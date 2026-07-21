@@ -1,5 +1,9 @@
 # momo 진행 현황
 
+## W-2 웹 read-only 클라이언트 정비 (#557, 2026-07-21)
+
+- 기존 `clients/web` 위에 서버 URL `/health` 확인, HTTPS/localhost 정책, 메모리 access·회전 refresh 인증, 채널 unread/mention·muted, 200건 타임라인과 과거 cursor, 5분 저자 그룹·날짜·멘션·edited/tombstone·링크/코드·반응 snapshot을 가산했다. `message.new/edited/deleted`와 `reaction.added/removed`는 cold-load 버퍼 뒤 적용하며 Centrifugo recovery를 요청한다.
+- empty/loading/error/offline과 세션 만료 인라인 상태를 추가했고, 만료 시 기존 메시지를 유지한다. Vitest 20 tests, eslint, TypeScript typecheck, Vite build는 PASS했다. Docker·브라우저 라이트/다크·한국어 장문·200+ 스크롤 육안은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
 ## MOMO-516 observer terminal attach + X-8 projection (#558, 2026-07-21)
 
 - terminal attach에 기본 `controller`와 채널 멤버용 read-only `observer` capability 등급, owner-only observation 토글, 검증 응답 mode, count-only `work.session.observer` projection을 추가했다. 세션 응답은 유효 `observerGrantCount`와 credential-free `remoteAttachAvailable`만 투영하며 raw PTY 스트림은 계속 client↔host 직결이다.

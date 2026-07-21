@@ -26,29 +26,64 @@ import { fetchRealtimeToken } from "../api/client";
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 /** message.new event envelope published by the relay (L4 §5.2). */
-export interface MessageNewEvent {
+interface MessageEventPayload {
+  id: string;
+  channel_id: string;
+  seq: number;
   type: string;
+  body?: string | null;
+  author_member_id: string;
+  hlc_ts: number;
+  hlc_count: number;
+  props?: Record<string, unknown> | null;
+  state?: "sent" | "edited" | "deleted" | "failed";
+  created_at_ms?: number;
+  edited_at_ms?: number | null;
+  deleted_at_ms?: number | null;
+}
+
+interface MessageEvent<T extends "message.new" | "message.edited"> {
+  type: T;
+  v: number;
+  ts: number;
+  seq: number;
+  payload: MessageEventPayload;
+}
+
+export type MessageNewEvent = MessageEvent<"message.new">;
+export type MessageEditedEvent = MessageEvent<"message.edited">;
+
+export interface MessageDeletedEvent {
+  type: "message.deleted";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: { message_id: string };
+}
+
+export interface ReactionEvent {
+  type: "reaction.added" | "reaction.removed";
   v: number;
   ts: number;
   seq: number;
   payload: {
-    id: string;
-    channel_id: string;
-    seq: number;
-    type: string;
-    body?: string | null;
-    author_member_id: string;
-    hlc_ts: number;
-    hlc_count: number;
-    /** Present on agent-gateway broadcasts (e.g. approval_request linkage). */
-    props?: Record<string, unknown> | null;
+    action: "added" | "removed";
+    message_id: string;
+    member_id: string;
+    emoji: string;
   };
 }
+
+export type ChannelRealtimeEvent =
+  | MessageNewEvent
+  | MessageEditedEvent
+  | MessageDeletedEvent
+  | ReactionEvent;
 
 export interface ChannelSubscriptionHandlers {
   /** Fired on (re)subscribe; `recovered:false` requires a REST backfill. */
   onSubscribed: (recovered: boolean) => void;
-  onPublication: (event: MessageNewEvent) => void;
+  onPublication: (event: ChannelRealtimeEvent) => void;
 }
 
 /**
@@ -136,14 +171,23 @@ export function createRealtime(
   ): () => void {
     const name = centrifugoChannelName(workspaceId, channelId);
     let sub: Subscription | null =
-      client.getSubscription(name) ?? client.newSubscription(name);
+      client.getSubscription(name) ??
+      client.newSubscription(name, { recoverable: true, positioned: true });
 
     const onSubscribed = (ctx: { recovered?: boolean }) => {
       handlers.onSubscribed(ctx.recovered === true);
     };
     const onPublication = (ctx: { data?: unknown }) => {
-      const event = ctx.data as MessageNewEvent | undefined;
-      if (event && event.type === "message.new" && event.payload) {
+      const event = ctx.data as ChannelRealtimeEvent | undefined;
+      if (
+        event &&
+        (event.type === "message.new" ||
+          event.type === "message.edited" ||
+          event.type === "message.deleted" ||
+          event.type === "reaction.added" ||
+          event.type === "reaction.removed") &&
+        event.payload
+      ) {
         handlers.onPublication(event);
       }
     };

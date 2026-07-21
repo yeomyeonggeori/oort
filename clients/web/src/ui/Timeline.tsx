@@ -1,15 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Channel, Message } from "../api/client";
-import { fetchMessages } from "../api/client";
-import type { MessageNewEvent, RealtimeHandle } from "../realtime/realtime";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import type { Channel } from "../api/client";
+import { fetchMessages, fetchReactionSnapshot } from "../api/client";
+import type {
+  ChannelRealtimeEvent,
+  MessageEditedEvent,
+  MessageNewEvent,
+  RealtimeHandle,
+} from "../realtime/realtime";
 import type { ApprovalsStore } from "../state/approvals";
+import {
+  applyReactionDelta,
+  fromRestMessage,
+  isSameLocalDate,
+  mentionsMember,
+  mergeMessages,
+  removeMessageReactions,
+  startsAuthorGroup,
+  type ReactionSnapshot,
+  type TimelineMessage,
+} from "../timeline/model";
 import ApprovalCard from "./ApprovalCard";
 import Composer from "./Composer";
+import MessageContent from "./MessageContent";
 
 interface TimelineProps {
   workspaceId: string;
   channel: Channel;
   channelLabel: string;
+  currentMemberId: string;
   displayNameFor: (memberId: string) => string;
   realtime: RealtimeHandle | null;
   approvals: ApprovalsStore;
@@ -17,18 +35,7 @@ interface TimelineProps {
   onLatestSeq: (channelId: string, seq: number) => void;
 }
 
-/** Normalized display message (REST camelCase + realtime snake_case unify). */
-interface UiMessage {
-  id: string;
-  seq: number;
-  type: string;
-  body?: string;
-  authorMemberId: string;
-  createdAtMs: number;
-  props?: Record<string, unknown>;
-}
-
-const HEAD_PAGE_LIMIT = 50;
+const HEAD_PAGE_LIMIT = 200;
 const BACKFILL_LIMIT = 200;
 const MAX_BACKFILL_PAGES = 10;
 
@@ -43,35 +50,31 @@ const TYPE_LABEL: Record<string, string> = {
   system: "시스템",
 };
 
-function fromRest(message: Message): UiMessage {
-  const ui: UiMessage = {
-    id: message.id,
-    seq: message.seq,
-    type: message.type,
-    authorMemberId: message.authorMemberId,
-    createdAtMs: message.createdAtMs,
-  };
-  if (message.body !== undefined) ui.body = message.body;
-  if (message.props !== undefined) ui.props = message.props;
-  return ui;
-}
-
-function fromRealtime(event: MessageNewEvent): UiMessage {
+function fromRealtime(
+  event: MessageNewEvent | MessageEditedEvent
+): TimelineMessage {
   const payload = event.payload;
-  const ui: UiMessage = {
+  const ui: TimelineMessage = {
     id: payload.id,
     seq: payload.seq,
     type: payload.type,
     authorMemberId: payload.author_member_id,
     // The realtime envelope has no created_at; hlc_ts is epoch-ms based and
     // close enough for display. REST reloads carry the authoritative value.
-    createdAtMs: payload.hlc_ts,
+    createdAtMs: payload.created_at_ms ?? payload.hlc_ts,
   };
   if (payload.body !== undefined && payload.body !== null) {
     ui.body = payload.body;
   }
   if (payload.props !== undefined && payload.props !== null) {
     ui.props = payload.props;
+  }
+  if (payload.state !== undefined) ui.state = payload.state;
+  if (payload.edited_at_ms !== undefined && payload.edited_at_ms !== null) {
+    ui.editedAtMs = payload.edited_at_ms;
+  }
+  if (payload.deleted_at_ms !== undefined && payload.deleted_at_ms !== null) {
+    ui.deletedAtMs = payload.deleted_at_ms;
   }
   return ui;
 }
@@ -81,7 +84,7 @@ function fromRealtime(event: MessageNewEvent): UiMessage {
  * plain-language title/summary the server wrote). Only those prose strings
  * are read — tool JSON/arguments/cost stay unrendered (ADR-0112 basic mode).
  */
-function approvalCardProps(message: UiMessage): {
+function approvalCardProps(message: TimelineMessage): {
   approvalId: string;
   title: string;
   summary?: string;
@@ -128,20 +131,6 @@ function resolveApprovalStatus(
   return storeStatus ?? propsStatus ?? null;
 }
 
-/** seq is the per-channel ordering authority; merge dedupes on it. */
-function mergeMessages(
-  existing: UiMessage[],
-  incoming: UiMessage[]
-): UiMessage[] {
-  if (incoming.length === 0) return existing;
-  const bySeq = new Map<number, UiMessage>();
-  for (const message of existing) bySeq.set(message.seq, message);
-  for (const message of incoming) {
-    if (!bySeq.has(message.seq)) bySeq.set(message.seq, message);
-  }
-  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
-}
-
 const timeFormat = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit",
   minute: "2-digit",
@@ -150,21 +139,30 @@ const fullFormat = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
   timeStyle: "medium",
 });
+const dateFormat = new Intl.DateTimeFormat("ko-KR", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  weekday: "short",
+});
 
 export default function Timeline({
   workspaceId,
   channel,
   channelLabel,
+  currentMemberId,
   displayNameFor,
   realtime,
   approvals,
   onLatestSeq,
 }: TimelineProps) {
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [messages, setMessages] = useState<TimelineMessage[]>([]);
+  const [reactions, setReactions] = useState<ReactionSnapshot>({});
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [oldestCursor, setOldestCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   // Highest seq we have; realtime gap detection and `?after=` catch-up
@@ -178,9 +176,11 @@ export default function Timeline({
   // (Refs reset per channel — Timeline is keyed by channel id in ChatPage.)
   const headLoadedRef = useRef(false);
   const pendingCatchUpRef = useRef(false);
+  const loadingProjectionRef = useRef(true);
+  const bufferedEventsRef = useRef<ChannelRealtimeEvent[]>([]);
   const channelId = channel.id;
 
-  const appendMessages = useCallback((incoming: UiMessage[]) => {
+  const appendMessages = useCallback((incoming: TimelineMessage[]) => {
     setMessages((current) => {
       const merged = mergeMessages(current, incoming);
       const last = merged[merged.length - 1];
@@ -190,6 +190,42 @@ export default function Timeline({
       return merged;
     });
   }, []);
+
+  const applyRealtimeEvent = useCallback(
+    (event: ChannelRealtimeEvent) => {
+      if (event.type === "message.new" || event.type === "message.edited") {
+        appendMessages([fromRealtime(event)]);
+        return;
+      }
+      if (event.type === "message.deleted") {
+        const messageId = event.payload.message_id;
+        setMessages((current) =>
+          current.map((message) => {
+            if (message.id.toLowerCase() !== messageId.toLowerCase()) return message;
+            const tombstone: TimelineMessage = {
+              ...message,
+              state: "deleted",
+              deletedAtMs: event.ts,
+            };
+            delete tombstone.body;
+            return tombstone;
+          })
+        );
+        setReactions((current) => removeMessageReactions(current, messageId));
+        return;
+      }
+      const delta = event.payload;
+      setReactions((current) =>
+        applyReactionDelta(current, {
+          action: delta.action,
+          messageId: delta.message_id,
+          memberId: delta.member_id,
+          emoji: delta.emoji,
+        })
+      );
+    },
+    [appendMessages]
+  );
 
   /**
    * REST `?after=<seq>` backfill (ascending) — the recovery authority.
@@ -211,7 +247,7 @@ export default function Timeline({
           after: lastSeqRef.current,
           limit: BACKFILL_LIMIT,
         });
-        const incoming = response.messages.map(fromRest);
+        const incoming = response.messages.map(fromRestMessage);
         if (incoming.length > 0) appendMessages(incoming);
         if (incoming.length < BACKFILL_LIMIT) break;
       }
@@ -222,16 +258,22 @@ export default function Timeline({
     }
   }, [appendMessages, channelId, workspaceId]);
 
-  // Initial head load: newest page (descending) rendered ascending.
+  // Initial head load: history and reactions establish one cold-load baseline.
+  // Publications received before both snapshots land are buffered, matching
+  // IOSTimelineModel.load(), then replayed in transport order.
   useEffect(() => {
     let cancelled = false;
+    loadingProjectionRef.current = true;
+    bufferedEventsRef.current = [];
     async function loadHead() {
       try {
-        const response = await fetchMessages(workspaceId, channelId, {
-          limit: HEAD_PAGE_LIMIT,
-        });
+        const [response, reactionSnapshot] = await Promise.all([
+          fetchMessages(workspaceId, channelId, { limit: HEAD_PAGE_LIMIT }),
+          fetchReactionSnapshot(workspaceId, channelId),
+        ]);
         if (cancelled) return;
-        appendMessages(response.messages.map(fromRest));
+        appendMessages(response.messages.map(fromRestMessage));
+        setReactions(reactionSnapshot);
         setOldestCursor(response.nextBefore ?? null);
         setLoaded(true);
         setLoadError(null);
@@ -239,19 +281,27 @@ export default function Timeline({
         // catch-up and replay one deferred request so the recovered:false /
         // gap fallback semantics survive the initial mount race.
         headLoadedRef.current = true;
+        loadingProjectionRef.current = false;
+        const buffered = bufferedEventsRef.current;
+        bufferedEventsRef.current = [];
+        for (const event of buffered) applyRealtimeEvent(event);
         if (pendingCatchUpRef.current) {
           pendingCatchUpRef.current = false;
           void catchUp();
         }
       } catch {
-        if (!cancelled) setLoadError("메시지를 불러오지 못했습니다.");
+        if (!cancelled) {
+          loadingProjectionRef.current = false;
+          setLoaded(true);
+          setLoadError("메시지와 반응을 불러오지 못했습니다. 연결을 확인하고 다시 시도해 주세요.");
+        }
       }
     }
     void loadHead();
     return () => {
       cancelled = true;
     };
-  }, [appendMessages, catchUp, channelId, workspaceId]);
+  }, [appendMessages, applyRealtimeEvent, catchUp, channelId, loadAttempt, workspaceId]);
 
   // Realtime subscription; server-side subscribe proxy authorizes it.
   useEffect(() => {
@@ -263,16 +313,19 @@ export default function Timeline({
         if (!recovered) void catchUp();
       },
       onPublication: (event) => {
-        const incoming = fromRealtime(event);
-        if (incoming.seq > lastSeqRef.current + 1) {
+        if (loadingProjectionRef.current) {
+          bufferedEventsRef.current.push(event);
+          return;
+        }
+        if (event.seq > lastSeqRef.current + 1) {
           // Gap: never render around a hole — REST backfill closes it first.
           void catchUp();
         }
-        appendMessages([incoming]);
+        applyRealtimeEvent(event);
       },
     });
     return unsubscribe;
-  }, [appendMessages, catchUp, channelId, realtime, workspaceId]);
+  }, [applyRealtimeEvent, catchUp, channelId, realtime, workspaceId]);
 
   async function loadOlder() {
     if (oldestCursor === null || loadingOlder) return;
@@ -282,7 +335,7 @@ export default function Timeline({
         before: oldestCursor,
         limit: HEAD_PAGE_LIMIT,
       });
-      appendMessages(response.messages.map(fromRest));
+      appendMessages(response.messages.map(fromRestMessage));
       setOldestCursor(response.nextBefore ?? null);
     } catch {
       // Keep the cursor; the button retries.
@@ -340,26 +393,44 @@ export default function Timeline({
           </button>
         )}
 
-        {loadError !== null && <p className="load-error">{loadError}</p>}
+        {loadError !== null && (
+          <div className="inline-state" role="alert">
+            <p className="load-error">{loadError}</p>
+            <button type="button" className="ghost-button" onClick={() => setLoadAttempt((value) => value + 1)}>
+              타임라인 다시 불러오기
+            </button>
+          </div>
+        )}
+
+        {!loaded && <p className="muted timeline-empty">메시지 불러오는 중…</p>}
 
         {loaded && messages.length === 0 && loadError === null && (
           <p className="muted timeline-empty">아직 메시지가 없습니다.</p>
         )}
 
         <ol className="message-list">
-          {messages.map((message) => {
+          {messages.map((message, index) => {
+            const previous = messages[index - 1];
+            const startsGroup = startsAuthorGroup(previous, message);
+            const showDate = previous === undefined || !isSameLocalDate(previous.createdAtMs, message.createdAtMs);
+            const mentioned = mentionsMember(message.props, currentMemberId);
+            const reactionEntries = Object.entries(
+              Object.entries(reactions).find(([messageId]) => messageId.toLowerCase() === message.id.toLowerCase())?.[1] ?? {}
+            );
             const approvalCard =
               message.type === "approval_request"
                 ? approvalCardProps(message)
                 : null;
             return (
+              <Fragment key={message.seq}>
+              {showDate && <li className="date-divider"><span>{dateFormat.format(new Date(message.createdAtMs))}</span></li>}
               <li
                 key={message.seq}
-                className="message-row"
+                className={`message-row${startsGroup ? " message-group-start" : " message-group-continuation"}${mentioned ? " message-mentioned" : ""}`}
                 data-testid="timeline-message"
                 data-seq={message.seq}
               >
-                <div className="message-meta">
+                {startsGroup && <div className="message-meta">
                   <span className="message-author">
                     {displayNameFor(message.authorMemberId)}
                   </span>
@@ -369,8 +440,11 @@ export default function Timeline({
                   >
                     {timeFormat.format(new Date(message.createdAtMs))}
                   </time>
-                </div>
-                {approvalCard !== null ? (
+                </div>}
+                {!startsGroup && <time className="message-time message-time-continuation">{timeFormat.format(new Date(message.createdAtMs))}</time>}
+                {message.state === "deleted" || message.deletedAtMs !== undefined ? (
+                  <p className="message-body message-tombstone">메시지 삭제됨</p>
+                ) : approvalCard !== null ? (
                   <ApprovalCard
                     approvalId={approvalCard.approvalId}
                     title={approvalCard.title}
@@ -390,15 +464,24 @@ export default function Timeline({
                       </span>
                     )}
                     {message.body !== undefined && message.body !== "" ? (
-                      <p className="message-body">{message.body}</p>
+                      <MessageContent body={message.body} />
                     ) : (
                       message.type !== "text" && (
                         <p className="message-body muted">에이전트 활동</p>
                       )
                     )}
+                    {(message.state === "edited" || message.editedAtMs !== undefined) && <span className="edited-badge">수정됨</span>}
                   </>
                 )}
+                {reactionEntries.length > 0 && (
+                  <div className="reaction-list" aria-label="반응">
+                    {reactionEntries.map(([emoji, members]) => (
+                      <span className="reaction-pill" key={emoji}>{emoji} {members.length}</span>
+                    ))}
+                  </div>
+                )}
               </li>
+              </Fragment>
             );
           })}
         </ol>
@@ -409,7 +492,7 @@ export default function Timeline({
           workspaceId={workspaceId}
           channelId={channelId}
           placeholder={`${channelLabel}에 메시지 보내기`}
-          onSent={(message) => appendMessages([fromRest(message)])}
+          onSent={(message) => appendMessages([fromRestMessage(message)])}
         />
       </footer>
     </div>

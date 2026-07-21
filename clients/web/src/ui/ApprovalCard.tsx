@@ -98,7 +98,7 @@ export default function ApprovalCard({
           {note !== null && (
             <span className="approval-note" data-testid="approval-note">
               {" "}
-              — {note}
+              · {note}
             </span>
           )}
         </p>
