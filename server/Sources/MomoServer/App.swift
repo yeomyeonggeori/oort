@@ -24,7 +24,7 @@ enum AppBuilder {
             environment: ProcessInfo.processInfo.environment,
             httpClient: httpClient
         )
-        let driveArchive = await DriveArchiveClientFactory.make(
+        let driveArchive = await ArchiveClientFactory.make(
             environmentName: config.momoEnvironment,
             environment: ProcessInfo.processInfo.environment,
             httpClient: httpClient,

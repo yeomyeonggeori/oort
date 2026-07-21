@@ -21,7 +21,22 @@ struct DriveArchiveFile: Sendable, Equatable {
 struct DriveArchiveContent: Sendable {
     let mime: String
     let sizeBytes: Int
-    let body: ResponseBody
+    let body: ResponseBody?
+    let redirectURL: String?
+
+    init(mime: String, sizeBytes: Int, body: ResponseBody) {
+        self.mime = mime
+        self.sizeBytes = sizeBytes
+        self.body = body
+        self.redirectURL = nil
+    }
+
+    init(mime: String, sizeBytes: Int, redirectURL: String) {
+        self.mime = mime
+        self.sizeBytes = sizeBytes
+        self.body = nil
+        self.redirectURL = redirectURL
+    }
 }
 
 protocol DriveArchiveClient: Sendable {
@@ -34,6 +49,7 @@ protocol DriveArchiveClient: Sendable {
     ) async throws -> DriveArchiveUploadSession
     func fileMetadata(fileID: String) async throws -> DriveArchiveFile
     func fileContent(fileID: String, maxBytes: Int) async throws -> DriveArchiveContent
+    func deleteFile(fileID: String) async throws
     func acceptStubUpload(token: String, mime: String?, bytes: Data) async throws
 }
 
@@ -123,6 +139,7 @@ struct UnavailableDriveArchiveClient: DriveArchiveClient {
     func fileContent(fileID _: String, maxBytes _: Int) async throws -> DriveArchiveContent {
         throw DriveArchiveError.unavailable
     }
+    func deleteFile(fileID _: String) async throws { throw DriveArchiveError.unavailable }
     func acceptStubUpload(token _: String, mime _: String?, bytes _: Data) async throws {
         throw DriveArchiveError.fileNotFound
     }
@@ -202,6 +219,13 @@ actor StubDriveArchiveClient: DriveArchiveClient {
             sizeBytes: bytes.count,
             body: ResponseBody(byteBuffer: ByteBuffer(data: bytes))
         )
+    }
+
+    func deleteFile(fileID: String) async throws {
+        guard let token = fileToken.removeValue(forKey: fileID) else {
+            throw DriveArchiveError.fileNotFound
+        }
+        sessions.removeValue(forKey: token)
     }
 }
 
@@ -334,6 +358,21 @@ struct GoogleDriveArchiveClient: DriveArchiveClient {
             try await writer.finish(nil)
         }
         return DriveArchiveContent(mime: metadata.mime, sizeBytes: contentLength, body: body)
+    }
+
+    func deleteFile(fileID: String) async throws {
+        try Self.requireFileID(fileID)
+        let url = try Self.url(
+            base: Self.driveAPIBase,
+            path: "/files/\(fileID)",
+            items: [.init(name: "supportsAllDrives", value: "true")]
+        )
+        let token = try await tokenProvider.accessToken()
+        var request = HTTPClientRequest(url: url.absoluteString)
+        request.method = .DELETE
+        request.headers.add(name: "Authorization", value: "Bearer \(token)")
+        let response = try await execute(request, timeoutSeconds: 15)
+        guard response.status.code == 204 else { throw Self.mappedError(response.status.code) }
     }
 
     func acceptStubUpload(token _: String, mime _: String?, bytes _: Data) async throws {

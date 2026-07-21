@@ -178,6 +178,87 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testS3SigV4MatchesAWSPresignedURLVector() throws {
+        // AWS S3 Developer Guide, "Authenticating Requests: Using Query
+        // Parameters", Example 1 (2013-05-24, GET /test.txt).
+        let config = S3ArchiveConfiguration(
+            endpoint: try XCTUnwrap(URL(string: "https://s3.amazonaws.com")),
+            region: "us-east-1",
+            bucket: "examplebucket",
+            accessKey: "AKIAIOSFODNN7EXAMPLE",
+            secretKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            forcePathStyle: false
+        )
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2013-05-24T00:00:00Z")
+        )
+        let url = try S3ArchiveSigner(configuration: config).presignedURL(
+            method: "GET", objectKey: "test.txt", now: now, expires: 86_400
+        )
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://examplebucket.s3.amazonaws.com/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404&X-Amz-SignedHeaders=host"
+        )
+    }
+
+    func testS3PresignExpirationAndPathStyleContract() throws {
+        let environment = [
+            "MOMO_S3_ENDPOINT": "http://minio:9000",
+            "MOMO_S3_REGION": "us-east-1",
+            "MOMO_S3_BUCKET": "momo-attachments",
+            "MOMO_S3_ACCESS_KEY": "placeholder-access",
+            "MOMO_S3_SECRET_KEY": "placeholder-secret",
+            "MOMO_S3_FORCE_PATH_STYLE": "1",
+        ]
+        let config = try XCTUnwrap(S3ArchiveConfiguration.load(environment))
+        XCTAssertTrue(config.forcePathStyle)
+        let signer = S3ArchiveSigner(configuration: config)
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-21T00:00:00Z")
+        )
+        let url = try signer.presignedURL(
+            method: "PUT",
+            objectKey: "channels/00000000-0000-7000-8000-000000000201/object",
+            now: now
+        )
+        XCTAssertEqual(
+            url.path,
+            "/momo-attachments/channels/00000000-0000-7000-8000-000000000201/object"
+        )
+        XCTAssertEqual(url.host, "minio")
+        XCTAssertEqual(url.port, 9000)
+        let query = Dictionary(uniqueKeysWithValues: try XCTUnwrap(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        ).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(query["X-Amz-Expires"], String(S3ArchiveSigner.defaultExpirationSeconds))
+        XCTAssertEqual(query["X-Amz-Date"], "20260721T000000Z")
+        XCTAssertEqual(query["X-Amz-SignedHeaders"], "host")
+        XCTAssertNotNil(query["X-Amz-Signature"])
+        XCTAssertThrowsError(try signer.presignedURL(
+            method: "PUT", objectKey: "object", now: now, expires: 604_801
+        ))
+    }
+
+    func testS3ConfigurationFailsClosedWhenCredentialsAreIncomplete() throws {
+        XCTAssertNil(S3ArchiveConfiguration.load([
+            "MOMO_S3_ENDPOINT": "https://s3.us-east-1.amazonaws.com",
+            "MOMO_S3_REGION": "us-east-1",
+            "MOMO_S3_BUCKET": "momo-attachments",
+            "MOMO_S3_ACCESS_KEY": "placeholder-access",
+        ]))
+        XCTAssertNoThrow(try ArchiveClientFactory.validateForBoot(
+            environmentName: "production",
+            environment: ["MOMO_ARCHIVE_BACKEND": "s3"]
+        ))
+        XCTAssertThrowsError(try ArchiveClientFactory.validateForBoot(
+            environmentName: "production",
+            environment: [
+                "MOMO_ARCHIVE_BACKEND": "drive",
+                "MOMO_DRIVE_ARCHIVE_BACKEND": "stub",
+            ]
+        ))
+    }
+
     func testAttachmentMigrationAndMessageBindingStaticContracts() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
