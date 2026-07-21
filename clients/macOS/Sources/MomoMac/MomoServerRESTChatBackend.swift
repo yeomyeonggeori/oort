@@ -1250,6 +1250,23 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return response.workSession
     }
 
+    func issueTerminalAttach(
+        workspace requestedWorkspace: WorkspaceID,
+        session workSessionID: WorkSessionID
+    ) async throws -> MomoTerminalAttachGrant {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await postEmpty(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-sessions/\(workSessionID.description)/terminal-attach",
+            authorized: true,
+            response: MomoTerminalAttachCapabilityDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return try response.grant
+    }
+
     func acknowledgeWorkControl(
         workspace requestedWorkspace: WorkspaceID,
         control: WorkControlID,
@@ -2302,6 +2319,31 @@ private struct MomoWorkHostHeartbeatRequestDTO: Encodable {
 
 private struct MomoWorkSessionResponseDTO: Decodable {
     let workSession: MomoWorkSession
+}
+
+private struct MomoTerminalAttachCapabilityDTO: Decodable {
+    let attachEndpoint: String
+    let capabilityToken: String
+    let ptyId: String
+
+    enum CodingKeys: String, CodingKey {
+        case attachEndpoint = "attach_endpoint"
+        case capabilityToken = "capability_token"
+        case ptyId = "pty_id"
+    }
+
+    var grant: MomoTerminalAttachGrant {
+        get throws {
+            guard let endpoint = URL(string: attachEndpoint) else {
+                throw BackendError.decoding("invalid terminal attach endpoint")
+            }
+            return try MomoTerminalAttachGrant(
+                endpoint: endpoint,
+                capabilityToken: capabilityToken,
+                ptyId: ptyId
+            )
+        }
+    }
 }
 
 private struct MomoCreateWorkSessionRequestDTO: Encodable {

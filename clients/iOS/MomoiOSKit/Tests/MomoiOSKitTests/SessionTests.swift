@@ -760,6 +760,153 @@ struct ConversationTests {
         #expect(messages.count == 3)
     }
 
+    @Test("timeline layout groups adjacent authors within five minutes and inserts dates")
+    func timelineV2Layout() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let base = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 12
+        )))
+        let baseMs = Int64(base.timeIntervalSince1970 * 1_000)
+        let otherMemberID = try #require(MemberID(uuidString: "00000000-0000-0000-0000-000000000099"))
+
+        var first = fixtureMessage(sequence: 1)
+        first.createdAtMs = baseMs
+        var continuation = fixtureMessage(sequence: 2)
+        continuation.createdAtMs = baseMs + 4 * 60 * 1_000
+        continuation.props = [
+            "mention_member_ids": .array([.string(fixtureMemberID.description)])
+        ]
+        var outsideWindow = fixtureMessage(sequence: 3)
+        outsideWindow.createdAtMs = continuation.createdAtMs! + 6 * 60 * 1_000
+        var otherAuthor = fixtureMessage(sequence: 4)
+        otherAuthor.createdAtMs = outsideWindow.createdAtMs! + 60 * 1_000
+        otherAuthor.authorMemberId = otherMemberID
+        var nextDay = fixtureMessage(sequence: 5)
+        nextDay.createdAtMs = baseMs + 24 * 60 * 60 * 1_000
+
+        let rows = IOSTimelineLayout.rows(
+            for: [first, continuation, outsideWindow, otherAuthor, nextDay],
+            currentMemberID: fixtureMemberID,
+            calendar: calendar
+        )
+        let messageRows = rows.compactMap { row -> (MessageID, Bool, Bool)? in
+            guard case .message(let message, let startsGroup, let mentionsMember, _) = row.content else {
+                return nil
+            }
+            return (message.id, startsGroup, mentionsMember)
+        }
+
+        #expect(rows.filter { if case .date = $0.content { true } else { false } }.count == 2)
+        #expect(messageRows.map(\.1) == [true, false, true, true, true])
+        #expect(messageRows.map(\.2) == [false, true, false, false, false])
+        #expect(Set(messageRows.map(\.0)).count == 5)
+    }
+
+    @Test("timeline presentation precomputes stable rows for more than two hundred messages")
+    func timelineV2LargeHistory() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let base = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 9
+        )))
+        let baseMs = Int64(base.timeIntervalSince1970 * 1_000)
+        let messages = (1...205).map { sequence -> Message in
+            var message = fixtureMessage(sequence: Int64(sequence))
+            message.createdAtMs = baseMs + Int64(sequence) * 10_000
+            return message
+        }
+
+        let rows = IOSTimelineLayout.rows(
+            for: messages,
+            currentMemberID: fixtureMemberID,
+            calendar: calendar
+        )
+        let messageIDs = rows.compactMap { row -> MessageID? in
+            guard case .message(let message, _, _, _) = row.content else { return nil }
+            return message.id
+        }
+
+        #expect(rows.count == 206)
+        #expect(messageIDs.count == 205)
+        #expect(Set(messageIDs).count == 205)
+    }
+
+    @Test("timeline body separates fenced code from link prose")
+    func timelineV2BodyParsing() throws {
+        let segments = IOSMessageBodyParser.segments(in: """
+        Review the [message contract](https://momo.example/docs).
+        ```swift
+        let state = MessageState.edited
+        ```
+        """)
+
+        #expect(segments.count == 2)
+        #expect(segments[0].kind == .prose)
+        #expect(segments[0].text.contains("https://momo.example/docs"))
+        #expect(segments[1].kind == .code(language: "swift"))
+        #expect(segments[1].text == "let state = MessageState.edited")
+    }
+
+    @Test("iOS history DTO preserves edited and deleted projections")
+    func timelineV2HistoryProjection() throws {
+        let editedData = Data("""
+        {
+          "id": "00000000-0000-0000-0001-000000000071",
+          "channelId": "00000000-0000-0000-0000-000000000010",
+          "seq": 71,
+          "hlcTs": 1710000000000,
+          "hlcCount": 0,
+          "authorMemberId": "00000000-0000-0000-0000-000000000002",
+          "type": "text",
+          "body": "Updated deployment note",
+          "props": {},
+          "clientMsgId": null,
+          "createdAtMs": 1710000000000,
+          "thread": null,
+          "state": "edited",
+          "editedAtMs": 1710000005000,
+          "deletedAtMs": null
+        }
+        """.utf8)
+        let deletedData = Data("""
+        {
+          "id": "00000000-0000-0000-0001-000000000072",
+          "channelId": "00000000-0000-0000-0000-000000000010",
+          "seq": 72,
+          "hlcTs": 1710000001000,
+          "hlcCount": 0,
+          "authorMemberId": "00000000-0000-0000-0000-000000000002",
+          "type": "text",
+          "body": null,
+          "props": {},
+          "clientMsgId": null,
+          "createdAtMs": 1710000001000,
+          "thread": null,
+          "state": "deleted",
+          "editedAtMs": null,
+          "deletedAtMs": 1710000006000
+        }
+        """.utf8)
+
+        let edited = try JSONDecoder().decode(IOSMessageDTO.self, from: editedData).value()
+        let deleted = try JSONDecoder().decode(IOSMessageDTO.self, from: deletedData).value()
+
+        #expect(edited.state == .edited)
+        #expect(edited.editedAtMs == 1_710_000_005_000)
+        #expect(!edited.isDeleted)
+        #expect(deleted.state == .deleted)
+        #expect(deleted.deletedAtMs == 1_710_000_006_000)
+        #expect(deleted.isDeleted)
+        #expect(deleted.body == nil)
+    }
+
     @Test("unread badge caps large server counts")
     func unreadBadgeCap() {
         let sections = IOSChannelListMapper.sections(
@@ -874,6 +1021,162 @@ struct ConversationTests {
         #expect(calls[0].clientDecisionId == calls[1].clientDecisionId)
         #expect(model.approvalStatus(for: model.messages[0]) == .approved)
         #expect(!model.approvalDecisionFailures.contains(approvalID))
+        model.stop()
+    }
+
+    @Test("interaction sheet actions fail closed for pending messages and restrict author actions")
+    @MainActor
+    func interactionSheetAvailability() async throws {
+        let backend = InteractionConversationBackend(message: fixtureMessage(sequence: 51))
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        let ownMessage = try #require(model.messages.first)
+        var otherMessage = ownMessage
+        otherMessage.authorMemberId = MemberID(uuidString: "00000000-0000-0000-0000-000000000099")!
+        var pendingMessage = ownMessage
+        pendingMessage.seq = nil
+
+        #expect(model.availableInteractionActions(for: ownMessage) == [.react, .reply, .edit, .delete, .copy])
+        #expect(model.availableInteractionActions(for: otherMessage) == [.react, .reply, .copy])
+        #expect(model.availableInteractionActions(for: pendingMessage).isEmpty)
+        #expect(!model.canPresentInteractionSheet(for: pendingMessage))
+        model.stop()
+    }
+
+    @Test("reaction toggle waits for the authoritative response and guards duplicate requests")
+    @MainActor
+    func reactionToggleRoundTrip() async throws {
+        let message = fixtureMessage(sequence: 52)
+        let backend = InteractionConversationBackend(message: message, suspendsReaction: true)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+
+        let firstToggle = Task { await model.toggleReaction("👍", on: message) }
+        await backend.waitUntilReactionStarts()
+        #expect(model.reactions(for: message).isEmpty)
+        #expect(model.isReactionMutationInFlight(message: message, emoji: "👍"))
+        await model.toggleReaction("👍", on: message)
+        #expect(await backend.reactionCallCount == 1)
+
+        await backend.finishReaction()
+        await firstToggle.value
+        #expect(model.reactions(for: message).first?.count == 1)
+        #expect(model.reactions(for: message).first?.isSelectedByCurrentMember == true)
+        #expect(!model.isReactionMutationInFlight(message: message, emoji: "👍"))
+        model.stop()
+    }
+
+    @Test("realtime edit delete and reaction deltas update the interaction projection")
+    @MainActor
+    func realtimeMessageInteractions() async throws {
+        let message = fixtureMessage(sequence: 53)
+        let backend = InteractionConversationBackend(message: message)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        var edited = message
+        edited.body = "수정 완료 / Edited remotely"
+        edited.state = .edited
+        edited.editedAtMs = 99
+
+        await model.consumeRealtimeEvent(.messageEdited(edited))
+        await model.consumeRealtimeEvent(.reaction(ReactionDelta(
+            action: .added,
+            messageId: message.id,
+            memberId: fixtureMemberID,
+            emoji: "🎉"
+        )))
+        #expect(model.messages.first?.body == "수정 완료 / Edited remotely")
+        #expect(model.reactions(for: message).first?.emoji == "🎉")
+
+        await model.consumeRealtimeEvent(.reaction(ReactionDelta(
+            action: .removed,
+            messageId: message.id,
+            memberId: fixtureMemberID,
+            emoji: "🎉"
+        )))
+        #expect(model.reactions(for: message).isEmpty)
+        await model.consumeRealtimeEvent(.messageDeleted(message.id))
+        #expect(model.messages.first?.isDeleted == true)
+        #expect(model.reactions(for: message).isEmpty)
+        model.stop()
+    }
+
+    @Test("reaction REST DTO decodes the server camel-case response")
+    func reactionRESTProjection() throws {
+        let data = Data("""
+        {
+          "action": "added",
+          "messageId": "00000000-0000-0000-0001-000000000053",
+          "memberId": "00000000-0000-0000-0000-000000000002",
+          "emoji": "👍"
+        }
+        """.utf8)
+
+        let delta = try JSONDecoder().decode(IOSReactionDeltaDTO.self, from: data).value()
+
+        #expect(delta.action == .added)
+        #expect(delta.messageId == MessageID(uuidString: "00000000-0000-0000-0001-000000000053"))
+        #expect(delta.memberId == fixtureMemberID)
+        #expect(delta.emoji == "👍")
+    }
+
+    @Test("cold load restores the server reaction snapshot")
+    @MainActor
+    func reactionColdLoad() async throws {
+        let message = fixtureMessage(sequence: 55)
+        let teammateID = MemberID(uuidString: "00000000-0000-0000-0000-000000000099")!
+        let backend = InteractionConversationBackend(
+            message: message,
+            reactionSnapshot: [message.id: ["👀": [fixtureMemberID, teammateID]]]
+        )
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+
+        await model.load()
+
+        let reaction = try #require(model.reactions(for: message).first)
+        #expect(reaction.emoji == "👀")
+        #expect(reaction.count == 2)
+        #expect(reaction.isSelectedByCurrentMember)
+        model.stop()
+    }
+
+    @Test("author edit and delete apply only server-returned messages")
+    @MainActor
+    func editAndDeleteRoundTrip() async throws {
+        let message = fixtureMessage(sequence: 54)
+        let backend = InteractionConversationBackend(message: message)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+
+        #expect(await model.editMessage(message, body: "서버 확정 수정 / Server confirmed edit"))
+        let edited = try #require(model.messages.first)
+        #expect(edited.body == "서버 확정 수정 / Server confirmed edit")
+        #expect(edited.state == .edited)
+        #expect(await model.deleteMessage(edited))
+        #expect(model.messages.first?.isDeleted == true)
+        #expect(model.messages.first?.body == nil)
+        #expect(await backend.editCallCount == 1)
+        #expect(await backend.deleteCallCount == 1)
         model.stop()
     }
 }
@@ -1211,6 +1514,106 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         approvalCalls.append(request)
         if failFirstApproval, approvalCalls.count == 1 { throw SessionError.transport("offline") }
         return ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
+}
+
+private actor InteractionConversationBackend: IOSConversationBackend {
+    private var storedMessage: Message
+    private let reactionSnapshotValue: [MessageID: [String: Set<MemberID>]]
+    private let suspendsReaction: Bool
+    private var reactionDidStart = false
+    private var reactionStartWaiter: CheckedContinuation<Void, Never>?
+    private var reactionFinishWaiter: CheckedContinuation<Void, Never>?
+    private(set) var reactionCallCount = 0
+    private(set) var editCallCount = 0
+    private(set) var deleteCallCount = 0
+
+    init(
+        message: Message,
+        reactionSnapshot: [MessageID: [String: Set<MemberID>]] = [:],
+        suspendsReaction: Bool = false
+    ) {
+        self.storedMessage = message
+        self.reactionSnapshotValue = reactionSnapshot
+        self.suspendsReaction = suspendsReaction
+    }
+
+    func snapshot() async throws -> IOSConversationSnapshot {
+        IOSConversationSnapshot(channels: [fixtureChannel()], members: [], readStates: [])
+    }
+
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] {
+        [storedMessage]
+    }
+
+    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] {
+        reactionSnapshotValue
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
+        reactionCallCount += 1
+        reactionDidStart = true
+        reactionStartWaiter?.resume()
+        reactionStartWaiter = nil
+        if suspendsReaction {
+            await withCheckedContinuation { continuation in
+                reactionFinishWaiter = continuation
+            }
+        }
+        return ReactionDelta(action: .added, messageId: id, memberId: fixtureMemberID, emoji: emoji)
+    }
+
+    func removeReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
+        reactionCallCount += 1
+        return ReactionDelta(action: .removed, messageId: id, memberId: fixtureMemberID, emoji: emoji)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        editCallCount += 1
+        storedMessage.body = body
+        storedMessage.state = .edited
+        storedMessage.editedAtMs = 100
+        return storedMessage
+    }
+
+    func deleteMessage(_ id: MessageID) async throws -> Message {
+        deleteCallCount += 1
+        storedMessage.body = nil
+        storedMessage.state = .deleted
+        storedMessage.deletedAtMs = 101
+        return storedMessage
+    }
+
+    func waitUntilReactionStarts() async {
+        guard !reactionDidStart else { return }
+        await withCheckedContinuation { continuation in
+            reactionStartWaiter = continuation
+        }
+    }
+
+    func finishReaction() {
+        reactionFinishWaiter?.resume()
+        reactionFinishWaiter = nil
+    }
+
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        ChannelReadState(
+            channelId: channel,
+            lastReadSeq: sequence,
+            latestSeq: sequence,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool { muted }
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { $0.finish() }
+    }
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message { storedMessage }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
     }
 }
 

@@ -1,4 +1,5 @@
 #if os(iOS)
+import Foundation
 import MomoCore
 import SwiftUI
 import UIKit
@@ -311,6 +312,7 @@ struct IOSTimelineView: View {
     @State private var model: IOSTimelineModel
     @State private var visibleMessageIDs: Set<MessageID> = []
     @State private var presentedHuddle: IOSHuddle?
+    @State private var presentedInteraction: IOSMessageInteractionPresentation?
 
     init(
         item: IOSChannelListItem,
@@ -356,39 +358,8 @@ struct IOSTimelineView: View {
                         )
                     }
                 case .loaded:
-                    ForEach(model.messages) { message in
-                        IOSMessageRow(
-                            message: message,
-                            member: members[message.authorMemberId],
-                            quotedBody: quotedBody(for: message),
-                            model: model
-                        )
-                            .id(message.id)
-                            .listRowSeparator(.hidden)
-                            .accessibilityIdentifier("message.\(message.id.description)")
-                            .onAppear { visibleMessageIDs.insert(message.id) }
-                            .onDisappear { visibleMessageIDs.remove(message.id) }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if !message.isDeleted {
-                                    Button {
-                                        model.selectReply(to: message)
-                                    } label: {
-                                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
-                                    }
-                                    .tint(.accentColor)
-                                    .accessibilityIdentifier("reply.\(message.id.description)")
-                                }
-                            }
-                            .contextMenu {
-                                if !message.isDeleted {
-                                    Button {
-                                        model.selectReply(to: message)
-                                    } label: {
-                                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
-                                    }
-                                    .accessibilityIdentifier("replyMenu.\(message.id.description)")
-                                }
-                            }
+                    ForEach(model.presentationRows) { row in
+                        timelineRow(row)
                     }
                 }
             }
@@ -419,6 +390,22 @@ struct IOSTimelineView: View {
         .sheet(item: $presentedHuddle) { _ in
             IOSHuddleSheet(model: model.huddle)
         }
+        .sheet(item: $presentedInteraction) { presentation in
+            IOSMessageInteractionSheet(messageID: presentation.id, model: model)
+        }
+        .alert(
+            "메시지 동작 실패 / Message action failed",
+            isPresented: Binding(
+                get: { model.interactionFailureMessage != nil },
+                set: { isPresented in
+                    if !isPresented { model.clearInteractionFailure() }
+                }
+            )
+        ) {
+            Button("닫기 / Dismiss", role: .cancel) { model.clearInteractionFailure() }
+        } message: {
+            Text(model.interactionFailureMessage ?? "다시 시도하세요. / Try again.")
+        }
         .onChange(of: model.huddle.activeHuddle?.id) { _, activeID in
             if activeID == nil { presentedHuddle = nil }
         }
@@ -435,6 +422,46 @@ struct IOSTimelineView: View {
             }
         }
         .onDisappear { Task { await model.shutdown() } }
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ row: IOSTimelineDisplayRow) -> some View {
+        switch row.content {
+        case .date(let dayStartMs):
+            IOSMessageDateDivider(dayStartMs: dayStartMs)
+                .listRowSeparator(.hidden)
+        case .message(let message, let startsAuthorGroup, let mentionsCurrentMember, let bodySegments):
+            IOSMessageRow(
+                message: message,
+                member: members[message.authorMemberId],
+                quotedBody: quotedBody(for: message),
+                startsAuthorGroup: startsAuthorGroup,
+                mentionsCurrentMember: mentionsCurrentMember,
+                bodySegments: bodySegments,
+                model: model
+            )
+            .id(message.id)
+            .listRowSeparator(.hidden)
+            .listRowBackground(mentionsCurrentMember ? Color.accentColor.opacity(0.10) : Color.clear)
+            .accessibilityIdentifier("message.\(message.id.description)")
+            .onAppear { visibleMessageIDs.insert(message.id) }
+            .onDisappear { visibleMessageIDs.remove(message.id) }
+            .onLongPressGesture {
+                guard model.canPresentInteractionSheet(for: message) else { return }
+                presentedInteraction = IOSMessageInteractionPresentation(id: message.id)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                if !message.isDeleted {
+                    Button {
+                        model.selectReply(to: message)
+                    } label: {
+                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
+                    }
+                    .tint(.accentColor)
+                    .accessibilityIdentifier("reply.\(message.id.description)")
+                }
+            }
+        }
     }
 
     private func huddleBanner(_ huddle: IOSHuddle) -> some View {
@@ -662,10 +689,39 @@ private struct IOSHuddleSheet: View {
     }
 }
 
+private struct IOSMessageDateDivider: View {
+    let dayStartMs: Int64
+    @Environment(\.calendar) private var calendar
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Divider()
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Divider()
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var title: String {
+        let date = Date(timeIntervalSince1970: Double(dayStartMs) / 1_000)
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day().weekday(.abbreviated))
+    }
+}
+
 private struct IOSMessageRow: View {
     let message: Message
     let member: Member?
     let quotedBody: String?
+    let startsAuthorGroup: Bool
+    let mentionsCurrentMember: Bool
+    let bodySegments: [IOSMessageBodySegment]
     let model: IOSTimelineModel
 
     var body: some View {
@@ -673,17 +729,23 @@ private struct IOSMessageRow: View {
             Image(systemName: "person.crop.circle.fill")
                 .font(.title3)
                 .foregroundStyle(member?.kind == .agent ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .opacity(startsAuthorGroup ? 1 : 0)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(member?.displayName ?? "Unknown member")
-                        .font(.body.weight(.semibold))
-                    Spacer(minLength: 8)
-                    if let createdAt = message.createdAtMs {
-                        Text(Date(timeIntervalSince1970: Double(createdAt) / 1_000), format: .dateTime.hour().minute())
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                if startsAuthorGroup {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(member?.displayName ?? "Unknown member")
+                            .font(.body.weight(.semibold))
+                        Spacer(minLength: 8)
+                        if let createdAt = message.createdAtMs {
+                            Text(
+                                Date(timeIntervalSince1970: Double(createdAt) / 1_000),
+                                format: .dateTime.hour().minute()
+                            )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
                 }
                 if let quotedBody {
@@ -698,6 +760,10 @@ private struct IOSMessageRow: View {
                     .accessibilityLabel("Replying to: \(quotedBody)")
                 }
                 messageContent
+                let reactions = model.reactions(for: message)
+                if !reactions.isEmpty {
+                    IOSReactionPillRow(message: message, reactions: reactions, model: model)
+                }
                 if message.isPendingAck {
                     Label(
                         message.state == .failed ? "Message not sent" : "Sending message",
@@ -708,25 +774,39 @@ private struct IOSMessageRow: View {
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, startsAuthorGroup ? 8 : 4)
         .accessibilityElement(children: message.type == .approvalRequest ? .contain : .combine)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint(mentionsCurrentMember ? "Mentions you" : "")
     }
 
     @ViewBuilder
     private var messageContent: some View {
         if message.isDeleted {
-            Text("Message deleted")
+            Label("메시지 삭제됨", systemImage: "trash")
                 .font(.body)
                 .foregroundStyle(.secondary)
         } else if message.type == .approvalRequest {
             IOSApprovalDecisionCard(message: message, model: model)
         } else {
-            Text(message.body ?? fallbackText)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                IOSMessageBody(bodySegments: bodySegments, fallbackText: fallbackText)
+                if message.editedAtMs != nil || message.state == .edited {
+                    Text("Edited")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+    }
+
+    private var accessibilitySummary: String {
+        let author = member?.displayName ?? "Unknown member"
+        let body = message.isDeleted ? "메시지 삭제됨" : (message.body ?? fallbackText)
+        let edited = !message.isDeleted && (message.editedAtMs != nil || message.state == .edited)
+            ? ", edited"
+            : ""
+        return "\(author), \(body)\(edited)"
     }
 
     private var fallbackText: String {
@@ -738,6 +818,280 @@ private struct IOSMessageRow: View {
         case .system: "System message"
         case .text, .approvalRequest: "Message"
         }
+    }
+}
+
+private struct IOSMessageInteractionPresentation: Identifiable {
+    let id: MessageID
+}
+
+@MainActor
+private struct IOSMessageInteractionSheet: View {
+    let messageID: MessageID
+    let model: IOSTimelineModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var isEditing = false
+    @State private var editDraft = ""
+    @State private var customEmoji = ""
+    @State private var confirmsDelete = false
+
+    private let additionalEmojis = ["🔥", "🚀", "✅", "🤔", "🙏", "💯"]
+
+    var body: some View {
+        NavigationStack {
+            if let message = model.message(id: messageID), model.canPresentInteractionSheet(for: message) {
+                if isEditing {
+                    editForm(message)
+                } else {
+                    actionList(message)
+                }
+            } else {
+                ContentUnavailableView(
+                    "메시지를 사용할 수 없음 / Message unavailable",
+                    systemImage: "message.badge",
+                    description: Text("목록을 새로고침하세요. / Refresh the message list.")
+                )
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .alert(
+            "메시지 동작 실패 / Message action failed",
+            isPresented: Binding(
+                get: { model.interactionFailureMessage != nil },
+                set: { isPresented in
+                    if !isPresented { model.clearInteractionFailure() }
+                }
+            )
+        ) {
+            Button("닫기 / Dismiss", role: .cancel) { model.clearInteractionFailure() }
+        } message: {
+            Text(model.interactionFailureMessage ?? "다시 시도하세요. / Try again.")
+        }
+    }
+
+    private func actionList(_ message: Message) -> some View {
+        List {
+            Section("최근 반응 / Recent reactions") {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(model.recentReactionEmojis, id: \.self) { emoji in
+                            reactionButton(emoji, message: message)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+
+            Section("반응 더 보기 / More reactions") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                    ForEach(additionalEmojis, id: \.self) { emoji in
+                        reactionButton(emoji, message: message)
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("이모지 입력 / Enter emoji", text: $customEmoji)
+                        .textInputAutocapitalization(.never)
+                    Button("반응 추가 / Add reaction") {
+                        submitReaction(customEmoji, message: message)
+                    }
+                    .disabled(customEmoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+
+            Section("메시지 동작 / Message actions") {
+                if model.availableInteractionActions(for: message).contains(.reply) {
+                    Button {
+                        model.selectReply(to: message)
+                        dismiss()
+                    } label: {
+                        Label("답글 작성 / Reply", systemImage: "arrowshape.turn.up.left")
+                    }
+                    .accessibilityIdentifier("replyMenu.\(message.id.description)")
+                }
+                if model.availableInteractionActions(for: message).contains(.edit) {
+                    Button {
+                        editDraft = message.body ?? ""
+                        isEditing = true
+                    } label: {
+                        Label("메시지 수정 / Edit message", systemImage: "pencil")
+                    }
+                    .disabled(model.messageMutationsInFlight.contains(message.id))
+                }
+                if model.availableInteractionActions(for: message).contains(.copy) {
+                    Button {
+                        UIPasteboard.general.string = message.body
+                        dismiss()
+                    } label: {
+                        Label("메시지 복사 / Copy message", systemImage: "doc.on.doc")
+                    }
+                }
+                if model.availableInteractionActions(for: message).contains(.delete) {
+                    Button(role: .destructive) {
+                        confirmsDelete = true
+                    } label: {
+                        Label("메시지 삭제 / Delete message", systemImage: "trash")
+                    }
+                    .disabled(model.messageMutationsInFlight.contains(message.id))
+                }
+            }
+        }
+        .navigationTitle("메시지 동작 / Message actions")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("닫기 / Done") { dismiss() }
+            }
+        }
+        .confirmationDialog(
+            "메시지를 삭제할까요? / Delete this message?",
+            isPresented: $confirmsDelete,
+            titleVisibility: .visible
+        ) {
+            Button("메시지 삭제 / Delete message", role: .destructive) {
+                Task {
+                    if await model.deleteMessage(message) { dismiss() }
+                }
+            }
+            Button("삭제 취소 / Cancel deletion", role: .cancel) {}
+        } message: {
+            Text("삭제한 메시지는 복원할 수 없습니다. / A deleted message cannot be restored.")
+        }
+    }
+
+    private func editForm(_ message: Message) -> some View {
+        Form {
+            Section("메시지 / Message") {
+                TextEditor(text: $editDraft)
+                    .frame(minHeight: 120)
+                    .accessibilityIdentifier("editMessageBody")
+            }
+        }
+        .navigationTitle("메시지 수정 / Edit message")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("수정 취소 / Cancel editing") { isEditing = false }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("변경 저장 / Save changes") {
+                    Task {
+                        if await model.editMessage(message, body: editDraft) { dismiss() }
+                    }
+                }
+                .disabled(
+                    editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || model.messageMutationsInFlight.contains(message.id)
+                )
+            }
+        }
+    }
+
+    private func reactionButton(_ emoji: String, message: Message) -> some View {
+        Button {
+            submitReaction(emoji, message: message)
+        } label: {
+            Text(emoji)
+                .font(.title3)
+                .frame(minWidth: 32, minHeight: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .disabled(model.isReactionMutationInFlight(message: message, emoji: emoji))
+        .accessibilityLabel("\(emoji) 반응 전환 / Toggle \(emoji) reaction")
+    }
+
+    private func submitReaction(_ emoji: String, message: Message) {
+        let normalized = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        customEmoji = ""
+        Task { await model.toggleReaction(normalized, on: message) }
+    }
+}
+
+@MainActor
+private struct IOSReactionPillRow: View {
+    let message: Message
+    let reactions: [IOSMessageReaction]
+    let model: IOSTimelineModel
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 4) {
+                ForEach(reactions) { reaction in
+                    Button {
+                        Task { await model.toggleReaction(reaction.emoji, on: message) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(reaction.emoji)
+                            Text(reaction.count, format: .number)
+                                .monospacedDigit()
+                        }
+                        .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .tint(reaction.isSelectedByCurrentMember ? .accentColor : .secondary)
+                    .disabled(model.isReactionMutationInFlight(message: message, emoji: reaction.emoji))
+                    .accessibilityLabel(
+                        "\(reaction.emoji), \(reaction.count)개 반응 / \(reaction.count) reactions"
+                    )
+                    .accessibilityAddTraits(reaction.isSelectedByCurrentMember ? .isSelected : [])
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("reactions.\(message.id.description)")
+    }
+}
+
+private struct IOSMessageBody: View {
+    let bodySegments: [IOSMessageBodySegment]
+    let fallbackText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if bodySegments.isEmpty {
+                Text(fallbackText)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(bodySegments) { segment in
+                    switch segment.kind {
+                    case .prose:
+                        Text(attributedProse(segment.text))
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .tint(.accentColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    case .code(let language):
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let language {
+                                Text(language)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ScrollView(.horizontal) {
+                                Text(segment.text)
+                                    .font(.callout.monospaced())
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                                    .padding(12)
+                            }
+                            .scrollIndicators(.hidden)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func attributedProse(_ prose: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: prose, options: options)) ?? AttributedString(prose)
     }
 }
 

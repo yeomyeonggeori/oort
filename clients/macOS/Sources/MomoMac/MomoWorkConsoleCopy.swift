@@ -3,7 +3,7 @@ import Foundation
 extension MomoWorkspaceCopy {
     var workConsole: String { language == .korean ? "Work Console" : "Work Console" }
     var workConsoleSubtitle: String {
-        language == .korean ? "이 Mac에서 실행되는 로컬 작업 세션" : "Local work sessions running on this Mac"
+        language == .korean ? "로컬과 원격 작업 세션" : "Local and remote work sessions"
     }
     var openWorkConsole: String { language == .korean ? "Work Console 열기" : "Open Work Console" }
     var closeWorkConsole: String { language == .korean ? "Work Console 닫기" : "Close Work Console" }
@@ -64,6 +64,37 @@ extension MomoWorkspaceCopy {
     }
     var workSessionFocusTerminal: String { language == .korean ? "터미널에 포커스" : "Focus terminal" }
     var workSessionShareExcerpt: String { language == .korean ? "발췌 공유" : "Share excerpt" }
+    var workSessionOpenRemoteTerminal: String { language == .korean ? "터미널 열기" : "Open terminal" }
+    var workSessionRemoteRetry: String { language == .korean ? "다시 연결" : "Reconnect" }
+    var workSessionRemoteGrantLoading: String {
+        language == .korean ? "원격 터미널 연결 권한을 받는 중" : "Requesting remote terminal access"
+    }
+    var workSessionRemoteConnecting: String {
+        language == .korean ? "원격 터미널에 연결하는 중" : "Connecting to the remote terminal"
+    }
+    var workSessionRemoteDisconnected: String {
+        language == .korean ? "원격 터미널 연결이 끊겼습니다. 다시 연결하세요." : "The remote terminal disconnected. Reconnect to continue."
+    }
+    var workSessionRemoteEnded: String {
+        language == .korean ? "세션이 종료되어 터미널을 읽기 전용으로 표시합니다." : "The session ended. The terminal is now read-only."
+    }
+
+    func remoteTerminalError(_ error: MomoRemoteTerminalError) -> String {
+        switch (error, language) {
+        case (.grantExpired, .korean): "연결 권한이 만료됐습니다. 새 권한으로 다시 연결하세요."
+        case (.grantExpired, .english): "Terminal access expired. Reconnect with a new grant."
+        case (.forbidden, .korean): "이 세션의 터미널을 열 권한이 없습니다. 세션 소유자를 확인하세요."
+        case (.forbidden, .english): "You cannot open this terminal. Check the session owner."
+        case (.revokedOrUnavailable, .korean): "세션이 종료됐거나 원격 호스트 연결이 해제됐습니다. 상태를 확인한 뒤 다시 연결하세요."
+        case (.revokedOrUnavailable, .english): "The session ended or the remote host was revoked. Check its status, then reconnect."
+        case (.rateLimited, .korean): "연결 요청이 너무 많습니다. 잠시 후 다시 연결하세요."
+        case (.rateLimited, .english): "There were too many connection attempts. Reconnect in a moment."
+        case (.networkDisconnected, .korean): "네트워크 연결이 끊겼습니다. 연결 상태를 확인한 뒤 다시 연결하세요."
+        case (.networkDisconnected, .english): "The network connection was lost. Check your connection, then reconnect."
+        case (.invalidGrant, .korean), (.invalidFrame, .korean): "원격 터미널 응답을 확인하지 못했습니다. 다시 연결하세요."
+        case (.invalidGrant, .english), (.invalidFrame, .english): "The remote terminal response was invalid. Reconnect to try again."
+        }
+    }
     var workSessionLocalOnly: String {
         language == .korean
             ? "전체 출력과 입력은 이 Mac에만 남습니다. 공유를 누른 발췌만 스레드에 전송됩니다."

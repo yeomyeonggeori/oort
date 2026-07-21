@@ -21,6 +21,8 @@ final class MomoWorkConsoleController: ObservableObject {
     @Published private(set) var sessions: [MomoWorkSession] = []
     @Published var selectedSessionId: WorkSessionID?
     @Published private(set) var localSessions: [WorkSessionID: MomoLocalTerminalSession] = [:]
+    @Published private(set) var remoteSessions: [WorkSessionID: MomoRemoteTerminalSession] = [:]
+    @Published private(set) var workHosts: [WorkHostID: WorkHost] = [:]
     @Published private(set) var pendingReads: [WorkSessionID: MomoPendingWorkRead] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var isStarting = false
@@ -31,6 +33,7 @@ final class MomoWorkConsoleController: ObservableObject {
 
     private let viewModel: ChatViewModel
     private let workHostRegistrar: MomoWorkHostRegistrar
+    private let remoteTransportFactory: @MainActor () -> any MomoRemoteTerminalTransport
     private var workspaceId: WorkspaceID?
     private var memberId: MemberID?
     private var handledControlIds: Set<WorkControlID> = []
@@ -40,10 +43,14 @@ final class MomoWorkConsoleController: ObservableObject {
     init(
         viewModel: ChatViewModel,
         workHostRegistrar: MomoWorkHostRegistrar = MomoWorkHostRegistrar(),
+        remoteTransportFactory: @escaping @MainActor () -> any MomoRemoteTerminalTransport = {
+            MomoURLSessionRemoteTerminalTransport()
+        },
         initialHostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession
     ) {
         self.viewModel = viewModel
         self.workHostRegistrar = workHostRegistrar
+        self.remoteTransportFactory = remoteTransportFactory
         self.hostRegistrationState = initialHostRegistrationState
         for tool in MomoWorkTool.allCases {
             autoApproveStates[tool] = .unknown
@@ -65,6 +72,10 @@ final class MomoWorkConsoleController: ObservableObject {
         selectedSessionId.flatMap { localSessions[$0] }
     }
 
+    var selectedRemoteSession: MomoRemoteTerminalSession? {
+        selectedSessionId.flatMap { remoteSessions[$0] }
+    }
+
     func owns(_ session: MomoWorkSession) -> Bool {
         session.memberId == viewModel.currentNavigationMemberID
     }
@@ -74,7 +85,10 @@ final class MomoWorkConsoleController: ObservableObject {
             heartbeatTask?.cancel()
             heartbeatTask = nil
             localSessions.values.forEach { $0.terminate() }
+            remoteSessions.values.forEach { $0.disconnect() }
             localSessions = [:]
+            remoteSessions = [:]
+            workHosts = [:]
             pendingReads = [:]
             handledControlIds = []
             sessions = []
@@ -111,6 +125,10 @@ final class MomoWorkConsoleController: ObservableObject {
         do {
             sessions = try await viewModel.loadWorkSessions(activeOnly: false)
                 .sorted(by: Self.sessionOrder)
+            for session in sessions where !session.isRunning {
+                remoteSessions[session.id]?.markEnded()
+            }
+            await refreshWorkHosts()
             if let selectedSessionId,
                !sessions.contains(where: { $0.id == selectedSessionId }) {
                 self.selectedSessionId = sessions.first?.id
@@ -194,6 +212,7 @@ final class MomoWorkConsoleController: ObservableObject {
         endingSessionIds.insert(session.id)
         defer { endingSessionIds.remove(session.id) }
         localSessions[session.id]?.terminate()
+        remoteSessions[session.id]?.terminate()
         do {
             upsert(try await viewModel.endWorkSession(session.id, exitCode: nil))
             lastIssue = nil
@@ -305,6 +324,49 @@ final class MomoWorkConsoleController: ObservableObject {
         await viewModel.requestWorkSessionThread(session)
     }
 
+    func canOpenRemoteTerminal(_ session: MomoWorkSession) -> Bool {
+        session.isRunning
+            && owns(session)
+            && localSessions[session.id] == nil
+            && session.isRemotePTYBound
+    }
+
+    func canOpenRemoteTerminal(sessionId: WorkSessionID) -> Bool {
+        sessions.first(where: { $0.id == sessionId }).map(canOpenRemoteTerminal) ?? false
+    }
+
+    func hostDisplayName(for session: MomoWorkSession) -> String? {
+        workHosts[session.hostId]?.displayName
+    }
+
+    func openRemoteTerminal(_ session: MomoWorkSession) async {
+        guard canOpenRemoteTerminal(session) else { return }
+        if let existing = remoteSessions[session.id] {
+            await existing.retry()
+            return
+        }
+        let remote = MomoRemoteTerminalSession(
+            grantProvider: { [weak viewModel] in
+                guard let viewModel else { throw MomoWorkConsoleError.unavailable }
+                return try await viewModel.issueTerminalAttach(session.id)
+            },
+            transport: remoteTransportFactory()
+        )
+        remoteSessions[session.id] = remote
+        selectedSessionId = session.id
+        await remote.start()
+    }
+
+    func openRemoteTerminal(sessionId: WorkSessionID) async {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else { return }
+        await openRemoteTerminal(session)
+    }
+
+    func disconnectRemoteTerminals() {
+        remoteSessions.values.forEach { $0.disconnect() }
+        remoteSessions = [:]
+    }
+
     func shutdown() async {
         heartbeatTask?.cancel()
         heartbeatTask = nil
@@ -313,10 +375,12 @@ final class MomoWorkConsoleController: ObservableObject {
         endingSessionIds.formUnion(runningIDs)
         defer { endingSessionIds.subtract(runningIDs) }
         localSessions.values.forEach { $0.terminate() }
+        remoteSessions.values.forEach { $0.disconnect() }
         for session in running {
             _ = try? await viewModel.endWorkSession(session.id, exitCode: nil)
         }
         localSessions = [:]
+        remoteSessions = [:]
         pendingReads = [:]
     }
 
@@ -483,6 +547,9 @@ final class MomoWorkConsoleController: ObservableObject {
     private func apply(_ delta: WorkSessionDelta) {
         if let index = sessions.firstIndex(where: { $0.id == delta.sessionId }) {
             sessions[index].apply(delta)
+            if delta.action == .ended {
+                remoteSessions[delta.sessionId]?.markEnded()
+            }
             sessions.sort(by: Self.sessionOrder)
             return
         }
@@ -511,6 +578,17 @@ final class MomoWorkConsoleController: ObservableObject {
             sessions.append(session)
         }
         sessions.sort(by: Self.sessionOrder)
+        if !session.isRunning {
+            remoteSessions[session.id]?.markEnded()
+        }
+    }
+
+    private func refreshWorkHosts() async {
+        guard let backend = try? viewModel.workHostBackendForCurrentSession(),
+              let workspaceId,
+              let hosts = try? await backend.workHosts(workspace: workspaceId)
+        else { return }
+        workHosts = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, $0) })
     }
 
     private static func normalizedLabel(

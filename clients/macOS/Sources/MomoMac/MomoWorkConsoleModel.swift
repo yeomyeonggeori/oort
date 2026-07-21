@@ -36,8 +36,40 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
     let startedAtMs: Int64
     var endedAtMs: Int64?
     var exitCode: Int?
+    let ptyId: String?
 
     var isRunning: Bool { status == .running }
+    var isRemotePTYBound: Bool { ptyId != nil }
+
+    init(
+        id: WorkSessionID,
+        workspaceId: WorkspaceID,
+        channelId: ChannelID,
+        memberId: MemberID,
+        hostId: WorkHostID,
+        rootMessageId: MessageID,
+        tool: MomoWorkTool,
+        label: String,
+        status: MomoWorkSessionStatus,
+        startedAtMs: Int64,
+        endedAtMs: Int64? = nil,
+        exitCode: Int? = nil,
+        ptyId: String? = nil
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.channelId = channelId
+        self.memberId = memberId
+        self.hostId = hostId
+        self.rootMessageId = rootMessageId
+        self.tool = tool
+        self.label = label
+        self.status = status
+        self.startedAtMs = startedAtMs
+        self.endedAtMs = endedAtMs
+        self.exitCode = exitCode
+        self.ptyId = ptyId
+    }
 
     mutating func apply(_ delta: WorkSessionDelta) {
         guard id == delta.sessionId else { return }
@@ -108,6 +140,11 @@ protocol MomoWorkConsoleBackend: Sendable {
         session: WorkSessionID,
         exitCode: Int?
     ) async throws -> MomoWorkSession
+
+    func issueTerminalAttach(
+        workspace: WorkspaceID,
+        session: WorkSessionID
+    ) async throws -> MomoTerminalAttachGrant
 
     func acknowledgeWorkControl(
         workspace: WorkspaceID,

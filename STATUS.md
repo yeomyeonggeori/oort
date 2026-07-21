@@ -1,9 +1,27 @@
 # momo 진행 현황
 
+## UXUI MOMO-511-U macOS 원격 터미널 attach (2026-07-21)
+
+- macOS Work 서랍이 owner의 running 원격 `work_session`에서 exact 3-field attach grant를 메모리에서만 소비하고, capability를 Authorization header로 전달해 SwiftTerm과 remote PTY를 직접 연결한다. stdout 렌더, byte stdin, 문자 단위 resize, kill 프레임은 `connect/send_stdin/resize/kill` 최소 계약만 사용하며 capability와 endpoint를 URL query, UserDefaults, 로그, 원장에 남기지 않는다.
+- 로컬·원격 터미널은 같은 SwiftTerm 표면을 사용한다. 원격 호스트 표시명 배지 하나, 발급/연결/만료/403/409/429/네트워크 단절 인라인 상태와 재연결, ended read-only 출력 선택·스크롤, 카드→서랍 진입, 서랍·앱 종료 소켓 정리를 추가했다. 서버 목록 응답은 remote PTY 결속 여부를 투영하지 않으므로 액션은 `ptyId`가 명시된 세션에만 fail-closed한다. 정확한 사전 판별용 `remoteAttachAvailable` 또는 `ptyId` read projection은 엔진 후속 요청이며, 랜딩 전 실데이터 액션 노출은 `runtime-unverified`다.
+- Design Read: Work 서랍 terminal surface for internal team users on macOS, HIG-first, density 7/10, motion 2/10. 정적 디자인 리뷰는 Blocker 0으로 PASS했고 High 2건(ended 출력 상호작용, 미결속 세션 액션)을 반영했다.
+- `swift build --disable-sandbox`와 Work Console 24 tests(실패 0)가 PASS했다. in-process mock은 grant→stdout/stdin/resize/kill 및 오류 상태를 검증했다. 실제 URLSession loopback WebSocket은 managed sandbox가 연결을 차단해 1 test skip이며, 실 E2B/원격 host와 loopback socket 재실행은 오케스트레이터 수동 게이트 전까지 `runtime-unverified`다.
+## UXUI iOS 메시지 상호작용 MOMO-499 (2026-07-21)
+
+- iOS 타임라인의 확정 `seq` 메시지 롱프레스에 시스템 시트를 연결하고 최근 반응·반응 피커, 기존 답글 경로, 작성자 전용 수정·삭제 확인, 복사를 추가했다. 반응 pill은 그룹 경계와 무관하게 해당 메시지 행에 귀속되며 서버 응답 전에는 화면을 바꾸지 않는다.
+- iOS REST 클라이언트가 반응 스냅샷, 반응 PUT/DELETE, 메시지 PATCH/DELETE를 소비하고 `reaction.added/removed`·`message.edited/deleted`를 reducer에 반영한다. cold load 중 realtime 이벤트는 스냅샷 위에 순서대로 재적용하며 삭제 시 반응 projection도 제거한다.
+- MomoiOSKit 47 tests가 PASS했다(기존 41 + 상호작용 6). 지시대로 `xcodebuild`·시뮬레이터·실기기 왕복은 실행하지 않았으며, 시뮬레이터 스냅샷과 맥→폰 반응 실시간 반영은 오케스트레이터/성재 게이트 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-512 NativeTextView 포커스 복원 (2026-07-20)
 
 - MOMO-508 네이티브 컴포저의 포커스 상태를 SwiftUI `.focused`와 연결되지 않은 `@FocusState` 대신 representable 갱신을 보장하는 `@State`로 소유하게 했다. 루트 뷰 교체 시 들어온 최초 focus 요청도 소비하고, AppKit window 부착 시 재동기화하며 제거된 text view의 지연 콜백은 first responder를 탈취하지 못한다.
 - 실제 WindowServer에서 rootView 교체 후 `MomoMessageComposerNativeTextView` first responder 복원 테스트를 반복 PASS했고, 컴포저 집중 4 tests·real-window 주변 4 tests·macOS 전체 445 tests가 PASS했다.
+
+## UXUI iOS 타임라인 v2 MOMO-498 (2026-07-20)
+
+- iOS 타임라인에 동일 작성자 5분 단위 그룹핑, 날짜 구분선, 서버 `mention_member_ids` 기반 내 멘션 강조, 수정 배지와 삭제 tombstone, Markdown 링크 및 가로 스크롤 코드 블록 렌더를 추가했다. 메시지는 각각 독립적인 List 행과 안정 ID를 유지해 답장 스와이프·컨텍스트 메뉴·200건 이상 지연 렌더 경계를 보존한다.
+- iOS history DTO가 엔진 X-5의 `state`·`editedAtMs`·`deletedAtMs`를 버리던 갭을 닫아 cold load에서도 수정/삭제 상태가 복원된다. realtime `message.edited`·`message.deleted`는 기존 reducer를 그대로 소비하며 삭제 본문은 UI에 노출하지 않는다.
+- MomoiOSKit 41 tests와 iPhone Simulator 무서명 build, build-for-testing, test-without-building이 PASS했다. 인증 실데이터를 사용한 라이트/다크·접근성 Dynamic Type·한국어 장문 스냅샷과 200건 스크롤 육안 판정은 Fable/성재 수동 게이트 전까지 `runtime-unverified`다.
 
 ## UXUI iOS v1 모바일 기반 MOMO-496/497 (2026-07-20)
 
