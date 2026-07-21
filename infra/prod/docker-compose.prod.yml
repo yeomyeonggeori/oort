@@ -35,13 +35,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-      # MOMO-390: web SPA build output served by Caddy's file_server (the api
-      # container never serves web assets — ADR-0119). Default is a named
-      # volume that stays empty until an operator (or a future momo-web asset
-      # image) populates it; an empty root simply 404s, which is correct for a
-      # web-less deploy. Operators may instead set MOMO_WEB_DIST_DIR to an
-      # absolute host path that holds the built clients/web dist.
-      - ${MOMO_WEB_DIST_DIR:-momo-web-dist}:/srv/momo-web:ro
+      # ADR-0119 W-3: web-init copies the immutable momo-web image's dist into
+      # this named volume before Caddy starts. The api image never contains or
+      # serves browser assets.
+      - momo-web-static:/srv/momo-web:ro
     depends_on:
       api:
         condition: service_started
@@ -234,6 +231,15 @@ services:
     networks:
       - private
 
+  # One-shot SPA asset initializer. install.sh/upgrade.sh run this pinned
+  # image before (re)starting Caddy; the final image contains dist only plus
+  # the minimal shell/cp needed to populate the shared read-only serving root.
+  web-init:
+    image: ${MOMO_WEB_IMAGE:?set MOMO_WEB_IMAGE}
+    restart: "no"
+    volumes:
+      - momo-web-static:/srv/momo-web
+
   # ADR-0127 self-host option. Select with `--profile s3`; Dawn-hosted
   # deployments keep the default Drive archive and never start these services.
   minio:
@@ -288,7 +294,5 @@ volumes:
     name: ${MINIO_VOLUME_NAME:-momo-minio-data}
   caddy-data:
   caddy-config:
-  # MOMO-390: default (empty) web asset volume; unused when MOMO_WEB_DIST_DIR
-  # points the caddy mount at a host path instead.
-  momo-web-dist:
-    name: ${WEB_DIST_VOLUME_NAME:-momo-web-dist}
+  momo-web-static:
+    name: ${WEB_STATIC_VOLUME_NAME:-momo-web-static}

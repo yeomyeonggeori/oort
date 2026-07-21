@@ -252,7 +252,7 @@ services:
       mock-hermes:
         condition: service_healthy
 
-  # MOMO-390: web serving smoke boundary. Runs the prod Caddyfile (the real
+  # MOMO-390: web serving/browser smoke boundary. Runs the prod Caddyfile (the real
   # deploy artifact) against localhost-only domains to verify the {$APP_DOMAIN}
   # SPA site: placeholder index.html serving, SPA deep-link fallback, /v1/*
   # proxy wiring, and the /v1/centrifugo/* edge 403. Profile-gated (`web`) so
@@ -278,6 +278,49 @@ services:
       # absolute path) here; default stays the MOMO-390 placeholder so the
       # serving smoke's expectations are unchanged.
       - ${WEB_EDGE_ASSETS_DIR:-./e2e/web-placeholder}:/srv/momo-web:ro
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 2s
+
+  # MOMO-576 (ADR-0119 W-3): build the real clients/web dist and copy it into
+  # an isolated named volume. This mirrors the production pinned-image init
+  # contract while keeping source builds legal only in the e2e layer.
+  web-init:
+    image: momo-web:e2e
+    profiles: ["web"]
+    build:
+      context: ..
+      dockerfile: infra/prod/Dockerfile.web
+    restart: "no"
+    volumes:
+      - e2e-web-static:/srv/momo-web
+
+  # HTTP-only serving verifier edge. The verifier names this service
+  # explicitly, so the legacy HTTPS browser-smoke edge above remains isolated.
+  # APP_DOMAIN includes the scheme to disable Caddy automatic HTTPS for this
+  # e2e surface; production keeps bare hostnames and automatic TLS.
+  web-serving-edge:
+    image: caddy:2-alpine
+    profiles: ["web"]
+    restart: "no"
+    environment:
+      ACME_EMAIL: e2e-web@momo.localhost
+      API_DOMAIN: api.localhost
+      REALTIME_DOMAIN: ${WEB_SERVING_REALTIME_DOMAIN:-rt.localhost}
+      APP_DOMAIN: http://${WEB_SERVING_APP_DOMAIN:-app.localhost}
+    ports:
+      - "127.0.0.1:${WEB_SERVING_PORT:-28070}:80"
+    volumes:
+      - ./prod/Caddyfile:/etc/caddy/Caddyfile:ro
+      - e2e-web-static:/srv/momo-web:ro
+    depends_on:
+      api:
+        condition: service_started
+      web-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
       interval: 2s
@@ -350,3 +393,4 @@ volumes:
   api-swiftpm:
   relay-swiftpm:
   worker-swiftpm:
+  e2e-web-static:

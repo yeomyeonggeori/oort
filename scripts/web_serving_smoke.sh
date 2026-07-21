@@ -13,8 +13,8 @@
 #      so 502 is the expected "proxied, upstream absent" answer; MOMO-391's
 #      login smoke covers the full proxy round trip).
 #   4. /v1/centrifugo/* is denied at the edge (403, MOMO-300).
-#   5. security_headers + strict SPA CSP (connect-src wss://REALTIME_DOMAIN,
-#      no inline script) are present on SPA responses.
+#   5. security_headers + ADR-0119 CSP (realtime wss/https connect-src, inline
+#      script blocked by default-src, inline style allowed) are present.
 #   6. With APP_DOMAIN unset, the sentinel site fails closed: 404 for /, deep
 #      links, and /v1/* (the host-matcher guard is ordered ahead of the path
 #      handles); the API site still answers (centrifugo edge 403 intact) and
@@ -142,12 +142,10 @@ headers_lc="$(curl -ksSI --resolve "$APP_HOST:$HTTPS_PORT:127.0.0.1" "https://$A
 contains "$headers_lc" "strict-transport-security:" || fail "missing HSTS header on SPA response"
 contains "$headers_lc" "x-frame-options: deny" || fail "missing X-Frame-Options DENY on SPA response"
 contains "$headers_lc" "content-security-policy:" || fail "missing Content-Security-Policy on SPA response"
-contains "$headers_lc" "connect-src 'self' wss://$RT_HOST" || fail "CSP connect-src must allow wss://$RT_HOST"
-contains "$headers_lc" "script-src 'self'" || fail "CSP must restrict script-src to 'self'"
-if contains "$headers_lc" "unsafe-inline"; then
-  fail "CSP must not allow inline script/style"
-fi
-pass "security headers + strict SPA CSP present (connect-src wss://$RT_HOST, no inline script)"
+contains "$headers_lc" "default-src 'self'" || fail "CSP default-src must restrict scripts to 'self'"
+contains "$headers_lc" "connect-src 'self' wss://$RT_HOST https://$RT_HOST" || fail "CSP connect-src must allow realtime wss/https"
+contains "$headers_lc" "style-src 'self' 'unsafe-inline'" || fail "CSP style-src must match ADR-0119 D3"
+pass "security headers + ADR-0119 SPA CSP present"
 
 echo "==> APP_DOMAIN-unset runtime behavior (sentinel fail-closed)"
 docker run -d --name "$UNSET_NAME" \

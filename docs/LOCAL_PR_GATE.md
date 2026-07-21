@@ -82,6 +82,7 @@ Profiles:
 | `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
+| `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, HTTP SPA/proxy/security-header six-assertion gate. Public DNS/ACME/TLS is excluded. |
 | `web` | `clients/web`, `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + generated-types sync check (openapi-typescript output vs committed `src/api/schema.d.ts`) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
@@ -102,6 +103,7 @@ scripts/local_gate.sh --profile external-agent-provider
 scripts/verify_local_hermes_credentialed_smoke.sh
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
+scripts/local_gate.sh --profile web-serving
 scripts/local_gate.sh --profile web
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
@@ -273,8 +275,8 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
    `src/api/schema.d.ts` from `docs/api/openapi.yaml` and the gate fails if
    the committed file differs — spec changes and client types cannot drift
    apart in one PR.
-3. `vite build` (production bundle must stay CSP-safe: no inline
-   script/style — the browser smoke enforces this at runtime too).
+3. `vite build` (production bundle must stay CSP-safe: no inline script;
+   ADR-0119 permits inline style, and the browser smoke enforces the policy).
 4. License gate: `clients/web/scripts/check-licenses.mjs` walks the full
    installed transitive closure from `package-lock.json`, fails on anything
    outside the permissive allowlist (MIT/Apache-2.0/ISC/BSD family;
@@ -324,8 +326,8 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
    (its own isolated stack, see above).
 
 CSP contract note: the web client uses centrifuge-js in websocket-only
-transport mode because the serving CSP allows `connect-src 'self'` +
-`wss://REALTIME_DOMAIN` and nothing else. Adding an HTTP-based fallback
+transport mode. The serving CSP allows `connect-src 'self'` plus
+`wss://REALTIME_DOMAIN` and `https://REALTIME_DOMAIN`. Adding another fallback
 transport requires updating the Caddyfile CSP and the
 `scripts/web_serving_smoke.sh` expectations in the same PR.
 

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-21 (Fable 3차) · MOMO-524 랜딩 — ADR-0128 서버 절반 완전 종결 + 동생 ①② 순항
+- 2차 배치(565 S3·566 멤버십) main 랜딩(49edf5d, 성재 승인). **#574 MOMO-524**(self-leave·agent credential 대칭·banned handle 생성차단·audit 조회 REST) track/engine 8cd20a2 랜딩 — docker 실런 PASS(self-leave/대칭/ban/audit/RLS) + 523 회귀 PASS. **ADR-0128 D1~D6 서버 전부 완결** — 잔여는 UXUI 525(=A-15, worker가 ENGINE_HANDOFF 등재)뿐.
+- 검수 수정 2건: 전송 응답 jq 경로(.message.id→.id — 응답은 top-level 객체), e2e compose gateway 기본 비활성이라 agent 대칭 probe용 AGENT_GATEWAY_MODE=gateway override 가산.
+- **동생 진행**: 순차 배치 ①(511-U 개방 #567/568)·②전반(505 Work 탭 #569/570) track/uxui 랜딩 — 순서 준수·페이스 양호. 506 진행 추정.
+- 도달점 보고(성재 전달됨): L1~L3 100%·L5 ~90%·오픈소스 4대 관점 중 ④ 블로커 해소·권한 수명주기 완결. 다음 큐: W-3/4/5(웹 완성), LICENSE+ghcr(공개 게이트), ADR-0117 기안. **성재 대기**: track/engine→main(574).
+
 ## 2026-07-21 (Fable 2차 배치 완결) · S3 어댑터 + 멤버십 수명주기 랜딩 — track/engine=main+2 승인 대기
 - **#565 MOMO-521**(S3 첨부): SigV4 SDK-less·presigned 직송·MinIO 프로파일. docker s3 실런 PASS(왕복/RLS/audit/redaction). 셀프호스트 하드 블로커 해소. **#566 MOMO-523**(멤버십 수명주기 D1~D3): workspace_membership 분리·역할변경·suspend/추방/ban·audit·guest 투영. docker 실런 PASS(lifecycle/hierarchy/guest/audit/RLS).
 - 검수 중 잡은 결함(오케스트레이터 수정, PR에 커밋): ①**서버 2계열 500** — nil String?/UUID? 바인딩 'could not determine data type'(Roster/Lifecycle/Join/WorkControl 4곳 ::text/::uuid) + **트랜잭션 내 HTTPError가 PostgresTransactionError로 감싸져 500**(라우트별 ad hoc unwrap을 Database.withTenantTransaction 중앙 unwrap으로 승격 — 재발 원천 차단) ②verifier 3건 — bash 3.2 빈 배열, api 컨테이너 curl 부재(mock-hermes python 대체), demo 계정 password 시드.

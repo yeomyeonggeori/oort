@@ -51,7 +51,7 @@ configure_compose
 render_compose_contract
 
 if [ "$DRY_RUN" = "1" ]; then
-  deploy_log "DRY RUN plan: pull pinned images -> start postgres/redis/centrifugo -> run migrate once -> start api/relay/worker/caddy -> check health -> record rollback state"
+  deploy_log "DRY RUN plan: pull five pinned images -> start postgres/redis/centrifugo -> run migrate and web-init once -> start api/relay/worker/caddy -> check health -> record rollback state"
   deploy_log "DRY RUN complete; no containers or state were changed"
   exit 0
 fi
@@ -65,6 +65,9 @@ deploy_log "starting stateful dependencies"
 
 deploy_log "running the pinned migration image once"
 "${COMPOSE[@]}" run --rm --no-deps migrate || { print_failure_diagnostics; exit 1; }
+
+deploy_log "installing the pinned web assets"
+"${COMPOSE[@]}" run --rm --no-deps web-init || { print_failure_diagnostics; exit 1; }
 
 for service in api relay worker caddy; do
   deploy_log "starting $service"
