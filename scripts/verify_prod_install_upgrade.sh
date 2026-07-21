@@ -172,6 +172,15 @@ grep -Fq 'database remains forward-only' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run did not disclose forward-only database migrations"
 pass "upgrade dry-run exposes sequential restart and app-only rollback asymmetry"
 
+mkdir -p "$TMP_ROOT/legacy-state"
+grep -v '^MOMO_WEB_IMAGE=' "$TMP_ROOT/state/$DEPLOY_STATE_NAME" > "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"
+chmod 600 "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"
+run_capture "$TMP_ROOT/legacy-upgrade.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
+  --state-dir "$TMP_ROOT/legacy-state" --dry-run
+grep -Fq 'legacy deploy state has no web image' "$TMP_ROOT/legacy-upgrade.out" ||
+  fail "first web-enabled upgrade did not accept legacy four-image deploy state"
+pass "legacy four-image deploy state upgrades without losing rollback safety disclosure"
+
 printf '{"result":"PASS"}\n' > "$TMP_ROOT/backup.json"
 FAILURE_MARKER="$TMP_ROOT/new-api-failed"
 if PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" \

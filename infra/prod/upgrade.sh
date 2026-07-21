@@ -78,7 +78,15 @@ STATE_TO_READ="$CURRENT_STATE"
 OLD_API="$(read_state_value "$STATE_TO_READ" MOMO_API_IMAGE)"
 OLD_RELAY="$(read_state_value "$STATE_TO_READ" MOMO_RELAY_IMAGE)"
 OLD_WORKER="$(read_state_value "$STATE_TO_READ" MOMO_WORKER_IMAGE)"
-OLD_WEB="$(read_state_value "$STATE_TO_READ" MOMO_WEB_IMAGE)"
+if grep -q '^MOMO_WEB_IMAGE=' "$STATE_TO_READ"; then
+  OLD_WEB="$(read_state_value "$STATE_TO_READ" MOMO_WEB_IMAGE)"
+else
+  # Deploy state written before W-3 has no web image to restore. Keep the
+  # requested pinned web image for this one compatibility upgrade; the new
+  # state records it so every later rollback is exact.
+  OLD_WEB="$MOMO_WEB_IMAGE"
+  deploy_log "legacy deploy state has no web image; first web-enabled rollback will retain the requested pinned web assets"
+fi
 
 rollback_apps() {
   deploy_log "ROLLBACK: restoring previous api/relay/worker/web image digests"
