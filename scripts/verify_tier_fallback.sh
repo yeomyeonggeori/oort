@@ -219,6 +219,13 @@ SELECT count(*) FROM message
 SQL
 )"
 [ "$got" = "1" ] || { echo "[tier-fallback] missing resume_offer card" >&2; exit 1; }
+got="$(sql_value <<SQL
+SELECT count(*) FROM message
+ WHERE id='$ASK_ROOT_ID' AND props->>'status'='orphaned'
+   AND props->>'session_id'='$ASK_SESSION_ID';
+SQL
+)"
+[ "$got" = "1" ] || { echo "[tier-fallback] ask root card did not become orphaned" >&2; exit 1; }
 RESUME_MESSAGE_ID="$(sql_value <<SQL
 SELECT id FROM message
  WHERE root_id='$ASK_ROOT_ID' AND props->>'kind'='resume_offer';
@@ -286,6 +293,13 @@ SQL
   sleep 1
 done
 [ "${got:-0}" = "1" ] || { echo "[tier-fallback] t1_only did not terminate" >&2; exit 1; }
+got="$(sql_value <<SQL
+SELECT count(*) FROM message
+ WHERE id='$T1_ROOT_ID' AND props->>'status'='ended'
+   AND props->>'end_reason'='orphaned';
+SQL
+)"
+[ "$got" = "1" ] || { echo "[tier-fallback] t1_only root card did not end" >&2; exit 1; }
 got="$(sql_value <<SQL
 SELECT count(*) FROM message WHERE root_id='$T1_ROOT_ID' AND props->>'kind'='resume_offer';
 SQL

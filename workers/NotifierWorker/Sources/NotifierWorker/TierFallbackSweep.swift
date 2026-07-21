@@ -115,6 +115,21 @@ extension NotifierService {
         ).collect()
         guard let transitionedAt = try rows.first?.decode(Date.self) else { return }
         let transitionedAtMs = Self.epochMs(transitionedAt)
+        var rootProps: [String: Any] = [
+            "kind": "work_session",
+            "session_id": session.id.uuidString,
+            "tool": session.tool,
+            "label": session.label,
+            "status": terminal ? "ended" : "orphaned",
+        ]
+        if terminal {
+            rootProps["ended_at"] = transitionedAtMs
+            rootProps["end_reason"] = "orphaned"
+        }
+        _ = try await conn.query(
+            "UPDATE message SET props = \(Self.jsonString(rootProps))::jsonb WHERE id = \(session.rootMessageID)",
+            logger: logger
+        )
         let orphanPayload = Self.lifecyclePayload(
             eventType: "work.session.orphaned",
             session: session,
@@ -215,7 +230,7 @@ extension NotifierService {
             conn: conn,
             session: session,
             action: "work.session.resume_offered",
-            targetID: messageID,
+            targetID: session.id,
             detail: [
                 "schema": "momo.work_session.resume_offer.v1",
                 "session_id": session.id.uuidString,
