@@ -155,6 +155,46 @@ export interface paths {
         patch: operations["changeWorkspaceMemberRole"];
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/members/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Leave the workspace and revoke the caller's sessions.
+         * @description Human active members only. Removes all channel memberships and the workspace membership, transitions the caller to deleted, revokes every token, and preserves authored messages. The final active owner must transfer ownership before leaving.
+         */
+        delete: operations["leaveWorkspace"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/channels/{channelId}/members/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Leave a public or private channel.
+         * @description Direct-message channels cannot be left. A private channel is archived atomically when its final active member leaves.
+         */
+        delete: operations["leaveChannel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role": {
         parameters: {
             query?: never;
@@ -253,6 +293,26 @@ export interface paths {
         post?: never;
         /** Delete a workspace ban and permit future rejoin. */
         delete: operations["deleteWorkspaceBan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the tenant audit ledger (owner/admin only).
+         * @description Stable newest-first keyset pagination over `(created_at, id)`. `actions` is a comma-separated list of action prefixes. The target member filter applies to `subject_member_id`; time bounds are inclusive epoch milliseconds. Snake-case filter aliases are canonical, with camelCase aliases accepted by the server.
+         */
+        get: operations["listWorkspaceAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1408,6 +1468,39 @@ export interface components {
             /** @enum {string} */
             status: "active" | "suspended" | "deleted";
         };
+        ChannelLeaveResponse: {
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            memberId: string;
+            archived: boolean;
+        };
+        AuditEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            actorMemberId?: string;
+            /** Format: uuid */
+            subjectMemberId?: string;
+            action: string;
+            targetType?: string;
+            /** Format: uuid */
+            targetId?: string;
+            /** Format: uuid */
+            viaTokenId?: string;
+            /** Format: uuid */
+            runId?: string;
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            createdAtMs: number;
+        };
+        AuditPageResponse: {
+            events: components["schemas"]["AuditEvent"][];
+            /** Format: uuid */
+            nextCursor?: string;
+        };
         RemoveWorkspaceMemberRequest: {
             /** @default false */
             ban: boolean;
@@ -1438,7 +1531,7 @@ export interface components {
         };
         CreateAgentRequest: {
             displayName: string;
-            /** @description Trimmed and lowercased server-side; unique per workspace. */
+            /** @description Trimmed and lowercased server-side; unique and not banned per workspace. */
             handle: string;
             model: string;
             /**
@@ -2808,6 +2901,84 @@ export interface operations {
             };
         };
     };
+    leaveWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workspace left and all caller tokens revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipLifecycleResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Caller is the last active owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    leaveChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Channel UUID. */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channel membership ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelLeaveResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Direct-message leave is forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active channel membership not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     changeChannelMemberRole: {
         parameters: {
             query?: never;
@@ -3107,6 +3278,48 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    listWorkspaceAudit: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated action prefixes. */
+                actions?: string;
+                target_member_id?: string;
+                from_ms?: number;
+                to_ms?: number;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Filtered audit page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPageResponse"];
+                };
+            };
+            /** @description Invalid filter or cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createAgent: {
