@@ -5,6 +5,23 @@
 -- and argument template. Executable paths and credentials remain host-local.
 -- =============================================================================
 
+CREATE FUNCTION momo_work_tool_launch_template_safe(template jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+STRICT
+AS $$
+  SELECT CASE
+    WHEN jsonb_typeof(template->'arguments') <> 'array' THEN false
+    ELSE NOT EXISTS (
+      SELECT 1
+        FROM jsonb_array_elements_text(template->'arguments') AS argument(value)
+       WHERE value ~* '(^/|^file:|authorization|bearer|password|secret|token|api[-_]?key)'
+          OR value ~ E'[\\n\\r]'
+    )
+  END;
+$$;
+
 CREATE TABLE work_tool_profile (
   id               uuid PRIMARY KEY DEFAULT uuidv7(),
   workspace_id     uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
@@ -35,6 +52,7 @@ CREATE TABLE work_tool_profile (
       launch_template,
       '$.arguments[*] ? (@.type() != "string")'
     )
+    AND momo_work_tool_launch_template_safe(launch_template)
   ),
   CONSTRAINT work_tool_profile_tier_defaults_ck
     CHECK (jsonb_typeof(tier_defaults) = 'object'),
@@ -122,23 +140,23 @@ $$;
 -- Backfill every existing workspace from its active owner/admin. Workspaces
 -- cannot dispatch work before they have a human membership, so an empty legacy
 -- workspace intentionally remains without executable profiles.
-SELECT momo_seed_work_tool_profiles(wm.workspace_id, wm.member_id)
-  FROM workspace_membership wm
-  JOIN member m
-    ON m.workspace_id = wm.workspace_id
-   AND m.id = wm.member_id
-   AND m.kind = 'human'
-   AND m.status = 'active'
-   AND m.deleted_at IS NULL
- WHERE wm.role IN ('owner', 'admin')
-   AND wm.member_id = (
-     SELECT wm2.member_id
-       FROM workspace_membership wm2
-      WHERE wm2.workspace_id = wm.workspace_id
-        AND wm2.role IN ('owner', 'admin')
-      ORDER BY CASE wm2.role WHEN 'owner' THEN 0 ELSE 1 END, wm2.joined_at, wm2.member_id
-      LIMIT 1
-   );
+WITH seed_actor AS (
+  SELECT DISTINCT ON (wm.workspace_id) wm.workspace_id, wm.member_id
+    FROM workspace_membership wm
+    JOIN member m
+      ON m.workspace_id = wm.workspace_id
+     AND m.id = wm.member_id
+     AND m.kind = 'human'
+     AND m.status = 'active'
+     AND m.deleted_at IS NULL
+   WHERE wm.role IN ('owner', 'admin')
+   ORDER BY wm.workspace_id,
+            CASE wm.role WHEN 'owner' THEN 0 ELSE 1 END,
+            wm.joined_at,
+            wm.member_id
+)
+SELECT momo_seed_work_tool_profiles(workspace_id, member_id)
+  FROM seed_actor;
 
 CREATE OR REPLACE FUNCTION momo_seed_work_tool_profiles_on_membership()
 RETURNS trigger

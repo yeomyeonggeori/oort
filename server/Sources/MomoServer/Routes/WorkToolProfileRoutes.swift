@@ -310,11 +310,32 @@ struct WorkToolProfileRoutes: Sendable {
         guard raw.objectValue != nil else {
             throw HTTPError(.badRequest, message: "tierDefaults must be an object")
         }
+        guard !containsCredentialShape(raw) else {
+            throw HTTPError(.badRequest, message: "tierDefaults cannot contain credential-shaped data")
+        }
         let json = try jsonString(raw)
         guard json.utf8.count <= 8_192 else {
             throw HTTPError(.badRequest, message: "tierDefaults is too large")
         }
         return json
+    }
+
+    private static func containsCredentialShape(_ value: JSONValue) -> Bool {
+        let forbidden = ["authorization", "bearer", "password", "secret", "token", "apikey", "api_key", "api-key"]
+        switch value {
+        case .object(let object):
+            return object.contains { key, child in
+                let normalized = key.lowercased()
+                return forbidden.contains(where: normalized.contains) || containsCredentialShape(child)
+            }
+        case .array(let array):
+            return array.contains(where: containsCredentialShape)
+        case .string(let string):
+            let normalized = string.lowercased()
+            return forbidden.contains(where: normalized.contains)
+        case .int, .double, .bool, .null:
+            return false
+        }
     }
 
     private static func jsonString(_ value: JSONValue) throws -> String {
