@@ -6,6 +6,7 @@ export interface TimelineMessage {
   id: string;
   seq: number;
   type: string;
+  rootId?: string;
   body?: string;
   state?: Message["state"];
   authorMemberId: string;
@@ -29,6 +30,7 @@ export function fromRestMessage(message: Message): TimelineMessage {
     id: message.id,
     seq: message.seq,
     type: message.type,
+    ...(message.rootId !== undefined ? { rootId: message.rootId } : {}),
     ...(message.body !== undefined ? { body: message.body } : {}),
     ...(message.state !== undefined ? { state: message.state } : {}),
     authorMemberId: message.authorMemberId,

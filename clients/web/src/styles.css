@@ -185,6 +185,93 @@ body {
   color: var(--text);
 }
 
+/* ---- typed artifacts (ADR-0126 D2) --------------------------------------- */
+
+.artifact-card {
+  max-width: 760px;
+  margin-top: 5px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.artifact-card-header,
+.artifact-diff-file summary,
+.artifact-metadata {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.artifact-card-header,
+.artifact-diff-file summary {
+  justify-content: space-between;
+}
+
+.artifact-metadata {
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 7px 0;
+}
+
+.artifact-change-summary {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.artifact-addition,
+.artifact-diff-addition {
+  color: var(--ok);
+}
+
+.artifact-deletion,
+.artifact-diff-deletion {
+  color: var(--danger);
+}
+
+.artifact-diff-file {
+  margin-top: 10px;
+}
+
+.artifact-diff-file summary {
+  cursor: pointer;
+}
+
+.artifact-diff-lines {
+  overflow-x: auto;
+  margin: 7px 0 0;
+  padding: 6px 0;
+  border-radius: 7px;
+  background: var(--bg);
+}
+
+.artifact-diff-line {
+  display: block;
+  min-width: max-content;
+  padding: 0 8px;
+}
+
+.artifact-diff-addition {
+  background: color-mix(in srgb, var(--ok) 9%, transparent);
+}
+
+.artifact-diff-deletion {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+
+.artifact-diff-hunk {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.artifact-diff-metadata {
+  color: var(--text-muted);
+}
+
 /* ---- chat layout ----------------------------------------------------------- */
 
 .chat-layout {
