@@ -1,8 +1,20 @@
 import Foundation
 
+enum WorkTransport: String, Sendable, Equatable {
+    case pty
+    case acp
+}
+
 struct CommandTemplate: Sendable, Equatable {
     let executable: String
     let arguments: [String]
+    let transport: WorkTransport
+
+    init(executable: String, arguments: [String], transport: WorkTransport = .pty) {
+        self.executable = executable
+        self.arguments = arguments
+        self.transport = transport
+    }
 }
 
 struct LocalCommandOverride: Sendable, Equatable {
@@ -108,15 +120,26 @@ struct WorkdConfig: Sendable {
                   profile.launchTemplate.arguments.count <= 64,
                   profile.launchTemplate.arguments.allSatisfy({ $0.count <= 4_096 })
             else { throw WorkdFailure.invalidResponse }
+            let transport: WorkTransport
+            if let rawTransport = profile.tierDefaults.objectValue?["transport"]?.stringValue {
+                guard let parsed = WorkTransport(rawValue: rawTransport) else {
+                    throw WorkdFailure.invalidResponse
+                }
+                transport = parsed
+            } else {
+                transport = .pty
+            }
             if let override = localOverrides[profile.toolKey] {
                 templates[profile.toolKey] = CommandTemplate(
                     executable: override.executable,
-                    arguments: override.arguments ?? profile.launchTemplate.arguments
+                    arguments: override.arguments ?? profile.launchTemplate.arguments,
+                    transport: transport
                 )
             } else {
                 templates[profile.toolKey] = CommandTemplate(
                     executable: "/usr/bin/env",
-                    arguments: [profile.launchTemplate.command] + profile.launchTemplate.arguments
+                    arguments: [profile.launchTemplate.command] + profile.launchTemplate.arguments,
+                    transport: transport
                 )
             }
         }

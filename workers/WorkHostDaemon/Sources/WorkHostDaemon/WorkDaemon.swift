@@ -120,7 +120,13 @@ final class WorkDaemon: Sendable {
                 localOverrides: localCommandOverrides
             )
             await processes.replaceTemplates(templates)
-            try await processes.start(sessionID: sessionID, tool: tool)
+            let prompt = control.payload.objectValue?["label"]?.stringValue ?? "Continue the work session."
+            try await processes.start(
+                sessionID: sessionID,
+                channelID: control.channelId,
+                tool: tool,
+                prompt: prompt
+            )
         } catch {
             try? await api.endSession(hostID: hostID, sessionID: sessionID, exitCode: -1)
             await acknowledgeFailure(controlID: control.id, label: "process_start_failed")
