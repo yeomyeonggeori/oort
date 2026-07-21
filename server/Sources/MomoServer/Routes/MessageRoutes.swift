@@ -243,7 +243,8 @@ struct MessageRoutes: Sendable {
                 centChannel: centChannel, messageID: id, channelID: channelID,
                 seq: seq, type: type, body: body, authorMemberID: principal.memberID,
                 hlcTs: ts, hlcCount: count, rootID: rootID,
-                attachments: attachments
+                attachments: attachments,
+                props: Self.jsonObject(responsePropsJSON) as? [String: Any]
             )
             if didInsert {
                 _ = try await conn.query(
