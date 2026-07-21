@@ -689,7 +689,7 @@ private struct IOSHuddleSheet: View {
     }
 }
 
-private struct IOSMessageDateDivider: View {
+struct IOSMessageDateDivider: View {
     let dayStartMs: Int64
     @Environment(\.calendar) private var calendar
 
@@ -715,7 +715,7 @@ private struct IOSMessageDateDivider: View {
     }
 }
 
-private struct IOSMessageRow: View {
+struct IOSMessageRow: View {
     let message: Message
     let member: Member?
     let quotedBody: String?
@@ -760,6 +760,11 @@ private struct IOSMessageRow: View {
                     .accessibilityLabel("Replying to: \(quotedBody)")
                 }
                 messageContent
+                if !message.isDeleted, let attachments = message.attachments, !attachments.isEmpty {
+                    ForEach(attachments) { attachment in
+                        IOSMessageAttachmentCard(attachment: attachment)
+                    }
+                }
                 let reactions = model.reactions(for: message)
                 if !reactions.isEmpty {
                     IOSReactionPillRow(message: message, reactions: reactions, model: model)
@@ -787,7 +792,14 @@ private struct IOSMessageRow: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
         } else if message.type == .approvalRequest {
-            IOSApprovalDecisionCard(message: message, model: model)
+            IOSApprovalDecisionCard(
+                message: message,
+                status: model.approvalStatus(for: message),
+                isInFlight: approvalID.map(model.approvalDecisionsInFlight.contains) == true,
+                didFail: approvalID.map(model.approvalDecisionFailures.contains) == true,
+                onDecide: { approve in Task { await model.decideApproval(message, approve: approve) } },
+                onRetry: { Task { await model.retryApprovalDecision(for: message) } }
+            )
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 IOSMessageBody(bodySegments: bodySegments, fallbackText: fallbackText)
@@ -819,14 +831,43 @@ private struct IOSMessageRow: View {
         case .text, .approvalRequest: "Message"
         }
     }
+
+    private var approvalID: ApprovalID? { IOSTimelineModel.approvalID(for: message) }
 }
 
-private struct IOSMessageInteractionPresentation: Identifiable {
+private struct IOSMessageAttachmentCard: View {
+    let attachment: MessageAttachment
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: attachment.mime.hasPrefix("image/") ? "photo" : "doc")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 32, height: 32)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+                Text(ByteCountFormatter.string(fromByteCount: attachment.sizeBytes, countStyle: .file))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Attachment, \(attachment.name), \(attachment.sizeBytes) bytes")
+    }
+}
+
+struct IOSMessageInteractionPresentation: Identifiable {
     let id: MessageID
 }
 
 @MainActor
-private struct IOSMessageInteractionSheet: View {
+struct IOSMessageInteractionSheet: View {
     let messageID: MessageID
     let model: IOSTimelineModel
     @Environment(\.dismiss) private var dismiss
@@ -1096,9 +1137,13 @@ private struct IOSMessageBody: View {
 }
 
 @MainActor
-private struct IOSApprovalDecisionCard: View {
+struct IOSApprovalDecisionCard: View {
     let message: Message
-    let model: IOSTimelineModel
+    let status: ApprovalStatus
+    let isInFlight: Bool
+    let didFail: Bool
+    let onDecide: (Bool) -> Void
+    let onRetry: () -> Void
     @State private var pendingIrreversibleDecision: Bool?
 
     var body: some View {
@@ -1131,7 +1176,7 @@ private struct IOSApprovalDecisionCard: View {
             if let approve = pendingIrreversibleDecision {
                 Button(approve ? "Approve irreversible action" : "Reject irreversible action", role: approve ? .destructive : nil) {
                     pendingIrreversibleDecision = nil
-                    Task { await model.decideApproval(message, approve: approve) }
+                    onDecide(approve)
                 }
                 .accessibilityIdentifier("confirmApprovalDecision")
             }
@@ -1147,15 +1192,13 @@ private struct IOSApprovalDecisionCard: View {
     @ViewBuilder
     private var decisionControls: some View {
         if status == .pending, let approvalID {
-            let isInFlight = model.approvalDecisionsInFlight.contains(approvalID)
-            let didFail = model.approvalDecisionFailures.contains(approvalID)
             if didFail {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Decision not recorded. Retry the same decision.", systemImage: "exclamationmark.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Retry recording decision") {
-                        Task { await model.retryApprovalDecision(for: message) }
+                        onRetry()
                     }
                     .accessibilityIdentifier("retryApproval.\(approvalID.description)")
                 }
@@ -1197,12 +1240,11 @@ private struct IOSApprovalDecisionCard: View {
         if isIrreversible {
             pendingIrreversibleDecision = approve
         } else {
-            Task { await model.decideApproval(message, approve: approve) }
+            onDecide(approve)
         }
     }
 
     private var approvalID: ApprovalID? { IOSTimelineModel.approvalID(for: message) }
-    private var status: ApprovalStatus { model.approvalStatus(for: message) }
     private var isIrreversible: Bool { message.props["is_reversible"]?.boolValue != true }
 
     private var actionName: String {
@@ -1233,7 +1275,7 @@ private struct IOSApprovalDecisionCard: View {
 }
 
 @MainActor
-private struct IOSMessageComposer: View {
+struct IOSMessageComposer: View {
     @Bindable var model: IOSTimelineModel
     @FocusState private var isFocused: Bool
 

@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-506 iOS Work 세션 상세 (#571, 2026-07-21)
+
+- iOS Work 세션 카드에서 서버의 root thread replies cursor를 끝까지 읽어 중간보고·결과를 기존 타임라인 문법으로 표시하고, 선택한 active agent에게 공개 스레드 답글로 `work_input`·`work_read`를 요청한다. 세션 ID는 소문자로 정규화하며 human iOS가 agent 전용 `work-controls`를 직접 호출하지 않는다.
+- pending `work_control_approval` 카드를 Work 탭에 모아 기존 승인/거부 UI를 재사용하고, 도구별 auto-approve GET/PUT/DELETE 현재값과 최초 조회 실패·재시도를 명시했다. 선택한 agent와 현재 channel의 active run에만 `AgentPartial` 텍스트·tool 이름·비용을 메모리 투영하고 tool args는 버리며, durable thread message 또는 terminal status가 도착하면 임시 카드를 제거한다.
+- MomoiOSKit 55 tests(신규 Work 상세 5)가 PASS했고 디자인 pre-flight도 PASS했다. `scripts/verify_ios_build.sh`는 Xcode 26.5가 generic Simulator build description에서 10분간 CPU 0%로 멈춰 중단했으며 소스 컴파일 오류는 출력되지 않았다. 인증된 폰 승인→Mac PTY 실행→폰 개입→검토 발췌 1왕복, iOS Xcode 게이트 재실행, 시뮬레이터 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-505 iOS Work 세션 관제 (#569, 2026-07-21)
 
 - iOS Work 탭이 `work-sessions`·`work-hosts`·`work-pool` REST projection과 채널별 `work.session.*` realtime hint를 소비한다. 진행 세션 우선 목록, 전체/진행 중 필터, 정적 상태 칩, 도구 아이콘, host 표시명·online, 시작·경과 시간, pool 사용량을 추가했으며 realtime 수신 뒤에는 REST를 다시 읽어 정본 projection을 유지한다.

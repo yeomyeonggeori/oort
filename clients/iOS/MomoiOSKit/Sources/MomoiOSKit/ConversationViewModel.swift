@@ -16,6 +16,22 @@ public protocol IOSConversationBackend: Sendable {
     func editMessage(_ id: MessageID, body: String) async throws -> Message
     func deleteMessage(_ id: MessageID) async throws -> Message
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> IOSThreadRepliesPage
+}
+
+public struct IOSThreadRepliesPage: Sendable, Hashable {
+    public let messages: [Message]
+    public let nextCursor: Int64?
+
+    public init(messages: [Message], nextCursor: Int64?) {
+        self.messages = messages
+        self.nextCursor = nextCursor
+    }
 }
 
 public extension IOSConversationBackend {
@@ -32,6 +48,18 @@ public extension IOSConversationBackend {
     func deleteMessage(_ id: MessageID) async throws -> Message {
         throw SessionError.server(status: 501, message: "Message deletion is unavailable.")
     }
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> IOSThreadRepliesPage {
+        let history = try await history(channel: channel, after: cursor, limit: limit)
+        return IOSThreadRepliesPage(
+            messages: history.filter { $0.rootId == root },
+            nextCursor: history.count == limit ? history.compactMap(\.seq).max() : nil
+        )
+    }
 }
 
 struct IOSPendingMessageSend: Sendable, Equatable {
@@ -41,6 +69,20 @@ struct IOSPendingMessageSend: Sendable, Equatable {
 
 struct IOSPendingApprovalDecision: Sendable, Equatable {
     let request: ApprovalDecisionRequest
+}
+
+public struct IOSAgentPartialProjection: Identifiable, Sendable, Hashable {
+    public let id: RunID
+    public var text: String
+    public var toolCallName: String?
+    public var spentMicroUSD: Int64?
+
+    public init(id: RunID, text: String = "", toolCallName: String? = nil, spentMicroUSD: Int64? = nil) {
+        self.id = id
+        self.text = text
+        self.toolCallName = toolCallName
+        self.spentMicroUSD = spentMicroUSD
+    }
 }
 
 @MainActor
@@ -450,11 +492,16 @@ public final class IOSTimelineModel {
     public private(set) var recentReactionEmojis = ["👍", "❤️", "😂", "🎉", "👀"]
     public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     public private(set) var approvalDecisionFailures: Set<ApprovalID> = []
+    public private(set) var agentPartials: [IOSAgentPartialProjection] = []
     public let huddle: IOSHuddleModel
 
     private let channel: ChannelID
     private let currentMemberID: MemberID
     private let backend: any IOSConversationBackend
+    private let threadRoot: MessageID?
+    private var workAgentMemberID: MemberID?
+    private var workAgentHandle: String?
+    private let workSessionID: WorkSessionID?
     private let onReadState: ((ChannelReadState) -> Void)?
     private var eventTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
@@ -462,6 +509,9 @@ public final class IOSTimelineModel {
     private var bufferedRealtimeEvents: [RealtimeEvent] = []
     private var failedSend: IOSPendingMessageSend?
     private var pendingApprovalDecisions: [ApprovalID: IOSPendingApprovalDecision] = [:]
+    private var activeWorkRunIDs: Set<RunID> = []
+    private var partialsByRunID: [RunID: IOSAgentPartialProjection] = [:]
+    private var nextWorkCommandIsRead = false
 
     public init(
         channel: ChannelID,
@@ -471,11 +521,19 @@ public final class IOSTimelineModel {
         huddleService: (any IOSHuddleService)? = nil,
         huddleAudioSession: (any IOSHuddleAudioSession)? = nil,
         microphonePermission: (any IOSMicrophonePermissionAuthorizing)? = nil,
+        threadRoot: MessageID? = nil,
+        workAgentMemberID: MemberID? = nil,
+        workAgentHandle: String? = nil,
+        workSessionID: WorkSessionID? = nil,
         onReadState: ((ChannelReadState) -> Void)? = nil
     ) {
         self.channel = channel
         self.currentMemberID = currentMemberID
         self.backend = backend
+        self.threadRoot = threadRoot
+        self.workAgentMemberID = workAgentMemberID
+        self.workAgentHandle = workAgentHandle
+        self.workSessionID = workSessionID
         self.onReadState = onReadState
         self.realtimeStatus = .idle(channel: channel)
         let huddleWorkspace = workspace ?? WorkspaceID()
@@ -511,6 +569,19 @@ public final class IOSTimelineModel {
         statusTask = nil
     }
 
+    public func configureWorkAgent(_ member: Member?) {
+        guard member?.kind == .agent else {
+            workAgentMemberID = nil
+            workAgentHandle = nil
+            activeWorkRunIDs = []
+            partialsByRunID = [:]
+            agentPartials = []
+            return
+        }
+        workAgentMemberID = member?.id
+        workAgentHandle = member?.handle
+    }
+
     public func load() async {
         guard !isSending else { return }
         phase = .loading
@@ -518,7 +589,7 @@ public final class IOSTimelineModel {
         bufferedRealtimeEvents = []
         subscribe()
         do {
-            async let historyRequest = backend.history(channel: channel, after: nil, limit: 200)
+            async let historyRequest = initialMessages()
             async let reactionRequest = backend.reactionSnapshot(channel: channel)
             let (history, reactions) = try await (historyRequest, reactionRequest)
             messages = IOSTimelineReducer.sorted(history)
@@ -535,7 +606,7 @@ public final class IOSTimelineModel {
                     onReadState?(state)
                 }
             }
-            await huddle.activate()
+            if threadRoot == nil { await huddle.activate() }
         } catch is CancellationError {
             isLoadingTimelineProjection = false
             bufferedRealtimeEvents = []
@@ -565,7 +636,7 @@ public final class IOSTimelineModel {
     public func resume() async {
         guard phase == .loaded else { return }
         subscribe()
-        await huddle.activate()
+        if threadRoot == nil { await huddle.activate() }
     }
 
     public func shutdown() async {
@@ -582,9 +653,11 @@ public final class IOSTimelineModel {
     }
 
     private func applyRealtimeEvent(_ event: RealtimeEvent) async {
-        if case .huddle(let delta) = event {
+        if threadRoot == nil, case .huddle(let delta) = event {
             await huddle.apply(delta)
         }
+        applyAgentProjection(event)
+        guard belongsToCurrentTimeline(event) else { return }
         messages = IOSTimelineReducer.applying(event, to: messages, channel: channel)
         switch event {
         case .reaction(let delta):
@@ -594,6 +667,10 @@ public final class IOSTimelineModel {
             reactionMembers[id] = nil
         default:
             break
+        }
+        if case .message(let message) = event, let runID = message.runId {
+            partialsByRunID[runID] = nil
+            agentPartials = partialsByRunID.values.sorted { $0.id.description < $1.id.description }
         }
     }
 
@@ -737,7 +814,13 @@ public final class IOSTimelineModel {
     public func sendComposerDraft() async {
         let body = composerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard phase == .loaded, !body.isEmpty, !isSending, failedSend == nil else { return }
-        let replyToID = replyTarget?.id
+        guard threadRoot == nil || (workAgentHandle != nil && workSessionID != nil) else {
+            sendFailureMessage = "Choose the agent that owns this Work session before sending input."
+            return
+        }
+        let preparedBody = workInstructionBody(for: body, requestsRead: nextWorkCommandIsRead)
+        nextWorkCommandIsRead = false
+        let replyToID = replyTarget?.id ?? threadRoot
         var props: [String: JSON] = [:]
         if let replyToID {
             props["reply_to_id"] = .string(replyToID.description)
@@ -746,8 +829,9 @@ public final class IOSTimelineModel {
             draft: DraftMessage(
                 channelId: channel,
                 type: .text,
-                body: body,
+                body: preparedBody,
                 props: .object(props),
+                rootId: threadRoot,
                 replyToId: replyToID
             ),
             clientMsgId: UUID()
@@ -760,6 +844,13 @@ public final class IOSTimelineModel {
             channel: channel
         )
         await performSend(pending)
+    }
+
+    public func requestCurrentWorkOutput() async {
+        guard threadRoot != nil else { return }
+        nextWorkCommandIsRead = true
+        composerDraft = "현재 출력을 검토 가능한 발췌로 이 스레드에 공유해줘."
+        await sendComposerDraft()
     }
 
     public func retryFailedSend() async {
@@ -805,6 +896,7 @@ public final class IOSTimelineModel {
         do {
             var acknowledged = try await backend.send(pending.draft, clientMsgId: pending.clientMsgId)
             acknowledged.clientMsgId = pending.clientMsgId
+            acknowledged.rootId = pending.draft.rootId
             acknowledged.replyToId = pending.draft.replyToId
             messages = IOSTimelineReducer.applying(.message(acknowledged), to: messages, channel: channel)
             failedSend = nil
@@ -849,6 +941,7 @@ public final class IOSTimelineModel {
             type: .text,
             body: pending.draft.body,
             props: pending.draft.props,
+            rootId: pending.draft.rootId,
             replyToId: pending.draft.replyToId,
             clientMsgId: pending.clientMsgId,
             createdAtMs: now
@@ -878,6 +971,84 @@ public final class IOSTimelineModel {
         if recentReactionEmojis.count > 5 {
             recentReactionEmojis.removeLast(recentReactionEmojis.count - 5)
         }
+    }
+
+    private func initialMessages() async throws -> [Message] {
+        guard let threadRoot else {
+            return try await backend.history(channel: channel, after: nil, limit: 200)
+        }
+        var messages: [Message] = []
+        var cursor: Int64?
+        var seenCursors: Set<Int64> = []
+        for _ in 0..<20 {
+            let page = try await backend.threadReplies(
+                channel: channel,
+                root: threadRoot,
+                cursor: cursor,
+                limit: 200
+            )
+            messages.append(contentsOf: page.messages)
+            guard let next = page.nextCursor,
+                  next != cursor,
+                  seenCursors.insert(next).inserted else { break }
+            cursor = next
+        }
+        return messages
+    }
+
+    private func belongsToCurrentTimeline(_ event: RealtimeEvent) -> Bool {
+        guard let threadRoot else { return true }
+        switch event {
+        case .message(let message), .messageEdited(let message):
+            return message.rootId == threadRoot
+        case .messageDeleted(let id):
+            return messages.contains(where: { $0.id == id })
+        case .reaction(let delta):
+            return messages.contains(where: { $0.id == delta.messageId })
+        case .approval(let approval):
+            return messages.contains(where: { Self.approvalID(for: $0) == approval.approvalId })
+        case .agentStatus, .agentPartial:
+            return false
+        case .threadUpdated, .typing, .presence, .huddle, .workSession, .workControl:
+            return false
+        }
+    }
+
+    private func applyAgentProjection(_ event: RealtimeEvent) {
+        guard workAgentMemberID != nil else { return }
+        switch event {
+        case .agentStatus(let status):
+            guard status.agentMemberId == workAgentMemberID,
+                  status.channelId == channel else { return }
+            if status.runStatus.isTerminal {
+                activeWorkRunIDs.remove(status.runId)
+                partialsByRunID[status.runId] = nil
+                agentPartials = partialsByRunID.values.sorted { $0.id.description < $1.id.description }
+            } else {
+                activeWorkRunIDs.insert(status.runId)
+            }
+        case .agentPartial(let partial):
+            guard partial.channelId == channel,
+                  activeWorkRunIDs.contains(partial.runId) else { return }
+            var projection = partialsByRunID[partial.runId]
+                ?? IOSAgentPartialProjection(id: partial.runId)
+            if let delta = partial.textDelta { projection.text += delta }
+            if let toolCallName = partial.toolCallName { projection.toolCallName = toolCallName }
+            if let spent = partial.spentMicroUSD { projection.spentMicroUSD = spent }
+            partialsByRunID[partial.runId] = projection
+            agentPartials = partialsByRunID.values.sorted { $0.id.description < $1.id.description }
+        default:
+            break
+        }
+    }
+
+    private func workInstructionBody(for body: String, requestsRead: Bool) -> String {
+        guard let handle = workAgentHandle,
+              let workSessionID else { return body }
+        if requestsRead {
+            return "@\(handle) work_read 세션 \(workSessionID.description.lowercased())의 현재 출력을 검토 가능한 발췌로 이 스레드에 공유해줘."
+        }
+        return "@\(handle) work_input 세션 \(workSessionID.description.lowercased())에 다음 요청을 반영해줘:\n\n\(body)"
     }
 
     private func subscribe() {

@@ -169,7 +169,9 @@ public actor MomoServerConversationClient: IOSConversationBackend {
             type: draft.type.rawValue,
             body: draft.body,
             props: draft.props.objectValue?.compactMapValues(\.stringValue),
-            runId: nil
+            rootId: draft.rootId,
+            runId: nil,
+            attachmentIds: draft.attachmentIds
         ))
         do {
             var message = try decoder.decode(IOSMessageDTO.self, from: try await execute(request: request)).value()
@@ -180,6 +182,42 @@ public actor MomoServerConversationClient: IOSConversationBackend {
             throw error
         } catch {
             throw SessionError.decoding("The server returned a sent message this app could not read.")
+        }
+    }
+
+    public func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> IOSThreadRepliesPage {
+        var components = URLComponents(
+            url: authenticated.baseURL.appendingPathComponent(
+                "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/messages/\(root.description)/replies"
+            ),
+            resolvingAgainstBaseURL: false
+        )
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: String(cursor))) }
+        components?.queryItems = query
+        guard let url = components?.url else {
+            throw SessionError.decoding("Could not create the thread history request.")
+        }
+        do {
+            let page = try decoder.decode(IOSThreadRepliesDTO.self, from: try await execute(url: url))
+            let messages = try page.messages.map { try $0.value() }
+                .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+            guard messages.allSatisfy({ $0.channelId == channel && $0.rootId == root }) else {
+                throw SessionError.decoding("The server returned replies outside this Work thread.")
+            }
+            if let latest = messages.compactMap(\.seq).max() {
+                lastKnownSequenceByChannel[channel] = max(lastKnownSequenceByChannel[channel] ?? 0, latest)
+            }
+            return IOSThreadRepliesPage(messages: messages, nextCursor: page.nextCursor)
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned thread history this app could not read.")
         }
     }
 
@@ -269,7 +307,7 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         return try await execute(request: request)
     }
 
-    private func execute(request: URLRequest) async throws -> Data {
+    func execute(request: URLRequest) async throws -> Data {
         do {
             let (data, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
@@ -533,14 +571,18 @@ private struct IOSSendMessageRequest: Encodable {
     let type: String
     let body: String?
     let props: [String: String]?
+    let rootId: MessageID?
     let runId: UUID?
+    let attachmentIds: [FileID]?
 
     private enum CodingKeys: String, CodingKey {
         case clientMsgId = "client_msg_id"
         case type
         case body
         case props
+        case rootId
         case runId = "run_id"
+        case attachmentIds
     }
 }
 private struct IOSEditMessageRequest: Encodable { let body: String }
@@ -604,6 +646,10 @@ private struct IOSReadStateResponse: Decodable {
 private struct IOSChannelsResponse: Decodable { let channels: [IOSChannelDTO] }
 private struct IOSRosterResponse: Decodable { let members: [IOSMemberDTO] }
 private struct IOSMessagePage: Decodable { let messages: [IOSMessageDTO] }
+private struct IOSThreadRepliesDTO: Decodable {
+    let messages: [IOSMessageDTO]
+    let nextCursor: Int64?
+}
 
 private struct IOSChannelDTO: Decodable {
     let id: String
@@ -693,6 +739,8 @@ struct IOSMessageDTO: Decodable {
     let type: String
     let body: String?
     let props: JSON?
+    let rootId: String?
+    let attachments: [MessageAttachment]?
     let runId: String?
     let clientMsgId: UUID?
     let createdAtMs: Int64
@@ -727,7 +775,9 @@ struct IOSMessageDTO: Decodable {
             state: decodedState,
             body: body,
             props: props ?? .object([:]),
+            rootId: rootId.flatMap { MessageID(uuidString: $0) },
             thread: thread,
+            attachments: attachments,
             runId: runId.flatMap { RunID(uuidString: $0) },
             clientMsgId: clientMsgId,
             createdAtMs: createdAtMs,
