@@ -11,7 +11,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -62,7 +62,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -81,7 +81,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -317,7 +317,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -328,7 +328,7 @@ esac
 RUNTIME_COMPOSE_PROFILE=0
 RUNTIME_COMPOSE_PREEXISTING=0
 case "$PROFILE" in
-  runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all|m3-dbc)
+  runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all|m3-dbc|web-serving)
     # macos-ui/all/m3-dbc included: they run the same `make up` bootstrap and
     # are Docker-heavy — the incident class this guard exists for.
     RUNTIME_COMPOSE_PROFILE=1
@@ -773,6 +773,15 @@ add_web_commands() {
   add_note_once not_covered "Real DNS/ACME/TLS on public hosts, the Dawn short-link service (ADR-0121 S-4), app deep links, and Safari/Firefox coverage (the smoke drives Chromium) remain out of scope for the web v0 gate."
 }
 
+add_web_serving_commands() {
+  # MOMO-576 (ADR-0119 W-3): infrastructure-only runtime profile. It uses the
+  # e2e web profile and never joins runtime-db or a developer compose project.
+  add_static_commands
+  add_cmd "web serving (real dist + Caddy same-origin proxy)" 'scripts/verify_web_serving.sh'
+  add_note_once coverage "MOMO-576 web-serving infra gate: isolated ports 28070-28074, real Dockerfile.web dist copied by web-init into a named volume, HTTP Caddy SPA/index fallback, live API login proxy response, Centrifugo callback 403, CSP/X-Frame-Options, and /health proxy."
+  add_note_once not_covered "Public DNS, ACME issuance, and production TLS remain orchestrator/public-host evidence; the e2e gate intentionally serves HTTP."
+}
+
 add_m3_dbc_commands() {
   add_static_commands
   add_runtime_env_guard_command
@@ -869,6 +878,9 @@ case "$PROFILE" in
     ;;
   m3-dbc)
     add_m3_dbc_commands
+    ;;
+  web-serving)
+    add_web_serving_commands
     ;;
   web)
     add_web_commands
