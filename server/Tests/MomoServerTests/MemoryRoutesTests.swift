@@ -106,5 +106,19 @@ final class MemoryRoutesTests: XCTestCase {
         XCTAssertTrue(routes.contains("WorkspaceAuthorization.requireAdmin"))
         XCTAssertFalse(routes.contains("BYPASSRLS"))
         XCTAssertFalse(routes.contains("/:memory\", use: delete"))
+
+        let openAPI = try String(
+            contentsOf: serverRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("docs/api/openapi.yaml"),
+            encoding: .utf8
+        )
+        for operation in [
+            "operationId: listMemories", "operationId: createMemory",
+            "operationId: updateMemory", "operationId: invalidateMemory",
+            "operationId: disableAndDeleteAllMemories", "operationId: putMemoryPolicy",
+        ] {
+            XCTAssertTrue(openAPI.contains(operation))
+        }
     }
 }
