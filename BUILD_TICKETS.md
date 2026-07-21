@@ -2296,7 +2296,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-527 수용기준 — pgvector+FTS+RRF 하이브리드 검색 `[runtime]`
 - [x] PG 이미지 pgvector 포함으로 3 compose+drift guard 동시 교체(digest 고정) + CREATE EXTENSION
 - [x] embedding(HNSW)+tsv(GIN), `GET .../memories/search` RRF — 정상 RLS 경로(BYPASSRLS 금지), 임베딩 지연 생성 허용
-- [x] `verify_memory_search.sh` PASS — 전 게이트 회귀는 main 머지 후 실행 중(완료 시 갱신)
+- [x] `verify_memory_search.sh` PASS(단독 전 항목). 회귀: runtime-db 스위트 핵심(migrate 멱등·RLS·roster·채널 관리·시드 비번) 신규 이미지서 PASS — memory-search 게이트 내 재확인·runtime-agent는 호스트 부하(load>12 가드)로 대기, 부하 해소 시 재실행
 
 ### MOMO-528 수용기준 — Context Packet v0 승격 `[runtime]`
 - [ ] context_packet 불변 저장(RLS FORCE)·만료 재발급 / memory_refs(profile 상시·fact/episode 질의 — 검색 범위=기본 스코프 ∪ 유효 visibility grant, 델타 2)
