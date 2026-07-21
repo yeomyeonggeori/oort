@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-21 (Fable 2차 배치 완결) · S3 어댑터 + 멤버십 수명주기 랜딩 — track/engine=main+2 승인 대기
+- **#565 MOMO-521**(S3 첨부): SigV4 SDK-less·presigned 직송·MinIO 프로파일. docker s3 실런 PASS(왕복/RLS/audit/redaction). 셀프호스트 하드 블로커 해소. **#566 MOMO-523**(멤버십 수명주기 D1~D3): workspace_membership 분리·역할변경·suspend/추방/ban·audit·guest 투영. docker 실런 PASS(lifecycle/hierarchy/guest/audit/RLS).
+- 검수 중 잡은 결함(오케스트레이터 수정, PR에 커밋): ①**서버 2계열 500** — nil String?/UUID? 바인딩 'could not determine data type'(Roster/Lifecycle/Join/WorkControl 4곳 ::text/::uuid) + **트랜잭션 내 HTTPError가 PostgresTransactionError로 감싸져 500**(라우트별 ad hoc unwrap을 Database.withTenantTransaction 중앙 unwrap으로 승격 — 재발 원천 차단) ②verifier 3건 — bash 3.2 빈 배열, api 컨테이너 curl 부재(mock-hermes python 대체), demo 계정 password 시드.
+- 함정 축적: nil 바인딩 ::캐스트·트랜잭션 HTTPError·bash 3.2 배열·컨테이너 내 curl 부재 → 이후 패킷 규율에 반영할 것. UXUI 순차 배치(9항목)는 동생 진행 중. **성재 대기**: track/engine→main(565·566), MOMO-524(D4~D6) 후속 발급.
+
 ## 2026-07-21 (Fable 오픈소스 배치 완결) · 519 랜딩 — 배치 4/4, track/engine=main+5 승인 대기
 - #562 MOMO-519 티어 폴백 랜딩(track/engine 9cae37e): docker verifier 최종 PASS(ask/t1_only/auto/orphan/resume/push/RLS). 검수 중 verifier 결함 4종을 오케스트레이터가 수정(포트 중복 28023 → hermes 28024 분리 / INSERT...SELECT uuid·message_type·jsonb 캐스트 / Swift UUID 대문자 vs 시드 소문자 lower() 3곳 / RLS 단정 psql -q 부재로 명령 태그 오염). keep-stack 부검으로 구현 무죄 확정(카드·RLS 전부 정상 — 단정만 결함). X-8 done(#560 remoteAttachAvailable).
 - perm-research 서브에이전트 좀비화(named spawn mailbox 전례 재발 — 메모리 교훈 위반, 재확인) → 손절, InfoQ 직접 fetch + 공지식으로 research/18-permissions-workspaces/00 작성(Slack V1→Grid→Unified Grid·Vitess 채널 샤딩·권한 헬퍼 중앙화 / Discord 계층·kick/ban / Mattermost·Matrix / 공통 패턴 8 / momo 시사점: 재샤딩 불요·0117=스키마 작업).
