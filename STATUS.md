@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-513 message.new realtime props 정합 (#553, 2026-07-21)
+
+- 메시지 전송 REST 응답과 같은 최종 props(서버가 투영한 `mention_member_ids` 포함)를 transactional outbox의 `message.new` payload에도 전달해 라이브 수신과 콜드 로드의 멘션·답장·승인 표시를 일치시켰다.
+- `message.edited`가 기존 props를 보존하는 경로를 상호작용 verifier로 재확인하고, 멘션 verifier에 REST↔outbox props 일치 단정을 추가했다. Swift 테스트와 verifier 정적 검증은 PASS했으며 Docker runtime verifier는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-503 푸시 페이로드 v2 (2026-07-21)
 
 - NotifierWorker→PushRelay 닫힌 계약을 `momo.push.dispatch.v2`로 올리고, APNs `thread-id`(`root_id ?? channel_id`)·4개 category(`momo.message|mention|approval|work`)·승인 전용 `approval_id`를 id-only 경계 안에서 가산했다. 기존 DM/멘션/승인 수신자 판정, 자기 메시지·채널 음소거 억제는 바꾸지 않았다.
