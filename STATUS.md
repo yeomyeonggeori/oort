@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-503 푸시 페이로드 v2 (2026-07-21)
+
+- NotifierWorker→PushRelay 닫힌 계약을 `momo.push.dispatch.v2`로 올리고, APNs `thread-id`(`root_id ?? channel_id`)·4개 category(`momo.message|mention|approval|work`)·승인 전용 `approval_id`를 id-only 경계 안에서 가산했다. 기존 DM/멘션/승인 수신자 판정, 자기 메시지·채널 음소거 억제는 바꾸지 않았다.
+- badge는 unread 채널 수 근사치 대신 ADR-0109의 채널별 `max(latest_seq-last_read_seq, 0)` 합계를 수신자별 계산한다. server 126 tests·NotifierWorker 4 tests·PushRelay 5 tests와 verifier bash/ShellCheck 정적 검증은 PASS했다.
+- `verify_push_notifier.sh`는 전용 27990~27994 포트에서 4 category, channel/root 그룹핑, 승인 ID 단독 노출, unread 합계 일치, 음소거 회귀를 검사한다. Docker 실런은 오케스트레이터 담당이라 현재 `runtime-unverified`다.
+
 ## UXUI MOMO-512 NativeTextView 포커스 복원 (2026-07-20)
 
 - MOMO-508 네이티브 컴포저의 포커스 상태를 SwiftUI `.focused`와 연결되지 않은 `@FocusState` 대신 representable 갱신을 보장하는 `@State`로 소유하게 했다. 루트 뷰 교체 시 들어온 최초 focus 요청도 소비하고, AppKit window 부착 시 재동기화하며 제거된 text view의 지연 콜백은 first responder를 탈취하지 못한다.
