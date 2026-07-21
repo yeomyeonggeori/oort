@@ -191,12 +191,16 @@ CREATE TABLE memory_extraction_cursor (
   workspace_id       uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   channel_id         uuid NOT NULL,
   last_extracted_seq bigint NOT NULL DEFAULT 0 CHECK (last_extracted_seq >= 0),
+  lease_token        uuid,
+  leased_until       timestamptz,
   updated_at         timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace_id, channel_id),
   CONSTRAINT memory_extraction_cursor_channel_fk
     FOREIGN KEY (workspace_id, channel_id)
     REFERENCES channel(workspace_id, id) ON DELETE CASCADE
 );
+CREATE INDEX memory_extraction_cursor_claim_idx
+  ON memory_extraction_cursor (leased_until, updated_at, workspace_id, channel_id);
 
 -- Workspace administrators own this switch. enabled=false is coupled to a
 -- server-side bulk purge transaction; clients cannot issue per-item DELETE.
