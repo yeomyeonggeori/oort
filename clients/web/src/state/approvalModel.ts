@@ -78,4 +78,3 @@ export function resolveApprovalStatus(
   if (messageStatus !== "pending") return messageStatus;
   return parsedStore ?? messageStatus;
 }
-

@@ -138,6 +138,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/members/{memberId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change a workspace role under the owner/admin hierarchy. */
+        patch: operations["changeWorkspaceMemberRole"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change a channel role under workspace/channel admin hierarchy. */
+        patch: operations["changeChannelMemberRole"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/members/{memberId}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Suspend a member and revoke all of their tokens. */
+        post: operations["suspendWorkspaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/members/{memberId}/reinstate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Return a suspended member to active status. */
+        post: operations["reinstateWorkspaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/members/{memberId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a member while preserving authored message history. */
+        delete: operations["removeWorkspaceMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/bans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the workspace ban ledger (admin only). */
+        get: operations["listWorkspaceBans"];
+        put?: never;
+        /** Ban an email and/or handle from invite redemption and public join. */
+        post: operations["createWorkspaceBan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/bans/{banId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a workspace ban and permit future rejoin. */
+        delete: operations["deleteWorkspaceBan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents": {
         parameters: {
             query?: never;
@@ -345,7 +465,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a direct terminal attach capability as its target host.
-         * @description MomoHost-signed control-plane check performed immediately before the direct PTY host accepts a client connection. The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running work_session and unrevoked work_host on every call, so expiry, session end, and host revoke take effect immediately. This endpoint returns binding metadata only: terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
+         * @description MomoHost-signed control-plane check performed immediately before the direct PTY host accepts a client connection. The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running work_session and unrevoked work_host on every call, so expiry, session end, and host revoke take effect immediately. The returned mode is authoritative: observer connections may receive output but the host must reject send_stdin, resize, and kill. This endpoint returns binding metadata only: terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
          */
         post: operations["validateTerminalAttachCapability"];
         delete?: never;
@@ -419,6 +539,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/work-tier-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the workspace-default host-loss fallback policy. */
+        get: operations["getWorkspaceWorkTierPolicy"];
+        /** Replace the workspace-default host-loss fallback policy. */
+        put: operations["putWorkspaceWorkTierPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-tier-policy/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the caller's effective fallback policy and inheritance state. */
+        get: operations["getMyWorkTierPolicy"];
+        /** Replace the caller's member-specific fallback policy override. */
+        put: operations["putMyWorkTierPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}": {
         parameters: {
             query?: never;
@@ -433,10 +589,30 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * End a running session without changing its card message seq.
-         * @description The creating member, or the MomoHost-signed execution host bound to the session, may end it. The ledger row and card props update beside a no-version work.session.ended outbox; the message row is not edited and no channel seq is minted.
+         * End a running session or change its observation policy.
+         * @description The creating member, or the MomoHost-signed execution host bound to the session, may end it. The ledger row and card props update beside a no-version work.session.ended outbox; the message row is not edited and no channel seq is minted. A human session owner may instead set observation to open or owner_only; owner_only invalidates live observer grants and blocks new ones.
          */
         patch: operations["endWorkSession"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an orphaned session on another registered host.
+         * @description Human session owner only. The source becomes ended(resumed), while a new running work_session reuses the same root thread, records resumedFromSessionId, and emits the existing spawn dispatch in one tenant transaction. Host paths, credentials, and process state are not accepted or persisted.
+         */
+        post: operations["resumeWorkSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach": {
@@ -450,7 +626,7 @@ export interface paths {
         put?: never;
         /**
          * Issue an ephemeral capability for direct remote PTY attach.
-         * @description Human bearer and session owner only. The running session must carry a MomoHost-signed remote PTY binding and its work_host must be unrevoked. The raw capability is returned exactly once, while PostgreSQL stores only its SHA-256 digest and timestamptz expiry. The same transaction audits only owner, issue time, and expiry. attach_endpoint contains no bearer or credential; the client connects there directly with the separate capability_token. MomoServer and relay expose no PTY stream.
+         * @description Human bearer only. mode defaults to controller, which remains session owner-only. observer requires active workspace and session-channel membership while observation=open. The running session must carry a MomoHost-signed remote PTY binding and its work_host must be unrevoked. The raw capability is returned exactly once, while PostgreSQL stores only its SHA-256 digest and timestamptz expiry. The same transaction audits only owner, mode, issue time, and expiry. Observer issuance also enqueues work.session.observer with a count-only projection. attach_endpoint contains no bearer or credential; the client connects there directly with the separate capability_token. MomoServer and relay expose no PTY stream.
          */
         post: operations["issueTerminalAttachCapability"];
         delete?: never;
@@ -1216,6 +1392,50 @@ export interface components {
             humanCount: number;
             agentCount: number;
         };
+        ChangeMembershipRoleRequest: {
+            role: components["schemas"]["MembershipRole"];
+        };
+        MembershipRoleResponse: {
+            /** Format: uuid */
+            memberId: string;
+            /** @enum {string} */
+            scope: "workspace" | "channel";
+            role: components["schemas"]["MembershipRole"];
+        };
+        MembershipLifecycleResponse: {
+            /** Format: uuid */
+            memberId: string;
+            /** @enum {string} */
+            status: "active" | "suspended" | "deleted";
+        };
+        RemoveWorkspaceMemberRequest: {
+            /** @default false */
+            ban: boolean;
+            reason?: string;
+        };
+        /** @description At least one of email or handle is required. */
+        CreateWorkspaceBanRequest: {
+            email?: string;
+            handle?: string;
+            reason?: string;
+        } | unknown | unknown;
+        WorkspaceBan: {
+            /** Format: uuid */
+            id: string;
+            email?: string;
+            handle?: string;
+            /** Format: uuid */
+            createdBy: string;
+            reason?: string;
+            /** Format: int64 */
+            createdAtMs: number;
+        };
+        WorkspaceBanResponse: {
+            ban: components["schemas"]["WorkspaceBan"];
+        };
+        WorkspaceBanListResponse: {
+            bans: components["schemas"]["WorkspaceBan"][];
+        };
         CreateAgentRequest: {
             displayName: string;
             /** @description Trimmed and lowercased server-side; unique per workspace. */
@@ -1407,11 +1627,54 @@ export interface components {
             /** @description Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query, and fragment are forbidden. MomoServer never proxies this stream. */
             attachEndpoint?: string;
         };
+        UpdateWorkSessionRequest: components["schemas"]["EndWorkSessionRequest"] | components["schemas"]["UpdateWorkSessionObservationRequest"];
         EndWorkSessionRequest: {
             /** @enum {string} */
             status: "ended";
             /** Format: int32 */
             exitCode?: number;
+        };
+        ResumeWorkSessionRequest: {
+            /**
+             * Format: uuid
+             * @description Active registered host allowed by the effective tier policy.
+             */
+            targetHostId: string;
+        };
+        PutWorkTierPolicyRequest: {
+            /**
+             * @default ask
+             * @enum {string}
+             */
+            mode: "t1_only" | "ask" | "auto";
+            /** @description Required only for auto; a work_host UUID or the reserved cloud selector. */
+            autoTarget?: string;
+        };
+        WorkTierPolicy: {
+            /** Format: uuid */
+            workspaceId: string;
+            /**
+             * Format: uuid
+             * @description Present for a member override or inherited effective member policy.
+             */
+            memberId?: string;
+            /** @enum {string} */
+            mode: "t1_only" | "ask" | "auto";
+            /** @description Concrete work_host UUID or the reserved cloud selector in auto mode. */
+            autoTarget?: string;
+            inherited: boolean;
+            /**
+             * Format: int64
+             * @description Absent for the virtual ask default.
+             */
+            updatedAtMs?: number;
+        };
+        WorkTierPolicyResponse: {
+            workTierPolicy: components["schemas"]["WorkTierPolicy"];
+        };
+        UpdateWorkSessionObservationRequest: {
+            /** @enum {string} */
+            observation: "open" | "owner_only";
         };
         WorkSession: {
             /** Format: uuid */
@@ -1430,7 +1693,16 @@ export interface components {
             tool: "claude" | "codex" | "opencode" | "shell";
             label: string;
             /** @enum {string} */
-            status: "running" | "ended";
+            status: "running" | "orphaned" | "ended";
+            /** @enum {string} */
+            observation: "open" | "owner_only";
+            /**
+             * Format: int64
+             * @description Currently valid observer capabilities only; expired or invalid grants are excluded.
+             */
+            observerGrantCount: number;
+            /** @description True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected. */
+            remoteAttachAvailable: boolean;
             /** Format: int64 */
             startedAtMs: number;
             /**
@@ -1443,6 +1715,16 @@ export interface components {
              * @description Present only when the ending host reports an exit code.
              */
             exitCode?: number;
+            /**
+             * @description Terminal host-loss or resume reason when applicable.
+             * @enum {string}
+             */
+            endReason?: "orphaned" | "resumed";
+            /**
+             * Format: uuid
+             * @description Source orphaned session; the root thread remains unchanged.
+             */
+            resumedFromSessionId?: string;
         };
         WorkSessionResponse: {
             workSession: components["schemas"]["WorkSession"];
@@ -1457,6 +1739,13 @@ export interface components {
             capability_token: string;
             pty_id: string;
         };
+        IssueTerminalAttachRequest: {
+            /**
+             * @default controller
+             * @enum {string}
+             */
+            mode: "controller" | "observer";
+        };
         ValidateTerminalAttachRequest: {
             /** @description Opaque grant presented by the direct client to its target host. */
             capability_token: string;
@@ -1470,6 +1759,11 @@ export interface components {
              * @description PostgreSQL timestamptz capability expiry.
              */
             expires_at: string;
+            /**
+             * @description Host authorization grade; observer forbids send_stdin, resize, and kill.
+             * @enum {string}
+             */
+            mode: "controller" | "observer";
         };
         CreateWorkControlRequest: {
             /** Format: uuid */
@@ -2396,7 +2690,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Roster of active members with an active channel membership. */
+            /** @description Active workspace roster, restricted to shared-channel members for guests. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2455,6 +2749,364 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    changeWorkspaceMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeMembershipRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description Workspace role changed and audited. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipRoleResponse"];
+                };
+            };
+            /** @description Invalid role or member id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Workspace member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The change would remove the last owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    changeChannelMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                channelId: string;
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeMembershipRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description Channel role changed and audited. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipRoleResponse"];
+                };
+            };
+            /** @description Invalid role or identifier */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Active channel membership not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    suspendWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member suspended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipLifecycleResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Workspace member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invalid transition or last-owner invariant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reinstateWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member reinstated; previously revoked tokens remain revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipLifecycleResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Workspace member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Member is not suspended */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    removeWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RemoveWorkspaceMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Memberships removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipLifecycleResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Workspace member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The member is the last active owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listWorkspaceBans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ban ledger */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceBanListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createWorkspaceBan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkspaceBanRequest"];
+            };
+        };
+        responses: {
+            /** @description Ban created and audited */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceBanResponse"];
+                };
+            };
+            /** @description Neither valid email nor handle supplied */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description A matching ban already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteWorkspaceBan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                banId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted ban */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceBanResponse"];
+                };
+            };
+            /** @description Invalid ban id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Ban not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     createAgent: {
@@ -3223,6 +3875,166 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    getWorkspaceWorkTierPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stored default, or the virtual ask default when no row exists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkTierPolicyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin role required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    putWorkspaceWorkTierPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutWorkTierPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated policy and same-transaction audit record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkTierPolicyResponse"];
+                };
+            };
+            /** @description Invalid mode or auto target. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin role required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Concrete auto target is unavailable or not workspace-scoped. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getMyWorkTierPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member override, inherited workspace default, or virtual ask default. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkTierPolicyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    putMyWorkTierPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutWorkTierPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated member override and same-transaction audit record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkTierPolicyResponse"];
+                };
+            };
+            /** @description Invalid mode or auto target. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Concrete auto target is unavailable or outside the member scope. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     endWorkSession: {
         parameters: {
             query?: never;
@@ -3237,7 +4049,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EndWorkSessionRequest"];
+                "application/json": components["schemas"]["UpdateWorkSessionRequest"];
             };
         };
         responses: {
@@ -3290,6 +4102,64 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    resumeWorkSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeWorkSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description New running session with durable lineage and dispatched spawn control. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkSessionResponse"];
+                };
+            };
+            /** @description Invalid source session or target host identifier. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human caller is not the source session owner. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Source session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Source is not orphaned, target host is revoked/unavailable/outside policy, or the workspace/member pool has no available slot. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     issueTerminalAttachCapability: {
         parameters: {
             query?: never;
@@ -3302,7 +4172,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["IssueTerminalAttachRequest"];
+            };
+        };
         responses: {
             /** @description Exact three-field direct attach grant. */
             200: {
@@ -3323,7 +4197,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Caller is not human, owner, or active workspace member. */
+            /** @description Caller is not an authorized active human/channel member, or observation is owner_only. */
             403: {
                 headers: {
                     [name: string]: unknown;
