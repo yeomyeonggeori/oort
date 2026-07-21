@@ -121,7 +121,7 @@ Wave U (UXUI):        MOMO-518(diff 카드 — 즉시 가능) → MOMO-529(메�
 - **Blaxel 캔슬**(성재 2026-07-21) — E2B 베이스 확정. T3 프로비저너 후속 ADR에서 E2B Enterprise 보관 조항 문의만 유지.
 - **"ACP"는 Zed Agent Client Protocol**(IBM ACP는 2025-08 A2A에 흡수·소멸). research/13-redesign의 "ACP 무시" 판정은 구 IBM ACP 기준 — Zed ACP는 본 배치가 채택(ADR-0130).
 - Agent Membership Protocol(공개 규격 제안)은 **보류** — 제품 질량(오픈소스 공개+실사용) 확보 후. 지금은 구현만.
-- `research/19-agent-native-fabric/05`(UXUI 레퍼런스 분석)가 이 커밋 직후 도착 예정 — 518/529/532 수용기준 이관 시 반영.
+- `research/19-agent-native-fabric/05`(UXUI 레퍼런스 분석) **랜딩 완료** — 518/529/532 수용기준 이관 시 §2(표면별 구현 제안: 컴포넌트 재사용/신규 목록·v0/v1 범위)가 원문. 핵심 계약: 카드=요약·서랍=상세 / ACP 승인 4옵션(이번만·항상×허용·거부) / 처리된 승인 카드 불변 고정 / plan=체크리스트 카드 / 산출물→run 역링크.
 - 정합 리뷰 R1~R6(진단 §6) 중 R1·R2=528, R3=533, R4=531에서 해소. R5(inbound MCP 구버전)·R6(delegation)은 이 배치 범위 외(후속).
 
 ## 8. 오케스트레이터 인수 프롬프트 (성재가 현행 오케스트레이터 세션에 붙여넣는 원문)
