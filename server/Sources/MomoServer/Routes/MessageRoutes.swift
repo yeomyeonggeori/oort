@@ -1410,6 +1410,13 @@ struct MessageRoutes: Sendable {
         let isChannelMember: Bool
     }
 
+    private struct IssuedContextPacket {
+        let packetID: UUID
+        let content: [String: Any]
+        let memoryRefs: [[String: Any]]
+        let toolGrants: [[String: Any]]
+    }
+
     private static func routeAgentMentions(
         conn: PostgresConnection,
         logger: Logger,
@@ -1775,6 +1782,30 @@ struct MessageRoutes: Sendable {
         guard let first = rows.first else { return }
         let runID = try first.decode(UUID.self)
 
+        // The labels in permission_basis are evidence, not optimistic claims.
+        // Re-check both members inside the same tenant transaction immediately
+        // before freezing the packet.
+        guard try await hasActiveMembership(
+            conn: conn, logger: logger, channelID: channelID, memberID: authorMemberID
+        ), agent.isChannelMember else {
+            throw HTTPError(.forbidden, message: "context packet channel membership changed")
+        }
+
+        let issuedPacket = try await issueContextPacket(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            runID: runID,
+            agent: agent,
+            body: body,
+            idempotencyKey: idempotencyKey,
+            recentMessages: recentMessages
+        )
+
         let payload = mentionJobPayload(
             workspaceID: workspaceID,
             channelID: channelID,
@@ -1787,6 +1818,7 @@ struct MessageRoutes: Sendable {
             hlcTs: hlcTs,
             idempotencyKey: idempotencyKey,
             recentMessages: recentMessages,
+            issuedPacket: issuedPacket,
             delivery: agentGateway.enabled ? "gateway" : "worker"
         )
         let jobMethod = agentGateway.enabled ? "gateway" : "publish"
@@ -1927,6 +1959,7 @@ struct MessageRoutes: Sendable {
         hlcTs: Int64,
         idempotencyKey: String,
         recentMessages: [[String: Any]],
+        issuedPacket: IssuedContextPacket,
         delivery: String
     ) -> String {
         let source = messageSource(
@@ -1936,19 +1969,6 @@ struct MessageRoutes: Sendable {
             messageSeq: messageSeq,
             authorMemberID: authorMemberID,
             body: body
-        )
-        let contextPacket = contextPacketProjection(
-            workspaceID: workspaceID,
-            channelID: channelID,
-            messageID: messageID,
-            messageSeq: messageSeq,
-            authorMemberID: authorMemberID,
-            runID: runID,
-            agent: agent,
-            body: body,
-            idempotencyKey: idempotencyKey,
-            source: source,
-            recentMessages: recentMessages
         )
         var payload: [String: Any] = [
             "run_id": runID.uuidString,
@@ -1963,8 +1983,12 @@ struct MessageRoutes: Sendable {
             // MOMO-302: worker-facing conversation window (recent-N/thread, ASC).
             "recent_messages": recentMessages,
             "tools": jsonObject(agent.toolSchemaJSON),
-            "tool_grants": readOnlyToolGrants(),
-            "context_packet_projection": contextPacket,
+            "tool_grants": issuedPacket.toolGrants,
+            "memory_refs": issuedPacket.memoryRefs,
+            "context_packet_id": issuedPacket.packetID.uuidString,
+            "context_packet": issuedPacket.content,
+            // Additive compatibility alias for older worker/gateway consumers.
+            "context_packet_projection": issuedPacket.content,
             "source_attribution": source,
             "max_output_tokens": maxOutputTokens(from: agent.configJSON),
             "step_count": 0,
@@ -2010,7 +2034,9 @@ struct MessageRoutes: Sendable {
         ])
     }
 
-    private static func contextPacketProjection(
+    private static func issueContextPacket(
+        conn: PostgresConnection,
+        logger: Logger,
         workspaceID: UUID,
         channelID: UUID,
         messageID: UUID,
@@ -2020,15 +2046,50 @@ struct MessageRoutes: Sendable {
         agent: AgentMentionCandidate,
         body: String,
         idempotencyKey: String,
-        source: [String: Any],
         recentMessages: [[String: Any]]
-    ) -> [String: Any] {
-        // Acceptance ②: the projection carries real channel history with source
-        // attribution, not just the trigger echo. Fall back to the trigger source
-        // when the window is somehow empty so the field is never absent.
+    ) async throws -> IssuedContextPacket {
+        let identityRows = try await conn.query(
+            """
+            SELECT uuidv7(), now(),
+                   now() + make_interval(secs => \(contextPacketLifetimeSeconds())::integer),
+                   w.slug, w.name
+              FROM workspace w
+             WHERE w.id = \(workspaceID)
+            """,
+            logger: logger
+        ).collect()
+        guard let identityRow = identityRows.first else {
+            throw HTTPError(.notFound, message: "workspace not found")
+        }
+        let (packetID, createdAt, expiresAt, workspaceSlug, workspaceName) = try identityRow.decode(
+            (UUID, Date, Date, String, String).self
+        )
+        let memoryRefs = try await loadContextMemoryRefs(
+            conn: conn, logger: logger, workspaceID: workspaceID,
+            actorMemberID: authorMemberID, agentMemberID: agent.id, query: body,
+            expiresAt: expiresAt
+        )
+        let toolGrants = try await loadContextToolGrants(
+            conn: conn, logger: logger,
+            workspaceID: workspaceID, actorMemberID: authorMemberID
+        )
+        let source = messageSource(
+            workspaceID: workspaceID, channelID: channelID, messageID: messageID,
+            messageSeq: messageSeq, authorMemberID: authorMemberID, body: body
+        )
         let history = recentMessages.isEmpty ? [source] : recentMessages
-        return [
-            "schema": "momo.context_packet.mention_projection.v0",
+        let maxPromptTokens = contextPacketPromptTokenBudget()
+        let content: [String: Any] = [
+            "schema": "momo.context_packet.v0",
+            "packet_id": packetID.uuidString,
+            "packet_version": 1,
+            "created_at": iso8601(createdAt),
+            "expires_at": iso8601(expiresAt),
+            "workspace": [
+                "workspace_id": workspaceID.uuidString,
+                "slug": workspaceSlug,
+                "display_name": workspaceName,
+            ],
             "request": [
                 "surface": "mention",
                 "request_id": runID.uuidString,
@@ -2044,6 +2105,11 @@ struct MessageRoutes: Sendable {
                 "workspace_id": workspaceID.uuidString,
                 "channel_id": channelID.uuidString,
                 "visibility": "channel",
+                "seq_window": [
+                    "from": history.compactMap { $0["seq"] as? Int64 }.min() ?? messageSeq,
+                    "to": messageSeq,
+                    "reason": "bounded_recent_channel_history",
+                ],
                 "permission_basis": [
                     "actor_channel_member",
                     "agent_channel_member",
@@ -2053,23 +2119,263 @@ struct MessageRoutes: Sendable {
                     "set_local_workspace_id": workspaceID.uuidString,
                 ],
             ],
+            "goal": [
+                "summary": String(body.prefix(240)),
+                "user_prompt": body,
+                "constraints": [],
+                "desired_outputs": ["timeline_reply"],
+                "non_goals": [],
+            ],
+            "participants": [
+                ["member_id": authorMemberID.uuidString, "role": "actor"],
+                ["member_id": agent.id.uuidString, "role": "agent"],
+            ],
             "recent_messages": history,
+            "memory_refs": memoryRefs,
             "sources": [source],
-            "tool_grants": readOnlyToolGrants(),
+            "tool_grants": toolGrants,
+            "budget": [
+                "budget_id": "context-packet-default-v0",
+                "model_route": "hybrid",
+                "max_prompt_tokens": maxPromptTokens,
+                "max_completion_tokens": maxOutputTokens(from: agent.configJSON),
+                "reserved_micro_usd": 0,
+                "soft_limit_micro_usd": 0,
+                "hard_limit_micro_usd": 0,
+                "approval_required_over_micro_usd": 0,
+                "usage_ledger_mode": "reserve_reconcile",
+            ],
+            "redactions": [],
+            "runtime_envelope": [
+                "transport": "openai_chat_completions_sse",
+                "endpoint": "/v1/chat/completions",
+                "stream": true,
+                "metadata": [
+                    "workspace_id": workspaceID.uuidString,
+                    "channel_id": channelID.uuidString,
+                    "run_id": runID.uuidString,
+                    "context_packet_id": packetID.uuidString,
+                    "idempotency_key": idempotencyKey,
+                ],
+                "messages_strategy": "system_summary_plus_context_json",
+                "forbidden_runtime_inputs": [
+                    "database_url", "provider_refresh_token",
+                    "raw_cross_channel_history", "unredacted_secret",
+                ],
+            ],
+            "audit": [
+                "policy_version": "context-packet-policy.v0",
+                "memory_retrieval": "memory_search_hybrid.v2",
+                "capability_projection": "plugin_capability_projection.v0",
+            ],
         ]
+        let json = jsonString(content)
+        _ = try await conn.query(
+            """
+            INSERT INTO context_packet
+              (packet_id, run_id, workspace_id, created_at, expires_at, content)
+            VALUES
+              (\(packetID), \(runID), \(workspaceID), \(createdAt), \(expiresAt), \(json)::jsonb)
+            """,
+            logger: logger
+        )
+        return IssuedContextPacket(
+            packetID: packetID, content: content,
+            memoryRefs: memoryRefs, toolGrants: toolGrants
+        )
     }
 
-    private static func readOnlyToolGrants() -> [[String: Any]] {
-        [[
-            "tool_name": "github.search_issues",
-            "provider": "github",
-            "grant": "read",
-            "risk": "read",
-            "approval_policy": "none",
-            "resource_scope_summary": "repo:Dawn-kim-official/momo",
-            "capability_version": "mock-github@0.1.0",
-            "policy_version": "capability-policy@2026-06-30",
-        ]]
+    private static func loadContextMemoryRefs(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        actorMemberID: UUID,
+        agentMemberID: UUID,
+        query: String,
+        expiresAt: Date
+    ) async throws -> [[String: Any]] {
+        let rows = try await conn.query(
+            """
+            WITH profiles AS (
+              SELECT mi.id, 0::integer AS source_order, NULL::double precision AS score
+                FROM memory_item mi
+               WHERE mi.workspace_id = \(workspaceID)
+                 AND mi.invalid_at IS NULL
+                 AND mi.kind = 'profile'
+                 AND EXISTS (
+                   SELECT 1 FROM memory_source_ref present
+                    WHERE present.workspace_id = mi.workspace_id
+                      AND present.memory_id = mi.id
+                 )
+                 AND (
+                   (
+                     (mi.scope = 'workspace'
+                       OR (mi.scope = 'member' AND mi.subject_member_id = \(actorMemberID))
+                       OR (mi.scope = 'agent' AND mi.agent_member_id = \(agentMemberID)))
+                     AND NOT EXISTS (
+                       SELECT 1 FROM memory_source_ref hidden
+                        WHERE hidden.workspace_id = mi.workspace_id
+                          AND hidden.memory_id = mi.id
+                          AND NOT EXISTS (
+                            SELECT 1 FROM membership ms
+                             WHERE ms.workspace_id = hidden.workspace_id
+                               AND ms.channel_id = hidden.channel_id
+                               AND ms.member_id = \(actorMemberID)
+                               AND ms.left_at IS NULL
+                          )
+                     )
+                   )
+                   OR EXISTS (
+                     SELECT 1 FROM memory_visibility_grant vg
+                      WHERE vg.workspace_id = mi.workspace_id
+                        AND vg.memory_id = mi.id
+                        AND vg.revoked_at IS NULL
+                        AND ((vg.grantee_kind = 'member' AND vg.grantee_id = \(actorMemberID))
+                          OR (vg.grantee_kind = 'agent' AND vg.grantee_id = \(agentMemberID)))
+                   )
+                 )
+               ORDER BY mi.valid_at DESC, mi.id
+               LIMIT 8
+            ), ranked AS (
+              SELECT search.memory_id AS id, 1::integer AS source_order,
+                     search.rrf_score AS score
+                FROM memory_search_hybrid(
+                  \(workspaceID), \(actorMemberID), \(query), NULL::vector(384),
+                  NULL::text, \(agentMemberID)::uuid, 12::integer, 60::integer
+                ) search
+            ), selected AS (
+              SELECT * FROM profiles
+              UNION ALL
+              SELECT ranked.* FROM ranked
+               WHERE NOT EXISTS (SELECT 1 FROM profiles WHERE profiles.id = ranked.id)
+            )
+            SELECT mi.id, mi.scope, mi.kind, mi.body, mi.valid_at,
+                   selected.source_order, selected.score,
+                   EXISTS (
+                     SELECT 1 FROM memory_visibility_grant vg
+                      WHERE vg.workspace_id = mi.workspace_id
+                        AND vg.memory_id = mi.id
+                        AND vg.revoked_at IS NULL
+                        AND ((vg.grantee_kind = 'member' AND vg.grantee_id = \(actorMemberID))
+                          OR (vg.grantee_kind = 'agent' AND vg.grantee_id = \(agentMemberID)))
+                   ) AS via_grant,
+                   coalesce((
+                     SELECT jsonb_agg(jsonb_build_object(
+                       'message_id', lower(msr.message_id::text),
+                       'channel_id', lower(msr.channel_id::text),
+                       'source_id', 'msg_' || lower(msr.message_id::text)
+                     ) ORDER BY msr.created_at, msr.id)
+                       FROM memory_source_ref msr
+                      WHERE msr.workspace_id = mi.workspace_id
+                        AND msr.memory_id = mi.id
+                   ), '[]'::jsonb)::text
+              FROM selected
+              JOIN memory_item mi ON mi.workspace_id = \(workspaceID) AND mi.id = selected.id
+             WHERE mi.kind IN ('profile', 'fact', 'episode')
+             ORDER BY selected.source_order, selected.score DESC NULLS LAST, mi.valid_at DESC, mi.id
+            """,
+            logger: logger
+        ).collect()
+
+        var remaining = contextPacketMemoryCharacterBudget()
+        var refs: [[String: Any]] = []
+        for row in rows where remaining > 0 {
+            let (id, scope, kind, body, validAt, sourceOrder, score, viaGrant, sourceJSON) =
+                try row.decode(
+                    (UUID, String, String, String, Date, Int, Double?, Bool, String).self
+                )
+            let bounded = String(body.prefix(min(1_200, remaining)))
+            guard !bounded.isEmpty else { continue }
+            remaining -= bounded.count
+            let sourceRefs = (jsonObject(sourceJSON) as? [[String: Any]]) ?? []
+            refs.append([
+                "memory_id": id.uuidString,
+                "kind": kind,
+                "scope": scope,
+                "excerpt": bounded,
+                "source_refs": sourceRefs,
+                "source_ids": sourceRefs.compactMap { $0["source_id"] as? String },
+                "reason_included": sourceOrder == 0 ? "profile_always" : "query_hybrid_top_k",
+                "permission_snapshot": viaGrant ? "active_visibility_grant" : "default_scope_and_source_membership",
+                "valid_at": iso8601(validAt),
+                "expires_at": iso8601(expiresAt),
+                "score": score ?? 0,
+            ])
+        }
+        return refs
+    }
+
+    private static func loadContextToolGrants(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        actorMemberID: UUID
+    ) async throws -> [[String: Any]] {
+        let rows = try await conn.query(
+            """
+            SELECT pcp.id, pcp.plugin_id, pcp.scope, pcp.tool_name,
+                   pcp.capability_version, pcp.schema_digest,
+                   pcp.risk, pcp.approval_tier
+              FROM plugin_capability_projection pcp
+              JOIN plugin_grant pg
+                ON pg.id = pcp.grant_id
+               AND pg.workspace_id = pcp.workspace_id
+               AND pg.member_id = pcp.member_id
+               AND pg.plugin_id = pcp.plugin_id
+               AND pg.scope = pcp.scope
+               AND pg.status = 'active' AND pg.revoked_at IS NULL
+              JOIN workspace_plugin_install wpi
+                ON wpi.workspace_id = pcp.workspace_id
+               AND wpi.plugin_id = pcp.plugin_id
+               AND wpi.enabled AND wpi.revoked_at IS NULL
+             WHERE pcp.workspace_id = \(workspaceID)
+               AND pcp.member_id = \(actorMemberID)
+             ORDER BY pcp.plugin_id, pcp.tool_name
+            """,
+            logger: logger
+        ).collect()
+        return try rows.map { row in
+            let (id, pluginID, scope, toolName, version, digest, risk, approvalTier) =
+                try row.decode((UUID, String, String, String, String, String, String, String).self)
+            return [
+                "tool_name": toolName,
+                "provider": pluginID,
+                "grant": risk == "read" ? "read" : "propose",
+                "risk": risk,
+                "approval_policy": approvalTier == "read_only" ? "none" : "always",
+                "allowed_operations": [toolName],
+                "denied_operations": [],
+                "input_schema_ref": "momo://capability-cache/\(pluginID)/\(toolName)/schemas/input/\(digest)",
+                "resource_scope_summary": scope,
+                "capability_version": version,
+                "policy_version": "plugin-capability-policy.v0",
+                "cache_entry_id": id.uuidString,
+            ]
+        }
+    }
+
+    private static func contextPacketLifetimeSeconds() -> Int {
+        let configured = ProcessInfo.processInfo.environment["CONTEXT_PACKET_TTL_SECONDS"]
+            .flatMap(Int.init) ?? 900
+        return min(max(configured, 1), 86_400)
+    }
+
+    private static func contextPacketPromptTokenBudget() -> Int {
+        let configured = ProcessInfo.processInfo.environment["CONTEXT_PACKET_MAX_PROMPT_TOKENS"]
+            .flatMap(Int.init) ?? 8_192
+        return min(max(configured, 1_024), 131_072)
+    }
+
+    private static func contextPacketMemoryCharacterBudget() -> Int {
+        // Conservative one-character-per-token ceiling keeps the packet below
+        // its declared prompt budget even for CJK-heavy memory text.
+        max(contextPacketPromptTokenBudget() / 4, 512)
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private static func messageSource(

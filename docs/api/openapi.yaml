@@ -3161,6 +3161,42 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/context-packets/{packetId}:
+    get:
+      tags: [agents]
+      operationId: getContextPacket
+      summary: Inspect the immutable Context Packet consumed by an agent run.
+      description: >
+        Returns the original frozen packet, including expired historical packets.
+        The caller must still be an active member of the run channel. This read
+        never refreshes or mutates packet content.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: packetId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Immutable packet metadata and content.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContextPacketResponse"}
+        "400":
+          description: Malformed workspace or packet id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Packet is absent or not visible through current run-channel membership.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/memories:
     get:
       tags: [memories]
@@ -3702,6 +3738,22 @@ components:
       required: [enabled]
       properties:
         enabled: {type: boolean}
+
+    ContextPacketResponse:
+      type: object
+      additionalProperties: false
+      required: [packetId, runId, workspaceId, createdAtMs, expiresAtMs, expired, content]
+      properties:
+        packetId: {type: string, format: uuid}
+        runId: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        expiresAtMs: {type: integer, format: int64}
+        expired: {type: boolean}
+        content:
+          type: object
+          description: Frozen momo.context_packet.v0 JSON object.
+          additionalProperties: true
 
     MemoryItem:
       type: object
