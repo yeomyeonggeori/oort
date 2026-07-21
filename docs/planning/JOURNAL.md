@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-21 (Fable 오픈소스 배치 완결) · 519 랜딩 — 배치 4/4, track/engine=main+5 승인 대기
+- #562 MOMO-519 티어 폴백 랜딩(track/engine 9cae37e): docker verifier 최종 PASS(ask/t1_only/auto/orphan/resume/push/RLS). 검수 중 verifier 결함 4종을 오케스트레이터가 수정(포트 중복 28023 → hermes 28024 분리 / INSERT...SELECT uuid·message_type·jsonb 캐스트 / Swift UUID 대문자 vs 시드 소문자 lower() 3곳 / RLS 단정 psql -q 부재로 명령 태그 오염). keep-stack 부검으로 구현 무죄 확정(카드·RLS 전부 정상 — 단정만 결함). X-8 done(#560 remoteAttachAvailable).
+- perm-research 서브에이전트 좀비화(named spawn mailbox 전례 재발 — 메모리 교훈 위반, 재확인) → 손절, InfoQ 직접 fetch + 공지식으로 research/18-permissions-workspaces/00 작성(Slack V1→Grid→Unified Grid·Vitess 채널 샤딩·권한 헬퍼 중앙화 / Discord 계층·kick/ban / Mattermost·Matrix / 공통 패턴 8 / momo 시사점: 재샤딩 불요·0117=스키마 작업).
+- **성재 대기**: ①track/engine→main 머지 승인(main+5: 560 관전·561 웹·562 폴백) ②ADR-0127(S3 스토리지) ③ADR-0128(멤버십 수명주기 — MOMO-523~525 발급 대기). 유지: momowebqa+vite(:5173) 성재 육안용.
+
 ## 2026-07-21 (Fable 오픈소스 배치) · 웹 탄생 + 관전 attach 랜딩 + 티어폴백 검수 중 + 권한 ADR-0128 기안
 - 성재 승인: 이중트랙 main 머지(8f9408f) + 우선순위 실행. ADR: 0126(관전)·0125 D11(티어폴백) **Accepted**, 0127(S3 스토리지)·0128(멤버십 수명주기 — 역할변경/suspend/kick/**ban**/self-leave/audit/에이전트 대칭) **Proposed 성재 대기**. 진단 2건: 2026-07-21-opensource-cowork-diagnosis.md(웹=0119 기이행 대기·셀프호스트 갭 4·cowork 갭 4) / 2026-07-21-permissions-workspace-diagnosis.md(P1~P7 — 초대는 강함, 수명주기 API 전무, 0117 멀티워크스페이스 미기안).
 - **랜딩(track/engine)**: #560 MOMO-516 관전 attach(observer capability+X-8 remoteAttachAvailable — verifier+511 회귀 PASS) / #561 **W-2 clients/web**(Vite+React, vitest 20·실서버 육안·실전송 PASS — momo 세 번째 클라이언트. 컴포저 범위초과=deviation accepted, W-4 축소로 상쇄). track/engine=main+3(560·561 머지커밋 포함).
