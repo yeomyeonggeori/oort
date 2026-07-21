@@ -560,6 +560,8 @@ public struct MessageBubble: View {
             resumeOfferCard
         } else if message.props["kind"]?.stringValue == "work_session" {
             workSessionCard
+        } else if let artifact = MessageArtifactPresentation.resolve(message: message) {
+            MomoMessageArtifactCard(presentation: artifact)
         } else if isAgent,
                   !presentation.showsDeveloperDetails,
                   message.type != .text,
