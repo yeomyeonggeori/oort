@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-21 (Fable 오픈소스 배치) · 웹 탄생 + 관전 attach 랜딩 + 티어폴백 검수 중 + 권한 ADR-0128 기안
+- 성재 승인: 이중트랙 main 머지(8f9408f) + 우선순위 실행. ADR: 0126(관전)·0125 D11(티어폴백) **Accepted**, 0127(S3 스토리지)·0128(멤버십 수명주기 — 역할변경/suspend/kick/**ban**/self-leave/audit/에이전트 대칭) **Proposed 성재 대기**. 진단 2건: 2026-07-21-opensource-cowork-diagnosis.md(웹=0119 기이행 대기·셀프호스트 갭 4·cowork 갭 4) / 2026-07-21-permissions-workspace-diagnosis.md(P1~P7 — 초대는 강함, 수명주기 API 전무, 0117 멀티워크스페이스 미기안).
+- **랜딩(track/engine)**: #560 MOMO-516 관전 attach(observer capability+X-8 remoteAttachAvailable — verifier+511 회귀 PASS) / #561 **W-2 clients/web**(Vite+React, vitest 20·실서버 육안·실전송 PASS — momo 세 번째 클라이언트. 컴포저 범위초과=deviation accepted, W-4 축소로 상쇄). track/engine=main+3(560·561 머지커밋 포함).
+- **진행 중**: #562 MOMO-519 티어폴백 검수 — notifier/workd 테스트 PASS, verify_tier_fallback은 worker의 포트 중복 버그(HERMES=PUSH=28023) 발견·오케스트레이터 직접 수정(HERMES→28024) 후 3차 실행 중. 이 수정은 559 브랜치에 커밋 필요. Slack/Discord 권한 리서치(deep-research) 마감 요청함 — 도착 시 research/18-permissions-workspaces/00에 저장.
+- 유지 중 스택: momowebqa(:28000)+vite dev(:5173 — 성재 육안용 크레덴셜은 QA_FOLLOWUP Q9 계정). worker 사고 1건(zsh 1-기반 배열로 워크트리 매핑 어긋남 — main 무사, 재발 방지: spawn 루프에 명시 매핑 사용).
+
 ## 2026-07-21 (Fable fleet 완결) · MOMO-513 수정 랜딩 — 위임 배치 4/4 종결
 - 553 worker(#556): outbox broadcastPayload에 `props: responsePropsJSON` 1줄 + 서버 테스트·verifier 양면 단정(mention REST↔outbox 일치, edited props 보존). 오케스트레이터 docker 실런 `verify_message_interaction.sh` PASS(실 Centrifugo 발행 props 단정) → track/engine e53c24d. **X-9 종결**. QA 스택 momo543qa teardown 완료.
 - **최종 대기 상태**: track/uxui=main+4(543·499·511-U), track/engine=main+2(503·513) — 성재 main 머지 승인 대기. 다음 큐: X-8(ptyId 투영), MOMO-514(iOS 토큰 UX), iOS 500~/504~506, 490.
