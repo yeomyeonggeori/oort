@@ -738,17 +738,25 @@ body {
   font-size: 14px;
 }
 
-.approval-state {
-  margin: 2px 0 0;
-  font-weight: 600;
-  color: var(--ok);
-  font-size: 14px;
+.approval-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.approval-card[data-approval-status="rejected"] .approval-state,
-.approval-card[data-approval-status="expired"] .approval-state,
-.approval-card[data-approval-status="cancelled"] .approval-state {
+.approval-status-chip {
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
   color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.approval-card[data-approval-status="approved"] .approval-status-chip {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: var(--ok);
 }
 
 .approval-note {

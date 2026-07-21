@@ -19,6 +19,7 @@ interface ApprovalCardProps {
 }
 
 const STATUS_LABEL: Record<string, string> = {
+  pending: "대기 중",
   approved: "승인됨",
   rejected: "거부됨",
   expired: "만료됨",
@@ -93,22 +94,22 @@ export default function ApprovalCard({
         <p className="approval-summary">{summary}</p>
       )}
       <p className="approval-requester muted">{requesterName}의 승인 요청</p>
+      <div className="approval-status-row">
+        <span className="approval-status-chip" data-testid="approval-status-chip">
+          {STATUS_LABEL[status ?? "pending"] ?? status ?? "대기 중"}
+        </span>
+        {note !== null && (
+          <span className="approval-note" data-testid="approval-note">
+            {note}
+          </span>
+        )}
+      </div>
 
       {isResumeOffer ? (
         <p className="approval-resume-note" data-testid="resume-offer-note">
           데스크톱에서 재개하세요.
         </p>
-      ) : status !== null && status !== "pending" ? (
-        <p className="approval-state" data-testid="approval-state">
-          {STATUS_LABEL[status] ?? status}
-          {note !== null && (
-            <span className="approval-note" data-testid="approval-note">
-              {" "}
-              · {note}
-            </span>
-          )}
-        </p>
-      ) : (
+      ) : !settled ? (
         <div className="approval-actions">
           <button
             type="button"
@@ -129,7 +130,7 @@ export default function ApprovalCard({
             거부
           </button>
         </div>
-      )}
+      ) : null}
 
       {errorCopy !== null && (
         <p className="approval-error" data-testid="approval-error" role="alert">
