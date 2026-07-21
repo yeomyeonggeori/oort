@@ -5,6 +5,12 @@ import Observation
 public protocol IOSConversationBackend: Sendable {
     func snapshot() async throws -> IOSConversationSnapshot
     func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message]
+    func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message]
+    func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage
     func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState
     func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent>
@@ -37,6 +43,16 @@ public struct IOSThreadRepliesPage: Sendable, Hashable {
 }
 
 public extension IOSConversationBackend {
+    func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message] {
+        try await history(channel: channel, after: nil, limit: limit)
+    }
+    func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage {
+        throw SessionError.server(status: 501, message: "Workspace message search is unavailable.")
+    }
     func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
         throw IOSAttachmentTransferIssue.unavailable
     }
@@ -620,6 +636,7 @@ public final class IOSTimelineModel {
     private let backend: any IOSConversationBackend
     private let threadRoot: MessageID?
     private let initialThreadRootMessage: Message?
+    private let initialBeforeSequence: Int64?
     private var workAgentMemberID: MemberID?
     private var workAgentHandle: String?
     private let workSessionID: WorkSessionID?
@@ -644,6 +661,7 @@ public final class IOSTimelineModel {
         microphonePermission: (any IOSMicrophonePermissionAuthorizing)? = nil,
         threadRoot: MessageID? = nil,
         initialThreadRootMessage: Message? = nil,
+        initialBeforeSequence: Int64? = nil,
         workAgentMemberID: MemberID? = nil,
         workAgentHandle: String? = nil,
         workSessionID: WorkSessionID? = nil,
@@ -654,6 +672,7 @@ public final class IOSTimelineModel {
         self.backend = backend
         self.threadRoot = threadRoot
         self.initialThreadRootMessage = initialThreadRootMessage
+        self.initialBeforeSequence = initialBeforeSequence
         self.workAgentMemberID = workAgentMemberID
         self.workAgentHandle = workAgentHandle
         self.workSessionID = workSessionID
@@ -1253,6 +1272,14 @@ public final class IOSTimelineModel {
 
     private func initialMessages() async throws -> [Message] {
         guard let threadRoot else {
+            if let initialBeforeSequence {
+                return try await backend.historyBefore(
+                    channel: channel,
+                    before: initialBeforeSequence,
+                    limit: 200
+                )
+                .filter { $0.rootId == nil }
+            }
             return try await backend.history(channel: channel, after: nil, limit: 200)
                 .filter { $0.rootId == nil }
         }

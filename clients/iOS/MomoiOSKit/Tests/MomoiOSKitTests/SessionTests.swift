@@ -469,6 +469,81 @@ struct ConversationTests {
         #expect(IOSAppTab.allCases == [.home, .search, .activity, .work, .profile])
     }
 
+    @Test("workspace message search debounces and preserves Unicode snippet offsets")
+    @MainActor
+    func workspaceMessageSearch() async throws {
+        let hit = IOSWorkspaceMessageSearchHit(
+            channelID: fixtureChannel().id,
+            messageID: fixtureMessage(sequence: 42).id,
+            sequence: 42,
+            authorMemberID: fixtureMemberID,
+            createdAtMs: 42,
+            snippet: "앞쪽 🔍 검색 결과",
+            matchOffset: 3
+        )
+        let backend = RecordingConversationBackend(
+            searchPage: IOSWorkspaceMessageSearchPage(hits: [hit], nextCursor: "next")
+        )
+        let model = IOSWorkspaceSearchModel(backend: backend)
+
+        model.schedule(query: "  검색  ")
+        try await Task.sleep(for: .milliseconds(350))
+
+        #expect(model.hits == [hit])
+        #expect(model.hasMore)
+        #expect(await backend.searchCalls.map(\.query) == ["검색"])
+        let segments = IOSSearchSnippet.segments(snippet: hit.snippet, matchOffset: 3, matchLength: 1)
+        #expect(segments.prefix == "앞쪽 ")
+        #expect(segments.match == "🔍")
+        #expect(segments.suffix == " 검색 결과")
+    }
+
+    @Test("exact search jump loads the page immediately before the target sequence")
+    @MainActor
+    func exactSearchJumpHistory() async {
+        let target = fixtureMessage(sequence: 42)
+        let backend = RecordingConversationBackend()
+        await backend.setHistory([target])
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend,
+            initialBeforeSequence: 43
+        )
+
+        await model.load()
+
+        #expect(model.messages.map(\.id) == [target.id])
+        #expect(await backend.historyBeforeCalls == [43])
+    }
+
+    @Test("activity aggregation normalizes mention UUIDs and excludes self reactions")
+    func activityAggregation() throws {
+        let otherMemberID = try #require(
+            MemberID(uuidString: "00000000-0000-0000-0000-000000000099")
+        )
+        var mention = fixtureMessage(sequence: 40, idSeed: 940)
+        mention.authorMemberId = otherMemberID
+        mention.props = [
+            "mention_member_ids": .array([.string(fixtureMemberID.description.uppercased())]),
+        ]
+        var reacted = fixtureMessage(sequence: 41, idSeed: 941)
+        reacted.authorMemberId = fixtureMemberID
+        let items = IOSActivityAggregator.recentItems(
+            messagesByChannel: [fixtureChannel().id: [mention, reacted]],
+            reactionsByChannel: [
+                fixtureChannel().id: [
+                    reacted.id: ["🎉": [fixtureMemberID, otherMemberID]],
+                ],
+            ],
+            currentMemberID: fixtureMemberID
+        )
+
+        #expect(items.count == 2)
+        #expect(items.contains { $0.kind == .mention && $0.messageID == mention.id })
+        #expect(items.contains { $0.kind == .reaction(emoji: "🎉", count: 1) && $0.messageID == reacted.id })
+    }
+
     @Test("channel mute and mark-read actions use server projections")
     @MainActor
     func channelActions() async {
@@ -1675,6 +1750,12 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         let muted: Bool
     }
 
+    struct SearchCall: Sendable, Equatable {
+        let query: String
+        let cursor: String?
+        let limit: Int
+    }
+
     private var historyValue: [Message] = []
     private let snapshotValue: IOSConversationSnapshot
     private let failFirstSend: Bool
@@ -1683,12 +1764,15 @@ private actor RecordingConversationBackend: IOSConversationBackend {
     private let failFirstMute: Bool
     private let failFirstRead: Bool
     private let threadPages: [IOSThreadRepliesPage]
+    private let searchPage: IOSWorkspaceMessageSearchPage
     private(set) var sendCalls: [SendCall] = []
     private(set) var uploadCalls: [URL] = []
     private(set) var approvalCalls: [ApprovalDecisionRequest] = []
     private(set) var markReadCalls: [MarkReadCall] = []
     private(set) var muteCalls: [MuteCall] = []
     private(set) var threadReplyCursors: [Int64?] = []
+    private(set) var historyBeforeCalls: [Int64] = []
+    private(set) var searchCalls: [SearchCall] = []
 
     init(
         snapshot: IOSConversationSnapshot? = nil,
@@ -1697,7 +1781,8 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         failFirstApproval: Bool = false,
         failFirstMute: Bool = false,
         failFirstRead: Bool = false,
-        threadPages: [IOSThreadRepliesPage] = []
+        threadPages: [IOSThreadRepliesPage] = [],
+        searchPage: IOSWorkspaceMessageSearchPage = .init(hits: [], nextCursor: nil)
     ) {
         self.snapshotValue = snapshot ?? IOSConversationSnapshot(
             channels: [fixtureChannel()],
@@ -1710,11 +1795,24 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         self.failFirstMute = failFirstMute
         self.failFirstRead = failFirstRead
         self.threadPages = threadPages
+        self.searchPage = searchPage
     }
 
     func setHistory(_ messages: [Message]) { historyValue = messages }
     func snapshot() async throws -> IOSConversationSnapshot { snapshotValue }
     func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { historyValue }
+    func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message] {
+        historyBeforeCalls.append(sequence)
+        return historyValue
+    }
+    func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage {
+        searchCalls.append(SearchCall(query: query, cursor: cursor, limit: limit))
+        return searchPage
+    }
     func threadReplies(
         channel: ChannelID,
         root: MessageID,
