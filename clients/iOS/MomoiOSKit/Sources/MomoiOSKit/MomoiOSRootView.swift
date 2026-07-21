@@ -112,6 +112,7 @@ public struct MomoiOSRootView: View {
     @State private var model: MomoiOSAppModel
     @State private var selectedTab: IOSAppTab = .home
     @State private var homePath: [IOSPushDeepLink] = []
+    @State private var workPath: [IOSPushDeepLink] = []
     @State private var deepLinkRouter: IOSPushDeepLinkRouter
 
     public init(
@@ -140,6 +141,7 @@ public struct MomoiOSRootView: View {
                     bootstrap: bootstrap,
                     selectedTab: $selectedTab,
                     homePath: $homePath,
+                    workPath: $workPath,
                     signOut: model.signOut
                 )
             }
@@ -150,13 +152,21 @@ public struct MomoiOSRootView: View {
             guard let link = deepLinkRouter.consumePending(
                 for: deepLinkRouteTrigger.signedInWorkspaceID
             ) else { return }
-            selectedTab = .home
-            homePath = [link]
+            if link.opensWorkSession {
+                selectedTab = .work
+                homePath = []
+                workPath = [link]
+            } else {
+                selectedTab = .home
+                workPath = []
+                homePath = [link]
+            }
         }
         .onChange(of: deepLinkRouteTrigger.signedInWorkspaceID) { previousWorkspace, workspace in
             guard previousWorkspace != workspace else { return }
             selectedTab = .home
             homePath = []
+            workPath = []
         }
     }
 

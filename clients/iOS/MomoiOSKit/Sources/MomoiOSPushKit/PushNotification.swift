@@ -7,6 +7,21 @@ public enum MomoPushContract {
     public static let placeholderBody = "새 알림"
 }
 
+public enum MomoPushCategory: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {
+    case message = "momo.message"
+    case mention = "momo.mention"
+    case approval = "momo.approval"
+    case work = "momo.work"
+
+    public var id: String { rawValue }
+}
+
+public enum MomoPushActionIdentifier {
+    public static let quickReply = "momo.action.quick-reply"
+    public static let approve = "momo.action.approve"
+    public static let reject = "momo.action.reject"
+}
+
 public struct PushFetchSession: Codable, Equatable, Sendable {
     public let baseURL: URL
     public let workspaceID: String
@@ -19,7 +34,7 @@ public struct PushFetchSession: Codable, Equatable, Sendable {
     }
 }
 
-public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
+public struct MomoPushEnvelope: Equatable, Hashable, Sendable {
     public let schema: String
     public let serverID: String
     public let workspaceID: String
@@ -27,15 +42,13 @@ public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
     public let messageID: String
     public let collapseID: String
     public let reason: String
+    public let approvalID: String?
+    public let threadID: String
+    public let category: MomoPushCategory
+    public let badge: Int
 
-    enum CodingKeys: String, CodingKey {
-        case schema
-        case serverID = "server_id"
-        case workspaceID = "workspace_id"
-        case channelID = "channel_id"
-        case messageID = "message_id"
-        case collapseID = "collapse_id"
-        case reason
+    public var threadRootID: String? {
+        threadID.lowercased() == channelID.lowercased() ? nil : threadID
     }
 
     public var deepLinkURL: URL? {
@@ -43,28 +56,86 @@ public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
         components.scheme = "momo"
         components.host = "push"
         components.path = "/workspaces/\(workspaceID)/channels/\(channelID)/messages/\(messageID)"
+        var items = [URLQueryItem(name: "category", value: category.rawValue)]
+        if let threadRootID {
+            items.append(URLQueryItem(name: "thread", value: threadRootID))
+        }
+        components.queryItems = items
         return components.url
     }
 }
 
 public enum MomoPushParser {
     private struct Root: Decodable {
-        let momo: MomoPushEnvelope
+        struct APS: Decodable {
+            let badge: Int
+            let threadID: String
+            let category: MomoPushCategory
+
+            enum CodingKeys: String, CodingKey {
+                case badge
+                case threadID = "thread-id"
+                case category
+            }
+        }
+
+        struct Envelope: Decodable {
+            let schema: String
+            let serverID: String
+            let workspaceID: String
+            let channelID: String
+            let messageID: String
+            let collapseID: String
+            let reason: String
+            let approvalID: String?
+
+            enum CodingKeys: String, CodingKey {
+                case schema
+                case serverID = "server_id"
+                case workspaceID = "workspace_id"
+                case channelID = "channel_id"
+                case messageID = "message_id"
+                case collapseID = "collapse_id"
+                case reason
+                case approvalID = "approval_id"
+            }
+        }
+
+        let aps: APS
+        let momo: Envelope
     }
 
     public static func parse(data: Data) throws -> MomoPushEnvelope {
-        let envelope = try JSONDecoder().decode(Root.self, from: data).momo
-        guard envelope.schema == "momo.push.notification.v1",
-              UUID(uuidString: envelope.workspaceID) != nil,
-              UUID(uuidString: envelope.channelID) != nil,
-              UUID(uuidString: envelope.messageID) != nil,
-              !envelope.serverID.isEmpty,
-              !envelope.collapseID.isEmpty,
-              ["dm", "mention", "approval_request"].contains(envelope.reason)
+        let root = try JSONDecoder().decode(Root.self, from: data)
+        let payload = root.momo
+        let approvalID = payload.approvalID?.lowercased()
+        guard payload.schema == "momo.push.notification.v2",
+              UUID(uuidString: payload.workspaceID) != nil,
+              UUID(uuidString: payload.channelID) != nil,
+              UUID(uuidString: payload.messageID) != nil,
+              UUID(uuidString: root.aps.threadID) != nil,
+              !payload.serverID.isEmpty,
+              !payload.collapseID.isEmpty,
+              root.aps.badge >= 0,
+              ["dm", "mention", "approval_request", "resume_offer"].contains(payload.reason),
+              (root.aps.category == .approval) == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
+              (root.aps.category == .approval || approvalID == nil)
         else {
             throw MomoPushError.invalidEnvelope
         }
-        return envelope
+        return MomoPushEnvelope(
+            schema: payload.schema,
+            serverID: payload.serverID,
+            workspaceID: payload.workspaceID.lowercased(),
+            channelID: payload.channelID.lowercased(),
+            messageID: payload.messageID.lowercased(),
+            collapseID: payload.collapseID,
+            reason: payload.reason,
+            approvalID: approvalID,
+            threadID: root.aps.threadID.lowercased(),
+            category: root.aps.category,
+            badge: root.aps.badge
+        )
     }
 
     public static func parse(userInfo: [AnyHashable: Any]) throws -> MomoPushEnvelope {

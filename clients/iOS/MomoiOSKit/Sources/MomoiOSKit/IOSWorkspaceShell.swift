@@ -1,6 +1,7 @@
 #if os(iOS)
 import MomoCore
 import SwiftUI
+import UIKit
 
 @MainActor
 public struct IOSWorkspaceView: View {
@@ -11,6 +12,7 @@ public struct IOSWorkspaceView: View {
     private let huddleService: any IOSHuddleService
     @Binding private var selectedTab: IOSAppTab
     @Binding private var homePath: [IOSPushDeepLink]
+    @Binding private var workPath: [IOSPushDeepLink]
     @State private var model: IOSChannelListModel
     @State private var workModel: IOSWorkListModel
     @State private var workApprovalModel: IOSWorkApprovalInboxModel
@@ -21,6 +23,7 @@ public struct IOSWorkspaceView: View {
         bootstrap: WorkspaceBootstrap,
         selectedTab: Binding<IOSAppTab>,
         homePath: Binding<[IOSPushDeepLink]>,
+        workPath: Binding<[IOSPushDeepLink]>,
         signOut: @escaping @MainActor () async -> Void
     ) {
         let backend = MomoServerConversationClient(authenticated: session)
@@ -31,6 +34,7 @@ public struct IOSWorkspaceView: View {
         self.huddleService = IOSHuddleRESTService(authenticated: session)
         _selectedTab = selectedTab
         _homePath = homePath
+        _workPath = workPath
         _model = State(initialValue: IOSChannelListModel(currentMemberID: session.member.id, backend: backend))
         _workModel = State(initialValue: IOSWorkListModel(backend: backend))
         _workApprovalModel = State(initialValue: IOSWorkApprovalInboxModel(backend: backend))
@@ -77,7 +81,7 @@ public struct IOSWorkspaceView: View {
             .tag(IOSAppTab.activity)
             .accessibilityIdentifier("tab.activity")
 
-            NavigationStack {
+            NavigationStack(path: $workPath) {
                 IOSWorkView(
                     model: workModel,
                     approvalModel: workApprovalModel,
@@ -89,6 +93,9 @@ public struct IOSWorkspaceView: View {
                     backend: backend,
                     developerModeEnabled: $developerModeEnabled
                 )
+                .navigationDestination(for: IOSPushDeepLink.self) { link in
+                    workDestination(link)
+                }
             }
             .tabItem { Label("Work", systemImage: "terminal") }
             .tag(IOSAppTab.work)
@@ -98,6 +105,7 @@ public struct IOSWorkspaceView: View {
                 IOSProfileView(
                     session: session,
                     workspaceName: bootstrap.workspace.name,
+                    channelListModel: model,
                     developerModeEnabled: $developerModeEnabled,
                     signOut: signOut
                 )
@@ -107,6 +115,57 @@ public struct IOSWorkspaceView: View {
             .accessibilityIdentifier("tab.profile")
         }
         .task { await model.load() }
+    }
+
+    @ViewBuilder
+    private func workDestination(_ link: IOSPushDeepLink) -> some View {
+        if link.workspaceID != session.workspaceID || !link.opensWorkSession {
+            unavailableWorkNotification("This notification does not belong to the active Work space.")
+        } else {
+            switch workModel.phase {
+            case .loading:
+                ProgressView("Opening Work session")
+                    .navigationTitle("Work")
+            case .failed(let failure):
+                ContentUnavailableView {
+                    Label(
+                        failure.isOffline ? "Work unavailable offline" : "Could not load Work",
+                        systemImage: failure.isOffline ? "wifi.slash" : "exclamationmark.triangle"
+                    )
+                } description: {
+                    Text(failure.message)
+                } actions: {
+                    Button("Retry") { Task { await workModel.retry() } }
+                }
+            case .loaded:
+                if let workSession = deepLinkedWorkSession(link) {
+                    IOSWorkSessionDetailView(
+                        session: workSession,
+                        host: workModel.host(for: workSession),
+                        currentMemberID: session.member.id,
+                        workspace: session.workspaceID,
+                        members: model.membersByID,
+                        backend: backend
+                    )
+                } else {
+                    unavailableWorkNotification("The session may have expired or is not visible to this member.")
+                }
+            }
+        }
+    }
+
+    private func deepLinkedWorkSession(_ link: IOSPushDeepLink) -> IOSWorkSession? {
+        let rootID = link.threadRootID ?? link.messageID
+        return workModel.sessions.first { $0.rootMessageId == rootID }
+    }
+
+    private func unavailableWorkNotification(_ description: String) -> some View {
+        ContentUnavailableView(
+            "Work session unavailable",
+            systemImage: "terminal",
+            description: Text(description)
+        )
+        .navigationTitle("Work")
     }
 }
 
@@ -119,6 +178,7 @@ struct IOSConversationDestination: View {
     let backend: any IOSConversationBackend
     let workspace: WorkspaceID
     let huddleService: any IOSHuddleService
+    let pushLink: IOSPushDeepLink?
 
     var body: some View {
         IOSTimelineView(
@@ -128,6 +188,9 @@ struct IOSConversationDestination: View {
             backend: backend,
             workspace: workspace,
             huddleService: huddleService,
+            threadRoot: pushLink?.threadRootID,
+            focusMessageID: pushLink?.messageID,
+            showsComposer: pushLink?.threadRootID == nil,
             onReadState: channelListModel.applyReadState
         )
     }
@@ -192,7 +255,8 @@ private struct IOSChannelSearchView: View {
                 currentMemberID: session.member.id,
                 backend: backend,
                 workspace: session.workspaceID,
-                huddleService: huddleService
+                huddleService: huddleService,
+                pushLink: nil
             )
         } label: {
             IOSChannelRow(item: item)
@@ -266,7 +330,8 @@ private struct IOSActivityView: View {
                                 currentMemberID: session.member.id,
                                 backend: backend,
                                 workspace: session.workspaceID,
-                                huddleService: huddleService
+                                huddleService: huddleService,
+                                pushLink: nil
                             )
                         } label: {
                             IOSChannelRow(item: item)
@@ -285,6 +350,7 @@ private struct IOSActivityView: View {
 private struct IOSProfileView: View {
     let session: IOSSession
     let workspaceName: String
+    let channelListModel: IOSChannelListModel
     @Binding var developerModeEnabled: Bool
     let signOut: @MainActor () async -> Void
 
@@ -298,6 +364,14 @@ private struct IOSProfileView: View {
             Section("Workspace") {
                 LabeledContent("Name", value: workspaceName)
                 LabeledContent("Server", value: session.baseURL.host ?? session.baseURL.absoluteString)
+            }
+            Section("Notifications") {
+                NavigationLink {
+                    IOSNotificationSettingsView(model: channelListModel)
+                } label: {
+                    Label("Notification settings", systemImage: "bell.badge")
+                }
+                .accessibilityIdentifier("profileNotificationSettings")
             }
             Section {
                 Toggle("Developer Mode", isOn: $developerModeEnabled)
@@ -315,6 +389,102 @@ private struct IOSProfileView: View {
             }
         }
         .navigationTitle("Profile")
+    }
+}
+
+@MainActor
+private struct IOSNotificationSettingsView: View {
+    let model: IOSChannelListModel
+    @State private var actionPreferences = IOSNotificationActionPreferenceStore.shared.load()
+
+    var body: some View {
+        Form {
+            Section {
+                actionToggle(.message, title: "Messages", detail: "Quick reply")
+                actionToggle(.mention, title: "Mentions", detail: "Quick reply")
+                actionToggle(.approval, title: "Approvals", detail: "Approve or reject")
+                actionToggle(.work, title: "Work", detail: "Work notification category")
+            } header: {
+                Text("Lock Screen actions")
+            } footer: {
+                Text("These switches change actions shown when you press and hold a notification. They do not stop delivery.")
+            }
+
+            Section {
+                if model.allItems.isEmpty {
+                    Text("No channels are available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.allItems) { item in
+                        Toggle(isOn: channelMuteBinding(item)) {
+                            Label(item.title, systemImage: item.isDirectMessage ? "person" : "number")
+                        }
+                        .disabled(model.isMutating(item.id))
+                        .accessibilityIdentifier("notification.channel.\(item.id.description.lowercased())")
+                    }
+                }
+            } header: {
+                Text("Channel delivery")
+            } footer: {
+                Text("Turn a switch off to mute all push notifications for that channel, including mentions. Unread counts are unchanged.")
+            }
+
+            Section {
+                Button("Open iOS notification settings") {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
+            }
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert(
+            "Notification update failed",
+            isPresented: Binding(
+                get: { model.actionFailureMessage != nil },
+                set: { if !$0 { model.clearActionFailure() } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) { model.clearActionFailure() }
+        } message: {
+            Text(model.actionFailureMessage ?? "Try again.")
+        }
+    }
+
+    private func actionToggle(
+        _ category: MomoPushCategory,
+        title: String,
+        detail: String
+    ) -> some View {
+        Toggle(isOn: actionPreferenceBinding(category)) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("notification.action.\(category.rawValue)")
+    }
+
+    private func actionPreferenceBinding(_ category: MomoPushCategory) -> Binding<Bool> {
+        Binding(
+            get: { actionPreferences.isEnabled(category) },
+            set: { enabled in
+                actionPreferences.set(category, enabled: enabled)
+                IOSNotificationActionPreferenceStore.shared.save(actionPreferences)
+                IOSNotificationCategoryRegistry.register(preferences: actionPreferences)
+            }
+        )
+    }
+
+    private func channelMuteBinding(_ item: IOSChannelListItem) -> Binding<Bool> {
+        Binding(
+            get: { !item.isMuted },
+            set: { receivesNotifications in
+                Task { await model.setChannelMuted(item.id, muted: !receivesNotifications) }
+            }
+        )
     }
 }
 
