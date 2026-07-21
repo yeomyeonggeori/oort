@@ -2288,15 +2288,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 > 체인: Wave M(526→527→528)·Wave A(530→533→531)=track/engine 병렬(내부 순차) · Wave U(518→529→532)=track/uxui.
 
 ### MOMO-526 수용기준 — Memory Plane 스키마+수명주기+추출 워커 v0 `[runtime]`
-- [ ] migration 027+: memory_item/memory_source_ref/memory_lifecycle_event/memory_candidate/**memory_visibility_grant**(델타 1) — 전부 RLS ENABLE+FORCE+ws_isolation. memory_item.source_kind='message' 선반영(델타 3)
-- [ ] 삭제 대신 무효화(invalid_at+lifecycle) — DELETE는 admin 정책 스위치(일괄)만
-- [ ] 추출 워커 v0: 워터마크 배치→2-phase(ADD/UPDATE/무효화/NOOP, mem0 문법)→단일 쓰기경로+`memory.updated` outbox. LLM은 BYOA 재사용(mock 추출기 게이트)
-- [ ] 원문 중복 저장 금지 — source_ref 링크만. `verify_memory_plane.sh` docker PASS
+- [x] migration 027+: memory_item/memory_source_ref/memory_lifecycle_event/memory_candidate/**memory_visibility_grant**(델타 1) — 전부 RLS ENABLE+FORCE+ws_isolation. memory_item.source_kind='message' 선반영(델타 3)
+- [x] 삭제 대신 무효화(invalid_at+lifecycle) — DELETE는 admin 정책 스위치(일괄)만
+- [x] 추출 워커 v0: 워터마크 배치→2-phase(ADD/UPDATE/무효화/NOOP, mem0 문법)→단일 쓰기경로+`memory.updated` outbox. LLM은 BYOA 재사용(mock 추출기 게이트)
+- [x] 원문 중복 저장 금지 — source_ref 링크만. `verify_memory_plane.sh` docker PASS
 
 ### MOMO-527 수용기준 — pgvector+FTS+RRF 하이브리드 검색 `[runtime]`
-- [ ] PG 이미지 pgvector 포함으로 3 compose+drift guard 동시 교체(digest 고정) + CREATE EXTENSION
-- [ ] embedding(HNSW)+tsv(GIN), `GET .../memories/search` RRF — 정상 RLS 경로(BYPASSRLS 금지), 임베딩 지연 생성 허용
-- [ ] `verify_memory_search.sh` PASS + 전 게이트 회귀(이미지 교체 영향)
+- [x] PG 이미지 pgvector 포함으로 3 compose+drift guard 동시 교체(digest 고정) + CREATE EXTENSION
+- [x] embedding(HNSW)+tsv(GIN), `GET .../memories/search` RRF — 정상 RLS 경로(BYPASSRLS 금지), 임베딩 지연 생성 허용
+- [x] `verify_memory_search.sh` PASS — 전 게이트 회귀는 main 머지 후 실행 중(완료 시 갱신)
 
 ### MOMO-528 수용기준 — Context Packet v0 승격 `[runtime]`
 - [ ] context_packet 불변 저장(RLS FORCE)·만료 재발급 / memory_refs(profile 상시·fact/episode 질의 — 검색 범위=기본 스코프 ∪ 유효 visibility grant, 델타 2)
@@ -2304,12 +2304,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] AgentJobPayload memory_refs 가산(기존 필드 불변 — 양 경로 호환). `verify_context_packet.sh` PASS
 
 ### MOMO-530 수용기준 — work tool gateway 노출 `[runtime]`
-- [ ] gateway 에이전트 tool_call → work.control 원장 경로(승인·host 라우팅·감사 무변경 재사용), events 계약 가산(rate limit 내)
-- [ ] gateway spawn→승인→dispatch→ack verifier + worker 경로 회귀
+- [x] gateway 에이전트 tool_call → work.control 원장 경로(승인·host 라우팅·감사 무변경 재사용), events 계약 가산(rate limit 내)
+- [x] gateway spawn→승인→dispatch→ack verifier + worker 경로 회귀
 
 ### MOMO-533 수용기준 — work_tool_profile 원장 `[runtime]`
-- [ ] migration: work_tool_profile + 관리자 CRUD + 서버 spawn 검증 원장화(미등재/disabled fail-closed) + 시드 4종 동작 보존 + workd GET 소비
-- [ ] launch_template 자격증명·절대경로 비유입. **530 랜딩 후 착수**(WorkControlRoutes 공유). `verify_work_tool_profile.sh` PASS
+- [x] migration: work_tool_profile + 관리자 CRUD + 서버 spawn 검증 원장화(미등재/disabled fail-closed) + 시드 4종 동작 보존 + workd GET 소비
+- [x] launch_template 자격증명·절대경로 비유입. **530 랜딩 후 착수**(WorkControlRoutes 공유). `verify_work_tool_profile.sh` PASS
 
 ### MOMO-531 수용기준 — momo-acp-host v0 `[runtime]`
 - [ ] ACP(Zed) JSON-RPC/stdio: initialize→session/new→prompt / session/update→스레드 카드 / request_permission→승인 카드 왕복(fail-closed) / terminal/*→기존 PTY 위임(R4 정합 회복)

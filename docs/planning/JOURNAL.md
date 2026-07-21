@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-22 (Fable 패브릭 2라운드) · 527·533 랜딩 + main 머지 + M-3/A-3 스폰 + 플랫폼 에이전트 리서치
+- **랜딩→main(e7c6592)**: #611 MOMO-527 pgvector+FTS+RRF(verify_memory_search 전 항목 PASS) / #612 MOMO-533 work_tool_profile(verifier PASS). track/engine 완전 랜딩(main과 동기). **528(#598)·531(#601) worker 스폰** — 528에 델타2 서빙 필터+memory_search_hybrid grant 확장 지시.
+- 검수 발견 3건(패킷 §4 성문화): 포트 28040대는 attachment와 충돌(신규=28100대부터, 27850~28093 사용 중) / 시드에 message 행 없음(verifier는 API 생성 — memory_plane 패턴) / Swift Int=bigint 바인딩이 SQL 함수 integer 파라미터 해석 실패(500) → `::integer` 캐스트. 마이그레이션 병렬 충돌: 028 중복 → 533을 029 리넘버.
+- **리서치 20-00**(성재 발제): eve/Cloudflare 플랫폼 에이전트 = hermes와 본질 동일(차이=거주지·컨텍스트 소유자). momo=경쟁 아닌 "에이전트가 출근하는 사무실". 권고: MOMO-534(eve/CF momo 채널 어댑터)·535(outbound 이벤트 구독)·0130 D4 상향. 성재 결정 대기.
+- 남은 것: 전 게이트 회귀(pgvector 이미지 영향 — internal-alpha 실행 예정), 528/531 검수·랜딩 후 동생 ⑩⑪ 개방, 공개 게이트 법무 패키지.
+
 ## 2026-07-22 (Fable 패브릭 1라운드) · 526·530·W-6 랜딩 + 비전 정합 델타 + 공개 게이트 준비
 - **랜딩(track/engine 14c1e25)**: #608 MOMO-526 Memory Plane(docker PASS — 2-phase/무효화/워터마크/RLS, 델타1·3 오케스트레이터 가산: visibility_grant+source_kind) / #606 MOMO-530 gateway work tool(hermes 실런 rc=0) / #607 W-6 웹 Work 관전(vitest 71). **M-2(597)·A-2(600) worker 스폰** — 연쇄 진행.
 - 검수 발견 3건: 596 demo password NULL 가정(진실=migration 005가 dev-password 백필 — §5.1 갱신 필요) / 599 fail() 미정의 127 / 599 approval 단정 UUID lower 누락(§5.1-3 재발). 599 사용 전제(소스 DB migrate 선행) 실측 명문화.
