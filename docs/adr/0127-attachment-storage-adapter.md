@@ -1,6 +1,6 @@
 # ADR-0127: 첨부 저장 어댑터 — 셀프호스트용 S3 호환 백엔드
 
-- Status: **Proposed** (2026-07-21, Fable 기안 — 성재 승인 대기. 오픈소스화 우선순위 2)
+- Status: **Accepted** (2026-07-21, 성재 승인 — 파생 MOMO-521/522 발급)
 - 관련: MOMO-474(Drive workspace archive — 현행), ADR-0121(셀프호스트 배포 — D5 Zulip 모델), docs/planning/2026-07-21-opensource-cowork-diagnosis.md §4-1
 - 발단: 셀프호스팅 진단 — 첨부 저장이 `GoogleDriveArchiveClient` 유일 실구현이라 Google Workspace 없는 셀프호스터는 첨부 기능 자체가 불가(하드 블로커).
 
