@@ -23,7 +23,7 @@ enum AppBuilder {
         return Application(
             router: router,
             configuration: .init(
-                address: .hostname("127.0.0.1", port: config.port),
+                address: .hostname(config.host, port: config.port),
                 serverName: "LinkShort"
             )
         )

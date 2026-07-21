@@ -9,7 +9,7 @@ struct Redirector: Sendable {
         guard Self.isURLSafe(code) else {
             throw RedirectError.invalidCode
         }
-        return "\(targetBaseURL)/join/\(code)"
+        return "\(targetBaseURL)/join?code=\(code)"
     }
 
     static func isURLSafe(_ code: String) -> Bool {
