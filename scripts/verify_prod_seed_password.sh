@@ -58,7 +58,7 @@ docker run --detach --rm \
   --env "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" \
   --publish 127.0.0.1::5432 \
   --volume "$REPO_ROOT:/workspace:ro" \
-  postgres:18 >/dev/null
+  pgvector/pgvector:0.8.5-pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0 >/dev/null
 
 for _ in $(seq 1 60); do
   if docker exec "$POSTGRES_CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then

@@ -16,6 +16,16 @@ for compose in infra/docker-compose.yml infra/docker-compose.e2e.yml infra/prod/
   fi
 done
 
+for runtime_gate in \
+  scripts/verify_runtime_role_bootstrap.sh \
+  scripts/verify_prod_seed_password.sh \
+  scripts/verify_backup_restore_rehearsal.sh; do
+  grep -Fq "$IMAGE" "$runtime_gate" || {
+    echo "[pgvector-contract] FAIL $runtime_gate launches a PostgreSQL server without pgvector" >&2
+    exit 1
+  }
+done
+
 MIGRATION=server/Migrations/028_memory_search.sql
 for contract in \
   'CREATE EXTENSION IF NOT EXISTS vector' \
