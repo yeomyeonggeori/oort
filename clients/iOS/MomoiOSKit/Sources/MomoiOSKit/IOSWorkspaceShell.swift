@@ -7,12 +7,13 @@ public struct IOSWorkspaceView: View {
     private let session: IOSSession
     private let bootstrap: WorkspaceBootstrap
     private let signOut: @MainActor () async -> Void
-    private let backend: any IOSConversationBackend
+    private let backend: MomoServerConversationClient
     private let huddleService: any IOSHuddleService
     @Binding private var selectedTab: IOSAppTab
     @Binding private var homePath: [IOSPushDeepLink]
     @State private var model: IOSChannelListModel
     @State private var workModel: IOSWorkListModel
+    @State private var workApprovalModel: IOSWorkApprovalInboxModel
     @AppStorage("momo.ios.developer-mode") private var developerModeEnabled = false
 
     public init(
@@ -32,6 +33,7 @@ public struct IOSWorkspaceView: View {
         _homePath = homePath
         _model = State(initialValue: IOSChannelListModel(currentMemberID: session.member.id, backend: backend))
         _workModel = State(initialValue: IOSWorkListModel(backend: backend))
+        _workApprovalModel = State(initialValue: IOSWorkApprovalInboxModel(backend: backend))
     }
 
     public var body: some View {
@@ -78,8 +80,13 @@ public struct IOSWorkspaceView: View {
             NavigationStack {
                 IOSWorkView(
                     model: workModel,
+                    approvalModel: workApprovalModel,
                     channelIDs: bootstrap.channels.filter { !$0.isArchived }.map(\.id),
                     isActive: selectedTab == .work,
+                    currentMemberID: session.member.id,
+                    workspace: session.workspaceID,
+                    members: model.membersByID,
+                    backend: backend,
                     developerModeEnabled: $developerModeEnabled
                 )
             }
