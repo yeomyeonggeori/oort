@@ -33,6 +33,7 @@ let package = Package(
         .executable(name: "AgentWorker", targets: ["AgentWorker"]),
     ],
     dependencies: [
+        .package(path: "../../services/OutboundHTTPPolicy"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
@@ -42,6 +43,7 @@ let package = Package(
         .executableTarget(
             name: "AgentWorker",
             dependencies: [
+                .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
@@ -53,7 +55,10 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentWorkerTests",
-            dependencies: ["AgentWorker"],
+            dependencies: [
+                "AgentWorker",
+                .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

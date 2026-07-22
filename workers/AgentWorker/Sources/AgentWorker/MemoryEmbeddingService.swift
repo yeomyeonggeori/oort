@@ -2,6 +2,7 @@ import AsyncHTTPClient
 import Foundation
 import Logging
 import NIOCore
+import OutboundHTTPPolicy
 import PostgresNIO
 import ServiceLifecycle
 
@@ -96,6 +97,7 @@ struct HermesMemoryEmbeddingProvider: MemoryEmbeddingProvider {
 struct MemoryEmbeddingService: Service, Sendable {
     let pg: PostgresClient
     let provider: any MemoryEmbeddingProvider
+    let consentGate: MemoryProviderConsentGate
     let pollInterval: Duration
     let batchSize: Int
     let poisonThreshold: Int
@@ -105,6 +107,7 @@ struct MemoryEmbeddingService: Service, Sendable {
     init(
         pg: PostgresClient,
         provider: any MemoryEmbeddingProvider,
+        providerTrust: ProviderEndpointTrust,
         pollInterval: Duration,
         batchSize: Int,
         poisonThreshold: Int = 5,
@@ -113,6 +116,9 @@ struct MemoryEmbeddingService: Service, Sendable {
     ) {
         self.pg = pg
         self.provider = provider
+        self.consentGate = MemoryProviderConsentGate(
+            pg: pg, providerTrust: providerTrust, logger: logger
+        )
         self.pollInterval = pollInterval
         self.batchSize = batchSize
         self.poisonThreshold = poisonThreshold
@@ -146,7 +152,15 @@ struct MemoryEmbeddingService: Service, Sendable {
         while !Task.isCancelled {
             var delay = pollInterval
             do {
+                if let workspaceID = try await deniedPendingWorkspace() {
+                    try await consentGate.recordRequiredOnce(workspaceID: workspaceID)
+                }
                 if let batch = try await loadBatch() {
+                    guard try await consentGate.isAllowed(workspaceID: batch.workspaceID) else {
+                        try await consentGate.recordRequiredOnce(workspaceID: batch.workspaceID)
+                        await sleeper.sleep(for: delay)
+                        continue
+                    }
                     do {
                         _ = try await backfill(batch)
                         retry.recordSuccess(for: batch.retryKey)
@@ -176,6 +190,10 @@ struct MemoryEmbeddingService: Service, Sendable {
     @discardableResult
     func backfillOnce() async throws -> Int {
         guard let batch = try await loadBatch() else { return 0 }
+        guard try await consentGate.isAllowed(workspaceID: batch.workspaceID) else {
+            try await consentGate.recordRequiredOnce(workspaceID: batch.workspaceID)
+            return 0
+        }
         return try await backfill(batch)
     }
 
@@ -187,6 +205,11 @@ struct MemoryEmbeddingService: Service, Sendable {
                 FROM memory_item mi
                WHERE mi.invalid_at IS NULL
                  AND mi.embedding IS NULL
+                 AND (\(!consentGate.requiresConsent) OR EXISTS (
+                   SELECT 1 FROM workspace w
+                    WHERE w.id = mi.workspace_id
+                      AND w.memory_external_provider_consent
+                 ))
                  AND NOT EXISTS (
                    SELECT 1
                      FROM audit_log poisoned
@@ -203,6 +226,11 @@ struct MemoryEmbeddingService: Service, Sendable {
               JOIN target_workspace tw ON tw.workspace_id = mi.workspace_id
              WHERE mi.invalid_at IS NULL
                AND mi.embedding IS NULL
+               AND (\(!consentGate.requiresConsent) OR EXISTS (
+                 SELECT 1 FROM workspace w
+                  WHERE w.id = mi.workspace_id
+                    AND w.memory_external_provider_consent
+               ))
                AND NOT EXISTS (
                  SELECT 1
                    FROM audit_log poisoned
@@ -223,6 +251,24 @@ struct MemoryEmbeddingService: Service, Sendable {
             return .init(id: id, body: body)
         }
         return .init(workspaceID: workspaceID, items: items)
+    }
+
+    private func deniedPendingWorkspace() async throws -> UUID? {
+        guard consentGate.requiresConsent else { return nil }
+        let rows = try await pg.query(
+            """
+            SELECT mi.workspace_id
+              FROM memory_item mi
+              JOIN workspace w ON w.id = mi.workspace_id
+             WHERE mi.invalid_at IS NULL
+               AND mi.embedding IS NULL
+               AND NOT w.memory_external_provider_consent
+             ORDER BY mi.updated_at, mi.id
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        return try rows.first?.decode(UUID.self)
     }
 
     private func backfill(_ batch: Batch) async throws -> Int {

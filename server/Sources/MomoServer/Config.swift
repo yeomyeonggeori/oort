@@ -1,4 +1,5 @@
 import Foundation
+import OutboundHTTPPolicy
 
 /// Server configuration loaded from environment variables.
 ///
@@ -343,6 +344,13 @@ struct AgentProviderConfig: Sendable {
 
     var endpointLabel: String {
         Self.redactedEndpointLabel(hermesBaseURL)
+    }
+
+    var memoryProviderTrust: ProviderEndpointTrust {
+        ProviderEndpointTrustPolicy.classify(
+            providerMode: mode.rawValue,
+            baseURL: hermesBaseURL
+        )
     }
 
     var keyConfigured: Bool {

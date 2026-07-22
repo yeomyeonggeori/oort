@@ -174,8 +174,25 @@ final class MemoryRoutesTests: XCTestCase {
             "operationId: searchMemories",
             "operationId: updateMemory", "operationId: invalidateMemory",
             "operationId: disableAndDeleteAllMemories", "operationId: putMemoryPolicy",
+            "operationId: getMemoryExternalProviderConsent",
+            "operationId: putMemoryExternalProviderConsent",
         ] {
             XCTAssertTrue(openAPI.contains(operation))
+        }
+
+        let consentMigration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/035_memory_external_provider_consent.sql"
+            ),
+            encoding: .utf8
+        )
+        for contract in [
+            "memory_external_provider_consent boolean NOT NULL DEFAULT false",
+            "memory_external_provider_consent_updated_by",
+            "memory.extraction.consent_required",
+            "CREATE UNIQUE INDEX audit_log_memory_extraction_consent_required_once",
+        ] {
+            XCTAssertTrue(consentMigration.contains(contract), "missing \(contract)")
         }
     }
 

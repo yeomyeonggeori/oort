@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-548 외부 provider 추출 동의 게이트 (#625, 2026-07-22)
+
+- migration 035에 기존 memory enabled 정책과 별도인 워크스페이스 외부 provider 명시 동의(기본 false)를 추가했다. 서버 admin REST/OpenAPI는 동의·공유 provider trust 판정·최종 추출 허용 여부를 투영한다.
+- AgentWorker 추출/임베딩은 external 미동의 시 원문 provider 호출을 건너뛰고 `memory.extraction.consent_required`를 워크스페이스당 1회 기록한다. local-mock과 loopback/사설 self-host는 현행 유지한다.
+- 공유 trust 정책·worker 동의 판정 유닛과 Swift/OpenAPI 정적 게이트를 수행하며, Docker `verify_memory_plane.sh` 동의 전이·회귀는 오케스트레이터 인수 전까지 `runtime-unverified`다.
+
 ## MOMO-535 outbound 이벤트 구독 (#617, 2026-07-22)
 
 - migration 033에 `event_subscription` FORCE RLS 원장과 mention·approval_request·work 상태 전이 transactional outbox 투영을 추가하고, 관리자 CRUD·감사·one-time HMAC secret 발급을 OpenAPI와 동기화했다. 평문 secret은 저장·재조회하지 않는다.

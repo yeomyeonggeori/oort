@@ -127,6 +127,38 @@ LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
     '{email:$e,password:$p,workspace:$w}')")"
 OWNER_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -er '.accessToken')"
 
+# External-provider consent is a distinct, default-deny workspace ledger axis.
+# This verifier runs local-mock, so extraction remains allowed regardless of
+# consent while the admin transition and audit contract are exercised.
+CONSENT_JSON="$(curl -fsS \
+  "$BASE_URL/v1/workspaces/$WS_ID/memory-external-provider-consent" \
+  -H "Authorization: Bearer $OWNER_TOKEN")"
+printf '%s' "$CONSENT_JSON" | jq -e \
+  '.memoryExternalProviderConsent.consented == false
+   and .memoryExternalProviderConsent.providerTrust == "local-mock"
+   and .memoryExternalProviderConsent.extractionAllowed == true' >/dev/null \
+  || fail "default external-provider consent projection is not fail-closed/local-safe"
+for consented in true false; do
+  CONSENT_JSON="$(curl -fsS -X PUT \
+    "$BASE_URL/v1/workspaces/$WS_ID/memory-external-provider-consent" \
+    -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
+    --data "{\"consented\":$consented}")"
+  printf '%s' "$CONSENT_JSON" | jq -e \
+    --argjson expected "$consented" \
+    '.memoryExternalProviderConsent.consented == $expected
+     and .memoryExternalProviderConsent.providerTrust == "local-mock"
+     and .memoryExternalProviderConsent.extractionAllowed == true' >/dev/null \
+    || fail "external-provider consent transition failed expected=$consented"
+done
+consent_audit="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID'
+   AND action='memory.external_provider_consent.updated';
+SQL
+)"
+[ "$consent_audit" = "2" ] || fail "external-provider consent audit count=$consent_audit"
+pass "external-provider consent default and admin transitions are independent from local extraction"
+
 send_marker() {
   local marker="$1" client_id response
   client_id="$(uuid)"

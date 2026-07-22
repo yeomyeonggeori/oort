@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import OutboundHTTPPolicy
 import PostgresNIO
 import ServiceLifecycle
 
@@ -228,6 +229,7 @@ struct HermesMemoryExtractor: MemoryExtracting {
 struct MemoryExtractionService: Service {
     let pg: PostgresClient
     let extractor: any MemoryExtracting
+    let consentGate: MemoryProviderConsentGate
     let pollInterval: Duration
     let batchSize: Int
     let poisonThreshold: Int
@@ -237,6 +239,7 @@ struct MemoryExtractionService: Service {
     init(
         pg: PostgresClient,
         extractor: any MemoryExtracting,
+        providerTrust: ProviderEndpointTrust,
         pollInterval: Duration,
         batchSize: Int,
         poisonThreshold: Int = 5,
@@ -245,6 +248,9 @@ struct MemoryExtractionService: Service {
     ) {
         self.pg = pg
         self.extractor = extractor
+        self.consentGate = MemoryProviderConsentGate(
+            pg: pg, providerTrust: providerTrust, logger: logger
+        )
         self.pollInterval = pollInterval
         self.batchSize = batchSize
         self.poisonThreshold = poisonThreshold
@@ -293,7 +299,15 @@ struct MemoryExtractionService: Service {
         while !Task.isCancelled {
             var retryDelay: Duration?
             do {
+                if let workspaceID = try await deniedPendingWorkspace() {
+                    try await consentGate.recordRequiredOnce(workspaceID: workspaceID)
+                }
                 while let claim = try await claimOne() {
+                    guard try await consentGate.isAllowed(workspaceID: claim.workspaceID) else {
+                        try await consentGate.recordRequiredOnce(workspaceID: claim.workspaceID)
+                        try await release(claim)
+                        break
+                    }
                     if await process(claim) {
                         retry.recordSuccess(for: claim.retryKey)
                     } else {
@@ -383,6 +397,11 @@ struct MemoryExtractionService: Service {
                   ) a ON true
                  WHERE cs.last_seq > mec.last_extracted_seq
                    AND (mec.leased_until IS NULL OR mec.leased_until < now())
+                   AND (\(!consentGate.requiresConsent) OR EXISTS (
+                     SELECT 1 FROM workspace w
+                      WHERE w.id = mec.workspace_id
+                        AND w.memory_external_provider_consent
+                   ))
                    AND NOT EXISTS (
                      SELECT 1 FROM workspace_memory_policy p
                       WHERE p.workspace_id = mec.workspace_id AND NOT p.enabled
@@ -457,6 +476,30 @@ struct MemoryExtractionService: Service {
                 toSeq: messages.last!.seq, messages: messages, existing: existing
             )
         }
+    }
+
+    private func deniedPendingWorkspace() async throws -> UUID? {
+        guard consentGate.requiresConsent else { return nil }
+        let rows = try await pg.query(
+            """
+            SELECT mec.workspace_id
+              FROM memory_extraction_cursor mec
+              JOIN channel_seq cs
+                ON cs.workspace_id = mec.workspace_id
+               AND cs.channel_id = mec.channel_id
+              JOIN workspace w ON w.id = mec.workspace_id
+             WHERE cs.last_seq > mec.last_extracted_seq
+               AND NOT w.memory_external_provider_consent
+               AND NOT EXISTS (
+                 SELECT 1 FROM workspace_memory_policy p
+                  WHERE p.workspace_id = mec.workspace_id AND NOT p.enabled
+               )
+             ORDER BY mec.updated_at, mec.workspace_id
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        return try rows.first?.decode(UUID.self)
     }
 
     private func process(_ claim: Claim) async -> Bool {
