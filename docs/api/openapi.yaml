@@ -3759,6 +3759,54 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/memory-external-provider-consent:
+    get:
+      tags: [memories]
+      operationId: getMemoryExternalProviderConsent
+      summary: Read external-provider memory consent and the server policy verdict.
+      description: >
+        Active workspace members may read this projection. Provider trust is
+        classified by the server from its configured provider mode and endpoint;
+        credentials and raw endpoint query data are never returned. The consent
+        value is a separate axis from the workspace memory enabled switch.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Current explicit consent, provider trust, and extraction verdict.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryExternalProviderConsentResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    put:
+      tags: [memories]
+      operationId: putMemoryExternalProviderConsent
+      summary: Replace the workspace external-provider memory consent.
+      description: >
+        Human workspace admin only. Existing workspaces default to false, and
+        every update is recorded in the workspace audit ledger. This operation
+        does not enable/disable or purge workspace memory.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PutMemoryExternalProviderConsentRequest"}
+      responses:
+        "200":
+          description: Updated consent and the server policy verdict.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryExternalProviderConsentResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4069,6 +4117,13 @@ components:
       properties:
         enabled: {type: boolean}
 
+    PutMemoryExternalProviderConsentRequest:
+      type: object
+      additionalProperties: false
+      required: [consented]
+      properties:
+        consented: {type: boolean}
+
     ContextPacketResponse:
       type: object
       additionalProperties: false
@@ -4174,6 +4229,34 @@ components:
       properties:
         memoryPolicy: {$ref: "#/components/schemas/MemoryPolicy"}
         deletedCount: {type: integer, minimum: 0}
+
+    MemoryExternalProviderConsent:
+      type: object
+      additionalProperties: false
+      required:
+        - workspaceId
+        - consented
+        - providerTrust
+        - providerEndpointLabel
+        - extractionAllowed
+      properties:
+        workspaceId: {type: string, format: uuid}
+        consented: {type: boolean, default: false}
+        providerTrust: {type: string, enum: [local-mock, self-hosted, external]}
+        providerEndpointLabel:
+          type: string
+          description: Redacted provider scheme/host/port/path without credentials or query.
+        extractionAllowed: {type: boolean}
+        updatedBy: {type: string, format: uuid}
+        updatedAtMs: {type: integer, format: int64}
+
+    MemoryExternalProviderConsentResponse:
+      type: object
+      additionalProperties: false
+      required: [memoryExternalProviderConsent]
+      properties:
+        memoryExternalProviderConsent:
+          $ref: "#/components/schemas/MemoryExternalProviderConsent"
 
     # ---- Auth ----------------------------------------------------------------
     LoginRequest:

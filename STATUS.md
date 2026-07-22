@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-548 외부 provider 추출 동의 게이트 (#625, 2026-07-22)
+
+- migration 035에 기존 memory enabled 정책과 별도인 워크스페이스 외부 provider 명시 동의(기본 false)를 추가했다. 서버 admin REST/OpenAPI는 동의·공유 provider trust 판정·최종 추출 허용 여부를 투영한다.
+- AgentWorker 추출/임베딩은 external 미동의 시 원문 provider 호출을 건너뛰고 `memory.extraction.consent_required`를 워크스페이스당 1회 기록한다. local-mock과 loopback/사설 self-host는 현행 유지한다.
+- 공유 trust 정책·worker 동의 판정 유닛과 Swift/OpenAPI 정적 게이트를 수행하며, Docker `verify_memory_plane.sh` 동의 전이·회귀는 오케스트레이터 인수 전까지 `runtime-unverified`다.
 ## MOMO-538 셀프호스트 eve 옵션 프로파일 (#619, 2026-07-22)
 
 - dev/prod compose에 기본 비활성 `eve` profile을 추가했다. Node 24.4.1 digest, eve 0.27.0, Postgres world 5.0.0-beta.27을 고정하고 MOMO-534 채널 프리셋과 모든 자격증명은 read-only mount/env 경계로만 주입한다.

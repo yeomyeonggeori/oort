@@ -1,4 +1,5 @@
 import Foundation
+import OutboundHTTPPolicy
 import XCTest
 @testable import AgentWorker
 
@@ -49,6 +50,38 @@ final class MemoryExtractionTests: XCTestCase {
         await sleeper.sleep(for: .seconds(10))
         let durations = await sleeper.durations
         XCTAssertEqual(durations, [.seconds(5), .seconds(10)])
+    }
+
+    func testExternalProviderWithoutConsentSkipsAndAudits() {
+        XCTAssertEqual(
+            MemoryProviderConsentDecision.evaluate(
+                providerTrust: .external,
+                workspaceConsented: false
+            ),
+            .skipAndAudit
+        )
+    }
+
+    func testExternalProviderWithConsentProceeds() {
+        XCTAssertEqual(
+            MemoryProviderConsentDecision.evaluate(
+                providerTrust: .external,
+                workspaceConsented: true
+            ),
+            .proceed
+        )
+    }
+
+    func testLocalAndSelfHostedProvidersProceedWithoutConsent() {
+        for trust in [ProviderEndpointTrust.localMock, .selfHosted] {
+            XCTAssertEqual(
+                MemoryProviderConsentDecision.evaluate(
+                    providerTrust: trust,
+                    workspaceConsented: false
+                ),
+                .proceed
+            )
+        }
     }
 
     func testMockEmbeddingIsStableNormalizedAnd384Dimensional() throws {

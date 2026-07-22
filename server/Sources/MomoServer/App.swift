@@ -180,7 +180,11 @@ enum AppBuilder {
             memoryQueryEmbedding = MockMemoryQueryEmbedding()
         }
         MemoryRoutes(
-            db: db, limiter: rateLimiter, queryEmbedding: memoryQueryEmbedding
+            db: db,
+            limiter: rateLimiter,
+            queryEmbedding: memoryQueryEmbedding,
+            providerTrust: config.agentProvider.memoryProviderTrust,
+            providerEndpointLabel: config.agentProvider.endpointLabel
         ).add(to: authed)
         attachmentRoutes.addProtected(to: authed)
         let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)

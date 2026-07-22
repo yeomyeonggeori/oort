@@ -1,6 +1,7 @@
 import Foundation
 import Hummingbird
 import Logging
+import OutboundHTTPPolicy
 import PostgresNIO
 
 struct MemorySourceRefRequest: Decodable, Sendable {
@@ -31,6 +32,10 @@ struct InvalidateMemoryRequest: Decodable, Sendable {
 
 struct PutMemoryPolicyRequest: Decodable, Sendable {
     let enabled: Bool
+}
+
+struct PutMemoryExternalProviderConsentRequest: Decodable, Sendable {
+    let consented: Bool
 }
 
 struct MemorySourceRefDTO: Codable, Sendable, Equatable {
@@ -90,6 +95,20 @@ struct MemoryPolicyResponse: ResponseEncodable {
     let deletedCount: Int?
 }
 
+struct MemoryExternalProviderConsentDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let workspaceId: String
+    let consented: Bool
+    let providerTrust: String
+    let providerEndpointLabel: String
+    let extractionAllowed: Bool
+    let updatedBy: String?
+    let updatedAtMs: Int64?
+}
+
+struct MemoryExternalProviderConsentResponse: ResponseEncodable {
+    let memoryExternalProviderConsent: MemoryExternalProviderConsentDTO
+}
+
 /// ADR-0129 Memory Plane CRUD and lifecycle surface.
 ///
 /// All access runs through the ordinary tenant transaction. Source rows are
@@ -104,6 +123,8 @@ struct MemoryRoutes: Sendable {
     let db: Database
     let limiter: SlidingWindowRateLimiter
     let queryEmbedding: any MemoryQueryEmbedding
+    let providerTrust: ProviderEndpointTrust
+    let providerEndpointLabel: String
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/memories/search", use: search)
@@ -114,6 +135,14 @@ struct MemoryRoutes: Sendable {
         group.delete("/v1/workspaces/:ws/memories", use: disableAndDeleteAll)
         group.get("/v1/workspaces/:ws/memory-policy", use: getPolicy)
         group.put("/v1/workspaces/:ws/memory-policy", use: putPolicy)
+        group.get(
+            "/v1/workspaces/:ws/memory-external-provider-consent",
+            use: getExternalProviderConsent
+        )
+        group.put(
+            "/v1/workspaces/:ws/memory-external-provider-consent",
+            use: putExternalProviderConsent
+        )
     }
 
     @Sendable
@@ -564,6 +593,80 @@ struct MemoryRoutes: Sendable {
     }
 
     @Sendable
+    func getExternalProviderConsent(
+        _ request: Request, context: AppRequestContext
+    ) async throws -> Response {
+        let (principal, workspaceID) = try Self.scope(context)
+        let consent = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            _ = try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal
+            )
+            return try await loadExternalProviderConsent(conn: conn, workspaceID: workspaceID)
+        }
+        return try MemoryExternalProviderConsentResponse(
+            memoryExternalProviderConsent: consent
+        ).response(from: request, context: context)
+    }
+
+    @Sendable
+    func putExternalProviderConsent(
+        _ request: Request, context: AppRequestContext
+    ) async throws -> Response {
+        let input = try await request.decode(
+            as: PutMemoryExternalProviderConsentRequest.self,
+            context: context
+        )
+        let (principal, workspaceID) = try Self.scope(context)
+        let consent = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            _ = try await WorkspaceAuthorization.requireAdmin(
+                conn: conn, logger: db.logger, principal: principal, forUpdate: true
+            )
+            let previousRows = try await conn.query(
+                "SELECT memory_external_provider_consent FROM workspace WHERE id = \(workspaceID) FOR UPDATE",
+                logger: db.logger
+            ).collect()
+            guard let previous = try previousRows.first?.decode(Bool.self) else {
+                throw HTTPError(.notFound, message: "workspace not found")
+            }
+            _ = try await conn.query(
+                """
+                UPDATE workspace
+                   SET memory_external_provider_consent = \(input.consented),
+                       memory_external_provider_consent_updated_by = \(principal.memberID),
+                       memory_external_provider_consent_updated_at = clock_timestamp(),
+                       updated_at = clock_timestamp()
+                 WHERE id = \(workspaceID)
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type, target_id,
+                   via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(principal.memberID),
+                   'memory.external_provider_consent.updated', 'workspace',
+                   \(workspaceID), \(principal.tokenID),
+                   jsonb_build_object(
+                     'schema', 'momo.memory.external_provider_consent.updated.v1',
+                     'previous', \(previous),
+                     'consented', \(input.consented),
+                     'provider_trust', \(providerTrust.rawValue),
+                     'provider_endpoint_label', \(providerEndpointLabel)))
+                """,
+                logger: db.logger
+            )
+            return try await loadExternalProviderConsent(
+                conn: conn, workspaceID: workspaceID
+            )
+        }
+        return try MemoryExternalProviderConsentResponse(
+            memoryExternalProviderConsent: consent
+        ).response(from: request, context: context)
+    }
+
+    @Sendable
     func disableAndDeleteAll(
         _ request: Request, context: AppRequestContext
     ) async throws -> Response {
@@ -917,6 +1020,34 @@ struct MemoryRoutes: Sendable {
         return MemoryPolicyDTO(
             workspaceId: workspaceID.uuidString, enabled: enabled,
             updatedBy: updatedBy?.uuidString, updatedAtMs: epochMs(updatedAt)
+        )
+    }
+
+    private func loadExternalProviderConsent(
+        conn: PostgresConnection, workspaceID: UUID
+    ) async throws -> MemoryExternalProviderConsentDTO {
+        let rows = try await conn.query(
+            """
+            SELECT memory_external_provider_consent,
+                   memory_external_provider_consent_updated_by,
+                   memory_external_provider_consent_updated_at
+              FROM workspace
+             WHERE id = \(workspaceID)
+            """,
+            logger: db.logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.notFound, message: "workspace not found")
+        }
+        let (consented, updatedBy, updatedAt) = try row.decode((Bool, UUID?, Date?).self)
+        return MemoryExternalProviderConsentDTO(
+            workspaceId: workspaceID.uuidString,
+            consented: consented,
+            providerTrust: providerTrust.rawValue,
+            providerEndpointLabel: providerEndpointLabel,
+            extractionAllowed: !providerTrust.requiresWorkspaceConsent || consented,
+            updatedBy: updatedBy?.uuidString,
+            updatedAtMs: updatedAt.map(Self.epochMs)
         )
     }
 

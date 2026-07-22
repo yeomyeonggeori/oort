@@ -84,6 +84,7 @@ struct AgentWorkerMain {
         let memoryWorker = MemoryExtractionService(
             pg: pg,
             extractor: memoryExtractor,
+            providerTrust: config.memoryProviderTrust,
             pollInterval: config.memoryExtractionPollInterval,
             batchSize: config.memoryExtractionBatchSize,
             poisonThreshold: config.memoryPoisonThreshold,
@@ -101,6 +102,7 @@ struct AgentWorkerMain {
         let memoryEmbeddingWorker = MemoryEmbeddingService(
             pg: pg,
             provider: memoryEmbeddingProvider,
+            providerTrust: config.memoryProviderTrust,
             pollInterval: config.memoryEmbeddingPollInterval,
             batchSize: config.memoryEmbeddingBatchSize,
             poisonThreshold: config.memoryPoisonThreshold,
