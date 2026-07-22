@@ -41,6 +41,10 @@ private enum MomoChannelMenuFocusTarget: Hashable {
     case leave
 }
 
+private struct MomoServedContextSelection: Identifiable {
+    let id: UUID
+}
+
 // MARK: - MessageListView  (seq-ordered)
 //
 // The channel timeline. Ordering authority is Message.seq (L4 §1.2 #3): the
@@ -102,6 +106,7 @@ public struct MessageListView: View {
     @State private var channelLeaveFailed = false
     @State private var selectedThreadRootID: MessageID?
     @State private var availableTimelineWidth: CGFloat = 0
+    @State private var servedContextSelection: MomoServedContextSelection?
 
     public init(
         viewModel: ChatViewModel,
@@ -293,6 +298,13 @@ public struct MessageListView: View {
                 pollQuestion: $pollQuestion,
                 pollOptions: $pollOptions,
                 selectedPlugins: $selectedPlugins
+            )
+        }
+        .sheet(item: $servedContextSelection) { selection in
+            MomoContextPacketInspectorView(
+                viewModel: viewModel,
+                packetID: selection.id,
+                copy: copy
             )
         }
         .confirmationDialog(
@@ -959,7 +971,9 @@ public struct MessageListView: View {
                 onOpenAttachment: viewModel.openDownloadedAttachment,
                 groupingStyle: item.startsGroup ? .groupStart : .compact,
                 timelineCopy: copy,
-                presentation: presentation
+                presentation: presentation,
+                memoryDelivery: item.message.runId.flatMap(viewModel.memoryDelivery(for:)),
+                onOpenServedContext: item.message.runId.flatMap(servedContextAction(for:))
             )
             .padding(.top, item.startsGroup ? 8 : 0)
             .background(
@@ -1023,6 +1037,8 @@ public struct MessageListView: View {
                 } ?? false,
                 copy: copy,
                 presentation: presentation,
+                memoryDelivery: viewModel.memoryDelivery(for: run.id),
+                onOpenServedContext: servedContextAction(for: run.id),
                 onApprovalDecision: { approvalId, approve in
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },
@@ -1033,6 +1049,13 @@ public struct MessageListView: View {
             .padding(.top, 8)
         }
         .id("work-\(run.id.description)")
+    }
+
+    private func servedContextAction(for runID: RunID) -> (() -> Void)? {
+        guard let packetID = viewModel.contextPacketID(for: runID) else { return nil }
+        return {
+            servedContextSelection = MomoServedContextSelection(id: packetID)
+        }
     }
 
     private var timelineBottomSentinel: some View {

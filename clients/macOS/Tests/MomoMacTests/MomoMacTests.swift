@@ -6806,7 +6806,7 @@ final class MomoMacTests: XCTestCase {
           "stepCount":0,
           "maxSteps":50,
           "depth":0,
-          "input":{"type":"work","title":"Work surface","brief":"Build the macOS Work surface."},
+          "input":{"type":"work","title":"Work surface","brief":"Build the macOS Work surface.","memory_delivery":{"included_count":3,"injected":true}},
           "output":null,
           "error":null,
           "startedAtMs":null,
@@ -6879,6 +6879,9 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(created.id, run)
         XCTAssertTrue(listed.isEmpty)
         XCTAssertEqual(detailed.id, run)
+        let deliveries = await backend.memoryDeliveries(for: [run])
+        XCTAssertEqual(deliveries[run]?.includedCount, 3)
+        XCTAssertEqual(deliveries[run]?.injected, true)
         XCTAssertEqual(requestCount.current(), 3)
     }
 
