@@ -15,7 +15,7 @@
 ## MOMO-557 휴먼 run 취소 + agent pause (#650, 2026-07-22)
 
 - ADR-0132 D1·D2에 따라 활성 human 채널 멤버의 run 취소 REST를 추가했다. run 취소·pending agent_job/approval 무효화·감사·채널 시스템 라인이 한 tenant transaction에 기록되며, 연결 work_session ID는 원장/응답에 남기되 세션은 종료하지 않는다.
-- migration 037의 `agent_profile.paused`와 owner/admin pause REST가 mention/work 신규 enqueue를 막고 시스템 라인으로 설명한다. AgentWorker는 실행 단계에서 cancelled SoT를 재확인하며 cancelled run의 durable agent 응답·상태 부활을 차단한다.
+- migration 038의 `agent_profile.paused`와 owner/admin pause REST가 mention/work 신규 enqueue를 막고 시스템 라인으로 설명한다. AgentWorker는 실행 단계에서 cancelled SoT를 재확인하며 cancelled run의 durable agent 응답·상태 부활을 차단한다.
 - server/worker build·unit 및 verifier 정적 검증은 worker가 수행한다. `scripts/verify_agent_run_cancel.sh`의 28184~28187 격리 Docker E2E는 momo-main 실행 전까지 `runtime-unverified`다.
 
 ## UXUI MOMO-553 메모리 접근 허용 UI (#645, 2026-07-22)
