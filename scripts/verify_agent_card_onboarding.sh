@@ -32,7 +32,9 @@ find_python() {
 PYTHON_BIN="$(find_python)"
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
-PROJECT="${AGENT_CARD_GATE_PROJECT:-momo536agentcard}"
+# 고정 프로젝트명은 이전 실패 런의 컨테이너/캐시를 재사용해 stale 소스 컴파일
+# 오류를 만든다(2026-07-22 실측) — run-tag로 격리한다.
+PROJECT="${AGENT_CARD_GATE_PROJECT:-momo536agentcard-$$-$(date +%s)}"
 API_PORT="${AGENT_CARD_GATE_API_PORT:-28124}"
 CENT_PORT_HOST="${AGENT_CARD_GATE_CENTRIFUGO_PORT:-28125}"
 PG_PORT="${AGENT_CARD_GATE_POSTGRES_PORT:-28126}"
