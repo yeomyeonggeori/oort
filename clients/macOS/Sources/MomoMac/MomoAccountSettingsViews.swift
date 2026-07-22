@@ -445,6 +445,7 @@ struct MomoMemberProfileSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     let member: Member
     @ObservedObject var viewModel: ChatViewModel
+    let onOpenMemory: (() -> Void)?
     let onSave: (String, String?, Presence) -> Void
     @State private var displayName: String
     @State private var avatarPath: String
@@ -455,11 +456,13 @@ struct MomoMemberProfileSettingsSurface: View {
         copy: MomoWorkspaceCopy,
         member: Member,
         viewModel: ChatViewModel,
+        onOpenMemory: (() -> Void)? = nil,
         onSave: @escaping (String, String?, Presence) -> Void
     ) {
         self.copy = copy
         self.member = member
         self.viewModel = viewModel
+        self.onOpenMemory = onOpenMemory
         self.onSave = onSave
         let allowsEditing = viewModel.allowsLocalProfileEditing
         _displayName = State(initialValue: allowsEditing
@@ -561,6 +564,17 @@ struct MomoMemberProfileSettingsSurface: View {
             }
 
             if member.isAgent {
+                if let onOpenMemory {
+                    MomoSettingsSection(
+                        title: copy.memoryBrowserTitle,
+                        subtitle: copy.memoryBrowserSubtitle
+                    ) {
+                        Button(action: onOpenMemory) {
+                            Label(copy.memoryBrowserTitle, systemImage: "brain.head.profile")
+                        }
+                    }
+                }
+
                 MomoAgentCredentialManagementView(
                     copy: copy,
                     agent: member,

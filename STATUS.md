@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-529 메모리 브라우저·서빙 인스펙터 (#603, 2026-07-22)
+
+- macOS 워크스페이스 메뉴와 에이전트 프로필에 "에이전트가 아는 것" 브라우저를 추가했다. 스코프·에이전트·무효 상태 필터, 검색, 열람·편집·무효화, 출처 메시지 이동, 관리자 정책 스위치는 모두 서버 Memory REST를 권위로 사용하며 기존 데이터를 로딩·오류 중에도 유지한다.
+- Work run 상세에는 저장된 불변 Context Packet을 여는 읽기 전용 인스펙터를 추가해 히스토리·memory refs·tool grants·budget·redactions·만료 상태를 표시한다. packet은 클라이언트에서 재조립하지 않고 기존 run/message props에서 식별자를 발견한 경우에만 GET으로 조회한다.
+- MomoCore·macOS build와 메모리 브라우저·인스펙터 집중 8 tests, 한국어 브라우저 및 인스펙터 라이트·다크 스냅샷 4종이 PASS했다. design-review 지적에 따라 내부 packet 어휘·원시 UUID를 제거하고 필터/정책/빈 상태 카피와 자연어 seq·budget 단위·출처 접근성 표기를 정리했다. macOS 전체 suite는 변경과 무관한 기존 `AgentCredentialSnapshotTests`의 headless `NSImage` nil unwrap(signal 5)에서 2회 중단됐다. 서버에 아직 없는 visibility grant 목록/회수, run→packet 식별자 투영, `memory.updated` Core realtime 소비, cache 밖 source_ref 메시지 단건 이동은 ENGINE_HANDOFF X-11로 역요청했으며 그 전까지 해당 동작은 거짓 개방하지 않는다. 실서버 편집→realtime 수렴은 momo-main 검증 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-525 macOS·iOS 멤버 lifecycle·audit (#609, 2026-07-22)
 
 - ADR-0128/A-15의 workspace 역할·suspend/reinstate/remove+ban·self-leave·audit cursor 계약을 macOS와 iOS 인증 REST 클라이언트에 연결했다. owner/admin 역할 서열은 클라이언트에서도 fail-closed하고 서버가 최종 권한·마지막 owner 409를 판정한다. audit은 action prefix·대상 멤버·24시간/7일/30일 시간 범위와 cursor를 정본 query로 전달한다.

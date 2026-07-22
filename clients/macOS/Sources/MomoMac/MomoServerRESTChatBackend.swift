@@ -9,7 +9,11 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
+<<<<<<< HEAD
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend {
+=======
 public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MomoMembershipAdministrationBackend {
+>>>>>>> origin/track/uxui
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -763,6 +767,142 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             queryItems: [],
             response: AgentWorkRun.self
         )
+    }
+
+    // MARK: Memory Plane (ADR-0129)
+
+    public func memories(
+        workspace requestedWorkspace: WorkspaceID,
+        scope: MemoryScope?,
+        agent: MemberID?,
+        includeInvalid: Bool,
+        limit: Int
+    ) async throws -> [MemoryEntry] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        var queryItems = [
+            URLQueryItem(name: "includeInvalid", value: includeInvalid ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
+        ]
+        if let scope { queryItems.append(URLQueryItem(name: "scope", value: scope.rawValue)) }
+        if let agent { queryItems.append(URLQueryItem(name: "agent", value: agent.description.lowercased())) }
+        let page = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories",
+            queryItems: queryItems,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemoryPageResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return page.memories
+    }
+
+    public func searchMemories(
+        workspace requestedWorkspace: WorkspaceID,
+        query: String,
+        scope: MemoryScope?,
+        agent: MemberID?,
+        limit: Int
+    ) async throws -> [MemorySearchHit] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        var queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 50))),
+        ]
+        if let scope { queryItems.append(URLQueryItem(name: "scope", value: scope.rawValue)) }
+        if let agent { queryItems.append(URLQueryItem(name: "agent", value: agent.description.lowercased())) }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/search",
+            queryItems: queryItems,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemorySearchResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.hits
+    }
+
+    public func updateMemory(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID,
+        body: String,
+        confidence: Double
+    ) async throws -> MemoryEntry {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await patch(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())",
+            body: UpdateMemoryRequestDTO(body: body, confidence: confidence),
+            response: MemoryItemResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memory
+    }
+
+    public func invalidateMemory(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID
+    ) async throws -> MemoryEntry {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())/invalidate",
+            body: InvalidateMemoryRequestDTO(invalidatedByMemoryId: nil),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemoryItemResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memory
+    }
+
+    public func memoryPolicy(
+        workspace requestedWorkspace: WorkspaceID
+    ) async throws -> WorkspaceMemoryPolicy {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memory-policy",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemoryPolicyResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memoryPolicy
+    }
+
+    public func setMemoryPolicy(
+        workspace requestedWorkspace: WorkspaceID,
+        enabled: Bool
+    ) async throws -> WorkspaceMemoryPolicy {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await put(
+            "/v1/workspaces/\(requestedWorkspace.description)/memory-policy",
+            body: PutMemoryPolicyRequestDTO(enabled: enabled),
+            response: MemoryPolicyResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memoryPolicy
+    }
+
+    public func contextPacket(
+        workspace requestedWorkspace: WorkspaceID,
+        packet: UUID
+    ) async throws -> ContextPacketSnapshot {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/context-packets/\(packet.uuidString.lowercased())",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: ContextPacketSnapshot.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.packetId == packet,
+              response.workspaceId == requestedWorkspace else {
+            throw BackendError.decoding("context packet response scope mismatch")
+        }
+        return response
     }
 
     // MARK: Read state (ADR-0109)
@@ -1929,6 +2069,35 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         }
         return MemberID(subject)
     }
+}
+
+private struct MemoryPageResponseDTO: Decodable {
+    let memories: [MemoryEntry]
+}
+
+private struct MemorySearchResponseDTO: Decodable {
+    let hits: [MemorySearchHit]
+}
+
+private struct MemoryItemResponseDTO: Decodable {
+    let memory: MemoryEntry
+}
+
+private struct MemoryPolicyResponseDTO: Decodable {
+    let memoryPolicy: WorkspaceMemoryPolicy
+}
+
+private struct UpdateMemoryRequestDTO: Encodable {
+    let body: String
+    let confidence: Double
+}
+
+private struct InvalidateMemoryRequestDTO: Encodable {
+    let invalidatedByMemoryId: UUID?
+}
+
+private struct PutMemoryPolicyRequestDTO: Encodable {
+    let enabled: Bool
 }
 
 // MARK: - Configuration

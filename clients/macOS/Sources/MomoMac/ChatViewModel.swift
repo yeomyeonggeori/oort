@@ -163,7 +163,11 @@ public final class ChatViewModel: ObservableObject {
     private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
     private let workConsoleBackend: (any MomoWorkConsoleBackend)?
     private let workHostBackend: (any MomoWorkHostBackend)?
+<<<<<<< HEAD
+    private let memoryPlaneBackend: (any MemoryPlaneBackend)?
+=======
     private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
+>>>>>>> origin/track/uxui
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -181,6 +185,10 @@ public final class ChatViewModel: ObservableObject {
 
     public var supportsWorkConsole: Bool {
         workConsoleBackend != nil && workHostBackend != nil
+    }
+
+    var memoryPlanePresentationBackend: (any MemoryPlaneBackend)? {
+        memoryPlaneBackend
     }
 
     public var allowsLocalProfileEditing: Bool {
@@ -358,7 +366,11 @@ public final class ChatViewModel: ObservableObject {
         self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
         self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
         self.workHostBackend = chat as? any MomoWorkHostBackend
+<<<<<<< HEAD
+        self.memoryPlaneBackend = chat as? any MemoryPlaneBackend
+=======
         self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
+>>>>>>> origin/track/uxui
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
