@@ -372,7 +372,7 @@ AGENT_GATEWAY_MODE=gateway
 
 ```text
 1. POST /v1/workspaces/{workspace}/agents
-   {displayName, handle, model, baseUrl, systemPrompt?, config?, ownerHumanId?}
+   {displayName, handle, model, baseUrl, systemPrompt?, config?, ownerHumanId?, profile?}
    -> {agent:{id,handle,displayName}}
 2. POST /v1/workspaces/{workspace}/channels/{channel}/members
    {memberId:<agent.id>, role:"member"}
@@ -380,8 +380,11 @@ AGENT_GATEWAY_MODE=gateway
    -> 원문 token 1회 반환
 ```
 
-1번은 `member(kind='agent')`·`agent`·`agent.created` audit만 같은 tenant transaction으로
-커밋하며 **채널을 자동 추가하지 않는다**. 2번은 기존 human/agent 공용 membership 경로를
+1번의 optional `profile`은 `{instructions,modelPref?,enabledTools,triggers?}`이며 같은 tenant
+transaction에서 `agent_profile`을 함께 만든다. 별도 생성/갱신은 agent의 human owner 또는
+workspace owner/admin이 `GET/PUT /v1/workspaces/{workspace}/agents/{agent}/profile`로 수행한다.
+instructions는 UTF-8 8KB, triggers는 `mention=true` 고정+미집행 schedule 예약이며 자격증명 형태
+필드는 재귀적으로 거부된다. 1번은 **채널을 자동 추가하지 않는다**. 2번은 기존 human/agent 공용 membership 경로를
 그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 momo-facing agent
 credential이며 서버에는 sha256만 저장된다. `baseUrl`/`config`에는 Codex/OpenAI OAuth token,
 provider API key, userinfo/query/fragment credential을 넣을 수 없다. non-loopback은 HTTPS만,

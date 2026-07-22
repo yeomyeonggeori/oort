@@ -173,7 +173,11 @@ struct SafeAgentCardFetcher<Resolver: AgentCardHostResolving, Transport: AgentCa
         guard case .object(let object) = raw else {
             throw AgentCardFetchError.invalidCard("card must be a JSON object")
         }
-        try rejectEmbeddedSecrets(raw, path: "card")
+        try AgentCredentialFieldPolicy.rejectCredentialShapedFields(
+            raw,
+            path: "card",
+            error: { AgentCardFetchError.invalidCard("credential-shaped field is forbidden at \($0)") }
+        )
         let name = try boundedString(object["name"], field: "name", maximum: 100)
         let description = try optionalBoundedString(
             object["description"], field: "description", maximum: 2_000
@@ -267,28 +271,6 @@ struct SafeAgentCardFetcher<Resolver: AgentCardHostResolving, Transport: AgentCa
         return .object(["schemes": .object(summaries), "requirements": safeRequirements])
     }
 
-    private static func rejectEmbeddedSecrets(_ value: JSONValue, path: String) throws {
-        let forbidden = [
-            "clientsecret", "access_token", "accesstoken", "refresh_token", "refreshtoken",
-            "password", "privatekey", "bearertoken", "apikeyvalue", "credential",
-        ]
-        switch value {
-        case .object(let object):
-            for (key, child) in object {
-                let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "_" }
-                if forbidden.contains(where: { normalized.contains($0) }) {
-                    throw AgentCardFetchError.invalidCard("credential-shaped field is forbidden at \(path).\(key)")
-                }
-                try rejectEmbeddedSecrets(child, path: "\(path).\(key)")
-            }
-        case .array(let values):
-            for (index, child) in values.enumerated() {
-                try rejectEmbeddedSecrets(child, path: "\(path)[\(index)]")
-            }
-        default:
-            break
-        }
-    }
 }
 
 protocol AgentCardFetching: Sendable {
