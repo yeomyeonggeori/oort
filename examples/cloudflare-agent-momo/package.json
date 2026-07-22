@@ -1,0 +1,22 @@
+{
+  "name": "@momo/example-cloudflare-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "agents": "0.3.10"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11",
+    "@modelcontextprotocol/sdk": "1.26.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20250726.0",
+    "@types/node": "24.1.0",
+    "typescript": "5.8.3"
+  }
+}

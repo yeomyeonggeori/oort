@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
+
+- `examples/eve-momo-channel`은 eve 0.27.0 `defineChannel`/`routeAuth`/`send`/workspace·channel continuation token으로, `examples/cloudflare-agent-momo`는 permissive·audit 경계를 지키는 Agents SDK 0.3.10 인증 fetch로 기존 per-agent bearer gateway pending→event→complete 계약만 소비한다. 코어 서버·OpenAPI·스키마·루트 npm은 변경하지 않았다.
+- 두 예제 TypeScript build와 Node 3 tests, `verify_momo_channel_adapter.sh` bash 문법이 PASS했다. 28120~28123 e2e stack의 mock eve pending→momo 메시지→완료 callback 실왕복은 오케스트레이터 실행 전까지, eve 실런타임은 beta 외부 런타임 설치 전까지 `runtime-unverified`다.
+
 ## MOMO-528 Context Packet v0 불변 승격 (#598, 2026-07-22)
 
 - migration 030에 불변 `context_packet` 원장·FORCE RLS와 기본 actor/agent/workspace 스코프 ∪ 유효 visibility grant 검색 필터를 추가하고, mention 트랜잭션이 profile 상시+fact/episode 질의 memory refs와 실제 plugin capability grant를 동결한다.
