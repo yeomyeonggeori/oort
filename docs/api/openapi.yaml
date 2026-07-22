@@ -1868,9 +1868,9 @@ paths:
       description: >
         Human callers require workspace owner/admin authority and receive all
         profiles. A MomoHost-signed caller receives enabled profiles only.
-        Launch templates contain a portable command key and arguments; no
-        executable path, environment value, provider credential, or token is
-        accepted or returned.
+        Launch templates contain a portable command key and arguments. The
+        environment policy contains key names only; no executable path,
+        environment value, provider credential, or token is accepted or returned.
       security:
         - bearerAuth: []
         - workHostAuth: []
@@ -5351,7 +5351,7 @@ components:
     WorkToolProfile:
       type: object
       required:
-        [id, workspaceId, toolKey, displayName, launchTemplate, tierDefaults,
+        [id, workspaceId, toolKey, displayName, launchTemplate, tierDefaults, envPolicy,
          enabled, createdBy, updatedBy, createdAtMs, updatedAtMs]
       properties:
         id:
@@ -5372,6 +5372,8 @@ components:
         tierDefaults:
           type: object
           additionalProperties: true
+        envPolicy:
+          $ref: "#/components/schemas/WorkToolEnvironmentPolicy"
         enabled:
           type: boolean
         createdBy:
@@ -5404,6 +5406,8 @@ components:
         tierDefaults:
           type: object
           additionalProperties: true
+        envPolicy:
+          $ref: "#/components/schemas/WorkToolEnvironmentPolicy"
         enabled:
           type: boolean
           default: true
@@ -5421,8 +5425,30 @@ components:
         tierDefaults:
           type: object
           additionalProperties: true
+        envPolicy:
+          $ref: "#/components/schemas/WorkToolEnvironmentPolicy"
         enabled:
           type: boolean
+
+    WorkToolEnvironmentPolicy:
+      type: object
+      additionalProperties: false
+      description: >
+        Child-process environment mode and requested host key names. Values are
+        never stored. Passthrough cannot widen the host-approved list, and
+        legacy mode is honored only when the host opts in.
+      properties:
+        mode:
+          type: string
+          enum: [allowlist, legacy]
+          default: allowlist
+        passthrough:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
 
     WorkToolProfileResponse:
       type: object

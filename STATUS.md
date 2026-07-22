@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-547 ACP/PTY 자식 env 스크럽 옵션 (#624, 2026-07-22)
+
+- WorkHostDaemon의 PTY·ACP·ACP terminal 자식 환경을 기본 allowlist(`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`, `COLORTERM`, `TMPDIR`)로 제한하고 `MOMO_WORKD_ENV_PASSTHROUGH`에 호스트 운영자가 명시한 이름만 추가한다. `MOMO_WORKD_*` 제어 변수는 항상 제외하며, 전역 legacy와 프로파일 legacy 모두 호스트의 명시적 옵트인이 필요하다.
+- migration 034에 값이 아닌 환경변수 이름만 담는 `work_tool_profile.env_policy` JSON object를 추가했다. 서버 CRUD·workd 투영·OpenAPI는 `mode`/`passthrough`만 최소 검증하며, 프로파일 정책은 호스트 패스스루 allowlist를 넓히지 않고 좁힐 수만 있다. 동시 MOMO-535가 사용할 수 있는 033은 비워 두었다.
+- WorkHostDaemon 15 tests(allowlist·패스스루 및 mock ACP 6 포함), MomoServer 161 tests, 전 9개 Swift 패키지 `swift build --disable-sandbox`, OpenAPI/YAML·bash 정적 검증은 PASS했다. 일반 `make build`는 관리형 환경의 중첩 `sandbox-exec` 거부로 코드 컴파일 전에 실패했다. `verify_work_tool_profile.sh`·기존 workd/acp verifier의 Docker 런타임 회귀는 오케스트레이터 수행 전까지 `runtime-unverified`다.
 ## MOMO-539 추출·임베딩 워커 실패 백오프와 포이즌 격리 (#620, 2026-07-22)
 
 - memory extraction과 embedding 배치 실패에 기본 poll 간격부터 최대 5분까지 지수 백오프를 적용하고, 성공 시 지연을 리셋한다. `MEMORY_POISON_THRESHOLD` 기본값은 5이며 실패 카운트는 동일 워터마크/ID 배치별로 유지한다.

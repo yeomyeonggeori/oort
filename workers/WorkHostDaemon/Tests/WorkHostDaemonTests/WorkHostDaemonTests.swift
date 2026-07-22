@@ -64,6 +64,64 @@ final class WorkHostDaemonTests: XCTestCase {
             arguments: []
         ))
         XCTAssertNil(config.registrationToken)
+        XCTAssertEqual(config.childEnvironmentPolicy, .safeDefault)
+        XCTAssertFalse(config.allowProfileLegacyEnvironment)
+    }
+
+    func testChildEnvironmentDefaultsToAllowlistAndSupportsExplicitPassthrough() throws {
+        let environment = [
+            "PATH": "/usr/bin", "HOME": "/tmp/home", "USER": "momo",
+            "SHELL": "/bin/zsh", "LANG": "ko_KR.UTF-8", "LC_ALL": "C",
+            "TERM": "xterm-256color", "TMPDIR": "/tmp", "GH_TOKEN": "secret",
+            "AWS_SECRET_ACCESS_KEY": "secret", "SSH_AUTH_SOCK": "/tmp/agent",
+            "CUSTOM_TOOL_HOME": "/tmp/tool", "MOMO_WORKD_SERVER_URL": "https://momo.test",
+        ]
+        let safe = ChildEnvironmentPolicy.safeDefault.filtered(environment)
+        XCTAssertEqual(safe["PATH"], "/usr/bin")
+        XCTAssertEqual(safe["LC_ALL"], "C")
+        XCTAssertNil(safe["GH_TOKEN"])
+        XCTAssertNil(safe["AWS_SECRET_ACCESS_KEY"])
+        XCTAssertNil(safe["SSH_AUTH_SOCK"])
+        XCTAssertNil(safe["MOMO_WORKD_SERVER_URL"])
+
+        let configured = try WorkdConfig.childEnvironmentPolicy(environment: [
+            "MOMO_WORKD_ENV_PASSTHROUGH": "CUSTOM_TOOL_HOME,GH_TOKEN",
+        ])
+        let passed = configured.filtered(environment)
+        XCTAssertEqual(passed["CUSTOM_TOOL_HOME"], "/tmp/tool")
+        XCTAssertEqual(passed["GH_TOKEN"], "secret")
+        XCTAssertNil(passed["AWS_SECRET_ACCESS_KEY"])
+        XCTAssertThrowsError(try WorkdConfig.childEnvironmentPolicy(environment: [
+            "MOMO_WORKD_ENV_PASSTHROUGH": "GOOD,MOMO_WORKD_SERVER_URL",
+        ]))
+    }
+
+    func testProfilePolicyAddsPassthroughAndLegacyRequiresHostOptIn() throws {
+        let workspaceID = UUID()
+        let profile = Self.profile(
+            workspaceID: workspaceID,
+            toolKey: "shell",
+            command: "sh",
+            envPolicy: .object([
+                "mode": .string("legacy"),
+                "passthrough": .array([.string("GH_TOKEN")]),
+            ])
+        )
+        let safe = try WorkdConfig.commandTemplates(profiles: [profile], localOverrides: [:])
+        XCTAssertEqual(safe["shell"]?.environmentPolicy.mode, .allowlist)
+        XCTAssertTrue(safe["shell"]?.environmentPolicy.passthrough.isEmpty == true)
+
+        let legacy = try WorkdConfig.commandTemplates(
+            profiles: [profile],
+            localOverrides: [:],
+            hostEnvironmentPolicy: ChildEnvironmentPolicy(
+                mode: .allowlist,
+                passthrough: ["GH_TOKEN", "CUSTOM_TOOL_HOME"]
+            ),
+            allowProfileLegacyEnvironment: true
+        )
+        XCTAssertEqual(legacy["shell"]?.environmentPolicy.mode, .legacy)
+        XCTAssertEqual(legacy["shell"]?.environmentPolicy.passthrough, ["GH_TOKEN"])
     }
 
     func testRegistrationTokenFileMustBePrivateAndCanBeConsumed() throws {
@@ -201,7 +259,8 @@ final class WorkHostDaemonTests: XCTestCase {
     private static func profile(
         workspaceID: UUID,
         toolKey: String,
-        command: String
+        command: String,
+        envPolicy: JSONValue = .object([:])
     ) -> WorkToolProfile {
         WorkToolProfile(
             id: UUID(),
@@ -210,6 +269,7 @@ final class WorkHostDaemonTests: XCTestCase {
             displayName: toolKey,
             launchTemplate: WorkToolLaunchTemplate(command: command, arguments: []),
             tierDefaults: .object([:]),
+            envPolicy: envPolicy,
             enabled: true,
             createdBy: UUID(),
             updatedBy: UUID(),

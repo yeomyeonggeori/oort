@@ -1064,6 +1064,15 @@ command key는 호스트의 `PATH`에서 로컬 해석한다. 필요하면
 도구별 로컬 override를 둔다(`TOOL_KEY`의 `-`는 `_`로 표기). 원장과 control payload에는
 실행 경로·환경 값·provider 자격증명을 넣지 않는다.
 
+PTY·ACP·ACP가 생성한 terminal 자식은 기본적으로 `PATH`, `HOME`, `USER`, `LOGNAME`,
+`SHELL`, `LANG`, `LC_*`, `TERM`, `COLORTERM`, `TMPDIR`만 상속한다. 도구가 추가 키를
+필요로 하면 호스트의 `MOMO_WORKD_ENV_PASSTHROUGH=KEY_A,KEY_B`에 **키 이름만** 명시한다.
+프로파일의 `envPolicy.passthrough`는 이 호스트 승인 목록을 도구별로 좁힐 수 있지만 넓힐
+수는 없다. 마이그레이션 중 기존 전체 상속이 꼭
+필요하면 호스트에서 `MOMO_WORKD_CHILD_ENV_MODE=legacy`를 설정한다. 프로파일별 legacy
+요청은 호스트가 `MOMO_WORKD_ALLOW_PROFILE_LEGACY_ENV=1`로 별도 동의해야만 효력이 있다.
+어떤 모드에서도 `MOMO_WORKD_*`는 자식에 전달되지 않는다.
+
 동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
 
 ```sh

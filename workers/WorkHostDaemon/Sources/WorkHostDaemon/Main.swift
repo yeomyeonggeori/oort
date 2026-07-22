@@ -43,7 +43,9 @@ struct WorkHostDaemonMain {
             let profiles = try await runtimeClient.workToolProfiles(hostID: hostID)
             let templates = try WorkdConfig.commandTemplates(
                 profiles: profiles,
-                localOverrides: config.localCommandOverrides
+                localOverrides: config.localCommandOverrides,
+                hostEnvironmentPolicy: config.childEnvironmentPolicy,
+                allowProfileLegacyEnvironment: config.allowProfileLegacyEnvironment
             )
             let processes = ProcessManager(
                 templates: templates,
@@ -62,6 +64,8 @@ struct WorkHostDaemonMain {
                 pollInterval: config.pollInterval,
                 heartbeatInterval: config.heartbeatInterval,
                 localCommandOverrides: config.localCommandOverrides,
+                childEnvironmentPolicy: config.childEnvironmentPolicy,
+                allowProfileLegacyEnvironment: config.allowProfileLegacyEnvironment,
                 logger: logger
             )
             await daemon.run()
