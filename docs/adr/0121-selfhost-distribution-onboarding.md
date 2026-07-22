@@ -58,3 +58,31 @@ D1-A(→B 후속) + D2-A(B는 상시 폴백) + D3 + D4 + D5-A + D6-A.
 - (−) Dawn 운영 표면 확대: 단축 링크 도메인 + relay(0120) — 소규모지만 상시 운영 의무.
 - (−) upgrade 경로의 하위 호환 부담이 공식화된다(마이그레이션 순서 보장은 이미 규율 — `scripts/migrate.sh`).
 - 보류: 마켓플레이스 이미지(D1-B), momo Cloud(별도 트랙), Android 관통(FCM 이후).
+
+---
+
+## 증보 1 — 셀프호스트 관측 노출 계약 (/metrics)
+
+- Status: **Proposed** (2026-07-22 momo-main 기안 — 성재 승인 시 MOMO-562 발급 게이트 해제)
+- 발단: DEPLOY §8.2의 핵심 메트릭 5종(outbox lag·예산 트립율·APNs 실패율·턴 지연·publish 지연)은 문서상 계획일 뿐 실물 엔드포인트가 없다. MOMO-562가 이를 실제 `/metrics`로 만들면 **셀프호스트 서버에 신규 노출 표면**이 생기므로, 배포판 ADR인 본 문서에 노출 계약을 먼저 고정한다. buzz 경쟁 분석의 push-gateway bounded-cardinality 규율을 이식한다.
+
+### D7. 노출 경계 — 내부망 전용, 공개 라우팅 금지
+- `/metrics`(Prometheus text format)는 **compose private 네트워크에서만** 응답한다. Caddy 공개 라우팅에 절대 연결하지 않으며, `verify_web_serving.sh`류 게이트에 "공개 도메인에서 `/metrics` 404/차단" 단정을 추가한다.
+- 스크레이프는 **opt-in prometheus 오버레이**(compose `--profile observability`)로만 구성한다. 기본 설치는 오버레이 없이 완전 동작(D4 오프그리드 원칙과 동일 계보).
+- v0 인증 없음은 "private 네트워크 한정"이 전제 조건이다 — 오버레이 밖 노출(호스트 포트 바인딩)은 금지.
+
+### D8. 콘텐츠 불유입 — 메트릭은 집계만
+- 메트릭 이름/라벨/값 어디에도 테넌트 콘텐츠(메시지 본문·프롬프트·표시명·이메일·채널명)를 넣지 않는다(ADR-0004 계보).
+- `workspace_id`·`run_id`·`member_id` 등 **무한/준식별 카디널리티 라벨 금지** — 전 워크스페이스 집계만 노출한다. 테넌트별 진단은 로그(상관키)와 audit이 담당한다.
+
+### D9. bounded-cardinality 라벨 규율
+- 라벨 값은 **유한 enum만** 허용(`status`, `kind`, `provider`, `code_class` 등). 신규 메트릭/라벨 추가 PR은 라벨 값 전수 열거를 본문에 명시해야 한다(buzz push-gateway 규율).
+- 이름 규약: `momo_` prefix + 단위 suffix(`_seconds`, `_total`).
+
+### D10. v0 범위 = DEPLOY §8.2 표 5종의 실물화
+- outbox lag(pending 최고 연령 게이지) · budget trip counter · APNs 실패 counter(code_class 라벨) · 에이전트 턴 지연 histogram · publish 지연 histogram. 각 서비스(api/relay/worker/push-relay)가 자체 `/metrics`를 노출하고 DB-파생 값은 폴링 게이지로 계산한다 — 세부 구현은 MOMO-562 재량.
+
+### Consequences (증보)
+- (+) day-2 운영(560 `momo-ops.sh`)과 리허설 Phase 2 운영 런북이 실측 신호를 갖는다.
+- (+) 노출 계약이 ADR로 고정되어 이후 메트릭 추가가 규율 안에서 일어난다.
+- (−) 오버레이 유지 부담(prometheus 설정 drift) — 게이트에 config 렌더 단정으로 상쇄.
