@@ -6,6 +6,12 @@
 - MomoServer strict 환경은 실제 DB `current_user=momo_app`·NOSUPERUSER·NOBYPASSRLS를 확인하지 못하면 기동을 거부한다. 서버 176 tests, prod preflight·install/upgrade 정적 verifier가 PASS했다.
 - `scripts/verify_prod_rls_posture.sh`는 28170~28173에서 prod compose API RLS 0행·catalog 쓰기 거부·수퍼유저 URL fail-closed를 최종 단정한다. Docker 실런과 `runtime-db`/`internal-alpha` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`다.
 
+## MOMO-555 local gate 하드닝 3종 (#648, 2026-07-22)
+
+- 모든 local gate 프로파일과 선택적 pre-push 훅에 merge-base 이후 `origin/main`↔현재 브랜치 변경 파일 overlap 차단을 추가했다. 검토된 예외는 `MOMO_GATE_SKIP_SKEW=사유`만 허용하고 최종 evidence에 사유를 남긴다.
+- `migrate.sh`의 psql 탐색 전과 local gate 정적 검사에서 정규화된 마이그레이션 번호 중복(`037`=`37`)을 거부한다. gate 로그·Markdown·run 전용 산출물은 종료 시 파일별 SHA-256 매니페스트로 고정한다.
+- disjoint/overlap/override skew, 고유/중복 migration, 정상/변조 manifest 격리 셀프 테스트와 docs 프로파일이 PASS했다. Docker 런타임 변경은 없으며 전체 Swift 패키지 build도 통과했다(`make build`의 중첩 sandbox 제약 때문에 동일 명령을 `--disable-sandbox`로 수행).
+
 ## UXUI MOMO-553 메모리 접근 허용 UI (#645, 2026-07-22)
 
 - macOS 메모리 상세에 접근 허용 원장 목록, 활성 roster 기반 멤버·에이전트 피커, 기록을 보존하는 접근 회수 확인을 MOMO-549 GET/POST/DELETE 계약으로 연결했다. 회수 이력은 회색 `회수됨` 상태와 부여자·부여/회수 시각을 함께 표시한다.

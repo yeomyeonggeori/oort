@@ -42,7 +42,32 @@ conservative mapping — ambiguous paths widen to `all`, never narrow — and
 records the suggested profile plus per-path reasons in the evidence markdown.
 An explicit `--profile` always wins over `--auto`.
 
-The script writes a log and Markdown evidence file under
+Every profile starts with two fail-fast repository checks:
+
+- `scripts/check_branch_skew.sh` computes the merge-base with
+  `${MOMO_GATE_SKEW_REF:-origin/main}` and fails when upstream and the current
+  branch changed any of the same paths after that point. Rebase and resolve the
+  listed paths before rerunning. A reviewed exceptional run may set
+  `MOMO_GATE_SKIP_SKEW='specific reason'`; the reason is printed and embedded in
+  the final evidence. Blank or reasonless overrides are rejected.
+- `scripts/check_migration_numbers.sh server/Migrations` rejects duplicate
+  numeric prefixes before any database connection. `037_name.sql` and
+  `37_other.sql` are treated as the same number. `scripts/migrate.sh` runs the
+  same check before psql discovery, so a missing psql cannot hide a collision.
+
+To enable the same skew check before every push, explicitly install the optional
+hook:
+
+```bash
+scripts/install_branch_skew_hook.sh
+```
+
+The installer only writes an absent or identical `pre-push` hook and refuses to
+overwrite another hook. It does not modify the shared worktree `post-checkout`
+bootstrap hook. The pre-push hook refreshes `origin/main` and fails closed when
+that fetch or the overlap check fails.
+
+The script writes a log, Markdown evidence file, and `.sha256` manifest under
 `${TMPDIR:-/tmp}/momo-local-gate` by default, then prints a PR-ready
 `## Local Gate` block to stdout. Filenames include the profile, UTC second,
 process id, nanosecond timestamp, worktree hash, and random suffix, for example
@@ -50,6 +75,13 @@ process id, nanosecond timestamp, worktree hash, and random suffix, for example
 This keeps evidence paths collision-safe when the same profile runs in parallel
 from multiple worktrees. Use `--output-dir <dir>` or `LOCAL_GATE_OUT_DIR=<dir>`
 when you need a stable parent directory for local evidence files.
+
+Each run also gets `artifacts-<run-id>/`; commands that consume
+`LOCAL_GATE_OUTPUT_DIR` write there instead of a shared directory. After the log
+is finalized, the manifest records SHA-256 for the evidence Markdown, log, and
+every file in that run artifact directory. Verify it from any working directory
+with `shasum -a 256 -c <manifest>` on macOS or
+`sha256sum -c <manifest>` on Linux. The manifest does not hash itself.
 
 Before `runtime-db`, `runtime-relay`, `runtime-live`, or `runtime-agent`
 starts, the script enforces the host resource threshold defined in
