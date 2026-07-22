@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-22 (Fable 회귀 정비 + 온보딩 리서치 + 동생 반려) · runtime-agent rc=0, 제품 결함 1건 수정
+- **527 전 게이트 회귀 완주**(runtime-db 핵심 PASS + runtime-agent rc=0). 8층 부검: ①pgvector 이미지 glibc 계보(→trixie digest, 상주 스택은 원 env로 재생성) ②스냅샷 드리프트 2건 재기록(카피 변경 — 511-U 부채 해소) ③멘션 패리티 단정 UUID 케이스 ④packet 스키마 문자열 ⑤~⑦fail-closed 픽스처 전환(owner 멤버십+실 install/grant+capability 등재 — §4 10 성문화) ⑧**제품 결함: 승인 재개가 grant 없는 도구에서 침묵 실패**(resume payload {} → 워커 디코드 사망; e984d9c 수정 — 서버 null 발신+워커 evidence optional, 인간 결정=권위).
+- 부수 발견→후속 후보: **MOMO-539** 추출 워커 실패 백오프 부재(비-JSON 응답에 초당 수회 핫루프, 포이즌 배치 격리 없음). momo240_* 잔재 28100 선점 재확인(리클레임 사각).
+- **리서치 20-01**(성재 발제 2차): eve 공식 셀프호스트+커스텀 채널 1급 API 확인, 업계 수렴=양문형(URL 담아오기/자연어 만들기)+에이전트 명부(=momo 불변식). **Wave B/C 기안**(534 어댑터·536 URL 온보딩·537 agent_profile+ADR-0131·535 outbound·538 동봉 eve) 성재 결정 대기.
+- **동생 #610 반려**(design-review Blocker 1: MomoWorkspaceCopy 우회 ~30 문자열 + High 4) — PR 코멘트로 반려 패킷 게시. iOS 공식 빌드 게이트는 내가 PASS 확인.
+
 ## 2026-07-22 (Fable 패브릭 3라운드) · Wave M/A 완주 — 528·531 랜딩, 엔진 배치 종결
 - **랜딩→main**: #613 MOMO-528 Context Packet v0(verify_context_packet 전 항목 PASS — 불변성·grant 서빙 필터(델타2)·revoke 재발급 제외·실 tool_grants·만료 재발급·RLS) / #614 MOMO-531 momo-acp-host(mock ACP 왕복 PASS — 승인 fail-closed·PTY 위임·029 template 경유). **패브릭 엔진 6장(526·527·528·530·533·531) 전부 main 랜딩** — 동생 ⑩(A-16/529)·⑪(A-17/532) 개방(A-16 중복 리넘버).
 - 528 검수 실결함 3건(패킷 §4 7·8 성문화): 멘션 원문 FTS 질의(websearch AND가 전 매치 차단 — packet에 profile만 남던 원인) / verifier jq select 파이프 우선순위 / CONTEXT_PACKET_TTL compose 미매핑(§4-4 재발). momo240_* 잔재가 28100 선점(리클레임 사각 재확인).
