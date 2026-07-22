@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-556 공급망 게이트 (#649, 2026-07-22)
+
+- remote SwiftPM 의존성이 있는 9개 패키지 루트를 자동 탐색·resolve하고 전이 checkout LICENSE 원문을 판독해 permissive SPDX만 허용하며, copyleft 계열은 예외보다 먼저 fail-closed로 거부한다.
+- `legal/THIRD_PARTY_NOTICES.md`의 SwiftPM 37종 표를 `--write`로 결정적 재생성하고 `--check` 드리프트 검사를 swift local gate에 편입했다. 격리 픽스처는 MIT와 SPDX OR/AND 통과, AGPL 주입 실패를 재현한다.
+- Dependabot은 npm 3루트·Docker 2루트·GitHub Actions를 주간 감시하되 기존 workflow_dispatch-only 정책을 변경하지 않는다. Docker/verifier 게이트는 계약에 따라 오케스트레이터 인계(`runtime-unverified`)다.
+
 ## MOMO-554 prod RLS 실집행 태세 (#647, 2026-07-22)
 
 - prod install/upgrade가 migration 전에 `momo_app`(NOBYPASSRLS)·`momo_relay`/`momo_worker`(BYPASSRLS)를 멱등 프로비저닝하고, compose의 API/migrate/relay/worker URL과 outbound webhook master key를 역할·키별로 분리한다. migration 037은 `plugin_registry`의 API 쓰기 권한을 회수한다.

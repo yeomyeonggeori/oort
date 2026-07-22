@@ -21,4 +21,4 @@ Signed-off-by: Your Name <your@email.com>
 
 ## 서드파티 고지
 
-의존성 추가/변경 시 `legal/THIRD_PARTY_NOTICES.md`를 갱신하세요(Package.resolved 기준, 라이선스 원문 확인). GPL 계열 의존성은 수용하지 않습니다.
+의존성 추가/변경 시 `scripts/check_spm_licenses.sh --write`로 `legal/THIRD_PARTY_NOTICES.md`를 재생성하고 변경을 같은 PR에 포함하세요. `--check`는 9개 SwiftPM 그래프의 checkout LICENSE 원문과 고지 드리프트를 검사하며, GPL/AGPL/LGPL/MPL/SSPL/BUSL 계열은 fail-closed로 거부합니다.

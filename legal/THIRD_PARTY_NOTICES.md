@@ -1,44 +1,50 @@
-# Third-party notices (자동 생성 — scripts 없이 Package.resolved+checkouts 실측, 2026-07-22)
+# Third-party notices
 
-| 패키지 | 버전 | 라이선스 | 출처 |
+<!-- BEGIN GENERATED: SPM LICENSES (scripts/check_spm_licenses.sh) -->
+## Swift Package Manager dependencies
+
+> Generated from 9 Package.resolved graphs and checkout LICENSE files. Do not edit this section manually.
+
+| Package | Version | License | Source |
 |---|---|---|---|
-| async-http-client | 1.34.0 | Apache-2.0 | https://github.com/swift-server/async-http-client |
-| centrifuge-swift | 0.9.0 | MIT | https://github.com/centrifugal/centrifuge-swift |
-| client-sdk-swift | 2.15.2 | Apache-2.0 | https://github.com/livekit/client-sdk-swift |
-| hummingbird | 2.25.0 | Apache-2.0 | https://github.com/hummingbird-project/hummingbird |
-| jwt-kit | 5.2.0 | MIT | https://github.com/vapor/jwt-kit |
-| livekit-uniffi-xcframework | 0.0.6 | Apache-2.0 | https://github.com/livekit/livekit-uniffi-xcframework |
-| postgres-nio | 1.33.0 | MIT | https://github.com/vapor/postgres-nio |
-| swift-algorithms | 1.2.1 | Apache-2.0 | https://github.com/apple/swift-algorithms |
+| async-http-client | 1.35.0 | Apache-2.0 | https://github.com/swift-server/async-http-client.git |
+| centrifuge-swift | 0.9.0 | MIT | https://github.com/centrifugal/centrifuge-swift.git |
+| client-sdk-swift | 2.15.2 | Apache-2.0 | https://github.com/livekit/client-sdk-swift.git |
+| hummingbird | 2.25.1 | Apache-2.0 | https://github.com/hummingbird-project/hummingbird.git |
+| jwt-kit | 5.2.0 | MIT | https://github.com/vapor/jwt-kit.git |
+| livekit-uniffi-xcframework | 0.0.6 | Apache-2.0 | https://github.com/livekit/livekit-uniffi-xcframework.git |
+| postgres-nio | 1.33.1 | MIT | https://github.com/vapor/postgres-nio.git |
+| swift-algorithms | 1.2.1 | Apache-2.0 | https://github.com/apple/swift-algorithms.git |
 | swift-argument-parser | 1.8.2 | Apache-2.0 | https://github.com/apple/swift-argument-parser |
-| swift-asn1 | 1.7.1 | Apache-2.0 | https://github.com/apple/swift-asn1 |
-| swift-async-algorithms | 1.1.4 | Apache-2.0 | https://github.com/apple/swift-async-algorithms |
-| swift-atomics | 1.3.0 | Apache-2.0 | https://github.com/apple/swift-atomics |
-| swift-certificates | 1.19.1 | Apache-2.0 | https://github.com/apple/swift-certificates |
-| swift-collections | 1.6.0 | Apache-2.0 | https://github.com/apple/swift-collections |
-| swift-configuration | 1.2.0 | Apache-2.0 | https://github.com/apple/swift-configuration |
-| swift-crypto | 4.5.0 | Apache-2.0 | https://github.com/apple/swift-crypto |
+| swift-asn1 | 1.7.1 | Apache-2.0 | https://github.com/apple/swift-asn1.git |
+| swift-async-algorithms | 1.1.5 | Apache-2.0 | https://github.com/apple/swift-async-algorithms.git |
+| swift-atomics | 1.3.1 | Apache-2.0 | https://github.com/apple/swift-atomics.git |
+| swift-certificates | 1.19.3 | Apache-2.0 | https://github.com/apple/swift-certificates.git |
+| swift-collections | 1.6.0 | Apache-2.0 | https://github.com/apple/swift-collections.git |
+| swift-configuration | 1.2.0 | Apache-2.0 | https://github.com/apple/swift-configuration.git |
+| swift-crypto | 3.15.1, 4.5.1 | Apache-2.0 | https://github.com/apple/swift-crypto.git |
 | swift-custom-dump | 1.6.1 | MIT | https://github.com/pointfreeco/swift-custom-dump |
-| swift-distributed-tracing | 1.4.1 | Apache-2.0 | https://github.com/apple/swift-distributed-tracing |
-| swift-http-structured-headers | 1.7.0 | Apache-2.0 | https://github.com/apple/swift-http-structured-headers |
-| swift-http-types | 1.6.0 | Apache-2.0 | https://github.com/apple/swift-http-types |
-| swift-log | 1.13.2 | Apache-2.0 | https://github.com/apple/swift-log |
-| swift-metrics | 2.11.0 | Apache-2.0 | https://github.com/apple/swift-metrics |
-| swift-nio | 2.101.0 | Apache-2.0 | https://github.com/apple/swift-nio |
-| swift-nio-extras | 1.34.1 | Apache-2.0 | https://github.com/apple/swift-nio-extras |
-| swift-nio-http2 | 1.44.0 | Apache-2.0 | https://github.com/apple/swift-nio-http2 |
-| swift-nio-ssl | 2.37.1 | Apache-2.0 | https://github.com/apple/swift-nio-ssl |
-| swift-nio-transport-services | 1.28.0 | Apache-2.0 | https://github.com/apple/swift-nio-transport-services |
-| swift-numerics | 1.1.1 | Apache-2.0 | https://github.com/apple/swift-numerics |
-| swift-protobuf | 1.38.1 | Apache-2.0 | https://github.com/apple/swift-protobuf |
-| swift-service-context | 1.3.0 | Apache-2.0 | https://github.com/apple/swift-service-context |
-| swift-service-lifecycle | 2.11.0 | Apache-2.0 | https://github.com/swift-server/swift-service-lifecycle |
-| swift-snapshot-testing | 1.19.2 | MIT | https://github.com/pointfreeco/swift-snapshot-testing |
+| swift-distributed-tracing | 1.4.1 | Apache-2.0 | https://github.com/apple/swift-distributed-tracing.git |
+| swift-http-structured-headers | 1.7.0 | Apache-2.0 | https://github.com/apple/swift-http-structured-headers.git |
+| swift-http-types | 1.6.0 | Apache-2.0 | https://github.com/apple/swift-http-types.git |
+| swift-log | 1.14.0 | Apache-2.0 | https://github.com/apple/swift-log.git |
+| swift-metrics | 2.11.0 | Apache-2.0 | https://github.com/apple/swift-metrics.git |
+| swift-nio | 2.101.3 | Apache-2.0 | https://github.com/apple/swift-nio.git |
+| swift-nio-extras | 1.34.3 | Apache-2.0 | https://github.com/apple/swift-nio-extras.git |
+| swift-nio-http2 | 1.45.0 | Apache-2.0 | https://github.com/apple/swift-nio-http2.git |
+| swift-nio-ssl | 2.37.2 | Apache-2.0 | https://github.com/apple/swift-nio-ssl.git |
+| swift-nio-transport-services | 1.28.0 | Apache-2.0 | https://github.com/apple/swift-nio-transport-services.git |
+| swift-numerics | 1.1.1 | Apache-2.0 | https://github.com/apple/swift-numerics.git |
+| swift-protobuf | 1.38.1 | Apache-2.0 | https://github.com/apple/swift-protobuf.git |
+| swift-service-context | 1.3.0 | Apache-2.0 | https://github.com/apple/swift-service-context.git |
+| swift-service-lifecycle | 2.11.0 | Apache-2.0 | https://github.com/swift-server/swift-service-lifecycle.git |
+| swift-snapshot-testing | 1.19.3 | MIT | https://github.com/pointfreeco/swift-snapshot-testing.git |
 | swift-syntax | 603.0.2 | Apache-2.0 | https://github.com/swiftlang/swift-syntax |
-| swift-system | 1.7.2 | Apache-2.0 | https://github.com/apple/swift-system |
-| swiftterm | 1.14.0 | MIT | https://github.com/migueldeicaza/SwiftTerm |
-| webrtc-xcframework | 144.7559.11 | MIT | https://github.com/livekit/webrtc-xcframework |
-| xctest-dynamic-overlay | 1.10.1 | MIT | https://github.com/pointfreeco/xctest-dynamic-overlay |
+| swift-system | 1.7.5 | Apache-2.0 | https://github.com/apple/swift-system |
+| swiftterm | 1.14.0 | MIT | https://github.com/migueldeicaza/SwiftTerm.git |
+| webrtc-xcframework | 144.7559.11 | MIT | https://github.com/livekit/webrtc-xcframework.git |
+| xctest-dynamic-overlay | 1.11.0 | MIT | https://github.com/pointfreeco/xctest-dynamic-overlay |
+<!-- END GENERATED: SPM LICENSES -->
 
 ## npm (web 런타임 의존)
 | react | MIT
@@ -76,7 +82,3 @@ SSPL/BUSL 항목은 없다.
 
 ## Apache 2.0 NOTICE 집계
 - 각 Apache-2.0 의존성의 NOTICE 파일 내용을 리포 루트 `NOTICE`에 집계(있는 것만).
-
----
-> TODO(Codex): `Package.resolved`로 전이 의존성 전체를 자동 수집하는 스크립트(`scripts/gen-notices.sh`)로 이 표를 생성·갱신.
-> 각 라이선스는 저장소 LICENSE 파일로 SPDX 확정. permissive 외(GPL/AGPL 등) 발견 시 즉시 보고(AGENTS.md §9).
