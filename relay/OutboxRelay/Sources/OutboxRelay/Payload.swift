@@ -67,3 +67,15 @@ struct BroadcastPayload: Decodable, Sendable {
         case idempotencyKey = "idempotency_key"
     }
 }
+
+struct WebhookDeliveryPayload: Decodable, Sendable {
+    let schema: String
+    let subscriptionID: UUID
+    let event: AnyJSON
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case subscriptionID = "subscription_id"
+        case event
+    }
+}

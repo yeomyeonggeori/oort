@@ -26,6 +26,9 @@ struct Config: Sendable {
     var pollInterval: Duration   // fallback poll cadence (spec: 300ms)
     var claimBatchSize: Int      // rows claimed per iteration
     var maxAttempts: Int         // give up → status='failed' after this many tries
+    var webhookSigningMasterKey: String
+    var webhookDisableAfterServerFailures: Int
+    var allowDevelopmentWebhookHTTP: Bool
 
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -55,7 +58,16 @@ struct Config: Sendable {
             centAPIKey: env("CENT_API_KEY", "dev-insecure-cent-api-key"),
             pollInterval: .milliseconds(pollMs),
             claimBatchSize: envInt("RELAY_CLAIM_BATCH", 64),
-            maxAttempts: envInt("RELAY_MAX_ATTEMPTS", 8)
+            maxAttempts: envInt("RELAY_MAX_ATTEMPTS", 8),
+            webhookSigningMasterKey: env(
+                "OUTBOUND_WEBHOOK_MASTER_KEY", env("JWT_HMAC", "dev-insecure-jwt-hmac-change-me")
+            ),
+            webhookDisableAfterServerFailures: max(
+                1, envInt("WEBHOOK_DISABLE_AFTER_5XX", 5)
+            ),
+            allowDevelopmentWebhookHTTP:
+                env("MOMO_ENV", "local").lowercased() == "local"
+                && env("MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP", "0") == "1"
         )
     }
 

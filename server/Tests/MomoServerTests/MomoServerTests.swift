@@ -3837,6 +3837,7 @@ final class MomoServerTests: XCTestCase {
             pgPassword: "momo",
             pgDatabase: "momo",
             jwtHMAC: "test-jwt-hmac",
+            outboundWebhookMasterKey: "test-outbound-webhook-master-key",
             accessTokenTTL: accessTokenTTL,
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: "http://localhost:8000/api",

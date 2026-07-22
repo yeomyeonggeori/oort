@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-535 outbound 이벤트 구독 (#617, 2026-07-22)
+
+- migration 033에 `event_subscription` FORCE RLS 원장과 mention·approval_request·work 상태 전이 transactional outbox 투영을 추가하고, 관리자 CRUD·감사·one-time HMAC secret 발급을 OpenAPI와 동기화했다. 평문 secret은 저장·재조회하지 않는다.
+- OutboxRelay가 MOMO-536에서 분리한 공용 DNS/IP SSRF 정책으로 목적지를 재검증·IP 고정하고 exact-body HMAC-SHA256 POST, 지수 재시도, 누적 5xx 5회 자동 disable+system audit을 수행한다. 공용 정책은 Darwin/Glibc 분기를 포함한다.
+- 전체 Swift 10개 패키지 build, 공용 정책 3·server 162·OutboxRelay 7 tests와 verifier bash/OpenAPI·compose YAML 정적 검증이 PASS했다. `verify_event_subscription.sh`는 28130~28134(run-tag 격리, 28132 선점 회피)에서 CRUD·서명·재시도·자동 disable·RLS를 단정하며 Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
 ## MOMO-547 ACP/PTY 자식 env 스크럽 옵션 (#624, 2026-07-22)
 
 - WorkHostDaemon의 PTY·ACP·ACP terminal 자식 환경을 기본 allowlist(`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`, `COLORTERM`, `TMPDIR`)로 제한하고 `MOMO_WORKD_ENV_PASSTHROUGH`에 호스트 운영자가 명시한 이름만 추가한다. `MOMO_WORKD_*` 제어 변수는 항상 제외하며, 전역 legacy와 프로파일 legacy 모두 호스트의 명시적 옵트인이 필요하다.
