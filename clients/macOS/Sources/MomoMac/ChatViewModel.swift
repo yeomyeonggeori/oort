@@ -163,7 +163,11 @@ public final class ChatViewModel: ObservableObject {
     private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
     private let workConsoleBackend: (any MomoWorkConsoleBackend)?
     private let workHostBackend: (any MomoWorkHostBackend)?
+<<<<<<< HEAD
     private let memoryPlaneBackend: (any MemoryPlaneBackend)?
+=======
+    private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
+>>>>>>> origin/track/uxui
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -205,6 +209,13 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var workspaceNameUpdateError: String?
     @Published public private(set) var workspaceNameUpdateIssue: WorkspaceNameUpdateIssue?
     @Published public private(set) var members: [Member] = []
+    @Published public private(set) var membershipMutationMemberIDs: Set<MemberID> = []
+    @Published public private(set) var membershipAdministrationError: String?
+    @Published public private(set) var workspaceAuditEvents: [MomoWorkspaceAuditEvent] = []
+    @Published public private(set) var workspaceAuditNextCursor: UUID?
+    @Published public private(set) var workspaceAuditIsLoading = false
+    @Published public private(set) var workspaceAuditError: String?
+    @Published public private(set) var workspaceAuditFilter = MomoWorkspaceAuditFilter.all
     @Published public private(set) var channels: [Channel] = []
     @Published public var selectedChannelId: ChannelID?
     @Published public private(set) var recentChannelIds: [ChannelID] = []
@@ -355,7 +366,11 @@ public final class ChatViewModel: ObservableObject {
         self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
         self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
         self.workHostBackend = chat as? any MomoWorkHostBackend
+<<<<<<< HEAD
         self.memoryPlaneBackend = chat as? any MemoryPlaneBackend
+=======
+        self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
+>>>>>>> origin/track/uxui
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -1137,6 +1152,138 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             memberDirectoryError = String(describing: error)
             reportConnectionError(error)
+        }
+    }
+
+    public func assignableWorkspaceRoles(for member: Member) -> [MembershipRole] {
+        MomoMembershipAdministrationPolicy.assignableRoles(actor: authenticatedMember, target: member)
+    }
+
+    public func canChangeLifecycle(of member: Member) -> Bool {
+        MomoMembershipAdministrationPolicy.canChangeLifecycle(actor: authenticatedMember, target: member)
+    }
+
+    @discardableResult
+    public func changeWorkspaceRole(member: Member, role: MembershipRole) async -> Bool {
+        guard assignableWorkspaceRoles(for: member).contains(role) else { return false }
+        return await performMembershipMutation(member.id) { backend in
+            try await backend.changeWorkspaceRole(member: member.id, role: role)
+        }
+    }
+
+    @discardableResult
+    public func suspendWorkspaceMember(_ member: Member) async -> Bool {
+        guard member.status == .active, canChangeLifecycle(of: member) else { return false }
+        return await performMembershipMutation(member.id) { backend in
+            try await backend.suspendWorkspaceMember(member.id)
+        }
+    }
+
+    @discardableResult
+    public func reinstateWorkspaceMember(_ member: Member) async -> Bool {
+        guard member.status == .suspended, canChangeLifecycle(of: member) else { return false }
+        return await performMembershipMutation(member.id) { backend in
+            try await backend.reinstateWorkspaceMember(member.id)
+        }
+    }
+
+    @discardableResult
+    public func removeWorkspaceMember(_ member: Member, ban: Bool, reason: String?) async -> Bool {
+        guard canChangeLifecycle(of: member) else { return false }
+        let normalizedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return await performMembershipMutation(member.id) { backend in
+            try await backend.removeWorkspaceMember(
+                member.id,
+                ban: ban,
+                reason: normalizedReason?.isEmpty == false ? normalizedReason : nil
+            )
+        }
+    }
+
+    public func loadWorkspaceAudit(
+        reset: Bool = false,
+        filter: MomoWorkspaceAuditFilter? = nil
+    ) async {
+        guard canManageWorkspace, let backend = membershipAdministrationBackend,
+              !workspaceAuditIsLoading else { return }
+        if reset {
+            workspaceAuditNextCursor = nil
+            if let filter { workspaceAuditFilter = filter }
+        }
+        workspaceAuditIsLoading = true
+        workspaceAuditError = nil
+        defer { workspaceAuditIsLoading = false }
+        do {
+            let page = try await backend.workspaceAudit(
+                cursor: reset ? nil : workspaceAuditNextCursor,
+                limit: 50,
+                filter: workspaceAuditFilter
+            )
+            if reset {
+                workspaceAuditEvents = page.events
+            } else {
+                let known = Set(workspaceAuditEvents.map(\.id))
+                workspaceAuditEvents.append(contentsOf: page.events.filter { !known.contains($0.id) })
+            }
+            workspaceAuditNextCursor = page.nextCursor
+        } catch {
+            workspaceAuditError = error.localizedDescription
+        }
+    }
+
+    public func clearMembershipAdministrationError() {
+        membershipAdministrationError = nil
+    }
+
+    @discardableResult
+    public func leaveCurrentWorkspace() async -> Bool {
+        guard let backend = membershipAdministrationBackend else { return false }
+        membershipAdministrationError = nil
+        do {
+            try await backend.leaveWorkspace()
+            await clearSessionSensitiveState()
+            return true
+        } catch {
+            membershipAdministrationError = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    public func leaveCurrentChannel() async -> Bool {
+        guard let workspaceId,
+              let channel = selectedChannelId,
+              channels.first(where: { $0.id == channel })?.kind != .dm,
+              let backend = membershipAdministrationBackend else { return false }
+        membershipAdministrationError = nil
+        do {
+            try await backend.leaveChannel(channel)
+            channels = try await chat.channels(workspace: workspaceId)
+            selectedChannelId = channels.first?.id
+            await refreshMemberDirectory()
+            return true
+        } catch {
+            membershipAdministrationError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func performMembershipMutation(
+        _ memberID: MemberID,
+        operation: @escaping (any MomoMembershipAdministrationBackend) async throws -> Void
+    ) async -> Bool {
+        guard let backend = membershipAdministrationBackend,
+              !membershipMutationMemberIDs.contains(memberID) else { return false }
+        membershipMutationMemberIDs.insert(memberID)
+        membershipAdministrationError = nil
+        defer { membershipMutationMemberIDs.remove(memberID) }
+        do {
+            try await operation(backend)
+            await refreshMemberDirectory()
+            return true
+        } catch {
+            membershipAdministrationError = error.localizedDescription
+            return false
         }
     }
 

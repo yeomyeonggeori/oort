@@ -1027,6 +1027,346 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var workspaceAuditLog: String {
+        switch language {
+        case .korean: return "감사 로그"
+        case .english: return "Audit log"
+        }
+    }
+
+    var workspaceRole: String {
+        switch language {
+        case .korean: return "워크스페이스 역할"
+        case .english: return "Workspace role"
+        }
+    }
+
+    var saveRole: String {
+        switch language {
+        case .korean: return "역할 저장"
+        case .english: return "Save role"
+        }
+    }
+
+    var reinstateMember: String {
+        switch language {
+        case .korean: return "멤버 복구"
+        case .english: return "Reinstate member"
+        }
+    }
+
+    var suspendMember: String {
+        switch language {
+        case .korean: return "멤버 일시 정지"
+        case .english: return "Suspend member"
+        }
+    }
+
+    var removeMember: String {
+        switch language {
+        case .korean: return "멤버 제거"
+        case .english: return "Remove member"
+        }
+    }
+
+    var updateMemberAccess: String {
+        switch language {
+        case .korean: return "멤버 접근 권한을 변경할까요?"
+        case .english: return "Update member access?"
+        }
+    }
+
+    func suspendMemberAction(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name) 일시 정지"
+        case .english: return "Suspend \(name)"
+        }
+    }
+
+    func reinstateMemberAction(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name) 복구"
+        case .english: return "Reinstate \(name)"
+        }
+    }
+
+    func suspendMemberExplanation(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name)님의 접근 권한이 즉시 중지되고 로그인 세션이 종료됩니다."
+        case .english: return "\(name) will lose access immediately and active login sessions will end."
+        }
+    }
+
+    func reinstateMemberExplanation(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name)님이 다시 로그인할 수 있습니다. 이전에 종료된 로그인 세션은 복원되지 않습니다."
+        case .english: return "\(name) can sign in again. Previously ended login sessions stay ended."
+        }
+    }
+
+    func removeMemberTitle(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name)님을 제거할까요?"
+        case .english: return "Remove \(name)?"
+        }
+    }
+
+    var removeMemberExplanation: String {
+        switch language {
+        case .korean: return "워크스페이스 접근 권한과 활성 로그인 세션이 종료됩니다. 이 작업은 감사 로그에 기록됩니다."
+        case .english: return "Workspace access and active login sessions end. This action is recorded in the audit log."
+        }
+    }
+
+    var removalReasonOptional: String {
+        switch language {
+        case .korean: return "사유(선택 사항)"
+        case .english: return "Reason (optional)"
+        }
+    }
+
+    func blockFromRejoining(_ handle: String) -> String {
+        switch language {
+        case .korean: return "@\(handle)의 재가입 차단"
+        case .english: return "Block @\(handle) from rejoining"
+        }
+    }
+
+    var agentCredentialAfterRemoval: String {
+        switch language {
+        case .korean: return "이 에이전트를 복구하거나 다시 만들려면 새 자격 증명이 필요합니다. 폐기된 자격 증명은 복원할 수 없습니다."
+        case .english: return "Reinstating or recreating this agent requires a new credential. Revoked credentials cannot be restored."
+        }
+    }
+
+    var remove: String {
+        switch language {
+        case .korean: return "제거"
+        case .english: return "Remove"
+        }
+    }
+
+    var membershipUpdateFailed: String {
+        switch language {
+        case .korean: return "멤버 변경을 완료하지 못했습니다. 다시 시도해 주세요."
+        case .english: return "The member update could not be completed. Try again."
+        }
+    }
+
+    var workspaceAccess: String {
+        switch language {
+        case .korean: return "워크스페이스 접근"
+        case .english: return "Workspace access"
+        }
+    }
+
+    var workspaceAccessSubtitle: String {
+        switch language {
+        case .korean: return "멤버십 변경 사항은 감사 로그에 기록됩니다."
+        case .english: return "Membership changes are recorded in the audit log."
+        }
+    }
+
+    var leaveWorkspace: String {
+        switch language {
+        case .korean: return "워크스페이스 나가기"
+        case .english: return "Leave workspace"
+        }
+    }
+
+    var leaveWorkspaceQuestion: String {
+        switch language {
+        case .korean: return "이 워크스페이스에서 나갈까요?"
+        case .english: return "Leave this workspace?"
+        }
+    }
+
+    var lastOwnerLeaveExplanation: String {
+        switch language {
+        case .korean: return "마지막 소유자라면 나가기 전에 다른 멤버를 소유자로 지정해야 합니다."
+        case .english: return "If you are the last owner, assign another owner before leaving."
+        }
+    }
+
+    var leaveWorkspaceExplanation: String {
+        switch language {
+        case .korean: return "워크스페이스 멤버십이 해제되고 활성 로그인 세션이 종료됩니다."
+        case .english: return "Your workspace membership ends and active login sessions are signed out."
+        }
+    }
+
+    var leaveChannel: String {
+        switch language {
+        case .korean: return "채널 나가기"
+        case .english: return "Leave channel"
+        }
+    }
+
+    var leaveChannelQuestion: String {
+        switch language {
+        case .korean: return "이 채널에서 나갈까요?"
+        case .english: return "Leave this channel?"
+        }
+    }
+
+    func leaveChannelAction(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name) 나가기"
+        case .english: return "Leave \(name)"
+        }
+    }
+
+    func leaveChannelExplanation(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name) 채널의 메시지를 더 이상 받지 않습니다."
+        case .english: return "You will stop receiving messages from \(name)."
+        }
+    }
+
+    var leaveChannelFailed: String {
+        switch language {
+        case .korean: return "채널에서 나가지 못했습니다. 다시 시도해 주세요."
+        case .english: return "Could not leave the channel. Try again."
+        }
+    }
+
+    var auditAction: String {
+        switch language {
+        case .korean: return "행위"
+        case .english: return "Action"
+        }
+    }
+
+    var auditMember: String {
+        switch language {
+        case .korean: return "멤버"
+        case .english: return "Member"
+        }
+    }
+
+    var auditTime: String {
+        switch language {
+        case .korean: return "기간"
+        case .english: return "Time"
+        }
+    }
+
+    var auditAllMembers: String {
+        switch language {
+        case .korean: return "모든 멤버"
+        case .english: return "All members"
+        }
+    }
+
+    var apply: String {
+        switch language {
+        case .korean: return "필터 적용"
+        case .english: return "Apply filters"
+        }
+    }
+
+    var loadingAuditLog: String {
+        switch language {
+        case .korean: return "감사 로그 불러오는 중"
+        case .english: return "Loading audit log"
+        }
+    }
+
+    var auditLoadFailed: String {
+        switch language {
+        case .korean: return "감사 로그를 불러오지 못했습니다."
+        case .english: return "Could not load audit log"
+        }
+    }
+
+    var noAuditEvents: String {
+        switch language {
+        case .korean: return "감사 이벤트가 없습니다."
+        case .english: return "No audit events"
+        }
+    }
+
+    var auditEvents: String {
+        switch language {
+        case .korean: return "이벤트"
+        case .english: return "Events"
+        }
+    }
+
+    var loadMore: String {
+        switch language {
+        case .korean: return "더 불러오기"
+        case .english: return "Load more"
+        }
+    }
+
+    var refresh: String {
+        switch language {
+        case .korean: return "새로고침"
+        case .english: return "Refresh"
+        }
+    }
+
+    var auditAllActions: String {
+        switch language {
+        case .korean: return "모든 행위"
+        case .english: return "All actions"
+        }
+    }
+
+    var auditMemberLifecycle: String {
+        switch language {
+        case .korean: return "멤버 수명 주기"
+        case .english: return "Member lifecycle"
+        }
+    }
+
+    var auditBans: String {
+        switch language {
+        case .korean: return "차단"
+        case .english: return "Bans"
+        }
+    }
+
+    var auditAllTime: String {
+        switch language {
+        case .korean: return "전체 기간"
+        case .english: return "All time"
+        }
+    }
+
+    var audit24Hours: String { language == .korean ? "24시간" : "24 hours" }
+    var audit7Days: String { language == .korean ? "7일" : "7 days" }
+    var audit30Days: String { language == .korean ? "30일" : "30 days" }
+
+    var unknownAuditActor: String {
+        switch language {
+        case .korean: return "알 수 없는 행위자"
+        case .english: return "Unknown actor"
+        }
+    }
+
+    func auditActorTarget(actor: String, target: String?) -> String {
+        switch (language, target) {
+        case (.korean, .some(let target)): return "행위자 \(actor) → 대상 \(target)"
+        case (.english, .some(let target)): return "Actor \(actor) → Target \(target)"
+        case (.korean, .none): return "행위자 \(actor)"
+        case (.english, .none): return "Actor \(actor)"
+        }
+    }
+
+    func auditActionTitle(_ action: String) -> String {
+        switch (language, action) {
+        case (.korean, "role.changed"): return "역할 변경"
+        case (.korean, "member.suspended"): return "멤버 일시 정지"
+        case (.korean, "member.reinstated"): return "멤버 복구"
+        case (.korean, "member.removed"): return "멤버 제거"
+        case (.korean, "ban.created"): return "재가입 차단"
+        case (.korean, "ban.deleted"): return "재가입 차단 해제"
+        default: return action.replacingOccurrences(of: ".", with: " ").capitalized
+        }
+    }
+
     var agents: String {
         switch language {
         case .korean: return "에이전트"
