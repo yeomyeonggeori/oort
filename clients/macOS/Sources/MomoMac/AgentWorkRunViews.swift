@@ -13,6 +13,9 @@ struct AgentWorkRunCard: View {
     var presentation: MomoDeveloperModePresentation = .standard
     var memoryDelivery: MomoMemoryDeliveryReceipt? = nil
     var onOpenServedContext: (() -> Void)? = nil
+    var isCancellationInFlight = false
+    var cancellationIssue: MomoAgentSafetyIssue? = nil
+    var onStop: (() -> Void)? = nil
     let onApprovalDecision: (ApprovalID, Bool) -> Void
     let onOpenDetail: () -> Void
 
@@ -74,6 +77,13 @@ struct AgentWorkRunCard: View {
                 }
                 .buttonStyle(.link)
             }
+
+            if let cancellationIssue {
+                Label(copy.stopAgentRunError(cancellationIssue), systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(12)
         .frame(maxWidth: MomoTheme.Work.cardMaximumWidth, alignment: .leading)
@@ -109,6 +119,20 @@ struct AgentWorkRunCard: View {
             }
 
             Spacer(minLength: 8)
+            if !status.isTerminal, let onStop {
+                Button(action: onStop) {
+                    Label(
+                        isCancellationInFlight ? copy.stoppingAgentRun : copy.stopAgentRun,
+                        systemImage: "stop.circle"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isCancellationInFlight)
+                .help(copy.stopAgentRunShortcut)
+                .accessibilityLabel(isCancellationInFlight ? copy.stoppingAgentRun : copy.stopAgentRun)
+                .accessibilityIdentifier("agent-run-stop-\(run.id.description.lowercased())")
+            }
             AgentWorkStatusChip(status: status, copy: copy)
         }
     }
@@ -223,7 +247,29 @@ struct AgentWorkRunDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
+                    if !status.isTerminal {
+                        Button {
+                            Task { await viewModel.cancelRun(run.id) }
+                        } label: {
+                            Label(
+                                viewModel.runCancellationIDs.contains(run.id)
+                                    ? copy.stoppingAgentRun
+                                    : copy.stopAgentRun,
+                                systemImage: "stop.circle"
+                            )
+                        }
+                        .disabled(viewModel.runCancellationIDs.contains(run.id))
+                        .help(copy.stopAgentRunShortcut)
+                        .accessibilityIdentifier("agent-run-stop-detail-\(run.id.description.lowercased())")
+                    }
                     AgentWorkStatusChip(status: status, copy: copy)
+                }
+
+                if let issue = viewModel.runCancellationIssues[run.id] {
+                    Label(copy.stopAgentRunError(issue), systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(MomoTheme.irreversibleRed)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if presentation.showsDeveloperDetails {

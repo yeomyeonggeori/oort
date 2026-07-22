@@ -848,7 +848,12 @@ public struct MessageListView: View {
                                 author: partialAuthor(for: partial),
                                 status: viewModel.agentStatuses[partial.runId],
                                 presentation: presentation,
-                                copy: copy
+                                copy: copy,
+                                isCancellationInFlight: viewModel.runCancellationIDs.contains(partial.runId),
+                                cancellationIssue: viewModel.runCancellationIssues[partial.runId],
+                                onStop: {
+                                    Task { await viewModel.cancelRun(partial.runId) }
+                                }
                             )
                             .padding(.top, 8)
                         }
@@ -1039,6 +1044,11 @@ public struct MessageListView: View {
                 presentation: presentation,
                 memoryDelivery: viewModel.memoryDelivery(for: run.id),
                 onOpenServedContext: servedContextAction(for: run.id),
+                isCancellationInFlight: viewModel.runCancellationIDs.contains(run.id),
+                cancellationIssue: viewModel.runCancellationIssues[run.id],
+                onStop: viewModel.effectiveWorkStatus(for: run).isTerminal
+                    ? nil
+                    : { Task { await viewModel.cancelRun(run.id) } },
                 onApprovalDecision: { approvalId, approve in
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },

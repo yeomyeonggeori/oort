@@ -5,6 +5,11 @@
 - migrate 이미지에 env-only `set-owner` one-shot을 추가하고 install이 migration 직후 이를 자동 실행하도록 연결했다. bootstrap owner 정확성·이메일 검증·세션 폐기형 credential rotation을 한 트랜잭션으로 처리하며 upgrade는 기존 owner를 덮어쓰지 않는다.
 - prod `.env.example`/`secrets.env.example`과 DEPLOY 런북에서 psql heredoc을 제거했다. 정적 설치/secret 비유입 검증은 worker가 수행하며, 28200 전용 Docker verifier는 오케스트레이터 실행 전까지 `runtime-unverified`다.
 
+## UXUI MOMO-558 Stop/Pause 클라이언트 표면 (#651, 2026-07-23)
+
+- macOS run 카드·스트리밍 헤더·상세에 human cancel REST 기반 Stop과 `⌘.` 경로를 연결하고, 권한 있는 owner/admin·agent human owner의 멤버 인스펙터에 Pause 토글을 추가했다. `agent_run_cancelled`·`agent_paused`는 에이전트 발화가 아닌 시스템 라인으로 렌더한다.
+- REST·ViewModel·권한·키보드 집중 테스트와 macOS Swift build가 PASS했다. light/dark 스냅샷 테스트 코드는 추가했지만 기준 PNG는 계약대로 기록하지 않았으며, 실서버 Stop/Pause 표면 E2E·Docker 게이트와 스냅샷 기준 기록은 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## MOMO-556 공급망 게이트 (#649, 2026-07-22)
 
 - remote SwiftPM 의존성이 있는 9개 패키지 루트를 자동 탐색·resolve하고 전이 checkout LICENSE 원문을 판독해 permissive SPDX만 허용하며, copyleft 계열은 예외보다 먼저 fail-closed로 거부한다.

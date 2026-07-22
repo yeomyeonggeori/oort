@@ -16,6 +16,9 @@ public struct AgentPartialView: View {
     public let status: AgentStatus?
     private let presentation: MomoDeveloperModePresentation
     private let copy: MomoWorkspaceCopy
+    private let isCancellationInFlight: Bool
+    private let cancellationIssue: MomoAgentSafetyIssue?
+    private let onStop: (() -> Void)?
 
     public init(partial: AgentPartial, author: Member?, status: AgentStatus? = nil) {
         self.partial = partial
@@ -23,6 +26,9 @@ public struct AgentPartialView: View {
         self.status = status
         self.presentation = .standard
         self.copy = MomoWorkspaceCopy(language: .preferredDefault)
+        self.isCancellationInFlight = false
+        self.cancellationIssue = nil
+        self.onStop = nil
     }
 
     init(
@@ -30,13 +36,19 @@ public struct AgentPartialView: View {
         author: Member?,
         status: AgentStatus? = nil,
         presentation: MomoDeveloperModePresentation,
-        copy: MomoWorkspaceCopy
+        copy: MomoWorkspaceCopy,
+        isCancellationInFlight: Bool = false,
+        cancellationIssue: MomoAgentSafetyIssue? = nil,
+        onStop: (() -> Void)? = nil
     ) {
         self.partial = partial
         self.author = author
         self.status = status
         self.presentation = presentation
         self.copy = copy
+        self.isCancellationInFlight = isCancellationInFlight
+        self.cancellationIssue = cancellationIssue
+        self.onStop = onStop
     }
 
     public var body: some View {
@@ -60,6 +72,12 @@ public struct AgentPartialView: View {
                 // In-progress tool_call (experience D: live tool-call card).
                 if presentation.showsDeveloperDetails, let toolName = partial.toolCallName {
                     liveToolCallCard(name: toolName)
+                }
+                if let cancellationIssue {
+                    Label(copy.stopAgentRunError(cancellationIssue), systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(MomoTheme.irreversibleRed)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)
@@ -91,6 +109,20 @@ public struct AgentPartialView: View {
             Text(author?.displayName ?? "agent").font(MomoTheme.Typography.emphasizedRow)
             if presentation.showsDeveloperDetails {
                 phaseChip
+            }
+            if let onStop {
+                Button(action: onStop) {
+                    Label(
+                        isCancellationInFlight ? copy.stoppingAgentRun : copy.stopAgentRun,
+                        systemImage: "stop.circle"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isCancellationInFlight)
+                .help(copy.stopAgentRunShortcut)
+                .accessibilityLabel(isCancellationInFlight ? copy.stoppingAgentRun : copy.stopAgentRun)
+                .accessibilityIdentifier("agent-run-stop-stream-\(partial.runId.description.lowercased())")
             }
         }
     }

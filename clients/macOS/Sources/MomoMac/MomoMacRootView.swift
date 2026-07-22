@@ -953,6 +953,7 @@ public struct MomoMacRootView: View {
                     canManageWorkspace: viewModel.canManageWorkspace
                 )
             } ?? false,
+            canStopAgentRun: viewModel.primaryCancellableRunID != nil,
             toggleSidebar: toggleSidebar,
             presentQuickSwitcher: {
                 showKeyboardShortcuts = false
@@ -978,6 +979,10 @@ public struct MomoMacRootView: View {
             toggleWorkConsole: {
                 quickSwitcherPresentation.dismiss()
                 setWorkConsolePresented(!showWorkConsole)
+            },
+            stopAgentRun: {
+                guard let runID = viewModel.primaryCancellableRunID else { return }
+                Task { await viewModel.cancelRun(runID) }
             },
             selectChannel: { number in
                 quickSwitcherPresentation.dismiss()

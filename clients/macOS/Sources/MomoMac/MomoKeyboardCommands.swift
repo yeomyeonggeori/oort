@@ -23,6 +23,7 @@ enum MomoKeyboardShortcutCatalog {
             MomoKeyboardShortcutItem(key: "⇧⌘D", label: copy.appDownloads),
             MomoKeyboardShortcutItem(key: "⌃`", label: copy.openWorkConsole),
             MomoKeyboardShortcutItem(key: "⇧⌘W", label: copy.startWork),
+            MomoKeyboardShortcutItem(key: "⌘.", label: copy.stopAgentRun),
             MomoKeyboardShortcutItem(key: "⌘1…⌘9", label: copy.quickSwitcherChannelShortcuts),
             MomoKeyboardShortcutItem(
                 key: MomoUnreadKeyboardShortcut.helpGlyphs,
@@ -109,6 +110,7 @@ public struct MomoMacCommandActions {
     var canNavigateUnreadChannels: Bool
     var canOpenSelectedChannelSettings: Bool
     var canInviteToSelectedChannel: Bool
+    var canStopAgentRun: Bool
     var toggleSidebar: () -> Void
     var presentQuickSwitcher: () -> Void
     var presentWorkspaceSearch: () -> Void
@@ -116,6 +118,7 @@ public struct MomoMacCommandActions {
     var inviteToChannel: () -> Void
     var openDownloads: () -> Void
     var toggleWorkConsole: () -> Void
+    var stopAgentRun: () -> Void
     var selectChannel: (Int) -> Void
     var navigateBackward: () -> Void
     var navigateForward: () -> Void
@@ -132,6 +135,7 @@ public struct MomoMacCommandActions {
         canNavigateUnreadChannels: Bool,
         canOpenSelectedChannelSettings: Bool,
         canInviteToSelectedChannel: Bool,
+        canStopAgentRun: Bool = false,
         toggleSidebar: @escaping () -> Void,
         presentQuickSwitcher: @escaping () -> Void,
         presentWorkspaceSearch: @escaping () -> Void,
@@ -139,6 +143,7 @@ public struct MomoMacCommandActions {
         inviteToChannel: @escaping () -> Void,
         openDownloads: @escaping () -> Void,
         toggleWorkConsole: @escaping () -> Void,
+        stopAgentRun: @escaping () -> Void = {},
         selectChannel: @escaping (Int) -> Void,
         navigateBackward: @escaping () -> Void,
         navigateForward: @escaping () -> Void,
@@ -154,6 +159,7 @@ public struct MomoMacCommandActions {
         self.canNavigateUnreadChannels = canNavigateUnreadChannels
         self.canOpenSelectedChannelSettings = canOpenSelectedChannelSettings
         self.canInviteToSelectedChannel = canInviteToSelectedChannel
+        self.canStopAgentRun = canStopAgentRun
         self.toggleSidebar = toggleSidebar
         self.presentQuickSwitcher = presentQuickSwitcher
         self.presentWorkspaceSearch = presentWorkspaceSearch
@@ -161,6 +167,7 @@ public struct MomoMacCommandActions {
         self.inviteToChannel = inviteToChannel
         self.openDownloads = openDownloads
         self.toggleWorkConsole = toggleWorkConsole
+        self.stopAgentRun = stopAgentRun
         self.selectChannel = selectChannel
         self.navigateBackward = navigateBackward
         self.navigateForward = navigateForward
@@ -219,6 +226,12 @@ public struct MomoMacCommands: Commands {
             }
             .keyboardShortcut("`", modifiers: .control)
             .disabled(actions == nil)
+
+            Button(copy.stopAgentRun) {
+                actions?.stopAgentRun()
+            }
+            .keyboardShortcut(".", modifiers: .command)
+            .disabled(actions?.canStopAgentRun != true)
 
             Divider()
 
