@@ -165,6 +165,21 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(english.removeFromChannel, "Remove from channel")
     }
 
+    func testMembershipAdministrationCopyIsLocalizedAndUsesLoginSessionLanguage() {
+        let korean = MomoWorkspaceCopy(language: .korean)
+        let english = MomoWorkspaceCopy(language: .english)
+
+        XCTAssertEqual(korean.workspaceAuditLog, "감사 로그")
+        XCTAssertEqual(korean.leaveChannelFailed, "채널에서 나가지 못했습니다. 다시 시도해 주세요.")
+        XCTAssertTrue(korean.suspendMemberExplanation("민지").contains("로그인 세션"))
+        XCTAssertTrue(english.suspendMemberExplanation("Minji").contains("login sessions"))
+        XCTAssertFalse(english.removeMemberExplanation.localizedCaseInsensitiveContains("token"))
+        XCTAssertEqual(
+            korean.auditActorTarget(actor: "상준", target: "Hermes"),
+            "행위자 상준 → 대상 Hermes"
+        )
+    }
+
     func testMemberDirectoryFiltersNamesHandlesAndMemberKind() {
         let workspace = WorkspaceID()
         let people = [
@@ -386,6 +401,86 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(groups.online.map(\.id), [online.id])
         XCTAssertEqual(groups.away.map(\.id), [away.id])
         XCTAssertEqual(groups.offline.map(\.id), [offline.id])
+    }
+
+    func testMembershipAdministrationPolicyFailsClosedAcrossRoleHierarchy() {
+        let workspace = WorkspaceID()
+        func member(_ role: MembershipRole, name: String) -> Member {
+            Member(
+                id: MemberID(), workspaceId: workspace, kind: .human,
+                displayName: name, handle: name.lowercased(), workspaceRole: role
+            )
+        }
+        let owner = member(.owner, name: "Owner")
+        let peerOwner = member(.owner, name: "PeerOwner")
+        let admin = member(.admin, name: "Admin")
+        let regular = member(.member, name: "Member")
+        let guest = member(.guest, name: "Guest")
+
+        XCTAssertEqual(
+            MomoMembershipAdministrationPolicy.assignableRoles(actor: owner, target: admin),
+            [.owner, .admin, .member, .guest]
+        )
+        XCTAssertEqual(
+            MomoMembershipAdministrationPolicy.assignableRoles(actor: admin, target: guest),
+            [.member, .guest]
+        )
+        XCTAssertTrue(MomoMembershipAdministrationPolicy.canChangeLifecycle(actor: admin, target: regular))
+        XCTAssertFalse(MomoMembershipAdministrationPolicy.canChangeLifecycle(actor: admin, target: owner))
+        XCTAssertFalse(MomoMembershipAdministrationPolicy.canChangeLifecycle(actor: regular, target: guest))
+        XCTAssertFalse(MomoMembershipAdministrationPolicy.canChangeLifecycle(actor: owner, target: owner))
+        XCTAssertTrue(MomoMembershipAdministrationPolicy.assignableRoles(actor: owner, target: peerOwner).isEmpty)
+    }
+
+    func testWorkspaceAuditRequestUsesCanonicalFiltersAndLowercaseUUIDs() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID()
+        let target = MemberID()
+        let cursor = UUID()
+        let session = URLSession(configuration: .momoMocked)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/audit"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer audit-token")
+            return MockHTTPResponse(json: #"{"events":[],"nextCursor":null}"#)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "audit-token",
+                workspace: workspace
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "audit-token")
+        _ = try await backend.workspaceAudit(
+            cursor: cursor,
+            limit: 250,
+            filter: MomoWorkspaceAuditFilter(
+                actionPrefixes: ["member.", "ban."],
+                targetMember: target,
+                fromMs: 100,
+                toMs: 200
+            )
+        )
+
+        let requests = await MockHTTPURLProtocol.requests()
+        let request = try XCTUnwrap(requests.first)
+        let components = try XCTUnwrap(
+            request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        )
+        let values = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+        XCTAssertEqual(values["limit"], "100")
+        XCTAssertEqual(values["cursor"], cursor.uuidString.lowercased())
+        XCTAssertEqual(values["actions"], "member.,ban.")
+        XCTAssertEqual(values["target_member_id"], target.description.lowercased())
+        XCTAssertEqual(values["from_ms"], "100")
+        XCTAssertEqual(values["to_ms"], "200")
     }
 
     func testDockUnreadBadgeAggregatesAndCapsWithoutOverflow() {

@@ -38,6 +38,7 @@ private enum MomoChannelMenuFocusTarget: Hashable {
     case invite
     case members
     case copyID
+    case leave
 }
 
 // MARK: - MessageListView  (seq-ordered)
@@ -97,6 +98,8 @@ public struct MessageListView: View {
     @State private var pollOptions = ["", ""]
     @State private var highlightedMessageID: MessageID?
     @State private var isChannelMenuPresented = false
+    @State private var channelLeaveConfirmation: Channel?
+    @State private var channelLeaveFailed = false
     @State private var selectedThreadRootID: MessageID?
     @State private var availableTimelineWidth: CGFloat = 0
 
@@ -186,6 +189,10 @@ public struct MessageListView: View {
                     connectionBanner(issue, copy: copy)
                     Divider()
                 }
+                if channelLeaveFailed {
+                    channelLeaveFailureBanner(copy: copy)
+                    Divider()
+                }
                 if viewModel.failedMessageFocus != nil {
                     HStack(spacing: 8) {
                         Label(copy.messageFocusFailedDetail, systemImage: "magnifyingglass")
@@ -247,6 +254,7 @@ public struct MessageListView: View {
         }
         .onChange(of: viewModel.selectedChannelId) { _, _ in
             isChannelMenuPresented = false
+            channelLeaveFailed = false
             if selectedThreadRootID != nil { onDismissThread() }
             selectedThreadRootID = nil
             resetLocalComposerDraftsForChannelChange()
@@ -286,6 +294,27 @@ public struct MessageListView: View {
                 pollOptions: $pollOptions,
                 selectedPlugins: $selectedPlugins
             )
+        }
+        .confirmationDialog(
+            copy.leaveChannelQuestion,
+            isPresented: Binding(
+                get: { channelLeaveConfirmation != nil },
+                set: { if !$0 { channelLeaveConfirmation = nil } }
+            ),
+            presenting: channelLeaveConfirmation
+        ) { channel in
+            Button(copy.leaveChannelAction(channelPresentation(for: channel).name), role: .destructive) {
+                Task {
+                    if await viewModel.leaveCurrentChannel() {
+                        channelLeaveConfirmation = nil
+                    } else {
+                        channelLeaveFailed = true
+                    }
+                }
+            }
+            Button(copy.cancel, role: .cancel) {}
+        } message: { channel in
+            Text(copy.leaveChannelExplanation(channelPresentation(for: channel).name))
         }
         .onAppear(perform: loadSelectedPlugins)
         .onChange(of: selectedPlugins) { _, _ in saveSelectedPlugins() }
@@ -330,6 +359,20 @@ public struct MessageListView: View {
 
     private var language: MomoUILanguage {
         MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
+    }
+
+    private func channelLeaveFailureBanner(copy: MomoWorkspaceCopy) -> some View {
+        HStack(spacing: MomoTheme.ChannelHeader.standardSpacing) {
+            Label(copy.leaveChannelFailed, systemImage: "exclamationmark.triangle")
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(MomoTheme.irreversibleRed)
+            Spacer()
+            Button(copy.dismiss) { channelLeaveFailed = false }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, MomoTheme.ChannelHeader.edgeInset)
+        .padding(.vertical, MomoTheme.ChannelHeader.standardSpacing)
+        .accessibilityIdentifier("channelLeaveError")
     }
 
     private func header(copy: MomoWorkspaceCopy) -> some View {
@@ -448,6 +491,18 @@ public struct MessageListView: View {
             ) {
                 copyChannelID(channel.id)
                 isChannelMenuPresented = false
+            }
+
+            if channel.kind != .dm {
+                Divider()
+                channelMenuAction(
+                    copy.leaveChannel,
+                    systemImage: "rectangle.portrait.and.arrow.right",
+                    target: .leave
+                ) {
+                    isChannelMenuPresented = false
+                    channelLeaveConfirmation = channel
+                }
             }
         }
         .padding(MomoTheme.ChannelHeader.edgeInset)
