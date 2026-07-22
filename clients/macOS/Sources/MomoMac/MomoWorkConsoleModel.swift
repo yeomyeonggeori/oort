@@ -1,21 +1,104 @@
 import Foundation
 import MomoCore
 
-enum MomoWorkTool: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {
-    case claude
-    case codex
-    case opencode
-    case shell
+struct MomoWorkTool: RawRepresentable, Codable, Sendable, Hashable, Identifiable {
+    let rawValue: String
+
+    init(rawValue: String) {
+        self.rawValue = rawValue.lowercased()
+    }
+
+    static let claude = MomoWorkTool(rawValue: "claude")
+    static let codex = MomoWorkTool(rawValue: "codex")
+    static let opencode = MomoWorkTool(rawValue: "opencode")
+    static let shell = MomoWorkTool(rawValue: "shell")
 
     var id: String { rawValue }
 
     init(_ tool: WorkSessionDelta.Tool) {
-        self = MomoWorkTool(rawValue: tool.rawValue) ?? .shell
+        self = MomoWorkTool(rawValue: tool.rawValue)
     }
 
     var coreValue: WorkSessionDelta.Tool {
-        WorkSessionDelta.Tool(rawValue: rawValue) ?? .shell
+        WorkSessionDelta.Tool(rawValue: rawValue)
     }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum MomoWorkTransport: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
+    case pty
+    case acp
+
+    var id: String { rawValue }
+}
+
+enum MomoWorkToolPermissionPolicy: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
+    case confirm
+    case allow
+    case deny
+
+    var id: String { rawValue }
+}
+
+enum MomoWorkToolRisk: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
+    case low
+    case medium
+    case high
+
+    var id: String { rawValue }
+}
+
+struct MomoWorkToolLaunchTemplate: Codable, Sendable, Hashable {
+    var command: String
+    var arguments: [String]
+}
+
+struct MomoWorkToolProfile: Identifiable, Codable, Sendable, Hashable {
+    let id: UUID
+    let workspaceId: WorkspaceID
+    let toolKey: String
+    var displayName: String
+    var launchTemplate: MomoWorkToolLaunchTemplate
+    var tierDefaults: [String: JSON]
+    var enabled: Bool
+    let createdBy: MemberID
+    let updatedBy: MemberID
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+
+    var tool: MomoWorkTool { MomoWorkTool(rawValue: toolKey) }
+    var transport: MomoWorkTransport {
+        guard case .string(let raw)? = tierDefaults["transport"] else { return .pty }
+        return MomoWorkTransport(rawValue: raw) ?? .pty
+    }
+    var permissionPolicy: MomoWorkToolPermissionPolicy {
+        guard case .string(let raw)? = tierDefaults["permission_policy"] else { return .confirm }
+        return MomoWorkToolPermissionPolicy(rawValue: raw) ?? .confirm
+    }
+    var risk: MomoWorkToolRisk {
+        guard case .string(let raw)? = tierDefaults["risk"] else { return .medium }
+        return MomoWorkToolRisk(rawValue: raw) ?? .medium
+    }
+}
+
+struct MomoWorkToolProfileDraft: Sendable, Hashable {
+    var toolKey: String
+    var displayName: String
+    var command: String
+    var arguments: [String]
+    var transport: MomoWorkTransport
+    var permissionPolicy: MomoWorkToolPermissionPolicy
+    var risk: MomoWorkToolRisk
+    var enabled: Bool
 }
 
 enum MomoWorkSessionStatus: String, Codable, Sendable, Hashable {
@@ -255,6 +338,24 @@ protocol MomoWorkConsoleBackend: Sendable {
         tool: MomoWorkTool,
         enabled: Bool
     ) async throws -> Bool
+
+    func workToolProfiles(workspace: WorkspaceID) async throws -> [MomoWorkToolProfile]
+
+    func createWorkToolProfile(
+        workspace: WorkspaceID,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile
+
+    func updateWorkToolProfile(
+        workspace: WorkspaceID,
+        tool: MomoWorkTool,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile
+
+    func deleteWorkToolProfile(
+        workspace: WorkspaceID,
+        tool: MomoWorkTool
+    ) async throws -> MomoWorkToolProfile
 }
 
 extension MomoWorkConsoleBackend {
@@ -267,6 +368,32 @@ extension MomoWorkConsoleBackend {
             session: session,
             mode: .controller
         )
+    }
+
+    func workToolProfiles(workspace: WorkspaceID) async throws -> [MomoWorkToolProfile] {
+        throw MomoWorkConsoleError.toolProfileUnavailable
+    }
+
+    func createWorkToolProfile(
+        workspace: WorkspaceID,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        throw MomoWorkConsoleError.toolProfileUnavailable
+    }
+
+    func updateWorkToolProfile(
+        workspace: WorkspaceID,
+        tool: MomoWorkTool,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        throw MomoWorkConsoleError.toolProfileUnavailable
+    }
+
+    func deleteWorkToolProfile(
+        workspace: WorkspaceID,
+        tool: MomoWorkTool
+    ) async throws -> MomoWorkToolProfile {
+        throw MomoWorkConsoleError.toolProfileUnavailable
     }
 }
 
@@ -286,6 +413,24 @@ protocol MomoWorkHostBackend: Sendable {
         sentAtMs: Int64,
         signature: String
     ) async throws -> WorkHost
+
+    func enabledWorkToolProfiles(
+        workspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        signature: String
+    ) async throws -> [MomoWorkToolProfile]
+}
+
+extension MomoWorkHostBackend {
+    func enabledWorkToolProfiles(
+        workspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        signature: String
+    ) async throws -> [MomoWorkToolProfile] {
+        throw MomoWorkConsoleError.toolProfileUnavailable
+    }
 }
 
 enum MomoWorkConsoleError: Error, Equatable, Sendable {
@@ -296,6 +441,7 @@ enum MomoWorkConsoleError: Error, Equatable, Sendable {
     case hostRegistrationFailed
     case hostHeartbeatFailed
     case executableUnavailable(MomoWorkTool)
+    case toolProfileUnavailable
     case sandboxRestricted
     case localLaunchFailed
     case sessionUnavailable
@@ -328,6 +474,10 @@ enum MomoWorkConsoleError: Error, Equatable, Sendable {
             return "호스트 연결 상태를 확인하지 못했습니다. 등록은 유지되며 다시 확인합니다."
         case (.hostHeartbeatFailed, .english):
             return "Host presence could not be confirmed. Registration remains active and will be checked again."
+        case (.toolProfileUnavailable, .korean):
+            return "등록되고 활성화된 도구 프로파일이 필요합니다."
+        case (.toolProfileUnavailable, .english):
+            return "A registered and enabled tool profile is required."
         case (.executableUnavailable(let tool), .korean):
             return "이 Mac에서 \(tool.rawValue) 실행 파일을 찾지 못했습니다."
         case (.executableUnavailable(let tool), .english):

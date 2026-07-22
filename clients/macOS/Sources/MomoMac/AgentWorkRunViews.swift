@@ -163,6 +163,7 @@ struct AgentWorkRunDetailView: View {
     let copy: MomoWorkspaceCopy
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
+    @State private var showsServedContext = false
 
     var body: some View {
         Group {
@@ -177,6 +178,16 @@ struct AgentWorkRunDetailView: View {
         }
         .task {
             await viewModel.refreshWorkRun(runId)
+        }
+        .sheet(isPresented: $showsServedContext) {
+            if let run = viewModel.workRun(runId),
+               let packetID = contextPacketID(for: run) {
+                MomoContextPacketInspectorView(
+                    viewModel: viewModel,
+                    packetID: packetID,
+                    copy: copy
+                )
+            }
         }
     }
 
@@ -294,6 +305,30 @@ struct AgentWorkRunDetailView: View {
                     }
                 }
 
+                GroupBox {
+                    HStack(spacing: 12) {
+                        Image(systemName: "shippingbox")
+                            .foregroundStyle(MomoTheme.agentAccent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(copy.servedContextTitle)
+                                .font(MomoTheme.Typography.emphasizedRow)
+                            Text(
+                                contextPacketID(for: run) == nil
+                                    ? copy.servedContextUnavailable
+                                    : copy.servedContextSubtitle
+                            )
+                            .font(MomoTheme.Typography.supporting)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button(copy.servedContextAction) {
+                            showsServedContext = true
+                        }
+                        .disabled(contextPacketID(for: run) == nil)
+                    }
+                }
+
                 HStack {
                     Spacer()
                     Button {
@@ -332,6 +367,13 @@ struct AgentWorkRunDetailView: View {
         MomoDeveloperModePresentation(
             isDeveloperModeEnabled: developerMode,
             isCostDisplayEnabled: showCosts
+        )
+    }
+
+    private func contextPacketID(for run: AgentWorkRun) -> UUID? {
+        MomoContextPacketIDResolver.resolve(
+            run: run,
+            messages: viewModel.workMessages(for: run.id)
         )
     }
 }

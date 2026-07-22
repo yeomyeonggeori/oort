@@ -48,6 +48,21 @@ final class MomoLocalACPSession: ObservableObject {
     private var client: ACPClient?
     private var task: Task<Void, Never>?
     private let approvalBroker = MomoLocalACPApprovalBroker()
+    private let onCompletion: @MainActor (Int?) -> Void
+
+    init(
+        previewEvents: [ACPProjectedEvent] = [],
+        previewIsRunning: Bool = false,
+        previewStopReason: String? = nil,
+        previewErrorLabel: String? = nil,
+        onCompletion: @escaping @MainActor (Int?) -> Void = { _ in }
+    ) {
+        events = previewEvents
+        isRunning = previewIsRunning
+        stopReason = previewStopReason
+        errorLabel = previewErrorLabel
+        self.onCompletion = onCompletion
+    }
 
     func start(
         command: ACPLaunchCommand,
@@ -78,10 +93,12 @@ final class MomoLocalACPSession: ObservableObject {
                 guard let self else { return }
                 self.stopReason = result.stopReason
                 self.isRunning = false
+                self.onCompletion(0)
             } catch {
                 guard let self else { return }
                 self.errorLabel = "acp_session_failed"
                 self.isRunning = false
+                self.onCompletion(nil)
             }
         }
     }
@@ -94,7 +111,10 @@ final class MomoLocalACPSession: ObservableObject {
                 guard let self else { return }
                 self.stopReason = result.stopReason
             } catch {
-                self?.errorLabel = "acp_session_failed"
+                guard let self else { return }
+                self.errorLabel = "acp_session_failed"
+                self.isRunning = false
+                self.onCompletion(nil)
             }
         }
     }

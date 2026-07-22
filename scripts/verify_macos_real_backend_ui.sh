@@ -436,6 +436,14 @@ VALUES
 ON CONFLICT (channel_id, member_id)
 DO UPDATE SET role = EXCLUDED.role, left_at = NULL;
 
+-- 수명주기 랜딩(#564) 이후 roster는 workspace_membership JOIN을 요구한다 —
+-- 채널 membership만으로는 로스터에 나타나지 않는다(verify_agent_worker 동일 처방).
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('${WORKSPACE_ID}', '${HUMAN_ID}', 'owner'),
+  ('${WORKSPACE_ID}', '${AGENT_ID}', 'member')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role = EXCLUDED.role;
+
 DELETE FROM usage_ledger WHERE id = '${USAGE_ID}' OR run_id = '${RUN_ID_FIXTURE}';
 DELETE FROM approval_decision WHERE approval_id = '${APPROVAL_ID}';
 DELETE FROM audit_log WHERE target_id = '${APPROVAL_ID}' OR run_id = '${RUN_ID_FIXTURE}';

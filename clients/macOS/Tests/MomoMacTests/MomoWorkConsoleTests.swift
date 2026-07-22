@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Foundation
+import MomoACPHost
 import MomoCore
 import Network
 import SwiftUI
@@ -98,6 +99,31 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertTrue(publicKey.isValidSignature(signature, for: payload))
     }
 
+    func testWorkHostRequestSignatureUsesExactServerPayload() throws {
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let host = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let sentAtMs: Int64 = 1_784_452_800_000
+        let path = "/v1/workspaces/\(workspace.description)/work-tool-profiles"
+        let signer = MomoWorkHostSigner.generate()
+        let payload = MomoWorkHostSigner.requestPayload(
+            method: "GET",
+            path: path,
+            workspace: workspace,
+            host: host,
+            sentAtMs: sentAtMs
+        )
+
+        XCTAssertEqual(
+            String(data: payload, encoding: .utf8),
+            "momo.work_host.request.v1\nGET\n\(path)\n\(workspace.description.lowercased())\n\(host.description.lowercased())\n\(sentAtMs)"
+        )
+        let publicKeyData = try XCTUnwrap(Data(base64Encoded: signer.publicKeyBase64))
+        let signature = try XCTUnwrap(Data(base64Encoded: signer.signatureBase64(for: payload)))
+        let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData)
+        XCTAssertEqual(signature.count, 64)
+        XCTAssertTrue(publicKey.isValidSignature(signature, for: payload))
+    }
+
     @MainActor
     func testWorkConsoleFailsClosedUntilServerHostRegistrationCompletes() async {
         let controller = MomoWorkConsoleController(
@@ -115,10 +141,22 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertEqual(controller.lastIssue, .hostRegistrationFailed)
     }
 
-    func testShellLaunchEnvironmentDoesNotForwardCredentialsOrWorkingPath() throws {
+    func testProfileLaunchEnvironmentDoesNotForwardCredentialsOrWorkingPath() throws {
         let secret = "must-not-reach-pty-environment"
         let spec = try MomoWorkLaunchSpec.resolve(
-            tool: .shell,
+            profile: MomoWorkToolProfile(
+                id: UUID(),
+                workspaceId: WorkspaceID(),
+                toolKey: "shell",
+                displayName: "팀 셸",
+                launchTemplate: MomoWorkToolLaunchTemplate(command: "zsh", arguments: ["-l"]),
+                tierDefaults: [:],
+                enabled: true,
+                createdBy: MemberID(),
+                updatedBy: MemberID(),
+                createdAtMs: 1,
+                updatedAtMs: 1
+            ),
             environment: [
                 "SHELL": "/bin/zsh",
                 "PATH": "/usr/bin:/bin",
@@ -129,8 +167,8 @@ final class MomoWorkConsoleTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(spec.executable, "/bin/zsh")
-        XCTAssertEqual(spec.arguments, ["-l"])
+        XCTAssertEqual(spec.executable, "/usr/bin/env")
+        XCTAssertEqual(spec.arguments, ["zsh", "-l"])
         XCTAssertTrue(spec.environment.contains("PATH=/usr/bin:/bin"))
         XCTAssertFalse(spec.environment.contains { $0.contains(secret) })
         XCTAssertFalse(spec.environment.contains { $0.hasPrefix("MOMO_ACCESS_TOKEN=") })
@@ -1185,6 +1223,211 @@ final class MomoWorkConsoleTests: XCTestCase {
         try XCTUnwrap(offlineArtifact.tiffRepresentation)
             .writePNG(to: offlineDestination)
         XCTAssertTrue(FileManager.default.fileExists(atPath: offlineDestination.path))
+    }
+
+    func testWorkToolProfileRESTUsesRegistryContractAndKeepsSecretsOut() async throws {
+        WorkConsoleURLProtocol.reset()
+        defer { WorkConsoleURLProtocol.reset() }
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let profileID = UUID(uuidString: "00000000-0000-7000-8000-000000000532")!
+        let member = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let host = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000533")!
+        let profileJSON = """
+            {
+              "id":"\(profileID)",
+              "workspaceId":"\(workspace)",
+              "toolKey":"mock-acp",
+              "displayName":"Mock ACP",
+              "launchTemplate":{"command":"mock-acp","arguments":["--stdio"]},
+              "tierDefaults":{"transport":"acp","permission_policy":"confirm","risk":"high"},
+              "enabled":true,
+              "createdBy":"\(member)",
+              "updatedBy":"\(member)",
+              "createdAtMs":1784452700000,
+              "updatedAtMs":1784452800000
+            }
+            """
+        WorkConsoleURLProtocol.setHandler { request in
+            XCTAssertNil(request.url?.query)
+            switch request.httpMethod {
+            case "GET": return .init(json: "{\"workToolProfiles\":[\(profileJSON)]}")
+            case "POST": return .init(statusCode: 201, json: "{\"workToolProfile\":\(profileJSON)}")
+            case "PUT", "DELETE": return .init(json: "{\"workToolProfile\":\(profileJSON)}")
+            default: return .init(statusCode: 404, json: #"{"title":"unexpected request"}"#)
+            }
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WorkConsoleURLProtocol.self]
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "human-token"
+            ),
+            session: URLSession(configuration: configuration)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "human-token")
+        let draft = MomoWorkToolProfileDraft(
+            toolKey: "mock-acp",
+            displayName: "Mock ACP",
+            command: "mock-acp",
+            arguments: ["--stdio"],
+            transport: .acp,
+            permissionPolicy: .confirm,
+            risk: .high,
+            enabled: true
+        )
+
+        let listed = try await backend.workToolProfiles(workspace: workspace)
+        let hostProjection = try await backend.enabledWorkToolProfiles(
+            workspace: workspace,
+            host: host,
+            sentAtMs: 1_784_452_800_000,
+            signature: "host-signature"
+        )
+        let created = try await backend.createWorkToolProfile(workspace: workspace, draft: draft)
+        let updated = try await backend.updateWorkToolProfile(
+            workspace: workspace, tool: draftTool(draft), draft: draft
+        )
+        _ = try await backend.deleteWorkToolProfile(workspace: workspace, tool: draftTool(draft))
+
+        XCTAssertEqual(listed.first?.transport, .acp)
+        XCTAssertEqual(hostProjection.map(\.toolKey), ["mock-acp"])
+        XCTAssertEqual(created.permissionPolicy, .confirm)
+        XCTAssertEqual(updated.risk, .high)
+        let requests = WorkConsoleURLProtocol.requests()
+        XCTAssertEqual(
+            requests.map { $0.httpMethod ?? "" },
+            ["GET", "GET", "POST", "PUT", "DELETE"]
+        )
+        XCTAssertEqual(
+            requests.map { $0.url?.path ?? "" },
+            [
+                "/v1/workspaces/\(workspace)/work-tool-profiles",
+                "/v1/workspaces/\(workspace)/work-tool-profiles",
+                "/v1/workspaces/\(workspace)/work-tool-profiles",
+                "/v1/workspaces/\(workspace)/work-tool-profiles/mock-acp",
+                "/v1/workspaces/\(workspace)/work-tool-profiles/mock-acp",
+            ]
+        )
+        XCTAssertEqual(
+            requests[1].value(forHTTPHeaderField: "Authorization"),
+            "MomoHost \(host.description.lowercased())"
+        )
+        XCTAssertEqual(
+            requests[1].value(forHTTPHeaderField: "X-Momo-Work-Host-Sent-At"),
+            "1784452800000"
+        )
+        XCTAssertEqual(
+            requests[1].value(forHTTPHeaderField: "X-Momo-Work-Host-Signature"),
+            "host-signature"
+        )
+        for (index, request) in requests.enumerated() {
+            if index != 1 {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer human-token")
+            }
+            let body = request.workConsoleBodyData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            XCTAssertFalse(body.localizedCaseInsensitiveContains("token"))
+            XCTAssertFalse(body.localizedCaseInsensitiveContains("password"))
+            XCTAssertFalse(body.contains("/Users/"))
+        }
+        let createBody = try XCTUnwrap(requests[2].workConsoleBodyData)
+        let createObject = try XCTUnwrap(JSONSerialization.jsonObject(with: createBody) as? [String: Any])
+        let tierDefaults = try XCTUnwrap(createObject["tierDefaults"] as? [String: String])
+        XCTAssertEqual(tierDefaults, [
+            "transport": "acp",
+            "permission_policy": "confirm",
+            "risk": "high",
+        ])
+    }
+
+    func testACPPresentationProjectsPlanProgressAndImmutableFourWayPermission() {
+        let context: [String: ACPValue] = [
+            "work_session_id": .string("00000000-0000-7000-8000-000000000532"),
+        ]
+        let plan = ACPProjectedEvent(
+            type: "agent.status",
+            timestampMs: 1,
+            payload: .object(context.merging([
+                "detail": .string("계획을 준비했습니다."),
+                "plan": .array([
+                    .object(["content": .string("현황 확인"), "status": .string("completed")]),
+                    .object(["content": .string("수정 적용"), "status": .string("in_progress")]),
+                ]),
+            ]) { _, new in new })
+        )
+        let tool = ACPProjectedEvent(
+            type: "agent.status",
+            timestampMs: 2,
+            payload: .object(context.merging([
+                "detail": .string("테스트 실행"),
+                "run_status": .string("running"),
+                "_meta": .object(["acp": .object([
+                    "sessionUpdate": .string("tool_call"),
+                    "toolCallId": .string("tool-1"),
+                    "title": .string("테스트 실행"),
+                    "kind": .string("execute"),
+                    "status": .string("in_progress"),
+                ])]),
+            ]) { _, new in new })
+        )
+        let request = ACPProjectedEvent(
+            type: "approval.requested",
+            timestampMs: 3,
+            payload: .object(context.merging([
+                "options": .array([
+                    permissionOption("allow-once", "allow_once"),
+                    permissionOption("allow-always", "allow_always"),
+                    permissionOption("reject-once", "reject_once"),
+                    permissionOption("reject-always", "reject_always"),
+                ]),
+                "_meta": .object(["acp": .object(["tool_call": .object([
+                    "title": .string("테스트 실행"), "kind": .string("execute"),
+                ])])]),
+            ]) { _, new in new })
+        )
+
+        let pending = MomoACPSessionPresentation(events: [plan, tool, request])
+        XCTAssertEqual(pending.plan.map(\.content), ["현황 확인", "수정 적용"])
+        XCTAssertEqual(pending.toolCalls.first?.status, "in_progress")
+        guard case .pending(let title, let kind, let options) = pending.permission else {
+            return XCTFail("permission must remain actionable until a decision event arrives")
+        }
+        XCTAssertEqual(title, "테스트 실행")
+        XCTAssertEqual(kind, "execute")
+        XCTAssertEqual(options.map(\.kind), [
+            "allow_once", "allow_always", "reject_once", "reject_always",
+        ])
+
+        let decision = ACPProjectedEvent(
+            type: "approval.decided",
+            timestampMs: 4,
+            payload: .object(context.merging([
+                "status": .string("approved"),
+                "option_id": .string("allow-once"),
+            ]) { _, new in new })
+        )
+        let resolved = MomoACPSessionPresentation(events: [plan, tool, request, decision])
+        XCTAssertEqual(resolved.permission, .resolved(status: "approved", optionID: "allow-once"))
+    }
+
+    func testACPTerminalStateCopyMapsProtocolLabelsToUserLanguage() {
+        let copy = MomoWorkspaceCopy(language: .korean)
+
+        XCTAssertFalse(copy.acpSessionFailed("acp_session_failed").contains("acp_session_failed"))
+        XCTAssertFalse(copy.acpSessionStopped("end_turn").contains("end_turn"))
+        XCTAssertTrue(copy.acpSessionFailed("acp_session_failed").contains("새 세션"))
+    }
+
+    private func draftTool(_ draft: MomoWorkToolProfileDraft) -> MomoWorkTool {
+        MomoWorkTool(rawValue: draft.toolKey)
+    }
+
+    private func permissionOption(_ id: String, _ kind: String) -> ACPValue {
+        .object([
+            "option_id": .string(id),
+            "name": .string(id),
+            "kind": .string(kind),
+        ])
     }
 
     private func posixPermissions(at url: URL) throws -> Int {

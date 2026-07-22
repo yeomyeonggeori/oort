@@ -2325,49 +2325,65 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] work.read 발췌 경로 유지(0114 D3)·서버 무변경. research/19-05 §2 반영. design-review Blocker 0
 
 ### MOMO-529 수용기준 — 메모리 브라우저+서빙 인스펙터 (UXUI, 527·528 후) `[runtime]`
-- [ ] "에이전트가 아는 것" 뷰(필터·열람·편집·무효화·출처 역링크·정책 스위치·**grant 목록/회수** — 델타 3절) + run packet 인스펙터
-- [ ] 편집/무효화 REST 경유(0129 D6), 실서버 왕복, design-review Blocker 0
+- [x] "에이전트가 아는 것" 뷰(필터·열람·편집·무효화·출처 역링크·정책 스위치·**grant 목록/회수** — 델타 3절) + run packet 인스펙터
+- [x] 편집/무효화 REST 경유(0129 D6), 실서버 왕복, design-review Blocker 0
 
 ### MOMO-532 수용기준 — 도구 관리+ACP 카드 (UXUI, 533·531 후) `[runtime]`
-- [ ] 도구 등록 UI(원장 소비·앱 하드코딩 제거·fail-closed) + ACP 세션 카드(plan/진행/승인 — 19-05 계약: 승인 4옵션·처리 카드 불변 고정)
-- [ ] 등록→spawn 반영→미등재 비노출, 카드 상태 전이 스냅샷, design-review Blocker 0
+- [x] 도구 등록 UI(원장 소비·앱 하드코딩 제거·fail-closed) + ACP 세션 카드(plan/진행/승인 — 19-05 계약: 승인 4옵션·처리 카드 불변 고정)
+- [x] 등록→spawn 반영→미등재 비노출, 카드 상태 전이 스냅샷, design-review Blocker 0
 
 ### MOMO-534 수용기준 — eve/CF momo 채널 어댑터 2종 (Wave B) `[runtime]`
-- [ ] examples/eve-momo-channel(defineChannel)+examples/cloudflare-agent-momo — gateway BYOA 계약 소비, 코어 diff 0, 자격증명 env 주입만
-- [ ] `verify_momo_channel_adapter.sh` PASS(mock eve 런타임 gateway 왕복). eve 실런타임은 runtime-unverified 허용
+- [x] examples/eve-momo-channel(defineChannel)+examples/cloudflare-agent-momo — gateway BYOA 계약 소비, 코어 diff 0, 자격증명 env 주입만
+- [x] `verify_momo_channel_adapter.sh` PASS(mock eve 런타임 gateway 왕복). eve 실런타임은 runtime-unverified 허용
 
 ### MOMO-536 수용기준 — 에이전트 명부+A2A 카드 URL 온보딩 (Wave B, 0130 D4 집행) `[runtime]`
-- [ ] from-card(fetch+SSRF 가드+파싱+pending_consent)→confirm(agent member+gateway credential+audit) 왕복, 카드 자격증명 비저장
-- [ ] SSRF 가드 유닛(사설IP·redirect) + `verify_agent_card_onboarding.sh` PASS(mock 카드 서버) + RLS + openapi
+- [x] from-card(fetch+SSRF 가드+파싱+pending_consent)→confirm(agent member+gateway credential+audit) 왕복, 카드 자격증명 비저장
+- [x] SSRF 가드 유닛(사설IP·redirect) + `verify_agent_card_onboarding.sh` PASS(mock 카드 서버) + RLS + openapi
 
 ### MOMO-535 수용기준 — outbound 이벤트 구독 (Wave B) `[runtime]`
-- [ ] event_subscription 원장+CRUD+RLS, outbox kind=webhook_delivery, HMAC 서명 POST, 재시도·자동 disable+audit, 시크릿 평문 비노출
-- [ ] `verify_event_subscription.sh` PASS(mock 수신기)
+- [x] event_subscription 원장+CRUD+RLS, outbox kind=webhook_delivery, HMAC 서명 POST, 재시도·자동 disable+audit, 시크릿 평문 비노출
+- [x] `verify_event_subscription.sh` PASS(mock 수신기)
 
 ### MOMO-537 수용기준 — agent_profile 원장+간편 생성 (Wave C, **ADR-0131 Accepted 후**) `[runtime]`
-- [ ] agent_profile 원장(RLS)+CRUD+packet 주입(프리앰블 우선·도구 교집합·모델 허용목록 내) — 기존 필드 불변
-- [ ] verifier PASS + 528 회귀
+- [x] agent_profile 원장(RLS)+CRUD+packet 주입(프리앰블 우선·도구 교집합·모델 허용목록 내) — 기존 필드 불변
+- [x] verifier PASS + 528 회귀
 
 ### MOMO-538 수용기준 — 동봉 eve 옵션 프로파일 (Wave C, 534 후) `[runtime]`
 - [x] compose --profile eve(기본 오프·버전 고정·별도 DB world·어댑터 프리셋)+drift guard+RUN.md, 미기동 시 무영향
 - [x] compose config+기동 스모크 verifier PASS
 
 ### MOMO-539 수용기준 — 추출 워커 실패 백오프 (소형) `[runtime]`
-- [ ] 지수 백오프(상한 5분)+포이즌 배치 N회 후 워터마크 전진+audit 1회, 핫루프 제거
-- [ ] 백오프 유닛 + verify_memory_plane 회귀
+- [x] 지수 백오프(상한 5분)+포이즌 배치 N회 후 워터마크 전진+audit 1회, 핫루프 제거
+- [x] 백오프 유닛 + verify_memory_plane 회귀
 
 ### MOMO-545 수용기준 — memory_refs 모델 실주입 (sol 감사 §1-1, HIGH) `[runtime]`
-- [ ] ContextAssembler가 packet memory_refs를 모델 메시지에 주입(시스템/컨텍스트 블록, 예산 절사 유지) + run 레코드에 주입 여부 기록(포함/조회/인용 어휘 구분)
-- [ ] /memories/search agent 파라미터 차용에 audit 로그 + verify_agent_context 확장(모델 요청 덤프에 memory 발췌 존재 단정 — end-to-end 소비 규율)
+- [x] ContextAssembler가 packet memory_refs를 모델 메시지에 주입(시스템/컨텍스트 블록, 예산 절사 유지) + run 레코드에 주입 여부 기록(포함/조회/인용 어휘 구분)
+- [x] /memories/search agent 파라미터 차용에 audit 로그 + verify_agent_context 확장(모델 요청 덤프에 memory 발췌 존재 단정 — end-to-end 소비 규율)
 
 ### MOMO-546 수용기준 — workd ACP 이벤트 서버 릴레이 (⑪/532 전제) `[runtime]`
-- [ ] 정규화 이벤트(진행/plan/승인 요청·결정/터미널 생성)를 기존 work 이벤트 REST로 발송(단일 쓰기경로·outbox), raw JSONL은 호스트 로컬 유지(0125 D10)
-- [ ] verify_acp_host 확장: 서버 원장 행+realtime 카드 투영 단정
+- [x] 정규화 이벤트(진행/plan/승인 요청·결정/터미널 생성)를 기존 work 이벤트 REST로 발송(단일 쓰기경로·outbox), raw JSONL은 호스트 로컬 유지(0125 D10)
+- [x] verify_acp_host 확장: 서버 원장 행+realtime 카드 투영 단정
 
 ### MOMO-547 수용기준 — ACP/PTY 자식 env 스크럽 옵션 (소형) `[runtime]`
 - [x] 기본 allowlist env(PATH/HOME/LANG 계열)+옵트인 패스스루, 프로파일별 env 정책은 work_tool_profile 확장 필드
-- [ ] 기존 workd/acp verifier 회귀
+- [x] 기존 workd/acp verifier 회귀
 
 ### MOMO-548 수용기준 — 외부 provider 추출 동의 게이트 `[runtime]`
-- [ ] provider=external 시 워크스페이스 명시 옵트인 없으면 추출/임베딩 fail-closed 오프(내부 mock/self-host 현행), 정책 스위치와 별도 축
-- [ ] verify_memory_plane 회귀 + 동의 상태 전이 verifier
+- [x] provider=external 시 워크스페이스 명시 옵트인 없으면 추출/임베딩 fail-closed 오프(내부 mock/self-host 현행), 정책 스위치와 별도 축
+- [x] verify_memory_plane 회귀 + 동의 상태 전이 verifier
+
+### MOMO-549 수용기준 — memory grant CRUD REST (529 grant UI 전제) `[runtime]`
+- [ ] GET/POST/DELETE grants(admin+스코프 주체), revoke=revoked_at(삭제 금지), audit, RLS, openapi
+- [ ] verifier: 부여→서빙 필터 즉시 반영→회수→packet 재발급 제외
+
+### MOMO-550 수용기준 — 에이전트 온보딩 UI: URL 붙여넣기 (⑫, 536 소비) `[runtime]`
+- [ ] 관리자 "에이전트 추가: URL" 문(from-card→능력/인증 요약 동의 화면→confirm), 실패 사유 인라인, 명부에 origin(card|local) 뱃지
+- [ ] macOS 우선(설정/멤버 디렉터리 진입), 한국어 라이트/다크 스냅샷, design-review Blocker 0
+
+### MOMO-551 수용기준 — 연동 설정 탭 실화: outbound 구독 (⑬, 535 소비) `[runtime]`
+- [ ] 채널/워크스페이스 설정의 웹훅 placeholder를 event_subscription CRUD 실물로(생성 시 1회성 시크릿 표시·재조회 불가 고지, 이벤트 종류 선택, disable 사유 표시)
+- [ ] 스냅샷+design-review Blocker 0
+
+### MOMO-552 수용기준 — 메모리 주입 표시 (⑭, 545 소비, 소형) `[runtime]`
+- [ ] 에이전트 응답/실행 카드에 memory_delivery 소비("메모리 n건 반영" — included/injected 구분 어휘), packet 인스펙터 진입 연결
+- [ ] 스냅샷+design-review Blocker 0

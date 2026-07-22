@@ -123,6 +123,83 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         XCTAssertEqual(light.size, dark.size)
     }
 
+    private func captureKoreanWorkspaceInspector(
+        scheme: ColorScheme,
+        artifactName: String
+    ) async throws -> NSImage {
+        guard !NSScreen.screens.isEmpty else {
+            throw XCTSkip("MOMO-525 Korean inspector evidence requires a WindowServer compositor")
+        }
+        let (viewModel, _) = try await makeViewModel()
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let hostingController = NSHostingController(
+            rootView: MomoChannelMemberInspectorView(
+                viewModel: viewModel,
+                audience: .workspace,
+                copy: MomoWorkspaceCopy(language: .korean),
+                close: {},
+                didOpenDirectMessage: {},
+                presentation: .attached
+            )
+            .environment(\.colorScheme, scheme)
+            .frame(width: MomoTheme.MemberInspector.overlayWidth, height: 640)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: MomoTheme.MemberInspector.overlayWidth,
+                height: 640
+            ),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        window.contentViewController = hostingController
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+
+        try await Task.sleep(for: .milliseconds(300))
+        guard let cgImage = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            CGWindowID(window.windowNumber),
+            [.boundsIgnoreFraming, .bestResolution]
+        ) else {
+            throw XCTSkip("WindowServer could not capture the MOMO-525 workspace inspector")
+        }
+        let image = NSImage(cgImage: cgImage, size: window.frame.size)
+        try writeArtifact(image, named: artifactName)
+        return image
+    }
+
+    func testKoreanWorkspaceInspectorWritesLightAndDarkRealWindowArtifacts() async throws {
+        let light = try await captureKoreanWorkspaceInspector(
+            scheme: .light,
+            artifactName: "momo-525-membership-korean-light.png"
+        )
+        let dark = try await captureKoreanWorkspaceInspector(
+            scheme: .dark,
+            artifactName: "momo-525-membership-korean-dark.png"
+        )
+
+        XCTAssertEqual(light.size, dark.size)
+        XCTAssertGreaterThan(light.size.width, 0)
+        XCTAssertGreaterThan(light.size.height, 0)
+        assertSnapshot(
+            of: light,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "korean-light"
+        )
+        assertSnapshot(
+            of: dark,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "korean-dark"
+        )
+    }
+
     func testInspectorSearchReceivesInitialKeyboardFocusInRealWindow() async throws {
         guard !NSScreen.screens.isEmpty else {
             throw XCTSkip("MOMO-385 keyboard focus evidence requires a WindowServer compositor")
