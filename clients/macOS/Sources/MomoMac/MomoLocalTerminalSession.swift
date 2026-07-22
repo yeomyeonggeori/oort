@@ -69,7 +69,7 @@ struct MomoWorkLaunchSpec: Equatable {
                 ? candidate
                 : "/bin/zsh"
             arguments = ["-l"]
-        case .claude, .codex, .opencode:
+        default:
             guard let resolved = resolveExecutable(
                 named: tool.rawValue,
                 environment: source,
@@ -84,6 +84,21 @@ struct MomoWorkLaunchSpec: Equatable {
         return MomoWorkLaunchSpec(
             executable: executable,
             arguments: arguments,
+            environment: allowedEnvironment(source)
+        )
+    }
+
+    static func resolve(
+        profile: MomoWorkToolProfile,
+        environment source: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> MomoWorkLaunchSpec {
+        guard !MomoWorkHostRuntime.isAppSandboxed else {
+            throw MomoWorkConsoleError.sandboxRestricted
+        }
+        guard profile.enabled else { throw MomoWorkConsoleError.toolProfileUnavailable }
+        return MomoWorkLaunchSpec(
+            executable: "/usr/bin/env",
+            arguments: [profile.launchTemplate.command] + profile.launchTemplate.arguments,
             environment: allowedEnvironment(source)
         )
     }
@@ -156,6 +171,20 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
 
     func start(tool: MomoWorkTool, directory: URL?) throws {
         let spec = try MomoWorkLaunchSpec.resolve(tool: tool)
+        terminalView.startProcess(
+            executable: spec.executable,
+            args: spec.arguments,
+            environment: spec.environment,
+            currentDirectory: directory?.path
+        )
+        guard terminalView.process.running else {
+            throw MomoWorkConsoleError.localLaunchFailed
+        }
+        isRunning = true
+    }
+
+    func start(profile: MomoWorkToolProfile, directory: URL?) throws {
+        let spec = try MomoWorkLaunchSpec.resolve(profile: profile)
         terminalView.startProcess(
             executable: spec.executable,
             args: spec.arguments,

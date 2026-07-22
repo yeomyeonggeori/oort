@@ -2278,6 +2278,45 @@ public final class ChatViewModel: ObservableObject {
         )
     }
 
+    func loadWorkToolProfiles() async throws -> [MomoWorkToolProfile] {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.workToolProfiles(workspace: workspaceId)
+    }
+
+    func createWorkToolProfile(
+        _ draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.createWorkToolProfile(
+            workspace: workspaceId,
+            draft: draft
+        )
+    }
+
+    func updateWorkToolProfile(
+        tool: MomoWorkTool,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.updateWorkToolProfile(
+            workspace: workspaceId,
+            tool: tool,
+            draft: draft
+        )
+    }
+
+    func deleteWorkToolProfile(tool: MomoWorkTool) async throws -> MomoWorkToolProfile {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.deleteWorkToolProfile(
+            workspace: workspaceId,
+            tool: tool
+        )
+    }
+
     func workHostBackendForCurrentSession() throws -> any MomoWorkHostBackend {
         guard workspaceId != nil else { throw MomoWorkConsoleError.noWorkspace }
         guard let workHostBackend else { throw MomoWorkConsoleError.unavailable }

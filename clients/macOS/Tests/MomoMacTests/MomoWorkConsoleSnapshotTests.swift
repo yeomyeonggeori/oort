@@ -1,4 +1,6 @@
 import AppKit
+import MomoACPHost
+import MomoCore
 import SnapshotTesting
 import SwiftUI
 import XCTest
@@ -51,6 +53,14 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
         try assertSettingsSnapshot(.dark, named: "dark", testName: #function)
     }
 
+    func testACPSessionCardLightSnapshot() throws {
+        try assertACPCardSnapshot(.light, named: "light", testName: #function)
+    }
+
+    func testACPSessionCardDarkSnapshot() throws {
+        try assertACPCardSnapshot(.dark, named: "dark", testName: #function)
+    }
+
     private func assertTerminalSnapshot(
         _ preset: MomoTerminalThemePreset,
         named: String,
@@ -80,7 +90,8 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
         try requireCanonicalReference(testName: canonicalName, named: named)
         let controller = MomoWorkConsoleController(
             viewModel: ChatViewModel(backend: LiveChatBackend()),
-            initialHostRegistrationState: .registering
+            initialHostRegistrationState: .registering,
+            initialToolProfiles: [snapshotToolProfile()]
         )
         let defaults = UserDefaults(
             suiteName: "MomoWorkConsoleSnapshotTests-\(scheme)-\(UUID())"
@@ -103,6 +114,111 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
             record: snapshotRecordMode,
             testName: canonicalName
         )
+    }
+
+    private func assertACPCardSnapshot(
+        _ scheme: ColorScheme,
+        named: String,
+        testName: String
+    ) throws {
+        let canonicalName = testName.replacingOccurrences(of: "()", with: "")
+        try requireCanonicalReference(testName: canonicalName, named: named)
+        let size = CGSize(width: 560, height: 520)
+        let content = MomoACPSessionCard(
+            session: MomoLocalACPSession(
+                previewEvents: snapshotACPEvents(),
+                previewIsRunning: true
+            ),
+            copy: MomoWorkspaceCopy(language: .korean)
+        )
+        .padding(24)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .momoFlatSurface(.background)
+        let image = try render(content, size: size, scheme: scheme)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: named,
+            record: snapshotRecordMode,
+            testName: canonicalName
+        )
+    }
+
+    private func snapshotToolProfile() -> MomoWorkToolProfile {
+        MomoWorkToolProfile(
+            id: UUID(uuidString: "00000000-0000-7000-8000-000000000532")!,
+            workspaceId: WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!,
+            toolKey: "opencode-acp",
+            displayName: "OpenCode ACP",
+            launchTemplate: MomoWorkToolLaunchTemplate(command: "opencode-acp", arguments: ["--stdio"]),
+            tierDefaults: [
+                "transport": .string("acp"),
+                "permission_policy": .string("confirm"),
+                "risk": .string("medium"),
+            ],
+            enabled: true,
+            createdBy: MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!,
+            updatedBy: MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!,
+            createdAtMs: 1_784_452_700_000,
+            updatedAtMs: 1_784_452_800_000
+        )
+    }
+
+    private func snapshotACPEvents() -> [ACPProjectedEvent] {
+        let context: [String: ACPValue] = [
+            "work_session_id": .string("00000000-0000-7000-8000-000000000532"),
+        ]
+        return [
+            ACPProjectedEvent(
+                type: "agent.status",
+                timestampMs: 1,
+                payload: .object(context.merging([
+                    "detail": .string("수정 범위와 검증 순서를 정리했습니다."),
+                    "plan": .array([
+                        .object(["content": .string("관련 코드 확인"), "status": .string("completed")]),
+                        .object(["content": .string("변경 적용"), "status": .string("in_progress")]),
+                        .object(["content": .string("테스트 실행"), "status": .string("pending")]),
+                    ]),
+                ]) { _, new in new })
+            ),
+            ACPProjectedEvent(
+                type: "agent.status",
+                timestampMs: 2,
+                payload: .object(context.merging([
+                    "detail": .string("테스트 명령 실행을 준비합니다."),
+                    "_meta": .object(["acp": .object([
+                        "sessionUpdate": .string("tool_call"),
+                        "toolCallId": .string("tool-1"),
+                        "title": .string("Swift 테스트 실행"),
+                        "kind": .string("execute"),
+                        "status": .string("pending"),
+                    ])]),
+                ]) { _, new in new })
+            ),
+            ACPProjectedEvent(
+                type: "approval.requested",
+                timestampMs: 3,
+                payload: .object(context.merging([
+                    "options": .array([
+                        snapshotPermission("allow-once", "이번만 허용", "allow_once"),
+                        snapshotPermission("allow-always", "항상 허용", "allow_always"),
+                        snapshotPermission("reject-once", "이번만 거부", "reject_once"),
+                        snapshotPermission("reject-always", "항상 거부", "reject_always"),
+                    ]),
+                    "_meta": .object(["acp": .object(["tool_call": .object([
+                        "title": .string("Swift 테스트 실행"), "kind": .string("execute"),
+                    ])])]),
+                ]) { _, new in new })
+            ),
+        ]
+    }
+
+    private func snapshotPermission(_ id: String, _ name: String, _ kind: String) -> ACPValue {
+        .object([
+            "option_id": .string(id),
+            "name": .string(name),
+            "kind": .string(kind),
+        ])
     }
 
     private func render<Content: View>(

@@ -43,6 +43,28 @@ final class MomoWorkHostSigner: @unchecked Sendable {
                 .utf8
         )
     }
+
+    static func requestPayload(
+        method: String,
+        path: String,
+        workspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64
+    ) -> Data {
+        Data(
+            "momo.work_host.request.v1\n"
+                .appending(method.uppercased())
+                .appending("\n")
+                .appending(path)
+                .appending("\n")
+                .appending(workspace.description.lowercased())
+                .appending("\n")
+                .appending(host.description.lowercased())
+                .appending("\n")
+                .appending(String(sentAtMs))
+                .utf8
+        )
+    }
 }
 
 struct MomoWorkHostIdentityStore: Sendable {
@@ -280,6 +302,41 @@ actor MomoWorkHostRegistrar {
             sentAtMs: sentAtMs,
             signature: signature
         )
+    }
+
+    func enabledToolProfiles(
+        workspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        backend: any MomoWorkHostBackend
+    ) async throws -> [MomoWorkToolProfile] {
+        guard let identityStore else { throw MomoWorkConsoleError.hostIdentityUnavailable }
+        let signer: MomoWorkHostSigner
+        if let cached = signers[workspace] {
+            signer = cached
+        } else {
+            signer = try identityStore.loadOrCreateSigner(workspace: workspace)
+            signers[workspace] = signer
+        }
+        let path = "/v1/workspaces/\(workspace.description)/work-tool-profiles"
+        let payload = MomoWorkHostSigner.requestPayload(
+            method: "GET",
+            path: path,
+            workspace: workspace,
+            host: host,
+            sentAtMs: sentAtMs
+        )
+        let signature = try signer.signatureBase64(for: payload)
+        let profiles = try await backend.enabledWorkToolProfiles(
+            workspace: workspace,
+            host: host,
+            sentAtMs: sentAtMs,
+            signature: signature
+        )
+        guard profiles.allSatisfy({ $0.workspaceId == workspace && $0.enabled }) else {
+            throw MomoWorkConsoleError.toolProfileUnavailable
+        }
+        return profiles
     }
 
     private static func normalizedDisplayName(_ raw: String) -> String {

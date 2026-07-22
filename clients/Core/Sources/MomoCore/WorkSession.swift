@@ -6,8 +6,27 @@ public struct WorkSessionDelta: Codable, Sendable, Hashable {
         case started, ended
     }
 
-    public enum Tool: String, Codable, Sendable, Hashable {
-        case claude, codex, opencode, shell
+    public struct Tool: RawRepresentable, Codable, Sendable, Hashable {
+        public let rawValue: String
+
+        public init(rawValue: String) {
+            self.rawValue = rawValue
+        }
+
+        public static let claude = Tool(rawValue: "claude")
+        public static let codex = Tool(rawValue: "codex")
+        public static let opencode = Tool(rawValue: "opencode")
+        public static let shell = Tool(rawValue: "shell")
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            self.init(rawValue: try container.decode(String.self))
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
     }
 
     public var action: Action
