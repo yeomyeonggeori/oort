@@ -58,7 +58,8 @@ struct MomoMemoryDeliveryMetadata: View {
             Button(action: onOpenServedContext) {
                 label
             }
-            .buttonStyle(.plain)
+            // 같은 메타 줄의 인터랙티브 이웃(답글 버튼)과 동일한 hover 피드백 관행.
+            .buttonStyle(.borderless)
             .help(copy.servedContextAction)
             .accessibilityLabel(copy.memoryDeliverySummary(receipt.includedCount))
             .accessibilityHint(copy.servedContextAction)
@@ -70,7 +71,7 @@ struct MomoMemoryDeliveryMetadata: View {
             copy.memoryDeliverySummary(receipt.includedCount),
             systemImage: "brain.head.profile"
         )
-        .font(MomoTheme.Typography.supporting)
+        .font(.caption)
         .foregroundStyle(.secondary)
         .monospacedDigit()
     }
