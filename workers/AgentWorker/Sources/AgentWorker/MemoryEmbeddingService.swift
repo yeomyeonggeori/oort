@@ -98,7 +98,40 @@ struct MemoryEmbeddingService: Service, Sendable {
     let provider: any MemoryEmbeddingProvider
     let pollInterval: Duration
     let batchSize: Int
+    let poisonThreshold: Int
     let logger: Logger
+    let sleeper: any MemoryWorkerSleeping
+
+    init(
+        pg: PostgresClient,
+        provider: any MemoryEmbeddingProvider,
+        pollInterval: Duration,
+        batchSize: Int,
+        poisonThreshold: Int = 5,
+        logger: Logger,
+        sleeper: any MemoryWorkerSleeping = TaskMemoryWorkerSleeper()
+    ) {
+        self.pg = pg
+        self.provider = provider
+        self.pollInterval = pollInterval
+        self.batchSize = batchSize
+        self.poisonThreshold = poisonThreshold
+        self.logger = logger
+        self.sleeper = sleeper
+    }
+
+    private struct Item: Sendable {
+        let id: UUID
+        let body: String
+    }
+
+    private struct Batch: Sendable {
+        let workspaceID: UUID
+        let items: [Item]
+
+        var retryKey: [UUID] { items.map(\.id) }
+        var auditKey: String { retryKey.map(\.uuidString).joined(separator: ":") }
+    }
 
     func run() async throws {
         logger.info("memory embedding worker starting", metadata: [
@@ -106,46 +139,159 @@ struct MemoryEmbeddingService: Service, Sendable {
             "dimensions": .stringConvertible(WorkerMemoryEmbedding.dimensions),
             "batchSize": .stringConvertible(batchSize),
         ])
+        var retry = MemoryBatchRetryState<[UUID]>(
+            baseDelay: pollInterval,
+            poisonThreshold: poisonThreshold
+        )
         while !Task.isCancelled {
+            var delay = pollInterval
             do {
-                _ = try await backfillOnce()
+                if let batch = try await loadBatch() {
+                    do {
+                        _ = try await backfill(batch)
+                        retry.recordSuccess(for: batch.retryKey)
+                    } catch {
+                        let decision = retry.recordFailure(for: batch.retryKey)
+                        delay = decision.delay
+                        logger.error("memory embedding backfill failed", metadata: [
+                            "workspaceId": .string(batch.workspaceID.uuidString),
+                            "failureCount": .stringConvertible(decision.failureCount),
+                            "errorType": .string(String(describing: type(of: error))),
+                        ])
+                        if decision.shouldPoison {
+                            try await poison(batch, failureCount: decision.failureCount)
+                            retry.recordPoisonHandled(for: batch.retryKey)
+                        }
+                    }
+                }
             } catch {
-                logger.error("memory embedding backfill failed", metadata: [
+                logger.error("memory embedding drain failed", metadata: [
                     "errorType": .string(String(describing: type(of: error))),
                 ])
             }
-            try? await Task.sleep(for: pollInterval)
+            await sleeper.sleep(for: delay)
         }
     }
 
     @discardableResult
     func backfillOnce() async throws -> Int {
+        guard let batch = try await loadBatch() else { return 0 }
+        return try await backfill(batch)
+    }
+
+    private func loadBatch() async throws -> Batch? {
         let rows = try await pg.query(
             """
-            SELECT id, body
-              FROM memory_item
-             WHERE invalid_at IS NULL AND embedding IS NULL
-             ORDER BY updated_at, id
+            WITH target_workspace AS (
+              SELECT mi.workspace_id
+                FROM memory_item mi
+               WHERE mi.invalid_at IS NULL
+                 AND mi.embedding IS NULL
+                 AND NOT EXISTS (
+                   SELECT 1
+                     FROM audit_log poisoned
+                    WHERE poisoned.workspace_id = mi.workspace_id
+                      AND poisoned.action = 'memory.embedding.poisoned'
+                      AND poisoned.target_type = 'memory_embedding_batch'
+                      AND (poisoned.detail->'memory_ids') ? mi.id::text
+                 )
+               ORDER BY mi.updated_at, mi.id
+               LIMIT 1
+            )
+            SELECT mi.workspace_id, mi.id, mi.body
+              FROM memory_item mi
+              JOIN target_workspace tw ON tw.workspace_id = mi.workspace_id
+             WHERE mi.invalid_at IS NULL
+               AND mi.embedding IS NULL
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM audit_log poisoned
+                  WHERE poisoned.workspace_id = mi.workspace_id
+                    AND poisoned.action = 'memory.embedding.poisoned'
+                    AND poisoned.target_type = 'memory_embedding_batch'
+                    AND (poisoned.detail->'memory_ids') ? mi.id::text
+               )
+             ORDER BY mi.updated_at, mi.id
              LIMIT \(batchSize)
             """,
             logger: logger
         ).collect()
-        var updated = 0
-        for row in rows {
+        guard let first = rows.first else { return nil }
+        let workspaceID = try first.decode((UUID, UUID, String).self).0
+        let items = try rows.map { row -> Item in
+            let (_, id, body) = try row.decode((UUID, UUID, String).self)
+            return .init(id: id, body: body)
+        }
+        return .init(workspaceID: workspaceID, items: items)
+    }
+
+    private func backfill(_ batch: Batch) async throws -> Int {
+        var vectors: [(UUID, String)] = []
+        for item in batch.items {
             if Task.isCancelled { break }
-            let (memoryID, body) = try row.decode((UUID, String).self)
-            let vector = try WorkerMemoryEmbedding.literal(try await provider.embed(body))
-            let result = try await pg.query(
+            let vector = try WorkerMemoryEmbedding.literal(try await provider.embed(item.body))
+            vectors.append((item.id, vector))
+        }
+        return try await pg.withTransaction(logger: logger) { conn in
+            var updated = 0
+            for (memoryID, vector) in vectors {
+                let result = try await conn.query(
+                    """
+                    UPDATE memory_item
+                       SET embedding = \(vector)::vector(384)
+                     WHERE workspace_id = \(batch.workspaceID)
+                       AND id = \(memoryID)
+                       AND invalid_at IS NULL
+                       AND embedding IS NULL
+                    RETURNING id
+                    """,
+                    logger: logger
+                ).collect()
+                if !result.isEmpty { updated += 1 }
+            }
+            return updated
+        }
+    }
+
+    /// audit_log is the durable poison marker: loadBatch excludes every ID in
+    /// this one event, which advances the embedding worker without a schema change.
+    private func poison(_ batch: Batch, failureCount: Int) async throws {
+        let memoryIDs = Self.jsonString(batch.retryKey.map(\.uuidString))
+        try await pg.withTransaction(logger: logger) { conn in
+            _ = try await conn.query(
+                "SELECT pg_advisory_xact_lock(hashtextextended(\(batch.auditKey), 0))",
+                logger: logger
+            )
+            _ = try await conn.query(
                 """
-                UPDATE memory_item
-                   SET embedding = \(vector)::vector(384)
-                 WHERE id = \(memoryID) AND invalid_at IS NULL AND embedding IS NULL
-                RETURNING id
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type, target_id, detail)
+                SELECT \(batch.workspaceID), NULL::uuid, 'memory.embedding.poisoned',
+                       'memory_embedding_batch', \(batch.items[0].id),
+                       jsonb_build_object(
+                         'batch_key', \(batch.auditKey),
+                         'memory_ids', \(memoryIDs)::jsonb,
+                         'failure_count', \(failureCount),
+                         'provider_kind', \(provider.kind))
+                 WHERE NOT EXISTS (
+                   SELECT 1 FROM audit_log
+                    WHERE workspace_id = \(batch.workspaceID)
+                      AND action = 'memory.embedding.poisoned'
+                      AND detail->>'batch_key' = \(batch.auditKey)
+                 )
                 """,
                 logger: logger
-            ).collect()
-            if !result.isEmpty { updated += 1 }
+            )
         }
-        return updated
+        logger.warning("memory embedding poison batch skipped", metadata: [
+            "workspaceId": .string(batch.workspaceID.uuidString),
+            "failureCount": .stringConvertible(failureCount),
+            "itemCount": .stringConvertible(batch.items.count),
+        ])
+    }
+
+    private static func jsonString(_ value: [String]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: value) else { return "[]" }
+        return String(decoding: data, as: UTF8.self)
     }
 }
