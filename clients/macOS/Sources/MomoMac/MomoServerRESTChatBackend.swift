@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMembershipAdministrationBackend, MomoAgentOnboardingBackend, MomoAgentOriginProvidingBackend, MomoAgentRunMemoryDeliveryProviding {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMemoryGrantBackend, MomoAgentOwnershipProvidingBackend, MomoMembershipAdministrationBackend, MomoAgentOnboardingBackend, MomoAgentOriginProvidingBackend, MomoAgentRunMemoryDeliveryProviding {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -29,6 +29,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     private var cachedChannelMuteStates: [ChannelID: Bool] = [:]
     private var cachedMembers: [Member]?
     private var cachedAgentOrigins: [MemberID: MomoAgentOrigin] = [:]
+    private var cachedAgentOwnerIDs: [MemberID: MemberID] = [:]
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
     private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
@@ -144,6 +145,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         cachedChannelMuteStates = [:]
         cachedMembers = nil
         cachedAgentOrigins = [:]
+        cachedAgentOwnerIDs = [:]
         lastKnownSeqByChannel = [:]
         readStateRealtimeTransport = nil
         realtimeStatusByChannel = [:]
@@ -499,11 +501,24 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
                 return (memberID, origin)
             }
         )
+        cachedAgentOwnerIDs = try Dictionary(
+            uniqueKeysWithValues: response.members.compactMap { dto in
+                guard let owner = dto.ownerHumanId else { return nil }
+                guard let memberID = MemberID(uuidString: dto.id),
+                      let ownerID = MemberID(uuidString: owner)
+                else { throw BackendError.decoding("invalid agent ownership identity") }
+                return (memberID, ownerID)
+            }
+        )
         return all
     }
 
     func agentOrigins() -> [MemberID: MomoAgentOrigin] {
         cachedAgentOrigins
+    }
+
+    func agentOwnerIDs() -> [MemberID: MemberID] {
+        cachedAgentOwnerIDs
     }
 
     func inspectAgentAddress(_ address: String) async throws -> MomoAgentRegistration {
@@ -961,6 +976,58 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             throw BackendError.decoding("context packet response scope mismatch")
         }
         return response
+    }
+
+    func memoryGrants(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID
+    ) async throws -> [MomoMemoryGrant] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())/grants",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoMemoryGrantPageResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.grants
+    }
+
+    func grantMemoryAccess(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID,
+        grantee: MemberID,
+        kind: MomoMemoryGrantGranteeKind
+    ) async throws -> MomoMemoryGrant {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())/grants",
+            body: MomoMemoryGrantRequestDTO(granteeKind: kind, granteeId: grantee),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoMemoryGrantResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.grant
+    }
+
+    func revokeMemoryAccess(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID,
+        grantee: MemberID,
+        kind: MomoMemoryGrantGranteeKind
+    ) async throws -> MomoMemoryGrant {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await delete(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())/grants",
+            body: MomoMemoryGrantRequestDTO(granteeKind: kind, granteeId: grantee),
+            response: MomoMemoryGrantResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.grant
     }
 
     // MARK: Read state (ADR-0109)
@@ -2488,6 +2555,7 @@ private struct MemberDTO: Decodable {
     let channelIds: [String]?
     let capabilities: [String]?
     let origin: String?
+    let ownerHumanId: String?
 
     func member() throws -> Member {
         guard let memberID = MemberID(uuidString: id),

@@ -50,11 +50,94 @@ extension MomoWorkspaceCopy {
     }
     var memoryDisableTitle: String { language == .korean ? "워크스페이스 메모리를 끌까요?" : "Turn off workspace memory?" }
     var memoryDisableAction: String { language == .korean ? "끄고 삭제" : "Turn off and purge" }
-    var memoryGrantTitle: String { language == .korean ? "공유 권한" : "Visibility grants" }
-    var memoryGrantUnavailable: String {
+    var memoryGrantTitle: String { language == .korean ? "메모리 접근 허용" : "Memory access" }
+    var memoryGrantAdd: String { language == .korean ? "접근 허용" : "Allow access" }
+    var memoryGrantConfirm: String { language == .korean ? "접근 허용" : "Allow access" }
+    var memoryGrantLoading: String { language == .korean ? "접근 내역을 불러오는 중" : "Loading access history" }
+    var memoryGrantEmpty: String {
+        language == .korean ? "추가로 접근이 허용된 멤버나 에이전트가 없습니다." : "No additional members or agents have access."
+    }
+    var memoryGrantOffline: String {
         language == .korean
-            ? "서버의 공유 권한 목록·회수 계약이 준비될 때까지 변경 기능을 잠급니다."
-            : "Grant changes remain locked until the server exposes list and revoke contracts."
+            ? "연결이 끊겨 메모리 접근 내역을 불러오지 못했습니다. 연결 후 다시 시도해 주세요."
+            : "Memory access history is unavailable while offline. Reconnect and try again."
+    }
+    var memoryGrantRetry: String { language == .korean ? "접근 내역 다시 불러오기" : "Reload access history" }
+    var memoryGrantReadOnly: String {
+        language == .korean ? "이 메모리의 접근 내역을 읽기 전용으로 보고 있습니다." : "You have read-only access to this memory's access history."
+    }
+    var memoryGrantActions: String { language == .korean ? "메모리 접근 작업" : "Memory access actions" }
+    var memoryGrantPickerTitle: String { language == .korean ? "메모리 접근 허용" : "Allow memory access" }
+    var memoryGrantPickerDetail: String {
+        language == .korean
+            ? "이 메모리를 볼 수 있는 워크스페이스 멤버나 에이전트를 선택하세요."
+            : "Choose a workspace member or agent who can view this memory."
+    }
+    var memoryGrantSearchPlaceholder: String { language == .korean ? "멤버 또는 에이전트 검색" : "Search members or agents" }
+    var memoryGrantNoCandidates: String { language == .korean ? "선택할 대상이 없습니다." : "No one is available to select." }
+    var memoryGrantNoCandidatesDetail: String {
+        language == .korean
+            ? "활성 명부의 모든 대상에게 이미 접근이 허용되었는지 확인해 주세요."
+            : "Everyone in the active roster may already have access."
+    }
+    var memoryGrantUnknownMember: String { language == .korean ? "알 수 없는 멤버" : "Unknown member" }
+    var memoryGrantRevoked: String { language == .korean ? "회수됨" : "Access revoked" }
+    var memoryRevokeTitle: String { language == .korean ? "메모리 접근을 회수할까요?" : "Revoke memory access?" }
+    var memoryRevokeAction: String { language == .korean ? "접근 회수" : "Revoke access" }
+    func memoryRevokeConfirmation(name: String) -> String {
+        language == .korean
+            ? "\(name) 님은 더 이상 이 메모리를 볼 수 없습니다. 접근 내역은 기록으로 남습니다."
+            : "\(name) will no longer be able to view this memory. The access history remains recorded."
+    }
+    func memoryGrantBadge(_ kind: MomoMemoryGrantGranteeKind) -> String {
+        switch (language, kind) {
+        case (.korean, .member): return "멤버"
+        case (.korean, .agent): return "에이전트"
+        case (.english, .member): return "Member"
+        case (.english, .agent): return "Agent"
+        }
+    }
+    func memoryGrantedBy(_ name: String, date: String) -> String {
+        language == .korean ? "\(name) 님이 \(date)에 허용" : "Allowed by \(name) on \(date)"
+    }
+    func memoryRevokedAt(_ date: String) -> String {
+        language == .korean ? "\(date)에 접근 회수" : "Access revoked on \(date)"
+    }
+    var memoryGrantGenericError: String {
+        language == .korean ? "메모리 접근 설정을 변경하지 못했습니다. 다시 시도해 주세요." : "Memory access could not be changed. Try again."
+    }
+    var memoryGrantInvalidTargetError: String {
+        language == .korean
+            ? "선택한 대상을 확인할 수 없습니다. 명부를 새로 불러온 뒤 다시 시도해 주세요."
+            : "The selected person could not be found. Reload the roster and try again."
+    }
+    var memoryGrantAuthenticationError: String {
+        language == .korean
+            ? "로그인이 만료되어 메모리 접근 설정을 변경하지 못했습니다. 다시 로그인해 주세요."
+            : "Your session expired. Sign in again to change memory access."
+    }
+    var memoryGrantPermissionError: String {
+        language == .korean ? "이 메모리의 접근 설정을 변경할 권한이 없습니다." : "You do not have permission to change access to this memory."
+    }
+    var memoryGrantNotFoundError: String {
+        language == .korean
+            ? "메모리 또는 접근 내역을 찾을 수 없습니다. 목록을 다시 불러와 주세요."
+            : "The memory or access history could not be found. Reload the list."
+    }
+    var memoryGrantRateLimitError: String {
+        language == .korean
+            ? "요청이 너무 많아 변경하지 못했습니다. 잠시 후 다시 시도해 주세요."
+            : "There are too many requests. Wait a moment and try again."
+    }
+    var memoryGrantServerError: String {
+        language == .korean
+            ? "서버가 메모리 접근 설정을 변경하지 못했습니다. 다시 시도해 주세요."
+            : "The server could not change memory access. Try again."
+    }
+    var memoryGrantInvalidResponseError: String {
+        language == .korean
+            ? "메모리 접근 내역을 읽지 못했습니다. 다시 불러와 주세요."
+            : "Memory access history could not be read. Reload it."
     }
     var servedContextTitle: String { language == .korean ? "서빙 내역" : "Served context" }
     var servedContextAction: String { language == .korean ? "서빙 내역 보기" : "View served context" }

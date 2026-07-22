@@ -164,6 +164,7 @@ public final class ChatViewModel: ObservableObject {
     private let workConsoleBackend: (any MomoWorkConsoleBackend)?
     private let workHostBackend: (any MomoWorkHostBackend)?
     private let memoryPlaneBackend: (any MemoryPlaneBackend)?
+    private let memoryGrantBackend: (any MomoMemoryGrantBackend)?
     private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
     private let agentOnboardingBackend: (any MomoAgentOnboardingBackend)?
     private let runMemoryDeliveryBackend: (any MomoAgentRunMemoryDeliveryProviding)?
@@ -190,6 +191,10 @@ public final class ChatViewModel: ObservableObject {
         memoryPlaneBackend
     }
 
+    var memoryGrantPresentationBackend: (any MomoMemoryGrantBackend)? {
+        memoryGrantBackend
+    }
+
     public var allowsLocalProfileEditing: Bool {
         !usesServerRosterSourceOfTruth
     }
@@ -209,6 +214,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var workspaceNameUpdateIssue: WorkspaceNameUpdateIssue?
     @Published public private(set) var members: [Member] = []
     @Published private(set) var agentOriginsByMemberID: [MemberID: MomoAgentOrigin] = [:]
+    @Published private(set) var agentOwnerIDsByMemberID: [MemberID: MemberID] = [:]
     @Published private(set) var agentOnboardingState = MomoAgentOnboardingState.entry
     @Published public private(set) var membershipMutationMemberIDs: Set<MemberID> = []
     @Published public private(set) var membershipAdministrationError: String?
@@ -369,6 +375,7 @@ public final class ChatViewModel: ObservableObject {
         self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
         self.workHostBackend = chat as? any MomoWorkHostBackend
         self.memoryPlaneBackend = chat as? any MemoryPlaneBackend
+        self.memoryGrantBackend = chat as? any MomoMemoryGrantBackend
         self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
         self.agentOnboardingBackend = chat as? any MomoAgentOnboardingBackend
         self.runMemoryDeliveryBackend = chat as? any MomoAgentRunMemoryDeliveryProviding
@@ -416,6 +423,7 @@ public final class ChatViewModel: ObservableObject {
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
             await refreshAgentOrigins()
+            await refreshAgentOwnership()
             let memberProvider = chat as? any AuthenticatedMemberIDProvidingBackend
             let providedMemberID = await memberProvider?.authenticatedMemberID()
             let resolvedMemberID = providedMemberID
@@ -582,6 +590,7 @@ public final class ChatViewModel: ObservableObject {
         workspaceIdentityUsesCache = false
         members = []
         agentOriginsByMemberID = [:]
+        agentOwnerIDsByMemberID = [:]
         agentOnboardingState = .entry
         channels = []
         selectedChannelId = nil
@@ -1153,6 +1162,7 @@ public final class ChatViewModel: ObservableObject {
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
             await refreshAgentOrigins()
+            await refreshAgentOwnership()
             memberDirectoryError = nil
             clearConnectionErrorState()
         } catch {
@@ -1218,6 +1228,14 @@ public final class ChatViewModel: ObservableObject {
             return
         }
         agentOriginsByMemberID = await provider.agentOrigins()
+    }
+
+    private func refreshAgentOwnership() async {
+        guard let provider = chat as? any MomoAgentOwnershipProvidingBackend else {
+            agentOwnerIDsByMemberID = [:]
+            return
+        }
+        agentOwnerIDsByMemberID = await provider.agentOwnerIDs()
     }
 
     nonisolated static func agentOnboardingFailure(_ error: any Error) -> MomoAgentOnboardingFailure {

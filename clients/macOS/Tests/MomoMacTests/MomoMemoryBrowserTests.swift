@@ -85,9 +85,120 @@ final class MomoMemoryBrowserTests: XCTestCase {
         XCTAssertEqual(copy.memorySourceLabel(channelName: "general", date: "2026. 7. 22."), "#general · 2026. 7. 22.")
         XCTAssertEqual(copy.memorySourceLabel(channelName: nil, date: "2026. 7. 22."), "2026. 7. 22.")
         XCTAssertEqual(copy.memoryScopeTitle(.conversation), "대화")
-        XCTAssertFalse(copy.memoryGrantUnavailable.contains("grant"))
+        XCTAssertEqual(copy.memoryGrantTitle, "메모리 접근 허용")
+        XCTAssertEqual(copy.memoryRevokeAction, "접근 회수")
+        XCTAssertFalse(copy.memoryGrantTitle.localizedCaseInsensitiveContains("grant"))
         XCTAssertFalse(copy.servedContextSubtitle.contains("Packet"))
         XCTAssertFalse(copy.servedContextUnavailable.contains("packet"))
+    }
+
+    func testGrantModelLoadsGrantsAndKeepsRevokedHistory() async throws {
+        let owner = Member(
+            id: MemberID(uuidString: "10000000-0000-7000-8000-000000000553")!,
+            workspaceId: .demo,
+            kind: .human,
+            displayName: "김성재",
+            handle: "sungjae",
+            workspaceRole: .owner
+        )
+        let agent = Member(
+            id: MemberID(uuidString: "20000000-0000-7000-8000-000000000553")!,
+            workspaceId: .demo,
+            kind: .agent,
+            displayName: "배포 도우미",
+            handle: "release-helper"
+        )
+        let backend = MemoryTestBackend(grantMembers: [owner, agent], grantedBy: owner.id)
+        let model = MomoMemoryGrantModel(
+            backend: backend,
+            workspace: .demo,
+            memory: UUID(uuidString: "20000000-0000-7000-8000-000000000529")!,
+            copy: MomoWorkspaceCopy(language: .korean)
+        )
+
+        await model.load()
+        XCTAssertEqual(model.state, .loaded)
+        XCTAssertEqual(model.grants.count, 2)
+        XCTAssertEqual(model.grants.filter(\.isRevoked).count, 1)
+
+        let revoked = try XCTUnwrap(model.grants.first { !$0.isRevoked })
+        let didRevoke = await model.revoke(revoked)
+        XCTAssertTrue(didRevoke)
+        XCTAssertTrue(try XCTUnwrap(model.grants.first { $0.id == revoked.id }).isRevoked)
+
+        let didGrant = await model.grant(to: agent)
+        XCTAssertTrue(didGrant)
+        XCTAssertFalse(try XCTUnwrap(model.grants.first { $0.granteeId == agent.id }).isRevoked)
+    }
+
+    func testGrantFailureMapsForbiddenReasonWithoutInternalVocabulary() {
+        let copy = MomoWorkspaceCopy(language: .korean)
+        let message = MomoMemoryGrantFailure.message(
+            for: BackendError.problem(
+                status: 403,
+                title: "Forbidden",
+                detail: "memory visibility grants require its scope subject"
+            ),
+            copy: copy
+        )
+        XCTAssertEqual(message, "이 메모리의 접근 설정을 변경할 권한이 없습니다.")
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("visibility"))
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("grant"))
+    }
+
+    func testOfflineStateOnlyOffersRetryWhenAConnectedBackendCanRetry() async {
+        let memoryID = UUID(uuidString: "20000000-0000-7000-8000-000000000529")!
+        let disconnected = MomoMemoryGrantModel(
+            backend: nil,
+            workspace: .demo,
+            memory: memoryID,
+            copy: MomoWorkspaceCopy(language: .korean)
+        )
+        XCTAssertEqual(disconnected.state, .offline)
+        XCTAssertFalse(disconnected.canRetry)
+
+        let retryable = MomoMemoryGrantModel(
+            backend: FailingMemoryGrantBackend(error: .notConnected),
+            workspace: .demo,
+            memory: memoryID,
+            copy: MomoWorkspaceCopy(language: .korean)
+        )
+        await retryable.load()
+        XCTAssertEqual(retryable.state, .offline)
+        XCTAssertTrue(retryable.canRetry)
+    }
+
+    func testGrantAuthorizationAllowsAdminSubjectAndAgentOwnerOnly() {
+        let subject = MemberID(uuidString: "10000000-0000-7000-8000-000000000553")!
+        let outsider = MemberID(uuidString: "10000000-0000-7000-8000-000000000554")!
+        let agent = MemberID(uuidString: "20000000-0000-7000-8000-000000000553")!
+        let memberMemory = Self.memoryEntry(scope: .member, subject: subject)
+        let agentMemory = Self.memoryEntry(scope: .agent, agent: agent)
+
+        XCTAssertTrue(MomoMemoryGrantAuthorization.canManage(
+            entry: memberMemory,
+            currentMemberID: outsider,
+            canManageWorkspace: true,
+            agentOwnerIDs: [:]
+        ))
+        XCTAssertTrue(MomoMemoryGrantAuthorization.canManage(
+            entry: memberMemory,
+            currentMemberID: subject,
+            canManageWorkspace: false,
+            agentOwnerIDs: [:]
+        ))
+        XCTAssertTrue(MomoMemoryGrantAuthorization.canManage(
+            entry: agentMemory,
+            currentMemberID: subject,
+            canManageWorkspace: false,
+            agentOwnerIDs: [agent: subject]
+        ))
+        XCTAssertFalse(MomoMemoryGrantAuthorization.canManage(
+            entry: agentMemory,
+            currentMemberID: outsider,
+            canManageWorkspace: false,
+            agentOwnerIDs: [agent: subject]
+        ))
     }
 
     func testRESTBackendUsesAuthoritativeMemoryAndPacketContracts() async throws {
@@ -130,6 +241,18 @@ final class MomoMemoryBrowserTests: XCTestCase {
                 return MemoryPlaneHTTPResponse(json: #"{"memoryPolicy":{"workspaceId":"\#(workspace.description)","enabled":false,"updatedBy":null,"updatedAtMs":2},"deletedCount":1}"#)
             case ("GET", "/v1/workspaces/\(workspace.description)/context-packets/\(packetID.uuidString.lowercased())"):
                 return MemoryPlaneHTTPResponse(json: #"{"packetId":"\#(packetID.uuidString)","runId":"10000000-0000-7000-8000-000000000529","workspaceId":"\#(workspace.description)","createdAtMs":1,"expiresAtMs":2,"expired":false,"content":{"schema":"momo.context_packet.v0","memory_refs":[],"tool_grants":[]}}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/memories/\(memoryID.uuidString.lowercased())/grants"):
+                return MemoryPlaneHTTPResponse(json: Self.grantPageJSON(workspace: workspace, memoryID: memoryID, grantee: agent))
+            case ("POST", "/v1/workspaces/\(workspace.description)/memories/\(memoryID.uuidString.lowercased())/grants"):
+                let body = try Self.bodyObject(request)
+                XCTAssertEqual(body["granteeKind"] as? String, "agent")
+                XCTAssertEqual(body["granteeId"] as? String, agent.description.lowercased())
+                return MemoryPlaneHTTPResponse(json: Self.grantResponseJSON(workspace: workspace, memoryID: memoryID, grantee: agent, revokedAtMs: nil))
+            case ("DELETE", "/v1/workspaces/\(workspace.description)/memories/\(memoryID.uuidString.lowercased())/grants"):
+                let body = try Self.bodyObject(request)
+                XCTAssertEqual(body["granteeKind"] as? String, "agent")
+                XCTAssertEqual(body["granteeId"] as? String, agent.description.lowercased())
+                return MemoryPlaneHTTPResponse(json: Self.grantResponseJSON(workspace: workspace, memoryID: memoryID, grantee: agent, revokedAtMs: 3))
             default:
                 return MemoryPlaneHTTPResponse(statusCode: 404, json: #"{"title":"unexpected memory request"}"#)
             }
@@ -167,11 +290,43 @@ final class MomoMemoryBrowserTests: XCTestCase {
         XCTAssertFalse(disabledPolicy.enabled)
         let packet = try await backend.contextPacket(workspace: workspace, packet: packetID)
         XCTAssertEqual(packet.packetId, packetID)
+        let grants = try await backend.memoryGrants(workspace: workspace, memory: memoryID)
+        XCTAssertEqual(grants.count, 1)
+        let granted = try await backend.grantMemoryAccess(
+            workspace: workspace, memory: memoryID, grantee: agent, kind: .agent
+        )
+        XCTAssertFalse(granted.isRevoked)
+        let revoked = try await backend.revokeMemoryAccess(
+            workspace: workspace, memory: memoryID, grantee: agent, kind: .agent
+        )
+        XCTAssertTrue(revoked.isRevoked)
     }
 
     nonisolated private static func bodyObject(_ request: URLRequest) throws -> [String: Any] {
         let data = try XCTUnwrap(request.memoryBodyData)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    nonisolated private static func memoryEntry(
+        scope: MemoryScope,
+        subject: MemberID? = nil,
+        agent: MemberID? = nil
+    ) -> MemoryEntry {
+        MemoryEntry(
+            id: UUID(uuidString: "20000000-0000-7000-8000-000000000529")!,
+            workspaceId: .demo,
+            scope: scope,
+            subjectMemberId: subject,
+            agentMemberId: agent,
+            kind: .fact,
+            body: "권한 경계 테스트",
+            confidence: 1,
+            validAtMs: 1,
+            createdByKind: "human",
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            sourceRefs: []
+        )
     }
 
     nonisolated private static func memoryPageJSON(workspace: WorkspaceID, memoryID: UUID, agent: MemberID) -> String {
@@ -205,6 +360,33 @@ final class MomoMemoryBrowserTests: XCTestCase {
         let invalid = invalidAtMs.map(String.init) ?? "null"
         return #"{"id":"\#(memoryID.uuidString)","workspaceId":"\#(workspace.description)","scope":"agent","subjectMemberId":null,"agentMemberId":"\#(agent.description)","channelId":"\#(ChannelID.demoGeneral.description)","kind":"fact","body":"\#(escapedBody)","confidence":\#(confidence),"validAtMs":1,"invalidAtMs":\#(invalid),"invalidatedByMemoryId":null,"createdByKind":"worker","createdByMemberId":null,"createdAtMs":1,"updatedAtMs":2,"sourceRefs":[{"messageId":"30000000-0000-7000-8000-000000000001","channelId":"\#(ChannelID.demoGeneral.description)"}]}"#
     }
+
+    nonisolated private static func grantPageJSON(
+        workspace: WorkspaceID,
+        memoryID: UUID,
+        grantee: MemberID
+    ) -> String {
+        #"{"grants":[\#(grantJSON(workspace: workspace, memoryID: memoryID, grantee: grantee, revokedAtMs: nil))]}"#
+    }
+
+    nonisolated private static func grantResponseJSON(
+        workspace: WorkspaceID,
+        memoryID: UUID,
+        grantee: MemberID,
+        revokedAtMs: Int64?
+    ) -> String {
+        #"{"grant":\#(grantJSON(workspace: workspace, memoryID: memoryID, grantee: grantee, revokedAtMs: revokedAtMs))}"#
+    }
+
+    nonisolated private static func grantJSON(
+        workspace: WorkspaceID,
+        memoryID: UUID,
+        grantee: MemberID,
+        revokedAtMs: Int64?
+    ) -> String {
+        let revoked = revokedAtMs.map(String.init) ?? "null"
+        return #"{"id":"40000000-0000-7000-8000-000000000553","workspaceId":"\#(workspace.description)","memoryId":"\#(memoryID.uuidString)","granteeKind":"agent","granteeId":"\#(grantee.description)","grantedBy":"10000000-0000-7000-8000-000000000553","createdAtMs":1,"revokedAtMs":\#(revoked)}"#
+    }
 }
 
 @MainActor
@@ -219,6 +401,22 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
 
     func testKoreanMemoryBrowserDarkSnapshot() async throws {
         try await assertBrowserSnapshot(scheme: .dark, named: "korean-dark", testName: #function)
+    }
+
+    func testKoreanMemoryGrantListLightSnapshot() async throws {
+        try await assertGrantListSnapshot(scheme: .light, named: "grant-list-light", testName: #function)
+    }
+
+    func testKoreanMemoryGrantListDarkSnapshot() async throws {
+        try await assertGrantListSnapshot(scheme: .dark, named: "grant-list-dark", testName: #function)
+    }
+
+    func testKoreanMemoryGrantPickerLightSnapshot() async throws {
+        try await assertGrantPickerSnapshot(scheme: .light, named: "grant-picker-light", testName: #function)
+    }
+
+    func testKoreanMemoryGrantPickerDarkSnapshot() async throws {
+        try await assertGrantPickerSnapshot(scheme: .dark, named: "grant-picker-dark", testName: #function)
     }
 
     func testKoreanContextInspectorCurrentLightSnapshot() async throws {
@@ -266,8 +464,14 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
             ),
         ])
         let agentID = try XCTUnwrap(seed.agents.first?.id)
+        let memoryBackend = MemoryTestBackend(
+            agentID: agentID,
+            grantMembers: [seed.human] + seed.agents,
+            grantedBy: seed.human.id
+        )
         let model = MomoMemoryBrowserModel(
-            backend: MemoryTestBackend(agentID: agentID),
+            backend: memoryBackend,
+            grantBackend: memoryBackend,
             workspace: seed.workspace,
             initialAgentID: agentID
         )
@@ -299,6 +503,203 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
             record: recordMode,
             testName: canonicalName
         )
+    }
+
+    private func assertGrantListSnapshot(
+        scheme: ColorScheme,
+        named: String,
+        testName: String
+    ) async throws {
+        let canonicalName = testName.replacingOccurrences(of: "()", with: "")
+        let reference = snapshotReference(testName: canonicalName, named: named)
+        if recordMode == nil, !FileManager.default.fileExists(atPath: reference.path) {
+            throw XCTSkip("MOMO-553 grant list snapshot is awaiting recording")
+        }
+        let members = grantMembersFixture()
+        let grants = grantFixture(members: members)
+        let model = MomoMemoryGrantModel(
+            backend: nil,
+            workspace: .demo,
+            memory: UUID(uuidString: "20000000-0000-7000-8000-000000000529")!,
+            copy: MomoWorkspaceCopy(language: .korean),
+            initialGrants: grants
+        )
+        let content = MomoMemoryGrantSection(
+            model: model,
+            copy: MomoWorkspaceCopy(language: .korean),
+            members: members,
+            canManage: true,
+            formatDate: fixedGrantDate
+        )
+        .padding(24)
+        .frame(width: 560, height: 340, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.colorScheme, scheme)
+
+        try await assertImageSnapshot(
+            content,
+            size: CGSize(width: 560, height: 340),
+            scheme: scheme,
+            named: named,
+            testName: canonicalName
+        )
+    }
+
+    private func assertGrantPickerSnapshot(
+        scheme: ColorScheme,
+        named: String,
+        testName: String
+    ) async throws {
+        let canonicalName = testName.replacingOccurrences(of: "()", with: "")
+        let reference = snapshotReference(testName: canonicalName, named: named)
+        if recordMode == nil, !FileManager.default.fileExists(atPath: reference.path) {
+            throw XCTSkip("MOMO-553 grant picker snapshot is awaiting recording")
+        }
+        let content = MomoMemoryGrantPickerView(
+            copy: MomoWorkspaceCopy(language: .korean),
+            members: grantMembersFixture(),
+            isGranting: false,
+            errorMessage: nil,
+            onCancel: {},
+            onGrant: { _ in true }
+        )
+        .environment(\.colorScheme, scheme)
+
+        try await assertImageSnapshot(
+            content,
+            size: CGSize(width: 480, height: 520),
+            scheme: scheme,
+            named: named,
+            testName: canonicalName
+        )
+    }
+
+    private func assertImageSnapshot<Content: View>(
+        _ content: Content,
+        size: CGSize,
+        scheme: ColorScheme,
+        named: String,
+        testName: String
+    ) async throws {
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let hostingController = NSHostingController(
+            rootView: content.frame(width: size.width, height: size.height)
+        )
+        let host = hostingController.view
+        host.appearance = appearance
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        window.backgroundColor = .windowBackgroundColor
+        window.isReleasedWhenClosed = false
+        window.contentViewController = hostingController
+        if !NSScreen.screens.isEmpty { window.orderFrontRegardless() }
+        defer { window.close() }
+        window.layoutIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(120))
+        window.layoutIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSWindow produced no memory grant bitmap")
+        }
+        representation.size = size
+        host.cacheDisplay(in: host.bounds, to: representation)
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: named,
+            record: recordMode,
+            testName: testName
+        )
+    }
+
+    private func snapshotReference(testName: String, named: String) -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("__Snapshots__/MomoMemoryBrowserTests")
+            .appendingPathComponent("\(testName).\(named).png")
+    }
+
+    private func grantMembersFixture() -> [Member] {
+        [
+            Member(
+                id: MemberID(uuidString: "10000000-0000-7000-8000-000000000553")!,
+                workspaceId: .demo,
+                kind: .human,
+                displayName: "김성재",
+                handle: "sungjae",
+                workspaceRole: .owner
+            ),
+            Member(
+                id: MemberID(uuidString: "20000000-0000-7000-8000-000000000553")!,
+                workspaceId: .demo,
+                kind: .agent,
+                displayName: "배포 도우미",
+                handle: "release-helper"
+            ),
+            Member(
+                id: MemberID(uuidString: "30000000-0000-7000-8000-000000000553")!,
+                workspaceId: .demo,
+                kind: .human,
+                displayName: "박수진 Product Operations",
+                handle: "sujin.ops"
+            ),
+        ]
+    }
+
+    private func grantFixture(members: [Member]) -> [MomoMemoryGrant] {
+        let memoryID = UUID(uuidString: "20000000-0000-7000-8000-000000000529")!
+        return [
+            MomoMemoryGrant(
+                id: UUID(uuidString: "40000000-0000-7000-8000-000000000551")!,
+                workspaceId: .demo,
+                memoryId: memoryID,
+                granteeKind: .agent,
+                granteeId: members[1].id,
+                grantedBy: members[0].id,
+                createdAtMs: 1_753_144_800_000,
+                revokedAtMs: nil
+            ),
+            MomoMemoryGrant(
+                id: UUID(uuidString: "40000000-0000-7000-8000-000000000552")!,
+                workspaceId: .demo,
+                memoryId: memoryID,
+                granteeKind: .member,
+                granteeId: members[2].id,
+                grantedBy: members[0].id,
+                createdAtMs: 1_753_058_400_000,
+                revokedAtMs: 1_753_148_400_000
+            ),
+        ]
+    }
+
+    private func fixedGrantDate(_ milliseconds: Int64) -> String {
+        switch milliseconds {
+        case 1_753_144_800_000: return "2025년 7월 22일 오전 9:40"
+        case 1_753_058_400_000: return "2025년 7월 21일 오전 9:40"
+        case 1_753_148_400_000: return "2025년 7월 22일 오전 10:40"
+        default: return "2025년 7월 22일 오전 9:40"
+        }
     }
 
     private func assertInspectorSnapshot(
@@ -395,12 +796,18 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
     }
 }
 
-private actor MemoryTestBackend: MemoryPlaneBackend {
+private actor MemoryTestBackend: MemoryPlaneBackend, MomoMemoryGrantBackend {
     private var items: [MemoryEntry]
     private var policyValue: WorkspaceMemoryPolicy
     private var mutation: String?
+    private var grants: [MomoMemoryGrant]
+    private let grantedBy: MemberID
 
-    init(agentID: MemberID = .demoAgent) {
+    init(
+        agentID: MemberID = .demoAgent,
+        grantMembers: [Member] = [],
+        grantedBy: MemberID = MemberID(uuidString: "10000000-0000-7000-8000-000000000553")!
+    ) {
         let now: Int64 = 1_753_144_800_000
         items = [
             MemoryEntry(
@@ -438,6 +845,19 @@ private actor MemoryTestBackend: MemoryPlaneBackend {
             ),
         ]
         policyValue = WorkspaceMemoryPolicy(workspaceId: .demo, enabled: true)
+        self.grantedBy = grantedBy
+        grants = grantMembers.enumerated().map { index, member in
+            MomoMemoryGrant(
+                id: UUID(uuidString: "40000000-0000-7000-8000-00000000055\(index + 1)")!,
+                workspaceId: .demo,
+                memoryId: UUID(uuidString: "20000000-0000-7000-8000-000000000529")!,
+                granteeKind: member.isAgent ? .agent : .member,
+                granteeId: member.id,
+                grantedBy: grantedBy,
+                createdAtMs: now - Int64(index * 86_400_000),
+                revokedAtMs: index == 1 ? now - 3_600_000 : nil
+            )
+        }
     }
 
     func memories(
@@ -530,7 +950,80 @@ private actor MemoryTestBackend: MemoryPlaneBackend {
         )
     }
 
+    func memoryGrants(workspace: WorkspaceID, memory: UUID) async throws -> [MomoMemoryGrant] {
+        grants
+    }
+
+    func grantMemoryAccess(
+        workspace: WorkspaceID,
+        memory: UUID,
+        grantee: MemberID,
+        kind: MomoMemoryGrantGranteeKind
+    ) async throws -> MomoMemoryGrant {
+        if let index = grants.firstIndex(where: { $0.granteeId == grantee }) {
+            let previous = grants[index]
+            let active = MomoMemoryGrant(
+                id: previous.id, workspaceId: workspace, memoryId: memory,
+                granteeKind: kind, granteeId: grantee, grantedBy: grantedBy,
+                createdAtMs: 1_753_144_800_000, revokedAtMs: nil
+            )
+            grants[index] = active
+            return active
+        }
+        let active = MomoMemoryGrant(
+            id: UUID(uuidString: "40000000-0000-7000-8000-000000000559")!,
+            workspaceId: workspace, memoryId: memory, granteeKind: kind,
+            granteeId: grantee, grantedBy: grantedBy,
+            createdAtMs: 1_753_144_800_000, revokedAtMs: nil
+        )
+        grants.insert(active, at: 0)
+        return active
+    }
+
+    func revokeMemoryAccess(
+        workspace: WorkspaceID,
+        memory: UUID,
+        grantee: MemberID,
+        kind: MomoMemoryGrantGranteeKind
+    ) async throws -> MomoMemoryGrant {
+        let index = grants.firstIndex { $0.granteeId == grantee }!
+        let previous = grants[index]
+        let revoked = MomoMemoryGrant(
+            id: previous.id, workspaceId: workspace, memoryId: memory,
+            granteeKind: kind, granteeId: grantee, grantedBy: previous.grantedBy,
+            createdAtMs: previous.createdAtMs, revokedAtMs: 1_753_148_400_000
+        )
+        grants[index] = revoked
+        return revoked
+    }
+
     func lastMutation() -> String? { mutation }
+}
+
+private struct FailingMemoryGrantBackend: MomoMemoryGrantBackend {
+    let error: BackendError
+
+    func memoryGrants(workspace: WorkspaceID, memory: UUID) async throws -> [MomoMemoryGrant] {
+        throw error
+    }
+
+    func grantMemoryAccess(
+        workspace: WorkspaceID,
+        memory: UUID,
+        grantee: MemberID,
+        kind: MomoMemoryGrantGranteeKind
+    ) async throws -> MomoMemoryGrant {
+        throw error
+    }
+
+    func revokeMemoryAccess(
+        workspace: WorkspaceID,
+        memory: UUID,
+        grantee: MemberID,
+        kind: MomoMemoryGrantGranteeKind
+    ) async throws -> MomoMemoryGrant {
+        throw error
+    }
 }
 
 private struct MemoryPlaneHTTPResponse: Sendable {
