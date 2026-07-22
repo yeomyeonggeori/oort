@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-549 memory visibility grant CRUD REST (#636, 2026-07-22)
+
+- migration 027의 `memory_visibility_grant` 원장에 admin/member-scope subject/agent human owner 관리 GET·POST·DELETE를 가산했다. active human/agent grantee 검증, 회수 마킹·멱등 재회수, 부여/회수 audit, FORCE RLS와 OpenAPI를 동기화했다.
+- `verify_memory_grant.sh`는 28160~28163 격리 포트에서 부여→030 검색/Context Packet 가시→회수→검색 비가시·재발급 `memory_refs` 제외, 권한·감사·RLS를 단정한다. Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
+
 ## MOMO-537 agent_profile 원장 + momo 네이티브 간편 생성 (#618, 2026-07-22)
 
 - ADR-0131 Accepted를 정본화하고 migration 036(035는 진행 PR #625와 충돌 회피)에 `agent_profile` 복합 agent FK·FORCE RLS 원장을 추가했다. 관리자/agent human owner GET·PUT, 8KB instructions·credential-shaped field 거부, version 증가·audit와 기존 agent 생성 요청의 optional profile 동시 커밋을 OpenAPI에 반영했다.
