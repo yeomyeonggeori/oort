@@ -14,7 +14,7 @@ Major bundled/linked components:
 - hummingbird (Apache-2.0) — https://github.com/hummingbird-project/hummingbird
 - async-http-client (Apache-2.0) — https://github.com/swift-server/async-http-client
 - swift-service-lifecycle (Apache-2.0) — https://github.com/swift-server/swift-service-lifecycle
-- postgres-nio (Apache-2.0) — https://github.com/vapor/postgres-nio
+- postgres-nio (MIT) — https://github.com/vapor/postgres-nio
 - jwt-kit (MIT) — https://github.com/vapor/jwt-kit
 - SwiftNIO and related (Apache-2.0) — https://github.com/apple/swift-nio
 - SwiftCentrifuge / centrifuge-swift (MIT) — https://github.com/centrifugal/centrifuge-swift
