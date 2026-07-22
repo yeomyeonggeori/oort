@@ -23,6 +23,14 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertNil(ChannelID("not-a-uuid"))
     }
 
+    func testWorkSessionToolPreservesRegistryDefinedValues() throws {
+        let data = Data(#""gemini-cli""#.utf8)
+        let tool = try JSONDecoder().decode(WorkSessionDelta.Tool.self, from: data)
+
+        XCTAssertEqual(tool.rawValue, "gemini-cli")
+        XCTAssertEqual(try JSONEncoder().encode(tool), data)
+    }
+
     // MARK: - JSON
 
     func testJSONRoundTrip() throws {

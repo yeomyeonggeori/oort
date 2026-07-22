@@ -84,6 +84,7 @@ let package = Package(
             name: "MomoMacTests",
             dependencies: [
                 "MomoMac",
+                .product(name: "MomoACPHost", package: "WorkHostDaemon"),
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
             exclude: ["__Snapshots__"]

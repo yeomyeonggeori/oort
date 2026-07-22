@@ -1418,6 +1418,31 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return response.workHost
     }
 
+    func enabledWorkToolProfiles(
+        workspace requestedWorkspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        signature: String
+    ) async throws -> [MomoWorkToolProfile] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let path = "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles"
+        var request = URLRequest(
+            url: config.baseURL.appendingPathComponent(path),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        request.httpMethod = "GET"
+        request.setValue("MomoHost \(host.description.lowercased())", forHTTPHeaderField: "Authorization")
+        request.setValue(String(sentAtMs), forHTTPHeaderField: "X-Momo-Work-Host-Sent-At")
+        request.setValue(signature, forHTTPHeaderField: "X-Momo-Work-Host-Signature")
+        let response = try await execute(request, response: MomoWorkToolProfilesResponseDTO.self)
+        try ensureSessionCurrent(context)
+        guard response.workToolProfiles.allSatisfy({
+            $0.workspaceId == requestedWorkspace && $0.enabled
+        }) else { throw BackendError.decoding("enabled work tool profile scope mismatch") }
+        return response.workToolProfiles
+    }
+
     func workSessions(
         workspace requestedWorkspace: WorkspaceID,
         activeOnly: Bool
@@ -1660,6 +1685,81 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             throw BackendError.decoding("work auto-approve response mismatch")
         }
         return response.enabled
+    }
+
+    func workToolProfiles(
+        workspace requestedWorkspace: WorkspaceID
+    ) async throws -> [MomoWorkToolProfile] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkToolProfilesResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfiles.allSatisfy({ $0.workspaceId == requestedWorkspace }) else {
+            throw BackendError.decoding("work tool profile workspace mismatch")
+        }
+        return response.workToolProfiles
+    }
+
+    func createWorkToolProfile(
+        workspace requestedWorkspace: WorkspaceID,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles",
+            body: MomoCreateWorkToolProfileRequestDTO(draft: draft),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkToolProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfile.workspaceId == requestedWorkspace,
+              response.workToolProfile.toolKey == draft.toolKey.lowercased()
+        else { throw BackendError.decoding("work tool profile response mismatch") }
+        return response.workToolProfile
+    }
+
+    func updateWorkToolProfile(
+        workspace requestedWorkspace: WorkspaceID,
+        tool: MomoWorkTool,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await put(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles/\(tool.rawValue)",
+            body: MomoUpdateWorkToolProfileRequestDTO(draft: draft),
+            response: MomoWorkToolProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfile.workspaceId == requestedWorkspace,
+              response.workToolProfile.tool == tool
+        else { throw BackendError.decoding("updated work tool profile response mismatch") }
+        return response.workToolProfile
+    }
+
+    func deleteWorkToolProfile(
+        workspace requestedWorkspace: WorkspaceID,
+        tool: MomoWorkTool
+    ) async throws -> MomoWorkToolProfile {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await delete(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles/\(tool.rawValue)",
+            authorized: true,
+            response: MomoWorkToolProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfile.workspaceId == requestedWorkspace,
+              response.workToolProfile.tool == tool
+        else { throw BackendError.decoding("deleted work tool profile response mismatch") }
+        return response.workToolProfile
     }
 
     // MARK: AgentTransport compatibility
@@ -2812,6 +2912,58 @@ private struct MomoWorkControlAckResponseDTO: Decodable {
 private struct MomoWorkAutoApproveResponseDTO: Decodable {
     let tool: MomoWorkTool
     let enabled: Bool
+}
+
+private struct MomoWorkToolProfilesResponseDTO: Decodable {
+    let workToolProfiles: [MomoWorkToolProfile]
+}
+
+private struct MomoWorkToolProfileResponseDTO: Decodable {
+    let workToolProfile: MomoWorkToolProfile
+}
+
+private struct MomoCreateWorkToolProfileRequestDTO: Encodable {
+    let toolKey: String
+    let displayName: String
+    let launchTemplate: MomoWorkToolLaunchTemplate
+    let tierDefaults: [String: JSON]
+    let enabled: Bool
+
+    init(draft: MomoWorkToolProfileDraft) {
+        toolKey = draft.toolKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        launchTemplate = MomoWorkToolLaunchTemplate(
+            command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            arguments: draft.arguments
+        )
+        tierDefaults = [
+            "transport": .string(draft.transport.rawValue),
+            "permission_policy": .string(draft.permissionPolicy.rawValue),
+            "risk": .string(draft.risk.rawValue),
+        ]
+        enabled = draft.enabled
+    }
+}
+
+private struct MomoUpdateWorkToolProfileRequestDTO: Encodable {
+    let displayName: String
+    let launchTemplate: MomoWorkToolLaunchTemplate
+    let tierDefaults: [String: JSON]
+    let enabled: Bool
+
+    init(draft: MomoWorkToolProfileDraft) {
+        displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        launchTemplate = MomoWorkToolLaunchTemplate(
+            command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            arguments: draft.arguments
+        )
+        tierDefaults = [
+            "transport": .string(draft.transport.rawValue),
+            "permission_policy": .string(draft.permissionPolicy.rawValue),
+            "risk": .string(draft.risk.rawValue),
+        ]
+        enabled = draft.enabled
+    }
 }
 
 private struct ApprovalDecisionRequestDTO: Encodable {

@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## UXUI MOMO-532 macOS 도구 프로파일·ACP 세션 카드 (#604, 2026-07-22)
+
+- Work Console의 고정 도구 enum을 임의 registry key를 보존하는 동적 모델로 바꾸고, 관리자용 `work_tool_profile` 등록·수정·삭제 UI와 등록된 enabled 프로파일만 표시·실행하는 fail-closed 목록을 연결했다. 일반 멤버는 앱의 Ed25519 Work Host 신원으로 enabled projection을 서명 조회하며, launch template에는 command key와 인자만 허용하고 절대경로·자격증명 형태를 클라이언트에서도 거부한다.
+- 로컬 ACP 세션의 plan·tool progress·permission 이벤트를 구조화 카드로 투영했다. 엔진이 제시한 `allow_once`·`allow_always`·`reject_once`·`reject_always`만 노출하고, 결정 이벤트 뒤에는 제어를 제거한 불변 결과 카드를 유지한다. ACP raw·stderr·terminal bytes는 계속 호스트 로컬 경계 밖으로 보내지 않는다.
+- Core 동적 tool key, 관리자 CRUD/호스트 서명 projection, ACP 4방향 승인·결정 불변성 집중 테스트와 한국어 라이트·다크 ACP/설정 snapshot이 PASS했다. design preflight, 전 Swift 패키지 build/test와 macOS 462 tests(1 skip, 0 failure), iOS Simulator 무서명 build, Docker 기동·migration 031 멱등 적용까지 PASS했다. `macos-ui`의 마지막 기존 real-backend roster verifier는 이 변경이 건드리지 않은 seed fixture에서 `agent-lab` 활성 human/agent membership을 찾지 못해 실패했으며(evidence: `local-gate-macos-ui-20260722T063508Z-pid94487-ns1784702108326888000-wt28dc727668fb-rd6dbab8bd522.md`), workd의 ACP plan/progress/승인 이벤트를 서버 thread/realtime 카드로 전달하는 MOMO-546(#623)과 함께 해당 실왕복만 `runtime-unverified`다.
+- PR #632 디자인 리뷰 후속으로 원장 우회 `start(tool:)` 경로를 제거하고, ACP 실패·종료·결정 불가 상태, 프로파일 로딩/빈/오류와 에디터 저장 재시도, 승인 문법·도구 정체성·접근성 카피를 정합했다. Work Console 라이트·다크 18 snapshot과 집중 33 tests(1 sandbox skip), macOS build, 디자인 프리플라이트 3종, 독립 design-review(Blocker 0)는 PASS했다. 전체 macOS suite 재실행에서는 기존 `AgentCredentialSnapshotTests`의 headless 1x↔2x SnapshotTesting crash와 이미 STATUS에 기록된 attachment UTI/MIME 4단정만 남았다.
+
 ## UXUI MOMO-529 메모리 브라우저·서빙 인스펙터 (#603, 2026-07-22)
 
 - macOS 워크스페이스 메뉴와 에이전트 프로필에 "에이전트가 아는 것" 브라우저를 추가했다. 스코프·에이전트·무효 상태 필터, 검색, 열람·편집·무효화, 출처 메시지 이동, 관리자 정책 스위치는 모두 서버 Memory REST를 권위로 사용하며 기존 데이터를 로딩·오류 중에도 유지한다.

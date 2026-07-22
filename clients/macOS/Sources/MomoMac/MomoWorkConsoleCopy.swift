@@ -168,6 +168,157 @@ extension MomoWorkspaceCopy {
             : "Only the display name is stored on the server. The actual path is never sent."
     }
     var startWorkSession: String { language == .korean ? "세션 시작" : "Start session" }
+    var workToolProfiles: String { language == .korean ? "도구 프로파일" : "Tool profiles" }
+    var workToolProfilesHelp: String {
+        language == .korean
+            ? "등록된 도구만 새 세션과 원격 실행에 표시됩니다. 실행 경로와 자격증명은 서버에 저장하지 않습니다."
+            : "Only registered tools appear for new sessions and remote runs. Executable paths and credentials never reach the server."
+    }
+    var workToolProfileAdd: String { language == .korean ? "도구 등록" : "Register tool" }
+    var workToolProfileEdit: String { language == .korean ? "프로파일 편집" : "Edit profile" }
+    func workToolProfileActions(_ displayName: String) -> String {
+        language == .korean ? "\(displayName) 도구 메뉴" : "\(displayName) tool menu"
+    }
+    var workToolProfileDelete: String { language == .korean ? "도구 등록 해제" : "Unregister tool" }
+    var workToolProfileDeleteTitle: String { language == .korean ? "이 도구를 등록 해제할까요?" : "Unregister this tool?" }
+    var workToolProfileDeleteBody: String {
+        language == .korean
+            ? "새 실행에서 즉시 숨겨지고 자동 승인 설정도 함께 지워집니다. 기존 세션 기록은 유지됩니다."
+            : "It is hidden from new runs immediately and its auto-approval setting is cleared. Existing session history remains."
+    }
+    var workToolProfileUnavailable: String {
+        language == .korean ? "활성화된 도구 프로파일이 없습니다." : "No enabled tool profiles are available."
+    }
+    var workToolProfilesLoading: String {
+        language == .korean ? "도구 프로파일 불러오는 중" : "Loading tool profiles"
+    }
+    var workToolProfilesLoadFailed: String {
+        language == .korean
+            ? "도구 프로파일을 불러오지 못했습니다. 다시 불러오기를 선택하세요."
+            : "Tool profiles could not be loaded. Choose Reload to try again."
+    }
+    var workToolProfilesReload: String { language == .korean ? "다시 불러오기" : "Reload" }
+    var workToolKey: String { language == .korean ? "도구 키" : "Tool key" }
+    var workToolDisplayName: String { language == .korean ? "표시 이름" : "Display name" }
+    var workToolCommand: String { language == .korean ? "명령 키" : "Command key" }
+    var workToolArguments: String { language == .korean ? "인자 (한 줄에 하나)" : "Arguments (one per line)" }
+    var workToolTransport: String { language == .korean ? "연결 방식" : "Transport" }
+    var workToolPermissionPolicy: String { language == .korean ? "도구 사용 정책" : "Tool-use policy" }
+    var workToolRisk: String { language == .korean ? "위험도" : "Risk" }
+    var workToolPTY: String { language == .korean ? "터미널" : "Terminal" }
+    var workToolACP: String { language == .korean ? "ACP 세션" : "ACP session" }
+    var workToolEnabled: String { language == .korean ? "새 실행에 표시" : "Show for new runs" }
+    func workToolPermissionPolicy(_ policy: MomoWorkToolPermissionPolicy) -> String {
+        switch (policy, language) {
+        case (.confirm, .korean): "매번 확인"
+        case (.confirm, .english): "Confirm each time"
+        case (.allow, .korean): "허용"
+        case (.allow, .english): "Allow"
+        case (.deny, .korean): "거부"
+        case (.deny, .english): "Deny"
+        }
+    }
+    func workToolRisk(_ risk: MomoWorkToolRisk) -> String {
+        switch (risk, language) {
+        case (.low, .korean): "낮음"
+        case (.low, .english): "Low"
+        case (.medium, .korean): "보통"
+        case (.medium, .english): "Medium"
+        case (.high, .korean): "높음"
+        case (.high, .english): "High"
+        }
+    }
+    var workToolSave: String { language == .korean ? "프로파일 저장" : "Save profile" }
+    var workToolSaving: String { language == .korean ? "저장 중" : "Saving" }
+    var workToolSaveFailed: String {
+        language == .korean
+            ? "도구 프로파일을 저장하지 못했습니다. 연결을 확인하고 프로파일 저장을 다시 선택하세요."
+            : "The tool profile could not be saved. Check the connection and choose Save profile again."
+    }
+    var workToolInvalid: String {
+        language == .korean
+            ? "키와 명령은 영문 소문자·숫자·점·대시만 사용할 수 있으며, 인자에 경로와 자격증명을 넣을 수 없습니다."
+            : "Keys and commands use lowercase letters, numbers, dots, or dashes. Arguments cannot contain paths or credentials."
+    }
+    var acpInitialPrompt: String { language == .korean ? "첫 요청" : "Initial prompt" }
+    var acpInitialPromptPlaceholder: String {
+        language == .korean ? "에이전트에게 맡길 작업을 입력하세요" : "Describe the task for the agent"
+    }
+    func acpCardTitle(toolDisplayName: String, sessionLabel: String) -> String {
+        "\(toolDisplayName) · \(sessionLabel)"
+    }
+    var acpPlan: String { language == .korean ? "계획" : "Plan" }
+    var acpProgress: String { language == .korean ? "진행" : "Progress" }
+    var acpPermission: String { language == .korean ? "승인 필요" : "Permission required" }
+    var acpPermissionResolved: String { language == .korean ? "처리됨" : "Resolved" }
+    var acpWaiting: String { language == .korean ? "에이전트 응답을 기다리는 중" : "Waiting for agent update" }
+    var acpSessionFailedStatus: String { language == .korean ? "실패" : "Failed" }
+    var acpDecisionUnavailable: String {
+        language == .korean
+            ? "세션이 종료되어 결정할 수 없습니다."
+            : "This session has ended, so a decision cannot be made."
+    }
+    func acpSessionFailed(_ errorLabel: String) -> String {
+        let reason = switch (errorLabel, language) {
+        case ("acp_session_failed", .korean): "에이전트 연결 또는 응답 처리 중 오류가 발생했습니다."
+        case ("acp_session_failed", .english): "The agent connection or response failed."
+        case (_, .korean): "에이전트 세션에서 오류가 발생했습니다."
+        case (_, .english): "The agent session failed."
+        }
+        return language == .korean
+            ? "\(reason) 새 세션을 시작해 다시 시도하세요."
+            : "\(reason) Start a new session to try again."
+    }
+    func acpSessionStopped(_ stopReason: String) -> String {
+        switch (stopReason, language) {
+        case ("end_turn", .korean): "에이전트가 작업 응답을 마쳤습니다."
+        case ("end_turn", .english): "The agent finished its response."
+        case (_, .korean): "에이전트가 세션을 종료했습니다."
+        case (_, .english): "The agent ended the session."
+        }
+    }
+    func acpPermissionOption(kind: String, fallback: String) -> String {
+        switch (kind, language) {
+        case ("allow_once", .korean): "이번만 허용"
+        case ("allow_once", .english): "Allow once"
+        case ("allow_always", .korean): "항상 허용"
+        case ("allow_always", .english): "Always allow"
+        case ("reject_once", .korean): "이번만 거부"
+        case ("reject_once", .english): "Reject once"
+        case ("reject_always", .korean): "항상 거부"
+        case ("reject_always", .english): "Always reject"
+        default: fallback
+        }
+    }
+    func acpPermissionResult(status: String, optionID: String?) -> String {
+        if status == "approved" {
+            return language == .korean ? "도구 사용을 허용했습니다." : "Tool use was allowed."
+        }
+        return language == .korean ? "도구 사용을 거부했습니다." : "Tool use was rejected."
+    }
+    func acpPlanStatus(_ status: String) -> String {
+        switch (status, language) {
+        case ("completed", .korean): "완료"
+        case ("completed", .english): "Completed"
+        case ("in_progress", .korean): "진행 중"
+        case ("in_progress", .english): "In progress"
+        case (_, .korean): "대기"
+        case (_, .english): "Pending"
+        }
+    }
+    func acpToolStatus(_ status: String) -> String {
+        switch (status, language) {
+        case ("pending", .korean): "대기"
+        case ("pending", .english): "Pending"
+        case ("in_progress", .korean), ("running", .korean): "진행 중"
+        case ("in_progress", .english), ("running", .english): "In progress"
+        case ("completed", .korean): "완료"
+        case ("completed", .english): "Completed"
+        case ("failed", .korean): "실패"
+        case ("failed", .english): "Failed"
+        default: status
+        }
+    }
     var workConsoleSettings: String { language == .korean ? "Work 설정" : "Work settings" }
     var workTierPolicyTitle: String { language == .korean ? "호스트 상실 시 재개" : "Host-loss recovery" }
     var workTierPolicyPersonal: String { language == .korean ? "내 정책" : "My policy" }
@@ -272,36 +423,28 @@ extension MomoWorkspaceCopy {
     }
 
     func workToolTitle(_ tool: MomoWorkTool) -> String {
-        switch (tool, language) {
-        case (.claude, _): return "Claude"
-        case (.codex, _): return "Codex"
-        case (.opencode, _): return "OpenCode"
-        case (.shell, .korean): return "셸"
-        case (.shell, .english): return "Shell"
-        }
+        if tool == .claude { return "Claude" }
+        if tool == .codex { return "Codex" }
+        if tool == .opencode { return "OpenCode" }
+        if tool == .shell { return language == .korean ? "셸" : "Shell" }
+        return tool.rawValue
     }
 
     func workToolSubtitle(_ tool: MomoWorkTool) -> String {
-        switch (tool, language) {
-        case (.claude, .korean): return "Claude Code 로컬 세션"
-        case (.claude, .english): return "Local Claude Code session"
-        case (.codex, .korean): return "Codex CLI 로컬 세션"
-        case (.codex, .english): return "Local Codex CLI session"
-        case (.opencode, .korean): return "OpenCode 로컬 세션"
-        case (.opencode, .english): return "Local OpenCode session"
-        case (.shell, .korean): return "로그인 셸 세션"
-        case (.shell, .english): return "Login shell session"
-        }
+        if tool == .claude { return language == .korean ? "Claude Code 로컬 세션" : "Local Claude Code session" }
+        if tool == .codex { return language == .korean ? "Codex CLI 로컬 세션" : "Local Codex CLI session" }
+        if tool == .opencode { return language == .korean ? "OpenCode 로컬 세션" : "Local OpenCode session" }
+        if tool == .shell { return language == .korean ? "로그인 셸 세션" : "Login shell session" }
+        return language == .korean ? "등록된 로컬 도구" : "Registered local tool"
     }
 }
 
 extension MomoWorkTool {
     var systemImage: String {
-        switch self {
-        case .claude: return "c.circle"
-        case .codex: return "terminal"
-        case .opencode: return "chevron.left.forwardslash.chevron.right"
-        case .shell: return "apple.terminal"
-        }
+        if self == .claude { return "c.circle" }
+        if self == .codex { return "terminal" }
+        if self == .opencode { return "chevron.left.forwardslash.chevron.right" }
+        if self == .shell { return "apple.terminal" }
+        return "wrench.and.screwdriver"
     }
 }
