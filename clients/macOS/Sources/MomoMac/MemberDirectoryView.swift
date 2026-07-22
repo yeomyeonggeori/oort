@@ -57,6 +57,7 @@ public struct MemberDirectoryView: View {
     @State private var scope: MomoMemberDirectoryScope = .all
     @State private var selectedMemberID: MemberID?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showsAgentOnboarding = false
     private let capturePane: MomoMemberDirectoryCapturePane?
 
     public init(viewModel: ChatViewModel) {
@@ -85,6 +86,29 @@ public struct MemberDirectoryView: View {
                     }
                     .keyboardShortcut(.cancelAction)
                 }
+                if viewModel.canManageWorkspace && viewModel.supportsAgentAddressOnboarding {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            viewModel.resetAgentOnboarding()
+                            showsAgentOnboarding = true
+                        } label: {
+                            Label(copy.addAgent, systemImage: "person.badge.plus")
+                        }
+                        .keyboardShortcut("a", modifiers: [.command, .shift])
+                        .help(copy.addAgent)
+                    }
+                }
+            }
+            .sheet(isPresented: $showsAgentOnboarding) {
+                MomoAgentOnboardingView(
+                    viewModel: viewModel,
+                    copy: copy,
+                    onCompleted: { memberID in
+                        selectedMemberID = memberID
+                        scope = .agents
+                        showsAgentOnboarding = false
+                    }
+                )
             }
             .task {
                 if viewModel.members.isEmpty {
@@ -286,6 +310,9 @@ public struct MemberDirectoryView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if member.isAgent {
                         MomoAgentBadgeGroup(capabilities: [], maximumCapabilities: 0)
+                        if let origin = viewModel.agentOrigin(for: member) {
+                            MomoAgentOriginBadge(origin: origin, copy: copy)
+                        }
                     }
                 }
                 Text("@\(member.handle)")
@@ -328,6 +355,9 @@ public struct MemberDirectoryView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                 if member.isAgent {
                                     MomoAgentBadgeGroup(capabilities: [], maximumCapabilities: 0)
+                                    if let origin = viewModel.agentOrigin(for: member) {
+                                        MomoAgentOriginBadge(origin: origin, copy: copy)
+                                    }
                                 }
                             }
                             Text("@\(member.handle)")

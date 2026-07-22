@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMembershipAdministrationBackend, MomoAgentRunMemoryDeliveryProviding {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMembershipAdministrationBackend, MomoAgentOnboardingBackend, MomoAgentOriginProvidingBackend, MomoAgentRunMemoryDeliveryProviding {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -28,6 +28,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     private var cachedChannels: [Channel]?
     private var cachedChannelMuteStates: [ChannelID: Bool] = [:]
     private var cachedMembers: [Member]?
+    private var cachedAgentOrigins: [MemberID: MomoAgentOrigin] = [:]
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
     private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
@@ -142,6 +143,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         cachedChannels = nil
         cachedChannelMuteStates = [:]
         cachedMembers = nil
+        cachedAgentOrigins = [:]
         lastKnownSeqByChannel = [:]
         readStateRealtimeTransport = nil
         realtimeStatusByChannel = [:]
@@ -488,7 +490,48 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             all.insert(authenticatedMember, at: 0)
         }
         cachedMembers = all
+        cachedAgentOrigins = try Dictionary(
+            uniqueKeysWithValues: response.members.compactMap { dto in
+                guard let origin = dto.origin.flatMap(MomoAgentOrigin.init(rawValue:)) else { return nil }
+                guard let memberID = MemberID(uuidString: dto.id) else {
+                    throw BackendError.decoding("invalid agent origin member identity")
+                }
+                return (memberID, origin)
+            }
+        )
         return all
+    }
+
+    func agentOrigins() -> [MemberID: MomoAgentOrigin] {
+        cachedAgentOrigins
+    }
+
+    func inspectAgentAddress(_ address: String) async throws -> MomoAgentRegistration {
+        guard let workspace else { throw BackendError.notConnected }
+        let response = try await post(
+            "/v1/workspaces/\(workspace.description)/agents/from-card",
+            body: RegisterAgentAddressRequestDTO(url: address),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: AgentRegistrationResponseDTO.self
+        )
+        return try response.registration.registration()
+    }
+
+    func confirmAgentRegistration(_ registrationID: UUID) async throws -> MemberID {
+        guard let workspace else { throw BackendError.notConnected }
+        let response = try await postEmpty(
+            "/v1/workspaces/\(workspace.description)/agents/from-card/\(registrationID.uuidString.lowercased())/confirm",
+            authorized: true,
+            response: ConfirmAgentRegistrationResponseDTO.self
+        )
+        guard response.registrationId == registrationID,
+              response.status == "confirmed",
+              let memberID = MemberID(uuidString: response.agent.id)
+        else { throw BackendError.decoding("confirmed agent response mismatch") }
+        cachedMembers = nil
+        cachedAgentOrigins[memberID] = .card
+        return memberID
     }
 
     public func changeWorkspaceRole(member: MemberID, role: MembershipRole) async throws {
@@ -2390,6 +2433,49 @@ private struct RevokeAgentCredentialResponseDTO: Decodable {
     let alreadyRevoked: Bool
 }
 
+private struct RegisterAgentAddressRequestDTO: Encodable {
+    let url: String
+}
+
+private struct AgentRegistrationDTO: Decodable {
+    let id: UUID
+    let status: String
+    let name: String
+    let description: String?
+    let url: String
+    let capabilities: JSON
+    let securitySchemes: JSON
+
+    func registration() throws -> MomoAgentRegistration {
+        guard status == "pending_consent",
+              let parsedURL = URL(string: url),
+              parsedURL.scheme != nil
+        else { throw BackendError.decoding("agent registration response mismatch") }
+        return MomoAgentRegistration(
+            id: id,
+            name: name,
+            description: description,
+            url: parsedURL,
+            capabilities: capabilities,
+            securitySchemes: securitySchemes
+        )
+    }
+}
+
+private struct AgentRegistrationResponseDTO: Decodable {
+    let registration: AgentRegistrationDTO
+}
+
+private struct ConfirmAgentRegistrationResponseDTO: Decodable {
+    let registrationId: UUID
+    let status: String
+    let agent: ConfirmedAgentMemberDTO
+}
+
+private struct ConfirmedAgentMemberDTO: Decodable {
+    let id: String
+}
+
 private struct MemberDTO: Decodable {
     let id: String
     let workspaceId: String
@@ -2401,6 +2487,7 @@ private struct MemberDTO: Decodable {
     let role: String?
     let channelIds: [String]?
     let capabilities: [String]?
+    let origin: String?
 
     func member() throws -> Member {
         guard let memberID = MemberID(uuidString: id),

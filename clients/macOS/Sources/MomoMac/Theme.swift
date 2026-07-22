@@ -438,6 +438,12 @@ public enum MomoTheme {
         public static let edgeInset: CGFloat = 24
     }
 
+    public enum AgentOnboarding {
+        public static let sheetWidth: CGFloat = 520
+        public static let loadingMinimumHeight: CGFloat = 160
+        public static let offlineMinimumHeight: CGFloat = 200
+    }
+
     /// Compact right-side roster and profile popover for the active conversation.
     public enum MemberInspector {
         public static let attachedWidth: CGFloat = 264
