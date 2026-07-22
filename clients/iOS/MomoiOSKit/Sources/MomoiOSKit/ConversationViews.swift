@@ -1,8 +1,11 @@
 #if os(iOS)
 import Foundation
 import MomoCore
+import PhotosUI
+import QuickLook
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 @MainActor
 struct IOSChannelHomeView: View {
@@ -30,7 +33,13 @@ struct IOSChannelHomeView: View {
         List {
             Section {
                 NavigationLink {
-                    IOSThreadsPlaceholderView()
+                    IOSThreadInboxView(
+                        session: session,
+                        channelListModel: model,
+                        backend: backend,
+                        workspace: session.workspaceID,
+                        huddleService: huddleService
+                    )
                 } label: {
                     Label("Threads", systemImage: "bubble.left.and.text.bubble.right")
                         .font(.body.weight(.medium))
@@ -76,7 +85,8 @@ struct IOSChannelHomeView: View {
                     currentMemberID: session.member.id,
                     backend: backend,
                     workspace: session.workspaceID,
-                    huddleService: huddleService
+                    huddleService: huddleService,
+                    pushLink: link
                 )
             } else {
                 ContentUnavailableView(
@@ -159,7 +169,8 @@ struct IOSChannelHomeView: View {
                 currentMemberID: session.member.id,
                 backend: backend,
                 workspace: session.workspaceID,
-                huddleService: huddleService
+                huddleService: huddleService,
+                pushLink: nil
             )
         } label: {
             IOSChannelRow(item: item)
@@ -307,6 +318,15 @@ struct IOSChannelRow: View {
 struct IOSTimelineView: View {
     let item: IOSChannelListItem
     let members: [MemberID: Member]
+    private let currentMemberID: MemberID
+    private let backend: any IOSConversationBackend
+    private let workspace: WorkspaceID
+    private let huddleService: any IOSHuddleService
+    private let threadRoot: MessageID?
+    private let onReadState: ((ChannelReadState) -> Void)?
+    private let focusMessageID: MessageID?
+    private let focusSequence: Int64?
+    private let showsComposer: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: IOSTimelineModel
@@ -321,16 +341,33 @@ struct IOSTimelineView: View {
         backend: any IOSConversationBackend,
         workspace: WorkspaceID,
         huddleService: any IOSHuddleService,
+        threadRoot: MessageID? = nil,
+        initialThreadRootMessage: Message? = nil,
+        focusMessageID: MessageID? = nil,
+        focusSequence: Int64? = nil,
+        showsComposer: Bool = true,
         onReadState: ((ChannelReadState) -> Void)? = nil
     ) {
         self.item = item
         self.members = members
+        self.currentMemberID = currentMemberID
+        self.backend = backend
+        self.workspace = workspace
+        self.huddleService = huddleService
+        self.threadRoot = threadRoot
+        self.onReadState = onReadState
+        self.focusMessageID = focusMessageID
+        self.focusSequence = focusSequence
+        self.showsComposer = showsComposer
         _model = State(initialValue: IOSTimelineModel(
             channel: item.id,
             currentMemberID: currentMemberID,
             backend: backend,
             workspace: workspace,
             huddleService: huddleService,
+            threadRoot: threadRoot,
+            initialThreadRootMessage: initialThreadRootMessage,
+            initialBeforeSequence: focusSequence.flatMap { $0 == Int64.max ? nil : $0 + 1 },
             onReadState: onReadState
         ))
     }
@@ -343,6 +380,9 @@ struct IOSTimelineView: View {
                 }
                 if model.realtimeStatus.isFallbackActive, model.phase == .loaded {
                     offlineBanner
+                }
+                if let refreshFailure = model.refreshFailure, model.phase == .loaded {
+                    historyRefreshBanner(refreshFailure)
                 }
                 switch model.phase {
                 case .loading:
@@ -377,9 +417,18 @@ struct IOSTimelineView: View {
                     }
                 }
             }
+            .task(id: focusMessageTrigger) {
+                guard let focusMessageID,
+                      model.messages.contains(where: { $0.id == focusMessageID })
+                else { return }
+                await Task.yield()
+                proxy.scrollTo(focusMessageID, anchor: .center)
+            }
         }
         .safeAreaInset(edge: .bottom) {
-            IOSMessageComposer(model: model)
+            if showsComposer {
+                IOSMessageComposer(model: model)
+            }
         }
         .listStyle(.plain)
         .scrollDismissesKeyboard(.interactively)
@@ -431,18 +480,49 @@ struct IOSTimelineView: View {
             IOSMessageDateDivider(dayStartMs: dayStartMs)
                 .listRowSeparator(.hidden)
         case .message(let message, let startsAuthorGroup, let mentionsCurrentMember, let bodySegments):
-            IOSMessageRow(
-                message: message,
-                member: members[message.authorMemberId],
-                quotedBody: quotedBody(for: message),
-                startsAuthorGroup: startsAuthorGroup,
-                mentionsCurrentMember: mentionsCurrentMember,
-                bodySegments: bodySegments,
-                model: model
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                IOSMessageRow(
+                    message: message,
+                    member: members[message.authorMemberId],
+                    quotedBody: quotedBody(for: message),
+                    startsAuthorGroup: startsAuthorGroup,
+                    mentionsCurrentMember: mentionsCurrentMember,
+                    bodySegments: bodySegments,
+                    model: model
+                )
+                if threadRoot == nil,
+                   let rollup = message.thread,
+                   rollup.replyCount > 0
+                {
+                    NavigationLink {
+                        IOSThreadDetailView(
+                            item: item,
+                            rootMessage: message,
+                            members: members,
+                            currentMemberID: currentMemberID,
+                            backend: backend,
+                            workspace: workspace,
+                            huddleService: huddleService,
+                            onReadState: onReadState
+                        )
+                    } label: {
+                        IOSThreadRollupLabel(
+                            rollup: rollup,
+                            participantMemberIDs: model.threadParticipantIDs[message.id] ?? [],
+                            members: members
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 32)
+                    .task(id: rollup.replyCount) {
+                        await model.loadThreadParticipants(for: message)
+                    }
+                    .accessibilityIdentifier("thread.\(message.id.description)")
+                }
+            }
             .id(message.id)
             .listRowSeparator(.hidden)
-            .listRowBackground(mentionsCurrentMember ? Color.accentColor.opacity(0.10) : Color.clear)
+            .listRowBackground(rowBackground(message: message, mentionsCurrentMember: mentionsCurrentMember))
             .accessibilityIdentifier("message.\(message.id.description)")
             .onAppear { visibleMessageIDs.insert(message.id) }
             .onDisappear { visibleMessageIDs.remove(message.id) }
@@ -462,6 +542,20 @@ struct IOSTimelineView: View {
                 }
             }
         }
+    }
+
+    private var focusMessageTrigger: MessageID? {
+        guard let focusMessageID,
+              model.phase == .loaded,
+              model.messages.contains(where: { $0.id == focusMessageID })
+        else { return nil }
+        return focusMessageID
+    }
+
+    private func rowBackground(message: Message, mentionsCurrentMember: Bool) -> Color {
+        if message.id == focusMessageID { return Color.accentColor.opacity(0.16) }
+        if mentionsCurrentMember { return Color.accentColor.opacity(0.10) }
+        return .clear
     }
 
     private func huddleBanner(_ huddle: IOSHuddle) -> some View {
@@ -524,6 +618,27 @@ struct IOSTimelineView: View {
         .accessibilityIdentifier("offlineBanner")
     }
 
+    private func historyRefreshBanner(_ failure: IOSTimelineModel.Failure) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    failure.requiresSignIn ? "Session expired" : "Messages may be out of date",
+                    systemImage: failure.requiresSignIn ? "person.crop.circle.badge.exclamationmark" : "arrow.clockwise"
+                )
+                .font(.callout.weight(.semibold))
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(failure.requiresSignIn ? "Try refreshing session" : "Retry message refresh") {
+                    Task { await model.retry() }
+                }
+                .accessibilityIdentifier("retryMessageRefresh")
+            }
+            .padding(.vertical, 8)
+        }
+        .accessibilityIdentifier("messageRefreshBanner")
+    }
+
     private var loadingMessages: some View {
         Section {
             ForEach(0..<4, id: \.self) { _ in
@@ -553,6 +668,87 @@ struct IOSTimelineView: View {
                 .accessibilityIdentifier("retryMessages")
             }
         }
+    }
+}
+
+@MainActor
+private struct IOSThreadDetailView: View {
+    let item: IOSChannelListItem
+    let rootMessage: Message
+    let members: [MemberID: Member]
+    let currentMemberID: MemberID
+    let backend: any IOSConversationBackend
+    let workspace: WorkspaceID
+    let huddleService: any IOSHuddleService
+    let onReadState: ((ChannelReadState) -> Void)?
+
+    var body: some View {
+        IOSTimelineView(
+            item: item,
+            members: members,
+            currentMemberID: currentMemberID,
+            backend: backend,
+            workspace: workspace,
+            huddleService: huddleService,
+            threadRoot: rootMessage.id,
+            initialThreadRootMessage: rootMessage,
+            showsComposer: true,
+            onReadState: onReadState
+        )
+        .navigationTitle("Thread")
+    }
+}
+
+private struct IOSThreadRollupLabel: View {
+    let rollup: ThreadRollup
+    let participantMemberIDs: [MemberID]
+    let members: [MemberID: Member]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if participantMemberIDs.isEmpty {
+                Image(systemName: "bubble.left.and.text.bubble.right")
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(Array(participantMemberIDs.prefix(3)), id: \.self) { memberID in
+                        Text(initial(for: members[memberID]))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.accentColor, in: Circle())
+                            .overlay(Circle().stroke(.background, lineWidth: 2))
+                    }
+                }
+            }
+            Text(replyLabel)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+            if participantMemberIDs.count > 3 {
+                Text("+\(participantMemberIDs.count - 3)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(replyLabel)
+        .accessibilityHint("Open thread")
+    }
+
+    private var replyLabel: String {
+        rollup.replyCount == 1 ? "1 reply" : "\(rollup.replyCount) replies"
+    }
+
+    private func initial(for member: Member?) -> String {
+        let name = member?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.first.map { String($0).uppercased() } ?? "?"
     }
 }
 
@@ -762,7 +958,7 @@ struct IOSMessageRow: View {
                 messageContent
                 if !message.isDeleted, let attachments = message.attachments, !attachments.isEmpty {
                     ForEach(attachments) { attachment in
-                        IOSMessageAttachmentCard(attachment: attachment)
+                        IOSMessageAttachmentCard(attachment: attachment, model: model)
                     }
                 }
                 let reactions = model.reactions(for: message)
@@ -780,7 +976,7 @@ struct IOSMessageRow: View {
             }
         }
         .padding(.vertical, startsAuthorGroup ? 8 : 4)
-        .accessibilityElement(children: message.type == .approvalRequest ? .contain : .combine)
+        .accessibilityElement(children: containsInteractiveContent ? .contain : .combine)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityHint(mentionsCurrentMember ? "Mentions you" : "")
     }
@@ -791,6 +987,8 @@ struct IOSMessageRow: View {
             Label("메시지 삭제됨", systemImage: "trash")
                 .font(.body)
                 .foregroundStyle(.secondary)
+        } else if let artifactPresentation {
+            IOSMessageArtifactCard(presentation: artifactPresentation)
         } else if message.type == .approvalRequest {
             IOSApprovalDecisionCard(
                 message: message,
@@ -833,32 +1031,147 @@ struct IOSMessageRow: View {
     }
 
     private var approvalID: ApprovalID? { IOSTimelineModel.approvalID(for: message) }
+
+    private var artifactPresentation: MessageArtifactPresentation? {
+        MessageArtifactPresentation.resolve(message: message)
+    }
+
+    private var containsInteractiveContent: Bool {
+        message.type == .approvalRequest || artifactPresentation != nil
+    }
 }
 
 private struct IOSMessageAttachmentCard: View {
     let attachment: MessageAttachment
+    let model: IOSTimelineModel
+    @State private var previewURL: URL?
+
+    private var state: IOSAttachmentDownloadState? {
+        model.attachmentDownloadState(for: attachment)
+    }
+
+    private var cachedURL: URL? {
+        model.cachedAttachmentURL(for: attachment)
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: attachment.mime.hasPrefix("image/") ? "photo" : "doc")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.tint)
-                .frame(width: 32, height: 32)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
-                Text(ByteCountFormatter.string(fromByteCount: attachment.sizeBytes, countStyle: .file))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            if attachment.mime.hasPrefix("image/") {
+                imagePreview
             }
-            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                Image(systemName: attachment.mime.hasPrefix("image/") ? "photo" : "doc")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 32, height: 32)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(attachment.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    Text(metadata)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                attachmentAction
+                if let cachedURL {
+                    ShareLink(item: cachedURL, preview: SharePreview(attachment.name)) {
+                        Label("Save or share attachment", systemImage: "square.and.arrow.up")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityLabel("Save or share \(attachment.name)")
+                    .frame(minWidth: 44, minHeight: 44)
+                }
+            }
         }
         .padding(10)
         .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Attachment, \(attachment.name), \(attachment.sizeBytes) bytes")
+        .accessibilityElement(children: .contain)
+        .quickLookPreview($previewURL)
+        .task(id: attachment.id) {
+            guard attachment.mime.hasPrefix("image/"), cachedURL == nil else { return }
+            _ = await model.downloadAttachment(attachment)
+        }
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        if let cachedURL,
+           let image = UIImage(contentsOfFile: cachedURL.path) {
+            Button {
+                previewURL = cachedURL
+            } label: {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 320, maxHeight: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview \(attachment.name)")
+        } else if state == .failed {
+            Button("Retry image preview") {
+                Task { _ = await model.downloadAttachment(attachment) }
+            }
+            .font(.caption)
+        } else {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Loading image preview")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 80)
+        }
+    }
+
+    @ViewBuilder
+    private var attachmentAction: some View {
+        switch state {
+        case .downloading:
+            ProgressView()
+                .accessibilityLabel("Downloading \(attachment.name)")
+                .frame(width: 44, height: 44)
+        case .completed(let url):
+            Button {
+                previewURL = url
+            } label: {
+                Label("Open attachment", systemImage: "arrow.up.forward.app")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Open \(attachment.name)")
+            .frame(minWidth: 44, minHeight: 44)
+        case .failed:
+            Button {
+                Task { _ = await model.downloadAttachment(attachment) }
+            } label: {
+                Label("Retry attachment download", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Retry downloading \(attachment.name)")
+            .frame(minWidth: 44, minHeight: 44)
+        case nil:
+            Button {
+                Task {
+                    if let url = await model.downloadAttachment(attachment) {
+                        previewURL = url
+                    }
+                }
+            } label: {
+                Label("Download attachment", systemImage: "arrow.down.to.line")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Download \(attachment.name)")
+            .frame(minWidth: 44, minHeight: 44)
+        }
+    }
+
+    private var metadata: String {
+        let size = ByteCountFormatter.string(fromByteCount: attachment.sizeBytes, countStyle: .file)
+        if state == .failed { return "Download failed · \(size)" }
+        return "\(attachment.mime) · \(size)"
     }
 }
 
@@ -1278,6 +1591,10 @@ struct IOSApprovalDecisionCard: View {
 struct IOSMessageComposer: View {
     @Bindable var model: IOSTimelineModel
     @FocusState private var isFocused: Bool
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var presentsFileImporter = false
+    @State private var presentsCamera = false
+    @State private var pickerFailureMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1316,7 +1633,52 @@ struct IOSMessageComposer: View {
                 }
             }
 
+            if !model.attachmentDrafts.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(model.attachmentDrafts) { draft in
+                            IOSAttachmentDraftChip(
+                                draft: draft,
+                                onRemove: { model.removeAttachmentDraft(draft.id) },
+                                onRetry: { Task { await model.retryAttachmentDraft(draft.id) } }
+                            )
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+
+            if let failure = model.attachmentFailureMessage ?? pickerFailureMessage {
+                Label(failure, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        presentsFileImporter = true
+                    } label: {
+                        Label("Files", systemImage: "folder")
+                    }
+                    Button {
+                        presentsCamera = true
+                    } label: {
+                        Label("Camera", systemImage: "camera")
+                    }
+                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                } label: {
+                    Label("Add attachment", systemImage: "plus.circle")
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                }
+                .disabled(model.isSending)
+                .accessibilityLabel("Add attachment")
+                .frame(minWidth: 44, minHeight: 44)
+
                 TextField("Write a message", text: $model.composerDraft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
@@ -1340,10 +1702,53 @@ struct IOSMessageComposer: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
+        .fileImporter(
+            isPresented: $presentsFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                for url in urls { stage(url) }
+            case .failure:
+                pickerFailureMessage = "Could not open the selected file."
+            }
+        }
+        .sheet(isPresented: $presentsCamera) {
+            IOSCameraCaptureView { image in
+                presentsCamera = false
+                guard let data = image.jpegData(compressionQuality: 0.9) else {
+                    pickerFailureMessage = "Could not prepare the captured photo."
+                    return
+                }
+                stage(data: data, name: "Camera Photo.jpg")
+            } onCancel: {
+                presentsCamera = false
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                defer { selectedPhoto = nil }
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self) else {
+                        pickerFailureMessage = "Could not load the selected photo."
+                        return
+                    }
+                    let fileType = item.supportedContentTypes.first ?? .jpeg
+                    let ext = fileType.preferredFilenameExtension ?? "jpg"
+                    stage(data: data, name: "Photo.\(ext)")
+                } catch {
+                    pickerFailureMessage = "Could not load the selected photo."
+                }
+            }
+        }
     }
 
     private var canSend: Bool {
-        !model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !model.attachmentDrafts.isEmpty)
             && model.phase == .loaded
             && !model.isSending
             && model.sendFailureMessage == nil
@@ -1352,6 +1757,265 @@ struct IOSMessageComposer: View {
     private func submit() {
         guard canSend else { return }
         Task { await model.sendComposerDraft() }
+    }
+
+    private func stage(_ url: URL) {
+        do {
+            try model.stageAttachment(fileURL: url)
+            pickerFailureMessage = nil
+        } catch let issue as IOSAttachmentTransferIssue where issue == .fileTooLarge {
+            pickerFailureMessage = "Attachments must be 100 MB or smaller."
+        } catch {
+            pickerFailureMessage = "Could not prepare the selected attachment."
+        }
+    }
+
+    private func stage(data: Data, name: String) {
+        do {
+            stage(try IOSAttachmentFileBoundary.materialize(data, named: name))
+        } catch let issue as IOSAttachmentTransferIssue where issue == .fileTooLarge {
+            pickerFailureMessage = "Attachments must be 100 MB or smaller."
+        } catch {
+            pickerFailureMessage = "Could not prepare the selected attachment."
+        }
+    }
+}
+
+private struct IOSAttachmentDraftChip: View {
+    let draft: IOSAttachmentDraft
+    let onRemove: () -> Void
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            stateIcon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(draft.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(ByteCountFormatter.string(fromByteCount: draft.sizeBytes, countStyle: .file))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if case .failed = draft.state {
+                Button(action: onRetry) {
+                    Label("Retry upload", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Retry uploading \(draft.name)")
+            }
+            if draft.state != .uploading {
+                Button(action: onRemove) {
+                    Label("Remove attachment", systemImage: "xmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Remove \(draft.name)")
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var stateIcon: some View {
+        switch draft.state {
+        case .ready:
+            Image(systemName: draft.mime.hasPrefix("image/") ? "photo" : "doc")
+                .foregroundStyle(.tint)
+        case .uploading:
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("Uploading \(draft.name)")
+        case .uploaded:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+        }
+    }
+}
+
+private struct IOSCameraCaptureView: UIViewControllerRepresentable {
+    let onCapture: (UIImage) -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCapture: onCapture, onCancel: onCancel)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let controller = UIImagePickerController()
+        controller.sourceType = .camera
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onCapture: (UIImage) -> Void
+        let onCancel: () -> Void
+
+        init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
+            self.onCapture = onCapture
+            self.onCancel = onCancel
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            guard let image = info[.originalImage] as? UIImage else {
+                onCancel()
+                return
+            }
+            onCapture(image)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onCancel()
+        }
+    }
+}
+
+@MainActor
+private struct IOSThreadInboxView: View {
+    let channelListModel: IOSChannelListModel
+    let backend: any IOSConversationBackend
+    let workspace: WorkspaceID
+    let huddleService: any IOSHuddleService
+    private let currentMemberID: MemberID
+    @State private var model: IOSThreadInboxModel
+
+    init(
+        session: IOSSession,
+        channelListModel: IOSChannelListModel,
+        backend: any IOSConversationBackend,
+        workspace: WorkspaceID,
+        huddleService: any IOSHuddleService
+    ) {
+        self.channelListModel = channelListModel
+        self.backend = backend
+        self.workspace = workspace
+        self.huddleService = huddleService
+        self.currentMemberID = session.member.id
+        _model = State(initialValue: IOSThreadInboxModel(
+            currentMemberID: session.member.id,
+            backend: backend
+        ))
+    }
+
+    var body: some View {
+        List {
+            if let refreshFailureMessage = model.refreshFailureMessage {
+                Section {
+                    Label(refreshFailureMessage, systemImage: "wifi.exclamationmark")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("threadsRefreshFailure")
+            }
+            switch model.phase {
+            case .loading:
+                Section {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Label("Loading thread", systemImage: "bubble.left.and.text.bubble.right")
+                            .redacted(reason: .placeholder)
+                    }
+                }
+            case .failed(let failure):
+                Section {
+                    ContentUnavailableView {
+                        Label(
+                            failure.isOffline ? "Threads unavailable offline" : "Could not load threads",
+                            systemImage: failure.isOffline ? "wifi.slash" : "exclamationmark.triangle"
+                        )
+                    } description: {
+                        Text(failure.message)
+                    } actions: {
+                        Button("Retry loading threads") { refresh() }
+                    }
+                }
+            case .loaded where model.items.isEmpty:
+                Section {
+                    ContentUnavailableView {
+                        Label("No thread activity", systemImage: "bubble.left.and.text.bubble.right")
+                    } description: {
+                        Text("Threads you start or reply to will appear here.")
+                    }
+                    .accessibilityIdentifier("threadsEmpty")
+                }
+            case .loaded:
+                Section {
+                    ForEach(model.items) { thread in
+                        NavigationLink {
+                            IOSThreadDetailView(
+                                item: thread.channel,
+                                rootMessage: thread.rootMessage,
+                                members: channelListModel.membersByID,
+                                currentMemberID: currentMemberID,
+                                backend: backend,
+                                workspace: workspace,
+                                huddleService: huddleService,
+                                onReadState: channelListModel.applyReadState
+                            )
+                        } label: {
+                            threadRow(thread)
+                        }
+                        .accessibilityIdentifier("threadInbox.\(thread.id.description)")
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Threads")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            await model.load(channels: channelListModel.allItems)
+        }
+        .task(id: channelIDs) {
+            await model.load(channels: channelListModel.allItems)
+        }
+    }
+
+    private var channelIDs: [ChannelID] {
+        channelListModel.allItems.map(\.id)
+    }
+
+    private func refresh() {
+        Task { await model.load(channels: channelListModel.allItems) }
+    }
+
+    private func threadRow(_ thread: IOSThreadListItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(thread.channel.isDirectMessage ? thread.channel.title : "#\(thread.channel.title)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text(
+                    Date(timeIntervalSince1970: Double(thread.lastReplyAtMs) / 1_000),
+                    format: .relative(presentation: .named)
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Text(thread.rootMessage.body ?? "Message")
+                .font(.body)
+                .lineLimit(2)
+            if let rollup = thread.rootMessage.thread {
+                IOSThreadRollupLabel(
+                    rollup: rollup,
+                    participantMemberIDs: thread.participantMemberIDs,
+                    members: channelListModel.membersByID
+                )
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

@@ -813,6 +813,7 @@ struct AgentGatewayRoutes: Sendable {
             runID: runID
         )
         let dto = try await request.decode(as: AgentGatewayCompleteRequest.self, context: context)
+        let memoryDelivery = try dto.memoryDelivery?.validated()
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
 
         let result = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
@@ -994,6 +995,26 @@ struct AgentGatewayRoutes: Sendable {
                 )
             }
 
+            if let memoryDelivery {
+                _ = try await conn.query(
+                    """
+                    UPDATE agent_run
+                       SET input = jsonb_set(
+                             input,
+                             '{memory_delivery}',
+                             jsonb_build_object(
+                               'included_count', \(memoryDelivery.includedCount)::integer,
+                               'injected', \(memoryDelivery.injected)
+                             ),
+                             true
+                           ),
+                           updated_at = now()
+                     WHERE id = \(runID)
+                    """,
+                    logger: db.logger
+                )
+            }
+
             _ = try await conn.query(
                 """
                 UPDATE outbox
@@ -1019,6 +1040,7 @@ struct AgentGatewayRoutes: Sendable {
                 "run_id": runID.uuidString,
                 "message_id": messageID.uuidString,
                 "usage": dto.usage?.asObject() as Any,
+                "memory_delivery": memoryDelivery?.asObject() as Any,
                 "source": "hermes_gateway",
             ])
             _ = try await conn.query(
@@ -2164,6 +2186,7 @@ struct AgentGatewayCompleteRequest: Decodable {
     let body: String?
     let error: String?
     let usage: AgentGatewayUsage?
+    let memoryDelivery: AgentMemoryDeliveryReceipt?
 
     private enum CodingKeys: String, CodingKey {
         case jobID = "job_id"
@@ -2172,6 +2195,7 @@ struct AgentGatewayCompleteRequest: Decodable {
         case body
         case error
         case usage
+        case memoryDelivery = "memory_delivery"
     }
 
     func validatedLease() throws -> AgentGatewayLeaseBinding {
@@ -2184,6 +2208,33 @@ struct AgentGatewayCompleteRequest: Decodable {
     var leaseBinding: AgentGatewayLeaseBinding? {
         guard let jobID, jobID > 0, let leaseID else { return nil }
         return AgentGatewayLeaseBinding(jobID: jobID, leaseID: leaseID)
+    }
+}
+
+struct AgentMemoryDeliveryReceipt: Decodable, Equatable, Sendable {
+    let includedCount: Int
+    let injected: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case includedCount = "included_count"
+        case injected
+    }
+
+    func validated() throws -> AgentMemoryDeliveryReceipt {
+        guard includedCount >= 0 && includedCount <= 10_000 else {
+            throw HTTPError(.badRequest, message: "memory_delivery.included_count is invalid")
+        }
+        guard includedCount > 0 || !injected else {
+            throw HTTPError(
+                .badRequest,
+                message: "memory_delivery.injected requires an included memory"
+            )
+        }
+        return self
+    }
+
+    func asObject() -> [String: Any] {
+        ["included_count": includedCount, "injected": injected]
     }
 }
 

@@ -10,19 +10,21 @@ public actor IOSHuddleRESTService: IOSHuddleService {
         var token: String
         var expiresAtMs: Int64
     }
-    private struct ProblemResponse: Decodable {
-        var title: String?
-        var detail: String?
-        var message: String?
-    }
     private struct EmptyBody: Encodable {}
 
     private let authenticated: IOSSession
-    private let session: URLSession
+    private let requestExecutor: IOSAuthenticatedRequestExecutor
 
-    public init(authenticated: IOSSession, session: URLSession = .shared) {
+    public init(
+        authenticated: IOSSession,
+        session: URLSession = .shared,
+        requestExecutor: IOSAuthenticatedRequestExecutor? = nil
+    ) {
         self.authenticated = authenticated
-        self.session = session
+        self.requestExecutor = requestExecutor ?? IOSAuthenticatedRequestExecutor(
+            authenticated: authenticated,
+            urlSession: session
+        )
     }
 
     public func active(workspace: WorkspaceID, channel: ChannelID) async throws -> IOSHuddle? {
@@ -82,20 +84,13 @@ public actor IOSHuddleRESTService: IOSHuddleService {
 
     private func execute<T: Decodable>(_ request: URLRequest, response: T.Type) async throws -> T {
         do {
-            let (data, urlResponse) = try await session.data(for: request)
-            guard let http = urlResponse as? HTTPURLResponse else {
-                throw IOSHuddleClientError.invalidResponse
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let problem = try? JSONDecoder().decode(ProblemResponse.self, from: data)
-                throw IOSHuddleClientError.http(
-                    http.statusCode,
-                    problem?.detail ?? problem?.message ?? problem?.title
-                        ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
-                )
-            }
+            let data = try await requestExecutor.data(for: request)
             return try JSONDecoder().decode(T.self, from: data)
         } catch let error as IOSHuddleClientError {
+            throw error
+        } catch SessionError.server(let status, let message) {
+            throw IOSHuddleClientError.http(status, message)
+        } catch let error as SessionError {
             throw error
         } catch is CancellationError {
             throw CancellationError()

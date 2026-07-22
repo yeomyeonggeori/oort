@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-agent-momo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-22",
+  "durable_objects": {
+    "bindings": [
+      { "name": "MomoAgent", "class_name": "MomoAgent" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MomoAgent"] }
+  ]
+}

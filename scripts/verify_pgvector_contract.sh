@@ -7,7 +7,7 @@ if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
 fi
 cd "$REPO_ROOT"
 
-IMAGE='pgvector/pgvector:0.8.5-pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0'
+IMAGE='pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e'
 for compose in infra/docker-compose.yml infra/docker-compose.e2e.yml infra/prod/docker-compose.prod.yml; do
   count="$(grep -Fc "image: $IMAGE" "$compose")"
   if [ "$count" -ne 1 ]; then

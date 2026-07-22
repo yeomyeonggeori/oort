@@ -5,6 +5,16 @@
 - migration 032에 `agent_card_registration` 원장(raw public card JSON·display-only security 요약·pending/confirmed 상태)과 workspace_id 기반 FORCE RLS를 추가했다. 관리자 `from-card`는 5초/256KB/최대 2홉 제한, 홉별 DNS 전체 IP 검사와 검증 IP 연결 고정, 기본 HTTPS 강제로 fail-closed fetch한 뒤에만 pending 원장을 쓴다.
 - confirm은 기존 agent member/workspace membership 및 gateway bearer 발급 기계장치를 한 tenant transaction에서 재사용하고 `agent.created`·`agent.credential.issued`·`agent.card.confirmed` audit을 남긴다. roster에는 기존 필드를 유지한 채 agent `origin=card|local`을 가산했고 OpenAPI를 동기화했다.
 - SSRF/redirect/card parser·요청 폐쇄성·migration 경계 집중 유닛 8건, 서버 전체 156 테스트, Swift 전 패키지 9개 빌드는 PASS했다. `verify_agent_card_onboarding.sh`는 28124~28128 격리 포트의 Python card mock으로 pending→confirm·credential digest·audit·origin·SSRF 400 무기록·RLS를 단정하며, Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
+## MOMO-545 memory_refs 모델 실주입 (#622, 2026-07-22)
+
+- worker와 Hermes gateway가 Context Packet의 `memory_refs` 세 payload 별칭을 fail-closed로 정규화해 시스템 프롬프트 뒤 `워크스페이스 메모리` 모델 컨텍스트로 주입하고, 기존 history 역할·채널 경계·`AGENT_CONTEXT_MAX_CHARS` 절사를 유지하되 메모리를 trigger보다 먼저 제거한다.
+- 실제 모델 전달 시 `agent_run.input.memory_delivery={included_count,injected}` receipt를 기록하며, `/memories/search?agent=`가 호출자 아닌 agent scope를 차용하면 `memory.search.agent_scope_borrowed` audit 1행을 같은 tenant transaction에 남긴다. 스키마·기존 payload 필드는 변경하지 않았다.
+- AgentWorker 47·server 150·Hermes adapter 60 tests와 focused 회귀가 실패 0이며, 격리 PG18+Centrifugo에서 `verify_agent_context.sh`가 mock Hermes 요청 덤프의 memory excerpt·별도 system 블록·budget/history 회귀·receipt `1|true`·차용 감사행·source DB digest 보존을 PASS했다.
+
+## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
+
+- `examples/eve-momo-channel`은 eve 0.27.0 `defineChannel`/`routeAuth`/`send`/workspace·channel continuation token으로, `examples/cloudflare-agent-momo`는 permissive·audit 경계를 지키는 Agents SDK 0.3.10 인증 fetch로 기존 per-agent bearer gateway pending→event→complete 계약만 소비한다. 코어 서버·OpenAPI·스키마·루트 npm은 변경하지 않았다.
+- 두 예제 TypeScript build와 Node 3 tests, `verify_momo_channel_adapter.sh` bash 문법이 PASS했다. 28120~28123 e2e stack의 mock eve pending→momo 메시지→완료 callback 실왕복은 오케스트레이터 실행 전까지, eve 실런타임은 beta 외부 런타임 설치 전까지 `runtime-unverified`다.
 
 ## MOMO-528 Context Packet v0 불변 승격 (#598, 2026-07-22)
 
@@ -76,6 +86,48 @@
 - ADR-0127에 따라 `MOMO_ARCHIVE_BACKEND=drive|s3` 부팅 선택과 SDK 없는 AWS SigV4 `S3ArchiveClient`를 추가했다. S3는 15분 presigned PUT/GET, signed HEAD 메타 확정, signed DELETE를 지원하며 불완전한 자격은 기존 unavailable 구현으로 fail-closed한다.
 - e2e/prod compose에 opt-in `s3` MinIO+bucket init 프로파일과 public HTTPS Caddy data plane을 추가했다. REST/OpenAPI/클라이언트와 `schema_v0.sql`은 변경하지 않았다.
 - AWS 공식 SigV4 vector·presign 만료·path-style 집중 테스트와 server 130 tests, verifier bash/ShellCheck·compose YAML 정적 검증이 PASS했다. 지시대로 Docker를 실행하지 않아 Drive stub 및 MinIO 28040~28044 실제 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+## UXUI MOMO-518 macOS·iOS 산출물 카드 표준 (#592, 2026-07-21)
+
+- ADR-0126 D2의 공용 `artifact_kind=diff|commit|pr` 해석을 MomoCore의 닫힌 표현 모델로 추가했다. unified diff는 200KB·2,000줄·100파일 상한 안에서만 파일별 경로와 추가/삭제 수를 계산하며, 일반 코드·malformed·oversized 입력은 기존 메시지 렌더로 fail-safe한다. commit/PR 링크는 HTTPS만 허용하고 credential 계열 query key·userinfo를 거부한다.
+- macOS·iOS 타임라인에 파일별 DisclosureGroup, 총/파일별 +/− 요약, 모노스페이스 시맨틱 diff 라인과 제목·브랜치·상태·repository·안전한 링크 카드를 추가했다. agent 개발자 모드와 무관하게 검토 대상 산출물은 같은 타입드 카드로 보이고, URL이 거부돼도 메타데이터 카드는 유지된다.
+- Core 42 tests, macOS 457 tests(관리형 loopback WebSocket 1 skip), MomoiOSKit 69 tests가 실패 0으로 PASS했고, 전체 `make build`·`make test`도 구성된 Core·서버·relay·workers·service·macOS 패키지에서 PASS했다. iOS generic Simulator `xcodebuild`는 package resolution 뒤 Xcode build-service의 package-loading 단계에서 60초 이상 산출물 갱신 없이 정체돼 중단했다. 실제 iOS 타깃 컴파일, real-window/Simulator 라이트·다크, Dynamic Type/VoiceOver, 키보드 DisclosureGroup·링크 동작 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-514 iOS 토큰 자동 리프레시·비파괴 오류 UX (#554, 2026-07-21)
+
+- iOS의 인증 REST·realtime token·다운로드·허들 요청을 하나의 actor executor로 통합했다. 401은 single-use refresh token을 단 한 번 회전한 뒤 원 요청을 한 번만 재시도하며, 이미 회전된 뒤 늦게 도착한 401은 새 access token으로만 재시도해 refresh replay를 만들지 않는다. 회전 실패 또는 재시도 401만 `sessionExpired`로 분류한다.
+- access/refresh token과 NSE fetch session을 App/NSE 공유 `AfterFirstUnlockThisDeviceOnly` Keychain으로 옮겼다. 기존 App Group·legacy UserDefaults의 평문 세션은 1회 migration 후 성공 여부와 무관하게 삭제하고, Keychain 일부 쓰기 실패는 두 값을 모두 제거해 fail-closed한다. 토큰은 URL query·로그·UserDefaults에 새로 기록하지 않는다.
+- 이미 표시한 타임라인의 history 갱신이 실패해도 기존 메시지와 갱신 중 수신한 realtime 이벤트를 유지하고 인라인 재시도 배너만 표시한다. session refresh가 실제로 실패한 경우에만 Profile 재로그인 안내를 노출한다. MomoiOSKit 69 tests(보안 저장·migration·staggered 401 single-flight·비파괴 타임라인 신규 4)가 PASS했고, 앱+Notification Service generic iOS Simulator 무서명 `xcodebuild build`가 PASS했다. 실제 15분 만료·토큰 회전, 서명된 실기기의 App↔NSE 공유 Keychain, 라이트/다크·Dynamic Type 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-502 iOS 검색·활동 실데이터화 (#589, 2026-07-21)
+
+- Search 탭을 채널명 로컬 필터와 서버 FTS `GET /search/messages`의 300ms debounce·opaque cursor 결과로 통합했다. 서버 snippet의 문자 offset을 Unicode-safe하게 강조하고, 결과의 channel/message/seq를 사용해 `before=seq+1` history를 불러온 뒤 정확한 메시지 행으로 이동·강조한다. 검색 갱신 실패는 기존 결과를 지우지 않고 인라인 오류와 재시도를 제공한다.
+- Activity 탭은 별도 서버 피드가 없는 v0 경계를 명시하고, 각 대화의 최근 200개 history와 reaction snapshot을 기기에서 집계해 나를 멘션한 메시지와 내 메시지에 다른 멤버가 남긴 반응을 최신순으로 표시한다. `mention_member_ids` UUID는 소문자로 정규화하고 자기 반응·삭제·thread reply를 제외하며, 항목을 누르면 동일한 정확한 메시지 점프를 사용한다.
+- MomoiOSKit 67 tests(신규 검색 debounce/Unicode offset·정확한 before cursor·활동 UUID/자기반응 경계 3)가 PASS했고 generic iOS Simulator 무서명 `xcodebuild build`가 PASS했다. 인증 서버 FTS cursor·membership 격리, 실제 멘션/반응의 Mac↔iPhone 반영, 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-501 iOS 첨부 송수신 (#587, 2026-07-21)
+
+- iOS 컴포저 `+` 메뉴에 사진 보관함·파일·카메라를 연결하고, 100MB 경계 검증 뒤 서버 upload session 발급 → capability URL 직접 PUT → complete → 메시지 `attachmentIds` 전송을 구현했다. 업로드 상태·개별 실패·재시도·삭제를 유지하며 첨부만 있는 메시지도 보낼 수 있고, 메시지 REST 실패는 같은 idempotency key와 완료된 첨부 ID로 재시도한다.
+- 수신 `Message.attachments`는 이미지를 인증 content proxy로 내려받아 인라인 미리보기하고, 일반 파일은 진행·실패·재시도 카드에서 Quick Look을 연다. 완료 파일은 iOS 공유 시트로 저장/공유할 수 있다. upload capability는 ephemeral URLSession의 지역 변수에서만 소비하고 Authorization header·URL query·로그·UserDefaults·메시지 모델에 넣지 않으며, 완료 응답 UUID 비교는 소문자로 정규화한다.
+- MomoiOSKit 64 tests(신규 첨부 전송·실패 재시도 2)가 PASS했고, generic iOS Simulator 무서명 `xcodebuild build`가 PASS했다. 실제 iPhone→Mac 사진, Mac→iPhone 일반 파일, 카메라 권한·Quick Look/저장, 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-500 iOS 스레드 1급 (#585, 2026-07-21)
+
+- 채널 타임라인은 서버 `Message.thread`의 답글 수를 실제 롤업으로 표시하고, replies REST 첫 페이지에서 확인한 실제 참여자만 아바타로 노출한다. 롤업을 열면 root 원문과 cursor 답글 전 페이지를 한 화면에 복원하며 `thread.updated`를 즉시 반영하고, 컴포저는 일반 메시지 REST에 동일 `rootId`·`reply_to_id`를 보존한다. 상위 타임라인에는 답글 realtime 행이 별도 메시지처럼 섞이지 않는다.
+- 홈 Threads는 채널별 최근 200개 root와 replies cursor를 로컬 집계해 내가 root를 작성했거나 답글에 참여한 스레드만 마지막 답글순으로 제공한다. 새 서버 follow 원장을 가장하지 않으며, 갱신 실패 시 기존 목록을 유지하고 인라인 오류를 표시한다. 알림으로 직접 연 스레드에서도 컴포저가 열려 정확한 root로 답장한다.
+- Design Read: iPhone 팀 메신저의 고밀도 native List, Mattermost식 replies 문법, 장식 모션 없음. 시맨틱 색상·Dynamic Type·4/8/12/16/24/32 스페이싱 pre-flight와 MomoiOSKit 62 tests가 PASS했고, `xcodebuild` generic iOS Simulator 무서명 앱 빌드가 PASS했다. 이 게이트에서 직전 MOMO-504의 누락된 `MomoiOSPushKit` import도 보정했다. 시뮬레이터 라이트/다크·Dynamic Type 스냅샷과 인증된 Mac↔iPhone 스레드 왕복은 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-504 iOS 알림 UX v2 (#583, 2026-07-21)
+
+- `momo.push.notification.v2`의 APNs `thread-id`, 4개 category, 승인 전용 `approval_id`, 서버 badge를 닫힌 파서로 소비한다. 잠금화면 빠른 답장은 기존 메시지 REST에 같은 root/reply 대상을 유지하고, 승인·거부는 기존 approval decision REST를 재사용한다. UUID는 비교·딥링크·요청 경계에서 소문자로 정규화하며 NSE의 id-only 본문 fetch 경계는 넓히지 않았다.
+- 알림 탭은 정확한 채널·메시지·스레드로 이동하고 Work category는 Work 탭의 동일 root 세션 상세로 이동한다. Profile에는 잠금화면 액션 등록 설정과 서버 채널 음소거를 분리해 제공하며, 후자는 멘션 포함 전달만 억제하고 unread는 바꾸지 않음을 명시했다. 카테고리별 서버 전달 억제 API는 없어 거짓 토글을 만들지 않고 ENGINE_HANDOFF X-10으로 역요청했다.
+- MomoiOSKit 60 tests(신규 v2 파서·승인 경계·중복 쿼리 거부·빠른 답장·승인 결정·비자격 설정 5건)가 PASS했다. `verify_ios_build.sh`와 package-resolution 고정 재시도는 모두 Xcode build service의 package-loading 단계에서 산출물 갱신 없이 정체돼 중단했으며, 실 APNs 빠른답장·승인·딥링크·badge, iOS 앱 타깃 재빌드 및 시뮬레이터 육안은 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-520 macOS 호스트 상실 전환·티어 정책 (#579, 2026-07-21)
+
+- Work Console이 서버의 `orphaned`·`endReason`·`resumedFromSessionId` projection을 소비하고, `resume_offer` 메시지를 일반 승인과 구분된 전환 카드로 렌더한다. 카드에서 Work 서랍의 원 세션으로 이동해 online·미revoke이면서 본인 또는 workspace 소유인 다른 host를 선택하고 resume REST로 새 세션을 만든다. 새 세션은 같은 root thread와 이전 세션 계보를 카드·상세에 표시한다.
+- Work 설정에 본인 override와 owner/admin용 workspace 기본 `t1_only`/`ask`/`auto` 정책을 추가했다. auto target은 `cloud` 또는 서버가 허용하는 등록 host만 전송하고 UUID는 소문자로 정규화한다. 재개 UI에는 v0가 마지막 push commit부터 새 세션을 만들며 PTY·프로세스·미커밋 변경을 옮기지 않는다는 손실 경계를 명시한다.
+- 선재 terminal color-vision/high-contrast 기준 이미지 드리프트 2건을 제외한 macOS 전체 455 tests와 Work Console 집중 29 tests가 PASS했다(관리형 sandbox loopback WebSocket 1 skip). policy GET/PUT, resume POST, UUID 정규화, orphan/reason/lineage decode 및 `resume_offer` light/dark 카드와 설정 light/dark snapshot을 자동 검증한다. ask 카드 실왕복, t1_only 카드 미생성, auto 재디스패치, 실제 host 전환·동일 스레드 계보, real-window 라이트/다크·접근성 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-517 macOS 관전 터미널 (#575, 2026-07-21)
 
 - 비소유 채널 멤버는 서버 projection이 `remoteAttachAvailable=true`, `observation=open`인 running 세션에서만 observer capability를 발급받아 기존 SwiftTerm을 읽기 전용으로 연다. observer 세션은 입력·resize·kill을 네트워크로 보내지 않고, 화면 상단에 관전 모드와 제어 불가를 명시한다. owner 세션은 기존 controller 모드를 유지한다.

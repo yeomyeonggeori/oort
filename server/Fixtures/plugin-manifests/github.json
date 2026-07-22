@@ -5,8 +5,15 @@
     "name": "GitHub",
     "version": "1.0.0",
     "description": "Official GitHub hosted MCP integration",
-    "publisher": { "id": "github", "name": "GitHub", "verified": true },
-    "license": { "spdx": "MIT", "kind": "open_source" },
+    "publisher": {
+      "id": "github",
+      "name": "GitHub",
+      "verified": true
+    },
+    "license": {
+      "spdx": "MIT",
+      "kind": "open_source"
+    },
     "provenance": {
       "sourceURL": "https://github.com/github/github-mcp-server",
       "releaseRef": "hosted",
@@ -17,27 +24,74 @@
     "protocolVersion": "2025-06-18",
     "transport": "streamable_http",
     "url": "https://api.githubcopilot.com/mcp/",
-    "server": { "name": "github/github-mcp-server", "version": "hosted" },
-    "tools": [{
-      "name": "github.list_repositories",
-      "description": "List repositories available to the delegated user",
-      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-      "schemaDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-      "scopes": ["github:read"],
-      "risk": "read",
-      "approvalPolicy": "none"
-    }]
+    "server": {
+      "name": "github/github-mcp-server",
+      "version": "hosted"
+    },
+    "tools": [
+      {
+        "name": "github.list_repositories",
+        "description": "List repositories available to the delegated user",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      },
+      {
+        "name": "github.search_issues",
+        "description": "Search issues in repositories available to the delegated user",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemaDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "scopes": [
+          "github:read"
+        ],
+        "risk": "read",
+        "approvalPolicy": "none"
+      }
+    ]
   },
-  "skill": { "reference": null, "optional": true },
+  "skill": {
+    "reference": null,
+    "optional": true
+  },
   "momo": {
-    "approvalTier": { "github.list_repositories": "read_only" },
+    "approvalTier": {
+      "github.list_repositories": "read_only",
+      "github.search_issues": "read_only"
+    },
     "risk": "low",
-    "egressDomains": ["api.githubcopilot.com"],
-    "recommendedFor": ["software-development", "work-tracking"],
+    "egressDomains": [
+      "api.githubcopilot.com"
+    ],
+    "recommendedFor": [
+      "software-development",
+      "work-tracking"
+    ],
     "serverPolicy": {
       "installAllowed": true,
       "enabledByDefault": false,
-      "allowedRoles": ["owner", "admin"]
+      "allowedRoles": [
+        "owner",
+        "admin"
+      ]
     }
   }
 }

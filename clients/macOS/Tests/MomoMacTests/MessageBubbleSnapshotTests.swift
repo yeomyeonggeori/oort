@@ -147,6 +147,63 @@ final class MessageBubbleSnapshotTests: XCTestCase {
         return image
     }
 
+    private func resumeOfferFixture(_ scheme: ColorScheme) -> some View {
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let author = Member(
+            id: MemberID(uuidString: "00000000-0000-7000-8000-000000000102")!,
+            workspaceId: workspace,
+            kind: .agent,
+            displayName: "kim",
+            handle: "kim"
+        )
+        let message = Message(
+            id: MessageID(uuidString: "00000000-0000-7000-8000-000000000702")!,
+            channelId: ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!,
+            seq: 520,
+            hlcTs: 1_784_452_800_000,
+            authorMemberId: author.id,
+            type: .approvalRequest,
+            body: "호스트 연결이 끊겼습니다. 다른 호스트에서 마지막 push 커밋부터 재개할까요?",
+            props: .object([
+                "kind": .string("resume_offer"),
+                "session_id": .string("00000000-0000-7000-8000-000000000520"),
+                "tool": .string("codex"),
+                "status": .string("pending"),
+                "label": .string("MOMO-520"),
+            ]),
+            createdAtMs: 1_784_452_800_000
+        )
+        return MessageBubble(
+            message: message,
+            author: author,
+            onOpenWorkSession: {},
+            groupingStyle: .standalone,
+            timelineCopy: MomoWorkspaceCopy(language: .korean)
+        )
+        .frame(width: 520, alignment: .leading)
+        .padding(16)
+        .background(Color(nsColor: .textBackgroundColor))
+        .environment(\.colorScheme, scheme)
+    }
+
+    private func renderResumeOfferFixture(_ scheme: ColorScheme) throws -> NSImage {
+        let renderer = ImageRenderer(content: resumeOfferFixture(scheme))
+        renderer.proposedSize = ProposedViewSize(width: 520, height: 260)
+        renderer.scale = 2
+
+        let appearanceName: NSAppearance.Name = scheme == .dark ? .darkAqua : .aqua
+        var image: NSImage?
+        if let appearance = NSAppearance(named: appearanceName) {
+            appearance.performAsCurrentDrawingAppearance { image = renderer.nsImage }
+        } else {
+            image = renderer.nsImage
+        }
+        guard let image else {
+            throw XCTSkip("ImageRenderer produced no resume offer image on this host")
+        }
+        return image
+    }
+
     private func attachmentFixture(
         _ scheme: ColorScheme,
         contrast: ColorSchemeContrast = .standard,
@@ -381,6 +438,23 @@ final class MessageBubbleSnapshotTests: XCTestCase {
             ),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: "increased-contrast-large-text",
+            record: recordMode
+        )
+    }
+
+    func testResumeOfferCardLightAndDarkSnapshots() throws {
+        let recordMode: SnapshotTestingConfiguration.Record? =
+            ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1" ? .all : nil
+        assertSnapshot(
+            of: try renderResumeOfferFixture(.light),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light",
+            record: recordMode
+        )
+        assertSnapshot(
+            of: try renderResumeOfferFixture(.dark),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark",
             record: recordMode
         )
     }

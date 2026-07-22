@@ -30,11 +30,11 @@ public final class MomoiOSAppModel {
 
     public init(
         store: SessionStore = .shared,
-        backend: any SessionBackend = MomoServerSessionClient(),
+        backend: (any SessionBackend)? = nil,
         pushLifecycle: any IOSPushLifecycle = NoopIOSPushLifecycle.shared
     ) {
         self.store = store
-        self.backend = backend
+        self.backend = backend ?? MomoServerSessionClient(store: store)
         self.pushLifecycle = pushLifecycle
         self.form = store.loadForm()
         self.phase = .signedOut
@@ -54,14 +54,16 @@ public final class MomoiOSAppModel {
         do {
             _ = try form.validated()
             let session = try await backend.authenticate(form: form)
+            guard store.save(session: session) else { throw SessionError.secureStorage }
             let bootstrap = try await backend.bootstrap(session: session)
+            let currentSession = store.loadSession() ?? session
             store.save(form: form)
-            store.save(session: session)
-            phase = .signedIn(session, bootstrap)
-            await pushLifecycle.activate(session: session)
+            phase = .signedIn(currentSession, bootstrap)
+            await pushLifecycle.activate(session: currentSession)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
+            store.clearSession()
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             failureKind = Self.failureKind(for: error)
             phase = .signedOut
@@ -85,8 +87,9 @@ public final class MomoiOSAppModel {
         do {
             let bootstrap = try await backend.bootstrap(session: session)
             if saveForm { store.save(form: form) }
-            phase = .signedIn(session, bootstrap)
-            await pushLifecycle.activate(session: session)
+            let currentSession = store.loadSession() ?? session
+            phase = .signedIn(currentSession, bootstrap)
+            await pushLifecycle.activate(session: currentSession)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
@@ -112,6 +115,7 @@ public struct MomoiOSRootView: View {
     @State private var model: MomoiOSAppModel
     @State private var selectedTab: IOSAppTab = .home
     @State private var homePath: [IOSPushDeepLink] = []
+    @State private var workPath: [IOSPushDeepLink] = []
     @State private var deepLinkRouter: IOSPushDeepLinkRouter
 
     public init(
@@ -140,6 +144,7 @@ public struct MomoiOSRootView: View {
                     bootstrap: bootstrap,
                     selectedTab: $selectedTab,
                     homePath: $homePath,
+                    workPath: $workPath,
                     signOut: model.signOut
                 )
             }
@@ -150,13 +155,21 @@ public struct MomoiOSRootView: View {
             guard let link = deepLinkRouter.consumePending(
                 for: deepLinkRouteTrigger.signedInWorkspaceID
             ) else { return }
-            selectedTab = .home
-            homePath = [link]
+            if link.opensWorkSession {
+                selectedTab = .work
+                homePath = []
+                workPath = [link]
+            } else {
+                selectedTab = .home
+                workPath = []
+                homePath = [link]
+            }
         }
         .onChange(of: deepLinkRouteTrigger.signedInWorkspaceID) { previousWorkspace, workspace in
             guard previousWorkspace != workspace else { return }
             selectedTab = .home
             homePath = []
+            workPath = []
         }
     }
 

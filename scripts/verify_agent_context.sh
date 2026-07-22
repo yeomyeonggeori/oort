@@ -12,6 +12,7 @@
 #
 # Scenario (single AgentWorker run, mock hermes request captured to a dump):
 #   1) seed prior channel messages ("파인애플 재고는 7개다" + an agent turn)
+#      and a source-linked workspace memory projection;
 #      plus two long padding messages, and an off-topic message in ANOTHER
 #      channel (cross-channel isolation probe);
 #   2) @mention the agent via REST POST /messages (the trigger);
@@ -21,7 +22,9 @@
 #      (b) the agent's own prior turn maps to role=assistant (others=user),
 #      (c) the other-channel message is NOT present (session boundary),
 #      (d) a small AGENT_CONTEXT_MAX_CHARS drops the oldest padding while the
-#          trigger + newest history survive (worker logs a trim count).
+#          trigger + newest history survive (worker logs a trim count),
+#      (e) the final mock Hermes request contains the memory excerpt and the
+#          run input distinguishes packet inclusion from model injection.
 #
 # This verifier owns an isolated migrated database and cleans up its exact
 # marker-bound database/roles plus server/worker/mock processes on exit.
@@ -120,7 +123,7 @@ WORKER_POLL_INTERVAL_MS=${WORKER_POLL_INTERVAL_MS:-100}
 
 # History window knobs under test.
 SERVER_MAX_MESSAGES=5     # AGENT_CONTEXT_MAX_MESSAGES: isolate our 5 recent rows
-WORKER_MAX_CHARS=200      # AGENT_CONTEXT_MAX_CHARS: force oldest-padding drop
+WORKER_MAX_CHARS=420      # AGENT_CONTEXT_MAX_CHARS: force oldest-padding drop
 
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_ID=00000000-0000-7000-8000-000000000101
@@ -129,6 +132,9 @@ TARGET_CHANNEL=00000000-0000-7000-8000-000000000202
 OTHER_CHANNEL=00000000-0000-7000-8000-000000000201
 BUDGET_ID=00000000-0000-7000-8000-000000000302
 CLIENT_MSG_ID=00000000-0000-7000-8000-000000302907
+MEMORY_ID=00000000-0000-7545-8000-000000000545
+MEMORY_SOURCE_MESSAGE_ID=00000000-0000-7545-8000-000000000546
+MEMORY_EXCERPT='CTX545 워크스페이스 메모리: 파인애플 출시는 목요일이다'
 
 TMP_ROOT=${TMPDIR:-/tmp}
 MOCK_LOG=${TMP_ROOT}/momo-ctx-mock-$$.log
@@ -348,7 +354,7 @@ echo "[agent-context] starting MomoServer (AGENT_CONTEXT_MAX_MESSAGES=$SERVER_MA
   DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
   PORT="$PORT" \
   AGENT_CONTEXT_MAX_MESSAGES="$SERVER_MAX_MESSAGES" \
-  swift run --package-path server MomoServer
+  swift run --disable-sandbox --package-path server MomoServer
 ) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -512,11 +518,23 @@ SELECT '$WORKSPACE_ID', '$TARGET_CHANNEL', b.last_seq,
 
 -- 2) human history keeper (must be delivered as recent context)
 WITH b AS (UPDATE channel_seq SET last_seq = last_seq + 1 WHERE channel_id = '$TARGET_CHANNEL' RETURNING last_seq)
-INSERT INTO message (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body)
-SELECT '$WORKSPACE_ID', '$TARGET_CHANNEL', b.last_seq,
+INSERT INTO message (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body)
+SELECT '$MEMORY_SOURCE_MESSAGE_ID', '$WORKSPACE_ID', '$TARGET_CHANNEL', b.last_seq,
        (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
        '$HUMAN_ID', 'text', 'CTX302 파인애플 재고는 7개다'
   FROM b;
+
+INSERT INTO memory_item
+  (id, workspace_id, scope, kind, body, confidence, created_by_kind,
+   created_by_member_id)
+VALUES
+  ('$MEMORY_ID', '$WORKSPACE_ID', 'workspace', 'profile', '$MEMORY_EXCERPT',
+   1.0, 'human', '$HUMAN_ID');
+
+INSERT INTO memory_source_ref
+  (workspace_id, memory_id, message_id, channel_id)
+VALUES
+  ('$WORKSPACE_ID', '$MEMORY_ID', '$MEMORY_SOURCE_MESSAGE_ID', '$TARGET_CHANNEL');
 
 -- 3) the agent's own prior turn (must map to role=assistant)
 WITH b AS (UPDATE channel_seq SET last_seq = last_seq + 1 WHERE channel_id = '$TARGET_CHANNEL' RETURNING last_seq)
@@ -554,8 +572,8 @@ SQL
 echo "[agent-context] starting AgentWorker (AGENT_CONTEXT_MAX_CHARS=$WORKER_MAX_CHARS)"
 (
   cd "$REPO_ROOT"
-  swift build --package-path workers/AgentWorker --product AgentWorker >/dev/null
-  WORKER_BIN="$(swift build --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
+  swift build --disable-sandbox --package-path workers/AgentWorker --product AgentWorker >/dev/null
+  WORKER_BIN="$(swift build --disable-sandbox --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
   exec env \
     RELAY_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
     CENT_API_URL="$CENT_API_URL" \
@@ -577,6 +595,19 @@ ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
 if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   echo "[agent-context] failed to obtain access token" >&2
   printf '%s\n' "$LOGIN_JSON" >&2
+  exit 1
+fi
+
+echo "[agent-context] exercising explicit borrowed agent memory search audit"
+curl -fsS \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "$BASE_URL/v1/workspaces/$WORKSPACE_ID/memories/search?q=pineapple&agent=$AGENT_ID&limit=5" \
+  >/dev/null
+BORROWED_AUDIT_COUNT=$(psql_run -q -t -A -c \
+  "SELECT count(*) FROM audit_log WHERE workspace_id='$WORKSPACE_ID' AND actor_member_id='$HUMAN_ID' AND subject_member_id='$AGENT_ID' AND action='memory.search.agent_scope_borrowed';" \
+  | tr -d '[:space:]')
+if [ "$BORROWED_AUDIT_COUNT" != "1" ]; then
+  echo "[agent-context] expected one borrowed-agent memory search audit row, got $BORROWED_AUDIT_COUNT" >&2
   exit 1
 fi
 
@@ -678,16 +709,36 @@ if content_of("PADDINGONE") is not None or content_of("PADDINGTWO") is not None:
 if content_of("파인애플 재고 몇 개야") is None:
     print("FAIL: trigger message was dropped (must always be kept)", file=sys.stderr)
     sys.exit(1)
+
+# (e) final consumption: packet memory must reach the actual model request.
+if content_of("CTX545 워크스페이스 메모리: 파인애플 출시는 목요일이다") is None:
+    print("FAIL: memory excerpt was decoded but not injected into the Hermes request", file=sys.stderr)
+    sys.exit(1)
+memory_message = next(
+    (m for m in messages if "워크스페이스 메모리" in (m.get("content") or "")),
+    None,
+)
+if memory_message is None or memory_message["role"] != "system":
+    print("FAIL: workspace memory must be delivered as a separate system context block", file=sys.stderr)
+    sys.exit(1)
 # window was seeded with 5 rows (2 padding + 2 keepers + trigger); budget trims it
 if len(non_system) >= 5:
     print(f"FAIL: expected trimmed window (<5 non-system), got {len(non_system)}", file=sys.stderr)
     sys.exit(1)
 
 print(
-    "[agent-context] OK: system+history assembled, self=assistant/others=user, "
+    "[agent-context] OK: system+memory+history assembled, self=assistant/others=user, "
     f"cross-channel excluded, budget trimmed to {len(non_system)} non-system turns"
 )
 PY
+
+MEMORY_DELIVERY=$(psql_run -q -t -A -c \
+  "SELECT concat(input #>> '{memory_delivery,included_count}', '|', input #>> '{memory_delivery,injected}') FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id=(SELECT id FROM message WHERE workspace_id='$WORKSPACE_ID' AND client_msg_id='$CLIENT_MSG_ID' LIMIT 1);" \
+  | tr -d '[:space:]')
+if [ "$MEMORY_DELIVERY" != "1|true" ]; then
+  echo "[agent-context] expected memory_delivery=1|true, got $MEMORY_DELIVERY" >&2
+  exit 1
+fi
 
 # The worker must have logged the drop (count only — never message bodies).
 if ! grep -q "context window trimmed to budget" "$WORKER_LOG"; then
@@ -737,5 +788,5 @@ SQL
 
 rm -f "$DUMP_FILE"
 
-echo "[agent-context] context assembly verified: recent-N history + role mapping + session boundary + token budget"
+echo "[agent-context] context assembly verified: memory delivery + recent-N history + role mapping + session boundary + token budget"
 echo "[agent-context] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG dump=<removed-after-assertion>"

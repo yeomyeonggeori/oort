@@ -22,6 +22,8 @@ enum ContextAssembler {
     struct Result: Equatable {
         let messages: [HermesTransport.ChatMessage]
         let droppedCount: Int
+        let memoryIncludedCount: Int
+        let memoryInjected: Bool
     }
 
     private struct Turn {
@@ -39,6 +41,7 @@ enum ContextAssembler {
         triggerMessageID: UUID?,
         fallbackPrompt: String,
         systemPrompt: String?,
+        memoryRefs: [JSONValue]? = nil,
         maxChars: Int
     ) -> Result {
         var head: [HermesTransport.ChatMessage] = []
@@ -47,23 +50,24 @@ enum ContextAssembler {
             head.append(HermesTransport.ChatMessage(role: "system", content: systemPrompt))
         }
 
-        guard !recentMessages.isEmpty else {
-            return Result(
-                messages: head + [HermesTransport.ChatMessage(role: "user", content: fallbackPrompt)],
-                droppedCount: 0
-            )
-        }
+        let memoryIncludedCount = memoryRefs?.count ?? 0
+        var memoryBlock = memoryContextBlock(memoryRefs)
 
-        var turns: [Turn] = recentMessages.map { message in
-            let isSelf = message.authorMemberID != nil && message.authorMemberID == agentMemberID
-            let body = message.body ?? ""
-            let isTrigger = triggerMessageID != nil && message.messageID == triggerMessageID
-            if isSelf {
-                return Turn(role: "assistant", content: body, isTrigger: isTrigger)
+        var turns: [Turn]
+        if recentMessages.isEmpty {
+            turns = [Turn(role: "user", content: fallbackPrompt, isTrigger: true)]
+        } else {
+            turns = recentMessages.map { message in
+                let isSelf = message.authorMemberID != nil && message.authorMemberID == agentMemberID
+                let body = message.body ?? ""
+                let isTrigger = triggerMessageID != nil && message.messageID == triggerMessageID
+                if isSelf {
+                    return Turn(role: "assistant", content: body, isTrigger: isTrigger)
+                }
+                let display = message.authorDisplay?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let content = (display?.isEmpty == false) ? "[\(display!)] \(body)" : body
+                return Turn(role: "user", content: content, isTrigger: isTrigger)
             }
-            let display = message.authorDisplay?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let content = (display?.isEmpty == false) ? "[\(display!)] \(body)" : body
-            return Turn(role: "user", content: content, isTrigger: isTrigger)
         }
 
         // MOMO-302 (review high): drop non-trigger turns whose content is
@@ -81,7 +85,7 @@ enum ContextAssembler {
             turns[last] = Turn(role: turns[last].role, content: turns[last].content, isTrigger: true)
         }
 
-        var total = turns.reduce(0) { $0 + $1.content.count }
+        var total = turns.reduce(memoryBlock?.count ?? 0) { $0 + $1.content.count }
         var dropped = 0
         // Drop oldest-first; never drop the trigger, never drop the last survivor.
         while total > maxChars, turns.count > 1, !turns[0].isTrigger {
@@ -90,7 +94,44 @@ enum ContextAssembler {
             dropped += 1
         }
 
+        // The current trigger is the hard keep. If history trimming is not
+        // enough, discard the lower-priority memory block before the trigger.
+        if total > maxChars, memoryBlock != nil {
+            memoryBlock = nil
+        }
+
         let tail = turns.map { HermesTransport.ChatMessage(role: $0.role, content: $0.content) }
-        return Result(messages: head + tail, droppedCount: dropped)
+        let memoryHead = memoryBlock.map {
+            [HermesTransport.ChatMessage(role: "system", content: $0)]
+        } ?? []
+        return Result(
+            messages: head + memoryHead + tail,
+            droppedCount: dropped,
+            memoryIncludedCount: memoryIncludedCount,
+            memoryInjected: memoryBlock != nil
+        )
+    }
+
+    private static func memoryContextBlock(_ refs: [JSONValue]?) -> String? {
+        guard let refs, !refs.isEmpty else { return nil }
+        let rows = refs.compactMap { ref -> String? in
+            guard let excerpt = ref["excerpt"]?.stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !excerpt.isEmpty
+            else { return nil }
+            let kind = ref["kind"]?.stringValue ?? "unknown"
+            let scope = ref["scope"]?.stringValue ?? "unknown"
+            let sourceIDs = ref["source_ids"]?.jsonString() ?? "[]"
+            let indentedExcerpt = excerpt.replacingOccurrences(of: "\n", with: "\n    ")
+            return """
+            - kind: \(kind)
+              scope: \(scope)
+              excerpt: |
+                \(indentedExcerpt)
+              source_ids: \(sourceIDs)
+            """
+        }
+        guard !rows.isEmpty else { return nil }
+        return "워크스페이스 메모리\n" + rows.joined(separator: "\n")
     }
 }

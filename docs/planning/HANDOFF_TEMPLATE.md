@@ -39,6 +39,15 @@
 ## 5. 알려진 함정 / 컨텍스트
 - <기획·감사 과정에서 발견한 함정, 레거시 플래그, 헷갈리는 지점>
 
+### 5.1 공통 함정 (검수 실측 축적분 — 모든 패킷에 기본 포함, 2026-07-21 승격)
+1. **nil String?/UUID? 바인딩** → `::text`/`::uuid` 명시 캐스트(jsonb_build_object 내 nullable 포함 — 489 전례).
+2. **트랜잭션 내 HTTPError**는 `Database.withTenantTransaction` 중앙 unwrap이 처리 — 라우트별 ad hoc unwrap 금지(565 전례).
+3. **verifier 규율**: bash 3.2 빈 배열 금지 문법(`${arr[@]+"${arr[@]}"}`) / api 컨테이너에 curl 없음(mock-hermes python 대체) / `psql -q`(명령 태그 오염 방지) / UUID 비교는 `lower()` / 포트 대역 신규 배정(기존 대역 회피·사전검사) / demo 계정 password 시드 확인 / 비동기 단정은 폴링.
+4. **compose/infra 변경 후 컨테이너 재시작 필수**(config drift — MOMO-338 전례). PG 이미지 교체는 e2e/dev/prod+drift guard 동시.
+5. **openssl 직접 호출 금지**(LibreSSL 게이트 함정 — 내부 Crypto 사용, 491 전례).
+6. **Centrifugo 발행 payload에 props 탑재 확인**(X-9 전례 — 신규 이벤트도 REST↔outbox 일치 단정).
+7. 게이트 실행 후 docker 회수(`momo-docker-reclaim.sh`, 배치 종료 시).
+
 ## 6. 검증
 - 게이트: `scripts/local_gate.sh --profile <...>` + <티켓별 추가 검증>
 - 수용기준 정본: `BUILD_TICKETS.md` `### MOMO-NNN 수용기준`

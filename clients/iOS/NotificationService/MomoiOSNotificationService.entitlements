@@ -6,5 +6,9 @@
 	<array>
 		<string>group.app.momo.ios</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
+	</array>
 </dict>
 </plist>

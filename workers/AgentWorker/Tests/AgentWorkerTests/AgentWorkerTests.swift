@@ -519,7 +519,7 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(result.output["tool_name"]?.stringValue, "momo.mock.echo")
     }
 
-    func testResumeApprovalExecutorFailsClosedWithoutPolicyEvidence() throws {
+    func testResumeApprovalExecutorAllowsHumanApprovedResumeWithoutPolicyEvidence() throws {
         let json = """
         {
           "run_id": "00000000-0000-7000-8000-000000000161",
@@ -543,9 +543,12 @@ final class AgentWorkerTests: XCTestCase {
         """
         let payload = try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
 
-        XCTAssertThrowsError(try ToolResumeExecutor().validate(payload)) { error in
-            XCTAssertEqual(error as? ToolResumeExecutor.Failure, .missingPolicyEvidence)
-        }
+        // MOMO-528 이후: capability grant가 없어 missing_or_ambiguous로 정지된
+        // 승인은 policy_evidence 없이 인간 결정만으로 재개된다. 결정 검증
+        // (approval_id 일치·approved 상태)은 여전히 필수다.
+        let validated = try ToolResumeExecutor().validate(payload)
+        XCTAssertNil(validated.policyEvidence)
+        XCTAssertEqual(validated.toolCall.name, "momo.mock.echo")
     }
 
     func testResumeApprovalExecutorRejectsNonApprovedDecision() throws {
@@ -928,6 +931,79 @@ final class AgentWorkerTests: XCTestCase {
             maxChars: 24_000)
         XCTAssertEqual(withSystem.messages, [
             .init(role: "system", content: "You are Hermes."),
+            .init(role: "user", content: "hi"),
+        ])
+    }
+
+    func testContextAssemblerInjectsWorkspaceMemoryAfterSystemPrompt() {
+        let memory: [JSONValue] = [
+            .object([
+                "kind": .string("profile"),
+                "scope": .string("workspace"),
+                "excerpt": .string("출시는 목요일이다"),
+                "source_ids": .array([.string("msg_001"), .string("msg_002")]),
+            ]),
+        ]
+        let result = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "일정을 알려줘",
+            systemPrompt: "You are Hermes.",
+            memoryRefs: memory,
+            maxChars: 24_000
+        )
+
+        XCTAssertEqual(result.memoryIncludedCount, 1)
+        XCTAssertTrue(result.memoryInjected)
+        XCTAssertEqual(result.messages.map(\.role), ["system", "system", "user"])
+        XCTAssertEqual(result.messages[0].content, "You are Hermes.")
+        XCTAssertEqual(result.messages[2].content, "일정을 알려줘")
+        XCTAssertTrue(result.messages[1].content.hasPrefix("워크스페이스 메모리\n"))
+        XCTAssertTrue(result.messages[1].content.contains("kind: profile"))
+        XCTAssertTrue(result.messages[1].content.contains("scope: workspace"))
+        XCTAssertTrue(result.messages[1].content.contains("excerpt: |\n    출시는 목요일이다"))
+        XCTAssertTrue(result.messages[1].content.contains("source_ids: [\"msg_001\",\"msg_002\"]"))
+    }
+
+    func testContextAssemblerDropsMemoryBeforeTriggerWhenBudgetIsExhausted() {
+        let result = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "trigger",
+            systemPrompt: nil,
+            memoryRefs: [
+                .object([
+                    "kind": .string("fact"),
+                    "scope": .string("agent"),
+                    "excerpt": .string(String(repeating: "메", count: 200)),
+                    "source_ids": .array([]),
+                ]),
+            ],
+            maxChars: 7
+        )
+
+        XCTAssertEqual(result.memoryIncludedCount, 1)
+        XCTAssertFalse(result.memoryInjected)
+        XCTAssertEqual(result.messages, [.init(role: "user", content: "trigger")])
+    }
+
+    func testContextAssemblerDoesNotInjectEmptyMemoryRefs() {
+        let result = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "hi",
+            systemPrompt: "system",
+            memoryRefs: [],
+            maxChars: 24_000
+        )
+
+        XCTAssertEqual(result.memoryIncludedCount, 0)
+        XCTAssertFalse(result.memoryInjected)
+        XCTAssertEqual(result.messages, [
+            .init(role: "system", content: "system"),
             .init(role: "user", content: "hi"),
         ])
     }

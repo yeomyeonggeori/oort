@@ -311,6 +311,112 @@ class HermesAdapterContractTests(unittest.TestCase):
 
         self.assertEqual(adapter.gateway_posts, fixture["expected_momo_callbacks"])
 
+    def test_gateway_memory_aliases_inject_the_same_model_context(self):
+        memory_refs = [
+            {
+                "kind": "profile",
+                "scope": "workspace",
+                "excerpt": "출시는 목요일이다",
+                "source_ids": ["msg_001"],
+            }
+        ]
+        base = {
+            "system_prompt": "You are Hermes.",
+            "prompt": "일정을 알려줘",
+        }
+        payloads = [
+            {**base, "memory_refs": memory_refs},
+            {**base, "context_packet": {"memory_refs": memory_refs}},
+            {**base, "context_packet_projection": {"memory_refs": memory_refs}},
+        ]
+
+        assembled = [
+            momo_adapter.MomoAdapter._payload_messages_with_delivery(payload)
+            for payload in payloads
+        ]
+
+        self.assertEqual(assembled[0], assembled[1])
+        self.assertEqual(assembled[1], assembled[2])
+        messages, receipt = assembled[0]
+        self.assertEqual([message["role"] for message in messages], ["system", "system", "user"])
+        self.assertIn("워크스페이스 메모리", messages[1]["content"])
+        self.assertIn("출시는 목요일이다", messages[1]["content"])
+        self.assertEqual(receipt, {"included_count": 1, "injected": True})
+
+    def test_gateway_memory_context_is_dropped_before_trigger_under_budget(self):
+        payload = {
+            "prompt": "trigger",
+            "memory_refs": [
+                {
+                    "kind": "fact",
+                    "scope": "agent",
+                    "excerpt": "메" * 200,
+                    "source_ids": [],
+                }
+            ],
+        }
+
+        with patch.dict(os.environ, {"AGENT_CONTEXT_MAX_CHARS": "7"}):
+            messages, receipt = momo_adapter.MomoAdapter._payload_messages_with_delivery(payload)
+
+        self.assertEqual(messages, [{"role": "user", "content": "trigger"}])
+        self.assertEqual(receipt, {"included_count": 1, "injected": False})
+
+    def test_gateway_empty_memory_refs_do_not_add_a_context_message(self):
+        messages, receipt = momo_adapter.MomoAdapter._payload_messages_with_delivery(
+            {"prompt": "hi", "memory_refs": []}
+        )
+
+        self.assertEqual(messages, [{"role": "user", "content": "hi"}])
+        self.assertEqual(receipt, {"included_count": 0, "injected": False})
+
+    def test_gateway_job_delivers_memory_messages_and_completion_receipt(self):
+        workspace_id = "00000000-0000-7000-8000-000000000001"
+        agent_id = "00000000-0000-7000-8000-000000000103"
+        run_id = "00000000-0000-7545-8000-000000000545"
+
+        class Runtime:
+            def run_momo_job(self, payload):
+                self.payload = payload
+                return {"status": "succeeded", "body": "memory delivered", "usage": {}}
+
+        runtime = Runtime()
+        adapter = CaptureAdapter(
+            workspace_id=workspace_id,
+            agent_member_id=agent_id,
+            run_id=run_id,
+            final_text="unused",
+        )
+        adapter.runtime = runtime
+        event = {
+            "channel": momo_adapter.agent_channel(workspace_id, agent_id),
+            "type": "agent.job",
+            "payload": {
+                "run_id": run_id,
+                "workspace_id": workspace_id,
+                "channel_id": "00000000-0000-7000-8000-000000000202",
+                "agent_member_id": agent_id,
+                "prompt": "일정을 알려줘",
+                "memory_refs": [
+                    {
+                        "kind": "profile",
+                        "scope": "workspace",
+                        "excerpt": "출시는 목요일이다",
+                        "source_ids": ["msg_001"],
+                    }
+                ],
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertIn("출시는 목요일이다", runtime.payload["messages"][0]["content"])
+        completion = adapter.gateway_posts[-1]["body"]
+        self.assertEqual(
+            completion["memory_delivery"],
+            {"included_count": 1, "injected": True},
+        )
+
     def test_gateway_provider_stream_forwards_bounded_status_and_partial_events(self):
         class Runtime:
             async def stream_momo_job(self, _payload):

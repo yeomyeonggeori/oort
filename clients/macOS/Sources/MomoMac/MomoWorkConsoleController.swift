@@ -31,6 +31,10 @@ final class MomoWorkConsoleController: ObservableObject {
     @Published private(set) var hostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession
     @Published private(set) var hostHeartbeatIssue: MomoWorkConsoleError?
     @Published private(set) var observationUpdatesInFlight: Set<WorkSessionID> = []
+    @Published private(set) var tierPolicies: [MomoWorkTierPolicyScope: MomoWorkTierPolicy] = [:]
+    @Published private(set) var tierPolicyUpdatesInFlight: Set<MomoWorkTierPolicyScope> = []
+    @Published private(set) var tierPolicyLoadFailed = false
+    @Published private(set) var resumeUpdatesInFlight: Set<WorkSessionID> = []
 
     private let viewModel: ChatViewModel
     private let workHostRegistrar: MomoWorkHostRegistrar
@@ -63,6 +67,8 @@ final class MomoWorkConsoleController: ObservableObject {
     var hostId: WorkHostID? { hostRegistrationState.host?.id }
 
     var isHostReady: Bool { hostRegistrationState.host != nil }
+
+    var canManageWorkspaceTierPolicy: Bool { viewModel.canManageWorkspace }
 
     var selectedSession: MomoWorkSession? {
         guard let selectedSessionId else { return nil }
@@ -98,6 +104,10 @@ final class MomoWorkConsoleController: ObservableObject {
             memberId = nextMember
             hostRegistrationState = .waitingForSession
             hostHeartbeatIssue = nil
+            tierPolicies = [:]
+            tierPolicyUpdatesInFlight = []
+            tierPolicyLoadFailed = false
+            resumeUpdatesInFlight = []
         }
         guard let nextWorkspace, let nextMember else {
             if nextWorkspace == nil { lastIssue = .noWorkspace }
@@ -131,6 +141,7 @@ final class MomoWorkConsoleController: ObservableObject {
             }
             reconcileObserverAccess()
             await refreshWorkHosts()
+            await refreshTierPolicies()
             if let selectedSessionId,
                !sessions.contains(where: { $0.id == selectedSessionId }) {
                 self.selectedSessionId = sessions.first?.id
@@ -229,6 +240,10 @@ final class MomoWorkConsoleController: ObservableObject {
         switch event.payload {
         case .session(let delta):
             apply(delta)
+            // Lifecycle deltas intentionally stay minimal. Refresh the REST
+            // projection so orphan/end reasons and resume lineage remain
+            // authoritative without widening the realtime Core contract.
+            await refresh()
         case .control(let delta):
             guard let hostId else { return }
             guard delta.action == .dispatched,
@@ -237,6 +252,11 @@ final class MomoWorkConsoleController: ObservableObject {
             else { return }
             handledControlIds.insert(delta.controlId)
             await execute(delta)
+        case .projectionRefresh(let sessionID):
+            await refresh()
+            if sessions.contains(where: { $0.id == sessionID }) {
+                selectedSessionId = sessionID
+            }
         }
     }
 
@@ -324,6 +344,81 @@ final class MomoWorkConsoleController: ObservableObject {
 
     func openThread(_ session: MomoWorkSession) async {
         await viewModel.requestWorkSessionThread(session)
+    }
+
+    func selectSession(_ sessionID: WorkSessionID) async {
+        if !sessions.contains(where: { $0.id == sessionID }) {
+            await refresh()
+        }
+        if sessions.contains(where: { $0.id == sessionID }) {
+            selectedSessionId = sessionID
+        }
+    }
+
+    func resumeTargets(for session: MomoWorkSession) -> [WorkHost] {
+        workHosts.values
+            .filter {
+                !$0.isRevoked
+                    && $0.online
+                    && $0.id != session.hostId
+                    && ($0.scope == .workspace || $0.ownerMemberId == memberId)
+            }
+            .sorted {
+                let nameOrder = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                return nameOrder == .orderedSame
+                    ? $0.id.description.lowercased() < $1.id.description.lowercased()
+                    : nameOrder == .orderedAscending
+            }
+    }
+
+    func resume(_ session: MomoWorkSession, on targetHost: WorkHostID) async -> Bool {
+        guard owns(session), session.isOrphaned,
+              !resumeUpdatesInFlight.contains(session.id),
+              resumeTargets(for: session).contains(where: { $0.id == targetHost })
+        else { return false }
+        resumeUpdatesInFlight.insert(session.id)
+        defer { resumeUpdatesInFlight.remove(session.id) }
+        do {
+            let resumed = try await viewModel.resumeWorkSession(
+                session.id,
+                targetHost: targetHost
+            )
+            await refresh()
+            upsert(resumed)
+            selectedSessionId = resumed.id
+            lastIssue = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            lastIssue = .sessionUnavailable
+            return false
+        }
+    }
+
+    func setTierPolicy(
+        scope: MomoWorkTierPolicyScope,
+        mode: MomoWorkTierPolicyMode,
+        autoTarget: String? = nil
+    ) async {
+        guard !tierPolicyUpdatesInFlight.contains(scope),
+              scope == .member || canManageWorkspaceTierPolicy else { return }
+        tierPolicyUpdatesInFlight.insert(scope)
+        defer { tierPolicyUpdatesInFlight.remove(scope) }
+        do {
+            tierPolicies[scope] = try await viewModel.setWorkTierPolicy(
+                scope: scope,
+                mode: mode,
+                autoTarget: autoTarget
+            )
+            tierPolicyLoadFailed = false
+            lastIssue = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            tierPolicyLoadFailed = true
+            lastIssue = .unavailable
+        }
     }
 
     func canOpenRemoteTerminal(_ session: MomoWorkSession) -> Bool {
@@ -643,6 +738,22 @@ final class MomoWorkConsoleController: ObservableObject {
               let hosts = try? await backend.workHosts(workspace: workspaceId)
         else { return }
         workHosts = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, $0) })
+    }
+
+    private func refreshTierPolicies() async {
+        do {
+            tierPolicies[.member] = try await viewModel.workTierPolicy(scope: .member)
+            if canManageWorkspaceTierPolicy {
+                tierPolicies[.workspace] = try await viewModel.workTierPolicy(scope: .workspace)
+            } else {
+                tierPolicies[.workspace] = nil
+            }
+            tierPolicyLoadFailed = false
+        } catch is CancellationError {
+            return
+        } catch {
+            tierPolicyLoadFailed = true
+        }
     }
 
     private static func normalizedLabel(

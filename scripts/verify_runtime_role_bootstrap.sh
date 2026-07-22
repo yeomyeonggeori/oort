@@ -25,7 +25,7 @@ start_postgres() {
     --env "POSTGRES_DB=$database" \
     --env "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" \
     --volume "$REPO_ROOT:/workspace:ro" \
-    pgvector/pgvector:0.8.5-pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0 >/dev/null
+    pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e >/dev/null
 
   attempt=1
   while [ "$attempt" -le 60 ]; do

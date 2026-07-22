@@ -1,4 +1,5 @@
 import AppKit
+import MomoCore
 import SwiftUI
 
 struct MomoWorkConsoleDrawer: View {
@@ -328,7 +329,7 @@ private struct MomoWorkSessionRow: View {
                     HStack(spacing: MomoTheme.WorkConsole.compactSpacing) {
                         Text(copy.workToolTitle(session.tool))
                         Text("•")
-                        Text(session.isRunning ? copy.workSessionRunning : copy.workSessionEnded)
+                        Text(copy.workSessionStatus(session.status))
                         if isLocal {
                             Image(systemName: "macbook")
                                 .accessibilityLabel(copy.workSessionLocalOnly)
@@ -357,6 +358,7 @@ private struct MomoWorkSessionDetail: View {
     let terminalTheme: MomoTerminalThemePreset
     let copy: MomoWorkspaceCopy
     @State private var excerptDraft: MomoWorkExcerptDraft?
+    @State private var selectedResumeHostID: WorkHostID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -383,6 +385,8 @@ private struct MomoWorkSessionDetail: View {
                     terminalTheme: terminalTheme,
                     copy: copy
                 )
+            } else if session.isOrphaned {
+                resumeOffer
             } else {
                 detachedState
             }
@@ -413,7 +417,7 @@ private struct MomoWorkSessionDetail: View {
                 HStack(spacing: MomoTheme.WorkConsole.compactSpacing) {
                     Text(copy.workToolTitle(session.tool))
                     Text("•")
-                    Text(session.isRunning ? copy.workSessionRunning : copy.workSessionEnded)
+                    Text(copy.workSessionStatus(session.status))
                     if let exitCode = session.exitCode {
                         Text("•")
                         Text(copy.workSessionExit(exitCode))
@@ -421,6 +425,10 @@ private struct MomoWorkSessionDetail: View {
                     if let count = session.observerGrantCount, count > 0 {
                         Text("•")
                         Label(copy.workSessionObservers(count), systemImage: "person.2")
+                    }
+                    if let sourceID = session.resumedFromSessionId {
+                        Text("•")
+                        Text("\(copy.workSessionLineage) \(copy.workSessionShortID(sourceID))")
                     }
                 }
                 .momoTypography(.metadata)
@@ -559,6 +567,68 @@ private struct MomoWorkSessionDetail: View {
         }
         .padding(MomoTheme.WorkConsole.edgeInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var resumeOffer: some View {
+        let targets = controller.resumeTargets(for: session)
+        return VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.sectionSpacing) {
+            HStack(alignment: .top, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                    .font(.title2)
+                    .foregroundStyle(MomoTheme.costAmber)
+                VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.compactSpacing) {
+                    Text(copy.workResumeOfferTitle)
+                        .momoTypography(.emphasizedRow)
+                    Text(copy.workResumeOfferBody)
+                        .momoTypography(.supporting)
+                        .foregroundStyle(.secondary)
+                    Label(copy.workResumeLossWarning, systemImage: "exclamationmark.triangle")
+                        .momoTypography(.metadata)
+                        .foregroundStyle(MomoTheme.costAmber)
+                }
+            }
+
+            if targets.isEmpty {
+                Text(copy.workResumeNoHost)
+                    .momoTypography(.supporting)
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker(copy.workResumeChooseHost, selection: $selectedResumeHostID) {
+                    Text(copy.workResumeChooseHost).tag(nil as WorkHostID?)
+                    ForEach(targets, id: \.id) { host in
+                        Text(host.displayName).tag(host.id as WorkHostID?)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Button(
+                    controller.resumeUpdatesInFlight.contains(session.id)
+                        ? copy.workResumeInFlight
+                        : copy.workResumeAction
+                ) {
+                    guard let selectedResumeHostID else { return }
+                    Task { _ = await controller.resume(session, on: selectedResumeHostID) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    selectedResumeHostID == nil
+                        || controller.resumeUpdatesInFlight.contains(session.id)
+                )
+            }
+
+            Divider()
+            Button(copy.workSessionOpenThread) {
+                Task { await controller.openThread(session) }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(MomoTheme.WorkConsole.edgeInset)
+        .frame(maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            if selectedResumeHostID == nil {
+                selectedResumeHostID = targets.first?.id
+            }
+        }
     }
 }
 
@@ -820,6 +890,25 @@ struct MomoWorkConsoleSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
+            VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                Text(copy.workTierPolicyTitle)
+                    .momoTypography(.supporting)
+                    .fontWeight(.medium)
+                tierPolicyRow(scope: .member, title: copy.workTierPolicyPersonal)
+                if controller.canManageWorkspaceTierPolicy {
+                    tierPolicyRow(scope: .workspace, title: copy.workTierPolicyWorkspace)
+                }
+                if controller.tierPolicyLoadFailed {
+                    Label(copy.workTierPolicyFailed, systemImage: "exclamationmark.triangle")
+                        .momoTypography(.metadata)
+                        .foregroundStyle(MomoTheme.costAmber)
+                }
+                Text(copy.workTierPolicyHelp)
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
             VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.compactSpacing) {
                 Text(copy.workHostIdentifier)
                     .momoTypography(.supporting)
@@ -916,5 +1005,72 @@ struct MomoWorkConsoleSettingsView: View {
         case .disabled: return copy.workAutoApproveDisabled
         case .failed: return copy.workAutoApproveFailed
         }
+    }
+
+    @ViewBuilder
+    private func tierPolicyRow(
+        scope: MomoWorkTierPolicyScope,
+        title: String
+    ) -> some View {
+        let policy = controller.tierPolicies[scope]
+        HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .momoTypography(.metadata)
+                    .fontWeight(.medium)
+                if scope == .member, policy?.inherited == true {
+                    Text(copy.workTierPolicyInherited)
+                        .momoTypography(.metadata)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            Menu(
+                controller.tierPolicyUpdatesInFlight.contains(scope)
+                    ? copy.workTierPolicyUpdating
+                    : copy.workTierPolicyTitle(policy?.mode ?? .ask)
+            ) {
+                Button(copy.workTierPolicyT1Only) {
+                    Task { await controller.setTierPolicy(scope: scope, mode: .t1Only) }
+                }
+                Button(copy.workTierPolicyAsk) {
+                    Task { await controller.setTierPolicy(scope: scope, mode: .ask) }
+                }
+                Menu(copy.workTierPolicyAuto) {
+                    Button(copy.workTierPolicyCloud) {
+                        Task {
+                            await controller.setTierPolicy(
+                                scope: scope,
+                                mode: .auto,
+                                autoTarget: "cloud"
+                            )
+                        }
+                    }
+                    ForEach(eligibleAutoTargets(scope: scope), id: \.id) { host in
+                        Button(host.displayName) {
+                            Task {
+                                await controller.setTierPolicy(
+                                    scope: scope,
+                                    mode: .auto,
+                                    autoTarget: host.id.description.lowercased()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            .disabled(controller.tierPolicyUpdatesInFlight.contains(scope))
+        }
+    }
+
+    private func eligibleAutoTargets(scope: MomoWorkTierPolicyScope) -> [WorkHost] {
+        controller.workHosts.values
+            .filter { host in
+                guard !host.isRevoked else { return false }
+                if scope == .workspace { return host.scope == .workspace }
+                return host.scope == .workspace
+                    || host.ownerMemberId == controller.hostRegistrationState.host?.ownerMemberId
+            }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 }

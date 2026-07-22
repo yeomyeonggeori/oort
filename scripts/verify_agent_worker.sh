@@ -1136,6 +1136,22 @@ if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   exit 1
 fi
 
+# MOMO-528: tool_grants는 mock이 아니라 plugin_capability_projection 실주입
+# (부재=빈 배열 fail-closed). 픽스처 tool_call이 승인 정지 없이 흐르려면
+# 작성자에게 실제 install+grant가 있어야 하고, install은 workspace admin을
+# 요구하므로 workspace_membership owner 행을 먼저 보장한다.
+psql_run -q <<SQL
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$WORKSPACE_ID', '$HUMAN_ID', 'owner')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role='owner';
+SQL
+PLUGIN_PATH="$BASE_URL/v1/workspaces/$WORKSPACE_ID/plugins/com.momo.plugins.github"
+curl -fsS -X POST "$PLUGIN_PATH/install" -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' --data '{"enabled":true}' >/dev/null
+curl -fsS -X POST "$PLUGIN_PATH/grants" -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"scope":"github:read","accessToken":"verifier-opaque-not-persisted"}' >/dev/null
+
 MENTION_BODY="@$AGENT_HANDLE MOMO-004 AgentWorker 검증해줘"
 SEND_PAYLOAD=$(jq -cn --arg client "$CLIENT_MSG_ID" --arg body "$MENTION_BODY" \
   '{clientMsgId:$client,type:"text",body:$body}')
@@ -1162,7 +1178,7 @@ fi
 
 # message.new must carry the same server-owned mention projection as the REST
 # response. Live clients cannot wait for a history reload to recover props.
-MENTION_PROJECTION_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'id')=lower('$MESSAGE_ID') AND payload->'data'->'payload'->'props'->'mention_member_ids' @> jsonb_build_array(lower('$AGENT_ID'));")
+MENTION_PROJECTION_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'id')=lower('$MESSAGE_ID') AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(payload->'data'->'payload'->'props'->'mention_member_ids') AS mm(v) WHERE lower(mm.v)=lower('$AGENT_ID'));")
 REST_MENTION_OK=$(printf '%s' "$SEND_JSON" | jq -r --arg agent "$(printf '%s' "$AGENT_ID" | tr '[:upper:]' '[:lower:]')" '[.props.mention_member_ids[]? | ascii_downcase] | index($agent) != null')
 if [ "$MENTION_PROJECTION_OK" != "1" ] || [ "$REST_MENTION_OK" != "true" ]; then
   echo "[agent-worker] message.new realtime props diverged from REST mention projection" >&2
@@ -1182,7 +1198,7 @@ if [ "$RUN_ID" = "" ]; then
     "$MESSAGE_ID" "$AGENT_ID" "$AGENT_HANDLE" "$JOB_COUNT" "${SKIP_REASON:-none}" >&2
   exit 1
 fi
-CONTEXT_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'run_id')=lower('$RUN_ID') AND payload->'context_packet_projection'->>'schema'='momo.context_packet.mention_projection.v0' AND lower(payload->'source_attribution'->>'message_id')=lower('$MESSAGE_ID') AND lower(payload->>'author_member_id')=lower('$HUMAN_ID');")
+CONTEXT_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'run_id')=lower('$RUN_ID') AND payload->'context_packet_projection'->>'schema' IN ('momo.context_packet.mention_projection.v0','momo.context_packet.v0') AND lower(payload->'source_attribution'->>'message_id')=lower('$MESSAGE_ID') AND lower(payload->>'author_member_id')=lower('$HUMAN_ID');")
 AUDIT_QUEUED=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='$WORKSPACE_ID' AND action='agent.mention.queued' AND target_id='$MESSAGE_ID' AND run_id='$RUN_ID';")
 if [ "$RUN_ID" = "" ] || [ "$JOB_COUNT" != "1" ] \
   || [ "$TOTAL_RUN_COUNT" != "1" ] || [ "$TOTAL_JOB_COUNT" != "1" ] \
@@ -1540,6 +1556,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 done
 if [ "$EQUIV_FINAL" != "1" ]; then
   echo "[agent-worker] MOMO-352 approved resume finalization did not verify" >&2
+  echo "succeeded=$EQUIV_SUCCEEDED resume_done=$EQUIV_RESUME_DONE result_msg=$EQUIV_RESULT_MSG audits=$EQUIV_AUDITS final_broadcast=$EQUIV_FINAL_BROADCAST final_live=$EQUIV_FINAL_LIVE" >&2
   tail -160 "$WORKER_LOG" >&2 || true
   exit 1
 fi

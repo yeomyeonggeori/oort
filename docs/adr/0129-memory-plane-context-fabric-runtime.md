@@ -1,6 +1,6 @@
 # ADR-0129: Memory Plane & Context Fabric 런타임 — 메신저가 에이전트의 컨텍스트를 핸들링한다
 
-- Status: **Proposed** (2026-07-21, Fable 기안 — 성재 승인 대기)
+- Status: **Accepted** (2026-07-21, 성재 — "위 내용을 main에 설계 기반으로 아주 상세하게 풀어내고 트랙으로 실행" 지시로 권고안 D1~D6 전부 A 승인. 실행 정본: `docs/planning/handoffs/2026-07-21-agent-native-fabric-batch.md`)
 - 관련: research/11-agent-runtime/04·05·06(Context Packet/Memory Plane/Capability Cache v0 규범 스펙 — 본 ADR은 그 **런타임 실장 결정**), research/19-agent-native-fabric/00(내부 실사)·03(메모리 OSS 지형), ADR-0102(실행 경로), ADR-0113(Capability projection), research/14 gap-audit(크리티컬 패스: "승인된 보안 ADR → Capability/Context/Memory foundation")
 - 발단: 성재(CTO 대화, 2026-07-21) — "메신저 레벨에서 codex/claude code가 해주는 것 같은 에이전트 컨텍스트 핸들링. 회사 단위로 관리되는 컨텍스트·메모리를 사용자가 가시적으로 보고, 에이전트에게 서빙한다. 메모리·데이터·컨텍스트 최적화가 핵심 화두."
 
@@ -45,4 +45,5 @@ D1-A(PG-native) · D2-A(outbox 2-phase+무효화) · D3-A(pgvector+FTS+RRF) · D
 - (+) 불변식 무변경: PG=SoT·RLS FORCE·단일 쓰기경로·자격증명 비유입 전부 기존 경로 재사용.
 - (−) pgvector는 스택 가산(이미지·마이그레이션·운영 지식) — 셀프호스트 배포판(0121)에 확장 동봉 필요.
 - (−) 추출 품질은 튜닝 반복이 필요(공개 프롬프트·mem0 논문으로 시작점은 확보).
+- 후속(v1, 2026-07-21 정합 검토): **추출원 확장** — 첨부 텍스트·Drive 문서·웹훅 payload를 메모리 소스로("회사 단위 데이터"의 잔여 절반). v0는 `memory_item.source_kind='message'` 고정 컬럼으로 확장 여지만 선반영.
 - 파생(Accepted 시 발급 예약): **MOMO-526**(엔진 — memory 스키마+RLS+수명주기 원장+추출 워커 v0) · **MOMO-527**(엔진 — pgvector/FTS/RRF 검색 + retrieval 게이트) · **MOMO-528**(엔진 — Context Packet v0 승격: 불변화·memory_refs·budget·mock grant 제거·실 projection 주입) · **MOMO-529**(UXUI — 메모리 브라우저+출처 역링크+정책 스위치+서빙 인스펙터).
