@@ -40,6 +40,7 @@ PY
 
 RUN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 PROJECT="momo-554-prod-rls-${RUN_TAG//[^a-zA-Z0-9]/-}"
+PROJECT="$(printf '%s' "$PROJECT" | tr '[:upper:]' '[:lower:]')"
 TMP_ROOT="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-prod-rls-posture}"
 mkdir -p "$TMP_ROOT"
 ENV_FILE="$TMP_ROOT/prod-rls-${RUN_TAG}.env"
@@ -49,8 +50,8 @@ SUPERUSER_LOG="$TMP_ROOT/prod-rls-${RUN_TAG}.superuser.log"
 PROD_COMPOSE="infra/prod/docker-compose.prod.yml"
 SWIFT_DOCKERFILE="infra/prod/docker/swift-service.Dockerfile"
 MIGRATE_DOCKERFILE="infra/prod/docker/internal-smoke-migrate.Dockerfile"
-API_IMAGE="momo-api:prod-rls-${RUN_TAG}"
-MIGRATE_IMAGE="momo-migrate:prod-rls-${RUN_TAG}"
+API_IMAGE="momo-api:internal-smoke-prod-rls-${RUN_TAG}"
+MIGRATE_IMAGE="momo-migrate:internal-smoke-prod-rls-${RUN_TAG}"
 
 cat > "$ENV_FILE" <<EOF
 COMPOSE_PROJECT_NAME=${PROJECT}
@@ -66,6 +67,7 @@ MOMO_API_IMAGE=${API_IMAGE}
 MOMO_RELAY_IMAGE=momo-outbox-relay:internal-smoke-unused
 MOMO_WORKER_IMAGE=momo-agent-worker:internal-smoke-unused
 MOMO_MIGRATE_IMAGE=${MIGRATE_IMAGE}
+MOMO_MOCK_HERMES_IMAGE=mock-hermes:internal-smoke-unused
 MOMO_WEB_IMAGE=momo-web:internal-smoke-unused
 MOMO_LINKSHORT_IMAGE=momo-linkshort:internal-smoke-unused
 POSTGRES_DB=momo
@@ -186,7 +188,7 @@ set -e
 if [ "$superuser_status" -eq 0 ]; then
   fail "API stayed running with the PostgreSQL superuser URL"
 fi
-grep -Eqi 'current_user must be momo_app|superuser|refusing to boot' "$SUPERUSER_LOG" ||
+grep -Eqi 'DatabaseSecurityPostureError|current_user must be momo_app|superuser|refusing to boot' "$SUPERUSER_LOG" ||
   fail "superuser refusal did not expose the expected fail-closed reason"
 
 printf '[prod-rls-posture] PASS: prod compose API=momo_app, FORCE RLS isolation, catalog revoke, and superuser boot refusal verified on ports %s-%s\n' "$POSTGRES_PORT" "$HTTPS_PORT"

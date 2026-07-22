@@ -619,7 +619,12 @@ elif [ "$runtime_mode" = "internal-smoke" ]; then
   assert_exact AGENT_MODEL hermes-agent
   assert_exact HERMES_BASE_URL http://mock-hermes:8088/v1
   assert_exact HERMES_API_KEY change-me-hermes-bearer
-  assert_exact MOMO_BOOTSTRAP_RUNTIME_ROLES 1
+  # MOMO-554: 0 = external runtime-roles provisioning (prod-faithful; migrate
+  # fail-closes when the roles are absent/unsafe), 1 = dev bootstrap in migrate.
+  case "$(get_var MOMO_BOOTSTRAP_RUNTIME_ROLES)" in
+    0|1) pass "MOMO_BOOTSTRAP_RUNTIME_ROLES selects a valid provisioning path" ;;
+    *) fail "MOMO_BOOTSTRAP_RUNTIME_ROLES must be exactly 0 or 1" ;;
+  esac
 
   assert_contains MOMO_API_IMAGE internal-smoke
   assert_contains MOMO_RELAY_IMAGE internal-smoke
