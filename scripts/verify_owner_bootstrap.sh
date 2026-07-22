@@ -114,7 +114,7 @@ SELECT count(*)
     ON wm.workspace_id = h.workspace_id
    AND wm.member_id = h.member_id
  WHERE h.member_id = '00000000-0000-7000-8000-000000000101'
-   AND h.email = :'check_email'
+   AND h.email = lower(btrim(:'check_email'))
    AND h.email_verified
    AND momo_password_verify(:'check_password', h.password_hash)
    AND wm.role = 'owner';
@@ -127,7 +127,7 @@ SET app.workspace_id = '00000000-0000-7000-8000-000000000001';
 INSERT INTO token (workspace_id, kind, actor_member_id, token_hash)
 VALUES (
   '00000000-0000-7000-8000-000000000001',
-  'access',
+  'session',
   '00000000-0000-7000-8000-000000000101',
   decode('5615615615615615615615615615615615615615615615615615615615615615', 'hex')
 );
@@ -156,7 +156,7 @@ SET app.workspace_id = '00000000-0000-7000-8000-000000000001';
 SELECT
   (SELECT count(*) FROM human
     WHERE member_id = '00000000-0000-7000-8000-000000000101'
-      AND email = :'check_email'
+      AND email = lower(btrim(:'check_email'))
       AND momo_password_verify(:'check_password', password_hash)),
   (SELECT count(*) FROM token
     WHERE actor_member_id = '00000000-0000-7000-8000-000000000101'
