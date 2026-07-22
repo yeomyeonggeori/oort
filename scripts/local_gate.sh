@@ -33,6 +33,8 @@ Environment:
   LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
   LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks and
                           --auto profile selection (falls back to local main).
+  MOMO_GATE_SKEW_REF       Branch-skew upstream. Default: origin/main.
+  MOMO_GATE_SKIP_SKEW      Reviewed override reason. The reason is recorded in evidence.
   LOCAL_GATE_FORCE=1       Run a runtime-* profile even when host load(1min) is > 12.
   DEVELOPER_DIR           Defaults to /Applications/Xcode.app/Contents/Developer for Swift gates.
   ENV_FILE                Optional runtime env file consumed by Makefile/runtime scripts.
@@ -376,10 +378,13 @@ fi
 RUN_ID="${STAMP}-pid$$-ns${RUN_NANOS}-wt${WORKTREE_HASH}-r${RUN_RANDOM}"
 LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.log"
 EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.md"
-export LOCAL_GATE_OUTPUT_DIR="$OUT_DIR"
+MANIFEST_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.sha256"
+RUN_ARTIFACT_DIR="$OUT_DIR/artifacts-${RUN_ID}"
+mkdir -p "$RUN_ARTIFACT_DIR" || exit 1
+export LOCAL_GATE_OUTPUT_DIR="$RUN_ARTIFACT_DIR"
 export LOCAL_GATE_RUN_ID="$RUN_ID"
-export LOCAL_GATE_LOCAL_ALPHA_DIR="$OUT_DIR/local-alpha-${RUN_ID}"
-export LOCAL_GATE_INTERNAL_ALPHA_DIR="$OUT_DIR/internal-alpha-${RUN_ID}"
+export LOCAL_GATE_LOCAL_ALPHA_DIR="$RUN_ARTIFACT_DIR/local-alpha-${RUN_ID}"
+export LOCAL_GATE_INTERNAL_ALPHA_DIR="$RUN_ARTIFACT_DIR/internal-alpha-${RUN_ID}"
 export MOMO_RUNTIME_GUARD_REPO_ROOT="$REPO_ROOT"
 RUNTIME_COMPOSE_STARTED=0
 case "$PROFILE" in
@@ -475,7 +480,9 @@ add_note_once() {
 }
 
 add_static_commands() {
+  add_cmd_once "branch skew preflight" 'scripts/check_branch_skew.sh'
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
+  add_cmd_once "migration number uniqueness" 'scripts/check_migration_numbers.sh server/Migrations'
   add_cmd_once "diff whitespace" 'base="${LOCAL_GATE_BASE_REF:-origin/main}"; if git rev-parse --verify "$base" >/dev/null 2>&1; then git diff --check "$base"...HEAD; else echo "base ref $base unavailable; falling back to working tree whitespace checks"; fi; git diff --cached --check; git diff --check'
   add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
   add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
@@ -486,7 +493,7 @@ add_static_commands() {
   add_cmd_once "Centrifugo exact credential metadata contract" 'test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/centrifugo.json)" = "true"; test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/prod/centrifugo.prod.json)" = "true"; grep -Fq "\"include_connection_meta\": true" scripts/local_alpha_runner.sh'
   add_cmd_once "pgvector image and migration drift contract" "scripts/verify_pgvector_contract.sh"
   add_cmd_once "eve compose profile drift contract" "scripts/verify_eve_profile.sh --config-only"
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_prod_rls_posture.sh scripts/verify_design_preflight.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/deploy-lib.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_prod_rls_posture.sh scripts/verify_design_preflight.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/deploy-lib.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "message interaction verifier shell syntax" "bash -n scripts/verify_message_interaction.sh"
   add_cmd_once "production migration entrypoint shell syntax" "bash -n infra/prod/docker/internal-smoke-migrate.sh"
   add_cmd_once "work session verifier shell syntax" "bash -n scripts/verify_work_session.sh"
@@ -507,6 +514,7 @@ add_static_commands() {
   add_cmd_once "lifecycle completion verifier shell syntax" "bash -n scripts/verify_lifecycle_completion.sh"
   add_cmd_once "deploy bundle synthetic fixture" 'scripts/tests/test_make_deploy_bundle.sh'
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
+  add_cmd_once "local gate hardening isolated regression" 'scripts/tests/test_local_gate_hardening.sh'
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/adapter.py scripts/mock_hermes.py scripts/mock_push_relay.py scripts/openapi_shape_check.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py scripts/tests/test_agent_seed_policy_contract.py scripts/tests/test_momo354_roster_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_agent_seed_policy_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_momo354_roster_contract.py'
 }
@@ -1107,6 +1115,14 @@ write_evidence() {
     echo "- Dirty files: \`$DIRTY_COUNT\`"
     echo "- Evidence markdown: \`$EVIDENCE_FILE\`"
     echo "- Evidence log: \`$LOG_FILE\`"
+    echo "- Evidence sha256 manifest: \`$MANIFEST_FILE\`"
+    echo "- Run artifact directory: \`$RUN_ARTIFACT_DIR\`"
+    if [ -n "${MOMO_GATE_SKIP_SKEW:-}" ]; then
+      skew_reason="$(printf '%s' "$MOMO_GATE_SKIP_SKEW" | tr '\r\n' '  ' | sed 's/`/'\''/g; s/^[[:space:]]*//; s/[[:space:]]*$//')"
+      echo "- Branch-skew override: \`$skew_reason\`"
+    else
+      echo "- Branch-skew upstream: \`${MOMO_GATE_SKEW_REF:-origin/main}\` (enforced)"
+    fi
     echo "- Machine/toolchain:"
     echo "  - Host: \`$MACHINE\`"
     echo "  - OS: \`$OS_INFO\`"
@@ -1197,9 +1213,12 @@ write_evidence "$EVIDENCE_FILE"
   cat "$EVIDENCE_FILE"
 } | tee -a "$LOG_FILE"
 
+scripts/write_sha256_manifest.sh "$MANIFEST_FILE" "$EVIDENCE_FILE" "$LOG_FILE" "$RUN_ARTIFACT_DIR"
+
 echo
 echo "Evidence file: $EVIDENCE_FILE"
 echo "Log file: $LOG_FILE"
+echo "SHA256 manifest: $MANIFEST_FILE"
 
 if [ "$FAILED_INDEX" -ne -1 ]; then
   exit "$FAILED_CODE"

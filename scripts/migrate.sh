@@ -52,6 +52,10 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 MIGRATIONS_DIR="$REPO_ROOT/server/Migrations"
 
+# Fail before psql discovery/connection: two files with the same numeric prefix
+# would otherwise both apply because schema_migrations tracks full filenames.
+"$REPO_ROOT/scripts/check_migration_numbers.sh" "$MIGRATIONS_DIR"
+
 # --- psql 확인: Homebrew libpq keg-only 설치도 자동 감지 -----------------------
 if command -v psql >/dev/null 2>&1; then
   PSQL_BIN=$(command -v psql)
@@ -94,12 +98,6 @@ fi
 
 # psql 공통 플래그: 에러 시 즉시 중단, 자동커밋 OFF(파일 단위 tx), 조용히.
 PSQL_FLAGS="-v ON_ERROR_STOP=1 --set=MOMO_AGENT_SEED_ENABLED=${MOMO_AGENT_SEED_ENABLED} --no-psqlrc --quiet"
-
-# --- 마이그레이션 디렉터리 확인 --------------------------------------------------
-if [ ! -d "$MIGRATIONS_DIR" ]; then
-  echo "[migrate] 마이그레이션 디렉터리 없음: $MIGRATIONS_DIR" >&2
-  exit 1
-fi
 
 # --- schema_migrations 추적 테이블 보장(없으면 생성) ----------------------------
 # version = 파일명(번호 prefix 포함). 적용 시각 기록. 재실행 시 SKIP 판정 근거.
