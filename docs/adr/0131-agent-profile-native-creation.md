@@ -1,6 +1,6 @@
 # ADR-0131: agent_profile 원장과 momo 네이티브 간편 생성
 
-- 상태: **Proposed** (성재 승인 대기 — Wave C(MOMO-537) 스폰 게이트)
+- 상태: **Accepted** (성재 승인 2026-07-22 — "537은 승인할게. 최적의 형태로 구현 진행")
 - 날짜: 2026-07-22
 - 발단: 성재 — "우리쪽 간편 생성 레벨에서 사용자가 원하는 에이전트를 제공할 수 있는가"(research/20-01 §2 T-B). 업계 수렴(OpenAI Workspace Agents·Notion Custom Agents)은 "이름·지시문·도구·트리거를 가진 공유 에이전트"이며, momo는 실행 런타임(AgentWorker+Context Packet)과 생성 API(X-7)를 이미 보유 — 빠진 것은 에이전트별 인격 정의 원장뿐.
 

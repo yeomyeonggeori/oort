@@ -2366,3 +2366,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-548 수용기준 — 외부 provider 추출 동의 게이트 `[runtime]`
 - [ ] provider=external 시 워크스페이스 명시 옵트인 없으면 추출/임베딩 fail-closed 오프(내부 mock/self-host 현행), 정책 스위치와 별도 축
 - [ ] verify_memory_plane 회귀 + 동의 상태 전이 verifier
+
+### MOMO-549 수용기준 — memory grant CRUD REST (529 grant UI 전제) `[runtime]`
+- [ ] GET/POST/DELETE grants(admin+스코프 주체), revoke=revoked_at(삭제 금지), audit, RLS, openapi
+- [ ] verifier: 부여→서빙 필터 즉시 반영→회수→packet 재발급 제외
