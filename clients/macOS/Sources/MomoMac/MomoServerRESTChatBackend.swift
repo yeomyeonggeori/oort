@@ -1944,11 +1944,11 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             authorized: true,
             response: MomoAgentRunCancelResponseDTO.self
         )
-        guard RunID(uuidString: response.runId) == id,
-              response.status == "cancelled",
-              response.workSessionsTerminated == false,
-              response.linkedWorkSessionIds.allSatisfy({ UUID(uuidString: $0) != nil })
-        else {
+        // Scope is the only hard contract: the server must be answering about
+        // this run. Benign field evolution (an async "cancelling" status, a
+        // future session-terminating cancel) must not turn an accepted cancel
+        // into a user-facing error.
+        guard RunID(uuidString: response.runId) == id else {
             throw BackendError.decoding("agent run cancel response mismatch")
         }
     }

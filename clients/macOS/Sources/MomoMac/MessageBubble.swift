@@ -228,7 +228,7 @@ public struct MessageBubble: View {
                 .accessibilityHidden(true)
             Text(
                 safetySystemKind == "agent_run_cancelled"
-                    ? timelineCopy.agentRunCancelledSystemLine
+                    ? timelineCopy.agentRunCancelledSystemLine(actorName: author?.displayName)
                     : timelineCopy.agentPausedSystemLine
             )
             .font(.callout)

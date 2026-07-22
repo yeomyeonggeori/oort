@@ -106,15 +106,54 @@ final class AgentSafetySnapshotTests: XCTestCase {
         .background(Color(nsColor: .textBackgroundColor))
         .environment(\.colorScheme, scheme)
 
-        let renderer = ImageRenderer(content: content)
-        renderer.proposedSize = ProposedViewSize(width: 552, height: 520)
-        renderer.scale = 2
+        // ImageRenderer drops AppKit-backed controls (buttons, toggles) from
+        // the pixels, which are exactly this surface's primary controls. Host
+        // the view in an offscreen window like the other canonical snapshot
+        // suites so the baseline contains the real widgets.
         let appearanceName: NSAppearance.Name = scheme == .dark ? .darkAqua : .aqua
-        var image: NSImage?
-        NSAppearance(named: appearanceName)?.performAsCurrentDrawingAppearance {
-            image = renderer.nsImage
+        let appearance = NSAppearance(named: appearanceName)
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.appearance = appearance
+        let size = CGSize(width: 552, height: hostingView.fittingSize.height)
+        hostingView.frame = CGRect(origin: .zero, size: size)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.orderBack(nil)
+        window.makeKey()
+        defer { window.close() }
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        // Native controls can be mid-appearance-transition on an offscreen
+        // host; let AppKit settle before capturing.
+        try await Task.sleep(for: .milliseconds(100))
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no agent safety bitmap on this host")
         }
-        guard let image else { throw XCTSkip("ImageRenderer produced no NSImage on this host") }
+        representation.size = size
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
         return image
     }
 

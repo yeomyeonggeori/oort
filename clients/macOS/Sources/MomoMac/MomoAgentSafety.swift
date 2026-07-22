@@ -45,8 +45,10 @@ struct MomoAgentPauseControl: View {
         GroupBox(copy.pauseAgent) {
             VStack(alignment: .leading, spacing: 8) {
                 if let paused = viewModel.agentPauseStates[agent.id] {
+                    // The GroupBox already carries the action title; the toggle
+                    // label describes the current state instead of repeating it.
                     Toggle(
-                        copy.pauseAgent,
+                        paused ? copy.agentPausedState : copy.agentActiveState,
                         isOn: Binding(
                             get: { viewModel.agentPauseStates[agent.id] ?? paused },
                             set: { value in
@@ -96,7 +98,7 @@ struct MomoAgentPauseControl: View {
                     : "exclamationmark.triangle"
             )
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(MomoTheme.irreversibleRed)
             .fixedSize(horizontal: false, vertical: true)
 
             Button(copy.retryAgentPause) {
