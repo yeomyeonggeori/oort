@@ -61,6 +61,7 @@ struct Config: Sendable {
     var memoryExtractionEnabled: Bool = true
     var memoryExtractionPollInterval: Duration = .seconds(5)
     var memoryExtractionBatchSize: Int = 50
+    var memoryPoisonThreshold: Int = 5
 
     // ---- Memory embedding backfill (MOMO-527 / ADR-0129 D3) ----
     var memoryEmbeddingEnabled: Bool = true
@@ -127,6 +128,7 @@ struct Config: Sendable {
             memoryExtractionBatchSize: min(
                 max(envInt("MEMORY_EXTRACTION_BATCH_SIZE", 50), 1), 200
             ),
+            memoryPoisonThreshold: max(envInt("MEMORY_POISON_THRESHOLD", 5), 1),
             memoryEmbeddingEnabled: AgentProviderValidation.boolFlag(
                 ProcessInfo.processInfo.environment["MEMORY_EMBEDDING_ENABLED"] ?? "1"
             ),

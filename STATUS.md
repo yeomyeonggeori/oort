@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-539 추출·임베딩 워커 실패 백오프와 포이즌 격리 (#620, 2026-07-22)
+
+- memory extraction과 embedding 배치 실패에 기본 poll 간격부터 최대 5분까지 지수 백오프를 적용하고, 성공 시 지연을 리셋한다. `MEMORY_POISON_THRESHOLD` 기본값은 5이며 실패 카운트는 동일 워터마크/ID 배치별로 유지한다.
+- 추출은 N회째 lease·워터마크를 검증해 커서를 전진시키며 `memory.extraction.poisoned` audit 1행을 같은 트랜잭션에 기록한다. 임베딩은 배치 전체 provider 성공 후 트랜잭션 반영하고, `memory.embedding.poisoned` audit의 ID 목록을 영속 skip marker로 사용해 스키마 변경 없이 다음 배치로 전진한다.
+- AgentWorker 50 tests와 집중 10 tests가 실패 0이며 주입 sleeper로 실제 대기 없는 백오프·상한·성공 리셋·배치별 N회 격리를 단정했다. `verify_memory_plane.sh` 실제 PG18 회귀는 지시대로 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-546 workd ACP 이벤트 서버 릴레이 (#623, 2026-07-22)
 
 - workd의 ACP sink를 mode 0600 raw JSONL + 서버 요약 relay 복합 sink로 바꾸고 progress/plan/승인 요청·결정/terminal 생성·종료를 기존 signed work-session PATCH로 보낸다. 서버는 신규 스키마·라우트 없이 세션 thread `message` 원장과 `message.new` + ACP envelope outbox를 한 트랜잭션에 투영한다.

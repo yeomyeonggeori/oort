@@ -3,6 +3,54 @@ import XCTest
 @testable import AgentWorker
 
 final class MemoryExtractionTests: XCTestCase {
+    actor RecordingMemorySleeper: MemoryWorkerSleeping {
+        private(set) var durations: [Duration] = []
+
+        func sleep(for duration: Duration) async {
+            durations.append(duration)
+        }
+    }
+
+    func testMemoryBatchRetryBacksOffCapsAndResetsAfterSuccess() {
+        var retry = MemoryBatchRetryState<String>(
+            baseDelay: .seconds(5), maximumDelay: .seconds(300), poisonThreshold: 20
+        )
+        let delays = (0..<8).map { _ in retry.recordFailure(for: "batch-a").delay }
+        XCTAssertEqual(
+            delays,
+            [.seconds(5), .seconds(10), .seconds(20), .seconds(40),
+             .seconds(80), .seconds(160), .seconds(300), .seconds(300)]
+        )
+
+        retry.recordSuccess(for: "batch-a")
+        let reset = retry.recordFailure(for: "batch-a")
+        XCTAssertEqual(reset.delay, .seconds(5))
+        XCTAssertEqual(reset.failureCount, 1)
+    }
+
+    func testMemoryBatchRetryPoisonsOnlySameBatchAtThreshold() {
+        var retry = MemoryBatchRetryState<String>(
+            baseDelay: .seconds(1), poisonThreshold: 5
+        )
+        for expected in 1...4 {
+            let decision = retry.recordFailure(for: "batch-a")
+            XCTAssertEqual(decision.failureCount, expected)
+            XCTAssertFalse(decision.shouldPoison)
+        }
+        let otherBatch = retry.recordFailure(for: "batch-b")
+        XCTAssertEqual(otherBatch.failureCount, 1)
+        XCTAssertFalse(otherBatch.shouldPoison)
+        XCTAssertTrue(retry.recordFailure(for: "batch-a").shouldPoison)
+    }
+
+    func testMemoryWorkerSleeperIsInjectableWithoutWallClockDelay() async {
+        let sleeper = RecordingMemorySleeper()
+        await sleeper.sleep(for: .seconds(5))
+        await sleeper.sleep(for: .seconds(10))
+        let durations = await sleeper.durations
+        XCTAssertEqual(durations, [.seconds(5), .seconds(10)])
+    }
+
     func testMockEmbeddingIsStableNormalizedAnd384Dimensional() throws {
         let first = WorkerMemoryEmbedding.deterministic("한국어 launch planning")
         let second = WorkerMemoryEmbedding.deterministic("한국어 launch planning")
