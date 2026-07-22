@@ -2377,8 +2377,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] verifier: 부여→서빙 필터 즉시 반영→회수→packet 재발급 제외
 
 ### MOMO-553 수용기준 — 메모리 grant UI: 목록/부여/회수 (⑮, 549 소비) `[runtime]`
-- [ ] 메모리 브라우저 상세의 잠금 플레이스홀더를 실물로 — grant 목록(대상·부여자·시점), 부여(member/agent 선택), 회수(확인 다이얼로그·revoked 이력 표시), 서버 4xx 사유 인라인
-- [ ] 스냅샷(목록·부여 각 라이트/다크)+design-review Blocker 0
+- [x] 메모리 브라우저 상세의 잠금 플레이스홀더를 실물로 — grant 목록(대상·부여자·시점), 부여(member/agent 선택), 회수(확인 다이얼로그·revoked 이력 표시), 서버 4xx 사유 인라인
+- [x] 스냅샷(목록·부여 각 라이트/다크)+design-review Blocker 0
 
 ### MOMO-550 수용기준 — 에이전트 온보딩 UI: URL 붙여넣기 (⑫, 536 소비) `[runtime]`
 - [x] 관리자 "에이전트 추가: URL" 문(from-card→능력/인증 요약 동의 화면→confirm), 실패 사유 인라인, 명부에 origin(card|local) 뱃지
