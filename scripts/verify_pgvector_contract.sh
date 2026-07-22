@@ -8,10 +8,32 @@ fi
 cd "$REPO_ROOT"
 
 IMAGE='pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e'
+
+service_image() {
+  compose=$1
+  service=$2
+  awk -v header="  $service:" '
+    $0 == header { active = 1; next }
+    active && /^  [a-zA-Z0-9_-]+:/ { exit }
+    active && /^    image:/ { sub(/^    image:[[:space:]]*/, ""); print; exit }
+  ' "$compose"
+}
+
 for compose in infra/docker-compose.yml infra/docker-compose.e2e.yml infra/prod/docker-compose.prod.yml; do
-  count="$(grep -Fc "image: $IMAGE" "$compose")"
-  if [ "$count" -ne 1 ]; then
-    echo "[pgvector-contract] FAIL $compose postgres service image drifted (count=$count)" >&2
+  actual="$(service_image "$compose" postgres)"
+  if [ "$actual" != "$IMAGE" ]; then
+    echo "[pgvector-contract] FAIL $compose postgres service image drifted ($actual)" >&2
+    exit 1
+  fi
+done
+
+# MOMO-538 uses the identical glibc/trixie PG image for the optional one-shot
+# eve database provisioner. Adding this service must not weaken the primary
+# postgres assertion above or make a harmless duplicate string fail the guard.
+for compose in infra/docker-compose.yml infra/prod/docker-compose.prod.yml; do
+  actual="$(service_image "$compose" eve-db-roles)"
+  if [ "$actual" != "$IMAGE" ]; then
+    echo "[pgvector-contract] FAIL $compose eve-db-roles image drifted ($actual)" >&2
     exit 1
   fi
 done

@@ -22,6 +22,9 @@ Major bundled/linked components:
 - xterm.js / @xterm/xterm (MIT) — https://github.com/xtermjs/xterm.js
 - SwiftProtobuf (Apache-2.0) — https://github.com/apple/swift-protobuf
 - pgvector (PostgreSQL License) — https://github.com/pgvector/pgvector
+- Node.js (MIT) — https://github.com/nodejs/node
+- eve (Apache-2.0) — https://github.com/vercel/eve
+- Workflow Postgres World (Apache-2.0) — https://github.com/vercel/workflow
 
 TODO(Codex): regenerate from Package.resolved via scripts/gen-notices.sh; verify
 each SPDX identifier against the upstream LICENSE file. Report any non-permissive

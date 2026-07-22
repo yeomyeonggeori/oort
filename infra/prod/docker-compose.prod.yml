@@ -262,6 +262,72 @@ services:
     networks:
       - private
 
+  # MOMO-538 self-host option. The default production stack remains unchanged;
+  # opt in explicitly with `--profile eve`. The pinned Node 24 base installs
+  # the MOMO-534 lockfile (eve 0.27.0) and mounts no momo database credential.
+  eve-db-roles:
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    profiles: ["eve"]
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: postgres
+      PGUSER: ${POSTGRES_USER:?set POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      MOMO_DB_NAME: ${POSTGRES_DB:?set POSTGRES_DB}
+      EVE_WORLD_DB: ${EVE_WORLD_DB:-eve_world}
+      EVE_WORLD_USER: ${EVE_WORLD_USER:-eve_world}
+      EVE_WORLD_PASSWORD: ${EVE_WORLD_PASSWORD:-change-me-eve-world}
+    command: ["sh", "/bootstrap/bootstrap_world.sh"]
+    volumes:
+      - ../eve/bootstrap_world.sh:/bootstrap/bootstrap_world.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+
+  eve:
+    image: node:24.4.1-bookworm-slim@sha256:36ae19f59c91f3303c7a648f07493fe14c4bd91320ac8d898416327bacf1bbfa
+    profiles: ["eve"]
+    restart: unless-stopped
+    init: true
+    working_dir: /eve-runtime
+    command: ["sh", "/bootstrap/entrypoint.sh"]
+    environment:
+      EVE_PORT: 28140
+      WORKFLOW_TARGET_WORLD: "@workflow/world-postgres"
+      WORKFLOW_POSTGRES_URL: postgres://${EVE_WORLD_USER:-eve_world}:${EVE_WORLD_PASSWORD:-change-me-eve-world}@postgres:5432/${EVE_WORLD_DB:-eve_world}
+      WORKFLOW_POSTGRES_JOB_PREFIX: ${EVE_WORLD_JOB_PREFIX:-momo_eve}
+      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: ${EVE_WORLD_WORKER_CONCURRENCY:-10}
+      WORKFLOW_POSTGRES_MAX_POOL_SIZE: ${EVE_WORLD_MAX_POOL_SIZE:-10}
+      MOMO_BASE_URL: ${EVE_MOMO_BASE_URL:-http://api:8080}
+      MOMO_WORKSPACE_ID: ${MOMO_WORKSPACE_ID:-}
+      MOMO_AGENT_MEMBER_ID: ${MOMO_AGENT_MEMBER_ID:-}
+      MOMO_AGENT_TOKEN: ${MOMO_AGENT_TOKEN:-}
+      MOMO_CHANNEL_ROUTE_TOKEN: ${MOMO_CHANNEL_ROUTE_TOKEN:-}
+      AI_GATEWAY_API_KEY: ${EVE_AI_GATEWAY_API_KEY:-}
+    ports:
+      - "${EVE_PORT:-28140}:28140"
+    volumes:
+      - ../../examples/eve-momo-channel:/preset:ro
+      - ../eve/entrypoint.sh:/bootstrap/entrypoint.sh:ro
+      - eve-runtime:/eve-runtime
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:28140/eve/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      eve-db-roles:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    networks:
+      - private
+
   # ADR-0127 self-host option. Select with `--profile s3`; Dawn-hosted
   # deployments keep the default Drive archive and never start these services.
   minio:
@@ -318,3 +384,5 @@ volumes:
   caddy-config:
   momo-web-static:
     name: ${WEB_STATIC_VOLUME_NAME:-momo-web-static}
+  eve-runtime:
+    name: ${EVE_RUNTIME_VOLUME_NAME:-momo-eve-runtime}

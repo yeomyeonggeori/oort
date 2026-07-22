@@ -3,6 +3,43 @@ import XCTest
 @testable import OutboundHTTPPolicy
 
 final class OutboundHTTPPolicyTests: XCTestCase {
+    func testProviderEndpointTrustSeparatesLocalSelfHostedAndExternal() {
+        XCTAssertEqual(
+            ProviderEndpointTrustPolicy.classify(
+                providerMode: "local-mock", baseURL: "https://api.openai.com/v1"
+            ),
+            .localMock
+        )
+        for url in [
+            "http://127.0.0.1:8088/v1",
+            "http://10.20.30.40:8088/v1",
+            "http://172.31.4.5/v1",
+            "https://192.168.1.4/v1",
+            "http://[::1]:8088/v1",
+            "http://[fd00::1]/v1",
+        ] {
+            XCTAssertEqual(
+                ProviderEndpointTrustPolicy.classify(
+                    providerMode: "external-hermes", baseURL: url
+                ),
+                .selfHosted,
+                url
+            )
+        }
+        XCTAssertEqual(
+            ProviderEndpointTrustPolicy.classify(
+                providerMode: "external-hermes", baseURL: "https://api.openai.com/v1"
+            ),
+            .external
+        )
+        XCTAssertEqual(
+            ProviderEndpointTrustPolicy.classify(
+                providerMode: "external-hermes", baseURL: "not-a-url"
+            ),
+            .external
+        )
+    }
+
     func testPrivateLinkLocalAndMappedAddressesAreDenied() {
         for address in [
             "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.1",

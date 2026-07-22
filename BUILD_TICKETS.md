@@ -2344,8 +2344,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] verifier PASS + 528 회귀
 
 ### MOMO-538 수용기준 — 동봉 eve 옵션 프로파일 (Wave C, 534 후) `[runtime]`
-- [ ] compose --profile eve(기본 오프·버전 고정·별도 DB world·어댑터 프리셋)+drift guard+RUN.md, 미기동 시 무영향
-- [ ] compose config+기동 스모크 verifier PASS
+- [x] compose --profile eve(기본 오프·버전 고정·별도 DB world·어댑터 프리셋)+drift guard+RUN.md, 미기동 시 무영향
+- [x] compose config+기동 스모크 verifier PASS
 
 ### MOMO-539 수용기준 — 추출 워커 실패 백오프 (소형) `[runtime]`
 - [x] 지수 백오프(상한 5분)+포이즌 배치 N회 후 워터마크 전진+audit 1회, 핫루프 제거

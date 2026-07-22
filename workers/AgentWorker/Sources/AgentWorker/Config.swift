@@ -1,4 +1,5 @@
 import Foundation
+import OutboundHTTPPolicy
 
 /// AgentWorker configuration loaded from environment variables.
 ///
@@ -144,6 +145,13 @@ struct Config: Sendable {
 
     var agentProviderEndpointLabel: String {
         AgentProviderValidation.redactedEndpointLabel(hermesBaseURL)
+    }
+
+    var memoryProviderTrust: ProviderEndpointTrust {
+        ProviderEndpointTrustPolicy.classify(
+            providerMode: agentProviderMode.rawValue,
+            baseURL: hermesBaseURL
+        )
     }
 
     var agentAvailability: String {

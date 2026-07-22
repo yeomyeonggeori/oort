@@ -145,3 +145,65 @@ public enum OutboundURLPolicy {
         return false
     }
 }
+
+/// Shared trust boundary for provider calls that may carry workspace content.
+///
+/// `local-mock` and `internal-host-mock` never leave momo. An
+/// `external-hermes` endpoint is considered self-hosted only when its URL host
+/// is a literal loopback/private address (or localhost); unresolved and public
+/// hosts fail closed as external. Server policy projections and background
+/// workers both consume this implementation so their consent decisions cannot
+/// drift.
+public enum ProviderEndpointTrust: String, Codable, Sendable {
+    case localMock = "local-mock"
+    case selfHosted = "self-hosted"
+    case external
+
+    public var requiresWorkspaceConsent: Bool { self == .external }
+}
+
+public enum ProviderEndpointTrustPolicy {
+    public static func classify(providerMode: String, baseURL: String) -> ProviderEndpointTrust {
+        switch providerMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "local-mock", "internal-host-mock":
+            return .localMock
+        default:
+            guard let host = URLComponents(string: baseURL)?.host,
+                  isLoopbackOrPrivateAddress(host)
+            else { return .external }
+            return .selfHosted
+        }
+    }
+
+    public static func isLoopbackOrPrivateAddress(_ raw: String) -> Bool {
+        let host = raw.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if host == "localhost" || host.hasSuffix(".localhost") { return true }
+
+        var ipv4 = in_addr()
+        if host.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
+            let value = UInt32(bigEndian: ipv4.s_addr)
+            let a = UInt8((value >> 24) & 0xff)
+            let b = UInt8((value >> 16) & 0xff)
+            return a == 0 || a == 10 || a == 127
+                || (a == 169 && b == 254)
+                || (a == 172 && (16...31).contains(b))
+                || (a == 192 && b == 168)
+        }
+
+        var ipv6 = in6_addr()
+        if host.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1 {
+            let bytes = withUnsafeBytes(of: &ipv6) { Array($0) }
+            if bytes.allSatisfy({ $0 == 0 }) { return true }
+            if bytes.dropLast().allSatisfy({ $0 == 0 }) && bytes.last == 1 { return true }
+            if (bytes[0] & 0xfe) == 0xfc { return true }
+            if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 { return true }
+            if bytes[0..<10].allSatisfy({ $0 == 0 })
+                && bytes[10] == 0xff && bytes[11] == 0xff {
+                return isLoopbackOrPrivateAddress(
+                    "\(bytes[12]).\(bytes[13]).\(bytes[14]).\(bytes[15])"
+                )
+            }
+        }
+        return false
+    }
+}
