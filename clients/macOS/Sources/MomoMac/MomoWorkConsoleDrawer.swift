@@ -370,7 +370,13 @@ private struct MomoWorkSessionDetail: View {
             }
             if let acp = controller.acpSessions[session.id] {
                 ScrollView {
-                    MomoACPSessionCard(session: acp, copy: copy)
+                    MomoACPSessionCard(
+                        session: acp,
+                        toolDisplayName: controller.toolProfiles.first(where: { $0.tool == session.tool })?.displayName
+                            ?? copy.workToolTitle(session.tool),
+                        sessionLabel: session.label,
+                        copy: copy
+                    )
                         .padding(MomoTheme.WorkConsole.edgeInset)
                         .frame(maxWidth: 720)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1020,19 +1026,19 @@ struct MomoWorkConsoleSettingsView: View {
                 Text(copy.workAutoApproveUnknown)
                     .momoTypography(.metadata)
                     .foregroundStyle(.secondary)
-                ForEach(controller.enabledToolProfiles.map(\.tool)) { tool in
+                ForEach(controller.enabledToolProfiles) { profile in
                     HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
-                        Label(copy.workToolTitle(tool), systemImage: tool.systemImage)
+                        Label(profile.displayName, systemImage: profile.tool.systemImage)
                         Spacer(minLength: 0)
-                        Menu(autoApproveLabel(for: tool)) {
+                        Menu(autoApproveLabel(for: profile.tool)) {
                             Button(copy.workAutoApproveEnable) {
-                                Task { await controller.setAutoApprove(true, for: tool) }
+                                Task { await controller.setAutoApprove(true, for: profile.tool) }
                             }
                             Button(copy.workAutoApproveDisable) {
-                                Task { await controller.setAutoApprove(false, for: tool) }
+                                Task { await controller.setAutoApprove(false, for: profile.tool) }
                             }
                         }
-                        .disabled(controller.autoApproveStates[tool] == .updating)
+                        .disabled(controller.autoApproveStates[profile.tool] == .updating)
                     }
                 }
             }
@@ -1089,8 +1095,23 @@ struct MomoWorkConsoleSettingsView: View {
                 .momoTypography(.metadata)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if controller.toolProfiles.isEmpty {
-                Label(copy.workToolProfileUnavailable, systemImage: "lock")
+            if controller.isLoadingToolProfiles {
+                ProgressView(copy.workToolProfilesLoading)
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+            } else if controller.toolProfileIssue != nil {
+                VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                    Label(copy.workToolProfilesLoadFailed, systemImage: "exclamationmark.triangle")
+                        .momoTypography(.metadata)
+                        .foregroundStyle(MomoTheme.costAmber)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(copy.workToolProfilesReload) {
+                        Task { await controller.refreshToolProfiles() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else if controller.toolProfiles.isEmpty {
+                Label(copy.workToolProfileUnavailable, systemImage: "tray")
                     .momoTypography(.metadata)
                     .foregroundStyle(.secondary)
             } else {
@@ -1118,16 +1139,12 @@ struct MomoWorkConsoleSettingsView: View {
                             } label: {
                                 Image(systemName: "ellipsis")
                             }
+                            .accessibilityLabel(copy.workToolProfileActions(profile.displayName))
                             .menuStyle(.borderlessButton)
                             .disabled(controller.mutatingToolKeys.contains(profile.toolKey))
                         }
                     }
                 }
-            }
-            if controller.toolProfileIssue != nil {
-                Label(copy.workToolProfileUnavailable, systemImage: "exclamationmark.triangle")
-                    .momoTypography(.metadata)
-                    .foregroundStyle(MomoTheme.costAmber)
             }
         }
     }
@@ -1210,7 +1227,7 @@ struct MomoWorkConsoleSettingsView: View {
     }
 }
 
-private struct MomoWorkToolProfileEditor: View {
+struct MomoWorkToolProfileEditor: View {
     @ObservedObject var controller: MomoWorkConsoleController
     let profile: MomoWorkToolProfile?
     let copy: MomoWorkspaceCopy
@@ -1224,6 +1241,7 @@ private struct MomoWorkToolProfileEditor: View {
     @State private var risk: MomoWorkToolRisk
     @State private var enabled: Bool
     @State private var isSaving = false
+    @State private var saveFailed = false
 
     init(
         controller: MomoWorkConsoleController,
@@ -1280,6 +1298,13 @@ private struct MomoWorkToolProfileEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if saveFailed {
+                Label(copy.workToolSaveFailed, systemImage: "exclamationmark.triangle.fill")
+                    .momoTypography(.metadata)
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Spacer(minLength: 0)
                 Button(copy.cancel) { dismiss() }
@@ -1287,12 +1312,18 @@ private struct MomoWorkToolProfileEditor: View {
                 Button(isSaving ? copy.workToolSaving : copy.workToolSave) {
                     Task {
                         isSaving = true
+                        saveFailed = false
                         let saved = await controller.saveToolProfile(draft, replacing: profile)
                         isSaving = false
-                        if saved { dismiss() }
+                        if saved {
+                            dismiss()
+                        } else {
+                            saveFailed = true
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(!isValid || isSaving)
             }
         }

@@ -53,10 +53,14 @@ final class MomoLocalACPSession: ObservableObject {
     init(
         previewEvents: [ACPProjectedEvent] = [],
         previewIsRunning: Bool = false,
+        previewStopReason: String? = nil,
+        previewErrorLabel: String? = nil,
         onCompletion: @escaping @MainActor (Int?) -> Void = { _ in }
     ) {
         events = previewEvents
         isRunning = previewIsRunning
+        stopReason = previewStopReason
+        errorLabel = previewErrorLabel
         self.onCompletion = onCompletion
     }
 
@@ -107,7 +111,10 @@ final class MomoLocalACPSession: ObservableObject {
                 guard let self else { return }
                 self.stopReason = result.stopReason
             } catch {
-                self?.errorLabel = "acp_session_failed"
+                guard let self else { return }
+                self.errorLabel = "acp_session_failed"
+                self.isRunning = false
+                self.onCompletion(nil)
             }
         }
     }

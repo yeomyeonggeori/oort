@@ -176,6 +176,9 @@ extension MomoWorkspaceCopy {
     }
     var workToolProfileAdd: String { language == .korean ? "도구 등록" : "Register tool" }
     var workToolProfileEdit: String { language == .korean ? "프로파일 편집" : "Edit profile" }
+    func workToolProfileActions(_ displayName: String) -> String {
+        language == .korean ? "\(displayName) 도구 메뉴" : "\(displayName) tool menu"
+    }
     var workToolProfileDelete: String { language == .korean ? "도구 등록 해제" : "Unregister tool" }
     var workToolProfileDeleteTitle: String { language == .korean ? "이 도구를 등록 해제할까요?" : "Unregister this tool?" }
     var workToolProfileDeleteBody: String {
@@ -186,6 +189,15 @@ extension MomoWorkspaceCopy {
     var workToolProfileUnavailable: String {
         language == .korean ? "활성화된 도구 프로파일이 없습니다." : "No enabled tool profiles are available."
     }
+    var workToolProfilesLoading: String {
+        language == .korean ? "도구 프로파일 불러오는 중" : "Loading tool profiles"
+    }
+    var workToolProfilesLoadFailed: String {
+        language == .korean
+            ? "도구 프로파일을 불러오지 못했습니다. 다시 불러오기를 선택하세요."
+            : "Tool profiles could not be loaded. Choose Reload to try again."
+    }
+    var workToolProfilesReload: String { language == .korean ? "다시 불러오기" : "Reload" }
     var workToolKey: String { language == .korean ? "도구 키" : "Tool key" }
     var workToolDisplayName: String { language == .korean ? "표시 이름" : "Display name" }
     var workToolCommand: String { language == .korean ? "명령 키" : "Command key" }
@@ -218,6 +230,11 @@ extension MomoWorkspaceCopy {
     }
     var workToolSave: String { language == .korean ? "프로파일 저장" : "Save profile" }
     var workToolSaving: String { language == .korean ? "저장 중" : "Saving" }
+    var workToolSaveFailed: String {
+        language == .korean
+            ? "도구 프로파일을 저장하지 못했습니다. 연결을 확인하고 프로파일 저장을 다시 선택하세요."
+            : "The tool profile could not be saved. Check the connection and choose Save profile again."
+    }
     var workToolInvalid: String {
         language == .korean
             ? "키와 명령은 영문 소문자·숫자·점·대시만 사용할 수 있으며, 인자에 경로와 자격증명을 넣을 수 없습니다."
@@ -227,12 +244,39 @@ extension MomoWorkspaceCopy {
     var acpInitialPromptPlaceholder: String {
         language == .korean ? "에이전트에게 맡길 작업을 입력하세요" : "Describe the task for the agent"
     }
-    var acpCardTitle: String { language == .korean ? "ACP 작업" : "ACP work" }
+    func acpCardTitle(toolDisplayName: String, sessionLabel: String) -> String {
+        "\(toolDisplayName) · \(sessionLabel)"
+    }
     var acpPlan: String { language == .korean ? "계획" : "Plan" }
     var acpProgress: String { language == .korean ? "진행" : "Progress" }
     var acpPermission: String { language == .korean ? "승인 필요" : "Permission required" }
     var acpPermissionResolved: String { language == .korean ? "처리됨" : "Resolved" }
     var acpWaiting: String { language == .korean ? "에이전트 응답을 기다리는 중" : "Waiting for agent update" }
+    var acpSessionFailedStatus: String { language == .korean ? "실패" : "Failed" }
+    var acpDecisionUnavailable: String {
+        language == .korean
+            ? "세션이 종료되어 결정할 수 없습니다."
+            : "This session has ended, so a decision cannot be made."
+    }
+    func acpSessionFailed(_ errorLabel: String) -> String {
+        let reason = switch (errorLabel, language) {
+        case ("acp_session_failed", .korean): "에이전트 연결 또는 응답 처리 중 오류가 발생했습니다."
+        case ("acp_session_failed", .english): "The agent connection or response failed."
+        case (_, .korean): "에이전트 세션에서 오류가 발생했습니다."
+        case (_, .english): "The agent session failed."
+        }
+        return language == .korean
+            ? "\(reason) 새 세션을 시작해 다시 시도하세요."
+            : "\(reason) Start a new session to try again."
+    }
+    func acpSessionStopped(_ stopReason: String) -> String {
+        switch (stopReason, language) {
+        case ("end_turn", .korean): "에이전트가 작업 응답을 마쳤습니다."
+        case ("end_turn", .english): "The agent finished its response."
+        case (_, .korean): "에이전트가 세션을 종료했습니다."
+        case (_, .english): "The agent ended the session."
+        }
+    }
     func acpPermissionOption(kind: String, fallback: String) -> String {
         switch (kind, language) {
         case ("allow_once", .korean): "이번만 허용"

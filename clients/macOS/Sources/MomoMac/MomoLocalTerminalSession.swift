@@ -52,43 +52,6 @@ struct MomoWorkLaunchSpec: Equatable {
     let environment: [String]
 
     static func resolve(
-        tool: MomoWorkTool,
-        environment source: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
-    ) throws -> MomoWorkLaunchSpec {
-        guard !MomoWorkHostRuntime.isAppSandboxed else {
-            throw MomoWorkConsoleError.sandboxRestricted
-        }
-
-        let executable: String
-        let arguments: [String]
-        switch tool {
-        case .shell:
-            let candidate = source["SHELL"] ?? "/bin/zsh"
-            executable = candidate.hasPrefix("/") && fileManager.isExecutableFile(atPath: candidate)
-                ? candidate
-                : "/bin/zsh"
-            arguments = ["-l"]
-        default:
-            guard let resolved = resolveExecutable(
-                named: tool.rawValue,
-                environment: source,
-                fileManager: fileManager
-            ) else {
-                throw MomoWorkConsoleError.executableUnavailable(tool)
-            }
-            executable = resolved
-            arguments = []
-        }
-
-        return MomoWorkLaunchSpec(
-            executable: executable,
-            arguments: arguments,
-            environment: allowedEnvironment(source)
-        )
-    }
-
-    static func resolve(
         profile: MomoWorkToolProfile,
         environment source: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> MomoWorkLaunchSpec {
@@ -101,32 +64,6 @@ struct MomoWorkLaunchSpec: Equatable {
             arguments: [profile.launchTemplate.command] + profile.launchTemplate.arguments,
             environment: allowedEnvironment(source)
         )
-    }
-
-    private static func resolveExecutable(
-        named name: String,
-        environment: [String: String],
-        fileManager: FileManager
-    ) -> String? {
-        let home = environment["HOME"] ?? fileManager.homeDirectoryForCurrentUser.path
-        let conventional = [
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "\(home)/.local/bin",
-            "\(home)/.npm-global/bin",
-        ]
-        let pathEntries = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        for directory in pathEntries + conventional where !directory.isEmpty {
-            let candidate = URL(fileURLWithPath: directory)
-                .appendingPathComponent(name, isDirectory: false)
-                .path
-            if fileManager.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
     }
 
     private static func allowedEnvironment(_ source: [String: String]) -> [String] {
@@ -167,20 +104,6 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
         terminalView.optionAsMetaKey = true
         terminalView.changeScrollback(MomoTheme.WorkConsole.terminalScrollbackLines)
         applyTheme(.defaultPreset)
-    }
-
-    func start(tool: MomoWorkTool, directory: URL?) throws {
-        let spec = try MomoWorkLaunchSpec.resolve(tool: tool)
-        terminalView.startProcess(
-            executable: spec.executable,
-            args: spec.arguments,
-            environment: spec.environment,
-            currentDirectory: directory?.path
-        )
-        guard terminalView.process.running else {
-            throw MomoWorkConsoleError.localLaunchFailed
-        }
-        isRunning = true
     }
 
     func start(profile: MomoWorkToolProfile, directory: URL?) throws {

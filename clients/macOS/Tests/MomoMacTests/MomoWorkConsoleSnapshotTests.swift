@@ -45,12 +45,12 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
         )
     }
 
-    func testWorkConsoleSettingsLightSnapshot() throws {
-        try assertSettingsSnapshot(.light, named: "light", testName: #function)
+    func testWorkConsoleSettingsLightSnapshot() async throws {
+        try await assertSettingsSnapshot(.light, named: "light", testName: #function)
     }
 
-    func testWorkConsoleSettingsDarkSnapshot() throws {
-        try assertSettingsSnapshot(.dark, named: "dark", testName: #function)
+    func testWorkConsoleSettingsDarkSnapshot() async throws {
+        try await assertSettingsSnapshot(.dark, named: "dark", testName: #function)
     }
 
     func testACPSessionCardLightSnapshot() throws {
@@ -59,6 +59,46 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
 
     func testACPSessionCardDarkSnapshot() throws {
         try assertACPCardSnapshot(.dark, named: "dark", testName: #function)
+    }
+
+    func testACPApprovedLightSnapshot() throws {
+        try assertACPCardSnapshot(.light, named: "light", testName: #function, state: .approved)
+    }
+
+    func testACPApprovedDarkSnapshot() throws {
+        try assertACPCardSnapshot(.dark, named: "dark", testName: #function, state: .approved)
+    }
+
+    func testACPRejectedLightSnapshot() throws {
+        try assertACPCardSnapshot(.light, named: "light", testName: #function, state: .rejected)
+    }
+
+    func testACPRejectedDarkSnapshot() throws {
+        try assertACPCardSnapshot(.dark, named: "dark", testName: #function, state: .rejected)
+    }
+
+    func testACPSessionEndedLightSnapshot() throws {
+        try assertACPCardSnapshot(.light, named: "light", testName: #function, state: .ended)
+    }
+
+    func testACPSessionEndedDarkSnapshot() throws {
+        try assertACPCardSnapshot(.dark, named: "dark", testName: #function, state: .ended)
+    }
+
+    func testACPSessionFailedLightSnapshot() throws {
+        try assertACPCardSnapshot(.light, named: "light", testName: #function, state: .failed)
+    }
+
+    func testACPSessionFailedDarkSnapshot() throws {
+        try assertACPCardSnapshot(.dark, named: "dark", testName: #function, state: .failed)
+    }
+
+    func testWorkToolProfileEditorLightSnapshot() async throws {
+        try await assertToolProfileEditorSnapshot(.light, named: "light", testName: #function)
+    }
+
+    func testWorkToolProfileEditorDarkSnapshot() async throws {
+        try await assertToolProfileEditorSnapshot(.dark, named: "dark", testName: #function)
     }
 
     private func assertTerminalSnapshot(
@@ -85,11 +125,15 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
         _ scheme: ColorScheme,
         named: String,
         testName: String
-    ) throws {
+    ) async throws {
         let canonicalName = testName.replacingOccurrences(of: "()", with: "")
         try requireCanonicalReference(testName: canonicalName, named: named)
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot-owner")
         let controller = MomoWorkConsoleController(
-            viewModel: ChatViewModel(backend: LiveChatBackend()),
+            viewModel: viewModel,
             initialHostRegistrationState: .registering,
             initialToolProfiles: [snapshotToolProfile()]
         )
@@ -119,21 +163,59 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
     private func assertACPCardSnapshot(
         _ scheme: ColorScheme,
         named: String,
-        testName: String
+        testName: String,
+        state: ACPCardSnapshotState = .pending
     ) throws {
         let canonicalName = testName.replacingOccurrences(of: "()", with: "")
         try requireCanonicalReference(testName: canonicalName, named: named)
         let size = CGSize(width: 560, height: 520)
         let content = MomoACPSessionCard(
             session: MomoLocalACPSession(
-                previewEvents: snapshotACPEvents(),
-                previewIsRunning: true
+                previewEvents: snapshotACPEvents(state: state),
+                previewIsRunning: state.keepsSessionRunning,
+                previewStopReason: state == .ended ? "end_turn" : nil,
+                previewErrorLabel: state == .failed ? "acp_session_failed" : nil
             ),
+            toolDisplayName: "OpenCode",
+            sessionLabel: "결제 모듈 회귀 점검",
             copy: MomoWorkspaceCopy(language: .korean)
         )
         .padding(24)
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .momoFlatSurface(.background)
+        let image = try render(content, size: size, scheme: scheme)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: named,
+            record: snapshotRecordMode,
+            testName: canonicalName
+        )
+    }
+
+    private func assertToolProfileEditorSnapshot(
+        _ scheme: ColorScheme,
+        named: String,
+        testName: String
+    ) async throws {
+        let canonicalName = testName.replacingOccurrences(of: "()", with: "")
+        try requireCanonicalReference(testName: canonicalName, named: named)
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot-owner")
+        let controller = MomoWorkConsoleController(
+            viewModel: viewModel,
+            initialToolProfiles: [snapshotToolProfile()]
+        )
+        let size = CGSize(width: 400, height: 640)
+        let content = MomoWorkToolProfileEditor(
+            controller: controller,
+            profile: snapshotToolProfile(),
+            copy: MomoWorkspaceCopy(language: .korean)
+        )
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
         let image = try render(content, size: size, scheme: scheme)
         assertSnapshot(
             of: image,
@@ -164,11 +246,11 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
         )
     }
 
-    private func snapshotACPEvents() -> [ACPProjectedEvent] {
+    private func snapshotACPEvents(state: ACPCardSnapshotState) -> [ACPProjectedEvent] {
         let context: [String: ACPValue] = [
             "work_session_id": .string("00000000-0000-7000-8000-000000000532"),
         ]
-        return [
+        var events = [
             ACPProjectedEvent(
                 type: "agent.status",
                 timestampMs: 1,
@@ -211,6 +293,22 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
                 ]) { _, new in new })
             ),
         ]
+        if state == .approved || state == .rejected {
+            events.append(
+                ACPProjectedEvent(
+                    type: "approval.decided",
+                    timestampMs: 4,
+                    payload: .object(context.merging([
+                        "status": .string(state == .approved ? "approved" : "rejected"),
+                        "option_id": .string(state == .approved ? "allow-once" : "reject-once"),
+                    ]) { _, new in new })
+                )
+            )
+        }
+        if state == .ended {
+            return Array(events.prefix(2))
+        }
+        return events
     }
 
     private func snapshotPermission(_ id: String, _ name: String, _ kind: String) -> ACPValue {
@@ -233,12 +331,39 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
         hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         hostingView.layoutSubtreeIfNeeded()
         hostingView.displayIfNeeded()
-        guard let representation = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
             throw XCTSkip("NSHostingView produced no Work Console bitmap on this host")
         }
+        representation.size = size
         hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
         let image = NSImage(size: size)
         image.addRepresentation(representation)
         return image
+    }
+}
+
+private enum ACPCardSnapshotState {
+    case pending
+    case approved
+    case rejected
+    case ended
+    case failed
+
+    var keepsSessionRunning: Bool {
+        switch self {
+        case .pending, .approved, .rejected: true
+        case .ended, .failed: false
+        }
     }
 }

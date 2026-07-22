@@ -141,10 +141,22 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertEqual(controller.lastIssue, .hostRegistrationFailed)
     }
 
-    func testShellLaunchEnvironmentDoesNotForwardCredentialsOrWorkingPath() throws {
+    func testProfileLaunchEnvironmentDoesNotForwardCredentialsOrWorkingPath() throws {
         let secret = "must-not-reach-pty-environment"
         let spec = try MomoWorkLaunchSpec.resolve(
-            tool: .shell,
+            profile: MomoWorkToolProfile(
+                id: UUID(),
+                workspaceId: WorkspaceID(),
+                toolKey: "shell",
+                displayName: "팀 셸",
+                launchTemplate: MomoWorkToolLaunchTemplate(command: "zsh", arguments: ["-l"]),
+                tierDefaults: [:],
+                enabled: true,
+                createdBy: MemberID(),
+                updatedBy: MemberID(),
+                createdAtMs: 1,
+                updatedAtMs: 1
+            ),
             environment: [
                 "SHELL": "/bin/zsh",
                 "PATH": "/usr/bin:/bin",
@@ -155,8 +167,8 @@ final class MomoWorkConsoleTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(spec.executable, "/bin/zsh")
-        XCTAssertEqual(spec.arguments, ["-l"])
+        XCTAssertEqual(spec.executable, "/usr/bin/env")
+        XCTAssertEqual(spec.arguments, ["zsh", "-l"])
         XCTAssertTrue(spec.environment.contains("PATH=/usr/bin:/bin"))
         XCTAssertFalse(spec.environment.contains { $0.contains(secret) })
         XCTAssertFalse(spec.environment.contains { $0.hasPrefix("MOMO_ACCESS_TOKEN=") })
@@ -1396,6 +1408,14 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
         let resolved = MomoACPSessionPresentation(events: [plan, tool, request, decision])
         XCTAssertEqual(resolved.permission, .resolved(status: "approved", optionID: "allow-once"))
+    }
+
+    func testACPTerminalStateCopyMapsProtocolLabelsToUserLanguage() {
+        let copy = MomoWorkspaceCopy(language: .korean)
+
+        XCTAssertFalse(copy.acpSessionFailed("acp_session_failed").contains("acp_session_failed"))
+        XCTAssertFalse(copy.acpSessionStopped("end_turn").contains("end_turn"))
+        XCTAssertTrue(copy.acpSessionFailed("acp_session_failed").contains("새 세션"))
     }
 
     private func draftTool(_ draft: MomoWorkToolProfileDraft) -> MomoWorkTool {

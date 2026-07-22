@@ -124,6 +124,8 @@ struct MomoACPSessionPresentation: Equatable {
 
 struct MomoACPSessionCard: View {
     @ObservedObject var session: MomoLocalACPSession
+    let toolDisplayName: String
+    let sessionLabel: String
     let copy: MomoWorkspaceCopy
     @State private var resolvingOptionID: String?
 
@@ -136,10 +138,12 @@ struct MomoACPSessionCard: View {
             HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .foregroundStyle(MomoTheme.agentAccent)
-                Text(copy.acpCardTitle)
+                Text(copy.acpCardTitle(toolDisplayName: toolDisplayName, sessionLabel: sessionLabel))
                     .momoTypography(.emphasizedRow)
                 Spacer(minLength: 0)
-                Text(session.isRunning ? copy.workSessionRunning : copy.workSessionEnded)
+                Text(session.errorLabel == nil
+                    ? (session.isRunning ? copy.workSessionRunning : copy.workSessionEnded)
+                    : copy.acpSessionFailedStatus)
                     .momoTypography(.metadata)
                     .foregroundStyle(.secondary)
             }
@@ -188,16 +192,35 @@ struct MomoACPSessionCard: View {
 
             permissionContent
 
-            Text(presentation.statusDetail ?? copy.acpWaiting)
-                .momoTypography(.metadata)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            sessionStatus
         }
         .padding(MomoTheme.WorkConsole.contentSpacing)
         .momoSurface(.card)
         .onChange(of: session.events.count) {
             if case .pending = presentation.permission { return }
             resolvingOptionID = nil
+        }
+    }
+
+    @ViewBuilder
+    private var sessionStatus: some View {
+        if let errorLabel = session.errorLabel {
+            Label(copy.acpSessionFailed(errorLabel), systemImage: "exclamationmark.triangle.fill")
+                .momoTypography(.metadata)
+                .foregroundStyle(MomoTheme.irreversibleRed)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if session.isRunning {
+            Text(presentation.statusDetail ?? copy.acpWaiting)
+                .momoTypography(.metadata)
+                .foregroundStyle(.secondary)
+        } else if let stopReason = session.stopReason {
+            Text(copy.acpSessionStopped(stopReason))
+                .momoTypography(.metadata)
+                .foregroundStyle(.secondary)
+        } else {
+            Text(copy.workSessionEnded)
+                .momoTypography(.metadata)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -218,7 +241,7 @@ struct MomoACPSessionCard: View {
                     .foregroundStyle(.secondary)
             }
             .padding(MomoTheme.WorkConsole.standardSpacing)
-            .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
         case .pending(let title, let kind, let options):
             section(copy.acpPermission) {
                 HStack(alignment: .top, spacing: MomoTheme.WorkConsole.standardSpacing) {
@@ -229,6 +252,12 @@ struct MomoACPSessionCard: View {
                     Spacer(minLength: 0)
                 }
                 permissionButtons(options)
+                if !session.isRunning {
+                    Label(copy.acpDecisionUnavailable, systemImage: "info.circle")
+                        .momoTypography(.metadata)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -244,7 +273,7 @@ struct MomoACPSessionCard: View {
             content()
         }
         .padding(MomoTheme.WorkConsole.standardSpacing)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
     }
 
     private func permissionButtons(_ options: [MomoACPPermissionOptionItem]) -> some View {
@@ -266,8 +295,7 @@ struct MomoACPSessionCard: View {
             resolvingOptionID = option.id
             session.resolvePermission(optionID: option.id)
         }
-        .tint(option.isAllow ? MomoTheme.agentAccent : MomoTheme.irreversibleRed)
-        .disabled(resolvingOptionID != nil)
+        .disabled(resolvingOptionID != nil || !session.isRunning || session.errorLabel != nil)
         if primary {
             button.buttonStyle(.borderedProminent)
         } else {
