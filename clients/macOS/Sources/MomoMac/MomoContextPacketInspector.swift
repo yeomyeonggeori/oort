@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import MomoCore
 
@@ -45,6 +46,13 @@ private final class MomoContextPacketInspectorModel: ObservableObject {
         self.packetID = packetID
     }
 
+    init(snapshot: ContextPacketSnapshot) {
+        self.backend = nil
+        self.workspace = snapshot.workspaceId
+        self.packetID = snapshot.packetId
+        self.snapshot = snapshot
+    }
+
     func load() async {
         guard let backend, let workspace else {
             errorMessage = BackendError.notConnected.localizedDescription
@@ -65,6 +73,7 @@ struct MomoContextPacketInspectorView: View {
     @ObservedObject var viewModel: ChatViewModel
     @StateObject private var model: MomoContextPacketInspectorModel
     let copy: MomoWorkspaceCopy
+    private let loadsOnAppear: Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var sourceNavigationError: String?
@@ -72,6 +81,7 @@ struct MomoContextPacketInspectorView: View {
     init(viewModel: ChatViewModel, packetID: UUID, copy: MomoWorkspaceCopy) {
         self.viewModel = viewModel
         self.copy = copy
+        loadsOnAppear = true
         _model = StateObject(
             wrappedValue: MomoContextPacketInspectorModel(
                 backend: viewModel.memoryPlanePresentationBackend,
@@ -79,6 +89,13 @@ struct MomoContextPacketInspectorView: View {
                 packetID: packetID
             )
         )
+    }
+
+    init(viewModel: ChatViewModel, snapshot: ContextPacketSnapshot, copy: MomoWorkspaceCopy) {
+        self.viewModel = viewModel
+        self.copy = copy
+        loadsOnAppear = false
+        _model = StateObject(wrappedValue: MomoContextPacketInspectorModel(snapshot: snapshot))
     }
 
     var body: some View {
@@ -119,7 +136,11 @@ struct MomoContextPacketInspectorView: View {
             }
         }
         .frame(width: 760, height: 680)
-        .task { await model.load() }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .task {
+            guard loadsOnAppear else { return }
+            await model.load()
+        }
         .alert(copy.memoryOpenSource, isPresented: sourceErrorIsPresented) {
             Button(copy.dismiss, role: .cancel) {}
         } message: {
@@ -174,10 +195,10 @@ struct MomoContextPacketInspectorView: View {
                 let body = object["excerpt"]?.stringValue
                     ?? object["body"]?.stringValue
                     ?? object["text"]?.stringValue
-                    ?? "#\(index + 1)"
+                    ?? copy.servedContextMessageSequence(Int64(index + 1))
                 packetRow(
                     title: body,
-                    detail: object["seq"]?.intValue.map { "#\($0)" },
+                    detail: object["seq"]?.intValue.map(copy.servedContextMessageSequence),
                     source: sourceReference(object)
                 )
             }
@@ -214,6 +235,7 @@ struct MomoContextPacketInspectorView: View {
                                 Label(copy.memoryOpenSource, systemImage: "arrow.turn.up.left")
                             }
                             .buttonStyle(.link)
+                            .accessibilityLabel(copy.memoryOpenSource)
                         }
                     }
                 }
@@ -280,6 +302,7 @@ struct MomoContextPacketInspectorView: View {
                     Image(systemName: "arrow.turn.up.left")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(copy.memoryOpenSource)
                 .help(copy.memoryOpenSource)
             }
         }
@@ -364,8 +387,8 @@ private struct PacketKeyValueRows: View {
         } else {
             VStack(spacing: 0) {
                 ForEach(object.keys.sorted(), id: \.self) { key in
-                    LabeledContent(label(key)) {
-                        Text(value(object[key] ?? .null))
+                    LabeledContent(copy.servedContextBudgetLabel(key)) {
+                        Text(value(object[key] ?? .null, for: key))
                             .font(MomoTheme.Typography.supporting.monospacedDigit())
                             .textSelection(.enabled)
                     }
@@ -378,19 +401,24 @@ private struct PacketKeyValueRows: View {
         }
     }
 
-    private func label(_ key: String) -> String {
-        key.replacingOccurrences(of: "_tokens", with: "")
-            .replacingOccurrences(of: "_micro_usd", with: "")
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
-    }
-
-    private func value(_ json: JSON) -> String {
+    private func value(_ json: JSON, for key: String) -> String {
+        if key.hasSuffix("_micro_usd"), let amount = json.doubleValue {
+            return String(
+                format: "$%.4f",
+                locale: Locale(identifier: "en_US_POSIX"),
+                amount / 1_000_000
+            )
+        }
+        if key.hasSuffix("_tokens"), let count = json.intValue {
+            return "\(count.formatted()) \(copy.servedContextTokenUnit)"
+        }
         if let string = json.stringValue { return string }
         if let integer = json.intValue { return integer.formatted() }
         if let number = json.doubleValue { return number.formatted() }
         if let boolean = json.boolValue { return boolean ? copy.servedContextYes : copy.servedContextNo }
-        if let array = json.arrayValue { return array.map(value).joined(separator: ", ") }
+        if let array = json.arrayValue {
+            return array.map { value($0, for: key) }.joined(separator: ", ")
+        }
         return copy.servedContextUnknownValue
     }
 }

@@ -9,6 +9,8 @@ extension MomoWorkspaceCopy {
             : "Review workspace memory and the context actually served to agents."
     }
     var memorySearchPlaceholder: String { language == .korean ? "메모리 검색" : "Search memory" }
+    var memoryScopeFilterTitle: String { language == .korean ? "범위" : "Scope" }
+    var memoryAgentFilterTitle: String { language == .korean ? "에이전트" : "Agent" }
     var memoryAllScopes: String { language == .korean ? "모든 범위" : "All scopes" }
     var memoryAllAgents: String { language == .korean ? "모든 에이전트" : "All agents" }
     var memoryShowInactive: String { language == .korean ? "무효화된 항목 포함" : "Include invalidated" }
@@ -16,6 +18,7 @@ extension MomoWorkspaceCopy {
     var memoryNoResultsDetail: String {
         language == .korean ? "필터를 바꾸거나 검색어를 지워보세요." : "Change the filters or clear the search."
     }
+    var memorySelectionPrompt: String { language == .korean ? "메모리를 선택하세요." : "Select a memory." }
     var memoryUnavailable: String { language == .korean ? "메모리 서비스를 사용할 수 없습니다." : "Memory service is unavailable." }
     var memoryRetry: String { language == .korean ? "다시 불러오기" : "Reload" }
     var memoryActive: String { language == .korean ? "활성" : "Active" }
@@ -37,6 +40,9 @@ extension MomoWorkspaceCopy {
             : "This item is not deleted. It remains as auditable invalid history."
     }
     var memoryPolicyTitle: String { language == .korean ? "워크스페이스 메모리" : "Workspace memory" }
+    var memoryPolicyToggle: String {
+        language == .korean ? "워크스페이스 메모리 사용" : "Use workspace memory"
+    }
     var memoryPolicyDetail: String {
         language == .korean
             ? "끄면 서버가 메모리 투영을 삭제합니다. 이 작업은 되돌릴 수 없습니다."
@@ -51,10 +57,11 @@ extension MomoWorkspaceCopy {
             : "Grant changes remain locked until the server exposes list and revoke contracts."
     }
     var servedContextTitle: String { language == .korean ? "서빙 내역" : "Served context" }
+    var servedContextAction: String { language == .korean ? "서빙 내역 보기" : "View served context" }
     var servedContextSubtitle: String {
         language == .korean
-            ? "이 실행에 저장된 불변 Context Packet입니다. 현재 정책으로 다시 조립하지 않습니다."
-            : "The immutable Context Packet stored for this run. It is never rebuilt from current policy."
+            ? "이 실행에 서빙된 저장 스냅샷입니다. 현재 정책으로 다시 구성하지 않습니다."
+            : "The stored snapshot served to this run. It is not rebuilt from current policy."
     }
     var servedContextExpired: String { language == .korean ? "만료된 스냅샷" : "Expired snapshot" }
     var servedContextCurrent: String { language == .korean ? "발급 당시 스냅샷" : "Issued snapshot" }
@@ -66,13 +73,24 @@ extension MomoWorkspaceCopy {
     var servedContextEmpty: String { language == .korean ? "포함된 항목 없음" : "No items included" }
     var servedContextUnavailable: String {
         language == .korean
-            ? "이 실행에서 저장 packet 식별자를 찾을 수 없습니다."
-            : "No stored packet identifier is available for this run."
+            ? "이 실행에 서빙된 저장 스냅샷을 찾을 수 없습니다."
+            : "No stored snapshot served to this run is available."
     }
     var servedContextLoading: String { language == .korean ? "서빙 내역 불러오는 중" : "Loading served context" }
     var servedContextYes: String { language == .korean ? "예" : "Yes" }
     var servedContextNo: String { language == .korean ? "아니요" : "No" }
     var servedContextUnknownValue: String { language == .korean ? "값 없음" : "Not available" }
+    var servedContextBudgetIdentifier: String { language == .korean ? "한도 ID" : "Budget ID" }
+    var servedContextModelRoute: String { language == .korean ? "모델 경로" : "Model route" }
+    var servedContextMaxPromptTokens: String { language == .korean ? "최대 입력" : "Maximum prompt" }
+    var servedContextMaxCompletionTokens: String { language == .korean ? "최대 출력" : "Maximum completion" }
+    var servedContextReservedCost: String { language == .korean ? "예약 금액" : "Reserved cost" }
+    var servedContextSoftLimit: String { language == .korean ? "알림 한도" : "Soft limit" }
+    var servedContextHardLimit: String { language == .korean ? "최대 한도" : "Hard limit" }
+    var servedContextApprovalThreshold: String { language == .korean ? "승인 기준 금액" : "Approval threshold" }
+    var servedContextUsageLedgerMode: String { language == .korean ? "사용량 기록 방식" : "Usage ledger mode" }
+    var servedContextOtherBudget: String { language == .korean ? "기타 한도" : "Other budget" }
+    var servedContextTokenUnit: String { language == .korean ? "토큰" : "tokens" }
     var memoryCreatedAt: String { language == .korean ? "생성" : "Created" }
     var memoryUpdatedAt: String { language == .korean ? "최근 변경" : "Updated" }
 
@@ -99,6 +117,30 @@ extension MomoWorkspaceCopy {
         case (.english, .fact): return "Fact"
         case (.english, .episode): return "Episode"
         case (.english, .procedure): return "Procedure"
+        }
+    }
+
+    func servedContextMessageSequence(_ sequence: Int64) -> String {
+        language == .korean ? "메시지 \(sequence)번째" : "Message \(sequence)"
+    }
+
+    func memorySourceLabel(channelName: String?, date: String) -> String {
+        guard let channelName else { return date }
+        return "#\(channelName) · \(date)"
+    }
+
+    func servedContextBudgetLabel(_ key: String) -> String {
+        switch key {
+        case "budget_id": return servedContextBudgetIdentifier
+        case "model_route": return servedContextModelRoute
+        case "max_prompt_tokens": return servedContextMaxPromptTokens
+        case "max_completion_tokens": return servedContextMaxCompletionTokens
+        case "reserved_micro_usd": return servedContextReservedCost
+        case "soft_limit_micro_usd": return servedContextSoftLimit
+        case "hard_limit_micro_usd": return servedContextHardLimit
+        case "approval_required_over_micro_usd": return servedContextApprovalThreshold
+        case "usage_ledger_mode": return servedContextUsageLedgerMode
+        default: return servedContextOtherBudget
         }
     }
 }

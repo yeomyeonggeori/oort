@@ -80,8 +80,14 @@ final class MomoMemoryBrowserTests: XCTestCase {
         let copy = MomoWorkspaceCopy(language: .korean)
         XCTAssertEqual(copy.memoryBrowserTitle, "에이전트가 아는 것")
         XCTAssertEqual(copy.servedContextTitle, "서빙 내역")
+        XCTAssertEqual(copy.servedContextAction, "서빙 내역 보기")
+        XCTAssertEqual(copy.servedContextBudgetLabel("reserved_micro_usd"), "예약 금액")
+        XCTAssertEqual(copy.memorySourceLabel(channelName: "general", date: "2026. 7. 22."), "#general · 2026. 7. 22.")
+        XCTAssertEqual(copy.memorySourceLabel(channelName: nil, date: "2026. 7. 22."), "2026. 7. 22.")
         XCTAssertEqual(copy.memoryScopeTitle(.conversation), "대화")
         XCTAssertFalse(copy.memoryGrantUnavailable.contains("grant"))
+        XCTAssertFalse(copy.servedContextSubtitle.contains("Packet"))
+        XCTAssertFalse(copy.servedContextUnavailable.contains("packet"))
     }
 
     func testRESTBackendUsesAuthoritativeMemoryAndPacketContracts() async throws {
@@ -215,6 +221,24 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
         try await assertBrowserSnapshot(scheme: .dark, named: "korean-dark", testName: #function)
     }
 
+    func testKoreanContextInspectorCurrentLightSnapshot() async throws {
+        try await assertInspectorSnapshot(
+            scheme: .light,
+            expired: false,
+            named: "current-light",
+            testName: #function
+        )
+    }
+
+    func testKoreanContextInspectorExpiredDarkSnapshot() async throws {
+        try await assertInspectorSnapshot(
+            scheme: .dark,
+            expired: true,
+            named: "expired-dark",
+            testName: #function
+        )
+    }
+
     private func assertBrowserSnapshot(
         scheme: ColorScheme,
         named: String,
@@ -233,6 +257,14 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
         let seed = await live.seedDemo()
         let viewModel = ChatViewModel(backend: live)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "memory-snapshot")
+        viewModel.setChannels([
+            Channel(
+                id: .demoGeneral,
+                workspaceId: seed.workspace,
+                kind: .publicChannel,
+                name: "general"
+            ),
+        ])
         let agentID = try XCTUnwrap(seed.agents.first?.id)
         let model = MomoMemoryBrowserModel(
             backend: MemoryTestBackend(agentID: agentID),
@@ -266,6 +298,99 @@ final class MomoMemoryBrowserSnapshotTests: XCTestCase {
             named: named,
             record: recordMode,
             testName: canonicalName
+        )
+    }
+
+    private func assertInspectorSnapshot(
+        scheme: ColorScheme,
+        expired: Bool,
+        named: String,
+        testName: String
+    ) async throws {
+        let canonicalName = testName.replacingOccurrences(of: "()", with: "")
+        let reference = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("__Snapshots__/MomoMemoryBrowserTests")
+            .appendingPathComponent("\(canonicalName).\(named).png")
+        if recordMode == nil, !FileManager.default.fileExists(atPath: reference.path) {
+            throw XCTSkip("MOMO-529 context inspector canonical snapshot is awaiting recording")
+        }
+
+        let live = LiveChatBackend()
+        let seed = await live.seedDemo()
+        let viewModel = ChatViewModel(backend: live)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "packet-snapshot")
+        let snapshot = contextPacketFixture(workspace: seed.workspace, expired: expired)
+        let size = CGSize(width: 760, height: 680)
+        let content = MomoContextPacketInspectorView(
+            viewModel: viewModel,
+            snapshot: snapshot,
+            copy: MomoWorkspaceCopy(language: .korean)
+        )
+        .frame(width: size.width, height: size.height)
+        .environment(\.colorScheme, scheme)
+
+        let host = NSHostingView(rootView: content)
+        host.frame = CGRect(origin: .zero, size: size)
+        host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+        guard let representation = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            throw XCTSkip("NSHostingView produced no context inspector bitmap")
+        }
+        host.cacheDisplay(in: host.bounds, to: representation)
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: named,
+            record: recordMode,
+            testName: canonicalName
+        )
+    }
+
+    private func contextPacketFixture(workspace: WorkspaceID, expired: Bool) -> ContextPacketSnapshot {
+        ContextPacketSnapshot(
+            packetId: UUID(uuidString: "30000000-0000-7000-8000-000000000529")!,
+            runId: RunID(uuidString: "40000000-0000-7000-8000-000000000529")!,
+            workspaceId: workspace,
+            createdAtMs: 1_753_144_800_000,
+            expiresAtMs: 1_753_231_200_000,
+            expired: expired,
+            content: .object([
+                "recent_messages": .array([
+                    .object([
+                        "excerpt": .string("배포 전에 macOS UI 게이트와 runtime-db 결과를 함께 확인해 주세요."),
+                        "seq": .int(42),
+                        "message_id": .string("30000000-0000-7000-8000-000000000529"),
+                        "channel_id": .string(ChannelID.demoGeneral.description),
+                    ]),
+                ]),
+                "memory_refs": .array([
+                    .object([
+                        "excerpt": .string("외부 쓰기는 담당자 승인 후 실행합니다."),
+                        "kind": .string("procedure"),
+                        "scope": .string("workspace"),
+                    ]),
+                ]),
+                "tool_grants": .array([
+                    .object([
+                        "tool_name": .string("work.read"),
+                        "provider": .string("momo"),
+                        "approval_policy": .string("read-only"),
+                    ]),
+                ]),
+                "budget": .object([
+                    "max_prompt_tokens": .int(8_192),
+                    "max_completion_tokens": .int(2_048),
+                    "reserved_micro_usd": .int(12_000),
+                    "hard_limit_micro_usd": .int(500_000),
+                ]),
+                "redactions": .array([
+                    .string("개인 API 키와 인증 정보"),
+                ]),
+            ])
         )
     }
 }

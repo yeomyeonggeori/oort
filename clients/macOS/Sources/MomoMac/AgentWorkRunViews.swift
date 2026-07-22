@@ -322,7 +322,7 @@ struct AgentWorkRunDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
-                        Button(copy.servedContextTitle) {
+                        Button(copy.servedContextAction) {
                             showsServedContext = true
                         }
                         .disabled(contextPacketID(for: run) == nil)

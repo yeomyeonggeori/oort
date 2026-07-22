@@ -252,9 +252,9 @@ struct MomoMemoryBrowserView: View {
                 .textFieldStyle(.roundedBorder)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(copy.memoryAllScopes)
+                Text(copy.memoryScopeFilterTitle)
                     .font(MomoTheme.Typography.sectionHeader)
-                Picker(copy.memoryAllScopes, selection: $model.scope) {
+                Picker(copy.memoryScopeFilterTitle, selection: $model.scope) {
                     Text(copy.memoryAllScopes).tag(MemoryScope?.none)
                     ForEach(MemoryScope.allCases, id: \.self) { scope in
                         Text(copy.memoryScopeTitle(scope)).tag(Optional(scope))
@@ -264,9 +264,9 @@ struct MomoMemoryBrowserView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(copy.memoryAllAgents)
+                Text(copy.memoryAgentFilterTitle)
                     .font(MomoTheme.Typography.sectionHeader)
-                Picker(copy.memoryAllAgents, selection: $model.agentID) {
+                Picker(copy.memoryAgentFilterTitle, selection: $model.agentID) {
                     Text(copy.memoryAllAgents).tag(MemberID?.none)
                     ForEach(viewModel.members.filter(\.isAgent)) { agent in
                         Text(agent.displayName).tag(Optional(agent.id))
@@ -283,7 +283,7 @@ struct MomoMemoryBrowserView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(copy.memoryPolicyTitle).font(MomoTheme.Typography.sectionHeader)
                 Toggle(
-                    copy.memoryPolicyTitle,
+                    copy.memoryPolicyToggle,
                     isOn: Binding(
                         get: { model.policy?.enabled ?? false },
                         set: { enabled in
@@ -295,7 +295,6 @@ struct MomoMemoryBrowserView: View {
                         }
                     )
                 )
-                .labelsHidden()
                 .disabled(!viewModel.canManageWorkspace || model.policy == nil || model.isMutating)
                 Text(copy.memoryPolicyDetail)
                     .font(MomoTheme.Typography.supporting)
@@ -372,6 +371,11 @@ struct MomoMemoryBrowserView: View {
                 model: model,
                 copy: copy,
                 canManage: viewModel.canManageWorkspace,
+                channelNames: Dictionary(
+                    uniqueKeysWithValues: viewModel.channels.compactMap { channel in
+                        channel.name.map { (channel.id, $0) }
+                    }
+                ),
                 onOpenSource: { source in
                     await viewModel.focusMessage(source.messageId, in: source.channelId)
                     if viewModel.failedMessageFocus == nil {
@@ -383,7 +387,7 @@ struct MomoMemoryBrowserView: View {
             )
             .id(entry.id.uuidString + "-\(entry.updatedAtMs)")
         } else {
-            ContentUnavailableView(copy.memoryNoResults, systemImage: "text.page")
+            ContentUnavailableView(copy.memorySelectionPrompt, systemImage: "text.page")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .momoFlatSurface(.background)
         }
@@ -433,6 +437,7 @@ private struct MomoMemoryEntryDetail: View {
     @ObservedObject var model: MomoMemoryBrowserModel
     let copy: MomoWorkspaceCopy
     let canManage: Bool
+    let channelNames: [ChannelID: String]
     let onOpenSource: (MemorySourceReference) async -> Void
 
     @State private var bodyDraft: String
@@ -444,12 +449,14 @@ private struct MomoMemoryEntryDetail: View {
         model: MomoMemoryBrowserModel,
         copy: MomoWorkspaceCopy,
         canManage: Bool,
+        channelNames: [ChannelID: String],
         onOpenSource: @escaping (MemorySourceReference) async -> Void
     ) {
         self.entry = entry
         self.model = model
         self.copy = copy
         self.canManage = canManage
+        self.channelNames = channelNames
         self.onOpenSource = onOpenSource
         _bodyDraft = State(initialValue: entry.body)
         _confidence = State(initialValue: entry.confidence)
@@ -529,8 +536,8 @@ private struct MomoMemoryEntryDetail: View {
                                 Image(systemName: "arrow.turn.up.left")
                                 Text(copy.memoryOpenSource)
                                 Spacer()
-                                Text(source.messageId.description.prefix(8))
-                                    .font(MomoTheme.Typography.supporting.monospaced())
+                                Text(sourceLabel(source))
+                                    .font(MomoTheme.Typography.supporting)
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -574,5 +581,11 @@ private struct MomoMemoryEntryDetail: View {
     private func formatted(_ milliseconds: Int64) -> String {
         Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
             .formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func sourceLabel(_ source: MemorySourceReference) -> String {
+        let date = Date(timeIntervalSince1970: Double(entry.validAtMs) / 1_000)
+            .formatted(date: .abbreviated, time: .omitted)
+        return copy.memorySourceLabel(channelName: channelNames[source.channelId], date: date)
     }
 }
