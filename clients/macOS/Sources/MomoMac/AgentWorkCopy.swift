@@ -39,8 +39,16 @@ extension MomoWorkspaceCopy {
         }
     }
 
-    var agentRunCancelledSystemLine: String {
-        language == .korean ? "사람이 이 실행을 중지했습니다." : "A person stopped this run."
+    /// The canceller is the system line's author on the server ledger; name
+    /// them when known so a multi-person channel keeps its accountability.
+    func agentRunCancelledSystemLine(actorName: String?) -> String {
+        let trimmed = actorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            return language == .korean ? "사람이 이 실행을 중지했습니다." : "A person stopped this run."
+        }
+        return language == .korean
+            ? "\(trimmed)님이 이 실행을 중지했습니다."
+            : "\(trimmed) stopped this run."
     }
 
     var agentPausedSystemLine: String {

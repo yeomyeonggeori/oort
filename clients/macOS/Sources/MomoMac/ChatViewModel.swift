@@ -254,6 +254,9 @@ public final class ChatViewModel: ObservableObject {
     // Live agent state for the selected channel.
     /// In-flight `agent.partial` buffers, keyed by run, for AgentPartialView (L4 §5.2).
     @Published public private(set) var partials: [RunID: AgentPartial] = [:]
+    /// Monotonic per-run streaming recency used to pick the ⌘. cancel target.
+    private var partialActivityCounter: UInt64 = 0
+    private var partialActivitySeq: [RunID: UInt64] = [:]
     /// Latest `agent.status` per run, drives CostBreathingRing + presence (L4 §5.2).
     @Published public private(set) var agentStatuses: [RunID: AgentStatus] = [:]
     /// Server-owned cost projection per run. Experience B consumes this instead
@@ -2313,12 +2316,18 @@ public final class ChatViewModel: ObservableObject {
         }) {
             return workRun.id
         }
+        // ⌘. must target a predictable run: the one that streamed most
+        // recently is the one the user is watching. UUID ordering is not a
+        // user-meaningful tiebreak in a multi-agent channel.
         return partials.values
             .filter {
                 $0.channelId == selectedChannelId
                     && agentStatuses[$0.runId]?.runStatus.isTerminal != true
             }
-            .sorted { $0.runId.description < $1.runId.description }
+            .sorted {
+                (partialActivitySeq[$0.runId] ?? 0, $0.runId.description)
+                    < (partialActivitySeq[$1.runId] ?? 0, $1.runId.description)
+            }
             .last?.runId
     }
 
@@ -3753,8 +3762,11 @@ public final class ChatViewModel: ObservableObject {
     private func coalesce(_ partial: AgentPartial) {
         guard !hasFinalMessage(for: partial) else {
             partials[partial.runId] = nil
+            partialActivitySeq[partial.runId] = nil
             return
         }
+        partialActivityCounter += 1
+        partialActivitySeq[partial.runId] = partialActivityCounter
         if var existing = partials[partial.runId] {
             if let delta = partial.textDelta {
                 existing.textDelta = (existing.textDelta ?? "") + delta
