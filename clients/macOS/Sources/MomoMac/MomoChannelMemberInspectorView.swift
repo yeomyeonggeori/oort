@@ -188,13 +188,13 @@ struct MomoChannelMemberInspectorView: View {
             query = ""
         }
         .sheet(isPresented: $showsAudit) {
-            MomoWorkspaceAuditView(viewModel: viewModel)
+            MomoWorkspaceAuditView(viewModel: viewModel, copy: copy)
         }
         .sheet(item: $removalMember) { member in
-            MomoMemberRemovalSheet(viewModel: viewModel, member: member)
+            MomoMemberRemovalSheet(viewModel: viewModel, member: member, copy: copy)
         }
         .confirmationDialog(
-            "Update member access?",
+            copy.updateMemberAccess,
             isPresented: Binding(
                 get: { lifecycleConfirmation != nil },
                 set: { if !$0 { lifecycleConfirmation = nil } }
@@ -203,21 +203,21 @@ struct MomoChannelMemberInspectorView: View {
         ) { confirmation in
             switch confirmation {
             case .suspend(let member):
-                Button("Suspend \(member.displayName)", role: .destructive) {
+                Button(copy.suspendMemberAction(member.displayName), role: .destructive) {
                     Task { await viewModel.suspendWorkspaceMember(member) }
                 }
             case .reinstate(let member):
-                Button("Reinstate \(member.displayName)") {
+                Button(copy.reinstateMemberAction(member.displayName)) {
                     Task { await viewModel.reinstateWorkspaceMember(member) }
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(copy.cancel, role: .cancel) {}
         } message: { confirmation in
             switch confirmation {
             case .suspend(let member):
-                Text("\(member.displayName) will lose access immediately. Existing tokens are revoked.")
+                Text(copy.suspendMemberExplanation(member.displayName))
             case .reinstate(let member):
-                Text("\(member.displayName) can sign in again, but revoked tokens stay revoked.")
+                Text(copy.reinstateMemberExplanation(member.displayName))
             }
         }
     }
@@ -253,7 +253,7 @@ struct MomoChannelMemberInspectorView: View {
                 Button {
                     showsAudit = true
                 } label: {
-                    Label("Audit log", systemImage: "list.bullet.clipboard")
+                    Label(copy.workspaceAuditLog, systemImage: "list.bullet.clipboard")
                         .labelStyle(.iconOnly)
                         .frame(
                             width: MomoTheme.ChannelHeader.actionSize,
@@ -261,8 +261,8 @@ struct MomoChannelMemberInspectorView: View {
                         )
                 }
                 .buttonStyle(.borderless)
-                .momoQuickTooltip("Audit log")
-                .accessibilityLabel("Audit log")
+                .momoQuickTooltip(copy.workspaceAuditLog)
+                .accessibilityLabel(copy.workspaceAuditLog)
             }
             Button(action: close) {
                 Label(copy.closeMemberInspector, systemImage: "xmark")
@@ -344,7 +344,7 @@ struct MomoChannelMemberInspectorView: View {
                         .foregroundStyle(MomoTheme.irreversibleRed)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: MomoTheme.MemberInspector.compactSpacing)
-                    Button("Dismiss") { viewModel.clearMembershipAdministrationError() }
+                    Button(copy.dismiss) { viewModel.clearMembershipAdministrationError() }
                         .controlSize(.small)
                 }
                 .accessibilityIdentifier("membershipAdministrationError")
@@ -590,7 +590,7 @@ struct MomoChannelMemberInspectorView: View {
                         }
                     }
                 } label: {
-                    Label("Role", systemImage: "person.badge.key")
+                    Label(copy.memberRole, systemImage: "person.badge.key")
                 }
                 .disabled(viewModel.membershipMutationMemberIDs.contains(member.id))
             }
@@ -600,20 +600,20 @@ struct MomoChannelMemberInspectorView: View {
                     Button {
                         lifecycleConfirmation = .reinstate(member)
                     } label: {
-                        Label("Reinstate member", systemImage: "person.badge.plus")
+                        Label(copy.reinstateMember, systemImage: "person.badge.plus")
                     }
                 } else if member.status == .active {
                     Button {
                         lifecycleConfirmation = .suspend(member)
                     } label: {
-                        Label("Suspend member", systemImage: "person.badge.minus")
+                        Label(copy.suspendMember, systemImage: "person.badge.minus")
                     }
                 }
                 Divider()
                 Button(role: .destructive) {
                     removalMember = member
                 } label: {
-                    Label("Remove member", systemImage: "person.crop.circle.badge.xmark")
+                    Label(copy.removeMember, systemImage: "person.crop.circle.badge.xmark")
                 }
             }
         }
@@ -896,27 +896,28 @@ private struct MomoMemberAvatarView: View {
 private struct MomoMemberRemovalSheet: View {
     @ObservedObject var viewModel: ChatViewModel
     let member: Member
+    let copy: MomoWorkspaceCopy
     @Environment(\.dismiss) private var dismiss
     @State private var reason = ""
     @State private var ban = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Remove \(member.displayName)?")
+            Text(copy.removeMemberTitle(member.displayName))
                 .font(.title3.weight(.semibold))
-            Text("This removes workspace access and revokes active tokens. The action is recorded in the audit log.")
+            Text(copy.removeMemberExplanation)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextField("Reason (optional)", text: $reason, axis: .vertical)
+            TextField(copy.removalReasonOptional, text: $reason, axis: .vertical)
                 .lineLimit(2...4)
                 .textFieldStyle(.roundedBorder)
 
-            Toggle("Block @\(member.handle) from rejoining", isOn: $ban)
+            Toggle(copy.blockFromRejoining(member.handle), isOn: $ban)
             if member.isAgent {
                 Label(
-                    "Reinstating or recreating this agent requires a new credential. Revoked credentials cannot be restored.",
+                    copy.agentCredentialAfterRemoval,
                     systemImage: "key.slash"
                 )
                 .font(.caption)
@@ -924,11 +925,19 @@ private struct MomoMemberRemovalSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
+            if viewModel.membershipAdministrationError != nil {
+                Label(copy.membershipUpdateFailed, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("memberRemovalError")
+            }
+
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(copy.cancel, role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Remove", role: .destructive) {
+                Button(copy.remove, role: .destructive) {
                     Task {
                         if await viewModel.removeWorkspaceMember(member, ban: ban, reason: reason) {
                             dismiss()
@@ -941,12 +950,14 @@ private struct MomoMemberRemovalSheet: View {
         }
         .padding(24)
         .frame(width: 440)
+        .onAppear { viewModel.clearMembershipAdministrationError() }
         .accessibilityIdentifier("memberRemovalSheet")
     }
 }
 
 private struct MomoWorkspaceAuditView: View {
     @ObservedObject var viewModel: ChatViewModel
+    let copy: MomoWorkspaceCopy
     @Environment(\.dismiss) private var dismiss
     @State private var actionFilter = MomoAuditActionFilter.all
     @State private var targetMember: MemberID?
@@ -956,23 +967,23 @@ private struct MomoWorkspaceAuditView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    Picker("Action", selection: $actionFilter) {
+                    Picker(copy.auditAction, selection: $actionFilter) {
                         ForEach(MomoAuditActionFilter.allCases) { filter in
-                            Text(filter.title).tag(filter)
+                            Text(filter.title(copy: copy)).tag(filter)
                         }
                     }
-                    Picker("Member", selection: $targetMember) {
-                        Text("All members").tag(nil as MemberID?)
+                    Picker(copy.auditMember, selection: $targetMember) {
+                        Text(copy.auditAllMembers).tag(nil as MemberID?)
                         ForEach(viewModel.members.filter { $0.status != .deleted }) { member in
                             Text(member.displayName).tag(Optional(member.id))
                         }
                     }
-                    Picker("Time", selection: $period) {
+                    Picker(copy.auditTime, selection: $period) {
                         ForEach(MomoAuditPeriod.allCases) { period in
-                            Text(period.title).tag(period)
+                            Text(period.title(copy: copy)).tag(period)
                         }
                     }
-                    Button("Apply") { Task { await applyFilters() } }
+                    Button(copy.apply) { Task { await applyFilters() } }
                         .disabled(viewModel.workspaceAuditIsLoading)
                 }
                 .labelsHidden()
@@ -981,19 +992,19 @@ private struct MomoWorkspaceAuditView: View {
                 Divider()
 
                 if viewModel.workspaceAuditIsLoading && viewModel.workspaceAuditEvents.isEmpty {
-                    ProgressView("Loading audit log")
+                    ProgressView(copy.loadingAuditLog)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let error = viewModel.workspaceAuditError,
                           viewModel.workspaceAuditEvents.isEmpty {
                     ContentUnavailableView {
-                        Label("Could not load audit log", systemImage: "exclamationmark.triangle")
+                        Label(copy.auditLoadFailed, systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(error)
                     } actions: {
-                        Button("Retry") { Task { await viewModel.loadWorkspaceAudit(reset: true) } }
+                        Button(copy.retry) { Task { await viewModel.loadWorkspaceAudit(reset: true) } }
                     }
                 } else if viewModel.workspaceAuditEvents.isEmpty {
-                    ContentUnavailableView("No audit events", systemImage: "list.bullet.clipboard")
+                    ContentUnavailableView(copy.noAuditEvents, systemImage: "list.bullet.clipboard")
                 } else {
                     List {
                         if let error = viewModel.workspaceAuditError {
@@ -1002,15 +1013,16 @@ private struct MomoWorkspaceAuditView: View {
                         }
                         ForEach(viewModel.workspaceAuditEvents) { event in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(event.action.replacingOccurrences(of: ".", with: " ").capitalized)
+                                Text(copy.auditActionTitle(event.action))
                                     .font(.body.weight(.medium))
                                 HStack(spacing: 8) {
                                     Text(Date(timeIntervalSince1970: TimeInterval(event.createdAtMs) / 1_000), style: .date)
                                     Text(Date(timeIntervalSince1970: TimeInterval(event.createdAtMs) / 1_000), style: .time)
-                                    if let subject = event.subjectMemberId {
-                                        Text(viewModel.member(subject)?.displayName ?? subject.description)
-                                            .lineLimit(1)
-                                    }
+                                    Text(copy.auditActorTarget(
+                                        actor: memberName(event.actorMemberId),
+                                        target: event.subjectMemberId.map(memberName)
+                                    ))
+                                    .lineLimit(1)
                                 }
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -1018,22 +1030,23 @@ private struct MomoWorkspaceAuditView: View {
                             .padding(.vertical, 4)
                         }
                         if viewModel.workspaceAuditNextCursor != nil {
-                            Button("Load more") { Task { await viewModel.loadWorkspaceAudit() } }
+                            Button(copy.loadMore) { Task { await viewModel.loadWorkspaceAudit() } }
                                 .disabled(viewModel.workspaceAuditIsLoading)
                         }
                     }
                 }
             }
-            .navigationTitle("Audit log")
+            .navigationTitle(copy.workspaceAuditLog)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(copy.dismiss) { dismiss() }
+                        .keyboardShortcut(.cancelAction)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         Task { await viewModel.loadWorkspaceAudit(reset: true) }
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label(copy.refresh, systemImage: "arrow.clockwise")
                     }
                     .disabled(viewModel.workspaceAuditIsLoading)
                 }
@@ -1055,6 +1068,11 @@ private struct MomoWorkspaceAuditView: View {
             )
         )
     }
+
+    private func memberName(_ id: MemberID?) -> String {
+        guard let id else { return copy.unknownAuditActor }
+        return viewModel.member(id)?.displayName ?? id.description
+    }
 }
 
 private enum MomoAuditActionFilter: String, CaseIterable, Identifiable {
@@ -1063,8 +1081,8 @@ private enum MomoAuditActionFilter: String, CaseIterable, Identifiable {
     case ban
 
     var id: String { rawValue }
-    var title: String {
-        switch self { case .all: "All actions"; case .member: "Member lifecycle"; case .ban: "Bans" }
+    func title(copy: MomoWorkspaceCopy) -> String {
+        switch self { case .all: copy.auditAllActions; case .member: copy.auditMemberLifecycle; case .ban: copy.auditBans }
     }
     var prefix: String? {
         switch self { case .all: nil; case .member: "member."; case .ban: "ban." }
@@ -1078,8 +1096,8 @@ private enum MomoAuditPeriod: String, CaseIterable, Identifiable {
     case month
 
     var id: String { rawValue }
-    var title: String {
-        switch self { case .all: "All time"; case .day: "24 hours"; case .week: "7 days"; case .month: "30 days" }
+    func title(copy: MomoWorkspaceCopy) -> String {
+        switch self { case .all: copy.auditAllTime; case .day: copy.audit24Hours; case .week: copy.audit7Days; case .month: copy.audit30Days }
     }
     var fromMs: Int64? {
         let seconds: TimeInterval

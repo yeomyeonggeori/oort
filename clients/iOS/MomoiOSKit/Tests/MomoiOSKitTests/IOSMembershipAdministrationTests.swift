@@ -31,4 +31,15 @@ final class IOSMembershipAdministrationTests: XCTestCase {
         XCTAssertFalse(IOSMembershipAdministrationPolicy.canChangeLifecycle(actor: owner, target: owner))
         XCTAssertTrue(IOSMembershipAdministrationPolicy.assignableRoles(actor: owner, target: peerOwner).isEmpty)
     }
+
+    func testMembershipCopyLocalizesLifecycleAndAvoidsTokenJargon() {
+        let korean = IOSWorkspaceCopy(isKorean: true)
+        let english = IOSWorkspaceCopy(isKorean: false)
+
+        XCTAssertEqual(korean.auditLog, "감사 로그")
+        XCTAssertEqual(korean.actorTarget(actor: "상준", target: "Hermes"), "행위자 상준 → 대상 Hermes")
+        XCTAssertTrue(korean.suspendExplanation.contains("로그인 세션"))
+        XCTAssertTrue(english.leaveWorkspaceExplanation.contains("login sessions"))
+        XCTAssertFalse(english.removeExplanation.localizedCaseInsensitiveContains("token"))
+    }
 }

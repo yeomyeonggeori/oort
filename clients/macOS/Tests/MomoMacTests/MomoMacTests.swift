@@ -165,6 +165,21 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(english.removeFromChannel, "Remove from channel")
     }
 
+    func testMembershipAdministrationCopyIsLocalizedAndUsesLoginSessionLanguage() {
+        let korean = MomoWorkspaceCopy(language: .korean)
+        let english = MomoWorkspaceCopy(language: .english)
+
+        XCTAssertEqual(korean.workspaceAuditLog, "감사 로그")
+        XCTAssertEqual(korean.leaveChannelFailed, "채널에서 나가지 못했습니다. 다시 시도해 주세요.")
+        XCTAssertTrue(korean.suspendMemberExplanation("민지").contains("로그인 세션"))
+        XCTAssertTrue(english.suspendMemberExplanation("Minji").contains("login sessions"))
+        XCTAssertFalse(english.removeMemberExplanation.localizedCaseInsensitiveContains("token"))
+        XCTAssertEqual(
+            korean.auditActorTarget(actor: "상준", target: "Hermes"),
+            "행위자 상준 → 대상 Hermes"
+        )
+    }
+
     func testMemberDirectoryFiltersNamesHandlesAndMemberKind() {
         let workspace = WorkspaceID()
         let people = [

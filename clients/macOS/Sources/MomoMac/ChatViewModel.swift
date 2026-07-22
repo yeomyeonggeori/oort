@@ -1215,7 +1215,7 @@ public final class ChatViewModel: ObservableObject {
             }
             workspaceAuditNextCursor = page.nextCursor
         } catch {
-            workspaceAuditError = String(describing: error)
+            workspaceAuditError = error.localizedDescription
         }
     }
 
@@ -1232,7 +1232,7 @@ public final class ChatViewModel: ObservableObject {
             await clearSessionSensitiveState()
             return true
         } catch {
-            membershipAdministrationError = String(describing: error)
+            membershipAdministrationError = error.localizedDescription
             return false
         }
     }
@@ -1251,7 +1251,7 @@ public final class ChatViewModel: ObservableObject {
             await refreshMemberDirectory()
             return true
         } catch {
-            membershipAdministrationError = String(describing: error)
+            membershipAdministrationError = error.localizedDescription
             return false
         }
     }
@@ -1270,7 +1270,7 @@ public final class ChatViewModel: ObservableObject {
             await refreshMemberDirectory()
             return true
         } catch {
-            membershipAdministrationError = String(describing: error)
+            membershipAdministrationError = error.localizedDescription
             return false
         }
     }

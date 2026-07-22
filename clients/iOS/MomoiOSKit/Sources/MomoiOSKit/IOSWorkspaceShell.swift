@@ -598,6 +598,7 @@ private struct IOSProfileView: View {
     @State private var showsLeaveWorkspaceConfirmation = false
     @State private var leaveWorkspaceError: String?
     @State private var leaveWorkspaceInFlight = false
+    private let copy = IOSWorkspaceCopy.current
 
     private var currentMember: Member {
         channelListModel.membersByID[session.member.id] ?? session.member
@@ -617,7 +618,7 @@ private struct IOSProfileView: View {
             Section("Workspace") {
                 LabeledContent("Name", value: workspaceName)
                 LabeledContent("Server", value: session.baseURL.host ?? session.baseURL.absoluteString)
-                LabeledContent("Role", value: profileRoleTitle(currentMember.workspaceRole))
+                LabeledContent(copy.role, value: copy.roleTitle(currentMember.workspaceRole))
                 if canManageMembers {
                     NavigationLink {
                         IOSMemberManagementView(
@@ -626,7 +627,7 @@ private struct IOSProfileView: View {
                             model: membershipModel
                         )
                     } label: {
-                        Label("Members and audit", systemImage: "person.2.badge.gearshape")
+                        Label(copy.membersAndAudit, systemImage: "person.2.badge.gearshape")
                     }
                     .accessibilityIdentifier("profileMemberManagement")
                 }
@@ -648,11 +649,11 @@ private struct IOSProfileView: View {
                 Text("Shows individual remote Work sessions and host status. Session output remains private unless explicitly shared.")
             }
             Section {
-                if let leaveWorkspaceError {
-                    Label(leaveWorkspaceError, systemImage: "exclamationmark.triangle")
+                if leaveWorkspaceError != nil {
+                    Label(copy.leaveWorkspaceFailed, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.red)
                 }
-                Button("Leave workspace", role: .destructive) {
+                Button(copy.leaveWorkspace, role: .destructive) {
                     showsLeaveWorkspaceConfirmation = true
                 }
                 .disabled(leaveWorkspaceInFlight)
@@ -665,18 +666,18 @@ private struct IOSProfileView: View {
         }
         .navigationTitle("Profile")
         .confirmationDialog(
-            "Leave \(workspaceName)?",
+            copy.leaveWorkspaceQuestion(workspaceName),
             isPresented: $showsLeaveWorkspaceConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Leave workspace", role: .destructive) {
+            Button(copy.leaveWorkspace, role: .destructive) {
                 Task { await leaveWorkspace() }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(copy.cancel, role: .cancel) {}
         } message: {
             Text(currentMember.workspaceRole == .owner
-                 ? "If you are the last owner, assign another owner before leaving."
-                 : "Your workspace membership and active tokens will be revoked.")
+                 ? copy.lastOwnerLeaveExplanation
+                 : copy.leaveWorkspaceExplanation)
         }
     }
 
@@ -692,10 +693,6 @@ private struct IOSProfileView: View {
             leaveWorkspaceError = error.localizedDescription
         }
     }
-}
-
-private func profileRoleTitle(_ role: MembershipRole?) -> String {
-    switch role { case .owner: "Owner"; case .admin: "Admin"; case .guest: "Guest"; default: "Member" }
 }
 
 @MainActor

@@ -16,6 +16,7 @@ struct IOSChannelHomeView: View {
     let model: IOSChannelListModel
     @State private var channelToLeave: IOSChannelListItem?
     @State private var channelLeaveError: String?
+    private let copy = IOSWorkspaceCopy.current
 
     init(
         session: IOSSession,
@@ -79,30 +80,30 @@ struct IOSChannelHomeView: View {
             Text(model.actionFailureMessage ?? "Try again.")
         }
         .confirmationDialog(
-            "Leave this channel?",
+            channelToLeave.map { copy.leaveChannelQuestion($0.title) } ?? copy.leaveChannel,
             isPresented: Binding(
                 get: { channelToLeave != nil },
                 set: { if !$0 { channelToLeave = nil } }
             ),
             presenting: channelToLeave
         ) { item in
-            Button("Leave \(item.title)", role: .destructive) {
+            Button(copy.leaveChannel, role: .destructive) {
                 Task { await leaveChannel(item) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(copy.cancel, role: .cancel) {}
         } message: { item in
-            Text("You will stop receiving messages from \(item.title). Direct messages cannot be left.")
+            Text(copy.leaveChannelExplanation(item.title))
         }
         .alert(
-            "Could not leave channel",
+            copy.leaveChannelFailed,
             isPresented: Binding(
                 get: { channelLeaveError != nil },
                 set: { if !$0 { channelLeaveError = nil } }
             )
         ) {
-            Button("Dismiss", role: .cancel) { channelLeaveError = nil }
+            Button(copy.dismiss, role: .cancel) { channelLeaveError = nil }
         } message: {
-            Text(channelLeaveError ?? "Try again.")
+            Text(copy.leaveChannelFailed)
         }
         .navigationDestination(for: IOSPushDeepLink.self) { link in
             if let item = deepLinkedItem(channelID: link.channelID) {
@@ -226,7 +227,7 @@ struct IOSChannelHomeView: View {
                 Button(role: .destructive) {
                     channelToLeave = item
                 } label: {
-                    Label("Leave channel", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label(copy.leaveChannel, systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
         }

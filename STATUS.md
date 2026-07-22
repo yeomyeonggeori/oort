@@ -4,7 +4,8 @@
 
 - ADR-0128/A-15의 workspace 역할·suspend/reinstate/remove+ban·self-leave·audit cursor 계약을 macOS와 iOS 인증 REST 클라이언트에 연결했다. owner/admin 역할 서열은 클라이언트에서도 fail-closed하고 서버가 최종 권한·마지막 owner 409를 판정한다. audit은 action prefix·대상 멤버·24시간/7일/30일 시간 범위와 cursor를 정본 query로 전달한다.
 - macOS workspace 멤버 inspector에는 guest/suspended 표시, 역할 메뉴, 정지·복원 확인, 선택적 사유와 재가입 차단이 있는 삭제 sheet, agent credential 재발급 안내, 필터·cursor audit sheet를 추가했다. iOS Profile에는 Members and audit, 동일 관리 상세, workspace self-leave를 추가했고 양 플랫폼의 일반 채널 메뉴에는 self-leave를 추가하되 DM은 노출하지 않는다.
-- macOS 전체 459 tests(관리형 loopback WebSocket 1 skip)와 real-window focus/snapshot, audit canonical query 집중 테스트, MomoiOSKit XCTest 1 + Swift Testing 69 tests, iOS Simulator SDK 직접 컴파일, design pre-flight가 실패 0으로 PASS했다. 공식 `verify_ios_build.sh`의 generic Simulator `xcodebuild`는 Xcode build-service의 build-description 단계에서 장시간 정체돼 중단했으며, 인증된 owner/admin/guest 계정의 실제 403·409·audit cursor 왕복, iPhone 라이트·다크·Dynamic Type/VoiceOver 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+- PR #610 반려 후 신규 멤버 관리·self-leave·audit 카피를 macOS `MomoWorkspaceCopy`와 iOS `IOSWorkspaceCopy` 정본으로 이관했고, 사용자 문구의 token 어휘를 로그인 세션으로 교체했다. 제거 실패는 양 플랫폼 sheet 내부에, macOS 채널 나가기 실패는 타임라인 인라인 배너에 표시하며 audit 행은 날짜·시간과 행위자→대상을 함께 노출한다.
+- MomoiOSKit XCTest 2 + Swift Testing 69 tests와 macOS 컴파일·MOMO-525 한국어 light/dark real-window 집중 테스트는 PASS했다. macOS 전체 459 tests 중 457 PASS·1 loopback skip이며 이번 diff와 무관한 기존 Work Console terminal preset canonical 2종만 현재 렌더와 불일치한다. momo-main이 확인한 공식 iOS 빌드 PASS는 지시대로 재실행하지 않았고, 인증된 owner/admin/guest 계정의 실제 403·409·audit cursor 왕복과 iPhone Dynamic Type/VoiceOver는 오케스트레이터 확인 전까지 `runtime-unverified`다.
 
 ## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
 

@@ -7,6 +7,7 @@ struct IOSMemberManagementView: View {
     let session: IOSSession
     let channelListModel: IOSChannelListModel
     let model: IOSMembershipAdministrationModel
+    private let copy = IOSWorkspaceCopy.current
 
     private var actor: Member {
         channelListModel.membersByID[session.member.id] ?? session.member
@@ -28,7 +29,7 @@ struct IOSMemberManagementView: View {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.red)
-                    Button("Dismiss") { model.clearError() }
+                    Button(copy.dismiss) { model.clearError() }
                 }
             }
 
@@ -36,12 +37,12 @@ struct IOSMemberManagementView: View {
                 NavigationLink {
                     IOSWorkspaceAuditView(model: model, members: channelListModel.membersByID)
                 } label: {
-                    Label("Audit log", systemImage: "list.bullet.clipboard")
+                    Label(copy.auditLog, systemImage: "list.bullet.clipboard")
                 }
                 .accessibilityIdentifier("memberManagementAudit")
             }
 
-            Section("Members") {
+            Section(copy.members) {
                 ForEach(members) { member in
                     NavigationLink {
                         IOSMemberAdministrationDetail(
@@ -62,9 +63,9 @@ struct IOSMemberManagementView: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(roleTitle(member.workspaceRole))
+                                Text(copy.roleTitle(member.workspaceRole))
                                 if member.status != .active {
-                                    Text(statusTitle(member.status))
+                                    Text(copy.statusTitle(member.status))
                                         .foregroundStyle(.orange)
                                 }
                             }
@@ -76,7 +77,7 @@ struct IOSMemberManagementView: View {
                 }
             }
         }
-        .navigationTitle("Members")
+        .navigationTitle(copy.members)
         .refreshable { await channelListModel.refresh() }
         .accessibilityIdentifier("memberManagementView")
     }
@@ -91,6 +92,7 @@ private struct IOSMemberAdministrationDetail: View {
     @State private var selectedRole: MembershipRole
     @State private var showsLifecycleConfirmation = false
     @State private var showsRemoval = false
+    private let copy = IOSWorkspaceCopy.current
 
     init(
         member: Member,
@@ -112,20 +114,20 @@ private struct IOSMemberAdministrationDetail: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Handle", value: "@\(member.handle)")
-                LabeledContent("Type", value: member.isAgent ? "Agent" : "Person")
-                LabeledContent("Status", value: statusTitle(member.status))
-                LabeledContent("Role", value: roleTitle(member.workspaceRole))
+                LabeledContent(copy.handle, value: "@\(member.handle)")
+                LabeledContent(copy.type, value: member.isAgent ? copy.agent : copy.person)
+                LabeledContent(copy.status, value: copy.statusTitle(member.status))
+                LabeledContent(copy.role, value: copy.roleTitle(member.workspaceRole))
             } header: {
                 Label(member.displayName, systemImage: member.isAgent ? "sparkles" : "person")
             }
 
             if !roles.isEmpty {
-                Section("Access") {
-                    Picker("Workspace role", selection: $selectedRole) {
-                        ForEach(roles, id: \.self) { Text(roleTitle($0)).tag($0) }
+                Section(copy.access) {
+                    Picker(copy.workspaceRole, selection: $selectedRole) {
+                        ForEach(roles, id: \.self) { Text(copy.roleTitle($0)).tag($0) }
                     }
-                    Button("Save role") {
+                    Button(copy.saveRole) {
                         Task {
                             if await model.changeRole(member: member, actor: actor, role: selectedRole) {
                                 await refresh()
@@ -138,38 +140,36 @@ private struct IOSMemberAdministrationDetail: View {
 
             if canManageLifecycle {
                 Section {
-                    Button(member.status == .suspended ? "Reinstate member" : "Suspend member") {
+                    Button(member.status == .suspended ? copy.reinstateMember : copy.suspendMember) {
                         showsLifecycleConfirmation = true
                     }
                     .disabled(isWorking)
 
-                    Button("Remove member", role: .destructive) { showsRemoval = true }
+                    Button(copy.removeMember, role: .destructive) { showsRemoval = true }
                         .disabled(isWorking)
                 } footer: {
                     if member.isAgent {
-                        Text("Reinstating or recreating this agent requires a new credential. Revoked credentials cannot be restored.")
+                        Text(copy.agentCredentialAfterRemoval)
                     }
                 }
             }
         }
         .navigationTitle(member.displayName)
         .confirmationDialog(
-            member.status == .suspended ? "Reinstate this member?" : "Suspend this member?",
+            member.status == .suspended ? copy.reinstateQuestion : copy.suspendQuestion,
             isPresented: $showsLifecycleConfirmation,
             titleVisibility: .visible
         ) {
-            Button(member.status == .suspended ? "Reinstate" : "Suspend", role: member.status == .suspended ? nil : .destructive) {
+            Button(member.status == .suspended ? copy.reinstate : copy.suspend, role: member.status == .suspended ? nil : .destructive) {
                 Task {
                     if await model.setSuspended(member.status != .suspended, member: member, actor: actor) {
                         await refresh()
                     }
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(copy.cancel, role: .cancel) {}
         } message: {
-            Text(member.status == .suspended
-                 ? "The member can sign in again, but revoked tokens stay revoked."
-                 : "Access ends immediately and active tokens are revoked.")
+            Text(member.status == .suspended ? copy.reinstateExplanation : copy.suspendExplanation)
         }
         .sheet(isPresented: $showsRemoval) {
             IOSMemberRemovalView(member: member, actor: actor, model: model) {
@@ -188,23 +188,31 @@ private struct IOSMemberRemovalView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var reason = ""
     @State private var ban = false
+    private let copy = IOSWorkspaceCopy.current
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Reason (optional)", text: $reason, axis: .vertical)
+                    TextField(copy.reasonOptional, text: $reason, axis: .vertical)
                         .lineLimit(2...5)
-                    Toggle("Block @\(member.handle) from rejoining", isOn: $ban)
+                    Toggle(copy.blockFromRejoining(member.handle), isOn: $ban)
                 } footer: {
-                    Text("Removing access revokes active tokens and records the action in the audit log.")
+                    Text(copy.removeExplanation)
+                }
+                if model.errorMessage != nil {
+                    Section {
+                        Label(copy.membershipUpdateFailed, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("memberRemovalError")
+                    }
                 }
             }
-            .navigationTitle("Remove \(member.displayName)")
+            .navigationTitle(copy.removeTitle(member.displayName))
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(copy.cancel) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Remove", role: .destructive) {
+                    Button(copy.remove, role: .destructive) {
                         Task {
                             if await model.remove(member: member, actor: actor, ban: ban, reason: reason) {
                                 await refresh()
@@ -217,6 +225,7 @@ private struct IOSMemberRemovalView: View {
             }
         }
         .presentationDetents([.medium])
+        .onAppear { model.clearError() }
         .accessibilityIdentifier("memberRemovalSheet")
     }
 }
@@ -228,27 +237,28 @@ private struct IOSWorkspaceAuditView: View {
     @State private var actionFilter = IOSAuditActionFilter.all
     @State private var targetMember: MemberID?
     @State private var period = IOSAuditPeriod.all
+    private let copy = IOSWorkspaceCopy.current
 
     var body: some View {
         List {
-            Section("Filters") {
-                Picker("Action", selection: $actionFilter) {
+            Section(copy.filters) {
+                Picker(copy.action, selection: $actionFilter) {
                     ForEach(IOSAuditActionFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
+                        Text(filter.title(copy: copy)).tag(filter)
                     }
                 }
-                Picker("Member", selection: $targetMember) {
-                    Text("All members").tag(nil as MemberID?)
+                Picker(copy.member, selection: $targetMember) {
+                    Text(copy.allMembers).tag(nil as MemberID?)
                     ForEach(sortedMembers) { member in
                         Text(member.displayName).tag(Optional(member.id))
                     }
                 }
-                Picker("Time", selection: $period) {
+                Picker(copy.time, selection: $period) {
                     ForEach(IOSAuditPeriod.allCases) { period in
-                        Text(period.title).tag(period)
+                        Text(period.title(copy: copy)).tag(period)
                     }
                 }
-                Button("Apply filters") { Task { await applyFilters() } }
+                Button(copy.applyFilters) { Task { await applyFilters() } }
                     .disabled(model.auditIsLoading)
             }
 
@@ -256,43 +266,45 @@ private struct IOSWorkspaceAuditView: View {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.secondary)
-                    Button("Dismiss") { model.clearError() }
+                    Button(copy.dismiss) { model.clearError() }
                 }
             }
 
-            Section("Events") {
+            Section(copy.events) {
                 if model.auditIsLoading && model.auditEvents.isEmpty {
                     HStack {
                         Spacer()
-                        ProgressView("Loading audit log")
+                        ProgressView(copy.loadingAuditLog)
                         Spacer()
                     }
                 } else if model.auditEvents.isEmpty {
-                    ContentUnavailableView("No audit events", systemImage: "list.bullet.clipboard")
+                    ContentUnavailableView(copy.noAuditEvents, systemImage: "list.bullet.clipboard")
                 } else {
                     ForEach(model.auditEvents) { event in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(event.action.replacingOccurrences(of: ".", with: " ").capitalized)
+                            Text(copy.auditActionTitle(event.action))
                                 .font(.body.weight(.medium))
                             HStack(spacing: 8) {
                                 Text(Date(timeIntervalSince1970: TimeInterval(event.createdAtMs) / 1_000), style: .date)
-                                if let id = event.subjectMemberId {
-                                    Text(members[id]?.displayName ?? id.description)
-                                        .lineLimit(1)
-                                }
+                                Text(Date(timeIntervalSince1970: TimeInterval(event.createdAtMs) / 1_000), style: .time)
+                                Text(copy.actorTarget(
+                                    actor: memberName(event.actorMemberId),
+                                    target: event.subjectMemberId.map { memberName($0) }
+                                ))
+                                .lineLimit(1)
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         }
                     }
                     if model.auditNextCursor != nil {
-                        Button("Load more") { Task { await model.loadAudit() } }
+                        Button(copy.loadMore) { Task { await model.loadAudit() } }
                             .disabled(model.auditIsLoading)
                     }
                 }
             }
         }
-        .navigationTitle("Audit log")
+        .navigationTitle(copy.auditLog)
         .task { await model.loadAudit(reset: true) }
         .refreshable { await model.loadAudit(reset: true) }
     }
@@ -314,6 +326,11 @@ private struct IOSWorkspaceAuditView: View {
             )
         )
     }
+
+    private func memberName(_ id: MemberID?) -> String {
+        guard let id else { return copy.unknownAuditActor }
+        return members[id]?.displayName ?? id.description
+    }
 }
 
 private enum IOSAuditActionFilter: String, CaseIterable, Identifiable {
@@ -322,8 +339,8 @@ private enum IOSAuditActionFilter: String, CaseIterable, Identifiable {
     case ban
 
     var id: String { rawValue }
-    var title: String {
-        switch self { case .all: "All actions"; case .member: "Member lifecycle"; case .ban: "Bans" }
+    func title(copy: IOSWorkspaceCopy) -> String {
+        switch self { case .all: copy.allActions; case .member: copy.memberLifecycle; case .ban: copy.bans }
     }
     var prefix: String? {
         switch self { case .all: nil; case .member: "member."; case .ban: "ban." }
@@ -337,8 +354,8 @@ private enum IOSAuditPeriod: String, CaseIterable, Identifiable {
     case month
 
     var id: String { rawValue }
-    var title: String {
-        switch self { case .all: "All time"; case .day: "24 hours"; case .week: "7 days"; case .month: "30 days" }
+    func title(copy: IOSWorkspaceCopy) -> String {
+        switch self { case .all: copy.allTime; case .day: copy.hours24; case .week: copy.days7; case .month: copy.days30 }
     }
     var fromMs: Int64? {
         let seconds: TimeInterval
@@ -374,11 +391,4 @@ private struct IOSMemberInitialsAvatar: View {
     }
 }
 
-private func roleTitle(_ role: MembershipRole?) -> String {
-    switch role { case .owner: "Owner"; case .admin: "Admin"; case .guest: "Guest"; default: "Member" }
-}
-
-private func statusTitle(_ status: MemberStatus) -> String {
-    switch status { case .active: "Active"; case .invited: "Invited"; case .suspended: "Suspended"; case .deleted: "Removed" }
-}
 #endif

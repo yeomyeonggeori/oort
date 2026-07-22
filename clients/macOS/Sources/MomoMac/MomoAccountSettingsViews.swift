@@ -383,13 +383,13 @@ struct MomoWorkspaceSettingsSurface: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
 
-            MomoSettingsSection(title: "Workspace access", subtitle: "Membership changes are recorded in the audit log") {
-                if let error = viewModel.membershipAdministrationError {
-                    Label(error, systemImage: "exclamationmark.triangle")
+            MomoSettingsSection(title: copy.workspaceAccess, subtitle: copy.workspaceAccessSubtitle) {
+                if viewModel.membershipAdministrationError != nil {
+                    Label(copy.membershipUpdateFailed, systemImage: "exclamationmark.triangle")
                         .font(MomoTheme.Typography.supporting)
                         .foregroundStyle(MomoTheme.irreversibleRed)
                 }
-                Button("Leave workspace", role: .destructive) {
+                Button(copy.leaveWorkspace, role: .destructive) {
                     showsLeaveWorkspaceConfirmation = true
                 }
                 .accessibilityIdentifier("workspaceSettingsLeave")
@@ -405,17 +405,17 @@ struct MomoWorkspaceSettingsSurface: View {
             saveNotice = nil
         }
         .confirmationDialog(
-            "Leave this workspace?",
+            copy.leaveWorkspaceQuestion,
             isPresented: $showsLeaveWorkspaceConfirmation
         ) {
-            Button("Leave workspace", role: .destructive) {
+            Button(copy.leaveWorkspace, role: .destructive) {
                 Task { await viewModel.leaveCurrentWorkspace() }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(copy.cancel, role: .cancel) {}
         } message: {
             Text(viewModel.authenticatedMember?.workspaceRole == .owner
-                 ? "If you are the last owner, assign another owner before leaving."
-                 : "Your workspace membership and active tokens will be revoked.")
+                 ? copy.lastOwnerLeaveExplanation
+                 : copy.leaveWorkspaceExplanation)
         }
     }
 
