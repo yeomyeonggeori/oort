@@ -45,7 +45,15 @@ struct WorkHostDaemonMain {
                 profiles: profiles,
                 localOverrides: config.localCommandOverrides
             )
-            let processes = ProcessManager(templates: templates, outputDirectory: config.outputDirectory)
+            let processes = ProcessManager(
+                templates: templates,
+                outputDirectory: config.outputDirectory,
+                acpEventRelay: { sessionID, event in
+                    try await runtimeClient.relayACPEvent(
+                        hostID: hostID, sessionID: sessionID, event: event
+                    )
+                }
+            )
             if CommandLine.arguments.contains("--bootstrap-only") { return }
             let daemon = WorkDaemon(
                 hostID: hostID,

@@ -1,4 +1,5 @@
 import Foundation
+import MomoACPHost
 
 enum WorkdFailure: Error, Sendable {
     case configuration
@@ -135,4 +136,9 @@ protocol WorkHostAPI: Sendable {
         errorLabel: String?
     ) async throws
     func endSession(hostID: UUID, sessionID: UUID, exitCode: Int?) async throws
+    func relayACPEvent(
+        hostID: UUID,
+        sessionID: UUID,
+        event: ACPProjectedEvent
+    ) async throws
 }

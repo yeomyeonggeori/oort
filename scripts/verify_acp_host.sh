@@ -36,6 +36,14 @@ fi
 
 echo "[acp-host] PASS: initialize -> session/new -> session/prompt, update/card projection, approval allow/reject, terminal PTY delegation"
 
+WORKD_GATE_ACP=1 \
+WORKD_GATE_PROJECT=momo546acprelay \
+WORKD_GATE_API_PORT="$API_PORT" \
+WORKD_GATE_CENTRIFUGO_PORT="$CENTRIFUGO_PORT" \
+WORKD_GATE_POSTGRES_PORT="$POSTGRES_PORT" \
+WORKD_GATE_HERMES_PORT="$MOCK_AGENT_PORT" \
+  "$REPO_ROOT/scripts/verify_workd.sh"
+
 if [ "${MOMO_ACP_REQUIRE_REAL:-0}" = "1" ]; then
   command -v opencode >/dev/null 2>&1 || {
     echo "[acp-host] opencode is required for real ACP smoke" >&2
