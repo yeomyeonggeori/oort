@@ -711,7 +711,7 @@ public struct MessageBubble: View {
     }
 
     private var workSessionCard: some View {
-        let tool = MomoWorkTool(rawValue: message.props["tool"]?.stringValue ?? "") ?? .shell
+        let tool = MomoWorkTool(rawValue: message.props["tool"]?.stringValue ?? "shell")
         let status = MomoWorkSessionStatus(
             rawValue: message.props["status"]?.stringValue ?? "running"
         ) ?? .running

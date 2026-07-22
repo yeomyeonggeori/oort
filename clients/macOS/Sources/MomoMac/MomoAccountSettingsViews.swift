@@ -254,6 +254,7 @@ final class MomoWorkspaceSettingsProjection: ObservableObject {
 
 struct MomoWorkspaceSettingsSurface: View {
     let copy: MomoWorkspaceCopy
+    private let viewModel: ChatViewModel
     @StateObject private var projection: MomoWorkspaceSettingsProjection
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
@@ -262,6 +263,7 @@ struct MomoWorkspaceSettingsSurface: View {
     @AppStorage("momo.server.memberInvitePolicy") private var memberInvitePolicy = "admins"
     @State private var serverDisplayName: String
     @State private var saveNotice: String?
+    @State private var showsLeaveWorkspaceConfirmation = false
 
     private var workspaceNameDraft: MomoWorkspaceNameDraft {
         MomoWorkspaceNameDraft(serverDisplayName)
@@ -273,6 +275,7 @@ struct MomoWorkspaceSettingsSurface: View {
 
     init(copy: MomoWorkspaceCopy, viewModel: ChatViewModel) {
         self.copy = copy
+        self.viewModel = viewModel
         _projection = StateObject(
             wrappedValue: MomoWorkspaceSettingsProjection(viewModel: viewModel)
         )
@@ -379,6 +382,18 @@ struct MomoWorkspaceSettingsSurface: View {
                 .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
+
+            MomoSettingsSection(title: copy.workspaceAccess, subtitle: copy.workspaceAccessSubtitle) {
+                if viewModel.membershipAdministrationError != nil {
+                    Label(copy.membershipUpdateFailed, systemImage: "exclamationmark.triangle")
+                        .font(MomoTheme.Typography.supporting)
+                        .foregroundStyle(MomoTheme.irreversibleRed)
+                }
+                Button(copy.leaveWorkspace, role: .destructive) {
+                    showsLeaveWorkspaceConfirmation = true
+                }
+                .accessibilityIdentifier("workspaceSettingsLeave")
+            }
         }
         .onChange(of: projection.workspace?.name) { _, value in
             guard let value, !value.isEmpty else { return }
@@ -388,6 +403,19 @@ struct MomoWorkspaceSettingsSurface: View {
             let persisted = projection.workspace.map { MomoWorkspaceNameDraft($0.name).normalized }
             guard MomoWorkspaceNameDraft(value).normalized != persisted else { return }
             saveNotice = nil
+        }
+        .confirmationDialog(
+            copy.leaveWorkspaceQuestion,
+            isPresented: $showsLeaveWorkspaceConfirmation
+        ) {
+            Button(copy.leaveWorkspace, role: .destructive) {
+                Task { await viewModel.leaveCurrentWorkspace() }
+            }
+            Button(copy.cancel, role: .cancel) {}
+        } message: {
+            Text(viewModel.authenticatedMember?.workspaceRole == .owner
+                 ? copy.lastOwnerLeaveExplanation
+                 : copy.leaveWorkspaceExplanation)
         }
     }
 
@@ -417,6 +445,7 @@ struct MomoMemberProfileSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     let member: Member
     @ObservedObject var viewModel: ChatViewModel
+    let onOpenMemory: (() -> Void)?
     let onSave: (String, String?, Presence) -> Void
     @State private var displayName: String
     @State private var avatarPath: String
@@ -427,11 +456,13 @@ struct MomoMemberProfileSettingsSurface: View {
         copy: MomoWorkspaceCopy,
         member: Member,
         viewModel: ChatViewModel,
+        onOpenMemory: (() -> Void)? = nil,
         onSave: @escaping (String, String?, Presence) -> Void
     ) {
         self.copy = copy
         self.member = member
         self.viewModel = viewModel
+        self.onOpenMemory = onOpenMemory
         self.onSave = onSave
         let allowsEditing = viewModel.allowsLocalProfileEditing
         _displayName = State(initialValue: allowsEditing
@@ -533,6 +564,17 @@ struct MomoMemberProfileSettingsSurface: View {
             }
 
             if member.isAgent {
+                if let onOpenMemory {
+                    MomoSettingsSection(
+                        title: copy.memoryBrowserTitle,
+                        subtitle: copy.memoryBrowserSubtitle
+                    ) {
+                        Button(action: onOpenMemory) {
+                            Label(copy.memoryBrowserTitle, systemImage: "brain.head.profile")
+                        }
+                    }
+                }
+
                 MomoAgentCredentialManagementView(
                     copy: copy,
                     agent: member,

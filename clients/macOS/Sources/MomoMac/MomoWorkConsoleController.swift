@@ -1,4 +1,5 @@
 import Foundation
+import MomoACPHost
 import MomoCore
 
 enum MomoWorkSessionShortcut {
@@ -21,6 +22,7 @@ final class MomoWorkConsoleController: ObservableObject {
     @Published private(set) var sessions: [MomoWorkSession] = []
     @Published var selectedSessionId: WorkSessionID?
     @Published private(set) var localSessions: [WorkSessionID: MomoLocalTerminalSession] = [:]
+    @Published private(set) var acpSessions: [WorkSessionID: MomoLocalACPSession] = [:]
     @Published private(set) var remoteSessions: [WorkSessionID: MomoRemoteTerminalSession] = [:]
     @Published private(set) var workHosts: [WorkHostID: WorkHost] = [:]
     @Published private(set) var pendingReads: [WorkSessionID: MomoPendingWorkRead] = [:]
@@ -35,6 +37,10 @@ final class MomoWorkConsoleController: ObservableObject {
     @Published private(set) var tierPolicyUpdatesInFlight: Set<MomoWorkTierPolicyScope> = []
     @Published private(set) var tierPolicyLoadFailed = false
     @Published private(set) var resumeUpdatesInFlight: Set<WorkSessionID> = []
+    @Published private(set) var toolProfiles: [MomoWorkToolProfile] = []
+    @Published private(set) var toolProfileIssue: MomoWorkConsoleError?
+    @Published private(set) var isLoadingToolProfiles = false
+    @Published private(set) var mutatingToolKeys: Set<String> = []
 
     private let viewModel: ChatViewModel
     private let workHostRegistrar: MomoWorkHostRegistrar
@@ -51,15 +57,14 @@ final class MomoWorkConsoleController: ObservableObject {
         remoteTransportFactory: @escaping @MainActor () -> any MomoRemoteTerminalTransport = {
             MomoURLSessionRemoteTerminalTransport()
         },
-        initialHostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession
+        initialHostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession,
+        initialToolProfiles: [MomoWorkToolProfile] = []
     ) {
         self.viewModel = viewModel
         self.workHostRegistrar = workHostRegistrar
         self.remoteTransportFactory = remoteTransportFactory
         self.hostRegistrationState = initialHostRegistrationState
-        for tool in MomoWorkTool.allCases {
-            autoApproveStates[tool] = .unknown
-        }
+        toolProfiles = initialToolProfiles
     }
 
     var supportsWorkConsole: Bool { viewModel.supportsWorkConsole }
@@ -69,6 +74,16 @@ final class MomoWorkConsoleController: ObservableObject {
     var isHostReady: Bool { hostRegistrationState.host != nil }
 
     var canManageWorkspaceTierPolicy: Bool { viewModel.canManageWorkspace }
+
+    var canManageToolProfiles: Bool { viewModel.canManageWorkspace }
+
+    var enabledToolProfiles: [MomoWorkToolProfile] {
+        toolProfiles.filter(\.enabled)
+    }
+
+    func profile(for tool: MomoWorkTool) -> MomoWorkToolProfile? {
+        toolProfiles.first { $0.tool == tool && $0.enabled }
+    }
 
     var selectedSession: MomoWorkSession? {
         guard let selectedSessionId else { return nil }
@@ -92,8 +107,10 @@ final class MomoWorkConsoleController: ObservableObject {
             heartbeatTask?.cancel()
             heartbeatTask = nil
             localSessions.values.forEach { $0.terminate() }
+            acpSessions.values.forEach { $0.terminate() }
             remoteSessions.values.forEach { $0.disconnect() }
             localSessions = [:]
+            acpSessions = [:]
             remoteSessions = [:]
             workHosts = [:]
             pendingReads = [:]
@@ -108,18 +125,105 @@ final class MomoWorkConsoleController: ObservableObject {
             tierPolicyUpdatesInFlight = []
             tierPolicyLoadFailed = false
             resumeUpdatesInFlight = []
+            toolProfiles = []
+            toolProfileIssue = nil
+            mutatingToolKeys = []
         }
         guard let nextWorkspace, let nextMember else {
             if nextWorkspace == nil { lastIssue = .noWorkspace }
             return
         }
         await reconcileWorkHost(workspace: nextWorkspace, member: nextMember)
+        await refreshToolProfiles()
         await refresh()
     }
 
     func retryWorkHostRegistration() async {
         guard let workspaceId, let memberId else { return }
         await reconcileWorkHost(workspace: workspaceId, member: memberId)
+    }
+
+    func refreshToolProfiles() async {
+        guard supportsWorkConsole else {
+            toolProfiles = []
+            toolProfileIssue = .unavailable
+            return
+        }
+        isLoadingToolProfiles = true
+        defer { isLoadingToolProfiles = false }
+        do {
+            let profiles: [MomoWorkToolProfile]
+            if canManageToolProfiles {
+                profiles = try await viewModel.loadWorkToolProfiles()
+            } else {
+                guard let workspaceId,
+                      let hostId,
+                      let backend = try? viewModel.workHostBackendForCurrentSession()
+                else { throw MomoWorkConsoleError.toolProfileUnavailable }
+                profiles = try await workHostRegistrar.enabledToolProfiles(
+                    workspace: workspaceId,
+                    host: hostId,
+                    sentAtMs: Int64(Date().timeIntervalSince1970 * 1_000),
+                    backend: backend
+                )
+            }
+            toolProfiles = profiles.sorted { ($0.displayName, $0.toolKey) < ($1.displayName, $1.toolKey) }
+            autoApproveStates = Dictionary(
+                uniqueKeysWithValues: profiles.map { ($0.tool, autoApproveStates[$0.tool] ?? .unknown) }
+            )
+            toolProfileIssue = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            toolProfiles = []
+            autoApproveStates = [:]
+            toolProfileIssue = .toolProfileUnavailable
+        }
+    }
+
+    func saveToolProfile(
+        _ draft: MomoWorkToolProfileDraft,
+        replacing profile: MomoWorkToolProfile?
+    ) async -> Bool {
+        guard canManageToolProfiles else { return false }
+        let normalizedKey = draft.toolKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedKey.isEmpty, !mutatingToolKeys.contains(normalizedKey) else { return false }
+        mutatingToolKeys.insert(normalizedKey)
+        defer { mutatingToolKeys.remove(normalizedKey) }
+        do {
+            let saved: MomoWorkToolProfile
+            if let profile {
+                saved = try await viewModel.updateWorkToolProfile(tool: profile.tool, draft: draft)
+            } else {
+                saved = try await viewModel.createWorkToolProfile(draft)
+            }
+            upsertToolProfile(saved)
+            toolProfileIssue = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            toolProfileIssue = .toolProfileUnavailable
+            return false
+        }
+    }
+
+    func deleteToolProfile(_ profile: MomoWorkToolProfile) async -> Bool {
+        guard canManageToolProfiles, !mutatingToolKeys.contains(profile.toolKey) else { return false }
+        mutatingToolKeys.insert(profile.toolKey)
+        defer { mutatingToolKeys.remove(profile.toolKey) }
+        do {
+            _ = try await viewModel.deleteWorkToolProfile(tool: profile.tool)
+            toolProfiles.removeAll { $0.id == profile.id }
+            autoApproveStates[profile.tool] = nil
+            toolProfileIssue = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            toolProfileIssue = .toolProfileUnavailable
+            return false
+        }
     }
 
     func refresh() async {
@@ -159,7 +263,8 @@ final class MomoWorkConsoleController: ObservableObject {
     func startSession(
         tool: MomoWorkTool,
         label rawLabel: String,
-        directory: URL?
+        directory: URL?,
+        initialPrompt: String? = nil
     ) async -> Bool {
         guard !isStarting else { return false }
         guard isHostReady else {
@@ -174,12 +279,15 @@ final class MomoWorkConsoleController: ObservableObject {
         isStarting = true
         defer { isStarting = false }
         do {
-            _ = try MomoWorkLaunchSpec.resolve(tool: tool)
+            guard let profile = profile(for: tool) else {
+                throw MomoWorkConsoleError.toolProfileUnavailable
+            }
             let session = try await createAndLaunch(
                 channel: channel,
-                tool: tool,
+                profile: profile,
                 label: label,
-                directory: directory
+                directory: directory,
+                initialPrompt: initialPrompt
             )
             upsert(session)
             selectedSessionId = session.id
@@ -506,39 +614,77 @@ final class MomoWorkConsoleController: ObservableObject {
         endingSessionIds.formUnion(runningIDs)
         defer { endingSessionIds.subtract(runningIDs) }
         localSessions.values.forEach { $0.terminate() }
+        acpSessions.values.forEach { $0.terminate() }
         remoteSessions.values.forEach { $0.disconnect() }
         for session in running {
             _ = try? await viewModel.endWorkSession(session.id, exitCode: nil)
         }
         localSessions = [:]
+        acpSessions = [:]
         remoteSessions = [:]
         pendingReads = [:]
     }
 
     private func createAndLaunch(
         channel: ChannelID,
-        tool: MomoWorkTool,
+        profile: MomoWorkToolProfile,
         label: String,
-        directory: URL?
+        directory: URL?,
+        initialPrompt: String?
     ) async throws -> MomoWorkSession {
         guard let hostId else { throw MomoWorkConsoleError.hostRegistrationFailed }
         let session = try await viewModel.createWorkSession(
             channel: channel,
             host: hostId,
-            tool: tool,
+            tool: profile.tool,
             label: label
         )
-        let local = MomoLocalTerminalSession { [weak self] exitCode in
-            guard let self else { return }
-            Task { await self.localProcessEnded(session.id, exitCode: exitCode) }
-        }
         do {
-            try local.start(tool: tool, directory: directory)
+            switch profile.transport {
+            case .pty:
+                let local = MomoLocalTerminalSession { [weak self] exitCode in
+                    guard let self else { return }
+                    Task { await self.localProcessEnded(session.id, exitCode: exitCode) }
+                }
+                try local.start(profile: profile, directory: directory)
+                localSessions[session.id] = local
+            case .acp:
+                let spec = try MomoWorkLaunchSpec.resolve(profile: profile)
+                let proposedPrompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let environment: [String: String] = Dictionary(
+                    uniqueKeysWithValues: spec.environment.compactMap { entry -> (String, String)? in
+                    guard let divider = entry.firstIndex(of: "=") else { return nil }
+                    return (String(entry[..<divider]), String(entry[entry.index(after: divider)...]))
+                    }
+                )
+                let acp = MomoLocalACPSession { [weak self] exitCode in
+                    guard let self else { return }
+                    Task { await self.localProcessEnded(session.id, exitCode: exitCode) }
+                }
+                acp.start(
+                    command: ACPLaunchCommand(
+                        executable: spec.executable,
+                        arguments: spec.arguments,
+                        workingDirectory: directory ?? FileManager.default.homeDirectoryForCurrentUser,
+                        environment: environment
+                    ),
+                    context: ACPHostContext(
+                        workSessionID: session.id.rawValue,
+                        channelID: channel.rawValue,
+                        agentMemberID: nil
+                    ),
+                    prompt: proposedPrompt.isEmpty ? label : proposedPrompt,
+                    terminalHandler: LocalPTYTerminalManager(
+                        defaultWorkingDirectory: directory ?? FileManager.default.homeDirectoryForCurrentUser,
+                        baseEnvironment: environment
+                    )
+                )
+                acpSessions[session.id] = acp
+            }
         } catch {
             _ = try? await viewModel.endWorkSession(session.id, exitCode: nil)
             throw error
         }
-        localSessions[session.id] = local
         return session
     }
 
@@ -565,15 +711,18 @@ final class MomoWorkConsoleController: ObservableObject {
 
     private func executeSpawn(_ control: WorkControlDelta) async throws {
         guard let rawTool = control.payload["tool"]?.stringValue,
-              let tool = MomoWorkTool(rawValue: rawTool),
               let rawLabel = control.payload["label"]?.stringValue
         else { throw MomoWorkConsoleError.localLaunchFailed }
-        _ = try MomoWorkLaunchSpec.resolve(tool: tool)
+        let tool = MomoWorkTool(rawValue: rawTool)
+        guard let profile = profile(for: tool) else {
+            throw MomoWorkConsoleError.toolProfileUnavailable
+        }
         let session = try await createAndLaunch(
             channel: control.channelId,
-            tool: tool,
+            profile: profile,
             label: Self.normalizedLabel(rawLabel, tool: tool, directory: nil),
-            directory: nil
+            directory: nil,
+            initialPrompt: rawLabel
         )
         do {
             try await viewModel.acknowledgeWorkControl(
@@ -594,12 +743,16 @@ final class MomoWorkConsoleController: ObservableObject {
 
     private func executeInput(_ control: WorkControlDelta) async throws {
         guard let sessionId = control.sessionId,
-              let local = localSessions[sessionId],
-              local.isRunning,
               let text = control.payload["text"]?.stringValue,
               !text.isEmpty
         else { throw MomoWorkConsoleError.sessionUnavailable }
-        local.sendInput(text)
+        if let local = localSessions[sessionId], local.isRunning {
+            local.sendInput(text)
+        } else if let acp = acpSessions[sessionId], acp.isRunning {
+            acp.sendPrompt(text)
+        } else {
+            throw MomoWorkConsoleError.sessionUnavailable
+        }
         try await viewModel.acknowledgeWorkControl(
             control.controlId,
             ok: true,
@@ -625,7 +778,7 @@ final class MomoWorkConsoleController: ObservableObject {
     private func executeKill(_ control: WorkControlDelta) async throws {
         guard let sessionId = control.sessionId,
               let session = sessions.first(where: { $0.id == sessionId }),
-              localSessions[sessionId] != nil
+              localSessions[sessionId] != nil || acpSessions[sessionId] != nil
         else { throw MomoWorkConsoleError.sessionUnavailable }
         guard !endingSessionIds.contains(sessionId) else {
             throw MomoWorkConsoleError.sessionUnavailable
@@ -633,6 +786,7 @@ final class MomoWorkConsoleController: ObservableObject {
         endingSessionIds.insert(sessionId)
         defer { endingSessionIds.remove(sessionId) }
         localSessions[sessionId]?.terminate()
+        acpSessions[sessionId]?.terminate()
         upsert(try await viewModel.endWorkSession(sessionId, exitCode: nil))
         try await viewModel.acknowledgeWorkControl(
             control.controlId,
@@ -716,6 +870,16 @@ final class MomoWorkConsoleController: ObservableObject {
             remoteSessions[session.id]?.disconnect()
             remoteSessions[session.id] = nil
         }
+    }
+
+    private func upsertToolProfile(_ profile: MomoWorkToolProfile) {
+        if let index = toolProfiles.firstIndex(where: { $0.id == profile.id }) {
+            toolProfiles[index] = profile
+        } else {
+            toolProfiles.append(profile)
+        }
+        toolProfiles.sort { ($0.displayName, $0.toolKey) < ($1.displayName, $1.toolKey) }
+        autoApproveStates[profile.tool] = autoApproveStates[profile.tool] ?? .unknown
     }
 
     private func reconcileObserverAccess() {
@@ -903,11 +1067,10 @@ final class MomoWorkConsoleController: ObservableObject {
     }
 
     private static var workHostCapabilities: [String: Bool] {
-        var capabilities = ["work.control.realtime": true]
-        for tool in MomoWorkTool.allCases {
-            capabilities["tool.\(tool.rawValue)"] =
-                (try? MomoWorkLaunchSpec.resolve(tool: tool)) != nil
-        }
-        return capabilities
+        [
+            "work.control.realtime": true,
+            "work.tool-profile": true,
+            "work.acp": true,
+        ]
     }
 }

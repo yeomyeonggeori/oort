@@ -368,7 +368,20 @@ private struct MomoWorkSessionDetail: View {
                 readRequest(request)
                 Divider()
             }
-            if let local = controller.localSessions[session.id] {
+            if let acp = controller.acpSessions[session.id] {
+                ScrollView {
+                    MomoACPSessionCard(
+                        session: acp,
+                        toolDisplayName: controller.toolProfiles.first(where: { $0.tool == session.tool })?.displayName
+                            ?? copy.workToolTitle(session.tool),
+                        sessionLabel: session.label,
+                        copy: copy
+                    )
+                        .padding(MomoTheme.WorkConsole.edgeInset)
+                        .frame(maxWidth: 720)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            } else if let local = controller.localSessions[session.id] {
                 MomoSwiftTermView(session: local, theme: terminalTheme)
                     .overlay(alignment: .bottomLeading) {
                         Text(copy.workSessionLocalOnly)
@@ -779,9 +792,14 @@ private struct MomoNewWorkSessionSheet: View {
     @ObservedObject var controller: MomoWorkConsoleController
     let copy: MomoWorkspaceCopy
     @Environment(\.dismiss) private var dismiss
-    @State private var tool = MomoWorkTool.codex
+    @State private var toolKey = ""
     @State private var label = ""
     @State private var folderURL: URL?
+    @State private var initialPrompt = ""
+
+    private var selectedProfile: MomoWorkToolProfile? {
+        controller.enabledToolProfiles.first { $0.toolKey == toolKey }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.sectionSpacing) {
@@ -793,10 +811,26 @@ private struct MomoNewWorkSessionSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            Picker(copy.workSessionProfile, selection: $tool) {
-                ForEach(MomoWorkTool.allCases) { tool in
-                    Label(copy.workToolTitle(tool), systemImage: tool.systemImage)
-                        .tag(tool)
+            if controller.enabledToolProfiles.isEmpty {
+                Label(copy.workToolProfileUnavailable, systemImage: "exclamationmark.triangle")
+                    .momoTypography(.supporting)
+                    .foregroundStyle(MomoTheme.costAmber)
+            } else {
+                Picker(copy.workSessionProfile, selection: $toolKey) {
+                    ForEach(controller.enabledToolProfiles) { profile in
+                        Label(profile.displayName, systemImage: profile.tool.systemImage)
+                            .tag(profile.toolKey)
+                    }
+                }
+            }
+
+            if selectedProfile?.transport == .acp {
+                VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.compactSpacing) {
+                    Text(copy.acpInitialPrompt)
+                        .momoTypography(.supporting)
+                        .fontWeight(.medium)
+                    TextField(copy.acpInitialPromptPlaceholder, text: $initialPrompt, axis: .vertical)
+                        .lineLimit(3...6)
                 }
             }
 
@@ -829,21 +863,32 @@ private struct MomoNewWorkSessionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(copy.startWorkSession) {
                     Task {
+                        guard let selectedProfile else { return }
                         if await controller.startSession(
-                            tool: tool,
+                            tool: selectedProfile.tool,
                             label: label,
-                            directory: folderURL
+                            directory: folderURL,
+                            initialPrompt: initialPrompt
                         ) {
                             dismiss()
                         }
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(controller.isStarting || !controller.isHostReady)
+                .disabled(
+                    controller.isStarting
+                        || !controller.isHostReady
+                        || selectedProfile == nil
+                        || (selectedProfile?.transport == .acp
+                            && initialPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                )
             }
         }
         .padding(MomoTheme.WorkConsole.edgeInset)
         .frame(width: MomoTheme.WorkConsole.newSessionWidth)
+        .onAppear {
+            if toolKey.isEmpty { toolKey = controller.enabledToolProfiles.first?.toolKey ?? "" }
+        }
     }
 
     private func chooseFolder() {
@@ -862,6 +907,9 @@ struct MomoWorkConsoleSettingsView: View {
     @ObservedObject var controller: MomoWorkConsoleController
     @ObservedObject var preferences: MomoWorkConsolePreferences
     let copy: MomoWorkspaceCopy
+    @State private var editingToolProfile: MomoWorkToolProfile?
+    @State private var showsNewToolProfile = false
+    @State private var deletingToolProfile: MomoWorkToolProfile?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.sectionSpacing) {
@@ -908,6 +956,8 @@ struct MomoWorkConsoleSettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Divider()
+            toolProfileSection
             Divider()
             VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.compactSpacing) {
                 Text(copy.workHostIdentifier)
@@ -976,25 +1026,127 @@ struct MomoWorkConsoleSettingsView: View {
                 Text(copy.workAutoApproveUnknown)
                     .momoTypography(.metadata)
                     .foregroundStyle(.secondary)
-                ForEach(MomoWorkTool.allCases) { tool in
+                ForEach(controller.enabledToolProfiles) { profile in
                     HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
-                        Label(copy.workToolTitle(tool), systemImage: tool.systemImage)
+                        Label(profile.displayName, systemImage: profile.tool.systemImage)
                         Spacer(minLength: 0)
-                        Menu(autoApproveLabel(for: tool)) {
+                        Menu(autoApproveLabel(for: profile.tool)) {
                             Button(copy.workAutoApproveEnable) {
-                                Task { await controller.setAutoApprove(true, for: tool) }
+                                Task { await controller.setAutoApprove(true, for: profile.tool) }
                             }
                             Button(copy.workAutoApproveDisable) {
-                                Task { await controller.setAutoApprove(false, for: tool) }
+                                Task { await controller.setAutoApprove(false, for: profile.tool) }
                             }
                         }
-                        .disabled(controller.autoApproveStates[tool] == .updating)
+                        .disabled(controller.autoApproveStates[profile.tool] == .updating)
                     }
                 }
             }
         }
         .padding(MomoTheme.WorkConsole.edgeInset)
         .frame(width: MomoTheme.WorkConsole.settingsWidth)
+        .sheet(isPresented: $showsNewToolProfile) {
+            MomoWorkToolProfileEditor(
+                controller: controller,
+                profile: nil,
+                copy: copy
+            )
+        }
+        .sheet(item: $editingToolProfile) { profile in
+            MomoWorkToolProfileEditor(
+                controller: controller,
+                profile: profile,
+                copy: copy
+            )
+        }
+        .alert(copy.workToolProfileDeleteTitle, isPresented: Binding(
+            get: { deletingToolProfile != nil },
+            set: { if !$0 { deletingToolProfile = nil } }
+        )) {
+            Button(copy.cancel, role: .cancel) { deletingToolProfile = nil }
+            Button(copy.workToolProfileDelete, role: .destructive) {
+                guard let profile = deletingToolProfile else { return }
+                deletingToolProfile = nil
+                Task { _ = await controller.deleteToolProfile(profile) }
+            }
+        } message: {
+            Text(copy.workToolProfileDeleteBody)
+        }
+    }
+
+    private var toolProfileSection: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.standardSpacing) {
+            HStack {
+                Text(copy.workToolProfiles)
+                    .momoTypography(.supporting)
+                    .fontWeight(.medium)
+                Spacer(minLength: 0)
+                if controller.canManageToolProfiles {
+                    Button {
+                        showsNewToolProfile = true
+                    } label: {
+                        Label(copy.workToolProfileAdd, systemImage: "plus")
+                            .labelStyle(.iconOnly)
+                    }
+                    .momoQuickTooltip(copy.workToolProfileAdd)
+                }
+            }
+            Text(copy.workToolProfilesHelp)
+                .momoTypography(.metadata)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if controller.isLoadingToolProfiles {
+                ProgressView(copy.workToolProfilesLoading)
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+            } else if controller.toolProfileIssue != nil {
+                VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                    Label(copy.workToolProfilesLoadFailed, systemImage: "exclamationmark.triangle")
+                        .momoTypography(.metadata)
+                        .foregroundStyle(MomoTheme.costAmber)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(copy.workToolProfilesReload) {
+                        Task { await controller.refreshToolProfiles() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else if controller.toolProfiles.isEmpty {
+                Label(copy.workToolProfileUnavailable, systemImage: "tray")
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(controller.toolProfiles) { profile in
+                    HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+                        Image(systemName: profile.tool.systemImage)
+                            .foregroundStyle(profile.enabled ? .primary : .secondary)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(profile.displayName)
+                                .momoTypography(.metadata)
+                                .fontWeight(.medium)
+                            Text(
+                                "\(profile.toolKey) · \(profile.transport == .acp ? copy.workToolACP : copy.workToolPTY) · \(copy.workToolPermissionPolicy(profile.permissionPolicy)) · \(copy.workToolRisk(profile.risk))"
+                            )
+                                .momoTypography(.metadata)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if controller.canManageToolProfiles {
+                            Menu {
+                                Button(copy.workToolProfileEdit) { editingToolProfile = profile }
+                                Button(copy.workToolProfileDelete, role: .destructive) {
+                                    deletingToolProfile = profile
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                            }
+                            .accessibilityLabel(copy.workToolProfileActions(profile.displayName))
+                            .menuStyle(.borderlessButton)
+                            .disabled(controller.mutatingToolKeys.contains(profile.toolKey))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func autoApproveLabel(for tool: MomoWorkTool) -> String {
@@ -1072,5 +1224,144 @@ struct MomoWorkConsoleSettingsView: View {
                     || host.ownerMemberId == controller.hostRegistrationState.host?.ownerMemberId
             }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+}
+
+struct MomoWorkToolProfileEditor: View {
+    @ObservedObject var controller: MomoWorkConsoleController
+    let profile: MomoWorkToolProfile?
+    let copy: MomoWorkspaceCopy
+    @Environment(\.dismiss) private var dismiss
+    @State private var toolKey: String
+    @State private var displayName: String
+    @State private var command: String
+    @State private var arguments: String
+    @State private var transport: MomoWorkTransport
+    @State private var permissionPolicy: MomoWorkToolPermissionPolicy
+    @State private var risk: MomoWorkToolRisk
+    @State private var enabled: Bool
+    @State private var isSaving = false
+    @State private var saveFailed = false
+
+    init(
+        controller: MomoWorkConsoleController,
+        profile: MomoWorkToolProfile?,
+        copy: MomoWorkspaceCopy
+    ) {
+        self.controller = controller
+        self.profile = profile
+        self.copy = copy
+        _toolKey = State(initialValue: profile?.toolKey ?? "")
+        _displayName = State(initialValue: profile?.displayName ?? "")
+        _command = State(initialValue: profile?.launchTemplate.command ?? "")
+        _arguments = State(initialValue: profile?.launchTemplate.arguments.joined(separator: "\n") ?? "")
+        _transport = State(initialValue: profile?.transport ?? .acp)
+        _permissionPolicy = State(initialValue: profile?.permissionPolicy ?? .confirm)
+        _risk = State(initialValue: profile?.risk ?? .medium)
+        _enabled = State(initialValue: profile?.enabled ?? true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.sectionSpacing) {
+            Text(profile == nil ? copy.workToolProfileAdd : copy.workToolProfileEdit)
+                .font(.title3.weight(.semibold))
+
+            Form {
+                TextField(copy.workToolKey, text: $toolKey)
+                    .disabled(profile != nil)
+                TextField(copy.workToolDisplayName, text: $displayName)
+                TextField(copy.workToolCommand, text: $command)
+                TextField(copy.workToolArguments, text: $arguments, axis: .vertical)
+                    .lineLimit(3...7)
+                Picker(copy.workToolTransport, selection: $transport) {
+                    Text(copy.workToolPTY).tag(MomoWorkTransport.pty)
+                    Text(copy.workToolACP).tag(MomoWorkTransport.acp)
+                }
+                Picker(copy.workToolPermissionPolicy, selection: $permissionPolicy) {
+                    ForEach(MomoWorkToolPermissionPolicy.allCases) { policy in
+                        Text(copy.workToolPermissionPolicy(policy)).tag(policy)
+                    }
+                }
+                Picker(copy.workToolRisk, selection: $risk) {
+                    ForEach(MomoWorkToolRisk.allCases) { level in
+                        Text(copy.workToolRisk(level)).tag(level)
+                    }
+                }
+                Toggle(copy.workToolEnabled, isOn: $enabled)
+            }
+            .formStyle(.grouped)
+
+            if !isValid {
+                Label(copy.workToolInvalid, systemImage: "exclamationmark.triangle")
+                    .momoTypography(.metadata)
+                    .foregroundStyle(MomoTheme.costAmber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if saveFailed {
+                Label(copy.workToolSaveFailed, systemImage: "exclamationmark.triangle.fill")
+                    .momoTypography(.metadata)
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+                Button(copy.cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(isSaving ? copy.workToolSaving : copy.workToolSave) {
+                    Task {
+                        isSaving = true
+                        saveFailed = false
+                        let saved = await controller.saveToolProfile(draft, replacing: profile)
+                        isSaving = false
+                        if saved {
+                            dismiss()
+                        } else {
+                            saveFailed = true
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!isValid || isSaving)
+            }
+        }
+        .padding(MomoTheme.WorkConsole.edgeInset)
+        .frame(width: MomoTheme.WorkConsole.settingsWidth)
+    }
+
+    private var draft: MomoWorkToolProfileDraft {
+        MomoWorkToolProfileDraft(
+            toolKey: toolKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+            command: command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            arguments: argumentLines,
+            transport: transport,
+            permissionPolicy: permissionPolicy,
+            risk: risk,
+            enabled: enabled
+        )
+    }
+
+    private var argumentLines: [String] {
+        arguments.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    private var isValid: Bool {
+        let normalizedKey = toolKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let forbidden = ["authorization", "bearer", "password", "secret", "token", "api-key", "api_key"]
+        return normalizedKey.wholeMatch(of: /^[a-z0-9][a-z0-9._-]{1,63}$/) != nil
+            && normalizedCommand.wholeMatch(of: /^[a-z0-9][a-z0-9._-]{0,63}$/) != nil
+            && !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && displayName.count <= 80
+            && argumentLines.count <= 64
+            && argumentLines.allSatisfy { argument in
+                argument.count <= 4_096
+                    && !argument.hasPrefix("/")
+                    && !argument.lowercased().hasPrefix("file:")
+                    && !forbidden.contains(where: argument.lowercased().contains)
+            }
     }
 }

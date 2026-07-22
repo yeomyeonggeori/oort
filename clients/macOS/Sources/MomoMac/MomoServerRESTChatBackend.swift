@@ -9,7 +9,11 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend {
+<<<<<<< HEAD
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend {
+=======
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MomoMembershipAdministrationBackend {
+>>>>>>> origin/track/uxui
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -489,6 +493,97 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return all
     }
 
+    public func changeWorkspaceRole(member: MemberID, role: MembershipRole) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await patch(
+            "/v1/workspaces/\(workspace.description)/members/\(member.description)/role",
+            body: MembershipRoleRequestDTO(role: role.rawValue),
+            response: MembershipRoleResponseDTO.self
+        )
+        cachedMembers = nil
+    }
+
+    public func suspendWorkspaceMember(_ member: MemberID) async throws {
+        try await changeWorkspaceMemberStatus(member, action: "suspend")
+    }
+
+    public func reinstateWorkspaceMember(_ member: MemberID) async throws {
+        try await changeWorkspaceMemberStatus(member, action: "reinstate")
+    }
+
+    public func removeWorkspaceMember(_ member: MemberID, ban: Bool, reason: String?) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await delete(
+            "/v1/workspaces/\(workspace.description)/members/\(member.description)",
+            body: RemoveWorkspaceMemberRequestDTO(ban: ban, reason: reason),
+            response: MembershipLifecycleResponseDTO.self
+        )
+        cachedMembers = nil
+    }
+
+    public func leaveWorkspace() async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await delete(
+            "/v1/workspaces/\(workspace.description)/members/me",
+            authorized: true,
+            response: MembershipLifecycleResponseDTO.self
+        )
+        await clearSessionSensitiveState()
+    }
+
+    public func leaveChannel(_ channel: ChannelID) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await delete(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/members/me",
+            authorized: true,
+            response: ChannelLeaveResponseDTO.self
+        )
+        cachedChannels = nil
+        cachedMembers = nil
+    }
+
+    public func workspaceAudit(
+        cursor: UUID?,
+        limit: Int,
+        filter: MomoWorkspaceAuditFilter
+    ) async throws -> MomoWorkspaceAuditPage {
+        guard let workspace else { throw BackendError.notConnected }
+        var query = [URLQueryItem(name: "limit", value: String(max(1, min(limit, 100))))]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor.uuidString.lowercased())) }
+        if !filter.actionPrefixes.isEmpty {
+            query.append(URLQueryItem(name: "actions", value: filter.actionPrefixes.joined(separator: ",")))
+        }
+        if let target = filter.targetMember {
+            query.append(URLQueryItem(name: "target_member_id", value: target.description.lowercased()))
+        }
+        if let fromMs = filter.fromMs {
+            query.append(URLQueryItem(name: "from_ms", value: String(fromMs)))
+        }
+        if let toMs = filter.toMs {
+            query.append(URLQueryItem(name: "to_ms", value: String(toMs)))
+        }
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/audit",
+            queryItems: query,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: WorkspaceAuditPageDTO.self
+        )
+        return MomoWorkspaceAuditPage(
+            events: page.events,
+            nextCursor: page.nextCursor.flatMap(UUID.init(uuidString:))
+        )
+    }
+
+    private func changeWorkspaceMemberStatus(_ member: MemberID, action: String) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await postEmpty(
+            "/v1/workspaces/\(workspace.description)/members/\(member.description)/\(action)",
+            authorized: true,
+            response: MembershipLifecycleResponseDTO.self
+        )
+        cachedMembers = nil
+    }
+
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
         guard let sessionWorkspace = self.workspace,
               sessionWorkspace == workspace,
@@ -672,6 +767,142 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             queryItems: [],
             response: AgentWorkRun.self
         )
+    }
+
+    // MARK: Memory Plane (ADR-0129)
+
+    public func memories(
+        workspace requestedWorkspace: WorkspaceID,
+        scope: MemoryScope?,
+        agent: MemberID?,
+        includeInvalid: Bool,
+        limit: Int
+    ) async throws -> [MemoryEntry] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        var queryItems = [
+            URLQueryItem(name: "includeInvalid", value: includeInvalid ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
+        ]
+        if let scope { queryItems.append(URLQueryItem(name: "scope", value: scope.rawValue)) }
+        if let agent { queryItems.append(URLQueryItem(name: "agent", value: agent.description.lowercased())) }
+        let page = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories",
+            queryItems: queryItems,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemoryPageResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return page.memories
+    }
+
+    public func searchMemories(
+        workspace requestedWorkspace: WorkspaceID,
+        query: String,
+        scope: MemoryScope?,
+        agent: MemberID?,
+        limit: Int
+    ) async throws -> [MemorySearchHit] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        var queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 50))),
+        ]
+        if let scope { queryItems.append(URLQueryItem(name: "scope", value: scope.rawValue)) }
+        if let agent { queryItems.append(URLQueryItem(name: "agent", value: agent.description.lowercased())) }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/search",
+            queryItems: queryItems,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemorySearchResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.hits
+    }
+
+    public func updateMemory(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID,
+        body: String,
+        confidence: Double
+    ) async throws -> MemoryEntry {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await patch(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())",
+            body: UpdateMemoryRequestDTO(body: body, confidence: confidence),
+            response: MemoryItemResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memory
+    }
+
+    public func invalidateMemory(
+        workspace requestedWorkspace: WorkspaceID,
+        memory: UUID
+    ) async throws -> MemoryEntry {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/memories/\(memory.uuidString.lowercased())/invalidate",
+            body: InvalidateMemoryRequestDTO(invalidatedByMemoryId: nil),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemoryItemResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memory
+    }
+
+    public func memoryPolicy(
+        workspace requestedWorkspace: WorkspaceID
+    ) async throws -> WorkspaceMemoryPolicy {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/memory-policy",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MemoryPolicyResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memoryPolicy
+    }
+
+    public func setMemoryPolicy(
+        workspace requestedWorkspace: WorkspaceID,
+        enabled: Bool
+    ) async throws -> WorkspaceMemoryPolicy {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await put(
+            "/v1/workspaces/\(requestedWorkspace.description)/memory-policy",
+            body: PutMemoryPolicyRequestDTO(enabled: enabled),
+            response: MemoryPolicyResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.memoryPolicy
+    }
+
+    public func contextPacket(
+        workspace requestedWorkspace: WorkspaceID,
+        packet: UUID
+    ) async throws -> ContextPacketSnapshot {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/context-packets/\(packet.uuidString.lowercased())",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: ContextPacketSnapshot.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.packetId == packet,
+              response.workspaceId == requestedWorkspace else {
+            throw BackendError.decoding("context packet response scope mismatch")
+        }
+        return response
     }
 
     // MARK: Read state (ADR-0109)
@@ -1187,6 +1418,31 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return response.workHost
     }
 
+    func enabledWorkToolProfiles(
+        workspace requestedWorkspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        signature: String
+    ) async throws -> [MomoWorkToolProfile] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let path = "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles"
+        var request = URLRequest(
+            url: config.baseURL.appendingPathComponent(path),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        request.httpMethod = "GET"
+        request.setValue("MomoHost \(host.description.lowercased())", forHTTPHeaderField: "Authorization")
+        request.setValue(String(sentAtMs), forHTTPHeaderField: "X-Momo-Work-Host-Sent-At")
+        request.setValue(signature, forHTTPHeaderField: "X-Momo-Work-Host-Signature")
+        let response = try await execute(request, response: MomoWorkToolProfilesResponseDTO.self)
+        try ensureSessionCurrent(context)
+        guard response.workToolProfiles.allSatisfy({
+            $0.workspaceId == requestedWorkspace && $0.enabled
+        }) else { throw BackendError.decoding("enabled work tool profile scope mismatch") }
+        return response.workToolProfiles
+    }
+
     func workSessions(
         workspace requestedWorkspace: WorkspaceID,
         activeOnly: Bool
@@ -1431,6 +1687,81 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return response.enabled
     }
 
+    func workToolProfiles(
+        workspace requestedWorkspace: WorkspaceID
+    ) async throws -> [MomoWorkToolProfile] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkToolProfilesResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfiles.allSatisfy({ $0.workspaceId == requestedWorkspace }) else {
+            throw BackendError.decoding("work tool profile workspace mismatch")
+        }
+        return response.workToolProfiles
+    }
+
+    func createWorkToolProfile(
+        workspace requestedWorkspace: WorkspaceID,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles",
+            body: MomoCreateWorkToolProfileRequestDTO(draft: draft),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkToolProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfile.workspaceId == requestedWorkspace,
+              response.workToolProfile.toolKey == draft.toolKey.lowercased()
+        else { throw BackendError.decoding("work tool profile response mismatch") }
+        return response.workToolProfile
+    }
+
+    func updateWorkToolProfile(
+        workspace requestedWorkspace: WorkspaceID,
+        tool: MomoWorkTool,
+        draft: MomoWorkToolProfileDraft
+    ) async throws -> MomoWorkToolProfile {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await put(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles/\(tool.rawValue)",
+            body: MomoUpdateWorkToolProfileRequestDTO(draft: draft),
+            response: MomoWorkToolProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfile.workspaceId == requestedWorkspace,
+              response.workToolProfile.tool == tool
+        else { throw BackendError.decoding("updated work tool profile response mismatch") }
+        return response.workToolProfile
+    }
+
+    func deleteWorkToolProfile(
+        workspace requestedWorkspace: WorkspaceID,
+        tool: MomoWorkTool
+    ) async throws -> MomoWorkToolProfile {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else { throw BackendError.notConnected }
+        let response = try await delete(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-tool-profiles/\(tool.rawValue)",
+            authorized: true,
+            response: MomoWorkToolProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workToolProfile.workspaceId == requestedWorkspace,
+              response.workToolProfile.tool == tool
+        else { throw BackendError.decoding("deleted work tool profile response mismatch") }
+        return response.workToolProfile
+    }
+
     // MARK: AgentTransport compatibility
 
     public func observe(agent: MemberID, channel: ChannelID) async throws -> AsyncStream<AgentEvent> {
@@ -1660,6 +1991,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return try await execute(request, response: response)
     }
 
+    private func delete<RequestBody: Encodable, ResponseBody: Decodable>(
+        _ path: String,
+        body: RequestBody,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        try authorize(&request)
+        return try await execute(request, response: response)
+    }
+
     private func authorize(_ request: inout URLRequest) throws {
         guard let accessToken else { throw BackendError.notConnected }
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -1825,6 +2169,35 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         }
         return MemberID(subject)
     }
+}
+
+private struct MemoryPageResponseDTO: Decodable {
+    let memories: [MemoryEntry]
+}
+
+private struct MemorySearchResponseDTO: Decodable {
+    let hits: [MemorySearchHit]
+}
+
+private struct MemoryItemResponseDTO: Decodable {
+    let memory: MemoryEntry
+}
+
+private struct MemoryPolicyResponseDTO: Decodable {
+    let memoryPolicy: WorkspaceMemoryPolicy
+}
+
+private struct UpdateMemoryRequestDTO: Encodable {
+    let body: String
+    let confidence: Double
+}
+
+private struct InvalidateMemoryRequestDTO: Encodable {
+    let invalidatedByMemoryId: UUID?
+}
+
+private struct PutMemoryPolicyRequestDTO: Encodable {
+    let enabled: Bool
 }
 
 // MARK: - Configuration
@@ -2038,6 +2411,37 @@ private struct MemberDTO: Decodable {
 
 private struct WorkspaceRosterResponse: Decodable {
     let members: [MemberDTO]
+}
+
+private struct MembershipRoleRequestDTO: Encodable {
+    let role: String
+}
+
+private struct RemoveWorkspaceMemberRequestDTO: Encodable {
+    let ban: Bool
+    let reason: String?
+}
+
+private struct MembershipRoleResponseDTO: Decodable {
+    let memberId: String
+    let scope: String
+    let role: String
+}
+
+private struct MembershipLifecycleResponseDTO: Decodable {
+    let memberId: String
+    let status: String
+}
+
+private struct ChannelLeaveResponseDTO: Decodable {
+    let channelId: String
+    let memberId: String
+    let archived: Bool
+}
+
+private struct WorkspaceAuditPageDTO: Decodable {
+    let events: [MomoWorkspaceAuditEvent]
+    let nextCursor: String?
 }
 
 private struct ReadStateListResponseDTO: Decodable {
@@ -2508,6 +2912,58 @@ private struct MomoWorkControlAckResponseDTO: Decodable {
 private struct MomoWorkAutoApproveResponseDTO: Decodable {
     let tool: MomoWorkTool
     let enabled: Bool
+}
+
+private struct MomoWorkToolProfilesResponseDTO: Decodable {
+    let workToolProfiles: [MomoWorkToolProfile]
+}
+
+private struct MomoWorkToolProfileResponseDTO: Decodable {
+    let workToolProfile: MomoWorkToolProfile
+}
+
+private struct MomoCreateWorkToolProfileRequestDTO: Encodable {
+    let toolKey: String
+    let displayName: String
+    let launchTemplate: MomoWorkToolLaunchTemplate
+    let tierDefaults: [String: JSON]
+    let enabled: Bool
+
+    init(draft: MomoWorkToolProfileDraft) {
+        toolKey = draft.toolKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        launchTemplate = MomoWorkToolLaunchTemplate(
+            command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            arguments: draft.arguments
+        )
+        tierDefaults = [
+            "transport": .string(draft.transport.rawValue),
+            "permission_policy": .string(draft.permissionPolicy.rawValue),
+            "risk": .string(draft.risk.rawValue),
+        ]
+        enabled = draft.enabled
+    }
+}
+
+private struct MomoUpdateWorkToolProfileRequestDTO: Encodable {
+    let displayName: String
+    let launchTemplate: MomoWorkToolLaunchTemplate
+    let tierDefaults: [String: JSON]
+    let enabled: Bool
+
+    init(draft: MomoWorkToolProfileDraft) {
+        displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        launchTemplate = MomoWorkToolLaunchTemplate(
+            command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            arguments: draft.arguments
+        )
+        tierDefaults = [
+            "transport": .string(draft.transport.rawValue),
+            "permission_policy": .string(draft.permissionPolicy.rawValue),
+            "risk": .string(draft.risk.rawValue),
+        ]
+        enabled = draft.enabled
+    }
 }
 
 private struct ApprovalDecisionRequestDTO: Encodable {

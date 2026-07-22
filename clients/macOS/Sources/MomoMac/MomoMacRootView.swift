@@ -36,6 +36,11 @@ private struct MomoWorkHostActivationKey: Hashable {
     let member: MemberID?
 }
 
+private struct MomoMemoryBrowserRequest: Identifiable {
+    let id = UUID()
+    let agentID: MemberID?
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var workConsoleController: MomoWorkConsoleController
@@ -52,6 +57,7 @@ public struct MomoMacRootView: View {
     @State private var showKeyboardShortcuts = false
     @State private var showWorkspaceSearch = false
     @State private var channelSettingsRequest: MomoChannelSettingsRequest?
+    @State private var memoryBrowserRequest: MomoMemoryBrowserRequest?
     @State private var showMemberInspector = true
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
@@ -172,6 +178,14 @@ public struct MomoMacRootView: View {
                 .id(request.id)
                 .environment(\.momoWebhookContext, sessionChrome?.inviteAdminContext)
             }
+        }
+        .sheet(item: $memoryBrowserRequest) { request in
+            MomoMemoryBrowserView(
+                viewModel: viewModel,
+                copy: copy,
+                initialAgentID: request.agentID
+            )
+            .id(request.id)
         }
         .onAppear {
             MomoDockUnreadBadgeController.apply(viewModel.readStatesByChannel)
@@ -401,6 +415,9 @@ public struct MomoMacRootView: View {
             },
             openWorkspaceSettings: {
                 openDetailPane(.workspaceSettings)
+            },
+            openMemoryBrowser: {
+                memoryBrowserRequest = MomoMemoryBrowserRequest(agentID: nil)
             },
             openSettings: {
                 openDetailPane(.settings)
@@ -823,7 +840,10 @@ public struct MomoMacRootView: View {
                     MomoMemberProfileSettingsSurface(
                         copy: copy,
                         member: member,
-                        viewModel: viewModel
+                        viewModel: viewModel,
+                        onOpenMemory: member.isAgent ? {
+                            memoryBrowserRequest = MomoMemoryBrowserRequest(agentID: member.id)
+                        } : nil
                     ) { displayName, avatarPath, presence in
                         viewModel.applyLocalProfile(
                             member: member.id,
