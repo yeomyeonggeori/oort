@@ -1,8 +1,25 @@
 import Foundation
 
+enum WorkTransport: String, Sendable, Equatable {
+    case pty
+    case acp
+}
+
 struct CommandTemplate: Sendable, Equatable {
     let executable: String
     let arguments: [String]
+    let transport: WorkTransport
+
+    init(executable: String, arguments: [String], transport: WorkTransport = .pty) {
+        self.executable = executable
+        self.arguments = arguments
+        self.transport = transport
+    }
+}
+
+struct LocalCommandOverride: Sendable, Equatable {
+    let executable: String
+    let arguments: [String]?
 }
 
 struct WorkdConfig: Sendable {
@@ -15,7 +32,7 @@ struct WorkdConfig: Sendable {
     let displayName: String
     let pollInterval: Duration
     let heartbeatInterval: Duration
-    let commandTemplates: [String: CommandTemplate]
+    let localCommandOverrides: [String: LocalCommandOverride]
     let registrationTokenURL: URL?
     var registrationToken: String?
 
@@ -63,10 +80,7 @@ struct WorkdConfig: Sendable {
             defaultValue: 30_000,
             range: 1_000...90_000
         )
-        var templates: [String: CommandTemplate] = [:]
-        for tool in ["claude", "codex", "opencode", "shell"] {
-            templates[tool] = try commandTemplate(tool: tool, environment: environment)
-        }
+        let localCommandOverrides = try localCommandOverrides(environment: environment)
 
         let directRegistrationToken = nonempty(environment["MOMO_WORKD_REGISTRATION_TOKEN"])
         let registrationTokenURL = nonempty(
@@ -89,34 +103,99 @@ struct WorkdConfig: Sendable {
             displayName: displayName,
             pollInterval: .milliseconds(pollMs),
             heartbeatInterval: .milliseconds(heartbeatMs),
-            commandTemplates: templates,
+            localCommandOverrides: localCommandOverrides,
             registrationTokenURL: registrationTokenURL,
             registrationToken: registrationToken
         )
     }
 
-    private static func commandTemplate(
-        tool: String,
+    static func commandTemplates(
+        profiles: [WorkToolProfile],
+        localOverrides: [String: LocalCommandOverride]
+    ) throws -> [String: CommandTemplate] {
+        var templates: [String: CommandTemplate] = [:]
+        for profile in profiles where profile.enabled {
+            guard profile.toolKey.wholeMatch(of: /^[a-z0-9][a-z0-9._-]{1,63}$/) != nil,
+                  profile.launchTemplate.command.wholeMatch(of: /^[a-z0-9][a-z0-9._-]{0,63}$/) != nil,
+                  profile.launchTemplate.arguments.count <= 64,
+                  profile.launchTemplate.arguments.allSatisfy({ $0.count <= 4_096 })
+            else { throw WorkdFailure.invalidResponse }
+            let transport: WorkTransport
+            if let rawTransport = profile.tierDefaults.objectValue?["transport"]?.stringValue {
+                guard let parsed = WorkTransport(rawValue: rawTransport) else {
+                    throw WorkdFailure.invalidResponse
+                }
+                transport = parsed
+            } else {
+                transport = .pty
+            }
+            if let override = localOverrides[profile.toolKey] {
+                templates[profile.toolKey] = CommandTemplate(
+                    executable: override.executable,
+                    arguments: override.arguments ?? profile.launchTemplate.arguments,
+                    transport: transport
+                )
+            } else {
+                templates[profile.toolKey] = CommandTemplate(
+                    executable: "/usr/bin/env",
+                    arguments: [profile.launchTemplate.command] + profile.launchTemplate.arguments,
+                    transport: transport
+                )
+            }
+        }
+        return templates
+    }
+
+    static func localCommandOverrides(
         environment: [String: String]
-    ) throws -> CommandTemplate {
-        let prefix = "MOMO_WORKD_PROFILE_\(tool.uppercased())"
-        let fallback: CommandTemplate = tool == "shell"
-            ? CommandTemplate(executable: "/bin/sh", arguments: [])
-            : CommandTemplate(executable: "/usr/bin/env", arguments: [tool])
-        let executable = nonempty(environment["\(prefix)_EXECUTABLE"])
-            ?? fallback.executable
-        guard executable.hasPrefix("/"), executable.count <= 4_096 else {
-            throw WorkdFailure.configuration
+    ) throws -> [String: LocalCommandOverride] {
+        let prefix = "MOMO_WORKD_PROFILE_"
+        let executableSuffix = "_EXECUTABLE"
+        let argumentSuffix = "_ARGUMENTS_JSON"
+        var toolNames = Set<String>()
+        for key in environment.keys where key.hasPrefix(prefix) {
+            let suffix: String
+            if key.hasSuffix(executableSuffix) {
+                suffix = executableSuffix
+            } else if key.hasSuffix(argumentSuffix) {
+                suffix = argumentSuffix
+            } else {
+                continue
+            }
+            let start = key.index(key.startIndex, offsetBy: prefix.count)
+            let end = key.index(key.endIndex, offsetBy: -suffix.count)
+            let tool = key[start..<end].lowercased().replacingOccurrences(of: "_", with: "-")
+            guard tool.wholeMatch(of: /^[a-z0-9][a-z0-9._-]{1,63}$/) != nil else {
+                throw WorkdFailure.configuration
+            }
+            toolNames.insert(tool)
         }
-        guard let rawArguments = environment["\(prefix)_ARGUMENTS_JSON"] else {
-            return CommandTemplate(executable: executable, arguments: fallback.arguments)
+
+        var overrides: [String: LocalCommandOverride] = [:]
+        for tool in toolNames {
+            let environmentKey = tool.uppercased().replacingOccurrences(of: "-", with: "_")
+            let executableKey = "\(prefix)\(environmentKey)\(executableSuffix)"
+            guard let executable = nonempty(environment[executableKey]),
+                  executable.hasPrefix("/"), executable.count <= 4_096
+            else { throw WorkdFailure.configuration }
+            let argumentsKey = "\(prefix)\(environmentKey)\(argumentSuffix)"
+            let arguments: [String]?
+            if let rawArguments = environment[argumentsKey] {
+                guard let data = rawArguments.data(using: .utf8),
+                      let decoded = try? JSONDecoder().decode([String].self, from: data),
+                      decoded.count <= 64,
+                      decoded.allSatisfy({ $0.count <= 4_096 })
+                else { throw WorkdFailure.configuration }
+                arguments = decoded
+            } else {
+                arguments = nil
+            }
+            overrides[tool] = LocalCommandOverride(
+                executable: executable,
+                arguments: arguments
+            )
         }
-        guard let data = rawArguments.data(using: .utf8),
-              let arguments = try? JSONDecoder().decode([String].self, from: data),
-              arguments.count <= 64,
-              arguments.allSatisfy({ $0.count <= 4_096 })
-        else { throw WorkdFailure.configuration }
-        return CommandTemplate(executable: executable, arguments: arguments)
+        return overrides
     }
 
     private static func boundedMilliseconds(

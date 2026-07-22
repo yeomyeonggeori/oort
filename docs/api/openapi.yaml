@@ -76,6 +76,8 @@ tags:
     description: Workspace-shared concurrent work-session quota and current derived usage.
   - name: work-controls
     description: Agent-requested, human-gated controls dispatched to a user-owned execution host.
+  - name: work-tool-profiles
+    description: Workspace-admin tool catalog and enabled host launch projection.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
   - name: attachments
@@ -92,6 +94,8 @@ tags:
     description: Incoming webhook installation management and public ingress.
   - name: mcp
     description: Hosted MCP JSON-RPC endpoints for agent bearers.
+  - name: memories
+    description: ADR-0129 workspace memory lifecycle, source links, and admin policy.
 
 paths:
   /v1/auth/login:
@@ -1770,6 +1774,128 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-tool-profiles:
+    get:
+      tags: [work-tool-profiles]
+      operationId: listWorkToolProfiles
+      summary: List the workspace tool catalog or its enabled work-host projection.
+      description: >
+        Human callers require workspace owner/admin authority and receive all
+        profiles. A MomoHost-signed caller receives enabled profiles only.
+        Launch templates contain a portable command key and arguments; no
+        executable path, environment value, provider credential, or token is
+        accepted or returned.
+      security:
+        - bearerAuth: []
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Deterministically ordered profile projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfilesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace admin or signed work-host authority required.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      tags: [work-tool-profiles]
+      operationId: createWorkToolProfile
+      summary: Register a workspace work tool profile.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkToolProfileRequest"
+      responses:
+        "201":
+          description: Profile and same-transaction audit record created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfileResponse"
+        "400":
+          description: Invalid profile or credential/path-shaped launch template.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin required.
+        "409":
+          description: Tool key is already registered.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-tool-profiles/{tool}:
+    put:
+      tags: [work-tool-profiles]
+      operationId: updateWorkToolProfile
+      summary: Replace supplied fields of a registered work tool profile.
+      description: >
+        Disabling a profile also clears its auto-approval rows. New spawn,
+        approval dispatch, session creation, and resume all fail closed while
+        the profile is disabled.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkTool"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkToolProfileRequest"
+      responses:
+        "200":
+          description: Updated profile and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfileResponse"
+        "400":
+          description: Empty or invalid update.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin required.
+        "404":
+          description: Tool profile not found.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [work-tool-profiles]
+      operationId: deleteWorkToolProfile
+      summary: Delete a workspace work tool profile and clear auto-approval rows.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkTool"
+      responses:
+        "200":
+          description: Deleted profile snapshot and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin required.
+        "404":
+          description: Tool profile not found.
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/uploads:
     post:
       tags: [attachments]
@@ -3159,6 +3285,274 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/context-packets/{packetId}:
+    get:
+      tags: [agents]
+      operationId: getContextPacket
+      summary: Inspect the immutable Context Packet consumed by an agent run.
+      description: >
+        Returns the original frozen packet, including expired historical packets.
+        The caller must still be an active member of the run channel. This read
+        never refreshes or mutates packet content.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: packetId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Immutable packet metadata and content.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ContextPacketResponse"}
+        "400":
+          description: Malformed workspace or packet id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Packet is absent or not visible through current run-channel membership.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/memories:
+    get:
+      tags: [memories]
+      operationId: listMemories
+      summary: List active, source-readable workspace memories.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          schema: {$ref: "#/components/schemas/MemoryScope"}
+        - name: agent
+          in: query
+          schema: {type: string, format: uuid}
+        - name: includeInvalid
+          in: query
+          schema: {type: boolean, default: false}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Memory page filtered through current source-channel membership.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryPageResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+    post:
+      tags: [memories]
+      operationId: createMemory
+      summary: Create a sourced memory through the tenant write path.
+      description: Source references contain message/channel identifiers only; message bodies are not copied.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateMemoryRequest"}
+      responses:
+        "200":
+          description: Memory, lifecycle, audit, and memory.updated outbox records committed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryItemResponse"}
+        "400":
+          description: Invalid scope, kind, body, confidence, subject, or source shape.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: Workspace memory is disabled.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [memories]
+      operationId: disableAndDeleteAllMemories
+      summary: Disable workspace memory and purge all memory projections.
+      description: Human workspace admin only. Individual memory DELETE does not exist; normal removal is invalidation.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Policy disabled and all memory items/candidates deleted atomically.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryPolicyResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/memories/search:
+    get:
+      tags: [memories]
+      operationId: searchMemories
+      summary: Search active memories with FTS and vector reciprocal-rank fusion.
+      description: >
+        Runs through the caller's normal FORCE RLS tenant path and current
+        source-channel membership. Items without embeddings remain eligible
+        through FTS. Query embedding failure degrades to FTS-only retrieval.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: true
+          schema: {type: string, minLength: 2}
+        - name: scope
+          in: query
+          schema: {$ref: "#/components/schemas/MemoryScope"}
+        - name: agent
+          in: query
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        "200":
+          description: RRF-ranked memory hits; FTS-only and vector-only hits are valid.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemorySearchResponse"}
+        "400":
+          description: Query, scope, agent, or limit is malformed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/memories/{memoryId}:
+    patch:
+      tags: [memories]
+      operationId: updateMemory
+      summary: Edit the bounded body or confidence of an active memory.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateMemoryRequest"}
+      responses:
+        "200":
+          description: Updated memory and committed lifecycle/audit/outbox evidence.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryItemResponse"}
+        "400":
+          description: No editable field or invalid value.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Memory does not exist in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Memory is disabled or the item was already invalidated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/memories/{memoryId}/invalidate:
+    post:
+      tags: [memories]
+      operationId: invalidateMemory
+      summary: Time-invalidate a memory without deleting its source or lifecycle evidence.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InvalidateMemoryRequest"}
+      responses:
+        "200":
+          description: Invalidated memory and committed lifecycle/audit/outbox evidence.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryItemResponse"}
+        "400":
+          description: Invalid replacement memory or self-invalidation.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Memory does not exist in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/memory-policy:
+    get:
+      tags: [memories]
+      operationId: getMemoryPolicy
+      summary: Read the workspace memory switch.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Current policy; absent rows project as enabled by default.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryPolicyResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    put:
+      tags: [memories]
+      operationId: putMemoryPolicy
+      summary: Enable memory, or disable and purge it atomically.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PutMemoryPolicyRequest"}
+      responses:
+        "200":
+          description: Updated policy and deleted count when disabled.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryPolicyResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3244,14 +3638,22 @@ components:
       schema:
         type: string
         format: uuid
+    MemoryId:
+      name: memoryId
+      in: path
+      required: true
+      description: UUIDv7 memory item id.
+      schema:
+        type: string
+        format: uuid
     WorkTool:
       name: tool
       in: path
       required: true
-      description: Closed execution tool identifier.
+      description: Workspace-registered execution tool key.
       schema:
         type: string
-        enum: [claude, codex, opencode, shell]
+        pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
     AttachmentId:
       name: attachmentId
       in: path
@@ -3395,6 +3797,177 @@ components:
           properties:
             message:
               type: string
+
+    # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
+    MemoryScope:
+      type: string
+      enum: [workspace, member, agent, conversation]
+
+    MemoryKind:
+      type: string
+      enum: [profile, fact, episode, procedure]
+
+    MemorySourceRefRequest:
+      type: object
+      additionalProperties: false
+      required: [messageId, channelId]
+      properties:
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+
+    MemorySourceRef:
+      type: object
+      additionalProperties: false
+      required: [messageId, channelId]
+      properties:
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+
+    CreateMemoryRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, kind, body, confidence, sourceRefs]
+      properties:
+        scope: {$ref: "#/components/schemas/MemoryScope"}
+        subjectMemberId: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        kind: {$ref: "#/components/schemas/MemoryKind"}
+        body: {type: string, minLength: 1, maxLength: 16384}
+        confidence: {type: number, format: double, minimum: 0, maximum: 1}
+        validAtMs: {type: integer, format: int64, minimum: 0}
+        sourceRefs:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items: {$ref: "#/components/schemas/MemorySourceRefRequest"}
+
+    UpdateMemoryRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        body: {type: string, minLength: 1, maxLength: 16384}
+        confidence: {type: number, format: double, minimum: 0, maximum: 1}
+
+    InvalidateMemoryRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        invalidatedByMemoryId: {type: string, format: uuid}
+
+    PutMemoryPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+
+    ContextPacketResponse:
+      type: object
+      additionalProperties: false
+      required: [packetId, runId, workspaceId, createdAtMs, expiresAtMs, expired, content]
+      properties:
+        packetId: {type: string, format: uuid}
+        runId: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        expiresAtMs: {type: integer, format: int64}
+        expired: {type: boolean}
+        content:
+          type: object
+          description: Frozen momo.context_packet.v0 JSON object.
+          additionalProperties: true
+
+    MemoryItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - workspaceId
+        - scope
+        - kind
+        - body
+        - confidence
+        - validAtMs
+        - createdByKind
+        - createdAtMs
+        - updatedAtMs
+        - sourceRefs
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        scope: {$ref: "#/components/schemas/MemoryScope"}
+        subjectMemberId: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        kind: {$ref: "#/components/schemas/MemoryKind"}
+        body: {type: string}
+        confidence: {type: number, format: double}
+        validAtMs: {type: integer, format: int64}
+        invalidAtMs: {type: integer, format: int64}
+        invalidatedByMemoryId: {type: string, format: uuid}
+        createdByKind: {type: string, enum: [human, agent, worker]}
+        createdByMemberId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+        sourceRefs:
+          type: array
+          items: {$ref: "#/components/schemas/MemorySourceRef"}
+
+    MemoryItemResponse:
+      type: object
+      additionalProperties: false
+      required: [memory]
+      properties:
+        memory: {$ref: "#/components/schemas/MemoryItem"}
+
+    MemoryPageResponse:
+      type: object
+      additionalProperties: false
+      required: [memories]
+      properties:
+        memories:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryItem"}
+
+    MemorySearchHit:
+      type: object
+      additionalProperties: false
+      required: [memory, score]
+      properties:
+        memory: {$ref: "#/components/schemas/MemoryItem"}
+        score: {type: number, format: double, minimum: 0}
+        ftsRank: {type: integer, minimum: 1}
+        vectorRank: {type: integer, minimum: 1}
+        vectorDistance: {type: number, format: double, minimum: 0}
+
+    MemorySearchResponse:
+      type: object
+      additionalProperties: false
+      required: [hits]
+      properties:
+        hits:
+          type: array
+          items: {$ref: "#/components/schemas/MemorySearchHit"}
+
+    MemoryPolicy:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, enabled]
+      properties:
+        workspaceId: {type: string, format: uuid}
+        enabled: {type: boolean}
+        updatedBy: {type: string, format: uuid}
+        updatedAtMs: {type: integer, format: int64}
+
+    MemoryPolicyResponse:
+      type: object
+      additionalProperties: false
+      required: [memoryPolicy]
+      properties:
+        memoryPolicy: {$ref: "#/components/schemas/MemoryPolicy"}
+        deletedCount: {type: integer, minimum: 0}
 
     # ---- Auth ----------------------------------------------------------------
     LoginRequest:
@@ -4184,7 +4757,7 @@ components:
           description: Registered work_host identity enforced by a database FK.
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         label:
           type: string
           minLength: 1
@@ -4317,7 +4890,7 @@ components:
           format: uuid
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         label:
           type: string
           minLength: 1
@@ -4460,7 +5033,7 @@ components:
       properties:
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         label:
           type: string
           minLength: 1
@@ -4545,7 +5118,7 @@ components:
       properties:
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         enabled:
           type: boolean
 
@@ -4559,7 +5132,115 @@ components:
           description: Enabled tool identifiers sorted lexicographically.
           items:
             type: string
-            enum: [claude, codex, opencode, shell]
+            pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+
+    WorkToolLaunchTemplate:
+      type: object
+      additionalProperties: false
+      required: [command, arguments]
+      description: Portable host-local command key plus arguments; never an executable path or credential.
+      properties:
+        command:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        arguments:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            maxLength: 4096
+
+    WorkToolProfile:
+      type: object
+      required:
+        [id, workspaceId, toolKey, displayName, launchTemplate, tierDefaults,
+         enabled, createdBy, updatedBy, createdAtMs, updatedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        toolKey:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        launchTemplate:
+          $ref: "#/components/schemas/WorkToolLaunchTemplate"
+        tierDefaults:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+        createdBy:
+          type: string
+          format: uuid
+        updatedBy:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+
+    CreateWorkToolProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [toolKey, displayName, launchTemplate]
+      properties:
+        toolKey:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        launchTemplate:
+          $ref: "#/components/schemas/WorkToolLaunchTemplate"
+        tierDefaults:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+          default: true
+
+    UpdateWorkToolProfileRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        launchTemplate:
+          $ref: "#/components/schemas/WorkToolLaunchTemplate"
+        tierDefaults:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+
+    WorkToolProfileResponse:
+      type: object
+      required: [workToolProfile]
+      properties:
+        workToolProfile:
+          $ref: "#/components/schemas/WorkToolProfile"
+
+    WorkToolProfilesResponse:
+      type: object
+      required: [workToolProfiles]
+      properties:
+        workToolProfiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkToolProfile"
 
     # ---- Huddles ------------------------------------------------------------
     HuddleParticipant:

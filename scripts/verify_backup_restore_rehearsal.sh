@@ -8,7 +8,7 @@
 set -euo pipefail
 
 OUT_DIR="${BACKUP_REHEARSAL_OUT_DIR:-${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-backup-rehearsal}}"
-POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:18}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e}"
 POSTGRES_DB="${POSTGRES_DB:-momo}"
 POSTGRES_USER="${POSTGRES_USER:-momo}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-momo-restore-rehearsal}"

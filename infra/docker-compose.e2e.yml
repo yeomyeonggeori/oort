@@ -29,7 +29,7 @@ x-source-mount: &source-mount
 
 services:
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
     restart: "no"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-momo}
@@ -182,6 +182,8 @@ services:
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_E2E_REALTIME_WS_URL:-ws://127.0.0.1:${CENT_PORT:-8000}/connection/websocket}
       HERMES_BASE_URL: http://mock-hermes:8088/v1
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+      MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
+      CONTEXT_PACKET_TTL_SECONDS: ${CONTEXT_PACKET_TTL_SECONDS:-900}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
@@ -241,6 +243,13 @@ services:
       MOMO_WORK_HOST_ID: ${MOMO_WORK_HOST_ID:-}
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-100}
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
+      MEMORY_EXTRACTION_ENABLED: ${MEMORY_EXTRACTION_ENABLED:-1}
+      MEMORY_EXTRACTION_POLL_INTERVAL_MS: ${MEMORY_EXTRACTION_POLL_INTERVAL_MS:-5000}
+      MEMORY_EXTRACTION_BATCH_SIZE: ${MEMORY_EXTRACTION_BATCH_SIZE:-50}
+      MEMORY_EMBEDDING_ENABLED: ${MEMORY_EMBEDDING_ENABLED:-1}
+      MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
+      MEMORY_EMBEDDING_POLL_INTERVAL_MS: ${MEMORY_EMBEDDING_POLL_INTERVAL_MS:-5000}
+      MEMORY_EMBEDDING_BATCH_SIZE: ${MEMORY_EMBEDDING_BATCH_SIZE:-50}
     volumes:
       - *source-mount
       - worker-swiftpm:/tmp/momo-swiftpm/worker
@@ -298,6 +307,29 @@ services:
     volumes:
       - e2e-web-static:/srv/momo-web
 
+  # Goal #593: LinkShort runs on the private compose network; the host verifier
+  # reaches it only through Caddy /i/*, so no extra host port is required.
+  linkshort:
+    image: momo-linkshort:e2e
+    profiles: ["web"]
+    build:
+      context: ..
+      dockerfile: infra/prod/docker/swift-service.Dockerfile
+      args:
+        PACKAGE_PATH: services/LinkShort
+        PRODUCT: LinkShort
+    restart: "no"
+    environment:
+      MOMO_LINKSHORT_HOST: 0.0.0.0
+      MOMO_LINKSHORT_PORT: 28190
+      MOMO_LINKSHORT_TARGET_BASE_URL: http://${WEB_SERVING_APP_DOMAIN:-app.localhost}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:28190/healthz >/dev/null"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
   # HTTP-only serving verifier edge. The verifier names this service
   # explicitly, so the legacy HTTPS browser-smoke edge above remains isolated.
   # APP_DOMAIN includes the scheme to disable Caddy automatic HTTPS for this
@@ -321,6 +353,8 @@ services:
         condition: service_started
       web-init:
         condition: service_completed_successfully
+      linkshort:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
       interval: 2s

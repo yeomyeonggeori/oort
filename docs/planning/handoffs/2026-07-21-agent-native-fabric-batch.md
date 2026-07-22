@@ -100,8 +100,16 @@ Wave U (UXUI):        MOMO-518(diff 카드 — 즉시 가능) → MOMO-529(메�
 
 1. **nil String?/UUID? 바인딩** → `::text`/`::uuid` 명시 캐스트(jsonb_build_object 내 nullable 포함 — 489 전례).
 2. **트랜잭션 내 HTTPError**는 `Database.withTenantTransaction` 중앙 unwrap이 처리 — 라우트별 ad hoc unwrap 금지(565 전례).
-3. **verifier 작성 규율**: bash 3.2 빈 배열 금지 문법 / api 컨테이너에 curl 없음(python 대체) / `psql -q`(명령 태그 오염 방지) / UUID 비교는 `lower()` / 포트 대역 신규 배정(28030대~, 기존 27950·27970·27980·28023·28024 회피) / demo 계정 password 시드 확인.
+3. **verifier 작성 규율**: bash 3.2 빈 배열 금지 문법 / api 컨테이너에 curl 없음(python 대체) / `psql -q`(명령 태그 오염 방지) / UUID 비교는 `lower()` / 포트 대역 신규 배정(**28100대부터 — 27850~28093 사용 중**, 스폰 전 `grep -rn '<포트>' scripts/`로 선점 확인) / demo 계정 password는 NULL 아님(migration 005가 dev/e2e 백필) — 행 존재 확인 후 UPDATE 덮어쓰기.
 4. **compose/infra 변경 후 컨테이너 재시작 필수**(config drift — MOMO-338 전례). 527 이미지 교체는 e2e/dev/prod+drift guard 동시.
+5. **(527 실측) 시드에는 채널(…202)만 있고 message 행이 없다** — verifier 소스 메시지는 API POST로 생성(verify_memory_plane.sh 패턴).
+6. **(527 실측) Swift Int 바인딩은 bigint** — SQL 함수의 `integer` 파라미터에 넘길 때 `::integer` 캐스트 필수(함수 해석 실패=500).
+7. **(528 실측) FTS 질의에 멘션 원문 금지** — websearch_to_tsquery는 AND 결합이라 @handle 토큰이 남으면 전 매치 실패. 검색 질의는 멘션 토큰 제거 후 전달.
+8. **(528 실측) jq select 안의 `.field|contains(...) and ...`는 파이프 우선순위 함정** — `(.field|contains(...)) and ...`로 괄호 필수.
+9. **(527 회귀 실측) PG 이미지는 glibc 계보(trixie) 유지 필수** — postgres:18(trixie, collation 2.41) 볼륨을 bookworm 계열 이미지(2.36)로 열면 영속 DB(dogfood/source) collation mismatch로 bootstrap 계열 verifier 전멸. 이미지 교체는 `-trixie` 태그 고정 + **상주 스택 컨테이너 재생성은 원래 env 파일(--env-file .env.worktree)로**(포트 매핑 소실 함정).
+10. **(528 회귀 실측) fail-closed 전환은 기존 verifier 픽스처를 연쇄로 깨뜨린다** — mock tool_grants 제거 후, tool_call을 재생하는 모든 픽스처는 ①workspace_membership owner 행 ②실 plugin install+grant(REST) ③해당 도구의 capability 등재(github 매니페스트+031)를 갖춰야 승인 정지 없이 흐른다. 신규 스키마 문자열(momo.context_packet.v0)·메모리 워커 기본 오프도 동일 전환 비용.
+11. **(528 회귀 실측) 승인 재개의 policy_evidence는 optional이 정본** — grant 없는 도구의 인간 승인 재개에서 서버는 null 발신, 워커는 인간 결정(validateDecision)을 권위로 수용. 빈 객체 {} 발신은 워커 디코드 전체를 죽인다(e984d9c).
+12. **(533 실측) 마이그레이션 번호는 병렬 wave 간 충돌** — 스폰 시점에 다른 진행 중 PR의 번호를 확인하고 배정(028 memory_search·029 work_tool_profile 확정, 다음=030).
 5. openssl 직접 호출 금지(LibreSSL 게이트 함정 — 내부 Crypto 사용, 491 전례).
 6. Centrifugo 발행 payload에 props 탑재 확인(X-9 전례 — 신규 이벤트도 REST↔outbox 일치 단정).
 7. 게이트 실행 후 docker 회수(`momo-docker-reclaim.sh`, 배치 종료 시).

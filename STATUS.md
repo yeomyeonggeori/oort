@@ -6,11 +6,56 @@
 - macOS workspace 멤버 inspector에는 guest/suspended 표시, 역할 메뉴, 정지·복원 확인, 선택적 사유와 재가입 차단이 있는 삭제 sheet, agent credential 재발급 안내, 필터·cursor audit sheet를 추가했다. iOS Profile에는 Members and audit, 동일 관리 상세, workspace self-leave를 추가했고 양 플랫폼의 일반 채널 메뉴에는 self-leave를 추가하되 DM은 노출하지 않는다.
 - PR #610 반려 후 신규 멤버 관리·self-leave·audit 카피를 macOS `MomoWorkspaceCopy`와 iOS `IOSWorkspaceCopy` 정본으로 이관했고, 사용자 문구의 token 어휘를 로그인 세션으로 교체했다. 제거 실패는 양 플랫폼 sheet 내부에, macOS 채널 나가기 실패는 타임라인 인라인 배너에 표시하며 audit 행은 날짜·시간과 행위자→대상을 함께 노출한다.
 - MomoiOSKit XCTest 2 + Swift Testing 69 tests와 macOS 컴파일·MOMO-525 한국어 light/dark real-window 집중 테스트는 PASS했다. macOS 전체 459 tests 중 457 PASS·1 loopback skip이며 이번 diff와 무관한 기존 Work Console terminal preset canonical 2종만 현재 렌더와 불일치한다. momo-main이 확인한 공식 iOS 빌드 PASS는 지시대로 재실행하지 않았고, 인증된 owner/admin/guest 계정의 실제 403·409·audit cursor 왕복과 iPhone Dynamic Type/VoiceOver는 오케스트레이터 확인 전까지 `runtime-unverified`다.
+## MOMO-528 Context Packet v0 불변 승격 (#598, 2026-07-22)
+
+- migration 030에 불변 `context_packet` 원장·FORCE RLS와 기본 actor/agent/workspace 스코프 ∪ 유효 visibility grant 검색 필터를 추가하고, mention 트랜잭션이 profile 상시+fact/episode 질의 memory refs와 실제 plugin capability grant를 동결한다.
+- worker/gateway 공통 payload에 `context_packet_id`·`context_packet`·`memory_refs`를 가산하고 기존 projection alias를 유지했으며, 현재 run-channel 멤버만 저장 packet을 열람하는 GET과 OpenAPI/런타임 스펙을 추가했다.
+- 전 9개 Swift 패키지 `swift build --disable-sandbox`와 Core 38·server 145·OutboxRelay 2·PushRelay 6·AgentWorker 44·WorkHostDaemon 6·NotifierWorker 4·LinkShort 5 unit, docs local gate, `verify_context_packet.sh` bash 문법과 `git diff --check`가 PASS했다. 일반 Swift local gate는 관리형 환경의 중첩 `sandbox-exec` 거부로 코드 컴파일 전에 실패해 동일 패키지를 `--disable-sandbox`로 검증했다. 28100~28103 격리 Docker의 불변성·만료 재발급·grant revoke·scope·RLS 실제 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
+## MOMO-531 momo-acp-host v0 (#601, 2026-07-22)
+
+- 재사용 가능한 `MomoACPHost`가 ACP JSON-RPC/stdio `initialize`→`session/new`→`session/prompt`, `session/update`의 `agent.partial`/`agent.status` 카드 투영, `_meta.acp` host-local 보존, `session/request_permission` 승인 정지점과 `terminal/*` PTY 위임을 구현했다. 앱 세션 매니저는 기존 승인 카드 결정과 PTY 소유자를 주입하며, 결정 전 continuation을 보류하고 누락·잘못된 option은 거부한다.
+- workd는 `work_tool_profile.tier_defaults.transport=acp` 투영으로만 ACP를 선택하고 launch_template의 command/arguments를 그대로 소비한다. 일반 도구는 Pipe 대신 실제 PTY로 실행해 R4를 복구했으며, ACP raw·stderr·terminal bytes는 mode 0600 host-local 파일 밖으로 보내지 않는다. 서버·OpenAPI·migration·`schema_v0.sql`은 변경하지 않았다.
+- `scripts/verify_acp_host.sh`의 credential-free mock ACP approve/reject·plan/progress·terminal 분기와 WorkHostDaemon 11 tests, macOS SwiftPM build가 PASS했다. opencode native ACP와 claude-agent-acp 실 credential 왕복은 `runtime-unverified(external ACP agent credentials)`이며 오케스트레이터 opt-in 검증이 남았다.
+
+## MOMO-533 work_tool_profile 원장 (#600, 2026-07-22)
+
+- ADR-0130 D3에 따라 migration 028에 workspace별 `work_tool_profile` FORCE RLS 원장과 기본 4종 시드를 추가하고, 관리자 CRUD·audit 및 spawn/승인 dispatch/session/resume의 미등재·disabled fail-closed 검증을 OpenAPI와 서버에 반영했다. launch template은 command key+인자만 허용하며 절대경로·credential 형태를 거부한다.
+- workd는 하드코딩 프로파일 대신 signed GET enabled 투영을 소비해 호스트 로컬에서 executable을 해석하고 spawn 직전 투영을 갱신한다. 전 9개 Swift 패키지 build와 macOS 외 8개 패키지 test, server 146 tests·workd 7 tests, OpenAPI/YAML·bash/docs 정적 검증은 PASS했다. macOS 전체 test는 변경하지 않은 기존 스냅샷의 headless `NSImage` nil(signal 5)과 attachment UTI/MIME 기대 4건으로 미통과했으며, 비스냅샷 352건 중 347 PASS·1 SKIP·4 FAIL이다. `verify_work_tool_profile.sh`의 사전검사된 28080~28083 PG18 실왕복 및 `runtime-db` 회귀는 Docker 실행 금지 지시에 따라 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+## MOMO-527 pgvector·FTS·RRF 하이브리드 메모리 검색 (#597, 2026-07-22)
+
+- dev/e2e/prod PostgreSQL 서비스를 digest 고정 `pgvector/pgvector:0.8.5-pg18` 이미지로 통일하고, migration 028에 `vector` extension·384차원 embedding/HNSW·generated `tsv`/GIN·SECURITY INVOKER RRF 함수를 추가했다. 기존 컨테이너는 새 이미지를 pull한 뒤 재생성이 필요하다.
+- `GET /v1/workspaces/:ws/memories/search`는 정상 tenant connection에서 membership·source channel 가시성을 fail-closed 재검증하고 scope/agent 필터와 전용 30/60초 rate limit을 적용한다. 임베딩 실패·미생성 항목은 FTS-only로 계속 검색되며, AgentWorker가 결정적 mock 또는 기존 Hermes BYOA `/embeddings` 경계로 비동기 벡터를 채운다.
+- 전 9개 Swift 패키지 `swift build --disable-sandbox`가 PASS했고 Core 42·server 144·OutboxRelay 2·PushRelay 6·AgentWorker 42·WorkHostDaemon 6·NotifierWorker 4·LinkShort 5 tests가 실패 0이다. macOS 테스트 코드는 컴파일됐으나 headless 환경의 첫 NSImage snapshot nil unwrap으로 xctest signal 5가 발생했다. 일반 `make build`는 관리형 환경의 중첩 `sandbox-exec` 거부로 코드 컴파일 전에 실패해 동일 패키지를 `--disable-sandbox`로 검증했다.
+- `verify_pgvector_contract.sh`, OpenAPI YAML parse, verifier bash 문법과 `git diff --check`는 PASS했다. 지시대로 Docker를 실행하지 않아 `verify_memory_search.sh`의 FTS-only·vector-only·RRF·scope·RLS·rate-limit 실제 PG18 왕복과 `runtime-db` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`이며, external Hermes embedding도 credential opt-in 전까지 `runtime-unverified`다.
+
+## W-6 웹 Work 관전 v0 (#605, 2026-07-21)
+
+- 웹에 credential-free Work 세션 목록, 기존 Timeline 기반 root thread read-only 관전, 메모리 전용 observer capability를 HTTPS direct stream에만 전달하는 lazy xterm 터미널을 추가했다. 입력·resize·kill UI/전송은 없으며 WSS-only·query-bearing·비HTTPS 원격 endpoint는 fail-closed한다.
+- MomoCore와 같은 `artifact_kind=diff|commit|pr` 우선순위·상한·안전한 HTTPS 링크 규칙으로 웹 타입드 카드를 렌더한다. Vitest 71 tests(artifact 11, observer 상태기계 13), eslint, typecheck, Vite build, npm permissive license gate가 PASS했다.
+- 실제 server→remote host observer HTTPS stream, CORS/CSP, capability 만료·회수 왕복은 지시대로 Docker·브라우저를 실행하지 않아 오케스트레이터 검증 전까지 `runtime-unverified`다.
+
+## MOMO-526 Memory Plane 스키마·추출 워커 v0 (#596, 2026-07-21)
+
+- ADR-0129 D1·D2·D5에 따라 migration 027에 Memory Plane 원장·채널 워터마크·정책 스위치를 FORCE RLS로 추가하고, source_ref는 message/channel 식별자만 저장한다. 메모리 CRUD·무효화·admin 정책-off 일괄 삭제 REST와 `memory.updated` transactional outbox를 OpenAPI 정본에 반영했다.
+- AgentWorker는 기존 BYOA Hermes transport 또는 결정적 mock으로 후보 추출→기존 유사 대조→ADD/UPDATE/INVALIDATE/NOOP를 수행하며 후보·메모리·lifecycle·audit·outbox·watermark를 한 트랜잭션에 반영한다. server 141 tests·AgentWorker 41 tests와 전 9개 Swift 패키지 build, OpenAPI YAML, verifier bash/ShellCheck 정적 검증은 PASS했다.
+- `verify_memory_plane.sh`의 28030~28033 격리 PG18 왕복과 `runtime-db` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`다. 실제 external Hermes 추출은 repo 밖 credential opt-in 전까지 `runtime-unverified`이며 provider 자격증명은 worker process 밖으로 유입하지 않는다.
+
+## W-5 초대 링크 웹 합류 (#593, 2026-07-21)
+
+- `/join?code=...`와 `/i/<code>` SPA 폴백이 같은 가입 폼을 사용하고, 표시명·handle·이메일·비밀번호를 현재 오리진의 `POST /v1/join`으로만 보낸다. 만료·소진·차단 403을 종결 카피로 구분하고 가입 성공 후 `history.replaceState`로 초대 코드 URL을 제거한다.
+- pinned `momo-linkshort` 이미지를 prod install/upgrade·rollback에 편입하고 Caddy `/i/*`를 SPA보다 먼저 LinkShort로 프록시했다. LinkShort는 `https://${APP_DOMAIN}/join?code=...`만 조립하며 코드를 저장·검증하지 않는다.
+- 웹 47 tests(신규 초대 파싱·검증·오류 9), lint, typecheck, build와 LinkShort 5 tests, publish/install 정적 계약 및 bash 문법은 PASS했다. Docker/Caddy/브라우저는 지시대로 실행하지 않았으며 초대 생성→단축링크→가입→메시지 1건 실왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
+## MOMO-530 gateway work tool 원장 경로 (2026-07-21)
+
+- Gateway BYOA adapter가 host 설정 시 `work.spawn|input|read|kill` 닫힌 스키마를 provider에 노출하고, 서버는 `status=tool_call` callback의 run/lease/actor/`work:control` scope를 재검증한 뒤 기존 `WorkControlRoutes` 승인·auto-approve·host·lineage·audit/outbox 트랜잭션을 그대로 재사용한다. host UUID는 provider arguments 밖의 adapter 설정에서만 주입하며 call_id 재시도는 멱등, 다른 입력 재사용은 409다.
+- server 138 tests, AgentWorker 35 tests, Hermes adapter 56 tests, Python compile, verifier bash 정적 검증은 PASS했다. `verify_hermes_gateway_adapter.sh`의 gateway spawn→승인→dispatch→ack 실왕복과 기존 worker runtime 경로 회귀는 Docker 실행 금지 지시에 따라 오케스트레이터 게이트 전까지 `runtime-unverified`다.
 
 ## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
 
-- ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. LinkShort `/i/*`는 prod compose 서비스가 없어 후속 프록시 위치만 주석으로 예약했다.
-- npm production build와 YAML/bash 정적 검증은 PASS했다. `verify_web_serving.sh`는 28070~28074 격리 포트에서 6개 HTTP 단정을 수행하도록 `web-serving` infra profile에 편입했으며, 지시대로 Docker/Caddy runtime과 공인 DNS·ACME·prod TLS는 오케스트레이터 검증 전까지 `runtime-unverified`다.
+- ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. 당시 예약한 LinkShort `/i/*` 위치는 W-5 #593에서 실행됐다.
+- npm production build와 YAML/bash 정적 검증은 PASS했다. `verify_web_serving.sh`는 W-5에서 `/join`·`/i/*`를 더해 8개 HTTP 단정으로 확장됐으며, 지시대로 Docker/Caddy runtime과 공인 DNS·ACME·prod TLS는 오케스트레이터 검증 전까지 `runtime-unverified`다.
 ## W-4 웹 승인·read-state·recovery 왕복 (#577, 2026-07-21)
 
 - 웹 타임라인 승인 카드는 `props.approval_status`와 `approval.*` 이벤트를 소비하고, pending/approved/rejected/expired 상태 칩과 멱등 결정 재시도를 제공한다. `resume_offer`는 결정 버튼 없이 데스크톱 재개 안내만 표시한다.

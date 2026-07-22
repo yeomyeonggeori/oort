@@ -231,6 +231,48 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(payload.sourceAttribution?["permission_snapshot"]?.stringValue, "actor:channel_member agent:channel_member")
     }
 
+    func testAgentJobPayloadDecodesMatchingContextPacketMemoryRefs() throws {
+        let packetID = "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaa0528"
+        let memory = """
+        [{"memory_id":"bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbb0528","kind":"profile","excerpt":"Team profile"}]
+        """
+        let payloadJSON = """
+        {
+          "agent_member_id":"cccccccc-cccc-7ccc-8ccc-cccccccc0528",
+          "channel_id":"dddddddd-dddd-7ddd-8ddd-dddddddd0528",
+          "model":"hermes-agent",
+          "prompt":"summarize",
+          "context_packet_id":"\(packetID)",
+          "memory_refs":\(memory),
+          "context_packet":{"memory_refs":\(memory)},
+          "context_packet_projection":{"memory_refs":\(memory)}
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            AgentJobPayload.self, from: Data(payloadJSON.utf8)
+        )
+        XCTAssertEqual(payload.contextPacketID?.uuidString.lowercased(), packetID)
+        XCTAssertEqual(payload.memoryRefs?.count, 1)
+        XCTAssertEqual(payload.memoryRefs?.first?["kind"]?.stringValue, "profile")
+    }
+
+    func testAgentJobPayloadRejectsConflictingMemoryRefSources() throws {
+        let payloadJSON = """
+        {
+          "agent_member_id":"cccccccc-cccc-7ccc-8ccc-cccccccc0528",
+          "channel_id":"dddddddd-dddd-7ddd-8ddd-dddddddd0528",
+          "model":"hermes-agent",
+          "prompt":"summarize",
+          "memory_refs":[{"memory_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaa0001"}],
+          "context_packet":{"memory_refs":[{"memory_id":"aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaa0002"}]}
+        }
+        """
+        let payload = try JSONDecoder().decode(
+            AgentJobPayload.self, from: Data(payloadJSON.utf8)
+        )
+        XCTAssertNil(payload.memoryRefs)
+    }
+
     func testApprovalPolicyRequiresApprovalFromToolGrantMetadata() {
         let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
         let grants = [
@@ -477,7 +519,7 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(result.output["tool_name"]?.stringValue, "momo.mock.echo")
     }
 
-    func testResumeApprovalExecutorFailsClosedWithoutPolicyEvidence() throws {
+    func testResumeApprovalExecutorAllowsHumanApprovedResumeWithoutPolicyEvidence() throws {
         let json = """
         {
           "run_id": "00000000-0000-7000-8000-000000000161",
@@ -501,9 +543,12 @@ final class AgentWorkerTests: XCTestCase {
         """
         let payload = try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
 
-        XCTAssertThrowsError(try ToolResumeExecutor().validate(payload)) { error in
-            XCTAssertEqual(error as? ToolResumeExecutor.Failure, .missingPolicyEvidence)
-        }
+        // MOMO-528 이후: capability grant가 없어 missing_or_ambiguous로 정지된
+        // 승인은 policy_evidence 없이 인간 결정만으로 재개된다. 결정 검증
+        // (approval_id 일치·approved 상태)은 여전히 필수다.
+        let validated = try ToolResumeExecutor().validate(payload)
+        XCTAssertNil(validated.policyEvidence)
+        XCTAssertEqual(validated.toolCall.name, "momo.mock.echo")
     }
 
     func testResumeApprovalExecutorRejectsNonApprovedDecision() throws {

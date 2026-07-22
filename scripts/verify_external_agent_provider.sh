@@ -672,6 +672,8 @@ start_worker() {
       MAX_STEPS="${MAX_STEPS:-12}" \
       MAX_DEPTH="${MAX_DEPTH:-4}" \
       MAX_CONCURRENT_RUNS="${MAX_CONCURRENT_RUNS:-1}" \
+      MEMORY_EXTRACTION_ENABLED="${MEMORY_EXTRACTION_ENABLED:-0}" \
+      MEMORY_EMBEDDING_ENABLED="${MEMORY_EMBEDDING_ENABLED:-0}" \
       "$WORKER_BIN"
   ) > "$WORKER_LOG" 2>&1 &
   WORKER_PID=$!
@@ -847,6 +849,22 @@ verify_roundtrip() {
     "$BASE_URL/v1/auth/login")"
   access_token="$(printf '%s' "$login_json" | jq -r '.accessToken // empty')"
   [ "$access_token" != "" ] || fail "runtime/auth" "demo login did not return access token"
+
+  # MOMO-528: loopback 픽스처가 github.search_issues tool_call을 재생한다.
+  # mock tool_grants가 제거됐으므로(capability 실투영 fail-closed) 작성자에게
+  # 실제 install+grant가 없으면 승인 정지 → 왕복 타임아웃. install은 admin
+  # 요구라 workspace_membership owner 행을 먼저 보장한다.
+  psql_run -q <<SQL
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$WORKSPACE_ID', '$HUMAN_ID', 'owner')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role='owner';
+SQL
+  local plugin_path="$BASE_URL/v1/workspaces/$WORKSPACE_ID/plugins/com.momo.plugins.github"
+  curl -fsS -X POST "$plugin_path/install" -H "Authorization: Bearer ${access_token}" \
+    -H 'Content-Type: application/json' --data '{"enabled":true}' >/dev/null
+  curl -fsS -X POST "$plugin_path/grants" -H "Authorization: Bearer ${access_token}" \
+    -H 'Content-Type: application/json' \
+    --data '{"scope":"github:read","accessToken":"verifier-opaque-not-persisted"}' >/dev/null
 
   send_payload="$(jq -cn \
     --arg client "$CLIENT_MSG_ID" \

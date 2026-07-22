@@ -60,7 +60,8 @@ required_services="caddy postgres redis centrifugo api relay worker"
 for service in $required_services; do
   grep -Eq "^[[:space:]]{2}${service}:" "$COMPOSE_FILE" || fail "missing service in prod compose: $service"
 done
-grep -Fq 'postgres:18' "$COMPOSE_FILE" || fail "prod compose must use postgres:18"
+grep -Fq 'pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e' "$COMPOSE_FILE" \
+  || fail "prod compose must use the pinned pgvector 0.8.5 PostgreSQL 18 image"
 grep -Fq 'centrifugo/centrifugo:v6' "$COMPOSE_FILE" || fail "prod compose must use centrifugo v6"
 grep -Fq 'CENTRIFUGO_ENGINE_TYPE: redis' "$COMPOSE_FILE" || fail "Centrifugo must use Redis engine env"
 grep -Fq 'CENT_API_URL: http://centrifugo:8000/api' "$COMPOSE_FILE" || fail "api/relay/worker must publish to internal Centrifugo API"
@@ -182,6 +183,7 @@ MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay:${MOMO_IMAGE_TAG}
 MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker:${MOMO_IMAGE_TAG}
 MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate:${MOMO_IMAGE_TAG}
 MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo-web:${MOMO_IMAGE_TAG}
+MOMO_LINKSHORT_IMAGE=ghcr.io/dawn-kim-official/momo-linkshort:${MOMO_IMAGE_TAG}
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=postgres_20260701_operator_generated_shape

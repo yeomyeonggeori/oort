@@ -9,7 +9,7 @@ struct ToolResumeExecutor: Sendable {
         let runID: UUID
         let approvalID: UUID
         let toolCall: ApprovedToolCallPayload
-        let policyEvidence: ToolGrantMetadata
+        let policyEvidence: ToolGrantMetadata?
     }
 
     struct Result: Sendable {
@@ -86,22 +86,25 @@ struct ToolResumeExecutor: Sendable {
         let toolName = toolCall.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !toolName.isEmpty else { throw Failure.emptyToolName }
 
-        guard let policyEvidence = payload.policyEvidence else {
-            throw Failure.missingPolicyEvidence
-        }
-        guard !policyEvidence.riskAliasesConflict else {
-            throw Failure.conflictingRiskAliases
-        }
-        if !policyEvidence.toolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           policyEvidence.normalizedToolName != ToolGrantMetadata.normalize(toolName)
-        {
-            throw Failure.policyToolMismatch(
-                expected: toolName,
-                actual: policyEvidence.toolName
-            )
-        }
-        guard Self.isApprovalRequiredPolicy(policyEvidence.normalizedApprovalPolicy) else {
-            throw Failure.policyDoesNotRequireApproval(policyEvidence.approvalPolicy)
+        // policy_evidence는 capability grant가 있던 승인에만 존재한다. grant가
+        // 없어 missing_or_ambiguous로 정지된 승인은 인간 결정(아래
+        // validateDecision)이 유일한 권위이며, 그 경로에서 evidence 부재는
+        // 정상이다(MOMO-528 mock grant 제거 이후 실측). 존재하면 전부 검증한다.
+        if let policyEvidence = payload.policyEvidence {
+            guard !policyEvidence.riskAliasesConflict else {
+                throw Failure.conflictingRiskAliases
+            }
+            if !policyEvidence.toolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               policyEvidence.normalizedToolName != ToolGrantMetadata.normalize(toolName)
+            {
+                throw Failure.policyToolMismatch(
+                    expected: toolName,
+                    actual: policyEvidence.toolName
+                )
+            }
+            guard Self.isApprovalRequiredPolicy(policyEvidence.normalizedApprovalPolicy) else {
+                throw Failure.policyDoesNotRequireApproval(policyEvidence.approvalPolicy)
+            }
         }
         guard let payloadSHA256 = toolCall.payloadSHA256?.trimmingCharacters(in: .whitespacesAndNewlines),
               payloadSHA256.hasPrefix("sha256:"),
@@ -115,7 +118,7 @@ struct ToolResumeExecutor: Sendable {
             runID: runID,
             approvalID: approvalID,
             toolCall: toolCall,
-            policyEvidence: policyEvidence
+            policyEvidence: payload.policyEvidence
         )
     }
 

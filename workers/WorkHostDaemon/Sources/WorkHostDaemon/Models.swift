@@ -103,8 +103,28 @@ struct WorkSession: Codable, Sendable, Equatable {
     let resumedFromSessionId: UUID?
 }
 
+struct WorkToolLaunchTemplate: Codable, Sendable, Equatable {
+    let command: String
+    let arguments: [String]
+}
+
+struct WorkToolProfile: Codable, Sendable, Equatable {
+    let id: UUID
+    let workspaceId: UUID
+    let toolKey: String
+    let displayName: String
+    let launchTemplate: WorkToolLaunchTemplate
+    let tierDefaults: JSONValue
+    let enabled: Bool
+    let createdBy: UUID
+    let updatedBy: UUID
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
 protocol WorkHostAPI: Sendable {
     func heartbeat(hostID: UUID) async throws
+    func workToolProfiles(hostID: UUID) async throws -> [WorkToolProfile]
     func pendingControls(hostID: UUID) async throws -> [WorkControl]
     func createSession(hostID: UUID, control: WorkControl) async throws -> WorkSession
     func acknowledge(

@@ -116,10 +116,12 @@ enum AppBuilder {
             ))
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
+        ContextPacketRoutes(db: db).add(to: authed)
         WorkSessionRoutes(db: db).add(to: authed)
         TerminalAttachRoutes(db: db).add(to: authed)
         WorkPoolRoutes(db: db).add(to: authed)
         WorkControlRoutes(db: db).add(to: authed)
+        WorkToolProfileRoutes(db: db).add(to: authed)
         WorkTierPolicyRoutes(db: db).add(to: authed)
         workHostRoutes.addProtected(to: authed)
         SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)
@@ -146,6 +148,21 @@ enum AppBuilder {
         HuddleRoutes(db: db, liveKit: config.liveKit).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
         DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
+        let memoryQueryEmbedding: any MemoryQueryEmbedding
+        if config.agentProvider.mode == .externalHermes {
+            memoryQueryEmbedding = HermesMemoryQueryEmbedding(
+                httpClient: httpClient,
+                baseURL: config.agentProvider.hermesBaseURL,
+                apiKey: config.agentProvider.hermesAPIKey,
+                model: ProcessInfo.processInfo.environment["MEMORY_EMBEDDING_MODEL"]
+                    ?? "text-embedding-3-small"
+            )
+        } else {
+            memoryQueryEmbedding = MockMemoryQueryEmbedding()
+        }
+        MemoryRoutes(
+            db: db, limiter: rateLimiter, queryEmbedding: memoryQueryEmbedding
+        ).add(to: authed)
         attachmentRoutes.addProtected(to: authed)
         let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)
         webhookRoutes.addPublic(to: router)

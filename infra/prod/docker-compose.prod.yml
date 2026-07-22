@@ -44,6 +44,8 @@ services:
         condition: service_started
       centrifugo:
         condition: service_started
+      linkshort:
+        condition: service_started
     networks:
       - public
       - private
@@ -54,7 +56,7 @@ services:
       retries: 3
 
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
@@ -147,6 +149,7 @@ services:
       AGENT_DISPLAY_NAME: ${AGENT_DISPLAY_NAME:-김인턴}
       HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
+      MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
       MOMO_ARCHIVE_BACKEND: ${MOMO_ARCHIVE_BACKEND:-drive}
       MOMO_S3_ENDPOINT: ${MOMO_S3_ENDPOINT:-}
       MOMO_S3_REGION: ${MOMO_S3_REGION:-}
@@ -204,6 +207,10 @@ services:
       MAX_STEPS: ${MAX_STEPS:-12}
       MAX_DEPTH: ${MAX_DEPTH:-4}
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
+      MEMORY_EMBEDDING_ENABLED: ${MEMORY_EMBEDDING_ENABLED:-1}
+      MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
+      MEMORY_EMBEDDING_POLL_INTERVAL_MS: ${MEMORY_EMBEDDING_POLL_INTERVAL_MS:-5000}
+      MEMORY_EMBEDDING_BATCH_SIZE: ${MEMORY_EMBEDDING_BATCH_SIZE:-50}
     depends_on:
       postgres:
         condition: service_healthy
@@ -239,6 +246,19 @@ services:
     restart: "no"
     volumes:
       - momo-web-static:/srv/momo-web
+
+  # ADR-0121 D2: stateless invite redirector. The code is never stored or
+  # validated here; Caddy forwards /i/* and LinkShort sends the browser back
+  # to this installation's same-origin /join landing.
+  linkshort:
+    image: ${MOMO_LINKSHORT_IMAGE:?set MOMO_LINKSHORT_IMAGE}
+    restart: unless-stopped
+    environment:
+      MOMO_LINKSHORT_HOST: 0.0.0.0
+      MOMO_LINKSHORT_PORT: 28190
+      MOMO_LINKSHORT_TARGET_BASE_URL: https://${APP_DOMAIN:-momo-app-domain-unset.localhost}
+    networks:
+      - private
 
   # ADR-0127 self-host option. Select with `--profile s3`; Dawn-hosted
   # deployments keep the default Drive archive and never start these services.

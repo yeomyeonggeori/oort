@@ -216,8 +216,15 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `RELAY_MAX_ATTEMPTS` | relay | `8` | 초과 시 `status='failed'`. |
 | `WORKER_POLL_INTERVAL_MS` | worker | `300` | agent_job 폴링 주기. |
 | `WORKER_MAX_ATTEMPTS` | worker | `8` | 초과 시 `status='failed'`. |
+| `MEMORY_EXTRACTION_ENABLED` | worker | `1` | ADR-0129 채널 워터마크 기반 메모리 추출 루프. `0`이면 신규 추출만 멈추며 기존 원장은 보존한다. 정책-off 삭제는 관리자 REST가 수행한다. |
+| `MEMORY_EXTRACTION_POLL_INTERVAL_MS` | worker | `5000` | 추출 가능한 채널을 다시 찾는 주기(최소 100ms). |
+| `MEMORY_EXTRACTION_BATCH_SIZE` | worker | `50` | 채널별 한 번에 읽는 메시지 수(1..200). |
+| `MEMORY_EMBEDDING_ENABLED` | worker | `1` | `embedding IS NULL`인 활성 memory_item의 비동기 임베딩 생성. `0`이면 FTS 검색은 계속 동작한다. |
+| `MEMORY_EMBEDDING_MODEL` | worker/api | `text-embedding-3-small` | external-hermes `/embeddings` 모델. local-mock은 이 값과 무관한 결정적 384차원 벡터를 사용한다. |
+| `MEMORY_EMBEDDING_POLL_INTERVAL_MS` | worker | `5000` | 임베딩 대기 항목 재탐색 주기(최소 100ms). |
+| `MEMORY_EMBEDDING_BATCH_SIZE` | worker | `50` | 한 poll에서 임베딩할 최대 항목 수(1..200). |
 | `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 momo API origin. |
-| `MOMO_WORK_HOST_ID` | worker | (미설정) | ADR-0125 host registry 전 v0 target host UUID. `work_*` 호출 시 UUID가 없거나 잘못되면 fail-closed한다. |
+| `MOMO_WORK_HOST_ID` | worker/gateway adapter | (미설정) | ADR-0125 host registry target UUID. worker의 `work_*` 및 gateway의 `work.*`는 이 호스트를 provider 인자 밖에서 주입한다. UUID가 없거나 잘못되면 worker는 호출을 거부하고 gateway adapter는 work tool 4종을 provider에 노출하지 않는다. |
 | `MAX_CONSECUTIVE_AUTO` | worker | `3` | 루프가드 G2(연속 자동응답). |
 | `MAX_STEPS` | worker | `12` | 루프가드 G3(턴당 tool-call 상한, 스키마 50의 v0 오버라이드). |
 | `MAX_DEPTH` | worker | `4` | A2A 홉 깊이 상한(§3.4). |
@@ -500,7 +507,7 @@ scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod --eviden
 
 필수 env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
 `API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
-`MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `MOMO_LINKSHORT_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
 `CENT_TOKEN_HMAC`, `CENT_API_KEY`, `CENT_PROXY_SECRET`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
 `HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
@@ -571,7 +578,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 make up            # = docker compose -f infra/docker-compose.yml up -d
 ```
 
-- `postgres` (image `postgres:18`): SoT. native `uuidv7()`. healthcheck = `pg_isready`.
+- `postgres` (image `pgvector/pgvector:0.8.5-pg18-trixie`, digest pinned): SoT. native `uuidv7()` + pgvector. healthcheck = `pg_isready`.
 - `centrifugo` (image `centrifugo/centrifugo:v6`): transport only(메모리 엔진). `infra/centrifugo.json` 마운트.
   subscribe proxy 콜백 = `http://api:8080/v1/centrifugo/subscribe`, 채널 = `ch:ws<workspaceUUID>.<channelUUID>`.
 
@@ -581,6 +588,8 @@ make up            # = docker compose -f infra/docker-compose.yml up -d
 docker compose -f infra/docker-compose.yml ps        # 두 서비스 모두 healthy 대기
 docker compose -f infra/docker-compose.yml logs -f
 ```
+
+MOMO-527 이전 구성에서 업그레이드할 때는 새 이미지를 pull한 뒤 `postgres` 컨테이너를 재생성하고 `make migrate`를 실행한다. named volume 데이터는 유지되지만, 기존 컨테이너를 재시작만 하면 변경된 이미지가 적용되지 않는다.
 
 중지: `make down`. 데이터까지 지우려면 `docker compose -f infra/docker-compose.yml down -v`
 (볼륨 `momo-pgdata` 삭제).
@@ -631,7 +640,7 @@ scripts/local_gate.sh --profile docs
 
 서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
 
-웹 서빙만 검증할 때는 아래 infra profile을 사용한다. 실제 `clients/web` build를 `web-init`이 named volume에 복사한 뒤 prod Caddyfile을 HTTP로 구동하며, 호스트 curl로 6개 서빙/프록시/헤더 단정을 수행한다. 포트는 28070~28074만 사용한다. 로컬 내부 CA를 만들지 않기 위해 HTTPS는 의도적으로 제외하며 공인 DNS·ACME·production TLS는 별도 host gate다.
+웹 서빙만 검증할 때는 아래 infra profile을 사용한다. 실제 `clients/web` build를 `web-init`이 named volume에 복사하고 LinkShort와 prod Caddyfile을 HTTP로 구동하며, 호스트 curl로 `/join` SPA 폴백과 `/i/*` 프록시를 포함한 8개 단정을 수행한다. 포트는 28070~28074만 사용한다. 로컬 내부 CA를 만들지 않기 위해 HTTPS는 의도적으로 제외하며 공인 DNS·ACME·production TLS와 초대→가입→메시지 실왕복은 별도 orchestrator gate다.
 
 ```sh
 scripts/local_gate.sh --profile web-serving
@@ -912,6 +921,11 @@ swift run --package-path workers/AgentWorker AgentWorker
 - `work_*`를 쓰는 worker process에는 해당 agent의 `MOMO_AGENT_TOKEN`, momo API의
   `MOMO_API_URL`, host-owned 실행기의 opaque `MOMO_WORK_HOST_ID`가 필요하다. token은
   credential 발급 응답에서 한 번만 얻으며 저장소·DB·로그에 남기지 않는다.
+- gateway/BYOA adapter도 같은 `MOMO_WORK_HOST_ID`를 사용한다. 설정되면 provider에는
+  `work.spawn|input|read|kill`의 닫힌 인자 스키마만 보이고, host UUID는 adapter가
+  인증된 `gateway/events` callback에 별도로 붙인다. 서버는 callback bearer에
+  `agent:runs:callback`과 `work:control`이 모두 있는지, run/lease/host/lineage를 다시
+  확인한다. 미설정 시 work tool은 fail-closed로 미노출된다.
 
 > **검증됨/미검증 구분:** MomoServer + OutboxRelay는 MOMO-001/002에서 DB·Centrifugo 실연결 검증됨.
 > AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile은 MOMO-004에서
@@ -1043,10 +1057,12 @@ swift run --package-path workers/WorkHostDaemon momo-workd
 ```
 
 등록이 성공하고 host ID가 로컬에 저장되면 token 파일은 삭제된다. 원격 HTTP는 거부하며,
-`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. command
-profile은 `MOMO_WORKD_PROFILE_{CLAUDE|CODEX|OPENCODE|SHELL}_EXECUTABLE` 절대경로와
-`..._ARGUMENTS_JSON` 문자열 배열로 로컬에서만 설정한다. 서버 payload가 실행 경로나 인자를
-선택하지 않는다.
+`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. workd는
+signed `GET /v1/workspaces/:ws/work-tool-profiles`의 enabled 투영(command key+인자)을 읽고,
+command key는 호스트의 `PATH`에서 로컬 해석한다. 필요하면
+`MOMO_WORKD_PROFILE_<TOOL_KEY>_EXECUTABLE` 절대경로와 `..._ARGUMENTS_JSON` 문자열 배열로
+도구별 로컬 override를 둔다(`TOOL_KEY`의 `-`는 `_`로 표기). 원장과 control payload에는
+실행 경로·환경 값·provider 자격증명을 넣지 않는다.
 
 동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
 
@@ -1072,6 +1088,29 @@ scripts/verify_workd.sh
 verifier는 workd 등록과 signed heartbeat/poll, auto-approved mock echo spawn, control ack,
 `work_session` started→ended, 위조 poll 401, FORCE RLS, raw marker의 서버 원장 부재를 단정한다.
 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행한다.
+
+#### ACP agent mode (MOMO-531)
+
+enabled `work_tool_profile`의 `tierDefaults.transport`가 `acp`일 때 workd와 앱 세션
+매니저는 launch template의 command/arguments를 ACP stdio subprocess로 실행한다. marker가
+없으면 기존 도구는 PTY mode이며, 알 수 없는 transport는 spawn 전에 fail-closed한다.
+
+ACP lifecycle은 `initialize` → `session/new` → `session/prompt` 순서다. 진행 텍스트, plan,
+tool-call은 기존 `agent.partial`/`agent.status` 어휘의 host-local event로 투영되고 확장 필드는
+`_meta.acp` 아래 mode 0600 JSONL에만 보존된다. `session/request_permission`은 앱의 기존 승인
+카드 결정이 돌아오기 전 응답하지 않으며, handler 부재·중복·알 수 없는 option은
+`cancelled`로 답한다. workd 단독 daemon에는 사람 결정 권한이 없으므로 같은 fail-closed
+기본값을 쓴다. `terminal/create|output|wait_for_exit|kill|release`는 host PTY manager가 맡고
+raw bytes는 서버·relay·DB·로그로 보내지 않는다.
+
+```sh
+scripts/verify_acp_host.sh
+MOMO_ACP_REQUIRE_REAL=1 scripts/verify_acp_host.sh
+```
+
+실 opencode와 claude-agent-acp prompt는 각 도구의 host-local credential login 뒤 수행한다.
+그 전까지는 `runtime-unverified(external ACP agent credentials)`다. verifier나 evidence에
+provider OAuth token/API key를 전달하지 않는다.
 
 ### 5.5 Remote terminal attach capability (ADR-0125 D10)
 

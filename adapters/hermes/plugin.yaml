@@ -25,6 +25,9 @@ optional_env:
   - name: MOMO_AGENT_HANDLE
     label: Agent handle
     description: Mention handle, usually hermes.
+  - name: MOMO_WORK_HOST_ID
+    label: Work host ID
+    description: Optional host registry UUID. Gateway work tools remain unavailable when unset.
   - name: MOMO_HOME_CHANNEL
     label: Home channel ID
     description: Channel UUID configured at gateway startup for scheduled and cross-platform delivery.

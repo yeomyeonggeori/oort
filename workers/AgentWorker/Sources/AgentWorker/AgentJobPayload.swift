@@ -24,6 +24,8 @@ struct AgentJobPayload: Decodable, Sendable {
     let recentMessages: [RecentMessage]?  // same-channel history window (MOMO-302)
     let tools: JSONValue?       // OpenAI tool/function defs (agent.tool_schema), optional
     let toolGrants: [ToolGrantMetadata]? // Context Packet / Capability Cache projection
+    let memoryRefs: [JSONValue]? // bounded immutable Context Packet memory projections
+    let contextPacketID: UUID?
     let sourceAttribution: JSONValue?
     let maxOutputTokens: Int?   // reserve estimate basis (§8.5)
     // gate seeds (§3.3 / §3.4)
@@ -49,6 +51,8 @@ struct AgentJobPayload: Decodable, Sendable {
         case recentMessages = "recent_messages"
         case tools
         case toolGrants = "tool_grants"
+        case memoryRefs = "memory_refs"
+        case contextPacketID = "context_packet_id"
         case contextPacket = "context_packet"
         case contextPacketProjection = "context_packet_projection"
         case sourceAttribution = "source_attribution"
@@ -94,6 +98,15 @@ struct AgentJobPayload: Decodable, Sendable {
             contextPacket?.toolGrants,
             contextProjection?.toolGrants
         )
+        let directMemoryRefs = try c.decodeIfPresent([JSONValue].self, forKey: .memoryRefs)
+        let packetMemoryRefs = try c.decodeIfPresent(
+            MemoryRefProjection.self, forKey: .contextPacket)?.memoryRefs
+        let projectionMemoryRefs = try c.decodeIfPresent(
+            MemoryRefProjection.self, forKey: .contextPacketProjection)?.memoryRefs
+        memoryRefs = Self.trustedMemoryRefs(
+            directMemoryRefs, packetMemoryRefs, projectionMemoryRefs
+        )
+        contextPacketID = try c.decodeIfPresent(UUID.self, forKey: .contextPacketID)
 
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         stepCount = try c.decodeIfPresent(Int.self, forKey: .stepCount)
@@ -109,6 +122,15 @@ struct AgentJobPayload: Decodable, Sendable {
     private static func trustedToolGrants(
         _ candidates: [ToolGrantMetadata]?...
     ) -> [ToolGrantMetadata]? {
+        let present = candidates.compactMap { $0 }
+        guard let first = present.first else { return nil }
+        guard present.allSatisfy({ $0 == first }) else { return nil }
+        return first
+    }
+
+    private static func trustedMemoryRefs(
+        _ candidates: [JSONValue]?...
+    ) -> [JSONValue]? {
         let present = candidates.compactMap { $0 }
         guard let first = present.first else { return nil }
         guard present.allSatisfy({ $0 == first }) else { return nil }
@@ -292,9 +314,17 @@ struct ToolGrantMetadata: Codable, Equatable, Sendable {
 }
 
 private struct ToolGrantProjection: Decodable {
-    let toolGrants: [ToolGrantMetadata]
+    let toolGrants: [ToolGrantMetadata]?
 
     enum CodingKeys: String, CodingKey {
         case toolGrants = "tool_grants"
+    }
+}
+
+private struct MemoryRefProjection: Decodable {
+    let memoryRefs: [JSONValue]?
+
+    enum CodingKeys: String, CodingKey {
+        case memoryRefs = "memory_refs"
     }
 }

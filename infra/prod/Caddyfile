@@ -97,9 +97,11 @@
         reverse_proxy api:8080
     }
 
-    # ADR-0121 LinkShort is not part of the current prod compose. When that
-    # service lands, add a dedicated /i/* reverse_proxy handle here before the
-    # SPA fallback; do not send short-link requests to the api container.
+    # ADR-0121 D2: resolve short links before the SPA fallback. LinkShort is
+    # stateless and only redirects to this site's /join?code=... landing.
+    handle /i/* {
+        reverse_proxy linkshort:28190
+    }
 
     handle {
         root * /srv/momo-web

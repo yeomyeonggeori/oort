@@ -78,16 +78,53 @@ struct AgentWorkerMain {
             pg: pg, hermes: hermes, centrifugo: centrifugo,
             workControls: workControls, guards: guards, cost: cost,
             config: config, logger: logger)
+        let memoryExtractor: any MemoryExtracting = config.agentProviderMode == .externalHermes
+            ? HermesMemoryExtractor(hermes: hermes)
+            : MockMemoryExtractor()
+        let memoryWorker = MemoryExtractionService(
+            pg: pg,
+            extractor: memoryExtractor,
+            pollInterval: config.memoryExtractionPollInterval,
+            batchSize: config.memoryExtractionBatchSize,
+            logger: logger
+        )
+        let memoryEmbeddingProvider: any MemoryEmbeddingProvider =
+            config.agentProviderMode == .externalHermes
+            ? HermesMemoryEmbeddingProvider(
+                httpClient: httpClient,
+                baseURL: config.hermesBaseURL,
+                apiKey: config.hermesAPIKey,
+                model: config.memoryEmbeddingModel
+            )
+            : MockMemoryEmbeddingProvider()
+        let memoryEmbeddingWorker = MemoryEmbeddingService(
+            pg: pg,
+            provider: memoryEmbeddingProvider,
+            pollInterval: config.memoryEmbeddingPollInterval,
+            batchSize: config.memoryEmbeddingBatchSize,
+            logger: logger
+        )
 
         // ServiceGroup ordering: PostgresClient.run() must be live before the worker
         // issues queries; the HTTP client shutdown service tears down on cancel.
+        var services: [ServiceGroupConfiguration.ServiceConfiguration] = [
+            .init(service: pg),
+            .init(service: worker),
+            .init(service: HTTPClientShutdownService(httpClient: httpClient)),
+        ]
+        if config.memoryExtractionEnabled {
+            services.insert(.init(service: memoryWorker), at: 2)
+        } else {
+            logger.info("memory extraction worker disabled")
+        }
+        if config.memoryEmbeddingEnabled {
+            services.insert(.init(service: memoryEmbeddingWorker), at: min(3, services.count))
+        } else {
+            logger.info("memory embedding worker disabled")
+        }
         let group = ServiceGroup(
             configuration: .init(
-                services: [
-                    .init(service: pg),
-                    .init(service: worker),
-                    .init(service: HTTPClientShutdownService(httpClient: httpClient)),
-                ],
+                services: services,
                 gracefulShutdownSignals: [.sigterm, .sigint],
                 logger: logger
             )

@@ -7,6 +7,7 @@ final class WorkDaemon: Sendable {
     private let processes: ProcessManager
     private let pollInterval: Duration
     private let heartbeatInterval: Duration
+    private let localCommandOverrides: [String: LocalCommandOverride]
     private let logger: Logger
     private let spawnedSessions = SpawnedSessionCache()
     private let appliedControls = AppliedControlCache()
@@ -17,6 +18,7 @@ final class WorkDaemon: Sendable {
         processes: ProcessManager,
         pollInterval: Duration,
         heartbeatInterval: Duration,
+        localCommandOverrides: [String: LocalCommandOverride] = [:],
         logger: Logger
     ) {
         self.hostID = hostID
@@ -24,6 +26,7 @@ final class WorkDaemon: Sendable {
         self.processes = processes
         self.pollInterval = pollInterval
         self.heartbeatInterval = heartbeatInterval
+        self.localCommandOverrides = localCommandOverrides
         self.logger = logger
     }
 
@@ -111,7 +114,19 @@ final class WorkDaemon: Sendable {
             tool = session.tool
         }
         do {
-            try await processes.start(sessionID: sessionID, tool: tool)
+            let profiles = try await api.workToolProfiles(hostID: hostID)
+            let templates = try WorkdConfig.commandTemplates(
+                profiles: profiles,
+                localOverrides: localCommandOverrides
+            )
+            await processes.replaceTemplates(templates)
+            let prompt = control.payload.objectValue?["label"]?.stringValue ?? "Continue the work session."
+            try await processes.start(
+                sessionID: sessionID,
+                channelID: control.channelId,
+                tool: tool,
+                prompt: prompt
+            )
         } catch {
             try? await api.endSession(hostID: hostID, sessionID: sessionID, exitCode: -1)
             await acknowledgeFailure(controlID: control.id, label: "process_start_failed")

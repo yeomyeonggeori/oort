@@ -9,26 +9,7 @@ import {
 import JoinPage from "./ui/JoinPage";
 import LoginPage from "./ui/LoginPage";
 import ChatPage from "./ui/ChatPage";
-
-// ---- /join/<code> deep link (MOMO-401, ADR-0121 D2-B) -------------------------
-// The invite code is a bearer secret. The path segment is the only place it
-// can arrive (D2-B link shape), so capture it ONCE at module load and
-// immediately REPLACE the address bar with "/": the code never survives in
-// browser history, never rides along on subsequent navigations, and is never
-// logged — it leaves memory only inside the POST /v1/join body.
-function captureJoinCode(): string | null {
-  const match = /^\/join\/([^/]+)\/?$/.exec(window.location.pathname);
-  if (match === null) return null;
-  let code = match[1];
-  try {
-    code = decodeURIComponent(code);
-  } catch {
-    // Malformed escape: submit the raw segment; the server will 404 it.
-  }
-  window.history.replaceState(null, "", "/");
-  return code;
-}
-const initialJoinCode = captureJoinCode();
+import { inviteCodeFromUrl } from "./join/model";
 
 export default function App() {
   const session = useSyncExternalStore(subscribeSession, getSession);
@@ -38,7 +19,11 @@ export default function App() {
   const [resuming, setResuming] = useState(
     () => getSession() !== null && getAccessToken() === null
   );
-  const [joinCode, setJoinCode] = useState<string | null>(initialJoinCode);
+  // Read the bearer invite once into component state so clearing the state
+  // also releases the app's last long-lived reference to the code.
+  const [joinCode, setJoinCode] = useState<string | null>(() =>
+    inviteCodeFromUrl(new URL(window.location.href))
+  );
   const [loginPrefillEmail, setLoginPrefillEmail] = useState<
     string | undefined
   >(undefined);
@@ -53,6 +38,12 @@ export default function App() {
       cancelled = true;
     };
   }, [resuming]);
+
+  useEffect(() => {
+    if (session === null || getAccessToken() === null || joinCode === null) return;
+    window.history.replaceState(null, "", "/");
+    setJoinCode(null);
+  }, [joinCode, session]);
 
   if (resuming) {
     return (
@@ -73,7 +64,10 @@ export default function App() {
     return (
       <JoinPage
         code={joinCode}
-        onJoined={() => setJoinCode(null)}
+        onJoined={() => {
+          window.history.replaceState(null, "", "/");
+          setJoinCode(null);
+        }}
         onGoToLogin={(prefillEmail) => {
           setLoginPrefillEmail(prefillEmail);
           setJoinCode(null);

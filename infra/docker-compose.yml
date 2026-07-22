@@ -14,7 +14,7 @@ services:
   # PostgreSQL 18 — SoT. uuidv7() 네이티브 전제(스펙 §0.5 D1 / schema_v0.sql).
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-momo}

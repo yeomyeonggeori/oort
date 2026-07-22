@@ -38,6 +38,7 @@
 - **경로 B(에이전트-발원)의 스크립트 mock 수동 재현은 비신뢰** — mock Hermes(python)는 정확한 E2E 시퀀스 문구에만 반응하고, KEEP 모드 재사용 스택은 옛 `MOMO-486 INPUT` 히스토리가 컨텍스트를 오염시켜 SPAWN보다 INPUT을 먼저 매칭(→lineage 403). work_control 계약 자체는 정상(원장에 spawn/input acked). 
 - **결론**: 경로 B 실계약은 `verify_work_agent_e2e` PASS가 정본 검증. 실 provider(tool-calling) 수동 데모는 Hermes gateway에 work tool을 노출하는 엔진 후속(X-7 계열, 별도 티켓) 이후로 이관. 스크립트 mock 수동 재현은 더 진행하지 않음.
 - 수동 QA 우선순위 재정렬: ①경로 A(완료) ②Hermes 멘션 메신저 플로우 ③경로 B는 실 provider 준비 후.
+- **MOMO-530 구현 갱신(2026-07-21)**: gateway adapter가 host 설정 시 `work.spawn|input|read|kill`을 노출하고 `gateway/events status=tool_call`로 기존 work.control 원장에 진입한다. `verify_hermes_gateway_adapter.sh`에 spawn→승인→dispatch→work_session→ack, call_id 멱등/충돌, audit/outbox 단정을 가산했다. 이 worker에서는 Docker 실행 금지 지시로 정적 검증만 수행했으며 실제 verifier PASS 판정은 오케스트레이터 게이트로 남는다. 실 provider tool-calling 육안 왕복도 계속 별도 opt-in이다.
 
 ## Q2. App Sandbox 배포 정책 결정 [Fable 기안 → 성재 결정]
 - **무엇**: dev(SwiftPM) 빌드는 PTY 동작, 배포(Xcode App Sandbox) 빌드는 fail-closed. 배포판에서 PTY를 열려면 ①App Sandbox 해제(App Store 불가·공증 직접배포 가능) 또는 ②비샌드박스 로컬 helper 경유 중 택1 — 보안 결정.
