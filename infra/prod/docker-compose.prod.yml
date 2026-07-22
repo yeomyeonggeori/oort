@@ -234,6 +234,8 @@ services:
       DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
       MOMO_BOOTSTRAP_RUNTIME_ROLES: "0"
       MOMO_AGENT_SEED_MODE: none
+      MOMO_INITIAL_OWNER_EMAIL: ${MOMO_INITIAL_OWNER_EMAIL:-}
+      MOMO_INITIAL_OWNER_PASSWORD: ${MOMO_INITIAL_OWNER_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

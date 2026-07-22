@@ -72,7 +72,8 @@ infra/prod/install.sh --env-file /run/momo/prod.env --mode prod \
 ```
 
 스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → `docker compose config
---quiet` → pull → PostgreSQL/Redis/Centrifugo → runtime role 프로비저닝 → one-shot `migrate`와 `web-init` →
+--quiet` → pull → PostgreSQL/Redis/Centrifugo → runtime role 프로비저닝 → one-shot `migrate` →
+env-only `set-owner` → `web-init` →
 API/relay/worker/Caddy → `https://API_DOMAIN/health` 순으로 실행한다. 실패하면 `compose
 ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는다. 성공한 이미지 세트는
 `/var/lib/momo/deploy-state.env`에 mode 0600으로 기록한다.
@@ -80,32 +81,30 @@ ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는�
 ### 설치 완료의 일부: owner 자격증명 인수 (필수 — URL 공유 전)
 
 > **경고 (review #429 H1, MOMO-408 반영):** prod 모드 마이그레이션은 시드 owner
-> (`demo@momo.local`)의 공개된 결정론적 비밀번호(`dev-password`)를 무효화한다. 아래 인수
-> UPDATE 전에는 해당 계정 로그인이 HTTP 401로 fail-closed된다. 그래도 install.sh의
+> (`demo@momo.local`)의 공개된 결정론적 비밀번호(`dev-password`)를 무효화한다. `set-owner`
+> 실행 전에는 해당 계정 로그인이 HTTP 401로 fail-closed된다. 그래도 install.sh의
 > "install complete"는 운영자 소유 email/password로 인수하고 실제 로그인을 확인해야 완료다 —
 > 인수 전에는 서버 URL을 누구와도 공유하지 마라.
 
 마이그레이션은 첫 bootstrap workspace와 owner 행을 멱등 생성한다. 초기 owner 자격증명은
 공개 설치 로그가 아니라 운영자의 SOPS/host-only provisioning 경계에서 설정해야 한다.
-암호화된 env에 `MOMO_INITIAL_OWNER_EMAIL`과 `MOMO_INITIAL_OWNER_PASSWORD`를 추가한 뒤,
-호스트에서 아래 one-shot 인수 절차를 실행한다. `psql \getenv`를 사용하므로 비밀번호 값은
-명령 인자·stdout에 나타나지 않는다.
+암호화된 env에 `MOMO_INITIAL_OWNER_EMAIL`과 `MOMO_INITIAL_OWNER_PASSWORD`를 추가한다.
+`install.sh`는 migration 직후 pinned migrate 이미지의 `set-owner` one-shot을 자동 실행하며,
+둘 중 하나가 없거나 template placeholder이면 API를 시작하기 전에 fail-closed된다. 비밀번호는
+컨테이너 환경에서 `psql \getenv`로만 읽으므로 argv·SQL 원문·stdout에 나타나지 않는다.
 
 ```sh
 sops exec-env /secure/momo/prod.sops.env \
-  'docker compose -f infra/prod/docker-compose.prod.yml exec -T \
-   -e MOMO_INITIAL_OWNER_EMAIL -e MOMO_INITIAL_OWNER_PASSWORD postgres \
-   psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
-\getenv owner_email MOMO_INITIAL_OWNER_EMAIL
-\getenv owner_password MOMO_INITIAL_OWNER_PASSWORD
-BEGIN;
-SET LOCAL app.workspace_id = '00000000-0000-7000-8000-000000000001';
-UPDATE human
-   SET email = :'owner_email', email_verified = true,
-       password_hash = momo_password_hash(:'owner_password')
- WHERE member_id = '00000000-0000-7000-8000-000000000101';
-COMMIT;
-SQL
+  'infra/prod/install.sh --from-env --mode prod --state-dir /var/lib/momo'
+```
+
+설치 뒤 이메일/비밀번호를 회전할 때도 같은 이미지 경계를 재사용한다. 아래 명령은 정확히
+bootstrap owner 한 명만 갱신하고 그 owner의 활성 세션을 폐기한다. 확립된 owner를 임의로
+덮어쓰지 않도록 `upgrade.sh`는 이 명령을 자동 실행하지 않는다.
+
+```sh
+sops exec-env /secure/momo/prod.sops.env \
+  'docker compose -f infra/prod/docker-compose.prod.yml run --rm --no-deps migrate set-owner'
 ```
 
 그 자격증명으로 macOS 앱의 **설치된 self-hosted 서버 연결**에서
@@ -114,8 +113,8 @@ SQL
 history·PR evidence에 복사하지 않는다. 이 시점이 "첫 워크스페이스/초대" 완료다.
 
 > 현재 v1 installer는 사람 계정 비밀번호나 원본 초대 코드를 인자로 받거나 출력하지
-> 않는다. 초기 owner credential provisioning은 호스트 DB 관리자 책임이며, 가입자가
-> 사용할 링크 초대의 기본 만료/역할/regenerate 서버 계약은 MOMO-407이 담당한다.
+> 않는다. 초기 owner credential은 SOPS/host-only env로만 받으며, 가입자가 사용할 링크
+> 초대의 기본 만료/역할/regenerate 서버 계약은 MOMO-407이 담당한다.
 
 relay 등록은 ADR-0120 P-3/S-5의 후속 자리만 `install.sh` 끝에 주석으로 예약돼 있다.
 등록 실패는 향후에도 설치 성공을 뒤집지 않으며, relay 없는 오프그리드 설치는 1급이다.

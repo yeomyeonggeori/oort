@@ -101,6 +101,8 @@ RELAY_POSTGRES_PASSWORD=25d89609443e44219a554563e39ac89b
 RELAY_DATABASE_URL=postgres://momo_relay:25d89609443e44219a554563e39ac89b@postgres:5432/momo
 WORKER_POSTGRES_PASSWORD=39de11bc42c84bc6a28c8634d609565a
 WORKER_DATABASE_URL=postgres://momo_worker:39de11bc42c84bc6a28c8634d609565a@postgres:5432/momo
+MOMO_INITIAL_OWNER_EMAIL=owner@momo-install.example.net
+MOMO_INITIAL_OWNER_PASSWORD=7c35a6867c864598b4c27a91c4cf7822
 DB_VOLUME_NAME=momo-406-static-pgdata
 REDIS_PASSWORD=1099a519ac6d439fba20c1940d483108
 CENTRIFUGO_REDIS_ADDRESS=redis://:1099a519ac6d439fba20c1940d483108@redis:6379/0
@@ -167,11 +169,24 @@ grep -Fq 'OUTBOUND_WEBHOOK_MASTER_KEY must not reuse JWT_HMAC' "$TMP_ROOT/key-re
   fail "webhook/JWT key reuse did not reach the preflight independence guard"
 pass "install rejects outbound webhook/JWT key reuse"
 
+NO_OWNER_ENV="$TMP_ROOT/no-owner.env"
+grep -Ev '^MOMO_INITIAL_OWNER_(EMAIL|PASSWORD)=' "$ENV_FILE" > "$NO_OWNER_ENV"
+if run_capture "$TMP_ROOT/no-owner.out" "$INSTALL" --env-file "$NO_OWNER_ENV" --mode staging \
+  --state-dir "$TMP_ROOT/no-owner-state" --dry-run; then
+  fail "install accepted missing initial owner credentials"
+fi
+grep -Fq 'MOMO_INITIAL_OWNER_EMAIL is required for installation' "$TMP_ROOT/no-owner.out" ||
+  fail "missing initial owner input did not fail before install mutation"
+pass "install requires env-only initial owner credentials"
+
 run_capture "$TMP_ROOT/install.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/install-state" --dry-run
-grep -Fq 'pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate and web-init once -> start api/relay/worker/linkshort/caddy' "$TMP_ROOT/install.out" ||
+grep -Fq 'pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate -> set initial owner -> run web-init -> start api/relay/worker/linkshort/caddy' "$TMP_ROOT/install.out" ||
   fail "install dry-run plan lost the ordered migration/start contract"
 grep -Fq 'config --quiet' "$TRACE" || fail "install did not render docker compose config"
+if grep -Fq '7c35a6867c864598b4c27a91c4cf7822' "$TMP_ROOT/install.out"; then
+  fail "install printed the initial owner password"
+fi
 pass "install dry-run validates preflight/digests/compose and ordered idempotent plan"
 
 if run_capture "$TMP_ROOT/no-backup.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
@@ -199,6 +214,16 @@ for deploy_script in "$INSTALL" "$UPGRADE"; do
     fail "$deploy_script must provision runtime roles before invoking migrate"
 done
 pass "install and upgrade consume runtime-role provisioning before migrations"
+
+owner_line="$(grep -n 'run --rm --no-deps migrate set-owner' "$INSTALL" | head -n 1 | cut -d: -f1)"
+install_migrate_line="$(grep -n 'run --rm --no-deps migrate ||' "$INSTALL" | head -n 1 | cut -d: -f1)"
+web_line="$(grep -n 'run --rm --no-deps web-init' "$INSTALL" | head -n 1 | cut -d: -f1)"
+[ -n "$owner_line" ] && [ "$install_migrate_line" -lt "$owner_line" ] && [ "$owner_line" -lt "$web_line" ] ||
+  fail "install must set the initial owner after migration and before service startup"
+if grep -Fq 'migrate set-owner' "$UPGRADE"; then
+  fail "upgrade must not overwrite an established owner credential"
+fi
+pass "install bootstraps the owner once while upgrade preserves established credentials"
 
 mkdir -p "$TMP_ROOT/legacy-state"
 grep -Ev '^MOMO_(WEB|LINKSHORT)_IMAGE=' "$TMP_ROOT/state/$DEPLOY_STATE_NAME" > "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"
