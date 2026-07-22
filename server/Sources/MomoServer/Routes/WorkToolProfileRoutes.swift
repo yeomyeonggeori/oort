@@ -8,6 +8,7 @@ private struct CreateWorkToolProfileRequest: Decodable, Sendable {
     let displayName: String
     let launchTemplate: JSONValue
     let tierDefaults: JSONValue?
+    let envPolicy: JSONValue?
     let enabled: Bool?
 }
 
@@ -15,6 +16,7 @@ private struct UpdateWorkToolProfileRequest: Decodable, Sendable {
     let displayName: String?
     let launchTemplate: JSONValue?
     let tierDefaults: JSONValue?
+    let envPolicy: JSONValue?
     let enabled: Bool?
 }
 
@@ -25,6 +27,7 @@ struct WorkToolProfileDTO: Codable, Sendable, Equatable {
     let displayName: String
     let launchTemplate: JSONValue
     let tierDefaults: JSONValue
+    let envPolicy: JSONValue
     let enabled: Bool
     let createdBy: String
     let updatedBy: String
@@ -44,7 +47,8 @@ private struct WorkToolProfileResponse: ResponseEncodable {
 ///
 /// Human reads and mutations require workspace admin authority. A signed work
 /// host may read only the enabled projection it needs to resolve commands
-/// locally; executable paths, environment values, and credentials never enter
+/// locally; environment policy contains names only, while executable paths,
+/// environment values, and credentials never enter
 /// this API or its audit records.
 struct WorkToolProfileRoutes: Sendable {
     let db: Database
@@ -75,7 +79,7 @@ struct WorkToolProfileRoutes: Sendable {
             let rows = try await conn.query(
                 """
                 SELECT id, workspace_id, tool_key, display_name,
-                       launch_template::text, tier_defaults::text, enabled,
+                       launch_template::text, tier_defaults::text, env_policy::text, enabled,
                        created_by, updated_by, created_at, updated_at
                   FROM work_tool_profile
                  WHERE workspace_id = \(workspaceID)
@@ -99,6 +103,7 @@ struct WorkToolProfileRoutes: Sendable {
         let displayName = try Self.validatedDisplayName(body.displayName)
         let launchTemplate = try Self.validatedLaunchTemplate(body.launchTemplate, toolKey: toolKey)
         let tierDefaults = try Self.validatedTierDefaults(body.tierDefaults ?? .object([:]))
+        let envPolicy = try Self.validatedEnvironmentPolicy(body.envPolicy ?? .object([:]))
         let enabled = body.enabled ?? true
 
         let profile = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
@@ -109,13 +114,14 @@ struct WorkToolProfileRoutes: Sendable {
                 """
                 INSERT INTO work_tool_profile
                   (workspace_id, tool_key, display_name, launch_template,
-                   tier_defaults, enabled, created_by, updated_by)
+                   tier_defaults, env_policy, enabled, created_by, updated_by)
                 VALUES
                   (\(workspaceID), \(toolKey), \(displayName), \(launchTemplate)::jsonb,
-                   \(tierDefaults)::jsonb, \(enabled), \(principal.memberID), \(principal.memberID))
+                   \(tierDefaults)::jsonb, \(envPolicy)::jsonb, \(enabled),
+                   \(principal.memberID), \(principal.memberID))
                 ON CONFLICT (workspace_id, tool_key) DO NOTHING
                 RETURNING id, workspace_id, tool_key, display_name,
-                          launch_template::text, tier_defaults::text, enabled,
+                          launch_template::text, tier_defaults::text, env_policy::text, enabled,
                           created_by, updated_by, created_at, updated_at
                 """,
                 logger: db.logger
@@ -144,7 +150,7 @@ struct WorkToolProfileRoutes: Sendable {
         let toolKey = try Self.validatedToolKey(try context.parameters.require("tool"))
         let body = try await request.decode(as: UpdateWorkToolProfileRequest.self, context: context)
         guard body.displayName != nil || body.launchTemplate != nil ||
-                body.tierDefaults != nil || body.enabled != nil
+                body.tierDefaults != nil || body.envPolicy != nil || body.enabled != nil
         else {
             throw HTTPError(.badRequest, message: "work tool profile update is empty")
         }
@@ -153,6 +159,7 @@ struct WorkToolProfileRoutes: Sendable {
             try Self.validatedLaunchTemplate($0, toolKey: toolKey)
         }
         let tierDefaults = try body.tierDefaults.map(Self.validatedTierDefaults)
+        let envPolicy = try body.envPolicy.map(Self.validatedEnvironmentPolicy)
 
         let profile = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             try await WorkspaceAuthorization.requireAdmin(
@@ -164,13 +171,14 @@ struct WorkToolProfileRoutes: Sendable {
                    SET display_name = COALESCE(\(displayName)::text, display_name),
                        launch_template = COALESCE(\(launchTemplate)::jsonb, launch_template),
                        tier_defaults = COALESCE(\(tierDefaults)::jsonb, tier_defaults),
+                       env_policy = COALESCE(\(envPolicy)::jsonb, env_policy),
                        enabled = COALESCE(\(body.enabled)::boolean, enabled),
                        updated_by = \(principal.memberID),
                        updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND tool_key = \(toolKey)
                 RETURNING id, workspace_id, tool_key, display_name,
-                          launch_template::text, tier_defaults::text, enabled,
+                          launch_template::text, tier_defaults::text, env_policy::text, enabled,
                           created_by, updated_by, created_at, updated_at
                 """,
                 logger: db.logger
@@ -216,7 +224,7 @@ struct WorkToolProfileRoutes: Sendable {
                  WHERE workspace_id = \(workspaceID)
                    AND tool_key = \(toolKey)
                 RETURNING id, workspace_id, tool_key, display_name,
-                          launch_template::text, tier_defaults::text, enabled,
+                          launch_template::text, tier_defaults::text, env_policy::text, enabled,
                           created_by, updated_by, created_at, updated_at
                 """,
                 logger: db.logger
@@ -320,6 +328,37 @@ struct WorkToolProfileRoutes: Sendable {
         return json
     }
 
+    static func validatedEnvironmentPolicy(_ raw: JSONValue) throws -> String {
+        guard let object = raw.objectValue,
+              Set(object.keys).isSubset(of: ["mode", "passthrough"])
+        else {
+            throw HTTPError(.badRequest, message: "envPolicy supports mode and passthrough only")
+        }
+        if let mode = object["mode"] {
+            guard let value = mode.stringValue, value == "allowlist" || value == "legacy" else {
+                throw HTTPError(.badRequest, message: "envPolicy mode must be allowlist or legacy")
+            }
+        }
+        if let passthrough = object["passthrough"] {
+            guard let values = passthrough.arrayValue, values.count <= 64 else {
+                throw HTTPError(.badRequest, message: "envPolicy passthrough must contain at most 64 keys")
+            }
+            for item in values {
+                guard let key = item.stringValue,
+                      key.wholeMatch(of: /^[A-Za-z_][A-Za-z0-9_]{0,127}$/) != nil,
+                      !key.hasPrefix("MOMO_WORKD_")
+                else {
+                    throw HTTPError(.badRequest, message: "envPolicy contains an invalid passthrough key")
+                }
+            }
+        }
+        let json = try jsonString(raw)
+        guard json.utf8.count <= 8_192 else {
+            throw HTTPError(.badRequest, message: "envPolicy is too large")
+        }
+        return json
+    }
+
     private static func containsCredentialShape(_ value: JSONValue) -> Bool {
         let forbidden = ["authorization", "bearer", "password", "secret", "token", "apikey", "api_key", "api-key"]
         switch value {
@@ -348,11 +387,12 @@ struct WorkToolProfileRoutes: Sendable {
 
     private static func decodeProfile(_ row: PostgresRow) throws -> WorkToolProfileDTO {
         let decoded = try row.decode(
-            (UUID, UUID, String, String, String, String, Bool, UUID, UUID, Date, Date).self
+            (UUID, UUID, String, String, String, String, String, Bool, UUID, UUID, Date, Date).self
         )
         let decoder = JSONDecoder()
         guard let launchData = decoded.4.data(using: .utf8),
-              let tierData = decoded.5.data(using: .utf8)
+              let tierData = decoded.5.data(using: .utf8),
+              let envData = decoded.6.data(using: .utf8)
         else {
             throw HTTPError(.internalServerError, message: "work tool profile JSON is invalid")
         }
@@ -363,11 +403,12 @@ struct WorkToolProfileRoutes: Sendable {
             displayName: decoded.3,
             launchTemplate: try decoder.decode(JSONValue.self, from: launchData),
             tierDefaults: try decoder.decode(JSONValue.self, from: tierData),
-            enabled: decoded.6,
-            createdBy: decoded.7.uuidString,
-            updatedBy: decoded.8.uuidString,
-            createdAtMs: Int64(decoded.9.timeIntervalSince1970 * 1_000),
-            updatedAtMs: Int64(decoded.10.timeIntervalSince1970 * 1_000)
+            envPolicy: try decoder.decode(JSONValue.self, from: envData),
+            enabled: decoded.7,
+            createdBy: decoded.8.uuidString,
+            updatedBy: decoded.9.uuidString,
+            createdAtMs: Int64(decoded.10.timeIntervalSince1970 * 1_000),
+            updatedAtMs: Int64(decoded.11.timeIntervalSince1970 * 1_000)
         )
     }
 

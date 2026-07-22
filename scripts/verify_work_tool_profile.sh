@@ -195,16 +195,19 @@ expect_status 200 "seed catalog list"
 printf '%s' "$RESPONSE_BODY" | jq -e '
   [.workToolProfiles[] | select(.enabled) | .toolKey] == ["claude","codex","opencode","shell"]
   and all(.workToolProfiles[]; (.launchTemplate | keys) == ["arguments","command"])
+  and all(.workToolProfiles[]; .envPolicy == {})
 ' >/dev/null
 
 api "$MEMBER_TOKEN" GET "$PROFILE_PATH"
 expect_status 403 "non-admin catalog list"
 
 api "$OWNER_TOKEN" POST "$PROFILE_PATH" \
-  '{"toolKey":"kimi","displayName":"Kimi","launchTemplate":{"command":"kimi","arguments":["--print"]},"tierDefaults":{"mode":"ask"}}'
+  '{"toolKey":"kimi","displayName":"Kimi","launchTemplate":{"command":"kimi","arguments":["--print"]},"tierDefaults":{"mode":"ask"},"envPolicy":{"mode":"allowlist","passthrough":["KIMI_HOME"]}}'
 expect_status 201 "custom profile create"
 printf '%s' "$RESPONSE_BODY" | jq -e \
-  '.workToolProfile.toolKey == "kimi" and .workToolProfile.enabled == true' >/dev/null
+  '.workToolProfile.toolKey == "kimi"
+   and .workToolProfile.enabled == true
+   and .workToolProfile.envPolicy == {"mode":"allowlist","passthrough":["KIMI_HOME"]}' >/dev/null
 
 api "$OWNER_TOKEN" POST "$PROFILE_PATH" \
   '{"toolKey":"unsafe","displayName":"Unsafe","launchTemplate":{"command":"unsafe","arguments":["/tmp/secret"]}}'
@@ -212,6 +215,12 @@ expect_status 400 "absolute path rejection"
 api "$OWNER_TOKEN" POST "$PROFILE_PATH" \
   '{"toolKey":"unsafe","displayName":"Unsafe","launchTemplate":{"command":"unsafe","arguments":["--api-key=secret"]}}'
 expect_status 400 "credential argument rejection"
+api "$OWNER_TOKEN" POST "$PROFILE_PATH" \
+  '{"toolKey":"unsafe","displayName":"Unsafe","launchTemplate":{"command":"unsafe","arguments":[]},"envPolicy":{"passthrough":["GH_TOKEN=secret"]}}'
+expect_status 400 "environment value rejection"
+api "$OWNER_TOKEN" POST "$PROFILE_PATH" \
+  '{"toolKey":"unsafe","displayName":"Unsafe","launchTemplate":{"command":"unsafe","arguments":[]},"envPolicy":{"passthrough":["MOMO_WORKD_SERVER_URL"]}}'
+expect_status 400 "workd control environment rejection"
 
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/work-hosts" \
   "$(jq -cn --arg key "$HOST_PUBLIC_KEY" \

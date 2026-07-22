@@ -230,7 +230,27 @@ struct MemoryExtractionService: Service {
     let extractor: any MemoryExtracting
     let pollInterval: Duration
     let batchSize: Int
+    let poisonThreshold: Int
     let logger: Logger
+    let sleeper: any MemoryWorkerSleeping
+
+    init(
+        pg: PostgresClient,
+        extractor: any MemoryExtracting,
+        pollInterval: Duration,
+        batchSize: Int,
+        poisonThreshold: Int = 5,
+        logger: Logger,
+        sleeper: any MemoryWorkerSleeping = TaskMemoryWorkerSleeper()
+    ) {
+        self.pg = pg
+        self.extractor = extractor
+        self.pollInterval = pollInterval
+        self.batchSize = batchSize
+        self.poisonThreshold = poisonThreshold
+        self.logger = logger
+        self.sleeper = sleeper
+    }
 
     private struct Claim: Sendable {
         let leaseToken: UUID
@@ -242,6 +262,22 @@ struct MemoryExtractionService: Service {
         let toSeq: Int64
         let messages: [MemoryExtractionMessage]
         let existing: [ExistingMemory]
+
+        var retryKey: RetryKey {
+            .init(
+                workspaceID: workspaceID,
+                channelID: channelID,
+                fromSeq: lastExtractedSeq,
+                toSeq: toSeq
+            )
+        }
+    }
+
+    private struct RetryKey: Hashable, Sendable {
+        let workspaceID: UUID
+        let channelID: UUID
+        let fromSeq: Int64
+        let toSeq: Int64
     }
 
     func run() async throws {
@@ -250,10 +286,36 @@ struct MemoryExtractionService: Service {
             "extractorVersion": .string(extractor.version),
             "batchSize": .stringConvertible(batchSize),
         ])
+        var retry = MemoryBatchRetryState<RetryKey>(
+            baseDelay: pollInterval,
+            poisonThreshold: poisonThreshold
+        )
         while !Task.isCancelled {
+            var retryDelay: Duration?
             do {
                 while let claim = try await claimOne() {
-                    await process(claim)
+                    if await process(claim) {
+                        retry.recordSuccess(for: claim.retryKey)
+                    } else {
+                        let decision = retry.recordFailure(for: claim.retryKey)
+                        if decision.shouldPoison {
+                            do {
+                                try await poison(claim, failureCount: decision.failureCount)
+                                retry.recordPoisonHandled(for: claim.retryKey)
+                            } catch {
+                                logger.error("memory extraction poison handling failed", metadata: [
+                                    "workspaceId": .string(claim.workspaceID.uuidString),
+                                    "channelId": .string(claim.channelID.uuidString),
+                                    "error": .string(String(describing: error)),
+                                ])
+                                try? await release(claim)
+                            }
+                        } else {
+                            try? await release(claim)
+                        }
+                        retryDelay = decision.delay
+                        break
+                    }
                     if Task.isCancelled { break }
                 }
             } catch {
@@ -261,7 +323,7 @@ struct MemoryExtractionService: Service {
                     "error": .string(String(describing: error)),
                 ])
             }
-            try? await Task.sleep(for: pollInterval)
+            await sleeper.sleep(for: retryDelay ?? pollInterval)
         }
     }
 
@@ -397,7 +459,7 @@ struct MemoryExtractionService: Service {
         }
     }
 
-    private func process(_ claim: Claim) async {
+    private func process(_ claim: Claim) async -> Bool {
         do {
             let batch = MemoryExtractionBatch(
                 workspaceID: claim.workspaceID,
@@ -410,6 +472,7 @@ struct MemoryExtractionService: Service {
             let extracted = try await extractor.extract(batch)
             let compared = Self.compare(extracted, existing: claim.existing)
             try await apply(compared, claim: claim)
+            return true
         } catch {
             logger.error("memory extraction batch failed", metadata: [
                 "workspaceId": .string(claim.workspaceID.uuidString),
@@ -418,7 +481,7 @@ struct MemoryExtractionService: Service {
                 "toSeq": .stringConvertible(claim.toSeq),
                 "error": .string(String(describing: error)),
             ])
-            try? await release(claim)
+            return false
         }
     }
 
@@ -694,6 +757,53 @@ struct MemoryExtractionService: Service {
                 logger: logger
             )
         }
+    }
+
+    /// Atomically consumes a poison batch and records exactly one audit event.
+    /// The lease and expected watermark protect the existing two-phase apply
+    /// contract from racing another extraction worker.
+    private func poison(_ claim: Claim, failureCount: Int) async throws {
+        try await pg.withTransaction(logger: logger) { conn in
+            let rows = try await conn.query(
+                """
+                UPDATE memory_extraction_cursor
+                   SET last_extracted_seq = \(claim.toSeq),
+                       lease_token = NULL,
+                       leased_until = NULL,
+                       updated_at = clock_timestamp()
+                 WHERE workspace_id = \(claim.workspaceID)
+                   AND channel_id = \(claim.channelID)
+                   AND lease_token = \(claim.leaseToken)
+                   AND last_extracted_seq = \(claim.lastExtractedSeq)
+                RETURNING channel_id
+                """,
+                logger: logger
+            ).collect()
+            guard !rows.isEmpty else { throw MemoryExtractionError.lostLease }
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type, target_id, detail)
+                VALUES
+                  (\(claim.workspaceID), \(claim.agentMemberID),
+                   'memory.extraction.poisoned', 'channel', \(claim.channelID),
+                   jsonb_build_object(
+                     'from_seq', \(claim.lastExtractedSeq),
+                     'to_seq', \(claim.toSeq),
+                     'failure_count', \(failureCount),
+                     'extractor_kind', \(extractor.kind),
+                     'extractor_version', \(extractor.version)))
+                """,
+                logger: logger
+            )
+        }
+        logger.warning("memory extraction poison batch skipped", metadata: [
+            "workspaceId": .string(claim.workspaceID.uuidString),
+            "channelId": .string(claim.channelID.uuidString),
+            "fromSeq": .stringConvertible(claim.lastExtractedSeq),
+            "toSeq": .stringConvertible(claim.toSeq),
+            "failureCount": .stringConvertible(failureCount),
+        ])
     }
 
     static func broadcastPayload(
