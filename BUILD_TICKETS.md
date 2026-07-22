@@ -2326,3 +2326,27 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-532 수용기준 — 도구 관리+ACP 카드 (UXUI, 533·531 후) `[runtime]`
 - [ ] 도구 등록 UI(원장 소비·앱 하드코딩 제거·fail-closed) + ACP 세션 카드(plan/진행/승인 — 19-05 계약: 승인 4옵션·처리 카드 불변 고정)
 - [ ] 등록→spawn 반영→미등재 비노출, 카드 상태 전이 스냅샷, design-review Blocker 0
+
+### MOMO-534 수용기준 — eve/CF momo 채널 어댑터 2종 (Wave B) `[runtime]`
+- [ ] examples/eve-momo-channel(defineChannel)+examples/cloudflare-agent-momo — gateway BYOA 계약 소비, 코어 diff 0, 자격증명 env 주입만
+- [ ] `verify_momo_channel_adapter.sh` PASS(mock eve 런타임 gateway 왕복). eve 실런타임은 runtime-unverified 허용
+
+### MOMO-536 수용기준 — 에이전트 명부+A2A 카드 URL 온보딩 (Wave B, 0130 D4 집행) `[runtime]`
+- [ ] from-card(fetch+SSRF 가드+파싱+pending_consent)→confirm(agent member+gateway credential+audit) 왕복, 카드 자격증명 비저장
+- [ ] SSRF 가드 유닛(사설IP·redirect) + `verify_agent_card_onboarding.sh` PASS(mock 카드 서버) + RLS + openapi
+
+### MOMO-535 수용기준 — outbound 이벤트 구독 (Wave B) `[runtime]`
+- [ ] event_subscription 원장+CRUD+RLS, outbox kind=webhook_delivery, HMAC 서명 POST, 재시도·자동 disable+audit, 시크릿 평문 비노출
+- [ ] `verify_event_subscription.sh` PASS(mock 수신기)
+
+### MOMO-537 수용기준 — agent_profile 원장+간편 생성 (Wave C, **ADR-0131 Accepted 후**) `[runtime]`
+- [ ] agent_profile 원장(RLS)+CRUD+packet 주입(프리앰블 우선·도구 교집합·모델 허용목록 내) — 기존 필드 불변
+- [ ] verifier PASS + 528 회귀
+
+### MOMO-538 수용기준 — 동봉 eve 옵션 프로파일 (Wave C, 534 후) `[runtime]`
+- [ ] compose --profile eve(기본 오프·버전 고정·별도 DB world·어댑터 프리셋)+drift guard+RUN.md, 미기동 시 무영향
+- [ ] compose config+기동 스모크 verifier PASS
+
+### MOMO-539 수용기준 — 추출 워커 실패 백오프 (소형) `[runtime]`
+- [ ] 지수 백오프(상한 5분)+포이즌 배치 N회 후 워터마크 전진+audit 1회, 핫루프 제거
+- [ ] 백오프 유닛 + verify_memory_plane 회귀
