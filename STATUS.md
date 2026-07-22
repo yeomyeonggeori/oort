@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-550 에이전트 주소 온보딩 (#638, 2026-07-22)
+
+- macOS 멤버 디렉터리와 워크스페이스 설정에 관리자용 에이전트 주소 입력→공개 능력·인증 방식 동의→등록 흐름을 연결했다. 서버 4xx 사유는 인라인으로 표시하고 카드 제공 인증정보 입력란은 두지 않는다.
+- confirm 뒤 서버 명부를 다시 읽어 새 에이전트를 반영하며, 기존 roster의 `origin=card|local`을 주소로 추가/직접 생성 뱃지로 투영한다. 한국어 동의 화면 light/dark snapshot과 REST·오류·카피 집중 테스트, 디자인 프리플라이트 3종, 독립 design-review(Blocker 0), macOS Swift build가 PASS했다.
+- 기준 `track/uxui`에 남아 있던 Memory Plane·멤버 lifecycle 병합 충돌 표식 6곳은 양 계약을 모두 보존해 최소 해소했다. 실서버 UI 왕복은 momo-main 검수 전까지 `runtime-unverified`다.
+
 ## MOMO-548 외부 provider 추출 동의 게이트 (#625, 2026-07-22)
 
 - migration 035에 기존 memory enabled 정책과 별도인 워크스페이스 외부 provider 명시 동의(기본 false)를 추가했다. 서버 admin REST/OpenAPI는 동의·공유 provider trust 판정·최종 추출 허용 여부를 투영한다.

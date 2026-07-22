@@ -163,11 +163,9 @@ public final class ChatViewModel: ObservableObject {
     private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
     private let workConsoleBackend: (any MomoWorkConsoleBackend)?
     private let workHostBackend: (any MomoWorkHostBackend)?
-<<<<<<< HEAD
     private let memoryPlaneBackend: (any MemoryPlaneBackend)?
-=======
     private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
->>>>>>> origin/track/uxui
+    private let agentOnboardingBackend: (any MomoAgentOnboardingBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -209,6 +207,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var workspaceNameUpdateError: String?
     @Published public private(set) var workspaceNameUpdateIssue: WorkspaceNameUpdateIssue?
     @Published public private(set) var members: [Member] = []
+    @Published private(set) var agentOriginsByMemberID: [MemberID: MomoAgentOrigin] = [:]
+    @Published private(set) var agentOnboardingState = MomoAgentOnboardingState.entry
     @Published public private(set) var membershipMutationMemberIDs: Set<MemberID> = []
     @Published public private(set) var membershipAdministrationError: String?
     @Published public private(set) var workspaceAuditEvents: [MomoWorkspaceAuditEvent] = []
@@ -366,11 +366,9 @@ public final class ChatViewModel: ObservableObject {
         self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
         self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
         self.workHostBackend = chat as? any MomoWorkHostBackend
-<<<<<<< HEAD
         self.memoryPlaneBackend = chat as? any MemoryPlaneBackend
-=======
         self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
->>>>>>> origin/track/uxui
+        self.agentOnboardingBackend = chat as? any MomoAgentOnboardingBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -414,6 +412,7 @@ public final class ChatViewModel: ObservableObject {
             self.members = usesServerRosterSourceOfTruth
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
+            await refreshAgentOrigins()
             let memberProvider = chat as? any AuthenticatedMemberIDProvidingBackend
             let providedMemberID = await memberProvider?.authenticatedMemberID()
             let resolvedMemberID = providedMemberID
@@ -579,6 +578,8 @@ public final class ChatViewModel: ObservableObject {
         workspaceNameUpdateIssue = nil
         workspaceIdentityUsesCache = false
         members = []
+        agentOriginsByMemberID = [:]
+        agentOnboardingState = .entry
         channels = []
         selectedChannelId = nil
         recentChannelIds = []
@@ -1147,11 +1148,92 @@ public final class ChatViewModel: ObservableObject {
             members = usesServerRosterSourceOfTruth
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
+            await refreshAgentOrigins()
             memberDirectoryError = nil
             clearConnectionErrorState()
         } catch {
             memberDirectoryError = String(describing: error)
             reportConnectionError(error)
+        }
+    }
+
+    public var supportsAgentAddressOnboarding: Bool {
+        agentOnboardingBackend != nil
+    }
+
+    func agentOrigin(for member: Member) -> MomoAgentOrigin? {
+        guard member.isAgent else { return nil }
+        return usesServerRosterSourceOfTruth ? agentOriginsByMemberID[member.id] : .local
+    }
+
+    public func resetAgentOnboarding() {
+        agentOnboardingState = .entry
+    }
+
+    public func inspectAgentAddress(_ address: String) async {
+        guard canManageWorkspace, let agentOnboardingBackend else { return }
+        agentOnboardingState = .loading
+        do {
+            let registration = try await agentOnboardingBackend.inspectAgentAddress(address)
+            agentOnboardingState = .consent(registration)
+        } catch is CancellationError {
+            agentOnboardingState = .entry
+        } catch {
+            agentOnboardingState = .failure(Self.agentOnboardingFailure(error))
+        }
+    }
+
+    public func confirmAgentRegistration() async -> MemberID? {
+        guard canManageWorkspace,
+              let agentOnboardingBackend,
+              case .consent(let registration) = agentOnboardingState
+        else { return nil }
+        agentOnboardingState = .confirming(registration)
+        do {
+            let memberID = try await agentOnboardingBackend.confirmAgentRegistration(registration.id)
+            await refreshMemberDirectory()
+            agentOnboardingState = .completed(memberID)
+            return memberID
+        } catch is CancellationError {
+            agentOnboardingState = .consent(registration)
+            return nil
+        } catch {
+            agentOnboardingState = .failure(Self.agentOnboardingFailure(error), registration: registration)
+            return nil
+        }
+    }
+
+    func retryAgentRegistrationConsent() {
+        guard case .failure(_, let registration?) = agentOnboardingState else { return }
+        agentOnboardingState = .consent(registration)
+    }
+
+    private func refreshAgentOrigins() async {
+        guard let provider = chat as? any MomoAgentOriginProvidingBackend else {
+            agentOriginsByMemberID = [:]
+            return
+        }
+        agentOriginsByMemberID = await provider.agentOrigins()
+    }
+
+    nonisolated static func agentOnboardingFailure(_ error: any Error) -> MomoAgentOnboardingFailure {
+        guard let backendError = error as? BackendError else {
+            return .unavailable
+        }
+        switch backendError {
+        case .problem(_, let title, let detail):
+            if let reason = detail ?? title { return .serverReason(reason) }
+            return .unavailable
+        case .notConnected:
+            return .offline
+        case .realtime:
+            return .connection
+        case .decoding:
+            return .invalidResponse
+        case .timedOut:
+            return .timedOut
+        case .budgetExceeded:
+            return .unavailable
         }
     }
 

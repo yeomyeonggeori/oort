@@ -264,6 +264,7 @@ struct MomoWorkspaceSettingsSurface: View {
     @State private var serverDisplayName: String
     @State private var saveNotice: String?
     @State private var showsLeaveWorkspaceConfirmation = false
+    @State private var showsAgentOnboarding = false
 
     private var workspaceNameDraft: MomoWorkspaceNameDraft {
         MomoWorkspaceNameDraft(serverDisplayName)
@@ -383,6 +384,18 @@ struct MomoWorkspaceSettingsSurface: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
 
+            if projection.canManageWorkspace && viewModel.supportsAgentAddressOnboarding {
+                MomoSettingsSection(title: copy.agents, subtitle: copy.addAgentFromAddressDetail) {
+                    Button {
+                        viewModel.resetAgentOnboarding()
+                        showsAgentOnboarding = true
+                    } label: {
+                        Label(copy.addAgent, systemImage: "person.badge.plus")
+                    }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                }
+            }
+
             MomoSettingsSection(title: copy.workspaceAccess, subtitle: copy.workspaceAccessSubtitle) {
                 if viewModel.membershipAdministrationError != nil {
                     Label(copy.membershipUpdateFailed, systemImage: "exclamationmark.triangle")
@@ -416,6 +429,14 @@ struct MomoWorkspaceSettingsSurface: View {
             Text(viewModel.authenticatedMember?.workspaceRole == .owner
                  ? copy.lastOwnerLeaveExplanation
                  : copy.leaveWorkspaceExplanation)
+        }
+        .sheet(isPresented: $showsAgentOnboarding) {
+            MomoAgentOnboardingView(
+                viewModel: viewModel,
+                copy: copy,
+                isOffline: viewModel.selectedRealtimeStatus?.isFallbackActive == true,
+                onCompleted: { _ in showsAgentOnboarding = false }
+            )
         }
     }
 
