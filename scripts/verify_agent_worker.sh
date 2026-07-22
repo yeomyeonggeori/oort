@@ -1182,7 +1182,7 @@ if [ "$RUN_ID" = "" ]; then
     "$MESSAGE_ID" "$AGENT_ID" "$AGENT_HANDLE" "$JOB_COUNT" "${SKIP_REASON:-none}" >&2
   exit 1
 fi
-CONTEXT_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'run_id')=lower('$RUN_ID') AND payload->'context_packet_projection'->>'schema'='momo.context_packet.mention_projection.v0' AND lower(payload->'source_attribution'->>'message_id')=lower('$MESSAGE_ID') AND lower(payload->>'author_member_id')=lower('$HUMAN_ID');")
+CONTEXT_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'run_id')=lower('$RUN_ID') AND payload->'context_packet_projection'->>'schema' IN ('momo.context_packet.mention_projection.v0','momo.context_packet.v0') AND lower(payload->'source_attribution'->>'message_id')=lower('$MESSAGE_ID') AND lower(payload->>'author_member_id')=lower('$HUMAN_ID');")
 AUDIT_QUEUED=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='$WORKSPACE_ID' AND action='agent.mention.queued' AND target_id='$MESSAGE_ID' AND run_id='$RUN_ID';")
 if [ "$RUN_ID" = "" ] || [ "$JOB_COUNT" != "1" ] \
   || [ "$TOTAL_RUN_COUNT" != "1" ] || [ "$TOTAL_JOB_COUNT" != "1" ] \
