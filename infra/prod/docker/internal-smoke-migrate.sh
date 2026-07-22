@@ -3,6 +3,22 @@ set -eu
 
 cd /workspace
 
+provision_roles=${MOMO_RUNTIME_ROLE_PROVISION:-0}
+case "$provision_roles" in
+  0) ;;
+  1)
+    psql "${DATABASE_URL:?set DATABASE_URL}" \
+      -v ON_ERROR_STOP=1 \
+      --no-psqlrc \
+      -f infra/prod/bootstrap_runtime_roles.sql
+    exit 0
+    ;;
+  *)
+    echo "[migrate] MOMO_RUNTIME_ROLE_PROVISION must be exactly 0 or 1" >&2
+    exit 1
+    ;;
+esac
+
 bootstrap_roles=${MOMO_BOOTSTRAP_RUNTIME_ROLES:-1}
 case "$bootstrap_roles" in
   0)

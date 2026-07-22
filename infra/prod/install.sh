@@ -51,7 +51,7 @@ configure_compose
 render_compose_contract
 
 if [ "$DRY_RUN" = "1" ]; then
-  deploy_log "DRY RUN plan: pull six pinned images -> start postgres/redis/centrifugo -> run migrate and web-init once -> start api/relay/worker/linkshort/caddy -> check health -> record rollback state"
+  deploy_log "DRY RUN plan: pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate and web-init once -> start api/relay/worker/linkshort/caddy -> check health -> record rollback state"
   deploy_log "DRY RUN complete; no containers or state were changed"
   exit 0
 fi
@@ -62,6 +62,9 @@ deploy_log "pulling pinned production images"
 
 deploy_log "starting stateful dependencies"
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180 postgres redis centrifugo || { print_failure_diagnostics; exit 1; }
+
+deploy_log "provisioning least-privilege runtime database roles"
+"${COMPOSE[@]}" run --rm --no-deps runtime-roles || { print_failure_diagnostics; exit 1; }
 
 deploy_log "running the pinned migration image once"
 "${COMPOSE[@]}" run --rm --no-deps migrate || { print_failure_diagnostics; exit 1; }

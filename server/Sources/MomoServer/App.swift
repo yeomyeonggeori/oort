@@ -196,6 +196,11 @@ enum AppBuilder {
         // The PostgresClient is a ServiceLifecycle.Service; hand it to the app's
         // ServiceGroup so its run() drives the pool and shuts down gracefully.
         var services: [any Service] = [db.client]
+        if DatabaseSecurityPosture.requiresBootGuard(
+            environmentName: config.momoEnvironment
+        ) {
+            services.append(DatabaseSecurityPostureService(database: db, logger: logger))
+        }
         if let platformReadClient = db.platformReadClient {
             services.append(platformReadClient)
         }

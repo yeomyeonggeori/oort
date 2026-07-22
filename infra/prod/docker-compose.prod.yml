@@ -135,9 +135,9 @@ services:
       MOMO_ENV: ${MOMO_ENV:-staging}
       HOST: 0.0.0.0
       PORT: 8080
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
-      OUTBOUND_WEBHOOK_MASTER_KEY: ${JWT_HMAC:?set JWT_HMAC}
+      OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:?set OUTBOUND_WEBHOOK_MASTER_KEY}
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
@@ -175,7 +175,7 @@ services:
     environment:
       MOMO_ENV: ${MOMO_ENV:-staging}
       RELAY_DATABASE_URL: ${RELAY_DATABASE_URL:?set RELAY_DATABASE_URL}
-      OUTBOUND_WEBHOOK_MASTER_KEY: ${JWT_HMAC:?set JWT_HMAC}
+      OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:?set OUTBOUND_WEBHOOK_MASTER_KEY}
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
       RELAY_POLL_INTERVAL_MS: ${RELAY_POLL_INTERVAL_MS:-300}
@@ -196,7 +196,7 @@ services:
     restart: unless-stopped
     environment:
       MOMO_ENV: ${MOMO_ENV:-staging}
-      RELAY_DATABASE_URL: ${RELAY_DATABASE_URL:?set RELAY_DATABASE_URL}
+      RELAY_DATABASE_URL: ${WORKER_DATABASE_URL:?set WORKER_DATABASE_URL}
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
       AGENT_PROVIDER_MODE: ${AGENT_PROVIDER_MODE:?set AGENT_PROVIDER_MODE}
@@ -231,9 +231,27 @@ services:
     image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
     restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
       MOMO_BOOTSTRAP_RUNTIME_ROLES: "0"
       MOMO_AGENT_SEED_MODE: none
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+
+  # MOMO-554: idempotent runtime-role creation/password rotation. install.sh and
+  # upgrade.sh run this one-shot before migrate; migrate then fails closed unless
+  # the three expected roles have the exact RLS posture.
+  runtime-roles:
+    image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
+    restart: "no"
+    environment:
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
+      MOMO_RUNTIME_ROLE_PROVISION: "1"
+      MOMO_APP_POSTGRES_PASSWORD: ${MOMO_APP_POSTGRES_PASSWORD:?set MOMO_APP_POSTGRES_PASSWORD}
+      RELAY_POSTGRES_PASSWORD: ${RELAY_POSTGRES_PASSWORD:?set RELAY_POSTGRES_PASSWORD}
+      WORKER_POSTGRES_PASSWORD: ${WORKER_POSTGRES_PASSWORD:?set WORKER_POSTGRES_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy

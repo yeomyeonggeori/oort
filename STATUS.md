@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-554 prod RLS 실집행 태세 (#647, 2026-07-22)
+
+- prod install/upgrade가 migration 전에 `momo_app`(NOBYPASSRLS)·`momo_relay`/`momo_worker`(BYPASSRLS)를 멱등 프로비저닝하고, compose의 API/migrate/relay/worker URL과 outbound webhook master key를 역할·키별로 분리한다. migration 037은 `plugin_registry`의 API 쓰기 권한을 회수한다.
+- MomoServer strict 환경은 실제 DB `current_user=momo_app`·NOSUPERUSER·NOBYPASSRLS를 확인하지 못하면 기동을 거부한다. 서버 176 tests, prod preflight·install/upgrade 정적 verifier가 PASS했다.
+- `scripts/verify_prod_rls_posture.sh`는 28170~28173에서 prod compose API RLS 0행·catalog 쓰기 거부·수퍼유저 URL fail-closed를 최종 단정한다. Docker 실런과 `runtime-db`/`internal-alpha` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-553 메모리 접근 허용 UI (#645, 2026-07-22)
 
 - macOS 메모리 상세에 접근 허용 원장 목록, 활성 roster 기반 멤버·에이전트 피커, 기록을 보존하는 접근 회수 확인을 MOMO-549 GET/POST/DELETE 계약으로 연결했다. 회수 이력은 회색 `회수됨` 상태와 부여자·부여/회수 시각을 함께 표시한다.
