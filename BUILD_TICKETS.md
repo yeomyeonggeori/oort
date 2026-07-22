@@ -2372,13 +2372,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] verifier: 부여→서빙 필터 즉시 반영→회수→packet 재발급 제외
 
 ### MOMO-550 수용기준 — 에이전트 온보딩 UI: URL 붙여넣기 (⑫, 536 소비) `[runtime]`
-- [ ] 관리자 "에이전트 추가: URL" 문(from-card→능력/인증 요약 동의 화면→confirm), 실패 사유 인라인, 명부에 origin(card|local) 뱃지
-- [ ] macOS 우선(설정/멤버 디렉터리 진입), 한국어 라이트/다크 스냅샷, design-review Blocker 0
+- [x] 관리자 "에이전트 추가: URL" 문(from-card→능력/인증 요약 동의 화면→confirm), 실패 사유 인라인, 명부에 origin(card|local) 뱃지
+- [x] macOS 우선(설정/멤버 디렉터리 진입), 한국어 라이트/다크 스냅샷, design-review Blocker 0
 
 ### MOMO-551 수용기준 — 연동 설정 탭 실화: outbound 구독 (⑬, 535 소비) `[runtime]`
-- [ ] 채널/워크스페이스 설정의 웹훅 placeholder를 event_subscription CRUD 실물로(생성 시 1회성 시크릿 표시·재조회 불가 고지, 이벤트 종류 선택, disable 사유 표시)
-- [ ] 스냅샷+design-review Blocker 0
+- [x] 채널/워크스페이스 설정의 웹훅 placeholder를 event_subscription CRUD 실물로(생성 시 1회성 시크릿 표시·재조회 불가 고지, 이벤트 종류 선택, disable 사유 표시)
+- [x] 스냅샷+design-review Blocker 0
 
 ### MOMO-552 수용기준 — 메모리 주입 표시 (⑭, 545 소비, 소형) `[runtime]`
-- [ ] 에이전트 응답/실행 카드에 memory_delivery 소비("메모리 n건 반영" — included/injected 구분 어휘), packet 인스펙터 진입 연결
-- [ ] 스냅샷+design-review Blocker 0
+- [x] 에이전트 응답/실행 카드에 memory_delivery 소비("메모리 n건 반영" — included/injected 구분 어휘), packet 인스펙터 진입 연결
+- [x] 스냅샷+design-review Blocker 0
