@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-22 (Fable buzz 경쟁 분석) · block/buzz 4축 해부 — 정본 2026-07-22-buzz-competitive-analysis.md
+- 성재 발제: 어제(7/21) 공식 런칭한 block/buzz(Nostr relay 기반 agent-native 워크스페이스, HN 316pt) 0-tier 해부. 레포 전체 clone+병렬 4축(아키텍처/git 고고학/커뮤니티/UX) 분석 완료.
+- 판정: momo와 동일 신념(에이전트=1급 멤버·PG=SoT·키 비유입)의 거울상. 프로토콜은 momo 우위(seq/outbox/RLS를 buzz는 구조적으로 못 가짐), 가져갈 것은 로직 계층(오너 위임 캐스케이드·페이지 계약·wake-only 푸시·승인 체인)+상흔(에이전트 멘션 루프·킬스위치 미도달·RLS 공리 5·branch-skew 가드).
+- 커뮤니티 최대 쟁점=멀티 에이전트 권한 누출 질문에 buzz가 답 못함 — momo RLS FORCE+member 모델이 구조적 답(포지셔닝 전면 배치 제안).
+- 제안 액션 7건(§8, 전부 성재 결정 대기): RLS 공리 게이트·라이선스 게이트·branch-skew·에이전트 상호작용 안전 계약·UXUI Top5·포지셔닝·4~6주 후 재방문. 티켓/정본 반영 없음.
+
 ## 2026-07-22 (Fable 온보딩 배치 완주+Wave U 랜딩) · PLN-20260722-01 엔진 전장 종결, UXUI ⑨⑩⑪ main
 - **PLN-20260722-01 엔진 몫 완주(main cdd78d0)**: 534 어댑터·536 카드 온보딩·535 outbound·538 동봉 eve·548 추출 동의·**537 agent_profile(ADR-0131 Accepted 집행 — 프리앰블 우선·도구 교집합·model fail-closed·요청 덤프 주입 단정)** + sol 후속 545·546·547·539. 양문형(담아오기+만들기) 전체 개통.
 - **Wave U 완주**: #610(525)·#628(529 — Blocker 1+High 수정 fleet 반영)·#632(532 — Blocker 2+High 5 수정, 터미널 프리셋 정당 드리프트 재기록) track/uxui→main. 검수 함정 신규: worker/게이트 스냅샷 렌더 컨텍스트 차이(오케스트레이터 환경=기준), 설정 표면 확장發 프리셋 드리프트.
