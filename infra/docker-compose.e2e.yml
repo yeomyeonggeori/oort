@@ -231,7 +231,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers /tmp/momo-src/clients && cp -Rp /workspace/workers/AgentWorker /tmp/momo-src/workers/AgentWorker && cp -Rp /workspace/clients/Core /tmp/momo-src/clients/Core && cd /tmp/momo-src && swift run -j 8 --package-path workers/AgentWorker --scratch-path /tmp/momo-swiftpm/worker AgentWorker",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers /tmp/momo-src/clients /tmp/momo-src/services && cp -Rp /workspace/workers/AgentWorker /tmp/momo-src/workers/AgentWorker && cp -Rp /workspace/clients/Core /tmp/momo-src/clients/Core && cp -Rp /workspace/services/OutboundHTTPPolicy /tmp/momo-src/services/OutboundHTTPPolicy && cd /tmp/momo-src && swift run -j 8 --package-path workers/AgentWorker --scratch-path /tmp/momo-swiftpm/worker AgentWorker",
       ]
     environment:
       <<: *e2e-common-env
