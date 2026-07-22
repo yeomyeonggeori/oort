@@ -2303,6 +2303,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] mock tool_grants 제거→plugin_capability 실주입(부재=빈 배열 fail-closed, R2) / permission_basis 실검증(R1)
 - [x] AgentJobPayload memory_refs 가산(기존 필드 불변 — 양 경로 호환). `verify_context_packet.sh` PASS
 
+### MOMO-549 수용기준 — memory visibility grant CRUD REST `[runtime]`
+- [ ] `GET/POST/DELETE /v1/workspaces/:ws/memories/:memory/grants`: admin 또는 member-scope subject 본인 또는 agent-scope human owner, active member/agent grantee 검증, FORCE RLS 경유
+- [ ] 회수는 `revoked_at` 마킹(행 삭제 금지), 이미 회수된 grant 재회수는 audit 중복 없는 멱등 200. 부여/회수 `audit_log` + OpenAPI 동기화
+- [ ] `verify_memory_grant.sh`: 부여 즉시 migration 030 검색 가시 → 회수 후 비가시·packet 재발급 `memory_refs` 제외 → RLS 격리 → 비권한자 403
+
 ### MOMO-530 수용기준 — work tool gateway 노출 `[runtime]`
 - [x] gateway 에이전트 tool_call → work.control 원장 경로(승인·host 라우팅·감사 무변경 재사용), events 계약 가산(rate limit 내)
 - [x] gateway spawn→승인→dispatch→ack verifier + worker 경로 회귀

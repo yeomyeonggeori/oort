@@ -38,6 +38,11 @@ struct PutMemoryExternalProviderConsentRequest: Decodable, Sendable {
     let consented: Bool
 }
 
+struct MemoryVisibilityGrantRequest: Decodable, Sendable {
+    let granteeKind: String
+    let granteeId: UUID
+}
+
 struct MemorySourceRefDTO: Codable, Sendable, Equatable {
     let messageId: String
     let channelId: String
@@ -109,6 +114,25 @@ struct MemoryExternalProviderConsentResponse: ResponseEncodable {
     let memoryExternalProviderConsent: MemoryExternalProviderConsentDTO
 }
 
+struct MemoryVisibilityGrantDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let id: String
+    let workspaceId: String
+    let memoryId: String
+    let granteeKind: String
+    let granteeId: String
+    let grantedBy: String
+    let createdAtMs: Int64
+    let revokedAtMs: Int64?
+}
+
+struct MemoryVisibilityGrantResponse: ResponseEncodable {
+    let grant: MemoryVisibilityGrantDTO
+}
+
+struct MemoryVisibilityGrantPageResponse: ResponseEncodable {
+    let grants: [MemoryVisibilityGrantDTO]
+}
+
 /// ADR-0129 Memory Plane CRUD and lifecycle surface.
 ///
 /// All access runs through the ordinary tenant transaction. Source rows are
@@ -132,6 +156,9 @@ struct MemoryRoutes: Sendable {
         group.post("/v1/workspaces/:ws/memories", use: create)
         group.patch("/v1/workspaces/:ws/memories/:memory", use: update)
         group.post("/v1/workspaces/:ws/memories/:memory/invalidate", use: invalidate)
+        group.get("/v1/workspaces/:ws/memories/:memory/grants", use: listGrants)
+        group.post("/v1/workspaces/:ws/memories/:memory/grants", use: grantVisibility)
+        group.delete("/v1/workspaces/:ws/memories/:memory/grants", use: revokeVisibility)
         group.delete("/v1/workspaces/:ws/memories", use: disableAndDeleteAll)
         group.get("/v1/workspaces/:ws/memory-policy", use: getPolicy)
         group.put("/v1/workspaces/:ws/memory-policy", use: putPolicy)
@@ -549,6 +576,149 @@ struct MemoryRoutes: Sendable {
     }
 
     @Sendable
+    func listGrants(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let (principal, workspaceID) = try Self.scope(context)
+        let memoryID = try Self.memoryID(context)
+        let grants = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            try await Self.requireGrantManager(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                memoryID: memoryID, principal: principal
+            )
+            let rows = try await conn.query(
+                """
+                SELECT id, grantee_kind, grantee_id, granted_by, created_at, revoked_at
+                  FROM memory_visibility_grant
+                 WHERE workspace_id = \(workspaceID) AND memory_id = \(memoryID)
+                 ORDER BY revoked_at NULLS FIRST, created_at DESC, id
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.map {
+                try Self.decodeGrant($0, workspaceID: workspaceID, memoryID: memoryID)
+            }
+        }
+        return try MemoryVisibilityGrantPageResponse(grants: grants)
+            .response(from: request, context: context)
+    }
+
+    @Sendable
+    func grantVisibility(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let (principal, workspaceID) = try Self.scope(context)
+        let memoryID = try Self.memoryID(context)
+        let input = try await request.decode(as: MemoryVisibilityGrantRequest.self, context: context)
+        let granteeKind = try Self.validatedGranteeKind(input.granteeKind)
+
+        let grant = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            try await Self.requireGrantManager(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                memoryID: memoryID, principal: principal, forUpdate: true
+            )
+            try await Self.requireActiveGrantee(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                granteeKind: granteeKind, granteeID: input.granteeId
+            )
+            let changedRows = try await conn.query(
+                """
+                INSERT INTO memory_visibility_grant
+                  (workspace_id, memory_id, grantee_kind, grantee_id, granted_by)
+                VALUES
+                  (\(workspaceID), \(memoryID), \(granteeKind),
+                   \(input.granteeId), \(principal.memberID))
+                ON CONFLICT (memory_id, grantee_kind, grantee_id) DO UPDATE
+                  SET granted_by = EXCLUDED.granted_by,
+                      created_at = clock_timestamp(),
+                      revoked_at = NULL
+                  WHERE memory_visibility_grant.revoked_at IS NOT NULL
+                RETURNING id, grantee_kind, grantee_id, granted_by, created_at, revoked_at
+                """,
+                logger: db.logger
+            ).collect()
+            if let row = changedRows.first {
+                let grant = try Self.decodeGrant(
+                    row, workspaceID: workspaceID, memoryID: memoryID
+                )
+                try await Self.recordGrantAudit(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    memoryID: memoryID, grant: grant, principal: principal,
+                    action: "memory.visibility_grant.granted"
+                )
+                return grant
+            }
+            return try await Self.loadGrant(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                memoryID: memoryID, granteeKind: granteeKind,
+                granteeID: input.granteeId
+            )
+        }
+        return try MemoryVisibilityGrantResponse(grant: grant)
+            .response(from: request, context: context)
+    }
+
+    @Sendable
+    func revokeVisibility(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let (principal, workspaceID) = try Self.scope(context)
+        let memoryID = try Self.memoryID(context)
+        let input = try await request.decode(as: MemoryVisibilityGrantRequest.self, context: context)
+        let granteeKind = try Self.validatedGranteeKind(input.granteeKind)
+
+        let grant = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            try await Self.requireGrantManager(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                memoryID: memoryID, principal: principal, forUpdate: true
+            )
+            let rows = try await conn.query(
+                """
+                SELECT id, grantee_kind, grantee_id, granted_by, created_at, revoked_at
+                  FROM memory_visibility_grant
+                 WHERE workspace_id = \(workspaceID)
+                   AND memory_id = \(memoryID)
+                   AND grantee_kind = \(granteeKind)
+                   AND grantee_id = \(input.granteeId)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "memory visibility grant not found")
+            }
+            var grant = try Self.decodeGrant(
+                row, workspaceID: workspaceID, memoryID: memoryID
+            )
+            if grant.revokedAtMs == nil {
+                guard let grantID = UUID(uuidString: grant.id) else {
+                    throw HTTPError(
+                        .internalServerError,
+                        message: "invalid memory visibility grant projection"
+                    )
+                }
+                let updatedRows = try await conn.query(
+                    """
+                    UPDATE memory_visibility_grant
+                       SET revoked_at = clock_timestamp()
+                     WHERE workspace_id = \(workspaceID) AND id = \(grantID)
+                    RETURNING id, grantee_kind, grantee_id, granted_by, created_at, revoked_at
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let updated = updatedRows.first else {
+                    throw HTTPError(.internalServerError, message: "memory visibility grant revoke failed")
+                }
+                grant = try Self.decodeGrant(
+                    updated, workspaceID: workspaceID, memoryID: memoryID
+                )
+                try await Self.recordGrantAudit(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    memoryID: memoryID, grant: grant, principal: principal,
+                    action: "memory.visibility_grant.revoked"
+                )
+            }
+            return grant
+        }
+        return try MemoryVisibilityGrantResponse(grant: grant)
+            .response(from: request, context: context)
+    }
+
+    @Sendable
     func getPolicy(_ request: Request, context: AppRequestContext) async throws -> Response {
         let (principal, workspaceID) = try Self.scope(context)
         let policy = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
@@ -911,6 +1081,179 @@ struct MemoryRoutes: Sendable {
         if let row = rows.first, try !row.decode(Bool.self) {
             throw HTTPError(.conflict, message: "workspace memory is disabled")
         }
+    }
+
+    private static func requireGrantManager(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        memoryID: UUID,
+        principal: AuthPrincipal,
+        forUpdate: Bool = false
+    ) async throws {
+        let role = try await WorkspaceAuthorization.requireMember(
+            conn: conn, logger: logger, principal: principal
+        )
+        let rows: [PostgresRow]
+        if forUpdate {
+            rows = try await conn.query(
+                """
+                SELECT mi.scope, mi.subject_member_id, a.owner_human_id
+                  FROM memory_item mi
+                  LEFT JOIN agent a
+                    ON a.workspace_id = mi.workspace_id
+                   AND a.member_id = mi.agent_member_id
+                 WHERE mi.workspace_id = \(workspaceID) AND mi.id = \(memoryID)
+                 FOR UPDATE OF mi
+                """,
+                logger: logger
+            ).collect()
+        } else {
+            rows = try await conn.query(
+                """
+                SELECT mi.scope, mi.subject_member_id, a.owner_human_id
+                  FROM memory_item mi
+                  LEFT JOIN agent a
+                    ON a.workspace_id = mi.workspace_id
+                   AND a.member_id = mi.agent_member_id
+                 WHERE mi.workspace_id = \(workspaceID) AND mi.id = \(memoryID)
+                """,
+                logger: logger
+            ).collect()
+        }
+        guard let row = rows.first else {
+            throw HTTPError(.notFound, message: "memory not found")
+        }
+        let (scope, subjectMemberID, agentOwnerID) =
+            try row.decode((String, UUID?, UUID?).self)
+        guard canManageGrant(
+            role: role, scope: scope, actorMemberID: principal.memberID,
+            subjectMemberID: subjectMemberID, agentOwnerID: agentOwnerID
+        ) else {
+            throw HTTPError(
+                .forbidden,
+                message: "memory visibility grants require its scope subject or workspace admin"
+            )
+        }
+    }
+
+    static func canManageGrant(
+        role: WorkspaceRole,
+        scope: String,
+        actorMemberID: UUID,
+        subjectMemberID: UUID?,
+        agentOwnerID: UUID?
+    ) -> Bool {
+        if role.isAdmin { return true }
+        switch scope {
+        case "member": return subjectMemberID == actorMemberID
+        case "agent": return agentOwnerID == actorMemberID
+        default: return false
+        }
+    }
+
+    static func validatedGranteeKind(_ raw: String) throws -> String {
+        guard raw == "member" || raw == "agent" else {
+            throw HTTPError(.badRequest, message: "granteeKind must be member or agent")
+        }
+        return raw
+    }
+
+    private static func requireActiveGrantee(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        granteeKind: String,
+        granteeID: UUID
+    ) async throws {
+        let expectedMemberKind = granteeKind == "agent" ? "agent" : "human"
+        let rows = try await conn.query(
+            """
+            SELECT 1
+              FROM member
+             WHERE workspace_id = \(workspaceID)
+               AND id = \(granteeID)
+               AND kind = \(expectedMemberKind)::member_kind
+               AND status = 'active'
+               AND deleted_at IS NULL
+            """,
+            logger: logger
+        ).collect()
+        guard !rows.isEmpty else {
+            throw HTTPError(.badRequest, message: "active grant grantee not found")
+        }
+    }
+
+    private static func loadGrant(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        memoryID: UUID,
+        granteeKind: String,
+        granteeID: UUID
+    ) async throws -> MemoryVisibilityGrantDTO {
+        let rows = try await conn.query(
+            """
+            SELECT id, grantee_kind, grantee_id, granted_by, created_at, revoked_at
+              FROM memory_visibility_grant
+             WHERE workspace_id = \(workspaceID)
+               AND memory_id = \(memoryID)
+               AND grantee_kind = \(granteeKind)
+               AND grantee_id = \(granteeID)
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.internalServerError, message: "memory visibility grant upsert failed")
+        }
+        return try decodeGrant(row, workspaceID: workspaceID, memoryID: memoryID)
+    }
+
+    private static func decodeGrant(
+        _ row: PostgresRow,
+        workspaceID: UUID,
+        memoryID: UUID
+    ) throws -> MemoryVisibilityGrantDTO {
+        let (id, granteeKind, granteeID, grantedBy, createdAt, revokedAt) =
+            try row.decode((UUID, String, UUID, UUID, Date, Date?).self)
+        return MemoryVisibilityGrantDTO(
+            id: id.uuidString, workspaceId: workspaceID.uuidString,
+            memoryId: memoryID.uuidString, granteeKind: granteeKind,
+            granteeId: granteeID.uuidString, grantedBy: grantedBy.uuidString,
+            createdAtMs: epochMs(createdAt), revokedAtMs: revokedAt.map(epochMs)
+        )
+    }
+
+    private static func recordGrantAudit(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        memoryID: UUID,
+        grant: MemoryVisibilityGrantDTO,
+        principal: AuthPrincipal,
+        action: String
+    ) async throws {
+        guard let grantID = UUID(uuidString: grant.id),
+              let granteeID = UUID(uuidString: grant.granteeId)
+        else {
+            throw HTTPError(.internalServerError, message: "invalid memory visibility grant projection")
+        }
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, via_token_id, detail)
+            VALUES
+              (\(workspaceID), \(principal.memberID), \(granteeID), \(action),
+               'memory_visibility_grant', \(grantID), \(principal.tokenID),
+               jsonb_build_object(
+                 'schema', 'momo.memory.visibility_grant.v1',
+                 'memory_id', lower(\(memoryID)::text),
+                 'grantee_kind', \(grant.granteeKind),
+                 'grantee_id', lower(\(granteeID)::text)))
+            """,
+            logger: logger
+        )
     }
 
     private static func sourceChannels(

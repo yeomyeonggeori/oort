@@ -61,6 +61,43 @@ final class MemoryRoutesTests: XCTestCase {
         )
     }
 
+    func testVisibilityGrantKindValidationAcceptsOnlyMemberAndAgent() throws {
+        XCTAssertEqual(try MemoryRoutes.validatedGranteeKind("member"), "member")
+        XCTAssertEqual(try MemoryRoutes.validatedGranteeKind("agent"), "agent")
+        XCTAssertThrowsError(try MemoryRoutes.validatedGranteeKind("workspace"))
+        XCTAssertThrowsError(try MemoryRoutes.validatedGranteeKind("Agent"))
+    }
+
+    func testVisibilityGrantManagerAllowsAdminMemberSubjectAndAgentOwner() {
+        let actor = UUID(uuidString: "00000000-0000-7000-8000-000000000512")!
+        let other = UUID(uuidString: "00000000-0000-7000-8000-000000000513")!
+
+        XCTAssertTrue(MemoryRoutes.canManageGrant(
+            role: .admin, scope: "workspace", actorMemberID: actor,
+            subjectMemberID: nil, agentOwnerID: nil
+        ))
+        XCTAssertTrue(MemoryRoutes.canManageGrant(
+            role: .member, scope: "member", actorMemberID: actor,
+            subjectMemberID: actor, agentOwnerID: nil
+        ))
+        XCTAssertTrue(MemoryRoutes.canManageGrant(
+            role: .member, scope: "agent", actorMemberID: actor,
+            subjectMemberID: nil, agentOwnerID: actor
+        ))
+        XCTAssertFalse(MemoryRoutes.canManageGrant(
+            role: .member, scope: "member", actorMemberID: actor,
+            subjectMemberID: other, agentOwnerID: nil
+        ))
+        XCTAssertFalse(MemoryRoutes.canManageGrant(
+            role: .member, scope: "agent", actorMemberID: actor,
+            subjectMemberID: nil, agentOwnerID: other
+        ))
+        XCTAssertFalse(MemoryRoutes.canManageGrant(
+            role: .member, scope: "conversation", actorMemberID: actor,
+            subjectMemberID: actor, agentOwnerID: actor
+        ))
+    }
+
     func testGatewayMemoryDeliveryReceiptValidatesObservableFields() throws {
         let receipt = try JSONDecoder().decode(
             AgentMemoryDeliveryReceipt.self,
@@ -126,6 +163,7 @@ final class MemoryRoutesTests: XCTestCase {
         for table in [
             "memory_item", "memory_source_ref", "memory_lifecycle_event",
             "memory_candidate", "memory_extraction_cursor", "workspace_memory_policy",
+            "memory_visibility_grant",
         ] {
             XCTAssertTrue(migration.contains("'\(table)'"))
         }
@@ -193,6 +231,55 @@ final class MemoryRoutesTests: XCTestCase {
             "CREATE UNIQUE INDEX audit_log_memory_extraction_consent_required_once",
         ] {
             XCTAssertTrue(consentMigration.contains(contract), "missing \(contract)")
+        }
+    }
+
+    func testMemoryVisibilityGrantRoutesKeepLedgerAndServingContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let repositoryRoot = serverRoot.deletingLastPathComponent()
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MemoryRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        let openAPI = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("docs/api/openapi.yaml"),
+            encoding: .utf8
+        )
+        let verifier = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "scripts/verify_memory_grant.sh"
+            ),
+            encoding: .utf8
+        )
+
+        for contract in [
+            "memories/:memory/grants", "memory_visibility_grant",
+            "revoked_at = clock_timestamp()", "memory.visibility_grant.granted",
+            "memory.visibility_grant.revoked", "requireActiveGrantee",
+            "requireGrantManager",
+        ] {
+            XCTAssertTrue(routes.contains(contract), "missing route contract \(contract)")
+        }
+        XCTAssertFalse(routes.contains("DELETE FROM memory_visibility_grant"))
+        for contract in [
+            "/v1/workspaces/{workspaceId}/memories/{memoryId}/grants:",
+            "operationId: listMemoryVisibilityGrants",
+            "operationId: grantMemoryVisibility",
+            "operationId: revokeMemoryVisibility",
+            "MemoryVisibilityGrantRequest:",
+        ] {
+            XCTAssertTrue(openAPI.contains(contract), "missing OpenAPI contract \(contract)")
+        }
+        for contract in [
+            "28160", "memory_search_hybrid", "revoked visibility grant survived packet reissue",
+            "FORCE RLS exposed foreign visibility grant", "expected 403",
+        ] {
+            XCTAssertTrue(verifier.contains(contract), "missing verifier contract \(contract)")
         }
     }
 
