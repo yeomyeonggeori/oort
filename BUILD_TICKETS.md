@@ -2340,8 +2340,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `verify_event_subscription.sh` PASS(mock 수신기)
 
 ### MOMO-537 수용기준 — agent_profile 원장+간편 생성 (Wave C, **ADR-0131 Accepted 후**) `[runtime]`
-- [ ] agent_profile 원장(RLS)+CRUD+packet 주입(프리앰블 우선·도구 교집합·모델 허용목록 내) — 기존 필드 불변
-- [ ] verifier PASS + 528 회귀
+- [x] agent_profile 원장(RLS)+CRUD+packet 주입(프리앰블 우선·도구 교집합·모델 허용목록 내) — 기존 필드 불변
+- [x] verifier PASS + 528 회귀
 
 ### MOMO-538 수용기준 — 동봉 eve 옵션 프로파일 (Wave C, 534 후) `[runtime]`
 - [x] compose --profile eve(기본 오프·버전 고정·별도 DB world·어댑터 프리셋)+drift guard+RUN.md, 미기동 시 무영향
