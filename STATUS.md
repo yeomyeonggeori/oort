@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-551 발신 이벤트 구독 설정 (#639, 2026-07-22)
+
+- 채널 설정의 연동 탭에 워크스페이스 범위 발신 이벤트 구독을 연결했다. 목록은 이벤트 종류·URL·4종 상태·중지 사유를 표시하고, 생성·사용·중지·삭제를 MOMO-535 REST 계약으로 수행한다.
+- 생성 응답의 HMAC 시크릿은 별도 일회성 화면에서만 표시·복사하며 목록 DTO와 분리했다. 화면 이탈·세션 변경 뒤에는 폐기하고 재조회하지 않으며 모든 관리 요청은 `no-store` 경계를 사용한다.
+- macOS build, 모델·REST 집중 7 tests, 한국어 목록/일회성 시크릿 라이트·다크 snapshot 4종, design preflight 3종이 PASS했다. 인증된 실서버 owner/admin CRUD 왕복은 오케스트레이터 확인 전까지 `runtime-unverified`다. 트랙 기저에 커밋돼 있던 MOMO-529/525 충돌 마커는 양 기능을 보존하는 최소 합집합으로 해소했다.
+
 ## MOMO-548 외부 provider 추출 동의 게이트 (#625, 2026-07-22)
 
 - migration 035에 기존 memory enabled 정책과 별도인 워크스페이스 외부 provider 명시 동의(기본 false)를 추가했다. 서버 admin REST/OpenAPI는 동의·공유 provider trust 판정·최종 추출 허용 여부를 투영한다.
