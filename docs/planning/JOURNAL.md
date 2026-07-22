@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-23 (Fable Wave H 집행 — H1 완결+H2 서버 랜딩) · 554 Critical 해소, ADR-0132 Accepted 집행
+- **main 랜딩 5장**: 554(prod RLS 실집행 — 롤 4분리+부트 가드+웹훅 키 분리, verifier 3회차 PASS 28170s)·555(게이트 하드닝 3종)·556(SPM 라이선스 게이트+dependabot, 실검사 37deps/9roots PASS)·557(휴먼 취소 REST+pause, verifier 5/5 PASS 28184s — worker 취소 경계 실왕복 확증)·559(depth 전파+G2+D4 프리앰블, verifier PASS 28191s). 이슈 647~650·652 close.
+- **오케스트레이터 수리 6건**: .env.example 옛 태세 회귀 핫픽스(554 누락분 — 648 새 게이트가 검출), 650 migration 037→038 재부여(555 중복검사 실증), 취소 폴링 1s 스로틀(델타당 쿼리 결함), 557 verifier 3건(worker 소스빌드 기동 대기·run_id 대문자 조인·진단 덤프), 554 verifier preflight 정합, ENGINE_HANDOFF U″ ID 충돌 A-21/22/23 재부여.
+- ADR-0121 **증보 1 기안(Proposed)** — /metrics 노출 계약(D7~D10, 562 게이트). 패킷 승격: handoffs/2026-07-22-buzz-hardening-batch.md(발급 후 델타 5건).
+- 진행 중: 651(558 Stop/Pause UI, base track/uxui)·654(561 set-owner) worker 병렬. 다음: 654 랜딩→560→563, 651 랜딩(design-review), 이후 **리허설 Phase 1**(새 롤 태세 검증=공개 게이트). 성재 확인 대기: 내부 알파 재배포 여부(554 랜딩 조건), 557 run↔work_session 경계 해석, ADR-0121 증보 승인(→562).
+
 ## 2026-07-23 새벽 (Fable buzz→Wave H 기획) · PLN-20260722-02 plan-ready — 정본 2026-07-22-buzz-actions-plan.md + ADR-0132 Proposed
 - 성재 지시("제안 액션 고도화+인프라 도입 검토+셀프호스팅 비교+우선순위·배포 판단+프롬프트")로 2차 사실 감사 2건 완료: ①momo RLS/게이트 태세 실코드 감사 — **Critical: prod 템플릿 API 롤=수퍼유저 momo(RLS 무효)**, 휴먼 정지권 REST 부재+cancelRun TODO, depth 전파 미구현, 게이트 3갭(skew/중복번호/SPM) ②셀프호스팅 축별 비교 — momo 우위(백업/롤백/BM), buzz 우위(단일이미지/owner 1줄/day-2 CLI/관측/공개 릴리스).
 - 산출: Wave H 3단(H1 554~556 태세·게이트 / H2 ADR-0132 정지권·루프·발화계약 / H3 560~563 셀프호스팅 제품화)+Wave U″ 제안, worker 프롬프트 3종+오케스트레이터 인수 프롬프트 포함. ADR-0132 Proposed 기안.
