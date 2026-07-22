@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-23 (Fable Wave H 집행 2 — 558·561 랜딩) · H2 완결 + H3 첫 타
+- **main 랜딩 2장**: 561(migrate `set-owner` one-shot — env-only·재실행=회전+세션 revoke, verifier PASS 28200. "5분 설치 마지막 5분 DBA" 해소) / 558(Stop/Pause 클라 표면 — cancelRun TODO 해소·⌘.·시스템 라인 2종, macOS 522 tests 0실패). **ADR-0132 전 결정(D1~D5) 서버+클라 완결.**
+- 558 design-review(신선 컨텍스트): Blocker 0·High 3 → 오케스트레이터 직접 해소: ①⌘. 취소 타겟 스트리밍 최근성 결정화 ②취소 시스템 라인 행위자 표기 ③스냅샷 렌더 NSHostingView 교체(실컨트롤 픽셀 포함 재기록). Medium 3(토글 라벨·에러 토큰 통일·응답 검증 완화)도 반영.
+- 수리 2건 추가: 648 잠복 회귀(migrate 이미지에 중복번호 검사 스크립트 미동봉 — 컨테이너 127, 561 verifier가 검출) 핫픽스 / WorkConsole 터미널 프리셋 스냅샷 2장 선재 드리프트 재기록.
+- 남은 Wave H: 560(653)·563(655) 발급 대기(성재 브리핑 후), 562=ADR-0121 증보 승인 대기, 564=공개 전제. 다음 큰 단계: **리허설 Phase 1**.
+
 ## 2026-07-23 (Fable Wave H 집행 — H1 완결+H2 서버 랜딩) · 554 Critical 해소, ADR-0132 Accepted 집행
 - **main 랜딩 5장**: 554(prod RLS 실집행 — 롤 4분리+부트 가드+웹훅 키 분리, verifier 3회차 PASS 28170s)·555(게이트 하드닝 3종)·556(SPM 라이선스 게이트+dependabot, 실검사 37deps/9roots PASS)·557(휴먼 취소 REST+pause, verifier 5/5 PASS 28184s — worker 취소 경계 실왕복 확증)·559(depth 전파+G2+D4 프리앰블, verifier PASS 28191s). 이슈 647~650·652 close.
 - **오케스트레이터 수리 6건**: .env.example 옛 태세 회귀 핫픽스(554 누락분 — 648 새 게이트가 검출), 650 migration 037→038 재부여(555 중복검사 실증), 취소 폴링 1s 스로틀(델타당 쿼리 결함), 557 verifier 3건(worker 소스빌드 기동 대기·run_id 대문자 조인·진단 덤프), 554 verifier preflight 정합, ENGINE_HANDOFF U″ ID 충돌 A-21/22/23 재부여.
