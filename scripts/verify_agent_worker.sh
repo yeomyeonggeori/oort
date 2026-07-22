@@ -166,6 +166,10 @@ configure_verifier_identity() {
   GUARD_G2_AGENT_MSG2_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343948
   GUARD_G2_RESET_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343949
   GUARD_G2_RESET_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}34394a
+  A2A_AGENT_TOKEN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343950
+  A2A_MESSAGE_CLIENT_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343951
+  A2A_MISSING_RUN_CLIENT_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343952
+  A2A_AGENT_BEARER="momo_agent_v1.${WORKSPACE_ID}.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
   NON_MEMBER_AGENT_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343102
   NON_MEMBER_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343107
   SENTINEL_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343390
@@ -330,6 +334,7 @@ SQL
 
 TMP_ROOT=${TMPDIR:-/tmp}
 MOCK_LOG=${TMP_ROOT}/momo-mock-hermes-$$.log
+MOCK_REQUEST_DUMP=${TMP_ROOT}/momo-mock-hermes-requests-$$.jsonl
 WORKER_LOG=${TMP_ROOT}/momo-agent-worker-$$.log
 SERVER_LOG=${TMP_ROOT}/momo-cost-projection-server-$$.log
 RELAY_LOG=${TMP_ROOT}/momo-agent-worker-relay-$$.log
@@ -587,6 +592,8 @@ start_server
 start_relay
 
 echo "[agent-worker] starting mock hermes on ${HERMES_BASE_URL}"
+: >"$MOCK_REQUEST_DUMP"
+MOCK_HERMES_REQUEST_DUMP="$MOCK_REQUEST_DUMP" \
 python3 "$REPO_ROOT/scripts/mock_hermes.py" --host 127.0.0.1 --port "$HERMES_PORT" \
   >"$MOCK_LOG" 2>&1 &
 MOCK_PID=$!
@@ -958,7 +965,8 @@ SELECT ar.id
    AND trigger_message.client_msg_id IN (
      '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$EQUIV_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
      '$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
-     '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID'
+     '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID',
+     '$A2A_MESSAGE_CLIENT_ID', '$A2A_MISSING_RUN_CLIENT_ID'
    )
 ON CONFLICT DO NOTHING;
 
@@ -979,7 +987,8 @@ SELECT id FROM message
    AND client_msg_id IN (
      '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$EQUIV_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
      '$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
-     '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID'
+     '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID',
+     '$A2A_MESSAGE_CLIENT_ID', '$A2A_MISSING_RUN_CLIENT_ID'
    )
 ON CONFLICT DO NOTHING;
 
@@ -999,6 +1008,11 @@ DELETE FROM audit_log
        AND target_id IN (SELECT id FROM _momo_agent_worker_fixture_messages)
      )
    );
+DELETE FROM token
+ WHERE id = '$A2A_AGENT_TOKEN_ID'
+   AND workspace_id = '$WORKSPACE_ID'
+   AND actor_member_id = '$AGENT_ID'
+   AND label = 'MOMO-559 depth verifier';
 DELETE FROM outbox
  WHERE workspace_id = '$WORKSPACE_ID'
    AND (
@@ -1068,6 +1082,19 @@ VALUES ('$AGENT_MEMBERSHIP_ID', '$WORKSPACE_ID', '$CHANNEL_ID', '$AGENT_ID', 'me
 ON CONFLICT (channel_id, member_id) DO UPDATE
   SET left_at = NULL,
       role = EXCLUDED.role;
+
+INSERT INTO token
+  (id, workspace_id, kind, actor_member_id, token_hash, scopes, label, created_by)
+VALUES
+  ('$A2A_AGENT_TOKEN_ID', '$WORKSPACE_ID', 'agent_bearer', '$AGENT_ID',
+   digest('$A2A_AGENT_BEARER', 'sha256'),
+   ARRAY['messages:read','messages:write']::text[],
+   'MOMO-559 depth verifier', '$HUMAN_ID')
+ON CONFLICT (id) DO UPDATE
+  SET token_hash = EXCLUDED.token_hash,
+      scopes = EXCLUDED.scopes,
+      revoked_at = NULL,
+      expires_at = NULL;
 
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('$NON_MEMBER_AGENT_ID', '$WORKSPACE_ID', 'agent', 'active',
@@ -1325,6 +1352,75 @@ fi
 
 echo "[agent-worker] success path verified: REST mention -> agent_job -> agent.partial/tool_call + final channel message.new + usage_ledger + budget_window + cost_projection"
 verify_cost_projection_endpoint
+
+# ADR-0132 D3/D4/D5: exercise the real final write/consume path. Agent-authored
+# mentions must be run-bound, inherit parent depth+1 into both ledgers, and
+# deliver the server D4 preamble to the provider ahead of any profile text.
+A2A_BODY="@$AGENT_HANDLE MOMO-559 depth and publication policy"
+MISSING_RUN_PAYLOAD=$(jq -cn --arg client "$A2A_MISSING_RUN_CLIENT_ID" --arg body "$A2A_BODY" \
+  '{clientMsgId:$client,type:"text",body:$body}')
+MISSING_RUN_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $A2A_AGENT_BEARER" \
+  -H 'Content-Type: application/json' -d "$MISSING_RUN_PAYLOAD" \
+  "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/$CHANNEL_ID/messages")
+[ "$MISSING_RUN_STATUS" = "400" ] || {
+  echo "[agent-worker] agent mention without source run was not rejected (HTTP $MISSING_RUN_STATUS)" >&2
+  exit 1
+}
+
+A2A_PAYLOAD=$(jq -cn --arg client "$A2A_MESSAGE_CLIENT_ID" --arg body "$A2A_BODY" --arg run "$RUN_ID" \
+  '{clientMsgId:$client,type:"text",body:$body,runId:$run}')
+A2A_SEND_JSON=$(curl -fsS \
+  -H "Authorization: Bearer $A2A_AGENT_BEARER" \
+  -H 'Content-Type: application/json' -d "$A2A_PAYLOAD" \
+  "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/$CHANNEL_ID/messages")
+A2A_MESSAGE_ID=$(printf '%s' "$A2A_SEND_JSON" | jq -er '.id')
+A2A_CHILD_RUN_ID=$(psql_scalar "SELECT id::text FROM agent_run WHERE trigger_message_id='$A2A_MESSAGE_ID' AND agent_member_id='$AGENT_ID';")
+A2A_LEDGER_OK=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$A2A_CHILD_RUN_ID' AND parent_run_id='$RUN_ID' AND depth=(SELECT depth+1 FROM agent_run WHERE id='$RUN_ID') AND lower(input->>'parent_run_id')=lower('$RUN_ID') AND (input->>'depth')::int=depth;")
+A2A_PAYLOAD_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('$A2A_CHILD_RUN_ID') AND (payload->>'depth')::int=1 AND payload->>'system_prompt' LIKE '%Publication policy for every turn%' AND position('Publish only when this turn adds new information' in payload->>'system_prompt') < position('Verifier-owned AgentWorker fixture' in payload->>'system_prompt');")
+[ "$A2A_LEDGER_OK" = "1" ] && [ "$A2A_PAYLOAD_OK" = "1" ] || {
+  echo "[agent-worker] depth causality or server D4 payload projection failed" >&2
+  printf 'message=%s child=%s ledger=%s payload=%s\n' "$A2A_MESSAGE_ID" "$A2A_CHILD_RUN_ID" "$A2A_LEDGER_OK" "$A2A_PAYLOAD_OK" >&2
+  exit 1
+}
+
+D4_CONSUMED=0
+deadline=$(($(date +%s) + 60))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if python3 - "$MOCK_REQUEST_DUMP" "$A2A_BODY" <<'PY'
+import json, pathlib, sys
+path, trigger = pathlib.Path(sys.argv[1]), sys.argv[2]
+if not path.exists():
+    raise SystemExit(1)
+for line in path.read_text(encoding="utf-8").splitlines():
+    request = json.loads(line)
+    messages = request.get("messages") or []
+    if not any(trigger in str(item.get("content") or "") for item in messages):
+        continue
+    if not messages or messages[0].get("role") != "system":
+        raise SystemExit(2)
+    system = str(messages[0].get("content") or "")
+    required = [
+        "Publish only when this turn adds new information",
+        "If a human asked a question, you must respond",
+        "silence is an explicit successful outcome",
+        "Never publish a bare acknowledgement",
+        'Does this message add new information to the thread?',
+    ]
+    raise SystemExit(0 if all(value in system for value in required) else 3)
+raise SystemExit(1)
+PY
+  then
+    D4_CONSUMED=1
+    break
+  fi
+  sleep 1
+done
+[ "$D4_CONSUMED" = "1" ] || {
+  echo "[agent-worker] final mock Hermes request did not consume the D4 preamble" >&2
+  exit 1
+}
+echo "[agent-worker] MOMO-559 depth parent+1, run-bound agent mention, and final D4 provider consumption verified"
 
 echo "[agent-worker] seeding approved deterministic resume fixture"
 psql_run <<SQL
@@ -1744,9 +1840,14 @@ wait_guard_trip() {
     BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('$guard_run_id') AND payload->'data'->'payload'->>'type'='system' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending','processing','done') AND last_error IS NULL;")
     JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('$guard_run_id') AND status='done';")
     NO_SPEND=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$guard_run_id';")
+    G2_NOTICE_OK=1
+    if [ "$guard_gate" = "G2" ]; then
+      G2_NOTICE_OK=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$guard_run_id' AND type='system' AND body LIKE '자동 응답 한도 도달 — 사람이 개입해야 계속합니다.%' AND EXISTS (SELECT 1 FROM outbox o WHERE o.kind='broadcast' AND lower(o.payload->'data'->'payload'->>'run_id')=lower('$guard_run_id') AND o.payload->'data'->'payload'->>'body'=message.body);")
+    fi
 
     if [ "$RUN_FAILED" = "1" ] && [ "$AUDIT_OK" = "1" ] && [ "$DEGRADED_OK" = "1" ] \
-      && [ "$BROADCAST_OK" = "1" ] && [ "$JOB_DONE" = "1" ] && [ "$NO_SPEND" = "0" ]; then
+      && [ "$BROADCAST_OK" = "1" ] && [ "$JOB_DONE" = "1" ] && [ "$NO_SPEND" = "0" ] \
+      && [ "$G2_NOTICE_OK" = "1" ]; then
       guard_ok=1
       break
     fi
@@ -1755,8 +1856,8 @@ wait_guard_trip() {
 
   if [ "$guard_ok" != "1" ]; then
     echo "[agent-worker] loop-guard $guard_label trip did not verify" >&2
-    printf 'run_failed=%s audit=%s degraded=%s broadcast=%s job_done=%s no_spend=%s\n' \
-      "${RUN_FAILED:-}" "${AUDIT_OK:-}" "${DEGRADED_OK:-}" "${BROADCAST_OK:-}" "${JOB_DONE:-}" "${NO_SPEND:-}" >&2
+    printf 'run_failed=%s audit=%s degraded=%s broadcast=%s job_done=%s no_spend=%s g2_notice=%s\n' \
+      "${RUN_FAILED:-}" "${AUDIT_OK:-}" "${DEGRADED_OK:-}" "${BROADCAST_OK:-}" "${JOB_DONE:-}" "${NO_SPEND:-}" "${G2_NOTICE_OK:-}" >&2
     tail -120 "$WORKER_LOG" >&2 || true
     exit 1
   fi

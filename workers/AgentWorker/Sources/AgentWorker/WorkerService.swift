@@ -807,13 +807,13 @@ struct WorkerService: Service {
     /// "how to proceed" tail must match what actually unblocks each gate —
     /// e.g. a G1 trip means another run is genuinely executing right now
     /// (approval-held runs no longer count), so re-mention after it finishes.
-    private static func guardTripMessage(gate: String, reason: String) -> String {
+    static func guardTripMessage(gate: String, reason: String) -> String {
         let prefix = "This agent run was stopped by loop-safety guard \(gate) before any provider call (no spend). \(reason)."
         switch gate {
         case "G1":
             return "\(prefix) Another run for this agent is still executing and was not interrupted; mention the agent again once it finishes."
         case "G2":
-            return "\(prefix) Send a human message in this channel to reset the auto-reply counter, then mention the agent again."
+            return "자동 응답 한도 도달 — 사람이 개입해야 계속합니다. \(prefix)"
         default:
             return "\(prefix) Mention the agent again to start a fresh run."
         }
