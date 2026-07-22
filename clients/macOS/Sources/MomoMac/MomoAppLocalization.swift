@@ -728,6 +728,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var outboundEvents: String {
+        switch language {
+        case .korean: return "발신 이벤트"
+        case .english: return "Outbound events"
+        }
+    }
+
     var webhookPlaceholderDetail: String {
         switch language {
         case .korean: return "이 워크스페이스에서는 아직 웹훅을 사용할 수 없습니다."
