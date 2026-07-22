@@ -283,18 +283,14 @@ WITH bumped AS (
   UPDATE channel_seq SET last_seq=last_seq+1
    WHERE workspace_id='$WS_ID' AND channel_id='$CHANNEL_ID'
   RETURNING last_seq
-), inserted AS (
-  INSERT INTO message
-    (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props)
-  SELECT '$WS_ID', '$CHANNEL_ID', last_seq,
-         (extract(epoch FROM clock_timestamp())*1000)::bigint, 0,
-         '$HUMAN_ID', 'text', 'MOMO-535 signed mention', '{}'::jsonb
-    FROM bumped
-  RETURNING id
 )
-UPDATE message
-   SET props=jsonb_build_object('mention_member_ids', jsonb_build_array('$HUMAN_ID'))
- WHERE id=(SELECT id FROM inserted)
+INSERT INTO message
+  (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props)
+SELECT '$WS_ID', '$CHANNEL_ID', last_seq,
+       (extract(epoch FROM clock_timestamp())*1000)::bigint, 0,
+       '$HUMAN_ID', 'text', 'MOMO-535 signed mention',
+       jsonb_build_object('mention_member_ids', jsonb_build_array('$HUMAN_ID'))
+  FROM bumped
 RETURNING id;
 SQL
 )"
