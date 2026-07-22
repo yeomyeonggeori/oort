@@ -8,6 +8,7 @@ import PostgresNIO
 ///   POST /v1/workspaces/{ws}/channels/{ch}/agent-runs
 ///   GET  /v1/workspaces/{ws}/channels/{ch}/agent-runs?type=work
 ///   GET  /v1/workspaces/{ws}/agent-runs/{run}
+///   POST /v1/workspaces/{ws}/agent-runs/{run}/cancel
 ///
 /// Work input is validated before a tenant transaction starts. The server only
 /// records and dispatches the run; execution remains on the BYOA gateway host.
@@ -19,6 +20,7 @@ struct AgentRunRoutes: Sendable {
         group.post("/v1/workspaces/:ws/channels/:ch/agent-runs", use: create)
         group.get("/v1/workspaces/:ws/channels/:ch/agent-runs", use: list)
         group.get("/v1/workspaces/:ws/agent-runs/:run", use: detail)
+        group.post("/v1/workspaces/:ws/agent-runs/:run/cancel", use: cancel)
     }
 
     @Sendable
@@ -82,6 +84,9 @@ struct AgentRunRoutes: Sendable {
                 agentMemberID: requestDTO.agentMemberId
             ) else {
                 return WorkRunCreationResult.agentNotFound
+            }
+            guard !agent.paused else {
+                return WorkRunCreationResult.agentPaused
             }
             guard agent.activeRuns < agent.maxConcurrentRuns else {
                 return WorkRunCreationResult.concurrencyLimit
@@ -201,6 +206,8 @@ struct AgentRunRoutes: Sendable {
             throw HTTPError(.forbidden, message: "not an active human channel member")
         case .agentNotFound:
             throw HTTPError(.notFound, message: "active channel agent not found")
+        case .agentPaused:
+            throw HTTPError(.conflict, message: "agent is paused")
         case .concurrencyLimit:
             throw HTTPError(.conflict, message: "agent concurrent run limit reached")
         case .idempotencyConflict:
@@ -303,6 +310,184 @@ struct AgentRunRoutes: Sendable {
         return try row.run.response(from: request, context: context)
     }
 
+    @Sendable
+    func cancel(_ request: Request, context: AppRequestContext) async throws -> AgentRunCancelResponse {
+        let principal = try Self.requireHumanPrincipal(context)
+        let workspaceID = try Self.workspaceScope(context, principal: principal)
+        let runID = try Self.runID(context)
+
+        let result = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT r.channel_id, r.agent_member_id, r.status::text,
+                       EXISTS (
+                         SELECT 1 FROM membership ms
+                          WHERE ms.workspace_id = \(workspaceID)
+                            AND ms.channel_id = r.channel_id
+                            AND ms.member_id = \(principal.memberID)
+                            AND ms.left_at IS NULL
+                       ) AS can_cancel
+                  FROM agent_run r
+                 WHERE r.workspace_id = \(workspaceID) AND r.id = \(runID)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return AgentRunCancelResult.notFound }
+            let (channelID, agentMemberID, status, canCancel) = try row.decode(
+                (UUID, UUID, String, Bool).self
+            )
+            guard canCancel else { return AgentRunCancelResult.forbidden }
+            guard status == "cancelled" || Self.isCancellableRunStatus(status) else {
+                return AgentRunCancelResult.conflict(status: status)
+            }
+
+            let sessionRows = try await conn.query(
+                """
+                SELECT DISTINCT wc.session_id
+                  FROM audit_log al
+                  JOIN work_control wc
+                    ON wc.workspace_id = al.workspace_id
+                   AND wc.id = al.target_id
+                   AND al.target_type = 'work_control'
+                 WHERE al.workspace_id = \(workspaceID)
+                   AND al.run_id = \(runID)
+                   AND wc.session_id IS NOT NULL
+                 ORDER BY wc.session_id
+                """,
+                logger: db.logger
+            ).collect()
+            let linkedSessionIDs = try sessionRows.map { try $0.decode(UUID.self) }
+            if status == "cancelled" {
+                return .cancelled(linkedSessionIDs: linkedSessionIDs)
+            }
+
+            let linkedSessionsJSON = Self.jsonString(
+                linkedSessionIDs.map { $0.uuidString.lowercased() }
+            )
+            _ = try await conn.query(
+                """
+                UPDATE agent_run
+                   SET status = 'cancelled',
+                       error = jsonb_build_object(
+                         'code', 'human_cancelled',
+                         'cancelled_by', \(principal.memberID),
+                         'linked_work_session_ids', \(linkedSessionsJSON)::jsonb,
+                         'work_sessions_terminated', false
+                       ),
+                       updated_at = now(), finished_at = now()
+                 WHERE workspace_id = \(workspaceID) AND id = \(runID)
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                UPDATE outbox
+                   SET status = 'done', processed_at = now(),
+                       last_error = 'human cancelled agent run'
+                 WHERE workspace_id = \(workspaceID)
+                   AND kind = 'agent_job' AND status = 'pending'
+                   AND payload->>'run_id' = \(runID.uuidString)
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                UPDATE approval
+                   SET status = 'cancelled', decided_at = now(),
+                       decision_reason = 'agent run cancelled by human'
+                 WHERE workspace_id = \(workspaceID)
+                   AND run_id = \(runID) AND status = 'pending'
+                """,
+                logger: db.logger
+            )
+
+            let hlcTs = Int64(Date().timeIntervalSince1970 * 1_000)
+            let props = Self.jsonString([
+                "kind": "agent_run_cancelled",
+                "run_id": runID.uuidString.lowercased(),
+                "agent_member_id": agentMemberID.uuidString.lowercased(),
+                "cancelled_by": principal.memberID.uuidString.lowercased(),
+                "linked_work_session_ids": linkedSessionIDs.map { $0.uuidString.lowercased() },
+                "work_sessions_terminated": false,
+            ])
+            let messageRows = try await conn.query(
+                """
+                WITH bumped AS (
+                  UPDATE channel_seq SET last_seq = last_seq + 1
+                   WHERE workspace_id = \(workspaceID) AND channel_id = \(channelID)
+                  RETURNING last_seq AS seq
+                )
+                INSERT INTO message
+                  (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                   author_member_id, type, body, props, run_id)
+                SELECT \(workspaceID), \(channelID), b.seq, \(hlcTs), 0,
+                       \(principal.memberID), 'system'::message_type,
+                       '실행이 사람에 의해 중지되었습니다.', \(props)::jsonb, \(runID)
+                  FROM bumped b
+                RETURNING id, seq
+                """,
+                logger: db.logger
+            ).collect()
+            guard let messageRow = messageRows.first else {
+                throw HTTPError(.internalServerError, message: "cancel system line insert failed")
+            }
+            let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+            let broadcast = Self.cancelMessageBroadcastPayload(
+                workspaceID: workspaceID, channelID: channelID,
+                messageID: messageID, seq: seq, authorMemberID: principal.memberID,
+                runID: runID, propsJSON: props, hlcTs: hlcTs
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO outbox (workspace_id, kind, method, payload, partition_key)
+                VALUES (\(workspaceID), 'broadcast', 'publish',
+                        \(broadcast)::jsonb, \(channelID))
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, run_id, detail)
+                VALUES
+                  (\(workspaceID), \(principal.memberID), \(agentMemberID),
+                   'agent.run.cancelled', 'agent_run', \(runID),
+                   \(principal.tokenID), \(runID),
+                   jsonb_build_object(
+                     'schema', 'momo.agent_run.cancelled.v1',
+                     'previous_status', \(status),
+                     'linked_work_session_ids', \(linkedSessionsJSON)::jsonb,
+                     'work_sessions_terminated', false,
+                     'system_message_id', \(messageID)
+                   ))
+                """,
+                logger: db.logger
+            )
+            return .cancelled(linkedSessionIDs: linkedSessionIDs)
+        }
+
+        switch result {
+        case .notFound:
+            throw HTTPError(.notFound, message: "agent run not found")
+        case .forbidden:
+            throw HTTPError(.forbidden, message: "active human channel member required")
+        case .conflict(let status):
+            throw HTTPError(.conflict, message: "agent run is already \(status)")
+        case .cancelled(let linkedSessionIDs):
+            return AgentRunCancelResponse(
+                runId: runID.uuidString.lowercased(), status: "cancelled",
+                linkedWorkSessionIds: linkedSessionIDs.map { $0.uuidString.lowercased() },
+                workSessionsTerminated: false
+            )
+        }
+    }
+
+    static func isCancellableRunStatus(_ status: String) -> Bool {
+        ["queued", "running", "awaiting_approval", "paused"].contains(status)
+    }
+
     static func validatedLimit(_ raw: String?) -> Int {
         min(max(raw.flatMap(Int.init) ?? 50, 1), 200)
     }
@@ -327,7 +512,7 @@ struct AgentRunRoutes: Sendable {
     private static func requireHumanPrincipal(_ context: AppRequestContext) throws -> AuthPrincipal {
         let principal = try context.requirePrincipal()
         guard principal.kind == .human else {
-            throw HTTPError(.forbidden, message: "human member required to create work runs")
+            throw HTTPError(.forbidden, message: "human member required")
         }
         return principal
     }
@@ -342,6 +527,7 @@ struct AgentRunRoutes: Sendable {
         let rows = try await conn.query(
             """
             SELECT a.model, a.max_run_steps, a.max_concurrent_runs,
+                   COALESCE(ap.paused, false),
                    (
                      SELECT count(*)::int
                        FROM agent_run active
@@ -359,6 +545,8 @@ struct AgentRunRoutes: Sendable {
                AND ms.channel_id = \(channelID)
                AND ms.member_id = m.id
                AND ms.left_at IS NULL
+              LEFT JOIN agent_profile ap
+                ON ap.workspace_id = a.workspace_id AND ap.agent_member_id = a.member_id
              WHERE m.id = \(agentMemberID)
                AND m.workspace_id = \(workspaceID)
                AND m.kind = 'agent'
@@ -370,13 +558,14 @@ struct AgentRunRoutes: Sendable {
             logger: logger
         ).collect()
         guard let first = rows.first else { return nil }
-        let (model, maxRunSteps, maxConcurrentRuns, activeRuns) = try first.decode(
-            (String, Int, Int, Int).self
+        let (model, maxRunSteps, maxConcurrentRuns, paused, activeRuns) = try first.decode(
+            (String, Int, Int, Bool, Int).self
         )
         return EligibleWorkAgent(
             model: model,
             maxRunSteps: maxRunSteps,
             maxConcurrentRuns: maxConcurrentRuns,
+            paused: paused,
             activeRuns: activeRuns
         )
     }
@@ -561,6 +750,37 @@ struct AgentRunRoutes: Sendable {
             ],
             "version": jobID,
             "idempotency_key": "\(channel):agent_job:\(runID.uuidString)",
+        ])
+    }
+
+    private static func cancelMessageBroadcastPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        seq: Int64,
+        authorMemberID: UUID,
+        runID: UUID,
+        propsJSON: String,
+        hlcTs: Int64
+    ) -> String {
+        let channel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        return jsonString([
+            "channel": channel,
+            "data": [
+                "type": "message.new", "v": 1, "ts": hlcTs, "seq": seq,
+                "payload": [
+                    "id": messageID.uuidString, "channel_id": channelID.uuidString,
+                    "channelId": channelID.uuidString, "seq": seq, "type": "system",
+                    "body": "실행이 사람에 의해 중지되었습니다.",
+                    "props": jsonObject(propsJSON),
+                    "author_member_id": authorMemberID.uuidString,
+                    "authorMemberId": authorMemberID.uuidString,
+                    "run_id": runID.uuidString, "runId": runID.uuidString,
+                    "hlc_ts": hlcTs, "hlcTs": hlcTs, "hlc_count": 0, "hlcCount": 0,
+                ],
+            ],
+            "version": seq,
+            "idempotency_key": "\(channel):\(seq)",
         ])
     }
 
@@ -789,13 +1009,29 @@ private struct EligibleWorkAgent: Sendable {
     let model: String
     let maxRunSteps: Int
     let maxConcurrentRuns: Int
+    let paused: Bool
     let activeRuns: Int
 }
 
 private enum WorkRunCreationResult: Sendable {
     case forbidden
     case agentNotFound
+    case agentPaused
     case concurrencyLimit
     case idempotencyConflict
     case ready(run: AgentRunDTO, created: Bool)
+}
+
+private enum AgentRunCancelResult: Sendable {
+    case notFound
+    case forbidden
+    case conflict(status: String)
+    case cancelled(linkedSessionIDs: [UUID])
+}
+
+struct AgentRunCancelResponse: ResponseEncodable, Codable, Sendable {
+    let runId: String
+    let status: String
+    let linkedWorkSessionIds: [String]
+    let workSessionsTerminated: Bool
 }

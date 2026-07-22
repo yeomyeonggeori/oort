@@ -1409,6 +1409,7 @@ struct MessageRoutes: Sendable {
         let maxRunSteps: Int
         let isChannelMember: Bool
         let profileVersion: Int?
+        let paused: Bool
         let enabledTools: Set<String>?
         let ignoredModelPref: String?
     }
@@ -1459,6 +1460,15 @@ struct MessageRoutes: Sendable {
                 continue
             }
 
+            if agent.paused {
+                try await insertPausedMentionSystemLine(
+                    conn: conn, logger: logger, workspaceID: workspaceID,
+                    channelID: channelID, sourceMessageID: messageID,
+                    authorMemberID: authorMemberID, agent: agent
+                )
+                continue
+            }
+
             try await enqueueMentionJob(
                 conn: conn,
                 logger: logger,
@@ -1486,7 +1496,7 @@ struct MessageRoutes: Sendable {
             SELECT m.id, m.handle, m.display_name, a.model,
                    a.tool_schema::text, a.config::text, a.system_prompt, a.max_run_steps,
                    ap.instructions, ap.model_pref, ap.enabled_tools::text,
-                   ap.version, w.settings::text,
+                   ap.version, COALESCE(ap.paused, false), w.settings::text,
                    EXISTS (
                      SELECT 1
                        FROM membership ms
@@ -1511,9 +1521,9 @@ struct MessageRoutes: Sendable {
         return try rows.map { row in
             let (id, handle, displayName, baseModel, toolSchema, config, baseSystemPrompt,
                  maxRunSteps, profileInstructions, modelPref, enabledToolsJSON,
-                 profileVersion, workspaceSettingsJSON, isChannelMember) = try row.decode(
+                 profileVersion, paused, workspaceSettingsJSON, isChannelMember) = try row.decode(
                     (UUID, String, String, String, String, String, String?, Int,
-                     String?, String?, String?, Int?, String, Bool).self
+                     String?, String?, String?, Int?, Bool, String, Bool).self
                  )
             let modelResolution = resolveProfileModel(
                 baseModel: baseModel, modelPref: modelPref,
@@ -1543,10 +1553,79 @@ struct MessageRoutes: Sendable {
                 maxRunSteps: maxRunSteps,
                 isChannelMember: isChannelMember,
                 profileVersion: profileVersion,
+                paused: paused,
                 enabledTools: enabledTools,
                 ignoredModelPref: modelResolution.ignoredPreference
             )
         }
+    }
+
+    private static func insertPausedMentionSystemLine(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        sourceMessageID: UUID,
+        authorMemberID: UUID,
+        agent: AgentMentionCandidate
+    ) async throws {
+        let hlcTs = Int64(Date().timeIntervalSince1970 * 1_000)
+        let body = "\(agent.displayName)은(는) 현재 일시정지되어 있습니다."
+        let props: [String: Any] = [
+            "kind": "agent_paused",
+            "agent_member_id": agent.id.uuidString.lowercased(),
+            "source_message_id": sourceMessageID.uuidString.lowercased(),
+        ]
+        let propsJSON = jsonString(props)
+        let rows = try await conn.query(
+            """
+            WITH bumped AS (
+              UPDATE channel_seq SET last_seq = last_seq + 1
+               WHERE workspace_id = \(workspaceID) AND channel_id = \(channelID)
+              RETURNING last_seq AS seq
+            )
+            INSERT INTO message
+              (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+               author_member_id, type, body, props)
+            SELECT \(workspaceID), \(channelID), b.seq, \(hlcTs), 0,
+                   \(agent.id), 'system'::message_type, \(body), \(propsJSON)::jsonb
+              FROM bumped b
+            RETURNING id, seq
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.internalServerError, message: "paused-agent system line insert failed")
+        }
+        let (messageID, seq) = try row.decode((UUID, Int64).self)
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let payload = broadcastPayload(
+            centChannel: centChannel, messageID: messageID, channelID: channelID,
+            seq: seq, type: "system", body: body, authorMemberID: agent.id,
+            hlcTs: hlcTs, hlcCount: 0, rootID: nil, props: props
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox (workspace_id, kind, method, payload, partition_key)
+            VALUES (\(workspaceID), 'broadcast', 'publish', \(payload)::jsonb, \(channelID))
+            """,
+            logger: logger
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, detail)
+            VALUES
+              (\(workspaceID), \(authorMemberID), \(agent.id),
+               'agent.mention.paused', 'message', \(sourceMessageID),
+               jsonb_build_object(
+                 'schema', 'momo.agent.mention.paused.v1',
+                 'system_message_id', \(messageID)
+               ))
+            """,
+            logger: logger
+        )
     }
 
     static let agentProfilePolicyPreamble = """

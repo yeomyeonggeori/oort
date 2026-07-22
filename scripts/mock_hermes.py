@@ -29,6 +29,7 @@ MOCK_TEXT = "김인턴 mock reply: MOMO-004 SSE path verified."
 # verifiers can assert the assembled chat array (roles, history, budgeting).
 # Disabled by default — never writes anything unless the env var is present.
 REQUEST_DUMP_PATH = os.environ.get("MOCK_HERMES_REQUEST_DUMP") or None
+EVENT_DELAY_SECONDS = float(os.environ.get("MOCK_HERMES_EVENT_DELAY_SECONDS", "0.05"))
 MOCK_TOOL_ARGS = {
     "repo": "Dawn-kim-official/momo",
     "query": "MOMO-201 live tool-call fixture",
@@ -104,12 +105,12 @@ class MockHermesHandler(BaseHTTPRequestHandler):
         ]
         for chunk in chunks:
             self._write_event(self._stream_chunk(request, content=chunk))
-            time.sleep(0.05)
+            time.sleep(EVENT_DELAY_SECONDS)
 
         self._write_event(self._tool_call_chunk(request, arguments_prefix=True))
-        time.sleep(0.05)
+        time.sleep(EVENT_DELAY_SECONDS)
         self._write_event(self._tool_call_chunk(request, arguments_prefix=False))
-        time.sleep(0.05)
+        time.sleep(EVENT_DELAY_SECONDS)
         self._write_event(self._usage_chunk(request))
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()

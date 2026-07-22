@@ -3,6 +3,24 @@ import XCTest
 @testable import AgentWorker
 
 final class AgentWorkerTests: XCTestCase {
+    func testHumanCancellationGuardsExecutionResumeAndFinalCommit() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/AgentWorker/WorkerService.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: "isRunCancelled(").count - 1,
+            5,
+            "DB cancellation must be consumed before execution, during SSE, resume, and commit"
+        )
+        XCTAssertTrue(source.contains("FOR UPDATE"))
+        XCTAssertTrue(source.contains("status <> 'cancelled'"))
+        XCTAssertTrue(source.contains("cancelled run final message suppressed"))
+    }
+
     func testMicroUSDPricingUsesIntegerRounding() {
         XCTAssertEqual(
             CostAccounting.microUSD(tokens: 64, unitPriceText: "0.600000", rounding: .up),
