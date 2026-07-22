@@ -27,16 +27,19 @@ actor ProcessManager {
 
     private var templates: [String: CommandTemplate]
     private let outputDirectory: URL
+    private let hostEnvironment: [String: String]
     private let acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)?
     private var sessions: [UUID: ManagedProcess] = [:]
 
     init(
         templates: [String: CommandTemplate],
         outputDirectory: URL,
+        hostEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)? = nil
     ) {
         self.templates = templates
         self.outputDirectory = outputDirectory
+        self.hostEnvironment = hostEnvironment
         self.acpEventRelay = acpEventRelay
     }
 
@@ -62,7 +65,7 @@ actor ProcessManager {
                 let process = try HostPTYProcess.launch(
                     executable: template.executable,
                     arguments: template.arguments,
-                    environment: hostEnvironment()
+                    environment: childEnvironment(for: template)
                 )
                 process.onOutput { data in try? output.write(contentsOf: data) }
                 sessions[sessionID] = ManagedProcess(runtime: .pty(process), output: output)
@@ -82,14 +85,14 @@ actor ProcessManager {
                 }
                 let terminals = LocalPTYTerminalManager(
                     defaultWorkingDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
-                    baseEnvironment: hostEnvironment()
+                    baseEnvironment: childEnvironment(for: template)
                 )
                 let client = ACPClient(
                     command: ACPLaunchCommand(
                         executable: template.executable,
                         arguments: template.arguments,
                         workingDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
-                        environment: hostEnvironment()
+                        environment: childEnvironment(for: template)
                     ),
                     context: ACPHostContext(workSessionID: sessionID, channelID: channelID),
                     eventSink: sink,
@@ -187,7 +190,7 @@ actor ProcessManager {
         managed.exitCode = exitCode
     }
 
-    private func hostEnvironment() -> [String: String] {
-        ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("MOMO_WORKD_") }
+    private func childEnvironment(for template: CommandTemplate) -> [String: String] {
+        template.environmentPolicy.filtered(hostEnvironment)
     }
 }

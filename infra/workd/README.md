@@ -11,6 +11,16 @@ command key and arguments. Executable paths and optional
 `MOMO_WORKD_PROFILE_<TOOL_KEY>_{EXECUTABLE,ARGUMENTS_JSON}` overrides remain in
 the host's private environment; credentials are never catalog fields.
 
+Tool children receive an allowlisted environment by default: `PATH`, `HOME`,
+`USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`, `COLORTERM`, and `TMPDIR`.
+Add host-owned keys explicitly with comma-separated
+`MOMO_WORKD_ENV_PASSTHROUGH`. A profile `envPolicy.passthrough` narrows those
+host-approved key names for that tool; it cannot widen the host list. During
+migration only, the old broad inheritance can be enabled
+globally with `MOMO_WORKD_CHILD_ENV_MODE=legacy`, or per profile by setting
+`envPolicy.mode=legacy` and host-side `MOMO_WORKD_ALLOW_PROFILE_LEGACY_ENV=1`.
+`MOMO_WORKD_*` control values are never passed to tool children in any mode.
+
 The checked-in launchd and systemd files are templates consumed by
 `bootstrap.sh`. The bootstrap expects a binary compiled for the target OS and
 architecture, an HTTPS momo server, workspace UUID, and a one-time human access

@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-547 ACP/PTY 자식 env 스크럽 옵션 (#624, 2026-07-22)
+
+- WorkHostDaemon의 PTY·ACP·ACP terminal 자식 환경을 기본 allowlist(`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`, `COLORTERM`, `TMPDIR`)로 제한하고 `MOMO_WORKD_ENV_PASSTHROUGH`에 호스트 운영자가 명시한 이름만 추가한다. `MOMO_WORKD_*` 제어 변수는 항상 제외하며, 전역 legacy와 프로파일 legacy 모두 호스트의 명시적 옵트인이 필요하다.
+- migration 034에 값이 아닌 환경변수 이름만 담는 `work_tool_profile.env_policy` JSON object를 추가했다. 서버 CRUD·workd 투영·OpenAPI는 `mode`/`passthrough`만 최소 검증하며, 프로파일 정책은 호스트 패스스루 allowlist를 넓히지 않고 좁힐 수만 있다. 동시 MOMO-535가 사용할 수 있는 033은 비워 두었다.
+- WorkHostDaemon 15 tests(allowlist·패스스루 및 mock ACP 6 포함), MomoServer 161 tests, 전 9개 Swift 패키지 `swift build --disable-sandbox`, OpenAPI/YAML·bash 정적 검증은 PASS했다. 일반 `make build`는 관리형 환경의 중첩 `sandbox-exec` 거부로 코드 컴파일 전에 실패했다. `verify_work_tool_profile.sh`·기존 workd/acp verifier의 Docker 런타임 회귀는 오케스트레이터 수행 전까지 `runtime-unverified`다.
+
 ## MOMO-546 workd ACP 이벤트 서버 릴레이 (#623, 2026-07-22)
 
 - workd의 ACP sink를 mode 0600 raw JSONL + 서버 요약 relay 복합 sink로 바꾸고 progress/plan/승인 요청·결정/terminal 생성·종료를 기존 signed work-session PATCH로 보낸다. 서버는 신규 스키마·라우트 없이 세션 thread `message` 원장과 `message.new` + ACP envelope outbox를 한 트랜잭션에 투영한다.

@@ -202,7 +202,8 @@ final class ACPHostTests: XCTestCase {
         WorkToolProfile(
             id: UUID(), workspaceId: workspaceID, toolKey: "mock-acp", displayName: "Mock ACP",
             launchTemplate: WorkToolLaunchTemplate(command: "mock-acp", arguments: []),
-            tierDefaults: .object(["transport": .string(transport)]), enabled: true,
+            tierDefaults: .object(["transport": .string(transport)]),
+            envPolicy: .object([:]), enabled: true,
             createdBy: UUID(), updatedBy: UUID(), createdAtMs: 1, updatedAtMs: 1
         )
     }

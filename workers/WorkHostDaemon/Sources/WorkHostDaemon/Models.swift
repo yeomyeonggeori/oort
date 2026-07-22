@@ -70,6 +70,11 @@ enum JSONValue: Codable, Sendable, Equatable {
         guard case .string(let value) = self else { return nil }
         return value
     }
+
+    var arrayValue: [JSONValue]? {
+        guard case .array(let value) = self else { return nil }
+        return value
+    }
 }
 
 struct WorkControl: Codable, Sendable, Equatable {
@@ -116,6 +121,7 @@ struct WorkToolProfile: Codable, Sendable, Equatable {
     let displayName: String
     let launchTemplate: WorkToolLaunchTemplate
     let tierDefaults: JSONValue
+    let envPolicy: JSONValue
     let enabled: Bool
     let createdBy: UUID
     let updatedBy: UUID
