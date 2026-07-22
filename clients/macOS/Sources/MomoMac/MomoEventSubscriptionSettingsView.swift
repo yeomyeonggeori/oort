@@ -73,7 +73,7 @@ struct MomoEventSubscriptionSettingsView: View {
                     synchronizeNavigationLock()
                 }
             }
-            Button(copy.cancel, role: .cancel) { pendingDelete = nil }
+            Button(copy.keepSubscription, role: .cancel) { pendingDelete = nil }
         } message: {
             Text(copy.deleteConfirmationMessage)
         }
@@ -518,6 +518,7 @@ struct MomoEventSubscriptionCopy {
     var enableSubscription: String { isKorean ? "구독 사용" : "Enable subscription" }
     var disableSubscription: String { isKorean ? "구독 중지" : "Disable subscription" }
     var deleteSubscription: String { isKorean ? "구독 삭제" : "Delete subscription" }
+    var keepSubscription: String { isKorean ? "삭제하지 않기" : "Keep subscription" }
     var deleteConfirmationTitle: String { isKorean ? "이 구독을 삭제할까요?" : "Delete this subscription?" }
     var deleteConfirmationMessage: String { isKorean ? "외부 전송이 즉시 중단되며 이 작업은 되돌릴 수 없습니다." : "Outbound delivery stops immediately. This action cannot be undone." }
     var oneTimeTitle: String { isKorean ? "서명 비밀을 지금 저장하세요" : "Save the signing secret now" }
