@@ -330,6 +330,9 @@ public actor ACPClient {
             workingDirectory: object["cwd"]?.stringValue,
             environment: environment
         ))
+        await eventSink.emit(ACPEventProjection.terminal(
+            event: "created", context: context, nowMs: nowMs()
+        ))
         return .object(["terminalId": .string(terminalID)])
     }
 
@@ -346,6 +349,9 @@ public actor ACPClient {
 
     private func terminalWait(_ params: ACPValue) async throws -> ACPValue {
         let code = try await terminalHandler.waitForExit(terminalID: terminalID(from: params))
+        await eventSink.emit(ACPEventProjection.terminal(
+            event: "ended", exitCode: code, context: context, nowMs: nowMs()
+        ))
         return .object(["exitCode": .int(code)])
     }
 

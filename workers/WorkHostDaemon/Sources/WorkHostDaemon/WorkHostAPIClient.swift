@@ -1,4 +1,5 @@
 import Foundation
+import MomoACPHost
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -39,6 +40,7 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
         let errorLabel: String?
     }
     private struct EndSessionRequest: Encodable { let status = "ended"; let exitCode: Int? }
+    private struct ACPEventRequest: Encodable { let event: ACPProjectedEvent }
 
     private let config: WorkdConfig
     private let signer: WorkHostSigner
@@ -168,6 +170,19 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
             hostID: hostID,
             body: EndSessionRequest(exitCode: exitCode)
+        )
+    }
+
+    func relayACPEvent(
+        hostID: UUID,
+        sessionID: UUID,
+        event: ACPProjectedEvent
+    ) async throws {
+        let _: SessionResponse = try await sendSigned(
+            method: "PATCH",
+            path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
+            hostID: hostID,
+            body: ACPEventRequest(event: event)
         )
     }
 

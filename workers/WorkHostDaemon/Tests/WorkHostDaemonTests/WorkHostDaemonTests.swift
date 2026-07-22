@@ -1,5 +1,6 @@
 @preconcurrency import Crypto
 import Foundation
+import MomoACPHost
 import Logging
 import XCTest
 @testable import WorkHostDaemon
@@ -273,5 +274,12 @@ actor MockWorkHostAPI: WorkHostAPI {
     }
     func endSession(hostID: UUID, sessionID: UUID, exitCode: Int?) async throws {
         events.append("end:\(sessionID):\(exitCode.map(String.init) ?? "nil")")
+    }
+    func relayACPEvent(
+        hostID: UUID,
+        sessionID: UUID,
+        event: ACPProjectedEvent
+    ) async throws {
+        events.append("acp:\(sessionID):\(event.type)")
     }
 }

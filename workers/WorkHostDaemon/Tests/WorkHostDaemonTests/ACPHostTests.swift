@@ -28,13 +28,15 @@ final class ACPHostTests: XCTestCase {
         let events = await sink.events
         XCTAssertEqual(events.map(\.type), [
             "agent.partial", "agent.status", "approval.requested",
-            "approval.decided", "agent.partial",
+            "approval.decided", "agent.status", "agent.status", "agent.partial",
         ])
         XCTAssertEqual(events[0].payload.objectValue?["text_delta"]?.stringValue, "mock progress")
         XCTAssertEqual(events[1].payload.objectValue?["has_plan"], .bool(true))
         XCTAssertNotNil(events[1].payload.objectValue?["_meta"]?.objectValue?["acp"])
         XCTAssertEqual(events[3].payload.objectValue?["status"]?.stringValue, "approved")
-        XCTAssertEqual(events[4].payload.objectValue?["text_delta"]?.stringValue, "approved branch executed")
+        XCTAssertEqual(events[4].payload.objectValue?["terminal_event"]?.stringValue, "created")
+        XCTAssertEqual(events[5].payload.objectValue?["terminal_event"]?.stringValue, "ended")
+        XCTAssertEqual(events[6].payload.objectValue?["text_delta"]?.stringValue, "approved branch executed")
         let permissionRequests = await permissions.requests
         let terminalCalls = await terminals.calls
         XCTAssertEqual(permissionRequests.count, 1)
@@ -73,6 +75,59 @@ final class ACPHostTests: XCTestCase {
         XCTAssertThrowsError(try WorkdConfig.commandTemplates(profiles: [unknown], localOverrides: [:]))
     }
 
+    func testCompositeSinkKeepsRawLocalEventAndRelayRetriesOnlySummary() async throws {
+        let local = EventRecorder()
+        let relay = RelayRecorder(failuresBeforeSuccess: 2)
+        let server = ACPServerRelaySink(
+            sender: { event in try await relay.send(event) },
+            retryDelay: { _ in }
+        )
+        let composite = ACPCompositeEventSink([local, server])
+        let event = ACPProjectedEvent(
+            id: UUID(uuidString: "00000000-0000-7000-8000-000000000546")!,
+            type: "agent.partial",
+            timestampMs: 1,
+            payload: .object([
+                "run_id": .string("00000000-0000-7000-8000-000000000531"),
+                "work_session_id": .string("00000000-0000-7000-8000-000000000531"),
+                "channel_id": .string("00000000-0000-7000-8000-000000000202"),
+                "text_delta": .string("safe summary"),
+                "_meta": .object(["acp": .object(["credential": .string("host-only")])]),
+            ])
+        )
+
+        await composite.emit(event)
+
+        let localEvents = await local.events
+        XCTAssertEqual(localEvents.first?.payload.objectValue?["_meta"]?.objectValue?["acp"]?
+            .objectValue?["credential"]?.stringValue, "host-only")
+        let relayAttempts = await relay.attempts
+        let relayEvents = await relay.events
+        XCTAssertEqual(relayAttempts, 3)
+        let relayed = try XCTUnwrap(relayEvents.first)
+        XCTAssertNil(relayed.payload.objectValue?["_meta"])
+        XCTAssertEqual(relayed.payload.objectValue?["text_delta"]?.stringValue, "safe summary")
+        XCTAssertEqual(relayed.id, event.id)
+
+        let planEvent = ACPProjectedEvent(
+            type: "agent.status",
+            timestampMs: 2,
+            payload: .object([
+                "phase": .string("thinking"),
+                "run_status": .string("running"),
+                "plan": .object([
+                    "safe_step": .string("inspect code"),
+                    "command": .string("printenv SECRET"),
+                    "nested": .object(["credential_token": .string("host-only")]),
+                ]),
+            ])
+        )
+        let safePlan = try XCTUnwrap(planEvent.serverSummary()?.payload.objectValue?["plan"]?.objectValue)
+        XCTAssertEqual(safePlan["safe_step"]?.stringValue, "inspect code")
+        XCTAssertNil(safePlan["command"])
+        XCTAssertEqual(safePlan["nested"]?.objectValue?.isEmpty, true)
+    }
+
     func testHostPTYProvidesInteractiveTTYInsteadOfPipe() async throws {
         let process = try HostPTYProcess.launch(
             executable: "/bin/sh",
@@ -89,6 +144,40 @@ final class ACPHostTests: XCTestCase {
         let output = await recorder.string
         XCTAssertTrue(output.contains("pty-ok"))
         process.close()
+    }
+
+    func testProcessManagerRunsACPWithCompositeLocalAndRelaySinks() async throws {
+        let script = try mockCommand().arguments[0]
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-acp-relay-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let relay = RelayRecorder(failuresBeforeSuccess: 0)
+        let manager = ProcessManager(
+            templates: ["mock-acp": CommandTemplate(
+                executable: "/usr/bin/python3", arguments: [script], transport: .acp
+            )],
+            outputDirectory: directory,
+            acpEventRelay: { _, event in try await relay.send(event) }
+        )
+        let sessionID = UUID()
+
+        try await manager.start(
+            sessionID: sessionID, channelID: UUID(), tool: "mock-acp", prompt: "reject"
+        )
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await relay.events.count < 5, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let relayedEvents = await relay.events
+        XCTAssertEqual(relayedEvents.count, 5)
+        let eventURL = directory.appendingPathComponent(
+            "\(sessionID.uuidString.lowercased()).acp-events.jsonl"
+        )
+        let local = try String(contentsOf: eventURL, encoding: .utf8)
+        XCTAssertTrue(local.contains("vendorExtension"))
+        XCTAssertFalse(String(data: try JSONEncoder().encode(relayedEvents), encoding: .utf8)!
+            .contains("vendorExtension"))
     }
 
     private func mockCommand() throws -> ACPLaunchCommand {
@@ -122,6 +211,20 @@ final class ACPHostTests: XCTestCase {
 private actor EventRecorder: ACPEventSink {
     private(set) var events: [ACPProjectedEvent] = []
     func emit(_ event: ACPProjectedEvent) async { events.append(event) }
+}
+
+private actor RelayRecorder {
+    private let failuresBeforeSuccess: Int
+    private(set) var attempts = 0
+    private(set) var events: [ACPProjectedEvent] = []
+
+    init(failuresBeforeSuccess: Int) { self.failuresBeforeSuccess = failuresBeforeSuccess }
+
+    func send(_ event: ACPProjectedEvent) throws {
+        attempts += 1
+        if attempts <= failuresBeforeSuccess { throw ACPHostError.transportClosed }
+        events.append(event)
+    }
 }
 
 private actor PermissionRecorder: ACPPermissionHandler {

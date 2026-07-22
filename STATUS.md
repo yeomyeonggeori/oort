@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-546 workd ACP 이벤트 서버 릴레이 (#623, 2026-07-22)
+
+- workd의 ACP sink를 mode 0600 raw JSONL + 서버 요약 relay 복합 sink로 바꾸고 progress/plan/승인 요청·결정/terminal 생성·종료를 기존 signed work-session PATCH로 보낸다. 서버는 신규 스키마·라우트 없이 세션 thread `message` 원장과 `message.new` + ACP envelope outbox를 한 트랜잭션에 투영한다.
+- event UUID 멱등성, 65,536-byte 상한, 세션별 240건/60초, 최대 3회 backoff 재시도를 적용했다. `_meta.acp`, command/env/path, credential 및 raw terminal output은 allowlist에서 제거·서버에서도 거부하며 relay 실패 시 로컬 JSONL은 유지한다.
+- WorkHostDaemon 13 tests(ACP 집중 6 포함), MomoServer 149 tests, 전체 9개 Swift 패키지 build, OpenAPI/YAML·bash 정적 검증과 `verify_acp_host.sh`의 28110~28113 PG18/Centrifugo mock ACP→thread message 5행+outbox 5행 실제 E2E가 PASS했다. 실 opencode/claude-agent-acp credential 왕복만 `runtime-unverified(external ACP agent credentials)`다.
+
 ## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
 
 - `examples/eve-momo-channel`은 eve 0.27.0 `defineChannel`/`routeAuth`/`send`/workspace·channel continuation token으로, `examples/cloudflare-agent-momo`는 permissive·audit 경계를 지키는 Agents SDK 0.3.10 인증 fetch로 기존 per-agent bearer gateway pending→event→complete 계약만 소비한다. 코어 서버·OpenAPI·스키마·루트 npm은 변경하지 않았다.
