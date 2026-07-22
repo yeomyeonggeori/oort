@@ -650,6 +650,72 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/agents/{agentId}/profile:
+    get:
+      tags: [agents]
+      operationId: getAgentProfile
+      summary: Read an agent's credential-free native profile.
+      description: Human workspace owner/admin or the agent's active human owner only.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Current profile ledger projection.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentProfileResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Active agent or profile not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+    put:
+      tags: [agents]
+      operationId: putAgentProfile
+      summary: Create or replace an agent profile and increment its version.
+      description: >
+        Human workspace owner/admin or agent owner only. instructions are
+        limited to 8192 bytes; credential-shaped fields are rejected.
+        enabledTools only narrows existing grants. mention=true is fixed and
+        schedule is reserved data with no v0 executor.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AgentProfileInput"}
+      responses:
+        "200":
+          description: Upserted profile with monotonically incremented version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentProfileResponse"}
+        "400":
+          description: Invalid profile, trigger, tool name, or credential-shaped field.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Active agent not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
   /v1/workspaces/{workspaceId}/agents/from-card:
     post:
       tags: [agents]
@@ -4744,6 +4810,62 @@ components:
           type: string
           format: uuid
           description: Optional active human owner in this workspace; defaults to the caller.
+        profile:
+          $ref: "#/components/schemas/AgentProfileInput"
+
+    AgentProfileInput:
+      type: object
+      additionalProperties: false
+      required: [instructions, enabledTools]
+      properties:
+        instructions:
+          type: string
+          description: UTF-8 content is limited to 8192 bytes by the server.
+        modelPref:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Applied only when listed in workspace.settings.allowed_agent_models.
+        enabledTools:
+          type: array
+          maxItems: 128
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 200}
+        triggers:
+          $ref: "#/components/schemas/AgentProfileTriggers"
+
+    AgentProfileTriggers:
+      type: object
+      additionalProperties: false
+      required: [mention]
+      properties:
+        mention: {type: boolean, enum: [true]}
+        schedule:
+          description: Reserved definition only; v0 does not execute schedules.
+
+    AgentProfile:
+      type: object
+      required:
+        [agentMemberId, workspaceId, instructions, enabledTools, triggers,
+         version, updatedBy, updatedAtMs]
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        instructions: {type: string}
+        modelPref: {type: string}
+        enabledTools:
+          type: array
+          items: {type: string}
+        triggers: {$ref: "#/components/schemas/AgentProfileTriggers"}
+        version: {type: integer, minimum: 1}
+        updatedBy: {type: string, format: uuid}
+        updatedAtMs: {type: integer, format: int64}
+
+    AgentProfileResponse:
+      type: object
+      required: [profile]
+      properties:
+        profile: {$ref: "#/components/schemas/AgentProfile"}
 
     AgentMember:
       type: object
