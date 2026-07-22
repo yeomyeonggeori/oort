@@ -10,12 +10,6 @@ import PostgresNIO
 /// the existing channel-membership and agent-credential routes for those two
 /// explicit follow-up decisions.
 struct AgentRoutes: Sendable {
-    private static let forbiddenConfigKeyFragments = [
-        "credential", "accesstoken", "refreshtoken", "oauthtoken", "authorization",
-        "clientsecret", "privatekey", "password", "bearertoken", "apikey",
-        "codexaccess", "codexrefresh", "openaioauth",
-    ]
-
     let db: Database
     let environmentName: String
     let allowLocalLoopback: Bool
@@ -45,6 +39,7 @@ struct AgentRoutes: Sendable {
         let systemPrompt = try Self.normalizedSystemPrompt(dto.systemPrompt)
         let config = try Self.validatedConfig(dto.config)
         let configJSON = try Self.jsonString(.object(config))
+        let profile = try dto.profile.map(AgentProfileValidation.validate)
         let ownerHumanID = dto.ownerHumanId ?? principal.memberID
 
         let result: AgentCreationResult = try await db.withTenantTransaction(
@@ -55,13 +50,21 @@ struct AgentRoutes: Sendable {
                 memberID: principal.memberID
             )
             guard role?.isAdmin == true else { return .forbidden }
-            return try await Self.createAgentIdentity(
+            let creation = try await Self.createAgentIdentity(
                 conn: conn, logger: db.logger, workspaceID: workspaceID,
                 actorMemberID: principal.memberID, viaTokenID: principal.tokenID,
                 displayName: displayName, handle: handle, model: model, baseURL: baseURL,
                 systemPrompt: systemPrompt, configJSON: configJSON,
                 ownerHumanID: ownerHumanID, auditExtraJSON: "{}"
             )
+            if case .created(let agent) = creation, let profile {
+                try await AgentProfileRoutes.insertInitialProfile(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    agentMemberID: agent.id, actorMemberID: principal.memberID,
+                    viaTokenID: principal.tokenID, profile: profile
+                )
+            }
+            return creation
         }
 
         switch result {
@@ -245,36 +248,12 @@ struct AgentRoutes: Sendable {
 
     static func validatedConfig(_ raw: [String: JSONValue]?) throws -> [String: JSONValue] {
         let config = raw ?? [:]
-        try rejectCredentialLikeKeys(.object(config), path: "config")
+        try AgentCredentialFieldPolicy.rejectCredentialShapedFields(.object(config), path: "config")
         let data = try JSONEncoder().encode(JSONValue.object(config))
         guard data.count <= 65_536 else {
             throw HTTPError(.badRequest, message: "config must be at most 65536 bytes")
         }
         return config
-    }
-
-    private static func rejectCredentialLikeKeys(_ value: JSONValue, path: String) throws {
-        switch value {
-        case .object(let object):
-            for (key, child) in object {
-                // Canonicalize snake_case, kebab-case, and camelCase to the
-                // same comparison space so `apiKey` cannot bypass `api_key`.
-                let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
-                if forbiddenConfigKeyFragments.contains(where: normalized.contains) {
-                    throw HTTPError(
-                        .badRequest,
-                        message: "provider credential fields are forbidden at \(path).\(key)"
-                    )
-                }
-                try rejectCredentialLikeKeys(child, path: "\(path).\(key)")
-            }
-        case .array(let values):
-            for (index, child) in values.enumerated() {
-                try rejectCredentialLikeKeys(child, path: "\(path)[\(index)]")
-            }
-        default:
-            break
-        }
     }
 
     private static func jsonString(_ value: JSONValue) throws -> String {
@@ -303,6 +282,7 @@ struct CreateAgentRequest: Decodable, Sendable {
     let systemPrompt: String?
     let config: [String: JSONValue]?
     let ownerHumanId: UUID?
+    let profile: AgentProfileInput?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case displayName
@@ -312,6 +292,7 @@ struct CreateAgentRequest: Decodable, Sendable {
         case systemPrompt
         case config
         case ownerHumanId
+        case profile
     }
 
     init(from decoder: Decoder) throws {
@@ -334,6 +315,7 @@ struct CreateAgentRequest: Decodable, Sendable {
         systemPrompt = try values.decodeIfPresent(String.self, forKey: .systemPrompt)
         config = try values.decodeIfPresent([String: JSONValue].self, forKey: .config)
         ownerHumanId = try values.decodeIfPresent(UUID.self, forKey: .ownerHumanId)
+        profile = try values.decodeIfPresent(AgentProfileInput.self, forKey: .profile)
     }
 }
 

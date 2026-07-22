@@ -5,6 +5,11 @@
 - 채널 설정의 연동 탭에 워크스페이스 범위 발신 이벤트 구독을 연결했다. 목록은 이벤트 종류·URL·4종 상태·중지 사유를 표시하고, 생성·사용·중지·삭제를 MOMO-535 REST 계약으로 수행한다.
 - 생성 응답의 HMAC 시크릿은 별도 일회성 화면에서만 표시·복사하며 목록 DTO와 분리했다. 화면 이탈·세션 변경 뒤에는 폐기하고 재조회하지 않으며 모든 관리 요청은 `no-store` 경계를 사용한다.
 - macOS build, 모델·REST 집중 7 tests, 한국어 목록/일회성 시크릿 라이트·다크 snapshot 4종, design preflight 3종이 PASS했다. 인증된 실서버 owner/admin CRUD 왕복은 오케스트레이터 확인 전까지 `runtime-unverified`다. 트랙 기저에 커밋돼 있던 MOMO-529/525 충돌 마커는 양 기능을 보존하는 최소 합집합으로 해소했다.
+## MOMO-537 agent_profile 원장 + momo 네이티브 간편 생성 (#618, 2026-07-22)
+
+- ADR-0131 Accepted를 정본화하고 migration 036(035는 진행 PR #625와 충돌 회피)에 `agent_profile` 복합 agent FK·FORCE RLS 원장을 추가했다. 관리자/agent human owner GET·PUT, 8KB instructions·credential-shaped field 거부, version 증가·audit와 기존 agent 생성 요청의 optional profile 동시 커밋을 OpenAPI에 반영했다.
+- 528 mention 경로는 profile이 있을 때만 서버 정책 프리앰블→기존 시스템 지시→profile instructions를 packet/payload에 가산하고, 실제 grant∩enabled_tools만 투영한다. model_pref는 `workspace.settings.allowed_agent_models`와 기존 agent.model 안에서만 적용하며 불허 preference는 run당 audit 1회 후 무시한다. 기존 profile 없는 agent payload는 유지된다.
+- 전체 Swift 패키지 build, 엔진 패키지 tests, server 171 tests(profile 집중 7 포함), OpenAPI YAML·verifier bash/ShellCheck는 PASS했다. `verify_agent_profile.sh`는 28150~28153 격리 포트에서 CRUD·owner/admin·RLS·packet·tool/model·mock Hermes 요청 덤프를 단정하며 Docker 실런과 `verify_context_packet.sh` 회귀는 오케스트레이터 수행 전까지 `runtime-unverified`다.
 
 ## MOMO-548 외부 provider 추출 동의 게이트 (#625, 2026-07-22)
 
