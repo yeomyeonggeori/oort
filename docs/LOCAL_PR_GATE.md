@@ -379,6 +379,12 @@ container. `scripts/verify_staging_smoke.sh` still performs the real
 `docker compose config --quiet` render; the orchestrator records that Docker
 gate separately.
 
+MOMO-561 adds `scripts/verify_owner_bootstrap.sh` to `runtime-db`. It builds the
+pinned migrate image and verifies the env-only `set-owner` command on reserved
+port 28200, including exact bootstrap-owner selection, secret non-disclosure,
+idempotent credential rotation, and active-session revocation. Worker handoff
+leaves this Docker verifier `runtime-unverified` for the orchestrator.
+
 For the external provider profile, keep stack ports in `.env.worktree` and pass
 only momo-facing provider endpoint/key values through the shell or, preferably,
 a separate untracked file. Codex/OpenAI OAuth login and provider API keys stay

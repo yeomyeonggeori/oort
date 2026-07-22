@@ -47,11 +47,12 @@ configure_env_source
 run_prod_preflight
 load_deploy_env
 validate_momo_image_digests
+validate_initial_owner_credentials
 configure_compose
 render_compose_contract
 
 if [ "$DRY_RUN" = "1" ]; then
-  deploy_log "DRY RUN plan: pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate and web-init once -> start api/relay/worker/linkshort/caddy -> check health -> record rollback state"
+  deploy_log "DRY RUN plan: pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate -> set initial owner -> run web-init -> start api/relay/worker/linkshort/caddy -> check health -> record rollback state"
   deploy_log "DRY RUN complete; no containers or state were changed"
   exit 0
 fi
@@ -68,6 +69,9 @@ deploy_log "provisioning least-privilege runtime database roles"
 
 deploy_log "running the pinned migration image once"
 "${COMPOSE[@]}" run --rm --no-deps migrate || { print_failure_diagnostics; exit 1; }
+
+deploy_log "setting the initial workspace owner from the secret environment"
+"${COMPOSE[@]}" run --rm --no-deps migrate set-owner || { print_failure_diagnostics; exit 1; }
 
 deploy_log "installing the pinned web assets"
 "${COMPOSE[@]}" run --rm --no-deps web-init || { print_failure_diagnostics; exit 1; }

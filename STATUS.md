@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-561 owner 부트스트랩 set-owner (#654, 2026-07-23)
+
+- migrate 이미지에 env-only `set-owner` one-shot을 추가하고 install이 migration 직후 이를 자동 실행하도록 연결했다. bootstrap owner 정확성·이메일 검증·세션 폐기형 credential rotation을 한 트랜잭션으로 처리하며 upgrade는 기존 owner를 덮어쓰지 않는다.
+- prod `.env.example`/`secrets.env.example`과 DEPLOY 런북에서 psql heredoc을 제거했다. 정적 설치/secret 비유입 검증은 worker가 수행하며, 28200 전용 Docker verifier는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-556 공급망 게이트 (#649, 2026-07-22)
 
 - remote SwiftPM 의존성이 있는 9개 패키지 루트를 자동 탐색·resolve하고 전이 checkout LICENSE 원문을 판독해 permissive SPDX만 허용하며, copyleft 계열은 예외보다 먼저 fail-closed로 거부한다.

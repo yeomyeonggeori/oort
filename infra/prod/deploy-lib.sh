@@ -65,6 +65,21 @@ load_deploy_env() {
   fi
 }
 
+validate_initial_owner_credentials() {
+  [ -n "${MOMO_INITIAL_OWNER_EMAIL:-}" ] || deploy_fail "MOMO_INITIAL_OWNER_EMAIL is required for installation"
+  [ -n "${MOMO_INITIAL_OWNER_PASSWORD:-}" ] || deploy_fail "MOMO_INITIAL_OWNER_PASSWORD is required for installation"
+  case "$MOMO_INITIAL_OWNER_EMAIL" in
+    *@*) ;;
+    *) deploy_fail "MOMO_INITIAL_OWNER_EMAIL must be a valid email address" ;;
+  esac
+  case "$MOMO_INITIAL_OWNER_EMAIL:$MOMO_INITIAL_OWNER_PASSWORD" in
+    *change-me*|*__BASE_DOMAIN__*|*__INITIAL_OWNER_PASSWORD__*)
+      deploy_fail "initial owner credentials must replace template placeholders"
+      ;;
+  esac
+  deploy_log "validated initial owner credential input (values redacted)"
+}
+
 validate_digest_ref() {
   local key="$1"
   local value="${!key:-}"
