@@ -19,7 +19,7 @@
     "@xterm/xterm": "^5.5.0",
     "centrifuge": "^5.3.5",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.0",
