@@ -11,6 +11,11 @@
 - 커뮤니티 최대 쟁점=멀티 에이전트 권한 누출 질문에 buzz가 답 못함 — momo RLS FORCE+member 모델이 구조적 답(포지셔닝 전면 배치 제안).
 - 제안 액션 7건(§8, 전부 성재 결정 대기): RLS 공리 게이트·라이선스 게이트·branch-skew·에이전트 상호작용 안전 계약·UXUI Top5·포지셔닝·4~6주 후 재방문. 티켓/정본 반영 없음.
 
+## 2026-07-22 (Fable ⑮ 랜딩·공개 게이트 확정) · Memory Plane 사용자 표면 완결 + 법무 5항 확정
+- **#646 MOMO-553 grant UI 랜딩(main c8bca25)** — design-review PASS(Blocker 0·High 0). 529의 X-11 잠금 완전 해제: Memory Plane이 추출→검색→packet→모델 주입→브라우저/인스펙터→**grant 부여/회수 UI**까지 전 표면 완결. 3 브랜치 동기, worker 0 — 계획 파이프라인 소진.
+- **공개 게이트 5항 성재 확정**(외부 법무 없이 내부 확정): dawnkim·DCO(CONTRIBUTING.md 구현)·momo 유지(상표 미등록 리스크 고지)·Centrifugo v6 Apache-2.0 실측·NOTICE 유지 절차. 실배포 리허설 2단계 일정 확정(Phase1 로컬=게이트 부채 후, Phase2=성재 VPS 요청 시점 명시).
+- 다음: 게이트 부채 배치 → 리허설 Phase 1 → ADR-0117 기안. 후속 소형: 553 Medium(피커 암묵 대상·⌘⇧G), 546 승인 이력 다건.
+
 ## 2026-07-22 (Fable UXUI 소비 3장 랜딩 + 통합 사고 수습) · ⑫⑬⑭ main, 마커 사고 2건 해소·절차화
 - **랜딩→main(db47f52)**: #643 MOMO-550 온보딩 UI(URL 붙여넣기·origin 뱃지 — High: REST 플로우의 realtime 프리게이트 오배선 제거) / #641 551 연동 탭(1회성 시크릿 재표시 금지 grep 단정 — High: 삭제 다이얼로그 취소 카피) / #642 552 메모리 표시(과장 어휘 금지 단정 — High: 클릭 메타 hover 관행). 전부 design-review Blocker 0 통과 후 High 1건씩 momo-main 직접 수정.
 - **통합 사고 2건(momo-main 과실)**: 632/642 머지에서 git add -A가 코드 파일 충돌 마커를 그대로 커밋 — track/uxui·main이 일시 빌드 불가(641 리뷰어가 최초 발견). 수리 완료(양측 보존+빌드 검증). **절차화: 통합 머지 후 push 전 grep 마커 검사+macOS 빌드 게이트 의무.**
