@@ -141,6 +141,15 @@ enum AppBuilder {
                 allowDevelopmentHTTP: allowAgentCardHTTP
             )
         ).add(to: authed)
+        EventSubscriptionRoutes(
+            db: db,
+            signingMasterKey: config.outboundWebhookMasterKey,
+            urlValidator: SystemEventSubscriptionURLValidator(
+                resolver: SystemAgentCardHostResolver(),
+                allowDevelopmentHTTP: config.momoEnvironment.lowercased() == "local"
+                    && ProcessInfo.processInfo.environment["MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP"] == "1"
+            )
+        ).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
         WorkspaceRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)

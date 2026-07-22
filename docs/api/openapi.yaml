@@ -78,6 +78,8 @@ tags:
     description: Agent-requested, human-gated controls dispatched to a user-owned execution host.
   - name: work-tool-profiles
     description: Workspace-admin tool catalog and enabled host launch projection.
+  - name: event-subscriptions
+    description: Workspace-admin signed outbound event webhook subscriptions.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
   - name: attachments
@@ -1859,6 +1861,124 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/event-subscriptions:
+    get:
+      tags: [event-subscriptions]
+      operationId: listEventSubscriptions
+      summary: List outbound event subscriptions without signing material.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Newest-first subscription projections; secret and secret_ref are absent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventSubscriptionsResponse"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace owner or admin required.
+        "429": {$ref: "#/components/responses/RateLimited"}
+    post:
+      tags: [event-subscriptions]
+      operationId: createEventSubscription
+      summary: Register a public webhook destination and issue its signing secret once.
+      description: >
+        The destination is DNS-resolved and checked against private, loopback,
+        link-local, multicast, and reserved ranges before the row is created.
+        Production requires HTTPS. The secret is derived from a non-secret
+        random reference and returned only by this response; list/update/delete
+        never expose either the secret or reference.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEventSubscriptionRequest"
+      responses:
+        "201":
+          description: Subscription, audit record, and one-time signing secret created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedEventSubscriptionResponse"
+        "400":
+          description: Invalid event kinds or unsafe/unresolvable destination.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace owner or admin required.
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/event-subscriptions/{subscriptionId}:
+    put:
+      tags: [event-subscriptions]
+      operationId: updateEventSubscription
+      summary: Update destination, event selection, or enabled state.
+      description: >
+        Re-enabling resets accumulated delivery failures. Updating never rotates
+        or returns signing material. A new URL receives the same SSRF validation
+        as create and is checked again by the relay at delivery time.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: subscriptionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEventSubscriptionRequest"
+      responses:
+        "200":
+          description: Updated subscription and audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventSubscriptionResponse"
+        "400":
+          description: Empty/invalid update or unsafe destination.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace owner or admin required.
+        "404":
+          description: Subscription not found in this workspace.
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [event-subscriptions]
+      operationId: deleteEventSubscription
+      summary: Delete an outbound event subscription.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: subscriptionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Deleted subscription snapshot and audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventSubscriptionResponse"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace owner or admin required.
+        "404":
+          description: Subscription not found in this workspace.
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/work-tool-profiles:
     get:
@@ -5331,6 +5451,94 @@ components:
           items:
             type: string
             pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+
+    EventSubscriptionKind:
+      type: string
+      enum: [mention, approval_request, work.status_changed]
+
+    EventSubscription:
+      type: object
+      additionalProperties: false
+      required:
+        [id, workspaceId, url, eventKinds, enabled, deliveryFailureCount,
+         createdBy, updatedBy, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        url: {type: string, format: uri, maxLength: 2048}
+        eventKinds:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/EventSubscriptionKind"}
+        enabled: {type: boolean}
+        deliveryFailureCount: {type: integer, minimum: 0}
+        disabledAtMs: {type: integer, format: int64}
+        disabledReason:
+          type: string
+          enum: [disabled_by_admin, server_5xx_threshold]
+        createdBy: {type: string, format: uuid}
+        updatedBy: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    CreateEventSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [url, eventKinds]
+      properties:
+        url: {type: string, format: uri, maxLength: 2048}
+        eventKinds:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/EventSubscriptionKind"}
+        enabled: {type: boolean, default: true}
+
+    UpdateEventSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        url: {type: string, format: uri, maxLength: 2048}
+        eventKinds:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/EventSubscriptionKind"}
+        enabled: {type: boolean}
+
+    EventSubscriptionResponse:
+      type: object
+      additionalProperties: false
+      required: [eventSubscription]
+      properties:
+        eventSubscription:
+          $ref: "#/components/schemas/EventSubscription"
+
+    EventSubscriptionsResponse:
+      type: object
+      additionalProperties: false
+      required: [eventSubscriptions]
+      properties:
+        eventSubscriptions:
+          type: array
+          items: {$ref: "#/components/schemas/EventSubscription"}
+
+    CreatedEventSubscriptionResponse:
+      type: object
+      additionalProperties: false
+      required: [eventSubscription, secret, signatureVersion, algorithm]
+      properties:
+        eventSubscription:
+          $ref: "#/components/schemas/EventSubscription"
+        secret:
+          type: string
+          description: One-time HMAC signing secret. Never returned again.
+        signatureVersion: {type: string, enum: [v1]}
+        algorithm: {type: string, enum: [HMAC-SHA256]}
 
     WorkToolLaunchTemplate:
       type: object

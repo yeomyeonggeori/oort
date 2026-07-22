@@ -1,13 +1,9 @@
 import AsyncHTTPClient
-#if canImport(Darwin)
-import Darwin
-#else
-import Glibc
-#endif
 import Foundation
 import HTTPTypes
 import Hummingbird
 import Logging
+import OutboundHTTPPolicy
 import PostgresNIO
 
 enum AgentCardFetchError: Error, Equatable, Sendable {
@@ -33,53 +29,8 @@ protocol AgentCardHTTPTransport: Sendable {
     func get(_ url: URL, resolvedAddress: String) async throws -> AgentCardHTTPResponse
 }
 
-protocol AgentCardHostResolving: Sendable {
-    func resolve(host: String) async throws -> [String]
-}
-
-struct SystemAgentCardHostResolver: AgentCardHostResolving {
-    func resolve(host: String) async throws -> [String] {
-        try await Task.detached(priority: .utility) {
-            // Darwin과 Glibc의 addrinfo 멤버 순서가 달라 memberwise init은
-            // 플랫폼 중 한쪽에서 컴파일이 깨진다 — 필드 개별 대입만 이식 가능.
-            var hints = addrinfo()
-            hints.ai_flags = AI_ADDRCONFIG
-            hints.ai_family = AF_UNSPEC
-            #if os(Linux)
-            hints.ai_socktype = Int32(SOCK_STREAM.rawValue)
-            #else
-            hints.ai_socktype = SOCK_STREAM
-            #endif
-            hints.ai_protocol = Int32(IPPROTO_TCP)
-            var result: UnsafeMutablePointer<addrinfo>?
-            guard getaddrinfo(host, nil, &hints, &result) == 0, let first = result else {
-                throw AgentCardFetchError.resolutionFailed
-            }
-            defer { freeaddrinfo(first) }
-
-            var addresses: Set<String> = []
-            var cursor: UnsafeMutablePointer<addrinfo>? = first
-            while let current = cursor {
-                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                if getnameinfo(
-                    current.pointee.ai_addr,
-                    current.pointee.ai_addrlen,
-                    &buffer,
-                    socklen_t(buffer.count),
-                    nil,
-                    0,
-                    NI_NUMERICHOST
-                ) == 0 {
-                    let end = buffer.firstIndex(of: 0) ?? buffer.endIndex
-                    addresses.insert(String(decoding: buffer[..<end].map(UInt8.init), as: UTF8.self))
-                }
-                cursor = current.pointee.ai_next
-            }
-            guard !addresses.isEmpty else { throw AgentCardFetchError.resolutionFailed }
-            return addresses.sorted()
-        }.value
-    }
-}
+typealias AgentCardHostResolving = OutboundHostResolving
+typealias SystemAgentCardHostResolver = SystemOutboundHostResolver
 
 struct AsyncAgentCardHTTPTransport: AgentCardHTTPTransport {
     static let maximumBytes = 256 * 1024
@@ -177,17 +128,13 @@ struct SafeAgentCardFetcher<Resolver: AgentCardHostResolving, Transport: AgentCa
     }
 
     func validateResolvedTarget(_ url: URL) async throws -> [String] {
-        guard let host = url.host?.lowercased(), !host.isEmpty else {
-            throw AgentCardFetchError.invalidURL
+        do {
+            return try await OutboundURLPolicy.validatedResolvedAddresses(
+                for: url, resolver: resolver
+            )
+        } catch let error as OutboundURLPolicyError {
+            throw Self.agentCardError(error)
         }
-        if Self.isDeniedAddress(host) { throw AgentCardFetchError.privateAddress }
-        let addresses: [String]
-        do { addresses = try await resolver.resolve(host: host) }
-        catch { throw AgentCardFetchError.resolutionFailed }
-        guard !addresses.isEmpty, addresses.allSatisfy({ !Self.isDeniedAddress($0) }) else {
-            throw AgentCardFetchError.privateAddress
-        }
-        return addresses
     }
 
     static func cardURL(from raw: String, allowDevelopmentHTTP: Bool) throws -> URL {
@@ -207,18 +154,13 @@ struct SafeAgentCardFetcher<Resolver: AgentCardHostResolving, Transport: AgentCa
     }
 
     static func validatedFetchURL(_ url: URL, allowDevelopmentHTTP: Bool) throws -> URL {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host, !host.isEmpty,
-              components.user == nil, components.password == nil,
-              components.fragment == nil
-        else { throw AgentCardFetchError.invalidURL }
-        if scheme == "http" {
-            guard allowDevelopmentHTTP else { throw AgentCardFetchError.insecureHTTP }
-        } else if scheme != "https" {
-            throw AgentCardFetchError.invalidURL
+        do {
+            return try OutboundURLPolicy.validatedURL(
+                url, allowDevelopmentHTTP: allowDevelopmentHTTP
+            )
+        } catch let error as OutboundURLPolicyError {
+            throw agentCardError(error)
         }
-        return url
     }
 
     static func parse(_ data: Data, allowDevelopmentHTTP: Bool) throws -> ParsedAgentCard {
@@ -261,40 +203,16 @@ struct SafeAgentCardFetcher<Resolver: AgentCardHostResolving, Transport: AgentCa
     }
 
     static func isDeniedAddress(_ raw: String) -> Bool {
-        let host = raw.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        if host == "localhost" || host.hasSuffix(".localhost") { return true }
+        OutboundURLPolicy.isDeniedAddress(raw)
+    }
 
-        var ipv4 = in_addr()
-        if host.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
-            let value = UInt32(bigEndian: ipv4.s_addr)
-            let a = UInt8((value >> 24) & 0xff)
-            let b = UInt8((value >> 16) & 0xff)
-            let c = UInt8((value >> 8) & 0xff)
-            return a == 0 || a == 10 || a == 127 || a >= 224
-                || (a == 100 && (64...127).contains(b))
-                || (a == 169 && b == 254)
-                || (a == 172 && (16...31).contains(b))
-                || (a == 192 && b == 168)
-                || (a == 192 && b == 0 && c == 0)
-                || (a == 192 && b == 0 && c == 2)
-                || (a == 198 && (b == 18 || b == 19 || b == 51))
-                || (a == 203 && b == 0 && c == 113)
-            }
-
-        var ipv6 = in6_addr()
-        if host.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1 {
-            let bytes = withUnsafeBytes(of: &ipv6) { Array($0) }
-            if bytes.allSatisfy({ $0 == 0 }) { return true }
-            if bytes.dropLast().allSatisfy({ $0 == 0 }) && bytes.last == 1 { return true }
-            if bytes[0] == 0xff || (bytes[0] & 0xfe) == 0xfc { return true }
-            if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 { return true }
-            if bytes[0...3].elementsEqual([0x20, 0x01, 0x0d, 0xb8]) { return true }
-            if bytes[0..<10].allSatisfy({ $0 == 0 }) && bytes[10] == 0xff && bytes[11] == 0xff {
-                return isDeniedAddress("\(bytes[12]).\(bytes[13]).\(bytes[14]).\(bytes[15])")
-            }
-            return false
+    private static func agentCardError(_ error: OutboundURLPolicyError) -> AgentCardFetchError {
+        switch error {
+        case .invalidURL: .invalidURL
+        case .insecureHTTP: .insecureHTTP
+        case .privateAddress: .privateAddress
+        case .resolutionFailed: .resolutionFailed
         }
-        return false
     }
 
     private static func boundedString(

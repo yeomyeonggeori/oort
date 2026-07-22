@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-535 outbound 이벤트 구독 (#617, 2026-07-22)
+
+- migration 033에 `event_subscription` FORCE RLS 원장과 mention·approval_request·work 상태 전이 transactional outbox 투영을 추가하고, 관리자 CRUD·감사·one-time HMAC secret 발급을 OpenAPI와 동기화했다. 평문 secret은 저장·재조회하지 않는다.
+- OutboxRelay가 MOMO-536에서 분리한 공용 DNS/IP SSRF 정책으로 목적지를 재검증·IP 고정하고 exact-body HMAC-SHA256 POST, 지수 재시도, 누적 5xx 5회 자동 disable+system audit을 수행한다. 공용 정책은 Darwin/Glibc 분기를 포함한다.
+- 전체 Swift 10개 패키지 build, 공용 정책 3·server 162·OutboxRelay 7 tests와 verifier bash/OpenAPI·compose YAML 정적 검증이 PASS했다. `verify_event_subscription.sh`는 28130~28134(run-tag 격리, 28132 선점 회피)에서 CRUD·서명·재시도·자동 disable·RLS를 단정하며 Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
+
 ## MOMO-546 workd ACP 이벤트 서버 릴레이 (#623, 2026-07-22)
 
 - workd의 ACP sink를 mode 0600 raw JSONL + 서버 요약 relay 복합 sink로 바꾸고 progress/plan/승인 요청·결정/terminal 생성·종료를 기존 signed work-session PATCH로 보낸다. 서버는 신규 스키마·라우트 없이 세션 thread `message` 원장과 `message.new` + ACP envelope outbox를 한 트랜잭션에 투영한다.

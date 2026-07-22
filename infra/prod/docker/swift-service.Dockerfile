@@ -15,6 +15,10 @@ WORKDIR /src
 COPY ${PACKAGE_PATH}/Package.swift ${PACKAGE_PATH}/Package.swift
 COPY ${PACKAGE_PATH}/Sources ${PACKAGE_PATH}/Sources
 COPY ${PACKAGE_PATH}/Tests ${PACKAGE_PATH}/Tests
+# Server and OutboxRelay share the MOMO-536-derived SSRF policy. Copying this
+# dependency for every product keeps the generic Dockerfile branch-free; SwiftPM
+# only resolves it for packages that declare the local dependency.
+COPY services/OutboundHTTPPolicy /src/services/OutboundHTTPPolicy
 
 WORKDIR /src/${PACKAGE_PATH}
 RUN swift build -c release --product "${PRODUCT}" --static-swift-stdlib

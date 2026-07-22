@@ -24,6 +24,8 @@ let package = Package(
         .executable(name: "OutboxRelay", targets: ["OutboxRelay"]),
     ],
     dependencies: [
+        .package(path: "../../services/OutboundHTTPPolicy"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
@@ -33,6 +35,8 @@ let package = Package(
         .executableTarget(
             name: "OutboxRelay",
             dependencies: [
+                .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
+                .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
@@ -44,7 +48,10 @@ let package = Package(
         ),
         .testTarget(
             name: "OutboxRelayTests",
-            dependencies: ["OutboxRelay"],
+            dependencies: [
+                "OutboxRelay",
+                .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

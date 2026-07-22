@@ -2,6 +2,7 @@ import AsyncHTTPClient
 import Foundation
 import Logging
 import NIOCore
+import OutboundHTTPPolicy
 import PostgresNIO
 import ServiceLifecycle
 
@@ -30,10 +31,16 @@ import ServiceLifecycle
 struct RelayService: Service {
     let pg: PostgresClient
     let centrifugo: CentrifugoClient
+    let webhooks: any WebhookDelivering
     let config: Config
     let logger: Logger
 
     private static let decoder = JSONDecoder()
+    private static let webhookEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }()
 
     func run() async throws {
         // Duration → whole milliseconds for the startup log line.
@@ -139,6 +146,7 @@ struct RelayService: Service {
     /// A claimed outbox row ready to publish.
     private struct ClaimedRow: Sendable {
         let id: Int64
+        let kind: String
         let attempts: Int
         let rawPayload: String
     }
@@ -151,7 +159,7 @@ struct RelayService: Service {
                 """
                 WITH claimed AS (
                   SELECT id FROM outbox
-                   WHERE kind = 'broadcast'
+                   WHERE kind IN ('broadcast', 'webhook_delivery')
                      AND status = 'pending'
                      AND available_at <= now()
                    ORDER BY id
@@ -162,20 +170,26 @@ struct RelayService: Service {
                    SET status = 'processing', attempts = o.attempts + 1
                   FROM claimed c
                  WHERE o.id = c.id
-                 RETURNING o.id, o.attempts, o.payload::text
+                 RETURNING o.id, o.kind::text, o.attempts, o.payload::text
                 """,
                 logger: logger
             ).collect()
 
             return try rows.map { row in
-                let (id, attempts, payload) = try row.decode((Int64, Int, String).self)
-                return ClaimedRow(id: id, attempts: attempts, rawPayload: payload)
+                let (id, kind, attempts, payload) = try row.decode(
+                    (Int64, String, Int, String).self
+                )
+                return ClaimedRow(id: id, kind: kind, attempts: attempts, rawPayload: payload)
             }
         }
     }
 
     /// Publish one claimed row and settle its terminal/retry status.
     private func processClaimed(_ row: ClaimedRow) async {
+        if row.kind == "webhook_delivery" {
+            await processWebhook(row)
+            return
+        }
         let payload: BroadcastPayload
         do {
             payload = try Self.decoder.decode(
@@ -217,12 +231,255 @@ struct RelayService: Service {
         }
     }
 
+    private struct WebhookSubscription: Sendable {
+        let id: UUID
+        let workspaceID: UUID
+        let url: URL
+        let secretRef: String
+        let enabled: Bool
+    }
+
+    private func processWebhook(_ row: ClaimedRow) async {
+        let payload: WebhookDeliveryPayload
+        do {
+            payload = try Self.decoder.decode(
+                WebhookDeliveryPayload.self, from: Data(row.rawPayload.utf8)
+            )
+            guard payload.schema == "momo.webhook_delivery.v1" else {
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: [], debugDescription: "unsupported webhook schema")
+                )
+            }
+        } catch {
+            await markFailed(row.id, reason: "webhook payload decode: \(error)")
+            return
+        }
+
+        let subscription: WebhookSubscription?
+        do { subscription = try await fetchWebhookSubscription(payload.subscriptionID) }
+        catch {
+            await requeue(row, reason: "subscription lookup failed")
+            return
+        }
+        guard let subscription else {
+            await markDone(row.id, reason: "subscription missing")
+            return
+        }
+        guard subscription.enabled else {
+            await markDone(row.id, reason: "subscription disabled")
+            return
+        }
+        let eventKind = Self.eventKind(payload.event) ?? "unknown"
+        let body: Data
+        do { body = try Self.webhookEncoder.encode(payload.event) }
+        catch {
+            await markFailed(row.id, reason: "webhook event encode: \(error)")
+            return
+        }
+        let secret = SafeWebhookDeliveryClient<SystemOutboundHostResolver, AsyncWebhookHTTPTransport>
+            .derivedSecret(
+                masterKey: config.webhookSigningMasterKey,
+                secretRef: subscription.secretRef
+            )
+        let result = await webhooks.deliver(
+            url: subscription.url,
+            deliveryID: String(row.id),
+            eventKind: eventKind,
+            secret: secret,
+            body: body
+        )
+        switch result {
+        case .ok:
+            await markWebhookDone(row.id, subscriptionID: subscription.id)
+        case .transientServerFailure(let status):
+            await recordWebhookServerFailure(
+                row, subscription: subscription, status: status
+            )
+        case .transientFailure(let reason):
+            await requeue(row, reason: reason)
+        case .permanentFailure(let reason):
+            await markFailed(row.id, reason: reason)
+        }
+    }
+
+    private func fetchWebhookSubscription(_ id: UUID) async throws -> WebhookSubscription? {
+        let rows = try await pg.query(
+            """
+            SELECT id, workspace_id, url, secret_ref, enabled
+              FROM event_subscription
+             WHERE id = \(id)
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else { return nil }
+        let decoded = try row.decode((UUID, UUID, String, String, Bool).self)
+        guard let url = URL(string: decoded.2) else { return nil }
+        return WebhookSubscription(
+            id: decoded.0, workspaceID: decoded.1, url: url,
+            secretRef: decoded.3, enabled: decoded.4
+        )
+    }
+
+    private static func eventKind(_ event: AnyJSON) -> String? {
+        guard case .object(let object) = event,
+              case .string(let kind) = object["kind"] else { return nil }
+        return kind
+    }
+
     // MARK: - Status transitions
 
-    private func markDone(_ id: Int64) async {
+    private func markDone(_ id: Int64, reason: String? = nil) async {
         await runUpdate(
-            "UPDATE outbox SET status='done', processed_at=now(), last_error=NULL WHERE id=\(id)",
+            "UPDATE outbox SET status='done', processed_at=now(), last_error=\(reason) WHERE id=\(id)",
             context: "markDone(\(id))")
+    }
+
+    private func markWebhookDone(_ id: Int64, subscriptionID: UUID) async {
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    """
+                    UPDATE event_subscription
+                       SET delivery_failure_count = 0,
+                           updated_at = CASE
+                             WHEN delivery_failure_count = 0 THEN updated_at
+                             ELSE clock_timestamp()
+                           END
+                     WHERE id = \(subscriptionID) AND enabled
+                    """,
+                    logger: logger
+                )
+                _ = try await conn.query(
+                    """
+                    UPDATE outbox
+                       SET status='done', processed_at=now(), last_error=NULL
+                     WHERE id=\(id)
+                    """,
+                    logger: logger
+                )
+            }
+        } catch {
+            logger.error("webhook success settlement failed", metadata: [
+                "outboxId": .stringConvertible(id),
+                "error": .string(String(describing: error)),
+            ])
+        }
+    }
+
+    private func recordWebhookServerFailure(
+        _ row: ClaimedRow,
+        subscription: WebhookSubscription,
+        status: Int
+    ) async {
+        let backoffSeconds = min(Int(pow(2.0, Double(row.attempts))), 60)
+        let serverError = "HTTP \(status)"
+        let disableError = "webhook auto-disabled after HTTP \(status)"
+        let maxAttemptsError = "max attempts: HTTP \(status)"
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                let rows = try await conn.query(
+                    """
+                    SELECT delivery_failure_count, enabled
+                      FROM event_subscription
+                     WHERE id = \(subscription.id)
+                     FOR UPDATE
+                    """,
+                    logger: logger
+                ).collect()
+                guard let current = rows.first else {
+                    _ = try await conn.query(
+                        "UPDATE outbox SET status='done', processed_at=now(), last_error='subscription missing' WHERE id=\(row.id)",
+                        logger: logger
+                    )
+                    return
+                }
+                let (failureCount, enabled) = try current.decode((Int, Bool).self)
+                guard enabled else {
+                    _ = try await conn.query(
+                        "UPDATE outbox SET status='done', processed_at=now(), last_error='subscription disabled' WHERE id=\(row.id)",
+                        logger: logger
+                    )
+                    return
+                }
+                let next = failureCount + 1
+                if next >= config.webhookDisableAfterServerFailures {
+                    _ = try await conn.query(
+                        """
+                        UPDATE event_subscription
+                           SET enabled = false,
+                               delivery_failure_count = \(next),
+                               disabled_at = clock_timestamp(),
+                               disabled_reason = 'server_5xx_threshold',
+                               updated_at = clock_timestamp()
+                         WHERE id = \(subscription.id)
+                        """,
+                        logger: logger
+                    )
+                    _ = try await conn.query(
+                        """
+                        INSERT INTO audit_log
+                          (workspace_id, action, target_type, target_id, detail)
+                        VALUES
+                          (\(subscription.workspaceID), 'event_subscription.auto_disabled',
+                           'event_subscription', \(subscription.id),
+                           jsonb_build_object(
+                             'schema', 'momo.event_subscription.auto_disabled.v1',
+                             'failure_count', \(next),
+                             'last_status', \(status),
+                             'outbox_id', \(row.id)
+                           ))
+                        """,
+                        logger: logger
+                    )
+                    _ = try await conn.query(
+                        """
+                        UPDATE outbox
+                           SET status='failed', processed_at=now(),
+                               last_error=\(disableError)
+                         WHERE id=\(row.id)
+                        """,
+                        logger: logger
+                    )
+                } else {
+                    _ = try await conn.query(
+                        """
+                        UPDATE event_subscription
+                           SET delivery_failure_count = \(next),
+                               updated_at = clock_timestamp()
+                         WHERE id = \(subscription.id)
+                        """,
+                        logger: logger
+                    )
+                    if row.attempts >= config.maxAttempts {
+                        _ = try await conn.query(
+                            """
+                            UPDATE outbox
+                               SET status='failed', processed_at=now(),
+                                   last_error=\(maxAttemptsError)
+                             WHERE id=\(row.id)
+                            """,
+                            logger: logger
+                        )
+                    } else {
+                        _ = try await conn.query(
+                            """
+                            UPDATE outbox
+                               SET status='pending',
+                                   available_at=now() + (\(backoffSeconds) * interval '1 second'),
+                                   last_error=\(serverError)
+                             WHERE id=\(row.id)
+                            """,
+                            logger: logger
+                        )
+                    }
+                }
+            }
+        } catch {
+            logger.error("webhook 5xx settlement failed", metadata: [
+                "outboxId": .stringConvertible(row.id),
+                "error": .string(String(describing: error)),
+            ])
+        }
     }
 
     private func markFailed(_ id: Int64, reason: String) async {
