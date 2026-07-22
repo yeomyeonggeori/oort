@@ -72,7 +72,7 @@ infra/prod/install.sh --env-file /run/momo/prod.env --mode prod \
 ```
 
 스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → `docker compose config
---quiet` → pull → PostgreSQL/Redis/Centrifugo → one-shot `migrate`와 `web-init` →
+--quiet` → pull → PostgreSQL/Redis/Centrifugo → runtime role 프로비저닝 → one-shot `migrate`와 `web-init` →
 API/relay/worker/Caddy → `https://API_DOMAIN/health` 순으로 실행한다. 실패하면 `compose
 ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는다. 성공한 이미지 세트는
 `/var/lib/momo/deploy-state.env`에 mode 0600으로 기록한다.
@@ -131,7 +131,8 @@ sops exec-env /secure/momo/prod-next.sops.env \
    --backup-evidence /var/lib/momo/evidence/backup-restore-evidence.json'
 ```
 
-upgrade는 현재 이미지 세트를 `.previous`로 보존하고 새 digest pull → migrate →
+upgrade는 현재 이미지 세트를 `.previous`로 보존하고 새 digest pull → runtime role
+재프로비저닝/비밀번호 회전 → migrate →
 web-init → api/relay/worker/Caddy 재기동 → health 순으로 진행한다. v1은 짧은 중단을 허용한다.
 실패하면 이전 **앱 이미지** 3개와 web 자산 이미지를 자동 복구한다. DB migration은 전방 전용이라 절대
 자동 역마이그레이션하지 않는다. 이전 앱이 새 스키마와 호환되지 않거나 자동 복구 후에도
@@ -316,7 +317,11 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 | `AGENT_MODEL` | literal | 기본 `hermes-agent`; provider/model 라벨. |
 | `HERMES_BASE_URL` | (hermes 발급) | OpenAI-compatible `/v1` base URL. staging/prod/internal-host는 `https://`만 허용. |
 | `HERMES_API_KEY` | (hermes 발급) | 김인턴 게이트웨이 Bearer. |
-| `RELAY_DATABASE_URL` | — | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§5.2). |
+| `MIGRATE_DATABASE_URL` | — | 초기화 owner `momo` 접속. migration/runtime-role 프로비저닝 전용. |
+| `MOMO_APP_DATABASE_URL` | — | API 전용 **NOBYPASSRLS `momo_app`** 접속(§5.2). |
+| `RELAY_DATABASE_URL` | — | relay 전용 **BYPASSRLS `momo_relay`** 접속(§5.2). |
+| `WORKER_DATABASE_URL` | — | worker 전용 **BYPASSRLS `momo_worker`** 접속(§5.2). |
+| `OUTBOUND_WEBHOOK_MASTER_KEY` | `openssl rand -hex 32` | 발신 webhook secret 암호화 전용. `JWT_HMAC` 재사용 금지. |
 | `REDIS_URL` | (내부) | `redis://redis:6379`(compose 내부, 비밀번호 설정 권장). |
 | `pgbackrest` repo cipher | `openssl rand -base64 48` | 백업 암호화 키(별도 보관). |
 
@@ -348,8 +353,10 @@ sops exec-env infra/prod/secrets.sops.env \
 Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
 `API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
 `MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `MOMO_LINKSHORT_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
-`DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
-`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
+`MIGRATE_DATABASE_URL`, `MOMO_APP_POSTGRES_PASSWORD`, `MOMO_APP_DATABASE_URL`,
+`RELAY_POSTGRES_PASSWORD`, `RELAY_DATABASE_URL`, `WORKER_POSTGRES_PASSWORD`,
+`WORKER_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `OUTBOUND_WEBHOOK_MASTER_KEY`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
 `HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
 `REDIS_VOLUME_NAME`, `PGBACKREST_STANZA`, `PGBACKREST_REPO1_PATH`,
 `PGBACKREST_REPO1_CIPHER_PASS`, `PGBACKREST_WAL_ARCHIVE_REQUIRED`,
@@ -531,16 +538,26 @@ make migrate                                                   # 001_init → 00
 ### 5.2 DB 역할 분리 (RLS 격리의 운영 기반)
 | 역할 | 권한 | 용도 |
 |---|---|---|
-| `momo` (app) | 일반(RLS 적용) | api(MomoServer) — 트랜잭션마다 `SET LOCAL app.workspace_id` 필수. |
-| `momo_relay` | **LOGIN BYPASSRLS** | relay/worker — 전 테넌트 outbox 폴링(background consumer). **읽기/relay 경로 한정**. |
-| `momo_admin` | **BYPASSRLS(읽기)** | 플랫폼 관리자 전역 조회(§6.3). **쓰기 경로엔 BYPASSRLS 금지.** |
+| `momo` | **SUPERUSER(초기화 owner)** | PostgreSQL 컨테이너 초기화, runtime-role 프로비저닝, migration 전용. API 접속 금지. |
+| `momo_app` | **LOGIN NOSUPERUSER NOBYPASSRLS** | api(MomoServer). 트랜잭션마다 `SET LOCAL app.workspace_id` 필수. `plugin_registry`는 SELECT만 가능. |
+| `momo_relay` | **LOGIN NOSUPERUSER BYPASSRLS** | relay의 전 테넌트 outbox 폴링(background consumer) 전용. |
+| `momo_worker` | **LOGIN NOSUPERUSER BYPASSRLS** | AgentWorker의 전 테넌트 job 폴링 전용. |
+| `momo_platform_admin` | **BYPASSRLS(읽기)** | 별도 URL의 플랫폼 관리자 전역 조회(§6.3). **쓰기 경로엔 BYPASSRLS 금지.** |
 
-```sql
--- 운영 부트스트랩(1회). 비밀번호는 SOPS 시크릿.
-CREATE ROLE momo_relay LOGIN BYPASSRLS PASSWORD '...';
-CREATE ROLE momo_admin LOGIN BYPASSRLS PASSWORD '...';   -- 읽기 전용 권한만 GRANT
+```sh
+# install/upgrade가 동일 단계를 migrate보다 먼저 자동 실행한다.
+docker compose --env-file /run/momo/prod.env \
+  -f infra/prod/docker-compose.prod.yml run --rm --no-deps runtime-roles
 ```
-> `app.workspace_id` 누락 시 RLS가 행을 **미노출**(fail-safe). 풀러는 transaction mode + 트랜잭션마다 `SET LOCAL` 강제. BYPASSRLS는 relay/admin-read에만(L4 §10.1).
+
+정본 SQL은 `infra/prod/bootstrap_runtime_roles.sql`이다. psql `\getenv`로 SOPS/host
+환경의 세 비밀번호를 읽어 역할을 멱등 생성·회전하고, `NOSUPERUSER`/`BYPASSRLS`
+태세를 매번 재단정한다. `install.sh`와 `upgrade.sh` 모두 이 one-shot을 migration보다
+먼저 실행하므로 신규 설치와 기존 설치가 대칭이다. API는 strict 환경에서 실제
+`current_user=momo_app`, `rolsuper=false`, `rolbypassrls=false`를 DB에 질의하고 하나라도
+어긋나면 서비스 그룹을 종료해 기동을 거부한다.
+
+> `app.workspace_id` 누락 시 RLS가 행을 **미노출**(fail-safe). 풀러는 transaction mode + 트랜잭션마다 `SET LOCAL` 강제. BYPASSRLS는 relay/worker/platform-admin-read에만(L4 §10.1). 로컬 prod 태세 검증은 `scripts/verify_prod_rls_posture.sh`가 예약 포트 28170~28173에서 API role·교차 workspace 0행·catalog 쓰기 거부·수퍼유저 URL 기동 거부를 최종 소비 지점까지 단정한다.
 
 ### 5.3 멀티테넌시 모델 (L4 §1.3)
 `workspace → channel → membership(member)` 3계층. 모든 테넌트 행에 `workspace_id` + RLS `FORCE`(schema_v0.sql line 385~400 DO-block). v0 단일 워크스페이스 → M2에서 N워크스페이스(10명=1팀, 3+팀). 격리는 `SET LOCAL app.workspace_id` + RLS 정책. 채널 네이밍은 `<namespace>:ws<workspaceUUID>.<resourceUUID>`(L4 §4.1)로 day-1 멀티테넌트.

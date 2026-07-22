@@ -151,10 +151,19 @@ struct Config: Sendable {
         guard AgentProviderConfig.requiresStrictExternalProvider(momoEnvironment) else {
             return
         }
+        var errors: [String] = []
         if AgentProviderConfig.isUnsafeSecret(centProxySecret) {
-            throw SecurityConfigurationError(errors: [
+            errors.append(
                 "CENT_PROXY_SECRET is missing or uses a placeholder/dev value in \(momoEnvironment)"
-            ])
+            )
+        }
+        if outboundWebhookMasterKey == jwtHMAC {
+            errors.append(
+                "OUTBOUND_WEBHOOK_MASTER_KEY must not reuse JWT_HMAC in \(momoEnvironment)"
+            )
+        }
+        if !errors.isEmpty {
+            throw SecurityConfigurationError(errors: errors)
         }
     }
 

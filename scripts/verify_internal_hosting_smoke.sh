@@ -135,7 +135,9 @@ pass "Centrifugo prod transport uses Redis and internal subscribe proxy"
 section "API health endpoint and app env"
 grep -Fq 'router.get("/health")' server/Sources/MomoServer/App.swift || fail "MomoServer must expose GET /health"
 grep -Fq 'PORT: 8080' "$PROD_COMPOSE" || fail "api service must bind internal PORT=8080"
-grep -Fq 'DATABASE_URL:' "$PROD_COMPOSE" || fail "api service missing DATABASE_URL"
+grep -Fq 'DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}' "$PROD_COMPOSE" || fail "api service must consume the NOBYPASSRLS MOMO_APP_DATABASE_URL"
+grep -Fq 'DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}' "$PROD_COMPOSE" || fail "migrate service must consume the owner-only MIGRATE_DATABASE_URL"
+grep -Fq 'RELAY_DATABASE_URL: ${WORKER_DATABASE_URL:?set WORKER_DATABASE_URL}' "$PROD_COMPOSE" || fail "worker service must consume its distinct momo_worker URL"
 grep -Fq 'CENT_API_URL: http://centrifugo:8000/api' "$PROD_COMPOSE" || fail "api service missing internal Centrifugo API URL"
 pass "health endpoint is wired behind Caddy -> api:8080"
 
@@ -157,7 +159,9 @@ section "env template and secret guard"
 scripts/prod_env_preflight.sh --env-file "$SMOKE_ENV" --mode internal-smoke
 for key in \
   COMPOSE_PROJECT_NAME API_DOMAIN REALTIME_DOMAIN MOMO_IMAGE_TAG MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
-  MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL REDIS_PASSWORD CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC HERMES_BASE_URL HERMES_API_KEY; do
+  MIGRATE_DATABASE_URL MOMO_APP_POSTGRES_PASSWORD MOMO_APP_DATABASE_URL DATABASE_URL \
+  RELAY_POSTGRES_PASSWORD RELAY_DATABASE_URL WORKER_POSTGRES_PASSWORD WORKER_DATABASE_URL \
+  REDIS_PASSWORD CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC OUTBOUND_WEBHOOK_MASTER_KEY HERMES_BASE_URL HERMES_API_KEY; do
   grep -Eq "^${key}=" "$SMOKE_ENV" || fail "internal smoke env missing key: $key"
 done
 if grep -Eq '^[A-Z0-9_]*(PASSWORD|HMAC|API_KEY|TOKEN|SECRET|CIPHER_PASS)=([0-9a-f]{32,}|[A-Za-z0-9+/]{40,}={0,2})$' "$SMOKE_ENV"; then

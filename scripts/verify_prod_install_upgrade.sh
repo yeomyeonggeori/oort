@@ -94,8 +94,13 @@ MOMO_LINKSHORT_IMAGE=ghcr.io/dawn-kim-official/momo-linkshort@sha256:$DIGEST_F
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=8d96741fb02c4e1ca8dd803a5f121c11
-DATABASE_URL=postgres://momo:8d96741fb02c4e1ca8dd803a5f121c11@postgres:5432/momo
+MIGRATE_DATABASE_URL=postgres://momo:8d96741fb02c4e1ca8dd803a5f121c11@postgres:5432/momo
+MOMO_APP_POSTGRES_PASSWORD=8a6f4fe7d8f84bf18486f21d5876050a
+MOMO_APP_DATABASE_URL=postgres://momo_app:8a6f4fe7d8f84bf18486f21d5876050a@postgres:5432/momo
+RELAY_POSTGRES_PASSWORD=25d89609443e44219a554563e39ac89b
 RELAY_DATABASE_URL=postgres://momo_relay:25d89609443e44219a554563e39ac89b@postgres:5432/momo
+WORKER_POSTGRES_PASSWORD=39de11bc42c84bc6a28c8634d609565a
+WORKER_DATABASE_URL=postgres://momo_worker:39de11bc42c84bc6a28c8634d609565a@postgres:5432/momo
 DB_VOLUME_NAME=momo-406-static-pgdata
 REDIS_PASSWORD=1099a519ac6d439fba20c1940d483108
 CENTRIFUGO_REDIS_ADDRESS=redis://:1099a519ac6d439fba20c1940d483108@redis:6379/0
@@ -104,6 +109,7 @@ CENT_TOKEN_HMAC=5d5b20976e38402a949e1b19655b0a9b
 CENT_API_KEY=69fed31405fb4696b3677e12a4f09737
 CENT_PROXY_SECRET=b3b355af9df54d2f9df7b46d51aad7dc
 JWT_HMAC=231171fc80c5458a84c0c52cd5b9f284
+OUTBOUND_WEBHOOK_MASTER_KEY=1524c03919df48adb80eb29568e8ef1f
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_MODEL=hermes-agent
 HERMES_BASE_URL=https://gateway.momo-install.example.net/v1
@@ -151,9 +157,19 @@ grep -Fq 'MOMO_API_IMAGE must be an immutable image ref' "$TMP_ROOT/tag.out" ||
   fail "tag-only image did not reach the installer digest guard"
 pass "install requires per-image sha256 digests beyond the shared preflight"
 
+KEY_REUSE_ENV="$TMP_ROOT/key-reuse.env"
+sed "s|^OUTBOUND_WEBHOOK_MASTER_KEY=.*|OUTBOUND_WEBHOOK_MASTER_KEY=231171fc80c5458a84c0c52cd5b9f284|" "$ENV_FILE" > "$KEY_REUSE_ENV"
+if run_capture "$TMP_ROOT/key-reuse.out" "$INSTALL" --env-file "$KEY_REUSE_ENV" --mode staging \
+  --state-dir "$TMP_ROOT/key-reuse-state" --dry-run; then
+  fail "install accepted OUTBOUND_WEBHOOK_MASTER_KEY=JWT_HMAC"
+fi
+grep -Fq 'OUTBOUND_WEBHOOK_MASTER_KEY must not reuse JWT_HMAC' "$TMP_ROOT/key-reuse.out" ||
+  fail "webhook/JWT key reuse did not reach the preflight independence guard"
+pass "install rejects outbound webhook/JWT key reuse"
+
 run_capture "$TMP_ROOT/install.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/install-state" --dry-run
-grep -Fq 'pull six pinned images -> start postgres/redis/centrifugo -> run migrate and web-init once -> start api/relay/worker/linkshort/caddy' "$TMP_ROOT/install.out" ||
+grep -Fq 'pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate and web-init once -> start api/relay/worker/linkshort/caddy' "$TMP_ROOT/install.out" ||
   fail "install dry-run plan lost the ordered migration/start contract"
 grep -Fq 'config --quiet' "$TRACE" || fail "install did not render docker compose config"
 pass "install dry-run validates preflight/digests/compose and ordered idempotent plan"
@@ -168,13 +184,21 @@ pass "real upgrade requires explicit backup evidence"
 
 run_capture "$TMP_ROOT/upgrade.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/state" --dry-run
-grep -Fq 'run forward migration and web-init -> restart api/relay/worker/linkshort/caddy' "$TMP_ROOT/upgrade.out" ||
+grep -Fq 'provision runtime roles -> run forward migration and web-init -> restart api/relay/worker/linkshort/caddy' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run lost migration/restart ordering"
 grep -Fq 'automatically restore previous api/relay/worker/web/LinkShort digests' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run lost the previous-image rollback path"
 grep -Fq 'database remains forward-only' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run did not disclose forward-only database migrations"
 pass "upgrade dry-run exposes sequential restart and app-only rollback asymmetry"
+
+for deploy_script in "$INSTALL" "$UPGRADE"; do
+  role_line="$(grep -n 'run --rm --no-deps runtime-roles' "$deploy_script" | head -n 1 | cut -d: -f1)"
+  migrate_line="$(grep -n 'run --rm --no-deps migrate' "$deploy_script" | head -n 1 | cut -d: -f1)"
+  [ -n "$role_line" ] && [ -n "$migrate_line" ] && [ "$role_line" -lt "$migrate_line" ] ||
+    fail "$deploy_script must provision runtime roles before invoking migrate"
+done
+pass "install and upgrade consume runtime-role provisioning before migrations"
 
 mkdir -p "$TMP_ROOT/legacy-state"
 grep -Ev '^MOMO_(WEB|LINKSHORT)_IMAGE=' "$TMP_ROOT/state/$DEPLOY_STATE_NAME" > "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"

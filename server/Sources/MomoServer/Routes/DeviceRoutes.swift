@@ -196,7 +196,7 @@ struct DeviceRoutes: Sendable {
                     logger: db.logger
                 ).collect()
                 guard insertedRows.first != nil else {
-                    throw HTTPError(.conflict, message: "push token is already registered in another workspace")
+                    throw HTTPError(.conflict, message: "push token is already registered")
                 }
             }
             } catch let error as PSQLError where error.serverInfo?[.sqlState] == "23505" {
