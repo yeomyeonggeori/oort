@@ -9,11 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-<<<<<<< HEAD
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend {
-=======
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MomoMembershipAdministrationBackend {
->>>>>>> origin/track/uxui
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMembershipAdministrationBackend, MomoAgentRunMemoryDeliveryProviding {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -35,6 +31,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
     private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
+    private var memoryDeliveriesByRunID: [RunID: MomoMemoryDeliveryReceipt] = [:]
 
     public init(
         config: MomoServerRESTChatBackendConfig,
@@ -139,6 +136,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
 
     private func resetSessionState(workspace: WorkspaceID?) {
         self.workspace = workspace
+        memoryDeliveriesByRunID = [:]
         accessToken = nil
         authenticatedMember = nil
         cachedChannels = nil
@@ -735,7 +733,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         clientRunId: UUID
     ) async throws -> AgentWorkRun {
         guard let workspace else { throw BackendError.notConnected }
-        return try await post(
+        let response = try await post(
             "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/agent-runs",
             body: CreateAgentWorkRunRequest(
                 agentMemberId: agent,
@@ -743,8 +741,10 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
                 input: input
             ),
             authorized: true,
-            response: AgentWorkRun.self
+            response: MomoAgentRunWireResponse.self
         )
+        cacheMemoryDelivery(response)
+        return response.run
     }
 
     public func workRuns(channel: ChannelID, limit: Int = 50) async throws -> [AgentWorkRun] {
@@ -755,18 +755,33 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
                 URLQueryItem(name: "type", value: "work"),
                 URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
             ],
-            response: AgentWorkRunPage.self
+            response: MomoAgentRunPageWireResponse.self
         )
-        return page.runs
+        page.runs.forEach(cacheMemoryDelivery)
+        return page.runs.map(\.run)
     }
 
     public func workRun(id: RunID) async throws -> AgentWorkRun {
         guard let workspace else { throw BackendError.notConnected }
-        return try await get(
+        let response = try await get(
             "/v1/workspaces/\(workspace.description)/agent-runs/\(id.description)",
             queryItems: [],
-            response: AgentWorkRun.self
+            response: MomoAgentRunWireResponse.self
         )
+        cacheMemoryDelivery(response)
+        return response.run
+    }
+
+    func memoryDeliveries(for runIDs: [RunID]) async -> [RunID: MomoMemoryDeliveryReceipt] {
+        Dictionary(
+            uniqueKeysWithValues: runIDs.compactMap { runID in
+                memoryDeliveriesByRunID[runID].map { (runID, $0) }
+            }
+        )
+    }
+
+    private func cacheMemoryDelivery(_ response: MomoAgentRunWireResponse) {
+        memoryDeliveriesByRunID[response.run.id] = response.memoryDelivery
     }
 
     // MARK: Memory Plane (ADR-0129)

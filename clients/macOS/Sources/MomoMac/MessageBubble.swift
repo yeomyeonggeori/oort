@@ -39,6 +39,8 @@ public struct MessageBubble: View {
     private let groupingStyle: MessageBubbleGroupingStyle
     private let timelineCopy: MomoWorkspaceCopy
     private let presentation: MomoDeveloperModePresentation
+    private let memoryDelivery: MomoMemoryDeliveryReceipt?
+    private let onOpenServedContext: (() -> Void)?
     @State private var isHovered = false
     @State private var isBasicCardExpanded = false
     @State private var isEditing = false
@@ -86,6 +88,8 @@ public struct MessageBubble: View {
         self.groupingStyle = .standalone
         self.timelineCopy = MomoWorkspaceCopy(language: .preferredDefault)
         self.presentation = .standard
+        self.memoryDelivery = nil
+        self.onOpenServedContext = nil
     }
 
     init(
@@ -111,7 +115,9 @@ public struct MessageBubble: View {
         onOpenAttachment: ((MessageAttachment) -> Void)? = nil,
         groupingStyle: MessageBubbleGroupingStyle,
         timelineCopy: MomoWorkspaceCopy,
-        presentation: MomoDeveloperModePresentation = .standard
+        presentation: MomoDeveloperModePresentation = .standard,
+        memoryDelivery: MomoMemoryDeliveryReceipt? = nil,
+        onOpenServedContext: (() -> Void)? = nil
     ) {
         self.message = message
         self.author = author
@@ -136,6 +142,8 @@ public struct MessageBubble: View {
         self.groupingStyle = groupingStyle
         self.timelineCopy = timelineCopy
         self.presentation = presentation
+        self.memoryDelivery = memoryDelivery
+        self.onOpenServedContext = onOpenServedContext
     }
 
     private var isAgent: Bool { author?.isAgent ?? false }
@@ -379,8 +387,19 @@ public struct MessageBubble: View {
 
     @ViewBuilder
     private var messageMetadata: some View {
-        if !reactions.isEmpty || showsReplyMetadata || interactionError != nil || showsEditedMetadata {
+        if visibleMemoryDelivery != nil
+            || !reactions.isEmpty
+            || showsReplyMetadata
+            || interactionError != nil
+            || showsEditedMetadata {
             VStack(alignment: .leading, spacing: 4) {
+                if let visibleMemoryDelivery, let onOpenServedContext {
+                    MomoMemoryDeliveryMetadata(
+                        receipt: visibleMemoryDelivery,
+                        copy: timelineCopy,
+                        onOpenServedContext: onOpenServedContext
+                    )
+                }
                 if !reactions.isEmpty || showsReplyMetadata {
                     MomoReactionFlowLayout(spacing: MomoTheme.MessageInteraction.compactSpacing) {
                         ForEach(reactions) { reaction in
@@ -429,6 +448,14 @@ public struct MessageBubble: View {
 
     private var showsEditedMetadata: Bool {
         !message.isDeleted && (message.editedAtMs != nil || message.state == .edited)
+    }
+
+    private var visibleMemoryDelivery: MomoMemoryDeliveryReceipt? {
+        guard isAgent,
+              message.runId != nil,
+              onOpenServedContext != nil,
+              memoryDelivery?.isVisible == true else { return nil }
+        return memoryDelivery
     }
 
     private var showsReplyMetadata: Bool {

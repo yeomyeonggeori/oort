@@ -43,6 +43,11 @@
 - 실제 모델 전달 시 `agent_run.input.memory_delivery={included_count,injected}` receipt를 기록하며, `/memories/search?agent=`가 호출자 아닌 agent scope를 차용하면 `memory.search.agent_scope_borrowed` audit 1행을 같은 tenant transaction에 남긴다. 스키마·기존 payload 필드는 변경하지 않았다.
 - AgentWorker 47·server 150·Hermes adapter 60 tests와 focused 회귀가 실패 0이며, 격리 PG18+Centrifugo에서 `verify_agent_context.sh`가 mock Hermes 요청 덤프의 memory excerpt·별도 system 블록·budget/history 회귀·receipt `1|true`·차용 감사행·source DB digest 보존을 PASS했다.
 
+## UXUI MOMO-552 메모리 주입 표시 (#640, 2026-07-22)
+
+- macOS가 `agent_run.input.memory_delivery` 영수증을 fail-closed sidecar로 소비해 `injected=true`이고 `included_count>0`이며 저장 packet ID를 확인한 에이전트 응답·Work 실행 카드에만 "메모리 n건 반영" 메타 버튼을 표시하고, 기존 서빙 내역 인스펙터로 연결한다. 0건·미주입·malformed 영수증과 packet ID 없는 실행은 거짓 액션 없이 무표시다.
+- macOS build와 집중 로직·REST 계약 테스트, 표시/무표시 라이트·다크 스냅샷 4장이 PASS했다. 시작점 `track/uxui`에 커밋돼 있던 충돌 마커 6개도 양쪽 protocol conformance를 보존해 정리했다.
+
 ## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
 
 - `examples/eve-momo-channel`은 eve 0.27.0 `defineChannel`/`routeAuth`/`send`/workspace·channel continuation token으로, `examples/cloudflare-agent-momo`는 permissive·audit 경계를 지키는 Agents SDK 0.3.10 인증 fetch로 기존 per-agent bearer gateway pending→event→complete 계약만 소비한다. 코어 서버·OpenAPI·스키마·루트 npm은 변경하지 않았다.

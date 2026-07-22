@@ -4,6 +4,42 @@ import MomoCore
 
 @MainActor
 final class AgentWorkSurfaceTests: XCTestCase {
+    func testMemoryDeliveryVisibilityIsFailClosedAndCopyStatesOnlyInclusion() throws {
+        let shown = try XCTUnwrap(MomoMemoryDeliveryReceipt(includedCount: 3, injected: true))
+        let zero = try XCTUnwrap(MomoMemoryDeliveryReceipt(includedCount: 0, injected: true))
+        let notInjected = try XCTUnwrap(MomoMemoryDeliveryReceipt(includedCount: 3, injected: false))
+
+        XCTAssertTrue(shown.isVisible)
+        XCTAssertFalse(zero.isVisible)
+        XCTAssertFalse(notInjected.isVisible)
+        XCTAssertNil(MomoMemoryDeliveryReceipt(includedCount: -1, injected: true))
+
+        let korean = MomoWorkspaceCopy(language: .korean).memoryDeliverySummary(shown.includedCount)
+        let english = MomoWorkspaceCopy(language: .english).memoryDeliverySummary(shown.includedCount)
+        XCTAssertEqual(korean, "메모리 3건 반영")
+        XCTAssertEqual(english, "3 memory items included")
+        XCTAssertFalse(korean.contains("사용"))
+        XCTAssertFalse(english.localizedCaseInsensitiveContains("used"))
+    }
+
+    func testMemoryDeliveryWireReceiptRejectsMalformedInput() throws {
+        let valid = try JSONDecoder().decode(
+            MomoAgentRunWireResponse.self,
+            from: Data(Self.memoryDeliveryRunJSON(includedCount: 2, injected: true).utf8)
+        )
+        XCTAssertEqual(valid.memoryDelivery?.includedCount, 2)
+        XCTAssertTrue(valid.memoryDelivery?.isVisible == true)
+
+        let malformed = Self.memoryDeliveryRunJSON(
+            memoryDelivery: #"{"included_count":"two","injected":true}"#
+        )
+        let decoded = try JSONDecoder().decode(
+            MomoAgentRunWireResponse.self,
+            from: Data(malformed.utf8)
+        )
+        XCTAssertNil(decoded.memoryDelivery)
+    }
+
     func testWorkCommandRecognizesOnlyExactCommandBoundary() {
         XCTAssertEqual(AgentWorkCommandParser.parse("/work")?.brief, "")
         let draft = "  /work   macOS 빌드 오류를 수정해줘  "
@@ -11,6 +47,32 @@ final class AgentWorkSurfaceTests: XCTestCase {
         XCTAssertEqual(AgentWorkCommandParser.parse(draft)?.draftToRestore, draft)
         XCTAssertNil(AgentWorkCommandParser.parse("/worker should stay a message"))
         XCTAssertNil(AgentWorkCommandParser.parse("please /work later"))
+    }
+
+    private static func memoryDeliveryRunJSON(includedCount: Int, injected: Bool) -> String {
+        memoryDeliveryRunJSON(
+            memoryDelivery: #"{"included_count":\#(includedCount),"injected":\#(injected)}"#
+        )
+    }
+
+    private static func memoryDeliveryRunJSON(memoryDelivery: String) -> String {
+        """
+        {
+          "id":"00000000-0000-7000-8000-000000000552",
+          "workspaceId":"00000000-0000-7000-8000-000000000001",
+          "agentMemberId":"00000000-0000-7000-8000-000000000103",
+          "channelId":"00000000-0000-7000-8000-000000000202",
+          "status":"succeeded",
+          "stepCount":1,
+          "maxSteps":50,
+          "depth":0,
+          "input":{"type":"work","title":"릴리스 노트 정리","brief":"한국어와 English 항목을 정리합니다.","memory_delivery":\(memoryDelivery)},
+          "output":null,
+          "error":null,
+          "createdAtMs":1783910400000,
+          "updatedAtMs":1783910460000
+        }
+        """
     }
 
     func testDurableTerminalWorkStatusWinsOverHydratedApprovalSidecar() async throws {

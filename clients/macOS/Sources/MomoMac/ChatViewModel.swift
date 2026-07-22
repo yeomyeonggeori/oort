@@ -163,11 +163,9 @@ public final class ChatViewModel: ObservableObject {
     private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
     private let workConsoleBackend: (any MomoWorkConsoleBackend)?
     private let workHostBackend: (any MomoWorkHostBackend)?
-<<<<<<< HEAD
     private let memoryPlaneBackend: (any MemoryPlaneBackend)?
-=======
     private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
->>>>>>> origin/track/uxui
+    private let runMemoryDeliveryBackend: (any MomoAgentRunMemoryDeliveryProviding)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -266,6 +264,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var workCreationError: AgentWorkSurfaceError?
     @Published public private(set) var workHistoryErrorsByChannel: [ChannelID: AgentWorkSurfaceError] = [:]
     @Published public private(set) var workDetailErrorsById: [RunID: AgentWorkSurfaceError] = [:]
+    @Published private(set) var memoryDeliveriesByRunID: [RunID: MomoMemoryDeliveryReceipt] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -366,11 +365,9 @@ public final class ChatViewModel: ObservableObject {
         self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
         self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
         self.workHostBackend = chat as? any MomoWorkHostBackend
-<<<<<<< HEAD
         self.memoryPlaneBackend = chat as? any MemoryPlaneBackend
-=======
         self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
->>>>>>> origin/track/uxui
+        self.runMemoryDeliveryBackend = chat as? any MomoAgentRunMemoryDeliveryProviding
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -628,6 +625,7 @@ public final class ChatViewModel: ObservableObject {
         bufferedReactionDeltasByChannel = [:]
         bufferedTimelineEventsByChannel = [:]
         workRunsByChannel = [:]
+        memoryDeliveriesByRunID = [:]
         workRunLoadingChannels = []
         workRunDetailLoadingIds = []
         isCreatingWorkRun = false
@@ -2129,6 +2127,15 @@ public final class ChatViewModel: ObservableObject {
             .sorted(by: Self.seqOrder)
     }
 
+    func memoryDelivery(for id: RunID) -> MomoMemoryDeliveryReceipt? {
+        memoryDeliveriesByRunID[id]
+    }
+
+    func contextPacketID(for id: RunID) -> UUID? {
+        guard let run = workRun(id) else { return nil }
+        return MomoContextPacketIDResolver.resolve(run: run, messages: workMessages(for: id))
+    }
+
     public func workApproval(for id: RunID) -> ApprovalEvent? {
         approvals.values
             .filter { $0.runId == id }
@@ -2196,7 +2203,9 @@ public final class ChatViewModel: ObservableObject {
         workRunDetailLoadingIds.insert(id)
         defer { workRunDetailLoadingIds.remove(id) }
         do {
-            upsertWorkRun(try await workRunBackend.workRun(id: id))
+            let run = try await workRunBackend.workRun(id: id)
+            upsertWorkRun(run)
+            await refreshMemoryDeliveries(for: [run])
             workDetailErrorsById[id] = nil
         } catch {
             workDetailErrorsById[id] = .detailFailed
@@ -3846,6 +3855,7 @@ public final class ChatViewModel: ObservableObject {
         do {
             let runs = try await workRunBackend.workRuns(channel: channel, limit: 50)
             workRunsByChannel[channel] = runs
+            await refreshMemoryDeliveries(for: runs)
             workHistoryErrorsByChannel[channel] = nil
         } catch {
             workHistoryErrorsByChannel[channel] = .historyFailed
@@ -3860,6 +3870,18 @@ public final class ChatViewModel: ObservableObject {
             runs.append(run)
         }
         workRunsByChannel[run.channelId] = runs
+    }
+
+    private func refreshMemoryDeliveries(for runs: [AgentWorkRun]) async {
+        let runIDs = runs.map(\.id)
+        guard let runMemoryDeliveryBackend else {
+            for runID in runIDs { memoryDeliveriesByRunID[runID] = nil }
+            return
+        }
+        let deliveries = await runMemoryDeliveryBackend.memoryDeliveries(for: runIDs)
+        for runID in runIDs {
+            memoryDeliveriesByRunID[runID] = deliveries[runID]
+        }
     }
 
     private func updateWorkRunStatus(_ status: AgentStatus) {
