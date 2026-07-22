@@ -6,6 +6,7 @@ FROM postgres:18
 WORKDIR /workspace
 
 COPY scripts/migrate.sh scripts/migrate.sh
+COPY scripts/check_migration_numbers.sh scripts/check_migration_numbers.sh
 COPY server/Migrations server/Migrations
 COPY infra/e2e/bootstrap_roles.sql infra/e2e/bootstrap_roles.sql
 COPY infra/prod/bootstrap_runtime_roles.sql infra/prod/bootstrap_runtime_roles.sql
