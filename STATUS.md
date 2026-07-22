@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-536 에이전트 명부 + A2A 카드 URL 온보딩 (#616, 2026-07-22)
+
+- migration 032에 `agent_card_registration` 원장(raw public card JSON·display-only security 요약·pending/confirmed 상태)과 workspace_id 기반 FORCE RLS를 추가했다. 관리자 `from-card`는 5초/256KB/최대 2홉 제한, 홉별 DNS 전체 IP 검사와 검증 IP 연결 고정, 기본 HTTPS 강제로 fail-closed fetch한 뒤에만 pending 원장을 쓴다.
+- confirm은 기존 agent member/workspace membership 및 gateway bearer 발급 기계장치를 한 tenant transaction에서 재사용하고 `agent.created`·`agent.credential.issued`·`agent.card.confirmed` audit을 남긴다. roster에는 기존 필드를 유지한 채 agent `origin=card|local`을 가산했고 OpenAPI를 동기화했다.
+- SSRF/redirect/card parser·요청 폐쇄성·migration 경계 집중 유닛 8건, 서버 전체 156 테스트, Swift 전 패키지 9개 빌드는 PASS했다. `verify_agent_card_onboarding.sh`는 28124~28128 격리 포트의 Python card mock으로 pending→confirm·credential digest·audit·origin·SSRF 400 무기록·RLS를 단정하며, Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
+
 ## MOMO-528 Context Packet v0 불변 승격 (#598, 2026-07-22)
 
 - migration 030에 불변 `context_packet` 원장·FORCE RLS와 기본 actor/agent/workspace 스코프 ∪ 유효 visibility grant 검색 필터를 추가하고, mention 트랜잭션이 profile 상시+fact/episode 질의 memory refs와 실제 plugin capability grant를 동결한다.

@@ -120,6 +120,17 @@ struct RosterRoutes: Sendable {
                                  ) WITH ORDINALITY AS capability(value, ordinality)
                                 WHERE jsonb_typeof(capability.value) = 'string'
                              ), '[]'::jsonb),
+                             'origin', CASE
+                               WHEN m.kind = 'agent' AND EXISTS (
+                                 SELECT 1
+                                   FROM agent_card_registration acr
+                                  WHERE acr.workspace_id = m.workspace_id
+                                    AND acr.agent_member_id = m.id
+                                    AND acr.status = 'confirmed'
+                               ) THEN 'card'
+                               WHEN m.kind = 'agent' THEN 'local'
+                               ELSE NULL
+                             END,
                              'email', h.email,
                              'timeZone', h.tz,
                              'agentModel', a.model,
