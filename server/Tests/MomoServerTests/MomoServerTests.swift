@@ -8,6 +8,34 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual("MomoServer", "MomoServer")
     }
 
+    func testDatabaseSecurityPostureBootGuardScopeAndValidation() throws {
+        for environment in ["staging", "prod", "production", "internal-host", "internal-smoke"] {
+            XCTAssertTrue(DatabaseSecurityPosture.requiresBootGuard(environmentName: environment))
+        }
+        for environment in ["local", "dev", "test", ""] {
+            XCTAssertFalse(DatabaseSecurityPosture.requiresBootGuard(environmentName: environment))
+        }
+
+        XCTAssertNoThrow(try DatabaseSecurityPosture(
+            currentUser: "momo_app", isSuperuser: false, bypassesRLS: false
+        ).validateForAPIBoot())
+        XCTAssertThrowsError(try DatabaseSecurityPosture(
+            currentUser: "momo", isSuperuser: true, bypassesRLS: true
+        ).validateForAPIBoot()) { error in
+            XCTAssertEqual(error as? DatabaseSecurityPostureError, .unexpectedRole("momo"))
+        }
+        XCTAssertThrowsError(try DatabaseSecurityPosture(
+            currentUser: "momo_app", isSuperuser: true, bypassesRLS: false
+        ).validateForAPIBoot()) { error in
+            XCTAssertEqual(error as? DatabaseSecurityPostureError, .superuser("momo_app"))
+        }
+        XCTAssertThrowsError(try DatabaseSecurityPosture(
+            currentUser: "momo_app", isSuperuser: false, bypassesRLS: true
+        ).validateForAPIBoot()) { error in
+            XCTAssertEqual(error as? DatabaseSecurityPostureError, .bypassesRLS("momo_app"))
+        }
+    }
+
     func testOfficialPluginManifestsValidateAndMatchVerifiedEndpoints() throws {
         let fixtures = try pluginFixtureDirectory()
         let expected: [(String, String, String?, [String], Bool)] = [
@@ -3596,6 +3624,18 @@ final class MomoServerTests: XCTestCase {
             XCTAssertThrowsError(try config.validateSecurityForBoot(), env)
             config.centProxySecret = "0f3f2c9a51e64b4bb1d2f8f4f5a6b7c8"
             XCTAssertNoThrow(try config.validateSecurityForBoot(), env)
+        }
+    }
+
+    func testSecurityBootValidationRejectsOutboundWebhookJWTKeyReuseInStrictEnv() {
+        var config = testServerConfig()
+        config.momoEnvironment = "prod"
+        config.centProxySecret = "0f3f2c9a51e64b4bb1d2f8f4f5a6b7c8"
+        config.outboundWebhookMasterKey = config.jwtHMAC
+        XCTAssertThrowsError(try config.validateSecurityForBoot()) { error in
+            XCTAssertTrue(String(describing: error).contains(
+                "OUTBOUND_WEBHOOK_MASTER_KEY must not reuse JWT_HMAC"
+            ))
         }
     }
 
