@@ -2350,3 +2350,19 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-539 수용기준 — 추출 워커 실패 백오프 (소형) `[runtime]`
 - [ ] 지수 백오프(상한 5분)+포이즌 배치 N회 후 워터마크 전진+audit 1회, 핫루프 제거
 - [ ] 백오프 유닛 + verify_memory_plane 회귀
+
+### MOMO-545 수용기준 — memory_refs 모델 실주입 (sol 감사 §1-1, HIGH) `[runtime]`
+- [ ] ContextAssembler가 packet memory_refs를 모델 메시지에 주입(시스템/컨텍스트 블록, 예산 절사 유지) + run 레코드에 주입 여부 기록(포함/조회/인용 어휘 구분)
+- [ ] /memories/search agent 파라미터 차용에 audit 로그 + verify_agent_context 확장(모델 요청 덤프에 memory 발췌 존재 단정 — end-to-end 소비 규율)
+
+### MOMO-546 수용기준 — workd ACP 이벤트 서버 릴레이 (⑪/532 전제) `[runtime]`
+- [ ] 정규화 이벤트(진행/plan/승인 요청·결정/터미널 생성)를 기존 work 이벤트 REST로 발송(단일 쓰기경로·outbox), raw JSONL은 호스트 로컬 유지(0125 D10)
+- [ ] verify_acp_host 확장: 서버 원장 행+realtime 카드 투영 단정
+
+### MOMO-547 수용기준 — ACP/PTY 자식 env 스크럽 옵션 (소형) `[runtime]`
+- [ ] 기본 allowlist env(PATH/HOME/LANG 계열)+옵트인 패스스루, 프로파일별 env 정책은 work_tool_profile 확장 필드
+- [ ] 기존 workd/acp verifier 회귀
+
+### MOMO-548 수용기준 — 외부 provider 추출 동의 게이트 `[runtime]`
+- [ ] provider=external 시 워크스페이스 명시 옵트인 없으면 추출/임베딩 fail-closed 오프(내부 mock/self-host 현행), 정책 스위치와 별도 축
+- [ ] verify_memory_plane 회귀 + 동의 상태 전이 verifier
