@@ -148,10 +148,33 @@ struct MemoryRoutes: Sendable {
             vectorLiteral = nil
         }
 
-        let hits = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        let hits = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             _ = try await WorkspaceAuthorization.requireMember(
                 conn: conn, logger: db.logger, principal: principal
             )
+            if Self.isBorrowedAgentScope(
+                callerMemberID: principal.memberID,
+                agentID: agentID
+            ), let agentID {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO audit_log
+                      (workspace_id, actor_member_id, subject_member_id, action,
+                       target_type, target_id, via_token_id, detail)
+                    VALUES
+                      (\(workspaceID), \(principal.memberID), \(agentID),
+                       'memory.search.agent_scope_borrowed', 'agent', \(agentID),
+                       \(principal.tokenID),
+                       jsonb_build_object(
+                         'schema', 'momo.memory.search.agent_scope_borrowed.v1',
+                         'requested_agent_id', lower(\(agentID)::text),
+                         'scope', \(scope)::text,
+                         'query_present', true
+                       ))
+                    """,
+                    logger: db.logger
+                )
+            }
             let rows = try await conn.query(
                 """
                 SELECT search.memory_id, search.fts_rank, search.vector_rank,
@@ -192,6 +215,11 @@ struct MemoryRoutes: Sendable {
             }
         }
         return try MemorySearchResponse(hits: hits).response(from: request, context: context)
+    }
+
+    static func isBorrowedAgentScope(callerMemberID: UUID, agentID: UUID?) -> Bool {
+        guard let agentID else { return false }
+        return agentID != callerMemberID
     }
 
     @Sendable

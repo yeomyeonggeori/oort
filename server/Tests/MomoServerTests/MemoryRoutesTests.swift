@@ -50,6 +50,34 @@ final class MemoryRoutesTests: XCTestCase {
         XCTAssertNoThrow(try MemoryRoutes.validatedConfidence(1))
     }
 
+    func testBorrowedAgentScopeAuditPredicateOnlyFlagsAnotherAgent() {
+        let caller = UUID(uuidString: "00000000-0000-7000-8000-000000000510")!
+        let otherAgent = UUID(uuidString: "00000000-0000-7000-8000-000000000511")!
+
+        XCTAssertFalse(MemoryRoutes.isBorrowedAgentScope(callerMemberID: caller, agentID: nil))
+        XCTAssertFalse(MemoryRoutes.isBorrowedAgentScope(callerMemberID: caller, agentID: caller))
+        XCTAssertTrue(
+            MemoryRoutes.isBorrowedAgentScope(callerMemberID: caller, agentID: otherAgent)
+        )
+    }
+
+    func testGatewayMemoryDeliveryReceiptValidatesObservableFields() throws {
+        let receipt = try JSONDecoder().decode(
+            AgentMemoryDeliveryReceipt.self,
+            from: Data(#"{"included_count":2,"injected":true}"#.utf8)
+        )
+
+        XCTAssertNoThrow(try receipt.validated())
+        XCTAssertEqual(receipt.asObject()["included_count"] as? Int, 2)
+        XCTAssertEqual(receipt.asObject()["injected"] as? Bool, true)
+
+        let invalid = try JSONDecoder().decode(
+            AgentMemoryDeliveryReceipt.self,
+            from: Data(#"{"included_count":0,"injected":true}"#.utf8)
+        )
+        XCTAssertThrowsError(try invalid.validated())
+    }
+
     func testMemoryUpdatedBroadcastCarriesCanonicalChannelAndNoBody() throws {
         let json = MemoryRoutes.broadcastPayload(
             workspaceID: workspaceID,
