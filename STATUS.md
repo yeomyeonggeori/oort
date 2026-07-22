@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-529 메모리 브라우저·서빙 인스펙터 (#603, 2026-07-22)
+
+- macOS 워크스페이스 메뉴와 에이전트 프로필에 "에이전트가 아는 것" 브라우저를 추가했다. 스코프·에이전트·무효 상태 필터, 검색, 열람·편집·무효화, 출처 메시지 이동, 관리자 정책 스위치는 모두 서버 Memory REST를 권위로 사용하며 기존 데이터를 로딩·오류 중에도 유지한다.
+- Work run 상세에는 저장된 불변 Context Packet을 여는 읽기 전용 인스펙터를 추가해 히스토리·memory refs·tool grants·budget·redactions·만료 상태를 표시한다. packet은 클라이언트에서 재조립하지 않고 기존 run/message props에서 식별자를 발견한 경우에만 GET으로 조회한다.
+- MomoCore·macOS build, focused 4 tests와 한국어 라이트·다크 스냅샷 2종이 PASS했다. macOS 전체 463 tests는 460 PASS·1 loopback skip이고, 변경과 무관한 기존 Work Console color-vision/high-contrast preset canonical 2건만 0.98 임계에서 불일치했다. 서버에 아직 없는 visibility grant 목록/회수, run→packet 식별자 투영, `memory.updated` Core realtime 소비, cache 밖 source_ref 메시지 단건 이동은 ENGINE_HANDOFF X-11로 역요청했으며 그 전까지 해당 동작은 거짓 개방하지 않는다. 실서버 편집→realtime 수렴과 공식 design-review는 momo-main 검증 전까지 `runtime-unverified`다.
+
 ## MOMO-528 Context Packet v0 불변 승격 (#598, 2026-07-22)
 
 - migration 030에 불변 `context_packet` 원장·FORCE RLS와 기본 actor/agent/workspace 스코프 ∪ 유효 visibility grant 검색 필터를 추가하고, mention 트랜잭션이 profile 상시+fact/episode 질의 memory refs와 실제 plugin capability grant를 동결한다.

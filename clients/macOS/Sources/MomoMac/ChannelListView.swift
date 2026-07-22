@@ -105,6 +105,7 @@ public struct ChannelListView: View {
     private let openProfile: (() -> Void)?
     private let openMemberProfile: ((MemberID) -> Void)?
     private let openWorkspaceSettings: (() -> Void)?
+    private let openMemoryBrowser: (() -> Void)?
     private let openSettings: (() -> Void)?
     private let openUpdates: (() -> Void)?
     private let openPluginMarketplace: (() -> Void)?
@@ -123,6 +124,7 @@ public struct ChannelListView: View {
         self.openProfile = nil
         self.openMemberProfile = nil
         self.openWorkspaceSettings = nil
+        self.openMemoryBrowser = nil
         self.openSettings = nil
         self.openUpdates = nil
         self.openPluginMarketplace = nil
@@ -142,6 +144,7 @@ public struct ChannelListView: View {
         openProfile: (() -> Void)? = nil,
         openMemberProfile: ((MemberID) -> Void)? = nil,
         openWorkspaceSettings: (() -> Void)? = nil,
+        openMemoryBrowser: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
         openPluginMarketplace: (() -> Void)? = nil,
@@ -159,6 +162,7 @@ public struct ChannelListView: View {
         self.openProfile = openProfile
         self.openMemberProfile = openMemberProfile
         self.openWorkspaceSettings = openWorkspaceSettings
+        self.openMemoryBrowser = openMemoryBrowser
         self.openSettings = openSettings
         self.openUpdates = openUpdates
         self.openPluginMarketplace = openPluginMarketplace
@@ -419,6 +423,12 @@ public struct ChannelListView: View {
             profileAction(copy.serverSettings, systemImage: "gearshape") {
                 showWorkspaceMenu = false
                 openWorkspaceSettings?()
+            }
+            if openMemoryBrowser != nil {
+                profileAction(copy.memoryBrowserTitle, systemImage: "brain.head.profile") {
+                    showWorkspaceMenu = false
+                    openMemoryBrowser?()
+                }
             }
             if openPluginMarketplace != nil {
                 profileAction(
