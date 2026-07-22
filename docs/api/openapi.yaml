@@ -3786,6 +3786,106 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/memories/{memoryId}/grants:
+    get:
+      tags: [memories]
+      operationId: listMemoryVisibilityGrants
+      summary: List active and revoked explicit visibility grants for one memory.
+      description: >
+        Workspace owner/admin, the member-scope subject, or the human
+        owner of an agent-scope memory only. The read runs through FORCE RLS.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryId"
+      responses:
+        "200":
+          description: Grant ledger rows, with active grants first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryVisibilityGrantPageResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Memory does not exist in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    post:
+      tags: [memories]
+      operationId: grantMemoryVisibility
+      summary: Grant explicit memory visibility to one active member or agent.
+      description: >
+        Workspace owner/admin, the member-scope subject, or the human
+        owner of an agent-scope memory only. A revoked ledger row is reactivated;
+        posting an already-active grant is idempotent. Grant changes and audit
+        evidence commit in one ordinary tenant transaction through FORCE RLS.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MemoryVisibilityGrantRequest"}
+      responses:
+        "200":
+          description: Active grant projection.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryVisibilityGrantResponse"}
+        "400":
+          description: Invalid grantee kind/id or no matching active grantee.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Memory does not exist in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [memories]
+      operationId: revokeMemoryVisibility
+      summary: Revoke explicit memory visibility without deleting its ledger row.
+      description: >
+        Uses the same manager boundary as grant creation. The first call marks
+        revokedAtMs and writes audit evidence; revoking the same row again is an
+        idempotent 200 with no duplicate revoke audit row.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MemoryVisibilityGrantRequest"}
+      responses:
+        "200":
+          description: Revoked grant projection.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemoryVisibilityGrantResponse"}
+        "400":
+          description: Invalid grantee kind or identifier.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Memory or visibility grant does not exist in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/memory-policy:
     get:
       tags: [memories]
@@ -4175,6 +4275,51 @@ components:
       additionalProperties: false
       properties:
         invalidatedByMemoryId: {type: string, format: uuid}
+
+    MemoryVisibilityGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [granteeKind, granteeId]
+      properties:
+        granteeKind: {type: string, enum: [member, agent]}
+        granteeId: {type: string, format: uuid}
+
+    MemoryVisibilityGrant:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - workspaceId
+        - memoryId
+        - granteeKind
+        - granteeId
+        - grantedBy
+        - createdAtMs
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        memoryId: {type: string, format: uuid}
+        granteeKind: {type: string, enum: [member, agent]}
+        granteeId: {type: string, format: uuid}
+        grantedBy: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        revokedAtMs: {type: integer, format: int64}
+
+    MemoryVisibilityGrantResponse:
+      type: object
+      additionalProperties: false
+      required: [grant]
+      properties:
+        grant: {$ref: "#/components/schemas/MemoryVisibilityGrant"}
+
+    MemoryVisibilityGrantPageResponse:
+      type: object
+      additionalProperties: false
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryVisibilityGrant"}
 
     PutMemoryPolicyRequest:
       type: object
