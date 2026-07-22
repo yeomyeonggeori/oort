@@ -165,10 +165,7 @@ public final class ChatViewModel: ObservableObject {
     private let workHostBackend: (any MomoWorkHostBackend)?
     private let memoryPlaneBackend: (any MemoryPlaneBackend)?
     private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
-<<<<<<< HEAD
     private let runMemoryDeliveryBackend: (any MomoAgentRunMemoryDeliveryProviding)?
-=======
->>>>>>> origin/track/uxui
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -370,10 +367,7 @@ public final class ChatViewModel: ObservableObject {
         self.workHostBackend = chat as? any MomoWorkHostBackend
         self.memoryPlaneBackend = chat as? any MemoryPlaneBackend
         self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
-<<<<<<< HEAD
         self.runMemoryDeliveryBackend = chat as? any MomoAgentRunMemoryDeliveryProviding
-=======
->>>>>>> origin/track/uxui
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
