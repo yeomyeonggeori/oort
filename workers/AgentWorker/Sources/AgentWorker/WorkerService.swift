@@ -1599,9 +1599,9 @@ struct WorkerService: Service {
                 "arguments": anyValue(request.toolCall.arguments),
                 "payload_sha256": request.toolCall.payloadSHA256.map { $0 as Any } ?? NSNull(),
             ],
-            "policy_evidence": request.policyEvidence.jsonObject(),
+            "policy_evidence": request.policyEvidence.map { $0.jsonObject() as Any } ?? NSNull(),
             "output": anyValue(output),
-            "error": error ?? NSNull(),
+            "error": error.map { $0 as Any } ?? NSNull(),
             "executor": "agentworker.resume_approval.v0",
         ])
     }

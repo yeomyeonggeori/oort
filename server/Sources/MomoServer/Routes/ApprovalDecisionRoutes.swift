@@ -1119,7 +1119,10 @@ struct ApprovalDecisionRoutes: Sendable {
     ) -> String {
         let payload = approval.payload.objectValue ?? [:]
         let toolCall = payload["tool_call"]?.objectValue ?? [:]
-        let toolGrant = toolCall["tool_grant"].map(anyValue) ?? [:]
+        // grant 부재(예: capability 미등재 도구의 수동 승인)면 빈 객체가 아니라
+        // null을 내보낸다 — 빈 객체는 워커의 ToolGrantMetadata 디코드를 통째로
+        // 실패시켜 resume job이 죽는다(MOMO-528 fail-closed 전환에서 실측).
+        let toolGrant = toolCall["tool_grant"].map(anyValue) ?? NSNull()
         let runInput = approval.runInput.objectValue ?? [:]
         var result: [String: Any] = [
             "run_id": approval.runID.uuidString,

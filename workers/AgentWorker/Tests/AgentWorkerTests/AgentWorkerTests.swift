@@ -519,7 +519,7 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(result.output["tool_name"]?.stringValue, "momo.mock.echo")
     }
 
-    func testResumeApprovalExecutorFailsClosedWithoutPolicyEvidence() throws {
+    func testResumeApprovalExecutorAllowsHumanApprovedResumeWithoutPolicyEvidence() throws {
         let json = """
         {
           "run_id": "00000000-0000-7000-8000-000000000161",
@@ -543,9 +543,12 @@ final class AgentWorkerTests: XCTestCase {
         """
         let payload = try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
 
-        XCTAssertThrowsError(try ToolResumeExecutor().validate(payload)) { error in
-            XCTAssertEqual(error as? ToolResumeExecutor.Failure, .missingPolicyEvidence)
-        }
+        // MOMO-528 이후: capability grant가 없어 missing_or_ambiguous로 정지된
+        // 승인은 policy_evidence 없이 인간 결정만으로 재개된다. 결정 검증
+        // (approval_id 일치·approved 상태)은 여전히 필수다.
+        let validated = try ToolResumeExecutor().validate(payload)
+        XCTAssertNil(validated.policyEvidence)
+        XCTAssertEqual(validated.toolCall.name, "momo.mock.echo")
     }
 
     func testResumeApprovalExecutorRejectsNonApprovedDecision() throws {
