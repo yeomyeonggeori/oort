@@ -81,6 +81,21 @@ enum ACPEventProjection {
         return ACPProjectedEvent(type: "approval.decided", timestampMs: nowMs, payload: .object(payload))
     }
 
+    static func terminal(
+        event: String,
+        exitCode: Int? = nil,
+        context: ACPHostContext,
+        nowMs: Int64
+    ) -> ACPProjectedEvent {
+        var payload = basePayload(context: context)
+        payload["phase"] = .string("streaming")
+        payload["run_status"] = .string("running")
+        payload["terminal_event"] = .string(event)
+        payload["detail"] = .string(event == "created" ? "Terminal created" : "Terminal ended")
+        if let exitCode { payload["exit_code"] = .int(exitCode) }
+        return ACPProjectedEvent(type: "agent.status", timestampMs: nowMs, payload: .object(payload))
+    }
+
     private static func basePayload(context: ACPHostContext) -> [String: ACPValue] {
         var payload: [String: ACPValue] = [
             "run_id": .string(context.workSessionID.uuidString.lowercased()),

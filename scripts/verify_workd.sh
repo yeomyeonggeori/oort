@@ -56,6 +56,16 @@ OWNER_EMAIL="workd-owner-$RUN_TAG@momo.local"
 OWNER_PASSWORD="owner-$(new_uuid)"
 RAW_MARKER="MOMO_WORKD_RAW_${RUN_TAG//-/_}"
 WORKD_BIN="$REPO_ROOT/workers/WorkHostDaemon/.build/debug/momo-workd"
+ACP_MODE="${WORKD_GATE_ACP:-0}"
+TOOL_KEY="shell"
+TOOL_LABEL="MOMO-488 mock echo"
+if [ "$ACP_MODE" = "1" ]; then
+  # Reuse the seeded opencode ledger key so this verifier does not widen the
+  # pre-029 work_session DB check while still exercising ACP transport.
+  TOOL_KEY="opencode"
+  TOOL_LABEL="MOMO-546 ACP relay"
+  RAW_MARKER="vendorExtension"
+fi
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" \
@@ -150,6 +160,12 @@ VALUES
   ('$RUN_ID', '$WS_ID', '$AGENT_ID', '$CHANNEL_ID', 'running',
    '{"prompt":"MOMO-488 workd spawn"}'::jsonb, 1, 50, 0,
    'momo-488-workd-$RUN_TAG');
+UPDATE work_tool_profile
+   SET tier_defaults='{"transport":"acp"}'::jsonb,
+       updated_by='$OWNER_ID'
+ WHERE '$ACP_MODE' = '1'
+   AND workspace_id='$WS_ID'
+   AND tool_key='opencode';
 COMMIT;
 SQL
 
@@ -162,6 +178,14 @@ printf '%s\n' "$OWNER_TOKEN" >"$TMP_DIR/registration.token"
 chmod 600 "$TMP_DIR/registration.token"
 
 SHELL_ARGS_JSON="$(jq -cn --arg command "printf '$RAW_MARKER\\n'" '["-c",$command]')"
+if [ "$ACP_MODE" = "1" ]; then
+  PROFILE_EXECUTABLE_KEY="MOMO_WORKD_PROFILE_OPENCODE_EXECUTABLE=/usr/bin/python3"
+  PROFILE_ARGUMENTS_KEY="MOMO_WORKD_PROFILE_OPENCODE_ARGUMENTS_JSON=$(jq -cn --arg script "$REPO_ROOT/scripts/mock_acp_agent.py" '[$script]')"
+else
+  PROFILE_EXECUTABLE_KEY="MOMO_WORKD_PROFILE_SHELL_EXECUTABLE=/bin/sh"
+  PROFILE_ARGUMENTS_KEY="MOMO_WORKD_PROFILE_SHELL_ARGUMENTS_JSON=$SHELL_ARGS_JSON"
+fi
+env "$PROFILE_EXECUTABLE_KEY" "$PROFILE_ARGUMENTS_KEY" \
 MOMO_WORKD_SERVER_URL="$BASE_URL" \
 MOMO_WORKD_ALLOW_INSECURE_HTTP=1 \
 MOMO_WORKD_WORKSPACE_ID="$WS_ID" \
@@ -173,8 +197,6 @@ MOMO_WORKD_OUTPUT_DIR="$TMP_DIR/output" \
 MOMO_WORKD_REGISTRATION_TOKEN_FILE="$TMP_DIR/registration.token" \
 MOMO_WORKD_POLL_INTERVAL_MS=100 \
 MOMO_WORKD_HEARTBEAT_INTERVAL_MS=1000 \
-MOMO_WORKD_PROFILE_SHELL_EXECUTABLE=/bin/sh \
-MOMO_WORKD_PROFILE_SHELL_ARGUMENTS_JSON="$SHELL_ARGS_JSON" \
   "$WORKD_BIN" >"$TMP_DIR/workd.log" 2>&1 &
 WORKD_PID=$!
 
@@ -257,14 +279,15 @@ AGENT_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
 printf '%s' "$RESPONSE_BODY" | jq -e \
   '.credential.scopes | index("work:control") != null' >/dev/null
 
-api "$OWNER_TOKEN" PUT "/v1/workspaces/$WS_ID/work-auto-approvals/shell"
-expect_status 200 "enable shell auto approval"
+api "$OWNER_TOKEN" PUT "/v1/workspaces/$WS_ID/work-auto-approvals/$TOOL_KEY"
+expect_status 200 "enable $TOOL_KEY auto approval"
 
 CONTROL_PATH="/v1/workspaces/$WS_ID/work-controls"
 api "$AGENT_TOKEN" POST "$CONTROL_PATH" \
   "$(jq -cn --arg channel "$CHANNEL_ID" --arg run "$RUN_ID" --arg host "$HOST_ID" \
+    --arg tool "$TOOL_KEY" --arg label "$TOOL_LABEL" \
     '{channelId:$channel,runId:$run,targetHostId:$host,kind:"spawn",
-      payload:{tool:"shell",label:"MOMO-488 mock echo"}}')"
+      payload:{tool:$tool,label:$label}}')"
 expect_status 201 "approved/dispatched spawn"
 printf '%s' "$RESPONSE_BODY" | jq -e \
   '.workControl.status == "dispatched" and .workControl.kind == "spawn"' >/dev/null
@@ -300,7 +323,11 @@ done
   exit 1
 }
 
-OUTPUT_FILE="$TMP_DIR/output/$SESSION_ID.log"
+if [ "$ACP_MODE" = "1" ]; then
+  OUTPUT_FILE="$TMP_DIR/output/$SESSION_ID.acp-events.jsonl"
+else
+  OUTPUT_FILE="$TMP_DIR/output/$SESSION_ID.log"
+fi
 deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
 until [ -f "$OUTPUT_FILE" ] && grep -Fq "$RAW_MARKER" "$OUTPUT_FILE"; do
   if [ "$(date -u +%s)" -ge "$deadline" ]; then
@@ -334,6 +361,33 @@ SQL
   echo "[workd] FAIL ack or running-to-ended ledger evidence: $got" >&2
   exit 1
 }
+
+if [ "$ACP_MODE" = "1" ]; then
+  got="$(sql_value <<SQL
+SELECT
+  (SELECT count(*) FROM message
+    WHERE workspace_id='$WS_ID' AND root_id=(
+      SELECT root_message_id FROM work_session WHERE id='$SESSION_ID')
+      AND props->>'kind'='work_session_event') || ':' ||
+  (SELECT count(*) FROM outbox
+    WHERE workspace_id='$WS_ID'
+      AND payload->'data'->'payload'->>'work_session_id' ILIKE '$SESSION_ID'
+      AND payload->'data'->>'type' IN
+        ('agent.partial','agent.status','approval.requested','approval.decided')) || ':' ||
+  (SELECT count(*) FROM message
+    WHERE workspace_id='$WS_ID' AND root_id=(
+      SELECT root_message_id FROM work_session WHERE id='$SESSION_ID')
+      AND props ? '_meta');
+SQL
+)"
+  case "$got" in
+    5:5:0|6:6:0|7:7:0) ;;
+    *)
+      echo "[workd] FAIL ACP message ledger/outbox projection evidence: $got" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 got="$(sql_value <<SQL
 SELECT
@@ -399,4 +453,8 @@ SQL
   exit 1
 }
 
-echo "MOMO-488 workd registration/heartbeat + signed polling + local-only raw output + session lifecycle/RLS PASS"
+if [ "$ACP_MODE" = "1" ]; then
+  echo "MOMO-546 ACP local JSONL + server message ledger/outbox relay + session lifecycle/RLS PASS"
+else
+  echo "MOMO-488 workd registration/heartbeat + signed polling + local-only raw output + session lifecycle/RLS PASS"
+fi

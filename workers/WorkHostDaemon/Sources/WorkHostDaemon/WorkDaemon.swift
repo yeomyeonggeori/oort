@@ -128,6 +128,9 @@ final class WorkDaemon: Sendable {
                 prompt: prompt
             )
         } catch {
+            logger.warning("work host process start failed", metadata: [
+                "error_label": .string(Self.label(for: error)),
+            ])
             try? await api.endSession(hostID: hostID, sessionID: sessionID, exitCode: -1)
             await acknowledgeFailure(controlID: control.id, label: "process_start_failed")
             return

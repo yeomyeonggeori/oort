@@ -27,11 +27,17 @@ actor ProcessManager {
 
     private var templates: [String: CommandTemplate]
     private let outputDirectory: URL
+    private let acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)?
     private var sessions: [UUID: ManagedProcess] = [:]
 
-    init(templates: [String: CommandTemplate], outputDirectory: URL) {
+    init(
+        templates: [String: CommandTemplate],
+        outputDirectory: URL,
+        acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)? = nil
+    ) {
         self.templates = templates
         self.outputDirectory = outputDirectory
+        self.acpEventRelay = acpEventRelay
     }
 
     func replaceTemplates(_ templates: [String: CommandTemplate]) {
@@ -64,7 +70,16 @@ actor ProcessManager {
                 let eventURL = outputDirectory.appendingPathComponent(
                     "\(sessionID.uuidString.lowercased()).acp-events.jsonl"
                 )
-                let sink = try ACPJSONLinesFileSink(url: eventURL)
+                let localSink = try ACPJSONLinesFileSink(url: eventURL)
+                let sink: any ACPEventSink
+                if let acpEventRelay {
+                    let relaySink = ACPServerRelaySink { event in
+                        try await acpEventRelay(sessionID, event)
+                    }
+                    sink = ACPCompositeEventSink([localSink, relaySink])
+                } else {
+                    sink = localSink
+                }
                 let terminals = LocalPTYTerminalManager(
                     defaultWorkingDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
                     baseEnvironment: hostEnvironment()

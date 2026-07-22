@@ -1096,8 +1096,14 @@ enabled `work_tool_profile`의 `tierDefaults.transport`가 `acp`일 때 workd와
 없으면 기존 도구는 PTY mode이며, 알 수 없는 transport는 spawn 전에 fail-closed한다.
 
 ACP lifecycle은 `initialize` → `session/new` → `session/prompt` 순서다. 진행 텍스트, plan,
-tool-call은 기존 `agent.partial`/`agent.status` 어휘의 host-local event로 투영되고 확장 필드는
-`_meta.acp` 아래 mode 0600 JSONL에만 보존된다. `session/request_permission`은 앱의 기존 승인
+tool-call은 기존 `agent.partial`/`agent.status` 어휘로 투영된다. workd는 먼저 mode 0600
+JSONL에 raw event를 기록한 뒤 `_meta.acp`·command/env/path·terminal output을 제거한 정규화
+요약만 signed `PATCH .../work-sessions/:id`로 보낸다. 서버는 세션 root의 `message` reply와
+`message.new` + ACP envelope outbox를 한 tenant transaction에 기록한다. event UUID를
+`client_msg_id`로 써 재시도는 멱등이며 relay는 100/200ms backoff로 최대 3회 시도한다.
+실패해도 앞서 기록한 로컬 JSONL은 유지된다. 서버 상한은 이벤트당 65,536 bytes 및 세션당
+240건/60초다. 확장 필드는 `_meta.acp` 아래 host-local JSONL에만 보존된다.
+`session/request_permission`은 앱의 기존 승인
 카드 결정이 돌아오기 전 응답하지 않으며, handler 부재·중복·알 수 없는 option은
 `cancelled`로 답한다. workd 단독 daemon에는 사람 결정 권한이 없으므로 같은 fail-closed
 기본값을 쓴다. `terminal/create|output|wait_for_exit|kill|release`는 host PTY manager가 맡고
@@ -1108,9 +1114,11 @@ scripts/verify_acp_host.sh
 MOMO_ACP_REQUIRE_REAL=1 scripts/verify_acp_host.sh
 ```
 
-실 opencode와 claude-agent-acp prompt는 각 도구의 host-local credential login 뒤 수행한다.
-그 전까지는 `runtime-unverified(external ACP agent credentials)`다. verifier나 evidence에
-provider OAuth token/API key를 전달하지 않는다.
+verifier는 28110~28113 격리 스택에서 mock ACP roundtrip 뒤 로컬 JSONL과 서버 thread message
+원장/outbox의 최종 소비를 함께 단정한다. 실 opencode와 claude-agent-acp prompt는 각 도구의
+host-local credential login 뒤 수행하며, 그 전까지는
+`runtime-unverified(external ACP agent credentials)`다. provider OAuth token/API key를
+verifier나 evidence에 전달하지 않는다.
 
 ### 5.5 Remote terminal attach capability (ADR-0125 D10)
 

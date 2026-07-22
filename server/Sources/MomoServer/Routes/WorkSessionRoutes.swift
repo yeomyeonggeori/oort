@@ -22,6 +22,20 @@ struct UpdateWorkSessionRequest: Decodable {
     let status: String?
     let exitCode: Int?
     let observation: WorkSessionObservation?
+    let event: WorkSessionACPEvent?
+}
+
+struct WorkSessionACPEvent: Codable, Sendable, Equatable {
+    let eventId: UUID
+    let type: String
+    let v: Int
+    let ts: Int64
+    let payload: JSONValue
+
+    private enum CodingKeys: String, CodingKey {
+        case eventId = "event_id"
+        case type, v, ts, payload
+    }
 }
 
 struct ResumeWorkSessionRequest: Decodable {
@@ -64,12 +78,25 @@ struct WorkSessionListResponse: ResponseEncodable {
 /// POST  /v1/workspaces/{ws}/work-sessions/{session}/resume
 /// GET   /v1/workspaces/{ws}/work-sessions?active=1
 struct WorkSessionRoutes: Sendable {
+    static let acpEventRateWindowSeconds = 60
+    static let maximumACPEventsPerWindow = 240
+    static let maximumACPEventBytes = 65_536
+
     struct EffectiveTierPolicy: Sendable, Equatable {
         let mode: String
         let autoTarget: String?
     }
 
     let db: Database
+    private let acpEventLimiter: SlidingWindowRateLimiter
+
+    init(
+        db: Database,
+        acpEventLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter()
+    ) {
+        self.db = db
+        self.acpEventLimiter = acpEventLimiter
+    }
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/work-sessions", use: create)
@@ -269,6 +296,21 @@ struct WorkSessionRoutes: Sendable {
             as: UpdateWorkSessionRequest.self,
             context: context
         )
+        if let event = requestDTO.event {
+            guard requestDTO.status == nil, requestDTO.exitCode == nil,
+                  requestDTO.observation == nil
+            else {
+                throw HTTPError(.badRequest, message: "event cannot be combined with lifecycle fields")
+            }
+            return try await recordACPEvent(
+                event,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        }
         if let observation = requestDTO.observation {
             guard requestDTO.status == nil, requestDTO.exitCode == nil else {
                 throw HTTPError(.badRequest, message: "observation cannot be combined with lifecycle fields")
@@ -399,6 +441,163 @@ struct WorkSessionRoutes: Sendable {
             return workSession
         }
 
+        return try WorkSessionResponse(workSession: session)
+            .response(from: request, context: context)
+    }
+
+    private func recordACPEvent(
+        _ event: WorkSessionACPEvent,
+        request: Request,
+        context: AppRequestContext,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> Response {
+        guard principal.kind == .workHost else {
+            throw HTTPError(.forbidden, message: "ACP events require work host signature")
+        }
+        let eventData = try JSONEncoder().encode(event)
+        guard eventData.count <= Self.maximumACPEventBytes else {
+            throw HTTPError(.badRequest, message: "ACP event exceeds 65536 bytes")
+        }
+        let normalized = try Self.validatedACPEvent(event, sessionID: sessionID)
+        let verdict = await acpEventLimiter.check(
+            key: "work-acp:\(workspaceID.uuidString):\(sessionID.uuidString)",
+            limit: Self.maximumACPEventsPerWindow,
+            windowSeconds: Self.acpEventRateWindowSeconds
+        )
+        guard verdict.allowed else {
+            throw HTTPError(.tooManyRequests, message: "ACP event rate limit exceeded")
+        }
+
+        let session = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       ws.status, ws.observation,
+                       0::bigint AS observer_grant_count,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code,
+                       ws.end_reason, ws.resumed_from_session_id,
+                       root.seq
+                  FROM work_session ws
+                  JOIN message root ON root.id = ws.root_message_id
+                 WHERE ws.id = \(sessionID)
+                 FOR UPDATE OF ws
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let decoded = try row.decode(
+                (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
+                 String, String, Int64, Bool, Date, Date?, Int?, String?, UUID?, Int64).self
+            )
+            guard decoded.4 == principal.tokenID else {
+                throw HTTPError(.forbidden, message: "work host cannot relay another host session")
+            }
+            guard decoded.8 == "running" else {
+                throw HTTPError(.conflict, message: "work session is not running")
+            }
+            guard normalized.channelID == decoded.2 else {
+                throw HTTPError(.badRequest, message: "ACP event channel does not match session")
+            }
+            try await Self.requireChannelMember(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                channelID: decoded.2,
+                memberID: decoded.3
+            )
+
+            let duplicate = try await conn.query(
+                """
+                SELECT 1
+                  FROM message
+                 WHERE channel_id = \(decoded.2)
+                   AND author_member_id = \(decoded.3)
+                   AND client_msg_id = \(event.eventId)
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect().first != nil
+            if !duplicate {
+                let hlcTs = Int64(Date().timeIntervalSince1970 * 1_000)
+                let propsJSON = Self.jsonString(normalized.props)
+                let messageRows = try await conn.query(
+                    """
+                    WITH bumped AS (
+                      UPDATE channel_seq
+                         SET last_seq = last_seq + 1
+                       WHERE workspace_id = \(workspaceID)
+                         AND channel_id = \(decoded.2)
+                      RETURNING last_seq AS seq
+                    )
+                    INSERT INTO message
+                      (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                       author_member_id, type, body, props, root_id, client_msg_id)
+                    SELECT \(workspaceID), \(decoded.2), b.seq, \(hlcTs), 0,
+                           \(decoded.3), 'system'::message_type, \(normalized.body),
+                           \(propsJSON)::jsonb, \(decoded.5), \(event.eventId)
+                      FROM bumped b
+                    RETURNING id, seq
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let messageRow = messageRows.first else {
+                    throw HTTPError(.notFound, message: "channel not found or not provisioned")
+                }
+                let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+                let channel = Self.channelName(workspaceID: workspaceID, channelID: decoded.2)
+                let messagePayload = MessageRoutes.broadcastPayload(
+                    centChannel: channel,
+                    messageID: messageID,
+                    channelID: decoded.2,
+                    seq: seq,
+                    type: "system",
+                    body: normalized.body,
+                    authorMemberID: decoded.3,
+                    hlcTs: hlcTs,
+                    hlcCount: 0,
+                    rootID: decoded.5,
+                    props: normalized.props
+                )
+                let eventPayload = Self.acpEventPayload(
+                    channel: channel,
+                    event: event,
+                    safePayload: normalized.safePayload,
+                    messageID: messageID,
+                    rootMessageID: decoded.5,
+                    seq: seq
+                )
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(messagePayload)::jsonb, \(decoded.2)),
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(eventPayload)::jsonb, \(decoded.2))
+                    """,
+                    logger: db.logger
+                )
+            }
+            return Self.sessionDTO(
+                from: (
+                    decoded.0, decoded.1, decoded.2, decoded.3, decoded.4,
+                    decoded.5, decoded.6, decoded.7, decoded.8, decoded.12,
+                    decoded.13, decoded.14, decoded.15, decoded.16
+                ),
+                observation: decoded.9,
+                observerGrantCount: decoded.10,
+                remoteAttachAvailable: decoded.11
+            )
+        }
         return try WorkSessionResponse(workSession: session)
             .response(from: request, context: context)
     }
@@ -847,6 +1046,156 @@ struct WorkSessionRoutes: Sendable {
             "idempotency_key": "\(channel):\(eventType):\(session.id)",
         ]
         return jsonString(object)
+    }
+
+    struct ValidatedACPEvent: @unchecked Sendable {
+        let channelID: UUID
+        let body: String
+        let safePayload: [String: Any]
+        let props: [String: Any]
+    }
+
+    static func validatedACPEvent(
+        _ event: WorkSessionACPEvent,
+        sessionID: UUID
+    ) throws -> ValidatedACPEvent {
+        guard event.v == 1, event.ts >= 0,
+              let payload = event.payload.objectValue,
+              !containsForbiddenACPKey(event.payload)
+        else { throw HTTPError(.badRequest, message: "invalid ACP event envelope") }
+        guard payload["run_id"]?.stringValue?.lowercased() == sessionID.uuidString.lowercased(),
+              payload["work_session_id"]?.stringValue?.lowercased() == sessionID.uuidString.lowercased(),
+              let channelRaw = payload["channel_id"]?.stringValue,
+              let channelID = UUID(uuidString: channelRaw)
+        else { throw HTTPError(.badRequest, message: "ACP event session binding is invalid") }
+
+        let base = Set(["run_id", "work_session_id", "channel_id", "agent_member_id"])
+        let allowed: Set<String>
+        let body: String
+        switch event.type {
+        case "agent.partial":
+            allowed = base.union(["text_delta"])
+            guard let text = payload["text_delta"]?.stringValue,
+                  !text.isEmpty, text.utf8.count <= 4_096
+            else { throw HTTPError(.badRequest, message: "invalid ACP progress text") }
+            body = text
+        case "agent.status":
+            allowed = base.union([
+                "phase", "run_status", "detail", "tool_call_name", "has_plan",
+                "plan", "terminal_event", "exit_code",
+            ])
+            guard let phase = payload["phase"]?.stringValue,
+                  ["thinking", "streaming"].contains(phase),
+                  payload["run_status"]?.stringValue == "running"
+            else { throw HTTPError(.badRequest, message: "invalid ACP status projection") }
+            if let detail = payload["detail"]?.stringValue, detail.utf8.count > 4_096 {
+                throw HTTPError(.badRequest, message: "ACP status detail is too large")
+            }
+            if let terminal = payload["terminal_event"]?.stringValue,
+               terminal != "created" && terminal != "ended" {
+                throw HTTPError(.badRequest, message: "invalid ACP terminal event")
+            }
+            body = payload["detail"]?.stringValue ?? "ACP session update"
+        case "approval.requested":
+            allowed = base.union(["action", "action_type", "status", "options"])
+            guard payload["action"]?.stringValue == "requested",
+                  payload["action_type"]?.stringValue == "tool_call",
+                  payload["status"]?.stringValue == "pending",
+                  let options = payload["options"]?.arrayValue,
+                  !options.isEmpty, options.count <= 16
+            else { throw HTTPError(.badRequest, message: "invalid ACP approval request") }
+            for option in options {
+                guard let item = option.objectValue,
+                      Set(item.keys).isSubset(of: ["option_id", "name", "kind"]),
+                      let optionID = item["option_id"]?.stringValue,
+                      !optionID.isEmpty, optionID.utf8.count <= 128,
+                      let name = item["name"]?.stringValue,
+                      !name.isEmpty, name.utf8.count <= 256
+                else { throw HTTPError(.badRequest, message: "invalid ACP approval option") }
+            }
+            body = "Approval requested"
+        case "approval.decided":
+            allowed = base.union(["action", "status", "option_id"])
+            guard payload["action"]?.stringValue == "decided",
+                  let status = payload["status"]?.stringValue,
+                  status == "approved" || status == "rejected"
+            else { throw HTTPError(.badRequest, message: "invalid ACP approval decision") }
+            body = status == "approved" ? "Approval granted" : "Approval rejected"
+        default:
+            throw HTTPError(.badRequest, message: "unsupported ACP event type")
+        }
+        guard Set(payload.keys).isSubset(of: allowed) else {
+            throw HTTPError(.badRequest, message: "ACP event contains non-summary fields")
+        }
+        let safePayload = payload.mapValues(jsonValue)
+        let props: [String: Any] = [
+            "kind": "work_session_event",
+            "schema": "momo.work_session.acp_event.v1",
+            "source": "acp",
+            "event_id": event.eventId.uuidString,
+            "event_type": event.type,
+            "event_ts": event.ts,
+            "event": safePayload,
+        ]
+        return ValidatedACPEvent(
+            channelID: channelID,
+            body: body,
+            safePayload: safePayload,
+            props: props
+        )
+    }
+
+    static func acpEventPayload(
+        channel: String,
+        event: WorkSessionACPEvent,
+        safePayload: [String: Any],
+        messageID: UUID,
+        rootMessageID: UUID,
+        seq: Int64
+    ) -> String {
+        var payload = safePayload
+        payload["event_id"] = event.eventId.uuidString
+        payload["message_id"] = messageID.uuidString
+        payload["root_message_id"] = rootMessageID.uuidString
+        return jsonString([
+            "channel": channel,
+            "data": [
+                "type": event.type,
+                "v": 1,
+                "ts": event.ts,
+                "seq": seq,
+                "payload": payload,
+            ],
+            // message.new owns the Centrifugo version for this durable seq.
+            "idempotency_key": "\(channel):acp:\(event.eventId.uuidString)",
+        ])
+    }
+
+    private static func containsForbiddenACPKey(_ value: JSONValue) -> Bool {
+        switch value {
+        case .object(let object):
+            let forbidden = ["_meta", "credential", "token", "secret", "environment",
+                             "env", "command", "output", "cwd", "path", "raw"]
+            return object.contains { key, child in
+                let lowered = key.lowercased()
+                return forbidden.contains(where: lowered.contains)
+                    || containsForbiddenACPKey(child)
+            }
+        case .array(let array): return array.contains(where: containsForbiddenACPKey)
+        case .string, .int, .double, .bool, .null: return false
+        }
+    }
+
+    private static func jsonValue(_ value: JSONValue) -> Any {
+        switch value {
+        case .object(let object): return object.mapValues(jsonValue)
+        case .array(let array): return array.map(jsonValue)
+        case .string(let string): return string
+        case .int(let int): return int
+        case .double(let double): return double
+        case .bool(let bool): return bool
+        case .null: return NSNull()
+        }
     }
 
     static func cardProps(

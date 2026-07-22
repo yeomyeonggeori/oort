@@ -1472,15 +1472,18 @@ paths:
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}:
     patch:
       tags: [work-sessions]
-      operationId: endWorkSession
-      summary: End a running session or change its observation policy.
+      operationId: updateWorkSession
+      summary: End a running session, change observation, or relay a normalized ACP event.
       description: >
         The creating member, or the MomoHost-signed execution host bound to the
         session, may end it. The ledger row and card props update beside a
         no-version work.session.ended outbox; the message row is not edited and
         no channel seq is minted. A human session owner may instead set
         observation to open or owner_only; owner_only invalidates live observer
-        grants and blocks new ones.
+        grants and blocks new ones. A MomoHost-signed caller may alternatively
+        append one bounded normalized ACP event to the session thread ledger;
+        the message row and message.new plus ACP realtime outbox projections
+        commit atomically. Raw ACP metadata and terminal streams are forbidden.
       security:
         - bearerAuth: []
         - workHostAuth: []
@@ -4942,6 +4945,47 @@ components:
       oneOf:
         - $ref: "#/components/schemas/EndWorkSessionRequest"
         - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
+        - $ref: "#/components/schemas/RelayWorkSessionACPEventRequest"
+
+    RelayWorkSessionACPEventRequest:
+      type: object
+      required: [event]
+      additionalProperties: false
+      properties:
+        event:
+          $ref: "#/components/schemas/WorkSessionACPEvent"
+
+    WorkSessionACPEvent:
+      type: object
+      required: [event_id, type, v, ts, payload]
+      additionalProperties: false
+      maxProperties: 5
+      description: >
+        At most 65536 encoded bytes. The server accepts at most 240 events per
+        work session per 60 seconds. payload is an ADR-0004 allowlisted summary;
+        _meta.acp, credentials, command/env/path, and terminal output are rejected.
+      properties:
+        event_id:
+          type: string
+          format: uuid
+          description: Stable idempotency key retained across relay retries.
+        type:
+          type: string
+          enum: [agent.partial, agent.status, approval.requested, approval.decided]
+        v:
+          type: integer
+          enum: [1]
+        ts:
+          type: integer
+          format: int64
+          minimum: 0
+        payload:
+          type: object
+          description: >
+            Normalized progress, plan, approval, or terminal lifecycle summary.
+            Terminal created/ended uses agent.status with terminal_event and an
+            optional exit_code; raw terminal bytes never enter this object.
+          additionalProperties: true
 
     EndWorkSessionRequest:
       type: object

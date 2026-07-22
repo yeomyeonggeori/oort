@@ -2534,6 +2534,65 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testWorkSessionACPEventValidationAndNoVersionProjection() throws {
+        XCTAssertEqual(WorkSessionRoutes.maximumACPEventsPerWindow, 240)
+        XCTAssertEqual(WorkSessionRoutes.acpEventRateWindowSeconds, 60)
+        XCTAssertEqual(WorkSessionRoutes.maximumACPEventBytes, 65_536)
+        let sessionID = UUID(uuidString: "00000000-0000-7000-8000-000000000531")!
+        let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000202")!
+        let eventID = UUID(uuidString: "00000000-0000-7000-8000-000000000546")!
+        let event = WorkSessionACPEvent(
+            eventId: eventID,
+            type: "agent.status",
+            v: 1,
+            ts: 1_784_678_400_000,
+            payload: .object([
+                "run_id": .string(sessionID.uuidString.lowercased()),
+                "work_session_id": .string(sessionID.uuidString.lowercased()),
+                "channel_id": .string(channelID.uuidString.lowercased()),
+                "phase": .string("thinking"),
+                "run_status": .string("running"),
+                "detail": .string("Plan ready"),
+                "has_plan": .bool(true),
+                "plan": .array([.object(["content": .string("Implement relay")])]),
+            ])
+        )
+        let validated = try WorkSessionRoutes.validatedACPEvent(event, sessionID: sessionID)
+        XCTAssertEqual(validated.channelID, channelID)
+        XCTAssertEqual(validated.body, "Plan ready")
+        XCTAssertEqual(validated.props["kind"] as? String, "work_session_event")
+
+        let raw = WorkSessionRoutes.acpEventPayload(
+            channel: "ch:ws00000000-0000-7000-8000-000000000001.\(channelID.uuidString)",
+            event: event,
+            safePayload: validated.safePayload,
+            messageID: UUID(),
+            rootMessageID: UUID(),
+            seq: 77
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+        )
+        XCTAssertNil(object["version"])
+        let data = try XCTUnwrap(object["data"] as? [String: Any])
+        XCTAssertEqual(data["type"] as? String, "agent.status")
+        XCTAssertEqual(data["seq"] as? Int, 77)
+
+        let forbidden = WorkSessionACPEvent(
+            eventId: UUID(), type: "agent.partial", v: 1, ts: 1,
+            payload: .object([
+                "run_id": .string(sessionID.uuidString),
+                "work_session_id": .string(sessionID.uuidString),
+                "channel_id": .string(channelID.uuidString),
+                "text_delta": .string("safe"),
+                "_meta": .object(["acp": .object(["raw": .string("forbidden")])]),
+            ])
+        )
+        XCTAssertThrowsError(
+            try WorkSessionRoutes.validatedACPEvent(forbidden, sessionID: sessionID)
+        )
+    }
+
     func testTierFallbackPolicyAndResumeProjectionContracts() throws {
         XCTAssertEqual(try WorkTierPolicyRoutes.validatedMode("t1_only"), "t1_only")
         XCTAssertEqual(try WorkTierPolicyRoutes.validatedMode("ask"), "ask")
