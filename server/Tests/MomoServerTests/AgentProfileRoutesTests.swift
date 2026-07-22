@@ -127,6 +127,29 @@ final class AgentProfileRoutesTests: XCTestCase {
         }
     }
 
+    func testPauseMigrationAndWireShapeAreExplicit() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sql = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/038_agent_interaction_safety.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(sql.contains("ADD COLUMN paused boolean NOT NULL DEFAULT false"))
+        XCTAssertTrue(sql.contains("WHERE paused"))
+
+        let pause = try JSONDecoder().decode(
+            AgentPauseInput.self,
+            from: Data(#"{"paused":true}"#.utf8)
+        )
+        XCTAssertTrue(pause.paused)
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AgentPauseInput.self,
+            from: Data(#"{"paused":true,"token":"must-not-be-ignored"}"#.utf8)
+        ))
+    }
+
     private func decode(_ json: String) throws -> AgentProfileInput {
         try JSONDecoder().decode(AgentProfileInput.self, from: Data(json.utf8))
     }

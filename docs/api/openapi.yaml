@@ -716,6 +716,67 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
 
+  /v1/workspaces/{workspaceId}/agents/{agentId}/pause:
+    put:
+      tags: [agents]
+      operationId: putAgentPause
+      summary: Pause or resume new run enqueue for an agent.
+      description: >
+        ADR-0132 D2. Human workspace owner/admin or the agent's active human
+        owner only. Pausing does not remove membership or cancel an existing
+        run; existing runs use the separate human cancel endpoint.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AgentPauseInput"}
+      responses:
+        "200":
+          description: Current profile projection including the pause state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentProfileResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Active agent not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel:
+    post:
+      tags: [agents]
+      operationId: cancelAgentRun
+      summary: Cancel one agent run as a human channel member.
+      description: >
+        ADR-0132 D1. Any active human member of the run's channel may cancel.
+        Agent and work-host bearers are rejected. The server atomically marks
+        the run cancelled, retires pending agent jobs, cancels pending
+        approvals, writes an audit event and a channel system line, and returns
+        linked work-session IDs. Linked work sessions are not terminated;
+        callers must use the existing work.control kill path separately.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Run is cancelled; repeated cancellation is idempotent.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunCancelResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Agent run not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Run is already terminal in a non-cancelled state, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agents/from-card:
     post:
       tags: [agents]
@@ -4979,6 +5040,13 @@ components:
         triggers:
           $ref: "#/components/schemas/AgentProfileTriggers"
 
+    AgentPauseInput:
+      type: object
+      additionalProperties: false
+      required: [paused]
+      properties:
+        paused: {type: boolean}
+
     AgentProfileTriggers:
       type: object
       additionalProperties: false
@@ -4991,7 +5059,7 @@ components:
     AgentProfile:
       type: object
       required:
-        [agentMemberId, workspaceId, instructions, enabledTools, triggers,
+        [agentMemberId, workspaceId, instructions, enabledTools, triggers, paused,
          version, updatedBy, updatedAtMs]
       properties:
         agentMemberId: {type: string, format: uuid}
@@ -5002,6 +5070,7 @@ components:
           type: array
           items: {type: string}
         triggers: {$ref: "#/components/schemas/AgentProfileTriggers"}
+        paused: {type: boolean}
         version: {type: integer, minimum: 1}
         updatedBy: {type: string, format: uuid}
         updatedAtMs: {type: integer, format: int64}
@@ -5011,6 +5080,20 @@ components:
       required: [profile]
       properties:
         profile: {$ref: "#/components/schemas/AgentProfile"}
+
+    AgentRunCancelResponse:
+      type: object
+      additionalProperties: false
+      required: [runId, status, linkedWorkSessionIds, workSessionsTerminated]
+      properties:
+        runId: {type: string, format: uuid}
+        status: {type: string, enum: [cancelled]}
+        linkedWorkSessionIds:
+          type: array
+          items: {type: string, format: uuid}
+        workSessionsTerminated:
+          type: boolean
+          enum: [false]
 
     AgentMember:
       type: object

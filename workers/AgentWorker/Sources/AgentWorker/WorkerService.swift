@@ -264,6 +264,12 @@ struct WorkerService: Service {
             }
         }
 
+        if await isRunCancelled(p.runID, workspaceID: job.workspaceID) {
+            await publishStatus(agentRealtime, runID: p.runID, status: .cancelled)
+            await markJobDone(job.id)
+            return
+        }
+
         // ---- §8.5 reserve (trip = abort before spend) ----
         let maxOutputTokens = p.maxOutputTokens ?? 1024
         let reserve = await cost.reserve(
@@ -299,6 +305,7 @@ struct WorkerService: Service {
         var usage: (prompt: Int, completion: Int, cached: Int, reasoning: Int)?
         var sawError: String?
         var handledWorkTool = false
+        var cancelledByLedger = false
 
         // Streaming message id: created lazily on the first text delta so the
         // PATCH (streaming mimic) targets one growing message (L4 §6.2).
@@ -342,8 +349,19 @@ struct WorkerService: Service {
             maxTokens: maxOutputTokens)
 
         do {
+            // Cancellation is observed at step boundaries (ADR-0132 D1); a 1s
+            // ledger-poll floor keeps text-delta streams from issuing one
+            // point query per token chunk.
+            var lastCancelLedgerCheck = ContinuousClock.now
             for try await event in stream {
                 if Task.isCancelled { break }
+                if ContinuousClock.now - lastCancelLedgerCheck >= .seconds(1) {
+                    lastCancelLedgerCheck = ContinuousClock.now
+                    if await isRunCancelled(p.runID, workspaceID: job.workspaceID) {
+                        cancelledByLedger = true
+                        break
+                    }
+                }
                 switch event {
                 case .status(let s):
                     await publishStatus(agentRealtime, runID: p.runID, status: s)
@@ -483,6 +501,22 @@ struct WorkerService: Service {
             workspaceID: job.workspaceID,
             reservedMicroUSD: 0
         )
+
+        var cancelledBeforeCommit = cancelledByLedger
+        if !cancelledBeforeCommit {
+            cancelledBeforeCommit = await isRunCancelled(
+                p.runID, workspaceID: job.workspaceID
+            )
+        }
+        if cancelledBeforeCommit {
+            logger.info("agent run cancellation observed at worker step boundary", metadata: [
+                "outboxId": .stringConvertible(job.id),
+                "runId": .string(p.runID?.uuidString ?? "nil"),
+            ])
+            await publishStatus(agentRealtime, runID: p.runID, status: .cancelled)
+            await markJobDone(job.id)
+            return
+        }
 
         // ---- terminal: finalize message + status ----
         if let err = sawError {
@@ -910,6 +944,11 @@ struct WorkerService: Service {
                 approvalID: request.approvalID
             )
             try validateResumeState(state, job: job, request: request)
+            if await isRunCancelled(request.runID, workspaceID: job.workspaceID) {
+                await publishStatus(agentRealtime, runID: request.runID, status: .cancelled)
+                await markJobDone(job.id)
+                return
+            }
 
             await updateRunStatus(
                 request.runID,
@@ -923,6 +962,17 @@ struct WorkerService: Service {
             try await recordResumeSuccess(job: job, request: request, result: result)
             await publishStatus(agentRealtime, runID: request.runID, status: .done)
         } catch {
+            if let resumeError = error as? ResumeApprovalError {
+                switch resumeError {
+                case .runCancelled,
+                     .approvalNotApproved("cancelled"):
+                    await publishStatus(agentRealtime, runID: request.runID, status: .cancelled)
+                    await markJobDone(job.id)
+                    return
+                default:
+                    break
+                }
+            }
             let reason = "resume approval execution failed: \(error)"
             let markRunFailed: Bool
             if let resumeError = error as? ResumeApprovalError,
@@ -1020,6 +1070,7 @@ struct WorkerService: Service {
         case agentMismatch(expected: UUID, actual: UUID)
         case frozenPayloadMismatch(String)
         case missingInsertedToolResult
+        case runCancelled(UUID)
 
         var description: String {
             switch self {
@@ -1037,6 +1088,8 @@ struct WorkerService: Service {
                 return "approved_tool_call does not match frozen approval payload field: \(field)"
             case .missingInsertedToolResult:
                 return "tool_result insert did not return a row"
+            case .runCancelled(let runID):
+                return "run was cancelled before approval resume commit: \(runID.uuidString)"
             }
         }
     }
@@ -1062,7 +1115,7 @@ struct WorkerService: Service {
                 conn: conn, logger: logger, job: job, runID: request.runID
             )
 
-            _ = try await conn.query(
+            let claimed = try await conn.query(
                 """
                 UPDATE agent_run
                    SET status = 'running',
@@ -1070,10 +1123,14 @@ struct WorkerService: Service {
                        updated_at = now(),
                        error = NULL,
                        finished_at = NULL
-                 WHERE id = \(request.runID)
+                 WHERE id = \(request.runID) AND status <> 'cancelled'
+                RETURNING id
                 """,
                 logger: logger
-            )
+            ).collect()
+            guard !claimed.isEmpty else {
+                throw ResumeApprovalError.runCancelled(request.runID)
+            }
 
             let rows = try await conn.query(
                 """
@@ -1161,7 +1218,7 @@ struct WorkerService: Service {
                        error = NULL,
                        updated_at = now(),
                        finished_at = now()
-                 WHERE id = \(request.runID)
+                 WHERE id = \(request.runID) AND status <> 'cancelled'
                 """,
                 logger: logger
             )
@@ -1203,7 +1260,7 @@ struct WorkerService: Service {
                                ),
                                updated_at = now(),
                                finished_at = now()
-                         WHERE id = \(runID)
+                         WHERE id = \(runID) AND status <> 'cancelled'
                         """,
                         logger: logger
                     )
@@ -1898,6 +1955,18 @@ struct WorkerService: Service {
                 _ = try await conn.query(
                     "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
                     logger: logger)
+                let runRows = try await conn.query(
+                    "SELECT status::text FROM agent_run WHERE id = \(runID) FOR UPDATE",
+                    logger: logger
+                ).collect()
+                guard let runRow = runRows.first,
+                      try runRow.decode(String.self) != "cancelled"
+                else {
+                    logger.info("cancelled run final message suppressed", metadata: [
+                        "runId": .string(runID.uuidString),
+                    ])
+                    return
+                }
                 let rootID = try await Self.triggerRootID(
                     conn: conn, logger: logger, job: job, runID: runID
                 )
@@ -2302,6 +2371,7 @@ struct WorkerService: Service {
                                finished_at = CASE WHEN \(dbStatus) IN ('succeeded','failed','cancelled','timed_out')
                                                   THEN now() ELSE finished_at END
                          WHERE id = \(runID)
+                           AND (status <> 'cancelled' OR \(dbStatus) = 'cancelled')
                         """,
                         logger: logger)
                 } else {
@@ -2314,6 +2384,7 @@ struct WorkerService: Service {
                                finished_at = CASE WHEN \(dbStatus) IN ('succeeded','failed','cancelled','timed_out')
                                                   THEN now() ELSE finished_at END
                          WHERE id = \(runID)
+                           AND (status <> 'cancelled' OR \(dbStatus) = 'cancelled')
                         """,
                         logger: logger)
                 }
@@ -2323,6 +2394,29 @@ struct WorkerService: Service {
                 "runId": .string(runID.uuidString),
                 "error": .string(String(describing: error)),
             ])
+        }
+    }
+
+    private func isRunCancelled(_ runID: UUID?, workspaceID: UUID) async -> Bool {
+        guard let runID else { return false }
+        do {
+            return try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                let rows = try await conn.query(
+                    "SELECT status::text FROM agent_run WHERE id = \(runID)",
+                    logger: logger
+                ).collect()
+                return try rows.first?.decode(String.self) == "cancelled"
+            }
+        } catch {
+            logger.warning("agent run cancellation check failed", metadata: [
+                "runId": .string(runID.uuidString),
+                "error": .string(String(describing: error)),
+            ])
+            return false
         }
     }
 
