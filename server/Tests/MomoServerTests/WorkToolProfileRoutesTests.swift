@@ -40,4 +40,34 @@ final class WorkToolProfileRoutesTests: XCTestCase {
         XCTAssertFalse(WorkHostAuthenticator.isAllowed(method: "PUT", path: path + "/codex"))
         XCTAssertFalse(WorkHostAuthenticator.isAllowed(method: "DELETE", path: path + "/codex"))
     }
+
+    func testEnvironmentPolicyAcceptsNamesButNeverValuesOrWorkdControlKeys() throws {
+        XCTAssertNoThrow(try WorkToolProfileRoutes.validatedEnvironmentPolicy(.object([
+            "mode": .string("allowlist"),
+            "passthrough": .array([.string("GH_TOKEN"), .string("CUSTOM_TOOL_HOME")]),
+        ])))
+        XCTAssertThrowsError(try WorkToolProfileRoutes.validatedEnvironmentPolicy(.object([
+            "passthrough": .array([.string("GH_TOKEN=secret")]),
+        ])))
+        XCTAssertThrowsError(try WorkToolProfileRoutes.validatedEnvironmentPolicy(.object([
+            "passthrough": .array([.string("MOMO_WORKD_SERVER_URL")]),
+        ])))
+        XCTAssertThrowsError(try WorkToolProfileRoutes.validatedEnvironmentPolicy(.object([
+            "mode": .string("unsafe"),
+        ])))
+    }
+
+    func testEnvironmentPolicyMigrationStoresNamesOnly() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sql = try String(
+            contentsOf: root.appendingPathComponent("Migrations/034_work_tool_profile_env_policy.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(sql.contains("ADD COLUMN env_policy jsonb"))
+        XCTAssertTrue(sql.contains("jsonb_typeof(env_policy) = 'object'"))
+        XCTAssertFalse(sql.lowercased().contains("env_value"))
+    }
 }

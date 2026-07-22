@@ -20,6 +20,7 @@ struct Config: Sendable {
 
     // ---- JWT (App access/refresh, HS256, L4 §7.1) ----
     var jwtHMAC: String
+    var outboundWebhookMasterKey: String
     var accessTokenTTL: TimeInterval   // 15m per spec
     var refreshTokenTTL: TimeInterval  // 30d per spec
 
@@ -69,6 +70,7 @@ struct Config: Sendable {
     static func load() -> Config {
         let pg = parseDatabaseURL(ProcessInfo.processInfo.environment["DATABASE_URL"])
 
+        let jwtHMAC = env("JWT_HMAC", "dev-insecure-jwt-hmac-change-me")
         return Config(
             host: env("HOST", "0.0.0.0"),
             port: envInt("PORT", 8080),
@@ -77,7 +79,8 @@ struct Config: Sendable {
             pgUser: pg?.user ?? env("POSTGRES_USER", "momo"),
             pgPassword: pg?.password ?? env("POSTGRES_PASSWORD", "momo"),
             pgDatabase: pg?.database ?? env("POSTGRES_DB", "momo"),
-            jwtHMAC: env("JWT_HMAC", "dev-insecure-jwt-hmac-change-me"),
+            jwtHMAC: jwtHMAC,
+            outboundWebhookMasterKey: env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC),
             accessTokenTTL: 15 * 60,
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: env("CENT_API_URL", "http://localhost:8000/api"),

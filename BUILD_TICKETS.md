@@ -2360,7 +2360,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] verify_acp_host 확장: 서버 원장 행+realtime 카드 투영 단정
 
 ### MOMO-547 수용기준 — ACP/PTY 자식 env 스크럽 옵션 (소형) `[runtime]`
-- [ ] 기본 allowlist env(PATH/HOME/LANG 계열)+옵트인 패스스루, 프로파일별 env 정책은 work_tool_profile 확장 필드
+- [x] 기본 allowlist env(PATH/HOME/LANG 계열)+옵트인 패스스루, 프로파일별 env 정책은 work_tool_profile 확장 필드
 - [ ] 기존 workd/acp verifier 회귀
 
 ### MOMO-548 수용기준 — 외부 provider 추출 동의 게이트 `[runtime]`

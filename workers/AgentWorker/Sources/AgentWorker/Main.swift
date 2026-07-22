@@ -86,6 +86,7 @@ struct AgentWorkerMain {
             extractor: memoryExtractor,
             pollInterval: config.memoryExtractionPollInterval,
             batchSize: config.memoryExtractionBatchSize,
+            poisonThreshold: config.memoryPoisonThreshold,
             logger: logger
         )
         let memoryEmbeddingProvider: any MemoryEmbeddingProvider =
@@ -102,6 +103,7 @@ struct AgentWorkerMain {
             provider: memoryEmbeddingProvider,
             pollInterval: config.memoryEmbeddingPollInterval,
             batchSize: config.memoryEmbeddingBatchSize,
+            poisonThreshold: config.memoryPoisonThreshold,
             logger: logger
         )
 

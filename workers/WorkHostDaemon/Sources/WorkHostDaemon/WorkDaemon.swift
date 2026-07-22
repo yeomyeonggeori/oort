@@ -8,6 +8,8 @@ final class WorkDaemon: Sendable {
     private let pollInterval: Duration
     private let heartbeatInterval: Duration
     private let localCommandOverrides: [String: LocalCommandOverride]
+    private let childEnvironmentPolicy: ChildEnvironmentPolicy
+    private let allowProfileLegacyEnvironment: Bool
     private let logger: Logger
     private let spawnedSessions = SpawnedSessionCache()
     private let appliedControls = AppliedControlCache()
@@ -19,6 +21,8 @@ final class WorkDaemon: Sendable {
         pollInterval: Duration,
         heartbeatInterval: Duration,
         localCommandOverrides: [String: LocalCommandOverride] = [:],
+        childEnvironmentPolicy: ChildEnvironmentPolicy = .safeDefault,
+        allowProfileLegacyEnvironment: Bool = false,
         logger: Logger
     ) {
         self.hostID = hostID
@@ -27,6 +31,8 @@ final class WorkDaemon: Sendable {
         self.pollInterval = pollInterval
         self.heartbeatInterval = heartbeatInterval
         self.localCommandOverrides = localCommandOverrides
+        self.childEnvironmentPolicy = childEnvironmentPolicy
+        self.allowProfileLegacyEnvironment = allowProfileLegacyEnvironment
         self.logger = logger
     }
 
@@ -117,7 +123,9 @@ final class WorkDaemon: Sendable {
             let profiles = try await api.workToolProfiles(hostID: hostID)
             let templates = try WorkdConfig.commandTemplates(
                 profiles: profiles,
-                localOverrides: localCommandOverrides
+                localOverrides: localCommandOverrides,
+                hostEnvironmentPolicy: childEnvironmentPolicy,
+                allowProfileLegacyEnvironment: allowProfileLegacyEnvironment
             )
             await processes.replaceTemplates(templates)
             let prompt = control.payload.objectValue?["label"]?.stringValue ?? "Continue the work session."

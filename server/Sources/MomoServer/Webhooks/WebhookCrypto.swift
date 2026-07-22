@@ -8,6 +8,7 @@ import Foundation
 /// URL tokens are independently random and only their SHA-256 digest is stored.
 enum WebhookCrypto {
     static let nativeSecretPrefix = "momo_whsec_v1"
+    static let outboundSecretPrefix = "momo_evtsec_v1"
     static let slackTokenPrefix = "momo_hook_v1"
 
     static func randomReference() -> String {
@@ -19,6 +20,13 @@ enum WebhookCrypto {
         let material = Data("momo.webhook.native.v1\n\(secretRef)".utf8)
         let code = HMAC<SHA256>.authenticationCode(for: material, using: key)
         return "\(nativeSecretPrefix).\(base64URL(Data(code)))"
+    }
+
+    static func outboundSecret(masterKey: String, secretRef: String) -> String {
+        let key = SymmetricKey(data: Data(masterKey.utf8))
+        let material = Data("momo.webhook.outbound.v1\n\(secretRef)".utf8)
+        let code = HMAC<SHA256>.authenticationCode(for: material, using: key)
+        return "\(outboundSecretPrefix).\(base64URL(Data(code)))"
     }
 
     static func slackToken(workspaceID: UUID) -> String {

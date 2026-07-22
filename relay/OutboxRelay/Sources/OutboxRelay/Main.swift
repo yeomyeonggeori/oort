@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import Logging
+import OutboundHTTPPolicy
 import PostgresNIO
 import ServiceLifecycle
 
@@ -50,9 +51,15 @@ struct OutboxRelayMain {
             apiKey: config.centAPIKey,
             logger: logger
         )
+        let webhooks = SafeWebhookDeliveryClient(
+            resolver: SystemOutboundHostResolver(),
+            transport: AsyncWebhookHTTPTransport(),
+            allowDevelopmentHTTP: config.allowDevelopmentWebhookHTTP
+        )
 
         let relay = RelayService(
-            pg: pg, centrifugo: centrifugo, config: config, logger: logger)
+            pg: pg, centrifugo: centrifugo, webhooks: webhooks,
+            config: config, logger: logger)
 
         // ServiceGroup ordering: PostgresClient.run() must be live before the relay
         // issues queries; the HTTP client shutdown service tears down on cancel.
