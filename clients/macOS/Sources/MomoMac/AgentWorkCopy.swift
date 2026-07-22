@@ -2,6 +2,116 @@ import Foundation
 import MomoCore
 
 extension MomoWorkspaceCopy {
+    var stopAgentRun: String {
+        language == .korean ? "실행 중지" : "Stop run"
+    }
+
+    var stoppingAgentRun: String {
+        language == .korean ? "실행 중지 중" : "Stopping run"
+    }
+
+    var stopAgentRunShortcut: String {
+        language == .korean ? "실행 중지 (⌘.)" : "Stop run (⌘.)"
+    }
+
+    func stopAgentRunError(_ issue: MomoAgentSafetyIssue) -> String {
+        switch (language, issue) {
+        case (.korean, .permissionDenied):
+            return "이 실행을 중지할 권한이 없습니다. 채널 멤버십을 확인하세요."
+        case (.korean, .notFound):
+            return "실행을 찾을 수 없습니다. Work 기록을 새로고침하세요."
+        case (.korean, .conflict):
+            return "이미 완료된 실행은 중지할 수 없습니다. Work 상태를 새로고침하세요."
+        case (.korean, .unavailable):
+            return "실행 중지 응답을 확인하지 못했습니다. 다시 시도하세요."
+        case (.korean, .connection):
+            return "실행을 중지하지 못했습니다. 연결을 확인하고 다시 시도하세요."
+        case (.english, .permissionDenied):
+            return "You cannot stop this run. Check your channel membership."
+        case (.english, .notFound):
+            return "The run could not be found. Refresh Work history."
+        case (.english, .conflict):
+            return "A completed run cannot be stopped. Refresh its Work status."
+        case (.english, .unavailable):
+            return "The stop response could not be verified. Try again."
+        case (.english, .connection):
+            return "The run could not be stopped. Check the connection and try again."
+        }
+    }
+
+    var agentRunCancelledSystemLine: String {
+        language == .korean ? "사람이 이 실행을 중지했습니다." : "A person stopped this run."
+    }
+
+    var agentPausedSystemLine: String {
+        language == .korean
+            ? "이 에이전트는 일시정지되어 새 실행을 시작하지 않았습니다."
+            : "This agent is paused, so a new run did not start."
+    }
+
+    var pauseAgent: String {
+        language == .korean ? "에이전트 일시정지" : "Pause agent"
+    }
+
+    var agentPausedState: String {
+        language == .korean ? "일시정지됨" : "Paused"
+    }
+
+    var agentActiveState: String {
+        language == .korean ? "활성" : "Active"
+    }
+
+    var agentPauseLoading: String {
+        language == .korean ? "일시정지 상태 불러오는 중" : "Loading pause status"
+    }
+
+    var agentPauseOffline: String {
+        language == .korean
+            ? "서버에 연결한 뒤 일시정지 상태를 변경하세요."
+            : "Connect to the server before changing pause status."
+    }
+
+    var agentPauseUnavailable: String {
+        language == .korean
+            ? "일시정지 상태를 불러오지 못했습니다. 다시 불러오세요."
+            : "Pause status could not load. Try loading it again."
+    }
+
+    func agentPauseError(_ issue: MomoAgentSafetyIssue) -> String {
+        switch (language, issue) {
+        case (.korean, .permissionDenied):
+            return "일시정지 상태를 변경할 권한이 없습니다. 에이전트 관리 권한을 확인하세요."
+        case (.korean, .notFound):
+            return "에이전트 프로필을 찾을 수 없습니다. 멤버 목록을 새로고침하세요."
+        case (.korean, .conflict):
+            return "일시정지 상태가 변경되었습니다. 현재 상태를 다시 불러오세요."
+        case (.korean, .unavailable):
+            return "일시정지 응답을 확인하지 못했습니다. 현재 상태를 다시 불러오세요."
+        case (.korean, .connection):
+            return agentPauseOffline
+        case (.english, .permissionDenied):
+            return "You cannot change pause status. Check your agent management permission."
+        case (.english, .notFound):
+            return "The agent profile could not be found. Refresh the member list."
+        case (.english, .conflict):
+            return "Pause status changed. Load the current status again."
+        case (.english, .unavailable):
+            return "The pause response could not be verified. Load the current status again."
+        case (.english, .connection):
+            return agentPauseOffline
+        }
+    }
+
+    var retryAgentPause: String {
+        language == .korean ? "일시정지 상태 다시 불러오기" : "Retry pause status"
+    }
+
+    var agentPauseExplanation: String {
+        language == .korean
+            ? "일시정지하면 새 멘션과 Work 실행을 받지 않습니다. 진행 중인 실행은 별도로 중지하세요."
+            : "A paused agent ignores new mentions and Work runs. Stop existing runs separately."
+    }
+
     var startWork: String {
         switch language {
         case .korean: return "Work 시작"

@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend, MomoChannelNotificationBackend, MomoThreadRepliesBackend {
+public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend, MomoChannelNotificationBackend, MomoThreadRepliesBackend, MomoAgentSafetyBackend {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var workspaceProfile: Workspace?
@@ -34,6 +34,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     private var approvalsById: [ApprovalID: Approval] = [:]
     private var workRunsById: [RunID: AgentWorkRun] = [:]
     private var workRunIdsByClientId: [UUID: RunID] = [:]
+    private var pausedAgentIDs: Set<MemberID> = []
     private var inviteJoinState: InviteJoinState = .idle
     private var credentialsByAgent: [MemberID: [MomoAgentCredential]] = [:]
 
@@ -71,6 +72,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         approvalsById = [:]
         workRunsById = [:]
         workRunIdsByClientId = [:]
+        pausedAgentIDs = []
         credentialsByAgent = [:]
         readCursorsByMember = [:]
 
@@ -520,6 +522,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         credentialsByAgent = [:]
         workRunsById = [:]
         workRunIdsByClientId = [:]
+        pausedAgentIDs = []
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
@@ -715,6 +718,9 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
                 title: "active channel agent not found",
                 detail: nil
             )
+        }
+        guard !pausedAgentIDs.contains(agent) else {
+            throw BackendError.problem(status: 409, title: "agent is paused", detail: nil)
         }
         if let existingId = workRunIdsByClientId[clientRunId],
            let existing = workRunsById[existingId] {
@@ -1172,7 +1178,46 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     }
 
     public func cancelRun(_ id: RunID) async throws {
-        // TODO(T09-followup): REST cancelRun.
+        guard var run = workRunsById[id] else {
+            throw BackendError.problem(status: 404, title: "agent run not found", detail: nil)
+        }
+        guard !run.status.isTerminal || run.status == .cancelled else {
+            throw BackendError.problem(status: 409, title: "agent run is already terminal", detail: nil)
+        }
+        run.status = .cancelled
+        run.finishedAtMs = nowMs()
+        run.updatedAtMs = run.finishedAtMs ?? run.updatedAtMs
+        workRunsById[id] = run
+        emitAgent(.status(id, .cancelled), to: run.channelId)
+        _ = appendServerMessage(
+            channel: run.channelId,
+            author: members.first(where: { !$0.isAgent })?.id ?? run.agentMemberId,
+            type: .system,
+            body: "실행이 사람에 의해 중지되었습니다.",
+            props: .object([
+                "kind": .string("agent_run_cancelled"),
+                "run_id": .string(id.description.lowercased()),
+                "agent_member_id": .string(run.agentMemberId.description.lowercased()),
+            ]),
+            runId: id
+        )
+    }
+
+    func agentPaused(_ agent: MemberID) async throws -> Bool {
+        guard connected else { throw BackendError.notConnected }
+        return pausedAgentIDs.contains(agent)
+    }
+
+    func setAgentPaused(_ agent: MemberID, paused: Bool) async throws -> Bool {
+        guard connected, members.contains(where: { $0.id == agent && $0.isAgent }) else {
+            throw BackendError.problem(status: 404, title: "active agent not found", detail: nil)
+        }
+        if paused {
+            pausedAgentIDs.insert(agent)
+        } else {
+            pausedAgentIDs.remove(agent)
+        }
+        return paused
     }
 
     // MARK: - Internal helpers

@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMemoryGrantBackend, MomoAgentOwnershipProvidingBackend, MomoMembershipAdministrationBackend, MomoAgentOnboardingBackend, MomoAgentOriginProvidingBackend, MomoAgentRunMemoryDeliveryProviding {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MemoryPlaneBackend, MomoMemoryGrantBackend, MomoAgentOwnershipProvidingBackend, MomoMembershipAdministrationBackend, MomoAgentOnboardingBackend, MomoAgentOriginProvidingBackend, MomoAgentRunMemoryDeliveryProviding, MomoAgentSafetyBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -1938,7 +1938,59 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     public func cancelRun(_ id: RunID) async throws {
-        throw BackendError.problem(status: 501, title: "not implemented", detail: "Agent cancel is out of scope for MOMO-177")
+        guard let workspace else { throw BackendError.notConnected }
+        let response = try await postEmpty(
+            "/v1/workspaces/\(workspace.description)/agent-runs/\(id.description)/cancel",
+            authorized: true,
+            response: MomoAgentRunCancelResponseDTO.self
+        )
+        guard RunID(uuidString: response.runId) == id,
+              response.status == "cancelled",
+              response.workSessionsTerminated == false,
+              response.linkedWorkSessionIds.allSatisfy({ UUID(uuidString: $0) != nil })
+        else {
+            throw BackendError.decoding("agent run cancel response mismatch")
+        }
+    }
+
+    func agentPaused(_ agent: MemberID) async throws -> Bool {
+        let context = try requireSessionContext()
+        let response = try await get(
+            "/v1/workspaces/\(context.workspace.description)/agents/\(agent.description)/profile",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoAgentPauseProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        try validateAgentPauseProfile(response.profile, agent: agent, workspace: context.workspace)
+        return response.profile.paused
+    }
+
+    func setAgentPaused(_ agent: MemberID, paused: Bool) async throws -> Bool {
+        let context = try requireSessionContext()
+        let response = try await put(
+            "/v1/workspaces/\(context.workspace.description)/agents/\(agent.description)/pause",
+            body: MomoAgentPauseRequestDTO(paused: paused),
+            response: MomoAgentPauseProfileResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        try validateAgentPauseProfile(response.profile, agent: agent, workspace: context.workspace)
+        guard response.profile.paused == paused else {
+            throw BackendError.decoding("agent pause response state mismatch")
+        }
+        return response.profile.paused
+    }
+
+    private func validateAgentPauseProfile(
+        _ profile: MomoAgentPauseProfileDTO,
+        agent: MemberID,
+        workspace: WorkspaceID
+    ) throws {
+        guard MemberID(uuidString: profile.agentMemberId) == agent,
+              WorkspaceID(uuidString: profile.workspaceId) == workspace
+        else {
+            throw BackendError.decoding("agent pause profile scope mismatch")
+        }
     }
 
     // MARK: HTTP

@@ -168,6 +168,7 @@ public final class ChatViewModel: ObservableObject {
     private let membershipAdministrationBackend: (any MomoMembershipAdministrationBackend)?
     private let agentOnboardingBackend: (any MomoAgentOnboardingBackend)?
     private let runMemoryDeliveryBackend: (any MomoAgentRunMemoryDeliveryProviding)?
+    private let agentSafetyBackend: (any MomoAgentSafetyBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -274,6 +275,12 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var workHistoryErrorsByChannel: [ChannelID: AgentWorkSurfaceError] = [:]
     @Published public private(set) var workDetailErrorsById: [RunID: AgentWorkSurfaceError] = [:]
     @Published private(set) var memoryDeliveriesByRunID: [RunID: MomoMemoryDeliveryReceipt] = [:]
+    @Published private(set) var agentPauseStates: [MemberID: Bool] = [:]
+    @Published private(set) var agentPauseLoadingIDs: Set<MemberID> = []
+    @Published private(set) var agentPauseMutationIDs: Set<MemberID> = []
+    @Published private(set) var agentPauseIssues: [MemberID: MomoAgentSafetyIssue] = [:]
+    @Published private(set) var runCancellationIDs: Set<RunID> = []
+    @Published private(set) var runCancellationIssues: [RunID: MomoAgentSafetyIssue] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -379,6 +386,7 @@ public final class ChatViewModel: ObservableObject {
         self.membershipAdministrationBackend = chat as? any MomoMembershipAdministrationBackend
         self.agentOnboardingBackend = chat as? any MomoAgentOnboardingBackend
         self.runMemoryDeliveryBackend = chat as? any MomoAgentRunMemoryDeliveryProviding
+        self.agentSafetyBackend = chat as? any MomoAgentSafetyBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -642,6 +650,12 @@ public final class ChatViewModel: ObservableObject {
         bufferedTimelineEventsByChannel = [:]
         workRunsByChannel = [:]
         memoryDeliveriesByRunID = [:]
+        agentPauseStates = [:]
+        agentPauseLoadingIDs = []
+        agentPauseMutationIDs = []
+        agentPauseIssues = [:]
+        runCancellationIDs = []
+        runCancellationIssues = [:]
         workRunLoadingChannels = []
         workRunDetailLoadingIds = []
         isCreatingWorkRun = false
@@ -2252,6 +2266,104 @@ public final class ChatViewModel: ObservableObject {
     public func effectiveWorkStatus(for run: AgentWorkRun) -> RunStatus {
         guard !run.status.isTerminal else { return run.status }
         return agentStatuses[run.id]?.runStatus ?? run.status
+    }
+
+    public func canPauseAgent(_ member: Member) -> Bool {
+        guard member.isAgent, member.status == .active,
+              let currentMemberID = authenticatedMemberId else { return false }
+        return canManageWorkspace || agentOwnerIDsByMemberID[member.id] == currentMemberID
+    }
+
+    public func refreshAgentPauseState(_ agent: MemberID) async {
+        guard let member = member(agent), canPauseAgent(member) else { return }
+        guard let agentSafetyBackend else {
+            agentPauseIssues[agent] = .unavailable
+            return
+        }
+        guard !agentPauseLoadingIDs.contains(agent), !agentPauseMutationIDs.contains(agent) else { return }
+        agentPauseLoadingIDs.insert(agent)
+        defer { agentPauseLoadingIDs.remove(agent) }
+        do {
+            agentPauseStates[agent] = try await agentSafetyBackend.agentPaused(agent)
+            agentPauseIssues[agent] = nil
+        } catch {
+            agentPauseIssues[agent] = Self.agentSafetyIssue(error)
+        }
+    }
+
+    public func setAgentPaused(_ agent: MemberID, paused: Bool) async {
+        guard let member = member(agent), canPauseAgent(member),
+              let agentSafetyBackend,
+              !agentPauseMutationIDs.contains(agent) else { return }
+        agentPauseMutationIDs.insert(agent)
+        agentPauseIssues[agent] = nil
+        defer { agentPauseMutationIDs.remove(agent) }
+        do {
+            agentPauseStates[agent] = try await agentSafetyBackend.setAgentPaused(agent, paused: paused)
+        } catch {
+            agentPauseIssues[agent] = Self.agentSafetyIssue(error)
+        }
+    }
+
+    public var primaryCancellableRunID: RunID? {
+        guard runCancellationIDs.isEmpty, let selectedChannelId else { return nil }
+        if let workRun = visibleWorkRuns.reversed().first(where: {
+            let status = effectiveWorkStatus(for: $0)
+            return !status.isTerminal
+        }) {
+            return workRun.id
+        }
+        return partials.values
+            .filter {
+                $0.channelId == selectedChannelId
+                    && agentStatuses[$0.runId]?.runStatus.isTerminal != true
+            }
+            .sorted { $0.runId.description < $1.runId.description }
+            .last?.runId
+    }
+
+    public func cancelRun(_ id: RunID) async {
+        guard !runCancellationIDs.contains(id) else { return }
+        runCancellationIDs.insert(id)
+        runCancellationIssues[id] = nil
+        defer { runCancellationIDs.remove(id) }
+        do {
+            try await agentTransport.cancelRun(id)
+            partials[id] = nil
+            if var run = workRun(id) {
+                run.status = .cancelled
+                run.updatedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
+                run.finishedAtMs = run.finishedAtMs ?? run.updatedAtMs
+                upsertWorkRun(run)
+                clearAgentWorking(run.agentMemberId, channel: run.channelId)
+            }
+            if var status = agentStatuses[id] {
+                status.phase = .done
+                status.runStatus = .cancelled
+                agentStatuses[id] = status
+            }
+        } catch {
+            runCancellationIssues[id] = Self.agentSafetyIssue(error)
+        }
+    }
+
+    private nonisolated static func agentSafetyIssue(_ error: any Error) -> MomoAgentSafetyIssue {
+        guard let backendError = error as? BackendError else { return .connection }
+        switch backendError {
+        case .notConnected, .realtime:
+            return .connection
+        case .decoding:
+            return .unavailable
+        case .problem(let status, _, _):
+            switch status {
+            case 401, 403: return .permissionDenied
+            case 404: return .notFound
+            case 409: return .conflict
+            default: return .connection
+            }
+        default:
+            return .connection
+        }
     }
 
     @discardableResult

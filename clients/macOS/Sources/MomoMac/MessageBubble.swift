@@ -148,7 +148,16 @@ public struct MessageBubble: View {
 
     private var isAgent: Bool { author?.isAgent ?? false }
 
+    @ViewBuilder
     public var body: some View {
+        if safetySystemKind != nil {
+            safetySystemLine
+        } else {
+            standardMessageBody
+        }
+    }
+
+    private var standardMessageBody: some View {
         HStack(alignment: .top, spacing: MomoTheme.gutter) {
             leadingColumn
             VStack(alignment: .leading, spacing: 4) {
@@ -210,6 +219,41 @@ public struct MessageBubble: View {
             Button(timelineCopy.deleteMessage, role: .destructive) { onDelete?() }
             Button(timelineCopy.cancel, role: .cancel) {}
         }
+    }
+
+    private var safetySystemLine: some View {
+        HStack(spacing: 8) {
+            Image(systemName: safetySystemKind == "agent_run_cancelled" ? "stop.circle" : "pause.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(
+                safetySystemKind == "agent_run_cancelled"
+                    ? timelineCopy.agentRunCancelledSystemLine
+                    : timelineCopy.agentPausedSystemLine
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            if let date = timestampDate {
+                Spacer(minLength: 8)
+                Text(date, format: .dateTime.hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var safetySystemKind: String? {
+        guard message.type == .system,
+              let kind = message.props["kind"]?.stringValue,
+              kind == "agent_run_cancelled" || kind == "agent_paused"
+        else { return nil }
+        return kind
     }
 
     // MARK: Parts

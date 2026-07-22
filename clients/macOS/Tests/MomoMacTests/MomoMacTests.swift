@@ -483,6 +483,100 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(values["to_ms"], "200")
     }
 
+    func testAgentSafetyRESTUsesHumanEndpointsAndValidatesResponses() async throws {
+        await MockHTTPURLProtocol.reset()
+        defer { Task { await MockHTTPURLProtocol.reset() } }
+        let workspace = WorkspaceID(uuidString: "10000000-0000-7000-8000-000000000001")!
+        let agent = MemberID(uuidString: "10000000-0000-7000-8000-000000000002")!
+        let run = RunID(uuidString: "10000000-0000-7000-8000-000000000003")!
+        let session = URLSession(configuration: .momoMocked)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer human-token")
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/workspaces/\(workspace.description)/agent-runs/\(run.description)/cancel"):
+                return MockHTTPResponse(
+                    json: #"{"runId":"\#(run.description)","status":"cancelled","linkedWorkSessionIds":[],"workSessionsTerminated":false}"#
+                )
+            case ("GET", "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/profile"):
+                return MockHTTPResponse(
+                    json: #"{"profile":{"agentMemberId":"\#(agent.description)","workspaceId":"\#(workspace.description)","instructions":"","enabledTools":[],"triggers":{"mention":true},"paused":false,"version":1,"updatedBy":"\#(agent.description)","updatedAtMs":1}}"#
+                )
+            case ("PUT", "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/pause"):
+                let body = try XCTUnwrap(request.momoBodyData)
+                XCTAssertEqual(try JSONDecoder().decode(MomoAgentPauseRequestDTO.self, from: body).paused, true)
+                return MockHTTPResponse(
+                    json: #"{"profile":{"agentMemberId":"\#(agent.description)","workspaceId":"\#(workspace.description)","instructions":"","enabledTools":[],"triggers":{"mention":true},"paused":true,"version":2,"updatedBy":"\#(agent.description)","updatedAtMs":2}}"#
+                )
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"message":"unexpected request"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "human-token",
+                workspace: workspace
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "human-token")
+
+        try await backend.cancelRun(run)
+        let initiallyPaused = try await backend.agentPaused(agent)
+        let paused = try await backend.setAgentPaused(agent, paused: true)
+        XCTAssertFalse(initiallyPaused)
+        XCTAssertTrue(paused)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "GET", "PUT"])
+    }
+
+    @MainActor
+    func testAgentSafetyViewModelStopsRunAndTogglesPauseForOwner() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let channel = try XCTUnwrap(seed.channels.first)
+        let agent = try XCTUnwrap(seed.agents.first { $0.channelIds.contains(channel.id) })
+        try await backend.connect(workspace: seed.workspace, accessToken: "human-token")
+        let run = try await backend.createWorkRun(
+            agent: agent.id,
+            channel: channel.id,
+            input: AgentWorkInput(title: "Stop contract", brief: "실제 클라이언트 표면에서 중지합니다."),
+            clientRunId: UUID()
+        )
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "human-token")
+        await viewModel.selectChannel(channel.id)
+
+        let canPauseAgent = viewModel.canPauseAgent(agent)
+        XCTAssertTrue(canPauseAgent)
+        await viewModel.refreshAgentPauseState(agent.id)
+        let initialPauseState = viewModel.agentPauseStates[agent.id]
+        XCTAssertEqual(initialPauseState, false)
+        await viewModel.setAgentPaused(agent.id, paused: true)
+        let pauseState = viewModel.agentPauseStates[agent.id]
+        XCTAssertEqual(pauseState, true)
+
+        await viewModel.cancelRun(run.id)
+        let runStatus = viewModel.workRun(run.id)?.status
+        let cancellationIssue = viewModel.runCancellationIssues[run.id]
+        XCTAssertEqual(runStatus, .cancelled)
+        XCTAssertNil(cancellationIssue)
+        let history = try await backend.history(channel: channel.id, after: nil, limit: 200)
+        XCTAssertTrue(history.contains {
+            $0.type == .system && $0.props["kind"]?.stringValue == "agent_run_cancelled"
+        })
+    }
+
+    func testKeyboardHelpIncludesAgentStopShortcut() {
+        let copy = MomoWorkspaceCopy(language: .korean)
+        XCTAssertTrue(MomoKeyboardShortcutCatalog.items(copy: copy).contains {
+            $0.key == "⌘." && $0.label == copy.stopAgentRun
+        })
+    }
+
     func testDockUnreadBadgeAggregatesAndCapsWithoutOverflow() {
         let first = ChannelID()
         let second = ChannelID()

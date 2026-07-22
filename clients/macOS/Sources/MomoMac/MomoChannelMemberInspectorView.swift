@@ -735,6 +735,11 @@ struct MomoMemberProfilePopoverView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            if viewModel.canPauseAgent(member) {
+                MomoAgentPauseControl(viewModel: viewModel, agent: member, copy: copy)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             availabilityMessage
 
             HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
