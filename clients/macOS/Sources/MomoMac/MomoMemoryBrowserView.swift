@@ -15,14 +15,17 @@ final class MomoMemoryBrowserModel: ObservableObject {
     @Published private(set) var errorMessage: String?
 
     let backend: (any MemoryPlaneBackend)?
+    let grantBackend: (any MomoMemoryGrantBackend)?
     let workspace: WorkspaceID?
 
     init(
         backend: (any MemoryPlaneBackend)?,
+        grantBackend: (any MomoMemoryGrantBackend)? = nil,
         workspace: WorkspaceID?,
         initialAgentID: MemberID? = nil
     ) {
         self.backend = backend
+        self.grantBackend = grantBackend
         self.workspace = workspace
         self.agentID = initialAgentID
         if initialAgentID != nil { self.scope = .agent }
@@ -170,6 +173,7 @@ struct MomoMemoryBrowserView: View {
         _model = StateObject(
             wrappedValue: MomoMemoryBrowserModel(
                 backend: viewModel.memoryPlanePresentationBackend,
+                grantBackend: viewModel.memoryGrantPresentationBackend,
                 workspace: viewModel.workspaceId,
                 initialAgentID: initialAgentID
             )
@@ -371,6 +375,10 @@ struct MomoMemoryBrowserView: View {
                 model: model,
                 copy: copy,
                 canManage: viewModel.canManageWorkspace,
+                canManageGrants: canManageGrants(entry),
+                grantBackend: model.grantBackend,
+                workspace: model.workspace,
+                members: viewModel.members,
                 channelNames: Dictionary(
                     uniqueKeysWithValues: viewModel.channels.compactMap { channel in
                         channel.name.map { (channel.id, $0) }
@@ -400,6 +408,15 @@ struct MomoMemoryBrowserView: View {
             model.agentID?.description ?? "all",
             model.includeInvalid.description,
         ].joined(separator: "|")
+    }
+
+    private func canManageGrants(_ entry: MemoryEntry) -> Bool {
+        MomoMemoryGrantAuthorization.canManage(
+            entry: entry,
+            currentMemberID: viewModel.authenticatedMember?.id,
+            canManageWorkspace: viewModel.canManageWorkspace,
+            agentOwnerIDs: viewModel.agentOwnerIDsByMemberID
+        )
     }
 }
 
@@ -437,6 +454,10 @@ private struct MomoMemoryEntryDetail: View {
     @ObservedObject var model: MomoMemoryBrowserModel
     let copy: MomoWorkspaceCopy
     let canManage: Bool
+    let canManageGrants: Bool
+    let grantBackend: (any MomoMemoryGrantBackend)?
+    let workspace: WorkspaceID?
+    let members: [Member]
     let channelNames: [ChannelID: String]
     let onOpenSource: (MemorySourceReference) async -> Void
 
@@ -449,6 +470,10 @@ private struct MomoMemoryEntryDetail: View {
         model: MomoMemoryBrowserModel,
         copy: MomoWorkspaceCopy,
         canManage: Bool,
+        canManageGrants: Bool,
+        grantBackend: (any MomoMemoryGrantBackend)?,
+        workspace: WorkspaceID?,
+        members: [Member],
         channelNames: [ChannelID: String],
         onOpenSource: @escaping (MemorySourceReference) async -> Void
     ) {
@@ -456,6 +481,10 @@ private struct MomoMemoryEntryDetail: View {
         self.model = model
         self.copy = copy
         self.canManage = canManage
+        self.canManageGrants = canManageGrants
+        self.grantBackend = grantBackend
+        self.workspace = workspace
+        self.members = members
         self.channelNames = channelNames
         self.onOpenSource = onOpenSource
         _bodyDraft = State(initialValue: entry.body)
@@ -547,13 +576,14 @@ private struct MomoMemoryEntryDetail: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(copy.memoryGrantTitle).font(MomoTheme.Typography.sectionHeader)
-                    Label(copy.memoryGrantUnavailable, systemImage: "lock")
-                        .font(MomoTheme.Typography.supporting)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                MomoMemoryGrantSection(
+                    backend: grantBackend,
+                    workspace: workspace,
+                    memory: entry.id,
+                    copy: copy,
+                    members: members,
+                    canManage: canManageGrants
+                )
 
                 VStack(spacing: 8) {
                     LabeledContent(copy.memoryCreatedAt) {
