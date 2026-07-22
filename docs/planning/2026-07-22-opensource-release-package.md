@@ -25,16 +25,16 @@
 - 컨테이너 배포: ghcr.io/dawn-kim-official (publish-images.yml 기성 — 수동 dispatch, 공개 시점에 태그 정책 결정).
 - 공개 1급 데모 자산: examples/eve-momo-channel·cloudflare-agent-momo (MOMO-534 랜딩) — README 배치 권고.
 
-## §5. 법무 확정 필요 항목 (성재 → 법무)
+## §5. 확정 사항 (성재 결정 2026-07-22 — 외부 법무 검토 없이 내부 확정)
 
-1. **저작권자 표기**: 현 NOTICE는 "Copyright (c) 2026 dawnkim" — 법인 정식 명칭(㈜…)로 통일할지, 개인/법인 귀속 정리.
-2. **CLA/DCO**: 외부 기여 수용 정책 — DCO(가벼움) vs CLA(권리 명확). 권고: DCO로 시작.
-3. **상표**: "momo" 명칭·로고의 상표 검토(오픈소스 라이선스는 상표권 불포함 — Apache-2.0 §6).
-4. **Centrifugo v5 라이선스 재확인**: v5는 Apache-2.0, v6 일부 기능 라이선스 변화 여부 — 배포 참조 버전 고정과 함께 확인.
-5. **NOTICE 유지 의무 절차**: Apache-2.0 §4(d) — 릴리스 파이프라인에 THIRD_PARTY 재생성 단계(§2의 판독 절차) 편입.
+1. **저작권자 표기 = "dawnkim" 유지** (성재 확정). 법인 전환 시 NOTICE 1줄 갱신으로 족함(과거 릴리스 소급 불요).
+2. **DCO 채택** (성재 확정) — CONTRIBUTING.md에 DCO 1.1 서명 요구 명문화(구현 완료). CLA 없음.
+3. **명칭 "momo" 유지** (성재 확정). 주의 고지: 상표 미등록 상태 — 제3자 동명 상표 리스크는 잔존하며, 제품 트랙션 발생 시 상표 출원을 재검토 항목으로 이월(공개 차단 사유 아님).
+4. **Centrifugo: 사용 중인 v6 코어 = Apache-2.0 실측 확인**(2026-07-22, 저장소 LICENSE 원문). PRO 기능 미사용. 후속 권고: compose의 `centrifugo:v6` 플로팅 태그를 digest 핀으로(기존 postgres 핀 규율과 정합) — 릴리스 체크리스트 편입.
+5. **NOTICE/THIRD_PARTY 유지 절차 확정**: ①의존성 변경 PR은 THIRD_PARTY 갱신 동반(CONTRIBUTING 명문화) ②릴리스 태그 전 §2의 재감사 절차(Package.resolved+checkouts LICENSE 판독) 1회 실행 ③GPL 계열 검출 시 fail-closed.
 
-## §6. 잔여 기술 작업 (법무와 무관, momo-main 큐)
+## §6. 잔여 기술 작업 (momo-main 큐)
 
-- 공개용 README/CONTRIBUTING/SECURITY.md 초안 (별도 티켓).
+- 공개용 README/SECURITY.md 초안 (별도 티켓 — CONTRIBUTING은 완료).
 - ghcr 태그 정책+자동 publish 트리거 결정.
 - 실배포 리허설(VPS install.sh→TLS→web→invite) — 공개 전 1회.
