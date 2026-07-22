@@ -130,6 +130,7 @@ INVITE_CODE="gate-invite-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 APPROVAL_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 CONTROL_RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CANCEL_RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 
 compose() {
   PORT="$GATE_PORT" \
@@ -299,7 +300,11 @@ VALUES ('$RUN_UUID', '$DEMO_WORKSPACE_ID', '$KIM_INTERN_MEMBER_ID',
        ('$CONTROL_RUN_UUID', '$DEMO_WORKSPACE_ID', '$GATE_AGENT_ID',
         '$GENERAL_CHANNEL_ID', 'running',
         '{"prompt":"work control contract gate"}'::jsonb,
-        'openapi-work-control-$RUN_ID');
+        'openapi-work-control-$RUN_ID'),
+       ('$CANCEL_RUN_UUID', '$DEMO_WORKSPACE_ID', '$KIM_INTERN_MEMBER_ID',
+        '$GENERAL_CHANNEL_ID', 'queued',
+        '{"prompt":"agent cancel contract gate"}'::jsonb,
+        'openapi-agent-cancel-$RUN_ID');
 
 INSERT INTO approval
   (id, workspace_id, run_id, channel_id, requested_by, action_type, payload,
@@ -685,6 +690,39 @@ sample approval-decision post \
   "$(jq -cn --arg a "$APPROVAL_UUID" --arg d "$(uuidgen)" \
       '{approval_id:$a,approve:true,reason:"openapi drift gate",client_decision_id:$d}')" "$ACCESS"
 guard_jq '.status == "approved"' "decision receipt reports approved"
+
+sample agent-pause put \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/pause" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/pause" 200 \
+  '{"paused":true}' "$ACCESS"
+guard_jq '.profile.paused == true' "agent pause projects the durable paused state"
+
+sample agent-resume put \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/pause" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/pause" 200 \
+  '{"paused":false}' "$ACCESS"
+guard_jq '.profile.paused == false' "agent resume clears the durable paused state"
+
+sample agent-profile-put put \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/profile" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/profile" 200 \
+  '{"instructions":"OpenAPI contract profile","modelPref":null,"enabledTools":[],"triggers":{"mention":true}}' "$ACCESS"
+guard_jq '.profile.instructions == "OpenAPI contract profile" and .profile.paused == false' \
+  "profile replacement preserves the independent pause state"
+
+sample agent-profile-get get \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/profile" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/profile" 200 "" "$ACCESS"
+guard_jq '.profile.instructions == "OpenAPI contract profile" and .profile.paused == false' \
+  "profile read includes the pause projection"
+
+sample agent-run-cancel post \
+  "/v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel" \
+  "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/cancel" 200 "" "$ACCESS"
+guard_jq --arg run "$(printf '%s' "$CANCEL_RUN_UUID" | tr '[:upper:]' '[:lower:]')" \
+  '(.runId | ascii_downcase) == $run and .status == "cancelled" and
+   .linkedWorkSessionIds == [] and .workSessionsTerminated == false' \
+  "agent cancel exposes the no-implicit-work-session-kill boundary"
 
 # plugins: catalog/detail -> install/grant -> delegated agent policy
 DRIVE_PLUGIN="com.momo.plugins.drive"

@@ -977,6 +977,19 @@ swift run --package-path workers/AgentWorker AgentWorker
 > AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile은 MOMO-004에서
 > `scripts/mock_hermes.py`와 `scripts/verify_agent_worker.sh`로 검증한다.
 
+ADR-0132 D1·D2의 휴먼 취소/pause 경계는 별도 격리 gate로 확인한다. worker는
+스크립트 문법까지만 검증하고 Docker 실행은 momo-main이 수행한다. 기본 포트는
+28184(API)·28185(Centrifugo)·28186(Postgres)·28187(mock Hermes)다.
+
+```bash
+scripts/verify_agent_run_cancel.sh
+```
+
+이 gate는 pause 후 mention이 run을 만들지 않고 시스템 라인을 남기는지, 취소가
+pending job·approval·감사·시스템 라인을 함께 확정하는지, 연결 work session을
+종료하지 않고 ID만 기록하는지, 실행 중 worker가 cancelled SoT를 소비해 durable
+에이전트 응답을 쓰지 않는지를 최종 소비 지점에서 단정한다.
+
 #### 5.3.1 MOMO-004 AgentWorker 런타임 게이트
 
 실제 hermes가 없을 때는 repo-local mock gateway를 사용한다. 이 스크립트는

@@ -9,6 +9,7 @@ struct AgentProfileRoutes: Sendable {
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/agents/:agent/profile", use: get)
         group.put("/v1/workspaces/:ws/agents/:agent/profile", use: put)
+        group.put("/v1/workspaces/:ws/agents/:agent/pause", use: putPause)
     }
 
     @Sendable
@@ -47,6 +48,25 @@ struct AgentProfileRoutes: Sendable {
                 conn: conn, logger: db.logger, workspaceID: workspaceID,
                 agentMemberID: agentMemberID, actorMemberID: principal.memberID,
                 viaTokenID: principal.tokenID, profile: input
+            )
+        }
+        return AgentProfileResponse(profile: profile)
+    }
+
+    @Sendable
+    func putPause(_ request: Request, context: AppRequestContext) async throws -> AgentProfileResponse {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, agentMemberID) = try Self.scope(context, principal: principal)
+        let input = try await request.decode(as: AgentPauseInput.self, context: context)
+        let profile = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            try await Self.requireEditor(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                agentMemberID: agentMemberID, principal: principal, forUpdate: true
+            )
+            return try await Self.setPaused(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                agentMemberID: agentMemberID, actorMemberID: principal.memberID,
+                viaTokenID: principal.tokenID, paused: input.paused
             )
         }
         return AgentProfileResponse(profile: profile)
@@ -96,7 +116,7 @@ struct AgentProfileRoutes: Sendable {
                   updated_at = now()
               WHERE agent_profile.workspace_id = EXCLUDED.workspace_id
             RETURNING instructions, model_pref, enabled_tools::text, triggers::text,
-                      version, updated_by, updated_at
+                      paused, version, updated_by, updated_at
             """,
             logger: logger
         ).collect()
@@ -128,6 +148,62 @@ struct AgentProfileRoutes: Sendable {
         return dto
     }
 
+    private static func setPaused(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        agentMemberID: UUID,
+        actorMemberID: UUID,
+        viaTokenID: UUID,
+        paused: Bool
+    ) async throws -> AgentProfileDTO {
+        let rows = try await conn.query(
+            """
+            INSERT INTO agent_profile
+              (agent_member_id, workspace_id, paused, version, updated_by, updated_at)
+            VALUES
+              (\(agentMemberID), \(workspaceID), \(paused), 1, \(actorMemberID), now())
+            ON CONFLICT (agent_member_id) DO UPDATE
+              SET paused = EXCLUDED.paused,
+                  version = CASE
+                    WHEN agent_profile.paused IS DISTINCT FROM EXCLUDED.paused
+                    THEN agent_profile.version + 1 ELSE agent_profile.version END,
+                  updated_by = CASE
+                    WHEN agent_profile.paused IS DISTINCT FROM EXCLUDED.paused
+                    THEN EXCLUDED.updated_by ELSE agent_profile.updated_by END,
+                  updated_at = CASE
+                    WHEN agent_profile.paused IS DISTINCT FROM EXCLUDED.paused
+                    THEN now() ELSE agent_profile.updated_at END
+              WHERE agent_profile.workspace_id = EXCLUDED.workspace_id
+            RETURNING instructions, model_pref, enabled_tools::text, triggers::text,
+                      paused, version, updated_by, updated_at
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.notFound, message: "agent profile target not found")
+        }
+        let dto = try decode(row, workspaceID: workspaceID, agentMemberID: agentMemberID)
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, via_token_id, detail)
+            VALUES
+              (\(workspaceID), \(actorMemberID), \(agentMemberID),
+               \(paused ? "agent.profile.paused" : "agent.profile.resumed"),
+               'agent_profile', \(agentMemberID), \(viaTokenID),
+               jsonb_build_object(
+                 'schema', 'momo.agent_profile.pause.v1',
+                 'paused', \(paused),
+                 'version', \(dto.version)::integer
+               ))
+            """,
+            logger: logger
+        )
+        return dto
+    }
+
     private static func load(
         conn: PostgresConnection,
         logger: Logger,
@@ -137,7 +213,7 @@ struct AgentProfileRoutes: Sendable {
         let rows = try await conn.query(
             """
             SELECT instructions, model_pref, enabled_tools::text, triggers::text,
-                   version, updated_by, updated_at
+                   paused, version, updated_by, updated_at
               FROM agent_profile
              WHERE workspace_id = \(workspaceID)
                AND agent_member_id = \(agentMemberID)
@@ -153,15 +229,17 @@ struct AgentProfileRoutes: Sendable {
         workspaceID: UUID,
         agentMemberID: UUID
     ) throws -> AgentProfileDTO {
-        let (instructions, modelPref, enabledToolsJSON, triggersJSON, version, updatedBy, updatedAt) =
-            try row.decode((String, String?, String, String, Int, UUID, Date).self)
+        let (instructions, modelPref, enabledToolsJSON, triggersJSON, paused,
+             version, updatedBy, updatedAt) = try row.decode(
+                (String, String?, String, String, Bool, Int, UUID, Date).self
+             )
         let decoder = JSONDecoder()
         let enabledTools = try decoder.decode([String].self, from: Data(enabledToolsJSON.utf8))
         let triggers = try decoder.decode(JSONValue.self, from: Data(triggersJSON.utf8))
         return AgentProfileDTO(
             agentMemberId: agentMemberID, workspaceId: workspaceID,
             instructions: instructions, modelPref: modelPref,
-            enabledTools: enabledTools, triggers: triggers, version: version,
+            enabledTools: enabledTools, triggers: triggers, paused: paused, version: version,
             updatedBy: updatedBy,
             updatedAtMs: Int64(updatedAt.timeIntervalSince1970 * 1_000)
         )
@@ -250,6 +328,27 @@ struct AgentProfileInput: Decodable, Sendable {
     }
 }
 
+struct AgentPauseInput: Decodable, Sendable {
+    let paused: Bool
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case paused
+    }
+
+    init(from decoder: Decoder) throws {
+        let dynamic = try decoder.container(keyedBy: AgentProfileCodingKey.self)
+        let unknown = dynamic.allKeys.map(\.stringValue).filter { $0 != CodingKeys.paused.rawValue }
+        guard unknown.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: AgentProfileCodingKey(unknown.sorted()[0]), in: dynamic,
+                debugDescription: "unknown agent-pause field"
+            )
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        paused = try values.decode(Bool.self, forKey: .paused)
+    }
+}
+
 enum AgentProfileValidation {
     static func validate(_ input: AgentProfileInput) throws -> ValidatedAgentProfile {
         guard input.instructions.utf8.count <= 8_192 else {
@@ -310,6 +409,7 @@ struct AgentProfileDTO: ResponseEncodable, Codable, Sendable {
     let modelPref: String?
     let enabledTools: [String]
     let triggers: JSONValue
+    let paused: Bool
     let version: Int
     let updatedBy: UUID
     let updatedAtMs: Int64

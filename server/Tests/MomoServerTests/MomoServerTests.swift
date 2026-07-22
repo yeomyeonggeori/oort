@@ -1617,6 +1617,12 @@ final class MomoServerTests: XCTestCase {
             runAgentMemberID: second,
             hasChannelMembership: false
         ))
+        for status in ["queued", "running", "awaiting_approval", "paused"] {
+            XCTAssertTrue(AgentRunRoutes.isCancellableRunStatus(status))
+        }
+        for status in ["succeeded", "failed", "cancelled", "timed_out"] {
+            XCTAssertFalse(AgentRunRoutes.isCancellableRunStatus(status))
+        }
     }
 
     func testAgentGatewayApprovalRequestDecodesAndBuildsWorkerCompatiblePayload() throws {
