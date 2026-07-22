@@ -131,6 +131,16 @@ enum AppBuilder {
             environmentName: config.momoEnvironment,
             allowLocalLoopback: config.agentProvider.allowLocalLoopback
         ).add(to: authed)
+        let allowAgentCardHTTP = config.momoEnvironment.lowercased() == "local"
+            && ProcessInfo.processInfo.environment["MOMO_AGENT_CARD_ALLOW_HTTP"] == "1"
+        AgentCardRoutes(
+            db: db,
+            fetcher: SafeAgentCardFetcher(
+                resolver: SystemAgentCardHostResolver(),
+                transport: AsyncAgentCardHTTPTransport(),
+                allowDevelopmentHTTP: allowAgentCardHTTP
+            )
+        ).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
         WorkspaceRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)

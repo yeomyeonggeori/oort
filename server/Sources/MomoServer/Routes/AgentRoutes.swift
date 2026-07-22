@@ -55,85 +55,13 @@ struct AgentRoutes: Sendable {
                 memberID: principal.memberID
             )
             guard role?.isAdmin == true else { return .forbidden }
-
-            try await JoinRoutes.requireNotBanned(
-                conn: conn, logger: db.logger, email: nil, handle: handle
+            return try await Self.createAgentIdentity(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                actorMemberID: principal.memberID, viaTokenID: principal.tokenID,
+                displayName: displayName, handle: handle, model: model, baseURL: baseURL,
+                systemPrompt: systemPrompt, configJSON: configJSON,
+                ownerHumanID: ownerHumanID, auditExtraJSON: "{}"
             )
-
-            let ownerRows = try await conn.query(
-                """
-                SELECT 1
-                  FROM member
-                 WHERE id = \(ownerHumanID)
-                   AND workspace_id = \(workspaceID)
-                   AND kind = 'human'
-                   AND status = 'active'
-                   AND deleted_at IS NULL
-                 LIMIT 1
-                """,
-                logger: db.logger
-            ).collect()
-            guard !ownerRows.isEmpty else { return .invalidOwner }
-
-            let memberRows = try await conn.query(
-                """
-                INSERT INTO member
-                  (workspace_id, kind, status, display_name, handle)
-                VALUES
-                  (\(workspaceID), 'agent', 'active', \(displayName), \(handle))
-                ON CONFLICT (workspace_id, handle) DO NOTHING
-                RETURNING id
-                """,
-                logger: db.logger
-            ).collect()
-            guard let memberRow = memberRows.first else { return .duplicateHandle }
-            let agentID = try memberRow.decode(UUID.self)
-
-            _ = try await conn.query(
-                """
-                INSERT INTO agent
-                  (member_id, workspace_id, model, base_url, system_prompt,
-                   tool_schema, config, owner_human_id)
-                VALUES
-                  (\(agentID), \(workspaceID), \(model), \(baseURL), \(systemPrompt),
-                   '[]'::jsonb, \(configJSON)::jsonb, \(ownerHumanID))
-                """,
-                logger: db.logger
-            )
-
-            _ = try await conn.query(
-                """
-                INSERT INTO workspace_membership (workspace_id, member_id, role)
-                VALUES (\(workspaceID), \(agentID), 'member')
-                """,
-                logger: db.logger
-            )
-
-            _ = try await conn.query(
-                """
-                INSERT INTO audit_log
-                  (workspace_id, actor_member_id, subject_member_id, action,
-                   target_type, target_id, via_token_id, detail)
-                VALUES
-                  (\(workspaceID), \(principal.memberID), \(agentID),
-                   'agent.created', 'agent', \(agentID), \(principal.tokenID),
-                   jsonb_build_object(
-                     'schema', 'momo.agent.created.v1',
-                     'handle', \(handle),
-                     'model', \(model),
-                     'endpoint_label', \(baseURL),
-                     'owner_human_id', \(ownerHumanID)::text,
-                     'channel_memberships_created', 0
-                   ))
-                """,
-                logger: db.logger
-            )
-
-            return .created(AgentMemberDTO(
-                id: agentID,
-                handle: handle,
-                displayName: displayName
-            ))
         }
 
         switch result {
@@ -160,6 +88,95 @@ struct AgentRoutes: Sendable {
             throw HTTPError(.badRequest, message: "model must contain 1...200 characters")
         }
         return value
+    }
+
+    /// Canonical first-class agent identity primitive used by local creation
+    /// and administrator-confirmed remote-card onboarding.
+    static func createAgentIdentity(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        actorMemberID: UUID,
+        viaTokenID: UUID,
+        displayName: String,
+        handle: String,
+        model: String,
+        baseURL: String,
+        systemPrompt: String?,
+        configJSON: String,
+        ownerHumanID: UUID,
+        auditExtraJSON: String
+    ) async throws -> AgentCreationResult {
+        try await JoinRoutes.requireNotBanned(
+            conn: conn, logger: logger, email: nil, handle: handle
+        )
+        let ownerRows = try await conn.query(
+            """
+            SELECT 1
+              FROM member
+             WHERE id = \(ownerHumanID)
+               AND workspace_id = \(workspaceID)
+               AND kind = 'human'
+               AND status = 'active'
+               AND deleted_at IS NULL
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        guard !ownerRows.isEmpty else { return .invalidOwner }
+
+        let memberRows = try await conn.query(
+            """
+            INSERT INTO member (workspace_id, kind, status, display_name, handle)
+            VALUES (\(workspaceID), 'agent', 'active', \(displayName), \(handle))
+            ON CONFLICT (workspace_id, handle) DO NOTHING
+            RETURNING id
+            """,
+            logger: logger
+        ).collect()
+        guard let memberRow = memberRows.first else { return .duplicateHandle }
+        let agentID = try memberRow.decode(UUID.self)
+
+        _ = try await conn.query(
+            """
+            INSERT INTO agent
+              (member_id, workspace_id, model, base_url, system_prompt,
+               tool_schema, config, owner_human_id)
+            VALUES
+              (\(agentID), \(workspaceID), \(model), \(baseURL), \(systemPrompt),
+               '[]'::jsonb, \(configJSON)::jsonb, \(ownerHumanID))
+            """,
+            logger: logger
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO workspace_membership (workspace_id, member_id, role)
+            VALUES (\(workspaceID), \(agentID), 'member')
+            """,
+            logger: logger
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, via_token_id, detail)
+            VALUES
+              (\(workspaceID), \(actorMemberID), \(agentID),
+               'agent.created', 'agent', \(agentID), \(viaTokenID),
+               jsonb_build_object(
+                 'schema', 'momo.agent.created.v1',
+                 'handle', \(handle),
+                 'model', \(model),
+                 'endpoint_label', \(baseURL),
+                 'owner_human_id', \(ownerHumanID)::text,
+                 'channel_memberships_created', 0
+               ) || \(auditExtraJSON)::jsonb)
+            """,
+            logger: logger
+        )
+        return .created(AgentMemberDTO(
+            id: agentID, handle: handle, displayName: displayName
+        ))
     }
 
     static func normalizedSystemPrompt(_ raw: String?) throws -> String? {
@@ -271,7 +288,7 @@ struct AgentRoutes: Sendable {
     }
 }
 
-private enum AgentCreationResult: Sendable {
+enum AgentCreationResult: Sendable {
     case created(AgentMemberDTO)
     case duplicateHandle
     case invalidOwner

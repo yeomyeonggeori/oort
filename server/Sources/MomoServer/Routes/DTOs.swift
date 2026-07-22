@@ -279,6 +279,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
     let channelCount: Int
     let channelIds: [String]
     let capabilities: [String]
+    let origin: String?
     let email: String?
     let timeZone: String?
     let agentModel: String?
@@ -300,6 +301,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
         case channelCount
         case channelIds
         case capabilities
+        case origin
         case email
         case timeZone
         case agentModel
@@ -323,6 +325,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
         self.channelCount = try c.decode(Int.self, forKey: .channelCount)
         self.channelIds = try c.decodeIfPresent([String].self, forKey: .channelIds) ?? []
         self.capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities) ?? []
+        self.origin = try c.decodeIfPresent(String.self, forKey: .origin)
         self.email = try c.decodeIfPresent(String.self, forKey: .email)
         self.timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
         self.agentModel = try c.decodeIfPresent(String.self, forKey: .agentModel)

@@ -55,66 +55,22 @@ struct AgentCredentialRoutes: Sendable {
             throw HTTPError(.notFound, message: "active agent not found")
         }
 
-        let result: (credential: AgentCredentialDTO, rotatedCount: Int) = try await db
+        let result: AgentCredentialIssuance = try await db
             .withTenantTransaction(workspaceID: workspaceID) { conn in
-                // Rotation keeps prior active credentials valid only through
-                // the requested overlap deadline (24h by default).
-                let rotated = try await conn.query(
-                    """
-                    UPDATE token
-                       SET expires_at = CASE
-                             WHEN expires_at IS NULL OR expires_at > \(graceDeadline)
-                               THEN \(graceDeadline)
-                             ELSE expires_at
-                           END
-                     WHERE workspace_id = \(workspaceID)
-                       AND actor_member_id = \(agentID)
-                       AND kind = 'agent_bearer'
-                       AND revoked_at IS NULL
-                       AND (expires_at IS NULL OR expires_at > now())
-                    RETURNING id
-                    """,
-                    logger: db.logger
-                ).collect()
-
-                let rows = try await conn.query(
-                    """
-                    INSERT INTO token
-                      (workspace_id, kind, actor_member_id, subject_member_id,
-                       token_hash, scopes, label, expires_at, created_by)
-                    VALUES
-                      (\(workspaceID), 'agent_bearer', \(agentID), NULL,
-                       digest(\(rawToken), 'sha256'), \(scopes), \(label), \(expiresAt),
-                       \(principal.memberID))
-                    RETURNING id, actor_member_id, scopes, label, last_used_at,
-                              expires_at, revoked_at, created_at
-                    """,
-                    logger: db.logger
-                ).collect()
-                guard let row = rows.first else {
-                    throw HTTPError(.internalServerError, message: "agent credential creation failed")
-                }
-                let credential = try Self.decodeCredential(row)
-                let detail = Self.auditDetail([
-                    "schema": "momo.agent_credential.issued.v1",
-                    "scopes": scopes,
-                    "label": label,
-                    "rotated_credential_count": rotated.count,
-                    "rotation_grace_seconds": graceSeconds,
-                ])
-                _ = try await conn.query(
-                    """
-                    INSERT INTO audit_log
-                      (workspace_id, actor_member_id, subject_member_id, action,
-                       target_type, target_id, via_token_id, detail)
-                    VALUES
-                      (\(workspaceID), \(principal.memberID), \(agentID),
-                       'agent.credential.issued', 'token', \(credential.id),
-                       \(principal.tokenID), \(detail)::jsonb)
-                    """,
-                    logger: db.logger
+                try await Self.issueCredential(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    agentID: agentID,
+                    createdBy: principal.memberID,
+                    viaTokenID: principal.tokenID,
+                    rawToken: rawToken,
+                    scopes: scopes,
+                    label: label,
+                    expiresAt: expiresAt,
+                    graceDeadline: graceDeadline,
+                    graceSeconds: graceSeconds
                 )
-                return (credential, rotated.count)
             }
 
         let response = CreateAgentCredentialResponse(
@@ -133,6 +89,81 @@ struct AgentCredentialRoutes: Sendable {
         encoded.headers[.cacheControl] = "no-store"
         encoded.headers[HTTPField.Name("Pragma")!] = "no-cache"
         return encoded
+    }
+
+    /// Shared one-time bearer issuance primitive. Agent-card confirmation uses
+    /// this inside the same identity transaction, so no partially paired agent
+    /// can commit if credential issuance or its audit row fails.
+    static func issueCredential(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        agentID: UUID,
+        createdBy: UUID,
+        viaTokenID: UUID,
+        rawToken: String,
+        scopes: [String],
+        label: String,
+        expiresAt: Date?,
+        graceDeadline: Date,
+        graceSeconds: Int
+    ) async throws -> AgentCredentialIssuance {
+        let rotated = try await conn.query(
+            """
+            UPDATE token
+               SET expires_at = CASE
+                     WHEN expires_at IS NULL OR expires_at > \(graceDeadline)
+                       THEN \(graceDeadline)
+                     ELSE expires_at
+                   END
+             WHERE workspace_id = \(workspaceID)
+               AND actor_member_id = \(agentID)
+               AND kind = 'agent_bearer'
+               AND revoked_at IS NULL
+               AND (expires_at IS NULL OR expires_at > now())
+            RETURNING id
+            """,
+            logger: logger
+        ).collect()
+
+        let rows = try await conn.query(
+            """
+            INSERT INTO token
+              (workspace_id, kind, actor_member_id, subject_member_id,
+               token_hash, scopes, label, expires_at, created_by)
+            VALUES
+              (\(workspaceID), 'agent_bearer', \(agentID), NULL,
+               digest(\(rawToken), 'sha256'), \(scopes), \(label), \(expiresAt),
+               \(createdBy))
+            RETURNING id, actor_member_id, scopes, label, last_used_at,
+                      expires_at, revoked_at, created_at
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.internalServerError, message: "agent credential creation failed")
+        }
+        let credential = try Self.decodeCredential(row)
+        let detail = Self.auditDetail([
+            "schema": "momo.agent_credential.issued.v1",
+            "scopes": scopes,
+            "label": label,
+            "rotated_credential_count": rotated.count,
+            "rotation_grace_seconds": graceSeconds,
+        ])
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, via_token_id, detail)
+            VALUES
+              (\(workspaceID), \(createdBy), \(agentID),
+               'agent.credential.issued', 'token', \(credential.id),
+               \(viaTokenID), \(detail)::jsonb)
+            """,
+            logger: logger
+        )
+        return AgentCredentialIssuance(credential: credential, rotatedCount: rotated.count)
     }
 
     @Sendable
@@ -395,7 +426,7 @@ struct AgentCredentialRoutes: Sendable {
         }
     }
 
-    private static func decodeCredential(_ row: PostgresRow) throws -> AgentCredentialDTO {
+    static func decodeCredential(_ row: PostgresRow) throws -> AgentCredentialDTO {
         let (id, agentID, scopes, label, lastUsedAt, expiresAt, revokedAt, createdAt) = try row
             .decode((UUID, UUID, [String], String?, Date?, Date?, Date?, Date).self)
         let status: String
@@ -419,13 +450,18 @@ struct AgentCredentialRoutes: Sendable {
         )
     }
 
-    private static func auditDetail(_ object: [String: Any]) -> String {
+    static func auditDetail(_ object: [String: Any]) -> String {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let value = String(data: data, encoding: .utf8)
         else { return "{}" }
         return value
     }
+}
+
+struct AgentCredentialIssuance: Sendable {
+    let credential: AgentCredentialDTO
+    let rotatedCount: Int
 }
 
 struct CreateAgentCredentialRequest: Decodable {
