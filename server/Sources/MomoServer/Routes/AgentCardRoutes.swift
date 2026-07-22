@@ -40,16 +40,17 @@ protocol AgentCardHostResolving: Sendable {
 struct SystemAgentCardHostResolver: AgentCardHostResolving {
     func resolve(host: String) async throws -> [String] {
         try await Task.detached(priority: .utility) {
-            var hints = addrinfo(
-                ai_flags: AI_ADDRCONFIG,
-                ai_family: AF_UNSPEC,
-                ai_socktype: SOCK_STREAM,
-                ai_protocol: IPPROTO_TCP,
-                ai_addrlen: 0,
-                ai_canonname: nil,
-                ai_addr: nil,
-                ai_next: nil
-            )
+            // Darwin과 Glibc의 addrinfo 멤버 순서가 달라 memberwise init은
+            // 플랫폼 중 한쪽에서 컴파일이 깨진다 — 필드 개별 대입만 이식 가능.
+            var hints = addrinfo()
+            hints.ai_flags = AI_ADDRCONFIG
+            hints.ai_family = AF_UNSPEC
+            #if os(Linux)
+            hints.ai_socktype = Int32(SOCK_STREAM.rawValue)
+            #else
+            hints.ai_socktype = SOCK_STREAM
+            #endif
+            hints.ai_protocol = Int32(IPPROTO_TCP)
             var result: UnsafeMutablePointer<addrinfo>?
             guard getaddrinfo(host, nil, &hints, &result) == 0, let first = result else {
                 throw AgentCardFetchError.resolutionFailed
