@@ -8,6 +8,7 @@
     "test": "npm run build && node --test dist/test/*.test.js"
   },
   "dependencies": {
+    "@workflow/world-postgres": "5.0.0-beta.27",
     "eve": "0.27.0"
   },
   "devDependencies": {

@@ -170,6 +170,12 @@ cp infra/.env.example .env
 | `MOMO_LIVEKIT_URL` | 서버 | 클라이언트에 반환할 LiveKit `http(s)`/`ws(s)` endpoint. 세 LiveKit 값 중 하나라도 없거나 URL이 잘못되면 허들 API는 503 `허들 미구성`으로 fail-closed한다. LiveKit 컨테이너 기동은 V-2 범위다. |
 | `LIVEKIT_PORT` / `LIVEKIT_RTC_TCP_PORT` | compose `huddle` profile | LiveKit signaling/HTTP(기본 7880)와 TCP RTC fallback(기본 7881)의 호스트 포트. |
 | `LIVEKIT_RTC_UDP_START` / `LIVEKIT_RTC_UDP_END` | compose `huddle` profile | 컨테이너의 제한된 UDP media range 50000~50100에 대응하는 같은 크기의 호스트 포트 범위. 기본 50000~50100. |
+| `EVE_PORT` | compose `eve` profile | eve HTTP/health 포트. 기본 28140이며 verifier는 실행 전 28140~28142 선점을 검사한다. |
+| `EVE_WORLD_DB` / `EVE_WORLD_USER` / `EVE_WORLD_PASSWORD` | compose `eve` profile | momo PG 클러스터 안의 별도 `eve_world` DB와 전용 NOBYPASSRLS role. 비밀번호는 URL-safe random text를 env/secret manager로 주입한다. |
+| `EVE_MOMO_BASE_URL` | compose `eve` profile | eve 컨테이너가 접근하는 momo API origin. 컨테이너 안에는 `MOMO_BASE_URL`로 주입된다. dev 기본은 `host.docker.internal:8080`, prod 기본은 `api:8080`. |
+| `MOMO_WORKSPACE_ID` / `MOMO_AGENT_MEMBER_ID` | compose `eve` profile | MOMO-534 채널 프리셋이 poll할 workspace와 `member(kind=agent)` 식별자. |
+| `MOMO_AGENT_TOKEN` / `MOMO_CHANNEL_ROUTE_TOKEN` | compose `eve` profile | 각각 momo gateway 전용 agent bearer와 eve `/poll` 보호 bearer. 코드·로그·world DB에 넣지 않고 env로만 주입한다. |
+| `EVE_AI_GATEWAY_API_KEY` | compose `eve` profile | 선택한 eve model provider credential. 컨테이너에는 `AI_GATEWAY_API_KEY`로만 주입하며 momo는 소유하거나 전달하지 않는다. |
 | `AGENT_PROVIDER_MODE` | 서버, worker | `local-mock` / `internal-host-mock` / `external-hermes`. staging/prod/internal-host는 `external-hermes`만 허용. |
 | `AGENT_MODEL` | 서버, worker | 김인턴 provider model label(기본 `hermes-agent`). |
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
@@ -600,7 +606,44 @@ MOMO-527 이전 구성에서 업그레이드할 때는 새 이미지를 pull한 
 
 > **compose layer 분리:** `infra/docker-compose.yml`은 dev/local runtime iteration용 PG18+Centrifugo layer다. `infra/docker-compose.e2e.yml`은 MOMO-186 local gate 전용으로 API/relay/worker/mock-Hermes까지 같은 compose project에 넣는다. `infra/prod/docker-compose.prod.yml`은 source checkout 없는 image-based staging/prod skeleton이다.
 
-### 3.1 음성 허들용 LiveKit 옵트인
+### 3.1 커스텀 에이전트 빌드 환경(eve) 옵트인
+
+momo 설치에는 커스텀 에이전트를 빌드·실행할 수 있는 eve 환경이 동봉된다. 기본 설치는
+기존처럼 PostgreSQL+Centrifugo만 기동하며, `eve` profile을 명시했을 때만 Node 24.4.1
+(digest pin)+eve 0.27.0+MOMO-534 momo 채널 프리셋이 추가된다.
+
+```sh
+cp infra/.env.example .env
+# MOMO_WORKSPACE_ID, MOMO_AGENT_MEMBER_ID와 세 credential 값을 채운다.
+docker compose --env-file .env -f infra/docker-compose.yml --profile eve up -d
+docker compose --env-file .env -f infra/docker-compose.yml --profile eve ps eve
+curl -fsS http://127.0.0.1:28140/eve/v1/health
+
+# eve만 중지한다. 기본 postgres/centrifugo는 유지된다.
+docker compose --env-file .env -f infra/docker-compose.yml --profile eve stop eve
+```
+
+`eve-db-roles` one-shot은 같은 PostgreSQL 18 클러스터에 `eve_world` DB와 전용
+`eve_world` NOBYPASSRLS role을 만든다. 이 role에는 momo DB의 테이블·시퀀스·함수 권한을
+부여하지 않으며 eve 컨테이너에는 `WORKFLOW_POSTGRES_URL`만 전달한다. momo의
+`DATABASE_URL`/`RELAY_DATABASE_URL`/DB owner credential은 eve에 전달하지 않는다.
+
+dev/prod compose는 534 프리셋을 read-only로 마운트하고 writable named volume에 staging한
+뒤 lockfile 그대로 `npm ci`한다. 따라서 npm graph는 예제 디렉터리에 격리되고 루트 package는
+오염되지 않는다. 운영에서 profile을 켤 때는 compose 파일과 함께 `examples/eve-momo-channel`
+및 `infra/eve`를 배포 bundle에 포함해야 한다. profile을 켜지 않은 prod 경로는 기존 image-only
+동작을 유지한다.
+
+```sh
+# dev/prod profile off/on 렌더, 기본 서비스 불변, 포트 선점,
+# eve health+프리셋 로그+eve_world 격리까지 검증한다.
+scripts/verify_eve_profile.sh
+```
+
+실 provider credential을 사용한 eve 세션 왕복은 `runtime-unverified`다. verifier는 실제 eve
+HTTP runtime과 Postgres world까지만 기동하고, 모델 호출이나 momo gateway job을 만들지 않는다.
+
+### 3.2 음성 허들용 LiveKit 옵트인
 
 LiveKit은 기본 `make up`에 포함되지 않는다. 음성 허들을 사용할 때만 `huddle` profile을
 명시하고, `.env`의 `MOMO_LIVEKIT_API_KEY`/`MOMO_LIVEKIT_API_SECRET`가 MomoServer와
@@ -626,7 +669,7 @@ scripts/verify_huddle_livekit.sh
 `runtime-unverified(worker)`: MOMO-470 worker는 Docker를 실행하지 않는다. 위 verifier의
 PASS evidence는 momo-main 오케스트레이터가 실제 실행한 뒤에만 기록한다.
 
-### 3.2 E2E compose static validation
+### 3.3 E2E compose static validation
 
 MOMO-186 e2e layer는 local gate가 전체 service boundary를 재현하기 위한 초안이다. dev compose를 대체하지 않고, prod compose의 image-based/source-checkout-free 원칙도 건드리지 않는다.
 
