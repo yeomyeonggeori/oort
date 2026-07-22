@@ -37,4 +37,6 @@
 
 - 공개용 README/SECURITY.md 초안 (별도 티켓 — CONTRIBUTING은 완료).
 - ghcr 태그 정책+자동 publish 트리거 결정.
-- 실배포 리허설(VPS install.sh→TLS→web→invite) — 공개 전 1회.
+- 실배포 리허설 — **일정 확정(momo-main, 성재 위임 2026-07-22)**: 2단계.
+  - **Phase 1 (로컬 실행분, ⑮ grant UI 랜딩+게이트 부채 배치 직후 착수)**: make_deploy_bundle→fresh VM급 환경에서 install.sh 경로·upgrade 경로·internal hosting smoke·backup/restore 리허설을 오케스트레이터가 일괄 실행(기존 verifier 체계 재사용, 신규 발견은 티켓화).
+  - **Phase 2 (공개 호스트)**: 도메인+VPS 1대 필요 — Phase 1 완료 보고 시점에 성재에게 VPS/도메인 준비 요청(그때까지 성재 액션 불요). TLS(ACME)→web 서빙→초대 링크 실왕복→운영 런북 대조까지.
