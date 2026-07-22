@@ -133,7 +133,7 @@ final class AgentProfileRoutesTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let sql = try String(
-            contentsOf: serverRoot.appendingPathComponent("Migrations/037_agent_interaction_safety.sql"),
+            contentsOf: serverRoot.appendingPathComponent("Migrations/038_agent_interaction_safety.sql"),
             encoding: .utf8
         )
         XCTAssertTrue(sql.contains("ADD COLUMN paused boolean NOT NULL DEFAULT false"))
