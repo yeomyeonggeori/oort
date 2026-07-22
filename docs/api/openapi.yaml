@@ -648,6 +648,89 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/agents/from-card:
+    post:
+      tags: [agents]
+      operationId: registerAgentFromCard
+      summary: Fetch an A2A v0.3 Agent Card for administrator consent.
+      description: >
+        Human workspace owner/admin only. The server fetches
+        `/.well-known/agent-card.json` with a five-second timeout, a 256KB
+        response limit, at most two manually validated redirects, and DNS/IP
+        SSRF checks on every hop. HTTPS is required except for an explicit
+        local-development opt-in. A successful parse stores public card
+        provenance and display-only security requirements with
+        status=pending_consent; failures persist nothing. Provider credentials
+        and secret-shaped card fields are rejected.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RegisterAgentCardRequest"}
+      responses:
+        "201":
+          description: Public card metadata is pending administrator consent.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentCardRegistrationResponse"}
+        "400":
+          description: Unsafe URL, failed fetch, redirect violation, oversize response, or invalid card.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/agents/from-card/{registrationId}/confirm:
+    post:
+      tags: [agents]
+      operationId: confirmAgentFromCard
+      summary: Confirm a pending Agent Card and issue its first gateway bearer.
+      description: >
+        Human workspace owner/admin only. The member(kind=agent), agent row,
+        workspace membership, one-time per-agent gateway bearer digest,
+        registration transition, and audit rows commit in one tenant
+        transaction. The raw bearer is returned once with no-store headers;
+        no card-provided credential is accepted or persisted.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: registrationId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "201":
+          description: Agent member and initial gateway credential created atomically.
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConfirmAgentCardResponse"}
+        "400":
+          description: Invalid registration identifier.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: Pending registration not found in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Registration was already confirmed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels:
     get:
       tags: [channels]
@@ -4280,6 +4363,10 @@ components:
           items:
             type: string
           description: Public capability projection for agents; empty for humans.
+        origin:
+          type: string
+          enum: [card, local]
+          description: Present for agents only; additive origin projection from the confirmed card ledger.
         email:
           type: string
         timeZone:
@@ -4473,6 +4560,73 @@ components:
       properties:
         agent:
           $ref: "#/components/schemas/AgentMember"
+
+    RegisterAgentCardRequest:
+      type: object
+      required: [url]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Agent origin or exact /.well-known/agent-card.json URL; userinfo, query, and fragment are forbidden.
+
+    AgentCardRegistration:
+      type: object
+      required: [id, status, name, url, capabilities, securitySchemes, createdAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [pending_consent, confirmed]}
+        name: {type: string, minLength: 1, maxLength: 100}
+        description: {type: string, maxLength: 2000}
+        url: {type: string, format: uri}
+        capabilities:
+          type: object
+          additionalProperties: true
+        securitySchemes:
+          type: object
+          description: Display-only summary; never includes submitted credentials or secrets.
+          additionalProperties: true
+        agentMemberId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        confirmedAtMs: {type: integer, format: int64}
+
+    AgentCardRegistrationResponse:
+      type: object
+      required: [registration]
+      properties:
+        registration: {$ref: "#/components/schemas/AgentCardRegistration"}
+
+    AgentCredential:
+      type: object
+      required: [id, agentMemberId, status, scopes, createdAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        status: {type: string, enum: [active, expired, revoked]}
+        scopes:
+          type: array
+          items: {type: string}
+        label: {type: string}
+        lastUsedAtMs: {type: integer, format: int64}
+        expiresAtMs: {type: integer, format: int64}
+        revokedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+
+    ConfirmAgentCardResponse:
+      type: object
+      required: [registrationId, status, agent, credential, token, tokenType, confirmedAtMs]
+      properties:
+        registrationId: {type: string, format: uuid}
+        status: {type: string, enum: [confirmed]}
+        agent: {$ref: "#/components/schemas/AgentMember"}
+        credential: {$ref: "#/components/schemas/AgentCredential"}
+        token:
+          type: string
+          writeOnly: true
+          description: One-time-issued scoped gateway bearer; only its SHA-256 digest is persisted.
+        tokenType: {type: string, enum: [Bearer]}
+        confirmedAtMs: {type: integer, format: int64}
 
     # ---- Channels ----------------------------------------------------------------
     Channel:

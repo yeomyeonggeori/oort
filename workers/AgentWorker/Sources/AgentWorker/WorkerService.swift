@@ -313,6 +313,7 @@ struct WorkerService: Service {
             triggerMessageID: p.triggerMessageID,
             fallbackPrompt: p.prompt,
             systemPrompt: p.systemPrompt,
+            memoryRefs: p.memoryRefs,
             maxChars: config.maxContextChars)
         if assembled.droppedCount > 0 {
             // Count only — never log message bodies (redaction, L4 §7).
@@ -327,6 +328,12 @@ struct WorkerService: Service {
         messages.insert(
             WorkToolDispatcher.systemInstruction(channelID: p.channelID),
             at: firstNonSystem
+        )
+        await recordMemoryDelivery(
+            p.runID,
+            workspaceID: job.workspaceID,
+            includedCount: assembled.memoryIncludedCount,
+            injected: assembled.memoryInjected
         )
         let stream = hermes.invoke(
             model: p.model,
@@ -2114,6 +2121,45 @@ struct WorkerService: Service {
             }
         } catch {
             logger.error("cost projection update failed", metadata: [
+                "runId": .string(runID.uuidString),
+                "error": .string(String(describing: error)),
+            ])
+        }
+    }
+
+    private func recordMemoryDelivery(
+        _ runID: UUID?,
+        workspaceID: UUID,
+        includedCount: Int,
+        injected: Bool
+    ) async {
+        guard let runID else { return }
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                _ = try await conn.query(
+                    """
+                    UPDATE agent_run
+                       SET input = jsonb_set(
+                             input,
+                             '{memory_delivery}',
+                             jsonb_build_object(
+                               'included_count', \(includedCount)::integer,
+                               'injected', \(injected)
+                             ),
+                             true
+                           ),
+                           updated_at = now()
+                     WHERE id = \(runID)
+                    """,
+                    logger: logger
+                )
+            }
+        } catch {
+            logger.error("memory delivery receipt update failed", metadata: [
                 "runId": .string(runID.uuidString),
                 "error": .string(String(describing: error)),
             ])

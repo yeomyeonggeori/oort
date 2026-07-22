@@ -935,6 +935,79 @@ final class AgentWorkerTests: XCTestCase {
         ])
     }
 
+    func testContextAssemblerInjectsWorkspaceMemoryAfterSystemPrompt() {
+        let memory: [JSONValue] = [
+            .object([
+                "kind": .string("profile"),
+                "scope": .string("workspace"),
+                "excerpt": .string("출시는 목요일이다"),
+                "source_ids": .array([.string("msg_001"), .string("msg_002")]),
+            ]),
+        ]
+        let result = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "일정을 알려줘",
+            systemPrompt: "You are Hermes.",
+            memoryRefs: memory,
+            maxChars: 24_000
+        )
+
+        XCTAssertEqual(result.memoryIncludedCount, 1)
+        XCTAssertTrue(result.memoryInjected)
+        XCTAssertEqual(result.messages.map(\.role), ["system", "system", "user"])
+        XCTAssertEqual(result.messages[0].content, "You are Hermes.")
+        XCTAssertEqual(result.messages[2].content, "일정을 알려줘")
+        XCTAssertTrue(result.messages[1].content.hasPrefix("워크스페이스 메모리\n"))
+        XCTAssertTrue(result.messages[1].content.contains("kind: profile"))
+        XCTAssertTrue(result.messages[1].content.contains("scope: workspace"))
+        XCTAssertTrue(result.messages[1].content.contains("excerpt: |\n    출시는 목요일이다"))
+        XCTAssertTrue(result.messages[1].content.contains("source_ids: [\"msg_001\",\"msg_002\"]"))
+    }
+
+    func testContextAssemblerDropsMemoryBeforeTriggerWhenBudgetIsExhausted() {
+        let result = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "trigger",
+            systemPrompt: nil,
+            memoryRefs: [
+                .object([
+                    "kind": .string("fact"),
+                    "scope": .string("agent"),
+                    "excerpt": .string(String(repeating: "메", count: 200)),
+                    "source_ids": .array([]),
+                ]),
+            ],
+            maxChars: 7
+        )
+
+        XCTAssertEqual(result.memoryIncludedCount, 1)
+        XCTAssertFalse(result.memoryInjected)
+        XCTAssertEqual(result.messages, [.init(role: "user", content: "trigger")])
+    }
+
+    func testContextAssemblerDoesNotInjectEmptyMemoryRefs() {
+        let result = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "hi",
+            systemPrompt: "system",
+            memoryRefs: [],
+            maxChars: 24_000
+        )
+
+        XCTAssertEqual(result.memoryIncludedCount, 0)
+        XCTAssertFalse(result.memoryInjected)
+        XCTAssertEqual(result.messages, [
+            .init(role: "system", content: "system"),
+            .init(role: "user", content: "hi"),
+        ])
+    }
+
     // MARK: - MOMO-479 thread projection
 
     func testThreadUpdatedPayloadUsesReplySequenceWithoutMintingAnotherSequence() throws {

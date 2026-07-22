@@ -5,6 +5,16 @@
 - workd의 ACP sink를 mode 0600 raw JSONL + 서버 요약 relay 복합 sink로 바꾸고 progress/plan/승인 요청·결정/terminal 생성·종료를 기존 signed work-session PATCH로 보낸다. 서버는 신규 스키마·라우트 없이 세션 thread `message` 원장과 `message.new` + ACP envelope outbox를 한 트랜잭션에 투영한다.
 - event UUID 멱등성, 65,536-byte 상한, 세션별 240건/60초, 최대 3회 backoff 재시도를 적용했다. `_meta.acp`, command/env/path, credential 및 raw terminal output은 allowlist에서 제거·서버에서도 거부하며 relay 실패 시 로컬 JSONL은 유지한다.
 - WorkHostDaemon 13 tests(ACP 집중 6 포함), MomoServer 149 tests, 전체 9개 Swift 패키지 build, OpenAPI/YAML·bash 정적 검증과 `verify_acp_host.sh`의 28110~28113 PG18/Centrifugo mock ACP→thread message 5행+outbox 5행 실제 E2E가 PASS했다. 실 opencode/claude-agent-acp credential 왕복만 `runtime-unverified(external ACP agent credentials)`다.
+## MOMO-536 에이전트 명부 + A2A 카드 URL 온보딩 (#616, 2026-07-22)
+
+- migration 032에 `agent_card_registration` 원장(raw public card JSON·display-only security 요약·pending/confirmed 상태)과 workspace_id 기반 FORCE RLS를 추가했다. 관리자 `from-card`는 5초/256KB/최대 2홉 제한, 홉별 DNS 전체 IP 검사와 검증 IP 연결 고정, 기본 HTTPS 강제로 fail-closed fetch한 뒤에만 pending 원장을 쓴다.
+- confirm은 기존 agent member/workspace membership 및 gateway bearer 발급 기계장치를 한 tenant transaction에서 재사용하고 `agent.created`·`agent.credential.issued`·`agent.card.confirmed` audit을 남긴다. roster에는 기존 필드를 유지한 채 agent `origin=card|local`을 가산했고 OpenAPI를 동기화했다.
+- SSRF/redirect/card parser·요청 폐쇄성·migration 경계 집중 유닛 8건, 서버 전체 156 테스트, Swift 전 패키지 9개 빌드는 PASS했다. `verify_agent_card_onboarding.sh`는 28124~28128 격리 포트의 Python card mock으로 pending→confirm·credential digest·audit·origin·SSRF 400 무기록·RLS를 단정하며, Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
+## MOMO-545 memory_refs 모델 실주입 (#622, 2026-07-22)
+
+- worker와 Hermes gateway가 Context Packet의 `memory_refs` 세 payload 별칭을 fail-closed로 정규화해 시스템 프롬프트 뒤 `워크스페이스 메모리` 모델 컨텍스트로 주입하고, 기존 history 역할·채널 경계·`AGENT_CONTEXT_MAX_CHARS` 절사를 유지하되 메모리를 trigger보다 먼저 제거한다.
+- 실제 모델 전달 시 `agent_run.input.memory_delivery={included_count,injected}` receipt를 기록하며, `/memories/search?agent=`가 호출자 아닌 agent scope를 차용하면 `memory.search.agent_scope_borrowed` audit 1행을 같은 tenant transaction에 남긴다. 스키마·기존 payload 필드는 변경하지 않았다.
+- AgentWorker 47·server 150·Hermes adapter 60 tests와 focused 회귀가 실패 0이며, 격리 PG18+Centrifugo에서 `verify_agent_context.sh`가 mock Hermes 요청 덤프의 memory excerpt·별도 system 블록·budget/history 회귀·receipt `1|true`·차용 감사행·source DB digest 보존을 PASS했다.
 
 ## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
 
