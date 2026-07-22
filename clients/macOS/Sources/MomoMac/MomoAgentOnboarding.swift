@@ -87,7 +87,6 @@ struct MomoAgentOriginBadge: View {
 struct MomoAgentOnboardingView: View {
     @ObservedObject var viewModel: ChatViewModel
     let copy: MomoWorkspaceCopy
-    let isOffline: Bool
     let onCompleted: (MemberID) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
@@ -102,11 +101,9 @@ struct MomoAgentOnboardingView: View {
                     .keyboardShortcut(.cancelAction)
             }
 
-            if isOffline {
-                offlineState
-            } else {
-                content
-            }
+            // 온보딩은 REST 전용 플로우라 realtime 상태로 프리게이트하지 않는다 —
+            // 실제 연결 실패는 from-card 인라인 실패(.offline)가 정직하게 알린다.
+            content
         }
         .padding(24)
         .frame(width: MomoTheme.AgentOnboarding.sheetWidth)
@@ -195,19 +192,6 @@ struct MomoAgentOnboardingView: View {
         }
     }
 
-    private var offlineState: some View {
-        ContentUnavailableView {
-            Label(copy.agentAddressOfflineTitle, systemImage: "wifi.slash")
-        } description: {
-            Text(copy.agentAddressOfflineDetail)
-        } actions: {
-            Button(copy.dismiss) { dismiss() }
-        }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: MomoTheme.AgentOnboarding.offlineMinimumHeight
-        )
-    }
 
     private func inlineFailure(_ reason: String) -> some View {
         Label {

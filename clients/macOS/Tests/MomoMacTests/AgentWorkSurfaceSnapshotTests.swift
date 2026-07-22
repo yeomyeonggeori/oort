@@ -10,11 +10,13 @@ import MomoCore
 @MainActor
 final class AgentWorkSurfaceSnapshotTests: XCTestCase {
     private let size = CGSize(width: 720, height: 680)
+    private let memorySize = CGSize(width: 720, height: 430)
     private let approvalInboxSize = CGSize(width: 440, height: 560)
 
     private func fixture(
         _ scheme: ColorScheme,
-        presentation: MomoDeveloperModePresentation = .developer(showCosts: true)
+        presentation: MomoDeveloperModePresentation = .developer(showCosts: true),
+        memoryDelivery: MomoMemoryDeliveryReceipt? = nil
     ) -> some View {
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!
@@ -91,6 +93,8 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
                     isApprovalInFlight: false,
                     copy: MomoWorkspaceCopy(language: .korean),
                     presentation: presentation,
+                    memoryDelivery: memoryDelivery,
+                    onOpenServedContext: {},
                     onApprovalDecision: { _, _ in },
                     onOpenDetail: {}
                 )
@@ -118,10 +122,15 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
 
     private func render(
         _ scheme: ColorScheme,
-        presentation: MomoDeveloperModePresentation = .developer(showCosts: true)
+        presentation: MomoDeveloperModePresentation = .developer(showCosts: true),
+        memoryDelivery: MomoMemoryDeliveryReceipt? = nil
     ) throws -> NSImage {
         let hostingView = NSHostingView(
-            rootView: fixture(scheme, presentation: presentation)
+            rootView: fixture(
+                scheme,
+                presentation: presentation,
+                memoryDelivery: memoryDelivery
+            )
         )
         hostingView.frame = CGRect(origin: .zero, size: size)
         hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
@@ -145,6 +154,117 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
         representation.size = size
         hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
         let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        return image
+    }
+
+    private func memoryFixture(
+        _ scheme: ColorScheme,
+        memoryDelivery: MomoMemoryDeliveryReceipt?
+    ) -> some View {
+        let copy = MomoWorkspaceCopy(language: .korean)
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!
+        let runID = RunID(uuidString: "00000000-0000-7000-8000-000000000552")!
+        let agent = Member(
+            id: MemberID(uuidString: "00000000-0000-7000-8000-000000000103")!,
+            workspaceId: workspace,
+            kind: .agent,
+            displayName: "문서봇",
+            handle: "docsbot"
+        )
+        let response = Message(
+            id: MessageID(uuidString: "00000000-0000-7000-8000-000000005521")!,
+            channelId: channel,
+            seq: 552,
+            hlcTs: 1_783_910_520_000,
+            authorMemberId: agent.id,
+            body: "지난 회의 결정과 release checklist를 반영해 배포 노트를 정리했습니다.",
+            runId: runID,
+            createdAtMs: 1_783_910_520_000
+        )
+        let run = AgentWorkRun(
+            id: runID,
+            workspaceId: workspace,
+            agentMemberId: agent.id,
+            channelId: channel,
+            status: .succeeded,
+            input: AgentWorkInput(
+                title: "배포 노트 정리",
+                brief: "한국어와 English 항목을 한 문서로 정리합니다."
+            ),
+            output: .object(["summary": .string("배포 노트를 정리했습니다.")]),
+            finishedAtMs: 1_783_910_520_000,
+            createdAtMs: 1_783_910_400_000,
+            updatedAtMs: 1_783_910_520_000
+        )
+
+        return VStack(alignment: .leading, spacing: 16) {
+            MessageBubble(
+                message: response,
+                author: agent,
+                groupingStyle: .groupStart,
+                timelineCopy: copy,
+                presentation: .standard,
+                memoryDelivery: memoryDelivery,
+                onOpenServedContext: {}
+            )
+            AgentWorkRunCard(
+                run: run,
+                agent: agent,
+                status: .succeeded,
+                partial: nil,
+                approval: nil,
+                messages: [response],
+                isApprovalInFlight: false,
+                copy: copy,
+                presentation: .standard,
+                memoryDelivery: memoryDelivery,
+                onOpenServedContext: {},
+                onApprovalDecision: { _, _ in },
+                onOpenDetail: {}
+            )
+        }
+        .padding(16)
+        .frame(
+            width: memorySize.width,
+            height: memorySize.height,
+            alignment: .topLeading
+        )
+        .background(Color(nsColor: .textBackgroundColor))
+        .environment(\.colorScheme, scheme)
+        .environment(\.locale, Locale(identifier: "ko_KR"))
+    }
+
+    private func renderMemory(
+        _ scheme: ColorScheme,
+        memoryDelivery: MomoMemoryDeliveryReceipt?
+    ) throws -> NSImage {
+        let hostingView = NSHostingView(
+            rootView: memoryFixture(scheme, memoryDelivery: memoryDelivery)
+        )
+        hostingView.frame = CGRect(origin: .zero, size: memorySize)
+        hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(memorySize.width * 2),
+            pixelsHigh: Int(memorySize.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no memory delivery bitmap on this host")
+        }
+        representation.size = memorySize
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        let image = NSImage(size: memorySize)
         image.addRepresentation(representation)
         return image
     }
@@ -293,6 +413,59 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
             of: try render(.dark),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: "dark"
+        )
+    }
+
+    func testMemoryDeliveryShownLightSnapshot() throws {
+        try assertMemoryDeliverySnapshot(
+            scheme: .light,
+            receipt: MomoMemoryDeliveryReceipt(includedCount: 3, injected: true),
+            named: "shown-light"
+        )
+    }
+
+    func testMemoryDeliveryShownDarkSnapshot() throws {
+        try assertMemoryDeliverySnapshot(
+            scheme: .dark,
+            receipt: MomoMemoryDeliveryReceipt(includedCount: 3, injected: true),
+            named: "shown-dark"
+        )
+    }
+
+    func testMemoryDeliveryHiddenLightSnapshot() throws {
+        try assertMemoryDeliverySnapshot(
+            scheme: .light,
+            receipt: MomoMemoryDeliveryReceipt(includedCount: 0, injected: true),
+            named: "hidden-light"
+        )
+    }
+
+    func testMemoryDeliveryHiddenDarkSnapshot() throws {
+        try assertMemoryDeliverySnapshot(
+            scheme: .dark,
+            receipt: MomoMemoryDeliveryReceipt(includedCount: 3, injected: false),
+            named: "hidden-dark"
+        )
+    }
+
+    private func assertMemoryDeliverySnapshot(
+        scheme: ColorScheme,
+        receipt: MomoMemoryDeliveryReceipt?,
+        named: String,
+        file: StaticString = #filePath,
+        testName: String = #function,
+        line: UInt = #line
+    ) throws {
+        let recordMode: SnapshotTestingConfiguration.Record? =
+            ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1" ? .all : nil
+        assertSnapshot(
+            of: try renderMemory(scheme, memoryDelivery: receipt),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: named,
+            record: recordMode,
+            file: file,
+            testName: testName,
+            line: line
         )
     }
 }

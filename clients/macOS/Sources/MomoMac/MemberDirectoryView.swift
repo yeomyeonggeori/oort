@@ -103,7 +103,6 @@ public struct MemberDirectoryView: View {
                 MomoAgentOnboardingView(
                     viewModel: viewModel,
                     copy: copy,
-                    isOffline: viewModel.selectedRealtimeStatus?.isFallbackActive == true,
                     onCompleted: { memberID in
                         selectedMemberID = memberID
                         scope = .agents

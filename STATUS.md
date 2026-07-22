@@ -5,6 +5,16 @@
 - macOS 멤버 디렉터리와 워크스페이스 설정에 관리자용 에이전트 주소 입력→공개 능력·인증 방식 동의→등록 흐름을 연결했다. 서버 4xx 사유는 인라인으로 표시하고 카드 제공 인증정보 입력란은 두지 않는다.
 - confirm 뒤 서버 명부를 다시 읽어 새 에이전트를 반영하며, 기존 roster의 `origin=card|local`을 주소로 추가/직접 생성 뱃지로 투영한다. 한국어 동의 화면 light/dark snapshot과 REST·오류·카피 집중 테스트, 디자인 프리플라이트 3종, 독립 design-review(Blocker 0), macOS Swift build가 PASS했다.
 - 기준 `track/uxui`에 남아 있던 Memory Plane·멤버 lifecycle 병합 충돌 표식 6곳은 양 계약을 모두 보존해 최소 해소했다. 실서버 UI 왕복은 momo-main 검수 전까지 `runtime-unverified`다.
+## UXUI MOMO-551 발신 이벤트 구독 설정 (#639, 2026-07-22)
+
+- 채널 설정의 연동 탭에 워크스페이스 범위 발신 이벤트 구독을 연결했다. 목록은 이벤트 종류·URL·4종 상태·중지 사유를 표시하고, 생성·사용·중지·삭제를 MOMO-535 REST 계약으로 수행한다.
+- 생성 응답의 HMAC 시크릿은 별도 일회성 화면에서만 표시·복사하며 목록 DTO와 분리했다. 화면 이탈·세션 변경 뒤에는 폐기하고 재조회하지 않으며 모든 관리 요청은 `no-store` 경계를 사용한다.
+- macOS build, 모델·REST 집중 7 tests, 한국어 목록/일회성 시크릿 라이트·다크 snapshot 4종, design preflight 3종이 PASS했다. 인증된 실서버 owner/admin CRUD 왕복은 오케스트레이터 확인 전까지 `runtime-unverified`다. 트랙 기저에 커밋돼 있던 MOMO-529/525 충돌 마커는 양 기능을 보존하는 최소 합집합으로 해소했다.
+## MOMO-537 agent_profile 원장 + momo 네이티브 간편 생성 (#618, 2026-07-22)
+
+- ADR-0131 Accepted를 정본화하고 migration 036(035는 진행 PR #625와 충돌 회피)에 `agent_profile` 복합 agent FK·FORCE RLS 원장을 추가했다. 관리자/agent human owner GET·PUT, 8KB instructions·credential-shaped field 거부, version 증가·audit와 기존 agent 생성 요청의 optional profile 동시 커밋을 OpenAPI에 반영했다.
+- 528 mention 경로는 profile이 있을 때만 서버 정책 프리앰블→기존 시스템 지시→profile instructions를 packet/payload에 가산하고, 실제 grant∩enabled_tools만 투영한다. model_pref는 `workspace.settings.allowed_agent_models`와 기존 agent.model 안에서만 적용하며 불허 preference는 run당 audit 1회 후 무시한다. 기존 profile 없는 agent payload는 유지된다.
+- 전체 Swift 패키지 build, 엔진 패키지 tests, server 171 tests(profile 집중 7 포함), OpenAPI YAML·verifier bash/ShellCheck는 PASS했다. `verify_agent_profile.sh`는 28150~28153 격리 포트에서 CRUD·owner/admin·RLS·packet·tool/model·mock Hermes 요청 덤프를 단정하며 Docker 실런과 `verify_context_packet.sh` 회귀는 오케스트레이터 수행 전까지 `runtime-unverified`다.
 
 ## MOMO-548 외부 provider 추출 동의 게이트 (#625, 2026-07-22)
 
@@ -48,6 +58,11 @@
 - worker와 Hermes gateway가 Context Packet의 `memory_refs` 세 payload 별칭을 fail-closed로 정규화해 시스템 프롬프트 뒤 `워크스페이스 메모리` 모델 컨텍스트로 주입하고, 기존 history 역할·채널 경계·`AGENT_CONTEXT_MAX_CHARS` 절사를 유지하되 메모리를 trigger보다 먼저 제거한다.
 - 실제 모델 전달 시 `agent_run.input.memory_delivery={included_count,injected}` receipt를 기록하며, `/memories/search?agent=`가 호출자 아닌 agent scope를 차용하면 `memory.search.agent_scope_borrowed` audit 1행을 같은 tenant transaction에 남긴다. 스키마·기존 payload 필드는 변경하지 않았다.
 - AgentWorker 47·server 150·Hermes adapter 60 tests와 focused 회귀가 실패 0이며, 격리 PG18+Centrifugo에서 `verify_agent_context.sh`가 mock Hermes 요청 덤프의 memory excerpt·별도 system 블록·budget/history 회귀·receipt `1|true`·차용 감사행·source DB digest 보존을 PASS했다.
+
+## UXUI MOMO-552 메모리 주입 표시 (#640, 2026-07-22)
+
+- macOS가 `agent_run.input.memory_delivery` 영수증을 fail-closed sidecar로 소비해 `injected=true`이고 `included_count>0`이며 저장 packet ID를 확인한 에이전트 응답·Work 실행 카드에만 "메모리 n건 반영" 메타 버튼을 표시하고, 기존 서빙 내역 인스펙터로 연결한다. 0건·미주입·malformed 영수증과 packet ID 없는 실행은 거짓 액션 없이 무표시다.
+- macOS build와 집중 로직·REST 계약 테스트, 표시/무표시 라이트·다크 스냅샷 4장이 PASS했다. 시작점 `track/uxui`에 커밋돼 있던 충돌 마커 6개도 양쪽 protocol conformance를 보존해 정리했다.
 
 ## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
 

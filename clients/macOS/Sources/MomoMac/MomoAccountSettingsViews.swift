@@ -434,7 +434,6 @@ struct MomoWorkspaceSettingsSurface: View {
             MomoAgentOnboardingView(
                 viewModel: viewModel,
                 copy: copy,
-                isOffline: viewModel.selectedRealtimeStatus?.isFallbackActive == true,
                 onCompleted: { _ in showsAgentOnboarding = false }
             )
         }
@@ -1301,6 +1300,13 @@ enum MomoChannelSettingsTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum MomoIntegrationSettingsTab: String, Identifiable {
+    case outbound
+    case inbound
+
+    var id: String { rawValue }
+}
+
 struct MomoChannelSettingsSheet: View {
     let copy: MomoWorkspaceCopy
     let channel: Channel
@@ -1314,6 +1320,7 @@ struct MomoChannelSettingsSheet: View {
     @State private var channelTopic: String
     @State private var savedLocally = false
     @State private var integrationNavigationLocked = false
+    @State private var selectedIntegration = MomoIntegrationSettingsTab.outbound
     private let canManageMembers: Bool
     private let canManageIntegrations: Bool
 
@@ -1555,12 +1562,32 @@ struct MomoChannelSettingsSheet: View {
     }
 
     private var integrationSettings: some View {
-        MomoWebhookSettingsView(
-            language: copy.language,
-            channel: channel,
-            context: webhookContext,
-            navigationLocked: $integrationNavigationLocked
-        )
+        VStack(spacing: 8) {
+            Picker(copy.integrations, selection: $selectedIntegration) {
+                Text(copy.outboundEvents).tag(MomoIntegrationSettingsTab.outbound)
+                Text(copy.inboundWebhook).tag(MomoIntegrationSettingsTab.inbound)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(integrationNavigationLocked)
+
+            switch selectedIntegration {
+            case .outbound:
+                MomoEventSubscriptionSettingsView(
+                    language: copy.language,
+                    workspaceID: channel.workspaceId,
+                    context: webhookContext,
+                    navigationLocked: $integrationNavigationLocked
+                )
+            case .inbound:
+                MomoWebhookSettingsView(
+                    language: copy.language,
+                    channel: channel,
+                    context: webhookContext,
+                    navigationLocked: $integrationNavigationLocked
+                )
+            }
+        }
     }
 
     private var draftPresentation: MomoChannelPresentation {

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-22 (Fable 온보딩 배치 완주+Wave U 랜딩) · PLN-20260722-01 엔진 전장 종결, UXUI ⑨⑩⑪ main
+- **PLN-20260722-01 엔진 몫 완주(main cdd78d0)**: 534 어댑터·536 카드 온보딩·535 outbound·538 동봉 eve·548 추출 동의·**537 agent_profile(ADR-0131 Accepted 집행 — 프리앰블 우선·도구 교집합·model fail-closed·요청 덤프 주입 단정)** + sol 후속 545·546·547·539. 양문형(담아오기+만들기) 전체 개통.
+- **Wave U 완주**: #610(525)·#628(529 — Blocker 1+High 수정 fleet 반영)·#632(532 — Blocker 2+High 5 수정, 터미널 프리셋 정당 드리프트 재기록) track/uxui→main. 검수 함정 신규: worker/게이트 스냅샷 렌더 컨텍스트 차이(오케스트레이터 환경=기준), 설정 표면 확장發 프리셋 드리프트.
+- roster verifier 선재 실패 해소(수명주기 roster의 workspace_membership JOIN — 픽스처 시드 추가, main 재현 rc=0→커밋). e2e worker 소스 복사에 services/ 누락 함정(§4 후보).
+- 진행: UXUI 소비 3장 스폰(⑫550 온보딩 UI·⑬551 연동 탭·⑭552 메모리 표시 — #638~640, 성재 지시로 fleet 대행). 남은 성재 전달물: 법무 패키지. 잔여 엔진 큐: 549(grant REST).
+
 ## 2026-07-22 (Fable Wave B 완주+감사 후속) · 546·539·547·535 랜딩, 법무 패키지 완성, 548·538 스폰
 - **랜딩→main(8f6fbd5)**: #629 MOMO-546 ACP 서버 릴레이(⑪ 전제 완성 — 원장+outbox+RLS PASS) / #630 539 백오프·포이즌 격리 / #631 547 env 스크럽(allowlist 기본, 마이그레이션 034) / #633 535 outbound 구독(HMAC·1회성 시크릿·자동 disable, 마이그레이션 033, OutboundHTTPPolicy 패키지로 SSRF 유틸 공용화). **Wave B(담아오기) 완주.**
 - 검수 수정 1건: 617 mention 픽스처의 데이터 수정 CTE 동일 스냅샷 함정(외부 UPDATE가 신규 행 미인지).

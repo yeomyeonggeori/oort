@@ -11,6 +11,8 @@ struct AgentWorkRunCard: View {
     let isApprovalInFlight: Bool
     let copy: MomoWorkspaceCopy
     var presentation: MomoDeveloperModePresentation = .standard
+    var memoryDelivery: MomoMemoryDeliveryReceipt? = nil
+    var onOpenServedContext: (() -> Void)? = nil
     let onApprovalDecision: (ApprovalID, Bool) -> Void
     let onOpenDetail: () -> Void
 
@@ -59,6 +61,13 @@ struct AgentWorkRunCard: View {
             }
 
             HStack {
+                if let memoryDelivery, let onOpenServedContext {
+                    MomoMemoryDeliveryMetadata(
+                        receipt: memoryDelivery,
+                        copy: copy,
+                        onOpenServedContext: onOpenServedContext
+                    )
+                }
                 Spacer()
                 Button(action: onOpenDetail) {
                     Label(copy.openWorkDetails, systemImage: "sidebar.right")

@@ -58,6 +58,9 @@ extension MomoWorkspaceCopy {
     }
     var servedContextTitle: String { language == .korean ? "서빙 내역" : "Served context" }
     var servedContextAction: String { language == .korean ? "서빙 내역 보기" : "View served context" }
+    func memoryDeliverySummary(_ count: Int) -> String {
+        language == .korean ? "메모리 \(count)건 반영" : "\(count) memory items included"
+    }
     var servedContextSubtitle: String {
         language == .korean
             ? "이 실행에 서빙된 저장 스냅샷입니다. 현재 정책으로 다시 구성하지 않습니다."
