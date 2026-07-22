@@ -567,6 +567,10 @@ class MomoAdapter(BasePlatformAdapter):
         packet = dict(raw_packet) if isinstance(raw_packet, Mapping) else {}
         packet["tool_policy"] = policy
         assembled["context_packet_projection"] = packet
+        messages, memory_delivery = self._payload_messages_with_delivery(assembled)
+        assembled["messages"] = messages
+        if memory_delivery is not None:
+            assembled["memory_delivery"] = memory_delivery
         return self._with_gateway_work_tools(assembled)
 
     def _with_gateway_work_tools(
@@ -1644,6 +1648,10 @@ class MomoAdapter(BasePlatformAdapter):
             try:
                 packet_payload = await self._payload_with_plugin_tool_policy(payload)
                 result = await self._run_gateway_job(packet_payload)
+                memory_delivery = packet_payload.get("memory_delivery")
+                if isinstance(memory_delivery, Mapping):
+                    result = dict(result)
+                    result["memory_delivery"] = dict(memory_delivery)
             except Exception as exc:  # noqa: BLE001 - durable readable failure
                 log.error(
                     "gateway job failed: run=%s error=%s",
@@ -1697,18 +1705,17 @@ class MomoAdapter(BasePlatformAdapter):
                 )
                 return
             control_id = str(control.get("id") or "unknown")
-            await self._complete_gateway_job(
-                workspace_id,
-                run_id,
-                {
-                    "status": "succeeded",
-                    "body": (
-                        f"Work control {control_id} is {status or 'accepted'}; "
-                        "the host acknowledgement remains authoritative."
-                    ),
-                    "usage": result.get("usage") or self._zero_usage(payload),
-                },
-            )
+            completion = {
+                "status": "succeeded",
+                "body": (
+                    f"Work control {control_id} is {status or 'accepted'}; "
+                    "the host acknowledgement remains authoritative."
+                ),
+                "usage": result.get("usage") or self._zero_usage(payload),
+            }
+            if isinstance(result.get("memory_delivery"), Mapping):
+                completion["memory_delivery"] = result["memory_delivery"]
+            await self._complete_gateway_job(workspace_id, run_id, completion)
             self._pending_gateway_results.pop(run_id, None)
             self._schedule_pending_recovery(
                 reason="gateway-work-result-slot-released", delay_s=0.1
@@ -1932,7 +1939,13 @@ class MomoAdapter(BasePlatformAdapter):
             return self._normalize_gateway_result(result, payload)
 
         if hasattr(self.runtime, "chat"):
-            messages = self._payload_messages(payload)
+            raw_messages = payload.get("messages")
+            messages = (
+                list(raw_messages)
+                if isinstance(raw_messages, Sequence)
+                and not isinstance(raw_messages, (str, bytes, bytearray))
+                else self._payload_messages(payload)
+            )
             result = self.runtime.chat(messages=messages, model=payload.get("model"))
             if inspect.isawaitable(result):
                 result = await result
@@ -2150,9 +2163,76 @@ class MomoAdapter(BasePlatformAdapter):
         return "\n".join(rows[-20:])
 
     @staticmethod
-    def _payload_messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
+    def _trusted_memory_refs(
+        payload: Mapping[str, Any]
+    ) -> tuple[list[Any], bool]:
+        candidates: list[list[Any]] = []
+        direct = payload.get("memory_refs")
+        if isinstance(direct, Sequence) and not isinstance(
+            direct, (str, bytes, bytearray)
+        ):
+            candidates.append(list(direct))
+        for alias in ("context_packet", "context_packet_projection"):
+            packet = payload.get(alias)
+            refs = packet.get("memory_refs") if isinstance(packet, Mapping) else None
+            if isinstance(refs, Sequence) and not isinstance(
+                refs, (str, bytes, bytearray)
+            ):
+                candidates.append(list(refs))
+        if not candidates:
+            return [], False
+        first = candidates[0]
+        if any(candidate != first for candidate in candidates[1:]):
+            return [], True
+        return first, True
+
+    @classmethod
+    def _memory_context_block(
+        cls, payload: Mapping[str, Any]
+    ) -> tuple[str, Optional[dict[str, Any]]]:
+        refs, present = cls._trusted_memory_refs(payload)
+        if not present:
+            return "", None
+        rows: list[str] = []
+        for ref in refs:
+            if not isinstance(ref, Mapping):
+                continue
+            excerpt = str(ref.get("excerpt") or "").strip()
+            if not excerpt:
+                continue
+            kind = str(ref.get("kind") or "unknown")
+            scope = str(ref.get("scope") or "unknown")
+            raw_source_ids = ref.get("source_ids")
+            source_ids = (
+                list(raw_source_ids)
+                if isinstance(raw_source_ids, Sequence)
+                and not isinstance(raw_source_ids, (str, bytes, bytearray))
+                else []
+            )
+            indented_excerpt = excerpt.replace("\n", "\n    ")
+            rows.append(
+                f"- kind: {kind}\n"
+                f"  scope: {scope}\n"
+                "  excerpt: |\n"
+                f"    {indented_excerpt}\n"
+                "  source_ids: "
+                f"{json.dumps(source_ids, ensure_ascii=False, separators=(',', ':'))}"
+            )
+        block = "워크스페이스 메모리\n" + "\n".join(rows) if rows else ""
+        return block, {
+            "included_count": len(refs),
+            "injected": bool(block),
+        }
+
+    @classmethod
+    def _payload_messages_with_delivery(
+        cls, payload: Mapping[str, Any]
+    ) -> tuple[list[dict[str, str]], Optional[dict[str, Any]]]:
         recent = payload.get("recent_messages")
-        messages: list[dict[str, str]] = []
+        turns: list[tuple[dict[str, str], bool]] = []
+        trigger_id = str(
+            payload.get("trigger_message_id") or payload.get("triggerMessageId") or ""
+        )
         if isinstance(recent, Sequence) and not isinstance(recent, (str, bytes, bytearray)):
             for item in recent:
                 if not isinstance(item, Mapping):
@@ -2161,10 +2241,43 @@ class MomoAdapter(BasePlatformAdapter):
                 if not body:
                     continue
                 role = "assistant" if item.get("author_kind") == "agent" else "user"
-                messages.append({"role": role, "content": body})
-        if not messages:
+                message_id = str(item.get("message_id") or item.get("messageId") or "")
+                turns.append((
+                    {"role": role, "content": body},
+                    bool(trigger_id and message_id == trigger_id),
+                ))
+        if not turns:
             prompt = str(payload.get("prompt") or "")
-            messages.append({"role": "user", "content": prompt})
+            turns.append(({"role": "user", "content": prompt}, True))
+        elif not any(is_trigger for _, is_trigger in turns):
+            turns[-1] = (turns[-1][0], True)
+
+        memory_block, memory_delivery = cls._memory_context_block(payload)
+        try:
+            max_chars = max(int(os.environ.get("AGENT_CONTEXT_MAX_CHARS", "24000")), 1)
+        except ValueError:
+            max_chars = 24000
+        total = len(memory_block) + sum(len(turn["content"]) for turn, _ in turns)
+        while total > max_chars and len(turns) > 1 and not turns[0][1]:
+            total -= len(turns[0][0]["content"])
+            turns.pop(0)
+        if total > max_chars and memory_block:
+            memory_block = ""
+            if memory_delivery is not None:
+                memory_delivery["injected"] = False
+
+        messages: list[dict[str, str]] = []
+        system_prompt = str(payload.get("system_prompt") or "").strip()
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if memory_block:
+            messages.append({"role": "system", "content": memory_block})
+        messages.extend(turn for turn, _ in turns)
+        return messages, memory_delivery
+
+    @classmethod
+    def _payload_messages(cls, payload: Mapping[str, Any]) -> list[dict[str, str]]:
+        messages, _ = cls._payload_messages_with_delivery(payload)
         return messages
 
     def _normalize_gateway_result(self, result: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
