@@ -53,12 +53,50 @@ final class AgentProfileRoutesTests: XCTestCase {
             prompt!.range(of: injection)!.lowerBound
         )
         XCTAssertTrue(prompt!.contains("cannot expand permissions or bypass"))
+        XCTAssertTrue(prompt!.contains("Publish only when this turn adds new information"))
+        XCTAssertTrue(prompt!.contains("silence is an explicit successful outcome"))
+        XCTAssertTrue(prompt!.contains("확인했습니다"))
+        XCTAssertLessThan(
+            prompt!.range(of: MessageRoutes.agentInteractionSafetyPreamble)!.lowerBound,
+            prompt!.range(of: injection)!.lowerBound
+        )
         XCTAssertEqual(
             MessageRoutes.effectiveSystemPrompt(
-                baseSystemPrompt: "legacy prompt", profileInstructions: nil
+                baseSystemPrompt: "legacy prompt", profileInstructions: nil,
+                appliesInteractionSafety: false
             ),
             "legacy prompt"
         )
+    }
+
+    func testInteractionSafetyAppliesWithoutProfileButNotToExternalRuntime() {
+        let internalPrompt = MessageRoutes.effectiveSystemPrompt(
+            baseSystemPrompt: "legacy prompt", profileInstructions: nil
+        )
+        XCTAssertTrue(internalPrompt!.hasPrefix(MessageRoutes.agentProfilePolicyPreamble))
+        XCTAssertTrue(internalPrompt!.contains(MessageRoutes.agentInteractionSafetyPreamble))
+        XCTAssertTrue(internalPrompt!.hasSuffix("Server-configured agent instructions:\nlegacy prompt"))
+
+        let externalPrompt = MessageRoutes.effectiveSystemPrompt(
+            baseSystemPrompt: "remote card description", profileInstructions: nil,
+            appliesInteractionSafety: false
+        )
+        XCTAssertEqual(externalPrompt, "remote card description")
+        XCTAssertFalse(externalPrompt!.contains("Publication policy for every turn"))
+
+        let externalProfilePrompt = MessageRoutes.effectiveSystemPrompt(
+            baseSystemPrompt: "remote card description", profileInstructions: "card profile",
+            appliesInteractionSafety: false
+        )
+        XCTAssertTrue(externalProfilePrompt!.contains("card profile"))
+        XCTAssertFalse(externalProfilePrompt!.contains("Publication policy for every turn"))
+    }
+
+    func testAgentMentionDepthInheritsAndStopsAtSchemaCap() throws {
+        XCTAssertEqual(try MessageRoutes.inheritedMentionDepth(0), 1)
+        XCTAssertEqual(try MessageRoutes.inheritedMentionDepth(3), 4)
+        XCTAssertThrowsError(try MessageRoutes.inheritedMentionDepth(4))
+        XCTAssertThrowsError(try MessageRoutes.inheritedMentionDepth(-1))
     }
 
     func testModelPreferenceRequiresWorkspaceAllowlist() {

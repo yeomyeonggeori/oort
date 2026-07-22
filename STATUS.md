@@ -24,6 +24,12 @@
 - migration 038의 `agent_profile.paused`와 owner/admin pause REST가 mention/work 신규 enqueue를 막고 시스템 라인으로 설명한다. AgentWorker는 실행 단계에서 cancelled SoT를 재확인하며 cancelled run의 durable agent 응답·상태 부활을 차단한다.
 - server/worker build·unit 및 verifier 정적 검증은 worker가 수행한다. `scripts/verify_agent_run_cancel.sh`의 28184~28187 격리 Docker E2E는 momo-main 실행 전까지 `runtime-unverified`다.
 
+## MOMO-559 agent interaction safety D3/D4/D5 (#652, 2026-07-22)
+
+- agent가 다른 agent를 mention할 때 source run을 강제하고 `parent_run_id`와 `depth=parent+1`을 run input·job payload까지 전파한다. 사람 발화는 기존 root depth 0을 유지하며, 외부 A2A 카드 런타임에도 동일 D3 구조 가드를 적용한다.
+- 내부 AgentWorker 경로에는 profile instructions보다 앞선 서버 권위 D4 publication preamble을 항상 삽입하고, adapter와 provider 최종 요청까지 전달되는 유닛·격리 verifier를 추가했다. 외부 A2A 카드 런타임에는 D4를 적용하지 않는다.
+- G2 차단은 기존 원자적 run 실패·`agent.guard.tripped` 감사·broadcast 경로에 정확한 사람 개입 시스템 라인을 남긴다. 전체 Swift 패키지 build, server 176·AgentWorker 55·Hermes adapter 61 tests와 verifier 정적 검증은 PASS했으며, 28191~28194 격리 Docker verifier 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-553 메모리 접근 허용 UI (#645, 2026-07-22)
 
 - macOS 메모리 상세에 접근 허용 원장 목록, 활성 roster 기반 멤버·에이전트 피커, 기록을 보존하는 접근 회수 확인을 MOMO-549 GET/POST/DELETE 계약으로 연결했다. 회수 이력은 회색 `회수됨` 상태와 부여자·부여/회수 시각을 함께 표시한다.

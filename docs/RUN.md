@@ -1006,6 +1006,15 @@ make migrate
 scripts/verify_agent_worker.sh
 ```
 
+ADR-0132 D3/D4/D5의 전용 격리 게이트는 아래 wrapper를 사용한다. 기본 포트는
+API 28191, mock Hermes 28192, PostgreSQL 28193, Centrifugo 28194이며, agent mention의
+`parent_run_id`/`depth=parent+1`, G2 감사·사람 개입 시스템 라인, D4 서버 프리앰블의
+mock provider 최종 소비를 확인한다. 외부 A2A 카드 런타임은 D3만 적용하고 D4는 적용하지 않는다.
+
+```sh
+scripts/verify_agent_interaction_safety.sh
+```
+
 MOMO-486의 chat-to-session 경계는 별도 격리 verifier로 확인한다. mock Hermes가 실제
 OpenAI-compatible tool-call delta를 내고 AgentWorker가 기존 work-control REST를 호출한다.
 spawn 승인 뒤에는 run을 재개하지 않고 host가 session 생성/ack를 수행하며, 이어지는 session
