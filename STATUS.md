@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-538 셀프호스트 eve 옵션 프로파일 (#619, 2026-07-22)
+
+- dev/prod compose에 기본 비활성 `eve` profile을 추가했다. Node 24.4.1 digest, eve 0.27.0, Postgres world 5.0.0-beta.27을 고정하고 MOMO-534 채널 프리셋과 모든 자격증명은 read-only mount/env 경계로만 주입한다.
+- `eve-db-roles`는 momo PostgreSQL 클러스터 안에 별도 `eve_world` DB와 NOBYPASSRLS role을 만들되 momo schema object 권한은 부여하지 않는다. `verify_eve_profile.sh`가 dev/prod profile off/on drift, 기본 서비스 불변, 28140~28142 포트 선점, eve health·프리셋 load 로그·world durable table·momo table 접근 거부를 단정한다.
+- 실제 provider credential을 사용하는 eve 세션 왕복만 `runtime-unverified(external eve model credentials)`다.
+
 ## MOMO-535 outbound 이벤트 구독 (#617, 2026-07-22)
 
 - migration 033에 `event_subscription` FORCE RLS 원장과 mention·approval_request·work 상태 전이 transactional outbox 투영을 추가하고, 관리자 CRUD·감사·one-time HMAC secret 발급을 OpenAPI와 동기화했다. 평문 secret은 저장·재조회하지 않는다.

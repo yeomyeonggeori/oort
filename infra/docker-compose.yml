@@ -98,6 +98,70 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
+  # eve — optional self-hosted custom-agent build/runtime environment.
+  # `docker compose --profile eve up -d` is the only activation path. The
+  # MOMO-534 preset stays read-only; entrypoint stages it into a named volume.
+  # ---------------------------------------------------------------------------
+  eve-db-roles:
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    profiles: ["eve"]
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: postgres
+      PGUSER: ${POSTGRES_USER:-momo}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-momo}
+      MOMO_DB_NAME: ${POSTGRES_DB:-momo}
+      EVE_WORLD_DB: ${EVE_WORLD_DB:-eve_world}
+      EVE_WORLD_USER: ${EVE_WORLD_USER:-eve_world}
+      EVE_WORLD_PASSWORD: ${EVE_WORLD_PASSWORD:-change-me-eve-world}
+    command: ["sh", "/bootstrap/bootstrap_world.sh"]
+    volumes:
+      - ./eve/bootstrap_world.sh:/bootstrap/bootstrap_world.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  eve:
+    image: node:24.4.1-bookworm-slim@sha256:36ae19f59c91f3303c7a648f07493fe14c4bd91320ac8d898416327bacf1bbfa
+    profiles: ["eve"]
+    restart: unless-stopped
+    init: true
+    working_dir: /eve-runtime
+    command: ["sh", "/bootstrap/entrypoint.sh"]
+    environment:
+      EVE_PORT: 28140
+      WORKFLOW_TARGET_WORLD: "@workflow/world-postgres"
+      WORKFLOW_POSTGRES_URL: postgres://${EVE_WORLD_USER:-eve_world}:${EVE_WORLD_PASSWORD:-change-me-eve-world}@postgres:5432/${EVE_WORLD_DB:-eve_world}
+      WORKFLOW_POSTGRES_JOB_PREFIX: ${EVE_WORLD_JOB_PREFIX:-momo_eve}
+      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: ${EVE_WORLD_WORKER_CONCURRENCY:-10}
+      WORKFLOW_POSTGRES_MAX_POOL_SIZE: ${EVE_WORLD_MAX_POOL_SIZE:-10}
+      MOMO_BASE_URL: ${EVE_MOMO_BASE_URL:-http://host.docker.internal:8080}
+      MOMO_WORKSPACE_ID: ${MOMO_WORKSPACE_ID:-}
+      MOMO_AGENT_MEMBER_ID: ${MOMO_AGENT_MEMBER_ID:-}
+      MOMO_AGENT_TOKEN: ${MOMO_AGENT_TOKEN:-}
+      MOMO_CHANNEL_ROUTE_TOKEN: ${MOMO_CHANNEL_ROUTE_TOKEN:-}
+      AI_GATEWAY_API_KEY: ${EVE_AI_GATEWAY_API_KEY:-}
+    ports:
+      - "${EVE_PORT:-28140}:28140"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../examples/eve-momo-channel:/preset:ro
+      - ./eve/entrypoint.sh:/bootstrap/entrypoint.sh:ro
+      - eve-runtime:/eve-runtime
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:28140/eve/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      eve-db-roles:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
   # relay / worker — 추후(후속 티켓에서 Swift 실행 패키지 빌드 후 서비스로 추가).
   #   relay  (T06 relay/OutboxRelay): outbox SKIP LOCKED 클레임 → Centrifugo /api/publish.
   #            BYPASSRLS role로 전 테넌트 폴링. depends_on: postgres(healthy), centrifugo.
@@ -125,3 +189,4 @@ services:
 
 volumes:
   pgdata:
+  eve-runtime:

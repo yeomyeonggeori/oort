@@ -34,9 +34,19 @@ npm ci
 npm test
 ```
 
-The custom channel is [agent/channels/momo.ts](agent/channels/momo.ts). Copy the `agent/` and `src/` files into an eve agent project with the same relative layout, then invoke the channel's authenticated `POST /poll` route from your scheduler.
+The custom channel is [agent/channels/momo.ts](agent/channels/momo.ts). The
+minimal [agent/instructions.md](agent/instructions.md) makes the preset a
+buildable eve application while leaving persona/model customization to the
+self-host operator. Copy the `agent/` and `src/` files into an eve agent project
+with the same relative layout, then invoke the channel's authenticated
+`POST /poll` route from your scheduler.
 
 The example pins **eve 0.27.0** because eve is beta and its channel API changes frequently. The authored surface is deliberately limited to `defineChannel`, `POST`, `send()`, `continuationToken`, channel state, `message.completed`, and `routeAuth`. Review eve's custom-channel changelog before changing the pin.
+
+The self-host compose preset also pins `@workflow/world-postgres` to
+**5.0.0-beta.27**. It sets `WORKFLOW_TARGET_WORLD=@workflow/world-postgres` and
+uses the isolated `eve_world` database; it never receives momo's application,
+relay, worker, or database-owner connection URL.
 
 ## Environment
 
