@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Fable Wave B-1 랜딩) · 534·536·545 main — 담아오기 문 개통 + sol 급소 1건 당일 봉합
+- **랜딩→main**: #621 MOMO-534 eve/CF 어댑터 2종(verify_momo_channel_adapter PASS — pending→mock eve→메시지→콜백) / #626 MOMO-536 A2A 카드 URL 온보딩(전 항목 PASS — SSRF 거부·confirm·credential·RLS) / #627 **MOMO-545 memory_refs 모델 실주입**(verify_agent_context 확장 PASS — 요청 덤프에 발췌 단정). Memory Plane이 이제 end-to-end로 모델에 서빙된다.
+- 검수 수정 4건(§4 12·13 성문화): 615 tsconfig verify/ 누락 / 616 addrinfo Darwin/Glibc 이식성(Linux 컨테이너에서만 발현)·verifier 고정 프로젝트명 stale 재사용 / 622는 무수정 통과.
+- 진행: 623(546 ACP 릴레이) worker 가동 중 — 랜딩 시 ⑪(532) 완전 개방. 다음 스폰 큐: 535(outbound)·539(백오프)·547(env 스크럽)·548(추출 동의). 537은 ADR-0131 승인 대기.
+
 ## 2026-07-22 (Fable sol 감사 검수) · 독립 감사 브리프 실코드 재검증 — 급소 2건 확증, 티켓 4장
 - 성재가 sol(GPT)과 정리한 감사 브리프를 main@e0c5336 실코드로 검수(정본 docs/planning/2026-07-22-sol-independent-audit-verdict.md). **적중 2건**: ①memory_refs가 모델 메시지에 미주입(ContextAssembler 0건 — Memory Plane이 아직 모델에 서빙 안 됨) ②workd ACP 이벤트가 로컬 JSONL 체류(서버 관전 불가 — 532 전제 갭).
 - 발급: **MOMO-545(#622, HIGH 실주입)·546(#623, ACP 릴레이)·547(#624, env 스크럽)·548(#625, 외부 추출 동의)**. 가설 판정: Work Object=thin slice 연구로(즉시 ADR 반대), fidelity lane=수요 후, Collaborative Work Profile=기존 AMP 보류와 동일 결론(어휘 채택), 5-plane=대체로 기설계 일치.
