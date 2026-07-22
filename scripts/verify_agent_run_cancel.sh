@@ -250,19 +250,29 @@ SQL
 pass "cancel atomically retires pending work and preserves linked work_session"
 
 compose up -d worker
+# The worker service compiles from source on first boot; wait for the runtime
+# start marker before opening the short claim window below.
+worker_deadline=$(( $(date -u +%s) + ${AGENT_CANCEL_WORKER_BOOT_TIMEOUT:-1800} ))
+until compose logs worker 2>/dev/null | grep -q "agent worker starting"; do
+  if [ "$(date -u +%s)" -ge "$worker_deadline" ]; then
+    compose logs --tail 60 worker >&2 || true
+    fail "worker runtime did not start before the claim scenario"
+  fi
+  sleep 5
+done
 LIVE_TRIGGER="MOMO557-LIVE-$RUN_TAG"
 LIVE_MESSAGE="$(curl -fsS -X POST "$BASE_URL/v1/workspaces/$WS_ID/channels/$CHANNEL_ID/messages" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
   --data "$(jq -cn --arg c "$(uuid)" --arg b "@$AGENT_HANDLE $LIVE_TRIGGER" \
     '{clientMsgId:$c,type:"text",body:$b}')")"
 LIVE_MESSAGE_ID="$(printf '%s' "$LIVE_MESSAGE" | jq -er '.id|ascii_downcase')"
-deadline=$(( $(date -u +%s) + 30 ))
+deadline=$(( $(date -u +%s) + 120 ))
 LIVE_RUN_ID=""
 while [ "$(date -u +%s)" -lt "$deadline" ]; do
   LIVE_RUN_ID="$(sql_value <<SQL
 SELECT lower(ar.id::text)
   FROM agent_run ar
-  JOIN outbox o ON o.payload->>'run_id'=ar.id::text
+  JOIN outbox o ON lower(o.payload->>'run_id')=lower(ar.id::text)
  WHERE ar.trigger_message_id='$LIVE_MESSAGE_ID'
    AND o.kind='agent_job' AND o.status='processing'
  LIMIT 1;
@@ -271,13 +281,25 @@ SQL
   [ -n "$LIVE_RUN_ID" ] && break
   sleep 0.02
 done
-[ -n "$LIVE_RUN_ID" ] || fail "worker did not reach live processing boundary"
+if [ -z "$LIVE_RUN_ID" ]; then
+  echo "[agent-cancel] diagnostics: run/outbox state for live trigger" >&2
+  sql_value >&2 <<SQL || true
+SELECT coalesce(json_agg(json_build_object(
+         'run', lower(ar.id::text), 'run_status', ar.status::text,
+         'outbox_status', o.status, 'outbox_error', o.last_error))::text, '[]')
+  FROM agent_run ar
+  LEFT JOIN outbox o ON o.kind='agent_job' AND lower(o.payload->>'run_id')=lower(ar.id::text)
+ WHERE ar.trigger_message_id='$LIVE_MESSAGE_ID';
+SQL
+  compose logs --tail 120 worker >&2 || true
+  fail "worker did not reach live processing boundary"
+fi
 curl -fsS -X POST "$BASE_URL/v1/workspaces/$WS_ID/agent-runs/$LIVE_RUN_ID/cancel" \
   -H "Authorization: Bearer $ADMIN_TOKEN" >/dev/null
 sleep 2
 LIVE_ASSERT="$(sql_value <<SQL
 SELECT (SELECT status::text FROM agent_run WHERE id='$LIVE_RUN_ID') || '|' ||
-       (SELECT status FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$LIVE_RUN_ID' LIMIT 1) || '|' ||
+       (SELECT status FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')='$LIVE_RUN_ID' LIMIT 1) || '|' ||
        (SELECT count(*) FROM message WHERE run_id='$LIVE_RUN_ID' AND type='text'
           AND author_member_id='$AGENT_ID')::text;
 SQL
