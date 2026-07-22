@@ -349,11 +349,18 @@ struct WorkerService: Service {
             maxTokens: maxOutputTokens)
 
         do {
+            // Cancellation is observed at step boundaries (ADR-0132 D1); a 1s
+            // ledger-poll floor keeps text-delta streams from issuing one
+            // point query per token chunk.
+            var lastCancelLedgerCheck = ContinuousClock.now
             for try await event in stream {
                 if Task.isCancelled { break }
-                if await isRunCancelled(p.runID, workspaceID: job.workspaceID) {
-                    cancelledByLedger = true
-                    break
+                if ContinuousClock.now - lastCancelLedgerCheck >= .seconds(1) {
+                    lastCancelLedgerCheck = ContinuousClock.now
+                    if await isRunCancelled(p.runID, workspaceID: job.workspaceID) {
+                        cancelledByLedger = true
+                        break
+                    }
                 }
                 switch event {
                 case .status(let s):
