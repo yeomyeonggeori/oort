@@ -1734,9 +1734,11 @@ public struct MessageListView: View {
         viewModel.selectedChannelWorkingSignals.first { $0.agentId == agentID }
     }
 
-    /// Agents whose working state already owns a row in the timeline (a live
-    /// partial bubble or a turn-liveness row), both pinned to the bottom of the
-    /// scroll content.
+    /// Agents whose working state is already represented in the loaded timeline:
+    /// either a live partial bubble (`livePartials`) or a turn-liveness row
+    /// (`visibleWorkingAgents`). This is pure derived data (partials, work runs,
+    /// members), independent of scroll position, so the footer dedup below stays
+    /// deterministic and snapshot-stable regardless of viewport/geometry.
     private var timelineWorkingAgentIDs: Set<MemberID> {
         var ids = Set(viewModel.visibleWorkingAgents.map(\.id))
         for partial in livePartials {
@@ -1747,16 +1749,14 @@ public struct MessageListView: View {
         return ids
     }
 
-    /// Signals for the composer footer. When the user is pinned to the bottom the
-    /// timeline rows for those agents are on-screen, so the footer would be a third
-    /// copy of the same signal; suppress it. Once scrolled up, the rows are out of
-    /// view and the footer becomes the only persistent working indicator, so it
-    /// shows every signal again.
+    /// Signals for the composer footer. Deterministic data rule (no scroll/geometry
+    /// heuristic): an agent whose working signal already appears in the loaded
+    /// timeline (as a partial bubble or a turn-liveness row) is suppressed, so the
+    /// footer never reprints a headline the timeline already shows. The footer
+    /// carries the headline only for agents that have no on-timeline representation.
     private var composerFooterSignals: [AgentWorkingSignal] {
-        let signals = viewModel.selectedChannelWorkingSignals
-        guard isPinnedToTimelineBottom else { return signals }
-        let onScreen = timelineWorkingAgentIDs
-        return signals.filter { !onScreen.contains($0.agentId) }
+        let onTimeline = timelineWorkingAgentIDs
+        return viewModel.selectedChannelWorkingSignals.filter { !onTimeline.contains($0.agentId) }
     }
 }
 
@@ -1896,14 +1896,14 @@ private struct MomoGuideStepPill: View {
 // Surface 3 (MOMO-568): the turn-liveness row. It consumes agentWorkingSignal and
 // uses the static accent liveness mark plus a ticking elapsed clock, so it never
 // reads as the animated three-dot "typing" affordance a human sender would get.
+// It deliberately shows only "{agent} is working" + elapsed clock + the generic
+// reassurance subtitle, never the signal's headline: the headline is already owned
+// by the live partial bubble (and, when no bubble is on screen, the composer bar),
+// so echoing it here would print the same sentence twice on one screen.
 private struct AgentWorkingTimelineRow: View {
     var agent: Member
     var signal: AgentWorkingSignal?
     var copy: MomoWorkspaceCopy
-
-    private var headline: String? {
-        signal?.headlines.first
-    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1916,7 +1916,7 @@ private struct AgentWorkingTimelineRow: View {
                         AgentWorkingElapsedLabel(startedAt: startedAt, copy: copy)
                     }
                 }
-                Text(headline ?? copy.agentWorkingSubtitle)
+                Text(copy.agentWorkingSubtitle)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
