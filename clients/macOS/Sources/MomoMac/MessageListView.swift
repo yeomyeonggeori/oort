@@ -888,9 +888,13 @@ public struct MessageListView: View {
                         }
 
                         ForEach(viewModel.visibleWorkingAgents) { agent in
-                            AgentWorkingTimelineRow(agent: agent, copy: copy)
-                                .padding(.top, 8)
-                                .id("working-\(agent.id.description)")
+                            AgentWorkingTimelineRow(
+                                agent: agent,
+                                signal: timelineWorkingSignal(for: agent.id),
+                                copy: copy
+                            )
+                            .padding(.top, 8)
+                            .id("working-\(agent.id.description)")
                         }
 
                         timelineBottomSentinel
@@ -1156,6 +1160,11 @@ public struct MessageListView: View {
             }
 
             composerSurface(candidates: candidates, copy: copy)
+
+            AgentWorkingComposerBar(
+                signals: viewModel.selectedChannelWorkingSignals,
+                copy: copy
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -1720,6 +1729,10 @@ public struct MessageListView: View {
         }
         return viewModel.member(agent)
     }
+
+    private func timelineWorkingSignal(for agentID: MemberID) -> AgentWorkingSignal? {
+        viewModel.selectedChannelWorkingSignals.first { $0.agentId == agentID }
+    }
 }
 
 private enum TimelineCoordinateSpace {
@@ -1855,20 +1868,34 @@ private struct MomoGuideStepPill: View {
     }
 }
 
+// Surface 3 (MOMO-568): the turn-liveness row. It consumes agentWorkingSignal and
+// uses the static accent liveness mark plus a ticking elapsed clock, so it never
+// reads as the animated three-dot "typing" affordance a human sender would get.
 private struct AgentWorkingTimelineRow: View {
     var agent: Member
+    var signal: AgentWorkingSignal?
     var copy: MomoWorkspaceCopy
+
+    private var headline: String? {
+        signal?.headlines.first
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
+            AgentTurnLivenessMark(accessibilityText: copy.agentWorkingTitle(agent.displayName))
             VStack(alignment: .leading, spacing: 4) {
-                Text(copy.agentWorkingTitle(agent.displayName))
-                    .font(.callout.weight(.semibold))
-                Text(copy.agentWorkingSubtitle)
+                HStack(spacing: 8) {
+                    Text(copy.agentWorkingTitle(agent.displayName))
+                        .font(.callout.weight(.semibold))
+                    if let startedAt = signal?.startedAt {
+                        AgentWorkingElapsedLabel(startedAt: startedAt, copy: copy)
+                    }
+                }
+                Text(headline ?? copy.agentWorkingSubtitle)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }

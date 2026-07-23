@@ -2,6 +2,22 @@ import Foundation
 import MomoCore
 
 extension MomoWorkspaceCopy {
+    /// Sidebar/badge label when more than one agent works a channel at once.
+    func agentsWorkingCount(_ count: Int) -> String {
+        switch language {
+        case .korean: return "에이전트 \(count)명 작업 중"
+        case .english: return count == 1 ? "1 agent working" : "\(count) agents working"
+        }
+    }
+
+    /// Accessibility readout for the elapsed working clock (digits from the caller).
+    func agentWorkingElapsed(_ formatted: String) -> String {
+        switch language {
+        case .korean: return "작업 시간 \(formatted)"
+        case .english: return "Working for \(formatted)"
+        }
+    }
+
     var stopAgentRun: String {
         language == .korean ? "실행 중지" : "Stop run"
     }
