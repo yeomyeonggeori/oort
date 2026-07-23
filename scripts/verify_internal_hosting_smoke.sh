@@ -65,21 +65,16 @@ for service in api relay worker linkshort; do
     END { exit found ? 0 : 1 }
   ' "$PROD_COMPOSE" && fail "prod service must not build from source checkout: $service"
   grep -Eq "^[[:space:]]{2}${service}:" "$CONFIG_OUT" || fail "rendered smoke config missing service: $service"
-  case "$service" in
-    api) expected_image="momo-api:internal-smoke" ;;
-    relay) expected_image="momo-outbox-relay:internal-smoke" ;;
-    worker) expected_image="momo-agent-worker:internal-smoke" ;;
-    linkshort) expected_image="momo-linkshort:internal-smoke" ;;
-  esac
+  expected_image="momo:internal-smoke"
   grep -Fq "$expected_image" "$SMOKE_ENV" || fail "internal smoke env missing local image fallback for $service"
 done
-grep -Fq "momo-migrate:internal-smoke" "$SMOKE_ENV" || fail "internal smoke env missing local migrate image fallback"
+grep -Fq "MOMO_IMAGE=momo:internal-smoke" "$SMOKE_ENV" || fail "internal smoke env missing unified image fallback"
 grep -Fq "momo-mock-hermes:internal-smoke" "$SMOKE_ENV" || fail "internal smoke env missing local mock Hermes image fallback"
 grep -Fq "pull_policy: never" "$CONFIG_OUT" || fail "internal smoke override must use local image fallback pull_policy"
 if grep -Fq "target: /workspace" "$CONFIG_OUT" || grep -Fq "source: ../.." "$CONFIG_OUT"; then
   fail "internal smoke runtime overlay must not bind-mount the source checkout"
 fi
-pass "api/relay/worker/linkshort/migrate/mock-hermes remain image-based with local image fallback tags for smoke"
+pass "six momo commands converge on one local image; mock-hermes remains separately image-based"
 
 section "Caddy and public/private network boundary"
 # shellcheck disable=SC2016 # Caddy placeholders are intentionally literal.

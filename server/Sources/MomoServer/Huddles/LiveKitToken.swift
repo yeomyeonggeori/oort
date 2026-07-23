@@ -1,4 +1,4 @@
-import Crypto
+@preconcurrency import Crypto
 import Foundation
 
 struct LiveKitVideoGrant: Codable, Equatable, Sendable {

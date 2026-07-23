@@ -98,12 +98,13 @@ ACME_EMAIL=ops@momo-install.example.net
 HTTP_PORT=80
 HTTPS_PORT=443
 MOMO_IMAGE_TAG=sha-0123456789abcdef0123456789abcdef01234567
-MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server@sha256:$DIGEST_A
-MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay@sha256:$DIGEST_B
-MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker@sha256:$DIGEST_C
-MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate@sha256:$DIGEST_D
-MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo-web@sha256:$DIGEST_E
-MOMO_LINKSHORT_IMAGE=ghcr.io/dawn-kim-official/momo-linkshort@sha256:$DIGEST_F
+MOMO_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
+MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
+MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
+MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
+MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
+MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
+MOMO_LINKSHORT_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=8d96741fb02c4e1ca8dd803a5f121c11
@@ -140,12 +141,13 @@ EOF
 
 cat > "$TMP_ROOT/state/$DEPLOY_STATE_NAME" <<EOF
 MOMO_IMAGE_TAG=sha-fedcba9876543210fedcba9876543210fedcba98
-MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server@sha256:$OLD_A
-MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay@sha256:$OLD_B
-MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker@sha256:$OLD_C
-MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate@sha256:$OLD_D
-MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo-web@sha256:$OLD_E
-MOMO_LINKSHORT_IMAGE=ghcr.io/dawn-kim-official/momo-linkshort@sha256:$OLD_F
+MOMO_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
+MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
+MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
+MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
+MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
+MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
+MOMO_LINKSHORT_IMAGE=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A
 EOF
 chmod 600 "$TMP_ROOT/state/$DEPLOY_STATE_NAME"
 cp "$TMP_ROOT/state/$DEPLOY_STATE_NAME" "$TMP_ROOT/state/$DEPLOY_STATE_NAME.previous"
@@ -164,21 +166,22 @@ grep -Fq 'missing --env-file FILE or --from-env' "$TMP_ROOT/missing-source.out" 
 pass "install rejects missing/ambiguous non-interactive input"
 
 TAG_ENV="$TMP_ROOT/tag.env"
-sed "s|MOMO_API_IMAGE=.*|MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:\${MOMO_IMAGE_TAG}|" "$ENV_FILE" > "$TAG_ENV"
+sed -E "/^MOMO_(IMAGE|API_IMAGE|RELAY_IMAGE|WORKER_IMAGE|MIGRATE_IMAGE|WEB_IMAGE|LINKSHORT_IMAGE)=/s|=.*|=ghcr.io/dawn-kim-official/momo:\${MOMO_IMAGE_TAG}|" \
+  "$ENV_FILE" > "$TAG_ENV"
 if run_capture "$TMP_ROOT/tag.out" "$INSTALL" --env-file "$TAG_ENV" --mode staging --state-dir "$TMP_ROOT/tag-state" --dry-run; then
   fail "install accepted a tag-only app image"
 fi
-grep -Fq 'MOMO_API_IMAGE must be an immutable image ref' "$TMP_ROOT/tag.out" ||
+grep -Fq 'MOMO_IMAGE must be an immutable image ref' "$TMP_ROOT/tag.out" ||
   fail "tag-only image did not reach the installer digest guard"
 pass "install requires per-image sha256 digests beyond the shared preflight"
 
 run_capture "$TMP_ROOT/attestation-success.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/attestation-success-state" --dry-run
-[ "$(wc -l < "$GH_TRACE" | tr -d ' ')" -ge 6 ] ||
-  fail "install did not verify all six momo image attestations"
+[ "$(wc -l < "$GH_TRACE" | tr -d ' ')" -eq 1 ] ||
+  fail "install did not converge provenance verification on one momo image"
 grep -Fq -- '--repo Dawn-kim-official/momo --predicate-type https://slsa.dev/provenance/v1' "$GH_TRACE" ||
   fail "attestation verification lost the repository/provenance identity policy"
-pass "install verifies six pinned momo images against repository SLSA provenance"
+pass "install verifies one pinned momo image against repository SLSA provenance"
 
 if ! bash -c '
   command() {
@@ -201,7 +204,7 @@ pass "missing GitHub CLI is an explicit install warning under the default policy
 
 MOMO406_GH_RESULT=failure run_capture "$TMP_ROOT/attestation-warn.out" "$INSTALL" --env-file "$ENV_FILE" \
   --mode staging --state-dir "$TMP_ROOT/attestation-warn-state" --dry-run
-grep -Fq 'WARNING: no verifiable provenance attestation for MOMO_API_IMAGE; continuing under warn policy' \
+grep -Fq 'WARNING: no verifiable provenance attestation for MOMO_IMAGE; continuing under warn policy' \
   "$TMP_ROOT/attestation-warn.out" ||
   fail "default attestation policy did not disclose its soft failure"
 pass "unpublished attestations are an explicit install warning by default"
@@ -215,7 +218,7 @@ if MOMO406_GH_RESULT=failure run_capture "$TMP_ROOT/attestation-required.out" "$
   --env-file "$REQUIRED_ENV" --mode staging --state-dir "$TMP_ROOT/attestation-required-state" --dry-run; then
   fail "required attestation policy accepted failed provenance verification"
 fi
-grep -Fq 'provenance attestation verification failed for MOMO_API_IMAGE' \
+grep -Fq 'provenance attestation verification failed for MOMO_IMAGE' \
   "$TMP_ROOT/attestation-required.out" ||
   fail "required attestation policy did not fail with an actionable image key"
 pass "required attestation policy fails closed on unverifiable provenance"
@@ -242,7 +245,7 @@ pass "install requires env-only initial owner credentials"
 
 run_capture "$TMP_ROOT/install.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/install-state" --dry-run
-grep -Fq 'pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate -> set initial owner -> run web-init -> start api/relay/worker/linkshort/caddy' "$TMP_ROOT/install.out" ||
+grep -Fq 'pull one pinned multi-command image -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate -> set initial owner -> run web-init -> start api/relay/worker/linkshort/caddy' "$TMP_ROOT/install.out" ||
   fail "install dry-run plan lost the ordered migration/start contract"
 grep -Fq 'config --quiet' "$TRACE" || fail "install did not render docker compose config"
 if grep -Fq '7c35a6867c864598b4c27a91c4cf7822' "$TMP_ROOT/install.out"; then
@@ -260,7 +263,7 @@ pass "real upgrade requires explicit backup evidence"
 
 run_capture "$TMP_ROOT/upgrade.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/state" --dry-run
-grep -Fq 'provision runtime roles -> run forward migration and web-init -> restart api/relay/worker/linkshort/caddy' "$TMP_ROOT/upgrade.out" ||
+grep -Fq 'pull new multi-command digest -> provision runtime roles -> run forward migration and web-init -> restart api/relay/worker/linkshort/caddy' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run lost migration/restart ordering"
 grep -Fq 'automatically restore previous api/relay/worker/web/LinkShort digests' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run lost the previous-image rollback path"
@@ -287,7 +290,7 @@ fi
 pass "install bootstraps the owner once while upgrade preserves established credentials"
 
 mkdir -p "$TMP_ROOT/legacy-state"
-grep -Ev '^MOMO_(WEB|LINKSHORT)_IMAGE=' "$TMP_ROOT/state/$DEPLOY_STATE_NAME" > "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"
+grep -Ev '^MOMO_(IMAGE|WEB_IMAGE|LINKSHORT_IMAGE)=' "$TMP_ROOT/state/$DEPLOY_STATE_NAME" > "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"
 chmod 600 "$TMP_ROOT/legacy-state/$DEPLOY_STATE_NAME"
 run_capture "$TMP_ROOT/legacy-upgrade.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/legacy-state" --dry-run
@@ -300,14 +303,14 @@ pass "legacy four-image deploy state upgrades without losing rollback safety dis
 printf '{"result":"PASS"}\n' > "$TMP_ROOT/backup.json"
 FAILURE_MARKER="$TMP_ROOT/new-api-failed"
 if PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" \
-  MOMO406_FAIL_NEW_API_ONCE=1 MOMO406_NEW_API_IMAGE="ghcr.io/dawn-kim-official/momo-server@sha256:$DIGEST_A" \
+  MOMO406_FAIL_NEW_API_ONCE=1 MOMO406_NEW_API_IMAGE="ghcr.io/dawn-kim-official/momo@sha256:$DIGEST_A" \
   MOMO406_FAILURE_MARKER="$FAILURE_MARKER" \
   "$UPGRADE" --env-file "$ENV_FILE" --mode staging --state-dir "$TMP_ROOT/state" \
   --backup-evidence "$TMP_ROOT/backup.json" >"$TMP_ROOT/failed-upgrade.out" 2>&1; then
   fail "simulated new-api failure unexpectedly reported upgrade success"
 fi
 [ -f "$FAILURE_MARKER" ] || fail "simulated new-api restart failure did not execute"
-grep -Fq "api_image=ghcr.io/dawn-kim-official/momo-server@sha256:$OLD_A args=" "$TRACE" ||
+grep -Fq "api_image=ghcr.io/dawn-kim-official/momo@sha256:$OLD_A args=" "$TRACE" ||
   fail "failed upgrade did not execute the previous-api digest rollback"
 grep -Fq 'previous app images restored, database migrations remain forward-only' "$TMP_ROOT/failed-upgrade.out" ||
   fail "failed upgrade did not report successful app rollback and DB asymmetry"

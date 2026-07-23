@@ -413,6 +413,21 @@ assert_image_pinned MOMO_WORKER_IMAGE
 assert_image_pinned MOMO_MIGRATE_IMAGE
 assert_image_pinned MOMO_WEB_IMAGE
 assert_image_pinned MOMO_LINKSHORT_IMAGE
+if [ "${MOMO_IMAGE:-}" != "" ]; then
+  assert_image_pinned MOMO_IMAGE
+  assert_image_matches_release MOMO_IMAGE
+  for momo565_alias in \
+    MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
+    MOMO_WEB_IMAGE MOMO_LINKSHORT_IMAGE; do
+    if [ "${!momo565_alias}" = "$MOMO_IMAGE" ]; then
+      pass "$momo565_alias converges on MOMO_IMAGE"
+    else
+      fail "$momo565_alias must equal MOMO_IMAGE when the canonical unified image is set"
+    fi
+  done
+else
+  pass "MOMO_IMAGE is unset — accepting a legacy six-image environment"
+fi
 assert_image_matches_release MOMO_API_IMAGE
 assert_image_matches_release MOMO_RELAY_IMAGE
 assert_image_matches_release MOMO_WORKER_IMAGE

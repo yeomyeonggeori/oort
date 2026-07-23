@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-565 멀티바이너리 이미지 통합 (#681, 2026-07-23)
+
+- `api/relay/worker/migrate/linkshort/web-assets`를 하나의 `ghcr.io/dawn-kim-official/momo` 이미지와 argv 서브커맨드로 통합했다. prod compose 토폴로지와 기존 migrate의 `set-owner/member-list/invite-create`, runtime-role 분기는 유지하며, 여섯 `MOMO_*_IMAGE` 별칭은 canonical `MOMO_IMAGE`로 수렴한다.
+- publish workflow·digest/attestation·LICENSE/NOTICE·install/upgrade/preflight/rollback 상태를 단일 이미지 기준으로 갱신했다. 기존 집중 verifier Dockerfile은 공개 발행에서 제외하고, host-runtime과 신규 28240~28243 verifier가 통합 이미지를 소비한다.
+- 정적 검증과 macOS Swift gate는 worker에서 수행한다. `swift:6.2-noble` 통합 이미지 실빌드 및 여섯 명령 Docker 기동은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-563 공급망 실물 위생 (#655, 2026-07-23)
 
 - prod install이 여섯 GHCR digest에 GitHub SLSA provenance 검증을 수행한다. 기본은 `gh` 부재·attestation 미발행을 이미지 키별로 경고하는 soft-fail이며, 릴리스 게이트는 `MOMO_ATTESTATION_POLICY=required`로 pull 전 fail-closed할 수 있다.

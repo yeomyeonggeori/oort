@@ -1,5 +1,5 @@
 import AsyncHTTPClient
-import Crypto
+@preconcurrency import Crypto
 import Foundation
 
 struct S3ArchiveConfiguration: Sendable, Equatable {

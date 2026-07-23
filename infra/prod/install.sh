@@ -53,7 +53,7 @@ configure_compose
 render_compose_contract
 
 if [ "$DRY_RUN" = "1" ]; then
-  deploy_log "DRY RUN plan: pull six pinned images -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate -> set initial owner -> run web-init -> start api/relay/worker/linkshort/caddy -> check health -> record rollback state"
+  deploy_log "DRY RUN plan: pull one pinned multi-command image -> start postgres/redis/centrifugo -> provision runtime roles -> run migrate -> set initial owner -> run web-init -> start api/relay/worker/linkshort/caddy -> check health -> record rollback state"
   deploy_log "DRY RUN complete; no containers or state were changed"
   exit 0
 fi

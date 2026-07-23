@@ -1379,8 +1379,9 @@ scripts/local_gate.sh --profile staging-smoke
 - `.sops.yaml.example`, pgBackRest config/cron, PITR rehearsal evidence template 존재
 - `infra/prod/docker-compose.internal-smoke.yml` + `internal-smoke.env.example`가 prod compose 위에서 config를 렌더링하고, API health route, relay/worker enablement, image-based migration path, mock Hermes boundary를 static smoke로 검증
 
-`MOMO_API_IMAGE`/`MOMO_RELAY_IMAGE`/`MOMO_WORKER_IMAGE`는 placeholder 태그다. MOMO-220의
-`host-runtime` verifier는 같은 env shape에 run-specific local tags를 주입해 이미지를 빌드하고 실제 boot를 검증한다.
+`MOMO_IMAGE`는 여섯 명령이 든 통합 이미지의 placeholder 태그이고 하위호환
+`MOMO_*_IMAGE` 별칭은 모두 이 값으로 수렴한다. MOMO-220/565의 `host-runtime`
+verifier는 run-specific 통합 태그 하나를 빌드해 여섯 명령과 실제 stack boot를 검증한다.
 Production host는 source checkout에서 build하지 않고 pinned registry image를 pull한다.
 `caddy` binary가 로컬에 있으면 parser validation까지 실행하고, 없으면 structural check만 PASS로 남기며 parser validation은 host-runtime으로 둔다.
 

@@ -61,11 +61,10 @@ need uuidgen
 PROD_COMPOSE="infra/prod/docker-compose.prod.yml"
 SMOKE_COMPOSE="infra/prod/docker-compose.internal-smoke.yml"
 ENV_TEMPLATE="infra/prod/internal-smoke.env.example"
-SWIFT_DOCKERFILE="infra/prod/docker/swift-service.Dockerfile"
-MIGRATE_DOCKERFILE="infra/prod/docker/internal-smoke-migrate.Dockerfile"
+MOMO_DOCKERFILE="infra/prod/docker/momo.Dockerfile"
 MOCK_DOCKERFILE="infra/prod/docker/mock-hermes.Dockerfile"
 
-for path in "$PROD_COMPOSE" "$SMOKE_COMPOSE" "$ENV_TEMPLATE" "$SWIFT_DOCKERFILE" "$MIGRATE_DOCKERFILE" "$MOCK_DOCKERFILE"; do
+for path in "$PROD_COMPOSE" "$SMOKE_COMPOSE" "$ENV_TEMPLATE" "$MOMO_DOCKERFILE" "$MOCK_DOCKERFILE"; do
   [ -f "$path" ] || fail "missing required file: $path"
 done
 [ -f "scripts/prod_env_preflight.sh" ] || fail "missing required file: scripts/prod_env_preflight.sh"
@@ -104,11 +103,7 @@ s.close()
 PY
 )"
 
-API_IMAGE="momo-api:internal-smoke-${TAG_SUFFIX}"
-RELAY_IMAGE="momo-outbox-relay:internal-smoke-${TAG_SUFFIX}"
-WORKER_IMAGE="momo-agent-worker:internal-smoke-${TAG_SUFFIX}"
-LINKSHORT_IMAGE="momo-linkshort:internal-smoke-${TAG_SUFFIX}"
-MIGRATE_IMAGE="momo-migrate:internal-smoke-${TAG_SUFFIX}"
+MOMO_IMAGE="momo:internal-smoke-${TAG_SUFFIX}"
 MOCK_IMAGE="momo-mock-hermes:internal-smoke-${TAG_SUFFIX}"
 
 cat > "$ENV_FILE" <<EOF
@@ -121,12 +116,13 @@ ACME_EMAIL=ops@example.com
 HTTP_PORT=${HTTP_PORT}
 HTTPS_PORT=${HTTPS_PORT}
 MOMO_IMAGE_TAG=internal-smoke-${TAG_SUFFIX}
-MOMO_API_IMAGE=${API_IMAGE}
-MOMO_RELAY_IMAGE=${RELAY_IMAGE}
-MOMO_WORKER_IMAGE=${WORKER_IMAGE}
-MOMO_MIGRATE_IMAGE=${MIGRATE_IMAGE}
-MOMO_WEB_IMAGE=momo-web:internal-smoke
-MOMO_LINKSHORT_IMAGE=${LINKSHORT_IMAGE}
+MOMO_IMAGE=${MOMO_IMAGE}
+MOMO_API_IMAGE=${MOMO_IMAGE}
+MOMO_RELAY_IMAGE=${MOMO_IMAGE}
+MOMO_WORKER_IMAGE=${MOMO_IMAGE}
+MOMO_MIGRATE_IMAGE=${MOMO_IMAGE}
+MOMO_WEB_IMAGE=${MOMO_IMAGE}
+MOMO_LINKSHORT_IMAGE=${MOMO_IMAGE}
 MOMO_MOCK_HERMES_IMAGE=${MOCK_IMAGE}
 POSTGRES_DB=momo
 POSTGRES_USER=momo
@@ -188,36 +184,15 @@ compose config > "$CONFIG_FILE"
 if grep -Fq "target: /workspace" "$CONFIG_FILE"; then
   fail "rendered internal host-runtime config must not bind-mount the source checkout"
 fi
-for image in "$API_IMAGE" "$RELAY_IMAGE" "$WORKER_IMAGE" "$LINKSHORT_IMAGE" "$MIGRATE_IMAGE" "$MOCK_IMAGE"; do
+for image in "$MOMO_IMAGE" "$MOCK_IMAGE"; do
   grep -Fq "image: ${image}" "$CONFIG_FILE" || fail "rendered compose config missing local image: $image"
 done
 
-echo "[host-runtime] building local images"
+echo "[host-runtime] building one local multi-command image"
 docker build \
-  -f "$SWIFT_DOCKERFILE" \
-  --build-arg PACKAGE_PATH=server \
-  --build-arg PRODUCT=MomoServer \
-  -t "$API_IMAGE" \
-  . 2>&1 | tee "$TMP_ROOT/build-api-${RUN_SLUG}.log"
-docker build \
-  -f "$SWIFT_DOCKERFILE" \
-  --build-arg PACKAGE_PATH=relay/OutboxRelay \
-  --build-arg PRODUCT=OutboxRelay \
-  -t "$RELAY_IMAGE" \
-  . 2>&1 | tee "$TMP_ROOT/build-relay-${RUN_SLUG}.log"
-docker build \
-  -f "$SWIFT_DOCKERFILE" \
-  --build-arg PACKAGE_PATH=workers/AgentWorker \
-  --build-arg PRODUCT=AgentWorker \
-  -t "$WORKER_IMAGE" \
-  . 2>&1 | tee "$TMP_ROOT/build-worker-${RUN_SLUG}.log"
-docker build \
-  -f "$SWIFT_DOCKERFILE" \
-  --build-arg PACKAGE_PATH=services/LinkShort \
-  --build-arg PRODUCT=LinkShort \
-  -t "$LINKSHORT_IMAGE" \
-  . 2>&1 | tee "$TMP_ROOT/build-linkshort-${RUN_SLUG}.log"
-docker build -f "$MIGRATE_DOCKERFILE" -t "$MIGRATE_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-migrate-${RUN_SLUG}.log"
+  -f "$MOMO_DOCKERFILE" \
+  -t "$MOMO_IMAGE" \
+  . 2>&1 | tee "$TMP_ROOT/build-momo-${RUN_SLUG}.log"
 docker build -f "$MOCK_DOCKERFILE" -t "$MOCK_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-mock-hermes-${RUN_SLUG}.log"
 
 echo "[host-runtime] booting prod + internal-smoke stack (up -d --wait)"

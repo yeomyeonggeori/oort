@@ -215,11 +215,12 @@ publish, and Kim Intern mode, then switch traffic.
 
 The alpha host must not need a source checkout.
 
-1. Build API/relay/worker/migrate images on a builder machine or CI.
-2. Push immutable tags or digests to GHCR/ECR, for example
-   `ghcr.io/dawn-kim-official/momo-server:sha-<gitsha>`.
-   The manual-only `publish-images` workflow publishes API, relay, worker, and
-   migrate for `linux/arm64` under one `MOMO_IMAGE_TAG=sha-<40-char-gitsha>`.
+1. Build the multi-command momo image on a builder machine or CI.
+2. Push one immutable tag or digest to GHCR/ECR, for example
+   `ghcr.io/dawn-kim-official/momo:sha-<gitsha>`.
+   The manual-only `publish-images` workflow publishes the `api`, `relay`,
+   `worker`, `migrate`, `web-assets`, and `linkshort` payload for `linux/arm64`
+   under one `MOMO_IMAGE_TAG=sha-<40-char-gitsha>`.
 3. Copy only a deploy bundle to the host: compose files, Caddyfile,
    Centrifugo config, env template, and operator runbook.
 4. Run preflight:

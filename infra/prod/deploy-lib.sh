@@ -89,13 +89,28 @@ validate_digest_ref() {
 }
 
 validate_momo_image_digests() {
+  if [ -n "${MOMO_IMAGE:-}" ]; then
+    validate_digest_ref MOMO_IMAGE
+    local alias
+    for alias in \
+      MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
+      MOMO_WEB_IMAGE MOMO_LINKSHORT_IMAGE; do
+      [ "${!alias:-}" = "$MOMO_IMAGE" ] ||
+        deploy_fail "$alias must equal MOMO_IMAGE for a unified-image deployment"
+    done
+    deploy_log "validated one immutable momo image digest and six compatible aliases"
+    return 0
+  fi
+
+  # Backward compatibility for pre-MOMO-565 env/state files. New templates
+  # always set MOMO_IMAGE and converge all aliases to it.
   validate_digest_ref MOMO_API_IMAGE
   validate_digest_ref MOMO_RELAY_IMAGE
   validate_digest_ref MOMO_WORKER_IMAGE
   validate_digest_ref MOMO_MIGRATE_IMAGE
   validate_digest_ref MOMO_WEB_IMAGE
   validate_digest_ref MOMO_LINKSHORT_IMAGE
-  deploy_log "validated six immutable momo image digests"
+  deploy_log "validated legacy six-image digest set"
 }
 
 verify_momo_image_attestations() {
@@ -115,9 +130,14 @@ verify_momo_image_attestations() {
     return 0
   fi
 
-  for image_key in \
-    MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
-    MOMO_WEB_IMAGE MOMO_LINKSHORT_IMAGE; do
+  local image_keys
+  if [ -n "${MOMO_IMAGE:-}" ]; then
+    image_keys="MOMO_IMAGE"
+  else
+    image_keys="MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_WEB_IMAGE MOMO_LINKSHORT_IMAGE"
+  fi
+
+  for image_key in $image_keys; do
     image_ref="${!image_key}"
     if gh attestation verify "oci://$image_ref" \
       --repo Dawn-kim-official/momo \
@@ -209,6 +229,9 @@ write_deploy_state() {
   temp_file="$(mktemp "$STATE_DIR/.deploy-state.XXXXXX")"
   {
     printf 'MOMO_IMAGE_TAG=%s\n' "$MOMO_IMAGE_TAG"
+    if [ -n "${MOMO_IMAGE:-}" ]; then
+      printf 'MOMO_IMAGE=%s\n' "$MOMO_IMAGE"
+    fi
     printf 'MOMO_API_IMAGE=%s\n' "$MOMO_API_IMAGE"
     printf 'MOMO_RELAY_IMAGE=%s\n' "$MOMO_RELAY_IMAGE"
     printf 'MOMO_WORKER_IMAGE=%s\n' "$MOMO_WORKER_IMAGE"

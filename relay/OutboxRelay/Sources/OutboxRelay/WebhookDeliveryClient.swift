@@ -1,5 +1,5 @@
 import AsyncHTTPClient
-import Crypto
+@preconcurrency import Crypto
 import Foundation
 import NIOCore
 import NIOFoundationCompat
