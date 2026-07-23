@@ -38,6 +38,23 @@ case "$command" in
       -f infra/prod/member_list.sql
     exit 0
     ;;
+  workspace-create)
+    [ "$#" -eq 1 ] || {
+      echo "[migrate] workspace-create does not accept arguments" >&2
+      exit 2
+    }
+    : "${MOMO_OPS_WORKSPACE_NAME:?set MOMO_OPS_WORKSPACE_NAME}"
+    : "${MOMO_OPS_WORKSPACE_SLUG:?set MOMO_OPS_WORKSPACE_SLUG}"
+    : "${MOMO_OPS_OWNER_EMAIL:?set MOMO_OPS_OWNER_EMAIL}"
+    : "${MOMO_OPS_OWNER_PASSWORD:?set MOMO_OPS_OWNER_PASSWORD}"
+    psql "${DATABASE_URL:?set DATABASE_URL}" \
+      -q \
+      -v ON_ERROR_STOP=1 \
+      --no-psqlrc \
+      -f infra/prod/create_workspace.sql
+    echo "[migrate] workspace created (owner credentials not printed)"
+    exit 0
+    ;;
   invite-create)
     [ "$#" -eq 1 ] || {
       echo "[migrate] invite-create does not accept arguments" >&2

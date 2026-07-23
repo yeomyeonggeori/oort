@@ -137,5 +137,41 @@ SQL
 [ "$invite_state" = "t" ] ||
   fail "invite hash, role, actor, metadata, or audit contract did not persist"
 
-printf '[momo-ops-runtime] PASS: member list + env-only invite hash/audit on port %s\n' \
+# MOMO-571 W-3: the invite role cap is enforced at the SQL layer, not only the
+# CLI. An owner-role invite must be refused with no invite_code row written.
+OWNER_INVITE_CODE="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+MOMO_OPS_INVITE_ROLE="owner"
+MOMO_OPS_INVITE_CODE="$OWNER_INVITE_CODE"
+export MOMO_OPS_INVITE_ROLE MOMO_OPS_INVITE_CODE
+if docker run --rm --network "$NETWORK" \
+    --env DATABASE_URL \
+    --env MOMO_OPS_WORKSPACE_ID \
+    --env MOMO_OPS_CREATED_BY \
+    --env MOMO_OPS_INVITE_ROLE \
+    --env MOMO_OPS_INVITE_MAX_USES \
+    --env MOMO_OPS_INVITE_EXPIRES_DAYS \
+    --env MOMO_OPS_INVITE_CODE \
+    "$MIGRATE_IMAGE" invite-create >"$TMP_DIR/invite-owner.log" 2>&1; then
+  fail "invite-create minted an owner-role invite"
+fi
+grep -Fq 'operator invite role must not be owner' "$TMP_DIR/invite-owner.log" ||
+  fail "owner-role invite failure was not actionable"
+owner_invite_absent="$(docker exec --interactive \
+  --env WORKSPACE_ID \
+  --env OWNER_INVITE_CODE="$OWNER_INVITE_CODE" \
+  "$POSTGRES_CONTAINER" psql -qAt -U postgres -d postgres \
+  -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+\getenv workspace_id WORKSPACE_ID
+\getenv invite_code OWNER_INVITE_CODE
+SET app.workspace_id = :'workspace_id';
+SELECT count(*) = 0
+  FROM invite_code i
+ WHERE i.workspace_id = :'workspace_id'::uuid
+   AND i.code_hash = momo_invite_code_hash(:'invite_code');
+SQL
+)"
+[ "$owner_invite_absent" = "t" ] ||
+  fail "rejected owner-role invite still persisted a row"
+
+printf '[momo-ops-runtime] PASS: member list + env-only invite hash/audit + owner-role refusal on port %s\n' \
   "$POSTGRES_PORT"
