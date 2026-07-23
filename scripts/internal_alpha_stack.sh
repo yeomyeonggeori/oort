@@ -36,8 +36,11 @@ compose() {
 }
 
 require_stack() {
-  docker ps --format '{{.Names}}' | grep -q "^${PROJECT}-postgres-1$" ||
-    fail "project '$PROJECT'의 postgres 컨테이너가 없다. 신규 기동은 이 스크립트 범위 밖(운영 결정)."
+  # 정지 상태(재배포 도중 중단 등)도 관리 대상 — 컨테이너 또는 데이터 볼륨이
+  # 존재하면 이 프로젝트의 스택으로 인정한다.
+  docker ps -a --format '{{.Names}}' | grep -q "^${PROJECT}-postgres-1$" && return 0
+  docker volume ls -q | grep -q "^${PROJECT}_" && return 0
+  fail "project '$PROJECT'의 컨테이너/볼륨이 없다. 신규 기동은 이 스크립트 범위 밖(운영 결정)."
 }
 
 wait_health() {
@@ -79,9 +82,12 @@ cmd_status() {
 }
 
 cmd_redeploy() {
-  require_stack
-  note "1/4 postgres 이미지 드리프트 수렴(볼륨 보존 — compose가 이미지 변경 시에만 재생성)"
-  compose up -d --no-deps postgres
+  # 부분 수렴(--no-deps 단일 서비스 up)은 compose 네트워크/라벨 구성이 바뀐 경우
+  # "network has active endpoints"로 죽는다 — 전체 down(볼륨 보존) 후 up이 정본.
+  # restart도 금지: 컨테이너 생성 시점의 낡은 command를 재사용한다(625 전례 변주).
+  note "1/4 전체 스택 down(--remove-orphans, 볼륨 보존) 후 기반 서비스 up"
+  compose down --remove-orphans || true
+  compose up -d --wait --wait-timeout 180 postgres centrifugo mock-hermes
   local deadline
   deadline=$(( $(date +%s) + 120 ))
   until docker exec "${PROJECT}-postgres-1" pg_isready -U momo >/dev/null 2>&1; do
@@ -92,9 +98,8 @@ cmd_redeploy() {
   note "2/4 마이그레이션(전방향 전용)"
   compose run --rm --no-deps migrate
 
-  note "3/4 api/relay 재생성 — restart는 컨테이너 생성 시점의 낡은 command를 재사용하므로"
-  note "    (services/ 복사줄 누락 전례) 반드시 recreate로 현행 compose command를 채용한다"
-  compose up -d --no-deps --force-recreate api relay
+  note "3/4 api/relay 기동 — 현행 compose command로 소스 재컴파일"
+  compose up -d api relay
 
   note "4/4 health 대기(콜드 컴파일 최대 ${BOOT_TIMEOUT}s) + 안전 라우트 스모크"
   wait_health
