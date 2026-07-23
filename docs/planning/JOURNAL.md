@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-07-23 (momo-main 인수 — 패키징 레인 판정 확정) · 연구 §7 6건 전건 판정, 크리티컬 패스 재편
+- 성재 위임("기각/수용 판단해 계획 포함")에 따라 §8 판정 확정: 옵션 A(이미지 6→1) **수용=MOMO-565**(562 후·리허설 전, ADR 불요 — ADR-0002 컨텍스트), 위생 ①② 수용(566·567, 패스 밖), code graph Phase 0~2 단계 수용, 모노레포 유지, mesh-llm 비편입(어댑터 확인은 즉석 실측 종결 — HERMES_BASE_URL=OpenAI-호환+루프백 해치, 신규 코드 0).
+- 크리티컬 패스 재편: 562 → **565** → 리허설 Phase 1 → 564 → 공개. 옵션 C·멤버십 게이트 mesh는 백로그 예약(기안 금지).
+
+## 2026-07-23 (Fable 리서치 — 패키징/레포 토폴로지/code graph) · 성재 발제 Q&A → 연구 문서 플러시
+- 한 일: buzz 배포 실체 웹 검증(단일 '이미지'≠단일 컨테이너 — 앱 이미지 1+PG/Redis/MinIO compose 5~6컨테이너)·패키징 패턴 조사(Mattermost/Campfire/Discourse/Zulip/Supabase)·code graph 도구 실사(Swift 지원 기준 생존자 선별)·레포 무게 실측(무거움의 실체=SPM .build 15GB, tracked는 213K LOC로 작음)·mesh-llm 검증(Block 공식 아님·buzz 릴리스 동봉은 사실 — 코드 레벨 확인). 정본: `2026-07-23-packaging-repo-codegraph-research.md`.
+- 판정 제안: ①커스텀 이미지 6→1 멀티바이너리 통합(buzz 동형, H3 후속 티켓 후보 — 권고) ②Centrifugo 제거 2서비스 수렴은 비권고 ③모노레포 유지(ADR-0001 트리거 미충족) + 위생 3종 후보 ④code graph는 저비용 3종+codebase-memory-mcp 실험만(Phase 0~2) ⑤mesh-llm 비편입·관찰(어댑터 OpenAI-호환 백엔드 확인만 소형 후속).
+- 다음: 성재 결정 대기 6건(연구 문서 §7). 티켓/정본 반영 없음. Wave H 기존 큐와 독립.
+
 ## 2026-07-23 (Fable Wave H 집행 2 — 558·561 랜딩) · H2 완결 + H3 첫 타
 - **main 랜딩 2장**: 561(migrate `set-owner` one-shot — env-only·재실행=회전+세션 revoke, verifier PASS 28200. "5분 설치 마지막 5분 DBA" 해소) / 558(Stop/Pause 클라 표면 — cancelRun TODO 해소·⌘.·시스템 라인 2종, macOS 522 tests 0실패). **ADR-0132 전 결정(D1~D5) 서버+클라 완결.**
 - 558 design-review(신선 컨텍스트): Blocker 0·High 3 → 오케스트레이터 직접 해소: ①⌘. 취소 타겟 스트리밍 최근성 결정화 ②취소 시스템 라인 행위자 표기 ③스냅샷 렌더 NSHostingView 교체(실컨트롤 픽셀 포함 재기록). Medium 3(토글 라벨·에러 토큰 통일·응답 검증 완화)도 반영.
