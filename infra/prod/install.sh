@@ -47,6 +47,7 @@ configure_env_source
 run_prod_preflight
 load_deploy_env
 validate_momo_image_digests
+verify_momo_image_attestations
 validate_initial_owner_credentials
 configure_compose
 render_compose_contract

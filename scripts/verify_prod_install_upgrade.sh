@@ -25,6 +25,7 @@ TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/momo406.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 FAKE_BIN="$TMP_ROOT/bin"
 TRACE="$TMP_ROOT/docker.trace"
+GH_TRACE="$TMP_ROOT/gh.trace"
 DEPLOY_STATE_NAME="deploy-state.env"
 mkdir -p "$FAKE_BIN" "$TMP_ROOT/state"
 
@@ -57,6 +58,18 @@ cat > "$FAKE_BIN/getent" <<'SH'
 printf '203.0.113.10 %s\n' "${2:-host}"
 SH
 chmod +x "$FAKE_BIN/curl" "$FAKE_BIN/getent"
+
+cat > "$FAKE_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${MOMO406_GH_TRACE:?}"
+case "${MOMO406_GH_RESULT:-success}" in
+  success) exit 0 ;;
+  failure) exit 1 ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$FAKE_BIN/gh"
 
 DIGEST_A="$(printf 'a%.0s' {1..64})"
 DIGEST_B="$(printf 'b%.0s' {1..64})"
@@ -140,7 +153,7 @@ cp "$TMP_ROOT/state/$DEPLOY_STATE_NAME" "$TMP_ROOT/state/$DEPLOY_STATE_NAME.prev
 run_capture() {
   local output="$1"
   shift
-  PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" "$@" >"$output" 2>&1
+  PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" MOMO406_GH_TRACE="$GH_TRACE" "$@" >"$output" 2>&1
 }
 
 if run_capture "$TMP_ROOT/missing-source.out" "$INSTALL" --dry-run; then
@@ -158,6 +171,54 @@ fi
 grep -Fq 'MOMO_API_IMAGE must be an immutable image ref' "$TMP_ROOT/tag.out" ||
   fail "tag-only image did not reach the installer digest guard"
 pass "install requires per-image sha256 digests beyond the shared preflight"
+
+run_capture "$TMP_ROOT/attestation-success.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
+  --state-dir "$TMP_ROOT/attestation-success-state" --dry-run
+[ "$(wc -l < "$GH_TRACE" | tr -d ' ')" -ge 6 ] ||
+  fail "install did not verify all six momo image attestations"
+grep -Fq -- '--repo Dawn-kim-official/momo --predicate-type https://slsa.dev/provenance/v1' "$GH_TRACE" ||
+  fail "attestation verification lost the repository/provenance identity policy"
+pass "install verifies six pinned momo images against repository SLSA provenance"
+
+if ! bash -c '
+  command() {
+    if [ "${1:-}" = "-v" ] && [ "${2:-}" = "gh" ]; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+  # shellcheck source=infra/prod/deploy-lib.sh
+  . "$1"
+  MOMO_ATTESTATION_POLICY=warn
+  verify_momo_image_attestations
+' _ "$LIB" >"$TMP_ROOT/attestation-no-gh.out" 2>&1; then
+  fail "warn policy failed when GitHub CLI was unavailable"
+fi
+grep -Fq 'WARNING: GitHub CLI is unavailable; skipping provenance attestation verification' \
+  "$TMP_ROOT/attestation-no-gh.out" ||
+  fail "missing GitHub CLI did not produce an explicit provenance warning"
+pass "missing GitHub CLI is an explicit install warning under the default policy"
+
+MOMO406_GH_RESULT=failure run_capture "$TMP_ROOT/attestation-warn.out" "$INSTALL" --env-file "$ENV_FILE" \
+  --mode staging --state-dir "$TMP_ROOT/attestation-warn-state" --dry-run
+grep -Fq 'WARNING: no verifiable provenance attestation for MOMO_API_IMAGE; continuing under warn policy' \
+  "$TMP_ROOT/attestation-warn.out" ||
+  fail "default attestation policy did not disclose its soft failure"
+pass "unpublished attestations are an explicit install warning by default"
+
+REQUIRED_ENV="$TMP_ROOT/attestation-required.env"
+{
+  printf 'MOMO_ATTESTATION_POLICY=required\n'
+  cat "$ENV_FILE"
+} > "$REQUIRED_ENV"
+if MOMO406_GH_RESULT=failure run_capture "$TMP_ROOT/attestation-required.out" "$INSTALL" \
+  --env-file "$REQUIRED_ENV" --mode staging --state-dir "$TMP_ROOT/attestation-required-state" --dry-run; then
+  fail "required attestation policy accepted failed provenance verification"
+fi
+grep -Fq 'provenance attestation verification failed for MOMO_API_IMAGE' \
+  "$TMP_ROOT/attestation-required.out" ||
+  fail "required attestation policy did not fail with an actionable image key"
+pass "required attestation policy fails closed on unverifiable provenance"
 
 KEY_REUSE_ENV="$TMP_ROOT/key-reuse.env"
 sed "s|^OUTBOUND_WEBHOOK_MASTER_KEY=.*|OUTBOUND_WEBHOOK_MASTER_KEY=231171fc80c5458a84c0c52cd5b9f284|" "$ENV_FILE" > "$KEY_REUSE_ENV"
@@ -266,6 +327,73 @@ grep -Fq 'ADR-0120 P-3 / ADR-0121 S-5 placeholder' "$INSTALL" ||
 # shellcheck disable=SC2016 # literal source-code contract, not shell expansion
 grep -Fq 'MOMO_API_IMAGE="$OLD_API"' "$UPGRADE" || fail "rollback image override is missing"
 pass "preflight, relay placeholder, and rollback source wiring are present"
+
+python3 - infra/prod/docker-compose.prod.yml infra/docker-compose.e2e.yml <<'PY' ||
+import re
+import sys
+
+for compose_path in sys.argv[1:]:
+    services = {}
+    current = None
+    in_services = False
+    for line in open(compose_path, encoding="utf-8"):
+        if line == "services:\n":
+            in_services = True
+            continue
+        if in_services and re.match(r"^[A-Za-z]", line):
+            break
+        service_match = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", line)
+        if in_services and service_match:
+            current = service_match.group(1)
+            services[current] = {"mem_limit": False, "labels": False, "images": []}
+            continue
+        if current is None:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("mem_limit:"):
+            services[current]["mem_limit"] = True
+        elif stripped == "labels: *momo-janitor-labels":
+            services[current]["labels"] = True
+        elif stripped.startswith("image:"):
+            services[current]["images"].append(stripped.split(":", 1)[1].strip())
+
+    if not services:
+        raise SystemExit(f"{compose_path}: no services parsed")
+    for service, contract in services.items():
+        if not contract["mem_limit"]:
+            raise SystemExit(f"{compose_path}: service {service} has no mem_limit")
+        if not contract["labels"]:
+            raise SystemExit(f"{compose_path}: service {service} has no janitor label set")
+        for image in contract["images"]:
+            if image.startswith("${") or image.startswith("momo-"):
+                continue
+            if not re.search(r"@sha256:[0-9a-f]{64}$", image):
+                raise SystemExit(f"{compose_path}: service {service} has tag-only external image {image}")
+PY
+  fail "compose resource/digest policy is incomplete"
+pass "prod and e2e compose give every service a memory ceiling, janitor label, and pinned external image"
+
+for env_key in MOMO_ATTESTATION_POLICY MOMO_CADDY_MEM_LIMIT MOMO_POSTGRES_MEM_LIMIT \
+  MOMO_REDIS_MEM_LIMIT MOMO_CENTRIFUGO_MEM_LIMIT MOMO_API_MEM_LIMIT MOMO_RELAY_MEM_LIMIT \
+  MOMO_WORKER_MEM_LIMIT MOMO_MIGRATE_MEM_LIMIT MOMO_RUNTIME_ROLES_MEM_LIMIT \
+  MOMO_WEB_INIT_MEM_LIMIT MOMO_LINKSHORT_MEM_LIMIT MOMO_EVE_DB_ROLES_MEM_LIMIT \
+  MOMO_EVE_MEM_LIMIT MOMO_MINIO_MEM_LIMIT MOMO_MINIO_INIT_MEM_LIMIT; do
+  grep -Eq "^${env_key}=" infra/prod/.env.example ||
+    fail "infra/prod/.env.example is missing $env_key"
+  grep -Eq "^${env_key}=" infra/prod/secrets.env.example ||
+    fail "infra/prod/secrets.env.example is missing $env_key"
+done
+pass "both production env templates expose the same attestation and memory policy keys"
+
+grep -Fq 'com.momo.janitor.match-label: com.docker.compose.project' \
+  infra/prod/docker-compose.prod.yml ||
+  fail "prod compose janitor label does not name the Compose project authority"
+grep -Fq 'com.momo.janitor.match-label: com.docker.compose.project' \
+  infra/docker-compose.e2e.yml ||
+  fail "e2e compose janitor label does not name the Compose project authority"
+grep -Fq 'label=com.docker.compose.project' scripts/compose_janitor.sh ||
+  fail "janitor no longer discovers resources through the Compose project label"
+pass "compose janitor labels use the same project authority as cleanup matching"
 
 # grep(POSIX)만 사용 — rg는 이 게이트 체인의 가용 전제가 아니며, 부재 시
 # exit 127이 "매치 없음"으로 오독되어 검사가 조용히 스킵된다 (review #429 M1).

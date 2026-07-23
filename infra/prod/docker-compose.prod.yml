@@ -10,9 +10,15 @@ name: ${COMPOSE_PROJECT_NAME:-momo-prod}
 x-momo-image-release:
   tag: ${MOMO_IMAGE_TAG:?set MOMO_IMAGE_TAG}
 
+x-momo-janitor-labels: &momo-janitor-labels
+  com.momo.janitor.managed: "true"
+  com.momo.janitor.match-label: com.docker.compose.project
+
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    mem_limit: ${MOMO_CADDY_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
@@ -57,6 +63,8 @@ services:
 
   postgres:
     image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    mem_limit: ${MOMO_POSTGRES_MEM_LIMIT:-2g}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
@@ -74,7 +82,9 @@ services:
       start_period: 20s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    mem_limit: ${MOMO_REDIS_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
@@ -91,7 +101,9 @@ services:
       start_period: 10s
 
   centrifugo:
-    image: centrifugo/centrifugo:v6
+    image: centrifugo/centrifugo:v6@sha256:8ba0c9443dadedc21b20254b3fc76f35c1998b29acc7cdec877ea0c3636c237e
+    mem_limit: ${MOMO_CENTRIFUGO_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     command: centrifugo --config=/centrifugo/centrifugo.prod.json
     environment:
@@ -130,6 +142,8 @@ services:
 
   api:
     image: ${MOMO_API_IMAGE:?set MOMO_API_IMAGE}
+    mem_limit: ${MOMO_API_MEM_LIMIT:-1g}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       MOMO_ENV: ${MOMO_ENV:-staging}
@@ -171,6 +185,8 @@ services:
 
   relay:
     image: ${MOMO_RELAY_IMAGE:?set MOMO_RELAY_IMAGE}
+    mem_limit: ${MOMO_RELAY_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       MOMO_ENV: ${MOMO_ENV:-staging}
@@ -193,6 +209,8 @@ services:
 
   worker:
     image: ${MOMO_WORKER_IMAGE:?set MOMO_WORKER_IMAGE}
+    mem_limit: ${MOMO_WORKER_MEM_LIMIT:-2g}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       MOMO_ENV: ${MOMO_ENV:-staging}
@@ -229,6 +247,8 @@ services:
   # same compose command; migrations must remain forward-compatible.
   migrate:
     image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
+    mem_limit: ${MOMO_MIGRATE_MEM_LIMIT:-1g}
+    labels: *momo-janitor-labels
     restart: "no"
     environment:
       DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
@@ -247,6 +267,8 @@ services:
   # the three expected roles have the exact RLS posture.
   runtime-roles:
     image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
+    mem_limit: ${MOMO_RUNTIME_ROLES_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
     restart: "no"
     environment:
       DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
@@ -265,6 +287,8 @@ services:
   # the minimal shell/cp needed to populate the shared read-only serving root.
   web-init:
     image: ${MOMO_WEB_IMAGE:?set MOMO_WEB_IMAGE}
+    mem_limit: ${MOMO_WEB_INIT_MEM_LIMIT:-128m}
+    labels: *momo-janitor-labels
     restart: "no"
     volumes:
       - momo-web-static:/srv/momo-web
@@ -274,6 +298,8 @@ services:
   # to this installation's same-origin /join landing.
   linkshort:
     image: ${MOMO_LINKSHORT_IMAGE:?set MOMO_LINKSHORT_IMAGE}
+    mem_limit: ${MOMO_LINKSHORT_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
     restart: unless-stopped
     environment:
       MOMO_LINKSHORT_HOST: 0.0.0.0
@@ -287,6 +313,8 @@ services:
   # the MOMO-534 lockfile (eve 0.27.0) and mounts no momo database credential.
   eve-db-roles:
     image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    mem_limit: ${MOMO_EVE_DB_ROLES_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
     profiles: ["eve"]
     restart: "no"
     environment:
@@ -310,6 +338,8 @@ services:
 
   eve:
     image: node:24.4.1-bookworm-slim@sha256:36ae19f59c91f3303c7a648f07493fe14c4bd91320ac8d898416327bacf1bbfa
+    mem_limit: ${MOMO_EVE_MEM_LIMIT:-2g}
+    labels: *momo-janitor-labels
     profiles: ["eve"]
     restart: unless-stopped
     init: true
@@ -351,7 +381,9 @@ services:
   # ADR-0127 self-host option. Select with `--profile s3`; Dawn-hosted
   # deployments keep the default Drive archive and never start these services.
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    mem_limit: ${MOMO_MINIO_MEM_LIMIT:-1g}
+    labels: *momo-janitor-labels
     profiles: ["s3"]
     restart: unless-stopped
     command: ["server", "/data"]
@@ -370,7 +402,9 @@ services:
       start_period: 10s
 
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+    mem_limit: ${MOMO_MINIO_INIT_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
     profiles: ["s3"]
     restart: "no"
     environment:
@@ -391,7 +425,9 @@ services:
 
 networks:
   public:
+    labels: *momo-janitor-labels
   private:
+    labels: *momo-janitor-labels
 
 volumes:
   pgdata:
