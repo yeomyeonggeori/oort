@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-24 (Fable provider GUI 실서버 완결 — 577 랜딩·라이브 검증·0.0.2 발행)
+- **MOMO-577 랜딩**(#703→track/engine→#704→main, 10e0493c): 실서버 왕복 3버그 수리 — PUT 500(PostgresNIO `Array<UInt8>`가 bytea 아닌 `char[]`로 인코딩→`ByteBuffer(bytes:)` 바인딩·decode `Data`, worker reader 동일 수정) + DELETE 500(audit `jsonb_build_object` nil `mode`/`endpoint` 타입 미추론→`::text` 캐스트) + Linux `.build` 심볼릭링크 함정(로컬 macOS build 잔재를 api 컨테이너 `cp -Rp`가 못 읽음→verifier가 부팅 전 제거).
+- **verifier 실왕복 자동화**: `PROVIDER_LINK_RUN_DOCKER=1`이 실 PG18+api 부팅→owner PUT→storage bytea 증명(version byte·octet_length·평문 부재)→GET→RLS default-deny/GUC unlock→DELETE→비관리자 403 8관문 자동 단정. 8/8 PASS(재발 차단). server 15+worker 72 tests green.
+- **라이브 실서버 검증 그린**: momowebqa 재배포(577 이미지, 데이터 볼륨 보존) 후 owner 계정 실왕복 — PUT(200·source=database·bearerLast4 마스킹)→GET(평문 부재)→DELETE(200)→env 복귀. "GUI로 provider 붙이면 실제 그 provider로 대화" 실서버 성립. 로그인=`/v1/auth/login`(workspace 필드 필수, demo WS), provider REST=`/v1/provider/link`.
+- **0.0.2 알파 발행**(build 1087 @10e0493c, sha256 eab65d6c…): provider GUI "AI 연결" 포함 unsigned Release, momo-alpha Release + Pages 매니페스트 갱신(인앱 Updates 소비). 다운로드 momo-macos-0.0.2.zip.
+- 다음: 성재 GUI 실사용(다운로드→로그인→AI 연결) 피드백 · ADR-0114 증보1(work host 동봉+GUI 페어링) 승인 대기 · 백로그 MOMO-575·ADR-0117 W-4·567.
+
 ## 2026-07-24 (Fable provider GUI 연동 3조각 완주) · "GUI로 붙이면 실제 대화" 성립
 - 성재 발제("실제 codex/hermes를 CLI가 아니라 GUI로 연동, 배포판에 담아"). buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속(momo ADR-0114 동형), mesh-llm(오픈모델)만 동봉. Codex 자체 동봉은 독점 CLI+OAuth+ADR-0004로 불가(buzz도 안 함).
 - **ADR-0004 증보1 Accepted → 3장 main 랜딩**(Opus 4.8): 572 provider config REST(암호화 저장·마스킹·mode override·health, 193 tests) + 573 worker job-time 소비(GUI 변경이 실제 대화 반영, 캐시 TTL 2s·golden interop vector) + 574 관리자 "AI 연결" GUI(design-review 2R Blocker 해소: 이탈 잠금 dead-end→미저장 확인 다이얼로그, in-flight dead-click→잠금을 unsaved bearer로 한정). 572의 prod boot 갭(api PROVIDER_LINK_MASTER_KEY 누락)·e2e compose 마스터키 배선도 수리.
