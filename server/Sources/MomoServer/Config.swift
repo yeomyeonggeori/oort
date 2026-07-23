@@ -22,6 +22,10 @@ struct Config: Sendable {
     // ---- JWT (App access/refresh, HS256, L4 §7.1) ----
     var jwtHMAC: String
     var outboundWebhookMasterKey: String
+    // MOMO-572 / ADR-0004 증보 1: dedicated master key for the provider_link
+    // bearer AES-GCM encryption. Deliberately separate from JWT_HMAC and
+    // OUTBOUND_WEBHOOK_MASTER_KEY so a leak of one key never exposes another.
+    var providerLinkMasterKey: String
     var accessTokenTTL: TimeInterval   // 15m per spec
     var refreshTokenTTL: TimeInterval  // 30d per spec
 
@@ -82,6 +86,7 @@ struct Config: Sendable {
             pgDatabase: pg?.database ?? env("POSTGRES_DB", "momo"),
             jwtHMAC: jwtHMAC,
             outboundWebhookMasterKey: env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC),
+            providerLinkMasterKey: env("PROVIDER_LINK_MASTER_KEY", jwtHMAC),
             accessTokenTTL: 15 * 60,
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: env("CENT_API_URL", "http://localhost:8000/api"),
@@ -160,6 +165,21 @@ struct Config: Sendable {
         if outboundWebhookMasterKey == jwtHMAC {
             errors.append(
                 "OUTBOUND_WEBHOOK_MASTER_KEY must not reuse JWT_HMAC in \(momoEnvironment)"
+            )
+        }
+        if providerLinkMasterKey == jwtHMAC {
+            errors.append(
+                "PROVIDER_LINK_MASTER_KEY must not reuse JWT_HMAC in \(momoEnvironment)"
+            )
+        }
+        if providerLinkMasterKey == outboundWebhookMasterKey {
+            errors.append(
+                "PROVIDER_LINK_MASTER_KEY must not reuse OUTBOUND_WEBHOOK_MASTER_KEY in \(momoEnvironment)"
+            )
+        }
+        if AgentProviderConfig.isUnsafeSecret(providerLinkMasterKey) {
+            errors.append(
+                "PROVIDER_LINK_MASTER_KEY is missing or uses a placeholder/dev value in \(momoEnvironment)"
             )
         }
         if !errors.isEmpty {

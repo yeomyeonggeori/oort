@@ -1,0 +1,246 @@
+openapi: 3.0.3
+
+# =============================================================================
+# momo REST API — operator (instance-admin) surface
+#
+# The canonical tenant-client contract (docs/api/openapi.yaml) intentionally
+# EXCLUDES operator/platform-admin routes (see its header: "platform admin …
+# remain intentionally undocumented here") because the drift gate
+# scripts/verify_openapi_contract.sh requires a live sample for every operation
+# and the gate stack does not provision the operator scope.
+#
+# This companion spec documents the operator surface so consumers such as the
+# P-2 provider-config UXUI have a precise, machine-readable contract. All
+# operations require a human App JWT that carries the `platform:read` operator
+# scope (issued at login for a PLATFORM_ADMIN_EMAILS address presenting
+# PLATFORM_ADMIN_LOGIN_SECRET).
+#
+# Encoding rules mirror openapi.yaml: optional response fields are OMITTED when
+# absent (Swift encodeIfPresent).
+#
+# MOMO-572 / ADR-0004 증보 1 (D1-D5).
+# =============================================================================
+
+info:
+  title: momo operator API (provider link)
+  version: 0.1.0
+  description: >-
+    Instance-global operator control plane for the OpenAI-compatible
+    Hermes/Kim Intern provider boundary (ADR-0004). A configured provider_link
+    row overrides the boot-time HERMES_* env trio (DB > env); deleting it reverts
+    to env. The provider bearer is write-only: it is stored AES-GCM encrypted and
+    never returned — reads expose only a boolean and a masked 4-char tail.
+
+servers:
+  - url: /
+    description: Same origin as the momo API host.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/provider/link:
+    get:
+      operationId: getProviderLink
+      summary: Read the effective provider link (DB > env), bearer masked
+      description: >-
+        Returns the effective provider configuration after DB-over-env
+        resolution. `source` reports which won. The bearer is never returned;
+        `bearerConfigured` and (for DB source) `bearerLast4` are the only signals.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Effective provider link status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLinkResponse"
+        "403":
+          description: Missing platform:read operator scope or non-human principal.
+    put:
+      operationId: putProviderLink
+      summary: Configure the instance provider link (DB override)
+      description: >-
+        Stores the operator provider link. `bearer` is accepted only here and is
+        encrypted at rest; it is never echoed. Unknown fields are rejected
+        (closed-world) so no Codex/OpenAI OAuth or raw-provider-key field can be
+        introduced (ADR-0004 Rules #1-#2).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutProviderLinkRequest"
+      responses:
+        "200":
+          description: Stored; returns the newly effective status (bearer masked).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLinkResponse"
+        "400":
+          description: Invalid base URL, empty bearer, bad mode, or unknown field.
+        "403":
+          description: Missing platform:read operator scope or non-human principal.
+    delete:
+      operationId: deleteProviderLink
+      summary: Remove the provider link (revert to env fallback)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Removed; returns the env-fallback effective status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLinkResponse"
+        "403":
+          description: Missing platform:read operator scope or non-human principal.
+  /v1/provider/link/test:
+    post:
+      operationId: testProviderLink
+      summary: Probe the effective provider for reachability/auth
+      description: >-
+        Performs a minimal OpenAI-compatible roundtrip against the effective
+        provider (DB link if present, else env). Returns a coarse, credential-free
+        result — the bearer and provider response bodies are never surfaced. A
+        provider failure is reported as `ok:false` with HTTP 200 (the operation
+        itself succeeded), not an error status.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Probe result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLinkTestResponse"
+        "403":
+          description: Missing platform:read operator scope or non-human principal.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: App access token carrying the platform:read operator scope.
+  schemas:
+    ProviderLinkResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - schema
+        - configured
+        - source
+        - mode
+        - baseUrl
+        - endpointLabel
+        - bearerConfigured
+        - availability
+        - keyConfigured
+        - diagnostics
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider_link.v0]
+        configured:
+          type: boolean
+          description: True when a DB provider_link row is the effective source.
+        source:
+          type: string
+          enum: [database, environment]
+        mode:
+          type: string
+          enum: [local-mock, internal-host-mock, external-hermes]
+        baseUrl:
+          type: string
+          description: Effective provider base URL (no userinfo/query/fragment).
+        endpointLabel:
+          type: string
+          description: Redacted endpoint label safe for display/logs.
+        bearerConfigured:
+          type: boolean
+        bearerLast4:
+          type: string
+          description: >-
+            Masked last 4 characters of the stored bearer; present only for DB
+            source and only when the bearer is at least 8 characters.
+        availability:
+          type: string
+          enum: [mock, available, degraded]
+        keyConfigured:
+          type: boolean
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: Present only for DB source.
+        updatedBy:
+          type: string
+          format: uuid
+          description: Member id of the last operator to write; DB source only.
+        diagnostics:
+          type: array
+          items:
+            type: string
+          description: Redacted fail-closed diagnostics (never credential material).
+    ProviderLinkTestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - schema
+        - ok
+        - source
+        - mode
+        - endpointLabel
+        - checkedAtMs
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider_link.test.v0]
+        ok:
+          type: boolean
+        reason:
+          type: string
+          description: >-
+            Coarse failure category when ok is false — e.g. provider_auth_failed,
+            provider_unreachable, provider_status_NNN, not_external_provider,
+            provider_not_configured. Never contains credentials.
+        source:
+          type: string
+          enum: [database, environment]
+        mode:
+          type: string
+          enum: [local-mock, internal-host-mock, external-hermes]
+        endpointLabel:
+          type: string
+        checkedAtMs:
+          type: integer
+          format: int64
+    PutProviderLinkRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - baseUrl
+        - bearer
+      properties:
+        baseUrl:
+          type: string
+          description: >-
+            Absolute HTTP(S) URL without userinfo/query/fragment. Non-loopback
+            must be https; loopback allowed only in local mode with
+            AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1.
+        bearer:
+          type: string
+          writeOnly: true
+          description: >-
+            Opaque provider bearer. Accepted only here; stored AES-GCM encrypted
+            and never returned. Must NOT be a Codex/OpenAI OAuth token or a raw
+            GPT/OpenAI API key (ADR-0004 boundary).
+        mode:
+          type: string
+          enum: [local-mock, internal-host-mock, external-hermes]
+          default: external-hermes
