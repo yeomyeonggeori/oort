@@ -92,8 +92,9 @@ cmd_redeploy() {
   note "2/4 마이그레이션(전방향 전용)"
   compose run --rm --no-deps migrate
 
-  note "3/4 api/relay 재시작 — 컨테이너 command가 바인드 마운트 소스를 재컴파일한다"
-  compose restart api relay
+  note "3/4 api/relay 재생성 — restart는 컨테이너 생성 시점의 낡은 command를 재사용하므로"
+  note "    (services/ 복사줄 누락 전례) 반드시 recreate로 현행 compose command를 채용한다"
+  compose up -d --no-deps --force-recreate api relay
 
   note "4/4 health 대기(콜드 컴파일 최대 ${BOOT_TIMEOUT}s) + 안전 라우트 스모크"
   wait_health
