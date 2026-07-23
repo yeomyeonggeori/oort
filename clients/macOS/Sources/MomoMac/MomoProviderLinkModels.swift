@@ -235,7 +235,11 @@ final class MomoProviderLinkSettingsModel: ObservableObject {
         !bearerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var navigationLocked: Bool { isWorking || hasUnsavedBearer }
+    // Lock the pane ONLY when an unsaved bearer would be silently dropped.
+    // An in-flight test/remove (no unsaved secret) must not lock close/Esc — its
+    // discard dialog only fires for hasUnsavedBearer, so locking on isWorking made
+    // close a dead click during a Test probe (design-review Blocker).
+    var navigationLocked: Bool { hasUnsavedBearer }
 
     var canSave: Bool {
         !isWorking

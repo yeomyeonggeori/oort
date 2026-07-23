@@ -187,6 +187,22 @@ final class MomoProviderLinkSettingsTests: XCTestCase {
         XCTAssertFalse(model.navigationLocked)
     }
 
+    func testNavigationLockTracksUnsavedBearerOnlyNotInFlightWork() async {
+        // design-review Blocker: lock must key on hasUnsavedBearer only, so an
+        // in-flight Test/Remove (no unsaved secret) leaves close/Esc reachable.
+        let fixture = ProviderLinkFixture()
+        let client = MockProviderLinkClient(status: fixture.databaseStatus)
+        let model = fixture.model(client: client)
+        await model.load()
+
+        XCTAssertFalse(model.hasUnsavedBearer)
+        XCTAssertFalse(model.navigationLocked, "no unsaved bearer must never lock, regardless of in-flight work")
+        model.bearerDraft = "typed-secret"
+        XCTAssertTrue(model.navigationLocked, "an unsaved bearer locks so it is not silently dropped")
+        model.discardDraftSecret()
+        XCTAssertFalse(model.navigationLocked)
+    }
+
     func testTestButtonDisabledForMockModeAndEnabledForExternalHermes() async {
         let fixture = ProviderLinkFixture()
 
