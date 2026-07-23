@@ -63,6 +63,7 @@ public struct MessageListView: View {
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private let onOpenChannelSettings: ((ChannelID) -> Void)?
     private let onInviteToChannel: ((ChannelID) -> Void)?
+    private let onCreateAgent: ((ChannelID) -> Void)?
     private let focusComposerRequest: UInt64
     private let onOpenPluginMarketplace: () -> Void
     private let serverIdentity: String?
@@ -118,6 +119,7 @@ public struct MessageListView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
         onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
         onInviteToChannel: ((ChannelID) -> Void)? = nil,
+        onCreateAgent: ((ChannelID) -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
         sidebarToggle: (() -> Void)? = nil,
@@ -132,6 +134,7 @@ public struct MessageListView: View {
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.onOpenChannelSettings = onOpenChannelSettings
         self.onInviteToChannel = onInviteToChannel
+        self.onCreateAgent = onCreateAgent
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
         self.sidebarToggle = sidebarToggle
@@ -152,6 +155,7 @@ public struct MessageListView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
         onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
         onInviteToChannel: ((ChannelID) -> Void)? = nil,
+        onCreateAgent: ((ChannelID) -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
         sidebarToggle: (() -> Void)? = nil,
@@ -169,6 +173,7 @@ public struct MessageListView: View {
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.onOpenChannelSettings = onOpenChannelSettings
         self.onInviteToChannel = onInviteToChannel
+        self.onCreateAgent = onCreateAgent
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
         self.sidebarToggle = sidebarToggle
@@ -436,6 +441,20 @@ public struct MessageListView: View {
                 .momoSurface(.panel, cornerRadius: 0)
             }
         }
+    }
+
+    private var emptyChannelActions: MomoEmptyChannelOnboardingPolicy.Actions {
+        let canManageChannelMembers = viewModel.selectedChannel.map {
+            MomoChannelActionPolicy.canManageMembers(
+                in: $0,
+                canManageWorkspace: viewModel.canManageWorkspace
+            )
+        } ?? false
+        return MomoEmptyChannelOnboardingPolicy.actions(
+            canManageChannelMembers: canManageChannelMembers,
+            invitePeopleAvailable: onInviteToChannel != nil,
+            createAgentAvailable: onCreateAgent != nil
+        )
     }
 
     private var channelMenuLeadingInset: CGFloat {
@@ -792,9 +811,19 @@ public struct MessageListView: View {
                             if viewModel.isSelectedChannelHistoryLoading {
                                 TimelineLoadingState(copy: copy)
                             } else {
-                                TimelineEmptyState(copy: copy) {
-                                    isComposerFocused = true
-                                }
+                                TimelineEmptyState(
+                                    copy: copy,
+                                    actions: emptyChannelActions,
+                                    focusComposer: { isComposerFocused = true },
+                                    invitePeople: {
+                                        guard let id = viewModel.selectedChannelId else { return }
+                                        onInviteToChannel?(id)
+                                    },
+                                    createAgent: {
+                                        guard let id = viewModel.selectedChannelId else { return }
+                                        onCreateAgent?(id)
+                                    }
+                                )
                             }
                         }
 
@@ -1727,18 +1756,57 @@ struct TimelineDayDivider: View {
     }
 }
 
-private struct TimelineEmptyState: View {
+// The empty-channel onboarding surface. Agent creation sits at equal footing with
+// people invitation (MOMO-570); a non-admin sees the same surface with the request
+// path instead of hidden controls.
+struct TimelineEmptyState: View {
     let copy: MomoWorkspaceCopy
+    let actions: MomoEmptyChannelOnboardingPolicy.Actions
     let focusComposer: () -> Void
+    let invitePeople: () -> Void
+    let createAgent: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text(copy.timelineEmptyTitle)
-                .font(.body.weight(.semibold))
+        VStack(spacing: 16) {
+            VStack(spacing: 8) {
+                Text(copy.emptyChannelTitle)
+                    .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(copy.emptyChannelSubtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if actions.showsManagementActions {
+                HStack(spacing: 12) {
+                    if actions.canInvitePeople {
+                        Button(action: invitePeople) {
+                            Label(copy.emptyChannelAddPeople, systemImage: "person.badge.plus")
+                        }
+                    }
+                    if actions.canCreateAgent {
+                        Button(action: createAgent) {
+                            Label(copy.emptyChannelAddAgent, systemImage: "sparkles")
+                        }
+                        .keyboardShortcut("a", modifiers: [.command, .shift])
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            } else {
+                Label(copy.emptyChannelRequestGuidance, systemImage: "person.2")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Button(copy.timelineEmptyAction, action: focusComposer)
                 .buttonStyle(.link)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: MomoTheme.Onboarding.emptyChannelContentMaximumWidth)
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 32)
     }
 }

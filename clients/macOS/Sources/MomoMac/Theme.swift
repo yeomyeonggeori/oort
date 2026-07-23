@@ -108,6 +108,9 @@ public enum MomoTheme {
         public static let choiceMaximumWidth: CGFloat = 520
         public static let detailMaximumWidth: CGFloat = 560
         public static let heroMaximumWidth: CGFloat = 520
+        // Readable measure for the empty-channel intro (MOMO-570) so its two
+        // co-equal actions and copy never stretch across a wide timeline.
+        public static let emptyChannelContentMaximumWidth: CGFloat = 420
         public static let splitContentMaximumWidth: CGFloat = 1_104
         public static let wideBreakpoint: CGFloat = 1_120
         public static let compactBreakpoint: CGFloat = 760
