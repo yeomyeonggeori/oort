@@ -57,6 +57,9 @@ public struct MomoMacRootView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var detailPanePresentation = MomoDetailPanePresentationState()
+    // Set by the AI-connection pane while an unsaved bearer is entered or a
+    // mutation is in flight, so leaving the pane cannot silently drop the secret.
+    @State private var detailPaneNavigationLocked = false
     @State private var selectedProfileMemberID: MemberID?
     @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
@@ -442,6 +445,9 @@ public struct MomoMacRootView: View {
             openSettings: {
                 openDetailPane(.settings)
             },
+            openAIConnection: {
+                openDetailPane(.aiConnection)
+            },
             openUpdates: {
                 openDetailPane(.updates)
             },
@@ -805,6 +811,7 @@ public struct MomoMacRootView: View {
                 .controlSize(.regular)
                 .momoQuickTooltip(copy.closeDetailPane)
                 .keyboardShortcut(.cancelAction)
+                .disabled(detailPaneNavigationLocked)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -884,6 +891,12 @@ public struct MomoMacRootView: View {
                 }
             case .settings:
                 MomoAppSettingsSurface(copy: copy)
+            case .aiConnection:
+                MomoProviderLinkSettingsView(
+                    language: copy.language,
+                    context: sessionChrome?.inviteAdminContext,
+                    navigationLocked: $detailPaneNavigationLocked
+                )
             case .workspaceSettings:
                 MomoWorkspaceSettingsSurface(copy: copy, viewModel: viewModel)
             case .downloads:
@@ -898,6 +911,8 @@ public struct MomoMacRootView: View {
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
         guard pane != .alpha || developerMode else { return }
+        // Never swap away from an AI-connection pane holding an unsaved bearer.
+        guard !detailPaneNavigationLocked else { return }
         withAnimation(layoutAnimation) {
             dismissThreadPanel()
             showMemberInspector = false
@@ -912,6 +927,7 @@ public struct MomoMacRootView: View {
     }
 
     private func closeDetailPane() {
+        guard !detailPaneNavigationLocked else { return }
         withAnimation(layoutAnimation) {
             detailPanePresentation.close()
         }
@@ -1393,6 +1409,7 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
     case profile
     case memberProfile
     case settings
+    case aiConnection
     case workspaceSettings
     case downloads
     case updates
@@ -1405,7 +1422,7 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return .approvals
         case .approvals:
             return .alpha
-        case .work, .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
+        case .work, .profile, .memberProfile, .settings, .aiConnection, .workspaceSettings, .downloads, .updates:
             return nil
         }
     }
@@ -1424,6 +1441,8 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.memberProfile
         case .settings:
             return copy.settings
+        case .aiConnection:
+            return copy.aiConnection
         case .workspaceSettings:
             return copy.serverSettings
         case .downloads:
@@ -1447,6 +1466,8 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.memberProfileSettingsSubtitle
         case .settings:
             return copy.settingsSubtitle
+        case .aiConnection:
+            return copy.aiConnectionSubtitle
         case .workspaceSettings:
             return copy.serverSettingsSubtitle
         case .downloads:
@@ -1470,6 +1491,8 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return "person.text.rectangle"
         case .settings:
             return "gearshape"
+        case .aiConnection:
+            return "brain"
         case .workspaceSettings:
             return "server.rack"
         case .downloads:
@@ -1487,7 +1510,7 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return MomoTheme.agentAccent
         case .approvals:
             return MomoTheme.costAmber
-        case .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
+        case .profile, .memberProfile, .settings, .aiConnection, .workspaceSettings, .downloads, .updates:
             return .secondary
         }
     }
