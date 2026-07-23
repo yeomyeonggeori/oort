@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # 내부 알파 macOS 빌드 발행 (2026-07-23 내부 테스트 전환 §1).
 #
-#   scripts/publish_alpha_build.sh --version 0.5.0-alpha.1 [--notes "..."]
+#   scripts/publish_alpha_build.sh --version 0.0.1 [--notes "..."]
+#
+# 버전 규칙 (성재 2026-07-23): 내부 빌드는 0.0.1부터 시작해 0.0.2, 0.0.3...
+# patch를 계속 올린다. **오픈 베타 전환 시에만 0.1.0**. 그 전에는 minor를 올리지
+# 않는다(0.0.x 역전 방지 — 이전 0.5.0-alpha 태그는 폐기됨).
 #
 # 절차: unsigned Release 앱 빌드 → LICENSE/NOTICE/THIRD_PARTY 동봉 zip+SHA-256 →
 # momo-alpha(공개 배포 저장소) Release 자산 업로드 → Pages의
