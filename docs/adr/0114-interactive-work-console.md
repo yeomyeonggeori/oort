@@ -73,7 +73,7 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 
 ## 증보 1 — work host의 배포판 동봉 + GUI 페어링 (2026-07-23 기안 · 2026-07-24 엔진 매트릭스 확장, 성재 발제)
 
-- Status: **Proposed** (2026-07-23 momo-main 기안 → 2026-07-24 goose 단독에서 goose∪opencode 양자 동봉안으로 확장 재기안 — 성재 "opencode·goose 둘 다" 지시. 승인 시 구현. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — momo도 동형이나 페어링 UX가 수동)
+- Status: **Accepted** (2026-07-24, 성재 "승인할게" — goose∪opencode 양자 동봉안 승인. 파생 WH-0(게이트 스파이크)=MOMO-578부터 순차. 2026-07-23 momo-main 기안 → 2026-07-24 goose 단독에서 goose∪opencode 양자 동봉안으로 확장 재기안 — 성재 "opencode·goose 둘 다" 지시. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — momo도 동형이나 페어링 UX가 수동)
 - 발단: 성재는 코드 실행 에이전트(Codex/goose)를 "담아서 띄우는" 경험을 원한다. buzz 검증 결과 Codex 자체는 독점 CLI+OAuth라 buzz도 동봉하지 않고 ACP로 접속한다(momo ADR-0114와 동형). 갭은 **①work host가 배포판에 안 담겨 사용자가 별도 실행 ②페어링이 host ID 수동 복사(TUI)**다. 자격증명 경계(본문 §하드 경계 불변, ADR-0004)는 유지한다.
 
 ### D1. work host를 single image 배포판에 사이드카로 동봉
@@ -102,7 +102,7 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 ### 파생 (Accepted 후)
 | 후보 | 내용 | 트랙 |
 |---|---|---|
-| **WH-0** | **스파이크: opencode 임베드/헤드리스 구동 API 표면 + Codex app-server JSON-RPC(stdio) 연결 경로 검증** — work host 연결을 ACP∪JSON-RPC로 넓힐지, opencode 동봉이 가능한지 판정(D1/D4 게이트) | 엔진 |
+| **WH-0** ✅ | **[DONE 2026-07-24] 스파이크: opencode 임베드 + Codex JSON-RPC 검증** — 둘 다 hands-on CONFIRMED(opencode `serve` 키없이 부팅·OpenAPI 3.1 경로 162·세션 생성 실왕복 / Codex `app-server` JSON-RPC 스키마 41파일·v2 516정의·승인훅). **게이트 통과: opencode v0 동봉 확정, work host 연결=ACP∪JSON-RPC(+mcp-server), 승인 경계 엔진무관 단일 계약.** 근거 `docs/planning/2026-07-24-wh0-workhost-engine-spike.md` | 엔진 |
 | WH-1 | work host 사이드카 compose 프로파일 + 동봉 엔진 이미지(opencode+goose, single image 계보) + 엔진 선택 배선 | 엔진 |
 | WH-2 | GUI 자동 페어링(코드/challenge)+상태 화면+엔진 선택 UI(provider GUI와 통합 설정) | UXUI |
 | WH-3 | 배포판 문서: "코드 실행 호스트 5분 연결"(opencode/goose 동봉·Codex 로컬) | docs |

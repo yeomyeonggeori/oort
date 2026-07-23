@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-24 (Fable ADR-0114 증보1 Accepted + WH-0 스파이크 실증) · 동봉 엔진 게이트 통과, WH-1/2/3 발급
+- 성재 "승인할게" → **ADR-0114 증보1 Accepted**(opencode 우선+goose 병행 양자 동봉). 파생 WH-0~3 = MOMO-578~581 예약.
+- **WH-0 스파이크 hands-on 완료(그린)** — 문서 아닌 실측: ①opencode 1.18.4 임시설치→`opencode serve` 키없이 부팅·OpenAPI 3.1 경로 162·`POST /session` 실세션 생성→제거(흔적 0). ②Codex CLI 0.144.1의 `codex app-server generate-json-schema`로 프로토콜 41파일 확보(Initialize/ThreadStart/TurnStart/CommandExec+승인/ApplyPatchApproval, v1 165+v2 516 정의). 추가 경로 `codex mcp-server`(stdio MCP)·`remote-control`(ws).
+- **게이트 결정(D1/D4 확정)**: opencode v0 동봉 확정(임베드 실증), work host 연결=ACP∪JSON-RPC(+mcp-server) 다중 어댑터, 승인 경계 엔진무관 단일 계약(opencode /permissions·Codex *ApprovalParams). 스코프 축소 없음. 근거 `2026-07-24-wh0-workhost-engine-spike.md`.
+- **발급**: WH-1 사이드카+어댑터 3종(#705, 엔진)·WH-2 GUI 페어링+엔진선택(#706, UXUI)·WH-3 문서(#707). 핸드오프 패킷 후 착수. 다음: WH-1 착수 여부 성재 확인(사이드카 동봉 대형 빌드).
+
 ## 2026-07-24 (Fable 코드 에이전트 엔진 조사 — opencode/goose/t3code) · ADR-0114 증보1 양자 동봉 재기안 + t3code 분석
 - 성재 발제("opencode·goose·t3code 다뤄봐, 셋 다 좋아 보임"). 웹 실측으로 라이선스·정체 확정: **goose(Apache-2.0)·opencode(MIT)=독립 에이전트=동봉 후보**, **t3code(MIT)=에이전트 감싸는 GUI 오케스트레이터=엔진 아님(momo work console 경쟁자)**. Codex/Claude Code=독점=로컬 연결만.
 - **ADR-0114 증보1 재기안(여전히 Proposed)**: goose 단독 → **opencode 우선+goose 병행** 양자 동봉안. 엔진 선택 매트릭스 추가, **WH-0 스파이크 신설**(opencode 임베드/헤드리스 API 표면 + Codex app-server JSON-RPC(stdio) 연결경로 검증 — t3code가 실증한 경로. D1/D4 확정 게이트, 실패 시 goose 단독 후퇴).
