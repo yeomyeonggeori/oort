@@ -15,6 +15,8 @@ openapi: 3.0.3
 # Console control surfaces. Other routes (invite admin,
 # workspace identity, agent credentials/runs, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
+# Operator/instance-admin surfaces (e.g. the MOMO-572 provider link) are
+# documented separately in docs/api/openapi.operator.yaml.
 #
 # Encoding rules (server truth):
 # - Optional response fields are OMITTED when absent (Swift encodeIfPresent);

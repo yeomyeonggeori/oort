@@ -133,6 +133,15 @@ enum AppBuilder {
             allowLocalLoopback: config.agentProvider.allowLocalLoopback
         ).add(to: authed)
         AgentProfileRoutes(db: db).add(to: authed)
+        // MOMO-572 / ADR-0004 증보 1: operator provider-link control plane.
+        ProviderLinkRoutes(
+            db: db,
+            environmentName: config.momoEnvironment,
+            allowLocalLoopback: config.agentProvider.allowLocalLoopback,
+            providerLinkMasterKey: config.providerLinkMasterKey,
+            envProvider: config.agentProvider,
+            healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger)
+        ).add(to: authed)
         let allowAgentCardHTTP = config.momoEnvironment.lowercased() == "local"
             && ProcessInfo.processInfo.environment["MOMO_AGENT_CARD_ALLOW_HTTP"] == "1"
         AgentCardRoutes(
