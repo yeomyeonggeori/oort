@@ -110,6 +110,40 @@ describe("artifact detection parity", () => {
     ).not.toHaveProperty("url");
   });
 
+  it("truncates a large diff and reports honest counts", () => {
+    const additions = 1_200;
+    const bigPatch = [
+      "diff --git a/src/catalog.ts b/src/catalog.ts",
+      "--- a/src/catalog.ts",
+      "+++ b/src/catalog.ts",
+      `@@ -0,0 +1,${additions} @@`,
+      ...Array.from({ length: additions }, (_, i) => `+const row${i + 1} = ${i + 1};`),
+    ].join("\n");
+    const result = resolveArtifact(
+      message("diff", bigPatch, { artifact_kind: "diff" })
+    );
+    expect(result?.kind).toBe("diff");
+    if (result?.kind === "diff") {
+      // 4 header/hunk lines + one line per addition, all in one file.
+      expect(result.totalLineCount).toBe(additions + 4);
+      expect(result.displayedLineCount).toBe(500);
+      expect(
+        result.files.reduce((sum, file) => sum + file.lines.length, 0)
+      ).toBe(500);
+      // Summary stays honest despite the truncated body.
+      expect(result.additions).toBe(additions);
+      expect(result.deletions).toBe(0);
+      expect(result.rawPatch.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps a small diff untruncated", () => {
+    const result = resolveArtifact(message("diff", patch));
+    if (result?.kind === "diff") {
+      expect(result.totalLineCount).toBe(result.displayedLineCount);
+    }
+  });
+
   it("rejects malformed explicit diff cards instead of falling through", () => {
     expect(
       resolveArtifact(
