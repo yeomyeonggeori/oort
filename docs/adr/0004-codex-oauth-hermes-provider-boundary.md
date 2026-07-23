@@ -136,7 +136,7 @@ separate encrypted provider-link table.
 
 ## 증보 1 — provider 연결의 GUI화 + Hermes bearer 암호화 저장 (2026-07-23, 성재 발제)
 
-- Status: **Proposed** (2026-07-23 momo-main 기안 — 성재 승인 시 provider 연결 GUI 구현 게이트 해제. 내부 테스트 "실제 codex/hermes를 CLI가 아니라 앱 GUI에서 매끄럽게 연동" 요구)
+- Status: **Accepted** (성재 승인 2026-07-23 — D1~D6 전부. P-1~P-3 발급, 0.0.2 목표)
 - 발단: 현재 provider는 서버 env(AGENT_PROVIDER_MODE·HERMES_BASE_URL·HERMES_API_KEY)로만 설정된다 — 운영자가 파일/CLI로 붙이는 TUI 경험. 성재는 셀프호스트 배포판에 provider 연결이 **옵션처럼 함께 담겨** 설치 후 **앱 GUI에서 직접 연결·테스트**하는 경험을 원한다. 이는 자격증명 저장 경계 변경이라 본 ADR 증보가 선행한다.
 
 ### D1. GUI로 받아 저장 가능한 것의 경계 (불변식 유지)

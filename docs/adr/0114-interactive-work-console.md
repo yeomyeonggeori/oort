@@ -68,3 +68,36 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 - (−) v0 세션은 호스트 앱 수명에 묶임(맥 앱이 꺼지면 에이전트도 세션을 못 만듦 — workd 전까지의 명시 한계).
 - (−) 원장 경유 control은 직결보다 지연이 있다(outbox→relay 홉). 타이핑 상호작용은 로컬 터미널이 담당하므로 실사용 임팩트는 스폰/개입 명령 수준.
 - (−) 큐레이션 기본이라 채널 기록은 완전 transcript가 아니다 — 필요 시 raw 옵트인.
+
+---
+
+## 증보 1 — work host의 배포판 동봉 + GUI 페어링 (2026-07-23, 성재 발제)
+
+- Status: **Proposed** (2026-07-23 momo-main 기안 — 성재 승인 시 구현. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — momo도 동형이나 페어링 UX가 수동)
+- 발단: 성재는 코드 실행 에이전트(Codex/goose)를 "담아서 띄우는" 경험을 원한다. buzz 검증 결과 Codex 자체는 독점 CLI+OAuth라 buzz도 동봉하지 않고 ACP로 접속한다(momo ADR-0114와 동형). 갭은 **①work host가 배포판에 안 담겨 사용자가 별도 실행 ②페어링이 host ID 수동 복사(TUI)**다. 자격증명 경계(본문 §하드 경계 불변, ADR-0004)는 유지한다.
+
+### D1. work host를 single image 배포판에 사이드카로 동봉
+- 565 단일 이미지 옆에 **work host 사이드카 서비스**(compose `--profile workhost` opt-in)를 배포판에 포함해, 설치 시 ACP 브리지가 이미 떠 있게 한다. 서버는 여전히 프로세스·자격증명 무접촉(본문 불변) — 사이드카는 사용자가 지정한 호스트/자격증명으로만 CLI를 실행하는 소비자다.
+- **오픈소스 에이전트(goose, Block Apache-2.0)는 사이드카 이미지에 실제 바이너리 동봉 가능**(재배포 라이선스 OK — buzz가 goose 1급 지원하는 근거). **Codex/Claude Code는 독점이라 동봉 불가 — 사용자 호스트의 것을 연결**(자격증명 `~/.codex`·keychain 그대로).
+
+### D2. GUI 페어링 (host ID 수동 복사 제거)
+- 관리자 설정 "코드 실행 호스트" 화면: 사이드카/로컬 호스트를 **자동 발견·페어링**(단기 페어링 코드 or 서명 challenge)하고 상태(연결됨/오프라인/도구 목록)를 표시. 현재 `MOMO_WORK_HOST_ID` 수동 조율(A-11)을 대체. ADR-0004 증보 1의 provider GUI와 **한 설정 화면에서 구분 표기**(LLM provider vs 코드 실행 호스트).
+
+### D3. 자격증명 경계 불변 (재확인)
+- 사이드카가 동봉돼도 **Codex OAuth·provider 키는 서버/DB/원장 비유입**(ADR-0004). 사이드카는 사용자 호스트 자격증명 소비자일 뿐, momo 서버 컨테이너와 신뢰 경계 분리. goose를 쓰더라도 goose가 호출하는 LLM 자격은 goose 설정(사용자) 소유.
+
+### D4. 스코프 경계
+- v0: goose 사이드카 동봉 + GUI 페어링 + 상태. Codex/Claude Code는 로컬 연결(GUI 페어링 공유). 원격 workd 다중 호스트·풀은 후속(ADR-0125 계보).
+
+### 파생 (Accepted 후)
+| 후보 | 내용 | 트랙 |
+|---|---|---|
+| WH-1 | work host 사이드카 compose 프로파일 + goose 동봉 이미지(single image 계보) | 엔진 |
+| WH-2 | GUI 자동 페어링(코드/challenge)+상태 화면(provider GUI와 통합 설정) | UXUI |
+| WH-3 | 배포판 문서: "코드 실행 호스트 5분 연결"(goose 동봉/Codex 로컬) | docs |
+
+### Consequences
+- (+) "코드 실행을 담아서 띄움"의 realizable 버전 — 오픈소스(goose)는 동봉, 독점(Codex)은 GUI 로컬 연결. buzz와 동형이되 페어링이 GUI.
+- (+) ADR-0004 경계 불변 — 사이드카는 자격증명 소비자, 서버 무접촉 유지.
+- (−) 사이드카 이미지 크기(goose+런타임)·compose 표면 증가(opt-in으로 상쇄).
+- 예약: Codex 자체 동봉(독점상 불가), 원격 호스트 풀, mesh-llm식 오픈모델 추론 동봉(별도).
