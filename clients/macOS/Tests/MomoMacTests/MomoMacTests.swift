@@ -7862,7 +7862,7 @@ private actor RecordingDecisionChatBackend: ChatBackend {
     }
 }
 
-private actor FailingDecisionAgentTransport: AgentTransport {
+actor FailingDecisionAgentTransport: AgentTransport {
     private var decisionCalls = 0
 
     func decisionCallCount() -> Int {
@@ -7925,7 +7925,8 @@ private struct FixtureReadStateRealtimeTransport: ReadStateRealtimeEnvelopeSubsc
     }
 }
 
-private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
+// Shared across the test target (agentWorkingSignal ViewModel tests reuse it).
+actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
     private let workspace: WorkspaceID
     private let storedMembers: [Member]
     private let storedChannels: [Channel]

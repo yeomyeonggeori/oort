@@ -692,6 +692,7 @@ public struct ChannelListView: View {
         let badgeLabel = channel.kind == .dm
             ? MomoUnreadBadge.label(unreadCount: readState?.unreadCount ?? 0)
             : MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
+        let workingSignals = viewModel.agentWorkingSignals(in: channel.id)
 
         HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
             Button {
@@ -708,6 +709,7 @@ public struct ChannelListView: View {
                         .truncationMode(.tail)
                         .help(displayName)
                     Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+                    AgentWorkingChannelBadge(signals: workingSignals, copy: copy)
                     if isMuted {
                         Image(systemName: "bell.slash.fill")
                             .foregroundStyle(.secondary)
