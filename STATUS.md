@@ -1,5 +1,15 @@
 # momo 진행 현황
 
+## MOMO-576 provider link 권한을 owner/admin에 개방 (#700, 2026-07-24, ADR-0004 증보1 D3)
+
+- 결함: MOMO-572 `ProviderLinkRoutes.requireOperator`가 `platform:read` scope만 요구해, owner의 일반 로그인 토큰(그 scope는 `PLATFORM_ADMIN_EMAILS`로만 발급)이 403 — 성재(owner)가 MOMO-574 'AI 연결' GUI를 열면 GET부터 403이라 GUI가 안 열렸다.
+- 수정: `requireOperator`를 async 인스턴스 메서드로 바꿔 **platform:read scope OR 워크스페이스 owner/admin role**을 허용한다. platform scope가 있으면 DB 조회 없이 통과(플랫폼 admin 경로), 없으면 principal 자기 워크스페이스의 membership role을 `WorkspaceAuthorization.activeRole`로 조회해 `owner||admin`(`WorkspaceRole.isAdmin`)이면 통과·아니면 403. 판정 로직은 순수 함수 `isOperatorAuthorized(kind:scopes:workspaceRole:)`로 분리해 DB 없이 유닛 테스트(owner/admin 200·member/guest 403·platform 200·비human 403).
+- RLS 정합: role 조회는 별도 `withTenantConnection`(app.workspace_id만 세팅, provider_link_admin 미세팅)에서 수행 — **권한 판정 완료 후에야** GET/test는 `withProviderLinkReadConnection`, PUT/DELETE는 `withProviderLinkTransaction`로 provider_link_admin GUC를 열어 행을 unlock한다("권한 판정 → GUC 세팅" 순서 유지).
+- 부수 버그 수정: PUT/DELETE가 `InviteRoutes.workspaceID(context,principal:)`(=`:ws` path param 요구)를 호출했는데 `/v1/provider/link`엔 `:ws`가 없어 항상 실패했을 경로 — 인스턴스-글로벌이라 audit 귀속 워크스페이스를 `principal.workspaceID`로 직접 사용(원 함수도 검증 후 `principal.workspaceID`만 반환했으므로 등가·안전).
+- 불변식: ADR-0004 OAuth/원본키 비유입·bearer write-only·마스킹 그대로. GUI 입력 필드/DTO closed-world 불변.
+- **후속 티켓 후보 (성재 승인 대기)**: provider_link는 instance-global(workspace_id 없음)이라 워크스페이스 owner/admin가 바꾸면 인스턴스 전 워크스페이스의 provider 해석에 영향. 내부 단일-WS 테스트엔 owner/admin 개방이 타당하나, **멀티 워크스페이스/공개 단계 전에 `platform:read`-only로 재조임** 필요(ADR-0117 D3 "워크스페이스 설정"은 owner-only인 반면 본 개방은 owner+admin이므로 정책 정합도 함께 결정). 코드 주석에 WARNING 성문화.
+- 검증: `swift build` + `swift test --filter ProviderLinkTests`(순수 유닛, DB 없음) — 라이브 200/403 REST 왕복은 orchestrator(포트 28260s)로 handoff, runtime-unverified.
+
 ## MOMO-571 momo-ops workspace-create + role 능력 매트릭스 감사 (#687, 2026-07-23, ADR-0117)
 
 - W-1: migrate 이미지에 env-only `workspace-create` 서브커맨드를 추가했다(`infra/prod/create_workspace.sql` + `internal-smoke-migrate.sh` 분기). 워크스페이스 이름/slug·초기 owner 이메일/비밀번호를 psql `\getenv`로만 받아 한 트랜잭션에 workspace 행 + owner human/member/workspace_membership(role=owner) + `#general` 채널 + channel_seq + owner 채널 membership + `workspace.created` 감사행을 만든다. 비밀번호는 `momo_password_hash`로 해시되며 argv/stdout에 노출되지 않는다(ADR-0004). **slug 재실행 정책 = 명시적 거부**(부분 워크스페이스 없음; 재프로비저닝은 별도 slug 또는 `set-owner` 사용). `momo-ops.sh workspace-create`는 env-only fail-closed 래퍼로 연결했다.

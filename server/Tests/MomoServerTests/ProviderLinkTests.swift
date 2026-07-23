@@ -166,6 +166,29 @@ final class ProviderLinkTests: XCTestCase {
         XCTAssertEqual(dto.mode, "external-hermes")
     }
 
+    // MARK: - Operator authorization matrix (MOMO-576 / ADR-0004 증보1 D3)
+
+    /// The pure authorization decision: platform:read OR workspace owner/admin,
+    /// human-only. The live 200/403 HTTP roundtrip stays orchestrator-owned
+    /// (runtime-unverified) because the role fallback needs Postgres.
+    func testOperatorAuthorizationMatrix() {
+        typealias R = ProviderLinkRoutes
+        // platform:read human — authorized regardless of workspace role.
+        XCTAssertTrue(R.isOperatorAuthorized(kind: .human, scopes: ["platform:read"], workspaceRole: nil))
+        XCTAssertTrue(R.isOperatorAuthorized(kind: .human, scopes: ["platform:read"], workspaceRole: .member))
+        // workspace owner/admin without platform scope — authorized via role fallback.
+        XCTAssertTrue(R.isOperatorAuthorized(kind: .human, scopes: [], workspaceRole: .owner))
+        XCTAssertTrue(R.isOperatorAuthorized(kind: .human, scopes: [], workspaceRole: .admin))
+        // non-privileged member/guest — 403.
+        XCTAssertFalse(R.isOperatorAuthorized(kind: .human, scopes: [], workspaceRole: .member))
+        XCTAssertFalse(R.isOperatorAuthorized(kind: .human, scopes: [], workspaceRole: .guest))
+        // no active membership and no scope — 403.
+        XCTAssertFalse(R.isOperatorAuthorized(kind: .human, scopes: [], workspaceRole: nil))
+        // non-human principals are never operators, even with the scope or owner role.
+        XCTAssertFalse(R.isOperatorAuthorized(kind: .agent, scopes: ["platform:read"], workspaceRole: .owner))
+        XCTAssertFalse(R.isOperatorAuthorized(kind: .workHost, scopes: ["platform:read"], workspaceRole: .owner))
+    }
+
     // MARK: - mode parsing
 
     func testResolvedModeDefaultsToExternalAndRejectsGarbage() throws {

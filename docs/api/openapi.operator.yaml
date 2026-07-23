@@ -11,9 +11,11 @@ openapi: 3.0.3
 #
 # This companion spec documents the operator surface so consumers such as the
 # P-2 provider-config UXUI have a precise, machine-readable contract. All
-# operations require a human App JWT that carries the `platform:read` operator
-# scope (issued at login for a PLATFORM_ADMIN_EMAILS address presenting
-# PLATFORM_ADMIN_LOGIN_SECRET).
+# operations require a human App JWT that is EITHER a platform operator (the
+# `platform:read` scope, issued at login for a PLATFORM_ADMIN_EMAILS address
+# presenting PLATFORM_ADMIN_LOGIN_SECRET) OR a workspace owner/admin (MOMO-576 /
+# ADR-0004 증보1 D3 — provider_link is instance-global; owner/admin is opened for
+# the internal single-workspace build and re-tightened before multi-WS exposure).
 #
 # Encoding rules mirror openapi.yaml: optional response fields are OMITTED when
 # absent (Swift encodeIfPresent).
@@ -57,7 +59,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderLinkResponse"
         "403":
-          description: Missing platform:read operator scope or non-human principal.
+          description: >-
+            Non-human principal, or a human lacking both the platform:read
+            operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
     put:
       operationId: putProviderLink
       summary: Configure the instance provider link (DB override)
@@ -84,7 +88,9 @@ paths:
         "400":
           description: Invalid base URL, empty bearer, bad mode, or unknown field.
         "403":
-          description: Missing platform:read operator scope or non-human principal.
+          description: >-
+            Non-human principal, or a human lacking both the platform:read
+            operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
     delete:
       operationId: deleteProviderLink
       summary: Remove the provider link (revert to env fallback)
@@ -98,7 +104,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderLinkResponse"
         "403":
-          description: Missing platform:read operator scope or non-human principal.
+          description: >-
+            Non-human principal, or a human lacking both the platform:read
+            operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
   /v1/provider/link/test:
     post:
       operationId: testProviderLink
@@ -119,7 +127,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderLinkTestResponse"
         "403":
-          description: Missing platform:read operator scope or non-human principal.
+          description: >-
+            Non-human principal, or a human lacking both the platform:read
+            operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
 
 components:
   securitySchemes:
@@ -127,7 +137,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: App access token carrying the platform:read operator scope.
+      description: >-
+        App access token for a human principal that carries the platform:read
+        operator scope OR is a workspace owner/admin (ADR-0004 증보1 D3).
   schemas:
     ProviderLinkResponse:
       type: object
