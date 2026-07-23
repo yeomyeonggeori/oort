@@ -393,7 +393,11 @@ PY
   fi
   sleep 1
 done
-[ "$AGENT_OK" = "1" ] || fail "mock Hermes agent roundtrip did not complete for trigger message $AGENT_TRIGGER_MESSAGE_ID run=${AGENT_RUN_ID:-unknown}"
+if [ "$AGENT_OK" != "1" ]; then
+  echo "[host-runtime] diagnostics: run status=${AGENT_RUN_STATUS:-unknown}; worker/api tail follows" >&2
+  compose logs --tail 80 worker api >&2 || true
+  fail "mock Hermes agent roundtrip did not complete for trigger message $AGENT_TRIGGER_MESSAGE_ID run=${AGENT_RUN_ID:-unknown}"
+fi
 
 compose logs --no-color > "$COMPOSE_LOG" 2>&1 || true
 
@@ -404,12 +408,9 @@ compose logs --no-color > "$COMPOSE_LOG" 2>&1 || true
   echo "- Env file: \`${ENV_FILE}\`"
   echo "- Compose config: \`${CONFIG_FILE}\`"
   echo "- Images:"
-  echo "  - api: \`${API_IMAGE}\`"
-  echo "  - relay: \`${RELAY_IMAGE}\`"
-  echo "  - worker: \`${WORKER_IMAGE}\`"
-  echo "  - migrate: \`${MIGRATE_IMAGE}\`"
+  echo "  - momo (api/relay/worker/migrate/linkshort/web-assets 단일): \`${MOMO_IMAGE}\`"
   echo "  - mock Hermes: \`${MOCK_IMAGE}\`"
-  echo "- Health: \`compose up -d --wait\` reached api /health healthcheck healthy + migrate completed; Caddy/internal API \`/health\` returned 200"
+  echo "- Health: install.sh 동형 시퀀스(기반 서비스 --wait → 원샷 run --rm → 앱 서비스 --wait)로 api /health healthy 도달; Caddy/internal API \`/health\` 200"
   echo "- Agent runtime status: \`/v1/agent-runtime/status\` reported internal-host-mock/mock without leaking provider secrets"
   echo "- Migration: single migrate container run performed apply + idempotent re-apply (MOMO-316 1-run); \`compose logs migrate\` captured \`IDEMPOTENCY_OK second-pass applied=0\` skip evidence"
   echo "- REST message: message_id=\`${MESSAGE_ID}\`, seq=\`${MESSAGE_SEQ}\`, client_msg_id=\`${CLIENT_MSG_ID}\`, channel=\`${CENT_GENERAL_CHANNEL}\`"
