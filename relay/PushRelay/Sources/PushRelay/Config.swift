@@ -1,4 +1,6 @@
-import Crypto
+// Linux swift-crypto lags CryptoKit's Sendable conformances (Curve25519 keys);
+// preconcurrency keeps the strict-concurrency build identical on both OSes.
+@preconcurrency import Crypto
 import Foundation
 
 enum APNSEnvironment: String, Codable, Sendable {
