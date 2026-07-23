@@ -207,11 +207,16 @@ final class DiffArtifactCardSnapshotTests: XCTestCase {
         XCTAssertTrue(diff.isTruncated)
         XCTAssertEqual(diff.displayedLineCount, 500)
         XCTAssertEqual(diff.totalLineCount, 1_204)
+        // Counts are locale-grouped so they match the card's `+N −N` change summary.
+        // Build the expected strings with the same formatter so the assertion holds
+        // on any test host locale (comma, space, or period grouping alike).
+        let totalText = diff.totalLineCount.formatted(.number)
+        let shownText = diff.displayedLineCount.formatted(.number)
         let banner = MomoWorkspaceCopy(language: .korean)
             .diffTruncationBanner(total: diff.totalLineCount, shown: diff.displayedLineCount)
-        XCTAssertEqual(banner, "전체 1204줄 중 500줄 표시")
+        XCTAssertEqual(banner, "전체 \(totalText)줄 중 \(shownText)줄 표시")
         let englishBanner = MomoWorkspaceCopy(language: .english)
             .diffTruncationBanner(total: diff.totalLineCount, shown: diff.displayedLineCount)
-        XCTAssertEqual(englishBanner, "Showing 500 of 1204 lines")
+        XCTAssertEqual(englishBanner, "Showing \(shownText) of \(totalText) lines")
     }
 }
