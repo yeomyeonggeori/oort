@@ -80,6 +80,13 @@ public enum AgentWorkingSignalResolver {
     private static let maximumHeadlines = 3
     private static let maximumHeadlineLength = 140
 
+    /// Idle cutoff: once a run's last observed activity (status/partial) is older
+    /// than this, the signal self-expires even if no terminal event ever arrived.
+    /// Guards against a lost realtime terminal event stranding a "working" signal
+    /// (and its elapsed clock running away to hundreds of hours). Honors the batch
+    /// contract's "stale signal disappears" rule.
+    public static let defaultIdleCutoff: TimeInterval = 90
+
     public static func resolve(
         channel: ChannelID,
         members: [Member],
@@ -88,9 +95,19 @@ public enum AgentWorkingSignalResolver {
         workRuns: [AgentWorkRun],
         typingAgentIDs: Set<MemberID>,
         startTimes: [RunID: Date],
+        lastActivityTimes: [RunID: Date] = [:],
+        idleCutoff: TimeInterval = defaultIdleCutoff,
         now: Date
     ) -> [AgentWorkingSignal] {
         let membersByID = Dictionary(members.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        // A run whose most recent activity predates the cutoff is treated as gone,
+        // the same as an explicit terminal event. `nil` last-activity (never
+        // stamped) is not proof of staleness, so it is kept.
+        func isStale(_ run: RunID) -> Bool {
+            guard let last = lastActivityTimes[run] else { return false }
+            return now.timeIntervalSince(last) > idleCutoff
+        }
 
         func workingMember(_ id: MemberID) -> Member? {
             guard let member = membersByID[id],
@@ -120,6 +137,7 @@ public enum AgentWorkingSignalResolver {
             let effectiveStatus = status?.runStatus ?? run.status
             guard !effectiveStatus.isTerminal else { continue }
             if let phase = status?.phase, phase == .done || phase == .error { continue }
+            guard !isStale(run.id) else { continue }
             guard let agent = workingMember(run.agentMemberId) else { continue }
             coveredRuns.insert(run.id)
             appendCandidate(
@@ -139,6 +157,7 @@ public enum AgentWorkingSignalResolver {
         for status in statuses where status.channelId == channel {
             guard !coveredRuns.contains(status.runId) else { continue }
             guard !status.runStatus.isTerminal, status.phase != .done, status.phase != .error else { continue }
+            guard !isStale(status.runId) else { continue }
             guard let agent = workingMember(status.agentMemberId) else { continue }
             coveredRuns.insert(status.runId)
             appendCandidate(
@@ -289,21 +308,46 @@ struct AgentTurnLivenessMark: View {
     }
 }
 
-/// A `.monospacedDigit()` elapsed clock that refreshes every second via
+/// A `.monospacedDigit()` elapsed clock. At runtime it refreshes every second via
 /// `TimelineView` (data cadence, not animation, so `reduceMotion` is irrelevant).
+/// Snapshot/preview paths inject a fixed `agentWorkingClock` so the readout is a
+/// deterministic value the regression gate can pin, instead of `wall-clock now`.
 struct AgentWorkingElapsedLabel: View {
     var startedAt: Date
     var copy: MomoWorkspaceCopy
 
+    @Environment(\.agentWorkingClock) private var frozenClock
+
     var body: some View {
-        TimelineView(.periodic(from: startedAt, by: 1)) { context in
-            let text = AgentWorkingElapsedFormat.string(context.date.timeIntervalSince(startedAt))
-            Text(text)
-                .font(.caption2.weight(.medium))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(copy.agentWorkingElapsed(text))
+        if let frozenClock {
+            label(for: frozenClock.timeIntervalSince(startedAt))
+        } else {
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                label(for: context.date.timeIntervalSince(startedAt))
+            }
         }
+    }
+
+    private func label(for interval: TimeInterval) -> some View {
+        let text = AgentWorkingElapsedFormat.string(interval)
+        return Text(text)
+            .font(.caption2.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(copy.agentWorkingElapsed(text))
+    }
+}
+
+private struct AgentWorkingClockKey: EnvironmentKey {
+    static let defaultValue: Date? = nil
+}
+
+extension EnvironmentValues {
+    /// Deterministic clock for elapsed readouts in snapshot/preview paths. `nil` at
+    /// runtime, where the elapsed label ticks from a live `TimelineView`.
+    var agentWorkingClock: Date? {
+        get { self[AgentWorkingClockKey.self] }
+        set { self[AgentWorkingClockKey.self] = newValue }
     }
 }
 
@@ -353,29 +397,77 @@ struct AgentWorkingChannelBadge: View {
 
 // MARK: - Surface 2: composer rotating headline bar
 
-/// Composer footer bar that rotates through "{agent}: {headline}" every 2.2s. Only
-/// shows when at least one agent has produced a headline (no empty rotation). With
-/// `reduceMotion` the headline swaps statically (no slide/fade transition).
+/// Composer footer bar that rotates through "{agent}: {headline}" one line at a
+/// time. Only shows when at least one agent has produced a headline (no empty
+/// rotation). Rotation pauses on hover so a line can be read; with `reduceMotion`
+/// it does not rotate at all, instead stacking one static line per working agent.
 struct AgentWorkingComposerBar: View {
     var signals: [AgentWorkingSignal]
     var copy: MomoWorkspaceCopy
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var index = 0
-    private let rotation = Timer.publish(every: 2.2, on: .main, in: .common).autoconnect()
+    @State private var isPaused = false
+    // 5s per headline: long enough to read a two-line Korean+English line without
+    // racing the reader (design-review: 2.2s was too fast). Hover pauses rotation.
+    private let rotation = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     private struct Item: Equatable {
         let agentName: String
         let headline: String
     }
 
+    /// Every agent×headline pair, rotated through one at a time (motion path).
     private var items: [Item] {
         signals.flatMap { signal in
             signal.headlines.map { Item(agentName: signal.agentName, headline: $0) }
         }
     }
 
+    /// One line per working agent, shown all at once when motion is reduced so the
+    /// content never mutates on its own.
+    private var staticItems: [Item] {
+        signals.compactMap { signal in
+            signal.headlines.first.map { Item(agentName: signal.agentName, headline: $0) }
+        }
+    }
+
     var body: some View {
+        if reduceMotion {
+            reducedMotionStack
+        } else {
+            rotatingBar
+        }
+    }
+
+    @ViewBuilder
+    private var reducedMotionStack: some View {
+        let items = staticItems
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(spacing: 8) {
+                        AgentTurnLivenessMark(accessibilityText: copy.agentWorkingTitle(item.agentName))
+                        Text(headlineText(item))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(headlineText(item))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MomoTheme.agentAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous))
+        }
+    }
+
+    @ViewBuilder
+    private var rotatingBar: some View {
         let items = items
         if let item = current(in: items) {
             HStack(spacing: 8) {
@@ -385,8 +477,8 @@ struct AgentWorkingComposerBar: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .id(reduceMotion ? nil : headlineText(item))
-                    .transition(reduceMotion ? .identity : .opacity)
+                    .id(headlineText(item))
+                    .transition(.opacity)
                 Spacer(minLength: 0)
                 if items.count > 1 {
                     Text("\(safeIndex(in: items) + 1)/\(items.count)")
@@ -400,11 +492,12 @@ struct AgentWorkingComposerBar: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(MomoTheme.agentAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous))
-            .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: index)
+            .animation(.snappy(duration: 0.2), value: index)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(headlineText(item))
+            .onHover { isPaused = $0 }
             .onReceive(rotation) { _ in
-                guard items.count > 1 else { return }
+                guard items.count > 1, !isPaused else { return }
                 index = (index + 1) % items.count
             }
             .onChange(of: items) { _, newItems in
