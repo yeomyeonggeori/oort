@@ -31,7 +31,11 @@ note() { echo "[internal-alpha] $*"; }
 compose() {
   # 포트 4종은 매 호출에 고정 주입한다 — 미주입 재생성은 호스트 포트 매핑을
   # compose 기본값으로 되돌리는 함정(pgvector 전례)이 있다.
+  # INTERNAL_ALPHA_WS_URL: Tailscale 등으로 원격 노출 시 로그인 응답이 건넬
+  # 실시간 WS 주소(예: wss://<host>.ts.net:8443/connection/websocket).
+  # 미설정이면 compose 기본(ws://127.0.0.1:<CENT_PORT>) — 단독 도그푸드용.
   PORT="$API_PORT" CENT_PORT="$CENT_PORT" POSTGRES_PORT="$PG_PORT" HERMES_PORT="$HERMES_PORT" \
+    MOMO_E2E_REALTIME_WS_URL="${INTERNAL_ALPHA_WS_URL:-ws://127.0.0.1:${CENT_PORT}/connection/websocket}" \
     docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 
