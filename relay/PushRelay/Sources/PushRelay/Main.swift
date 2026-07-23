@@ -2,6 +2,7 @@ import AsyncHTTPClient
 import Foundation
 import Hummingbird
 import Logging
+import MomoMetrics
 
 @main
 struct PushRelayMain {
@@ -10,6 +11,7 @@ struct PushRelayMain {
         logger.logLevel = ProcessInfo.processInfo.environment["LOG_LEVEL"]
             .flatMap(Logger.Level.init(rawValue:)) ?? .info
         let config = try RelayConfig.load()
+        let metrics = await MetricsRegistry.pushRelay()
 
         let httpClient: HTTPClient?
         let sender: any APNSSender
@@ -47,7 +49,12 @@ struct PushRelayMain {
             "rateLimitPerMinute": .stringConvertible(config.rateLimitPerMinute),
             "senderMode": .string(config.senderMode.rawValue),
         ])
-        let app = PushRelayApp.build(config: config, sender: sender, logger: logger)
+        let app = PushRelayApp.build(
+            config: config,
+            sender: sender,
+            metrics: metrics,
+            logger: logger
+        )
         do {
             try await app.runService()
         } catch {

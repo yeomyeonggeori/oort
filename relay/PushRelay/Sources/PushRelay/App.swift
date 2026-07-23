@@ -3,6 +3,7 @@ import Foundation
 import Hummingbird
 import HTTPTypes
 import Logging
+import MomoMetrics
 
 struct RelayRequestContext: RequestContext {
     var coreContext: CoreRequestContextStorage
@@ -30,7 +31,12 @@ enum PushRelayApp {
     private static let serverIDHeader = HTTPField.Name("X-Momo-Server-Id")!
     private static let signatureHeader = HTTPField.Name("X-Momo-Push-Signature")!
 
-    static func build(config: RelayConfig, sender: any APNSSender, logger: Logger) -> some ApplicationProtocol {
+    static func build(
+        config: RelayConfig,
+        sender: any APNSSender,
+        metrics: MetricsRegistry,
+        logger: Logger
+    ) -> some ApplicationProtocol {
         let router = Router(context: RelayRequestContext.self)
         let limiter = ServerRateLimiter(limit: config.rateLimitPerMinute)
 
@@ -74,12 +80,22 @@ enum PushRelayApp {
 
             do {
                 let result = try await sender.send(dispatch)
+                if let codeClass = APNSFailureCodeClass.classify(status: result.status) {
+                    await metrics.incrementLabeledCounter(
+                        name: MomoMetricName.apnsFailuresTotal,
+                        labelValue: codeClass.rawValue
+                    )
+                }
                 return PushReceipt(
                     apnsStatus: result.status,
                     apnsReason: result.reason,
                     apnsId: result.apnsID
                 )
             } catch {
+                await metrics.incrementLabeledCounter(
+                    name: MomoMetricName.apnsFailuresTotal,
+                    labelValue: APNSFailureCodeClass.transportError.rawValue
+                )
                 logger.error("APNs dispatch failed", metadata: [
                     "serverId": .string(serverID),
                     "messageId": .string(dispatch.messageId),
@@ -89,7 +105,7 @@ enum PushRelayApp {
             }
         }
 
-        return Application(
+        var app = Application(
             router: router,
             configuration: .init(
                 address: .hostname(config.host, port: config.port),
@@ -97,5 +113,14 @@ enum PushRelayApp {
             ),
             logger: logger
         )
+        let metricsEndpoint = MetricsEndpointConfig.load(defaultPort: 9093)
+        app.addServices(MetricsHTTPServer.build(
+            registry: metrics,
+            host: metricsEndpoint.host,
+            port: metricsEndpoint.port,
+            serviceName: "PushRelay",
+            logger: logger
+        ))
+        return app
     }
 }

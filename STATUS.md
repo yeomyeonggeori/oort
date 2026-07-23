@@ -5,6 +5,12 @@
 - prod install이 여섯 GHCR digest에 GitHub SLSA provenance 검증을 수행한다. 기본은 `gh` 부재·attestation 미발행을 이미지 키별로 경고하는 soft-fail이며, 릴리스 게이트는 `MOMO_ATTESTATION_POLICY=required`로 pull 전 fail-closed할 수 있다.
 - prod/e2e compose 전 서비스에 조정 가능한 `mem_limit`과 janitor 관리 라벨을 추가하고 외부 tag-only 이미지를 registry digest로 고정했다. 정적 verifier는 Compose 표준 project 라벨 매칭·이 계약·두 prod env 템플릿 동기화를 검사하며, Docker compose 실제 기동·메모리 상한·attestation 실조회는 오케스트레이터 수행 전까지 `runtime-unverified`다.
 
+## MOMO-562 관측 실물화 v0 (#677, 2026-07-23)
+
+- API·OutboxRelay·AgentWorker·PushRelay에 공개 서비스 포트와 분리된 Prometheus text 0.0.4 `/metrics`를 추가했다. relay는 pending broadcast 최고 연령 게이지와 commit→publish histogram, worker는 budget trip counter와 mention enqueue→정상 terminal histogram, PushRelay는 닫힌 `code_class` 6값 APNs 실패 counter를 소유한다. 테넌트/콘텐츠/식별자 라벨은 없다.
+- prod compose는 metrics 포트를 host/public network에 publish하지 않고 `--profile observability`일 때만 private Prometheus를 기동한다. Caddy의 API·앱 도메인 `/metrics`는 명시적으로 404이며 web-serving gate가 단정한다.
+- MomoMetrics 3 tests와 API/relay/worker/PushRelay Swift build, verifier bash 정적 검증은 PASS했다. 28210~28213 Docker endpoint/profile verifier는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-560 day-2 운영 단일 진입 (#653, 2026-07-23)
 
 - prod `momo-ops.sh`에 status/logs/기존 upgrade 래핑/backup-hint/member list/invite-create를 모았다. status 외 명령은 기존 prod preflight를 재사용해 placeholder를 fail-closed하고, 멤버·초대는 migrate 이미지의 env-only DB 경로로 실행하며 원본 초대 코드는 mode-0600 파일에만 1회 기록한다.

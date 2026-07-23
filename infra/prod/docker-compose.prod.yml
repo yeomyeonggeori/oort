@@ -165,6 +165,8 @@ services:
       HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
       MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9090
       MOMO_ARCHIVE_BACKEND: ${MOMO_ARCHIVE_BACKEND:-drive}
       MOMO_S3_ENDPOINT: ${MOMO_S3_ENDPOINT:-}
       MOMO_S3_REGION: ${MOMO_S3_REGION:-}
@@ -197,6 +199,8 @@ services:
       RELAY_POLL_INTERVAL_MS: ${RELAY_POLL_INTERVAL_MS:-300}
       RELAY_CLAIM_BATCH: ${RELAY_CLAIM_BATCH:-64}
       RELAY_MAX_ATTEMPTS: ${RELAY_MAX_ATTEMPTS:-8}
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9091
     depends_on:
       postgres:
         condition: service_healthy
@@ -231,6 +235,8 @@ services:
       MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
       MEMORY_EMBEDDING_POLL_INTERVAL_MS: ${MEMORY_EMBEDDING_POLL_INTERVAL_MS:-5000}
       MEMORY_EMBEDDING_BATCH_SIZE: ${MEMORY_EMBEDDING_BATCH_SIZE:-50}
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9092
     depends_on:
       postgres:
         condition: service_healthy
@@ -238,6 +244,31 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    networks:
+      - private
+
+  # ADR-0121 D7: absent from the default stack. It starts only when the
+  # operator supplies `--profile observability`; no Prometheus or metrics port
+  # is published to the host or attached to the public network.
+  prometheus:
+    image: prom/prometheus:v3.5.0@sha256:8672a850efe2f9874702406c8318704edb363587f8c2ca88586b4c8fdb5cea24
+    mem_limit: ${MOMO_PROMETHEUS_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_started
+      relay:
+        condition: service_started
+      worker:
+        condition: service_started
     networks:
       - private
 
@@ -440,5 +471,7 @@ volumes:
   caddy-config:
   momo-web-static:
     name: ${WEB_STATIC_VOLUME_NAME:-momo-web-static}
+  prometheus-data:
+    name: ${PROMETHEUS_VOLUME_NAME:-momo-prometheus-data}
   eve-runtime:
     name: ${EVE_RUNTIME_VOLUME_NAME:-momo-eve-runtime}

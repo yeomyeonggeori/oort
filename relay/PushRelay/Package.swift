@@ -9,7 +9,9 @@ let package = Package(
         .executable(name: "PushRelay", targets: ["PushRelay"]),
     ],
     dependencies: [
+        .package(path: "../../services/MomoMetrics"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.25.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
@@ -19,7 +21,10 @@ let package = Package(
         .executableTarget(
             name: "PushRelay",
             dependencies: [
+                .product(name: "MomoMetrics", package: "MomoMetrics"),
                 .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "Logging", package: "swift-log"),

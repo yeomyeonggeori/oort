@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import Logging
+import MomoMetrics
 import NIOCore
 import OutboundHTTPPolicy
 import PostgresNIO
@@ -32,6 +33,7 @@ struct RelayService: Service {
     let pg: PostgresClient
     let centrifugo: CentrifugoClient
     let webhooks: any WebhookDelivering
+    let metrics: MetricsRegistry
     let config: Config
     let logger: Logger
 
@@ -76,6 +78,7 @@ struct RelayService: Service {
             group.addTask {
                 for await _ in wakes {
                     if Task.isCancelled { break }
+                    await refreshOutboxLagGauge()
                     await drainToEmpty()
                 }
             }
@@ -149,6 +152,7 @@ struct RelayService: Service {
         let kind: String
         let attempts: Int
         let rawPayload: String
+        let createdAt: Date
     }
 
     /// L4 §3.5 / §8.1: claim pending broadcast rows and flip them to `processing`
@@ -170,16 +174,23 @@ struct RelayService: Service {
                    SET status = 'processing', attempts = o.attempts + 1
                   FROM claimed c
                  WHERE o.id = c.id
-                 RETURNING o.id, o.kind::text, o.attempts, o.payload::text
+                 RETURNING o.id, o.kind::text, o.attempts, o.payload::text,
+                           o.created_at
                 """,
                 logger: logger
             ).collect()
 
             return try rows.map { row in
-                let (id, kind, attempts, payload) = try row.decode(
-                    (Int64, String, Int, String).self
+                let (id, kind, attempts, payload, createdAt) = try row.decode(
+                    (Int64, String, Int, String, Date).self
                 )
-                return ClaimedRow(id: id, kind: kind, attempts: attempts, rawPayload: payload)
+                return ClaimedRow(
+                    id: id,
+                    kind: kind,
+                    attempts: attempts,
+                    rawPayload: payload,
+                    createdAt: createdAt
+                )
             }
         }
     }
@@ -210,6 +221,10 @@ struct RelayService: Service {
             let result = try await centrifugo.publish(payload)
             switch result {
             case .ok:
+                await metrics.observeHistogram(
+                    name: MomoMetricName.outboxPublishLatencySeconds,
+                    value: Date().timeIntervalSince(row.createdAt)
+                )
                 await markDone(row.id)
                 logger.debug("published", metadata: [
                     "outboxId": .stringConvertible(row.id),
@@ -228,6 +243,36 @@ struct RelayService: Service {
         } catch {
             // Network/timeout = transient → requeue with backoff.
             await requeue(row, reason: "publish threw: \(error)")
+        }
+    }
+
+    /// D10: refresh the aggregate DB-derived gauge on every poll/NOTIFY wake.
+    /// No tenant, row, or content value is projected into the metric.
+    private func refreshOutboxLagGauge() async {
+        do {
+            let age: Double = try await pg.withConnection { conn in
+                let rows = try await conn.query(
+                    """
+                    SELECT COALESCE(
+                      EXTRACT(EPOCH FROM (clock_timestamp() - MIN(created_at))),
+                      0
+                    )::double precision
+                      FROM outbox
+                     WHERE kind = 'broadcast' AND status = 'pending'
+                    """,
+                    logger: logger
+                ).collect()
+                guard let first = rows.first else { return 0 }
+                return try first.decode(Double.self)
+            }
+            await metrics.setGauge(
+                name: MomoMetricName.outboxPendingOldestAgeSeconds,
+                value: age
+            )
+        } catch {
+            logger.warning("outbox lag gauge refresh failed", metadata: [
+                "error": .string(String(describing: error)),
+            ])
         }
     }
 

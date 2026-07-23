@@ -753,13 +753,41 @@ scripts/verify_internal_host_runtime.sh
 - 구조화 로그(JSON): 모든 로그에 `run_id`/`workspace_id` 상관키. `docker compose logs -f` + 로그 드라이버(json-file rotate 또는 외부 수집).
 
 ### 8.2 핵심 메트릭 (게이트/운영 신호)
-| 메트릭 | 의미 | 경보 임계 `(추정)` |
-|---|---|---|
-| **outbox lag** | pending outbox 행의 최고 연령 | > 5s 지속 시 relay 점검 |
-| **예산 트립율** | budget_window 서킷브레이커 트립 빈도 | 급증 시 가격/한도 점검 |
-| **APNs 실패율** | 410/400/429 비율 | 429 = 토큰 갱신 액터 점검(20~60분), 410/400 = invalidated_at |
-| **에이전트 턴 지연** | 멘션→응답 p90 | hermes 지연/타임아웃 점검 |
-| **publish 지연** | commit→Centrifugo publish | relay/centrifugo 점검 |
+| 메트릭 | 소유 서비스 | 의미 | 경보 임계 `(추정)` |
+|---|---|---|---|
+| `momo_outbox_pending_oldest_age_seconds` | OutboxRelay | pending broadcast outbox 행의 최고 연령(DB 폴링 게이지) | > 5s 지속 시 relay 점검 |
+| `momo_budget_trips_total` | AgentWorker | budget_window 서킷브레이커 트립 누계 | 증가율 급증 시 가격/한도 점검 |
+| `momo_apns_failures_total{code_class}` | PushRelay | APNs 실패 누계 | 429 = 토큰 갱신 액터 점검(20~60분), 410/400 = invalidated_at |
+| `momo_agent_turn_duration_seconds` | AgentWorker | 멘션 enqueue→정상 terminal 응답 histogram | p90 증가 시 hermes 지연/타임아웃 점검 |
+| `momo_outbox_publish_latency_seconds` | OutboxRelay | outbox commit→Centrifugo 성공 publish histogram | relay/centrifugo 점검 |
+
+각 프로세스는 공개 서비스 포트와 분리된 `/metrics`를 제공한다(API 9090,
+OutboxRelay 9091, AgentWorker 9092, PushRelay 9093). source 직접 실행은
+loopback에만 bind하고, prod compose가 `MOMO_METRICS_HOST=0.0.0.0`을 설정하되
+호스트 포트를 publish하지 않아 private 네트워크에서만 접근 가능하다. Caddy의 API·앱
+도메인은 `/metrics`를 명시적으로 404 처리한다.
+
+Prometheus는 기본 설치에 포함되지 않는다. 운영자가 명시적으로 아래처럼 opt-in한다.
+Prometheus UI 포트도 호스트에 publish되지 않으므로 점검은 compose 내부에서 수행하거나
+별도 인증 프록시를 설계한 뒤 후속 ADR로 승격한다.
+
+```sh
+docker compose --env-file /secure/momo/prod.env \
+  -f infra/prod/docker-compose.prod.yml \
+  --profile observability up -d prometheus
+```
+
+`code_class`는 `400`, `410`, `429`, `other_4xx`, `5xx`, `transport`의 닫힌
+6값만 허용한다. 그 밖의 라벨은 없으며 메트릭 이름·라벨·값에 메시지/프롬프트/표시명과
+`workspace_id`·`run_id`·`member_id`를 넣지 않는다.
+
+정적/Swift 검증은 로컬에서 수행할 수 있다. API/relay/worker/PushRelay의 실제 endpoint와
+production profile render를 함께 확인하는 Docker verifier는 오케스트레이터가 실행한다.
+
+```sh
+swift test --package-path services/MomoMetrics
+scripts/verify_metrics_observability.sh  # 28210~28213, orchestrator-only
+```
 
 > APNs 운영 상수(L4 §8.3, 검증됨): provider JWT **ES256, 1h 초과 403, 20분 1회 초과 갱신 시 429** → 프로세스당 토큰 1개 캐시 + 20~60분 갱신 액터(single-signer). 410 Unregistered/400 BadDeviceToken → `push_token.invalidated_at`.
 

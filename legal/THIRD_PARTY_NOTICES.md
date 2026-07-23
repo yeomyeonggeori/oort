@@ -3,7 +3,7 @@
 <!-- BEGIN GENERATED: SPM LICENSES (scripts/check_spm_licenses.sh) -->
 ## Swift Package Manager dependencies
 
-> Generated from 9 Package.resolved graphs and checkout LICENSE files. Do not edit this section manually.
+> Generated from 10 Package.resolved graphs and checkout LICENSE files. Do not edit this section manually.
 
 | Package | Version | License | Source |
 |---|---|---|---|

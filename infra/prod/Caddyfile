@@ -26,6 +26,12 @@
         respond "forbidden" 403
     }
 
+    # ADR-0121 D7: metrics is a separate compose-private listener. Keep an
+    # explicit edge deny so future API router changes cannot expose it.
+    handle /metrics {
+        respond "not found" 404
+    }
+
     handle {
         reverse_proxy api:8080
     }
@@ -87,6 +93,11 @@
     # fail closed) so the rate-limit-excluded route is never web-reachable.
     handle /v1/centrifugo/* {
         respond "forbidden" 403
+    }
+
+    # The SPA fallback would otherwise turn /metrics into index.html (200).
+    handle /metrics {
+        respond "not found" 404
     }
 
     handle /v1/* {

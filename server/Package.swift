@@ -22,6 +22,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../services/OutboundHTTPPolicy"),
+        .package(path: "../services/MomoMetrics"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.25.0"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
         // Keep JWTKit exact until CI moves past Xcode 16.4 / Swift 6.1.2.
@@ -35,6 +36,7 @@ let package = Package(
             name: "MomoServer",
             dependencies: [
                 .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
+                .product(name: "MomoMetrics", package: "MomoMetrics"),
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "JWTKit", package: "jwt-kit"),
