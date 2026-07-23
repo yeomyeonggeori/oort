@@ -404,13 +404,21 @@ struct AgentWorkingChannelBadge: View {
 struct AgentWorkingComposerBar: View {
     var signals: [AgentWorkingSignal]
     var copy: MomoWorkspaceCopy
+    /// Test/preview seam: forces the reduced-motion path on. `nil` at runtime, where
+    /// the live `accessibilityReduceMotion` environment value decides (that value is
+    /// read-only on this SDK, so a snapshot cannot override it via `.environment`).
+    var forcedReduceMotion: Bool? = nil
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var environmentReduceMotion
     @State private var index = 0
     @State private var isPaused = false
     // 5s per headline: long enough to read a two-line Korean+English line without
     // racing the reader (design-review: 2.2s was too fast). Hover pauses rotation.
     private let rotation = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    private var reduceMotion: Bool {
+        forcedReduceMotion ?? environmentReduceMotion
+    }
 
     private struct Item: Equatable {
         let agentName: String

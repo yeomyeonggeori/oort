@@ -14,7 +14,7 @@ import MomoCore
 final class AgentWorkingSignalSnapshotTests: XCTestCase {
     private let size = CGSize(width: 520, height: 260)
 
-    private func fixture(_ scheme: ColorScheme) -> some View {
+    private func fixture(_ scheme: ColorScheme, reduceMotion: Bool = false) -> some View {
         let copy = MomoWorkspaceCopy(language: .korean)
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!
@@ -45,7 +45,11 @@ final class AgentWorkingSignalSnapshotTests: XCTestCase {
         return VStack(alignment: .leading, spacing: 16) {
             AgentWorkingChannelBadge(signals: [buildbot, apollo], copy: copy)
             AgentTurnLivenessMark(accessibilityText: copy.agentWorkingTitle(buildbot.agentName))
-            AgentWorkingComposerBar(signals: [buildbot, apollo], copy: copy)
+            AgentWorkingComposerBar(
+                signals: [buildbot, apollo],
+                copy: copy,
+                forcedReduceMotion: reduceMotion ? true : nil
+            )
         }
         .padding(16)
         .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -55,10 +59,13 @@ final class AgentWorkingSignalSnapshotTests: XCTestCase {
         // Inject a fixed clock so the elapsed readout is deterministic ("1:23")
         // instead of wall-clock now minus a 2026 startedAt (a runaway value).
         .environment(\.agentWorkingClock, now)
+        // reduceMotion=true is passed straight into the composer bar (via its
+        // forcedReduceMotion seam) so the static per-agent stack path is covered;
+        // accessibilityReduceMotion is read-only in the environment on this SDK.
     }
 
-    private func render(_ scheme: ColorScheme) throws -> NSImage {
-        let hostingView = NSHostingView(rootView: fixture(scheme))
+    private func render(_ scheme: ColorScheme, reduceMotion: Bool = false) throws -> NSImage {
+        let hostingView = NSHostingView(rootView: fixture(scheme, reduceMotion: reduceMotion))
         hostingView.frame = CGRect(origin: .zero, size: size)
         hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         hostingView.layoutSubtreeIfNeeded()
@@ -115,12 +122,20 @@ final class AgentWorkingSignalSnapshotTests: XCTestCase {
 
     func testAgentWorkingSignalWritesDesignReviewArtifacts() throws {
         for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .dark ? "dark" : "light"
             let image = try render(scheme)
             try writeDesignReviewArtifact(
                 image,
-                named: "momo-568-agent-working-signal-\(scheme == .dark ? "dark" : "light").png"
+                named: "momo-568-agent-working-signal-\(suffix).png"
             )
             XCTAssertEqual(image.size, size)
+
+            let reducedMotion = try render(scheme, reduceMotion: true)
+            try writeDesignReviewArtifact(
+                reducedMotion,
+                named: "momo-568-agent-working-signal-reduced-motion-\(suffix).png"
+            )
+            XCTAssertEqual(reducedMotion.size, size)
         }
     }
 
@@ -145,6 +160,30 @@ final class AgentWorkingSignalSnapshotTests: XCTestCase {
             of: try render(.dark),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: "dark"
+        )
+    }
+
+    func testAgentWorkingSignalReducedMotionLightSnapshot() throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "reduced-motion-light"
+        )
+        assertSnapshot(
+            of: try render(.light, reduceMotion: true),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "reduced-motion-light"
+        )
+    }
+
+    func testAgentWorkingSignalReducedMotionDarkSnapshot() throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "reduced-motion-dark"
+        )
+        assertSnapshot(
+            of: try render(.dark, reduceMotion: true),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "reduced-motion-dark"
         )
     }
 }

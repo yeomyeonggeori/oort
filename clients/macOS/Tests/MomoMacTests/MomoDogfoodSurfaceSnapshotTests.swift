@@ -113,6 +113,11 @@ final class MomoDogfoodSurfaceSnapshotTests: XCTestCase {
         .frame(width: messageFocusSize.width, height: messageFocusSize.height)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.colorScheme, scheme)
+        // Freeze the agentWorkingSignal elapsed clock so the turn-liveness row's
+        // readout is deterministic instead of ticking off wall-clock now. The seed
+        // stamps working-start at test-run wall time, so a fixed pre-seed instant
+        // pins the readout rather than leaking the host clock into the snapshot.
+        .environment(\.agentWorkingClock, Date(timeIntervalSince1970: 1_752_572_700))
         .defaultAppStorage(snapshotDefaults())
     }
 
