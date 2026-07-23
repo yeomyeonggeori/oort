@@ -152,6 +152,10 @@ services:
       DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
       OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:?set OUTBOUND_WEBHOOK_MASTER_KEY}
+      # ADR-0004 증보 1 (MOMO-572/573): seals the provider_link bearer here and is
+      # decrypted by the worker at job time. Strict-env boot validation rejects a
+      # missing/placeholder value, so the api cannot boot without it.
+      PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
@@ -227,6 +231,10 @@ services:
       AGENT_MODEL: ${AGENT_MODEL:-hermes-agent}
       HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
+      # ADR-0004 증보 1 (MOMO-573): decrypts the operator's provider_link bearer at
+      # job time so a GUI provider change reaches the conversation. Must match the
+      # api's PROVIDER_LINK_MASTER_KEY (same value seals + opens the bearer).
+      PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-300}
       WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-8}
       MAX_CONSECUTIVE_AUTO: ${MAX_CONSECUTIVE_AUTO:-3}

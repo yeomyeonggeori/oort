@@ -37,6 +37,10 @@ struct AgentWorkerMain {
             "agentProviderMode": .string(config.agentProviderMode.rawValue),
             "agentProviderEndpoint": .string(config.agentProviderEndpointLabel),
             "agentAvailability": .string(config.agentAvailability),
+            // MOMO-573: job-time provider_link override is active only when the
+            // master key is present (never log the key itself).
+            "providerLinkResolution": .string(
+                config.providerLinkMasterKey == nil ? "env-only" : "db-over-env"),
         ])
 
         // ---- PostgreSQL pool (SoT access; BYPASSRLS role) ----
