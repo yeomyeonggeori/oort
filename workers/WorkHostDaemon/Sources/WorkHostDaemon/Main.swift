@@ -39,6 +39,9 @@ struct WorkHostDaemonMain {
             logger.info("momo-workd host ready", metadata: [
                 "workspace_id": .string(config.workspaceID.uuidString.lowercased()),
                 "host_id": .string(hostID.uuidString.lowercased()),
+                // WH-1: the boot-selected engine. A DB-backed override (migration
+                // 040) is resolved per dispatch via WorkdConfig.resolveEngine.
+                "engine": .string(config.engine.rawValue),
             ])
             let profiles = try await runtimeClient.workToolProfiles(hostID: hostID)
             let templates = try WorkdConfig.commandTemplates(

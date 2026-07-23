@@ -467,6 +467,37 @@ services:
     networks:
       - private
 
+  # WH-1 (MOMO-579 / ADR-0114 증보1) opt-in work host sidecar. Absent from the
+  # default stack; starts only with `--profile workhost`. Bundles opencode (MIT)
+  # + goose (Apache-2.0) + momo-workd (see infra/prod/docker/workhost.Dockerfile);
+  # Codex is never bundled. ADR-0004: no provider key / OAuth is set here — the
+  # sidecar is a credential consumer. It talks to the API over the public HTTPS
+  # domain (the daemon requires https unless the target is loopback).
+  workhost:
+    image: ${MOMO_WORKHOST_IMAGE:?set MOMO_WORKHOST_IMAGE}
+    mem_limit: ${MOMO_WORKHOST_MEM_LIMIT:-2g}
+    labels: *momo-janitor-labels
+    profiles: ["workhost"]
+    restart: unless-stopped
+    init: true
+    environment:
+      MOMO_WORKD_SERVER_URL: ${MOMO_WORKHOST_SERVER_URL:-https://${API_DOMAIN:?set API_DOMAIN}}
+      MOMO_WORKD_WORKSPACE_ID: ${MOMO_WORKHOST_WORKSPACE_ID:?set MOMO_WORKHOST_WORKSPACE_ID}
+      # ADR-0114 증보1 B: default engine opencode; a DB-backed per-workspace
+      # override (migration 040) wins at dispatch time.
+      MOMO_WORKD_ENGINE: ${MOMO_WORKHOST_ENGINE:-opencode}
+      # One-shot bootstrap token; consumed on first registration, never persisted.
+      MOMO_WORKD_REGISTRATION_TOKEN: ${MOMO_WORKHOST_REGISTRATION_TOKEN:-}
+      MOMO_WORKD_SCOPE: ${MOMO_WORKHOST_SCOPE:-workspace}
+      # opencode HTTP basic auth (opt-in). Empty => opencode serve boots open on
+      # the loopback interface inside the container only.
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - private
+
 networks:
   public:
     labels: *momo-janitor-labels
