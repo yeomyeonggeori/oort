@@ -22,5 +22,14 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- 내부 알파 LAN 직결(2026-07-23): 같은 와이파이의 http://192.168.x.x
+	     서버·ws:// 실시간 접속을 허용한다. NSAllowsLocalNetworking은 사설/링크로컬
+	     대역과 .local 호스트에만 ATS를 면제하며 공인 도메인 HTTPS 요구는 유지한다
+	     (공개 배포는 TLS 경로 그대로). -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
