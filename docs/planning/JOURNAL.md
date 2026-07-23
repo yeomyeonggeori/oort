@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-23 (Fable Opus 4.8 전환 집행 — UXUI 배치 5장 완주) · Codex 대체 파이프라인 실증
+- **Codex 한도 소진(7/29) → Opus 4.8 서브에이전트(Workflow) 구현 전환**(성재 지시, ultracode). 정본 메모리 [[momo-opus-implementation-pipeline]] 갱신.
+- **5장 랜딩**: 571 workspace-create(main, ADR-0117 W-1/2/3, verifier PASS 28250) + UXUI 4장(track/uxui): 568 작업신호·569 managed-by·570 Create agent 동급·518 diff 카드. 각 goal Workflow 병렬 구현→검수→Docker/스냅샷 게이트→**design-review(fresh)**→반려수정→재리뷰→랜딩.
+- **품질 게이트 실증**: design-review가 실결함 전건 검출·차단 — 569 Blocker(중첩 popover dead-control→inline disclosure), 568 High 3라운드(같은 문장 화면 중복→3표면 dedup 근본단순화, 잔여는 오케스트레이터가 footer 동일규칙으로 종결), 570 High(sparkles AI-tell→person.fill.badge.plus 3표면 일관), 518 High(과대추정 빈밴드→GeometryReader 실측). 전부 Blocker0·High0로 수렴.
+- 스냅샷 규율 재확인: 기준이미지=오케스트레이터 환경, 재기록은 `--filter`로 스위트 한정(SNAPSHOT_TESTING_RECORD=all 전체는 노이즈 40장 유발 — 교훈). track/uxui 5장 통합 빌드 PASS.
+- **다음: track/uxui→main 머지 성재 승인 대기**(TRACKS.md §3). 승인 시 순차 머지+알파 재발행(UX 개선 담긴).
+
 ## 2026-07-23 (Fable 내부 테스트 전환 집행) · 공개 동결, 알파 배포 채널 라이브, UXUI 배치 발급
 - **방향 전환(성재)**: 공개=게이트 충족 동결, 내부 테스트 집중(잔버그·연동·UXUI). 목표치 통과 시 자연 배포. 정본 `2026-07-23-internal-test-focus-plan.md`.
 - **알파 배포 채널 라이브**: 공개 저장소 momo-alpha + Pages(`dawn-kim-official.github.io/momo-alpha`) + `publish_alpha_build.sh` 원커맨드. **첫 빌드 v0.5.0-alpha.1(build 1047) 발행 완료**(LICENSE/NOTICE 동봉, sha256 기록, 인앱 Updates manifest 연결). 소스 비공개 유지·바이너리 공개 유통은 성재 승인분.

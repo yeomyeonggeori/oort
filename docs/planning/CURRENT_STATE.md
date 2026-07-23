@@ -1,5 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-07-23 밤 스냅샷(Opus 4.8 UXUI 배치 완주)**: Codex 한도 소진 → Opus 4.8 서브에이전트(Workflow) 구현으로 전환. **5장 랜딩**: 571 workspace-create(main) + 568·569·570·518(track/uxui, 각 design-review Blocker0·High0). **track/uxui→main 머지 성재 승인 대기**(5장 통합 빌드 PASS). 승인 시 순차 머지+알파 재발행. 내부 테스트 서버(mDNS `MacBook-Pro-2.local:28000`·restart=unless-stopped) 가동, workspace-create로 5WS 시나리오 개방. Codex 7/29 리셋 시 fleet 백업 병용. 이하 이전:
 > **⚠️ 2026-07-23 저녁 — Codex 사용 한도 소진(7/29 리셋까지 fleet worker spawn 불가)**: 오늘 대량 소비 결과. 영향: MOMO-571(#687 workspace-create) 미착수로 리셋 or momo-main 직접 구현 or 크레딧 구매 대기. 내부 테스트 서버는 완비(mDNS `MacBook-Pro-2.local:28000`·restart=unless-stopped·alpha.2 ATS LAN)라 **1 시드 워크스페이스 도그푸드는 즉시 가능**. 5WS 시나리오만 571 대기. ADR-0117 Accepted. 이하 이전:
 
 > **2026-07-23 스냅샷 5(내부 테스트 전환)**: 공개=게이트 충족 **동결**(성재 — 내부 목표치 통과 시 자연 배포). **알파 채널 라이브**: `dawn-kim-official.github.io/momo-alpha`(v0.5.0-alpha.1 발행, `publish_alpha_build.sh`). UXUI 배치 #684~686+#602 발급(패킷 `2026-07-23-uxui-buzz-batch.md`, UXUI 세션 몫 — 성재 전달). 내부 테스트 목표치=계획 §3(7일 무크래시·P0/P1 0·연동 3경로 완주·피드백 라운드 소진). momo-main 다음: UXUI 랜딩분 순차 main 머지, 피드백 인테이크 루프, 서버 공유 방식 결정 대기(Tailscale/단독). 이하 이전:
