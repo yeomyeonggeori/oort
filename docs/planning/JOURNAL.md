@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-24 (Fable WH-1 구현·검수·track/engine 랜딩) · 동봉 엔진 사이드카 실빌드 확증
+- WH-1(#705) Opus 4.8 xhigh 서브에이전트 구현 → 오케스트레이터 검수 → **track/engine 랜딩**(PR #708, main 승인 대기).
+- **A**: WorkEngineAdapter 프로토콜 + 3어댑터(OpenCodeHTTPAdapter HTTP+SSE·ACPEngineAdapter goose·CodexJSONRPCAdapter app-server stdio) + 승인 단일 계약(WorkApprovalRequest/Decision, fail-closed). **B**: 엔진 선택(기본 opencode)+마이그레이션 040(work_host_engine, RLS FORCE). **C**: workhost.Dockerfile(opencode MIT+goose Apache-2.0+momo-workd 레이어 분리, Codex 미동봉)+compose profile+라이선스. **D**: verify_workhost_engines.sh(28270대).
+- **검수 그린**: 검증기 8관문 PASS(실 opencode 부팅/세션/권한+goose·codex 실stdio mock+ADR-0004 비유출), WorkHostDaemon 26 tests, **실 Docker 사이드카 빌드 성공**(1.02GB, momo-workd/opencode 1.18.4/goose OK·codex ABSENT·라이선스 3종).
+- **오케스트레이터가 잡은 실결함 2건**(에이전트 최종보고는 placeholder "x"라 무시하고 직접 검증): ①Dockerfile opencode fetch가 `.zip`(404)→실제 `.tar.gz` 수정 ②LocalPTYTerminalManager Linux 첫 빌드에서 `posix_openpt` 등 Glibc 오버레이 미노출→CMomoPTY C shim(`_XOPEN_SOURCE`)으로 정공법 수리(goose ACP terminal을 Linux 사이드카에서 유지, macOS 회귀 0). **Linux 컨테이너 함정 3번째 성문화 후보**: WorkHostDaemon 첫 Linux 빌드는 PTY POSIX 심볼 갭.
+- 다음: **track/engine→main 성재 승인 대기**. 승인 시 WH-2(#706 GUI 페어링+엔진선택, UXUI)·WH-3(#707 문서) 착수.
+
 ## 2026-07-24 (Fable ADR-0114 증보1 Accepted + WH-0 스파이크 실증) · 동봉 엔진 게이트 통과, WH-1/2/3 발급
 - 성재 "승인할게" → **ADR-0114 증보1 Accepted**(opencode 우선+goose 병행 양자 동봉). 파생 WH-0~3 = MOMO-578~581 예약.
 - **WH-0 스파이크 hands-on 완료(그린)** — 문서 아닌 실측: ①opencode 1.18.4 임시설치→`opencode serve` 키없이 부팅·OpenAPI 3.1 경로 162·`POST /session` 실세션 생성→제거(흔적 0). ②Codex CLI 0.144.1의 `codex app-server generate-json-schema`로 프로토콜 41파일 확보(Initialize/ThreadStart/TurnStart/CommandExec+승인/ApplyPatchApproval, v1 165+v2 516 정의). 추가 경로 `codex mcp-server`(stdio MCP)·`remote-control`(ws).
