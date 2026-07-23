@@ -132,6 +132,15 @@ public actor ACPClient {
         process?.terminate()
     }
 
+    /// Additive accessor for WH-1's `WorkEngineAdapter.createSession`: performs the
+    /// initialize -> session/new handshake once and returns the ACP session id.
+    /// Idempotent — `prompt()` still lazily ensures the same session, so existing
+    /// behavior is unchanged.
+    @discardableResult
+    public func startSession() async throws -> String {
+        try await ensureSession()
+    }
+
     private func start() throws {
         guard process == nil else { throw ACPHostError.alreadyRunning }
         let stdinPipe = Pipe()

@@ -1,4 +1,5 @@
 import Foundation
+import MomoACPHost
 
 enum WorkTransport: String, Sendable, Equatable {
     case pty
@@ -71,6 +72,10 @@ struct WorkdConfig: Sendable {
     let allowProfileLegacyEnvironment: Bool
     let registrationTokenURL: URL?
     var registrationToken: String?
+    /// WH-1 (ADR-0114 증보1 B): the sidecar-driven engine this host launches.
+    /// Boot default is opencode; a DB-backed server setting (migration 040) wins
+    /// over env at dispatch time via `resolveEngine`.
+    let engine: WorkEngine
 
     static func load(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -119,6 +124,15 @@ struct WorkdConfig: Sendable {
         let localCommandOverrides = try localCommandOverrides(environment: environment)
         let childEnvironmentPolicy = try childEnvironmentPolicy(environment: environment)
         let allowProfileLegacyEnvironment = environment["MOMO_WORKD_ALLOW_PROFILE_LEGACY_ENV"] == "1"
+        // A set-but-invalid engine is a configuration error (fail closed); unset
+        // falls back to the WH-1 default (opencode).
+        let engine: WorkEngine
+        if let raw = nonempty(environment["MOMO_WORKD_ENGINE"]) {
+            guard let parsed = WorkEngine(rawValue: raw) else { throw WorkdFailure.configuration }
+            engine = parsed
+        } else {
+            engine = .default
+        }
 
         let directRegistrationToken = nonempty(environment["MOMO_WORKD_REGISTRATION_TOKEN"])
         let registrationTokenURL = nonempty(
@@ -145,8 +159,26 @@ struct WorkdConfig: Sendable {
             childEnvironmentPolicy: childEnvironmentPolicy,
             allowProfileLegacyEnvironment: allowProfileLegacyEnvironment,
             registrationTokenURL: registrationTokenURL,
-            registrationToken: registrationToken
+            registrationToken: registrationToken,
+            engine: engine
         )
+    }
+
+    /// Effective engine precedence (ADR-0114 증보1 B, provider_link 패턴):
+    /// DB-backed server setting > `MOMO_WORKD_ENGINE` > default (opencode).
+    /// An unparseable value at any tier is ignored in favor of the next tier so a
+    /// stale/garbage setting never blocks dispatch.
+    static func resolveEngine(
+        databaseSetting: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> WorkEngine {
+        if let raw = nonempty(databaseSetting), let engine = WorkEngine(rawValue: raw) {
+            return engine
+        }
+        if let raw = nonempty(environment["MOMO_WORKD_ENGINE"]), let engine = WorkEngine(rawValue: raw) {
+            return engine
+        }
+        return .default
     }
 
     static func commandTemplates(
