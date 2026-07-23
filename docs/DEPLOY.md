@@ -51,7 +51,7 @@ DNS 전파, ACME 인증서 발급 시간은 포함하지 않는다.
 - Docker Engine + Compose v2, `curl`, `getent`(또는 `dig`), 80/443 인바운드,
   여유 디스크 10 GiB 이상이 준비돼 있다.
 - `infra/prod/secrets.env.example`을 바탕으로 SOPS/age 또는 권한 제한 host-local env를
-  만들었다. 다섯 momo 이미지(`api`, `relay`, `worker`, `migrate`, `web`)는 각각
+  만들었다. 여섯 momo 이미지(`api`, `relay`, `worker`, `migrate`, `web`, `linkshort`)는 각각
   `ghcr.io/...@sha256:<64 hex>` 전체 digest ref여야 한다. `latest`나 tag-only 입력은
   install/upgrade가 거부한다.
 - pgBackRest stanza/check/full backup/WAL/PITR 의무와 외부 Hermes HTTPS 자격증명을
@@ -71,12 +71,29 @@ infra/prod/install.sh --env-file /run/momo/prod.env --mode prod \
   --state-dir /var/lib/momo --evidence-dir /var/lib/momo/evidence
 ```
 
-스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → `docker compose config
---quiet` → pull → PostgreSQL/Redis/Centrifugo → runtime role 프로비저닝 → one-shot `migrate` →
+스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → GitHub SLSA provenance
+attestation 검사 → `docker compose config --quiet` → pull → PostgreSQL/Redis/Centrifugo →
+runtime role 프로비저닝 → one-shot `migrate` →
 env-only `set-owner` → `web-init` →
 API/relay/worker/Caddy → `https://API_DOMAIN/health` 순으로 실행한다. 실패하면 `compose
 ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는다. 성공한 이미지 세트는
 `/var/lib/momo/deploy-state.env`에 mode 0600으로 기록한다.
+
+`MOMO_ATTESTATION_POLICY=warn`이 설치 기본값이다. 이 모드에서는 `gh`가 없으면 명시
+경고를, 공식 이미지 attestation이 아직 발행되지 않았으면 이미지 키별 경고를 남기고 계속한다. 이는
+셀프호스트 설치가 GitHub CLI/attestation 발행 시점에 종속되지 않게 하는 배포 정책이다.
+공개 릴리스 후보 검증에서는 G-H 공급망 증거가 필수이므로 인증된 `gh`와 발행 완료를
+전제로 `MOMO_ATTESTATION_POLICY=required`를 사용한다. 이 모드에서 누락·신원 불일치·
+provenance 검증 실패는 pull 전에 fail-closed된다. 검증 신원은
+`Dawn-kim-official/momo`, predicate는 SLSA provenance v1으로 고정한다.
+
+prod/e2e compose의 모든 서비스에는 `mem_limit`과
+`com.momo.janitor.managed=true` 라벨이 있다. 기본 상한은 DB·에이전트
+워크로드에 prod 기준 1~2 GiB, API 1 GiB, relay/realtime 512 MiB, one-shot helper 128~256 MiB를
+배정하며 `infra/prod/.env.example`의 `MOMO_*_MEM_LIMIT` 키로 호스트 용량에 맞춰 조정한다.
+`docker compose -p`를 쓰는 verifier까지 드리프트 없이 잡도록 janitor의 project 정본은
+Docker Compose가 자동 부여하는 `com.docker.compose.project`이고, 고정
+`com.momo.janitor.match-label` 라벨도 그 키를 명시한다.
 
 ### 설치 완료의 일부: owner 자격증명 인수 (필수 — URL 공유 전)
 
