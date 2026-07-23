@@ -8,7 +8,7 @@
 # 순회한다 → 후속 티켓이 패키지를 추가하기 전에도 이 Makefile은 안전하게 동작한다.
 
 # Swift 패키지 루트 (의존 순서: Core → server/relay/worker/notifier/service → macOS)
-SWIFT_PKGS := clients/Core services/OutboundHTTPPolicy server relay/OutboxRelay relay/PushRelay workers/AgentWorker workers/WorkHostDaemon workers/NotifierWorker services/LinkShort clients/macOS
+SWIFT_PKGS := clients/Core services/OutboundHTTPPolicy services/MomoMetrics server relay/OutboxRelay relay/PushRelay workers/AgentWorker workers/WorkHostDaemon workers/NotifierWorker services/LinkShort clients/macOS
 
 COMPOSE        := docker compose
 COMPOSE_FILE   := infra/docker-compose.yml

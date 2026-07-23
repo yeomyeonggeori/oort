@@ -19,6 +19,7 @@ COPY ${PACKAGE_PATH}/Tests ${PACKAGE_PATH}/Tests
 # dependency for every product keeps the generic Dockerfile branch-free; SwiftPM
 # only resolves it for packages that declare the local dependency.
 COPY services/OutboundHTTPPolicy /src/services/OutboundHTTPPolicy
+COPY services/MomoMetrics /src/services/MomoMetrics
 
 WORKDIR /src/${PACKAGE_PATH}
 RUN swift build -c release --product "${PRODUCT}" --static-swift-stdlib

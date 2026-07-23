@@ -91,6 +91,10 @@ grep -Fq 'reverse_proxy centrifugo:8000' "$CADDYFILE" || fail "Caddyfile must pr
 grep -Fq 'Strict-Transport-Security' "$CADDYFILE" || fail "Caddyfile missing HSTS header"
 # MOMO-300: rate-limit-excluded subscribe proxy must be edge-denied (403).
 grep -Fq 'handle /v1/centrifugo/*' "$CADDYFILE" || fail "Caddyfile must deny /v1/centrifugo/* at the edge (MOMO-300)"
+metrics_deny_handles="$(grep -Fc 'handle /metrics' "$CADDYFILE")"
+metrics_deny_404s="$(grep -A1 'handle /metrics' "$CADDYFILE" | grep -Ec 'respond .*404' || true)"
+[ "$metrics_deny_handles" -ge 2 ] && [ "$metrics_deny_404s" -eq "$metrics_deny_handles" ] \
+  || fail "every public Caddy site must deny /metrics with 404"
 # MOMO-399: MOMO-390 added a second edge site ({$APP_DOMAIN}) with its own
 # /v1/centrifugo/* handle. Require EVERY such handle to respond 403 so one
 # site block losing its deny cannot hide behind another block's match.

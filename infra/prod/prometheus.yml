@@ -1,0 +1,20 @@
+# ADR-0121 D7-D10: opt-in, compose-private scrape targets only.
+# No target or label contains a workspace/member/run identifier or tenant content.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: momo-api
+    static_configs:
+      - targets: ["api:9090"]
+  - job_name: momo-outbox-relay
+    static_configs:
+      - targets: ["relay:9091"]
+  - job_name: momo-agent-worker
+    static_configs:
+      - targets: ["worker:9092"]
+
+# PushRelay is a Dawn-operated deployment boundary, not a service in the
+# self-host compose stack. Its process exposes the same private-only endpoint
+# on MOMO_METRICS_PORT (default 9093) for that deployment's Prometheus.

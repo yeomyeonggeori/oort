@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import Logging
+import MomoMetrics
 import PostgresNIO
 import ServiceLifecycle
 
@@ -24,6 +25,8 @@ struct AgentWorkerMain {
                 .flatMap { Logger.Level(rawValue: $0) } ?? .info
 
         let config = Config.load()
+        let metrics = await MetricsRegistry.agentWorker()
+        let metricsEndpoint = MetricsEndpointConfig.load(defaultPort: 9092)
         try config.validateAgentProviderForBoot()
         logger.info("starting AgentWorker", metadata: [
             "pgHost": .string(config.pgHost),
@@ -77,7 +80,7 @@ struct AgentWorkerMain {
         let worker = WorkerService(
             pg: pg, hermes: hermes, centrifugo: centrifugo,
             workControls: workControls, guards: guards, cost: cost,
-            config: config, logger: logger)
+            metrics: metrics, config: config, logger: logger)
         let memoryExtractor: any MemoryExtracting = config.agentProviderMode == .externalHermes
             ? HermesMemoryExtractor(hermes: hermes)
             : MockMemoryExtractor()
@@ -114,6 +117,13 @@ struct AgentWorkerMain {
         var services: [ServiceGroupConfiguration.ServiceConfiguration] = [
             .init(service: pg),
             .init(service: worker),
+            .init(service: MetricsHTTPServer.build(
+                registry: metrics,
+                host: metricsEndpoint.host,
+                port: metricsEndpoint.port,
+                serviceName: "AgentWorker",
+                logger: logger
+            )),
             .init(service: HTTPClientShutdownService(httpClient: httpClient)),
         ]
         if config.memoryExtractionEnabled {
