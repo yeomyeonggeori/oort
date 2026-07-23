@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-24 (Fable 코드 에이전트 엔진 조사 — opencode/goose/t3code) · ADR-0114 증보1 양자 동봉 재기안 + t3code 분석
+- 성재 발제("opencode·goose·t3code 다뤄봐, 셋 다 좋아 보임"). 웹 실측으로 라이선스·정체 확정: **goose(Apache-2.0)·opencode(MIT)=독립 에이전트=동봉 후보**, **t3code(MIT)=에이전트 감싸는 GUI 오케스트레이터=엔진 아님(momo work console 경쟁자)**. Codex/Claude Code=독점=로컬 연결만.
+- **ADR-0114 증보1 재기안(여전히 Proposed)**: goose 단독 → **opencode 우선+goose 병행** 양자 동봉안. 엔진 선택 매트릭스 추가, **WH-0 스파이크 신설**(opencode 임베드/헤드리스 API 표면 + Codex app-server JSON-RPC(stdio) 연결경로 검증 — t3code가 실증한 경로. D1/D4 확정 게이트, 실패 시 goose 단독 후퇴).
+- **t3code 경쟁 분석 신규**(`2026-07-24-t3code-competitive-analysis.md`, buzz 분석 형식): t3code=work console에서 메신저·에이전트멤버·SoT 뺀 1인 로컬 슬라이스. momo 해자=팀+에이전트=멤버·PG SoT·네이티브 Swift·엔진 비종속. 가져올 것 Top4=Codex JSON-RPC 경로·태스크스레드 GUI·worktree 1급 UX·Full/Supervised 이중런타임. 포지셔닝 경보: "코드 에이전트 GUI" 공간 붐빔 → momo는 "메신저, work console은 표면" 위계 고정.
+- 대기: 성재 ADR-0114 증보1 승인(양자 동봉안) → WH-0 스파이크 착수. 백로그에 t3code 파생 액션 3건.
+
 ## 2026-07-24 (Fable provider GUI 실서버 완결 — 577 랜딩·라이브 검증·0.0.2 발행)
 - **MOMO-577 랜딩**(#703→track/engine→#704→main, 10e0493c): 실서버 왕복 3버그 수리 — PUT 500(PostgresNIO `Array<UInt8>`가 bytea 아닌 `char[]`로 인코딩→`ByteBuffer(bytes:)` 바인딩·decode `Data`, worker reader 동일 수정) + DELETE 500(audit `jsonb_build_object` nil `mode`/`endpoint` 타입 미추론→`::text` 캐스트) + Linux `.build` 심볼릭링크 함정(로컬 macOS build 잔재를 api 컨테이너 `cp -Rp`가 못 읽음→verifier가 부팅 전 제거).
 - **verifier 실왕복 자동화**: `PROVIDER_LINK_RUN_DOCKER=1`이 실 PG18+api 부팅→owner PUT→storage bytea 증명(version byte·octet_length·평문 부재)→GET→RLS default-deny/GUC unlock→DELETE→비관리자 403 8관문 자동 단정. 8/8 PASS(재발 차단). server 15+worker 72 tests green.
