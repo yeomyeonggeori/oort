@@ -50,6 +50,10 @@ struct WorkerService: Service {
     let config: Config
     let logger: Logger
     let resumeExecutor = ToolResumeExecutor()
+    // MOMO-573 / ADR-0004 증보 1 P-1b: short-TTL cache in front of the per-job
+    // provider_link read+decrypt. Default value ⇒ no change to the memberwise init
+    // callers (Main.swift).
+    let providerLinkCache = ProviderLinkCache()
 
     private static let decoder = JSONDecoder()
 
@@ -348,7 +352,14 @@ struct WorkerService: Service {
             includedCount: assembled.memoryIncludedCount,
             injected: assembled.memoryInjected
         )
-        let stream = hermes.invoke(
+        // MOMO-573 / ADR-0004 증보 1 P-1b: resolve the transport for THIS turn from
+        // the operator's provider_link (DB) when present+usable, else the boot-time
+        // env transport. Both the mention and work turn paths converge here (the
+        // only model-invocation site; resume_approval never reaches this point), so
+        // this single resolution covers both. The decrypted bearer stays local to
+        // the transport and is never logged or written to the payload/ledger.
+        let effectiveHermes = await resolveTransport()
+        let stream = effectiveHermes.invoke(
             model: p.model,
             messages: messages,
             tools: WorkToolDispatcher.mergedToolDefinitions(into: p.tools),
@@ -912,6 +923,41 @@ struct WorkerService: Service {
             "version": seq,
             "idempotency_key": "\(centChannel):\(seq)",
         ])
+    }
+
+    // MARK: - Job-time provider resolution (MOMO-573 / ADR-0004 증보 1 P-1b)
+
+    /// Resolve the `HermesTransport` for the current turn. Returns a transport
+    /// pointed at the operator's `provider_link` (DB base_url + decrypted bearer)
+    /// when a present, usable row exists; otherwise the boot-time env transport.
+    ///
+    /// The DB read + AES-GCM decrypt are cached with a short TTL and skipped
+    /// entirely when the row is unchanged (see `ProviderLinkCache`), so this is
+    /// cheap on the hot path while still reflecting a GUI change from the next job
+    /// after the TTL window. Fails safe to env on any missing key / unreadable /
+    /// undecryptable / unusable row — never fails the turn blank.
+    private func resolveTransport() async -> HermesTransport {
+        guard let masterKey = config.providerLinkMasterKey else {
+            return hermes   // no key configured ⇒ env transport (backward compatible)
+        }
+        let pg = self.pg
+        let logger = self.logger
+        let link = await providerLinkCache.resolve(
+            masterKey: masterKey,
+            ttl: config.providerLinkCacheTTL,
+            logger: logger,
+            read: { try await WorkerProviderLinkStore.read(pg: pg, logger: logger) }
+        )
+        guard let override = ProviderLinkResolution.transportOverride(link: link) else {
+            return hermes
+        }
+        // Reuse the shared HTTPClient; only the endpoint + bearer differ.
+        return HermesTransport(
+            httpClient: hermes.httpClient,
+            baseURL: override.baseURL,
+            apiKey: override.bearer,
+            logger: logger
+        )
     }
 
     // MARK: - approval resume executor (MOMO-178)

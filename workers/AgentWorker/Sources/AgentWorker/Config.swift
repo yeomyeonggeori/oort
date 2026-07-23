@@ -32,6 +32,16 @@ struct Config: Sendable {
     var agentModel: String
     var allowLocalLoopbackExternalHermes: Bool
 
+    // ---- provider_link job-time override (MOMO-573 / ADR-0004 증보 1 P-1b) ----
+    // Master key for AES-GCM-decrypting the operator's provider_link bearer at job
+    // time. Same value the server (`momo_app`) sealed it with. Optional: when unset
+    // the worker cannot decrypt and simply keeps the env transport (backward
+    // compatible with deployments that predate the provider_link GUI).
+    var providerLinkMasterKey: String?
+    // Short TTL in front of the per-job read+decrypt; a GUI change is picked up on
+    // the first job after this window (see ProviderLinkCache).
+    var providerLinkCacheTTL: Duration = .milliseconds(2_000)
+
     // ---- momo control-plane (ADR-0114 / MOMO-486) ----
     // Raw per-agent bearer remains process-local. The server stores only its
     // hash; it is never projected into agent_job payloads or Postgres rows.
@@ -103,6 +113,11 @@ struct Config: Sendable {
             agentModel: env("AGENT_MODEL", "hermes-agent"),
             allowLocalLoopbackExternalHermes: AgentProviderValidation.boolFlag(
                 ProcessInfo.processInfo.environment["AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK"]
+            ),
+            providerLinkMasterKey: ProcessInfo.processInfo.environment["PROVIDER_LINK_MASTER_KEY"]
+                .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 },
+            providerLinkCacheTTL: .milliseconds(
+                max(envInt("PROVIDER_LINK_CACHE_TTL_MS", 2_000), 0)
             ),
             momoAPIURL: env("MOMO_API_URL", "http://localhost:8080"),
             momoAgentToken: ProcessInfo.processInfo.environment["MOMO_AGENT_TOKEN"]

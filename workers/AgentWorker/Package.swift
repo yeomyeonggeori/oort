@@ -36,6 +36,10 @@ let package = Package(
         .package(path: "../../services/OutboundHTTPPolicy"),
         .package(path: "../../services/MomoMetrics"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
+        // MOMO-573 / ADR-0004 증보 1 P-1b: AES-GCM decrypt of the provider_link
+        // bearer at job time. Same tag family the other workers pin
+        // (WorkHostDaemon / NotifierWorker).
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
@@ -49,6 +53,7 @@ let package = Package(
                 .product(name: "MomoMetrics", package: "MomoMetrics"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOFoundationCompat", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
@@ -63,6 +68,7 @@ let package = Package(
             dependencies: [
                 "AgentWorker",
                 .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
+                .product(name: "Logging", package: "swift-log"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
