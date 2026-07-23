@@ -723,6 +723,17 @@ struct MomoMemberProfilePopoverView: View {
                     LabeledContent(copy.status) {
                         Text(copy.memberStatusTitle(member.status))
                     }
+                    if member.isAgent, let ownerPresentation = viewModel.agentOwner(for: member) {
+                        // This profile card is itself a transient popover, so the
+                        // owner detail expands inline instead of nesting a second
+                        // popover (which macOS cannot present reliably).
+                        MomoAgentManagedByView(
+                            viewModel: viewModel,
+                            presentation: ownerPresentation,
+                            copy: copy,
+                            detailStyle: .inlineDisclosure
+                        )
+                    }
                     if member.isAgent, !member.normalizedCapabilities.isEmpty {
                         MomoAgentBadgeGroup(
                             capabilities: member.normalizedCapabilities,
@@ -825,7 +836,7 @@ struct MomoMemberProfilePopoverView: View {
 
 }
 
-private struct MomoMemberAvatarView: View {
+struct MomoMemberAvatarView: View {
     @ObservedObject var viewModel: ChatViewModel
     let member: Member
     let size: CGFloat

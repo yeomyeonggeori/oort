@@ -265,6 +265,15 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var realtimeStatuses: [ChannelID: RealtimeConnectionStatus] = [:]
     @Published public private(set) var agentRuntimeStatus: AgentRuntimeStatus = .localMock
     @Published public private(set) var agentWorkingStates: [MemberID: AgentWorkingState] = [:]
+    /// First moment each run was observed working, so the agentWorkingSignal module
+    /// (MOMO-568) can show elapsed time for runs whose `agent.status` carries no
+    /// timestamp (mention fallback). Durable Work runs prefer their own clock.
+    @Published private(set) var agentWorkingSince: [RunID: Date] = [:]
+    /// Last moment fresh activity (status/partial) was observed for each run. Feeds
+    /// the agentWorkingSignal idle cutoff (MOMO-568) so a signal self-expires if a
+    /// terminal realtime event is ever lost, instead of the elapsed clock running
+    /// away to hundreds of hours.
+    @Published private(set) var agentWorkingActivityAt: [RunID: Date] = [:]
     @Published public private(set) var typingStates: [ChannelID: [MemberID: TypingActivity]] = [:]
     @Published public var composerDraft: String = ""
     @Published public private(set) var mentionNotice: String?
@@ -631,6 +640,8 @@ public final class ChatViewModel: ObservableObject {
         realtimeStatuses = [:]
         agentRuntimeStatus = .localMock
         agentWorkingStates = [:]
+        agentWorkingSince = [:]
+        agentWorkingActivityAt = [:]
         agentCredentialsByMember = [:]
         agentCredentialLoadingMembers = []
         agentCredentialRefreshes.values.forEach { $0.task.cancel() }
@@ -1195,6 +1206,22 @@ public final class ChatViewModel: ObservableObject {
     func agentOrigin(for member: Member) -> MomoAgentOrigin? {
         guard member.isAgent else { return nil }
         return usesServerRosterSourceOfTruth ? agentOriginsByMemberID[member.id] : .local
+    }
+
+    /// Resolves "managed by {owner}" presentation from the roster's existing
+    /// owner read-through and origin projection. Returns `nil` when there is
+    /// nothing to render (a human, or an agent with no owner and no external
+    /// runtime).
+    func agentOwner(for member: Member) -> MomoAgentOwnerPresentation? {
+        guard member.isAgent else { return nil }
+        let ownerID = usesServerRosterSourceOfTruth ? agentOwnerIDsByMemberID[member.id] : nil
+        let ownerMember = ownerID.flatMap(self.member)
+        return MomoAgentOwnerPresentation.resolve(
+            agent: member,
+            ownerID: ownerID,
+            ownerMember: ownerMember,
+            origin: agentOrigin(for: member)
+        )
     }
 
     public func resetAgentOnboarding() {
@@ -2339,6 +2366,8 @@ public final class ChatViewModel: ObservableObject {
         do {
             try await agentTransport.cancelRun(id)
             partials[id] = nil
+            agentWorkingSince[id] = nil
+            agentWorkingActivityAt[id] = nil
             if var run = workRun(id) {
                 run.status = .cancelled
                 run.updatedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
@@ -3605,6 +3634,7 @@ public final class ChatViewModel: ObservableObject {
         case .agentStatus(let status):
             guard status.channelId == channel, activeTimelineChannelId == channel else { return }
             agentStatuses[status.runId] = status
+            trackWorkingClock(from: status)
             updateWorkRunStatus(status)
             mergeCostSnapshot(from: status)
             reconcileAgentWorking(from: status)
@@ -3763,10 +3793,13 @@ public final class ChatViewModel: ObservableObject {
         guard !hasFinalMessage(for: partial) else {
             partials[partial.runId] = nil
             partialActivitySeq[partial.runId] = nil
+            agentWorkingActivityAt[partial.runId] = nil
             return
         }
         partialActivityCounter += 1
         partialActivitySeq[partial.runId] = partialActivityCounter
+        // Streaming deltas keep the working signal fresh against the idle cutoff.
+        agentWorkingActivityAt[partial.runId] = Date()
         if var existing = partials[partial.runId] {
             if let delta = partial.textDelta {
                 existing.textDelta = (existing.textDelta ?? "") + delta
@@ -3800,6 +3833,8 @@ public final class ChatViewModel: ObservableObject {
         guard hasFinal else { return }
         for run in runs {
             partials[run] = nil
+            agentWorkingSince[run] = nil
+            agentWorkingActivityAt[run] = nil
             if var status = agentStatuses[run] {
                 status.phase = .done
                 status.runStatus = .succeeded
@@ -3813,6 +3848,8 @@ public final class ChatViewModel: ObservableObject {
         guard let runs = pendingFallbackMentionRuns.removeValue(forKey: channel) else { return }
         for run in runs {
             partials[run] = nil
+            agentWorkingSince[run] = nil
+            agentWorkingActivityAt[run] = nil
             agentStatuses[run] = nil
         }
     }
@@ -3834,6 +3871,51 @@ public final class ChatViewModel: ObservableObject {
         if agentWorkingStates[member]?.channelId == channel {
             agentWorkingStates[member] = nil
         }
+    }
+
+    /// Records/clears the working start clock for the agentWorkingSignal module.
+    /// A run that is live gets a first-seen stamp (once); a terminal/done/error run
+    /// drops its stamp so the derived signal disappears from every surface.
+    private func trackWorkingClock(from status: AgentStatus) {
+        if status.runStatus.isTerminal || status.phase == .done || status.phase == .error {
+            agentWorkingSince[status.runId] = nil
+            agentWorkingActivityAt[status.runId] = nil
+        } else {
+            if agentWorkingSince[status.runId] == nil {
+                agentWorkingSince[status.runId] = Date()
+            }
+            agentWorkingActivityAt[status.runId] = Date()
+        }
+    }
+
+    /// Agent members currently typing in a channel (the working-signal fallback).
+    private func typingAgentIDs(in channel: ChannelID) -> Set<MemberID> {
+        guard let activities = typingStates[channel]?.values else { return [] }
+        return Set(
+            activities
+                .map(\.memberId)
+                .filter { member($0)?.isAgent == true }
+        )
+    }
+
+    /// The single agentWorkingSignal source (MOMO-568) every surface consumes.
+    public func agentWorkingSignals(in channel: ChannelID) -> [AgentWorkingSignal] {
+        AgentWorkingSignalResolver.resolve(
+            channel: channel,
+            members: members,
+            statuses: Array(agentStatuses.values),
+            partials: partials,
+            workRuns: workRunsByChannel[channel] ?? [],
+            typingAgentIDs: typingAgentIDs(in: channel),
+            startTimes: agentWorkingSince,
+            lastActivityTimes: agentWorkingActivityAt,
+            now: Date()
+        )
+    }
+
+    public var selectedChannelWorkingSignals: [AgentWorkingSignal] {
+        guard let selectedChannelId else { return [] }
+        return agentWorkingSignals(in: selectedChannelId)
     }
 
     private func reconcileAgentWorking(from status: AgentStatus) {
@@ -4262,6 +4344,8 @@ public final class ChatViewModel: ObservableObject {
     private func showFallbackMentionProgress(agent: Member, channel: ChannelID) {
         let run = RunID()
         pendingFallbackMentionRuns[channel, default: []].insert(run)
+        agentWorkingSince[run] = Date()
+        agentWorkingActivityAt[run] = Date()
         agentStatuses[run] = AgentStatus(
             runId: run,
             agentMemberId: agent.id,

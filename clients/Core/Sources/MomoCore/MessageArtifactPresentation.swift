@@ -25,14 +25,37 @@ public enum MessageArtifactPresentation: Sendable, Hashable {
 public struct UnifiedDiffPresentation: Sendable, Hashable {
     public let title: String
     public let files: [UnifiedDiffFile]
+    /// Additions and deletions count the full source, never only the rendered
+    /// slice, so the summary stays honest even when the body is truncated.
     public let additions: Int
     public let deletions: Int
+    /// Fence-stripped unified-diff source, kept for the raw-payload disclosure.
+    public let rawPatch: String
+    /// Total diff lines in the source before any display truncation.
+    public let totalLineCount: Int
+    /// Diff lines actually kept in `files` for rendering.
+    public let displayedLineCount: Int
 
-    public init(title: String, files: [UnifiedDiffFile], additions: Int, deletions: Int) {
+    /// True when the rendered body holds fewer lines than the source, so the
+    /// client can show an honest "N of M lines" banner instead of hiding the gap.
+    public var isTruncated: Bool { displayedLineCount < totalLineCount }
+
+    public init(
+        title: String,
+        files: [UnifiedDiffFile],
+        additions: Int,
+        deletions: Int,
+        rawPatch: String,
+        totalLineCount: Int,
+        displayedLineCount: Int
+    ) {
         self.title = title
         self.files = files
         self.additions = additions
         self.deletions = deletions
+        self.rawPatch = rawPatch
+        self.totalLineCount = totalLineCount
+        self.displayedLineCount = displayedLineCount
     }
 }
 
@@ -100,8 +123,9 @@ public struct ArtifactLinkPresentation: Sendable, Hashable {
 
 private enum MessageArtifactParser {
     private static let maximumSourceBytes = 200_000
-    private static let maximumLineCount = 2_000
-    private static let maximumFileCount = 100
+    /// Diff lines kept for rendering. Anything past this is dropped from the body
+    /// but still counted so the client can surface an honest truncation banner.
+    private static let maximumRenderedLines = 500
 
     private struct FileAccumulator {
         var oldPath: String?
@@ -178,7 +202,6 @@ private enum MessageArtifactParser {
         guard source.utf8.count <= maximumSourceBytes else { return nil }
 
         let rawLines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        guard rawLines.count <= maximumLineCount else { return nil }
 
         var files: [UnifiedDiffFile] = []
         var current: FileAccumulator?
@@ -186,7 +209,7 @@ private enum MessageArtifactParser {
         var sawHunk = false
 
         func appendCurrent() {
-            guard let value = current, !value.lines.isEmpty, files.count < maximumFileCount else { return }
+            guard let value = current, !value.lines.isEmpty else { return }
             files.append(
                 UnifiedDiffFile(
                     id: files.count,
@@ -201,7 +224,6 @@ private enum MessageArtifactParser {
         for (lineIndex, line) in rawLines.enumerated() {
             if line.hasPrefix("diff --git ") {
                 appendCurrent()
-                guard files.count < maximumFileCount else { return nil }
                 let paths = diffGitPaths(line)
                 current = FileAccumulator(oldPath: paths?.0, newPath: paths?.1)
                 sawDiffMarker = true
@@ -245,12 +267,50 @@ private enum MessageArtifactParser {
         appendCurrent()
         guard !files.isEmpty, sawHunk || sawDiffMarker else { return nil }
 
+        let totalLineCount = files.reduce(0) { $0 + $1.lines.count }
+        let (renderedFiles, displayedLineCount) = truncateForDisplay(files, limit: maximumRenderedLines)
+
         return UnifiedDiffPresentation(
             title: bounded(title, maximum: 200) ?? "Code changes",
-            files: files,
+            files: renderedFiles,
             additions: files.reduce(0) { $0 + $1.additions },
-            deletions: files.reduce(0) { $0 + $1.deletions }
+            deletions: files.reduce(0) { $0 + $1.deletions },
+            rawPatch: source,
+            totalLineCount: totalLineCount,
+            displayedLineCount: displayedLineCount
         )
+    }
+
+    /// Keeps the first `limit` diff lines in source order, dropping the overflow
+    /// while preserving each surviving file's full addition/deletion counts.
+    private static func truncateForDisplay(
+        _ files: [UnifiedDiffFile],
+        limit: Int
+    ) -> (files: [UnifiedDiffFile], displayedLineCount: Int) {
+        let total = files.reduce(0) { $0 + $1.lines.count }
+        guard total > limit else { return (files, total) }
+
+        var remaining = limit
+        var rendered: [UnifiedDiffFile] = []
+        for file in files {
+            if remaining <= 0 { break }
+            if file.lines.count <= remaining {
+                rendered.append(file)
+                remaining -= file.lines.count
+            } else {
+                rendered.append(
+                    UnifiedDiffFile(
+                        id: file.id,
+                        path: file.path,
+                        additions: file.additions,
+                        deletions: file.deletions,
+                        lines: Array(file.lines.prefix(remaining))
+                    )
+                )
+                remaining = 0
+            }
+        }
+        return (rendered, rendered.reduce(0) { $0 + $1.lines.count })
     }
 
     private static func looksLikeUnifiedDiff(_ rawSource: String) -> Bool {

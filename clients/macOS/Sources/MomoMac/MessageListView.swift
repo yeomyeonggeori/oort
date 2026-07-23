@@ -63,6 +63,7 @@ public struct MessageListView: View {
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private let onOpenChannelSettings: ((ChannelID) -> Void)?
     private let onInviteToChannel: ((ChannelID) -> Void)?
+    private let onCreateAgent: ((ChannelID) -> Void)?
     private let focusComposerRequest: UInt64
     private let onOpenPluginMarketplace: () -> Void
     private let serverIdentity: String?
@@ -118,6 +119,7 @@ public struct MessageListView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
         onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
         onInviteToChannel: ((ChannelID) -> Void)? = nil,
+        onCreateAgent: ((ChannelID) -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
         sidebarToggle: (() -> Void)? = nil,
@@ -132,6 +134,7 @@ public struct MessageListView: View {
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.onOpenChannelSettings = onOpenChannelSettings
         self.onInviteToChannel = onInviteToChannel
+        self.onCreateAgent = onCreateAgent
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
         self.sidebarToggle = sidebarToggle
@@ -152,6 +155,7 @@ public struct MessageListView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
         onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
         onInviteToChannel: ((ChannelID) -> Void)? = nil,
+        onCreateAgent: ((ChannelID) -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
         sidebarToggle: (() -> Void)? = nil,
@@ -169,6 +173,7 @@ public struct MessageListView: View {
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.onOpenChannelSettings = onOpenChannelSettings
         self.onInviteToChannel = onInviteToChannel
+        self.onCreateAgent = onCreateAgent
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
         self.sidebarToggle = sidebarToggle
@@ -436,6 +441,20 @@ public struct MessageListView: View {
                 .momoSurface(.panel, cornerRadius: 0)
             }
         }
+    }
+
+    private var emptyChannelActions: MomoEmptyChannelOnboardingPolicy.Actions {
+        let canManageChannelMembers = viewModel.selectedChannel.map {
+            MomoChannelActionPolicy.canManageMembers(
+                in: $0,
+                canManageWorkspace: viewModel.canManageWorkspace
+            )
+        } ?? false
+        return MomoEmptyChannelOnboardingPolicy.actions(
+            canManageChannelMembers: canManageChannelMembers,
+            invitePeopleAvailable: onInviteToChannel != nil,
+            createAgentAvailable: onCreateAgent != nil
+        )
     }
 
     private var channelMenuLeadingInset: CGFloat {
@@ -792,9 +811,19 @@ public struct MessageListView: View {
                             if viewModel.isSelectedChannelHistoryLoading {
                                 TimelineLoadingState(copy: copy)
                             } else {
-                                TimelineEmptyState(copy: copy) {
-                                    isComposerFocused = true
-                                }
+                                TimelineEmptyState(
+                                    copy: copy,
+                                    actions: emptyChannelActions,
+                                    focusComposer: { isComposerFocused = true },
+                                    invitePeople: {
+                                        guard let id = viewModel.selectedChannelId else { return }
+                                        onInviteToChannel?(id)
+                                    },
+                                    createAgent: {
+                                        guard let id = viewModel.selectedChannelId else { return }
+                                        onCreateAgent?(id)
+                                    }
+                                )
                             }
                         }
 
@@ -858,10 +887,14 @@ public struct MessageListView: View {
                             .padding(.top, 8)
                         }
 
-                        ForEach(viewModel.visibleWorkingAgents) { agent in
-                            AgentWorkingTimelineRow(agent: agent, copy: copy)
-                                .padding(.top, 8)
-                                .id("working-\(agent.id.description)")
+                        ForEach(turnLivenessAgents) { agent in
+                            AgentWorkingTimelineRow(
+                                agent: agent,
+                                signal: timelineWorkingSignal(for: agent.id),
+                                copy: copy
+                            )
+                            .padding(.top, 8)
+                            .id("working-\(agent.id.description)")
                         }
 
                         timelineBottomSentinel
@@ -1127,6 +1160,11 @@ public struct MessageListView: View {
             }
 
             composerSurface(candidates: candidates, copy: copy)
+
+            AgentWorkingComposerBar(
+                signals: composerFooterSignals,
+                copy: copy
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -1691,6 +1729,50 @@ public struct MessageListView: View {
         }
         return viewModel.member(agent)
     }
+
+    private func timelineWorkingSignal(for agentID: MemberID) -> AgentWorkingSignal? {
+        viewModel.selectedChannelWorkingSignals.first { $0.agentId == agentID }
+    }
+
+    /// Agents whose working state is already represented in the loaded timeline:
+    /// either a live partial bubble (`livePartials`) or a turn-liveness row
+    /// (`visibleWorkingAgents`). This is pure derived data (partials, work runs,
+    /// members), independent of scroll position, so the footer dedup below stays
+    /// deterministic and snapshot-stable regardless of viewport/geometry.
+    private var timelineWorkingAgentIDs: Set<MemberID> {
+        var ids = Set(viewModel.visibleWorkingAgents.map(\.id))
+        ids.formUnion(livePartialAgentIDs)
+        return ids
+    }
+
+    /// Agents already represented by a live partial bubble on the timeline.
+    private var livePartialAgentIDs: Set<MemberID> {
+        var ids = Set<MemberID>()
+        for partial in livePartials {
+            if let agentID = viewModel.agentStatuses[partial.runId]?.agentMemberId {
+                ids.insert(agentID)
+            }
+        }
+        return ids
+    }
+
+    /// Turn-liveness rows exclude any agent whose partial bubble is already on
+    /// screen, so the "{agent} 작업 중" line never stacks under its own partial
+    /// (even in the pre-first-token thinking gap). The footer uses the same set.
+    private var turnLivenessAgents: [Member] {
+        let onPartial = livePartialAgentIDs
+        return viewModel.visibleWorkingAgents.filter { !onPartial.contains($0.id) }
+    }
+
+    /// Signals for the composer footer. Deterministic data rule (no scroll/geometry
+    /// heuristic): an agent whose working signal already appears in the loaded
+    /// timeline (as a partial bubble or a turn-liveness row) is suppressed, so the
+    /// footer never reprints a headline the timeline already shows. The footer
+    /// carries the headline only for agents that have no on-timeline representation.
+    private var composerFooterSignals: [AgentWorkingSignal] {
+        let onTimeline = timelineWorkingAgentIDs
+        return viewModel.selectedChannelWorkingSignals.filter { !onTimeline.contains($0.agentId) }
+    }
 }
 
 private enum TimelineCoordinateSpace {
@@ -1727,19 +1809,69 @@ struct TimelineDayDivider: View {
     }
 }
 
-private struct TimelineEmptyState: View {
+// The empty-channel onboarding surface. Agent creation sits at equal footing with
+// people invitation (MOMO-570); a non-admin sees the same surface with the request
+// path instead of hidden controls.
+struct TimelineEmptyState: View {
     let copy: MomoWorkspaceCopy
+    let actions: MomoEmptyChannelOnboardingPolicy.Actions
     let focusComposer: () -> Void
+    let invitePeople: () -> Void
+    let createAgent: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text(copy.timelineEmptyTitle)
+        VStack(spacing: 16) {
+            // Hierarchy comes from weight and secondary color, not size inflation:
+            // the two co-equal actions below carry the intent, so the title stays
+            // at body weight and no subtitle restates the button labels.
+            Text(copy.emptyChannelTitle)
                 .font(.body.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if actions.showsManagementActions {
+                // The invite/create pair reflows to a vertical stack once the
+                // timeline column is narrowed by the sidebar and inspector, so
+                // neither large button clips at minimum window width (MOMO-570).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { managementActions }
+                    VStack(spacing: 12) { managementActions }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            } else {
+                Label(copy.emptyChannelRequestGuidance, systemImage: "person.2")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Button(copy.timelineEmptyAction, action: focusComposer)
                 .buttonStyle(.link)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: MomoTheme.Onboarding.emptyChannelContentMaximumWidth)
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 32)
+    }
+
+    // Shared by the horizontal and vertical layouts so the reflow keeps identical
+    // actions and a single keyboard shortcut.
+    @ViewBuilder
+    private var managementActions: some View {
+        if actions.canInvitePeople {
+            Button(action: invitePeople) {
+                Label(copy.emptyChannelAddPeople, systemImage: "person.badge.plus")
+            }
+        }
+        if actions.canCreateAgent {
+            // Agents are first-class members, so "Add agent" is a person-badge-plus
+            // sibling of "Add people" (filled to distinguish the two), never an
+            // AI-magic glyph like sparkles.
+            Button(action: createAgent) {
+                Label(copy.emptyChannelAddAgent, systemImage: "person.fill.badge.plus")
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+        }
     }
 }
 
@@ -1776,20 +1908,34 @@ private struct MomoGuideStepPill: View {
     }
 }
 
+// Surface 3 (MOMO-568): the turn-liveness row. It consumes agentWorkingSignal and
+// uses the static accent liveness mark plus a ticking elapsed clock, so it never
+// reads as the animated three-dot "typing" affordance a human sender would get.
+// It deliberately shows only "{agent} is working" + elapsed clock + the generic
+// reassurance subtitle, never the signal's headline: the headline is already owned
+// by the live partial bubble (and, when no bubble is on screen, the composer bar),
+// so echoing it here would print the same sentence twice on one screen.
 private struct AgentWorkingTimelineRow: View {
     var agent: Member
+    var signal: AgentWorkingSignal?
     var copy: MomoWorkspaceCopy
 
     var body: some View {
         HStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
+            AgentTurnLivenessMark(accessibilityText: copy.agentWorkingTitle(agent.displayName))
             VStack(alignment: .leading, spacing: 4) {
-                Text(copy.agentWorkingTitle(agent.displayName))
-                    .font(.callout.weight(.semibold))
+                HStack(spacing: 8) {
+                    Text(copy.agentWorkingTitle(agent.displayName))
+                        .font(.callout.weight(.semibold))
+                    if let startedAt = signal?.startedAt {
+                        AgentWorkingElapsedLabel(startedAt: startedAt, copy: copy)
+                    }
+                }
                 Text(copy.agentWorkingSubtitle)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }

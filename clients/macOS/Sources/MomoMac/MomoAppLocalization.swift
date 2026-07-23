@@ -185,13 +185,6 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var timelineEmptyTitle: String {
-        switch language {
-        case .korean: return "첫 메시지를 보내보세요"
-        case .english: return "Send the first message"
-        }
-    }
-
     var timelineEmptyAction: String {
         switch language {
         case .korean: return "메시지 작성하기"
@@ -203,6 +196,36 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "메시지 기록 불러오는 중"
         case .english: return "Loading message history"
+        }
+    }
+
+    var emptyChannelTitle: String {
+        switch language {
+        case .korean: return "이 채널을 함께 시작하세요"
+        case .english: return "Start this channel together"
+        }
+    }
+
+    var emptyChannelAddPeople: String {
+        switch language {
+        // Peer to "에이전트 추가": both actions use the same verb so the co-equal
+        // framing survives translation (English is Add/Add).
+        case .korean: return "사람 추가"
+        case .english: return "Add people"
+        }
+    }
+
+    var emptyChannelAddAgent: String {
+        switch language {
+        case .korean: return "에이전트 추가"
+        case .english: return "Add agent"
+        }
+    }
+
+    var emptyChannelRequestGuidance: String {
+        switch language {
+        case .korean: return "사람이나 에이전트를 추가하려면 워크스페이스 관리자에게 요청하세요."
+        case .english: return "Ask a workspace admin to add people or an agent to this channel."
         }
     }
 
@@ -2143,6 +2166,48 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "닫기"
         case .english: return "Dismiss"
+        }
+    }
+
+    // MARK: - Diff artifact card (ADR-0126 D2 / MOMO-518)
+
+    var diffExpandAction: String {
+        switch language {
+        case .korean: return "크게 보기"
+        case .english: return "Expand diff"
+        }
+    }
+
+    func diffExpandAccessibility(title: String) -> String {
+        switch language {
+        case .korean: return "\(title) 변경 내용 크게 보기"
+        case .english: return "Expand \(title) in a larger view"
+        }
+    }
+
+    var diffRawLabel: String {
+        switch language {
+        case .korean: return "원본 diff 보기"
+        case .english: return "Show raw diff"
+        }
+    }
+
+    var diffExpandedClose: String {
+        switch language {
+        case .korean: return "닫기"
+        case .english: return "Close"
+        }
+    }
+
+    /// Honest truncation banner: the source has `total` lines and the body shows
+    /// `shown`. Both counts are locale-grouped so they match the card's `+N −N`
+    /// change summary (which the `Text` localized-key path also groups).
+    func diffTruncationBanner(total: Int, shown: Int) -> String {
+        let totalText = total.formatted(.number)
+        let shownText = shown.formatted(.number)
+        switch language {
+        case .korean: return "전체 \(totalText)줄 중 \(shownText)줄 표시"
+        case .english: return "Showing \(shownText) of \(totalText) lines"
         }
     }
 

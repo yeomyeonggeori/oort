@@ -125,6 +125,65 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertNil(MessageArtifactPresentation.resolve(message: oversized))
     }
 
+    func testArtifactPresentationTruncatesLargeDiffAndReportsHonestCounts() throws {
+        let additionCount = 1_200
+        var patchLines = [
+            "diff --git a/Sources/BigTable.swift b/Sources/BigTable.swift",
+            "--- a/Sources/BigTable.swift",
+            "+++ b/Sources/BigTable.swift",
+            "@@ -0,0 +1,\(additionCount) @@",
+        ]
+        for index in 1...additionCount {
+            patchLines.append("+let row\(index) = \(index)")
+        }
+        let patch = patchLines.joined(separator: "\n")
+        // 4 header/hunk lines + one line per addition, all in a single file.
+        let expectedTotalLines = patchLines.count
+
+        let message = artifactMessage(
+            type: .diff,
+            props: ["artifact_kind": "diff", "title": "대용량 diff 렌더", "patch": .string(patch)]
+        )
+
+        guard case .diff(let presentation) = MessageArtifactPresentation.resolve(message: message) else {
+            return XCTFail("Expected a diff presentation")
+        }
+
+        XCTAssertTrue(presentation.isTruncated)
+        XCTAssertEqual(presentation.totalLineCount, expectedTotalLines)
+        XCTAssertEqual(presentation.displayedLineCount, 500)
+        XCTAssertEqual(
+            presentation.files.reduce(0) { $0 + $1.lines.count },
+            500,
+            "Rendered body must hold exactly the display cap"
+        )
+        // Summary counts stay honest even though the body is truncated.
+        XCTAssertEqual(presentation.additions, additionCount)
+        XCTAssertEqual(presentation.deletions, 0)
+        XCTAssertEqual(presentation.files.first?.additions, additionCount)
+        XCTAssertFalse(presentation.rawPatch.isEmpty)
+    }
+
+    func testArtifactPresentationDoesNotTruncateSmallDiff() throws {
+        let patch = """
+        diff --git a/a.txt b/a.txt
+        --- a/a.txt
+        +++ b/a.txt
+        @@ -1 +1 @@
+        -before
+        +after
+        """
+        let message = artifactMessage(
+            type: .diff,
+            props: ["artifact_kind": "diff", "patch": .string(patch)]
+        )
+        guard case .diff(let presentation) = MessageArtifactPresentation.resolve(message: message) else {
+            return XCTFail("Expected a diff presentation")
+        }
+        XCTAssertFalse(presentation.isTruncated)
+        XCTAssertEqual(presentation.totalLineCount, presentation.displayedLineCount)
+    }
+
     func testArtifactLinkPresentationAcceptsOnlyCredentialSafeHTTPS() throws {
         let pullRequest = artifactMessage(
             type: .artifact,
