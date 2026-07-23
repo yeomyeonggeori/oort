@@ -107,10 +107,14 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             self._write_event(self._stream_chunk(request, content=chunk))
             time.sleep(EVENT_DELAY_SECONDS)
 
-        self._write_event(self._tool_call_chunk(request, arguments_prefix=True))
-        time.sleep(EVENT_DELAY_SECONDS)
-        self._write_event(self._tool_call_chunk(request, arguments_prefix=False))
-        time.sleep(EVENT_DELAY_SECONDS)
+        # MOMO-565 리허설 검출: 528 fail-closed 이후 grant가 시드되지 않은 스택에서
+        # tool_call은 승인 대기로 멈춘다. 순수 텍스트 왕복만 검증하는 스모크는
+        # MOCK_HERMES_TOOL_CALLS=0으로 툴콜 방출을 끈다(기본 1 = 기존 동작).
+        if os.environ.get("MOCK_HERMES_TOOL_CALLS", "1") != "0":
+            self._write_event(self._tool_call_chunk(request, arguments_prefix=True))
+            time.sleep(EVENT_DELAY_SECONDS)
+            self._write_event(self._tool_call_chunk(request, arguments_prefix=False))
+            time.sleep(EVENT_DELAY_SECONDS)
         self._write_event(self._usage_chunk(request))
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()

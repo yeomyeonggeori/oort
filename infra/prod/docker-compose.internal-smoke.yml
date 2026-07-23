@@ -102,6 +102,9 @@ services:
     restart: "no"
     environment:
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+      # 이 스모크는 순수 텍스트 SSE 왕복(MOMO-004)만 단정한다 — grant 미시드
+      # 스택에서 tool_call은 fail-closed 승인 대기로 멈춘다(528 계약).
+      MOCK_HERMES_TOOL_CALLS: "0"
     networks:
       - private
     healthcheck:
