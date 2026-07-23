@@ -76,10 +76,16 @@ enum WorkerProviderLinkStore {
                 logger: logger
             ).collect()
             guard let row = rows.first else { return nil }
-            let decoded = try row.decode((String, [UInt8], String, Int64).self)
+            // `bearer_ciphertext` is a `bytea` column. Decode it as `Data`
+            // (PostgresNIO maps `Data` to `.bytea`); decoding into `[UInt8]`
+            // routes through the Array conformance and parses the value as a
+            // Postgres array wire format, which does not match a bytea payload
+            // and throws against a real row. Mirrors the server-side
+            // `ProviderLinkStore` fix (MOMO-577).
+            let decoded = try row.decode((String, Data, String, Int64).self)
             return StoredProviderLink(
                 baseURL: decoded.0,
-                bearerCiphertext: Data(decoded.1),
+                bearerCiphertext: decoded.1,
                 mode: decoded.2,
                 updatedAtMs: decoded.3
             )

@@ -293,8 +293,8 @@ struct ProviderLinkRoutes: Sendable {
                \(viaTokenID),
                jsonb_build_object(
                  'schema', 'momo.provider_link.audit.v1',
-                 'mode', \(mode),
-                 'endpoint_label', \(endpointLabel),
+                 'mode', \(mode)::text,
+                 'endpoint_label', \(endpointLabel)::text,
                  'bearer_configured', \(bearerConfigured)
                ))
             """,

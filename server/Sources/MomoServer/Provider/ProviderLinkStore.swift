@@ -1,6 +1,7 @@
 import Foundation
 import Hummingbird
 import Logging
+import NIOCore
 import PostgresNIO
 
 /// The raw `provider_link` singleton row as stored (bearer still ciphertext).
@@ -35,10 +36,14 @@ enum ProviderLinkStore {
             logger: logger
         ).collect()
         guard let row = rows.first else { return nil }
-        let decoded = try row.decode((String, [UInt8], String, UUID?, Int64).self)
+        // `bearer_ciphertext` is a `bytea` column. Decode it as `Data` (which
+        // PostgresNIO maps to `.bytea`); decoding into `[UInt8]` would instead go
+        // through PostgresNIO's Array conformance and try to parse the value as a
+        // Postgres array wire format, which does not match a bytea payload.
+        let decoded = try row.decode((String, Data, String, UUID?, Int64).self)
         return StoredProviderLink(
             baseURL: decoded.0,
-            bearerCiphertext: Data(decoded.1),
+            bearerCiphertext: decoded.1,
             mode: decoded.2,
             updatedByMemberID: decoded.3,
             updatedAtMs: decoded.4
@@ -54,13 +59,18 @@ enum ProviderLinkStore {
         mode: String,
         updatedBy: UUID
     ) async throws -> StoredProviderLink {
-        let bytes = [UInt8](bearerCiphertext)
+        // Bind the AES-GCM ciphertext as a `bytea` parameter. PostgresNIO encodes
+        // `ByteBuffer` (and `Data`) with `psqlType == .bytea`, whereas `[UInt8]`
+        // resolves to the Array conformance and is encoded as a Postgres `"char"[]`
+        // array — which the `bytea` column rejects at bind time (observed as a 500
+        // on PUT /v1/provider/link against a real Postgres). See MOMO-577.
+        let ciphertext = ByteBuffer(bytes: bearerCiphertext)
         let rows = try await conn.query(
             """
             INSERT INTO provider_link
               (id, base_url, bearer_ciphertext, mode, updated_by, updated_at)
             VALUES
-              (true, \(baseURL), \(bytes), \(mode), \(updatedBy), now())
+              (true, \(baseURL), \(ciphertext), \(mode), \(updatedBy), now())
             ON CONFLICT (id) DO UPDATE
               SET base_url = EXCLUDED.base_url,
                   bearer_ciphertext = EXCLUDED.bearer_ciphertext,
@@ -81,10 +91,11 @@ enum ProviderLinkStore {
         guard let row = rows.first else {
             throw HTTPError(.internalServerError, message: "provider link upsert returned no row")
         }
-        let decoded = try row.decode((String, [UInt8], String, UUID?, Int64).self)
+        // Decode `bearer_ciphertext` (bytea) as `Data`; see `read` for the rationale.
+        let decoded = try row.decode((String, Data, String, UUID?, Int64).self)
         return StoredProviderLink(
             baseURL: decoded.0,
-            bearerCiphertext: Data(decoded.1),
+            bearerCiphertext: decoded.1,
             mode: decoded.2,
             updatedByMemberID: decoded.3,
             updatedAtMs: decoded.4
