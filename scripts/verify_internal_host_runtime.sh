@@ -200,7 +200,7 @@ echo "[host-runtime] booting prod + internal-smoke stack (up -d --wait)"
 #   api      = internal-smoke override의 /health healthcheck(healthy까지 대기)
 #   migrate  = one-shot 완주(service_completed_successfully) 대기
 #   postgres/redis/centrifugo/caddy/mock-hermes = 기존 healthcheck healthy 대기
-if ! compose up -d --wait --wait-timeout 300 2>&1 | tee "$COMPOSE_LOG"; then
+if ! compose up -d --wait --wait-timeout "${HOST_RUNTIME_WAIT_TIMEOUT:-600}" 2>&1 | tee "$COMPOSE_LOG"; then
   fail "compose up -d --wait did not reach healthy/completed state"
 fi
 
