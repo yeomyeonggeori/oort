@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-23 (Opus 구현 · MOMO-569 #685) · managed-by 표기 + owner 팝오버 (track/uxui, 성재 승인 전)
+- **구현**: 멤버 디렉터리 상세·인스펙터 팝오버 GroupBox에 "관리 주체 {owner}" 행 + 읽기전용 owner 프로필 팝오버(키보드 포커스 버튼). 순수 리졸버 `MomoAgentOwnerPresentation`(신규 `MomoAgentOwnerLabel.swift`)·`ChatViewModel.agentOwner(for:)`가 명부 기존 owner 읽기투영·origin만 소비 — 신규 서버 계약 0. owner 이탈=회색+"워크스페이스에서 나감", 비활성=회색+"현재 비활성", card 출신=행에 "external runtime" 병기.
+- **비스코프 준수**: who-can-talk(수신 게이트) UI 미구현(서버 집행 필드 부재=가짜 통제) → **X-12로 역등재**(profile `inbound_policy`+allowlist 필드 & agent_job enqueue 집행 지점 요청). A-22 done(track/uxui) 갱신.
+- **검증**: swift build green, 순수 리졸버 8 테스트 PASS + 스냅샷 1 gated-skip(기준이미지 기록 금지 — 오케스트레이터 환경 기준, `MOMO_VERIFY_569_SNAPSHOTS`). 인스펙터/디렉터리 회귀 스냅샷 10 PASS. design-taste pre-flight grep 0 hit.
+- **대기**: design-review 에이전트(신선 컨텍스트) Blocker/High 0 · main 머지=momo-main 순차·성재 승인.
+
 ## 2026-07-23 (Fable 내부 테스트 전환 집행) · 공개 동결, 알파 배포 채널 라이브, UXUI 배치 발급
 - **방향 전환(성재)**: 공개=게이트 충족 동결, 내부 테스트 집중(잔버그·연동·UXUI). 목표치 통과 시 자연 배포. 정본 `2026-07-23-internal-test-focus-plan.md`.
 - **알파 배포 채널 라이브**: 공개 저장소 momo-alpha + Pages(`dawn-kim-official.github.io/momo-alpha`) + `publish_alpha_build.sh` 원커맨드. **첫 빌드 v0.5.0-alpha.1(build 1047) 발행 완료**(LICENSE/NOTICE 동봉, sha256 기록, 인앱 Updates manifest 연결). 소스 비공개 유지·바이너리 공개 유통은 성재 승인분.

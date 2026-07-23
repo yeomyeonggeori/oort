@@ -1197,6 +1197,22 @@ public final class ChatViewModel: ObservableObject {
         return usesServerRosterSourceOfTruth ? agentOriginsByMemberID[member.id] : .local
     }
 
+    /// Resolves "managed by {owner}" presentation from the roster's existing
+    /// owner read-through and origin projection. Returns `nil` when there is
+    /// nothing to render (a human, or an agent with no owner and no external
+    /// runtime).
+    func agentOwner(for member: Member) -> MomoAgentOwnerPresentation? {
+        guard member.isAgent else { return nil }
+        let ownerID = usesServerRosterSourceOfTruth ? agentOwnerIDsByMemberID[member.id] : nil
+        let ownerMember = ownerID.flatMap(self.member)
+        return MomoAgentOwnerPresentation.resolve(
+            agent: member,
+            ownerID: ownerID,
+            ownerMember: ownerMember,
+            origin: agentOrigin(for: member)
+        )
+    }
+
     public func resetAgentOnboarding() {
         agentOnboardingState = .entry
     }

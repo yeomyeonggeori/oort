@@ -383,6 +383,13 @@ public struct MemberDirectoryView: View {
                             LabeledContent(copy.status) {
                                 Text(copy.memberStatusTitle(member.status))
                             }
+                            if member.isAgent, let ownerPresentation = viewModel.agentOwner(for: member) {
+                                MomoAgentManagedByView(
+                                    viewModel: viewModel,
+                                    presentation: ownerPresentation,
+                                    copy: copy
+                                )
+                            }
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, MomoTheme.MemberDirectory.standardSpacing)

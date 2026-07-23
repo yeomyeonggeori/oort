@@ -723,6 +723,13 @@ struct MomoMemberProfilePopoverView: View {
                     LabeledContent(copy.status) {
                         Text(copy.memberStatusTitle(member.status))
                     }
+                    if member.isAgent, let ownerPresentation = viewModel.agentOwner(for: member) {
+                        MomoAgentManagedByView(
+                            viewModel: viewModel,
+                            presentation: ownerPresentation,
+                            copy: copy
+                        )
+                    }
                     if member.isAgent, !member.normalizedCapabilities.isEmpty {
                         MomoAgentBadgeGroup(
                             capabilities: member.normalizedCapabilities,
@@ -825,7 +832,7 @@ struct MomoMemberProfilePopoverView: View {
 
 }
 
-private struct MomoMemberAvatarView: View {
+struct MomoMemberAvatarView: View {
     @ObservedObject var viewModel: ChatViewModel
     let member: Member
     let size: CGFloat
