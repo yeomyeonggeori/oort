@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-564 공개용 README + SECURITY.md (#656, 2026-07-23)
+
+- 공개 README를 영어 우선 단일본으로 재작성해 단일 이미지 5분 설치, Dawn 비경유 신뢰 경계, RLS FORCE, 에이전트 온보딩 3경로, 공개 예제·Apache-2.0/DCO를 현재 구현에 맞춰 정리했다.
+- SECURITY.md에 최신 v0.x 지원 정책, 비공개 Security Advisory 신고·응답 목표, 역할 분리/부트 가드/fail-closed/attestation 하드닝과 ADR-0004 시크릿 경계를 추가했다.
+
 ## MOMO-565 멀티바이너리 이미지 통합 (#681, 2026-07-23)
 
 - `api/relay/worker/migrate/linkshort/web-assets`를 하나의 `ghcr.io/dawn-kim-official/momo` 이미지와 argv 서브커맨드로 통합했다. prod compose 토폴로지와 기존 migrate의 `set-owner/member-list/invite-create`, runtime-role 분기는 유지하며, 여섯 `MOMO_*_IMAGE` 별칭은 canonical `MOMO_IMAGE`로 수렴한다.
