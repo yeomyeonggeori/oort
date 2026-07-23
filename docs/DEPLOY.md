@@ -150,6 +150,49 @@ sops exec-env /secure/momo/prod-next.sops.env \
 pgBackRest backup/PITR, 외부 Hermes 연결은 실제 호스트 evidence가 생기기 전까지
 `runtime-unverified(public host)`다.
 
+### Day-2 단일 진입 (`momo-ops.sh`)
+
+설치 후 일상 운영은 `infra/prod/momo-ops.sh`에서 시작한다. `status`는 배포가
+깨진 상태와 아직 채우지 않은 템플릿도 진단할 수 있도록 유일하게 strict preflight를
+건너뛴다. 그 밖의 명령은 모두 기존 `prod_env_preflight.sh`를 먼저 통과해야 하며,
+`change-me-*`/`__PLACEHOLDER__`/example 값이 남아 있으면 Docker나 DB를 건드리기
+전에 실패한다.
+
+```sh
+# 서비스 상태와 최근 로그
+sops exec-env /secure/momo/prod.sops.env \
+  'infra/prod/momo-ops.sh status --from-env'
+sops exec-env /secure/momo/prod.sops.env \
+  'infra/prod/momo-ops.sh logs --from-env --tail 200 api relay worker'
+
+# 백업/PITR evidence 체크리스트와 기존 guarded upgrade 실행
+sops exec-env /secure/momo/prod.sops.env \
+  'infra/prod/momo-ops.sh backup-hint --from-env'
+sops exec-env /secure/momo/prod-next.sops.env \
+  'infra/prod/momo-ops.sh upgrade --from-env --mode prod \
+   --state-dir /var/lib/momo \
+   --backup-evidence /var/lib/momo/evidence/backup-restore-evidence.json'
+
+# 운영자 DB 경로의 멤버 목록
+sops exec-env /secure/momo/prod.sops.env \
+  'infra/prod/momo-ops.sh member list --from-env \
+   --workspace-id 00000000-0000-7000-8000-000000000001'
+
+# 운영자 DB 경로의 일회성 초대 생성
+umask 077
+sops exec-env /secure/momo/prod.sops.env \
+  'infra/prod/momo-ops.sh invite-create --from-env \
+   --workspace-id 00000000-0000-7000-8000-000000000001 \
+   --role member --max-uses 1 --expires-days 7 \
+   --output /run/momo/invite-code'
+```
+
+`member list`와 `invite-create`는 서버 REST 토큰을 우회하는 임의 SQL이 아니라 pinned
+migrate 이미지의 명시적 운영 명령이다. DB URL은 compose environment 안에만 있고
+argv나 출력으로 노출되지 않는다. 초대 bearer code도 SQL/컨테이너 stdout에 출력하지
+않으며, 이미 존재하는 파일을 덮어쓰지 않고 요청한 host 경로에 mode 0600으로 한 번만
+기록한다. 전달 후 즉시 해당 파일을 안전하게 제거한다.
+
 ### 단일 노드 상한
 
 v1 문서상 보수 상한은 **동시 사용자 수백 명(최대 500명 계획값)** 이다. 이는 SLA나

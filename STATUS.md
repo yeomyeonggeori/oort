@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-560 day-2 운영 단일 진입 (#653, 2026-07-23)
+
+- prod `momo-ops.sh`에 status/logs/기존 upgrade 래핑/backup-hint/member list/invite-create를 모았다. status 외 명령은 기존 prod preflight를 재사용해 placeholder를 fail-closed하고, 멤버·초대는 migrate 이미지의 env-only DB 경로로 실행하며 원본 초대 코드는 mode-0600 파일에만 1회 기록한다.
+- 정적·mock operator 계약 검증은 PASS했다. 예약 포트 28220의 격리 PG18/migrate-image verifier는 준비했으며 실제 멤버 조회·초대 hash/audit Docker 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-561 owner 부트스트랩 set-owner (#654, 2026-07-23)
 
 - migrate 이미지에 env-only `set-owner` one-shot을 추가하고 install이 migration 직후 이를 자동 실행하도록 연결했다. bootstrap owner 정확성·이메일 검증·세션 폐기형 credential rotation을 한 트랜잭션으로 처리하며 upgrade는 기존 owner를 덮어쓰지 않는다.
