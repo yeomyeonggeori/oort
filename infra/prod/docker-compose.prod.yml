@@ -4,9 +4,9 @@
 
 name: ${COMPOSE_PROJECT_NAME:-momo-prod}
 
-# Shared immutable tag emitted by publish-images.yml. The full per-service image
-# refs below are derived from this value in env files, but may be replaced by
-# distinct @sha256 digests for a verified deploy or rollback.
+# Shared immutable tag emitted by publish-images.yml. MOMO_IMAGE is the canonical
+# single image; the six MOMO_*_IMAGE aliases remain accepted for old env/state
+# files and default to the same ref in the shipped templates.
 x-momo-image-release:
   tag: ${MOMO_IMAGE_TAG:?set MOMO_IMAGE_TAG}
 
@@ -41,9 +41,8 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-      # ADR-0119 W-3: web-init copies the immutable momo-web image's dist into
-      # this named volume before Caddy starts. The api image never contains or
-      # serves browser assets.
+      # web-init copies the immutable momo image's bundled dist into this named
+      # volume before Caddy starts. The api process never serves browser assets.
       - momo-web-static:/srv/momo-web:ro
     depends_on:
       api:
@@ -142,6 +141,7 @@ services:
 
   api:
     image: ${MOMO_API_IMAGE:?set MOMO_API_IMAGE}
+    command: ["api"]
     mem_limit: ${MOMO_API_MEM_LIMIT:-1g}
     labels: *momo-janitor-labels
     restart: unless-stopped
@@ -187,6 +187,7 @@ services:
 
   relay:
     image: ${MOMO_RELAY_IMAGE:?set MOMO_RELAY_IMAGE}
+    command: ["relay"]
     mem_limit: ${MOMO_RELAY_MEM_LIMIT:-512m}
     labels: *momo-janitor-labels
     restart: unless-stopped
@@ -213,6 +214,7 @@ services:
 
   worker:
     image: ${MOMO_WORKER_IMAGE:?set MOMO_WORKER_IMAGE}
+    command: ["worker"]
     mem_limit: ${MOMO_WORKER_MEM_LIMIT:-2g}
     labels: *momo-janitor-labels
     restart: unless-stopped
@@ -274,10 +276,11 @@ services:
 
   # One-shot, source-checkout-free migration. `pull && up --no-build` runs this
   # pinned image before api/relay/worker. Roll back by restoring the previous
-  # per-image digests (or previous MOMO_IMAGE_TAG-derived refs) and rerunning the
-  # same compose command; migrations must remain forward-compatible.
+  # image digest and rerunning the same compose command; migrations must remain
+  # forward-compatible.
   migrate:
     image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
+    command: ["migrate"]
     mem_limit: ${MOMO_MIGRATE_MEM_LIMIT:-1g}
     labels: *momo-janitor-labels
     restart: "no"
@@ -298,6 +301,7 @@ services:
   # the three expected roles have the exact RLS posture.
   runtime-roles:
     image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
+    command: ["migrate"]
     mem_limit: ${MOMO_RUNTIME_ROLES_MEM_LIMIT:-256m}
     labels: *momo-janitor-labels
     restart: "no"
@@ -313,11 +317,11 @@ services:
     networks:
       - private
 
-  # One-shot SPA asset initializer. install.sh/upgrade.sh run this pinned
-  # image before (re)starting Caddy; the final image contains dist only plus
-  # the minimal shell/cp needed to populate the shared read-only serving root.
+  # One-shot SPA asset initializer. install.sh/upgrade.sh run the web-assets
+  # command before (re)starting Caddy.
   web-init:
     image: ${MOMO_WEB_IMAGE:?set MOMO_WEB_IMAGE}
+    command: ["web-assets"]
     mem_limit: ${MOMO_WEB_INIT_MEM_LIMIT:-128m}
     labels: *momo-janitor-labels
     restart: "no"
@@ -329,6 +333,7 @@ services:
   # to this installation's same-origin /join landing.
   linkshort:
     image: ${MOMO_LINKSHORT_IMAGE:?set MOMO_LINKSHORT_IMAGE}
+    command: ["linkshort"]
     mem_limit: ${MOMO_LINKSHORT_MEM_LIMIT:-256m}
     labels: *momo-janitor-labels
     restart: unless-stopped

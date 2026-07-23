@@ -1,4 +1,4 @@
-import Crypto
+@preconcurrency import Crypto
 import Foundation
 
 /// Cryptographic primitives for ADR-0115 webhook ingress.

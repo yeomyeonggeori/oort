@@ -559,6 +559,22 @@ if [ "$runtime_mode" = "strict" ]; then
   assert_not_latest_or_smoke_image MOMO_WEB_IMAGE
   assert_not_latest_or_smoke_image MOMO_LINKSHORT_IMAGE
   assert_release_tag MOMO_IMAGE_TAG
+  if [ "$(get_var MOMO_IMAGE)" != "" ]; then
+    assert_no_prod_placeholder MOMO_IMAGE
+    assert_not_latest_or_smoke_image MOMO_IMAGE
+    assert_image_matches_release MOMO_IMAGE
+    for momo565_alias in \
+      MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
+      MOMO_WEB_IMAGE MOMO_LINKSHORT_IMAGE; do
+      if [ "$(get_var "$momo565_alias")" = "$(get_var MOMO_IMAGE)" ]; then
+        pass "$momo565_alias converges on MOMO_IMAGE"
+      else
+        fail "$momo565_alias must equal MOMO_IMAGE when the canonical unified image is set"
+      fi
+    done
+  else
+    pass "MOMO_IMAGE is unset — accepting a legacy six-image environment"
+  fi
   assert_image_matches_release MOMO_API_IMAGE
   assert_image_matches_release MOMO_RELAY_IMAGE
   assert_image_matches_release MOMO_WORKER_IMAGE

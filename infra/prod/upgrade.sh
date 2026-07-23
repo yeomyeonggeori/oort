@@ -113,7 +113,7 @@ if [ "$DRY_RUN" = "1" ]; then
   if [ "$ROLLBACK_ONLY" = "1" ]; then
     deploy_log "DRY RUN rollback plan: restore previous api/relay/worker/web/LinkShort digests; do not reverse migrations; verify health"
   else
-    deploy_log "DRY RUN upgrade plan: preserve current image state -> pull new digests -> provision runtime roles -> run forward migration and web-init -> restart api/relay/worker/linkshort/caddy -> health check"
+    deploy_log "DRY RUN upgrade plan: preserve current image state -> pull new multi-command digest -> provision runtime roles -> run forward migration and web-init -> restart api/relay/worker/linkshort/caddy -> health check"
     deploy_log "DRY RUN failure plan: automatically restore previous api/relay/worker/web/LinkShort digests; database remains forward-only"
   fi
   deploy_log "DRY RUN complete; no containers or state were changed"
