@@ -88,6 +88,11 @@ if [ "${PROVIDER_LINK_RUN_DOCKER:-0}" != "1" ]; then
   log "runtime-unverified: live REST smoke (migration 039 apply, PUT/GET/DELETE/POST-test"
   log "  roundtrip, RLS default-deny for non-operator sessions, bearer-never-returned)"
   log "  is handed off to the orchestrator. Re-run with PROVIDER_LINK_RUN_DOCKER=1 on a runtime."
+  log "runtime-unverified (MOMO-576 authorization matrix — orchestrator, ports 28260s):"
+  log "  * workspace owner login token (no platform:read)   -> GET/PUT/DELETE/test = 200"
+  log "  * workspace admin login token  (no platform:read)   -> 200 (per D3 policy)"
+  log "  * non-admin member/guest token (no platform:read)   -> 403"
+  log "  * platform:read operator token                      -> 200"
   exit 0
 fi
 
