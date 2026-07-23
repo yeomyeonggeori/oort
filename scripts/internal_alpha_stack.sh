@@ -108,7 +108,14 @@ cmd_redeploy() {
   note "4/4 health 대기(콜드 컴파일 최대 ${BOOT_TIMEOUT}s) + 안전 라우트 스모크"
   wait_health
   safety_route_smoke
-  note "PASS: '$PROJECT' 재배포 완료 — api=127.0.0.1:${API_PORT}, 데이터 볼륨 보존"
+
+  # 상시 서비스에 restart=unless-stopped를 걸어 맥 재부팅/Docker Desktop 재시작 시
+  # 자동 복구되게 한다(성재 출근 시 서버가 이미 떠 있어야 함 — 이동식 호스트 요건).
+  # e2e compose 기본은 restart:no라 실행 중 컨테이너에 직접 적용한다.
+  docker update --restart unless-stopped \
+    "${PROJECT}-postgres-1" "${PROJECT}-centrifugo-1" "${PROJECT}-mock-hermes-1" \
+    "${PROJECT}-api-1" "${PROJECT}-relay-1" >/dev/null 2>&1 || true
+  note "PASS: '$PROJECT' 재배포 완료 — api=127.0.0.1:${API_PORT}, restart=unless-stopped, 데이터 볼륨 보존"
 }
 
 cmd_reclaim() {
