@@ -187,6 +187,39 @@ final class MomoProviderLinkSettingsTests: XCTestCase {
         XCTAssertFalse(model.navigationLocked)
     }
 
+    func testTestButtonDisabledForMockModeAndEnabledForExternalHermes() async {
+        let fixture = ProviderLinkFixture()
+
+        let mockClient = MockProviderLinkClient(status: fixture.environmentStatus)
+        let mockModel = fixture.model(client: mockClient)
+        await mockModel.load()
+        // A local-mock link would always answer not_external_provider, so the
+        // reachability probe stays disabled instead of guaranteeing a failed tap.
+        XCTAssertEqual(mockModel.status?.mode, .localMock)
+        XCTAssertFalse(mockModel.canTest)
+
+        let externalClient = MockProviderLinkClient(status: fixture.databaseStatus)
+        let externalModel = fixture.model(client: externalClient)
+        await externalModel.load()
+        XCTAssertEqual(externalModel.status?.mode, .externalHermes)
+        XCTAssertTrue(externalModel.canTest)
+    }
+
+    func testDiscardConfirmationCopyIsBilingualAndNextStepAware() {
+        let korean = MomoProviderLinkCopy(language: .korean)
+        let english = MomoProviderLinkCopy(language: .english)
+        // The exit is explained: discarding drops the entered bearer.
+        XCTAssertTrue(korean.discardConfirmationMessage.contains("지워집니다"))
+        XCTAssertTrue(english.discardAndLeave.contains("Discard"))
+        XCTAssertTrue(korean.unsavedBearerHint.contains("bearer"))
+        // Internal governance vocabulary never leaks into work-host copy.
+        XCTAssertFalse(korean.workHostGuidance.contains("ADR"))
+        XCTAssertFalse(english.workHostGuidance.contains("ADR"))
+        // Test-mode note points at the next step.
+        XCTAssertTrue(korean.testUnavailableForMode.contains("외부 Hermes"))
+        XCTAssertTrue(english.testUnavailableForMode.contains("external Hermes"))
+    }
+
     func testConnectionStateMapping() {
         XCTAssertEqual(ProviderConnectionState(status: nil), .notConfigured)
         let fixture = ProviderLinkFixture()

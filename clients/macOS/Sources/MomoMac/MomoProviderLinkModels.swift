@@ -248,7 +248,10 @@ final class MomoProviderLinkSettingsModel: ObservableObject {
     }
 
     var canTest: Bool {
-        !isWorking && loadState == .loaded
+        // The reachability probe only means something against an external Hermes
+        // target; mock/unconfigured modes always answer `not_external_provider`,
+        // so the button stays disabled instead of guaranteeing a failing tap.
+        !isWorking && loadState == .loaded && status?.mode == .externalHermes
     }
 
     func updateContext(_ newContext: MomoInviteAdminContext?) async {

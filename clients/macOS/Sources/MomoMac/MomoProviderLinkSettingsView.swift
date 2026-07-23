@@ -11,17 +11,28 @@ struct MomoProviderLinkSettingsView: View {
     private let copy: MomoProviderLinkCopy
     @StateObject private var model: MomoProviderLinkSettingsModel
     @Binding private var navigationLocked: Bool
+    /// Bumped by the host when a close/switch is attempted while the pane is
+    /// locked, so the pane can raise its own discard confirmation.
+    private let discardRequest: Int
+    /// Called after the operator confirms discarding the unsaved bearer, so the
+    /// host can replay the deferred close/switch.
+    private let onConfirmDiscard: () -> Void
     @State private var showsRemoveConfirmation = false
+    @State private var showsDiscardConfirmation = false
     @FocusState private var baseURLFocused: Bool
 
     init(
         language: MomoUILanguage,
         context: MomoInviteAdminContext?,
         navigationLocked: Binding<Bool> = .constant(false),
+        discardRequest: Int = 0,
+        onConfirmDiscard: @escaping () -> Void = {},
         client: any MomoProviderLinkClient = MomoProviderLinkRESTClient()
     ) {
         self.copy = MomoProviderLinkCopy(language: language)
         _navigationLocked = navigationLocked
+        self.discardRequest = discardRequest
+        self.onConfirmDiscard = onConfirmDiscard
         _model = StateObject(wrappedValue: MomoProviderLinkSettingsModel(
             context: context,
             client: client
@@ -32,10 +43,14 @@ struct MomoProviderLinkSettingsView: View {
     init(
         language: MomoUILanguage,
         model: MomoProviderLinkSettingsModel,
-        navigationLocked: Binding<Bool> = .constant(false)
+        navigationLocked: Binding<Bool> = .constant(false),
+        discardRequest: Int = 0,
+        onConfirmDiscard: @escaping () -> Void = {}
     ) {
         self.copy = MomoProviderLinkCopy(language: language)
         _navigationLocked = navigationLocked
+        self.discardRequest = discardRequest
+        self.onConfirmDiscard = onConfirmDiscard
         _model = StateObject(wrappedValue: model)
     }
 
@@ -51,6 +66,13 @@ struct MomoProviderLinkSettingsView: View {
             .onChange(of: model.navigationLocked) { _, locked in
                 navigationLocked = locked
             }
+            .onChange(of: discardRequest) { _, _ in
+                // The host deferred a close/switch; confirm the discard only when
+                // there is actually an unsaved bearer to lose (an in-flight
+                // mutation with no draft resolves on its own).
+                guard model.hasUnsavedBearer else { return }
+                showsDiscardConfirmation = true
+            }
             .confirmationDialog(
                 copy.removeConfirmationTitle,
                 isPresented: $showsRemoveConfirmation,
@@ -62,6 +84,19 @@ struct MomoProviderLinkSettingsView: View {
                 Button(copy.cancel, role: .cancel) {}
             } message: {
                 Text(copy.removeConfirmationMessage)
+            }
+            .confirmationDialog(
+                copy.discardConfirmationTitle,
+                isPresented: $showsDiscardConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(copy.discardAndLeave, role: .destructive) {
+                    model.discardDraftSecret()
+                    onConfirmDiscard()
+                }
+                Button(copy.keepEditing, role: .cancel) {}
+            } message: {
+                Text(copy.discardConfirmationMessage)
             }
             .accessibilityIdentifier("ai-connection-settings")
     }
@@ -191,6 +226,10 @@ struct MomoProviderLinkSettingsView: View {
         }
     }
 
+    // §1 custom-control justification: AppKit has no native "status pill" that
+    // carries a semantic tint outline; a bordered Button would imply an action and
+    // a plain Text loses the at-a-glance state. This is a read-only status token,
+    // so a Capsule-outlined label is the least-surprising native-feeling shape.
     private var connectionChip: some View {
         let connection = ProviderConnectionState(status: model.status)
         return Text(copy.connectionValue(connection))
@@ -258,6 +297,13 @@ struct MomoProviderLinkSettingsView: View {
                     .foregroundStyle(MomoTheme.reversibleGreen)
             }
 
+            if model.hasUnsavedBearer {
+                Label(copy.unsavedBearerHint, systemImage: "lock")
+                    .momoTypography(.supporting)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: 8) {
                 Spacer()
                 Button {
@@ -320,6 +366,11 @@ struct MomoProviderLinkSettingsView: View {
                 feedbackLabel(copy.mutationFailure(issue))
             } else if let result = model.testResult {
                 testResultLabel(result)
+            } else if let status = model.status, status.mode != .externalHermes {
+                Label(copy.testUnavailableForMode, systemImage: "info.circle")
+                    .momoTypography(.supporting)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } header: {
             Text(copy.testSectionHeader)
@@ -529,6 +580,23 @@ struct MomoProviderLinkCopy {
     var saveConnection: String { isKorean ? "연결 저장" : "Save connection" }
     var savingConnection: String { isKorean ? "저장 중" : "Saving" }
     var savedNotice: String { isKorean ? "연결을 저장했습니다." : "Connection saved." }
+    var unsavedBearerHint: String {
+        isKorean
+            ? "저장하지 않은 bearer가 있어요. 저장하거나, 나갈 때 입력을 지울 수 있어요."
+            : "You have an unsaved bearer. Save it, or discard it when you leave."
+    }
+
+    // Discard confirmation (raised when leaving with an unsaved bearer)
+    var discardConfirmationTitle: String {
+        isKorean ? "저장하지 않은 bearer를 지울까요?" : "Discard the unsaved bearer?"
+    }
+    var discardConfirmationMessage: String {
+        isKorean
+            ? "입력한 bearer를 저장하지 않고 나가면 지워집니다. 계속 입력하려면 취소하세요."
+            : "Leaving without saving discards the bearer you entered. Cancel to keep editing."
+    }
+    var discardAndLeave: String { isKorean ? "저장 안 하고 나가기" : "Discard and leave" }
+    var keepEditing: String { isKorean ? "계속 입력하기" : "Keep editing" }
 
     // Test
     var testSectionHeader: String { isKorean ? "연결 테스트" : "Test connection" }
@@ -539,6 +607,11 @@ struct MomoProviderLinkCopy {
     }
     var testConnection: String { isKorean ? "연결 테스트" : "Test connection" }
     var testingConnection: String { isKorean ? "테스트 중" : "Testing" }
+    var testUnavailableForMode: String {
+        isKorean
+            ? "외부 Hermes 모드에서만 연결을 테스트할 수 있어요. 먼저 모드를 외부 Hermes로 저장하세요."
+            : "Connection tests run only in external Hermes mode. Save the mode as external Hermes first."
+    }
     var testSucceeded: String { isKorean ? "연결에 성공했습니다." : "Connection succeeded." }
     func testFailed(_ reason: String?) -> String {
         let detail = reasonDescription(reason)
@@ -604,8 +677,8 @@ struct MomoProviderLinkCopy {
     var workHostStatusValue: String { isKorean ? "이 화면에서 설정하지 않음" : "Not configured here" }
     var workHostGuidance: String {
         isKorean
-            ? "work host 연결은 업무 콘솔에서 로컬 CLI를 페어링해 설정합니다 (ADR-0114)."
-            : "Pair a local CLI from the work console to connect a work host (ADR-0114)."
+            ? "work host 연결은 업무 콘솔의 로컬 CLI 페어링 흐름에서 설정합니다."
+            : "Set up a work host from the local CLI pairing flow in the work console."
     }
 
     // Shared / states
@@ -616,8 +689,8 @@ struct MomoProviderLinkCopy {
     var unavailableTitle: String { isKorean ? "운영자 세션이 필요합니다" : "Operator session required" }
     var unavailableDescription: String {
         isKorean
-            ? "실서버 운영자 세션으로 연결하면 AI provider 연결을 관리할 수 있습니다."
-            : "Connect with a live server operator session to manage the AI provider connection."
+            ? "실서버 운영자 세션으로 다시 로그인한 뒤 이 화면을 열면 AI provider 연결을 관리할 수 있어요."
+            : "Sign back in with a live server operator session, then reopen this screen to manage the AI provider connection."
     }
     var offlineTitle: String { isKorean ? "서버에 연결할 수 없습니다" : "Server is offline" }
     var offlineDescription: String {

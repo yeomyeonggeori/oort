@@ -49,6 +49,13 @@ private struct MomoChannelAgentCreationRequest: Identifiable {
     let channelID: ChannelID
 }
 
+// A detail-pane navigation the host deferred because the current pane holds an
+// unsaved secret; replayed after the pane confirms discarding it.
+private enum LockedDetailNavigation: Equatable {
+    case close
+    case open(MomoMacDetailPane)
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var workConsoleController: MomoWorkConsoleController
@@ -60,6 +67,11 @@ public struct MomoMacRootView: View {
     // Set by the AI-connection pane while an unsaved bearer is entered or a
     // mutation is in flight, so leaving the pane cannot silently drop the secret.
     @State private var detailPaneNavigationLocked = false
+    // A close/switch requested while the pane is locked is deferred here: the
+    // counter nudges the locked pane to raise its discard confirmation, and the
+    // pending intent is replayed once the operator confirms.
+    @State private var detailPaneDiscardRequest = 0
+    @State private var pendingLockedNavigation: LockedDetailNavigation?
     @State private var selectedProfileMemberID: MemberID?
     @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
@@ -811,7 +823,6 @@ public struct MomoMacRootView: View {
                 .controlSize(.regular)
                 .momoQuickTooltip(copy.closeDetailPane)
                 .keyboardShortcut(.cancelAction)
-                .disabled(detailPaneNavigationLocked)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -895,7 +906,9 @@ public struct MomoMacRootView: View {
                 MomoProviderLinkSettingsView(
                     language: copy.language,
                     context: sessionChrome?.inviteAdminContext,
-                    navigationLocked: $detailPaneNavigationLocked
+                    navigationLocked: $detailPaneNavigationLocked,
+                    discardRequest: detailPaneDiscardRequest,
+                    onConfirmDiscard: { resolveLockedDetailNavigation() }
                 )
             case .workspaceSettings:
                 MomoWorkspaceSettingsSurface(copy: copy, viewModel: viewModel)
@@ -911,8 +924,13 @@ public struct MomoMacRootView: View {
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
         guard pane != .alpha || developerMode else { return }
-        // Never swap away from an AI-connection pane holding an unsaved bearer.
-        guard !detailPaneNavigationLocked else { return }
+        // An AI-connection pane holding an unsaved bearer owns the discard
+        // confirmation; defer the switch and let it ask before we navigate away.
+        guard !detailPaneNavigationLocked else {
+            pendingLockedNavigation = .open(pane)
+            detailPaneDiscardRequest &+= 1
+            return
+        }
         withAnimation(layoutAnimation) {
             dismissThreadPanel()
             showMemberInspector = false
@@ -927,9 +945,34 @@ public struct MomoMacRootView: View {
     }
 
     private func closeDetailPane() {
-        guard !detailPaneNavigationLocked else { return }
+        // A locked pane defers the close and raises its own discard confirmation
+        // so the entered secret is never dropped silently, but the exit is always
+        // reachable and explained.
+        guard !detailPaneNavigationLocked else {
+            pendingLockedNavigation = .close
+            detailPaneDiscardRequest &+= 1
+            return
+        }
         withAnimation(layoutAnimation) {
             detailPanePresentation.close()
+        }
+    }
+
+    /// Replays the deferred close/switch after the AI-connection pane confirms it
+    /// discarded the unsaved bearer.
+    private func resolveLockedDetailNavigation() {
+        let intent = pendingLockedNavigation
+        pendingLockedNavigation = nil
+        detailPaneNavigationLocked = false
+        withAnimation(layoutAnimation) {
+            switch intent {
+            case .open(let pane):
+                dismissThreadPanel()
+                showMemberInspector = false
+                detailPanePresentation.present(pane)
+            case .close, .none:
+                detailPanePresentation.close()
+            }
         }
     }
 
