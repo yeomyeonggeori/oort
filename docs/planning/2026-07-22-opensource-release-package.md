@@ -39,4 +39,4 @@
 - **공개 릴리스 확정(성재 2026-07-22, buzz 계획 §2)**: 게이트=554 랜딩+리허설 Phase1 PASS. 레포(모노레포 전체)+이미지 동시 공개, README/SECURITY(MOMO-564) 전제. 체크리스트 4조건: (a) 이미지 내 LICENSE/NOTICE 동봉 (b) 공개 전 이미지 1회 시크릿·설정 스캔 (c) semver v0.x+latest=stable+digest 핀 (d) publish=workflow_dispatch 수동 유지. 법무 추가 검토는 공개 차단 사유 아님(§5 종결).
 - 실배포 리허설 — **일정 확정(momo-main, 성재 위임 2026-07-22)**: 2단계.
   - **Phase 1 (로컬 실행분, ⑮ grant UI 랜딩+게이트 부채 배치 직후 착수)**: make_deploy_bundle→fresh VM급 환경에서 install.sh 경로·upgrade 경로·internal hosting smoke·backup/restore 리허설을 오케스트레이터가 일괄 실행(기존 verifier 체계 재사용, 신규 발견은 티켓화).
-  - **Phase 2 (공개 호스트)**: 도메인+VPS 1대 필요 — Phase 1 완료 보고 시점에 성재에게 VPS/도메인 준비 요청(그때까지 성재 액션 불요). TLS(ACME)→web 서빙→초대 링크 실왕복→운영 런북 대조까지.
+  - **Phase 2 (공개 호스트)**: 도메인+VPS 1대 필요 — **일정 갱신(성재 2026-07-23): 실 AWS/VPS 호스트는 내부 도커 기반 호스트(momowebqa, `scripts/internal_alpha_stack.sh`로 수명주기 관리)가 충분히 검증된 이후 진행. 그 검증 단계에서 성재가 UXUI 피드백을 조목조목 진행할 예정.** 시점 도래 시 성재에게 VPS/도메인 준비 요청. TLS(ACME)→web 서빙→초대 링크 실왕복→운영 런북 대조까지.
