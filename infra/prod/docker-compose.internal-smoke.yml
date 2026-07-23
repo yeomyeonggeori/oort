@@ -5,9 +5,9 @@
 #     -f infra/prod/docker-compose.prod.yml \
 #     -f infra/prod/docker-compose.internal-smoke.yml config
 #
-# This override keeps api/relay/worker/migrate/mock-hermes image-based. Local
-# smoke points those images at locally built tags, but production hosts must pull
-# pinned registry images and must not build from a source checkout.
+# This override keeps momo/mock-hermes image-based. Local smoke points all six
+# momo commands at one locally built tag; production hosts pull one pinned
+# registry digest and never build from a source checkout.
 
 name: ${COMPOSE_PROJECT_NAME:-momo-internal-smoke}
 
@@ -28,7 +28,7 @@ services:
       start_period: 2s
 
   api:
-    image: ${MOMO_API_IMAGE:-momo-api:internal-smoke}
+    image: ${MOMO_API_IMAGE:-momo:internal-smoke}
     pull_policy: never
     environment:
       DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
@@ -52,7 +52,7 @@ services:
         condition: service_completed_successfully
 
   relay:
-    image: ${MOMO_RELAY_IMAGE:-momo-outbox-relay:internal-smoke}
+    image: ${MOMO_RELAY_IMAGE:-momo:internal-smoke}
     pull_policy: never
     depends_on:
       postgres:
@@ -63,7 +63,7 @@ services:
         condition: service_completed_successfully
 
   worker:
-    image: ${MOMO_WORKER_IMAGE:-momo-agent-worker:internal-smoke}
+    image: ${MOMO_WORKER_IMAGE:-momo:internal-smoke}
     pull_policy: never
     environment:
       RELAY_DATABASE_URL: ${WORKER_DATABASE_URL:?set WORKER_DATABASE_URL}
@@ -79,11 +79,11 @@ services:
         condition: service_healthy
 
   linkshort:
-    image: ${MOMO_LINKSHORT_IMAGE:-momo-linkshort:internal-smoke}
+    image: ${MOMO_LINKSHORT_IMAGE:-momo:internal-smoke}
     pull_policy: never
 
   migrate:
-    image: ${MOMO_MIGRATE_IMAGE:-momo-migrate:internal-smoke}
+    image: ${MOMO_MIGRATE_IMAGE:-momo:internal-smoke}
     pull_policy: never
     restart: "no"
     environment:

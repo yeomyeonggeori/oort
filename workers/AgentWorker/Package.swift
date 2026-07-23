@@ -35,6 +35,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../services/OutboundHTTPPolicy"),
         .package(path: "../../services/MomoMetrics"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
@@ -46,6 +47,8 @@ let package = Package(
             dependencies: [
                 .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
                 .product(name: "MomoMetrics", package: "MomoMetrics"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),

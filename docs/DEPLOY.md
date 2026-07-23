@@ -51,9 +51,10 @@ DNS 전파, ACME 인증서 발급 시간은 포함하지 않는다.
 - Docker Engine + Compose v2, `curl`, `getent`(또는 `dig`), 80/443 인바운드,
   여유 디스크 10 GiB 이상이 준비돼 있다.
 - `infra/prod/secrets.env.example`을 바탕으로 SOPS/age 또는 권한 제한 host-local env를
-  만들었다. 여섯 momo 이미지(`api`, `relay`, `worker`, `migrate`, `web`, `linkshort`)는 각각
-  `ghcr.io/...@sha256:<64 hex>` 전체 digest ref여야 한다. `latest`나 tag-only 입력은
-  install/upgrade가 거부한다.
+  만들었다. `MOMO_IMAGE`는 여섯 명령(`api`, `relay`, `worker`, `migrate`,
+  `web-assets`, `linkshort`)을 담은 하나의 `ghcr.io/...@sha256:<64 hex>` ref다.
+  하위호환 `MOMO_*_IMAGE` 여섯 별칭은 모두 이 값에서 파생한다. `latest`나 tag-only,
+  canonical/별칭 불일치는 install/upgrade가 거부한다.
 - pgBackRest stanza/check/full backup/WAL/PITR 의무와 외부 Hermes HTTPS 자격증명을
   env에 선언했다. 값은 로그나 PR evidence에 붙이지 않는다.
 
@@ -72,7 +73,7 @@ infra/prod/install.sh --env-file /run/momo/prod.env --mode prod \
 ```
 
 스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → GitHub SLSA provenance
-attestation 검사 → `docker compose config --quiet` → pull → PostgreSQL/Redis/Centrifugo →
+attestation 1회 검사 → `docker compose config --quiet` → pull → PostgreSQL/Redis/Centrifugo →
 runtime role 프로비저닝 → one-shot `migrate` →
 env-only `set-owner` → `web-init` →
 API/relay/worker/Caddy → `https://API_DOMAIN/health` 순으로 실행한다. 실패하면 `compose
@@ -80,7 +81,7 @@ ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는�
 `/var/lib/momo/deploy-state.env`에 mode 0600으로 기록한다.
 
 `MOMO_ATTESTATION_POLICY=warn`이 설치 기본값이다. 이 모드에서는 `gh`가 없으면 명시
-경고를, 공식 이미지 attestation이 아직 발행되지 않았으면 이미지 키별 경고를 남기고 계속한다. 이는
+경고를, 공식 이미지 attestation이 아직 발행되지 않았으면 `MOMO_IMAGE` 경고를 남기고 계속한다. 이는
 셀프호스트 설치가 GitHub CLI/attestation 발행 시점에 종속되지 않게 하는 배포 정책이다.
 공개 릴리스 후보 검증에서는 G-H 공급망 증거가 필수이므로 인증된 `gh`와 발행 완료를
 전제로 `MOMO_ATTESTATION_POLICY=required`를 사용한다. 이 모드에서 누락·신원 불일치·
@@ -520,7 +521,7 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 
 **미설정(`APP_DOMAIN` unset) 시 동작 — 완전 하위 호환:** Caddyfile의 site 주소가 예약 sentinel `momo-app-domain-unset.localhost`로 폴백된다. `.localhost`는 Caddy 내부 CA로만 인증서가 발급되어 ACME 트래픽이 없고, sentinel host를 겨냥한 요청은 모든 경로(`/`·deep link·`/v1/*`)에서 404로 fail-closed된다(호스트 매처 가드가 프록시/파일 핸들보다 먼저 평가 — `scripts/web_serving_smoke.sh`가 런타임 검증). 기존 `api.`/`rt.` 2-site 동작은 무변화. **주의:** compose는 `${APP_DOMAIN:-<sentinel>}`로 빈 문자열도 sentinel로 흡수한다 — Caddy는 빈 site 주소를 파싱하지 못하므로 compose 밖에서 이 Caddyfile을 쓸 때도 `APP_DOMAIN`을 빈 값으로 export하지 말 것.
 
-**자산 배치:** `infra/prod/Dockerfile.web`이 Node build stage에서 `npm ci && npm run build`를 수행하고 최종 `momo-web` 이미지에는 `dist`와 복사용 최소 도구만 남긴다. production host는 소스를 빌드하거나 bind mount하지 않는다. install/upgrade가 pinned `MOMO_WEB_IMAGE`를 one-shot `web-init`으로 실행해 `momo-web-static` volume을 교체하고, Caddy는 이를 read-only로 서빙한다(ADR-0002).
+**자산 배치:** `infra/prod/docker/momo.Dockerfile`의 Node build stage가 `npm ci && npm run build`를 수행하고 통합 이미지에 `dist`를 동봉한다. install/upgrade가 같은 pinned `MOMO_IMAGE`의 `web-assets` 명령을 one-shot `web-init`으로 실행해 `momo-web-static` volume을 교체하고, Caddy는 이를 read-only로 서빙한다(ADR-0002). `infra/prod/Dockerfile.web`은 `web-serving` 집중 verifier의 빠른 재빌드 경로로만 남으며 공개 발행 대상이 아니다.
 
 **보안 헤더:** `{$APP_DOMAIN}` site는 공통 `security_headers`(HSTS·`X-Frame-Options DENY` 등)에 더해 SPA 응답에 ADR-0119 CSP를 강제한다. `default-src 'self'`로 inline script를 금지하고, `style-src 'self' 'unsafe-inline'`, `connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}`, `img-src 'self' data:`, `frame-ancestors 'none'`만 허용한다. 실측한 Vite 산출물은 외부 JS/CSS asset tag만 사용해 script hash가 불필요하다. `/v1/centrifugo/*`는 이 site에서도 엣지 403(MOMO-300과 동일 규칙).
 

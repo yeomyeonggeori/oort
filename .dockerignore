@@ -1,0 +1,14 @@
+.git
+.build
+**/.build
+.swiftpm
+**/.swiftpm
+DerivedData
+**/DerivedData
+node_modules
+**/node_modules
+.env
+.env.*
+infra/prod/secrets.env
+infra/prod/*.sops.env
+local-gate-evidence
