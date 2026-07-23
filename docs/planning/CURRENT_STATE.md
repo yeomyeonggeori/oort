@@ -1,5 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-07-23 스냅샷 5(내부 테스트 전환)**: 공개=게이트 충족 **동결**(성재 — 내부 목표치 통과 시 자연 배포). **알파 채널 라이브**: `dawn-kim-official.github.io/momo-alpha`(v0.5.0-alpha.1 발행, `publish_alpha_build.sh`). UXUI 배치 #684~686+#602 발급(패킷 `2026-07-23-uxui-buzz-batch.md`, UXUI 세션 몫 — 성재 전달). 내부 테스트 목표치=계획 §3(7일 무크래시·P0/P1 0·연동 3경로 완주·피드백 라운드 소진). momo-main 다음: UXUI 랜딩분 순차 main 머지, 피드백 인테이크 루프, 서버 공유 방식 결정 대기(Tailscale/단독). 이하 이전:
 > **2026-07-23 스냅샷 4(공개 게이트 완성)**: main=8e5a2d4 — **공개 릴리스 전제 전부 충족**: 554 ✅·리허설 Phase 1 PASS ✅(보고서 2026-07-23-rehearsal-phase1-report.md)·564 README/SECURITY ✅·565 단일 이미지(LICENSE/NOTICE 동봉 단정) ✅. worker 0, 이슈 647~656·677·681 전부 close. **성재 결정 1건 대기: 공개 실행**(절차: publish dispatch→digest 핀→이미지 스캔→v0.1.0 태그→레포 공개 전환 — 전환 클릭만 성재 권한 필요할 수 있음). 잔여 백로그: 566 ✅(reclaim 스크립트)·567 원장 로테이션·code graph Phase 0·옵션 C·ADR-0117. 이하 이전:
 > **2026-07-23 스냅샷 3(Wave H 완결+패키징 레인)**: main=f5a6a55 — **Wave H 전량 랜딩**(554~563 + 클라 558, ADR-0132 완결, 562 /metrics까지). 내부 알파(momowebqa) 신 태세 재배포 완료(`scripts/internal_alpha_stack.sh` 정본, cancel/pause 라우트 실서빙). 패키징 레인 §8 판정 확정(62a046e): **크리티컬 패스 = 565(이미지 6→1, worker 가동 중 #681) → 리허설 Phase 1 → 564 → 공개**. 실 AWS는 내부 도커 호스트 검증+UXUI 피드백 후(성재). Linux 컨테이너 빌드 함정 2건 성문화(암묵 전이 import·swift-crypto Sendable). 이하 이전:
 

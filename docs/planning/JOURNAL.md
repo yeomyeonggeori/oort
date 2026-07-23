@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-23 (Fable 내부 테스트 전환 집행) · 공개 동결, 알파 배포 채널 라이브, UXUI 배치 발급
+- **방향 전환(성재)**: 공개=게이트 충족 동결, 내부 테스트 집중(잔버그·연동·UXUI). 목표치 통과 시 자연 배포. 정본 `2026-07-23-internal-test-focus-plan.md`.
+- **알파 배포 채널 라이브**: 공개 저장소 momo-alpha + Pages(`dawn-kim-official.github.io/momo-alpha`) + `publish_alpha_build.sh` 원커맨드. **첫 빌드 v0.5.0-alpha.1(build 1047) 발행 완료**(LICENSE/NOTICE 동봉, sha256 기록, 인앱 Updates manifest 연결). 소스 비공개 유지·바이너리 공개 유통은 성재 승인분.
+- **UXUI buzz 잔여 배치 발급**: 568(작업신호)·569(managed-by)·570(Create agent 동급)=#684~686 + 기존 #602(diff 카드). 패킷 `handoffs/2026-07-23-uxui-buzz-batch.md`(빡빡 종료조건 — design-review High 0·스테일 신호 3초·4클릭 여정 등). **성재가 UXUI 세션에 직접 전달**(프롬프트 제공됨). buzz 이행 원장은 계획 §5.
+- 대기: 서버 공유 방식(Tailscale vs 단독 도그푸드) 성재 결정 → 결정 시 연동 온보딩 §2 실행.
+
 ## 2026-07-23 (Fable 공개 게이트 완성) · 565 랜딩 → 리허설 Phase 1 PASS → 564 랜딩 — "공개 버튼만 남음"
 - **565 랜딩**: 단일 momo 이미지(6 커맨드+웹 에셋+LICENSE/NOTICE 빌드 시 단정), verifier 6/6 실기동 PASS(28240s). 공개 표면 6→1.
 - **리허설 Phase 1 PASS(5/5)** — 보고서 2026-07-23-rehearsal-phase1-report.md. 검출 결함 4건 당일 해소(--wait 원샷 quirk→install 동형 시퀀스, 한도 600s, 528 픽스처 갭→mock 툴콜 토글, 증적 변수 잔재).
