@@ -206,6 +206,41 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var emptyChannelTitle: String {
+        switch language {
+        case .korean: return "이 채널을 함께 시작하세요"
+        case .english: return "Start this channel together"
+        }
+    }
+
+    var emptyChannelSubtitle: String {
+        switch language {
+        case .korean: return "사람을 초대하거나 에이전트를 추가하고, 첫 메시지로 대화를 시작하세요."
+        case .english: return "Add people or an agent, then start the conversation with the first message."
+        }
+    }
+
+    var emptyChannelAddPeople: String {
+        switch language {
+        case .korean: return "사람 초대"
+        case .english: return "Add people"
+        }
+    }
+
+    var emptyChannelAddAgent: String {
+        switch language {
+        case .korean: return "에이전트 추가"
+        case .english: return "Add agent"
+        }
+    }
+
+    var emptyChannelRequestGuidance: String {
+        switch language {
+        case .korean: return "사람이나 에이전트를 추가하려면 워크스페이스 관리자에게 요청하세요."
+        case .english: return "Ask a workspace admin to add people or an agent to this channel."
+        }
+    }
+
     var messageSending: String {
         switch language {
         case .korean: return "전송 중"

@@ -41,6 +41,14 @@ private struct MomoMemoryBrowserRequest: Identifiable {
     let agentID: MemberID?
 }
 
+// Empty-channel "Add agent" entry (MOMO-570): the created agent is auto-invited to
+// this channel on completion, so the empty-channel to first-mention journey stays
+// within four clicks.
+private struct MomoChannelAgentCreationRequest: Identifiable {
+    let id = UUID()
+    let channelID: ChannelID
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var workConsoleController: MomoWorkConsoleController
@@ -58,6 +66,7 @@ public struct MomoMacRootView: View {
     @State private var showWorkspaceSearch = false
     @State private var channelSettingsRequest: MomoChannelSettingsRequest?
     @State private var memoryBrowserRequest: MomoMemoryBrowserRequest?
+    @State private var channelAgentCreation: MomoChannelAgentCreationRequest?
     @State private var showMemberInspector = true
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
@@ -184,6 +193,17 @@ public struct MomoMacRootView: View {
                 viewModel: viewModel,
                 copy: copy,
                 initialAgentID: request.agentID
+            )
+            .id(request.id)
+        }
+        .sheet(item: $channelAgentCreation) { request in
+            MomoAgentOnboardingView(
+                viewModel: viewModel,
+                copy: copy,
+                onCompleted: { memberID in
+                    channelAgentCreation = nil
+                    Task { await viewModel.addMember(memberID, to: request.channelID) }
+                }
             )
             .id(request.id)
         }
@@ -478,6 +498,12 @@ public struct MomoMacRootView: View {
             onInviteToChannel: viewModel.canManageWorkspace
                 ? { channelID in
                     presentChannelSettings(channelID, initialTab: .members)
+                }
+                : nil,
+            onCreateAgent: (viewModel.canManageWorkspace && viewModel.supportsAgentAddressOnboarding)
+                ? { channelID in
+                    viewModel.resetAgentOnboarding()
+                    channelAgentCreation = MomoChannelAgentCreationRequest(channelID: channelID)
                 }
                 : nil,
             focusComposerRequest: composerFocusRequest,
