@@ -887,7 +887,7 @@ public struct MessageListView: View {
                             .padding(.top, 8)
                         }
 
-                        ForEach(viewModel.visibleWorkingAgents) { agent in
+                        ForEach(turnLivenessAgents) { agent in
                             AgentWorkingTimelineRow(
                                 agent: agent,
                                 signal: timelineWorkingSignal(for: agent.id),
@@ -1741,12 +1741,27 @@ public struct MessageListView: View {
     /// deterministic and snapshot-stable regardless of viewport/geometry.
     private var timelineWorkingAgentIDs: Set<MemberID> {
         var ids = Set(viewModel.visibleWorkingAgents.map(\.id))
+        ids.formUnion(livePartialAgentIDs)
+        return ids
+    }
+
+    /// Agents already represented by a live partial bubble on the timeline.
+    private var livePartialAgentIDs: Set<MemberID> {
+        var ids = Set<MemberID>()
         for partial in livePartials {
             if let agentID = viewModel.agentStatuses[partial.runId]?.agentMemberId {
                 ids.insert(agentID)
             }
         }
         return ids
+    }
+
+    /// Turn-liveness rows exclude any agent whose partial bubble is already on
+    /// screen, so the "{agent} 작업 중" line never stacks under its own partial
+    /// (even in the pre-first-token thinking gap). The footer uses the same set.
+    private var turnLivenessAgents: [Member] {
+        let onPartial = livePartialAgentIDs
+        return viewModel.visibleWorkingAgents.filter { !onPartial.contains($0.id) }
     }
 
     /// Signals for the composer footer. Deterministic data rule (no scroll/geometry
