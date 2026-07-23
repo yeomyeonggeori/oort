@@ -1768,30 +1768,21 @@ struct TimelineEmptyState: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            VStack(spacing: 8) {
-                Text(copy.emptyChannelTitle)
-                    .font(.title3.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                Text(copy.emptyChannelSubtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // Hierarchy comes from weight and secondary color, not size inflation:
+            // the two co-equal actions below carry the intent, so the title stays
+            // at body weight and no subtitle restates the button labels.
+            Text(copy.emptyChannelTitle)
+                .font(.body.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             if actions.showsManagementActions {
-                HStack(spacing: 12) {
-                    if actions.canInvitePeople {
-                        Button(action: invitePeople) {
-                            Label(copy.emptyChannelAddPeople, systemImage: "person.badge.plus")
-                        }
-                    }
-                    if actions.canCreateAgent {
-                        Button(action: createAgent) {
-                            Label(copy.emptyChannelAddAgent, systemImage: "sparkles")
-                        }
-                        .keyboardShortcut("a", modifiers: [.command, .shift])
-                    }
+                // The invite/create pair reflows to a vertical stack once the
+                // timeline column is narrowed by the sidebar and inspector, so
+                // neither large button clips at minimum window width (MOMO-570).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { managementActions }
+                    VStack(spacing: 12) { managementActions }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
@@ -1808,6 +1799,26 @@ struct TimelineEmptyState: View {
         .frame(maxWidth: MomoTheme.Onboarding.emptyChannelContentMaximumWidth)
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 32)
+    }
+
+    // Shared by the horizontal and vertical layouts so the reflow keeps identical
+    // actions and a single keyboard shortcut.
+    @ViewBuilder
+    private var managementActions: some View {
+        if actions.canInvitePeople {
+            Button(action: invitePeople) {
+                Label(copy.emptyChannelAddPeople, systemImage: "person.badge.plus")
+            }
+        }
+        if actions.canCreateAgent {
+            // Agents are first-class members, so "Add agent" is a person-badge-plus
+            // sibling of "Add people" (filled to distinguish the two), never an
+            // AI-magic glyph like sparkles.
+            Button(action: createAgent) {
+                Label(copy.emptyChannelAddAgent, systemImage: "person.fill.badge.plus")
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+        }
     }
 }
 

@@ -185,13 +185,6 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var timelineEmptyTitle: String {
-        switch language {
-        case .korean: return "첫 메시지를 보내보세요"
-        case .english: return "Send the first message"
-        }
-    }
-
     var timelineEmptyAction: String {
         switch language {
         case .korean: return "메시지 작성하기"
@@ -213,16 +206,11 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var emptyChannelSubtitle: String {
-        switch language {
-        case .korean: return "사람을 초대하거나 에이전트를 추가하고, 첫 메시지로 대화를 시작하세요."
-        case .english: return "Add people or an agent, then start the conversation with the first message."
-        }
-    }
-
     var emptyChannelAddPeople: String {
         switch language {
-        case .korean: return "사람 초대"
+        // Peer to "에이전트 추가": both actions use the same verb so the co-equal
+        // framing survives translation (English is Add/Add).
+        case .korean: return "사람 추가"
         case .english: return "Add people"
         }
     }
