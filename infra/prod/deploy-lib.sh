@@ -98,6 +98,41 @@ validate_momo_image_digests() {
   deploy_log "validated six immutable momo image digests"
 }
 
+verify_momo_image_attestations() {
+  local policy="${MOMO_ATTESTATION_POLICY:-warn}"
+  local image_key image_ref
+
+  case "$policy" in
+    warn|required) ;;
+    *) deploy_fail "MOMO_ATTESTATION_POLICY must be warn or required" ;;
+  esac
+
+  if ! command -v gh >/dev/null 2>&1; then
+    if [ "$policy" = "required" ]; then
+      deploy_fail "GitHub CLI is required by MOMO_ATTESTATION_POLICY=required"
+    fi
+    deploy_log "WARNING: GitHub CLI is unavailable; skipping provenance attestation verification"
+    return 0
+  fi
+
+  for image_key in \
+    MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
+    MOMO_WEB_IMAGE MOMO_LINKSHORT_IMAGE; do
+    image_ref="${!image_key}"
+    if gh attestation verify "oci://$image_ref" \
+      --repo Dawn-kim-official/momo \
+      --predicate-type https://slsa.dev/provenance/v1 >/dev/null 2>&1; then
+      deploy_log "verified SLSA provenance attestation for $image_key"
+      continue
+    fi
+
+    if [ "$policy" = "required" ]; then
+      deploy_fail "provenance attestation verification failed for $image_key"
+    fi
+    deploy_log "WARNING: no verifiable provenance attestation for $image_key; continuing under warn policy"
+  done
+}
+
 configure_compose() {
   COMPOSE=(docker compose)
   if [ -n "${ENV_FILE:-}" ]; then
