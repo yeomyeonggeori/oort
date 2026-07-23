@@ -195,14 +195,18 @@ docker build \
   . 2>&1 | tee "$TMP_ROOT/build-momo-${RUN_SLUG}.log"
 docker build -f "$MOCK_DOCKERFILE" -t "$MOCK_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-mock-hermes-${RUN_SLUG}.log"
 
-echo "[host-runtime] booting prod + internal-smoke stack (up -d --wait)"
-# MOMO-316: `--wait`가 HTTP 준비를 보장하는 근거 —
-#   api      = internal-smoke override의 /health healthcheck(healthy까지 대기)
-#   migrate  = one-shot 완주(service_completed_successfully) 대기
-#   postgres/redis/centrifugo/caddy/mock-hermes = 기존 healthcheck healthy 대기
-if ! compose up -d --wait --wait-timeout "${HOST_RUNTIME_WAIT_TIMEOUT:-600}" 2>&1 | tee "$COMPOSE_LOG"; then
-  fail "compose up -d --wait did not reach healthy/completed state"
-fi
+echo "[host-runtime] booting prod + internal-smoke stack (install.sh 동형 시퀀스)"
+# MOMO-316/565: 원샷(runtime-roles/migrate/web-init)은 install.sh처럼 `run --rm`으로
+# 분리 실행한다 — `up --wait`는 exit-0 원샷을 실패로 판정하는 compose quirk가 있어
+# (v5.x에서 재현, 리허설 Phase 1 검출) 상주 서비스에만 건다. 이 순서가 실제
+# 설치 경로와도 동형이라 리허설 충실도도 올라간다.
+{
+  compose up -d --wait --wait-timeout 180 postgres redis centrifugo mock-hermes &&
+  compose run --rm --no-deps runtime-roles &&
+  compose run --rm --no-deps migrate &&
+  compose run --rm --no-deps web-init &&
+  compose up -d --wait --wait-timeout "${HOST_RUNTIME_WAIT_TIMEOUT:-600}" api relay worker linkshort caddy
+} 2>&1 | tee "$COMPOSE_LOG" || fail "install-shaped boot sequence did not reach healthy state"
 
 echo "[host-runtime] verifying app health through Caddy edge"
 # MOMO-316: 이 wait_http 폴링은 유지한다 — Caddy "edge 라우팅"(host port 매핑 +
