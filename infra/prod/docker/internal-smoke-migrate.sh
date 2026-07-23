@@ -26,8 +26,38 @@ case "$command" in
     echo "[migrate] bootstrap owner credentials updated"
     exit 0
     ;;
+  member-list)
+    [ "$#" -eq 1 ] || {
+      echo "[migrate] member-list does not accept arguments" >&2
+      exit 2
+    }
+    : "${MOMO_OPS_WORKSPACE_ID:?set MOMO_OPS_WORKSPACE_ID}"
+    psql "${DATABASE_URL:?set DATABASE_URL}" \
+      -v ON_ERROR_STOP=1 \
+      --no-psqlrc \
+      -f infra/prod/member_list.sql
+    exit 0
+    ;;
+  invite-create)
+    [ "$#" -eq 1 ] || {
+      echo "[migrate] invite-create does not accept arguments" >&2
+      exit 2
+    }
+    : "${MOMO_OPS_WORKSPACE_ID:?set MOMO_OPS_WORKSPACE_ID}"
+    : "${MOMO_OPS_INVITE_ROLE:?set MOMO_OPS_INVITE_ROLE}"
+    : "${MOMO_OPS_INVITE_MAX_USES:?set MOMO_OPS_INVITE_MAX_USES}"
+    : "${MOMO_OPS_INVITE_EXPIRES_DAYS:?set MOMO_OPS_INVITE_EXPIRES_DAYS}"
+    : "${MOMO_OPS_INVITE_CODE:?set MOMO_OPS_INVITE_CODE}"
+    psql "${DATABASE_URL:?set DATABASE_URL}" \
+      -q \
+      -v ON_ERROR_STOP=1 \
+      --no-psqlrc \
+      -f infra/prod/create_invite.sql
+    echo "[migrate] operator invite created (raw code not printed)"
+    exit 0
+    ;;
   *)
-    echo "[migrate] unknown command: $command (expected migrate or set-owner)" >&2
+    echo "[migrate] unknown command: $command" >&2
     exit 2
     ;;
 esac
