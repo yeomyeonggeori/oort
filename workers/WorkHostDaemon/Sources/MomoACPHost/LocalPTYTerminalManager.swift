@@ -4,6 +4,7 @@ import Foundation
 import Darwin
 #else
 import Glibc
+import CMomoPTY
 #endif
 
 public final class HostPTYProcess: @unchecked Sendable {
@@ -102,11 +103,13 @@ private func openPseudoTerminal() throws -> (master: Int32, slave: Int32) {
     }
     return (master, slave)
 #else
-    let master = Glibc.posix_openpt(O_RDWR | O_NOCTTY)
+    // The Swift Glibc overlay omits these POSIX PTY calls; go through the
+    // CMomoPTY C shim (which sets _XOPEN_SOURCE) instead.
+    let master = momo_posix_openpt(O_RDWR | O_NOCTTY)
     guard master >= 0,
-          Glibc.grantpt(master) == 0,
-          Glibc.unlockpt(master) == 0,
-          let slaveName = Glibc.ptsname(master)
+          momo_grantpt(master) == 0,
+          momo_unlockpt(master) == 0,
+          let slaveName = momo_ptsname(master)
     else {
         if master >= 0 { systemClose(master) }
         throw ACPHostError.terminalUnavailable

@@ -24,8 +24,12 @@ let package = Package(
         ),
         .target(
             name: "MomoACPHost",
+            dependencies: ["CMomoPTY"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        // C shim exposing POSIX PTY calls the Swift Glibc overlay omits (Linux
+        // container portability for ACP terminal/* — MOMO-579 / WH-1).
+        .target(name: "CMomoPTY"),
         .testTarget(
             name: "WorkHostDaemonTests",
             dependencies: [
