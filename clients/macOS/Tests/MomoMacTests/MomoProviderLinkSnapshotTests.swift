@@ -17,6 +17,7 @@ final class MomoProviderLinkSnapshotTests: XCTestCase {
         case notConfigured
         case testing
         case failed
+        case unsavedBearer
     }
 
     func testConnectedLightSnapshot() async throws {
@@ -41,6 +42,13 @@ final class MomoProviderLinkSnapshotTests: XCTestCase {
 
     func testConnectedEnglishLightSnapshot() async throws {
         try await assertState(.connected, scheme: .light, language: .english, name: "light", testName: #function)
+    }
+
+    // Captures the on-screen "face" of the navigation lock: an unsaved bearer
+    // shows the inline lock clue, and the exit is reachable via the discard
+    // confirmation the host raises on close/Esc/switch.
+    func testUnsavedBearerLightSnapshot() async throws {
+        try await assertState(.unsavedBearer, scheme: .light, language: .korean, name: "light", testName: #function)
     }
 
     // MARK: - Harness
@@ -109,6 +117,14 @@ final class MomoProviderLinkSnapshotTests: XCTestCase {
             let model = fixture.model(client: client)
             await model.load()
             await model.test()
+            return (MomoProviderLinkSettingsView(language: language, model: model), nil)
+
+        case .unsavedBearer:
+            let client = MockProviderLinkClient(status: fixture.databaseStatus)
+            let model = fixture.model(client: client)
+            await model.load()
+            // Typed but unsaved: navigation is now locked and the inline clue shows.
+            model.bearerDraft = "hermes-gateway-bearer-abcdz9k2"
             return (MomoProviderLinkSettingsView(language: language, model: model), nil)
         }
     }
