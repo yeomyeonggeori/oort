@@ -113,6 +113,55 @@ struct Database: Sendable {
         try await withTenantTransaction(workspaceID: workspaceID, body)
     }
 
+    /// Run an operator provider-link transaction (MOMO-572 / ADR-0004 증보 1).
+    ///
+    /// `provider_link` is instance-global operator config with a GUC-gated RLS
+    /// policy. This sets `app.provider_link_admin = 'on'` to unlock the row and
+    /// `app.workspace_id` so the same transaction can also write the operator's
+    /// audit_log entry (which is workspace-scoped). Callers MUST verify the
+    /// platform:read operator scope BEFORE opening this transaction.
+    func withProviderLinkTransaction<Result: Sendable>(
+        workspaceID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            return try await client.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                _ = try await conn.query(
+                    "SELECT set_config('app.provider_link_admin', 'on', true)",
+                    logger: logger
+                )
+                return try await body(conn)
+            }
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
+    /// Read-only variant of `withProviderLinkTransaction` for resolution paths
+    /// that never write and therefore need no workspace binding.
+    func withProviderLinkReadConnection<Result: Sendable>(
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            return try await client.withTransaction(logger: logger) { conn in
+                _ = try await conn.query("SET TRANSACTION READ ONLY", logger: logger)
+                _ = try await conn.query(
+                    "SELECT set_config('app.provider_link_admin', 'on', true)",
+                    logger: logger
+                )
+                return try await body(conn)
+            }
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
     /// Run an explicit platform-admin inspection read using a separate BYPASSRLS
     /// role. The transaction is read-only, so this helper must never back tenant
     /// write paths.
