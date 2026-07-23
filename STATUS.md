@@ -1,5 +1,17 @@
 # momo 진행 현황
 
+## MOMO-571 momo-ops workspace-create + role 능력 매트릭스 감사 (#687, 2026-07-23, ADR-0117)
+
+- W-1: migrate 이미지에 env-only `workspace-create` 서브커맨드를 추가했다(`infra/prod/create_workspace.sql` + `internal-smoke-migrate.sh` 분기). 워크스페이스 이름/slug·초기 owner 이메일/비밀번호를 psql `\getenv`로만 받아 한 트랜잭션에 workspace 행 + owner human/member/workspace_membership(role=owner) + `#general` 채널 + channel_seq + owner 채널 membership + `workspace.created` 감사행을 만든다. 비밀번호는 `momo_password_hash`로 해시되며 argv/stdout에 노출되지 않는다(ADR-0004). **slug 재실행 정책 = 명시적 거부**(부분 워크스페이스 없음; 재프로비저닝은 별도 slug 또는 `set-owner` 사용). `momo-ops.sh workspace-create`는 env-only fail-closed 래퍼로 연결했다.
+- W-3: `create_invite.sql`의 owner 역할 거부(≤admin만 허용)를 재확인했고, 정적 verifier에 owner 거부 grep + 런타임 verifier에 owner 역할 초대 거부·행 미생성 negative 테스트를 보강했다.
+- W-2: ADR-0117 §D3 능력 매트릭스를 서버 집행 지점과 대조 감사했다. 명백한 role 검증 누락(가드 부재)은 **없다** — 감사한 4개 파일의 모든 변경 엔드포인트에 명시 가드가 있다. 아래는 매트릭스와 구현의 **정책 divergence**로, 스코프 폭발 방지를 위해 수정하지 않고 티켓 후보로 등재한다:
+  - **GAP-1 (에이전트 관리 범위)**: `AgentProfileRoutes.requireEditor`는 `role.isAdmin || owner_human_id == principal`을 허용해, admin 미만 member(또는 guest)라도 자기가 소유한 agent를 관리·pause할 수 있다. D3는 "에이전트 생성/관리·pause = owner/admin, member ❌"로 명시. ADR-0131 소유권 경로와 D3의 조정 필요(소유 human의 관리 허용 여부 결정 → requireEditor 조임 또는 D3 개정). *보안 완화 아님(소유권 스코프 한정).*
+  - **GAP-2 (채널 생성 정책 토글 부재)**: `ChannelRoutes.create`는 `requireWorkspaceAdmin`(owner/admin)만 허용. D3는 "채널 생성 = owner/admin/**member(정책 토글)**". 즉 구현이 매트릭스보다 엄격(member 생성 불가, 토글 미존재). member-생성 정책 토글 추가 또는 D3를 admin-only로 개정.
+  - **GAP-3 (채널 아카이브 미구현)**: D3는 "채널 생성·아카이브"를 능력으로 명시하나 `ChannelRoutes`에 아카이브 엔드포인트가 없다(list/create/notification-pref/addMember/removeMember만). 아카이브 엔드포인트 + owner/admin(+member 토글) 집행 구현 필요.
+  - 정합 확인(가드 일치): `AuditRoutes.list`=requireAdmin ✅; `MemberLifecycleRoutes`의 role변경/제거/suspend/reinstate/bans=requireAdmin + `requireCanManage`(≤자기 role·equal/higher 금지·admin은 admin/owner 부여 금지) ✅; 채널 멤버 add/remove=requireWorkspaceAdmin ✅; updateNotificationPref=자기 채널 멤버십(개인 설정) ✅.
+  - 스코프 밖: D3의 "메시지·멘션·Work 실행" 및 "guest=초대된 채널만" 집행은 지정 4개 파일이 아닌 Message/Work 라우트 소관 — 이번 감사 범위 아님(별도 후속 감사 후보).
+- 검증: `bash -n`/`sh -n` + 정적 verifier PASS. `scripts/verify_workspace_create.sh`(예약 포트 28250) 및 `verify_momo_ops_runtime.sh` 보강분의 Docker 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다. 신규 마이그레이션은 불필요했다(스키마가 이미 멀티 워크스페이스 전제 — ADR-0117 Context 1).
+
 ## MOMO-564 공개용 README + SECURITY.md (#656, 2026-07-23)
 
 - 공개 README를 영어 우선 단일본으로 재작성해 단일 이미지 5분 설치, Dawn 비경유 신뢰 경계, RLS FORCE, 에이전트 온보딩 3경로, 공개 예제·Apache-2.0/DCO를 현재 구현에 맞춰 정리했다.

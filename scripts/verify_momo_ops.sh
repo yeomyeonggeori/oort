@@ -18,8 +18,9 @@ OPS="infra/prod/momo-ops.sh"
 ENTRYPOINT="infra/prod/docker/internal-smoke-migrate.sh"
 DOCKERFILE="infra/prod/docker/internal-smoke-migrate.Dockerfile"
 for path in "$OPS" "$ENTRYPOINT" "$DOCKERFILE" \
-  infra/prod/member_list.sql infra/prod/create_invite.sql; do
-  [ -f "$path" ] || fail "missing MOMO-560 artifact: $path"
+  infra/prod/member_list.sql infra/prod/create_invite.sql \
+  infra/prod/create_workspace.sql; do
+  [ -f "$path" ] || fail "missing MOMO-560/571 artifact: $path"
 done
 
 bash -n "$OPS"
@@ -27,10 +28,19 @@ sh -n "$ENTRYPOINT"
 grep -Fq 'run_prod_preflight' "$OPS" || fail "operator wrapper lost production preflight reuse"
 grep -Fq 'migrate member-list' "$OPS" || fail "member list is not routed through migrate image"
 grep -Fq 'migrate invite-create' "$OPS" || fail "invite creation is not routed through migrate image"
+grep -Fq 'migrate workspace-create' "$OPS" || fail "workspace creation is not routed through migrate image"
 grep -Fq '\getenv invite_code MOMO_OPS_INVITE_CODE' infra/prod/create_invite.sql ||
   fail "invite SQL does not use env-only bearer input"
 grep -Fq 'momo_invite_code_hash(input.raw_code)' infra/prod/create_invite.sql ||
   fail "invite SQL does not hash the bearer code before persistence"
+# MOMO-571 W-3: invites must never mint an owner (owner transfer is a distinct act).
+grep -Fq "input.invite_role = 'owner'" infra/prod/create_invite.sql ||
+  fail "invite SQL does not reject the owner role"
+# MOMO-571 W-1: workspace-create owner password is env-only and never selected.
+grep -Fq '\getenv owner_password MOMO_OPS_OWNER_PASSWORD' infra/prod/create_workspace.sql ||
+  fail "workspace SQL does not use env-only owner password input"
+grep -Fq 'momo_password_hash(input.password)' infra/prod/create_workspace.sql ||
+  fail "workspace SQL does not hash the owner password before persistence"
 if grep -Eq '(^|[[:space:]])(-c|--command)[[:space:]]' "$OPS"; then
   fail "database operation must not interpolate credentials or values into psql command text"
 fi
@@ -72,6 +82,13 @@ if [[ " $* " == *' run --rm --no-deps '* ]] && [[ " $* " == *' invite-create '* 
 fi
 if [[ " $* " == *' run --rm --no-deps '* ]] && [[ " $* " == *' member-list '* ]]; then
   printf 'member-list-ok\n'
+fi
+if [[ " $* " == *' run --rm --no-deps '* ]] && [[ " $* " == *' workspace-create '* ]]; then
+  [ -n "${MOMO_OPS_WORKSPACE_NAME:-}" ] || exit 11
+  [ -n "${MOMO_OPS_WORKSPACE_SLUG:-}" ] || exit 12
+  [ -n "${MOMO_OPS_OWNER_EMAIL:-}" ] || exit 13
+  [ -n "${MOMO_OPS_OWNER_PASSWORD:-}" ] || exit 14
+  printf 'workspace-create-ok\n'
 fi
 SH
 
@@ -142,6 +159,37 @@ if run_ops invite-create --env-file "$VALID_ENV" \
   fail "invite-create overwrote an existing secret file"
 fi
 pass "invite bearer stays out of argv/stdout and is written once as mode 0600"
+
+# MOMO-571 W-1: workspace-create is env-only and fails closed on missing inputs.
+: > "$TRACE"
+if run_ops workspace-create --from-env > "$TMP_ROOT/wsc-missing.out" 2>&1; then
+  fail "workspace-create succeeded without required environment inputs"
+fi
+[ ! -s "$TRACE" ] || fail "workspace-create touched Docker before fail-closed validation"
+grep -Fq 'MOMO_OPS_WORKSPACE_NAME' "$TMP_ROOT/wsc-missing.out" ||
+  fail "workspace-create missing-input failure was not actionable"
+
+: > "$TRACE"
+WSC_PASSWORD="w0rkspace-owner-$$-secret"
+if MOMO_OPS_WORKSPACE_NAME="Acme Alpha" \
+   MOMO_OPS_WORKSPACE_SLUG="acme-alpha" \
+   MOMO_OPS_OWNER_EMAIL="owner@acme.test" \
+   MOMO_OPS_OWNER_PASSWORD="$WSC_PASSWORD" \
+   run_ops workspace-create --from-env > "$TMP_ROOT/wsc.out" 2>&1; then
+  :
+else
+  fail "workspace-create mock path failed with valid inputs"
+fi
+grep -Fq 'migrate workspace-create' "$TRACE" || fail "workspace-create did not use migrate image"
+grep -Fq 'workspace-create-ok' "$TMP_ROOT/wsc.out" || fail "workspace-create output was lost"
+if grep -Fq "$WSC_PASSWORD" "$TRACE" || grep -Fq "$WSC_PASSWORD" "$TMP_ROOT/wsc.out"; then
+  fail "owner password leaked into argv/stdout trace"
+fi
+# The slug is passed as an env passthrough (-e NAME), never interpolated into argv.
+if grep -Fq 'acme-alpha' "$TRACE"; then
+  fail "workspace slug value leaked into container argv"
+fi
+pass "workspace-create is env-only, fails closed, and keeps the owner password off argv/stdout"
 
 run_ops upgrade --env-file "$VALID_ENV" --backup-evidence "$TMP_ROOT/pass.md" \
   > "$TMP_ROOT/upgrade.out" 2>&1

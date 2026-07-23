@@ -39,6 +39,7 @@ Commands:
   member list --workspace-id ID  List active workspace members via migrate image
   invite-create --workspace-id ID --output FILE
                                  Create an invite; raw code goes only to FILE
+  workspace-create               Create a workspace + initial owner (env-only)
 
 Common options:
   --env-file FILE                Host-local environment file
@@ -55,6 +56,13 @@ invite-create options:
   --max-uses N                   Redemption limit, 1..10000 (default: 1)
   --expires-days N               Expiry, 1..365 days (default: 7)
   --output FILE                  New mode-0600 file for the one-time raw code
+
+workspace-create environment (via --env-file or --from-env only):
+  MOMO_OPS_WORKSPACE_NAME        Display name, 1..200 chars
+  MOMO_OPS_WORKSPACE_SLUG        1..63 chars [a-z0-9-], no leading/trailing hyphen
+  MOMO_OPS_OWNER_EMAIL           Initial owner login email
+  MOMO_OPS_OWNER_PASSWORD        Initial owner password (never accepted as an arg)
+  Re-running with an existing slug is refused (no partial workspace).
 
 For SOPS:
   sops exec-env infra/prod/secrets.sops.env \
@@ -189,6 +197,64 @@ run_invite_create() {
   deploy_log "invite created; the one-time code was written to a mode-0600 file: $INVITE_OUTPUT"
 }
 
+run_workspace_create() {
+  [ "${#POSITIONAL[@]}" -eq 0 ] ||
+    deploy_usage_fail "workspace-create does not accept positional arguments"
+
+  # All four inputs arrive only through the operator env source (--env-file or
+  # --from-env). The password is never accepted as an argument (ADR-0004).
+  # Source the env and fail closed BEFORE any Docker/preflight side effect.
+  case "$DEPLOY_MODE" in
+    staging|prod|production) ;;
+    *) deploy_usage_fail "--mode must be staging, prod, or production" ;;
+  esac
+  configure_env_source
+  load_deploy_env
+
+  [ -n "${MOMO_OPS_WORKSPACE_NAME:-}" ] ||
+    deploy_fail "workspace-create requires MOMO_OPS_WORKSPACE_NAME in the environment"
+  [ -n "${MOMO_OPS_WORKSPACE_SLUG:-}" ] ||
+    deploy_fail "workspace-create requires MOMO_OPS_WORKSPACE_SLUG in the environment"
+  [ -n "${MOMO_OPS_OWNER_EMAIL:-}" ] ||
+    deploy_fail "workspace-create requires MOMO_OPS_OWNER_EMAIL in the environment"
+  [ -n "${MOMO_OPS_OWNER_PASSWORD:-}" ] ||
+    deploy_fail "workspace-create requires MOMO_OPS_OWNER_PASSWORD in the environment"
+
+  # Fail closed on obvious shell-layer violations before touching the database.
+  # The SQL re-validates authoritatively.
+  [ "${#MOMO_OPS_WORKSPACE_NAME}" -le 200 ] ||
+    deploy_fail "MOMO_OPS_WORKSPACE_NAME must be at most 200 characters"
+  [[ "$MOMO_OPS_WORKSPACE_SLUG" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
+    deploy_fail "MOMO_OPS_WORKSPACE_SLUG must be 1..63 chars of lowercase letters, digits, or hyphens (no leading/trailing hyphen)"
+  case "$MOMO_OPS_OWNER_EMAIL" in
+    *@*) ;;
+    *) deploy_fail "MOMO_OPS_OWNER_EMAIL must be a valid email address" ;;
+  esac
+  case "$MOMO_OPS_WORKSPACE_SLUG:$MOMO_OPS_OWNER_EMAIL:$MOMO_OPS_OWNER_PASSWORD" in
+    *change-me*|*__BASE_DOMAIN__*|*__INITIAL_OWNER_PASSWORD__*|*example.com*)
+      deploy_fail "workspace-create inputs must replace template placeholders" ;;
+  esac
+
+  # Inputs are valid — now run the strict preflight and render the compose
+  # contract before dispatching the one-shot workspace-create through migrate.
+  run_prod_preflight
+  configure_compose
+  render_compose_contract
+
+  export MOMO_OPS_WORKSPACE_NAME
+  export MOMO_OPS_WORKSPACE_SLUG
+  export MOMO_OPS_OWNER_EMAIL
+  export MOMO_OPS_OWNER_PASSWORD
+
+  deploy_log "creating workspace '$MOMO_OPS_WORKSPACE_SLUG' with its initial owner (credentials redacted)"
+  "${COMPOSE[@]}" run --rm --no-deps \
+    -e MOMO_OPS_WORKSPACE_NAME \
+    -e MOMO_OPS_WORKSPACE_SLUG \
+    -e MOMO_OPS_OWNER_EMAIL \
+    -e MOMO_OPS_OWNER_PASSWORD \
+    migrate workspace-create
+}
+
 case "$ACTION" in
   help|-h|--help)
     usage
@@ -196,7 +262,7 @@ case "$ACTION" in
   upgrade)
     exec "$SCRIPT_DIR/upgrade.sh" "$@"
     ;;
-  status|logs|backup-hint|member|invite-create)
+  status|logs|backup-hint|member|invite-create|workspace-create)
     parse_common_and_action_options "$@"
     case "$ACTION" in
       status)
@@ -233,6 +299,7 @@ EOF
         ;;
       member) run_member_list ;;
       invite-create) run_invite_create ;;
+      workspace-create) run_workspace_create ;;
     esac
     ;;
   *)
