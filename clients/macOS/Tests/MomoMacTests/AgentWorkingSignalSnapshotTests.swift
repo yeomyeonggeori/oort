@@ -52,6 +52,9 @@ final class AgentWorkingSignalSnapshotTests: XCTestCase {
         .background(Color(nsColor: .textBackgroundColor))
         .environment(\.colorScheme, scheme)
         .environment(\.locale, Locale(identifier: "ko_KR"))
+        // Inject a fixed clock so the elapsed readout is deterministic ("1:23")
+        // instead of wall-clock now minus a 2026 startedAt (a runaway value).
+        .environment(\.agentWorkingClock, now)
     }
 
     private func render(_ scheme: ColorScheme) throws -> NSImage {

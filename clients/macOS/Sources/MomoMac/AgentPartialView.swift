@@ -62,9 +62,12 @@ public struct AgentPartialView: View {
                 if let text = partial.textDelta, !text.isEmpty {
                     AgentTranscriptText(text: text, isStreaming: true, style: .message)
                 } else if !presentation.showsDeveloperDetails {
+                    // "sparkle" matches the working-concept glyph used by the
+                    // turn-liveness mark and channel badge; "ellipsis.bubble" read
+                    // as the human typing affordance on an adjacent row.
                     Label(
                         copy.agentWorkingTitle(author?.displayName ?? copy.agent),
-                        systemImage: "ellipsis.bubble"
+                        systemImage: "sparkle"
                     )
                     .font(.body)
                     .foregroundStyle(.secondary)

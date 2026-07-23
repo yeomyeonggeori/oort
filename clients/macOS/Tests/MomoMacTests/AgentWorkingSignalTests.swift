@@ -174,6 +174,69 @@ final class AgentWorkingSignalResolverTests: XCTestCase {
         XCTAssertTrue(signals.isEmpty)
     }
 
+    // MARK: Idle cutoff (lost-terminal-event self-expiry)
+
+    func testStaleRunSelfExpiresAfterIdleCutoff() {
+        let agentID = MemberID()
+        let run = RunID()
+        let started = Date(timeIntervalSince1970: 1_000)
+        // Last activity is well past the cutoff and no terminal event ever arrived.
+        let lastActivity = Date(timeIntervalSince1970: 2_000)
+        let now = lastActivity.addingTimeInterval(AgentWorkingSignalResolver.defaultIdleCutoff + 30)
+
+        let signals = AgentWorkingSignalResolver.resolve(
+            channel: channel,
+            members: [agent(agentID, name: "빌드봇")],
+            statuses: [status(run: run, agent: agentID, phase: .streaming, runStatus: .running)],
+            partials: [run: AgentPartial(runId: run, channelId: channel, textDelta: "오래된 스트리밍 텍스트")],
+            workRuns: [],
+            typingAgentIDs: [],
+            startTimes: [run: started],
+            lastActivityTimes: [run: lastActivity],
+            now: now
+        )
+        XCTAssertTrue(signals.isEmpty, "a run idle past the cutoff must self-expire even without a terminal event")
+    }
+
+    func testFreshActivityWithinCutoffKeepsSignal() {
+        let agentID = MemberID()
+        let run = RunID()
+        let started = Date(timeIntervalSince1970: 1_000)
+        let lastActivity = Date(timeIntervalSince1970: 2_000)
+        let now = lastActivity.addingTimeInterval(AgentWorkingSignalResolver.defaultIdleCutoff - 10)
+
+        let signals = AgentWorkingSignalResolver.resolve(
+            channel: channel,
+            members: [agent(agentID, name: "빌드봇")],
+            statuses: [status(run: run, agent: agentID, phase: .streaming, runStatus: .running)],
+            partials: [:],
+            workRuns: [],
+            typingAgentIDs: [],
+            startTimes: [run: started],
+            lastActivityTimes: [run: lastActivity],
+            now: now
+        )
+        XCTAssertEqual(signals.count, 1, "a run active within the cutoff must remain")
+    }
+
+    func testMissingLastActivityDoesNotExpire() {
+        let agentID = MemberID()
+        let run = RunID()
+        // No lastActivity entry is not proof of staleness (backward-compatible path).
+        let signals = AgentWorkingSignalResolver.resolve(
+            channel: channel,
+            members: [agent(agentID, name: "빌드봇")],
+            statuses: [status(run: run, agent: agentID, phase: .streaming, runStatus: .running)],
+            partials: [:],
+            workRuns: [],
+            typingAgentIDs: [],
+            startTimes: [run: Date()],
+            lastActivityTimes: [:],
+            now: Date().addingTimeInterval(100_000)
+        )
+        XCTAssertEqual(signals.count, 1)
+    }
+
     // MARK: Multi-agent concurrency
 
     func testMultipleAgentsProduceSeparateSortedSignals() {

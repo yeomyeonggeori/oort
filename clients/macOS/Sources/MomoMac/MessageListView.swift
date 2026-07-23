@@ -1162,7 +1162,7 @@ public struct MessageListView: View {
             composerSurface(candidates: candidates, copy: copy)
 
             AgentWorkingComposerBar(
-                signals: viewModel.selectedChannelWorkingSignals,
+                signals: composerFooterSignals,
                 copy: copy
             )
         }
@@ -1732,6 +1732,31 @@ public struct MessageListView: View {
 
     private func timelineWorkingSignal(for agentID: MemberID) -> AgentWorkingSignal? {
         viewModel.selectedChannelWorkingSignals.first { $0.agentId == agentID }
+    }
+
+    /// Agents whose working state already owns a row in the timeline (a live
+    /// partial bubble or a turn-liveness row), both pinned to the bottom of the
+    /// scroll content.
+    private var timelineWorkingAgentIDs: Set<MemberID> {
+        var ids = Set(viewModel.visibleWorkingAgents.map(\.id))
+        for partial in livePartials {
+            if let agentID = viewModel.agentStatuses[partial.runId]?.agentMemberId {
+                ids.insert(agentID)
+            }
+        }
+        return ids
+    }
+
+    /// Signals for the composer footer. When the user is pinned to the bottom the
+    /// timeline rows for those agents are on-screen, so the footer would be a third
+    /// copy of the same signal; suppress it. Once scrolled up, the rows are out of
+    /// view and the footer becomes the only persistent working indicator, so it
+    /// shows every signal again.
+    private var composerFooterSignals: [AgentWorkingSignal] {
+        let signals = viewModel.selectedChannelWorkingSignals
+        guard isPinnedToTimelineBottom else { return signals }
+        let onScreen = timelineWorkingAgentIDs
+        return signals.filter { !onScreen.contains($0.agentId) }
     }
 }
 
