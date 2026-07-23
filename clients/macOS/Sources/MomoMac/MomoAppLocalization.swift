@@ -2200,11 +2200,14 @@ struct MomoWorkspaceCopy {
     }
 
     /// Honest truncation banner: the source has `total` lines and the body shows
-    /// `shown`. Numbers stay verbatim so nothing about the gap is hidden.
+    /// `shown`. Both counts are locale-grouped so they match the card's `+N −N`
+    /// change summary (which the `Text` localized-key path also groups).
     func diffTruncationBanner(total: Int, shown: Int) -> String {
+        let totalText = total.formatted(.number)
+        let shownText = shown.formatted(.number)
         switch language {
-        case .korean: return "전체 \(total)줄 중 \(shown)줄 표시"
-        case .english: return "Showing \(shown) of \(total) lines"
+        case .korean: return "전체 \(totalText)줄 중 \(shownText)줄 표시"
+        case .english: return "Showing \(shownText) of \(totalText) lines"
         }
     }
 

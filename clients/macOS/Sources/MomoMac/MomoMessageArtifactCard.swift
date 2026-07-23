@@ -69,7 +69,7 @@ struct MomoMessageArtifactCard: View {
             Text(copy.diffTruncationBanner(total: diff.totalLineCount, shown: diff.displayedLineCount))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.caption)
+        .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -178,6 +178,8 @@ private struct MomoDiffBodyView: View {
     let files: [UnifiedDiffFile]
     let maxHeight: CGFloat
 
+    @State private var contentHeight: CGFloat = 0
+
     var body: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 12) {
@@ -187,30 +189,42 @@ private struct MomoDiffBodyView: View {
             }
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: MomoDiffContentHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            )
         }
-        .frame(height: min(estimatedHeight, maxHeight))
+        .frame(height: resolvedHeight)
         .scrollIndicators(.visible)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             Color.primary.opacity(0.025),
             in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall)
         )
+        .onPreferenceChange(MomoDiffContentHeightPreferenceKey.self) { contentHeight = $0 }
     }
 
-    /// Deterministic height estimate (no measure/state feedback loop) so the body
-    /// renders the same under a live run loop and the single-pass ImageRenderer the
-    /// snapshot gate uses. Under-estimates simply scroll; the cap holds at maxHeight.
-    private var estimatedHeight: CGFloat {
-        let lineHeight: CGFloat = 17
-        let fileHeaderHeight: CGFloat = 30
-        let interFileSpacing: CGFloat = 12
-        let verticalPadding: CGFloat = 8
-        let totalLines = files.reduce(0) { $0 + $1.lines.count }
-        let fileCount = CGFloat(files.count)
-        return CGFloat(totalLines) * lineHeight
-            + fileCount * fileHeaderHeight
-            + max(0, fileCount - 1) * interFileSpacing
-            + verticalPadding
+    /// Hug the measured content height so short diffs stay tight and only genuinely
+    /// long ones reach `maxHeight` and scroll. The content's natural height is
+    /// independent of this viewport frame (the scroll axis is unbounded), so
+    /// measuring it never feeds back into the layout. Before the first measurement
+    /// lands we fall back to `maxHeight`; the snapshot host runs a second layout
+    /// pass after the preference settles, so the captured frame is the hugged one.
+    private var resolvedHeight: CGFloat {
+        guard contentHeight > 0 else { return maxHeight }
+        return min(contentHeight, maxHeight)
+    }
+}
+
+private struct MomoDiffContentHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -273,7 +287,7 @@ private struct MomoDiffExpandedView: View {
                     Image(systemName: "info.circle")
                     Text(copy.diffTruncationBanner(total: diff.totalLineCount, shown: diff.displayedLineCount))
                 }
-                .font(.caption)
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
             }
