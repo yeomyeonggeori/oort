@@ -37,6 +37,14 @@ struct MomoAgentOwnerPresentation: Equatable {
         return true
     }
 
+    /// Whether there is a specific owner to describe with a "Managed by" row.
+    /// Card agents with no recorded owner render only the external-runtime row,
+    /// never an empty "Managed by" label sitting over nothing.
+    var hasOwnerRow: Bool {
+        if case .none = owner { return false }
+        return true
+    }
+
     var resolvedOwner: Member? {
         switch owner {
         case .active(let member), .inactive(let member): return member
@@ -87,21 +95,36 @@ struct MomoAgentOwnerPresentation: Equatable {
 // MARK: - Managed-by rows
 
 /// Renders the "Managed by {owner}" row (and, for card agents, an "external
-/// runtime" row) inside an existing profile GroupBox. The owner name opens a
-/// read-only owner profile popover; card agents are annotated as external
-/// runtime. Every affordance is reachable by keyboard (the owner name is a
-/// focusable button).
+/// runtime" row) inside an existing profile GroupBox. The owner name reveals a
+/// read-only owner profile; card agents are annotated as external runtime.
+/// Every affordance is reachable by keyboard.
+///
+/// The owner detail is revealed differently per host:
+/// - `.popover` (default): the owner name is a button that opens a transient
+///   popover. Safe on non-popover hosts such as the member directory detail pane.
+/// - `.inlineDisclosure`: the owner name toggles an inline disclosure that
+///   expands the detail in place. Required when the host is itself a popover
+///   (the member inspector), because macOS cannot reliably present a transient
+///   popover from inside another transient popover: the child fails to show or
+///   dismisses its host, leaving the owner name a dead control.
 struct MomoAgentManagedByView: View {
+    enum OwnerDetailStyle {
+        case popover
+        case inlineDisclosure
+    }
+
     @ObservedObject var viewModel: ChatViewModel
     let presentation: MomoAgentOwnerPresentation
     let copy: MomoWorkspaceCopy
+    var detailStyle: OwnerDetailStyle = .popover
 
     @State private var showsOwnerPopover = false
+    @State private var isOwnerExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.standardSpacing) {
-            LabeledContent(copy.agentOwnerTitle) {
-                ownerValue
+            if presentation.hasOwnerRow {
+                ownerRow
             }
             if presentation.isExternalRuntime {
                 LabeledContent(copy.agentRuntime) {
@@ -115,25 +138,20 @@ struct MomoAgentManagedByView: View {
     }
 
     @ViewBuilder
-    private var ownerValue: some View {
+    private var ownerRow: some View {
         switch presentation.owner {
         case .active(let owner), .inactive(let owner):
-            VStack(alignment: .trailing, spacing: MomoTheme.MemberInspector.compactSpacing) {
-                ownerButton(owner)
-                if presentation.isMuted {
-                    Text(copy.ownerInactive)
+            resolvedOwnerRow(owner)
+        case .departed:
+            LabeledContent(copy.agentOwnerTitle) {
+                VStack(alignment: .trailing, spacing: MomoTheme.MemberInspector.compactSpacing) {
+                    Text(copy.managedByFormerMember)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(copy.ownerLeftWorkspace)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-            }
-        case .departed:
-            VStack(alignment: .trailing, spacing: MomoTheme.MemberInspector.compactSpacing) {
-                Text(copy.managedByFormerMember)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(copy.ownerLeftWorkspace)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(copy.managedByFormerMember), \(copy.ownerLeftWorkspace)")
@@ -142,12 +160,59 @@ struct MomoAgentManagedByView: View {
         }
     }
 
+    @ViewBuilder
+    private func resolvedOwnerRow(_ owner: Member) -> some View {
+        switch detailStyle {
+        case .popover:
+            LabeledContent(copy.agentOwnerTitle) {
+                ownerValue { ownerButton(owner) }
+            }
+        case .inlineDisclosure:
+            // A native DisclosureGroup: the whole label row (owner name included)
+            // toggles the inline detail, so the name stays interactive without a
+            // nested popover.
+            DisclosureGroup(isExpanded: $isOwnerExpanded) {
+                MomoAgentOwnerDetail(
+                    viewModel: viewModel,
+                    owner: owner,
+                    presentation: presentation,
+                    copy: copy
+                )
+                .padding(.top, MomoTheme.MemberInspector.standardSpacing)
+            } label: {
+                LabeledContent(copy.agentOwnerTitle) {
+                    ownerValue {
+                        Text(owner.displayName)
+                            .foregroundStyle(.tint)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+            .accessibilityHint(copy.viewOwnerProfile)
+        }
+    }
+
+    /// The owner name plus, when the owner cannot currently act, an adjacent
+    /// caption. The name itself stays tinted (interactive) rather than greyed so
+    /// it never reads as a disabled control.
+    private func ownerValue<Name: View>(@ViewBuilder name: () -> Name) -> some View {
+        VStack(alignment: .trailing, spacing: MomoTheme.MemberInspector.compactSpacing) {
+            name()
+            if presentation.isMuted {
+                Text(copy.ownerInactive)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func ownerButton(_ owner: Member) -> some View {
         Button {
             showsOwnerPopover = true
         } label: {
             Text(owner.displayName)
-                .foregroundStyle(presentation.isMuted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+                .foregroundStyle(.tint)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -166,9 +231,11 @@ struct MomoAgentManagedByView: View {
     }
 }
 
-/// Read-only profile card for an agent's owner. Reuses the roster avatar so the
-/// owner's presence dot and identity read identically to the member inspector.
-struct MomoAgentOwnerPopover: View {
+/// Read-only detail for an agent's owner: avatar, identity, workspace role,
+/// status, and the managed-by explanation. Shared by the popover (directory
+/// detail pane) and the inline disclosure (member inspector) so both surfaces
+/// read identically.
+struct MomoAgentOwnerDetail: View {
     @ObservedObject var viewModel: ChatViewModel
     let owner: Member
     let presentation: MomoAgentOwnerPresentation
@@ -191,9 +258,6 @@ struct MomoAgentOwnerPopover: View {
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    Text(copy.workspaceRoleTitle(owner.workspaceRole))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -201,6 +265,13 @@ struct MomoAgentOwnerPopover: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Label the workspace role explicitly ("Role · Owner") so it is never
+            // confused with the "Managed by" heading above it.
+            LabeledContent(copy.memberRole) {
+                Text(copy.workspaceRoleTitle(owner.workspaceRole))
+            }
+            .font(.caption)
 
             LabeledContent(copy.status) {
                 Text(copy.memberStatusTitle(owner.status))
@@ -217,6 +288,26 @@ struct MomoAgentOwnerPopover: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// Read-only profile card for an agent's owner, presented as a transient popover
+/// on non-popover hosts (the member directory detail pane). Reuses the roster
+/// avatar so the owner's presence dot and identity read identically to the
+/// member inspector.
+struct MomoAgentOwnerPopover: View {
+    @ObservedObject var viewModel: ChatViewModel
+    let owner: Member
+    let presentation: MomoAgentOwnerPresentation
+    let copy: MomoWorkspaceCopy
+
+    var body: some View {
+        MomoAgentOwnerDetail(
+            viewModel: viewModel,
+            owner: owner,
+            presentation: presentation,
+            copy: copy
+        )
         .padding(MomoTheme.MemberInspector.edgeInset)
         .frame(width: MomoTheme.MemberInspector.profileWidth, alignment: .leading)
         .accessibilityElement(children: .contain)
