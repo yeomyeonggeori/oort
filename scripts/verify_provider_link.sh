@@ -174,6 +174,20 @@ trap 'exit 143' TERM
 
 BASE_URL="http://127.0.0.1:$API_PORT"
 
+# Linux trap: the api container copies the read-only source mount with
+# `cp -Rp /workspace/server ...`. A host-side `.build/` (the worker gate above
+# just ran a local macOS `swift build`) holds symlinks such as `.build/debug`
+# that Linux `cp` cannot read ("cannot read symbolic link '.build/debug':
+# Invalid argument"), which aborts api boot before /health. The container builds
+# fresh in its own scratch volume, so drop the host build artifacts from every
+# package tree the api service copies.
+for build_dir in \
+  "$REPO_ROOT/server/.build" \
+  "$REPO_ROOT/services/OutboundHTTPPolicy/.build" \
+  "$REPO_ROOT/services/MomoMetrics/.build"; do
+  rm -rf "$build_dir" 2>/dev/null || true
+done
+
 log "booting isolated PG18 + api stack '$PROJECT' on ${API_PORT}/${PG_PORT}/${CENTRIFUGO_PORT}/${HERMES_PORT}"
 # `api` depends_on db-roles -> migrate (applies every migration incl. 039) ->
 # postgres, plus centrifugo + mock-hermes; bringing up api boots the chain.
