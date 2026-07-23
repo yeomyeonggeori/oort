@@ -2169,6 +2169,45 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    // MARK: - Diff artifact card (ADR-0126 D2 / MOMO-518)
+
+    var diffExpandAction: String {
+        switch language {
+        case .korean: return "크게 보기"
+        case .english: return "Expand diff"
+        }
+    }
+
+    func diffExpandAccessibility(title: String) -> String {
+        switch language {
+        case .korean: return "\(title) 변경 내용 크게 보기"
+        case .english: return "Expand \(title) in a larger view"
+        }
+    }
+
+    var diffRawLabel: String {
+        switch language {
+        case .korean: return "원본 diff 보기"
+        case .english: return "Show raw diff"
+        }
+    }
+
+    var diffExpandedClose: String {
+        switch language {
+        case .korean: return "닫기"
+        case .english: return "Close"
+        }
+    }
+
+    /// Honest truncation banner: the source has `total` lines and the body shows
+    /// `shown`. Numbers stay verbatim so nothing about the gap is hidden.
+    func diffTruncationBanner(total: Int, shown: Int) -> String {
+        switch language {
+        case .korean: return "전체 \(total)줄 중 \(shown)줄 표시"
+        case .english: return "Showing \(shown) of \(total) lines"
+        }
+    }
+
     var messageLoadFailedTitle: String {
         switch language {
         case .korean: return "메시지를 불러오지 못했습니다"

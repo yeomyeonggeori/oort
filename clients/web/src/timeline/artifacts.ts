@@ -29,6 +29,12 @@ export type ArtifactPresentation =
       additions: number;
       deletions: number;
       files: DiffFile[];
+      /** Fence-stripped source, kept for the raw-payload disclosure. */
+      rawPatch: string;
+      /** Diff lines in the source before display truncation. */
+      totalLineCount: number;
+      /** Diff lines actually kept in `files`. */
+      displayedLineCount: number;
     }
   | {
       kind: "commit" | "pr";
@@ -40,8 +46,8 @@ export type ArtifactPresentation =
     };
 
 const MAX_SOURCE_BYTES = 200_000;
-const MAX_LINE_COUNT = 2_000;
-const MAX_FILE_COUNT = 100;
+/** Diff lines kept for rendering; the overflow is counted, never silently hidden. */
+const MAX_RENDERED_LINES = 500;
 const SENSITIVE_URL_KEYS = [
   "token",
   "capability",
@@ -164,7 +170,6 @@ function parseDiff(
   const source = stripSingleDiffFence(raw);
   if (new TextEncoder().encode(source).byteLength > MAX_SOURCE_BYTES) return null;
   const lines = source.split("\n");
-  if (lines.length > MAX_LINE_COUNT) return null;
 
   interface PendingFile {
     oldPath?: string;
@@ -179,7 +184,6 @@ function parseDiff(
   let sawHunk = false;
   const append = () => {
     if (current === undefined || current.lines.length === 0) return;
-    if (files.length >= MAX_FILE_COUNT) return;
     files.push({
       id: files.length,
       path:
@@ -197,7 +201,6 @@ function parseDiff(
   for (const [id, line] of lines.entries()) {
     if (line.startsWith("diff --git ")) {
       append();
-      if (files.length >= MAX_FILE_COUNT) return null;
       const paths = line.slice("diff --git ".length).split(" ", 2);
       current = {
         ...(paths[0] ? { oldPath: paths[0] } : {}),
@@ -239,13 +242,53 @@ function parseDiff(
   }
   append();
   if (files.length === 0 || (!sawGit && !sawHunk)) return null;
+
+  const totalLineCount = files.reduce((sum, file) => sum + file.lines.length, 0);
+  const { renderedFiles, displayedLineCount } = truncateForDisplay(
+    files,
+    MAX_RENDERED_LINES
+  );
+
   return {
     kind: "diff",
     title: bounded(rawTitle, 200) ?? "Code changes",
-    files,
+    files: renderedFiles,
     additions: files.reduce((sum, file) => sum + file.additions, 0),
     deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    rawPatch: source,
+    totalLineCount,
+    displayedLineCount,
   };
+}
+
+/**
+ * Keeps the first `limit` diff lines in source order, dropping the overflow while
+ * preserving each surviving file's full addition/deletion counts.
+ */
+function truncateForDisplay(
+  files: DiffFile[],
+  limit: number
+): { renderedFiles: DiffFile[]; displayedLineCount: number } {
+  const total = files.reduce((sum, file) => sum + file.lines.length, 0);
+  if (total <= limit) return { renderedFiles: files, displayedLineCount: total };
+
+  let remaining = limit;
+  const renderedFiles: DiffFile[] = [];
+  for (const file of files) {
+    if (remaining <= 0) break;
+    if (file.lines.length <= remaining) {
+      renderedFiles.push(file);
+      remaining -= file.lines.length;
+    } else {
+      renderedFiles.push({ ...file, lines: file.lines.slice(0, remaining) });
+      remaining = 0;
+    }
+  }
+  const displayedLineCount = renderedFiles.reduce(
+    (sum, file) => sum + file.lines.length,
+    0
+  );
+  return { renderedFiles, displayedLineCount };
 }
 
 /** Mirrors MomoCore MessageArtifactPresentation's closed detection order. */

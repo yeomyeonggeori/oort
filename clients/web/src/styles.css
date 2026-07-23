@@ -233,6 +233,44 @@ body {
   color: var(--danger);
 }
 
+.artifact-diff-truncation {
+  margin: 8px 0 0;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Diff body scrolls internally so a long change never grows the page. */
+.artifact-diff-body {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.artifact-diff-raw {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.artifact-diff-raw summary {
+  cursor: pointer;
+}
+
+.artifact-diff-raw-payload {
+  max-height: 240px;
+  overflow: auto;
+  margin: 7px 0 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
 .artifact-diff-file {
   margin-top: 10px;
 }

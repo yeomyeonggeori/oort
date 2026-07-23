@@ -48,6 +48,8 @@ export default function ArtifactCard({
     );
   }
 
+  const isTruncated = presentation.displayedLineCount < presentation.totalLineCount;
+
   return (
     <article
       className="artifact-card artifact-diff-card"
@@ -60,28 +62,39 @@ export default function ArtifactCard({
           deletions={presentation.deletions}
         />
       </header>
-      {presentation.files.map((file) => (
-        <details className="artifact-diff-file" key={file.id}>
-          <summary>
-            <code>{file.path}</code>
-            <ChangeSummary
-              additions={file.additions}
-              deletions={file.deletions}
-            />
-          </summary>
-          <pre className="artifact-diff-lines">
-            {file.lines.map((line) => (
-              <code
-                key={line.id}
-                className={`artifact-diff-line artifact-diff-${line.kind}`}
-                aria-label={`${LINE_LABEL[line.kind]}: ${line.text}`}
-              >
-                {line.text === "" ? " " : line.text}{"\n"}
-              </code>
-            ))}
-          </pre>
-        </details>
-      ))}
+      {isTruncated && (
+        <p className="artifact-diff-truncation" role="status">
+          전체 {presentation.totalLineCount}줄 중 {presentation.displayedLineCount}줄 표시
+        </p>
+      )}
+      <div className="artifact-diff-body">
+        {presentation.files.map((file) => (
+          <details className="artifact-diff-file" key={file.id} open>
+            <summary>
+              <code>{file.path}</code>
+              <ChangeSummary
+                additions={file.additions}
+                deletions={file.deletions}
+              />
+            </summary>
+            <pre className="artifact-diff-lines">
+              {file.lines.map((line) => (
+                <code
+                  key={line.id}
+                  className={`artifact-diff-line artifact-diff-${line.kind}`}
+                  aria-label={`${LINE_LABEL[line.kind]}: ${line.text}`}
+                >
+                  {line.text === "" ? " " : line.text}{"\n"}
+                </code>
+              ))}
+            </pre>
+          </details>
+        ))}
+      </div>
+      <details className="artifact-diff-raw">
+        <summary>원본 diff 보기</summary>
+        <pre className="artifact-diff-raw-payload">{presentation.rawPatch}</pre>
+      </details>
     </article>
   );
 }
