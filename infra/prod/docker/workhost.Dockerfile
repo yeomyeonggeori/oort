@@ -40,7 +40,7 @@ FROM ${RUNTIME_IMAGE} AS opencode-fetch
 ARG OPENCODE_VERSION
 ARG TARGETARCH
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 RUN set -eu; \
   case "${TARGETARCH:-amd64}" in \
@@ -48,14 +48,15 @@ RUN set -eu; \
     arm64) OC_ARCH=arm64 ;; \
     *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
   esac; \
-  mkdir -p /opt/opencode /usr/share/licenses/opencode; \
-  curl -fsSL -o /tmp/opencode.zip \
-    "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.zip"; \
-  unzip -o /tmp/opencode.zip -d /opt/opencode; \
-  # The archive contains the single `opencode` binary; normalize its location.
-  find /opt/opencode -type f -name opencode -exec install -Dm755 {} /opt/opencode/opencode \; ; \
+  mkdir -p /opt/opencode /usr/share/licenses/opencode /tmp/opencode-extract; \
+  # WH-1: the sst/opencode linux release asset is a .tar.gz (not .zip); the
+  # archive holds the single `opencode` binary (possibly under a subdir).
+  curl -fsSL -o /tmp/opencode.tar.gz \
+    "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz"; \
+  tar -xzf /tmp/opencode.tar.gz -C /tmp/opencode-extract; \
+  find /tmp/opencode-extract -type f -name opencode -exec install -Dm755 {} /opt/opencode/opencode \; ; \
   test -x /opt/opencode/opencode; \
-  rm -f /tmp/opencode.zip; \
+  rm -rf /tmp/opencode.tar.gz /tmp/opencode-extract; \
   curl -fsSL -o /usr/share/licenses/opencode/LICENSE \
     "https://raw.githubusercontent.com/sst/opencode/v${OPENCODE_VERSION}/LICENSE" \
   || curl -fsSL -o /usr/share/licenses/opencode/LICENSE \
