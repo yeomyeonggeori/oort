@@ -96,21 +96,21 @@ case "$index_body" in
   *'<title>momo</title>'*) ;;
   *) fail "GET / did not return the built momo index.html" ;;
 esac
-pass "1/8 GET / serves the built momo index.html"
+pass "1/9 GET / serves the built momo index.html"
 
 route_body="$(curl -fsS -H "Host: $APP_HOST" "$BASE_URL/some/spa/route")" || fail "SPA deep route failed"
 case "$route_body" in
   *'<title>momo</title>'*) ;;
   *) fail "SPA deep route did not fall back to index.html" ;;
 esac
-pass "2/8 SPA deep route falls back to index.html"
+pass "2/9 SPA deep route falls back to index.html"
 
 join_body="$(curl -fsS -H "Host: $APP_HOST" "$BASE_URL/join")" || fail "GET /join failed"
 case "$join_body" in
   *'<title>momo</title>'*) ;;
   *) fail "GET /join did not fall back to the momo SPA" ;;
 esac
-pass "3/8 GET /join falls back to index.html"
+pass "3/9 GET /join falls back to index.html"
 
 invite_headers="$(curl -sS -D - -o /dev/null -H "Host: $APP_HOST" "$BASE_URL/i/verifier-code" | tr -d '\r')" || fail "GET /i/verifier-code failed"
 case "$invite_headers" in
@@ -121,7 +121,7 @@ case "$invite_headers" in
   *"location: http://$APP_HOST/join?code=verifier-code"*|*"Location: http://$APP_HOST/join?code=verifier-code"*) ;;
   *) fail "GET /i/verifier-code did not proxy through LinkShort" ;;
 esac
-pass "4/8 GET /i/* proxies to LinkShort"
+pass "4/9 GET /i/* proxies to LinkShort"
 
 login_status="$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Host: $APP_HOST" -H 'Content-Type: application/json' \
@@ -130,22 +130,27 @@ case "$login_status" in
   400|401) ;;
   *) fail "POST /v1/auth/login expected API 400/401, got $login_status" ;;
 esac
-pass "5/8 POST /v1/auth/login reaches the API ($login_status)"
+pass "5/9 POST /v1/auth/login reaches the API ($login_status)"
 
 centrifugo_status="$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Host: $APP_HOST" -X POST "$BASE_URL/v1/centrifugo/subscribe")" || fail "centrifugo deny request failed"
 [ "$centrifugo_status" = "403" ] || fail "/v1/centrifugo/subscribe expected 403, got $centrifugo_status"
-pass "6/8 internal Centrifugo callback is edge-denied"
+pass "6/9 internal Centrifugo callback is edge-denied"
 
 headers="$(curl -fsSI -H "Host: $APP_HOST" "$BASE_URL/" | tr '[:upper:]' '[:lower:]')" || fail "SPA header request failed"
 case "$headers" in *'content-security-policy:'*) ;; *) fail "missing Content-Security-Policy" ;; esac
 case "$headers" in *'x-frame-options: deny'*) ;; *) fail "missing X-Frame-Options DENY" ;; esac
 case "$headers" in *"connect-src 'self' wss://$RT_HOST https://$RT_HOST"*) ;; *) fail "CSP realtime connect-src is incomplete" ;; esac
-pass "7/8 CSP and X-Frame-Options headers are present"
+pass "7/9 CSP and X-Frame-Options headers are present"
 
 health_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: $APP_HOST" "$BASE_URL/health")" || fail "health proxy request failed"
 [ "$health_status" = "200" ] || fail "GET /health expected 200, got $health_status"
-pass "8/8 GET /health reaches the API"
+pass "8/9 GET /health reaches the API"
 
-printf '[web-serving] PASS: eight web-serving assertions complete (HTTP e2e only)\n'
+metrics_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H "Host: $APP_HOST" "$BASE_URL/metrics")" || fail "public /metrics deny request failed"
+[ "$metrics_status" = "404" ] || fail "public /metrics expected 404, got $metrics_status"
+pass "9/9 public /metrics is edge-denied"
+
+printf '[web-serving] PASS: nine web-serving assertions complete (HTTP e2e only)\n'
 printf '[web-serving] runtime-unverified here: public DNS, ACME certificate issuance, and production TLS\n'

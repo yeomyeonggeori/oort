@@ -3,6 +3,7 @@ import Foundation
 import Hummingbird
 import JWTKit
 import Logging
+import MomoMetrics
 import PostgresNIO
 import ServiceLifecycle
 
@@ -215,6 +216,15 @@ enum AppBuilder {
             logger: logger
         )
 
+        let metrics = MetricsRegistry.api()
+        let metricsEndpoint = MetricsEndpointConfig.load(defaultPort: 9090)
+        app.addServices(MetricsHTTPServer.build(
+            registry: metrics,
+            host: metricsEndpoint.host,
+            port: metricsEndpoint.port,
+            serviceName: "MomoServer",
+            logger: logger
+        ))
         // Close the shared HTTP client on shutdown (best-effort).
         app.addServices(HTTPClientShutdownService(httpClient: httpClient))
         return app

@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import Logging
+import MomoMetrics
 import OutboundHTTPPolicy
 import PostgresNIO
 import ServiceLifecycle
@@ -23,6 +24,8 @@ struct OutboxRelayMain {
                 .flatMap { Logger.Level(rawValue: $0) } ?? .info
 
         let config = Config.load()
+        let metrics = await MetricsRegistry.outboxRelay()
+        let metricsEndpoint = MetricsEndpointConfig.load(defaultPort: 9091)
         logger.info("starting OutboxRelay", metadata: [
             "pgHost": .string(config.pgHost),
             "pgDatabase": .string(config.pgDatabase),
@@ -59,7 +62,7 @@ struct OutboxRelayMain {
 
         let relay = RelayService(
             pg: pg, centrifugo: centrifugo, webhooks: webhooks,
-            config: config, logger: logger)
+            metrics: metrics, config: config, logger: logger)
 
         // ServiceGroup ordering: PostgresClient.run() must be live before the relay
         // issues queries; the HTTP client shutdown service tears down on cancel.
@@ -68,6 +71,13 @@ struct OutboxRelayMain {
                 services: [
                     .init(service: pg),
                     .init(service: relay),
+                    .init(service: MetricsHTTPServer.build(
+                        registry: metrics,
+                        host: metricsEndpoint.host,
+                        port: metricsEndpoint.port,
+                        serviceName: "OutboxRelay",
+                        logger: logger
+                    )),
                     .init(service: HTTPClientShutdownService(httpClient: httpClient)),
                 ],
                 gracefulShutdownSignals: [.sigterm, .sigint],

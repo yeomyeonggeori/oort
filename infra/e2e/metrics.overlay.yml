@@ -1,0 +1,55 @@
+# MOMO-562 runtime verifier overlay. Host publication is verifier-only and
+# restricted to the reserved 28210-28213 band; production publishes none.
+services:
+  api:
+    environment:
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9090
+    ports:
+      - "127.0.0.1:${MOMO_METRICS_API_PORT:-28210}:9090"
+
+  relay:
+    environment:
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9091
+    ports:
+      - "127.0.0.1:${MOMO_METRICS_RELAY_PORT:-28211}:9091"
+
+  worker:
+    environment:
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9092
+    ports:
+      - "127.0.0.1:${MOMO_METRICS_WORKER_PORT:-28212}:9092"
+
+  metrics-push-relay:
+    image: swift:6.2
+    profiles: ["observability"]
+    restart: "no"
+    init: true
+    working_dir: /workspace
+    command:
+      - bash
+      - -lc
+      - >-
+        rm -rf /tmp/momo-metrics-push &&
+        mkdir -p /tmp/momo-metrics-push/relay /tmp/momo-metrics-push/services &&
+        cp -Rp /workspace/relay/PushRelay /tmp/momo-metrics-push/relay/PushRelay &&
+        cp -Rp /workspace/services/MomoMetrics /tmp/momo-metrics-push/services/MomoMetrics &&
+        cd /tmp/momo-metrics-push &&
+        swift run -j 8 --package-path relay/PushRelay
+        --scratch-path /tmp/momo-swiftpm/push-relay PushRelay
+    environment:
+      MOMO_RELAY_SERVERS: '{"metrics-verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+      MOMO_APNS_SENDER: stub
+      MOMO_PUSH_RELAY_HOST: 0.0.0.0
+      MOMO_PUSH_RELAY_PORT: 8090
+      MOMO_METRICS_HOST: 0.0.0.0
+      MOMO_METRICS_PORT: 9093
+    ports:
+      - "127.0.0.1:${MOMO_METRICS_PUSH_PORT:-28213}:9093"
+    volumes:
+      - type: bind
+        source: ..
+        target: /workspace
+        read_only: true

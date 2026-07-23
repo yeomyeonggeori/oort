@@ -13,7 +13,7 @@ Usage: scripts/check_spm_licenses.sh --check|--write
 
 Environment (fixture/test use only):
   SPM_LICENSE_REPO_ROOT       Repository root override.
-  SPM_LICENSE_EXPECTED_ROOTS  Expected remote SwiftPM package-root count (default: 9).
+  SPM_LICENSE_EXPECTED_ROOTS  Expected remote SwiftPM package-root count (default: 10).
   SPM_LICENSE_SKIP_RESOLVE=1  Require existing Package.resolved/checkouts.
 EOF
 }
@@ -35,7 +35,7 @@ else
 fi
 cd "$REPO_ROOT"
 
-EXPECTED_ROOTS="${SPM_LICENSE_EXPECTED_ROOTS:-9}"
+EXPECTED_ROOTS="${SPM_LICENSE_EXPECTED_ROOTS:-10}"
 EXCEPTIONS_FILE="${SPM_LICENSE_EXCEPTIONS_FILE:-scripts/spm_license_exceptions.tsv}"
 NOTICES_FILE="${SPM_LICENSE_NOTICES_FILE:-legal/THIRD_PARTY_NOTICES.md}"
 BEGIN_MARKER="<!-- BEGIN GENERATED: SPM LICENSES (scripts/check_spm_licenses.sh) -->"

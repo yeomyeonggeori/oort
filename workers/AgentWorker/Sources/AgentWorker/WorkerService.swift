@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import Logging
+import MomoMetrics
 import NIOCore
 import PostgresNIO
 import ServiceLifecycle
@@ -45,6 +46,7 @@ struct WorkerService: Service {
     let workControls: WorkControlClient
     let guards: LoopGuards
     let cost: CostAccounting
+    let metrics: MetricsRegistry
     let config: Config
     let logger: Logger
     let resumeExecutor = ToolResumeExecutor()
@@ -143,12 +145,13 @@ struct WorkerService: Service {
         let attempts: Int
         let method: String
         let payload: AgentJobPayload
+        let createdAt: Date
     }
 
     /// L4 §3.5: claim ONE pending agent_job and flip it to `processing`.
     /// partition_key = agent_member_id ⇒ per-agent serialization.
     private func claimOne() async throws -> ClaimedJob? {
-        let row: (Int64, UUID, Int, String, String)? = try await pg.withTransaction(logger: logger) { conn in
+        let row: (Int64, UUID, Int, String, String, Date)? = try await pg.withTransaction(logger: logger) { conn in
             let rows = try await conn.query(
                 """
                 WITH claimed AS (
@@ -165,14 +168,15 @@ struct WorkerService: Service {
                    SET status = 'processing', attempts = o.attempts + 1
                   FROM claimed c
                  WHERE o.id = c.id
-                 RETURNING o.id, o.workspace_id, o.attempts, o.method, o.payload::text
+                 RETURNING o.id, o.workspace_id, o.attempts, o.method,
+                           o.payload::text, o.created_at
                 """,
                 logger: logger
             ).collect()
             guard let first = rows.first else { return nil }
-            return try first.decode((Int64, UUID, Int, String, String).self)
+            return try first.decode((Int64, UUID, Int, String, String, Date).self)
         }
-        guard let (id, ws, attempts, method, payloadText) = row else { return nil }
+        guard let (id, ws, attempts, method, payloadText, createdAt) = row else { return nil }
 
         do {
             let payload = try Self.decoder.decode(
@@ -182,7 +186,8 @@ struct WorkerService: Service {
                 workspaceID: ws,
                 attempts: attempts,
                 method: method,
-                payload: payload
+                payload: payload,
+                createdAt: createdAt
             )
         } catch {
             // Malformed payload can never succeed → fail permanently (no poison loop).
@@ -285,6 +290,7 @@ struct WorkerService: Service {
                 reservedMicroUSD: est
             )
         case .tripped(let grain):
+            await metrics.incrementCounter(name: MomoMetricName.budgetTripsTotal)
             let reason = "G5 budget trip (\(grain))"
             logger.warning("budget circuit breaker tripped", metadata: [
                 "outboxId": .stringConvertible(job.id), "grain": .string(grain),
@@ -530,6 +536,10 @@ struct WorkerService: Service {
         await finalizeStreamingMessage(streamMessageID, job: job, body: accumulatedText)
         await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .done, error: nil)
         await publishStatus(agentRealtime, runID: p.runID, status: .done)
+        await metrics.observeHistogram(
+            name: MomoMetricName.agentTurnDurationSeconds,
+            value: Date().timeIntervalSince(job.createdAt)
+        )
         await markJobDone(job.id)
     }
 
