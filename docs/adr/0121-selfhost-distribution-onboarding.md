@@ -63,7 +63,7 @@ D1-A(→B 후속) + D2-A(B는 상시 폴백) + D3 + D4 + D5-A + D6-A.
 
 ## 증보 1 — 셀프호스트 관측 노출 계약 (/metrics)
 
-- Status: **Proposed** (2026-07-22 momo-main 기안 — 성재 승인 시 MOMO-562 발급 게이트 해제)
+- Status: **Accepted** (성재 승인 2026-07-23 — D7~D10 전부, MOMO-562 발급 게이트 해제)
 - 발단: DEPLOY §8.2의 핵심 메트릭 5종(outbox lag·예산 트립율·APNs 실패율·턴 지연·publish 지연)은 문서상 계획일 뿐 실물 엔드포인트가 없다. MOMO-562가 이를 실제 `/metrics`로 만들면 **셀프호스트 서버에 신규 노출 표면**이 생기므로, 배포판 ADR인 본 문서에 노출 계약을 먼저 고정한다. buzz 경쟁 분석의 push-gateway bounded-cardinality 규율을 이식한다.
 
 ### D7. 노출 경계 — 내부망 전용, 공개 라우팅 금지

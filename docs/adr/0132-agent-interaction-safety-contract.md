@@ -11,7 +11,7 @@
 구현 지렛대(신설 아님·재사용): `cancelled` 전이와 서버발 취소의 gateway ack 프로토콜, pending outbox 무효화 선례가 이미 있다 — 승인 거부 경로(`ApprovalDecisionRoutes.swift:823-833`, `AgentGatewayRoutes.swift:341,455-475`). D1은 이 기계장치를 휴먼 트리거로 노출하는 것이다.
 
 ### D2. 취소 의미론 3단 선명화 (buzz 교훈: "1턴 취소는 루프 브레이커가 아니다")
-- **run 취소**(D1): 이 실행 1건만. 다음 멘션에 정상 재개.
+- **run 취소**(D1): 이 실행 1건만. 다음 멘션에 정상 재개. **경계 확정(성재 확인 2026-07-23)**: run 취소는 그 run이 spawn한 work_session을 자동 종료하지 않는다 — 취소 원장·응답에 연결 세션 ID를 기록하고(`linked_work_session_ids`, `work_sessions_terminated=false`), 폭주 주체가 work_session이면 별도 kill(work.control)로 다룬다.
 - **에이전트 일시정지**: `agent_profile.paused` (해당 워크스페이스에서 신규 run enqueue 거부, 멘션은 "일시정지됨" 시스템 라인로 응답). 폭주 루프를 멈추는 실제 수단.
 - **채널 격리**: 채널 멤버십 제거(기존 경로) = 그 채널에서만 배제.
 클라 표면: run 카드에 Stop(D1), 에이전트 프로필/멤버 인스펙터에 Pause(2단). **수용기준에 "실클라이언트 표면에서 발동하는 E2E"를 명시** — 유닛 테스트 단독 검증 금지.
