@@ -107,6 +107,7 @@ public struct ChannelListView: View {
     private let openWorkspaceSettings: (() -> Void)?
     private let openMemoryBrowser: (() -> Void)?
     private let openSettings: (() -> Void)?
+    private let openAIConnection: (() -> Void)?
     private let openUpdates: (() -> Void)?
     private let openPluginMarketplace: (() -> Void)?
     private let onChannelSelected: ((ChannelID) -> Void)?
@@ -126,6 +127,7 @@ public struct ChannelListView: View {
         self.openWorkspaceSettings = nil
         self.openMemoryBrowser = nil
         self.openSettings = nil
+        self.openAIConnection = nil
         self.openUpdates = nil
         self.openPluginMarketplace = nil
         self.onChannelSelected = nil
@@ -146,6 +148,7 @@ public struct ChannelListView: View {
         openWorkspaceSettings: (() -> Void)? = nil,
         openMemoryBrowser: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
+        openAIConnection: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
         openPluginMarketplace: (() -> Void)? = nil,
         onChannelSelected: ((ChannelID) -> Void)? = nil,
@@ -164,6 +167,7 @@ public struct ChannelListView: View {
         self.openWorkspaceSettings = openWorkspaceSettings
         self.openMemoryBrowser = openMemoryBrowser
         self.openSettings = openSettings
+        self.openAIConnection = openAIConnection
         self.openUpdates = openUpdates
         self.openPluginMarketplace = openPluginMarketplace
         self.onChannelSelected = onChannelSelected
@@ -1287,6 +1291,12 @@ public struct ChannelListView: View {
             profileAction(copy.settings, systemImage: "gearshape") {
                 showProfilePanel = false
                 openSettings?()
+            }
+            if openAIConnection != nil, sessionChrome?.inviteAdminContext != nil, viewModel.canManageWorkspace {
+                profileAction(copy.aiConnection, systemImage: "brain", helpText: copy.aiConnectionSubtitle) {
+                    showProfilePanel = false
+                    openAIConnection?()
+                }
             }
             profileAction(copy.updates, systemImage: "arrow.down.circle") {
                 showProfilePanel = false

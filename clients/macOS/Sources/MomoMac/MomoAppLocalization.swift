@@ -1846,6 +1846,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var aiConnection: String {
+        switch language {
+        case .korean: return "AI 연결"
+        case .english: return "AI connection"
+        }
+    }
+
+    var aiConnectionSubtitle: String {
+        switch language {
+        case .korean: return "에이전트 응답을 받는 LLM provider를 연결하고 테스트합니다."
+        case .english: return "Connect and test the LLM provider that powers agent replies."
+        }
+    }
+
     var general: String {
         switch language {
         case .korean: return "일반"
