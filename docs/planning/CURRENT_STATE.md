@@ -1,5 +1,7 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-07-24 스냅샷(provider GUI 연동 완주)**: main=551efe9c — ADR-0004 증보1 Accepted, **provider 연결 GUI 3조각 랜딩**(572 REST control-plane·573 worker data-plane·574 "AI 연결" GUI). "성재가 앱에서 provider 붙이면 실제 그 provider로 대화" 성립. Opus 4.8 구현(Codex 한도 7/29까지). 대기: momowebqa 재배포(039)→성재 GUI 실왕복→0.0.2 발행. 성재 결정: ADR-0114 증보1(work host 배포판 동봉+GUI 페어링, goose 동봉) 승인 여부. 백로그: MOMO-575(프리셋 스냅샷 안정화), ADR-0117 W-4(멀티WS 전환 UX), 567·code graph 등. 이하 이전:
+
 > **2026-07-23 밤 스냅샷(Opus 4.8 UXUI 배치 완주)**: Codex 한도 소진 → Opus 4.8 서브에이전트(Workflow) 구현으로 전환. **5장 랜딩**: 571 workspace-create(main) + 568·569·570·518(track/uxui, 각 design-review Blocker0·High0). **track/uxui→main 머지 성재 승인 대기**(5장 통합 빌드 PASS). 승인 시 순차 머지+알파 재발행. 내부 테스트 서버(mDNS `MacBook-Pro-2.local:28000`·restart=unless-stopped) 가동, workspace-create로 5WS 시나리오 개방. Codex 7/29 리셋 시 fleet 백업 병용. 이하 이전:
 > **⚠️ 2026-07-23 저녁 — Codex 사용 한도 소진(7/29 리셋까지 fleet worker spawn 불가)**: 오늘 대량 소비 결과. 영향: MOMO-571(#687 workspace-create) 미착수로 리셋 or momo-main 직접 구현 or 크레딧 구매 대기. 내부 테스트 서버는 완비(mDNS `MacBook-Pro-2.local:28000`·restart=unless-stopped·alpha.2 ATS LAN)라 **1 시드 워크스페이스 도그푸드는 즉시 가능**. 5WS 시나리오만 571 대기. ADR-0117 Accepted. 이하 이전:
 

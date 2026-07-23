@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-24 (Fable provider GUI 연동 3조각 완주) · "GUI로 붙이면 실제 대화" 성립
+- 성재 발제("실제 codex/hermes를 CLI가 아니라 GUI로 연동, 배포판에 담아"). buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속(momo ADR-0114 동형), mesh-llm(오픈모델)만 동봉. Codex 자체 동봉은 독점 CLI+OAuth+ADR-0004로 불가(buzz도 안 함).
+- **ADR-0004 증보1 Accepted → 3장 main 랜딩**(Opus 4.8): 572 provider config REST(암호화 저장·마스킹·mode override·health, 193 tests) + 573 worker job-time 소비(GUI 변경이 실제 대화 반영, 캐시 TTL 2s·golden interop vector) + 574 관리자 "AI 연결" GUI(design-review 2R Blocker 해소: 이탈 잠금 dead-end→미저장 확인 다이얼로그, in-flight dead-click→잠금을 unsaved bearer로 한정). 572의 prod boot 갭(api PROVIDER_LINK_MASTER_KEY 누락)·e2e compose 마스터키 배선도 수리.
+- **ADR-0114 증보1 기안(Proposed)**: work host 배포판 동봉+GUI 페어링(goose 동봉·Codex 로컬)=WH-1~3 — 성재 승인 대기.
+- 부수: MOMO-575(WorkConsole 프리셋 스냅샷 크로스환경 드리프트 안정화) 발급. 다음: momowebqa 재배포(039)→성재 GUI 실왕복→0.0.2 발행.
+
 ## 2026-07-23 (Fable Opus 4.8 전환 집행 — UXUI 배치 5장 완주) · Codex 대체 파이프라인 실증
 - **Codex 한도 소진(7/29) → Opus 4.8 서브에이전트(Workflow) 구현 전환**(성재 지시, ultracode). 정본 메모리 [[momo-opus-implementation-pipeline]] 갱신.
 - **5장 랜딩**: 571 workspace-create(main, ADR-0117 W-1/2/3, verifier PASS 28250) + UXUI 4장(track/uxui): 568 작업신호·569 managed-by·570 Create agent 동급·518 diff 카드. 각 goal Workflow 병렬 구현→검수→Docker/스냅샷 게이트→**design-review(fresh)**→반려수정→재리뷰→랜딩.
