@@ -251,7 +251,9 @@ services:
   # operator supplies `--profile observability`; no Prometheus or metrics port
   # is published to the host or attached to the public network.
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.5.0@sha256:8672a850efe2f9874702406c8318704edb363587f8c2ca88586b4c8fdb5cea24
+    mem_limit: ${MOMO_PROMETHEUS_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
     profiles: ["observability"]
     restart: unless-stopped
     command:
