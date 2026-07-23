@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-23 (Fable 공개 게이트 완성) · 565 랜딩 → 리허설 Phase 1 PASS → 564 랜딩 — "공개 버튼만 남음"
+- **565 랜딩**: 단일 momo 이미지(6 커맨드+웹 에셋+LICENSE/NOTICE 빌드 시 단정), verifier 6/6 실기동 PASS(28240s). 공개 표면 6→1.
+- **리허설 Phase 1 PASS(5/5)** — 보고서 2026-07-23-rehearsal-phase1-report.md. 검출 결함 4건 당일 해소(--wait 원샷 quirk→install 동형 시퀀스, 한도 600s, 528 픽스처 갭→mock 툴콜 토글, 증적 변수 잔재).
+- **564 랜딩**: 공개 README(신뢰 경계 "What never leaves your server" 절)+SECURITY.md(비공개 신고·응답 타깃·하드닝). 링크 전수 실존 확인.
+- 부수: 디스크 회수 254GB+14GB(reclaim_worktrees.sh 정본화=MOMO-566 종결), 패키징 레인 §8 판정 집행 완료.
+- **다음: 성재 공개 실행 결정 대기** — 절차: 이미지 publish(workflow_dispatch)→digest 핀→시크릿 스캔→semver v0.1.0 태그→레포 공개 전환. Phase 2(공개 호스트)는 내부 검증+UXUI 피드백 후.
+
 ## 2026-07-23 (Fable Wave H 완결 — 562 랜딩·565 착수) · 관측 실물화 + 내부 알파 재배포
 - **562 main 랜딩**(f5a6a55): /metrics 5종·bounded 라벨·프라이빗 전용·prometheus opt-in 오버레이(mem_limit/digest 핀 정합 후속 포함). verifier 4엔드포인트 실기동 PASS(28210s). **Linux 전용 결함 2건 검출·수정**: PushRelay 암묵 nio 전이 import, swift-crypto Sendable 격차(@preconcurrency) — 함정 목록 승격.
 - **내부 알파 재배포 완결**: `scripts/internal_alpha_stack.sh`(redeploy/status/reclaim) 정본화 — 부분 수렴·restart 함정 2건 성문화, momowebqa가 신 태세(cancel/pause 실서빙, 데이터 보존)로 전환. 실 AWS는 내부 검증+UXUI 피드백 후(성재 확정).
