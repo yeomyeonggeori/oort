@@ -390,7 +390,7 @@ struct MomoWorkspaceSettingsSurface: View {
                         viewModel.resetAgentOnboarding()
                         showsAgentOnboarding = true
                     } label: {
-                        Label(copy.addAgent, systemImage: "person.badge.plus")
+                        Label(copy.addAgent, systemImage: "person.fill.badge.plus")
                     }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                 }
