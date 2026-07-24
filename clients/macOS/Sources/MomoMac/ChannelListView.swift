@@ -108,6 +108,7 @@ public struct ChannelListView: View {
     private let openMemoryBrowser: (() -> Void)?
     private let openSettings: (() -> Void)?
     private let openAIConnection: (() -> Void)?
+    private let openWorkHost: (() -> Void)?
     private let openUpdates: (() -> Void)?
     private let openPluginMarketplace: (() -> Void)?
     private let onChannelSelected: ((ChannelID) -> Void)?
@@ -128,6 +129,7 @@ public struct ChannelListView: View {
         self.openMemoryBrowser = nil
         self.openSettings = nil
         self.openAIConnection = nil
+        self.openWorkHost = nil
         self.openUpdates = nil
         self.openPluginMarketplace = nil
         self.onChannelSelected = nil
@@ -149,6 +151,7 @@ public struct ChannelListView: View {
         openMemoryBrowser: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
         openAIConnection: (() -> Void)? = nil,
+        openWorkHost: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
         openPluginMarketplace: (() -> Void)? = nil,
         onChannelSelected: ((ChannelID) -> Void)? = nil,
@@ -168,6 +171,7 @@ public struct ChannelListView: View {
         self.openMemoryBrowser = openMemoryBrowser
         self.openSettings = openSettings
         self.openAIConnection = openAIConnection
+        self.openWorkHost = openWorkHost
         self.openUpdates = openUpdates
         self.openPluginMarketplace = openPluginMarketplace
         self.onChannelSelected = onChannelSelected
@@ -1296,6 +1300,12 @@ public struct ChannelListView: View {
                 profileAction(copy.aiConnection, systemImage: "brain", helpText: copy.aiConnectionSubtitle) {
                     showProfilePanel = false
                     openAIConnection?()
+                }
+            }
+            if openWorkHost != nil, sessionChrome?.inviteAdminContext != nil, viewModel.canManageWorkspace {
+                profileAction(copy.workHost, systemImage: "terminal", helpText: copy.workHostSubtitle) {
+                    showProfilePanel = false
+                    openWorkHost?()
                 }
             }
             profileAction(copy.updates, systemImage: "arrow.down.circle") {
