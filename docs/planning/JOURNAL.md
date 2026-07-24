@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-24 (Fable 온보딩 와우 배치 W-O1~5 완주) · 딥링크·mDNS·에이전트 첫 인사 main 랜딩
+- 성재 "전체 배치로 진행" → 5티켓(MOMO-584~588/#719~723) 병렬 Opus 4.8 xhigh → 검수 → 트랙 → main(#729·#730). 계약 정본 `docs/onboarding-deeplink.md`(momo://join?server&code) + `_momo._tcp` TXT base.
+- **엔진 3건**: 584 invite-create 딥링크 출력(verify 10/10, 코드 원문 파일-only 유지) · 586 internal_alpha mDNS 광고(dns-sd 수명주기, 누수 0 실측) · 588 에이전트 첫 인사(단일 쓰기경로 한 tx·UUIDv5 멱등·결정론 템플릿·join 불가침, **runtime verifier 11/11** — 실행 요건: 클린 볼륨+MOMO_AGENT_SEED_MODE=demo).
+- **UXUI 2건**: 585 momo:// 스킴+join 프리필+기본값 정리(파서 16+라우팅 5 tests) · 587 chooser LAN 발견 카드. **design-review 1R FAIL(Blocker2·High1)→수정→2R PASS**: 배너 크롬 밴드 회피(controlBandHeight+8)·발견 카드 1행 압축(기본 창 푸터 잘림 해소)·Esc·톤 합니다체·connecting 딥링크 큐잉(didSet 전달). 스냅샷 기준이미지 오케스트레이터 기록.
+- **검수에서 잡은 것**: 588 verifier 2건(demo 시드 모드 미지정 401, outbox id uuidString 대문자 케이스 — 582·577과 동일 클래스 3번째, **"UUID 비교는 항상 케이스 무관" 성문화 대상**) · STATUS.md 트랙 충돌 union 해소.
+- **W-O5**: TESTER_GUIDE 운영자 초대 카드 복붙 템플릿(딥링크 1개+폴백). momowebqa 재배포 — **mDNS 광고 라이브**(momo._momo._tcp :28000). 0.0.4 발행(온보딩 와우 빌드). 백로그: Esc 공존(Medium), ko InfoPlist.strings, W-O6 서명/공증(성재 결정).
+
 ## 2026-07-24 (Fable MOMO-583 권한 재조임 + 알파 사이트 여명 리디자인) · 576 후속 집행, 사이트 라이브
 - 성재 발제: ①576 후속 진행 ②배포 사이트 리디자인(buzz/slack/discord 참조, 히어로 재밌게, 여명거리 느낌, 마스코트는 우선 없이).
 - **MOMO-583(#716→PR#717→#718→main)**: provider_link any-owner/admin 폴백 제거. 새 인가=platform:read OR **등재 인스턴스 운영자**(owner/admin+검증 이메일+PLATFORM_ADMIN_EMAILS, 요청시점 판정). **설계 조정 이유**: macOS 로그인은 platformAdminSecret 미지원 → scope-only면 운영자 GUI 영구 403. per-WS 표면(582)은 owner/admin 유지(의도된 분리). verifier 9관문 PASS(미등재 owner 403 회귀 단정 신설), server 16 tests. e2e compose+internal_alpha에 PLATFORM_ADMIN_EMAILS 배선(기본 성재).
