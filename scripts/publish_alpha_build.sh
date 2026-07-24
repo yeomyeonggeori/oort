@@ -101,8 +101,16 @@ echo "[alpha-publish] 4/5 manifest + page push"
 PAGES="$WORK/pages"
 git clone -q "https://github.com/${DIST_REPO}" "$PAGES"
 RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-MANIFEST_NOTES="$NOTES" python3 - "$PAGES/update-manifest-alpha.json" <<PY
+MANIFEST_NOTES="$NOTES" MANIFEST_SIGNED="$SIGN" python3 - "$PAGES/update-manifest-alpha.json" <<PY
 import json, os, sys
+signed = os.environ.get("MANIFEST_SIGNED") == "1"
+steps = [
+    "Download and unzip the new build.",
+    "Replace the app in /Applications and relaunch."
+    if signed
+    else "Replace the app in /Applications, then right-click > Open on first launch.",
+    "Reopen Updates to confirm the new build.",
+]
 manifest = {
     "schema_version": 1,
     "channel": "alpha",
@@ -114,11 +122,8 @@ manifest = {
     "download_url": "${DOWNLOAD_URL}",
     "release_notes_url": "https://github.com/${DIST_REPO}/releases/tag/${TAG}",
     "sha256": "${SHA256}",
-    "restart_instructions": [
-        "Download and unzip the new build.",
-        "Replace the app in /Applications, then right-click > Open on first launch.",
-        "Relaunch momo and reopen Updates to confirm the new build.",
-    ],
+    "signed": signed,
+    "restart_instructions": steps,
 }
 json.dump(manifest, open(sys.argv[1], "w"), ensure_ascii=False, indent=2)
 PY
