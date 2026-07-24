@@ -709,7 +709,11 @@ public final class MomoServerSessionController: ObservableObject {
     }
 
     @Published public var form: MomoServerSessionForm
-    @Published public private(set) var phase: Phase = .choosing
+    @Published public private(set) var phase: Phase = .choosing {
+        // W-O1 design-review M5: a deep link that arrived mid-connect is queued,
+        // not dropped — deliver it as soon as the connect settles either way.
+        didSet { deliverPendingDeepLinkIfNeeded() }
+    }
     @Published public private(set) var sessionNotice: String?
     @Published private(set) var sessionFailureKind: MomoSessionFailureKind?
     @Published private(set) var onboardingPath: MomoOnboardingPath?
@@ -723,6 +727,8 @@ public final class MomoServerSessionController: ObservableObject {
     private let client: MomoServerSessionClient
     private var didAttemptEnvironmentAutoconnect = false
     private var deepLinkPrefillToken = 0
+    /// Deep link received while `phase == .connecting`; delivered on settle (M5).
+    private var pendingDeepLink: MomoDeepLink?
 
     public init(
         store: MomoServerSessionStore = .shared,
@@ -814,8 +820,25 @@ public final class MomoServerSessionController: ObservableObject {
         case .connected:
             deepLinkWhileConnected = link
         case .connecting:
-            break
+            // M5: never drop a click silently — queue and deliver on settle.
+            pendingDeepLink = link
         case .choosing, .failed:
+            applyJoinPrefill(link)
+        }
+    }
+
+    /// Delivers a deep link that was queued during `.connecting` once the
+    /// connect settles: connected → banner, chooser/failed → join prefill.
+    private func deliverPendingDeepLinkIfNeeded() {
+        guard let link = pendingDeepLink else { return }
+        switch phase {
+        case .connecting:
+            return
+        case .connected:
+            pendingDeepLink = nil
+            deepLinkWhileConnected = link
+        case .choosing, .failed:
+            pendingDeepLink = nil
             applyJoinPrefill(link)
         }
     }
@@ -1075,7 +1098,12 @@ public struct MomoMacSessionRootView: View {
                             dismissAction: { controller.dismissConnectedDeepLink() }
                         )
                         .padding(.horizontal, MomoTheme.Onboarding.blockSpacing)
-                        .padding(.top, MomoTheme.Onboarding.blockSpacing)
+                        // Design-review B1: the connected shell owns the window from
+                        // y=0 and its first `controlBandHeight` points are the unified
+                        // titlebar band — drop the banner below it so chrome controls
+                        // and window dragging stay clickable (MomoDownloadsPanelView
+                        // precedent).
+                        .padding(.top, MomoWindowChromeLayout.controlBandHeight + 8)
                     }
                 }
             case .failed(let message):
@@ -1201,7 +1229,9 @@ struct MomoServerSessionChooser: View {
                             alignment: .center
                         )
                     }
-                    .scrollIndicators(.hidden)
+                    // Design-review B2: with the discovery strip the chooser can
+                    // exceed the default height — keep the affordance visible.
+                    .scrollIndicators(.automatic)
                 }
             }
         }
@@ -1700,19 +1730,18 @@ private struct MomoDiscoveredServerCard: View {
     var onSelect: (MomoDiscoveredServer) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MomoTheme.Onboarding.contentSpacing) {
-            HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
+        // Design-review B2: a quiet suggestion, not a second card stack. One
+        // caption header + the row list — no outer material card, no inline
+        // privacy paragraph (moved to .help) — so the four primary paths and the
+        // chooser footer stay on screen at the default window size.
+        VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
+            HStack(spacing: MomoTheme.Onboarding.compactSpacing) {
                 Image(systemName: "wifi")
-                    .font(.body.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(MomoTheme.humanAccent)
-                VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
-                    Text(copy.discoveryTitle)
-                        .font(.body.weight(.semibold))
-                    Text(copy.discoverySubtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(copy.discoveryTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
 
             VStack(spacing: 0) {
@@ -1736,22 +1765,9 @@ private struct MomoDiscoveredServerCard: View {
                 RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
                     .stroke(MomoTheme.subtleBorder, lineWidth: 1)
             }
-
-            Text(copy.discoveryPrivacyNote)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .help(copy.discoveryPrivacyNote)
         }
-        .padding(MomoTheme.Onboarding.blockSpacing)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            .regularMaterial,
-            in: RoundedRectangle(cornerRadius: MomoTheme.cornerLarge, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: MomoTheme.cornerLarge, style: .continuous)
-                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
-        }
     }
 }
 
@@ -2048,20 +2064,16 @@ private struct MomoDeepLinkConnectedBanner: View {
                     Button(copy.deepLinkSwitchAndJoin, action: switchAction)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
+                    // Design-review H3/N7: single close affordance with an Esc
+                    // path — the extra xmark icon button was redundant.
                     Button(copy.deepLinkDismiss, action: dismissAction)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .keyboardShortcut(.cancelAction)
                 }
                 .padding(.top, MomoTheme.Onboarding.compactSpacing)
             }
             Spacer(minLength: MomoTheme.Onboarding.standardSpacing)
-            Button(action: dismissAction) {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(copy.deepLinkDismiss)
         }
         .padding(MomoTheme.Onboarding.blockSpacing)
         .frame(maxWidth: MomoTheme.Onboarding.detailMaximumWidth)
@@ -2269,7 +2281,7 @@ private struct MomoSessionCopy {
 
     var deepLinkConnectedTitle: String {
         switch language {
-        case .korean: return "초대 링크를 받았어요"
+        case .korean: return "초대 링크를 받았습니다"
         case .english: return "Invite link received"
         }
     }
@@ -2278,9 +2290,9 @@ private struct MomoSessionCopy {
         switch language {
         case .korean:
             if server.isEmpty {
-                return "지금은 다른 워크스페이스에 연결되어 있어요. 세션을 바꾸면 초대 코드로 참여할 수 있어요."
+                return "지금은 다른 워크스페이스에 연결되어 있습니다. 세션을 바꾸면 초대 코드로 참여할 수 있습니다."
             }
-            return "지금은 다른 워크스페이스에 연결되어 있어요. \(server)에 참여하려면 세션을 바꾸세요."
+            return "지금은 다른 워크스페이스에 연결되어 있습니다. \(server)에 참여하려면 세션을 바꾸세요."
         case .english:
             if server.isEmpty {
                 return "You are connected to another workspace. Switch session to join with this invite code."
