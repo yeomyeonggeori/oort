@@ -64,8 +64,9 @@ if [ "$SIGN" = "1" ]; then
 
   # 공증은 zip으로 제출하고, 성공 후 앱에 스테이플 → 최종 배포 zip을 다시 만든다.
   ditto -c -k --keepParent "$APP_PATH" "$WORK/notarize.zip"
+  # 신규 팀의 첫 공증은 1시간+ 걸릴 수 있다(2026-07-24 실측: 30m 타임아웃 초과).
   xcrun notarytool submit "$WORK/notarize.zip" --keychain-profile "$NOTARY_PROFILE" \
-    --wait --timeout 30m > "$WORK/notary.log" 2>&1 || {
+    --wait --timeout 120m > "$WORK/notary.log" 2>&1 || {
       tail -30 "$WORK/notary.log" >&2
       echo "[alpha-publish] notarization failed — 로그를 확인하세요 (xcrun notarytool log <id> --keychain-profile $NOTARY_PROFILE)" >&2
       exit 1; }
