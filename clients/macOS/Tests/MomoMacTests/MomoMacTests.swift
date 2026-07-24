@@ -6420,6 +6420,26 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(loaded.savePassword)
     }
 
+    func testShippedSessionStoreStartsWithNeutralEmptyDefaults() {
+        // W-O4: outside the local development app the onboarding form starts empty
+        // (no demo@momo.local / 127.0.0.1 prefill), letting the neutral placeholders show.
+        let suite = "momo-host-session-defaults-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MomoServerSessionStore(
+            defaults: defaults,
+            keychain: MomoKeychainPasswordStore(service: "momo.test.unused.\(suite)"),
+            bundleIdentifier: "app.momo.host"
+        )
+
+        let loaded = store.load()
+
+        XCTAssertEqual(loaded.baseURLString, "")
+        XCTAssertEqual(loaded.email, "")
+        XCTAssertEqual(loaded.password, "")
+        XCTAssertFalse(loaded.savePassword)
+    }
+
     func testDevelopmentSessionStorePersistsAndClearsPasswordInDefaults() {
         let suite = "momo-dev-session-roundtrip-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
