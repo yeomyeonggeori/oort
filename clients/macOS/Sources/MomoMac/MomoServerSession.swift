@@ -709,7 +709,11 @@ public final class MomoServerSessionController: ObservableObject {
     }
 
     @Published public var form: MomoServerSessionForm
-    @Published public private(set) var phase: Phase = .choosing
+    @Published public private(set) var phase: Phase = .choosing {
+        // W-O1 design-review M5: a deep link that arrived mid-connect is queued,
+        // not dropped — deliver it as soon as the connect settles either way.
+        didSet { deliverPendingDeepLinkIfNeeded() }
+    }
     @Published public private(set) var sessionNotice: String?
     @Published private(set) var sessionFailureKind: MomoSessionFailureKind?
     @Published private(set) var onboardingPath: MomoOnboardingPath?
@@ -723,6 +727,8 @@ public final class MomoServerSessionController: ObservableObject {
     private let client: MomoServerSessionClient
     private var didAttemptEnvironmentAutoconnect = false
     private var deepLinkPrefillToken = 0
+    /// Deep link received while `phase == .connecting`; delivered on settle (M5).
+    private var pendingDeepLink: MomoDeepLink?
 
     public init(
         store: MomoServerSessionStore = .shared,
@@ -814,8 +820,25 @@ public final class MomoServerSessionController: ObservableObject {
         case .connected:
             deepLinkWhileConnected = link
         case .connecting:
-            break
+            // M5: never drop a click silently — queue and deliver on settle.
+            pendingDeepLink = link
         case .choosing, .failed:
+            applyJoinPrefill(link)
+        }
+    }
+
+    /// Delivers a deep link that was queued during `.connecting` once the
+    /// connect settles: connected → banner, chooser/failed → join prefill.
+    private func deliverPendingDeepLinkIfNeeded() {
+        guard let link = pendingDeepLink else { return }
+        switch phase {
+        case .connecting:
+            return
+        case .connected:
+            pendingDeepLink = nil
+            deepLinkWhileConnected = link
+        case .choosing, .failed:
+            pendingDeepLink = nil
             applyJoinPrefill(link)
         }
     }
@@ -1075,7 +1098,12 @@ public struct MomoMacSessionRootView: View {
                             dismissAction: { controller.dismissConnectedDeepLink() }
                         )
                         .padding(.horizontal, MomoTheme.Onboarding.blockSpacing)
-                        .padding(.top, MomoTheme.Onboarding.blockSpacing)
+                        // Design-review B1: the connected shell owns the window from
+                        // y=0 and its first `controlBandHeight` points are the unified
+                        // titlebar band — drop the banner below it so chrome controls
+                        // and window dragging stay clickable (MomoDownloadsPanelView
+                        // precedent).
+                        .padding(.top, MomoWindowChromeLayout.controlBandHeight + 8)
                     }
                 }
             case .failed(let message):
@@ -1135,21 +1163,25 @@ struct MomoServerSessionChooser: View {
     var initialFocus: MomoSessionField?
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedField: MomoSessionField?
     @State private var selectedPath: MomoOnboardingPath?
+    @StateObject private var discovery: MomoServerDiscoveryModel
 
     init(
         controller: MomoServerSessionController,
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
         initialFocus: MomoSessionField? = nil,
-        initialPath: MomoOnboardingPath? = nil
+        initialPath: MomoOnboardingPath? = nil,
+        discovery: MomoServerDiscoveryModel? = nil
     ) {
         self.controller = controller
         self.errorMessage = errorMessage
         self.failureKind = failureKind
         self.initialFocus = initialFocus
         _selectedPath = State(initialValue: initialPath)
+        _discovery = StateObject(wrappedValue: discovery ?? MomoServerDiscoveryModel())
     }
 
     var body: some View {
@@ -1197,7 +1229,9 @@ struct MomoServerSessionChooser: View {
                             alignment: .center
                         )
                     }
-                    .scrollIndicators(.hidden)
+                    // Design-review B2: with the discovery strip the chooser can
+                    // exceed the default height — keep the affordance visible.
+                    .scrollIndicators(.automatic)
                 }
             }
         }
@@ -1220,6 +1254,10 @@ struct MomoServerSessionChooser: View {
             if selectedPath == nil, errorMessage != nil || initialFocus != nil {
                 selectedPath = controller.form.trimmedInviteCode.isEmpty ? .signIn : .join
             }
+            discovery.start()
+        }
+        .onDisappear {
+            discovery.stop()
         }
         .onChange(of: controller.deepLinkPrefillIntent) { _, intent in
             guard let intent else { return }
@@ -1293,8 +1331,26 @@ struct MomoServerSessionChooser: View {
         if let selectedPath {
             credentialSurface(path: selectedPath, copy: copy)
         } else {
-            pathChooser(copy: copy)
+            VStack(spacing: MomoTheme.Onboarding.sectionSpacing) {
+                if !discovery.servers.isEmpty {
+                    MomoDiscoveredServerCard(
+                        servers: discovery.servers,
+                        copy: copy,
+                        onSelect: selectDiscoveredServer
+                    )
+                    .transition(.opacity)
+                }
+                pathChooser(copy: copy)
+            }
+            .animation(reduceMotion ? nil : .snappy, value: discovery.servers)
         }
+    }
+
+    private func selectDiscoveredServer(_ server: MomoDiscoveredServer) {
+        controller.form.baseURLString = server.baseURLString
+        discovery.stop()
+        selectedPath = .signIn
+        focusedField = .email
     }
 
     private func pathChooser(copy: MomoSessionCopy) -> some View {
@@ -1665,6 +1721,110 @@ private struct MomoOnboardingPathButton: View {
     }
 }
 
+/// A quiet suggestion shown above the path chooser only when a momo server was
+/// found on the local network (MOMO-587). When nothing is found the card is
+/// absent, so not-found / denied / timed-out are all rendered as silence.
+private struct MomoDiscoveredServerCard: View {
+    var servers: [MomoDiscoveredServer]
+    var copy: MomoSessionCopy
+    var onSelect: (MomoDiscoveredServer) -> Void
+
+    var body: some View {
+        // Design-review B2: a quiet suggestion, not a second card stack. One
+        // caption header + the row list — no outer material card, no inline
+        // privacy paragraph (moved to .help) — so the four primary paths and the
+        // chooser footer stay on screen at the default window size.
+        VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
+            HStack(spacing: MomoTheme.Onboarding.compactSpacing) {
+                Image(systemName: "wifi")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+                Text(copy.discoveryTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
+                    if index > 0 {
+                        Divider()
+                    }
+                    MomoDiscoveredServerRow(
+                        host: server.displayHost,
+                        actionLabel: copy.discoveryUseAction
+                    ) {
+                        onSelect(server)
+                    }
+                }
+            }
+            .background(
+                MomoTheme.Onboarding.fieldBackground,
+                in: RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+                    .stroke(MomoTheme.subtleBorder, lineWidth: 1)
+            }
+            .help(copy.discoveryPrivacyNote)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MomoDiscoveredServerRow: View {
+    var host: String
+    var actionLabel: String
+    var action: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: MomoTheme.Onboarding.contentSpacing) {
+                Image(systemName: "server.rack")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+                    .frame(width: 24, height: 24)
+
+                Text(host)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: MomoTheme.Onboarding.standardSpacing)
+
+                Text(actionLabel)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+            }
+            .padding(.horizontal, MomoTheme.Onboarding.contentSpacing)
+            .padding(.vertical, MomoTheme.Onboarding.standardSpacing)
+            .contentShape(Rectangle())
+            .background(
+                isHovering
+                    ? MomoTheme.Onboarding.choiceHover(colorScheme: colorScheme)
+                    : Color.clear,
+                in: RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+            )
+            .overlay {
+                if isFocused {
+                    RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+                        .stroke(MomoTheme.Onboarding.focusBorder, lineWidth: 2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .focused($isFocused)
+        .onHover { isHovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(host), \(actionLabel)")
+    }
+}
+
 private struct MomoLaunchLoadingView: View {
     var message: String
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
@@ -1904,20 +2064,16 @@ private struct MomoDeepLinkConnectedBanner: View {
                     Button(copy.deepLinkSwitchAndJoin, action: switchAction)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
+                    // Design-review H3/N7: single close affordance with an Esc
+                    // path — the extra xmark icon button was redundant.
                     Button(copy.deepLinkDismiss, action: dismissAction)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .keyboardShortcut(.cancelAction)
                 }
                 .padding(.top, MomoTheme.Onboarding.compactSpacing)
             }
             Spacer(minLength: MomoTheme.Onboarding.standardSpacing)
-            Button(action: dismissAction) {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(copy.deepLinkDismiss)
         }
         .padding(MomoTheme.Onboarding.blockSpacing)
         .frame(maxWidth: MomoTheme.Onboarding.detailMaximumWidth)
@@ -2074,6 +2230,34 @@ private struct MomoSessionCopy {
         }
     }
 
+    var discoveryTitle: String {
+        switch language {
+        case .korean: return "같은 네트워크에서 momo 서버를 찾았습니다"
+        case .english: return "Found a momo server on your network"
+        }
+    }
+
+    var discoverySubtitle: String {
+        switch language {
+        case .korean: return "선택하면 서버 주소를 채우고 로그인 단계로 넘어갑니다."
+        case .english: return "Pick one to fill its address and move to sign in."
+        }
+    }
+
+    var discoveryUseAction: String {
+        switch language {
+        case .korean: return "주소 채우기"
+        case .english: return "Use address"
+        }
+    }
+
+    var discoveryPrivacyNote: String {
+        switch language {
+        case .korean: return "같은 와이파이의 momo 서버만 찾습니다. 주소는 자동으로 저장되지 않습니다."
+        case .english: return "Only momo servers on your Wi-Fi appear here. Nothing is saved automatically."
+        }
+    }
+
     var operatorBadge: String {
         switch language {
         case .korean: return "운영자"
@@ -2097,7 +2281,7 @@ private struct MomoSessionCopy {
 
     var deepLinkConnectedTitle: String {
         switch language {
-        case .korean: return "초대 링크를 받았어요"
+        case .korean: return "초대 링크를 받았습니다"
         case .english: return "Invite link received"
         }
     }
@@ -2106,9 +2290,9 @@ private struct MomoSessionCopy {
         switch language {
         case .korean:
             if server.isEmpty {
-                return "지금은 다른 워크스페이스에 연결되어 있어요. 세션을 바꾸면 초대 코드로 참여할 수 있어요."
+                return "지금은 다른 워크스페이스에 연결되어 있습니다. 세션을 바꾸면 초대 코드로 참여할 수 있습니다."
             }
-            return "지금은 다른 워크스페이스에 연결되어 있어요. \(server)에 참여하려면 세션을 바꾸세요."
+            return "지금은 다른 워크스페이스에 연결되어 있습니다. \(server)에 참여하려면 세션을 바꾸세요."
         case .english:
             if server.isEmpty {
                 return "You are connected to another workspace. Switch session to join with this invite code."
