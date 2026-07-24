@@ -1,5 +1,14 @@
 # momo 진행 현황
 
+## MOMO-588 신규 멤버 첫 입장 에이전트 인사 (W-O3, #723, 2026-07-24)
+
+- 온보딩 와우 배치 W-O3. `JoinRoutes.join` 성공 경로 끝에서 워크스페이스 에이전트가 신규 멤버에게 **실제 발화 경로로** 먼저 인사한다(봇 래핑 금지 철학, 가짜 클라 연출 없음). 신규 로직은 `server/Sources/MomoServer/Routes/OnboardingGreeting.swift`.
+- 단일 쓰기경로 재사용: 직접 INSERT 없이 `channel_seq` bump + `message` INSERT + `outbox` INSERT를 한 tenant tx(RLS FORCE, BYPASSRLS 미사용)로 수행하고, mention 부기는 `ReadStateMentions.record`, 브로드캐스트 payload는 `MessageRoutes.broadcastPayload`를 재사용한다. 대상 채널=#general 우선(없으면 가장 오래된 public), 작성자=활성 agent 멤버 handle 사전순 첫 번째.
+- 결정론 템플릿(LLM 무호출): 고정 한국어(+`Accept-Language: en*`이면 영어) — 환영 + 할 수 있는 것 2가지(대화 요약·자료 조사) + "저를 한번 멘션해보세요" + 신규 멤버 `@handle` 멘션. em-dash 0·이모지 0·내부 어휘 0.
+- 멱등((workspace, member)당 1회): 결정론 `client_msg_id`(RFC 4122 v5, 네임스페이스+워크스페이스+멤버) + `NOT EXISTS`(작성자 변경 대비) + `ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING`. 재입장 시 seq 미소모·중복 없음. props 마커 `onboarding_greeting=v1`도 기록.
+- 조용한 skip(불침): 활성 agent 없음 또는 public 채널 없음이면 인사 생략, 어떤 예외도 삼켜(로그만) join은 항상 성공 — 인사 실패가 join을 깨지 않는다.
+- 검증: `swift build` green(server) + `swift test`(215 tests, 신규 `OnboardingGreetingTests` 10개: 템플릿 계약·Accept-Language 선택·UUIDv5 RFC 벡터·멱등키 결정성·서버 mention 파서 정합). join→인사 존재+작성자=agent+멘션+outbox 1행+재입장 멱등+무-agent skip의 Docker/psql 왕복은 `scripts/verify_onboarding_greeting.sh` — **오케스트레이터 실행 11관문 PASS**(클린 볼륨+`MOMO_AGENT_SEED_MODE=demo` migrate 필수, outbox id 비교는 uuidString 대문자 정합으로 케이스 무관). 신규 마이그레이션 불필요(기존 message/props 관례 재사용).
+
 ## MOMO-583 provider_link 권한 재조임 — 등재 인스턴스 운영자만 (#716, 2026-07-24, 576 후속 집행)
 
 - 조치: MOMO-576의 any-owner/admin 폴백 제거(instance-global 표면의 멀티WS 크로스테넌트 통제 누출). 새 인가 = **platform:read scope OR 등재 인스턴스 운영자**(owner/admin + `email_verified` + `PLATFORM_ADMIN_EMAILS` 등재, 요청 시점 DB 판정 — 재로그인 불필요).

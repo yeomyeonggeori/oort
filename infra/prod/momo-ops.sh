@@ -25,6 +25,7 @@ INVITE_ROLE="member"
 INVITE_MAX_USES=1
 INVITE_EXPIRES_DAYS=7
 INVITE_OUTPUT=""
+INVITE_SERVER_URL=""
 POSITIONAL=()
 
 usage() {
@@ -56,6 +57,8 @@ invite-create options:
   --max-uses N                   Redemption limit, 1..10000 (default: 1)
   --expires-days N               Expiry, 1..365 days (default: 7)
   --output FILE                  New mode-0600 file for the one-time raw code
+  --server-url URL               API base URL embedded in the momo://join deep
+                                 link (default: PUBLIC_BASE_URL from the env)
 
 workspace-create environment (via --env-file or --from-env only):
   MOMO_OPS_WORKSPACE_NAME        Display name, 1..200 chars
@@ -78,6 +81,29 @@ valid_uuid() {
   [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
 }
 
+# A base URL that the macOS/iOS client can re-validate: a scheme, "://", and a
+# non-empty host authority. Mirrors the client's validatedBaseURL() acceptance
+# (scheme + host) so the deep link and the app agree on what is accepted.
+valid_base_url() {
+  [[ "$1" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#[:space:]]+ ]]
+}
+
+# RFC 3986 percent-encoding of a query-parameter value. Everything outside the
+# unreserved set (ALPHA / DIGIT / "-" / "." / "_" / "~") is percent-encoded, so
+# the ":" and "/" of the base URL survive transport and the client decodes the
+# exact original value. Inputs here are ASCII (URLs and base64url invite codes).
+percent_encode() {
+  local raw="$1" out="" i char
+  for (( i = 0; i < ${#raw}; i++ )); do
+    char="${raw:i:1}"
+    case "$char" in
+      [a-zA-Z0-9.~_-]) out+="$char" ;;
+      *) printf -v char '%%%02X' "'$char"; out+="$char" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 parse_common_and_action_options() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -92,6 +118,7 @@ parse_common_and_action_options() {
       --max-uses) INVITE_MAX_USES="${2:-}"; shift 2 ;;
       --expires-days) INVITE_EXPIRES_DAYS="${2:-}"; shift 2 ;;
       --output) INVITE_OUTPUT="${2:-}"; shift 2 ;;
+      --server-url) INVITE_SERVER_URL="${2:-}"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       --) shift; POSITIONAL+=("$@"); break ;;
       -*) deploy_usage_fail "unknown option for $ACTION: $1" ;;
@@ -150,8 +177,24 @@ run_invite_create() {
   [ ! -e "$INVITE_OUTPUT" ] || deploy_fail "refusing to overwrite invite output: $INVITE_OUTPUT"
   [ -d "$(dirname -- "$INVITE_OUTPUT")" ] ||
     deploy_fail "invite output parent directory does not exist"
+  if [ -n "$INVITE_SERVER_URL" ]; then
+    valid_base_url "$INVITE_SERVER_URL" ||
+      deploy_usage_fail "--server-url must be an absolute URL like https://api.example.com"
+  fi
 
   prepare_compose 1
+
+  # Resolve the API base URL for the deep link now that the operator env is
+  # loaded: an explicit --server-url wins, otherwise the required prod contract
+  # value PUBLIC_BASE_URL. Fail closed here — before reserving the output file or
+  # creating the durable DB row — so a missing/invalid base URL never leaves a
+  # created invite with no way to hand it to the new member.
+  local server_url="${INVITE_SERVER_URL:-${PUBLIC_BASE_URL:-}}"
+  [ -n "$server_url" ] ||
+    deploy_fail "invite-create needs a base URL: pass --server-url or set PUBLIC_BASE_URL in the env"
+  valid_base_url "$server_url" ||
+    deploy_fail "resolved base URL is not an absolute URL (check PUBLIC_BASE_URL or --server-url)"
+
   command -v openssl >/dev/null 2>&1 || deploy_fail "openssl is required to generate an invite"
 
   local invite_code temp_output
@@ -192,9 +235,23 @@ run_invite_create() {
     deploy_fail "invite creation failed; reserved output was removed"
   fi
 
+  # Build the operator delivery deep link while the code is still in scope, then
+  # scrub the code from the environment. Contract (shared verbatim with the macOS
+  # client, MOMO-585): momo://join?server=<percent-encoded base URL>&code=<code>.
+  # Unlike the bare code — which stays file-only and never reaches argv, stdout,
+  # or the container — this link is what the operator hands to the new member so
+  # the client prefills the server URL and code (the member types only
+  # name/password). Emitting it on stdout is the whole point of this command, so
+  # the code is intentionally present inside the link. It never touches the DB
+  # path argv (the code travels to the container only via -e MOMO_OPS_INVITE_CODE).
+  local deeplink
+  deeplink="momo://join?server=$(percent_encode "$server_url")&code=$(percent_encode "$invite_code")"
+
   unset MOMO_OPS_INVITE_CODE
   invite_code=""
   deploy_log "invite created; the one-time code was written to a mode-0600 file: $INVITE_OUTPUT"
+  deploy_log "share this deep link with the new member (the client prefills server URL and code):"
+  printf '%s\n' "$deeplink"
 }
 
 run_workspace_create() {
