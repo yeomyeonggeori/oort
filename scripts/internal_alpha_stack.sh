@@ -193,8 +193,10 @@ cmd_redeploy() {
   note "2/4 마이그레이션(전방향 전용)"
   compose run --rm --no-deps migrate
 
-  note "3/4 api/relay 기동 — 현행 compose command로 소스 재컴파일"
-  compose up -d api relay
+  note "3/4 api/relay/worker 기동 — 현행 compose command로 소스 재컴파일"
+  # worker(AgentWorker) 미기동이면 에이전트 멘션 응답이 라이브에서 안 나간다
+  # (MOMO-592 런북 걷기에서 발견된 갭, 2026-07-24).
+  compose up -d api relay worker
 
   note "4/4 health 대기(콜드 컴파일 최대 ${BOOT_TIMEOUT}s) + 안전 라우트 스모크"
   wait_health
