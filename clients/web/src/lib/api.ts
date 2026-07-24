@@ -1,8 +1,9 @@
 // =============================================================================
-// REST client for the momowebqa spike (ADR-0133 P0 / MOMO-595).
+// REST client for the canonical web UI (ADR-0133 §1; originated in the MOMO-595
+// P0 spike against momowebqa).
 //
 // Contract source of truth: server Routes + docs/api/openapi.yaml, mirrored by
-// the ADR-0119 client at clients/web/src/api. Quirks preserved on purpose:
+// the ADR-0119 client at clients/web-legacy/src/api. Quirks preserved on purpose:
 //   - message ordering authority is `seq` (gapless per channel);
 //   - `?before=<seq>` reads OLDER history DESCENDING; `?after=<seq>` backfill is
 //     ASCENDING (used to heal realtime gaps);
@@ -10,8 +11,9 @@
 //     compare case-insensitively (uuidEq);
 //   - the realtime WS URL is authoritative from login, never derived.
 //
-// Spike scope: access token kept in memory only. No refresh rotation (the
-// ADR-0119 client owns that; not needed to prove the stack in a spike).
+// Current scope (inherited from the spike): access token kept in memory only.
+// No refresh rotation yet — clients/web-legacy/src/api/client.ts is the working
+// reference implementation to port during P1.
 // =============================================================================
 
 import { API_BASE } from "./env";

@@ -55,7 +55,7 @@ export default function App() {
 
   // An existing session wins over a join deep link (v0): redeeming an invite
   // needs email+password, which a signed-in user should not re-enter. See
-  // clients/web/README.md known limits.
+  // clients/web-legacy/README.md known limits.
   if (session !== null && getAccessToken() !== null) {
     return <ChatPage session={session} authExpired={authExpired} />;
   }

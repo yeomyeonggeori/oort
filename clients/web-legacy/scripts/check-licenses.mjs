@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// clients/web license gate (MOMO-391, hard rule: permissive-only).
+// clients/web-legacy license gate (MOMO-391, hard rule: permissive-only).
 //
 // Walks EVERY installed package recorded in package-lock.json (production and
 // dev, i.e. the full transitive closure npm installed), reads its license,
@@ -112,7 +112,7 @@ for (const [pkgPath, info] of Object.entries(lock.packages ?? {})) {
 rows.sort((a, b) => a.name.localeCompare(b.name));
 
 const lines = [];
-lines.push("### clients/web dependency licenses");
+lines.push("### clients/web-legacy dependency licenses");
 lines.push("");
 lines.push(
   `Total installed packages: ${rows.length} ` +

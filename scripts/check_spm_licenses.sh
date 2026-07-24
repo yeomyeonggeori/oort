@@ -142,7 +142,7 @@ spdx_atom_allowed() {
   esac
 }
 
-# Match clients/web/scripts/check-licenses.mjs: OR passes if any branch is
+# Match clients/web-legacy/scripts/check-licenses.mjs: OR passes if any branch is
 # allowed; AND requires every branch. Parentheses around the whole expression
 # are accepted, while copyleft tokens always fail before expression evaluation.
 spdx_expression_allowed() {

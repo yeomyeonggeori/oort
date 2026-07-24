@@ -4,7 +4,7 @@ openapi: 3.0.3
 # momo REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
 #
 # This file is the canonical client contract for the web v0 surface. Clients
-# (clients/web via openapi-typescript, and MomoCore as a conformance target)
+# (clients/web-legacy via openapi-typescript, and MomoCore as a conformance target)
 # follow this spec; the spec itself is kept field-level identical to the
 # server DTOs in server/Sources/MomoServer/Routes/DTOs.swift and the Routes/*
 # handlers. Drift between this spec and the running server is detected by

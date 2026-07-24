@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "identifier": "app.momo.spike",
   "build": {
-    "beforeDevCommand": "npm --prefix ../web-spike run dev",
+    "beforeDevCommand": "npm --prefix ../web run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix ../web-spike run build",
-    "frontendDist": "../../web-spike/dist"
+    "beforeBuildCommand": "npm --prefix ../web run build",
+    "frontendDist": "../../web/dist"
   },
   "app": {
     "windows": [

@@ -1,7 +1,8 @@
-# momo desktop — MOMO-595 P0 (ADR-0133)
+# momo desktop — Tauri 2 shell (ADR-0133)
 
-Tauri 2 shell that wraps the **exact `clients/web-spike` bundle** — no forked UI.
-Proves web/desktop run one codebase (plan §1). **Spike quality, not production.**
+Tauri 2 shell that wraps the **exact `clients/web` bundle** — no forked UI.
+Proves web/desktop run one codebase (plan §1). Originated as the MOMO-595 P0
+spike; the wrapped bundle was promoted to `clients/web` by MOMO-596.
 
 Native integrations (deep-link, mDNS, keychain, notification, updater) are
 deliberately **not** here — they are P2 (migration plan §2 B-group). This shell is
@@ -12,7 +13,7 @@ core-only: it opens a window and loads the web bundle.
 ```
 src-tauri/
   Cargo.toml          # momo-desktop (tauri 2, release: LTO + strip + opt-level=s)
-  tauri.conf.json     # devUrl → web-spike dev; frontendDist → web-spike/dist
+  tauri.conf.json     # devUrl → clients/web dev; frontendDist → ../../web/dist
   src/main.rs         # thin entry → lib.rs run()
   src/lib.rs          # tauri::Builder::default().run(...)  (no plugins yet)
   capabilities/       # core:default only
@@ -21,7 +22,7 @@ src-tauri/
 
 ## Run
 
-Normal dev (spawns the web-spike Vite dev server on 5173, then opens the window):
+Normal dev (spawns the `clients/web` Vite dev server on 5173, then opens the window):
 
 ```sh
 cd clients/desktop
@@ -33,7 +34,7 @@ desktop app got the same-origin proxy + whitelisted WS origin (5173 was held by 
 sibling worktree on IPv6, so preview bound IPv4 `127.0.0.1:5173`):
 
 ```sh
-# web-spike preview already up on http://127.0.0.1:5173
+# clients/web preview already up on http://127.0.0.1:5173
 cargo tauri dev --config '{"build":{"beforeDevCommand":"","devUrl":"http://127.0.0.1:5173"}}'
 ```
 
@@ -58,4 +59,4 @@ open src-tauri/target/release/bundle/macos/momo-spike.app
 The **release** app loads `tauri://localhost`, so the web build's dev proxy for
 `/v1` does not exist — REST calls need a Rust HTTP command, an embedded proxy, or
 server-side CORS. The **dev** path (pointing at the proxied preview) does the full
-round-trip today. See `clients/web-spike/README.md` findings.
+round-trip today. See `clients/web/README.md` findings.

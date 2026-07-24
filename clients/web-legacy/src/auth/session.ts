@@ -18,7 +18,7 @@ type LoginResponse = components["schemas"]["LoginResponse"];
 //
 // PUBLIC-DEPLOY GATE: this storage model is gated to the internal alpha.
 // Before any public deployment the refresh token must move to an httpOnly
-// Secure SameSite=Strict cookie (ADR-0119 D3-B). See clients/web/README.md —
+// Secure SameSite=Strict cookie (ADR-0119 D3-B). See clients/web-legacy/README.md —
 // that document, not this comment, is the canonical statement of the gate.
 // =============================================================================
 

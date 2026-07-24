@@ -2,15 +2,18 @@
 
 FROM node:22-alpine AS build
 
-WORKDIR /workspace/clients/web
-COPY clients/web/package.json clients/web/package-lock.json ./
+# ADR-0119 v0 client. MOMO-596 (ADR-0133) moved it from clients/web to
+# clients/web-legacy; it remains the artifact this image serves until the
+# ADR-0133 parity gate flips serving to the new clients/web.
+WORKDIR /workspace/clients/web-legacy
+COPY clients/web-legacy/package.json clients/web-legacy/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY clients/web/ ./
+COPY clients/web-legacy/ ./
 RUN npm run build
 
 FROM alpine:3.21
 
 RUN mkdir -p /opt/momo-web /srv/momo-web
-COPY --from=build /workspace/clients/web/dist/ /opt/momo-web/
+COPY --from=build /workspace/clients/web-legacy/dist/ /opt/momo-web/
 
 ENTRYPOINT ["/bin/sh", "-ec", "rm -rf /srv/momo-web/* /srv/momo-web/.[!.]* /srv/momo-web/..?* 2>/dev/null || true; cp -a /opt/momo-web/. /srv/momo-web/"]
