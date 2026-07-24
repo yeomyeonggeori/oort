@@ -2959,6 +2959,131 @@ enum MomoInviteShortLinkConfiguration {
     }
 }
 
+// MARK: - Invite email (MOMO-591)
+
+/// Optional download-page URL for the invite email. Client-side config only, so
+/// enabling it adds no infrastructure. Same clean-origin rules as the short link
+/// domain, except a landing path is allowed (e.g. a GitHub Pages sub-path).
+enum MomoInviteMailConfiguration {
+    static let downloadPageURLEnvironmentKey = "MOMO_ALPHA_DOWNLOAD_URL"
+
+    static func downloadPageURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard let rawValue = environment[downloadPageURLEnvironmentKey],
+              let url = URL(string: rawValue),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              scheme == "https" || (
+                scheme == "http"
+                    && ["localhost", "127.0.0.1", "::1"].contains(host)
+              )
+        else {
+            return nil
+        }
+        return url
+    }
+}
+
+/// A prefilled invite email (subject + body) plus the `mailto:` URL that opens
+/// the operator's default mail app. Pure value type so the copy and the RFC 6068
+/// encoding are unit-testable without AppKit.
+struct MomoInviteMailContent: Equatable {
+    let subject: String
+    let body: String
+
+    /// `mailto:?subject=…&body=…` with no recipient, so the operator fills in the
+    /// tester's address. Subject and body are percent-encoded down to the RFC 3986
+    /// unreserved set, which satisfies RFC 6068: the `&` and `=` inside the
+    /// embedded deep link become `%26`/`%3D` and never leak into mailto headers,
+    /// and CRLF line breaks become `%0D%0A`.
+    var mailtoURL: URL? {
+        guard
+            let encodedSubject = MomoDeepLinkBuilder.percentEncoded(subject),
+            let encodedBody = MomoDeepLinkBuilder.percentEncoded(body)
+        else {
+            return nil
+        }
+        return URL(string: "mailto:?subject=\(encodedSubject)&body=\(encodedBody)")
+    }
+}
+
+/// Builds the invite email body. Card skeleton (onboarding runbook §3): install
+/// the app, open the deep link, and a manual fallback if the link does not open.
+enum MomoInviteMailComposer {
+    private static let lineBreak = "\r\n"
+
+    static func content(
+        language: MomoUILanguage,
+        serverURLString: String,
+        inviteCode: String,
+        deepLink: String,
+        downloadPageURL: URL?
+    ) -> MomoInviteMailContent {
+        let server = serverURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines: [String] = []
+
+        if language == .korean {
+            lines.append("안녕하세요,")
+            lines.append("")
+            lines.append("momo 워크스페이스에 초대합니다. 아래 순서대로 참여하세요.")
+            lines.append("")
+            lines.append("1. macOS 앱 설치")
+            lines.append("운영자가 보낸 승인된 다운로드 링크와 SHA-256 체크섬을 확인한 뒤 설치하세요.")
+            if let downloadPageURL {
+                lines.append("다운로드 페이지: \(downloadPageURL.absoluteString)")
+            }
+            lines.append("")
+            lines.append("2. 초대 링크 열기")
+            lines.append("앱을 설치한 뒤 아래 링크를 여세요. 서버 주소와 초대 코드가 자동으로 채워집니다.")
+            lines.append(deepLink)
+            lines.append("")
+            lines.append("3. 링크가 열리지 않을 때")
+            lines.append("앱의 'Join with invite'에서 아래 값을 직접 입력하세요.")
+            lines.append("서버 주소: \(server)")
+            lines.append("초대 코드: \(code)")
+            lines.append("")
+            lines.append("이 초대 코드는 재발급되지 않습니다. 다른 사람과 공유하지 마세요.")
+        } else {
+            lines.append("Hello,")
+            lines.append("")
+            lines.append("You are invited to a momo workspace. Follow these steps to join.")
+            lines.append("")
+            lines.append("1. Install the macOS app")
+            lines.append("Verify the approved download link and SHA-256 checksum from your operator, then install.")
+            if let downloadPageURL {
+                lines.append("Download page: \(downloadPageURL.absoluteString)")
+            }
+            lines.append("")
+            lines.append("2. Open the invite link")
+            lines.append("After installing the app, open the link below. It fills in the server address and invite code for you.")
+            lines.append(deepLink)
+            lines.append("")
+            lines.append("3. If the link does not open the app")
+            lines.append("In the app, choose 'Join with invite' and enter these values.")
+            lines.append("Server: \(server)")
+            lines.append("Invite code: \(code)")
+            lines.append("")
+            lines.append("This invite code will not be reissued. Do not share it with anyone.")
+        }
+
+        let subject = language == .korean
+            ? "momo 워크스페이스 초대"
+            : "Join our momo workspace"
+        return MomoInviteMailContent(
+            subject: subject,
+            body: lines.joined(separator: lineBreak)
+        )
+    }
+}
+
 struct MomoInviteOneTimeCopy {
     let language: MomoUILanguage
 
@@ -2972,6 +3097,14 @@ struct MomoInviteOneTimeCopy {
 
     var copyShortLink: String {
         language == .korean ? "단축 링크 복사" : "Copy Short Link"
+    }
+
+    var copyDeepLink: String {
+        language == .korean ? "딥링크 복사" : "Copy Deep Link"
+    }
+
+    var sendEmail: String {
+        language == .korean ? "메일로 보내기" : "Send by Email"
     }
 
     var savedIt: String {
@@ -3036,6 +3169,36 @@ struct MomoInviteOneTimeCopy {
             ? "단축 초대 링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
             : "Short invite link copied. The raw invite code remains visible only in this flow."
     }
+
+    var createBeforeCopyingDeepLink: String {
+        language == .korean
+            ? "딥링크를 복사하려면 먼저 초대를 만드세요."
+            : "Create an invite before copying the deep link."
+    }
+
+    var deepLinkCopied: String {
+        language == .korean
+            ? "초대 딥링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
+            : "Invite deep link copied. The raw invite code remains visible only in this flow."
+    }
+
+    var createBeforeSendingEmail: String {
+        language == .korean
+            ? "메일을 작성하려면 먼저 초대를 만드세요."
+            : "Create an invite before drafting the email."
+    }
+
+    var mailComposerUnavailable: String {
+        language == .korean
+            ? "기본 메일 앱을 열지 못했습니다. 딥링크를 대신 복사하세요."
+            : "Could not open the default mail app. Copy the deep link instead."
+    }
+
+    var mailComposerOpened: String {
+        language == .korean
+            ? "메일 초안을 열었습니다. 받는 사람을 확인한 뒤 보내세요."
+            : "Draft email opened. Check the recipient before sending."
+    }
 }
 
 @MainActor
@@ -3055,6 +3218,8 @@ final class MomoInviteAdminViewModel: ObservableObject {
     private let copyInviteCode: @MainActor (String) -> Void
     private let publicShortLinkBaseURL: URL?
     private let copyInviteLink: @MainActor (String) -> Void
+    private let downloadPageURL: URL?
+    private let openMailComposer: @MainActor (URL) -> Bool
     private let oneTimeCopy: MomoInviteOneTimeCopy
 
     init(
@@ -3063,6 +3228,8 @@ final class MomoInviteAdminViewModel: ObservableObject {
         copyInviteCode: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard,
         publicShortLinkBaseURL: URL? = MomoInviteShortLinkConfiguration.publicBaseURL(),
         copyInviteLink: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard,
+        downloadPageURL: URL? = MomoInviteMailConfiguration.downloadPageURL(),
+        openMailComposer: @escaping @MainActor (URL) -> Bool = MomoInviteAdminViewModel.openInDefaultApp,
         language: MomoUILanguage = .preferredDefault
     ) {
         self.context = context
@@ -3070,6 +3237,8 @@ final class MomoInviteAdminViewModel: ObservableObject {
         self.copyInviteCode = copyInviteCode
         self.publicShortLinkBaseURL = publicShortLinkBaseURL
         self.copyInviteLink = copyInviteLink
+        self.downloadPageURL = downloadPageURL
+        self.openMailComposer = openMailComposer
         self.oneTimeCopy = MomoInviteOneTimeCopy(language: language)
     }
 
@@ -3184,6 +3353,51 @@ final class MomoInviteAdminViewModel: ObservableObject {
         errorMessage = nil
     }
 
+    /// `momo://join` deep link for the current one-time code. The server is the
+    /// live session base URL, so the recipient lands on the same workspace the
+    /// operator is in. Present whenever a code exists (unlike the short link,
+    /// which needs a configured public domain).
+    var createdDeepLink: String? {
+        guard let createdCode, !createdCode.isEmpty else { return nil }
+        return MomoDeepLinkBuilder.buildJoinLink(
+            serverURLString: context.baseURL.absoluteString,
+            inviteCode: createdCode
+        )
+    }
+
+    func copyCreatedDeepLink() {
+        guard let createdDeepLink else {
+            errorMessage = oneTimeCopy.createBeforeCopyingDeepLink
+            return
+        }
+        copyInviteLink(createdDeepLink)
+        notice = oneTimeCopy.deepLinkCopied
+        errorMessage = nil
+    }
+
+    func composeInviteEmail() {
+        guard let createdCode, !createdCode.isEmpty, let createdDeepLink else {
+            errorMessage = oneTimeCopy.createBeforeSendingEmail
+            return
+        }
+        // The raw code rides inside the deep link and the fallback lines on
+        // purpose: the email is the operator's own hand-off to a new member, the
+        // same allowance docs/onboarding-deeplink.md grants the link artifact.
+        let content = MomoInviteMailComposer.content(
+            language: oneTimeCopy.language,
+            serverURLString: context.baseURL.absoluteString,
+            inviteCode: createdCode,
+            deepLink: createdDeepLink,
+            downloadPageURL: downloadPageURL
+        )
+        guard let mailtoURL = content.mailtoURL, openMailComposer(mailtoURL) else {
+            errorMessage = oneTimeCopy.mailComposerUnavailable
+            return
+        }
+        notice = oneTimeCopy.mailComposerOpened
+        errorMessage = nil
+    }
+
     func discardCreatedCode() {
         createdCode = nil
     }
@@ -3214,6 +3428,11 @@ final class MomoInviteAdminViewModel: ObservableObject {
         let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
         pasteboard.declareTypes([.string, concealedType, transientType], owner: nil)
         pasteboard.setString(code, forType: .string)
+    }
+
+    @MainActor
+    private static func openInDefaultApp(_ url: URL) -> Bool {
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -3374,7 +3593,32 @@ struct InviteAdminPopover: View {
                         .disabled(model.isWorking)
                     }
                 }
-                HStack {
+                if let deepLink = model.createdDeepLink {
+                    HStack(spacing: 8) {
+                        Label(deepLink, systemImage: "arrow.up.forward.app")
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .privacySensitive()
+                        Spacer()
+                        Button {
+                            model.copyCreatedDeepLink()
+                        } label: {
+                            Text(oneTimeCopy.copyDeepLink)
+                        }
+                        .controlSize(.small)
+                        .disabled(model.isWorking)
+                    }
+                }
+                HStack(spacing: 8) {
+                    Button {
+                        model.composeInviteEmail()
+                    } label: {
+                        Label(oneTimeCopy.sendEmail, systemImage: "envelope")
+                    }
+                    .controlSize(.small)
+                    .disabled(model.isWorking)
                     Spacer()
                     Button(oneTimeCopy.savedIt) {
                         model.discardCreatedCode()

@@ -92,6 +92,54 @@ final class MomoDeepLinkParserTests: XCTestCase {
     }
 }
 
+// Deep link assembly coverage (MOMO-591). The builder is the inverse of the
+// parser and must match docs/onboarding-deeplink.md byte for byte.
+final class MomoDeepLinkBuilderTests: XCTestCase {
+    func testBuildsCanonicalJoinLink() {
+        let link = MomoDeepLinkBuilder.buildJoinLink(
+            serverURLString: "https://api.example.com",
+            inviteCode: "TEAM-7Q2X"
+        )
+        XCTAssertEqual(link, "momo://join?server=https%3A%2F%2Fapi.example.com&code=TEAM-7Q2X")
+    }
+
+    func testBuildEncodesSchemeColonAndPathSlashes() {
+        let link = MomoDeepLinkBuilder.buildJoinLink(
+            serverURLString: "http://macbook.local:28180",
+            inviteCode: "ABC123"
+        )
+        XCTAssertEqual(link, "momo://join?server=http%3A%2F%2Fmacbook.local%3A28180&code=ABC123")
+    }
+
+    func testBuildTrimsWhitespace() {
+        let link = MomoDeepLinkBuilder.buildJoinLink(
+            serverURLString: "  https://a.example.com  ",
+            inviteCode: "  CODE-1  "
+        )
+        XCTAssertEqual(link, "momo://join?server=https%3A%2F%2Fa.example.com&code=CODE-1")
+    }
+
+    func testBuildReturnsNilWhenServerBlank() {
+        XCTAssertNil(MomoDeepLinkBuilder.buildJoinLink(serverURLString: "   ", inviteCode: "CODE"))
+    }
+
+    func testBuildReturnsNilWhenCodeBlank() {
+        XCTAssertNil(MomoDeepLinkBuilder.buildJoinLink(serverURLString: "https://a.example.com", inviteCode: ""))
+    }
+
+    // The generated link must parse back to the same server and code so the two
+    // MOMO-584/585 halves of the contract stay in lockstep.
+    func testBuiltLinkRoundTripsThroughParser() throws {
+        let string = try XCTUnwrap(MomoDeepLinkBuilder.buildJoinLink(
+            serverURLString: "https://team.momo.io/api",
+            inviteCode: "aB3-_xyz"
+        ))
+        let url = try XCTUnwrap(URL(string: string))
+        let parsed = try XCTUnwrap(MomoDeepLinkParser.parseJoin(url))
+        XCTAssertEqual(parsed, MomoDeepLink(serverURLString: "https://team.momo.io/api", inviteCode: "aB3-_xyz"))
+    }
+}
+
 @MainActor
 final class MomoDeepLinkRoutingTests: XCTestCase {
     private func makeController() -> MomoServerSessionController {

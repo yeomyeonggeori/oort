@@ -79,3 +79,46 @@ public enum MomoDeepLinkParser {
             .map { $0.lowercased() }
     }
 }
+
+// MARK: - momo:// deep link assembly (MOMO-591)
+
+/// Builds `momo://join` deep links, the inverse of `MomoDeepLinkParser`.
+///
+/// The output must match `docs/onboarding-deeplink.md` byte for byte so the
+/// ops CLI (MOMO-584) and the in-app invite tooling produce identical links.
+public enum MomoDeepLinkBuilder {
+    /// RFC 3986 unreserved set: `A-Z a-z 0-9 - . _ ~`. Everything else is
+    /// percent-encoded, so the server base URL's `:` and `/` become `%3A`/`%2F`
+    /// per the deep link contract, and the same set safely encodes mailto header
+    /// values (RFC 6068: spaces to `%20`, `&`/`=` to `%26`/`%3D`).
+    static let unreservedCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
+    static func percentEncoded(_ value: String) -> String? {
+        value.addingPercentEncoding(withAllowedCharacters: unreservedCharacters)
+    }
+
+    /// Assembles `momo://join?server=<percent-encoded base URL>&code=<code>`.
+    ///
+    /// The raw invite code is embedded on purpose: the deep link is a hand-off
+    /// artifact the operator gives a new member, so carrying the code inside the
+    /// link is the same allowance `docs/onboarding-deeplink.md` grants the ops
+    /// CLI (the code only ever appears inside the link). Callers must build this
+    /// only from a code they already surfaced to the operator.
+    ///
+    /// Returns `nil` when either input is blank, so a link is never emitted with
+    /// a missing server or code.
+    public static func buildJoinLink(serverURLString: String, inviteCode: String) -> String? {
+        let server = serverURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !server.isEmpty, !code.isEmpty else { return nil }
+        guard
+            let encodedServer = percentEncoded(server),
+            let encodedCode = percentEncoded(code)
+        else {
+            return nil
+        }
+        return "\(MomoDeepLinkParser.scheme)://\(MomoDeepLinkParser.joinAction)?server=\(encodedServer)&code=\(encodedCode)"
+    }
+}
