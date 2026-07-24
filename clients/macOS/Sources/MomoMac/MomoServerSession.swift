@@ -967,7 +967,12 @@ public final class MomoServerSessionController: ObservableObject {
 
         form.password = ""
         phase = .choosing
-        sessionNotice = "Created the '\(created.name)' workspace. Sign in to move into it."
+        // design-review M2: 초대 약속을 침묵 강등하지 않는다 — 수동 로그인으로
+        // 새 워크스페이스에 들어오면 one-shot이 소비되어 초대 흐름이 재개된다.
+        if requestInvite {
+            pendingInviteWorkspace = created.workspaceId
+        }
+        sessionNotice = "Created the '\(created.name)' workspace. Sign in to move into it; the invite panel will open after you land."
     }
 
     public func logout() async {
@@ -3046,7 +3051,8 @@ enum MomoInviteMailComposer {
             lines.append(deepLink)
             lines.append("")
             lines.append("3. 링크가 열리지 않을 때")
-            lines.append("앱의 'Join with invite'에서 아래 값을 직접 입력하세요.")
+            // 실제 chooser 라벨(joinWithInvite ko)과 글자 그대로 일치해야 한다(design-review High).
+            lines.append("앱 첫 화면에서 '초대로 참여'를 누르고 아래 값을 직접 입력하세요.")
             lines.append("서버 주소: \(server)")
             lines.append("초대 코드: \(code)")
             lines.append("")
@@ -3067,7 +3073,8 @@ enum MomoInviteMailComposer {
             lines.append(deepLink)
             lines.append("")
             lines.append("3. If the link does not open the app")
-            lines.append("In the app, choose 'Join with invite' and enter these values.")
+            // Must match the chooser label verbatim (joinWithInvite en).
+            lines.append("On the app's first screen, choose 'Join with Invite' and enter these values.")
             lines.append("Server: \(server)")
             lines.append("Invite code: \(code)")
             lines.append("")

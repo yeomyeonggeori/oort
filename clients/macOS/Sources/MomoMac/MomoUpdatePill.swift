@@ -142,6 +142,7 @@ struct MomoUpdatePillView: View {
                         .foregroundStyle(MomoTheme.costAmber)
                     Text(copy.updatePillLabel(version))
                         .font(MomoTheme.Sidebar.rowDetailFont)
+                        .monospacedDigit()
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
