@@ -165,7 +165,9 @@ enum AppBuilder {
             )
         ).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
-        WorkspaceRoutes(db: db).add(to: authed)
+        WorkspaceRoutes(
+            db: db, platformAdminEmails: config.platformAdminEmails
+        ).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         MemberLifecycleRoutes(db: db).add(to: authed)

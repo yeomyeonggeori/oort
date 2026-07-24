@@ -1,5 +1,13 @@
 # momo 진행 현황
 
+## MOMO-589 인앱 워크스페이스 생성 REST — POST /v1/workspaces (W-S1, #731, 2026-07-24)
+
+- 셀프서브 여정 배치 W-S1. `infra/prod/create_workspace.sql`(MOMO-571 migrate 서브커맨드)의 시딩 로직을 REST로 서버화했다. 신규 로직은 `server/Sources/MomoServer/Routes/WorkspaceRoutes.swift`의 `create` 핸들러 + `DTOs.swift`의 `CreateWorkspaceRequest`/`CreateWorkspaceResponse`. `App.swift`에서 `WorkspaceRoutes`에 `platformAdminEmails`를 주입한다. 신규 마이그레이션 불필요(기존 테이블만 사용).
+- 인가 = 등재 인스턴스 운영자(MOMO-583 모델 재사용): `ProviderLinkRoutes.isProviderLinkOperatorAuthorized`를 그대로 호출 — `platform:read` scope 또는 owner/admin+검증 이메일이 `PLATFORM_ADMIN_EMAILS`에 등재. 일반 워크스페이스 owner(미등재)·비운영자·비-human 토큰은 403(테넌트 신설은 인스턴스 운영자 권한이지 워크스페이스 소유권이 아니다).
+- 한 tx 시딩(신규 WS GUC 경유): 트랜잭션은 운영자 홈 워크스페이스로 열어 인가 판정 + 자격 스냅샷을 RLS 안에서 읽고, `set_config('app.workspace_id', 신규ID)`로 재바인딩한 뒤 workspace + owner member/human + workspace_membership(owner) + `#general` 채널 + channel_seq(0) + owner 채널 membership + `workspace.created`(source=momo-rest) 감사행을 모두 INSERT한다. slug 중복 = `workspace_slug_uniq` 23505 포착 → 409(부분 워크스페이스 없음).
+- D5-A 계정 복제: owner의 email·password_hash를 `momo_password_hash` 재해시 없이 `ON COMMIT DROP` 임시테이블로 SQL 내부에서만 복사(해시가 앱으로 유입되지 않음, momo_password_* 규율 준수) → 운영자가 동일 이메일/비번으로 신규 WS에 owner로 즉시 로그인 가능.
+- 검증: `swift build` green(server) + `swift test`(신규 `WorkspaceCreateTests` 5개: slug 정규화·거부 매트릭스, name 경계, 생성 표면 운영자 인가 매트릭스). 생성→201→풀테넌트 시딩→신규 WS owner 로그인(D5-A)→403 매트릭스(member·미등재 owner)→slug 중복 409→400 검증의 Docker/psql 왕복은 `scripts/verify_workspace_rest_create.sh`(28290 포트 블록, `WORKSPACE_CREATE_RUN_DOCKER=1`) — **런타임 왕복은 오케스트레이터 실행 대기(runtime-unverified)**.
+
 ## MOMO-588 신규 멤버 첫 입장 에이전트 인사 (W-O3, #723, 2026-07-24)
 
 - 온보딩 와우 배치 W-O3. `JoinRoutes.join` 성공 경로 끝에서 워크스페이스 에이전트가 신규 멤버에게 **실제 발화 경로로** 먼저 인사한다(봇 래핑 금지 철학, 가짜 클라 연출 없음). 신규 로직은 `server/Sources/MomoServer/Routes/OnboardingGreeting.swift`.
