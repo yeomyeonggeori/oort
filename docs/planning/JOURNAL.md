@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-24 (Fable 셀프서브+업데이트 배치 + 서명 배포) · 실사용 루프 인앱 완결, Gatekeeper 제거
+- 성재 "둘다 진행"+"서명도 진행했어" → 5티켓(MOMO-589~593/#731~735) 병렬 Opus xhigh + 서명 체인(오케스트레이터 직접).
+- **서명 배포 성립**: 인증서(YWQQFQM38J)·momo-notary 검증 → publish에 codesign(hardened)+notarytool(120m)+staple+ditto 배선(MOMO_SIGN=0 폴백). 첫 공증 30m 타임아웃(신규 팀 지연, 실측 ~35m Accepted) 후 **0.0.5 서명 발행: Gatekeeper accepted**. 사이트/가이드 우회 안내 제거. Sparkle(#736) 게이트 해제.
+- **엔진**: 589 POST /v1/workspaces(등재 운영자 인가·create_workspace.sql 서버화·D5-A 해시 SQL 내 복제·**verifier 전관문 PASS** 28290) + 592 ACP 런북(AGENT_HOSTING_QUICKSTART+agent_host_local.sh). **592 걷기가 실갭 발견: 재배포가 worker(AgentWorker) 미기동 → 멘션 응답 사망** — internal_alpha_stack `up api relay worker` 수리(main).
+- **UXUI**: 590 워크스페이스 생성 시트(세션 전환+초대 연결) + 591 초대 딥링크 복사+메일로 보내기(mailto RFC6068) + 593 업데이트 pill(T3식, 기동+6h, 무소음 실패). 순차 rebase 체인(732→733→735) 무충돌. **통합 design-review PASS(Blocker0)** → High1(메일이 실재하지 않는 라벨 'Join with invite' 인용→'초대로 참여' 정합)+M2(초대 약속 침묵 강등 제거)+N6 수정, 기준이미지 기록. ADR-0117 증보2 Accepted(표면 확장, D1-A 불변).
+- main #743·#744. momowebqa 재배포(worker 첫 포함, mDNS 재등록). 0.0.6 발행(아래 결과). 백로그: 시트 필드 레일 정렬(가족 단위)·자동 초대 팝오버 런타임 1회 확인·734 deferred(WH-2 페어링 표면 갭·시드 개인화).
+
 ## 2026-07-24 (Fable 온보딩 와우 배치 W-O1~5 완주) · 딥링크·mDNS·에이전트 첫 인사 main 랜딩
 - 성재 "전체 배치로 진행" → 5티켓(MOMO-584~588/#719~723) 병렬 Opus 4.8 xhigh → 검수 → 트랙 → main(#729·#730). 계약 정본 `docs/onboarding-deeplink.md`(momo://join?server&code) + `_momo._tcp` TXT base.
 - **엔진 3건**: 584 invite-create 딥링크 출력(verify 10/10, 코드 원문 파일-only 유지) · 586 internal_alpha mDNS 광고(dns-sd 수명주기, 누수 0 실측) · 588 에이전트 첫 인사(단일 쓰기경로 한 tx·UUIDv5 멱등·결정론 템플릿·join 불가침, **runtime verifier 11/11** — 실행 요건: 클린 볼륨+MOMO_AGENT_SEED_MODE=demo).
