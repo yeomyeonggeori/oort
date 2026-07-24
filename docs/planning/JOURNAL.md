@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-24 (Fable WH-2·WH-3 main 랜딩 + 0.0.3 발행) · ADR-0114 증보1 전량 완성
+- 성재 "ㄱㄱ" → track/engine→main(#714, MOMO-582 서버 REST + WH-3 문서) + track/uxui→main(#715, WH-2 GUI). 두 delta 모두 WH 작업만(이전 UXUI 배치는 기 main). 마커 3종(GUI/REST/docs) main 확인.
+- **0.0.3 발행**(build 1114 @04c95afa, sha256 734315c8…, momo-macos-0.0.3.zip): 설정 "코드 실행 호스트" GUI 포함. macOS Release 빌드 통과=통합 게이트.
+- **ADR-0114 증보1(WH-0 스파이크·WH-1 사이드카·WH-2 REST+GUI·WH-3 문서) 전량 main 완성.** "배포판에 코드 에이전트(opencode/goose) 담아 GUI로 붙이는" 경험의 클라이언트+서버+인프라+문서 완결. Codex는 로컬 연결(codex-local).
+- 백로그 이관: 셰어드 토큰 상태칩 AA 대비(574/706 공통, design-review Medium2) — 공유 토큰 레벨 수정 후속. 다음: 성재 0.0.3 실사용(사이드카 `--profile workhost` + 엔진 붙이기) 피드백.
+
 ## 2026-07-24 (Fable WH-2·WH-3 병렬 구현·검수·트랙 랜딩) · GUI+REST+문서, main 승인 대기
 - 성재 "이어서 진행". 3작업 병렬 Opus 4.8 xhigh → 오케스트레이터 검수 → 트랙 랜딩.
 - **MOMO-582(#710, 서버 REST)**: GET/PUT `/v1/provider/work-host-engine`(requireOperator=platform:read OR owner/admin, 비관리자 403), per-workspace RLS(마이그레이션 040 재사용), 400 검증. **검증기 실 PG18 왕복 전관문 PASS**(3엔진·403·400·RLS FORCE·ADR-0004 라벨전용). WorkHostEngineTests 10. → PR #711 track/engine.
