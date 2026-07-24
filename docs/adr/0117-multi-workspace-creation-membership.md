@@ -57,3 +57,11 @@
 - (+) 권한 4축이 문서로 고정 — 초대·role·채널 스코프가 명시 계약.
 - (−) D5-A는 같은 사람의 WS별 계정 분리 = 전환 UX가 공개 SaaS 대비 투박(공개 시 D5-B로 승격 부담).
 - 예약: 셀프서브 생성·전역 identity·비공개 채널 visibility 플래그.
+
+## 증보 2 — 워크스페이스 생성 표면을 앱으로 확장 (2026-07-24, 성재 승인)
+
+- Status: **Accepted** (2026-07-24, 성재 — 셀프서브 운영자 여정 배치 "둘다 진행" 승인. 계획 정본 `docs/planning/2026-07-24-selfserve-operator-journey-plan.md`)
+- **정책 불변**: D1-A(운영자 생성)는 유지된다. 바뀌는 것은 표면뿐 — 기존 CLI(momo-ops workspace-create, SQL)에 더해 **인앱 생성**(`POST /v1/workspaces` + "새 워크스페이스 만들기" GUI)을 연다.
+- 인가 = **등재 인스턴스 운영자**(MOMO-583 모델 재사용: platform:read OR owner/admin+검증 이메일+PLATFORM_ADMIN_EMAILS). 일반 멤버/비운영자 403. 공개 셀프 가입·셀프 생성은 여전히 공개 단계 결정으로 유보.
+- 시딩은 create_workspace.sql과 동일 결과(생성자 owner 멤버십·계정 복제(D5-A)·#general·channel_seq·slug 중복 명시 거부)를 서버 tx로.
+- 파생: MOMO-589(REST)·590(GUI). 멀티WS 전환 UX(W-4)는 별도 잔존.
