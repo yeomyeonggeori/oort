@@ -328,10 +328,13 @@ SQL
   # ---- PUT goose -> source database, upsert ------------------------------
   rest_api PUT "$ENGINE_PATH" "$RE_OWNER_TOKEN" '{"engine":"goose"}'
   rest_expect 200 "owner PUT goose"
+  # updatedBy is Swift `UUID.uuidString` (uppercase), same as the sibling
+  # provider_link route; compare case-insensitively against the seeded member id.
   printf '%s' "$RE_BODY" | jq -e \
     --arg m "$RE_OWNER_ID" '
       .engine == "goose" and .source == "database"
-      and .updatedBy == $m and (.updatedAtMs | type == "number")
+      and ((.updatedBy | ascii_downcase) == ($m | ascii_downcase))
+      and (.updatedAtMs | type == "number")
     ' >/dev/null || { log "FAIL PUT goose projection"; echo "$RE_BODY" >&2; exit 1; }
   DB_ENGINE="$(printf "SELECT engine FROM work_host_engine WHERE workspace_id='%s';" "$RE_WORKSPACE_ID" | rest_sql_scalar)"
   [ "$DB_ENGINE" = "goose" ] || { log "FAIL DB engine after PUT: '$DB_ENGINE'"; exit 1; }
