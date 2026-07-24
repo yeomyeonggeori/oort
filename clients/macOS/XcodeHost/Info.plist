@@ -22,6 +22,21 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- 초대 딥링크(W-O1, MOMO-585): momo://join?server=<percent-encoded base URL>&code=<invite code>.
+	     onOpenURL이 chooser의 join 경로에 서버 URL·초대 코드를 프리필한다. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>app.momo.join</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>momo</string>
+			</array>
+		</dict>
+	</array>
 	<!-- 내부 알파 LAN 직결(2026-07-23): 같은 와이파이의 http://192.168.x.x
 	     서버·ws:// 실시간 접속을 허용한다. NSAllowsLocalNetworking은 사설/링크로컬
 	     대역과 .local 호스트에만 ATS를 면제하며 공인 도메인 HTTPS 요구는 유지한다
