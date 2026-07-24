@@ -244,7 +244,9 @@ greeting_body_ok_for() {
 
 outbox_count_for_message() {
   local message="$1"
-  psql_scalar "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM outbox WHERE workspace_id = '$WORKSPACE_ID' AND kind = 'broadcast' AND method = 'publish' AND payload->'data'->'payload'->>'id' = '$message'; COMMIT;"
+  # payload id는 Swift UUID.uuidString(대문자), DB uuid 텍스트는 소문자 —
+  # 케이스 무관 비교(582 updatedBy 전례와 동일 클래스).
+  psql_scalar "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM outbox WHERE workspace_id = '$WORKSPACE_ID' AND kind = 'broadcast' AND method = 'publish' AND lower(payload->'data'->'payload'->>'id') = lower('$message'); COMMIT;"
 }
 
 provision_fallback_agent() {
