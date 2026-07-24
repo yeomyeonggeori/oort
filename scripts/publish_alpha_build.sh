@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 내부 알파 macOS 빌드 발행 (2026-07-23 내부 테스트 전환 §1).
 #
-#   scripts/publish_alpha_build.sh --version 0.0.1 [--notes "..."]
+#   scripts/publish_alpha_build.sh --version 0.0.1 [--notes "..."] [MOMO_SIGN=0 폴백]
 #
 # 버전 규칙 (성재 2026-07-23): 내부 빌드는 0.0.1부터 시작해 0.0.2, 0.0.3...
 # patch를 계속 올린다. **오픈 베타 전환 시에만 0.1.0**. 그 전에는 minor를 올리지
@@ -32,7 +32,13 @@ GIT_SHA="$(git rev-parse --short HEAD)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/momo-alpha-build.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
-echo "[alpha-publish] 1/5 unsigned Release build (v${VERSION} build ${BUILD_NUM} @${GIT_SHA})"
+# 서명/공증(W-O6, 2026-07-24 성재 인증서 준비 완료). 기본=서명 배포.
+# 비상시 MOMO_SIGN=0 으로 구버전(unsigned) 경로 폴백.
+SIGN="${MOMO_SIGN:-1}"
+SIGN_IDENTITY="${MOMO_SIGN_IDENTITY:-Developer ID Application: Kwak Seongjae (YWQQFQM38J)}"
+NOTARY_PROFILE="${MOMO_NOTARY_PROFILE:-momo-notary}"
+
+echo "[alpha-publish] 1/5 Release build (v${VERSION} build ${BUILD_NUM} @${GIT_SHA}, sign=${SIGN})"
 xcodebuild -project clients/macOS/MomoMac.xcodeproj -scheme MomoMac -configuration Release \
   -derivedDataPath "$WORK/dd" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
@@ -42,12 +48,41 @@ xcodebuild -project clients/macOS/MomoMac.xcodeproj -scheme MomoMac -configurati
 APP_PATH="$(find "$WORK/dd/Build/Products/Release" -maxdepth 1 -name '*.app' | head -1)"
 [ -n "$APP_PATH" ] || { echo "[alpha-publish] .app not found" >&2; exit 1; }
 
+if [ "$SIGN" = "1" ]; then
+  echo "[alpha-publish] 1b/5 codesign (hardened runtime) + notarize + staple"
+  # 내부 중첩 코드(프레임워크/dylib/헬퍼)를 먼저, 앱 번들을 마지막에 서명한다.
+  while IFS= read -r nested; do
+    codesign --force --options runtime --timestamp \
+      --sign "$SIGN_IDENTITY" "$nested" 2>>"$WORK/codesign.log" || {
+        echo "[alpha-publish] nested codesign failed: $nested" >&2; exit 1; }
+  done < <(find "$APP_PATH" -type d \( -name '*.framework' -o -name '*.xpc' -o -name '*.appex' \) ; \
+           find "$APP_PATH" -type f \( -name '*.dylib' \))
+  codesign --force --options runtime --timestamp \
+    --sign "$SIGN_IDENTITY" "$APP_PATH" >> "$WORK/codesign.log" 2>&1 || {
+      tail -20 "$WORK/codesign.log" >&2; exit 1; }
+  codesign --verify --strict --deep "$APP_PATH" || { echo "[alpha-publish] codesign verify failed" >&2; exit 1; }
+
+  # 공증은 zip으로 제출하고, 성공 후 앱에 스테이플 → 최종 배포 zip을 다시 만든다.
+  ditto -c -k --keepParent "$APP_PATH" "$WORK/notarize.zip"
+  xcrun notarytool submit "$WORK/notarize.zip" --keychain-profile "$NOTARY_PROFILE" \
+    --wait --timeout 30m > "$WORK/notary.log" 2>&1 || {
+      tail -30 "$WORK/notary.log" >&2
+      echo "[alpha-publish] notarization failed — 로그를 확인하세요 (xcrun notarytool log <id> --keychain-profile $NOTARY_PROFILE)" >&2
+      exit 1; }
+  grep -q "status: Accepted" "$WORK/notary.log" || { tail -30 "$WORK/notary.log" >&2; exit 1; }
+  xcrun stapler staple "$APP_PATH" >> "$WORK/notary.log" 2>&1 || { echo "[alpha-publish] staple failed" >&2; exit 1; }
+  spctl -a -t exec -vv "$APP_PATH" 2>&1 | grep -q "accepted" && echo "[alpha-publish] Gatekeeper: accepted" \
+    || echo "[alpha-publish] warn: spctl not accepted (오프라인 평가일 수 있음)"
+fi
+
 echo "[alpha-publish] 2/5 packaging with LICENSE/NOTICE/THIRD_PARTY"
 STAGE="$WORK/stage"; mkdir -p "$STAGE"
 cp -R "$APP_PATH" "$STAGE/"
 cp LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md "$STAGE/"
 ZIP_NAME="momo-macos-${VERSION}.zip"
-(cd "$STAGE" && zip -qry "$WORK/$ZIP_NAME" .)
+# ditto가 서명/스테이플 메타데이터(리소스 포크·xattr)를 보존한다 — zip -qry는 유실 위험.
+# --keepParent 없이 스테이징 내용물이 zip 루트에 오도록.
+ditto -c -k "$STAGE" "$WORK/$ZIP_NAME"
 SHA256="$(shasum -a 256 "$WORK/$ZIP_NAME" | cut -d' ' -f1)"
 echo "[alpha-publish] sha256=$SHA256"
 
@@ -58,7 +93,7 @@ gh release create "$TAG" --repo "$DIST_REPO" --title "momo ${VERSION} (internal 
 
 - build: ${BUILD_NUM} (source ${GIT_SHA}, private repo)
 - sha256: \`${SHA256}\`
-- unsigned internal build — install per the download page instructions" \
+$([ "$SIGN" = "1" ] && echo "- Developer ID signed + notarized: 더블클릭으로 바로 실행됩니다" || echo "- unsigned internal build: install per the download page instructions")" \
   "$WORK/$ZIP_NAME" 2>/dev/null || gh release upload "$TAG" --repo "$DIST_REPO" --clobber "$WORK/$ZIP_NAME"
 DOWNLOAD_URL="https://github.com/${DIST_REPO}/releases/download/${TAG}/${ZIP_NAME}"
 
