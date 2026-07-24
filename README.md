@@ -103,6 +103,18 @@ momo supports three onboarding paths:
    opt-in described in the
    [provider guide](docs/external-agent-provider/README.md).
 
+## Connect a code execution host
+
+An optional work host lets agents run CLI code sessions on infrastructure you
+control. The bundled sidecar ships opencode (MIT, default) and goose
+(Apache-2.0); Codex is not bundled and connects to your own host's `codex`
+install. The sidecar is a credential consumer: engine LLM keys and Codex OAuth
+tokens stay with the user host and do not enter momo's server, database, or
+ledger. The five-minute connect steps, engine selection, and the local Codex
+path are in [`docs/WORK_HOST_QUICKSTART.md`](docs/WORK_HOST_QUICKSTART.md). See
+[ADR-0114](docs/adr/0114-interactive-work-console.md) and
+[ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md).
+
 ## Reference integrations
 
 - [`examples/eve-momo-channel`](examples/eve-momo-channel) — an eve custom
