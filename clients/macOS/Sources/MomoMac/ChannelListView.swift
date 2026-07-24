@@ -213,6 +213,9 @@ public struct ChannelListView: View {
                     }
                     .scrollIndicators(.hidden)
 
+                    if openUpdates != nil {
+                        MomoUpdatePillView(language: language, openUpdates: openUpdates)
+                    }
                     utilityFooter(copy: copy)
                     profileFooter(copy: copy)
                         .padding(.bottom, MomoTheme.Sidebar.footerBottomInset)

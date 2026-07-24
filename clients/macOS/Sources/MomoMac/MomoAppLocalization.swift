@@ -2825,6 +2825,28 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    func updatePillLabel(_ version: MomoMacAppVersion) -> String {
+        let display = "v\(version.version)"
+        switch language {
+        case .korean: return "업데이트 가능 \(display)"
+        case .english: return "Update available \(display)"
+        }
+    }
+
+    var updatePillHelp: String {
+        switch language {
+        case .korean: return "업데이트 세부 정보 보기"
+        case .english: return "Open update details"
+        }
+    }
+
+    var dismissUpdatePill: String {
+        switch language {
+        case .korean: return "업데이트 알림 닫기"
+        case .english: return "Dismiss update notice"
+        }
+    }
+
     var updateCheckFailed: String {
         switch language {
         case .korean: return "업데이트 확인 실패"
