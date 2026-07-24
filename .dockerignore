@@ -7,6 +7,10 @@ DerivedData
 **/DerivedData
 node_modules
 **/node_modules
+# Rust build output (clients/desktop Tauri shell, ADR-0133) — multi-GB, never
+# part of a docker build context.
+target
+**/target
 .env
 .env.*
 infra/prod/secrets.env

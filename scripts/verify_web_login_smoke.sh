@@ -4,7 +4,7 @@
 #
 # Boots an ISOLATED e2e compose stack (infra/docker-compose.e2e.yml) under its
 # own compose project on non-default loopback ports, serves the built SPA
-# (clients/web/dist) through the REAL prod Caddyfile web-edge (strict CSP),
+# (clients/web-legacy/dist) through the REAL prod Caddyfile web-edge (strict CSP),
 # and drives a real Chromium (playwright) through:
 #
 #   login form (workspace empty -> demo fallback) -> channel list -> #general
@@ -44,8 +44,8 @@
 # host ports 18990-18995, teardown removes only this project's containers and
 # volumes. It never touches other compose projects or host momo processes.
 #
-# Prereqs: clients/web/dist built (the web gate profile builds it first),
-# clients/web/node_modules installed, docker, curl, jq, node.
+# Prereqs: clients/web-legacy/dist built (the web gate profile builds it first),
+# clients/web-legacy/node_modules installed, docker, curl, jq, node.
 #
 # Environment overrides:
 #   WEB_LOGIN_SMOKE_PROJECT        compose project (default: momo391web)
@@ -86,15 +86,15 @@ need npx
 need uuidgen
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
-WEB_DIR="$REPO_ROOT/clients/web"
+WEB_DIR="$REPO_ROOT/clients/web-legacy"
 DIST_DIR="$WEB_DIR/dist"
 
 [ -f "$DIST_DIR/index.html" ] || {
-  echo "[web-smoke] clients/web/dist/index.html not found — run (cd clients/web && npm ci && npm run build) first" >&2
+  echo "[web-smoke] clients/web-legacy/dist/index.html not found — run (cd clients/web-legacy && npm ci && npm run build) first" >&2
   exit 1
 }
 [ -d "$WEB_DIR/node_modules" ] || {
-  echo "[web-smoke] clients/web/node_modules not found — run (cd clients/web && npm ci) first" >&2
+  echo "[web-smoke] clients/web-legacy/node_modules not found — run (cd clients/web-legacy && npm ci) first" >&2
   exit 1
 }
 

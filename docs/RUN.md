@@ -686,7 +686,7 @@ scripts/local_gate.sh --profile docs
 
 서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
 
-웹 서빙만 검증할 때는 아래 infra profile을 사용한다. 실제 `clients/web` build를 `web-init`이 named volume에 복사하고 LinkShort와 prod Caddyfile을 HTTP로 구동하며, 호스트 curl로 `/join` SPA 폴백과 `/i/*` 프록시를 포함한 8개 단정을 수행한다. 포트는 28070~28074만 사용한다. 로컬 내부 CA를 만들지 않기 위해 HTTPS는 의도적으로 제외하며 공인 DNS·ACME·production TLS와 초대→가입→메시지 실왕복은 별도 orchestrator gate다.
+웹 서빙만 검증할 때는 아래 infra profile을 사용한다. 실제 `clients/web-legacy` build(ADR-0119 v0)를 `web-init`이 named volume에 복사하고 LinkShort와 prod Caddyfile을 HTTP로 구동하며, 호스트 curl로 `/join` SPA 폴백과 `/i/*` 프록시를 포함한 8개 단정을 수행한다. 포트는 28070~28074만 사용한다. 로컬 내부 CA를 만들지 않기 위해 HTTPS는 의도적으로 제외하며 공인 DNS·ACME·production TLS와 초대→가입→메시지 실왕복은 별도 orchestrator gate다.
 
 ```sh
 scripts/local_gate.sh --profile web-serving
