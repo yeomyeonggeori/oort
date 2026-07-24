@@ -1,0 +1,4 @@
+# Rust build output — never commit.
+/target/
+# Tauri codegen (schemas, etc.) — regenerated on build.
+/gen/schemas/
