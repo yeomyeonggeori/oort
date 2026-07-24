@@ -1,13 +1,21 @@
 # momo 진행 현황
 
-## MOMO-576 provider link 권한을 owner/admin에 개방 (#700, 2026-07-24, ADR-0004 증보1 D3)
+## MOMO-583 provider_link 권한 재조임 — 등재 인스턴스 운영자만 (#716, 2026-07-24, 576 후속 집행)
+
+- 조치: MOMO-576의 any-owner/admin 폴백 제거(instance-global 표면의 멀티WS 크로스테넌트 통제 누출). 새 인가 = **platform:read scope OR 등재 인스턴스 운영자**(owner/admin + `email_verified` + `PLATFORM_ADMIN_EMAILS` 등재, 요청 시점 DB 판정 — 재로그인 불필요).
+- scope-only가 아닌 이유: `platform:read` 발급은 `platformAdminSecret` 로그인(MOMO-300 상수시간 비교)이 전제인데 macOS 앱 로그인에 그 필드가 없어, scope 전용 조임은 운영자 GUI를 영구 403으로 만든다. allowlist는 배포 env 통제자=인스턴스 운영자라는 ADR-0004 증보1 D3의 신뢰 경계와 일치.
+- 분리 유지: per-WS 표면(`WorkHostEngineRoutes`, RLS-scoped)은 owner/admin 인가 유지 — instance-global ⇒ 등재 운영자, per-workspace ⇒ owner/admin.
+- 배선: e2e compose `PLATFORM_ADMIN_EMAILS` passthrough, `internal_alpha_stack.sh` 기본 성재 이메일 주입.
+- 검증: verifier 9관문 PASS — **동일 owner 롤 미등재 신원(WSOWNER) GET/PUT/DELETE 403 회귀 단정 신설**(폴백 제거 증명) + 등재 운영자 전체 왕복·마스킹·RLS·평문 비유출 유지. server 16 tests(매트릭스 2벌). PR #717→track/engine→#718→main.
+
+## MOMO-576 provider link 권한을 owner/admin에 개방 (#700, 2026-07-24, ADR-0004 증보1 D3) — 후속 집행됨(583)
 
 - 결함: MOMO-572 `ProviderLinkRoutes.requireOperator`가 `platform:read` scope만 요구해, owner의 일반 로그인 토큰(그 scope는 `PLATFORM_ADMIN_EMAILS`로만 발급)이 403 — 성재(owner)가 MOMO-574 'AI 연결' GUI를 열면 GET부터 403이라 GUI가 안 열렸다.
 - 수정: `requireOperator`를 async 인스턴스 메서드로 바꿔 **platform:read scope OR 워크스페이스 owner/admin role**을 허용한다. platform scope가 있으면 DB 조회 없이 통과(플랫폼 admin 경로), 없으면 principal 자기 워크스페이스의 membership role을 `WorkspaceAuthorization.activeRole`로 조회해 `owner||admin`(`WorkspaceRole.isAdmin`)이면 통과·아니면 403. 판정 로직은 순수 함수 `isOperatorAuthorized(kind:scopes:workspaceRole:)`로 분리해 DB 없이 유닛 테스트(owner/admin 200·member/guest 403·platform 200·비human 403).
 - RLS 정합: role 조회는 별도 `withTenantConnection`(app.workspace_id만 세팅, provider_link_admin 미세팅)에서 수행 — **권한 판정 완료 후에야** GET/test는 `withProviderLinkReadConnection`, PUT/DELETE는 `withProviderLinkTransaction`로 provider_link_admin GUC를 열어 행을 unlock한다("권한 판정 → GUC 세팅" 순서 유지).
 - 부수 버그 수정: PUT/DELETE가 `InviteRoutes.workspaceID(context,principal:)`(=`:ws` path param 요구)를 호출했는데 `/v1/provider/link`엔 `:ws`가 없어 항상 실패했을 경로 — 인스턴스-글로벌이라 audit 귀속 워크스페이스를 `principal.workspaceID`로 직접 사용(원 함수도 검증 후 `principal.workspaceID`만 반환했으므로 등가·안전).
 - 불변식: ADR-0004 OAuth/원본키 비유입·bearer write-only·마스킹 그대로. GUI 입력 필드/DTO closed-world 불변.
-- **후속 티켓 후보 (성재 승인 대기)**: provider_link는 instance-global(workspace_id 없음)이라 워크스페이스 owner/admin가 바꾸면 인스턴스 전 워크스페이스의 provider 해석에 영향. 내부 단일-WS 테스트엔 owner/admin 개방이 타당하나, **멀티 워크스페이스/공개 단계 전에 `platform:read`-only로 재조임** 필요(ADR-0117 D3 "워크스페이스 설정"은 owner-only인 반면 본 개방은 owner+admin이므로 정책 정합도 함께 결정). 코드 주석에 WARNING 성문화.
+- ~~후속 티켓 후보~~ → **집행 완료(2026-07-24, MOMO-583/#716)**: 등재 인스턴스 운영자 allowlist로 재조임(위 583 항목). 원안의 platform:read-only는 macOS 로그인 경로 부재로 변형 채택.
 - 검증: `swift build` + `swift test --filter ProviderLinkTests`(순수 유닛, DB 없음) — 라이브 200/403 REST 왕복은 orchestrator(포트 28260s)로 handoff, runtime-unverified.
 
 ## MOMO-571 momo-ops workspace-create + role 능력 매트릭스 감사 (#687, 2026-07-23, ADR-0117)

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-24 (Fable MOMO-583 권한 재조임 + 알파 사이트 여명 리디자인) · 576 후속 집행, 사이트 라이브
+- 성재 발제: ①576 후속 진행 ②배포 사이트 리디자인(buzz/slack/discord 참조, 히어로 재밌게, 여명거리 느낌, 마스코트는 우선 없이).
+- **MOMO-583(#716→PR#717→#718→main)**: provider_link any-owner/admin 폴백 제거. 새 인가=platform:read OR **등재 인스턴스 운영자**(owner/admin+검증 이메일+PLATFORM_ADMIN_EMAILS, 요청시점 판정). **설계 조정 이유**: macOS 로그인은 platformAdminSecret 미지원 → scope-only면 운영자 GUI 영구 403. per-WS 표면(582)은 owner/admin 유지(의도된 분리). verifier 9관문 PASS(미등재 owner 403 회귀 단정 신설), server 16 tests. e2e compose+internal_alpha에 PLATFORM_ADMIN_EMAILS 배선(기본 성재).
+- **알파 사이트 여명(Dawn) 리디자인 라이브**(dawn-kim-official.github.io/momo-alpha): 밤하늘 히어로(별+떠다니는 실대화 조각: @김인턴 멘션→작업완료 칩→승인대기 칩)→기능 3장→번호 스텝 설치/시작→여명 지평선 푸터(momo by Dawn). 마스코트 유보 슬롯(에이전트 아바타 교체형). 자급자족 단일 파일·noindex·manifest fetch 유지. 방향 정본 `2026-07-24-alpha-site-design-direction.md`(마스코트 후보 포함). em-dash 0·과장어 0 pre-flight 통과.
+- 다음: momowebqa 재배포(583) 후 성재 GUI 라이브 확인 · 마스코트 방향 성재 결정 대기.
+
 ## 2026-07-24 (Fable WH-2·WH-3 main 랜딩 + 0.0.3 발행) · ADR-0114 증보1 전량 완성
 - 성재 "ㄱㄱ" → track/engine→main(#714, MOMO-582 서버 REST + WH-3 문서) + track/uxui→main(#715, WH-2 GUI). 두 delta 모두 WH 작업만(이전 UXUI 배치는 기 main). 마커 3종(GUI/REST/docs) main 확인.
 - **0.0.3 발행**(build 1114 @04c95afa, sha256 734315c8…, momo-macos-0.0.3.zip): 설정 "코드 실행 호스트" GUI 포함. macOS Release 빌드 통과=통합 게이트.
