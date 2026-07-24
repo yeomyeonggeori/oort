@@ -121,9 +121,9 @@ codex-local). 이 선택은 워크스페이스별 `work_host_engine` 행에 저�
 
 **우선순위**(`WorkdConfig.resolveEngine`):
 
-1. DB 설정(`work_host_engine`) — 앱에서 고른 값. 있으면 이게 이긴다.
-2. `MOMO_WORKD_ENGINE` 환경값 — 사이드카 부팅 기본(§1.2의 `MOMO_WORKHOST_ENGINE`).
-3. 컴파일 기본값 — opencode.
+1. DB 설정(`work_host_engine`): 앱에서 고른 값. 있으면 이게 이긴다.
+2. `MOMO_WORKD_ENGINE` 환경값: 사이드카 부팅 기본(§1.2의 `MOMO_WORKHOST_ENGINE`).
+3. 컴파일 기본값: opencode.
 
 DB에 행이 없으면 별도 쓰기 없이 opencode로 동작한다.
 
