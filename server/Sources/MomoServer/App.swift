@@ -142,6 +142,8 @@ enum AppBuilder {
             envProvider: config.agentProvider,
             healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger)
         ).add(to: authed)
+        // MOMO-582 / ADR-0114 증보1 B: per-workspace work host engine selection.
+        WorkHostEngineRoutes(db: db).add(to: authed)
         let allowAgentCardHTTP = config.momoEnvironment.lowercased() == "local"
             && ProcessInfo.processInfo.environment["MOMO_AGENT_CARD_ALLOW_HTTP"] == "1"
         AgentCardRoutes(
