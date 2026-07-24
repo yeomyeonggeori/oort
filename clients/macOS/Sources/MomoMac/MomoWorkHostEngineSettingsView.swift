@@ -45,66 +45,20 @@ struct MomoWorkHostEngineSettingsView: View {
     }
 
     var body: some View {
-        stateContent
-            .task {
-                await model.loadIfNeeded()
-            }
-            .accessibilityIdentifier("work-host-settings")
-    }
-
-    @ViewBuilder
-    private var stateContent: some View {
-        switch model.loadState {
-        case .idle, .loading:
-            VStack(spacing: 12) {
-                ProgressView()
-                Text(copy.loading)
-                    .momoTypography(.supporting)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        case .unavailable:
-            ContentUnavailableView {
-                Label(copy.unavailableTitle, systemImage: "server.rack")
-            } description: {
-                Text(copy.unavailableDescription)
-            }
-
-        case .offline:
-            ContentUnavailableView {
-                Label(copy.offlineTitle, systemImage: "wifi.slash")
-            } description: {
-                Text(copy.offlineDescription)
-            } actions: {
-                Button(copy.tryAgain) {
-                    Task { await model.load() }
-                }
-            }
-
-        case .failed(let failure):
-            ContentUnavailableView {
-                Label(copy.loadFailedTitle, systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(copy.failureDescription(failure))
-            } actions: {
-                Button(copy.tryAgain) {
-                    Task { await model.load() }
-                }
-            }
-
-        case .loaded:
-            loadedForm
-        }
-    }
-
-    private var loadedForm: some View {
+        // Pairing (this Mac's registration) is locally known and independent of the
+        // engine REST load, so it renders unconditionally. Only the engine section
+        // reflects loadState, and it does so inline — a REST failure never hides the
+        // pairing status, which is a primary purpose of this surface (WH-2 review).
         Form {
             pairingSection
-            engineSection
+            engineStateSection
             providerDistinctionSection
         }
         .formStyle(.grouped)
+        .task {
+            await model.loadIfNeeded()
+        }
+        .accessibilityIdentifier("work-host-settings")
     }
 
     // MARK: - Pairing status (this Mac as a work host)
@@ -170,27 +124,121 @@ struct MomoWorkHostEngineSettingsView: View {
 
     // MARK: - Execution engine selection
 
-    private var engineSection: some View {
+    // The engine concern loads over REST and can fail independently. It renders its
+    // own state INLINE (loading/unavailable/offline/failed/loaded) inside this one
+    // section so a failure degrades only the engine controls, never the whole surface.
+    @ViewBuilder
+    private var engineStateSection: some View {
         Section {
-            if let status = model.status {
-                LabeledContent(copy.currentEngineLabel) {
-                    Text(copy.engineName(status.engine))
-                        .momoTypography(.row)
+            switch model.loadState {
+            case .idle, .loading:
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                    Text(copy.loading)
+                        .momoTypography(.supporting)
+                        .foregroundStyle(.secondary)
                 }
-                LabeledContent(copy.sourceLabel) {
-                    Text(copy.sourceValue(status.source))
-                        .momoTypography(.row)
-                }
-                if let updatedAtMs = status.updatedAtMs {
-                    LabeledContent(copy.updatedLabel) {
-                        Text(copy.timestamp(updatedAtMs))
-                            .momoTypography(.row)
-                            .monospacedDigit()
+
+            case .unavailable:
+                engineNotice(
+                    icon: "server.rack",
+                    title: copy.unavailableTitle,
+                    description: copy.unavailableDescription,
+                    showRetry: false
+                )
+
+            case .offline:
+                engineNotice(
+                    icon: "wifi.slash",
+                    title: copy.offlineTitle,
+                    description: copy.offlineDescription,
+                    showRetry: true
+                )
+
+            case .failed(let failure):
+                engineNotice(
+                    icon: "exclamationmark.triangle",
+                    title: copy.loadFailedTitle,
+                    description: copy.failureDescription(failure),
+                    showRetry: true
+                )
+
+            case .loaded:
+                engineLoadedContent
+            }
+        } header: {
+            engineSectionHeaderView
+        } footer: {
+            Text(copy.engineSectionFooter)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var engineSectionHeaderView: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Label(copy.engineSectionHeader, systemImage: "cpu")
+            Spacer(minLength: 8)
+            Button {
+                Task { await model.load() }
+            } label: {
+                Label(copy.refresh, systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("r", modifiers: [.command])
+            .disabled(model.isWorking)
+            .help(copy.refresh)
+        }
+    }
+
+    @ViewBuilder
+    private func engineNotice(
+        icon: String,
+        title: String,
+        description: String,
+        showRetry: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .momoTypography(.row)
+            Text(description)
+                .momoTypography(.supporting)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if showRetry {
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(copy.tryAgain) {
+                        Task { await model.load() }
                     }
                 }
             }
+        }
+    }
 
-            Picker(selection: $model.engineDraft) {
+    @ViewBuilder
+    private var engineLoadedContent: some View {
+        if let status = model.status {
+            LabeledContent(copy.currentEngineLabel) {
+                Text(copy.engineName(status.engine))
+                    .momoTypography(.row)
+            }
+            LabeledContent(copy.sourceLabel) {
+                Text(copy.sourceValue(status.source))
+                    .momoTypography(.row)
+            }
+            if let updatedAtMs = status.updatedAtMs {
+                LabeledContent(copy.updatedLabel) {
+                    Text(copy.timestamp(updatedAtMs))
+                        .momoTypography(.row)
+                        .monospacedDigit()
+                }
+            }
+        }
+
+        Picker(selection: $model.engineDraft) {
                 ForEach(MomoWorkHostEngine.allCases) { engine in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(copy.engineName(engine))
@@ -208,6 +256,15 @@ struct MomoWorkHostEngineSettingsView: View {
             .pickerStyle(.inline)
             .labelsHidden()
             .accessibilityIdentifier("work-host-engine-picker")
+
+            // codex-local runs on THIS Mac; surface the coherence gap when the
+            // selected engine needs a host that is currently offline / not paired.
+            if model.engineDraft == .codexLocal, pairing.connection.isUnreachable {
+                Label(copy.codexLocalUnreachableNote, systemImage: "exclamationmark.triangle")
+                    .momoTypography(.supporting)
+                    .foregroundStyle(MomoTheme.costAmber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let issue = model.mutationIssue, issue.action == .save {
                 feedbackLabel(copy.saveFailure(issue))
@@ -242,25 +299,6 @@ struct MomoWorkHostEngineSettingsView: View {
                     model.operation == .saving ? copy.savingEngine : copy.saveEngine
                 )
             }
-        } header: {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label(copy.engineSectionHeader, systemImage: "cpu")
-                Spacer(minLength: 8)
-                Button {
-                    Task { await model.load() }
-                } label: {
-                    Label(copy.refresh, systemImage: "arrow.clockwise")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("r", modifiers: [.command])
-                .disabled(model.isWorking)
-                .help(copy.refresh)
-            }
-        } footer: {
-            Text(copy.engineSectionFooter)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     // MARK: - LLM provider distinction
@@ -337,6 +375,12 @@ enum MomoWorkHostPairingConnection: Equatable {
     case pairing
     case waiting
     case notPaired
+
+    /// The host cannot currently run a host-local engine (codex-local): it is either
+    /// offline or has never paired. `pairing`/`waiting` are transient and not flagged.
+    var isUnreachable: Bool {
+        self == .offline || self == .notPaired
+    }
 }
 
 struct MomoWorkHostEngineCopy {
@@ -421,6 +465,11 @@ struct MomoWorkHostEngineCopy {
     var saveEngine: String { isKorean ? "엔진 저장" : "Save engine" }
     var savingEngine: String { isKorean ? "저장 중" : "Saving" }
     var savedNotice: String { isKorean ? "실행 엔진을 저장했습니다." : "Execution engine saved." }
+    var codexLocalUnreachableNote: String {
+        isKorean
+            ? "codex-local은 이 Mac에서 실행됩니다. 지금 이 Mac이 코드 실행 호스트로 연결돼 있지 않아 실행되지 않을 수 있어요."
+            : "codex-local runs on this Mac. This Mac is not connected as a code execution host right now, so it may not run."
+    }
 
     // Provider distinction
     var providerDistinctionHeader: String { isKorean ? "AI 연결과의 차이" : "How this differs from AI connection" }
