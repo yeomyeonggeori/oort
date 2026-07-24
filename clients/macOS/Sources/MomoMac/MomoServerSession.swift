@@ -1135,21 +1135,25 @@ struct MomoServerSessionChooser: View {
     var initialFocus: MomoSessionField?
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedField: MomoSessionField?
     @State private var selectedPath: MomoOnboardingPath?
+    @StateObject private var discovery: MomoServerDiscoveryModel
 
     init(
         controller: MomoServerSessionController,
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
         initialFocus: MomoSessionField? = nil,
-        initialPath: MomoOnboardingPath? = nil
+        initialPath: MomoOnboardingPath? = nil,
+        discovery: MomoServerDiscoveryModel? = nil
     ) {
         self.controller = controller
         self.errorMessage = errorMessage
         self.failureKind = failureKind
         self.initialFocus = initialFocus
         _selectedPath = State(initialValue: initialPath)
+        _discovery = StateObject(wrappedValue: discovery ?? MomoServerDiscoveryModel())
     }
 
     var body: some View {
@@ -1220,6 +1224,10 @@ struct MomoServerSessionChooser: View {
             if selectedPath == nil, errorMessage != nil || initialFocus != nil {
                 selectedPath = controller.form.trimmedInviteCode.isEmpty ? .signIn : .join
             }
+            discovery.start()
+        }
+        .onDisappear {
+            discovery.stop()
         }
         .onChange(of: controller.deepLinkPrefillIntent) { _, intent in
             guard let intent else { return }
@@ -1293,8 +1301,26 @@ struct MomoServerSessionChooser: View {
         if let selectedPath {
             credentialSurface(path: selectedPath, copy: copy)
         } else {
-            pathChooser(copy: copy)
+            VStack(spacing: MomoTheme.Onboarding.sectionSpacing) {
+                if !discovery.servers.isEmpty {
+                    MomoDiscoveredServerCard(
+                        servers: discovery.servers,
+                        copy: copy,
+                        onSelect: selectDiscoveredServer
+                    )
+                    .transition(.opacity)
+                }
+                pathChooser(copy: copy)
+            }
+            .animation(reduceMotion ? nil : .snappy, value: discovery.servers)
         }
+    }
+
+    private func selectDiscoveredServer(_ server: MomoDiscoveredServer) {
+        controller.form.baseURLString = server.baseURLString
+        discovery.stop()
+        selectedPath = .signIn
+        focusedField = .email
     }
 
     private func pathChooser(copy: MomoSessionCopy) -> some View {
@@ -1662,6 +1688,124 @@ private struct MomoOnboardingPathButton: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(title)
         .accessibilityHint(detail)
+    }
+}
+
+/// A quiet suggestion shown above the path chooser only when a momo server was
+/// found on the local network (MOMO-587). When nothing is found the card is
+/// absent, so not-found / denied / timed-out are all rendered as silence.
+private struct MomoDiscoveredServerCard: View {
+    var servers: [MomoDiscoveredServer]
+    var copy: MomoSessionCopy
+    var onSelect: (MomoDiscoveredServer) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Onboarding.contentSpacing) {
+            HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
+                Image(systemName: "wifi")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+                VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
+                    Text(copy.discoveryTitle)
+                        .font(.body.weight(.semibold))
+                    Text(copy.discoverySubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
+                    if index > 0 {
+                        Divider()
+                    }
+                    MomoDiscoveredServerRow(
+                        host: server.displayHost,
+                        actionLabel: copy.discoveryUseAction
+                    ) {
+                        onSelect(server)
+                    }
+                }
+            }
+            .background(
+                MomoTheme.Onboarding.fieldBackground,
+                in: RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+                    .stroke(MomoTheme.subtleBorder, lineWidth: 1)
+            }
+
+            Text(copy.discoveryPrivacyNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MomoTheme.Onboarding.blockSpacing)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: MomoTheme.cornerLarge, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: MomoTheme.cornerLarge, style: .continuous)
+                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
+        }
+    }
+}
+
+private struct MomoDiscoveredServerRow: View {
+    var host: String
+    var actionLabel: String
+    var action: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: MomoTheme.Onboarding.contentSpacing) {
+                Image(systemName: "server.rack")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+                    .frame(width: 24, height: 24)
+
+                Text(host)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: MomoTheme.Onboarding.standardSpacing)
+
+                Text(actionLabel)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+            }
+            .padding(.horizontal, MomoTheme.Onboarding.contentSpacing)
+            .padding(.vertical, MomoTheme.Onboarding.standardSpacing)
+            .contentShape(Rectangle())
+            .background(
+                isHovering
+                    ? MomoTheme.Onboarding.choiceHover(colorScheme: colorScheme)
+                    : Color.clear,
+                in: RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+            )
+            .overlay {
+                if isFocused {
+                    RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+                        .stroke(MomoTheme.Onboarding.focusBorder, lineWidth: 2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .focused($isFocused)
+        .onHover { isHovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(host), \(actionLabel)")
     }
 }
 
@@ -2071,6 +2215,34 @@ private struct MomoSessionCopy {
         switch language {
         case .korean: return "서버 주소와 계정 정보는 필요한 단계에서만 입력합니다."
         case .english: return "Server and account details appear only when they are needed."
+        }
+    }
+
+    var discoveryTitle: String {
+        switch language {
+        case .korean: return "같은 네트워크에서 momo 서버를 찾았습니다"
+        case .english: return "Found a momo server on your network"
+        }
+    }
+
+    var discoverySubtitle: String {
+        switch language {
+        case .korean: return "선택하면 서버 주소를 채우고 로그인 단계로 넘어갑니다."
+        case .english: return "Pick one to fill its address and move to sign in."
+        }
+    }
+
+    var discoveryUseAction: String {
+        switch language {
+        case .korean: return "주소 채우기"
+        case .english: return "Use address"
+        }
+    }
+
+    var discoveryPrivacyNote: String {
+        switch language {
+        case .korean: return "같은 와이파이의 momo 서버만 찾습니다. 주소는 자동으로 저장되지 않습니다."
+        case .english: return "Only momo servers on your Wi-Fi appear here. Nothing is saved automatically."
         }
     }
 
