@@ -5,7 +5,7 @@
 
 ## Context (실측)
 
-- 현행 UI 자산: macOS SwiftUI 112파일(+테스트·스냅샷 인프라·momo-design-taste 체계), iOS 킷 35파일(부분). **웹 클라이언트는 0** — 최소 릴리스 요건(Web)만으로도 React 코드베이스 신설이 불가피하다.
+- 현행 UI 자산: macOS SwiftUI 112파일(+테스트·스냅샷 인프라·momo-design-taste 체계), iOS 킷 35파일(부분). 웹 클라이언트는 ADR-0119 v0(`clients/web`, 레포 브라우저·알파 서빙용 경량 Vite 앱)가 존재하나 메신저 UI는 아니다(정정 2026-07-25 — 기안 시 '0'으로 오기). v0의 seq/reconcile·approval 모델 어휘는 momo-web의 씨앗으로 재사용한다.
 - 서버 계약은 UI 무관: REST + Centrifugo(WS) + momo:// 딥링크 + mDNS. **엔진(서버/relay/worker/momo-workd/ACP)은 이 결정의 영향권 밖.**
 - Tauri 2: 2024-10 stable, 현행 2.9.x. 데스크톱(mac WKWebView·win WebView2) 성숙, **모바일(iOS/Android)은 1급 타깃이나 상대적으로 신생**(iOS=Swift 셸+WKWebView+Rust FFI). 내장 updater·deep-link 플러그인·서명/공증 번들러 보유.
 - buzz 실측: 데스크톱=Tauri, **모바일=Flutter(부분)** — buzz도 모바일엔 Tauri를 쓰지 않았다. Tauri의 Linux(WebKitGTK) day-1 크래시 전과는 우리 초기 타깃(mac/win)엔 비해당.
