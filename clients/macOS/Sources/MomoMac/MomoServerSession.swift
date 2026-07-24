@@ -722,6 +722,10 @@ public final class MomoServerSessionController: ObservableObject {
     /// Set when a deep link arrives while a session is already connected; drives
     /// the dismissible banner that offers to switch workspaces.
     @Published private(set) var deepLinkWhileConnected: MomoDeepLink?
+    /// One-shot (MOMO-590): the workspace whose session should open the invite flow
+    /// as soon as it lands, so a just-created workspace flows straight into inviting
+    /// the team. Cleared once the sidebar consumes it.
+    @Published public private(set) var pendingInviteWorkspace: WorkspaceID?
 
     private let store: MomoServerSessionStore
     private let client: MomoServerSessionClient
@@ -896,6 +900,74 @@ public final class MomoServerSessionController: ObservableObject {
         sessionFailureKind = nil
         phase = .choosing
         sessionNotice = "Choose another server or account. Previous token, realtime subscription, and channel cache were cleared."
+    }
+
+    /// Clears the one-shot invite prompt after the sidebar has opened the invite
+    /// flow for a freshly created workspace (MOMO-590).
+    public func consumePendingInviteWorkspace() {
+        pendingInviteWorkspace = nil
+    }
+
+    /// Switches the live session into a workspace the operator just created
+    /// (MOMO-590). The operator App JWT is workspace-scoped, so landing in the new
+    /// workspace means re-authenticating there. When the current credentials are
+    /// still in hand (a saved password), the switch lands seamlessly; otherwise it
+    /// returns to the chooser with a notice so the operator signs in to the new
+    /// workspace. Full multi-workspace switching without re-auth is W-4 backlog.
+    func switchToCreatedWorkspace(_ created: MomoCreatedWorkspace, requestInvite: Bool) async {
+        await clearActiveSessionState()
+        pendingInviteWorkspace = nil
+        var reloaded = store.load()
+        reloaded.inviteCode = ""
+        form = reloaded
+        onboardingPath = nil
+        sessionFailureKind = nil
+
+        let hasCredentials = !reloaded.password.isEmpty
+            && (try? reloaded.validatedBaseURL()) != nil
+            && (try? reloaded.validatedEmail()) != nil
+
+        if hasCredentials {
+            phase = .connecting("Switching to \(created.name)")
+            do {
+                let session = try await client.login(form: reloaded, workspace: created.workspaceId)
+                let viewModel = await makeViewModel(session: session, password: reloaded.password)
+                if let error = viewModel.connectionError {
+                    await viewModel.clearSessionSensitiveState()
+                    sessionFailureKind = .offline
+                    phase = .failed(error)
+                    return
+                }
+                form.password = ""
+                sessionNotice = nil
+                if requestInvite {
+                    pendingInviteWorkspace = session.workspace
+                }
+                phase = .connected(viewModel, MomoServerSessionSummary(
+                    mode: .real,
+                    title: session.summaryTitle,
+                    detail: "New workspace",
+                    channelCount: viewModel.channels.count,
+                    serverURLString: session.baseURL.absoluteString,
+                    workspaceIDString: session.workspace.description,
+                    memberDisplayName: session.member.displayName,
+                    memberHandle: session.member.handle,
+                    memberKind: session.member.kind,
+                    email: session.email
+                ), MomoInviteAdminContext(
+                    baseURL: session.baseURL,
+                    workspace: session.workspace,
+                    accessToken: session.accessToken
+                ))
+                return
+            } catch {
+                // Fall through to the chooser hand-off below.
+            }
+        }
+
+        form.password = ""
+        phase = .choosing
+        sessionNotice = "Created the '\(created.name)' workspace. Sign in to move into it."
     }
 
     public func logout() async {
@@ -1081,6 +1153,16 @@ public struct MomoMacSessionRootView: View {
                         },
                         logout: {
                             Task { await controller.logout() }
+                        },
+                        switchToCreatedWorkspace: { created, requestInvite in
+                            Task {
+                                await controller.switchToCreatedWorkspace(created, requestInvite: requestInvite)
+                            }
+                        },
+                        presentInviteOnLanding: inviteAdmin?.workspace != nil
+                            && controller.pendingInviteWorkspace == inviteAdmin?.workspace,
+                        consumeInvitePrompt: {
+                            controller.consumePendingInviteWorkspace()
                         }
                     ),
                     onOpenMemberDirectory: onOpenMemberDirectory

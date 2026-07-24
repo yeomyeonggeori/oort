@@ -63,6 +63,8 @@ public struct ChannelListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @State private var showChannelCreation = false
+    @State private var showWorkspaceCreation = false
+    @State private var didAutoPresentInvite = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
     @State private var inviteDismissLocked = false
@@ -295,6 +297,17 @@ public struct ChannelListView: View {
                 dismiss: { showChannelCreation = false }
             )
         }
+        .sheet(isPresented: $showWorkspaceCreation) {
+            MomoWorkspaceCreateSheet(
+                context: sessionChrome?.inviteAdminContext,
+                language: language,
+                dismiss: { showWorkspaceCreation = false },
+                onSwitchToWorkspace: { created, requestInvite in
+                    showWorkspaceCreation = false
+                    sessionChrome?.switchToCreatedWorkspace(created, requestInvite)
+                }
+            )
+        }
         .sheet(isPresented: $showMemberDirectory) {
             MemberDirectoryView(viewModel: viewModel)
         }
@@ -309,6 +322,17 @@ public struct ChannelListView: View {
             memberInvitePopover(copy: copy)
                 .frame(width: MomoTheme.memberInvitePopoverWidth)
                 .padding(MomoTheme.Sidebar.contentSpacing)
+        }
+        .onAppear {
+            // MOMO-590: a workspace the operator just created lands here; open the
+            // invite flow so the first move is inviting the team, then clear the
+            // one-shot flag. Guarded so a later re-appear cannot reopen it.
+            guard !didAutoPresentInvite,
+                  sessionChrome?.presentInviteOnLanding == true,
+                  sessionChrome?.inviteAdminContext != nil else { return }
+            didAutoPresentInvite = true
+            showInvites = true
+            sessionChrome?.consumeInvitePrompt()
         }
     }
 
@@ -1306,6 +1330,16 @@ public struct ChannelListView: View {
                 profileAction(copy.workHost, systemImage: "terminal", helpText: copy.workHostSubtitle) {
                     showProfilePanel = false
                     openWorkHost?()
+                }
+            }
+            if sessionChrome?.inviteAdminContext != nil, viewModel.canManageWorkspace {
+                profileAction(
+                    copy.createWorkspace,
+                    systemImage: "plus.square.dashed",
+                    helpText: copy.createWorkspaceSubtitle
+                ) {
+                    showProfilePanel = false
+                    showWorkspaceCreation = true
                 }
             }
             profileAction(copy.updates, systemImage: "arrow.down.circle") {

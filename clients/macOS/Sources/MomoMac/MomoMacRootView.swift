@@ -15,6 +15,14 @@ struct MomoSessionChrome {
     var inviteAdminContext: MomoInviteAdminContext?
     var switchSession: () -> Void
     var logout: () -> Void
+    // MOMO-590: switch the live session into a workspace the operator just
+    // created; the Bool requests the invite flow open once the new session lands.
+    var switchToCreatedWorkspace: (MomoCreatedWorkspace, Bool) -> Void = { _, _ in }
+    // True when this connected session is the freshly created workspace and the
+    // operator asked to invite people, so the sidebar opens the invite flow on
+    // appear and then clears the one-shot flag.
+    var presentInviteOnLanding: Bool = false
+    var consumeInvitePrompt: () -> Void = {}
 }
 
 enum MomoMemberDirectoryNavigation {
