@@ -3728,6 +3728,189 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(english.shortLinkUnavailable, "A public invite link domain is not configured. Copy the raw code instead.")
     }
 
+    // MARK: - Invite email + deep link (MOMO-591)
+
+    func testInviteMailAndDeepLinkCopyFollowLanguage() {
+        let korean = MomoInviteOneTimeCopy(language: .korean)
+        let english = MomoInviteOneTimeCopy(language: .english)
+
+        XCTAssertEqual(korean.copyDeepLink, "딥링크 복사")
+        XCTAssertEqual(korean.sendEmail, "메일로 보내기")
+        XCTAssertEqual(english.copyDeepLink, "Copy Deep Link")
+        XCTAssertEqual(english.sendEmail, "Send by Email")
+    }
+
+    func testInviteMailDownloadPageURLRequiresCleanOrigin() {
+        XCTAssertNil(MomoInviteMailConfiguration.downloadPageURL(environment: [:]))
+        XCTAssertNil(MomoInviteMailConfiguration.downloadPageURL(environment: [
+            MomoInviteMailConfiguration.downloadPageURLEnvironmentKey: "http://downloads.momo.example/alpha"
+        ]))
+        XCTAssertNil(MomoInviteMailConfiguration.downloadPageURL(environment: [
+            MomoInviteMailConfiguration.downloadPageURLEnvironmentKey: "https://downloads.momo.example/alpha?token=x"
+        ]))
+        XCTAssertNotNil(MomoInviteMailConfiguration.downloadPageURL(environment: [
+            MomoInviteMailConfiguration.downloadPageURLEnvironmentKey: "http://localhost:28190/alpha"
+        ]))
+        XCTAssertEqual(
+            MomoInviteMailConfiguration.downloadPageURL(environment: [
+                MomoInviteMailConfiguration.downloadPageURLEnvironmentKey: "https://downloads.momo.example/alpha"
+            ])?.absoluteString,
+            "https://downloads.momo.example/alpha"
+        )
+    }
+
+    func testInviteMailContentEmbedsDeepLinkServerCodeAndFallback() {
+        let content = MomoInviteMailComposer.content(
+            language: .korean,
+            serverURLString: "https://api.momo.test",
+            inviteCode: "momo_raw_once",
+            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once",
+            downloadPageURL: nil
+        )
+
+        XCTAssertEqual(content.subject, "momo 워크스페이스 초대")
+        XCTAssertTrue(content.body.contains("momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
+        XCTAssertTrue(content.body.contains("서버 주소: https://api.momo.test"))
+        XCTAssertTrue(content.body.contains("초대 코드: momo_raw_once"))
+        XCTAssertTrue(content.body.contains("Join with invite"))
+        XCTAssertFalse(content.body.contains("다운로드 페이지:"))
+    }
+
+    func testInviteMailContentIncludesDownloadPageWhenConfigured() {
+        let content = MomoInviteMailComposer.content(
+            language: .english,
+            serverURLString: "https://api.momo.test",
+            inviteCode: "C1",
+            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=C1",
+            downloadPageURL: URL(string: "https://downloads.momo.example/alpha")!
+        )
+
+        XCTAssertEqual(content.subject, "Join our momo workspace")
+        XCTAssertTrue(content.body.contains("Download page: https://downloads.momo.example/alpha"))
+        XCTAssertTrue(content.body.contains("Server: https://api.momo.test"))
+        XCTAssertTrue(content.body.contains("Invite code: C1"))
+    }
+
+    func testInviteMailtoURLEncodesHeadersAndEmbeddedSeparators() throws {
+        let content = MomoInviteMailComposer.content(
+            language: .english,
+            serverURLString: "https://api.momo.test",
+            inviteCode: "C1",
+            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=C1",
+            downloadPageURL: nil
+        )
+        let url = try XCTUnwrap(content.mailtoURL)
+        let string = url.absoluteString
+
+        XCTAssertEqual(url.scheme, "mailto")
+        XCTAssertTrue(string.hasPrefix("mailto:?subject="))
+        XCTAssertTrue(string.contains("&body="))
+        // The deep link's own "&code=" must be encoded so it cannot leak into a mailto header.
+        XCTAssertTrue(string.contains("%26code%3D"))
+        // Body line breaks are CRLF per RFC 6068.
+        XCTAssertTrue(string.contains("%0D%0A"))
+        // Spaces encode as %20, never "+".
+        XCTAssertFalse(string.contains("+"))
+    }
+
+    func testInviteMailtoBodyRoundTripsThroughURLComponents() throws {
+        let content = MomoInviteMailComposer.content(
+            language: .korean,
+            serverURLString: "https://api.momo.test",
+            inviteCode: "momo_raw_once",
+            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once",
+            downloadPageURL: nil
+        )
+        let url = try XCTUnwrap(content.mailtoURL)
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let items = try XCTUnwrap(components.queryItems)
+
+        let subject = try XCTUnwrap(items.first { $0.name == "subject" }?.value)
+        let body = try XCTUnwrap(items.first { $0.name == "body" }?.value)
+        XCTAssertEqual(subject, content.subject)
+        XCTAssertEqual(body, content.body)
+    }
+
+    @MainActor
+    func testCopyCreatedDeepLinkUsesCurrentSessionServer() {
+        var copiedLink: String?
+        let model = MomoInviteAdminViewModel(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://api.momo.test")!,
+                workspace: .demo,
+                accessToken: "token"
+            ),
+            copyInviteLink: { copiedLink = $0 },
+            language: .korean
+        )
+
+        model.copyCreatedDeepLink()
+        XCTAssertNil(copiedLink)
+        XCTAssertEqual(model.errorMessage, "딥링크를 복사하려면 먼저 초대를 만드세요.")
+
+        model.createdCode = "momo_raw_once"
+        XCTAssertEqual(
+            model.createdDeepLink,
+            "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"
+        )
+        model.copyCreatedDeepLink()
+        XCTAssertEqual(copiedLink, "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once")
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(
+            model.notice,
+            "초대 딥링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
+        )
+    }
+
+    @MainActor
+    func testComposeInviteEmailOpensMailtoDraftWithDeepLink() throws {
+        var openedURL: URL?
+        let model = MomoInviteAdminViewModel(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://api.momo.test")!,
+                workspace: .demo,
+                accessToken: "token"
+            ),
+            openMailComposer: { openedURL = $0; return true },
+            language: .korean
+        )
+
+        model.composeInviteEmail()
+        XCTAssertNil(openedURL)
+        XCTAssertEqual(model.errorMessage, "메일을 작성하려면 먼저 초대를 만드세요.")
+
+        model.createdCode = "momo_raw_once"
+        model.composeInviteEmail()
+
+        let url = try XCTUnwrap(openedURL)
+        XCTAssertEqual(url.scheme, "mailto")
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let body = try XCTUnwrap(components.queryItems?.first { $0.name == "body" }?.value)
+        XCTAssertTrue(body.contains("momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
+        XCTAssertTrue(body.contains("초대 코드: momo_raw_once"))
+        XCTAssertEqual(model.notice, "메일 초안을 열었습니다. 받는 사람을 확인한 뒤 보내세요.")
+        XCTAssertNil(model.errorMessage)
+    }
+
+    @MainActor
+    func testComposeInviteEmailReportsFailureWhenMailAppUnavailable() {
+        let model = MomoInviteAdminViewModel(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://api.momo.test")!,
+                workspace: .demo,
+                accessToken: "token"
+            ),
+            openMailComposer: { _ in false },
+            language: .korean
+        )
+        model.createdCode = "momo_raw_once"
+
+        model.composeInviteEmail()
+
+        XCTAssertEqual(model.errorMessage, "기본 메일 앱을 열지 못했습니다. 딥링크를 대신 복사하세요.")
+        XCTAssertNil(model.notice)
+    }
+
     func testRESTBackendLoadsChannelsFromMomoServer() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)

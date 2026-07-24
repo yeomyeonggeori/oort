@@ -722,6 +722,10 @@ public final class MomoServerSessionController: ObservableObject {
     /// Set when a deep link arrives while a session is already connected; drives
     /// the dismissible banner that offers to switch workspaces.
     @Published private(set) var deepLinkWhileConnected: MomoDeepLink?
+    /// One-shot (MOMO-590): the workspace whose session should open the invite flow
+    /// as soon as it lands, so a just-created workspace flows straight into inviting
+    /// the team. Cleared once the sidebar consumes it.
+    @Published public private(set) var pendingInviteWorkspace: WorkspaceID?
 
     private let store: MomoServerSessionStore
     private let client: MomoServerSessionClient
@@ -896,6 +900,79 @@ public final class MomoServerSessionController: ObservableObject {
         sessionFailureKind = nil
         phase = .choosing
         sessionNotice = "Choose another server or account. Previous token, realtime subscription, and channel cache were cleared."
+    }
+
+    /// Clears the one-shot invite prompt after the sidebar has opened the invite
+    /// flow for a freshly created workspace (MOMO-590).
+    public func consumePendingInviteWorkspace() {
+        pendingInviteWorkspace = nil
+    }
+
+    /// Switches the live session into a workspace the operator just created
+    /// (MOMO-590). The operator App JWT is workspace-scoped, so landing in the new
+    /// workspace means re-authenticating there. When the current credentials are
+    /// still in hand (a saved password), the switch lands seamlessly; otherwise it
+    /// returns to the chooser with a notice so the operator signs in to the new
+    /// workspace. Full multi-workspace switching without re-auth is W-4 backlog.
+    func switchToCreatedWorkspace(_ created: MomoCreatedWorkspace, requestInvite: Bool) async {
+        await clearActiveSessionState()
+        pendingInviteWorkspace = nil
+        var reloaded = store.load()
+        reloaded.inviteCode = ""
+        form = reloaded
+        onboardingPath = nil
+        sessionFailureKind = nil
+
+        let hasCredentials = !reloaded.password.isEmpty
+            && (try? reloaded.validatedBaseURL()) != nil
+            && (try? reloaded.validatedEmail()) != nil
+
+        if hasCredentials {
+            phase = .connecting("Switching to \(created.name)")
+            do {
+                let session = try await client.login(form: reloaded, workspace: created.workspaceId)
+                let viewModel = await makeViewModel(session: session, password: reloaded.password)
+                if let error = viewModel.connectionError {
+                    await viewModel.clearSessionSensitiveState()
+                    sessionFailureKind = .offline
+                    phase = .failed(error)
+                    return
+                }
+                form.password = ""
+                sessionNotice = nil
+                if requestInvite {
+                    pendingInviteWorkspace = session.workspace
+                }
+                phase = .connected(viewModel, MomoServerSessionSummary(
+                    mode: .real,
+                    title: session.summaryTitle,
+                    detail: "New workspace",
+                    channelCount: viewModel.channels.count,
+                    serverURLString: session.baseURL.absoluteString,
+                    workspaceIDString: session.workspace.description,
+                    memberDisplayName: session.member.displayName,
+                    memberHandle: session.member.handle,
+                    memberKind: session.member.kind,
+                    email: session.email
+                ), MomoInviteAdminContext(
+                    baseURL: session.baseURL,
+                    workspace: session.workspace,
+                    accessToken: session.accessToken
+                ))
+                return
+            } catch {
+                // Fall through to the chooser hand-off below.
+            }
+        }
+
+        form.password = ""
+        phase = .choosing
+        // design-review M2: 초대 약속을 침묵 강등하지 않는다 — 수동 로그인으로
+        // 새 워크스페이스에 들어오면 one-shot이 소비되어 초대 흐름이 재개된다.
+        if requestInvite {
+            pendingInviteWorkspace = created.workspaceId
+        }
+        sessionNotice = "Created the '\(created.name)' workspace. Sign in to move into it; the invite panel will open after you land."
     }
 
     public func logout() async {
@@ -1081,6 +1158,16 @@ public struct MomoMacSessionRootView: View {
                         },
                         logout: {
                             Task { await controller.logout() }
+                        },
+                        switchToCreatedWorkspace: { created, requestInvite in
+                            Task {
+                                await controller.switchToCreatedWorkspace(created, requestInvite: requestInvite)
+                            }
+                        },
+                        presentInviteOnLanding: inviteAdmin?.workspace != nil
+                            && controller.pendingInviteWorkspace == inviteAdmin?.workspace,
+                        consumeInvitePrompt: {
+                            controller.consumePendingInviteWorkspace()
                         }
                     ),
                     onOpenMemberDirectory: onOpenMemberDirectory
@@ -2877,6 +2964,133 @@ enum MomoInviteShortLinkConfiguration {
     }
 }
 
+// MARK: - Invite email (MOMO-591)
+
+/// Optional download-page URL for the invite email. Client-side config only, so
+/// enabling it adds no infrastructure. Same clean-origin rules as the short link
+/// domain, except a landing path is allowed (e.g. a GitHub Pages sub-path).
+enum MomoInviteMailConfiguration {
+    static let downloadPageURLEnvironmentKey = "MOMO_ALPHA_DOWNLOAD_URL"
+
+    static func downloadPageURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard let rawValue = environment[downloadPageURLEnvironmentKey],
+              let url = URL(string: rawValue),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              scheme == "https" || (
+                scheme == "http"
+                    && ["localhost", "127.0.0.1", "::1"].contains(host)
+              )
+        else {
+            return nil
+        }
+        return url
+    }
+}
+
+/// A prefilled invite email (subject + body) plus the `mailto:` URL that opens
+/// the operator's default mail app. Pure value type so the copy and the RFC 6068
+/// encoding are unit-testable without AppKit.
+struct MomoInviteMailContent: Equatable {
+    let subject: String
+    let body: String
+
+    /// `mailto:?subject=…&body=…` with no recipient, so the operator fills in the
+    /// tester's address. Subject and body are percent-encoded down to the RFC 3986
+    /// unreserved set, which satisfies RFC 6068: the `&` and `=` inside the
+    /// embedded deep link become `%26`/`%3D` and never leak into mailto headers,
+    /// and CRLF line breaks become `%0D%0A`.
+    var mailtoURL: URL? {
+        guard
+            let encodedSubject = MomoDeepLinkBuilder.percentEncoded(subject),
+            let encodedBody = MomoDeepLinkBuilder.percentEncoded(body)
+        else {
+            return nil
+        }
+        return URL(string: "mailto:?subject=\(encodedSubject)&body=\(encodedBody)")
+    }
+}
+
+/// Builds the invite email body. Card skeleton (onboarding runbook §3): install
+/// the app, open the deep link, and a manual fallback if the link does not open.
+enum MomoInviteMailComposer {
+    private static let lineBreak = "\r\n"
+
+    static func content(
+        language: MomoUILanguage,
+        serverURLString: String,
+        inviteCode: String,
+        deepLink: String,
+        downloadPageURL: URL?
+    ) -> MomoInviteMailContent {
+        let server = serverURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines: [String] = []
+
+        if language == .korean {
+            lines.append("안녕하세요,")
+            lines.append("")
+            lines.append("momo 워크스페이스에 초대합니다. 아래 순서대로 참여하세요.")
+            lines.append("")
+            lines.append("1. macOS 앱 설치")
+            lines.append("운영자가 보낸 승인된 다운로드 링크와 SHA-256 체크섬을 확인한 뒤 설치하세요.")
+            if let downloadPageURL {
+                lines.append("다운로드 페이지: \(downloadPageURL.absoluteString)")
+            }
+            lines.append("")
+            lines.append("2. 초대 링크 열기")
+            lines.append("앱을 설치한 뒤 아래 링크를 여세요. 서버 주소와 초대 코드가 자동으로 채워집니다.")
+            lines.append(deepLink)
+            lines.append("")
+            lines.append("3. 링크가 열리지 않을 때")
+            // 실제 chooser 라벨(joinWithInvite ko)과 글자 그대로 일치해야 한다(design-review High).
+            lines.append("앱 첫 화면에서 '초대로 참여'를 누르고 아래 값을 직접 입력하세요.")
+            lines.append("서버 주소: \(server)")
+            lines.append("초대 코드: \(code)")
+            lines.append("")
+            lines.append("이 초대 코드는 재발급되지 않습니다. 다른 사람과 공유하지 마세요.")
+        } else {
+            lines.append("Hello,")
+            lines.append("")
+            lines.append("You are invited to a momo workspace. Follow these steps to join.")
+            lines.append("")
+            lines.append("1. Install the macOS app")
+            lines.append("Verify the approved download link and SHA-256 checksum from your operator, then install.")
+            if let downloadPageURL {
+                lines.append("Download page: \(downloadPageURL.absoluteString)")
+            }
+            lines.append("")
+            lines.append("2. Open the invite link")
+            lines.append("After installing the app, open the link below. It fills in the server address and invite code for you.")
+            lines.append(deepLink)
+            lines.append("")
+            lines.append("3. If the link does not open the app")
+            // Must match the chooser label verbatim (joinWithInvite en).
+            lines.append("On the app's first screen, choose 'Join with Invite' and enter these values.")
+            lines.append("Server: \(server)")
+            lines.append("Invite code: \(code)")
+            lines.append("")
+            lines.append("This invite code will not be reissued. Do not share it with anyone.")
+        }
+
+        let subject = language == .korean
+            ? "momo 워크스페이스 초대"
+            : "Join our momo workspace"
+        return MomoInviteMailContent(
+            subject: subject,
+            body: lines.joined(separator: lineBreak)
+        )
+    }
+}
+
 struct MomoInviteOneTimeCopy {
     let language: MomoUILanguage
 
@@ -2890,6 +3104,14 @@ struct MomoInviteOneTimeCopy {
 
     var copyShortLink: String {
         language == .korean ? "단축 링크 복사" : "Copy Short Link"
+    }
+
+    var copyDeepLink: String {
+        language == .korean ? "딥링크 복사" : "Copy Deep Link"
+    }
+
+    var sendEmail: String {
+        language == .korean ? "메일로 보내기" : "Send by Email"
     }
 
     var savedIt: String {
@@ -2954,6 +3176,36 @@ struct MomoInviteOneTimeCopy {
             ? "단축 초대 링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
             : "Short invite link copied. The raw invite code remains visible only in this flow."
     }
+
+    var createBeforeCopyingDeepLink: String {
+        language == .korean
+            ? "딥링크를 복사하려면 먼저 초대를 만드세요."
+            : "Create an invite before copying the deep link."
+    }
+
+    var deepLinkCopied: String {
+        language == .korean
+            ? "초대 딥링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
+            : "Invite deep link copied. The raw invite code remains visible only in this flow."
+    }
+
+    var createBeforeSendingEmail: String {
+        language == .korean
+            ? "메일을 작성하려면 먼저 초대를 만드세요."
+            : "Create an invite before drafting the email."
+    }
+
+    var mailComposerUnavailable: String {
+        language == .korean
+            ? "기본 메일 앱을 열지 못했습니다. 딥링크를 대신 복사하세요."
+            : "Could not open the default mail app. Copy the deep link instead."
+    }
+
+    var mailComposerOpened: String {
+        language == .korean
+            ? "메일 초안을 열었습니다. 받는 사람을 확인한 뒤 보내세요."
+            : "Draft email opened. Check the recipient before sending."
+    }
 }
 
 @MainActor
@@ -2973,6 +3225,8 @@ final class MomoInviteAdminViewModel: ObservableObject {
     private let copyInviteCode: @MainActor (String) -> Void
     private let publicShortLinkBaseURL: URL?
     private let copyInviteLink: @MainActor (String) -> Void
+    private let downloadPageURL: URL?
+    private let openMailComposer: @MainActor (URL) -> Bool
     private let oneTimeCopy: MomoInviteOneTimeCopy
 
     init(
@@ -2981,6 +3235,8 @@ final class MomoInviteAdminViewModel: ObservableObject {
         copyInviteCode: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard,
         publicShortLinkBaseURL: URL? = MomoInviteShortLinkConfiguration.publicBaseURL(),
         copyInviteLink: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard,
+        downloadPageURL: URL? = MomoInviteMailConfiguration.downloadPageURL(),
+        openMailComposer: @escaping @MainActor (URL) -> Bool = MomoInviteAdminViewModel.openInDefaultApp,
         language: MomoUILanguage = .preferredDefault
     ) {
         self.context = context
@@ -2988,6 +3244,8 @@ final class MomoInviteAdminViewModel: ObservableObject {
         self.copyInviteCode = copyInviteCode
         self.publicShortLinkBaseURL = publicShortLinkBaseURL
         self.copyInviteLink = copyInviteLink
+        self.downloadPageURL = downloadPageURL
+        self.openMailComposer = openMailComposer
         self.oneTimeCopy = MomoInviteOneTimeCopy(language: language)
     }
 
@@ -3102,6 +3360,51 @@ final class MomoInviteAdminViewModel: ObservableObject {
         errorMessage = nil
     }
 
+    /// `momo://join` deep link for the current one-time code. The server is the
+    /// live session base URL, so the recipient lands on the same workspace the
+    /// operator is in. Present whenever a code exists (unlike the short link,
+    /// which needs a configured public domain).
+    var createdDeepLink: String? {
+        guard let createdCode, !createdCode.isEmpty else { return nil }
+        return MomoDeepLinkBuilder.buildJoinLink(
+            serverURLString: context.baseURL.absoluteString,
+            inviteCode: createdCode
+        )
+    }
+
+    func copyCreatedDeepLink() {
+        guard let createdDeepLink else {
+            errorMessage = oneTimeCopy.createBeforeCopyingDeepLink
+            return
+        }
+        copyInviteLink(createdDeepLink)
+        notice = oneTimeCopy.deepLinkCopied
+        errorMessage = nil
+    }
+
+    func composeInviteEmail() {
+        guard let createdCode, !createdCode.isEmpty, let createdDeepLink else {
+            errorMessage = oneTimeCopy.createBeforeSendingEmail
+            return
+        }
+        // The raw code rides inside the deep link and the fallback lines on
+        // purpose: the email is the operator's own hand-off to a new member, the
+        // same allowance docs/onboarding-deeplink.md grants the link artifact.
+        let content = MomoInviteMailComposer.content(
+            language: oneTimeCopy.language,
+            serverURLString: context.baseURL.absoluteString,
+            inviteCode: createdCode,
+            deepLink: createdDeepLink,
+            downloadPageURL: downloadPageURL
+        )
+        guard let mailtoURL = content.mailtoURL, openMailComposer(mailtoURL) else {
+            errorMessage = oneTimeCopy.mailComposerUnavailable
+            return
+        }
+        notice = oneTimeCopy.mailComposerOpened
+        errorMessage = nil
+    }
+
     func discardCreatedCode() {
         createdCode = nil
     }
@@ -3132,6 +3435,11 @@ final class MomoInviteAdminViewModel: ObservableObject {
         let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
         pasteboard.declareTypes([.string, concealedType, transientType], owner: nil)
         pasteboard.setString(code, forType: .string)
+    }
+
+    @MainActor
+    private static func openInDefaultApp(_ url: URL) -> Bool {
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -3292,7 +3600,32 @@ struct InviteAdminPopover: View {
                         .disabled(model.isWorking)
                     }
                 }
-                HStack {
+                if let deepLink = model.createdDeepLink {
+                    HStack(spacing: 8) {
+                        Label(deepLink, systemImage: "arrow.up.forward.app")
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .privacySensitive()
+                        Spacer()
+                        Button {
+                            model.copyCreatedDeepLink()
+                        } label: {
+                            Text(oneTimeCopy.copyDeepLink)
+                        }
+                        .controlSize(.small)
+                        .disabled(model.isWorking)
+                    }
+                }
+                HStack(spacing: 8) {
+                    Button {
+                        model.composeInviteEmail()
+                    } label: {
+                        Label(oneTimeCopy.sendEmail, systemImage: "envelope")
+                    }
+                    .controlSize(.small)
+                    .disabled(model.isWorking)
                     Spacer()
                     Button(oneTimeCopy.savedIt) {
                         model.discardCreatedCode()

@@ -1874,6 +1874,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var createWorkspace: String {
+        switch language {
+        case .korean: return "새 워크스페이스 만들기"
+        case .english: return "Create a workspace"
+        }
+    }
+
+    var createWorkspaceSubtitle: String {
+        switch language {
+        case .korean: return "새 팀 워크스페이스를 만들고 바로 이동합니다."
+        case .english: return "Create a new team workspace and move into it."
+        }
+    }
+
     var general: String {
         switch language {
         case .korean: return "일반"
@@ -2808,6 +2822,28 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "업데이트 설정 필요"
         case .english: return "Updates not configured"
+        }
+    }
+
+    func updatePillLabel(_ version: MomoMacAppVersion) -> String {
+        let display = "v\(version.version)"
+        switch language {
+        case .korean: return "업데이트 가능 \(display)"
+        case .english: return "Update available \(display)"
+        }
+    }
+
+    var updatePillHelp: String {
+        switch language {
+        case .korean: return "업데이트 세부 정보 보기"
+        case .english: return "Open update details"
+        }
+    }
+
+    var dismissUpdatePill: String {
+        switch language {
+        case .korean: return "업데이트 알림 닫기"
+        case .english: return "Dismiss update notice"
         }
     }
 
