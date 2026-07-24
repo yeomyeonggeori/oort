@@ -28,6 +28,9 @@ sh -n "$ENTRYPOINT"
 grep -Fq 'run_prod_preflight' "$OPS" || fail "operator wrapper lost production preflight reuse"
 grep -Fq 'migrate member-list' "$OPS" || fail "member list is not routed through migrate image"
 grep -Fq 'migrate invite-create' "$OPS" || fail "invite creation is not routed through migrate image"
+# MOMO-584: the operator deep link contract shared verbatim with the macOS client (585).
+grep -Fq 'momo://join?server=' "$OPS" ||
+  fail "invite-create no longer emits the momo://join deep link"
 grep -Fq 'migrate workspace-create' "$OPS" || fail "workspace creation is not routed through migrate image"
 grep -Fq '\getenv invite_code MOMO_OPS_INVITE_CODE' infra/prod/create_invite.sql ||
   fail "invite SQL does not use env-only bearer input"
@@ -100,7 +103,7 @@ chmod +x "$TMP_ROOT/repo/infra/prod/momo-ops.sh" \
 PLACEHOLDER_ENV="$TMP_ROOT/placeholder.env"
 VALID_ENV="$TMP_ROOT/valid.env"
 printf 'POSTGRES_PASSWORD=change-me-postgres\n' > "$PLACEHOLDER_ENV"
-printf 'MOMO_ENV=prod\n' > "$VALID_ENV"
+{ printf 'MOMO_ENV=prod\n'; printf 'PUBLIC_BASE_URL=https://api.momo-ops.test\n'; } > "$VALID_ENV"
 TRACE="$TMP_ROOT/docker.trace"
 PREFLIGHT_TRACE="$TMP_ROOT/preflight.trace"
 touch "$TRACE" "$PREFLIGHT_TRACE"
@@ -150,15 +153,68 @@ run_ops invite-create --env-file "$VALID_ENV" \
   fail "invite output is not mode 0600"
 INVITE_CODE="$(tr -d '\n' < "$INVITE_FILE")"
 grep -Fq 'migrate invite-create' "$TRACE" || fail "invite create did not use migrate image"
-if grep -Fq "$INVITE_CODE" "$TRACE" || grep -Fq "$INVITE_CODE" "$TMP_ROOT/invite.out"; then
-  fail "raw invite code leaked into argv/stdout trace"
+# The bearer code must never reach the container argv/trace (system-visible via ps).
+if grep -Fq "$INVITE_CODE" "$TRACE"; then
+  fail "raw invite code leaked into container argv trace"
+fi
+# MOMO-584: invite-create emits a momo://join deep link on stdout for operator
+# delivery. server is the percent-encoded PUBLIC_BASE_URL; code is the invite code.
+grep -Eq '^momo://join\?server=https%3A%2F%2Fapi\.momo-ops\.test&code=' "$TMP_ROOT/invite.out" ||
+  fail "invite-create did not emit the momo://join deep link with a percent-encoded server URL"
+grep -Fq "momo://join?server=https%3A%2F%2Fapi.momo-ops.test&code=$INVITE_CODE" "$TMP_ROOT/invite.out" ||
+  fail "invite deep link did not carry the exact invite code"
+# The code may appear on stdout only inside that deep link, never as a bare value.
+if grep -F "$INVITE_CODE" "$TMP_ROOT/invite.out" | grep -vq '^momo://join'; then
+  fail "invite code appeared on stdout outside the deep link"
 fi
 if run_ops invite-create --env-file "$VALID_ENV" \
   --workspace-id 00000000-0000-7000-8000-000000000001 \
   --output "$INVITE_FILE" > "$TMP_ROOT/invite-overwrite.out" 2>&1; then
   fail "invite-create overwrote an existing secret file"
 fi
-pass "invite bearer stays out of argv/stdout and is written once as mode 0600"
+pass "invite deep link is emitted on stdout while the bare code stays file-only and off argv"
+
+# MOMO-584: --server-url overrides the env default and is percent-encoded.
+: > "$TRACE"
+INVITE_FILE2="$TMP_ROOT/invite2.secret"
+run_ops invite-create --env-file "$VALID_ENV" \
+  --workspace-id 00000000-0000-7000-8000-000000000001 \
+  --server-url 'http://192.0.2.10:28180' --output "$INVITE_FILE2" \
+  > "$TMP_ROOT/invite2.out" 2>&1 ||
+  fail "invite-create with --server-url failed"
+grep -Fq 'momo://join?server=http%3A%2F%2F192.0.2.10%3A28180&code=' "$TMP_ROOT/invite2.out" ||
+  fail "--server-url was not percent-encoded into the deep link"
+pass "--server-url overrides PUBLIC_BASE_URL and is percent-encoded in the deep link"
+
+# MOMO-584: reject a malformed --server-url before any Docker side effect.
+: > "$TRACE"
+if run_ops invite-create --env-file "$VALID_ENV" \
+  --workspace-id 00000000-0000-7000-8000-000000000001 \
+  --server-url 'not-a-url' --output "$TMP_ROOT/invite-bad.secret" \
+  > "$TMP_ROOT/invite-bad.out" 2>&1; then
+  fail "invite-create accepted a malformed --server-url"
+fi
+[ ! -s "$TRACE" ] || fail "malformed --server-url touched Docker before validation"
+[ ! -e "$TMP_ROOT/invite-bad.secret" ] || fail "malformed --server-url reserved an output file"
+pass "invite-create rejects a malformed --server-url before Docker"
+
+# MOMO-584: fail closed before any durable side effect when no base URL is available.
+: > "$TRACE"
+NO_BASE_ENV="$TMP_ROOT/nobase.env"
+printf 'MOMO_ENV=prod\n' > "$NO_BASE_ENV"
+INVITE_FILE3="$TMP_ROOT/invite3.secret"
+if run_ops invite-create --env-file "$NO_BASE_ENV" \
+  --workspace-id 00000000-0000-7000-8000-000000000001 \
+  --output "$INVITE_FILE3" > "$TMP_ROOT/invite3.out" 2>&1; then
+  fail "invite-create created an invite without a resolvable base URL"
+fi
+[ ! -e "$INVITE_FILE3" ] || fail "invite-create reserved an output file before the base URL check"
+if grep -Fq 'migrate invite-create' "$TRACE"; then
+  fail "invite-create reached the DB path without a base URL"
+fi
+grep -Fq 'PUBLIC_BASE_URL' "$TMP_ROOT/invite3.out" ||
+  fail "missing base URL failure was not actionable"
+pass "invite-create fails closed before the DB path when no base URL is available"
 
 # MOMO-571 W-1: workspace-create is env-only and fails closed on missing inputs.
 : > "$TRACE"
