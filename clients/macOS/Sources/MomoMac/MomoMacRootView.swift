@@ -460,6 +460,9 @@ public struct MomoMacRootView: View {
             openAIConnection: {
                 openDetailPane(.aiConnection)
             },
+            openWorkHost: {
+                openDetailPane(.workHost)
+            },
             openUpdates: {
                 openDetailPane(.updates)
             },
@@ -909,6 +912,18 @@ public struct MomoMacRootView: View {
                     navigationLocked: $detailPaneNavigationLocked,
                     discardRequest: detailPaneDiscardRequest,
                     onConfirmDiscard: { resolveLockedDetailNavigation() }
+                )
+            case .workHost:
+                MomoWorkHostEngineSettingsView(
+                    language: copy.language,
+                    context: sessionChrome?.inviteAdminContext,
+                    pairing: MomoWorkHostPairing(
+                        state: workConsoleController.hostRegistrationState,
+                        heartbeatIssue: workConsoleController.hostHeartbeatIssue
+                    ),
+                    onRetryPairing: {
+                        Task { await workConsoleController.retryWorkHostRegistration() }
+                    }
                 )
             case .workspaceSettings:
                 MomoWorkspaceSettingsSurface(copy: copy, viewModel: viewModel)
@@ -1453,6 +1468,7 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
     case memberProfile
     case settings
     case aiConnection
+    case workHost
     case workspaceSettings
     case downloads
     case updates
@@ -1465,7 +1481,7 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return .approvals
         case .approvals:
             return .alpha
-        case .work, .profile, .memberProfile, .settings, .aiConnection, .workspaceSettings, .downloads, .updates:
+        case .work, .profile, .memberProfile, .settings, .aiConnection, .workHost, .workspaceSettings, .downloads, .updates:
             return nil
         }
     }
@@ -1486,6 +1502,8 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.settings
         case .aiConnection:
             return copy.aiConnection
+        case .workHost:
+            return copy.workHost
         case .workspaceSettings:
             return copy.serverSettings
         case .downloads:
@@ -1511,6 +1529,8 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.settingsSubtitle
         case .aiConnection:
             return copy.aiConnectionSubtitle
+        case .workHost:
+            return copy.workHostSubtitle
         case .workspaceSettings:
             return copy.serverSettingsSubtitle
         case .downloads:
@@ -1536,6 +1556,8 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return "gearshape"
         case .aiConnection:
             return "brain"
+        case .workHost:
+            return "terminal"
         case .workspaceSettings:
             return "server.rack"
         case .downloads:
@@ -1553,7 +1575,7 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return MomoTheme.agentAccent
         case .approvals:
             return MomoTheme.costAmber
-        case .profile, .memberProfile, .settings, .aiConnection, .workspaceSettings, .downloads, .updates:
+        case .profile, .memberProfile, .settings, .aiConnection, .workHost, .workspaceSettings, .downloads, .updates:
             return .secondary
         }
     }

@@ -71,14 +71,23 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 
 ---
 
-## 증보 1 — work host의 배포판 동봉 + GUI 페어링 (2026-07-23, 성재 발제)
+## 증보 1 — work host의 배포판 동봉 + GUI 페어링 (2026-07-23 기안 · 2026-07-24 엔진 매트릭스 확장, 성재 발제)
 
-- Status: **Proposed** (2026-07-23 momo-main 기안 — 성재 승인 시 구현. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — momo도 동형이나 페어링 UX가 수동)
+- Status: **Accepted** (2026-07-24, 성재 "승인할게" — goose∪opencode 양자 동봉안 승인. 파생 WH-0(게이트 스파이크)=MOMO-578부터 순차. 2026-07-23 momo-main 기안 → 2026-07-24 goose 단독에서 goose∪opencode 양자 동봉안으로 확장 재기안 — 성재 "opencode·goose 둘 다" 지시. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — momo도 동형이나 페어링 UX가 수동)
 - 발단: 성재는 코드 실행 에이전트(Codex/goose)를 "담아서 띄우는" 경험을 원한다. buzz 검증 결과 Codex 자체는 독점 CLI+OAuth라 buzz도 동봉하지 않고 ACP로 접속한다(momo ADR-0114와 동형). 갭은 **①work host가 배포판에 안 담겨 사용자가 별도 실행 ②페어링이 host ID 수동 복사(TUI)**다. 자격증명 경계(본문 §하드 경계 불변, ADR-0004)는 유지한다.
 
 ### D1. work host를 single image 배포판에 사이드카로 동봉
 - 565 단일 이미지 옆에 **work host 사이드카 서비스**(compose `--profile workhost` opt-in)를 배포판에 포함해, 설치 시 ACP 브리지가 이미 떠 있게 한다. 서버는 여전히 프로세스·자격증명 무접촉(본문 불변) — 사이드카는 사용자가 지정한 호스트/자격증명으로만 CLI를 실행하는 소비자다.
-- **오픈소스 에이전트(goose, Block Apache-2.0)는 사이드카 이미지에 실제 바이너리 동봉 가능**(재배포 라이선스 OK — buzz가 goose 1급 지원하는 근거). **Codex/Claude Code는 독점이라 동봉 불가 — 사용자 호스트의 것을 연결**(자격증명 `~/.codex`·keychain 그대로).
+- **동봉 대상은 재배포 가능 라이선스(퍼미시브)의 오픈소스 에이전트로 한정**. 후보 2종(2026-07-24 확인):
+
+| 엔진 | 라이선스 | 정체 | provider 중립 | 연결 경로 | 동봉 | 비고 |
+|---|---|---|---|---|---|---|
+| **goose** (Block) | Apache-2.0 | 독립 에이전트, MCP 확장 | ✅ BYO 모델 | ACP | ✅ 바이너리 | buzz 1급 지원 근거, Block 백킹·MCP 생태계 |
+| **opencode** (opencode.ai / Anomaly·SST) | MIT | 독립 에이전트, build/plan 모드, 75+ 모델 | ✅ Anthropic/OpenAI/Ollama | **서버-클라(로컬 서버)** — 임베드 API는 스파이크 확인 | ✅ 바이너리 | 서버-클라 구조라 프로그램으로 몰기 유리(가설) |
+| Codex / Claude Code | 독점 | 독립 에이전트 | — | ACP 또는 Codex app-server JSON-RPC(stdio, t3code 실증) | ❌ 불가 | 사용자 호스트의 것 로컬 연결(`~/.codex`·keychain 그대로) |
+
+- **v0 동봉 엔진 = opencode 우선 + goose 병행**(사용자가 설정에서 선택). 근거: opencode(MIT, 더 느슨)가 (a) 서버-클라 구조로 momo가 GUI로 몰기 수월할 여지, (b) 데스크톱 배포 경험 보유. goose는 MCP 확장·Apache-2.0으로 병행 가치. **단, opencode의 실제 임베드/헤드리스 API 표면은 미확정 — WH-0 스파이크로 검증 후 최종 확정**(검증 실패 시 goose 단독으로 후퇴).
+- **Codex/Claude Code는 독점이라 동봉 불가 — 사용자 호스트의 것을 연결**. 연결 프로토콜은 ACP 외에 **Codex app-server JSON-RPC(stdio) 경로도 후보**(t3code가 실증) — WH-0에서 함께 판정.
 
 ### D2. GUI 페어링 (host ID 수동 복사 제거)
 - 관리자 설정 "코드 실행 호스트" 화면: 사이드카/로컬 호스트를 **자동 발견·페어링**(단기 페어링 코드 or 서명 challenge)하고 상태(연결됨/오프라인/도구 목록)를 표시. 현재 `MOMO_WORK_HOST_ID` 수동 조율(A-11)을 대체. ADR-0004 증보 1의 provider GUI와 **한 설정 화면에서 구분 표기**(LLM provider vs 코드 실행 호스트).
@@ -87,17 +96,21 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 - 사이드카가 동봉돼도 **Codex OAuth·provider 키는 서버/DB/원장 비유입**(ADR-0004). 사이드카는 사용자 호스트 자격증명 소비자일 뿐, momo 서버 컨테이너와 신뢰 경계 분리. goose를 쓰더라도 goose가 호출하는 LLM 자격은 goose 설정(사용자) 소유.
 
 ### D4. 스코프 경계
-- v0: goose 사이드카 동봉 + GUI 페어링 + 상태. Codex/Claude Code는 로컬 연결(GUI 페어링 공유). 원격 workd 다중 호스트·풀은 후속(ADR-0125 계보).
+- v0: **opencode(우선)+goose 사이드카 동봉** + GUI 페어링 + 상태 + 엔진 선택. Codex/Claude Code는 로컬 연결(GUI 페어링 공유). 원격 workd 다중 호스트·풀은 후속(ADR-0125 계보).
+- **WH-0(스파이크)가 D1 확정의 게이트**: opencode 임베드/헤드리스 API가 프로그램 구동 불가로 판명되면 v0은 goose 단독으로 축소하고 opencode는 후속으로 미룬다(스코프 축소는 성재 통보).
 
 ### 파생 (Accepted 후)
 | 후보 | 내용 | 트랙 |
 |---|---|---|
-| WH-1 | work host 사이드카 compose 프로파일 + goose 동봉 이미지(single image 계보) | 엔진 |
-| WH-2 | GUI 자동 페어링(코드/challenge)+상태 화면(provider GUI와 통합 설정) | UXUI |
-| WH-3 | 배포판 문서: "코드 실행 호스트 5분 연결"(goose 동봉/Codex 로컬) | docs |
+| **WH-0** ✅ | **[DONE 2026-07-24] 스파이크: opencode 임베드 + Codex JSON-RPC 검증** — 둘 다 hands-on CONFIRMED(opencode `serve` 키없이 부팅·OpenAPI 3.1 경로 162·세션 생성 실왕복 / Codex `app-server` JSON-RPC 스키마 41파일·v2 516정의·승인훅). **게이트 통과: opencode v0 동봉 확정, work host 연결=ACP∪JSON-RPC(+mcp-server), 승인 경계 엔진무관 단일 계약.** 근거 `docs/planning/2026-07-24-wh0-workhost-engine-spike.md` | 엔진 |
+| WH-1 | work host 사이드카 compose 프로파일 + 동봉 엔진 이미지(opencode+goose, single image 계보) + 엔진 선택 배선 | 엔진 |
+| WH-2 | GUI 자동 페어링(코드/challenge)+상태 화면+엔진 선택 UI(provider GUI와 통합 설정) | UXUI |
+| WH-3 | 배포판 문서: "코드 실행 호스트 5분 연결"(opencode/goose 동봉·Codex 로컬) | docs |
 
 ### Consequences
-- (+) "코드 실행을 담아서 띄움"의 realizable 버전 — 오픈소스(goose)는 동봉, 독점(Codex)은 GUI 로컬 연결. buzz와 동형이되 페어링이 GUI.
-- (+) ADR-0004 경계 불변 — 사이드카는 자격증명 소비자, 서버 무접촉 유지.
-- (−) 사이드카 이미지 크기(goose+런타임)·compose 표면 증가(opt-in으로 상쇄).
+- (+) "코드 실행을 담아서 띄움"의 realizable 버전 — 퍼미시브 오픈소스(opencode MIT·goose Apache-2.0)는 동봉·사용자 선택, 독점(Codex)은 GUI 로컬 연결. buzz와 동형이되 페어링이 GUI + 엔진 선택지.
+- (+) ADR-0004 경계 불변 — 사이드카는 자격증명 소비자, 서버 무접촉 유지. 동봉 엔진이 호출하는 LLM 자격은 엔진 설정(사용자) 소유.
+- (+) 엔진 2종 지원으로 특정 벤더 종속 회피 + provider GUI("AI 연결")로 붙인 모델을 그대로 물림.
+- (−) 사이드카 이미지 크기(엔진 2종+런타임)·compose 표면 증가(opt-in·엔진별 레이어 분리로 상쇄). WH-0 전까지 opencode 임베드 가능성 미확정 리스크.
 - 예약: Codex 자체 동봉(독점상 불가), 원격 호스트 풀, mesh-llm식 오픈모델 추론 동봉(별도).
+- 근거 문서: 엔진 후보 비교·t3code 경쟁 분석 = `docs/planning/2026-07-24-t3code-competitive-analysis.md`.

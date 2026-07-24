@@ -1860,6 +1860,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var workHost: String {
+        switch language {
+        case .korean: return "코드 실행 호스트"
+        case .english: return "Code execution host"
+        }
+    }
+
+    var workHostSubtitle: String {
+        switch language {
+        case .korean: return "실행 엔진을 고르고 이 Mac의 페어링 상태를 확인합니다."
+        case .english: return "Choose the execution engine and check this Mac's pairing status."
+        }
+    }
+
     var general: String {
         switch language {
         case .korean: return "일반"

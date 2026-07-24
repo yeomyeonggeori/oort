@@ -5,6 +5,52 @@
 
 ---
 
+## 2026-07-24 (Fable MOMO-583 권한 재조임 + 알파 사이트 여명 리디자인) · 576 후속 집행, 사이트 라이브
+- 성재 발제: ①576 후속 진행 ②배포 사이트 리디자인(buzz/slack/discord 참조, 히어로 재밌게, 여명거리 느낌, 마스코트는 우선 없이).
+- **MOMO-583(#716→PR#717→#718→main)**: provider_link any-owner/admin 폴백 제거. 새 인가=platform:read OR **등재 인스턴스 운영자**(owner/admin+검증 이메일+PLATFORM_ADMIN_EMAILS, 요청시점 판정). **설계 조정 이유**: macOS 로그인은 platformAdminSecret 미지원 → scope-only면 운영자 GUI 영구 403. per-WS 표면(582)은 owner/admin 유지(의도된 분리). verifier 9관문 PASS(미등재 owner 403 회귀 단정 신설), server 16 tests. e2e compose+internal_alpha에 PLATFORM_ADMIN_EMAILS 배선(기본 성재).
+- **알파 사이트 여명(Dawn) 리디자인 라이브**(dawn-kim-official.github.io/momo-alpha): 밤하늘 히어로(별+떠다니는 실대화 조각: @김인턴 멘션→작업완료 칩→승인대기 칩)→기능 3장→번호 스텝 설치/시작→여명 지평선 푸터(momo by Dawn). 마스코트 유보 슬롯(에이전트 아바타 교체형). 자급자족 단일 파일·noindex·manifest fetch 유지. 방향 정본 `2026-07-24-alpha-site-design-direction.md`(마스코트 후보 포함). em-dash 0·과장어 0 pre-flight 통과.
+- 다음: momowebqa 재배포(583) 후 성재 GUI 라이브 확인 · 마스코트 방향 성재 결정 대기.
+
+## 2026-07-24 (Fable WH-2·WH-3 main 랜딩 + 0.0.3 발행) · ADR-0114 증보1 전량 완성
+- 성재 "ㄱㄱ" → track/engine→main(#714, MOMO-582 서버 REST + WH-3 문서) + track/uxui→main(#715, WH-2 GUI). 두 delta 모두 WH 작업만(이전 UXUI 배치는 기 main). 마커 3종(GUI/REST/docs) main 확인.
+- **0.0.3 발행**(build 1114 @04c95afa, sha256 734315c8…, momo-macos-0.0.3.zip): 설정 "코드 실행 호스트" GUI 포함. macOS Release 빌드 통과=통합 게이트.
+- **ADR-0114 증보1(WH-0 스파이크·WH-1 사이드카·WH-2 REST+GUI·WH-3 문서) 전량 main 완성.** "배포판에 코드 에이전트(opencode/goose) 담아 GUI로 붙이는" 경험의 클라이언트+서버+인프라+문서 완결. Codex는 로컬 연결(codex-local).
+- 백로그 이관: 셰어드 토큰 상태칩 AA 대비(574/706 공통, design-review Medium2) — 공유 토큰 레벨 수정 후속. 다음: 성재 0.0.3 실사용(사이드카 `--profile workhost` + 엔진 붙이기) 피드백.
+
+## 2026-07-24 (Fable WH-2·WH-3 병렬 구현·검수·트랙 랜딩) · GUI+REST+문서, main 승인 대기
+- 성재 "이어서 진행". 3작업 병렬 Opus 4.8 xhigh → 오케스트레이터 검수 → 트랙 랜딩.
+- **MOMO-582(#710, 서버 REST)**: GET/PUT `/v1/provider/work-host-engine`(requireOperator=platform:read OR owner/admin, 비관리자 403), per-workspace RLS(마이그레이션 040 재사용), 400 검증. **검증기 실 PG18 왕복 전관문 PASS**(3엔진·403·400·RLS FORCE·ADR-0004 라벨전용). WorkHostEngineTests 10. → PR #711 track/engine.
+- **WH-2(#706, GUI)**: 설정 "코드 실행 호스트"(엔진 Picker opencode 기본/goose/codex-local + 페어링 상태 + "AI 연결" 구분). 574 셸 재사용. macOS 15 tests. **design-review Blocker0·High1** → 수정: 페어링을 엔진 loadState에서 분리(로드 실패해도 페어링 표시 유지) + codex-local 오프라인 코히런스 노트(Medium). → PR #712 track/uxui.
+- **WH-3(#707, docs)**: `docs/WORK_HOST_QUICKSTART.md`+README. em-dash→콜론 수정. → PR #713 track/engine.
+- 오케스트레이터 검수 이력: 자기보고 신뢰 안 하고 직접 빌드/테스트/docker/design-review. 잡은 것: verifier updatedBy 케이스 과민(→ascii_downcase), GUI 페어링 결합(→분리). 마이그레이션 다음=041, verifier 포트 다음=28290대.
+- 대기: **WH-2/WH-3 track→main 성재 승인**(하드룰). 승인 시 0.0.3 배포판에 사이드카+GUI 동봉.
+
+## 2026-07-24 (Fable WH-1 구현·검수·track/engine 랜딩) · 동봉 엔진 사이드카 실빌드 확증
+- WH-1(#705) Opus 4.8 xhigh 서브에이전트 구현 → 오케스트레이터 검수 → **track/engine 랜딩**(PR #708, main 승인 대기).
+- **A**: WorkEngineAdapter 프로토콜 + 3어댑터(OpenCodeHTTPAdapter HTTP+SSE·ACPEngineAdapter goose·CodexJSONRPCAdapter app-server stdio) + 승인 단일 계약(WorkApprovalRequest/Decision, fail-closed). **B**: 엔진 선택(기본 opencode)+마이그레이션 040(work_host_engine, RLS FORCE). **C**: workhost.Dockerfile(opencode MIT+goose Apache-2.0+momo-workd 레이어 분리, Codex 미동봉)+compose profile+라이선스. **D**: verify_workhost_engines.sh(28270대).
+- **검수 그린**: 검증기 8관문 PASS(실 opencode 부팅/세션/권한+goose·codex 실stdio mock+ADR-0004 비유출), WorkHostDaemon 26 tests, **실 Docker 사이드카 빌드 성공**(1.02GB, momo-workd/opencode 1.18.4/goose OK·codex ABSENT·라이선스 3종).
+- **오케스트레이터가 잡은 실결함 2건**(에이전트 최종보고는 placeholder "x"라 무시하고 직접 검증): ①Dockerfile opencode fetch가 `.zip`(404)→실제 `.tar.gz` 수정 ②LocalPTYTerminalManager Linux 첫 빌드에서 `posix_openpt` 등 Glibc 오버레이 미노출→CMomoPTY C shim(`_XOPEN_SOURCE`)으로 정공법 수리(goose ACP terminal을 Linux 사이드카에서 유지, macOS 회귀 0). **Linux 컨테이너 함정 3번째 성문화 후보**: WorkHostDaemon 첫 Linux 빌드는 PTY POSIX 심볼 갭.
+- 다음: **track/engine→main 성재 승인 대기**. 승인 시 WH-2(#706 GUI 페어링+엔진선택, UXUI)·WH-3(#707 문서) 착수.
+
+## 2026-07-24 (Fable ADR-0114 증보1 Accepted + WH-0 스파이크 실증) · 동봉 엔진 게이트 통과, WH-1/2/3 발급
+- 성재 "승인할게" → **ADR-0114 증보1 Accepted**(opencode 우선+goose 병행 양자 동봉). 파생 WH-0~3 = MOMO-578~581 예약.
+- **WH-0 스파이크 hands-on 완료(그린)** — 문서 아닌 실측: ①opencode 1.18.4 임시설치→`opencode serve` 키없이 부팅·OpenAPI 3.1 경로 162·`POST /session` 실세션 생성→제거(흔적 0). ②Codex CLI 0.144.1의 `codex app-server generate-json-schema`로 프로토콜 41파일 확보(Initialize/ThreadStart/TurnStart/CommandExec+승인/ApplyPatchApproval, v1 165+v2 516 정의). 추가 경로 `codex mcp-server`(stdio MCP)·`remote-control`(ws).
+- **게이트 결정(D1/D4 확정)**: opencode v0 동봉 확정(임베드 실증), work host 연결=ACP∪JSON-RPC(+mcp-server) 다중 어댑터, 승인 경계 엔진무관 단일 계약(opencode /permissions·Codex *ApprovalParams). 스코프 축소 없음. 근거 `2026-07-24-wh0-workhost-engine-spike.md`.
+- **발급**: WH-1 사이드카+어댑터 3종(#705, 엔진)·WH-2 GUI 페어링+엔진선택(#706, UXUI)·WH-3 문서(#707). 핸드오프 패킷 후 착수. 다음: WH-1 착수 여부 성재 확인(사이드카 동봉 대형 빌드).
+
+## 2026-07-24 (Fable 코드 에이전트 엔진 조사 — opencode/goose/t3code) · ADR-0114 증보1 양자 동봉 재기안 + t3code 분석
+- 성재 발제("opencode·goose·t3code 다뤄봐, 셋 다 좋아 보임"). 웹 실측으로 라이선스·정체 확정: **goose(Apache-2.0)·opencode(MIT)=독립 에이전트=동봉 후보**, **t3code(MIT)=에이전트 감싸는 GUI 오케스트레이터=엔진 아님(momo work console 경쟁자)**. Codex/Claude Code=독점=로컬 연결만.
+- **ADR-0114 증보1 재기안(여전히 Proposed)**: goose 단독 → **opencode 우선+goose 병행** 양자 동봉안. 엔진 선택 매트릭스 추가, **WH-0 스파이크 신설**(opencode 임베드/헤드리스 API 표면 + Codex app-server JSON-RPC(stdio) 연결경로 검증 — t3code가 실증한 경로. D1/D4 확정 게이트, 실패 시 goose 단독 후퇴).
+- **t3code 경쟁 분석 신규**(`2026-07-24-t3code-competitive-analysis.md`, buzz 분석 형식): t3code=work console에서 메신저·에이전트멤버·SoT 뺀 1인 로컬 슬라이스. momo 해자=팀+에이전트=멤버·PG SoT·네이티브 Swift·엔진 비종속. 가져올 것 Top4=Codex JSON-RPC 경로·태스크스레드 GUI·worktree 1급 UX·Full/Supervised 이중런타임. 포지셔닝 경보: "코드 에이전트 GUI" 공간 붐빔 → momo는 "메신저, work console은 표면" 위계 고정.
+- 대기: 성재 ADR-0114 증보1 승인(양자 동봉안) → WH-0 스파이크 착수. 백로그에 t3code 파생 액션 3건.
+
+## 2026-07-24 (Fable provider GUI 실서버 완결 — 577 랜딩·라이브 검증·0.0.2 발행)
+- **MOMO-577 랜딩**(#703→track/engine→#704→main, 10e0493c): 실서버 왕복 3버그 수리 — PUT 500(PostgresNIO `Array<UInt8>`가 bytea 아닌 `char[]`로 인코딩→`ByteBuffer(bytes:)` 바인딩·decode `Data`, worker reader 동일 수정) + DELETE 500(audit `jsonb_build_object` nil `mode`/`endpoint` 타입 미추론→`::text` 캐스트) + Linux `.build` 심볼릭링크 함정(로컬 macOS build 잔재를 api 컨테이너 `cp -Rp`가 못 읽음→verifier가 부팅 전 제거).
+- **verifier 실왕복 자동화**: `PROVIDER_LINK_RUN_DOCKER=1`이 실 PG18+api 부팅→owner PUT→storage bytea 증명(version byte·octet_length·평문 부재)→GET→RLS default-deny/GUC unlock→DELETE→비관리자 403 8관문 자동 단정. 8/8 PASS(재발 차단). server 15+worker 72 tests green.
+- **라이브 실서버 검증 그린**: momowebqa 재배포(577 이미지, 데이터 볼륨 보존) 후 owner 계정 실왕복 — PUT(200·source=database·bearerLast4 마스킹)→GET(평문 부재)→DELETE(200)→env 복귀. "GUI로 provider 붙이면 실제 그 provider로 대화" 실서버 성립. 로그인=`/v1/auth/login`(workspace 필드 필수, demo WS), provider REST=`/v1/provider/link`.
+- **0.0.2 알파 발행**(build 1087 @10e0493c, sha256 eab65d6c…): provider GUI "AI 연결" 포함 unsigned Release, momo-alpha Release + Pages 매니페스트 갱신(인앱 Updates 소비). 다운로드 momo-macos-0.0.2.zip.
+- 다음: 성재 GUI 실사용(다운로드→로그인→AI 연결) 피드백 · ADR-0114 증보1(work host 동봉+GUI 페어링) 승인 대기 · 백로그 MOMO-575·ADR-0117 W-4·567.
+
 ## 2026-07-24 (Fable provider GUI 연동 3조각 완주) · "GUI로 붙이면 실제 대화" 성립
 - 성재 발제("실제 codex/hermes를 CLI가 아니라 GUI로 연동, 배포판에 담아"). buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속(momo ADR-0114 동형), mesh-llm(오픈모델)만 동봉. Codex 자체 동봉은 독점 CLI+OAuth+ADR-0004로 불가(buzz도 안 함).
 - **ADR-0004 증보1 Accepted → 3장 main 랜딩**(Opus 4.8): 572 provider config REST(암호화 저장·마스킹·mode override·health, 193 tests) + 573 worker job-time 소비(GUI 변경이 실제 대화 반영, 캐시 TTL 2s·golden interop vector) + 574 관리자 "AI 연결" GUI(design-review 2R Blocker 해소: 이탈 잠금 dead-end→미저장 확인 다이얼로그, in-flight dead-click→잠금을 unsaved bearer로 한정). 572의 prod boot 갭(api PROVIDER_LINK_MASTER_KEY 누락)·e2e compose 마스터키 배선도 수리.

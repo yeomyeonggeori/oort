@@ -20,7 +20,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         failureKind: MomoSessionFailureKind? = nil,
         initialFocus: MomoSessionField? = nil,
         initialPath: MomoOnboardingPath? = nil,
-        developerMode: Bool = true
+        developerMode: Bool = true,
+        discoveredServers: [MomoDiscoveredServer] = []
     ) -> some View {
         let suite = "momo.snapshot.onboarding.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -40,12 +41,16 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             savePassword: false
         )
 
+        // Seed the browser-free model so the discovery card renders deterministically.
+        let discovery = MomoServerDiscoveryModel(seeded: discoveredServers)
+
         return MomoServerSessionChooser(
             controller: controller,
             errorMessage: errorMessage,
             failureKind: failureKind,
             initialFocus: initialFocus,
-            initialPath: initialPath
+            initialPath: initialPath,
+            discovery: discovery
         )
             .environment(\.colorScheme, scheme)
             .defaultAppStorage(defaults)
@@ -59,7 +64,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         failureKind: MomoSessionFailureKind? = nil,
         initialFocus: MomoSessionField? = nil,
         initialPath: MomoOnboardingPath? = nil,
-        developerMode: Bool = true
+        developerMode: Bool = true,
+        discoveredServers: [MomoDiscoveredServer] = []
     ) throws -> NSImage {
         let hostingView = NSHostingView(
             rootView: fixture(
@@ -69,7 +75,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 failureKind: failureKind,
                 initialFocus: initialFocus,
                 initialPath: initialPath,
-                developerMode: developerMode
+                developerMode: developerMode,
+                discoveredServers: discoveredServers
             )
             .frame(width: size.width, height: size.height)
         )
@@ -305,6 +312,46 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             named: "dark",
             record: snapshotRecordMode
         )
+    }
+
+    private let discoveredServers = [
+        MomoDiscoveredServer(baseURLString: "http://MacBook-Pro-2.local:28000", displayHost: "MacBook-Pro-2.local:28000")
+    ]
+
+    func testOnboardingWithDiscoveredServerLightSnapshot() throws {
+        try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
+        assertSnapshot(
+            of: try render(size: defaultSize, scheme: .light, discoveredServers: discoveredServers),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light",
+            record: snapshotRecordMode
+        )
+    }
+
+    func testOnboardingWithDiscoveredServerDarkSnapshot() throws {
+        try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
+        assertSnapshot(
+            of: try render(size: defaultSize, scheme: .dark, discoveredServers: discoveredServers),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark",
+            record: snapshotRecordMode
+        )
+    }
+
+    func testDiscoveredServerCardWritesDesignReviewRasters() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let image = try render(
+                size: defaultSize,
+                scheme: scheme,
+                developerMode: false,
+                discoveredServers: discoveredServers
+            )
+            XCTAssertEqual(image.size, defaultSize)
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-587-onboarding-discovered-server-\(scheme == .dark ? "dark" : "light").png"
+            )
+        }
     }
 
     func testOnboardingDesignReviewRasters() throws {

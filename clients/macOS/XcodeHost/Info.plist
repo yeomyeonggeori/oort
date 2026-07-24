@@ -22,6 +22,21 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- 초대 딥링크(W-O1, MOMO-585): momo://join?server=<percent-encoded base URL>&code=<invite code>.
+	     onOpenURL이 chooser의 join 경로에 서버 URL·초대 코드를 프리필한다. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>app.momo.join</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>momo</string>
+			</array>
+		</dict>
+	</array>
 	<!-- 내부 알파 LAN 직결(2026-07-23): 같은 와이파이의 http://192.168.x.x
 	     서버·ws:// 실시간 접속을 허용한다. NSAllowsLocalNetworking은 사설/링크로컬
 	     대역과 .local 호스트에만 ATS를 면제하며 공인 도메인 HTTPS 요구는 유지한다
@@ -31,5 +46,15 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- 서버 자동 발견(MOMO-587): 첫 실행 chooser가 같은 네트워크의 momo 서버를
+	     Bonjour(_momo._tcp)로 조용히 찾아 주소를 제안한다. 발견되지 않으면 무소음.
+	     NSLocalNetworkUsageDescription은 로컬 네트워크 권한 프롬프트에 노출되는
+	     설명 문자열이고, NSBonjourServices는 브라우징을 허용할 서비스 타입이다. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>momo looks for a workspace server on your local network so you can connect without typing its address.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_momo._tcp</string>
+	</array>
 </dict>
 </plist>
