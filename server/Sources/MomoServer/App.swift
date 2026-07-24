@@ -140,7 +140,8 @@ enum AppBuilder {
             allowLocalLoopback: config.agentProvider.allowLocalLoopback,
             providerLinkMasterKey: config.providerLinkMasterKey,
             envProvider: config.agentProvider,
-            healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger)
+            healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger),
+            platformAdminEmails: config.platformAdminEmails
         ).add(to: authed)
         // MOMO-582 / ADR-0114 증보1 B: per-workspace work host engine selection.
         WorkHostEngineRoutes(db: db).add(to: authed)

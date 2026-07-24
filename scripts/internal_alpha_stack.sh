@@ -34,8 +34,12 @@ compose() {
   # INTERNAL_ALPHA_WS_URL: Tailscale 등으로 원격 노출 시 로그인 응답이 건넬
   # 실시간 WS 주소(예: wss://<host>.ts.net:8443/connection/websocket).
   # 미설정이면 compose 기본(ws://127.0.0.1:<CENT_PORT>) — 단독 도그푸드용.
+  # PLATFORM_ADMIN_EMAILS(MOMO-583): provider_link("AI 연결")는 이 목록에 등재된
+  # 인스턴스 운영자(owner/admin + 검증된 이메일)만 편집 가능. 요청 시점 판정이라
+  # 재로그인 불필요. 기본=성재. 미등재 워크스페이스 owner는 403(크로스테넌트 차단).
   PORT="$API_PORT" CENT_PORT="$CENT_PORT" POSTGRES_PORT="$PG_PORT" HERMES_PORT="$HERMES_PORT" \
     MOMO_E2E_REALTIME_WS_URL="${INTERNAL_ALPHA_WS_URL:-ws://127.0.0.1:${CENT_PORT}/connection/websocket}" \
+    PLATFORM_ADMIN_EMAILS="${INTERNAL_ALPHA_PLATFORM_ADMIN_EMAILS:-gkffhdnls13@gmail.com}" \
     docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 

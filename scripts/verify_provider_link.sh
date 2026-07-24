@@ -131,10 +131,15 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-provider-link.XXXXXX")"
 WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 OWNER_ID="$(new_uuid)"
 MEMBER_ID="$(new_uuid)"
+WSOWNER_ID="$(new_uuid)"
 OWNER_EMAIL="provider-owner-$RUN_ID@momo.local"
 MEMBER_EMAIL="provider-member-$RUN_ID@momo.local"
+# MOMO-583 회귀 단정용: 워크스페이스 owner 롤은 있으나 PLATFORM_ADMIN_EMAILS에
+# 없는 신원 — provider_link에 403이어야 한다(576 폴백 제거 증명).
+WSOWNER_EMAIL="provider-wsowner-$RUN_ID@momo.local"
 OWNER_PASSWORD="provider-owner-$(new_uuid)"
 MEMBER_PASSWORD="provider-member-$(new_uuid)"
+WSOWNER_PASSWORD="provider-wsowner-$(new_uuid)"
 
 # Operator-supplied bearer under test. >= 8 chars so the masked tail is exposed;
 # a distinctive infix so any plaintext leak (response body, api log, ciphertext
@@ -149,8 +154,11 @@ EXPECTED_CIPHERTEXT_LEN=$((BEARER_LEN + 29))
 BASE_URL_VALUE="https://provider.example.test/v1"
 
 compose() {
+  # MOMO-583: provider_link REST = platform:read scope OR 등재된 인스턴스 운영자
+  # (owner/admin + 검증된 이메일이 PLATFORM_ADMIN_EMAILS에 존재, 요청 시점 판정).
+  # OWNER_EMAIL을 등재해 OWNER만 통과시키고, 동일 owner 롤의 WSOWNER는 403.
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENTRIFUGO_PORT" \
-    HERMES_PORT="$HERMES_PORT" \
+    HERMES_PORT="$HERMES_PORT" PLATFORM_ADMIN_EMAILS="$OWNER_EMAIL" \
     docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 
@@ -221,16 +229,23 @@ SET LOCAL row_security = off;
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES
   ('$OWNER_ID', '$WORKSPACE_ID', 'human', 'active', 'Provider Owner', 'provider-owner-$RUN_ID'),
-  ('$MEMBER_ID', '$WORKSPACE_ID', 'human', 'active', 'Provider Member', 'provider-member-$RUN_ID');
+  ('$MEMBER_ID', '$WORKSPACE_ID', 'human', 'active', 'Provider Member', 'provider-member-$RUN_ID'),
+  ('$WSOWNER_ID', '$WORKSPACE_ID', 'human', 'active', 'WS Owner NoPlatform', 'provider-wsowner-$RUN_ID');
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
   ('$OWNER_ID', '$WORKSPACE_ID', '$OWNER_EMAIL', true, momo_password_hash('$OWNER_PASSWORD'), 'UTC'),
-  ('$MEMBER_ID', '$WORKSPACE_ID', '$MEMBER_EMAIL', true, momo_password_hash('$MEMBER_PASSWORD'), 'UTC');
--- MOMO-576 D3: owner/admin of its own workspace authorizes the operator surface
--- without platform:read. The non-admin member intentionally has no
--- workspace_membership owner/admin row.
+  ('$MEMBER_ID', '$WORKSPACE_ID', '$MEMBER_EMAIL', true, momo_password_hash('$MEMBER_PASSWORD'), 'UTC'),
+  ('$WSOWNER_ID', '$WORKSPACE_ID', '$WSOWNER_EMAIL', true, momo_password_hash('$WSOWNER_PASSWORD'), 'UTC');
+-- MOMO-583: the operator surface needs platform:read OR a listed instance
+-- operator (owner/admin + verified email in PLATFORM_ADMIN_EMAILS, checked at
+-- request time). OWNER passes via the allowlist; WSOWNER holds the SAME
+-- workspace owner role but is NOT listed — it must get 403 (proves the
+-- MOMO-576 any-owner fallback is gone). MEMBER stays the non-admin 403 case.
 INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES ('$WORKSPACE_ID', '$OWNER_ID', 'owner')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role = 'owner';
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$WORKSPACE_ID', '$WSOWNER_ID', 'owner')
 ON CONFLICT (workspace_id, member_id) DO UPDATE SET role = 'owner';
 INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES ('$WORKSPACE_ID', '$MEMBER_ID', 'member')
@@ -246,7 +261,9 @@ login() {
 }
 OWNER_TOKEN="$(login "$OWNER_EMAIL" "$OWNER_PASSWORD")"
 MEMBER_TOKEN="$(login "$MEMBER_EMAIL" "$MEMBER_PASSWORD")"
-[ -n "$OWNER_TOKEN" ] && [ -n "$MEMBER_TOKEN" ] || { log "login did not return tokens"; exit 1; }
+WSOWNER_TOKEN="$(login "$WSOWNER_EMAIL" "$WSOWNER_PASSWORD")"
+[ -n "$OWNER_TOKEN" ] && [ -n "$MEMBER_TOKEN" ] && [ -n "$WSOWNER_TOKEN" ] || {
+  log "login did not return tokens"; exit 1; }
 
 RESPONSE_BODY=""
 RESPONSE_STATUS=""
@@ -288,6 +305,18 @@ api POST "$TEST_PATH" "$MEMBER_TOKEN"
 expect_status 403 "non-admin POST test"
 api DELETE "$LINK_PATH" "$MEMBER_TOKEN"
 expect_status 403 "non-admin DELETE"
+
+# ---- MOMO-583: workspace OWNER without platform:read is denied ---------------
+# Same owner role as the operator, email NOT in PLATFORM_ADMIN_EMAILS — the
+# MOMO-576 owner/admin fallback must be gone on this instance-global surface.
+api GET "$LINK_PATH" "$WSOWNER_TOKEN"
+expect_status 403 "ws-owner(no platform scope) GET"
+api PUT "$LINK_PATH" "$WSOWNER_TOKEN" \
+  "$(jq -cn --arg u "$BASE_URL_VALUE" --arg b "$BEARER_SECRET" '{baseUrl:$u,bearer:$b,mode:"external-hermes"}')"
+expect_status 403 "ws-owner(no platform scope) PUT"
+api DELETE "$LINK_PATH" "$WSOWNER_TOKEN"
+expect_status 403 "ws-owner(no platform scope) DELETE"
+log "PASS MOMO-583: workspace owner without platform:read denied (fallback removed)"
 
 # ---- Baseline: nothing configured -> env fallback --------------------------
 api GET "$LINK_PATH" "$OWNER_TOKEN"
