@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-25 (Fable ADR-0133 Accepted + P0 스파이크 게이트 PASS + R-1/R-2) · Tauri/React 전환 개시
+- 성재 ADR-0133 승인 → 즉시 P0 스파이크(#745)+R-1/R-2 병렬. **스파이크 게이트 전관문 PASS**(커밋 667a40a3 정본): seq 121건 셔플 후 단조·gap 0 / 재연결 resume 25/25 누락 0 / 1k 스크롤 p95 10.3ms·>33ms 프레임 0 / 콜드 web 181ms·desktop 537ms / 메모리 196MB(<400MB). clients/web-spike+clients/desktop(Tauri 2) 신설, momo-spike.app 실빌드. main #747.
+- **P1/P2 이월 발견 3건**: ①서버가 mDNS WS 호스트 반환 시 Chrome 리졸버 행(근본 수정=브라우저 리졸브 가능한 호스트 반환) ②REST CORS 부재→웹은 동일오리진 프록시, Tauri release는 Rust HTTP 필요 ③virtuoso initialItemCount. 스파이크 에이전트 최종 구조화 보고는 실패(StructuredOutput cap)했으나 작업·커밋·실측 완결 — ground truth 검증 원칙 재확인.
+- **R-1 웹 UX 스펙 5장**(`research/2026-07-25-r1-ux-component-spec-web.md`): 실코드 어휘(TimelineMessage.seq·reconcileMessages·ApprovalStatus) 인용, buzz zero-noise→인박스 3필터 번역, 재연결 UX=momo 최대 우위 표면화, 에이전트=같은 그리드+--agent-accent+managed-by. **R-2 momo-design-taste-web 스킬 설치**(초안): 여명 토큰·CSP style-src 'self' 제약·grep 10종 pre-flight. **정정**: clients/web v0(ADR-0119) 실존 — ADR 컨텍스트 수정.
+- 다음 성재 결정: ①P1(momo-web MVP) 착수 — 착수 시 SwiftUI 신규 표면 동결 발효 ②web-spike 승격 명명(기존 v0와의 관계) ③팔레트(v0 인디고→여명 호박) 승인.
+
+
 ## 2026-07-24 (Fable 셀프서브+업데이트 배치 + 서명 배포) · 실사용 루프 인앱 완결, Gatekeeper 제거
 - 성재 "둘다 진행"+"서명도 진행했어" → 5티켓(MOMO-589~593/#731~735) 병렬 Opus xhigh + 서명 체인(오케스트레이터 직접).
 - **서명 배포 성립**: 인증서(YWQQFQM38J)·momo-notary 검증 → publish에 codesign(hardened)+notarytool(120m)+staple+ditto 배선(MOMO_SIGN=0 폴백). 첫 공증 30m 타임아웃(신규 팀 지연, 실측 ~35m Accepted) 후 **0.0.5 서명 발행: Gatekeeper accepted**. 사이트/가이드 우회 안내 제거. Sparkle(#736) 게이트 해제.
