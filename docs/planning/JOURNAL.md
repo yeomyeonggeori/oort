@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-24 (Fable WH-2·WH-3 병렬 구현·검수·트랙 랜딩) · GUI+REST+문서, main 승인 대기
+- 성재 "이어서 진행". 3작업 병렬 Opus 4.8 xhigh → 오케스트레이터 검수 → 트랙 랜딩.
+- **MOMO-582(#710, 서버 REST)**: GET/PUT `/v1/provider/work-host-engine`(requireOperator=platform:read OR owner/admin, 비관리자 403), per-workspace RLS(마이그레이션 040 재사용), 400 검증. **검증기 실 PG18 왕복 전관문 PASS**(3엔진·403·400·RLS FORCE·ADR-0004 라벨전용). WorkHostEngineTests 10. → PR #711 track/engine.
+- **WH-2(#706, GUI)**: 설정 "코드 실행 호스트"(엔진 Picker opencode 기본/goose/codex-local + 페어링 상태 + "AI 연결" 구분). 574 셸 재사용. macOS 15 tests. **design-review Blocker0·High1** → 수정: 페어링을 엔진 loadState에서 분리(로드 실패해도 페어링 표시 유지) + codex-local 오프라인 코히런스 노트(Medium). → PR #712 track/uxui.
+- **WH-3(#707, docs)**: `docs/WORK_HOST_QUICKSTART.md`+README. em-dash→콜론 수정. → PR #713 track/engine.
+- 오케스트레이터 검수 이력: 자기보고 신뢰 안 하고 직접 빌드/테스트/docker/design-review. 잡은 것: verifier updatedBy 케이스 과민(→ascii_downcase), GUI 페어링 결합(→분리). 마이그레이션 다음=041, verifier 포트 다음=28290대.
+- 대기: **WH-2/WH-3 track→main 성재 승인**(하드룰). 승인 시 0.0.3 배포판에 사이드카+GUI 동봉.
+
 ## 2026-07-24 (Fable WH-1 구현·검수·track/engine 랜딩) · 동봉 엔진 사이드카 실빌드 확증
 - WH-1(#705) Opus 4.8 xhigh 서브에이전트 구현 → 오케스트레이터 검수 → **track/engine 랜딩**(PR #708, main 승인 대기).
 - **A**: WorkEngineAdapter 프로토콜 + 3어댑터(OpenCodeHTTPAdapter HTTP+SSE·ACPEngineAdapter goose·CodexJSONRPCAdapter app-server stdio) + 승인 단일 계약(WorkApprovalRequest/Decision, fail-closed). **B**: 엔진 선택(기본 opencode)+마이그레이션 040(work_host_engine, RLS FORCE). **C**: workhost.Dockerfile(opencode MIT+goose Apache-2.0+momo-workd 레이어 분리, Codex 미동봉)+compose profile+라이선스. **D**: verify_workhost_engines.sh(28270대).
