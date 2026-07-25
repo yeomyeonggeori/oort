@@ -28,7 +28,9 @@ Do NOT default to: purple/blue/indigo AI gradients, glassy hero cards, three-equ
 
 ## 1. Platform constraints (web-specific, load-bearing)
 
-- **CSP is `style-src 'self'`** (enforced by the prod Caddyfile the browser smoke runs behind). No inline `style={{...}}`, no `style=` attributes, no styled-components runtime injection. Every style lives in Tailwind classes compiled to a served stylesheet or in `src/design/tokens.css`. This is not a preference; violating it breaks rendering. If a value must be dynamic, drive it with a `data-*` attribute and a CSS rule, or a named `@utility`.
+- **CSP: this codebase writes no inline styles.** The shipped header (`infra/prod/Caddyfile`) is `default-src 'self'; connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'`. Read the two directives separately:
+  - `style-src` carries `'unsafe-inline'`, and it is load-bearing for the VENDORED libraries that style at runtime, not for anything this codebase writes. Measured on the built bundle behind the prod header, 2026-07-26: a plain channel view carries 5 inline-style nodes (react-virtuoso's virtualized rows), and a streaming 관전 터미널 carries 40 plus 3 injected `<style>` elements, 35 of them xterm.js writing one `setAttribute("style", ...)` per truecolor cell (MOMO-619). Under a hypothetical `style-src 'self'` the terminal still streams text but loses colour, cell positioning and its own dimensions. That allowance belongs to the libraries and is not a licence for components: no inline `style={{...}}`, no `style=` attributes, no styled-components runtime injection. §10.3 still fails them, and every style this codebase authors lives in Tailwind classes compiled to a served stylesheet or in `src/design/tokens.css`. If a value must be dynamic, drive it with a `data-*` attribute and a CSS rule, or a named `@utility`. The directive can no longer be tightened without breaking the timeline and the terminal, so changing it is a review item and not a config tweak.
+  - `connect-src` is the one that bites feature work: it covers this origin plus the realtime domain and nothing else, so a surface that dials a third address (a work host's own terminal endpoint, ADR-0126 D1) is refused by the browser, with **no error and no close event on the socket**. That is a deployment decision rather than a client bug, and the client's job is to name it (`observerStream.cspBlockedHost`) instead of blaming the host or hanging on a busy state.
 - **Self-contained assets**: system font stack only, no `fonts.googleapis.com`, no external CDN, no remote fonts/images. Same-origin only.
 - **Tauri shell parity**: keyboard shortcuts, deep links, and native integrations (keychain, mDNS, updater) live in the Rust plugin layer (ADR-0133 §2), not the React tree. Do not reimplement OS behavior in JS.
 - **System-first (web translation)**: reach for the shadcn/Radix primitive before a custom control (`DropdownMenu`, `Dialog`, `Popover`, `Tabs`, `Command`, `ContextMenu`, `Sheet`, `Collapsible`, `Form`). react-virtuoso for the timeline, cmdk for Cmd+K. Every custom-drawn control needs a one-line comment stating what the primitive could not do. No justification means use the primitive.
@@ -126,7 +128,7 @@ Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was co
 |---|---|---|
 | 1 | `emdash` | em-dash inside a quoted string, and anything in `index.html` |
 | 2 | `raw_color` | hex / `rgb()` / `hsl()` outside the token definition |
-| 3 | `inline_style` | `style={{...}}` or `style=` (CSP blocks it at runtime) |
+| 3 | `inline_style` | `style={{...}}` or `style=` (house rule, §1: the `'unsafe-inline'` in the shipped `style-src` is for xterm.js, not for components) |
 | 4 | `arbitrary_tw` | `className="... [13px] ..."` arbitrary values |
 | 5 | `ai_gradient` | `bg-gradient`, indigo/violet/fuchsia family |
 | 6 | `toast` | `sonner` / `useToast` / `toast(` |

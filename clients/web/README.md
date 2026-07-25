@@ -245,9 +245,30 @@ host), both about `infra/prod/Caddyfile`:
   but loses colour, cell positioning and its dimensions (measured). The shipped
   policy carries `'unsafe-inline'`, so **no relaxation is needed** — but the
   directive can no longer be tightened without breaking this surface.
+  Re-measured with a census on 2026-07-26 (R2 M3): a plain channel view already
+  carries 5 inline-style nodes from react-virtuoso, and a streaming terminal
+  carries 40 plus 3 injected `<style>` elements, 35 of them xterm's. The
+  dependency is therefore older and wider than this ticket, and it is now
+  recorded where the RULE lives (`momo-design-taste-web` SKILL §1 and
+  `scripts/design_preflight_web.sh`), which until R2 still said the policy was
+  `style-src 'self'`. The house rule is unchanged and still gated: components
+  author no inline styles.
 
-Two more things a terminal costs, both found by the R1 review and both about
-xterm rather than about momo:
+The liveness claim, and the two things a terminal costs:
+
+- **관전 중 is bound to three facts, not to `readyState`.** The socket must be
+  OPEN, `navigator.onLine` must be true, and nothing may have reported an outage
+  since the last byte (`observerStream.observerLink`). R2 H1 measured why: with
+  the network cut under a live stream no `onclose` ever arrives, so the phase
+  stays `watching` and 관전 중 froze over a dead screen while the panel above it
+  said the connection had dropped. There is no ping to send (the observer grade
+  has no encoder for any frame but `connect`), so the surface reports what it
+  can observe: 네트워크 끊김 while the browser has no network, 연결 확인 필요 with
+  a 다시 연결 control after it comes back and before the stream proves itself,
+  and `마지막 출력 N초 전` once the bytes have been silent for 10 seconds.
+  Measured against the live host: 13.5 s offline held `data-link="offline"` on
+  every sample with the age of the last byte counting up, and one arriving byte
+  returns the surface to 관전 중 on its own.
 
 - **xterm eats keys on behalf of a program that is not listening.** `disableStdin`
   drops the byte in `CoreService`, long after `preventDefault()` has already run,
@@ -262,4 +283,8 @@ xterm rather than about momo:
   the pane is. The surface publishes the column count while it differs and
   offers the pane's 넓게 보기 state; see `references/tokens.md` in the
   design-taste-web skill for the measured numbers and the `getComputedStyle`
-  border-box trap that made both axes over-report.
+  border-box trap that made both axes over-report. Below 900px that control is
+  hidden, because the pane is already the whole chat surface and widening it has
+  nothing left to do, so the notice names the window instead of pointing at a
+  button that is not there (R2 M2: measured at 880px, 79 columns against the
+  host's 80, with both 넓게 보기 controls correctly absent).

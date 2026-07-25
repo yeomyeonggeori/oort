@@ -15,12 +15,18 @@ import {
   observationStillPermits,
   observerCountLabel,
   observerFailureCopy,
+  observerLink,
   observerSubprotocols,
   observeGate,
+  offersReload,
   offersRetry,
+  quietLabel,
   terminalOwnsKey,
   OBSERVER_FAILURE_COPY,
+  OBSERVER_LINK_NOTE,
+  OBSERVER_LINK_STATUS,
   OBSERVER_SUBPROTOCOL,
+  QUIET_AFTER_MS,
   type ObserverFailure,
 } from "./observerStream";
 
@@ -206,12 +212,28 @@ describe("failure copy", () => {
     // running and the pty can still be there, so 다시 연결 is a real question
     // to ask the host (R1 H1: this used to be a banner with no action at all).
     expect(offersRetry("stream_closed", true)).toBe(true);
+    // The endpoint and the pty id are the HOST's own registration columns, so a
+    // host that fixes them makes the next capability call succeed (R2 M4).
+    expect(offersRetry("grant_invalid", true)).toBe(true);
     // The owner closed observation or the session ended: the next step is not
     // a retry, it is a different fact on screen.
     expect(offersRetry("observation_closed", true)).toBe(false);
     expect(offersRetry("session_ended", true)).toBe(false);
-    expect(offersRetry("grant_invalid", true)).toBe(false);
     // A policy the page carries is not something a second attempt can change.
+    expect(offersRetry("host_blocked_by_policy", true)).toBe(false);
+  });
+
+  it("offers the reload where only a new document can change the answer", () => {
+    // A CSP arrives with the page. An operator who fixes connect-src changes
+    // nothing for a tab that is already open, so this failure alone gets an
+    // action that reloads rather than one that redials (R2 M4).
+    expect(offersReload("host_blocked_by_policy")).toBe(true);
+    for (const failure of failures.filter(
+      (name) => name !== "host_blocked_by_policy"
+    )) {
+      expect(offersReload(failure)).toBe(false);
+    }
+    // The two never both offer an action: one banner, one next step.
     expect(offersRetry("host_blocked_by_policy", true)).toBe(false);
   });
 
@@ -356,7 +378,92 @@ describe("observationStillPermits", () => {
 });
 
 describe("observerCountLabel", () => {
-  it("keeps the mac wording", () => {
-    expect(observerCountLabel(3)).toBe("관전 3");
+  it("carries its unit, because the number is not a headcount", () => {
+    // The mac says 관전 N. Here the qualifier used to be a two line note under
+    // the badge, which was a third of the fixed prose in a 320px column (R2
+    // M5/M7). The word that made the note necessary is now in the label.
+    expect(observerCountLabel(3)).toBe("관전 권한 3");
+  });
+});
+
+describe("observerLink", () => {
+  const base = { watching: true, online: true, quietMs: 0, doubted: false };
+
+  it("claims nothing at all unless the socket is open", () => {
+    expect(observerLink({ ...base, watching: false })).toBeNull();
+    // Not even when everything else looks healthy.
+    expect(
+      observerLink({ watching: false, online: true, quietMs: 0, doubted: false })
+    ).toBeNull();
+  });
+
+  it("stops claiming 관전 중 the moment the browser loses the network", () => {
+    // R2 H1: with the network cut under a live stream no close event ever
+    // arrived, so an OPEN socket alone kept 관전 중 frozen on screen while the
+    // panel above it said the connection had dropped.
+    expect(observerLink({ ...base, online: false })).toBe("offline");
+    // Even mid-burst: onLine false means no socket on this page is going
+    // anywhere, and under-claiming is the safe direction on this surface.
+    expect(observerLink({ ...base, online: false, quietMs: 0 })).toBe("offline");
+  });
+
+  it("holds the doubt until a byte settles it", () => {
+    expect(observerLink({ ...base, doubted: true })).toBe("unverified");
+    // A byte arriving is what clears `doubted` (ObserverTerminal.markByte), so
+    // the state cannot outlive the evidence against it.
+    expect(observerLink({ ...base, doubted: false })).toBe("live");
+  });
+
+  it("names silence as silence, never as death", () => {
+    expect(observerLink({ ...base, quietMs: QUIET_AFTER_MS - 1 })).toBe("live");
+    expect(observerLink({ ...base, quietMs: QUIET_AFTER_MS })).toBe("quiet");
+    // An idle agent is still being watched: the word does not change, only the
+    // clause beside it does.
+    expect(OBSERVER_LINK_STATUS.quiet).toBe(OBSERVER_LINK_STATUS.live);
+    expect(OBSERVER_LINK_STATUS.live).toBe("관전 중");
+    expect(OBSERVER_LINK_STATUS.offline).not.toBe(OBSERVER_LINK_STATUS.live);
+    expect(OBSERVER_LINK_STATUS.unverified).not.toBe(OBSERVER_LINK_STATUS.live);
+  });
+
+  it("ranks the outage above the doubt above the silence", () => {
+    expect(
+      observerLink({ watching: true, online: false, quietMs: 60_000, doubted: true })
+    ).toBe("offline");
+    expect(
+      observerLink({ watching: true, online: true, quietMs: 60_000, doubted: true })
+    ).toBe("unverified");
+  });
+});
+
+describe("quietLabel", () => {
+  it("says nothing while output is arriving", () => {
+    expect(quietLabel(0, true)).toBeNull();
+    expect(quietLabel(QUIET_AFTER_MS - 1, true)).toBeNull();
+  });
+
+  it("distinguishes a stream that paused from one that never started", () => {
+    expect(quietLabel(12_000, true)).toBe("마지막 출력 12초 전");
+    // Nothing has arrived on this attempt, so there is no "마지막 출력" to date.
+    expect(quietLabel(12_000, false)).toBe("12초째 출력 없음");
+  });
+
+  it("switches to minutes rather than counting to hundreds", () => {
+    expect(quietLabel(59_000, true)).toBe("마지막 출력 59초 전");
+    expect(quietLabel(60_000, true)).toBe("마지막 출력 1분 전");
+    expect(quietLabel(605_000, false)).toBe("10분째 출력 없음");
+  });
+});
+
+describe("link notes", () => {
+  it("states the fact and the next step, with no em-dash and no blame", () => {
+    for (const note of Object.values(OBSERVER_LINK_NOTE)) {
+      expect(note).not.toMatch(/[—–]/);
+      expect(note).not.toMatch(/죄송|불편|확인해 주세요/);
+    }
+    // Offline: nothing this client can do until the network returns, so it says
+    // what becomes possible then rather than pointing at a dead control.
+    expect(OBSERVER_LINK_NOTE.offline).toContain("다시 연결할 수 있습니다");
+    // Unverified: the honest claim is that nobody knows yet.
+    expect(OBSERVER_LINK_NOTE.unverified).toContain("다음 출력이 도착해야");
   });
 });

@@ -276,12 +276,19 @@ export function observerFailureCopy(
  * dead end (a clean host close left a banner with no action and no 관전 시작,
  * with nothing on the panel able to get the stream back). Whether the retry can
  * succeed is the host's answer to give, and asking it costs one capability call.
+ *
+ * `grant_invalid` joined it in R2 (M4). It reads like a permanent verdict and is
+ * not one: the endpoint and the pty id are columns the HOST wrote, and a host
+ * that re-registers with a dialable endpoint makes the very next capability call
+ * succeed. Leaving it out meant an operator could fix the registration and still
+ * find this panel dead until the reader navigated out of the session and back.
  */
 const RETRYABLE: ReadonlySet<ObserverFailure> = new Set<ObserverFailure>([
   "server_unreachable",
   "host_unreachable",
   "host_timeout",
   "grant_expired",
+  "grant_invalid",
   "stream_dropped",
   "stream_closed",
   "capability_denied",
@@ -305,6 +312,21 @@ export function offersRetry(
   gateAvailable: boolean
 ): boolean {
   return gateAvailable && RETRYABLE.has(failure);
+}
+
+/**
+ * The one failure whose way out is a new DOCUMENT rather than a new socket.
+ *
+ * A Content-Security-Policy is delivered with the page and is fixed for the
+ * lifetime of that document: an operator who adds the host endpoint to
+ * `connect-src` changes nothing for a tab that is already open, and 다시 연결
+ * would dial through the same refused policy forever. So this failure keeps its
+ * "a retry cannot change a policy" rule (offersRetry stays false) and offers the
+ * action that CAN change it. Without this the panel was a terminus even after
+ * the deployment was fixed (R2 M4).
+ */
+export function offersReload(failure: ObserverFailure): boolean {
+  return failure === "host_blocked_by_policy";
 }
 
 /** Why the capability call failed. Status codes are the server's own contract. */
@@ -385,6 +407,104 @@ export function newlineCount(chunk: string | Uint8Array): number {
  */
 export const HOST_COLUMNS = 80;
 
+// ---- how live "관전 중" is allowed to be ------------------------------------
+
+/**
+ * What the panel may claim while it still holds a socket it believes is open.
+ *
+ * An open WebSocket is NOT the same fact as a working connection, and R2 H1
+ * measured the gap: with the network cut under a live stream, `onclose` never
+ * fired, the phase stayed `watching`, and 관전 중 sat frozen over a byte count
+ * that had stopped moving while the panel one block up already said
+ * "연결이 끊겨 갱신이 멈췄습니다". Two contradictory claims, both on screen. The
+ * handshake had a deadline (HOST_CONNECT_TIMEOUT_MS) and the DATA path had
+ * nothing at all, so a half-open TCP (laptop asleep, wifi dropped) could hold
+ * the lie for minutes rather than the nine seconds the emulator could show.
+ *
+ * There is no ping to send: an observer capability has no encoder for any frame
+ * but `connect`, and inventing one would break the invariant at the top of this
+ * file. So the two facts a browser can observe honestly are used instead:
+ *
+ *   - `navigator.onLine` false means this browser has no network path at all,
+ *     which no socket survives. It is a hard "stop claiming".
+ *   - time since the last byte. Silence is not proof of death (an idle agent is
+ *     silent too), so it is never reported AS death; it is reported as itself,
+ *     "마지막 출력 34초 전", and the reader judges.
+ *
+ * `unverified` is the state a reconnecting laptop lands in: the browser says the
+ * network is back but this socket has not delivered a byte since it went away,
+ * so nobody yet knows whether it survived. That is where the panel offers
+ * 다시 연결, and one arriving byte settles the question by itself.
+ */
+export type ObserverLink = "live" | "quiet" | "offline" | "unverified";
+
+/**
+ * Silence after which the surface names the gap.
+ *
+ * 10 seconds is short enough that the frozen-screen case is caught while the
+ * reader is still looking, and long enough that an ordinary pause between a
+ * command and its output does not decorate a healthy stream with a warning. The
+ * byte counter is the signal below this threshold: it moves as bytes arrive.
+ */
+export const QUIET_AFTER_MS = 10_000;
+
+export function observerLink(input: {
+  /** The socket is OPEN as far as this client knows. */
+  watching: boolean;
+  /** `navigator.onLine`. */
+  online: boolean;
+  /** Milliseconds since the last byte (or since the socket opened). */
+  quietMs: number;
+  /** The browser reported an outage, and nothing has arrived since. */
+  doubted: boolean;
+}): ObserverLink | null {
+  if (!input.watching) return null;
+  if (!input.online) return "offline";
+  if (input.doubted) return "unverified";
+  return input.quietMs >= QUIET_AFTER_MS ? "quiet" : "live";
+}
+
+/**
+ * The status word under the terminal.
+ *
+ * `quiet` still says 관전 중, because it still IS: the socket is open, the
+ * browser has a network, and the host simply has not printed. What changes is
+ * that the sentence carries the age of the last byte beside it.
+ */
+export const OBSERVER_LINK_STATUS: Readonly<Record<ObserverLink, string>> = {
+  live: "관전 중",
+  quiet: "관전 중",
+  offline: "네트워크 끊김",
+  unverified: "연결 확인 필요",
+};
+
+/** How long since the last byte, or null while output is arriving normally. */
+export function quietLabel(
+  quietMs: number,
+  everReceived: boolean
+): string | null {
+  if (quietMs < QUIET_AFTER_MS) return null;
+  const seconds = Math.floor(quietMs / 1000);
+  const span = seconds < 60 ? `${seconds}초` : `${Math.floor(seconds / 60)}분`;
+  return everReceived ? `마지막 출력 ${span} 전` : `${span}째 출력 없음`;
+}
+
+/**
+ * The two link states that need a sentence of their own, not just a word.
+ *
+ * Neither blames the reader and neither guesses: the offline one states what the
+ * browser reported and what will be possible when it changes, the other states
+ * exactly what is and is not known about the socket.
+ */
+export const OBSERVER_LINK_NOTE: Readonly<
+  Record<"offline" | "unverified", string>
+> = {
+  offline:
+    "이 브라우저의 네트워크가 끊겼습니다. 출력은 더 오지 않고, 연결이 돌아오면 여기에서 다시 연결할 수 있습니다.",
+  unverified:
+    "네트워크가 돌아왔습니다. 끊긴 동안 이 연결이 살아남았는지는 다음 출력이 도착해야 알 수 있습니다.",
+};
+
 // ---- who may watch, who may change the scope --------------------------------
 
 export interface ObserveGate {
@@ -460,7 +580,7 @@ export function observationStillPermits(
 // ---- the badge --------------------------------------------------------------
 
 /**
- * "관전 N", the mac's own wording (`workSessionObservers`).
+ * "관전 권한 N".
  *
  * WHAT THE NUMBER IS, EXACTLY: the server counts observer capability rows that
  * have not expired (`terminal_attach_capability.mode = 'observer' AND
@@ -469,15 +589,21 @@ export function observationStillPermits(
  * teammate who has been watching for ten minutes is NOT in it, and one who
  * retried twice in a minute is in it twice.
  *
- * That gap is why `observerNote` exists and is rendered next to the number
- * rather than in a tooltip. The alternative was to re-issue a capability every
- * 30 seconds so the count would track live watchers, which would mint tokens
- * and publish a realtime frame per observer per minute in order to make a badge
- * literal, and would still count a mac observer wrong. The number is the
- * server's, and the sentence says what the server counted.
+ * The mac says 관전 N. This one says 관전 권한 N, and the extra word is the
+ * whole point (R2 M5/M7): the qualifier used to live in a two line muted note
+ * under the badge, which is a third of the prose this 320px column was spending
+ * on fixed explanation, and a number that needs a paragraph to stop being a
+ * headcount should carry its unit instead. What the note said stays reachable
+ * as the badge's own title and accessible name.
+ *
+ * The alternative was to re-issue a capability every 30 seconds so the count
+ * would track live watchers, which would mint tokens and publish a realtime
+ * frame per observer per minute in order to make a badge literal, and would
+ * still count a mac observer wrong. The number is the server's, and the label
+ * says what the server counted.
  */
 export function observerCountLabel(count: number): string {
-  return `관전 ${count}`;
+  return `관전 권한 ${count}`;
 }
 
 export const OBSERVER_COUNT_NOTE =

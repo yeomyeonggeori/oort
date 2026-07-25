@@ -25,11 +25,16 @@ import {
   observationStillPermits,
   observerCountLabel,
   observerFailureCopy,
+  observerLink,
   observerSubprotocols,
   observeGate,
+  offersReload,
   offersRetry,
+  quietLabel,
   terminalOwnsKey,
   OBSERVER_COUNT_NOTE,
+  OBSERVER_LINK_NOTE,
+  OBSERVER_LINK_STATUS,
   type ObserverFailure,
 } from "./observerStream";
 import type { ITheme, Terminal } from "./terminalRuntime";
@@ -44,20 +49,35 @@ import type { ITheme, Terminal } from "./terminalRuntime";
 // under text that had stopped arriving, and the fix there was to bind the
 // caret to a fact the client can actually observe. The same rule, harder, here:
 //
-//   - 관전 중 is shown only while the WebSocket is OPEN. Not while it is
-//     connecting, not after a close, never from the ledger.
+//   - 관전 중 is shown only while the WebSocket is OPEN, the browser reports a
+//     network, and nothing says the connection has been cut under it. Not while
+//     it is connecting, not after a close, never from the ledger. An OPEN socket
+//     alone was not enough: R2 H1 measured the network dropped under a live
+//     stream, no `onclose` ever arrived, and 관전 중 froze for as long as the
+//     emulator would run while the panel above it said the opposite. What can be
+//     observed honestly is `navigator.onLine` and the age of the last byte, so
+//     that is what the claim is bound to (observerStream.observerLink).
 //   - the running byte count under the terminal is the honest liveness signal:
 //     it moves exactly as fast as bytes arrive and stops dead when they stop.
-//     There is no caret, no pulse and no shimmer over a dead socket.
+//     There is no caret, no pulse and no shimmer over a dead socket. When it
+//     stops for more than QUIET_AFTER_MS the surface says so in words, because a
+//     number that stopped moving is only legible to someone who was watching it.
 //   - a live socket is not the same claim as a live SCREEN. Scrolling back
 //     freezes the viewport while bytes keep arriving, so the panel says so and
 //     offers the way back to the tail (R1 M1).
 //   - the cursor is off (`cursorInactiveStyle: "none"`). A blinking block in a
 //     disconnected terminal is a claim that a process is waiting for you.
 //   - every disconnect names its own cause (observerStream.ObserverFailure) and
-//     leaves the received output on screen, because what arrived was real.
+//     leaves the received output on screen, because what arrived was real. So
+//     does 관전 중단: R2 M1 caught the reader's own stop erasing the transcript
+//     the same code kept across a crash, and a stop button is an instruction
+//     about the stream, not about what is already on screen.
 //   - a failure is never a terminus. While the ledger still permits watching,
-//     there is always a control that starts it again (R1 H1).
+//     there is always a control that starts it again (R1 H1), including the one
+//     failure that needs a new document rather than a new socket (R2 M4).
+//   - a frame with nothing in it is not kept: a connection that failed before a
+//     single byte arrived hides the terminal instead of drawing an empty box and
+//     explaining that its scroll and copy work (R2 M6).
 //
 // READ-ONLY, TWICE. The capability is `observer`, so the server issues stdout
 // rights only and the host re-validates that grade. On this side there is no
@@ -151,6 +171,23 @@ export function ObserverTerminal({
   const bytesRef = useRef(0);
   const [lines, setLines] = useState(0);
   const linesRef = useRef(0);
+  /**
+   * Whether a single byte has ever arrived on THIS attempt.
+   *
+   * It decides two different things and both are about not lying with a box:
+   * the terminal is kept on screen after 관전 중단 because there is something in
+   * it (R2 M1), and it is not drawn at all after a failure that received
+   * nothing, where the frame plus its "복사와 스크롤은 그대로 됩니다" caption
+   * described a terminal that never existed (R2 M6).
+   */
+  const [received, setReceived] = useState(false);
+  const receivedRef = useRef(false);
+  /** Seconds since the last byte, published while watching. */
+  const [quietSeconds, setQuietSeconds] = useState(0);
+  const lastByteAtRef = useRef(0);
+  /** The browser reported an outage and nothing has arrived since. */
+  const [doubted, setDoubted] = useState(false);
+  const doubtedRef = useRef(false);
   /** Lines arrived since the reader scrolled off the tail, 0 while pinned. */
   const [behind, setBehind] = useState(0);
   const tailAnchorRef = useRef<number | null>(null);
@@ -162,6 +199,26 @@ export function ObserverTerminal({
     useState<WorkSession["observation"] | null>(null);
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [closeArmed, setCloseArmed] = useState(false);
+  /**
+   * The browser's own verdict on whether it has a network at all.
+   *
+   * `navigator.onLine` is a weak signal for "can I reach that host" and a strong
+   * one for the opposite: false means no socket on this page is going anywhere,
+   * which is exactly the claim 관전 중 must stop making (R2 H1). The momo
+   * realtime status (`live`, which WorkPanel already has) is deliberately NOT
+   * used for this: it is a socket to a DIFFERENT peer, and a momo relay restart
+   * would make this panel announce that a host stream had died while its bytes
+   * were still arriving, which is the same false claim pointing the other way.
+   */
+  const [online, setOnline] = useState(
+    () => typeof navigator === "undefined" || navigator.onLine
+  );
+  /**
+   * The pane is already the whole chat surface, so 넓게 보기 cannot widen it.
+   * Same 900px breakpoint as tokens.css `work-pane` / `pane-wide-toggle`, read
+   * here so the fold notice can say what the reader can actually do (R2 M2).
+   */
+  const [paneAtWindowWidth, setPaneAtWindowWidth] = useState(false);
 
   const mountRef = useRef<HTMLDivElement>(null);
   const selectionProbeRef = useRef<HTMLSpanElement>(null);
@@ -170,6 +227,19 @@ export function ObserverTerminal({
   const socketRef = useRef<WebSocket | null>(null);
   /** Generation counter: an old attempt's callbacks must not touch new state. */
   const runRef = useRef(0);
+
+  /** One byte arrived: the clock restarts and any doubt about the link ends. */
+  const markByte = useCallback(() => {
+    lastByteAtRef.current = performance.now();
+    if (!receivedRef.current) {
+      receivedRef.current = true;
+      setReceived(true);
+    }
+    if (doubtedRef.current) {
+      doubtedRef.current = false;
+      setDoubted(false);
+    }
+  }, []);
 
   const closeSocket = useCallback(() => {
     const socket = socketRef.current;
@@ -268,15 +338,13 @@ export function ObserverTerminal({
   }, [syncTail]);
 
   const start = useCallback(async () => {
+    // Nothing is cleared here. An attempt that fails before it reaches the host
+    // leaves the previous transcript and the counts that describe it on screen,
+    // because they are still true; the clearing happens in one place below,
+    // beside the `terminal.reset()` that makes them false (R2 M1).
     const run = runRef.current + 1;
     runRef.current = run;
     closeSocket();
-    bytesRef.current = 0;
-    linesRef.current = 0;
-    tailAnchorRef.current = null;
-    setBytes(0);
-    setLines(0);
-    setBehind(0);
     setPhase({ kind: "issuing" });
 
     let grant;
@@ -304,7 +372,22 @@ export function ObserverTerminal({
     // Reconnect starts from a clean screen. A host replays its scrollback on
     // connect, so writing it under what the previous socket already delivered
     // would duplicate every line and leave a transcript that never happened.
+    // The counters go with the screen and not with the attempt: they describe
+    // what is visible, so they are zeroed exactly here, where it stops being
+    // visible, and never on a retry that failed before reaching the host.
     terminal.reset();
+    bytesRef.current = 0;
+    linesRef.current = 0;
+    tailAnchorRef.current = null;
+    receivedRef.current = false;
+    doubtedRef.current = false;
+    lastByteAtRef.current = performance.now();
+    setBytes(0);
+    setLines(0);
+    setBehind(0);
+    setReceived(false);
+    setDoubted(false);
+    setQuietSeconds(0);
 
     setPhase({ kind: "connecting" });
     let socket: WebSocket;
@@ -354,6 +437,12 @@ export function ObserverTerminal({
       if (runRef.current !== run) return;
       opened = true;
       socket.send(connectFrame(grant.pty_id));
+      // The quiet clock starts at the handshake, not at the first byte: a host
+      // that accepts the socket and then says nothing is exactly the case the
+      // reader needs told, and until something arrives the label counts from
+      // here ("14초째 출력 없음").
+      lastByteAtRef.current = performance.now();
+      setQuietSeconds(0);
       setPhase({ kind: "watching" });
       refitRef.current?.();
     };
@@ -364,6 +453,7 @@ export function ObserverTerminal({
         terminal.write(data);
         bytesRef.current += TEXT_ENCODER.encode(data).length;
         linesRef.current += newlineCount(data);
+        markByte();
         return;
       }
       if (data instanceof ArrayBuffer) {
@@ -371,6 +461,7 @@ export function ObserverTerminal({
         terminal.write(chunk);
         bytesRef.current += chunk.byteLength;
         linesRef.current += newlineCount(chunk);
+        markByte();
       }
       // Anything else (a Blob, if binaryType were ever changed) is dropped
       // rather than guessed at: this socket carries pty bytes and nothing else.
@@ -392,8 +483,18 @@ export function ObserverTerminal({
     // handshake, a blocked connect-src and an unroutable host are one event),
     // so the close that always follows is what names the failure.
     socket.onerror = () => {};
-  }, [closeSocket, ensureTerminal, session.id, workspaceId]);
+  }, [closeSocket, ensureTerminal, markByte, session.id, workspaceId]);
 
+  /**
+   * Stop the stream, keep what it delivered.
+   *
+   * 관전 중단 closes the socket and nothing else: the counters keep their totals
+   * and the terminal keeps its scrollback, so the surface reads 연결 없음 over
+   * the output that really arrived. It used to unmount the whole block and put
+   * the "관전을 시작하면 ..." invitation back, which threw away the only record
+   * of what the agent printed on the reader's own click, while the identical
+   * bytes were carefully preserved across a crash two paths over (R2 M1).
+   */
   const stop = useCallback(() => {
     runRef.current += 1;
     closeSocket();
@@ -435,6 +536,11 @@ export function ObserverTerminal({
     const publish = () => {
       setBytes(bytesRef.current);
       setLines(linesRef.current);
+      // Whole seconds, so a quiet stream re-renders this tree once a second
+      // instead of twice, and a busy one not at all (the value stays 0).
+      setQuietSeconds(
+        Math.max(0, Math.floor((performance.now() - lastByteAtRef.current) / 1000))
+      );
     };
     const timer = window.setInterval(publish, 500);
     return () => {
@@ -442,6 +548,38 @@ export function ObserverTerminal({
       publish();
     };
   }, [phase.kind]);
+
+  // The browser's network verdict. `online` is polled from the events rather
+  // than read at render time because `navigator.onLine` is not reactive: without
+  // these two listeners the panel would only notice an outage on some unrelated
+  // re-render, which on a frozen stream is never (R2 H1).
+  useEffect(() => {
+    const sync = () => setOnline(navigator.onLine);
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+
+  // Once the browser has said "no network" under a live stream, this socket is
+  // unproven until a byte arrives on it, whatever the readyState says.
+  useEffect(() => {
+    if (online || phase.kind !== "watching" || doubtedRef.current) return;
+    doubtedRef.current = true;
+    setDoubted(true);
+  }, [online, phase.kind]);
+
+  // Which side of the pane breakpoint the window is on (tokens.css work-pane).
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(width < 900px)");
+    const sync = () => setPaneAtWindowWidth(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
 
   /**
    * A dead terminal is as tall as what it holds, not as tall as a live one.
@@ -460,7 +598,12 @@ export function ObserverTerminal({
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    if (phase.kind !== "failed") {
+    // Streaming (or about to): the window is worth its full 320px. Stopped or
+    // failed: it is worth exactly what it holds. 관전 중단 joined the failure
+    // path here in R2 because the stopped surface now KEEPS its output (M1), and
+    // a two line transcript under a 320px box is the same empty band by another
+    // route.
+    if (phase.kind !== "failed" && phase.kind !== "idle") {
       setBodyFitsContent(false);
       refitRef.current?.();
       return;
@@ -486,9 +629,14 @@ export function ObserverTerminal({
     bytesRef.current = 0;
     linesRef.current = 0;
     tailAnchorRef.current = null;
+    receivedRef.current = false;
+    doubtedRef.current = false;
     setBytes(0);
     setLines(0);
     setBehind(0);
+    setReceived(false);
+    setDoubted(false);
+    setQuietSeconds(0);
     setCloseArmed(false);
     setPhase({ kind: "idle" });
   }, [session.id, closeSocket]);
@@ -562,29 +710,83 @@ export function ObserverTerminal({
     }
   }
 
-  const showTerminal = phase.kind !== "idle";
+  // The frame is drawn while a stream is being set up or running, and after
+  // that only if it holds something. `issuing` and `connecting` are in here for
+  // a mechanical reason as well as an honest one: xterm measures its parent on
+  // open, and a mount inside a `hidden` box fits to zero columns.
+  const showTerminal =
+    phase.kind === "issuing" ||
+    phase.kind === "connecting" ||
+    phase.kind === "watching" ||
+    received;
   const canToggle = canChangeObservation(session, auth.member.id);
   const gateReasonInBanner =
     phase.kind === "failed" &&
     (phase.failure === "observation_closed" || phase.failure === "session_ended");
-  // One notice at a time under the terminal. Both facts are true at once in a
-  // narrow pane, but "you are not looking at the tail" is the one that changes
-  // what the reader should do next, and stacking two warn-toned rows over a
-  // 320px column turns both into wallpaper.
-  const folded =
-    phase.kind === "watching" && behind === 0 && columns < HOST_COLUMNS;
+  const link = observerLink({
+    watching: phase.kind === "watching",
+    online,
+    quietMs: quietSeconds * 1000,
+    doubted,
+  });
+  // Only while a socket is held. The clock stops with the stream, so keeping
+  // the clause afterwards would freeze "마지막 출력 15초 전" over a surface that
+  // has since said 연결 없음 for ten minutes: a stale number is the same class
+  // of lie this file exists to prevent, one size smaller.
+  const quiet = link === null ? null : quietLabel(quietSeconds * 1000, received);
+  // One notice at a time under the terminal. All three facts can be true at
+  // once in a narrow pane, and stacking three warn-toned rows over a 320px
+  // column turns all of them into wallpaper, so they are ranked by which one
+  // changes what the reader should do next: a connection that may be dead
+  // outranks a viewport that is not at the tail, which outranks lines that are
+  // folded but present.
+  const notice =
+    link === "offline" || link === "unverified"
+      ? "link"
+      : behind > 0
+        ? "tail"
+        : phase.kind === "watching" && columns < HOST_COLUMNS
+          ? "folded"
+          : null;
+  // Below 900px the pane is ALREADY the whole chat surface (tokens.css
+  // work-pane), and 넓게 보기 is hidden there because it has nothing left to do.
+  // R2 M2 measured what that left behind: a permanent "긴 줄은 접혀서 보입니다"
+  // over zero controls. The remedy at that width is the window, so the notice
+  // says the window instead of pointing at a button that is not there.
+  const paneAtFullWidth = wide || paneAtWindowWidth;
 
   return (
     <section
       className="border-b border-line px-4 py-2"
       data-testid="work-observer"
       data-phase={phase.kind}
+      data-link={link ?? undefined}
     >
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="min-w-0 flex-1 text-meta text-ink-muted">터미널 관전</h4>
+        {/* 읽기 전용 is a property of the surface, so it is stated once where
+            the surface is named. It used to be three muted lines under the
+            terminal, repeated in every state, in a 320px column that was
+            already carrying nine lines of fixed explanation (R2 M5). The
+            sentence itself is not lost: the invitation above the terminal says
+            it in full before anyone starts, and it stays here as the chip's
+            title for anyone who arrives mid-stream. */}
+        {(gate.available || showTerminal) && (
+          <span
+            className="shrink-0 rounded-sm bg-surface-hover px-2 py-px text-timestamp text-ink-muted"
+            title="출력만 호스트에서 직접 받습니다. 입력, 크기 조절, 종료는 보낼 수 없고 복사와 스크롤은 그대로 됩니다."
+            data-testid="work-observer-readonly"
+          >
+            읽기 전용
+          </span>
+        )}
         {session.observerGrantCount > 0 && (
           <span
             className="shrink-0 rounded-sm bg-surface-hover px-2 py-px text-timestamp text-ink"
+            title={OBSERVER_COUNT_NOTE}
+            aria-label={`${observerCountLabel(
+              session.observerGrantCount
+            )}, ${OBSERVER_COUNT_NOTE}`}
             data-testid="work-observer-count"
           >
             <span data-numeric>{observerCountLabel(session.observerGrantCount)}</span>
@@ -634,15 +836,14 @@ export function ObserverTerminal({
           screen, arriving with no warning on their side. */}
       {closeArmed && (
         <div className="pt-1" data-testid="work-observation-confirm">
+          {/* The grant count is deliberately NOT quoted here (R2 M7). It counts
+              capabilities issued in the last minute, so one teammate who
+              reconnected once reads as "2건", and a sentence asking whether to
+              cut someone off is the last place to put a number that means
+              something other than people. The badge above states the number
+              with its unit; this states the consequence. */}
           <p className="text-meta text-ink">
             관전을 닫으면 지금 보고 있는 팀원의 화면이 그 자리에서 끊깁니다.
-            {session.observerGrantCount > 0 && (
-              <>
-                {" "}
-                최근 1분 안에 발급된 관전 권한은{" "}
-                <span data-numeric>{session.observerGrantCount}</span>건입니다.
-              </>
-            )}
           </p>
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
@@ -671,11 +872,6 @@ export function ObserverTerminal({
         </div>
       )}
 
-      {session.observerGrantCount > 0 && (
-        <p className="pt-1 text-meta text-ink-muted" data-testid="work-observer-note">
-          {OBSERVER_COUNT_NOTE}
-        </p>
-      )}
       {scopeError && (
         <p role="alert" className="pt-1 text-meta text-danger" data-testid="work-observation-error">
           {scopeError}
@@ -695,10 +891,18 @@ export function ObserverTerminal({
 
       {gate.available && phase.kind === "idle" && (
         <div className="flex flex-col items-start gap-2 pt-1">
+          {/* Two different idle states, because they answer different
+              questions. Before anything has arrived this is an invitation and
+              says what watching IS. After 관전 중단 the output is still on
+              screen below, so the sentence says what happened to it and what
+              starting again will do to it, since a host replays its scrollback
+              and the screen therefore has to be cleared first (see `start`). */}
           <p className="text-meta text-ink-muted" data-testid="work-observer-invite">
-            {hostName === null
-              ? "관전을 시작하면 호스트의 출력이 이 자리에 그대로 흐릅니다. 출력은 서버를 거치지 않고 호스트에서 직접 옵니다."
-              : `관전을 시작하면 ${hostName}의 출력이 이 자리에 그대로 흐릅니다. 출력은 서버를 거치지 않고 호스트에서 직접 옵니다.`}
+            {received
+              ? "관전을 멈췄습니다. 아래 출력은 받은 그대로 남아 있고, 다시 시작하면 화면을 지우고 호스트가 보내는 출력부터 새로 그립니다."
+              : hostName === null
+                ? "관전을 시작하면 호스트의 출력이 이 자리에 그대로 흐릅니다. 읽기 전용이라 입력은 보낼 수 없고, 출력은 서버를 거치지 않고 호스트에서 직접 옵니다."
+                : `관전을 시작하면 ${hostName}의 출력이 이 자리에 그대로 흐릅니다. 읽기 전용이라 입력은 보낼 수 없고, 출력은 서버를 거치지 않고 호스트에서 직접 옵니다.`}
           </p>
           <Button
             type="button"
@@ -707,7 +911,7 @@ export function ObserverTerminal({
             onClick={() => void start()}
             data-testid="work-observer-start"
           >
-            관전 시작
+            {received ? "관전 다시 시작" : "관전 시작"}
           </Button>
         </div>
       )}
@@ -724,7 +928,13 @@ export function ObserverTerminal({
       )}
 
       {phase.kind === "failed" && (
-        <div className="pt-1">
+        // Full bleed inside a padded section (R2 M8). InlineBanner brings its
+        // own px-4 and its own bottom rule because it is built to span a panel;
+        // dropped into this px-4 section it indented the error sentence 16px
+        // past the heading above it and drew a rule narrower than the block.
+        // The negative margin gives it the width it was drawn for, so its text
+        // lands on the same left edge as everything else here.
+        <div className="-mx-4 pt-1">
           <InlineBanner
             tone={
               phase.failure === "stream_closed" ||
@@ -736,7 +946,17 @@ export function ObserverTerminal({
             message={observerFailureCopy(phase.failure, isOwner)}
             {...(offersRetry(phase.failure, gate.available)
               ? { actionLabel: "다시 연결", onAction: () => void start() }
-              : {})}
+              : offersReload(phase.failure)
+                ? {
+                    // A policy the page carries cannot be re-asked on this
+                    // document, and an operator who has just fixed connect-src
+                    // otherwise has to find the way back into this panel by
+                    // hand (R2 M4). The reload is the action that can change
+                    // the answer, so it is the one offered.
+                    actionLabel: "새로고침",
+                    onAction: () => window.location.reload(),
+                  }
+                : {})}
             testId="work-observer-error"
           />
         </div>
@@ -784,12 +1004,39 @@ export function ObserverTerminal({
           className="hidden bg-accent-soft"
         />
 
+        {/* The link is not the socket's readyState. Either the browser has said
+            it has no network at all, or it said so while this stream was open
+            and has not proved otherwise since. Both are rows rather than words
+            because both need a next step spelled out (R2 H1). */}
+        {notice === "link" && link !== null && (
+          <div
+            className="flex flex-wrap items-center gap-2 pt-1"
+            data-testid="work-observer-link"
+            data-link={link}
+          >
+            <p role="status" className="min-w-0 flex-1 text-meta text-warn">
+              {OBSERVER_LINK_NOTE[link === "offline" ? "offline" : "unverified"]}
+            </p>
+            {link === "unverified" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void start()}
+                data-testid="work-observer-relink"
+              >
+                다시 연결
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Scrolled off the tail with the socket still open. The header still
             says 관전 중 and it is still true, but the SCREEN stopped being the
             newest thing that arrived, and nothing said so: xterm hides its
             scrollbar at rest, so a frozen viewport under a rising byte count
             looked exactly like a live one (R1 M1). */}
-        {behind > 0 && (
+        {notice === "tail" && (
           <div
             className="flex flex-wrap items-center gap-2 pt-1"
             data-testid="work-observer-tail"
@@ -815,8 +1062,10 @@ export function ObserverTerminal({
         {/* The viewport is narrower than what the host is writing for, so the
             lines on screen are folded, not shown. This client sends no resize
             frame by design, so the only thing that can change is how wide this
-            pane is (R1 H2). */}
-        {folded && (
+            pane is (R1 H2), and where the pane is already as wide as it gets,
+            the window (R2 M2). Every branch here ends in something the reader
+            can do. */}
+        {notice === "folded" && (
           <div
             className="flex flex-wrap items-center gap-2 pt-1"
             data-testid="work-observer-folded"
@@ -825,8 +1074,9 @@ export function ObserverTerminal({
               이 폭에서는 <span data-numeric>{columns}</span>칼럼만 보입니다.
               호스트는 <span data-numeric>{HOST_COLUMNS}</span>칼럼으로 쓰고
               있어서 긴 줄은 접혀서 보입니다.
+              {paneAtFullWidth && " 창을 넓히면 접히지 않습니다."}
             </p>
-            {!wide && (
+            {!paneAtFullWidth && (
               <Button
                 type="button"
                 variant="outline"
@@ -841,12 +1091,29 @@ export function ObserverTerminal({
           </div>
         )}
 
-        <p className="pt-1 text-meta text-ink-muted" data-testid="work-observer-readonly">
-          읽기 전용입니다. 출력만 호스트에서 직접 받고, 입력, 크기 조절, 종료는
-          보낼 수 없습니다. 복사와 스크롤은 그대로 됩니다.
-        </p>
-        <p className="text-meta text-ink-muted" data-testid="work-observer-bytes">
-          {phase.kind === "watching" ? "관전 중" : "연결 없음"} · 받은 출력{" "}
+        {/* What the surface is, then what it holds. The first word is the whole
+            liveness claim and it is bound to what this client can observe: an
+            OPEN socket, a browser that has a network, and bytes recent enough
+            that silence is not worth naming. When it is, the age of the last
+            byte sits beside it rather than being left for the reader to infer
+            from a number that stopped moving (R2 H1). */}
+        <p
+          className={cn(
+            "pt-1 text-meta",
+            link === "offline" || link === "unverified"
+              ? "text-warn"
+              : "text-ink-muted"
+          )}
+          data-testid="work-observer-bytes"
+        >
+          {link === null ? "연결 없음" : OBSERVER_LINK_STATUS[link]}
+          {quiet !== null && (
+            <>
+              {" · "}
+              <span data-numeric>{quiet}</span>
+            </>
+          )}{" "}
+          · 받은 출력{" "}
           <span data-numeric className="font-mono">
             {lines.toLocaleString()}
           </span>
