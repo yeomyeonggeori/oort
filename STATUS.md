@@ -1,13 +1,38 @@
 # momo 진행 현황
 
-## MOMO-576 provider link 권한을 owner/admin에 개방 (#700, 2026-07-24, ADR-0004 증보1 D3)
+## MOMO-589 인앱 워크스페이스 생성 REST — POST /v1/workspaces (W-S1, #731, 2026-07-24)
+
+- 셀프서브 여정 배치 W-S1. `infra/prod/create_workspace.sql`(MOMO-571 migrate 서브커맨드)의 시딩 로직을 REST로 서버화했다. 신규 로직은 `server/Sources/MomoServer/Routes/WorkspaceRoutes.swift`의 `create` 핸들러 + `DTOs.swift`의 `CreateWorkspaceRequest`/`CreateWorkspaceResponse`. `App.swift`에서 `WorkspaceRoutes`에 `platformAdminEmails`를 주입한다. 신규 마이그레이션 불필요(기존 테이블만 사용).
+- 인가 = 등재 인스턴스 운영자(MOMO-583 모델 재사용): `ProviderLinkRoutes.isProviderLinkOperatorAuthorized`를 그대로 호출 — `platform:read` scope 또는 owner/admin+검증 이메일이 `PLATFORM_ADMIN_EMAILS`에 등재. 일반 워크스페이스 owner(미등재)·비운영자·비-human 토큰은 403(테넌트 신설은 인스턴스 운영자 권한이지 워크스페이스 소유권이 아니다).
+- 한 tx 시딩(신규 WS GUC 경유): 트랜잭션은 운영자 홈 워크스페이스로 열어 인가 판정 + 자격 스냅샷을 RLS 안에서 읽고, `set_config('app.workspace_id', 신규ID)`로 재바인딩한 뒤 workspace + owner member/human + workspace_membership(owner) + `#general` 채널 + channel_seq(0) + owner 채널 membership + `workspace.created`(source=momo-rest) 감사행을 모두 INSERT한다. slug 중복 = `workspace_slug_uniq` 23505 포착 → 409(부분 워크스페이스 없음).
+- D5-A 계정 복제: owner의 email·password_hash를 `momo_password_hash` 재해시 없이 `ON COMMIT DROP` 임시테이블로 SQL 내부에서만 복사(해시가 앱으로 유입되지 않음, momo_password_* 규율 준수) → 운영자가 동일 이메일/비번으로 신규 WS에 owner로 즉시 로그인 가능.
+- 검증: `swift build` green(server) + `swift test`(신규 `WorkspaceCreateTests` 5개: slug 정규화·거부 매트릭스, name 경계, 생성 표면 운영자 인가 매트릭스). 생성→201→풀테넌트 시딩→신규 WS owner 로그인(D5-A)→403 매트릭스(member·미등재 owner)→slug 중복 409→400 검증의 Docker/psql 왕복은 `scripts/verify_workspace_rest_create.sh`(28290 포트 블록, `WORKSPACE_CREATE_RUN_DOCKER=1`) — **런타임 왕복은 오케스트레이터 실행 대기(runtime-unverified)**.
+
+## MOMO-588 신규 멤버 첫 입장 에이전트 인사 (W-O3, #723, 2026-07-24)
+
+- 온보딩 와우 배치 W-O3. `JoinRoutes.join` 성공 경로 끝에서 워크스페이스 에이전트가 신규 멤버에게 **실제 발화 경로로** 먼저 인사한다(봇 래핑 금지 철학, 가짜 클라 연출 없음). 신규 로직은 `server/Sources/MomoServer/Routes/OnboardingGreeting.swift`.
+- 단일 쓰기경로 재사용: 직접 INSERT 없이 `channel_seq` bump + `message` INSERT + `outbox` INSERT를 한 tenant tx(RLS FORCE, BYPASSRLS 미사용)로 수행하고, mention 부기는 `ReadStateMentions.record`, 브로드캐스트 payload는 `MessageRoutes.broadcastPayload`를 재사용한다. 대상 채널=#general 우선(없으면 가장 오래된 public), 작성자=활성 agent 멤버 handle 사전순 첫 번째.
+- 결정론 템플릿(LLM 무호출): 고정 한국어(+`Accept-Language: en*`이면 영어) — 환영 + 할 수 있는 것 2가지(대화 요약·자료 조사) + "저를 한번 멘션해보세요" + 신규 멤버 `@handle` 멘션. em-dash 0·이모지 0·내부 어휘 0.
+- 멱등((workspace, member)당 1회): 결정론 `client_msg_id`(RFC 4122 v5, 네임스페이스+워크스페이스+멤버) + `NOT EXISTS`(작성자 변경 대비) + `ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING`. 재입장 시 seq 미소모·중복 없음. props 마커 `onboarding_greeting=v1`도 기록.
+- 조용한 skip(불침): 활성 agent 없음 또는 public 채널 없음이면 인사 생략, 어떤 예외도 삼켜(로그만) join은 항상 성공 — 인사 실패가 join을 깨지 않는다.
+- 검증: `swift build` green(server) + `swift test`(215 tests, 신규 `OnboardingGreetingTests` 10개: 템플릿 계약·Accept-Language 선택·UUIDv5 RFC 벡터·멱등키 결정성·서버 mention 파서 정합). join→인사 존재+작성자=agent+멘션+outbox 1행+재입장 멱등+무-agent skip의 Docker/psql 왕복은 `scripts/verify_onboarding_greeting.sh` — **오케스트레이터 실행 11관문 PASS**(클린 볼륨+`MOMO_AGENT_SEED_MODE=demo` migrate 필수, outbox id 비교는 uuidString 대문자 정합으로 케이스 무관). 신규 마이그레이션 불필요(기존 message/props 관례 재사용).
+
+## MOMO-583 provider_link 권한 재조임 — 등재 인스턴스 운영자만 (#716, 2026-07-24, 576 후속 집행)
+
+- 조치: MOMO-576의 any-owner/admin 폴백 제거(instance-global 표면의 멀티WS 크로스테넌트 통제 누출). 새 인가 = **platform:read scope OR 등재 인스턴스 운영자**(owner/admin + `email_verified` + `PLATFORM_ADMIN_EMAILS` 등재, 요청 시점 DB 판정 — 재로그인 불필요).
+- scope-only가 아닌 이유: `platform:read` 발급은 `platformAdminSecret` 로그인(MOMO-300 상수시간 비교)이 전제인데 macOS 앱 로그인에 그 필드가 없어, scope 전용 조임은 운영자 GUI를 영구 403으로 만든다. allowlist는 배포 env 통제자=인스턴스 운영자라는 ADR-0004 증보1 D3의 신뢰 경계와 일치.
+- 분리 유지: per-WS 표면(`WorkHostEngineRoutes`, RLS-scoped)은 owner/admin 인가 유지 — instance-global ⇒ 등재 운영자, per-workspace ⇒ owner/admin.
+- 배선: e2e compose `PLATFORM_ADMIN_EMAILS` passthrough, `internal_alpha_stack.sh` 기본 성재 이메일 주입.
+- 검증: verifier 9관문 PASS — **동일 owner 롤 미등재 신원(WSOWNER) GET/PUT/DELETE 403 회귀 단정 신설**(폴백 제거 증명) + 등재 운영자 전체 왕복·마스킹·RLS·평문 비유출 유지. server 16 tests(매트릭스 2벌). PR #717→track/engine→#718→main.
+
+## MOMO-576 provider link 권한을 owner/admin에 개방 (#700, 2026-07-24, ADR-0004 증보1 D3) — 후속 집행됨(583)
 
 - 결함: MOMO-572 `ProviderLinkRoutes.requireOperator`가 `platform:read` scope만 요구해, owner의 일반 로그인 토큰(그 scope는 `PLATFORM_ADMIN_EMAILS`로만 발급)이 403 — 성재(owner)가 MOMO-574 'AI 연결' GUI를 열면 GET부터 403이라 GUI가 안 열렸다.
 - 수정: `requireOperator`를 async 인스턴스 메서드로 바꿔 **platform:read scope OR 워크스페이스 owner/admin role**을 허용한다. platform scope가 있으면 DB 조회 없이 통과(플랫폼 admin 경로), 없으면 principal 자기 워크스페이스의 membership role을 `WorkspaceAuthorization.activeRole`로 조회해 `owner||admin`(`WorkspaceRole.isAdmin`)이면 통과·아니면 403. 판정 로직은 순수 함수 `isOperatorAuthorized(kind:scopes:workspaceRole:)`로 분리해 DB 없이 유닛 테스트(owner/admin 200·member/guest 403·platform 200·비human 403).
 - RLS 정합: role 조회는 별도 `withTenantConnection`(app.workspace_id만 세팅, provider_link_admin 미세팅)에서 수행 — **권한 판정 완료 후에야** GET/test는 `withProviderLinkReadConnection`, PUT/DELETE는 `withProviderLinkTransaction`로 provider_link_admin GUC를 열어 행을 unlock한다("권한 판정 → GUC 세팅" 순서 유지).
 - 부수 버그 수정: PUT/DELETE가 `InviteRoutes.workspaceID(context,principal:)`(=`:ws` path param 요구)를 호출했는데 `/v1/provider/link`엔 `:ws`가 없어 항상 실패했을 경로 — 인스턴스-글로벌이라 audit 귀속 워크스페이스를 `principal.workspaceID`로 직접 사용(원 함수도 검증 후 `principal.workspaceID`만 반환했으므로 등가·안전).
 - 불변식: ADR-0004 OAuth/원본키 비유입·bearer write-only·마스킹 그대로. GUI 입력 필드/DTO closed-world 불변.
-- **후속 티켓 후보 (성재 승인 대기)**: provider_link는 instance-global(workspace_id 없음)이라 워크스페이스 owner/admin가 바꾸면 인스턴스 전 워크스페이스의 provider 해석에 영향. 내부 단일-WS 테스트엔 owner/admin 개방이 타당하나, **멀티 워크스페이스/공개 단계 전에 `platform:read`-only로 재조임** 필요(ADR-0117 D3 "워크스페이스 설정"은 owner-only인 반면 본 개방은 owner+admin이므로 정책 정합도 함께 결정). 코드 주석에 WARNING 성문화.
+- ~~후속 티켓 후보~~ → **집행 완료(2026-07-24, MOMO-583/#716)**: 등재 인스턴스 운영자 allowlist로 재조임(위 583 항목). 원안의 platform:read-only는 macOS 로그인 경로 부재로 변형 채택.
 - 검증: `swift build` + `swift test --filter ProviderLinkTests`(순수 유닛, DB 없음) — 라이브 200/403 REST 왕복은 orchestrator(포트 28260s)로 handoff, runtime-unverified.
 
 ## MOMO-571 momo-ops workspace-create + role 능력 매트릭스 감사 (#687, 2026-07-23, ADR-0117)

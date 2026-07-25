@@ -140,8 +140,11 @@ enum AppBuilder {
             allowLocalLoopback: config.agentProvider.allowLocalLoopback,
             providerLinkMasterKey: config.providerLinkMasterKey,
             envProvider: config.agentProvider,
-            healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger)
+            healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger),
+            platformAdminEmails: config.platformAdminEmails
         ).add(to: authed)
+        // MOMO-582 / ADR-0114 증보1 B: per-workspace work host engine selection.
+        WorkHostEngineRoutes(db: db).add(to: authed)
         let allowAgentCardHTTP = config.momoEnvironment.lowercased() == "local"
             && ProcessInfo.processInfo.environment["MOMO_AGENT_CARD_ALLOW_HTTP"] == "1"
         AgentCardRoutes(
@@ -162,7 +165,9 @@ enum AppBuilder {
             )
         ).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
-        WorkspaceRoutes(db: db).add(to: authed)
+        WorkspaceRoutes(
+            db: db, platformAdminEmails: config.platformAdminEmails
+        ).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         MemberLifecycleRoutes(db: db).add(to: authed)

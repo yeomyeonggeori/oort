@@ -6,19 +6,25 @@ import PostgresNIO
 /// MOMO-572 / ADR-0004 증보 1 — operator REST for the instance-global provider
 /// link (the DB override of the boot-time HERMES_* env trio).
 ///
-/// Authorization (MOMO-576 / ADR-0004 증보1 D3 "설정 권한 = 서버 운영자/owner"):
-/// a human principal that is EITHER a platform operator (`platform:read` scope —
-/// the cross-tenant operator path) OR an owner/admin of its own workspace. The
-/// workspace-role fallback exists because an owner's ordinary login token does
-/// NOT carry `platform:read` (that scope is gated by `PLATFORM_ADMIN_EMAILS`), so
-/// 성재(owner) was getting 403 when opening the "AI 연결" GUI (MOMO-574).
+/// Authorization (MOMO-583, tightening the MOMO-576 opening): provider_link is
+/// instance-global (no workspace_id) — whoever edits it changes provider
+/// resolution for EVERY workspace on the instance. The MOMO-576 "any workspace
+/// owner/admin" fallback was therefore a cross-tenant control leak the moment
+/// ADR-0117 multi-WS opened, and is removed. This surface now requires either:
+///   * the `platform:read` cross-tenant scope (MOMO-300 admin-secret login), or
+///   * an **instance operator**: a workspace owner/admin whose VERIFIED email is
+///     listed in `PLATFORM_ADMIN_EMAILS`, checked at request time against the DB.
+/// The allowlist path exists because the macOS app's login cannot send the
+/// platform-admin secret (no such field), so a scope-only rule would lock the
+/// operator out of the "AI 연결" GUI entirely. The env allowlist is controlled
+/// by whoever operates the deployment — exactly the trust boundary intended by
+/// ADR-0004 증보1 D3 ("설정 권한 = 서버 운영자"). Other workspaces' owners are
+/// not listed and get 403.
 ///
-/// WARNING — provider_link is instance-global (no workspace_id). A workspace
-/// owner/admin who edits it therefore changes provider resolution for EVERY
-/// workspace on the instance. That is acceptable for the internal single-
-/// workspace test build (one WS, 성재=owner) but MUST be re-tightened to
-/// `platform:read`-only before any multi-workspace / public exposure. Follow-up:
-/// STATUS "MOMO-576 후속 (멀티 WS provider-link 권한 조임)".
+/// Per-WORKSPACE operator surfaces (e.g. `WorkHostEngineRoutes`, RLS-scoped)
+/// still accept any workspace owner/admin via `isOperatorAuthorized` — the split
+/// is deliberate: instance-global ⇒ platform scope or listed instance operator,
+/// per-workspace ⇒ owner/admin.
 ///
 /// ADR-0004 invariants enforced here:
 ///   * The bearer is accepted only in the PUT body and stored as AES-GCM
@@ -33,6 +39,8 @@ struct ProviderLinkRoutes: Sendable {
     let providerLinkMasterKey: String
     let envProvider: AgentProviderConfig
     let healthProbe: any ProviderHealthProbing
+    /// MOMO-583: lowercased instance-operator allowlist (PLATFORM_ADMIN_EMAILS).
+    let platformAdminEmails: [String]
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/provider/link", use: get)
@@ -199,15 +207,15 @@ struct ProviderLinkRoutes: Sendable {
 
     // MARK: - Helpers
 
-    /// Pure authorization decision for the provider-link operator surface,
-    /// separated from the DB role lookup so the full matrix is unit-testable
-    /// without Postgres. A caller is an operator iff it is a human that either
-    /// carries the `platform:read` cross-tenant scope, or is an owner/admin of
-    /// its own workspace (ADR-0004 증보1 D3; owner||admin == `WorkspaceRole.isAdmin`).
+    /// Pure authorization decision for PER-WORKSPACE operator surfaces
+    /// (`WorkHostEngineRoutes` and siblings whose data is RLS-scoped to one
+    /// workspace): a human that either carries the `platform:read` cross-tenant
+    /// scope or is an owner/admin of its own workspace.
     ///
-    /// `workspaceRole` is the principal's role on its home workspace, or nil when
-    /// no active membership exists. It is only consulted when `platform:read` is
-    /// absent, so the platform path never needs a DB lookup.
+    /// NOT used by provider_link itself since MOMO-583 — that surface is
+    /// instance-global and requires the platform scope
+    /// (`isProviderLinkOperatorAuthorized`). Kept here so the operator matrix
+    /// stays single-sourced for the per-workspace consumers.
     static func isOperatorAuthorized(
         kind: AuthPrincipalKind,
         scopes: [String],
@@ -218,40 +226,76 @@ struct ProviderLinkRoutes: Sendable {
         return workspaceRole?.isAdmin ?? false
     }
 
+    /// Pure authorization decision for the INSTANCE-GLOBAL provider-link surface
+    /// (MOMO-583): human AND (`platform:read` scope OR listed instance operator).
+    /// A listed instance operator is a workspace owner/admin whose VERIFIED email
+    /// appears in `PLATFORM_ADMIN_EMAILS` — an arbitrary workspace owner/admin
+    /// (the MOMO-576 fallback) no longer qualifies.
+    ///
+    /// `verifiedEmail` must be nil unless `human.email_verified` is true; it is
+    /// compared lowercased against the (already-lowercased) configured list.
+    static func isProviderLinkOperatorAuthorized(
+        kind: AuthPrincipalKind,
+        scopes: [String],
+        workspaceRole: WorkspaceRole?,
+        verifiedEmail: String?,
+        platformAdminEmails: [String]
+    ) -> Bool {
+        guard kind == .human else { return false }
+        if scopes.contains("platform:read") { return true }
+        guard workspaceRole?.isAdmin ?? false else { return false }
+        guard let verifiedEmail else { return false }
+        return platformAdminEmails.contains(verifiedEmail.lowercased())
+    }
+
     /// Authorizes the provider-link operator surface (see the type doc comment).
     ///
-    /// The workspace-role fallback lookup runs in its own tenant transaction —
-    /// `app.workspace_id` is set but `app.provider_link_admin` is NOT — so the
-    /// authorization decision fully completes with provider_link still RLS-locked.
-    /// Only after this returns does a caller open
-    /// `withProviderLinkTransaction`/`withProviderLinkReadConnection`, preserving
-    /// the "권한 판정 → GUC 세팅" ordering (D3 정합).
+    /// The allowlist lookup runs in its own tenant transaction — `app.workspace_id`
+    /// is set but `app.provider_link_admin` is NOT — so the authorization decision
+    /// fully completes with provider_link still RLS-locked. Only after this
+    /// returns does a caller open `withProviderLinkTransaction`.
     func requireOperator(_ context: AppRequestContext) async throws -> AuthPrincipal {
         let principal = try context.requirePrincipal()
         guard principal.kind == .human else {
             throw HTTPError(.forbidden, message: "human operator required")
         }
-        // Platform operator scope authorizes without any workspace-role lookup.
-        if Self.isOperatorAuthorized(
-            kind: principal.kind, scopes: principal.scopes, workspaceRole: nil
-        ) {
-            return principal
-        }
-        // Fallback: owner/admin of the principal's own workspace.
-        let role = try await db.withTenantConnection(workspaceID: principal.workspaceID) { conn in
-            try await WorkspaceAuthorization.activeRole(
+        // Platform scope authorizes without any DB lookup.
+        if principal.scopes.contains("platform:read") { return principal }
+        // Listed-instance-operator path: role + verified email, both RLS-scoped.
+        let (role, verifiedEmail) = try await db.withTenantConnection(
+            workspaceID: principal.workspaceID
+        ) { conn in
+            let role = try await WorkspaceAuthorization.activeRole(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: principal.workspaceID,
                 memberID: principal.memberID
             )
+            var email: String?
+            let rows = try await conn.query(
+                """
+                SELECT email FROM human
+                WHERE member_id = \(principal.memberID)
+                  AND workspace_id = \(principal.workspaceID)
+                  AND email_verified = true
+                """,
+                logger: db.logger
+            )
+            for try await row in rows {
+                email = try row.decode(String.self)
+            }
+            return (role, email)
         }
-        guard Self.isOperatorAuthorized(
-            kind: principal.kind, scopes: principal.scopes, workspaceRole: role
+        guard Self.isProviderLinkOperatorAuthorized(
+            kind: principal.kind,
+            scopes: principal.scopes,
+            workspaceRole: role,
+            verifiedEmail: verifiedEmail,
+            platformAdminEmails: platformAdminEmails
         ) else {
             throw HTTPError(
                 .forbidden,
-                message: "platform:read scope or workspace owner/admin required"
+                message: "platform:read scope or listed instance operator required"
             )
         }
         return principal
@@ -293,8 +337,8 @@ struct ProviderLinkRoutes: Sendable {
                \(viaTokenID),
                jsonb_build_object(
                  'schema', 'momo.provider_link.audit.v1',
-                 'mode', \(mode),
-                 'endpoint_label', \(endpointLabel),
+                 'mode', \(mode)::text,
+                 'endpoint_label', \(endpointLabel)::text,
                  'bearer_configured', \(bearerConfigured)
                ))
             """,

@@ -31,6 +31,9 @@ struct JoinRoutes: Sendable {
         let password = try Self.normalizedPassword(dto.password)
         let timeZone = try Self.normalizedTimeZone(dto.timeZone)
         let userAgent = request.headers[.userAgent]
+        let greetingLanguage = OnboardingGreeting.Language.from(
+            acceptLanguage: request.headers[.acceptLanguage]
+        )
 
         let lookup = try await findInvite(code: code)
         try Self.throwIfInviteStatusFailed(lookup.status)
@@ -162,6 +165,18 @@ struct JoinRoutes: Sendable {
         }
 
         let memberID = try UUID(uuidString: joined.member.id).unwrapJoinInternal()
+
+        // W-O3 (MOMO-588): the workspace agent greets the new member through the
+        // canonical write path. Best-effort and idempotent per (workspace, member):
+        // it never throws, so a greeting problem cannot break a successful join.
+        await OnboardingGreeting.post(
+            db: db,
+            logger: db.logger,
+            workspaceID: lookup.workspaceID,
+            newMember: joined.member,
+            language: greetingLanguage
+        )
+
         let scopes = ["messages:write", "messages:read"]
         let access = try await jwt.signAccess(
             memberID: memberID,

@@ -690,6 +690,21 @@ struct UpdateWorkspaceRequest: Decodable {
     let expectedUpdatedAtMs: Int64
 }
 
+/// POST /v1/workspaces request body (MOMO-589 / ADR-0117 §D1-A).
+struct CreateWorkspaceRequest: Decodable {
+    let slug: String
+    let name: String
+}
+
+/// POST /v1/workspaces success body (201). `workspaceId` is the operator's
+/// handle for the freshly provisioned tenant.
+struct CreateWorkspaceResponse: ResponseEncodable, Decodable {
+    let schema: String
+    let workspaceId: String
+    let slug: String
+    let name: String
+}
+
 struct WorkspaceDTO: ResponseEncodable, Decodable {
     let id: String
     let slug: String

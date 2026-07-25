@@ -82,5 +82,24 @@ Apache-2.0, MIT, ISC, BSD-2/3-Clause, 0BSD, BlueOak-1.0.0, Python-2.0 및
 `(AFL-2.1 OR BSD-3-Clause)`로만 구성됨을 MOMO-538에서 확인했다. GPL/AGPL/
 SSPL/BUSL 항목은 없다.
 
+## 워크 호스트 사이드카 동봉 엔진 (WH-1 / MOMO-579, ADR-0114 증보1)
+> `infra/prod/docker/workhost.Dockerfile`로 빌드하는 opt-in 사이드카 이미지에만
+> 동봉된다(기본 스택 미포함, `--profile workhost`). 각 엔진 바이너리는 별도
+> 이미지 레이어로 분리하고 upstream LICENSE를 `/usr/share/licenses/<engine>/`에
+> 함께 동봉한다. **Codex는 미동봉** — `codex-local` 엔진은 사용자 호스트의 자체
+> Codex 설치에 연결하며 ChatGPT/OAuth 자격증명 경계는 momo 밖에 남는다(ADR-0004).
+
+| 엔진 | 라이선스 | 배포 | 사용처 |
+|---|---|---|---|
+| opencode | MIT | GitHub release 단일 바이너리 (`sst/opencode`) | 기본 엔진, HTTP+SSE(`opencode serve`) — OpenCodeHTTPAdapter |
+| goose | Apache-2.0 | GitHub release 단일 바이너리 (`block/goose`) | ACP 엔진(stdio) — ACPEngineAdapter |
+| Codex CLI | (미동봉) | 사용자 호스트 설치 | 로컬 연결 전용(app-server JSON-RPC/stdio) — CodexJSONRPCAdapter. 이미지에 포함하지 않음 |
+
+opencode(MIT)·goose(Apache-2.0) 모두 permissive이며 AGPL/SSPL/BUSL 백본 금지
+원칙에 부합한다. 이미지 빌드 시 엔진 버전/자산 URL·per-arch 체크섬은 오케스트레이터가
+확정하여 핀(supply-chain 하드닝)한다.
+
 ## Apache 2.0 NOTICE 집계
 - 각 Apache-2.0 의존성의 NOTICE 파일 내용을 리포 루트 `NOTICE`에 집계(있는 것만).
+- goose(Apache-2.0) 사이드카 동봉 시 upstream NOTICE(있으면)를
+  `/usr/share/licenses/goose/`에 함께 포함한다.

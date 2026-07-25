@@ -25,6 +25,9 @@ x-e2e-common-env: &e2e-common-env
   # MOMO-572: outbound webhook 및 provider_link bearer 암호화 마스터키(서로·JWT와 분리).
   OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:-change-me-outbound-webhook-key}
   PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:-change-me-provider-link-key}
+  # MOMO-583: provider_link REST는 platform:read 전용 — 이 목록의 이메일로 로그인한
+  # 토큰만 그 scope를 받는다(verifier·내부 알파 스택이 운영자 이메일을 주입).
+  PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
 
 x-source-mount: &source-mount
   type: bind

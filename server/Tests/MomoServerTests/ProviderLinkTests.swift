@@ -166,12 +166,12 @@ final class ProviderLinkTests: XCTestCase {
         XCTAssertEqual(dto.mode, "external-hermes")
     }
 
-    // MARK: - Operator authorization matrix (MOMO-576 / ADR-0004 증보1 D3)
+    // MARK: - Operator authorization matrix (MOMO-576 → MOMO-583 tightening)
 
-    /// The pure authorization decision: platform:read OR workspace owner/admin,
-    /// human-only. The live 200/403 HTTP roundtrip stays orchestrator-owned
-    /// (runtime-unverified) because the role fallback needs Postgres.
-    func testOperatorAuthorizationMatrix() {
+    /// Per-WORKSPACE operator matrix (`isOperatorAuthorized`) — still consumed by
+    /// RLS-scoped surfaces like WorkHostEngineRoutes: platform:read OR workspace
+    /// owner/admin, human-only.
+    func testPerWorkspaceOperatorAuthorizationMatrix() {
         typealias R = ProviderLinkRoutes
         // platform:read human — authorized regardless of workspace role.
         XCTAssertTrue(R.isOperatorAuthorized(kind: .human, scopes: ["platform:read"], workspaceRole: nil))
@@ -187,6 +187,48 @@ final class ProviderLinkTests: XCTestCase {
         // non-human principals are never operators, even with the scope or owner role.
         XCTAssertFalse(R.isOperatorAuthorized(kind: .agent, scopes: ["platform:read"], workspaceRole: .owner))
         XCTAssertFalse(R.isOperatorAuthorized(kind: .workHost, scopes: ["platform:read"], workspaceRole: .owner))
+    }
+
+    /// INSTANCE-GLOBAL provider-link matrix (MOMO-583): platform:read scope OR a
+    /// listed instance operator (workspace owner/admin + verified email in
+    /// PLATFORM_ADMIN_EMAILS). An arbitrary workspace owner/admin (the MOMO-576
+    /// fallback) no longer authorizes this surface.
+    func testProviderLinkOperatorRequiresScopeOrListedInstanceOperator() {
+        typealias R = ProviderLinkRoutes
+        let listed = ["op@momo.local"]
+        // platform:read — authorized regardless of role/email.
+        XCTAssertTrue(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: ["platform:read"], workspaceRole: nil,
+            verifiedEmail: nil, platformAdminEmails: []))
+        // Listed instance operator: owner/admin + verified listed email.
+        XCTAssertTrue(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: [], workspaceRole: .owner,
+            verifiedEmail: "op@momo.local", platformAdminEmails: listed))
+        XCTAssertTrue(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: [], workspaceRole: .admin,
+            verifiedEmail: "OP@momo.local", platformAdminEmails: listed)) // case-insensitive
+        // MOMO-576 regression: owner/admin whose email is NOT listed — 403.
+        XCTAssertFalse(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: [], workspaceRole: .owner,
+            verifiedEmail: "other-owner@momo.local", platformAdminEmails: listed))
+        // Listed email but unverified (nil) or without owner/admin role — 403.
+        XCTAssertFalse(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: [], workspaceRole: .owner,
+            verifiedEmail: nil, platformAdminEmails: listed))
+        XCTAssertFalse(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: [], workspaceRole: .member,
+            verifiedEmail: "op@momo.local", platformAdminEmails: listed))
+        // Empty allowlist closes the fallback entirely.
+        XCTAssertFalse(R.isProviderLinkOperatorAuthorized(
+            kind: .human, scopes: [], workspaceRole: .owner,
+            verifiedEmail: "op@momo.local", platformAdminEmails: []))
+        // Non-human principals are never provider-link operators.
+        XCTAssertFalse(R.isProviderLinkOperatorAuthorized(
+            kind: .agent, scopes: ["platform:read"], workspaceRole: .owner,
+            verifiedEmail: "op@momo.local", platformAdminEmails: listed))
+        XCTAssertFalse(R.isProviderLinkOperatorAuthorized(
+            kind: .workHost, scopes: ["platform:read"], workspaceRole: .owner,
+            verifiedEmail: "op@momo.local", platformAdminEmails: listed))
     }
 
     // MARK: - mode parsing

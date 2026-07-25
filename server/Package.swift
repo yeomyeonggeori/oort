@@ -54,7 +54,10 @@ let package = Package(
         ),
         .testTarget(
             name: "MomoServerTests",
-            dependencies: ["MomoServer"],
+            dependencies: [
+                "MomoServer",
+                .product(name: "Hummingbird", package: "hummingbird"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]
