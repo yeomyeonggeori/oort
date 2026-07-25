@@ -149,10 +149,27 @@
 }
 
 /* Two-pane shell geometry as a named utility, so no component needs an
- * arbitrary grid-cols-[240px_1fr] value. */
+ * arbitrary grid-cols-[240px_1fr] value.
+ *
+ * The shell is the window, not a document (MOMO-610): it is exactly as tall as
+ * the viewport and never taller, so a long route can never push the sidebar off
+ * screen. Two things enforce that. The single row is `minmax(0, 1fr)` rather
+ * than the implicit `auto`, so the track is a fraction of a definite height
+ * instead of being sized from its content; and `overflow: clip` is the hard
+ * boundary — `clip` and not `hidden` because a hidden box is still a scroll
+ * container, and focusing something below the fold would scroll the sidebar out
+ * of view with no scrollbar to bring it back.
+ *
+ * Panes inside are then responsible for their own scrolling. Anything that
+ * grows must sit in a `min-h-0 flex-1 overflow-y-auto` box; nothing may rely on
+ * the document scrolling for it. */
 @utility app-shell {
   display: grid;
   grid-template-columns: var(--w-sidebar) 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  block-size: 100%;
+  min-block-size: 0;
+  overflow: clip;
 }
 
 /* Determinate download progress (설정 > 업데이트, MOMO-606). A native

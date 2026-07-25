@@ -211,7 +211,9 @@ export function InviteSection({
           hint="이 링크로 참여할 수 있는 사람 수입니다."
         >
           {/* A count is not a URL: it gets the named narrow pane, not the
-              full form width. */}
+              full form width. max-w rather than a flat width so a window
+              narrower than the pane shrinks the field instead of pushing a
+              sideways scroll into the settings body (MOMO-610). */}
           <Input
             id="invite-max-uses"
             name="maxUses"
@@ -220,7 +222,7 @@ export function InviteSection({
             max={10000}
             value={maxUses}
             onChange={(e) => setMaxUses(e.target.value)}
-            className="w-pane"
+            className="w-full max-w-pane"
           />
         </Field>
 

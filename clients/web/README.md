@@ -26,7 +26,7 @@ src/app/          # App shell (realtime rail + sidebar frame), routes, ⌘K swit
 src/features/     # auth, sidebar, workspace reads, timeline, chat, inbox/activity/settings
 src/design/       # tokens.css (여명 placeholder palette) + shadcn/ui primitives
 src/lib/          # api (REST, contract-faithful), realtime (Centrifugo), env
-gates/            # measurement runners (seq / resume / scroll+coldstart / inject)
+gates/            # measurement runners (seq / resume / scroll+coldstart / shell layout / inject)
 e2e/              # smoke.mjs: login → channel → timeline → send → live receipt
 ```
 
@@ -167,6 +167,21 @@ npm run preview -- --host 127.0.0.1 # then, in another shell:
 node gates/gate-scroll.mjs          # GATE 3 (+ web cold start), headless Chromium
 ```
 
+The shell layout gate needs neither creds nor a backend (it mocks `/v1` the way
+`scripts/capture-screens.mjs` does) and brings up its own preview server:
+
+```sh
+npm run build && npm run gate:shell      # SHELL_GATE_SCHEME=light for the paper scheme
+```
+
+It asserts that the window never becomes a scrolling document: on every
+signed-in route at 1280x800 / 900x600 / 760x480 the document scroll offset stays
+0, the sidebar nav stays at its resting y, `.app-shell` is not itself a scroll
+container, a long 설정 section still scrolls its own body pane down to the last
+control, the composer stays inside the window, and the 1k-row timeline still
+windows to ~24 DOM rows. The connect screen is checked the other way round: it
+has no shell, so a short window must still reach the sign-in button.
+
 | Gate | Result |
 |---|---|
 | **seq order** | PASS — 121 msgs fetched, folded (shuffled to mimic out-of-order realtime), strictly ascending, 0 gaps in range |
@@ -175,6 +190,7 @@ node gates/gate-scroll.mjs          # GATE 3 (+ web cold start), headless Chromi
 | **cold start (web)** | FCP 72 ms · time-to-first-row 181 ms (production build) |
 | **cold start (desktop, release)** | 537 ms launch → WebKit content process (< 2 s gate) |
 | **idle memory (desktop, release)** | ~196 MB (main 98.8 + WebContent 48.7 + GPU 33.0 + Networking 15.4); debug ~230 MB — under the 400 MB gate |
+| **shell layout** (MOMO-610) | PASS — 31 checks, 3 window sizes × 8 routes: document overflow 0 everywhere, sidebar nav held at y=45. Fails 10 checks on the pre-fix bundle (설정 > 멤버와 초대 pushed the nav to y=-487 at 1280x800, y=-1163 at 760x480) |
 
 ## Spike findings (carry into P1/P2)
 
