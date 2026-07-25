@@ -6,6 +6,7 @@ import {
   Inbox,
   Lock,
   MessageSquare,
+  Plus,
   Search,
   Settings,
   SquarePen,
@@ -35,6 +36,8 @@ import {
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
+import { canCreateChannel } from "@/features/channels/model";
+import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -151,6 +154,12 @@ export function Sidebar({
   // real agent activity (the ?stress= path renames the channel header for the
   // same reason).
   const fixtureMode = agentTurnFixtureMode();
+
+  // Only an owner/admin can create one (ChannelRoutes.requireWorkspaceAdmin),
+  // so a plain member is told who can instead of being handed a + that always
+  // ends in 403. That is the dead end this ticket removes, not a new one.
+  const openCreateChannel = useOpenCreateChannel();
+  const canCreate = canCreateChannel(selfMember?.role);
 
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
@@ -284,7 +293,23 @@ export function Sidebar({
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
             </ul>
 
-            <SidebarSection title="채널">
+            <SidebarSection
+              title="채널"
+              action={
+                canCreate ? (
+                  <button
+                    type="button"
+                    onClick={openCreateChannel}
+                    aria-label="새 채널 만들기"
+                    title="새 채널 만들기"
+                    data-testid="new-channel"
+                    className="flex size-6 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    <Plus className="size-4" />
+                  </button>
+                ) : undefined
+              }
+            >
               {channelsQuery.isLoading && <SkeletonRows rows={4} />}
               {channelsQuery.error && (
                 <InlineBanner
@@ -295,15 +320,23 @@ export function Sidebar({
                 />
               )}
               {!channelsQuery.isLoading && !channelsQuery.error && channels.length === 0 && (
-                <EmptyInvite
-                  headline="첫 채널을 만들어 팀을 시작하세요."
-                  actions={
-                    <Button size="sm" asChild>
-                      <Link to="/settings">채널 만들기</Link>
-                    </Button>
-                  }
-                  testId="channels-empty"
-                />
+                canCreate ? (
+                  <EmptyInvite
+                    headline="첫 채널을 만들어 팀을 시작하세요."
+                    actions={
+                      <Button size="sm" onClick={openCreateChannel}>
+                        채널 만들기
+                      </Button>
+                    }
+                    testId="channels-empty"
+                  />
+                ) : (
+                  <EmptyInvite
+                    headline="아직 채널이 없습니다."
+                    detail="채널은 워크스페이스 오너나 관리자가 만들 수 있습니다."
+                    testId="channels-empty"
+                  />
+                )
               )}
               {channels.map(rowFor)}
             </SidebarSection>

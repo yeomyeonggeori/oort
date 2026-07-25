@@ -172,6 +172,16 @@
   overflow: clip;
 }
 
+/* Dialog panel measure (R-1 §5 다이얼로그, MOMO-614). A dialog sits one 32px
+ * step below the top of the window, so its own maximum height is the window
+ * minus that step twice. The rhythm scale has no viewport-relative step and
+ * max-h-[calc(...)] does not compile, so the measure gets a NAME, exactly as
+ * app-shell does for the two-pane grid. The panel body scrolls inside it; the
+ * document must never scroll (MOMO-610). */
+@utility dialog-panel {
+  max-block-size: calc(100dvh - var(--spacing-8) * 2);
+}
+
 /* Determinate download progress (설정 > 업데이트, MOMO-606). A native
  * <progress> rather than a div with a width: CSP is style-src 'self', so the
  * only way to draw a bar whose length is data is to let the platform control do

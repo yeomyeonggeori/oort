@@ -10,6 +10,7 @@ import {
 import { SessionProvider } from "@/app/session";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
+import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
@@ -92,12 +93,19 @@ export function AppShell({
        * the window and the whole page scrolled, carrying the sidebar off screen.
        * With the floor at zero the route is handed the window height and has to
        * scroll its own pane. */}
-      <div className="app-shell">
-        <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
-        <main className="flex min-h-0 min-w-0">
-          <Outlet />
-        </main>
-      </div>
+      {/* 채널 만들기 is offered from three places (사이드바 헤더 +, 사이드바 빈
+       * 상태, 빈 워크스페이스) and all three open ONE dialog owned here, so the
+       * form has one piece of state and no entry point can go stale (MOMO-614).
+       * It wraps the shell rather than sitting beside it because the dialog is
+       * portalled anyway and the sidebar needs the verb. */}
+      <CreateChannelProvider>
+        <div className="app-shell">
+          <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
+          <main className="flex min-h-0 min-w-0">
+            <Outlet />
+          </main>
+        </div>
+      </CreateChannelProvider>
       {/* Global keyboard paths that must work from any route (R-1 §2). */}
       <InboxHotkeys />
       {/* Renders nothing; watches the rail so a mention or an approval request

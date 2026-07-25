@@ -426,6 +426,54 @@ export async function listChannels(workspaceId: string): Promise<Channel[]> {
   return res.channels;
 }
 
+/** Channel membership row, as the write endpoints return it. */
+export interface ChannelMembership {
+  id: string;
+  workspaceId: string;
+  channelId: string;
+  memberId: string;
+  role: MembershipRole;
+  joinedAtMs: number;
+  leftAtMs?: number;
+}
+
+/**
+ * Result of POST /v1/workspaces/{ws}/channels (server CreateChannelResponse).
+ * The creator is inserted as `owner` of the new channel in the same
+ * transaction, so the caller is already a member when this resolves.
+ */
+export interface CreatedChannel {
+  channel: Channel;
+  creatorMembership: ChannelMembership;
+}
+
+export interface CreateChannelInput {
+  kind: "public" | "private";
+  /**
+   * Already trimmed and lowercased by the caller. The server normalises again
+   * and rejects anything outside `[a-z0-9]` plus hyphen/underscore, so the
+   * client applies the same rule up front instead of showing an English 400.
+   */
+  name: string;
+  /** Optional; omitted rather than sent empty, which the server reads as null. */
+  topic?: string;
+}
+
+/**
+ * Create a channel. Requires workspace owner/admin (ChannelRoutes guards it),
+ * answers 409 when an unarchived non-DM channel already carries the name
+ * case-insensitively, and 201 with the created row otherwise.
+ */
+export function createChannel(
+  workspaceId: string,
+  input: CreateChannelInput
+): Promise<CreatedChannel> {
+  return request<CreatedChannel>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
 /**
  * Result of POST /v1/workspaces/{ws}/dms. The call is idempotent per participant
  * pair: it creates the channel on the first call (201) and returns the existing

@@ -155,6 +155,15 @@ sidebar and `<main>`; the ⌘K switcher is a portalled dialog and stays outside
 the grid. Inside the sidebar column the workspace rail is `w-8` (32px), so the
 channel list keeps the remaining 208px.
 
+`dialog-panel` is the second named geometry utility (MOMO-614): a dialog sits one
+32px step below the top of the window, so its own ceiling is
+`calc(100dvh - var(--spacing-8) * 2)`. The rhythm scale has no viewport-relative
+step and `max-h-[calc(...)]` does not compile, so the measure gets a name for the
+same reason `app-shell` does. The panel is a flex column whose middle box carries
+`min-h-0 overflow-y-auto`: at 760x480 the form scrolls inside the panel while the
+title and the action row stay put, and the document still does not scroll
+(MOMO-610).
+
 ## 5b. Motion utilities
 
 There is exactly one, and it is feedback rather than decoration: `caret-stream`
