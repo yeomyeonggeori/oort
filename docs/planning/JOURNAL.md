@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-25 (Fable P1 wave1 design-review 종결) · 웹판 첫 리뷰 사이클 2R PASS, Medium 전건 해소
+- **1R FAIL(Blocker2·High2)**: 리뷰어가 런타임 스크롤 프로브 자작 — B1 프리펜드 앵커 소실(R-1 §3 firstItemIndex 계약 미이행), B2 Tauri 타이틀 em-dash, H3 로그인 매달린 카피+내부 어휘, H4 디바이더 직후 무기명 렌더.
+- **수정 라운드(Opus 5)**: 10건 전부 반영 + **리뷰 프로브 자체의 결함 2건 교정**(?before 0회·프로그램적 scrollTop 점프) + baseline A/B 실측(앵커 이탈 vs 드리프트 -1~-3px anchorHeld). 리뷰 판정의 증상 서술 오류 정정. 엔진 리스크 플래그(nextBefore) → 오케스트레이터 실서버 확인 정상(209) 해제.
+- **2R PASS(Blocker0·High0)**: B1(교정 프로브 독립 재실행 pxDrift -3px)·B2·H3·H4 RESOLVED. 2R이 픽셀 스캔으로 신규 발견: N12 마커가 위치(-8px) 문제로 **0픽셀 렌더** → 레일 가장자리 앵커로 수리 + tokens.md marker 축 동기화(같은 커밋 규칙 준수). PR #754·#755.
+- wave1 최종: track/uxui = 748+749+750+리뷰 2사이클 완결. 남은 deferred: M9 세션 영속·M10 낙관 삽입(wave2), RuntimeBadge 스파이크 문구(정식 빌드 전 제거). **다음: main 병합 성재 승인 → wave2(R-1 2·4·5장: 인박스·에이전트 카드·설정 셸)**.
+
+
 ## 2026-07-25 (Fable P1 wave1 완주 — 파운데이션·여명 토큰·코어, Opus 5 전환) · track/uxui 랜딩
 - **Opus 5 확정**: 하네스 별칭 `opus`=claude-opus-5 (프로브 실측). 노트북 종료 2회 중단 → worktree 미커밋 진행분 diff-검토 재개 방식으로 무손실 복구(momowebqa는 restart=unless-stopped로 생존).
 - **748 승격**(PR #751): web-spike→clients/web·v0→web-legacy(git mv --follow 보존), 참조 30여곳 전수 갱신, 서빙/배포는 의도적으로 legacy 유지(parity 게이트 전). 빌드 3종 실증.
