@@ -24,18 +24,31 @@ use std::process::Command;
 /// are far below it; anything longer is not a link somebody typed.
 const MAX_URL_LEN: usize = 2_048;
 
-/// https only, no whitespace, no control or quoting characters.
+/// Characters that mean something to a command interpreter and NOTHING to a
+/// valid URL: RFC 3986 requires every one of them to be percent-encoded, so
+/// refusing them costs no real link.
+///
+/// The set is the reason the R1 list was half a guard. It stopped `&` and `|`
+/// but let `<`, `>` and `^` through, and `>` is the redirection operator: a
+/// launcher that reaches a shell would have written a file instead of opening a
+/// page. `%` is deliberately NOT here, because percent-encoding is the most
+/// common shape a real link arrives in; the Windows path below stops going
+/// through `cmd` instead, so there is no `%VAR%` expansion left to defend
+/// against.
+const SHELL_METACHARACTERS: [char; 7] = ['"', '\'', '&', '|', '<', '>', '^'];
+
+/// https only, no whitespace, no control characters, no shell metacharacters.
 ///
 /// The argument goes to `exec` as one argv entry, never through a shell, so this
-/// is defence in depth rather than the only guard. It still matters: on Windows
-/// the launcher IS a shell, and `https://` plus "no whitespace, no quotes" is
-/// what keeps that entry from becoming a second command.
+/// is defence in depth rather than the only guard. It still matters: this is the
+/// boundary where webview-supplied data becomes an OS process argument, and the
+/// launcher on the other side is a different program on every platform.
 fn is_openable(url: &str) -> bool {
     if url.len() > MAX_URL_LEN || !url.starts_with("https://") {
         return false;
     }
     !url.chars().any(|c| {
-        c.is_whitespace() || c.is_control() || c == '"' || c == '\'' || c == '&' || c == '|'
+        c.is_whitespace() || c.is_control() || SHELL_METACHARACTERS.contains(&c)
     })
 }
 
@@ -43,7 +56,13 @@ fn is_openable(url: &str) -> bool {
 ///
 /// `async` on purpose: a synchronous `#[tauri::command]` runs on the main
 /// thread, and waiting there on a child process would freeze the window for as
-/// long as `open` takes to answer.
+/// long as the launcher takes to answer.
+///
+/// The wait itself goes to `spawn_blocking`. `Command::status()` blocks the
+/// thread it is called on, and inside an async command that thread is an async
+/// runtime worker: R1 moved the wait off the main thread and parked a worker
+/// instead, which is a smaller version of the same bug (a slow `open` would
+/// stall unrelated commands sharing the pool).
 ///
 /// Errors are returned rather than swallowed. The card shows an inline failure
 /// with the address so the person can copy it, which is only possible if this
@@ -62,12 +81,16 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
         c
     };
 
+    // NOT `cmd /C start`. That path is a command interpreter, so the URL is
+    // parsed twice: `%…%` pairs expand as environment variables, which quietly
+    // corrupts exactly the percent-encoded links this product sends most often,
+    // and any metacharacter that slipped the filter above would be read as
+    // syntax. rundll32 is invoked through CreateProcess with the URL as a plain
+    // argument, so there is no second parse to defend.
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut c = Command::new("cmd");
-        // The empty string is `start`'s title argument; without it `start` reads
-        // the URL as the window title and opens nothing.
-        c.args(["/C", "start", ""]);
+        let mut c = Command::new("rundll32.exe");
+        c.arg("url.dll,FileProtocolHandler");
         c
     };
 
@@ -76,7 +99,11 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
 
     command.arg(&url);
 
-    match command.status() {
+    let status = tauri::async_runtime::spawn_blocking(move || command.status())
+        .await
+        .map_err(|error| format!("browser launcher did not run: {error}"))?;
+
+    match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(format!("browser launcher failed: {status}")),
         Err(error) => Err(format!("browser launcher failed: {error}")),
@@ -106,9 +133,25 @@ mod tests {
             "https://example.com/a&calc",
             "https://example.com/a|calc",
             "https://example.com/\"x\"",
+            // R2 M5: every one of these is a shell operator and none of them is
+            // legal unencoded in a URL.
+            "https://example.com/a>out.txt",
+            "https://example.com/a<in.txt",
+            "https://example.com/a^b",
         ] {
             assert!(!is_openable(url), "{url} must be refused");
         }
+    }
+
+    #[test]
+    fn accepts_the_percent_encoding_a_real_link_arrives_with() {
+        // The Windows launcher no longer goes through cmd, so `%` needs no
+        // filtering, and filtering it would have broken the common case: a
+        // branch name with a slash or a query value with a space.
+        assert!(is_openable(
+            "https://github.com/Dawn-kim-official/momo/tree/feat%2F803-artifact-cards"
+        ));
+        assert!(is_openable("https://example.com/search?q=momo%20diff%20card"));
     }
 
     #[test]

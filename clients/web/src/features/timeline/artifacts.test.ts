@@ -431,7 +431,7 @@ describe("commit and pull request link cards", () => {
     expect(link.rejectedHost).toBeUndefined();
   });
 
-  it("drops an over-long metadata value instead of truncating it", () => {
+  it("[R2-M6] cuts an over-long metadata value instead of hiding the row", () => {
     const link = asLink(
       msg({
         props: {
@@ -443,10 +443,82 @@ describe("commit and pull request link cards", () => {
         },
       })
     );
-    expect(link.branch).toBeUndefined();
-    expect(link.status).toBeUndefined();
-    expect(link.repository).toBeUndefined();
-    expect(link.title).toBe("풀 리퀘스트");
+    // The value is cut AT its ceiling, ellipsis included, and the cut is
+    // visible: dropping it removed the whole 저장소/브랜치 row from the card
+    // with nothing saying a row had gone missing.
+    expect(link.branch).toBe(`${"b".repeat(119)}…`);
+    expect(link.status).toBe(`${"s".repeat(79)}…`);
+    expect(link.repository).toBe(`${"r".repeat(159)}…`);
+    expect(link.title).toBe(`${"t".repeat(199)}…`);
+  });
+
+  it("never cuts a value that fits", () => {
+    const link = asLink(
+      msg({ props: { artifact_kind: "pr", branch: "b".repeat(120) } })
+    );
+    expect(link.branch).toBe("b".repeat(120));
+  });
+
+  it("cuts on code points, so an emoji is never split in half", () => {
+    const link = asLink(
+      msg({ props: { artifact_kind: "commit", status: "🚀".repeat(81) } })
+    );
+    expect(link.status).toBe(`${"🚀".repeat(79)}…`);
+    expect(link.status?.includes("�")).toBe(false);
+  });
+});
+
+describe("[R2-M1] the tool's verb and object survive the artifact swap", () => {
+  it("titles a patch with the tool that produced it", () => {
+    const diff = asDiff(
+      msg({
+        type: "tool_result",
+        body: PATCH,
+        props: {
+          tool_name: "apply_patch",
+          label: "relay/Sources/Relay/OutboxDrain.swift",
+          is_error: true,
+        },
+      })
+    );
+    expect(diff.title).toBe(
+      "apply_patch 실행, relay/Sources/Relay/OutboxDrain.swift"
+    );
+  });
+
+  it("reads the legacy `tool` key too, and needs no label", () => {
+    expect(
+      asDiff(msg({ type: "diff", body: PATCH, props: { tool: "git apply" } }))
+        .title
+    ).toBe("git apply 실행");
+  });
+
+  it("still prefers a title the sender wrote", () => {
+    expect(
+      asDiff(
+        msg({
+          type: "diff",
+          body: PATCH,
+          props: { tool_name: "apply_patch", title: "outbox 샤딩" },
+        })
+      ).title
+    ).toBe("outbox 샤딩");
+  });
+
+  it("keeps the generic name when the message names no tool", () => {
+    expect(asDiff(msg({ type: "diff", body: PATCH })).title).toBe("코드 변경");
+  });
+
+  it("composes a title that fits the 200 character ceiling", () => {
+    const diff = asDiff(
+      msg({
+        type: "tool_result",
+        body: PATCH,
+        props: { tool_name: "t".repeat(90), label: "l".repeat(120) },
+      })
+    );
+    expect([...diff.title].length).toBeLessThanOrEqual(200);
+    expect(diff.title.startsWith(`${"t".repeat(79)}… 실행, `)).toBe(true);
   });
 });
 

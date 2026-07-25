@@ -307,10 +307,20 @@ a URL with any handler", and the only thing this product needs is "hand one http
 URL to the default browser". A command that can do exactly that cannot be talked
 into doing anything else by a compromised webview.
 
-The URL is re-validated in Rust (https only, no whitespace, no quoting or shell
-metacharacters, 2048 byte ceiling) even though `clients/web` already refuses
-anything else. A native command must not inherit its caller's discipline: this is
-where webview-supplied data becomes an OS process argument.
+The URL is re-validated in Rust (https only, no whitespace, no control
+characters, none of `" ' & | < > ^`, 2048 byte ceiling) even though `clients/web`
+already refuses anything else. A native command must not inherit its caller's
+discipline: this is where webview-supplied data becomes an OS process argument.
+Every refused character has to be percent-encoded in a valid URL anyway, so the
+filter costs no real link, and `%` is deliberately allowed because percent
+encoding is the shape most real links arrive in.
+
+The launcher is `/usr/bin/open` on macOS, `xdg-open` on other unixes, and
+`rundll32.exe url.dll,FileProtocolHandler` on Windows. Windows does **not** go
+through `cmd /C start`: a command interpreter parses the URL a second time, where
+`%…%` pairs expand as environment variables and quietly corrupt percent-encoded
+links. The wait for the launcher runs on `spawn_blocking`, so a slow handler
+parks neither the main thread nor an async runtime worker.
 
 Web half: `openExternalUrl()` in `clients/web/src/lib/tauri.ts`, called from
 `ArtifactCard`'s link row, which falls back to the plain anchor in a browser and

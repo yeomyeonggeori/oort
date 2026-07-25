@@ -79,6 +79,93 @@ export function isProvisional(state: ArtifactState | null): boolean {
   return state !== null && PROVISIONAL_STATUS.has(state.status);
 }
 
+// ---- the sentence under the chip --------------------------------------------
+
+/** Tone of the status note. Only a confirmed failure earns danger. */
+export type ArtifactNoteTone = "muted" | "danger";
+
+export interface ArtifactNote {
+  text: string;
+  tone: ArtifactNoteTone;
+  /** A stream is still open, so the sentence carries the live caret. */
+  live: boolean;
+}
+
+interface NoteCopy {
+  sentence: string;
+  /**
+   * How the server's note is introduced, or null when the note REPLACES the
+   * sentence: on a failure the server's own reason is better copy than ours.
+   */
+  lead: string | null;
+  tone?: "danger";
+  live?: true;
+}
+
+const IN_FLIGHT =
+  "아직 받는 중입니다. 아래 내용과 숫자는 지금까지 도착한 부분입니다.";
+
+/**
+ * Copy per status, as a TOTAL map rather than an if/else chain.
+ *
+ * The chain is what shipped in R1 and it got the settled cases wrong: only
+ * error/stalled/cancelled/awaiting-approval had a branch, so `done` and
+ * `queued` fell into the in-flight else and a finished turn said "아직 받는
+ * 중입니다" one line under its own green 완료 chip. The card contradicted
+ * itself, and the accessible label contradicted the card again, because
+ * `isProvisional("done")` is false so the counters read as final while the
+ * sentence said they were still moving.
+ *
+ * A `Record<AgentTurnStatus, …>` cannot have that hole: adding a ninth status
+ * to the vocabulary fails the type check here instead of silently inheriting
+ * somebody else's sentence.
+ *
+ * Two rules the copy itself must keep, and rowModel.test.ts asserts both:
+ *   - only a PROVISIONAL status may say the body is still arriving,
+ *   - only `error` may carry the danger tone; silence is not failure
+ *     (ADR-0132).
+ */
+const NOTE_COPY: Readonly<Record<AgentTurnStatus, NoteCopy>> = {
+  queued: {
+    sentence: "아직 시작하지 않았습니다. 아래 내용과 숫자는 확정이 아닙니다.",
+    lead: "함께 온 메모",
+  },
+  thinking: { sentence: IN_FLIGHT, lead: "마지막 신호", live: true },
+  streaming: { sentence: IN_FLIGHT, lead: "마지막 신호", live: true },
+  "awaiting-approval": {
+    sentence: "승인을 기다리는 중이라 아래 내용은 아직 확정이 아닙니다.",
+    lead: "마지막 신호",
+  },
+  done: {
+    sentence: "실행이 끝났습니다. 아래 내용이 전부입니다.",
+    lead: "함께 온 메모",
+  },
+  error: {
+    sentence: "이 변경을 끝내지 못했습니다. 아래 내용은 실패한 시점까지입니다.",
+    lead: null,
+    tone: "danger",
+  },
+  stalled: {
+    sentence: "아직 응답이 없습니다. 실패로 확정되지 않았습니다.",
+    lead: "마지막 신호",
+  },
+  cancelled: {
+    sentence: "실행이 중단되어 여기까지만 도착했습니다.",
+    lead: "마지막 신호",
+  },
+};
+
+/** What the artifact card says under the chip, for one turn state. */
+export function artifactNote(state: ArtifactState): ArtifactNote {
+  const copy = NOTE_COPY[state.status];
+  let text = copy.sentence;
+  if (state.note !== undefined) {
+    text =
+      copy.lead === null ? state.note : `${text} ${copy.lead}: ${state.note}`;
+  }
+  return { text, tone: copy.tone ?? "muted", live: copy.live === true };
+}
+
 function stateFor(card: AgentCardModel | null): ArtifactState | null {
   if (card === null || card.kind === "approval") return null;
   const note = card.errorNote;

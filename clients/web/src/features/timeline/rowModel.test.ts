@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/lib/api";
-import { isProvisional, rowPresentation } from "./rowModel";
+import { TURN_STATUS_LABEL, type AgentTurnStatus } from "./agentCardModel";
+import { artifactNote, isProvisional, rowPresentation } from "./rowModel";
 
 // =============================================================================
 // The precedence chain one timeline row runs (MOMO-620 R1).
@@ -221,6 +222,81 @@ describe("the row without an artifact is unchanged", () => {
     expect(row.card).toBeNull();
     expect(row.artifact).toBeNull();
     expect(row.keepsBody).toBe(true);
+  });
+});
+
+describe("the status note never contradicts the chip (R2 H1)", () => {
+  const ALL_STATUSES = Object.keys(TURN_STATUS_LABEL) as AgentTurnStatus[];
+
+  it("covers every status in the vocabulary", () => {
+    for (const status of ALL_STATUSES) {
+      expect(artifactNote({ status }).text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("only a provisional status may say the body is still arriving", () => {
+    for (const status of ALL_STATUSES) {
+      const text = artifactNote({ status, note: "마지막 하트비트 09:12" }).text;
+      const claimsArriving = text.includes("받는 중") || text.includes("도착");
+      if (claimsArriving) {
+        expect(
+          isProvisional({ status }),
+          `${status} claims the body is still arriving`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("only a confirmed failure is coloured danger", () => {
+    for (const status of ALL_STATUSES) {
+      const tone = artifactNote({ status, note: "마지막 신호" }).tone;
+      expect(tone === "danger", `${status} tone`).toBe(status === "error");
+    }
+  });
+
+  it("[R2-H1] a finished turn with a note says it finished", () => {
+    // The exact runtime case: status=succeeded plus an `error` prop, so the
+    // chip is 완료 and the note used to read "아직 받는 중입니다".
+    const note = artifactNote({
+      status: "done",
+      note: "부분 실패: 마지막 헝크는 건너뛰었습니다.",
+    });
+    expect(note.text).toBe(
+      "실행이 끝났습니다. 아래 내용이 전부입니다. 함께 온 메모: 부분 실패: 마지막 헝크는 건너뛰었습니다."
+    );
+    expect(note.text).not.toContain("받는 중");
+    expect(note.live).toBe(false);
+    expect(note.tone).toBe("muted");
+  });
+
+  it("[R2-H1] a queued run is not described as arriving", () => {
+    const note = artifactNote({ status: "queued" });
+    expect(note.text).toBe(
+      "아직 시작하지 않았습니다. 아래 내용과 숫자는 확정이 아닙니다."
+    );
+    expect(note.live).toBe(false);
+  });
+
+  it("lets the server's own failure text replace ours", () => {
+    expect(
+      artifactNote({ status: "error", note: "패치가 3번째 hunk에서 충돌했습니다." })
+    ).toEqual({
+      text: "패치가 3번째 hunk에서 충돌했습니다.",
+      tone: "danger",
+      live: false,
+    });
+  });
+
+  it("still says something when a failure arrived with no text", () => {
+    expect(artifactNote({ status: "error" }).text).toBe(
+      "이 변경을 끝내지 못했습니다. 아래 내용은 실패한 시점까지입니다."
+    );
+  });
+
+  it("gives a streaming turn the live caret and keeps the last signal", () => {
+    const note = artifactNote({ status: "streaming", note: "12개 파일 중 3개" });
+    expect(note.live).toBe(true);
+    expect(note.text).toContain("마지막 신호: 12개 파일 중 3개");
   });
 });
 

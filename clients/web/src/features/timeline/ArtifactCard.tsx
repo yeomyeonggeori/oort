@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState, type HTMLAttributes } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -12,7 +12,7 @@ import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { formatCount } from "./agentCardModel";
 import { StreamCaret, TurnChip } from "./StatusChip";
-import { isProvisional, type ArtifactState } from "./rowModel";
+import { artifactNote, isProvisional, type ArtifactState } from "./rowModel";
 import {
   isTruncated,
   omittedFileCount,
@@ -74,7 +74,11 @@ const LINE_CLASS: Readonly<Record<DiffLineKind, string>> = {
   // a hunk header from the metadata lines around it.
   hunk: "bg-surface-hover text-ink-muted",
   metadata: "text-ink-muted",
-  context: "text-ink",
+  // Context recedes. It is the majority of the lines in a diff and none of the
+  // change: at full ink strength it competed with the two colours that ARE the
+  // information, and in a dense card the eye landed on the unchanged code
+  // first. Muted, so +/- steps forward on weight as well as on hue.
+  context: "text-ink-muted",
 };
 
 /**
@@ -106,13 +110,95 @@ const INSET_FOCUS_RING =
 const OPEN_FILES = new Map<string, boolean>();
 const OPEN_FILES_LIMIT = 500;
 
-function rememberOpen(key: string, open: boolean) {
-  OPEN_FILES.delete(key);
-  OPEN_FILES.set(key, open);
-  if (OPEN_FILES.size > OPEN_FILES_LIMIT) {
-    const oldest = OPEN_FILES.keys().next().value;
-    if (oldest !== undefined) OPEN_FILES.delete(oldest);
+/**
+ * Rows the shell failed to hand to a browser, kept outside the tree for the
+ * same reason and with the same shape.
+ *
+ * R1 put the disclosure state out here and left the failure in a `useState`,
+ * which meant the one message on the card that a person had to ACT on was the
+ * one the timeline threw away: scroll past a "브라우저를 열지 못했습니다" row
+ * and the address it printed for copying vanished with it.
+ */
+const OPEN_FAILURES = new Map<string, boolean>();
+const OPEN_FAILURES_LIMIT = 100;
+
+/** Newest wins, oldest evicted, so a long session cannot grow a map forever. */
+function remember(
+  map: Map<string, boolean>,
+  key: string,
+  value: boolean,
+  limit: number
+) {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > limit) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
   }
+}
+
+/**
+ * True while the element really can scroll.
+ *
+ * Two things on this card hang off the answer, and both were wrong when it was
+ * assumed rather than measured. A scroll container needs a tab stop because
+ * WebKit gives it none (WCAG 2.1.1), but a block that FITS is not a scroll
+ * container, and R1 put `tabIndex={0}` on every open file block: a six file
+ * card grew up to six tab stops that moved nothing. And a container that does
+ * scroll needs to say so, which is what `scrollbar-visible` is for.
+ *
+ * Measured on mount and on every resize of the box itself, which is what
+ * changes the answer here: the line content is fixed once the row is rendered,
+ * and the system font stack cannot reflow late (no webfont, SKILL §1).
+ */
+function useScrollable<T extends HTMLElement>() {
+  const [scrollable, setScrollable] = useState(false);
+  const node = useRef<T | null>(null);
+  const observer = useRef<ResizeObserver | null>(null);
+
+  const measure = useCallback(() => {
+    const element = node.current;
+    if (element === null) return;
+    setScrollable(
+      element.scrollWidth > element.clientWidth ||
+        element.scrollHeight > element.clientHeight
+    );
+  }, []);
+
+  // A callback ref, not an effect on a ref object: a file block mounts its
+  // <pre> only when the disclosure is open, and an effect that ran once at card
+  // mount would measure nothing and leave every hand-opened file without its
+  // tab stop. This runs on the mount that actually happened.
+  const ref = useCallback(
+    (element: T | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      node.current = element;
+      if (element === null) {
+        setScrollable(false);
+        return;
+      }
+      measure();
+      if (typeof ResizeObserver === "undefined") return;
+      observer.current = new ResizeObserver(measure);
+      observer.current.observe(element);
+    },
+    [measure]
+  );
+
+  return { ref, scrollable, measure };
+}
+
+/**
+ * The keyboard contract for a scroll container: a stop with a NAME, or nothing
+ * at all. `role="group"` rides along with the tab stop because ARIA forbids
+ * naming a `generic` element, so a bare focusable <pre> announces nothing.
+ */
+function scrollStop(
+  scrollable: boolean,
+  label: string
+): HTMLAttributes<HTMLElement> {
+  return scrollable ? { tabIndex: 0, role: "group", "aria-label": label } : {};
 }
 
 /**
@@ -124,6 +210,17 @@ function rememberOpen(key: string, open: boolean) {
  * rows below counts patch lines, which includes headers and context, and the
  * two numbers sit close enough that a reader will otherwise try to reconcile
  * them.
+ *
+ * `role="img"` so the label is actually spoken. A <span> is `generic`, ARIA
+ * forbids naming a generic element, and Chrome exposing the name anyway is not
+ * a licence to rely on it: WebKit is the engine the Tauri shell runs on, and it
+ * is the one that drops the name and reads the digits raw. A leaf role also
+ * hides the "+535 −87" glyphs the label already restates, so the pair is
+ * announced once and as a sentence.
+ *
+ * "지금까지" is TEXT, not only a label and a data attribute. A provisional
+ * count that looks identical to a settled one is a settled claim to the eye,
+ * whatever the DOM says.
  */
 function ChangeSummary({
   additions,
@@ -139,16 +236,18 @@ function ChangeSummary({
 }) {
   return (
     <span
+      role="img"
       data-numeric
       data-testid={testId}
       data-provisional={provisional ? "true" : undefined}
-      className="shrink-0 font-mono text-timestamp font-semibold"
+      className="shrink-0 text-timestamp font-semibold"
       aria-label={`${provisional ? "지금까지 " : ""}변경 줄, 추가 ${formatCount(
         additions
       )}줄, 삭제 ${formatCount(deletions)}줄`}
     >
-      <span className="text-ok">+{formatCount(additions)}</span>{" "}
-      <span className="text-danger">−{formatCount(deletions)}</span>
+      {provisional && <span className="mr-1 text-ink-muted">지금까지</span>}
+      <span className="font-mono text-ok">+{formatCount(additions)}</span>{" "}
+      <span className="font-mono text-danger">−{formatCount(deletions)}</span>
     </span>
   );
 }
@@ -173,6 +272,7 @@ function DiffFileSection({
   defaultOpen: boolean;
 }) {
   const [open, setOpen] = useState(() => OPEN_FILES.get(storageKey) ?? defaultOpen);
+  const lines = useScrollable<HTMLPreElement>();
   const hidden = file.lineCount - file.lines.length;
   return (
     <details
@@ -180,7 +280,7 @@ function DiffFileSection({
       onToggle={(event) => {
         const next = event.currentTarget.open;
         setOpen(next);
-        rememberOpen(storageKey, next);
+        remember(OPEN_FILES, storageKey, next, OPEN_FILES_LIMIT);
       }}
       data-testid="artifact-diff-file"
       data-path={file.path}
@@ -211,18 +311,19 @@ function DiffFileSection({
         // of block <code> rows so a hunk header's tint spans the full measure
         // (min-w-full) instead of ending where its text does.
         //
-        // tabIndex because a scroll container with no focusable child is not
-        // reachable from the keyboard in WebKit, which is the engine the Tauri
-        // shell runs on: without it the right-hand half of a long line is
-        // mouse-only (WCAG 2.1.1). role="group" with it, because ARIA forbids
-        // naming a `generic` element, so on a bare <pre> the aria-label below is
-        // dropped and the stop announces nothing at all.
+        // The tab stop is CONDITIONAL (see useScrollable): a file whose lines
+        // fit has nothing to scroll, and a stop that moves nothing is a stop a
+        // keyboard reader pays for six times on a six file card.
+        //
+        // scrollbar-visible is the affordance the platform withholds. macOS
+        // overlay scrollbars stay invisible until you already scroll, so a line
+        // cut at the right edge of the card looked exactly like a line that
+        // ended there, with no hint that the rest existed.
         <pre
-          tabIndex={0}
-          role="group"
-          aria-label={`${file.path} 변경 내용`}
+          ref={lines.ref}
+          {...scrollStop(lines.scrollable, `${file.path} 변경 내용`)}
           className={cn(
-            "overflow-x-auto pb-1 font-mono text-meta",
+            "scrollbar-visible overflow-x-auto pb-1 font-mono text-meta",
             INSET_FOCUS_RING
           )}
         >
@@ -280,43 +381,62 @@ function OmittedFileRow({ file }: { file: DiffFile }) {
 /**
  * The run's state, on the artifact card that replaced the run's own card.
  *
- * Copy per status, and the split matters: `error` says what failed, `stalled`
- * says news has not arrived and refuses to call that a failure (ADR-0132), and
- * the in-flight statuses say the patch below is a running total. Only `error`
- * is allowed the danger colour.
+ * The copy itself lives in rowModel as a total map over the status vocabulary,
+ * because the version that lived here as an if/else chain had no branch for
+ * `done` or `queued` and told a finished turn it was still arriving. What is
+ * left in the component is the rendering: one tone, one caret.
  */
 function StatusNote({ state }: { state: ArtifactState }) {
-  const live = state.status === "thinking" || state.status === "streaming";
-  let text: string;
-  let danger = false;
-  if (state.status === "error") {
-    text =
-      state.note ?? "이 변경을 끝내지 못했습니다. 아래 내용은 실패한 시점까지입니다.";
-    danger = true;
-  } else if (state.status === "stalled") {
-    text = "아직 응답이 없습니다. 실패로 확정되지 않았습니다.";
-    if (state.note) text += ` 마지막 신호: ${state.note}`;
-  } else if (state.status === "cancelled") {
-    text = "실행이 중단되어 여기까지만 도착했습니다.";
-    if (state.note) text += ` 마지막 신호: ${state.note}`;
-  } else if (state.status === "awaiting-approval") {
-    text = "승인을 기다리는 중이라 아래 내용은 아직 확정이 아닙니다.";
-    if (state.note) text += ` 마지막 신호: ${state.note}`;
-  } else {
-    text = "아직 받는 중입니다. 아래 내용과 숫자는 지금까지 도착한 부분입니다.";
-    if (state.note) text += ` 마지막 신호: ${state.note}`;
-  }
+  const note = artifactNote(state);
   return (
     <p
       data-testid="artifact-status-note"
+      data-status={state.status}
       className={cn(
         "border-b border-line px-3 py-1 text-meta",
-        danger ? "text-danger" : "text-ink-muted"
+        note.tone === "danger" ? "text-danger" : "text-ink-muted"
       )}
     >
-      {text}
-      {live && <StreamCaret />}
+      {note.text}
+      {note.live && <StreamCaret />}
     </p>
+  );
+}
+
+/**
+ * The whole patch, folded. Shared by the diff and oversized cards, which are
+ * the same disclosure over different reasons for it.
+ *
+ * `onToggle` re-measures because a closed <details> has no box to measure: the
+ * tab stop and the scrollbar both have to be decided the moment it opens.
+ */
+function RawPatch({ patch }: { patch: string }) {
+  const body = useScrollable<HTMLPreElement>();
+  return (
+    <details
+      className="border-t border-line"
+      data-testid="artifact-diff-raw"
+      onToggle={body.measure}
+    >
+      <summary
+        className={cn(
+          "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover",
+          INSET_FOCUS_RING
+        )}
+      >
+        원본 diff 보기
+      </summary>
+      <pre
+        ref={body.ref}
+        {...scrollStop(body.scrollable, "원본 diff")}
+        className={cn(
+          "scrollbar-visible max-h-pane overflow-auto px-3 pb-2 font-mono text-meta text-ink",
+          INSET_FOCUS_RING
+        )}
+      >
+        {patch}
+      </pre>
+    </details>
   );
 }
 
@@ -402,7 +522,7 @@ function DiffCard({
           containers with no focusable descendant, and this one is full of
           <summary> elements. Adding one anyway bought a seventh tab stop per
           card that did nothing the next Tab did not already do. */}
-      <div className="max-h-diff-body overflow-y-auto">
+      <div className="scrollbar-visible max-h-diff-body overflow-y-auto">
         {diff.files.map((file) => {
           if (file.lines.length === 0) {
             return <OmittedFileRow key={file.id} file={file} />;
@@ -420,27 +540,7 @@ function DiffCard({
         })}
       </div>
 
-      <details className="border-t border-line" data-testid="artifact-diff-raw">
-        <summary
-          className={cn(
-            "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover",
-            INSET_FOCUS_RING
-          )}
-        >
-          원본 diff 보기
-        </summary>
-        <pre
-          tabIndex={0}
-          role="group"
-          aria-label="원본 diff"
-          className={cn(
-            "max-h-pane overflow-auto px-3 pb-2 font-mono text-meta text-ink",
-            INSET_FOCUS_RING
-          )}
-        >
-          {diff.rawPatch}
-        </pre>
-      </details>
+      <RawPatch patch={diff.rawPatch} />
     </section>
   );
 }
@@ -492,27 +592,7 @@ function OversizedCard({
         아래에서 원문을 그대로 볼 수 있습니다.
       </p>
 
-      <details className="border-t border-line" data-testid="artifact-diff-raw">
-        <summary
-          className={cn(
-            "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover",
-            INSET_FOCUS_RING
-          )}
-        >
-          원본 diff 보기
-        </summary>
-        <pre
-          tabIndex={0}
-          role="group"
-          aria-label="원본 diff"
-          className={cn(
-            "max-h-pane overflow-auto px-3 pb-2 font-mono text-meta text-ink",
-            INSET_FOCUS_RING
-          )}
-        >
-          {oversized.rawPatch}
-        </pre>
-      </details>
+      <RawPatch patch={oversized.rawPatch} />
     </section>
   );
 }
@@ -562,8 +642,14 @@ function MetaRow({
  * If the shell cannot open it, the row says so and shows the address, because
  * the next step available to the reader is to copy it.
  */
-function OpenLinkRow({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
+function OpenLinkRow({ url, storageKey }: { url: string; storageKey: string }) {
+  const key = `${storageKey}:${url}`;
+  const [failed, setFailed] = useState(() => OPEN_FAILURES.get(key) === true);
+  // Announced only when the failure happens while this row is mounted. A
+  // restored failure is the same sentence the reader already saw, and
+  // react-virtuoso re-mounts rows on every scroll pass, so keeping role="alert"
+  // on it would interrupt a screen reader again on every return trip.
+  const [announce, setAnnounce] = useState(false);
   return (
     <>
       <a
@@ -575,7 +661,12 @@ function OpenLinkRow({ url }: { url: string }) {
           if (!isDesktop()) return;
           event.preventDefault();
           setFailed(false);
-          void openExternalUrl(url).then((opened) => setFailed(!opened));
+          OPEN_FAILURES.delete(key);
+          void openExternalUrl(url).then((opened) => {
+            remember(OPEN_FAILURES, key, !opened, OPEN_FAILURES_LIMIT);
+            setFailed(!opened);
+            setAnnounce(!opened);
+          });
         }}
         className={cn(
           "flex items-center gap-2 border-t border-line px-3 py-2 text-meta text-accent hover:bg-surface-hover",
@@ -587,7 +678,7 @@ function OpenLinkRow({ url }: { url: string }) {
       </a>
       {failed && (
         <p
-          role="alert"
+          {...(announce ? { role: "alert" } : {})}
           data-testid="artifact-link-failed"
           className="border-t border-line px-3 py-2 text-meta text-danger"
         >
@@ -607,9 +698,11 @@ function OpenLinkRow({ url }: { url: string }) {
 function LinkCard({
   link,
   state,
+  storageKey,
 }: {
   link: LinkArtifact;
   state: ArtifactState | null;
+  storageKey: string;
 }) {
   const isCommit = link.kind === "commit";
   const Icon = isCommit ? GitCommitHorizontal : GitPullRequest;
@@ -658,7 +751,7 @@ function LinkCard({
         </dl>
       )}
 
-      {link.url && <OpenLinkRow url={link.url} />}
+      {link.url && <OpenLinkRow url={link.url} storageKey={storageKey} />}
 
       {link.urlRejected && (
         // Say why the link is missing instead of showing a pull request with no
@@ -701,5 +794,5 @@ export function ArtifactCard({
   if (artifact.kind === "oversized") {
     return <OversizedCard oversized={artifact} state={state} />;
   }
-  return <LinkCard link={artifact} state={state} />;
+  return <LinkCard link={artifact} state={state} storageKey={storageKey} />;
 }

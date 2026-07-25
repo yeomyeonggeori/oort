@@ -159,6 +159,27 @@ function bounded(value: string | undefined, maximum: number) {
   return value !== undefined && value.length <= maximum ? value : undefined;
 }
 
+/**
+ * The same ceiling as `bounded`, but it CUTS instead of dropping.
+ *
+ * `bounded` returning undefined is right for a value the card can do without
+ * (an unparseable host), and wrong for one the card is there to show: a 170
+ * character `repository` used to remove the 저장소 row from the card entirely,
+ * with nothing saying a row had been removed. That is the mirror image of the
+ * dishonesty this file exists to prevent, which is claiming what was not
+ * measured: here the card was hiding what it HAD.
+ *
+ * Cut on code points, not UTF-16 units, so the cut never lands inside a
+ * surrogate pair and produces a replacement glyph. The ellipsis is part of the
+ * budget, so the result never exceeds `maximum`.
+ */
+function clamped(value: string | undefined, maximum: number) {
+  if (value === undefined) return undefined;
+  const characters = [...value];
+  if (characters.length <= maximum) return value;
+  return `${characters.slice(0, maximum - 1).join("")}…`;
+}
+
 function byteLength(source: string): number {
   return new TextEncoder().encode(source).byteLength;
 }
@@ -304,6 +325,32 @@ interface PendingFile {
 }
 
 /**
+ * The title a diff card wears when the sender named none.
+ *
+ * An artifact card OUTRANKS the tool card for the same message (rowModel), so
+ * whatever the tool card would have said has to survive the swap or it is gone
+ * from the timeline. R1 hoisted the tool's status and error note and stopped
+ * there, which left a failed `apply_patch` on a patch body titled 코드 변경:
+ * the run's verb and its object had been thrown away and replaced with a
+ * common noun. §9 asks agent activity to read as "{verb} to {object}", and the
+ * accessible label is built from this title, so the loss was audible too.
+ *
+ * Same two props the tool card frames itself from (`tool_name`/`tool` for the
+ * verb, `label` for the object), so the two renderings of one message agree.
+ * The budgets add up to less than the 200 character title ceiling, so a
+ * composed title is never dropped by the clamp below.
+ */
+function toolActionTitle(props: Record<string, unknown> | undefined) {
+  const tool = clamped(
+    propString(props, "tool_name") ?? propString(props, "tool"),
+    80
+  );
+  if (tool === undefined) return undefined;
+  const object = clamped(propString(props, "label"), 100);
+  return object === undefined ? `${tool} 실행` : `${tool} 실행, ${object}`;
+}
+
+/**
  * Fence-strip, weigh, then parse. A source past the ceiling becomes the
  * `oversized` card instead of falling through to the unbounded body paragraph.
  */
@@ -316,7 +363,7 @@ function diffArtifact(
   if (byteCount > MAX_SOURCE_BYTES) {
     return {
       kind: "oversized",
-      title: bounded(rawTitle, 200) ?? "코드 변경",
+      title: clamped(rawTitle, 200) ?? "코드 변경",
       totalLineCount: source.split("\n").length,
       byteCount,
       rawPatch: source,
@@ -402,7 +449,7 @@ function parseDiff(source: string, rawTitle: string | undefined): DiffArtifact |
 
   return {
     kind: "diff",
-    title: bounded(rawTitle, 200) ?? "코드 변경",
+    title: clamped(rawTitle, 200) ?? "코드 변경",
     files: renderedFiles,
     additions: files.reduce((sum, file) => sum + file.additions, 0),
     deletions: files.reduce((sum, file) => sum + file.deletions, 0),
@@ -469,12 +516,18 @@ function urlHost(raw: string): string | undefined {
 }
 
 function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
-  const branch = bounded(propString(message.props, "branch"), 120);
-  const status = bounded(propString(message.props, "status"), 80);
-  const repository = bounded(propString(message.props, "repository"), 160);
+  // Clamped, not dropped: these three ARE the card, so an over-long value is
+  // shown cut rather than deleted along with its row.
+  const branch = clamped(propString(message.props, "branch"), 120);
+  const status = clamped(propString(message.props, "status"), 80);
+  const repository = clamped(propString(message.props, "repository"), 160);
   const rawUrl =
     propString(message.props, "url") ?? propString(message.props, "uri");
   const url = safeHttpsUrl(rawUrl);
+  // The one value still DROPPED at its ceiling. A hostname is an identity
+  // claim the reader is meant to judge ("was this even my repository?"), and a
+  // cut hostname invites the wrong answer; the sentence around it reads fine
+  // without the host.
   const rejectedHost =
     rawUrl !== undefined && url === undefined
       ? bounded(urlHost(rawUrl), 160)
@@ -482,7 +535,7 @@ function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
   return {
     kind,
     title:
-      bounded(propString(message.props, "title"), 200) ??
+      clamped(propString(message.props, "title"), 200) ??
       (kind === "commit" ? "커밋" : "풀 리퀘스트"),
     ...(branch ? { branch } : {}),
     ...(status ? { status } : {}),
@@ -508,16 +561,16 @@ export function resolveArtifact(message: Message): ArtifactPresentation | null {
   if (explicit === "commit" || explicit === "pr") {
     return linkArtifact(explicit, message);
   }
+  const title =
+    propString(message.props, "title") ?? toolActionTitle(message.props);
   if (explicit === "diff") {
     const source = propString(message.props, "patch") ?? message.body;
-    return source === undefined
-      ? null
-      : diffArtifact(source, propString(message.props, "title"));
+    return source === undefined ? null : diffArtifact(source, title);
   }
   if (message.body === undefined || !looksLikeUnifiedDiff(message.body)) {
     return null;
   }
-  return diffArtifact(message.body, propString(message.props, "title"));
+  return diffArtifact(message.body, title);
 }
 
 /**
