@@ -1,15 +1,32 @@
-import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { SendHorizontal } from "lucide-react";
 import type { RosterMember } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
+import { useSession } from "@/app/session";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import {
+  agentTurnsInChannel,
   elapsedLabel,
+  hasChannelTurn,
   useAgentWorkingSignals,
-  workingInChannel,
+  useTickingNow,
+  type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
-import { memberFor } from "@/features/workspace/useWorkspace";
+import {
+  activityLines,
+  activitySuffix,
+  activityText,
+  UNKNOWN_AGENT_NAME,
+  type AgentActivityLine,
+} from "@/features/agents/turnCopy";
+import { memberNameParts } from "@/features/workspace/useWorkspace";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ⌘↵ sends, ↵ is a line
@@ -64,6 +81,115 @@ export function matchMembers(
   return matched.slice(0, limit);
 }
 
+/**
+ * Composer activity bar (R-1 §3, mac AgentWorkingComposerBar). One flat meta
+ * line per open turn, drawn from what the agent actually wrote, with its clock
+ * beside its own label.
+ *
+ * It does NOT rotate. The mac bar cycles agent x headline pairs every five
+ * seconds because a SwiftUI composer footer has one line to spend; on the web
+ * that same loop is content that mutates on a timer, which needs a pause
+ * control to meet WCAG 2.2.2, has no keyboard path when the pause is a hover,
+ * and prints a "1/3" pager that reads as a slideshow inside a work tool. Two or
+ * three stacked lines say more, sit still, and need no controls at all. Nothing
+ * here animates, so there is no reduced-motion branch to diverge from.
+ *
+ * The bar states a turn even before a headline exists ("김인턴이 작업 중" plus a
+ * clock is a true thing the reader wants) and states an approval wait as an
+ * approval wait, never as work.
+ *
+ * OFFLINE (SKILL §5) is a state this bar has to SHOW, not merely encode. The
+ * first cut expressed a dead rail by hiding the clock and rewriting an
+ * aria-label, which for an awaiting_approval turn is a no-op on screen: the
+ * line "Hermes가 승인을 기다립니다" was pixel-identical either way, so the app
+ * kept asserting agent state on a socket that was gone. Now the agent token
+ * comes off the name (the same demotion the sidebar pill makes: a remembered
+ * claim must not look as confirmed as a live one) and one warn-colored line
+ * says why, in place, which is what an offline banner is (§5) and not a toast.
+ */
+function AgentActivityBar({
+  turns,
+  directory,
+  nowMs,
+  live,
+}: {
+  turns: AgentWorkingSignal[];
+  directory: Directory;
+  nowMs: number;
+  /** The realtime rail is connected, so a clock is measuring something. */
+  live: boolean;
+}) {
+  const { lines, overflowCount, summary } = useMemo(
+    () =>
+      activityLines(turns, (memberId) =>
+        memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME)
+      ),
+    [turns, directory]
+  );
+
+  if (lines.length === 0) return null;
+
+  return (
+    <ul
+      className="flex flex-col gap-1 px-4 pb-2"
+      // The offline sentence is a real list item below, so it is announced in
+      // reading order rather than glued onto the list's name and read twice.
+      aria-label={summary}
+      data-testid="composer-working"
+      data-live={live ? "" : undefined}
+    >
+      {lines.map((line) => (
+        <li
+          key={line.key}
+          className="flex items-baseline gap-2 text-meta text-ink-muted"
+        >
+          <ActivityText line={line} live={live} />
+          {live && line.state === "working" && line.startedAtMs !== undefined && (
+            <span className="shrink-0 text-timestamp" data-numeric>
+              {elapsedLabel(line.startedAtMs, nowMs)}
+            </span>
+          )}
+        </li>
+      ))}
+      {overflowCount > 0 && (
+        <li className="text-meta text-ink-muted">
+          외 <span data-numeric>{overflowCount}</span>명
+        </li>
+      )}
+      {!live && (
+        <li className="text-meta text-warn" data-testid="composer-working-stale">
+          연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.
+        </li>
+      )}
+    </ul>
+  );
+}
+
+/**
+ * The line itself. `min-w-0 truncate` without `flex-1`, so the clock sits right
+ * after the text it belongs to: a right-aligned number a screen away from its
+ * label stops reading as a card and starts reading as a banner (tokens.md §4).
+ */
+function ActivityText({
+  line,
+  live,
+}: {
+  line: AgentActivityLine;
+  live: boolean;
+}) {
+  return (
+    <span className="min-w-0 truncate" title={activityText(line)}>
+      {/* Offline the name drops to the row's own ink-muted: agent identity is a
+          claim about who is acting right now, and nobody is acting right now. */}
+      <span className={live ? "text-agent" : undefined}>{line.name.name}</span>
+      {line.name.handle && (
+        <span className="text-ink-muted">({line.name.handle})</span>
+      )}
+      {activitySuffix(line)}
+    </span>
+  );
+}
+
 export function Composer({
   channelId,
   directory,
@@ -83,8 +209,24 @@ export function Composer({
   const [mentionOpen, setMentionOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // The clock is mounted for THIS channel's turns, not the workspace's: the
+  // store is workspace-wide, and gating on its size alone re-rendered the
+  // composer once a second because an agent was busy in a channel nobody here
+  // is looking at. The membership test is clock-free, so it can decide whether
+  // to start the clock before there is one.
+  //
+  // `useTickingNow` returns the render's own clock whatever the argument says;
+  // the argument only buys the 1Hz re-render. That is what makes the same
+  // `nowMs` safe to hand to the staleness filter. Handing it a value the tick
+  // captured meant that with the rail down (no tick) the clock froze at the
+  // moment the socket died, `isStaleSignal` compared two fixed numbers, and the
+  // 90s TTL could never fire on this surface at all. Now every render, from
+  // whatever cause, re-reads the wall clock and drops what has gone quiet.
+  const { connStatus } = useSession();
+  const railLive = connStatus === "connected";
   const signals = useAgentWorkingSignals();
-  const working = workingInChannel(signals, channelId);
+  const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
+  const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
   const query = mentionOpen ? mentionQueryAt(text, caret) : null;
   const candidates = useMemo(
@@ -226,15 +368,12 @@ export function Composer({
         </Button>
       </form>
 
-      {working.length > 0 && (
-        <p
-          className="px-4 pb-2 text-meta text-ink-muted"
-          data-testid="composer-working"
-        >
-          {memberFor(directory, working[0].memberId)?.displayName ?? "에이전트"}
-          이(가) 작업 중 · {elapsedLabel(working[0].startedAtMs, Date.now())}
-        </p>
-      )}
+      <AgentActivityBar
+        turns={turns}
+        directory={directory}
+        nowMs={nowMs}
+        live={railLive}
+      />
     </div>
   );
 }

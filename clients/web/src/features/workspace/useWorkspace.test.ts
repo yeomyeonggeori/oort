@@ -7,6 +7,7 @@ import {
   isAmbiguousName,
   makeDirectory,
   memberFor,
+  memberNameParts,
 } from "./useWorkspace";
 
 // =============================================================================
@@ -163,5 +164,28 @@ describe("channelLabel", () => {
       "김인턴 @kim-intern"
     );
     expect(channelLabel(dm(SEONGJAE.id), DIRECTORY, DEMO.id)).toBe("곽성재");
+  });
+});
+
+describe("memberNameParts", () => {
+  // The same rule for the surfaces that name a MEMBER rather than a channel:
+  // the agent turn pill and the composer activity line (MOMO-613).
+  it("carries the handle exactly where the name alone is a coin toss", () => {
+    expect(memberNameParts(DIRECTORY, INTERN_AGENT.id, "에이전트")).toEqual({
+      name: "김인턴",
+      handle: "@kim-intern",
+    });
+    expect(memberNameParts(DIRECTORY, SEONGJAE.id, "에이전트")).toEqual({
+      name: "곽성재",
+    });
+  });
+
+  it("folds id case and falls back rather than naming nobody", () => {
+    expect(
+      memberNameParts(DIRECTORY, INTERN_HUMAN.id.toUpperCase(), "에이전트").handle
+    ).toBe("@intern-kim");
+    expect(
+      memberNameParts(DIRECTORY, "019f0000-0000-7000-8000-000000000999", "에이전트")
+    ).toEqual({ name: "에이전트" });
   });
 });

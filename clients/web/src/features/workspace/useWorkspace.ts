@@ -134,6 +134,31 @@ export function memberFor(
   return directory.byId.get(keyOf(memberId)) ?? null;
 }
 
+/** A member named for a sentence: the name, plus the handle when it is needed. */
+export interface MemberNameParts {
+  name: string;
+  handle?: string;
+}
+
+/**
+ * Name a member the way `channelLabelParts` names a DM: display name, and
+ * "@handle" whenever this workspace carries more than one member under that
+ * name. Every surface that puts a member's name in a sentence goes through
+ * here, because dropping the disambiguator is the bug the ambiguity index
+ * exists to prevent.
+ */
+export function memberNameParts(
+  directory: Directory,
+  memberId: string,
+  fallback: string
+): MemberNameParts {
+  const member = memberFor(directory, memberId);
+  if (!member || member.displayName.trim() === "") return { name: fallback };
+  return isAmbiguousName(directory, member)
+    ? { name: member.displayName, handle: `@${member.handle}` }
+    : { name: member.displayName };
+}
+
 /**
  * The other participant of a 1:1 DM, resolved through the roster. A DM is fixed
  * to a participant pair by its dmKey (openapi `openDm`), so "the other one" is

@@ -8,8 +8,13 @@
 // level, which means the capture exercises the same CSS light-dark() path the
 // product uses; nothing is themed specially for the screenshot.
 //
-//   node scripts/capture-screens.mjs          # -> artifacts/design/*.png
-//   OUT_DIR=/tmp/shots node scripts/capture-screens.mjs
+//   npm run capture:design                    # -> artifacts/design/*.png
+//   OUT_DIR=/tmp/shots npm run capture:design
+//
+// Go through the npm script, not this file directly: it builds `--mode design`,
+// and that mode is what enables the `?agentwork=` capture seam. A release build
+// (`npm run build`) answers null to that flag on purpose, so the two agent turn
+// screens would shoot an empty sidebar against a production dist.
 //
 // No credentials and no backend are involved: /v1 is fulfilled from the
 // fixtures below (realistic Korean+English team content, never "테스트 1").
@@ -442,6 +447,39 @@ async function captureScheme(browser, scheme) {
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);
 
+  // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
+  //     activity list. `?agentwork=live` seeds fixed turns and reports the rail
+  //     as connected, so the clock, the 승인 대기 state and the stacked composer
+  //     lines are all on screen at once without a socket.
+  const turns = await context.newPage();
+  await turns.goto(`${ORIGIN}/?agentwork=live`, { waitUntil: "networkidle" });
+  await signIn(turns);
+  await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
+  await turns.getByTestId("composer-working").waitFor({ state: "visible" });
+  const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
+  await turns.screenshot({ path: turnsShot });
+  shots.push(turnsShot);
+
+  // 3f. the same turns with the rail down (SKILL §5 offline): the clocks go
+  //     away rather than counting on a dead socket, and the banner says why.
+  const turnsOffline = await context.newPage();
+  await turnsOffline.goto(`${ORIGIN}/?agentwork=offline`, {
+    waitUntil: "networkidle",
+  });
+  await signIn(turnsOffline);
+  await turnsOffline
+    .getByTestId("timeline-message")
+    .first()
+    .waitFor({ state: "visible" });
+  await turnsOffline
+    .getByTestId("agent-turn-badge")
+    .first()
+    .waitFor({ state: "visible" });
+  const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
+  await turnsOffline.screenshot({ path: turnsOfflineShot });
+  shots.push(turnsOfflineShot);
+
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
   await stress.goto(`${ORIGIN}/?stress=40`, { waitUntil: "networkidle" });
@@ -457,7 +495,7 @@ async function captureScheme(browser, scheme) {
 
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
-    throw new Error("dist/ is missing. Run `npm run build` first.");
+    throw new Error("dist/ is missing. Run `npm run capture:design`.");
   }
   mkdirSync(OUT_DIR, { recursive: true });
 

@@ -77,6 +77,127 @@ export function centrifugoChannelName(
   return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
 }
 
+// ---- agent progress rail (AX-5 / MOMO-613) ---------------------------------
+// `agent:ws<workspace>.<channel>.<agentMember>` is the exact-channel observable
+// progress namespace (research/11-agent-runtime/14, verified by
+// scripts/verify_agent_live_channel.sh): the subscribe proxy authorises it only
+// when the observer AND the target agent are both active members of that exact
+// channel, which is why one subscription is needed per (channel, agent) pair
+// rather than one per channel.
+//
+// Two payload facts, measured against momowebqa rather than assumed:
+//   - ids arrive in MIXED case. `run_id` is a Swift `uuidString` (UPPERCASE)
+//     while `channel_id` comes back lowercase, so every comparison downstream
+//     folds case (agentRail.ts `keyOf`).
+//   - `agent.partial` carries NO `agent_member_id`. The delta is attributed to
+//     the agent whose channel it arrived on, which the subscription already
+//     knows; deriving it from the run id would need a status frame that may not
+//     have arrived yet.
+
+/** Run lifecycle (`run_status`) as the worker publishes it. */
+export type AgentRunStatusWire =
+  | "queued"
+  | "running"
+  | "awaiting_approval"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+
+/** Stream phase (`phase`) as the worker publishes it. */
+export type AgentPhaseWire =
+  | "queued"
+  | "thinking"
+  | "streaming"
+  | "done"
+  | "error";
+
+export interface AgentStatusEvent {
+  type: "agent.status";
+  v: number;
+  ts: number;
+  payload: {
+    run_id: string;
+    agent_member_id: string;
+    channel_id: string;
+    phase: AgentPhaseWire;
+    run_status: AgentRunStatusWire;
+    /** Tool name behind the current step. Internal vocabulary, never rendered. */
+    detail?: string;
+    reserved_micro_usd?: number;
+    spent_micro_usd?: number;
+  };
+}
+
+export interface AgentPartialEvent {
+  type: "agent.partial";
+  v: number;
+  ts: number;
+  payload: {
+    run_id: string;
+    channel_id: string;
+    message_id?: string;
+    /** Appended slice of the streaming answer. */
+    text_delta?: string;
+    /** The full text so far (worker convenience field). */
+    text?: string;
+    tool_call_id?: string;
+    tool_call_name?: string;
+    tool_call_args?: unknown;
+    tool_call_args_truncated?: boolean;
+    spent_micro_usd?: number;
+  };
+}
+
+export type AgentProgressEvent = AgentStatusEvent | AgentPartialEvent;
+
+export function centrifugoAgentChannelName(
+  workspaceId: string,
+  channelId: string,
+  agentMemberId: string
+): string {
+  return `agent:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}.${agentMemberId.toUpperCase()}`;
+}
+
+/** Subset of the centrifuge subscribed context the replay gate reads. */
+export interface SubscribedRecoveryContext {
+  recovered?: boolean;
+  hasRecoveredPublications?: boolean;
+}
+
+/**
+ * Tells replayed publications apart from live ones.
+ *
+ * The `agent` namespace recovers WHATEVER THE CLIENT ASKS FOR: infra/centrifugo.json
+ * gives it `force_recovery: true` with 100 frames of 24h history, and a live
+ * subscribe against momowebqa comes back `recoverable:true positioned:true` even
+ * for a subscription created with both flags off. Measured on 2026-07-25: after
+ * a 25s disconnect that spanned a whole @kim-intern turn, the resubscribe
+ * answered `recovered:true` and replayed all 8 frames of that finished turn.
+ *
+ * centrifuge-js flushes those recovered publications synchronously, immediately
+ * after it emits `subscribed` (`Subscription._handleSubscribeResult`). So the
+ * gate raises on that event and lowers on the next microtask: it covers exactly
+ * the replayed batch, and nothing that arrives later can be mistaken for it.
+ * `schedule` is the seam that lets a test drive the lowering by hand.
+ */
+export function createReplayGate(schedule: (task: () => void) => void = queueMicrotask) {
+  let replaying = false;
+  return {
+    onSubscribed(ctx: SubscribedRecoveryContext): void {
+      if (ctx.recovered !== true && ctx.hasRecoveredPublications !== true) return;
+      replaying = true;
+      schedule(() => {
+        replaying = false;
+      });
+    },
+    isReplaying(): boolean {
+      return replaying;
+    },
+  };
+}
+
 function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
@@ -154,6 +275,17 @@ export interface RealtimeHandle {
       onMessage: (event: MessageNewEvent) => void;
     }
   ) => () => void;
+  /**
+   * Watch one agent's progress inside one channel (`agent.status` /
+   * `agent.partial`). Same refcount as `subscribeChannel`, so two surfaces may
+   * watch the same agent without either ending the other's feed.
+   */
+  subscribeAgent: (
+    workspaceId: string,
+    channelId: string,
+    agentMemberId: string,
+    handlers: { onEvent: (event: AgentProgressEvent) => void }
+  ) => () => void;
   dispose: () => void;
 }
 
@@ -167,8 +299,24 @@ export function createRealtime(
     maxReconnectDelay: 20_000,
   });
 
-  client.on("connecting", () => onStatus("connecting"));
-  client.on("connected", () => onStatus("connected"));
+  // `connecting` means two different things to a reader and only one thing to
+  // centrifuge-js. Before the first `connected` it is the opening handshake, and
+  // "연결 중" is the honest word. After it, it is the reconnect loop the client
+  // enters on every drop, and it stays there for as long as the network is gone:
+  // `disconnected` is emitted only when the SERVER closes the session on
+  // purpose. Reporting both as "연결 중" is why a real 40s socket drop showed no
+  // offline banner at all (measured): ChatShell gates the banner on
+  // `disconnected`, which never arrived. Once we have been connected, not being
+  // connected is being disconnected, and every rail-down surface (the banner,
+  // the sidebar pill, the composer bar, the clocks) keys off that one fact.
+  let everConnected = false;
+  client.on("connecting", () =>
+    onStatus(everConnected ? "disconnected" : "connecting")
+  );
+  client.on("connected", () => {
+    everConnected = true;
+    onStatus("connected");
+  });
   client.on("disconnected", () => onStatus("disconnected"));
   client.connect();
 
@@ -179,49 +327,33 @@ export function createRealtime(
   // timeline watch the same channel and the user changes route.
   const shared = new Map<string, { sub: Subscription; refs: number }>();
 
-  function subscribeChannel(
-    workspaceId: string,
-    channelId: string,
-    handlers: {
-      onSubscribed: (recovered: boolean) => void;
-      onMessage: (event: MessageNewEvent) => void;
-    }
+  /**
+   * Refcounted attach to one Centrifugo channel. `wire` registers the caller's
+   * handlers and returns the matching detach, so the ownership rule lives in
+   * one place for both the message rail and the agent progress rail.
+   */
+  function attach(
+    name: string,
+    options: { recoverable: boolean; positioned: boolean },
+    wire: (sub: Subscription) => () => void
   ): () => void {
-    const name = centrifugoChannelName(workspaceId, channelId);
     let entry = shared.get(name);
     if (!entry) {
       const sub =
-        client.getSubscription(name) ??
-        client.newSubscription(name, { recoverable: true, positioned: true });
+        client.getSubscription(name) ?? client.newSubscription(name, options);
       entry = { sub, refs: 0 };
       shared.set(name, entry);
     }
     entry.refs += 1;
     const sub = entry.sub;
-
-    const onSubscribed = (ctx: { recovered?: boolean }) =>
-      handlers.onSubscribed(ctx.recovered === true);
-    const onPublication = (ctx: { data?: unknown }) => {
-      const event = ctx.data as MessageNewEvent | undefined;
-      if (
-        event &&
-        (event.type === "message.new" || event.type === "message.edited") &&
-        event.payload
-      ) {
-        handlers.onMessage(event);
-      }
-    };
-
-    sub.on("subscribed", onSubscribed);
-    sub.on("publication", onPublication);
+    const detach = wire(sub);
     if (sub.state !== "subscribed") sub.subscribe();
 
     let released = false;
     return () => {
       if (released) return; // a double cleanup must not release someone else's ref
       released = true;
-      sub.off("subscribed", onSubscribed);
-      sub.off("publication", onPublication);
+      detach();
       const current = shared.get(name);
       if (!current || current.sub !== sub) return;
       current.refs -= 1;
@@ -232,8 +364,85 @@ export function createRealtime(
     };
   }
 
+  function subscribeChannel(
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onSubscribed: (recovered: boolean) => void;
+      onMessage: (event: MessageNewEvent) => void;
+    }
+  ): () => void {
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onSubscribed = (ctx: { recovered?: boolean }) =>
+          handlers.onSubscribed(ctx.recovered === true);
+        const onPublication = (ctx: { data?: unknown }) => {
+          const event = ctx.data as MessageNewEvent | undefined;
+          if (
+            event &&
+            (event.type === "message.new" || event.type === "message.edited") &&
+            event.payload
+          ) {
+            handlers.onMessage(event);
+          }
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
+  function subscribeAgent(
+    workspaceId: string,
+    channelId: string,
+    agentMemberId: string,
+    handlers: { onEvent: (event: AgentProgressEvent) => void }
+  ): () => void {
+    // Asked for without recovery, unlike the message rail: progress is an
+    // ephemeral projection of a run Postgres already owns, so a gap is nothing
+    // to heal. The server does not honour that request (`agent` is
+    // force_recovery in infra/centrifugo.json), which is why the flags alone
+    // would have been a comment rather than a defence, and why the replay gate
+    // below does the actual work: a reconnect after a laptop sleep replays every
+    // frame of turns that finished minutes ago, and folding those in would put a
+    // dead turn back on the sidebar with a fresh clock.
+    return attach(
+      centrifugoAgentChannelName(workspaceId, channelId, agentMemberId),
+      { recoverable: false, positioned: false },
+      (sub) => {
+        const gate = createReplayGate();
+        const onSubscribed = (ctx: SubscribedRecoveryContext) =>
+          gate.onSubscribed(ctx);
+        const onPublication = (ctx: { data?: unknown }) => {
+          if (gate.isReplaying()) return;
+          const event = ctx.data as AgentProgressEvent | undefined;
+          if (
+            event &&
+            (event.type === "agent.status" || event.type === "agent.partial") &&
+            event.payload
+          ) {
+            handlers.onEvent(event);
+          }
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
     subscribeChannel,
+    subscribeAgent,
     dispose: () => {
       shared.clear();
       client.disconnect();

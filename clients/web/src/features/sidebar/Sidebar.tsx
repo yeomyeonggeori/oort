@@ -12,20 +12,29 @@ import {
   Users,
 } from "lucide-react";
 import type { Channel } from "@/lib/api";
+import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import {
+  agentTurnsInChannel,
+  useAgentWorkingSignals,
+  type AgentWorkingSignal,
+} from "@/features/agents/agentWorkingSignal";
+import {
+  agentTurnBadgeCopy,
+  UNKNOWN_AGENT_NAME,
+} from "@/features/agents/turnCopy";
+import { agentCoverage } from "@/features/agents/agentRail";
+import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import {
   channelLabelParts,
   memberFor,
+  memberNameParts,
   unreadFor,
   useChannels,
   useDirectory,
   useReadStates,
+  type Directory,
 } from "@/features/workspace/useWorkspace";
-import {
-  elapsedLabel,
-  useAgentWorkingSignals,
-  workingInChannel,
-} from "@/features/agents/agentWorkingSignal";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -44,19 +53,63 @@ import { Button } from "@/design/ui/button";
 // to the same surface, next to the DMs a person already has (parity G-3/G-4).
 // =============================================================================
 
-function AgentTurnBadge({ channelId }: { channelId: string }) {
-  const signals = useAgentWorkingSignals();
-  const active = workingInChannel(signals, channelId);
-  if (active.length === 0) return null;
-  const oldest = active[0];
+/**
+ * Turn pill on a channel row (R-1 §1, mac AgentWorkingChannelBadge). It says
+ * the state in words and carries no digits: the cell to its right is an unread
+ * count, and a second unlabelled number on the same row is a second count to
+ * anyone reading quickly. Who and how many is in the accessible name; the
+ * per-turn clocks are in the composer, which has the width for them.
+ *
+ * Two live states, two token colors (SKILL §9). 작업 중 is the agent acting and
+ * wears the agent token; 승인 대기 is the run stopped on a decision only the
+ * reader can make, which is a status, not an identity, so it wears --warn and
+ * an outline instead of a fill. The word carried both states at 240px, and one
+ * word is a thin difference between "nothing for you to do" and "this is
+ * blocked on you".
+ */
+function AgentTurnBadge({
+  turns,
+  directory,
+  live,
+}: {
+  turns: AgentWorkingSignal[];
+  directory: Directory;
+  /** The realtime rail is connected, so this state is confirmed, not remembered. */
+  live: boolean;
+}) {
+  const copy = agentTurnBadgeCopy(turns, (memberId) =>
+    memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME)
+  );
+  if (!copy) return null;
+  const label = live
+    ? copy.label
+    : `${copy.label} 연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.`;
   return (
     <span
-      className="shrink-0 text-timestamp text-ink-muted"
-      data-numeric
+      className={cn(
+        "shrink-0 rounded-sm px-1",
+        // Offline (SKILL §5): the pill keeps saying what was last confirmed, but
+        // it drops the status color, so a remembered claim does not sit on the
+        // row looking exactly as live as a confirmed one.
+        !live && "text-ink-muted",
+        live && copy.state === "working" && "bg-agent-soft text-agent",
+        live && copy.state === "awaiting_approval" && "border border-warn text-warn",
+        // Last, and deliberately: tailwind-merge files an unknown text-* class
+        // under text-COLOR, so a role written before a color is deleted from the
+        // output. cn() now knows these five roles (design/lib/cn.ts) and this
+        // order survives either way.
+        "text-timestamp"
+      )}
       data-testid="agent-turn-badge"
-      title="에이전트가 턴을 진행 중입니다"
+      data-live={live ? "" : undefined}
+      data-state={copy.state}
+      title={label}
     >
-      {elapsedLabel(oldest.startedAtMs, Date.now())}
+      {/* A bare aria-label on a generic span is not reliably announced, so the
+          sentence is real (hidden) text, and the compact half is hidden from
+          assistive tech rather than read twice. */}
+      <span className="sr-only">{label}</span>
+      <span aria-hidden="true">{copy.text}</span>
     </span>
   );
 }
@@ -77,6 +130,27 @@ export function Sidebar({
 
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
+
+  // No clock in the sidebar at all: the pill is a word, so nothing here ticks.
+  // Staleness is still checked, from the render's own clock, and the rail's 15s
+  // sweep re-publishes the store, which is what re-renders this list.
+  const turnSignals = useAgentWorkingSignals();
+  const railLive = connStatus === "connected";
+  const nowMs = Date.now();
+
+  // What the subscription cap left out (agentRail MAX_AGENT_SUBSCRIPTIONS).
+  // Same pure function and the same inputs the rail subscribes with, so the two
+  // cannot disagree about which rows are actually being watched.
+  const uncovered = useMemo(
+    () => agentCoverage([...channels, ...dms], directoryQuery.directory.members).uncovered,
+    [channels, dms, directoryQuery.directory.members]
+  );
+
+  // The capture seam (?agentwork=), if this build has one at all. The turns on
+  // screen are then fabricated, so the surface says so rather than passing for
+  // real agent activity (the ?stress= path renames the channel header for the
+  // same reason).
+  const fixtureMode = agentTurnFixtureMode();
 
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
@@ -152,7 +226,13 @@ export function Sidebar({
         agent={label.isAgent}
         unreadCount={read?.unreadCount ?? 0}
         mentionCount={read?.mentionCount ?? 0}
-        trailing={<AgentTurnBadge channelId={channel.id} />}
+        trailing={
+          <AgentTurnBadge
+            turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
+            directory={directoryQuery.directory}
+            live={railLive}
+          />
+        }
         testId="channel-item"
         dataAttrs={{ "data-channel-id": channel.id }}
       />
@@ -179,6 +259,17 @@ export function Sidebar({
             <span className="text-meta text-ink-muted">⌘K</span>
           </Button>
         </div>
+
+        {fixtureMode !== null && (
+          <p
+            className="border-b border-line px-2 py-1 text-meta text-warn"
+            data-testid="agent-fixture-notice"
+          >
+            {fixtureMode === "live"
+              ? "에이전트 활동 픽스처: 아래 턴과 연결 상태는 실제가 아닙니다."
+              : "에이전트 활동 픽스처: 아래 턴은 실제가 아니고 레일은 끊긴 상태입니다."}
+          </p>
+        )}
 
         <div
           ref={navRef}
@@ -236,6 +327,25 @@ export function Sidebar({
               >
                 {dms.map(rowFor)}
               </SidebarSection>
+            )}
+
+            {/* The turn pill covers a bounded number of (channel, agent) pairs.
+                Past that bound a row's empty trailing cell means "not watched",
+                which looks exactly like "quiet" and is not the same fact, so the
+                list names the gap instead of leaving the reader to assume the
+                friendlier reading (SKILL §9). Renders nothing until the cap
+                actually cuts, which no workspace this size reaches. */}
+            {uncovered.length > 0 && (
+              <p
+                className="px-4 py-2 text-meta text-ink-muted"
+                data-testid="agent-coverage-notice"
+                title={`에이전트 활동 미표시: ${uncovered
+                  .map((c) => c.name ?? c.id)
+                  .join(", ")}`}
+              >
+                에이전트 활동 표시가 한도에 닿았습니다. 위 목록 아래쪽 채널 일부는
+                작업 중이어도 표시되지 않습니다.
+              </p>
             )}
           </nav>
         </div>
