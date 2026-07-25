@@ -19,8 +19,9 @@
 // carries just a boolean plus a 4-character tail.
 // =============================================================================
 
-import { ApiError, getAccessToken } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import { API_BASE } from "@/lib/env";
+import { getAccessToken } from "@/lib/session";
 
 async function settingsRequest<T>(
   path: string,

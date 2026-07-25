@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/env";
-import { getAccessToken } from "@/lib/api";
+import { getAccessToken } from "@/lib/session";
 import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
 
 // =============================================================================
