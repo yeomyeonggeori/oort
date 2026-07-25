@@ -68,17 +68,30 @@ additions, each of which also has to work when the answer is "nothing to show":
   Submitting redeems it through `POST /v1/join`, with display name and handle
   derived from the email exactly as the mac client derives them.
 - **LAN discovery card.** `_momo._tcp` sightings reported by the shell, offered
-  only when the TXT `base` key carries a usable URL. Browsers have no mDNS, so
-  the card never renders there; nothing found is silence, not an error state.
+  only when the advertised `baseUrl` is a usable http(s) URL. Browsers have no
+  mDNS, so the card never renders there; nothing found is silence, not an error
+  state.
 
-The shell contract this consumes (web half of MOMO-603, `src/lib/tauri.ts`):
+The shell contract this consumes (web half of MOMO-603, `src/lib/tauri.ts`).
+**The Rust side owns it** — `clients/desktop/README.md` "Bridge contract" is the
+canonical statement and `src-tauri/src/{deeplink,discovery}.rs` the source:
 
 | direction | name | payload |
 |---|---|---|
-| event | `deep-link://new-url` | `string[]` (a bare string / `{urls}` also read) |
-| event | `mdns://servers-changed` | `[{ name?, host?, port?, txt: { base } }]` (`{servers: […]}` also read) |
-| command | `plugin:deep-link\|get_current` | `-> string[] \| null` (cold start) |
-| command | `mdns_start` / `mdns_stop` | best effort, absence is not an error |
+| event | `momo:deep-link` | `{ url, server, code }` — one accepted link |
+| event | `momo:discovery` | `{ servers: [{ baseUrl, displayHost, instanceName }], scanning }` — the FULL current set every time |
+| command | `deep_link_take_pending` | `-> DeepLinkJoin[]`, drains the cold-start buffer |
+| command | `discovery_start({ timeoutMs })` / `discovery_stop` | never rejects to the UI; the shell stops itself at the timeout |
+
+Order matters for both: **subscribe first, then drain/start.** A cold start
+delivers the URL long before React mounts, so the shell buffers it and
+`takePendingDeepLinks()` is the handshake that releases it — draining before
+`onDeepLink()` resolves releases the buffer to nobody, and draining twice
+returns nothing the second time.
+
+The shell deliberately does **not** validate `server`; the connect surface
+re-validates it (`features/auth/deepLink.ts`) so that rule keeps a single owner,
+exactly as the mac client does it.
 
 **Still open (spike finding 3 below, not changed by this ticket):** the REST
 server sends no CORS headers and does not answer preflight (verified: `OPTIONS
