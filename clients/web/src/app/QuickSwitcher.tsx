@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import {
@@ -8,6 +8,7 @@ import {
   Inbox,
   Lock,
   MessageSquare,
+  Plus,
   Settings,
   User,
   Users,
@@ -16,11 +17,17 @@ import { useSession } from "@/app/session";
 import {
   channelLabelParts,
   dmPeer,
+  memberFor,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
 import { switcherPeople } from "@/features/directory/model";
 import { useOpenDm } from "@/features/directory/useOpenDm";
+import { canCreateChannelNow } from "@/features/channels/model";
+import {
+  useCreateChannelOpen,
+  useOpenCreateChannel,
+} from "@/features/channels/useCreateChannel";
 import { InlineBanner } from "@/features/common/States";
 
 // =============================================================================
@@ -65,9 +72,24 @@ export function QuickSwitcher({
   const { session, workspaceId } = useSession();
   const navigate = useNavigate();
   const { groups } = useChannels(workspaceId);
-  const { directory } = useDirectory(workspaceId);
+  const directoryQuery = useDirectory(workspaceId);
+  const { directory } = directoryQuery;
   const dm = useOpenDm();
   const { clearError } = dm;
+
+  // 채널 만들기 has a seat in the palette because ⌘K is the house grammar for
+  // "every action has a keyboard path" (SKILL §6) and this action only had Tab.
+  // Same permission rule as the sidebar +, from the same function, so the
+  // palette never offers what the server would answer with 403, and the same
+  // silence while the roster is still in flight (R2 M5).
+  const openCreateChannel = useOpenCreateChannel();
+  const canCreate = canCreateChannelNow(
+    !directoryQuery.isPending,
+    memberFor(directory, session.member.id)?.role
+  );
+
+  // 폼 다이얼로그가 떠 있는 동안 전역 단축키는 물러선다 (R2 M4).
+  const formDialogOpen = useCreateChannelOpen();
 
   // Everyone already reachable as a DM row. Those rows are the conversation,
   // so the 사람 section below lists the people you have not talked to yet.
@@ -94,9 +116,31 @@ export function QuickSwitcher({
     if (!open) clearError();
   }, [open, clearError]);
 
+  // 닫으면 캐럿이 원래 있던 곳으로 돌아간다. cmdk의 Command.Dialog는 Radix
+  // Content에 onCloseAutoFocus를 넘길 통로가 없고, Radix 기본 복귀는 존재하지
+  // 않는 DialogTrigger를 향하므로 팔레트를 닫은 사람은 문서 처음부터 다시 Tab을
+  // 시작해야 했다. 여는 순간의 activeElement를 렌더 중에 잡아둔다: 이 시점은
+  // cmdk의 포커스 스코프가 아직 아무것도 옮기기 전이다.
+  const restoreRef = useRef<HTMLElement | null>(null);
+  if (open && restoreRef.current === null && typeof document !== "undefined") {
+    const active = document.activeElement;
+    restoreRef.current = active instanceof HTMLElement ? active : null;
+  }
+  useEffect(() => {
+    if (open) return;
+    const target = restoreRef.current;
+    restoreRef.current = null;
+    if (target?.isConnected) target.focus();
+  }, [open]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!event.metaKey && !event.ctrlKey) return;
+      // 모달 폼이 떠 있으면 이 셋 중 어느 것도 발화하지 않는다. 팔레트는 폼
+      // 위에 겹쳐 뜨면서 캐럿을 가져갔고, 거기서 채널을 고르면 폼을 열어둔 채
+      // 다른 채널로 이동했다. ⌘⇧K와 ⌘,도 같은 이유로 같은 사고를 낸다.
+      // 폼을 닫는 키는 Esc 하나면 충분하다 (R2 M4).
+      if (formDialogOpen) return;
       // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). It lands on the member
       // directory, which is where a DM starts, and the directory puts the caret
       // in its search field on arrival (DirectoryRoute), so this shortcut ends
@@ -121,20 +165,25 @@ export function QuickSwitcher({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onOpenChange, navigate]);
+  }, [open, onOpenChange, navigate, formDialogOpen]);
 
   function go(path: string) {
     onOpenChange(false);
     navigate(path);
   }
 
+  // 채널 만들기 다이얼로그와 같은 앵커(left-1/2 top-8 max-w-pane-md)에 번갈아
+  // 뜨는 오버레이라, 스크림도 라운드도 폭도 하나여야 한다. rounded-lg = 다이얼로그가
+  // 토큰 역할표의 답이고(references/tokens.md §4), bg-scrim은 다크에서 배경을
+  // 오히려 밝히던 bg-ink/20을 대신하며, 512px은 스톡 스케일의 이름 없는 숫자가
+  // 아니라 이름을 가진 오버레이 측정선이다(R2 M7).
   return (
     <Command.Dialog
       open={open}
       onOpenChange={onOpenChange}
       label="검색과 이동"
-      overlayClassName="fixed inset-0 bg-ink/20"
-      contentClassName="fixed left-1/2 top-8 w-full max-w-lg -translate-x-1/2 rounded-md border border-line bg-surface-raised text-ink shadow-lg"
+      overlayClassName="fixed inset-0 bg-scrim"
+      contentClassName="fixed left-1/2 top-8 w-full max-w-pane-md -translate-x-1/2 rounded-lg border border-line bg-surface-raised text-ink shadow-lg"
       data-testid="quick-switcher"
     >
       <Command.Input
@@ -183,6 +232,27 @@ export function QuickSwitcher({
             설정
           </Command.Item>
         </Command.Group>
+
+        {canCreate && (
+          <Command.Group heading="만들기">
+            <Command.Item
+              className={itemClass}
+              value="채널 만들기 새 채널 create channel"
+              data-testid="switcher-create-channel"
+              onSelect={() => {
+                onOpenChange(false);
+                // 한 프레임 뒤에 연다. 같은 커밋에서 팔레트가 닫히고 폼이
+                // 열리면 두 포커스 스코프가 겹쳐, 폼이 "무엇이 나를 열었나"로
+                // 사라지는 중인 팔레트 입력을 잡는다. 팔레트가 먼저 캐럿을
+                // 제자리에 돌려놓은 다음 열려야 닫을 때도 그 자리로 돌아간다.
+                requestAnimationFrame(openCreateChannel);
+              }}
+            >
+              <Plus className="size-4 opacity-70" />
+              채널 만들기
+            </Command.Item>
+          </Command.Group>
+        )}
 
         <Command.Group heading="채널">
           {groups.channels.map((channel) => (

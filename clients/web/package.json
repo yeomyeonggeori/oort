@@ -17,9 +17,12 @@
     "gate:seq": "node gates/gate-seq.mjs",
     "gate:resume": "node gates/gate-resume.mjs",
     "gate:shell": "node gates/gate-shell-layout.mjs",
-    "capture:design": "node scripts/capture-screens.mjs"
+    "build:design": "tsc -b && vite build --mode design",
+    "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
+    "capture:usage": "node scripts/capture-usage.mjs"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-scroll-area": "^1.2.0",
     "@radix-ui/react-slot": "^1.1.0",
     "@tanstack/react-query": "^5.59.0",

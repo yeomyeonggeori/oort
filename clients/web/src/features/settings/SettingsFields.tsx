@@ -35,6 +35,36 @@ export function SectionShell({
 }
 
 /**
+ * A block inside a section. One settings section can govern more than one thing
+ * (코드 실행 호스트 governs the engine, the host-loss policy and the registry),
+ * and three h2 sections in the nav for one subject would be worse than one
+ * section with a real heading hierarchy inside it.
+ */
+export function Subsection({
+  title,
+  lines,
+  children,
+}: {
+  title: string;
+  lines?: string[];
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-px">
+        <h3 className="text-body font-semibold text-ink">{title}</h3>
+        {lines?.map((line) => (
+          <p key={line} className="text-meta text-ink-muted">
+            {line}
+          </p>
+        ))}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
  * Label above control, not a fixed label column: a Korean label and a full URL
  * do not share one width without truncating or an off-grid fixed size.
  */
@@ -77,7 +107,15 @@ const CHIP_TONE: Record<ChipTone, string> = {
   muted: "border-line text-ink-muted",
 };
 
-/** Text-first status chip. Never pulses, never carries meaning in color alone. */
+/**
+ * Text-first status chip. Never pulses, never carries meaning in color alone.
+ *
+ * The 11px `text-timestamp` used to be deleted here by the class merge, which
+ * files an unknown `text-*` as a color and let `text-ok` replace it: the chip
+ * rendered at whatever it inherited (14px measured). `cn` now knows momo's text
+ * roles, so a role replaces a role and a color replaces a color. See
+ * `src/design/lib/cn.ts`.
+ */
 export function StatusChip({
   tone,
   children,
@@ -167,6 +205,9 @@ export function ChoiceRadios({
   value,
   onChange,
   disabled,
+  busy,
+  hint,
+  testId,
 }: {
   name: string;
   legend: string;
@@ -174,9 +215,29 @@ export function ChoiceRadios({
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  /**
+   * A write is in flight. This is deliberately NOT `disabled`: disabling a
+   * focused control drops focus to <body>, and a keyboard user who changes a
+   * setting would be thrown to the top of the panel on every save. The group
+   * announces itself busy and keeps the focus ring where the person left it.
+   */
+  busy?: boolean;
+  /** Save state in words: 상속 중 / 저장 중 / 아직 저장되지 않음. */
+  hint?: string;
+  testId?: string;
 }) {
+  const hintId = hint ? `${name}-hint` : undefined;
   return (
-    <fieldset className="flex min-w-0 flex-col gap-1" disabled={disabled}>
+    <fieldset
+      className="flex min-w-0 flex-col gap-1"
+      disabled={disabled}
+      aria-describedby={hintId}
+      aria-busy={busy || undefined}
+      data-testid={testId}
+    >
+      {/* The legend names the group, so two of these on one panel are two
+          distinct radiogroups to a screen reader instead of two anonymous
+          lists of the same three option names. */}
       <legend className="pb-1 text-meta text-ink-muted">{legend}</legend>
       {/* One bordered group with hairline rows, not a card per option: a box
           around every row is the web-card AI-tell and costs density. */}
@@ -206,7 +267,155 @@ export function ChoiceRadios({
           </label>
         ))}
       </div>
+      {hint && (
+        <p id={hintId} role="status" className="text-meta text-ink-muted">
+          {hint}
+        </p>
+      )}
     </fieldset>
+  );
+}
+
+export interface SelectChoice {
+  id: string;
+  label: string;
+  /**
+   * Rendered but not selectable. A stored value the server would now reject
+   * (a revoked host, an id that left the registry) still has to appear, or the
+   * control renders blank and the panel stops saying what is in force.
+   */
+  disabled?: boolean;
+}
+
+/**
+ * Label above a full-width native select.
+ *
+ * Full width is the point, not a shrug: a select sized to its content lets the
+ * LONGEST OPTION decide the column, so two of these in one panel line up at two
+ * different left edges depending on which hosts happen to be registered that
+ * day. Width belongs to the panel, the value does not.
+ *
+ * Native `<select>`: this bundle carries no Radix Select, and the platform
+ * control already gives type-ahead, arrow keys, the collapsed value as its own
+ * label, and a popup that a screen reader announces as a listbox. The only
+ * thing added here is the token skin.
+ */
+export function SelectField({
+  id,
+  label,
+  ariaLabel,
+  hint,
+  hintTone = "muted",
+  value,
+  choices,
+  onChange,
+  disabled,
+  busy,
+  testId,
+}: {
+  id: string;
+  label: string;
+  /**
+   * Full accessible name when the visible label repeats across scopes ("재개
+   * 대상" twice). Must contain the visible label so speech input still matches.
+   */
+  ariaLabel?: string;
+  hint?: ReactNode;
+  /**
+   * `danger` when the value in the control is one the server will refuse: that
+   * is an error state living where the problem is (SKILL §5), not a footnote,
+   * so it takes --danger and role="alert" instead of muted meta text. The same
+   * panel already draws save failures that way, and one panel gets one rule.
+   */
+  hintTone?: "muted" | "danger";
+  value: string;
+  choices: SelectChoice[];
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  /** In flight. Never disables: see the note on ChoiceRadios.busy. */
+  busy?: boolean;
+  testId?: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="text-meta text-ink-muted">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={ariaLabel}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        aria-busy={busy || undefined}
+        data-testid={testId}
+        className="h-control-sm w-full min-w-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {choices.map((choice) => (
+          <option key={choice.id} value={choice.id} disabled={choice.disabled}>
+            {choice.label}
+          </option>
+        ))}
+      </select>
+      {hint && (
+        <p
+          id={`${id}-hint`}
+          role={hintTone === "danger" ? "alert" : "status"}
+          className={cn(
+            "text-meta",
+            hintTone === "danger" ? "text-danger" : "text-ink-muted"
+          )}
+          data-hint-tone={hintTone}
+        >
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The commit control of an explicitly saved settings block.
+ *
+ * `aria-disabled` rather than `disabled`, because this button is the one that
+ * turns itself off: the moment its own save lands nothing is dirty any more, and
+ * a FOCUSED element that becomes `disabled` drops focus to <body>, throwing a
+ * keyboard user back to the top of the panel on every successful save. It stays
+ * in the tab order, announces itself unavailable, and the click is a no-op.
+ */
+export function SaveButton({
+  label,
+  busyLabel = "저장 중",
+  canSave,
+  busy,
+  onSave,
+  testId,
+}: {
+  /** Verb-first and scope-bearing: two blocks on one panel need two names. */
+  label: string;
+  busyLabel?: string;
+  canSave: boolean;
+  busy?: boolean;
+  onSave: () => void;
+  testId?: string;
+}) {
+  const blocked = !canSave || Boolean(busy);
+  return (
+    <Button
+      type="button"
+      size="sm"
+      aria-disabled={blocked || undefined}
+      aria-busy={busy || undefined}
+      className={cn(blocked && "opacity-50")}
+      onClick={() => {
+        if (blocked) return;
+        onSave();
+      }}
+      data-testid={testId}
+    >
+      {busy ? busyLabel : label}
+    </Button>
   );
 }
 
@@ -217,10 +426,23 @@ export function ChoiceRadios({
 export function CopyButton({
   value,
   label = "복사",
+  subject,
   testId,
 }: {
   value: string;
   label?: string;
+  /**
+   * What the copied value belongs to. One list renders one copy button per row,
+   * and three buttons all named "호스트 ID 복사" are three identical stops in the
+   * tab order. The visible label stays short; the accessible name carries the
+   * row.
+   *
+   * It has to be something that is actually unique per row: a display name is
+   * not, because the work host registry writes a NEW row on every pairing and
+   * the live workspace holds three rows called "성재 iMac, 집 작업실". Callers
+   * pass the discriminator with the name (see `workHostIdTail`).
+   */
+  subject?: string;
   testId?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -240,15 +462,21 @@ export function CopyButton({
     timer.current = window.setTimeout(() => setCopied(false), 2000);
   }
 
+  // The visible text carries the result, so the accessible name has to move
+  // with it: a fixed aria-label would leave a screen reader on "복사" after the
+  // copy already happened.
+  const text = copied ? `${label}됨` : label;
+
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
       onClick={copy}
+      aria-label={subject ? `${subject} ${text}` : undefined}
       data-testid={testId}
     >
-      {copied ? "복사됨" : label}
+      {text}
     </Button>
   );
 }

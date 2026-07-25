@@ -1,0 +1,124 @@
+{
+  "_note": "GET /v1/workspaces/:ws/usage/summary contract fixtures (AX-7 1층, MOMO-616). Source of truth for usageModel.test.ts AND scripts/capture-usage.mjs, so the screenshots show exactly the payload the tests assert. Contract: docs/planning/handoffs/2026-07-25-usage-summary-contract.md. UUIDs are upper-cased here on purpose: the server returns them that way and the client must lower-case on parse.",
+
+  "normal": {
+    "range": {
+      "from": "2026-06-25T00:00:00Z",
+      "to": "2026-07-25T00:00:00Z",
+      "bucket": "day"
+    },
+    "totals": {
+      "costMicroUsd": 18432500,
+      "estimatedMicroUsd": 2140000,
+      "promptTokens": 4812336,
+      "completionTokens": 391204
+    },
+    "buckets": [
+      { "start": "2026-07-16T00:00:00Z", "costMicroUsd": 1240000, "promptTokens": 323720, "completionTokens": 26320 },
+      { "start": "2026-07-17T00:00:00Z", "costMicroUsd": 980500, "promptTokens": 256000, "completionTokens": 20800 },
+      { "start": "2026-07-18T00:00:00Z", "costMicroUsd": 2310000, "promptTokens": 603000, "completionTokens": 49000 },
+      { "start": "2026-07-19T00:00:00Z", "costMicroUsd": 145000, "promptTokens": 37850, "completionTokens": 3080 },
+      { "start": "2026-07-20T00:00:00Z", "costMicroUsd": 0, "promptTokens": 0, "completionTokens": 0 },
+      { "start": "2026-07-21T00:00:00Z", "costMicroUsd": 3420000, "promptTokens": 892900, "completionTokens": 72600 },
+      { "start": "2026-07-22T00:00:00Z", "costMicroUsd": 2105000, "promptTokens": 549600, "completionTokens": 44680 },
+      { "start": "2026-07-23T00:00:00Z", "costMicroUsd": 1890000, "promptTokens": 493400, "completionTokens": 40120 },
+      { "start": "2026-07-24T00:00:00Z", "costMicroUsd": 2960000, "promptTokens": 772900, "completionTokens": 62840 },
+      { "start": "2026-07-25T00:00:00Z", "costMicroUsd": 3382000, "promptTokens": 882966, "completionTokens": 71764 }
+    ],
+    "byModel": [
+      { "model": "claude-opus-5", "costMicroUsd": 12100000, "promptTokens": 2940112, "completionTokens": 240118 },
+      { "model": "gpt-5.6-sol", "costMicroUsd": 4832500, "promptTokens": 1502884, "completionTokens": 118442 },
+      { "model": "claude-haiku-4.5", "costMicroUsd": 1500000, "promptTokens": 369340, "completionTokens": 32644 }
+    ],
+    "byAgent": [
+      {
+        "agentMemberId": "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90",
+        "displayName": "김인턴",
+        "costMicroUsd": 11204000,
+        "promptTokens": 2988402,
+        "completionTokens": 244806
+      },
+      {
+        "agentMemberId": "019F94E3-9C32-7BF1-A4D5-6E2B3C7D8E01",
+        "displayName": "hermes",
+        "costMicroUsd": 7228500,
+        "promptTokens": 1823934,
+        "completionTokens": 146398
+      }
+    ],
+    "budget": {
+      "grain": "workspace",
+      "limitMicroUsd": 50000000,
+      "spentMicroUsd": 18432500,
+      "reservedMicroUsd": 1250000,
+      "state": "normal",
+      "periodStart": "2026-07-01T00:00:00Z"
+    }
+  },
+
+  "emptyPeriod": {
+    "range": {
+      "from": "2026-07-18T00:00:00Z",
+      "to": "2026-07-25T00:00:00Z",
+      "bucket": "day"
+    },
+    "totals": {
+      "costMicroUsd": 0,
+      "estimatedMicroUsd": 0,
+      "promptTokens": 0,
+      "completionTokens": 0
+    },
+    "buckets": [],
+    "byModel": [],
+    "byAgent": [],
+    "budget": null
+  },
+
+  "budgetHardLimit": {
+    "range": {
+      "from": "2026-07-18T00:00:00Z",
+      "to": "2026-07-25T00:00:00Z",
+      "bucket": "day"
+    },
+    "totals": {
+      "costMicroUsd": 9420000,
+      "estimatedMicroUsd": 0,
+      "promptTokens": 2410880,
+      "completionTokens": 198640
+    },
+    "buckets": [
+      { "start": "2026-07-22T00:00:00Z", "costMicroUsd": 1820000, "promptTokens": 465000, "completionTokens": 38400 },
+      { "start": "2026-07-23T00:00:00Z", "costMicroUsd": 2640000, "promptTokens": 676000, "completionTokens": 55600 },
+      { "start": "2026-07-24T00:00:00Z", "costMicroUsd": 3110000, "promptTokens": 796000, "completionTokens": 65500 },
+      { "start": "2026-07-25T00:00:00Z", "costMicroUsd": 1850000, "promptTokens": 473880, "completionTokens": 39140 }
+    ],
+    "byModel": [
+      { "model": "claude-opus-5", "costMicroUsd": 6980000, "promptTokens": 1712400, "completionTokens": 141220 },
+      { "model": "gpt-5.6-sol", "costMicroUsd": 2440000, "promptTokens": 698480, "completionTokens": 57420 }
+    ],
+    "byAgent": [
+      {
+        "agentMemberId": "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90",
+        "displayName": "김인턴",
+        "costMicroUsd": 6120000,
+        "promptTokens": 1560400,
+        "completionTokens": 128900
+      },
+      {
+        "agentMemberId": "019F94E3-9C32-7BF1-A4D5-6E2B3C7D8E01",
+        "displayName": "hermes",
+        "costMicroUsd": 3300000,
+        "promptTokens": 850480,
+        "completionTokens": 69740
+      }
+    ],
+    "budget": {
+      "grain": "workspace",
+      "limitMicroUsd": 50000000,
+      "spentMicroUsd": 47800000,
+      "reservedMicroUsd": 2400000,
+      "state": "hard_limit",
+      "periodStart": "2026-07-01T00:00:00Z"
+    }
+  }
+}

@@ -6,6 +6,8 @@
 // from the Swift DTOs, not guessed:
 //   server/Sources/MomoServer/Routes/ProviderLinkRoutes.swift   (link + test)
 //   server/Sources/MomoServer/Routes/WorkHostEngineRoutes.swift (engine)
+//   server/Sources/MomoServer/Routes/WorkTierPolicyRoutes.swift (tier policy)
+//   server/Sources/MomoServer/Routes/WorkHostRoutes.swift       (host registry)
 //   server/Sources/MomoServer/Routes/WorkspaceRoutes.swift      (create/read)
 //   server/Sources/MomoServer/Routes/InviteRoutes.swift         (invites)
 //
@@ -136,6 +138,95 @@ export function putWorkHostEngine(engine: string): Promise<WorkHostEngine> {
   });
 }
 
+// --- 티어 정책: GET/PUT /v1/workspaces/:ws/work-tier-policy[/me] ------------
+//
+// ADR-0125 D11 policy ledger, transcribed from WorkTierPolicyRoutes.swift.
+// Two scopes share one shape: `/me` is the signed-in member's override and the
+// bare path is the workspace default (owner/admin only, 403 otherwise).
+// `inherited: true` means no member row exists and the workspace default is the
+// value in force, so the panel says that instead of implying a saved override.
+
+export type WorkTierScope = "member" | "workspace";
+
+/** `WorkTierPolicyDTO`. `mode` is t1_only | ask | auto; nothing else validates. */
+export interface WorkTierPolicy {
+  workspaceId: string;
+  /** Absent on the workspace default row. Server casing varies: use uuidEq. */
+  memberId?: string;
+  mode: string;
+  /** Only ever set in auto mode: "cloud" or a lower-cased work host id. */
+  autoTarget?: string;
+  inherited: boolean;
+  updatedAtMs?: number;
+}
+
+/** Closed-world PUT body. autoTarget outside auto mode is a 400 by contract. */
+export interface WorkTierPolicyInput {
+  mode: string;
+  autoTarget?: string;
+}
+
+function tierPolicyPath(workspaceId: string, scope: WorkTierScope): string {
+  const base = `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-tier-policy`;
+  return scope === "member" ? `${base}/me` : base;
+}
+
+export async function fetchWorkTierPolicy(
+  workspaceId: string,
+  scope: WorkTierScope
+): Promise<WorkTierPolicy> {
+  const res = await settingsRequest<{ workTierPolicy: WorkTierPolicy }>(
+    tierPolicyPath(workspaceId, scope)
+  );
+  return res.workTierPolicy;
+}
+
+export async function putWorkTierPolicy(
+  workspaceId: string,
+  scope: WorkTierScope,
+  input: WorkTierPolicyInput
+): Promise<WorkTierPolicy> {
+  const res = await settingsRequest<{ workTierPolicy: WorkTierPolicy }>(
+    tierPolicyPath(workspaceId, scope),
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+  return res.workTierPolicy;
+}
+
+// --- 등록된 호스트: GET /v1/workspaces/:ws/work-hosts -----------------------
+
+/**
+ * `WorkHostDTO`. The registry is a poll, not a realtime event: `online` is
+ * computed by the server from a 90 second heartbeat window, so the client never
+ * decides liveness on its own clock.
+ *
+ * `publicKey` is in the payload and is deliberately never rendered: it is the
+ * host's signing identity, not something an operator acts on, and a settings
+ * row is not a key dump. Revoked rows stay in the list (the server does not
+ * filter them), which is why the panel has a 해지됨 state.
+ */
+export interface WorkHost {
+  id: string;
+  workspaceId: string;
+  scope: string;
+  ownerMemberId: string;
+  type: string;
+  displayName: string;
+  publicKey: string;
+  capabilities: Record<string, boolean>;
+  lastSeenAtMs?: number;
+  revokedAtMs?: number;
+  createdAtMs: number;
+  online: boolean;
+}
+
+export async function listWorkHosts(workspaceId: string): Promise<WorkHost[]> {
+  const res = await settingsRequest<{ workHosts: WorkHost[] }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-hosts`
+  );
+  return res.workHosts;
+}
+
 // --- 워크스페이스: POST /v1/workspaces, GET /v1/workspaces/:ws -------------
 
 export interface CreatedWorkspace {
@@ -217,5 +308,31 @@ export function createInvite(
   return settingsRequest<CreatedInvite>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/invites`,
     { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+// --- 사용량: GET /v1/workspaces/:ws/usage/summary ---------------------------
+
+/**
+ * Workspace usage summary (AX-7 1층, MOMO-616).
+ *
+ * Contract: docs/planning/handoffs/2026-07-25-usage-summary-contract.md, shared
+ * with the engine ticket MOMO-615. Every workspace member may read it, so there
+ * is no operator gate here; a 403 would still land on the shared error path.
+ *
+ * The body is returned untyped on purpose and shaped by `parseUsageSummary`
+ * (./usageModel), which is where the contract is pinned and unit tested.
+ */
+export function fetchUsageSummary(
+  workspaceId: string,
+  query: { from: string; to: string; bucket: string }
+): Promise<unknown> {
+  const params = new URLSearchParams({
+    from: query.from,
+    to: query.to,
+    bucket: query.bucket,
+  });
+  return settingsRequest<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/usage/summary?${params.toString()}`
   );
 }

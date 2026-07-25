@@ -11,6 +11,7 @@ import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
+import { forgetUsage } from "@/features/settings/usageModel";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
@@ -50,6 +51,9 @@ export function App() {
                 // the previous member survives into the next login.
                 signOut();
                 queryClient.clear();
+                // The 사용량 fallback lives outside the query cache (it has to
+                // outlive the failing query), so it is cleared by hand here.
+                forgetUsage();
               }}
             />
           }

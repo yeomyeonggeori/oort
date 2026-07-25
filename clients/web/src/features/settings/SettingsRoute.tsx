@@ -10,6 +10,7 @@ import { AccountSection } from "./AccountSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { InviteSection } from "./InviteSection";
 import { SectionShell } from "./SettingsFields";
+import { UsageSection } from "./UsageSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 
@@ -31,12 +32,25 @@ type SectionId =
   | "ai"
   | "code"
   | "workspace"
+  | "usage"
   | "members";
 
+/**
+ * The two groups are a SCOPE, not a permission: 나 is what only affects the
+ * signed-in member, 워크스페이스 is what the whole tenant shares. Permission is
+ * answered per panel by the server (each operator section swaps in the "서버
+ * 운영자에게 문의" notice on a 403), so the nav must not double as a gate.
+ *
+ * The group used to be called 운영, which read as operator-only and put 사용량
+ * behind an expectation that is false: every member may read the workspace's
+ * costs (AX-7 1층 계약: "워크스페이스에서 발생하는 과금은 사용자가 전부 트래킹").
+ * A member who can read a panel should not have to disbelieve the sidebar to
+ * open it.
+ */
 interface SectionMeta {
   id: SectionId;
   label: string;
-  group: "나" | "운영";
+  group: "나" | "워크스페이스";
   /** Only in the desktop shell: a browser tab has no app bundle to update. */
   desktopOnly?: boolean;
 }
@@ -45,16 +59,17 @@ const SECTIONS: SectionMeta[] = [
   { id: "account", label: "계정", group: "나" },
   { id: "notifications", label: "알림 규칙", group: "나" },
   { id: "updates", label: "업데이트", group: "나", desktopOnly: true },
-  { id: "ai", label: "AI 연결", group: "운영" },
-  { id: "code", label: "코드 실행 호스트", group: "운영" },
-  { id: "workspace", label: "워크스페이스", group: "운영" },
-  { id: "members", label: "멤버와 초대", group: "운영" },
+  { id: "ai", label: "AI 연결", group: "워크스페이스" },
+  { id: "code", label: "코드 실행 호스트", group: "워크스페이스" },
+  { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
+  { id: "usage", label: "사용량", group: "워크스페이스" },
+  { id: "members", label: "멤버와 초대", group: "워크스페이스" },
 ];
 
-const GROUPS: SectionMeta["group"][] = ["나", "운영"];
+const GROUPS: SectionMeta["group"][] = ["나", "워크스페이스"];
 
 export function SettingsRoute() {
-  const { workspaceId, connStatus } = useSession();
+  const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   // ?section=updates lets the sidebar badge (and a bug report) land on one
   // panel instead of "open 설정 and click the fourth item".
@@ -159,10 +174,21 @@ export function SettingsRoute() {
           {section === "notifications" && <NotificationRulesSection />}
           {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} />}
-          {section === "code" && <WorkHostSection offline={offline} />}
+          {section === "code" && (
+            <WorkHostSection
+              workspaceId={workspaceId}
+              memberId={session.member.id}
+              offline={offline}
+            />
+          )}
           {section === "workspace" && (
             <WorkspaceSection workspaceId={workspaceId} offline={offline} />
           )}
+          {/* No `offline` prop: 사용량 is a read, and the realtime rail being
+              down says nothing about whether this GET answers. The panel reads
+              the browser's own offline state instead (react-query fetchStatus),
+              which is the only signal that actually stops the request. */}
+          {section === "usage" && <UsageSection workspaceId={workspaceId} />}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />
           )}
