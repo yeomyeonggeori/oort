@@ -320,6 +320,25 @@ const WORK_HOSTS = [
   },
 ];
 
+// WorkTierPolicyRoutes.loadPolicy answers /me out of the workspace row when the
+// member has no row of their own, so an inherited member policy carries the
+// DEFAULT's mode, target and updated_at, and differs only in member_id and
+// inherited. A review screenshot that shows 상속 중 next to a different mode is
+// a screen the server cannot produce, which makes the shot worse than no shot.
+const WORKSPACE_TIER_POLICY = {
+  workspaceId: WORKSPACE_ID,
+  mode: "auto",
+  autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+  inherited: false,
+  updatedAtMs: Date.now() - 3_600_000,
+};
+
+const MEMBER_TIER_POLICY = {
+  ...WORKSPACE_TIER_POLICY,
+  memberId: ME,
+  inherited: true,
+};
+
 /** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
 function makeDmMessages() {
   const base = Date.now() - 3 * 60_000;
@@ -419,8 +438,8 @@ async function installMocks(context) {
     json(route, READ_STATES[0])
   );
   // 설정 > 코드 실행 호스트 (MOMO-617). The workspace default sits in 자동 재개
-  // so the target row is on screen, and the member override inherits it, which
-  // is the pair the panel has to keep apart.
+  // so the 재개 대상 control is on screen, and the member override inherits it,
+  // which is the pair the panel has to keep apart.
   await context.route("**/v1/provider/work-host-engine", (route) =>
     json(route, {
       engine: "opencode",
@@ -434,25 +453,10 @@ async function installMocks(context) {
     json(route, { workHosts: WORK_HOSTS })
   );
   await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
-    json(route, {
-      workTierPolicy: {
-        workspaceId: WORKSPACE_ID,
-        mode: "auto",
-        autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
-        inherited: false,
-        updatedAtMs: Date.now() - 3_600_000,
-      },
-    })
+    json(route, { workTierPolicy: WORKSPACE_TIER_POLICY })
   );
   await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
-    json(route, {
-      workTierPolicy: {
-        workspaceId: WORKSPACE_ID,
-        memberId: ME,
-        mode: "ask",
-        inherited: true,
-      },
-    })
+    json(route, { workTierPolicy: MEMBER_TIER_POLICY })
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());

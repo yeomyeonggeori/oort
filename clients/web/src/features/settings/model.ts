@@ -163,7 +163,20 @@ export function eligibleAutoTargets<T extends AutoTargetHost>(
   });
 }
 
-/** Target as the person named it, not as the ledger stores it. */
+/**
+ * Target as the person named it, not as the ledger stores it.
+ *
+ * Only ever called with a registry that actually loaded: "이 호스트는 등록에
+ * 없다" is a claim about the registry, and an empty array can also mean the read
+ * is still in flight or failed, so the caller decides that first (see
+ * `registryState` in WorkHostSection). A stored id that survives that check is
+ * named as missing WITHOUT the raw UUID: the id belongs in the 등록된 호스트 row
+ * where it can be copied, not in a sentence.
+ *
+ * A revoked host keeps its name and gains the same 해지됨 word the registry row
+ * uses, because the server will answer 409 for it and a bare display name reads
+ * as a healthy choice.
+ */
 export function autoTargetLabel(
   target: string | undefined,
   hosts: AutoTargetHost[]
@@ -171,7 +184,8 @@ export function autoTargetLabel(
   if (!target) return "고른 대상 없음";
   if (target === CLOUD_TARGET) return "momo Cloud";
   const host = hosts.find((h) => h.id.toLowerCase() === target.toLowerCase());
-  return host ? host.displayName : `등록에 없는 호스트 ${target}`;
+  if (!host) return "등록 목록에 없는 호스트";
+  return host.revokedAtMs ? `${host.displayName} (해지됨)` : host.displayName;
 }
 
 /** `InviteRoutes.normalizedRole`. */
@@ -337,6 +351,38 @@ export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message) return error.message;
   return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+}
+
+function statusOf(error: unknown): number {
+  return error instanceof ApiError ? error.status : 0;
+}
+
+/**
+ * 코드 실행 호스트 surfaces answer in Korean, not in the wire message.
+ *
+ * WorkTierPolicyRoutes and WorkHostRoutes speak operator English ("auto target
+ * work host is unavailable", "not a workspace member"), which is the right
+ * thing to log and the wrong thing to put on screen next to a select. Each
+ * status the client can actually provoke gets copy that says what happened and
+ * the next move; anything unmapped falls back to the generic line rather than
+ * leaking the wire string.
+ */
+export function workTierPolicySaveMessage(error: unknown): string {
+  switch (statusOf(error)) {
+    case 400:
+      return "자동 재개는 재개 대상을 함께 골라야 저장됩니다. 대상을 고른 뒤 다시 저장하세요.";
+    case 403:
+      return "워크스페이스 기본값은 오너나 관리자만 바꿀 수 있습니다. 내 정책은 그대로 바꿀 수 있습니다.";
+    case 409:
+      return "고른 호스트는 지금 재개 대상이 될 수 없습니다. 해지됐거나 이 정책이 쓸 수 없는 호스트입니다. 등록된 호스트를 다시 불러온 뒤 고르세요.";
+    default:
+      return "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  }
+}
+
+/** 403 is answered by OperatorNotice, so this is only the non-permission half. */
+export function workHostRegistryMessage(): string {
+  return "등록된 호스트 목록을 불러오지 못했습니다. 잠시 뒤에 다시 불러오세요.";
 }
 
 /** Invite status for the list, derived from the server row (never guessed). */

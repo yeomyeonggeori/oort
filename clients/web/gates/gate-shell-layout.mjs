@@ -152,10 +152,10 @@ const INVITES = Array.from({ length: 12 }, (_, i) => ({
   updatedAtMs: Date.now(),
 }));
 
-// 코드 실행 호스트 (MOMO-617) is now three blocks tall, and the auto-target row
-// only exists when a policy is in auto, so the fixture puts the workspace
-// default there: the tallest form the section can take is the one to measure.
-// One host carries a long Korean name for the same reason LONG_KO exists.
+// 코드 실행 호스트 (MOMO-617) is now three blocks tall, and the 재개 대상 control
+// only exists when a policy is in auto, so the fixture puts both scopes there:
+// the tallest form the section can take is the one to measure. One host carries
+// a long Korean name for the same reason LONG_KO exists.
 const WORK_HOSTS = [
   {
     id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
@@ -197,6 +197,25 @@ const WORK_HOSTS = [
     online: false,
   },
 ];
+
+// The pair the server can actually produce. WorkTierPolicyRoutes.loadPolicy
+// answers /me from the workspace row when no member row exists, so an inherited
+// member policy carries the DEFAULT's mode, target and updated_at, with only
+// member_id and inherited differing. A fixture that inherits while showing a
+// different mode measures a screen the server cannot serve.
+const WORKSPACE_TIER_POLICY = {
+  workspaceId: WORKSPACE_ID,
+  mode: "auto",
+  autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+  inherited: false,
+  updatedAtMs: Date.now() - 3_600_000,
+};
+
+const MEMBER_TIER_POLICY = {
+  ...WORKSPACE_TIER_POLICY,
+  memberId: ME,
+  inherited: true,
+};
 
 const BODIES = [
   [ME, "relay outbox lag p99가 1.2s 근처예요. batch size 만지기 전에 원인부터 봅시다."],
@@ -309,25 +328,10 @@ async function installMocks(context) {
     json(route, { workHosts: WORK_HOSTS })
   );
   await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
-    json(route, {
-      workTierPolicy: {
-        workspaceId: WORKSPACE_ID,
-        mode: "auto",
-        autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
-        inherited: false,
-        updatedAtMs: Date.now(),
-      },
-    })
+    json(route, { workTierPolicy: WORKSPACE_TIER_POLICY })
   );
   await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
-    json(route, {
-      workTierPolicy: {
-        workspaceId: WORKSPACE_ID,
-        memberId: ME,
-        mode: "ask",
-        inherited: true,
-      },
-    })
+    json(route, { workTierPolicy: MEMBER_TIER_POLICY })
   );
   // Least specific of the workspace routes; `*` never crosses a `/`, so the
   // ones above still win for their own sub-paths.
@@ -452,7 +456,7 @@ async function measureSize(browser, size) {
   // 초대 by row count, 코드 실행 호스트 (MOMO-617) by carrying three blocks.
   for (const [hash, label, shot, selector] of [
     ["/settings?section=members", "멤버와 초대", "settings-bottom", "invite-create"],
-    ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-mode-workspace"],
+    ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-target-workspace"],
   ]) {
     await go(page, hash);
     const reach = await page.evaluate(`(async () => {

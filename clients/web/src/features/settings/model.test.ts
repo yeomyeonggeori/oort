@@ -23,10 +23,12 @@ import {
   slugError,
   WORK_ENGINES,
   WORK_TIER_MODES,
+  workHostRegistryMessage,
   workHostScopeLabel,
   workHostStatus,
   workHostTypeLabel,
   workspaceNameError,
+  workTierPolicySaveMessage,
 } from "./model";
 
 // The values asserted here were taken from live momowebqa round trips against
@@ -270,9 +272,54 @@ describe("auto target eligibility (mirrors requireAllowedTarget)", () => {
       "dawn-build-01"
     );
     expect(autoTargetLabel(undefined, [workspaceHost])).toBe("고른 대상 없음");
-    expect(autoTargetLabel("019f0000-0000-0000-0000-000000000000", [])).toContain(
-      "등록에 없는 호스트"
+    expect(autoTargetLabel("019f0000-0000-0000-0000-000000000000", [])).toBe(
+      "등록 목록에 없는 호스트"
     );
+  });
+
+  it("marks a revoked target instead of passing it off as a live host", () => {
+    const revoked = { ...workspaceHost, revokedAtMs: 1784983342799 };
+    expect(autoTargetLabel(revoked.id, [revoked])).toBe("dawn-build-01 (해지됨)");
+  });
+
+  it("keeps the raw host id out of the sentence", () => {
+    const missing = "019f0000-0000-0000-0000-000000000000";
+    expect(autoTargetLabel(missing, [])).not.toContain(missing);
+  });
+});
+
+describe("코드 실행 호스트 error copy", () => {
+  // The routes answer in operator English. None of it reaches the panel.
+  it("answers each tier policy status the client can provoke", () => {
+    const at = (status: number, message: string) =>
+      workTierPolicySaveMessage(new ApiError(status, message));
+
+    expect(at(400, "auto mode requires autoTarget")).toContain("재개 대상");
+    expect(at(403, "workspace tier policy requires owner or admin")).toContain(
+      "오너나 관리자"
+    );
+    expect(at(409, "auto target work host is unavailable")).toContain("해지");
+    expect(at(500, "boom")).toBe(
+      "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    );
+    expect(workTierPolicySaveMessage(new Error("network"))).toBe(
+      "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    );
+  });
+
+  it("never leaks a wire message into user copy", () => {
+    const wire = [
+      "workspace policy requires a workspace-scoped host",
+      "auto target work host is unavailable",
+      "member policy target belongs to another member",
+      "not a workspace member",
+    ];
+    for (const message of wire) {
+      expect(workTierPolicySaveMessage(new ApiError(409, message))).not.toContain(
+        message
+      );
+    }
+    expect(workHostRegistryMessage()).not.toContain("workspace");
   });
 });
 

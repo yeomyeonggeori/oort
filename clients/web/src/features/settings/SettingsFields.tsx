@@ -197,6 +197,9 @@ export function ChoiceRadios({
   value,
   onChange,
   disabled,
+  busy,
+  hint,
+  testId,
 }: {
   name: string;
   legend: string;
@@ -204,9 +207,29 @@ export function ChoiceRadios({
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  /**
+   * A write is in flight. This is deliberately NOT `disabled`: disabling a
+   * focused control drops focus to <body>, and a keyboard user who changes a
+   * setting would be thrown to the top of the panel on every save. The group
+   * announces itself busy and keeps the focus ring where the person left it.
+   */
+  busy?: boolean;
+  /** Save state in words: 상속 중 / 저장 중 / 아직 저장되지 않음. */
+  hint?: string;
+  testId?: string;
 }) {
+  const hintId = hint ? `${name}-hint` : undefined;
   return (
-    <fieldset className="flex min-w-0 flex-col gap-1" disabled={disabled}>
+    <fieldset
+      className="flex min-w-0 flex-col gap-1"
+      disabled={disabled}
+      aria-describedby={hintId}
+      aria-busy={busy || undefined}
+      data-testid={testId}
+    >
+      {/* The legend names the group, so two of these on one panel are two
+          distinct radiogroups to a screen reader instead of two anonymous
+          lists of the same three option names. */}
       <legend className="pb-1 text-meta text-ink-muted">{legend}</legend>
       {/* One bordered group with hairline rows, not a card per option: a box
           around every row is the web-card AI-tell and costs density. */}
@@ -236,6 +259,11 @@ export function ChoiceRadios({
           </label>
         ))}
       </div>
+      {hint && (
+        <p id={hintId} role="status" className="text-meta text-ink-muted">
+          {hint}
+        </p>
+      )}
     </fieldset>
   );
 }
@@ -243,64 +271,82 @@ export function ChoiceRadios({
 export interface SelectChoice {
   id: string;
   label: string;
+  /**
+   * Rendered but not selectable. A stored value the server would now reject
+   * (a revoked host, an id that left the registry) still has to appear, or the
+   * control renders blank and the panel stops saying what is in force.
+   */
+  disabled?: boolean;
 }
 
 /**
- * One-line choice on a row, for a setting whose options are a closed list but
- * which does not deserve a fieldset of its own (the tier policy has two scopes,
- * so radios would put six rows on screen for two decisions).
+ * Label above a full-width native select.
+ *
+ * Full width is the point, not a shrug: a select sized to its content lets the
+ * LONGEST OPTION decide the column, so two of these in one panel line up at two
+ * different left edges depending on which hosts happen to be registered that
+ * day. Width belongs to the panel, the value does not.
  *
  * Native `<select>`: this bundle carries no Radix Select, and the platform
  * control already gives type-ahead, arrow keys, the collapsed value as its own
  * label, and a popup that a screen reader announces as a listbox. The only
  * thing added here is the token skin.
  */
-export function SelectRow({
+export function SelectField({
   id,
   label,
+  ariaLabel,
   hint,
   value,
   choices,
   onChange,
   disabled,
+  busy,
   testId,
 }: {
   id: string;
   label: string;
+  /**
+   * Full accessible name when the visible label repeats across scopes ("재개
+   * 대상" twice). Must contain the visible label so speech input still matches.
+   */
+  ariaLabel?: string;
   hint?: ReactNode;
   value: string;
   choices: SelectChoice[];
   onChange: (id: string) => void;
   disabled?: boolean;
+  /** In flight. Never disables: see the note on ChoiceRadios.busy. */
+  busy?: boolean;
   testId?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-line py-2 last:border-b-0">
-      <div className="flex min-w-0 flex-col gap-px">
-        <label htmlFor={id} className="text-body text-ink">
-          {label}
-        </label>
-        {hint && (
-          <span id={`${id}-hint`} className="text-meta text-ink-muted">
-            {hint}
-          </span>
-        )}
-      </div>
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="text-meta text-ink-muted">
+        {label}
+      </label>
       <select
         id={id}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
+        aria-label={ariaLabel}
         aria-describedby={hint ? `${id}-hint` : undefined}
+        aria-busy={busy || undefined}
         data-testid={testId}
-        className="h-control-sm min-w-0 shrink-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-control-sm w-full min-w-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
         {choices.map((choice) => (
-          <option key={choice.id} value={choice.id}>
+          <option key={choice.id} value={choice.id} disabled={choice.disabled}>
             {choice.label}
           </option>
         ))}
       </select>
+      {hint && (
+        <p id={`${id}-hint`} role="status" className="text-meta text-ink-muted">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -312,10 +358,18 @@ export function SelectRow({
 export function CopyButton({
   value,
   label = "복사",
+  subject,
   testId,
 }: {
   value: string;
   label?: string;
+  /**
+   * What the copied value belongs to, e.g. a host name. One list renders one
+   * copy button per row, and three buttons all named "호스트 ID 복사" are three
+   * identical rows in a screen reader's button list. The visible label stays
+   * short; the accessible name carries the row.
+   */
+  subject?: string;
   testId?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -335,15 +389,21 @@ export function CopyButton({
     timer.current = window.setTimeout(() => setCopied(false), 2000);
   }
 
+  // The visible text carries the result, so the accessible name has to move
+  // with it: a fixed aria-label would leave a screen reader on "복사" after the
+  // copy already happened.
+  const text = copied ? `${label}됨` : label;
+
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
       onClick={copy}
+      aria-label={subject ? `${subject} ${text}` : undefined}
       data-testid={testId}
     >
-      {copied ? "복사됨" : label}
+      {text}
     </Button>
   );
 }

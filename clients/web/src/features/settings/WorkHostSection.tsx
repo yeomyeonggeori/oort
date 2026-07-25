@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -26,16 +26,18 @@ import {
   relativeSince,
   WORK_ENGINES,
   WORK_TIER_MODES,
+  workHostRegistryMessage,
   workHostScopeLabel,
   workHostStatus,
   workHostTypeLabel,
+  workTierPolicySaveMessage,
 } from "./model";
 import {
   ChoiceRadios,
   CopyButton,
   OperatorNotice,
   SectionShell,
-  SelectRow,
+  SelectField,
   StatusChip,
   Subsection,
 } from "./SettingsFields";
@@ -85,10 +87,14 @@ export function WorkHostSection({
     >
       <EngineBlock offline={offline} />
       <RegistryBlock hosts={hosts} />
+      {/* The QUERY goes down, not `hosts.data ?? []`: an empty array cannot say
+          whether the registry is empty, still loading, or refused, and the
+          policy block has to tell those apart before it claims a host is not
+          registered. */}
       <TierPolicyBlock
         workspaceId={workspaceId}
         memberId={memberId}
-        hosts={hosts.data ?? []}
+        hosts={hosts}
         offline={offline}
       />
     </SectionShell>
@@ -255,12 +261,24 @@ function RegistryBlock({
   if (hosts.isError) {
     return (
       <Subsection title="등록된 호스트" lines={REGISTRY_LINES}>
-        <InlineBanner
-          message={errorMessage(hosts.error)}
-          actionLabel="다시 시도"
-          onAction={() => void hosts.refetch()}
-          testId="work-hosts-error"
-        />
+        {/* Same shape as the engine block one heading above: a 403 here means
+            the reader is not a member of this workspace, which is an answer and
+            not a failure, so it does not get a retry button that is guaranteed
+            to fail. The other statuses get Korean copy instead of the wire
+            message ("not a workspace member") the route logs. */}
+        {isOperatorDenied(hosts.error) ? (
+          <OperatorNotice
+            who="등록된 호스트 목록은 이 워크스페이스의 멤버만 볼 수 있습니다."
+            contact="초대가 아직 처리되지 않았는지 워크스페이스 관리자에게 확인하세요."
+          />
+        ) : (
+          <InlineBanner
+            message={workHostRegistryMessage()}
+            actionLabel="등록 목록 다시 불러오기"
+            onAction={() => void hosts.refetch()}
+            testId="work-hosts-error"
+          />
+        )}
       </Subsection>
     );
   }
@@ -333,6 +351,7 @@ function HostRow({ host }: { host: WorkHost }) {
       <CopyButton
         value={host.id}
         label="호스트 ID 복사"
+        subject={host.displayName}
         testId="work-host-copy-id"
       />
     </li>
@@ -346,11 +365,11 @@ const POLICY_LINES = [
 ];
 
 /**
- * ADR-0125 D11. Two rows for two scopes: the signed-in member's override, and
+ * ADR-0125 D11. Two groups for two scopes: the signed-in member's override, and
  * the workspace default it falls back to. A member who is neither owner nor
  * admin gets a 403 on the workspace read, which is an answer and not a failure,
- * so their own row keeps working and the default is stated in one line instead
- * of being drawn as a control whose save is guaranteed to fail.
+ * so their own group keeps working and the default is stated in one line
+ * instead of being drawn as a control whose save is guaranteed to fail.
  */
 function TierPolicyBlock({
   workspaceId,
@@ -360,7 +379,7 @@ function TierPolicyBlock({
 }: {
   workspaceId: string;
   memberId: string;
-  hosts: WorkHost[];
+  hosts: UseQueryResult<WorkHost[], unknown>;
   offline: boolean;
 }) {
   const mine = useQuery({
@@ -389,7 +408,7 @@ function TierPolicyBlock({
             먼저 필요하다. */}
         <InlineBanner
           message="정책을 불러오지 못했습니다. 기존 세션은 그대로 유지됩니다."
-          actionLabel="다시 시도"
+          actionLabel="정책 다시 불러오기"
           onAction={() => void mine.refetch()}
           testId="work-tier-policy-error"
         />
@@ -397,21 +416,27 @@ function TierPolicyBlock({
     );
   }
 
+  const registry = registryState(hosts);
+
   return (
     <Subsection title="호스트 상실 시 재개" lines={POLICY_LINES}>
-      {/* One bordered group per scope, not one group holding both: 자동 재개
-          opens a 재개 대상 row underneath, and in a shared box that row reads as
-          belonging to whichever scope the eye lands on. */}
-      <div className="flex flex-col gap-2" data-testid="work-tier-policy">
+      {/* One fieldset per scope rather than one shared box: 자동 재개 opens a
+          재개 대상 control underneath, and in a shared group that control reads
+          as belonging to whichever scope the eye lands on. The legend gives
+          each group a name a screen reader announces on entry. */}
+      <div className="flex flex-col gap-4" data-testid="work-tier-policy">
         <TierPolicyScope
           scope="member"
           title="내 정책"
           workspaceId={workspaceId}
           memberId={memberId}
           policy={mine.data}
-          hosts={hosts}
+          registry={registry}
           offline={offline}
         />
+
+        {workspace.isPending && <SkeletonRows rows={2} />}
+
         {workspace.data && (
           <TierPolicyScope
             scope="workspace"
@@ -419,23 +444,36 @@ function TierPolicyBlock({
             workspaceId={workspaceId}
             memberId={memberId}
             policy={workspace.data}
-            hosts={hosts}
+            registry={registry}
             offline={offline}
           />
         )}
+
+        {/* Four states here too. A 403 is the permission answer; anything else
+            used to delete the row silently, which left an admin reading "내
+            정책 … 워크스페이스 기본값을 상속 중" with no way to learn what the
+            inherited value is or that the read failed at all. */}
+        {workspace.isError &&
+          (isOperatorDenied(workspace.error) ? (
+            <p className="text-meta text-ink-muted">
+              워크스페이스 기본값은 오너나 관리자만 보고 바꿉니다. 내 정책은 그
+              기본값 위에 얹힙니다.
+            </p>
+          ) : (
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-meta text-ink-muted">워크스페이스 기본</p>
+              <InlineBanner
+                message="워크스페이스 기본값을 불러오지 못했습니다. 내 정책은 그대로 바꿀 수 있습니다."
+                actionLabel="기본값 다시 불러오기"
+                onAction={() => void workspace.refetch()}
+                testId="work-tier-workspace-error"
+              />
+            </div>
+          ))}
       </div>
-
-      {workspace.isError && isOperatorDenied(workspace.error) && (
-        <p className="text-meta text-ink-muted">
-          워크스페이스 기본값은 오너나 관리자만 보고 바꿉니다. 내 정책은 그
-          기본값 위에 얹힙니다.
-        </p>
-      )}
-
-      <p className="text-meta text-ink-muted">
-        자동 재개는 고른 호스트에서 마지막 push 커밋으로 새 세션을 시작합니다.
-        비용이 생길 수 있어 직접 켜야 합니다.
-      </p>
+      {/* No trailing paragraph about 자동 재개 any more: each option now carries
+          its own description in the group above, and repeating it under the
+          control was the same sentence twice. */}
     </Subsection>
   );
 }
@@ -443,13 +481,32 @@ function TierPolicyBlock({
 /** The empty auto target, before a host is picked. Never sent to the server. */
 const NO_TARGET = "";
 
+/**
+ * What the panel is allowed to say about the registry.
+ *
+ * `hosts` is one query shared by the list and the target picker, and "이 호스트는
+ * 등록에 없습니다" is only true once it has actually answered. While it is in
+ * flight or failed there is no ledger to compare against, so the target control
+ * says so instead of drawing a picker whose every claim would be a guess.
+ */
+type RegistryState =
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; hosts: WorkHost[] };
+
+function registryState(query: UseQueryResult<WorkHost[], unknown>): RegistryState {
+  if (query.isPending) return { status: "loading" };
+  if (query.isError) return { status: "error" };
+  return { status: "ready", hosts: query.data ?? [] };
+}
+
 function TierPolicyScope({
   scope,
   title,
   workspaceId,
   memberId,
   policy,
-  hosts,
+  registry,
   offline,
 }: {
   scope: WorkTierScope;
@@ -457,20 +514,31 @@ function TierPolicyScope({
   workspaceId: string;
   memberId: string;
   policy: WorkTierPolicy;
-  hosts: WorkHost[];
+  registry: RegistryState;
   offline: boolean;
 }) {
   const client = useQueryClient();
   // 자동 재개 is not a legal row until it has a target (the server answers 400
-  // to auto without one), so picking that mode only opens the target row and
-  // the save happens when a target is chosen. That is the only unsaved value on
-  // this surface; the other two modes save on pick, like the mac menu.
+  // to auto without one), so picking that mode only opens the target control
+  // and the save happens when a target is chosen. It is the one unsaved value
+  // on this surface, and because turning it on costs money the group says out
+  // loud that nothing has been written yet.
   const [draftAuto, setDraftAuto] = useState(false);
 
+  // Nothing is disabled while a save is in flight (a keyboard user would lose
+  // focus on every change), so two PUTs can overlap. Only the newest one is
+  // allowed to write the cache; an older reply landing last would otherwise
+  // repaint the panel with the value the person already moved away from.
+  const latestSave = useRef(0);
+
   const save = useMutation({
-    mutationFn: (input: { mode: string; autoTarget?: string }) =>
-      putWorkTierPolicy(workspaceId, scope, input),
-    onSuccess: (next) => {
+    mutationFn: async (input: { mode: string; autoTarget?: string }) => {
+      const ticket = ++latestSave.current;
+      const next = await putWorkTierPolicy(workspaceId, scope, input);
+      return { ticket, next };
+    },
+    onSuccess: ({ ticket, next }) => {
+      if (ticket !== latestSave.current) return;
       setDraftAuto(false);
       client.setQueryData(
         ["settings", "work-tier-policy", workspaceId, scope],
@@ -479,25 +547,20 @@ function TierPolicyScope({
     },
   });
 
-  const mode = draftAuto ? "auto" : policy.mode;
-  const target = draftAuto ? NO_TARGET : policy.autoTarget ?? NO_TARGET;
-  const targets = eligibleAutoTargets(hosts, scope, memberId);
-  const busy = save.isPending || offline;
-
-  const targetChoices = [
-    ...(target === NO_TARGET ? [{ id: NO_TARGET, label: "대상 고르기" }] : []),
-    { id: CLOUD_TARGET, label: "momo Cloud" },
-    ...targets.map((host) => ({ id: host.id, label: host.displayName })),
-  ];
-  // A stored target can point at a host that has since been revoked or removed,
-  // and a <select> whose value matches no option renders blank. Carry it as its
-  // own option so the row states what is actually in the ledger.
-  if (
-    target !== NO_TARGET &&
-    !targetChoices.some((c) => c.id.toLowerCase() === target.toLowerCase())
-  ) {
-    targetChoices.unshift({ id: target, label: autoTargetLabel(target, hosts) });
-  }
+  // What the controls show. While a PUT is in flight they show the value being
+  // written, not the value the server still holds: these are radios, so the
+  // stored value would otherwise snap the selection back the instant the person
+  // clicks and jump forward again when the reply lands. The hint says a save is
+  // running, and a failure falls straight back to `policy` (the server's truth)
+  // with the error underneath.
+  const shown =
+    save.isPending && save.variables
+      ? save.variables
+      : draftAuto
+        ? { mode: "auto", autoTarget: undefined }
+        : { mode: policy.mode, autoTarget: policy.autoTarget };
+  const mode = shown.mode;
+  const target = shown.autoTarget ?? NO_TARGET;
 
   function pickMode(next: string) {
     if (next === mode) return;
@@ -510,48 +573,166 @@ function TierPolicyScope({
   }
 
   function pickTarget(next: string) {
-    if (next === NO_TARGET) return;
+    if (next === NO_TARGET || next === target) return;
     save.mutate({ mode: "auto", autoTarget: next });
   }
 
-  const inheritedHint =
-    scope === "member" && policy.inherited
-      ? "워크스페이스 기본값을 상속 중"
-      : undefined;
+  // Save state in words, most transient first. 자동 재개 in draft is the one
+  // that matters: the radio is already on 자동 재개 and the server has heard
+  // nothing, so leaving this panel drops it.
+  const stateHint = save.isPending
+    ? "정책을 저장하는 중입니다."
+    : draftAuto
+      ? "아직 저장되지 않았습니다. 재개 대상을 고르면 자동 재개가 저장됩니다."
+      : offline
+        ? "연결이 끊겨 지금은 바꿀 수 없습니다."
+        : scope === "member" && policy.inherited
+          ? "워크스페이스 기본값을 상속 중입니다. 다른 값을 고르면 내 정책으로 저장됩니다."
+          : undefined;
 
   return (
-    <div className="flex min-w-0 flex-col rounded-md border border-line px-3">
-      <SelectRow
-        id={`work-tier-mode-${scope}`}
-        label={title}
-        hint={save.isPending ? "정책 저장 중" : inheritedHint}
+    <div className="flex min-w-0 flex-col gap-2">
+      <ChoiceRadios
+        name={`work-tier-mode-${scope}`}
+        legend={title}
+        choices={WORK_TIER_MODES}
         value={mode}
-        choices={WORK_TIER_MODES.map((m) => ({ id: m.id, label: m.label }))}
         onChange={pickMode}
-        disabled={busy}
+        disabled={offline}
+        busy={save.isPending}
+        hint={stateHint}
         testId={`work-tier-mode-${scope}`}
       />
+
       {mode === "auto" && (
-        <SelectRow
-          id={`work-tier-target-${scope}`}
-          label="재개 대상"
-          hint={
-            targets.length === 0
-              ? "고를 수 있는 호스트가 없어 momo Cloud만 남습니다."
-              : undefined
-          }
-          value={target}
-          choices={targetChoices}
-          onChange={pickTarget}
-          disabled={busy}
-          testId={`work-tier-target-${scope}`}
+        <AutoTargetField
+          scope={scope}
+          scopeTitle={title}
+          memberId={memberId}
+          target={target}
+          registry={registry}
+          draft={draftAuto}
+          busy={save.isPending}
+          disabled={offline}
+          onPick={pickTarget}
         />
       )}
+
       {save.isError && (
-        <p className="py-2 text-meta text-danger" role="alert">
-          {errorMessage(save.error)}
+        <p
+          className="text-meta text-danger"
+          role="alert"
+          data-testid={`work-tier-save-error-${scope}`}
+        >
+          {workTierPolicySaveMessage(save.error)}
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The 재개 대상 control, which only exists in 자동 재개.
+ *
+ * It has four states of its own because the registry it reads from does: while
+ * that read is in flight or failed the control is a line of text, not a picker,
+ * because every option list it could draw would be a claim about a ledger it
+ * has not seen. Only in `ready` does it say what is and is not registered.
+ */
+function AutoTargetField({
+  scope,
+  scopeTitle,
+  memberId,
+  target,
+  registry,
+  draft,
+  busy,
+  disabled,
+  onPick,
+}: {
+  scope: WorkTierScope;
+  scopeTitle: string;
+  memberId: string;
+  target: string;
+  registry: RegistryState;
+  draft: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onPick: (id: string) => void;
+}) {
+  const id = `work-tier-target-${scope}`;
+
+  if (registry.status !== "ready") {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <p className="text-meta text-ink-muted">재개 대상</p>
+        <p
+          className="text-body text-ink-muted"
+          role="status"
+          data-testid={`${id}-unavailable`}
+        >
+          {registry.status === "loading"
+            ? "등록된 호스트를 불러오는 중입니다. 목록이 도착하면 대상을 고를 수 있습니다."
+            : "등록된 호스트를 불러오지 못해 지금은 대상을 고를 수 없습니다. 위 등록된 호스트 블록을 확인하세요."}
+        </p>
+      </div>
+    );
+  }
+
+  const hosts = registry.hosts;
+  const eligible = eligibleAutoTargets(hosts, scope, memberId);
+  const stored = hosts.find((h) => h.id.toLowerCase() === target.toLowerCase());
+
+  const choices = [
+    ...(target === NO_TARGET
+      ? [{ id: NO_TARGET, label: "대상 고르기", disabled: true }]
+      : []),
+    { id: CLOUD_TARGET, label: "momo Cloud" },
+    ...eligible.map((host) => ({ id: host.id, label: host.displayName })),
+  ];
+
+  // A stored target can point at a host that has since been revoked or left the
+  // registry, and a <select> whose value matches no option renders blank. Carry
+  // it as its own option so the control states what is actually in the ledger,
+  // named for what it is and not selectable again: the server answers 409 for
+  // it, so offering it as a choice would be offering a save that cannot land.
+  const staleTarget =
+    target !== NO_TARGET &&
+    !choices.some((c) => c.id.toLowerCase() === target.toLowerCase());
+  if (staleTarget) {
+    choices.unshift({
+      id: target,
+      label: autoTargetLabel(target, hosts),
+      disabled: true,
+    });
+  }
+
+  const hint = staleTarget
+    ? stored?.revokedAtMs
+      ? "지금 저장된 대상은 해지된 호스트입니다. 다른 대상을 고르세요."
+      : stored
+        ? "지금 저장된 대상은 이 정책에서 쓸 수 없는 호스트입니다. 다른 대상을 고르세요."
+        : "지금 저장된 대상이 등록 목록에 없습니다. 다른 대상을 고르세요."
+    : draft
+      ? "대상을 고르면 자동 재개가 저장됩니다."
+      : eligible.length === 0
+        ? "등록된 호스트 중 고를 수 있는 것이 없어 momo Cloud만 고를 수 있습니다."
+        : undefined;
+
+  return (
+    <SelectField
+      id={id}
+      label="재개 대상"
+      // Both scopes draw this control, so the visible label alone is two
+      // identical names in one panel.
+      ariaLabel={`${scopeTitle} 재개 대상`}
+      hint={hint}
+      value={target}
+      choices={choices}
+      onChange={onPick}
+      disabled={disabled}
+      busy={busy}
+      testId={id}
+    />
   );
 }
