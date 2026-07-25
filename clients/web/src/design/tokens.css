@@ -85,6 +85,10 @@
   --spacing-6: 24px;
   --spacing-8: 32px;
 
+  /* Selection marker bar (R-1 §1: 현재 워크스페이스 = 좌측 액센트 바 2px). Two
+   * pixels is a state marker; the 1px hairline reads as a border artifact. */
+  --spacing-marker: 2px;
+
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
   --spacing-control: 32px;

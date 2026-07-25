@@ -20,6 +20,15 @@ const itemClass =
   "text-ink data-[selected=true]:bg-accent-soft " +
   "data-[selected=true]:text-ink";
 
+// cmdk renders the group label into a [cmdk-group-heading] element it owns, so
+// it is styled from the list rather than by a className we could pass. Same
+// weight as the sidebar section header (SidebarSection): a section label is a
+// section label wherever it appears.
+const groupHeadingClass =
+  "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 " +
+  "[&_[cmdk-group-heading]]:text-meta [&_[cmdk-group-heading]]:font-medium " +
+  "[&_[cmdk-group-heading]]:text-ink-muted";
+
 export function QuickSwitcher({
   open,
   onOpenChange,
@@ -67,7 +76,9 @@ export function QuickSwitcher({
         data-testid="quick-switcher-input"
         className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent placeholder:text-ink-muted"
       />
-      <Command.List className="max-h-pane overflow-y-auto p-2">
+      <Command.List
+        className={`max-h-pane overflow-y-auto p-2 ${groupHeadingClass}`}
+      >
         <Command.Empty className="px-2 py-3 text-body text-ink-muted">
           일치하는 채널이 없습니다. 다른 이름으로 검색하세요.
         </Command.Empty>

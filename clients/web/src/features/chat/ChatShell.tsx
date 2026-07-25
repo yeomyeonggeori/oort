@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare } from "lucide-react";
 import { updateReadState, uuidEq, type Message } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
+  makeDirectory,
   memberFor,
   unreadFor,
   useChannels,
@@ -15,8 +16,11 @@ import {
 import { Timeline } from "@/features/timeline/Timeline";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { useTimeline } from "@/features/timeline/useTimeline";
-import { makeSyntheticMessages } from "@/features/timeline/stress";
-import { Composer } from "@/features/chat/Composer";
+import {
+  makeStressRoster,
+  makeSyntheticMessages,
+} from "@/features/timeline/stress";
+import { Composer, sendComposerMessage } from "@/features/chat/Composer";
 import {
   EmptyInvite,
   InlineBanner,
@@ -50,6 +54,16 @@ export function ChatShell() {
   const readStates = useReadStates(workspaceId);
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
 
+  // The stress path never hits /roster, so it carries its own members: without
+  // them every row would render a uuid stub and the dense capture would review
+  // a surface nobody ships.
+  const stressDirectory = useMemo(
+    () => makeDirectory(stressCount > 0 ? makeStressRoster() : []),
+    [stressCount]
+  );
+  const directory =
+    stressCount > 0 ? stressDirectory : directoryQuery.directory;
+
   // The index route lands on the first channel the server actually returned.
   // Nothing is hardcoded: a workspace with no channels renders the empty state
   // instead of pointing at an id that may not exist here.
@@ -69,7 +83,7 @@ export function ChatShell() {
     [channelsQuery.groups, channelId]
   );
   const label = channel
-    ? channelLabel(channel, directoryQuery.directory, session.member.id)
+    ? channelLabel(channel, directory, session.member.id)
     : "채널";
 
   const timeline = useTimeline(
@@ -120,6 +134,20 @@ export function ChatShell() {
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
 
+  // Inline retry on a failed row. Same send path as the composer, so there is
+  // one code path to keep honest. A retry that fails again leaves the row as it
+  // is: it already says 전송 실패 and still offers the button.
+  const onResend = useCallback(
+    (message: Message) => {
+      if (channelId === null || !message.body) return;
+      return sendComposerMessage(workspaceId, channelId, message.body).then(
+        () => undefined,
+        () => undefined
+      );
+    },
+    [workspaceId, channelId]
+  );
+
   // Read-only probe for the browser gate runner (DOM stays the primary source
   // of truth; this just avoids scraping when convenient).
   useEffect(() => {
@@ -146,16 +174,16 @@ export function ChatShell() {
     const ids =
       channel.kind === "dm"
         ? channel.memberIds ?? []
-        : directoryQuery.directory.members
+        : directory.members
             .filter((m) => m.channelIds.some((id) => uuidEq(id, channel.id)))
             .map((m) => m.id);
     const names = ids
-      .map((id) => memberFor(directoryQuery.directory, id)?.displayName)
+      .map((id) => memberFor(directory, id)?.displayName)
       .filter((name): name is string => Boolean(name));
     if (names.length === 0) return "";
     if (names.length <= 3) return names.join(", ");
     return `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
-  }, [channel, directoryQuery.directory]);
+  }, [channel, directory]);
 
   const offline = stressCount === 0 && connStatus === "disconnected";
   const hasChannel = stressCount > 0 || channelId !== null;
@@ -209,7 +237,7 @@ export function ChatShell() {
           {hasChannel ? (
             <Timeline
               messages={messages}
-              directory={directoryQuery.directory}
+              directory={directory}
               status={stressCount > 0 ? "ready" : timeline.status}
               lastReadSeq={openedWith?.lastReadSeq ?? null}
               unreadCount={openedWith?.unreadCount ?? 0}
@@ -217,6 +245,7 @@ export function ChatShell() {
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
               onRetry={timeline.reload}
               onOpenThread={setThread}
+              onResend={stressCount > 0 ? undefined : onResend}
               onInviteMember={() => navigate("/settings")}
             />
           ) : channelsQuery.isLoading ? (
@@ -245,7 +274,7 @@ export function ChatShell() {
           <Composer
             workspaceId={workspaceId}
             channelId={channelId}
-            directory={directoryQuery.directory}
+            directory={directory}
             channelLabel={label}
           />
         )}
@@ -256,7 +285,7 @@ export function ChatShell() {
           workspaceId={workspaceId}
           channelId={channelId}
           root={thread}
-          directory={directoryQuery.directory}
+          directory={directory}
           onClose={() => setThread(null)}
         />
       )}

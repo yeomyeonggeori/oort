@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { SendHorizontal } from "lucide-react";
-import { sendMessage, type RosterMember } from "@/lib/api";
+import { sendMessage, type Message, type RosterMember } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -22,6 +22,24 @@ import { memberFor } from "@/features/workspace/useWorkspace";
 
 const MAX_ROWS = 6;
 const MENTION_LIMIT = 6;
+
+/**
+ * The one send path. The composer's first attempt, its own retry, and the
+ * inline retry on a failed timeline row all go through here, so "다시 보내기"
+ * can never drift from "보내기".
+ *
+ * clientMsgId is the idempotency key (L4 §3.1) and a retry mints a NEW one: the
+ * failed attempt was never accepted, so reusing its key would be a lie. The
+ * message returns over the realtime rail and merges by seq, so there is no
+ * optimistic insert to reconcile.
+ */
+export function sendComposerMessage(
+  workspaceId: string,
+  channelId: string,
+  body: string
+): Promise<Message> {
+  return sendMessage(workspaceId, channelId, crypto.randomUUID(), body);
+}
 
 interface MentionQuery {
   /** Index of the '@' that opened the query. */
@@ -105,10 +123,7 @@ export function Composer({
     setBusy(true);
     setFailed(null);
     try {
-      // clientMsgId is the idempotency key (L4 §3.1). The message returns over
-      // the realtime rail and merges by seq, so there is no optimistic insert
-      // to reconcile.
-      await sendMessage(workspaceId, channelId, crypto.randomUUID(), body);
+      await sendComposerMessage(workspaceId, channelId, body);
       setText("");
     } catch {
       setFailed(body);

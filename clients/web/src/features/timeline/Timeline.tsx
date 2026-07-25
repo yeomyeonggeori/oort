@@ -23,6 +23,45 @@ import {
 // blank area; offline is one banner above, owned by the shell.
 // =============================================================================
 
+// ---- virtualisation contract (R-1 §3: "firstItemIndex 조정으로 스크롤 점프 없이
+// prepend") -------------------------------------------------------------------
+//
+// react-virtuoso only holds the row under the reader when `firstItemIndex`
+// DECREASES by exactly the number of items inserted at the head, in the SAME
+// commit that hands it the longer `data` array. Without that it treats the
+// prepend as new content and the viewport jumps forward by a page.
+//
+// The shift cannot be "page size": `items` is the derived stream, so a 50
+// message page can insert 51 items (a day separator moves in with it). So the
+// shift is measured against the anchor row itself, the oldest message that was
+// already on screen, by how far it moved.
+const START_INDEX = 1_000_000;
+
+/** Oldest message currently in the stream, with its position. */
+function anchorOf(
+  items: TimelineItem[]
+): { seq: number; index: number } | null {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind === "message") return { seq: item.message.seq, index: i };
+  }
+  return null;
+}
+
+function indexOfSeq(items: TimelineItem[], seq: number): number {
+  return items.findIndex(
+    (item) => item.kind === "message" && item.message.seq === seq
+  );
+}
+
+interface AnchorState {
+  /** Identity of the stream this index was computed for. */
+  items: TimelineItem[];
+  firstItemIndex: number;
+  /** Bumped when the stream is replaced, to remount instead of shifting. */
+  epoch: number;
+}
+
 export function Timeline({
   messages,
   directory,
@@ -33,6 +72,7 @@ export function Timeline({
   onStartReached,
   onRetry,
   onOpenThread,
+  onResend,
   onInviteMember,
 }: {
   messages: Message[];
@@ -44,6 +84,7 @@ export function Timeline({
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
+  onResend?: (message: Message) => Promise<void> | void;
   onInviteMember?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
@@ -57,6 +98,42 @@ export function Timeline({
       }),
     [messages, lastReadSeq, unreadCount, recoveryMarkers]
   );
+
+  // Derived during render, not in an effect: virtuoso has to receive the new
+  // `data` and the lowered `firstItemIndex` together or the correction lands a
+  // frame late, which is exactly the jump it is meant to prevent. Keyed on the
+  // `items` reference so a double render (StrictMode) cannot apply it twice.
+  const anchorRef = useRef<AnchorState>({
+    items: [],
+    firstItemIndex: START_INDEX,
+    epoch: 0,
+  });
+  if (anchorRef.current.items !== items) {
+    const previous = anchorRef.current;
+    const anchor = anchorOf(previous.items);
+    const moved = anchor === null ? -1 : indexOfSeq(items, anchor.seq);
+    if (anchor === null) {
+      // Nothing was on screen to hold (first fill, or an empty channel).
+      anchorRef.current = { ...previous, items };
+    } else if (moved < 0) {
+      // The stream was replaced (channel switch / reload). A RISING
+      // firstItemIndex means "rows fell off the head" to virtuoso, so remount
+      // instead and start the next channel from a clean index.
+      anchorRef.current = {
+        items,
+        firstItemIndex: START_INDEX,
+        epoch: previous.epoch + 1,
+      };
+    } else {
+      const prepended = Math.max(0, moved - anchor.index);
+      anchorRef.current = {
+        items,
+        firstItemIndex: previous.firstItemIndex - prepended,
+        epoch: previous.epoch,
+      };
+    }
+  }
+  const { firstItemIndex, epoch } = anchorRef.current;
 
   if (status === "error") {
     return (
@@ -79,8 +156,10 @@ export function Timeline({
         headline="이 채널을 함께 시작하세요."
         detail="사람과 에이전트를 같은 자격으로 추가할 수 있습니다."
         actions={
+          // Equal weight on purpose (R-1 §3): adding an agent is not the
+          // secondary path to adding a person, they are the same act.
           <>
-            <Button size="sm" onClick={onInviteMember}>
+            <Button size="sm" variant="outline" onClick={onInviteMember}>
               사람 추가
             </Button>
             <Button size="sm" variant="outline" onClick={onInviteMember}>
@@ -95,6 +174,7 @@ export function Timeline({
 
   return (
     <Virtuoso
+      key={epoch}
       ref={ref}
       className="h-full"
       data={items}
@@ -102,6 +182,7 @@ export function Timeline({
       alignToBottom
       followOutput="auto"
       startReached={onStartReached}
+      firstItemIndex={firstItemIndex}
       // initialItemCount forces a first paint of rows independent of the
       // ResizeObserver measurement pass (in an embedded webview the scroller
       // height can resolve a tick after mount, leaving the list empty).
@@ -121,6 +202,7 @@ export function Timeline({
             startsGroup={item.startsGroup}
             directory={directory}
             onOpenThread={onOpenThread}
+            onResend={onResend}
           />
         );
       }}

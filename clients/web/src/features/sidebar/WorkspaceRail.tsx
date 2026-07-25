@@ -34,7 +34,7 @@ export function WorkspaceRail({
       >
         <span
           aria-hidden="true"
-          className="absolute -left-2 h-4 w-px rounded-sm bg-accent"
+          className="absolute -left-2 h-4 w-marker rounded-sm bg-accent"
         />
         {initial}
       </span>

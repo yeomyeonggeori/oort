@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { threadRollup, type Message, type RosterMember } from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
@@ -50,12 +51,16 @@ export function MessageRow({
   startsGroup,
   directory,
   onOpenThread,
+  onResend,
 }: {
   message: Message;
   startsGroup: boolean;
   directory: Directory;
   onOpenThread?: (message: Message) => void;
+  /** Re-send a row the server marked `failed` (the composer's send path). */
+  onResend?: (message: Message) => Promise<void> | void;
 }) {
+  const [resending, setResending] = useState(false);
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
   const name = author?.displayName ?? message.authorMemberId.slice(0, 8);
@@ -114,8 +119,30 @@ export function MessageRow({
           <span className="text-meta text-ink-muted">수정됨</span>
         )}
         {failed && (
-          <span className="text-meta text-danger">
-            전송 실패, 다시 보내세요.
+          // The retry lives on the row, not in a banner far from it (R-1 §3
+          // "전송 실패 [재시도]"). It runs the composer's send path, so a
+          // resend is a new send with a fresh idempotency key, not a replay.
+          <span
+            className="flex flex-wrap items-center gap-2 text-meta text-danger"
+            data-testid="message-failed"
+          >
+            전송 실패
+            {message.body && onResend && (
+              <button
+                type="button"
+                disabled={resending}
+                data-testid="message-resend"
+                onClick={() => {
+                  setResending(true);
+                  void Promise.resolve(onResend(message)).finally(() =>
+                    setResending(false)
+                  );
+                }}
+                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+              >
+                {resending ? "보내는 중…" : "다시 보내기"}
+              </button>
+            )}
           </span>
         )}
         {rollup && (
