@@ -73,6 +73,9 @@ const DM_CHANNEL = {
   muted: false,
 };
 
+/** The id POST /channels answers with (MOMO-614): the app routes to it. */
+const CREATED_CHANNEL_ID = "019f9b10-0000-7000-8000-000000000301";
+
 const CHANNEL_IDS = CHANNELS.map((c) => c.id);
 
 // Roster and read-state are what turn the timeline from raw ids into the actual
@@ -313,9 +316,47 @@ async function installMocks(context) {
       memberId: ME,
     })
   );
-  await context.route("**/v1/workspaces/*/channels", (route) =>
-    json(route, { channels: [...CHANNELS, DM_CHANNEL] })
-  );
+  // 채널 만들기 (MOMO-614). The POST answers the way the server does: 409 when
+  // an unarchived channel already carries the name, which is the frame that
+  // matters because the rejection has to land under the name field, and 201
+  // with the created row otherwise.
+  await context.route("**/v1/workspaces/*/channels", (route) => {
+    if (route.request().method() !== "POST") {
+      return json(route, { channels: [...CHANNELS, DM_CHANNEL] });
+    }
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    if (CHANNELS.some((c) => c.name === body.name)) {
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { message: "channel name already exists" },
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        channel: {
+          id: CREATED_CHANNEL_ID,
+          workspaceId: WORKSPACE_ID,
+          kind: body.kind,
+          name: body.name,
+          topic: body.topic,
+          muted: false,
+        },
+        creatorMembership: {
+          id: "019f9b10-0000-7000-8000-0000000003ff",
+          workspaceId: WORKSPACE_ID,
+          channelId: CREATED_CHANNEL_ID,
+          memberId: ME,
+          role: "owner",
+          joinedAtMs: Date.now(),
+        },
+      }),
+    });
+  });
   // 디렉터리 행에서 DM 시작 (MOMO-611): idempotent per pair, so the fixture
   // answers created:false, which is the "이미 있는 대화로 이동" path.
   await context.route("**/v1/workspaces/*/dms", (route) =>
@@ -412,6 +453,110 @@ async function captureScheme(browser, scheme) {
   const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
   await login.screenshot({ path: focusShot });
   shots.push(focusShot);
+
+  // 3a. 채널 만들기 다이얼로그 (MOMO-614): the form the sidebar + opens, filled
+  //     the way a person fills it. This is the surface that replaced the
+  //     /settings dead end, so it is reviewed in both schemes.
+  await login.getByTestId("new-channel").click();
+  await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  await login.getByTestId("create-channel-name").fill("release-rollback");
+  await login
+    .getByTestId("create-channel-topic")
+    .fill("배포와 롤백 절차, 당번 인계를 한곳에서");
+  // The focus ring rides `transition-colors` (150ms), so a frame shot the
+  // instant after focus catches the ring mid-interpolation and reviews a color
+  // the product never rests on. Let it settle first.
+  await login.waitForTimeout(300);
+  const createShot = `${OUT_DIR}/channel-create-${scheme}.png`;
+  await login.screenshot({ path: createShot });
+  shots.push(createShot);
+
+  // 3a-2. 서버 거절은 필드 옆에 (MOMO-614): 이미 있는 이름을 보내면 409가 이름
+  //       상자 밑에 붙고, 입력한 값은 그대로 남는다. 토스트 아님.
+  await login.getByTestId("create-channel-name").fill("general");
+  await login.getByTestId("create-channel-submit").click();
+  await login
+    .getByTestId("create-channel-name-error")
+    .waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const createErrorShot = `${OUT_DIR}/channel-create-error-${scheme}.png`;
+  await login.screenshot({ path: createErrorShot });
+  shots.push(createErrorShot);
+
+  // 3a-3. 진행 중 (MOMO-614 R1): 제출 버튼 안 스피너 + 라벨. 흐린 라벨 하나가
+  //       유일한 진행 신호였던 프레임이라, 두 스킴 모두에서 다시 본다. 응답을
+  //       늦추는 라우트는 이 페이지에만 걸고 곧바로 걷는다.
+  await login.route("**/v1/workspaces/*/channels", async (route) => {
+    if (route.request().method() === "POST") {
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    return route.fallback();
+  });
+  await login.getByTestId("create-channel-name").fill("release-rollback");
+  await login.getByTestId("create-channel-submit").click();
+  await login
+    .locator('[data-testid="create-channel-submit"][aria-busy="true"]')
+    .waitFor({ state: "visible" });
+  await login.waitForTimeout(200);
+  const createPendingShot = `${OUT_DIR}/channel-create-pending-${scheme}.png`;
+  await login.screenshot({ path: createPendingShot });
+  shots.push(createPendingShot);
+  await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+  await login.unroute("**/v1/workspaces/*/channels");
+
+  // 3a-4. 오프라인 (MOMO-614 R1 / R-1 5장): 배너 한 줄 + 만들기 버튼 disabled.
+  //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도
+  //       함께 읽는다. 여기서는 그 브라우저 신호를 실제로 끊어 확인한다.
+  await context.setOffline(true);
+  await login.getByTestId("new-channel").click();
+  await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
+  await login.waitForTimeout(200);
+  const createOfflineShot = `${OUT_DIR}/channel-create-offline-${scheme}.png`;
+  await login.screenshot({ path: createOfflineShot });
+  shots.push(createOfflineShot);
+  await context.setOffline(false);
+  await login.getByTestId("create-channel-cancel").click();
+  await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+
+  // 3a-3. 빈 워크스페이스 (MOMO-614): 채널이 0개일 때 남는 유일한 행동. 이 화면의
+  //       [채널 만들기]가 /settings로 보내던 막다른 골목이었고, 이제 위의
+  //       다이얼로그를 연다. 이 페이지에서만 채널 목록을 비운다.
+  const emptyWorkspace = await context.newPage();
+  await emptyWorkspace.route("**/v1/workspaces/*/channels", (route) =>
+    route.request().method() === "POST"
+      ? route.fallback()
+      : json(route, { channels: [] })
+  );
+  await emptyWorkspace.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(emptyWorkspace);
+  await emptyWorkspace.getByTestId("chat-no-channel").waitFor({ state: "visible" });
+  const emptyShot = `${OUT_DIR}/workspace-empty-${scheme}.png`;
+  await emptyWorkspace.screenshot({ path: emptyShot });
+  shots.push(emptyShot);
+
+  // 3a-5. 만들 권한이 없는 멤버가 보는 같은 화면 (MOMO-614): +도 팔레트 항목도
+  //       없고, 대신 누가 만들 수 있는지 말한다. requireWorkspaceAdmin이 거절할
+  //       버튼을 내주지 않는 것이 이 티켓이 없앤 막다른 골목의 반대편이다.
+  const nonAdmin = await context.newPage();
+  await nonAdmin.route("**/v1/workspaces/*/channels", (route) =>
+    route.request().method() === "POST"
+      ? route.fallback()
+      : json(route, { channels: [] })
+  );
+  await nonAdmin.route("**/v1/workspaces/*/roster", (route) =>
+    json(route, {
+      members: ROSTER.map((m) =>
+        m.id === ME ? { ...m, role: "member" } : m
+      ),
+    })
+  );
+  await nonAdmin.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(nonAdmin);
+  await nonAdmin.getByTestId("chat-no-channel").waitFor({ state: "visible" });
+  const nonAdminShot = `${OUT_DIR}/workspace-empty-nonadmin-${scheme}.png`;
+  await nonAdmin.screenshot({ path: nonAdminShot });
+  shots.push(nonAdminShot);
 
   // 3b. 멤버 디렉터리 (MOMO-611): the roster as a list, the role labels, the
   //     human/agent split, and the row that starts a DM.

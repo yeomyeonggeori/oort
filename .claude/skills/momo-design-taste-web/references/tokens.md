@@ -52,6 +52,24 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--on-danger` | `#fffefb` | `#17161a` | label on filled danger |
 | `--ok` | `#187533` | `#57ab5a` | connected, done |
 | `--warn` | `#8a5c00` | `#d4a72c` | connecting, stalled |
+| `--scrim` | `rgb(36 33 28 / 0.24)` | `rgb(9 8 11 / 0.62)` | the layer under a dialog or the ⌘K palette |
+
+`--scrim` is the one token that is not opaque, and the only one whose two
+schemes are not the same color at different lightness. It exists because a
+scrim is a **direction**, not a color: it must darken whatever it covers so the
+panel above it comes forward. Painting it as `--ink` at 20% looked right in
+light and inverted in dark, where `--ink` is nearly white (`#ececf1`): the
+overlay brightened the app to `rgb(74 73 78)` while the panel stayed
+`--surface-raised` `#201f24`, so the focused panel was **darker** than its
+scrimmed surroundings and the dialog read as receding (MOMO-614 R1). The alphas
+differ per scheme for the same reason: pressing warm paper down 24% buys the
+separation that near-night sky only gets at 62%.
+
+Both values are measured, not chosen by eye. `tokens.contrast.test.ts`
+composites the scrim over every surface with sRGB source-over blending and
+asserts two things in both schemes: the result is at most 0.7x the surface
+luminance (it darkens), and `--surface-raised` stays brighter than anything the
+scrim covers (the panel comes forward).
 
 Tailwind reaches these as `bg-surface`, `text-ink-muted`, `border-line-strong`,
 `bg-accent`, `text-agent`, and so on. Tailwind's stock palette is **cleared**
@@ -108,11 +126,18 @@ Control heights are a separate axis from spacing: `h-control-sm` 28px,
 Panes are a third axis. A secondary column is wider than any rhythm step, so it
 gets a **name** rather than an off-grid number, and `w-[320px]` still does not
 compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
-`w-pane` / `max-h-pane` 320px (thread panel, command list), `max-w-pane-lg`
-640px (agent card measure, R-1 §4). The card measure is a token for the same
-reason as the others: let an agent card run the full timeline width and its
-right-aligned numeric column ends up a screen away from its label, at which
-point it stops reading as a card and starts reading as a banner.
+`w-pane` / `max-h-pane` 320px (thread panel, command list), `max-w-pane-md`
+512px (the overlay measure: dialog panel and ⌘K palette), `max-w-pane-lg` 640px
+(agent card measure, R-1 §4). The card measure is a token for the same reason as
+the others: let an agent card run the full timeline width and its right-aligned
+numeric column ends up a screen away from its label, at which point it stops
+reading as a card and starts reading as a banner.
+
+`pane-md` was added last (MOMO-614 R2) because width was the one axis where a
+new surface could still take an unnamed dimension. The dialog and the palette
+both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
+token file had never heard of the measure the two overlays share. They alternate
+at the same anchor, so it is one measure and it gets one name.
 
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
@@ -138,6 +163,16 @@ component must name a role and cannot reach for size inflation:
 | `text-title` | 16px | surface titles |
 | `text-display` | 20px | at most one per surface |
 
+A role and a color share the `text-` prefix but are **different axes**, and the
+class merge has to be told so. `cn()` (`src/design/lib/cn.ts`) extends
+tailwind-merge with the five roles as its `font-size` group; without that,
+tailwind-merge's font-size validator rejects the role names, both axes collapse
+into `text-color`, and a class list naming a role and a color keeps only the
+last one. That is not hypothetical: it shipped the dialog title at 14px next to
+its own 14px description, and it painted every filled `size="sm"` button label
+in `--ink` instead of `--on-accent` (2.78:1 light, 1.71:1 dark). Adding a sixth
+role means adding it to that list too, and `cn.test.ts` is the check.
+
 Fonts are system stacks only (`--font-sans` includes `Apple SD Gothic Neo` and
 `Noto Sans KR` so Korean does not fall back to a metric-mismatched face). No
 webfont, no CDN: CSP forbids it and the desktop shell must render offline.
@@ -155,6 +190,15 @@ sidebar and `<main>`; the ⌘K switcher is a portalled dialog and stays outside
 the grid. Inside the sidebar column the workspace rail is `w-8` (32px), so the
 channel list keeps the remaining 208px.
 
+`dialog-panel` is the second named geometry utility (MOMO-614): a dialog sits one
+32px step below the top of the window, so its own ceiling is
+`calc(100dvh - var(--spacing-8) * 2)`. The rhythm scale has no viewport-relative
+step and `max-h-[calc(...)]` does not compile, so the measure gets a name for the
+same reason `app-shell` does. The panel is a flex column whose middle box carries
+`min-h-0 overflow-y-auto`: at 760x480 the form scrolls inside the panel while the
+title and the action row stay put, and the document still does not scroll
+(MOMO-610).
+
 ## 5b. Motion utilities
 
 There is exactly one, and it is feedback rather than decoration: `caret-stream`
@@ -164,6 +208,16 @@ inside the `@utility` block, so a reduced-motion viewer gets a **steady** caret
 rather than none: the caret is information about a stream still being open, and
 removing it would remove the information along with the motion. There is no
 shimmer utility and there must not be one (SKILL §4).
+
+`spinner-busy` (MOMO-614) is the second, and it follows the same rule for the
+same reason: a submit that is in flight shows a spinner **inside the button**
+(R-1 §5 "연결 검증 중 인라인 스피너(버튼 내부), 폼은 락"), and under
+`prefers-reduced-motion: reduce` it slows to `steps(8)` rather than stopping,
+because the rotation is the information that the request is still open. Note
+that a busy button is not a disabled one: `disabled:opacity-50` would drop the
+in-flight label to 2.2:1 exactly when it is the only progress signal, so a busy
+control keeps full contrast and carries `aria-busy`, while a control that
+genuinely cannot act (offline) is really `disabled` and says why.
 
 ## 6. Scheme selection
 

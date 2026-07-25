@@ -42,11 +42,18 @@ export function WorkspaceRail({
         {initial}
       </span>
 
+      {/* 빈 타일이지 맨 +가 아니다. 채널 섹션 헤더의 "새 채널 만들기"가 같은
+          lucide Plus를 같은 size-4, 같은 text-ink-muted로 200px 옆에 세우면서
+          접근 이름만 다르고 눈으로는 구별되지 않았다(R2 M8). 이 열은
+          워크스페이스 타일이 서는 열이므로 윤곽선을 둘러 "아직 비어 있는
+          타일"로 읽히게 한다: 바로 위 현재 워크스페이스 타일과 같은 24px
+          사각형이고 채워지지 않았을 뿐이다. 윤곽선은 컨트롤 윤곽선이라
+          --line이 아니라 --line-strong(3:1)을 쓴다(tokens.md §2). */}
       <Link
         to="/settings"
         aria-label="워크스페이스 추가"
         title="워크스페이스 추가"
-        className="flex size-6 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="flex size-6 items-center justify-center rounded-sm border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <Plus className="size-4" />
       </Link>
