@@ -238,12 +238,31 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `RATE_LIMIT_WINDOW_SECONDS` | 서버 | `60` | **MOMO-300** rate limit sliding window 길이. |
 | `RATE_LIMIT_PER_MEMBER` | 서버 | `600` | 윈도당 인증 멤버별 요청 상한. `0`=축 비활성. 초과 시 429 + `Retry-After` + `audit_log(rate_limit.exceeded)`(버스트당 1회). |
 | `RATE_LIMIT_PER_IP` | 서버 | `1200` | 윈도당 클라이언트 IP별 요청 상한(`X-Forwarded-For` 우선). `0`=축 비활성. **per-IP 축 위반은 인증 여부와 무관하게 audit_log에 기록되지 않는다** — IP 미들웨어가 AuthMiddleware보다 앞의 전역 계층이라 principal(tenant)이 없어 서버 로그로만 남는다. audit_log(`rate_limit.exceeded`)는 member 축 위반만 기록. |
+| `MOMO_CORS_ALLOWED_ORIGINS` | 서버 | (빈값) | **MOMO-605 / ADR-0133 P2** 교차 오리진 allowlist(쉼표 구분, 완전일치). 빈값·미설정=기본=**완전 무변경**(미들웨어 미장착 → `Access-Control-*`/`Vary` 헤더 0개, OPTIONS 동작 그대로). 예: `tauri://localhost,http://localhost:5173`. |
 
 > **rate limit v0 경계(문서화):** in-memory sliding window — 단일 노드 전제, 프로세스
 > 재시작 시 리셋, 레플리카 간 비공유. `/health`와 subscribe proxy 경로는 제외.
 > 비용 서킷브레이커(budget_window)와는 독립 축이다.
 > subscribe proxy(`/v1/centrifugo/*`)는 **내부 전용**(centrifugo → api compose 네트워크,
 > `CENT_PROXY_SECRET` 인증)이며 prod Caddy 엣지에서 403으로 차단된다(`infra/prod/Caddyfile`).
+
+> **CORS v0 경계(문서화) — MOMO-605:** 웹 클라는 같은 오리진 서빙이라 CORS가 필요 없다
+> (ADR-0119 D1-A). 이 knob은 **패키징된 Tauri 데스크톱** 전용이다 — 릴리스 빌드의 webview
+> 오리진이 `tauri://localhost`(Windows/Android는 `http://tauri.localhost`)라서 `/v1/*` 호출이
+> 진짜 교차 오리진이 되고, 어떤 도메인으로도 파생할 수 없어 operator가 명시한다.
+> `tauri dev`는 devUrl(`http://localhost:5173`)을 그대로 쓴다.
+> **와일드카드 금지** — `*`, `https://*.example.com`, 리터럴 `null`, 경로/트레일링 슬래시가
+> 붙은 값은 부팅 시 거부되고 warning 로그로 알린다(오타는 허용범위를 좁힐 뿐 넓히지 않는다).
+> **credentials off** — momo는 쿠키를 발급하지 않고 Authorization 베어러만 쓰므로
+> `Access-Control-Allow-Credentials`를 절대 보내지 않는다(클라는 fetch 기본값
+> `credentials: 'omit'` + 토큰 헤더). 따라서 `Allow-Origin: *` + credentials 조합은 표현 불가다.
+> 허용되지 않은 Origin은 403이 아니라 **헤더 없이 통과**시킨다 — 브라우저는 차단하고,
+> Origin을 보내지 않는 네이티브 클라/curl/work host/subscribe proxy는 무영향이다.
+> 미들웨어는 rate limiter **바깥**에 있어 429 응답에도 CORS 헤더가 붙는다(브라우저가 불투명
+> 네트워크 오류 대신 실제 상태를 읽는다). 검증: `scripts/verify_cors_allowlist.sh`.
+> realtime(wss)은 별도 계약 — dev/e2e/내부알파는 `infra/centrifugo.json`의
+> `client.allowed_origins`가 같은 데스크톱 오리진을 이미 허용하고, prod는 `APP_DOMAIN` 파생
+> (MOMO-398)이라 이 변수와 무관하다.
 
 > **보안:** `.env.example`의 `change-me-*` / 코드의 `dev-insecure-*` 기본값은 **개발용**이다.
 > 실배포에선 반드시 교체(`openssl rand -hex 32`). 기본값으로도 부팅은 되지만 안전하지 않다.

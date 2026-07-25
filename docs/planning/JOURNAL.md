@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-07-25 (Fable P2 완주 — Tauri 네이티브 통합) · 딥링크·mDNS·keychain·CORS, main 승인 대기
+- 3갈래 병렬(Opus 5): **766 Tauri 플러그인 4종**(딥링크 콜드스타트 버퍼링·mDNS 실발견·keychain·알림 — 실번들 E2E, 스캔 스레드 누수 자체 발견·수리, Rust 12 tests) + **767 웹 연결 표면**(서버 선택·프리필·발견 카드·API_BASE 동적화·브라우저 ?join 폴백) + **768 서버 CORS**(track/engine #769, 238/238+12관문).
+- **통합(#770)**: lib/tauri.ts add/add 충돌을 766 셸 정본으로 해소, 767 재배선은 예고대로 상수 5개 국한. 182/182 tests. **실번들 핸드셰이크 E2E**: ①momo://join 콜드스타트→7.1s 내 프리필 렌더(실초대 코드 일치) PASS ②mDNS 발견 카드→클릭 프리필 PASS(로컬네트워크 권한 프롬프트 실발생) ③keychain 세션 복원 dev 경로 PASS — 릴리스 번들은 momowebqa CORS 미적용이라 차단(768 main 반영+재배포로 해소, 마지막 조각).
+- 파이프라인 메모: push 의무화 후 누락 재발 0. 머지 커밋 provenance(2e71faaa 기본 메시지) 미흡 — 재작성 대신 코드 주석+README 커밋으로 근거 보존(정직 보고 수용).
+- **다음: P2(engine 768 + uxui 766/767/770) main 병합 성재 승인** → momowebqa CORS 재배포→릴리스 번들 최종 E2E → momo-next 발행 채널(Tauri updater)+parity 게이트.
+
+
+## 2026-07-25 (Fable wave2 3R 종결) · Blocker0·High0, main 승인 대기
+- **3R 판정**: Blocker 0·High 1·Medium 5 — opaque payload가 픽셀로 증명(rm -rf 인자 미노출+"숨김 3개"), stalled 계약·seq 앵커·낙관 행 전부 런타임 검증. wave1 회귀 0.
+- **수정 반영(오케스트레이터 직접, PR #764)**: H1 초대 발급 카드 포커스 착지(1회 노출 코드가 폴드 아래) · M3 모두읽음 카피 정직화(채널 커서 전진 사실 진술) · M4 와이어 어휘 번역(actionType·availability map-with-fallback) · M5 설정 Esc 편집 중 가드 · N9 payload→원본 데이터. 136/136 tests.
+- 백로그 등재: 인박스 인라인 승인(760 ApprovalActions 재사용, R-1 §2 완성) · aria-controls·title 툴팁·⌘⇧A ctrl 병행 · M2 스펙 정합 질문. 
+- **다음: wave1+2 통합분 track/uxui→main 성재 승인** → P2(Tauri 네이티브: 딥링크·mDNS·updater·keychain) 설계.
+
+
+## 2026-07-25 (Fable P1 wave2 완주 — 인박스·에이전트 카드·설정 셸·세션/낙관) · track/uxui 랜딩, 3R 리뷰 중
+- 4갈래 병렬(Opus 5, MOMO-599~602) → 통합 브랜치(761→759→760→762) → **136/136 tests·실서버 스모크 2종 PASS**로 track/uxui 랜딩(PR #763).
+- **759 인박스**: 3필터+zero-noise 빈상태+seq 앵커 점프. 실서버로 멘션 계약 실측(대문자 UUID — 케이스 무관 교훈 4번째 적용). data gap 7건 정직(승인 원장 created_at 부재·전역 agent-run REST 부재 등 — 엔진 후속 후보).
+- **760 에이전트 카드**: opaque payload 규율 계승(allowlist 밖 "숨김 N개"), timed_out=stalled(ADR-0132 침묵≠실패), 승인 결정 idempotency.
+- **761 설정 셸 4표면**: 실서버 왕복 검증 + 상태 복원(잔존: momoqa-601 WS 1개 — 삭제 REST 부재).
+- **762 M9/M10**: 새로고침 세션 복원(refresh 회전)+낙관 삽입→seq 확정 치환(중복 0 실측). 발견: realtime 페이로드 client_msg_id 부재(엔진 후속 후보).
+- **통합 교훈**: 텍스트 충돌 0인데 **자동머지가 의미적 파손 2건 통과**(getAccessToken이 lib/session으로 이관돼 761·760 임포트 파손) — typecheck가 검출. "머지 직후 typecheck 필수" 성문화. 관측: worker들이 커밋을 원격에 push하지 않아(껍데기 브랜치) 로컬 worktree 브랜치로 통합 — 파이프라인 개선 후보.
+- 진행: design-review 3R(wave2 표면). 다음: 3R 종결→main 승인 요청→P2(Tauri 데스크톱 네이티브 통합) 설계.
+
+
 ## 2026-07-25 (Fable P1 wave1 design-review 종결) · 웹판 첫 리뷰 사이클 2R PASS, Medium 전건 해소
 - **1R FAIL(Blocker2·High2)**: 리뷰어가 런타임 스크롤 프로브 자작 — B1 프리펜드 앵커 소실(R-1 §3 firstItemIndex 계약 미이행), B2 Tauri 타이틀 em-dash, H3 로그인 매달린 카피+내부 어휘, H4 디바이더 직후 무기명 렌더.
 - **수정 라운드(Opus 5)**: 10건 전부 반영 + **리뷰 프로브 자체의 결함 2건 교정**(?before 0회·프로그램적 scrollTop 점프) + baseline A/B 실측(앵커 이탈 vs 드리프트 -1~-3px anchorHeld). 리뷰 판정의 증상 서술 오류 정정. 엔진 리스크 플래그(nextBefore) → 오케스트레이터 실서버 확인 정상(209) 해제.

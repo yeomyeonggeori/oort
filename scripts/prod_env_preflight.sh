@@ -552,6 +552,23 @@ if [ "$runtime_mode" = "strict" ]; then
     pass "Centrifugo allowed_origins stays unset — no web origin, browser realtime remains fail-closed (allowed)"
   fi
 
+  # MOMO-605 (ADR-0133 P2): the API CORS allowlist is an explicit operator value
+  # (a packaged desktop webview origin such as tauri://localhost cannot be
+  # derived from any domain). Unset is the default and means the middleware is
+  # never mounted. The server already refuses wildcard entries at boot, so this
+  # check exists to surface the mistake BEFORE compose comes up rather than in a
+  # log line nobody reads.
+  momo605_cors="$(get_var MOMO_CORS_ALLOWED_ORIGINS)"
+  if [ "$momo605_cors" = "" ]; then
+    pass "MOMO_CORS_ALLOWED_ORIGINS is unset — no CORS middleware is mounted (default, same-origin web serving needs none)"
+  elif printf '%s' "$momo605_cors" | grep -q '[*]'; then
+    fail "MOMO_CORS_ALLOWED_ORIGINS must not contain a wildcard — list exact origins (e.g. tauri://localhost); the server drops wildcard entries and the surface would stay closed"
+  elif printf '%s' "$momo605_cors" | grep -Eqi '(^|,)[[:space:]]*null[[:space:]]*(,|$)'; then
+    fail "MOMO_CORS_ALLOWED_ORIGINS must not allow the literal 'null' origin (sandboxed iframes and file:// documents send it)"
+  else
+    pass "MOMO_CORS_ALLOWED_ORIGINS lists exact origins only ('$momo605_cors')"
+  fi
+
   assert_not_latest_or_smoke_image MOMO_API_IMAGE
   assert_not_latest_or_smoke_image MOMO_RELAY_IMAGE
   assert_not_latest_or_smoke_image MOMO_WORKER_IMAGE

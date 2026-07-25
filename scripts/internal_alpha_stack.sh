@@ -123,9 +123,12 @@ compose() {
   # PLATFORM_ADMIN_EMAILS(MOMO-583): provider_link("AI 연결")는 이 목록에 등재된
   # 인스턴스 운영자(owner/admin + 검증된 이메일)만 편집 가능. 요청 시점 판정이라
   # 재로그인 불필요. 기본=성재. 미등재 워크스페이스 owner는 403(크로스테넌트 차단).
+  # MOMO_CORS_ALLOWED_ORIGINS(MOMO-605/P2): Tauri 데스크톱(tauri://localhost)과
+  # dev preview가 REST에 닿도록 기본 허용. 완전일치 목록, 와일드카드 불가.
   PORT="$API_PORT" CENT_PORT="$CENT_PORT" POSTGRES_PORT="$PG_PORT" HERMES_PORT="$HERMES_PORT" \
     MOMO_E2E_REALTIME_WS_URL="${INTERNAL_ALPHA_WS_URL:-ws://127.0.0.1:${CENT_PORT}/connection/websocket}" \
     PLATFORM_ADMIN_EMAILS="${INTERNAL_ALPHA_PLATFORM_ADMIN_EMAILS:-gkffhdnls13@gmail.com}" \
+    MOMO_CORS_ALLOWED_ORIGINS="${INTERNAL_ALPHA_CORS_ORIGINS:-tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173}" \
     docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 

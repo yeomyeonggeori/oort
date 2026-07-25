@@ -212,6 +212,11 @@ services:
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
       MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
       CONTEXT_PACKET_TTL_SECONDS: ${CONTEXT_PACKET_TTL_SECONDS:-900}
+      # MOMO-605 (ADR-0133 P2): exact-match CORS origin allowlist for the Tauri
+      # desktop webview (tauri://localhost). Empty by default — the server then
+      # mounts no CORS middleware at all, so every existing gate keeps
+      # byte-identical responses. Wildcards are refused by the server.
+      MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
