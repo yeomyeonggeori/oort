@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Hash, Lock } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Hash, Loader2, Lock } from "lucide-react";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import {
@@ -56,6 +62,43 @@ const KINDS = [
   },
 ];
 
+/** 다이얼로그를 닫아도 남는 입력. 지운 적 없는 글은 지워지지 않는다. */
+export interface ChannelDraft {
+  kind: "public" | "private";
+  name: string;
+  topic: string;
+}
+
+const EMPTY_DRAFT: ChannelDraft = { kind: "public", name: "", topic: "" };
+
+/**
+ * 오프라인인가. 두 곳에 물어본다.
+ *
+ * 레일의 `disconnected`는 centrifuge가 재연결을 포기한 종단 절단에서만 오기
+ * 때문에, 랜선을 뽑고 105초를 기다려도 상태는 `connecting`에 머문다. 즉 그
+ * 신호 하나만 보면 이 표면의 오프라인 상태는 코드에만 있고 화면에는 없다.
+ * 브라우저가 아는 사실(navigator.onLine)을 함께 읽어서, 실제로 끊긴 사람이
+ * 실제로 배너를 본다. 두 신호는 겹칠 뿐 서로를 대체하지 않는다: 랜선은
+ * 살아 있는데 서버만 죽은 경우는 레일이, 랜선이 빠진 경우는 브라우저가 안다.
+ */
+function useOffline(): boolean {
+  const { connStatus } = useSession();
+  const [browserOffline, setBrowserOffline] = useState(
+    () => typeof navigator !== "undefined" && navigator.onLine === false
+  );
+  useEffect(() => {
+    const online = () => setBrowserOffline(false);
+    const offline = () => setBrowserOffline(true);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
+  return browserOffline || connStatus === "disconnected";
+}
+
 /**
  * Label, control, then one line under it that is either the hint or the error.
  *
@@ -103,22 +146,24 @@ function DialogField({
 }
 
 function CreateChannelPanel({
+  draft,
+  setDraft,
   onOpenChange,
 }: {
+  draft: ChannelDraft;
+  setDraft: (next: ChannelDraft) => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { connStatus } = useSession();
   const { pending, failure, create, clearFailure } = useCreateChannel();
+  const offline = useOffline();
 
-  const [kind, setKind] = useState<"public" | "private">("public");
-  const [name, setName] = useState("");
-  const [topic, setTopic] = useState("");
+  const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
-  const offline = connStatus === "disconnected";
 
   // A rule is only worth stating once the reader has done something it applies
   // to: an untouched empty field is not a mistake, it is a field.
@@ -144,7 +189,7 @@ function CreateChannelPanel({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setAttempted(true);
-    if (pending) return;
+    if (pending || offline) return;
     if (nameIssue !== null || topicIssue !== null) {
       // Land the caret on the field that has to change, the same way the mac
       // sheet does, so the message and the cursor are in one place.
@@ -157,27 +202,35 @@ function CreateChannelPanel({
       name: normalizeChannelName(name),
       topic: normalizedTopic === "" ? undefined : normalizedTopic,
     });
-    if (created) onOpenChange(false);
+    if (created) {
+      // 만들어진 채널의 초안은 더 이상 초안이 아니다.
+      setDraft(EMPTY_DRAFT);
+      onOpenChange(false);
+    }
   }
 
   // Editing invalidates the answer the server gave about the old input, so the
   // rejection goes with it instead of hanging over a name that has changed.
   const onInput = useCallback(
-    (set: (value: string) => void) => (event: React.ChangeEvent<HTMLInputElement>) => {
-      set(event.target.value);
+    (key: "name" | "topic") => (event: React.ChangeEvent<HTMLInputElement>) => {
+      setDraft({ ...draft, [key]: event.target.value });
       clearFailure();
     },
-    [clearFailure]
+    [draft, setDraft, clearFailure]
   );
 
   return (
     <DialogContent
       data-testid="create-channel-dialog"
-      onOpenAutoFocus={(event) => {
-        // Radix would focus the first tabbable element, which is the 공개 범위
-        // radio. The field a person came here to fill is the name.
-        event.preventDefault();
-        nameRef.current?.focus();
+      onKeyDown={(event) => {
+        // ⌘↵ = 다이얼로그 기본 액션 (R-1 5장). On the <form> this reached the
+        // fields and nothing else: [취소]와 [채널 만들기]는 form 밖에서 form=
+        // 속성으로만 묶여 있어 keydown이 폼까지 올라가지 않았다. 패널 루트에
+        // 걸면 액션 행을 포함해 다이얼로그 어디서든 같은 키가 같은 일을 한다.
+        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          event.preventDefault();
+          formRef.current?.requestSubmit();
+        }
       }}
       onEscapeKeyDown={(event) => {
         if (pending) event.preventDefault();
@@ -193,30 +246,74 @@ function CreateChannelPanel({
         </DialogDescription>
       </div>
 
-      {/* 오프라인은 사실 보고이지 금지가 아니다: 채널 생성은 REST 한 번이고 그
-          경로에는 데드라인이 걸려 있어(lib/http) 서버가 없으면 그렇다고 말한다.
-          끊긴 것은 실시간 레일이므로, 그 결과만 정확히 알린다. */}
+      {/* 오프라인이면 만들 수 없다고 말하고 버튼을 잠근다 (R-1 5장). 생성은
+          REST 한 번이고 그 경로에는 데드라인이 걸려 있어(lib/http) 끊긴 채로
+          누르면 15초 뒤 실패가 돌아온다. "지금 만들 수 있다"고 약속했다가 그
+          실패로 반박당하느니, 설정 화면과 같은 문장으로 같은 사실을 말한다. */}
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결 끊김, 재연결 중입니다. 채널은 지금 만들 수 있고, 새 메시지는 연결이 돌아온 뒤 도착합니다."
+          message="연결이 끊겼습니다. 채널 만들기는 다시 연결된 뒤에 할 수 있습니다."
           testId="create-channel-offline"
         />
       )}
 
       <form
         id={FORM_ID}
+        ref={formRef}
         onSubmit={submit}
-        onKeyDown={(event) => {
-          // ⌘↵ = 다이얼로그 기본 액션 (R-1 §5). Plain Enter already submits from
-          // a text input; this is the path from anywhere else in the form.
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-            event.preventDefault();
-            event.currentTarget.requestSubmit();
-          }
-        }}
         className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4"
       >
+        {/* 이름이 먼저다. 사람이 여기 온 이유이자 Radix가 기본으로 캐럿을 두는
+            첫 tabbable이라, 보이는 순서와 Tab 순서와 시작 위치가 하나로 맞는다.
+            공개 범위가 위에 있던 동안에는 정방향 Tab이 액션 버튼을 지나야 그
+            선택지에 닿았다. 순서는 mac 시트(이름, 주제)를 잇는다. */}
+        <DialogField
+          label="채널 이름"
+          htmlFor="create-channel-name"
+          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다."
+          error={nameError}
+        >
+          <Input
+            id="create-channel-name"
+            ref={nameRef}
+            name="name"
+            value={name}
+            onChange={onInput("name")}
+            placeholder="product-planning"
+            autoComplete="off"
+            spellCheck={false}
+            disabled={pending}
+            aria-invalid={nameError ? true : undefined}
+            aria-describedby={
+              nameError ? "create-channel-name-error" : "create-channel-name-hint"
+            }
+            data-testid="create-channel-name"
+          />
+        </DialogField>
+
+        <DialogField
+          label="주제"
+          htmlFor="create-channel-topic"
+          hint="선택 사항이며 280자까지 쓸 수 있습니다."
+          error={topicError}
+        >
+          <Input
+            id="create-channel-topic"
+            name="topic"
+            value={topic}
+            onChange={onInput("topic")}
+            placeholder="이 채널에서 무엇을 다루는지 한 줄로"
+            autoComplete="off"
+            disabled={pending}
+            aria-invalid={topicError ? true : undefined}
+            aria-describedby={
+              topicError ? "create-channel-topic-error" : "create-channel-topic-hint"
+            }
+            data-testid="create-channel-topic"
+          />
+        </DialogField>
+
         <fieldset
           className="flex min-w-0 flex-col gap-1"
           disabled={pending}
@@ -242,7 +339,7 @@ function CreateChannelPanel({
                   value={choice.id}
                   checked={kind === choice.id}
                   onChange={() => {
-                    setKind(choice.id);
+                    setDraft({ ...draft, kind: choice.id });
                     clearFailure();
                   }}
                   className="mt-1 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
@@ -258,52 +355,6 @@ function CreateChannelPanel({
             ))}
           </div>
         </fieldset>
-
-        <DialogField
-          label="채널 이름"
-          htmlFor="create-channel-name"
-          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내로 입력하세요. 영문은 소문자로 저장됩니다."
-          error={nameError}
-        >
-          <Input
-            id="create-channel-name"
-            ref={nameRef}
-            name="name"
-            value={name}
-            onChange={onInput(setName)}
-            placeholder="product-planning"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={pending}
-            aria-invalid={nameError ? true : undefined}
-            aria-describedby={
-              nameError ? "create-channel-name-error" : "create-channel-name-hint"
-            }
-            data-testid="create-channel-name"
-          />
-        </DialogField>
-
-        <DialogField
-          label="주제"
-          htmlFor="create-channel-topic"
-          hint="선택 사항이며 280자까지 쓸 수 있습니다."
-          error={topicError}
-        >
-          <Input
-            id="create-channel-topic"
-            name="topic"
-            value={topic}
-            onChange={onInput(setTopic)}
-            placeholder="이 채널에서 무엇을 다루는지 한 줄로"
-            autoComplete="off"
-            disabled={pending}
-            aria-invalid={topicError ? true : undefined}
-            aria-describedby={
-              topicError ? "create-channel-topic-error" : "create-channel-topic-hint"
-            }
-            data-testid="create-channel-topic"
-          />
-        </DialogField>
 
         {/* A rejection that belongs to the whole attempt rather than to one box
             (권한, 네트워크). Inline in the form, never a toast. */}
@@ -327,13 +378,24 @@ function CreateChannelPanel({
         >
           취소
         </Button>
+        {/* 진행 중은 비활성이 아니라 바쁜 것이다. `disabled`를 걸면 하우스의
+            disabled 흐리기(opacity-50)가 라벨을 2.2:1로 낮추는데, 하필 그
+            순간의 라벨이 유일한 진행 신호다. 그래서 바쁜 동안에는 대비를 그대로
+            두고 버튼 안 스피너를 켜며(R-1 5장), 클릭은 submit이 막는다. 반대로
+            오프라인은 진짜로 할 수 없는 일이라 진짜 disabled에 이유 툴팁이다. */}
         <Button
           type="submit"
           form={FORM_ID}
           size="sm"
-          disabled={pending}
+          disabled={offline}
+          aria-disabled={pending || undefined}
+          aria-busy={pending || undefined}
+          title={
+            offline ? "연결이 끊겨 지금은 만들 수 없습니다." : undefined
+          }
           data-testid="create-channel-submit"
         >
+          {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
           {pending ? "채널 만드는 중" : "채널 만들기"}
         </Button>
       </div>
@@ -344,31 +406,52 @@ function CreateChannelPanel({
 export function CreateChannelDialog({
   open,
   onOpenChange,
+  draft,
+  setDraft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  draft: ChannelDraft;
+  setDraft: (next: ChannelDraft) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Mounted only while open, so every opening starts on an empty form
-          rather than on the abandoned draft of the last one. */}
-      {open && <CreateChannelPanel onOpenChange={onOpenChange} />}
+      {/* 열려 있는 동안에만 마운트한다. 이전 시도의 거절과 attempted 플래그가
+          다음 열기까지 따라오지 않고, 다이얼로그가 열리는 그 순간의
+          document.activeElement가 곧 "무엇이 이걸 열었나"이기 때문이다
+          (dialog.tsx가 그 값을 잡아 닫을 때 돌려준다).
+          다만 초안은 위(provider)에 있어서, 280자를 쓰다가 바깥을 한 번
+          클릭해도 글은 그대로 있고 다시 열면 이어서 쓴다. 지운 적 없는 글은
+          지워지지 않는다는 쪽이, 닫을 때마다 확인 다이얼로그를 띄우는 쪽보다
+          조용하다(SKILL §6 파괴적 액션 확인). */}
+      {open && (
+        <CreateChannelPanel
+          draft={draft}
+          setDraft={setDraft}
+          onOpenChange={onOpenChange}
+        />
+      )}
     </Dialog>
   );
 }
 
 /**
  * Holds the one dialog for the whole signed-in shell and hands its entry points
- * the verb that opens it (sidebar header +, sidebar empty state, empty
- * workspace).
+ * the verb that opens it (sidebar header +, empty workspace, ⌘K 팔레트).
  */
 export function CreateChannelProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<ChannelDraft>(EMPTY_DRAFT);
   const openCreate = useCallback(() => setOpen(true), []);
   return (
     <CreateChannelOpenContext.Provider value={openCreate}>
       {children}
-      <CreateChannelDialog open={open} onOpenChange={setOpen} />
+      <CreateChannelDialog
+        open={open}
+        onOpenChange={setOpen}
+        draft={draft}
+        setDraft={setDraft}
+      />
     </CreateChannelOpenContext.Provider>
   );
 }

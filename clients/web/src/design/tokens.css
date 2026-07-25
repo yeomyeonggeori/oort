@@ -47,6 +47,19 @@
   --agent: light-dark(#4a6785, #7fa0c4);
   --agent-soft: light-dark(#e6ebf2, #1e2836);
 
+  /* --- 스크림: 다이얼로그 뒤를 덮는 층 (MOMO-614 R1) ---------------------
+   * 스크림은 색이 아니라 방향이다: 어느 스킴에서든 뒤를 **어둡게** 해서 앞의
+   * 패널이 앞으로 나오게 만든다. 이것을 --ink/20으로 대신하면 다크에서
+   * --ink가 거의 흰색(#ececf1)이라 오버레이가 배경을 오히려 밝히고, 패널
+   * (--surface-raised)이 주변보다 어두워져 초점이 뒤로 물러난다. 그래서 이
+   * 층은 잉크를 빌려 쓰지 않고 자기 토큰을 갖는다.
+   *
+   * 알파는 스킴마다 다르다. 밝은 종이를 24%로 눌러 얻는 분리를, 이미 어두운
+   * 밤하늘에서 얻으려면 훨씬 더 짙어야 한다(62%). 두 값 모두 합성 후 휘도를
+   * tokens.contrast.test.ts가 잰다: 스크림은 모든 표면을 어둡게 해야 하고,
+   * 스크림 걸린 어떤 표면보다 --surface-raised가 밝아야 한다. */
+  --scrim: light-dark(rgb(36 33 28 / 0.24), rgb(9 8 11 / 0.62));
+
   /* --- status ------------------------------------------------------------ */
   --danger: light-dark(#b3261e, #f2b8b5);
   --on-danger: light-dark(#fffefb, #17161a);
@@ -142,6 +155,7 @@
   --color-on-accent: var(--on-accent);
   --color-agent: var(--agent);
   --color-agent-soft: var(--agent-soft);
+  --color-scrim: var(--scrim);
   --color-danger: var(--danger);
   --color-on-danger: var(--on-danger);
   --color-ok: var(--ok);
@@ -221,6 +235,24 @@
 
   @media (prefers-reduced-motion: reduce) {
     animation: none;
+  }
+}
+
+/* 버튼 안 스피너 (R-1 5장 "연결 검증 중 인라인 스피너(버튼 내부), 폼은 락").
+ * caret-stream과 같은 이유로 reduced-motion에서 사라지지 않고 **느려진다**:
+ * 회전이 곧 "아직 진행 중"이라는 정보이고, 모션만 걷어내면 정보까지 함께
+ * 사라진다. 매끄러운 회전 대신 8단으로 끊어 돌려 전정 자극을 없앤다. */
+@utility spinner-busy {
+  animation: momo-spin 0.9s linear infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: momo-spin 1.6s steps(8, end) infinite;
+  }
+}
+
+@keyframes momo-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

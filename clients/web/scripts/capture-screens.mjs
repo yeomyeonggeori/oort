@@ -482,6 +482,40 @@ async function captureScheme(browser, scheme) {
   const createErrorShot = `${OUT_DIR}/channel-create-error-${scheme}.png`;
   await login.screenshot({ path: createErrorShot });
   shots.push(createErrorShot);
+
+  // 3a-3. 진행 중 (MOMO-614 R1): 제출 버튼 안 스피너 + 라벨. 흐린 라벨 하나가
+  //       유일한 진행 신호였던 프레임이라, 두 스킴 모두에서 다시 본다. 응답을
+  //       늦추는 라우트는 이 페이지에만 걸고 곧바로 걷는다.
+  await login.route("**/v1/workspaces/*/channels", async (route) => {
+    if (route.request().method() === "POST") {
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    return route.fallback();
+  });
+  await login.getByTestId("create-channel-name").fill("release-rollback");
+  await login.getByTestId("create-channel-submit").click();
+  await login
+    .locator('[data-testid="create-channel-submit"][aria-busy="true"]')
+    .waitFor({ state: "visible" });
+  await login.waitForTimeout(200);
+  const createPendingShot = `${OUT_DIR}/channel-create-pending-${scheme}.png`;
+  await login.screenshot({ path: createPendingShot });
+  shots.push(createPendingShot);
+  await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+  await login.unroute("**/v1/workspaces/*/channels");
+
+  // 3a-4. 오프라인 (MOMO-614 R1 / R-1 5장): 배너 한 줄 + 만들기 버튼 disabled.
+  //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도
+  //       함께 읽는다. 여기서는 그 브라우저 신호를 실제로 끊어 확인한다.
+  await context.setOffline(true);
+  await login.getByTestId("new-channel").click();
+  await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
+  await login.waitForTimeout(200);
+  const createOfflineShot = `${OUT_DIR}/channel-create-offline-${scheme}.png`;
+  await login.screenshot({ path: createOfflineShot });
+  shots.push(createOfflineShot);
+  await context.setOffline(false);
   await login.getByTestId("create-channel-cancel").click();
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
 
@@ -500,6 +534,29 @@ async function captureScheme(browser, scheme) {
   const emptyShot = `${OUT_DIR}/workspace-empty-${scheme}.png`;
   await emptyWorkspace.screenshot({ path: emptyShot });
   shots.push(emptyShot);
+
+  // 3a-5. 만들 권한이 없는 멤버가 보는 같은 화면 (MOMO-614): +도 팔레트 항목도
+  //       없고, 대신 누가 만들 수 있는지 말한다. requireWorkspaceAdmin이 거절할
+  //       버튼을 내주지 않는 것이 이 티켓이 없앤 막다른 골목의 반대편이다.
+  const nonAdmin = await context.newPage();
+  await nonAdmin.route("**/v1/workspaces/*/channels", (route) =>
+    route.request().method() === "POST"
+      ? route.fallback()
+      : json(route, { channels: [] })
+  );
+  await nonAdmin.route("**/v1/workspaces/*/roster", (route) =>
+    json(route, {
+      members: ROSTER.map((m) =>
+        m.id === ME ? { ...m, role: "member" } : m
+      ),
+    })
+  );
+  await nonAdmin.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(nonAdmin);
+  await nonAdmin.getByTestId("chat-no-channel").waitFor({ state: "visible" });
+  const nonAdminShot = `${OUT_DIR}/workspace-empty-nonadmin-${scheme}.png`;
+  await nonAdmin.screenshot({ path: nonAdminShot });
+  shots.push(nonAdminShot);
 
   // 3b. 멤버 디렉터리 (MOMO-611): the roster as a list, the role labels, the
   //     human/agent split, and the row that starts a DM.

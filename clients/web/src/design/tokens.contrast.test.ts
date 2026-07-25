@@ -21,6 +21,31 @@ function parseLightDarkTokens(source: string): Record<string, [string, string]> 
 
 const TOKENS = parseLightDarkTokens(css);
 
+/**
+ * `--scrim` is the one token that is not opaque, so the generic parser above
+ * cannot see it and the pairs it produces cannot describe it. It gets its own
+ * reader: `light-dark(rgb(r g b / a), rgb(r g b / a))`.
+ */
+function parseScrim(source: string): [ScrimLayer, ScrimLayer] {
+  const rgba = String.raw`rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\s*\)`;
+  const m = source.match(
+    new RegExp(String.raw`--scrim:\s*light-dark\(\s*${rgba}\s*,\s*${rgba}\s*\)`)
+  );
+  if (!m) throw new Error("--scrim missing from tokens.css, or not light-dark(rgb(...), rgb(...))");
+  const layer = (o: number): ScrimLayer => ({
+    rgb: [Number(m[o]), Number(m[o + 1]), Number(m[o + 2])],
+    alpha: Number(m[o + 3]),
+  });
+  return [layer(1), layer(5)];
+}
+
+interface ScrimLayer {
+  rgb: [number, number, number];
+  alpha: number;
+}
+
+const SCRIM = parseScrim(css);
+
 function channels(hex: string): [number, number, number] {
   const v = hex.replace("#", "");
   return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255) as [
@@ -39,6 +64,22 @@ function linearize(hex: string): [number, number, number] {
 function luminance(hex: string): number {
   const [r, g, b] = linearize(hex);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function luminanceRGB([r, g, b]: [number, number, number]): number {
+  const [lr, lg, lb] = [r, g, b].map((c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+}
+
+/** What the browser actually paints: source-over alpha blending in sRGB. */
+function composite(layer: ScrimLayer, hex: string): [number, number, number] {
+  const under = channels(hex).map((c) => c * 255);
+  return under.map(
+    (c, i) => layer.rgb[i] * layer.alpha + c * (1 - layer.alpha)
+  ) as [number, number, number];
 }
 
 /** OKLab hue angle in degrees, used to police hue families (AI-tell bans). */
@@ -123,6 +164,11 @@ describe("Dawn palette", () => {
         expect(hex.toLowerCase(), `${token} -> ${hex}`).not.toBe("#000000");
       }
     }
+    // The scrim is the one place a lazy pure black would be tempting.
+    for (const layer of SCRIM) {
+      expect(layer.rgb.join(","), "scrim tint").not.toBe("0,0,0");
+      expect(layer.rgb.join(","), "scrim tint").not.toBe("255,255,255");
+    }
   });
 
   for (const scheme of SCHEMES) {
@@ -161,6 +207,34 @@ describe("Dawn palette", () => {
             Number(ratio.toFixed(2)),
             `line-strong on ${bg} (${scheme.name})`
           ).toBeGreaterThanOrEqual(3);
+        }
+      });
+
+      // The scrim is a direction, not a color: whatever it covers must end up
+      // darker, in BOTH schemes. Painting it with --ink passed review by eye in
+      // light and inverted in dark (--ink is nearly white there), which is the
+      // regression these two assertions exist to make impossible (MOMO-614 R1).
+      it("darkens every surface it covers", () => {
+        const layer = SCRIM[scheme.index];
+        for (const bg of SURFACES) {
+          const hex = pick(bg, scheme.index);
+          const over = luminanceRGB(composite(layer, hex));
+          expect(
+            Number(over.toFixed(4)),
+            `scrim over ${bg} (${scheme.name})`
+          ).toBeLessThanOrEqual(luminance(hex) * 0.7);
+        }
+      });
+
+      it("leaves the dialog panel brighter than anything it covers", () => {
+        const layer = SCRIM[scheme.index];
+        const panel = luminance(pick("surface-raised", scheme.index));
+        for (const bg of SURFACES) {
+          const over = luminanceRGB(composite(layer, pick(bg, scheme.index)));
+          expect(
+            panel,
+            `--surface-raised panel vs scrimmed ${bg} (${scheme.name})`
+          ).toBeGreaterThan(over);
         }
       });
 

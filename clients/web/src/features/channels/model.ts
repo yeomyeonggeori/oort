@@ -21,7 +21,14 @@ export const CHANNEL_TOPIC_MAX = 280;
  *  at the server. */
 const NAME_RE = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/;
 
-export type ChannelNameIssue = "required" | "tooLong" | "unsupportedCharacters";
+/** The alphabet by itself, without the rule about where a name may begin. */
+const NAME_ALPHABET_RE = /^[a-z0-9_-]+$/;
+
+export type ChannelNameIssue =
+  | "required"
+  | "tooLong"
+  | "unsupportedCharacters"
+  | "edgeSeparator";
 export type ChannelTopicIssue = "tooLong";
 
 /** What the server stores: trimmed and lowercased. */
@@ -40,8 +47,11 @@ export function channelNameIssue(raw: string): ChannelNameIssue | null {
   // Length before shape, same order as the server: "80자를 넘었다"는 말이
   // "쓸 수 없는 글자가 있다"보다 고치기 쉬운 안내다.
   if (name.length > CHANNEL_NAME_MAX) return "tooLong";
-  if (!NAME_RE.test(name)) return "unsupportedCharacters";
-  return null;
+  if (NAME_RE.test(name)) return null;
+  // The server's regex refuses two different things and one message for both
+  // told `-release` to use only the characters it had already used. Which half
+  // of the rule was broken decides which sentence the reader gets.
+  return NAME_ALPHABET_RE.test(name) ? "edgeSeparator" : "unsupportedCharacters";
 }
 
 export function channelTopicIssue(raw: string): ChannelTopicIssue | null {
@@ -59,6 +69,8 @@ export function channelNameIssueMessage(issue: ChannelNameIssue): string {
       return `채널 이름은 ${CHANNEL_NAME_MAX}자 이내여야 합니다.`;
     case "unsupportedCharacters":
       return "영문, 숫자, 하이픈, 밑줄만 사용할 수 있습니다.";
+    case "edgeSeparator":
+      return "처음과 끝은 영문이나 숫자여야 합니다. 하이픈과 밑줄은 가운데에만 쓸 수 있습니다.";
   }
 }
 
@@ -111,7 +123,7 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
       return {
         field: "name",
         message:
-          "서버가 이 이름을 거절했습니다. 영문 소문자, 숫자, 하이픈, 밑줄만 사용할 수 있습니다.",
+          "서버가 이 이름을 거절했습니다. 영문 소문자, 숫자, 하이픈, 밑줄만 쓸 수 있고 처음과 끝은 영문이나 숫자여야 합니다.",
       };
     }
     if (error.status === 403) {

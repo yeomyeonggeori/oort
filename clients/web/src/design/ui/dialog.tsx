@@ -19,13 +19,19 @@ export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;
 
+/**
+ * The scrim. `bg-scrim`, not `bg-ink/20`: the overlay's job is to push the page
+ * back, and ink is nearly white in dark mode, so borrowing it there brightened
+ * the app and left the panel darker than its own surroundings. `--scrim`
+ * darkens in both schemes and tokens.contrast.test.ts measures that it does.
+ */
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 bg-ink/20", className)}
+    className={cn("fixed inset-0 bg-scrim", className)}
     {...props}
   />
 ));
@@ -35,25 +41,52 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  * The panel. `dialog-panel` (tokens.css) caps its height at the window minus
  * the 32px inset it sits at, so a short window scrolls the panel body and never
  * the document (MOMO-610). Callers put the scrolling box inside.
+ *
+ * Closing returns the caret to whatever opened the dialog. Radix's own
+ * `onCloseAutoFocus` focuses `DialogTrigger`, and every dialog in this app is
+ * opened programmatically (a sidebar button, a command palette item), so that
+ * ref is null and focus fell to `<body>`: a keyboard reader who opened the form
+ * from the sidebar + lost their place and had to Tab from the top of the
+ * document. The opener is captured during the first render, before Radix's
+ * focus scope has moved anything, and restored on the way out.
  */
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "dialog-panel fixed left-1/2 top-8 flex w-full max-w-lg -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
-        className
-      )}
-      {...props}
-    >
-      {children}
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
+>(({ className, children, onCloseAutoFocus, ...props }, ref) => {
+  const openerRef = React.useRef<HTMLElement | null>(null);
+  if (openerRef.current === null && typeof document !== "undefined") {
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement ? active : null;
+  }
+
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "dialog-panel fixed left-1/2 top-8 flex w-full max-w-lg -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
+          className
+        )}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (event.defaultPrevented) return;
+          const opener = openerRef.current;
+          // preventDefault also skips Radix's own handler, which would send the
+          // caret to a trigger that does not exist here.
+          if (opener?.isConnected) {
+            event.preventDefault();
+            opener.focus();
+          }
+        }}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 export const DialogTitle = React.forwardRef<

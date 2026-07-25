@@ -297,13 +297,16 @@ export function Sidebar({
               title="채널"
               action={
                 canCreate ? (
+                  /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
+                     크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
+                     셋(+, 새 DM, 설정)이 같은 규격이다. */
                   <button
                     type="button"
                     onClick={openCreateChannel}
                     aria-label="새 채널 만들기"
                     title="새 채널 만들기"
                     data-testid="new-channel"
-                    className="flex size-6 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <Plus className="size-4" />
                   </button>
@@ -319,24 +322,19 @@ export function Sidebar({
                   testId="channels-error"
                 />
               )}
+              {/* 빈 워크스페이스의 [채널 만들기]는 본문 하나뿐이다. 여기에도
+                  같은 액센트 버튼을 두면 200px 간격으로 같은 버튼 둘이 서로
+                  primary를 다퉜고, 권한 없는 멤버에게는 같은 문장이 사이드바와
+                  본문에 두 번 반복됐다(R-1 §1 "액션 1개", SKILL §5 empty).
+                  이 자리는 이 목록이 비었다는 사실만 말한다. 본문의 초대와 같은
+                  문장을 되풀이하지 않으려고 이 목록을 주어로 쓰고, 만들 수 있는
+                  사람에게는 바로 위의 +와 팔레트를 가리킨다. */}
               {!channelsQuery.isLoading && !channelsQuery.error && channels.length === 0 && (
-                canCreate ? (
-                  <EmptyInvite
-                    headline="첫 채널을 만들어 팀을 시작하세요."
-                    actions={
-                      <Button size="sm" onClick={openCreateChannel}>
-                        채널 만들기
-                      </Button>
-                    }
-                    testId="channels-empty"
-                  />
-                ) : (
-                  <EmptyInvite
-                    headline="아직 채널이 없습니다."
-                    detail="채널은 워크스페이스 오너나 관리자가 만들 수 있습니다."
-                    testId="channels-empty"
-                  />
-                )
+                <EmptyInvite
+                  headline="채널 목록이 비어 있습니다."
+                  detail={canCreate ? "+ 또는 ⌘K로 만듭니다." : undefined}
+                  testId="channels-empty"
+                />
               )}
               {channels.map(rowFor)}
             </SidebarSection>
@@ -352,7 +350,7 @@ export function Sidebar({
                     aria-label="새 다이렉트 메시지 시작"
                     title="새 다이렉트 메시지 (⌘⇧K)"
                     data-testid="new-dm"
-                    className="flex size-6 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <SquarePen className="size-4" />
                   </Link>
@@ -403,7 +401,7 @@ export function Sidebar({
             aria-label="설정 열기"
             title="설정 (⌘,)"
             data-testid="nav-settings"
-            className="flex size-6 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             <Settings className="size-4" />
           </Link>

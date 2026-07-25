@@ -40,13 +40,20 @@ describe("channelNameIssue", () => {
     expect(channelNameIssue("   ")).toBe("required");
   });
 
-  it("rejects a name the server's regex rejects", () => {
+  it("names an illegal character as an illegal character", () => {
     // Korean is the case a Korean team types first, and the server refuses it.
     expect(channelNameIssue("엔진")).toBe("unsupportedCharacters");
     expect(channelNameIssue("with space")).toBe("unsupportedCharacters");
-    expect(channelNameIssue("-leading")).toBe("unsupportedCharacters");
-    expect(channelNameIssue("trailing-")).toBe("unsupportedCharacters");
     expect(channelNameIssue("dot.name")).toBe("unsupportedCharacters");
+  });
+
+  it("names a leading or trailing separator as what it is", () => {
+    // Every one of these uses only legal characters, so the alphabet sentence
+    // would have told the reader to use exactly what they had already used.
+    // The rule they actually broke is where a name may begin and end.
+    for (const name of ["-release", "release-", "_ops", "ops-", "-", "__"]) {
+      expect(channelNameIssue(name), name).toBe("edgeSeparator");
+    }
   });
 
   it("reports length before shape, so the fixable problem is named first", () => {
@@ -57,12 +64,25 @@ describe("channelNameIssue", () => {
   });
 
   it("has copy for every issue, none of it an apology", () => {
-    for (const issue of ["required", "tooLong", "unsupportedCharacters"] as const) {
+    for (const issue of [
+      "required",
+      "tooLong",
+      "unsupportedCharacters",
+      "edgeSeparator",
+    ] as const) {
       const message = channelNameIssueMessage(issue);
       expect(message.length).toBeGreaterThan(0);
       expect(message).not.toMatch(/죄송|오류가 발생/);
       expect(message).not.toMatch(/—|–/);
     }
+  });
+
+  it("does not answer an edge separator with the alphabet sentence", () => {
+    // The regression this file exists to catch: `-release` was told to use
+    // only the characters it was already using.
+    const edge = channelNameIssueMessage("edgeSeparator");
+    expect(edge).not.toBe(channelNameIssueMessage("unsupportedCharacters"));
+    expect(edge).toContain("처음과 끝");
   });
 });
 

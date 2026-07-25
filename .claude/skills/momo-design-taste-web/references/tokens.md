@@ -52,6 +52,24 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--on-danger` | `#fffefb` | `#17161a` | label on filled danger |
 | `--ok` | `#187533` | `#57ab5a` | connected, done |
 | `--warn` | `#8a5c00` | `#d4a72c` | connecting, stalled |
+| `--scrim` | `rgb(36 33 28 / 0.24)` | `rgb(9 8 11 / 0.62)` | the layer under a dialog or the ⌘K palette |
+
+`--scrim` is the one token that is not opaque, and the only one whose two
+schemes are not the same color at different lightness. It exists because a
+scrim is a **direction**, not a color: it must darken whatever it covers so the
+panel above it comes forward. Painting it as `--ink` at 20% looked right in
+light and inverted in dark, where `--ink` is nearly white (`#ececf1`): the
+overlay brightened the app to `rgb(74 73 78)` while the panel stayed
+`--surface-raised` `#201f24`, so the focused panel was **darker** than its
+scrimmed surroundings and the dialog read as receding (MOMO-614 R1). The alphas
+differ per scheme for the same reason: pressing warm paper down 24% buys the
+separation that near-night sky only gets at 62%.
+
+Both values are measured, not chosen by eye. `tokens.contrast.test.ts`
+composites the scrim over every surface with sRGB source-over blending and
+asserts two things in both schemes: the result is at most 0.7x the surface
+luminance (it darkens), and `--surface-raised` stays brighter than anything the
+scrim covers (the panel comes forward).
 
 Tailwind reaches these as `bg-surface`, `text-ink-muted`, `border-line-strong`,
 `bg-accent`, `text-agent`, and so on. Tailwind's stock palette is **cleared**
@@ -173,6 +191,16 @@ inside the `@utility` block, so a reduced-motion viewer gets a **steady** caret
 rather than none: the caret is information about a stream still being open, and
 removing it would remove the information along with the motion. There is no
 shimmer utility and there must not be one (SKILL §4).
+
+`spinner-busy` (MOMO-614) is the second, and it follows the same rule for the
+same reason: a submit that is in flight shows a spinner **inside the button**
+(R-1 §5 "연결 검증 중 인라인 스피너(버튼 내부), 폼은 락"), and under
+`prefers-reduced-motion: reduce` it slows to `steps(8)` rather than stopping,
+because the rotation is the information that the request is still open. Note
+that a busy button is not a disabled one: `disabled:opacity-50` would drop the
+in-flight label to 2.2:1 exactly when it is the only progress signal, so a busy
+control keeps full contrast and carries `aria-busy`, while a control that
+genuinely cannot act (offline) is really `disabled` and says why.
 
 ## 6. Scheme selection
 
