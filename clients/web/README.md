@@ -22,11 +22,12 @@ separate gated step (ADR-0133 parity appendix), not part of the promotion.
 ## Structure (matches plan §1)
 
 ```
-src/app/          # App shell, router seam, TanStack Query client, runtime badge
-src/features/     # auth, channels, timeline (react-virtuoso + seq model), chat
+src/app/          # App shell (realtime rail + sidebar frame), routes, ⌘K switcher
+src/features/     # auth, sidebar, workspace reads, timeline, chat, inbox/activity/settings
 src/design/       # tokens.css (여명 placeholder palette) + shadcn/ui primitives
 src/lib/          # api (REST, contract-faithful), realtime (Centrifugo), env
 gates/            # measurement runners (seq / resume / scroll+coldstart / inject)
+e2e/              # smoke.mjs: login → channel → timeline → send → live receipt
 ```
 
 Stack: TS + React 18 + Vite 6 + Tailwind v4 + shadcn/ui (vendored) + react-virtuoso
@@ -48,6 +49,23 @@ npm run dev                          # http://localhost:5173 (proxies /v1 → mo
   (`infra/centrifugo.json`), so the realtime WS handshake is accepted.
 - Credentials come from the login form (or `VITE_MOMO_DEV_*` in `.env.local`),
   never from source.
+
+## Smoke (MOMO-598)
+
+One browser run over the whole P1 loop against a live momowebqa. It signs in,
+opens the ⌘K switcher, picks a channel from the sidebar, waits for the timeline
+and a connected rail, sends a message, and waits for that row to appear.
+
+```sh
+npm run build && npm run preview -- --host 127.0.0.1   # or npm run dev
+export MOMO_EMAIL=... MOMO_PASSWORD=...                # never hardcode
+npm run smoke                                          # optional: MOMO_CHANNEL=<uuid>
+```
+
+The receipt assertion is a realtime assertion: the composer does no optimistic
+insert, so a sent row can only reach the timeline through the Centrifugo
+publication merged by `seq`. The report prints `resubscribesDuringRun`, which is
+`0` when the row arrived live rather than through a reconnect backfill.
 
 ## Gates (measured on live momowebqa at MOMO-595, 2026-07-25 — honest numbers)
 

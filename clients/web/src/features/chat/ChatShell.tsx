@@ -1,36 +1,39 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Channel, LoginResponse } from "@/lib/api";
+import { useNavigate, useParams } from "react-router-dom";
+import { Hash, Lock, MessageSquare } from "lucide-react";
+import { updateReadState, uuidEq, type Message } from "@/lib/api";
+import { useSession } from "@/app/session";
 import {
-  createRealtime,
-  resolveSpikeRealtimeUrl,
-  type RealtimeHandle,
-  type RealtimeStatus,
-} from "@/lib/realtime";
-import { ChannelList } from "@/features/channels/ChannelList";
+  channelLabel,
+  memberFor,
+  unreadFor,
+  useChannels,
+  useDirectory,
+  useInvalidateReadStates,
+  useReadStates,
+} from "@/features/workspace/useWorkspace";
 import { Timeline } from "@/features/timeline/Timeline";
-import { Composer } from "@/features/chat/Composer";
+import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import { makeSyntheticMessages } from "@/features/timeline/stress";
-import { RuntimeBadge } from "@/app/RuntimeBadge";
+import { Composer } from "@/features/chat/Composer";
+import {
+  EmptyInvite,
+  InlineBanner,
+  SkeletonRows,
+} from "@/features/common/States";
 import { Button } from "@/design/ui/button";
-import { cn } from "@/design/lib/cn";
 
-const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
+// =============================================================================
+// Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
+// panel. The realtime rail and the sidebar live in the shell above, so moving
+// between channels never drops the connection.
+// =============================================================================
 
-function statusColor(s: RealtimeStatus): string {
-  if (s === "connected") return "bg-ok";
-  if (s === "connecting") return "bg-warn";
-  return "bg-danger";
-}
-
-export function ChatShell({
-  session,
-  onLogout,
-}: {
-  session: LoginResponse;
-  onLogout: () => void;
-}) {
-  const workspaceId = session.member.workspaceId;
+export function ChatShell() {
+  const { session, workspaceId, realtime, connStatus } = useSession();
+  const params = useParams();
+  const navigate = useNavigate();
 
   // ── 1k-scroll gate: ?stress=N renders synthetic rows, no network ───────────
   const stressCount = useMemo(() => {
@@ -42,39 +45,83 @@ export function ChatShell({
     [stressCount]
   );
 
-  // ── realtime rail (one handle per session) ─────────────────────────────────
-  const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
-  const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
-  const realtimeRef = useRef<RealtimeHandle | null>(null);
+  const channelsQuery = useChannels(workspaceId);
+  const directoryQuery = useDirectory(workspaceId);
+  const readStates = useReadStates(workspaceId);
+  const invalidateReadStates = useInvalidateReadStates(workspaceId);
 
-  useEffect(() => {
-    if (stressCount > 0) return; // skip WS in pure-scroll gate
-    const handle = createRealtime(
-      resolveSpikeRealtimeUrl(session.realtimeWebSocketUrl),
-      setConnStatus
-    );
-    realtimeRef.current = handle;
-    setRealtime(handle);
-    return () => {
-      handle.dispose();
-      realtimeRef.current = null;
-      setRealtime(null);
-    };
-  }, [session.realtimeWebSocketUrl, stressCount]);
+  // The index route lands on the first channel the server actually returned.
+  // Nothing is hardcoded: a workspace with no channels renders the empty state
+  // instead of pointing at an id that may not exist here.
+  const channelId =
+    params.channelId ??
+    channelsQuery.groups.channels[0]?.id ??
+    channelsQuery.groups.dms[0]?.id ??
+    null;
 
-  const [selected, setSelected] = useState<Channel | null>(null);
-  const channelId = selected?.id ?? GENERAL_ID;
+  const channel = useMemo(
+    () =>
+      channelId === null
+        ? null
+        : [...channelsQuery.groups.channels, ...channelsQuery.groups.dms].find(
+            (c) => uuidEq(c.id, channelId)
+          ) ?? null,
+    [channelsQuery.groups, channelId]
+  );
+  const label = channel
+    ? channelLabel(channel, directoryQuery.directory, session.member.id)
+    : "채널";
 
   const timeline = useTimeline(
     realtime,
     workspaceId,
     stressCount > 0 ? null : channelId
   );
-
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
 
-  // Expose a tiny read-only probe for the browser gate runner (DOM stays the
-  // primary source of truth; this just avoids scraping when convenient).
+  // Unread boundary is the cursor as it stood when the channel was OPENED:
+  // advancing the cursor below must not erase the divider under the reader.
+  const [openedWith, setOpenedWith] = useState<{
+    channelId: string;
+    lastReadSeq: number | null;
+    unreadCount: number;
+  } | null>(null);
+  const markedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (channelId === null) return;
+    const read = unreadFor(readStates.byChannel, channelId);
+    setOpenedWith((current) => {
+      if (current && uuidEq(current.channelId, channelId)) return current;
+      if (!read) return { channelId, lastReadSeq: null, unreadCount: 0 };
+      return {
+        channelId,
+        lastReadSeq: read.lastReadSeq,
+        unreadCount: read.unreadCount,
+      };
+    });
+  }, [channelId, readStates.byChannel]);
+
+  // Advance the server read cursor once history is on screen (P7: the server
+  // owns unread, so the client reports a position instead of counting).
+  const newestSeq = timeline.state.newestSeq;
+  useEffect(() => {
+    if (stressCount > 0 || newestSeq === null || channelId === null) return;
+    const key = `${channelId}:${newestSeq}`;
+    if (markedRef.current === key) return;
+    markedRef.current = key;
+    updateReadState(workspaceId, channelId, newestSeq)
+      .then(() => invalidateReadStates())
+      .catch(() => {
+        /* the cursor is advisory; the next open retries it */
+      });
+  }, [workspaceId, channelId, newestSeq, stressCount, invalidateReadStates]);
+
+  const [thread, setThread] = useState<Message | null>(null);
+  useEffect(() => setThread(null), [channelId]);
+
+  // Read-only probe for the browser gate runner (DOM stays the primary source
+  // of truth; this just avoids scraping when convenient).
   useEffect(() => {
     (window as unknown as Record<string, unknown>).__spike = {
       count: messages.length,
@@ -82,88 +129,137 @@ export function ChatShell({
       oldestSeq: timeline.state.oldestSeq,
       connStatus,
       resume: timeline.resume,
+      recoveryMarkers: timeline.recoveryMarkers.length,
       stress: stressCount,
     };
-  }, [messages.length, timeline.state, connStatus, timeline.resume, stressCount]);
+  }, [
+    messages.length,
+    timeline.state,
+    timeline.resume,
+    timeline.recoveryMarkers,
+    connStatus,
+    stressCount,
+  ]);
+
+  const memberSummary = useMemo(() => {
+    if (!channel) return "";
+    const ids =
+      channel.kind === "dm"
+        ? channel.memberIds ?? []
+        : directoryQuery.directory.members
+            .filter((m) => m.channelIds.some((id) => uuidEq(id, channel.id)))
+            .map((m) => m.id);
+    const names = ids
+      .map((id) => memberFor(directoryQuery.directory, id)?.displayName)
+      .filter((name): name is string => Boolean(name));
+    if (names.length === 0) return "";
+    if (names.length <= 3) return names.join(", ");
+    return `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
+  }, [channel, directoryQuery.directory]);
+
+  const offline = stressCount === 0 && connStatus === "disconnected";
+  const hasChannel = stressCount > 0 || channelId !== null;
 
   return (
-    <div className="app-shell h-full">
-      <aside className="flex flex-col border-r border-line bg-surface-sidebar">
-        <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
-          <span className="truncate text-body font-semibold">
-            {session.member.displayName}
-          </span>
-          <RuntimeBadge />
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <ChannelList
-            workspaceId={workspaceId}
-            selectedId={channelId}
-            onSelect={setSelected}
-          />
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="m-2 justify-start"
-          onClick={onLogout}
-          data-testid="logout"
-        >
-          로그아웃
-        </Button>
-      </aside>
-
-      <main className="flex min-w-0 flex-col">
+    <div className="flex min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-          <div className="flex items-center gap-2">
-            <span className="text-body font-semibold">
-              {stressCount > 0
-                ? `stress (${stressCount})`
-                : `#${selected?.name ?? "general"}`}
+          <div className="flex min-w-0 items-center gap-2">
+            <span aria-hidden="true" className="text-ink-muted">
+              {channel?.kind === "dm" ? (
+                <MessageSquare className="size-4" />
+              ) : channel?.kind === "private" ? (
+                <Lock className="size-4" />
+              ) : (
+                <Hash className="size-4" />
+              )}
             </span>
-            <span
-              className="text-meta text-ink-muted"
-              data-numeric
-              data-testid="message-count"
-            >
-              {messages.length} messages
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            {timeline.resume.resubscribeCount > 0 && (
-              <span
-                className="text-timestamp text-ink-muted"
-                data-numeric
-                data-testid="resume-info"
-              >
-                resubscribe #{timeline.resume.resubscribeCount} · recovered=
-                {String(timeline.resume.lastRecovered)} · backfill=
-                {timeline.resume.lastBackfillCount}
+            <h1 className="truncate text-body font-semibold">
+              {stressCount > 0 ? `스크롤 측정 (${stressCount})` : label}
+            </h1>
+            {memberSummary && (
+              <span className="truncate text-meta text-ink-muted">
+                {memberSummary}
               </span>
             )}
-            <span className="flex items-center gap-2 text-meta text-ink-muted">
-              <span
-                className={cn("size-2 rounded-full", statusColor(connStatus))}
-                data-testid="conn-status"
-                data-status={stressCount > 0 ? "n/a" : connStatus}
-              />
-              {stressCount > 0 ? "n/a" : connStatus}
+            <span className="sr-only" data-testid="message-count">
+              메시지 {messages.length}개
             </span>
           </div>
+          {timeline.resume.resubscribeCount > 0 && (
+            <span
+              className="shrink-0 text-timestamp text-ink-muted"
+              data-numeric
+              data-testid="resume-info"
+            >
+              재연결 {timeline.resume.resubscribeCount}회
+            </span>
+          )}
         </header>
 
-        <div className="min-h-0 flex-1">
-          <Timeline
-            messages={messages}
-            selfMemberId={session.member.id}
-            onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
+        {offline && (
+          <InlineBanner
+            tone="neutral"
+            message="연결 끊김, 재연결 중입니다. 지금 보이는 내용은 마지막으로 확인된 상태입니다."
+            testId="offline-banner"
           />
+        )}
+
+        <div className="min-h-0 flex-1">
+          {hasChannel ? (
+            <Timeline
+              messages={messages}
+              directory={directoryQuery.directory}
+              status={stressCount > 0 ? "ready" : timeline.status}
+              lastReadSeq={openedWith?.lastReadSeq ?? null}
+              unreadCount={openedWith?.unreadCount ?? 0}
+              recoveryMarkers={timeline.recoveryMarkers}
+              onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
+              onRetry={timeline.reload}
+              onOpenThread={setThread}
+              onInviteMember={() => navigate("/settings")}
+            />
+          ) : channelsQuery.isLoading ? (
+            <SkeletonRows rows={6} className="p-4" />
+          ) : channelsQuery.error ? (
+            <InlineBanner
+              message="채널을 불러오지 못했습니다."
+              actionLabel="다시 시도"
+              onAction={() => void channelsQuery.refetch()}
+              testId="chat-channels-error"
+            />
+          ) : (
+            <EmptyInvite
+              headline="아직 채널이 없습니다. 첫 채널을 만들어 팀을 시작하세요."
+              actions={
+                <Button size="sm" onClick={() => navigate("/settings")}>
+                  채널 만들기
+                </Button>
+              }
+              testId="chat-no-channel"
+            />
+          )}
         </div>
 
-        {stressCount === 0 && (
-          <Composer workspaceId={workspaceId} channelId={channelId} />
+        {stressCount === 0 && channelId !== null && (
+          <Composer
+            workspaceId={workspaceId}
+            channelId={channelId}
+            directory={directoryQuery.directory}
+            channelLabel={label}
+          />
         )}
-      </main>
+      </div>
+
+      {thread && channelId !== null && (
+        <ThreadPanel
+          workspaceId={workspaceId}
+          channelId={channelId}
+          root={thread}
+          directory={directoryQuery.directory}
+          onClose={() => setThread(null)}
+        />
+      )}
     </div>
   );
 }

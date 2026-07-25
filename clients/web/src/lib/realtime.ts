@@ -8,7 +8,7 @@ import { fetchRealtimeToken } from "./api";
 //   - the connection JWT comes from POST /v1/auth/realtime-token (getToken);
 //   - channel subscriptions are recoverable+positioned so a reconnect replays
 //     missed publications with ctx.recovered; when NOT recovered the caller
-//     heals via REST `?after=<seq>` backfill — the resume gate exercises both;
+//     heals via REST `?after=<seq>` backfill, and the resume gate exercises both;
 //   - Centrifugo channel names are case-sensitive and the relay bakes UUIDs as
 //     Swift UUID.uuidString (UPPERCASE), so ids must be uppercased.
 // =============================================================================
@@ -46,7 +46,7 @@ export function centrifugoChannelName(
  * (`ws://<machine>.local:28001/...`). Chrome's WebSocket resolver hangs on that
  * `.local` name in this dev environment (raw connect: 127.0.0.1 opens in
  * ~270ms, `<machine>.local` never resolves), so the realtime rail never
- * connects in the browser. node/ping/curl resolve it fine — this is a
+ * connects in the browser. node/ping/curl resolve it fine, so this is a
  * webview-specific gap.
  *
  * ADR-0110 ("use the login-returned WS address verbatim, never derive it") is

@@ -1,7 +1,7 @@
 import type { Message } from "@/lib/api";
 
 // Synthetic, in-memory timeline for the 1k-scroll performance gate. This
-// isolates react-virtuoso rendering cost from network/DB — the gate measures
+// isolates react-virtuoso rendering cost from network/DB, so the gate measures
 // the WEBVIEW's virtualized-scroll behavior, which is independent of where the
 // rows came from. Real seq-ordering and resume are measured separately against
 // live momowebqa data (gates/gate-seq.mjs, gates/gate-resume.mjs).

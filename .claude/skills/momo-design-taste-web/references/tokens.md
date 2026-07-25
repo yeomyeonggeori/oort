@@ -105,6 +105,11 @@ taste regresses just as quietly:
 Control heights are a separate axis from spacing: `h-control-sm` 28px,
 `h-control` 32px, `h-control-lg` 40px.
 
+Panes are a third axis. A secondary column is wider than any rhythm step, so it
+gets a **name** rather than an off-grid number, and `w-[320px]` still does not
+compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
+`w-pane` / `max-h-pane` 320px (thread panel, command list).
+
 **Radius: three steps, nothing else.** `--radius-*: initial` clears the stock
 scale first.
 
@@ -137,7 +142,10 @@ Put `data-numeric` on the element rather than repeating a utility class.
 
 `app-shell` is a named utility (`grid-template-columns: var(--w-sidebar) 1fr`,
 sidebar 240px) so no component needs an arbitrary `grid-cols-[240px_1fr]`, which
-the pre-flight would flag.
+the pre-flight would flag. `AppShell` renders exactly two children into it, the
+sidebar and `<main>`; the ⌘K switcher is a portalled dialog and stays outside
+the grid. Inside the sidebar column the workspace rail is `w-8` (32px), so the
+channel list keeps the remaining 208px.
 
 ## 6. Scheme selection
 
