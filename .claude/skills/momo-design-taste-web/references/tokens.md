@@ -178,8 +178,16 @@ Fonts are system stacks only (`--font-sans` includes `Apple SD Gothic Neo` and
 webfont, no CDN: CSP forbids it and the desktop shell must render offline.
 
 **Numbers.** `[data-numeric]` applies `font-variant-numeric: tabular-nums` in
-the base layer, so counters, seq values, and costs do not jitter as they change.
-Put `data-numeric` on the element rather than repeating a utility class.
+the base layer, so counters, seq values, costs, and dates/clocks do not jitter
+as they change or fail to line up down a column. Put `data-numeric` on the
+element rather than repeating a utility class.
+
+It marks **figures**, not every value in a figure-shaped list. Korean prose set
+in `font-mono` with tabular-nums renders with visibly stretched gaps between
+syllables ("워크스페이스  전체"), so a key-value list that mixes the two
+(사용량 > 예산: 사용 / 예약 / 한도 versus 적용 범위) tags the figures and leaves
+the phrase in the sans stack. A component that renders both takes a flag
+(`numeric?: boolean`) instead of forcing one answer on every row.
 
 ## 5. Shell geometry
 
@@ -198,6 +206,33 @@ same reason `app-shell` does. The panel is a flex column whose middle box carrie
 `min-h-0 overflow-y-auto`: at 760x480 the form scrolls inside the panel while the
 title and the action row stay put, and the document still does not scroll
 (MOMO-610).
+
+## 5a. Bars
+
+`progress-bar` styles a native `<progress>` (CSP `style-src 'self'` rules out a
+div with a computed width, so the length has to come from `value`/`max`). Its
+fill defaults to `--accent`, and `data-tone` on the element selects a different
+one, because a bar carries two unrelated meanings in this client:
+
+| `data-tone` | fill | used for |
+|---|---|---|
+| (absent) | `--accent` | determinate progress (설정 > 업데이트) |
+| `neutral` | `--line-strong` | a share of the largest row (사용량 > 모델별/에이전트별) |
+| `ok` | `--ok` | 예산 한도 안 |
+| `warn` | `--warn` | 예산 소프트 한도 |
+| `danger` | `--danger` | 예산 하드 한도 |
+
+A state bar takes the same token as the status chip next to it, **in every
+state**. A full bar in the accent colour beside a red "한도 도달" chip reads as
+a finished download, which is the opposite of what it means; an amber bar beside
+a green "한도 안" chip is the same mistake in the state that is on screen most
+of the time, so `ok` is a listed tone rather than a fall-through to the default.
+
+A share bar is a comparison device, so its **track** is the same length in every
+row of the list: the length carries the meaning, and a track that shortens
+because the metadata beside it grew a digit is a rescaled axis per row. Give the
+bar its own line at the row's full width, or fix the width of whatever sits
+beside it.
 
 ## 5b. Motion utilities
 
