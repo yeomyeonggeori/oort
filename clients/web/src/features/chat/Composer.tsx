@@ -35,7 +35,7 @@ export function Composer({
   return (
     <form
       onSubmit={onSubmit}
-      className="flex items-center gap-2 border-t border-[var(--color-border)] p-3"
+      className="flex items-center gap-2 border-t border-line p-3"
     >
       <Input
         value={text}

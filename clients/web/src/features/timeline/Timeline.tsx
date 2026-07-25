@@ -15,20 +15,18 @@ function MessageRow({
   const deleted = message.state === "deleted";
   return (
     <div
-      className="px-4 py-1.5"
+      className="px-4 py-1"
       data-testid="timeline-message"
       data-seq={message.seq}
     >
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
+        <span className="font-mono text-timestamp tabular-nums text-ink-muted">
           #{message.seq}
         </span>
         <span
           className={cn(
-            "text-xs font-medium",
-            mine
-              ? "text-[var(--color-primary)]"
-              : "text-[var(--color-foreground)]"
+            "text-meta font-medium",
+            mine ? "text-accent" : "text-ink"
           )}
         >
           {message.authorMemberId.slice(0, 8)}
@@ -36,8 +34,8 @@ function MessageRow({
       </div>
       <p
         className={cn(
-          "whitespace-pre-wrap break-words text-sm leading-relaxed",
-          deleted && "italic text-[var(--color-muted-foreground)]"
+          "whitespace-pre-wrap break-words text-body leading-relaxed",
+          deleted && "italic text-ink-muted"
         )}
       >
         {deleted ? "(삭제된 메시지)" : message.body}
@@ -60,7 +58,7 @@ export function Timeline({
   return (
     <Virtuoso
       ref={ref}
-      style={{ height: "100%" }}
+      className="h-full"
       data={messages}
       data-testid="timeline-virtuoso"
       alignToBottom

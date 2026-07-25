@@ -6,7 +6,7 @@ export function RuntimeBadge() {
     <span
       data-testid="runtime-badge"
       data-runtime={IS_TAURI ? "desktop" : "web"}
-      className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-muted-foreground)]"
+      className="rounded-sm border border-line px-2 py-1 text-timestamp font-medium text-ink-muted"
       title={IS_TAURI ? "Tauri WKWebView/WebView2" : "browser"}
     >
       {IS_TAURI ? "desktop (Tauri)" : "web"}

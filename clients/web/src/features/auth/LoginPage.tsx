@@ -42,7 +42,7 @@ export function LoginPage({
       <Card className="w-full max-w-sm">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">momo</CardTitle>
+            <CardTitle className="text-title">momo</CardTitle>
             <RuntimeBadge />
           </div>
           <CardDescription>
@@ -51,8 +51,8 @@ export function LoginPage({
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-[var(--color-muted-foreground)]">이메일</span>
+            <label className="flex flex-col gap-1 text-body">
+              <span className="text-ink-muted">이메일</span>
               <Input
                 type="email"
                 value={email}
@@ -62,10 +62,8 @@ export function LoginPage({
                 data-testid="login-email"
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-[var(--color-muted-foreground)]">
-                비밀번호
-              </span>
+            <label className="flex flex-col gap-1 text-body">
+              <span className="text-ink-muted">비밀번호</span>
               <Input
                 type="password"
                 value={password}
@@ -75,10 +73,8 @@ export function LoginPage({
                 data-testid="login-password"
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-[var(--color-muted-foreground)]">
-                워크스페이스
-              </span>
+            <label className="flex flex-col gap-1 text-body">
+              <span className="text-ink-muted">워크스페이스</span>
               <Input
                 value={workspace}
                 onChange={(e) => setWorkspace(e.target.value)}
@@ -87,7 +83,7 @@ export function LoginPage({
             </label>
             {error && (
               <p
-                className="text-sm text-[var(--color-destructive)]"
+                className="text-body text-danger"
                 data-testid="login-error"
               >
                 {error}

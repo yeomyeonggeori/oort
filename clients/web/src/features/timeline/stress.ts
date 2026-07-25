@@ -22,7 +22,7 @@ export function makeSyntheticMessages(count: number): Message[] {
       authorMemberId: authors[i % authors.length],
       type: "text",
       body:
-        `#${i + 1} 스트레스 메시지 — react-virtuoso 1k 스크롤 게이트. ` +
+        `#${i + 1} 스트레스 메시지 · react-virtuoso 1k 스크롤 게이트. ` +
         (i % 5 === 0
           ? "조금 더 긴 줄로 가변 높이를 만들어 가상화가 실제 레이아웃 비용을 감당하는지 본다. ".repeat(
               2
