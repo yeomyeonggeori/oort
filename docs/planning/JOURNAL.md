@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-26 (Fable Wave A 랜딩) · 에이전트 경험 프로그램 1차 — 5장 전량 트랙 랜딩
+- **랜딩**: 789 작업중 표시(track/uxui #794) · 790 채널 생성(#795) · 792 사용량 섹션(#796) · 793 티어정책·호스트 UI(#797) · 791 사용량 REST(track/engine #798). Opus 5 병렬 21에이전트(구현 5+리뷰 8+수정 8), UI 4장 리뷰 2R 전량.
+- **리뷰 수확 백미**: ①789 R1 Blocker — 재연결 replay가 끝난 턴을 되살려 거짓 '작업 중'(진행 스트림 non-recoverable로 해소) ②**twMerge 함정을 3개 에이전트가 독립 발견**(text-role이 색으로 오분류→소실; 789/790/793 각자 cn.ts에 extendTailwindMerge 동일 수리 — add/add 충돌 3회, 789판 채택+테스트 합집합) ③790 R2 — 공용 dialog 제목 위계·filled sm 버튼 AA 미달(라이트 2.78:1) 근본 수리.
+- **순차 리베이스 랜딩**: Sidebar(789↔790)·AppShell(CreateChannelProvider 이동)·package.json·tokens.md·capture-screens 충돌 5건 수동 해소, 매 랜딩 후 전체 게이트 재실행(최종 467 tests). '머지 직후 typecheck' 규율이 이번에도 값함.
+- **정리**: 이슈 5개 클로즈, 워크트리·compose 잔존 0. ENGINE_HANDOFF X-13(usage REST) 추가.
+- **대기**: ①track/{uxui,engine}→main 동기화(성재 승인) ②그 후 momowebqa 재배포→616 라이브 통합 실측→next.8 발행 ③Wave C ADR 3~4건 발의.
+
+
 ## 2026-07-25 (Fable 전환 실행 + Wave A 발진) · 기본 다운로드 = Tauri, SwiftUI 은퇴
 - **성재 3결정 승인**: ①기본 다운로드 전환 ②Wave A 착수 ③프로그램 결정 큐(auto 모델 노출·xterm.js·OAuth 경계안·T3 E2B/크레딧 방향).
 - **전환 실행**: track/uxui→main 동기화(#788) → **0.1.0-next.7 발행**(디렉터리+DM 포함, sha f8e45de4…) → 사이트 manifest 교체(`scripts/switch_default_download.sh` 신설·실행 — 다운로드 버튼 3곳이 Tauri zip을 가리킴, SwiftUI 0.0.6은 legacy 블록 보존). **ADR-0133 전환 기록 완료. SwiftUI 신규 발행 중단.**

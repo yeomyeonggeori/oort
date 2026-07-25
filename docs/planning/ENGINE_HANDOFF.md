@@ -73,3 +73,5 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
 - 2026-07-18 밤: UXUI 실서버 연동 배치(A-1/2/3/5/7 + A-4 답글 전송) · 엔진 음소거(MOMO-477)·상호작용 서버(MOMO-478)·X-1 스테이징
 - 2026-07-18: B-1 첨부(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · 허들 V-1~V-3b(MOMO-468~473)
 - 2026-07-17: 플러그인 SE-04A~D(MOMO-410~458) · 웹훅(MOMO-412) · 단축링크(MOMO-460) · iOS v0(MOMO-462~467)
+
+- **X-13 (ready→consumed)**: MOMO-615 워크스페이스 사용량 요약 REST `GET /v1/workspaces/:ws/usage/summary` — track/engine 랜딩(#798, 2026-07-26). 계약 정본 `handoffs/2026-07-25-usage-summary-contract.md`. 웹 소비면은 MOMO-616(설정 사용량 섹션, track/uxui #796 랜딩)이 계약 픽스처로 선구현 — **라이브 통합 검증은 main 동기화+momowebqa 재배포 후 오케스트레이터 수행 (pending)**.
