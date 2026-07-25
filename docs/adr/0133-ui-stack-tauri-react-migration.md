@@ -1,6 +1,7 @@
 # ADR-0133: 클라이언트 UI 스택 전환 — SwiftUI → TS/React + Tauri (+Rust 코어)
 
 - Status: **Accepted** (2026-07-25, 성재 — "ADR 승인할게. 스파이크랑 리서치 바로 진행해줘." 파생 P0 스파이크·R-1·R-2 즉시 착수. 2026-07-24 기안, Fable — 성재 발제)
+- **전환 실행: 2026-07-25** — parity 게이트 실측(차단 0·성능 3종 통과, `docs/planning/2026-07-25-parity-gate-report.md`) 후 성재 승인으로 기본 다운로드를 momo-next 0.1.0-next.7(Tauri)로 교체(`scripts/switch_default_download.sh`). SwiftUI 0.0.6 = legacy 최종 빌드(신규 발행 중단, 은퇴).
 - 발단(성재): ①Swift 백그라운드 부재로 SwiftUI의 장점을 오너가 살리지 못함(UI를 오너가 직접 다듬을 수 없음) ②Windows 지원 필요 ③buzz(Tauri)를 레퍼런스로 직접 활용 가능 ④최종 타깃 = **Windows·macOS·iOS·Android·Web**, 최소 릴리스 = **iOS·macOS·Web**.
 
 ## Context (실측)

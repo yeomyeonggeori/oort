@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-25 (Fable 전환 실행 + Wave A 발진) · 기본 다운로드 = Tauri, SwiftUI 은퇴
+- **성재 3결정 승인**: ①기본 다운로드 전환 ②Wave A 착수 ③프로그램 결정 큐(auto 모델 노출·xterm.js·OAuth 경계안·T3 E2B/크레딧 방향).
+- **전환 실행**: track/uxui→main 동기화(#788) → **0.1.0-next.7 발행**(디렉터리+DM 포함, sha f8e45de4…) → 사이트 manifest 교체(`scripts/switch_default_download.sh` 신설·실행 — 다운로드 버튼 3곳이 Tauri zip을 가리킴, SwiftUI 0.0.6은 legacy 블록 보존). **ADR-0133 전환 기록 완료. SwiftUI 신규 발행 중단.**
+- **Wave A 발진**(wf_a16ee964): #789 작업중 표시(MOMO-613) · #790 채널 생성(614) · #791 사용량 요약 REST(615, track/engine) · #792 사용량 섹션(616) · #793 티어정책 UI(617) — Opus 5 병렬 5장, UI 4장은 design-review 루프(최대 2R) 내장. 615/616 계약 핸드오프: `handoffs/2026-07-25-usage-summary-contract.md`.
+- 다음: Wave A 회수·검증·랜딩 → 616 라이브 통합(엔진 랜딩 후) → Wave C ADR 3~4건 발의(라우팅/캐스캐이드·쿼터/T3 프로비저너).
+
+
 ## 2026-07-25 (Fable #782 랜딩) · 멤버 디렉터리+DM 시작 — parity G-3·G-4 해소
 - **MOMO-611 track/uxui 랜딩**(PR #787, bdfef0a3): 디렉터리 라우트(검색·역할·managed by·localeCompare ko)+DM 시작(POST /dms 서버 판정, 201/200 동일 경로)+⌘K 사람 섹션+⌘⇧K. Opus 5 구현+design-review 3R+medium 후속 = 커밋 4개(6eae5531→81e957cb→08363b37→db265157→d30b0617).
 - **리뷰 루프 수확**: High 5(⌘K stale error·DM 착지 화면이 채널용 빈 상태·거짓 카운터 "사람 0"·⌘⇧K 포커스 미배치 Tab15회·동명이인 aria-label 동일)·Medium 6 전부 실측 검증 해소. 스켈레톤이 실물 행 클래스를 공유해 구조적으로 어긋날 수 없게 한 패턴 채택.
