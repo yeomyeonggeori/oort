@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import {
@@ -12,13 +12,13 @@ import {
   User,
   Users,
 } from "lucide-react";
-import { uuidEq } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
+import { switcherPeople } from "@/features/directory/model";
 import { useOpenDm } from "@/features/directory/useOpenDm";
 import { InlineBanner } from "@/features/common/States";
 
@@ -59,12 +59,22 @@ export function QuickSwitcher({
   const { groups } = useChannels(workspaceId);
   const { directory } = useDirectory(workspaceId);
   const dm = useOpenDm();
+  const { clearError } = dm;
 
-  // Everyone but me: the server refuses a DM with yourself, so it is not
-  // offered here. uuidEq, because ids arrive in mixed case.
-  const people = directory.members.filter(
-    (member) => !uuidEq(member.id, session.member.id)
+  // Who a DM can be opened with, decided by the directory's own rule rather
+  // than by a second filter that would drift from it (model.switcherPeople).
+  const people = useMemo(
+    () => switcherPeople(directory.members, session.member.id),
+    [directory.members, session.member.id]
   );
+
+  // A failed DM belongs to the attempt that failed, not to the palette. The
+  // palette outlives its openings — cmdk unmounts the dialog contents but this
+  // component stays — so nothing else would ever clear the banner, and a ⌘K
+  // opened to jump to a channel would start with an error already given up on.
+  useEffect(() => {
+    if (!open) clearError();
+  }, [open, clearError]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -187,7 +197,7 @@ export function QuickSwitcher({
 
         {people.length > 0 && (
           <Command.Group heading="사람">
-            {people.map((member) => (
+            {people.map(({ member, selectable, reason }) => (
               <Command.Item
                 key={member.id}
                 value={`${member.displayName} ${member.handle} ${member.id}`}
@@ -195,6 +205,10 @@ export function QuickSwitcher({
                 data-testid="switcher-person"
                 data-member-id={member.id}
                 data-member-kind={member.kind}
+                // cmdk skips a disabled item for arrow keys, Enter and click,
+                // while keeping it in the filtered list: the name is still
+                // findable, it just is not an action.
+                disabled={!selectable}
                 onSelect={() => {
                   void dm.openDm(member).then((opened) => {
                     if (opened) onOpenChange(false);
@@ -212,6 +226,9 @@ export function QuickSwitcher({
                 <span className="text-meta text-ink-muted">
                   @{member.handle}
                 </span>
+                {/* Same word the directory row uses, same token, so the two
+                 * surfaces do not invent two vocabularies for one status. */}
+                {reason && <span className="text-meta text-warn">{reason}</span>}
                 {dm.pendingMemberId === member.id && (
                   <span className="text-meta text-ink-muted">여는 중</span>
                 )}

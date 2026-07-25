@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type Channel, type RosterMember } from "@/lib/api";
+import { ApiError, uuidEq, type Channel, type RosterMember } from "@/lib/api";
 import { NetworkError } from "@/lib/http";
 import {
   countLabel,
@@ -11,6 +11,7 @@ import {
   openDmErrorMessage,
   roleLabel,
   statusLabel,
+  switcherPeople,
   upsertChannel,
 } from "./model";
 
@@ -211,6 +212,70 @@ describe("dmAvailability", () => {
     expect(
       dmAvailability(member({ id: "z", status: "invited" }), DEMO.id)
     ).toEqual({ kind: "inactive", label: "초대됨" });
+  });
+});
+
+describe("switcherPeople", () => {
+  const INVITED = member({
+    id: "00000000-0000-7000-8000-0000000009a1",
+    displayName: "이서연",
+    handle: "seoyeon",
+    role: "member",
+    status: "invited",
+  });
+  const SUSPENDED = member({
+    id: "00000000-0000-7000-8000-0000000009a2",
+    displayName: "최민우",
+    handle: "minwoo",
+    role: "member",
+    status: "suspended",
+  });
+
+  it("drops only yourself, ignoring uuid case", () => {
+    const rows = switcherPeople(ROSTER, DEMO.id.toUpperCase());
+    expect(rows.map((r) => r.member.handle)).toEqual([
+      "hermes",
+      "kim-intern",
+      "intern-kim",
+      "seongjae",
+    ]);
+  });
+
+  it("offers every active member, agents included", () => {
+    const rows = switcherPeople([HERMES, SEONGJAE], DEMO.id);
+    expect(rows.every((r) => r.selectable)).toBe(true);
+    expect(rows.every((r) => r.reason === null)).toBe(true);
+  });
+
+  it("keeps an inactive member visible but unselectable, with the reason", () => {
+    const rows = switcherPeople([INVITED, SUSPENDED], DEMO.id);
+    expect(rows).toEqual([
+      { member: INVITED, selectable: false, reason: "초대됨" },
+      { member: SUSPENDED, selectable: false, reason: "정지됨" },
+    ]);
+  });
+
+  it("agrees with the directory row on every member of the roster", () => {
+    // The whole point of this helper: one rule, two surfaces. Whatever the row
+    // renders as a plain non-button, the palette must render unselectable.
+    const roster = [...ROSTER, INVITED, SUSPENDED];
+    for (const m of roster) {
+      const availability = dmAvailability(m, DEMO.id);
+      const row = switcherPeople(roster, DEMO.id).find((r) =>
+        uuidEq(r.member.id, m.id)
+      );
+      if (availability.kind === "self") {
+        expect(row).toBeUndefined();
+        continue;
+      }
+      expect(row?.selectable).toBe(availability.kind === "ready");
+    }
+  });
+
+  it("does not mutate or reorder the roster it was handed", () => {
+    const input = [...ROSTER];
+    switcherPeople(input, DEMO.id);
+    expect(input).toEqual(ROSTER);
   });
 });
 

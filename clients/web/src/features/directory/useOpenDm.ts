@@ -29,6 +29,12 @@ export interface OpenDmHandle {
   error: OpenDmFailure | null;
   /** Resolves true when the DM was opened and the route changed. */
   openDm: (member: RosterMember) => Promise<boolean>;
+  /**
+   * Drop the banner because the surface that was showing it is going away.
+   * For a route that is the surface, unmounting does this for free; for the ⌘K
+   * palette, which stays mounted between openings, closing it is the moment.
+   */
+  clearError: () => void;
 }
 
 export function useOpenDm(): OpenDmHandle {
@@ -65,7 +71,10 @@ export function useOpenDm(): OpenDmHandle {
     [workspaceId, client, navigate]
   );
 
-  // No dismiss action on purpose: the banner is cleared by the next attempt,
-  // and an error a person can wave away without acting on it is decoration.
-  return { pendingMemberId, error, openDm };
+  const clearError = useCallback(() => setError(null), []);
+
+  // No dismiss button on purpose: an error a person can wave away without
+  // acting on it is decoration. It goes away when the next attempt starts or
+  // when the surface holding it closes — never on its own, never on a timer.
+  return { pendingMemberId, error, openDm, clearError };
 }

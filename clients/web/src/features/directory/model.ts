@@ -153,6 +153,47 @@ export function dmAvailability(
   return { kind: "ready" };
 }
 
+/** One row of the ⌘K 사람 section. */
+export interface SwitcherPerson {
+  member: RosterMember;
+  /** Can Enter open a DM with this person? */
+  selectable: boolean;
+  /** Why not, in the directory's words ("초대됨"), or null when it can. */
+  reason: string | null;
+}
+
+/**
+ * The 사람 section of the palette, decided by the SAME dmAvailability the
+ * directory row uses. Two surfaces offering the same action must not disagree
+ * about who it is available for: a name the directory refuses to open a DM with
+ * cannot be a name ⌘K offers, or the palette is teaching the person to expect a
+ * conversation the server is about to refuse.
+ *
+ * An inactive member stays visible and unselectable rather than vanishing:
+ * disappearing from search would read as "not in this workspace", which is a
+ * different and untrue statement. The row says 초대됨/정지됨, exactly as the
+ * directory does.
+ */
+export function switcherPeople(
+  members: RosterMember[],
+  selfMemberId: string
+): SwitcherPerson[] {
+  const rows: SwitcherPerson[] = [];
+  for (const member of members) {
+    const availability = dmAvailability(member, selfMemberId);
+    // Yourself is dropped instead of shown unselectable: the palette lists
+    // places to go and you are not one of them. The directory keeps that row
+    // because it is the roster, and a roster missing you is wrong.
+    if (availability.kind === "self") continue;
+    rows.push({
+      member,
+      selectable: availability.kind === "ready",
+      reason: availability.kind === "inactive" ? availability.label : null,
+    });
+  }
+  return rows;
+}
+
 /**
  * Put an opened DM into a cached channel list. Case-insensitive on the id for
  * the same reason as above: an existing DM comes back from the server in
