@@ -11,7 +11,6 @@ import { SessionProvider } from "@/app/session";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
-import { startUpdateWatch } from "@/features/updates/store";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -33,11 +32,6 @@ export function AppShell({
   // The pure-scroll gate (?stress=N) renders synthetic rows and must not open
   // a socket, otherwise the frame profile measures the network too.
   const stress = new URLSearchParams(location.search).has("stress");
-
-  // The update channel starts with the signed-in shell, not with the app: a
-  // login screen is not the place to learn that a new build exists, and the
-  // check is a no-op in a browser tab anyway (MOMO-606).
-  useEffect(() => startUpdateWatch(), []);
 
   useEffect(() => {
     if (stress) return;

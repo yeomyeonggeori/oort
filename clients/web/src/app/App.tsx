@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "@/app/queryClient";
 import { useRestoredSession } from "@/app/session";
+import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
 import { AppShell } from "@/app/AppShell";
 import { SkeletonRows } from "@/features/common/States";
@@ -14,6 +16,11 @@ import { SettingsRoute } from "@/features/settings/SettingsRoute";
 // have to resolve identically in both runtimes (ADR-0133 "one codebase").
 export function App() {
   const { status, session, signIn, signOut } = useRestoredSession();
+
+  // Above the signed-in/anonymous split on purpose (MOMO-606): someone stuck on
+  // the connect screen is the reader most likely to need the build that fixes
+  // why they are stuck. No-op in a browser tab.
+  useEffect(() => startUpdateWatch(), []);
 
   if (status === "restoring") {
     // Height-preserving bars, not a spinner or a splash: the shell that is

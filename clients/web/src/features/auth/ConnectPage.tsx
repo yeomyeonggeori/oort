@@ -26,6 +26,7 @@ import {
 } from "@/design/ui/card";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
+import { UpdateNotice } from "@/features/updates/UpdateNotice";
 import { DiscoveredServerList } from "./DiscoveredServerList";
 import { useDiscoveredServers, type DiscoveredServer } from "./discovery";
 import { useJoinPrefill } from "./useJoinPrefill";
@@ -219,6 +220,8 @@ export function ConnectPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <UpdateNotice />
+
           {!online && (
             <InlineBanner
               tone="neutral"
