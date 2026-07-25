@@ -139,6 +139,14 @@ both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
 token file had never heard of the measure the two overlays share. They alternate
 at the same anchor, so it is one measure and it gets one name.
 
+Body caps are a fifth axis: `max-h-diff-body` 400px (MOMO-620), the height a
+diff scrolls inside its card. It is not a pane (a pane is a width) and the rhythm
+scale has no step near 400, so the measure gets a name rather than
+`max-h-[400px]`. The number is the mac diff card's cap, so the same change reads
+at the same size on both clients. It is a MAXIMUM, not a fixed height: a short
+diff hugs its content, which is the empty-band regression the mac card had to
+fix separately (MOMO-518 R2 H1) and CSS gets for free.
+
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
 bar gets a named token instead of widening the closed set.

@@ -1,12 +1,9 @@
 import { useRef, useState } from "react";
 import { ShieldQuestion, Terminal, Zap } from "lucide-react";
-import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import {
-  APPROVAL_STATUS_LABEL,
-  TURN_STATUS_LABEL,
   formatCount,
   formatMicroUsd,
   resolveApprovalStatus,
@@ -14,10 +11,10 @@ import {
   type AgentCardModel,
   type AgentToolCard,
   type AgentTurnCard,
-  type AgentTurnStatus,
   type ApprovalStatus,
   type PayloadDetail,
 } from "./agentCardModel";
+import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
 import {
   decideApproval,
   newDecisionId,
@@ -43,67 +40,6 @@ import {
 //     unguarded click), and keeping the confirmation in the row keeps it next
 //     to the evidence the human is judging instead of covering it with a modal.
 // =============================================================================
-
-const TURN_CHIP_CLASS: Readonly<Record<AgentTurnStatus, string>> = {
-  queued: "bg-surface-hover text-ink-muted",
-  thinking: "bg-surface-hover text-warn",
-  streaming: "bg-surface-hover text-warn",
-  "awaiting-approval": "bg-accent-soft text-accent",
-  done: "bg-surface-hover text-ok",
-  error: "bg-surface-hover text-danger",
-  stalled: "bg-surface-hover text-warn",
-  cancelled: "bg-surface-hover text-ink-muted",
-};
-
-const APPROVAL_CHIP_CLASS: Readonly<Record<ApprovalStatus, string>> = {
-  pending: "bg-accent-soft text-accent",
-  approved: "bg-surface-hover text-ok",
-  rejected: "bg-surface-hover text-danger",
-  expired: "bg-surface-hover text-ink-muted",
-  cancelled: "bg-surface-hover text-ink-muted",
-};
-
-/**
- * Status chip. Text first, one token status color, no pulse: a chip that
- * animates forever is decoration pretending to be information
- * (design-taste-web §8).
- */
-function StatusChip({
-  label,
-  tone,
-  status,
-}: {
-  label: string;
-  tone: string;
-  status: string;
-}) {
-  return (
-    <span
-      data-testid="agent-status-chip"
-      data-status={status}
-      className={cn(
-        "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
-        tone
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
-/**
- * The live caret. Streaming gets a caret, never a shimmer skeleton, and the
- * blink is guarded by prefers-reduced-motion in tokens.css.
- */
-function StreamCaret() {
-  return (
-    <span
-      aria-hidden="true"
-      data-testid="stream-caret"
-      className="caret-stream ml-px inline-block h-3 w-px shrink-0 bg-accent align-middle"
-    />
-  );
-}
 
 /** One typed key/value row. Never a raw JSON blob (design-taste-web §8). */
 function LabeledRow({
@@ -361,13 +297,7 @@ function ApprovalBody({
     <CardFrame
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
       title={card.title}
-      chip={
-        <StatusChip
-          label={APPROVAL_STATUS_LABEL[status]}
-          tone={APPROVAL_CHIP_CLASS[status]}
-          status={status}
-        />
-      }
+      chip={<ApprovalChip status={status} />}
       status={status}
       kind="approval"
       note={
@@ -463,13 +393,7 @@ function ToolBody({ card }: { card: AgentToolCard }) {
     <CardFrame
       icon={<Terminal className="size-4" aria-hidden="true" />}
       title={card.title}
-      chip={
-        <StatusChip
-          label={TURN_STATUS_LABEL[card.status]}
-          tone={TURN_CHIP_CLASS[card.status]}
-          status={card.status}
-        />
-      }
+      chip={<TurnChip status={card.status} />}
       status={card.status}
       kind="tool"
       detail={card.detail}
@@ -481,6 +405,21 @@ function ToolBody({ card }: { card: AgentToolCard }) {
         {card.frame.outcome ?? (live ? "실행 중입니다." : "결과가 없습니다.")}
         {live && <StreamCaret />}
       </LabeledRow>
+      {card.errorNote && (
+        // Same rule as the turn card: silence is not failure, so a stalled run
+        // gets the server note without the 오류 label and without the danger
+        // colour (ADR-0132).
+        <LabeledRow
+          label={card.status === "stalled" ? "마지막 신호" : "오류"}
+          testId="tool-error"
+        >
+          {card.status === "stalled" ? (
+            card.errorNote
+          ) : (
+            <span className="text-danger">{card.errorNote}</span>
+          )}
+        </LabeledRow>
+      )}
     </CardFrame>
   );
 }
@@ -492,13 +431,7 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
     <CardFrame
       icon={<Zap className="size-4" aria-hidden="true" />}
       title={card.title}
-      chip={
-        <StatusChip
-          label={TURN_STATUS_LABEL[card.status]}
-          tone={TURN_CHIP_CLASS[card.status]}
-          status={card.status}
-        />
-      }
+      chip={<TurnChip status={card.status} />}
       status={card.status}
       kind="turn"
       detail={card.detail}

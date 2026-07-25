@@ -115,6 +115,13 @@
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
+  /* Diff body measure (MOMO-620 / ADR-0126 D2). A diff scrolls INSIDE its card
+   * at this height, the same 400px cap the mac card uses, so a 500 line change
+   * never grows the timeline row and the page never gains a horizontal scroll.
+   * It is a height, not a width, so it is not a pane; and the rhythm scale has
+   * no step near 400, so the measure gets a NAME rather than max-h-[400px]. */
+  --spacing-diff-body: 400px;
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */
@@ -307,6 +314,49 @@
     &::-moz-progress-bar {
       background: var(--danger);
     }
+  }
+}
+
+/* 스크롤 어포던스 (MOMO-620 R2). macOS 오버레이 스크롤바는 **스크롤을 시작한
+ * 뒤에야** 나타난다. 그래서 카드 오른쪽 끝에서 잘린 diff 줄과 거기서 끝나는
+ * 줄이 화면에서 완전히 똑같아 보였다: 더 있다는 신호가 하나도 없었다.
+ *
+ * ::-webkit-scrollbar를 정의하면 WebKit/Chromium은 그 스크롤러에 대해 오버레이
+ * 를 끄고 항상 보이는 막대를 그린다. Tauri 셸(WKWebView)과 브라우저 양쪽에서
+ * 같은 경로다. 색은 토큰이므로 스킴을 따라가고, 트랙은 투명이라 카드 배경을
+ * 덧칠하지 않는다. 8px는 스크롤 가능 여부를 말할 만큼은 굵고 12px 코드 줄을
+ * 밀어내지 않을 만큼은 얇다.
+ *
+ * scrollbar-width/scrollbar-color는 쓰지 않는다: Chromium은 둘 중 하나라도
+ * 지정되면 ::-webkit-scrollbar 규칙 전체를 무시해서, 두 경로를 함께 쓰면
+ * 브라우저마다 다른 막대가 나온다.
+ *
+ * 이 파일에서 유일하게 물리 속성(width/height)을 쓰는 자리다. 스크롤바 의사
+ * 요소는 논리 속성을 해석하지 않아서 block-size/inline-size로 쓰면 크기가 잡히지
+ * 않고, 크기가 없으면 엔진이 커스텀 막대를 그리지 않는다: 실측에서 오버레이가
+ * 그대로 남아 offsetHeight - clientHeight = 0이었다(= 자리를 차지하지 않는
+ * 막대 = 보이지 않는 막대). */
+@utility scrollbar-visible {
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: var(--radius-sm);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-muted);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
 
