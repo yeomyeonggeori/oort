@@ -110,6 +110,10 @@ gets a **name** rather than an off-grid number, and `w-[320px]` still does not
 compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
 `w-pane` / `max-h-pane` 320px (thread panel, command list).
 
+Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
+(R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
+bar gets a named token instead of widening the closed set.
+
 **Radius: three steps, nothing else.** `--radius-*: initial` clears the stock
 scale first.
 
