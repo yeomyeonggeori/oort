@@ -108,3 +108,20 @@ spctl -a -t exec -vv /tmp/check/momo.app
 ```
 
 종단 증명은 하나뿐이다: **구버전 설치본에서 배지가 뜨고, 버튼 한 번으로 설치되고, 재시작하면 새 버전이 보이는 것.** 유닛 테스트로는 대신할 수 없다.
+
+## 7. 실측 종단 증명 (2026-07-25, mac aarch64)
+
+발행 4회(`next.1`~`next.4`), 자동 업데이트 2홉. 로컬 빌드가 아니라 **릴리스 페이지에서 받은 zip** 을 `/Applications` 에 설치한 뒤 시작했다.
+
+1. 설치: `momo-next-0.1.0-next.2-darwin-aarch64.zip` (sha256 `fdd09ff0…`, 페이지 공표값과 일치) → `/Applications/momo.app`. `spctl -a -t exec` = `accepted, source=Notarized Developer ID`.
+2. 실행 → 연결 화면에 `새 버전 0.1.0-next.3` 한 줄. 배지는 `desktop 0.1.0-next.2`. mDNS 도 같이 살아 있었다(`MacBook-Pro-2.local:28000` 발견 카드).
+3. **키보드만으로** 도달 가능: 창 진입 후 Tab 한 번에 `지금 업데이트` 로 포커스가 가고 액센트 포커스 링이 보인다. Space 로 실행.
+4. 약 4초 뒤 행이 `재시작하면 적용` 로 바뀌고, 그 시점에 이미 디스크의 `CFBundleShortVersionString` 은 `0.1.0-next.3`. 실행 중인 창의 배지는 여전히 `next.2` — macOS 가 종료 전까지 옛 이미지를 쓰는 그 동작이 화면에 그대로 보인다.
+5. `지금 재시작` → 재실행. 배지 `desktop 0.1.0-next.3`, 그리고 곧바로 `새 버전 0.1.0-next.4`.
+6. 같은 방식으로 2홉째 → 배지 `desktop 0.1.0-next.4`, 업데이트 행은 **사라진다**(최신일 때 침묵).
+7. 자기 갱신으로 교체된 `/Applications/momo.app` 검증:
+   - `spctl -a -t exec -vv` → `accepted, source=Notarized Developer ID`
+   - `xcrun stapler validate` → `The validate action worked!`
+   즉 **자동 업데이트로 받은 앱과 수동 설치한 앱의 Gatekeeper 판정이 같다.** 스테이플 이후에 tar 를 다시 만드는 단계가 있는 이유가 이것이다.
+
+부수 실측: 발행 직후 매니페스트가 옛 버전을 응답하는 구간이 실제로 있었다(Pages `max-age=600`). §4 의 10분 안내는 추정이 아니다.

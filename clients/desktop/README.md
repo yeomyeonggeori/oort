@@ -320,15 +320,39 @@ All four verified against the real `momo-spike.app`, not a unit-test double:
   load returns null. No residue (`security find-generic-password -s app.momo.desktop`).
 - **Notification**: permission `Granted`, `show → true`, banner displayed.
 
+### 2026-07-25, mac aarch64, published bundles (MOMO-606 updater)
+
+Four real publishes (`0.1.0-next.1` .. `.4`) and two self-updates, starting from
+the **release-page zip** installed into `/Applications`, not a local build:
+
+- Install: `spctl -a -t exec` → `accepted, source=Notarized Developer ID`.
+- `0.1.0-next.2` offered `0.1.0-next.3` on the connect screen; **one Tab** from
+  window entry focuses `지금 업데이트` with a visible ring, Space installs.
+- ~4 s later the row read `재시작하면 적용` and the bundle on disk was already
+  `0.1.0-next.3` while the running window still reported `next.2` — the macOS
+  "old image until exit" behaviour, visible on screen.
+- `지금 재시작` relaunched as `0.1.0-next.3`, which immediately offered `.4`.
+  Second hop landed on `0.1.0-next.4`, and the row disappeared (silent when current).
+- The **self-updated** `/Applications/momo.app`: `spctl` → `accepted, source=
+  Notarized Developer ID`, `xcrun stapler validate` → `The validate action worked!`
+  Same Gatekeeper answer as a manual install, which is the whole point of
+  re-creating the tarball after stapling.
+- mDNS discovery worked in the packaged build (`MacBook-Pro-2.local:28000`).
+
 ## Known gaps
 
 - The **release** app loads `tauri://localhost`, so the web build's dev proxy for
   `/v1` does not exist — REST calls need a Rust HTTP command, an embedded proxy,
   or server-side CORS. The **dev** path (pointing at the proxied preview) does the
   full round-trip today. See `clients/web/README.md` findings.
-- Bundle identity is still the spike's (`app.momo.spike`, product `momo-spike`).
-  The `momo://` registration and the keychain item are filed under it, so renaming
-  later is a migration, not a rename.
-- Unsigned builds: macOS ties keychain ACLs to the binary's signature, so a
-  rebuilt dev binary can re-prompt for access to an item an earlier build created.
-  Signing (the 0.0.5+ certificate path) removes this.
+  **This is what blocks inviting testers to the next channel**, not the updater:
+  the published app installs and updates itself cleanly but cannot yet reach a
+  momowebqa server from the packaged build.
+- `momo://` is registered by this bundle and by the SwiftUI client, and macOS
+  picks one handler. Drive a specific build with `open -a <path> "momo://…"`.
+- Unsigned or differently-signed builds: macOS ties keychain ACLs to the binary's
+  signature, so an item left by one identity makes another put up a login-keychain
+  password dialog. The shell no longer touches the credential store when there is
+  nothing to resume (see Keychain above), which removes it from a first launch;
+  a developer machine carrying an old item clears it once with
+  `security delete-generic-password -s app.momo.desktop -a refresh-token`.
