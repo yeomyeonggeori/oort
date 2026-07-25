@@ -122,6 +122,15 @@
    * no step near 400, so the measure gets a NAME rather than max-h-[400px]. */
   --spacing-diff-body: 400px;
 
+  /* 관전 터미널 본문 (MOMO-619 / ADR-0126 D1). A read-only terminal is measured
+   * in ROWS, not in rhythm steps: at the 12px monospace role a row is 16px, so
+   * 320px is exactly 20 rows, the smallest window in which a command and the
+   * output it produced are visible together. It scrolls inside itself (xterm
+   * owns its own viewport), so a host that prints for an hour never grows the
+   * session pane. A height, so it is not a pane; and the scale has no step near
+   * 320, so like --spacing-diff-body the measure gets a NAME, not h-[320px]. */
+  --spacing-terminal-body: 320px;
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */

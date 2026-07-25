@@ -147,6 +147,14 @@ at the same size on both clients. It is a MAXIMUM, not a fixed height: a short
 diff hugs its content, which is the empty-band regression the mac card had to
 fix separately (MOMO-518 R2 H1) and CSS gets for free.
 
+`h-terminal-body` 320px (MOMO-619, the read-only 관전 terminal) is the second
+body cap and the one place a cap is a FIXED height rather than a maximum: a
+terminal is measured in rows (320px is 20 rows at the 12px monospace role), and
+xterm sizes its own viewport from the box it is handed, so a box that hugged its
+content would report zero rows before the first byte arrived. Measured inside the
+320px work pane that is 37 columns; below 900px, where the pane takes the whole
+chat surface, it is about 95, which is the width host output is written for.
+
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
 bar gets a named token instead of widening the closed set.

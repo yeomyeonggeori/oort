@@ -208,3 +208,29 @@ has no shell, so a short window must still reach the sign-in button.
    route REST via the dev proxy equivalent or a Rust HTTP command / server CORS.
 4. Automated **background** browser tabs throttle rAF/timers — scroll FPS must be
    measured headless (visible) or in the foreground Tauri window, not a bg tab.
+
+## Read-only terminal observation (MOMO-619, ADR-0126 D1)
+
+`src/features/work/ObserverTerminal.tsx` + `observerStream.ts`. The capability
+call is REST (`POST .../work-sessions/{id}/terminal-attach {"mode":"observer"}`),
+the bytes are a **direct** WebSocket to the host: momo servers carry no terminal
+stream, by design. xterm.js is bundled locally and code split
+(`terminalRuntime.ts`, 334 kB js + 5 kB css, loaded on the first 관전 시작).
+
+Two deployment facts measured on 2026-07-26 (live momowebqa + a local WSS PTY
+host), both about `infra/prod/Caddyfile`:
+
+- **`connect-src` blocks the host socket.** The prod policy is
+  `connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}`, which
+  does not cover an arbitrary host `attach_endpoint`. Chrome refuses the socket,
+  logs the violation, and — this is the trap — fires **no error and no close
+  event**, so the page must supply its own deadline (`HOST_CONNECT_TIMEOUT_MS`).
+  Serving the web client with a `connect-src` that permits the workspace's host
+  endpoints is a prerequisite for D1 in the browser; the Tauri shell
+  (`tauri.conf.json csp: null`) is unaffected today.
+- **`style-src` already allows what xterm needs.** xterm's DOM renderer writes
+  `<style>` elements and one `setAttribute("style", …)` per truecolor cell. Under
+  a hypothetical `style-src 'self'` the terminal still streams and prints text
+  but loses colour, cell positioning and its dimensions (measured). The shipped
+  policy carries `'unsafe-inline'`, so **no relaxation is needed** — but the
+  directive can no longer be tightened without breaking this surface.

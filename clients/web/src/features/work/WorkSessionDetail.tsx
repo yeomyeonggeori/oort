@@ -13,6 +13,7 @@ import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { ObserverTerminal } from "./ObserverTerminal";
 import { useSessionEvents } from "./useWorkSessions";
 import {
   composeExcerpt,
@@ -630,26 +631,47 @@ export function WorkSessionDetail({
                 </span>
               </MetaRow>
             )}
-            {session.observerGrantCount > 0 && (
-              <MetaRow label="관전">
-                <span data-numeric className="font-mono">
-                  {session.observerGrantCount}
-                </span>
-              </MetaRow>
-            )}
+            {/* 관전 N is NOT repeated here. It lives in the 터미널 관전 block
+                below, next to the sentence that says what the server actually
+                counted (grants issued in the last minute, not people watching).
+                A bare number in a meta list cannot carry that qualifier and
+                would read as a headcount. */}
           </dl>
         </details>
 
+        {/* 관전 (MOMO-619 / ADR-0126 D1). It sits above the ledger because it
+            is the live surface and the ledger is the record, and it obeys the
+            layout rule at the top of this file by being SMALL until asked: a
+            header line plus one sentence, and the 320px terminal only after
+            someone starts watching. Nothing here is fixed chrome; it scrolls
+            with everything else.
+
+            It is also deliberately ABOVE the unverified-host banner. That
+            banner is a statement about the STEP LEDGER underneath it, and the
+            terminal is a different path entirely: capability plus a direct
+            socket to the host, no relay in between. Drawn under the banner it
+            read as the thing the banner was doubting. */}
+        <ObserverTerminal session={session} hostName={hostName} />
+
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a
             verified path yet, so this panel refuses to read its empty stream as
-            a quiet session. The ledger facts above are still the server's. */}
+            a quiet session. It says "the steps below", not "everything here":
+            the terminal above is not relayed and a live stream sitting under
+            "여기 보이는 것은 세션 원장뿐입니다" made that sentence false
+            (measured on momowebqa 2026-07-26, a workd host streaming into the
+            terminal while the banner claimed only the ledger was visible). */}
         {trust !== "local" && (
           <InlineBanner
             tone="neutral"
             message={
               trust === "remote"
-                ? "원격 호스트에서 실행 중인 세션입니다. 진행 내역 중계는 아직 검증되지 않았으므로, 여기 보이는 것은 세션 원장뿐입니다."
-                : "이 세션의 호스트를 확인하지 못했습니다. 진행 내역이 모두 도착했는지 보장할 수 없습니다."
+                ? // Tense follows the ledger. "실행 중인 세션입니다" under a
+                  // 종료됨 chip is a small lie the banner used to tell on every
+                  // finished remote session (seen on momowebqa 2026-07-26).
+                  `원격 호스트에서 ${
+                    session.status === "running" ? "실행 중인" : "실행된"
+                  } 세션입니다. 진행 내역 중계는 아직 검증되지 않았으므로, 아래 단계 목록에는 세션 원장에 남은 것만 나옵니다.`
+                : "이 세션의 호스트를 확인하지 못했습니다. 아래 진행 내역이 모두 도착했는지 보장할 수 없습니다."
             }
             testId="work-host-unverified"
           />
