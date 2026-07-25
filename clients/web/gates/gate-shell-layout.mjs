@@ -29,12 +29,19 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// 설정 > 사용량 (MOMO-616) is the tallest settings panel, so it is measured from
+// the same contract fixture usageModel.test.ts asserts rather than from an
+// invented payload.
+const USAGE_FIXTURE = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/usageFixtures.json"), "utf8")
+).normal;
 const PORT = Number(process.env.SHELL_GATE_PORT || 5179);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const OUT_DIR = process.env.OUT_DIR
@@ -223,6 +230,9 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: INVITES })
   );
+  await context.route("**/v1/workspaces/*/usage/summary*", (route) =>
+    json(route, USAGE_FIXTURE)
+  );
   await context.route("**/v1/provider/link", (route) =>
     json(route, {
       schema: "momo.provider_link.v0",
@@ -360,6 +370,7 @@ async function measureSize(browser, size) {
     ["/settings?section=ai", "설정 AI 연결", "settings-ai"],
     ["/settings?section=code", "설정 코드 실행 호스트", "settings-code"],
     ["/settings?section=workspace", "설정 워크스페이스", "settings-workspace"],
+    ["/settings?section=usage", "설정 사용량", "settings-usage"],
   ]) {
     await go(page, hash);
     await assertShellHeld(page, `${size.name} ${label}`, `${size.name}-${shot}`);

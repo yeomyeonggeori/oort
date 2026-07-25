@@ -10,6 +10,7 @@ import { AccountSection } from "./AccountSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { InviteSection } from "./InviteSection";
 import { SectionShell } from "./SettingsFields";
+import { UsageSection } from "./UsageSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 
@@ -31,6 +32,7 @@ type SectionId =
   | "ai"
   | "code"
   | "workspace"
+  | "usage"
   | "members";
 
 interface SectionMeta {
@@ -48,6 +50,10 @@ const SECTIONS: SectionMeta[] = [
   { id: "ai", label: "AI 연결", group: "운영" },
   { id: "code", label: "코드 실행 호스트", group: "운영" },
   { id: "workspace", label: "워크스페이스", group: "운영" },
+  // 사용량 is the one 운영 panel every member may read (AX-7 1층 계약: "워크스
+  // 페이스에서 발생하는 과금은 사용자가 전부 트래킹"), so it carries no operator
+  // gate; the panel says so in its own copy rather than relying on the group.
+  { id: "usage", label: "사용량", group: "운영" },
   { id: "members", label: "멤버와 초대", group: "운영" },
 ];
 
@@ -162,6 +168,9 @@ export function SettingsRoute() {
           {section === "code" && <WorkHostSection offline={offline} />}
           {section === "workspace" && (
             <WorkspaceSection workspaceId={workspaceId} offline={offline} />
+          )}
+          {section === "usage" && (
+            <UsageSection workspaceId={workspaceId} offline={offline} />
           )}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />

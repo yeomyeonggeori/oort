@@ -219,3 +219,29 @@ export function createInvite(
     { method: "POST", body: JSON.stringify(input) }
   );
 }
+
+// --- 사용량: GET /v1/workspaces/:ws/usage/summary ---------------------------
+
+/**
+ * Workspace usage summary (AX-7 1층, MOMO-616).
+ *
+ * Contract: docs/planning/handoffs/2026-07-25-usage-summary-contract.md, shared
+ * with the engine ticket MOMO-615. Every workspace member may read it, so there
+ * is no operator gate here; a 403 would still land on the shared error path.
+ *
+ * The body is returned untyped on purpose and shaped by `parseUsageSummary`
+ * (./usageModel), which is where the contract is pinned and unit tested.
+ */
+export function fetchUsageSummary(
+  workspaceId: string,
+  query: { from: string; to: string; bucket: string }
+): Promise<unknown> {
+  const params = new URLSearchParams({
+    from: query.from,
+    to: query.to,
+    bucket: query.bucket,
+  });
+  return settingsRequest<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/usage/summary?${params.toString()}`
+  );
+}
