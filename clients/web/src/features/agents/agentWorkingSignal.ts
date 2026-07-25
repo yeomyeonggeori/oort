@@ -370,22 +370,31 @@ export function elapsedLabel(startedAtMs: number, nowMs: number): string {
 }
 
 /**
- * A once-per-second clock, mounted only while a clock is actually on screen.
- * The elapsed readout is data cadence rather than animation (it changes exactly
- * as fast as the number it shows), so it keeps ticking under reduced motion.
+ * A once-per-second RE-RENDER, mounted only while a clock is actually on
+ * screen. The elapsed readout is data cadence rather than animation (it changes
+ * exactly as fast as the number it shows), so it keeps ticking under reduced
+ * motion.
  *
  * Hoist this to the surface that owns the list, not to each row: ten channel
  * rows must not mean ten intervals. And pass `false` while the realtime rail is
  * down: a clock that keeps counting on a dead socket is measuring our optimism,
  * not the agent's turn.
+ *
+ * What it returns is the RENDER's own `Date.now()`, never a value the interval
+ * captured. Returning a frozen timestamp while disabled was a real defect: the
+ * composer fed the same number to `agentTurnsInChannel`, whose whole job is to
+ * drop signals older than IDLE_CUTOFF_MS, and a frozen now can never find one
+ * stale. The rail is down is exactly when a signal most needs to expire, so the
+ * TTL was inert precisely when it mattered. `enabled` decides whether this
+ * component re-renders on a timer; it does not decide what time it is.
  */
 export function useTickingNow(enabled: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [, setTick] = useState(0);
   useEffect(() => {
     if (!enabled) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1_000);
+    setTick((t) => t + 1);
+    const id = setInterval(() => setTick((t) => t + 1), 1_000);
     return () => clearInterval(id);
   }, [enabled]);
-  return now;
+  return Date.now();
 }

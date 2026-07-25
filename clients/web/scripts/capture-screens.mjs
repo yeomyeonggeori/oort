@@ -8,8 +8,13 @@
 // level, which means the capture exercises the same CSS light-dark() path the
 // product uses; nothing is themed specially for the screenshot.
 //
-//   node scripts/capture-screens.mjs          # -> artifacts/design/*.png
-//   OUT_DIR=/tmp/shots node scripts/capture-screens.mjs
+//   npm run capture:design                    # -> artifacts/design/*.png
+//   OUT_DIR=/tmp/shots npm run capture:design
+//
+// Go through the npm script, not this file directly: it builds `--mode design`,
+// and that mode is what enables the `?agentwork=` capture seam. A release build
+// (`npm run build`) answers null to that flag on purpose, so the two agent turn
+// screens would shoot an empty sidebar against a production dist.
 //
 // No credentials and no backend are involved: /v1 is fulfilled from the
 // fixtures below (realistic Korean+English team content, never "테스트 1").
@@ -490,7 +495,7 @@ async function captureScheme(browser, scheme) {
 
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
-    throw new Error("dist/ is missing. Run `npm run build` first.");
+    throw new Error("dist/ is missing. Run `npm run capture:design`.");
   }
   mkdirSync(OUT_DIR, { recursive: true });
 

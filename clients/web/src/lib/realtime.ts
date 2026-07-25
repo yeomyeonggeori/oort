@@ -299,8 +299,24 @@ export function createRealtime(
     maxReconnectDelay: 20_000,
   });
 
-  client.on("connecting", () => onStatus("connecting"));
-  client.on("connected", () => onStatus("connected"));
+  // `connecting` means two different things to a reader and only one thing to
+  // centrifuge-js. Before the first `connected` it is the opening handshake, and
+  // "연결 중" is the honest word. After it, it is the reconnect loop the client
+  // enters on every drop, and it stays there for as long as the network is gone:
+  // `disconnected` is emitted only when the SERVER closes the session on
+  // purpose. Reporting both as "연결 중" is why a real 40s socket drop showed no
+  // offline banner at all (measured): ChatShell gates the banner on
+  // `disconnected`, which never arrived. Once we have been connected, not being
+  // connected is being disconnected, and every rail-down surface (the banner,
+  // the sidebar pill, the composer bar, the clocks) keys off that one fact.
+  let everConnected = false;
+  client.on("connecting", () =>
+    onStatus(everConnected ? "disconnected" : "connecting")
+  );
+  client.on("connected", () => {
+    everConnected = true;
+    onStatus("connected");
+  });
   client.on("disconnected", () => onStatus("disconnected"));
   client.connect();
 

@@ -41,6 +41,10 @@ export function AppShell({
   // activity line are reviewable in artifacts/design (SKILL §11). The rail is
   // swapped out, not the socket: the timeline still loads its history through
   // the ordinary path, and the turn store keeps exactly one writer.
+  //
+  // It exists only in a dev or `--mode design` build (turnFixture.ts), and where
+  // it exists the sidebar prints a warn line naming the mode, because unlike
+  // ?stress=N these fixtures are indistinguishable from the real thing on sight.
   const turnFixture = agentTurnFixtureMode();
 
   useEffect(() => {
@@ -62,10 +66,19 @@ export function AppShell({
         session,
         workspaceId: session.member.workspaceId,
         realtime,
-        // `?agentwork=live` shoots the connected surface without a socket;
-        // `?agentwork=offline` leaves the status where a dead rail leaves it,
-        // which is the state the two surfaces have to say out loud.
-        connStatus: turnFixture === "live" ? "connected" : connStatus,
+        // `?agentwork=live` shoots the connected surface without a socket and
+        // `?agentwork=offline` shoots the rail-down one. Both are stated
+        // outright rather than left to the environment: measured against a real
+        // momowebqa the socket connects, so an `offline` capture that merely
+        // "let the status be" produced a fully live screen. The override reaches
+        // every consumer of connStatus, including the offline banner, which is
+        // why the sidebar notice says so in as many words.
+        connStatus:
+          turnFixture === "live"
+            ? "connected"
+            : turnFixture === "offline"
+              ? "disconnected"
+              : connStatus,
         logout: onLogout,
       }}
     >

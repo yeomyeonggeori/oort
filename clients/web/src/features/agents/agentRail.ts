@@ -27,6 +27,11 @@ import {
  * looking. That product is channels x agents, so it needs a ceiling: past this
  * many pairs the rail watches the first N in a stable order and the rest simply
  * carry no badge (a missing badge is a smaller lie than a socket storm).
+ *
+ * "Smaller" is not "none": a reader who cannot tell an unwatched channel from a
+ * quiet one has been told something false by omission. `agentCoverage` reports
+ * what the cap cut so the sidebar can say it out loud (SKILL §9: absence is
+ * never promoted to a confirmed story).
  */
 export const MAX_AGENT_SUBSCRIPTIONS = 32;
 
@@ -52,23 +57,50 @@ export function agentSubscriptionPairs(
   members: readonly RosterMember[],
   limit: number = MAX_AGENT_SUBSCRIPTIONS
 ): AgentSubscription[] {
+  return agentCoverage(channels, members, limit).pairs;
+}
+
+/**
+ * What the cap watches and what it leaves out.
+ *
+ * `uncovered` holds every channel that has an active agent member the rail is
+ * NOT subscribed to, whether the cap cut the channel entirely or only its
+ * second agent. That is the set of rows whose blank trailing cell means "we did
+ * not look", not "nothing happened", and the sidebar states that difference
+ * rather than letting the reader assume the quieter one.
+ */
+export interface AgentCoverage {
+  pairs: AgentSubscription[];
+  uncovered: Channel[];
+}
+
+export function agentCoverage(
+  channels: readonly Channel[],
+  members: readonly RosterMember[],
+  limit: number = MAX_AGENT_SUBSCRIPTIONS
+): AgentCoverage {
   const agents = members
     .filter((m) => m.kind === "agent" && m.status === "active")
     .slice()
     .sort((a, b) => keyOf(a.id).localeCompare(keyOf(b.id)));
 
-  const out: AgentSubscription[] = [];
+  const pairs: AgentSubscription[] = [];
+  const uncovered: Channel[] = [];
   for (const channel of channels) {
+    let missed = false;
     for (const agent of agents) {
-      if (out.length >= limit) return out;
       const memberOfChannel = agent.channelIds.some(
         (id) => keyOf(id) === keyOf(channel.id)
       );
       if (!memberOfChannel) continue;
-      out.push({ channelId: channel.id, memberId: agent.id });
+      // Past the cap the loop keeps running rather than returning: the rest of
+      // the walk is what turns "we stopped" into a list of channels to name.
+      if (pairs.length >= limit) missed = true;
+      else pairs.push({ channelId: channel.id, memberId: agent.id });
     }
+    if (missed) uncovered.push(channel);
   }
-  return out;
+  return { pairs, uncovered };
 }
 
 /**
@@ -270,9 +302,20 @@ function applyPartial(
     runId,
     memberId: existing?.memberId ?? context.memberId,
     channelId: existing?.channelId ?? event.payload.channel_id ?? context.channelId,
-    // A streamed token is the agent writing, so a partial takes a run back out
-    // of the approval wait it may have been parked in.
-    state: "working",
+    // A partial refreshes liveness and may carry a headline, but it never
+    // decides the STATE. `run_status` is the only field that says whether the
+    // run is running or parked on a person, it rides on `agent.status` alone,
+    // and `AgentPartialEvent` has no equivalent: promoting every partial to
+    // 작업 중 means one late `tool_call_*` frame (a documented payload shape
+    // that carries no text at all) drags a run back out of 승인 대기 and both
+    // surfaces resume claiming the reader should wait. That is the exact lie
+    // this module exists to prevent.
+    //
+    // Same rule as the mac resolver, which reads state off the runs projection
+    // and lets partials contribute headlines only (AgentWorkingSignal.swift
+    // §1a/§1b). A run that genuinely resumes after an approval publishes a
+    // fresh `agent.status`, and that frame is what moves it back to working.
+    state: existing?.state ?? "working",
     source: existing?.source ?? "status",
     ...(existing?.startedAtMs !== undefined
       ? { startedAtMs: existing.startedAtMs }
@@ -315,13 +358,13 @@ export function candidatesFrom(tracks: RunTracks): AgentWorkingSignal[] {
       state: track.state,
       source: track.source,
       runId: track.runId,
+      ...(track.startedAtMs !== undefined
+        ? { startedAtMs: track.startedAtMs }
+        : {}),
       // A run parked on an approval keeps no headline: the answer it is waiting
       // on is already a message in the timeline, and reprinting it as a live
       // status line is the "stacked on its own partial" pattern the mac client
       // rules out in MessageListView (composerFooterSignals).
-      ...(track.startedAtMs !== undefined
-        ? { startedAtMs: track.startedAtMs }
-        : {}),
       headlines:
         track.headline === undefined || track.state !== "working"
           ? []

@@ -97,6 +97,15 @@ export function matchMembers(
  * The bar states a turn even before a headline exists ("김인턴이 작업 중" plus a
  * clock is a true thing the reader wants) and states an approval wait as an
  * approval wait, never as work.
+ *
+ * OFFLINE (SKILL §5) is a state this bar has to SHOW, not merely encode. The
+ * first cut expressed a dead rail by hiding the clock and rewriting an
+ * aria-label, which for an awaiting_approval turn is a no-op on screen: the
+ * line "Hermes가 승인을 기다립니다" was pixel-identical either way, so the app
+ * kept asserting agent state on a socket that was gone. Now the agent token
+ * comes off the name (the same demotion the sidebar pill makes: a remembered
+ * claim must not look as confirmed as a live one) and one warn-colored line
+ * says why, in place, which is what an offline banner is (§5) and not a toast.
  */
 function AgentActivityBar({
   turns,
@@ -123,15 +132,18 @@ function AgentActivityBar({
   return (
     <ul
       className="flex flex-col gap-1 px-4 pb-2"
-      aria-label={live ? summary : `${summary} 연결이 끊겨 갱신이 멈췄습니다.`}
+      // The offline sentence is a real list item below, so it is announced in
+      // reading order rather than glued onto the list's name and read twice.
+      aria-label={summary}
       data-testid="composer-working"
+      data-live={live ? "" : undefined}
     >
       {lines.map((line) => (
         <li
           key={line.key}
           className="flex items-baseline gap-2 text-meta text-ink-muted"
         >
-          <ActivityText line={line} />
+          <ActivityText line={line} live={live} />
           {live && line.state === "working" && line.startedAtMs !== undefined && (
             <span className="shrink-0 text-timestamp" data-numeric>
               {elapsedLabel(line.startedAtMs, nowMs)}
@@ -140,7 +152,14 @@ function AgentActivityBar({
         </li>
       ))}
       {overflowCount > 0 && (
-        <li className="text-meta text-ink-muted">외 {overflowCount}명</li>
+        <li className="text-meta text-ink-muted">
+          외 <span data-numeric>{overflowCount}</span>명
+        </li>
+      )}
+      {!live && (
+        <li className="text-meta text-warn" data-testid="composer-working-stale">
+          연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.
+        </li>
       )}
     </ul>
   );
@@ -151,10 +170,18 @@ function AgentActivityBar({
  * after the text it belongs to: a right-aligned number a screen away from its
  * label stops reading as a card and starts reading as a banner (tokens.md §4).
  */
-function ActivityText({ line }: { line: AgentActivityLine }) {
+function ActivityText({
+  line,
+  live,
+}: {
+  line: AgentActivityLine;
+  live: boolean;
+}) {
   return (
     <span className="min-w-0 truncate" title={activityText(line)}>
-      <span className="text-agent">{line.name.name}</span>
+      {/* Offline the name drops to the row's own ink-muted: agent identity is a
+          claim about who is acting right now, and nobody is acting right now. */}
+      <span className={live ? "text-agent" : undefined}>{line.name.name}</span>
       {line.name.handle && (
         <span className="text-ink-muted">({line.name.handle})</span>
       )}
@@ -187,6 +214,14 @@ export function Composer({
   // composer once a second because an agent was busy in a channel nobody here
   // is looking at. The membership test is clock-free, so it can decide whether
   // to start the clock before there is one.
+  //
+  // `useTickingNow` returns the render's own clock whatever the argument says;
+  // the argument only buys the 1Hz re-render. That is what makes the same
+  // `nowMs` safe to hand to the staleness filter. Handing it a value the tick
+  // captured meant that with the rail down (no tick) the clock froze at the
+  // moment the socket died, `isStaleSignal` compared two fixed numbers, and the
+  // 90s TTL could never fire on this surface at all. Now every render, from
+  // whatever cause, re-reads the wall clock and drops what has gone quiet.
   const { connStatus } = useSession();
   const railLive = connStatus === "connected";
   const signals = useAgentWorkingSignals();

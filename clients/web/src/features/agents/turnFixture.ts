@@ -12,14 +12,33 @@ import type { AgentWorkingSignal } from "./agentWorkingSignal";
 // Same shape of seam as `?stress=N` in ChatShell: a URL flag, off by default,
 // that swaps live data for fixed data. It only produces SIGNALS; the resolver,
 // the copy and both surfaces are the shipped ones.
+//
+// Two things keep it from being a way to fake product state at a reader:
+//
+//   1. It is not in a release build. `npm run build` compiles MODE=production
+//      and the flag is dead there; the capture builds `--mode design` and the
+//      dev server is DEV, which are the only two places anyone reviews pixels.
+//      `?stress=N` can afford to ship because a header reading 스크롤 측정 (40)
+//      cannot be mistaken for a channel; fabricated agent turns can be mistaken
+//      for agent turns, which is the whole point of them.
+//   2. Where it IS live, the sidebar prints a warn-colored line naming the mode
+//      (Sidebar agent-fixture-notice), including the fact that `live` also pins
+//      the connection status to connected. The synthetic surface names itself.
 // =============================================================================
 
 export type AgentTurnFixtureMode = "live" | "offline";
+
+/**
+ * Builds where the capture seam exists at all. A release bundle answers null to
+ * every `?agentwork=` no matter what the URL says.
+ */
+const SEAM_ENABLED = import.meta.env.DEV || import.meta.env.MODE === "design";
 
 /** The fixture mode this page was opened with, or null for a normal session. */
 export function agentTurnFixtureMode(
   search: string = typeof location === "undefined" ? "" : location.search
 ): AgentTurnFixtureMode | null {
+  if (!SEAM_ENABLED) return null;
   const value = new URLSearchParams(search).get("agentwork");
   return value === "live" || value === "offline" ? value : null;
 }

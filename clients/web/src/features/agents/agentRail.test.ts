@@ -3,6 +3,7 @@ import type { Channel, RosterMember } from "@/lib/api";
 import type { AgentPartialEvent, AgentStatusEvent } from "@/lib/realtime";
 import { centrifugoAgentChannelName, createReplayGate } from "@/lib/realtime";
 import {
+  agentCoverage,
   agentSubscriptionPairs,
   applyAgentEvent,
   candidatesFrom,
@@ -192,6 +193,34 @@ describe("agentSubscriptionPairs", () => {
       }))
     );
     expect(parseSubscriptionKey("")).toEqual([]);
+  });
+
+  it("names the channels the cap left out, so the gap is not silent", () => {
+    // Under the cap nothing is claimed and nothing is reported.
+    expect(agentCoverage(channels, agents).uncovered).toEqual([]);
+
+    // GENERAL is fully watched; LAB loses its only agent and DM loses its only
+    // agent, so both are rows whose empty trailing cell means "not watched".
+    const cut = agentCoverage(channels, agents, 2);
+    expect(cut.pairs).toEqual([
+      { channelId: GENERAL, memberId: KIM },
+      { channelId: GENERAL, memberId: HERMES },
+    ]);
+    expect(cut.uncovered.map((c) => c.id)).toEqual([LAB, DM]);
+
+    // A channel that is only PARTLY covered still counts: half a channel's
+    // agents watched is not the same fact as all of them.
+    expect(
+      agentCoverage(channels, agents, 1).uncovered.map((c) => c.id)
+    ).toEqual([GENERAL, LAB, DM]);
+  });
+
+  it("subscribes to exactly what coverage says it subscribes to", () => {
+    for (const limit of [1, 2, 3, 4, 10]) {
+      expect(agentSubscriptionPairs(channels, agents, limit)).toEqual(
+        agentCoverage(channels, agents, limit).pairs
+      );
+    }
   });
 });
 
@@ -422,6 +451,56 @@ describe("applyAgentEvent", () => {
     // The tool name is internal vocabulary and never becomes a headline (§7).
     expect(JSON.stringify(signal)).not.toContain("github.search_issues");
   });
+
+  it("does not let a partial drag a parked run back into 작업 중", () => {
+    // `agent.partial` carries no run_status; only `agent.status` knows whether
+    // the run is running or stopped on a person. A tool_call partial is a
+    // documented payload shape that carries no text at all, so treating any
+    // partial as proof of work is how 승인 대기 flips back to 작업 중 and the
+    // reader is told to wait for an agent that is waiting for them.
+    let tracks: RunTracks = applyAgentEvent(new Map(), status(), CONTEXT, NOW);
+    tracks = applyAgentEvent(
+      tracks,
+      status({ run_status: "awaiting_approval" }, NOW + 100),
+      CONTEXT,
+      NOW + 100
+    );
+    expect([...tracks.values()][0].state).toBe("awaiting_approval");
+
+    tracks = applyAgentEvent(
+      tracks,
+      partial({ tool_call_id: "call_01" }, NOW + 200),
+      CONTEXT,
+      NOW + 200
+    );
+    const [parked] = resolveAgentWorkingSignals(candidatesFrom(tracks), NOW + 300);
+    expect(parked.state).toBe("awaiting_approval");
+    // It is still proof of LIFE, just not proof of work: the TTL restarts.
+    expect(parked.lastActivityAtMs).toBe(NOW + 200);
+
+    // A run that genuinely resumes says so on the channel that can say it.
+    tracks = applyAgentEvent(
+      tracks,
+      status({ run_status: "running" }, NOW + 400),
+      CONTEXT,
+      NOW + 400
+    );
+    expect(
+      resolveAgentWorkingSignals(candidatesFrom(tracks), NOW + 500)[0].state
+    ).toBe("working");
+  });
+
+  it("still opens a run at working when the partial is the first frame seen", () => {
+    const tracks = applyAgentEvent(
+      new Map(),
+      partial({ text: "게이트 로그 수집" }),
+      CONTEXT,
+      NOW
+    );
+    const [signal] = resolveAgentWorkingSignals(candidatesFrom(tracks), NOW + 10);
+    expect(signal.state).toBe("working");
+    expect(signal.headlines).toEqual(["게이트 로그 수집"]);
+  });
 });
 
 describe("pruneTracks", () => {
@@ -536,20 +615,35 @@ describe("turn copy: the two surfaces say the same thing", () => {
     expect(many?.label).not.toMatch(/\d+s/);
   });
 
-  it("leads with the working turn and still mentions the waiting one", () => {
+  it("leads with the turn that is waiting on the reader, not the busy one", () => {
+    // One agent is running (needs nothing from you) and one is parked on an
+    // approval (cannot move until you decide). The row has one word, so it
+    // spends it on the actionable fact; the other becomes the second sentence.
     const mixed = [
       turns[0],
       { ...turns[1], state: "awaiting_approval" as const },
     ];
     const badge = agentTurnBadgeCopy(mixed, nameFor);
-    expect(badge?.text).toBe("작업 중");
+    expect(badge?.text).toBe("승인 대기");
+    expect(badge?.state).toBe("awaiting_approval");
     expect(badge?.label).toBe(
-      "Hermes가 작업 중입니다. 에이전트 1명이 승인을 기다립니다."
+      "김인턴(@kim-intern)이 승인을 기다립니다. 에이전트 1명이 작업 중입니다."
     );
     // Both are still lines in the composer, each with its own state.
     expect(activityLines(mixed, nameFor).lines.map(activityText)).toEqual([
       "Hermes: 빌드 확인 중",
       "김인턴(@kim-intern)이 승인을 기다립니다",
     ]);
+  });
+
+  it("only says 작업 중 when nothing is waiting on the reader", () => {
+    expect(agentTurnBadgeCopy(turns, nameFor)?.state).toBe("working");
+    const twoWaiting = turns.map((t) => ({
+      ...t,
+      state: "awaiting_approval" as const,
+    }));
+    expect(agentTurnBadgeCopy(twoWaiting, nameFor)?.label).toBe(
+      "에이전트 2명이 승인을 기다립니다."
+    );
   });
 });

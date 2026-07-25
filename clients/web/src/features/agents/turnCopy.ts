@@ -127,21 +127,40 @@ export function activityLines(
   };
 }
 
-/** Working turns lead: an agent that is running is what the reader waits on. */
+/**
+ * Which state leads: the one that is waiting on the READER.
+ *
+ * An agent that is running needs nothing from you; an agent parked on an
+ * approval cannot move until you decide. So when a channel holds both, the lead
+ * is the approval. This is the sidebar's whole job (a pill is how you learn
+ * something happened in a channel you are not looking at), and letting 작업 중
+ * win the single word would file the only actionable fact on the row under
+ * "nothing to do here". The other state is not dropped, it becomes the second
+ * sentence of the accessible name and the second line of the composer list.
+ */
 function primary(turns: readonly AgentWorkingSignal[]): {
   state: AgentTurnState;
   shown: AgentWorkingSignal[];
 } {
-  const working = turns.filter((t) => t.state === "working");
-  return working.length > 0
-    ? { state: "working", shown: working }
-    : { state: "awaiting_approval", shown: [...turns] };
+  const waiting = turns.filter((t) => t.state === "awaiting_approval");
+  return waiting.length > 0
+    ? { state: "awaiting_approval", shown: waiting }
+    : { state: "working", shown: [...turns] };
+}
+
+/** Third person plain, so it reads the same in a pill title and a sentence. */
+function verbFor(state: AgentTurnState): string {
+  return state === "working" ? "작업 중입니다" : "승인을 기다립니다";
 }
 
 /**
  * One sentence naming what is open in a channel, digits excluded on purpose:
  * this is an accessible name, and a name that changes once a second is re-read
  * once a second by some assistive tech.
+ *
+ * Both states are always stated. The lead sentence is whichever one the pill is
+ * showing, so the word on screen and the first thing announced are the same
+ * fact, and the remainder follows rather than disappearing.
  */
 export function turnSummary(
   turns: readonly AgentWorkingSignal[],
@@ -149,15 +168,15 @@ export function turnSummary(
 ): string {
   if (turns.length === 0) return "";
   const { state, shown } = primary(turns);
-  const verb = state === "working" ? "작업 중입니다" : "승인을 기다립니다";
   const head =
     shown.length === 1
       ? agentLabelAsSubject(nameFor(shown[0].memberId))
       : `에이전트 ${shown.length}명이`;
-  const waiting = state === "working" ? turns.length - shown.length : 0;
-  const tail =
-    waiting > 0 ? ` 에이전트 ${waiting}명이 승인을 기다립니다.` : "";
-  return `${head} ${verb}.${tail}`;
+  const rest = turns.length - shown.length;
+  const other: AgentTurnState =
+    state === "working" ? "awaiting_approval" : "working";
+  const tail = rest > 0 ? ` 에이전트 ${rest}명이 ${verbFor(other)}.` : "";
+  return `${head} ${verbFor(state)}.${tail}`;
 }
 
 export interface AgentTurnBadgeCopy {
@@ -165,6 +184,13 @@ export interface AgentTurnBadgeCopy {
   text: string;
   /** The sentence assistive tech gets: who, how many, and what they are doing. */
   label: string;
+  /**
+   * Which state the word names, so the pill can carry the matching status color.
+   * 승인 대기 is the one state on this row that a person has to act on, and a
+   * word alone is a weak differentiator at 240px (SKILL §9: lifecycle chips use
+   * the status tokens, text-first).
+   */
+  state: AgentTurnState;
 }
 
 /**
@@ -191,5 +217,6 @@ export function agentTurnBadgeCopy(
   return {
     text: state === "working" ? "작업 중" : "승인 대기",
     label: turnSummary(turns, nameFor),
+    state,
   };
 }

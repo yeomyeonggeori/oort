@@ -23,6 +23,8 @@ import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
 } from "@/features/agents/turnCopy";
+import { agentCoverage } from "@/features/agents/agentRail";
+import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import {
   channelLabelParts,
   memberFor,
@@ -57,6 +59,13 @@ import { Button } from "@/design/ui/button";
  * count, and a second unlabelled number on the same row is a second count to
  * anyone reading quickly. Who and how many is in the accessible name; the
  * per-turn clocks are in the composer, which has the width for them.
+ *
+ * Two live states, two token colors (SKILL §9). 작업 중 is the agent acting and
+ * wears the agent token; 승인 대기 is the run stopped on a decision only the
+ * reader can make, which is a status, not an identity, so it wears --warn and
+ * an outline instead of a fill. The word carried both states at 240px, and one
+ * word is a thin difference between "nothing for you to do" and "this is
+ * blocked on you".
  */
 function AgentTurnBadge({
   turns,
@@ -78,14 +87,22 @@ function AgentTurnBadge({
   return (
     <span
       className={cn(
-        "shrink-0 rounded-sm px-1 text-timestamp",
+        "shrink-0 rounded-sm px-1",
         // Offline (SKILL §5): the pill keeps saying what was last confirmed, but
-        // it drops the agent token, so a remembered claim does not sit on the
+        // it drops the status color, so a remembered claim does not sit on the
         // row looking exactly as live as a confirmed one.
-        live ? "bg-agent-soft text-agent" : "text-ink-muted"
+        !live && "text-ink-muted",
+        live && copy.state === "working" && "bg-agent-soft text-agent",
+        live && copy.state === "awaiting_approval" && "border border-warn text-warn",
+        // Last, and deliberately: tailwind-merge files an unknown text-* class
+        // under text-COLOR, so a role written before a color is deleted from the
+        // output. cn() now knows these five roles (design/lib/cn.ts) and this
+        // order survives either way.
+        "text-timestamp"
       )}
       data-testid="agent-turn-badge"
       data-live={live ? "" : undefined}
+      data-state={copy.state}
       title={label}
     >
       {/* A bare aria-label on a generic span is not reliably announced, so the
@@ -120,6 +137,20 @@ export function Sidebar({
   const turnSignals = useAgentWorkingSignals();
   const railLive = connStatus === "connected";
   const nowMs = Date.now();
+
+  // What the subscription cap left out (agentRail MAX_AGENT_SUBSCRIPTIONS).
+  // Same pure function and the same inputs the rail subscribes with, so the two
+  // cannot disagree about which rows are actually being watched.
+  const uncovered = useMemo(
+    () => agentCoverage([...channels, ...dms], directoryQuery.directory.members).uncovered,
+    [channels, dms, directoryQuery.directory.members]
+  );
+
+  // The capture seam (?agentwork=), if this build has one at all. The turns on
+  // screen are then fabricated, so the surface says so rather than passing for
+  // real agent activity (the ?stress= path renames the channel header for the
+  // same reason).
+  const fixtureMode = agentTurnFixtureMode();
 
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
@@ -229,6 +260,17 @@ export function Sidebar({
           </Button>
         </div>
 
+        {fixtureMode !== null && (
+          <p
+            className="border-b border-line px-2 py-1 text-meta text-warn"
+            data-testid="agent-fixture-notice"
+          >
+            {fixtureMode === "live"
+              ? "에이전트 활동 픽스처: 아래 턴과 연결 상태는 실제가 아닙니다."
+              : "에이전트 활동 픽스처: 아래 턴은 실제가 아니고 레일은 끊긴 상태입니다."}
+          </p>
+        )}
+
         <div
           ref={navRef}
           onKeyDown={onNavKeyDown}
@@ -285,6 +327,25 @@ export function Sidebar({
               >
                 {dms.map(rowFor)}
               </SidebarSection>
+            )}
+
+            {/* The turn pill covers a bounded number of (channel, agent) pairs.
+                Past that bound a row's empty trailing cell means "not watched",
+                which looks exactly like "quiet" and is not the same fact, so the
+                list names the gap instead of leaving the reader to assume the
+                friendlier reading (SKILL §9). Renders nothing until the cap
+                actually cuts, which no workspace this size reaches. */}
+            {uncovered.length > 0 && (
+              <p
+                className="px-4 py-2 text-meta text-ink-muted"
+                data-testid="agent-coverage-notice"
+                title={`에이전트 활동 미표시: ${uncovered
+                  .map((c) => c.name ?? c.id)
+                  .join(", ")}`}
+              >
+                에이전트 활동 표시가 한도에 닿았습니다. 위 목록 아래쪽 채널 일부는
+                작업 중이어도 표시되지 않습니다.
+              </p>
             )}
           </nav>
         </div>
