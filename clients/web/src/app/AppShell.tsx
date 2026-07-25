@@ -57,12 +57,19 @@ export function AppShell({
         logout: onLogout,
       }}
     >
-      {/* app-shell is the named two-pane grid from tokens.css (sidebar 240px),
-       * so the shell needs no arbitrary grid-cols value. The switcher is a
-       * portalled dialog and deliberately sits outside that grid. */}
-      <div className="app-shell h-full">
+      {/* app-shell is the named two-pane grid from tokens.css (sidebar 240px,
+       * viewport height), so the shell needs no arbitrary grid-cols value. The
+       * switcher is a portalled dialog and deliberately sits outside that grid.
+       *
+       * min-h-0 on <main> is load-bearing (MOMO-610): without it a grid item
+       * whose overflow is visible takes its content height as its minimum, so a
+       * long route — 설정 > 멤버와 초대 was the reported one — grew the row past
+       * the window and the whole page scrolled, carrying the sidebar off screen.
+       * With the floor at zero the route is handed the window height and has to
+       * scroll its own pane. */}
+      <div className="app-shell">
         <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
-        <main className="flex min-w-0">
+        <main className="flex min-h-0 min-w-0">
           <Outlet />
         </main>
       </div>
