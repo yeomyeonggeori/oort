@@ -50,6 +50,49 @@ npm run dev                          # http://localhost:5173 (proxies /v1 → mo
 - Credentials come from the login form (or `VITE_MOMO_DEV_*` in `.env.local`),
   never from source.
 
+## Connect surface + dynamic API base (MOMO-604, P2)
+
+`src/features/auth/ConnectPage.tsx` replaced the same-origin login form. Three
+additions, each of which also has to work when the answer is "nothing to show":
+
+- **Server selection.** The address is a runtime value now, resolved by
+  `apiBase()` in `src/lib/serverBase.ts`: the server chosen on the connect
+  screen (localStorage `momo.web.server.v1`) → `VITE_MOMO_API_BASE` → `""` =
+  same-origin. **The existing web deployment and the dev proxy are unchanged**:
+  a blank field IS the same-origin path. Inside the Tauri shell there is no
+  same-origin API, so the field is required there.
+- **Invite deep link.** `momo://join?server=…&code=…`
+  (`docs/onboarding-deeplink.md`) is consumed from the desktop shell event, and
+  in a browser from the page query (`?server=&code=`, `?code=`, or a whole link
+  as `?join=`). The code is stripped from the address bar as soon as it is read.
+  Submitting redeems it through `POST /v1/join`, with display name and handle
+  derived from the email exactly as the mac client derives them.
+- **LAN discovery card.** `_momo._tcp` sightings reported by the shell, offered
+  only when the TXT `base` key carries a usable URL. Browsers have no mDNS, so
+  the card never renders there; nothing found is silence, not an error state.
+
+The shell contract this consumes (web half of MOMO-603, `src/lib/tauri.ts`):
+
+| direction | name | payload |
+|---|---|---|
+| event | `deep-link://new-url` | `string[]` (a bare string / `{urls}` also read) |
+| event | `mdns://servers-changed` | `[{ name?, host?, port?, txt: { base } }]` (`{servers: […]}` also read) |
+| command | `plugin:deep-link\|get_current` | `-> string[] \| null` (cold start) |
+| command | `mdns_start` / `mdns_stop` | best effort, absence is not an error |
+
+**Still open (spike finding 3 below, not changed by this ticket):** the REST
+server sends no CORS headers and does not answer preflight (verified: `OPTIONS
+/v1/auth/login` → 404). A browser therefore cannot address a *different* origin
+directly, and the desktop shell needs either server-side CORS for the app origin
+or a Rust HTTP command. The connect screen stores and uses whatever base it is
+given; making a cross-origin base reachable is a shell/server change.
+
+```sh
+npm run build && npm run preview -- --host 127.0.0.1
+export MOMO_EMAIL=... MOMO_PASSWORD=...
+npm run smoke:connect     # deep-link prefill, validation, dynamic base, offline
+```
+
 ## Smoke (MOMO-598)
 
 One browser run over the whole P1 loop against a live momowebqa. It signs in,
