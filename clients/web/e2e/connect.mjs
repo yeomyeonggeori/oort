@@ -164,7 +164,14 @@ try {
   const deadBaseError = await page.textContent('[data-testid="login-error"]');
   record(
     "requests-follow-the-chosen-base",
-    (deadBaseError ?? "").includes("서버에 연결하지 못했습니다"),
+    (deadBaseError ?? "").includes("서버에 닿지 못했습니다"),
+    `error=${deadBaseError}`
+  );
+  // MOMO-609 / G-1: a base that cannot answer must END, with a retry attached
+  // to the failure rather than a button that stays on its busy label forever.
+  record(
+    "unreachable-base-offers-a-retry",
+    (deadBaseError ?? "").includes("다시 시도"),
     `error=${deadBaseError}`
   );
   record(

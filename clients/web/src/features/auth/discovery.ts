@@ -11,29 +11,31 @@ import {
 // LAN server discovery on the connect screen (W-O2 client side, web half).
 //
 // The internal-alpha stack advertises the server over Bonjour as `_momo._tcp`
-// with a TXT record whose `base` key holds the API base URL. The mac chooser
-// consumes exactly that (MomoServerDiscovery.swift); this is the same decision
-// layer in TS, kept pure so it is testable without a network or a shell:
-// validate, dedupe, preserve discovery order, and return an EMPTY list for
-// anything doubtful. Empty means the card is not rendered at all — discovery is
-// a quiet suggestion, never an announcement, and never an error.
+// with two TXT keys: `base`, the machine's `.local` NAME, and `ipv4`, its LAN
+// ADDRESS. This is the decision layer in TS, kept pure so it is testable without
+// a network or a shell: validate, dedupe, preserve discovery order, and return
+// an EMPTY list for anything doubtful. Empty means the card is not rendered at
+// all — discovery is a quiet suggestion, never an announcement, never an error.
 //
-// The shell (clients/desktop/src-tauri/src/discovery.rs) has already read the
-// TXT `base` key and reports it as `baseUrl`; that field is the only address
-// authority here. A sighting without a usable one is skipped rather than
-// guessed at from host/port, because a wrong scheme would hand someone a
-// suggestion that cannot connect, which is worse than silence. The shell does
-// NOT validate the advertised URL — anything on the LAN can advertise — so the
-// check below stays, exactly as the mac chooser re-checks its own sightings.
+// The shell (clients/desktop/src-tauri/src/discovery.rs) has already picked
+// which of the two this runtime can DIAL — the address first, the name as the
+// fallback, because the webview resolves a `.local` name to a link-local IPv6
+// address it cannot reach (MOMO-609) — and reports the winner as `baseUrl`. That
+// field is the only address authority here. A sighting without a usable one is
+// skipped rather than guessed at from host/port, because a wrong scheme would
+// hand someone a suggestion that cannot connect, which is worse than silence.
+// The shell does not trust the advertisement either — anything on the LAN can
+// advertise — so the check below stays, exactly as the mac chooser re-checks its
+// own sightings.
 //
 // Browsers do not get this: there is no mDNS in a web page, so the hook exits
 // before it listens and the card never appears.
 // =============================================================================
 
 export interface DiscoveredServer {
-  /** Validated API base URL to fill into the server field. */
+  /** Validated API base URL to fill into the server field, and to dial. */
   base: string;
-  /** Short human label, e.g. "macbook.local:28000". */
+  /** Short label naming the machine, e.g. "MacBook-Pro-2.local:28000". */
   displayHost: string;
 }
 

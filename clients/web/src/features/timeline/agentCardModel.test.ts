@@ -12,7 +12,8 @@ import {
   resolveApprovalStatus,
   turnStatusFor,
 } from "./agentCardModel";
-import { interpretReceipt } from "./approvalDecision";
+import { NetworkError } from "@/lib/http";
+import { interpretReceipt, sendFailureCopy } from "./approvalDecision";
 
 function msg(overrides: Partial<Message> = {}): Message {
   return {
@@ -408,6 +409,17 @@ describe("decision receipt semantics", () => {
     const outcome = interpretReceipt(409, receipt("idempotency_conflict"));
     expect(outcome.kind).toBe("error");
     expect(outcome.errorCode).toBe("idempotency_conflict");
+  });
+
+  it("never lets a decision that got no answer read as recorded", () => {
+    // MOMO-609: the request either reached the server or it did not, and the
+    // two absences point at different next moves. Neither is "it was recorded".
+    expect(sendFailureCopy(new NetworkError("timeout", 15_000))).toContain(
+      "보내지 못했습니다"
+    );
+    expect(sendFailureCopy(new NetworkError("unreachable", 15_000))).toContain(
+      "닿지 못했습니다"
+    );
   });
 
   it("says what a 403 and a 404 mean without apologising", () => {

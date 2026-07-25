@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, displayNameFromEmail, handleFromEmail } from "@/lib/api";
+import { NetworkError } from "@/lib/http";
 import { normalizeServerUrl } from "@/lib/serverBase";
 import { resolveSpikeRealtimeUrl } from "@/lib/realtime";
 import {
@@ -273,11 +274,33 @@ describe("failure copy", () => {
   });
 
   it("never shows a raw transport failure as an invite verdict", () => {
-    expect(joinFailureCopy(new TypeError("fetch failed")).message).toContain(
-      "서버에 연결하지 못했습니다"
+    const unreachable = new NetworkError("unreachable", 15_000);
+    expect(joinFailureCopy(unreachable).message).toContain("서버에 닿지 못했습니다");
+    expect(signInFailureCopy(unreachable).message).toContain(
+      "서버에 닿지 못했습니다"
     );
-    expect(signInFailureCopy(new TypeError("fetch failed")).message).toContain(
-      "서버에 연결하지 못했습니다"
+    // A body that is not JSON is a client-side fault, not a verdict either.
+    expect(signInFailureCopy(new SyntaxError("bad json")).message).toContain(
+      "서버 응답을 읽지 못했습니다"
+    );
+  });
+
+  it("offers a retry only where sending the same thing again could work", () => {
+    // Nothing answered: the input is fine, the address or the network is not.
+    expect(signInFailureCopy(new NetworkError("timeout", 15_000)).retryable).toBe(
+      true
+    );
+    expect(signInFailureCopy(new ApiError(500, "boom")).retryable).toBe(true);
+    // A rejected password is corrected in the field, not by pressing again.
+    expect(signInFailureCopy(new ApiError(401, "invalid")).retryable).toBe(false);
+    expect(joinFailureCopy(new ApiError(410, "invite expired")).retryable).toBe(
+      false
+    );
+  });
+
+  it("names which absence happened, because the next move differs", () => {
+    expect(signInFailureCopy(new NetworkError("timeout", 15_000)).message).toContain(
+      "15초"
     );
   });
 

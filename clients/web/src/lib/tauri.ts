@@ -111,11 +111,15 @@ export async function takePendingDeepLinks(): Promise<DeepLinkJoin[]> {
 
 // ---- LAN server discovery ---------------------------------------------------
 
-/** A server advertised on the LAN as `_momo._tcp` with a TXT `base` key. */
+/**
+ * A server advertised on the LAN as `_momo._tcp`. The advertisement carries the
+ * machine's `.local` name (TXT `base`) and its LAN address (TXT `ipv4`); the
+ * shell has already chosen the one this runtime can dial (MOMO-609).
+ */
 export interface DiscoveredServer {
-  /** API base URL, exactly as advertised — this is what gets prefilled. */
+  /** The address to dial, exactly as advertised — this is what gets prefilled. */
   baseUrl: string;
-  /** Short label, e.g. `MacBook-Pro-2.local:28000`. */
+  /** Short label naming the machine, e.g. `MacBook-Pro-2.local:28000`. */
   displayHost: string;
   /** Bonjour instance name, e.g. `momo`. */
   instanceName: string;

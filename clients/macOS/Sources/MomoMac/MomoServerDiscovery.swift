@@ -9,6 +9,13 @@ import Network
 // service so the chooser can *quietly* offer the address instead of making a new
 // teammate type it by hand.
 //
+// The same advertisement carries an `ipv4` key since MOMO-609
+// (`http://192.168.35.57:28000`), added for the Tauri shell: its embedded
+// webview resolves a `.local` name to a link-local IPv6 address it cannot dial,
+// so that client prefers the address form. This client stays on `base`
+// deliberately — URLSession resolves Bonjour names through the system responder,
+// and the name survives a DHCP lease change.
+//
 // The discovery logic is split into three layers so the decision-making stays
 // pure and unit-testable without a live network:
 //   1. `MomoServerDiscovery` — pure functions that turn raw browse results into
