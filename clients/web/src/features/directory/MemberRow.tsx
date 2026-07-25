@@ -32,10 +32,14 @@ import {
 // and starts reading as a banner).
 // =============================================================================
 
-const ROW_CLASS =
+// Exported because the loading state has to predict this exact geometry. A
+// skeleton that guesses at the shape is a skeleton that moves the list when the
+// roster lands, so DirectoryRoute builds its placeholder rows from the SAME two
+// constants rather than from a second description of them.
+export const ROW_CLASS =
   "flex w-full items-center border-b border-line px-4 py-2 text-left";
 
-const CONTENT_CLASS = "flex w-full max-w-pane-lg items-center gap-3";
+export const CONTENT_CLASS = "flex w-full max-w-pane-lg items-center gap-3";
 
 export function MemberRow({
   member,

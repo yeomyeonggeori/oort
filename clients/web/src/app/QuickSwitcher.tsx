@@ -34,10 +34,17 @@ import { InlineBanner } from "@/features/common/States";
 // conversation is reused instead of a second one being created.
 // =============================================================================
 
+// cmdk writes data-disabled on the item it refuses to select. Without a rule
+// for it an unselectable name rendered exactly like a selectable one, so the
+// list showed rows that answer nothing to Enter and look like rows that do.
+// opacity-50 is the same dimming Button, Input and the directory row already
+// use for disabled, so the palette does not invent a second dialect for the
+// same state; and dimmed text below AA is what WCAG 1.4.3 exempts inactive
+// controls for, which is exactly what this row is.
 const itemClass =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1 text-body " +
   "text-ink data-[selected=true]:bg-accent-soft " +
-  "data-[selected=true]:text-ink";
+  "data-[selected=true]:text-ink data-[disabled=true]:opacity-50";
 
 // cmdk renders the group label into a [cmdk-group-heading] element it owns, so
 // it is styled from the list rather than by a className we could pass. Same
@@ -158,13 +165,18 @@ export function QuickSwitcher({
             <Activity className="size-4 opacity-70" />
             활동
           </Command.Item>
+          {/* 멤버, the same word the sidebar row and the route's own h1 use.
+              One destination cannot have three names, and the surface people
+              arrive at says 멤버, so that is the name (R-1 어휘 계승). The
+              older wording stays in `value` as a search alias, so typing
+              디렉터리 or 명부 still finds it. */}
           <Command.Item
             className={itemClass}
             value="멤버 디렉터리 명부"
             onSelect={() => go("/directory")}
           >
             <Users className="size-4 opacity-70" />
-            멤버 디렉터리
+            멤버
           </Command.Item>
           <Command.Item className={itemClass} onSelect={() => go("/settings")}>
             <Settings className="size-4 opacity-70" />

@@ -4,19 +4,10 @@ import type { RosterMember } from "@/lib/api";
 import { useSession } from "@/app/session";
 import { Input } from "@/design/ui/input";
 import { Button } from "@/design/ui/button";
-import {
-  EmptyInvite,
-  InlineBanner,
-  SkeletonRows,
-} from "@/features/common/States";
+import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
-import { MemberRow } from "./MemberRow";
-import {
-  countLabel,
-  groupDirectory,
-  hasOtherMembers,
-  normalizeQuery,
-} from "./model";
+import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
+import { countLabel, groupDirectory, hasOtherMembers } from "./model";
 import { useOpenDm } from "./useOpenDm";
 
 // =============================================================================
@@ -28,6 +19,49 @@ import { useOpenDm } from "./useOpenDm";
 // The source is the roster the sidebar already uses, so this surface adds a
 // route and a view, not another read of the same thing.
 // =============================================================================
+
+// The section label above 사람 / 에이전트. Named because the loading state below
+// has to reserve the same band it will occupy.
+const SECTION_HEADING_CLASS =
+  "border-b border-line px-4 py-1 text-meta font-medium text-ink-muted";
+
+/** A bar of dead space, in the neutral surface the other skeletons use. */
+const BAR_CLASS = "block rounded-sm bg-surface-hover";
+
+/**
+ * The roster, before it arrives, in the shape it will arrive in.
+ *
+ * The generic SkeletonRows was full-bleed 24px bars, so a 1600px window
+ * predicted a 1328px-wide 24px row and then delivered a 640px-capped 41px one:
+ * the list moved on BOTH axes at the moment of arrival, which is the jump a
+ * skeleton exists to prevent (design-taste-web §5, loading is height-preserving
+ * and never a light show). These placeholders are built from MemberRow's own
+ * ROW_CLASS/CONTENT_CLASS, so the prediction cannot drift from the row, and the
+ * band above them stands in for the 사람 heading that always precedes the first
+ * row of a roster that has anyone in it.
+ *
+ * Person height is what is predicted, not agent height: the split between the
+ * two is exactly what this client does not know yet, and 사람 is the section
+ * that comes first.
+ */
+function DirectorySkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div aria-hidden="true" data-testid="directory-skeleton">
+      <div className={SECTION_HEADING_CLASS}>
+        <span className={`${BAR_CLASS} h-4 w-8`} />
+      </div>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className={ROW_CLASS} data-testid="skeleton-row">
+          <span className={CONTENT_CLASS}>
+            {/* Same size-6 square the shared Avatar draws. */}
+            <span className={`${BAR_CLASS} size-6 shrink-0`} />
+            <span className={`${BAR_CLASS} h-4 w-pane-sm`} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function DirectoryRoute() {
   const { session, workspaceId, connStatus } = useSession();
@@ -68,7 +102,11 @@ export function DirectoryRoute() {
   const count = countLabel(groups, roster);
 
   const offline = connStatus === "disconnected";
-  const trimmed = normalizeQuery(query);
+  // The query as the person typed it, only stripped of the spaces around it.
+  // Matching folds case (model.normalizeQuery); quoting the folded string back
+  // would hand "KIM" the answer "kim" and quietly correct a search that was
+  // never wrong.
+  const searched = query.trim();
   const hasOthers = hasOtherMembers(
     rosterQuery.directory.members,
     session.member.id
@@ -115,9 +153,7 @@ export function DirectoryRoute() {
     if (members.length === 0) return null;
     return (
       <section className="flex flex-col" data-testid={testId}>
-        <h2 className="border-b border-line px-4 py-1 text-meta font-medium text-ink-muted">
-          {title}
-        </h2>
+        <h2 className={SECTION_HEADING_CLASS}>{title}</h2>
         <ul className="flex flex-col">
           {members.map((member) => (
             <MemberRow
@@ -136,19 +172,26 @@ export function DirectoryRoute() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="directory-route">
-      <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-body font-semibold">멤버</h1>
-        {/* Nothing at all while the roster is unknown: a header that counts to
-            zero over a skeleton or over "명부를 불러오지 못했습니다" is the one
-            screen saying two contradictory things (model.countLabel). */}
-        {count !== null && (
-          <span
-            className="text-meta text-ink-muted"
-            data-testid="directory-count"
-          >
-            {count}
-          </span>
-        )}
+      {/* The rule and the padding run the full pane, the CONTENT does not: the
+          search field below and every row below that stop at max-w-pane-lg, and
+          a header that did not would push its count 1200px away from the title
+          it belongs to on a 1600px window. Same measure, one column. */}
+      <header className="border-b border-line px-4 py-2">
+        <div className="flex w-full max-w-pane-lg items-center justify-between gap-3">
+          <h1 className="text-body font-semibold">멤버</h1>
+          {/* Nothing at all while the roster is unknown: a header that counts to
+              zero over a skeleton or over "명부를 불러오지 못했습니다" is the one
+              screen saying two contradictory things (model.countLabel). */}
+          {count !== null && (
+            <span
+              className="text-meta text-ink-muted"
+              data-numeric
+              data-testid="directory-count"
+            >
+              {count}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="border-b border-line px-4 py-2">
@@ -191,7 +234,7 @@ export function DirectoryRoute() {
         data-testid="directory-list"
       >
         {roster.pending && groups.total === 0 ? (
-          <SkeletonRows rows={6} className="p-4" />
+          <DirectorySkeleton rows={6} />
         ) : roster.failed && groups.total === 0 ? (
           <InlineBanner
             message="멤버 명부를 불러오지 못했습니다."
@@ -213,7 +256,7 @@ export function DirectoryRoute() {
         ) : groups.matched === 0 ? (
           <EmptyInvite
             headline="일치하는 멤버가 없습니다."
-            detail={`"${trimmed}"로 이름과 핸들을 찾았습니다. 다른 이름으로 검색하세요.`}
+            detail={`검색어 "${searched}"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요.`}
             actions={
               <Button variant="outline" size="sm" onClick={() => setQuery("")}>
                 검색 지우기
