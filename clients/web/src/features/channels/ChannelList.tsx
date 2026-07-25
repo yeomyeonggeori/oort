@@ -18,17 +18,17 @@ export function ChannelList({
   });
 
   return (
-    <nav className="flex flex-col gap-0.5 p-2" data-testid="channel-list">
-      <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
+    <nav className="flex flex-col gap-1 p-2" data-testid="channel-list">
+      <div className="px-2 pb-1 pt-2 text-timestamp font-semibold text-ink-muted">
         채널
       </div>
       {isLoading && (
-        <p className="px-2 py-1 text-sm text-[var(--color-muted-foreground)]">
+        <p className="px-2 py-1 text-body text-ink-muted">
           불러오는 중…
         </p>
       )}
       {error && (
-        <p className="px-2 py-1 text-sm text-[var(--color-destructive)]">
+        <p className="px-2 py-1 text-body text-danger">
           채널 로드 실패
         </p>
       )}
@@ -41,16 +41,17 @@ export function ChannelList({
             data-testid="channel-item"
             data-channel-id={channel.id}
             className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+              "flex items-center gap-2 rounded-sm px-2 py-1 text-left text-body transition-colors",
+              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
               active
-                ? "bg-[var(--color-accent)] text-[var(--color-accent-foreground)]"
-                : "text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
+                ? "bg-accent-soft text-ink"
+                : "text-ink hover:bg-surface-hover"
             )}
           >
             {channel.kind === "private" ? (
-              <Lock className="size-3.5 opacity-60" />
+              <Lock className="size-4 text-ink-muted" />
             ) : (
-              <Hash className="size-3.5 opacity-60" />
+              <Hash className="size-4 text-ink-muted" />
             )}
             <span className="truncate">{channel.name ?? "(dm)"}</span>
           </button>

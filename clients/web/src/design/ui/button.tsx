@@ -5,26 +5,23 @@ import { cn } from "@/design/lib/cn";
 
 // shadcn/ui new-york Button (vendored). Radix Slot lets it wrap links/etc.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm text-body font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default:
-          "bg-[var(--color-primary)] text-[var(--color-primary-foreground)] hover:opacity-90",
+        default: "bg-accent text-on-accent hover:opacity-90",
         secondary:
-          "bg-[var(--color-muted)] text-[var(--color-foreground)] hover:bg-[var(--color-accent)]",
-        ghost:
-          "hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-foreground)]",
-        destructive:
-          "bg-[var(--color-destructive)] text-white hover:opacity-90",
+          "border border-line bg-surface-raised text-ink hover:bg-surface-hover",
+        ghost: "text-ink hover:bg-surface-hover",
+        destructive: "bg-danger text-on-danger hover:opacity-90",
         outline:
-          "border border-[var(--color-border)] bg-transparent hover:bg-[var(--color-accent)]",
+          "border border-line-strong bg-transparent text-ink hover:bg-surface-hover",
       },
       size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-6",
-        icon: "size-9",
+        default: "h-control px-4 py-2",
+        sm: "h-control-sm px-3 text-meta",
+        lg: "h-control-lg px-6",
+        icon: "size-control",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

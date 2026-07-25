@@ -1,122 +1,174 @@
 @import "tailwindcss";
 
 /* =============================================================================
- * momo design tokens — SPIKE placeholder (ADR-0133 §1 "src/design/ 토큰 자리").
+ * momo 여명(Dawn) design tokens — MOMO-597 / ADR-0133 P1.
  *
- * These are PLACEHOLDER "여명(dawn)" values, not the production palette. The
- * real token set is ported from the SwiftUI MomoDS via R-2
- * (momo-design-taste-web). Names follow the shadcn/ui convention so vendored
- * primitives (button/input/card/scroll-area) resolve against them unchanged.
+ * Source of truth for every color, spacing step, radius and text role in
+ * clients/web. Component files carry ZERO raw color literals and ZERO arbitrary
+ * spacing: they may only reference the utilities generated here.
+ *
+ * Contract (mirrored in .claude/skills/momo-design-taste-web/references/tokens.md
+ * and verified mechanically by src/design/tokens.contrast.test.ts):
+ *   - one accent per surface (--accent, 호박/amber horizon)
+ *   - agent identity is --agent (predawn slate-blue) on avatar/badge only
+ *   - every foreground token meets WCAG AA (>= 4.5:1) on every surface token,
+ *     in BOTH schemes; --line-strong (control borders) meets >= 3:1
+ *   - no pure #000000 / #ffffff anywhere: the light "paper" white is #fffefb
+ *   - light/dark come from one declaration via CSS light-dark(); there is no
+ *     second copy of the palette to drift from
+ *
+ * Scheme selection follows the OS by default (color-scheme: light dark).
+ * :root[data-theme="light"|"dark"] pins it (used by the screenshot capture).
  * ========================================================================== */
 
-@theme {
-  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Pretendard",
-    system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", "Menlo", monospace;
-  --radius: 0.625rem;
-}
-
 :root {
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  color-scheme: light dark;
 
-  /* Light — dawn */
-  --background: oklch(0.99 0.004 95);
-  --foreground: oklch(0.21 0.02 265);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 265);
-  --muted: oklch(0.97 0.006 95);
-  --muted-foreground: oklch(0.5 0.02 265);
-  --border: oklch(0.91 0.006 95);
-  --input: oklch(0.91 0.006 95);
-  --ring: oklch(0.62 0.17 45);
-  --primary: oklch(0.62 0.17 45); /* dawn amber */
-  --primary-foreground: oklch(0.99 0.004 95);
-  --accent: oklch(0.95 0.02 60);
-  --accent-foreground: oklch(0.28 0.03 45);
-  --destructive: oklch(0.58 0.21 27);
-  --sidebar: oklch(0.975 0.005 95);
-  --sidebar-foreground: oklch(0.21 0.02 265);
+  /* --- surfaces (warm paper by day, near-night sky after dark) ----------- */
+  --surface: light-dark(#f7f6f3, #17161a);
+  --surface-raised: light-dark(#fffefb, #201f24);
+  --surface-sidebar: light-dark(#efece6, #1b1a1f);
+  --surface-hover: light-dark(#e7e3db, #26252c);
+
+  /* --- lines: --line separates, --line-strong outlines controls (3:1) ---- */
+  --line: light-dark(#dcd8d0, #34323b);
+  --line-strong: light-dark(#84817d, #6f6e73);
+
+  /* --- text -------------------------------------------------------------- */
+  --ink: light-dark(#24211c, #ececf1);
+  --ink-muted: light-dark(#6a655f, #9b98a3);
+
+  /* --- the single accent: 호박(amber horizon) ---------------------------- */
+  --accent: light-dark(#a54c08, #f0a850);
+  --accent-soft: light-dark(#f4e7d6, #33261a);
+  --on-accent: light-dark(#fffefb, #17161a);
+
+  /* --- agent identity: predawn slate-blue (never neon AI purple) --------- */
+  --agent: light-dark(#4a6785, #7fa0c4);
+  --agent-soft: light-dark(#e6ebf2, #1e2836);
+
+  /* --- status ------------------------------------------------------------ */
+  --danger: light-dark(#b3261e, #f2b8b5);
+  --on-danger: light-dark(#fffefb, #17161a);
+  --ok: light-dark(#187533, #57ab5a);
+  --warn: light-dark(#8a5c00, #d4a72c);
+
+  /* --- shell geometry ---------------------------------------------------- */
+  --w-sidebar: 240px;
 }
 
-.dark {
-  /* Dark — dusk */
-  --background: oklch(0.19 0.015 265);
-  --foreground: oklch(0.96 0.005 95);
-  --card: oklch(0.23 0.017 265);
-  --card-foreground: oklch(0.96 0.005 95);
-  --muted: oklch(0.27 0.02 265);
-  --muted-foreground: oklch(0.68 0.02 265);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.68 0.16 55);
-  --primary: oklch(0.72 0.16 60);
-  --primary-foreground: oklch(0.2 0.02 60);
-  --accent: oklch(0.3 0.03 60);
-  --accent-foreground: oklch(0.95 0.01 95);
-  --destructive: oklch(0.66 0.2 25);
-  --sidebar: oklch(0.17 0.015 265);
-  --sidebar-foreground: oklch(0.96 0.005 95);
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@theme {
+  /* Self-contained system stacks only: no webfont, no CDN (CSP + offline). */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas,
+    monospace;
+
+  /* --- spacing: FIXED scale. The dynamic multiplier is disabled, so an
+   * off-grid step such as p-5 or py-1.5 does not compile at all. Allowed
+   * steps are {4, 8, 12, 16, 24, 32}px plus 0 and the 1px hairline. ------- */
+  --spacing: initial;
+  --spacing-0: 0px;
+  --spacing-px: 1px;
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+
+  /* Control heights are a separate dimension from spacing. */
+  --spacing-control-sm: 28px;
+  --spacing-control: 32px;
+  --spacing-control-lg: 40px;
+
+  /* --- radius: three steps, nothing else --------------------------------- */
+  --radius-*: initial;
+  --radius-sm: 6px; /* buttons, chips, inputs */
+  --radius-md: 10px; /* cards, list groups */
+  --radius-lg: 14px; /* dialogs, sheets */
+
+  /* --- text roles, not size inflation ------------------------------------ */
+  --text-*: initial;
+  --text-timestamp: 0.6875rem; /* 11px, seq / clock / counters */
+  --text-timestamp--line-height: 1rem;
+  --text-meta: 0.75rem; /* 12px, secondary and meta rows */
+  --text-meta--line-height: 1.125rem;
+  --text-body: 0.875rem; /* 14px, message body and controls */
+  --text-body--line-height: 1.375rem;
+  --text-title: 1rem; /* 16px, surface titles */
+  --text-title--line-height: 1.5rem;
+  --text-display: 1.25rem; /* 20px, at most one per surface */
+  --text-display--line-height: 1.75rem;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
+  /* Clear Tailwind's stock palette: bg-indigo-500 and friends must not exist,
+   * so the only reachable colors are the Dawn tokens below. */
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-inherit: inherit;
+
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sidebar: var(--surface-sidebar);
+  --color-surface-hover: var(--surface-hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
   --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --radius-sm: var(--radius-sm);
-  --radius-md: var(--radius-md);
-  --radius-lg: var(--radius-lg);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-agent: var(--agent);
+  --color-agent-soft: var(--agent-soft);
+  --color-danger: var(--danger);
+  --color-on-danger: var(--on-danger);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    --background: oklch(0.19 0.015 265);
-    --foreground: oklch(0.96 0.005 95);
-    --card: oklch(0.23 0.017 265);
-    --card-foreground: oklch(0.96 0.005 95);
-    --muted: oklch(0.27 0.02 265);
-    --muted-foreground: oklch(0.68 0.02 265);
-    --border: oklch(1 0 0 / 12%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.68 0.16 55);
-    --primary: oklch(0.72 0.16 60);
-    --primary-foreground: oklch(0.2 0.02 60);
-    --accent: oklch(0.3 0.03 60);
-    --accent-foreground: oklch(0.95 0.01 95);
-    --destructive: oklch(0.66 0.2 25);
-    --sidebar: oklch(0.17 0.015 265);
-    --sidebar-foreground: oklch(0.96 0.005 95);
+/* Two-pane shell geometry as a named utility, so no component needs an
+ * arbitrary grid-cols-[240px_1fr] value. */
+@utility app-shell {
+  display: grid;
+  grid-template-columns: var(--w-sidebar) 1fr;
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--line);
   }
-}
 
-* {
-  border-color: var(--color-border);
-}
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-html,
-body,
-#root {
-  height: 100%;
-}
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
 
-body {
-  margin: 0;
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+  /* Numbers never jitter: counters, seq, cost. */
+  :where([data-numeric]) {
+    font-variant-numeric: tabular-nums;
+  }
 }

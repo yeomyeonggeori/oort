@@ -18,9 +18,9 @@ import { cn } from "@/design/lib/cn";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
 
 function statusColor(s: RealtimeStatus): string {
-  if (s === "connected") return "bg-emerald-500";
-  if (s === "connecting") return "bg-amber-500";
-  return "bg-rose-500";
+  if (s === "connected") return "bg-ok";
+  if (s === "connecting") return "bg-warn";
+  return "bg-danger";
 }
 
 export function ChatShell({
@@ -87,10 +87,10 @@ export function ChatShell({
   }, [messages.length, timeline.state, connStatus, timeline.resume, stressCount]);
 
   return (
-    <div className="grid h-full grid-cols-[240px_1fr]">
-      <aside className="flex flex-col border-r border-[var(--color-border)] bg-[var(--color-sidebar)]">
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
-          <span className="truncate text-sm font-semibold">
+    <div className="app-shell h-full">
+      <aside className="flex flex-col border-r border-line bg-surface-sidebar">
+        <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+          <span className="truncate text-body font-semibold">
             {session.member.displayName}
           </span>
           <RuntimeBadge />
@@ -114,15 +114,16 @@ export function ChatShell({
       </aside>
 
       <main className="flex min-w-0 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2">
+        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">
+            <span className="text-body font-semibold">
               {stressCount > 0
                 ? `stress (${stressCount})`
                 : `#${selected?.name ?? "general"}`}
             </span>
             <span
-              className="text-xs text-[var(--color-muted-foreground)]"
+              className="text-meta text-ink-muted"
+              data-numeric
               data-testid="message-count"
             >
               {messages.length} messages
@@ -131,7 +132,8 @@ export function ChatShell({
           <div className="flex items-center gap-3">
             {timeline.resume.resubscribeCount > 0 && (
               <span
-                className="text-[11px] text-[var(--color-muted-foreground)]"
+                className="text-timestamp text-ink-muted"
+                data-numeric
                 data-testid="resume-info"
               >
                 resubscribe #{timeline.resume.resubscribeCount} · recovered=
@@ -139,7 +141,7 @@ export function ChatShell({
                 {timeline.resume.lastBackfillCount}
               </span>
             )}
-            <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted-foreground)]">
+            <span className="flex items-center gap-2 text-meta text-ink-muted">
               <span
                 className={cn("size-2 rounded-full", statusColor(connStatus))}
                 data-testid="conn-status"
