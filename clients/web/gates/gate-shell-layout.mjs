@@ -454,9 +454,14 @@ async function measureSize(browser, size) {
   // must still reach its last control, and doing so must not move the shell.
   // Two sections are asked, because they overflow for different reasons: 멤버와
   // 초대 by row count, 코드 실행 호스트 (MOMO-617) by carrying three blocks.
+  //
+  // The code section's last control is the workspace-scope SAVE button, not the
+  // target select above it: since R2 both policy scopes commit explicitly, and
+  // a fold check that stops one control short is a fold check that passes while
+  // the button nobody can reach is the one that writes the ledger.
   for (const [hash, label, shot, selector] of [
     ["/settings?section=members", "멤버와 초대", "settings-bottom", "invite-create"],
-    ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-target-workspace"],
+    ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-save-workspace"],
   ]) {
     await go(page, hash);
     const reach = await page.evaluate(`(async () => {

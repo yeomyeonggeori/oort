@@ -278,7 +278,41 @@ function makeMessages(count) {
 // 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
 // at in both schemes: three status chips (온라인 / 오프라인 / 해지됨) side by
 // side is where a status color that only works in one scheme would show.
+//
+// Shaped like the momowebqa ledger the R2 review measured, because that ledger
+// is what exposed the defects. A host that pairs again writes a NEW row, so one
+// display name repeats across rows and only the id tail separates them; revoked
+// rows are never deleted; and the server returns creation order, so the usable
+// hosts do not arrive first. The array is in that server order on purpose,
+// which makes the shot prove the panel sorts rather than getting lucky.
+const REVOKED_TARGET = "019f99a0-8ac1-77b0-948b-210e791c6238";
 const WORK_HOSTS = [
+  {
+    id: "019f999c-6845-79cd-841d-22f20d098c61",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 iMac, 집 작업실",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true },
+    revokedAtMs: Date.now() - 3 * 86_400_000,
+    createdAtMs: Date.now() - 30 * 86_400_000,
+    online: false,
+  },
+  {
+    id: REVOKED_TARGET,
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 iMac, 집 작업실",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true },
+    revokedAtMs: Date.now() - 2 * 86_400_000,
+    createdAtMs: Date.now() - 20 * 86_400_000,
+    online: false,
+  },
   {
     id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
     workspaceId: WORKSPACE_ID,
@@ -305,19 +339,6 @@ const WORK_HOSTS = [
     createdAtMs: Date.now() - 7 * 86_400_000,
     online: false,
   },
-  {
-    id: "019f994c-4ef4-70bb-9c02-2c3a5d8e1f77",
-    workspaceId: WORKSPACE_ID,
-    scope: "member",
-    ownerMemberId: HERMES,
-    type: "app",
-    displayName: "지수 MacBook Air",
-    publicKey: "capture-only-not-a-credential",
-    capabilities: {},
-    revokedAtMs: Date.now() - 2 * 86_400_000,
-    createdAtMs: Date.now() - 30 * 86_400_000,
-    online: false,
-  },
 ];
 
 // WorkTierPolicyRoutes.loadPolicy answers /me out of the workspace row when the
@@ -333,10 +354,18 @@ const WORKSPACE_TIER_POLICY = {
   updatedAtMs: Date.now() - 3_600_000,
 };
 
+// The member has their OWN row here, pointing at a host that was revoked after
+// the policy was written. That is the live momowebqa state and it is the one a
+// review has to see: the server answers 409 for this target, so the panel is
+// describing a policy that cannot run, and the shot is where you check that it
+// says so in --danger instead of a muted footnote (SKILL §5 / §8).
 const MEMBER_TIER_POLICY = {
-  ...WORKSPACE_TIER_POLICY,
+  workspaceId: WORKSPACE_ID,
   memberId: ME,
-  inherited: true,
+  mode: "auto",
+  autoTarget: REVOKED_TARGET,
+  inherited: false,
+  updatedAtMs: Date.now() - 40 * 60_000,
 };
 
 /** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */

@@ -21,8 +21,11 @@ import {
   providerTestMessage,
   relativeSince,
   slugError,
+  sortWorkHosts,
   WORK_ENGINES,
   WORK_TIER_MODES,
+  workHostCounts,
+  workHostIdTail,
   workHostRegistryMessage,
   workHostScopeLabel,
   workHostStatus,
@@ -355,6 +358,65 @@ describe("work host row (WorkHostRoutes projection)", () => {
     expect(relativeSince(now - 12 * 60_000, now)).toBe("12분 전");
     expect(relativeSince(now - 3 * 3_600_000, now)).toBe("3시간 전");
     expect(relativeSince(now - 3 * 86_400_000, now)).toBe("2026-07-22");
+  });
+
+  // The live momowebqa registry: six rows, four revoked, and three of them
+  // sharing one displayName because the host re-registered three times.
+  const LIVE = [
+    { id: "019f9984-b2a9-7618-8ed1-eb0d622ccaa2", online: false, name: "성재 MacBook Pro 16인치, 사무실 창가 자리" },
+    { id: "019f9984-b2cb-7c28-8a42-387c95d5b9b6", online: false, name: "dawn-build-01" },
+    { id: "019f9984-b2ee-78b0-89c0-31ac6769e8f3", online: false, revokedAtMs: 1784987053140, name: "지수 MacBook Air" },
+    { id: "019f999c-6845-79cd-841d-22f20d098c61", online: false, revokedAtMs: 1784988592207, name: "성재 iMac, 집 작업실" },
+    { id: "019f999d-8729-72a6-995d-5dffec0bc8a0", online: false, revokedAtMs: 1784988665650, name: "성재 iMac, 집 작업실" },
+    { id: "019f99a0-8ac1-77b0-948b-210e791c6238", online: false, revokedAtMs: 1784988863000, name: "성재 iMac, 집 작업실" },
+  ];
+
+  it("distinguishes rows by id tail, because a display name does not", () => {
+    // Three live rows, one name. Only the tail separates them, so it is what
+    // the accessible name of a per-row control has to carry.
+    const sameName = LIVE.filter((h) => h.name === "성재 iMac, 집 작업실");
+    expect(sameName).toHaveLength(3);
+    const tails = sameName.map((h) => workHostIdTail(h.id));
+    expect(tails).toEqual(["098c61", "0bc8a0", "1c6238"]);
+    expect(new Set(tails).size).toBe(3);
+    // Lower-cased always: work host ids arrive lower-cased and member ids can
+    // arrive upper-cased, and nothing on this surface compares raw strings.
+    expect(workHostIdTail("019F99A0-8AC1-77B0-948B-210E791C6238")).toBe("1c6238");
+    expect(workHostIdTail("abc")).toBe("abc");
+  });
+
+  it("orders the registry online, offline, never seen, revoked", () => {
+    const hosts = [
+      { id: "revoked", online: false, revokedAtMs: 1 },
+      { id: "never", online: false },
+      { id: "online", online: true },
+      { id: "offline", online: false, lastSeenAtMs: 1 },
+      { id: "revoked-but-online", online: true, revokedAtMs: 1 },
+    ];
+    expect(sortWorkHosts(hosts).map((h) => h.id)).toEqual([
+      "online",
+      "offline",
+      "never",
+      "revoked",
+      "revoked-but-online",
+    ]);
+    // The live ledger, as the server happens to return it, reversed: the two
+    // usable hosts have to climb back to the top, and the four revoked rows
+    // keep the (reversed) order they arrived in.
+    const reversed = [...LIVE].reverse();
+    expect(sortWorkHosts(reversed).map((h) => h.id)).toEqual([
+      LIVE[1].id,
+      LIVE[0].id,
+      LIVE[5].id,
+      LIVE[4].id,
+      LIVE[3].id,
+      LIVE[2].id,
+    ]);
+  });
+
+  it("counts hosts you can use apart from hosts that are gone", () => {
+    expect(workHostCounts(LIVE)).toEqual({ usable: 2, revoked: 4 });
+    expect(workHostCounts([])).toEqual({ usable: 0, revoked: 0 });
   });
 });
 

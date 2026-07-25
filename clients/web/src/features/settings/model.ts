@@ -120,6 +120,62 @@ export function workHostStatus(host: {
   return { tone: "muted", label: "연결된 적 없음" };
 }
 
+/**
+ * Last 6 characters of a work host id.
+ *
+ * The registry re-registers a host as a NEW row every time it pairs, so three
+ * live rows can carry the identical `displayName` (the momowebqa ledger has
+ * exactly that: "성재 iMac, 집 작업실" three times). A name is therefore not a
+ * discriminator, in the row and least of all in an accessible name, where three
+ * buttons called "성재 iMac, 집 작업실 호스트 ID 복사" are three indistinguishable
+ * stops in the tab order. UUIDv7 ids share their prefix (time-ordered) and
+ * differ in the tail, so the tail is what identifies a row.
+ */
+export function workHostIdTail(id: string, length = 6): string {
+  return id.length <= length ? id.toLowerCase() : id.slice(-length).toLowerCase();
+}
+
+export interface WorkHostLiveness {
+  online: boolean;
+  revokedAtMs?: number;
+  lastSeenAtMs?: number;
+}
+
+/**
+ * Registry rank: online, offline, never connected, revoked.
+ *
+ * The server returns creation order, so whether a usable host is on the first
+ * screen is an accident of when it happened to be registered. A registry whose
+ * top rows are four revoked hosts answers "어디에 붙지" with the four answers
+ * that cannot be picked.
+ */
+function livenessRank(host: WorkHostLiveness): number {
+  if (host.revokedAtMs) return 3;
+  if (host.online) return 0;
+  return host.lastSeenAtMs ? 1 : 2;
+}
+
+/** Stable within a rank: same-rank rows keep the order the server sent. */
+export function sortWorkHosts<T extends WorkHostLiveness>(hosts: T[]): T[] {
+  return hosts
+    .map((host, index) => ({ host, index }))
+    .sort((a, b) => livenessRank(a.host) - livenessRank(b.host) || a.index - b.index)
+    .map((entry) => entry.host);
+}
+
+/**
+ * What "등록 6대" hides. Four of those six are revoked in the live workspace, so
+ * one number reads as "이 워크스페이스에 호스트가 여섯 대 있다" when the true
+ * answer is two.
+ */
+export function workHostCounts(hosts: WorkHostLiveness[]): {
+  usable: number;
+  revoked: number;
+} {
+  const revoked = hosts.filter((host) => host.revokedAtMs).length;
+  return { usable: hosts.length - revoked, revoked };
+}
+
 /** "방금", "12분 전", or a calendar day once it stops being a recent event. */
 export function relativeSince(epochMs: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - epochMs) / 1000));
@@ -374,7 +430,11 @@ export function workTierPolicySaveMessage(error: unknown): string {
     case 403:
       return "워크스페이스 기본값은 오너나 관리자만 바꿀 수 있습니다. 내 정책은 그대로 바꿀 수 있습니다.";
     case 409:
-      return "고른 호스트는 지금 재개 대상이 될 수 없습니다. 해지됐거나 이 정책이 쓸 수 없는 호스트입니다. 등록된 호스트를 다시 불러온 뒤 고르세요.";
+      // The next step names a control that exists: 등록된 호스트 블록의
+      // '등록 목록 다시 불러오기'. Before MOMO-617 R2 that sentence asked for an
+      // action the panel had no button for, so the only way to do it was a
+      // browser reload.
+      return "고른 호스트는 지금 재개 대상이 될 수 없습니다. 해지됐거나 이 정책이 쓸 수 없는 호스트입니다. 등록된 호스트에서 등록 목록 다시 불러오기를 누른 뒤 고르세요.";
     default:
       return "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
   }

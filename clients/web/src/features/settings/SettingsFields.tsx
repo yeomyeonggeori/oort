@@ -107,7 +107,15 @@ const CHIP_TONE: Record<ChipTone, string> = {
   muted: "border-line text-ink-muted",
 };
 
-/** Text-first status chip. Never pulses, never carries meaning in color alone. */
+/**
+ * Text-first status chip. Never pulses, never carries meaning in color alone.
+ *
+ * The 11px `text-timestamp` used to be deleted here by the class merge, which
+ * files an unknown `text-*` as a color and let `text-ok` replace it: the chip
+ * rendered at whatever it inherited (14px measured). `cn` now knows momo's text
+ * roles, so a role replaces a role and a color replaces a color. See
+ * `src/design/lib/cn.ts`.
+ */
 export function StatusChip({
   tone,
   children,
@@ -297,6 +305,7 @@ export function SelectField({
   label,
   ariaLabel,
   hint,
+  hintTone = "muted",
   value,
   choices,
   onChange,
@@ -312,6 +321,13 @@ export function SelectField({
    */
   ariaLabel?: string;
   hint?: ReactNode;
+  /**
+   * `danger` when the value in the control is one the server will refuse: that
+   * is an error state living where the problem is (SKILL §5), not a footnote,
+   * so it takes --danger and role="alert" instead of muted meta text. The same
+   * panel already draws save failures that way, and one panel gets one rule.
+   */
+  hintTone?: "muted" | "danger";
   value: string;
   choices: SelectChoice[];
   onChange: (id: string) => void;
@@ -343,11 +359,63 @@ export function SelectField({
         ))}
       </select>
       {hint && (
-        <p id={`${id}-hint`} role="status" className="text-meta text-ink-muted">
+        <p
+          id={`${id}-hint`}
+          role={hintTone === "danger" ? "alert" : "status"}
+          className={cn(
+            "text-meta",
+            hintTone === "danger" ? "text-danger" : "text-ink-muted"
+          )}
+          data-hint-tone={hintTone}
+        >
           {hint}
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The commit control of an explicitly saved settings block.
+ *
+ * `aria-disabled` rather than `disabled`, because this button is the one that
+ * turns itself off: the moment its own save lands nothing is dirty any more, and
+ * a FOCUSED element that becomes `disabled` drops focus to <body>, throwing a
+ * keyboard user back to the top of the panel on every successful save. It stays
+ * in the tab order, announces itself unavailable, and the click is a no-op.
+ */
+export function SaveButton({
+  label,
+  busyLabel = "저장 중",
+  canSave,
+  busy,
+  onSave,
+  testId,
+}: {
+  /** Verb-first and scope-bearing: two blocks on one panel need two names. */
+  label: string;
+  busyLabel?: string;
+  canSave: boolean;
+  busy?: boolean;
+  onSave: () => void;
+  testId?: string;
+}) {
+  const blocked = !canSave || Boolean(busy);
+  return (
+    <Button
+      type="button"
+      size="sm"
+      aria-disabled={blocked || undefined}
+      aria-busy={busy || undefined}
+      className={cn(blocked && "opacity-50")}
+      onClick={() => {
+        if (blocked) return;
+        onSave();
+      }}
+      data-testid={testId}
+    >
+      {busy ? busyLabel : label}
+    </Button>
   );
 }
 
@@ -364,10 +432,15 @@ export function CopyButton({
   value: string;
   label?: string;
   /**
-   * What the copied value belongs to, e.g. a host name. One list renders one
-   * copy button per row, and three buttons all named "호스트 ID 복사" are three
-   * identical rows in a screen reader's button list. The visible label stays
-   * short; the accessible name carries the row.
+   * What the copied value belongs to. One list renders one copy button per row,
+   * and three buttons all named "호스트 ID 복사" are three identical stops in the
+   * tab order. The visible label stays short; the accessible name carries the
+   * row.
+   *
+   * It has to be something that is actually unique per row: a display name is
+   * not, because the work host registry writes a NEW row on every pairing and
+   * the live workspace holds three rows called "성재 iMac, 집 작업실". Callers
+   * pass the discriminator with the name (see `workHostIdTail`).
    */
   subject?: string;
   testId?: string;

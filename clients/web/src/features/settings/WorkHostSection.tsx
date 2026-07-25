@@ -6,6 +6,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
+import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   fetchWorkHostEngine,
@@ -15,6 +16,7 @@ import {
   putWorkTierPolicy,
   type WorkHost,
   type WorkTierPolicy,
+  type WorkTierPolicyInput,
   type WorkTierScope,
 } from "./api";
 import {
@@ -24,8 +26,11 @@ import {
   errorMessage,
   isOperatorDenied,
   relativeSince,
+  sortWorkHosts,
   WORK_ENGINES,
   WORK_TIER_MODES,
+  workHostCounts,
+  workHostIdTail,
   workHostRegistryMessage,
   workHostScopeLabel,
   workHostStatus,
@@ -36,6 +41,7 @@ import {
   ChoiceRadios,
   CopyButton,
   OperatorNotice,
+  SaveButton,
   SectionShell,
   SelectField,
   StatusChip,
@@ -59,7 +65,20 @@ import {
 // a behaviour ("연결 끊김 시 묻기"), never a tier. The mode copy is inherited
 // from MomoWorkConsoleCopy.swift so both clients say the same thing about the
 // same ledger row.
+//
+// Both radio groups on this surface commit the SAME way: pick, then press the
+// block's save button. Nothing here writes the ledger on a focus move.
 // =============================================================================
+
+/**
+ * Registry re-read interval. Half the server's 90 second heartbeat window
+ * (`WorkHostRoutes.onlineWindowSeconds`), so a host that comes up is named
+ * online within one window rather than whenever someone reloads the browser.
+ */
+const REGISTRY_POLL_MS = 30_000;
+
+/** Shared by every state of 등록된 호스트 so the verb never changes on the reader. */
+const REGISTRY_REFRESH_LABEL = "등록 목록 다시 불러오기";
 
 export function WorkHostSection({
   workspaceId,
@@ -71,10 +90,20 @@ export function WorkHostSection({
   offline: boolean;
 }) {
   // One read of the registry serves both the list and the auto-target choices.
+  //
+  // `online` is the server's 90 second heartbeat window, so a value painted once
+  // and never re-read is a claim about the past wearing the present tense: with
+  // the panel open you could start workd and the row would still say 연결된 적
+  // 없음 until the browser was reloaded. A status indicator has to be bound to
+  // the real state (SKILL §8), so this query polls at half the heartbeat window
+  // and goes stale immediately, which also makes leaving and re-entering the
+  // section a real re-read rather than a cache hit.
   const hosts = useQuery({
     queryKey: ["settings", "work-hosts", workspaceId],
     queryFn: () => listWorkHosts(workspaceId),
     retry: false,
+    staleTime: 0,
+    refetchInterval: REGISTRY_POLL_MS,
   });
 
   return (
@@ -86,7 +115,7 @@ export function WorkHostSection({
       ]}
     >
       <EngineBlock offline={offline} />
-      <RegistryBlock hosts={hosts} />
+      <RegistryBlock hosts={hosts} offline={offline} />
       {/* The QUERY goes down, not `hosts.data ?? []`: an empty array cannot say
           whether the registry is empty, still loading, or refused, and the
           policy block has to tell those apart before it claims a host is not
@@ -146,6 +175,12 @@ function EngineBlock({ offline }: { offline: boolean }) {
             who="코드 실행 엔진은 워크스페이스 오너나 관리자만 바꿀 수 있습니다."
             contact="변경이 필요하면 워크스페이스 관리자에게 문의하세요."
           />
+        ) : offline ? (
+          /* No retry while the uplink is down: it can only fail. */
+          <InlineBanner
+            message="연결이 끊겨 실행 엔진을 불러올 수 없습니다. 다시 연결되면 불러옵니다."
+            testId="work-host-error"
+          />
         ) : (
           <InlineBanner
             message={errorMessage(query.error)}
@@ -187,13 +222,27 @@ function EngineBlock({ offline }: { offline: boolean }) {
         )}
       </div>
 
+      {/* Exactly the rule the two policy groups below use: offline disables the
+          group (nothing here can be written), a save in flight never does (a
+          disabled focused radio drops focus to <body>), and the state is said
+          in words underneath. */}
       <ChoiceRadios
         name="work-host-engine"
         legend="엔진"
         choices={WORK_ENGINES}
         value={selected}
         onChange={setEngine}
-        disabled={save.isPending}
+        disabled={offline}
+        busy={save.isPending}
+        hint={
+          save.isPending
+            ? "엔진을 저장하는 중입니다."
+            : dirty
+              ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
+              : offline
+                ? "연결이 끊겨 지금은 바꿀 수 없습니다."
+                : undefined
+        }
       />
 
       {save.isError && (
@@ -203,19 +252,24 @@ function EngineBlock({ offline }: { offline: boolean }) {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          disabled={offline || !dirty || save.isPending}
-          onClick={() => save.mutate(selected)}
-          data-testid="work-host-save"
-        >
-          {save.isPending ? "저장 중" : "엔진 저장"}
-        </Button>
+        {/* Same commit control as the policy blocks below, so the panel has one
+            rule: pick, then press save. */}
+        <SaveButton
+          label="엔진 저장"
+          canSave={dirty && !offline}
+          busy={save.isPending}
+          onSave={() => save.mutate(selected)}
+          testId="work-host-save"
+        />
         {dirty && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setEngine(current.engine)}
+            aria-label="실행 엔진 되돌리기"
+            onClick={() => {
+              if (save.isPending) return;
+              setEngine(current.engine);
+            }}
           >
             되돌리기
           </Button>
@@ -234,7 +288,55 @@ function EngineBlock({ offline }: { offline: boolean }) {
 
 const REGISTRY_LINES = [
   "데스크톱 앱과 workd 데몬이 스스로 등록합니다. 이 화면에서 등록하지는 않습니다.",
+  "온라인 여부는 서버가 정하고, 이 목록은 30초마다 다시 읽습니다. 행은 ID 끝 6자리로 구분하고, 전체 ID는 복사 버튼으로 가져갑니다.",
 ];
+
+/**
+ * The one control the 409 copy tells people to use.
+ *
+ * The registry poll keeps the list honest on its own, but "등록된 호스트를 다시
+ * 불러온 뒤 고르세요" has to be an action someone can take at the moment they
+ * read it, not a wait. Present in every state of the block including success and
+ * empty: before MOMO-617 R2 only the error state had it, so a person who had
+ * just registered a host had no way to go looking for it.
+ */
+function RegistryRefreshButton({
+  hosts,
+  offline,
+}: {
+  hosts: UseQueryResult<WorkHost[], unknown>;
+  offline: boolean;
+}) {
+  // Busy for a reload THIS BUTTON started, not for `hosts.isFetching`: the poll
+  // above refetches every 30 seconds, and a control whose name changes twice a
+  // minute on its own is a moving target in the tab order and a flicker nobody
+  // asked for. The label is the accessible name, so it moves only when the
+  // person moved it.
+  const [reloading, setReloading] = useState(false);
+
+  async function reload() {
+    if (reloading) return;
+    setReloading(true);
+    try {
+      await hosts.refetch();
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={offline}
+      aria-busy={reloading || undefined}
+      onClick={() => void reload()}
+      data-testid="work-hosts-refresh"
+    >
+      {reloading ? "다시 불러오는 중" : REGISTRY_REFRESH_LABEL}
+    </Button>
+  );
+}
 
 /**
  * The registry as a list you can read, not a key dump: name, kind, liveness and
@@ -247,8 +349,10 @@ const REGISTRY_LINES = [
  */
 function RegistryBlock({
   hosts,
+  offline,
 }: {
   hosts: UseQueryResult<WorkHost[], unknown>;
+  offline: boolean;
 }) {
   if (hosts.isPending) {
     return (
@@ -271,10 +375,18 @@ function RegistryBlock({
             who="등록된 호스트 목록은 이 워크스페이스의 멤버만 볼 수 있습니다."
             contact="초대가 아직 처리되지 않았는지 워크스페이스 관리자에게 확인하세요."
           />
+        ) : offline ? (
+          /* Offline is the fourth state here too. A retry button while the
+             socket is down is a button that cannot succeed, which is the same
+             defect as an operator form whose save always 403s. */
+          <InlineBanner
+            message="연결이 끊겨 등록된 호스트 목록을 불러올 수 없습니다. 다시 연결되면 목록을 불러옵니다."
+            testId="work-hosts-error"
+          />
         ) : (
           <InlineBanner
             message={workHostRegistryMessage()}
-            actionLabel="등록 목록 다시 불러오기"
+            actionLabel={REGISTRY_REFRESH_LABEL}
             onAction={() => void hosts.refetch()}
             testId="work-hosts-error"
           />
@@ -286,29 +398,49 @@ function RegistryBlock({
   if (hosts.data.length === 0) {
     return (
       <Subsection title="등록된 호스트" lines={REGISTRY_LINES}>
+        {/* One line of copy AND one action (SKILL §5). The action cannot be
+            "등록하기" because nothing in this app registers a host, so it is the
+            one thing a person who just started a host actually wants: look
+            again. The copy names the app and the moment that creates the row. */}
         <EmptyInvite
           headline="등록된 호스트가 아직 없습니다."
-          detail="momo 데스크톱 앱으로 이 워크스페이스에 로그인하면 그 자리가 호스트로 등록됩니다."
+          detail="momo 데스크톱 앱을 이 워크스페이스 계정으로 열면 그 자리가 호스트로 등록되고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록합니다."
+          actions={<RegistryRefreshButton hosts={hosts} offline={offline} />}
           testId="work-hosts-empty"
         />
       </Subsection>
     );
   }
 
+  // 사용 가능 / 해지 split: the live workspace holds 6 rows of which 4 are
+  // revoked, and "등록 6대" reads as six hosts you can send work to.
+  const counts = workHostCounts(hosts.data);
+  const ordered = sortWorkHosts(hosts.data);
+
   return (
     <Subsection title="등록된 호스트" lines={REGISTRY_LINES}>
-      <p className="text-meta text-ink-muted">
-        등록{" "}
-        <span className="font-mono text-ink" data-numeric>
-          {hosts.data.length}
-        </span>
-        대
-      </p>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <p className="text-meta text-ink-muted" data-testid="work-host-count">
+          사용 가능{" "}
+          <span className="font-mono text-ink" data-numeric>
+            {counts.usable}
+          </span>
+          {counts.revoked > 0 && (
+            <>
+              , 해지{" "}
+              <span className="font-mono text-ink" data-numeric>
+                {counts.revoked}
+              </span>
+            </>
+          )}
+        </p>
+        <RegistryRefreshButton hosts={hosts} offline={offline} />
+      </div>
       <ul
         className="flex flex-col overflow-hidden rounded-md border border-line"
         data-testid="work-host-list"
       >
-        {hosts.data.map((host) => (
+        {ordered.map((host) => (
           <HostRow key={host.id} host={host} />
         ))}
       </ul>
@@ -318,12 +450,14 @@ function RegistryBlock({
 
 function HostRow({ host }: { host: WorkHost }) {
   const status = workHostStatus(host);
+  const revoked = Boolean(host.revokedAtMs);
   const facts = [workHostTypeLabel(host.type), workHostScopeLabel(host.scope)];
   if (host.revokedAtMs) {
     facts.push(`해지 ${relativeSince(host.revokedAtMs)}`);
   } else if (host.lastSeenAtMs) {
     facts.push(`마지막 연결 ${relativeSince(host.lastSeenAtMs)}`);
   }
+  const tail = workHostIdTail(host.id);
 
   return (
     <li
@@ -333,25 +467,35 @@ function HostRow({ host }: { host: WorkHost }) {
     >
       <div className="flex min-w-0 flex-col gap-px">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 break-words text-body text-ink">
+          {/* A revoked row is history, not a choice. It keeps its full contrast
+              chip and its facts, and gives up the ink weight of a name you can
+              still send work to. */}
+          <span
+            className={cn(
+              "min-w-0 break-words text-body",
+              revoked ? "text-ink-muted" : "text-ink"
+            )}
+          >
             {host.displayName}
           </span>
           <StatusChip tone={status.tone}>{status.label}</StatusChip>
         </div>
-        <span className="text-meta text-ink-muted">{facts.join(", ")}</span>
-        {/* The id is the point of the row: it is what MOMO_WORK_HOST_ID takes
-            and what an auto-target 409 names, so it is readable, not hidden. */}
-        <span
-          className="min-w-0 break-all font-mono text-meta text-ink-muted"
-          data-numeric
-        >
-          {host.id}
-        </span>
+        {/* The id tail rides the facts line instead of owning a third line: a
+            36 character UUID per row made the six-row list 486px tall and
+            pushed every policy control under the fold in a 900px window. The
+            tail is what distinguishes rows (UUIDv7 shares its prefix); the full
+            id is what the copy button puts on the clipboard. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-meta text-ink-muted">
+          <span className="min-w-0 break-words">{facts.join(", ")}</span>
+          <span className="font-mono" data-numeric>
+            ID {tail}
+          </span>
+        </div>
       </div>
       <CopyButton
         value={host.id}
         label="호스트 ID 복사"
-        subject={host.displayName}
+        subject={`${host.displayName} 끝자리 ${tail}`}
         testId="work-host-copy-id"
       />
     </li>
@@ -404,14 +548,29 @@ function TierPolicyBlock({
   if (mine.isError) {
     return (
       <Subsection title="호스트 상실 시 재개" lines={POLICY_LINES}>
-        {/* mac 정본과 같은 문장: 실패했다는 사실보다 세션이 무사하다는 사실이
-            먼저 필요하다. */}
-        <InlineBanner
-          message="정책을 불러오지 못했습니다. 기존 세션은 그대로 유지됩니다."
-          actionLabel="정책 다시 불러오기"
-          onAction={() => void mine.refetch()}
-          testId="work-tier-policy-error"
-        />
+        {/* Same permission split the two blocks above use. Someone dropped from
+            the workspace mid-session gets a 403 on their own policy too, and a
+            retry button is then a button that can only fail. */}
+        {isOperatorDenied(mine.error) ? (
+          <OperatorNotice
+            who="내 정책은 이 워크스페이스의 멤버만 보고 바꿀 수 있습니다."
+            contact="초대가 아직 처리되지 않았는지 워크스페이스 관리자에게 확인하세요."
+          />
+        ) : offline ? (
+          <InlineBanner
+            message="연결이 끊겨 정책을 불러올 수 없습니다. 기존 세션은 그대로 유지됩니다."
+            testId="work-tier-policy-error"
+          />
+        ) : (
+          /* mac 정본과 같은 문장: 실패했다는 사실보다 세션이 무사하다는 사실이
+             먼저 필요하다. */
+          <InlineBanner
+            message="정책을 불러오지 못했습니다. 기존 세션은 그대로 유지됩니다."
+            actionLabel="정책 다시 불러오기"
+            onAction={() => void mine.refetch()}
+            testId="work-tier-policy-error"
+          />
+        )}
       </Subsection>
     );
   }
@@ -435,7 +594,16 @@ function TierPolicyBlock({
           offline={offline}
         />
 
-        {workspace.isPending && <SkeletonRows rows={2} />}
+        {/* The skeleton keeps the group's NAME, not just its height: an unnamed
+            pair of bars does not say what is arriving, and the heading appearing
+            with the data reads as a new group popping in. 내 정책 above draws its
+            whole Subsection while loading for the same reason. */}
+        {workspace.isPending && (
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-meta text-ink-muted">워크스페이스 기본</p>
+            <SkeletonRows rows={2} />
+          </div>
+        )}
 
         {workspace.data && (
           <TierPolicyScope
@@ -518,12 +686,17 @@ function TierPolicyScope({
   offline: boolean;
 }) {
   const client = useQueryClient();
-  // 자동 재개 is not a legal row until it has a target (the server answers 400
-  // to auto without one), so picking that mode only opens the target control
-  // and the save happens when a target is chosen. It is the one unsaved value
-  // on this surface, and because turning it on costs money the group says out
-  // loud that nothing has been written yet.
-  const [draftAuto, setDraftAuto] = useState(false);
+
+  // EXPLICIT COMMIT, same as the 실행 엔진 block one heading above.
+  //
+  // These are native radios, so arrow-key roving IS selection: moving focus
+  // through the group fires onChange on every stop. When onChange wrote the
+  // ledger, a keyboard user walking t1_only -> ask -> auto sent a PUT for the
+  // value they were only passing through, moved updatedAtMs on the D11 policy
+  // row, and had nothing on screen to undo it with. Two visually identical
+  // radio groups in one panel must not have opposite commit models either, and
+  // the engine block already had a save button, so this one gets one too.
+  const [draft, setDraft] = useState<WorkTierPolicyInput | null>(null);
 
   // Nothing is disabled while a save is in flight (a keyboard user would lose
   // focus on every change), so two PUTs can overlap. Only the newest one is
@@ -532,63 +705,87 @@ function TierPolicyScope({
   const latestSave = useRef(0);
 
   const save = useMutation({
-    mutationFn: async (input: { mode: string; autoTarget?: string }) => {
+    mutationFn: async (input: WorkTierPolicyInput) => {
       const ticket = ++latestSave.current;
       const next = await putWorkTierPolicy(workspaceId, scope, input);
       return { ticket, next };
     },
     onSuccess: ({ ticket, next }) => {
       if (ticket !== latestSave.current) return;
-      setDraftAuto(false);
+      setDraft(null);
       client.setQueryData(
         ["settings", "work-tier-policy", workspaceId, scope],
         next
       );
     },
+    // A reply the ticket check throws away still LANDED on the server, so the
+    // cache would otherwise keep showing a value the ledger no longer holds.
+    // Whatever the outcome, re-read the row the server actually has.
+    onSettled: () => {
+      void client.invalidateQueries({
+        queryKey: ["settings", "work-tier-policy", workspaceId, scope],
+      });
+    },
   });
 
-  // What the controls show. While a PUT is in flight they show the value being
-  // written, not the value the server still holds: these are radios, so the
-  // stored value would otherwise snap the selection back the instant the person
-  // clicks and jump forward again when the reply lands. The hint says a save is
-  // running, and a failure falls straight back to `policy` (the server's truth)
-  // with the error underneath.
-  const shown =
-    save.isPending && save.variables
-      ? save.variables
-      : draftAuto
-        ? { mode: "auto", autoTarget: undefined }
-        : { mode: policy.mode, autoTarget: policy.autoTarget };
+  // What the controls show: the draft while there is one, the server row
+  // otherwise. A save in flight keeps showing the draft (these are radios; the
+  // stored value would snap the selection back and forward again), and a
+  // failure leaves it in place so the person can retry or revert rather than
+  // silently losing what they picked.
+  const stored: WorkTierPolicyInput = {
+    mode: policy.mode,
+    autoTarget: policy.mode === "auto" ? policy.autoTarget : undefined,
+  };
+  const shown = draft ?? stored;
   const mode = shown.mode;
   const target = shown.autoTarget ?? NO_TARGET;
+  const storedTarget = stored.autoTarget ?? NO_TARGET;
+
+  const dirty =
+    mode !== stored.mode ||
+    target.toLowerCase() !== storedTarget.toLowerCase();
+  // The server answers 400 to auto without a target, so the button says so
+  // instead of offering a save that cannot land.
+  const needsTarget = mode === "auto" && target === NO_TARGET;
 
   function pickMode(next: string) {
     if (next === mode) return;
-    if (next === "auto") {
-      setDraftAuto(true);
-      return;
-    }
-    setDraftAuto(false);
-    save.mutate({ mode: next });
+    setDraft(
+      next === "auto"
+        ? { mode: "auto", autoTarget: stored.autoTarget }
+        : { mode: next }
+    );
   }
 
   function pickTarget(next: string) {
-    if (next === NO_TARGET || next === target) return;
-    save.mutate({ mode: "auto", autoTarget: next });
+    if (next === NO_TARGET) return;
+    setDraft({ mode: "auto", autoTarget: next });
   }
 
-  // Save state in words, most transient first. 자동 재개 in draft is the one
-  // that matters: the radio is already on 자동 재개 and the server has heard
-  // nothing, so leaving this panel drops it.
+  function commit() {
+    // Guarded rather than disabled: a disabled button drops focus to <body>
+    // mid-save, which is exactly the keyboard defect the radios avoid.
+    if (save.isPending || !dirty || needsTarget || offline) return;
+    save.mutate(mode === "auto" ? { mode, autoTarget: target } : { mode });
+  }
+
+  // Save state in words, most transient first.
   const stateHint = save.isPending
     ? "정책을 저장하는 중입니다."
-    : draftAuto
-      ? "아직 저장되지 않았습니다. 재개 대상을 고르면 자동 재개가 저장됩니다."
-      : offline
-        ? "연결이 끊겨 지금은 바꿀 수 없습니다."
-        : scope === "member" && policy.inherited
-          ? "워크스페이스 기본값을 상속 중입니다. 다른 값을 고르면 내 정책으로 저장됩니다."
-          : undefined;
+    : needsTarget
+      ? "자동 재개는 재개 대상을 고른 뒤에 저장됩니다."
+      : dirty
+        ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
+        : offline
+          ? "연결이 끊겨 지금은 바꿀 수 없습니다."
+          : scope === "member" && policy.inherited
+            ? "워크스페이스 기본값을 상속 중입니다. 다른 값을 골라 저장하면 내 정책이 됩니다."
+            : undefined;
+
+  // Two scopes draw the same two buttons, so the visible labels carry the scope
+  // instead of leaving two identical "저장" stops in the tab order.
+  const saveLabel = scope === "member" ? "내 정책 저장" : "워크스페이스 기본 저장";
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -611,7 +808,7 @@ function TierPolicyScope({
           memberId={memberId}
           target={target}
           registry={registry}
-          draft={draftAuto}
+          unsaved={dirty}
           busy={save.isPending}
           disabled={offline}
           onPick={pickTarget}
@@ -627,6 +824,29 @@ function TierPolicyScope({
           {workTierPolicySaveMessage(save.error)}
         </p>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SaveButton
+          label={saveLabel}
+          canSave={dirty && !needsTarget && !offline}
+          busy={save.isPending}
+          onSave={commit}
+          testId={`work-tier-save-${scope}`}
+        />
+        {dirty && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${title} 되돌리기`}
+            onClick={() => {
+              if (save.isPending) return;
+              setDraft(null);
+            }}
+          >
+            되돌리기
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -645,7 +865,7 @@ function AutoTargetField({
   memberId,
   target,
   registry,
-  draft,
+  unsaved,
   busy,
   disabled,
   onPick,
@@ -655,7 +875,8 @@ function AutoTargetField({
   memberId: string;
   target: string;
   registry: RegistryState;
-  draft: boolean;
+  /** The block has a pick the server has not been told about yet. */
+  unsaved: boolean;
   busy: boolean;
   disabled: boolean;
   onPick: (id: string) => void;
@@ -707,14 +928,19 @@ function AutoTargetField({
     });
   }
 
+  // A stale stored target is not a footnote, it is the state of the policy: the
+  // server answers 409 for this exact row, so the panel is currently describing
+  // a setting that cannot run. It says so in --danger with role="alert", the
+  // same way this block already draws a save failure, instead of a muted line
+  // that reads like help text next to a normally selected 자동 재개 radio.
   const hint = staleTarget
     ? stored?.revokedAtMs
-      ? "지금 저장된 대상은 해지된 호스트입니다. 다른 대상을 고르세요."
+      ? "지금 저장된 대상은 해지된 호스트여서 이 정책은 실행되지 않습니다. 다른 대상을 고른 뒤 저장하세요."
       : stored
-        ? "지금 저장된 대상은 이 정책에서 쓸 수 없는 호스트입니다. 다른 대상을 고르세요."
-        : "지금 저장된 대상이 등록 목록에 없습니다. 다른 대상을 고르세요."
-    : draft
-      ? "대상을 고르면 자동 재개가 저장됩니다."
+        ? "지금 저장된 대상은 이 정책이 쓸 수 없는 호스트여서 이 정책은 실행되지 않습니다. 다른 대상을 고른 뒤 저장하세요."
+        : "지금 저장된 대상이 등록 목록에 없어 이 정책은 실행되지 않습니다. 다른 대상을 고른 뒤 저장하세요."
+    : unsaved
+      ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
       : eligible.length === 0
         ? "등록된 호스트 중 고를 수 있는 것이 없어 momo Cloud만 고를 수 있습니다."
         : undefined;
@@ -727,6 +953,7 @@ function AutoTargetField({
       // identical names in one panel.
       ariaLabel={`${scopeTitle} 재개 대상`}
       hint={hint}
+      hintTone={staleTarget ? "danger" : "muted"}
       value={target}
       choices={choices}
       onChange={onPick}
