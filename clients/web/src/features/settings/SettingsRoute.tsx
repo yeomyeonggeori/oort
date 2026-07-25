@@ -1,149 +1,171 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
-import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
+import { InlineBanner } from "@/features/common/States";
+import { AccountSection } from "./AccountSection";
+import { AiLinkSection } from "./AiLinkSection";
+import { InviteSection } from "./InviteSection";
+import { SectionShell } from "./SettingsFields";
+import { WorkHostSection } from "./WorkHostSection";
+import { WorkspaceSection } from "./WorkspaceSection";
 
 // =============================================================================
-// 설정 셸 (R-1 §5): full-screen route with a left nav and a right panel, not a
-// modal. Only 계정 carries real data in P1; the operator sections state their
-// contract so the shape is settled before the forms land.
+// 설정 셸 (R-1 §5): a full-screen route with a left nav and a right panel, not
+// a modal. "패널 수는 죄": the operator sections are grouped under one quiet
+// heading rather than spread across tabs, and there is no tour.
+//
+// Operator gating is answered by the server, not guessed by the client: each
+// operator section calls its own GET and swaps in the "서버 운영자에게 문의"
+// notice on a 403, so a member who cannot change a setting is told who can
+// instead of being handed a form whose save is guaranteed to fail.
 // =============================================================================
 
-type SectionId = "account" | "notifications" | "ai" | "code" | "workspace" | "members";
+type SectionId =
+  | "account"
+  | "notifications"
+  | "ai"
+  | "code"
+  | "workspace"
+  | "members";
 
-const SECTIONS: { id: SectionId; label: string; admin?: boolean }[] = [
-  { id: "account", label: "계정" },
-  { id: "notifications", label: "알림 규칙" },
-  { id: "ai", label: "AI 연결", admin: true },
-  { id: "code", label: "코드 실행", admin: true },
-  { id: "workspace", label: "워크스페이스", admin: true },
-  { id: "members", label: "멤버와 초대", admin: true },
+interface SectionMeta {
+  id: SectionId;
+  label: string;
+  group: "나" | "운영";
+}
+
+const SECTIONS: SectionMeta[] = [
+  { id: "account", label: "계정", group: "나" },
+  { id: "notifications", label: "알림 규칙", group: "나" },
+  { id: "ai", label: "AI 연결", group: "운영" },
+  { id: "code", label: "코드 실행 호스트", group: "운영" },
+  { id: "workspace", label: "워크스페이스", group: "운영" },
+  { id: "members", label: "멤버와 초대", group: "운영" },
 ];
 
-const COPY: Record<SectionId, string[]> = {
-  account: [],
-  notifications: [
-    "알림 규칙은 서버에 하나만 존재합니다. 플랫폼마다 다시 구현하지 않습니다.",
-    "각 알림에는 왜 왔는지가 함께 기록됩니다.",
-  ],
-  ai: [
-    "에이전트가 사용할 provider를 워크스페이스 단위로 연결합니다.",
-    "키는 이 기기 또는 이 서버에만 저장되며, 서버 간에 옮기지 않습니다.",
-  ],
-  code: [
-    "코드를 실행할 호스트를 페어링하고, 실행 권한을 Supervised와 Full 중에서 고릅니다.",
-    "승인 경계는 이 두 모드로만 표현됩니다.",
-  ],
-  workspace: [
-    "워크스페이스 생성과 참여, 이름 변경을 다룹니다.",
-    "이름 변경은 오너만 할 수 있습니다.",
-  ],
-  members: [
-    "초대 링크를 발급해 사람을 부릅니다.",
-    "에이전트는 담당자와 수신 범위를 정한 뒤 만들어집니다.",
-  ],
-};
+const GROUPS: SectionMeta["group"][] = ["나", "운영"];
 
 export function SettingsRoute() {
-  const { session, workspaceId, logout } = useSession();
-  const { directory } = useDirectory(workspaceId);
+  const { workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   const [section, setSection] = useState<SectionId>("account");
+  const navRefs = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
+
+  const close = useCallback(() => navigate(-1), [navigate]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") navigate(-1);
+      if (event.key === "Escape") close();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigate]);
+  }, [close]);
 
-  const me = memberFor(directory, session.member.id);
-  const current = SECTIONS.find((s) => s.id === section);
+  // Arrow keys move focus through the nav; Enter and Space activate through the
+  // native button, so no key handling is duplicated for activation.
+  function onNavKeyDown(event: React.KeyboardEvent) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const ids = SECTIONS.map((s) => s.id);
+    const focused = ids.findIndex(
+      (id) => navRefs.current[id] === document.activeElement
+    );
+    const from = focused >= 0 ? focused : ids.indexOf(section);
+    const step = event.key === "ArrowDown" ? 1 : ids.length - 1;
+    navRefs.current[ids[(from + step) % ids.length]]?.focus();
+  }
+
+  const offline = connStatus === "disconnected";
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
         <h1 className="text-body font-semibold">설정</h1>
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+        <Button variant="ghost" size="sm" onClick={close}>
           닫기
         </Button>
       </header>
 
+      {offline && (
+        <InlineBanner
+          tone="neutral"
+          message="연결이 끊겼습니다. 저장은 다시 연결된 뒤에 할 수 있습니다."
+          testId="settings-offline-banner"
+        />
+      )}
+
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="설정 섹션"
-          className="w-pane-sm shrink-0 border-r border-line p-2"
+          onKeyDown={onNavKeyDown}
+          className="w-pane-sm shrink-0 overflow-y-auto border-r border-line p-2"
         >
-          <ul className="flex flex-col gap-1">
-            {SECTIONS.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setSection(item.id)}
-                  aria-current={section === item.id ? "page" : undefined}
-                  className={cn(
-                    "w-full rounded-sm px-2 py-1 text-left text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-                    section === item.id
-                      ? "bg-accent-soft text-ink"
-                      : "hover:bg-surface-hover"
-                  )}
-                >
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>
+          {GROUPS.map((group) => (
+            <div key={group} className="flex flex-col gap-1 pb-3">
+              <p className="px-2 text-meta text-ink-muted">{group}</p>
+              <ul className="flex flex-col gap-1">
+                {SECTIONS.filter((item) => item.group === group).map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      ref={(el) => {
+                        navRefs.current[item.id] = el;
+                      }}
+                      onClick={() => setSection(item.id)}
+                      aria-current={section === item.id ? "page" : undefined}
+                      className={cn(
+                        "w-full rounded-sm px-2 py-1 text-left text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                        section === item.id
+                          ? "bg-accent-soft text-ink"
+                          : "hover:bg-surface-hover"
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
 
         <div className="min-w-0 flex-1 overflow-y-auto p-4">
-          <h2 className="text-body font-semibold">{current?.label}</h2>
-
-          {/* Label above value, not a fixed label column: a Korean label and a
-              full UUID do not share one width without either truncating or an
-              off-grid fixed width. */}
-          {section === "account" ? (
-            <dl className="mt-3 flex flex-col gap-3 text-body">
-              <div className="flex flex-col gap-1">
-                <dt className="text-meta text-ink-muted">이름</dt>
-                <dd>{me?.displayName ?? session.member.displayName}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <dt className="text-meta text-ink-muted">핸들</dt>
-                <dd>@{me?.handle ?? session.member.handle}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <dt className="text-meta text-ink-muted">워크스페이스</dt>
-                <dd className="break-all font-mono text-meta" data-numeric>
-                  {workspaceId}
-                </dd>
-              </div>
-            </dl>
-          ) : (
-            <ul className="mt-3 flex flex-col gap-2">
-              {COPY[section].map((line, index) => (
-                <li key={index} className="text-body text-ink-muted">
-                  {line}
-                </li>
-              ))}
-            </ul>
+          {section === "account" && <AccountSection />}
+          {section === "notifications" && <NotificationRulesSection />}
+          {section === "ai" && <AiLinkSection offline={offline} />}
+          {section === "code" && <WorkHostSection offline={offline} />}
+          {section === "workspace" && (
+            <WorkspaceSection workspaceId={workspaceId} offline={offline} />
           )}
-
-          {section === "account" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-6"
-              onClick={logout}
-              data-testid="logout"
-            >
-              로그아웃
-            </Button>
+          {section === "members" && (
+            <InviteSection workspaceId={workspaceId} offline={offline} />
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 알림 규칙 (P9): the rule tree lives on the server and has no operator REST
+ * yet, so this panel states the contract rather than drawing switches that
+ * would write nowhere.
+ */
+function NotificationRulesSection() {
+  return (
+    <SectionShell
+      title="알림 규칙"
+      lines={[
+        "알림 규칙은 서버에 하나만 존재합니다. 플랫폼마다 다시 구현하지 않습니다.",
+        "각 알림에는 왜 왔는지가 함께 기록되고, 인박스에서 그 이유를 볼 수 있습니다.",
+      ]}
+    >
+      <p className="text-body text-ink-muted">
+        규칙을 이 화면에서 바꾸는 기능은 아직 없습니다. 지금은 서버 설정으로만
+        바뀝니다.
+      </p>
+    </SectionShell>
   );
 }
