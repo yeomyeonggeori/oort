@@ -18,6 +18,14 @@ export interface SidebarRowProps {
   to: string;
   icon: ReactNode;
   label: string;
+  /**
+   * "@handle", shown right after the name when the name alone is shared by two
+   * members of this workspace. Two rows reading 김인턴 are not a list, they are
+   * a coin toss.
+   */
+  handle?: string | null;
+  /** The row names an agent: identity is the --agent token on the name (§9). */
+  agent?: boolean;
   /** Server unread count (P7). Renders only when the projection supplies one. */
   unreadCount?: number;
   /** Server mention count; promotes the badge to an accent pill. */
@@ -32,6 +40,8 @@ export function SidebarRow({
   to,
   icon,
   label,
+  handle = null,
+  agent = false,
   unreadCount = 0,
   mentionCount = 0,
   trailing,
@@ -54,13 +64,24 @@ export function SidebarRow({
         <span className="shrink-0 opacity-70" aria-hidden="true">
           {icon}
         </span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate",
-            hasUnread && "font-semibold"
+        <span className="flex min-w-0 flex-1 items-baseline gap-1">
+          <span
+            className={cn(
+              "min-w-0 truncate",
+              hasUnread && "font-semibold",
+              agent && "text-agent"
+            )}
+          >
+            {label}
+          </span>
+          {handle && (
+            <span
+              className="min-w-0 truncate text-meta text-ink-muted"
+              data-testid="row-handle"
+            >
+              {handle}
+            </span>
           )}
-        >
-          {label}
         </span>
         {trailing}
         {hasMention ? (

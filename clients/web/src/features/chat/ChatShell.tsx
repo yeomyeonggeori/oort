@@ -5,6 +5,8 @@ import { updateReadState, uuidEq, type Message } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
+  channelLabelParts,
+  dmPeer,
   makeDirectory,
   memberFor,
   unreadFor,
@@ -27,6 +29,7 @@ import {
   SkeletonRows,
 } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
+import { cn } from "@/design/lib/cn";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -82,9 +85,17 @@ export function ChatShell() {
           ) ?? null,
     [channelsQuery.groups, channelId]
   );
+  // Two labels, one rule (channelLabelParts): the header renders the name and
+  // the disambiguating handle as separate spans, and everything that can only
+  // take a string (the composer placeholder, its sr-only label) gets them
+  // joined. A DM in this workspace can be one of two 김인턴.
+  const labelParts = channel
+    ? channelLabelParts(channel, directory, session.member.id)
+    : null;
   const label = channel
     ? channelLabel(channel, directory, session.member.id)
     : "채널";
+  const peer = channel ? dmPeer(channel, directory, session.member.id) : null;
 
   const timeline = useTimeline(
     realtime,
@@ -135,6 +146,15 @@ export function ChatShell() {
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
 
+  // The composer owns its own ref for the mention popover, so this reaches it
+  // by the id it already publishes (its sr-only <label htmlFor> points at the
+  // same one). Focus, not scroll or fake typing: the empty DM state's action is
+  // "start writing", and writing happens in the composer that is already there.
+  const focusComposer = useCallback(() => {
+    const input = document.getElementById("composer-input");
+    if (input instanceof HTMLTextAreaElement) input.focus();
+  }, []);
+
   // Re-send a row the SERVER stored as `failed`. That message is durable and
   // will not change, so this is a genuinely new send with a fresh idempotency
   // key, not a retry of the old one: it goes through the same send path as the
@@ -176,13 +196,13 @@ export function ChatShell() {
   ]);
 
   const memberSummary = useMemo(() => {
-    if (!channel) return "";
-    const ids =
-      channel.kind === "dm"
-        ? channel.memberIds ?? []
-        : directory.members
-            .filter((m) => m.channelIds.some((id) => uuidEq(id, channel.id)))
-            .map((m) => m.id);
+    // A DM's participants are the title and me. Repeating "데모 사용자, 김인턴"
+    // beside a title that already says 김인턴 @intern-kim adds a second, less
+    // precise copy of the same fact.
+    if (!channel || channel.kind === "dm") return "";
+    const ids = directory.members
+      .filter((m) => m.channelIds.some((id) => uuidEq(id, channel.id)))
+      .map((m) => m.id);
     const names = ids
       .map((id) => memberFor(directory, id)?.displayName)
       .filter((name): name is string => Boolean(name));
@@ -208,9 +228,24 @@ export function ChatShell() {
                 <Hash className="size-4" />
               )}
             </span>
-            <h1 className="truncate text-body font-semibold">
-              {stressCount > 0 ? `스크롤 측정 (${stressCount})` : label}
+            <h1
+              className={cn(
+                "truncate text-body font-semibold",
+                labelParts?.isAgent && stressCount === 0 && "text-agent"
+              )}
+            >
+              {stressCount > 0
+                ? `스크롤 측정 (${stressCount})`
+                : labelParts?.text ?? label}
             </h1>
+            {stressCount === 0 && labelParts?.handle && (
+              <span
+                className="shrink-0 text-meta text-ink-muted"
+                data-testid="channel-handle"
+              >
+                {labelParts.handle}
+              </span>
+            )}
             {memberSummary && (
               <span className="truncate text-meta text-ink-muted">
                 {memberSummary}
@@ -254,7 +289,10 @@ export function ChatShell() {
               onOpenThread={setThread}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
-              onInviteMember={() => navigate("/settings")}
+              channelKind={channel?.kind}
+              peer={peer}
+              onInviteMember={() => navigate("/settings?section=members")}
+              onStartWriting={focusComposer}
             />
           ) : channelsQuery.isLoading ? (
             <SkeletonRows rows={6} className="p-4" />
