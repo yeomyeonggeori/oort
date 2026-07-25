@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-07-25 (Fable P1 wave2 완주 — 인박스·에이전트 카드·설정 셸·세션/낙관) · track/uxui 랜딩, 3R 리뷰 중
+- 4갈래 병렬(Opus 5, MOMO-599~602) → 통합 브랜치(761→759→760→762) → **136/136 tests·실서버 스모크 2종 PASS**로 track/uxui 랜딩(PR #763).
+- **759 인박스**: 3필터+zero-noise 빈상태+seq 앵커 점프. 실서버로 멘션 계약 실측(대문자 UUID — 케이스 무관 교훈 4번째 적용). data gap 7건 정직(승인 원장 created_at 부재·전역 agent-run REST 부재 등 — 엔진 후속 후보).
+- **760 에이전트 카드**: opaque payload 규율 계승(allowlist 밖 "숨김 N개"), timed_out=stalled(ADR-0132 침묵≠실패), 승인 결정 idempotency.
+- **761 설정 셸 4표면**: 실서버 왕복 검증 + 상태 복원(잔존: momoqa-601 WS 1개 — 삭제 REST 부재).
+- **762 M9/M10**: 새로고침 세션 복원(refresh 회전)+낙관 삽입→seq 확정 치환(중복 0 실측). 발견: realtime 페이로드 client_msg_id 부재(엔진 후속 후보).
+- **통합 교훈**: 텍스트 충돌 0인데 **자동머지가 의미적 파손 2건 통과**(getAccessToken이 lib/session으로 이관돼 761·760 임포트 파손) — typecheck가 검출. "머지 직후 typecheck 필수" 성문화. 관측: worker들이 커밋을 원격에 push하지 않아(껍데기 브랜치) 로컬 worktree 브랜치로 통합 — 파이프라인 개선 후보.
+- 진행: design-review 3R(wave2 표면). 다음: 3R 종결→main 승인 요청→P2(Tauri 데스크톱 네이티브 통합) 설계.
+
+
 ## 2026-07-25 (Fable P1 wave1 design-review 종결) · 웹판 첫 리뷰 사이클 2R PASS, Medium 전건 해소
 - **1R FAIL(Blocker2·High2)**: 리뷰어가 런타임 스크롤 프로브 자작 — B1 프리펜드 앵커 소실(R-1 §3 firstItemIndex 계약 미이행), B2 Tauri 타이틀 em-dash, H3 로그인 매달린 카피+내부 어휘, H4 디바이더 직후 무기명 렌더.
 - **수정 라운드(Opus 5)**: 10건 전부 반영 + **리뷰 프로브 자체의 결함 2건 교정**(?before 0회·프로그램적 scrollTop 점프) + baseline A/B 실측(앵커 이탈 vs 드리프트 -1~-3px anchorHeld). 리뷰 판정의 증상 서술 오류 정정. 엔진 리스크 플래그(nextBefore) → 오케스트레이터 실서버 확인 정상(209) 해제.
