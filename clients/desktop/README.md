@@ -224,8 +224,15 @@ check is not like that: "I could not reach the update server" and "you are on
 the latest build" must never render identically, or a stalled channel stays
 invisible until someone reports a bug that was fixed a week ago.
 
-Web half: `clients/web/src/features/updates/` (badge in the sidebar footer, the
-full state in 설정 > 업데이트, deep-linked as `/settings?section=updates`).
+Web half: `clients/web/src/features/updates/`. Three surfaces, one store:
+
+- the connect screen, **before any login** — the internal alpha guide says the
+  server is unreachable whenever the operator is away from their desk, so being
+  stuck there is a normal state, and announcing the fix only to people who got
+  in makes the channel useless exactly when it matters;
+- a one-line badge in the sidebar footer, shown only when there is something to
+  act on;
+- the full state in 설정 > 업데이트, deep-linked as `/settings?section=updates`.
 
 Publishing: `scripts/publish_next_build.sh --version 0.1.0-next.N`.
 
