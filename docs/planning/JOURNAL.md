@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-25 (Fable #782 랜딩) · 멤버 디렉터리+DM 시작 — parity G-3·G-4 해소
+- **MOMO-611 track/uxui 랜딩**(PR #787, bdfef0a3): 디렉터리 라우트(검색·역할·managed by·localeCompare ko)+DM 시작(POST /dms 서버 판정, 201/200 동일 경로)+⌘K 사람 섹션+⌘⇧K. Opus 5 구현+design-review 3R+medium 후속 = 커밋 4개(6eae5531→81e957cb→08363b37→db265157→d30b0617).
+- **리뷰 루프 수확**: High 5(⌘K stale error·DM 착지 화면이 채널용 빈 상태·거짓 카운터 "사람 0"·⌘⇧K 포커스 미배치 Tab15회·동명이인 aria-label 동일)·Medium 6 전부 실측 검증 해소. 스켈레톤이 실물 행 클래스를 공유해 구조적으로 어긋날 수 없게 한 패턴 채택.
+- **부수 발견 티켓화**: #786(MOMO-612) — realtime connStatus가 disconnected로 전이하지 않아 **오프라인 배너가 전 표면에서 사장**(기존 결함, 782 무관).
+- 게이트 원점 재검증: 301 tests·typecheck 0·gate:shell PASS·preflight 10/10. parity 잔여 기능 갭(G-3·G-4) 소멸 — main 반영은 성재 승인 대기(전환 결정과 함께).
+
+
 ## 2026-07-25 (Fable 에이전트 경험 프로그램 기획) · 성재 7개 지시 → 재고 판정 + 실행 계획
 - **성재 지시(7)**: ①첫 사용 와우 ②모델/effort/auto 라우팅 ③작업 관전 패널(핵심) ④캐스캐이드+사용량/잔여량 ⑤작업중 표시 ⑥cloud T1~T3 실동 ⑦워크스페이스 과금 트래킹.
 - **3방향 병렬 조사**: 엔진 재고(서버 전수)·클라 재고(웹/SwiftUI 대조)·레퍼런스(buzz 오픈소스 소스 직독 1차 확인 포함, `research/2026-07-25-reference-ux-survey.md`).
