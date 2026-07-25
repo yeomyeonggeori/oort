@@ -79,9 +79,42 @@ const CHANNELS = [
 ];
 const CHANNEL_IDS = CHANNELS.map((c) => c.id);
 
+// A roster long enough to overflow a short window: 멤버 디렉터리 (MOMO-611) is
+// the second surface after 설정 > 멤버와 초대 whose length is the workspace's,
+// not the designer's, so the gate measures it on a workspace that has been
+// hiring rather than on two rows that fit anywhere.
+const TEAM = [
+  ["박지훈", "jihoon", "admin"],
+  ["이서연", "seoyeon", "member"],
+  ["최민우", "minwoo", "member"],
+  ["정하늘", "haneul", "member"],
+  ["윤도현", "dohyun", "guest"],
+  ["장서준", "seojun", "member"],
+  ["임채원", "chaewon", "member"],
+  ["오세훈", "sehun", "member"],
+  ["강다인", "dain", "member"],
+  ["신유진", "yujin", "member"],
+  ["Nadia Rahman", "nadia", "member"],
+  ["Tom Okafor", "tom", "member"],
+];
+
 const ROSTER = [
-  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", displayName: "곽성재", handle: "seongjae", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
-  { id: HERMES, workspaceId: WORKSPACE_ID, kind: "agent", status: "active", displayName: "hermes", handle: "hermes", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: ["code"], ownerHumanId: ME, agentModel: "hermes-agent", createdAtMs: 0, updatedAtMs: 0 },
+  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
+  { id: HERMES, workspaceId: WORKSPACE_ID, kind: "agent", status: "active", role: "member", displayName: "hermes", handle: "hermes", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: ["code"], ownerHumanId: ME, agentModel: "hermes-agent", createdAtMs: 0, updatedAtMs: 0 },
+  ...TEAM.map(([displayName, handle, role], i) => ({
+    id: `019f9a01-0000-7000-8000-0000000004${String(i).padStart(2, "0")}`,
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    status: "active",
+    role,
+    displayName,
+    handle,
+    channelCount: 1,
+    channelIds: [GENERAL_ID],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  })),
 ];
 
 const READ_STATES = CHANNELS.map((c, i) => ({
@@ -321,6 +354,7 @@ async function measureSize(browser, size) {
   for (const [hash, label, shot] of [
     ["/inbox", "인박스", "inbox"],
     ["/activity", "활동", "activity"],
+    ["/directory", "멤버 디렉터리", "directory"],
     ["/settings?section=account", "설정 계정", "settings-account"],
     ["/settings?section=members", "설정 멤버와 초대", "settings-members"],
     ["/settings?section=ai", "설정 AI 연결", "settings-ai"],
@@ -358,6 +392,40 @@ async function measureSize(browser, size) {
     JSON.stringify(reach)
   );
   await page.screenshot({ path: `${OUT_DIR}/${size.name}-settings-bottom.png` });
+
+  // Same question for the member directory (MOMO-611): a 14-row roster is
+  // taller than a 480px window, so the LIST has to scroll and the shell must
+  // not. Reaching the last row by keyboard is the case that broke settings.
+  await go(page, "/directory");
+  const lastRow = await page.evaluate(`(async () => {
+    const rows = document.querySelectorAll('[data-testid="directory-row"]');
+    if (rows.length === 0) return { missing: true };
+    const last = rows[rows.length - 1];
+    last.scrollIntoView({ block: "end" });
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const r = last.getBoundingClientRect();
+    const shell = document.querySelector(".app-shell");
+    const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+    const doc = document.scrollingElement || document.documentElement;
+    return {
+      rows: rows.length,
+      reached: r.top >= 0 && r.bottom <= window.innerHeight + 1,
+      shellScrollTop: shell ? shell.scrollTop : null,
+      docScrollY: Math.round(window.scrollY),
+      docOverflowY: doc.scrollHeight - doc.clientHeight,
+      navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+    };
+  })()`);
+  check(
+    `${size.name} 디렉터리 본문이 마지막 멤버까지 스크롤된다`,
+    lastRow.reached === true &&
+      lastRow.shellScrollTop === 0 &&
+      lastRow.docScrollY === 0 &&
+      lastRow.docOverflowY === 0 &&
+      lastRow.navTop === NAV_RESTING_TOP,
+    JSON.stringify(lastRow)
+  );
+  await page.screenshot({ path: `${OUT_DIR}/${size.name}-directory-bottom.png` });
 
   await context.close();
 }

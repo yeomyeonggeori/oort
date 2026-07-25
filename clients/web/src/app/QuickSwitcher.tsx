@@ -1,18 +1,36 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
-import { Activity, Hash, Inbox, Lock, MessageSquare, Settings } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Hash,
+  Inbox,
+  Lock,
+  MessageSquare,
+  Settings,
+  User,
+  Users,
+} from "lucide-react";
+import { uuidEq } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
+import { useOpenDm } from "@/features/directory/useOpenDm";
+import { InlineBanner } from "@/features/common/States";
 
 // =============================================================================
-// ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs and the
-// global surfaces in one list. Arrow keys move, Enter opens, Esc closes: cmdk
-// owns that grammar, so no custom key handling beyond the ⌘K toggle.
+// ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
+// and the global surfaces in one list. Arrow keys move, Enter opens, Esc closes:
+// cmdk owns that grammar, so no custom key handling beyond the ⌘K toggle.
+//
+// 사람 (parity G-3/G-4) is a section of the SAME palette rather than a second
+// picker: "누구와 이야기할까"는 "어디로 갈까"의 한 갈래다. Choosing a person goes
+// through the same useOpenDm path a directory row uses, so an existing
+// conversation is reused instead of a second one being created.
 // =============================================================================
 
 const itemClass =
@@ -40,15 +58,32 @@ export function QuickSwitcher({
   const navigate = useNavigate();
   const { groups } = useChannels(workspaceId);
   const { directory } = useDirectory(workspaceId);
+  const dm = useOpenDm();
+
+  // Everyone but me: the server refuses a DM with yourself, so it is not
+  // offered here. uuidEq, because ids arrive in mixed case.
+  const people = directory.members.filter(
+    (member) => !uuidEq(member.id, session.member.id)
+  );
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
+      if (!event.metaKey && !event.ctrlKey) return;
+      // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). It lands on the member
+      // directory, which is where a DM starts. Checked BEFORE ⌘K, because the
+      // shifted key still reports as "k" and would otherwise toggle the palette.
+      if (event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        onOpenChange(false);
+        navigate("/directory");
+        return;
+      }
+      if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         onOpenChange(!open);
       }
       // ⌘, opens settings (R-1 §1 keyboard path).
-      if (event.key === "," && (event.metaKey || event.ctrlKey)) {
+      if (event.key === ",") {
         event.preventDefault();
         navigate("/settings");
       }
@@ -72,15 +107,22 @@ export function QuickSwitcher({
       data-testid="quick-switcher"
     >
       <Command.Input
-        placeholder="채널, 다이렉트 메시지, 설정으로 이동"
+        placeholder="채널, 사람, 설정으로 이동"
         data-testid="quick-switcher-input"
         className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent placeholder:text-ink-muted"
       />
+
+      {/* A DM that failed to open keeps the palette up: the message belongs next
+       * to the name that was picked, not behind a dialog that closed itself. */}
+      {dm.error && (
+        <InlineBanner message={dm.error.message} testId="switcher-dm-error" />
+      )}
+
       <Command.List
         className={`max-h-pane overflow-y-auto p-2 ${groupHeadingClass}`}
       >
         <Command.Empty className="px-2 py-3 text-body text-ink-muted">
-          일치하는 채널이 없습니다. 다른 이름으로 검색하세요.
+          일치하는 채널이나 사람이 없습니다. 다른 이름으로 검색하세요.
         </Command.Empty>
 
         <Command.Group heading="이동">
@@ -91,6 +133,14 @@ export function QuickSwitcher({
           <Command.Item className={itemClass} onSelect={() => go("/activity")}>
             <Activity className="size-4 opacity-70" />
             활동
+          </Command.Item>
+          <Command.Item
+            className={itemClass}
+            value="멤버 디렉터리 명부"
+            onSelect={() => go("/directory")}
+          >
+            <Users className="size-4 opacity-70" />
+            멤버 디렉터리
           </Command.Item>
           <Command.Item className={itemClass} onSelect={() => go("/settings")}>
             <Settings className="size-4 opacity-70" />
@@ -132,6 +182,41 @@ export function QuickSwitcher({
                 </Command.Item>
               );
             })}
+          </Command.Group>
+        )}
+
+        {people.length > 0 && (
+          <Command.Group heading="사람">
+            {people.map((member) => (
+              <Command.Item
+                key={member.id}
+                value={`${member.displayName} ${member.handle} ${member.id}`}
+                className={itemClass}
+                data-testid="switcher-person"
+                data-member-id={member.id}
+                data-member-kind={member.kind}
+                onSelect={() => {
+                  void dm.openDm(member).then((opened) => {
+                    if (opened) onOpenChange(false);
+                  });
+                }}
+              >
+                {/* Agent identity is the --agent token on the glyph and nothing
+                 * else: same row, same type as a human (design-taste-web §9). */}
+                {member.kind === "agent" ? (
+                  <Bot className="size-4 text-agent" />
+                ) : (
+                  <User className="size-4 opacity-70" />
+                )}
+                {member.displayName}
+                <span className="text-meta text-ink-muted">
+                  @{member.handle}
+                </span>
+                {dm.pendingMemberId === member.id && (
+                  <span className="text-meta text-ink-muted">여는 중</span>
+                )}
+              </Command.Item>
+            ))}
           </Command.Group>
         )}
       </Command.List>

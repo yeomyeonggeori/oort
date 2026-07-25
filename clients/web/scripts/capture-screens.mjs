@@ -56,6 +56,18 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000204", workspaceId: WORKSPACE_ID, kind: "public", name: "release-notes", muted: false },
 ];
 
+// The DM the directory opens onto (MOMO-611). It is in the fixture so the
+// sidebar renders its 다이렉트 메시지 section, including the 새 다이렉트 메시지
+// entry point, in every frame below.
+const DM_ID = "019f984d-b4a8-76fd-8fba-3b6e3390072d";
+const DM_CHANNEL = {
+  id: DM_ID,
+  workspaceId: WORKSPACE_ID,
+  kind: "dm",
+  memberIds: [ME, HERMES],
+  muted: false,
+};
+
 const CHANNEL_IDS = CHANNELS.map((c) => c.id);
 
 // Roster and read-state are what turn the timeline from raw ids into the actual
@@ -68,6 +80,7 @@ const ROSTER = [
     workspaceId: WORKSPACE_ID,
     kind: "human",
     status: "active",
+    role: "owner",
     displayName: "곽성재",
     handle: "seongjae",
     channelCount: CHANNEL_IDS.length,
@@ -81,12 +94,74 @@ const ROSTER = [
     workspaceId: WORKSPACE_ID,
     kind: "agent",
     status: "active",
+    role: "member",
     displayName: "hermes",
     handle: "hermes",
     channelCount: CHANNEL_IDS.length,
     channelIds: CHANNEL_IDS,
     capabilities: ["code"],
     ownerHumanId: ME,
+    agentModel: "hermes-agent",
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+  // The directory (MOMO-611) is the first surface that renders the whole
+  // roster, so the fixture carries a workspace rather than a pair: role
+  // labels, the human/agent split, and a second agent attributed to a human.
+  {
+    id: "019f9a01-0000-7000-8000-000000000401",
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    status: "active",
+    role: "admin",
+    displayName: "박지훈",
+    handle: "jihoon",
+    channelCount: 2,
+    channelIds: CHANNEL_IDS.slice(0, 2),
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+  {
+    id: "019f9a01-0000-7000-8000-000000000402",
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    status: "active",
+    role: "member",
+    displayName: "김인턴",
+    handle: "intern-kim",
+    channelCount: 1,
+    channelIds: [GENERAL_ID],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+  {
+    id: "019f9a01-0000-7000-8000-000000000403",
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    status: "invited",
+    role: "member",
+    displayName: "Nadia Rahman",
+    handle: "nadia",
+    channelCount: 0,
+    channelIds: [],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+  {
+    id: "019f9a01-0000-7000-8000-000000000404",
+    workspaceId: WORKSPACE_ID,
+    kind: "agent",
+    status: "active",
+    role: "member",
+    displayName: "김인턴",
+    handle: "kim-intern",
+    channelCount: 2,
+    channelIds: CHANNEL_IDS.slice(0, 2),
+    capabilities: ["code"],
+    ownerHumanId: "019f9a01-0000-7000-8000-000000000401",
     agentModel: "hermes-agent",
     createdAtMs: 0,
     updatedAtMs: 0,
@@ -98,6 +173,7 @@ const READ_STATES = [
   { channel_id: CHANNELS[1].id, last_read_seq: 40, latest_seq: 42, unread_count: 2, mention_count: 0 },
   { channel_id: CHANNELS[2].id, last_read_seq: 12, latest_seq: 12, unread_count: 0, mention_count: 0 },
   { channel_id: CHANNELS[3].id, last_read_seq: 7, latest_seq: 7, unread_count: 0, mention_count: 0 },
+  { channel_id: DM_ID, last_read_seq: 3, latest_seq: 3, unread_count: 0, mention_count: 0 },
 ];
 
 // Three of these rows are typed agent events, not prose, so the capture shows
@@ -191,6 +267,27 @@ function makeMessages(count) {
   });
 }
 
+/** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
+function makeDmMessages() {
+  const base = Date.now() - 3 * 60_000;
+  return [
+    [ME, "어제 올린 relay 패치, DM으로 짧게만 확인할게요. 롤백 절차는 그대로죠?"],
+    [HERMES, "그대로입니다. outbox 재처리 스크립트만 먼저 돌리면 됩니다."],
+    [ME, "좋아요. 배포 끝나면 여기로 결과만 남겨주세요."],
+  ].map(([author, body], i) => ({
+    id: `capture-dm-${i + 1}`,
+    channelId: DM_ID,
+    seq: i + 1,
+    hlcTs: base + i * 60_000,
+    hlcCount: 0,
+    authorMemberId: author,
+    type: "text",
+    body,
+    state: "sent",
+    createdAtMs: base + i * 60_000,
+  }));
+}
+
 function json(route, body) {
   return route.fulfill({
     status: 200,
@@ -212,7 +309,14 @@ async function installMocks(context) {
     })
   );
   await context.route("**/v1/workspaces/*/channels", (route) =>
-    json(route, { channels: CHANNELS })
+    json(route, { channels: [...CHANNELS, DM_CHANNEL] })
+  );
+  // 디렉터리 행에서 DM 시작 (MOMO-611): idempotent per pair, so the fixture
+  // answers created:false, which is the "이미 있는 대화로 이동" path.
+  await context.route("**/v1/workspaces/*/dms", (route) =>
+    route.request().method() === "POST"
+      ? json(route, { channel: DM_CHANNEL, created: false })
+      : json(route, { channels: [DM_CHANNEL] })
   );
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, { members: ROSTER })
@@ -228,6 +332,9 @@ async function installMocks(context) {
     // Older-history and backfill pages are empty: the head page is the shot.
     if (url.searchParams.has("before") || url.searchParams.has("after")) {
       return json(route, { messages: [] });
+    }
+    if (url.pathname.includes(DM_ID)) {
+      return json(route, { messages: makeDmMessages() });
     }
     return json(route, { messages: makeMessages(16) });
   });
@@ -300,6 +407,40 @@ async function captureScheme(browser, scheme) {
   const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
   await login.screenshot({ path: focusShot });
   shots.push(focusShot);
+
+  // 3b. 멤버 디렉터리 (MOMO-611): the roster as a list, the role labels, the
+  //     human/agent split, and the row that starts a DM.
+  const directory = await context.newPage();
+  await directory.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(directory);
+  await directory.evaluate('location.hash = "/directory"');
+  await directory.getByTestId("directory-row").first().waitFor({ state: "visible" });
+  const directoryShot = `${OUT_DIR}/directory-${scheme}.png`;
+  await directory.screenshot({ path: directoryShot });
+  shots.push(directoryShot);
+
+  // 3c. ⌘K with the 사람 section: channels, DMs and people in one palette. The
+  //     query is typed, which is how the palette is actually used, and "김"
+  //     lands on the pair a directory has to keep apart (a human and an agent
+  //     whose display names are both 김인턴).
+  await directory.getByTestId("open-quick-switcher").click();
+  await directory.getByTestId("quick-switcher-input").fill("김");
+  await directory.getByTestId("switcher-person").first().waitFor({ state: "visible" });
+  const switcherShot = `${OUT_DIR}/quick-switcher-people-${scheme}.png`;
+  await directory.screenshot({ path: switcherShot });
+  shots.push(switcherShot);
+  await directory.keyboard.press("Escape");
+
+  // 3d. the DM that a directory row opens: same timeline anatomy as a channel.
+  await directory
+    .locator('[data-testid="directory-row"][data-member-kind="agent"]')
+    .first()
+    .click();
+  await directory.getByTestId("composer-input").waitFor({ state: "visible" });
+  await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
+  await directory.screenshot({ path: dmShot });
+  shots.push(dmShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Activity, Hash, Inbox, Lock, MessageSquare, Search, Settings } from "lucide-react";
+import {
+  Activity,
+  Hash,
+  Inbox,
+  Lock,
+  MessageSquare,
+  Search,
+  Settings,
+  SquarePen,
+  Users,
+} from "lucide-react";
 import type { Channel } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
@@ -24,9 +34,14 @@ import { Button } from "@/design/ui/button";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
-// channels, DMs, and the settings entry. Real momowebqa data throughout: the
-// unread numbers come from the server read-state projection (P7), never from a
-// local count, so they match on every device.
+// the member directory, channels, DMs, and the settings entry. Real momowebqa
+// data throughout: the unread numbers come from the server read-state
+// projection (P7), never from a local count, so they match on every device.
+//
+// 멤버 sits with the global surfaces rather than above the channel list: it is a
+// place you go, not a thing you are subscribed to, and it is the only entry
+// point to starting a DM. The + on the 다이렉트 메시지 header is the second door
+// to the same surface, next to the DMs a person already has (parity G-3/G-4).
 // =============================================================================
 
 function AgentTurnBadge({ channelId }: { channelId: string }) {
@@ -166,6 +181,7 @@ export function Sidebar({
             <ul className="flex flex-col px-2 py-2">
               <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
+              <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
             </ul>
 
             <SidebarSection title="채널">
@@ -192,9 +208,25 @@ export function Sidebar({
               {channels.map(rowFor)}
             </SidebarSection>
 
-            {/* DM 0개면 섹션 자체를 접는다 (R-1 §1 빈 상태). */}
+            {/* DM 0개면 섹션 자체를 접는다 (R-1 §1 빈 상태). 그때의 시작 경로는
+                위의 멤버 행과 ⌘⇧K다. */}
             {dms.length > 0 && (
-              <SidebarSection title="다이렉트 메시지">{dms.map(rowFor)}</SidebarSection>
+              <SidebarSection
+                title="다이렉트 메시지"
+                action={
+                  <Link
+                    to="/directory"
+                    aria-label="새 다이렉트 메시지 시작"
+                    title="새 다이렉트 메시지 (⌘⇧K)"
+                    data-testid="new-dm"
+                    className="flex size-6 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    <SquarePen className="size-4" />
+                  </Link>
+                }
+              >
+                {dms.map(rowFor)}
+              </SidebarSection>
             )}
           </nav>
         </div>
