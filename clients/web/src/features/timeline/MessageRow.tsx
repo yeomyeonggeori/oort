@@ -31,7 +31,14 @@ function relativeLabel(atMs: number, nowMs: number): string {
   return `${Math.round(hours / 24)}일 전`;
 }
 
-function Avatar({ member, name }: { member: RosterMember | null; name: string }) {
+/** Shared with the pending row so an optimistic echo sits on the same grid. */
+export function Avatar({
+  member,
+  name,
+}: {
+  member: RosterMember | null;
+  name: string;
+}) {
   const isAgent = member?.kind === "agent";
   return (
     <span

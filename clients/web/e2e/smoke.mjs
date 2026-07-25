@@ -1,11 +1,19 @@
-// SMOKE (MOMO-598 / R-1 P1): login → channel select → timeline → send → live receipt.
+// SMOKE (MOMO-598 / MOMO-602, R-1 P1): login → channel select → timeline →
+// send → live receipt → duplicate check → reload resume.
 //
-// Drives the real browser bundle against a live momowebqa. Nothing is stubbed:
-// the assertion that a sent message shows up in the timeline IS the realtime
-// assertion, because the composer does no optimistic insert (Composer.tsx: the
-// row can only appear once the Centrifugo publication merges by seq). The run
-// also records `resubscribeCount` before and after, so a row that arrived via a
-// reconnect backfill instead of a live publication is reported, not hidden.
+// Drives the real browser bundle against a live momowebqa. Nothing is stubbed.
+//
+// The send now inserts a local echo (M10), so the live-receipt assertion is
+// deliberately scoped to `timeline-message`, the CONFIRMED row: it carries a
+// data-seq, and only the merge of a server row (POST response or Centrifugo
+// publication) can produce one. The echo renders as `timeline-pending` and is
+// asserted separately, together with the duplicate count across both, which is
+// what proves the reconcile replaced the echo instead of stacking on it.
+//
+// The run also records `resubscribeCount` before and after, so a row that
+// arrived via a reconnect backfill instead of a live publication is reported,
+// not hidden, and finishes by reloading the page to prove the session resumes
+// from the stored refresh token (M9) instead of falling back to the login form.
 //
 // Credentials come ONLY from the shell env, never from source:
 //   MOMO_EMAIL / MOMO_PASSWORD   required
@@ -138,7 +146,8 @@ try {
   record("send", true, token);
 
   // ---- 6) live receipt -----------------------------------------------------
-  // No optimistic insert exists, so this row can only come from the rail.
+  // `timeline-message` is the confirmed row (it has a data-seq), so this waits
+  // on the server echo, not on the optimistic one.
   const t0 = Date.now();
   const arrived = page.locator(
     `[data-testid="timeline-message"]:has-text("${token}")`
@@ -154,11 +163,17 @@ try {
     for (let i = 1; i < seqs.length; i++) {
       if (seqs[i] <= seqs[i - 1]) ascending = false;
     }
+    const echoes = [
+      ...document.querySelectorAll('[data-testid="timeline-pending"]'),
+    ].filter((r) => (r.textContent || "").includes(tok));
     return {
       probe: window.__spike,
       renderedRows: rows.length,
       renderedAscending: ascending,
       arrivedSeq: hit ? Number(hit.getAttribute("data-seq")) : null,
+      confirmedCopies: rows.filter((r) => (r.textContent || "").includes(tok))
+        .length,
+      pendingCopies: echoes.length,
     };
   }, token);
 
@@ -169,6 +184,28 @@ try {
       after.renderedAscending,
     `seq=${after.arrivedSeq} newestSeq=${after.probe.newestSeq} ascending=${after.renderedAscending}`
   );
+
+  // ---- 7) optimistic reconcile: exactly one row, echo settled (M10) --------
+  const copies = after.confirmedCopies + after.pendingCopies;
+  record(
+    "optimistic-reconcile",
+    copies === 1 && after.pendingCopies === 0,
+    `confirmed=${after.confirmedCopies} pending=${after.pendingCopies} probePending=${after.probe.pending}`
+  );
+
+  // ---- 8) session resume across a reload (M9) ------------------------------
+  // The access token is memory-only, so surviving this reload means the stored
+  // refresh token rotated successfully, not that anything was cached.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const resumeOutcome = await Promise.race([
+    page
+      .waitForSelector('[data-testid="channel-list"]', { timeout: 20000 })
+      .then(() => "resumed", () => "timeout"),
+    page
+      .waitForSelector('[data-testid="login-email"]', { timeout: 20000 })
+      .then(() => "logged-out", () => "timeout"),
+  ]);
+  record("session-resume", resumeOutcome === "resumed", resumeOutcome);
 
   result = {
     ...result,
@@ -185,6 +222,10 @@ try {
     resubscribesDuringRun:
       after.probe.resume.resubscribeCount - beforeProbe.resume.resubscribeCount,
     recoveryMarkers: after.probe.recoveryMarkers,
+    // 1 confirmed + 0 pending is the duplicate-free reconcile (M10).
+    confirmedCopies: after.confirmedCopies,
+    pendingCopies: after.pendingCopies,
+    sessionResume: resumeOutcome,
   };
 } catch (err) {
   result = { ...result, error: String(err && err.message ? err.message : err) };

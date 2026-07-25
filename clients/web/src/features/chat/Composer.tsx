@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { SendHorizontal } from "lucide-react";
-import { sendMessage, type Message, type RosterMember } from "@/lib/api";
+import type { RosterMember } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -18,28 +18,17 @@ import { memberFor } from "@/features/workspace/useWorkspace";
 // The mention list is hand-rolled rather than cmdk/Command: a Command popover
 // owns its own input and would pull focus out of the textarea mid-sentence.
 // This keeps the caret in the textarea and exposes a listbox for a11y.
+//
+// Sending is NOT owned here (M10): `onSend` is useTimeline's one send path, so
+// the local echo, the seq reconcile and the failure state all live next to the
+// timeline that renders them. The composer's job ends at clearing the input,
+// which it does immediately: the message is already on screen as a pending row,
+// and a composer that stays full while its message is visible below reads as if
+// nothing happened.
 // =============================================================================
 
 const MAX_ROWS = 6;
 const MENTION_LIMIT = 6;
-
-/**
- * The one send path. The composer's first attempt, its own retry, and the
- * inline retry on a failed timeline row all go through here, so "다시 보내기"
- * can never drift from "보내기".
- *
- * clientMsgId is the idempotency key (L4 §3.1) and a retry mints a NEW one: the
- * failed attempt was never accepted, so reusing its key would be a lie. The
- * message returns over the realtime rail and merges by seq, so there is no
- * optimistic insert to reconcile.
- */
-export function sendComposerMessage(
-  workspaceId: string,
-  channelId: string,
-  body: string
-): Promise<Message> {
-  return sendMessage(workspaceId, channelId, crypto.randomUUID(), body);
-}
 
 interface MentionQuery {
   /** Index of the '@' that opened the query. */
@@ -76,19 +65,19 @@ export function matchMembers(
 }
 
 export function Composer({
-  workspaceId,
   channelId,
   directory,
   channelLabel,
+  onSend,
 }: {
-  workspaceId: string;
+  /** Scopes the agent working signal to this channel; sending goes via onSend. */
   channelId: string;
   directory: Directory;
   channelLabel: string;
+  /** useTimeline's send: inserts the local echo, then reconciles by seq. */
+  onSend: (body: string) => Promise<void> | void;
 }) {
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState<string | null>(null);
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -119,24 +108,20 @@ export function Composer({
     });
   }
 
-  async function submit(body: string) {
-    setBusy(true);
-    setFailed(null);
-    try {
-      await sendComposerMessage(workspaceId, channelId, body);
-      setText("");
-    } catch {
-      setFailed(body);
-    } finally {
-      setBusy(false);
-    }
+  function submit(body: string) {
+    // Clear first, send second. The echo row carries the message from here on,
+    // including its failure state and its retry, so there is nothing left for
+    // the composer to hold on to.
+    setText("");
+    setMentionOpen(false);
+    void onSend(body);
   }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     const body = text.trim();
-    if (!body || busy) return;
-    void submit(body);
+    if (!body) return;
+    submit(body);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -165,27 +150,12 @@ export function Composer({
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       const body = text.trim();
-      if (body && !busy) void submit(body);
+      if (body) submit(body);
     }
   }
 
   return (
     <div className="border-t border-line">
-      {failed !== null && (
-        <div
-          className="flex items-center justify-between gap-3 px-4 py-2 text-body text-danger"
-          role="alert"
-          data-testid="composer-failed"
-        >
-          <span className="min-w-0 flex-1 truncate">
-            메시지를 보내지 못했습니다. 연결을 확인하고 다시 보내세요.
-          </span>
-          <Button variant="outline" size="sm" onClick={() => void submit(failed)}>
-            다시 보내기
-          </Button>
-        </div>
-      )}
-
       <form onSubmit={onSubmit} className="relative flex items-end gap-2 p-3">
         {showMentions && (
           <ul
@@ -247,7 +217,7 @@ export function Composer({
         <Button
           type="submit"
           size="icon"
-          disabled={busy || text.trim().length === 0}
+          disabled={text.trim().length === 0}
           aria-label="메시지 보내기"
           title="메시지 보내기 (⌘↵)"
           data-testid="composer-send"

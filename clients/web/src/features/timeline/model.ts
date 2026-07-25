@@ -86,6 +86,9 @@ export function isStrictlyOrdered(messages: Message[]): boolean {
 /** Author group window: a new header after 5 minutes of the same author. */
 export const AUTHOR_GROUP_WINDOW_MS = 300_000;
 
+/** The two fields grouping depends on; a pending row has them before it has a seq. */
+export type GroupingRow = Pick<Message, "authorMemberId" | "createdAtMs">;
+
 /** Local-day key, used for the day separator and to force a group break. */
 export function dayKey(atMs: number): string {
   const d = new Date(atMs);
@@ -98,8 +101,8 @@ export function dayKey(atMs: number): string {
  * boundary. Continuation rows drop the header for density (Slack convention).
  */
 export function startsAuthorGroup(
-  previous: Message | undefined,
-  current: Message
+  previous: GroupingRow | undefined,
+  current: GroupingRow
 ): boolean {
   if (!previous) return true;
   if (!uuidEq(previous.authorMemberId, current.authorMemberId)) return true;
@@ -123,11 +126,122 @@ export interface RecoveryMarker {
   source: "replay" | "backfill";
 }
 
+// ---- optimistic insert (M10, R-1 §3 "로컬 echo → seq 도착 시 reconcile") -----
+//
+// A message the user just sent has no seq yet: the server mints it inside the
+// write transaction (REST -> PG -> outbox -> relay). Since seq is the ONLY
+// ordering authority in this module, a local echo must never be given a fake
+// one. Pending rows therefore live OUTSIDE the seq array, as a tail overlay
+// appended after the confirmed stream, and the confirmed array keeps its
+// strictly-ascending-by-seq invariant untouched (the seq gate re-implements
+// that fold and would catch any violation).
+//
+// Settlement, i.e. how a pending row is replaced by its confirmed twin:
+//   1. the POST response carries clientMsgId AND seq, so the sender always
+//      learns the exact identity of its own message (the strong path);
+//   2. but the realtime `message.new` frame does NOT carry client_msg_id
+//      (MessageRoutes.broadcastPayload: id/seq/type/body/author/hlc/root only),
+//      and it can beat the POST response back to this client. During that
+//      window the confirmed row is already on screen while the pending row is
+//      still waiting, which is exactly the duplicate this fold removes.
+//
+// So settlement is decided by the render fold, on content the realtime frame
+// does carry: same author, same body, and a seq ABOVE the newest one that
+// existed when the send started. That last clause is what keeps an older
+// identical message ("네") from swallowing a fresh send. Each confirmed message
+// settles at most one pending row, oldest first, so sending the same text twice
+// still shows two rows and settles them one at a time.
+
+export interface PendingMessage {
+  /** Idempotency key (L4 §3.1). Stable across retries of the same attempt. */
+  clientMsgId: string;
+  channelId: string;
+  authorMemberId: string;
+  body: string;
+  createdAtMs: number;
+  /** newestSeq at the moment the send started; the echo must land above it. */
+  sinceSeq: number | null;
+  status: "sending" | "failed";
+}
+
+/** True when `message` is the server's echo of `pending`. */
+export function confirmsPending(
+  message: Message,
+  pending: PendingMessage
+): boolean {
+  if (message.type !== "text") return false;
+  if (message.state === "deleted") return false;
+  if (pending.sinceSeq !== null && message.seq <= pending.sinceSeq) return false;
+  if (!uuidEq(message.authorMemberId, pending.authorMemberId)) return false;
+  return (message.body ?? "") === pending.body;
+}
+
+/**
+ * The pending rows that are still unconfirmed against this message array, in
+ * send order. One confirmed message settles at most one pending row.
+ */
+export function unsettledPending(
+  messages: Message[],
+  pending: PendingMessage[]
+): PendingMessage[] {
+  if (pending.length === 0) return pending;
+  const open = pending.slice();
+  for (const message of messages) {
+    const index = open.findIndex((p) => confirmsPending(message, p));
+    if (index >= 0) open.splice(index, 1);
+    if (open.length === 0) break;
+  }
+  return open;
+}
+
+// ---- pending list transitions (pure, so the hook holds no logic) ------------
+
+export function addPending(
+  list: PendingMessage[],
+  pending: PendingMessage
+): PendingMessage[] {
+  return [...list, pending];
+}
+
+export function removePending(
+  list: PendingMessage[],
+  clientMsgId: string
+): PendingMessage[] {
+  return list.filter((p) => p.clientMsgId !== clientMsgId);
+}
+
+/** The send attempt failed. The row stays put and offers a retry (R-1 §3). */
+export function failPending(
+  list: PendingMessage[],
+  clientMsgId: string
+): PendingMessage[] {
+  return list.map((p) =>
+    p.clientMsgId === clientMsgId ? { ...p, status: "failed" } : p
+  );
+}
+
+/**
+ * Retry a failed row. The clientMsgId is deliberately REUSED: a failed POST
+ * may still have committed on the server (a dropped response, a timeout), and
+ * the idempotency key is exactly what turns that ambiguity into a guarantee.
+ * Re-sending with the same key returns the original message instead of writing
+ * a second one, which is what makes the duplicate count zero here.
+ */
+export function retryPending(
+  list: PendingMessage[],
+  clientMsgId: string
+): PendingMessage[] {
+  return list.map((p) =>
+    p.clientMsgId === clientMsgId ? { ...p, status: "sending" } : p
+  );
+}
+
 export type TimelineItem =
   | { kind: "day"; key: string; atMs: number }
   | { kind: "unread"; key: string; count: number }
   | { kind: "recovery"; key: string; seq: number; source: "replay" | "backfill" }
-  | { kind: "message"; key: string; message: Message; startsGroup: boolean };
+  | { kind: "message"; key: string; message: Message; startsGroup: boolean }
+  | { kind: "pending"; key: string; pending: PendingMessage; startsGroup: boolean };
 
 export interface BuildItemsOptions {
   /** Server read cursor (P7). The divider sits above the first newer message. */
@@ -136,6 +250,8 @@ export interface BuildItemsOptions {
   unreadCount?: number;
   /** Reconnect markers, each anchored after the seq it recovered up to. */
   recoveryMarkers?: RecoveryMarker[];
+  /** Local echoes of messages this client sent, still awaiting their seq. */
+  pending?: PendingMessage[];
 }
 
 /**
@@ -146,7 +262,12 @@ export function buildTimelineItems(
   messages: Message[],
   options: BuildItemsOptions = {}
 ): TimelineItem[] {
-  const { lastReadSeq = null, unreadCount = 0, recoveryMarkers = [] } = options;
+  const {
+    lastReadSeq = null,
+    unreadCount = 0,
+    recoveryMarkers = [],
+    pending = [],
+  } = options;
   const items: TimelineItem[] = [];
   let previous: Message | undefined;
   let unreadPlaced = false;
@@ -215,6 +336,22 @@ export function buildTimelineItems(
       dividerAbove = true;
     }
     previous = message;
+  }
+
+  // Pending rows close the stream: they are always the newest thing the user
+  // did, and they carry no seq to be sorted by. A row whose confirmed twin is
+  // already in `messages` is dropped here, which is where "중복 0" is enforced
+  // regardless of whether the POST response or the realtime frame won the race.
+  let previousRow: GroupingRow | undefined = previous;
+  for (const row of unsettledPending(messages, pending)) {
+    items.push({
+      kind: "pending",
+      key: `p-${row.clientMsgId}`,
+      pending: row,
+      startsGroup: dividerAbove || startsAuthorGroup(previousRow, row),
+    });
+    dividerAbove = false;
+    previousRow = row;
   }
   return items;
 }
