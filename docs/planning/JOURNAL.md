@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-25 (Fable wave2 3R 종결) · Blocker0·High0, main 승인 대기
+- **3R 판정**: Blocker 0·High 1·Medium 5 — opaque payload가 픽셀로 증명(rm -rf 인자 미노출+"숨김 3개"), stalled 계약·seq 앵커·낙관 행 전부 런타임 검증. wave1 회귀 0.
+- **수정 반영(오케스트레이터 직접, PR #764)**: H1 초대 발급 카드 포커스 착지(1회 노출 코드가 폴드 아래) · M3 모두읽음 카피 정직화(채널 커서 전진 사실 진술) · M4 와이어 어휘 번역(actionType·availability map-with-fallback) · M5 설정 Esc 편집 중 가드 · N9 payload→원본 데이터. 136/136 tests.
+- 백로그 등재: 인박스 인라인 승인(760 ApprovalActions 재사용, R-1 §2 완성) · aria-controls·title 툴팁·⌘⇧A ctrl 병행 · M2 스펙 정합 질문. 
+- **다음: wave1+2 통합분 track/uxui→main 성재 승인** → P2(Tauri 네이티브: 딥링크·mDNS·updater·keychain) 설계.
+
+
 ## 2026-07-25 (Fable P1 wave2 완주 — 인박스·에이전트 카드·설정 셸·세션/낙관) · track/uxui 랜딩, 3R 리뷰 중
 - 4갈래 병렬(Opus 5, MOMO-599~602) → 통합 브랜치(761→759→760→762) → **136/136 tests·실서버 스모크 2종 PASS**로 track/uxui 랜딩(PR #763).
 - **759 인박스**: 3필터+zero-noise 빈상태+seq 앵커 점프. 실서버로 멘션 계약 실측(대문자 UUID — 케이스 무관 교훈 4번째 적용). data gap 7건 정직(승인 원장 created_at 부재·전역 agent-run REST 부재 등 — 엔진 후속 후보).
