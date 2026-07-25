@@ -99,6 +99,7 @@
    * means w-pane / max-h-pane exist and w-[320px] still never compiles. */
   --spacing-pane-sm: 192px; /* section nav, mention/dropdown list */
   --spacing-pane: 320px; /* thread panel, command list */
+  --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
@@ -152,6 +153,30 @@
 @utility app-shell {
   display: grid;
   grid-template-columns: var(--w-sidebar) 1fr;
+}
+
+/* Streaming caret (R-1 §4). Streaming text gets a CARET, never a shimmer
+ * skeleton: the blink is feedback that a stream is still open, and it stops
+ * being motion at all under prefers-reduced-motion, where the caret stays
+ * steady rather than disappearing. steps(1) so it reads as a text cursor and
+ * not as a decorative fade. */
+@utility caret-stream {
+  animation: momo-caret 1.1s steps(1, end) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes momo-caret {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @layer base {
