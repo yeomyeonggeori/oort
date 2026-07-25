@@ -173,13 +173,21 @@ most of what the credential store was for.
 - Service `app.momo.desktop`, account `refresh-token`. **Stable across builds** —
   changing either silently orphans every stored session.
 - macOS binds an item's ACL to the **signature** of the binary that wrote it, so
-  the spike's unsigned builds left items this signed build can neither read nor
-  overwrite (`errSecAuthFailed`, not `NoEntry`). Without a recovery the probe
-  would fail on every launch forever and quietly downgrade the shell to web
-  storage. `keychain_available` therefore deletes an unreadable item **once per
-  process** and re-probes: the cost is one sign-in, the alternative is a
-  credential store that is never used again. Once per process so that a genuinely
-  locked keychain cannot become a delete loop.
+  an item left by the unsigned spike (or an ad-hoc dev build) is one this signed
+  build may not read. macOS does not answer that with an error: it puts up a
+  **login keychain password dialog**. Measured 2026-07-25 against the signed
+  `0.1.0-next.2` bundle: a modal appeared over the window on launch, before the
+  person had signed in. `keyring`'s `delete_credential` prompted a second time
+  for the same item, so an automatic delete-and-retry doubles the dialogs rather
+  than recovering.
+- The fix is therefore a rule at the call site, not a recovery in Rust: the
+  credential store is touched **only when there is a session to resume or a token
+  to move**. A first launch never asks, because the answer is not used until
+  sign-in. If a write is then refused, the run demotes to web storage with the
+  session intact and `getSessionStorageMode()` reports `web`.
+- Developer machine with an orphaned item, once:
+  `security delete-generic-password -s app.momo.desktop -a refresh-token`
+  (that path deletes without a prompt).
 - `clients/web/src/lib/session.ts` decides at runtime: keychain when the shell
   has one, the pre-existing `momo.web.session.v1` localStorage record otherwise.
   In keychain mode the token is in the credential store and only the non-secret
