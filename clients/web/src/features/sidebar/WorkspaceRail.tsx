@@ -32,9 +32,12 @@ export function WorkspaceRail({
         title={workspaceName}
         data-testid="workspace-current"
       >
+        {/* 2R design-review: -left-2(-8px)는 아바타의 레일 인셋(4px)을 초과해
+            마커가 뷰포트 밖으로 전량 클리핑됐다(0픽셀 렌더 실측). 레일 왼쪽
+            가장자리(x=0)에 앵커한다 — R-1 §1 현재 WS 액센트 바. */}
         <span
           aria-hidden="true"
-          className="absolute -left-2 h-4 w-marker rounded-sm bg-accent"
+          className="absolute -left-1 h-4 w-marker rounded-sm bg-accent"
         />
         {initial}
       </span>
