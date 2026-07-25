@@ -5,6 +5,7 @@ import {
   CHANNEL_NAME_MAX,
   CHANNEL_TOPIC_MAX,
   canCreateChannel,
+  canCreateChannelNow,
   channelNameIssue,
   channelNameIssueMessage,
   channelTopicIssue,
@@ -109,6 +110,22 @@ describe("canCreateChannel", () => {
 
   it("lets the server decide when the roster did not report a role", () => {
     expect(canCreateChannel(undefined)).toBe(true);
+  });
+});
+
+describe("canCreateChannelNow", () => {
+  // R2 M5: an offer that is withdrawn a frame later is worse than a late one.
+  it("offers nothing while the roster is still in flight", () => {
+    expect(canCreateChannelNow(false, "owner")).toBe(false);
+    expect(canCreateChannelNow(false, "member")).toBe(false);
+    expect(canCreateChannelNow(false, undefined)).toBe(false);
+  });
+
+  it("answers as before once it has settled, roleless roster included", () => {
+    expect(canCreateChannelNow(true, "owner")).toBe(true);
+    expect(canCreateChannelNow(true, "admin")).toBe(true);
+    expect(canCreateChannelNow(true, "member")).toBe(false);
+    expect(canCreateChannelNow(true, undefined)).toBe(true);
   });
 });
 

@@ -112,6 +112,7 @@
    * means w-pane / max-h-pane exist and w-[320px] still never compiles. */
   --spacing-pane-sm: 192px; /* section nav, mention/dropdown list */
   --spacing-pane: 320px; /* thread panel, command list */
+  --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
   /* --- radius: three steps, nothing else --------------------------------- */

@@ -80,3 +80,21 @@ export function useOpenCreateChannel(): () => void {
   }
   return open;
 }
+
+/**
+ * 폼 다이얼로그가 지금 열려 있는가.
+ *
+ * 셸의 전역 단축키(⌘K, ⌘⇧K, ⌘,, ⌘⇧A)는 window에 걸려 있어 모달이 떠 있어도
+ * 그대로 발화했다. ⌘K는 팔레트를 폼 위에 겹쳐 띄우고 캐럿을 가져갔으며, 거기서
+ * 채널을 하나 고르면 폼이 열린 채로 다른 채널로 이동했다(R2 M4). 모달이 떠
+ * 있다는 것은 그동안 앱의 유일한 대화 상대가 그것이라는 뜻이므로, 전역 키는 이
+ * 값을 보고 물러선다.
+ *
+ * 여는 함수와 열림 상태를 다른 컨텍스트로 나눈 이유는, 열고 닫을 때마다 verb만
+ * 쓰는 구독자(사이드바, 본문 빈 상태)까지 다시 그리지 않기 위해서다.
+ */
+export const CreateChannelOpenStateContext = createContext(false);
+
+export function useCreateChannelOpen(): boolean {
+  return useContext(CreateChannelOpenStateContext);
+}

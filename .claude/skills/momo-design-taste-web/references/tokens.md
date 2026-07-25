@@ -126,11 +126,18 @@ Control heights are a separate axis from spacing: `h-control-sm` 28px,
 Panes are a third axis. A secondary column is wider than any rhythm step, so it
 gets a **name** rather than an off-grid number, and `w-[320px]` still does not
 compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
-`w-pane` / `max-h-pane` 320px (thread panel, command list), `max-w-pane-lg`
-640px (agent card measure, R-1 §4). The card measure is a token for the same
-reason as the others: let an agent card run the full timeline width and its
-right-aligned numeric column ends up a screen away from its label, at which
-point it stops reading as a card and starts reading as a banner.
+`w-pane` / `max-h-pane` 320px (thread panel, command list), `max-w-pane-md`
+512px (the overlay measure: dialog panel and ⌘K palette), `max-w-pane-lg` 640px
+(agent card measure, R-1 §4). The card measure is a token for the same reason as
+the others: let an agent card run the full timeline width and its right-aligned
+numeric column ends up a screen away from its label, at which point it stops
+reading as a card and starts reading as a banner.
+
+`pane-md` was added last (MOMO-614 R2) because width was the one axis where a
+new surface could still take an unnamed dimension. The dialog and the palette
+both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
+token file had never heard of the measure the two overlays share. They alternate
+at the same anchor, so it is one measure and it gets one name.
 
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
@@ -155,6 +162,16 @@ component must name a role and cannot reach for size inflation:
 | `text-body` | 14px | message body, controls |
 | `text-title` | 16px | surface titles |
 | `text-display` | 20px | at most one per surface |
+
+A role and a color share the `text-` prefix but are **different axes**, and the
+class merge has to be told so. `cn()` (`src/design/lib/cn.ts`) extends
+tailwind-merge with the five roles as its `font-size` group; without that,
+tailwind-merge's font-size validator rejects the role names, both axes collapse
+into `text-color`, and a class list naming a role and a color keeps only the
+last one. That is not hypothetical: it shipped the dialog title at 14px next to
+its own 14px description, and it painted every filled `size="sm"` button label
+in `--ink` instead of `--on-accent` (2.78:1 light, 1.71:1 dark). Adding a sixth
+role means adding it to that list too, and `cn.test.ts` is the check.
 
 Fonts are system stacks only (`--font-sans` includes `Apple SD Gothic Neo` and
 `Noto Sans KR` so Korean does not fall back to a metric-mismatched face). No

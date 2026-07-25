@@ -98,6 +98,26 @@ export function canCreateChannel(role: MembershipRole | undefined): boolean {
 }
 
 /**
+ * The same question, asked while the roster may still be in flight.
+ *
+ * The fallback above answers "a roster that arrived without a role field", and
+ * for that it is right. It cannot also answer "no roster yet", and it was being
+ * asked both: on a slow roster every member saw the +, the ⌘K 만들기 item and
+ * the body [채널 만들기] for a frame, then watched all three disappear (R2 M5).
+ * An offer that is withdrawn is worse than an offer that arrives a beat late,
+ * so until the roster settles the entry points say nothing. Once it settles,
+ * including when it settles as an error, the documented fallback applies again
+ * and the server keeps the last word.
+ */
+export function canCreateChannelNow(
+  rosterSettled: boolean,
+  role: MembershipRole | undefined
+): boolean {
+  if (!rosterSettled) return false;
+  return canCreateChannel(role);
+}
+
+/**
  * A rejected creation, addressed to a place on the form.
  *
  * `field` is what makes this inline rather than a banner: a duplicate name is a

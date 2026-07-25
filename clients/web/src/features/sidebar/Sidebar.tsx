@@ -36,7 +36,7 @@ import {
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { canCreateChannel } from "@/features/channels/model";
+import { canCreateChannelNow } from "@/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
@@ -158,8 +158,11 @@ export function Sidebar({
   // Only an owner/admin can create one (ChannelRoutes.requireWorkspaceAdmin),
   // so a plain member is told who can instead of being handed a + that always
   // ends in 403. That is the dead end this ticket removes, not a new one.
+  // 명부가 도착하기 전에는 아직 아무것도 내밀지 않는다 (R2 M5); 그동안 헤더의
+  // 액션 자리는 아래에서 같은 크기의 빈 칸이 지킨다.
   const openCreateChannel = useOpenCreateChannel();
-  const canCreate = canCreateChannel(selfMember?.role);
+  const rosterSettled = !directoryQuery.isPending;
+  const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
 
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
@@ -310,7 +313,12 @@ export function Sidebar({
                   >
                     <Plus className="size-4" />
                   </button>
-                ) : undefined
+                ) : rosterSettled ? undefined : (
+                  /* 명부를 기다리는 동안 자리만 지킨다. 이 칸이 비면 헤더가
+                     18px로 줄었다가 명부가 오는 순간 28px로 뛰어, 아직
+                     아무것도 하지 않은 사람의 채널 목록이 한 번 내려앉는다. */
+                  <span aria-hidden="true" className="block size-control-sm" />
+                )
               }
             >
               {channelsQuery.isLoading && <SkeletonRows rows={4} />}
@@ -322,17 +330,30 @@ export function Sidebar({
                   testId="channels-error"
                 />
               )}
-              {/* 빈 워크스페이스의 [채널 만들기]는 본문 하나뿐이다. 여기에도
-                  같은 액센트 버튼을 두면 200px 간격으로 같은 버튼 둘이 서로
-                  primary를 다퉜고, 권한 없는 멤버에게는 같은 문장이 사이드바와
-                  본문에 두 번 반복됐다(R-1 §1 "액션 1개", SKILL §5 empty).
-                  이 자리는 이 목록이 비었다는 사실만 말한다. 본문의 초대와 같은
-                  문장을 되풀이하지 않으려고 이 목록을 주어로 쓰고, 만들 수 있는
-                  사람에게는 바로 위의 +와 팔레트를 가리킨다. */}
+              {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
+                  본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
+                  좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
+                  있고, 서술형 문장은 지시가 아니며, 문장 첫머리의 +는 글머리표로
+                  읽혔다(R2 M6). 그래서 액션을 여기에도 두되 outline이다: 액센트
+                  하나는 본문에만 있어 200px 간격으로 primary 둘이 다투지 않고,
+                  여기 있는 것은 같은 일로 가는 조용한 두 번째 문이다.
+                  만들 수 없는 멤버에게는 여전히 이 목록이 비었다는 사실뿐이고,
+                  누가 만들 수 있는지는 본문이 한 번만 말한다. */}
               {!channelsQuery.isLoading && !channelsQuery.error && channels.length === 0 && (
                 <EmptyInvite
                   headline="채널 목록이 비어 있습니다."
-                  detail={canCreate ? "+ 또는 ⌘K로 만듭니다." : undefined}
+                  actions={
+                    canCreate ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={openCreateChannel}
+                        data-testid="sidebar-create-channel"
+                      >
+                        채널 만들기
+                      </Button>
+                    ) : undefined
+                  }
                   testId="channels-empty"
                 />
               )}

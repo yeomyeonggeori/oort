@@ -27,6 +27,7 @@ import {
 } from "./model";
 import {
   CreateChannelOpenContext,
+  CreateChannelOpenStateContext,
   useCreateChannel,
 } from "./useCreateChannel";
 
@@ -160,6 +161,7 @@ function CreateChannelPanel({
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   const nameIssue = channelNameIssue(name);
@@ -192,8 +194,12 @@ function CreateChannelPanel({
     if (pending || offline) return;
     if (nameIssue !== null || topicIssue !== null) {
       // Land the caret on the field that has to change, the same way the mac
-      // sheet does, so the message and the cursor are in one place.
-      nameRef.current?.focus();
+      // sheet does, so the message and the cursor are in one place. The name
+      // comes first when both are wrong, because it is the field the form
+      // starts on and the only required one; a valid name with a 300자 주제
+      // sends the caret to 주제, where the message actually is (R2 M1).
+      const target = nameIssue !== null ? nameRef : topicRef;
+      target.current?.focus();
       return;
     }
     const normalizedTopic = normalizeChannelTopic(topic);
@@ -300,6 +306,7 @@ function CreateChannelPanel({
         >
           <Input
             id="create-channel-topic"
+            ref={topicRef}
             name="topic"
             value={topic}
             onChange={onInput("topic")}
@@ -381,18 +388,22 @@ function CreateChannelPanel({
         {/* 진행 중은 비활성이 아니라 바쁜 것이다. `disabled`를 걸면 하우스의
             disabled 흐리기(opacity-50)가 라벨을 2.2:1로 낮추는데, 하필 그
             순간의 라벨이 유일한 진행 신호다. 그래서 바쁜 동안에는 대비를 그대로
-            두고 버튼 안 스피너를 켜며(R-1 5장), 클릭은 submit이 막는다. 반대로
-            오프라인은 진짜로 할 수 없는 일이라 진짜 disabled에 이유 툴팁이다. */}
+            두고 버튼 안 스피너를 켜며(R-1 5장), 클릭은 submit이 막는다. 그
+            상태를 말하는 속성은 `aria-busy` 하나다: 조작이 실제로 가능한
+            컨트롤에 `aria-disabled`까지 붙이면 스크린리더는 "사용 불가"라고
+            읽는데 Enter는 그대로 먹는다(R2 M3).
+
+            오프라인은 반대로 진짜 할 수 없는 일이라 진짜 `disabled`다. 이유는
+            폼 위 배너가 이미 말한다. 여기 `title`을 달아도 하우스 버튼의
+            `disabled:pointer-events-none` 때문에 hover 자체가 도달하지 않아
+            영원히 뜨지 않는 툴팁이었다(R2 M2). 같은 사실을 두 번 약속하느니
+            한 번 지킨다. */}
         <Button
           type="submit"
           form={FORM_ID}
           size="sm"
           disabled={offline}
-          aria-disabled={pending || undefined}
           aria-busy={pending || undefined}
-          title={
-            offline ? "연결이 끊겨 지금은 만들 수 없습니다." : undefined
-          }
           data-testid="create-channel-submit"
         >
           {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
@@ -445,7 +456,12 @@ export function CreateChannelProvider({ children }: { children: ReactNode }) {
   const openCreate = useCallback(() => setOpen(true), []);
   return (
     <CreateChannelOpenContext.Provider value={openCreate}>
-      {children}
+      {/* 열림 상태는 별도 컨텍스트다. 셸의 전역 단축키가 모달 위에서 발화하지
+          않으려면 이 값을 읽어야 하고(R2 M4), verb만 쓰는 진입점 셋은 이
+          상태 변화로 다시 그릴 이유가 없다. */}
+      <CreateChannelOpenStateContext.Provider value={open}>
+        {children}
+      </CreateChannelOpenStateContext.Provider>
       <CreateChannelDialog
         open={open}
         onOpenChange={setOpen}

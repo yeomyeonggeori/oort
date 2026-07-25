@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { buttonVariants } from "@/design/ui/button";
 import { cn } from "./cn";
 
 /**
@@ -9,10 +10,11 @@ import { cn } from "./cn";
  * build warning: the class is simply absent from the DOM and the element
  * renders one role too large.
  *
- * That is not a hypothetical. It shipped: the sidebar agent turn pill was
- * written as cn("... text-timestamp", live ? "bg-agent-soft text-agent" : ...)
- * and measured 14px on screen beside an 11px unread count. These assertions are
- * the mechanical check that lesson turns into.
+ * That is not a hypothetical. It shipped twice, independently: the sidebar
+ * agent turn pill measured 14px beside an 11px unread count (MOMO-613 R2 H-1),
+ * and the dialog title rendered at body size while every filled `size="sm"`
+ * button lost its `--on-accent` label (MOMO-614 R2 H1/H2). These assertions are
+ * the mechanical check both lessons turn into.
  */
 
 const tokensCss = readFileSync(
@@ -64,5 +66,45 @@ describe("cn", () => {
         `text-${role} text-ink-muted`
       );
     }
+  });
+});
+
+describe("cn: role and color are different axes", () => {
+  it("keeps both across separate arguments, which is how overrides arrive", () => {
+    // DialogTitle's own class list, plus a caller recoloring it.
+    expect(cn("text-title font-semibold text-ink", "text-ink-muted")).toBe(
+      "text-title font-semibold text-ink-muted"
+    );
+  });
+
+  it("lets a caller override the role and the color independently", () => {
+    expect(cn("text-meta text-ink-muted", "text-body text-ink")).toBe(
+      "text-body text-ink"
+    );
+    expect(cn("text-meta text-ink-muted", "text-ink")).toBe("text-meta text-ink");
+  });
+});
+
+describe("Button keeps its label color at every size", () => {
+  // R2 H2: the accent fill is unreadable if `text-meta` evicts `text-on-accent`.
+  // Button renders `cn(buttonVariants(...))`, so the merge is what ships.
+  it("filled sizes all carry text-on-accent", () => {
+    for (const size of ["default", "sm", "lg", "icon"] as const) {
+      expect(cn(buttonVariants({ variant: "default", size }))).toContain(
+        "text-on-accent"
+      );
+    }
+  });
+
+  it("the small size is still 12px", () => {
+    expect(cn(buttonVariants({ variant: "default", size: "sm" }))).toContain(
+      "text-meta"
+    );
+  });
+
+  it("destructive keeps text-on-danger at small size", () => {
+    expect(cn(buttonVariants({ variant: "destructive", size: "sm" }))).toContain(
+      "text-on-danger"
+    );
   });
 });

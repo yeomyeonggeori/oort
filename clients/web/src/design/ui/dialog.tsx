@@ -42,6 +42,13 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  * the 32px inset it sits at, so a short window scrolls the panel body and never
  * the document (MOMO-610). Callers put the scrolling box inside.
  *
+ * Its width is `max-w-pane-md` (512px), the same named measure the ⌘K palette
+ * uses, because an overlay is a pane and a pane has a name. It used to be the
+ * stock container scale, which is the same number wearing no name: width was
+ * the one axis where a new surface could still take a dimension the token file
+ * had never heard of (R2 M7, tokens.md §4). Naming the class in this comment
+ * would be enough for Tailwind to emit it, so it is not named.
+ *
  * Closing returns the caret to whatever opened the dialog. Radix's own
  * `onCloseAutoFocus` focuses `DialogTrigger`, and every dialog in this app is
  * opened programmatically (a sidebar button, a command palette item), so that
@@ -66,7 +73,7 @@ export const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "dialog-panel fixed left-1/2 top-8 flex w-full max-w-lg -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
+          "dialog-panel fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
           className
         )}
         onCloseAutoFocus={(event) => {
@@ -89,6 +96,13 @@ export const DialogContent = React.forwardRef<
 });
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
+/**
+ * 16px, and the description under it stays 14px. Naming a role and a color in
+ * one `cn()` used to cost the role: tailwind-merge read `text-title` as a color
+ * and kept only `text-ink`, so this title shipped at body size and the dialog
+ * had no first line (R2 H1). The two axes are separated in design/lib/cn.ts and
+ * asserted in cn.test.ts, which is why the pair below is safe to write.
+ */
 export const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>

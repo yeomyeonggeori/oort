@@ -23,7 +23,7 @@ import {
   makeSyntheticMessages,
 } from "@/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
-import { canCreateChannel } from "@/features/channels/model";
+import { canCreateChannelNow } from "@/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import {
   EmptyInvite,
@@ -216,11 +216,14 @@ export function ChatShell() {
   const offline = stressCount === 0 && connStatus === "disconnected";
   const hasChannel = stressCount > 0 || channelId !== null;
 
-  // 빈 워크스페이스의 유일한 행동. 이 버튼은 /settings로 보내는 막다른 골목이었고
-  // (설정에는 그런 폼이 없다), 이제 같은 자리에서 채널 만들기 다이얼로그를 연다
-  // (MOMO-614). 만들 수 없는 멤버에게는 버튼 대신 누가 만들 수 있는지 말한다.
+  // 빈 워크스페이스에서 가장 큰 행동. 이 버튼은 /settings로 보내는 막다른
+  // 골목이었고 (설정에는 그런 폼이 없다), 이제 같은 자리에서 채널 만들기
+  // 다이얼로그를 연다 (MOMO-614). 만들 수 없는 멤버에게는 버튼 대신 누가 만들 수
+  // 있는지 말한다. 명부가 도착하기 전에는 아무 말도 하지 않는다: 늦게 오는
+  // 버튼보다 왔다가 사라지는 버튼이 나쁘다 (R2 M5).
   const openCreateChannel = useOpenCreateChannel();
-  const canCreate = canCreateChannel(
+  const canCreate = canCreateChannelNow(
+    !directoryQuery.isPending,
     memberFor(directory, session.member.id)?.role
   );
 
