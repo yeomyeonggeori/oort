@@ -41,3 +41,22 @@ export function freshnessLabel(atMs: number): string {
   const at = new Date(atMs);
   return `${clockLabel(atMs)}:${String(at.getSeconds()).padStart(2, "0")}`;
 }
+
+/**
+ * How long the stream has actually been silent, in words.
+ *
+ * The survival signal turns on at SLOW_STEP_MS, and the copy used to state that
+ * THRESHOLD ("10초 넘게 새 신호가 없습니다") no matter how long the silence had
+ * really run: a five minute gap read as ten seconds, which is the threshold
+ * masquerading as an observation. The number a reader needs in order to decide
+ * whether to wait or to intervene is the elapsed one, so that is the number
+ * every surface says.
+ */
+export function silenceLabel(sinceMs: number, nowMs: number): string {
+  const seconds = Math.max(0, Math.floor((nowMs - sinceMs) / 1000));
+  if (seconds < 60) return `${seconds}초`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}분 ${seconds % 60}초`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}시간 ${minutes % 60}분`;
+}

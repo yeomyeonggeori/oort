@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -40,6 +40,7 @@ import {
   freshnessLabel,
   ROW_STATE_CLASS,
   SESSION_STATUS_CLASS,
+  silenceLabel,
 } from "./workSessionFormat";
 import { WorkSessionDetail } from "./WorkSessionDetail";
 
@@ -56,7 +57,10 @@ import { WorkSessionDetail } from "./WorkSessionDetail";
 //
 // The list is for peeking and the detail is for reading. Choosing a row shows an
 // inline preview UNDER that row without leaving the list (Claude Agent View's
-// "do not lose your place"), and going in is a separate, named action.
+// "do not lose your place"), and going in is a separate, named action. Choosing
+// means clicking or pressing Enter: a preview that opens itself on hover moves
+// every row below it while the cursor is still travelling, and reads a thread
+// nobody asked for.
 // =============================================================================
 
 function ScopeButton({
@@ -88,10 +92,23 @@ function ScopeButton({
   );
 }
 
+/** DOM id of the peek a row controls, so the two are linked for a11y. */
+function peekDomId(sessionId: string): string {
+  return `work-peek-${sessionId.toLowerCase()}`;
+}
+
 /**
  * One session in the list. Choosing it peeks; the preview under it carries the
  * action that actually opens it. A row is a button and nothing is nested inside
  * it, so the whole list stays reachable with Tab and arrow keys.
+ *
+ * Peeking is an EXPLICIT choice (click or Enter), never a hover and never a
+ * focus. The preview is inserted under the row inside the same <li>, so opening
+ * one pushes every row below it down by its full height; on hover that turned
+ * running the cursor across the list into a 90px bounce per row, with the row
+ * under the cursor changing identity mid-gesture, and each pass also fired a
+ * `/replies` read for a session nobody had asked to see. `onFocus` had the same
+ * two effects once per Tab stop.
  */
 function SessionRow({
   session,
@@ -102,6 +119,7 @@ function SessionRow({
   lastEventAtMs,
   summary,
   onPeek,
+  rowRef,
 }: {
   session: WorkSession;
   channelName: string;
@@ -111,17 +129,18 @@ function SessionRow({
   lastEventAtMs: number | null;
   summary: string | null;
   onPeek: () => void;
+  rowRef: (element: HTMLButtonElement | null) => void;
 }) {
   const status = workSessionStatus(session);
   const slow = live && isSlowStep(session, lastEventAtMs, nowMs);
   const elapsed = elapsedLabel(session.startedAtMs, session.endedAtMs ?? nowMs);
   return (
     <button
+      ref={rowRef}
       type="button"
       onClick={onPeek}
-      onMouseEnter={onPeek}
-      onFocus={onPeek}
       aria-expanded={peeked}
+      {...(peeked ? { "aria-controls": peekDomId(session.id) } : {})}
       data-testid="work-session-row"
       data-session-id={session.id}
       data-status={status.key}
@@ -150,19 +169,26 @@ function SessionRow({
             "shrink-0 font-mono text-timestamp",
             !live ? "text-ink-muted" : slow ? "text-warn" : "text-ink-muted"
           )}
-          title={
-            slow
-              ? "10초 넘게 새 신호가 없습니다. 아직 실행 중입니다."
-              : undefined
-          }
         >
           {elapsed}
         </span>
       </span>
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="shrink-0 text-meta text-ink-muted">{channelName}</span>
-        {/* The second half is either the newest line the rail delivered, or the
-            two facts the ledger row itself carries. It is never "아직 단계가
+        {/* The survival signal is a WORD, not a hue. It used to be a color
+            change on the clock with the explanation in a `title`, which a
+            keyboard or screen reader user never reaches and which leaves colour
+            carrying the state on its own (SKILL §6). */}
+        {slow && lastEventAtMs !== null && (
+          <span
+            className="shrink-0 text-meta text-warn"
+            data-testid="work-session-slow"
+          >
+            신호 없음 {silenceLabel(lastEventAtMs, nowMs)}
+          </span>
+        )}
+        {/* The rest is either the newest line the rail delivered, or the two
+            facts the ledger row itself carries. It is never "아직 단계가
             없습니다": this row has not read the session thread, and absence of
             evidence would be stated here as evidence of absence. */}
         <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
@@ -198,13 +224,15 @@ function SessionPeek({
     [liveEvents, session.id]
   );
   const query = useSessionEvents(workspaceId, session, mine);
+  const truncated = query.truncated;
   const rows = useMemo(
-    () => foldSessionEvents(query.events, session).rows,
-    [query.events, session]
+    () => foldSessionEvents(query.events, session, truncated).rows,
+    [query.events, session, truncated]
   );
   const tail = peekRows(rows);
   return (
     <div
+      id={peekDomId(session.id)}
       className="border-y border-line bg-surface-raised px-4 py-2"
       data-testid="work-session-peek"
       data-session-id={session.id}
@@ -266,10 +294,24 @@ function SessionPeek({
 
 export function WorkPanel({
   channelId,
+  scope: requestedScope,
+  onScopeChange,
+  selectedId,
+  onSelectedIdChange,
   onClose,
 }: {
   /** The open channel, or null when the route has none. */
   channelId: string | null;
+  /**
+   * Scope and selection live in ChatShell, not here. Closing the panel unmounts
+   * it, and holding them locally meant every close threw away the range you had
+   * chosen and the session you were reading: reopening dropped an all-workspace
+   * view back to the current channel, which is frequently an empty list.
+   */
+  scope: WorkScope;
+  onScopeChange: (scope: WorkScope) => void;
+  selectedId: string | null;
+  onSelectedIdChange: (sessionId: string | null) => void;
   onClose: () => void;
 }) {
   const { session: auth, workspaceId, connStatus } = useSession();
@@ -278,11 +320,49 @@ export function WorkPanel({
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
 
-  const [scope, setScope] = useState<WorkScope>(
-    channelId === null ? "all" : "channel"
-  );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // With no open channel there is no channel scope to be in, whatever the
+  // remembered preference says.
+  const scope: WorkScope = channelId === null ? "all" : requestedScope;
   const [peekId, setPeekId] = useState<string | null>(null);
+
+  // ---- focus ownership -----------------------------------------------------
+  // Every step in and out of this panel hands the caret somewhere explicit. It
+  // used to fall to <body>: entering the detail left focus nowhere, which also
+  // took Escape (handled on the <aside>) out of reach, so the one keyboard path
+  // into the detail disabled the keyboard path back out of it. Closing the
+  // panel stranded the caret the same way instead of returning it to the
+  // toggle that opened it. The house rule is already the other one:
+  // design/ui/dialog.tsx captures its opener and restores it.
+  const asideRef = useRef<HTMLElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const openerRef = useRef<HTMLElement | null>(null);
+  if (openerRef.current === null && typeof document !== "undefined") {
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement ? active : null;
+  }
+  const [restoreRowId, setRestoreRowId] = useState<string | null>(null);
+
+  const closePanel = useCallback(() => {
+    const opener = openerRef.current;
+    onClose();
+    if (opener?.isConnected) opener.focus();
+  }, [onClose]);
+
+  const closeDetail = useCallback(() => {
+    const id = selectedId;
+    onSelectedIdChange(null);
+    if (id !== null) setRestoreRowId(id);
+  }, [selectedId, onSelectedIdChange]);
+
+  useEffect(() => {
+    if (restoreRowId === null) return;
+    setRestoreRowId(null);
+    const row = rowRefs.current.get(restoreRowId.toLowerCase());
+    // A session that left the list while it was open (scope change, ended and
+    // filtered out) has no row to go back to; the panel itself takes the caret
+    // so the next Tab starts here rather than at the top of the document.
+    (row ?? asideRef.current)?.focus();
+  }, [restoreRowId]);
 
   const sessions = useMemo(
     () => sortSessions(sessionsQuery.data ?? []),
@@ -325,9 +405,9 @@ export function WorkPanel({
   // detail view of a session the list no longer holds is a view of nothing.
   useEffect(() => {
     if (selectedId !== null && selected === null && !sessionsQuery.isPending) {
-      setSelectedId(null);
+      onSelectedIdChange(null);
     }
-  }, [selectedId, selected, sessionsQuery.isPending]);
+  }, [selectedId, selected, sessionsQuery.isPending, onSelectedIdChange]);
 
   useEffect(() => {
     setPeekId(null);
@@ -358,6 +438,8 @@ export function WorkPanel({
 
   return (
     <aside
+      ref={asideRef}
+      tabIndex={-1}
       aria-label="작업 세션"
       data-testid="work-panel"
       data-scope={scope}
@@ -367,22 +449,22 @@ export function WorkPanel({
         // detail to the list, out of the peek to the plain list, then out.
         if (selectedId !== null) {
           event.stopPropagation();
-          setSelectedId(null);
+          closeDetail();
         } else if (peekId !== null) {
           event.stopPropagation();
           setPeekId(null);
         } else {
-          onClose();
+          closePanel();
         }
       }}
-      className="flex h-full w-pane shrink-0 flex-col border-l border-line bg-surface"
+      className="work-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
     >
       <header className="flex flex-col gap-1 border-b border-line px-4 py-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-body font-semibold">작업 세션</h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={closePanel}
             aria-label="작업 세션 닫기"
             data-testid="work-panel-close"
             className="flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
@@ -394,38 +476,41 @@ export function WorkPanel({
           <ScopeButton
             active={scope === "channel"}
             label={scopeLabel}
-            onClick={() => setScope("channel")}
+            onClick={() => onScopeChange("channel")}
             testId="work-scope-channel"
           />
           <ScopeButton
             active={scope === "all"}
             label="전체"
-            onClick={() => setScope("all")}
+            onClick={() => onScopeChange("all")}
             testId="work-scope-all"
           />
         </div>
         {/* The count is a claim about the server, so it waits for the server.
-            While the list is loading or failed there is no number here at all.
-            The scope is NOT repeated here: it is one control away, above, and
-            saying it twice cost a whole line of a 320px column. */}
-        <p className="text-meta text-ink-muted" data-testid="work-panel-summary">
-          {sessionsQuery.isPending ? (
-            "세션을 불러오는 중입니다."
-          ) : sessionsQuery.error !== null ? (
-            "세션 목록을 확인하지 못했습니다."
-          ) : (
-            <>
-              세션{" "}
-              <span data-numeric className="font-mono">
-                {visible.length}
-              </span>
-              개 · 마지막 갱신{" "}
-              <span data-numeric className="font-mono">
-                {freshnessLabel(updatedAt)}
-              </span>
-            </>
-          )}
-        </p>
+            While the list is loading there is no number here at all, and when
+            the read FAILED this line is gone entirely: the banner below already
+            says so, and saying it twice in two different sentences ("확인하지
+            못했습니다" / "불러오지 못했습니다") reads as two problems.
+            The scope is NOT repeated here either: it is one control away,
+            above, and saying it twice cost a whole line of a 320px column. */}
+        {sessionsQuery.error === null && (
+          <p className="text-meta text-ink-muted" data-testid="work-panel-summary">
+            {sessionsQuery.isPending ? (
+              "세션을 불러오는 중입니다."
+            ) : (
+              <>
+                세션{" "}
+                <span data-numeric className="font-mono">
+                  {visible.length}
+                </span>
+                개 · 마지막 갱신{" "}
+                <span data-numeric className="font-mono">
+                  {freshnessLabel(updatedAt)}
+                </span>
+              </>
+            )}
+          </p>
+        )}
       </header>
 
       {!live && (
@@ -455,7 +540,7 @@ export function WorkPanel({
           liveEvents={rail.liveEvents}
           live={live}
           nowMs={nowMs}
-          onBack={() => setSelectedId(null)}
+          onBack={closeDetail}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -487,7 +572,7 @@ export function WorkPanel({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setScope("all")}
+                      onClick={() => onScopeChange("all")}
                       data-testid="work-empty-all"
                     >
                       전체 범위로 보기
@@ -512,14 +597,19 @@ export function WorkPanel({
                       nowMs={nowMs}
                       lastEventAtMs={folded.lastEventAtMs}
                       summary={lastLine(folded.rows)}
-                      onPeek={() => setPeekId(session.id)}
+                      onPeek={() => setPeekId(peeked ? null : session.id)}
+                      rowRef={(element) => {
+                        const key = session.id.toLowerCase();
+                        if (element) rowRefs.current.set(key, element);
+                        else rowRefs.current.delete(key);
+                      }}
                     />
                     {peeked && (
                       <SessionPeek
                         session={session}
                         hosts={hostsQuery.data}
                         liveEvents={rail.liveEvents}
-                        onOpen={() => setSelectedId(session.id)}
+                        onOpen={() => onSelectedIdChange(session.id)}
                       />
                     )}
                   </li>

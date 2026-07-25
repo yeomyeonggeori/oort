@@ -20,6 +20,7 @@ import {
   workSessionStatus,
   type WorkSessionEvent,
 } from "./workSessionModel";
+import { silenceLabel } from "./workSessionFormat";
 
 // =============================================================================
 // The rules the 작업 세션 panel renders (AX-3 / MOMO-618).
@@ -352,6 +353,86 @@ describe("foldSessionEvents", () => {
     ]);
   });
 
+  // The projection carries ONE slice per agent.partial (`text_delta`, no
+  // cumulative field) and a host emits one per transcript chunk, up to 200 for
+  // a single answer. These are the shapes momowebqa relayed for one sentence.
+  it("folds a run of deltas into one message row, clocked at the first", () => {
+    const folded = foldSessionEvents(
+      events(
+        reply("agent.status", { terminal_event: "created" }, 1_784_998_548_500),
+        reply("agent.partial", { text_delta: "워커 로그를 읽었습니" }, 1_784_998_549_000),
+        reply("agent.partial", { text_delta: "다. 재시작 루프가 1" }, 1_784_998_549_200),
+        reply("agent.partial", { text_delta: "건 있었고," }, 1_784_998_549_400)
+      ),
+      session({ status: "ended" })
+    );
+    expect(folded.rows.map((row) => [row.kind, row.headline])).toEqual([
+      ["lifecycle", "세션을 시작함"],
+      ["message", "워커 로그를 읽었습니다. 재시작 루프가 1건 있었고,"],
+    ]);
+    expect(folded.rows[1].atMs).toBe(1_784_998_549_000);
+  });
+
+  it("marks an open stream running and closes it on the next typed event", () => {
+    const open = foldSessionEvents(
+      events(
+        reply("agent.partial", { text_delta: "확인해 보겠습니다" }),
+        reply("agent.partial", { text_delta: ". 잠시만요." })
+      ),
+      session()
+    );
+    expect(open.rows).toHaveLength(1);
+    expect(open.rows[0].state).toBe("running");
+
+    const closed = foldSessionEvents(
+      events(
+        reply("agent.partial", { text_delta: "확인해 보겠습니다" }),
+        reply("agent.status", { tool_call_name: "read_file", detail: "api.ts" }),
+        reply("agent.partial", { text_delta: "다시 시작합니다" })
+      ),
+      session()
+    );
+    expect(closed.rows.map((row) => [row.kind, row.state])).toEqual([
+      ["message", "done"],
+      ["tool", "done"],
+      ["message", "running"],
+    ]);
+  });
+
+  it("drops an agent.status that carries nothing a row could say", () => {
+    const folded = foldSessionEvents(
+      events(
+        reply("agent.status", {
+          phase: "thinking",
+          run_status: "running",
+          has_plan: true,
+          plan: [{ content: "관전 패널 반려 정리", status: "in_progress" }],
+        }),
+        reply("agent.status", { phase: "thinking", run_status: "running" })
+      ),
+      session()
+    );
+    expect(folded.rows).toEqual([]);
+    expect(folded.plan).toEqual([
+      { content: "관전 패널 반려 정리", status: "in_progress" },
+    ]);
+  });
+
+  it("promotes nothing to 진행 중 when the newest rows were not fetched", () => {
+    const stream = events(
+      reply("agent.status", { tool_call_name: "shell", detail: "빌드" }),
+      reply("agent.partial", { text_delta: "빌드를 걸었습니다" })
+    );
+    expect(
+      foldSessionEvents(stream, session()).rows.map((row) => row.state)
+    ).toEqual(["done", "running"]);
+    // `truncated`: the thread was longer than the panel read, so the last row
+    // held is the last row FETCHED and may be a thousand events old.
+    expect(
+      foldSessionEvents(stream, session(), true).rows.map((row) => row.state)
+    ).toEqual(["done", "done"]);
+  });
+
   it("does not blame the last step for the session's exit code", () => {
     const folded = foldSessionEvents(
       events(reply("agent.status", { tool_call_name: "shell", detail: "빌드" })),
@@ -438,6 +519,24 @@ describe("list surfaces", () => {
     expect(peekRows(folded.rows, 1)).toHaveLength(1);
   });
 
+  it("flattens a streamed answer into the one line a row can hold", () => {
+    const folded = foldSessionEvents(
+      events(
+        reply("agent.partial", { text_delta: "정리했습니다.\n\n" }),
+        reply("agent.partial", { text_delta: "  다음은 게이트입니다." })
+      ),
+      session({ status: "ended" })
+    );
+    expect(lastLine(folded.rows)).toBe("정리했습니다. 다음은 게이트입니다.");
+  });
+
+  it("states the measured silence, never the threshold that triggered it", () => {
+    const at = 1_784_998_548_000;
+    expect(silenceLabel(at, at + 12_000)).toBe("12초");
+    expect(silenceLabel(at, at + 300_000)).toBe("5분 0초");
+    expect(silenceLabel(at, at + 3_840_000)).toBe("1시간 4분");
+  });
+
   it("watches the open channel first and reports what the cap left out", () => {
     const running = Array.from({ length: 10 }, (_, i) =>
       session({ id: `s${i}`, channelId: `0000000${i}-0000-7000-8000-00000000020${i}` })
@@ -464,6 +563,26 @@ describe("composeExcerpt", () => {
         "",
         "파일 읽음: api.ts",
         "읽었습니다.",
+      ].join("\n")
+    );
+  });
+
+  // Sharing writes into the channel thread, permanently. Before the deltas were
+  // folded, this wrote the agent's answer chopped at whatever byte the
+  // transport happened to cut, one fragment per line, into the ledger.
+  it("shares the whole answer, not the slices it arrived in", () => {
+    const folded = foldSessionEvents(
+      events(
+        reply("agent.partial", { text_delta: "재시작 루프는 outbox_dr" }),
+        reply("agent.partial", { text_delta: "ain 타임아웃이었습니다." })
+      ),
+      session({ status: "ended" })
+    );
+    expect(composeExcerpt(session(), folded.rows)).toBe(
+      [
+        "세션 발췌: clients/web 관전 패널 왕복 확인",
+        "",
+        "재시작 루프는 outbox_drain 타임아웃이었습니다.",
       ].join("\n")
     );
   });

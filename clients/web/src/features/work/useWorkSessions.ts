@@ -4,6 +4,7 @@ import {
   fetchThreadReplies,
   fetchWorkHosts,
   fetchWorkSessions,
+  uuidEq,
   type WorkSession,
 } from "@/lib/api";
 import { useSession } from "@/app/session";
@@ -28,6 +29,26 @@ import {
 /** How many 200-row pages of a session thread the panel will pull. */
 const EVENT_PAGE_LIMIT = 200;
 const EVENT_MAX_PAGES = 5;
+
+/**
+ * Bound on the live tail (agentWorkingSignal's IDLE_CUTOFF/ZOMBIE_CLEAR sweep,
+ * ported to a buffer that has no clock of its own).
+ *
+ * This panel is built to be left open, it watches up to
+ * MAX_WORK_CHANNEL_SUBSCRIPTIONS channels at once, and a single answer can
+ * publish 200 `agent.partial` frames (codex_workbench MAX_PARTIAL_EVENTS). An
+ * unbounded array is therefore not a slow leak but the normal case, and the
+ * dedupe used to be a linear scan of it on every frame, so the cost was
+ * quadratic in the length of a watch.
+ *
+ * Dropping the oldest entries is safe in a way it would not be for a timeline:
+ * every one of them is already durable in the session thread the panel reads
+ * over REST, and `mergeEvents` prefers that durable row anyway. What is trimmed
+ * is re-read, never lost. Trimming in one bite down to KEEP (rather than one
+ * entry per frame) is what keeps the rebuild amortised.
+ */
+const LIVE_EVENT_CAP = 400;
+const LIVE_EVENT_KEEP = 300;
 
 export function useWorkSessions(workspaceId: string) {
   return useQuery({
@@ -139,6 +160,14 @@ export function useWorkSessionRail(
   const queryClient = useQueryClient();
   const [liveEvents, setLiveEvents] = useState<WorkSessionEvent[]>([]);
   const liveRef = useRef<WorkSessionEvent[]>([]);
+  /** Folded event ids currently in the buffer: O(1) dedupe, rebuilt on trim. */
+  const seenRef = useRef<Set<string>>(new Set());
+
+  const publish = useCallback((next: WorkSessionEvent[]) => {
+    liveRef.current = next;
+    seenRef.current = new Set(next.map((e) => e.eventId.toLowerCase()));
+    setLiveEvents(next);
+  }, []);
 
   const { watched, uncovered } = useMemo(
     () => workChannelsToWatch(sessions, openChannelId),
@@ -159,20 +188,26 @@ export function useWorkSessionRail(
     // The live buffer is dropped in the same breath: those events are already in
     // the thread the refetch is about to read, and keeping them would double
     // every row that arrived before the drop.
-    if (liveRef.current.length > 0) {
-      liveRef.current = [];
-      setLiveEvents(liveRef.current);
-    }
+    if (liveRef.current.length > 0) publish([]);
     void queryClient.invalidateQueries({ queryKey: ["work-sessions", workspaceId] });
     void queryClient.invalidateQueries({ queryKey: ["work-session-events"] });
-  }, [queryClient, workspaceId]);
+  }, [publish, queryClient, workspaceId]);
 
   useEffect(() => {
     if (!realtime) return;
     const channels = watchKey === "" ? [] : watchKey.split(",");
     const stops = channels.map((channelId) =>
       realtime.subscribeWorkSession(workspaceId, channelId, {
-        onLifecycle: () => {
+        onLifecycle: (frame) => {
+          // A session that ended keeps nothing in the live tail: its whole
+          // stream is in the thread the invalidation below is about to re-read,
+          // and holding it would mean a long watch accumulates every finished
+          // session's frames until the next resync.
+          if (frame.type === "work.session.ended") {
+            const id = frame.payload.session_id;
+            const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
+            if (kept.length !== liveRef.current.length) publish(kept);
+          }
           void queryClient.invalidateQueries({
             queryKey: ["work-sessions", workspaceId],
           });
@@ -180,11 +215,15 @@ export function useWorkSessionRail(
         onAcpEvent: (frame) => {
           const event = eventFromFrame(frame);
           const folded = event.eventId.toLowerCase();
-          if (liveRef.current.some((e) => e.eventId.toLowerCase() === folded)) {
+          if (seenRef.current.has(folded)) return;
+          const next = [...liveRef.current, event];
+          if (next.length > LIVE_EVENT_CAP) {
+            publish(next.slice(next.length - LIVE_EVENT_KEEP));
             return;
           }
-          liveRef.current = [...liveRef.current, event];
-          setLiveEvents(liveRef.current);
+          liveRef.current = next;
+          seenRef.current.add(folded);
+          setLiveEvents(next);
         },
         onResync: resync,
       })
@@ -192,7 +231,7 @@ export function useWorkSessionRail(
     return () => {
       for (const stop of stops) stop();
     };
-  }, [realtime, workspaceId, watchKey, queryClient, resync]);
+  }, [realtime, workspaceId, watchKey, queryClient, publish, resync]);
 
   return { liveEvents, uncovered };
 }

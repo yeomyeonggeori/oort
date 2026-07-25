@@ -310,10 +310,17 @@ function planFrom(value: unknown): WorkPlanItem[] {
  * A non-zero session exit code is deliberately NOT painted onto the last tool
  * row: the ledger says the session failed, not which step did, and inventing
  * the attribution is the false story the four states exist to avoid.
+ *
+ * `truncated` says the thread was longer than the panel read, so the newest
+ * rows are the ones MISSING. Every "this is what is happening now" promotion
+ * below is then switched off: the last row we hold is the last row we FETCHED,
+ * and calling a step that ended a thousand events ago 진행 중 is the same
+ * invented attribution, one page further back.
  */
 export function foldSessionEvents(
   events: readonly WorkSessionEvent[],
-  session: Pick<WorkSession, "status">
+  session: Pick<WorkSession, "status">,
+  truncated = false
 ): FoldedSession {
   const rows: WorkEventRow[] = [];
   let plan: WorkPlanItem[] = [];
@@ -322,11 +329,16 @@ export function foldSessionEvents(
   let openToolIndex: number | null = null;
   /** Index of the approval row still waiting for a decision. */
   let pendingApprovalIndex: number | null = null;
+  /** Index of the streamed message row the next delta appends to. */
+  let openMessageIndex: number | null = null;
 
   for (const event of events) {
     lastEventAtMs =
       lastEventAtMs === null ? event.atMs : Math.max(lastEventAtMs, event.atMs);
     const payload = event.payload;
+    // Anything that is not another slice of the same answer closes the run of
+    // deltas: the next `agent.partial` starts a new message.
+    if (event.type !== "agent.partial") openMessageIndex = null;
 
     if (event.type === "agent.status") {
       const terminal = asString(payload.terminal_event);
@@ -359,12 +371,17 @@ export function foldSessionEvents(
         openToolIndex = rows.length - 1;
         continue;
       }
+      // An `agent.status` with no terminal event, no tool call and no detail
+      // carries nothing a row could say: a plan-only frame is already fully
+      // rendered by the 계획 block above it, and "진행 상황을 알림" beside a
+      // clock is a line of zero information competing with the real steps.
+      if (!detail) continue;
       rows.push({
         id: event.eventId,
         kind: "note",
         state: "done",
         atMs: event.atMs,
-        headline: detail ?? "진행 상황을 알림",
+        headline: detail,
       });
       continue;
     }
@@ -372,6 +389,18 @@ export function foldSessionEvents(
     if (event.type === "agent.partial") {
       const text = asString(payload.text_delta);
       if (!text) continue;
+      // The projection carries ONE slice per event (`text_delta`, <= 4096B,
+      // and there is no cumulative `text` field), and a host emits one per
+      // transcript chunk, up to 200 for a single answer. Rendering a row per
+      // slice chops the answer mid-word into a column of fragments and, worse,
+      // writes those fragments into the channel ledger when the excerpt is
+      // shared. Consecutive deltas are therefore ONE message row: the clock is
+      // the first delta's, the text is the whole answer so far.
+      if (openMessageIndex !== null) {
+        const open = rows[openMessageIndex];
+        rows[openMessageIndex] = { ...open, headline: open.headline + text };
+        continue;
+      }
       rows.push({
         id: event.eventId,
         kind: "message",
@@ -379,6 +408,7 @@ export function foldSessionEvents(
         atMs: event.atMs,
         headline: text,
       });
+      openMessageIndex = rows.length - 1;
       continue;
     }
 
@@ -437,10 +467,17 @@ export function foldSessionEvents(
     }
   }
 
-  // The newest tool row is present tense only while the SERVER still calls the
-  // session running and nothing is parked on a decision.
-  if (
-    session.status === "running" &&
+  // EXACTLY ONE row may be present tense, and only while the SERVER still calls
+  // the session running and the tail we hold is the real tail (`truncated`).
+  //
+  // An open run of deltas wins it: the agent is writing its answer right now,
+  // and the tool call it wrote after is over by definition. `openToolIndex` is
+  // left standing all the same, because it is also what an approval parks on.
+  const live = !truncated && session.status === "running";
+  if (live && openMessageIndex !== null) {
+    rows[openMessageIndex] = { ...rows[openMessageIndex], state: "running" };
+  } else if (
+    live &&
     pendingApprovalIndex === null &&
     openToolIndex !== null &&
     rows[openToolIndex].state === "done"
@@ -520,26 +557,40 @@ export function peekRows(rows: readonly WorkEventRow[], count = 3): WorkEventRow
   return rows.slice(Math.max(0, rows.length - count));
 }
 
-/** The single line a list row carries under the session label. */
+/**
+ * The single line a list row carries under the session label. A message row now
+ * holds a whole streamed answer, newlines included, and a row is one line: the
+ * text is flattened here rather than being handed to a `truncate` span that
+ * would silently decide the same thing at render time.
+ */
 export function lastLine(rows: readonly WorkEventRow[]): string | null {
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
     if (row.kind === "lifecycle") continue;
-    return row.detail && row.kind === "tool"
-      ? `${row.headline} ${row.detail}`
-      : row.headline;
+    const text =
+      row.detail && row.kind === "tool"
+        ? `${row.headline} ${row.detail}`
+        : row.headline;
+    const flat = text.replace(/\s+/g, " ").trim();
+    if (flat === "") continue;
+    return flat;
   }
   return null;
 }
 
-/** Excerpt line count offered by default; the mac console offers 80 lines. */
+/** Excerpt row count offered by default; the mac console offers 80 lines. */
 export const EXCERPT_LINE_LIMIT = 80;
 
 /**
- * The text a share starts from: the session label, then the rendered lines the
+ * The text a share starts from: the session label, then the rendered rows the
  * panel is showing. It is EDITABLE before it is sent, because the person
  * sharing is the last check on what lands in the channel ledger, exactly as the
  * mac excerpt sheet works.
+ *
+ * What it takes is one entry per ROW, which is why the delta accumulation in
+ * `foldSessionEvents` is a data rule and not a display one: before it, a shared
+ * excerpt wrote the agent's answer into the channel ledger sliced at whatever
+ * byte the transport happened to cut, permanently.
  */
 export function composeExcerpt(
   session: Pick<WorkSession, "label">,

@@ -18,6 +18,7 @@ import {
 import { Timeline } from "@/features/timeline/Timeline";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import type { WorkScope } from "@/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import {
   makeStressRoster,
@@ -152,7 +153,14 @@ export function ChatShell() {
   // 작업 세션 패널 (AX-3 / MOMO-618). One secondary pane at a time: a thread and
   // a work session are both "the thing you stepped aside to read", and stacking
   // two 320px panes on a 1280px window leaves the channel narrower than either.
+  //
+  // What the panel is SHOWING lives here rather than inside it, because closing
+  // it unmounts it: held locally, the chosen range and the session being read
+  // were thrown away on every close, and reopening dropped an all-workspace
+  // view back to the current channel (frequently an empty list).
   const [workOpen, setWorkOpen] = useState(false);
+  const [workScope, setWorkScope] = useState<WorkScope>("channel");
+  const [workSessionId, setWorkSessionId] = useState<string | null>(null);
 
   // The composer owns its own ref for the mention popover, so this reaches it
   // by the id it already publishes (its sr-only <label htmlFor> points at the
@@ -234,7 +242,10 @@ export function ChatShell() {
   );
 
   return (
-    <div className="flex min-w-0 flex-1">
+    // `relative` is the anchor the 작업 세션 pane needs on a narrow window,
+    // where it stops being a column beside the channel and becomes a drawer
+    // over it (tokens.css `work-pane`).
+    <div className="relative flex min-w-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -392,7 +403,14 @@ export function ChatShell() {
       )}
 
       {workOpen && !thread && stressCount === 0 && (
-        <WorkPanel channelId={channelId} onClose={() => setWorkOpen(false)} />
+        <WorkPanel
+          channelId={channelId}
+          scope={workScope}
+          onScopeChange={setWorkScope}
+          selectedId={workSessionId}
+          onSelectedIdChange={setWorkSessionId}
+          onClose={() => setWorkOpen(false)}
+        />
       )}
     </div>
   );
