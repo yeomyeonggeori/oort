@@ -31,8 +31,21 @@ pub const DISCOVERY_EVENT: &str = "momo:discovery";
 
 /// Service type advertised by the stack (MOMO-586).
 const SERVICE_TYPE: &str = "_momo._tcp.local.";
-/// TXT record key holding the API base URL.
+/// TXT key: the API as a Bonjour NAME, e.g. `http://MacBook-Pro-2.local:28000`.
 const TXT_BASE_KEY: &str = "base";
+/// TXT key: the same API as a LAN ADDRESS, e.g. `http://192.168.35.57:28000`.
+///
+/// Added by MOMO-609 (parity gate G-1) on both sides at once — the advertiser is
+/// `scripts/internal_alpha_stack.sh`. The webview this shell embeds was measured
+/// resolving the advertised `.local` name to a link-local IPv6 address it then
+/// could not dial, so a login against the NAME produced no request at all: 70 s
+/// of "로그인 중…" with zero entries in the server's access log. Whether that
+/// name resolves depends on the responder cache and the local-network grant,
+/// which is not a thing a client can rely on; the address form always dials, and
+/// the name form survives a DHCP lease change. Advertising both lets each
+/// consumer take the one it can actually use, so this shell prefers `ipv4` and
+/// falls back to `base`, and an advertiser that predates this key still works.
+const TXT_IPV4_KEY: &str = "ipv4";
 
 /// Matches the macOS chooser's browse window: long enough for a responder on the
 /// same LAN to answer, short enough that a person is not left watching a spinner.
@@ -43,10 +56,14 @@ const MAX_TIMEOUT_MS: u64 = 30_000;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredServer {
-    /// The advertised API base URL, exactly as advertised — this is what gets
-    /// prefilled, so it is never normalised on the way through.
+    /// The address this client will DIAL, exactly as advertised — this is what
+    /// gets prefilled, so it is never normalised on the way through. `ipv4` when
+    /// the advertisement carried a usable one, `base` otherwise.
     pub base_url: String,
-    /// Short human label, e.g. `MacBook-Pro-2.local:28000`.
+    /// Short human label naming the MACHINE, e.g. `MacBook-Pro-2.local:28000`.
+    /// Taken from the advertised name even when the dialed address is the IPv4
+    /// one, because the name is what its owner recognises; the address is shown
+    /// beside it on the card, so neither is hidden.
     pub display_host: String,
     /// The Bonjour instance name, e.g. `momo`.
     pub instance_name: String,
@@ -237,14 +254,43 @@ fn emit_if_current<R: Runtime>(
     true
 }
 
+/// A TXT value, trimmed, with an empty one treated as absent.
+fn txt<'a>(resolved: &'a mdns_sd::ResolvedService, key: &str) -> Option<&'a str> {
+    let value = resolved.txt_properties.get_property_val_str(key)?.trim();
+    (!value.is_empty()).then_some(value)
+}
+
 fn to_server(resolved: &mdns_sd::ResolvedService) -> Option<DiscoveredServer> {
-    let raw = resolved.txt_properties.get_property_val_str(TXT_BASE_KEY)?.trim();
-    let url = validated_base_url(raw)?;
+    let (base_url, display_host) = offered(
+        txt(resolved, TXT_BASE_KEY),
+        txt(resolved, TXT_IPV4_KEY),
+    )?;
     Some(DiscoveredServer {
-        display_host: display_host(raw, &url),
-        base_url: raw.to_string(),
+        base_url,
+        display_host,
         instance_name: instance_name(&resolved.fullname, &resolved.ty_domain),
     })
+}
+
+/// What one advertisement is worth offering: the address to dial and the label
+/// to show it under.
+///
+/// Dial priority is the LAN address first, the Bonjour name second. Each is
+/// checked independently, so a malformed `ipv4` falls through to `base` rather
+/// than taking the sighting down with it, and an advertiser carrying only `base`
+/// behaves exactly as it did before this key existed.
+fn offered(named: Option<&str>, addressed: Option<&str>) -> Option<(String, String)> {
+    let (raw, url) = dialable(addressed).or_else(|| dialable(named))?;
+    // The label names the machine whenever the advertisement said what it is
+    // called, even when the dialed address is the numeric one.
+    let label = named.and_then(|name| validated_base_url(name).map(|_| name));
+    Some((raw.to_string(), display_host(label.unwrap_or(raw), &url)))
+}
+
+/// The raw string paired with its parsed URL, or None when it is not offerable.
+fn dialable(raw: Option<&str>) -> Option<(&str, Url)> {
+    let raw = raw?;
+    validated_base_url(raw).map(|url| (raw, url))
 }
 
 /// An advertisement is only offered when it carries a base URL a client could
@@ -268,10 +314,10 @@ fn validated_base_url(raw: &str) -> Option<Url> {
 /// The advertised authority — host plus port, since the alpha stack listens on
 /// `:28000` and the port is part of what identifies the machine.
 ///
-/// Cut from the RAW advertisement rather than read off the parsed URL, because
-/// `Url` lowercases hosts and the advertisement carries the machine's own casing
-/// (`MacBook-Pro-2.local`) — which is the form its owner recognises. The parsed
-/// URL is still what decides the string is offerable at all.
+/// Cut from the RAW advertised string rather than read off the parsed URL,
+/// because `Url` lowercases hosts and the advertisement carries the machine's
+/// own casing (`MacBook-Pro-2.local`) — which is the form its owner recognises.
+/// The parsed URL is still what decides the string is offerable at all.
 fn display_host(raw: &str, url: &Url) -> String {
     let authority = raw
         .split_once("://")
@@ -322,6 +368,56 @@ mod tests {
         );
         assert_eq!(label("https://api.example.com"), "api.example.com");
         assert_eq!(label("http://macbook.local:28000/"), "macbook.local:28000");
+    }
+
+    #[test]
+    fn dials_the_lan_address_and_labels_it_with_the_machine_name() {
+        // What the live stack advertises after MOMO-609. The name is what the
+        // person recognises; the address is what a webview can actually reach.
+        let (base, label) = offered(
+            Some("http://MacBook-Pro-2.local:28000"),
+            Some("http://192.168.35.57:28000"),
+        )
+        .expect("an offerable sighting");
+        assert_eq!(base, "http://192.168.35.57:28000");
+        assert_eq!(label, "MacBook-Pro-2.local:28000");
+    }
+
+    #[test]
+    fn falls_back_to_the_name_when_there_is_no_address() {
+        // An advertiser that predates the ipv4 key, and one whose ipv4 is junk:
+        // both keep working exactly as before instead of disappearing.
+        assert_eq!(
+            offered(Some("http://macbook.local:28000"), None),
+            Some((
+                "http://macbook.local:28000".to_string(),
+                "macbook.local:28000".to_string()
+            ))
+        );
+        assert_eq!(
+            offered(Some("http://macbook.local:28000"), Some("192.168.0.9:28000")),
+            Some((
+                "http://macbook.local:28000".to_string(),
+                "macbook.local:28000".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn offers_an_address_only_advertisement_under_its_address() {
+        assert_eq!(
+            offered(None, Some("http://192.168.35.57:28000")),
+            Some((
+                "http://192.168.35.57:28000".to_string(),
+                "192.168.35.57:28000".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn stays_silent_when_neither_key_is_dialable() {
+        assert_eq!(offered(None, None), None);
+        assert_eq!(offered(Some("macbook.local:28000"), Some("nonsense")), None);
     }
 
     #[test]

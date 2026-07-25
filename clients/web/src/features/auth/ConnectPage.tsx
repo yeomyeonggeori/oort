@@ -34,6 +34,7 @@ import {
   joinFailureCopy,
   prefillFocus,
   signInFailureCopy,
+  type ConnectFailure,
   type ConnectField,
   type ConnectMode,
 } from "./connectModel";
@@ -83,7 +84,7 @@ export function ConnectPage({
   const [inviteCode, setInviteCode] = useState("");
   const [mode, setMode] = useState<ConnectMode>("signIn");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<ConnectField | null>(null);
 
@@ -131,7 +132,7 @@ export function ConnectPage({
       setInviteCode(prefill.inviteCode);
       setMode("join");
     }
-    setError(null);
+    setFailure(null);
     focusLater(
       prefillFocus({
         serverUrl: prefill.serverUrl || typed.current.serverUrl,
@@ -145,6 +146,7 @@ export function ConnectPage({
   function selectDiscovered(server: DiscoveredServer) {
     setServerUrl(server.base);
     setServerError(null);
+    setFailure(null); // a new address invalidates what the last one answered
     focusLater(email.trim() === "" ? "email" : "password");
   }
 
@@ -171,9 +173,17 @@ export function ConnectPage({
     return true;
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
+  /**
+   * One attempt with what is on screen. Reachable from the form and from the
+   * error banner's retry, which is the same action: a failure that could not
+   * reach the server leaves the input untouched and worth sending again.
+   *
+   * Every request underneath carries a deadline (lib/http.ts), so this always
+   * ends — in the shell, in a session or in a stated failure. It cannot sit on
+   * "로그인 중…" the way it did against a `.local` address (MOMO-609 / G-1).
+   */
+  async function attempt() {
+    setFailure(null);
     setServerError(null);
     if (!commitServer()) return;
     setBusy(true);
@@ -184,13 +194,17 @@ export function ConnectPage({
           : await login(email, password, workspace);
       onLoggedIn(session);
     } catch (err) {
-      const failure =
-        mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
-      setError(failure.message);
-      if (failure.suggestSignIn) setMode("signIn");
+      const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
+      setFailure(next);
+      if (next.suggestSignIn) setMode("signIn");
     } finally {
       setBusy(false);
     }
+  }
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    void attempt();
   }
 
   const serverHint = requiresServer
@@ -342,14 +356,18 @@ export function ConnectPage({
               </label>
             )}
 
-            {error && (
-              <p
-                role="alert"
-                className="text-body text-danger"
-                data-testid="login-error"
-              >
-                {error}
-              </p>
+            {/* Inline, in the form it belongs to, with the retry attached to
+                the failure itself. A retry only appears when sending the SAME
+                input again could work: a wrong password is corrected in the
+                field above, not by pressing again. */}
+            {failure && (
+              <InlineBanner
+                tone="error"
+                message={failure.message}
+                actionLabel={failure.retryable && !busy ? "다시 시도" : undefined}
+                onAction={failure.retryable && !busy ? () => void attempt() : undefined}
+                testId="login-error"
+              />
             )}
 
             <Button
@@ -369,7 +387,7 @@ export function ConnectPage({
               onClick={() => {
                 const next = mode === "join" ? "signIn" : "join";
                 setMode(next);
-                setError(null);
+                setFailure(null);
                 focusLater(next === "join" ? "code" : "email");
               }}
               data-testid="connect-mode-toggle"

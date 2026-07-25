@@ -1,3 +1,4 @@
+import { NetworkError, fetchWithDeadline, type HttpResponse } from "@/lib/http";
 import { apiBase } from "@/lib/serverBase";
 import { getAccessToken } from "@/lib/session";
 import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
@@ -57,6 +58,18 @@ export function newDecisionId(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * Copy for a decision that never reached an answer. Says which of the two
+ * happened, because "the server took too long" and "nothing was there" lead to
+ * different next moves, and neither is "the decision was recorded".
+ */
+export function sendFailureCopy(cause: unknown): string {
+  if (cause instanceof NetworkError && cause.failure === "timeout") {
+    return "서버가 제때 응답하지 않아 결정을 보내지 못했습니다. 다시 시도하세요.";
+  }
+  return "결정이 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도하세요.";
+}
+
 export async function decideApproval(
   workspaceId: string,
   approvalId: string,
@@ -67,9 +80,12 @@ export async function decideApproval(
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  let response: Response;
+  // Deadline, not an open-ended wait (MOMO-609): an approval card stuck on its
+  // busy state is the one place where "still working" and "never sent" look
+  // identical, and the person is deciding whether to press it again.
+  let response: HttpResponse;
   try {
-    response = await fetch(
+    response = await fetchWithDeadline(
       `${apiBase()}/v1/workspaces/${encodeURIComponent(
         workspaceId
       )}/approvals/${encodeURIComponent(approvalId)}/decision`,
@@ -83,11 +99,10 @@ export async function decideApproval(
         }),
       }
     );
-  } catch {
-    return {
-      kind: "error",
-      errorCopy: "결정을 보내지 못했습니다. 연결을 확인하고 다시 시도하세요.",
-    };
+  } catch (error) {
+    // The idempotency key is caller-held and unchanged, so pressing the same
+    // button again replays this decision rather than minting a second one.
+    return { kind: "error", errorCopy: sendFailureCopy(error) };
   }
 
   const receiptStatuses = new Set([200, 403, 404, 409]);
@@ -100,7 +115,7 @@ export async function decideApproval(
 
   let receipt: ApprovalDecisionReceipt;
   try {
-    receipt = (await response.json()) as ApprovalDecisionReceipt;
+    receipt = response.json<ApprovalDecisionReceipt>();
   } catch {
     return {
       kind: "error",
