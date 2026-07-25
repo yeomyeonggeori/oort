@@ -38,6 +38,9 @@ import { desktopKeychain, isDesktop } from "./tauri";
 //
 // Detected at RUNTIME, not at build time, because one bundle serves both:
 //
+//   The credential store is touched ONLY when there is a session to resume or a
+//   token to move (MOMO-606): see `hydrate()`.
+//
 //   desktop + keychain   token in the OS credential store, metadata in
 //                        `momo.desktop.session.v1`. An injected script can no
 //                        longer read the token back — it can still ASK the shell
@@ -185,9 +188,19 @@ function readStorage(): PersistedSession | null {
 function writeStorage(value: PersistedSession | null): void {
   if (storageMode === "keychain") {
     writeRaw(DESKTOP_METADATA_KEY, value ? JSON.stringify(metadataOf(value)) : null);
-    queueKeychain(() =>
-      value ? desktopKeychain.store(value.refreshToken) : desktopKeychain.clear()
-    );
+    queueKeychain(async () => {
+      if (!value) return desktopKeychain.clear();
+      if (await desktopKeychain.store(value.refreshToken)) return true;
+      // The credential store refused the write: no Secret Service, or an item
+      // this build's signature may not overwrite. Dropping the token here would
+      // sign the person out on the next launch for no reason they could act on,
+      // so the run demotes to web storage and `getSessionStorageMode()` stops
+      // claiming a guarantee it is no longer delivering.
+      storageMode = "web";
+      writeRaw(DESKTOP_METADATA_KEY, null);
+      writeRaw(STORAGE_KEY, JSON.stringify(value));
+      return false;
+    });
     return;
   }
   writeRaw(STORAGE_KEY, value ? JSON.stringify(value) : null);
@@ -229,13 +242,30 @@ export function initSessionStore(): Promise<void> {
 
 async function hydrate(): Promise<void> {
   if (!isDesktop()) return;
-  if (!(await desktopKeychain.available())) return; // degraded: stay on web storage
 
   // A record left by a browser-mode run of this same bundle: an earlier build, or
-  // a run where the keychain was unavailable. Move it, and only then drop the
-  // web copy — losing the token here would sign someone out for no reason, and
-  // leaving it behind would defeat the point of moving it at all.
+  // a run where the keychain was unavailable.
   const legacy = persisted;
+  const metadata = parsePersistedMetadata(readRaw(DESKTOP_METADATA_KEY));
+
+  // NOTHING is stored: no session to resume, no token to move. Do not touch the
+  // credential store at all (MOMO-606). On macOS an item left by a build with a
+  // different signature is answered with a login-keychain PASSWORD DIALOG rather
+  // than an error, and putting that in front of someone who has not signed in
+  // yet — to answer a question whose answer is not used until they do — is the
+  // fastest way to teach them that this app asks for their password at random.
+  // Assume the keychain; the first write settles it for real, and demotes to web
+  // storage if it cannot.
+  if (!legacy && !metadata) {
+    storageMode = "keychain";
+    return;
+  }
+
+  if (!(await desktopKeychain.available())) return; // degraded: stay on web storage
+
+  // Move the legacy record, and only then drop the web copy — losing the token
+  // here would sign someone out for no reason, and leaving it behind would
+  // defeat the point of moving it at all.
   if (legacy) {
     if (!(await desktopKeychain.store(legacy.refreshToken))) return;
     storageMode = "keychain";
@@ -245,7 +275,6 @@ async function hydrate(): Promise<void> {
   }
 
   storageMode = "keychain";
-  const metadata = parsePersistedMetadata(readRaw(DESKTOP_METADATA_KEY));
   const refreshToken = await desktopKeychain.load();
   if (metadata && refreshToken) {
     persisted = { refreshToken, ...metadata };

@@ -6,6 +6,7 @@
 //   discovery     _momo._tcp browse               -> `momo:discovery` event
 //   notification  mentions/approvals              -> commands
 //   keychain      refresh token at rest           -> commands
+//   updater       self-replace the app bundle     -> commands + progress event
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -17,15 +18,68 @@ mod deeplink;
 mod discovery;
 mod keychain;
 mod notification;
+// The updater replaces an application bundle, which is not a thing that exists
+// on iOS/Android — the plugin is desktop-only and so is this module.
+#[cfg(desktop)]
+mod updater;
 
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
+/// The version this build reports, e.g. `0.1.0-next.1`.
+///
+/// Comes from `tauri.conf.json > version`, which is also what the updater
+/// compares against the manifest — so what a tester reads on screen and what
+/// decides "is there a new build" can never disagree. A bug report that names a
+/// version is worth several that say "the latest one".
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdaterState::default())
+        .invoke_handler(tauri::generate_handler![
+            deeplink::deep_link_take_pending,
+            discovery::discovery_start,
+            discovery::discovery_stop,
+            notification::notification_permission,
+            notification::notification_request_permission,
+            notification::notification_show,
+            keychain::keychain_available,
+            keychain::keychain_load_refresh_token,
+            keychain::keychain_store_refresh_token,
+            keychain::keychain_clear_refresh_token,
+            app_version,
+            updater::updater_check,
+            updater::updater_install,
+            updater::updater_relaunch,
+        ]);
+
+    #[cfg(not(desktop))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        deeplink::deep_link_take_pending,
+        discovery::discovery_start,
+        discovery::discovery_stop,
+        notification::notification_permission,
+        notification::notification_request_permission,
+        notification::notification_show,
+        keychain::keychain_available,
+        keychain::keychain_load_refresh_token,
+        keychain::keychain_store_refresh_token,
+        keychain::keychain_clear_refresh_token,
+        app_version,
+    ]);
+
+    builder
         .manage(deeplink::DeepLinkState::default())
         .manage(discovery::DiscoveryState::default())
         .setup(|app| {
@@ -65,18 +119,6 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            deeplink::deep_link_take_pending,
-            discovery::discovery_start,
-            discovery::discovery_stop,
-            notification::notification_permission,
-            notification::notification_request_permission,
-            notification::notification_show,
-            keychain::keychain_available,
-            keychain::keychain_load_refresh_token,
-            keychain::keychain_store_refresh_token,
-            keychain::keychain_clear_refresh_token,
-        ])
         .run(tauri::generate_context!())
         .expect("error while running momo desktop shell");
 }

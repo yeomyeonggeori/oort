@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
+import { isDesktop } from "@/lib/tauri";
+import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { InviteSection } from "./InviteSection";
@@ -25,6 +27,7 @@ import { WorkspaceSection } from "./WorkspaceSection";
 type SectionId =
   | "account"
   | "notifications"
+  | "updates"
   | "ai"
   | "code"
   | "workspace"
@@ -34,11 +37,14 @@ interface SectionMeta {
   id: SectionId;
   label: string;
   group: "나" | "운영";
+  /** Only in the desktop shell: a browser tab has no app bundle to update. */
+  desktopOnly?: boolean;
 }
 
 const SECTIONS: SectionMeta[] = [
   { id: "account", label: "계정", group: "나" },
   { id: "notifications", label: "알림 규칙", group: "나" },
+  { id: "updates", label: "업데이트", group: "나", desktopOnly: true },
   { id: "ai", label: "AI 연결", group: "운영" },
   { id: "code", label: "코드 실행 호스트", group: "운영" },
   { id: "workspace", label: "워크스페이스", group: "운영" },
@@ -50,7 +56,19 @@ const GROUPS: SectionMeta["group"][] = ["나", "운영"];
 export function SettingsRoute() {
   const { workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
-  const [section, setSection] = useState<SectionId>("account");
+  // ?section=updates lets the sidebar badge (and a bug report) land on one
+  // panel instead of "open 설정 and click the fourth item".
+  const [params] = useSearchParams();
+  const sections = useMemo(
+    () => SECTIONS.filter((item) => !item.desktopOnly || isDesktop()),
+    []
+  );
+  const requested = params.get("section");
+  const [section, setSection] = useState<SectionId>(() =>
+    sections.some((item) => item.id === requested)
+      ? (requested as SectionId)
+      : "account"
+  );
   const navRefs = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
 
   const close = useCallback(() => navigate(-1), [navigate]);
@@ -73,7 +91,7 @@ export function SettingsRoute() {
   function onNavKeyDown(event: React.KeyboardEvent) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    const ids = SECTIONS.map((s) => s.id);
+    const ids = sections.map((s) => s.id);
     const focused = ids.findIndex(
       (id) => navRefs.current[id] === document.activeElement
     );
@@ -111,7 +129,7 @@ export function SettingsRoute() {
             <div key={group} className="flex flex-col gap-1 pb-3">
               <p className="px-2 text-meta text-ink-muted">{group}</p>
               <ul className="flex flex-col gap-1">
-                {SECTIONS.filter((item) => item.group === group).map((item) => (
+                {sections.filter((item) => item.group === group).map((item) => (
                   <li key={item.id}>
                     <button
                       type="button"
@@ -139,6 +157,7 @@ export function SettingsRoute() {
         <div className="min-w-0 flex-1 overflow-y-auto p-4">
           {section === "account" && <AccountSection />}
           {section === "notifications" && <NotificationRulesSection />}
+          {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} />}
           {section === "code" && <WorkHostSection offline={offline} />}
           {section === "workspace" && (

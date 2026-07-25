@@ -1,5 +1,5 @@
 import { Centrifuge, type Subscription } from "centrifuge";
-import { fetchRealtimeToken } from "./api";
+import { fetchRealtimeToken, type Message } from "./api";
 import { apiBase } from "./serverBase";
 
 // =============================================================================
@@ -32,7 +32,42 @@ export interface MessageNewEvent {
     hlc_count: number;
     created_at_ms?: number;
     state?: string;
+    root_id?: string | null;
+    /**
+     * Server-decided message properties, forwarded verbatim by the relay
+     * (server `MessageRoutes.broadcastPayload`, omitted when empty). This is
+     * where `mention_member_ids` and the approval fields live, so a live frame
+     * carries the same facts the REST page does.
+     */
+    props?: Record<string, unknown>;
   };
+}
+
+/**
+ * A realtime frame as the rest of the app sees messages. Shared by the timeline
+ * and the notification rail so a live row and a REST row are the same object
+ * shape — a second converter is how the two drift apart.
+ *
+ * `created_at_ms` is NOT in the broadcast envelope, so the local clock stands in
+ * for the grouping label only; ordering is `seq` and the server time the
+ * notification rail reads is `hlc_ts`.
+ */
+export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
+  const message: Message = {
+    id: p.id,
+    channelId: p.channel_id,
+    seq: p.seq,
+    hlcTs: p.hlc_ts,
+    hlcCount: p.hlc_count,
+    authorMemberId: p.author_member_id,
+    type: (p.type as Message["type"]) ?? "text",
+    body: p.body ?? undefined,
+    state: (p.state as Message["state"]) ?? "sent",
+    createdAtMs: p.created_at_ms ?? Date.now(),
+  };
+  if (typeof p.root_id === "string") message.rootId = p.root_id;
+  if (p.props && typeof p.props === "object") message.props = p.props;
+  return message;
 }
 
 export function centrifugoChannelName(
@@ -106,6 +141,11 @@ export function resolveSpikeRealtimeUrl(
 }
 
 export interface RealtimeHandle {
+  /**
+   * Watch one channel. Callers are independent: the timeline and the desktop
+   * notification rail both want the open channel, and neither can end the
+   * other's feed (see the refcount below).
+   */
   subscribeChannel: (
     workspaceId: string,
     channelId: string,
@@ -132,6 +172,13 @@ export function createRealtime(
   client.on("disconnected", () => onStatus("disconnected"));
   client.connect();
 
+  // One Centrifugo subscription per channel, shared by however many callers
+  // want it, torn down when the last one lets go. Without the count the first
+  // caller to unmount would unsubscribe a channel the other is still reading —
+  // which is exactly what happens when the notification rail and the open
+  // timeline watch the same channel and the user changes route.
+  const shared = new Map<string, { sub: Subscription; refs: number }>();
+
   function subscribeChannel(
     workspaceId: string,
     channelId: string,
@@ -141,9 +188,16 @@ export function createRealtime(
     }
   ): () => void {
     const name = centrifugoChannelName(workspaceId, channelId);
-    let sub: Subscription | null =
-      client.getSubscription(name) ??
-      client.newSubscription(name, { recoverable: true, positioned: true });
+    let entry = shared.get(name);
+    if (!entry) {
+      const sub =
+        client.getSubscription(name) ??
+        client.newSubscription(name, { recoverable: true, positioned: true });
+      entry = { sub, refs: 0 };
+      shared.set(name, entry);
+    }
+    entry.refs += 1;
+    const sub = entry.sub;
 
     const onSubscribed = (ctx: { recovered?: boolean }) =>
       handlers.onSubscribed(ctx.recovered === true);
@@ -162,15 +216,27 @@ export function createRealtime(
     sub.on("publication", onPublication);
     if (sub.state !== "subscribed") sub.subscribe();
 
+    let released = false;
     return () => {
-      if (!sub) return;
+      if (released) return; // a double cleanup must not release someone else's ref
+      released = true;
       sub.off("subscribed", onSubscribed);
       sub.off("publication", onPublication);
+      const current = shared.get(name);
+      if (!current || current.sub !== sub) return;
+      current.refs -= 1;
+      if (current.refs > 0) return;
+      shared.delete(name);
       sub.unsubscribe();
       client.removeSubscription(sub);
-      sub = null;
     };
   }
 
-  return { subscribeChannel, dispose: () => client.disconnect() };
+  return {
+    subscribeChannel,
+    dispose: () => {
+      shared.clear();
+      client.disconnect();
+    },
+  };
 }

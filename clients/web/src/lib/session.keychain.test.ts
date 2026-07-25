@@ -137,6 +137,34 @@ describe("desktop runtime with a working keychain", () => {
     expect(session.getRefreshToken()).toBe("legacy.refresh");
   });
 
+  it("does not touch the credential store when there is nothing to resume", async () => {
+    // MOMO-606: on macOS a probe against an item written by a differently
+    // signed build is answered with a login-keychain password DIALOG, not an
+    // error. A first launch must not put that in front of someone who has not
+    // signed in, to answer a question whose answer is not used until they do.
+    const session = await loadStore();
+    await session.initSessionStore();
+
+    expect(mocks.keychain.available).not.toHaveBeenCalled();
+    expect(mocks.keychain.load).not.toHaveBeenCalled();
+    expect(session.getSessionStorageMode()).toBe("keychain");
+    expect(session.hasPersistedSession()).toBe(false);
+  });
+
+  it("demotes to web storage when the keychain refuses the write, keeping the session", async () => {
+    mocks.keychain.store.mockResolvedValue(false);
+    const session = await loadStore();
+    await session.initSessionStore();
+
+    session.applyLogin(login);
+    await flush();
+
+    expect(session.getSessionStorageMode()).toBe("web");
+    expect(JSON.parse(store.get(WEB_KEY)!).refreshToken).toBe("refresh.token");
+    expect(store.has(DESKTOP_KEY)).toBe(false);
+    expect(session.getRefreshToken()).toBe("refresh.token");
+  });
+
   it("writes rotations to the keychain and never to web storage", async () => {
     const session = await loadStore();
     await session.initSessionStore();

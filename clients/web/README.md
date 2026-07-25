@@ -106,6 +106,37 @@ export MOMO_EMAIL=... MOMO_PASSWORD=...
 npm run smoke:connect     # deep-link prefill, validation, dynamic base, offline
 ```
 
+## Desktop notifications (MOMO-607, P2)
+
+`src/features/notifications/` closes the seam MOMO-603 left open: the shell knows
+how to show a banner, and this decides when one is worth showing.
+
+- **Two events, both addressed to a person.** A mention the SERVER recorded
+  (`props.mention_member_ids`, never a client-side scan of the body) and an
+  approval request whose ledger status is still `pending` — the agent card's
+  `awaiting-approval` state, the one row in the product actively waiting on a
+  human.
+- **The window having focus suppresses everything.** momo in front means the
+  message is already on screen or one keystroke away, so a banner would be pure
+  noise. Also suppressed: one's own writing, a muted channel (server truth,
+  `Channel.muted`), an edit of a message that already had its chance, a repeat of
+  something already announced, and a burst replayed by a reconnect (judged on
+  `hlc_ts`, since the broadcast envelope carries no `created_at_ms`).
+- **Copy is thin on purpose.** Sender as the title, one truncated line as the
+  body. Fenced and inline code is replaced rather than quoted, and a short list of
+  secret-shaped tokens (bearer, JWT, `sk-`, `gh*_`, `xox*-`, `AKIA`) is redacted:
+  a banner is rendered by the OS, kept by the notification centre, and readable by
+  anyone glancing at the screen.
+- **A browser does nothing** — no notification, and no Centrifugo subscription
+  either, so the web build pays nothing for a desktop capability.
+- **Click landing is an approximation, and says so.** The shell cannot report a
+  click (`clients/desktop/README.md`), so the target channel is armed when the
+  banner is shown and consumed by the next window focus, expiring after 20s.
+
+All of it is decided in `model.ts`, which is pure and unit-tested (35 cases,
+including three VERBATIM momowebqa publications captured off the live rail).
+`DesktopNotifications.tsx` is the impure half: subscriptions, focus, the OS call.
+
 ## Smoke (MOMO-598)
 
 One browser run over the whole P1 loop against a live momowebqa. It signs in,

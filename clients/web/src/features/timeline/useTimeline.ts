@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMessages, sendMessage, type Message } from "@/lib/api";
-import type { MessageNewEvent, RealtimeHandle } from "@/lib/realtime";
+import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
 import {
   addPending,
   emptyTimeline,
@@ -16,21 +16,6 @@ import {
 
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
-
-function payloadToMessage(p: MessageNewEvent["payload"]): Message {
-  return {
-    id: p.id,
-    channelId: p.channel_id,
-    seq: p.seq,
-    hlcTs: p.hlc_ts,
-    hlcCount: p.hlc_count,
-    authorMemberId: p.author_member_id,
-    type: (p.type as Message["type"]) ?? "text",
-    body: p.body ?? undefined,
-    state: (p.state as Message["state"]) ?? "sent",
-    createdAtMs: p.created_at_ms ?? Date.now(),
-  };
-}
 
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
