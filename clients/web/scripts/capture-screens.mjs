@@ -56,6 +56,50 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000204", workspaceId: WORKSPACE_ID, kind: "public", name: "release-notes", muted: false },
 ];
 
+const CHANNEL_IDS = CHANNELS.map((c) => c.id);
+
+// Roster and read-state are what turn the timeline from raw ids into the actual
+// design: the agent row is where --agent (predawn slate-blue) is visible at all,
+// and the unread/mention badges are the only place --accent lands in the
+// sidebar. Without these the capture would review a surface nobody ships.
+const ROSTER = [
+  {
+    id: ME,
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    status: "active",
+    displayName: "곽성재",
+    handle: "seongjae",
+    channelCount: CHANNEL_IDS.length,
+    channelIds: CHANNEL_IDS,
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+  {
+    id: HERMES,
+    workspaceId: WORKSPACE_ID,
+    kind: "agent",
+    status: "active",
+    displayName: "hermes",
+    handle: "hermes",
+    channelCount: CHANNEL_IDS.length,
+    channelIds: CHANNEL_IDS,
+    capabilities: ["code"],
+    ownerHumanId: ME,
+    agentModel: "hermes-agent",
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+];
+
+const READ_STATES = [
+  { channel_id: GENERAL_ID, last_read_seq: 1410, latest_seq: 1415, unread_count: 5, mention_count: 1 },
+  { channel_id: CHANNELS[1].id, last_read_seq: 40, latest_seq: 42, unread_count: 2, mention_count: 0 },
+  { channel_id: CHANNELS[2].id, last_read_seq: 12, latest_seq: 12, unread_count: 0, mention_count: 0 },
+  { channel_id: CHANNELS[3].id, last_read_seq: 7, latest_seq: 7, unread_count: 0, mention_count: 0 },
+];
+
 const BODIES = [
   [ME, "prometheus mem_limit 붙였어요. 야간 소크 돌려두고 아침에 그래프 확인합시다."],
   [ME, "relay outbox lag 지표가 p99에서 1.2s 근처인데, 배치 크기 조정 전에 원인부터 봅시다."],
@@ -108,6 +152,15 @@ async function installMocks(context) {
   );
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
+  );
+  await context.route("**/v1/workspaces/*/roster", (route) =>
+    json(route, { members: ROSTER })
+  );
+  await context.route("**/v1/workspaces/*/read-state", (route) =>
+    json(route, { read_states: READ_STATES })
+  );
+  await context.route("**/v1/workspaces/*/channels/*/read-state", (route) =>
+    json(route, READ_STATES[0])
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());

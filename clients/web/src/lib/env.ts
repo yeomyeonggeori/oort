@@ -1,5 +1,5 @@
 // Runtime config for the spike. Backend origin + workspace are configurable;
-// credentials are NEVER hardcoded — they come from .env.local (dev prefill) or
+// credentials are NEVER hardcoded, they come from .env.local (dev prefill) or
 // the login form. The realtime WS address is NOT here: it is only ever the
 // `realtimeWebSocketUrl` the server returns at login (ADR-0110).
 

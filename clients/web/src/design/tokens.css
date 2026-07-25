@@ -90,6 +90,12 @@
   --spacing-control: 32px;
   --spacing-control-lg: 40px;
 
+  /* Panes are a third dimension: a secondary column is wider than any rhythm
+   * step, so it gets a NAME rather than an off-grid number. Keeping them here
+   * means w-pane / max-h-pane exist and w-[320px] still never compiles. */
+  --spacing-pane-sm: 192px; /* section nav, mention/dropdown list */
+  --spacing-pane: 320px; /* thread panel, command list */
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */
