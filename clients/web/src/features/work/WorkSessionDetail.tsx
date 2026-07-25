@@ -473,6 +473,8 @@ export function WorkSessionDetail({
   liveEvents,
   live,
   nowMs,
+  wide,
+  onWideChange,
   onBack,
 }: {
   session: WorkSession;
@@ -483,6 +485,9 @@ export function WorkSessionDetail({
   /** The realtime rail is connected, so what is on screen is confirmed. */
   live: boolean;
   nowMs: number;
+  /** The pane is at full surface width. Owned by WorkPanel, read by 관전. */
+  wide: boolean;
+  onWideChange: (wide: boolean) => void;
   onBack: () => void;
 }) {
   const { workspaceId } = useSession();
@@ -651,7 +656,12 @@ export function WorkSessionDetail({
             terminal is a different path entirely: capability plus a direct
             socket to the host, no relay in between. Drawn under the banner it
             read as the thing the banner was doubting. */}
-        <ObserverTerminal session={session} hostName={hostName} />
+        <ObserverTerminal
+          session={session}
+          hostName={hostName}
+          wide={wide}
+          onWideChange={onWideChange}
+        />
 
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a
             verified path yet, so this panel refuses to read its empty stream as

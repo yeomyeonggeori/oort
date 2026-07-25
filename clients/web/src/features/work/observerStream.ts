@@ -32,6 +32,37 @@ export function connectFrame(ptyId: string): string {
   return JSON.stringify({ pty_id: ptyId, type: "connect" });
 }
 
+/**
+ * Which keys the TERMINAL is allowed to have, for xterm's
+ * `attachCustomKeyEventHandler` (it takes "should xterm process this", so a
+ * `false` hands the key back to the browser untouched).
+ *
+ * This lives beside the connect frame because it is the same invariant seen
+ * from the reader's side. xterm cancels the browser default for every key it
+ * maps, and `disableStdin` does not change that: it drops the byte in
+ * CoreService long after `preventDefault()` has already run. MOMO-619 R1
+ * measured the result on the live build: once focus reached
+ * `.xterm-helper-textarea` there was no way out, with six Tabs, Escape and
+ * Shift+Tab all leaving `document.activeElement` on that textarea. 관전 중단,
+ * the scope toggle and the panel's own Escape handler were unreachable without
+ * a mouse, which is WCAG 2.1.2 and, on a surface with nothing listening for
+ * those keys, keystrokes eaten on behalf of nobody.
+ *
+ * So the keys that MOVE a reader belong to the browser, and so do the copy
+ * chords: Ctrl+C is `\x03` to xterm, which cancels the browser's own copy on
+ * Linux and Windows in exchange for an interrupt this grade cannot send. What
+ * xterm keeps is what it can honestly act on: PageUp/PageDown/Home/End scroll
+ * its viewport, and printable keys land nowhere, exactly as before.
+ */
+export function terminalOwnsKey(event: KeyboardEvent): boolean {
+  if (event.key === "Tab" || event.key === "Escape") return false;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+    const key = event.key.toLowerCase();
+    if (key === "c" || key === "insert") return false;
+  }
+  return true;
+}
+
 /** Host-side id grammar, mirrored from `RemotePTYBinding.validated`. */
 export function isValidPtyId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
@@ -110,6 +141,8 @@ export type ObserverFailure =
   | "server_unreachable"
   /** The socket never opened: the host address refused or could not be reached. */
   | "host_unreachable"
+  /** The page's own Content-Security-Policy refused the connection. */
+  | "host_blocked_by_policy"
   /** The socket was still connecting when the deadline blew. */
   | "host_timeout"
   /** The host rejected the bearer as expired. */
@@ -133,14 +166,57 @@ export type ObserverFailure =
  * A WebSocket has no timeout of its own, which is the MOMO-609 bug one protocol
  * over: a browser that cannot reach the host sits in CONNECTING until the OS
  * gives up (75 seconds on macOS for a dropped SYN), and a socket the page's own
- * CSP refuses reports NOTHING at all. Measured on 2026-07-26 against the
- * production connect-src (`'self'` plus the realtime domain, which does not
- * cover a host endpoint): the console logged the refusal, the constructor threw
- * nothing, no error or close event ever arrived, and the panel sat on
- * "호스트에 연결하는 중" indefinitely. A busy state with no end is the same lie
- * as a false live state, so the deadline is not optional.
+ * CSP refuses reports NOTHING at all on the socket itself. Measured on
+ * 2026-07-26 against the production connect-src (`'self'` plus the realtime
+ * domain, which does not cover a host endpoint): the console logged the
+ * refusal, the constructor threw nothing, no error or close event ever arrived,
+ * and the panel sat on "호스트에 연결하는 중" indefinitely. A busy state with no
+ * end is the same lie as a false live state, so the deadline is not optional.
+ *
+ * The deadline is the FLOOR, not the answer. A blocked connection does raise a
+ * `securitypolicyviolation` event on the document (`cspBlockedHost` below), and
+ * waiting 15 seconds to say "the host did not answer" when the browser already
+ * said "I refused to ask" is an accurate sentence about the wrong thing.
  */
 export const HOST_CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * Whether a `securitypolicyviolation` is THIS socket being refused by the page's
+ * own connect-src, rather than any other blocked request on the page.
+ *
+ * Measured in Chrome 2026-07-26 serving the built bundle behind the production
+ * header (`connect-src 'self' wss://REALTIME https://REALTIME`): dialling
+ * `wss://127.0.0.1:28443/v1/observer-terminal` fired one event carrying
+ * `effectiveDirective: "connect-src"` and that whole url as `blockedURI`,
+ * 38 to 51 ms after 관전 시작 (against the 15 second deadline it replaces). Other
+ * engines report the ORIGIN only, so the comparison is scheme plus host and
+ * never the path; a blockedURI that is not a url at all (Chrome uses bare
+ * keywords such as "inline" for other directives) can match nothing.
+ */
+export function cspBlockedHost(
+  violation: Pick<
+    SecurityPolicyViolationEvent,
+    "effectiveDirective" | "violatedDirective" | "blockedURI"
+  >,
+  socketUrl: string
+): boolean {
+  const directive = violation.effectiveDirective || violation.violatedDirective;
+  if (!directive.startsWith("connect-src")) return false;
+  let blocked: URL;
+  let target: URL;
+  try {
+    blocked = new URL(violation.blockedURI);
+    target = new URL(socketUrl);
+  } catch {
+    return false;
+  }
+  // Scheme is compared as ws/wss vs http/https folded onto each other: Chrome
+  // reports the blocked origin with the scheme it was dialled with, but a proxy
+  // or a future engine reporting `https:` for the same host is the same refusal.
+  const fold = (value: string) =>
+    value === "wss:" ? "https:" : value === "ws:" ? "http:" : value;
+  return fold(blocked.protocol) === fold(target.protocol) && blocked.host === target.host;
+}
 
 /**
  * What happened, then what to do next (design-taste-web §5). No apology, no
@@ -157,6 +233,8 @@ export const OBSERVER_FAILURE_COPY: Readonly<Record<ObserverFailure, string>> = 
     "서버에 관전 권한을 요청하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.",
   host_unreachable:
     "호스트에 닿지 못했습니다. 출력은 서버를 거치지 않고 호스트에서 직접 오므로, 이 브라우저가 호스트 주소에 닿을 수 있어야 합니다.",
+  host_blocked_by_policy:
+    "이 페이지의 보안 정책이 호스트 주소로의 연결을 막았습니다. 데스크톱 앱에서는 그대로 관전할 수 있고, 브라우저에서 열려면 이 웹을 서빙하는 서버가 호스트 주소를 허용해야 합니다.",
   host_timeout: `호스트가 ${Math.round(
     HOST_CONNECT_TIMEOUT_MS / 1000
   )}초 안에 응답하지 않았습니다. 호스트 주소와 네트워크를 확인한 뒤 다시 연결하세요.`,
@@ -169,20 +247,64 @@ export const OBSERVER_FAILURE_COPY: Readonly<Record<ObserverFailure, string>> = 
   session_ended: "세션이 끝나 출력 스트림이 닫혔습니다.",
 };
 
-/** Failures a retry can plausibly fix. The rest offer no retry control. */
+/**
+ * The owner's own view of a failure they caused.
+ *
+ * `observation_closed` is written in the third person because that is what it
+ * is for a teammate whose stream just went dark. Shown to the OWNER, one click
+ * after they pressed 소유자만 보기, the same sentence reports their own action
+ * back to them as someone else's and never says what to do next (§5). The gate
+ * already carries the owner's version of this fact; the banner path needs its
+ * own because a banner is what the reader is looking at.
+ */
+export function observerFailureCopy(
+  failure: ObserverFailure,
+  isOwner: boolean
+): string {
+  if (isOwner && failure === "observation_closed") {
+    return "관전을 소유자만 보기로 닫았습니다. 팀원 관전을 허용하면 이 자리에서 다시 볼 수 있습니다.";
+  }
+  return OBSERVER_FAILURE_COPY[failure];
+}
+
+/**
+ * Failures a retry can plausibly fix. The rest offer no retry control.
+ *
+ * `stream_closed` is in here, unlike its first shape. A host that closes the
+ * stream cleanly (code 1000) has not ended the SESSION: the ledger can still say
+ * running, the pty can still be there, and MOMO-619 R1 measured exactly that
+ * dead end (a clean host close left a banner with no action and no 관전 시작,
+ * with nothing on the panel able to get the stream back). Whether the retry can
+ * succeed is the host's answer to give, and asking it costs one capability call.
+ */
 const RETRYABLE: ReadonlySet<ObserverFailure> = new Set<ObserverFailure>([
   "server_unreachable",
   "host_unreachable",
   "host_timeout",
   "grant_expired",
   "stream_dropped",
+  "stream_closed",
   "capability_denied",
   "session_unavailable",
   "host_revoked",
 ]);
 
-export function isRetryable(failure: ObserverFailure): boolean {
-  return RETRYABLE.has(failure);
+/**
+ * Whether the failed state offers 다시 연결, which is TWO questions and not one.
+ *
+ * `gateAvailable` is the second, and it is why this takes an argument at all. A
+ * retry control on a session the ledger has already ended, or whose owner has
+ * already closed observation, is a button whose only possible outcome is the
+ * same error one round trip later; `isRetryable` alone cannot see either fact.
+ * When the gate is shut the panel states the reason instead (observeGate), and
+ * when the gate REOPENS the component drops the stale failure entirely rather
+ * than leaving a banner arguing with the controls beside it.
+ */
+export function offersRetry(
+  failure: ObserverFailure,
+  gateAvailable: boolean
+): boolean {
+  return gateAvailable && RETRYABLE.has(failure);
 }
 
 /** Why the capability call failed. Status codes are the server's own contract. */
@@ -224,6 +346,44 @@ export function classifyClose(input: {
   if (!input.opened) return "host_unreachable";
   return input.code === 1000 ? "stream_closed" : "stream_dropped";
 }
+
+// ---- what arrived, and how wide the window on it is -------------------------
+
+/**
+ * Lines in a chunk, counted so the surface can say how much output it holds and
+ * how far behind a scrolled-back reader is.
+ *
+ * It counts LF and nothing else. A pty writes CRLF, a bare CR is a progress bar
+ * redrawing the same row, and counting CR as a line would report a 3 second
+ * spinner as four hundred lines of output.
+ */
+export function newlineCount(chunk: string | Uint8Array): number {
+  let count = 0;
+  if (typeof chunk === "string") {
+    for (let i = 0; i < chunk.length; i += 1) {
+      if (chunk.charCodeAt(i) === 10) count += 1;
+    }
+    return count;
+  }
+  for (let i = 0; i < chunk.length; i += 1) {
+    if (chunk[i] === 10) count += 1;
+  }
+  return count;
+}
+
+/**
+ * The width host output is written for.
+ *
+ * 80 is not a preference, it is what the other side is doing: a pty created
+ * without a size gets 80 columns, and this client sends no resize frame by
+ * design (the observer grade has no encoder for one), so the host keeps writing
+ * at its own width no matter how narrow this viewport is. Below this the
+ * terminal is not showing the output, it is folding it, and MOMO-619 R1
+ * measured what that costs: 37 columns inside the 320px pane at a 1280px
+ * window, where a single pytest invocation wrapped onto two rows and an 79
+ * character ruler onto three.
+ */
+export const HOST_COLUMNS = 80;
 
 // ---- who may watch, who may change the scope --------------------------------
 

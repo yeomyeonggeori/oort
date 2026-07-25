@@ -8,13 +8,17 @@ import {
   classifyClose,
   classifyGrantFailure,
   connectFrame,
+  cspBlockedHost,
   HOST_CONNECT_TIMEOUT_MS,
-  isRetryable,
   isValidPtyId,
+  newlineCount,
   observationStillPermits,
   observerCountLabel,
+  observerFailureCopy,
   observerSubprotocols,
   observeGate,
+  offersRetry,
+  terminalOwnsKey,
   OBSERVER_FAILURE_COPY,
   OBSERVER_SUBPROTOCOL,
   type ObserverFailure,
@@ -64,6 +68,29 @@ describe("the observer sends nothing", () => {
     expect(connectFrame("pty-619-abc")).toBe(
       '{"pty_id":"pty-619-abc","type":"connect"}'
     );
+  });
+
+  it("hands the keys that move a reader back to the browser", () => {
+    const key = (init: Partial<KeyboardEvent>) =>
+      terminalOwnsKey({
+        key: "",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        ...init,
+      } as KeyboardEvent);
+    // WCAG 2.1.2: focus must be able to leave, and Escape must reach the panel.
+    expect(key({ key: "Tab" })).toBe(false);
+    expect(key({ key: "Escape" })).toBe(false);
+    // Copy is the point of a read-only terminal, and Ctrl+C is ^C to xterm.
+    expect(key({ key: "c", ctrlKey: true })).toBe(false);
+    expect(key({ key: "C", metaKey: true })).toBe(false);
+    expect(key({ key: "Insert", ctrlKey: true })).toBe(false);
+    // Everything else stays with the terminal: scrolling and selection are its.
+    expect(key({ key: "PageUp" })).toBe(true);
+    expect(key({ key: "a" })).toBe(true);
+    expect(key({ key: "c" })).toBe(true);
+    expect(key({ key: "c", ctrlKey: true, altKey: true })).toBe(true);
   });
 
   it("mirrors the server pty id grammar", () => {
@@ -172,15 +199,100 @@ describe("failure copy", () => {
   });
 
   it("offers a retry only where retrying can change the answer", () => {
-    expect(isRetryable("stream_dropped")).toBe(true);
-    expect(isRetryable("host_unreachable")).toBe(true);
-    expect(isRetryable("host_timeout")).toBe(true);
+    expect(offersRetry("stream_dropped", true)).toBe(true);
+    expect(offersRetry("host_unreachable", true)).toBe(true);
+    expect(offersRetry("host_timeout", true)).toBe(true);
+    // A clean host close is not an ended session: the ledger can still say
+    // running and the pty can still be there, so 다시 연결 is a real question
+    // to ask the host (R1 H1: this used to be a banner with no action at all).
+    expect(offersRetry("stream_closed", true)).toBe(true);
     // The owner closed observation or the session ended: the next step is not
     // a retry, it is a different fact on screen.
-    expect(isRetryable("observation_closed")).toBe(false);
-    expect(isRetryable("session_ended")).toBe(false);
-    expect(isRetryable("stream_closed")).toBe(false);
-    expect(isRetryable("grant_invalid")).toBe(false);
+    expect(offersRetry("observation_closed", true)).toBe(false);
+    expect(offersRetry("session_ended", true)).toBe(false);
+    expect(offersRetry("grant_invalid", true)).toBe(false);
+    // A policy the page carries is not something a second attempt can change.
+    expect(offersRetry("host_blocked_by_policy", true)).toBe(false);
+  });
+
+  it("withdraws the retry when the ledger no longer permits watching", () => {
+    // Same failure, both answers: the only difference is whether the session is
+    // still running with observation open. A 다시 연결 that can only produce the
+    // same error one round trip later is not an action.
+    expect(offersRetry("stream_dropped", false)).toBe(false);
+    expect(offersRetry("host_timeout", false)).toBe(false);
+  });
+
+  it("reports the owner's own close to the owner, with the way back", () => {
+    const teammate = observerFailureCopy("observation_closed", false);
+    const owner = observerFailureCopy("observation_closed", true);
+    expect(teammate).toBe("세션 소유자가 관전을 닫았습니다.");
+    expect(owner).not.toBe(teammate);
+    expect(owner).toContain("팀원 관전을 허용하면");
+    // Everything else reads the same for both sides.
+    expect(observerFailureCopy("stream_dropped", true)).toBe(
+      OBSERVER_FAILURE_COPY.stream_dropped
+    );
+  });
+});
+
+describe("cspBlockedHost", () => {
+  const url = "wss://host.example:28443/v1/observer-terminal";
+
+  it("recognises the page's own policy refusing THIS host", () => {
+    // Chrome reports the origin only, and names the directive in
+    // `effectiveDirective` (measured 2026-07-26 under the prod header).
+    expect(
+      cspBlockedHost(
+        {
+          effectiveDirective: "connect-src",
+          violatedDirective: "connect-src",
+          blockedURI: "wss://host.example:28443",
+        },
+        url
+      )
+    ).toBe(true);
+    // Folded schemes: the same refusal reported as https is the same host.
+    expect(
+      cspBlockedHost(
+        {
+          effectiveDirective: "connect-src",
+          violatedDirective: "connect-src",
+          blockedURI: "https://host.example:28443/v1/observer-terminal",
+        },
+        url
+      )
+    ).toBe(true);
+  });
+
+  it("ignores every other violation the page may raise", () => {
+    const other = (over: Partial<SecurityPolicyViolationEvent>) =>
+      cspBlockedHost(
+        {
+          effectiveDirective: "connect-src",
+          violatedDirective: "connect-src",
+          blockedURI: "wss://host.example:28443",
+          ...over,
+        },
+        url
+      );
+    expect(other({ blockedURI: "wss://other.example:28443" })).toBe(false);
+    expect(other({ blockedURI: "wss://host.example:9443" })).toBe(false);
+    expect(
+      other({ effectiveDirective: "style-src", violatedDirective: "style-src" })
+    ).toBe(false);
+    // Chrome uses bare keywords for other directives; they parse as no url.
+    expect(other({ blockedURI: "inline" })).toBe(false);
+  });
+});
+
+describe("newlineCount", () => {
+  it("counts LF and never a bare CR", () => {
+    expect(newlineCount("a\r\nb\r\n")).toBe(2);
+    expect(newlineCount("")).toBe(0);
+    // A progress bar redrawing one row is one row, not four hundred lines.
+    expect(newlineCount("50%\r60%\r70%\r")).toBe(0);
+    expect(newlineCount(new TextEncoder().encode("한 줄\n두 줄\n"))).toBe(2);
   });
 });
 

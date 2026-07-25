@@ -224,13 +224,42 @@ host), both about `infra/prod/Caddyfile`:
   `connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}`, which
   does not cover an arbitrary host `attach_endpoint`. Chrome refuses the socket,
   logs the violation, and — this is the trap — fires **no error and no close
-  event**, so the page must supply its own deadline (`HOST_CONNECT_TIMEOUT_MS`).
-  Serving the web client with a `connect-src` that permits the workspace's host
-  endpoints is a prerequisite for D1 in the browser; the Tauri shell
-  (`tauri.conf.json csp: null`) is unaffected today.
+  event on the socket**, so the page carries its own deadline
+  (`HOST_CONNECT_TIMEOUT_MS`).
+  The refusal is still observable: it raises `securitypolicyviolation` on the
+  document, and `cspBlockedHost` matches it against the endpoint being dialled
+  (R1 M6). Re-measured behind the prod header on 2026-07-26 the panel now names
+  the policy in **tens of milliseconds** (38 and 51 ms measured) instead of waiting 15 seconds to blame the host for a
+  question it was never asked, and offers no retry, because a retry cannot
+  change a policy the page is carrying.
+  **This is a deployment prerequisite, not a client bug, and it is still open.**
+  D1 in a browser needs the web client served with a `connect-src` that permits
+  the workspace's host endpoints; ADR-0126 D1 owns that decision and the host
+  PTY adapter it depends on (`observerStream.ts`: no host implementation exists
+  in this repo yet). Until then the Tauri shell is the supported path for 관전
+  (`tauri.conf.json csp: null`, unaffected), and the browser says so in the
+  banner rather than failing silently.
 - **`style-src` already allows what xterm needs.** xterm's DOM renderer writes
   `<style>` elements and one `setAttribute("style", …)` per truecolor cell. Under
   a hypothetical `style-src 'self'` the terminal still streams and prints text
   but loses colour, cell positioning and its dimensions (measured). The shipped
   policy carries `'unsafe-inline'`, so **no relaxation is needed** — but the
   directive can no longer be tightened without breaking this surface.
+
+Two more things a terminal costs, both found by the R1 review and both about
+xterm rather than about momo:
+
+- **xterm eats keys on behalf of a program that is not listening.** `disableStdin`
+  drops the byte in `CoreService`, long after `preventDefault()` has already run,
+  so Tab and Escape never left the helper textarea and a keyboard reader could
+  not get back out of the terminal at all (WCAG 2.1.2). `terminalOwnsKey` is
+  attached through `attachCustomKeyEventHandler` and returns the two navigation
+  keys, plus the copy chords, to the browser. Verified against the live build:
+  from inside the terminal, four Tabs walk out to 패널 넓게 보기 → 관전 중단 →
+  세션 종료 → 발췌 공유, and Escape reaches the panel's step-back handler.
+- **The viewport is not the host's width.** This client sends no resize frame by
+  design, so the host keeps writing at its pty's own width (80) however narrow
+  the pane is. The surface publishes the column count while it differs and
+  offers the pane's 넓게 보기 state; see `references/tokens.md` in the
+  design-taste-web skill for the measured numbers and the `getComputedStyle`
+  border-box trap that made both axes over-report.

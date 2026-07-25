@@ -123,12 +123,14 @@
   --spacing-diff-body: 400px;
 
   /* 관전 터미널 본문 (MOMO-619 / ADR-0126 D1). A read-only terminal is measured
-   * in ROWS, not in rhythm steps: at the 12px monospace role a row is 16px, so
-   * 320px is exactly 20 rows, the smallest window in which a command and the
-   * output it produced are visible together. It scrolls inside itself (xterm
-   * owns its own viewport), so a host that prints for an hour never grows the
-   * session pane. A height, so it is not a pane; and the scale has no step near
-   * 320, so like --spacing-diff-body the measure gets a NAME, not h-[320px]. */
+   * in ROWS, not in rhythm steps: at the 12px monospace role a row measures 14px
+   * (2026-07-26), so 320px draws 22 rows, the smallest window in which a command
+   * and the output it produced are visible together. It scrolls inside itself
+   * (xterm owns its own viewport), so a host that prints for an hour never grows
+   * the session pane. A height, so it is not a pane; and the scale has no step
+   * near 320, so like --spacing-diff-body the measure gets a NAME, not
+   * h-[320px]. It is applied only while the stream can still grow: a failed one
+   * hugs the rows it actually used (MOMO-619 R1 M7). */
   --spacing-terminal-body: 320px;
 
   /* --- radius: three steps, nothing else --------------------------------- */
@@ -226,15 +228,42 @@
  *
  * It is a named utility rather than a pair of responsive classes because the
  * width itself is the token: `w-[320px]` and `md:w-[320px]` are exactly the
- * arbitrary values the scale exists to keep out. */
+ * arbitrary values the scale exists to keep out.
+ *
+ * `data-wide` is the same full-surface geometry, asked for (MOMO-619 R1 H2).
+ * 320px is the right default for a list of session rows and the wrong one for
+ * the read-only terminal inside it: the host writes at 80 columns and the pane
+ * could only show 37, so a pytest invocation wrapped onto two rows. Widening
+ * BELOW 900px already happened for free, which made the panel narrower the
+ * wider the window got. The wide state is the same rule the media query
+ * applies, available at any width, and it wins over the base declaration by
+ * specificity (class + attribute), so the two never have to be ordered. */
 @utility work-pane {
   inline-size: var(--spacing-pane);
+
+  &[data-wide] {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
 
   @media (width < 900px) {
     position: absolute;
     inset: 0;
     inline-size: auto;
     z-index: 20;
+  }
+}
+
+/* The 넓게 보기 controls exist only where the pane is not ALREADY the whole
+ * surface. Below 900px the rule above has widened it, so the toggle's only
+ * possible effect has already happened and pressing it would do nothing. The
+ * breakpoint is a media query and not a `max-[899px]:` variant because an
+ * arbitrary Tailwind value is exactly what the preflight rejects. */
+@utility pane-wide-toggle {
+  @media (width < 900px) {
+    display: none;
   }
 }
 
