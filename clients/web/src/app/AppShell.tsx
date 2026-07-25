@@ -10,6 +10,7 @@ import {
 import { SessionProvider } from "@/app/session";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
+import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -64,6 +65,8 @@ export function AppShell({
           <Outlet />
         </main>
       </div>
+      {/* Global keyboard paths that must work from any route (R-1 §2). */}
+      <InboxHotkeys />
       <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </SessionProvider>
   );
