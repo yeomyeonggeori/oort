@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api";
 import {
+  autoTargetLabel,
   buildInviteMailto,
   buildJoinLink,
   choiceLabel,
+  eligibleAutoTargets,
   errorMessage,
   formatDay,
   INVITE_ROLES,
@@ -17,8 +19,13 @@ import {
   PROVIDER_MODES,
   providerSourceLabel,
   providerTestMessage,
+  relativeSince,
   slugError,
   WORK_ENGINES,
+  WORK_TIER_MODES,
+  workHostScopeLabel,
+  workHostStatus,
+  workHostTypeLabel,
   workspaceNameError,
 } from "./model";
 
@@ -193,6 +200,114 @@ describe("catalogs match the server enums", () => {
     ]);
     expect(choiceLabel(INVITE_ROLES, "member")).toBe("멤버");
     expect(choiceLabel(INVITE_ROLES, "unknown")).toBe("unknown");
+  });
+});
+
+describe("work tier policy (ADR-0125 D11)", () => {
+  it("offers exactly the three modes WorkTierPolicyRoutes.validatedMode allows", () => {
+    expect(WORK_TIER_MODES.map((m) => m.id)).toEqual(["t1_only", "ask", "auto"]);
+  });
+
+  it("never puts a tier number in front of a person", () => {
+    for (const mode of WORK_TIER_MODES) {
+      expect(`${mode.label} ${mode.detail}`).not.toMatch(/\bT[123]\b/);
+    }
+  });
+
+  it("keeps the mac wording for the two platform-neutral modes", () => {
+    expect(choiceLabel(WORK_TIER_MODES, "ask")).toBe("연결 끊김 시 묻기");
+    expect(choiceLabel(WORK_TIER_MODES, "auto")).toBe("자동 재개");
+  });
+});
+
+describe("auto target eligibility (mirrors requireAllowedTarget)", () => {
+  // Ids as the registry returns them (lower-case) against a member id as login
+  // returns it (upper-case): the pair that a raw === would silently drop.
+  const workspaceHost = {
+    id: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+    scope: "workspace",
+    ownerMemberId: "00000000-0000-7000-8000-000000000101",
+    displayName: "dawn-build-01",
+  };
+  const myHost = {
+    id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
+    scope: "member",
+    ownerMemberId: "00000000-0000-7000-8000-000000000101",
+    displayName: "성재 MacBook Pro",
+  };
+  const otherHost = {
+    id: "019f994c-4ed0-76a9-9d43-a9bde45b8fce",
+    scope: "member",
+    ownerMemberId: "00000000-0000-7000-8000-000000000102",
+    displayName: "지수 MacBook Air",
+  };
+  const ME = "00000000-0000-7000-8000-000000000101".toUpperCase();
+
+  it("lets a workspace default point only at a workspace-scoped host", () => {
+    expect(
+      eligibleAutoTargets([workspaceHost, myHost, otherHost], "workspace", ME).map(
+        (h) => h.displayName
+      )
+    ).toEqual(["dawn-build-01"]);
+  });
+
+  it("lets my override point at a workspace host or one I own", () => {
+    expect(
+      eligibleAutoTargets([workspaceHost, myHost, otherHost], "member", ME).map(
+        (h) => h.displayName
+      )
+    ).toEqual(["dawn-build-01", "성재 MacBook Pro"]);
+  });
+
+  it("never offers a revoked host, whatever its scope", () => {
+    const revoked = { ...workspaceHost, revokedAtMs: 1784983342799 };
+    expect(eligibleAutoTargets([revoked, myHost], "member", ME)).toEqual([myHost]);
+  });
+
+  it("names the stored target, and says so when it left the registry", () => {
+    expect(autoTargetLabel("cloud", [workspaceHost])).toBe("momo Cloud");
+    expect(autoTargetLabel(workspaceHost.id.toUpperCase(), [workspaceHost])).toBe(
+      "dawn-build-01"
+    );
+    expect(autoTargetLabel(undefined, [workspaceHost])).toBe("고른 대상 없음");
+    expect(autoTargetLabel("019f0000-0000-0000-0000-000000000000", [])).toContain(
+      "등록에 없는 호스트"
+    );
+  });
+});
+
+describe("work host row (WorkHostRoutes projection)", () => {
+  it("reads liveness from the server row, and revocation outranks it", () => {
+    expect(workHostStatus({ online: true }).label).toBe("온라인");
+    expect(workHostStatus({ online: false, lastSeenAtMs: 1 }).label).toBe(
+      "오프라인"
+    );
+    expect(workHostStatus({ online: false }).label).toBe("연결된 적 없음");
+    expect(
+      workHostStatus({ online: true, revokedAtMs: 1, lastSeenAtMs: 1 })
+    ).toEqual({ tone: "muted", label: "해지됨" });
+  });
+
+  it("labels every type and scope the server validates", () => {
+    expect(["app", "workd", "cloud"].map(workHostTypeLabel)).toEqual([
+      "데스크톱 앱",
+      "workd 데몬",
+      "momo Cloud",
+    ]);
+    expect(["member", "workspace"].map(workHostScopeLabel)).toEqual([
+      "개인",
+      "워크스페이스 공용",
+    ]);
+    // An enum this client has not heard of is shown, never swallowed.
+    expect(workHostTypeLabel("gpu-farm")).toBe("gpu-farm");
+  });
+
+  it("reports how long ago a host was last seen, then falls back to a day", () => {
+    const now = new Date(2026, 6, 25, 12, 0, 0).getTime();
+    expect(relativeSince(now - 5_000, now)).toBe("방금");
+    expect(relativeSince(now - 12 * 60_000, now)).toBe("12분 전");
+    expect(relativeSince(now - 3 * 3_600_000, now)).toBe("3시간 전");
+    expect(relativeSince(now - 3 * 86_400_000, now)).toBe("2026-07-22");
   });
 });
 

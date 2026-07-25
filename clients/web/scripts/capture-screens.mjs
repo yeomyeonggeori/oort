@@ -275,6 +275,51 @@ function makeMessages(count) {
   });
 }
 
+// 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
+// at in both schemes: three status chips (온라인 / 오프라인 / 해지됨) side by
+// side is where a status color that only works in one scheme would show.
+const WORK_HOSTS = [
+  {
+    id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 MacBook Pro",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true, git: true },
+    lastSeenAtMs: Date.now() - 20_000,
+    createdAtMs: Date.now() - 86_400_000,
+    online: true,
+  },
+  {
+    id: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+    workspaceId: WORKSPACE_ID,
+    scope: "workspace",
+    ownerMemberId: ME,
+    type: "workd",
+    displayName: "dawn-build-01",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true },
+    lastSeenAtMs: Date.now() - 3 * 3_600_000,
+    createdAtMs: Date.now() - 7 * 86_400_000,
+    online: false,
+  },
+  {
+    id: "019f994c-4ef4-70bb-9c02-2c3a5d8e1f77",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: HERMES,
+    type: "app",
+    displayName: "지수 MacBook Air",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: {},
+    revokedAtMs: Date.now() - 2 * 86_400_000,
+    createdAtMs: Date.now() - 30 * 86_400_000,
+    online: false,
+  },
+];
+
 /** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
 function makeDmMessages() {
   const base = Date.now() - 3 * 60_000;
@@ -372,6 +417,42 @@ async function installMocks(context) {
   );
   await context.route("**/v1/workspaces/*/channels/*/read-state", (route) =>
     json(route, READ_STATES[0])
+  );
+  // 설정 > 코드 실행 호스트 (MOMO-617). The workspace default sits in 자동 재개
+  // so the target row is on screen, and the member override inherits it, which
+  // is the pair the panel has to keep apart.
+  await context.route("**/v1/provider/work-host-engine", (route) =>
+    json(route, {
+      engine: "opencode",
+      source: "database",
+      updatedBy: "곽성재",
+      updatedAtMs: Date.now() - 2 * 86_400_000,
+      schema: "momo.work_host_engine.v0",
+    })
+  );
+  await context.route("**/v1/workspaces/*/work-hosts", (route) =>
+    json(route, { workHosts: WORK_HOSTS })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
+    json(route, {
+      workTierPolicy: {
+        workspaceId: WORKSPACE_ID,
+        mode: "auto",
+        autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+        inherited: false,
+        updatedAtMs: Date.now() - 3_600_000,
+      },
+    })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
+    json(route, {
+      workTierPolicy: {
+        workspaceId: WORKSPACE_ID,
+        memberId: ME,
+        mode: "ask",
+        inherited: true,
+      },
+    })
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());
@@ -624,6 +705,30 @@ async function captureScheme(browser, scheme) {
   const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
   await turnsOffline.screenshot({ path: turnsOfflineShot });
   shots.push(turnsOfflineShot);
+
+  // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
+  //     agent runs. Shot at the top of the panel, where the engine card, the
+  //     registry rows and the policy selects all land in one frame.
+  const settings = await context.newPage();
+  await settings.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(settings);
+  await settings.evaluate('location.hash = "/settings?section=code"');
+  await settings.getByTestId("work-host-list").waitFor({ state: "visible" });
+  await settings.getByTestId("work-tier-policy").waitFor({ state: "visible" });
+  const workHostShot = `${OUT_DIR}/settings-work-host-${scheme}.png`;
+  await settings.screenshot({ path: workHostShot });
+  shots.push(workHostShot);
+
+  // …and the same panel scrolled to its foot, where the three status chips and
+  // the two policy scopes sit together. A section this tall is reviewed twice
+  // or the half nobody sees is the half that regresses.
+  await settings
+    .getByTestId("work-tier-policy")
+    .scrollIntoViewIfNeeded();
+  await settings.waitForTimeout(200);
+  const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
+  await settings.screenshot({ path: policyShot });
+  shots.push(policyShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

@@ -152,6 +152,52 @@ const INVITES = Array.from({ length: 12 }, (_, i) => ({
   updatedAtMs: Date.now(),
 }));
 
+// 코드 실행 호스트 (MOMO-617) is now three blocks tall, and the auto-target row
+// only exists when a policy is in auto, so the fixture puts the workspace
+// default there: the tallest form the section can take is the one to measure.
+// One host carries a long Korean name for the same reason LONG_KO exists.
+const WORK_HOSTS = [
+  {
+    id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 MacBook Pro 16인치, 사무실 창가 자리",
+    publicKey: "gate-only-not-a-credential",
+    capabilities: { terminal: true, git: true },
+    lastSeenAtMs: Date.now() - 20_000,
+    createdAtMs: Date.now() - 86_400_000,
+    online: true,
+  },
+  {
+    id: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+    workspaceId: WORKSPACE_ID,
+    scope: "workspace",
+    ownerMemberId: ME,
+    type: "workd",
+    displayName: "dawn-build-01",
+    publicKey: "gate-only-not-a-credential",
+    capabilities: { terminal: true },
+    lastSeenAtMs: Date.now() - 3 * 3_600_000,
+    createdAtMs: Date.now() - 7 * 86_400_000,
+    online: false,
+  },
+  {
+    id: "019f994c-4ef4-70bb-9c02-2c3a5d8e1f77",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: HERMES,
+    type: "app",
+    displayName: "지수 MacBook Air",
+    publicKey: "gate-only-not-a-credential",
+    capabilities: {},
+    revokedAtMs: Date.now() - 2 * 86_400_000,
+    createdAtMs: Date.now() - 30 * 86_400_000,
+    online: false,
+  },
+];
+
 const BODIES = [
   [ME, "relay outbox lag p99가 1.2s 근처예요. batch size 만지기 전에 원인부터 봅시다."],
   [HERMES, "outbox_drain 워커 로그를 읽었습니다. 재시작 루프 1건, 마지막 30분은 안정입니다."],
@@ -257,6 +303,30 @@ async function installMocks(context) {
       updatedBy: "곽성재",
       updatedAtMs: Date.now(),
       schema: "momo.work_host_engine.v0",
+    })
+  );
+  await context.route("**/v1/workspaces/*/work-hosts", (route) =>
+    json(route, { workHosts: WORK_HOSTS })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
+    json(route, {
+      workTierPolicy: {
+        workspaceId: WORKSPACE_ID,
+        mode: "auto",
+        autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+        inherited: false,
+        updatedAtMs: Date.now(),
+      },
+    })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
+    json(route, {
+      workTierPolicy: {
+        workspaceId: WORKSPACE_ID,
+        memberId: ME,
+        mode: "ask",
+        inherited: true,
+      },
     })
   );
   // Least specific of the workspace routes; `*` never crosses a `/`, so the
@@ -378,31 +448,38 @@ async function measureSize(browser, size) {
 
   // Clipping without scrolling would be the worse bug: the settings body pane
   // must still reach its last control, and doing so must not move the shell.
-  await go(page, "/settings?section=members");
-  const reach = await page.evaluate(`(async () => {
-    const btn = document.querySelector('[data-testid="invite-create"]');
-    if (!btn) return { missing: true };
-    btn.scrollIntoView({ block: "end" });
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const r = btn.getBoundingClientRect();
-    const shell = document.querySelector(".app-shell");
-    const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
-    return {
-      reached: r.top >= 0 && r.bottom <= window.innerHeight + 1,
-      shellScrollTop: shell ? shell.scrollTop : null,
-      docScrollY: Math.round(window.scrollY),
-      navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
-    };
-  })()`);
-  check(
-    `${size.name} 설정 본문이 마지막 컨트롤까지 스크롤된다`,
-    reach.reached === true &&
-      reach.shellScrollTop === 0 &&
-      reach.docScrollY === 0 &&
-      reach.navTop === NAV_RESTING_TOP,
-    JSON.stringify(reach)
-  );
-  await page.screenshot({ path: `${OUT_DIR}/${size.name}-settings-bottom.png` });
+  // Two sections are asked, because they overflow for different reasons: 멤버와
+  // 초대 by row count, 코드 실행 호스트 (MOMO-617) by carrying three blocks.
+  for (const [hash, label, shot, selector] of [
+    ["/settings?section=members", "멤버와 초대", "settings-bottom", "invite-create"],
+    ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-mode-workspace"],
+  ]) {
+    await go(page, hash);
+    const reach = await page.evaluate(`(async () => {
+      const btn = document.querySelector('[data-testid="${selector}"]');
+      if (!btn) return { missing: true };
+      btn.scrollIntoView({ block: "end" });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const r = btn.getBoundingClientRect();
+      const shell = document.querySelector(".app-shell");
+      const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+      return {
+        reached: r.top >= 0 && r.bottom <= window.innerHeight + 1,
+        shellScrollTop: shell ? shell.scrollTop : null,
+        docScrollY: Math.round(window.scrollY),
+        navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+      };
+    })()`);
+    check(
+      `${size.name} 설정 ${label} 마지막 컨트롤까지 스크롤된다`,
+      reach.reached === true &&
+        reach.shellScrollTop === 0 &&
+        reach.docScrollY === 0 &&
+        reach.navTop === NAV_RESTING_TOP,
+      JSON.stringify(reach)
+    );
+    await page.screenshot({ path: `${OUT_DIR}/${size.name}-${shot}.png` });
+  }
 
   // Same question for the member directory (MOMO-611): a 14-row roster is
   // taller than a 480px window, so the LIST has to scroll and the shell must

@@ -35,6 +35,36 @@ export function SectionShell({
 }
 
 /**
+ * A block inside a section. One settings section can govern more than one thing
+ * (코드 실행 호스트 governs the engine, the host-loss policy and the registry),
+ * and three h2 sections in the nav for one subject would be worse than one
+ * section with a real heading hierarchy inside it.
+ */
+export function Subsection({
+  title,
+  lines,
+  children,
+}: {
+  title: string;
+  lines?: string[];
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-px">
+        <h3 className="text-body font-semibold text-ink">{title}</h3>
+        {lines?.map((line) => (
+          <p key={line} className="text-meta text-ink-muted">
+            {line}
+          </p>
+        ))}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
  * Label above control, not a fixed label column: a Korean label and a full URL
  * do not share one width without truncating or an off-grid fixed size.
  */
@@ -207,6 +237,71 @@ export function ChoiceRadios({
         ))}
       </div>
     </fieldset>
+  );
+}
+
+export interface SelectChoice {
+  id: string;
+  label: string;
+}
+
+/**
+ * One-line choice on a row, for a setting whose options are a closed list but
+ * which does not deserve a fieldset of its own (the tier policy has two scopes,
+ * so radios would put six rows on screen for two decisions).
+ *
+ * Native `<select>`: this bundle carries no Radix Select, and the platform
+ * control already gives type-ahead, arrow keys, the collapsed value as its own
+ * label, and a popup that a screen reader announces as a listbox. The only
+ * thing added here is the token skin.
+ */
+export function SelectRow({
+  id,
+  label,
+  hint,
+  value,
+  choices,
+  onChange,
+  disabled,
+  testId,
+}: {
+  id: string;
+  label: string;
+  hint?: ReactNode;
+  value: string;
+  choices: SelectChoice[];
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  testId?: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-line py-2 last:border-b-0">
+      <div className="flex min-w-0 flex-col gap-px">
+        <label htmlFor={id} className="text-body text-ink">
+          {label}
+        </label>
+        {hint && (
+          <span id={`${id}-hint`} className="text-meta text-ink-muted">
+            {hint}
+          </span>
+        )}
+      </div>
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        data-testid={testId}
+        className="h-control-sm min-w-0 shrink-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {choices.map((choice) => (
+          <option key={choice.id} value={choice.id}>
+            {choice.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 

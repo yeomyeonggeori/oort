@@ -58,6 +58,122 @@ export const WORK_ENGINES: Choice[] = [
   },
 ];
 
+/**
+ * `WorkTierPolicyRoutes.validatedMode`. The tier NUMBERS (T1/T2/T3) are an
+ * internal ADR-0125 vocabulary and stay out of user copy, exactly as on macOS:
+ * the person picks a behaviour, not a tier. Two of the three labels are the mac
+ * strings verbatim (MomoWorkConsoleCopy.swift). The first is not: the mac says
+ * "이 Mac에서만" because there the client IS the host, while a browser or a
+ * Tauri window can be looking at a Linux workd it will never run code on, so
+ * the web names the host by its role instead of by the reader's machine.
+ */
+export const WORK_TIER_MODES: Choice[] = [
+  {
+    id: "t1_only",
+    label: "처음 시작한 호스트에서만",
+    detail: "연결이 끊겨도 다른 곳으로 옮기지 않고, 그 호스트가 돌아오기를 기다립니다.",
+  },
+  {
+    id: "ask",
+    label: "연결 끊김 시 묻기",
+    detail: "호스트를 잃으면 어디서 이어갈지 물어봅니다. 고르지 않으면 이 값이 쓰입니다.",
+  },
+  {
+    id: "auto",
+    label: "자동 재개",
+    detail: "고른 호스트에서 마지막 push 커밋으로 새 세션을 시작합니다. 비용이 생길 수 있습니다.",
+  },
+];
+
+/** Reserved target selector in `validatedAutoTarget`, alongside a host id. */
+export const CLOUD_TARGET = "cloud";
+
+/** `WorkHostRoutes.validatedType`. */
+export function workHostTypeLabel(type: string): string {
+  if (type === "app") return "데스크톱 앱";
+  if (type === "workd") return "workd 데몬";
+  if (type === "cloud") return "momo Cloud";
+  return type;
+}
+
+/** `WorkHostRoutes.validatedScope`. */
+export function workHostScopeLabel(scope: string): string {
+  if (scope === "workspace") return "워크스페이스 공용";
+  if (scope === "member") return "개인";
+  return scope;
+}
+
+/**
+ * Host status from the server row only. `online` is the server's 90 second
+ * heartbeat window (`WorkHostRoutes.onlineWindowSeconds`), never a client clock
+ * comparison, and a revoked row outranks it: a revoked host is gone whatever
+ * its last heartbeat said.
+ */
+export function workHostStatus(host: {
+  online: boolean;
+  revokedAtMs?: number;
+  lastSeenAtMs?: number;
+}): { tone: "ok" | "warn" | "muted"; label: string } {
+  if (host.revokedAtMs) return { tone: "muted", label: "해지됨" };
+  if (host.online) return { tone: "ok", label: "온라인" };
+  if (host.lastSeenAtMs) return { tone: "warn", label: "오프라인" };
+  return { tone: "muted", label: "연결된 적 없음" };
+}
+
+/** "방금", "12분 전", or a calendar day once it stops being a recent event. */
+export function relativeSince(epochMs: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - epochMs) / 1000));
+  if (seconds < 60) return "방금";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return formatDay(epochMs);
+}
+
+export interface AutoTargetHost {
+  id: string;
+  scope: string;
+  ownerMemberId: string;
+  displayName: string;
+  revokedAtMs?: number;
+}
+
+/**
+ * Which hosts the server will accept as an auto target for a scope, mirroring
+ * `WorkTierPolicyRoutes.requireAllowedTarget`: the workspace default may only
+ * point at a workspace-scoped host, a member override may also point at a host
+ * that member owns, and a revoked host is never eligible. Offering a target the
+ * server answers 409 for is the same bug as showing a form that cannot save.
+ *
+ * Every id comparison is lower-cased: work host ids arrive lower-cased from the
+ * registry while member ids can arrive upper-cased from login, and `===` on the
+ * raw strings silently drops the owner's own host out of the list.
+ */
+export function eligibleAutoTargets<T extends AutoTargetHost>(
+  hosts: T[],
+  scope: "member" | "workspace",
+  memberId: string
+): T[] {
+  return hosts.filter((host) => {
+    if (host.revokedAtMs) return false;
+    if (host.scope === "workspace") return true;
+    if (scope === "workspace") return false;
+    return host.ownerMemberId.toLowerCase() === memberId.toLowerCase();
+  });
+}
+
+/** Target as the person named it, not as the ledger stores it. */
+export function autoTargetLabel(
+  target: string | undefined,
+  hosts: AutoTargetHost[]
+): string {
+  if (!target) return "고른 대상 없음";
+  if (target === CLOUD_TARGET) return "momo Cloud";
+  const host = hosts.find((h) => h.id.toLowerCase() === target.toLowerCase());
+  return host ? host.displayName : `등록에 없는 호스트 ${target}`;
+}
+
 /** `InviteRoutes.normalizedRole`. */
 export const INVITE_ROLES: Choice[] = [
   { id: "member", label: "멤버", detail: "채널을 읽고 씁니다." },

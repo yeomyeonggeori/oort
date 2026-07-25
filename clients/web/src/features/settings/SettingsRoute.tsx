@@ -69,7 +69,7 @@ const SECTIONS: SectionMeta[] = [
 const GROUPS: SectionMeta["group"][] = ["나", "워크스페이스"];
 
 export function SettingsRoute() {
-  const { workspaceId, connStatus } = useSession();
+  const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   // ?section=updates lets the sidebar badge (and a bug report) land on one
   // panel instead of "open 설정 and click the fourth item".
@@ -174,7 +174,13 @@ export function SettingsRoute() {
           {section === "notifications" && <NotificationRulesSection />}
           {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} />}
-          {section === "code" && <WorkHostSection offline={offline} />}
+          {section === "code" && (
+            <WorkHostSection
+              workspaceId={workspaceId}
+              memberId={session.member.id}
+              offline={offline}
+            />
+          )}
           {section === "workspace" && (
             <WorkspaceSection workspaceId={workspaceId} offline={offline} />
           )}
