@@ -342,12 +342,11 @@ the **release-page zip** installed into `/Applications`, not a local build:
 ## Known gaps
 
 - The **release** app loads `tauri://localhost`, so the web build's dev proxy for
-  `/v1` does not exist — REST calls need a Rust HTTP command, an embedded proxy,
-  or server-side CORS. The **dev** path (pointing at the proxied preview) does the
-  full round-trip today. See `clients/web/README.md` findings.
-  **This is what blocks inviting testers to the next channel**, not the updater:
-  the published app installs and updates itself cleanly but cannot yet reach a
-  momowebqa server from the packaged build.
+  `/v1` does not exist and REST is cross-origin. The server side of that landed on
+  `main` as the CORS origin allowlist (MOMO-605, #768) and is **not in this
+  branch's base** (`track/uxui` P2), so the `0.1.0-next.*` builds published so far
+  install and self-update cleanly but cannot yet sign in against momowebqa. Taking
+  `main` into the track closes it; nothing in the updater depends on it.
 - `momo://` is registered by this bundle and by the SwiftUI client, and macOS
   picks one handler. Drive a specific build with `open -a <path> "momo://…"`.
 - Unsigned or differently-signed builds: macOS ties keychain ACLs to the binary's
