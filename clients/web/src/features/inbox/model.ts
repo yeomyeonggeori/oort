@@ -205,7 +205,7 @@ export function approvalItem(
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
-    predicate: `${approval.actionType} 실행 허가를 요청했습니다`,
+    predicate: `${actionTypeLabel(approval.actionType)} 허가를 요청했습니다`,
     detail: approval.decisionReason ?? undefined,
     outcome: outcome.label,
     outcomeTone: outcome.tone,
@@ -309,4 +309,15 @@ export function orderFeed(items: FeedItem[]): FeedItem[] {
     if (a.sortAtMs !== b.sortAtMs) return b.sortAtMs - a.sortAtMs;
     return a.key < b.key ? -1 : 1;
   });
+}
+
+/** 3R M4: 와이어 액션 타입을 사용자 문장 어휘로. 미지의 타입은 원문 유지(정직 폴백). */
+export function actionTypeLabel(actionType: string): string {
+  const known: Record<string, string> = {
+    "work.spawn": "작업 실행",
+    "work.exec": "명령 실행",
+    "workspace.file_write_and_reindex": "파일 쓰기와 재색인",
+    "message.send": "메시지 전송",
+  };
+  return known[actionType] ?? actionType;
 }

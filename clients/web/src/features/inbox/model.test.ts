@@ -121,7 +121,8 @@ describe("approval rows", () => {
     expect(item.pending).toBe(true);
     expect(item.actor).toBe("@kim-intern");
     expect(item.actorIsAgent).toBe(true);
-    expect(item.predicate).toBe("work.spawn 실행 허가를 요청했습니다");
+    // 3R M4: 와이어 액션 타입은 사용자 어휘로 번역된다(actionTypeLabel).
+    expect(item.predicate).toBe("작업 실행 허가를 요청했습니다");
     // The projection carries no created_at, so a pending row shows the deadline.
     expect(item.timeLabel).toBe("5분 후 만료");
     expect(item.managedBy).toBe("곽성재");

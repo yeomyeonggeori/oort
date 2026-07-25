@@ -47,6 +47,17 @@ function statusChip(link: ProviderLink) {
   return <StatusChip tone="muted">연결 안 됨</StatusChip>;
 }
 
+/** 3R M4: 와이어 가용성 값을 사용자 어휘로. 미지 값은 원문 유지. */
+function availabilityLabel(availability: string): string {
+  const known: Record<string, string> = {
+    live: "연결됨",
+    available: "연결됨",
+    mock: "모의 응답",
+    unavailable: "연결 안 됨",
+  };
+  return known[availability] ?? availability;
+}
+
 export function AiLinkSection({ offline }: { offline: boolean }) {
   const client = useQueryClient();
   const query = useQuery({
@@ -190,7 +201,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             rows={[
               { key: "모드", value: choiceLabel(PROVIDER_MODES, link.mode) },
               { key: "저장된 키", value: maskedBearer(link.bearerLast4), numeric: true },
-              { key: "가용성", value: link.availability },
+              { key: "가용성", value: availabilityLabel(link.availability) },
               ...(link.updatedAtMs
                 ? [
                     {

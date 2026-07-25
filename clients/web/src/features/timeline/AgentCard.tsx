@@ -170,7 +170,7 @@ function PayloadDisclosure({ detail }: { detail: PayloadDetail }) {
   return (
     <details className="border-t border-line" data-testid="agent-payload">
       <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-        payload 자세히 보기
+        원본 데이터 보기
       </summary>
       <dl className="pb-2">
         {detail.rows.map((row) => (
