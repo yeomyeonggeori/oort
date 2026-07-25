@@ -203,9 +203,26 @@ export interface UsageBucketChoice {
   label: string;
 }
 
+/**
+ * Every grain the contract can answer with has a label here, including `month`,
+ * which this panel never ASKS for but a server may still answer with. The two
+ * offered choices are derived from this table rather than the table being
+ * derived from the choices, so a month-grained response is labelled 월별 instead
+ * of being mislabelled with the default.
+ */
+const BUCKET_UNIT_LABELS: Record<UsageBucketUnit, string> = {
+  day: "일별",
+  week: "주별",
+  month: "월별",
+};
+
+export function bucketUnitLabel(bucket: UsageBucketUnit): string {
+  return BUCKET_UNIT_LABELS[bucket];
+}
+
 export const USAGE_BUCKETS: UsageBucketChoice[] = [
-  { id: "day", label: "일별" },
-  { id: "week", label: "주별" },
+  { id: "day", label: BUCKET_UNIT_LABELS.day },
+  { id: "week", label: BUCKET_UNIT_LABELS.week },
 ];
 
 export interface UsageQuery {
@@ -251,7 +268,7 @@ export function formatClock(ms: number): string {
 }
 
 export function formatRange(range: UsageRange): string {
-  const unit = USAGE_BUCKETS.find((b) => b.id === range.bucket)?.label ?? "일별";
+  const unit = bucketUnitLabel(range.bucket);
   return `${formatIsoDay(range.from)} ~ ${formatIsoDay(range.to)} · ${unit}`;
 }
 
@@ -337,6 +354,53 @@ export function largestCost(rows: { costMicroUsd: number }[]): number {
   return rows.reduce((max, row) => Math.max(max, row.costMicroUsd), 0);
 }
 
+// ---- how a breakdown row is named --------------------------------------------
+//
+// The ledger names an agent by a member id and whatever display name the join
+// found. Neither is a label on its own: a member id is an internal value that
+// has no business in user copy, and this workspace really has two 김인턴 (a
+// human @intern-kim and an agent @kim-intern), so a display name alone can name
+// two different members. The roster already answers both questions for the
+// directory and the DM destination list (useWorkspace.channelLabelParts), and
+// this is the same answer for the same reason, not a second rule.
+
+/** What the roster knows about one member, narrowed to what a row needs. Kept
+ *  structural so this file stays free of the REST types and stays testable. */
+export interface UsageAgentIdentity {
+  displayName: string;
+  handle: string;
+  /** More than one member of this workspace carries this display name. */
+  ambiguous: boolean;
+}
+
+export interface UsageRowLabel {
+  text: string;
+  /** "@handle", present only where the name alone names two members. */
+  handle: string | null;
+}
+
+/**
+ * The roster wins over the ledger's copy of the name (it is the live one), the
+ * ledger is the fallback while the roster loads, and a member the roster does
+ * not know AND the ledger did not name gets a plain noun rather than its UUID.
+ */
+export function agentRowLabel(
+  row: UsageByAgent,
+  identity: UsageAgentIdentity | null
+): UsageRowLabel {
+  const named = (identity?.displayName || row.displayName).trim();
+  const handle = identity?.handle.trim() ?? "";
+  return {
+    text: named || "이름 없는 에이전트",
+    handle: handle && identity?.ambiguous ? `@${handle}` : null,
+  };
+}
+
+/** Same rule for a model row: an empty string is a row with no label at all. */
+export function modelRowLabel(model: string): string {
+  return model.trim() || "이름 없는 모델";
+}
+
 // ---- budget ------------------------------------------------------------------
 
 export interface BudgetStatus {
@@ -366,6 +430,12 @@ export function budgetGrainLabel(grain: string): string {
  * does NOT claim the server blocks anything: `limit_state` is a projection over
  * the ledger, and enforcement is a separate contract that does not exist yet.
  * Saying "실행이 막힙니다" here would be a story the system does not back.
+ *
+ * All three states name the SAME figure the same way. `observed` is spent plus
+ * reserved, which is what the server compares against the limit, and the rows
+ * under this line break it back into 사용 and 예약. Calling it "썼습니다" in two
+ * of the three states put a third number on the card that reconciled with
+ * neither of the other two.
  */
 export function budgetStatus(
   budget: UsageBudget,
@@ -389,7 +459,7 @@ export function budgetStatus(
     return {
       tone: "warn",
       label: "주의",
-      detail: `한도 ${limit} 중 ${used}을 썼습니다. 소프트 한도를 넘었습니다.`,
+      detail: `한도 ${limit} 중 예약을 포함한 사용액이 ${used}입니다. 소프트 한도를 넘었습니다.`,
       observedMicroUsd: observed,
       usedPercent,
     };
@@ -397,7 +467,7 @@ export function budgetStatus(
   return {
     tone: "ok",
     label: "한도 안",
-    detail: `한도 ${limit} 중 ${used}을 썼습니다.`,
+    detail: `한도 ${limit} 중 예약을 포함한 사용액이 ${used}입니다.`,
     observedMicroUsd: observed,
     usedPercent,
   };
@@ -466,16 +536,21 @@ export function forgetUsage(workspaceId?: string): void {
 // ---- which of the four states the panel is in --------------------------------
 
 export interface UsageViewInput {
-  /** react-query isPending: no answer yet for the range currently selected. */
-  pending: boolean;
   data: UsageSummary | null;
   /** When `data` arrived. react-query keeps data across a failed refetch, and
    *  that data is by definition a last-known value, not a live one. */
   dataUpdatedAtMs: number;
   /** Already mapped to Korean copy by the caller (errorMessage in ./model). */
   errorMessage: string | null;
-  /** Realtime rail is down. REST may still answer, so this only decides copy. */
-  offline: boolean;
+  /**
+   * react-query `fetchStatus === "paused"`: the browser is offline, so the
+   * request was never sent and no error will arrive either. This is the ONLY
+   * offline signal the panel can act on. The realtime rail being down says
+   * nothing about whether REST answers, and a paused query stays `pending`
+   * forever, so without this the panel would hold skeleton bars for as long as
+   * the connection is out.
+   */
+  paused: boolean;
   lastKnown: LastKnownUsage | null;
   nowMs: number;
 }
@@ -514,40 +589,62 @@ function lastKnownView(
 }
 
 /**
- * Fresh data always wins. A failure falls back to the last confirmed answer
- * when there is one, and only says "불러오지 못했습니다" with nothing to show
- * when there is not. A range that is still loading shows bars rather than the
- * previous range's numbers, because a stale total under a new range label is
- * the one thing worse than waiting.
+ * Fresh data wins, a stalled read falls back to the last confirmed answer with
+ * a label on it, and nothing to fall back on says so plainly. A range that is
+ * genuinely still in flight shows bars rather than the previous range's
+ * numbers, because a stale total under a new range label is the one thing worse
+ * than waiting.
+ *
+ * The failure branches are checked BEFORE the ready branch on purpose. Data
+ * that is on screen while the current read cannot complete is a last-known
+ * value whether the read failed or was never sent, and silently passing an old
+ * total off as the current bill is the failure mode this fallback exists to
+ * prevent.
  */
 export function usageView(input: UsageViewInput): UsageView {
+  // A refresh that failed leaves the previous answer on screen, labelled.
+  const fallback: LastKnownUsage | null = input.data
+    ? { summary: input.data, checkedAtMs: input.dataUpdatedAtMs || input.nowMs }
+    : input.lastKnown;
+
+  if (input.errorMessage) {
+    return fallback
+      ? lastKnownView(fallback, input.errorMessage, input.nowMs)
+      : { kind: "error", message: input.errorMessage };
+  }
+  if (input.paused) {
+    return fallback
+      ? lastKnownView(fallback, OFFLINE_REASON, input.nowMs)
+      : { kind: "error", message: OFFLINE_EMPTY };
+  }
   if (input.data) {
-    // A refresh that failed leaves the previous answer on screen. It keeps
-    // rendering, but it is labelled: silently passing an old total off as the
-    // current bill is the failure mode this whole fallback exists to prevent.
-    if (input.errorMessage) {
-      return lastKnownView(
-        { summary: input.data, checkedAtMs: input.dataUpdatedAtMs || input.nowMs },
-        input.errorMessage,
-        input.nowMs
-      );
-    }
     return {
       kind: "ready",
       summary: input.data,
       empty: isEmptyUsage(input.data),
     };
   }
-  if (input.errorMessage) {
-    return input.lastKnown
-      ? lastKnownView(input.lastKnown, input.errorMessage, input.nowMs)
-      : { kind: "error", message: input.errorMessage };
-  }
-  if (input.pending) return { kind: "loading" };
-  if (input.offline) {
-    return input.lastKnown
-      ? lastKnownView(input.lastKnown, OFFLINE_REASON, input.nowMs)
-      : { kind: "error", message: OFFLINE_EMPTY };
-  }
   return { kind: "loading" };
+}
+
+/**
+ * One sentence for the panel's live region, so a screen reader hears the wait
+ * and then hears the number. The 15s deadline is a long time to be told
+ * nothing, and the skeleton bars are aria-hidden by design.
+ *
+ * Error and 마지막 확인값 are deliberately silent here: each already renders its
+ * own role=alert / role=status banner, and announcing the same sentence from
+ * two live regions reads it twice.
+ */
+export function usageAnnouncement(
+  view: UsageView,
+  formatCost: (microUsd: number) => string
+): string {
+  if (view.kind === "loading") return "사용량을 불러오는 중입니다.";
+  if (view.kind === "ready") {
+    return view.empty
+      ? "이 기간에 기록된 사용량이 없습니다."
+      : `사용량 합계 ${formatCost(view.summary.totals.costMicroUsd)}을 불러왔습니다.`;
+  }
+  return "";
 }

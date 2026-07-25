@@ -169,9 +169,11 @@ export function SettingsRoute() {
           {section === "workspace" && (
             <WorkspaceSection workspaceId={workspaceId} offline={offline} />
           )}
-          {section === "usage" && (
-            <UsageSection workspaceId={workspaceId} offline={offline} />
-          )}
+          {/* No `offline` prop: 사용량 is a read, and the realtime rail being
+              down says nothing about whether this GET answers. The panel reads
+              the browser's own offline state instead (react-query fetchStatus),
+              which is the only signal that actually stops the request. */}
+          {section === "usage" && <UsageSection workspaceId={workspaceId} />}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />
           )}

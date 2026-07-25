@@ -2,8 +2,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { formatMicroUsd } from "@/features/timeline/agentCardModel";
 import fixtures from "./usageFixtures.json";
 import {
+  USAGE_BUCKETS,
   USAGE_PERIODS,
+  agentRowLabel,
   barShare,
+  bucketUnitLabel,
   budgetGrainLabel,
   budgetStatus,
   costConfidence,
@@ -13,12 +16,14 @@ import {
   formatRange,
   isEmptyUsage,
   largestCost,
+  modelRowLabel,
   parseUsageSummary,
   peakBucket,
   percentOf,
   recallUsage,
   relativeSince,
   rememberUsage,
+  usageAnnouncement,
   usageErrorCopy,
   usageQuery,
   usageView,
@@ -179,7 +184,24 @@ describe("budget", () => {
     expect(status.label).toBe("한도 안");
     expect(status.observedMicroUsd).toBe(19_682_500);
     expect(status.usedPercent).toBe(39);
-    expect(status.detail).toBe("한도 $50.00 중 $19.68을 썼습니다.");
+    expect(status.detail).toBe(
+      "한도 $50.00 중 예약을 포함한 사용액이 $19.68입니다."
+    );
+  });
+
+  it("names the figure the same way in every state, because it is one figure", () => {
+    // $19.68 is spent + reserved, and the rows under this line split it back
+    // into 사용 $18.43 and 예약 $1.25. Two of the three states used to call it
+    // "썼습니다", which put a third number on the card that reconciled with
+    // neither of the other two.
+    for (const state of ["normal", "soft_limit", "hard_limit"] as const) {
+      const status = budgetStatus(
+        { ...normal.budget!, state },
+        formatMicroUsd
+      );
+      expect(status.detail).toContain("예약을 포함한 사용액");
+      expect(status.detail).toContain("$19.68");
+    }
   });
 
   it("states the hard limit without claiming the server blocks anything", () => {
@@ -212,6 +234,17 @@ describe("formatting", () => {
   it("renders a range as two local days plus the bucket unit", () => {
     expect(formatRange(normal.range)).toBe("2026-06-25 ~ 2026-07-25 · 일별");
     expect(formatRange({ ...normal.range, bucket: "week" })).toContain("주별");
+  });
+
+  it("labels a month-grained answer as 월별, not as the default", () => {
+    // The panel only ever asks for day or week, but the contract lets the
+    // server answer with month, and parseBucketUnit keeps it. A range line
+    // reading 일별 above a "가장 비쌌던 달" row is the card contradicting itself.
+    expect(bucketUnitLabel("month")).toBe("월별");
+    expect(formatRange({ ...normal.range, bucket: "month" })).toBe(
+      "2026-06-25 ~ 2026-07-25 · 월별"
+    );
+    expect(USAGE_BUCKETS.map((b) => b.id)).toEqual(["day", "week"]);
   });
 
   it("labels a bucket at the grain it covers", () => {
@@ -279,11 +312,10 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
 
   function view(over: Partial<Parameters<typeof usageView>[0]> = {}) {
     return usageView({
-      pending: false,
       data: null,
       dataUpdatedAtMs: 0,
       errorMessage: null,
-      offline: false,
+      paused: false,
       lastKnown: null,
       nowMs: NOW,
       ...over,
@@ -295,7 +327,6 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
       data: normal,
       dataUpdatedAtMs: NOW,
       lastKnown: { summary: emptyPeriod, checkedAtMs: CHECKED },
-      offline: true,
     });
     expect(state.kind).toBe("ready");
     expect(state.kind === "ready" && state.summary.totals.costMicroUsd).toBe(
@@ -334,9 +365,13 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     expect(state).toEqual({ kind: "error", message: "요청을 끝내지 못했습니다." });
   });
 
-  it("keeps the cached range rendering while offline, undimmed", () => {
+  // `paused` is react-query's own fetchStatus for "the browser is offline, so
+  // the request was never sent". It is the state the panel can actually reach:
+  // a paused query stays pending and never errors, so it has to be answered
+  // before the loading branch or the bars would never resolve.
+  it("keeps the cached range rendering while the browser is offline, undimmed", () => {
     const state = view({
-      offline: true,
+      paused: true,
       lastKnown: { summary: normal, checkedAtMs: CHECKED },
     });
     expect(state.kind).toBe("last-known");
@@ -344,16 +379,23 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
   });
 
   it("states the offline case plainly when there is no cached answer", () => {
-    const state = view({ offline: true });
+    const state = view({ paused: true });
     expect(state).toEqual({
       kind: "error",
       message: "연결이 끊겼습니다. 다시 연결되면 사용량을 불러옵니다.",
     });
   });
 
+  it("labels data already on screen when the next read cannot be sent", () => {
+    const state = view({ data: normal, dataUpdatedAtMs: CHECKED, paused: true });
+    expect(state.kind).toBe("last-known");
+    expect(state.kind === "last-known" && state.notice).toContain(
+      "연결이 끊겼습니다."
+    );
+  });
+
   it("shows bars, not the previous range's numbers, while a new range loads", () => {
     const state = view({
-      pending: true,
       lastKnown: { summary: normal, checkedAtMs: CHECKED },
     });
     expect(state).toEqual({ kind: "loading" });
@@ -374,5 +416,89 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     const summary: UsageSummary | undefined =
       state.kind === "last-known" ? state.summary : undefined;
     expect(summary?.budget?.state).toBe("hard_limit");
+  });
+
+  describe("live region copy", () => {
+    it("announces the wait and then the number", () => {
+      expect(usageAnnouncement({ kind: "loading" }, formatMicroUsd)).toBe(
+        "사용량을 불러오는 중입니다."
+      );
+      expect(
+        usageAnnouncement(
+          { kind: "ready", summary: normal, empty: false },
+          formatMicroUsd
+        )
+      ).toBe("사용량 합계 $18.43을 불러왔습니다.");
+      expect(
+        usageAnnouncement(
+          { kind: "ready", summary: emptyPeriod, empty: true },
+          formatMicroUsd
+        )
+      ).toBe("이 기간에 기록된 사용량이 없습니다.");
+    });
+
+    it("stays silent where a banner is already a live region", () => {
+      expect(
+        usageAnnouncement({ kind: "error", message: "끊겼습니다." }, formatMicroUsd)
+      ).toBe("");
+      expect(
+        usageAnnouncement(
+          {
+            kind: "last-known",
+            summary: normal,
+            empty: false,
+            notice: "끊겼습니다.",
+            checkedAtMs: CHECKED,
+          },
+          formatMicroUsd
+        )
+      ).toBe("");
+    });
+  });
+});
+
+describe("breakdown row labels", () => {
+  const [intern] = normal.byAgent;
+
+  it("prefers the roster name and never falls back to a member id", () => {
+    expect(agentRowLabel(intern, null)).toEqual({
+      text: "김인턴",
+      handle: null,
+    });
+    expect(
+      agentRowLabel(
+        { ...intern, displayName: "" },
+        { displayName: "김인턴", handle: "kim-intern", ambiguous: false }
+      )
+    ).toEqual({ text: "김인턴", handle: null });
+    // Neither source named it: a plain noun, not 019f94e3-8b21-...
+    const nameless = agentRowLabel({ ...intern, displayName: "  " }, null);
+    expect(nameless.text).toBe("이름 없는 에이전트");
+    expect(nameless.text).not.toContain(intern.agentMemberId.slice(0, 8));
+  });
+
+  it("adds the handle exactly where the name names two members", () => {
+    // This workspace really has two 김인턴: a human @intern-kim and an agent
+    // @kim-intern. Two identical rows in a cost ledger is a coin toss.
+    expect(
+      agentRowLabel(intern, {
+        displayName: "김인턴",
+        handle: "kim-intern",
+        ambiguous: true,
+      })
+    ).toEqual({ text: "김인턴", handle: "@kim-intern" });
+    expect(
+      agentRowLabel(intern, {
+        displayName: "hermes",
+        handle: "hermes",
+        ambiguous: false,
+      }).handle
+    ).toBeNull();
+  });
+
+  it("gives a model row with no name a label rather than a blank line", () => {
+    expect(modelRowLabel("claude-opus-5")).toBe("claude-opus-5");
+    expect(modelRowLabel("")).toBe("이름 없는 모델");
+    expect(modelRowLabel("   ")).toBe("이름 없는 모델");
   });
 });

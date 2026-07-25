@@ -199,6 +199,24 @@ same reason `app-shell` does. The panel is a flex column whose middle box carrie
 title and the action row stay put, and the document still does not scroll
 (MOMO-610).
 
+## 5a. Bars
+
+`progress-bar` styles a native `<progress>` (CSP `style-src 'self'` rules out a
+div with a computed width, so the length has to come from `value`/`max`). Its
+fill defaults to `--accent`, and `data-tone` on the element selects a different
+one, because a bar carries two unrelated meanings in this client:
+
+| `data-tone` | fill | used for |
+|---|---|---|
+| (absent) | `--accent` | determinate progress (설정 > 업데이트) |
+| `neutral` | `--line-strong` | a share of the largest row (사용량 > 모델별/에이전트별) |
+| `warn` | `--warn` | 예산 소프트 한도 |
+| `danger` | `--danger` | 예산 하드 한도 |
+
+A state bar takes the same token as the status chip next to it. A full bar in
+the accent colour beside a red "한도 도달" chip reads as a finished download,
+which is the opposite of what it means.
+
 ## 5b. Motion utilities
 
 There is exactly one, and it is feedback rather than decoration: `caret-stream`

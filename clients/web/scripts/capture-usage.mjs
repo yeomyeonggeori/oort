@@ -55,6 +55,54 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000202", workspaceId: WORKSPACE_ID, kind: "public", name: "엔진", muted: false },
 ];
 
+/**
+ * The roster the 에이전트별 rows are named from. Ids are upper-cased exactly as
+ * the server sends them, and the two 김인턴 (a human @intern-kim and the agent
+ * @kim-intern) are the real reason a cost row cannot be labelled by display
+ * name alone: without the handle those are two identical lines in a bill.
+ */
+function member(id, kind, displayName, handle, extra = {}) {
+  return {
+    id,
+    workspaceId: WORKSPACE_ID,
+    kind,
+    status: "active",
+    displayName,
+    handle,
+    channelCount: 2,
+    channelIds: [GENERAL_ID],
+    capabilities: [],
+    createdAtMs: 1_750_000_000_000,
+    updatedAtMs: 1_750_000_000_000,
+    ...extra,
+  };
+}
+
+const ROSTER = [
+  member(ME, "human", "곽성재", "seongjae", { role: "owner" }),
+  member(
+    "019F94E3-7B0F-7A22-9C13-4D5E6F708192",
+    "human",
+    "김인턴",
+    "intern-kim",
+    { role: "member" }
+  ),
+  member(
+    "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90",
+    "agent",
+    "김인턴",
+    "kim-intern",
+    { ownerHumanId: ME, agentModel: "claude-opus-5" }
+  ),
+  member(
+    "019F94E3-9C32-7BF1-A4D5-6E2B3C7D8E01",
+    "agent",
+    "hermes",
+    "hermes",
+    { ownerHumanId: ME, agentModel: "gpt-5.6-sol" }
+  ),
+];
+
 function json(route, body) {
   return route.fulfill({
     status: 200,
@@ -87,6 +135,9 @@ async function installMocks(context, usage) {
   );
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
+  );
+  await context.route("**/v1/workspaces/*/roster", (route) =>
+    json(route, { members: ROSTER })
   );
   await context.route("**/v1/workspaces/*/usage/summary*", (route) => {
     const body = usage();
@@ -133,13 +184,17 @@ async function scrollTo(page, selector) {
   })()`);
 }
 
-async function openUsage(context) {
+/** `beforeUsage` runs after sign-in and before the panel opens, which is the
+ *  only window in which the browser can be taken offline BEFORE the usage query
+ *  is ever created (the offline state has nothing cached to fall back on). */
+async function openUsage(context, beforeUsage) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  if (beforeUsage) await beforeUsage(page, context);
   await page.evaluate('location.hash = "/settings?section=usage"');
   await page.getByTestId("usage-controls").waitFor({ state: "visible" });
   return page;
@@ -148,7 +203,7 @@ async function openUsage(context) {
 async function captureScheme(browser, scheme) {
   const shots = [];
 
-  async function shoot(name, usage, drive) {
+  async function shoot(name, usage, drive, beforeUsage) {
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -156,7 +211,7 @@ async function captureScheme(browser, scheme) {
       reducedMotion: "reduce",
     });
     await installMocks(context, usage);
-    const page = await openUsage(context);
+    const page = await openUsage(context, beforeUsage);
     await drive(page);
     const path = `${OUT_DIR}/usage-${name}-${scheme}.png`;
     await page.screenshot({ path });
@@ -213,6 +268,22 @@ async function captureScheme(browser, scheme) {
   await shoot("error", () => 404, async (page) => {
     await page.getByTestId("usage-error").waitFor({ state: "visible" });
   });
+
+  // 4c. 오프라인: the browser goes offline BEFORE the panel is opened, so the
+  //     query is created in react-query's `paused` fetchStatus. It is never
+  //     sent and never fails, so nothing but this branch would ever resolve the
+  //     skeleton. Nothing is cached yet either, which is the one case that has
+  //     to say so in words rather than fall back.
+  await shoot(
+    "offline",
+    () => FIXTURES.normal,
+    async (page) => {
+      await page.getByTestId("usage-error").waitFor({ state: "visible" });
+    },
+    async (_page, context) => {
+      await context.setOffline(true);
+    }
+  );
 
   // 5. 키보드 초점: the range control is a native radio group, one tab stop with
   //    arrow-key roving inside it. Tabbed into rather than focused

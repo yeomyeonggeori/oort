@@ -6,6 +6,15 @@ import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/State
 // The one cost formatter in this client. A second rounding rule would mean two
 // different answers to "how much did this cost" on two surfaces.
 import { formatCount, formatMicroUsd } from "@/features/timeline/agentCardModel";
+// The roster is what turns a member id into a name, and a name into an
+// unambiguous one. It is already fetched for the sidebar and the directory, so
+// this is a cache read, not a second request.
+import {
+  isAmbiguousName,
+  memberFor,
+  useDirectory,
+  type Directory,
+} from "@/features/workspace/useWorkspace";
 import { ApiError } from "@/lib/api";
 import { fetchUsageSummary } from "./api";
 import { errorMessage } from "./model";
@@ -13,6 +22,7 @@ import { SectionShell, StatusChip } from "./SettingsFields";
 import {
   USAGE_BUCKETS,
   USAGE_PERIODS,
+  agentRowLabel,
   barShare,
   budgetGrainLabel,
   budgetStatus,
@@ -22,10 +32,12 @@ import {
   formatIsoDay,
   formatRange,
   largestCost,
+  modelRowLabel,
   parseUsageSummary,
   peakBucket,
   recallUsage,
   rememberUsage,
+  usageAnnouncement,
   usageErrorCopy,
   usageQuery,
   usageView,
@@ -53,15 +65,10 @@ import {
 // own figure so the confidence of the total is visible rather than implied.
 // =============================================================================
 
-export function UsageSection({
-  workspaceId,
-  offline,
-}: {
-  workspaceId: string;
-  offline: boolean;
-}) {
+export function UsageSection({ workspaceId }: { workspaceId: string }) {
   const [period, setPeriod] = useState<UsagePeriodId>("30d");
   const [bucket, setBucket] = useState<UsageBucketUnit>("day");
+  const { directory } = useDirectory(workspaceId);
 
   const query = useQuery({
     // The workspace id is lower-cased in the key: the same workspace arriving
@@ -85,7 +92,6 @@ export function UsageSection({
   }, [query.data, query.dataUpdatedAt, workspaceId]);
 
   const view = usageView({
-    pending: query.isPending,
     data: query.data ?? null,
     dataUpdatedAtMs: query.dataUpdatedAt,
     errorMessage: query.isError
@@ -94,7 +100,10 @@ export function UsageSection({
           errorMessage(query.error)
         )
       : null,
-    offline,
+    // "paused" is react-query saying the browser is offline, so the request was
+    // never sent: it will not fail and it will not finish. Anything else, the
+    // realtime rail included, says nothing about whether this REST read works.
+    paused: query.fetchStatus === "paused",
     lastKnown: recallUsage(workspaceId),
     nowMs: Date.now(),
   });
@@ -124,8 +133,10 @@ export function UsageSection({
           value={bucket}
           onChange={(id) => setBucket(id as UsageBucketUnit)}
         />
+        {/* Bordered, not ghost: this sits between two bordered segmented groups
+            and a borderless label there does not read as something to press. */}
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           onClick={() => void query.refetch()}
           disabled={query.isFetching}
@@ -135,57 +146,74 @@ export function UsageSection({
         </Button>
       </div>
 
-      {view.kind === "loading" && <SkeletonRows rows={5} />}
+      {/* The skeleton bars are aria-hidden and the deadline is 15 seconds, so
+          without this the wait and the arrival are both silent. Error and
+          마지막 확인값 stay out of it: their own banners are live regions. */}
+      <p className="sr-only" role="status" data-testid="usage-status">
+        {usageAnnouncement(view, formatMicroUsd)}
+      </p>
 
-      {view.kind === "error" && (
-        <InlineBanner
-          message={view.message}
-          actionLabel="다시 시도"
-          onAction={() => void query.refetch()}
-          testId="usage-error"
-        />
-      )}
+      <div
+        className="flex min-w-0 flex-col gap-4"
+        aria-busy={view.kind === "loading"}
+        data-testid="usage-panel"
+      >
+        {view.kind === "loading" && <SkeletonRows rows={5} />}
 
-      {view.kind === "last-known" && (
-        <div className="flex min-w-0 flex-col gap-3" data-testid="usage-last-known">
-          {/* P15 durability layer: the cached answer keeps rendering, undimmed,
-              with the instant it was confirmed stated next to it. */}
+        {view.kind === "error" && (
           <InlineBanner
-            tone="neutral"
-            message={view.notice}
+            message={view.message}
             actionLabel="다시 시도"
             onAction={() => void query.refetch()}
-            testId="usage-last-known-banner"
+            testId="usage-error"
           />
-          {/* The cached answer can cover a different range from the one the
-              selector now shows, so the range is stated here as well as inside
-              the block below. */}
-          <p className="text-meta text-ink-muted">
-            마지막 확인{" "}
-            <time dateTime={new Date(view.checkedAtMs).toISOString()}>
-              {formatClock(view.checkedAtMs)}
-            </time>{" "}
-            · {formatRange(view.summary.range)}
-          </p>
+        )}
+
+        {view.kind === "last-known" && (
+          <div
+            className="flex min-w-0 flex-col gap-3"
+            data-testid="usage-last-known"
+          >
+            {/* P15 durability layer: the cached answer keeps rendering,
+                undimmed, with the instant it was confirmed stated next to it.
+                The range it covers is stated once, by the block below: the
+                cached range and the selected one can differ, and the block
+                header is where the numbers it labels actually are. */}
+            <InlineBanner
+              tone="neutral"
+              message={view.notice}
+              actionLabel="다시 시도"
+              onAction={() => void query.refetch()}
+              testId="usage-last-known-banner"
+            />
+            <p className="text-meta text-ink-muted">
+              마지막 확인{" "}
+              <time dateTime={new Date(view.checkedAtMs).toISOString()}>
+                {formatClock(view.checkedAtMs)}
+              </time>
+            </p>
+            <UsageBody
+              summary={view.summary}
+              empty={view.empty}
+              period={period}
+              directory={directory}
+              onWiden={() => setPeriod("30d")}
+              onRetry={() => void query.refetch()}
+            />
+          </div>
+        )}
+
+        {view.kind === "ready" && (
           <UsageBody
             summary={view.summary}
             empty={view.empty}
             period={period}
+            directory={directory}
             onWiden={() => setPeriod("30d")}
             onRetry={() => void query.refetch()}
           />
-        </div>
-      )}
-
-      {view.kind === "ready" && (
-        <UsageBody
-          summary={view.summary}
-          empty={view.empty}
-          period={period}
-          onWiden={() => setPeriod("30d")}
-          onRetry={() => void query.refetch()}
-        />
-      )}
+        )}
+      </div>
     </SectionShell>
   );
 }
@@ -196,12 +224,14 @@ function UsageBody({
   summary,
   empty,
   period,
+  directory,
   onWiden,
   onRetry,
 }: {
   summary: UsageSummary;
   empty: boolean;
   period: UsagePeriodId;
+  directory: Directory;
   onWiden: () => void;
   onRetry: () => void;
 }) {
@@ -249,8 +279,11 @@ function UsageBody({
           )}
         </div>
 
+        {/* text-display carries the emphasis; a third weight in this tree would
+            be size inflation dressed as hierarchy (SKILL §3: max 2 per
+            component, and the h3s below are already the medium one). */}
         <p
-          className="font-mono text-display font-semibold text-ink"
+          className="font-mono text-display font-medium text-ink"
           data-numeric=""
           data-testid="usage-total-cost"
         >
@@ -301,7 +334,8 @@ function UsageBody({
         emptyCopy="이 기간에 기록된 모델이 없습니다."
         rows={summary.byModel.map((row) => ({
           key: row.model,
-          label: row.model,
+          label: modelRowLabel(row.model),
+          handle: null,
           costMicroUsd: row.costMicroUsd,
           promptTokens: row.promptTokens,
           completionTokens: row.completionTokens,
@@ -313,20 +347,40 @@ function UsageBody({
         title="에이전트별"
         testId="usage-agent"
         emptyCopy="이 기간에 기록된 에이전트가 없습니다."
-        rows={summary.byAgent.map((row) => ({
-          key: row.agentMemberId,
-          label: row.displayName || row.agentMemberId,
-          costMicroUsd: row.costMicroUsd,
-          promptTokens: row.promptTokens,
-          completionTokens: row.completionTokens,
-          share: barShare(row.costMicroUsd, agentMax),
-        }))}
+        rows={summary.byAgent.map((row) => {
+          // The ledger sends an id and a name; the roster is what says whether
+          // that name belongs to one member or to two of them.
+          const member = memberFor(directory, row.agentMemberId);
+          const label = agentRowLabel(
+            row,
+            member
+              ? {
+                  displayName: member.displayName,
+                  handle: member.handle,
+                  ambiguous: isAmbiguousName(directory, member),
+                }
+              : null
+          );
+          return {
+            key: row.agentMemberId,
+            label: label.text,
+            handle: label.handle,
+            costMicroUsd: row.costMicroUsd,
+            promptTokens: row.promptTokens,
+            completionTokens: row.completionTokens,
+            share: barShare(row.costMicroUsd, agentMax),
+          };
+        })}
       />
 
       {summary.buckets.length > 0 && (
         <details className="min-w-0 rounded-md border border-line" data-testid="usage-buckets">
           <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-            기간별 자세히 ({summary.buckets.length}개 구간)
+            기간별로 자세히 보기 (
+            <span className="font-mono" data-numeric="">
+              {summary.buckets.length}
+            </span>
+            개 구간)
           </summary>
           <ul className="max-h-pane overflow-y-auto border-t border-line">
             {summary.buckets.map((row) => (
@@ -388,6 +442,8 @@ function NumberRow({
 interface BreakdownRow {
   key: string;
   label: string;
+  /** "@handle", only where the label alone names two different members. */
+  handle: string | null;
   costMicroUsd: number;
   promptTokens: number;
   completionTokens: number;
@@ -398,7 +454,9 @@ interface BreakdownRow {
  * Flat rows with a bar, not a card per row. The bar is relative to the largest
  * row rather than to the total, so the second and third lines stay readable
  * when one model dominates, and it is aria-hidden because the exact figure is
- * already text on the same line.
+ * already text on the same line. It is toned neutral: this bar states a
+ * proportion, and the accent belongs to the one bar on this surface that states
+ * a state (예산).
  */
 function Breakdown({
   title,
@@ -425,8 +483,15 @@ function Breakdown({
               data-testid={`${testId}-row`}
             >
               <div className="flex min-w-0 items-baseline justify-between gap-3">
-                <span className="min-w-0 truncate text-body text-ink">
-                  {row.label}
+                <span className="flex min-w-0 items-baseline gap-2 truncate">
+                  <span className="min-w-0 truncate text-body text-ink">
+                    {row.label}
+                  </span>
+                  {row.handle && (
+                    <span className="shrink-0 text-meta text-ink-muted">
+                      {row.handle}
+                    </span>
+                  )}
                 </span>
                 <span
                   className="shrink-0 font-mono text-body text-ink"
@@ -438,6 +503,7 @@ function Breakdown({
               <div className="flex min-w-0 items-center gap-3">
                 <progress
                   className="progress-bar min-w-0 flex-1"
+                  data-tone="neutral"
                   value={row.share}
                   max={100}
                   aria-hidden="true"
@@ -484,8 +550,12 @@ function BudgetBlock({ summary }: { summary: UsageSummary }) {
         <h3 className="text-body font-medium text-ink">예산</h3>
         <StatusChip tone={status.tone}>{status.label}</StatusChip>
       </div>
+      {/* The bar takes the chip's tone. A full bar in the accent colour beside a
+          red "한도 도달" chip reads as a finished download, and the same accent
+          is already the share bars below, where it would mean a proportion. */}
       <progress
         className="progress-bar"
+        data-tone={status.tone === "ok" ? undefined : status.tone}
         value={status.usedPercent}
         max={100}
         aria-hidden="true"
@@ -564,7 +634,14 @@ function Segmented({
               onChange={() => onChange(option.id)}
               className="peer sr-only"
             />
-            <span className="block cursor-pointer px-3 py-1 text-meta text-ink-muted hover:bg-surface-hover peer-checked:bg-accent-soft peer-checked:text-ink peer-focus-visible:outline-2 peer-focus-visible:-outline-offset-2 peer-focus-visible:outline-accent">
+            {/* h-control-sm, not padding: control height is its own axis
+                (SKILL §3) and this option sits in a row with a size="sm"
+                button. peer-checked:hover repeats the selected background on
+                purpose: `hover:bg-surface-hover` and `peer-checked:bg-*` have
+                the same specificity, so without it the hover rule (emitted
+                later by Tailwind) wins and the selection marker disappears
+                under the cursor. */}
+            <span className="flex h-control-sm cursor-pointer items-center px-3 text-meta text-ink-muted hover:bg-surface-hover peer-checked:bg-accent-soft peer-checked:text-ink peer-checked:hover:bg-accent-soft peer-focus-visible:outline-2 peer-focus-visible:-outline-offset-2 peer-focus-visible:outline-accent">
               {option.label}
             </span>
           </label>

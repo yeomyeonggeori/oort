@@ -224,6 +224,43 @@
   &::-moz-progress-bar {
     background: var(--accent);
   }
+
+  /* The fill colour is the bar's meaning, and a bar means two different things
+   * in this client. A share bar (사용량 > 모델별) states a proportion and is
+   * neutral; a state bar (사용량 > 예산) carries the same status token as the
+   * chip beside it, so a full bar at the hard limit does not read as a finished
+   * download. Driven by data-tone rather than a second utility because the fill
+   * lives in pseudo elements no utility class can reach. Default stays accent,
+   * which is what 설정 > 업데이트 (MOMO-606) already renders. */
+  &[data-tone="neutral"] {
+    &::-webkit-progress-value {
+      background: var(--line-strong);
+    }
+
+    &::-moz-progress-bar {
+      background: var(--line-strong);
+    }
+  }
+
+  &[data-tone="warn"] {
+    &::-webkit-progress-value {
+      background: var(--warn);
+    }
+
+    &::-moz-progress-bar {
+      background: var(--warn);
+    }
+  }
+
+  &[data-tone="danger"] {
+    &::-webkit-progress-value {
+      background: var(--danger);
+    }
+
+    &::-moz-progress-bar {
+      background: var(--danger);
+    }
+  }
 }
 
 /* Streaming caret (R-1 §4). Streaming text gets a CARET, never a shimmer
