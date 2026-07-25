@@ -180,7 +180,7 @@ export function InboxRoute() {
         {confirmingAll ? (
           <>
             <span className="text-meta text-ink">
-              멘션 {mentionCount}개를 읽음으로 표시합니다. 되돌릴 수 없습니다.
+              멘션 {mentionCount}개를 읽음으로 표시합니다. 해당 채널의 다른 안 읽은 메시지도 함께 읽음 처리되며, 되돌릴 수 없습니다.
             </span>
             <Button size="sm" onClick={markAllRead} data-testid="mark-all-confirm">
               읽음으로 표시

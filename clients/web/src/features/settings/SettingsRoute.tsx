@@ -57,7 +57,12 @@ export function SettingsRoute() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape") return;
+      // 3R M5: provider 키 등 명시 저장형 폼을 입력하던 중의 반사적 Esc가
+      // 라우트 이탈로 폼 상태를 날리지 않도록, 편집 중에는 무시한다.
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      close();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

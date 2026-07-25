@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -70,6 +70,15 @@ export function InviteSection({
   const [days, setDays] = useState("7");
   const [formError, setFormError] = useState<string | null>(null);
   const [issued, setIssued] = useState<CreatedInvite | null>(null);
+  // 3R High: 코드는 1회 노출인데 발급 카드가 폴드 아래 렌더될 수 있다.
+  // 발급 즉시 카드로 포커스를 옮겨 시각·키보드 사용자 모두에게 착지시킨다.
+  const issuedRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (issued && issuedRef.current) {
+      issuedRef.current.focus({ preventScroll: true });
+      issuedRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [issued]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -253,7 +262,9 @@ export function InviteSection({
 
       {card && issued && (
         <div
-          className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4"
+          ref={issuedRef}
+          tabIndex={-1}
+          className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           role="status"
           data-testid="invite-issued"
         >
