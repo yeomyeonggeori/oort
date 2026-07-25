@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Extra macOS bundle keys, merged into the generated Info.plist by the Tauri
+  bundler (MOMO-603). Only keys the bundler does NOT produce belong here.
+
+  Deliberately absent: CFBundleURLTypes. The bundler writes it from
+  `tauri.conf.json > plugins > deep-link > desktop > schemes`, and a second copy
+  here would register momo:// twice. The generated plist is the place to check
+  that it landed:
+    plutil -p src-tauri/target/release/bundle/macos/momo-spike.app/Contents/Info.plist
+-->
+<plist version="1.0">
+<dict>
+	<!-- Server discovery (MOMO-603, mirroring the macOS client's MOMO-587 keys).
+	     macOS gates mDNS browsing behind the local-network permission prompt;
+	     NSLocalNetworkUsageDescription is the sentence shown in it, and
+	     NSBonjourServices whitelists the service types we may browse. Without
+	     both, the browse returns nothing and — by design — says nothing. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>momo looks for a workspace server on your local network so you can connect without typing its address.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_momo._tcp</string>
+	</array>
+	<!-- A discovered server is a LAN address (http://MacBook-Pro-2.local:28000),
+	     so App Transport Security has to allow it or discovery would hand the
+	     webview an address it is then forbidden to dial. NSAllowsLocalNetworking
+	     exempts private/link-local ranges and .local hosts only; public domains
+	     still require HTTPS, so the shipping TLS path is unchanged. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
