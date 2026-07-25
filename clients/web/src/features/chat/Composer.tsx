@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,23 +9,24 @@ import { SendHorizontal } from "lucide-react";
 import type { RosterMember } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
-import { useReducedMotion } from "@/design/lib/useReducedMotion";
+import { useSession } from "@/app/session";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import {
+  agentTurnsInChannel,
   elapsedLabel,
+  hasChannelTurn,
   useAgentWorkingSignals,
   useTickingNow,
-  workingInChannel,
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
 import {
+  activityLines,
   activitySuffix,
   activityText,
-  rotatingActivityLines,
-  staticActivityLines,
+  UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
-} from "@/features/agents/activityLine";
-import { memberFor } from "@/features/workspace/useWorkspace";
+} from "@/features/agents/turnCopy";
+import { memberNameParts } from "@/features/workspace/useWorkspace";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ⌘↵ sends, ↵ is a line
@@ -46,14 +46,6 @@ import { memberFor } from "@/features/workspace/useWorkspace";
 
 const MAX_ROWS = 6;
 const MENTION_LIMIT = 6;
-
-/**
- * Headline dwell in the activity bar. Short enough that a second agent's line is
- * not hidden behind the first one for long, and pausable: the pointer resting on
- * the bar holds the current line, so a reader who wants to finish one is not
- * raced by the next.
- */
-const HEADLINE_ROTATION_MS = 2_200;
 
 interface MentionQuery {
   /** Index of the '@' that opened the query. */
@@ -90,125 +82,83 @@ export function matchMembers(
 }
 
 /**
- * Composer activity bar (R-1 §3, mac AgentWorkingComposerBar). One line at a
- * time, drawn from what the agent actually wrote, plus the turn clock.
+ * Composer activity bar (R-1 §3, mac AgentWorkingComposerBar). One flat meta
+ * line per open turn, drawn from what the agent actually wrote, with its clock
+ * beside its own label.
  *
- * The bar states the turn even before a headline exists, because "김인턴이(가)
- * 작업 중" plus a clock is a true thing the reader wants; what it never does is
- * rotate through nothing. Rotation is the only motion here and it is content
- * motion, so `prefers-reduced-motion` does not slow it down, it removes it:
- * every working agent gets its own static line instead.
+ * It does NOT rotate. The mac bar cycles agent x headline pairs every five
+ * seconds because a SwiftUI composer footer has one line to spend; on the web
+ * that same loop is content that mutates on a timer, which needs a pause
+ * control to meet WCAG 2.2.2, has no keyboard path when the pause is a hover,
+ * and prints a "1/3" pager that reads as a slideshow inside a work tool. Two or
+ * three stacked lines say more, sit still, and need no controls at all. Nothing
+ * here animates, so there is no reduced-motion branch to diverge from.
+ *
+ * The bar states a turn even before a headline exists ("김인턴이 작업 중" plus a
+ * clock is a true thing the reader wants) and states an approval wait as an
+ * approval wait, never as work.
  */
 function AgentActivityBar({
-  working,
+  turns,
   directory,
   nowMs,
+  live,
 }: {
-  working: AgentWorkingSignal[];
+  turns: AgentWorkingSignal[];
   directory: Directory;
   nowMs: number;
+  /** The realtime rail is connected, so a clock is measuring something. */
+  live: boolean;
 }) {
-  const reducedMotion = useReducedMotion();
-  const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
+  const { lines, overflowCount, summary } = useMemo(
+    () =>
+      activityLines(turns, (memberId) =>
+        memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME)
+      ),
+    [turns, directory]
+  );
 
-  const lines = useMemo(() => {
-    const nameFor = (memberId: string) =>
-      memberFor(directory, memberId)?.displayName ?? null;
-    return {
-      rotating: rotatingActivityLines(working, nameFor),
-      static: staticActivityLines(working, nameFor),
-    };
-  }, [working, directory]);
+  if (lines.length === 0) return null;
 
-  const rotatingCount = lines.rotating.length;
-  useEffect(() => {
-    if (reducedMotion || paused || rotatingCount < 2) return;
-    const id = setInterval(
-      () => setIndex((i) => (i + 1) % rotatingCount),
-      HEADLINE_ROTATION_MS
-    );
-    return () => clearInterval(id);
-  }, [reducedMotion, paused, rotatingCount]);
-
-  // A turn that ends shortens the list; the cursor must not point past its end.
-  useEffect(() => {
-    setIndex((i) => (rotatingCount === 0 ? 0 : i % rotatingCount));
-  }, [rotatingCount]);
-
-  if (working.length === 0) return null;
-
-  if (reducedMotion) {
-    const summary =
-      working.length > 1
-        ? `에이전트 ${working.length}명이 작업 중`
-        : "에이전트가 작업 중";
-    return (
-      <ul
-        className="flex flex-col gap-1 px-4 pb-2"
-        aria-label={summary}
-        data-testid="composer-working"
-      >
-        {lines.static.map((line) => (
-          <li
-            key={line.key}
-            className="flex items-baseline gap-2 text-meta text-ink-muted"
-          >
-            <ActivityText line={line} />
-            <ActivityElapsed startedAtMs={line.startedAtMs} nowMs={nowMs} />
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  // No aria-label and no live region on the rotating form: a paragraph is not
-  // reliably named by one, and announcing a new line every 2.2s would be noise
-  // rather than information. Its own text is the accessible content, and a
-  // reader who has reduced motion on gets the named static list above.
-  const current = lines.rotating[index % rotatingCount];
   return (
-    <p
-      className="flex items-baseline gap-2 px-4 pb-2 text-meta text-ink-muted"
+    <ul
+      className="flex flex-col gap-1 px-4 pb-2"
+      aria-label={live ? summary : `${summary} 연결이 끊겨 갱신이 멈췄습니다.`}
       data-testid="composer-working"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
     >
-      <ActivityText line={current} />
-      {rotatingCount > 1 && (
-        <span
-          className="shrink-0 text-timestamp"
-          data-numeric
-          aria-hidden="true"
+      {lines.map((line) => (
+        <li
+          key={line.key}
+          className="flex items-baseline gap-2 text-meta text-ink-muted"
         >
-          {index % rotatingCount + 1}/{rotatingCount}
-        </span>
+          <ActivityText line={line} />
+          {live && line.state === "working" && line.startedAtMs !== undefined && (
+            <span className="shrink-0 text-timestamp" data-numeric>
+              {elapsedLabel(line.startedAtMs, nowMs)}
+            </span>
+          )}
+        </li>
+      ))}
+      {overflowCount > 0 && (
+        <li className="text-meta text-ink-muted">외 {overflowCount}명</li>
       )}
-      <ActivityElapsed startedAtMs={current.startedAtMs} nowMs={nowMs} />
-    </p>
+    </ul>
   );
 }
 
+/**
+ * The line itself. `min-w-0 truncate` without `flex-1`, so the clock sits right
+ * after the text it belongs to: a right-aligned number a screen away from its
+ * label stops reading as a card and starts reading as a banner (tokens.md §4).
+ */
 function ActivityText({ line }: { line: AgentActivityLine }) {
   return (
-    <span className="min-w-0 flex-1 truncate" title={activityText(line)}>
-      <span className="text-agent">{line.agentName}</span>
+    <span className="min-w-0 truncate" title={activityText(line)}>
+      <span className="text-agent">{line.name.name}</span>
+      {line.name.handle && (
+        <span className="text-ink-muted">({line.name.handle})</span>
+      )}
       {activitySuffix(line)}
-    </span>
-  );
-}
-
-function ActivityElapsed({
-  startedAtMs,
-  nowMs,
-}: {
-  startedAtMs?: number;
-  nowMs: number;
-}) {
-  if (startedAtMs === undefined) return null;
-  return (
-    <span className="shrink-0 text-timestamp" data-numeric>
-      {elapsedLabel(startedAtMs, nowMs)}
     </span>
   );
 }
@@ -232,9 +182,16 @@ export function Composer({
   const [mentionOpen, setMentionOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // The clock is mounted for THIS channel's turns, not the workspace's: the
+  // store is workspace-wide, and gating on its size alone re-rendered the
+  // composer once a second because an agent was busy in a channel nobody here
+  // is looking at. The membership test is clock-free, so it can decide whether
+  // to start the clock before there is one.
+  const { connStatus } = useSession();
+  const railLive = connStatus === "connected";
   const signals = useAgentWorkingSignals();
-  const nowMs = useTickingNow(signals.size > 0);
-  const working = workingInChannel(signals, channelId, nowMs);
+  const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
+  const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
   const query = mentionOpen ? mentionQueryAt(text, caret) : null;
   const candidates = useMemo(
@@ -376,7 +333,12 @@ export function Composer({
         </Button>
       </form>
 
-      <AgentActivityBar working={working} directory={directory} nowMs={nowMs} />
+      <AgentActivityBar
+        turns={turns}
+        directory={directory}
+        nowMs={nowMs}
+        live={railLive}
+      />
     </div>
   );
 }

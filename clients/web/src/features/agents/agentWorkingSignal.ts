@@ -1,9 +1,16 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 // =============================================================================
-// agentWorkingSignal: ONE source for "an agent is taking a turn right now"
+// agentWorkingSignal: ONE source for "an agent has an OPEN TURN right now"
 // (R-1 §1). The sidebar badge and the composer activity line both read this
 // store, so they can never disagree.
+//
+// An open turn is not the same thing as a working agent. `state` says which of
+// the two it is, and no surface may render `awaiting_approval` as 작업 중:
+// momowebqa's agent ends every turn on `run_status=awaiting_approval`, so an
+// indicator that treats the two alike tells the reader to wait for the agent
+// while the agent is waiting for the reader (SKILL §9: awaiting-approval is its
+// own state, and absence is never promoted to a story).
 //
 // The rules here are the web port of the mac resolver
 // (clients/macOS/Sources/MomoMac/AgentWorkingSignal.swift, MOMO-568), kept
@@ -34,25 +41,39 @@ const SOURCE_RANK: Record<AgentWorkingSource, number> = {
   typing: 1,
 };
 
+/**
+ * What the open turn is doing. `working` means the agent is running; the run
+ * came back `awaiting_approval`, which means it stopped and the next move
+ * belongs to a person.
+ */
+export type AgentTurnState = "working" | "awaiting_approval";
+
 export interface AgentWorkingSignal {
   /** The agent member taking the turn. */
   memberId: string;
   /** Channel the turn is happening in. */
   channelId: string;
+  /** Working, or stopped and waiting for a human decision. */
+  state: AgentTurnState;
   /** Which observation proved it. */
   source: AgentWorkingSource;
   /** The live run behind the turn, when one is known. */
   runId?: string;
   /**
-   * Epoch ms the turn started; the surfaces render elapsed time from this.
-   * Absent for a typing-only fallback, where no run clock exists yet and the
-   * elapsed readout is omitted rather than invented.
+   * Epoch ms (SERVER clock, from the frame envelope) the turn started; the
+   * surfaces render elapsed time from this.
+   *
+   * Absent whenever the start was never observed: a typing-only fallback, or a
+   * rail that attached to a turn already in flight. The surfaces then state the
+   * turn WITHOUT a clock, because "0s" would be the moment we noticed rather
+   * than the moment the agent began, and a number nobody can act on is worse
+   * than no number.
    */
   startedAtMs?: number;
   /**
-   * Rotating headline candidates drawn from agent-authored content (the last
-   * streamed line). Empty until the agent has produced one, in which case the
-   * composer states the turn without a headline instead of rotating nothing.
+   * Headline candidates drawn from agent-authored content (the last streamed
+   * line). Empty until the agent has produced one, in which case the composer
+   * states the turn without a headline instead of inventing one.
    */
   headlines: string[];
   /** Last moment fresh activity was observed. Drives the TTL and the sweep. */
@@ -118,6 +139,10 @@ export function isStaleSignal(
  * Collapse one agent's concurrent-run candidates into one signal: earliest
  * start clock, unioned headlines, strongest source. The run that owns the
  * earliest clock also owns `runId`, so the two never describe different turns.
+ *
+ * State merges toward `working`: one run that is actually running makes the
+ * agent working, whatever a second run is waiting on. The reverse would be the
+ * lie this whole module exists to prevent.
  */
 export function mergeAgentWorkingSignals(
   candidates: readonly AgentWorkingSignal[]
@@ -125,15 +150,20 @@ export function mergeAgentWorkingSignals(
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
 
-  const starts = candidates
+  const working = candidates.filter((c) => c.state === "working");
+  // The clock and the headline belong to the state being shown: an agent that
+  // is working must not borrow the start time of a run that is parked on an
+  // approval.
+  const shown = working.length > 0 ? working : candidates;
+
+  const starts = shown
     .map((c) => c.startedAtMs)
     .filter((v): v is number => typeof v === "number");
   const earliest = starts.length > 0 ? Math.min(...starts) : undefined;
-  const anchor =
-    candidates.find((c) => c.startedAtMs === earliest) ?? candidates[0];
+  const anchor = shown.find((c) => c.startedAtMs === earliest) ?? shown[0];
 
   const headlines: string[] = [];
-  for (const candidate of candidates) {
+  for (const candidate of shown) {
     for (const headline of candidate.headlines) {
       if (!headlines.includes(headline)) headlines.push(headline);
     }
@@ -149,6 +179,7 @@ export function mergeAgentWorkingSignals(
   const merged: AgentWorkingSignal = {
     memberId: anchor.memberId,
     channelId: anchor.channelId,
+    state: working.length > 0 ? "working" : "awaiting_approval",
     source,
     headlines: headlines.slice(0, MAX_HEADLINES),
     lastActivityAtMs: Math.max(...candidates.map((c) => c.lastActivityAtMs)),
@@ -205,6 +236,7 @@ function sameSignal(a: AgentWorkingSignal, b: AgentWorkingSignal): boolean {
   return (
     a.memberId === b.memberId &&
     a.channelId === b.channelId &&
+    a.state === b.state &&
     a.source === b.source &&
     a.runId === b.runId &&
     a.startedAtMs === b.startedAtMs &&
@@ -274,18 +306,18 @@ function snapshot(): ReadonlyMap<Key, AgentWorkingSignal> {
 /** Test/diagnostic seam: the raw store without a React subscription. */
 export const agentWorkingSnapshot = snapshot;
 
-/** All active turns, keyed by `channelId|memberId`. */
+/** All open turns, keyed by `channelId|memberId`. */
 export function useAgentWorkingSignals(): ReadonlyMap<Key, AgentWorkingSignal> {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**
- * Active turns in one channel, oldest first, with stale entries filtered at
+ * Open turns in one channel, oldest first, with stale entries filtered at
  * render time. The filter matters even with the sweep running: between 90s and
  * 120s a stranded signal is still in the store, and no surface may claim it is
  * live.
  */
-export function workingInChannel(
+export function agentTurnsInChannel(
   all: ReadonlyMap<Key, AgentWorkingSignal>,
   channelId: string,
   nowMs: number
@@ -298,6 +330,23 @@ export function workingInChannel(
     out.push(signal);
   }
   return out.sort(byOldestTurn);
+}
+
+/**
+ * Does this channel have any entry at all in the store? Cheap and clock-free,
+ * so a surface can decide whether to mount a 1Hz clock BEFORE it has one. Without
+ * it the composer would tick once a second because some other channel's agent is
+ * busy, which is a render loop bought with nothing on screen.
+ */
+export function hasChannelTurn(
+  all: ReadonlyMap<Key, AgentWorkingSignal>,
+  channelId: string
+): boolean {
+  const prefix = `${channelId.toLowerCase()}|`;
+  for (const key of all.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
 }
 
 // ---- elapsed readout --------------------------------------------------------
@@ -321,12 +370,14 @@ export function elapsedLabel(startedAtMs: number, nowMs: number): string {
 }
 
 /**
- * A once-per-second clock, mounted only while something is actually working.
+ * A once-per-second clock, mounted only while a clock is actually on screen.
  * The elapsed readout is data cadence rather than animation (it changes exactly
  * as fast as the number it shows), so it keeps ticking under reduced motion.
  *
  * Hoist this to the surface that owns the list, not to each row: ten channel
- * rows must not mean ten intervals.
+ * rows must not mean ten intervals. And pass `false` while the realtime rail is
+ * down: a clock that keeps counting on a dead socket is measuring our optimism,
+ * not the agent's turn.
  */
 export function useTickingNow(enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now());

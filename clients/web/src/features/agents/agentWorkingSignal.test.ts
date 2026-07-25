@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  agentTurnsInChannel,
   agentWorkingSnapshot,
   clearAgentWorking,
   elapsedLabel,
+  hasChannelTurn,
   headlineFrom,
   IDLE_CUTOFF_MS,
   markAgentWorking,
@@ -10,12 +12,12 @@ import {
   resetAgentWorking,
   resolveAgentWorkingSignals,
   sweepAgentWorking,
-  workingInChannel,
   ZOMBIE_CLEAR_MS,
   type AgentWorkingSignal,
 } from "./agentWorkingSignal";
 
 const CHANNEL = "00000000-0000-7000-8000-000000000202";
+const OTHER_CHANNEL = "00000000-0000-7000-8000-000000000201";
 const HERMES = "00000000-0000-7000-8000-000000000103";
 const KIM = "00000000-0000-7000-8000-000000000102";
 const NOW = 1_784_983_000_000;
@@ -24,6 +26,7 @@ function signal(over: Partial<AgentWorkingSignal> = {}): AgentWorkingSignal {
   return {
     memberId: HERMES,
     channelId: CHANNEL,
+    state: "working",
     source: "status",
     runId: "019f994e-6b8d-7f13-a324-ec4b954f2635",
     startedAtMs: NOW - 42_000,
@@ -101,6 +104,26 @@ describe("mergeAgentWorkingSignals: one signal per agent per channel", () => {
     ]);
     expect(merged?.startedAtMs).toBeUndefined();
   });
+
+  it("merges toward working: one running run makes the agent working", () => {
+    const merged = mergeAgentWorkingSignals([
+      signal({ runId: "waiting", state: "awaiting_approval", startedAtMs: NOW - 90_000 }),
+      signal({ runId: "running", state: "working", startedAtMs: NOW - 10_000 }),
+    ]);
+    expect(merged?.state).toBe("working");
+    // The clock belongs to the state being shown, so it is the running run's,
+    // not the older one parked on an approval.
+    expect(merged?.startedAtMs).toBe(NOW - 10_000);
+    expect(merged?.runId).toBe("running");
+  });
+
+  it("stays awaiting when every run of that agent stopped for a person", () => {
+    const merged = mergeAgentWorkingSignals([
+      signal({ runId: "a", state: "awaiting_approval" }),
+      signal({ runId: "b", state: "awaiting_approval", startedAtMs: NOW - 90_000 }),
+    ]);
+    expect(merged?.state).toBe("awaiting_approval");
+  });
 });
 
 describe("resolveAgentWorkingSignals", () => {
@@ -153,7 +176,7 @@ describe("zombie defence", () => {
   it("hides a stale signal from a surface before the sweep removes it", () => {
     markAgentWorking(signal({ lastActivityAtMs: NOW - IDLE_CUTOFF_MS - 1 }));
     expect(agentWorkingSnapshot().size).toBe(1); // still stored
-    expect(workingInChannel(agentWorkingSnapshot(), CHANNEL, NOW)).toEqual([]);
+    expect(agentTurnsInChannel(agentWorkingSnapshot(), CHANNEL, NOW)).toEqual([]);
   });
 
   it("force clears an entry that has not been refreshed for two minutes", () => {
@@ -177,6 +200,19 @@ describe("zombie defence", () => {
     markAgentWorking(signal());
     clearAgentWorking(CHANNEL.toUpperCase(), HERMES.toUpperCase());
     expect(agentWorkingSnapshot().size).toBe(0);
+  });
+});
+
+describe("hasChannelTurn", () => {
+  it("answers for one channel without consulting a clock", () => {
+    // This is what decides whether the composer mounts a 1Hz interval, so it
+    // must not need the number that interval produces.
+    markAgentWorking(signal({ channelId: OTHER_CHANNEL, memberId: KIM }));
+    expect(hasChannelTurn(agentWorkingSnapshot(), CHANNEL)).toBe(false);
+    expect(hasChannelTurn(agentWorkingSnapshot(), OTHER_CHANNEL)).toBe(true);
+    expect(hasChannelTurn(agentWorkingSnapshot(), OTHER_CHANNEL.toUpperCase())).toBe(
+      true
+    );
   });
 });
 

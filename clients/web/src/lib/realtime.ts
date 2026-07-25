@@ -160,6 +160,44 @@ export function centrifugoAgentChannelName(
   return `agent:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}.${agentMemberId.toUpperCase()}`;
 }
 
+/** Subset of the centrifuge subscribed context the replay gate reads. */
+export interface SubscribedRecoveryContext {
+  recovered?: boolean;
+  hasRecoveredPublications?: boolean;
+}
+
+/**
+ * Tells replayed publications apart from live ones.
+ *
+ * The `agent` namespace recovers WHATEVER THE CLIENT ASKS FOR: infra/centrifugo.json
+ * gives it `force_recovery: true` with 100 frames of 24h history, and a live
+ * subscribe against momowebqa comes back `recoverable:true positioned:true` even
+ * for a subscription created with both flags off. Measured on 2026-07-25: after
+ * a 25s disconnect that spanned a whole @kim-intern turn, the resubscribe
+ * answered `recovered:true` and replayed all 8 frames of that finished turn.
+ *
+ * centrifuge-js flushes those recovered publications synchronously, immediately
+ * after it emits `subscribed` (`Subscription._handleSubscribeResult`). So the
+ * gate raises on that event and lowers on the next microtask: it covers exactly
+ * the replayed batch, and nothing that arrives later can be mistaken for it.
+ * `schedule` is the seam that lets a test drive the lowering by hand.
+ */
+export function createReplayGate(schedule: (task: () => void) => void = queueMicrotask) {
+  let replaying = false;
+  return {
+    onSubscribed(ctx: SubscribedRecoveryContext): void {
+      if (ctx.recovered !== true && ctx.hasRecoveredPublications !== true) return;
+      replaying = true;
+      schedule(() => {
+        replaying = false;
+      });
+    },
+    isReplaying(): boolean {
+      return replaying;
+    },
+  };
+}
+
 function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
@@ -350,17 +388,23 @@ export function createRealtime(
     agentMemberId: string,
     handlers: { onEvent: (event: AgentProgressEvent) => void }
   ): () => void {
-    // Deliberately NOT recoverable/positioned, unlike the message rail. Progress
-    // is an ephemeral projection of a run that Postgres already owns: replaying
-    // a gap after a reconnect would resurrect deltas from a turn that has since
-    // finished, and the working signal would claim activity that stopped
-    // minutes ago. A reconnect starts from silence and the idle TTL clears
-    // whatever was left behind.
+    // Asked for without recovery, unlike the message rail: progress is an
+    // ephemeral projection of a run Postgres already owns, so a gap is nothing
+    // to heal. The server does not honour that request (`agent` is
+    // force_recovery in infra/centrifugo.json), which is why the flags alone
+    // would have been a comment rather than a defence, and why the replay gate
+    // below does the actual work: a reconnect after a laptop sleep replays every
+    // frame of turns that finished minutes ago, and folding those in would put a
+    // dead turn back on the sidebar with a fresh clock.
     return attach(
       centrifugoAgentChannelName(workspaceId, channelId, agentMemberId),
       { recoverable: false, positioned: false },
       (sub) => {
+        const gate = createReplayGate();
+        const onSubscribed = (ctx: SubscribedRecoveryContext) =>
+          gate.onSubscribed(ctx);
         const onPublication = (ctx: { data?: unknown }) => {
+          if (gate.isReplaying()) return;
           const event = ctx.data as AgentProgressEvent | undefined;
           if (
             event &&
@@ -370,8 +414,12 @@ export function createRealtime(
             handlers.onEvent(event);
           }
         };
+        sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);
-        return () => sub.off("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
       }
     );
   }

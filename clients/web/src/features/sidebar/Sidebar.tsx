@@ -12,23 +12,27 @@ import {
   Users,
 } from "lucide-react";
 import type { Channel } from "@/lib/api";
+import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import {
+  agentTurnsInChannel,
+  useAgentWorkingSignals,
+  type AgentWorkingSignal,
+} from "@/features/agents/agentWorkingSignal";
+import {
+  agentTurnBadgeCopy,
+  UNKNOWN_AGENT_NAME,
+} from "@/features/agents/turnCopy";
 import {
   channelLabelParts,
   memberFor,
+  memberNameParts,
   unreadFor,
   useChannels,
   useDirectory,
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import {
-  elapsedLabel,
-  useAgentWorkingSignals,
-  useTickingNow,
-  workingInChannel,
-  type AgentWorkingSignal,
-} from "@/features/agents/agentWorkingSignal";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -48,45 +52,47 @@ import { Button } from "@/design/ui/button";
 // =============================================================================
 
 /**
- * Working pill on a channel row (R-1 §1, mac AgentWorkingChannelBadge). It reads
- * as the agent's clock rather than as a status dot: the number ticks once a
- * second because that is how fast the thing it measures changes, and it carries
- * the agent token so a turn is never confused with an unread count.
- *
- * With more than one agent working the same channel the count leads and the
- * clock belongs to the LONGEST running turn, which is the one a reader is most
- * likely to be waiting on.
+ * Turn pill on a channel row (R-1 §1, mac AgentWorkingChannelBadge). It says
+ * the state in words and carries no digits: the cell to its right is an unread
+ * count, and a second unlabelled number on the same row is a second count to
+ * anyone reading quickly. Who and how many is in the accessible name; the
+ * per-turn clocks are in the composer, which has the width for them.
  */
 function AgentTurnBadge({
-  active,
+  turns,
   directory,
-  nowMs,
+  live,
 }: {
-  active: AgentWorkingSignal[];
+  turns: AgentWorkingSignal[];
   directory: Directory;
-  nowMs: number;
+  /** The realtime rail is connected, so this state is confirmed, not remembered. */
+  live: boolean;
 }) {
-  if (active.length === 0) return null;
-  const oldest = active[0];
-  const name = memberFor(directory, oldest.memberId)?.displayName ?? "에이전트";
-  const label =
-    active.length > 1
-      ? `에이전트 ${active.length}명이 작업 중입니다`
-      : `${name}이(가) 작업 중입니다`;
+  const copy = agentTurnBadgeCopy(turns, (memberId) =>
+    memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME)
+  );
+  if (!copy) return null;
+  const label = live
+    ? copy.label
+    : `${copy.label} 연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.`;
   return (
     <span
-      className="shrink-0 rounded-sm bg-agent-soft px-1 text-timestamp text-agent"
-      data-numeric
+      className={cn(
+        "shrink-0 rounded-sm px-1 text-timestamp",
+        // Offline (SKILL §5): the pill keeps saying what was last confirmed, but
+        // it drops the agent token, so a remembered claim does not sit on the
+        // row looking exactly as live as a confirmed one.
+        live ? "bg-agent-soft text-agent" : "text-ink-muted"
+      )}
       data-testid="agent-turn-badge"
+      data-live={live ? "" : undefined}
       title={label}
     >
       {/* A bare aria-label on a generic span is not reliably announced, so the
-          sentence a clock alone cannot carry is real (hidden) text. */}
-      <span className="sr-only">{label} </span>
-      {active.length > 1 ? `(${active.length}) ` : ""}
-      {oldest.startedAtMs === undefined
-        ? "작업 중"
-        : elapsedLabel(oldest.startedAtMs, nowMs)}
+          sentence is real (hidden) text, and the compact half is hidden from
+          assistive tech rather than read twice. */}
+      <span className="sr-only">{label}</span>
+      <span aria-hidden="true">{copy.text}</span>
     </span>
   );
 }
@@ -108,10 +114,12 @@ export function Sidebar({
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
 
-  // One clock for the whole list, and only while an agent is actually working:
-  // a per-row interval would mean ten timers to render one number each.
-  const workingSignals = useAgentWorkingSignals();
-  const nowMs = useTickingNow(workingSignals.size > 0);
+  // No clock in the sidebar at all: the pill is a word, so nothing here ticks.
+  // Staleness is still checked, from the render's own clock, and the rail's 15s
+  // sweep re-publishes the store, which is what re-renders this list.
+  const turnSignals = useAgentWorkingSignals();
+  const railLive = connStatus === "connected";
+  const nowMs = Date.now();
 
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
@@ -189,9 +197,9 @@ export function Sidebar({
         mentionCount={read?.mentionCount ?? 0}
         trailing={
           <AgentTurnBadge
-            active={workingInChannel(workingSignals, channel.id, nowMs)}
+            turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
             directory={directoryQuery.directory}
-            nowMs={nowMs}
+            live={railLive}
           />
         }
         testId="channel-item"

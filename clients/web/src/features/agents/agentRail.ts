@@ -6,6 +6,8 @@ import type {
 } from "@/lib/realtime";
 import {
   headlineFrom,
+  IDLE_CUTOFF_MS,
+  type AgentTurnState,
   type AgentWorkingSignal,
   type AgentWorkingSource,
 } from "./agentWorkingSignal";
@@ -100,8 +102,14 @@ export interface RunTrack {
   runId: string;
   memberId: string;
   channelId: string;
+  state: AgentTurnState;
   source: AgentWorkingSource;
-  startedAtMs: number;
+  /**
+   * Server epoch ms of the run's OPENING frame, or undefined when that frame
+   * was never seen (the rail attached mid-turn). "When we first noticed" is not
+   * "when the agent started", so it is left unknown rather than guessed.
+   */
+  startedAtMs?: number;
   lastActivityAtMs: number;
   /** Latest agent-authored line, or undefined until one is streamed. */
   headline?: string;
@@ -113,9 +121,8 @@ export interface RunTrack {
  * timed_out` are terminal, and a `done` / `error` phase ends the turn even while
  * the run row still says running.
  *
- * `awaiting_approval` is deliberately NOT terminal. momowebqa's mock agent ends
- * its turn exactly there, which is the whole reason the idle TTL exists: the
- * run is genuinely still open, it just has nobody to answer it.
+ * `awaiting_approval` is deliberately NOT terminal: the run row is genuinely
+ * still open. It is not WORKING either, which `turnStateOf` decides separately.
  */
 export function isRunOver(runStatus: string, phase: string): boolean {
   if (phase === "done" || phase === "error") return true;
@@ -127,11 +134,61 @@ export function isRunOver(runStatus: string, phase: string): boolean {
   );
 }
 
+/**
+ * Working, or stopped and waiting for a person?
+ *
+ * Measured against momowebqa: every @kim-intern turn ends on
+ * `run_status=awaiting_approval, phase=thinking` and publishes nothing further.
+ * Reading that as "작업 중" is how a stopped agent kept a clock running for 90
+ * seconds while the reader waited for a decision only they could make.
+ *
+ * `paused` is the same shape of fact (the run stopped for input it does not
+ * have), so it lands in the same state rather than in a third one nobody can
+ * tell apart on a sidebar row.
+ */
+export function turnStateOf(runStatus: string): AgentTurnState {
+  return runStatus === "awaiting_approval" || runStatus === "paused"
+    ? "awaiting_approval"
+    : "working";
+}
+
+/**
+ * A run's opening frame: the only frame that proves when a turn began.
+ * momowebqa publishes it as `phase=queued, run_status=queued` ahead of
+ * everything else (measured), so a rail that was already listening gets a real
+ * start time and a rail that attached mid-turn honestly gets none.
+ */
+function isRunOpening(event: AgentStatusEvent): boolean {
+  return event.payload.phase === "queued" || event.payload.run_status === "queued";
+}
+
+/**
+ * When the SERVER says this frame happened. Every agent envelope carries `ts`
+ * in epoch ms (measured: a live frame's ts lands 2-4ms before it is received),
+ * and using it instead of `Date.now()` is what keeps a replayed frame's age
+ * real instead of resetting it to zero on arrival.
+ *
+ * A ts ahead of our clock is clamped: no turn starts in the future. A ts far
+ * behind ours is left alone, and `applyAgentEvent` refuses it below.
+ */
+export function eventTimeMs(event: AgentProgressEvent, nowMs: number): number {
+  const ts = event.ts;
+  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return nowMs;
+  return Math.min(ts, nowMs);
+}
+
 export type RunTracks = ReadonlyMap<string, RunTrack>;
 
 /**
  * Fold one realtime frame into the run table. Returns the same map instance when
  * nothing changed, so a caller can skip a re-render on a no-op frame.
+ *
+ * A frame that is ALREADY older than the idle cutoff when it arrives cannot
+ * prove anything is live, so it never refreshes a turn. This is the second line
+ * of defence behind the replay gate in `subscribeAgent`: a laptop that slept for
+ * ten minutes wakes into a recovery batch of frames that old, and the failure
+ * direction here is deliberate (a server clock lagging ours by more than the
+ * cutoff would show nothing rather than something false).
  */
 export function applyAgentEvent(
   tracks: RunTracks,
@@ -142,6 +199,12 @@ export function applyAgentEvent(
   return event.type === "agent.status"
     ? applyStatus(tracks, event, context, nowMs)
     : applyPartial(tracks, event, context, nowMs);
+}
+
+/** Is this frame too old to prove liveness? Terminal frames bypass it: ending a
+ *  turn late is still ending it, and a delete is never a false claim. */
+function tooOldToProveLiveness(atMs: number, nowMs: number): boolean {
+  return nowMs - atMs > IDLE_CUTOFF_MS;
 }
 
 function applyStatus(
@@ -162,15 +225,21 @@ function applyStatus(
     return next;
   }
 
+  const atMs = eventTimeMs(event, nowMs);
+  if (tooOldToProveLiveness(atMs, nowMs)) return tracks;
+
   const existing = tracks.get(runId);
+  const startedAtMs =
+    existing?.startedAtMs ?? (isRunOpening(event) ? atMs : undefined);
   const next = new Map(tracks);
   next.set(runId, {
     runId,
     memberId,
     channelId,
+    state: turnStateOf(event.payload.run_status),
     source: "status",
-    startedAtMs: existing?.startedAtMs ?? nowMs,
-    lastActivityAtMs: nowMs,
+    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+    lastActivityAtMs: atMs,
     ...(existing?.headline !== undefined ? { headline: existing.headline } : {}),
   });
   return next;
@@ -184,6 +253,9 @@ function applyPartial(
 ): RunTracks {
   const runId = keyOf(event.payload.run_id ?? "");
   if (runId === "") return tracks;
+  const atMs = eventTimeMs(event, nowMs);
+  if (tooOldToProveLiveness(atMs, nowMs)) return tracks;
+
   const existing = tracks.get(runId);
   // `text` is the full answer so far and `text_delta` only the new slice, so the
   // headline reads the cumulative field when the worker sends it; a tool-call
@@ -198,9 +270,14 @@ function applyPartial(
     runId,
     memberId: existing?.memberId ?? context.memberId,
     channelId: existing?.channelId ?? event.payload.channel_id ?? context.channelId,
+    // A streamed token is the agent writing, so a partial takes a run back out
+    // of the approval wait it may have been parked in.
+    state: "working",
     source: existing?.source ?? "status",
-    startedAtMs: existing?.startedAtMs ?? nowMs,
-    lastActivityAtMs: nowMs,
+    ...(existing?.startedAtMs !== undefined
+      ? { startedAtMs: existing.startedAtMs }
+      : {}),
+    lastActivityAtMs: atMs,
     ...(headline !== undefined ? { headline } : {}),
   });
   return next;
@@ -235,10 +312,20 @@ export function candidatesFrom(tracks: RunTracks): AgentWorkingSignal[] {
     out.push({
       memberId: track.memberId,
       channelId: track.channelId,
+      state: track.state,
       source: track.source,
       runId: track.runId,
-      startedAtMs: track.startedAtMs,
-      headlines: track.headline === undefined ? [] : [track.headline],
+      // A run parked on an approval keeps no headline: the answer it is waiting
+      // on is already a message in the timeline, and reprinting it as a live
+      // status line is the "stacked on its own partial" pattern the mac client
+      // rules out in MessageListView (composerFooterSignals).
+      ...(track.startedAtMs !== undefined
+        ? { startedAtMs: track.startedAtMs }
+        : {}),
+      headlines:
+        track.headline === undefined || track.state !== "working"
+          ? []
+          : [track.headline],
       lastActivityAtMs: track.lastActivityAtMs,
     });
   }
