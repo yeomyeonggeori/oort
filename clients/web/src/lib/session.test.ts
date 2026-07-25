@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { LoginResponse } from "./api";
-import { parsePersistedSession, restoredLoginResponse } from "./session";
+import {
+  parsePersistedMetadata,
+  parsePersistedSession,
+  restoredLoginResponse,
+} from "./session";
 
 // The store's stateful half talks to localStorage and is exercised by the
 // browser smoke; what is worth pinning here is the boundary that decides
@@ -52,6 +56,36 @@ describe("persisted session parsing", () => {
     expect(
       parsePersistedSession(
         JSON.stringify({ ...stored, member: { id: member.id } })
+      )
+    ).toBeNull();
+  });
+});
+
+describe("desktop metadata parsing", () => {
+  const metadata = {
+    realtimeWebSocketUrl: stored.realtimeWebSocketUrl,
+    member,
+  };
+
+  it("accepts a record with no refresh token, which is the whole point", () => {
+    // In keychain mode the token is deliberately absent from this blob, so the
+    // full-session validator would reject exactly the records that are correct.
+    expect(parsePersistedMetadata(JSON.stringify(metadata))).toEqual(metadata);
+  });
+
+  it("keeps only the two fields it owns", () => {
+    expect(
+      parsePersistedMetadata(JSON.stringify({ ...metadata, refreshToken: "leaked" }))
+    ).toEqual(metadata);
+  });
+
+  it("treats an absent, corrupt or incomplete record as no metadata", () => {
+    expect(parsePersistedMetadata(null)).toBeNull();
+    expect(parsePersistedMetadata("{not json")).toBeNull();
+    expect(parsePersistedMetadata(JSON.stringify({ member }))).toBeNull();
+    expect(
+      parsePersistedMetadata(
+        JSON.stringify({ realtimeWebSocketUrl: metadata.realtimeWebSocketUrl })
       )
     ).toBeNull();
   });

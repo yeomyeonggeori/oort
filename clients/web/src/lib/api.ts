@@ -15,9 +15,14 @@
 // token rotates single-use through POST /v1/auth/refresh. Storage, the XSS
 // bound and the deferred Tauri keychain path are documented in ./session.ts,
 // ported from clients/web-legacy/src/api/client.ts.
+//
+// Base address (P2, MOMO-604): every path below is relative to `apiBase()`,
+// read at call time rather than captured at import. Same-origin stays the
+// default (empty base = the existing web deployment and dev proxy); the connect
+// screen can point this device at another server, and the Tauri shell must.
 // =============================================================================
 
-import { API_BASE } from "./env";
+import { apiBase } from "./serverBase";
 import {
   applyLogin,
   applyRotation,
@@ -183,7 +188,7 @@ function rawRequest(
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(`${API_BASE}${path}`, { ...init, headers });
+  return fetch(`${apiBase()}${path}`, { ...init, headers });
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -265,6 +270,73 @@ export async function login(
   const loginResponse = (await res.json()) as LoginResponse;
   applyLogin(loginResponse);
   return loginResponse;
+}
+
+// ---- invite self-signup (POST /v1/join) -------------------------------------
+// Public route, mounted outside AuthMiddleware: the invite code IS the only
+// credential, and it leaves the client only inside this request body. Success
+// returns a full session token pair (openapi.yaml JoinResponse), so applying it
+// here is the spec'd join-login path, not an invented auto-login.
+
+/** Display name from the email local part, same derivation as the mac client. */
+export function displayNameFromEmail(email: string): string {
+  const local = email.split("@")[0] ?? email;
+  return local
+    .split(".")
+    .filter((part) => part !== "")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/** Handle from the email local part: a-z, 0-9 and hyphen, never empty. */
+export function handleFromEmail(email: string): string {
+  const local = (email.split("@")[0] ?? email).toLowerCase();
+  const mapped = Array.from(local)
+    .map((ch) => (/[a-z0-9-]/.test(ch) ? ch : "-"))
+    .join("");
+  const trimmed = mapped.replace(/^-+/, "").replace(/-+$/, "");
+  return trimmed === "" ? "momo-user" : trimmed;
+}
+
+function browserTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Redeem an invite code and land in the workspace it belongs to. The person
+ * supplies only an email and a password: display name and handle are derived
+ * from the email exactly as the mac chooser derives them, so the same person
+ * joining from either client gets the same identity.
+ */
+export async function joinWithInvite(
+  code: string,
+  email: string,
+  password: string
+): Promise<LoginResponse> {
+  const trimmedEmail = email.trim();
+  const res = await rawRequest(
+    "/v1/join",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        code: code.trim(),
+        email: trimmedEmail,
+        displayName: displayNameFromEmail(trimmedEmail),
+        handle: handleFromEmail(trimmedEmail),
+        password,
+        timeZone: browserTimeZone(),
+      }),
+    },
+    null
+  );
+  if (!res.ok) throw await parseError(res);
+  const joinResponse = (await res.json()) as LoginResponse;
+  applyLogin(joinResponse);
+  return joinResponse;
 }
 
 /**

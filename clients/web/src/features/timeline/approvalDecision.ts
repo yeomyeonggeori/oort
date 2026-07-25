@@ -1,4 +1,4 @@
-import { API_BASE } from "@/lib/env";
+import { apiBase } from "@/lib/serverBase";
 import { getAccessToken } from "@/lib/session";
 import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
 
@@ -70,7 +70,7 @@ export async function decideApproval(
   let response: Response;
   try {
     response = await fetch(
-      `${API_BASE}/v1/workspaces/${encodeURIComponent(
+      `${apiBase()}/v1/workspaces/${encodeURIComponent(
         workspaceId
       )}/approvals/${encodeURIComponent(approvalId)}/decision`,
       {

@@ -20,7 +20,7 @@
 // =============================================================================
 
 import { ApiError } from "@/lib/api";
-import { API_BASE } from "@/lib/env";
+import { absoluteApiBase, apiBase } from "@/lib/serverBase";
 import { getAccessToken } from "@/lib/session";
 
 async function settingsRequest<T>(
@@ -31,7 +31,7 @@ async function settingsRequest<T>(
   headers.set("Content-Type", "application/json");
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
     try {
@@ -46,14 +46,13 @@ async function settingsRequest<T>(
 }
 
 /**
- * The API origin a new member has to point their client at. Empty API_BASE
- * means same-origin relative paths (the dev/preview proxy), so the browser
- * origin is the honest answer for the invite deep link.
+ * The API origin a new member has to point their client at. An empty base means
+ * same-origin relative paths (the dev/preview proxy), so the browser origin is
+ * the honest answer for the invite deep link; a server chosen on the connect
+ * screen (MOMO-604) wins over both.
  */
 export function resolveServerBaseUrl(): string {
-  if (API_BASE) return API_BASE;
-  if (typeof window === "undefined") return "";
-  return window.location.origin;
+  return absoluteApiBase();
 }
 
 // --- AI 연결: GET/PUT/DELETE /v1/provider/link, POST /v1/provider/link/test --

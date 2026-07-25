@@ -272,6 +272,22 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
 
+  // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
+  //     momo://join link fills server and code, so only email/password remain.
+  //     The LAN discovery card has no web equivalent (no mDNS in a page), so it
+  //     is reviewed in the desktop shell, not here.
+  const invite = await context.newPage();
+  const deepLink = `momo://join?server=${encodeURIComponent(
+    ORIGIN
+  )}&code=momo-alpha-2026`;
+  await invite.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
+    waitUntil: "networkidle",
+  });
+  await invite.getByTestId("login-invite-code").waitFor({ state: "visible" });
+  const inviteShot = `${OUT_DIR}/connect-invite-${scheme}.png`;
+  await invite.screenshot({ path: inviteShot });
+  shots.push(inviteShot);
+
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);
   await login.getByTestId("timeline-message").first().waitFor({ state: "visible" });

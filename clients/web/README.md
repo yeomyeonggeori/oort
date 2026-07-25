@@ -50,6 +50,62 @@ npm run dev                          # http://localhost:5173 (proxies /v1 → mo
 - Credentials come from the login form (or `VITE_MOMO_DEV_*` in `.env.local`),
   never from source.
 
+## Connect surface + dynamic API base (MOMO-604, P2)
+
+`src/features/auth/ConnectPage.tsx` replaced the same-origin login form. Three
+additions, each of which also has to work when the answer is "nothing to show":
+
+- **Server selection.** The address is a runtime value now, resolved by
+  `apiBase()` in `src/lib/serverBase.ts`: the server chosen on the connect
+  screen (localStorage `momo.web.server.v1`) → `VITE_MOMO_API_BASE` → `""` =
+  same-origin. **The existing web deployment and the dev proxy are unchanged**:
+  a blank field IS the same-origin path. Inside the Tauri shell there is no
+  same-origin API, so the field is required there.
+- **Invite deep link.** `momo://join?server=…&code=…`
+  (`docs/onboarding-deeplink.md`) is consumed from the desktop shell event, and
+  in a browser from the page query (`?server=&code=`, `?code=`, or a whole link
+  as `?join=`). The code is stripped from the address bar as soon as it is read.
+  Submitting redeems it through `POST /v1/join`, with display name and handle
+  derived from the email exactly as the mac client derives them.
+- **LAN discovery card.** `_momo._tcp` sightings reported by the shell, offered
+  only when the advertised `baseUrl` is a usable http(s) URL. Browsers have no
+  mDNS, so the card never renders there; nothing found is silence, not an error
+  state.
+
+The shell contract this consumes (web half of MOMO-603, `src/lib/tauri.ts`).
+**The Rust side owns it** — `clients/desktop/README.md` "Bridge contract" is the
+canonical statement and `src-tauri/src/{deeplink,discovery}.rs` the source:
+
+| direction | name | payload |
+|---|---|---|
+| event | `momo:deep-link` | `{ url, server, code }` — one accepted link |
+| event | `momo:discovery` | `{ servers: [{ baseUrl, displayHost, instanceName }], scanning }` — the FULL current set every time |
+| command | `deep_link_take_pending` | `-> DeepLinkJoin[]`, drains the cold-start buffer |
+| command | `discovery_start({ timeoutMs })` / `discovery_stop` | never rejects to the UI; the shell stops itself at the timeout |
+
+Order matters for both: **subscribe first, then drain/start.** A cold start
+delivers the URL long before React mounts, so the shell buffers it and
+`takePendingDeepLinks()` is the handshake that releases it — draining before
+`onDeepLink()` resolves releases the buffer to nobody, and draining twice
+returns nothing the second time.
+
+The shell deliberately does **not** validate `server`; the connect surface
+re-validates it (`features/auth/deepLink.ts`) so that rule keeps a single owner,
+exactly as the mac client does it.
+
+**Still open (spike finding 3 below, not changed by this ticket):** the REST
+server sends no CORS headers and does not answer preflight (verified: `OPTIONS
+/v1/auth/login` → 404). A browser therefore cannot address a *different* origin
+directly, and the desktop shell needs either server-side CORS for the app origin
+or a Rust HTTP command. The connect screen stores and uses whatever base it is
+given; making a cross-origin base reachable is a shell/server change.
+
+```sh
+npm run build && npm run preview -- --host 127.0.0.1
+export MOMO_EMAIL=... MOMO_PASSWORD=...
+npm run smoke:connect     # deep-link prefill, validation, dynamic base, offline
+```
+
 ## Smoke (MOMO-598)
 
 One browser run over the whole P1 loop against a live momowebqa. It signs in,
