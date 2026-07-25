@@ -12,6 +12,7 @@ import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
+import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -78,6 +79,9 @@ export function AppShell({
       {/* Renders nothing; watches the rail so a mention or an approval request
        * reaches the OS while the window is in the background (MOMO-607). */}
       {!stress && <DesktopNotifications />}
+      {/* Renders nothing; watches every agent's progress channel so the sidebar
+       * badge and the composer line describe the same turn (MOMO-613). */}
+      {!stress && <AgentWorkingRail />}
       <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </SessionProvider>
   );

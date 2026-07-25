@@ -77,6 +77,89 @@ export function centrifugoChannelName(
   return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
 }
 
+// ---- agent progress rail (AX-5 / MOMO-613) ---------------------------------
+// `agent:ws<workspace>.<channel>.<agentMember>` is the exact-channel observable
+// progress namespace (research/11-agent-runtime/14, verified by
+// scripts/verify_agent_live_channel.sh): the subscribe proxy authorises it only
+// when the observer AND the target agent are both active members of that exact
+// channel, which is why one subscription is needed per (channel, agent) pair
+// rather than one per channel.
+//
+// Two payload facts, measured against momowebqa rather than assumed:
+//   - ids arrive in MIXED case. `run_id` is a Swift `uuidString` (UPPERCASE)
+//     while `channel_id` comes back lowercase, so every comparison downstream
+//     folds case (agentRail.ts `keyOf`).
+//   - `agent.partial` carries NO `agent_member_id`. The delta is attributed to
+//     the agent whose channel it arrived on, which the subscription already
+//     knows; deriving it from the run id would need a status frame that may not
+//     have arrived yet.
+
+/** Run lifecycle (`run_status`) as the worker publishes it. */
+export type AgentRunStatusWire =
+  | "queued"
+  | "running"
+  | "awaiting_approval"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+
+/** Stream phase (`phase`) as the worker publishes it. */
+export type AgentPhaseWire =
+  | "queued"
+  | "thinking"
+  | "streaming"
+  | "done"
+  | "error";
+
+export interface AgentStatusEvent {
+  type: "agent.status";
+  v: number;
+  ts: number;
+  payload: {
+    run_id: string;
+    agent_member_id: string;
+    channel_id: string;
+    phase: AgentPhaseWire;
+    run_status: AgentRunStatusWire;
+    /** Tool name behind the current step. Internal vocabulary, never rendered. */
+    detail?: string;
+    reserved_micro_usd?: number;
+    spent_micro_usd?: number;
+  };
+}
+
+export interface AgentPartialEvent {
+  type: "agent.partial";
+  v: number;
+  ts: number;
+  payload: {
+    run_id: string;
+    channel_id: string;
+    message_id?: string;
+    /** Appended slice of the streaming answer. */
+    text_delta?: string;
+    /** The full text so far (worker convenience field). */
+    text?: string;
+    tool_call_id?: string;
+    tool_call_name?: string;
+    tool_call_args?: unknown;
+    tool_call_args_truncated?: boolean;
+    spent_micro_usd?: number;
+  };
+}
+
+export type AgentProgressEvent = AgentStatusEvent | AgentPartialEvent;
+
+export function centrifugoAgentChannelName(
+  workspaceId: string,
+  channelId: string,
+  agentMemberId: string
+): string {
+  return `agent:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}.${agentMemberId.toUpperCase()}`;
+}
+
 function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
@@ -154,6 +237,17 @@ export interface RealtimeHandle {
       onMessage: (event: MessageNewEvent) => void;
     }
   ) => () => void;
+  /**
+   * Watch one agent's progress inside one channel (`agent.status` /
+   * `agent.partial`). Same refcount as `subscribeChannel`, so two surfaces may
+   * watch the same agent without either ending the other's feed.
+   */
+  subscribeAgent: (
+    workspaceId: string,
+    channelId: string,
+    agentMemberId: string,
+    handlers: { onEvent: (event: AgentProgressEvent) => void }
+  ) => () => void;
   dispose: () => void;
 }
 
@@ -179,49 +273,33 @@ export function createRealtime(
   // timeline watch the same channel and the user changes route.
   const shared = new Map<string, { sub: Subscription; refs: number }>();
 
-  function subscribeChannel(
-    workspaceId: string,
-    channelId: string,
-    handlers: {
-      onSubscribed: (recovered: boolean) => void;
-      onMessage: (event: MessageNewEvent) => void;
-    }
+  /**
+   * Refcounted attach to one Centrifugo channel. `wire` registers the caller's
+   * handlers and returns the matching detach, so the ownership rule lives in
+   * one place for both the message rail and the agent progress rail.
+   */
+  function attach(
+    name: string,
+    options: { recoverable: boolean; positioned: boolean },
+    wire: (sub: Subscription) => () => void
   ): () => void {
-    const name = centrifugoChannelName(workspaceId, channelId);
     let entry = shared.get(name);
     if (!entry) {
       const sub =
-        client.getSubscription(name) ??
-        client.newSubscription(name, { recoverable: true, positioned: true });
+        client.getSubscription(name) ?? client.newSubscription(name, options);
       entry = { sub, refs: 0 };
       shared.set(name, entry);
     }
     entry.refs += 1;
     const sub = entry.sub;
-
-    const onSubscribed = (ctx: { recovered?: boolean }) =>
-      handlers.onSubscribed(ctx.recovered === true);
-    const onPublication = (ctx: { data?: unknown }) => {
-      const event = ctx.data as MessageNewEvent | undefined;
-      if (
-        event &&
-        (event.type === "message.new" || event.type === "message.edited") &&
-        event.payload
-      ) {
-        handlers.onMessage(event);
-      }
-    };
-
-    sub.on("subscribed", onSubscribed);
-    sub.on("publication", onPublication);
+    const detach = wire(sub);
     if (sub.state !== "subscribed") sub.subscribe();
 
     let released = false;
     return () => {
       if (released) return; // a double cleanup must not release someone else's ref
       released = true;
-      sub.off("subscribed", onSubscribed);
-      sub.off("publication", onPublication);
+      detach();
       const current = shared.get(name);
       if (!current || current.sub !== sub) return;
       current.refs -= 1;
@@ -232,8 +310,75 @@ export function createRealtime(
     };
   }
 
+  function subscribeChannel(
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onSubscribed: (recovered: boolean) => void;
+      onMessage: (event: MessageNewEvent) => void;
+    }
+  ): () => void {
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onSubscribed = (ctx: { recovered?: boolean }) =>
+          handlers.onSubscribed(ctx.recovered === true);
+        const onPublication = (ctx: { data?: unknown }) => {
+          const event = ctx.data as MessageNewEvent | undefined;
+          if (
+            event &&
+            (event.type === "message.new" || event.type === "message.edited") &&
+            event.payload
+          ) {
+            handlers.onMessage(event);
+          }
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
+  function subscribeAgent(
+    workspaceId: string,
+    channelId: string,
+    agentMemberId: string,
+    handlers: { onEvent: (event: AgentProgressEvent) => void }
+  ): () => void {
+    // Deliberately NOT recoverable/positioned, unlike the message rail. Progress
+    // is an ephemeral projection of a run that Postgres already owns: replaying
+    // a gap after a reconnect would resurrect deltas from a turn that has since
+    // finished, and the working signal would claim activity that stopped
+    // minutes ago. A reconnect starts from silence and the idle TTL clears
+    // whatever was left behind.
+    return attach(
+      centrifugoAgentChannelName(workspaceId, channelId, agentMemberId),
+      { recoverable: false, positioned: false },
+      (sub) => {
+        const onPublication = (ctx: { data?: unknown }) => {
+          const event = ctx.data as AgentProgressEvent | undefined;
+          if (
+            event &&
+            (event.type === "agent.status" || event.type === "agent.partial") &&
+            event.payload
+          ) {
+            handlers.onEvent(event);
+          }
+        };
+        sub.on("publication", onPublication);
+        return () => sub.off("publication", onPublication);
+      }
+    );
+  }
+
   return {
     subscribeChannel,
+    subscribeAgent,
     dispose: () => {
       shared.clear();
       client.disconnect();

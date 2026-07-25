@@ -20,11 +20,14 @@ import {
   useChannels,
   useDirectory,
   useReadStates,
+  type Directory,
 } from "@/features/workspace/useWorkspace";
 import {
   elapsedLabel,
   useAgentWorkingSignals,
+  useTickingNow,
   workingInChannel,
+  type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
@@ -44,19 +47,46 @@ import { Button } from "@/design/ui/button";
 // to the same surface, next to the DMs a person already has (parity G-3/G-4).
 // =============================================================================
 
-function AgentTurnBadge({ channelId }: { channelId: string }) {
-  const signals = useAgentWorkingSignals();
-  const active = workingInChannel(signals, channelId);
+/**
+ * Working pill on a channel row (R-1 §1, mac AgentWorkingChannelBadge). It reads
+ * as the agent's clock rather than as a status dot: the number ticks once a
+ * second because that is how fast the thing it measures changes, and it carries
+ * the agent token so a turn is never confused with an unread count.
+ *
+ * With more than one agent working the same channel the count leads and the
+ * clock belongs to the LONGEST running turn, which is the one a reader is most
+ * likely to be waiting on.
+ */
+function AgentTurnBadge({
+  active,
+  directory,
+  nowMs,
+}: {
+  active: AgentWorkingSignal[];
+  directory: Directory;
+  nowMs: number;
+}) {
   if (active.length === 0) return null;
   const oldest = active[0];
+  const name = memberFor(directory, oldest.memberId)?.displayName ?? "에이전트";
+  const label =
+    active.length > 1
+      ? `에이전트 ${active.length}명이 작업 중입니다`
+      : `${name}이(가) 작업 중입니다`;
   return (
     <span
-      className="shrink-0 text-timestamp text-ink-muted"
+      className="shrink-0 rounded-sm bg-agent-soft px-1 text-timestamp text-agent"
       data-numeric
       data-testid="agent-turn-badge"
-      title="에이전트가 턴을 진행 중입니다"
+      title={label}
     >
-      {elapsedLabel(oldest.startedAtMs, Date.now())}
+      {/* A bare aria-label on a generic span is not reliably announced, so the
+          sentence a clock alone cannot carry is real (hidden) text. */}
+      <span className="sr-only">{label} </span>
+      {active.length > 1 ? `(${active.length}) ` : ""}
+      {oldest.startedAtMs === undefined
+        ? "작업 중"
+        : elapsedLabel(oldest.startedAtMs, nowMs)}
     </span>
   );
 }
@@ -77,6 +107,11 @@ export function Sidebar({
 
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
+
+  // One clock for the whole list, and only while an agent is actually working:
+  // a per-row interval would mean ten timers to render one number each.
+  const workingSignals = useAgentWorkingSignals();
+  const nowMs = useTickingNow(workingSignals.size > 0);
 
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
@@ -152,7 +187,13 @@ export function Sidebar({
         agent={label.isAgent}
         unreadCount={read?.unreadCount ?? 0}
         mentionCount={read?.mentionCount ?? 0}
-        trailing={<AgentTurnBadge channelId={channel.id} />}
+        trailing={
+          <AgentTurnBadge
+            active={workingInChannel(workingSignals, channel.id, nowMs)}
+            directory={directoryQuery.directory}
+            nowMs={nowMs}
+          />
+        }
         testId="channel-item"
         dataAttrs={{ "data-channel-id": channel.id }}
       />
