@@ -41,6 +41,7 @@ src-tauri/
   src/deeplink.rs     # momo://join parsing + pre-webview buffer
   src/discovery.rs    # _momo._tcp browse
   src/notification.rs # permission + show
+  src/opener.rs       # hand one https URL to the OS browser
   src/keychain.rs     # refresh token in the OS credential store
   src/updater.rs      # check / install / relaunch over the minisign manifest
   capabilities/       # core:default only (app commands need no permission entry)
@@ -86,6 +87,7 @@ interface DiscoveredServer {
 | `keychain_load_refresh_token` | — | `string \| null` | |
 | `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
 | `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. |
+| `open_external_url` | `{ url: string }` | `void` \| error | Opens one **https** URL in the OS browser. Rejects anything else. Desktop only. |
 | `app_version` | — | `string` | The running build, e.g. `0.1.0-next.1`. |
 | `updater_check` | — | `AvailableUpdate \| null` \| error | `null` = already newest. **Rejects** on a failed check; see below. |
 | `updater_install` | — | `void` \| error | Downloads, verifies minisign, swaps the bundle. Does not restart. |
@@ -290,6 +292,29 @@ approximates it (arm the channel at show time, consume it on the next window
 focus, expire after 20s) and says so in `notifications/model.ts`. Closing it
 properly means a Rust notification path that keeps the handle and emits an event
 with the app-supplied target.
+
+## External links (MOMO-620)
+
+`<a target="_blank">` is correct in a browser tab and does **nothing** here: wry
+leaves WKWebView's `createWebViewWith` unimplemented, so a new-window request is
+dropped and a labelled action becomes a dead control in the desktop build only.
+That is how `브라우저에서 열기` on a commit/PR artifact card shipped broken on
+desktop while working everywhere else.
+
+`open_external_url` is the fix, and it is an app command rather than
+`tauri-plugin-opener` on purpose: the plugin's surface is "open a path, a file or
+a URL with any handler", and the only thing this product needs is "hand one https
+URL to the default browser". A command that can do exactly that cannot be talked
+into doing anything else by a compromised webview.
+
+The URL is re-validated in Rust (https only, no whitespace, no quoting or shell
+metacharacters, 2048 byte ceiling) even though `clients/web` already refuses
+anything else. A native command must not inherit its caller's discipline: this is
+where webview-supplied data becomes an OS process argument.
+
+Web half: `openExternalUrl()` in `clients/web/src/lib/tauri.ts`, called from
+`ArtifactCard`'s link row, which falls back to the plain anchor in a browser and
+shows an inline failure with the address when the shell could not open it.
 
 ## Run
 

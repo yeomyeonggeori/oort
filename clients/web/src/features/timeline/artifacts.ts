@@ -48,6 +48,12 @@ export interface DiffFile {
   /** Full-file counts. Truncating the body never changes them. */
   additions: number;
   deletions: number;
+  /**
+   * Lines this file has in the SOURCE. `lines.length` is what survived display
+   * truncation, so `lines.length < lineCount` means the file is cut and
+   * `lines.length === 0` means only its path made it into the card.
+   */
+  lineCount: number;
   lines: DiffLine[];
 }
 
@@ -57,6 +63,12 @@ export interface DiffArtifact {
   /** Source-wide counts, honest even when `files` holds a truncated slice. */
   additions: number;
   deletions: number;
+  /**
+   * EVERY file in the source, in source order. Truncation empties a file's
+   * `lines`, it never drops the file: a card that renders 10 of 12 files while
+   * announcing "파일 10개" states a count it did not measure, which is the one
+   * thing this model exists to prevent.
+   */
   files: DiffFile[];
   /** Fence-stripped source, kept whole for the raw-payload disclosure. */
   rawPatch: string;
@@ -64,6 +76,28 @@ export interface DiffArtifact {
   totalLineCount: number;
   /** Diff lines actually kept in `files`. */
   displayedLineCount: number;
+}
+
+/**
+ * A patch past the source ceiling. Rendering side only, and it exists because
+ * declining to parse must not mean declining to CONTAIN: without it a 200 KB
+ * patch fell through to the plain body paragraph, which has no height cap, so
+ * the largest change on the timeline was the one that grew the row without
+ * limit (the exact inversion ArtifactCard's MOMO-610 promise rules out).
+ *
+ * It carries no files and no +/- counts on purpose. Nothing here was parsed, so
+ * nothing here may be claimed; the card says how big the patch is and hands the
+ * source to a bounded disclosure.
+ */
+export interface OversizedArtifact {
+  kind: "oversized";
+  title: string;
+  /** Lines in the source patch. */
+  totalLineCount: number;
+  /** Bytes in the source patch, as the ceiling measured them. */
+  byteCount: number;
+  /** Fence-stripped source, whole, for the bounded disclosure. */
+  rawPatch: string;
 }
 
 export interface LinkArtifact {
@@ -81,9 +115,19 @@ export interface LinkArtifact {
    * a pull request with no way to open it.
    */
   urlRejected: boolean;
+  /**
+   * Host of the refused address, when it parsed as a URL at all. A hostname is
+   * not a credential (the query string that carried one is already gone), and
+   * naming it turns "we refused a link" into something the reader can act on:
+   * they can see whether it was the repository they expected.
+   */
+  rejectedHost?: string;
 }
 
-export type ArtifactPresentation = DiffArtifact | LinkArtifact;
+export type ArtifactPresentation =
+  | DiffArtifact
+  | LinkArtifact
+  | OversizedArtifact;
 
 /** Source ceiling. Past this the message stays a message (MomoCore parity). */
 const MAX_SOURCE_BYTES = 200_000;
@@ -184,28 +228,39 @@ function stripSingleDiffFence(source: string): string {
 }
 
 /**
+ * Anchored pre-filter for the sniff below: the only four ways a body can open
+ * and still be a diff. Anchored, so it reads the first bytes and stops.
+ */
+const DIFF_HEAD_RE = /^(```(diff|patch)|diff --git |--- )/i;
+
+/**
  * The promotion bar for an UNMARKED message (MomoCore `looksLikeUnifiedDiff`).
  * It is deliberately narrow: either the body is fenced as ```diff/```patch, or
  * its first content line is a real `diff --git ` / `--- ` header, AND the body
  * carries hunk or ---/+++ header structure. A message that merely mentions a
  * `+` line keeps its plain rendering.
+ *
+ * Cheapest test first, and that ordering is load-bearing rather than tidy:
+ * MessageRow's useMemo is thrown away every time react-virtuoso unmounts a row,
+ * so a channel of long prose used to re-encode every body to UTF-8 on every
+ * scroll pass just to learn it was not a diff. The head match rejects those
+ * before anything touches the whole string. The size ceiling moved OUT of this
+ * function entirely: an oversized patch IS a diff, it is just one this client
+ * renders as `oversized` rather than parsing.
  */
 function looksLikeUnifiedDiff(raw: string): boolean {
   const trimmed = raw.trim();
+  if (!DIFF_HEAD_RE.test(trimmed)) return false;
   const source = stripSingleDiffFence(trimmed);
-  if (byteLength(source) > MAX_SOURCE_BYTES) return false;
-  const lines = source.split("\n");
-  const first = lines.find((line) => line.trim() !== "");
   if (
-    first === undefined ||
-    !(
-      source !== trimmed ||
-      first.startsWith("diff --git ") ||
-      first.startsWith("--- ")
-    )
+    source === trimmed &&
+    !(trimmed.startsWith("diff --git ") || trimmed.startsWith("--- "))
   ) {
+    // The head looked like a fence but was not one (```diffs, ```patched), and
+    // what is left does not open with a real header.
     return false;
   }
+  const lines = source.split("\n");
   const hunk = lines.some((line) => line.startsWith("@@"));
   const git = lines.some((line) => line.startsWith("diff --git "));
   const headers =
@@ -248,9 +303,29 @@ interface PendingFile {
   lines: DiffLine[];
 }
 
-function parseDiff(raw: string, rawTitle: string | undefined): DiffArtifact | null {
+/**
+ * Fence-strip, weigh, then parse. A source past the ceiling becomes the
+ * `oversized` card instead of falling through to the unbounded body paragraph.
+ */
+function diffArtifact(
+  raw: string,
+  rawTitle: string | undefined
+): DiffArtifact | OversizedArtifact | null {
   const source = stripSingleDiffFence(raw);
-  if (byteLength(source) > MAX_SOURCE_BYTES) return null;
+  const byteCount = byteLength(source);
+  if (byteCount > MAX_SOURCE_BYTES) {
+    return {
+      kind: "oversized",
+      title: bounded(rawTitle, 200) ?? "코드 변경",
+      totalLineCount: source.split("\n").length,
+      byteCount,
+      rawPatch: source,
+    };
+  }
+  return parseDiff(source, rawTitle);
+}
+
+function parseDiff(source: string, rawTitle: string | undefined): DiffArtifact | null {
   const lines = source.split("\n");
 
   const files: DiffFile[] = [];
@@ -270,6 +345,7 @@ function parseDiff(raw: string, rawTitle: string | undefined): DiffArtifact | nu
         "이름 없는 파일",
       additions: current.additions,
       deletions: current.deletions,
+      lineCount: current.lines.length,
       lines: current.lines,
     });
   };
@@ -337,9 +413,14 @@ function parseDiff(raw: string, rawTitle: string | undefined): DiffArtifact | nu
 }
 
 /**
- * Keeps the first `limit` diff lines in source order, dropping the overflow
- * while preserving each surviving file's full addition/deletion counts. The
- * caller reports the gap; nothing here hides it.
+ * Keeps the first `limit` diff lines in source order and empties the overflow.
+ *
+ * Every file survives, including the ones the budget never reached: they come
+ * back with `lines: []` and their real `lineCount`, `additions` and `deletions`
+ * intact. Dropping them from the array instead (the first cut of this function)
+ * made `files.length` a count of what fit rather than a count of what changed,
+ * and the card then announced that number as the size of the change while two
+ * files were missing from the list with nothing saying so.
  */
 function truncateForDisplay(
   files: DiffFile[],
@@ -349,17 +430,15 @@ function truncateForDisplay(
   if (total <= limit) return { renderedFiles: files, displayedLineCount: total };
 
   let remaining = limit;
-  const renderedFiles: DiffFile[] = [];
-  for (const file of files) {
-    if (remaining <= 0) break;
-    if (file.lines.length <= remaining) {
-      renderedFiles.push(file);
+  const renderedFiles: DiffFile[] = files.map((file) => {
+    if (remaining >= file.lines.length) {
       remaining -= file.lines.length;
-    } else {
-      renderedFiles.push({ ...file, lines: file.lines.slice(0, remaining) });
-      remaining = 0;
+      return file;
     }
-  }
+    const kept = file.lines.slice(0, remaining);
+    remaining = 0;
+    return { ...file, lines: kept };
+  });
   const displayedLineCount = renderedFiles.reduce(
     (sum, file) => sum + file.lines.length,
     0
@@ -372,6 +451,23 @@ export function isTruncated(diff: DiffArtifact): boolean {
   return diff.displayedLineCount < diff.totalLineCount;
 }
 
+/** Files whose lines were dropped entirely: only the path is on the card. */
+export function omittedFileCount(diff: DiffArtifact): number {
+  return diff.files.filter(
+    (file) => file.lines.length === 0 && file.lineCount > 0
+  ).length;
+}
+
+/** Hostname of an address, when it parses at all. Never the query string. */
+function urlHost(raw: string): string | undefined {
+  try {
+    const host = new URL(raw).hostname;
+    return host === "" ? undefined : host;
+  } catch {
+    return undefined;
+  }
+}
+
 function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
   const branch = bounded(propString(message.props, "branch"), 120);
   const status = bounded(propString(message.props, "status"), 80);
@@ -379,6 +475,10 @@ function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
   const rawUrl =
     propString(message.props, "url") ?? propString(message.props, "uri");
   const url = safeHttpsUrl(rawUrl);
+  const rejectedHost =
+    rawUrl !== undefined && url === undefined
+      ? bounded(urlHost(rawUrl), 160)
+      : undefined;
   return {
     kind,
     title:
@@ -389,6 +489,7 @@ function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
     ...(repository ? { repository } : {}),
     ...(url ? { url } : {}),
     urlRejected: rawUrl !== undefined && url === undefined,
+    ...(rejectedHost ? { rejectedHost } : {}),
   };
 }
 
@@ -411,12 +512,12 @@ export function resolveArtifact(message: Message): ArtifactPresentation | null {
     const source = propString(message.props, "patch") ?? message.body;
     return source === undefined
       ? null
-      : parseDiff(source, propString(message.props, "title"));
+      : diffArtifact(source, propString(message.props, "title"));
   }
   if (message.body === undefined || !looksLikeUnifiedDiff(message.body)) {
     return null;
   }
-  return parseDiff(message.body, propString(message.props, "title"));
+  return diffArtifact(message.body, propString(message.props, "title"));
 }
 
 /**
@@ -434,6 +535,6 @@ export function artifactKeepsBody(
   message: Message,
   artifact: ArtifactPresentation
 ): boolean {
-  if (artifact.kind !== "diff") return true;
+  if (artifact.kind !== "diff" && artifact.kind !== "oversized") return true;
   return propString(message.props, "patch") !== undefined;
 }

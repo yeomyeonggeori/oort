@@ -162,6 +162,31 @@ export async function stopDiscovery(): Promise<void> {
   }
 }
 
+// ---- external links ---------------------------------------------------------
+
+/**
+ * Open an https link in the OS browser. Returns false when it did not open.
+ *
+ * `target="_blank"` is enough in a browser tab and does NOTHING in this shell:
+ * wry leaves WKWebView's new-window request unimplemented, so an anchor that
+ * works in Chrome is a dead control in the desktop build. Callers therefore ask
+ * here first and only fall back to the anchor's own behaviour in a browser.
+ *
+ * A refusal is a return value, not an exception: the Rust side re-validates the
+ * address and the caller has an inline failure state either way, so there is
+ * nothing for a throw to add.
+ */
+export async function openExternalUrl(url: string): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    await invoke<void>("open_external_url", { url });
+    return true;
+  } catch (error) {
+    console.warn("[momo] external link did not open", error);
+    return false;
+  }
+}
+
 // ---- native notifications ---------------------------------------------------
 
 /** Same vocabulary as the browser Notification API, minus the prompt variants. */

@@ -3,9 +3,8 @@ import { threadRollup, type Message, type RosterMember } from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { AgentCard } from "./AgentCard";
-import { agentCardModel, cardKeepsBody } from "./agentCardModel";
 import { ArtifactCard } from "./ArtifactCard";
-import { artifactKeepsBody, resolveArtifact } from "./artifacts";
+import { rowPresentation } from "./rowModel";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -80,30 +79,20 @@ export function MessageRow({
   const failed = message.state === "failed";
   const rollup = threadRollup(message);
   // Agent events render their structured body as a card in the SAME row (R-1
-  // §4): tool runs, approvals and settled turn cost. Ordinary prose returns
-  // null here and the row is untouched.
-  const card = agentCardModel(message);
-  // Code artifacts (ADR-0126 D2 / MOMO-620) sit at the same place in the row.
-  // Precedence follows the mac chain (MessageBubble.primaryContent): an
-  // artifact outranks the tool/turn card, so a diff renders as a diff instead
-  // of as a tool result whose body happens to be a patch.
-  //
-  // The one exception is an approval, which outranks BOTH. An approval card
-  // carries the 승인/거부 action; letting a patch-shaped body promote it into a
-  // read-only diff would hide the only thing the human is being asked to do.
+  // §4): tool runs, approvals, settled turn cost, and the ADR-0126 D2 code
+  // artifacts. Which of those takes the slot, and what the winner has to carry
+  // over from the loser, is decided by `rowPresentation` — a pure function with
+  // its own tests, because this row got that precedence wrong once and turned
+  // failing turns into clean diffs (rowModel.ts).
   //
   // Memoised because it is the one derivation in this row that is not O(1):
   // parsing a 700 line patch on every scroll-driven re-render is work the
   // virtualiser would pay for over and over. The message object is replaced
   // only when the server row changes, so it is the right key.
-  const isApproval = card?.kind === "approval";
-  const artifact = useMemo(
-    () => (isApproval ? null : resolveArtifact(message)),
-    [isApproval, message]
+  const { card, artifact, artifactState, keepsBody } = useMemo(
+    () => rowPresentation(message),
+    [message]
   );
-  const keepsBody = artifact
-    ? artifactKeepsBody(message, artifact)
-    : card === null || cardKeepsBody(card);
 
   return (
     <article
@@ -154,7 +143,11 @@ export function MessageRow({
           </p>
         )}
         {artifact ? (
-          <ArtifactCard artifact={artifact} />
+          <ArtifactCard
+            artifact={artifact}
+            state={artifactState}
+            storageKey={message.id}
+          />
         ) : (
           card && <AgentCard card={card} directory={directory} />
         )}

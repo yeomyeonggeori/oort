@@ -3,9 +3,11 @@ import type { Message } from "@/lib/api";
 import {
   artifactKeepsBody,
   isTruncated,
+  omittedFileCount,
   resolveArtifact,
   type DiffArtifact,
   type LinkArtifact,
+  type OversizedArtifact,
 } from "./artifacts";
 
 // =============================================================================
@@ -142,20 +144,65 @@ describe("artifact detection declines", () => {
     expect(resolveArtifact(msg({ props: { artifact_kind: "diff" } }))).toBeNull();
   });
 
-  it("declines a source past the 200,000 byte ceiling", () => {
-    const huge = [
-      "diff --git a/big.txt b/big.txt",
-      "--- a/big.txt",
-      "+++ b/big.txt",
-      "@@ -1,1 +1,1 @@",
-      ...Array.from({ length: 12_000 }, (_, i) => `+${"가".repeat(20)}${i}`),
-    ].join("\n");
-    expect(new TextEncoder().encode(huge).byteLength).toBeGreaterThan(200_000);
-    expect(resolveArtifact(msg({ type: "diff", body: huge }))).toBeNull();
-  });
-
   it("declines an unknown artifact_kind rather than inventing a fourth card", () => {
     expect(resolveArtifact(msg({ props: { artifact_kind: "issue" } }))).toBeNull();
+  });
+});
+
+describe("a patch past the 200,000 byte ceiling", () => {
+  const HUGE = [
+    "diff --git a/big.txt b/big.txt",
+    "--- a/big.txt",
+    "+++ b/big.txt",
+    "@@ -1,1 +1,1 @@",
+    ...Array.from({ length: 12_000 }, (_, i) => `+${"가".repeat(20)}${i}`),
+  ].join("\n");
+
+  function asOversized(message: Message): OversizedArtifact {
+    const artifact = resolveArtifact(message);
+    expect(artifact?.kind).toBe("oversized");
+    return artifact as OversizedArtifact;
+  }
+
+  it("is contained rather than parsed, so the row still has a ceiling", () => {
+    expect(new TextEncoder().encode(HUGE).byteLength).toBeGreaterThan(200_000);
+    const oversized = asOversized(msg({ type: "diff", body: HUGE }));
+    expect(oversized.totalLineCount).toBe(12_004);
+    expect(oversized.byteCount).toBeGreaterThan(200_000);
+    expect(oversized.rawPatch).toBe(HUGE);
+  });
+
+  it("claims nothing it did not parse: no files, no +/- counts", () => {
+    const oversized = asOversized(msg({ type: "diff", body: HUGE }));
+    expect(oversized).not.toHaveProperty("files");
+    expect(oversized).not.toHaveProperty("additions");
+    expect(oversized).not.toHaveProperty("deletions");
+  });
+
+  it("takes the sniffed path too, not only an explicit artifact_kind", () => {
+    expect(resolveArtifact(msg({ type: "text", body: HUGE }))?.kind).toBe(
+      "oversized"
+    );
+    expect(
+      resolveArtifact(msg({ props: { artifact_kind: "diff", patch: HUGE } }))?.kind
+    ).toBe("oversized");
+  });
+
+  it("still declines prose, however long: the ceiling is not a promotion", () => {
+    const prose = Array.from({ length: 12_000 }, (_, i) =>
+      `${"가".repeat(20)}${i}`
+    ).join("\n");
+    expect(resolveArtifact(msg({ type: "text", body: prose }))).toBeNull();
+  });
+
+  it("drops the body it swallowed, and keeps a separate sentence", () => {
+    const sniffed = msg({ type: "text", body: HUGE });
+    expect(artifactKeepsBody(sniffed, asOversized(sniffed))).toBe(false);
+    const withProp = msg({
+      body: "패치가 너무 커서 첨부만 올립니다.",
+      props: { artifact_kind: "diff", patch: HUGE },
+    });
+    expect(artifactKeepsBody(withProp, asOversized(withProp))).toBe(true);
   });
 });
 
@@ -209,6 +256,36 @@ describe("honest truncation", () => {
     expect(diff.files[1].lines).toHaveLength(196);
     // The second file is cut, but its own counts still describe the whole file.
     expect(diff.files[1].additions).toBe(300);
+    expect(diff.files[1].lineCount).toBe(304);
+  });
+
+  it("keeps EVERY file, so `파일 N개` counts the change and not the slice", () => {
+    // 12 files of 54 lines: the 500 line budget dies inside the tenth.
+    const source = Array.from({ length: 12 }, (_, i) =>
+      bigDiff(50).replace(/Timeline/g, `Batch${i}`)
+    ).join("\n");
+    const diff = asDiff(msg({ type: "diff", body: source }));
+    expect(diff.files).toHaveLength(12);
+    expect(diff.displayedLineCount).toBe(500);
+    // Nine whole files fit, the tenth is cut, the last two are path-only.
+    expect(omittedFileCount(diff)).toBe(2);
+    expect(diff.files[9].lines.length).toBeGreaterThan(0);
+    expect(diff.files[9].lines.length).toBeLessThan(diff.files[9].lineCount);
+    for (const file of diff.files.slice(10)) {
+      expect(file.lines).toHaveLength(0);
+      expect(file.lineCount).toBe(54);
+      // A file nobody can see still reports its path and what it changed.
+      expect(file.additions).toBe(50);
+      expect(file.path).toMatch(
+        /^clients\/web\/src\/features\/timeline\/Batch\d+\.tsx$/
+      );
+    }
+  });
+
+  it("reports no omitted files when the whole diff fits", () => {
+    const diff = asDiff(msg({ type: "diff", body: bigDiff(100) }));
+    expect(omittedFileCount(diff)).toBe(0);
+    expect(diff.files[0].lineCount).toBe(diff.files[0].lines.length);
   });
 });
 
@@ -328,7 +405,30 @@ describe("commit and pull request link cards", () => {
   });
 
   it("does not claim a refusal when no url was sent at all", () => {
-    expect(asLink(msg({ props: { artifact_kind: "pr" } })).urlRejected).toBe(false);
+    const link = asLink(msg({ props: { artifact_kind: "pr" } }));
+    expect(link.urlRejected).toBe(false);
+    expect(link.rejectedHost).toBeUndefined();
+  });
+
+  it("names the host of a refused address, never its query string", () => {
+    const link = asLink(
+      msg({
+        props: {
+          artifact_kind: "pr",
+          url: "https://ghe.example.com/x/y/pull/1?token=super-secret",
+        },
+      })
+    );
+    expect(link.url).toBeUndefined();
+    expect(link.rejectedHost).toBe("ghe.example.com");
+  });
+
+  it("leaves the host absent when the address does not parse at all", () => {
+    const link = asLink(
+      msg({ props: { artifact_kind: "pr", url: "그냥 문장입니다" } })
+    );
+    expect(link.urlRejected).toBe(true);
+    expect(link.rejectedHost).toBeUndefined();
   });
 
   it("drops an over-long metadata value instead of truncating it", () => {
