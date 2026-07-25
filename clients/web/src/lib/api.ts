@@ -326,3 +326,140 @@ export function sendMessage(
     }
   );
 }
+
+// ---- Approvals: read projection over the decision ledger --------------------
+// GET /v1/workspaces/{ws}/approvals?status=&limit= (ApprovalDecisionRoutes).
+// Rows are scoped by channel membership server-side, snake_case on the wire,
+// and ordered `expires_at NULLS LAST, created_at DESC`.
+//
+// Two things the projection deliberately does NOT give a client, and this
+// module does not invent: there is no `created_at`, so a pending row has no
+// "how long ago" (only `expires_at`), and `payload` is left out of the type
+// because tool arguments/paths stay opaque in product UI.
+
+export type ApprovalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
+export interface Approval {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  channelId: string;
+  /** The message carrying the approval card, when the run wrote one. */
+  requestMessageId?: string;
+  /** The AGENT member that asked. Agents are members (ADR-0004). */
+  requestedBy: string;
+  /** The human the agent acted for, when the run recorded one. */
+  onBehalfOf?: string;
+  /** Tool or control name, e.g. `work.spawn`. */
+  actionType: string;
+  status: ApprovalStatus;
+  /** Server risk flag; false means the action cannot be undone. */
+  isReversible?: boolean;
+  decidedBy?: string;
+  decidedAtMs?: number;
+  decisionReason?: string;
+  expiresAtMs?: number;
+}
+
+interface WireApproval {
+  id: string;
+  workspace_id: string;
+  run_id: string;
+  channel_id: string;
+  request_message_id?: string | null;
+  requested_by: string;
+  on_behalf_of?: string | null;
+  action_type: string;
+  status: string;
+  is_reversible?: boolean | null;
+  decided_by?: string | null;
+  decided_at_ms?: number | null;
+  decision_reason?: string | null;
+  expires_at_ms?: number | null;
+}
+
+function optional<T>(value: T | null | undefined): T | undefined {
+  return value === null || value === undefined ? undefined : value;
+}
+
+function toApproval(wire: WireApproval): Approval {
+  return {
+    id: wire.id,
+    workspaceId: wire.workspace_id,
+    runId: wire.run_id,
+    channelId: wire.channel_id,
+    requestMessageId: optional(wire.request_message_id),
+    requestedBy: wire.requested_by,
+    onBehalfOf: optional(wire.on_behalf_of),
+    actionType: wire.action_type,
+    status: wire.status as ApprovalStatus,
+    isReversible: optional(wire.is_reversible),
+    decidedBy: optional(wire.decided_by),
+    decidedAtMs: optional(wire.decided_at_ms),
+    decisionReason: optional(wire.decision_reason),
+    expiresAtMs: optional(wire.expires_at_ms),
+  };
+}
+
+/** One approval status page. The server clamps `limit` to 1...500. */
+export async function fetchApprovals(
+  workspaceId: string,
+  status: ApprovalStatus = "pending",
+  limit = 50
+): Promise<Approval[]> {
+  const res = await request<{ approvals: WireApproval[] }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/approvals?status=${status}&limit=${limit}`
+  );
+  return res.approvals.map(toApproval);
+}
+
+// ---- Agent runs: work projection ------------------------------------------
+// GET /v1/workspaces/{ws}/channels/{ch}/agent-runs (type=work only, the server
+// rejects any other value). camelCase on the wire, unlike read-state/approvals.
+
+export type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "awaiting_approval"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+
+export interface AgentRun {
+  id: string;
+  workspaceId: string;
+  agentMemberId: string;
+  channelId: string;
+  triggerMessageId?: string;
+  status: AgentRunStatus;
+  stepCount: number;
+  maxSteps: number;
+  /** Validated work input: `{ type, title, brief, repo?, branch? }`. */
+  input?: Record<string, unknown>;
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export async function fetchAgentRuns(
+  workspaceId: string,
+  channelId: string,
+  limit = 20
+): Promise<AgentRun[]> {
+  const res = await request<{ runs: AgentRun[] }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/agent-runs?limit=${limit}`
+  );
+  return res.runs;
+}
