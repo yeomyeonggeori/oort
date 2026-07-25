@@ -252,8 +252,24 @@ needs exactly one npm dependency (`@tauri-apps/api`) for the whole bridge.
 `ensureNotificationPermission()` asks at most once per run, and is meant to be
 called at the moment a notification is first worth showing — an OS permission
 dialog at boot, before anyone has a reason to want notifications, is the fastest
-way to earn a permanent "no". **Wiring which events notify (mention, approval
-request) is the web layer's job and is not done yet** — the bridge is the seam.
+way to earn a permanent "no".
+
+**Which events notify is the web layer's decision, and it now has an owner:**
+`clients/web/src/features/notifications/` (MOMO-607). The shell is told to show a
+banner for exactly two things — a mention the server recorded, and an approval
+request still waiting on a human — and only while this window does not have
+focus. Every other rule (mute, de-duplication, replay suppression, copy
+redaction) lives in that module's pure half and is unit-tested there. Nothing
+about that policy belongs in Rust.
+
+**Gap the bridge still has: the click.** `notification_show` is fire-and-forget —
+`tauri-plugin-notification`'s desktop path spawns the notification and drops the
+handle, so there is no way for the shell to report that a banner was clicked, and
+therefore no way for the web layer to know *which* one was. The web side
+approximates it (arm the channel at show time, consume it on the next window
+focus, expire after 20s) and says so in `notifications/model.ts`. Closing it
+properly means a Rust notification path that keeps the handle and emits an event
+with the app-supplied target.
 
 ## Run
 
@@ -355,3 +371,6 @@ the **release-page zip** installed into `/Applications`, not a local build:
   nothing to resume (see Keychain above), which removes it from a first launch;
   a developer machine carrying an old item clears it once with
   `security delete-generic-password -s app.momo.desktop -a refresh-token`.
+- Notification click routing: see the Notification section. The shell cannot
+  report a click, so "click the banner, land on the channel" is an approximation
+  on the web side rather than an OS-reported event.
