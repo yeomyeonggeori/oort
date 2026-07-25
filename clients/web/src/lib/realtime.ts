@@ -322,6 +322,35 @@ export interface WorkSessionACPFrame {
   } & Record<string, unknown>;
 }
 
+/**
+ * Observer count projection (ADR-0126 D1, `TerminalAttachRoutes.observerPayload`).
+ * Published on the same channel when an observer capability is issued, and the
+ * payload is deliberately two fields: the session and the count. It says nothing
+ * about WHO, so nothing here can grow into an attendance list.
+ */
+export interface WorkSessionObserverFrame {
+  type: "work.session.observer";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    session_id: string;
+    observer_count: number;
+  };
+}
+
+export function asWorkSessionObserverFrame(
+  data: unknown
+): WorkSessionObserverFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionObserverFrame>;
+  if (frame.type !== "work.session.observer") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.session_id !== "string") return null;
+  if (typeof payload.observer_count !== "number") return null;
+  return frame as WorkSessionObserverFrame;
+}
+
 const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
   "agent.status",
   "agent.partial",
@@ -396,6 +425,8 @@ export interface RealtimeHandle {
     handlers: {
       onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
+      /** An observer capability was issued: re-read the count from Postgres. */
+      onObserver: (frame: WorkSessionObserverFrame) => void;
       /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
       onResync: () => void;
     }
@@ -560,6 +591,7 @@ export function createRealtime(
     handlers: {
       onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
+      onObserver: (frame: WorkSessionObserverFrame) => void;
       onResync: () => void;
     }
   ): () => void {
@@ -589,6 +621,11 @@ export function createRealtime(
           const lifecycle = asWorkSessionLifecycleFrame(ctx.data);
           if (lifecycle) {
             handlers.onLifecycle(lifecycle);
+            return;
+          }
+          const observer = asWorkSessionObserverFrame(ctx.data);
+          if (observer) {
+            handlers.onObserver(observer);
             return;
           }
           const acp = asWorkSessionACPFrame(ctx.data);

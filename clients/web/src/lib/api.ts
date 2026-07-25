@@ -712,6 +712,64 @@ export async function endWorkSession(
 }
 
 /**
+ * Who may watch this session's terminal (ADR-0126 D1). `open` is the default and
+ * matches the fact that the session thread is already public in the channel;
+ * `owner_only` is the owner closing it, which also revokes every observer
+ * capability already issued (server `updateObservation`).
+ */
+export async function setWorkSessionObservation(
+  workspaceId: string,
+  sessionId: string,
+  observation: WorkSession["observation"]
+): Promise<WorkSession> {
+  const res = await request<{ workSession: WorkSession }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "PATCH", body: JSON.stringify({ observation }) }
+  );
+  return res.workSession;
+}
+
+// ---- Terminal attach capability (ADR-0126 D1 / ADR-0125 D10) ----------------
+// POST /v1/workspaces/{ws}/work-sessions/{session}/terminal-attach
+//
+// This is a CONTROL PLANE call and nothing else. The server mints a 60 second
+// opaque bearer and hands back the host's own endpoint; it carries no stream,
+// no socket and no relay (TerminalAttachRoutes: "There is intentionally no
+// stream, websocket, stdin, stdout, resize, or relay route in this server").
+// The bytes then flow client <-> host directly, which is the invariant that
+// keeps raw terminal output off momo's servers.
+//
+// The response is snake_case, unlike every camelCase body above; it is the
+// wire shape the mac client already consumes, and renaming it here would hide
+// which fields came from the server.
+//
+// `mode` is the D1 grade. The web client only ever asks for `observer`: a
+// controller grant carries stdin/resize/kill rights this client has no code to
+// use (see features/work/observerStream.ts, which cannot encode those frames).
+
+export interface TerminalAttachGrant {
+  /** The HOST's endpoint, https/wss, credential free (server-validated). */
+  attach_endpoint: string;
+  /** Opaque bearer, 60s TTL, validated by the host against this server. */
+  capability_token: string;
+  pty_id: string;
+}
+
+export async function issueObserverTerminalAttach(
+  workspaceId: string,
+  sessionId: string
+): Promise<TerminalAttachGrant> {
+  return request<TerminalAttachGrant>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/terminal-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "observer" }) }
+  );
+}
+
+/**
  * Registered execution host (ADR-0125 D1). `type` is what decides whether the
  * ACP event relay behind a session is a verified path: `app` is the local
  * client host, everything else is a remote workd/cloud host whose normalised

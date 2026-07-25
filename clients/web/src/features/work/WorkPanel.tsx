@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { uuidEq, type Channel, type WorkHost, type WorkSession } from "@/lib/api";
@@ -360,6 +360,23 @@ export function WorkPanel({
   const scope: WorkScope = channelId === null ? "all" : requestedScope;
   const [peekId, setPeekId] = useState<string | null>(null);
 
+  /**
+   * The pane takes the whole chat surface instead of its 320px strip.
+   *
+   * MOMO-619 R1 H2: 320px is the right default for a column of session rows and
+   * the wrong one for the read-only terminal inside the detail, which showed 37
+   * of the 80 columns the host writes at, folding an ordinary pytest line onto
+   * two rows. The same full-surface geometry already existed below 900px, which
+   * meant the panel got NARROWER as the window got wider; this makes it a
+   * choice at any width.
+   *
+   * Unlike scope and selection it is deliberately NOT lifted into ChatShell: it
+   * covers the channel, and a pane that silently reopens on top of the
+   * conversation days later is a state nobody asked to persist. Closing the
+   * panel is also the way out of it.
+   */
+  const [wide, setWide] = useState(false);
+
   // ---- focus ownership -----------------------------------------------------
   // Every step in and out of this panel hands the caret somewhere explicit. It
   // used to fall to <body>: entering the detail left focus nowhere, which also
@@ -523,17 +540,37 @@ export function WorkPanel({
           closePanel();
         }
       }}
+      data-wide={wide ? "" : undefined}
       className="work-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
     >
       <header className="flex flex-col gap-1 border-b border-line px-4 py-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-body font-semibold">작업 세션</h2>
+          <h2 className="min-w-0 flex-1 truncate text-body font-semibold">
+            작업 세션
+          </h2>
+          {/* Icon only, so it carries its own name, and `aria-pressed` because
+              it is a state and not a one-way action. Hidden below 900px, where
+              the pane is already the whole surface (tokens.css). */}
+          <button
+            type="button"
+            onClick={() => setWide((current) => !current)}
+            aria-pressed={wide}
+            aria-label={wide ? "패널 좁게 보기" : "패널 넓게 보기"}
+            data-testid="work-panel-wide"
+            className="pane-wide-toggle flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            {wide ? (
+              <PanelRightClose className="size-4" />
+            ) : (
+              <PanelRightOpen className="size-4" />
+            )}
+          </button>
           <button
             type="button"
             onClick={closePanel}
             aria-label="작업 세션 닫기"
             data-testid="work-panel-close"
-            className="flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             <X className="size-4" />
           </button>
@@ -619,6 +656,8 @@ export function WorkPanel({
           liveEvents={rail.liveEvents}
           live={live}
           nowMs={nowMs}
+          wide={wide}
+          onWideChange={setWide}
           onBack={closeDetail}
         />
       ) : (

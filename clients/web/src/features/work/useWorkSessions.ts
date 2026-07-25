@@ -212,6 +212,17 @@ export function useWorkSessionRail(
             queryKey: ["work-sessions", workspaceId],
           });
         },
+        // The observer count is read from Postgres, never from the frame that
+        // announced it (MOMO-619). The frame says a capability was issued; the
+        // number a reader sees has to survive a dropped or duplicated
+        // publication, and the list projection is the only place that can
+        // answer "how many are unexpired right now". Same rule as the lifecycle
+        // frames above, for the same reason.
+        onObserver: () => {
+          void queryClient.invalidateQueries({
+            queryKey: ["work-sessions", workspaceId],
+          });
+        },
         onAcpEvent: (frame) => {
           const event = eventFromFrame(frame);
           const folded = event.eventId.toLowerCase();

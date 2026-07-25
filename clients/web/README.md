@@ -208,3 +208,83 @@ has no shell, so a short window must still reach the sign-in button.
    route REST via the dev proxy equivalent or a Rust HTTP command / server CORS.
 4. Automated **background** browser tabs throttle rAF/timers — scroll FPS must be
    measured headless (visible) or in the foreground Tauri window, not a bg tab.
+
+## Read-only terminal observation (MOMO-619, ADR-0126 D1)
+
+`src/features/work/ObserverTerminal.tsx` + `observerStream.ts`. The capability
+call is REST (`POST .../work-sessions/{id}/terminal-attach {"mode":"observer"}`),
+the bytes are a **direct** WebSocket to the host: momo servers carry no terminal
+stream, by design. xterm.js is bundled locally and code split
+(`terminalRuntime.ts`, 334 kB js + 5 kB css, loaded on the first 관전 시작).
+
+Two deployment facts measured on 2026-07-26 (live momowebqa + a local WSS PTY
+host), both about `infra/prod/Caddyfile`:
+
+- **`connect-src` blocks the host socket.** The prod policy is
+  `connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}`, which
+  does not cover an arbitrary host `attach_endpoint`. Chrome refuses the socket,
+  logs the violation, and — this is the trap — fires **no error and no close
+  event on the socket**, so the page carries its own deadline
+  (`HOST_CONNECT_TIMEOUT_MS`).
+  The refusal is still observable: it raises `securitypolicyviolation` on the
+  document, and `cspBlockedHost` matches it against the endpoint being dialled
+  (R1 M6). Re-measured behind the prod header on 2026-07-26 the panel now names
+  the policy in **tens of milliseconds** (38 and 51 ms measured) instead of waiting 15 seconds to blame the host for a
+  question it was never asked, and offers no retry, because a retry cannot
+  change a policy the page is carrying.
+  **This is a deployment prerequisite, not a client bug, and it is still open.**
+  D1 in a browser needs the web client served with a `connect-src` that permits
+  the workspace's host endpoints; ADR-0126 D1 owns that decision and the host
+  PTY adapter it depends on (`observerStream.ts`: no host implementation exists
+  in this repo yet). Until then the Tauri shell is the supported path for 관전
+  (`tauri.conf.json csp: null`, unaffected), and the browser says so in the
+  banner rather than failing silently.
+- **`style-src` already allows what xterm needs.** xterm's DOM renderer writes
+  `<style>` elements and one `setAttribute("style", …)` per truecolor cell. Under
+  a hypothetical `style-src 'self'` the terminal still streams and prints text
+  but loses colour, cell positioning and its dimensions (measured). The shipped
+  policy carries `'unsafe-inline'`, so **no relaxation is needed** — but the
+  directive can no longer be tightened without breaking this surface.
+  Re-measured with a census on 2026-07-26 (R2 M3): a plain channel view already
+  carries 5 inline-style nodes from react-virtuoso, and a streaming terminal
+  carries 40 plus 3 injected `<style>` elements, 35 of them xterm's. The
+  dependency is therefore older and wider than this ticket, and it is now
+  recorded where the RULE lives (`momo-design-taste-web` SKILL §1 and
+  `scripts/design_preflight_web.sh`), which until R2 still said the policy was
+  `style-src 'self'`. The house rule is unchanged and still gated: components
+  author no inline styles.
+
+The liveness claim, and the two things a terminal costs:
+
+- **관전 중 is bound to three facts, not to `readyState`.** The socket must be
+  OPEN, `navigator.onLine` must be true, and nothing may have reported an outage
+  since the last byte (`observerStream.observerLink`). R2 H1 measured why: with
+  the network cut under a live stream no `onclose` ever arrives, so the phase
+  stays `watching` and 관전 중 froze over a dead screen while the panel above it
+  said the connection had dropped. There is no ping to send (the observer grade
+  has no encoder for any frame but `connect`), so the surface reports what it
+  can observe: 네트워크 끊김 while the browser has no network, 연결 확인 필요 with
+  a 다시 연결 control after it comes back and before the stream proves itself,
+  and `마지막 출력 N초 전` once the bytes have been silent for 10 seconds.
+  Measured against the live host: 13.5 s offline held `data-link="offline"` on
+  every sample with the age of the last byte counting up, and one arriving byte
+  returns the surface to 관전 중 on its own.
+
+- **xterm eats keys on behalf of a program that is not listening.** `disableStdin`
+  drops the byte in `CoreService`, long after `preventDefault()` has already run,
+  so Tab and Escape never left the helper textarea and a keyboard reader could
+  not get back out of the terminal at all (WCAG 2.1.2). `terminalOwnsKey` is
+  attached through `attachCustomKeyEventHandler` and returns the two navigation
+  keys, plus the copy chords, to the browser. Verified against the live build:
+  from inside the terminal, four Tabs walk out to 패널 넓게 보기 → 관전 중단 →
+  세션 종료 → 발췌 공유, and Escape reaches the panel's step-back handler.
+- **The viewport is not the host's width.** This client sends no resize frame by
+  design, so the host keeps writing at its pty's own width (80) however narrow
+  the pane is. The surface publishes the column count while it differs and
+  offers the pane's 넓게 보기 state; see `references/tokens.md` in the
+  design-taste-web skill for the measured numbers and the `getComputedStyle`
+  border-box trap that made both axes over-report. Below 900px that control is
+  hidden, because the pane is already the whole chat surface and widening it has
+  nothing left to do, so the notice names the window instead of pointing at a
+  button that is not there (R2 M2: measured at 880px, 79 columns against the
+  host's 80, with both 넓게 보기 controls correctly absent).
