@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-26 (Fable main 동기화·라이브 통합·next.8·Wave C ADR) 
+- **main 동기화**(성재 승인, #799 #800) 후 원점 검증 그린(웹 467 tests·swift build 0), momowebqa 재배포.
+- **616 라이브 통합 실측 PASS**: /usage/summary 전항목 손계산 일치(30d 총계 148,200µUSD·추정 분리·모델/에이전트 내림차순·7d 범위 절단·주 bucket 경계·401/400 게이트). 시드 3행은 QA 워크스페이스에 잔류(합성 데이터 고지) — 사용량 섹션 실렌더 확인용.
+- **0.1.0-next.8 발행 + 기본 다운로드 갱신**(switch_default_download.sh) — Wave A 5장이 사용자 빌드에 도달.
+- **Wave C ADR 3건 Proposed 발의**: 0134(요청 단위 model·effort 라우팅+auto — 선택 모델 항상 노출), 0135(프로바이더 캐스캐이드 체인+잔여량 프로브 — ADR-0004 경계 보존형), 0136(momo Cloud E2B 프로비저너+크레딧·활성시간 원장+리허설 게이트). 성재 검토·Accept 대기.
+
+
 ## 2026-07-26 (Fable Wave A 랜딩) · 에이전트 경험 프로그램 1차 — 5장 전량 트랙 랜딩
 - **랜딩**: 789 작업중 표시(track/uxui #794) · 790 채널 생성(#795) · 792 사용량 섹션(#796) · 793 티어정책·호스트 UI(#797) · 791 사용량 REST(track/engine #798). Opus 5 병렬 21에이전트(구현 5+리뷰 8+수정 8), UI 4장 리뷰 2R 전량.
 - **리뷰 수확 백미**: ①789 R1 Blocker — 재연결 replay가 끝난 턴을 되살려 거짓 '작업 중'(진행 스트림 non-recoverable로 해소) ②**twMerge 함정을 3개 에이전트가 독립 발견**(text-role이 색으로 오분류→소실; 789/790/793 각자 cn.ts에 extendTailwindMerge 동일 수리 — add/add 충돌 3회, 789판 채택+테스트 합집합) ③790 R2 — 공용 dialog 제목 위계·filled sm 버튼 AA 미달(라이트 2.78:1) 근본 수리.
