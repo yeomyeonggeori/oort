@@ -139,8 +139,10 @@ async function installMocks(context, usage) {
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, { members: ROSTER })
   );
-  await context.route("**/v1/workspaces/*/usage/summary*", (route) => {
-    const body = usage();
+  await context.route("**/v1/workspaces/*/usage/summary*", async (route) => {
+    // Awaited so a variant can hold a read open and photograph the wait, and
+    // handed the URL so one can answer differently per requested window.
+    const body = await usage(route.request().url());
     if (typeof body === "number") {
       return route.fulfill({
         status: body,
@@ -249,17 +251,37 @@ async function captureScheme(browser, scheme) {
     await scrollTo(page, budget);
   });
 
-  // 4. 마지막 확인값: one good answer, then the server stops answering and the
-  //    person switches range. The cached summary keeps rendering, undimmed,
-  //    with the instant it was confirmed stated above it.
+  // 4. 마지막 확인값: one good answer for this window, then the server stops
+  //    answering a refresh of the SAME window. The cached summary keeps
+  //    rendering, undimmed, and the banner states the instant it was confirmed.
   let served = 0;
   await shoot(
     "last-known",
     () => (served++ === 0 ? FIXTURES.normal : 503),
     async (page) => {
       await page.getByTestId("usage-totals").waitFor({ state: "visible" });
-      await page.getByTestId("usage-period-7d").click();
+      await page.getByTestId("usage-refresh").click();
       await page.getByTestId("usage-last-known").waitFor({ state: "visible" });
+    }
+  );
+
+  // 4a. 다른 기간의 실패: 30일 was confirmed, 7일 is not. The fallback is keyed
+  //     by window, so the panel says the 7일 read failed instead of leaving the
+  //     30일 total on screen under a lit 7일 segment. The control and the
+  //     numbers never disagree on a cost surface.
+  await shoot(
+    "period-switch-error",
+    (url) => {
+      const q = new URL(url).searchParams;
+      const days = Math.round(
+        (Date.parse(q.get("to")) - Date.parse(q.get("from"))) / 86_400_000
+      );
+      return days <= 8 ? 503 : FIXTURES.normal;
+    },
+    async (page) => {
+      await page.getByTestId("usage-totals").waitFor({ state: "visible" });
+      await page.getByTestId("usage-period-7d").click();
+      await page.getByTestId("usage-error").waitFor({ state: "visible" });
     }
   );
 
@@ -284,6 +306,22 @@ async function captureScheme(browser, scheme) {
       await context.setOffline(true);
     }
   );
+
+  // 4d. 로딩: height-preserving neutral bars shaped like the panel they stand
+  //     in for (two grouped blocks then two lists), so the surface does not jump
+  //     ~800px when the read lands. Never a shimmer.
+  {
+    let release = () => {};
+    const held = new Promise((r) => {
+      release = r;
+    });
+    // The read is held open for the whole variant: the shot has to be taken
+    // while the bars are still on screen, and shoot() photographs after drive().
+    await shoot("loading", () => held.then(() => FIXTURES.normal), async (page) => {
+      await page.getByTestId("usage-skeleton").waitFor({ state: "visible" });
+    });
+    release();
+  }
 
   // 5. 키보드 초점: the range control is a native radio group, one tab stop with
   //    arrow-key roving inside it. Tabbed into rather than focused

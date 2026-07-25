@@ -286,16 +286,6 @@ export function percentOf(part: number, whole: number): number {
   return Math.floor((part / whole) * 100);
 }
 
-export function relativeSince(thenMs: number, nowMs: number): string {
-  const elapsed = Math.max(0, nowMs - thenMs);
-  if (elapsed < 60_000) return "방금";
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.floor(hours / 24)}일 전`;
-}
-
 // ---- derivations the panel renders ------------------------------------------
 
 /** A period with no ledger rows is a 200 with zeros (contract), not a 404. */
@@ -444,7 +434,17 @@ export function budgetStatus(
   const observed = budget.spentMicroUsd + budget.reservedMicroUsd;
   const limit = formatCost(budget.limitMicroUsd);
   const used = formatCost(observed);
-  const usedPercent = Math.min(100, percentOf(observed, budget.limitMicroUsd));
+  // A limit of 0 is a real value the server can send (a workspace switched off
+  // rather than budgeted), and `percentOf` answers 0 for it because there is no
+  // whole to take a share of. An empty bar beside a red 한도 도달 chip is the bar
+  // and the chip telling opposite stories, so a limit that cannot hold anything
+  // reads as full the moment a single micro-dollar is observed.
+  const usedPercent =
+    budget.limitMicroUsd > 0
+      ? Math.min(100, percentOf(observed, budget.limitMicroUsd))
+      : observed > 0
+        ? 100
+        : 0;
 
   if (budget.state === "hard_limit") {
     return {
@@ -496,9 +496,17 @@ export function usageErrorCopy(status: number | null, fallback: string): string 
 // ---- 마지막 확인값 (the durability layer, P15) --------------------------------
 //
 // A failed read does not blank a surface that already had an answer. The last
-// successful response per workspace is kept in memory with the instant it
-// arrived, and the panel renders it with that instant stated: cached content
-// keeps rendering, undimmed, and the person is told it is not live.
+// successful response is kept in memory with the instant it arrived, and the
+// panel renders it with that instant stated: cached content keeps rendering,
+// undimmed, and the person is told it is not live.
+//
+// The cache key is the workspace AND the window the answer covers. A workspace-
+// only key made the fallback answer a question nobody asked: select 7일 after a
+// good 30일 read, have the 7일 read fail, and the panel would keep the 30일
+// total on screen with the 7일 segment still lit. On a cost surface the control
+// disagreeing with the number is the most expensive kind of misread, so a
+// window with no confirmed answer of its own now falls through to the error
+// state instead of borrowing another window's numbers.
 //
 // Memory only, never storage: this is a session-lifetime durability aid, and
 // `forgetUsage()` runs on sign-out beside queryClient.clear() so no workspace's
@@ -509,28 +517,50 @@ export interface LastKnownUsage {
   checkedAtMs: number;
 }
 
+/** Which window an answer covers. Part of the cache key, not decoration. */
+export interface UsageScope {
+  period: UsagePeriodId;
+  bucket: UsageBucketUnit;
+}
+
 const lastKnown = new Map<string, LastKnownUsage>();
 
-function workspaceKey(workspaceId: string): string {
-  return workspaceId.toLowerCase();
+/** Lower-cased workspace id, because the same workspace arrives upper-cased
+ *  from other surfaces and must not open a second cache entry. */
+function workspacePrefix(workspaceId: string): string {
+  return `${workspaceId.toLowerCase()}|`;
+}
+
+function scopeKey(workspaceId: string, scope: UsageScope): string {
+  return `${workspacePrefix(workspaceId)}${scope.period}|${scope.bucket}`;
 }
 
 export function rememberUsage(
   workspaceId: string,
+  scope: UsageScope,
   summary: UsageSummary,
   checkedAtMs: number
 ): void {
-  lastKnown.set(workspaceKey(workspaceId), { summary, checkedAtMs });
+  lastKnown.set(scopeKey(workspaceId, scope), { summary, checkedAtMs });
 }
 
-export function recallUsage(workspaceId: string): LastKnownUsage | null {
-  return lastKnown.get(workspaceKey(workspaceId)) ?? null;
+export function recallUsage(
+  workspaceId: string,
+  scope: UsageScope
+): LastKnownUsage | null {
+  return lastKnown.get(scopeKey(workspaceId, scope)) ?? null;
 }
 
-/** All workspaces, or one. Called on sign-out. */
+/** All workspaces, or every window of one. Called on sign-out. */
 export function forgetUsage(workspaceId?: string): void {
-  if (workspaceId === undefined) lastKnown.clear();
-  else lastKnown.delete(workspaceKey(workspaceId));
+  if (workspaceId === undefined) {
+    lastKnown.clear();
+    return;
+  }
+  const prefix = workspacePrefix(workspaceId);
+  for (const key of lastKnown.keys()) {
+    if (key.startsWith(prefix)) lastKnown.delete(key);
+  }
 }
 
 // ---- which of the four states the panel is in --------------------------------
@@ -552,7 +582,6 @@ export interface UsageViewInput {
    */
   paused: boolean;
   lastKnown: LastKnownUsage | null;
-  nowMs: number;
 }
 
 export type UsageView =
@@ -571,19 +600,19 @@ const OFFLINE_REASON = "연결이 끊겼습니다.";
 const OFFLINE_EMPTY =
   "연결이 끊겼습니다. 다시 연결되면 사용량을 불러옵니다.";
 
-function lastKnownView(
-  cached: LastKnownUsage,
-  reason: string,
-  nowMs: number
-): UsageView {
+/**
+ * One line carries the whole fallback: what happened, and the instant the
+ * numbers on screen were last confirmed. It is absolute rather than relative
+ * ("3분 전") because nothing re-renders this panel on a timer, so a relative
+ * stamp would freeze at whatever it said when the read failed and quietly start
+ * lying about its own age.
+ */
+function lastKnownView(cached: LastKnownUsage, reason: string): UsageView {
   return {
     kind: "last-known",
     summary: cached.summary,
     empty: isEmptyUsage(cached.summary),
-    notice: `${reason} 마지막으로 확인한 값(${relativeSince(
-      cached.checkedAtMs,
-      nowMs
-    )})을 표시합니다.`,
+    notice: `${reason} ${formatClock(cached.checkedAtMs)}에 확인한 값을 표시합니다.`,
     checkedAtMs: cached.checkedAtMs,
   };
 }
@@ -603,18 +632,21 @@ function lastKnownView(
  */
 export function usageView(input: UsageViewInput): UsageView {
   // A refresh that failed leaves the previous answer on screen, labelled.
-  const fallback: LastKnownUsage | null = input.data
-    ? { summary: input.data, checkedAtMs: input.dataUpdatedAtMs || input.nowMs }
-    : input.lastKnown;
+  // Data with no arrival instant cannot be labelled with one, so it falls
+  // through to the remembered answer rather than being stamped 1970.
+  const fallback: LastKnownUsage | null =
+    input.data && input.dataUpdatedAtMs > 0
+      ? { summary: input.data, checkedAtMs: input.dataUpdatedAtMs }
+      : input.lastKnown;
 
   if (input.errorMessage) {
     return fallback
-      ? lastKnownView(fallback, input.errorMessage, input.nowMs)
+      ? lastKnownView(fallback, input.errorMessage)
       : { kind: "error", message: input.errorMessage };
   }
   if (input.paused) {
     return fallback
-      ? lastKnownView(fallback, OFFLINE_REASON, input.nowMs)
+      ? lastKnownView(fallback, OFFLINE_REASON)
       : { kind: "error", message: OFFLINE_EMPTY };
   }
   if (input.data) {

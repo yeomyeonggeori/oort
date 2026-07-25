@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -28,7 +28,6 @@ import {
   budgetStatus,
   costConfidence,
   formatBucketStart,
-  formatClock,
   formatIsoDay,
   formatRange,
   largestCost,
@@ -43,6 +42,7 @@ import {
   usageView,
   type UsageBucketUnit,
   type UsagePeriodId,
+  type UsageScope,
   type UsageSummary,
 } from "./usageModel";
 
@@ -69,6 +69,7 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
   const [period, setPeriod] = useState<UsagePeriodId>("30d");
   const [bucket, setBucket] = useState<UsageBucketUnit>("day");
   const { directory } = useDirectory(workspaceId);
+  const scope: UsageScope = { period, bucket };
 
   const query = useQuery({
     // The workspace id is lower-cased in the key: the same workspace arriving
@@ -84,28 +85,49 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
     retry: false,
   });
 
-  // Every successful answer becomes the fallback for the next failed one.
+  // Every successful answer becomes the fallback for the next failed one, filed
+  // under the window it actually covers so a 7일 failure can never be answered
+  // with a 30일 total.
   useEffect(() => {
-    if (query.data) {
-      rememberUsage(workspaceId, query.data, query.dataUpdatedAt || Date.now());
+    if (query.data && query.dataUpdatedAt > 0) {
+      rememberUsage(
+        workspaceId,
+        { period, bucket },
+        query.data,
+        query.dataUpdatedAt
+      );
     }
-  }, [query.data, query.dataUpdatedAt, workspaceId]);
+  }, [query.data, query.dataUpdatedAt, workspaceId, period, bucket]);
+
+  const liveError = query.isError
+    ? usageErrorCopy(
+        query.error instanceof ApiError ? query.error.status : null,
+        errorMessage(query.error)
+      )
+    : null;
+
+  // react-query clears the error the moment a data-less query refetches, so the
+  // banner unmounted under the very button that started the retry and keyboard
+  // focus fell to <body> (SKILL §6). The copy is held for exactly that window:
+  // it is filed under the range it described, so switching 기간 still shows bars
+  // rather than the previous range's failure, and it is dropped as soon as the
+  // read finishes either way.
+  const windowKey = `${period}|${bucket}`;
+  const held = useRef<{ key: string; message: string } | null>(null);
+  if (liveError) held.current = { key: windowKey, message: liveError };
+  else if (!query.isFetching || query.data) held.current = null;
 
   const view = usageView({
     data: query.data ?? null,
     dataUpdatedAtMs: query.dataUpdatedAt,
-    errorMessage: query.isError
-      ? usageErrorCopy(
-          query.error instanceof ApiError ? query.error.status : null,
-          errorMessage(query.error)
-        )
-      : null,
+    errorMessage:
+      liveError ??
+      (held.current?.key === windowKey ? held.current.message : null),
     // "paused" is react-query saying the browser is offline, so the request was
     // never sent: it will not fail and it will not finish. Anything else, the
     // realtime rail included, says nothing about whether this REST read works.
     paused: query.fetchStatus === "paused",
-    lastKnown: recallUsage(workspaceId),
-    nowMs: Date.now(),
+    lastKnown: recallUsage(workspaceId, scope),
   });
 
   const lines = [
@@ -134,12 +156,20 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
           onChange={(id) => setBucket(id as UsageBucketUnit)}
         />
         {/* Bordered, not ghost: this sits between two bordered segmented groups
-            and a borderless label there does not read as something to press. */}
+            and a borderless label there does not read as something to press.
+
+            It stays ENABLED while the read is in flight and reports the wait
+            through aria-busy plus its own label. Disabling it moved keyboard
+            focus to <body> the moment it was pressed and never gave it back, so
+            every refresh cost a walk back down the page with Tab (SKILL §6). A
+            second press while fetching is a no-op instead. */}
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => void query.refetch()}
-          disabled={query.isFetching}
+          onClick={() => {
+            if (!query.isFetching) void query.refetch();
+          }}
+          aria-busy={query.isFetching}
           data-testid="usage-refresh"
         >
           {query.isFetching ? "불러오는 중" : "새로 고치기"}
@@ -153,12 +183,16 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
         {usageAnnouncement(view, formatMicroUsd)}
       </p>
 
+      {/* aria-busy follows the request, not the view: a refetch keeps the view
+          at `ready` (the numbers stay on screen), and a panel whose button says
+          불러오는 중 while its container says nothing is busy tells assistive
+          tech the opposite of what it tells the eye. */}
       <div
         className="flex min-w-0 flex-col gap-4"
-        aria-busy={view.kind === "loading"}
+        aria-busy={query.isFetching}
         data-testid="usage-panel"
       >
-        {view.kind === "loading" && <SkeletonRows rows={5} />}
+        {view.kind === "loading" && <UsageSkeleton />}
 
         {view.kind === "error" && (
           <InlineBanner
@@ -175,10 +209,10 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
             data-testid="usage-last-known"
           >
             {/* P15 durability layer: the cached answer keeps rendering,
-                undimmed, with the instant it was confirmed stated next to it.
-                The range it covers is stated once, by the block below: the
-                cached range and the selected one can differ, and the block
-                header is where the numbers it labels actually are. */}
+                undimmed, and the banner carries the whole fallback in one line
+                (what happened, and when the numbers were last confirmed). The
+                clock used to be repeated on a second line underneath, which
+                spent a row of a density-7 panel restating one fact. */}
             <InlineBanner
               tone="neutral"
               message={view.notice}
@@ -186,12 +220,6 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
               onAction={() => void query.refetch()}
               testId="usage-last-known-banner"
             />
-            <p className="text-meta text-ink-muted">
-              마지막 확인{" "}
-              <time dateTime={new Date(view.checkedAtMs).toISOString()}>
-                {formatClock(view.checkedAtMs)}
-              </time>
-            </p>
             <UsageBody
               summary={view.summary}
               empty={view.empty}
@@ -237,24 +265,31 @@ function UsageBody({
 }) {
   if (empty) {
     return (
-      <div className="flex min-w-0 flex-col gap-2" data-testid="usage-body">
-        <p className="text-meta text-ink-muted">{formatRange(summary.range)}</p>
-        <EmptyInvite
-          headline="이 기간에 기록된 사용량이 없습니다."
-          detail="에이전트가 실행되면 모델별, 에이전트별 비용이 여기에 쌓입니다."
-          testId="usage-empty"
-          actions={
-            period === "7d" ? (
-              <Button variant="outline" size="sm" onClick={onWiden}>
-                30일로 보기
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" onClick={onRetry}>
-                다시 불러오기
-              </Button>
-            )
-          }
-        />
+      <div className="flex min-w-0 flex-col gap-4" data-testid="usage-body">
+        <div className="flex min-w-0 flex-col gap-2">
+          <p className="text-meta text-ink-muted">{formatRange(summary.range)}</p>
+          <EmptyInvite
+            headline="이 기간에 기록된 사용량이 없습니다."
+            detail="에이전트가 실행되면 모델별, 에이전트별 비용이 여기에 쌓입니다."
+            testId="usage-empty"
+            actions={
+              period === "7d" ? (
+                <Button variant="outline" size="sm" onClick={onWiden}>
+                  30일로 보기
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  다시 불러오기
+                </Button>
+              )
+            }
+          />
+        </div>
+        {/* 예산 is a state of the workspace, not of the selected window. A
+            workspace sitting on its hard limit still sits on it during a week
+            nobody ran an agent, and hiding the limit exactly there was hiding
+            it from the person most likely to be looking for it. */}
+        <BudgetBlock summary={summary} />
       </div>
     );
   }
@@ -270,8 +305,15 @@ function UsageBody({
         className="flex min-w-0 flex-col gap-3 rounded-md border border-line bg-surface-raised p-4"
         data-testid="usage-totals"
       >
+        {/* The biggest number on the surface used to be the only block without
+            a heading, so heading navigation skipped straight from 사용량 to
+            예산 (SKILL §6: real heading hierarchy). It shares the row with the
+            range rather than taking a line of its own. */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-meta text-ink-muted">{formatRange(summary.range)}</p>
+          <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+            <h3 className="text-body font-medium text-ink">합계</h3>
+            <p className="text-meta text-ink-muted">{formatRange(summary.range)}</p>
+          </div>
           {confidence.allSettled ? (
             <StatusChip tone="ok">확정 값</StatusChip>
           ) : (
@@ -289,10 +331,13 @@ function UsageBody({
         >
           {formatMicroUsd(summary.totals.costMicroUsd)}
         </p>
+        {/* "provider" is what the AI 연결 panel calls it to an operator, and
+            this panel is read by every member (SKILL §7: internal vocabulary
+            stays out of shared copy). */}
         <p className="text-meta text-ink-muted">
           {confidence.allSettled
-            ? "provider가 확정한 청구 값입니다."
-            : "provider가 아직 확정하지 않은 부분이 있어 두 값을 나눠 적습니다."}
+            ? "AI 제공자가 확정한 청구 값입니다."
+            : "AI 제공자가 아직 확정하지 않은 부분이 있어 두 값을 나눠 적습니다."}
         </p>
 
         <dl className="flex min-w-0 flex-col gap-2">
@@ -415,26 +460,62 @@ function bucketNoun(bucket: UsageBucketUnit): string {
 
 // ---- parts ------------------------------------------------------------------
 
-/** One dense key/value line. dt left and muted, dd right and monospaced. */
+/**
+ * One dense key/value line. dt left and muted, dd right.
+ *
+ * `numeric` is the default because almost every value in these lists is a
+ * figure, and figures want mono plus tabular-nums so a column of them lines up
+ * and does not jitter as it changes. Not every value is: a grain label is a
+ * Korean phrase, and monospacing Korean stretches the gaps between syllables
+ * into something that reads as broken rather than as a number.
+ */
 function NumberRow({
   term,
   value,
+  numeric = true,
   testId,
 }: {
   term: string;
   value: ReactNode;
+  numeric?: boolean;
   testId?: string;
 }) {
   return (
     <div className="flex min-w-0 items-baseline justify-between gap-3">
       <dt className="min-w-0 truncate text-meta text-ink-muted">{term}</dt>
       <dd
-        className="shrink-0 font-mono text-meta text-ink"
-        data-numeric=""
+        className={cn("shrink-0 text-meta text-ink", numeric && "font-mono")}
+        data-numeric={numeric ? "" : undefined}
         data-testid={testId}
       >
         {value}
       </dd>
+    </div>
+  );
+}
+
+/**
+ * Loading state for this panel, not a generic five bars. The panel it replaces
+ * is a tall stack (two grouped blocks then two lists), so a 168px placeholder
+ * for a ~900px arrival threw the surface down the page the moment the read
+ * landed. This mirrors the real block structure at roughly the real height
+ * (SKILL §5: height-preserving neutral bars, never a shimmer).
+ */
+function UsageSkeleton() {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-4"
+      aria-hidden="true"
+      data-testid="usage-skeleton"
+    >
+      <div className="rounded-md border border-line bg-surface-raised p-4">
+        <SkeletonRows rows={7} />
+      </div>
+      <div className="rounded-md border border-line bg-surface-raised p-4">
+        <SkeletonRows rows={6} />
+      </div>
+      <SkeletonRows rows={5} />
+      <SkeletonRows rows={4} />
     </div>
   );
 }
@@ -457,6 +538,13 @@ interface BreakdownRow {
  * already text on the same line. It is toned neutral: this bar states a
  * proportion, and the accent belongs to the one bar on this surface that states
  * a state (예산).
+ *
+ * The bar owns its own line at the row's full width. It used to share a line
+ * with the token counts, which made the track as long as that text was short:
+ * three rows measured 474 / 474 / 494px at 1280, so the same share was drawn at
+ * different lengths depending on how many digits sat beside it. A comparison
+ * device on a variable scale is not a comparison device, and this bar is the
+ * only one on the surface.
  */
 function Breakdown({
   title,
@@ -493,32 +581,32 @@ function Breakdown({
                     </span>
                   )}
                 </span>
-                <span
-                  className="shrink-0 font-mono text-body text-ink"
-                  data-numeric=""
-                >
-                  {formatMicroUsd(row.costMicroUsd)}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center gap-3">
-                <progress
-                  className="progress-bar min-w-0 flex-1"
-                  data-tone="neutral"
-                  value={row.share}
-                  max={100}
-                  aria-hidden="true"
-                />
-                <span className="shrink-0 text-timestamp text-ink-muted">
-                  입력{" "}
-                  <span className="font-mono" data-numeric="">
-                    {formatCount(row.promptTokens)}
-                  </span>{" "}
-                  · 출력{" "}
-                  <span className="font-mono" data-numeric="">
-                    {formatCount(row.completionTokens)}
+                <span className="flex shrink-0 items-baseline gap-3">
+                  <span className="text-timestamp text-ink-muted">
+                    입력{" "}
+                    <span className="font-mono" data-numeric="">
+                      {formatCount(row.promptTokens)}
+                    </span>{" "}
+                    · 출력{" "}
+                    <span className="font-mono" data-numeric="">
+                      {formatCount(row.completionTokens)}
+                    </span>
+                  </span>
+                  <span
+                    className="font-mono text-body text-ink"
+                    data-numeric=""
+                  >
+                    {formatMicroUsd(row.costMicroUsd)}
                   </span>
                 </span>
               </div>
+              <progress
+                className="progress-bar"
+                data-tone="neutral"
+                value={row.share}
+                max={100}
+                aria-hidden="true"
+              />
             </li>
           ))}
         </ul>
@@ -550,12 +638,13 @@ function BudgetBlock({ summary }: { summary: UsageSummary }) {
         <h3 className="text-body font-medium text-ink">예산</h3>
         <StatusChip tone={status.tone}>{status.label}</StatusChip>
       </div>
-      {/* The bar takes the chip's tone. A full bar in the accent colour beside a
-          red "한도 도달" chip reads as a finished download, and the same accent
-          is already the share bars below, where it would mean a proportion. */}
+      {/* The bar takes the chip's tone in every state, ok included (tokens.md
+          §5a). Leaving `ok` untoned fell through to the accent default, so the
+          most common state drew an amber bar next to a green 한도 안 chip,
+          which is the same two-stories failure the rule exists to stop. */}
       <progress
         className="progress-bar"
-        data-tone={status.tone === "ok" ? undefined : status.tone}
+        data-tone={status.tone}
         value={status.usedPercent}
         max={100}
         aria-hidden="true"
@@ -569,7 +658,12 @@ function BudgetBlock({ summary }: { summary: UsageSummary }) {
         {status.detail}
       </p>
       <dl className="flex min-w-0 flex-col gap-2">
-        <NumberRow term="적용 범위" value={budgetGrainLabel(budget.grain)} />
+        {/* The one value in this list that is a phrase, not a figure. */}
+        <NumberRow
+          term="적용 범위"
+          value={budgetGrainLabel(budget.grain)}
+          numeric={false}
+        />
         <NumberRow
           term="사용"
           value={formatMicroUsd(budget.spentMicroUsd)}

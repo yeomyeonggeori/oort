@@ -12,6 +12,7 @@ import {
   costConfidence,
   forgetUsage,
   formatBucketStart,
+  formatClock,
   formatIsoDay,
   formatRange,
   isEmptyUsage,
@@ -21,12 +22,12 @@ import {
   peakBucket,
   percentOf,
   recallUsage,
-  relativeSince,
   rememberUsage,
   usageAnnouncement,
   usageErrorCopy,
   usageQuery,
   usageView,
+  type UsageScope,
   type UsageSummary,
 } from "./usageModel";
 
@@ -223,6 +224,29 @@ describe("budget", () => {
     expect(status.label).toBe("주의");
   });
 
+  it("fills the bar when the limit is zero and anything at all was observed", () => {
+    // A limit of 0 is a value the server can send. percentOf answers 0 for it
+    // (no whole to take a share of), which drew an EMPTY danger bar next to a
+    // red 한도 도달 chip: the bar and the chip telling opposite stories, which
+    // is exactly what the tone rule exists to stop.
+    const zero = {
+      ...hardLimit.budget!,
+      limitMicroUsd: 0,
+      spentMicroUsd: 50_200_000,
+      reservedMicroUsd: 0,
+    };
+    const status = budgetStatus(zero, formatMicroUsd);
+    expect(status.tone).toBe("danger");
+    expect(status.usedPercent).toBe(100);
+    // Nothing spent against a zero limit is not "full", it is untouched.
+    expect(
+      budgetStatus(
+        { ...zero, spentMicroUsd: 0, state: "normal" },
+        formatMicroUsd
+      ).usedPercent
+    ).toBe(0);
+  });
+
   it("names the grain in Korean and passes an unknown grain through", () => {
     expect(budgetGrainLabel("workspace")).toBe("워크스페이스 전체");
     expect(budgetGrainLabel("agent_channel")).toBe("에이전트와 채널별");
@@ -262,13 +286,11 @@ describe("formatting", () => {
     expect(percentOf(1, 0)).toBe(0);
   });
 
-  it("ages the last-known stamp in whole units", () => {
-    const now = Date.parse("2026-07-25T09:00:00Z");
-    expect(relativeSince(now - 5_000, now)).toBe("방금");
-    expect(relativeSince(now - 180_000, now)).toBe("3분 전");
-    expect(relativeSince(now - 7_200_000, now)).toBe("2시간 전");
-    expect(relativeSince(now - 3 * 86_400_000, now)).toBe("3일 전");
-    expect(relativeSince(now + 5_000, now)).toBe("방금");
+  it("stamps the last-known instant absolutely, not relatively", () => {
+    // Nothing re-renders this panel on a timer, so "3분 전" would freeze at
+    // whatever it said when the read failed and start lying about its own age.
+    const at = new Date(2026, 6, 25, 23, 7).getTime();
+    expect(formatClock(at)).toBe("2026-07-25 23:07");
   });
 });
 
@@ -295,19 +317,44 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
   const WS = "00000000-0000-7000-8000-000000000001";
   const NOW = Date.parse("2026-07-25T09:00:00Z");
   const CHECKED = NOW - 180_000;
+  const CHECKED_CLOCK = formatClock(CHECKED);
+  const W30: UsageScope = { period: "30d", bucket: "day" };
+  const W7: UsageScope = { period: "7d", bucket: "day" };
 
   beforeEach(() => forgetUsage());
 
   it("recalls a remembered summary case-insensitively by workspace id", () => {
-    rememberUsage(WS.toUpperCase(), normal, CHECKED);
-    expect(recallUsage(WS)?.summary.totals.costMicroUsd).toBe(18_432_500);
-    expect(recallUsage(WS)?.checkedAtMs).toBe(CHECKED);
+    rememberUsage(WS.toUpperCase(), W30, normal, CHECKED);
+    expect(recallUsage(WS, W30)?.summary.totals.costMicroUsd).toBe(18_432_500);
+    expect(recallUsage(WS, W30)?.checkedAtMs).toBe(CHECKED);
   });
 
-  it("forgets everything on sign-out", () => {
-    rememberUsage(WS, normal, CHECKED);
+  it("files an answer under the window it covers, not under the workspace", () => {
+    // The whole point: 30일 was confirmed, 7일 never was. A 7일 read that fails
+    // must not be answered with the 30일 total while the 7일 segment is lit.
+    rememberUsage(WS, W30, normal, CHECKED);
+    expect(recallUsage(WS, W7)).toBeNull();
+    expect(recallUsage(WS, { period: "30d", bucket: "week" })).toBeNull();
+    expect(recallUsage(WS, W30)?.summary.totals.costMicroUsd).toBe(18_432_500);
+  });
+
+  it("keeps each window's own answer side by side", () => {
+    rememberUsage(WS, W30, normal, CHECKED);
+    rememberUsage(WS, W7, emptyPeriod, CHECKED);
+    expect(recallUsage(WS, W30)?.summary.totals.costMicroUsd).toBe(18_432_500);
+    expect(recallUsage(WS, W7)?.summary.totals.costMicroUsd).toBe(0);
+  });
+
+  it("forgets every window of a workspace, and everything on sign-out", () => {
+    rememberUsage(WS, W30, normal, CHECKED);
+    rememberUsage(WS, W7, normal, CHECKED);
+    forgetUsage(WS.toUpperCase());
+    expect(recallUsage(WS, W30)).toBeNull();
+    expect(recallUsage(WS, W7)).toBeNull();
+
+    rememberUsage(WS, W30, normal, CHECKED);
     forgetUsage();
-    expect(recallUsage(WS)).toBeNull();
+    expect(recallUsage(WS, W30)).toBeNull();
   });
 
   function view(over: Partial<Parameters<typeof usageView>[0]> = {}) {
@@ -317,7 +364,6 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
       errorMessage: null,
       paused: false,
       lastKnown: null,
-      nowMs: NOW,
       ...over,
     });
   }
@@ -343,7 +389,7 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     expect(state.kind).toBe("last-known");
     if (state.kind !== "last-known") throw new Error("expected last-known");
     expect(state.checkedAtMs).toBe(CHECKED);
-    expect(state.notice).toContain("마지막으로 확인한 값(3분 전)");
+    expect(state.notice).toContain(`${CHECKED_CLOCK}에 확인한 값을 표시합니다.`);
   });
 
   it("shows the last confirmed answer with its age when the read fails", () => {
@@ -353,8 +399,10 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     });
     expect(state.kind).toBe("last-known");
     if (state.kind !== "last-known") throw new Error("expected last-known");
+    // One line, one statement of when: the panel used to repeat the same fact
+    // on a second line, once relative and once absolute.
     expect(state.notice).toBe(
-      "서버가 15초 안에 응답하지 않았습니다. 마지막으로 확인한 값(3분 전)을 표시합니다."
+      `서버가 15초 안에 응답하지 않았습니다. ${CHECKED_CLOCK}에 확인한 값을 표시합니다.`
     );
     expect(state.checkedAtMs).toBe(CHECKED);
     expect(state.summary.totals.costMicroUsd).toBe(18_432_500);
@@ -410,8 +458,8 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
   });
 
   it("round-trips a remembered summary through the view without reshaping it", () => {
-    rememberUsage(WS, hardLimit, CHECKED);
-    const cached = recallUsage(WS);
+    rememberUsage(WS, W30, hardLimit, CHECKED);
+    const cached = recallUsage(WS, W30);
     const state = view({ errorMessage: "끊겼습니다.", lastKnown: cached });
     const summary: UsageSummary | undefined =
       state.kind === "last-known" ? state.summary : undefined;

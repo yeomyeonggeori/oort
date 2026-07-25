@@ -231,7 +231,9 @@
    * chip beside it, so a full bar at the hard limit does not read as a finished
    * download. Driven by data-tone rather than a second utility because the fill
    * lives in pseudo elements no utility class can reach. Default stays accent,
-   * which is what 설정 > 업데이트 (MOMO-606) already renders. */
+   * which is what 설정 > 업데이트 (MOMO-606) already renders, and a state bar
+   * names its tone in EVERY state including ok: falling back to the default for
+   * the common case put an amber bar beside a green chip. */
   &[data-tone="neutral"] {
     &::-webkit-progress-value {
       background: var(--line-strong);
@@ -239,6 +241,16 @@
 
     &::-moz-progress-bar {
       background: var(--line-strong);
+    }
+  }
+
+  &[data-tone="ok"] {
+    &::-webkit-progress-value {
+      background: var(--ok);
+    }
+
+    &::-moz-progress-bar {
+      background: var(--ok);
     }
   }
 
