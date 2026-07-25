@@ -24,6 +24,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["momo"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

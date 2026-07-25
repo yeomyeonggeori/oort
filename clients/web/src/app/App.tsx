@@ -1,7 +1,7 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "@/app/queryClient";
 import { useRestoredSession } from "@/app/session";
-import { LoginPage } from "@/features/auth/LoginPage";
+import { ConnectPage } from "@/features/auth/ConnectPage";
 import { AppShell } from "@/app/AppShell";
 import { SkeletonRows } from "@/features/common/States";
 import { ChatShell } from "@/features/chat/ChatShell";
@@ -26,7 +26,7 @@ export function App() {
   }
 
   if (!session) {
-    return <LoginPage onLoggedIn={signIn} />;
+    return <ConnectPage onLoggedIn={signIn} />;
   }
 
   return (

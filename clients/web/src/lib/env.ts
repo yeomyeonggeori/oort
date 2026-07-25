@@ -5,10 +5,18 @@
 
 const env = import.meta.env as Record<string, string | undefined>;
 
-// Default is EMPTY = same-origin relative paths, proxied to momowebqa by the
-// dev/preview server (see vite.config.ts). Set VITE_MOMO_API_BASE only for a
-// CORS-enabled backend origin.
-export const API_BASE = (env.VITE_MOMO_API_BASE ?? "").replace(/\/+$/, "");
+// BUILD-TIME default only. Empty = same-origin relative paths, proxied to
+// momowebqa by the dev/preview server (see vite.config.ts). Set
+// VITE_MOMO_API_BASE only for a CORS-enabled backend origin.
+//
+// This is no longer the address requests actually go to: the person connecting
+// can pick a server on the connect screen (MOMO-604), and that choice is stored
+// per device. Read the effective base through `apiBase()` in ./serverBase.ts;
+// this constant is only its fallback.
+export const API_BASE_DEFAULT = (env.VITE_MOMO_API_BASE ?? "").replace(
+  /\/+$/,
+  ""
+);
 
 export const DEFAULT_WORKSPACE =
   env.VITE_MOMO_WORKSPACE ?? "00000000-0000-7000-8000-000000000001";
