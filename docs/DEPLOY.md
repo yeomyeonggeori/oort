@@ -523,7 +523,7 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 | 키 | 기본값 | 의미 |
 |---|---|---|
 | `APP_DOMAIN` | (unset) | 웹 SPA 공개 도메인(예: `momo.example.com`). unset이면 웹 서빙 비활성. |
-| `MOMO_WEB_IMAGE` | (required) | `clients/web`의 production `dist`를 담은 immutable digest image. install/upgrade가 `web-init`으로 실행한다. |
+| `MOMO_WEB_IMAGE` | (required) | `clients/web-legacy`(ADR-0119 v0)의 production `dist`를 담은 immutable digest image. install/upgrade가 `web-init`으로 실행한다. ADR-0133 정본 UI(`clients/web`)로의 전환은 parity 게이트 통과 뒤 별도 단계다. |
 | `MOMO_LINKSHORT_IMAGE` | (required) | `services/LinkShort`의 immutable digest image. `/i/*`를 `/join?code=...`로 리다이렉트한다. |
 | `WEB_STATIC_VOLUME_NAME` | `momo-web-static` | `web-init`이 채우고 Caddy가 read-only로 마운트하는 named volume 이름. |
 

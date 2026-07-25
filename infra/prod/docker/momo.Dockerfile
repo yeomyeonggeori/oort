@@ -37,11 +37,14 @@ RUN --mount=type=cache,target=/root/.cache/org.swift.swiftpm \
     swift build --package-path services/LinkShort -c release --product LinkShort --static-swift-stdlib \
     && install -Dm755 "$(swift build --package-path services/LinkShort -c release --show-bin-path)/LinkShort" /artifacts/LinkShort
 
+# ADR-0119 v0 client (clients/web-legacy since MOMO-596 / ADR-0133). The
+# canonical clients/web UI is not wired into the shipped image until the
+# ADR-0133 parity gate passes.
 FROM ${NODE_IMAGE} AS web-build
-WORKDIR /src/clients/web
-COPY clients/web/package.json clients/web/package-lock.json ./
+WORKDIR /src/clients/web-legacy
+COPY clients/web-legacy/package.json clients/web-legacy/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY clients/web/ ./
+COPY clients/web-legacy/ ./
 RUN npm run build
 
 FROM ${RUNTIME_IMAGE}
@@ -63,7 +66,7 @@ RUN apt-get update \
     && mkdir -p /workspace /opt/momo-web /srv/momo-web /usr/share/licenses/momo
 
 COPY --from=swift-build /artifacts/ /usr/local/bin/
-COPY --from=web-build /src/clients/web/dist/ /opt/momo-web/
+COPY --from=web-build /src/clients/web-legacy/dist/ /opt/momo-web/
 
 # Source-checkout-free migration and day-2 operator payload.
 WORKDIR /workspace

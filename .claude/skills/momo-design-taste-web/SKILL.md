@@ -8,6 +8,14 @@ description: Anti-slop design taste for the momo web client (TS/React + Tailwind
 momo-web is the canonical UI (ADR-0133): TS + React + Vite, Tailwind + shadcn/ui(Radix), react-virtuoso, cmdk, wrapped by Tauri 2 for desktop. The bar is the same as the mac client:
 **it must feel like a native-grade work tool with the information density of Slack and the calm confidence of Codex, not a marketing web app.** Landing-page patterns transplanted into the product surface are the #1 slop signature to avoid. This is the web sibling of `momo-design-taste`; the hard rules are identical in intent, translated to CSS/Tailwind/React.
 
+Three files carry the load, and they are checked in, not aspirational:
+
+| what | where |
+|---|---|
+| token definition | `clients/web/src/design/tokens.css` |
+| token reference + measured contrast | `references/tokens.md` |
+| mechanical pre-flight | `scripts/design_preflight_web.sh` |
+
 ## 0. Design Read (mandatory, before any code)
 
 Output one line before writing UI code:
@@ -20,87 +28,34 @@ Do NOT default to: purple/blue/indigo AI gradients, glassy hero cards, three-equ
 
 ## 1. Platform constraints (web-specific, load-bearing)
 
-- **CSP is `style-src 'self'`** (verified in current `clients/web`). No inline `style={{...}}`, no `style=` attributes, no styled-components runtime injection. Every style lives in Tailwind classes compiled to a served stylesheet or in `src/styles.css`. This is not a preference; violating it breaks rendering.
+- **CSP is `style-src 'self'`** (enforced by the prod Caddyfile the browser smoke runs behind). No inline `style={{...}}`, no `style=` attributes, no styled-components runtime injection. Every style lives in Tailwind classes compiled to a served stylesheet or in `src/design/tokens.css`. This is not a preference; violating it breaks rendering. If a value must be dynamic, drive it with a `data-*` attribute and a CSS rule, or a named `@utility`.
 - **Self-contained assets**: system font stack only, no `fonts.googleapis.com`, no external CDN, no remote fonts/images. Same-origin only.
 - **Tauri shell parity**: keyboard shortcuts, deep links, and native integrations (keychain, mDNS, updater) live in the Rust plugin layer (ADR-0133 §2), not the React tree. Do not reimplement OS behavior in JS.
 - **System-first (web translation)**: reach for the shadcn/Radix primitive before a custom control (`DropdownMenu`, `Dialog`, `Popover`, `Tabs`, `Command`, `ContextMenu`, `Sheet`, `Collapsible`, `Form`). react-virtuoso for the timeline, cmdk for Cmd+K. Every custom-drawn control needs a one-line comment stating what the primitive could not do. No justification means use the primitive.
 
 ## 2. Dawn palette tokens (the only source of color)
 
-Colors come from CSS variables, referenced through Tailwind semantic classes. **Zero raw hex / rgb() / hsl() literals in component files.** The palette is the "Dawn" identity (night to first light), calm and warm, with a single amber accent. The current v0 indigo accent (`#4f46e5`) is provisional and is replaced by amber here (indigo/purple reads as an AI-tell).
+Full palette, measured contrast, spacing/radius/text scales, and the procedure for adding a token: **`references/tokens.md`**. Do not restate hex values anywhere else, and do not copy them into a component.
 
-Define once in `src/styles.css` (or `@theme` for Tailwind v4):
-
-```css
-:root {
-  color-scheme: light dark;
-
-  /* surfaces (warm paper, "동튼 직후") */
-  --bg:          #f7f6f3;
-  --bg-raised:   #ffffff;
-  --bg-sidebar:  #efece6;
-  --border:      #dcd8d0;
-
-  /* text */
-  --text:        #24211c;
-  --text-muted:  #77716a;
-
-  /* single accent = 호박(amber horizon), AA on --bg */
-  --accent:          #b45309;
-  --accent-contrast: #ffffff;
-
-  /* agent identity = predawn slate-blue, distinct from human accent, NOT neon AI purple */
-  --agent-accent:    #4a6785;
-
-  /* status (tokens only, never raw) */
-  --danger: #b3261e;
-  --ok:     #1a7f37;
-  --warn:   #9a6700;
-
-  /* radius scale (fixed, no other values) */
-  --radius-sm: 6px;   /* controls: buttons, chips, inputs */
-  --radius-md: 10px;  /* cards, list groups */
-  --radius-lg: 14px;  /* dialogs, sheets */
-
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* surfaces (near-night sky, dark is the base tone) */
-    --bg:          #17161a;
-    --bg-raised:   #201f24;
-    --bg-sidebar:  #1b1a1f;
-    --border:      #34323b;
-
-    --text:        #ececf1;
-    --text-muted:  #9b98a3;
-
-    --accent:          #f0a850;  /* lighter amber, AA on --bg */
-    --accent-contrast: #17161a;
-
-    --agent-accent:    #7fa0c4;
-
-    --danger: #f2b8b5;
-    --ok:     #57ab5a;
-    --warn:   #d4a72c;
-  }
-}
-```
+The identity is "Dawn" (night to first light): warm paper surfaces, a single amber accent (호박, the horizon at first light), and a predawn slate-blue reserved for agents. Indigo/violet is not merely discouraged: Tailwind's stock palette is cleared in `tokens.css`, so `bg-indigo-500` does not compile.
 
 Rules:
-- **ONE accent per surface** = `--accent`. Agent identity uses `--agent-accent` on avatar/badge only, never a different bubble shape or row background tint. Status colors from `--danger/--ok/--warn` only.
+- **Zero raw hex / `rgb()` / `hsl()` literals in component files.** Color reaches a component only as a token utility (`bg-surface`, `text-ink-muted`, `border-line-strong`).
+- **ONE accent per surface** = `--accent`. Agent identity uses `--agent` on avatar/badge only, never a different bubble shape or row background tint. Status colors from `--danger` / `--ok` / `--warn` only.
 - **Color Consistency Lock**: once a surface accent is set, the whole surface uses it. Sections do not invert theme. One theme per color scheme.
-- **No pure `#000000` / `#ffffff` backgrounds** (except `--bg-raised` white on light, which is warm-paper white). Use the surface tokens; they adapt to scheme.
+- **No pure `#000000` / `#ffffff`.** The light "paper" white is `#fffefb`. Use the surface tokens; they adapt to scheme via `light-dark()`.
+- **Contrast is verified, not eyeballed.** `clients/web/src/design/tokens.contrast.test.ts` measures every foreground against every surface in both schemes (AA 4.5:1, control borders 3:1) and asserts the agent/accent hue gap and the empty indigo band. Retuning a hex without running `npm test` is not a change, it is a guess.
 - **Real translucency via `backdrop-filter` + token overlay**, never a semi-transparent solid pretending to be glass, and never as decoration.
 
-## 3. Tailwind scale (fixed, grep-enforced)
+## 3. Tailwind scale (fixed, compiler-enforced)
 
-- **Spacing only from {4, 8, 12, 16, 24, 32}px** = Tailwind `1, 2, 3, 4, 6, 8`. `p-[13px]`, `w-[237px]`, `gap-[15px]` and other arbitrary values are violations. Configure `theme.spacing` to expose only these steps so arbitrary values stand out.
-- **Radius only from the token scale** (`rounded-sm/md/lg` bound to `--radius-*`). No `rounded-[12px]`, no mixing 6/10/14 by feel.
-- **Typography via semantic roles, not size inflation.** Define text roles (`text-body`, `text-timestamp`, `text-channel`, `text-mono-payload`) mapped to system text sizes. No `text-[13px]`, no `font-[...]`, no external font. Hierarchy via weight + `--text-muted`, max 2 weights per component.
-- **Numbers** (counters, costs, seq, token counts) use `tabular-nums` + `font-mono` + right-align. Never animate faster than the data changes; no count-up theater.
+The scales are closed sets in `tokens.css`: the dynamic spacing multiplier, the stock radius scale, and the stock text sizes are all cleared. An off-grid class does not silently render at the wrong size, it fails to compile.
+
+- **Spacing only from {4, 8, 12, 16, 24, 32}px** = Tailwind `1, 2, 3, 4, 6, 8` (plus `0` and the 1px `px` hairline). `p-5`, `py-1.5`, `p-[13px]`, `gap-[15px]` are violations. Control heights are a separate axis: `h-control-sm` / `h-control` / `h-control-lg`.
+- **Radius only from the token scale**: `rounded-sm` (6, controls) / `rounded-md` (10, cards) / `rounded-lg` (14, dialogs). No `rounded-[12px]`, no mixing by feel.
+- **Typography via semantic roles, not size inflation**: `text-timestamp` / `text-meta` / `text-body` / `text-title` / `text-display`. No `text-sm`, no `text-[13px]`, no external font. Hierarchy via weight + `text-ink-muted`, max 2 weights per component.
+- **Numbers** (counters, costs, seq, token counts) carry `data-numeric` (tabular-nums from the base layer) plus `font-mono` and right-alignment where they form a column. Never animate faster than the data changes; no count-up theater.
+- **Shell geometry** comes from named utilities (`app-shell`), not arbitrary grid values.
 
 ## 4. Motion
 
@@ -118,16 +73,16 @@ Every surface ships **empty / loading / error / offline**:
 ## 6. Interaction, keyboard, focus, a11y
 
 - **Keyboard path for every action** (P11): cmdk Cmd+K switcher, Cmd+N, arrow navigation, unread traversal. Row-level actions live in `ContextMenu`, not always-visible button rows.
-- **Focus ring is mandatory and visible.** If you set `outline-none`, you must add a `focus-visible:` ring in the same class list. Never remove focus indication without replacing it.
+- **Focus ring is mandatory and visible.** The house pattern is `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent`. If you set `outline-none`, you must add a `focus-visible:` ring in the same class list; the pre-flight fails a naked `outline-none`.
 - **Destructive and approval actions require confirmation** (`AlertDialog`), never fire on a single unguarded click or a bare hover.
-- **Hover uses subtle background change**, not scale transforms.
-- **Contrast AA**: body text and interactive labels meet WCAG AA against their surface. Amber accent as text only on surfaces where it passes AA (verify both schemes). Icon-only controls carry `aria-label`.
-- **Semantic HTML + roles**: real headings hierarchy, `nav/ul/li` for lists, `dl` for key-value rows, `button` for actions (never a clickable `div`).
+- **Hover uses subtle background change** (`hover:bg-surface-hover`), not scale transforms.
+- **Contrast AA**: guaranteed by the token test for token pairs. What the test cannot see is your composition: check that accent-on-accent-soft combinations you invent are in the measured table, and give icon-only controls an `aria-label`.
+- **Semantic HTML + roles**: real heading hierarchy, `nav/ul/li` for lists, `dl` for key-value rows, `button` for actions (never a clickable `div`).
 
 ## 7. Copy (user-visible strings)
 
 - **Verb-first buttons** ("변경 저장", "메시지 보내기", never bare "확인"/"Submit" where a verb fits).
-- **ZERO em-dashes** (`—`, `–`) in any user-visible string. Binary: one em-dash = pre-flight fail. Use commas, colons, parentheses, or line breaks.
+- **ZERO em-dashes** (`—`, `–`) in any user-visible string. Binary: one em-dash = pre-flight fail. Use commas, colons, parentheses, or line breaks. This includes `index.html` `<title>` and Tauri window titles.
 - **No filler-hype vocabulary**: "seamless / effortless / unleash / elevate / 원활한 / 손쉽게 / 매끄러운" banned in UI copy.
 - Errors say what happened and the next step; they never apologize and are never vague.
 - **Internal vocabulary** ("Context Packet", "Memory Plane", "Capability Cache", run IDs, seq numbers) never appears as user-facing copy outside developer/diagnostic surfaces.
@@ -148,59 +103,51 @@ Every surface ships **empty / loading / error / offline**:
 | Section-number eyebrows ("001 · SETTINGS"), uppercase-tracking micro-labels (>1 per surface) | Sentence-case plain headers |
 | Pure `#000`/`#fff` backgrounds | Surface tokens that adapt to scheme |
 | Shimmer skeletons | Height-preserving neutral bars |
-| Count-up / animated number theater | Numbers change at data speed, `tabular-nums` |
+| Count-up / animated number theater | Numbers change at data speed, `data-numeric` |
 | Custom titlebar breaking OS window controls | Tauri standard window chrome |
 
 ## 9. Agent-native surfaces (momo-specific)
 
-- Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent-accent` on avatar/badge, plus "managed by {owner}" attribution. Never a different bubble shape or full-row background tint.
+- Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent` on avatar/badge, plus "managed by {owner}" attribution. Never a different bubble shape or full-row background tint. The token test asserts a >= 90 degree hue gap from `--accent`, so human and agent identity cannot converge by a well-meant tweak.
 - Tool-call / approval / diff / cost cards are **structured, calm, dense**: title row (icon + name + status chip) then typed fields then a disclosure for raw payload. Status lifecycle chips (`queued / thinking / streaming / awaiting-approval / done / error`) use token status colors, text-first, no pulsing. Approval status maps to the real model (`pending / approved / rejected / expired / cancelled`).
 - Render only server-provided public fields; tool arguments, paths, credentials, and cost internals stay opaque even behind disclosure (matches `approvalCardModel` basic-mode contract).
 - Agent activity reads as "the agent did {verb} to {object} → {outcome}". Frame absence (timeout, silence, cache miss) as `stalled`, never promote it to `error` or a false story (agent-interaction-safety, ADR-0132).
 
 ## 10. Mechanical Pre-Flight Check (run before claiming done)
 
-Run from `clients/web`. ALL must pass; any hit is a fail unless it is inside the token/theme definition (`src/styles.css`, tailwind config).
-
 ```sh
-# 10.1 em-dash in any source string (user-visible), zero hits
-grep -rn '—\|–' src --include='*.tsx' --include='*.ts'
-
-# 10.2 raw color literals in components, zero hits outside styles.css/config
-grep -rnE '#[0-9a-fA-F]{3,8}\b|rgb\(|rgba\(|hsl\(' src --include='*.tsx' \
-  | grep -v 'styles.css'
-
-# 10.3 inline styles (CSP forbids; also a slop vector), zero hits
-grep -rn 'style={{\|style={' src --include='*.tsx'
-
-# 10.4 arbitrary Tailwind values (spacing/size/color), inspect every hit
-grep -rnE 'className=.*\[[0-9#]' src --include='*.tsx'
-
-# 10.5 AI-tell gradients on product surfaces, inspect (allow only landing)
-grep -rnE 'bg-gradient|from-(purple|indigo|violet|fuchsia|blue)|via-(purple|indigo|violet)' src --include='*.tsx'
-
-# 10.6 toast stacks, inspect (prefer inline banners)
-grep -rniE 'sonner|useToast|toast\(' src --include='*.tsx'
-
-# 10.7 focus removed without replacement, every outline-none needs focus-visible nearby
-grep -rn 'outline-none' src --include='*.tsx'
-
-# 10.8 external fonts/CDN (breaks CSP + self-contained), zero hits
-grep -rniE 'fonts.googleapis|cdn\.|@font-face|<link[^>]+href="http' src
-
-# 10.9 filler-hype vocabulary in copy, zero hits
-grep -rniE 'seamless|effortless|unleash|elevate|원활한|손쉽게|매끄러운' src --include='*.tsx'
-
-# 10.10 pure black/white backgrounds, inspect
-grep -rniE 'bg-black|bg-white|#000000|#ffffff' src --include='*.tsx'
+scripts/design_preflight_web.sh          # exit 0 pass, 1 violation
+scripts/design_preflight_web.sh --list   # every hit per category, no gating
 ```
 
-Manual checklist:
+Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
+
+| # | key | catches |
+|---|---|---|
+| 1 | `emdash` | em-dash inside a quoted string, and anything in `index.html` |
+| 2 | `raw_color` | hex / `rgb()` / `hsl()` outside the token definition |
+| 3 | `inline_style` | `style={{...}}` or `style=` (CSP blocks it at runtime) |
+| 4 | `arbitrary_tw` | `className="... [13px] ..."` arbitrary values |
+| 5 | `ai_gradient` | `bg-gradient`, indigo/violet/fuchsia family |
+| 6 | `toast` | `sonner` / `useToast` / `toast(` |
+| 7 | `naked_focus` | `outline-none` with no `focus-visible:` in the same class list |
+| 8 | `external_font` | webfont / CDN / `<link href="http` |
+| 9 | `hype` | filler-hype vocabulary |
+| 10 | `pure_bw` | `bg-black` / `bg-white` / `#000000` / `#ffffff` |
+
+`src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked on the offending line with the comment marker `design-preflight-allow` and justified in the PR body.
+
+Two more mechanical checks that are not grep:
+
+```sh
+cd clients/web && npm run lint    # eslint also bans JSX style= and hex literals
+cd clients/web && npm test        # tokens.contrast.test.ts measures AA in both schemes
+```
+
+Manual checklist (nothing here is grep-able, so it is on you):
 - [ ] Design Read line was produced and the result matches it
-- [ ] Light AND dark scheme checked (both render correctly, AA holds in both)
+- [ ] Light AND dark scheme checked (`npm run capture:design` renders both)
 - [ ] Empty / loading / error / offline states exist for the touched surface
-- [ ] All spacing ∈ {4,8,12,16,24,32}; radius from token scale only
-- [ ] One accent (`--accent`); agent uses `--agent-accent`; status from tokens only
 - [ ] Keyboard path exists for every new action; visible focus ring on every interactive element
 - [ ] No banned Web AI-Tells (§8 table)
 - [ ] Long Korean + English mixed strings do not truncate/overflow (test a 3-line Korean message)
@@ -209,4 +156,17 @@ Manual checklist:
 
 ## 11. Review loop
 
-After implementation, request the `design-review` agent with screenshots (Playwright captures in both schemes). Blockers loop back automatically; only High-Priority-and-below findings go to a human. Rubric mirrors the mac skill (`references/review-rubric.md` web variant). Gate target (ADR-0133 parity): design-review Blocker 0, High 0.
+Capture both schemes, then hand off:
+
+```sh
+cd clients/web && npm run build && npm run capture:design   # -> artifacts/design/*.png
+```
+
+The capture mocks `/v1` with realistic Korean+English team fixtures, emulates `prefers-color-scheme` at the browser level (so it exercises the same `light-dark()` path the product uses), and shoots login / chat shell / composer focus / dense timeline in light and dark.
+
+Then request the `design-review` agent (`.claude/agents/design-review.md`) with those screenshots attached. Blockers loop back automatically; only High-Priority-and-below findings go to a human. Rubric: `.claude/skills/momo-design-taste/references/review-rubric.md`, with two web substitutions:
+
+- phase 2 "window behavior" becomes **viewport behavior**: 1280 and 900 wide, sidebar collapsed, long channel names.
+- phase 4 "VoiceOver" becomes **keyboard-only completion + visible focus ring at every stop**, plus `aria-label` on icon-only controls.
+
+Gate target (ADR-0133 parity): design-review Blocker 0, High 0.

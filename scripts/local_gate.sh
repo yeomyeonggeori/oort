@@ -179,10 +179,18 @@ auto_classify_path() {
       # The client contract spec: drift is verified against the live server
       # inside the web profile (verify_openapi_contract.sh).
       AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (contract spec; runtime drift gate)") ;;
-    clients/web/*)
-      # Before the docs/*.md pattern on purpose: clients/web/README.md is the
-      # httpOnly promotion-gate canon — a web surface change, not docs.
-      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
+    clients/web-legacy/*)
+      # Before the docs/*.md pattern on purpose: clients/web-legacy/README.md is
+      # the httpOnly promotion-gate canon — a web surface change, not docs.
+      # This is the ADR-0119 v0 (MOMO-596 moved it off clients/web); it still owns
+      # the live serving/e2e path, so the `web` profile stays pointed here.
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (ADR-0119 alpha at clients/web-legacy)") ;;
+    clients/web/*|clients/desktop/*)
+      # ADR-0133 canonical UI + Tauri shell (promoted from the MOMO-595 P0 spike
+      # by MOMO-596). No gate profile covers this stack yet, and `web` verifies
+      # clients/web-legacy — narrowing here would emit a green that proves
+      # nothing about the changed files.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (ADR-0133 stack has no gate profile yet; widen, do not narrow)") ;;
     docs/*|research/*|legal/*|*.md)
       AUTO_REASONS+=("$1 -> docs") ;;
     clients/iOS/*)
@@ -803,19 +811,21 @@ add_local_alpha_commands() {
 }
 
 add_web_commands() {
-  # MOMO-391 (ADR-0119 W-2): clients/web quality + e2e gate.
+  # MOMO-391 (ADR-0119 W-2): clients/web-legacy quality + e2e gate. The v0 web
+  # client moved to clients/web-legacy in MOMO-596 (ADR-0133 promotion) and is
+  # still the client this profile builds, serves and drives in the browser.
   # install -> lint -> unit tests -> typecheck -> generated-types sync -> build -> license
   # gate -> serving smoke (MOMO-390 regression: APP_DOMAIN sentinel
   # fail-closed + strict CSP) -> browser login/timeline smoke (e2e compose)
   # -> OpenAPI runtime drift gate (spec vs live server, MOMO-389).
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
-  add_cmd "web install (npm ci)" '(cd clients/web && npm ci --no-audit --no-fund)'
-  add_cmd "web lint (eslint)" '(cd clients/web && npm run lint)'
-  add_cmd "web unit tests (vitest)" '(cd clients/web && npm run test)'
-  add_cmd "web typecheck (tsc --noEmit)" '(cd clients/web && npm run typecheck)'
-  add_cmd "web generated API types in sync with docs/api/openapi.yaml" '(cd clients/web && npm run generate:types && git diff --exit-code -- src/api/schema.d.ts) || { echo "src/api/schema.d.ts is stale — run (cd clients/web && npm run generate:types) and commit the result"; exit 1; }'
-  add_cmd "web build (vite, CSP-safe output)" '(cd clients/web && npm run build)'
-  add_cmd "web dependency license gate (permissive-only, full transitive list)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; (cd clients/web && WEB_LICENSE_REPORT="$out" node scripts/check-licenses.mjs) && echo "license inventory: $out"'
+  add_cmd "web install (npm ci)" '(cd clients/web-legacy && npm ci --no-audit --no-fund)'
+  add_cmd "web lint (eslint)" '(cd clients/web-legacy && npm run lint)'
+  add_cmd "web unit tests (vitest)" '(cd clients/web-legacy && npm run test)'
+  add_cmd "web typecheck (tsc --noEmit)" '(cd clients/web-legacy && npm run typecheck)'
+  add_cmd "web generated API types in sync with docs/api/openapi.yaml" '(cd clients/web-legacy && npm run generate:types && git diff --exit-code -- src/api/schema.d.ts) || { echo "src/api/schema.d.ts is stale — run (cd clients/web-legacy && npm run generate:types) and commit the result"; exit 1; }'
+  add_cmd "web build (vite, CSP-safe output)" '(cd clients/web-legacy && npm run build)'
+  add_cmd "web dependency license gate (permissive-only, full transitive list)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; (cd clients/web-legacy && WEB_LICENSE_REPORT="$out" node scripts/check-licenses.mjs) && echo "license inventory: $out"'
   add_cmd "web serving smoke (Caddy APP_DOMAIN edge + sentinel fail-closed)" 'scripts/web_serving_smoke.sh'
   add_cmd "web login -> timeline browser smoke (e2e compose)" 'scripts/verify_web_login_smoke.sh'
   add_cmd "OpenAPI contract drift gate (spec vs live server)" 'scripts/verify_openapi_contract.sh'

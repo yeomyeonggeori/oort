@@ -1,8 +1,7 @@
-// momo desktop shell (ADR-0133 P0 spike). Wraps the exact clients/web-spike
-// bundle — no forked UI. Native integrations (deep-link, mDNS, keychain,
-// notification, updater) are deliberately NOT here: they are P2 per the
-// migration plan §2 B-group. This spike only proves "one codebase, two
-// runtimes" and desktop performance.
+// momo desktop shell (ADR-0133). Wraps the exact clients/web bundle — no forked
+// UI. Native integrations (deep-link, mDNS, keychain, notification, updater) are
+// deliberately NOT here: they are P2 per the migration plan §2 B-group. Today
+// this shell only proves "one codebase, two runtimes" and desktop performance.
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

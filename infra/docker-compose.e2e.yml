@@ -317,7 +317,7 @@ services:
       - "127.0.0.1:${WEB_EDGE_HTTPS_PORT:-19443}:443"
     volumes:
       - ./prod/Caddyfile:/etc/caddy/Caddyfile:ro
-      # MOMO-391: the login smoke mounts the built SPA (clients/web/dist,
+      # MOMO-391: the login smoke mounts the built SPA (clients/web-legacy/dist,
       # absolute path) here; default stays the MOMO-390 placeholder so the
       # serving smoke's expectations are unchanged.
       - ${WEB_EDGE_ASSETS_DIR:-./e2e/web-placeholder}:/srv/momo-web:ro
@@ -328,7 +328,7 @@ services:
       retries: 30
       start_period: 2s
 
-  # MOMO-576 (ADR-0119 W-3): build the real clients/web dist and copy it into
+  # MOMO-576 (ADR-0119 W-3): build the real clients/web-legacy dist and copy it into
   # an isolated named volume. This mirrors the production pinned-image init
   # contract while keeping source builds legal only in the e2e layer.
   web-init:

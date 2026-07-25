@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # MOMO-576 / ADR-0119 W-3: isolated HTTP verification for the production
-# Caddyfile + real clients/web build. Docker execution belongs to the
+# Caddyfile + real clients/web-legacy build (ADR-0119 v0; moved off
+# clients/web by MOMO-596). Docker execution belongs to the
 # orchestrator; workers may run bash/static checks only.
 set -euo pipefail
 

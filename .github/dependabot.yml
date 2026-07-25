@@ -2,12 +2,19 @@ version: 2
 updates:
   - package-ecosystem: npm
     directories:
+      # ADR-0133 canonical UI (promoted from the P0 spike by MOMO-596).
       - /clients/web
+      # ADR-0119 v0 — still the built/served alpha client until parity.
+      - /clients/web-legacy
       - /examples/cloudflare-agent-momo
       - /examples/eve-momo-channel
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+  # TODO(ADR-0133): clients/desktop/src-tauri (cargo) has no dependabot coverage
+  # yet — adding a cargo ecosystem is a supply-chain policy call, not part of the
+  # MOMO-596 path promotion.
 
   - package-ecosystem: docker
     directories:
