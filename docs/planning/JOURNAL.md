@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-07-25 (Fable P1 wave1 완주 — 파운데이션·여명 토큰·코어, Opus 5 전환) · track/uxui 랜딩
+- **Opus 5 확정**: 하네스 별칭 `opus`=claude-opus-5 (프로브 실측). 노트북 종료 2회 중단 → worktree 미커밋 진행분 diff-검토 재개 방식으로 무손실 복구(momowebqa는 restart=unless-stopped로 생존).
+- **748 승격**(PR #751): web-spike→clients/web·v0→web-legacy(git mv --follow 보존), 참조 30여곳 전수 갱신, 서빙/배포는 의도적으로 legacy 유지(parity 게이트 전). 빌드 3종 실증.
+- **749 여명 토큰**(PR #752): light-dark() 단일 선언, **컴파일러 집행 스케일**(Tailwind 스톡 팔레트/스페이싱 initial 비움), R-2 제안값 AA 실측 조정(액센트 #a54c08 등 4색, 조정 근거 tokens.md 수록), 대비 자동테스트 12종(OKLab 색상각·인디고 대역 공백 단언), preflight 스크립트(negative test), eslint 정비. 인디고 잔재 0.
+- **750 코어**(PR #753): R-1 1·3장 — 사이드바(서버 프로젝션 unread), 타임라인(같은 그리드+--agent, **"재연결됨, seq N까지 복구"** replay/backfill 구분, author group 300s), 컴포저(@멘션·재시도), ⌘K. 통합 에이전트가 충돌 7파일 해소(구조=750·스타일=749) + **지시문 오류 실측 정정: Tailwind v4는 미정의 유틸 무음 드롭 → 산출 CSS 전수 대조로 검증**(스킬 §10 반영 후보). 32/32 tests·preflight 10/10.
+- **실서버 Playwright 스모크 2회 PASS**(momowebqa): 로그인→⌘K→채널→타임라인→전송→라이브 수신(24~74ms, 211건 가상화 27행, 재구독 0=순수 라이브 증명).
+- 진행 중: 웹판 첫 design-review(신선 컨텍스트). 다음: 리뷰 종결→main 병합 여부→wave2(인박스·에이전트 카드·설정 셸) 설계. deferred 등재: tauri.conf 타이틀 정리·LoginPage 구분점·빈/오프라인 상태 일부·preflight의 local_gate 배선.
+
+
 ## 2026-07-25 (Fable ADR-0133 Accepted + P0 스파이크 게이트 PASS + R-1/R-2) · Tauri/React 전환 개시
 - 성재 ADR-0133 승인 → 즉시 P0 스파이크(#745)+R-1/R-2 병렬. **스파이크 게이트 전관문 PASS**(커밋 667a40a3 정본): seq 121건 셔플 후 단조·gap 0 / 재연결 resume 25/25 누락 0 / 1k 스크롤 p95 10.3ms·>33ms 프레임 0 / 콜드 web 181ms·desktop 537ms / 메모리 196MB(<400MB). clients/web-spike+clients/desktop(Tauri 2) 신설, momo-spike.app 실빌드. main #747.
 - **P1/P2 이월 발견 3건**: ①서버가 mDNS WS 호스트 반환 시 Chrome 리졸버 행(근본 수정=브라우저 리졸브 가능한 호스트 반환) ②REST CORS 부재→웹은 동일오리진 프록시, Tauri release는 Rust HTTP 필요 ③virtuoso initialItemCount. 스파이크 에이전트 최종 구조화 보고는 실패(StructuredOutput cap)했으나 작업·커밋·실측 완결 — ground truth 검증 원칙 재확인.
