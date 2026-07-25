@@ -1,5 +1,15 @@
 # momo 진행 현황
 
+## MOMO-615 워크스페이스 사용량 요약 REST (AX-7 1층, #791, 2026-07-25)
+
+- 배경: `usage_ledger`는 `workspace_id` 축 + `usage_ledger_ws_time_idx (workspace_id, created_at DESC)`가 이미 완비돼 있고 **노출만 부재**했다. 계약 정본 = `docs/planning/handoffs/2026-07-25-usage-summary-contract.md`(MOMO-615 엔진 ↔ MOMO-616 웹 공유).
+- 신규 표면: `GET /v1/workspaces/:ws/usage/summary?from=<ISO8601>&to=<ISO8601>&bucket=day|week|month` — `server/Sources/MomoServer/Routes/UsageSummaryRoutes.swift`(라우트 + 7개 wire DTO), `App.swift`의 `authed` 그룹에 mount. **읽기 전용이라 마이그레이션 없음, `schema_v0.sql` 무변경.**
+- 인가: `InviteRoutes.workspaceID`(path ws == JWT ws, 불일치 403) + `WorkspaceAuthorization.activeRole`(활성 워크스페이스 멤버 전원 조회 가능 — "워크스페이스에서 발생하는 과금은 사용자가 전부 트래킹"). 테넌트 커넥션(RLS FORCE)만 사용, BYPASSRLS·`row_security = off` 미사용, 쓰기 0.
+- 집계: totals(`was_estimated` 부분합을 `FILTER`로 분리) · buckets(`date_trunc(unit, created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'` — DB 세션 TZ와 무관하게 UTC 고정, week = ISO 월요일) · byModel · byAgent(`member` LEFT JOIN으로 displayName, **UUID는 소문자**) 모두 `costMicroUsd` 내림차순. 기간 필터는 `AuditRoutes`의 기존 from/to 관례대로 **양끝 포함**.
+- budget: `CostProjectionRoutes`의 grain 매칭 중 `workspace` arm + MIN(limit) 채택(`ORDER BY b.limit_micro_usd ASC, b.id ASC LIMIT 1`)으로 한 budget 행에서 grain/limit/spent/reserved/periodStart를 일관되게 뽑고, 상태는 `CostProjectionRoutes.limitState`를 그대로 재사용. 매칭 없으면 `"budget": null`(키 유지 — 합성 `Encodable`의 `encodeIfPresent` 누락을 커스텀 `encode(to:)`로 방지).
+- 계약 기본값: `from=to-30d`·`bucket=day`, 최대 93일 초과 400, 빈 기간은 **200 + 0값**(404 아님).
+- 검증: `swift build` green(server, 신규 경고 0) + `swift test` **251/251 PASS**(신규 `UsageSummaryRoutesTests` 13개: 범위 검증 400 매트릭스·93일 경계·계약 wire 키 집합·빈 기간 0값/`budget: null`·시드 원장 손계산 라운드트립·소스 계약). `scripts/verify_usage_summary.sh` **30관문 전부 PASS**(워크트리 compose 포트 24650/24652, `infra/docker-compose.e2e.yml`, 종료 시 `down -v`): 비-멤버 403 · 교차 워크스페이스 403 · 비인증 401 · 400 4종 · 빈 워크스페이스 200/0값/budget null · 시드 원장 4행 손계산 일치(cost 186000, estimated 66000, prompt 6100, completion 1210) · day/week/month 버킷 경계(`2026-07-05T23:59:59Z`/`2026-07-06T00:00:00Z` 쌍이 day·week 모두에서 분리, week는 `2026-06-29`로 롤백) · 범위 밖 2행 제외 · budget MIN(limit) 채택(200000 채택, 500000·agent grain 1000 미채택) + soft_limit→hard_limit 전이 · 기본 30일 창.
+
 ## MOMO-605 서버 CORS 오리진 allowlist — Tauri 데스크톱 (P2, #768, 2026-07-25)
 
 - 배경(ADR-0133 P2 스파이크 발견): 웹은 같은 오리진 서빙(ADR-0119 D1-A)이라 CORS가 필요 없지만, 패키징된 Tauri 릴리스는 webview 오리진이 `tauri://localhost`(Windows/Android는 `http://tauri.localhost`)라 `/v1/*` 호출이 진짜 교차 오리진이 되어 브라우저 규칙에 막힌다. 어떤 도메인으로도 파생할 수 없는 값이라 operator 명시 env로 연다.
