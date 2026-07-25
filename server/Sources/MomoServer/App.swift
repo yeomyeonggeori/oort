@@ -204,6 +204,7 @@ enum AppBuilder {
         DMRoutes(db: db).add(to: authed)
         ReadStateRoutes(db: db).add(to: authed)
         CostProjectionRoutes(db: db).add(to: authed)
+        UsageSummaryRoutes(db: db).add(to: authed)
         ApprovalDecisionRoutes(db: db).add(to: authed)
         InviteRoutes(db: db).add(to: authed)
         InboundMCPRoutes(db: db).add(to: authed)
