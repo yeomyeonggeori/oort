@@ -20,7 +20,7 @@ import {
   makeStressRoster,
   makeSyntheticMessages,
 } from "@/features/timeline/stress";
-import { Composer, sendComposerMessage } from "@/features/chat/Composer";
+import { Composer } from "@/features/chat/Composer";
 import {
   EmptyInvite,
   InlineBanner,
@@ -89,7 +89,8 @@ export function ChatShell() {
   const timeline = useTimeline(
     realtime,
     workspaceId,
-    stressCount > 0 ? null : channelId
+    stressCount > 0 ? null : channelId,
+    session.member.id
   );
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
 
@@ -134,18 +135,19 @@ export function ChatShell() {
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
 
-  // Inline retry on a failed row. Same send path as the composer, so there is
-  // one code path to keep honest. A retry that fails again leaves the row as it
-  // is: it already says 전송 실패 and still offers the button.
+  // Re-send a row the SERVER stored as `failed`. That message is durable and
+  // will not change, so this is a genuinely new send with a fresh idempotency
+  // key, not a retry of the old one: it goes through the same send path as the
+  // composer and appears as a local echo until its own seq arrives. (The retry
+  // on an unconfirmed echo is the opposite case and reuses its key; see
+  // model.ts retryPending.)
+  const timelineSend = timeline.send;
   const onResend = useCallback(
     (message: Message) => {
       if (channelId === null || !message.body) return;
-      return sendComposerMessage(workspaceId, channelId, message.body).then(
-        () => undefined,
-        () => undefined
-      );
+      return timelineSend(message.body);
     },
-    [workspaceId, channelId]
+    [channelId, timelineSend]
   );
 
   // Read-only probe for the browser gate runner (DOM stays the primary source
@@ -158,6 +160,9 @@ export function ChatShell() {
       connStatus,
       resume: timeline.resume,
       recoveryMarkers: timeline.recoveryMarkers.length,
+      // Local echoes still awaiting a seq. A gate that sees this fall back to 0
+      // has watched the optimistic row reconcile into the confirmed stream.
+      pending: timeline.pending.length,
       stress: stressCount,
     };
   }, [
@@ -165,6 +170,7 @@ export function ChatShell() {
     timeline.state,
     timeline.resume,
     timeline.recoveryMarkers,
+    timeline.pending,
     connStatus,
     stressCount,
   ]);
@@ -242,10 +248,12 @@ export function ChatShell() {
               lastReadSeq={openedWith?.lastReadSeq ?? null}
               unreadCount={openedWith?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
+              pending={stressCount > 0 ? undefined : timeline.pending}
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
               onRetry={timeline.reload}
               onOpenThread={setThread}
               onResend={stressCount > 0 ? undefined : onResend}
+              onResendPending={stressCount > 0 ? undefined : timeline.resend}
               onInviteMember={() => navigate("/settings")}
             />
           ) : channelsQuery.isLoading ? (
@@ -272,10 +280,10 @@ export function ChatShell() {
 
         {stressCount === 0 && channelId !== null && (
           <Composer
-            workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}
             channelLabel={label}
+            onSend={timeline.send}
           />
         )}
       </div>

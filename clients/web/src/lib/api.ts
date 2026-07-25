@@ -11,12 +11,23 @@
 //     compare case-insensitively (uuidEq);
 //   - the realtime WS URL is authoritative from login, never derived.
 //
-// Current scope (inherited from the spike): access token kept in memory only.
-// No refresh rotation yet; clients/web-legacy/src/api/client.ts is the working
-// reference implementation to port during P1.
+// Token policy (M9): the access token is kept in memory only and the refresh
+// token rotates single-use through POST /v1/auth/refresh. Storage, the XSS
+// bound and the deferred Tauri keychain path are documented in ./session.ts,
+// ported from clients/web-legacy/src/api/client.ts.
 // =============================================================================
 
 import { API_BASE } from "./env";
+import {
+  applyLogin,
+  applyRotation,
+  clearSession,
+  getAccessToken,
+  getPersistedSession,
+  getRefreshToken,
+  markAuthExpired,
+  restoredLoginResponse,
+} from "./session";
 
 export interface Member {
   id: string;
@@ -159,29 +170,82 @@ export function uuidEq(a: string | undefined, b: string | undefined): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
-let accessToken: string | null = null;
-export function setAccessToken(token: string | null): void {
-  accessToken = token;
-}
-export function getAccessToken(): string | null {
-  return accessToken;
+interface RefreshResponse {
+  accessToken: string;
+  refreshToken: string;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+function rawRequest(
+  path: string,
+  init: RequestInit,
+  token: string | null
+): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: { message?: string } };
-      if (body?.error?.message) message = body.error.message;
-    } catch {
-      /* non-JSON error body is a documented shape */
-    }
-    throw new ApiError(res.status, message);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(`${API_BASE}${path}`, { ...init, headers });
+}
+
+async function parseError(res: Response): Promise<ApiError> {
+  let message = `HTTP ${res.status}`;
+  try {
+    const body = (await res.json()) as { error?: { message?: string } };
+    if (body?.error?.message) message = body.error.message;
+  } catch {
+    /* non-JSON error body is a documented shape */
   }
+  return new ApiError(res.status, message);
+}
+
+// ---- refresh rotation (single flight) ---------------------------------------
+// The refresh token is single-use (MOMO-300): the server revokes the presented
+// token as it issues the new pair. Concurrent 401s must therefore funnel into
+// ONE rotation, because a second concurrent call would present an
+// already-revoked token and end the session. Cross-TAB races stay possible
+// while the token lives in localStorage; see ./session.ts.
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function refreshSession(): Promise<boolean> {
+  refreshInFlight ??= (async () => {
+    try {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) return false;
+      const res = await rawRequest(
+        "/v1/auth/refresh",
+        { method: "POST", body: JSON.stringify({ refreshToken }) },
+        null
+      );
+      if (!res.ok) {
+        markAuthExpired();
+        return false;
+      }
+      const pair = (await res.json()) as RefreshResponse;
+      applyRotation(pair.accessToken, pair.refreshToken);
+      return true;
+    } catch {
+      return false; // offline: the caller keeps rendering cached content (P15)
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+/**
+ * Authenticated request. On 401 it attempts exactly one rotation and retries
+ * once; a 401 that survives the rotation ends the session. `init.body` is
+ * always a string here, so replaying it on the retry is safe.
+ */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let res = await rawRequest(path, init, getAccessToken());
+  if (res.status === 401 && getRefreshToken()) {
+    if (await refreshSession()) {
+      res = await rawRequest(path, init, getAccessToken());
+    }
+  }
+  if (res.status === 401) markAuthExpired();
+  if (!res.ok) throw await parseError(res);
   return (await res.json()) as T;
 }
 
@@ -192,12 +256,78 @@ export async function login(
 ): Promise<LoginResponse> {
   const body: Record<string, string> = { email, password };
   if (workspace && workspace.trim()) body.workspace = workspace.trim();
-  const res = await request<LoginResponse>("/v1/auth/login", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  accessToken = res.accessToken;
-  return res;
+  const res = await rawRequest(
+    "/v1/auth/login",
+    { method: "POST", body: JSON.stringify(body) },
+    null
+  );
+  if (!res.ok) throw await parseError(res);
+  const loginResponse = (await res.json()) as LoginResponse;
+  applyLogin(loginResponse);
+  return loginResponse;
+}
+
+/**
+ * Resume a stored session after a reload or a webview restart (M9). The access
+ * token was never persisted, so resuming IS one refresh rotation; identity and
+ * the websocket address come from the stored login response.
+ *
+ * Returns null when there is nothing to resume or the stored refresh token is
+ * dead, and wipes local state in that case so the login screen is not shown
+ * beside a token that still looks valid.
+ */
+export async function restoreSession(): Promise<LoginResponse | null> {
+  if (!getPersistedSession()) return null;
+  const rotated = await refreshSession();
+  const persisted = getPersistedSession();
+  const token = getAccessToken();
+  if (!rotated || !persisted || !token) {
+    clearSession();
+    return null;
+  }
+  return restoredLoginResponse(persisted, token);
+}
+
+/**
+ * Log out completely. The local wipe happens FIRST and unconditionally, so a
+ * slow or failing network can never leave a usable token on the device; the
+ * server revocation then runs with the captured pair as a best effort.
+ */
+export async function logout(): Promise<void> {
+  const access = getAccessToken();
+  const refresh = getRefreshToken();
+  clearSession();
+  if (!access) return; // nothing the server will accept a revocation for
+  const revoke = (accessToken: string, refreshToken: string | null) =>
+    rawRequest(
+      "/v1/auth/logout",
+      {
+        method: "POST",
+        body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+      },
+      accessToken
+    );
+  try {
+    const res = await revoke(access, refresh);
+    if (res.status === 401 && refresh) {
+      // The access token expired before the server revoked anything, while the
+      // refresh token is alive for 30 days. Rotate that pair once and revoke
+      // the result, otherwise the session stays valid on the server. The store
+      // is already wiped, so this rotation is carried by locals only.
+      const rotated = await rawRequest(
+        "/v1/auth/refresh",
+        { method: "POST", body: JSON.stringify({ refreshToken: refresh }) },
+        null
+      );
+      if (rotated.ok) {
+        const pair = (await rotated.json()) as RefreshResponse;
+        await revoke(pair.accessToken, pair.refreshToken);
+      }
+    }
+  } catch {
+    // A network failure must not trap the user inside the session; the local
+    // wipe above already happened and the tokens expire on their own.
+  }
 }
 
 export async function fetchRealtimeToken(): Promise<string> {

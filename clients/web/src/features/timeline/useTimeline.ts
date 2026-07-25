@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMessages, type Message } from "@/lib/api";
+import { fetchMessages, sendMessage, type Message } from "@/lib/api";
 import type { MessageNewEvent, RealtimeHandle } from "@/lib/realtime";
 import {
+  addPending,
   emptyTimeline,
+  failPending,
   reconcileMessages,
+  removePending,
+  retryPending,
+  unsettledPending,
+  type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
 } from "./model";
@@ -40,6 +46,12 @@ export interface UseTimelineResult {
   resume: ResumeInfo;
   /** Reconnect markers, rendered inline as "재연결됨, seq N까지 복구". */
   recoveryMarkers: RecoveryMarker[];
+  /** Local echoes awaiting their server seq (M10). Never inside `state`. */
+  pending: PendingMessage[];
+  /** The one send path: optimistic echo now, server seq when it lands. */
+  send: (body: string) => Promise<void>;
+  /** Re-run a failed echo with the SAME idempotency key. */
+  resend: (clientMsgId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
@@ -47,9 +59,9 @@ export interface UseTimelineResult {
 }
 
 /**
- * Loads channel history head, subscribes the realtime rail, and heals gaps via
- * REST `?after` backfill on a non-recovered resubscribe. `seq` is the sole
- * ordering authority throughout (reconcileMessages).
+ * Loads channel history head, subscribes the realtime rail, heals gaps via REST
+ * `?after` backfill on a non-recovered resubscribe, and owns the send path.
+ * `seq` is the sole ordering authority throughout (reconcileMessages).
  *
  * Every heal also records a RecoveryMarker so the timeline can state exactly
  * how far it was restored, which is only possible because the server issues a
@@ -58,7 +70,8 @@ export interface UseTimelineResult {
 export function useTimeline(
   realtime: RealtimeHandle | null,
   workspaceId: string,
-  channelId: string | null
+  channelId: string | null,
+  authorMemberId: string
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult["status"]>("loading");
@@ -68,6 +81,7 @@ export function useTimeline(
     resubscribeCount: 0,
   });
   const [recoveryMarkers, setRecoveryMarkers] = useState<RecoveryMarker[]>([]);
+  const [pending, setPending] = useState<PendingMessage[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -98,6 +112,79 @@ export function useTimeline(
     ]);
   }, []);
 
+  // ---- optimistic send (M10) ------------------------------------------------
+  // The pending list is mirrored in a ref so a retry can read the row it is
+  // retrying without making the callbacks depend on the list (which would
+  // rebuild the composer's handler on every keystroke of every other sender).
+  const pendingRef = useRef<PendingMessage[]>([]);
+  const updatePending = useCallback(
+    (fn: (list: PendingMessage[]) => PendingMessage[]) => {
+      pendingRef.current = fn(pendingRef.current);
+      setPending(pendingRef.current);
+    },
+    []
+  );
+
+  // Which channel the hook is currently showing, read by in-flight sends that
+  // resolved after the user moved on. Without it a POST for channel A could
+  // merge its row into channel B's timeline.
+  const channelRef = useRef<string | null>(null);
+
+  const post = useCallback(
+    async (row: PendingMessage) => {
+      try {
+        const confirmed = await sendMessage(
+          workspaceId,
+          row.channelId,
+          row.clientMsgId,
+          row.body
+        );
+        // The response IS the committed server echo (seq-authoritative), so
+        // merging it is not optimistic rendering: it is the same reconcile the
+        // realtime frame gets, and whichever arrives second dedupes by seq.
+        if (channelRef.current === row.channelId) applyBatch([confirmed]);
+        updatePending((list) => removePending(list, row.clientMsgId));
+      } catch {
+        // The row stays where it is and states 전송 실패 with a retry (R-1 §3),
+        // which is the same inline failure path a server-stored `failed`
+        // message row uses. No toast, no banner far from the message.
+        updatePending((list) => failPending(list, row.clientMsgId));
+      }
+    },
+    [workspaceId, applyBatch, updatePending]
+  );
+
+  const send = useCallback(
+    async (body: string) => {
+      const channel = channelId;
+      if (channel === null || body === "") return;
+      const row: PendingMessage = {
+        clientMsgId: crypto.randomUUID(),
+        channelId: channel,
+        authorMemberId,
+        body,
+        // Local clock, used only for grouping and the time label on a row that
+        // has not been ordered yet. Ordering still waits for seq.
+        createdAtMs: Date.now(),
+        sinceSeq: newestSeqRef.current,
+        status: "sending",
+      };
+      updatePending((list) => addPending(list, row));
+      await post(row);
+    },
+    [channelId, authorMemberId, post, updatePending]
+  );
+
+  const resend = useCallback(
+    async (clientMsgId: string) => {
+      const row = pendingRef.current.find((p) => p.clientMsgId === clientMsgId);
+      if (!row || row.status === "sending") return;
+      updatePending((list) => retryPending(list, clientMsgId));
+      await post(row);
+    },
+    [post, updatePending]
+  );
+
   const backfillAfter = useCallback(
     async (channel: string) => {
       let after = newestSeqRef.current ?? 0;
@@ -122,11 +209,27 @@ export function useTimeline(
   );
 
   useEffect(() => {
+    channelRef.current = channelId;
+  }, [channelId]);
+
+  // Drop echoes whose confirmed twin has landed in the seq stream, even when
+  // the POST that created them never resolved. That case is real: if the write
+  // committed but the response was lost, the realtime frame delivers the row
+  // and the echo is settled by content, while the request may hang forever.
+  // The render fold already hides such a row; without this the entry would sit
+  // in state for the rest of the session and be reported as still sending.
+  useEffect(() => {
+    const open = unsettledPending(state.messages, pendingRef.current);
+    if (open.length !== pendingRef.current.length) updatePending(() => open);
+  }, [state.messages, updatePending]);
+
+  useEffect(() => {
     if (!channelId || !realtime) return;
     let cancelled = false;
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
+    updatePending(() => []);
     setState(emptyTimeline());
     setStatus("loading");
     setReachedStart(false);
@@ -189,6 +292,7 @@ export function useTimeline(
     backfillAfter,
     applyBatch,
     addMarker,
+    updatePending,
     reloadNonce,
   ]);
 
@@ -216,6 +320,9 @@ export function useTimeline(
     status,
     resume,
     recoveryMarkers,
+    pending,
+    send,
+    resend,
     loadOlder,
     reload,
     loadingOlder,
