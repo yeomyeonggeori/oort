@@ -5,6 +5,7 @@ import {
   addPending,
   buildTimelineItems,
   confirmsPending,
+  emptyChannelCopy,
   emptyTimeline,
   failPending,
   isStrictlyOrdered,
@@ -446,5 +447,55 @@ describe("mention autocomplete", () => {
       "seongjae",
       "hermes",
     ]);
+  });
+});
+
+// A DM and a channel are empty for different reasons, so they cannot land on
+// one line of copy: a 1:1 DM's participants are fixed by dmKey, so the channel
+// copy would offer an action the server refuses (MOMO-611 R2 High).
+describe("empty surface copy", () => {
+  it("names the person and offers no invite in a DM", () => {
+    const copy = emptyChannelCopy("dm", {
+      displayName: "곽성재",
+      kind: "human",
+    });
+    expect(copy.headline).toBe("곽성재님과의 대화를 시작하세요.");
+    expect(copy.invitable).toBe(false);
+    expect(copy.detail).not.toContain("추가");
+  });
+
+  it("frames an agent DM as work handed over, still with no invite", () => {
+    const copy = emptyChannelCopy("dm", {
+      displayName: "김인턴",
+      kind: "agent",
+    });
+    expect(copy.headline).toBe("김인턴님에게 첫 일을 맡겨보세요.");
+    expect(copy.invitable).toBe(false);
+  });
+
+  it("says nothing about who it is when the roster has not loaded", () => {
+    const copy = emptyChannelCopy("dm", null);
+    expect(copy.headline).toBe("다이렉트 메시지를 시작하세요.");
+    expect(copy.invitable).toBe(false);
+  });
+
+  it("invites members in a channel, which can gain them", () => {
+    for (const kind of ["public", "private", undefined] as const) {
+      const copy = emptyChannelCopy(kind, null);
+      expect(copy.headline).toBe("이 채널을 함께 시작하세요.");
+      expect(copy.invitable).toBe(true);
+    }
+  });
+
+  it("writes no em-dash into any of the four copies", () => {
+    const copies = [
+      emptyChannelCopy("dm", { displayName: "곽성재", kind: "human" }),
+      emptyChannelCopy("dm", { displayName: "김인턴", kind: "agent" }),
+      emptyChannelCopy("dm", null),
+      emptyChannelCopy("public", null),
+    ];
+    for (const copy of copies) {
+      expect(`${copy.headline}${copy.detail}`).not.toMatch(/[—–]/);
+    }
   });
 });

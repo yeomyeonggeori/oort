@@ -9,6 +9,7 @@ import { SkeletonRows } from "@/features/common/States";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
+import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
@@ -57,6 +58,7 @@ export function App() {
           <Route path="c/:channelId" element={<ChatShell />} />
           <Route path="inbox" element={<InboxRoute />} />
           <Route path="activity" element={<ActivityRoute />} />
+          <Route path="directory" element={<DirectoryRoute />} />
           <Route path="settings" element={<SettingsRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

@@ -50,6 +50,9 @@ export interface LoginResponse {
   realtimeWebSocketUrl: string;
 }
 
+/** Workspace membership role (openapi MembershipRole). Absent on older rows. */
+export type MembershipRole = "owner" | "admin" | "member" | "guest";
+
 /**
  * Roster entry (GET /roster). Superset of `Member`: adds the agent/human split
  * fields the sidebar and timeline need to attribute a message to a real member
@@ -63,6 +66,8 @@ export interface RosterMember {
   displayName: string;
   handle: string;
   avatarUrl?: string;
+  /** Workspace role, as the roster projection reports it. */
+  role?: MembershipRole;
   channelCount: number;
   channelIds: string[];
   capabilities: string[];
@@ -419,6 +424,29 @@ export async function listChannels(workspaceId: string): Promise<Channel[]> {
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`
   );
   return res.channels;
+}
+
+/**
+ * Result of POST /v1/workspaces/{ws}/dms. The call is idempotent per participant
+ * pair: it creates the channel on the first call (201) and returns the existing
+ * one afterwards (200). `created` tells the two apart; `channel.id` is the
+ * SERVER's answer to "which DM is this", so a client never has to match a pair
+ * against its own channel list to find out.
+ */
+export interface OpenedDirectMessage {
+  channel: Channel;
+  created: boolean;
+}
+
+/** Open (or reuse) the 1:1 DM channel with another member. */
+export function openDirectMessage(
+  workspaceId: string,
+  memberId: string
+): Promise<OpenedDirectMessage> {
+  return request<OpenedDirectMessage>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/dms`,
+    { method: "POST", body: JSON.stringify({ memberId }) }
+  );
 }
 
 /** Active workspace members, humans and agents alike (agents are members). */

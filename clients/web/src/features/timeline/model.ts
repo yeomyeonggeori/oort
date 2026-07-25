@@ -1,4 +1,4 @@
-import type { Message } from "@/lib/api";
+import type { Channel, Message, RosterMember } from "@/lib/api";
 import { uuidEq } from "@/lib/api";
 
 // =============================================================================
@@ -27,6 +27,59 @@ export interface TimelineState {
 
 export function emptyTimeline(): TimelineState {
   return { messages: [], oldestSeq: null, newestSeq: null };
+}
+
+// ---- empty surface copy (R-1 §3 빈 상태) ------------------------------------
+//
+// A channel and a DM are empty for different reasons and have different next
+// steps, so they cannot share one line of copy. A channel can gain members, so
+// its empty state invites you to bring them. A 1:1 DM cannot: the server fixes
+// the participant pair by dmKey (openapi `openDm`), so offering "사람 추가"
+// there would be an action the product does not have. What is left in a DM is
+// the thing the composer below already does, so the empty state names the
+// person and hands focus to the composer instead of inventing a second door.
+
+export interface EmptyChannelCopy {
+  headline: string;
+  detail: string;
+  /** Members can still be added here, so the invite action is offered. */
+  invitable: boolean;
+}
+
+const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
+
+export function emptyChannelCopy(
+  kind: Channel["kind"] | null | undefined,
+  peer: Pick<RosterMember, "displayName" | "kind"> | null
+): EmptyChannelCopy {
+  if (kind !== "dm") {
+    // R-1 §3 asked for [사람 추가] and [에이전트 추가] as equal buttons, to say
+    // that adding an agent is not the lesser path. Two buttons on one handler
+    // said it twice and did it once, and this client has no agent-creation
+    // surface to send the second one to, so the equality moved into the copy
+    // and the surface offers the single action it can actually perform.
+    return {
+      headline: "이 채널을 함께 시작하세요.",
+      detail: "멤버를 초대하면 사람과 에이전트가 같은 자격으로 함께 일합니다.",
+      invitable: true,
+    };
+  }
+  if (!peer) {
+    // Roster not loaded yet: name nothing rather than name the wrong thing.
+    return {
+      headline: "다이렉트 메시지를 시작하세요.",
+      detail: DM_DETAIL,
+      invitable: false,
+    };
+  }
+  return {
+    headline:
+      peer.kind === "agent"
+        ? `${peer.displayName}님에게 첫 일을 맡겨보세요.`
+        : `${peer.displayName}님과의 대화를 시작하세요.`,
+    detail: DM_DETAIL,
+    invitable: false,
+  };
 }
 
 /** Binary-search insertion index for `seq` in an ascending array. */

@@ -1,24 +1,50 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
-import { Activity, Hash, Inbox, Lock, MessageSquare, Settings } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Hash,
+  Inbox,
+  Lock,
+  MessageSquare,
+  Settings,
+  User,
+  Users,
+} from "lucide-react";
 import { useSession } from "@/app/session";
 import {
-  channelLabel,
+  channelLabelParts,
+  dmPeer,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
+import { switcherPeople } from "@/features/directory/model";
+import { useOpenDm } from "@/features/directory/useOpenDm";
+import { InlineBanner } from "@/features/common/States";
 
 // =============================================================================
-// ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs and the
-// global surfaces in one list. Arrow keys move, Enter opens, Esc closes: cmdk
-// owns that grammar, so no custom key handling beyond the ⌘K toggle.
+// ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
+// and the global surfaces in one list. Arrow keys move, Enter opens, Esc closes:
+// cmdk owns that grammar, so no custom key handling beyond the ⌘K toggle.
+//
+// 사람 (parity G-3/G-4) is a section of the SAME palette rather than a second
+// picker: "누구와 이야기할까"는 "어디로 갈까"의 한 갈래다. Choosing a person goes
+// through the same useOpenDm path a directory row uses, so an existing
+// conversation is reused instead of a second one being created.
 // =============================================================================
 
+// cmdk writes data-disabled on the item it refuses to select. Without a rule
+// for it an unselectable name rendered exactly like a selectable one, so the
+// list showed rows that answer nothing to Enter and look like rows that do.
+// opacity-50 is the same dimming Button, Input and the directory row already
+// use for disabled, so the palette does not invent a second dialect for the
+// same state; and dimmed text below AA is what WCAG 1.4.3 exempts inactive
+// controls for, which is exactly what this row is.
 const itemClass =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1 text-body " +
   "text-ink data-[selected=true]:bg-accent-soft " +
-  "data-[selected=true]:text-ink";
+  "data-[selected=true]:text-ink data-[disabled=true]:opacity-50";
 
 // cmdk renders the group label into a [cmdk-group-heading] element it owns, so
 // it is styled from the list rather than by a className we could pass. Same
@@ -40,15 +66,55 @@ export function QuickSwitcher({
   const navigate = useNavigate();
   const { groups } = useChannels(workspaceId);
   const { directory } = useDirectory(workspaceId);
+  const dm = useOpenDm();
+  const { clearError } = dm;
+
+  // Everyone already reachable as a DM row. Those rows are the conversation,
+  // so the 사람 section below lists the people you have not talked to yet.
+  const peersWithDm = useMemo(
+    () =>
+      groups.dms
+        .map((channel) => dmPeer(channel, directory, session.member.id)?.id)
+        .filter((id): id is string => id !== undefined),
+    [groups.dms, directory, session.member.id]
+  );
+
+  // Who a DM can be opened with, decided by the directory's own rule rather
+  // than by a second filter that would drift from it (model.switcherPeople).
+  const people = useMemo(
+    () => switcherPeople(directory.members, session.member.id, peersWithDm),
+    [directory.members, session.member.id, peersWithDm]
+  );
+
+  // A failed DM belongs to the attempt that failed, not to the palette. The
+  // palette outlives its openings — cmdk unmounts the dialog contents but this
+  // component stays — so nothing else would ever clear the banner, and a ⌘K
+  // opened to jump to a channel would start with an error already given up on.
+  useEffect(() => {
+    if (!open) clearError();
+  }, [open, clearError]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
+      if (!event.metaKey && !event.ctrlKey) return;
+      // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). It lands on the member
+      // directory, which is where a DM starts, and the directory puts the caret
+      // in its search field on arrival (DirectoryRoute), so this shortcut ends
+      // where its name promises: at a box you can type a name into. Checked
+      // BEFORE ⌘K, because the shifted key still reports as "k" and would
+      // otherwise toggle the palette.
+      if (event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        onOpenChange(false);
+        navigate("/directory");
+        return;
+      }
+      if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         onOpenChange(!open);
       }
       // ⌘, opens settings (R-1 §1 keyboard path).
-      if (event.key === "," && (event.metaKey || event.ctrlKey)) {
+      if (event.key === ",") {
         event.preventDefault();
         navigate("/settings");
       }
@@ -72,15 +138,22 @@ export function QuickSwitcher({
       data-testid="quick-switcher"
     >
       <Command.Input
-        placeholder="채널, 다이렉트 메시지, 설정으로 이동"
+        placeholder="채널, 사람, 설정으로 이동"
         data-testid="quick-switcher-input"
         className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent placeholder:text-ink-muted"
       />
+
+      {/* A DM that failed to open keeps the palette up: the message belongs next
+       * to the name that was picked, not behind a dialog that closed itself. */}
+      {dm.error && (
+        <InlineBanner message={dm.error.message} testId="switcher-dm-error" />
+      )}
+
       <Command.List
         className={`max-h-pane overflow-y-auto p-2 ${groupHeadingClass}`}
       >
         <Command.Empty className="px-2 py-3 text-body text-ink-muted">
-          일치하는 채널이 없습니다. 다른 이름으로 검색하세요.
+          일치하는 채널이나 사람이 없습니다. 다른 이름으로 검색하세요.
         </Command.Empty>
 
         <Command.Group heading="이동">
@@ -91,6 +164,19 @@ export function QuickSwitcher({
           <Command.Item className={itemClass} onSelect={() => go("/activity")}>
             <Activity className="size-4 opacity-70" />
             활동
+          </Command.Item>
+          {/* 멤버, the same word the sidebar row and the route's own h1 use.
+              One destination cannot have three names, and the surface people
+              arrive at says 멤버, so that is the name (R-1 어휘 계승). The
+              older wording stays in `value` as a search alias, so typing
+              디렉터리 or 명부 still finds it. */}
+          <Command.Item
+            className={itemClass}
+            value="멤버 디렉터리 명부"
+            onSelect={() => go("/directory")}
+          >
+            <Users className="size-4 opacity-70" />
+            멤버
           </Command.Item>
           <Command.Item className={itemClass} onSelect={() => go("/settings")}>
             <Settings className="size-4 opacity-70" />
@@ -119,19 +205,78 @@ export function QuickSwitcher({
         {groups.dms.length > 0 && (
           <Command.Group heading="다이렉트 메시지">
             {groups.dms.map((channel) => {
-              const label = channelLabel(channel, directory, session.member.id);
+              // Same rule as the sidebar and the directory: the name decides
+              // the row only when the workspace has one member by that name.
+              // Here it never has, so the handle rides along and the agent 김인턴
+              // and the human 김인턴 stop being two identical lines.
+              const label = channelLabelParts(
+                channel,
+                directory,
+                session.member.id
+              );
               return (
                 <Command.Item
                   key={channel.id}
-                  value={`${label} ${channel.id}`}
+                  value={`${label.text} ${label.handle ?? ""} ${channel.id}`}
                   className={itemClass}
+                  data-testid="switcher-dm"
+                  data-channel-id={channel.id}
                   onSelect={() => go(`/c/${channel.id}`)}
                 >
                   <MessageSquare className="size-4 opacity-70" />
-                  {label}
+                  <span className={label.isAgent ? "text-agent" : undefined}>
+                    {label.text}
+                  </span>
+                  {label.handle && (
+                    <span className="text-meta text-ink-muted">
+                      {label.handle}
+                    </span>
+                  )}
                 </Command.Item>
               );
             })}
+          </Command.Group>
+        )}
+
+        {people.length > 0 && (
+          <Command.Group heading="사람">
+            {people.map(({ member, selectable, reason }) => (
+              <Command.Item
+                key={member.id}
+                value={`${member.displayName} ${member.handle} ${member.id}`}
+                className={itemClass}
+                data-testid="switcher-person"
+                data-member-id={member.id}
+                data-member-kind={member.kind}
+                // cmdk skips a disabled item for arrow keys, Enter and click,
+                // while keeping it in the filtered list: the name is still
+                // findable, it just is not an action.
+                disabled={!selectable}
+                onSelect={() => {
+                  void dm.openDm(member).then((opened) => {
+                    if (opened) onOpenChange(false);
+                  });
+                }}
+              >
+                {/* Agent identity is the --agent token on the glyph and nothing
+                 * else: same row, same type as a human (design-taste-web §9). */}
+                {member.kind === "agent" ? (
+                  <Bot className="size-4 text-agent" />
+                ) : (
+                  <User className="size-4 opacity-70" />
+                )}
+                {member.displayName}
+                <span className="text-meta text-ink-muted">
+                  @{member.handle}
+                </span>
+                {/* Same word the directory row uses, same token, so the two
+                 * surfaces do not invent two vocabularies for one status. */}
+                {reason && <span className="text-meta text-warn">{reason}</span>}
+                {dm.pendingMemberId === member.id && (
+                  <span className="text-meta text-ink-muted">여는 중</span>
+                )}
+              </Command.Item>
+            ))}
           </Command.Group>
         )}
       </Command.List>
