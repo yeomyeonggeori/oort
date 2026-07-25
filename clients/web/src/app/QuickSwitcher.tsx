@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { useSession } from "@/app/session";
 import {
-  channelLabel,
+  channelLabelParts,
+  dmPeer,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
@@ -61,11 +62,21 @@ export function QuickSwitcher({
   const dm = useOpenDm();
   const { clearError } = dm;
 
+  // Everyone already reachable as a DM row. Those rows are the conversation,
+  // so the 사람 section below lists the people you have not talked to yet.
+  const peersWithDm = useMemo(
+    () =>
+      groups.dms
+        .map((channel) => dmPeer(channel, directory, session.member.id)?.id)
+        .filter((id): id is string => id !== undefined),
+    [groups.dms, directory, session.member.id]
+  );
+
   // Who a DM can be opened with, decided by the directory's own rule rather
   // than by a second filter that would drift from it (model.switcherPeople).
   const people = useMemo(
-    () => switcherPeople(directory.members, session.member.id),
-    [directory.members, session.member.id]
+    () => switcherPeople(directory.members, session.member.id, peersWithDm),
+    [directory.members, session.member.id, peersWithDm]
   );
 
   // A failed DM belongs to the attempt that failed, not to the palette. The
@@ -179,16 +190,33 @@ export function QuickSwitcher({
         {groups.dms.length > 0 && (
           <Command.Group heading="다이렉트 메시지">
             {groups.dms.map((channel) => {
-              const label = channelLabel(channel, directory, session.member.id);
+              // Same rule as the sidebar and the directory: the name decides
+              // the row only when the workspace has one member by that name.
+              // Here it never has, so the handle rides along and the agent 김인턴
+              // and the human 김인턴 stop being two identical lines.
+              const label = channelLabelParts(
+                channel,
+                directory,
+                session.member.id
+              );
               return (
                 <Command.Item
                   key={channel.id}
-                  value={`${label} ${channel.id}`}
+                  value={`${label.text} ${label.handle ?? ""} ${channel.id}`}
                   className={itemClass}
+                  data-testid="switcher-dm"
+                  data-channel-id={channel.id}
                   onSelect={() => go(`/c/${channel.id}`)}
                 >
                   <MessageSquare className="size-4 opacity-70" />
-                  {label}
+                  <span className={label.isAgent ? "text-agent" : undefined}>
+                    {label.text}
+                  </span>
+                  {label.handle && (
+                    <span className="text-meta text-ink-muted">
+                      {label.handle}
+                    </span>
+                  )}
                 </Command.Item>
               );
             })}

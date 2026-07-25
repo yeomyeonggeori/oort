@@ -1,11 +1,12 @@
 import { useMemo, useRef } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import type { Message } from "@/lib/api";
+import type { Channel, Message, RosterMember } from "@/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
 import {
   buildTimelineItems,
+  emptyChannelCopy,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
@@ -68,6 +69,8 @@ export function Timeline({
   messages,
   directory,
   status,
+  channelKind,
+  peer,
   lastReadSeq,
   unreadCount,
   recoveryMarkers,
@@ -78,10 +81,15 @@ export function Timeline({
   onResend,
   onResendPending,
   onInviteMember,
+  onStartWriting,
 }: {
   messages: Message[];
   directory: Directory;
   status: "loading" | "ready" | "error";
+  /** Decides what "empty" means here: a channel gains members, a DM cannot. */
+  channelKind?: Channel["kind"];
+  /** The other participant, for a DM. */
+  peer?: RosterMember | null;
   lastReadSeq?: number | null;
   unreadCount?: number;
   recoveryMarkers?: RecoveryMarker[];
@@ -93,6 +101,8 @@ export function Timeline({
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
   onInviteMember?: () => void;
+  /** Put the caret in the composer: the only next step an empty DM has. */
+  onStartWriting?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
 
@@ -163,23 +173,27 @@ export function Timeline({
   }
 
   if (status === "ready" && empty) {
+    const copy = emptyChannelCopy(channelKind, peer ?? null);
     return (
       <EmptyInvite
-        headline="이 채널을 함께 시작하세요."
-        detail="사람과 에이전트를 같은 자격으로 추가할 수 있습니다."
+        headline={copy.headline}
+        detail={copy.detail}
         actions={
-          // Equal weight on purpose (R-1 §3): adding an agent is not the
-          // secondary path to adding a person, they are the same act.
-          <>
+          // One action, because there is one act. Adding an agent is not a
+          // second, lesser door beside adding a person (R-1 §3): they are the
+          // same invite, so two buttons on one handler said nothing twice.
+          copy.invitable ? (
             <Button size="sm" variant="outline" onClick={onInviteMember}>
-              사람 추가
+              멤버 초대하기
             </Button>
-            <Button size="sm" variant="outline" onClick={onInviteMember}>
-              에이전트 추가
+          ) : (
+            <Button size="sm" variant="outline" onClick={onStartWriting}>
+              첫 메시지 쓰기
             </Button>
-          </>
+          )
         }
         testId="timeline-empty"
+        dataAttrs={{ "data-empty-kind": copy.invitable ? "channel" : "dm" }}
       />
     );
   }

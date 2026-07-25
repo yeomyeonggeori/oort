@@ -18,10 +18,19 @@ import { dmAvailability, roleLabel, statusLabel } from "./model";
 // the DM, because opening a conversation with someone is the only thing this
 // surface exists to do. Rows that cannot be a DM target (yourself, a member who
 // is not active) render as plain rows instead of dead buttons, and say why.
+//
+// Measure: the hover background and the separator run the full pane, but the
+// CONTENT is capped at max-w-pane-lg, the same 640px the search field above it
+// uses. Left full-bleed on a 1600px window the trailing glyph landed ~900px
+// from the name it belongs to, which is the exact failure tokens.md §4 names
+// (a right-aligned column a screen away from its label stops reading as a row
+// and starts reading as a banner).
 // =============================================================================
 
 const ROW_CLASS =
-  "flex w-full items-center gap-3 border-b border-line px-4 py-2 text-left";
+  "flex w-full items-center border-b border-line px-4 py-2 text-left";
+
+const CONTENT_CLASS = "flex w-full max-w-pane-lg items-center gap-3";
 
 export function MemberRow({
   member,
@@ -76,14 +85,16 @@ export function MemberRow({
     return (
       <li>
         <div {...shared} className={ROW_CLASS}>
-          <Avatar member={member} name={member.displayName} />
-          {identity}
-          {/* Self is marked here; an inactive member already carries its
-              status beside the name, so the trailing slot stays empty rather
-              than saying 초대됨 twice on one row. */}
-          {availability.kind === "self" && (
-            <span className="shrink-0 text-meta text-ink-muted">나</span>
-          )}
+          <span className={CONTENT_CLASS}>
+            <Avatar member={member} name={member.displayName} />
+            {identity}
+            {/* Self is marked here; an inactive member already carries its
+                status beside the name, so the trailing slot stays empty rather
+                than saying 초대됨 twice on one row. */}
+            {availability.kind === "self" && (
+              <span className="shrink-0 text-meta text-ink-muted">나</span>
+            )}
+          </span>
         </div>
       </li>
     );
@@ -105,15 +116,17 @@ export function MemberRow({
           "disabled:cursor-default disabled:opacity-50"
         )}
       >
-        <Avatar member={member} name={member.displayName} />
-        {identity}
-        {pending ? (
-          <span className="shrink-0 text-meta text-ink-muted">여는 중</span>
-        ) : (
-          <span className="shrink-0 text-ink-muted" aria-hidden="true">
-            <MessageSquare className="size-4" />
-          </span>
-        )}
+        <span className={CONTENT_CLASS}>
+          <Avatar member={member} name={member.displayName} />
+          {identity}
+          {pending ? (
+            <span className="shrink-0 text-meta text-ink-muted">여는 중</span>
+          ) : (
+            <span className="shrink-0 text-ink-muted" aria-hidden="true">
+              <MessageSquare className="size-4" />
+            </span>
+          )}
+        </span>
       </button>
     </li>
   );

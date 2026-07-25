@@ -176,7 +176,14 @@ export interface SwitcherPerson {
  */
 export function switcherPeople(
   members: RosterMember[],
-  selfMemberId: string
+  selfMemberId: string,
+  /**
+   * Members already listed above as a 다이렉트 메시지 row. That row IS the
+   * conversation this section would open, so listing them twice offers one
+   * destination under two headings, and the second one costs a POST to learn
+   * what the first already knew.
+   */
+  membersWithDm: string[] = []
 ): SwitcherPerson[] {
   const rows: SwitcherPerson[] = [];
   for (const member of members) {
@@ -185,6 +192,9 @@ export function switcherPeople(
     // places to go and you are not one of them. The directory keeps that row
     // because it is the roster, and a roster missing you is wrong.
     if (availability.kind === "self") continue;
+    // uuidEq, not ===: these ids come from two different responses (/roster and
+    // /dms) and the wire case is not guaranteed to match.
+    if (membersWithDm.some((id) => uuidEq(id, member.id))) continue;
     rows.push({
       member,
       selectable: availability.kind === "ready",

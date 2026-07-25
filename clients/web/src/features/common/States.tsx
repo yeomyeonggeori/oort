@@ -85,16 +85,20 @@ export function EmptyInvite({
   detail,
   actions,
   testId,
+  dataAttrs,
 }: {
   headline: string;
   detail?: string;
   actions?: React.ReactNode;
   testId?: string;
+  /** Extra data-* hooks, e.g. which variant of an empty state this is. */
+  dataAttrs?: Record<string, string>;
 }) {
   return (
     <div
       className="flex flex-col items-start gap-3 px-4 py-6"
       data-testid={testId}
+      {...dataAttrs}
     >
       <p className="text-body font-medium text-ink">
         {headline}

@@ -14,7 +14,7 @@ import {
 import type { Channel } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
-  channelLabel,
+  channelLabelParts,
   memberFor,
   unreadFor,
   useChannels,
@@ -126,7 +126,14 @@ export function Sidebar({
 
   function rowFor(channel: Channel) {
     const read = unreadFor(readStates.byChannel, channel.id);
-    const label = channelLabel(channel, directoryQuery.directory, session.member.id);
+    // A DM row is named after a person, and this workspace holds two members
+    // called 김인턴, so the row carries the handle whenever the name alone does
+    // not decide which one it is (channelLabelParts).
+    const label = channelLabelParts(
+      channel,
+      directoryQuery.directory,
+      session.member.id
+    );
     return (
       <SidebarRow
         key={channel.id}
@@ -140,7 +147,9 @@ export function Sidebar({
             <Hash className="size-4" />
           )
         }
-        label={label}
+        label={label.text}
+        handle={label.handle}
+        agent={label.isAgent}
         unreadCount={read?.unreadCount ?? 0}
         mentionCount={read?.mentionCount ?? 0}
         trailing={<AgentTurnBadge channelId={channel.id} />}

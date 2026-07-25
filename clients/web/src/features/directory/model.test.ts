@@ -247,6 +247,16 @@ describe("switcherPeople", () => {
     expect(rows.every((r) => r.reason === null)).toBe(true);
   });
 
+  it("drops a member the palette already lists as a DM row, uuid case aside", () => {
+    // The DM row above IS this conversation, so a second row under 사람 would
+    // offer one destination twice (and pay a POST to learn what it knew).
+    const rows = switcherPeople(ROSTER, DEMO.id, [
+      INTERN_AGENT.id.toUpperCase(),
+      SEONGJAE.id,
+    ]);
+    expect(rows.map((r) => r.member.handle)).toEqual(["hermes", "intern-kim"]);
+  });
+
   it("keeps an inactive member visible but unselectable, with the reason", () => {
     const rows = switcherPeople([INVITED, SUSPENDED], DEMO.id);
     expect(rows).toEqual([
