@@ -3,7 +3,12 @@ import type { RosterMember } from "@/lib/api";
 import { cn } from "@/design/lib/cn";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
-import { dmAvailability, roleLabel, statusLabel } from "./model";
+import {
+  dmAvailability,
+  memberRowLabel,
+  roleLabel,
+  statusLabel,
+} from "./model";
 
 // =============================================================================
 // One directory row (parity G-3). Flat row, separator, hover background: a
@@ -107,7 +112,10 @@ export function MemberRow({
         {...shared}
         data-directory-row=""
         disabled={pending}
-        aria-label={`${member.displayName}님과 다이렉트 메시지 열기`}
+        // Name AND handle AND attribution: two rows here really do share a
+        // display name, so a label of the name alone would offer a screen
+        // reader two identical actions (model.memberRowLabel).
+        aria-label={memberRowLabel(member, owner?.displayName ?? null)}
         onClick={() => onOpenDm(member)}
         className={cn(
           ROW_CLASS,

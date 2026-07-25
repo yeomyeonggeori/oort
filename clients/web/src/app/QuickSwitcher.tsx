@@ -91,8 +91,11 @@ export function QuickSwitcher({
     function onKeyDown(event: KeyboardEvent) {
       if (!event.metaKey && !event.ctrlKey) return;
       // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). It lands on the member
-      // directory, which is where a DM starts. Checked BEFORE ⌘K, because the
-      // shifted key still reports as "k" and would otherwise toggle the palette.
+      // directory, which is where a DM starts, and the directory puts the caret
+      // in its search field on arrival (DirectoryRoute), so this shortcut ends
+      // where its name promises: at a box you can type a name into. Checked
+      // BEFORE ⌘K, because the shifted key still reports as "k" and would
+      // otherwise toggle the palette.
       if (event.shiftKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         onOpenChange(false);

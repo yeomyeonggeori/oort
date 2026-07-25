@@ -113,9 +113,76 @@ export function groupDirectory(
   };
 }
 
-/** "사람 3 · 에이전트 2", the roster's own split, not an invented metric. */
-export function countLabel(groups: DirectoryGroups): string {
+/** What this client knows about the roster, which is not always "it". */
+export interface RosterLoadState {
+  /**
+   * No roster has arrived yet. This is react-query's `isPending`, not
+   * `isLoading`: on the very first render a fresh query is pending with
+   * fetchStatus `idle`, so `isLoading` is false for one frame, and a surface
+   * that branches on it paints "there is nobody here" before it has asked.
+   */
+  pending: boolean;
+  /** The roster request failed. */
+  failed: boolean;
+}
+
+/**
+ * "사람 3 · 에이전트 2" for the header, or null when this client has no roster
+ * to count.
+ *
+ * A count is an assertion about who is in this workspace, and the two moments
+ * the client does not know are exactly the two where "사람 0 · 에이전트 0"
+ * would be read as the answer: the request is still out, or it failed. Beside a
+ * skeleton or a "명부를 불러오지 못했습니다" banner that zero is not a smaller
+ * truth, it is a different and false one, and one screen must not say both
+ * (design-taste-web §5: an error states what happened, §9: absence is never
+ * promoted to a story).
+ *
+ * The numbers count `groups`, which the search box has already narrowed, so the
+ * header counts what is on screen rather than a roster the list is not showing.
+ * A roster already in hand keeps counting through a background refetch or a
+ * failed refresh: cached content stays readable (P15) and the count beside it
+ * is still true.
+ */
+export function countLabel(
+  groups: DirectoryGroups,
+  state: RosterLoadState
+): string | null {
+  if (groups.total === 0 && (state.pending || state.failed)) return null;
   return `사람 ${groups.people.length} · 에이전트 ${groups.agents.length}`;
+}
+
+/**
+ * The accessible name of a directory row's DM button.
+ *
+ * `aria-label` REPLACES the subtree, so a label carrying displayName alone is
+ * not a shorter name for the row, it is a different one: this workspace holds
+ * two members displayed as 김인턴 (a human @intern-kim and an agent
+ * @kim-intern), and a screen reader that reads the same sentence for both rows
+ * turns the list back into the coin toss the handle exists to settle. So
+ * everything the eye gets from the row is in the label as well, in the order it
+ * is rendered, and the action comes last.
+ *
+ * `ownerName` is the human an agent is attributed to, resolved by the caller
+ * from the roster, or null when the roster has no row for it.
+ */
+export function memberRowLabel(
+  member: RosterMember,
+  ownerName: string | null
+): string {
+  const parts = [`${member.displayName} @${member.handle}`];
+  const role = roleLabel(member);
+  if (role) parts.push(role);
+  if (member.kind === "agent") {
+    // On screen "agent" is the --agent token on the avatar and the name. Colour
+    // reaches no screen reader, so here it is a word, followed by the same
+    // "managed by {owner}" attribution the row prints (WCAG 2.5.3: the visible
+    // text is inside the accessible name).
+    parts.push(ownerName ? `에이전트, managed by ${ownerName}` : "에이전트");
+  }
+  const status = statusLabel(member);
+  if (status) parts.push(status);
+  return `${parts.join(", ")}, 다이렉트 메시지 열기`;
 }
 
 /**

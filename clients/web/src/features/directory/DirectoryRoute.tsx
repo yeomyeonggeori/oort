@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import type { RosterMember } from "@/lib/api";
 import { useSession } from "@/app/session";
 import { Input } from "@/design/ui/input";
@@ -35,11 +35,37 @@ export function DirectoryRoute() {
   const { pendingMemberId, error: dmError, openDm } = useOpenDm();
   const [query, setQuery] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const navKey = useLocation().key;
+
+  // 이름을 칠 곳에 캐럿을 둔다 (design-taste-web §6: every action has a keyboard
+  // path). ⌘⇧K, the 다이렉트 메시지 헤더의 +, and the 멤버 row all land on this
+  // route to start a DM by typing a name, and landing with focus on <body>
+  // leaves that name 15 tabs away. Keyed on the navigation, not on mount, so a
+  // second ⌘⇧K while the directory is already open focuses again instead of
+  // doing nothing.
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, [navKey]);
 
   const groups = useMemo(
     () => groupDirectory(rosterQuery.directory.members, query),
     [rosterQuery.directory.members, query]
   );
+
+  // What this client knows about the roster, read once. The header and the list
+  // below branch on the SAME two facts, so the two halves of this screen cannot
+  // end up saying different things about whether there is a roster at all.
+  //
+  // isPending, not isLoading: a fresh query's first render is pending with
+  // fetchStatus `idle`, and isLoading is false there. Branching on isLoading
+  // paints one frame of "이 워크스페이스에 아직 다른 멤버가 없습니다" (plus a
+  // count of zero) before the request has even left.
+  const roster = {
+    pending: rosterQuery.isPending,
+    failed: rosterQuery.error !== null,
+  };
+  const count = countLabel(groups, roster);
 
   const offline = connStatus === "disconnected";
   const trimmed = normalizeQuery(query);
@@ -112,13 +138,22 @@ export function DirectoryRoute() {
     <div className="flex min-w-0 flex-1 flex-col" data-testid="directory-route">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
         <h1 className="text-body font-semibold">멤버</h1>
-        <span className="text-meta text-ink-muted" data-testid="directory-count">
-          {countLabel(groups)}
-        </span>
+        {/* Nothing at all while the roster is unknown: a header that counts to
+            zero over a skeleton or over "명부를 불러오지 못했습니다" is the one
+            screen saying two contradictory things (model.countLabel). */}
+        {count !== null && (
+          <span
+            className="text-meta text-ink-muted"
+            data-testid="directory-count"
+          >
+            {count}
+          </span>
+        )}
       </header>
 
       <div className="border-b border-line px-4 py-2">
         <Input
+          ref={searchRef}
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -155,9 +190,9 @@ export function DirectoryRoute() {
         className="min-h-0 flex-1 overflow-y-auto"
         data-testid="directory-list"
       >
-        {rosterQuery.isLoading && groups.total === 0 ? (
+        {roster.pending && groups.total === 0 ? (
           <SkeletonRows rows={6} className="p-4" />
-        ) : rosterQuery.error && groups.total === 0 ? (
+        ) : roster.failed && groups.total === 0 ? (
           <InlineBanner
             message="멤버 명부를 불러오지 못했습니다."
             actionLabel="다시 시도"

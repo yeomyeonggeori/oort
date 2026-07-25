@@ -7,6 +7,7 @@ import {
   groupDirectory,
   hasOtherMembers,
   matchesQuery,
+  memberRowLabel,
   normalizeQuery,
   openDmErrorMessage,
   roleLabel,
@@ -166,9 +167,103 @@ describe("groupDirectory", () => {
 });
 
 describe("countLabel", () => {
+  const LOADED = { pending: false, failed: false };
+
   it("reports the roster split, not an invented metric", () => {
-    expect(countLabel(groupDirectory(ROSTER, ""))).toBe("사람 3 · 에이전트 2");
-    expect(countLabel(groupDirectory([], ""))).toBe("사람 0 · 에이전트 0");
+    expect(countLabel(groupDirectory(ROSTER, ""), LOADED)).toBe(
+      "사람 3 · 에이전트 2"
+    );
+    expect(countLabel(groupDirectory([], ""), LOADED)).toBe(
+      "사람 0 · 에이전트 0"
+    );
+  });
+
+  it("counts what the search left on screen, not the roster behind it", () => {
+    expect(countLabel(groupDirectory(ROSTER, "김인턴"), LOADED)).toBe(
+      "사람 1 · 에이전트 1"
+    );
+  });
+
+  it("says nothing while the roster is still being fetched", () => {
+    // The list is a skeleton at this moment; a header counting to zero beside
+    // it would be the screen answering a question it has not heard back on.
+    expect(
+      countLabel(groupDirectory([], ""), { pending: true, failed: false })
+    ).toBeNull();
+  });
+
+  it("says nothing when the roster failed to load", () => {
+    // The list says 명부를 불러오지 못했습니다. "사람 0 · 에이전트 0" beside it
+    // is not a smaller truth, it is a contradicting claim.
+    expect(
+      countLabel(groupDirectory([], ""), { pending: false, failed: true })
+    ).toBeNull();
+  });
+
+  it("keeps counting a roster already in hand through a refresh or its failure", () => {
+    // Cached members keep rendering (P15), so the number beside them is still
+    // the number on screen.
+    for (const state of [
+      { pending: true, failed: false },
+      { pending: false, failed: true },
+    ]) {
+      expect(countLabel(groupDirectory(ROSTER, ""), state)).toBe(
+        "사람 3 · 에이전트 2"
+      );
+    }
+  });
+});
+
+describe("memberRowLabel", () => {
+  it("names the human, the handle and the workspace role before the action", () => {
+    expect(memberRowLabel(SEONGJAE, null)).toBe(
+      "곽성재 @seongjae, 관리자, 다이렉트 메시지 열기"
+    );
+  });
+
+  it("gives the two 김인턴 two different accessible names", () => {
+    // The whole point: aria-label replaces the subtree, so a label of the
+    // display name alone would offer a screen reader the same action twice.
+    const human = memberRowLabel(INTERN_HUMAN, null);
+    const agent = memberRowLabel(INTERN_AGENT, DEMO.displayName);
+    expect(human).not.toBe(agent);
+    expect(human).toContain("@intern-kim");
+    expect(agent).toContain("@kim-intern");
+  });
+
+  it("says an agent is an agent and who it is attributed to", () => {
+    // Colour (--agent) reaches no screen reader, and "managed by 데모 사용자" is
+    // on screen, so both are in the name (WCAG 2.5.3).
+    expect(memberRowLabel(INTERN_AGENT, DEMO.displayName)).toBe(
+      "김인턴 @kim-intern, 에이전트, managed by 데모 사용자, 다이렉트 메시지 열기"
+    );
+  });
+
+  it("still says 에이전트 when the roster has no row for the owner", () => {
+    expect(memberRowLabel(HERMES, null)).toBe(
+      "Hermes @hermes, 에이전트, 다이렉트 메시지 열기"
+    );
+  });
+
+  it("carries a status the row shows beside the name", () => {
+    const invited = member({
+      id: "00000000-0000-7000-8000-0000000009a3",
+      displayName: "이서연",
+      handle: "seoyeon",
+      role: "member",
+      status: "invited",
+    });
+    expect(memberRowLabel(invited, null)).toBe(
+      "이서연 @seoyeon, 멤버, 초대됨, 다이렉트 메시지 열기"
+    );
+  });
+
+  it("ends with the action, so the row reads as a thing then a verb", () => {
+    for (const m of ROSTER) {
+      expect(memberRowLabel(m, DEMO.displayName)).toMatch(
+        /, 다이렉트 메시지 열기$/
+      );
+    }
   });
 });
 
