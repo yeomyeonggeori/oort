@@ -20,9 +20,13 @@
 // =============================================================================
 
 import { ApiError } from "@/lib/api";
+import { fetchWithDeadline } from "@/lib/http";
 import { absoluteApiBase, apiBase } from "@/lib/serverBase";
 import { getAccessToken } from "@/lib/session";
 
+// Same deadline as the shared client (MOMO-609): settings is where someone
+// re-points a device at another server, so an address that answers nothing has
+// to surface here as an error with a retry, not as a section that never loads.
 async function settingsRequest<T>(
   path: string,
   init: RequestInit = {}
@@ -31,18 +35,12 @@ async function settingsRequest<T>(
   headers.set("Content-Type", "application/json");
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
+  const res = await fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
   if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: { message?: string } };
-      if (body?.error?.message) message = body.error.message;
-    } catch {
-      /* non-JSON error body is a documented shape */
-    }
-    throw new ApiError(res.status, message);
+    const body = res.jsonOrNull<{ error?: { message?: string } }>();
+    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
   }
-  return (await res.json()) as T;
+  return res.json<T>();
 }
 
 /**

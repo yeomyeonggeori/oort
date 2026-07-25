@@ -66,8 +66,8 @@ All payloads are camelCase. Commands are invoked by the exact names below.
 
 ```ts
 interface DiscoveredServer {
-  baseUrl: string      // as advertised, e.g. "http://MacBook-Pro-2.local:28000"
-  displayHost: string  // "MacBook-Pro-2.local:28000"
+  baseUrl: string      // the address to dial, as advertised, e.g. "http://192.168.35.57:28000"
+  displayHost: string  // the machine's name, e.g. "MacBook-Pro-2.local:28000"
   instanceName: string // "momo"
 }
 ```
@@ -138,14 +138,34 @@ runtime and deliver the launch URL as an argv entry instead.
 
 ## Discovery (`_momo._tcp`)
 
-The internal-alpha stack advertises the API over Bonjour with a TXT `base` key
-holding the API base URL (`scripts/internal_alpha_stack.sh`, MOMO-586). Ported
-from `clients/macOS/Sources/MomoMac/MomoServerDiscovery.swift` (MOMO-587).
+The internal-alpha stack advertises the API over Bonjour
+(`scripts/internal_alpha_stack.sh`, MOMO-586). Ported from
+`clients/macOS/Sources/MomoMac/MomoServerDiscovery.swift` (MOMO-587).
 
-- Only advertisements whose `base` is `http(s)` **with a host** are offered.
-  Deduped by that URL, discovery order preserved.
-- `baseUrl` is the raw advertised string — never normalised, because it is what
-  gets prefilled. `displayHost` keeps the advertised casing for the same reason.
+**TXT contract, two keys** (advertiser and consumer changed together, MOMO-609):
+
+| key | holds | example |
+| --- | --- | --- |
+| `base` | the machine's Bonjour **name** | `http://MacBook-Pro-2.local:28000` |
+| `ipv4` | the same API as a LAN **address** | `http://192.168.35.57:28000` |
+
+- **Dial priority: `ipv4`, then `base`.** The webview was measured resolving the
+  advertised `.local` name to a link-local IPv6 address it could not dial, so a
+  login against the name produced no request at all: 70 s of "로그인 중…" with
+  zero entries in the server's access log (parity gate G-1, 2026-07-25). Whether
+  that name resolves depends on the responder cache and the local-network grant,
+  so it is not something a client can rely on. The name stays advertised because
+  it survives a DHCP lease change and consumers that can resolve it (the SwiftUI
+  client, `curl`) still use it.
+- Each key is validated on its own, so a malformed `ipv4` falls back to `base`
+  instead of taking the sighting down with it, and an advertiser that predates
+  `ipv4` behaves exactly as it did before.
+- Only an advertisement that is `http(s)` **with a host** is offered. Deduped by
+  the dialed URL, discovery order preserved.
+- `baseUrl` is the raw advertised string of the **winning** key — never
+  normalised, because it is what gets prefilled. `displayHost` names the machine
+  (from `base` when present, advertised casing kept), so the card shows the name
+  above the address it will actually connect to.
 - **Silence is the contract.** Nothing found, permission denied, no responder on
   the host: all three end as an empty list. Discovery is an offer, not a step,
   and someone who already knows their address must never see a failed search.

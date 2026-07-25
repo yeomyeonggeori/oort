@@ -22,6 +22,7 @@
 // screen can point this device at another server, and the Tauri shell must.
 // =============================================================================
 
+import { fetchWithDeadline, type HttpResponse } from "./http";
 import { apiBase } from "./serverBase";
 import {
   applyLogin,
@@ -180,25 +181,24 @@ interface RefreshResponse {
   refreshToken: string;
 }
 
+// Every call below goes through `fetchWithDeadline` (./http.ts): a request that
+// cannot reach the server fails as a `NetworkError` within seconds instead of
+// pending forever, which is what made a `.local` address look like a hung app
+// rather than a wrong address (MOMO-609 / G-1).
 function rawRequest(
   path: string,
   init: RequestInit,
   token: string | null
-): Promise<Response> {
+): Promise<HttpResponse> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(`${apiBase()}${path}`, { ...init, headers });
+  return fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
 }
 
-async function parseError(res: Response): Promise<ApiError> {
-  let message = `HTTP ${res.status}`;
-  try {
-    const body = (await res.json()) as { error?: { message?: string } };
-    if (body?.error?.message) message = body.error.message;
-  } catch {
-    /* non-JSON error body is a documented shape */
-  }
+function parseError(res: HttpResponse): ApiError {
+  const body = res.jsonOrNull<{ error?: { message?: string } }>();
+  const message = body?.error?.message ?? `HTTP ${res.status}`;
   return new ApiError(res.status, message);
 }
 
@@ -225,11 +225,14 @@ export function refreshSession(): Promise<boolean> {
         markAuthExpired();
         return false;
       }
-      const pair = (await res.json()) as RefreshResponse;
+      const pair = res.json<RefreshResponse>();
       applyRotation(pair.accessToken, pair.refreshToken);
       return true;
     } catch {
-      return false; // offline: the caller keeps rendering cached content (P15)
+      // Offline, unreachable server, or a blown deadline: the caller keeps
+      // rendering cached content (P15) and the session is not declared dead,
+      // because nothing answered to say it is.
+      return false;
     } finally {
       refreshInFlight = null;
     }
@@ -250,8 +253,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
   if (res.status === 401) markAuthExpired();
-  if (!res.ok) throw await parseError(res);
-  return (await res.json()) as T;
+  if (!res.ok) throw parseError(res);
+  return res.json<T>();
 }
 
 export async function login(
@@ -266,8 +269,8 @@ export async function login(
     { method: "POST", body: JSON.stringify(body) },
     null
   );
-  if (!res.ok) throw await parseError(res);
-  const loginResponse = (await res.json()) as LoginResponse;
+  if (!res.ok) throw parseError(res);
+  const loginResponse = res.json<LoginResponse>();
   applyLogin(loginResponse);
   return loginResponse;
 }
@@ -333,8 +336,8 @@ export async function joinWithInvite(
     },
     null
   );
-  if (!res.ok) throw await parseError(res);
-  const joinResponse = (await res.json()) as LoginResponse;
+  if (!res.ok) throw parseError(res);
+  const joinResponse = res.json<LoginResponse>();
   applyLogin(joinResponse);
   return joinResponse;
 }
@@ -392,13 +395,15 @@ export async function logout(): Promise<void> {
         null
       );
       if (rotated.ok) {
-        const pair = (await rotated.json()) as RefreshResponse;
+        const pair = rotated.json<RefreshResponse>();
         await revoke(pair.accessToken, pair.refreshToken);
       }
     }
   } catch {
     // A network failure must not trap the user inside the session; the local
-    // wipe above already happened and the tokens expire on their own.
+    // wipe above already happened and the tokens expire on their own. With a
+    // deadline on every call this now also ENDS: before, a logout aimed at an
+    // unreachable server left a promise pending for the life of the app.
   }
 }
 

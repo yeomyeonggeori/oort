@@ -45,12 +45,41 @@ mdns_supported() {
 }
 
 mdns_base_url() {
-  # TXT base = 587 클라가 접속할 API base URL. Bonjour .local 호스트명을 쓴다
-  # (예: http://MacBook-Pro-2.local:28000).
+  # TXT base = 이 호스트의 Bonjour '이름' 주소(예: http://MacBook-Pro-2.local:28000).
+  # DHCP로 IP가 바뀌어도 유효하지만, 이름 해석이 되는 클라에서만 접속 가능하다.
   local host
   host="$(scutil --get LocalHostName 2>/dev/null || true)"
   [ -n "$host" ] || host="$(hostname -s 2>/dev/null || echo momo-host)"
   echo "http://${host}.local:${API_PORT}"
+}
+
+mdns_ipv4_url() {
+  # TXT ipv4 = 같은 API의 '주소' 형태(예: http://192.168.35.57:28000).
+  #
+  # 왜 둘 다 광고하나(MOMO-609 / parity G-1): 데스크톱 셸의 웹뷰(WKWebView)에서
+  # 이 호스트의 .local 이름이 링크로컬 IPv6(fe80::)로만 해석돼 로그인이 70초+
+  # 무응답으로 끝나지 않은 실측이 있다(서버 접근 로그 요청 0건, 2026-07-25 parity
+  # 게이트). 이름 해석은 클라 런타임·권한 상태에 따라 되기도 하고 안 되기도 하는,
+  # 클라가 의존할 수 없는 변수다. 반대로 이름은 IP가 바뀌어도 살아남는다. 그래서
+  # 이름과 주소를 함께 싣고, 소비자가 자기가 실제로 다이얼할 수 있는 쪽을 고른다
+  # (웹뷰 클라는 ipv4 우선 — clients/desktop/src-tauri/src/discovery.rs).
+  #
+  # 주소는 광고 시점의 기본 경로 인터페이스에서 읽는다. 재배포마다 다시 등록되므로
+  # 리스 갱신으로 IP가 바뀌면 다음 redeploy에서 따라온다.
+  local iface ip=""
+  iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+  if [ -n "$iface" ]; then
+    ip="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"
+  fi
+  if [ -z "$ip" ]; then
+    # 기본 경로가 없거나(오프라인) 읽히지 않으면 유선/무선 후보를 순서대로 본다.
+    for iface in en0 en1 en2 en3 en4 en5; do
+      ip="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"
+      if [ -n "$ip" ]; then break; fi
+    done
+  fi
+  [ -n "$ip" ] || return 1
+  echo "http://${ip}:${API_PORT}"
 }
 
 mdns_running() {
@@ -72,13 +101,22 @@ mdns_advertise() {
     return 0
   fi
   mkdir -p "$MDNS_STATE_DIR"
-  local base
+  local base ipv4
   base="$(mdns_base_url)"
+  ipv4="$(mdns_ipv4_url || true)"
+  # TXT는 base(이름)와 ipv4(주소) 2키. ipv4는 LAN 주소를 못 읽은 경우에만 빠지고,
+  # 그때 광고는 기존과 완전히 동일해진다(하위호환).
+  local txt=("base=${base}")
+  if [ -n "$ipv4" ]; then
+    txt+=("ipv4=${ipv4}")
+  else
+    note "mDNS 광고: LAN IPv4를 읽지 못해 ipv4 TXT 생략 — 이름(base)만 광고"
+  fi
   # dns-sd -R는 등록을 유지하는 상시 프로세스 — 백그라운드로 띄우고 pid를 남긴다.
-  dns-sd -R "$MDNS_SERVICE_NAME" "$MDNS_SERVICE_TYPE" . "$API_PORT" "base=${base}" \
+  dns-sd -R "$MDNS_SERVICE_NAME" "$MDNS_SERVICE_TYPE" . "$API_PORT" "${txt[@]}" \
     >"$MDNS_LOG_FILE" 2>&1 &
   echo "$!" >"$MDNS_PID_FILE"
-  note "mDNS 광고 등록: ${MDNS_SERVICE_NAME}.${MDNS_SERVICE_TYPE} :${API_PORT} (TXT base=${base}, pid=$!)"
+  note "mDNS 광고 등록: ${MDNS_SERVICE_NAME}.${MDNS_SERVICE_TYPE} :${API_PORT} (TXT ${txt[*]}, pid=$!)"
 }
 
 mdns_withdraw() {
@@ -99,7 +137,7 @@ mdns_status_line() {
     return 0
   fi
   if mdns_running; then
-    note "mDNS 광고: 활성 — ${MDNS_SERVICE_NAME}.${MDNS_SERVICE_TYPE} :${API_PORT} (TXT base=$(mdns_base_url), pid=$(cat "$MDNS_PID_FILE" 2>/dev/null || echo '?'))"
+    note "mDNS 광고: 활성 — ${MDNS_SERVICE_NAME}.${MDNS_SERVICE_TYPE} :${API_PORT} (TXT base=$(mdns_base_url) ipv4=$(mdns_ipv4_url || echo '(없음)'), pid=$(cat "$MDNS_PID_FILE" 2>/dev/null || echo '?'))"
   else
     note "mDNS 광고: 비활성(pid 파일 없음 또는 스테일)"
   fi
