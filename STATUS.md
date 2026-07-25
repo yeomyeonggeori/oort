@@ -1,5 +1,16 @@
 # momo 진행 현황
 
+## MOMO-605 서버 CORS 오리진 allowlist — Tauri 데스크톱 (P2, #768, 2026-07-25)
+
+- 배경(ADR-0133 P2 스파이크 발견): 웹은 같은 오리진 서빙(ADR-0119 D1-A)이라 CORS가 필요 없지만, 패키징된 Tauri 릴리스는 webview 오리진이 `tauri://localhost`(Windows/Android는 `http://tauri.localhost`)라 `/v1/*` 호출이 진짜 교차 오리진이 되어 브라우저 규칙에 막힌다. 어떤 도메인으로도 파생할 수 없는 값이라 operator 명시 env로 연다.
+- 신규 계약: `MOMO_CORS_ALLOWED_ORIGINS`(쉼표 구분, **완전일치** allowlist). 파싱은 `server/Sources/MomoServer/Config.swift`의 `CORSConfig`, 게이트는 `server/Sources/MomoServer/Middleware/CORSMiddleware.swift`의 `OriginAllowlistCORSMiddleware`(Hummingbird 내장 `CORSMiddleware`의 헤더 기계장치를 위임 사용 — 내장 `.oneOf`가 가변인자 전용이라 런타임 배열로 만들 수 없기 때문).
+- **기본 빈=완전 무변경**: `config.cors.isEnabled`가 false면 `App.swift`가 미들웨어를 아예 mount하지 않는다 → `Access-Control-*`/`Vary` 헤더 0개, OPTIONS 단락 없음. 기존 게이트 전부 무회귀.
+- 와일드카드 금지: `*`·`https://*.example.com`·리터럴 `null`·경로/트레일링 슬래시·userinfo·불량 포트는 파싱 단계에서 거부하고 부팅 시 warning 1회를 남긴다(오타는 허용범위를 좁힐 뿐 넓히지 않는다 — 실측: `MOMO_CORS_ALLOWED_ORIGINS=*` 기동 시 표면 완전 폐쇄 + warning). credentials 정합: momo는 쿠키 미발급(서버 `Set-Cookie` 0건)·Authorization 베어러 전용이라 `Access-Control-Allow-Credentials`를 절대 보내지 않는다 → `Allow-Origin: *` + credentials 조합이 표현 불가다.
+- 미허용 Origin은 403이 아니라 **헤더 없이 통과**시킨다(브라우저가 차단; Origin을 보내지 않는 네이티브 클라·curl·work host·subscribe proxy는 무영향). 미들웨어는 rate limiter 바깥이라 429/4xx 응답도 CORS 헤더를 유지한다(브라우저가 불투명 오류 대신 실제 상태를 읽는다).
+- Centrifugo: `infra/centrifugo.json` `client.allowed_origins`에 `tauri://localhost`·`http://tauri.localhost` 추가 — e2e와 내부알파(`momowebqa`, `scripts/internal_alpha_stack.sh`)가 같은 파일을 쓴다. prod는 MOMO-398 `APP_DOMAIN` 단일 파생 계약 **무변경**.
+- 배선/문서: e2e·prod compose api 서비스가 `MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}` passthrough, 두 env 템플릿(`infra/.env.example`·`infra/prod/.env.example`) 동시 갱신(주석 상태 유지 = 기본 무변경), `scripts/prod_env_preflight.sh` strict가 와일드카드/`null` 값을 compose 기동 전에 fail-fast, `docs/RUN.md` §2.2 + `docs/DEPLOY.md` 갱신. 마이그레이션 없음, `schema_v0.sql` 무변경.
+- 검증: `swift build` green(server) + `swift test --filter CORSAllowlistTests` **18/18 PASS**(파싱·정규화·와일드카드/`null`/malformed 거부·중복제거·게이트 판정·헤더 정책 상수). `scripts/verify_cors_allowlist.sh` **전관문 PASS** — 정적 계약 + **실 MomoServer 프로세스 3회 기동 preflight 실왕복**(28300 포트 블록, Docker 불요: DB 미접속 상태에서 미들웨어와 `/health`만 사용): ①knob unset → `Access-Control-*`/`Vary` 0개·OPTIONS 비단락 ②knob set → `OPTIONS /v1/auth/login` 204 + 정확 echo·methods/headers·`Vary: Origin`·credentials 헤더 부재·wildcard 부재, 미허용 오리진 무헤더, Origin 없는 요청 무헤더, 4xx도 헤더 유지 ③`*` → 부팅 거부 warning + 표면 폐쇄.
+
 ## MOMO-589 인앱 워크스페이스 생성 REST — POST /v1/workspaces (W-S1, #731, 2026-07-24)
 
 - 셀프서브 여정 배치 W-S1. `infra/prod/create_workspace.sql`(MOMO-571 migrate 서브커맨드)의 시딩 로직을 REST로 서버화했다. 신규 로직은 `server/Sources/MomoServer/Routes/WorkspaceRoutes.swift`의 `create` 핸들러 + `DTOs.swift`의 `CreateWorkspaceRequest`/`CreateWorkspaceResponse`. `App.swift`에서 `WorkspaceRoutes`에 `platformAdminEmails`를 주입한다. 신규 마이그레이션 불필요(기존 테이블만 사용).

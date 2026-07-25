@@ -48,6 +48,11 @@ struct Config: Sendable {
     // ---- Rate limiting (MOMO-300, in-memory sliding window, single node) ----
     var rateLimit: RateLimitConfig
 
+    // ---- CORS origin allowlist (MOMO-605, ADR-0133 P2) ----
+    // Empty (the default) means the surface is entirely absent: no middleware is
+    // mounted and no CORS header is ever emitted.
+    var cors: CORSConfig = .disabled
+
     // ---- Platform admin read-only inspection (MOMO-013) ----
     var platformAdminDatabaseURL: String?
     var platformAdminEmails: [String]
@@ -103,6 +108,7 @@ struct Config: Sendable {
             centProxySecret: env("CENT_PROXY_SECRET", "dev-insecure-cent-proxy-secret"),
             liveKit: LiveKitConfig.load(environment: ProcessInfo.processInfo.environment),
             rateLimit: RateLimitConfig.load(environment: ProcessInfo.processInfo.environment),
+            cors: CORSConfig.load(environment: ProcessInfo.processInfo.environment),
             platformAdminDatabaseURL: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_DATABASE_URL"],
             platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
                 .split(separator: ",")
@@ -282,6 +288,151 @@ struct RateLimitConfig: Sendable {
 
     private static func intValue(_ raw: String?, fallback: Int) -> Int {
         raw.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? fallback
+    }
+}
+
+/// MOMO-605 / ADR-0133 P2 — browser & webview CORS origin allowlist.
+///
+/// Why this exists: the web client is served same-origin behind Caddy
+/// (ADR-0119 D1-A) so it never needs CORS, but a packaged Tauri desktop build
+/// runs its frontend on a webview-owned origin (`tauri://localhost` on
+/// macOS/iOS/Linux, `http://tauri.localhost` on Windows/Android) and therefore
+/// issues genuinely cross-origin `/v1/*` calls. Without an allowlist the
+/// browser blocks them.
+///
+/// Contract (deliberately conservative):
+///   * `MOMO_CORS_ALLOWED_ORIGINS` is a comma-separated exact-match allowlist.
+///     **Unset or empty is the default and means "no change at all"** — the
+///     middleware is not even mounted, so not a single response header, no
+///     `Vary`, and no OPTIONS short-circuit differ from the pre-MOMO-605 build.
+///   * **Wildcards are forbidden.** Any entry containing `*` (including a bare
+///     `*` and subdomain patterns like `https://*.example.com`) is rejected at
+///     parse time, as is the literal `null` origin (sandboxed iframes /
+///     `file://` documents). Rejected entries are dropped and reported so the
+///     server can log them once at boot; a typo can therefore only ever make
+///     the surface *narrower*, never wider.
+///   * Credentials stay off. momo authenticates with a bearer token in the
+///     `Authorization` header and issues no cookies (`grep Set-Cookie` = 0), so
+///     `Access-Control-Allow-Credentials` is never sent. Combined with the
+///     exact-match echo above, the forbidden `Allow-Origin: *` +
+///     `Allow-Credentials: true` combination is unrepresentable.
+struct CORSConfig: Sendable, Equatable {
+    /// Environment variable that drives the allowlist.
+    static let environmentKey = "MOMO_CORS_ALLOWED_ORIGINS"
+
+    /// Normalized (lowercased, exact) origins allowed to make cross-origin calls.
+    var allowedOrigins: [String]
+    /// Entries refused while parsing (wildcard, `null`, or malformed origin).
+    /// Kept so `AppBuilder` can warn once at boot instead of failing silently.
+    var rejectedEntries: [String]
+
+    /// The shipped default: no origin, no middleware, no header.
+    static let disabled = CORSConfig(allowedOrigins: [], rejectedEntries: [])
+
+    /// Mount the middleware only when at least one origin survived parsing.
+    var isEnabled: Bool { !allowedOrigins.isEmpty }
+
+    static func load(environment: [String: String]) -> CORSConfig {
+        parse(environment[environmentKey])
+    }
+
+    static func parse(_ raw: String?) -> CORSConfig {
+        guard let raw else { return CORSConfig(allowedOrigins: [], rejectedEntries: []) }
+        var allowed: [String] = []
+        var rejected: [String] = []
+        for entry in raw.split(separator: ",", omittingEmptySubsequences: false) {
+            let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Blank slots (trailing comma, `MOMO_CORS_ALLOWED_ORIGINS=`) are the
+            // documented "off" spelling — not an operator error.
+            if trimmed.isEmpty { continue }
+            guard let origin = normalizedOrigin(trimmed) else {
+                rejected.append(trimmed)
+                continue
+            }
+            if !allowed.contains(origin) { allowed.append(origin) }
+        }
+        return CORSConfig(allowedOrigins: allowed, rejectedEntries: rejected)
+    }
+
+    /// Canonicalize one allowlist entry (or an inbound `Origin` header) to the
+    /// serialized form RFC 6454 §6.1 defines: `scheme "://" host [ ":" port ]`,
+    /// ASCII-lowercased, with no path, query, fragment, userinfo, or trailing
+    /// slash. Returns nil for anything else — including wildcards and `null`.
+    static func normalizedOrigin(_ raw: String) -> String? {
+        let candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !candidate.isEmpty, candidate != "null" else { return nil }
+        // Wildcards are banned outright: momo never answers `*`, and a pattern
+        // entry must not silently degrade into an exact-match miss either.
+        guard !candidate.contains("*") else { return nil }
+        guard candidate.allSatisfy({ !$0.isWhitespace }) else { return nil }
+
+        guard let separator = candidate.range(of: "://") else { return nil }
+        let scheme = String(candidate[candidate.startIndex..<separator.lowerBound])
+        let authority = String(candidate[separator.upperBound...])
+        guard isValidScheme(scheme), !authority.isEmpty else { return nil }
+        // Anything after the authority (path/query/fragment) or userinfo makes
+        // this not an origin. A trailing slash is the common operator typo.
+        guard !authority.contains(where: { "/?#@\\".contains($0) }) else { return nil }
+
+        let host: String
+        let port: String?
+        if authority.hasPrefix("[") {
+            // IPv6 literal: [::1]:8080
+            guard let close = authority.firstIndex(of: "]") else { return nil }
+            host = String(authority[authority.startIndex...close])
+            let rest = String(authority[authority.index(after: close)...])
+            if rest.isEmpty {
+                port = nil
+            } else if rest.hasPrefix(":") {
+                port = String(rest.dropFirst())
+            } else {
+                return nil
+            }
+            guard isValidIPv6Literal(host) else { return nil }
+        } else {
+            let parts = authority.split(separator: ":", omittingEmptySubsequences: false)
+            guard parts.count <= 2 else { return nil }
+            host = String(parts[0])
+            port = parts.count == 2 ? String(parts[1]) : nil
+            guard isValidHost(host) else { return nil }
+        }
+        if let port {
+            // ASCII digits only: `Int("+80")`/`Int("٨٠")` must not sneak through.
+            guard !port.isEmpty,
+                  port.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let number = Int(port), (1...65535).contains(number)
+            else { return nil }
+            return "\(scheme)://\(host):\(port)"
+        }
+        return "\(scheme)://\(host)"
+    }
+
+    /// RFC 3986 scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
+    /// Custom webview schemes such as `tauri` are first-class here.
+    private static func isValidScheme(_ scheme: String) -> Bool {
+        guard let first = scheme.first, first.isLetter, first.isASCII else { return false }
+        return scheme.allSatisfy { character in
+            character.isASCII
+                && (character.isLetter || character.isNumber || "+-.".contains(character))
+        }
+    }
+
+    private static func isValidHost(_ host: String) -> Bool {
+        guard !host.isEmpty else { return false }
+        guard !host.hasPrefix("."), !host.hasSuffix("."), !host.contains("..") else { return false }
+        return host.allSatisfy { character in
+            character.isASCII
+                && (character.isLetter || character.isNumber || character == "." || character == "-")
+        }
+    }
+
+    private static func isValidIPv6Literal(_ host: String) -> Bool {
+        guard host.hasPrefix("["), host.hasSuffix("]"), host.count > 2 else { return false }
+        let inner = host.dropFirst().dropLast()
+        return inner.allSatisfy { character in
+            character.isASCII
+                && (character.isHexDigit || character == ":" || character == "." || character == "%")
+        }
     }
 }
 

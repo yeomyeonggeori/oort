@@ -45,6 +45,35 @@ enum AppBuilder {
         // ---- Router ----
         let router = Router(context: AppRequestContext.self)
         router.add(middleware: SecretRedactingRequestLogMiddleware(.info))
+        // MOMO-605 / ADR-0133 P2 CORS allowlist. Mounted ONLY when
+        // MOMO_CORS_ALLOWED_ORIGINS names at least one valid origin, so the
+        // default (unset/empty) deployment keeps byte-identical responses.
+        // Placed outside the rate limiter so a 429 still carries the CORS
+        // header (otherwise the browser sees an opaque network error) and an
+        // allowlisted preflight short-circuits before spending limiter budget.
+        if !config.cors.rejectedEntries.isEmpty {
+            logger.warning(
+                """
+                \(CORSConfig.environmentKey): ignoring invalid entries — wildcards, \
+                'null', and malformed origins are refused, so the allowlist can only \
+                get narrower, never wider
+                """,
+                metadata: [
+                    "rejected": .string(config.cors.rejectedEntries.joined(separator: " ")),
+                ]
+            )
+        }
+        if config.cors.isEnabled {
+            router.add(middleware: OriginAllowlistCORSMiddleware(
+                allowedOrigins: config.cors.allowedOrigins
+            ))
+            logger.info(
+                "CORS origin allowlist active (exact match, no credentials, no wildcard)",
+                metadata: [
+                    "origins": .string(config.cors.allowedOrigins.joined(separator: " ")),
+                ]
+            )
+        }
         // MOMO-300 per-IP rate limit — applies to public + protected routes
         // (excludes /health and the shared-secret-authenticated subscribe proxy).
         let rateLimiter = SlidingWindowRateLimiter()

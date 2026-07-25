@@ -178,6 +178,14 @@ services:
       MOMO_S3_ACCESS_KEY: ${MOMO_S3_ACCESS_KEY:-}
       MOMO_S3_SECRET_KEY: ${MOMO_S3_SECRET_KEY:-}
       MOMO_S3_FORCE_PATH_STYLE: ${MOMO_S3_FORCE_PATH_STYLE:-0}
+      # MOMO-605 (ADR-0133 P2): exact-match CORS origin allowlist. Unlike the
+      # MOMO-398 Centrifugo allowance above this is NOT derived from APP_DOMAIN
+      # — the web SPA is served same-origin (ADR-0119 D1-A) and needs no CORS at
+      # all; this knob exists only for packaged desktop webviews whose origin is
+      # `tauri://localhost` (or `http://tauri.localhost` on Windows), which no
+      # domain can derive. Unset/empty is the shipped default and mounts no CORS
+      # middleware whatsoever. Wildcards are refused by the server at boot.
+      MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
