@@ -1,5 +1,6 @@
 import { Centrifuge, type Subscription } from "centrifuge";
 import { fetchRealtimeToken } from "./api";
+import { apiBase } from "./serverBase";
 
 // =============================================================================
 // Realtime rail (transport-only; Postgres is the SoT). Mirrors the ADR-0119
@@ -41,6 +42,23 @@ export function centrifugoChannelName(
   return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
 }
 
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+/**
+ * The host the REST client is actually talking to: the chosen/built-in server
+ * base when there is one, otherwise the page's own origin (same-origin mode).
+ */
+function restHost(pageHost: string, base: string): string {
+  if (base === "") return pageHost;
+  try {
+    return new URL(base).hostname;
+  } catch {
+    return pageHost;
+  }
+}
+
 /**
  * SPIKE-ONLY (MOMO-595 finding): momowebqa's login returns an mDNS host
  * (`ws://<machine>.local:28001/...`). Chrome's WebSocket resolver hangs on that
@@ -50,27 +68,35 @@ export function centrifugoChannelName(
  * webview-specific gap.
  *
  * ADR-0110 ("use the login-returned WS address verbatim, never derive it") is
- * PRESERVED in production: this rewrite fires ONLY when the page itself is on a
- * loopback origin (i.e. local dev), and only to swap a `.local`/bare-host for
- * the loopback the page is already served from. Any real (non-loopback) deploy
- * is untouched. The proper fix is server-side: return a browser-resolvable host
- * for the target environment (tracked as a spike finding, not fixed here).
+ * PRESERVED: the rewrite fires ONLY when the REST base itself is loopback, i.e.
+ * this client is talking to a server on this machine, and only to swap a
+ * `.local`/bare-host for that same loopback.
+ *
+ * The anchor is the REST base, NOT the page origin (P2, MOMO-604). Inside the
+ * Tauri shell the page is always served from `tauri://localhost`, so keying off
+ * the page would have read every desktop session as "local dev" and rewritten a
+ * real remote WS host down to localhost. A desktop client pointed at a remote
+ * server now gets the login-returned address verbatim, which is the rule.
+ *
+ * The proper fix remains server-side: return a browser-resolvable host for the
+ * target environment (tracked as a spike finding, not fixed here).
  */
-export function resolveSpikeRealtimeUrl(url: string): string {
-  if (typeof window === "undefined") return url;
-  const pageHost = window.location.hostname;
-  const onLoopback =
-    pageHost === "127.0.0.1" ||
-    pageHost === "localhost" ||
-    pageHost === "::1";
-  if (!onLoopback) return url; // production: verbatim (ADR-0110)
+export function resolveSpikeRealtimeUrl(
+  url: string,
+  options: { pageHost?: string; base?: string } = {}
+): string {
+  const pageHost =
+    options.pageHost ??
+    (typeof window === "undefined" ? "" : window.location.hostname);
+  if (pageHost === "") return url;
+  const base = options.base ?? apiBase();
+  if (!isLoopbackHost(restHost(pageHost, base))) {
+    return url; // production / remote server: verbatim (ADR-0110)
+  }
   try {
     const u = new URL(url);
-    const h = u.hostname;
-    const targetIsLoopback =
-      h === "127.0.0.1" || h === "localhost" || h === "::1";
-    if (!targetIsLoopback) {
-      u.hostname = pageHost; // e.g. <machine>.local -> 127.0.0.1
+    if (!isLoopbackHost(u.hostname)) {
+      u.hostname = restHost(pageHost, base); // e.g. <machine>.local -> 127.0.0.1
       return u.toString();
     }
   } catch {

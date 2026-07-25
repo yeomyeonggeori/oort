@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "smoke": "node e2e/smoke.mjs",
+    "smoke:connect": "node e2e/connect.mjs",
     "gate:inject": "node gates/inject.mjs",
     "gate:seq": "node gates/gate-seq.mjs",
     "gate:resume": "node gates/gate-resume.mjs",
