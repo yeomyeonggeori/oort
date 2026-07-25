@@ -11,6 +11,7 @@ import { SessionProvider } from "@/app/session";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
+import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -67,6 +68,9 @@ export function AppShell({
       </div>
       {/* Global keyboard paths that must work from any route (R-1 §2). */}
       <InboxHotkeys />
+      {/* Renders nothing; watches the rail so a mention or an approval request
+       * reaches the OS while the window is in the background (MOMO-607). */}
+      {!stress && <DesktopNotifications />}
       <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </SessionProvider>
   );
