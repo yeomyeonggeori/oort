@@ -22,6 +22,7 @@ import {
   useWorkSessions,
 } from "./useWorkSessions";
 import {
+  emptyStepsDetail,
   eventsForSession,
   foldSessionEvents,
   isSlowStep,
@@ -184,7 +185,11 @@ function SessionRow({
             className="shrink-0 text-meta text-warn"
             data-testid="work-session-slow"
           >
-            신호 없음 {silenceLabel(lastEventAtMs, nowMs)}
+            {/* Prose in sans, the figure tabular (tokens.md §4). It reticks
+                every second, and an untagged "15초" growing to "15분 3초"
+                shifts the summary beside it. */}
+            신호 없음{" "}
+            <span data-numeric>{silenceLabel(lastEventAtMs, nowMs)}</span>
           </span>
         )}
         {/* The rest is either the newest line the rail delivered, or the two
@@ -206,6 +211,16 @@ function SessionRow({
  * buffer, which is what makes it honest: an empty peek here means the thread
  * WAS read and holds nothing, and the query it uses is keyed exactly like the
  * detail's, so opening the session after peeking costs no second round trip.
+ * That shared read is also why the page budget (5 x 200) is the detail's and
+ * not a preview's: one read serves both, and it only fires when a row is
+ * explicitly chosen.
+ *
+ * When that budget runs out the rows in hand are the thread's HEAD, because
+ * /replies pages oldest first with a seq cursor and the server offers no
+ * descending order. The tail of a truncated read is therefore a thousand events
+ * old, and three lines of it presented with no caption read as "the latest".
+ * So a truncated peek says so before its rows, in the same words the detail
+ * uses.
  */
 function SessionPeek({
   session,
@@ -248,34 +263,54 @@ function SessionPeek({
         // host is not a quiet session, it is a relay this client cannot vouch
         // for, and the peek is exactly where that difference would be missed.
         <p className="text-meta text-ink-muted" data-testid="work-peek-empty">
-          {workHostTrust(session, hosts) === "local"
-            ? "아직 진행 내역이 없습니다."
-            : "진행 내역 중계가 검증되지 않은 호스트입니다. 세션 원장만 확인할 수 있습니다."}
+          {workHostTrust(session, hosts) !== "local"
+            ? "진행 내역 중계가 검증되지 않은 호스트입니다. 세션 원장만 확인할 수 있습니다."
+            : `아직 진행 내역이 없습니다. ${emptyStepsDetail(session, hosts)}`}
         </p>
       ) : (
-        <ul className="flex flex-col gap-1">
-          {tail.map((row) => (
-            <li key={row.id} className="flex items-baseline gap-2">
-              <span
-                data-numeric
-                className="shrink-0 font-mono text-timestamp text-ink-muted"
-              >
-                {clockLabel(row.atMs)}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-meta text-ink">
-                {row.headline}
-              </span>
-              <span
-                className={cn(
-                  "shrink-0 rounded-sm px-1 text-timestamp",
-                  ROW_STATE_CLASS[row.state]
+        <>
+          {truncated && (
+            <p
+              className="pb-1 text-meta text-warn"
+              data-testid="work-peek-truncated"
+            >
+              진행 내역이 많아 앞부분만 불러왔습니다. 아래는 최근 단계가
+              아닙니다.
+            </p>
+          )}
+          <ul className="flex flex-col gap-1">
+            {tail.map((row) => (
+              <li key={row.id} className="flex items-baseline gap-2">
+                <span
+                  data-numeric
+                  className="shrink-0 font-mono text-timestamp text-ink-muted"
+                >
+                  {clockLabel(row.atMs)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-meta text-ink">
+                  {row.headline}
+                </span>
+                {/* Same chip rule as the detail: a `message` row is the agent's
+                    own text and a `note` is a status line, so neither is a step
+                    with a state. Chipping a message 진행 중 turned the ledger's
+                    "this session is still open" into "these words are arriving
+                    now", which is a claim about the stream that the list row
+                    above (신호 없음 N) may be denying in the same breath. */}
+                {row.kind !== "message" && row.kind !== "note" && (
+                  <span
+                    data-testid="work-peek-chip"
+                    className={cn(
+                      "shrink-0 rounded-sm px-1 text-timestamp",
+                      ROW_STATE_CLASS[row.state]
+                    )}
+                  >
+                    {ROW_STATE_LABEL[row.state]}
+                  </span>
                 )}
-              >
-                {ROW_STATE_LABEL[row.state]}
-              </span>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       <div className="flex justify-end pt-2">
         <Button
@@ -396,31 +431,62 @@ export function WorkPanel({
   }, [channels, directoryQuery.directory, auth.member.id]);
 
   const scopeLabel = channelId === null ? "전체" : nameOf(channelId);
+  // Looked up inside the CURRENT scope, not the whole workspace, so the body
+  // can never render a session the scope control above it excludes, not even
+  // for the frame before the effect below clears the selection.
   const selected =
     selectedId === null
       ? null
-      : sessions.find((session) => uuidEq(session.id, selectedId)) ?? null;
+      : visible.find((session) => uuidEq(session.id, selectedId)) ?? null;
 
-  // A selection that scrolled out of scope is not a selection any more, and a
-  // detail view of a session the list no longer holds is a view of nothing.
+  // A detail view of a session THIS LIST no longer holds is a view of nothing.
+  //
+  // It used to check membership of the whole workspace, which let the header
+  // and the body disagree: switching the scope to #A while a session from #B
+  // was open left the body on #B under a scope control insisting on #A. The
+  // scope label is rendered at all times precisely so a reader never has to
+  // wonder which range they are looking at, so it cannot be allowed to point
+  // somewhere the pane below it is not.
+  //
+  // Focus is only recovered when it was STRANDED. The detail is gone by the
+  // time this runs (`selected` is scoped too), so the question is not where the
+  // caret was but where it is: on <body> means it went down with the detail and
+  // the panel takes it back, anywhere else means the reader is holding it. That
+  // second case is the scope button they just pressed, and pulling focus off it
+  // mid-gesture would be the panel answering a click by taking the keyboard.
   useEffect(() => {
-    if (selectedId !== null && selected === null && !sessionsQuery.isPending) {
-      onSelectedIdChange(null);
-    }
-  }, [selectedId, selected, sessionsQuery.isPending, onSelectedIdChange]);
+    if (selectedId === null || sessionsQuery.isPending) return;
+    if (visible.some((session) => uuidEq(session.id, selectedId))) return;
+    const active = document.activeElement;
+    const stranded = active === null || active === document.body;
+    onSelectedIdChange(null);
+    if (stranded) setRestoreRowId(selectedId);
+  }, [selectedId, visible, sessionsQuery.isPending, onSelectedIdChange]);
 
   useEffect(() => {
     setPeekId(null);
   }, [scope, channelId]);
 
-  /** Folded rows per session, so the row summary and the peek agree exactly. */
+  /**
+   * Folded rows per session, so the row summary and the peek agree exactly.
+   *
+   * The key carries the session's STATUS as well as its id, because the fold
+   * reads it: a running session promotes its newest tool row to the present
+   * tense (workSessionModel), and a finished one does not. Keyed on the id
+   * alone the cache only ever refreshed when `rail.liveEvents` changed, which
+   * covers running to ended (the `work.session.ended` frame sweeps that
+   * session's live events out) but not running to orphaned: a host whose
+   * heartbeat expires publishes no frame at all and is discovered by the 60s
+   * poll, so the chip would flip to 호스트 연결 끊김 while the summary beside
+   * it still said 명령 실행 중.
+   */
   const foldedFor = useMemo(() => {
     const cache = new Map<
       string,
       { rows: ReturnType<typeof foldSessionEvents>["rows"]; lastEventAtMs: number | null }
     >();
     return (session: WorkSession) => {
-      const key = session.id.toLowerCase();
+      const key = `${session.id.toLowerCase()}:${session.status}`;
       const hit = cache.get(key);
       if (hit) return hit;
       const mine: WorkSessionEvent[] = eventsForSession(
@@ -472,7 +538,15 @@ export function WorkPanel({
             <X className="size-4" />
           </button>
         </div>
-        <div className="flex min-w-0 items-center gap-1" data-testid="work-scope">
+        {/* The pair is one control, so it is announced as one: without the
+            group a screen reader reads "#agent-lab, 눌림, 버튼" then "전체,
+            버튼" with nothing saying what the two are choosing between. */}
+        <div
+          role="group"
+          aria-label="범위"
+          className="flex min-w-0 items-center gap-1"
+          data-testid="work-scope"
+        >
           <ScopeButton
             active={scope === "channel"}
             label={scopeLabel}
@@ -487,30 +561,35 @@ export function WorkPanel({
           />
         </div>
         {/* The count is a claim about the server, so it waits for the server.
-            While the list is loading there is no number here at all, and when
-            the read FAILED this line is gone entirely: the banner below already
-            says so, and saying it twice in two different sentences ("확인하지
-            못했습니다" / "불러오지 못했습니다") reads as two problems.
-            The scope is NOT repeated here either: it is one control away,
-            above, and saying it twice cost a whole line of a 320px column. */}
-        {sessionsQuery.error === null && (
+            While the list is loading there is no number here at all.
+            The scope is NOT repeated here: it is one control away, above, and
+            saying it twice cost a whole line of a 320px column.
+
+            When the read FAILS the line does NOT disappear. Dropping it was an
+            over-correction: the duplicate sentence was the problem ("확인하지
+            못했습니다" beside "불러오지 못했습니다" reads as two faults), but
+            the timestamp is not a duplicate of anything the banner says. It is
+            the only thing on screen that dates the rows still standing under
+            the error, each of them wearing a 실행 중 chip and a clock that goes
+            on counting, so it matters most exactly when the read failed. What
+            it says then is what it is: the moment the list last came back. */}
+        {sessionsQuery.isPending ? (
           <p className="text-meta text-ink-muted" data-testid="work-panel-summary">
-            {sessionsQuery.isPending ? (
-              "세션을 불러오는 중입니다."
-            ) : (
-              <>
-                세션{" "}
-                <span data-numeric className="font-mono">
-                  {visible.length}
-                </span>
-                개 · 마지막 갱신{" "}
-                <span data-numeric className="font-mono">
-                  {freshnessLabel(updatedAt)}
-                </span>
-              </>
-            )}
+            세션을 불러오는 중입니다.
           </p>
-        )}
+        ) : updatedAt > 0 ? (
+          <p className="text-meta text-ink-muted" data-testid="work-panel-summary">
+            세션{" "}
+            <span data-numeric className="font-mono">
+              {visible.length}
+            </span>
+            개 ·{" "}
+            {sessionsQuery.error === null ? "마지막 갱신" : "마지막으로 확인한 시각"}{" "}
+            <span data-numeric className="font-mono">
+              {freshnessLabel(updatedAt)}
+            </span>
+          </p>
+        ) : null}
       </header>
 
       {!live && (

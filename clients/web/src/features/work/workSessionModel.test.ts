@@ -3,6 +3,7 @@ import type { Message, WorkHost, WorkSession } from "@/lib/api";
 import type { WorkSessionACPFrame } from "@/lib/realtime";
 import {
   composeExcerpt,
+  emptyStepsDetail,
   eventFromFrame,
   eventsForSession,
   foldSessionEvents,
@@ -16,6 +17,7 @@ import {
   SLOW_STEP_MS,
   toolPhrase,
   workChannelsToWatch,
+  workHostOnline,
   workHostTrust,
   workSessionStatus,
   type WorkSessionEvent,
@@ -482,6 +484,34 @@ describe("workHostTrust", () => {
   it("matches the host id case-insensitively", () => {
     expect(workHostTrust(session(), [host({ id: HOST_ID.toLowerCase() })])).toBe(
       "local"
+    );
+  });
+
+  // The heartbeat is a different channel from the relay, and that is measured
+  // rather than assumed: momowebqa answers online:false / lastSeenAtMs:null for
+  // every host, including the one that had just relayed 15 agent.partial events
+  // into the session on screen. Folding it into trust would paint a visibly
+  // streaming session as unverified.
+  it("keeps the heartbeat out of the relay judgement", () => {
+    expect(workHostTrust(session(), [host({ online: false })])).toBe("local");
+    expect(workHostOnline(session(), [host({ online: false })])).toBe(false);
+    expect(workHostOnline(session(), [host()])).toBe(true);
+    expect(workHostOnline(session(), [])).toBeNull();
+    expect(workHostOnline(session(), undefined)).toBeNull();
+  });
+
+  it("drops the promise of coming steps when nobody has heard the host", () => {
+    const promise = "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
+    expect(emptyStepsDetail(session(), [host()])).toBe(promise);
+    // A finished session is history: the host's heartbeat now says nothing
+    // about the steps it already did or did not deliver.
+    expect(
+      emptyStepsDetail(session({ status: "ended" }), [host({ online: false })])
+    ).toBe(promise);
+    // No answer from the registry is not evidence either way.
+    expect(emptyStepsDetail(session(), undefined)).toBe(promise);
+    expect(emptyStepsDetail(session(), [host({ online: false })])).toBe(
+      "이 호스트에서 최근 신호를 받은 기록이 없습니다. 새 단계가 도착하지 않을 수 있습니다."
     );
   });
 });

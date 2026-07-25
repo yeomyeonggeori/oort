@@ -162,6 +162,34 @@ export function ChatShell() {
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
   const [workSessionId, setWorkSessionId] = useState<string | null>(null);
 
+  // Under 900px the 작업 세션 pane stops being a column beside the channel and
+  // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset
+  // 0, z-index 20). A surface that is covered has to leave the tab order with
+  // it. Without that, Tab walked straight through the drawer into controls that
+  // were not on screen: from the sidebar it took three stops to reach
+  // `composer-input`, buried under the drawer with elementFromPoint returning
+  // the drawer at every one of them, and typing there filled a composer nobody
+  // could see. `inert` is the platform's own answer (it removes focusability
+  // AND hides the subtree from assistive tech), so it is what this uses, driven
+  // from the same 900px breakpoint the stylesheet uses so the two cannot drift.
+  const coveredRef = useRef<HTMLDivElement>(null);
+  const [drawerWidth, setDrawerWidth] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(width < 900px)");
+    const sync = () => setDrawerWidth(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  const covered = workOpen && !thread && stressCount === 0 && drawerWidth;
+  useEffect(() => {
+    const node = coveredRef.current;
+    if (!node) return;
+    if (covered) node.setAttribute("inert", "");
+    else node.removeAttribute("inert");
+  }, [covered]);
+
   // The composer owns its own ref for the mention popover, so this reaches it
   // by the id it already publishes (its sr-only <label htmlFor> points at the
   // same one). Focus, not scroll or fake typing: the empty DM state's action is
@@ -246,7 +274,7 @@ export function ChatShell() {
     // where it stops being a column beside the channel and becomes a drawer
     // over it (tokens.css `work-pane`).
     <div className="relative flex min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div ref={coveredRef} className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
             <span aria-hidden="true" className="text-ink-muted">
@@ -295,6 +323,9 @@ export function ChatShell() {
                 재연결 {timeline.resume.resubscribeCount}회
               </span>
             )}
+            {/* The tooltip and the accessible name are the same string: two
+                names for one control is two controls to a reader who hears one
+                and sees the other. */}
             {stressCount === 0 && (
               <button
                 type="button"
@@ -304,7 +335,7 @@ export function ChatShell() {
                 }}
                 aria-pressed={workOpen}
                 aria-label="작업 세션 패널"
-                title="작업 세션"
+                title="작업 세션 패널"
                 data-testid="open-work-panel"
                 className={cn(
                   "flex size-control-sm items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
@@ -409,7 +440,15 @@ export function ChatShell() {
           onScopeChange={setWorkScope}
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
-          onClose={() => setWorkOpen(false)}
+          onClose={() => {
+            // The panel hands the caret back to the toggle that opened it, and
+            // that toggle lives in the surface this drawer just made `inert`.
+            // React would not drop the attribute until the commit that unmounts
+            // the panel, i.e. after that focus() call, so it comes off here
+            // first. The effect above re-syncs and finds nothing to do.
+            coveredRef.current?.removeAttribute("inert");
+            setWorkOpen(false);
+          }}
         />
       )}
     </div>

@@ -16,6 +16,7 @@ import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/State
 import { useSessionEvents } from "./useWorkSessions";
 import {
   composeExcerpt,
+  emptyStepsDetail,
   eventsForSession,
   foldSessionEvents,
   isSlowStep,
@@ -48,22 +49,27 @@ import {
 // content simply had nowhere to be.
 //
 // So the ledger facts sit in a native <details> disclosure, everything except
-// the actions scrolls, and only the two things you steer by (the back path and
-// the session's state) are sticky.
+// the action bar scrolls, and only the two things you steer by (the back path
+// and the session's state) are sticky. The excerpt form scrolls WITH the ledger
+// for the same reason, one step further in: as a second fixed block it stood at
+// 265px against a 240px ledger at 900x600, squeezing the very rows it exists to
+// quote. It is a disclosure under the steps now, not chrome over them.
 //
 // Three things this surface deliberately does not do:
 //   - it never renders `message.body` for a typed row. The server writes those
 //     in English ("Approval requested", "ACP session update"); the Korean copy
 //     is derived from the typed props instead (workSessionModel).
 //   - it never offers a turn-scoped stop it cannot perform. There is no server
-//     path from a work session to its agent run, so the panel STATES that in a
-//     sentence instead of parking a permanently disabled button in the chrome.
+//     path from a work session to its agent run (see SessionActions), so no
+//     control and no sentence about one: naming a capability only to withdraw
+//     it in the next clause is a coming-soon note wearing a status line.
 //   - it never draws a remote host's silence as a quiet session. The normalised
 //     ACP relay for workd hosts is still in flight (X-11 / MOMO-546), so an
 //     unverified stream says so (fail-closed).
 // =============================================================================
 
 const EXCERPT_FIELD_ID = "work-excerpt-body";
+const EXCERPT_FORM_ID = "work-excerpt-form";
 
 function MetaRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -119,18 +125,27 @@ function PlanBlock({ plan }: { plan: ReturnType<typeof foldSessionEvents>["plan"
 
 /**
  * One projected step. Past tense once it is over, present tense while it runs,
- * and the third branch when it failed, with the state as a text-first chip.
- * The raw tool name never reaches the headline: it is internal vocabulary and
- * lives in the row's title attribute for a developer reading over a shoulder.
+ * and the third branch when it failed, with the state as a text-first chip. The
+ * raw tool name never reaches a rendered string at all, tooltip included: it is
+ * internal vocabulary (SKILL §7) and its whole job is to pick the Korean copy.
  *
  * A `message` row is the agent's own text, folded from every `agent.partial`
  * delta of one answer, so it keeps the line breaks the agent wrote
  * (`whitespace-pre-wrap`) and, while the stream is still open, ends in a caret
  * rather than a chip: streaming text gets a caret, not a list of fragments and
  * not a shimmer (SKILL §4).
+ *
+ * `streamOpen` is what makes that caret honest. tokens.md §5b defines it as
+ * "information about a stream still being open", so it may only blink while
+ * this client can still observe one arriving. The row state alone cannot say
+ * that: it is promoted from the SERVER ledger (`session.status === "running"`),
+ * which stays true through a nineteen minute silence and through a dropped
+ * socket. Both of those are already stated in words at the top of the pane, and
+ * a caret blinking under those sentences would be the only moving thing on
+ * screen, claiming letters are arriving right now.
  */
-function EventRow({ row }: { row: WorkEventRow }) {
-  const streaming = row.kind === "message" && row.state === "running";
+function EventRow({ row, streamOpen }: { row: WorkEventRow; streamOpen: boolean }) {
+  const streaming = row.kind === "message" && row.state === "running" && streamOpen;
   return (
     <li
       className="flex items-baseline gap-2 border-b border-line px-4 py-1 last:border-b-0"
@@ -152,7 +167,6 @@ function EventRow({ row }: { row: WorkEventRow }) {
               ? "whitespace-pre-wrap text-body text-ink"
               : "text-meta text-ink"
           )}
-          {...(row.toolName ? { title: row.toolName } : {})}
         >
           {row.headline}
         </span>
@@ -192,6 +206,10 @@ function EventRow({ row }: { row: WorkEventRow }) {
  * sent, because the person sharing is the last check on what lands in the
  * channel ledger; this is the same contract as the mac excerpt sheet, and it
  * uses the same write path (a thread reply on the session's root message).
+ *
+ * It lives at the END of the scroll column rather than pinned under it, so the
+ * steps it quotes stay scrollable while it is open, and it takes the caret on
+ * open (which is also what scrolls it into view).
  */
 function ExcerptForm({
   session,
@@ -206,6 +224,15 @@ function ExcerptForm({
   const [text, setText] = useState(() => composeExcerpt(session, rows));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    fieldRef.current?.focus();
+    // Focusing the field only guarantees the FIELD is on screen. Aligning the
+    // form's end brings the send control with it, which is what a pinned bar
+    // used to do for free and is the one thing worth keeping from it.
+    formRef.current?.scrollIntoView({ block: "end" });
+  }, []);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -235,6 +262,8 @@ function ExcerptForm({
 
   return (
     <form
+      ref={formRef}
+      id={EXCERPT_FORM_ID}
       onSubmit={submit}
       className="flex flex-col gap-2 border-t border-line p-4"
       data-testid="work-excerpt-form"
@@ -242,15 +271,23 @@ function ExcerptForm({
       <label htmlFor={EXCERPT_FIELD_ID} className="text-meta text-ink-muted">
         발췌 내용
       </label>
+      {/* Korean prose in the sans stack, not `font-mono` (tokens.md §4): a
+          monospaced face renders 한글 with visibly stretched gaps between
+          syllables, so "세션을 시작함" reads as if it were double spaced. This
+          is the text the author proof-reads before it lands in the channel
+          ledger, and nothing in it is a column of figures that needs aligning.
+          It opens at four rows and resizes: the form scrolls with the ledger
+          now, but a short window should still show the send control. */}
       <textarea
+        ref={fieldRef}
         id={EXCERPT_FIELD_ID}
         value={text}
-        rows={6}
+        rows={4}
         onChange={(event) => setText(event.target.value)}
         disabled={pending}
         spellCheck={false}
         data-testid="work-excerpt-body"
-        className="w-full resize-y rounded-sm border border-line-strong bg-surface-raised p-2 font-mono text-meta text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="w-full resize-y rounded-sm border border-line-strong bg-surface-raised p-2 text-meta text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       />
       <p className="text-meta text-ink-muted">
         토큰, 비밀번호, 개인 경로가 없는지 확인하세요. 공유하면 채널 스레드
@@ -287,7 +324,7 @@ function ExcerptForm({
 }
 
 /**
- * The write actions, and what is missing from them stated in words.
+ * The write actions this release can actually perform.
  *
  * "이 턴만 중단" is what the reference calls Stop current turn: interrupt the
  * step without killing the process. momo's server has exactly one cancel, and
@@ -295,23 +332,27 @@ function ExcerptForm({
  * `run_id` inside its ACP events IS the session id, enforced server-side and
  * verified against momowebqa: /agent-runs/{sessionId}/cancel answers 404).
  *
- * It shipped as a disabled button with its reason beside it. Being explicit
- * about the reason was right; keeping the control was not. A button that cannot
- * become enabled in this release is not a control, it is 105px of permanent
- * chrome in a 320px column, and this pane has no room to spend on a promise.
- * So the sentence stays and the button goes, and only while the session is
- * still running, which is the only time interrupting a turn is a thing anyone
- * would be looking for. 세션 종료 remains beside it as the different thing it
- * is (the process, not the turn), behind a two step confirmation.
+ * That fact lives here, in the code, and nowhere on screen. It shipped first as
+ * a permanently disabled button, then as the two line sentence that replaced
+ * it ("이 턴만 중단: 서버에 이 세션의 턴만 중단하는 경로가 아직 없습니다"),
+ * which is worse in the way that matters: the product has never offered a
+ * turn-scoped stop, so the sentence introduced a capability purely in order to
+ * withdraw it, on every running session, in a 320px column. That is a
+ * coming-soon note plus an implementation excuse (SKILL §7 internal
+ * vocabulary), not a status. 세션 종료 is the different thing this pane really
+ * can do (the process, not the turn), behind a two step confirmation, and it
+ * states its own reason when it is unavailable.
  */
 function SessionActions({
   session,
   onExcerpt,
   excerptOpen,
+  excerptRef,
 }: {
   session: WorkSession;
   onExcerpt: () => void;
   excerptOpen: boolean;
+  excerptRef: React.RefObject<HTMLButtonElement>;
 }) {
   const { session: auth, workspaceId } = useSession();
   const [armed, setArmed] = useState(false);
@@ -382,11 +423,13 @@ function SessionActions({
           </span>
         )}
         <Button
+          ref={excerptRef}
           type="button"
           variant="outline"
           size="sm"
           onClick={onExcerpt}
           aria-expanded={excerptOpen}
+          {...(excerptOpen ? { "aria-controls": EXCERPT_FORM_ID } : {})}
           data-testid="work-excerpt-open"
         >
           발췌 공유
@@ -395,14 +438,7 @@ function SessionActions({
 
       {/* Each unavailable action states its own reason, on its own line. One
           merged sentence would leave the reader guessing which action it is
-          about. This one has no control at all (see the block comment), so the
-          sentence carries the whole fact, and only while it could matter. */}
-      {running && (
-        <p className="text-meta text-ink-muted" data-testid="work-stop-reason">
-          이 턴만 중단: 서버에 이 세션의 턴만 중단하는 경로가 아직 없습니다.
-          세션 전체를 끝내는 것만 가능합니다.
-        </p>
-      )}
+          about. */}
       {armed && (
         <p className="text-meta text-ink" data-testid="work-end-warning">
           세션 종료는 턴 하나가 아니라 이 세션 전체를 끝냅니다. 호스트에서
@@ -462,6 +498,7 @@ export function WorkSessionDetail({
 
   const [excerptOpen, setExcerptOpen] = useState(false);
   const [shared, setShared] = useState(false);
+  const excerptRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     setExcerptOpen(false);
     setShared(false);
@@ -497,6 +534,13 @@ export function WorkSessionDetail({
     session.startedAtMs,
     session.endedAtMs ?? nowMs
   );
+  // The one condition under which a blinking caret is a true statement: the
+  // rail is up, the relay is one we can vouch for, and something arrived within
+  // the survival window. Drop any of the three and the caret goes; the pane
+  // already says why in words (the offline banner, the silence line, the
+  // unverified host banner), and those sentences are the honest version of what
+  // the caret was claiming.
+  const streamOpen = live && trust === "local" && !slow;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="work-detail">
@@ -549,8 +593,13 @@ export function WorkSessionDetail({
               className="px-4 pb-2 text-meta text-warn"
               data-testid="work-detail-slow"
             >
-              마지막 신호 뒤 {silenceLabel(lastSignalAtMs, nowMs)} 동안
-              조용합니다. 세션은 아직 실행 중입니다.
+              {/* The figure is tagged, the prose is not (tokens.md §4): this
+                  line is re-rendered every second, so "15분 26초" changing to
+                  "15분 27초" shifts the sentence after it unless the digits are
+                  tabular. Korean prose stays in the sans stack. */}
+              마지막 신호 뒤{" "}
+              <span data-numeric>{silenceLabel(lastSignalAtMs, nowMs)}</span>{" "}
+              동안 조용합니다. 세션은 아직 실행 중입니다.
             </p>
           )}
         </div>
@@ -630,16 +679,32 @@ export function WorkSessionDetail({
           trust === "local" && (
             <EmptyInvite
               headline="아직 진행 내역이 없습니다."
-              detail="에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다."
+              detail={emptyStepsDetail(session, hosts)}
               testId="work-detail-empty"
             />
           )}
         {folded.rows.length > 0 && (
           <ul data-testid="work-event-list">
             {folded.rows.map((row) => (
-              <EventRow key={row.id} row={row} />
+              <EventRow key={row.id} row={row} streamOpen={streamOpen} />
             ))}
           </ul>
+        )}
+
+        {/* The excerpt form is the last block of the SCROLL column, not a
+            second pinned bar: it quotes the rows above it, and chrome that
+            outgrows the reading area is the bug the layout rule at the top of
+            this file exists to prevent. */}
+        {excerptOpen && (
+          <ExcerptForm
+            session={session}
+            rows={folded.rows}
+            onDone={(sent) => {
+              setExcerptOpen(false);
+              if (sent) setShared(true);
+              excerptRef.current?.focus();
+            }}
+          />
         )}
       </div>
 
@@ -653,25 +718,15 @@ export function WorkSessionDetail({
         </p>
       )}
 
-      {excerptOpen ? (
-        <ExcerptForm
-          session={session}
-          rows={folded.rows}
-          onDone={(sent) => {
-            setExcerptOpen(false);
-            if (sent) setShared(true);
-          }}
-        />
-      ) : (
-        <SessionActions
-          session={session}
-          excerptOpen={excerptOpen}
-          onExcerpt={() => {
-            setShared(false);
-            setExcerptOpen(true);
-          }}
-        />
-      )}
+      <SessionActions
+        session={session}
+        excerptOpen={excerptOpen}
+        excerptRef={excerptRef}
+        onExcerpt={() => {
+          setShared(false);
+          setExcerptOpen((open) => !open);
+        }}
+      />
     </div>
   );
 }

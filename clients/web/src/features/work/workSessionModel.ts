@@ -54,9 +54,27 @@ export interface WorkEventRow {
   atMs: number;
   /** One line, past tense once it is over, present tense while it runs. */
   headline: string;
-  /** The host-authored detail line, when there is one. */
+  /**
+   * The host-authored summary line, rendered as written.
+   *
+   * This is a deliberate contract, not an oversight. SKILL §9 keeps tool
+   * arguments and paths opaque, and the enforcement point for that is the
+   * SERVER: `validatedACPEvent` rejects any payload key containing
+   * command/output/cwd/path/raw/env/_meta outright, so `detail` is the one
+   * summary field a host is allowed to author. The client has no second
+   * classifier that could tell an allowed summary from a leaked argument, and
+   * inventing one here would either drop legitimate summaries or give a false
+   * assurance about strings the server already vetted. So the panel renders
+   * what the projection hands it and the redaction stays where it can be
+   * enforced. A host that writes a path into `detail` is a host bug, and the
+   * fix belongs in the projection, not in a regex on this side.
+   */
   detail?: string;
-  /** Raw tool name. Internal vocabulary: disclosure only, never a headline. */
+  /**
+   * Raw tool name (`read_file`, `fs.read`). Internal vocabulary, so it never
+   * reaches a rendered string or a tooltip: it exists only to classify the row
+   * into Korean copy via `toolPhrase`.
+   */
   toolName?: string;
 }
 
@@ -531,6 +549,9 @@ export type WorkHostTrust = "local" | "remote" | "unknown";
  * name at all is not evidence of anything. Both non-local answers are drawn
  * fail-closed: the panel states that the stream is unverified rather than
  * rendering an empty event list as a quiet session.
+ *
+ * The host's `online` flag is not part of this judgement, and `workHostOnline`
+ * below records the measurement behind that split.
  */
 export function workHostTrust(
   session: Pick<WorkSession, "hostId">,
@@ -548,6 +569,50 @@ export function workHostName(
 ): string | null {
   const host = hosts?.find((candidate) => uuidEq(candidate.id, session.hostId));
   return host?.displayName ?? null;
+}
+
+/**
+ * Whether the registry has heard from this session's host lately, or null when
+ * it has no answer (hosts not loaded, or a host id the registry does not know).
+ *
+ * `online` is deliberately NOT folded into `workHostTrust`, and the reason is
+ * measured rather than assumed. Exactly one server path writes it: the signed
+ * heartbeat (`WorkHostRoutes`, `UPDATE work_host SET last_seen_at`, a 90 second
+ * window). The ACP relay that carries every event this panel renders is a
+ * different endpoint and never touches that column. On momowebqa 2026-07-26 all
+ * 8 registered hosts answer `online: false` with `lastSeenAtMs: null`,
+ * including the host that had just relayed 15 `agent.partial` events into the
+ * session on screen. Gating relay trust on it would therefore paint a visibly
+ * streaming session as unverified, which is the opposite of fail-closed.
+ *
+ * What a heartbeat CAN honestly carry is a claim about the future: an empty
+ * step list under "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다"
+ * promises steps that a host nobody has heard from may never send. That is the
+ * one place this answer is used, and only while the ledger still calls the
+ * session running, because for a finished session the host's heartbeat now says
+ * nothing about the events it already delivered.
+ */
+export function workHostOnline(
+  session: Pick<WorkSession, "hostId">,
+  hosts: readonly WorkHost[] | undefined
+): boolean | null {
+  const host = hosts?.find((candidate) => uuidEq(candidate.id, session.hostId));
+  return host ? host.online : null;
+}
+
+/**
+ * The copy under "아직 진행 내역이 없습니다" for a session whose thread came
+ * back empty. A running session on a host the registry has not heard from gets
+ * the fact instead of the promise (see `workHostOnline`).
+ */
+export function emptyStepsDetail(
+  session: Pick<WorkSession, "hostId" | "status">,
+  hosts: readonly WorkHost[] | undefined
+): string {
+  if (session.status === "running" && workHostOnline(session, hosts) === false) {
+    return "이 호스트에서 최근 신호를 받은 기록이 없습니다. 새 단계가 도착하지 않을 수 있습니다.";
+  }
+  return "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
 }
 
 // ---- peek + excerpt ---------------------------------------------------------
