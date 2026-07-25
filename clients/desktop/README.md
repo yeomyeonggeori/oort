@@ -6,11 +6,27 @@ spike; the wrapped bundle was promoted to `clients/web` by MOMO-596.
 
 The shell's job is the part a webview cannot do. MOMO-603 landed the four native
 integrations of plan §2 B-group — **deep link, mDNS discovery, notification,
-keychain** — as plain app commands and two events. Everything else stays in the
-web bundle: what to prefill, when to notify and how a discovered server is
-offered are product decisions, and none of them live in Rust.
+keychain** — as plain app commands and two events. MOMO-606 added the fifth,
+the **updater**, and with it the bundle identity this app ships under. Everything
+else stays in the web bundle: what to prefill, when to notify and how a
+discovered server is offered are product decisions, and none of them live in
+Rust.
 
-Still not here: the **updater** (Tauri updater vs Sparkle #736 is undecided).
+## Identity (MOMO-606)
+
+| | |
+| --- | --- |
+| bundle identifier | `app.momo.desktop` (was the spike's `app.momo.spike`) |
+| product / app name | `momo` → `momo.app` (the SwiftUI client is `MomoMac.app`, so both can sit in /Applications) |
+| version | `0.1.0-next.N`, the pre-release train to the `0.1.0` open beta |
+| keychain service | `app.momo.desktop`, account `refresh-token` |
+| updater manifest | `https://dawn-kim-official.github.io/momo-alpha/update-next.json` |
+
+`momo://` is registered by this bundle **and** by the SwiftUI client. macOS
+LaunchServices picks one handler for the scheme, so on a machine with both
+installed an invite link may open either. Test deep links against a specific
+build with `open -a <path> "momo://join?..."` (below) rather than trusting the
+default handler.
 
 ## Layout
 
@@ -26,6 +42,7 @@ src-tauri/
   src/discovery.rs    # _momo._tcp browse
   src/notification.rs # permission + show
   src/keychain.rs     # refresh token in the OS credential store
+  src/updater.rs      # check / install / relaunch over the minisign manifest
   capabilities/       # core:default only (app commands need no permission entry)
   icons/              # generated via `cargo tauri icon app-icon.png`
 ```
@@ -45,6 +62,7 @@ All payloads are camelCase. Commands are invoked by the exact names below.
 | --- | --- | --- |
 | `momo:deep-link` | `{ url: string, server: string, code: string }` | A `momo://join` link arrived while the app was running. |
 | `momo:discovery` | `{ servers: DiscoveredServer[], scanning: boolean }` | The known server set changed, and once more when a scan ends (`scanning: false`). |
+| `momo:update-progress` | `{ downloaded: number, total: number \| null }` | Bytes moved while `updater_install` runs. `total` is null when the server sent no Content-Length. |
 
 ```ts
 interface DiscoveredServer {
@@ -68,6 +86,19 @@ interface DiscoveredServer {
 | `keychain_load_refresh_token` | — | `string \| null` | |
 | `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
 | `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. |
+| `app_version` | — | `string` | The running build, e.g. `0.1.0-next.1`. |
+| `updater_check` | — | `AvailableUpdate \| null` \| error | `null` = already newest. **Rejects** on a failed check; see below. |
+| `updater_install` | — | `void` \| error | Downloads, verifies minisign, swaps the bundle. Does not restart. |
+| `updater_relaunch` | — | never returns | Restarts into the installed build. |
+
+```ts
+interface AvailableUpdate {
+  version: string         // "0.1.0-next.2"
+  currentVersion: string  // "0.1.0-next.1"
+  notes: string | null    // manifest `notes`
+  publishedAt: string | null  // manifest `pub_date`, verbatim RFC 3339
+}
+```
 
 ## Deep link (`momo://join`)
 
@@ -141,6 +172,14 @@ most of what the credential store was for.
 
 - Service `app.momo.desktop`, account `refresh-token`. **Stable across builds** —
   changing either silently orphans every stored session.
+- macOS binds an item's ACL to the **signature** of the binary that wrote it, so
+  the spike's unsigned builds left items this signed build can neither read nor
+  overwrite (`errSecAuthFailed`, not `NoEntry`). Without a recovery the probe
+  would fail on every launch forever and quietly downgrade the shell to web
+  storage. `keychain_available` therefore deletes an unreadable item **once per
+  process** and re-probes: the cost is one sign-in, the alternative is a
+  credential store that is never used again. Once per process so that a genuinely
+  locked keychain cannot become a delete loop.
 - `clients/web/src/lib/session.ts` decides at runtime: keychain when the shell
   has one, the pre-existing `momo.web.session.v1` localStorage record otherwise.
   In keychain mode the token is in the credential store and only the non-secret
@@ -150,6 +189,45 @@ most of what the credential store was for.
 - `getSessionStorageMode()` reports which path is in force, so a degraded run
   (Linux with no Secret Service) can be honest rather than imply a guarantee it
   is not delivering.
+
+## Updater
+
+Tauri updater, not Sparkle (#736 closed by ADR-0133). It is the difference
+between "download a zip, drag it over the old app, relaunch" and one button, and
+three manual steps is three chances to end up running a build nobody can
+identify from the bug report that follows.
+
+Trust chain, both halves needed:
+
+- **minisign** — the manifest names a `.app.tar.gz` and its detached signature.
+  The public key is in `tauri.conf.json` and compiled into the binary; the
+  private key lives in `~/.momo-secrets/momo-updater.key` (0600) and is not in
+  this repo. A tampered payload fails verification before anything is unpacked,
+  so a compromised Pages host still cannot ship code to a tester.
+- **Developer ID** — the `.app` inside that tarball is the same signed, notarized
+  and **stapled** bundle the download page serves. `scripts/publish_next_build.sh`
+  re-creates the tarball *after* stapling and proves it with a tar round trip
+  (`codesign --verify` + `stapler validate` on the extracted copy), because the
+  bundler's own updater artifact is written before notarization runs.
+
+Three commands rather than one "update now", because each is a different
+decision for the person at the keyboard: is there one, download it, restart into
+it. The last one is separate on purpose — `download_and_install` replaces the
+bundle under the running process, which keeps executing the old image until it
+exits, so restarting is user-timed. Yanking the app out from under someone
+mid-sentence is the one thing an auto-updater must never do.
+
+`updater_check` **rejects** on failure instead of degrading quietly, which is the
+opposite of `discovery_start`. Discovery finding nothing and discovery being
+broken look the same to the person and both mean "type the address". An update
+check is not like that: "I could not reach the update server" and "you are on
+the latest build" must never render identically, or a stalled channel stays
+invisible until someone reports a bug that was fixed a week ago.
+
+Web half: `clients/web/src/features/updates/` (badge in the sidebar footer, the
+full state in 설정 > 업데이트, deep-linked as `/settings?section=updates`).
+
+Publishing: `scripts/publish_next_build.sh --version 0.1.0-next.N`.
 
 ## Notification
 

@@ -17,6 +17,7 @@ import {
   workingInChannel,
 } from "@/features/agents/agentWorkingSignal";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { Button } from "@/design/ui/button";
@@ -197,6 +198,11 @@ export function Sidebar({
             )}
           </nav>
         </div>
+
+        {/* Above the identity row, not below it: a new build is news, and news
+            belongs where the eye already lands when it leaves the channel list.
+            Renders nothing at all unless there is something to act on. */}
+        <UpdateBadge />
 
         <div className="flex items-center gap-2 border-t border-line p-2">
           <span
