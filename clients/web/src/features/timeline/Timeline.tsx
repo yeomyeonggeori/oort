@@ -6,6 +6,7 @@ import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/State
 import { Button } from "@/design/ui/button";
 import {
   buildTimelineItems,
+  type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
 } from "./model";
@@ -15,6 +16,7 @@ import {
   RecoveryDivider,
   UnreadDivider,
 } from "./MessageRow";
+import { PendingRow } from "./PendingRow";
 
 // =============================================================================
 // Timeline (R-1 §3). Virtualised by react-virtuoso, ordered by seq only, with
@@ -69,10 +71,12 @@ export function Timeline({
   lastReadSeq,
   unreadCount,
   recoveryMarkers,
+  pending,
   onStartReached,
   onRetry,
   onOpenThread,
   onResend,
+  onResendPending,
   onInviteMember,
 }: {
   messages: Message[];
@@ -81,10 +85,13 @@ export function Timeline({
   lastReadSeq?: number | null;
   unreadCount?: number;
   recoveryMarkers?: RecoveryMarker[];
+  /** Local echoes awaiting their seq; folded in at the tail (M10). */
+  pending?: PendingMessage[];
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
   onResend?: (message: Message) => Promise<void> | void;
+  onResendPending?: (clientMsgId: string) => Promise<void> | void;
   onInviteMember?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
@@ -95,8 +102,9 @@ export function Timeline({
         lastReadSeq,
         unreadCount,
         recoveryMarkers,
+        pending,
       }),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers]
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending]
   );
 
   // Derived during render, not in an effect: virtuoso has to receive the new
@@ -146,11 +154,15 @@ export function Timeline({
     );
   }
 
-  if (status === "loading" && messages.length === 0) {
+  // A local echo counts as content: the first message in an empty channel must
+  // appear the moment it is sent, not after the server round trip finishes.
+  const empty = messages.length === 0 && items.length === 0;
+
+  if (status === "loading" && empty) {
     return <SkeletonRows rows={6} className="p-4" />;
   }
 
-  if (status === "ready" && messages.length === 0) {
+  if (status === "ready" && empty) {
     return (
       <EmptyInvite
         headline="이 채널을 함께 시작하세요."
@@ -195,6 +207,16 @@ export function Timeline({
         if (item.kind === "unread") return <UnreadDivider count={item.count} />;
         if (item.kind === "recovery") {
           return <RecoveryDivider seq={item.seq} source={item.source} />;
+        }
+        if (item.kind === "pending") {
+          return (
+            <PendingRow
+              pending={item.pending}
+              startsGroup={item.startsGroup}
+              directory={directory}
+              onResend={onResendPending}
+            />
+          );
         }
         return (
           <MessageRow

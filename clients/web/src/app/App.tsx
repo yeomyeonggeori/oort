@@ -1,8 +1,9 @@
-import { useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
-import { setAccessToken, type LoginResponse } from "@/lib/api";
+import { queryClient } from "@/app/queryClient";
+import { useRestoredSession } from "@/app/session";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { AppShell } from "@/app/AppShell";
+import { SkeletonRows } from "@/features/common/States";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
@@ -12,10 +13,20 @@ import { SettingsRoute } from "@/features/settings/SettingsRoute";
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
 // have to resolve identically in both runtimes (ADR-0133 "one codebase").
 export function App() {
-  const [session, setSession] = useState<LoginResponse | null>(null);
+  const { status, session, signIn, signOut } = useRestoredSession();
+
+  if (status === "restoring") {
+    // Height-preserving bars, not a spinner or a splash: the shell that is
+    // about to appear occupies this space, so nothing jumps when it does.
+    return (
+      <div data-testid="session-restoring">
+        <SkeletonRows rows={4} className="p-6" />
+      </div>
+    );
+  }
 
   if (!session) {
-    return <LoginPage onLoggedIn={setSession} />;
+    return <LoginPage onLoggedIn={signIn} />;
   }
 
   return (
@@ -26,8 +37,11 @@ export function App() {
             <AppShell
               session={session}
               onLogout={() => {
-                setAccessToken(null);
-                setSession(null);
+                // Cached workspace data belongs to the session that is ending,
+                // so it goes with it: no roster, channel or read-state row from
+                // the previous member survives into the next login.
+                signOut();
+                queryClient.clear();
               }}
             />
           }
