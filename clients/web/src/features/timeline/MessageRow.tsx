@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { threadRollup, type Message, type RosterMember } from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { AgentCard } from "./AgentCard";
 import { agentCardModel, cardKeepsBody } from "./agentCardModel";
+import { ArtifactCard } from "./ArtifactCard";
+import { artifactKeepsBody, resolveArtifact } from "./artifacts";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -81,6 +83,27 @@ export function MessageRow({
   // §4): tool runs, approvals and settled turn cost. Ordinary prose returns
   // null here and the row is untouched.
   const card = agentCardModel(message);
+  // Code artifacts (ADR-0126 D2 / MOMO-620) sit at the same place in the row.
+  // Precedence follows the mac chain (MessageBubble.primaryContent): an
+  // artifact outranks the tool/turn card, so a diff renders as a diff instead
+  // of as a tool result whose body happens to be a patch.
+  //
+  // The one exception is an approval, which outranks BOTH. An approval card
+  // carries the 승인/거부 action; letting a patch-shaped body promote it into a
+  // read-only diff would hide the only thing the human is being asked to do.
+  //
+  // Memoised because it is the one derivation in this row that is not O(1):
+  // parsing a 700 line patch on every scroll-driven re-render is work the
+  // virtualiser would pay for over and over. The message object is replaced
+  // only when the server row changes, so it is the right key.
+  const isApproval = card?.kind === "approval";
+  const artifact = useMemo(
+    () => (isApproval ? null : resolveArtifact(message)),
+    [isApproval, message]
+  );
+  const keepsBody = artifact
+    ? artifactKeepsBody(message, artifact)
+    : card === null || cardKeepsBody(card);
 
   return (
     <article
@@ -120,7 +143,7 @@ export function MessageRow({
             </time>
           </div>
         )}
-        {(card === null || cardKeepsBody(card)) && (
+        {keepsBody && (
           <p
             className={cn(
               "whitespace-pre-wrap break-words text-body leading-relaxed",
@@ -130,7 +153,11 @@ export function MessageRow({
             {deleted ? "삭제된 메시지" : message.body}
           </p>
         )}
-        {card && <AgentCard card={card} directory={directory} />}
+        {artifact ? (
+          <ArtifactCard artifact={artifact} />
+        ) : (
+          card && <AgentCard card={card} directory={directory} />
+        )}
         {message.state === "edited" && (
           <span className="text-meta text-ink-muted">수정됨</span>
         )}

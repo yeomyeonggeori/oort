@@ -115,6 +115,13 @@
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
+  /* Diff body measure (MOMO-620 / ADR-0126 D2). A diff scrolls INSIDE its card
+   * at this height, the same 400px cap the mac card uses, so a 500 line change
+   * never grows the timeline row and the page never gains a horizontal scroll.
+   * It is a height, not a width, so it is not a pane; and the rhythm scale has
+   * no step near 400, so the measure gets a NAME rather than max-h-[400px]. */
+  --spacing-diff-body: 400px;
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */
