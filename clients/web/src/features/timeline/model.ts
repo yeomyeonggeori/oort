@@ -150,6 +150,13 @@ export function buildTimelineItems(
   const items: TimelineItem[] = [];
   let previous: Message | undefined;
   let unreadPlaced = false;
+  // A divider cuts the visual thread of an author group, so the row on the far
+  // side of it must re-introduce its author. Without this the first row under
+  // "새 메시지 3개" or "재연결됨" is anonymous whenever the same author happens
+  // to continue across the line, which is exactly when the reader is least able
+  // to infer who is speaking. Day dividers need no flag: a day boundary already
+  // forces a group through startsAuthorGroup.
+  let dividerAbove = false;
 
   // Markers anchor AFTER the newest loaded message at or below their seq, so
   // "seq N까지 복구" reads as a line drawn under everything it confirmed.
@@ -189,13 +196,15 @@ export function buildTimelineItems(
         count: unreadCount,
       });
       unreadPlaced = true;
+      dividerAbove = true;
     }
     items.push({
       kind: "message",
       key: `m-${message.seq}`,
       message,
-      startsGroup: startsAuthorGroup(previous, message),
+      startsGroup: dividerAbove || startsAuthorGroup(previous, message),
     });
+    dividerAbove = false;
     for (const marker of markersBySeq.get(message.seq) ?? []) {
       items.push({
         kind: "recovery",
@@ -203,6 +212,7 @@ export function buildTimelineItems(
         seq: marker.seq,
         source: marker.source,
       });
+      dividerAbove = true;
     }
     previous = message;
   }

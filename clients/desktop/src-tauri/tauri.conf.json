@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "momo — spike (Tauri)",
+        "title": "momo (spike)",
         "width": 1100,
         "height": 760,
         "minWidth": 720,

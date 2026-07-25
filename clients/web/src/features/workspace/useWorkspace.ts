@@ -27,15 +27,20 @@ export interface Directory {
   byId: Map<string, RosterMember>;
 }
 
+/** Index a member list for lookup by id, whatever the case the ids arrive in. */
+export function makeDirectory(members: RosterMember[]): Directory {
+  return { members, byId: new Map(members.map((m) => [keyOf(m.id), m])) };
+}
+
 export function useDirectory(workspaceId: string) {
   const query = useQuery({
     queryKey: ["roster", workspaceId],
     queryFn: () => fetchRoster(workspaceId),
   });
-  const directory = useMemo<Directory>(() => {
-    const members = query.data ?? [];
-    return { members, byId: new Map(members.map((m) => [keyOf(m.id), m])) };
-  }, [query.data]);
+  const directory = useMemo<Directory>(
+    () => makeDirectory(query.data ?? []),
+    [query.data]
+  );
   return { ...query, directory };
 }
 

@@ -164,6 +164,45 @@ describe("timeline item stream", () => {
     expect(kinds(items)).not.toContain("recovery");
   });
 
+  it("re-introduces the author on the row directly under the unread divider", () => {
+    // seq 10 and 11 are the same author inside the group window, so without the
+    // divider rule seq 11 renders anonymous right below "새 메시지 2개".
+    expect(startsAuthorGroup(messages[0], messages[1])).toBe(false);
+    const items = buildTimelineItems(messages, {
+      lastReadSeq: 10,
+      unreadCount: 2,
+    });
+    const index = items.findIndex((item) => item.kind === "unread");
+    const under = items[index + 1];
+    expect(under.kind === "message" && under.message.seq).toBe(11);
+    expect(under.kind === "message" && under.startsGroup).toBe(true);
+  });
+
+  it("re-introduces the author on the row directly under a recovery divider", () => {
+    const items = buildTimelineItems(messages, {
+      recoveryMarkers: [{ id: "r1", seq: 10, source: "backfill" }],
+    });
+    const index = items.findIndex((item) => item.kind === "recovery");
+    const under = items[index + 1];
+    expect(under.kind === "message" && under.message.seq).toBe(11);
+    expect(under.kind === "message" && under.startsGroup).toBe(true);
+  });
+
+  it("forces the header only on the row under the divider, not the next one", () => {
+    const run = [
+      msg(10, "배포 브랜치 올렸습니다", { createdAtMs: DAY }),
+      msg(11, "CI 초록 뜨면 머지할게요", { createdAtMs: DAY + 1000 }),
+      msg(12, "그대로 진행합니다", { createdAtMs: DAY + 2000 }),
+    ];
+    const items = buildTimelineItems(run, { lastReadSeq: 10, unreadCount: 2 });
+    const starts = items
+      .filter((item): item is Extract<TimelineItem, { kind: "message" }> =>
+        item.kind === "message"
+      )
+      .map((item) => item.startsGroup);
+    expect(starts).toEqual([true, true, false]);
+  });
+
   it("marks author group starts on the derived stream", () => {
     const items = buildTimelineItems(messages);
     const starts = items

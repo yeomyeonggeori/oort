@@ -45,9 +45,14 @@ export function LoginPage({
             <CardTitle className="text-title">momo</CardTitle>
             <RuntimeBadge />
           </div>
-          <CardDescription>
-            ADR-0133 스파이크 · {API_BASE}
-          </CardDescription>
+          {/* Default is same-origin, and then there is nothing to state: an
+              empty segment left a dangling separator on screen. The build's
+              own identity lives in the RuntimeBadge tooltip, not in copy. */}
+          {API_BASE !== "" && (
+            <CardDescription data-testid="login-api-base">
+              서버 {API_BASE}
+            </CardDescription>
+          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="flex flex-col gap-3">
