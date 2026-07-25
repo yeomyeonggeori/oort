@@ -100,21 +100,81 @@ const READ_STATES = [
   { channel_id: CHANNELS[3].id, last_read_seq: 7, latest_seq: 7, unread_count: 0, mention_count: 0 },
 ];
 
+// Three of these rows are typed agent events, not prose, so the capture shows
+// the R-1 §4 agent cards (approval / tool run / settled turn cost) in both
+// schemes. The props are shaped exactly like the server's own
+// (AgentGatewayRoutes.approvalRequestProps, WorkerService.toolResultProps,
+// AgentGatewayRoutes.timelineProps), opaque fields included, so the capture
+// also proves the redaction: `arguments` and `tool_grant` are present in the
+// fixture and must not appear anywhere on screen.
 const BODIES = [
   [ME, "prometheus mem_limit 붙였어요. 야간 소크 돌려두고 아침에 그래프 확인합시다."],
   [ME, "relay outbox lag 지표가 p99에서 1.2s 근처인데, 배치 크기 조정 전에 원인부터 봅시다."],
   [HERMES, "로그를 읽었습니다. outbox drain 워커 1개가 재시작 루프에 있었고, 지금은 안정입니다."],
-  [HERMES, "빌드 캐시를 정리하려 합니다. rm -rf build/ 는 되돌릴 수 없어서 승인이 필요합니다."],
+  [
+    HERMES,
+    "빌드 캐시를 정리하려 합니다.",
+    "approval_request",
+    {
+      approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+      run_id: "0199aa11-2222-7000-8000-0000000000b2",
+      action_type: "shell",
+      tool_name: "shell",
+      tier: "workspace_write",
+      call_id: "call_9f31",
+      title: "빌드 캐시 정리",
+      summary: "빌드 산출물 디렉터리를 지웁니다. 진행 중인 빌드는 없습니다.",
+      arguments: { command: "rm -rf build/", cwd: "/Users/dawn/projects/momo" },
+      tool_grant: { grant_id: "g-31", scopes: ["shell:write"] },
+      is_reversible: false,
+      estimated_micro_usd: 12400,
+      status: "pending",
+      source: "hermes_gateway",
+    },
+  ],
   [ME, "좋아요, 승인할게요. 끝나면 seq 기준으로 복구 마커 남는지 확인 부탁해요."],
-  [HERMES, "정리 완료. 3개 디렉터리 삭제, 소요 2.4s. 승인 원장에 기록했습니다."],
+  [
+    HERMES,
+    "3개 디렉터리 삭제",
+    "tool_result",
+    {
+      call_id: "call_9f31",
+      tool_name: "shell",
+      label: "빌드 캐시",
+      approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+      run_id: "0199aa11-2222-7000-8000-0000000000b2",
+      payload_sha256: "sha256:0199aa112222",
+      output: { stdout: "removed 3 directories" },
+      is_error: false,
+      executor: "agentworker.resume_approval.v0",
+    },
+  ],
   [ME, "@hermes 다음은 clients/web 쪽 토큰 교체 diff 리뷰 부탁합니다."],
-  [HERMES, "확인했습니다. 여명 팔레트 토큰만 사용하고 있고, 인디고 잔재는 없습니다."],
+  [
+    HERMES,
+    "확인했습니다. 여명 팔레트 토큰만 사용하고 있고, 인디고 잔재는 없습니다.",
+    "text",
+    {
+      schema: "momo.agent_gateway.timeline.v0",
+      source: "hermes_gateway",
+      status: "succeeded",
+      run_id: "0199aa11-2222-7000-8000-0000000000c3",
+      agent_member_id: HERMES,
+      usage: {
+        model: "claude-opus-4",
+        prompt_tokens: 1240,
+        completion_tokens: 380,
+        cost_micro_usd: 12000,
+        was_estimated: false,
+      },
+    },
+  ],
 ];
 
 function makeMessages(count) {
   const base = Date.now() - count * 60_000;
   return Array.from({ length: count }, (_, i) => {
-    const [author, body] = BODIES[i % BODIES.length];
+    const [author, body, type, props] = BODIES[i % BODIES.length];
     return {
       id: `capture-${i + 1}`,
       channelId: GENERAL_ID,
@@ -122,9 +182,10 @@ function makeMessages(count) {
       hlcTs: base + i * 60_000,
       hlcCount: 0,
       authorMemberId: author,
-      type: "text",
+      type: type ?? "text",
       body,
       state: "sent",
+      ...(props ? { props } : {}),
       createdAtMs: base + i * 60_000,
     };
   });

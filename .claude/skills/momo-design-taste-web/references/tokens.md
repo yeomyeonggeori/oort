@@ -108,7 +108,11 @@ Control heights are a separate axis from spacing: `h-control-sm` 28px,
 Panes are a third axis. A secondary column is wider than any rhythm step, so it
 gets a **name** rather than an off-grid number, and `w-[320px]` still does not
 compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
-`w-pane` / `max-h-pane` 320px (thread panel, command list).
+`w-pane` / `max-h-pane` 320px (thread panel, command list), `max-w-pane-lg`
+640px (agent card measure, R-1 §4). The card measure is a token for the same
+reason as the others: let an agent card run the full timeline width and its
+right-aligned numeric column ends up a screen away from its label, at which
+point it stops reading as a card and starts reading as a banner.
 
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
@@ -150,6 +154,16 @@ the pre-flight would flag. `AppShell` renders exactly two children into it, the
 sidebar and `<main>`; the ⌘K switcher is a portalled dialog and stays outside
 the grid. Inside the sidebar column the workspace rail is `w-8` (32px), so the
 channel list keeps the remaining 208px.
+
+## 5b. Motion utilities
+
+There is exactly one, and it is feedback rather than decoration: `caret-stream`
+(R-1 §4) blinks the streaming caret with `steps(1)` so it reads as a text cursor
+and not as a fade. It carries its own `prefers-reduced-motion: reduce` branch
+inside the `@utility` block, so a reduced-motion viewer gets a **steady** caret
+rather than none: the caret is information about a stream still being open, and
+removing it would remove the information along with the motion. There is no
+shimmer utility and there must not be one (SKILL §4).
 
 ## 6. Scheme selection
 

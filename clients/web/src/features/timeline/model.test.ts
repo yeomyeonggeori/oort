@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "@/lib/api";
 import {
   AUTHOR_GROUP_WINDOW_MS,
+  addPending,
   buildTimelineItems,
+  confirmsPending,
   emptyTimeline,
+  failPending,
   isStrictlyOrdered,
   mergeMessages,
   reconcileMessages,
+  removePending,
+  retryPending,
   startsAuthorGroup,
+  unsettledPending,
+  type PendingMessage,
   type TimelineItem,
 } from "./model";
 import { matchMembers, mentionQueryAt } from "@/features/chat/Composer";
@@ -211,6 +218,165 @@ describe("timeline item stream", () => {
       )
       .map((item) => item.startsGroup);
     expect(starts).toEqual([true, false, true]);
+  });
+});
+
+describe("optimistic insert (M10)", () => {
+  const ME = "0199aaaa-0000-7000-8000-000000000001";
+  const OTHER = "0199bbbb-0000-7000-8000-000000000002";
+
+  function pending(
+    clientMsgId: string,
+    body: string,
+    overrides: Partial<PendingMessage> = {}
+  ): PendingMessage {
+    return {
+      clientMsgId,
+      channelId: "c",
+      authorMemberId: ME,
+      body,
+      createdAtMs: DAY,
+      sinceSeq: 10,
+      status: "sending",
+      ...overrides,
+    };
+  }
+
+  function mine(seq: number, body: string, overrides: Partial<Message> = {}) {
+    return msg(seq, body, { authorMemberId: ME, createdAtMs: DAY, ...overrides });
+  }
+
+  function pendingKeys(items: TimelineItem[]): string[] {
+    return items
+      .filter((item): item is Extract<TimelineItem, { kind: "pending" }> =>
+        item.kind === "pending"
+      )
+      .map((item) => item.pending.clientMsgId);
+  }
+
+  // ---- 낙관 -> 확정 치환 ---------------------------------------------------
+
+  it("renders the local echo at the tail while it has no seq", () => {
+    const items = buildTimelineItems([mine(10, "배포 시작합니다")], {
+      pending: [pending("k1", "CI 초록 뜨면 머지할게요")],
+    });
+    expect(items.map((i) => i.kind)).toEqual(["day", "message", "pending"]);
+    expect(pendingKeys(items)).toEqual(["k1"]);
+  });
+
+  it("replaces the echo with the confirmed row once its seq arrives", () => {
+    const body = "CI 초록 뜨면 머지할게요";
+    const echo = pending("k1", body);
+    const confirmed = [mine(10, "배포 시작합니다"), mine(11, body)];
+    expect(unsettledPending(confirmed, [echo])).toEqual([]);
+    const items = buildTimelineItems(confirmed, { pending: [echo] });
+    expect(items.map((i) => i.kind)).toEqual(["day", "message", "message"]);
+  });
+
+  it("keeps the confirmed array strictly ordered by seq, echoes stay outside", () => {
+    // The echo never gets a synthetic seq, so the invariant the seq gate
+    // re-implements is untouched while a send is in flight.
+    const state = reconcileMessages(emptyTimeline(), [mine(10, "a"), mine(11, "b")]);
+    expect(isStrictlyOrdered(state.messages)).toBe(true);
+    expect(state.newestSeq).toBe(11);
+  });
+
+  // ---- 중복 방지 ------------------------------------------------------------
+
+  it("shows one row, not two, when the realtime frame beats the POST response", () => {
+    // message.new carries no client_msg_id (MessageRoutes.broadcastPayload), so
+    // the confirmed twin has to be recognised by content and seq position.
+    const body = "prometheus mem_limit 붙였어요";
+    const echo = pending("k1", body);
+    const items = buildTimelineItems([mine(11, body)], { pending: [echo] });
+    const rows = items.filter(
+      (i) => i.kind === "message" || i.kind === "pending"
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("message");
+  });
+
+  it("does not let an older identical message swallow a fresh echo", () => {
+    const body = "네";
+    const echo = pending("k1", body, { sinceSeq: 10 });
+    // seq 9 predates the send: it cannot be its echo, however identical.
+    expect(confirmsPending(mine(9, body), echo)).toBe(false);
+    expect(unsettledPending([mine(9, body)], [echo])).toEqual([echo]);
+  });
+
+  it("does not settle an echo against another member's identical message", () => {
+    const body = "확인했습니다";
+    const echo = pending("k1", body);
+    expect(confirmsPending(mine(11, body, { authorMemberId: OTHER }), echo)).toBe(
+      false
+    );
+  });
+
+  it("settles one echo per confirmed message when the same text is sent twice", () => {
+    const body = "다시 확인 부탁드립니다";
+    const first = pending("k1", body);
+    const second = pending("k2", body);
+    expect(unsettledPending([mine(11, body)], [first, second])).toEqual([second]);
+    expect(unsettledPending([mine(11, body), mine(12, body)], [first, second]))
+      .toEqual([]);
+  });
+
+  it("ignores a tombstone as a confirmation", () => {
+    const body = "지워진 메시지";
+    const echo = pending("k1", body);
+    expect(confirmsPending(mine(11, body, { state: "deleted" }), echo)).toBe(false);
+  });
+
+  // ---- 실패 전이 ------------------------------------------------------------
+
+  it("moves a failed send to the failed row state without dropping the text", () => {
+    const list = addPending([], pending("k1", "머지했습니다"));
+    const failed = failPending(list, "k1");
+    expect(failed[0].status).toBe("failed");
+    expect(failed[0].body).toBe("머지했습니다");
+    const items = buildTimelineItems([mine(10, "배포 시작합니다")], {
+      pending: failed,
+    });
+    const row = items.find((i) => i.kind === "pending");
+    expect(row?.kind === "pending" && row.pending.status).toBe("failed");
+  });
+
+  it("retries with the SAME idempotency key so a committed send is not doubled", () => {
+    const list = failPending(addPending([], pending("k1", "머지했습니다")), "k1");
+    const retried = retryPending(list, "k1");
+    expect(retried[0].clientMsgId).toBe("k1");
+    expect(retried[0].status).toBe("sending");
+  });
+
+  it("drops the echo when the send path settles it explicitly", () => {
+    const list = addPending([], pending("k1", "머지했습니다"));
+    expect(removePending(list, "k1")).toEqual([]);
+  });
+
+  // ---- 그룹핑 / 빈 채널 -----------------------------------------------------
+
+  it("continues the author group when the echo follows my own recent message", () => {
+    const items = buildTimelineItems([mine(10, "배포 시작합니다")], {
+      pending: [pending("k1", "CI 돌려둘게요", { createdAtMs: DAY + 1000 })],
+    });
+    const row = items.find((i) => i.kind === "pending");
+    expect(row?.kind === "pending" && row.startsGroup).toBe(false);
+  });
+
+  it("starts a group when the echo follows someone else", () => {
+    const items = buildTimelineItems(
+      [msg(10, "확인 부탁드립니다", { authorMemberId: OTHER, createdAtMs: DAY })],
+      { pending: [pending("k1", "지금 봅니다", { createdAtMs: DAY + 1000 })] }
+    );
+    const row = items.find((i) => i.kind === "pending");
+    expect(row?.kind === "pending" && row.startsGroup).toBe(true);
+  });
+
+  it("carries the first message of an empty channel", () => {
+    const items = buildTimelineItems([], {
+      pending: [pending("k1", "첫 메시지입니다", { sinceSeq: null })],
+    });
+    expect(items.map((i) => i.kind)).toEqual(["pending"]);
   });
 });
 

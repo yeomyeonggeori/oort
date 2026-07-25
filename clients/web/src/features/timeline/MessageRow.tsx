@@ -2,6 +2,8 @@ import { useState } from "react";
 import { threadRollup, type Message, type RosterMember } from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
+import { AgentCard } from "./AgentCard";
+import { agentCardModel, cardKeepsBody } from "./agentCardModel";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -31,7 +33,14 @@ function relativeLabel(atMs: number, nowMs: number): string {
   return `${Math.round(hours / 24)}일 전`;
 }
 
-function Avatar({ member, name }: { member: RosterMember | null; name: string }) {
+/** Shared with the pending row so an optimistic echo sits on the same grid. */
+export function Avatar({
+  member,
+  name,
+}: {
+  member: RosterMember | null;
+  name: string;
+}) {
   const isAgent = member?.kind === "agent";
   return (
     <span
@@ -68,6 +77,10 @@ export function MessageRow({
   const deleted = message.state === "deleted";
   const failed = message.state === "failed";
   const rollup = threadRollup(message);
+  // Agent events render their structured body as a card in the SAME row (R-1
+  // §4): tool runs, approvals and settled turn cost. Ordinary prose returns
+  // null here and the row is untouched.
+  const card = agentCardModel(message);
 
   return (
     <article
@@ -107,14 +120,17 @@ export function MessageRow({
             </time>
           </div>
         )}
-        <p
-          className={cn(
-            "whitespace-pre-wrap break-words text-body leading-relaxed",
-            deleted && "text-ink-muted"
-          )}
-        >
-          {deleted ? "삭제된 메시지" : message.body}
-        </p>
+        {(card === null || cardKeepsBody(card)) && (
+          <p
+            className={cn(
+              "whitespace-pre-wrap break-words text-body leading-relaxed",
+              deleted && "text-ink-muted"
+            )}
+          >
+            {deleted ? "삭제된 메시지" : message.body}
+          </p>
+        )}
+        {card && <AgentCard card={card} directory={directory} />}
         {message.state === "edited" && (
           <span className="text-meta text-ink-muted">수정됨</span>
         )}
