@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-26 (Fable Wave B 1단계 랜딩 + 2단계 발진)
+- **랜딩(track/uxui)**: #801 작업 패널(MOMO-618, #804) · #803 diff/커밋/PR 카드(MOMO-620, #805). 리뷰 2R씩 — B3·H7·M32 전량 해소, 최종 577 tests·게이트 전량 그린.
+- **801 수확**: 실서버 Ed25519 호스트 등록→ACP 중계 6종 200 실왕복. R1 Blocker 2(상세 크롬 압사·partial 델타 원장 오염)·R2 High(거짓 라이브 캐럿→streamOpen 게이트, 드로어 포커스 누수→inert). **엔진 발견**: work_session→agent_run 링크 미노출로 '턴만 중단' 서버 경로 부재(ENGINE_HANDOFF 후보), 서버 이벤트 body 영어 렌더(별건 후보).
+- **803 수확**: R1 Blocker(실패 턴이 깨끗한 diff 카드로 둔갑)·잘림 거짓 단언 해소. mac 518 props 계약 정합 확인.
+- **2단계 발진(wf_5be00582)**: #802 터미널 관전(xterm.js, observer 등급 소비, read-only 각인 프레임 검증 포함).
+- QA 잔여물: momowebqa에 qa-618 채널·프로브 호스트·세션 3건(802 검증 재활용 예정).
+
+
 ## 2026-07-26 (Fable main 동기화·라이브 통합·next.8·Wave C ADR) 
 - **main 동기화**(성재 승인, #799 #800) 후 원점 검증 그린(웹 467 tests·swift build 0), momowebqa 재배포.
 - **616 라이브 통합 실측 PASS**: /usage/summary 전항목 손계산 일치(30d 총계 148,200µUSD·추정 분리·모델/에이전트 내림차순·7d 범위 절단·주 bucket 경계·401/400 게이트). 시드 3행은 QA 워크스페이스에 잔류(합성 데이터 고지) — 사용량 섹션 실렌더 확인용.
