@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Hash, Lock, MessageSquare } from "lucide-react";
+import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import { updateReadState, uuidEq, type Message } from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { Timeline } from "@/features/timeline/Timeline";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
+import { WorkPanel } from "@/features/work/WorkPanel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import {
   makeStressRoster,
@@ -148,6 +149,11 @@ export function ChatShell() {
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
 
+  // 작업 세션 패널 (AX-3 / MOMO-618). One secondary pane at a time: a thread and
+  // a work session are both "the thing you stepped aside to read", and stacking
+  // two 320px panes on a 1280px window leaves the channel narrower than either.
+  const [workOpen, setWorkOpen] = useState(false);
+
   // The composer owns its own ref for the mention popover, so this reaches it
   // by the id it already publishes (its sr-only <label htmlFor> points at the
   // same one). Focus, not scroll or fake typing: the empty DM state's action is
@@ -268,15 +274,38 @@ export function ChatShell() {
               메시지 {messages.length}개
             </span>
           </div>
-          {timeline.resume.resubscribeCount > 0 && (
-            <span
-              className="shrink-0 text-timestamp text-ink-muted"
-              data-numeric
-              data-testid="resume-info"
-            >
-              재연결 {timeline.resume.resubscribeCount}회
-            </span>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {timeline.resume.resubscribeCount > 0 && (
+              <span
+                className="text-timestamp text-ink-muted"
+                data-numeric
+                data-testid="resume-info"
+              >
+                재연결 {timeline.resume.resubscribeCount}회
+              </span>
+            )}
+            {stressCount === 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setThread(null);
+                  setWorkOpen((open) => !open);
+                }}
+                aria-pressed={workOpen}
+                aria-label="작업 세션 패널"
+                title="작업 세션"
+                data-testid="open-work-panel"
+                className={cn(
+                  "flex size-control-sm items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                  workOpen
+                    ? "bg-accent-soft text-accent"
+                    : "text-ink-muted hover:bg-surface-hover"
+                )}
+              >
+                <SquareTerminal className="size-4" />
+              </button>
+            )}
+          </div>
         </header>
 
         {offline && (
@@ -299,7 +328,10 @@ export function ChatShell() {
               pending={stressCount > 0 ? undefined : timeline.pending}
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
               onRetry={timeline.reload}
-              onOpenThread={setThread}
+              onOpenThread={(message) => {
+                setWorkOpen(false);
+                setThread(message);
+              }}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
@@ -357,6 +389,10 @@ export function ChatShell() {
           directory={directory}
           onClose={() => setThread(null)}
         />
+      )}
+
+      {workOpen && !thread && stressCount === 0 && (
+        <WorkPanel channelId={channelId} onClose={() => setWorkOpen(false)} />
       )}
     </div>
   );
