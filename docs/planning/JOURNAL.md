@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-25 (Fable parity 게이트 실측·차단 해소·next.6) · Tauri 전환 판정 재료 완비
+- **parity 실측(MOMO-608, 릴리스 번들 0.1.0-next.5)**: 부록 대분류 10개 PASS5·부분5·**FAIL 0**. 성능 3종 전부 통과 — 1k 스크롤 실효 96~105fps(p95 15~19ms, 가상화 62행 고정)·콜드 469~547ms(첫 실행 946ms)·유휴 137~169MB footprint. **릴리스 keychain 왕복 PASS**(암호창 0회 — 606 ACL 수리 유효). 재연결 resume 실측(Centrifugo 중단 중 25건 주입→복귀 유실 0). 보고서 `2026-07-25-parity-gate-report.md`.
+- **차단 1건(G-1) 해소(MOMO-609)**: .local 무한 대기 → ①모든 REST 15s 데드라인(본문 포함)·NetworkError/ApiError 분리·의미 있는 실패에만 재시도(무응답 15.3s 종료 실측) ②mDNS TXT `ipv4` 키 추가, 셸 ipv4→base 우선 다이얼(하위호환, macOS 클라는 base 유지). 발견 카드→로그인 2.1s 성공. **정직 보고**: 이번 환경에선 원 증상 미재현 — 해제 근거는 "무한 대기 구조적 불가+카드가 이름 해석 비의존 주소 제공".
+- **High(G-2) 해소(MOMO-610)**: 근본 원인=app-shell 암묵 auto 행+main min-height:auto → minmax(0,1fr)+overflow:clip(hidden은 포커스 스크롤로 더 나쁨). 3창×8라우트 실측 overflow 0, **회귀 게이트 gate:shell 신설**(전 10 FAIL→후 31 PASS 양방향).
+- **next.6 발행**(sha256 cce83f1a…): 차단·High 수리 포함 첫 빌드. main #785.
+- **전환 결정 대기**: 차단 GAP 0. 잔여 비차단=멤버 디렉터리·새 DM 진입점(#782), 비용 표시 미검증, 업데이터 실설치 재현. 권고: 성재가 next.6 직접 사용 후 전환 판단, 그동안 #782 진행.
+
+
 ## 2026-07-25 (Fable parity 게이트 실측 — MOMO-608/#775) · 릴리스 번들 0.1.0-next.5, 조건부 전환 권고
 - 발행 번들(notarized·stapled)을 격리 경로에서 구동해 ADR-0133 부록을 전수 실측. 대분류 10개 **PASS 5·부분 PASS 5·FAIL 0**(세분 17행 기준 PASS 12·부분 5). 조작은 AX(AXPress/포커스)+CGEvent 키보드·휠 — 합성 마우스 클릭이 이 WKWebView 웹 콘텐츠엔 전달되지 않는 자동화 한계를 보고서에 명시.
 - **성능 3종 전부 PASS**: 1k 실메시지 로드 후 4초 휠 스크롤 **96.0/105.5fps**(p50 9ms, >33ms 프레임 4/0, DOM 행 61~62 고정) · 콜드 스타트 창 표시 **269~946ms**·사용가능 469~547ms · 유휴 **RSS 247.5MB / footprint 137.6MB**(1k 스트레스 직후에도 298/169MB). **추가 항목 keychain 왕복 PASS**(로그인→⌘Q→재실행 무로그인 복원, 암호 창 0회). 재연결 resume도 릴리스 번들 실측(centrifugo stop→25건 주입→재기동, 9초 복귀·1000→1025·유실 0).
