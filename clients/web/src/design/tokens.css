@@ -187,6 +187,41 @@
   overflow: clip;
 }
 
+/* 작업 세션 패널 기하 (MOMO-618 R1). The pane is 320px, and beside a 240px
+ * sidebar that is 560px of the window spent before the channel gets any. On a
+ * 1280px window the channel still has 720px; on a 760px one it has 200px, the
+ * composer collapses to 136px, and its placeholder wraps to two lines and is
+ * cut off vertically. A secondary pane must not be able to squeeze the primary
+ * surface out of usable width.
+ *
+ * So below 900px (the narrowest window the shell gate measures) the two stop
+ * sharing the row: the pane takes the whole chat surface and the channel waits
+ * underneath at its own full width, restored the moment the pane is closed.
+ * ONE pane at a time, rather than two panes that both lose.
+ *
+ * It takes the WHOLE surface and not a 320px strip over one edge, because a
+ * strip covers the trailing half of the composer, including its send control:
+ * an overlay that hides a control the reader can still half see is worse than
+ * one that clearly replaces the surface. The pane brings its own close button
+ * and its own Escape, so nothing is stranded behind it.
+ *
+ * The anchor is the chat surface's own `relative` box, so this never escapes
+ * the shell and the document still cannot scroll (MOMO-610).
+ *
+ * It is a named utility rather than a pair of responsive classes because the
+ * width itself is the token: `w-[320px]` and `md:w-[320px]` are exactly the
+ * arbitrary values the scale exists to keep out. */
+@utility work-pane {
+  inline-size: var(--spacing-pane);
+
+  @media (width < 900px) {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
+}
+
 /* Dialog panel measure (R-1 §5 다이얼로그, MOMO-614). A dialog sits one 32px
  * step below the top of the window, so its own maximum height is the window
  * minus that step twice. The rhythm scale has no viewport-relative step and
