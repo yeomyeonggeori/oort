@@ -8,9 +8,9 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain}.rs` and the command/event contract is documented in
-// `clients/desktop/README.md`. Keep the three in sync — a renamed command fails
-// at runtime, not at compile time.
+// notification,keychain,updater}.rs` and the command/event contract is
+// documented in `clients/desktop/README.md`. Keep the three in sync — a renamed
+// command fails at runtime, not at compile time.
 //
 // `@tauri-apps/api` is imported DYNAMICALLY on purpose. Vite splits it into its
 // own chunk that a browser tab never requests, so the desktop bridge costs the
@@ -30,6 +30,8 @@ export const DESKTOP_EVENT = {
   deepLink: "momo:deep-link",
   /** The full current set of discovered servers. */
   discovery: "momo:discovery",
+  /** Bytes downloaded so far while an update installs. */
+  updateProgress: "momo:update-progress",
 } as const;
 
 // ---- module plumbing --------------------------------------------------------
@@ -267,5 +269,73 @@ export const desktopKeychain = {
       console.warn("[momo] keychain clear failed", error);
       return false;
     }
+  },
+};
+
+// ---- self-update ------------------------------------------------------------
+
+/** The build this shell is running, e.g. `0.1.0-next.1`. Null in a browser. */
+export async function appVersion(): Promise<string | null> {
+  if (!IS_TAURI) return null;
+  try {
+    return await invoke<string>("app_version");
+  } catch {
+    return null;
+  }
+}
+
+/** A newer build announced by the update manifest. */
+export interface AvailableUpdate {
+  /** The version on offer. */
+  version: string;
+  /** The version running now, so the offer can be shown as a transition. */
+  currentVersion: string;
+  /** Release notes from the manifest. May be absent. */
+  notes: string | null;
+  /** The manifest's publish timestamp (RFC 3339), verbatim. May be absent. */
+  publishedAt: string | null;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  /** Null when the server sent no Content-Length. */
+  total: number | null;
+}
+
+/**
+ * Self-update, in three separate acts (ADR-0133 P2, MOMO-606).
+ *
+ * Unlike the rest of this file, `check` and `install` REJECT on failure instead
+ * of degrading quietly. "I could not reach the update server" and "you are on
+ * the latest build" must never look the same to a tester, or a stalled release
+ * channel stays invisible until someone reports a bug that was fixed a week
+ * ago. `relaunch` is the exception and by nature: it never returns.
+ */
+export const desktopUpdater = {
+  /** Ask the manifest. Resolves to null when this build is current. */
+  async check(): Promise<AvailableUpdate | null> {
+    if (!IS_TAURI) return null;
+    return invoke<AvailableUpdate | null>("updater_check");
+  },
+
+  /**
+   * Download, verify (minisign) and swap the app bundle on disk. Does NOT
+   * restart: on macOS the running process keeps executing the old image until
+   * it exits, so when to restart is the person's call, not ours.
+   */
+  async install(): Promise<void> {
+    if (!IS_TAURI) return;
+    return invoke<void>("updater_install");
+  },
+
+  /** Restart into the installed build. Never resolves. */
+  async relaunch(): Promise<void> {
+    if (!IS_TAURI) return;
+    return invoke<void>("updater_relaunch");
+  },
+
+  /** Download progress while `install` runs. */
+  onProgress(handler: (progress: UpdateProgress) => void): Promise<() => void> {
+    return listen<UpdateProgress>(DESKTOP_EVENT.updateProgress, handler);
   },
 };

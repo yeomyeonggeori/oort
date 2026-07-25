@@ -155,6 +155,35 @@
   grid-template-columns: var(--w-sidebar) 1fr;
 }
 
+/* Determinate download progress (설정 > 업데이트, MOMO-606). A native
+ * <progress> rather than a div with a width: CSP is style-src 'self', so the
+ * only way to draw a bar whose length is data is to let the platform control do
+ * it from its value/max attributes. It is styled here because the pseudo
+ * elements that paint it cannot be reached from a utility class. Tokens only,
+ * so it follows the scheme like everything else, and no animation: it moves
+ * exactly as fast as the bytes arrive. */
+@utility progress-bar {
+  appearance: none;
+  inline-size: 100%;
+  block-size: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-hover);
+
+  &::-webkit-progress-bar {
+    background: var(--surface-hover);
+  }
+
+  &::-webkit-progress-value {
+    background: var(--accent);
+  }
+
+  &::-moz-progress-bar {
+    background: var(--accent);
+  }
+}
+
 /* Streaming caret (R-1 §4). Streaming text gets a CARET, never a shimmer
  * skeleton: the blink is feedback that a stream is still open, and it stops
  * being motion at all under prefers-reduced-motion, where the caret stays
