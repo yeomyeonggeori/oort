@@ -275,6 +275,99 @@ function makeMessages(count) {
   });
 }
 
+// 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
+// at in both schemes: three status chips (온라인 / 오프라인 / 해지됨) side by
+// side is where a status color that only works in one scheme would show.
+//
+// Shaped like the momowebqa ledger the R2 review measured, because that ledger
+// is what exposed the defects. A host that pairs again writes a NEW row, so one
+// display name repeats across rows and only the id tail separates them; revoked
+// rows are never deleted; and the server returns creation order, so the usable
+// hosts do not arrive first. The array is in that server order on purpose,
+// which makes the shot prove the panel sorts rather than getting lucky.
+const REVOKED_TARGET = "019f99a0-8ac1-77b0-948b-210e791c6238";
+const WORK_HOSTS = [
+  {
+    id: "019f999c-6845-79cd-841d-22f20d098c61",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 iMac, 집 작업실",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true },
+    revokedAtMs: Date.now() - 3 * 86_400_000,
+    createdAtMs: Date.now() - 30 * 86_400_000,
+    online: false,
+  },
+  {
+    id: REVOKED_TARGET,
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 iMac, 집 작업실",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true },
+    revokedAtMs: Date.now() - 2 * 86_400_000,
+    createdAtMs: Date.now() - 20 * 86_400_000,
+    online: false,
+  },
+  {
+    id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 MacBook Pro",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true, git: true },
+    lastSeenAtMs: Date.now() - 20_000,
+    createdAtMs: Date.now() - 86_400_000,
+    online: true,
+  },
+  {
+    id: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+    workspaceId: WORKSPACE_ID,
+    scope: "workspace",
+    ownerMemberId: ME,
+    type: "workd",
+    displayName: "dawn-build-01",
+    publicKey: "capture-only-not-a-credential",
+    capabilities: { terminal: true },
+    lastSeenAtMs: Date.now() - 3 * 3_600_000,
+    createdAtMs: Date.now() - 7 * 86_400_000,
+    online: false,
+  },
+];
+
+// WorkTierPolicyRoutes.loadPolicy answers /me out of the workspace row when the
+// member has no row of their own, so an inherited member policy carries the
+// DEFAULT's mode, target and updated_at, and differs only in member_id and
+// inherited. A review screenshot that shows 상속 중 next to a different mode is
+// a screen the server cannot produce, which makes the shot worse than no shot.
+const WORKSPACE_TIER_POLICY = {
+  workspaceId: WORKSPACE_ID,
+  mode: "auto",
+  autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
+  inherited: false,
+  updatedAtMs: Date.now() - 3_600_000,
+};
+
+// The member has their OWN row here, pointing at a host that was revoked after
+// the policy was written. That is the live momowebqa state and it is the one a
+// review has to see: the server answers 409 for this target, so the panel is
+// describing a policy that cannot run, and the shot is where you check that it
+// says so in --danger instead of a muted footnote (SKILL §5 / §8).
+const MEMBER_TIER_POLICY = {
+  workspaceId: WORKSPACE_ID,
+  memberId: ME,
+  mode: "auto",
+  autoTarget: REVOKED_TARGET,
+  inherited: false,
+  updatedAtMs: Date.now() - 40 * 60_000,
+};
+
 /** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
 function makeDmMessages() {
   const base = Date.now() - 3 * 60_000;
@@ -372,6 +465,27 @@ async function installMocks(context) {
   );
   await context.route("**/v1/workspaces/*/channels/*/read-state", (route) =>
     json(route, READ_STATES[0])
+  );
+  // 설정 > 코드 실행 호스트 (MOMO-617). The workspace default sits in 자동 재개
+  // so the 재개 대상 control is on screen, and the member override inherits it,
+  // which is the pair the panel has to keep apart.
+  await context.route("**/v1/provider/work-host-engine", (route) =>
+    json(route, {
+      engine: "opencode",
+      source: "database",
+      updatedBy: "곽성재",
+      updatedAtMs: Date.now() - 2 * 86_400_000,
+      schema: "momo.work_host_engine.v0",
+    })
+  );
+  await context.route("**/v1/workspaces/*/work-hosts", (route) =>
+    json(route, { workHosts: WORK_HOSTS })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
+    json(route, { workTierPolicy: WORKSPACE_TIER_POLICY })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
+    json(route, { workTierPolicy: MEMBER_TIER_POLICY })
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());
@@ -624,6 +738,30 @@ async function captureScheme(browser, scheme) {
   const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
   await turnsOffline.screenshot({ path: turnsOfflineShot });
   shots.push(turnsOfflineShot);
+
+  // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
+  //     agent runs. Shot at the top of the panel, where the engine card, the
+  //     registry rows and the policy selects all land in one frame.
+  const settings = await context.newPage();
+  await settings.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(settings);
+  await settings.evaluate('location.hash = "/settings?section=code"');
+  await settings.getByTestId("work-host-list").waitFor({ state: "visible" });
+  await settings.getByTestId("work-tier-policy").waitFor({ state: "visible" });
+  const workHostShot = `${OUT_DIR}/settings-work-host-${scheme}.png`;
+  await settings.screenshot({ path: workHostShot });
+  shots.push(workHostShot);
+
+  // …and the same panel scrolled to its foot, where the three status chips and
+  // the two policy scopes sit together. A section this tall is reviewed twice
+  // or the half nobody sees is the half that regresses.
+  await settings
+    .getByTestId("work-tier-policy")
+    .scrollIntoViewIfNeeded();
+  await settings.waitForTimeout(200);
+  const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
+  await settings.screenshot({ path: policyShot });
+  shots.push(policyShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

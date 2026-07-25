@@ -58,6 +58,192 @@ export const WORK_ENGINES: Choice[] = [
   },
 ];
 
+/**
+ * `WorkTierPolicyRoutes.validatedMode`. The tier NUMBERS (T1/T2/T3) are an
+ * internal ADR-0125 vocabulary and stay out of user copy, exactly as on macOS:
+ * the person picks a behaviour, not a tier. Two of the three labels are the mac
+ * strings verbatim (MomoWorkConsoleCopy.swift). The first is not: the mac says
+ * "이 Mac에서만" because there the client IS the host, while a browser or a
+ * Tauri window can be looking at a Linux workd it will never run code on, so
+ * the web names the host by its role instead of by the reader's machine.
+ */
+export const WORK_TIER_MODES: Choice[] = [
+  {
+    id: "t1_only",
+    label: "처음 시작한 호스트에서만",
+    detail: "연결이 끊겨도 다른 곳으로 옮기지 않고, 그 호스트가 돌아오기를 기다립니다.",
+  },
+  {
+    id: "ask",
+    label: "연결 끊김 시 묻기",
+    detail: "호스트를 잃으면 어디서 이어갈지 물어봅니다. 고르지 않으면 이 값이 쓰입니다.",
+  },
+  {
+    id: "auto",
+    label: "자동 재개",
+    detail: "고른 호스트에서 마지막 push 커밋으로 새 세션을 시작합니다. 비용이 생길 수 있습니다.",
+  },
+];
+
+/** Reserved target selector in `validatedAutoTarget`, alongside a host id. */
+export const CLOUD_TARGET = "cloud";
+
+/** `WorkHostRoutes.validatedType`. */
+export function workHostTypeLabel(type: string): string {
+  if (type === "app") return "데스크톱 앱";
+  if (type === "workd") return "workd 데몬";
+  if (type === "cloud") return "momo Cloud";
+  return type;
+}
+
+/** `WorkHostRoutes.validatedScope`. */
+export function workHostScopeLabel(scope: string): string {
+  if (scope === "workspace") return "워크스페이스 공용";
+  if (scope === "member") return "개인";
+  return scope;
+}
+
+/**
+ * Host status from the server row only. `online` is the server's 90 second
+ * heartbeat window (`WorkHostRoutes.onlineWindowSeconds`), never a client clock
+ * comparison, and a revoked row outranks it: a revoked host is gone whatever
+ * its last heartbeat said.
+ */
+export function workHostStatus(host: {
+  online: boolean;
+  revokedAtMs?: number;
+  lastSeenAtMs?: number;
+}): { tone: "ok" | "warn" | "muted"; label: string } {
+  if (host.revokedAtMs) return { tone: "muted", label: "해지됨" };
+  if (host.online) return { tone: "ok", label: "온라인" };
+  if (host.lastSeenAtMs) return { tone: "warn", label: "오프라인" };
+  return { tone: "muted", label: "연결된 적 없음" };
+}
+
+/**
+ * Last 6 characters of a work host id.
+ *
+ * The registry re-registers a host as a NEW row every time it pairs, so three
+ * live rows can carry the identical `displayName` (the momowebqa ledger has
+ * exactly that: "성재 iMac, 집 작업실" three times). A name is therefore not a
+ * discriminator, in the row and least of all in an accessible name, where three
+ * buttons called "성재 iMac, 집 작업실 호스트 ID 복사" are three indistinguishable
+ * stops in the tab order. UUIDv7 ids share their prefix (time-ordered) and
+ * differ in the tail, so the tail is what identifies a row.
+ */
+export function workHostIdTail(id: string, length = 6): string {
+  return id.length <= length ? id.toLowerCase() : id.slice(-length).toLowerCase();
+}
+
+export interface WorkHostLiveness {
+  online: boolean;
+  revokedAtMs?: number;
+  lastSeenAtMs?: number;
+}
+
+/**
+ * Registry rank: online, offline, never connected, revoked.
+ *
+ * The server returns creation order, so whether a usable host is on the first
+ * screen is an accident of when it happened to be registered. A registry whose
+ * top rows are four revoked hosts answers "어디에 붙지" with the four answers
+ * that cannot be picked.
+ */
+function livenessRank(host: WorkHostLiveness): number {
+  if (host.revokedAtMs) return 3;
+  if (host.online) return 0;
+  return host.lastSeenAtMs ? 1 : 2;
+}
+
+/** Stable within a rank: same-rank rows keep the order the server sent. */
+export function sortWorkHosts<T extends WorkHostLiveness>(hosts: T[]): T[] {
+  return hosts
+    .map((host, index) => ({ host, index }))
+    .sort((a, b) => livenessRank(a.host) - livenessRank(b.host) || a.index - b.index)
+    .map((entry) => entry.host);
+}
+
+/**
+ * What "등록 6대" hides. Four of those six are revoked in the live workspace, so
+ * one number reads as "이 워크스페이스에 호스트가 여섯 대 있다" when the true
+ * answer is two.
+ */
+export function workHostCounts(hosts: WorkHostLiveness[]): {
+  usable: number;
+  revoked: number;
+} {
+  const revoked = hosts.filter((host) => host.revokedAtMs).length;
+  return { usable: hosts.length - revoked, revoked };
+}
+
+/** "방금", "12분 전", or a calendar day once it stops being a recent event. */
+export function relativeSince(epochMs: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - epochMs) / 1000));
+  if (seconds < 60) return "방금";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return formatDay(epochMs);
+}
+
+export interface AutoTargetHost {
+  id: string;
+  scope: string;
+  ownerMemberId: string;
+  displayName: string;
+  revokedAtMs?: number;
+}
+
+/**
+ * Which hosts the server will accept as an auto target for a scope, mirroring
+ * `WorkTierPolicyRoutes.requireAllowedTarget`: the workspace default may only
+ * point at a workspace-scoped host, a member override may also point at a host
+ * that member owns, and a revoked host is never eligible. Offering a target the
+ * server answers 409 for is the same bug as showing a form that cannot save.
+ *
+ * Every id comparison is lower-cased: work host ids arrive lower-cased from the
+ * registry while member ids can arrive upper-cased from login, and `===` on the
+ * raw strings silently drops the owner's own host out of the list.
+ */
+export function eligibleAutoTargets<T extends AutoTargetHost>(
+  hosts: T[],
+  scope: "member" | "workspace",
+  memberId: string
+): T[] {
+  return hosts.filter((host) => {
+    if (host.revokedAtMs) return false;
+    if (host.scope === "workspace") return true;
+    if (scope === "workspace") return false;
+    return host.ownerMemberId.toLowerCase() === memberId.toLowerCase();
+  });
+}
+
+/**
+ * Target as the person named it, not as the ledger stores it.
+ *
+ * Only ever called with a registry that actually loaded: "이 호스트는 등록에
+ * 없다" is a claim about the registry, and an empty array can also mean the read
+ * is still in flight or failed, so the caller decides that first (see
+ * `registryState` in WorkHostSection). A stored id that survives that check is
+ * named as missing WITHOUT the raw UUID: the id belongs in the 등록된 호스트 row
+ * where it can be copied, not in a sentence.
+ *
+ * A revoked host keeps its name and gains the same 해지됨 word the registry row
+ * uses, because the server will answer 409 for it and a bare display name reads
+ * as a healthy choice.
+ */
+export function autoTargetLabel(
+  target: string | undefined,
+  hosts: AutoTargetHost[]
+): string {
+  if (!target) return "고른 대상 없음";
+  if (target === CLOUD_TARGET) return "momo Cloud";
+  const host = hosts.find((h) => h.id.toLowerCase() === target.toLowerCase());
+  if (!host) return "등록 목록에 없는 호스트";
+  return host.revokedAtMs ? `${host.displayName} (해지됨)` : host.displayName;
+}
+
 /** `InviteRoutes.normalizedRole`. */
 export const INVITE_ROLES: Choice[] = [
   { id: "member", label: "멤버", detail: "채널을 읽고 씁니다." },
@@ -221,6 +407,42 @@ export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message) return error.message;
   return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+}
+
+function statusOf(error: unknown): number {
+  return error instanceof ApiError ? error.status : 0;
+}
+
+/**
+ * 코드 실행 호스트 surfaces answer in Korean, not in the wire message.
+ *
+ * WorkTierPolicyRoutes and WorkHostRoutes speak operator English ("auto target
+ * work host is unavailable", "not a workspace member"), which is the right
+ * thing to log and the wrong thing to put on screen next to a select. Each
+ * status the client can actually provoke gets copy that says what happened and
+ * the next move; anything unmapped falls back to the generic line rather than
+ * leaking the wire string.
+ */
+export function workTierPolicySaveMessage(error: unknown): string {
+  switch (statusOf(error)) {
+    case 400:
+      return "자동 재개는 재개 대상을 함께 골라야 저장됩니다. 대상을 고른 뒤 다시 저장하세요.";
+    case 403:
+      return "워크스페이스 기본값은 오너나 관리자만 바꿀 수 있습니다. 내 정책은 그대로 바꿀 수 있습니다.";
+    case 409:
+      // The next step names a control that exists: 등록된 호스트 블록의
+      // '등록 목록 다시 불러오기'. Before MOMO-617 R2 that sentence asked for an
+      // action the panel had no button for, so the only way to do it was a
+      // browser reload.
+      return "고른 호스트는 지금 재개 대상이 될 수 없습니다. 해지됐거나 이 정책이 쓸 수 없는 호스트입니다. 등록된 호스트에서 등록 목록 다시 불러오기를 누른 뒤 고르세요.";
+    default:
+      return "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  }
+}
+
+/** 403 is answered by OperatorNotice, so this is only the non-permission half. */
+export function workHostRegistryMessage(): string {
+  return "등록된 호스트 목록을 불러오지 못했습니다. 잠시 뒤에 다시 불러오세요.";
 }
 
 /** Invite status for the list, derived from the server row (never guessed). */
