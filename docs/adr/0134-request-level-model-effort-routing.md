@@ -1,6 +1,6 @@
 # ADR-0134: 요청 단위 모델·effort 라우팅 + auto 정책
 
-- Status: **Proposed** (2026-07-26, Fable 초안 — 방향은 성재 2026-07-25 결정 큐 승인, 세부 결정 검토 대기)
+- Status: **Accepted** (2026-07-26, 성재 — "둘다 승인할게". 초안 Fable 2026-07-26)
 - 관련: ADR-0131 D2(agent model_pref + 허용목록 게이트), ADR-0130(provider-불가지 gateway), 에이전트 경험 프로그램 AX-2, 레퍼런스 리서치 §2(`research/2026-07-25-reference-ux-survey.md`)
 
 ## Context
