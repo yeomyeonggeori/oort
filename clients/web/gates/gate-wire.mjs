@@ -62,9 +62,23 @@ async function assertShell(page, surface) {
     rootChildren: document.getElementById("root")?.children.length ?? 0,
     sidebar: Boolean(document.querySelector("nav[aria-label='워크스페이스 탐색']")),
     settings: Boolean(document.querySelector('[data-testid="settings-route"]')),
+    // Only the boundary's own fallback counts. Inline field/section errors also
+    // use role=alert and are exactly the graceful degradation we want to keep.
+    caught: Boolean(document.querySelector('[data-testid="render-error-boundary"]')),
   }));
   if (state.rootChildren === 0 || !state.sidebar || !state.settings) {
     throw new Error(`${surface}: shell blanked: ${JSON.stringify(state)}`);
+  }
+  // Without this the gate proves only that the error boundary works: a render
+  // throw is caught, the route shell survives, and every assertion above still
+  // holds while the wire validation is broken (measured — reverting
+  // `listWorkHosts` to its unchecked unwrap kept this gate green). The section
+  // must degrade to its own empty state, not be rescued mid-render.
+  if (state.caught) {
+    throw new Error(
+      `${surface}: the error boundary caught a render throw — wire validation ` +
+      `did not degrade this section gracefully: ${JSON.stringify(state)}`
+    );
   }
 }
 
@@ -83,7 +97,9 @@ async function main() {
       await page.getByTestId("login-password").fill("not-a-secret");
       await page.getByTestId("login-submit").click();
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
-      await page.getByRole("button", { name: "설정 열기" }).click();
+      // 설정 진입은 <Link>라 role=link다. 사이드바가 이 컨트롤을 어떤 요소로
+      // 그리는지에 게이트가 묶이지 않도록 testid로 잡는다.
+      await page.getByTestId("nav-settings").click();
       await page.waitForSelector('[data-testid="settings-route"]');
       for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["account", "계정"]]) {
         await page.getByRole("button", { name: label, exact: true }).click();
