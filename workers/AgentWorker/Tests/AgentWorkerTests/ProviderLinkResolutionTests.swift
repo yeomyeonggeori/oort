@@ -219,18 +219,21 @@ final class ProviderLinkResolutionTests: XCTestCase {
 
     // MARK: - Wiring guard
 
-    /// Locks the invoke site to the job-time-resolved transport so a future refactor
-    /// cannot silently revert to the boot-time env transport (the bug this closes).
+    /// Locks the invoke site to the job-time-resolved provider so a future refactor
+    /// cannot silently revert to the boot-time env transport (the bug MOMO-573
+    /// closed). MOMO-622 upgraded that single transport into an ordered cascade, so
+    /// the guard now pins `resolveCascade()` + `cascadingInvoke(`; reverting either
+    /// to `hermes.invoke(` would restore the original bug.
     func testWorkerServiceUsesResolvedTransportAtInvokeSite() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/AgentWorker/WorkerService.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        XCTAssertTrue(source.contains("resolveTransport()"))
-        XCTAssertTrue(source.contains("effectiveHermes.invoke("))
+        XCTAssertTrue(source.contains("let cascade = await resolveCascade()"))
+        XCTAssertTrue(source.contains("let stream = cascadingInvoke("))
         XCTAssertFalse(
             source.contains("let stream = hermes.invoke("),
-            "the turn must use the job-time-resolved transport, not the boot env transport")
+            "the turn must use the job-time-resolved cascade, not the boot env transport")
     }
 }
 

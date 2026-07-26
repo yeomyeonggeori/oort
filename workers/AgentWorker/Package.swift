@@ -69,6 +69,14 @@ let package = Package(
                 "AgentWorker",
                 .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
                 .product(name: "Logging", package: "swift-log"),
+                // MOMO-622 / ADR-0135 D1: the cascade tests stand up real in-process
+                // mock providers (401 / 429 / 500 / SSE) and drive the real
+                // HermesTransport at them, so the fall-over rule is measured over an
+                // actual socket instead of asserted against a stub. Test-only, and
+                // swift-nio is already in this package's dependency graph.
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
