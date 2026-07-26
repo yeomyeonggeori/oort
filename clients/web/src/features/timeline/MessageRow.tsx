@@ -4,6 +4,8 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
+import { CascadeNotice } from "./CascadeNotice";
+import { turnRecordRunId } from "./cascadeModel";
 import { rowPresentation } from "./rowModel";
 
 // =============================================================================
@@ -160,6 +162,10 @@ export function MessageRow({
         ) : (
           card && <AgentCard card={card} directory={directory} />
         )}
+        {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
+            purpose: whichever of the two took the slot, a turn served by the
+            second provider says so. Renders nothing for every other row. */}
+        <CascadeNotice runId={turnRecordRunId(message)} />
         {message.state === "edited" && (
           <span className="text-meta text-ink-muted">수정됨</span>
         )}

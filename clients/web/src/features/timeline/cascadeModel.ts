@@ -1,0 +1,190 @@
+import type { Message } from "@/lib/api";
+import type { CascadeFallbackFrame } from "@/lib/realtime";
+
+// =============================================================================
+// Provider cascade notices (ADR-0135 D1 / MOMO-627). Pure: no DOM, no fetch, no
+// React, so the dedupe rule and the copy are asserted by unit tests.
+//
+// The ADR's own words are the requirement: "전환은 기록한다 … 조용한 전환 금지 —
+// 비용·거버넌스가 다른 경로로 흘렀음을 사용자가 안다." A turn served by the
+// second provider costs a different budget and answers to a different account,
+// so the row that shows it is not a diagnostic: it is the user-facing half of
+// the audit rule.
+//
+// What this module deliberately does NOT do:
+//   - it never claims a turn ran on the FIRST provider. The frame is the only
+//     evidence a fallback happened, there is no REST history for it, and a
+//     session that was not listening when a run fell over simply has nothing to
+//     say. Absence of a notice is absence of evidence, so no card ever prints
+//     "1차 프로바이더로 처리됨";
+//   - it never renders the position numbers. `position` is wire vocabulary
+//     (design-taste-web §7); a person reads attempt order (1차 / 2차 / 3차).
+// =============================================================================
+
+/** One recorded transition: the cascade left `from` and was served by `to`. */
+export interface CascadeFallback {
+  /** Lower-cased run id. Server uuidStrings arrive UPPERCASE. */
+  runId: string;
+  from: number;
+  to: number;
+  /** Machine label from the worker, kept raw; `cascadeReasonLabel` translates. */
+  reason: string;
+  fromEndpointLabel: string;
+  toEndpointLabel: string;
+}
+
+/** Recorded transitions per run, oldest hop first. */
+export type CascadeByRun = ReadonlyMap<string, readonly CascadeFallback[]>;
+
+export const EMPTY_CASCADE: CascadeByRun = new Map();
+
+/**
+ * A frame this client is willing to act on, or null.
+ *
+ * A frame with no run id is dropped rather than bucketed: the worker publishes
+ * one when the fallback happened before a run row existed, and a notice with
+ * nothing to attach to would either float free or be pinned to the wrong turn.
+ */
+export function parseCascadeFallback(
+  frame: CascadeFallbackFrame
+): CascadeFallback | null {
+  const payload = frame.payload;
+  const rawRunId = payload.run_id;
+  if (typeof rawRunId !== "string" || rawRunId === "") return null;
+  if (!Number.isInteger(payload.from) || !Number.isInteger(payload.to)) {
+    return null;
+  }
+  // A cascade only ever moves forward. A frame that says otherwise is not a
+  // transition this UI can describe, so it is dropped instead of reordered.
+  if (payload.to <= payload.from) return null;
+  return {
+    runId: rawRunId.toLowerCase(),
+    from: payload.from,
+    to: payload.to,
+    reason: payload.reason,
+    fromEndpointLabel:
+      typeof payload.from_endpoint_label === "string"
+        ? payload.from_endpoint_label
+        : "",
+    toEndpointLabel:
+      typeof payload.to_endpoint_label === "string"
+        ? payload.to_endpoint_label
+        : "",
+  };
+}
+
+/** Identity of one transition. Matches the server's outbox idempotency key. */
+export function cascadeKey(fallback: CascadeFallback): string {
+  return `${fallback.runId}:${fallback.from}-${fallback.to}`;
+}
+
+/**
+ * Fold one transition into the map, replacing rather than appending when the
+ * same transition arrives twice.
+ *
+ * A reconnect replays the whole gap on the recoverable `ch:` namespace, so the
+ * same fallback lands again on every resubscribe. Without this the card would
+ * grow a second identical row for each reconnect, which reads as a second
+ * fall-over that never happened.
+ */
+export function mergeCascadeFallback(
+  current: CascadeByRun,
+  fallback: CascadeFallback
+): CascadeByRun {
+  const existing = current.get(fallback.runId) ?? [];
+  const key = cascadeKey(fallback);
+  const kept = existing.filter((entry) => cascadeKey(entry) !== key);
+  const next = [...kept, fallback].sort((a, b) => a.to - b.to);
+  const map = new Map(current);
+  map.set(fallback.runId, next);
+  return map;
+}
+
+/** Transitions recorded for one run in this session, oldest hop first. */
+export function cascadeFor(
+  map: CascadeByRun,
+  runId: string | null
+): readonly CascadeFallback[] {
+  if (runId === null || runId === "") return [];
+  return map.get(runId.toLowerCase()) ?? [];
+}
+
+// ---- which row carries the notice -------------------------------------------
+
+/** `AgentGatewayRoutes.timelineProps`: the settled record of one agent turn. */
+const TURN_RECORD_SCHEMA = "momo.agent_gateway.timeline.v0";
+
+/**
+ * The run a message is the SETTLED RECORD of, or null.
+ *
+ * Deliberately narrower than "any message carrying run_id". One run writes an
+ * approval request, tool rows and a turn record, and every one of them carries
+ * the same `run_id`; keying the notice off that would print the same line three
+ * times in one turn. The gateway turn record is written once per run and is the
+ * row whose cost and outcome the notice qualifies, so it is the one that says
+ * where the turn was actually served.
+ */
+export function turnRecordRunId(message: Message): string | null {
+  const props = message.props;
+  if (!props || props["schema"] !== TURN_RECORD_SCHEMA) return null;
+  const runId = props["run_id"];
+  return typeof runId === "string" && runId !== "" ? runId.toLowerCase() : null;
+}
+
+// ---- copy -------------------------------------------------------------------
+
+/** Attempt order as a person counts it: position 0 is the first provider. */
+export function cascadeOrdinal(position: number): string {
+  return `${position + 1}차`;
+}
+
+/**
+ * The worker's machine reason in plain Korean.
+ *
+ * `provider_status_<code>` is generated (`ProviderCascadeClassifier.decide`), so
+ * it is matched by shape rather than enumerated. Anything unmapped is named as
+ * the server's own report instead of being printed bare, which is the same rule
+ * `providerTestMessage` already follows in settings.
+ */
+export function cascadeReasonLabel(reason: string): string {
+  if (reason === "provider_unreachable") return "응답 없음";
+  if (reason === "provider_rate_limited") return "요청 한도 초과";
+  const status = /^provider_status_(\d{3})$/.exec(reason);
+  if (status) return `서버 오류 ${status[1]}`;
+  return `서버가 보고한 사유: ${reason}`;
+}
+
+/**
+ * The one line the card carries.
+ *
+ * Single hop: "2차 프로바이더로 처리됨 (응답 없음)". More than one: the ordinal
+ * is still the provider that actually served the turn, and the count says how
+ * many providers were tried and failed before it, because "3차" alone hides
+ * that two budgets were touched on the way.
+ */
+export function cascadeNoticeText(
+  fallbacks: readonly CascadeFallback[]
+): string | null {
+  const last = fallbacks[fallbacks.length - 1];
+  if (last === undefined) return null;
+  const served = cascadeOrdinal(last.to);
+  const reason = cascadeReasonLabel(last.reason);
+  if (fallbacks.length === 1) {
+    return `${served} 프로바이더로 처리됨 (${reason})`;
+  }
+  return `${served} 프로바이더로 처리됨 (전환 ${fallbacks.length}번, 마지막 사유: ${reason})`;
+}
+
+/**
+ * The endpoints behind the notice, for the disclosure line. Labels only, which
+ * is all the server sends: host and port, never the path, query or key.
+ */
+export function cascadeRouteText(
+  fallbacks: readonly CascadeFallback[]
+): string | null {
+  const first = fallbacks[0];
+  const last = fallbacks[fallbacks.length - 1];
+  if (first === undefined || last === undefined) return null;
+  if (first.fromEndpointLabel === "" || last.toEndpointLabel === "") return null;
+  return `${first.fromEndpointLabel} 에서 ${last.toEndpointLabel} 로`;
+}

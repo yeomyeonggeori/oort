@@ -242,6 +242,11 @@ const BODIES = [
       schema: "momo.agent_gateway.timeline.v0",
       source: "hermes_gateway",
       status: "succeeded",
+      // The cascade fixture in src/features/timeline/cascadeRail.tsx keys its
+      // seeded fallback off THIS run id, which is the only way the ADR-0135 D1
+      // "2차 프로바이더로 처리됨" row can reach artifacts/design: the capture runs
+      // with no socket, so the frame that normally carries it never arrives.
+      // Change one and change the other.
       run_id: "0199aa11-2222-7000-8000-0000000000c3",
       agent_member_id: HERMES,
       usage: {
@@ -340,6 +345,112 @@ const WORK_HOSTS = [
     online: false,
   },
 ];
+
+// 설정 > AI 연결 (MOMO-627 / ADR-0135 D1). The singleton head plus two fallback
+// hops, one of them parked, because that trio is what the block has to keep
+// apart on screen: a head that is read-only here, a live fallback, and a hop the
+// operator switched off. Bearers are masked tails, exactly as the API answers
+// (ADR-0004: the key never leaves the server).
+const PROVIDER_LINK = {
+  schema: "momo.provider_link.v0",
+  configured: true,
+  source: "database",
+  mode: "external-hermes",
+  baseUrl: "https://api.anthropic.com/v1",
+  endpointLabel: "api.anthropic.com",
+  bearerConfigured: true,
+  bearerLast4: "8f21",
+  availability: "live",
+  keyConfigured: true,
+  updatedAtMs: Date.now() - 6 * 3_600_000,
+  diagnostics: [],
+};
+
+const PROVIDER_CHAIN = {
+  schema: "momo.provider_link.chain.v0",
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      baseUrl: PROVIDER_LINK.baseUrl,
+      endpointLabel: PROVIDER_LINK.endpointLabel,
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "8f21",
+      updatedAtMs: PROVIDER_LINK.updatedAtMs,
+    },
+    {
+      position: 1,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://gateway.dawn.internal:8443/v1",
+      endpointLabel: "gateway.dawn.internal:8443",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "c40a",
+      updatedAtMs: Date.now() - 2 * 3_600_000,
+    },
+    {
+      position: 2,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://backup.dawn.internal/v1",
+      endpointLabel: "backup.dawn.internal",
+      enabled: false,
+      bearerConfigured: true,
+      bearerLast4: "1b77",
+    },
+  ],
+  fallbackCount: 2,
+  attemptableCount: 2,
+};
+
+// The probe result a review has to look at: the head fell over, the second hop
+// answered, the parked hop was skipped. Three dispositions, three tones, one
+// frame, and `cascadeOk: true` because a cascade that fell over to a working
+// provider is the cascade doing its job.
+const PROVIDER_PROBE = {
+  schema: "momo.provider_link.test.v0",
+  ok: false,
+  reason: "provider_unreachable",
+  source: "database",
+  mode: "external-hermes",
+  endpointLabel: PROVIDER_LINK.endpointLabel,
+  checkedAtMs: Date.now(),
+  cascadeOk: true,
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      endpointLabel: "api.anthropic.com",
+      enabled: true,
+      ok: false,
+      reason: "provider_unreachable",
+      disposition: "fall_over",
+    },
+    {
+      position: 1,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "gateway.dawn.internal:8443",
+      enabled: true,
+      ok: true,
+      disposition: "ok",
+    },
+    {
+      position: 2,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "backup.dawn.internal",
+      enabled: false,
+      ok: false,
+      reason: "hop_disabled",
+      disposition: "skipped",
+    },
+  ],
+};
 
 // WorkTierPolicyRoutes.loadPolicy answers /me out of the workspace row when the
 // member has no row of their own, so an inherited member policy carries the
@@ -481,6 +592,15 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
+  // 설정 > AI 연결 (MOMO-627). The chain routes are matched BEFORE the singleton
+  // so `**/v1/provider/link` does not swallow `/link/chain` and `/link/test`.
+  await context.route("**/v1/provider/link/chain", (route) =>
+    json(route, PROVIDER_CHAIN)
+  );
+  await context.route("**/v1/provider/link/test", (route) =>
+    json(route, PROVIDER_PROBE)
+  );
+  await context.route("**/v1/provider/link", (route) => json(route, PROVIDER_LINK));
   await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
     json(route, { workTierPolicy: WORKSPACE_TIER_POLICY })
   );
@@ -762,6 +882,53 @@ async function captureScheme(browser, scheme) {
   const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
   await settings.screenshot({ path: policyShot });
   shots.push(policyShot);
+
+  // 3h. 설정 > AI 연결 (MOMO-627 / ADR-0135 D1): the singleton card plus the
+  //     cascade it heads. Three rows that must stay apart at a glance, the head
+  //     being the only one this block cannot edit.
+  const aiLink = await context.newPage();
+  await aiLink.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiLink);
+  await aiLink.evaluate('location.hash = "/settings?section=ai"');
+  await aiLink.getByTestId("chain-list").waitFor({ state: "visible" });
+  const aiLinkShot = `${OUT_DIR}/settings-ai-chain-${scheme}.png`;
+  await aiLink.screenshot({ path: aiLinkShot });
+  shots.push(aiLinkShot);
+
+  // …and its foot, where the hop editor's own controls live. A block this tall
+  // is reviewed twice or the half nobody sees is the half that regresses.
+  await aiLink.getByTestId("chain-add").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiEditShot = `${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`;
+  await aiLink.screenshot({ path: aiEditShot });
+  shots.push(aiEditShot);
+
+  // …and the probe table, which is the one surface carrying all four
+  //     dispositions and therefore all four status tones in one frame.
+  await aiLink.getByRole("button", { name: "연결 확인" }).click();
+  await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
+  const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
+  await aiLink.screenshot({ path: aiProbeShot });
+  shots.push(aiProbeShot);
+
+  // 3i. the same panel against a server built BEFORE the chain landed, which is
+  //     the live momowebqa answer today (404, measured 2026-07-26). The block
+  //     has to say "this server has no chain yet", never draw an empty chain.
+  const aiLegacy = await context.newPage();
+  await aiLegacy.route("**/v1/provider/link/chain", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "not found" } }),
+    })
+  );
+  await aiLegacy.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiLegacy);
+  await aiLegacy.evaluate('location.hash = "/settings?section=ai"');
+  await aiLegacy.getByTestId("chain-unavailable").waitFor({ state: "visible" });
+  const aiLegacyShot = `${OUT_DIR}/settings-ai-no-chain-${scheme}.png`;
+  await aiLegacy.screenshot({ path: aiLegacyShot });
+  shots.push(aiLegacyShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
