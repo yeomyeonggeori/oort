@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_run_routing.sh — MOMO-621 / ADR-0134 D1·D2·D3 runtime gate
+# scripts/verify_run_routing.sh — MOMO-621 · MOMO-625 / ADR-0134 D1·D2·D3 gate
 #
 # Request-level model/effort routing against a real Postgres 18 + MomoServer
 # stack (infra/docker-compose.e2e.yml, api forced into AGENT_GATEWAY_MODE=gateway
@@ -25,6 +25,13 @@
 #   5. usage_ledger.effort: a full gateway roundtrip (agent bearer -> claim the
 #      pending job -> POST .../gateway/complete) writes the effort column, and
 #      the adapter-reported effort wins over the requested one.
+#   6. agent_profile.effort_pref REST writer (MOMO-625): PUT normalizes+persists+
+#      audits it, and refuses an unusable level / an effort the pinned modelPref
+#      cannot support / an unknown field, without a partial write.
+#   7. mention path routing (MOMO-625): POST .../messages carries the same
+#      closed-world `routing` block, resolves through the same chain, produces
+#      the same 400 matrix, rolls the SEND back on a violation, and records the
+#      same audit keys as the work-run surface.
 #
 # Ports default to the worktree compose env (.env.worktree -> .conductor/local.env)
 # so parallel worktrees never collide. The stack is torn down with `down -v`.
@@ -517,4 +524,186 @@ SQL
 [ "$OWN_ROWS" = "2" ] || fail "own-workspace effort rows expected 2, got $OWN_ROWS"
 pass "usage_ledger.effort stays FORCE-RLS isolated (own=2, foreign=0)"
 
-echo "[run-routing] PASS request-level model/effort routing runtime gate (MOMO-621 / ADR-0134 D1·D2·D3)"
+# =============================================================================
+# 6. agent_profile.effort_pref writer (MOMO-625 / ADR-0134 D3)
+#
+# Until now the agent tier could only be populated by hand-written SQL (layer 4
+# does exactly that). This layer drives it through the real REST writer.
+# =============================================================================
+put_profile() { # <json-body>
+  api PUT "/v1/workspaces/$WS_ID/agents/$AGENT_ID/profile" "$ADMIN_TOKEN" "$1"
+}
+profile_effort_pref() {
+  run_sql -tA <<SQL | tr -d '[:space:]'
+SELECT coalesce(effort_pref,'NULL') FROM agent_profile
+ WHERE workspace_id='$WS_ID' AND agent_member_id='$AGENT_ID';
+SQL
+}
+
+put_profile '{"instructions":"","effortPref":"  MAX  ","enabledTools":[]}'
+expect 200 "profile writer accepts effortPref without a modelPref"
+printf '%s' "$BODY" | jq -e '.profile.effortPref == "max"' >/dev/null \
+  || { echo "$BODY" >&2; fail "profile response did not echo the normalized effortPref"; }
+[ "$(profile_effort_pref)" = "max" ] \
+  || fail "effort_pref was not persisted: '$(profile_effort_pref)'"
+
+api GET "/v1/workspaces/$WS_ID/agents/$AGENT_ID/profile" "$ADMIN_TOKEN"
+expect 200 "profile read"
+printf '%s' "$BODY" | jq -e '.profile.effortPref == "max"' >/dev/null \
+  || { echo "$BODY" >&2; fail "GET profile does not project effortPref"; }
+
+PROFILE_AUDIT="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action IN ('agent.profile.created','agent.profile.updated')
+   AND target_id='$AGENT_ID' AND (detail->>'has_effort_pref')::boolean;
+SQL
+)"
+[ "$PROFILE_AUDIT" -ge 1 ] || fail "profile write did not audit has_effort_pref ($PROFILE_AUDIT)"
+
+# An explicit write is a choice, so an unusable one is a visible 400 — unlike the
+# runtime, where an inherited-but-unusable preference is silently ignored.
+put_profile '{"instructions":"","modelPref":"hermes-fast","effortPref":"max","enabledTools":[]}'
+expect 400 "effortPref the pinned modelPref cannot support"
+put_profile '{"instructions":"","effortPref":"ultra","enabledTools":[]}'
+expect 400 "effortPref outside the canonical level set"
+put_profile '{"instructions":"","effort_pref":"low","enabledTools":[]}'
+expect 400 "closed-world: snake_case effort_pref is not a known profile field"
+[ "$(profile_effort_pref)" = "max" ] \
+  || fail "a rejected profile write mutated effort_pref: '$(profile_effort_pref)'"
+pass "profile effort_pref writer: normalize+persist+audit, 400 on unusable/unknown, no partial write"
+
+# =============================================================================
+# 7. Mention path routing (MOMO-625 / ADR-0134 D1·D3)
+#
+# Same gates, same 400 rules, same audit asymmetry as POST .../agent-runs — the
+# mention path is just the other surface that starts a run.
+# =============================================================================
+LAST_CLIENT_MSG_ID=""
+send_message() { # <routing-json-or-empty> [extra-top-level-json]
+  local routing="$1" extra="${2:-}" body
+  LAST_CLIENT_MSG_ID="$(uuid)"
+  body="$(jq -cn --arg c "$LAST_CLIENT_MSG_ID" \
+    --arg b "<@$AGENT_ID> MOMO-625 mention routing $RUN_TAG" \
+    '{clientMsgId:$c,type:"text",body:$b}')"
+  if [ -n "$routing" ]; then
+    body="$(jq -c --argjson r "$routing" '. + {routing:$r}' <<<"$body")"
+  fi
+  if [ -n "$extra" ]; then
+    body="$(jq -c --argjson e "$extra" '. + $e' <<<"$body")"
+  fi
+  api POST "/v1/workspaces/$WS_ID/channels/$CHANNEL_ID/messages" "$ADMIN_TOKEN" "$body"
+}
+mention_run_id() { # <message-id>
+  run_sql -tA <<SQL | tr -d '[:space:]'
+SELECT lower(id::text) FROM agent_run
+ WHERE workspace_id='$WS_ID' AND trigger_message_id='$1' AND agent_member_id='$AGENT_ID'
+ LIMIT 1;
+SQL
+}
+messages_for_last_client_msg_id() {
+  sql_value <<SQL
+SELECT count(*) FROM message
+ WHERE workspace_id='$WS_ID' AND client_msg_id='$LAST_CLIENT_MSG_ID';
+SQL
+}
+
+# 7a. No routing -> the profile tier written in layer 6 is inherited silently.
+put_profile '{"instructions":"","modelPref":"hermes-fast","effortPref":"low","enabledTools":[]}'
+expect 200 "profile pinned to hermes-fast/low for the mention gates"
+send_message ''
+expect 201 "mention without routing"
+INHERIT_MSG_ID="$(printf '%s' "$BODY" | jq -er '.id')"
+INHERIT_MENTION_RUN="$(mention_run_id "$INHERIT_MSG_ID")"
+[ -n "$INHERIT_MENTION_RUN" ] || fail "mention did not create an agent_run"
+INHERIT_HAS_ROUTING="$(sql_value <<SQL
+SELECT (input ? 'routing')::text FROM agent_run WHERE id='$INHERIT_MENTION_RUN';
+SQL
+)"
+[ "$INHERIT_HAS_ROUTING" = "false" ] \
+  || fail "an inherited routing was echoed as if the client had asked for it"
+printf '%s' "$(job_payload_for_run "$INHERIT_MENTION_RUN")" \
+  | jq -e '.model == "hermes-fast" and .effort == "low"' >/dev/null \
+  || fail "mention job payload did not inherit model_pref/effort_pref"
+pass "mention without routing inherits the agent tier (hermes-fast/low), input.routing omitted"
+
+# 7b. Explicit routing wins and is echoed, exactly like the work-run surface.
+send_message '{"model":"hermes-lite","effort":"medium"}'
+expect 201 "mention with explicit routing"
+EXPLICIT_MSG_ID="$(printf '%s' "$BODY" | jq -er '.id')"
+EXPLICIT_MENTION_RUN="$(mention_run_id "$EXPLICIT_MSG_ID")"
+ECHOED="$(run_sql -tA <<SQL | head -n 1
+SELECT (input->'routing')::text FROM agent_run WHERE id='$EXPLICIT_MENTION_RUN';
+SQL
+)"
+printf '%s' "$ECHOED" | jq -e '. == {model:"hermes-lite",effort:"medium"}' >/dev/null \
+  || { echo "$ECHOED" >&2; fail "mention run input did not echo the requested routing"; }
+printf '%s' "$(job_payload_for_run "$EXPLICIT_MENTION_RUN")" \
+  | jq -e '.model == "hermes-lite" and .effort == "medium"' >/dev/null \
+  || fail "mention job payload does not carry the resolved model/effort"
+MENTION_AUDIT="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action='agent.mention.queued'
+   AND lower(run_id::text)='$EXPLICIT_MENTION_RUN'
+   AND detail->>'resolved_model'='hermes-lite'
+   AND detail->>'resolved_effort'='medium'
+   AND detail->'routing'->>'model'='hermes-lite';
+SQL
+)"
+[ "$MENTION_AUDIT" = "1" ] \
+  || fail "agent.mention.queued did not record the same routing keys as agent.work.queued"
+pass "mention routing{model,effort} -> 201, echoed on input.routing, resolved onto the job payload + audit"
+
+# 7c. Disallowed model -> 400, and the whole send rolls back (no message row).
+send_message '{"model":"external-premium"}'
+expect 400 "mention routing.model outside allowed_agent_models"
+[ "$(messages_for_last_client_msg_id)" = "0" ] \
+  || fail "a rejected mention routing still committed the source message"
+DENIED_MENTION_RUNS="$(sql_value <<SQL
+SELECT count(*) FROM agent_run
+ WHERE workspace_id='$WS_ID' AND input->'routing'->>'model'='external-premium';
+SQL
+)"
+[ "$DENIED_MENTION_RUNS" = "0" ] || fail "a rejected mention routing still wrote an agent_run row"
+pass "disallowed mention model is refused and the send transaction rolls back (no message, no run)"
+
+# 7d/7e/7f. The rest of the 400 matrix, identical to the work-run surface.
+send_message '{"model":"hermes-lite","effort":"max"}'
+expect 400 "mention routing.effort unsupported by the requested model"
+send_message '{"effort":"ultra"}'
+expect 400 "mention routing.effort outside the canonical level set"
+send_message '{"model":"hermes-fast","temperature":0.7}'
+expect 400 "unknown field inside mention routing"
+send_message '' '{"model":"hermes-fast"}'
+expect 400 "unknown top-level field on the message request"
+send_message '' '{"props":{"model":"external-premium","effort":"max"}}'
+expect 201 "props stays free-form and is never read as routing (ADR-0134 D1 B)"
+SMUGGLED_RUN="$(mention_run_id "$(printf '%s' "$BODY" | jq -er '.id')")"
+printf '%s' "$(job_payload_for_run "$SMUGGLED_RUN")" \
+  | jq -e '.model == "hermes-fast" and .effort == "low"' >/dev/null \
+  || fail "a props-smuggled model/effort leaked into the job payload"
+pass "mention 400 matrix matches the work-run surface; props is not a routing carrier"
+
+# 7g. D3 "the model change invalidated the effort": the inherited effort is
+#     dropped and audited, never a 400.
+put_profile '{"instructions":"","effortPref":"max","enabledTools":[]}'
+expect 200 "profile keeps effort_pref=max with no pinned model"
+send_message '{"model":"hermes-fast"}'
+expect 201 "explicit model that cannot honour the inherited effort is not an error"
+IGNORED_MSG_ID="$(printf '%s' "$BODY" | jq -er '.id')"
+IGNORED_MENTION_RUN="$(mention_run_id "$IGNORED_MSG_ID")"
+printf '%s' "$(job_payload_for_run "$IGNORED_MENTION_RUN")" \
+  | jq -e '.model == "hermes-fast" and (has("effort") | not)' >/dev/null \
+  || fail "an unsupported inherited effort leaked onto the mention job payload"
+IGNORED_MENTION_AUDIT="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action='agent.mention.queued'
+   AND lower(run_id::text)='$IGNORED_MENTION_RUN'
+   AND detail->>'ignored_effort_pref'='max'
+   AND detail->>'resolved_model'='hermes-fast';
+SQL
+)"
+[ "$IGNORED_MENTION_AUDIT" = "1" ] \
+  || fail "mention path did not audit the ignored effort_pref ($IGNORED_MENTION_AUDIT)"
+pass "mention inheritance: unusable effort_pref silently dropped + audited, request still 201"
+
+echo "[run-routing] PASS request-level model/effort routing runtime gate (MOMO-621 · MOMO-625 / ADR-0134 D1·D2·D3)"

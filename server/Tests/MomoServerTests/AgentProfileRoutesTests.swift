@@ -1,4 +1,5 @@
 import Foundation
+import Hummingbird
 import XCTest
 @testable import MomoServer
 
@@ -28,6 +29,69 @@ final class AgentProfileRoutesTests: XCTestCase {
         ])
         XCTAssertThrowsError(try AgentProfileValidation.validate(
             try JSONDecoder().decode(AgentProfileInput.self, from: data)
+        ))
+    }
+
+    // MARK: - effort_pref writer (MOMO-625 / ADR-0134 D3)
+
+    func testEffortPrefIsNormalizedAndOptional() throws {
+        let normalized = try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","effortPref":"  MAX  ","enabledTools":[]}
+        """#))
+        XCTAssertEqual(normalized.effortPref, "max")
+
+        // Absent = inherit; the column stays NULL rather than gaining a default.
+        XCTAssertNil(try AgentProfileValidation.validate(try decode(
+            #"{"instructions":"x","enabledTools":[]}"#
+        )).effortPref)
+    }
+
+    /// A *write* is an explicit choice, so an unusable level is a visible 400 —
+    /// the ADR-0134 D1 asymmetry. (Once stored, an unusable preference is still
+    /// silently ignored at run time; see `RunRoutingTests`.)
+    func testEffortPrefOutsideTheCanonicalLevelsIsRejected() {
+        for bogus in ["ultra", "none", "reasoning", "1", "  ", String(repeating: "x", count: 33)] {
+            XCTAssertThrowsError(
+                try AgentProfileValidation.validate(try decode(
+                    #"{"instructions":"x","effortPref":"\#(bogus)","enabledTools":[]}"#
+                )),
+                "effortPref '\(bogus)' must be a 400"
+            ) { error in
+                XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+            }
+        }
+    }
+
+    /// With `modelPref` set the body itself pins the model down, so the
+    /// provider×model effort table applies; without it only the level set can be
+    /// checked, because the resolved model is a run-time property.
+    func testEffortPrefIsGatedAgainstModelPrefOnlyWhenTheModelIsDetermined() throws {
+        XCTAssertThrowsError(try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","modelPref":"hermes-fast","effortPref":"max","enabledTools":[]}
+        """#))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+
+        let compatible = try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","modelPref":"hermes-fast","effortPref":"low","enabledTools":[]}
+        """#))
+        XCTAssertEqual(compatible.effortPref, "low")
+
+        // No modelPref → the resolved model is unknown here, so `max` is a legal
+        // preference to store even though some models will later ignore it.
+        let undetermined = try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","effortPref":"max","enabledTools":[]}
+        """#))
+        XCTAssertEqual(undetermined.effortPref, "max")
+    }
+
+    /// `effortPref` is the only key the profile contract grew.
+    func testProfileBodyStaysClosedWorldAroundEffortPref() {
+        XCTAssertThrowsError(try decode(
+            #"{"instructions":"x","enabledTools":[],"effort_pref":"low"}"#
+        ))
+        XCTAssertThrowsError(try decode(
+            #"{"instructions":"x","enabledTools":[],"effort":"low"}"#
         ))
     }
 

@@ -110,16 +110,21 @@ enum ProviderEffortTable {
     /// Shape-only normalization, usable before a transaction opens: trims,
     /// lowercases, and requires membership in `levels`. Model compatibility is a
     /// separate, DB-dependent check (`RunRoutingResolution`).
-    static func normalizedLevel(_ raw: String) throws -> String {
+    ///
+    /// `field` only names the offending input in the message — the request tier
+    /// (`routing.effort`) and the agent tier (`agent_profile.effort_pref`,
+    /// MOMO-625) share one normalizer so the two writers cannot drift on casing,
+    /// length, or the accepted level set.
+    static func normalizedLevel(_ raw: String, field: String = "routing effort") throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.utf8.count <= maxEffortLength else {
-            throw HTTPError(.badRequest, message: "routing effort is empty or too large")
+            throw HTTPError(.badRequest, message: "\(field) is empty or too large")
         }
         let normalized = trimmed.lowercased()
         guard levels.contains(normalized) else {
             throw HTTPError(
                 .badRequest,
-                message: "routing effort must be one of \(levels.joined(separator: ", "))"
+                message: "\(field) must be one of \(levels.joined(separator: ", "))"
             )
         }
         return normalized

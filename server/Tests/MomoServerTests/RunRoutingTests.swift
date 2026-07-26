@@ -3,16 +3,19 @@ import Hummingbird
 import XCTest
 @testable import MomoServer
 
-/// MOMO-621 / ADR-0134 D1·D2·D3 — request-level `routing { model, effort }`.
+/// MOMO-621 / MOMO-625 / ADR-0134 D1·D2·D3 — request-level `routing { model, effort }`
+/// on **both** surfaces that start an agent run: `POST .../agent-runs` (work) and
+/// `POST .../messages` (mention).
 ///
 /// Everything here is pure unit (no DB): the closed-world request/routing shape,
 /// the provider×model effort table, the allow-list + model×effort 400 gates, the
 /// silent-inheritance fallbacks, and the usage-ledger effort precedence.
 ///
 /// The live HTTP/SQL side (201 with the resolved model+effort on the agent_job
-/// payload, 400s over real requests, `usage_ledger.effort` written by the gateway
-/// completion callback, migration 041 columns + FORCE RLS) is exercised by
-/// `scripts/verify_run_routing.sh` against compose PG18 + MomoServer.
+/// payload, 400s over real requests on both surfaces, `usage_ledger.effort`
+/// written by the gateway completion callback, migration 041 columns + FORCE RLS)
+/// is exercised by `scripts/verify_run_routing.sh` against compose PG18 +
+/// MomoServer.
 final class RunRoutingTests: XCTestCase {
     // MARK: - routing block shape (closed-world, ADR-0134 D1)
 
@@ -133,6 +136,110 @@ final class RunRoutingTests: XCTestCase {
             ]),
             ["routing"]
         )
+    }
+
+    // MARK: - Message body (MOMO-625: the mention surface, same contract)
+
+    private static let mentionBodyPrefix = """
+    "clientMsgId":"00000000-0000-7000-8000-000000000625","type":"text","body":"@bot go"
+    """
+
+    private func decodeSend(_ extra: String) throws -> SendMessageRequest {
+        try JSONDecoder().decode(
+            SendMessageRequest.self,
+            from: Data("{\(Self.mentionBodyPrefix)\(extra)}".utf8)
+        )
+    }
+
+    func testSendMessageRequestDecodesRoutingAndOmitsItWhenAbsent() throws {
+        let withRouting = try decodeSend(#","routing":{"model":"hermes-fast","effort":"LOW"}"#)
+        let routing = try RunRoutingInput.validate(withRouting.routing)
+        XCTAssertEqual(routing?.model, "hermes-fast")
+        XCTAssertEqual(routing?.effort, "low")
+
+        // Every pre-0134 sender keeps working and inherits.
+        let legacy = try decodeSend("")
+        XCTAssertNil(legacy.routing)
+        XCTAssertNil(try RunRoutingInput.validate(legacy.routing))
+    }
+
+    func testSendMessageRequestKeepsItsExistingFields() throws {
+        let full = try decodeSend("""
+        ,"rootId":"00000000-0000-7000-8000-000000000301"\
+        ,"props":{"k":"v"}\
+        ,"runId":"00000000-0000-7000-8000-000000000401"\
+        ,"attachmentIds":["00000000-0000-7000-8000-000000000501"]
+        """)
+        XCTAssertEqual(full.props?["k"], "v")
+        XCTAssertEqual(full.attachmentIds?.count, 1)
+        XCTAssertNotNil(full.rootId)
+        XCTAssertNotNil(full.runId)
+        XCTAssertNil(full.routing)
+    }
+
+    /// `routing` is the ONLY key the message contract grew, and a near-miss key
+    /// must fail loudly instead of silently routing to the inherited model.
+    func testSendMessageRequestRejectsUnknownTopLevelFields() {
+        for extra in [
+            #","model":"hermes-fast""#,
+            #","effort":"max""#,
+            #","routting":{"model":"hermes-fast"}"#,
+            #","apiKey":"sk-leak""#,
+        ] {
+            XCTAssertThrowsError(try decodeSend(extra), "closed-world body must reject: \(extra)")
+        }
+        XCTAssertEqual(
+            SendMessageRequest.allowedKeys.subtracting([
+                "clientMsgId", "rootId", "type", "body", "props", "runId", "attachmentIds",
+            ]),
+            ["routing"]
+        )
+    }
+
+    /// ADR-0134 D1 B: `props` is the message's only free-form field, so it must
+    /// NOT become a second, unvalidated routing carrier.
+    func testRoutingIsNotSmuggledThroughProps() throws {
+        let smuggled = try decodeSend(#","props":{"model":"external-premium","effort":"max"}"#)
+        XCTAssertNil(smuggled.routing)
+        XCTAssertNil(try RunRoutingInput.validate(smuggled.routing))
+    }
+
+    /// The two surfaces must share one shape gate — same input, same verdict.
+    func testBothSurfacesShareOneRoutingShapeGate() throws {
+        let cases: [(json: String, valid: Bool)] = [
+            (#"{"model":"hermes-fast","effort":"low"}"#, true),
+            (#"{"effort":"MAX"}"#, true),
+            (#"{}"#, true),
+            (#"{"model":"hermes-fast","temperature":0.7}"#, false),
+            (#"{"effort":"ultra"}"#, false),
+            (#"{"model":true}"#, false),
+        ]
+        for testCase in cases {
+            let run = try JSONDecoder().decode(
+                CreateAgentRunRequest.self,
+                from: Data("""
+                {"agentMemberId":"00000000-0000-7000-8000-000000000103",
+                 "clientRunId":"00000000-0000-7000-8000-000000000625",
+                 "input":{"type":"work","title":"T","brief":"B"},
+                 "routing":\(testCase.json)}
+                """.utf8)
+            )
+            let send = try decodeSend(",\"routing\":\(testCase.json)")
+            for raw in [run.routing, send.routing] {
+                if testCase.valid {
+                    XCTAssertNoThrow(try RunRoutingInput.validate(raw), testCase.json)
+                } else {
+                    XCTAssertThrowsError(try RunRoutingInput.validate(raw), testCase.json) { error in
+                        XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+                    }
+                }
+            }
+            XCTAssertEqual(
+                try? RunRoutingInput.validate(run.routing),
+                try? RunRoutingInput.validate(send.routing),
+                "the two surfaces disagreed on \(testCase.json)"
+            )
+        }
     }
 
     // MARK: - input.routing (allowedKeys gained exactly `routing`)
@@ -390,6 +497,56 @@ final class RunRoutingTests: XCTestCase {
         XCTAssertEqual(overridden.effort, "medium")
         XCTAssertNil(overridden.ignoredModelPref)
         XCTAssertNil(overridden.ignoredEffortPref)
+    }
+
+    /// D3 chain order as one table. Both surfaces call exactly this resolver, so
+    /// the matrix is the contract for the mention path too — the mention path no
+    /// longer resolves the profile tier on its own (MOMO-625).
+    func testInheritancePriorityMatrix() throws {
+        let cases: [(
+            label: String,
+            requested: RunRoutingInput?,
+            modelPref: String?,
+            effortPref: String?,
+            model: String,
+            effort: String?,
+            ignoredEffort: String?
+        )] = [
+            ("nothing anywhere", nil, nil, nil, "hermes-agent", nil, nil),
+            ("agent tier only", nil, "hermes-fast", "low", "hermes-fast", "low", nil),
+            (
+                "request model wins, agent effort still inherited when compatible",
+                RunRoutingInput(model: "hermes-lite", effort: nil), "hermes-fast", "low",
+                "hermes-lite", "low", nil
+            ),
+            (
+                "request model invalidates the inherited effort -> dropped, not 400",
+                RunRoutingInput(model: "hermes-lite", effort: nil), nil, "max",
+                "hermes-lite", nil, "max"
+            ),
+            (
+                "request effort wins over the agent effort",
+                RunRoutingInput(model: nil, effort: "high"), "hermes-agent", "low",
+                "hermes-agent", "high", nil
+            ),
+            (
+                "request wins on both axes",
+                RunRoutingInput(model: "hermes-fast", effort: "medium"), "hermes-lite", "low",
+                "hermes-fast", "medium", nil
+            ),
+        ]
+        for testCase in cases {
+            let resolved = try RunRoutingResolution.resolve(
+                requested: testCase.requested,
+                baseModel: "hermes-agent",
+                modelPref: testCase.modelPref,
+                effortPref: testCase.effortPref,
+                workspaceSettingsJSON: Self.allowlist
+            )
+            XCTAssertEqual(resolved.model, testCase.model, testCase.label)
+            XCTAssertEqual(resolved.effort, testCase.effort, testCase.label)
+            XCTAssertEqual(resolved.ignoredEffortPref, testCase.ignoredEffort, testCase.label)
+        }
     }
 
     // MARK: - usage_ledger.effort precedence (ADR-0134 D2)
