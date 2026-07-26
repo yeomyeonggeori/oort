@@ -419,6 +419,45 @@ async function captureScheme(browser, scheme, support) {
   await shoot(directory, `${OUT_DIR}/agent-profile-new-${tag}.png`, shots);
   await directory.getByTestId("agent-profile-cancel").click();
 
+  // 2d. 허용목록 밖 모델을 골랐을 때 (2026-07-26 머지 리뷰 F1). 워크스페이스
+  //     허용목록(`workspace.settings.allowed_agent_models`)을 내려주는 REST가
+  //     없으므로 피커는 아는 이름을 모두 올리고, 서버가 그중 하나를 거절하면 그
+  //     문장은 **모델 상자 옆**에 선다. 채널 만들기의 409와 같은 규칙이고, 폼 맨
+  //     아래 한 줄이었다면 무엇을 고쳐야 하는지가 사라진다.
+  //
+  //     이 400은 엔진 절반이 지금 만드는 중이다. 문구를 여기서 고정하지 않는
+  //     이유는 클라이언트가 그것을 다시 쓰지 않기 때문이다: 서버 원문을 그대로
+  //     옮기고 **자리만** 옮긴다.
+  if (hasEffortAxis) {
+    await directory.route("**/v1/workspaces/*/agents/*/profile", async (route) =>
+      route.request().method() === "PUT"
+        ? json(
+            route,
+            {
+              error: {
+                message:
+                  "modelPref is not in workspace.settings.allowed_agent_models",
+              },
+            },
+            400
+          )
+        : route.fallback()
+    );
+    await directory
+      .locator(`[data-testid="directory-row-profile"][data-member-id="${TIDY}"]`)
+      .click();
+    await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+    // 2a에서 이미 hermes-lite로 저장했으므로 다른 이름을 골라야 dirty가 된다.
+    await directory.getByTestId("agent-profile-model").selectOption("hermes-default");
+    await directory.getByTestId("agent-profile-save").click();
+    await directory
+      .getByTestId("agent-profile-model-error")
+      .waitFor({ state: "visible" });
+    await shoot(directory, `${OUT_DIR}/agent-profile-model-rejected-${tag}.png`, shots);
+    await directory.getByTestId("agent-profile-cancel").click();
+    await directory.unroute("**/v1/workspaces/*/agents/*/profile");
+  }
+
   // 3. 프로필 다이얼로그: 모델을 바꿔 강도가 무효해지는 순간. 강도 축이 있는
   //    서버에서만 의미가 있다(absent에서는 강도 상자가 잠겨 있고 그 사유가
   //    이미 2b 프레임에 찍혀 있다).

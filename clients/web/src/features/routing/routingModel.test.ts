@@ -12,6 +12,7 @@ import {
   effectiveModel,
   effortLabel,
   effortsForModel,
+  hasUnattestedModels,
   ignoredEffortNotice,
   inheritedEffortLabel,
   inheritedModelLabel,
@@ -21,6 +22,7 @@ import {
   parseEffortTable,
   resolveInheritance,
   routingPayload,
+  routingRejectionField,
   supportsEffort,
   type EffortTable,
   type RoutingDraft,
@@ -104,13 +106,43 @@ describe("유효값은 모델마다 다르다 (D2)", () => {
     expect(modelOptions(table, "claude-opus-5")).toContain("claude-opus-5");
   });
 
+  // 서버가 재는 자는 `MessageRoutes.resolveProfileModel`이고 그 허용집합은
+  // `{agent.model} ∪ workspace.settings.allowed_agent_models`다. 뒤쪽 절반을 주는
+  // REST가 없으므로 교집합은 계산할 수 없고, 대신 **근거 순서**를 지킨다: 증명된
+  // 값(에이전트 자신의 모델)이 맨 앞, 허용목록이 아닌 effort 표가 맨 뒤
+  // (2026-07-26 머지 리뷰 F1).
+  it("피커 목록은 근거가 강한 순서로 온다", () => {
+    expect(
+      modelOptions(table, "claude-opus-5", ["hermes-fast", "claude-opus-5"])
+    ).toEqual([
+      // 1층: 이 에이전트의 모델. 서버가 반드시 받는 유일한 값이다.
+      "claude-opus-5",
+      // 2층: 이 워크스페이스가 실제로 돌리는 모델.
+      "hermes-fast",
+      // 3층: effort 표에만 있는 이름들. 표는 강도 능력표이지 허용목록이 아니다.
+      "hermes-agent",
+      "hermes-default",
+      "hermes-lite",
+    ]);
+  });
+
+  it("증명된 값이 하나뿐인지 아닌지를 화면에 알려준다", () => {
+    // 목록이 에이전트 자신의 모델뿐이면 할 말은 "목록을 주는 경로가 없다"이고,
+    // 그 밖의 이름이 하나라도 섞이면 "허용 여부를 모른다"로 바뀐다.
+    expect(hasUnattestedModels(["hermes-agent"], "hermes-agent")).toBe(false);
+    expect(hasUnattestedModels([], "hermes-agent")).toBe(false);
+    expect(
+      hasUnattestedModels(["hermes-agent", "hermes-fast"], "hermes-agent")
+    ).toBe(true);
+  });
+
   it("표가 없어도 모델 축은 고를 수 있다", () => {
     // 모델은 ADR-0131 D2라 모든 세대의 서버가 가지고 있고, 표는 ADR-0134 D2라
     // 아직 없는 서버가 있다. 표를 목록의 유일한 출처로 두면 표가 없는 서버에서
     // MOMO-537(에이전트 기본 모델 편집)이 통째로 사라진다(R1 B2).
     expect(
       modelOptions(null, "hermes-agent", ["hermes-fast", "hermes-agent"])
-    ).toEqual(["hermes-fast", "hermes-agent"]);
+    ).toEqual(["hermes-agent", "hermes-fast"]);
     expect(modelOptions(null, "")).toEqual([]);
   });
 
@@ -351,5 +383,63 @@ describe("mentionRoutingTarget", () => {
     const target = mentionRoutingTarget("@hermes @kim-intern 같이 봐줘", members);
     expect(target.kind).toBe("many");
     expect(target.kind === "many" && target.agents).toHaveLength(2);
+  });
+});
+
+// =============================================================================
+// 서버 거절의 배달 주소 (2026-07-26 머지 리뷰 F1).
+//
+// 허용목록 밖 모델에 대한 400은 "모델을 바꿔라"는 요청이므로 폼 맨 아래가 아니라
+// 모델 상자 옆에 서야 한다. 엔진 절반이 프로필 PUT을 200 무음 폐기에서 400으로
+// 바꾸는 중이고 그 **문구는 아직 확정되지 않았으므로**, 여기서는 리터럴을 맞히지
+// 않고 축 이름이 문장에 등장하는지만 본다. 못 알아보면 null이고, 그때는 지금까지와
+// 똑같이 폼 전체에 붙는다.
+// =============================================================================
+
+describe("routingRejectionField", () => {
+  const both: RoutingDraft = { model: "hermes-fast", effort: "max" };
+  const modelOnly: RoutingDraft = { model: "hermes-fast", effort: null };
+
+  it("허용목록 거절은 모델 상자로 간다", () => {
+    // 컴포저 전송 표면의 실제 문구(capability.ts가 인용하는 그것).
+    expect(
+      routingRejectionField(
+        400,
+        "routing.model is not in workspace.settings.allowed_agent_models",
+        both
+      )
+    ).toBe("model");
+    // 프로필 PUT의 기존 길이 검사도 같은 상자에 대한 답이다.
+    expect(
+      routingRejectionField(400, "modelPref must contain 1...200 characters", both)
+    ).toBe("model");
+  });
+
+  it("강도 거절은 강도 상자로 가고, 두 축을 모두 부르는 문장도 그렇다", () => {
+    expect(
+      routingRejectionField(400, "effortPref is not valid for model hermes-fast", both)
+    ).toBe("effort");
+  });
+
+  it("보내지 않은 축으로는 배달하지 않는다", () => {
+    // 강도를 싣지 않았는데 온 400은 강도에 대한 답일 수 없다.
+    expect(
+      routingRejectionField(400, "effortPref is not a known field", modelOnly)
+    ).toBe("model");
+    expect(
+      routingRejectionField(400, "modelPref rejected", INHERIT_DRAFT)
+    ).toBeNull();
+  });
+
+  it("이 폼이 새로 보내는 값이 모델뿐이면 알아보지 못한 400도 모델의 답이다", () => {
+    // 나머지 키는 읽은 그대로 되돌려 보내는 값이라 방금 전까지 서버가 받아 주던
+    // 것들이다.
+    expect(routingRejectionField(400, "bad request", modelOnly)).toBe("model");
+  });
+
+  it("알아보지 못하면 폼 전체에 붙인다. 승급이지 대체가 아니다", () => {
+    expect(routingRejectionField(400, "bad request", both)).toBeNull();
+    expect(routingRejectionField(500, "modelPref rejected", both)).toBeNull();
+    expect(routingRejectionField(403, "modelPref rejected", both)).toBeNull();
   });
 });

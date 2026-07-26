@@ -184,13 +184,22 @@ const READ_STATES = [
   { channel_id: DM_ID, last_read_seq: 3, latest_seq: 3, unread_count: 0, mention_count: 0 },
 ];
 
-// Three of these rows are typed agent events, not prose, so the capture shows
-// the R-1 §4 agent cards (approval / tool run / settled turn cost) in both
-// schemes. The props are shaped exactly like the server's own
-// (AgentGatewayRoutes.approvalRequestProps, WorkerService.toolResultProps,
-// AgentGatewayRoutes.timelineProps), opaque fields included, so the capture
-// also proves the redaction: `arguments` and `tool_grant` are present in the
-// fixture and must not appear anywhere on screen.
+// Four of these rows are typed agent events, not prose, so the capture shows
+// the R-1 §4 agent cards (approval / tool run / settled turn cost) and the
+// ADR-0135 D1 cascade notice in both schemes. The props are shaped exactly like
+// the server's own (AgentGatewayRoutes.approvalRequestProps,
+// WorkerService.toolResultProps, AgentGatewayRoutes.timelineProps,
+// WorkerService.finalMessageProps), opaque fields included, so the capture also
+// proves the redaction: `arguments` and `tool_grant` are present in the fixture
+// and must not appear anywhere on screen.
+//
+// TWO settled turn records on purpose, because there are two executors and they
+// mark themselves differently. Hand-writing only the gateway one is exactly how
+// the cascade notice shipped structurally unrenderable (2026-07-26 merge review
+// D1/F3): the rows a cascade actually lands on are written by the worker, which
+// writes no `schema` key, and this capture agreed with the unit fixture instead
+// of with the emitter. The cascade now rides the WORKER row here, which is the
+// only row it can ride in production.
 const BODIES = [
   [ME, "prometheus mem_limit 붙였어요. 야간 소크 돌려두고 아침에 그래프 확인합시다."],
   [ME, "relay outbox lag 지표가 p99에서 1.2s 근처인데, 배치 크기 조정 전에 원인부터 봅시다."],
@@ -239,15 +248,13 @@ const BODIES = [
     "확인했습니다. 여명 팔레트 토큰만 사용하고 있고, 인디고 잔재는 없습니다.",
     "text",
     {
+      // Gateway turn record (AgentGatewayRoutes.timelineProps). It is the only
+      // shape that carries `usage`, so this is the row that renders the settled
+      // turn cost card.
       schema: "momo.agent_gateway.timeline.v0",
       source: "hermes_gateway",
       status: "succeeded",
-      // The cascade fixture in src/features/timeline/cascadeRail.tsx keys its
-      // seeded fallback off THIS run id, which is the only way the ADR-0135 D1
-      // "2차 프로바이더로 처리됨" row can reach artifacts/design: the capture runs
-      // with no socket, so the frame that normally carries it never arrives.
-      // Change one and change the other.
-      run_id: "0199aa11-2222-7000-8000-0000000000c3",
+      run_id: "0199aa11-2222-7000-8000-0000000000c4",
       agent_member_id: HERMES,
       usage: {
         model: "claude-opus-4",
@@ -255,6 +262,42 @@ const BODIES = [
         completion_tokens: 380,
         cost_micro_usd: 12000,
         was_estimated: false,
+      },
+    },
+  ],
+  [ME, "@hermes 남은 세 파일도 같은 기준으로 봐주세요."],
+  [
+    HERMES,
+    "남은 세 파일도 토큰만 씁니다. 하드코딩된 색은 없습니다.",
+    "text",
+    {
+      // Worker turn record, transcribed from WorkerService.finalMessageProps.
+      // No `schema` key: the worker does not write one, and inventing one here
+      // would put this capture back to agreeing with the client instead of with
+      // the emitter.
+      //
+      // The cascade fixture in src/features/timeline/cascadeRail.tsx keys its
+      // seeded fallback off THIS run id, which is the only way the ADR-0135 D1
+      // "2차 프로바이더로 처리됨" row can reach artifacts/design: the capture runs
+      // with no socket, so the frame that normally carries it never arrives.
+      // Change one and change the other.
+      run_id: "0199aa11-2222-7000-8000-0000000000c3",
+      source: "agent_worker.final_text.v0",
+      trigger_message_id: "0199aa11-2222-7000-8000-0000000000d1",
+      trigger_message_seq: 1412,
+      author_member_id: ME,
+      source_attribution: {
+        source_id: "msg_0199aa11-2222-7000-8000-0000000000d1",
+        kind: "message",
+        title: "Message #1412",
+        uri: `momo://workspaces/${WORKSPACE_ID}/channels/${GENERAL_ID}/messages/0199aa11-2222-7000-8000-0000000000d1`,
+        workspace_id: WORKSPACE_ID,
+        channel_id: GENERAL_ID,
+        message_id: "0199aa11-2222-7000-8000-0000000000d1",
+        message_seq: 1412,
+        author_member_id: ME,
+        permission_snapshot: "actor:channel_member agent:channel_member",
+        excerpt: "@hermes 남은 세 파일도 같은 기준으로 봐주세요.",
       },
     },
   ],
@@ -919,9 +962,27 @@ async function captureScheme(browser, scheme) {
   await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
   await turns.getByTestId("composer-working").waitFor({ state: "visible" });
+  // The ADR-0135 D1 cascade notice, and this wait is a GATE rather than a
+  // convenience. The row it hangs on is the WORKER turn record in BODIES, which
+  // is the only shape a real cascade can land on; the seeded fallback in
+  // cascadeRail.tsx is keyed to that row's run id. If `turnRecordRunId` ever
+  // narrows back to the gateway schema, the capture stops here instead of
+  // shipping screenshots of a surface that cannot render in production, which
+  // is precisely how D1/F3 got through the gates the first time.
+  await turns.getByTestId("cascade-notice").waitFor({ state: "visible" });
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
+
+  // 3e-2. 그 안내 줄을 화면 안으로 (ADR-0135 D1). 이 줄은 아티팩트에 한 번도 뜬
+  //       적이 없다 — 렌더를 확인하지 못한 채 머지 리뷰까지 갔고, 거기서 구조적으로
+  //       렌더 불가라는 것이 드러났다(D1/F3). 워커 턴 행에 붙은 모습을 두 스킴
+  //       모두에서 남겨 다음 리뷰가 눈으로도 확인할 수 있게 한다.
+  await turns.getByTestId("cascade-notice").scrollIntoViewIfNeeded();
+  await turns.waitForTimeout(200);
+  const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
+  await turns.screenshot({ path: cascadeShot });
+  shots.push(cascadeShot);
 
   // 3f. the same turns with the rail down (SKILL §5 offline): the clocks go
   //     away rather than counting on a dead socket, and the banner says why.

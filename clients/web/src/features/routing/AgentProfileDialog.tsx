@@ -336,6 +336,13 @@ function AgentProfilePanel({
     inheritedModel,
     knownAgentModels(directory.members)
   );
+  // 거절이 어느 상자로 가는가. 모델로 배달된 문장은 폼 아래 알림에서 빠진다.
+  const modelError =
+    handle.failure?.field === "model" ? handle.failure.message : null;
+  const formError =
+    handle.failure && handle.failure.field !== "model"
+      ? handle.failure.message
+      : undefined;
 
   return (
     <Frame
@@ -396,6 +403,10 @@ function AgentProfilePanel({
                 )
               : null
           }
+          // 서버가 모델을 거절했으면 그 문장은 모델 상자 옆에 선다. 폼 아래 알림은
+          // 그때 비는데, 같은 문장을 두 곳에 두면 사람은 서로 다른 두 문제가
+          // 있다고 읽는다(RoutingFields의 sharedReason과 같은 규칙).
+          modelError={modelError}
         />
 
         {capability.support === "unknown" && !offline && (
@@ -415,13 +426,16 @@ function AgentProfilePanel({
 
         {/* 라이브 리전은 내용보다 먼저, 그리고 **렌더된 채로** 붙어 있어야 읽힌다
             (R1 M6). display:none으로 감추면 접근성 트리에서 빠져 마운트를 미룬
-            것과 같아지므로, 비어 있을 때는 내용이 없어 높이가 0인 상태로 둔다. */}
+            것과 같아지므로, 비어 있을 때는 내용이 없어 높이가 0인 상태로 둔다.
+
+            모델 상자로 배달된 거절은 여기 오지 않는다. 그 문장은 이미 상자 옆에
+            서 있고, 같은 말을 두 번 적으면 사람은 두 개의 다른 문제로 읽는다. */}
         <p
           className="text-meta text-danger"
           role="alert"
           data-testid="agent-profile-save-error"
         >
-          {handle.failure?.message}
+          {formError}
         </p>
       </form>
     </Frame>

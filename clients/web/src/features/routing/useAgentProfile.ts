@@ -13,7 +13,11 @@ import {
   noteRoutingUnsupported,
   routingScope,
 } from "./capability";
-import type { RoutingDraft } from "./routingModel";
+import {
+  routingRejectionField,
+  type RoutingDraft,
+  type RoutingRejectionField,
+} from "./routingModel";
 
 // =============================================================================
 // 에이전트 프로필의 라우팅 필드 읽기·저장 (ADR-0134 D3 2층, MOMO-626/537).
@@ -38,15 +42,22 @@ import type { RoutingDraft } from "./routingModel";
 // =============================================================================
 
 /**
- * 화면에 뜰 실패 문구 하나. 원인 분류는 여기에 두지 않는다(R2 M7).
+ * 화면에 뜰 실패 문구 하나 + 그 문장이 **어느 상자에 대한 답인가**. 원인 분류는
+ * 여기에 두지 않는다(R2 M7).
  *
  * "강도 필드를 모른다"는 사실은 `AgentProfileSaveResult.effortUnsupported`가
  * 저장 호출의 답으로 이미 전달하고, 그 값으로 폼을 되돌리는 것이 호출자의 일이다.
  * 같은 사실을 실패 객체에도 복사해 두면 정본이 둘이 되고, 둘 중 아무도 읽지 않는
  * 쪽이 남는다.
+ *
+ * `field`는 그 분류가 아니라 **배달 주소**다. 허용목록 밖 모델에 대한 400은 모델을
+ * 바꾸라는 요청이므로 폼 맨 아래가 아니라 모델 상자 옆에 서야 한다(2026-07-26 머지
+ * 리뷰 F1; 엔진 절반이 지금 이 400을 만드는 중이고, 웹은 그 문장이 도착할 자리를
+ * 먼저 만들어 둔다). 알아보지 못하면 `null`이고 지금까지와 똑같이 폼 전체에 붙는다.
  */
 export interface AgentProfileSaveFailure {
   message: string;
+  field: RoutingRejectionField;
 }
 
 export interface AgentProfileSaveResult {
@@ -123,6 +134,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
           setFailure({
             message:
               "이 서버는 아직 추론 강도 저장을 지원하지 않습니다. 고른 강도는 되돌렸고, 모델만 바꿔서 다시 저장할 수 있습니다.",
+            field: null,
           });
           return { ok: false, effortUnsupported: true };
         }
@@ -131,6 +143,14 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
             error instanceof ApiError || error instanceof Error
               ? error.message
               : "변경을 저장하지 못했습니다.",
+          // 서버 원문을 그대로 옮기되 **자리는 옮긴다**. 문구를 다시 쓰지 않는
+          // 이유는 이 거절의 내용을 웹이 모르기 때문이다: 허용목록도, 그 안에
+          // 무엇이 있는지도 이 클라이언트에 내려오지 않는다. 우리가 아는 것은
+          // 어느 상자를 고쳐야 하는가뿐이고, 그것이 여기서 더하는 전부다.
+          field:
+            error instanceof ApiError
+              ? routingRejectionField(error.status, error.message, draft)
+              : null,
         });
         return { ok: false, effortUnsupported: false };
       } finally {
