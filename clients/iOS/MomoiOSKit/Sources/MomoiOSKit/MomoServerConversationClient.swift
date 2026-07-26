@@ -773,12 +773,12 @@ private struct IOSSendMessageRequest: Encodable {
     let attachmentIds: [FileID]?
 
     private enum CodingKeys: String, CodingKey {
-        case clientMsgId = "client_msg_id"
+        case clientMsgId
         case type
         case body
         case props
         case rootId
-        case runId = "run_id"
+        case runId
         case attachmentIds
     }
 }
