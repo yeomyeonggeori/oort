@@ -70,6 +70,10 @@
 ## 5. 웹 백스크린 6건 (전부 main 기존, 이번 회귀 아님)
 
 `lib/http.ts:83`의 검증 없는 캐스트가 뿌리. react-query가 `undefined`는 막지만 **`null`은 통과** — Vapor Optional·PG JSON이 정확히 보내는 값이다.
+
+> **정정 (2026-07-27, #827 착수 전 전수 대조)**: 밑줄 친 마지막 절은 **사실이 아니다.** Swift의 합성 `Encodable`은 Optional을 `encodeIfPresent`로 인코딩하므로 nil은 **JSON `null`이 아니라 키 부재**로 나간다. 그리고 키 부재는 `undefined`가 되어 react-query가 막는다. 라우트 DTO 중 커스텀 `encode(to:)`로 null을 방출하는 것은 없고, jsonb를 타는 경로(roster·approvals·work-host)는 SQL에서 `COALESCE(..., '[]')`로 막혀 있다. `JSONValue`는 `encodeNil`이 가능하지만 그 타입을 쓰는 `ApprovalProjectionDTO.payload`는 웹 타입에 아예 없어 소비 지점이 없다.
+> → **아래 6건 + 리뷰가 지목한 언랩 지점 10개는 전부 `DRIFT-ONLY`다**(프록시·버전 스큐·미래의 비-Swift 서비스 대비). 재현은 **주입된** null로 이루어졌고, 오늘의 서버는 그 응답을 만들지 못한다. MOMO-632의 값은 "실동 백스크린 수리"가 아니라 **①에러 경계(레포에 `componentDidCatch` 0건 — 폭발 반경을 구조적으로 묶는다) ②드리프트 방어 ③이 계열을 잡는 게이트 신설**에 있다. 근거: `ProviderLinkRoutes.swift:427`·`WorkHostRoutes.swift:40`·`WorkTierPolicyRoutes.swift:21`·`DTOs.swift:44/254/318/403/671/740` 전부 non-Optional.
+> 별건 실수확 1건: `useTimeline.ts:241,307`이 `page.nextBefore === undefined`로 비교한다(`== null` 아님). 오늘은 맞지만 absent→null 정규화 프록시가 끼면 `reachedStart`가 영원히 false가 되어 "히스토리 끝" 판정이 죽는다 — 크래시가 아니라 조용한 오동작이라 더 늦게 발견된다.
 `AiLinkSection.tsx:229`(diagnostics) · `WorkHostSection.tsx:398,737` · `settings/model.ts:175,455` · `InviteSection.tsx:157` — 각각 `null`/정크 응답에 설정 화면 전체 백스크린(rootChildren=0) 재현됨.
 특기: `AiLinkSection`은 818이 만진 파일이고 같은 컴포넌트 179행은 `parseProbeEntries`로 방어돼 있다 — **교훈이 파일 하나 안에서 절반만 적용**됐다.
 → **티켓 1장**: `lib/wire.ts` 공용 검증 헬퍼 + 언랩 지점 일괄 통과(`workHosts`·`invites`·`workTierPolicy`·`read_states`·`approvals`·roster 행).
