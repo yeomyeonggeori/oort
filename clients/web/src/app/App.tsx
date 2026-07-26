@@ -6,6 +6,7 @@ import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
 import { AppShell } from "@/app/AppShell";
 import { SkeletonRows } from "@/features/common/States";
+import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
@@ -44,7 +45,12 @@ export function App() {
       <Routes>
         <Route
           element={
-            <AppShell
+            <RenderErrorBoundary
+              title="화면을 열지 못했습니다"
+              message="이 화면을 다시 열어보세요. 문제가 계속되면 서버 연결을 확인하세요."
+              retryLabel="앱 다시 열기"
+              onRetry={() => window.location.reload()}
+            ><AppShell
               session={session}
               onLogout={() => {
                 // Cached workspace data belongs to the session that is ending,
@@ -58,7 +64,7 @@ export function App() {
                 forgetUsage();
                 forgetQuota();
               }}
-            />
+            /></RenderErrorBoundary>
           }
         >
           <Route index element={<ChatShell />} />

@@ -25,6 +25,7 @@ import { ApiError } from "@/lib/api";
 import { fetchWithDeadline } from "@/lib/http";
 import { absoluteApiBase, apiBase } from "@/lib/serverBase";
 import { getAccessToken } from "@/lib/session";
+import { arrayField, responseRecord } from "@/lib/wire";
 
 // Same deadline as the shared client (MOMO-609): settings is where someone
 // re-points a device at another server, so an address that answers nothing has
@@ -42,7 +43,7 @@ async function settingsRequest<T>(
     const body = res.jsonOrNull<{ error?: { message?: string } }>();
     throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
   }
-  return res.json<T>();
+  return responseRecord(res.json<unknown>()) as T;
 }
 
 /**
@@ -315,7 +316,9 @@ export async function fetchWorkTierPolicy(
   const res = await settingsRequest<{ workTierPolicy: WorkTierPolicy }>(
     tierPolicyPath(workspaceId, scope)
   );
-  return res.workTierPolicy;
+  return (res.workTierPolicy && typeof res.workTierPolicy === "object")
+    ? res.workTierPolicy
+    : Promise.reject(new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요."));
 }
 
 export async function putWorkTierPolicy(
@@ -327,7 +330,9 @@ export async function putWorkTierPolicy(
     tierPolicyPath(workspaceId, scope),
     { method: "PUT", body: JSON.stringify(input) }
   );
-  return res.workTierPolicy;
+  return (res.workTierPolicy && typeof res.workTierPolicy === "object")
+    ? res.workTierPolicy
+    : Promise.reject(new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요."));
 }
 
 // --- 등록된 호스트: GET /v1/workspaces/:ws/work-hosts -----------------------
@@ -361,7 +366,7 @@ export async function listWorkHosts(workspaceId: string): Promise<WorkHost[]> {
   const res = await settingsRequest<{ workHosts: WorkHost[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-hosts`
   );
-  return res.workHosts;
+  return arrayField<WorkHost>(res, "workHosts") ?? [];
 }
 
 // --- 워크스페이스: POST /v1/workspaces, GET /v1/workspaces/:ws -------------
@@ -397,6 +402,9 @@ export async function fetchWorkspace(
   const res = await settingsRequest<{ workspace: WorkspaceIdentity }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}`
   );
+  if (!res.workspace || typeof res.workspace !== "object") {
+    throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
+  }
   return res.workspace;
 }
 
@@ -435,7 +443,7 @@ export async function listInvites(workspaceId: string): Promise<InviteCode[]> {
   const res = await settingsRequest<{ invites: InviteCode[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/invites?limit=20`
   );
-  return res.invites;
+  return arrayField<InviteCode>(res, "invites") ?? [];
 }
 
 export function createInvite(

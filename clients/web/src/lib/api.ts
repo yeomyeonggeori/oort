@@ -34,6 +34,7 @@ import {
   markAuthExpired,
   restoredLoginResponse,
 } from "./session";
+import { arrayField, num, record, responseRecord, str, WireShapeError } from "./wire";
 
 export interface Member {
   id: string;
@@ -76,6 +77,26 @@ export interface RosterMember {
   agentModel?: string;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+function isRosterMember(value: unknown): value is RosterMember {
+  const kind = str(value, "kind");
+  const status = str(value, "status");
+  const channelIds = arrayField(value, "channelIds");
+  const capabilities = arrayField(value, "capabilities");
+  return (
+    str(value, "id") !== undefined &&
+    str(value, "workspaceId") !== undefined &&
+    (kind === "human" || kind === "agent") &&
+    (status === "active" || status === "invited" || status === "suspended" || status === "deleted") &&
+    str(value, "displayName") !== undefined &&
+    str(value, "handle") !== undefined &&
+    num(value, "channelCount") !== undefined &&
+    num(value, "createdAtMs") !== undefined &&
+    num(value, "updatedAtMs") !== undefined &&
+    channelIds !== null && channelIds.every((id) => typeof id === "string") &&
+    capabilities !== null && capabilities.every((capability) => typeof capability === "string")
+  );
 }
 
 export interface Channel {
@@ -139,6 +160,21 @@ export interface Message {
     last_reply_seq: number;
     last_reply_at: number;
   };
+}
+
+function isMessage(value: unknown): value is Message {
+  const type = str(value, "type");
+  return (
+    str(value, "id") !== undefined &&
+    str(value, "channelId") !== undefined &&
+    str(value, "authorMemberId") !== undefined &&
+    num(value, "seq") !== undefined &&
+    num(value, "hlcTs") !== undefined &&
+    num(value, "hlcCount") !== undefined &&
+    num(value, "createdAtMs") !== undefined &&
+    (type === "text" || type === "tool_call" || type === "tool_result" || type === "diff" ||
+      type === "artifact" || type === "approval_request" || type === "system")
+  );
 }
 
 /** Normalised reply rollup, or null when the message has no replies. */
@@ -230,7 +266,7 @@ export function refreshSession(): Promise<boolean> {
         markAuthExpired();
         return false;
       }
-      const pair = res.json<RefreshResponse>();
+      const pair = refreshResponseFromWire(res.json<unknown>());
       applyRotation(pair.accessToken, pair.refreshToken);
       return true;
     } catch {
@@ -259,7 +295,45 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 401) markAuthExpired();
   if (!res.ok) throw parseError(res);
-  return res.json<T>();
+  return responseRecord(res.json<unknown>()) as T;
+}
+
+function loginResponseFromWire(value: unknown): LoginResponse {
+  const source = responseRecord(value);
+  const member = record(source.member);
+  if (
+    member === null ||
+    typeof source.accessToken !== "string" ||
+    typeof source.refreshToken !== "string" ||
+    typeof source.realtimeWebSocketUrl !== "string" ||
+    typeof member.id !== "string" ||
+    typeof member.workspaceId !== "string" ||
+    (member.kind !== "human" && member.kind !== "agent") ||
+    typeof member.displayName !== "string" ||
+    typeof member.handle !== "string"
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    accessToken: source.accessToken,
+    refreshToken: source.refreshToken,
+    realtimeWebSocketUrl: source.realtimeWebSocketUrl,
+    member: {
+      id: member.id,
+      workspaceId: member.workspaceId,
+      kind: member.kind,
+      displayName: member.displayName,
+      handle: member.handle,
+    },
+  };
+}
+
+function refreshResponseFromWire(value: unknown): RefreshResponse {
+  const source = responseRecord(value);
+  if (typeof source.accessToken !== "string" || typeof source.refreshToken !== "string") {
+    throw new WireShapeError();
+  }
+  return { accessToken: source.accessToken, refreshToken: source.refreshToken };
 }
 
 export async function login(
@@ -275,7 +349,7 @@ export async function login(
     null
   );
   if (!res.ok) throw parseError(res);
-  const loginResponse = res.json<LoginResponse>();
+  const loginResponse = loginResponseFromWire(res.json<unknown>());
   applyLogin(loginResponse);
   return loginResponse;
 }
@@ -342,7 +416,7 @@ export async function joinWithInvite(
     null
   );
   if (!res.ok) throw parseError(res);
-  const joinResponse = res.json<LoginResponse>();
+  const joinResponse = loginResponseFromWire(res.json<unknown>());
   applyLogin(joinResponse);
   return joinResponse;
 }
@@ -400,7 +474,7 @@ export async function logout(): Promise<void> {
         null
       );
       if (rotated.ok) {
-        const pair = rotated.json<RefreshResponse>();
+        const pair = refreshResponseFromWire(rotated.json<unknown>());
         await revoke(pair.accessToken, pair.refreshToken);
       }
     }
@@ -423,7 +497,7 @@ export async function listChannels(workspaceId: string): Promise<Channel[]> {
   const res = await request<{ channels: Channel[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`
   );
-  return res.channels;
+  return arrayField<Channel>(res, "channels") ?? [];
 }
 
 /** Channel membership row, as the write endpoints return it. */
@@ -502,7 +576,7 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
   const res = await request<{ members: RosterMember[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
   );
-  return res.members;
+  return (arrayField(res, "members") ?? []).filter(isRosterMember);
 }
 
 interface WireReadState {
@@ -530,7 +604,15 @@ export async function fetchReadStates(
   const res = await request<{ read_states: WireReadState[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/read-state`
   );
-  return res.read_states.map(toReadState);
+  const states = arrayField(res, "read_states");
+  return states === null ? [] : states.filter((state): state is WireReadState => {
+    return typeof state === "object" && state !== null &&
+      typeof (state as Record<string, unknown>).channel_id === "string" &&
+      typeof (state as Record<string, unknown>).last_read_seq === "number" &&
+      typeof (state as Record<string, unknown>).latest_seq === "number" &&
+      typeof (state as Record<string, unknown>).unread_count === "number" &&
+      typeof (state as Record<string, unknown>).mention_count === "number";
+  }).map(toReadState);
 }
 
 /**
@@ -559,7 +641,7 @@ export interface MessageQuery {
   after?: number;
 }
 
-export function fetchMessages(
+export async function fetchMessages(
   workspaceId: string,
   channelId: string,
   query: MessageQuery = {}
@@ -569,11 +651,13 @@ export function fetchMessages(
   if (query.before !== undefined) params.set("before", String(query.before));
   if (query.after !== undefined) params.set("after", String(query.after));
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return request<MessagePage>(
+  const page = await request<MessagePage>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
   );
+  const messages = arrayField<Message>(page, "messages");
+  return { ...page, messages: (messages ?? []).filter(isMessage) };
 }
 
 /**
@@ -820,7 +904,7 @@ export async function fetchWorkHosts(workspaceId: string): Promise<WorkHost[]> {
   const res = await request<{ workHosts: WorkHost[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-hosts`
   );
-  return res.workHosts;
+  return arrayField<WorkHost>(res, "workHosts") ?? [];
 }
 
 // ---- Approvals: read projection over the decision ledger --------------------
@@ -902,6 +986,18 @@ function toApproval(wire: WireApproval): Approval {
   };
 }
 
+function isWireApproval(value: unknown): value is WireApproval {
+  return (
+    str(value, "id") !== undefined &&
+    str(value, "workspace_id") !== undefined &&
+    str(value, "run_id") !== undefined &&
+    str(value, "channel_id") !== undefined &&
+    str(value, "requested_by") !== undefined &&
+    str(value, "action_type") !== undefined &&
+    str(value, "status") !== undefined
+  );
+}
+
 /** One approval status page. The server clamps `limit` to 1...500. */
 export async function fetchApprovals(
   workspaceId: string,
@@ -913,7 +1009,8 @@ export async function fetchApprovals(
       workspaceId
     )}/approvals?status=${status}&limit=${limit}`
   );
-  return res.approvals.map(toApproval);
+  const approvals = arrayField(res, "approvals");
+  return approvals === null ? [] : approvals.filter(isWireApproval).map(toApproval);
 }
 
 // ---- Agent runs: work projection ------------------------------------------
