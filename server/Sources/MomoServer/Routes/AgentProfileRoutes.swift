@@ -88,6 +88,64 @@ struct AgentProfileRoutes: Sendable {
         )
     }
 
+    /// ADR-0131 D2 allow-list, applied at **write** time.
+    ///
+    /// The runtime keeps ignoring an unusable *inherited* preference silently
+    /// (`MessageRoutes.resolveProfileModel` → `ignored_model_pref`), because by
+    /// then the allow-list may have changed under a profile nobody re-saved.
+    /// An explicit write is a different act: the client is asserting a model for
+    /// this agent right now, so a violation is a visible 400 — exactly the
+    /// asymmetry ADR-0134 D1 already draws for `routing.model` on the composer
+    /// path, and the sibling of the `effortPref` 400 in `AgentProfileValidation`.
+    ///
+    /// The judgement is delegated to `MessageRoutes.allowedAgentModels` so this
+    /// surface and the request tier cannot drift into disagreeing about the same
+    /// string. It lives in the route layer rather than in
+    /// `AgentProfileValidation` because the allow-list is workspace state, which
+    /// body validation has no access to.
+    static func assertModelPrefIsAllowed(
+        _ modelPref: String?,
+        baseModel: String,
+        workspaceSettingsJSON: String
+    ) throws {
+        guard let modelPref, !modelPref.isEmpty else { return }
+        let allowed = MessageRoutes.allowedAgentModels(
+            baseModel: baseModel, workspaceSettingsJSON: workspaceSettingsJSON
+        )
+        guard allowed.contains(modelPref) else {
+            throw HTTPError(
+                .badRequest,
+                message: "modelPref is not in workspace.settings.allowed_agent_models"
+            )
+        }
+    }
+
+    /// The two inputs `assertModelPrefIsAllowed` needs, read inside the tenant
+    /// transaction that is about to write the profile.
+    private static func loadModelPolicy(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        agentMemberID: UUID
+    ) async throws -> (baseModel: String, workspaceSettingsJSON: String) {
+        let rows = try await conn.query(
+            """
+            SELECT a.model, w.settings::text
+              FROM agent a
+              JOIN workspace w ON w.id = a.workspace_id
+             WHERE a.workspace_id = \(workspaceID)
+               AND a.member_id = \(agentMemberID)
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.notFound, message: "agent profile target not found")
+        }
+        let (model, settings) = try row.decode((String, String).self)
+        return (model, settings)
+    }
+
     private static func upsert(
         conn: PostgresConnection,
         logger: Logger,
@@ -97,6 +155,20 @@ struct AgentProfileRoutes: Sendable {
         viaTokenID: UUID,
         profile: ValidatedAgentProfile
     ) async throws -> AgentProfileDTO {
+        // Every profile write funnels through here (REST PUT and the agent
+        // creation form alike), so the allow-list gate cannot be bypassed by
+        // adding another caller. Only paid for when a preference is present.
+        if let modelPref = profile.modelPref, !modelPref.isEmpty {
+            let policy = try await loadModelPolicy(
+                conn: conn, logger: logger,
+                workspaceID: workspaceID, agentMemberID: agentMemberID
+            )
+            try assertModelPrefIsAllowed(
+                modelPref,
+                baseModel: policy.baseModel,
+                workspaceSettingsJSON: policy.workspaceSettingsJSON
+            )
+        }
         let rows = try await conn.query(
             """
             INSERT INTO agent_profile

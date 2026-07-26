@@ -25,9 +25,12 @@
 #   5. usage_ledger.effort: a full gateway roundtrip (agent bearer -> claim the
 #      pending job -> POST .../gateway/complete) writes the effort column, and
 #      the adapter-reported effort wins over the requested one.
-#   6. agent_profile.effort_pref REST writer (MOMO-625): PUT normalizes+persists+
-#      audits it, and refuses an unusable level / an effort the pinned modelPref
-#      cannot support / an unknown field, without a partial write.
+#   6. agent_profile REST writer (MOMO-625): PUT normalizes+persists+audits
+#      effort_pref, and refuses an unusable level / an effort the pinned
+#      modelPref cannot support / an unknown field / a modelPref outside
+#      workspace.settings.allowed_agent_models, without a partial write — while a
+#      violation already stored in the row still reads 200 and stays a silent
+#      runtime ignore (ADR-0131 D2).
 #   7. mention path routing (MOMO-625): POST .../messages carries the same
 #      closed-world `routing` block, resolves through the same chain, produces
 #      the same 400 matrix, rolls the SEND back on a violation, and records the
@@ -571,6 +574,76 @@ expect 400 "closed-world: snake_case effort_pref is not a known profile field"
 [ "$(profile_effort_pref)" = "max" ] \
   || fail "a rejected profile write mutated effort_pref: '$(profile_effort_pref)'"
 pass "profile effort_pref writer: normalize+persist+audit, 400 on unusable/unknown, no partial write"
+
+# ---- 6b. modelPref allow-list at write time (F1, 2026-07-26 merge review) ----
+#
+# Before: PUT modelPref='external-premium' answered 200, and every later run
+# silently swapped it for agent.model (audited as ignored_model_pref) — the
+# client was told a model was in effect that never ran. The write is now a 400,
+# symmetrical with the composer's routing.model gate on the same allow-list.
+profile_model_pref() {
+  run_sql -tA <<SQL | tr -d '[:space:]'
+SELECT coalesce(model_pref,'NULL') FROM agent_profile
+ WHERE workspace_id='$WS_ID' AND agent_member_id='$AGENT_ID';
+SQL
+}
+
+put_profile '{"instructions":"","modelPref":"hermes-lite","enabledTools":[]}'
+expect 200 "modelPref inside allowed_agent_models"
+[ "$(profile_model_pref)" = "hermes-lite" ] \
+  || fail "an accepted modelPref was not persisted: '$(profile_model_pref)'"
+
+put_profile '{"instructions":"","modelPref":"external-premium","enabledTools":[]}'
+expect 400 "modelPref outside allowed_agent_models"
+printf '%s' "$BODY" | jq -e '.error.message | test("allowed_agent_models")' >/dev/null \
+  || { echo "$BODY" >&2; fail "modelPref 400 does not name the allow-list"; }
+[ "$(profile_model_pref)" = "hermes-lite" ] \
+  || fail "a rejected modelPref write mutated the row: '$(profile_model_pref)'"
+
+# The agent's own model is always in the set, allow-list or not (ADR-0131 D2).
+put_profile "$(jq -cn --arg m "$BASE_MODEL" '{instructions:"",modelPref:$m,enabledTools:[]}')"
+expect 200 "modelPref equal to agent.model is always allowed"
+
+# ADR-0131 D2 is unchanged for values that are *already stored*: only the
+# explicit write became an error. A row written before the allow-list narrowed
+# still reads 200 and is still a silent ignore at run time — otherwise this fix
+# would turn every historical profile into a broken agent.
+run_sql >/dev/null <<SQL
+UPDATE agent_profile SET model_pref='external-premium'
+ WHERE workspace_id='$WS_ID' AND agent_member_id='$AGENT_ID';
+SQL
+api GET "/v1/workspaces/$WS_ID/agents/$AGENT_ID/profile" "$ADMIN_TOKEN"
+expect 200 "a previously stored allow-list violation still reads 200"
+printf '%s' "$BODY" | jq -e '.profile.modelPref == "external-premium"' >/dev/null \
+  || { echo "$BODY" >&2; fail "GET must project the stored preference verbatim"; }
+api POST "/v1/workspaces/$WS_ID/channels/$CHANNEL_ID/messages" "$ADMIN_TOKEN" \
+  "$(jq -cn --arg c "$(uuid)" \
+      --arg b "<@$AGENT_ID> MOMO-625 stored-violation inheritance $RUN_TAG" \
+      '{clientMsgId:$c,type:"text",body:$b}')"
+expect 201 "a mention still runs while the stored preference is unusable"
+STORED_VIOLATION_MSG_ID="$(printf '%s' "$BODY" | jq -er '.id')"
+STORED_VIOLATION_RUN="$(run_sql -tA <<SQL | tr -d '[:space:]'
+SELECT lower(id::text) FROM agent_run
+ WHERE workspace_id='$WS_ID' AND trigger_message_id='$STORED_VIOLATION_MSG_ID'
+   AND agent_member_id='$AGENT_ID'
+ LIMIT 1;
+SQL
+)"
+[ -n "$STORED_VIOLATION_RUN" ] || fail "stored-violation mention did not create an agent_run"
+printf '%s' "$(job_payload_for_run "$STORED_VIOLATION_RUN")" \
+  | jq -e --arg base "$BASE_MODEL" '.model == $base' >/dev/null \
+  || fail "a stored allow-list violation must still fall back to agent.model"
+STORED_VIOLATION_AUDIT="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action='agent.mention.queued'
+   AND lower(run_id::text)='$STORED_VIOLATION_RUN'
+   AND detail->>'ignored_model_pref'='external-premium'
+   AND detail->>'resolved_model'='$BASE_MODEL';
+SQL
+)"
+[ "$STORED_VIOLATION_AUDIT" = "1" ] \
+  || fail "the silent runtime ignore stopped being audited ($STORED_VIOLATION_AUDIT)"
+pass "modelPref writer: 400 outside the allow-list, no partial write, stored violations still read 200 and stay a silent runtime ignore"
 
 # =============================================================================
 # 7. Mention path routing (MOMO-625 / ADR-0134 D1·D3)

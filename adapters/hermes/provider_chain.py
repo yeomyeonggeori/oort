@@ -95,14 +95,30 @@ CREDENTIAL_KEYS = frozenset(
     }
 )
 
+#: Everything a bearer token may consist of after `Bearer `. RFC 6750 b64token
+#: plus `=` padding; quotes/brackets are excluded so a JSON- or repr-serialized
+#: log line loses the secret without losing the structure around it.
+_BEARER_TOKEN = r"[A-Za-z0-9._~+/=-]+"
+
+#: Credential shapes. **Every pattern must consume its credential in full.**
+#: A pattern that matches only part of a secret fails twice: the remainder stays
+#: in the log line, and the prefix it ate is exactly what the next pattern
+#: anchors on (`Bearer sk-…` lost its `s`, so `\bsk-` then matched nothing).
 _CREDENTIAL_VALUE_PATTERNS = (
-    re.compile(r"(?i)\bbearer\s+\S"),
+    re.compile(r"\b(?i:bearer)\s+" + _BEARER_TOKEN),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"),
     re.compile(r"\bghp_[A-Za-z0-9_-]{8,}"),
     re.compile(r"\bxox[baprs]-[A-Za-z0-9_-]{8,}"),
     re.compile(r"\bya29\.[A-Za-z0-9._-]{8,}"),
-    re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\."),
-    re.compile(r"momo_agent_v1\.[A-Za-z0-9_-]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"),
+    re.compile(r"momo_agent_v1(?:\.[A-Za-z0-9_-]+)+"),
+)
+
+#: Redaction runs as **one** pass over this alternation instead of one pass per
+#: pattern. `re.sub` takes the leftmost match and resumes after it, so no
+#: pattern can partially rewrite the text another pattern still has to match.
+_CREDENTIAL_VALUE_SCANNER = re.compile(
+    "|".join(f"(?:{pattern.pattern})" for pattern in _CREDENTIAL_VALUE_PATTERNS)
 )
 
 _ENV_KEY_SAFE = re.compile(r"[^A-Z0-9]+")
@@ -563,11 +579,10 @@ def assert_snapshot_credential_free(payload: Mapping[str, Any]) -> dict[str, Any
         if not _looks_like_iso_utc(str(payload[key])):
             raise ProviderQuotaContractError(f"{key} must be an ISO-8601 UTC timestamp")
     serialized = json.dumps(payload, sort_keys=True)
-    for pattern in _CREDENTIAL_VALUE_PATTERNS:
-        if pattern.search(serialized):
-            raise ProviderQuotaContractError(
-                "quota snapshot carries credential-shaped text (ADR-0004)"
-            )
+    if _CREDENTIAL_VALUE_SCANNER.search(serialized):
+        raise ProviderQuotaContractError(
+            "quota snapshot carries credential-shaped text (ADR-0004)"
+        )
     return dict(payload)
 
 
@@ -1172,10 +1187,7 @@ def _nested_int(raw: Mapping[str, Any], outer: str, inner: str) -> Any:
 
 
 def _redact(raw: Any) -> str:
-    value = str(raw)
-    for pattern in _CREDENTIAL_VALUE_PATTERNS:
-        value = pattern.sub("[redacted]", value)
-    return value
+    return _CREDENTIAL_VALUE_SCANNER.sub("[redacted]", str(raw))
 
 
 __all__ = [

@@ -376,6 +376,103 @@ class ProviderCascadeTests(unittest.TestCase):
         )
 
         self.assertNotIn(PRIMARY_BEARER, str(error))
+        # `assertNotIn(PRIMARY_BEARER, ...)` on its own is a false pass: a pattern
+        # that eats only the first character removes the *exact* string while
+        # leaking everything from the second character on.
+        self.assertNotIn(PRIMARY_BEARER[1:], str(error))
+
+
+class RedactionTests(unittest.TestCase):
+    """`_redact` must consume the *whole* secret, and no pattern may disarm another.
+
+    Every case here is a regression of one defect family: a pattern that matches
+    a credential but consumes less than all of it, leaving a usable suffix in the
+    log line — and, worse, mangling the prefix that the next pattern anchors on.
+    """
+
+    def assertFullyRedacted(self, raw, *secrets):
+        redacted = provider_chain._redact(raw)
+        for secret in secrets:
+            self.assertNotIn(secret, redacted, f"{secret!r} survived in {redacted!r}")
+            # A surviving suffix is still a leak, so walk every suffix down to 8
+            # characters instead of only comparing the exact string.
+            for start in range(1, max(len(secret) - 8, 1)):
+                self.assertNotIn(
+                    secret[start:],
+                    redacted,
+                    f"suffix {secret[start:]!r} survived in {redacted!r}",
+                )
+        return redacted
+
+    def test_bearer_redaction_consumes_the_entire_token(self):
+        token = "sk-proj-AbCdEf0123456789ZZ"
+        self.assertFullyRedacted(f"Authorization: Bearer {token}", token, token[1:])
+
+    def test_bearer_redaction_covers_opaque_tokens_without_a_known_prefix(self):
+        # No `sk-`/`ghp_`/`xox` prefix, so the bearer pattern is the *only*
+        # defense here — there is no second pattern to fall back on.
+        token = "hx_live_9f8e7d6c5b4a3210deadbeef"
+        self.assertFullyRedacted(f"Authorization: Bearer {token}", token, token[1:])
+
+    def test_bearer_pattern_does_not_disarm_the_prefix_patterns(self):
+        # The defect: the bearer pattern ate the leading `s` of `sk-`, so the
+        # `\bsk-` pattern no longer matched what was left behind.
+        redacted = self.assertFullyRedacted(
+            f"Authorization: Bearer {PRIMARY_BEARER}", PRIMARY_BEARER
+        )
+        self.assertNotIn("k-primary", redacted)
+
+    def test_bearer_redaction_is_case_insensitive_and_survives_json(self):
+        token = "sk-json-embedded-secret-value"
+        serialized = json.dumps(
+            {"headers": {"authorization": f"bearer {token}"}, "status": 401}
+        )
+        redacted = self.assertFullyRedacted(serialized, token)
+        # Over-redaction has a floor too: the surrounding structure must survive
+        # or the log line stops being diagnosable.
+        self.assertIn("status", redacted)
+
+    def test_prefixed_tokens_are_consumed_to_their_end(self):
+        for token in (
+            "sk-proj-AbCdEf0123456789",
+            "ghp_AbCdEf0123456789zz",
+            "xoxb-1234567890-abcdefghij",
+            "ya29.a0AfB_abcdefghijklmnop",
+        ):
+            with self.subTest(token=token):
+                self.assertFullyRedacted(f"detail token={token} end", token)
+
+    def test_agent_token_and_jwt_signatures_are_not_left_behind(self):
+        # `momo_agent_v1.<payload>.<signature>` and a JWT both carry a trailing
+        # segment that the patterns stopped short of.
+        self.assertFullyRedacted(
+            "token=momo_agent_v1.abcdef12.SIGNATUREPART",
+            "momo_agent_v1.abcdef12.SIGNATUREPART",
+        )
+        self.assertFullyRedacted(
+            "jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SIGSIGSIGSIG",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SIGSIGSIGSIG",
+        )
+
+    def test_snapshot_screening_still_catches_every_pattern(self):
+        base = {
+            "provider_ref": "primary",
+            "window": "short",
+            "remaining_ratio": 0.5,
+            "resets_at": "2026-07-26T12:00:00Z",
+            "probed_at": "2026-07-26T11:00:00Z",
+        }
+        for poisoned in (
+            "Bearer hx_live_9f8e7d6c5b4a3210deadbeef",
+            "bearer sk-proj-AbCdEf0123456789",
+            "momo_agent_v1.abcdef12.SIGNATUREPART",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SIGSIGSIGSIG",
+        ):
+            with self.subTest(poisoned=poisoned):
+                with self.assertRaises(provider_chain.ProviderQuotaContractError):
+                    provider_chain.assert_snapshot_credential_free(
+                        {**base, "provider_ref": poisoned}
+                    )
 
 
 # ---------------------------------------------------------------------------
