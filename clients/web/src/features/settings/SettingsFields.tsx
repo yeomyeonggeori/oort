@@ -83,6 +83,11 @@ export function Subsection({
  * the field that is wrong. The clone is how a shared wrapper does that without
  * every call site repeating two ids: an explicitly passed value always wins, so
  * a caller that describes its input itself is never overwritten.
+ *
+ * The hint STAYS while the error shows. It used to be swapped out, which
+ * deleted "예: https://api.example.com/v1" at the exact moment "주소는 http://
+ * 또는 https:// 로 시작해야 합니다." appeared: the format rule was withdrawn
+ * from the one person who had just proved they needed it.
  */
 export function Field({
   label,
@@ -111,7 +116,7 @@ export function Field({
         {label}
       </label>
       {control}
-      {hint && !error && <p className="text-meta text-ink-muted">{hint}</p>}
+      {hint && <p className="text-meta text-ink-muted">{hint}</p>}
       {error && (
         <p className="text-meta text-danger" role="alert" id={errorId}>
           {error}

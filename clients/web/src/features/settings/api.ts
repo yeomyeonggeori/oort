@@ -200,6 +200,18 @@ export interface ProviderChain {
    * with a zero it would go on to state as a fact.
    */
   attemptableCount?: number;
+  /**
+   * 1-based indexes, in the order the server sent them, of entries this client
+   * could not read. Absent when every entry parsed.
+   *
+   * It exists because dropping such an entry is not a display problem, it is a
+   * DESTRUCTIVE one: `PUT /v1/provider/link/chain` replaces every fallback hop
+   * at once, so a hop that never reached the draft is a hop the next save
+   * deletes from the server along with the key stored at its position. A chain
+   * carrying this is therefore read-only until the server answers something
+   * this client can read in full.
+   */
+  unreadable?: number[];
 }
 
 /** Closed-world PUT entry: any other key is a 400 by contract. */

@@ -28,6 +28,15 @@ import type { CascadeFallbackFrame } from "@/lib/realtime";
 //     subject of the sentence is the endpoint label the worker publishes
 //     instead: it needs no mapping to be true, and it is the same string the
 //     operator reads in 설정 > AI 연결 and in the audit row.
+//
+// What it cannot do yet, and where that is disclosed: the frame is live-only.
+// A reader who refreshes, or who opens the channel later, sees no row for a turn
+// that really did fall over, and "no row" then looks like "no switch", which is
+// the silent transition ADR-0135 D1 bans, arriving through the back door.
+// Persisting it is ENGINE_HANDOFF X-15 and is not this client's to invent, so
+// until it lands the limit is STATED, once, on the surface that governs the
+// cascade: the `chain-record-scope` line in settings/AiLinkChain.tsx. Delete
+// that line when X-15 makes it false, and not before.
 // =============================================================================
 
 /** One recorded transition: the cascade left `from` and was served by `to`. */

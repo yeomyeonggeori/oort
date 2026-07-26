@@ -3,16 +3,21 @@ import { ApiError } from "@/lib/api";
 import type { ProviderChain, ProviderChainProbe } from "./api";
 import {
   addDraftRow,
+  bearerHint,
   cascadeProbeSummary,
+  chainDirtyHint,
   chainErrorCopy,
   chainSaveMessage,
   chainSummary,
+  chainUnreadableCopy,
+  draftBlockedHint,
   draftErrors,
   draftFromChain,
   draftIsDirty,
   draftRowError,
   draftToInput,
   fallbackEntries,
+  headClaim,
   headEntry,
   hopOrdinal,
   MAX_FALLBACK_HOPS,
@@ -109,20 +114,42 @@ describe("wire parsing", () => {
     expect(parseProviderChain("<!doctype html>")).toBeNull();
   });
 
-  it("drops an entry with no position or address, and keeps the rest", () => {
+  // An entry that does not parse is RECORDED, never merely skipped. PUT
+  // replaces the whole fallback list, so a hop that did not reach the draft is
+  // one the next save deletes from the server together with the ciphertext at
+  // its position. The index is response order, which is the only handle a
+  // person has on a row that has no address to point at.
+  it("records an entry it could not read instead of dropping it silently", () => {
     const parsed = parseProviderChain({
       entries: [CHAIN.entries[0], { position: 1 }, null, CHAIN.entries[1]],
     });
     expect(parsed?.entries.map((e) => e.position)).toEqual([0, 1]);
+    expect(parsed?.unreadable).toEqual([2, 3]);
   });
 
-  // fallbackCount is recomputed because the rows carry it. attemptableCount is
-  // NOT: it depends on stored bearers this client never sees, so a default of 0
-  // would be an invented fact ("시도되는 경로 0개") rather than a missing one.
+  it("leaves the marker absent when every entry parsed", () => {
+    expect(parseProviderChain(CHAIN)?.unreadable).toBeUndefined();
+  });
+
+  // fallbackCount is recomputed from the ROWS, always, never taken from the
+  // body: the server's number counts hops this client may not be able to show,
+  // and a summary claiming four over three rendered rows is a false statement
+  // about the screen the reader is looking at. attemptableCount is NOT
+  // recomputable: it depends on stored bearers this client never sees, so a
+  // default of 0 would be an invented fact rather than a missing one.
   it("recomputes the fallback count and leaves the attemptable count absent", () => {
     const parsed = parseProviderChain({ entries: CHAIN.entries });
     expect(parsed?.fallbackCount).toBe(2);
     expect(parsed?.attemptableCount).toBeUndefined();
+  });
+
+  it("never repeats a fallback count the rows cannot support", () => {
+    const parsed = parseProviderChain({
+      entries: [CHAIN.entries[0], CHAIN.entries[1], { position: 2 }],
+      fallbackCount: 2,
+    });
+    expect(parsed?.fallbackCount).toBe(1);
+    expect(parsed?.unreadable).toEqual([3]);
   });
 
   it("falls back to the address when a row carries no label", () => {
@@ -200,6 +227,7 @@ describe("draft seeding", () => {
     expect(draft.map((row) => row.bearer)).toEqual(["", ""]);
     expect(draft.map((row) => row.isNew)).toEqual([false, false]);
     expect(draft.map((row) => row.bearerLast4)).toEqual(["c40a", "1b77"]);
+    expect(draft.map((row) => row.bearerConfigured)).toEqual([true, true]);
   });
 
   it("carries the server's enabled flag", () => {
@@ -243,6 +271,7 @@ describe("draft validation mirrors the server", () => {
     bearer: "",
     mode: "external-hermes",
     enabled: true,
+    bearerConfigured: false,
     isNew: true,
   };
 
@@ -250,6 +279,7 @@ describe("draft validation mirrors the server", () => {
     expect(draftRowError(NEW_ROW)).toEqual({
       field: "baseUrl",
       message: "provider 주소를 입력하세요.",
+      next: "주소를 입력하면",
     });
   });
 
@@ -257,6 +287,7 @@ describe("draft validation mirrors the server", () => {
     expect(draftRowError({ ...NEW_ROW, baseUrl: "api.example.com" })).toEqual({
       field: "baseUrl",
       message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+      next: "주소를 http:// 또는 https:// 로 시작하게 고치면",
     });
   });
 
@@ -270,7 +301,45 @@ describe("draft validation mirrors the server", () => {
     ).toEqual({
       field: "bearer",
       message: "새 provider는 키를 입력해야 저장됩니다.",
+      next: "키를 입력하면",
     });
+  });
+
+  // Every rule carries a forward-looking twin, because the message form is only
+  // shown once the person has HAD the field: a row created one click ago has
+  // not failed at anything, and painting it red on creation uses the error
+  // state as a placeholder.
+  it("states the same rule as a next action, for a row nobody has touched yet", () => {
+    expect(draftBlockedHint([NEW_ROW], draftErrors([NEW_ROW]))).toBe(
+      "2차 provider 주소를 입력하면 저장할 수 있습니다."
+    );
+  });
+
+  it("names the first blocking row by attempt order and counts the rest", () => {
+    const draft = [
+      ...draftFromChain(CHAIN),
+      { ...NEW_ROW, key: "new-3", position: 3 },
+      { ...NEW_ROW, key: "new-4", position: 4 },
+    ];
+    expect(draftBlockedHint(draft, draftErrors(draft))).toBe(
+      "4차 provider 주소를 입력하면 저장할 수 있습니다. 채워야 할 항목은 모두 2개입니다."
+    );
+  });
+
+  it("says nothing at all when the draft is savable", () => {
+    const draft = draftFromChain(CHAIN);
+    expect(draftBlockedHint(draft, draftErrors(draft))).toBeNull();
+  });
+
+  // Offline makes `canSave` false, so the old line told a person to press a
+  // button that does nothing. The only place that said why was the route banner
+  // at the top of a panel this block is at the foot of.
+  it("names the rail when the rail is what blocks the save", () => {
+    expect(chainDirtyHint(false)).toBe(
+      "아직 저장되지 않았습니다. 연결 순서 저장을 눌러야 적용됩니다."
+    );
+    expect(chainDirtyHint(true)).toContain("서버에 연결되어 있지 않아 저장할 수 없고");
+    expect(chainDirtyHint(true)).not.toBe(chainDirtyHint(false));
   });
 
   // The opposite case, and it is not an error: an empty key on a STORED hop is
@@ -389,20 +458,20 @@ describe("failure copy", () => {
 describe("summary line", () => {
   it("says what a chain of one actually means", () => {
     expect(chainSummary(HEAD_ONLY)).toBe(
-      "폴백 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다."
+      "예비 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다."
     );
   });
 
   // attemptableCount is the server's number (enabled AND usable), so a parked
   // or half-written hop is not counted as a route a turn would take. It counts
-  // the head too, and the sentence names that: "폴백 2개, 경로 2개" beside a
+  // the head too, and the sentence names that: "예비 2개, 경로 2개" beside a
   // 꺼둠 chip read as "both fallbacks are live", the opposite of the truth.
   it("reports the server's attemptable count and says the head is in it", () => {
     expect(chainSummary(CHAIN)).toBe(
-      "폴백 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 2개입니다."
+      "예비 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 2개입니다."
     );
     expect(chainSummary({ ...CHAIN, attemptableCount: 1 })).toBe(
-      "폴백 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 1개입니다."
+      "예비 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 1개입니다."
     );
   });
 
@@ -411,7 +480,108 @@ describe("summary line", () => {
   // key would be exactly the invented fact it was written to prevent.
   it("drops the attempt clause when the body carried no count", () => {
     const parsed = parseProviderChain({ entries: CHAIN.entries })!;
-    expect(chainSummary(parsed)).toBe("폴백 provider 2개를 두었습니다.");
+    expect(chainSummary(parsed)).toBe("예비 provider 2개를 두었습니다.");
+  });
+
+  // The measured failure this whole path exists for: a body whose third entry
+  // lost its baseUrl rendered three rows under "폴백 provider 4개" and the next
+  // save would have deleted the hop nobody could see. No count survives a body
+  // the panel could not read in full.
+  it("states no count at all when an entry could not be read", () => {
+    const parsed = parseProviderChain({
+      entries: [
+        CHAIN.entries[0],
+        CHAIN.entries[1],
+        { position: 2, source: "chain", mode: "external-hermes" },
+        { ...CHAIN.entries[2], position: 3 },
+      ],
+      fallbackCount: 3,
+      attemptableCount: 4,
+    })!;
+    expect(chainSummary(parsed)).toBe(
+      "이 서버가 보낸 항목 중 일부를 읽지 못해, 예비 provider가 몇 개인지 말할 수 없습니다."
+    );
+    expect(chainSummary(parsed)).not.toMatch(/\d개/);
+  });
+});
+
+describe("an unreadable entry makes the chain read-only", () => {
+  it("says nothing when the whole body parsed", () => {
+    expect(chainUnreadableCopy(CHAIN)).toBeNull();
+    expect(chainUnreadableCopy(parseProviderChain(CHAIN)!)).toBeNull();
+  });
+
+  // Names the destructive consequence, because that is the part a person cannot
+  // guess: the save button being unavailable looks like a bug until the reason
+  // is on screen.
+  it("names the rows by their place in the answer, and why saving is blocked", () => {
+    const parsed = parseProviderChain({
+      entries: [CHAIN.entries[0], { position: 1 }, null],
+    })!;
+    expect(chainUnreadableCopy(parsed)).toBe(
+      "이 서버가 보낸 연결 순서에서 2번째, 3번째 항목을 읽지 못했습니다. 지금 저장하면 그 항목이 서버에서 지워지므로 저장을 막았습니다. 아래 목록은 읽은 항목만 보여 줍니다. 서버 버전을 확인한 뒤 다시 열어보세요."
+    );
+  });
+});
+
+describe("key field hint", () => {
+  it("prints the masked tail the API answers with", () => {
+    expect(bearerHint(draftFromChain(CHAIN)[0])).toBe(
+      "저장된 키 ••••c40a. 비워 두면 그대로 둡니다."
+    );
+  });
+
+  it("promises nothing about a new row's key beyond what happens to it", () => {
+    expect(bearerHint(addDraftRow([])[0])).toBe(
+      "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다."
+    );
+  });
+
+  // `ProviderChainEntryDTO.bearerLast4` is optional on the wire, so a stored
+  // hop with a key and no tail is reachable. It used to render "저장된 키 저장된
+  // 키 없음. 비워 두면 그대로 둡니다.": one sentence saying both things.
+  it("does not print a stored key and its absence in the same sentence", () => {
+    const stored = draftFromChain(CHAIN)[0];
+    const { bearerLast4: _drop, ...noTail } = stored;
+    expect(bearerHint(noTail)).toBe("키가 저장되어 있습니다. 비워 두면 그대로 둡니다.");
+    expect(bearerHint({ ...noTail, bearerConfigured: false })).toBe(
+      "이 provider에는 저장된 키가 없습니다. 키를 입력해야 실제로 시도됩니다."
+    );
+  });
+});
+
+describe("what the head row may claim", () => {
+  // `ProviderCascade.attemptable` is `enabled && isUsable`, so a head with no
+  // key is one the cascade skips. "가장 먼저 시도합니다." next to a 키 없음 chip
+  // announced an attempt that never happens.
+  it("does not promise an attempt for a head with no key", () => {
+    expect(headClaim({ ...CHAIN.entries[0], bearerConfigured: false })).toBe(
+      "키가 없어 지금은 시도하지 않습니다. 위의 provider 연결에서 키를 저장하면 가장 먼저 시도합니다."
+    );
+  });
+
+  // …and not the reverse claim either: a bundled mock answers turns without a
+  // key, so the self-host default is not inert and must not be told it is.
+  it("keeps the plain sentence for a mock head, which needs no key", () => {
+    expect(
+      headClaim({
+        ...CHAIN.entries[0],
+        mode: "local-mock",
+        bearerConfigured: false,
+      })
+    ).toBe("가장 먼저 시도합니다. 이 항목은 위의 provider 연결에서 바꿉니다.");
+  });
+
+  it("says a parked head is parked", () => {
+    expect(headClaim({ ...CHAIN.entries[0], enabled: false })).toBe(
+      "꺼져 있어 시도하지 않습니다. 이 항목은 위의 provider 연결에서 바꿉니다."
+    );
+  });
+
+  it("keeps the plain sentence for a live, keyed head", () => {
+    expect(headClaim(CHAIN.entries[0])).toBe(
+      "가장 먼저 시도합니다. 이 항목은 위의 provider 연결에서 바꿉니다."
+    );
   });
 });
 
@@ -515,6 +685,24 @@ describe("probe results (entries[] + cascadeOk)", () => {
     );
   });
 
+  // 로 / 으로 is decided by how the NUMBER is spoken, and the codes an operator
+  // meets most (500, 503, 400, 403, 406) are exactly the ones that close on a
+  // consonant. "provider가 503로 답했습니다." was on screen.
+  it("attaches the particle the status code is actually spoken with", () => {
+    const rows = probeRows([
+      { ...ENTRIES[0], reason: "provider_status_500" },
+      { ...ENTRIES[0], reason: "provider_status_403" },
+      { ...ENTRIES[0], reason: "provider_status_406" },
+      { ...ENTRIES[0], reason: "provider_status_401" },
+    ]);
+    expect(rows.map((row) => row.detail.split(" ")[1])).toEqual([
+      "500으로",
+      "403으로",
+      "406으로",
+      "401로",
+    ]);
+  });
+
   // The reason leads and the consequence follows it, because a fixed "응답하지
   // 않아" contradicted itself the moment the reason was 429 or 5xx: the provider
   // DID answer, it answered with a refusal.
@@ -524,7 +712,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
       { ...ENTRIES[0], reason: "provider_rate_limited" },
     ]);
     expect(rows[0].detail).toBe(
-      "provider가 503로 답했습니다. 다음 provider로 넘어갑니다."
+      "provider가 503으로 답했습니다. 다음 provider로 넘어갑니다."
     );
     expect(rows[1].detail).toBe(
       "요청 한도를 넘었습니다. 다음 provider로 넘어갑니다."
@@ -614,7 +802,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(probeReasonCopy("provider_not_configured")).toBe("주소나 키가 비어 있습니다.");
     expect(probeReasonCopy("provider_rate_limited")).toBe("요청 한도를 넘었습니다.");
     expect(probeReasonCopy("probe_not_run")).toBe("확인이 끝나지 않았습니다.");
-    expect(probeReasonCopy("provider_status_503")).toBe("provider가 503로 답했습니다.");
+    expect(probeReasonCopy("provider_status_503")).toBe("provider가 503으로 답했습니다.");
     expect(probeReasonCopy(undefined)).toBe("");
   });
 

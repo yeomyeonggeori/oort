@@ -431,6 +431,23 @@ const PROVIDER_CHAIN = {
   attemptableCount: 4,
 };
 
+// The same body with one entry this client cannot read: position 2 lost its
+// `baseUrl`. A 200 does not rule that out (a proxy, a dev catch-all or a later
+// schema can all produce it), and the panel's answer to it is not cosmetic.
+// `PUT /v1/provider/link/chain` replaces the whole fallback list, so a hop that
+// never reached the draft is one the next save deletes from the server together
+// with the key stored at its position. The block goes read-only, names the
+// entry by its place in the answer, and states no count it cannot show.
+const PROVIDER_CHAIN_PARTIAL = {
+  ...PROVIDER_CHAIN,
+  entries: PROVIDER_CHAIN.entries.map((entry, index) => {
+    if (index !== 2) return entry;
+    const rest = { ...entry };
+    delete rest.baseUrl;
+    return rest;
+  }),
+};
+
 // A fresh self-host instance: no operator link, so the head is the boot-time
 // HERMES_* env trio pointed at the bundled mock. This is what momowebqa answers
 // today, and the state the panel must describe as a MODE rather than a failure.
@@ -976,6 +993,46 @@ async function captureScheme(browser, scheme) {
   const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
   await aiLink.screenshot({ path: aiProbeShot });
   shots.push(aiProbeShot);
+
+  // …and a hop that was just added. This frame exists to prove a NEGATIVE: the
+  //     empty address field must NOT be red, must not be aria-invalid, and must
+  //     keep its format hint. Nothing has happened yet, so there is no error to
+  //     report; what the block owes the reader is the next step, once, at the
+  //     foot ("6차 provider 주소를 입력하면 저장할 수 있습니다.").
+  await aiLink.getByTestId("chain-add").click();
+  await aiLink.getByTestId("chain-blocked").waitFor({ state: "visible" });
+  await aiLink.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiNewRowShot = `${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`;
+  await aiLink.screenshot({ path: aiNewRowShot });
+  shots.push(aiNewRowShot);
+
+  // …and the probe table with that unsaved hop still on screen. The table is
+  //     numbered by the SAVED order, so once the two can disagree it has to say
+  //     which of them it is describing: one screen must not carry two meanings
+  //     of "3차".
+  await aiLink.getByTestId("chain-probe-scope").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiPendingShot = `${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`;
+  await aiLink.screenshot({ path: aiPendingShot });
+  shots.push(aiPendingShot);
+
+  // 3h-2. a 200 whose entries this client cannot read in full. Read-only, one
+  //     banner naming the entry, and no count anywhere that the rows below do
+  //     not support.
+  const aiPartial = await context.newPage();
+  await aiPartial.route("**/v1/provider/link/chain", (route) =>
+    json(route, PROVIDER_CHAIN_PARTIAL)
+  );
+  await aiPartial.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiPartial);
+  await aiPartial.evaluate('location.hash = "/settings?section=ai"');
+  await aiPartial.getByTestId("chain-partial").waitFor({ state: "visible" });
+  await aiPartial.getByTestId("chain-partial").scrollIntoViewIfNeeded();
+  await aiPartial.waitForTimeout(200);
+  const aiPartialShot = `${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`;
+  await aiPartial.screenshot({ path: aiPartialShot });
+  shots.push(aiPartialShot);
 
   // 3i. the same panel against a server built BEFORE the chain landed, which is
   //     the live momowebqa answer today (404, measured 2026-07-26). The block

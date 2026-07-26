@@ -1,4 +1,6 @@
 import { ApiError } from "@/lib/api";
+import { attachDirection } from "@/lib/koreanParticle";
+import { maskedBearer } from "./model";
 import type {
   ProviderChain,
   ProviderChainEntry,
@@ -88,29 +90,57 @@ function parseChainEntry(raw: unknown): ProviderChainEntry | null {
 /**
  * The chain body, or null when this answer is not one.
  *
- * `entries` is the field that decides: it must be present and an array. The two
- * counts are derived facts, so a body that omits them is still readable: the
- * fallback count is recomputed from the rows, and the attemptable count is left
- * ABSENT rather than defaulted. Zero is not a neutral placeholder here, it is
- * the claim "no provider would be tried right now", and `chainSummary` would
- * print it as one.
+ * `entries` is the field that decides: it must be present and an array.
+ *
+ * An entry that does not parse is recorded, not merely skipped, and this is the
+ * rule the whole panel hangs off. Saving is `PUT` with the FULL list, so a hop
+ * that never reached the draft is a hop the next 연결 순서 저장 deletes from the
+ * server together with the ciphertext stored at its position. Silently dropping
+ * one therefore turns an unreadable field into destroyed configuration, one
+ * click later, with nothing on screen having said so. `unreadable` carries the
+ * response-order index of every such entry so the panel can refuse to write.
+ *
+ * `fallbackCount` is ALWAYS recomputed from the rows that parsed, never taken
+ * from the body. The server's number counts hops this client may not be able to
+ * show, and a summary that says "예비 provider 4개" over three rendered rows is
+ * a false claim about the screen the reader is looking at. `attemptableCount`
+ * is left ABSENT when the body omits it: zero is not a neutral placeholder, it
+ * is the claim "no provider would be tried right now".
  */
 export function parseProviderChain(raw: unknown): ProviderChain | null {
   const source = record(raw);
   if (source === null) return null;
   const rawEntries = source["entries"];
   if (!Array.isArray(rawEntries)) return null;
-  const entries = rawEntries
-    .map(parseChainEntry)
-    .filter((entry): entry is ProviderChainEntry => entry !== null);
-  const fallbacks = entries.filter((entry) => entry.position >= 1).length;
+  const entries: ProviderChainEntry[] = [];
+  const unreadable: number[] = [];
+  rawEntries.forEach((item, index) => {
+    const entry = parseChainEntry(item);
+    if (entry === null) unreadable.push(index + 1);
+    else entries.push(entry);
+  });
   const attemptable = num(source, "attemptableCount");
   return {
     schema: str(source, "schema") ?? "",
     entries,
-    fallbackCount: num(source, "fallbackCount") ?? fallbacks,
+    fallbackCount: entries.filter((entry) => entry.position >= 1).length,
     ...(attemptable === undefined ? {} : { attemptableCount: attemptable }),
+    ...(unreadable.length === 0 ? {} : { unreadable }),
   };
+}
+
+/**
+ * Why this chain may not be written, or null when it may.
+ *
+ * Names the rows by their place in the server's own answer, because that is the
+ * only handle a person has on a row this client could not render: there is no
+ * address to point at, which is precisely the problem.
+ */
+export function chainUnreadableCopy(chain: ProviderChain): string | null {
+  const unreadable = chain.unreadable;
+  if (unreadable === undefined || unreadable.length === 0) return null;
+  const where = unreadable.map((index) => `${index}번째`).join(", ");
+  return `이 서버가 보낸 연결 순서에서 ${where} 항목을 읽지 못했습니다. 지금 저장하면 그 항목이 서버에서 지워지므로 저장을 막았습니다. 아래 목록은 읽은 항목만 보여 줍니다. 서버 버전을 확인한 뒤 다시 열어보세요.`;
 }
 
 /** Probe hops off the `/test` body. Empty when the server sent none. */
@@ -158,7 +188,13 @@ export interface ChainDraftRow {
   bearer: string;
   mode: string;
   enabled: boolean;
-  /** Masked tail of the stored key, absent when the server holds none. */
+  /** The server holds a key for this position. */
+  bearerConfigured: boolean;
+  /**
+   * Masked tail of the stored key. Independent of `bearerConfigured`: the DTO
+   * declares it optional, so a stored key with no tail is a reachable state and
+   * the hint has to survive it.
+   */
   bearerLast4?: string;
   /** The server has never stored this row, so a key is required to save it. */
   isNew: boolean;
@@ -184,11 +220,55 @@ export function draftFromChain(chain: ProviderChain): ChainDraftRow[] {
     bearer: "",
     mode: entry.mode,
     enabled: entry.enabled,
+    bearerConfigured: entry.bearerConfigured,
     ...(entry.bearerLast4 !== undefined
       ? { bearerLast4: entry.bearerLast4 }
       : {}),
     isNew: false,
   }));
+}
+
+/**
+ * What the key field of one hop says under it.
+ *
+ * Three different facts, because there are three different states and the panel
+ * used to print the first sentence for all of them: `maskedBearer(undefined)`
+ * answers "저장된 키 없음", so a stored hop whose DTO carried no tail rendered
+ * "저장된 키 저장된 키 없음. 비워 두면 그대로 둡니다.", a sentence that says
+ * both things at once and instructs the reader to keep a key it just said does
+ * not exist.
+ */
+export function bearerHint(row: ChainDraftRow): string {
+  if (row.isNew) {
+    return "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다.";
+  }
+  if (!row.bearerConfigured) {
+    return "이 provider에는 저장된 키가 없습니다. 키를 입력해야 실제로 시도됩니다.";
+  }
+  if (row.bearerLast4 === undefined) {
+    return "키가 저장되어 있습니다. 비워 두면 그대로 둡니다.";
+  }
+  return `저장된 키 ${maskedBearer(row.bearerLast4)}. 비워 두면 그대로 둡니다.`;
+}
+
+/**
+ * What the head row can truthfully claim about itself.
+ *
+ * `ProviderCascade.attemptable` is `enabled && isUsable`, so a head with no key
+ * is NOT tried, and "가장 먼저 시도합니다." next to a 키 없음 chip announced an
+ * attempt the cascade will not make. `isUsable` only needs a key when the mode
+ * actually calls out to a provider, so a mock head keeps the plain sentence: a
+ * bundled mock answers turns without one, and telling a self-host default it is
+ * inert would be the same kind of false claim in the other direction.
+ */
+export function headClaim(entry: ProviderChainEntry): string {
+  if (!entry.enabled) {
+    return "꺼져 있어 시도하지 않습니다. 이 항목은 위의 provider 연결에서 바꿉니다.";
+  }
+  if (entry.mode === "external-hermes" && !entry.bearerConfigured) {
+    return "키가 없어 지금은 시도하지 않습니다. 위의 provider 연결에서 키를 저장하면 가장 먼저 시도합니다.";
+  }
+  return "가장 먼저 시도합니다. 이 항목은 위의 provider 연결에서 바꿉니다.";
 }
 
 /**
@@ -216,6 +296,7 @@ export function addDraftRow(
       bearer: "",
       mode,
       enabled: true,
+      bearerConfigured: false,
       isNew: true,
     },
   ];
@@ -248,7 +329,20 @@ export function patchDraftRow(
  */
 export interface DraftRowError {
   field: "baseUrl" | "bearer";
+  /**
+   * What is wrong. Only ever shown once the person has HAD a turn at the field:
+   * after it loses focus, or after they asked to save. A row that was created
+   * one keystroke ago has not failed at anything, and painting it red on
+   * creation uses the error state as a placeholder (SKILL §5: an error says what
+   * happened, and nothing has happened yet).
+   */
   message: string;
+  /**
+   * The same fact as a next action, for before that turn. It goes in the block
+   * hint, never on the untouched control, so an empty new row still explains
+   * why 연결 순서 저장 is unavailable without accusing the reader of an error.
+   */
+  next: string;
 }
 
 /**
@@ -262,18 +356,24 @@ export interface DraftRowError {
 export function draftRowError(row: ChainDraftRow): DraftRowError | null {
   const url = row.baseUrl.trim();
   if (url === "") {
-    return { field: "baseUrl", message: "provider 주소를 입력하세요." };
+    return {
+      field: "baseUrl",
+      message: "provider 주소를 입력하세요.",
+      next: "주소를 입력하면",
+    };
   }
   if (!/^https?:\/\/.+/.test(url)) {
     return {
       field: "baseUrl",
       message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+      next: "주소를 http:// 또는 https:// 로 시작하게 고치면",
     };
   }
   if (row.isNew && row.bearer.trim() === "") {
     return {
       field: "bearer",
       message: "새 provider는 키를 입력해야 저장됩니다.",
+      next: "키를 입력하면",
     };
   }
   return null;
@@ -289,6 +389,27 @@ export function draftErrors(
     if (error !== null) errors.set(row.key, error);
   }
   return errors;
+}
+
+/**
+ * Why 연결 순서 저장 is unavailable, said forwards, or null when it is available.
+ *
+ * The block used to print "위에 표시된 항목을 고쳐야 저장할 수 있습니다." while
+ * nothing was displayed above it, because the row errors only appear once the
+ * person has touched the field. This names the row instead, by attempt order,
+ * and says the one thing left to do.
+ */
+export function draftBlockedHint(
+  rows: readonly ChainDraftRow[],
+  errors: ReadonlyMap<string, DraftRowError>
+): string | null {
+  if (errors.size === 0) return null;
+  const index = rows.findIndex((row) => errors.has(row.key));
+  const error = index < 0 ? undefined : errors.get(rows[index].key);
+  if (error === undefined) return null;
+  const first = `${hopOrdinal(index + 1)} provider ${error.next} 저장할 수 있습니다.`;
+  if (errors.size === 1) return first;
+  return `${first} 채워야 할 항목은 모두 ${errors.size}개입니다.`;
 }
 
 /**
@@ -347,6 +468,21 @@ export function chainErrorCopy(error: unknown): string | null {
   return null;
 }
 
+/**
+ * The unsaved-changes line, which has to name the reason it cannot be acted on.
+ *
+ * Offline is the case that contradicted itself: `canSave` is false while the
+ * rail is down, so "연결 순서 저장을 눌러야 적용됩니다." instructed a person to
+ * press a button that does nothing. The route banner does say why, but it sits
+ * at the top of a panel this block is at the FOOT of, so by the time the hint
+ * is read the explanation has scrolled off screen.
+ */
+export function chainDirtyHint(offline: boolean): string {
+  return offline
+    ? "아직 저장되지 않았습니다. 지금은 서버에 연결되어 있지 않아 저장할 수 없고, 연결이 돌아오면 연결 순서 저장을 누르세요."
+    : "아직 저장되지 않았습니다. 연결 순서 저장을 눌러야 적용됩니다.";
+}
+
 /** Save failures the operator can act on, from the server's own 400 rules. */
 export function chainSaveMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -366,6 +502,11 @@ export function chainSaveMessage(error: unknown): string {
 /**
  * What the chain does right now, in one line.
  *
+ * Every number here has to be one the rows below it support. `fallbackCount` is
+ * recomputed from those rows by the parser for that reason, and a chain with an
+ * unreadable entry gets NO count at all: both counts would then describe hops
+ * the reader cannot see, and the panel is already saying it could not read them.
+ *
  * `attemptableCount` is the server's own number (enabled AND usable), so a
  * chain whose second hop is parked or half-written says how many providers a
  * turn would really try instead of counting rows on screen.
@@ -373,7 +514,7 @@ export function chainSaveMessage(error: unknown): string {
  * The two numbers count DIFFERENT things and the sentence has to admit it:
  * `fallbackCount` excludes position 0 (`entries.count - 1`) and
  * `attemptableCount` includes it (`ProviderCascade.attemptable` filters the
- * whole plan). Saying "폴백 2개, 시도되는 경로 2개" next to a row chipped 꺼둠
+ * whole plan). Saying "예비 2개, 시도되는 경로 2개" next to a row chipped 꺼둠
  * reads as "both fallbacks are live", which is the opposite of what happened.
  *
  * A body that omits the attemptable count gets the first sentence only. The
@@ -382,15 +523,18 @@ export function chainSaveMessage(error: unknown): string {
  * missing key would be exactly the false claim it was written to prevent.
  */
 export function chainSummary(chain: ProviderChain): string {
+  if (chain.unreadable !== undefined && chain.unreadable.length > 0) {
+    return "이 서버가 보낸 항목 중 일부를 읽지 못해, 예비 provider가 몇 개인지 말할 수 없습니다.";
+  }
   const fallbacks = chain.fallbackCount;
   if (fallbacks === 0) {
-    return "폴백 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다.";
+    return "예비 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다.";
   }
   const attemptable = chain.attemptableCount;
   if (attemptable === undefined) {
-    return `폴백 provider ${fallbacks}개를 두었습니다.`;
+    return `예비 provider ${fallbacks}개를 두었습니다.`;
   }
-  return `폴백 provider ${fallbacks}개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 ${attemptable}개입니다.`;
+  return `예비 provider ${fallbacks}개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 ${attemptable}개입니다.`;
 }
 
 // ---- probe results ----------------------------------------------------------
@@ -450,7 +594,7 @@ function isMockMode(entry: ProviderChainProbe): boolean {
  * The reason sentence leads, and the consequence follows it. The old order put
  * a fixed "응답하지 않아" in front of every fall_over, which contradicted itself
  * the moment the reason was 429 or 503: the provider DID answer, it answered
- * with a refusal ("응답하지 않아 다음 provider로 넘어갑니다. provider가 503로
+ * with a refusal ("응답하지 않아 다음 provider로 넘어갑니다. provider가 503으로
  * 답했습니다." was on screen).
  */
 function dispositionCopy(entry: ProviderChainProbe): {
@@ -503,6 +647,11 @@ function dispositionCopy(entry: ProviderChainProbe): {
  * `provider_status_<code>` is generated by the classifier, so it is matched by
  * shape. Anything unmapped is named as the server's own report rather than
  * printed bare, the same rule `providerTestMessage` follows.
+ *
+ * The status code takes its particle from how the number is SPOKEN, not from a
+ * fixed 로. "provider가 503로 답했습니다." was on screen, and it is wrong for
+ * every code closing on 0, 3 or 6 (영/삼/육), which is the set an operator meets
+ * most: 500, 503, 400, 403, 406. See lib/koreanParticle.directionParticle.
  */
 export function probeReasonCopy(reason: string | undefined): string {
   if (reason === undefined || reason === "") return "";
@@ -529,7 +678,7 @@ export function probeReasonCopy(reason: string | undefined): string {
     return "확인이 끝나지 않았습니다.";
   }
   const status = /^provider_status_(\d{3})$/.exec(reason);
-  if (status) return `provider가 ${status[1]}로 답했습니다.`;
+  if (status) return `provider가 ${attachDirection(status[1])} 답했습니다.`;
   return `서버가 보고한 사유: ${reason}`;
 }
 

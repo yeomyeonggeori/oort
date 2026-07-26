@@ -74,6 +74,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   const [mode, setMode] = useState("external-hermes");
   const [formError, setFormError] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
+  // The chain block below owns its own draft, and the probe table above it is
+  // numbered by the SAVED order. When the two disagree the table says so
+  // rather than letting one screen carry two meanings of "3차".
+  const [chainPending, setChainPending] = useState(false);
 
   const invalidate = () =>
     client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
@@ -355,6 +359,8 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
           <ChainProbeResult
             cascadeOk={probe.cascadeOk === true}
             entries={probeEntries}
+            checkedAtMs={probe.checkedAtMs}
+            chainPending={chainPending}
           />
         ) : (
           <p
@@ -366,7 +372,13 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
           </p>
         ))}
 
-      <AiLinkChain offline={offline} />
+      {/* A saved chain makes the table above describe a cascade that no longer
+          exists, exactly as save/unlink do for the singleton. Same clear. */}
+      <AiLinkChain
+        offline={offline}
+        onSaved={() => setProbe(null)}
+        onPendingChange={setChainPending}
+      />
     </SectionShell>
   );
 }
