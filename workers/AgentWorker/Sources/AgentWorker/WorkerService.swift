@@ -318,6 +318,7 @@ struct WorkerService: Service {
         var accumulatedText = ""
         var usage: (prompt: Int, completion: Int, cached: Int, reasoning: Int)?
         var sawError: String?
+        var streamFailure: (any Error)?
         var handledWorkTool = false
         var cancelledByLedger = false
 
@@ -514,6 +515,7 @@ struct WorkerService: Service {
                 }
             }
         } catch {
+            streamFailure = error
             sawError = "stream error: \(error)"
         }
 
@@ -552,8 +554,22 @@ struct WorkerService: Service {
         if let err = sawError {
             await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .error, error: err)
             await publishStatus(agentRealtime, runID: p.runID, status: .error, detail: err)
-            // Streaming failures are transient at the transport level → requeue.
-            await requeueJob(job, reason: err)
+            switch ProviderCascadeJobDisposition.resolve(streamFailure) {
+            case .requeue:
+                // Only every-hop availability exhaustion is transient. The typed
+                // cascade failure is what prevents 4xx/cancel/partial-output turns
+                // from being retried as if they were network outages.
+                await requeueJob(job, reason: err)
+            case .markFailed:
+                // Match the exhaustion terminal path's user-facing failure notice;
+                // immediate failure must not leave the turn silently absent.
+                await finalizeStreamingMessage(
+                    streamMessageID,
+                    job: job,
+                    body: Self.degradedProviderMessage(reason: err)
+                )
+                await markJobFailed(job.id, reason: err)
+            }
             return
         }
 
@@ -1026,6 +1042,7 @@ struct WorkerService: Service {
             messages: messages,
             tools: tools,
             maxTokens: maxTokens,
+            totalTimeout: config.providerCascadeTotalTimeout,
             makeTransport: { transport(for: $0) },
             onFallback: { from, to, reason in
                 await recordCascadeFallback(
