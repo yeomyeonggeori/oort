@@ -53,9 +53,10 @@ struct HermesTransport: Sendable {
 
     // MARK: - Public API (AgentTransport contract, L4 §6.1)
 
-    /// Invoke the model and stream `AgentEvent`s. Streaming first; on transport or
-    /// SSE-parse failure, transparently falls back to the non-stream path so
-    /// tool_calls are never dropped (L4 §6.3).
+    /// Invoke the model and stream `AgentEvent`s. Streaming first; an untouched
+    /// stream may fall back to non-stream for parse/protocol errors only. Once a
+    /// content event was emitted, replaying the prompt would append a whole second
+    /// response to an already-visible partial answer.
     ///
     /// Returns an `AsyncThrowingStream` the worker loop consumes to drive
     /// `agent.partial` publishes + the final `message` write.
@@ -63,24 +64,35 @@ struct HermesTransport: Sendable {
         model: String,
         messages: [ChatMessage],
         tools: JSONValue?,
-        maxTokens: Int?
+        maxTokens: Int?,
+        /// The remaining *cascade-wide* wall-clock allowance, if this invocation
+        /// belongs to a provider chain. Nil keeps the legacy 120s transport limit.
+        timeout: Duration? = nil
     ) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                let emissionTracker = ContentEmissionTracker()
                 do {
                     try await streamCompletion(
                         model: model, messages: messages, tools: tools,
-                        maxTokens: maxTokens, into: continuation)
+                        maxTokens: maxTokens, timeout: timeout,
+                        didEmitContent: { emissionTracker.mark() }, into: continuation)
                     continuation.finish()
                 } catch {
-                    // SSE path failed → non-stream fallback (L4 §6.3 mandatory path).
+                    // A non-stream replay is safe only before any text/tool/usage
+                    // event, and only for a parse/protocol failure. Availability
+                    // failures are for the cascade to classify and fall over.
+                    guard !emissionTracker.hasEmitted, Self.isProtocolFailure(error) else {
+                        continuation.finish(throwing: error)
+                        return
+                    }
                     logger.warning("hermes stream failed; falling back to non-stream", metadata: [
                         "error": .string(String(describing: error)),
                     ])
                     do {
                         try await nonStreamCompletion(
                             model: model, messages: messages, tools: tools,
-                            maxTokens: maxTokens, into: continuation)
+                            maxTokens: maxTokens, timeout: timeout, into: continuation)
                         continuation.finish()
                     } catch {
                         continuation.yield(.error("hermes fallback failed: \(error)"))
@@ -99,6 +111,8 @@ struct HermesTransport: Sendable {
         messages: [ChatMessage],
         tools: JSONValue?,
         maxTokens: Int?,
+        timeout: Duration?,
+        didEmitContent: @escaping @Sendable () -> Void,
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws {
         let body = ChatRequest(
@@ -113,7 +127,7 @@ struct HermesTransport: Sendable {
         request.headers.add(name: "Authorization", value: "Bearer \(apiKey)")
         request.body = .bytes(ByteBuffer(data: try Self.encoder.encode(body)))
 
-        let response = try await httpClient.execute(request, timeout: .seconds(120))
+        let response = try await httpClient.execute(request, timeout: Self.requestTimeout(timeout))
         guard response.status == .ok else {
             throw TransportError.httpStatus(Int(response.status.code))
         }
@@ -133,27 +147,30 @@ struct HermesTransport: Sendable {
                 if dataLine == "[DONE]" {
                     // Flush any buffered tool calls (defensive: usually flushed by
                     // finish_reason, but [DONE] is the hard stop).
-                    flushToolCalls(&toolCallBuffers, into: continuation)
+                    flushToolCalls(&toolCallBuffers, didEmitContent: didEmitContent, into: continuation)
                     return
                 }
                 try parseStreamChunk(
-                    dataLine, toolCalls: &toolCallBuffers, into: continuation)
+                    dataLine, toolCalls: &toolCallBuffers,
+                    didEmitContent: didEmitContent, into: continuation)
             }
         }
         // Stream ended without [DONE] (some gateways just close) → flush.
-        flushToolCalls(&toolCallBuffers, into: continuation)
+        flushToolCalls(&toolCallBuffers, didEmitContent: didEmitContent, into: continuation)
     }
 
     /// Decode one `chat.completion.chunk` JSON line and emit deltas.
     private func parseStreamChunk(
         _ json: String,
         toolCalls: inout [Int: (id: String, name: String, args: String)],
+        didEmitContent: @escaping @Sendable () -> Void,
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) throws {
         let chunk = try Self.decoder.decode(ChatCompletionChunk.self, from: Data(json.utf8))
 
         // usage (last chunk only, when include_usage=true) → reconcile basis (§8.5).
         if let u = chunk.usage {
+            didEmitContent()
             continuation.yield(.usage(
                 promptTokens: u.prompt_tokens ?? 0,
                 completionTokens: u.completion_tokens ?? 0,
@@ -164,6 +181,7 @@ struct HermesTransport: Sendable {
         guard let choice = chunk.choices?.first else { return }
 
         if let content = choice.delta?.content, !content.isEmpty {
+            didEmitContent()
             continuation.yield(.textDelta(content))
         }
 
@@ -180,15 +198,17 @@ struct HermesTransport: Sendable {
         }
 
         if let reason = choice.finish_reason, reason == "tool_calls" {
-            flushToolCalls(&toolCalls, into: continuation)
+            flushToolCalls(&toolCalls, didEmitContent: didEmitContent, into: continuation)
         }
     }
 
     private func flushToolCalls(
         _ toolCalls: inout [Int: (id: String, name: String, args: String)],
+        didEmitContent: @escaping @Sendable () -> Void,
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) {
         for (_, tc) in toolCalls.sorted(by: { $0.key < $1.key }) where !tc.name.isEmpty {
+            didEmitContent()
             continuation.yield(.toolCall(id: tc.id, name: tc.name, arguments: tc.args))
         }
         toolCalls.removeAll()
@@ -201,6 +221,7 @@ struct HermesTransport: Sendable {
         messages: [ChatMessage],
         tools: JSONValue?,
         maxTokens: Int?,
+        timeout: Duration?,
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws {
         let body = ChatRequest(
@@ -213,7 +234,7 @@ struct HermesTransport: Sendable {
         request.headers.add(name: "Authorization", value: "Bearer \(apiKey)")
         request.body = .bytes(ByteBuffer(data: try Self.encoder.encode(body)))
 
-        let response = try await httpClient.execute(request, timeout: .seconds(120))
+        let response = try await httpClient.execute(request, timeout: Self.requestTimeout(timeout))
         guard response.status == .ok else {
             throw TransportError.httpStatus(Int(response.status.code))
         }
@@ -245,6 +266,38 @@ struct HermesTransport: Sendable {
 
     enum TransportError: Error, Sendable {
         case httpStatus(Int)
+    }
+
+    private static func isProtocolFailure(_ error: any Error) -> Bool {
+        error is DecodingError
+    }
+
+    private static func requestTimeout(_ budget: Duration?) -> TimeAmount {
+        guard let budget else { return .seconds(120) }
+        let components = budget.components
+        let milliseconds = components.seconds * 1_000
+            + components.attoseconds / 1_000_000_000_000_000
+        return .milliseconds(max(milliseconds, 1))
+    }
+}
+
+/// `HermesTransport.invoke`'s producer and parser closures are Sendable. The
+/// parser is the only writer, but this lock keeps the fallback guard race-free
+/// without turning the hot SSE path into an actor hop.
+private final class ContentEmissionTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var emitted = false
+
+    func mark() {
+        lock.lock()
+        emitted = true
+        lock.unlock()
+    }
+
+    var hasEmitted: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return emitted
     }
 }
 

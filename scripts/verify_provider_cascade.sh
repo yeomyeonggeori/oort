@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_provider_cascade.sh — MOMO-622 / ADR-0135 D1 provider cascade gate
+# scripts/verify_provider_cascade.sh — MOMO-630 provider cascade safety gate
 #
 # Two layers:
 #   1. Worker gate (always): migration 042 presence + FORCE RLS, schema_v0
@@ -88,10 +88,10 @@ new_uuid() { python3 -c 'import uuid; print(uuid.uuid4())'; }
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 # Worktree ports (.conductor/local.env). Override per environment if needed.
-API_PORT="${PROVIDER_CASCADE_API_PORT:-24310}"
-CENTRIFUGO_PORT="${PROVIDER_CASCADE_CENTRIFUGO_PORT:-24311}"
-PG_PORT="${PROVIDER_CASCADE_POSTGRES_PORT:-24312}"
-HERMES_PORT="${PROVIDER_CASCADE_HERMES_PORT:-24313}"
+API_PORT="${PROVIDER_CASCADE_API_PORT:-28330}"
+CENTRIFUGO_PORT="${PROVIDER_CASCADE_CENTRIFUGO_PORT:-28331}"
+PG_PORT="${PROVIDER_CASCADE_POSTGRES_PORT:-28332}"
+HERMES_PORT="${PROVIDER_CASCADE_HERMES_PORT:-28333}"
 PROJECT="${PROVIDER_CASCADE_PROJECT:-momo622cascade}"
 BOOT_TIMEOUT="${PROVIDER_CASCADE_BOOT_TIMEOUT:-2400}"
 ASSERT_TIMEOUT="${PROVIDER_CASCADE_ASSERT_TIMEOUT:-240}"
@@ -591,6 +591,25 @@ PROPAGATE_AUDIT="$(printf "SELECT count(*) FROM audit_log WHERE action='provider
 [ "$PROPAGATE_AUDIT" = "0" ] \
   || fail "B6 a 401 recorded $PROPAGATE_AUDIT fallback rows — 4xx must propagate, never fall over"
 log "PASS B6: 401 on hop 0 propagated (run failed with $RUN_ERROR, 0 fallback rows) — hop 1's budget untouched"
+
+# The cascade's typed propagate disposition must reach the worker terminal
+# branch. A 401 used to be requeued (up to WORKER_MAX_ATTEMPTS); this proves the
+# same first claim is terminal and no retry amplification is pending.
+PROPAGATE_JOB="$(run_sql -tA <<SQL
+SELECT json_build_object('status', status, 'attempts', attempts)::text
+  FROM outbox
+ WHERE kind = 'agent_job'
+   AND payload->>'run_id' = '$PROPAGATE_RUN'
+ ORDER BY id DESC
+ LIMIT 1;
+SQL
+)"
+printf '%s' "$PROPAGATE_JOB" | jq -e '
+    .status == "failed" and .attempts == 1
+  ' >/dev/null || {
+    fail "B6 401 agent_job was requeued or claimed more than once: $PROPAGATE_JOB"
+  }
+log "PASS B6: 401 terminal failure leaves agent_job status=failed, attempts=1 (no requeue)"
 
 # =============================================================================
 # C. ADR-0004: plaintext bearers never reach the logs
