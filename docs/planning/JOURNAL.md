@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-26 (Fable Wave C1 랜딩 + C2 발진) · ADR-0134·0135 엔진층 완성
+- **C1 랜딩(track/engine #812~815)**: 808 routing+effort(041) · 809 provider_link_chain+캐스캐이드(042) · 810 quota_snapshot(043) · 811 hermes adapter 다형화. 순차 리베이스, STATUS.md 합집합 1건. **병합 팁 스모크**: 마이그레이션 43 유니크·server 314 tests·verify_run_routing 32 PASS(docker).
+- 설계 판단 기록: 809 — position0은 싱글톤 무이전 참조(이중 저장 드리프트 방지), 스트림 개시 후 실패는 전파(타임라인 중복 방지), connection-refused 폴백 ~30s 레이턴시 특성. 810 — window 예약어→quota_window(와이어는 window 유지), 신규 scope provider:quota:write는 grantable-only. 811 — local_gate 미등록 공백 자가 발견·수리.
+- 809 verifier가 자기 거짓 초록(캐시 미갱신) 잡고 단정 강화 — 검증 문화 정착 증거.
+- **ENGINE_HANDOFF X-14** ready 등록(웹 소비면 3종). **C2 발진(wf_379bafbc)**: 816 엔진 소형(profile effort_pref writer+멘션 routing — 808 미구현분) · 817 프로필 다이얼로그+컴포저 피커(537 합류) · 818 체인 UI+전환 표기 · 819 잔여량 게이지. 웹 3장은 계약 픽스처 기반(momowebqa 엔진층 미반영) — **라이브 통합은 track/engine main 반영 후**.
+- 대기: E2B 키·크레딧(0136), C2 후 main 동기화 승인.
+
+
 ## 2026-07-26 (Fable Wave B main·next.9 + ADR Accept + Wave C1 발진)
 - **Wave B main 동기화**(#807, 성재 승인) → 검증 그린(613 tests) → **next.9 발행+기본 다운로드 갱신**(sha 9a5bcfec…) — 관전 패널·터미널·diff 카드가 사용자 빌드 도달.
 - **ADR 0134·0135·0136 Accepted**(성재 "둘다 승인할게").
