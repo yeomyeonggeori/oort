@@ -1,5 +1,9 @@
 # momo 진행 현황
 
+## MOMO-631 iOS message send camelCase repair + live-wire gate (#826, 2026-07-27)
+
+- `IOSSendMessageRequest` now emits the server's closed-world `clientMsgId`/`runId` keys; `scripts/verify_ios_wire.sh` adds the isolated compose + disposable-fixture gate that drives the public MomoiOSKit login → send → history → identical-id replay path. Docker execution and the intentional pre-fix red proof remain orchestrator-owned in this worker sandbox.
+
 ## MOMO-625 profile effort_pref writer + 멘션 경로 routing (ADR-0134 D1·D3, #816, 2026-07-26)
 
 - 배경: MOMO-621(#808)은 `agent_profile.effort_pref` 컬럼(마이그레이션 041)과 요청 단위 `routing`을 **run 생성 표면 하나에만** 붙였다. 남은 두 구멍이 이번 범위 — ①`effort_pref`를 쓰는 REST writer가 없어 SQL로만 채울 수 있었고 ②에이전트 run을 시작하는 **다른** 표면인 멘션 경로에는 요청 단위 오버라이드가 없었다. 마이그레이션 신규 없음(041 컬럼 기존재).

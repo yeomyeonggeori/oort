@@ -116,8 +116,10 @@ struct MemberDTO: ResponseEncodable {
 /// `routting` block would be silently dropped and the run would quietly use the
 /// inherited model — exactly the invisible failure D1 legislates against. Every
 /// first-party sender (macOS `MomoServerRESTChatBackend`, iOS
-/// `MomoServerConversationClient`, `adapters/hermes/momo_adapter.py`) already
-/// sends only these keys.
+/// `MomoServerConversationClient`, `adapters/hermes/momo_adapter.py`) sends
+/// only these keys. `scripts/verify_ios_wire.sh` keeps the iOS part of that
+/// assertion honest by logging in through MomoiOSKit and sending a real
+/// `IOSSendMessageRequest` to this closed-world decoder.
 struct SendMessageRequest: Decodable {
     static let allowedKeys = Set([
         "clientMsgId", "rootId", "type", "body", "props", "runId",
