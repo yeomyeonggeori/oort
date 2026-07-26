@@ -41,6 +41,9 @@ struct Config: Sendable {
     // Short TTL in front of the per-job read+decrypt; a GUI change is picked up on
     // the first job after this window (see ProviderLinkCache).
     var providerLinkCacheTTL: Duration = .milliseconds(2_000)
+    /// One cap shared by every hop in a provider cascade. This prevents a long
+    /// chain from turning a 120s per-hop transport timeout into a long worker hold.
+    var providerCascadeTotalTimeout: Duration = .seconds(60)
 
     // ---- momo control-plane (ADR-0114 / MOMO-486) ----
     // Raw per-agent bearer remains process-local. The server stores only its
@@ -118,6 +121,9 @@ struct Config: Sendable {
                 .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 },
             providerLinkCacheTTL: .milliseconds(
                 max(envInt("PROVIDER_LINK_CACHE_TTL_MS", 2_000), 0)
+            ),
+            providerCascadeTotalTimeout: .milliseconds(
+                max(envInt("PROVIDER_CASCADE_TOTAL_TIMEOUT_MS", 60_000), 1_000)
             ),
             momoAPIURL: env("MOMO_API_URL", "http://localhost:8080"),
             momoAgentToken: ProcessInfo.processInfo.environment["MOMO_AGENT_TOKEN"]

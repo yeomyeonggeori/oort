@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-630 캐스캐이드 실패 분기 + 총 예산 (#825, 2026-07-27)
+
+- `ProviderCascadeRunner`는 이제 `ProviderCascadeFailure(reason, disposition, underlying)`를 경계 밖으로 전달한다. 워커는 **모든 홉의 가용성 소진만** 재큐잉하며, 4xx·cancelled·undecodable·부분 출력 후 실패·총 예산 초과는 `markJobFailed`와 동일한 사용자 실패 안내로 끝낸다. 원본 오류는 진단 문자열에 보존되어 401 등 원인을 `agent_run.error`에서 확인할 수 있다.
+- `PROVIDER_CASCADE_TOTAL_TIMEOUT_MS`(기본 60000ms)는 체인 전체 wall-clock 상한이다. 각 hop은 남은 시간만 요청 timeout으로 받고, 남은 hop 전에 또는 in-flight timeout 뒤 예산이 소진되면 `provider_cascade_total_timeout`으로 끝난다. Hermes 논스트림 재요청은 콘텐츠를 아직 내보내지 않은 decoding/protocol 실패로 한정해 부분 출력+전체 답변의 본문 오염을 막는다.
+- 검증: focused `ProviderCascadeTests`에 propagate/content-emitted/availability-exhausted/total-budget worker terminal 분기와 실제 소켓 회귀를 추가했고, `scripts/verify_provider_cascade.sh` B6은 401 job의 `status=failed, attempts=1`을 확인한다. Docker runtime gate는 오케스트레이터 실행 대상: `PROVIDER_CASCADE_RUN_DOCKER=1 scripts/verify_provider_cascade.sh` (기본 포트 28330–28333).
+
 ## MOMO-631 iOS message send camelCase repair + live-wire gate (#826, 2026-07-27)
 
 - `IOSSendMessageRequest` now emits the server's closed-world `clientMsgId`/`runId` keys; `scripts/verify_ios_wire.sh` adds the isolated compose + disposable-fixture gate that drives the public MomoiOSKit login → send → history → identical-id replay path. Docker execution and the intentional pre-fix red proof remain orchestrator-owned in this worker sandbox.

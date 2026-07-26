@@ -222,6 +222,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `RELAY_MAX_ATTEMPTS` | relay | `8` | 초과 시 `status='failed'`. |
 | `WORKER_POLL_INTERVAL_MS` | worker | `300` | agent_job 폴링 주기. |
 | `WORKER_MAX_ATTEMPTS` | worker | `8` | 초과 시 `status='failed'`. |
+| `PROVIDER_CASCADE_TOTAL_TIMEOUT_MS` | worker | `60000` | provider cascade 전체 wall-clock 상한(최소 1000ms). 각 홉은 남은 시간만 사용하며, 초과·4xx·부분 출력 실패는 재큐잉하지 않는다. |
 | `MEMORY_EXTRACTION_ENABLED` | worker | `1` | ADR-0129 채널 워터마크 기반 메모리 추출 루프. `0`이면 신규 추출만 멈추며 기존 원장은 보존한다. 정책-off 삭제는 관리자 REST가 수행한다. |
 | `MEMORY_EXTRACTION_POLL_INTERVAL_MS` | worker | `5000` | 추출 가능한 채널을 다시 찾는 주기(최소 100ms). |
 | `MEMORY_EXTRACTION_BATCH_SIZE` | worker | `50` | 채널별 한 번에 읽는 메시지 수(1..200). |

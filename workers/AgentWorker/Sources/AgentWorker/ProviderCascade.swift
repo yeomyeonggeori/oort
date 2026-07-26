@@ -276,6 +276,50 @@ enum ProviderCascadeStep: Sendable, Equatable {
     case surface(reason: String)
 }
 
+/// The typed boundary between the cascade and `WorkerService`.
+///
+/// A cascade decision is a safety decision, not merely a log message: collapsing
+/// it into `String(describing: error)` made a bad credential indistinguishable
+/// from every provider being unavailable, and the worker retried both. Keep the
+/// original error for diagnostics (notably the HTTP status), while carrying the
+/// terminal disposition that the worker must obey.
+struct ProviderCascadeFailure: Error, @unchecked Sendable, CustomStringConvertible {
+    enum Disposition: String, Sendable, Equatable {
+        /// 4xx, cancellation, or an undecodable response: do not retry this job.
+        case propagate
+        /// A hop emitted durable-looking content before failing: do not replay it.
+        case contentAlreadyEmitted = "content_already_emitted"
+        /// Every usable hop was unavailable: this is the sole retryable outcome.
+        case availabilityExhausted = "availability_exhausted"
+        /// The chain exhausted its turn-wide wall-clock allowance.
+        case totalBudgetExceeded = "total_budget_exceeded"
+    }
+
+    let reason: String
+    let disposition: Disposition
+    /// Kept intact so run diagnostics retain the original HTTP status/error.
+    let underlying: (any Error)?
+
+    var description: String {
+        let cause = underlying.map { ": \(String(describing: $0))" } ?? ""
+        return "provider cascade \(disposition.rawValue) (\(reason))\(cause)"
+    }
+}
+
+/// The worker's terminal rule is deliberately pure and testable without a
+/// database: only a fully exhausted availability cascade may be requeued.
+enum ProviderCascadeJobDisposition: Sendable, Equatable {
+    case markFailed
+    case requeue
+
+    static func resolve(_ failure: (any Error)?) -> ProviderCascadeJobDisposition {
+        guard let cascade = failure as? ProviderCascadeFailure,
+              cascade.disposition == .availabilityExhausted
+        else { return .markFailed }
+        return .requeue
+    }
+}
+
 /// Drives a turn across the cascade. Kept free of `WorkerService`'s Postgres /
 /// Centrifugo dependencies so the fall-over behavior can be measured against real
 /// HTTP providers in unit tests; `WorkerService.cascadingInvoke` supplies the
@@ -293,13 +337,27 @@ enum ProviderCascadeRunner {
         messages: [HermesTransport.ChatMessage],
         tools: JSONValue?,
         maxTokens: Int?,
+        /// A turn-wide deadline, not a per-hop timeout. A new hop only receives
+        /// the remaining allowance, so a long chain cannot multiply occupancy.
+        totalTimeout: Duration = .seconds(60),
         makeTransport: @escaping TransportFactory,
         onFallback: @escaping FallbackRecorder
     ) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                let clock = ContinuousClock()
+                let startedAt = clock.now
                 var index = 0
                 while index < hops.count {
+                    let elapsed = startedAt.duration(to: clock.now)
+                    guard elapsed < totalTimeout else {
+                        continuation.finish(throwing: ProviderCascadeFailure(
+                            reason: "provider_cascade_total_timeout",
+                            disposition: .totalBudgetExceeded,
+                            underlying: nil
+                        ))
+                        return
+                    }
                     let hop = hops[index]
                     // A transport-authored `.error` is held back: if this hop turns
                     // out to be a fall-over, that error is superseded by the next
@@ -309,9 +367,11 @@ enum ProviderCascadeRunner {
                     var failure: (any Error)?
 
                     do {
+                        let remaining = totalTimeout - elapsed
                         let stream = makeTransport(hop).invoke(
                             model: model, messages: messages,
-                            tools: tools, maxTokens: maxTokens
+                            tools: tools, maxTokens: maxTokens,
+                            timeout: remaining
                         )
                         for try await event in stream {
                             switch event {
@@ -336,6 +396,18 @@ enum ProviderCascadeRunner {
                         return
                     }
 
+                    // The in-flight request is given only the remaining allowance,
+                    // but it may report its timeout as a generic transport error.
+                    // Preserve the stricter turn-wide semantic at this boundary.
+                    guard startedAt.duration(to: clock.now) < totalTimeout else {
+                        continuation.finish(throwing: ProviderCascadeFailure(
+                            reason: "provider_cascade_total_timeout",
+                            disposition: .totalBudgetExceeded,
+                            underlying: failure
+                        ))
+                        return
+                    }
+
                     let next = index + 1
                     switch ProviderCascade.step(
                         failure: failure,
@@ -345,9 +417,22 @@ enum ProviderCascadeRunner {
                     case .fallOver(let reason):
                         await onFallback(hop, hops[next], reason)
                         index = next
-                    case .surface:
+                    case .surface(let reason):
                         if let heldError { continuation.yield(.error(heldError)) }
-                        continuation.finish(throwing: failure)
+                        let decision = ProviderCascadeClassifier.decide(error: failure)
+                        let disposition: ProviderCascadeFailure.Disposition
+                        if emittedContent {
+                            disposition = .contentAlreadyEmitted
+                        } else if decision.isFallOver {
+                            disposition = .availabilityExhausted
+                        } else {
+                            disposition = .propagate
+                        }
+                        continuation.finish(throwing: ProviderCascadeFailure(
+                            reason: reason,
+                            disposition: disposition,
+                            underlying: failure
+                        ))
                         return
                     }
                 }

@@ -301,11 +301,18 @@ final class ProviderCascadeTests: XCTestCase {
                                baseURL: live.baseURL, bearer: "sk-good"),
         ])
 
-        XCTAssertNotNil(outcome.thrownError, "a 401 must surface, not be swallowed")
+        let failure = try XCTUnwrap(outcome.thrownError as? ProviderCascadeFailure)
+        XCTAssertEqual(failure.reason, "provider_status_401")
+        XCTAssertEqual(failure.disposition, .propagate)
+        XCTAssertTrue(failure.description.contains("401"),
+                      "the underlying HTTP status must remain diagnosable")
         XCTAssertEqual(outcome.text, "")
         XCTAssertTrue(outcome.fallbacks.isEmpty, "a 4xx must not record a transition")
         let secondHopRequests = await live.requestCount()
         XCTAssertEqual(secondHopRequests, 0, "the second provider must never be spent on a 4xx")
+        let unauthorizedRequests = await unauthorized.requestCount()
+        XCTAssertEqual(unauthorizedRequests, 1,
+                       "a 401 must not trigger HermesTransport's non-stream replay")
     }
 
     /// With no chain configured the cascade is a single hop and a 5xx surfaces —
@@ -318,8 +325,107 @@ final class ProviderCascadeTests: XCTestCase {
             ProviderCascadeHop(position: 0, source: .environment,
                                baseURL: failing.baseURL, bearer: "sk-only"),
         ])
-        XCTAssertNotNil(outcome.thrownError)
+        let failure = try XCTUnwrap(outcome.thrownError as? ProviderCascadeFailure)
+        XCTAssertEqual(failure.disposition, .availabilityExhausted)
         XCTAssertTrue(outcome.fallbacks.isEmpty)
+    }
+
+    /// This is the WorkerService terminal branch in pure form: none of the
+    /// cascade's explicitly non-retryable outcomes may reach `requeueJob`.
+    func testWorkerTerminalDispositionRequeuesOnlyAvailabilityExhaustion() {
+        let cause = HermesTransport.TransportError.httpStatus(401)
+        XCTAssertEqual(
+            ProviderCascadeJobDisposition.resolve(ProviderCascadeFailure(
+                reason: "provider_status_401", disposition: .propagate, underlying: cause
+            )),
+            .markFailed
+        )
+        XCTAssertEqual(
+            ProviderCascadeJobDisposition.resolve(ProviderCascadeFailure(
+                reason: "content_already_emitted",
+                disposition: .contentAlreadyEmitted, underlying: cause
+            )),
+            .markFailed
+        )
+        XCTAssertEqual(
+            ProviderCascadeJobDisposition.resolve(ProviderCascadeFailure(
+                reason: "provider_unreachable",
+                disposition: .availabilityExhausted, underlying: cause
+            )),
+            .requeue
+        )
+        XCTAssertEqual(
+            ProviderCascadeJobDisposition.resolve(ProviderCascadeFailure(
+                reason: "provider_cascade_total_timeout",
+                disposition: .totalBudgetExceeded, underlying: nil
+            )),
+            .markFailed
+        )
+
+        // An unclassified failure is the interesting case, because before MOMO-630
+        // it was the *only* case and it requeued. A stream that reports `.error`
+        // without throwing leaves no typed failure behind (today unreachable:
+        // HermesTransport always follows `.error` with `finish(throwing:)`), and a
+        // future transport that changes that must not silently make every turn
+        // retry-amplify again. Unclassified is therefore terminal on purpose.
+        XCTAssertEqual(ProviderCascadeJobDisposition.resolve(nil), .markFailed)
+        XCTAssertEqual(
+            ProviderCascadeJobDisposition.resolve(HermesTransport.TransportError.httpStatus(503)),
+            .markFailed
+        )
+    }
+
+    /// A malformed SSE payload after a text delta must surface the typed
+    /// content-already-emitted disposition and must not replay the prompt through
+    /// HermesTransport's non-stream fallback.
+    func testPartialContentFailureDoesNotReplayOrFallOver() async throws {
+        let partial = try MockProvider(behavior: .streamTextThenMalformed("first fragment"))
+        let live = try MockProvider(behavior: .streamText("must never be reached"))
+        defer { partial.shutdown(); live.shutdown() }
+
+        let outcome = try await runCascade(hops: [
+            ProviderCascadeHop(position: 0, source: .providerLink,
+                               baseURL: partial.baseURL, bearer: "sk-a"),
+            ProviderCascadeHop(position: 1, source: .chain,
+                               baseURL: live.baseURL, bearer: "sk-b"),
+        ])
+
+        let failure = try XCTUnwrap(outcome.thrownError as? ProviderCascadeFailure)
+        XCTAssertEqual(failure.disposition, .contentAlreadyEmitted)
+        XCTAssertEqual(outcome.text, "first fragment")
+        XCTAssertTrue(outcome.fallbacks.isEmpty)
+        let partialRequests = await partial.requestCount()
+        XCTAssertEqual(partialRequests, 1,
+                       "content already emitted means no non-stream replay")
+        let liveRequests = await live.requestCount()
+        XCTAssertEqual(liveRequests, 0,
+                       "content already emitted means no next provider")
+    }
+
+    /// The total time belongs to the entire chain. Time spent recording the
+    /// first fallback consumes the remaining allowance, so hop 1 is never tried.
+    func testTotalCascadeBudgetSkipsRemainingHops() async throws {
+        let unavailable = try MockProvider(behavior: .status(503))
+        let live = try MockProvider(behavior: .streamText("must never be reached"))
+        defer { unavailable.shutdown(); live.shutdown() }
+
+        let outcome = try await runCascade(
+            hops: [
+                ProviderCascadeHop(position: 0, source: .providerLink,
+                                   baseURL: unavailable.baseURL, bearer: "sk-a"),
+                ProviderCascadeHop(position: 1, source: .chain,
+                                   baseURL: live.baseURL, bearer: "sk-b"),
+            ],
+            totalTimeout: .milliseconds(5),
+            fallbackDelay: .milliseconds(20)
+        )
+
+        let failure = try XCTUnwrap(outcome.thrownError as? ProviderCascadeFailure)
+        XCTAssertEqual(failure.reason, "provider_cascade_total_timeout")
+        XCTAssertEqual(failure.disposition, .totalBudgetExceeded)
+        let liveRequests = await live.requestCount()
+        XCTAssertEqual(liveRequests, 0,
+                       "the total budget must prevent the remaining hop request")
     }
 
     // MARK: - Cascade driver
@@ -330,7 +436,11 @@ final class ProviderCascadeTests: XCTestCase {
         var thrownError: (any Error)?
     }
 
-    private func runCascade(hops: [ProviderCascadeHop]) async throws -> CascadeOutcome {
+    private func runCascade(
+        hops: [ProviderCascadeHop],
+        totalTimeout: Duration = .seconds(60),
+        fallbackDelay: Duration? = nil
+    ) async throws -> CascadeOutcome {
         let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
         let logger = self.logger
         let recorder = FallbackCollector()
@@ -341,6 +451,7 @@ final class ProviderCascadeTests: XCTestCase {
             messages: [HermesTransport.ChatMessage(role: "user", content: "hi")],
             tools: nil,
             maxTokens: 64,
+            totalTimeout: totalTimeout,
             makeTransport: { hop in
                 HermesTransport(
                     httpClient: httpClient, baseURL: hop.baseURL,
@@ -351,6 +462,9 @@ final class ProviderCascadeTests: XCTestCase {
                 await recorder.record(
                     FallbackRecord(from: from.position, to: to.position, reason: reason)
                 )
+                if let fallbackDelay {
+                    try? await Task.sleep(for: fallbackDelay)
+                }
             }
         )
 
@@ -440,6 +554,9 @@ final class MockProvider: @unchecked Sendable {
         /// Accept the request and close the connection without answering — the
         /// "무응답" case, deterministic and immediate.
         case hangUp
+        /// Yield text, then a malformed SSE frame. This exercises the regression:
+        /// content already visible to the user must not trigger a full replay.
+        case streamTextThenMalformed(String)
     }
 
     private let group: MultiThreadedEventLoopGroup
@@ -522,6 +639,26 @@ private final class MockProviderHandler: ChannelInboundHandler, @unchecked Senda
             [{"delta":{"content":"\(text)"},"finish_reason":null}]}
             """
             let payload = "data: \(chunk)\n\ndata: [DONE]\n\n"
+            let head = HTTPResponseHead(
+                version: .http1_1,
+                status: .ok,
+                headers: [
+                    "Content-Type": "text/event-stream",
+                    "Content-Length": "\(payload.utf8.count)",
+                ]
+            )
+            context.write(wrapOutboundOut(.head(head)), promise: nil)
+            var body = context.channel.allocator.buffer(capacity: payload.utf8.count)
+            body.writeString(payload)
+            context.write(wrapOutboundOut(.body(.byteBuffer(body))), promise: nil)
+            context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
+
+        case .streamTextThenMalformed(let text):
+            let chunk = """
+            {"id":"c","object":"chat.completion.chunk","choices":\
+            [{"delta":{"content":"\(text)"},"finish_reason":null}]}
+            """
+            let payload = "data: \(chunk)\n\ndata: {not-json}\n\n"
             let head = HTTPResponseHead(
                 version: .http1_1,
                 status: .ok,
