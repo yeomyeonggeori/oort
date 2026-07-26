@@ -12,7 +12,7 @@
 # Categories (SKILL §10.1 .. §10.10):
 #   1  emdash        em-dash (—/–) inside a user-visible string
 #   2  raw_color     hex / rgb() / hsl() literal outside the token definition
-#   3  inline_style  style={{...}} or style= (CSP style-src 'self' blocks it)
+#   3  inline_style  style={{...}} or style= (house rule, SKILL §1)
 #   4  arbitrary_tw  arbitrary Tailwind value: className="... [13px] ..."
 #   5  ai_gradient   bg-gradient / indigo-violet family (AI-tell)
 #   6  toast         toast / snackbar stack instead of an inline banner
@@ -62,7 +62,7 @@ label_for() {
   case "$1" in
     emdash)        echo "em-dash (—/–) in a user-visible string (SKILL §7: binary fail, use , : ( ) or a line break)" ;;
     raw_color)     echo "raw color literal outside src/design/tokens.css (use a Dawn token utility)" ;;
-    inline_style)  echo "inline style attribute (CSP style-src 'self' blocks it at runtime)" ;;
+    inline_style)  echo "inline style attribute (SKILL §1: the shipped style-src carries 'unsafe-inline' for xterm.js only, components author no styles)" ;;
     arbitrary_tw)  echo "arbitrary Tailwind value (spacing is {4,8,12,16,24,32}px, radius is sm/md/lg)" ;;
     ai_gradient)   echo "gradient / indigo-violet family on a product surface (AI-tell, SKILL §8)" ;;
     toast)         echo "toast or snackbar stack (use an inline banner in context, SKILL §8)" ;;

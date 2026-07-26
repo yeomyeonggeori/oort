@@ -576,14 +576,22 @@ export function fetchMessages(
   );
 }
 
-/** One oldest-first page of thread replies (ascending channel seq). */
+/**
+ * One oldest-first page of thread replies (ascending channel seq). `limit` is
+ * clamped to 1...200 by the server; the work session panel asks for the ceiling
+ * because a session thread is an event log, not a conversation.
+ */
 export function fetchThreadReplies(
   workspaceId: string,
   channelId: string,
   rootId: string,
-  cursor?: number
+  cursor?: number,
+  limit?: number
 ): Promise<{ messages: Message[]; nextCursor?: number }> {
-  const suffix = cursor === undefined ? "" : `?cursor=${cursor}`;
+  const params = new URLSearchParams();
+  if (cursor !== undefined) params.set("cursor", String(cursor));
+  if (limit !== undefined) params.set("limit", String(limit));
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return request<{ messages: Message[]; nextCursor?: number }>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
@@ -608,6 +616,185 @@ export function sendMessage(
       body: JSON.stringify({ clientMsgId, type: "text", body: bodyText }),
     }
   );
+}
+
+/**
+ * Reply inside a thread. The SAME write path as `sendMessage` with `rootId`
+ * set (server `SendMessageRequest.rootId`), which is exactly how the mac client
+ * shares a work excerpt into a session thread (ChatViewModel.shareWorkExcerpt
+ * calls sendReply with the session's root message). There is no dedicated
+ * excerpt endpoint on the server, and inventing one client-side would be a
+ * second write path into the same ledger.
+ */
+export function sendThreadReply(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+  clientMsgId: string,
+  bodyText: string
+): Promise<Message> {
+  return request<Message>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({ clientMsgId, rootId, type: "text", body: bodyText }),
+    }
+  );
+}
+
+// ---- Work sessions: the ADR-0114 session ledger (AX-3 / MOMO-618) ----------
+// GET   /v1/workspaces/{ws}/work-sessions[?active=1]   (WorkSessionRoutes.list)
+// PATCH /v1/workspaces/{ws}/work-sessions/{session}     (owner ends it)
+//
+// camelCase on the wire, ids UPPERCASE (Swift `uuidString`) while the ids
+// inside a projected ACP event payload are lowercase Postgres JSON: measured
+// against momowebqa on 2026-07-26, which is why every comparison here folds
+// case through `uuidEq`.
+//
+// The list is workspace-wide and already scoped to the caller's channel
+// memberships server-side (it JOINs `membership`), so a channel filter is a
+// presentation choice, never an access control.
+
+/** `running` while the host holds it, `orphaned` when the host went away. */
+export type WorkSessionStatusWire = "running" | "orphaned" | "ended";
+
+export interface WorkSession {
+  id: string;
+  workspaceId: string;
+  channelId: string;
+  /** The HUMAN who owns the session; only they may end it. */
+  memberId: string;
+  hostId: string;
+  /** The channel card this session hangs under; its thread carries the events. */
+  rootMessageId: string;
+  tool: string;
+  label: string;
+  status: WorkSessionStatusWire;
+  observation: "open" | "owner_only";
+  observerGrantCount: number;
+  remoteAttachAvailable: boolean;
+  startedAtMs: number;
+  endedAtMs?: number;
+  exitCode?: number;
+  endReason?: string;
+  resumedFromSessionId?: string;
+}
+
+export async function fetchWorkSessions(
+  workspaceId: string,
+  activeOnly = false
+): Promise<WorkSession[]> {
+  const suffix = activeOnly ? "?active=1" : "";
+  const res = await request<{ workSessions: WorkSession[] }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions${suffix}`
+  );
+  return res.workSessions;
+}
+
+/**
+ * End a session. This is the PROCESS side of the ledger (the host stops holding
+ * it), not "stop the current turn": the server has no turn-scoped stop for a
+ * work session, and the two are deliberately different words in the UI.
+ */
+export async function endWorkSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<WorkSession> {
+  const res = await request<{ workSession: WorkSession }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "PATCH", body: JSON.stringify({ status: "ended" }) }
+  );
+  return res.workSession;
+}
+
+/**
+ * Who may watch this session's terminal (ADR-0126 D1). `open` is the default and
+ * matches the fact that the session thread is already public in the channel;
+ * `owner_only` is the owner closing it, which also revokes every observer
+ * capability already issued (server `updateObservation`).
+ */
+export async function setWorkSessionObservation(
+  workspaceId: string,
+  sessionId: string,
+  observation: WorkSession["observation"]
+): Promise<WorkSession> {
+  const res = await request<{ workSession: WorkSession }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "PATCH", body: JSON.stringify({ observation }) }
+  );
+  return res.workSession;
+}
+
+// ---- Terminal attach capability (ADR-0126 D1 / ADR-0125 D10) ----------------
+// POST /v1/workspaces/{ws}/work-sessions/{session}/terminal-attach
+//
+// This is a CONTROL PLANE call and nothing else. The server mints a 60 second
+// opaque bearer and hands back the host's own endpoint; it carries no stream,
+// no socket and no relay (TerminalAttachRoutes: "There is intentionally no
+// stream, websocket, stdin, stdout, resize, or relay route in this server").
+// The bytes then flow client <-> host directly, which is the invariant that
+// keeps raw terminal output off momo's servers.
+//
+// The response is snake_case, unlike every camelCase body above; it is the
+// wire shape the mac client already consumes, and renaming it here would hide
+// which fields came from the server.
+//
+// `mode` is the D1 grade. The web client only ever asks for `observer`: a
+// controller grant carries stdin/resize/kill rights this client has no code to
+// use (see features/work/observerStream.ts, which cannot encode those frames).
+
+export interface TerminalAttachGrant {
+  /** The HOST's endpoint, https/wss, credential free (server-validated). */
+  attach_endpoint: string;
+  /** Opaque bearer, 60s TTL, validated by the host against this server. */
+  capability_token: string;
+  pty_id: string;
+}
+
+export async function issueObserverTerminalAttach(
+  workspaceId: string,
+  sessionId: string
+): Promise<TerminalAttachGrant> {
+  return request<TerminalAttachGrant>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/terminal-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "observer" }) }
+  );
+}
+
+/**
+ * Registered execution host (ADR-0125 D1). `type` is what decides whether the
+ * ACP event relay behind a session is a verified path: `app` is the local
+ * client host, everything else is a remote workd/cloud host whose normalised
+ * ACP relay is still in flight (X-11 / MOMO-546), so the panel must not draw a
+ * remote session's silence as "quiet".
+ */
+export interface WorkHost {
+  id: string;
+  workspaceId: string;
+  scope: "member" | "workspace";
+  ownerMemberId: string;
+  type: string;
+  displayName: string;
+  capabilities: Record<string, boolean>;
+  lastSeenAtMs?: number;
+  revokedAtMs?: number;
+  createdAtMs: number;
+  online: boolean;
+}
+
+export async function fetchWorkHosts(workspaceId: string): Promise<WorkHost[]> {
+  const res = await request<{ workHosts: WorkHost[] }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-hosts`
+  );
+  return res.workHosts;
 }
 
 // ---- Approvals: read projection over the decision ledger --------------------

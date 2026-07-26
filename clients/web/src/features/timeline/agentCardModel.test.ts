@@ -267,6 +267,32 @@ describe("tool card", () => {
     );
     expect(card?.kind === "tool" && card.status).toBe("thinking");
   });
+
+  it("reads the server's error text, the same prop the turn record reads", () => {
+    // A tool whose BODY is the artifact it tried to write has nowhere else to
+    // carry the reason it failed, and the artifact card hoists this note.
+    const card = agentCardModel(
+      msg({
+        type: "tool_result",
+        body: "diff --git a/x b/x",
+        props: {
+          tool_name: "apply_patch",
+          is_error: true,
+          error: "패치가 3번째 hunk에서 충돌했습니다.",
+        },
+      })
+    );
+    expect(card?.kind === "tool" && card.errorNote).toBe(
+      "패치가 3번째 hunk에서 충돌했습니다."
+    );
+  });
+
+  it("leaves errorNote absent when the server sent none", () => {
+    const card = agentCardModel(
+      msg({ type: "tool_result", body: "완료", props: { tool_name: "shell" } })
+    );
+    expect(card?.kind === "tool" && "errorNote" in card).toBe(false);
+  });
 });
 
 describe("turn record and cost", () => {

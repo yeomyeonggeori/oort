@@ -115,6 +115,24 @@
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
+  /* Diff body measure (MOMO-620 / ADR-0126 D2). A diff scrolls INSIDE its card
+   * at this height, the same 400px cap the mac card uses, so a 500 line change
+   * never grows the timeline row and the page never gains a horizontal scroll.
+   * It is a height, not a width, so it is not a pane; and the rhythm scale has
+   * no step near 400, so the measure gets a NAME rather than max-h-[400px]. */
+  --spacing-diff-body: 400px;
+
+  /* 관전 터미널 본문 (MOMO-619 / ADR-0126 D1). A read-only terminal is measured
+   * in ROWS, not in rhythm steps: at the 12px monospace role a row measures 14px
+   * (2026-07-26), so 320px draws 22 rows, the smallest window in which a command
+   * and the output it produced are visible together. It scrolls inside itself
+   * (xterm owns its own viewport), so a host that prints for an hour never grows
+   * the session pane. A height, so it is not a pane; and the scale has no step
+   * near 320, so like --spacing-diff-body the measure gets a NAME, not
+   * h-[320px]. It is applied only while the stream can still grow: a failed one
+   * hugs the rows it actually used (MOMO-619 R1 M7). */
+  --spacing-terminal-body: 320px;
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */
@@ -185,6 +203,68 @@
   block-size: 100%;
   min-block-size: 0;
   overflow: clip;
+}
+
+/* 작업 세션 패널 기하 (MOMO-618 R1). The pane is 320px, and beside a 240px
+ * sidebar that is 560px of the window spent before the channel gets any. On a
+ * 1280px window the channel still has 720px; on a 760px one it has 200px, the
+ * composer collapses to 136px, and its placeholder wraps to two lines and is
+ * cut off vertically. A secondary pane must not be able to squeeze the primary
+ * surface out of usable width.
+ *
+ * So below 900px (the narrowest window the shell gate measures) the two stop
+ * sharing the row: the pane takes the whole chat surface and the channel waits
+ * underneath at its own full width, restored the moment the pane is closed.
+ * ONE pane at a time, rather than two panes that both lose.
+ *
+ * It takes the WHOLE surface and not a 320px strip over one edge, because a
+ * strip covers the trailing half of the composer, including its send control:
+ * an overlay that hides a control the reader can still half see is worse than
+ * one that clearly replaces the surface. The pane brings its own close button
+ * and its own Escape, so nothing is stranded behind it.
+ *
+ * The anchor is the chat surface's own `relative` box, so this never escapes
+ * the shell and the document still cannot scroll (MOMO-610).
+ *
+ * It is a named utility rather than a pair of responsive classes because the
+ * width itself is the token: `w-[320px]` and `md:w-[320px]` are exactly the
+ * arbitrary values the scale exists to keep out.
+ *
+ * `data-wide` is the same full-surface geometry, asked for (MOMO-619 R1 H2).
+ * 320px is the right default for a list of session rows and the wrong one for
+ * the read-only terminal inside it: the host writes at 80 columns and the pane
+ * could only show 37, so a pytest invocation wrapped onto two rows. Widening
+ * BELOW 900px already happened for free, which made the panel narrower the
+ * wider the window got. The wide state is the same rule the media query
+ * applies, available at any width, and it wins over the base declaration by
+ * specificity (class + attribute), so the two never have to be ordered. */
+@utility work-pane {
+  inline-size: var(--spacing-pane);
+
+  &[data-wide] {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
+
+  @media (width < 900px) {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
+}
+
+/* The 넓게 보기 controls exist only where the pane is not ALREADY the whole
+ * surface. Below 900px the rule above has widened it, so the toggle's only
+ * possible effect has already happened and pressing it would do nothing. The
+ * breakpoint is a media query and not a `max-[899px]:` variant because an
+ * arbitrary Tailwind value is exactly what the preflight rejects. */
+@utility pane-wide-toggle {
+  @media (width < 900px) {
+    display: none;
+  }
 }
 
 /* Dialog panel measure (R-1 §5 다이얼로그, MOMO-614). A dialog sits one 32px
@@ -272,6 +352,49 @@
     &::-moz-progress-bar {
       background: var(--danger);
     }
+  }
+}
+
+/* 스크롤 어포던스 (MOMO-620 R2). macOS 오버레이 스크롤바는 **스크롤을 시작한
+ * 뒤에야** 나타난다. 그래서 카드 오른쪽 끝에서 잘린 diff 줄과 거기서 끝나는
+ * 줄이 화면에서 완전히 똑같아 보였다: 더 있다는 신호가 하나도 없었다.
+ *
+ * ::-webkit-scrollbar를 정의하면 WebKit/Chromium은 그 스크롤러에 대해 오버레이
+ * 를 끄고 항상 보이는 막대를 그린다. Tauri 셸(WKWebView)과 브라우저 양쪽에서
+ * 같은 경로다. 색은 토큰이므로 스킴을 따라가고, 트랙은 투명이라 카드 배경을
+ * 덧칠하지 않는다. 8px는 스크롤 가능 여부를 말할 만큼은 굵고 12px 코드 줄을
+ * 밀어내지 않을 만큼은 얇다.
+ *
+ * scrollbar-width/scrollbar-color는 쓰지 않는다: Chromium은 둘 중 하나라도
+ * 지정되면 ::-webkit-scrollbar 규칙 전체를 무시해서, 두 경로를 함께 쓰면
+ * 브라우저마다 다른 막대가 나온다.
+ *
+ * 이 파일에서 유일하게 물리 속성(width/height)을 쓰는 자리다. 스크롤바 의사
+ * 요소는 논리 속성을 해석하지 않아서 block-size/inline-size로 쓰면 크기가 잡히지
+ * 않고, 크기가 없으면 엔진이 커스텀 막대를 그리지 않는다: 실측에서 오버레이가
+ * 그대로 남아 offsetHeight - clientHeight = 0이었다(= 자리를 차지하지 않는
+ * 막대 = 보이지 않는 막대). */
+@utility scrollbar-visible {
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: var(--radius-sm);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-muted);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
 

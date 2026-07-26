@@ -261,6 +261,134 @@ export function resolveSpikeRealtimeUrl(
   return url;
 }
 
+// ---- work session rail (AX-3 / MOMO-618) -----------------------------------
+// Work sessions publish on the CHANNEL namespace, not the agent one: the server
+// builds both frames with `ch:ws<ws>.<channel>` (WorkSessionRoutes
+// `lifecyclePayload` / `acpEventPayload`), so watching a session is watching the
+// channel it lives in. Two frame families arrive there beyond message.new:
+//
+//   - `work.session.started` / `work.session.ended`, the ledger lifecycle;
+//   - the projected ACP event, whose `data.type` is the RAW event name
+//     (`agent.status`, `agent.partial`, `approval.requested`,
+//     `approval.decided`) and whose payload carries `work_session_id`. That
+//     field is the discriminator against the identically named frames on the
+//     agent namespace, which are about `agent_run` and carry no session id.
+//
+// Measured against momowebqa on 2026-07-26 (host-signed PATCH round trip):
+// `run_id` inside a work-session ACP payload is the WORK SESSION id, not an
+// agent_run id. The server enforces it (`validatedACPEvent` requires
+// `run_id == work_session_id == {session}`), so it must never be handed to
+// /agent-runs/{run}/cancel; that call answers 404, as verified.
+
+export type WorkSessionACPType =
+  | "agent.status"
+  | "agent.partial"
+  | "approval.requested"
+  | "approval.decided";
+
+export interface WorkSessionLifecycleFrame {
+  type: "work.session.started" | "work.session.ended";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    session_id: string;
+    channel_id: string;
+    root_message_id: string;
+    member_id: string;
+    host_id: string;
+    tool: string;
+    label: string;
+    started_at?: number;
+    ended_at?: number;
+    exit_code?: number;
+    end_reason?: string;
+    resumed_from_session_id?: string;
+  };
+}
+
+export interface WorkSessionACPFrame {
+  type: WorkSessionACPType;
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    work_session_id: string;
+    run_id: string;
+    channel_id: string;
+    event_id: string;
+    message_id: string;
+    root_message_id: string;
+  } & Record<string, unknown>;
+}
+
+/**
+ * Observer count projection (ADR-0126 D1, `TerminalAttachRoutes.observerPayload`).
+ * Published on the same channel when an observer capability is issued, and the
+ * payload is deliberately two fields: the session and the count. It says nothing
+ * about WHO, so nothing here can grow into an attendance list.
+ */
+export interface WorkSessionObserverFrame {
+  type: "work.session.observer";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    session_id: string;
+    observer_count: number;
+  };
+}
+
+export function asWorkSessionObserverFrame(
+  data: unknown
+): WorkSessionObserverFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionObserverFrame>;
+  if (frame.type !== "work.session.observer") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.session_id !== "string") return null;
+  if (typeof payload.observer_count !== "number") return null;
+  return frame as WorkSessionObserverFrame;
+}
+
+const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
+  "agent.status",
+  "agent.partial",
+  "approval.requested",
+  "approval.decided",
+]);
+
+/** A publication carrying a projected ACP event for a work session. */
+export function asWorkSessionACPFrame(
+  data: unknown
+): WorkSessionACPFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionACPFrame>;
+  if (typeof frame.type !== "string" || !WORK_ACP_TYPES.has(frame.type)) {
+    return null;
+  }
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.work_session_id !== "string") return null;
+  return frame as WorkSessionACPFrame;
+}
+
+/** A publication carrying a work-session lifecycle transition. */
+export function asWorkSessionLifecycleFrame(
+  data: unknown
+): WorkSessionLifecycleFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionLifecycleFrame>;
+  if (
+    frame.type !== "work.session.started" &&
+    frame.type !== "work.session.ended"
+  ) {
+    return null;
+  }
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.session_id !== "string") return null;
+  return frame as WorkSessionLifecycleFrame;
+}
+
 export interface RealtimeHandle {
   /**
    * Watch one channel. Callers are independent: the timeline and the desktop
@@ -285,6 +413,23 @@ export interface RealtimeHandle {
     channelId: string,
     agentMemberId: string,
     handlers: { onEvent: (event: AgentProgressEvent) => void }
+  ) => () => void;
+  /**
+   * Watch the work sessions of one channel. Shares the channel subscription
+   * with `subscribeChannel` (same refcount), and drops replayed publications
+   * instead of folding them in: see `subscribeWorkSession` below.
+   */
+  subscribeWorkSession: (
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
+      onAcpEvent: (frame: WorkSessionACPFrame) => void;
+      /** An observer capability was issued: re-read the count from Postgres. */
+      onObserver: (frame: WorkSessionObserverFrame) => void;
+      /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
+      onResync: () => void;
+    }
   ) => () => void;
   dispose: () => void;
 }
@@ -440,9 +585,66 @@ export function createRealtime(
     );
   }
 
+  function subscribeWorkSession(
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
+      onAcpEvent: (frame: WorkSessionACPFrame) => void;
+      onObserver: (frame: WorkSessionObserverFrame) => void;
+      onResync: () => void;
+    }
+  ): () => void {
+    // The SAME options the message rail asks for, because this is the same
+    // Centrifugo channel and `attach` shares one subscription between them: a
+    // second set of flags here would be a flag nobody reads, since whichever
+    // caller arrives first creates the subscription.
+    //
+    // Which is exactly why the replay gate is not optional. The `ch:` namespace
+    // IS recoverable, so a reconnect after a sleep replays every publication of
+    // the gap, including the ACP frames of turns that ended minutes ago. Folding
+    // those in would put a finished turn back on screen with a running clock,
+    // which is the MOMO-789 blocker. Replayed frames are dropped and `onResync`
+    // asks the caller to re-read Postgres instead, which is the only surface
+    // that can answer "what is true now".
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const gate = createReplayGate();
+        const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+          gate.onSubscribed(ctx);
+          handlers.onResync();
+        };
+        const onPublication = (ctx: { data?: unknown }) => {
+          if (gate.isReplaying()) return;
+          const lifecycle = asWorkSessionLifecycleFrame(ctx.data);
+          if (lifecycle) {
+            handlers.onLifecycle(lifecycle);
+            return;
+          }
+          const observer = asWorkSessionObserverFrame(ctx.data);
+          if (observer) {
+            handlers.onObserver(observer);
+            return;
+          }
+          const acp = asWorkSessionACPFrame(ctx.data);
+          if (acp) handlers.onAcpEvent(acp);
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
     subscribeChannel,
     subscribeAgent,
+    subscribeWorkSession,
     dispose: () => {
       shared.clear();
       client.disconnect();

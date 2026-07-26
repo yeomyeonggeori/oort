@@ -18,8 +18,11 @@ mod deeplink;
 mod discovery;
 mod keychain;
 mod notification;
-// The updater replaces an application bundle, which is not a thing that exists
-// on iOS/Android — the plugin is desktop-only and so is this module.
+// Handing a URL to the platform browser needs a platform browser, and the
+// updater replaces an application bundle, which is not a thing that exists on
+// iOS/Android — both are desktop-only and so are these modules.
+#[cfg(desktop)]
+mod opener;
 #[cfg(desktop)]
 mod updater;
 
@@ -58,6 +61,7 @@ pub fn run() {
             keychain::keychain_load_refresh_token,
             keychain::keychain_store_refresh_token,
             keychain::keychain_clear_refresh_token,
+            opener::open_external_url,
             app_version,
             updater::updater_check,
             updater::updater_install,

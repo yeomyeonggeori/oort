@@ -371,6 +371,8 @@ export interface AgentToolCard {
   title: string;
   status: AgentTurnStatus;
   frame: ActionFrame;
+  /** Server-sanitised failure text, same `error` prop the turn record uses. */
+  errorNote?: string;
   detail: PayloadDetail;
 }
 
@@ -441,11 +443,16 @@ function toolCard(message: Message, props: Props): AgentToolCard {
     object: readString(props, "label") ?? null,
     outcome: message.body ?? null,
   };
+  // Read the same `error` prop the turn record reads. A failed tool run whose
+  // body is the artifact it was trying to write (a patch) has nowhere else to
+  // put the reason, and losing it is how a failure reads as a success.
+  const errorNote = readString(props, "error");
   return {
     kind: "tool",
     title: frame.verb,
     status,
     frame,
+    ...(errorNote !== undefined ? { errorNote } : {}),
     detail: payloadDetail(props),
   };
 }

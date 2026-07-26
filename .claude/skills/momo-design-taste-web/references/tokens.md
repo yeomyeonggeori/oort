@@ -139,6 +139,43 @@ both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
 token file had never heard of the measure the two overlays share. They alternate
 at the same anchor, so it is one measure and it gets one name.
 
+Body caps are a fifth axis: `max-h-diff-body` 400px (MOMO-620), the height a
+diff scrolls inside its card. It is not a pane (a pane is a width) and the rhythm
+scale has no step near 400, so the measure gets a name rather than
+`max-h-[400px]`. The number is the mac diff card's cap, so the same change reads
+at the same size on both clients. It is a MAXIMUM, not a fixed height: a short
+diff hugs its content, which is the empty-band regression the mac card had to
+fix separately (MOMO-518 R2 H1) and CSS gets for free.
+
+`h-terminal-body` 320px (MOMO-619, the read-only 관전 terminal) is the second
+body cap. A terminal is measured in rows and xterm sizes its own viewport from
+the box it is handed, so this is a FIXED height while the stream is alive:
+measured 2026-07-26 the cell is 14px, so 320px draws 22 rows, the smallest
+window in which a command and the output it produced are visible together.
+
+Three corrections from the MOMO-619 R1 review, the first two the same bug.
+`FitAddon` measures its parent with `getComputedStyle().height`, which on a
+`box-sizing: border-box` element resolves to the BORDER box. With `p-2` and a
+hairline on the mount every fit proposed one row and two columns more than the
+box could show, and against a content height the box grew about twelve rows per
+frame without stopping. **The mount carries no padding and no border**; the
+frame around it does. Any surface handing a box to a self-sizing library
+inherits that rule.
+
+- A DEAD stream hugs its output instead of holding the cap. A host that closed
+  after one line left a 300px empty band (R1 M7, the same regression the mac
+  diff card fixed in MOMO-518 R2 H1): the failed body resizes the terminal to
+  the rows it actually used and drops the fixed height. Measured: 320px/22 rows
+  live becomes 42px/3 rows for a two line transcript, and back on reconnect.
+- Inside the 320px work pane the terminal is **35 columns** (the review's 37
+  counted the two clipped ones). Host output is written for 80, so the surface
+  says so and offers 넓게 보기: `work-pane[data-wide]` is the same full-surface
+  geometry the media query already applied below 900px, available at any width,
+  and at 1280 it makes the pane 1040px and the terminal 120 columns. Both widen
+  controls carry `pane-wide-toggle`, which hides them below 900px where the pane
+  is already the whole surface (79 columns at 880): a control whose only effect
+  has already happened is not a control.
+
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
 bar gets a named token instead of widening the closed set.
