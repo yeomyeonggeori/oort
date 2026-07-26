@@ -140,6 +140,11 @@ COMMIT;
 SQL
 
 log 'running public MomoiOSKit login -> send -> history -> idempotent replay test'
+# MOMO_IOS_WIRE_REQUIRED turns the test's skip branch into a failure: if any
+# variable below is ever lost, the suite goes red instead of passing in a
+# millisecond without sending anything. A gate that can silently verify nothing
+# is how this bug survived nine weeks in the first place.
+MOMO_IOS_WIRE_REQUIRED=1 \
 MOMO_IOS_WIRE_BASE_URL="$BASE_URL" \
 MOMO_IOS_WIRE_EMAIL="$EMAIL" \
 MOMO_IOS_WIRE_PASSWORD="$PASSWORD" \

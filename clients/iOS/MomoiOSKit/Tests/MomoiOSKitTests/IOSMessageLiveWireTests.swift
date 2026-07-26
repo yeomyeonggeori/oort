@@ -9,11 +9,24 @@ import Testing
 /// test returns without network activity unless the verifier supplies its
 /// disposable fixture environment. The verifier creates that fixture itself;
 /// this test never discovers or guesses an existing account.
+///
+/// The skip is only safe because it is one-directional: `MOMO_IOS_WIRE_REQUIRED`
+/// turns a missing variable into a failure, so the gate can never report a pass
+/// it did not earn.
 @Suite("MomoiOS message live wire")
 struct IOSMessageLiveWireTests {
     @Test("a MomoiOSKit message send survives the closed-world server decoder")
     func sendHistoryAndIdempotency() async throws {
         guard let configuration = IOSMessageLiveWireConfiguration.fromEnvironment() else {
+            // Without this the suite would pass in a millisecond having sent
+            // nothing whenever a fixture variable goes missing — a green gate
+            // that proves nothing, which is the exact failure class MOMO-631
+            // exists to close. verify_ios_wire.sh sets the flag below, so under
+            // the gate an incomplete environment is red rather than skipped.
+            #expect(
+                ProcessInfo.processInfo.environment["MOMO_IOS_WIRE_REQUIRED"] == nil,
+                "verify_ios_wire.sh demanded the live wire path but the fixture environment is incomplete — no request was sent"
+            )
             return
         }
 
