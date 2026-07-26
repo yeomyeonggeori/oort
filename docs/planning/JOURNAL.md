@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-26 (Fable Wave C2 완결) · ADR-0134·0135 소비면 4장 랜딩
+- **랜딩**: 816 엔진(profile effort_pref writer+멘션 routing, track/engine #820) · 817 프로필 다이얼로그+컴포저 피커(#821) · 818 체인 UI+캐스캐이드 표기(#822) · 819 잔여량 게이지(#823) track/uxui. 824 tests대(각 랜딩 시 원점 재검증).
+- **819 gate:shell 전면 실패 = 워크트리 오염(원인 C)**: 818(MOMO-627)의 미커밋 작업이 819 워크트리에 유출→dist 빌드→chainModel `undefined.filter` 크래시로 설정 AI 섹션부터 React 루트 언마운트. **819 소스·gate 코드 모두 무결**(gate가 실제 크래시를 정확히 포착 — 완화 0줄). 유출물 제거로 해소, 오케스트레이터 원점 검증(HEAD=origin·diff 819 파일만·gate:shell 44/44 PASS·827 tests).
+- **파이프라인 교훈**: 워커 cwd 오염(작업이 남의 워크트리에 기록). 재발 방지 후보 = spawn 프롬프트에 "착수 시 git status clean 선검사" + 워크트리 경로 이중 확인. codex-fleet/워크플로 프롬프트에 반영 예정.
+- ADR-0134·0135 **엔진+웹 양층 track 완비**. 대기: track→main 동기화(성재 승인) → momowebqa 재배포 → **817/818/819 라이브 통합 실측**(요청 라우팅·캐스캐이드·잔여량이 실서버서 처음 실동) → next.10.
+- **0136(E2B)**: 키 부재 확정(.env엔 BLAXEL/DAYTONA만). 성재 조달 대기.
+
+
 ## 2026-07-26 (Fable Wave C1 랜딩 + C2 발진) · ADR-0134·0135 엔진층 완성
 - **C1 랜딩(track/engine #812~815)**: 808 routing+effort(041) · 809 provider_link_chain+캐스캐이드(042) · 810 quota_snapshot(043) · 811 hermes adapter 다형화. 순차 리베이스, STATUS.md 합집합 1건. **병합 팁 스모크**: 마이그레이션 43 유니크·server 314 tests·verify_run_routing 32 PASS(docker).
 - 설계 판단 기록: 809 — position0은 싱글톤 무이전 참조(이중 저장 드리프트 방지), 스트림 개시 후 실패는 전파(타임라인 중복 방지), connection-refused 폴백 ~30s 레이턴시 특성. 810 — window 예약어→quota_window(와이어는 window 유지), 신규 scope provider:quota:write는 grantable-only. 811 — local_gate 미등록 공백 자가 발견·수리.
