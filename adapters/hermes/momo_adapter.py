@@ -2321,7 +2321,8 @@ class MomoAdapter(BasePlatformAdapter):
             "status": status,
             "body": body,
             "error": error,
-            "usage": usage,
+            # ADR-0134 D2: carry the job's effort back to momo's usage ledger.
+            "usage": self._stamp_effort(usage, payload),
         }
 
     @staticmethod
@@ -2376,8 +2377,42 @@ class MomoAdapter(BasePlatformAdapter):
         }
 
     @staticmethod
-    def _zero_usage(payload: Mapping[str, Any]) -> dict[str, Any]:
-        return {
+    def _job_effort(payload: Mapping[str, Any]) -> Optional[str]:
+        """ADR-0134 D2: the reasoning effort momo resolved for this job.
+
+        momo already gated the value against the provider x model table before
+        writing the job payload, so the adapter only normalizes and forwards it.
+        Absent/blank means "no effort was chosen" and must stay absent — a guessed
+        default would corrupt the cost ledger's analysis axis.
+        """
+        raw = payload.get("effort")
+        if not isinstance(raw, str):
+            return None
+        normalized = raw.strip().lower()
+        if not normalized or len(normalized) > 32:
+            return None
+        return normalized
+
+    @classmethod
+    def _stamp_effort(cls, usage: Any, payload: Mapping[str, Any]) -> Any:
+        """Echo the job's effort on usage when the runtime did not report one.
+
+        momo's ledger prefers the runtime-reported effort (the provider is the
+        authority on what it actually ran); this only fills the gap for runtimes
+        that have not learned about the axis yet.
+        """
+        effort = cls._job_effort(payload)
+        if effort is None or not isinstance(usage, Mapping):
+            return usage
+        if usage.get("effort"):
+            return usage
+        stamped = dict(usage)
+        stamped["effort"] = effort
+        return stamped
+
+    @classmethod
+    def _zero_usage(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        usage: dict[str, Any] = {
             "model": payload.get("model") or "hermes-agent",
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -2386,6 +2421,10 @@ class MomoAdapter(BasePlatformAdapter):
             "cost_micro_usd": 0,
             "was_estimated": True,
         }
+        effort = cls._job_effort(payload)
+        if effort is not None:
+            usage["effort"] = effort
+        return usage
 
     @staticmethod
     def _normalize_approval_request(

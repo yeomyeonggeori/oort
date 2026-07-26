@@ -509,7 +509,7 @@ struct WorkerService: Service {
         let u = usage ?? (prompt: 0, completion: 0, cached: 0, reasoning: 0)
         await cost.reconcile(
             workspaceID: job.workspaceID, runID: p.runID, agentMemberID: p.agentMemberID,
-            channelID: p.channelID, model: p.model,
+            channelID: p.channelID, model: p.model, effort: p.effort,
             promptTokens: u.prompt, completionTokens: u.completion,
             cachedTokens: u.cached, reasoningTokens: u.reasoning,
             wasEstimated: wasEstimated, reservedMicroUSD: reservedMicroUSD)

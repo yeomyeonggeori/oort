@@ -19,6 +19,10 @@ struct AgentJobPayload: Decodable, Sendable {
     let triggerMessageID: UUID? // source message for mention/context action runs
     let triggerMessageSeq: Int64?
     let model: String           // OpenAI-compatible model id (agent.model)
+    /// ADR-0134 D2 reasoning effort resolved by the server (request routing →
+    /// agent profile preference). Absent when nothing was chosen or inherited;
+    /// recorded on `usage_ledger.effort` as the cost-analysis axis.
+    let effort: String?
     let prompt: String          // user/trigger text
     let systemPrompt: String?   // agent.system_prompt → first `system` chat message (MOMO-302)
     let recentMessages: [RecentMessage]?  // same-channel history window (MOMO-302)
@@ -46,6 +50,7 @@ struct AgentJobPayload: Decodable, Sendable {
         case triggerMessageID = "trigger_message_id"
         case triggerMessageSeq = "trigger_message_seq"
         case model
+        case effort
         case prompt
         case systemPrompt = "system_prompt"
         case recentMessages = "recent_messages"
@@ -82,6 +87,7 @@ struct AgentJobPayload: Decodable, Sendable {
         sourceAttribution = try c.decodeIfPresent(JSONValue.self, forKey: .sourceAttribution)
 
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        effort = try c.decodeIfPresent(String.self, forKey: .effort)
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
         recentMessages = try c.decodeIfPresent([RecentMessage].self, forKey: .recentMessages)

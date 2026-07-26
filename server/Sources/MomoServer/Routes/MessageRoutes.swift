@@ -1414,6 +1414,10 @@ struct MessageRoutes: Sendable {
         let paused: Bool
         let enabledTools: Set<String>?
         let ignoredModelPref: String?
+        /// ADR-0134 D3: agent-tier effort preference, already narrowed to a value
+        /// the resolved model accepts (unusable preferences are dropped here, the
+        /// same silent-ignore contract as `model_pref`).
+        let effort: String?
     }
 
     private struct IssuedContextPacket {
@@ -1503,6 +1507,7 @@ struct MessageRoutes: Sendable {
                    a.tool_schema::text, a.config::text, a.system_prompt, a.max_run_steps,
                    ap.instructions, ap.model_pref, ap.enabled_tools::text,
                    ap.version, COALESCE(ap.paused, false), w.settings::text,
+                   ap.effort_pref,
                    EXISTS (
                      SELECT 1
                        FROM membership ms
@@ -1534,15 +1539,19 @@ struct MessageRoutes: Sendable {
         return try rows.map { row in
             let (id, handle, displayName, baseModel, toolSchema, config, baseSystemPrompt,
                  maxRunSteps, profileInstructions, modelPref, enabledToolsJSON,
-                 profileVersion, paused, workspaceSettingsJSON, isChannelMember,
-                 isExternalRuntime) = try row.decode(
+                 profileVersion, paused, workspaceSettingsJSON, effortPref,
+                 isChannelMember, isExternalRuntime) = try row.decode(
                     (UUID, String, String, String, String, String, String?, Int,
-                     String?, String?, String?, Int?, Bool, String, Bool, Bool).self
+                     String?, String?, String?, Int?, Bool, String, String?, Bool, Bool).self
                  )
             let modelResolution = resolveProfileModel(
                 baseModel: baseModel, modelPref: modelPref,
                 workspaceSettingsJSON: workspaceSettingsJSON
             )
+            let effort = ProviderEffortTable.knownLevel(effortPref).flatMap {
+                ProviderEffortTable.supports(model: modelResolution.model, effort: $0)
+                    ? $0 : nil
+            }
             let decodedEnabledTools: Set<String>? = enabledToolsJSON.flatMap {
                 guard let data = $0.data(using: .utf8),
                       let values = try? JSONDecoder().decode([String].self, from: data)
@@ -1570,7 +1579,8 @@ struct MessageRoutes: Sendable {
                 profileVersion: profileVersion,
                 paused: paused,
                 enabledTools: enabledTools,
-                ignoredModelPref: modelResolution.ignoredPreference
+                ignoredModelPref: modelResolution.ignoredPreference,
+                effort: effort
             )
         }
     }
@@ -1681,6 +1691,24 @@ struct MessageRoutes: Sendable {
         return sections.joined(separator: "\n\n")
     }
 
+    /// ADR-0131 D2 model allow-list: the agent's own `agent.model` plus whatever
+    /// `workspace.settings.allowed_agent_models` permits. Single-sourced so the
+    /// agent-preference path (below) and the ADR-0134 D1 request `routing.model`
+    /// gate cannot drift apart.
+    static func allowedAgentModels(
+        baseModel: String,
+        workspaceSettingsJSON: String
+    ) -> Set<String> {
+        var allowed = Set([baseModel])
+        if let data = workspaceSettingsJSON.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let configured = object["allowed_agent_models"] as? [String]
+                ?? object["allowedAgentModels"] as? [String]
+            allowed.formUnion(configured ?? [])
+        }
+        return allowed
+    }
+
     static func resolveProfileModel(
         baseModel: String,
         modelPref: String?,
@@ -1689,13 +1717,9 @@ struct MessageRoutes: Sendable {
         guard let preference = modelPref?.trimmingCharacters(in: .whitespacesAndNewlines),
               !preference.isEmpty
         else { return (baseModel, nil) }
-        var allowed = Set([baseModel])
-        if let data = workspaceSettingsJSON.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let configured = object["allowed_agent_models"] as? [String]
-                ?? object["allowedAgentModels"] as? [String]
-            allowed.formUnion(configured ?? [])
-        }
+        let allowed = allowedAgentModels(
+            baseModel: baseModel, workspaceSettingsJSON: workspaceSettingsJSON
+        )
         return allowed.contains(preference)
             ? (preference, nil)
             : (baseModel, preference)
@@ -2271,6 +2295,12 @@ struct MessageRoutes: Sendable {
         if let systemPrompt = agent.systemPrompt,
            !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             payload["system_prompt"] = systemPrompt
+        }
+        // ADR-0134 D2/D3: the effort axis rides the same job payload as `model`,
+        // so both the worker (usage_ledger) and the gateway adapter see it. The
+        // key is omitted entirely when nothing is inherited (no null noise).
+        if let effort = agent.effort {
+            payload["effort"] = effort
         }
         return jsonString(payload)
     }
