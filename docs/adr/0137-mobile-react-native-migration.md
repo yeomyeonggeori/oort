@@ -17,6 +17,8 @@
 ### D1. 스택 = **bare React Native + Expo 모듈 낱개, EAS 미도입**
 - RN 0.83+/React 19, **New Architecture ON**. 레퍼런스 정합: Mattermost 0.83.9(New Arch, bare + expo-router + Expo 모듈 낱개, `eas.json` 없음, fastlane+GHA), Rocket.Chat 0.81.5.
 - **EAS를 쓰지 않는 이유**: momo는 이미 fastlane+match+`release-ios.yml`과 `momo-signing` private repo를 갖고 있다. EAS로 가면 서명 인프라를 재구성해야 하고, 셀프호스팅 오픈소스 제품의 빌드를 특정 SaaS에 묶는다. Expo 모듈의 이점은 bare에서도 그대로 얻는다.
+- **플랫폼별로 이유가 다르다(정밀화)**: **iOS는 bare 유지** — NSE 62줄 + `PushNotification.swift` 329줄 + App Group + fastlane/match가 **이미 손으로 짜여 동작한다**. config plugin의 가치는 "손으로 유지하던 네이티브 프로젝트를 선언적으로 대체"인데, 대체할 필요 없는 것을 이미 가졌으므로 plugin 작성은 순 이득이 아니라 **번역 비용**이다. **Android는 `expo prebuild --platform android`로 골격만 부트스트랩** — 지킬 기존 자산이 0이라 잃을 게 없고, 이후 유지보수는 bare와 동일하게 간다(CNG 관리형으로 계속 끌고 가지 않는다).
+- 2026년에는 `expo` 의존 유무가 bare/managed 이분법의 기준이 아니다(실사용 페어링: Bluesky Expo 54/RN 0.81.5 · Mattermost Expo ^55/RN 0.83.9 · Rocket.Chat Expo ^54/RN 0.81.5 · MetaMask Expo ^55/RN 0.83.6).
 - 대안 기각: Tauri 모바일(§Context 5), Capacitor(silent push 미지원), Flutter(우리 TS/React 자산과 공유 0 — buzz가 그 길을 갔고 코드 공유가 0이다), KMP(UI 2벌은 우리 인력으로 불가).
 
 ### D2. 이행 방식 = **전량 재작성** (brownfield 기각)
@@ -55,13 +57,15 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 2. **URL 폴리필 + `momo://join` 실왕복** — `react-native-url-polyfill` 선결(`new URL`/`URLSearchParams`가 15개 파일에서 쓰인다). `deepLink.ts`가 무수정 통과하는지.
 3. **centrifuge-js 실왕복 + 리플레이 게이트 동작 + Android cleartext 정책**.
 4. **기존 Swift NSE를 RN 프로젝트에 붙여** id-only→fetch→표시→알림 액션 승인.
-5. **타임라인 `inverted` + `maintainVisibleContentPosition` 1k/60fps** — Mattermost가 여기서 **RN 코어 Fabric ObjC++를 패치**했다(`RCTScrollViewComponentView.mm`). 채팅 타임라인의 난점은 가상화 성능이 아니라 **inverted + 스크롤 위치 보존**이다. FlashList는 답이 아니다(Mattermost도 메인 타임라인은 `Animated.FlatList`, FlashList는 부차 리스트에만).
+5. **타임라인 리스트 3자 실측** — 난점은 가상화 성능이 아니라 **inverted + 스크롤 위치 보존**이다(Mattermost는 여기서 **RN 코어 Fabric ObjC++**를 패치했다 — `RCTScrollViewComponentView.mm`, 메인 타임라인은 `Animated.FlatList`이고 FlashList는 부차 리스트에만). 다만 **FlashList v2는 New Arch 전용이고 `maintainVisibleContentPosition`을 기본 활성화**해 인버티드 채팅에 유리해졌으므로 Mattermost의 판단(v2 이전)을 그대로 승계하지 않는다. **`Animated.FlatList` / FlashList v2 / `@legendapp/list`(채팅을 1급 시나리오로 설계) 3자를 1k/60fps로 실측해 정한다.**
 6. Android 동일 루프.
 
 ### D7. 승계 자산 — **Swift 푸시 391줄과 배포 레인은 살린다**
 - `MomoiOSPushKit/PushNotification.swift`(329줄)는 **import가 Foundation·Security뿐, UIKit/SwiftUI 히트 0**(오케스트레이터 확인). `NotificationService.swift`(62줄)는 NSE 별도 타깃이라 호스트 프레임워크와 무관. **ADR-0120 D2-A 구현이 그대로 생존한다.**
 - fastlane은 Xcode 프로젝트를 빌드할 뿐 앱이 SwiftUI인지 RN인지 모른다 — `match`·TestFlight·공증 레인 유효. 추가 작업은 **Xcode 경로 변경 + Android 레인 신설** 둘.
 - v0는 오프라인 DB가 없어 **NSE가 fetch→표시만** 하면 된다(Mattermost가 네이티브 26,000줄인 이유는 NSE가 로컬 SQLite에 직접 써야 해서다). **오프라인 캐시를 도입하는 순간 그 비용이 따라온다**는 것을 알고 결정한다.
+- **푸시 JS 라이브러리 후보는 2개**: `expo-notifications` 또는 `@react-native-firebase/messaging`. **Notifee 계열은 제외** — `invertase/notifee`가 GitHub **archived 상태**(오케스트레이터 확인)이고 README가 `expo-notifications` 이관을 권고한다. 우리는 iOS NSE를 Swift로 이미 가져 JS 역할이 "토큰 등록 + 알림 액션 수신"으로 좁으므로 스파이크 4에서 실측 결정한다.
+- **저장소 분리 규율**: 세션 토큰·자격증명은 `react-native-keychain`(iOS 키체인/Android Keystore). **MMKV는 시크릿 저장소가 아니다** — 옵션 암호화의 `encryptionKey`를 다시 어딘가 안전히 둬야 하는 순환 문제가 생긴다. MMKV는 `serverBase.ts` 같은 **비시크릿 로컬 캐시 한정**.
 - 상태관리는 Mattermost를 따라가지 않는다 — WatermelonDB+RxJS는 오프라인 우선·멀티서버 SQLite 전제에서 성립한다. **react-query 유지가 싸다.**
 
 ### D8. 기존 iOS SwiftUI 킷 = **동결 후 교체**, ADR-0123 대체
