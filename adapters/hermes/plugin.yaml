@@ -37,3 +37,12 @@ optional_env:
   - name: MOMO_AGENT_ALLOW_INSECURE_HTTP
     label: Allow private-network plaintext
     description: Set to 1 only when http/ws is required on a trusted non-loopback private network. Defaults to fail-closed.
+  - name: MOMO_PROVIDER_BEARER_ENV_PREFIX
+    label: Provider bearer env prefix
+    description: Env prefix this adapter reads provider bearers from (default HERMES_PROVIDER_BEARER; per link HERMES_PROVIDER_BEARER__<PROVIDER_REF>). momo never sends provider credentials (ADR-0004).
+  - name: MOMO_QUOTA_PROBE_ENABLED
+    label: Quota probe enabled
+    description: Set to 0 to disable the periodic provider remaining-quota probe. Defaults to enabled.
+  - name: MOMO_QUOTA_PROBE_INTERVAL_S
+    label: Quota probe interval (seconds)
+    description: Probe period in seconds, minimum 30, default 900.
