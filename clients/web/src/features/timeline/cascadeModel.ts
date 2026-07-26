@@ -17,8 +17,17 @@ import type { CascadeFallbackFrame } from "@/lib/realtime";
 //     session that was not listening when a run fell over simply has nothing to
 //     say. Absence of a notice is absence of evidence, so no card ever prints
 //     "1차 프로바이더로 처리됨";
-//   - it never renders the position numbers. `position` is wire vocabulary
-//     (design-taste-web §7); a person reads attempt order (1차 / 2차 / 3차).
+//   - it never prints an attempt-order number, and that is a correction, not a
+//     preference. The frame carries wire POSITIONS (`from`/`to`), and a position
+//     is NOT an attempt ordinal: a hop's position is its credential's identity,
+//     so deleting a middle hop leaves a permanent gap on purpose (settings/
+//     chainModel.ts rule 1). Position 2 is then the SECOND provider tried, and
+//     `position + 1` would announce a "3차" that the 연결 순서 list does not
+//     contain. The mapping that would fix it lives behind operator-only REST
+//     (`GET /v1/provider/link/chain`, 403 for an ordinary member), so the
+//     subject of the sentence is the endpoint label the worker publishes
+//     instead: it needs no mapping to be true, and it is the same string the
+//     operator reads in 설정 > AI 연결 and in the audit row.
 // =============================================================================
 
 /** One recorded transition: the cascade left `from` and was served by `to`. */
@@ -133,9 +142,20 @@ export function turnRecordRunId(message: Message): string | null {
 
 // ---- copy -------------------------------------------------------------------
 
-/** Attempt order as a person counts it: position 0 is the first provider. */
-export function cascadeOrdinal(position: number): string {
-  return `${position + 1}차`;
+/**
+ * Who served the turn, as a noun phrase.
+ *
+ * The endpoint label, because it is the only identifier in the frame that is
+ * true without a lookup (see the header). `to_endpoint_label` is
+ * `AgentProviderValidation.redactedEndpointLabel`: host and port, never the
+ * path, the query or the key. A frame that carries none is hedged rather than
+ * numbered: "예비" says a fallback served the turn, which is exactly what is
+ * known, where "2차" would be a guess about a list this surface cannot read.
+ */
+export function cascadeServedSubject(fallback: CascadeFallback): string {
+  return fallback.toEndpointLabel === ""
+    ? "예비 프로바이더"
+    : `${fallback.toEndpointLabel} 프로바이더`;
 }
 
 /**
@@ -157,34 +177,37 @@ export function cascadeReasonLabel(reason: string): string {
 /**
  * The one line the card carries.
  *
- * Single hop: "2차 프로바이더로 처리됨 (응답 없음)". More than one: the ordinal
- * is still the provider that actually served the turn, and the count says how
- * many providers were tried and failed before it, because "3차" alone hides
- * that two budgets were touched on the way.
+ * Single hop: "gateway.dawn.internal:8443 프로바이더로 처리됨 (응답 없음)". More
+ * than one: the subject is still the provider that actually served the turn,
+ * and the count says how many were tried and failed before it, because naming
+ * only the survivor hides that two budgets were touched on the way.
  */
 export function cascadeNoticeText(
   fallbacks: readonly CascadeFallback[]
 ): string | null {
   const last = fallbacks[fallbacks.length - 1];
   if (last === undefined) return null;
-  const served = cascadeOrdinal(last.to);
+  const served = cascadeServedSubject(last);
   const reason = cascadeReasonLabel(last.reason);
   if (fallbacks.length === 1) {
-    return `${served} 프로바이더로 처리됨 (${reason})`;
+    return `${served}로 처리됨 (${reason})`;
   }
-  return `${served} 프로바이더로 처리됨 (전환 ${fallbacks.length}번, 마지막 사유: ${reason})`;
+  return `${served}로 처리됨 (전환 ${fallbacks.length}번, 마지막 사유: ${reason})`;
 }
 
 /**
- * The endpoints behind the notice, for the disclosure line. Labels only, which
- * is all the server sends: host and port, never the path, query or key.
+ * Where the cascade started, for the muted half of the line.
+ *
+ * The headline already names where it ended, so this says the one thing it does
+ * not: which provider the turn was supposed to run on. Labels only, which is
+ * all the server sends: host and port, never the path, query or key. No space
+ * before 에서, matching usageModel/Composer rather than the two older strings
+ * that put one there.
  */
 export function cascadeRouteText(
   fallbacks: readonly CascadeFallback[]
 ): string | null {
   const first = fallbacks[0];
-  const last = fallbacks[fallbacks.length - 1];
-  if (first === undefined || last === undefined) return null;
-  if (first.fromEndpointLabel === "" || last.toEndpointLabel === "") return null;
-  return `${first.fromEndpointLabel} 에서 ${last.toEndpointLabel} 로`;
+  if (first === undefined || first.fromEndpointLabel === "") return null;
+  return `${first.fromEndpointLabel}에서 넘어왔습니다`;
 }

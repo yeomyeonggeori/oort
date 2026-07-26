@@ -17,6 +17,13 @@ import { cascadeNoticeText, cascadeRouteText } from "./cascadeModel";
 // --warn, not --danger: falling over is the cascade WORKING. The turn was
 // served. What changed is which budget paid for it and which account it answers
 // to, which is worth stating and is not a failure.
+//
+// Not a live region. This is a settled fact about a turn that already finished,
+// and react-virtuoso re-mounts rows on every scroll pass, so role="status" here
+// would read the same sentence aloud again every time the card came back into
+// view. Same rule ArtifactCard's truncation banner and open-failure row already
+// carry (MOMO-620 R1/R2); the frame that creates the notice arrives while the
+// run is streaming, and the row that announces run outcome is the card itself.
 // =============================================================================
 
 export function CascadeNotice({ runId }: { runId: string | null }) {
@@ -27,7 +34,6 @@ export function CascadeNotice({ runId }: { runId: string | null }) {
 
   return (
     <p
-      role="status"
       data-testid="cascade-notice"
       data-hops={fallbacks.length}
       className="mt-1 flex max-w-pane-lg flex-wrap items-baseline gap-2 text-meta text-warn"

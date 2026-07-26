@@ -188,8 +188,18 @@ export interface ProviderChain {
   entries: ProviderChainEntry[];
   /** Configured fallback hops (everything beyond position 0). */
   fallbackCount: number;
-  /** Hops a real turn would actually attempt: enabled AND usable. */
-  attemptableCount: number;
+  /**
+   * Hops a real turn would actually attempt: enabled AND usable, POSITION 0
+   * INCLUDED. `ProviderCascade.attemptable` filters the whole plan and the plan
+   * starts at the head, so two live fallbacks behind a live head answer 3, not
+   * 2. Any sentence built from this number has to say so, or it reads as a
+   * count of fallbacks and contradicts `fallbackCount` in the same breath.
+   *
+   * Optional, and absent means absent: it is a derived number, so a body that
+   * omits it leaves this panel with nothing to say about attempts rather than
+   * with a zero it would go on to state as a fact.
+   */
+  attemptableCount?: number;
 }
 
 /** Closed-world PUT entry: any other key is a 400 by contract. */

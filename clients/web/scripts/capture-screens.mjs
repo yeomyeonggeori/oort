@@ -346,11 +346,13 @@ const WORK_HOSTS = [
   },
 ];
 
-// 설정 > AI 연결 (MOMO-627 / ADR-0135 D1). The singleton head plus two fallback
-// hops, one of them parked, because that trio is what the block has to keep
-// apart on screen: a head that is read-only here, a live fallback, and a hop the
-// operator switched off. Bearers are masked tails, exactly as the API answers
-// (ADR-0004: the key never leaves the server).
+// 설정 > AI 연결 (MOMO-627 / ADR-0135 D1). The singleton head plus four fallback
+// hops, because those five rows are what the block has to keep apart on screen:
+// a head that is read-only here, a live fallback, a hop the operator switched
+// off, a hop whose key the provider rejects, and a hop in a mock mode (the
+// self-host default, and the row that must NOT read as a failure). Bearers are
+// masked tails, exactly as the API answers (ADR-0004: the key never leaves the
+// server).
 const PROVIDER_LINK = {
   schema: "momo.provider_link.v0",
   configured: true,
@@ -401,14 +403,53 @@ const PROVIDER_CHAIN = {
       bearerConfigured: true,
       bearerLast4: "1b77",
     },
+    {
+      position: 3,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://relay.dawn.internal/v1",
+      endpointLabel: "relay.dawn.internal",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "9e03",
+    },
+    {
+      position: 4,
+      source: "chain",
+      mode: "local-mock",
+      baseUrl: "http://127.0.0.1:8088/v1",
+      endpointLabel: "127.0.0.1:8088",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "0000",
+    },
   ],
-  fallbackCount: 2,
-  attemptableCount: 2,
+  // `entries.count - 1`: fallbacks only. `ProviderCascade.attemptable` filters
+  // the WHOLE plan, so the head counts there and the parked hop does not, which
+  // is why the summary sentence has to name what it is counting.
+  fallbackCount: 4,
+  attemptableCount: 4,
+};
+
+// A fresh self-host instance: no operator link, so the head is the boot-time
+// HERMES_* env trio pointed at the bundled mock. This is what momowebqa answers
+// today, and the state the panel must describe as a MODE rather than a failure.
+const MOCK_ONLY_HOP = {
+  position: 0,
+  source: "environment",
+  mode: "local-mock",
+  baseUrl: "http://127.0.0.1:8088/v1",
+  endpointLabel: "127.0.0.1:8088",
+  enabled: true,
+  bearerConfigured: true,
+  bearerLast4: "0000",
 };
 
 // The probe result a review has to look at: the head fell over, the second hop
-// answered, the parked hop was skipped. Three dispositions, three tones, one
-// frame, and `cascadeOk: true` because a cascade that fell over to a working
+// answered, the parked hop was skipped, the fourth hop's key was rejected, and
+// the fifth is in a mock mode the probe declines to call at all. Every
+// disposition the server can emit, in one frame, with the tone each has to be
+// drawn in. `cascadeOk: true` because a cascade that fell over to a working
 // provider is the cascade doing its job.
 const PROVIDER_PROBE = {
   schema: "momo.provider_link.test.v0",
@@ -448,6 +489,31 @@ const PROVIDER_PROBE = {
       ok: false,
       reason: "hop_disabled",
       disposition: "skipped",
+    },
+    {
+      position: 3,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "relay.dawn.internal",
+      enabled: true,
+      ok: false,
+      // 401/403. A caller error does NOT fall over: the next provider would
+      // fail the same way, so the cascade stops here (--danger).
+      reason: "provider_auth_failed",
+      disposition: "propagate",
+    },
+    {
+      position: 4,
+      source: "chain",
+      mode: "local-mock",
+      endpointLabel: "127.0.0.1:8088",
+      enabled: true,
+      ok: false,
+      // `probeHop` returns before calling anything for a non-external mode. It
+      // arrives as `propagate`, but nothing failed and nothing was measured, so
+      // this row is muted 목 모드 and is excluded from the headline's counts.
+      reason: "not_external_provider",
+      disposition: "propagate",
     },
   ],
 };
@@ -929,6 +995,72 @@ async function captureScheme(browser, scheme) {
   const aiLegacyShot = `${OUT_DIR}/settings-ai-no-chain-${scheme}.png`;
   await aiLegacy.screenshot({ path: aiLegacyShot });
   shots.push(aiLegacyShot);
+
+  // 3j. the self-host DEFAULT: one hop, mock mode, no operator link. This frame
+  //     exists because the panel used to call it broken. `probeHop` never calls
+  //     a non-external hop, so the check measured nothing, and "지금은 실행이
+  //     실패합니다" was a false statement about an instance whose turns succeed
+  //     through the bundled mock. It has to read as a mode, not as an outage.
+  const aiMock = await context.newPage();
+  await aiMock.route("**/v1/provider/link/chain", (route) =>
+    json(route, {
+      schema: "momo.provider_link.chain.v0",
+      entries: [MOCK_ONLY_HOP],
+      fallbackCount: 0,
+      attemptableCount: 1,
+    })
+  );
+  await aiMock.route("**/v1/provider/link/test", (route) =>
+    json(route, {
+      schema: "momo.provider_link.test.v0",
+      ok: false,
+      reason: "not_external_provider",
+      source: "environment",
+      mode: "local-mock",
+      endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+      checkedAtMs: Date.now(),
+      cascadeOk: false,
+      entries: [
+        {
+          position: 0,
+          source: "environment",
+          mode: "local-mock",
+          endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+          enabled: true,
+          ok: false,
+          reason: "not_external_provider",
+          disposition: "propagate",
+        },
+      ],
+    })
+  );
+  // The singleton above the chain is overridden too, or the shot would show a
+  // saved anthropic link heading a mock cascade: a frame the server cannot
+  // produce, which makes the screenshot worse than no screenshot. Registered
+  // after the two above for the same reason installMocks does it in that order.
+  await aiMock.route("**/v1/provider/link", (route) =>
+    json(route, {
+      schema: "momo.provider_link.v0",
+      configured: false,
+      source: "environment",
+      mode: "local-mock",
+      baseUrl: MOCK_ONLY_HOP.baseUrl,
+      endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+      bearerConfigured: true,
+      availability: "mock",
+      keyConfigured: true,
+      diagnostics: [],
+    })
+  );
+  await aiMock.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiMock);
+  await aiMock.evaluate('location.hash = "/settings?section=ai"');
+  await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
+  await aiMock.getByRole("button", { name: "연결 확인" }).click();
+  await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
+  const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
+  await aiMock.screenshot({ path: aiMockShot });
+  shots.push(aiMockShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

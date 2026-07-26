@@ -89,8 +89,11 @@ function parseChainEntry(raw: unknown): ProviderChainEntry | null {
  * The chain body, or null when this answer is not one.
  *
  * `entries` is the field that decides: it must be present and an array. The two
- * counts are derived facts, so a body that omits them is still readable and the
- * fallback count is recomputed rather than shown as zero.
+ * counts are derived facts, so a body that omits them is still readable: the
+ * fallback count is recomputed from the rows, and the attemptable count is left
+ * ABSENT rather than defaulted. Zero is not a neutral placeholder here, it is
+ * the claim "no provider would be tried right now", and `chainSummary` would
+ * print it as one.
  */
 export function parseProviderChain(raw: unknown): ProviderChain | null {
   const source = record(raw);
@@ -101,11 +104,12 @@ export function parseProviderChain(raw: unknown): ProviderChain | null {
     .map(parseChainEntry)
     .filter((entry): entry is ProviderChainEntry => entry !== null);
   const fallbacks = entries.filter((entry) => entry.position >= 1).length;
+  const attemptable = num(source, "attemptableCount");
   return {
     schema: str(source, "schema") ?? "",
     entries,
     fallbackCount: num(source, "fallbackCount") ?? fallbacks,
-    attemptableCount: num(source, "attemptableCount") ?? 0,
+    ...(attemptable === undefined ? {} : { attemptableCount: attemptable }),
   };
 }
 
@@ -235,6 +239,19 @@ export function patchDraftRow(
 // ---- validation (mirrors the server, so a save is never a guaranteed 400) ----
 
 /**
+ * What is wrong with one row, and WHICH control it is wrong about.
+ *
+ * The field is carried, not inferred, because one row owns two inputs and a
+ * message that lands on the wrong one is worse than no message: "새 provider는
+ * 키를 입력해야 저장됩니다." printed under 주소 tells a person to fix the field
+ * they already filled in correctly.
+ */
+export interface DraftRowError {
+  field: "baseUrl" | "bearer";
+  message: string;
+}
+
+/**
  * What is wrong with one row, or null.
  *
  * The base URL rule is the singleton form's rule verbatim, and the key rule is
@@ -242,23 +259,31 @@ export function patchDraftRow(
  * with an empty key field is NOT an error, it is the documented way to keep a
  * key the API can never show anyone again.
  */
-export function draftRowError(row: ChainDraftRow): string | null {
+export function draftRowError(row: ChainDraftRow): DraftRowError | null {
   const url = row.baseUrl.trim();
-  if (url === "") return "provider 주소를 입력하세요.";
+  if (url === "") {
+    return { field: "baseUrl", message: "provider 주소를 입력하세요." };
+  }
   if (!/^https?:\/\/.+/.test(url)) {
-    return "주소는 http:// 또는 https:// 로 시작해야 합니다.";
+    return {
+      field: "baseUrl",
+      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+    };
   }
   if (row.isNew && row.bearer.trim() === "") {
-    return "새 provider는 키를 입력해야 저장됩니다.";
+    return {
+      field: "bearer",
+      message: "새 provider는 키를 입력해야 저장됩니다.",
+    };
   }
   return null;
 }
 
-/** Row key to message. Empty when the draft is savable. */
+/** Row key to error. Empty when the draft is savable. */
 export function draftErrors(
   rows: readonly ChainDraftRow[]
-): ReadonlyMap<string, string> {
-  const errors = new Map<string, string>();
+): ReadonlyMap<string, DraftRowError> {
+  const errors = new Map<string, DraftRowError>();
   for (const row of rows) {
     const error = draftRowError(row);
     if (error !== null) errors.set(row.key, error);
@@ -344,13 +369,28 @@ export function chainSaveMessage(error: unknown): string {
  * `attemptableCount` is the server's own number (enabled AND usable), so a
  * chain whose second hop is parked or half-written says how many providers a
  * turn would really try instead of counting rows on screen.
+ *
+ * The two numbers count DIFFERENT things and the sentence has to admit it:
+ * `fallbackCount` excludes position 0 (`entries.count - 1`) and
+ * `attemptableCount` includes it (`ProviderCascade.attemptable` filters the
+ * whole plan). Saying "폴백 2개, 시도되는 경로 2개" next to a row chipped 꺼둠
+ * reads as "both fallbacks are live", which is the opposite of what happened.
+ *
+ * A body that omits the attemptable count gets the first sentence only. The
+ * clause is dropped, never filled with a zero: this parser exists because a
+ * non-contract 200 is possible, and inventing "시도되는 경로는 0개" out of a
+ * missing key would be exactly the false claim it was written to prevent.
  */
 export function chainSummary(chain: ProviderChain): string {
   const fallbacks = chain.fallbackCount;
   if (fallbacks === 0) {
     return "폴백 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다.";
   }
-  return `폴백 provider ${fallbacks}개. 지금 실제로 시도되는 경로는 ${chain.attemptableCount}개입니다.`;
+  const attemptable = chain.attemptableCount;
+  if (attemptable === undefined) {
+    return `폴백 provider ${fallbacks}개를 두었습니다.`;
+  }
+  return `폴백 provider ${fallbacks}개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 ${attemptable}개입니다.`;
 }
 
 // ---- probe results ----------------------------------------------------------
@@ -369,14 +409,49 @@ export interface ProbeRow {
 }
 
 /**
+ * `ProviderLinkRoutes.probeHop`'s answer for a hop whose mode is not
+ * `external-hermes`. It is NOT a failure and it is not the operator's problem:
+ * the probe declined to call anything, because there is no external provider to
+ * call. It arrives as `disposition: propagate` only because a mock mode is a
+ * configuration fact rather than an outage, and reading that as "여기서 멈춤"
+ * turns the self-host default into a red row that claims a broken instance.
+ */
+const MOCK_MODE_REASON = "not_external_provider";
+
+/** Switched on and pointing at a real provider, so the probe actually called it. */
+function wasProbed(entry: ProviderChainProbe): boolean {
+  return (
+    entry.enabled &&
+    entry.disposition !== "skipped" &&
+    entry.reason !== MOCK_MODE_REASON
+  );
+}
+
+/** Switched on, but in a mock mode, so nothing was called and nothing is known. */
+function isMockMode(entry: ProviderChainProbe): boolean {
+  return (
+    entry.enabled &&
+    entry.disposition !== "skipped" &&
+    entry.reason === MOCK_MODE_REASON
+  );
+}
+
+/**
  * `disposition` to plain Korean.
  *
- * The four cases are not four shades of failure, they are four different
- * answers, and only one of them is the operator's problem right now:
+ * The cases are not shades of failure, they are different answers, and only one
+ * of them is the operator's problem right now:
  *   ok         the turn would be served here;
  *   fall_over  a provider-side outage: the cascade moves on, as designed;
  *   propagate  a caller/config error: nothing downstream will fix it;
- *   skipped    the operator parked this hop themselves.
+ *   skipped    the operator parked this hop themselves;
+ *   목 모드      nothing was called, so nothing was measured (see above).
+ *
+ * The reason sentence leads, and the consequence follows it. The old order put
+ * a fixed "응답하지 않아" in front of every fall_over, which contradicted itself
+ * the moment the reason was 429 or 503: the provider DID answer, it answered
+ * with a refusal ("응답하지 않아 다음 provider로 넘어갑니다. provider가 503로
+ * 답했습니다." was on screen).
  */
 function dispositionCopy(entry: ProviderChainProbe): {
   tone: ProbeTone;
@@ -397,17 +472,28 @@ function dispositionCopy(entry: ProviderChainProbe): {
       detail: "꺼져 있어 시도하지 않습니다.",
     };
   }
+  if (entry.reason === MOCK_MODE_REASON) {
+    return {
+      tone: "muted",
+      label: "목 모드",
+      // States what the probe did, and stops. Whether the mock answers a real
+      // turn is a different question this check never asked.
+      detail:
+        "모드가 목으로 되어 있어 이번 확인에서는 실제 provider를 부르지 않았습니다.",
+    };
+  }
+  const reason = probeReasonCopy(entry.reason);
   if (entry.disposition === "fall_over") {
     return {
       tone: "warn",
       label: "다음으로 넘어감",
-      detail: `응답하지 않아 다음 provider로 넘어갑니다. ${probeReasonCopy(entry.reason)}`,
+      detail: `${reason} 다음 provider로 넘어갑니다.`,
     };
   }
   return {
     tone: "danger",
     label: "여기서 멈춤",
-    detail: `설정 문제라 다음 provider로 넘기지 않고 여기서 실패합니다. ${probeReasonCopy(entry.reason)}`,
+    detail: `${reason} 다음 provider로 넘겨도 같은 이유로 실패하므로 여기서 멈춥니다.`,
   };
 }
 
@@ -426,6 +512,12 @@ export function probeReasonCopy(reason: string | undefined): string {
   }
   if (reason === "provider_not_configured") {
     return "주소나 키가 비어 있습니다.";
+  }
+  // 401/403 from `ProviderCascadeClassifier`, and the single most common
+  // operator mistake on this panel: a key that was pasted wrong or has been
+  // rotated away. It was falling through to the machine label.
+  if (reason === "provider_auth_failed") {
+    return "provider가 저장된 키를 받아들이지 않았습니다.";
   }
   if (reason === "provider_unreachable") {
     return "주소에 닿지 못했습니다.";
@@ -455,27 +547,72 @@ export function probeRows(entries: readonly ProviderChainProbe[]): ProbeRow[] {
   });
 }
 
+/** The headline over the probe rows, with the tone it has to be drawn in. */
+export interface ProbeSummary {
+  tone: ProbeTone;
+  text: string;
+}
+
 /**
  * The headline over the probe rows.
  *
  * `cascadeOk` is the server's own answer to "can this instance serve a turn at
- * all", so the headline states that and not a count the client re-derived. A
- * chain whose head failed but whose second hop answered is a WORKING instance,
- * and saying otherwise would send an operator to fix a provider that is doing
- * exactly what the cascade is for.
+ * all", so the serving case states that and not a count the client re-derived.
+ * A chain whose head failed but whose second hop answered is a WORKING
+ * instance, and saying otherwise would send an operator to fix a provider that
+ * is doing exactly what the cascade is for.
+ *
+ * The counts are over hops that were ACTUALLY CALLED, which is neither
+ * `entries.length` nor `cascadeOk`. Two kinds of row were never called and must
+ * not be counted as evidence of anything:
+ *
+ *   * a parked hop, which the operator switched off themselves;
+ *   * a hop in a mock mode, which `probeHop` declines to call outright.
+ *
+ * The second one is the reason this function was rewritten. A default self-host
+ * instance runs `local-mock`, so its only hop answers `not_external_provider`,
+ * and "확인한 provider 1개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다."
+ * was a false statement about an instance whose turns succeed (the mock answers
+ * them). Nothing was checked there, so nothing is asserted: the headline says
+ * the check found no real provider to call, and stops.
  */
-export function cascadeProbeHeadline(
+export function cascadeProbeSummary(
   cascadeOk: boolean,
   entries: readonly ProviderChainProbe[]
-): string {
-  const answered = entries.filter((entry) => entry.ok).length;
+): ProbeSummary {
+  const probed = entries.filter(wasProbed);
+  const answered = probed.filter((entry) => entry.ok).length;
   const first = entries.findIndex((entry) => entry.ok);
   // `cascadeOk` is the server's own `entries.contains { $0.ok }`, so the two
   // agree on a healthy server. They are still read independently: naming a hop
   // this client cannot find would print "0차", and a flag without a matching
   // row is the one case where the rows are the more trustworthy answer.
-  if (!cascadeOk || first < 0) {
-    return `확인한 provider ${entries.length}개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.`;
+  if (cascadeOk && first >= 0) {
+    return {
+      tone: "ok",
+      text: `${hopOrdinal(first)} provider가 응답했습니다. 확인한 ${probed.length}개 중 ${answered}개가 응답합니다.`,
+    };
   }
-  return `${hopOrdinal(first)} provider가 응답했습니다. 확인한 ${entries.length}개 중 ${answered}개가 응답합니다.`;
+  const mocked = entries.filter(isMockMode).length;
+  if (probed.length === 0) {
+    return mocked > 0
+      ? {
+          tone: "muted",
+          text: "확인할 수 있는 실제 provider가 없습니다. 모드가 목으로 되어 있어 이번 확인은 어디에도 요청하지 않았습니다.",
+        }
+      : {
+          tone: "warn",
+          text: "켜져 있는 provider가 없습니다. 하나 이상 켜야 실행할 수 있습니다.",
+        };
+  }
+  if (mocked > 0) {
+    return {
+      tone: "warn",
+      text: `확인한 provider ${probed.length}개 중 응답한 곳이 없습니다. 목 모드 provider는 이번 확인에서 부르지 않았습니다.`,
+    };
+  }
+  return {
+    tone: "warn",
+    text: `확인한 provider ${probed.length}개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.`,
+  };
 }

@@ -5,9 +5,9 @@ import {
   cascadeFor,
   cascadeKey,
   cascadeNoticeText,
-  cascadeOrdinal,
   cascadeReasonLabel,
   cascadeRouteText,
+  cascadeServedSubject,
   EMPTY_CASCADE,
   mergeCascadeFallback,
   parseCascadeFallback,
@@ -165,29 +165,58 @@ describe("which row carries the notice", () => {
 });
 
 describe("copy", () => {
-  it("counts the provider link as the first provider", () => {
-    expect(cascadeOrdinal(0)).toBe("1차");
-    expect(cascadeOrdinal(1)).toBe("2차");
+  it("names the provider that served the turn, never an attempt number", () => {
+    expect(cascadeServedSubject(parseCascadeFallback(frame())!)).toBe(
+      "gateway.dawn.internal:8443 프로바이더"
+    );
+  });
+
+  // The bug this replaced: `position + 1` printed an ordinal, and a position is
+  // not an ordinal. Deleting a middle hop leaves a permanent gap by design (a
+  // position is a credential's identity, settings/chainModel.ts rule 1), so the
+  // survivor at position 2 is the SECOND provider tried and the 연결 순서 list
+  // labels it "2차" while the frame carries `to: 2`. The old text announced
+  // "3차 프로바이더로 처리됨" for a 3차 that does not exist on that screen.
+  it("says nothing numeric about a hop that survived a gap-making delete", () => {
+    const gapped = parseCascadeFallback(
+      frame({ from: 0, to: 2, to_endpoint_label: "backup.dawn.internal" })
+    )!;
+    const text = cascadeNoticeText([gapped])!;
+    expect(text).toBe("backup.dawn.internal 프로바이더로 처리됨 (응답 없음)");
+    expect(text).not.toContain("차");
   });
 
   it("says which provider served the turn and why the first did not", () => {
     expect(cascadeNoticeText([parseCascadeFallback(frame())!])).toBe(
-      "2차 프로바이더로 처리됨 (응답 없음)"
+      "gateway.dawn.internal:8443 프로바이더로 처리됨 (응답 없음)"
     );
   });
 
-  // "3차" alone would hide that two providers were tried and two budgets were
-  // touched on the way, which is the fact the ADR asks the UI to surface.
+  // Naming only the survivor would hide that two providers were tried and two
+  // budgets were touched on the way, which is the fact the ADR asks for.
   it("states the transition count when more than one provider was spent", () => {
     const hops = [
       parseCascadeFallback(frame())!,
       parseCascadeFallback(
-        frame({ from: 1, to: 2, reason: "provider_rate_limited" })
+        frame({
+          from: 1,
+          to: 2,
+          reason: "provider_rate_limited",
+          to_endpoint_label: "backup.dawn.internal",
+        })
       )!,
     ];
     expect(cascadeNoticeText(hops)).toBe(
-      "3차 프로바이더로 처리됨 (전환 2번, 마지막 사유: 요청 한도 초과)"
+      "backup.dawn.internal 프로바이더로 처리됨 (전환 2번, 마지막 사유: 요청 한도 초과)"
     );
+  });
+
+  // A frame with no label is the one case where nothing can be named. It is
+  // hedged, not numbered: "예비" is what is actually known.
+  it("hedges rather than numbering when the server sent no label", () => {
+    expect(
+      cascadeNoticeText([parseCascadeFallback(frame({ to_endpoint_label: "" }))!])
+    ).toBe("예비 프로바이더로 처리됨 (응답 없음)");
   });
 
   // Absence of a notice is absence of evidence: there is no REST history for
@@ -210,21 +239,24 @@ describe("copy", () => {
     );
   });
 
-  it("renders the route from the first hop left to the last hop reached", () => {
+  // The headline already names where the turn landed, so the muted half names
+  // the one thing it does not: where it was supposed to run. No space before
+  // 에서, matching usageModel/Composer/approvalDecision.
+  it("names the provider the cascade left, without a space before the particle", () => {
     const hops = [
       parseCascadeFallback(frame())!,
       parseCascadeFallback(
         frame({ from: 1, to: 2, to_endpoint_label: "backup.dawn.internal" })
       )!,
     ];
-    expect(cascadeRouteText(hops)).toBe(
-      "api.anthropic.com 에서 backup.dawn.internal 로"
-    );
+    expect(cascadeRouteText(hops)).toBe("api.anthropic.com에서 넘어왔습니다");
   });
 
   it("stays silent rather than half-naming a route", () => {
     expect(
-      cascadeRouteText([parseCascadeFallback(frame({ to_endpoint_label: "" }))!])
+      cascadeRouteText([
+        parseCascadeFallback(frame({ from_endpoint_label: "" }))!,
+      ])
     ).toBeNull();
   });
 });

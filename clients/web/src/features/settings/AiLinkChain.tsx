@@ -13,7 +13,7 @@ import {
 } from "./api";
 import {
   addDraftRow,
-  cascadeProbeHeadline,
+  cascadeProbeSummary,
   CHAIN_UNREADABLE,
   chainErrorCopy,
   chainSaveMessage,
@@ -30,6 +30,7 @@ import {
   probeRows,
   removeDraftRow,
   type ChainDraftRow,
+  type DraftRowError,
 } from "./chainModel";
 import { choiceLabel, errorMessage, isOperatorDenied, maskedBearer, PROVIDER_MODES } from "./model";
 import {
@@ -116,7 +117,7 @@ function HopRow({
 }: {
   row: ChainDraftRow;
   index: number;
-  error: string | undefined;
+  error: DraftRowError | undefined;
   /**
    * A write is in flight. There is deliberately no `offline` here: everything
    * this row changes is DRAFT state, and the rail being down is answered by the
@@ -151,7 +152,13 @@ function HopRow({
         <span className="flex-1" />
         {/* Native checkbox: this bundle carries no Radix Switch, and the
             platform control already ships the label association, the keyboard
-            path and the checked state a screen reader announces. */}
+            path and the checked state a screen reader announces.
+
+            The accessible name carries the row, the visible one stays "사용":
+            eight fallback hops make eight identical "사용" stops otherwise, and
+            a screen reader user tabbing the list cannot tell which provider
+            they are about to park. Same rule as the three inputs below, and the
+            visible word is kept inside the name so speech input still matches. */}
         <label
           htmlFor={enabledId}
           className="flex shrink-0 cursor-pointer items-center gap-2 text-meta text-ink"
@@ -160,6 +167,7 @@ function HopRow({
             type="checkbox"
             id={enabledId}
             checked={row.enabled}
+            aria-label={`${ordinal} provider 사용`}
             onChange={(event) => onPatch({ enabled: event.target.checked })}
             className="accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           />
@@ -171,6 +179,7 @@ function HopRow({
             was perfectly able to make. */}
         <ConfirmButton
           label="삭제"
+          ariaLabel={`${ordinal} provider 삭제`}
           question={`${ordinal} provider를 목록에서 뺍니다.`}
           confirmLabel="빼기"
           disabled={busy}
@@ -179,11 +188,15 @@ function HopRow({
         />
       </div>
 
+      {/* The error goes to the control it is about. `draftRowError` names the
+          field for that reason: "새 provider는 키를 입력해야 저장됩니다."
+          rendered under 주소 sends a person to fix the one field they filled
+          in correctly. */}
       <Field
         label="provider 주소"
         htmlFor={urlId}
         hint="예: https://api.example.com/v1"
-        error={error ?? null}
+        error={error?.field === "baseUrl" ? error.message : null}
       >
         <Input
           id={urlId}
@@ -202,6 +215,7 @@ function HopRow({
             ? "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다."
             : `저장된 키 ${maskedBearer(row.bearerLast4)}. 비워 두면 그대로 둡니다.`
         }
+        error={error?.field === "bearer" ? error.message : null}
       >
         <Input
           id={bearerId}
@@ -241,13 +255,19 @@ export function ChainProbeResult({
   entries: ProviderChainProbe[];
 }) {
   const rows = probeRows(entries);
+  // Tone comes from the summary, not from `cascadeOk` alone: an instance whose
+  // only hop is a mock mode has cascadeOk false and nothing wrong with it, so
+  // it is drawn muted rather than as a warning about a failure that did not
+  // happen (see cascadeProbeSummary).
+  const summary = cascadeProbeSummary(cascadeOk, entries);
   return (
     <div className="flex flex-col gap-2" data-testid="chain-probe">
       <p
         role="status"
-        className={cn("text-meta", cascadeOk ? "text-ok" : "text-warn")}
+        data-tone={summary.tone}
+        className={cn("text-meta", PROBE_TONE[summary.tone])}
       >
-        {cascadeProbeHeadline(cascadeOk, entries)}
+        {summary.text}
       </p>
       <dl className="flex flex-col overflow-hidden rounded-md border border-line">
         {rows.map((row) => (
@@ -332,8 +352,13 @@ export function AiLinkChain({ offline }: { offline: boolean }) {
     // A server that predates the endpoint is not a broken panel: it is a server
     // with one provider, which is exactly what the block above already shows.
     const notYet = chainErrorCopy(query.error);
+    // …and on that server the intro lines are dropped, not just contradicted.
+    // "첫 provider가 응답하지 않으면 다음 순서로 넘어갑니다." is present tense
+    // about a behaviour this instance does not have, and leaving it above the
+    // correction put two opposite sentences in one screen (measured on
+    // momowebqa, light and dark). The correction is the whole answer here.
     return (
-      <Subsection title="연결 순서" lines={lines}>
+      <Subsection title="연결 순서" lines={notYet !== null ? undefined : lines}>
         {notYet !== null ? (
           <p className="text-body text-ink-muted" data-testid="chain-unavailable">
             {notYet}

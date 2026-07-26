@@ -3,7 +3,7 @@ import { ApiError } from "@/lib/api";
 import type { ProviderChain, ProviderChainProbe } from "./api";
 import {
   addDraftRow,
-  cascadeProbeHeadline,
+  cascadeProbeSummary,
   chainErrorCopy,
   chainSaveMessage,
   chainSummary,
@@ -77,6 +77,9 @@ const CHAIN: ProviderChain = {
     },
   ],
   fallbackCount: 2,
+  // `ProviderCascade.attemptable` filters the WHOLE plan, head included, so a
+  // live head plus one live fallback plus one parked fallback is 2, not 2
+  // fallbacks. The summary sentence has to say which it is counting.
   attemptableCount: 2,
 };
 
@@ -113,10 +116,13 @@ describe("wire parsing", () => {
     expect(parsed?.entries.map((e) => e.position)).toEqual([0, 1]);
   });
 
-  it("recomputes the fallback count when the server omitted it", () => {
+  // fallbackCount is recomputed because the rows carry it. attemptableCount is
+  // NOT: it depends on stored bearers this client never sees, so a default of 0
+  // would be an invented fact ("시도되는 경로 0개") rather than a missing one.
+  it("recomputes the fallback count and leaves the attemptable count absent", () => {
     const parsed = parseProviderChain({ entries: CHAIN.entries });
     expect(parsed?.fallbackCount).toBe(2);
-    expect(parsed?.attemptableCount).toBe(0);
+    expect(parsed?.attemptableCount).toBeUndefined();
   });
 
   it("falls back to the address when a row carries no label", () => {
@@ -241,21 +247,30 @@ describe("draft validation mirrors the server", () => {
   };
 
   it("asks for an address before anything else", () => {
-    expect(draftRowError(NEW_ROW)).toBe("provider 주소를 입력하세요.");
+    expect(draftRowError(NEW_ROW)).toEqual({
+      field: "baseUrl",
+      message: "provider 주소를 입력하세요.",
+    });
   });
 
   it("rejects an address the server's validatedBaseURL would reject", () => {
-    expect(draftRowError({ ...NEW_ROW, baseUrl: "api.example.com" })).toBe(
-      "주소는 http:// 또는 https:// 로 시작해야 합니다."
-    );
+    expect(draftRowError({ ...NEW_ROW, baseUrl: "api.example.com" })).toEqual({
+      field: "baseUrl",
+      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+    });
   });
 
   // "bearer is required for new chain position N" — a new row with no key is a
-  // guaranteed 400, so it is stopped here where the person can read why.
-  it("requires a key for a hop the server has never stored", () => {
+  // guaranteed 400, so it is stopped here where the person can read why. The
+  // field travels with the message: a key error rendered under provider 주소
+  // sends a person to fix the one input they already filled in correctly.
+  it("requires a key for a hop the server has never stored, and says so on the key", () => {
     expect(
       draftRowError({ ...NEW_ROW, baseUrl: "https://api.example.com/v1" })
-    ).toBe("새 provider는 키를 입력해야 저장됩니다.");
+    ).toEqual({
+      field: "bearer",
+      message: "새 provider는 키를 입력해야 저장됩니다.",
+    });
   });
 
   // The opposite case, and it is not an error: an empty key on a STORED hop is
@@ -379,14 +394,24 @@ describe("summary line", () => {
   });
 
   // attemptableCount is the server's number (enabled AND usable), so a parked
-  // or half-written hop is not counted as a route a turn would take.
-  it("reports the server's attemptable count, not the row count", () => {
+  // or half-written hop is not counted as a route a turn would take. It counts
+  // the head too, and the sentence names that: "폴백 2개, 경로 2개" beside a
+  // 꺼둠 chip read as "both fallbacks are live", the opposite of the truth.
+  it("reports the server's attemptable count and says the head is in it", () => {
     expect(chainSummary(CHAIN)).toBe(
-      "폴백 provider 2개. 지금 실제로 시도되는 경로는 2개입니다."
+      "폴백 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 2개입니다."
     );
     expect(chainSummary({ ...CHAIN, attemptableCount: 1 })).toBe(
-      "폴백 provider 2개. 지금 실제로 시도되는 경로는 1개입니다."
+      "폴백 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 1개입니다."
     );
+  });
+
+  // The clause is dropped, not filled with a zero. This parser exists because a
+  // non-contract 200 is possible, so "시도되는 경로는 0개입니다" out of a missing
+  // key would be exactly the invented fact it was written to prevent.
+  it("drops the attempt clause when the body carried no count", () => {
+    const parsed = parseProviderChain({ entries: CHAIN.entries })!;
+    expect(chainSummary(parsed)).toBe("폴백 provider 2개를 두었습니다.");
   });
 });
 
@@ -423,6 +448,23 @@ describe("probe results (entries[] + cascadeOk)", () => {
     },
   ];
 
+  /**
+   * What a default self-host instance answers, and what momowebqa answers
+   * today: no operator link, `HERMES_BASE_URL` pointing at the bundled mock, so
+   * `probeHop` returns before calling anything. `disposition: propagate` is the
+   * server's spelling for "a caller/config fact", not for "this failed".
+   */
+  const MOCK_HEAD: ProviderChainProbe = {
+    position: 0,
+    source: "environment",
+    mode: "local-mock",
+    endpointLabel: "127.0.0.1:8088",
+    enabled: true,
+    ok: false,
+    reason: "not_external_provider",
+    disposition: "propagate",
+  };
+
   it("labels each hop by attempt order and by what a turn would do", () => {
     expect(probeRows(ENTRIES)).toEqual([
       {
@@ -430,7 +472,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
         endpointLabel: "api.anthropic.com",
         tone: "warn",
         label: "다음으로 넘어감",
-        detail: "응답하지 않아 다음 provider로 넘어갑니다. 주소에 닿지 못했습니다.",
+        detail: "주소에 닿지 못했습니다. 다음 provider로 넘어갑니다.",
       },
       {
         ordinal: "2차",
@@ -469,30 +511,100 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(rows[0].tone).toBe("danger");
     expect(rows[0].label).toBe("여기서 멈춤");
     expect(rows[0].detail).toBe(
-      "설정 문제라 다음 provider로 넘기지 않고 여기서 실패합니다. provider가 401로 답했습니다."
+      "provider가 401로 답했습니다. 다음 provider로 넘겨도 같은 이유로 실패하므로 여기서 멈춥니다."
+    );
+  });
+
+  // The reason leads and the consequence follows it, because a fixed "응답하지
+  // 않아" contradicted itself the moment the reason was 429 or 5xx: the provider
+  // DID answer, it answered with a refusal.
+  it("does not call a 503 or a 429 an absence of response", () => {
+    const rows = probeRows([
+      { ...ENTRIES[0], reason: "provider_status_503" },
+      { ...ENTRIES[0], reason: "provider_rate_limited" },
+    ]);
+    expect(rows[0].detail).toBe(
+      "provider가 503로 답했습니다. 다음 provider로 넘어갑니다."
+    );
+    expect(rows[1].detail).toBe(
+      "요청 한도를 넘었습니다. 다음 provider로 넘어갑니다."
+    );
+    expect(rows.every((row) => !row.detail.includes("응답하지 않아"))).toBe(true);
+  });
+
+  // `probeHop` refuses to call a hop whose mode is not external-hermes and
+  // answers `not_external_provider` with `disposition: propagate`. That is a
+  // configuration fact, not an outage: drawing it danger "여기서 멈춤" told a
+  // default self-host instance it was broken while its turns were succeeding.
+  it("reads a mock-mode hop as a mode, not as a failure", () => {
+    const rows = probeRows([MOCK_HEAD]);
+    expect(rows[0].tone).toBe("muted");
+    expect(rows[0].label).toBe("목 모드");
+    expect(rows[0].detail).toBe(
+      "모드가 목으로 되어 있어 이번 확인에서는 실제 provider를 부르지 않았습니다."
     );
   });
 
   // A cascade that fell over to a working hop is the cascade WORKING. Reporting
-  // it as broken sends an operator to fix a provider that is doing its job.
+  // it as broken sends an operator to fix a provider that is doing its job. The
+  // count is over hops that were actually CALLED, so the parked third one is
+  // not counted as something that was checked.
   it("headlines a fallen-over-but-serving chain as serving", () => {
-    expect(cascadeProbeHeadline(true, ENTRIES)).toBe(
-      "2차 provider가 응답했습니다. 확인한 3개 중 1개가 응답합니다."
-    );
+    expect(cascadeProbeSummary(true, ENTRIES)).toEqual({
+      tone: "ok",
+      text: "2차 provider가 응답했습니다. 확인한 2개 중 1개가 응답합니다.",
+    });
   });
 
   it("headlines a chain nobody answered as a chain that fails now", () => {
     expect(
-      cascadeProbeHeadline(false, [ENTRIES[0], { ...ENTRIES[1], ok: false }])
-    ).toBe("확인한 provider 2개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.");
+      cascadeProbeSummary(false, [ENTRIES[0], { ...ENTRIES[1], ok: false }])
+    ).toEqual({
+      tone: "warn",
+      text: "확인한 provider 2개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.",
+    });
+  });
+
+  // The self-host default, and the sentence that was false. A momowebqa-shaped
+  // instance serves its turns through the mock and answers them, while this
+  // table said "지금은 실행이 실패합니다" about a check that called nothing.
+  it("never claims a failure for an instance whose only hop is a mock", () => {
+    const summary = cascadeProbeSummary(false, [MOCK_HEAD]);
+    expect(summary).toEqual({
+      tone: "muted",
+      text: "확인할 수 있는 실제 provider가 없습니다. 모드가 목으로 되어 있어 이번 확인은 어디에도 요청하지 않았습니다.",
+    });
+    expect(summary.text).not.toContain("실패");
+  });
+
+  // Mixed: one real hop was called and did not answer, one mock hop was never
+  // called, so what a turn would do is not this check's to state.
+  it("reports what was checked and not the fate of what was not", () => {
+    expect(
+      cascadeProbeSummary(false, [
+        { ...ENTRIES[0], ok: false },
+        { ...MOCK_HEAD, position: 1, source: "chain" },
+      ])
+    ).toEqual({
+      tone: "warn",
+      text: "확인한 provider 1개 중 응답한 곳이 없습니다. 목 모드 provider는 이번 확인에서 부르지 않았습니다.",
+    });
+  });
+
+  it("says so when every hop is parked", () => {
+    expect(cascadeProbeSummary(false, [{ ...ENTRIES[2], position: 0 }])).toEqual({
+      tone: "warn",
+      text: "켜져 있는 provider가 없습니다. 하나 이상 켜야 실행할 수 있습니다.",
+    });
   });
 
   // A flag with no matching row would otherwise name "0차", a hop that does not
   // exist. The rows are the more trustworthy answer when the two disagree.
   it("trusts the rows over a cascadeOk flag they do not support", () => {
-    expect(
-      cascadeProbeHeadline(true, [{ ...ENTRIES[0], ok: false }])
-    ).toBe("확인한 provider 1개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.");
+    expect(cascadeProbeSummary(true, [{ ...ENTRIES[0], ok: false }])).toEqual({
+      tone: "warn",
+      text: "확인한 provider 1개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.",
+    });
   });
 
   it("translates every reason the probe can emit, generated ones included", () => {
@@ -504,6 +616,14 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(probeReasonCopy("probe_not_run")).toBe("확인이 끝나지 않았습니다.");
     expect(probeReasonCopy("provider_status_503")).toBe("provider가 503로 답했습니다.");
     expect(probeReasonCopy(undefined)).toBe("");
+  });
+
+  // 401/403, and the most common operator mistake on this panel: a key pasted
+  // wrong or rotated away. It was reaching the screen as the machine label.
+  it("translates the auth failure the classifier names in its own comment", () => {
+    expect(probeReasonCopy("provider_auth_failed")).toBe(
+      "provider가 저장된 키를 받아들이지 않았습니다."
+    );
   });
 
   it("names an unmapped reason as the server's report, never bare", () => {
