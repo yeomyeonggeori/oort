@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { queryClient } from "@/app/queryClient";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
@@ -174,8 +175,15 @@ export function SettingsRoute() {
           <RenderErrorBoundary
             key={section}
             title="이 설정을 열지 못했습니다"
-            message="서버에서 받은 설정을 읽지 못했습니다. 다시 시도하세요."
-            retryLabel="다시 시도"
+            message="서버에서 받은 설정을 읽지 못했습니다."
+            retryLabel="다시 불러오기"
+            // Remounting alone re-reads the same cache — `staleTime` is 30s, so
+            // within that window nothing is even refetched and the section
+            // throws again on the same data. The action has to change the
+            // inputs to mean anything, so the cache goes first.
+            onRetry={() => {
+              void queryClient.resetQueries();
+            }}
           >
           {section === "account" && <AccountSection />}
           {section === "notifications" && <NotificationRulesSection />}

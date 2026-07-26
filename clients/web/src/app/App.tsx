@@ -43,28 +43,40 @@ export function App() {
   return (
     <HashRouter>
       <Routes>
+        {/* 라우트 실패는 AppShell 안쪽 경계가 받는다. 여기까지 올라온 것은 셸
+         * 자체가 서지 못한 경우뿐이라 사이드바도 설정도 남지 않는다. 그래서 이
+         * 폴백의 행동은 새로고침이 아니라 입력을 바꾸는 것이어야 한다 — 같은
+         * 주소로 다시 열면 방금 무너진 그 상태로 돌아올 뿐이고, 서버를 다시 고를
+         * 길은 연결 화면에만 있다. */}
         <Route
           element={
             <RenderErrorBoundary
-              title="화면을 열지 못했습니다"
-              message="이 화면을 다시 열어보세요. 문제가 계속되면 서버 연결을 확인하세요."
-              retryLabel="앱 다시 열기"
-              onRetry={() => window.location.reload()}
-            ><AppShell
-              session={session}
-              onLogout={() => {
-                // Cached workspace data belongs to the session that is ending,
-                // so it goes with it: no roster, channel or read-state row from
-                // the previous member survives into the next login.
+              title="momo를 열지 못했습니다"
+              message="이 서버에서 받은 내용을 읽지 못했습니다. 연결 화면에서 서버 주소를 다시 확인할 수 있습니다."
+              retryLabel="연결 화면으로"
+              onRetry={() => {
                 signOut();
                 queryClient.clear();
-                // The 사용량 fallbacks live outside the query cache (they have
-                // to outlive the failing query), so they are cleared by hand
-                // here: the cost ledger and the provider quota gauges alike.
                 forgetUsage();
                 forgetQuota();
               }}
-            /></RenderErrorBoundary>
+            >
+              <AppShell
+                session={session}
+                onLogout={() => {
+                  // Cached workspace data belongs to the session that is ending,
+                  // so it goes with it: no roster, channel or read-state row from
+                  // the previous member survives into the next login.
+                  signOut();
+                  queryClient.clear();
+                  // The 사용량 fallbacks live outside the query cache (they have
+                  // to outlive the failing query), so they are cleared by hand
+                  // here: the cost ledger and the provider quota gauges alike.
+                  forgetUsage();
+                  forgetQuota();
+                }}
+              />
+            </RenderErrorBoundary>
           }
         >
           <Route index element={<ChatShell />} />
