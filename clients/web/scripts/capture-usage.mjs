@@ -451,6 +451,27 @@ async function captureScheme(browser, scheme) {
     await page.getByTestId("usage-totals").waitFor({ state: "visible" });
   });
 
+  // 6d-2. 로딩: the block's own wait, which had never been photographed (R1 M3
+  //       had to measure it with a probe instead). The bars are shaped like one
+  //       provider and its two gauges rather than six generic rows, so the
+  //       ledger below does not jump when the read lands: measured 231px waiting
+  //       against 227px settled for a one-provider server.
+  {
+    let release = () => {};
+    const held = new Promise((r) => {
+      release = r;
+    });
+    await withQuota(
+      "quota-loading",
+      () => held.then(() => anchoredQuota(QUOTA.healthy)),
+      async (page) => {
+        await page.getByTestId("usage-quota-skeleton").waitFor({ state: "attached" });
+        await page.getByTestId("usage-totals").waitFor({ state: "visible" });
+      }
+    );
+    release();
+  }
+
   // 6e. 마지막 확인값: one good answer, then the server stops answering. The
   //     cached gauges keep rendering, undimmed, and the banner states when they
   //     were confirmed (레퍼런스 §5, Claude Code `Showing last-known usage`).

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import fixtures from "./quotaFixtures.json";
 import {
   QUOTA_FRESH_SECONDS,
+  QUOTA_TICK_MS,
   agedSeconds,
   forgetQuota,
   formatCheckedAt,
@@ -131,14 +132,18 @@ describe("groupByProvider", () => {
 });
 
 describe("labels", () => {
-  it("names the two windows", () => {
-    expect(windowLabel("short")).toBe("짧은 창");
+  it("names the two windows in the reader's vocabulary, not the wire's", () => {
+    // R1 M5: `short` was rendered as its direct translation 짧은 창, and 창 beside
+    // 주간 in a desktop app reads as an application window first.
+    expect(windowLabel("short")).toBe("단기");
     expect(windowLabel("weekly")).toBe("주간");
   });
 
   it("gives an unnamed provider a noun, never a blank heading", () => {
     expect(providerLabel("anthropic")).toBe("anthropic");
-    expect(providerLabel("   ")).toBe("이름 없는 프로바이더");
+    // R1 H2: this panel is read by every member, so the actor is called what
+    // the rest of the panel calls it (AI 제공자), not what the engine calls it.
+    expect(providerLabel("   ")).toBe("이름 없는 AI 제공자");
   });
 });
 
@@ -164,8 +169,8 @@ describe("agedSeconds", () => {
   const snapshot = healthy.snapshots[0];
 
   it("adds the time the answer has been held in this tab", () => {
-    // Nothing re-renders this panel on a timer, so an unadjusted ageSeconds
-    // would freeze at 3분 전 and start lying about its own age.
+    // An unadjusted ageSeconds freezes at 3분 전 and starts lying about its own
+    // age. What makes the addition move is QUOTA_TICK_MS, not a refetch.
     expect(agedSeconds(snapshot, 0)).toBe(224);
     expect(agedSeconds(snapshot, 600_000)).toBe(824);
   });
@@ -173,14 +178,48 @@ describe("agedSeconds", () => {
   it("never runs a clock backwards", () => {
     expect(agedSeconds(snapshot, -60_000)).toBe(224);
   });
+
+  it("ticks often enough that no displayed step is ever skipped", () => {
+    // R1 H1: nothing moved the clock at all, so a reading stayed 방금 전 for as
+    // long as the panel was open and never crossed into 오래된 값. The tick has
+    // to be shorter than the smallest step the display can take, which is the
+    // 60s boundary between 방금 전 and 1분 전.
+    expect(QUOTA_TICK_MS).toBeLessThanOrEqual(60_000);
+    expect(QUOTA_TICK_MS).toBeGreaterThanOrEqual(30_000);
+    const before = quotaAge(agedSeconds({ ...snapshot, ageSeconds: 30 }, 0));
+    const after = quotaAge(
+      agedSeconds({ ...snapshot, ageSeconds: 30 }, QUOTA_TICK_MS)
+    );
+    expect(before.amount).toBeNull();
+    expect(after.amount).toBe(1);
+  });
 });
 
 describe("quotaReset", () => {
   it("says 오늘 for an instant later today", () => {
     expect(quotaReset("2026-07-26T13:00:00Z", NOW)).toEqual({
+      day: "오늘",
+      clock: "22:00",
+      verb: "리셋",
       text: "오늘 22:00 리셋",
       passed: false,
     });
+  });
+
+  it("keeps the day word and the clock apart so only the digits are a figure", () => {
+    // R1 M7: the component marks `clock` with data-numeric, and the age on the
+    // same 11px line already carries it. One line, one number treatment.
+    const reset = quotaReset("2026-07-26T13:00:00Z", NOW);
+    expect(reset?.day).toBe("오늘");
+    expect(reset?.clock).toBe("22:00");
+    expect(`${reset?.day} ${reset?.clock} ${reset?.verb}`).toBe(reset?.text);
+  });
+
+  it("folds a date into the figure, because a date is digits too", () => {
+    const reset = quotaReset("2026-08-10T01:00:00Z", NOW);
+    expect(reset?.day).toBe("");
+    expect(reset?.clock).toBe("2026-08-10 10:00");
+    expect(reset?.text).toBe("2026-08-10 10:00 리셋");
   });
 
   it("says 내일 for tomorrow, even a few hours away across midnight", () => {
@@ -203,7 +242,13 @@ describe("quotaReset", () => {
 
   it("marks an instant already behind us and writes it in the past tense", () => {
     const reset = quotaReset("2026-07-26T04:00:00Z", NOW);
-    expect(reset).toEqual({ text: "오늘 13:00 리셋됨", passed: true });
+    expect(reset).toEqual({
+      day: "오늘",
+      clock: "13:00",
+      verb: "리셋됨",
+      text: "오늘 13:00 리셋됨",
+      passed: true,
+    });
   });
 
   it("has nothing to say when the provider reported no reset", () => {
@@ -224,16 +269,21 @@ describe("quotaGauge", () => {
     ).toBe(99);
   });
 
-  it("leaves a healthy gauge uncoloured and unchipped", () => {
-    // The calm state gets neither a chip nor a coloured bar: a column of 여유
-    // chips over green bars is a status board reporting that nothing is
-    // happening, and colour on this block has to mean "look at this one".
+  it("leaves a healthy gauge unchipped and its bar on the accent", () => {
+    // The calm state gets no STATUS colour: a column of 여유 chips over green
+    // bars is a status board reporting that nothing is happening, and status
+    // colour on this block has to mean "look at this one".
+    //
+    // The bar is still accent rather than neutral (R1 M10). Neutral is
+    // --line-strong, which is what the 모델별/에이전트별 share bars two blocks
+    // down already draw, and those fill the opposite way: a full share bar is
+    // the biggest spender, a full remaining bar is an untouched subscription.
     const gauge = quotaGauge(anthropicShort, NOW, 0);
     expect(gauge.tone).toBe("ok");
     expect(gauge.stateLabel).toBeNull();
-    expect(gauge.barTone).toBe("neutral");
+    expect(gauge.barTone).toBe("accent");
     expect(gauge.outdated).toBe(false);
-    expect(gauge.windowLabel).toBe("짧은 창");
+    expect(gauge.windowLabel).toBe("단기");
     expect(gauge.reset?.text).toBe("오늘 22:00 리셋");
     expect(gauge.age).toEqual({ amount: 3, unit: "분", stale: false });
   });
@@ -252,12 +302,23 @@ describe("quotaGauge", () => {
 
   it("gives the bar the chip's tone wherever there is a chip", () => {
     // tokens.md §5a: a bar and the chip beside it can never tell different
-    // stories. Where there is no chip there is no colour either.
+    // stories. Where there is no chip the bar carries no status token either,
+    // and draws the accent a determinate measure takes.
     const at = (ratio: number) =>
       quotaGauge({ ...anthropicWeekly, remainingRatio: ratio }, NOW, 0);
-    expect(at(0.6)).toMatchObject({ stateLabel: null, barTone: "neutral" });
+    expect(at(0.6)).toMatchObject({ stateLabel: null, barTone: "accent" });
     expect(at(0.2)).toMatchObject({ stateLabel: "주의", barTone: "warn" });
     expect(at(0.05)).toMatchObject({ stateLabel: "임박", barTone: "danger" });
+  });
+
+  it("keeps the remaining bar off the share bars' token", () => {
+    // R1 M10 measured the calm gauge pixel-identical to a 모델별 share bar. The
+    // only tone this block draws in --line-strong now is the one that is not a
+    // live measure of anything.
+    const live = quotaGauge(anthropicShort, NOW, 0);
+    const outdated = quotaGauge(stale.snapshots[0], NOW, 0);
+    expect(live.barTone).not.toBe("neutral");
+    expect(outdated.barTone).toBe("neutral");
   });
 
   it("tones the near-limit fixture the way its numbers read", () => {
@@ -278,15 +339,24 @@ describe("quotaGauge", () => {
 
   it("removes the state colour from a reading old enough to be wrong", () => {
     // 7.5 hours old AND past its own reset: an old 19% may have been 100% for
-    // most of that time, so it is shown, aged, and no longer toned.
+    // most of that time, so it is shown, aged, and no longer toned. The reset
+    // is the stronger of the two reasons, so it is the one the chip names.
     const gauge = quotaGauge(stale.snapshots[0], NOW, 0);
     expect(gauge.remainingPercent).toBe(19);
     expect(gauge.tone).toBe("neutral");
     expect(gauge.barTone).toBe("neutral");
-    expect(gauge.stateLabel).toBe("오래된 값");
+    expect(gauge.stateLabel).toBe("리셋 지남");
     expect(gauge.outdated).toBe(true);
     expect(gauge.age).toEqual({ amount: 7, unit: "시간", stale: true });
-    expect(gauge.reset).toEqual({ text: "오늘 13:00 리셋됨", passed: true });
+    expect(gauge.reset?.text).toBe("오늘 13:00 리셋됨");
+  });
+
+  it("calls an old reading 오래된 값 only when age is the reason", () => {
+    // Weekly resets on 화요일, so this one is outdated by age alone.
+    const gauge = quotaGauge(stale.snapshots[1], NOW, 0);
+    expect(gauge.reset?.passed).toBe(false);
+    expect(gauge.age.stale).toBe(true);
+    expect(gauge.stateLabel).toBe("오래된 값");
   });
 
   it("treats a passed reset as outdated even when the reading is fresh", () => {
@@ -300,6 +370,20 @@ describe("quotaGauge", () => {
     expect(gauge.age.stale).toBe(false);
     expect(gauge.tone).toBe("neutral");
     expect(gauge.outdated).toBe(true);
+  });
+
+  it("never calls a 41-second-old reading 오래된 값", () => {
+    // R1 M1, measured: `[오래된 값] … 마지막 확인 방금 전` on one line, where the
+    // real reason was a reset that had passed. One of the two had to be false;
+    // now the chip names the reason it actually has.
+    const gauge = quotaGauge(
+      { ...nearLimit.snapshots[0], resetsAt: "2026-07-26T04:00:00Z" },
+      NOW,
+      0
+    );
+    expect(gauge.age).toEqual({ amount: null, unit: "", stale: false });
+    expect(gauge.stateLabel).toBe("리셋 지남");
+    expect(gauge.stateLabel).not.toBe("오래된 값");
   });
 
   it("ages out a fresh gauge once the answer has been held long enough", () => {
@@ -518,9 +602,26 @@ describe("quotaAnnouncement", () => {
       lastKnown: null,
       nowMs: NOW,
     });
+    // 단기 takes 가 and 주간 takes 이 (koreanParticle.ts): a live region that
+    // reads "단기이(가)" is a machine refusing to decide out loud.
     expect(quotaAnnouncement(view, NOW)).toBe(
-      "구독 잔여량을 불러왔습니다. 가장 적게 남은 창은 anthropic 짧은 창 4% 남음입니다."
+      "구독 잔여량을 불러왔습니다. anthropic 단기가 4%로 가장 적게 남았습니다."
     );
+  });
+
+  it("attaches the right subject particle to either window name", () => {
+    const view = (data: QuotaSnapshots) =>
+      quotaView({
+        data,
+        dataUpdatedAtMs: NOW,
+        errorMessage: null,
+        paused: false,
+        lastKnown: null,
+        nowMs: NOW,
+      });
+    // healthy: the lowest live gauge is anthropic weekly at 41%.
+    expect(quotaAnnouncement(view(healthy), NOW)).toContain("주간이 41%로");
+    expect(quotaAnnouncement(view(nearLimit), NOW)).toContain("단기가 4%로");
   });
 
   it("says the list is empty rather than reading a number that is not there", () => {
@@ -535,7 +636,10 @@ describe("quotaAnnouncement", () => {
     expect(quotaAnnouncement(view, NOW)).toBe("보고된 구독 잔여량이 없습니다.");
   });
 
-  it("says the readings are old when every one of them is", () => {
+  it("says every reading is unusable without claiming they are all old", () => {
+    // A gauge drops out of this sentence for two different reasons (age, or a
+    // window that has since reset), so the sentence names the consequence they
+    // share rather than one of the two causes.
     const view = quotaView({
       data: stale,
       dataUpdatedAtMs: NOW,
@@ -544,7 +648,9 @@ describe("quotaAnnouncement", () => {
       lastKnown: null,
       nowMs: NOW,
     });
-    expect(quotaAnnouncement(view, NOW)).toContain("오래된 값");
+    expect(quotaAnnouncement(view, NOW)).toBe(
+      "구독 잔여량을 불러왔습니다. 모두 지금 잔여율과 다를 수 있는 값입니다."
+    );
   });
 
   it("stays silent where a banner already speaks", () => {

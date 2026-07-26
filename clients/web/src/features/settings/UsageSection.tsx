@@ -140,8 +140,14 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
     lastKnown: recallUsage(workspaceId, scope),
   });
 
+  // The lead is a static sentence and the block above it is a read that can
+  // fail, so a lead that promises 잔여량 was false on every server that answers
+  // 404 there, which today is all of them (R1 M9: the panel said "AI 구독의
+  // 잔여량과 ... 비용입니다" two lines above "이 서버는 아직 구독 잔여량을
+  // 제공하지 않습니다"). The ledger is what this section always has; the gauges
+  // are conditional, and the sentence says so in that order.
   const lines = [
-    "이 서버가 연결한 AI 구독의 잔여량과, 이 워크스페이스에서 에이전트가 쓴 비용입니다.",
+    "이 워크스페이스에서 에이전트가 쓴 비용입니다. 이 서버가 AI 구독 잔여량을 제공하면 위에 함께 표시됩니다.",
     "워크스페이스 멤버라면 누구나 볼 수 있습니다.",
   ];
 

@@ -27,6 +27,8 @@
 //     sentence this surface can say by accident.
 // =============================================================================
 
+import { attachParticle } from "@/lib/koreanParticle";
+
 /** The two windows the contract accepts. 레퍼런스 §5: Claude and Codex both
  *  publish a short rolling window and a weekly one, and that pair has become the
  *  de facto standard. Anything else on the wire is not a gauge we can name. */
@@ -158,13 +160,28 @@ export function groupByProvider(snapshots: QuotaSnapshot[]): QuotaProvider[] {
 }
 
 /** An operator slug is the label. A row with no name gets a noun, never a blank
- *  heading (same rule as modelRowLabel in usageModel). */
+ *  heading (same rule as modelRowLabel in usageModel).
+ *
+ *  "AI 제공자" and not "프로바이더": this panel is read by every member of the
+ *  workspace, and `provider` is what the AI 연결 panel calls the same thing to an
+ *  operator (SKILL §7, and the same decision UsageSection made two blocks down
+ *  for 확정 값 copy). One actor, one name, inside one panel. */
 export function providerLabel(providerRef: string): string {
-  return providerRef.trim() || "이름 없는 프로바이더";
+  return providerRef.trim() || "이름 없는 AI 제공자";
 }
 
+/**
+ * The two windows, named in the reader's vocabulary rather than transliterated
+ * from the wire.
+ *
+ * The contract field is `short`, and "짧은 창" was its direct translation, but
+ * "창" beside 주간 in a desktop app reads as a window of the application first
+ * and as a rolling quota period second. The provider owns the length (Claude's
+ * short window is 5 hours, Codex's is not), so the label cannot state one, and
+ * 단기/주간 is the pair that carries the same distinction with no second reading.
+ */
 const WINDOW_LABELS: Record<QuotaWindow, string> = {
-  short: "짧은 창",
+  short: "단기",
   weekly: "주간",
 };
 
@@ -183,13 +200,36 @@ export function windowLabel(window: QuotaWindow): string {
 export const QUOTA_FRESH_SECONDS = 3_600;
 
 /**
+ * How often the block recomputes its own clock (ProviderQuotaBlock ticks on it).
+ *
+ * The elapsed-time arithmetic below is only true if something makes the panel
+ * render again, and MOMO-628 R1 measured that nothing did: the query has no
+ * `refetchInterval`, `queryClient.ts` sets `refetchOnWindowFocus: false`, and a
+ * settings panel with a healthy realtime connection receives no other update at
+ * all. Over 90 seconds with the panel open and the window focused, the measured
+ * count of quota fetches was 0 and of re-renders 1 (an unrelated app event). So
+ * `마지막 확인 3분 전` stayed 3분 for as long as the panel was open, a reading
+ * never crossed QUOTA_FRESH_SECONDS, and a 4% gauge whose reset had since passed
+ * kept its danger chip and its red bar.
+ *
+ * 30 seconds is the coarsest tick that still turns 방금 전 into 1분 전 within one
+ * step of it being true, and it is not motion: it carries no `prefers-reduced-
+ * motion` branch, because a clock that stops for a reduced-motion reader is a
+ * clock that lies to them.
+ */
+export const QUOTA_TICK_MS = 30_000;
+
+/**
  * The server's age plus however long its answer has been sitting in this tab.
  *
- * Nothing re-renders this panel on a timer, so a bare `ageSeconds` would freeze
- * at whatever it said when the response landed and quietly start lying about its
- * own age. Adding the elapsed time means every render (react-query refetches on
- * window focus, so returning to the tab is one) recomputes it upward, and the
- * 마지막 확인값 branch is measured from the instant it was actually confirmed.
+ * A bare `ageSeconds` freezes at whatever it said when the response landed and
+ * quietly starts lying about its own age. Adding the elapsed time means every
+ * render recomputes it upward, and the 마지막 확인값 branch is measured from the
+ * instant it was actually confirmed. What produces those renders is
+ * QUOTA_TICK_MS, not a refetch: the number itself is only as new as the last
+ * adapter probe, so polling the endpoint would spend requests without making the
+ * figure fresher, while the age and the suppression it drives have to keep
+ * moving on their own.
  */
 export function agedSeconds(snapshot: QuotaSnapshot, elapsedMs: number): number {
   return snapshot.ageSeconds + Math.max(0, Math.floor(elapsedMs / 1000));
@@ -247,6 +287,21 @@ function calendarDayDelta(fromMs: number, toMs: number): number {
  * characters, so anything past this week falls back to the date.
  */
 export interface QuotaReset {
+  /**
+   * The day word, or "" when the day is itself a figure.
+   *
+   * Split from the clock so the component can mark the digits and only the
+   * digits. tokens.md §4 puts clocks in the same `data-numeric` set as counters
+   * and costs, and the age on the same 11px line already carries it: one line
+   * that sets 14:50 in the sans stack and 3분 in tabular mono is one line with
+   * two number treatments in it.
+   */
+  day: string;
+  /** The numeric run: `22:00`, or `2026-08-10 10:00` once the day is a date. */
+  clock: string;
+  /** 리셋 / 리셋됨. */
+  verb: string;
+  /** The three joined with spaces: the live region and the tests read this. */
   text: string;
   /** The instant is already behind us: the ratio beside it predates a reset. */
   passed: boolean;
@@ -258,20 +313,33 @@ export function quotaReset(iso: string | null, nowMs: number): QuotaReset | null
   if (Number.isNaN(ms)) return null;
 
   const at = new Date(ms);
-  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
   const delta = calendarDayDelta(nowMs, ms);
 
   let day: string;
+  let clock = time;
   if (delta === 0) day = "오늘";
   else if (delta === 1) day = "내일";
   else if (delta === -1) day = "어제";
   else if (delta > 1 && delta <= 6) day = `${WEEKDAYS[at.getDay()]}요일`;
   else {
-    day = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+    // Past this week the day is a date, which is one uninterrupted run of
+    // digits with the clock: it belongs to the figure, not to the word.
+    day = "";
+    clock =
+      `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ` +
+      time;
   }
 
   const passed = ms <= nowMs;
-  return { text: `${day} ${clock} ${passed ? "리셋됨" : "리셋"}`, passed };
+  const verb = passed ? "리셋됨" : "리셋";
+  return {
+    day,
+    clock,
+    verb,
+    text: [day, clock, verb].filter(Boolean).join(" "),
+    passed,
+  };
 }
 
 // ---- one gauge --------------------------------------------------------------
@@ -288,18 +356,28 @@ export interface QuotaGauge {
   /** The truth about the reading. Drives the figure's colour and the chip's. */
   tone: QuotaTone;
   /**
-   * What the bar draws, which is the chip's tone or nothing.
+   * What the bar draws.
    *
    * tokens.md §5a says a state bar names its tone in EVERY state including ok,
    * so a green chip never sits beside an amber bar. That rule was written for
    * the 예산 block, which is ONE bar; this block is up to two per provider, and
    * a column of 여유 chips over green bars is a status board reporting that
-   * nothing is happening. So the calm state is given neither: no chip, a
-   * neutral bar, and the figure in ink. The invariant §5a protects still holds
-   * because the chip and the bar are still driven by one value, and colour here
-   * only ever means "look at this one".
+   * nothing is happening. So the calm state gets no chip. The invariant §5a
+   * protects still holds because the chip and the bar are driven by one value,
+   * and status colour here only ever means "look at this one".
+   *
+   * The calm bar is `accent` rather than `neutral` (MOMO-628 R1 M10). Neutral is
+   * `--line-strong`, which is exactly what the 모델별/에이전트별 share bars in
+   * the block below draw, so the two were pixel-identical while filling in
+   * opposite directions: a full share bar is the largest spender, a full
+   * remaining bar is a subscription barely touched. Accent is the fill this
+   * client already gives a determinate measure of its own supply (설정 >
+   * 업데이트), which is what a remaining ratio is, and it is not a status token,
+   * so it cannot be read as a fourth severity. `neutral` stays as the fill for
+   * an OUTDATED gauge, where grey now says what it should: this is not a live
+   * measure of anything.
    */
-  barTone: "neutral" | "warn" | "danger";
+  barTone: "accent" | "neutral" | "warn" | "danger";
   /** Chip copy, null when the gauge has nothing the number does not say. */
   stateLabel: string | null;
   age: QuotaAge;
@@ -336,8 +414,15 @@ export function quotaGauge(
         ? "warn"
         : "ok";
 
-  const stateLabel =
-    tone === "neutral"
+  // The two ways to be outdated get two chips, because they are two different
+  // sentences and one of them was measured contradicting the line it sits on
+  // (MOMO-628 R1 M1): a 41-second-old reading whose window had already reset
+  // rendered as `[오래된 값] … 마지막 확인 방금 전`, so either the chip or the age
+  // had to be false. A passed reset is not an old reading, it is a current
+  // reading of a window that no longer exists, and it says so.
+  const stateLabel = reset?.passed
+    ? "리셋 지남"
+    : age.stale
       ? "오래된 값"
       : tone === "danger"
         ? "임박"
@@ -350,7 +435,12 @@ export function quotaGauge(
     windowLabel: windowLabel(snapshot.window),
     remainingPercent: Math.floor(snapshot.remainingRatio * 100),
     tone,
-    barTone: tone === "warn" || tone === "danger" ? tone : "neutral",
+    barTone:
+      tone === "warn" || tone === "danger"
+        ? tone
+        : outdated
+          ? "neutral"
+          : "accent",
     stateLabel,
     age,
     reset,
@@ -560,11 +650,17 @@ export function quotaAnnouncement(view: QuotaView, nowMs: number): string {
   if (view.empty) return "보고된 구독 잔여량이 없습니다.";
   const lowest = lowestGauge(view.providers, nowMs, view.elapsedMs);
   if (!lowest) {
-    return "구독 잔여량을 불러왔습니다. 모두 확인한 지 오래된 값입니다.";
+    // Not "오래된 값" as a blanket: a gauge can also be excluded because its
+    // window has reset since it was read, which is a fresh number about a dead
+    // window rather than an old one (R1 M1).
+    return "구독 잔여량을 불러왔습니다. 모두 지금 잔여율과 다를 수 있는 값입니다.";
   }
+  // 단기 takes 가 and 주간 takes 이, and a sentence that reads "단기이(가)" is a
+  // machine refusing to decide in front of the reader (koreanParticle.ts).
   return (
-    `구독 잔여량을 불러왔습니다. 가장 적게 남은 창은 ` +
-    `${providerLabel(lowest.providerRef)} ${lowest.gauge.windowLabel} ` +
-    `${lowest.gauge.remainingPercent}% 남음입니다.`
+    `구독 잔여량을 불러왔습니다. ` +
+    `${providerLabel(lowest.providerRef)} ` +
+    `${attachParticle(lowest.gauge.windowLabel, "subject")} ` +
+    `${lowest.gauge.remainingPercent}%로 가장 적게 남았습니다.`
   );
 }

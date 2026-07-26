@@ -327,7 +327,24 @@
    * lives in pseudo elements no utility class can reach. Default stays accent,
    * which is what 설정 > 업데이트 (MOMO-606) already renders, and a state bar
    * names its tone in EVERY state including ok: falling back to the default for
-   * the common case put an amber bar beside a green chip. */
+   * the common case put an amber bar beside a green chip.
+   *
+   * `accent` is that same default written down (MOMO-628). A gauge of a supply
+   * you still hold (구독 잔여량) is a determinate measure, not a share of a list
+   * and not a status, so it takes the accent; naming it rather than falling
+   * through is the lesson the 예산 bar already paid for once, and it keeps a
+   * calm remaining bar from being drawn in --line-strong, which is exactly what
+   * the share bars in the same panel use while filling the opposite way. */
+  &[data-tone="accent"] {
+    &::-webkit-progress-value {
+      background: var(--accent);
+    }
+
+    &::-moz-progress-bar {
+      background: var(--accent);
+    }
+  }
+
   &[data-tone="neutral"] {
     &::-webkit-progress-value {
       background: var(--line-strong);

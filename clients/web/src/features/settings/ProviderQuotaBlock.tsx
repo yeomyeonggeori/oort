@@ -1,13 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { ApiError } from "@/lib/api";
 import { fetchProviderQuotaSnapshots } from "./api";
 import { errorMessage } from "./model";
 import { StatusChip, type ChipTone } from "./SettingsFields";
 import {
+  QUOTA_TICK_MS,
   parseQuotaSnapshots,
   providerLabel,
   quotaAnnouncement,
@@ -42,11 +43,41 @@ import {
 // The shape is the pair every surveyed product converged on (§5): a short
 // rolling window and a weekly one, two gauges, remaining rather than consumed,
 // with the reset written as an absolute instant rather than a countdown. What
-// this adds is honesty about the reading itself: a snapshot is a report from an
-// adapter, so its age is on screen next to it, and a reading too old (or one
-// whose window has already reset) keeps rendering with its state colour
+// this adds is honesty about the reading itself: a snapshot is a report from the
+// server's own probe, so its age is on screen next to it, and a reading too old
+// (or one whose window has already reset) keeps rendering with its state colour
 // removed, because an hour-old 3% may have been 100% for the last 55 minutes.
+//
+// All four states are drawn INSIDE one bordered frame (R1 M2). The frame rule
+// under this block is the boundary between the two frames, and a banner that
+// draws its own full-bleed rule 16px above it puts the louder of two parallel
+// lines where no boundary is. One box, one rule.
 // =============================================================================
+
+/**
+ * The block's own clock.
+ *
+ * Age, staleness suppression and the reset having passed are all read against
+ * "now", and R1 H1 measured that in this panel nothing ever moved it: no
+ * `refetchInterval`, `refetchOnWindowFocus: false` in queryClient.ts, and a
+ * healthy realtime connection produces no incidental re-render either (measured
+ * over 90s with the panel open: 0 fetches, 1 unrelated DOM change). The gauges
+ * therefore kept saying 마지막 확인 3분 전 indefinitely, never crossed into
+ * 오래된 값, and kept a danger chip on a window that had already reset.
+ *
+ * This is a clock, not an animation, so it has no `prefers-reduced-motion`
+ * branch: a reader who asked for less motion did not ask to be told the wrong
+ * time. It is one interval for the whole block, so the gauges of one provider
+ * can never be aged against two different instants.
+ */
+function useQuotaClock(): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), QUOTA_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return nowMs;
+}
 
 export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
   const query = useQuery({
@@ -73,16 +104,14 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
     : null;
 
   // react-query clears the error the moment a data-less query refetches, so the
-  // banner would unmount under the very button that started the retry and drop
-  // keyboard focus to <body> (SKILL §6). The copy is held for exactly that
-  // window and dropped as soon as the read finishes either way.
+  // message would blink out and back for the length of every retry. The copy is
+  // held for exactly that window and dropped as soon as the read finishes either
+  // way.
   const held = useRef<string | null>(null);
   if (liveError) held.current = liveError;
   else if (!query.isFetching || query.data) held.current = null;
 
-  // One clock for the whole render, so the two gauges of one provider cannot be
-  // aged against two different instants.
-  const nowMs = Date.now();
+  const nowMs = useQuotaClock();
   const view = quotaView({
     data: query.data ?? null,
     dataUpdatedAtMs: query.dataUpdatedAt,
@@ -104,19 +133,23 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
         <div className="flex min-w-0 flex-col gap-px">
           <h3 className="text-body font-medium text-ink">구독 잔여량</h3>
           {/* The frame statement. It says whose numbers these are (the server's
-              provider subscriptions, not this workspace's ledger) and that they
-              are not the money below, which is the one misread §5 found across
-              the field. */}
+              provider subscriptions, not this workspace's ledger), which
+              direction they fill (what is LEFT), and that they are not the money
+              below, which is the one misread §5 found across the field. */}
           <p className="text-meta text-ink-muted">
-            이 서버가 연결한 AI 구독의 창별 잔여 비율입니다. 아래 비용 집계와는
+            이 서버가 연결한 AI 구독에 지금 남은 비율입니다. 아래 비용 집계와는
             다른 값입니다.
           </p>
         </div>
-        {/* Its own refresh, not the cost block's: a gauge whose point is
-            freshness needs a way to ask again without re-reading the ledger.
+        {/* The block's ONE refresh, in all four states (R1 M6). It used to share
+            the job with a 다시 시도 in the error banner, a second 다시 시도 in the
+            last-known banner and a 다시 불러오기 in the empty state, so one
+            action carried three names and two of them were on screen at once.
+
             Stays ENABLED while fetching and reports the wait through aria-busy,
             because disabling it moves focus to <body> and never gives it back
-            (the 616 lesson, SKILL §6). */}
+            (the 616 lesson, SKILL §6). Being the only one, it also never
+            unmounts, so a retry can no longer drop the keyboard. */}
         <Button
           variant="secondary"
           size="sm"
@@ -137,60 +170,96 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
         {quotaAnnouncement(view, nowMs)}
       </p>
 
-      {view.kind === "loading" && (
-        <div
-          className="rounded-md border border-line"
-          aria-hidden="true"
-          data-testid="usage-quota-skeleton"
-        >
-          <SkeletonRows rows={6} />
-        </div>
-      )}
+      {/* One frame for every state, so the block is a box on the page rather
+          than a stack of loose rules, and so the settled answer arrives inside
+          the same boundary the wait was drawn in. */}
+      <div
+        className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line"
+        data-testid="usage-quota-frame"
+      >
+        {view.kind === "loading" && <QuotaSkeleton />}
 
-      {view.kind === "error" && (
-        <InlineBanner
-          message={view.message}
-          actionLabel="다시 시도"
-          onAction={() => void query.refetch()}
-          testId="usage-quota-error"
-        />
-      )}
-
-      {view.kind === "last-known" && (
-        <div
-          className="flex min-w-0 flex-col gap-3"
-          data-testid="usage-quota-last-known"
-        >
-          {/* P15 durability layer: the cached answer keeps rendering, undimmed,
-              and the banner carries the whole fallback in one line. §5 records
-              the same behaviour as Claude Code's `Showing last-known usage`. */}
+        {view.kind === "error" && (
           <InlineBanner
-            tone="neutral"
-            message={view.notice}
-            actionLabel="다시 시도"
-            onAction={() => void query.refetch()}
-            testId="usage-quota-last-known-banner"
+            message={view.message}
+            separator={false}
+            testId="usage-quota-error"
           />
+        )}
+
+        {view.kind === "last-known" && (
+          <div className="flex min-w-0 flex-col" data-testid="usage-quota-last-known">
+            {/* P15 durability layer: the cached answer keeps rendering,
+                undimmed, and the banner carries the whole fallback in one line.
+                §5 records the same behaviour as Claude Code's `Showing
+                last-known usage`. Its border is a real separator here: the
+                gauges it describes are directly underneath it. */}
+            <InlineBanner
+              tone="neutral"
+              message={view.notice}
+              testId="usage-quota-last-known-banner"
+            />
+            <QuotaBody
+              providers={view.providers}
+              empty={view.empty}
+              nowMs={nowMs}
+              elapsedMs={view.elapsedMs}
+            />
+          </div>
+        )}
+
+        {view.kind === "ready" && (
           <QuotaBody
             providers={view.providers}
             empty={view.empty}
             nowMs={nowMs}
             elapsedMs={view.elapsedMs}
-            onRetry={() => void query.refetch()}
           />
-        </div>
-      )}
-
-      {view.kind === "ready" && (
-        <QuotaBody
-          providers={view.providers}
-          empty={view.empty}
-          nowMs={nowMs}
-          elapsedMs={view.elapsedMs}
-          onRetry={() => void query.refetch()}
-        />
-      )}
+        )}
+      </div>
     </section>
+  );
+}
+
+// ---- loading ----------------------------------------------------------------
+
+/**
+ * The wait, shaped like what arrives (SKILL §5: height-preserving, no shimmer).
+ *
+ * Six generic `SkeletonRows` stood in for a shape they did not have, so every
+ * arrival threw the whole ledger below it up or down the page by about 150px
+ * (R1 M3). This mirrors the real structure instead: one provider heading and its
+ * two gauges, each gauge a label line, a 4px bar and an 11px age line at the
+ * real steps.
+ *
+ * One provider is what it stands in for, because that is what a server with one
+ * AI 연결 sends, and it cannot stand in for all of them at once: the same read
+ * answers with a 404, an empty list, one provider or several. Measured at 1280
+ * (block height, wait -> settled): 404 231 -> 93, 빈 목록 231 -> 159, 1개
+ * 231 -> 227, 2개 231 -> 400. The modal arrival now moves the ledger by 4px
+ * instead of 157.
+ */
+function QuotaSkeleton() {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-3 px-3 py-3"
+      aria-hidden="true"
+      data-testid="usage-quota-skeleton"
+    >
+      <div className="h-6 w-pane-sm rounded-sm bg-surface-hover" />
+      <GaugeSkeleton />
+      <GaugeSkeleton />
+    </div>
+  );
+}
+
+function GaugeSkeleton() {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="h-6 rounded-sm bg-surface-hover" />
+      <div className="h-1 rounded-sm bg-surface-hover" />
+      <div className="h-4 w-pane rounded-sm bg-surface-hover" />
+    </div>
   );
 }
 
@@ -201,34 +270,29 @@ function QuotaBody({
   empty,
   nowMs,
   elapsedMs,
-  onRetry,
 }: {
   providers: QuotaProvider[];
   empty: boolean;
   nowMs: number;
   elapsedMs: number;
-  onRetry: () => void;
 }) {
   if (empty) {
-    // A 200 with an empty list is the honest answer of a server whose adapter
-    // has not probed yet, and it is not a failure. One line and one action, no
-    // centered poster (SKILL §5).
+    // A 200 with an empty list is the honest answer of a server that has not
+    // probed its providers yet, and it is not a failure. One line, no centered
+    // poster (SKILL §5). The action is the 다시 확인 in the header one row above:
+    // this state has exactly the same next step as the other three, and giving
+    // it a differently named button of its own was the R1 M6 finding.
     return (
       <EmptyInvite
         headline="아직 보고된 구독 잔여량이 없습니다."
-        detail="AI 어댑터가 잔여량을 보고하면 프로바이더별로 짧은 창과 주간 잔여 비율이 여기에 표시됩니다."
+        detail="이 서버가 AI 제공자에게서 잔여량을 받아오면 제공자별로 단기와 주간 남은 비율이 여기에 표시됩니다."
         testId="usage-quota-empty"
-        actions={
-          <Button variant="outline" size="sm" onClick={onRetry}>
-            다시 불러오기
-          </Button>
-        }
       />
     );
   }
 
   return (
-    <ul className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line">
+    <ul className="flex min-w-0 flex-col">
       {providers.map((provider) => (
         <li
           key={provider.providerRef}
@@ -243,13 +307,13 @@ function QuotaBody({
             {providerLabel(provider.providerRef)}
           </h4>
           <Gauge
-            window="short"
+            windowKind="short"
             snapshot={provider.short}
             nowMs={nowMs}
             elapsedMs={elapsedMs}
           />
           <Gauge
-            window="weekly"
+            windowKind="weekly"
             snapshot={provider.weekly}
             nowMs={nowMs}
             elapsedMs={elapsedMs}
@@ -287,32 +351,37 @@ const PERCENT_TONE: Record<QuotaTone, string> = {
  * The bar is a native <progress>: CSP is style-src 'self' for anything this
  * codebase authors, so a data-driven width cannot come from an inline style and
  * the platform control draws it from value/max. It is aria-hidden because the
- * exact figure is already text on the same line, and it carries the same
- * data-tone as the chip in every state including ok, so the two can never tell
- * different stories (tokens.md §5a).
+ * exact figure is already text on the same line, and its `data-tone` is driven
+ * by the same value as the chip, so the two can never tell different stories
+ * (tokens.md §5a).
+ *
+ * `windowKind`, not `window`: the parameter used to shadow the DOM global inside
+ * this whole component, which reads as the global to anyone scanning it and
+ * would have broken silently the first time anything here reached for
+ * `window.matchMedia` (R1 M8).
  */
 function Gauge({
-  window,
+  windowKind,
   snapshot,
   nowMs,
   elapsedMs,
 }: {
-  window: QuotaWindow;
+  windowKind: QuotaWindow;
   snapshot: QuotaSnapshot | null;
   nowMs: number;
   elapsedMs: number;
 }) {
   if (!snapshot) {
-    // An adapter that reports one window and not the other leaves a real hole,
+    // A server that reports one window and not the other leaves a real hole,
     // and a hole is stated. Drawing an empty bar here would read as 0% left.
     return (
       <div
         className="flex min-w-0 flex-wrap items-baseline justify-between gap-2"
         data-testid="usage-quota-gauge"
-        data-window={window}
+        data-window={windowKind}
         data-missing=""
       >
-        <span className="text-meta text-ink-muted">{windowLabel(window)}</span>
+        <span className="text-meta text-ink-muted">{windowLabel(windowKind)}</span>
         <span className="text-meta text-ink-muted">
           아직 보고되지 않았습니다
         </span>
@@ -361,8 +430,21 @@ function Gauge({
         max={100}
         aria-hidden="true"
       />
+      {/* One 11px line, one treatment for the numbers in it: the clock and the
+          age are both figures and both carry data-numeric (tokens.md §4). The
+          clock used to be prose while the age beside it was tabular mono, which
+          is visible at 11px as two different typefaces in one sentence
+          (R1 M7). */}
       <p className="text-timestamp text-ink-muted">
-        {gauge.reset && <>{gauge.reset.text} · </>}
+        {gauge.reset && (
+          <span data-testid="usage-quota-reset">
+            {gauge.reset.day && `${gauge.reset.day} `}
+            <span className="font-mono" data-numeric="">
+              {gauge.reset.clock}
+            </span>{" "}
+            {gauge.reset.verb} ·{" "}
+          </span>
+        )}
         <span data-testid="usage-quota-age">
           마지막 확인{" "}
           {gauge.age.amount === null ? (
