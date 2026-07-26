@@ -75,3 +75,5 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
 - 2026-07-17: 플러그인 SE-04A~D(MOMO-410~458) · 웹훅(MOMO-412) · 단축링크(MOMO-460) · iOS v0(MOMO-462~467)
 
 - **X-13 (ready→consumed)**: MOMO-615 워크스페이스 사용량 요약 REST `GET /v1/workspaces/:ws/usage/summary` — track/engine 랜딩(#798, 2026-07-26). 계약 정본 `handoffs/2026-07-25-usage-summary-contract.md`. 웹 소비면은 MOMO-616(설정 사용량 섹션, track/uxui #796 랜딩)이 계약 픽스처로 선구현 — **라이브 통합 검증은 main 동기화+momowebqa 재배포 후 오케스트레이터 수행 (pending)**.
+
+- **X-14 (ready)**: ADR-0134·0135 엔진층 track/engine 랜딩(2026-07-26, #812~815) — 웹(C2) 소비 가능 표면: ①`routing{model,effort}` run 생성 파라미터(위반 400)+`GET /v1/provider/effort-table`(provider×model 유효값 정본) ②provider 체인 CRUD+`/test` `entries[]`·`cascadeOk`+run 이벤트 `provider.cascade.fallback{from,to,reason}`("2차 프로바이더로 처리됨" 카드 재료) ③`GET /v1/provider/quota-snapshots`(멤버 조회, `ageSeconds` 포함 — "마지막 확인값" 폴백 재료). 후속 미구현(의도): agent_profile.effort_pref REST writer(UI 티켓 소관), 워크스페이스 기본 tier, auto 정책(0134 D4).
