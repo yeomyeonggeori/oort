@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-07-26 (Fable 머지 전 리뷰 + 블로커 수리) · C1·C2 머지 준비 완료
+- **머지 전 리뷰 4관점 실시**(성재 지시): 계약 드리프트·엔진 불변식/보안·머지 후 실동(실스택 기동)·유출 잔재. 보고서 `2026-07-26-c1c2-merge-review.md`. **기계 게이트는 전부 초록인 상태에서 Blocker 4건 발견** — 빌드가 심판이 아님을 재확인.
+- **선수정 3건 랜딩**(#829 engine, #830 uxui):
+  - B-1: `_redact`가 bearer를 첫 글자만 마스킹(테스트가 거짓 통과로 인증). 수리 중 **동일 계열 4건**(bearer·불투명 토큰·agent 토큰·JWT 서명) 발견, 단일 alternation 1패스로 상호 파괴 구조 제거. `\S+` 대신 RFC6750 문자류(로그 JSON 과잉 삭제 방지) — 의도적 이탈.
+  - D1/F3: 캐스캐이드 안내가 구조적 렌더 불가(웹은 게이트웨이 스키마 요구, 워커 턴엔 부재). 앵커 확장 + **발신 코드에서 유도한 픽스처**, before 렌더 30s 타임아웃 → after 라이트·다크 렌더 확인.
+  - F1: 프로필 upsert가 허용목록 검사 후 400(생성 폼 포함 단일 퍼널). 게이트가 **D2 커버리지 소실을 자가 포착**해 SQL 시딩으로 보존.
+- **잔여 티켓**: #825(B-3 증폭 차단) #826(iOS 전송+라이브 게이트) #827(웹 와이어 검증) #828(M건 묶음) **#831(allowed_agent_models 노출 REST — 피커 교집합의 선결)**.
+- **교훈 정본화**: 픽스처는 ADR이 아니라 **발신 코드에서 유도**한다(D1이 그 실패). 웹/엔진 병렬 시 계약 대조를 별도 관문으로.
+- 다음: track→main 동기화(성재 승인) → 라이브 통합 → next.10.
+
+
+## 2026-07-26 (Fable 리서치) · 모바일 스택 레퍼런스 — ADR-0133 P4a 입력
+- **산출**: `docs/planning/2026-07-26-mobile-stack-research.md`. 성재 발제(모바일 전략) → A 제품별 스택 / B 프레임워크 / C 모바일 에이전트 UX / 권고. 소스 직독 우선(tauri·plugins-workspace·buzz·element-x·zulip·mattermost·rocket.chat·signal 클론).
+- **판정: Tauri 2 모바일 = 불합격.** 1st-party 푸시 부재(업스트림 #11651 20개월 open, notification 플러그인은 `UNPushNotificationTrigger`를 명시 배제) · **ADR-0120이 요구하는 NSE가 Tauri iOS CI 서명에서 entitlement 유실**(#15663 open) · awesome-tauri 모바일 앱 사실상 0 · **buzz가 같은 Tauri 2.11에서 모바일만 Flutter 37,815 LOC·코드공유 0**.
+- **권고 1순위 = React Native**(iOS+Android 단일, **한글 IME 스파이크 조건부**), 대안 = Flutter. 근거: momo 공백은 iOS가 아니라 **Android(0)** · TS/React가 ADR-0133 "오너가 UI를 직접" 원칙을 모바일까지 잇는 유일 선택지 · **momo의 id-only+NSE 푸시가 Mattermost(RN 0.83.9)에서 프로덕션 검증** — ADR-0120이 선례로 인용한 그 제품. Capacitor는 **iOS silent push 미지원(공식)** 으로, KMP/CMP는 유명사례가 전부 "로직만 공유·UI 네이티브 2벌"이라 기각.
+- **🔴 최대 리스크(직접 검증)**: iOS Fabric **CJK/한글 IME 조합 결함** 18개월째 open(원본 #48497 재현코드 첨부, 수정 PR #56082 리뷰어 미배정 `blocked`), New Arch는 0.82+ 강제라 회피로 없음. **단 "한글 입력 불가"는 과장** — 확증 증상은 조합 밑줄 소실이고 더 센 주장엔 RN팀이 `Needs: Repro`, **Mattermost(New Arch)엔 열린 CJK 이슈 0**. → 실기기 스파이크가 P4a 1번 게이트. **한글 검증은 Flutter를 골라도 동일 필요**(Flutter도 2019~2025 한글 이슈 계보).
+- **정정 4건**: ①`clients/web`은 "이미 반응형"이 아님(반응형 프리픽스 3개, 900px는 데스크톱 축소용) ②ADR-0123(SwiftUI iOS 14,119 LOC)과 ADR-0133이 iOS에 **상충하는 Accepted** — 결정의 실체는 그 자산 처분 ③buzz 모바일은 "Flutter(부분)"이 아니라 220파일·37,815 LOC 본격 구현 ④Slack "과거 하이브리드"설은 1차 출처 미확인(2013년부터 네이티브, 공유 C++ Libslack만 시도 후 폐기).
+- **대기**: 성재 결정 4건(스택·기존 iOS 킷 처분·Android 시점·ADR 증보 기안). **엔진 선결질문**: momo 에이전트 작업이 모든 기기 꺼도 지속되는가(레퍼런스가 여기서 갈림 → 모바일 약속 문구 결정).
+
 ## 2026-07-26 (Fable Wave C2 완결) · ADR-0134·0135 소비면 4장 랜딩
 - **랜딩**: 816 엔진(profile effort_pref writer+멘션 routing, track/engine #820) · 817 프로필 다이얼로그+컴포저 피커(#821) · 818 체인 UI+캐스캐이드 표기(#822) · 819 잔여량 게이지(#823) track/uxui. 824 tests대(각 랜딩 시 원점 재검증).
 - **819 gate:shell 전면 실패 = 워크트리 오염(원인 C)**: 818(MOMO-627)의 미커밋 작업이 819 워크트리에 유출→dist 빌드→chainModel `undefined.filter` 크래시로 설정 AI 섹션부터 React 루트 언마운트. **819 소스·gate 코드 모두 무결**(gate가 실제 크래시를 정확히 포착 — 완화 0줄). 유출물 제거로 해소, 오케스트레이터 원점 검증(HEAD=origin·diff 819 파일만·gate:shell 44/44 PASS·827 tests).
