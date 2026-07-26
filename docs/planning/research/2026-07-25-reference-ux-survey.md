@@ -363,3 +363,15 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 buzz 소스: `github.com/block/buzz` @ `ab3af82` (2026-07-24) — `desktop/src/features/{onboarding,agents,channels,sidebar}`
 공식 문서: support.claude.com · code.claude.com · platform.claude.com · docs.slack.dev · linear.app/developers · cursor.com/docs · cursor.com/help · learn.chatgpt.com · openrouter.ai/docs · modal.com/docs · e2b.dev/docs · daytona.io/docs · docs.devin.ai · docs.github.com/copilot · vercel.com/docs · docs.railway.com · fly.io/docs · docs.discord.com
 2차: forum.cursor.com · feedback.t3.chat · pageflows.com · andrew.ooo · macrumors.com · jdhodges.com
+
+---
+
+## 부록 C. herdr (성재 질의 2026-07-26, 소스 직독 — ogulcancelik/herdr, Apache-2.0, commit 8843bbb)
+
+**정체**: 코딩 에이전트용 터미널 멀티플렉서(Rust 단일 바이너리, tmux 계열 TUI). 워크스페이스/탭/페인 토폴로지에 실제 PTY를 담고, 페인 안에서 도는 에이전트(claude·codex·opencode 등)를 감지해 **blocked/working/done을 한눈에** 보여준다. detach 후에도 에이전트는 계속 돌고 ssh 포함 어디서든 reattach, 세션은 재시작을 견딘다.
+
+**주목 포인트(소스 확인)**: ①순수 소켓 API + 동봉 Claude 스킬 — 에이전트가 herdr 페인을 spawn하고 출력을 읽고 서로를 wait할 수 있다(로컬판 에이전트 오케스트레이션) ②에이전트 세션 resume 매핑(`codex resume <id>` 등)을 도구별로 정본화 ③최근 커밋이 **사이드바 worktree 계층** — 우리 goal_claim 워크트리-티켓 모델과 같은 정신 모델 ④감지 매니페스트 기반 에이전트 인식(src/detect/).
+
+**momo와의 관계**: 니치가 직교한다 — herdr는 **1인·로컬·터미널** 관제, momo 관전 표면은 **팀·원장·권한 계약**(observer capability, RLS) 위의 관제. herdr의 상태 문법(blocked/working/done at a glance)이 우리 작업중 표시·작업 패널과 수렴한 것은 방향 검증으로 읽으면 된다. momo가 못 하는 것(로컬 터미널 멀티플렉스)을 herdr가 하고, herdr가 안 하는 것(팀 공유·승인 원장·비용)을 momo가 한다.
+
+**우리 내부 사용 여부**: 미사용. 내부 오케스트레이션은 Claude Code Workflow(API 기반 서브에이전트 — PTY가 아니라 herdr에 안 잡힘)+goal_claim 워크트리+codex-fleet. **채택 판단**: 파이프라인 도입 실익 없음. 성재가 로컬에서 CLI 에이전트를 직접 여럿 돌릴 때 개인 관제용으로는 유용할 수 있음(brew install herdr). 참고할 세부: 소켓 API의 "에이전트가 서로를 wait" 문법, resume 매핑 정본화.
