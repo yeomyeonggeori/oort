@@ -172,6 +172,9 @@ enum AppBuilder {
             healthProbe: HTTPProviderHealthProbe(httpClient: httpClient, logger: logger),
             platformAdminEmails: config.platformAdminEmails
         ).add(to: authed)
+        // MOMO-623 / ADR-0135 D2: provider quota gauge — adapter-side probe
+        // ingest (numbers only) + workspace-member read.
+        ProviderQuotaSnapshotRoutes(db: db).add(to: authed)
         // MOMO-582 / ADR-0114 증보1 B: per-workspace work host engine selection.
         WorkHostEngineRoutes(db: db).add(to: authed)
         // MOMO-621 / ADR-0134 D2: provider×model effort table (routing picker SoT).

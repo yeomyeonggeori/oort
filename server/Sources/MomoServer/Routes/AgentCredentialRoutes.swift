@@ -8,6 +8,8 @@ import PostgresNIO
 /// Raw credentials are returned exactly once from `create`; every persisted
 /// representation is a pgcrypto sha256 digest in the existing `token` table.
 struct AgentCredentialRoutes: Sendable {
+    /// Scopes granted when the caller does not name any — the ordinary
+    /// conversational agent set.
     static let defaultScopes = [
         "agent:jobs:read",
         "agent:runs:callback",
@@ -15,6 +17,15 @@ struct AgentCredentialRoutes: Sendable {
         "messages:write",
         "realtime:subscribe",
         "work:control",
+    ]
+
+    /// Everything an admin MAY grant. `provider:quota:write` (MOMO-623 /
+    /// ADR-0135 D2) is grantable but deliberately NOT default: it reaches an
+    /// instance-global surface, so only a credential minted explicitly for the
+    /// provider-probing adapter should carry it. Existing agent credentials must
+    /// not gain the ingest surface by being re-issued with default scopes.
+    static let grantableScopes = defaultScopes + [
+        ProviderQuotaSnapshotRoutes.ingestScope,
     ]
     static let maximumRotationGraceSeconds = 7 * 24 * 60 * 60
 
@@ -303,7 +314,7 @@ struct AgentCredentialRoutes: Sendable {
         guard !normalized.isEmpty else {
             throw HTTPError(.badRequest, message: "at least one agent scope is required")
         }
-        let allowed = Set(defaultScopes)
+        let allowed = Set(grantableScopes)
         guard normalized.allSatisfy(allowed.contains) else {
             throw HTTPError(.badRequest, message: "unsupported agent scope")
         }

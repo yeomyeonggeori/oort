@@ -162,6 +162,38 @@ struct Database: Sendable {
         }
     }
 
+    /// Run the provider quota-snapshot ingest transaction (MOMO-623 / ADR-0135 D2).
+    ///
+    /// `quota_snapshot` is instance-global (no workspace_id) and its write policy
+    /// is gated on `app.provider_quota_admin`. Callers MUST have verified the
+    /// agent bearer + `provider:quota:write` scope BEFORE opening this
+    /// transaction — the GUC is the last gate, not the first.
+    ///
+    /// `app.workspace_id` is also bound (to the ingesting agent's workspace) so
+    /// the tenant-scoped read policy behaves identically inside this transaction
+    /// and any future audit write in the same tx stays attributable.
+    func withProviderQuotaIngestTransaction<Result: Sendable>(
+        workspaceID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            return try await client.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                _ = try await conn.query(
+                    "SELECT set_config('app.provider_quota_admin', 'on', true)",
+                    logger: logger
+                )
+                return try await body(conn)
+            }
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
     /// Run an explicit platform-admin inspection read using a separate BYPASSRLS
     /// role. The transaction is read-only, so this helper must never back tenant
     /// write paths.

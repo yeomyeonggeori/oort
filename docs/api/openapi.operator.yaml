@@ -131,8 +131,93 @@ paths:
             Non-human principal, or a human lacking both the platform:read
             operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
 
+  # ===========================================================================
+  # MOMO-623 / ADR-0135 D2 — provider quota gauge.
+  #
+  # The probe runs on the side that already holds the provider credential (the
+  # hermes adapter). momo never calls a provider quota API; it accepts the
+  # resulting NUMBERS and keeps the latest snapshot per (providerRef, window).
+  # This is why D2-A does not violate ADR-0004.
+  #
+  # The two verbs have DIFFERENT principals — unlike /v1/provider/link, which is
+  # human-operator only:
+  #   POST = agent bearer carrying the `provider:quota:write` scope (the adapter
+  #          credential; grantable but not default).
+  #   GET  = any active workspace member's App JWT (usage/summary convention).
+  # ===========================================================================
+  /v1/provider/quota-snapshots:
+    post:
+      operationId: ingestProviderQuotaSnapshot
+      summary: Ingest one provider quota gauge (numbers only)
+      description: >-
+        Upserts the latest snapshot for (providerRef, window). The write is
+        monotone in `probedAt`: a replayed or out-of-order probe older than the
+        stored one is retained rather than applied, and the response reports
+        `applied:false` with the retained snapshot. The body is closed-world —
+        only the five fields below are accepted (ADR-0135 snake_case spellings
+        `provider_ref` / `remaining_ratio` / `resets_at` / `probed_at` are
+        accepted aliases) — and every key and string value is screened for
+        credential shapes, so no token, OAuth code, or raw header can enter
+        (ADR-0004).
+      security:
+        - agentBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderQuotaSnapshotIngestRequest"
+      responses:
+        "200":
+          description: Stored (or retained) gauge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderQuotaSnapshotIngestResponse"
+        "400":
+          description: >-
+            Unknown/duplicate field, credential-shaped key or value, non-numeric
+            or out-of-range remainingRatio, unknown window, or a malformed /
+            implausible timestamp.
+        "401":
+          description: Missing or invalid credential.
+        "403":
+          description: >-
+            Not an agent bearer, or an agent bearer without the
+            `provider:quota:write` scope.
+    get:
+      operationId: listProviderQuotaSnapshots
+      summary: Read the current provider quota gauges
+      description: >-
+        Returns every stored gauge, ordered by providerRef then window
+        (short before weekly), each with its snapshot age so the dashboard can
+        fall back to "마지막 확인값" when the probe is stale. Readable by any
+        ACTIVE member of the caller's workspace; agent bearers cannot read this
+        surface at all.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current gauges.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderQuotaSnapshotListResponse"
+        "401":
+          description: Missing or invalid credential.
+        "403":
+          description: Not an active member of the caller's workspace.
+
 components:
   securitySchemes:
+    agentBearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        Opaque per-agent bearer (ADR-0101 phase 1) whose credential row carries
+        the `provider:quota:write` scope. Issued by
+        POST /v1/workspaces/{ws}/agents/{agent}/credentials with that scope named
+        explicitly — it is never part of the default scope set.
     bearerAuth:
       type: http
       scheme: bearer
@@ -256,3 +341,119 @@ components:
           type: string
           enum: [local-mock, internal-host-mock, external-hermes]
           default: external-hermes
+
+    # ---- MOMO-623 / ADR-0135 D2 -------------------------------------------
+    ProviderQuotaSnapshotIngestRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - providerRef
+        - window
+        - remainingRatio
+        - probedAt
+      properties:
+        providerRef:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+          description: >-
+            Provider/chain-entry label (e.g. codex, claude, hermes-primary).
+            Slug-shaped and screened for credential shapes so it can never carry
+            a pasted key. Alias: provider_ref.
+        window:
+          type: string
+          enum: [short, weekly]
+          description: Which gauge this snapshot is for (ADR-0135 two-window model).
+        remainingRatio:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >-
+            Remaining fraction. Must be a JSON number — a quoted value is 400,
+            never coerced. Ratio only; absolute provider billing data is out of
+            scope.
+          # Alias: remaining_ratio.
+        resetsAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Absolute reset instant reported by the provider, or null/omitted when
+            it reported none. Alias: resets_at.
+        probedAt:
+          type: string
+          format: date-time
+          description: >-
+            When the credential holder actually probed. May lead the server clock
+            by at most 300s and must be under 30 days old. Alias: probed_at.
+    ProviderQuotaSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - providerRef
+        - window
+        - remainingRatio
+        - resetsAt
+        - probedAt
+        - ingestedAt
+        - ageSeconds
+      properties:
+        providerRef:
+          type: string
+        window:
+          type: string
+          enum: [short, weekly]
+        remainingRatio:
+          type: number
+        resetsAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Always present; null when the provider reported no reset.
+        probedAt:
+          type: string
+          format: date-time
+        ingestedAt:
+          type: string
+          format: date-time
+          description: Server receive time, so sender clock skew stays visible.
+        ageSeconds:
+          type: integer
+          format: int64
+          description: now - probedAt; drives the staleness badge and last-known fallback.
+    ProviderQuotaSnapshotIngestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - schema
+        - applied
+        - snapshot
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider_quota_snapshot.v0]
+        applied:
+          type: boolean
+          description: >-
+            False when the monotonicity guard retained a newer stored probe; the
+            returned snapshot is then the retained one.
+        snapshot:
+          $ref: "#/components/schemas/ProviderQuotaSnapshot"
+    ProviderQuotaSnapshotListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - schema
+        - observedAt
+        - snapshots
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider_quota_snapshots.v0]
+        observedAt:
+          type: string
+          format: date-time
+          description: Server time the ages were computed against.
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderQuotaSnapshot"
