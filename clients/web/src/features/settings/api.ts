@@ -75,7 +75,38 @@ export interface ProviderLink {
   diagnostics: string[];
 }
 
-/** `momo.provider_link.test.v0`. `reason` is a machine label, not user copy. */
+/**
+ * One hop as the probe found it (`ProviderChainProbeDTO`, MOMO-622).
+ *
+ * `disposition` is what a REAL turn would do with this outcome, which is a
+ * different question from `ok`: a 4xx hop is not ok AND does not fall over,
+ * because retrying a caller error on the next provider spends a second budget
+ * on the same guaranteed failure. The panel has to say which of the two it is
+ * or an operator reads every red row as "the cascade will handle it".
+ */
+export interface ProviderChainProbe {
+  position: number;
+  source: string;
+  mode: string;
+  endpointLabel: string;
+  enabled: boolean;
+  ok: boolean;
+  /** Machine label, not user copy. */
+  reason?: string;
+  /** `ok` | `fall_over` | `propagate` | `skipped`. */
+  disposition: string;
+}
+
+/**
+ * `momo.provider_link.test.v0`. `reason` is a machine label, not user copy.
+ *
+ * The first seven fields are the MOMO-572 contract and describe POSITION 0, so
+ * they keep their exact old meaning. `cascadeOk` and `entries` are the ADR-0135
+ * D1 extension and are OPTIONAL here for the same reason they are additive on
+ * the wire: a server built before the chain landed answers the old body, and
+ * the panel must read that as "this server has no chain", never as an empty
+ * chain (which would be a claim, and a false one).
+ */
 export interface ProviderLinkTest {
   schema: string;
   ok: boolean;
@@ -84,6 +115,10 @@ export interface ProviderLinkTest {
   mode: string;
   endpointLabel: string;
   checkedAtMs: number;
+  /** At least one hop in the cascade could serve a turn right now. */
+  cascadeOk?: boolean;
+  /** Per-hop probe results in attempt order, position 0 first. */
+  entries?: ProviderChainProbe[];
 }
 
 /** Closed-world PUT body: the server rejects any other key with a 400. */
@@ -113,6 +148,108 @@ export function deleteProviderLink(): Promise<ProviderLink> {
 export function testProviderLink(): Promise<ProviderLinkTest> {
   return settingsRequest<ProviderLinkTest>("/v1/provider/link/test", {
     method: "POST",
+  });
+}
+
+// --- 프로바이더 체인: GET/PUT/DELETE /v1/provider/link/chain ------------------
+//
+// ADR-0135 D1 (MOMO-622), transcribed from ProviderLinkChainRoutes.swift.
+//
+// Two boundaries this client must not blur, both enforced by the server:
+//   1. GET returns the WHOLE cascade including position 0, but position 0 is
+//      the legacy `provider_link` singleton and PUT here rejects it with a 400.
+//      The head is edited through PUT /v1/provider/link and nowhere else.
+//   2. PUT replaces every fallback hop at once. `bearer` is write-only and may
+//      be omitted to keep the key already stored AT THAT POSITION, so a hop's
+//      position is its identity: moving a base URL to another position without
+//      re-typing its key would pair it with a different provider's credential.
+//      Positions of stored rows are therefore never rewritten by this client.
+
+/** `ProviderChainEntryDTO`. Carries a masked 4-char tail, never a bearer. */
+export interface ProviderChainEntry {
+  /** 0 is the provider link singleton; fallback hops start at 1. */
+  position: number;
+  /** `provider_link` | `environment` | `chain`. */
+  source: string;
+  mode: string;
+  baseUrl: string;
+  endpointLabel: string;
+  enabled: boolean;
+  bearerConfigured: boolean;
+  bearerLast4?: string;
+  updatedAtMs?: number;
+  updatedBy?: string;
+}
+
+/** `momo.provider_link.chain.v0`. */
+export interface ProviderChain {
+  schema: string;
+  /** The whole cascade in attempt order, position 0 first. */
+  entries: ProviderChainEntry[];
+  /** Configured fallback hops (everything beyond position 0). */
+  fallbackCount: number;
+  /**
+   * Hops a real turn would actually attempt: enabled AND usable, POSITION 0
+   * INCLUDED. `ProviderCascade.attemptable` filters the whole plan and the plan
+   * starts at the head, so two live fallbacks behind a live head answer 3, not
+   * 2. Any sentence built from this number has to say so, or it reads as a
+   * count of fallbacks and contradicts `fallbackCount` in the same breath.
+   *
+   * Optional, and absent means absent: it is a derived number, so a body that
+   * omits it leaves this panel with nothing to say about attempts rather than
+   * with a zero it would go on to state as a fact.
+   */
+  attemptableCount?: number;
+  /**
+   * 1-based indexes, in the order the server sent them, of entries this client
+   * could not read. Absent when every entry parsed.
+   *
+   * It exists because dropping such an entry is not a display problem, it is a
+   * DESTRUCTIVE one: `PUT /v1/provider/link/chain` replaces every fallback hop
+   * at once, so a hop that never reached the draft is a hop the next save
+   * deletes from the server along with the key stored at its position. A chain
+   * carrying this is therefore read-only until the server answers something
+   * this client can read in full.
+   */
+  unreadable?: number[];
+}
+
+/** Closed-world PUT entry: any other key is a 400 by contract. */
+export interface ProviderChainEntryInput {
+  position: number;
+  baseUrl: string;
+  /** Omit to keep the bearer already stored at this position. */
+  bearer?: string;
+  mode?: string;
+  enabled?: boolean;
+}
+
+// All three answer the same body, and all three return it UNTYPED on purpose,
+// shaped by `parseProviderChain` (./chainModel) exactly as the usage summary is
+// shaped by `parseUsageSummary`.
+//
+// The reason is a measured crash, not caution. This route does not exist on the
+// server yet, so anything in front of it that answers 200 with a different body
+// (a proxy, a dev catch-all, a later schema) hands back an object with no
+// `entries`. Trusting the type annotation there threw inside render and took the
+// whole 설정 route down with it, which is a far worse answer than "this server
+// sent something this panel cannot read".
+export function fetchProviderChain(): Promise<unknown> {
+  return settingsRequest<unknown>("/v1/provider/link/chain");
+}
+
+export function putProviderChain(
+  entries: ProviderChainEntryInput[]
+): Promise<unknown> {
+  return settingsRequest<unknown>("/v1/provider/link/chain", {
+    method: "PUT",
+    body: JSON.stringify({ entries }),
+  });
+}
+
+export function deleteProviderChain(): Promise<unknown> {
+  return settingsRequest<unknown>("/v1/provider/link/chain", {
+    method: "DELETE",
   });
 }
 
@@ -335,4 +472,27 @@ export function fetchUsageSummary(
   return settingsRequest<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/usage/summary?${params.toString()}`
   );
+}
+
+// --- 구독 잔여량: GET /v1/provider/quota-snapshots --------------------------
+
+/**
+ * Provider quota snapshots (ADR-0135 D2, MOMO-628).
+ *
+ * Contract: server/Sources/MomoServer/Routes/ProviderQuotaSnapshotRoutes.swift
+ * (track/engine, ENGINE_HANDOFF X-14). The path carries no workspace segment
+ * and no query: the snapshots are instance-global telemetry, one latest row per
+ * (provider_ref, window), and membership is checked from the bearer rather than
+ * from the URL. Any active workspace member may read it, same convention as the
+ * usage summary.
+ *
+ * Only the WRITE side is scoped to an agent credential (`provider:quota:write`),
+ * which is the half that keeps ADR-0004 intact: the adapter holding the provider
+ * credential probes and posts numbers, and this client only ever reads them.
+ *
+ * Untyped on purpose and shaped by `parseQuotaSnapshots` (./quotaModel), where
+ * the contract is pinned and unit tested against the fixtures.
+ */
+export function fetchProviderQuotaSnapshots(): Promise<unknown> {
+  return settingsRequest<unknown>("/v1/provider/quota-snapshots");
 }

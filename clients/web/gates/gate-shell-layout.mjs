@@ -42,6 +42,9 @@ const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const USAGE_FIXTURE = JSON.parse(
   readFileSync(resolve(WEB_ROOT, "src/features/settings/usageFixtures.json"), "utf8")
 ).normal;
+const QUOTA_FIXTURE = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/quotaFixtures.json"), "utf8")
+).healthy;
 const PORT = Number(process.env.SHELL_GATE_PORT || 5179);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const OUT_DIR = process.env.OUT_DIR
@@ -297,6 +300,12 @@ async function installMocks(context) {
   );
   await context.route("**/v1/workspaces/*/usage/summary*", (route) =>
     json(route, USAGE_FIXTURE)
+  );
+  // 사용량 is the tallest settings panel and it grew a second frame on top
+  // (구독 잔여량, ADR-0135 D2), so the gate measures it with the gauges actually
+  // rendered rather than with the empty state a catch-all would produce.
+  await context.route("**/v1/provider/quota-snapshots", (route) =>
+    json(route, QUOTA_FIXTURE)
   );
   await context.route("**/v1/provider/link", (route) =>
     json(route, {

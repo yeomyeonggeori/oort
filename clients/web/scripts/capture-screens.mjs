@@ -184,13 +184,22 @@ const READ_STATES = [
   { channel_id: DM_ID, last_read_seq: 3, latest_seq: 3, unread_count: 0, mention_count: 0 },
 ];
 
-// Three of these rows are typed agent events, not prose, so the capture shows
-// the R-1 §4 agent cards (approval / tool run / settled turn cost) in both
-// schemes. The props are shaped exactly like the server's own
-// (AgentGatewayRoutes.approvalRequestProps, WorkerService.toolResultProps,
-// AgentGatewayRoutes.timelineProps), opaque fields included, so the capture
-// also proves the redaction: `arguments` and `tool_grant` are present in the
-// fixture and must not appear anywhere on screen.
+// Four of these rows are typed agent events, not prose, so the capture shows
+// the R-1 §4 agent cards (approval / tool run / settled turn cost) and the
+// ADR-0135 D1 cascade notice in both schemes. The props are shaped exactly like
+// the server's own (AgentGatewayRoutes.approvalRequestProps,
+// WorkerService.toolResultProps, AgentGatewayRoutes.timelineProps,
+// WorkerService.finalMessageProps), opaque fields included, so the capture also
+// proves the redaction: `arguments` and `tool_grant` are present in the fixture
+// and must not appear anywhere on screen.
+//
+// TWO settled turn records on purpose, because there are two executors and they
+// mark themselves differently. Hand-writing only the gateway one is exactly how
+// the cascade notice shipped structurally unrenderable (2026-07-26 merge review
+// D1/F3): the rows a cascade actually lands on are written by the worker, which
+// writes no `schema` key, and this capture agreed with the unit fixture instead
+// of with the emitter. The cascade now rides the WORKER row here, which is the
+// only row it can ride in production.
 const BODIES = [
   [ME, "prometheus mem_limit 붙였어요. 야간 소크 돌려두고 아침에 그래프 확인합시다."],
   [ME, "relay outbox lag 지표가 p99에서 1.2s 근처인데, 배치 크기 조정 전에 원인부터 봅시다."],
@@ -239,10 +248,13 @@ const BODIES = [
     "확인했습니다. 여명 팔레트 토큰만 사용하고 있고, 인디고 잔재는 없습니다.",
     "text",
     {
+      // Gateway turn record (AgentGatewayRoutes.timelineProps). It is the only
+      // shape that carries `usage`, so this is the row that renders the settled
+      // turn cost card.
       schema: "momo.agent_gateway.timeline.v0",
       source: "hermes_gateway",
       status: "succeeded",
-      run_id: "0199aa11-2222-7000-8000-0000000000c3",
+      run_id: "0199aa11-2222-7000-8000-0000000000c4",
       agent_member_id: HERMES,
       usage: {
         model: "claude-opus-4",
@@ -250,6 +262,42 @@ const BODIES = [
         completion_tokens: 380,
         cost_micro_usd: 12000,
         was_estimated: false,
+      },
+    },
+  ],
+  [ME, "@hermes 남은 세 파일도 같은 기준으로 봐주세요."],
+  [
+    HERMES,
+    "남은 세 파일도 토큰만 씁니다. 하드코딩된 색은 없습니다.",
+    "text",
+    {
+      // Worker turn record, transcribed from WorkerService.finalMessageProps.
+      // No `schema` key: the worker does not write one, and inventing one here
+      // would put this capture back to agreeing with the client instead of with
+      // the emitter.
+      //
+      // The cascade fixture in src/features/timeline/cascadeRail.tsx keys its
+      // seeded fallback off THIS run id, which is the only way the ADR-0135 D1
+      // "2차 프로바이더로 처리됨" row can reach artifacts/design: the capture runs
+      // with no socket, so the frame that normally carries it never arrives.
+      // Change one and change the other.
+      run_id: "0199aa11-2222-7000-8000-0000000000c3",
+      source: "agent_worker.final_text.v0",
+      trigger_message_id: "0199aa11-2222-7000-8000-0000000000d1",
+      trigger_message_seq: 1412,
+      author_member_id: ME,
+      source_attribution: {
+        source_id: "msg_0199aa11-2222-7000-8000-0000000000d1",
+        kind: "message",
+        title: "Message #1412",
+        uri: `momo://workspaces/${WORKSPACE_ID}/channels/${GENERAL_ID}/messages/0199aa11-2222-7000-8000-0000000000d1`,
+        workspace_id: WORKSPACE_ID,
+        channel_id: GENERAL_ID,
+        message_id: "0199aa11-2222-7000-8000-0000000000d1",
+        message_seq: 1412,
+        author_member_id: ME,
+        permission_snapshot: "actor:channel_member agent:channel_member",
+        excerpt: "@hermes 남은 세 파일도 같은 기준으로 봐주세요.",
       },
     },
   ],
@@ -340,6 +388,195 @@ const WORK_HOSTS = [
     online: false,
   },
 ];
+
+// 설정 > AI 연결 (MOMO-627 / ADR-0135 D1). The singleton head plus four fallback
+// hops, because those five rows are what the block has to keep apart on screen:
+// a head that is read-only here, a live fallback, a hop the operator switched
+// off, a hop whose key the provider rejects, and a hop in a mock mode (the
+// self-host default, and the row that must NOT read as a failure). Bearers are
+// masked tails, exactly as the API answers (ADR-0004: the key never leaves the
+// server).
+const PROVIDER_LINK = {
+  schema: "momo.provider_link.v0",
+  configured: true,
+  source: "database",
+  mode: "external-hermes",
+  baseUrl: "https://api.anthropic.com/v1",
+  endpointLabel: "api.anthropic.com",
+  bearerConfigured: true,
+  bearerLast4: "8f21",
+  availability: "live",
+  keyConfigured: true,
+  updatedAtMs: Date.now() - 6 * 3_600_000,
+  diagnostics: [],
+};
+
+const PROVIDER_CHAIN = {
+  schema: "momo.provider_link.chain.v0",
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      baseUrl: PROVIDER_LINK.baseUrl,
+      endpointLabel: PROVIDER_LINK.endpointLabel,
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "8f21",
+      updatedAtMs: PROVIDER_LINK.updatedAtMs,
+    },
+    {
+      position: 1,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://gateway.dawn.internal:8443/v1",
+      endpointLabel: "gateway.dawn.internal:8443",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "c40a",
+      updatedAtMs: Date.now() - 2 * 3_600_000,
+    },
+    {
+      position: 2,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://backup.dawn.internal/v1",
+      endpointLabel: "backup.dawn.internal",
+      enabled: false,
+      bearerConfigured: true,
+      bearerLast4: "1b77",
+    },
+    {
+      position: 3,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://relay.dawn.internal/v1",
+      endpointLabel: "relay.dawn.internal",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "9e03",
+    },
+    {
+      position: 4,
+      source: "chain",
+      mode: "local-mock",
+      baseUrl: "http://127.0.0.1:8088/v1",
+      endpointLabel: "127.0.0.1:8088",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "0000",
+    },
+  ],
+  // `entries.count - 1`: fallbacks only. `ProviderCascade.attemptable` filters
+  // the WHOLE plan, so the head counts there and the parked hop does not, which
+  // is why the summary sentence has to name what it is counting.
+  fallbackCount: 4,
+  attemptableCount: 4,
+};
+
+// The same body with one entry this client cannot read: position 2 lost its
+// `baseUrl`. A 200 does not rule that out (a proxy, a dev catch-all or a later
+// schema can all produce it), and the panel's answer to it is not cosmetic.
+// `PUT /v1/provider/link/chain` replaces the whole fallback list, so a hop that
+// never reached the draft is one the next save deletes from the server together
+// with the key stored at its position. The block goes read-only, names the
+// entry by its place in the answer, and states no count it cannot show.
+const PROVIDER_CHAIN_PARTIAL = {
+  ...PROVIDER_CHAIN,
+  entries: PROVIDER_CHAIN.entries.map((entry, index) => {
+    if (index !== 2) return entry;
+    const rest = { ...entry };
+    delete rest.baseUrl;
+    return rest;
+  }),
+};
+
+// A fresh self-host instance: no operator link, so the head is the boot-time
+// HERMES_* env trio pointed at the bundled mock. This is what momowebqa answers
+// today, and the state the panel must describe as a MODE rather than a failure.
+const MOCK_ONLY_HOP = {
+  position: 0,
+  source: "environment",
+  mode: "local-mock",
+  baseUrl: "http://127.0.0.1:8088/v1",
+  endpointLabel: "127.0.0.1:8088",
+  enabled: true,
+  bearerConfigured: true,
+  bearerLast4: "0000",
+};
+
+// The probe result a review has to look at: the head fell over, the second hop
+// answered, the parked hop was skipped, the fourth hop's key was rejected, and
+// the fifth is in a mock mode the probe declines to call at all. Every
+// disposition the server can emit, in one frame, with the tone each has to be
+// drawn in. `cascadeOk: true` because a cascade that fell over to a working
+// provider is the cascade doing its job.
+const PROVIDER_PROBE = {
+  schema: "momo.provider_link.test.v0",
+  ok: false,
+  reason: "provider_unreachable",
+  source: "database",
+  mode: "external-hermes",
+  endpointLabel: PROVIDER_LINK.endpointLabel,
+  checkedAtMs: Date.now(),
+  cascadeOk: true,
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      endpointLabel: "api.anthropic.com",
+      enabled: true,
+      ok: false,
+      reason: "provider_unreachable",
+      disposition: "fall_over",
+    },
+    {
+      position: 1,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "gateway.dawn.internal:8443",
+      enabled: true,
+      ok: true,
+      disposition: "ok",
+    },
+    {
+      position: 2,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "backup.dawn.internal",
+      enabled: false,
+      ok: false,
+      reason: "hop_disabled",
+      disposition: "skipped",
+    },
+    {
+      position: 3,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "relay.dawn.internal",
+      enabled: true,
+      ok: false,
+      // 401/403. A caller error does NOT fall over: the next provider would
+      // fail the same way, so the cascade stops here (--danger).
+      reason: "provider_auth_failed",
+      disposition: "propagate",
+    },
+    {
+      position: 4,
+      source: "chain",
+      mode: "local-mock",
+      endpointLabel: "127.0.0.1:8088",
+      enabled: true,
+      ok: false,
+      // `probeHop` returns before calling anything for a non-external mode. It
+      // arrives as `propagate`, but nothing failed and nothing was measured, so
+      // this row is muted 목 모드 and is excluded from the headline's counts.
+      reason: "not_external_provider",
+      disposition: "propagate",
+    },
+  ],
+};
 
 // WorkTierPolicyRoutes.loadPolicy answers /me out of the workspace row when the
 // member has no row of their own, so an inherited member policy carries the
@@ -481,6 +718,15 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
+  // 설정 > AI 연결 (MOMO-627). The chain routes are matched BEFORE the singleton
+  // so `**/v1/provider/link` does not swallow `/link/chain` and `/link/test`.
+  await context.route("**/v1/provider/link/chain", (route) =>
+    json(route, PROVIDER_CHAIN)
+  );
+  await context.route("**/v1/provider/link/test", (route) =>
+    json(route, PROVIDER_PROBE)
+  );
+  await context.route("**/v1/provider/link", (route) => json(route, PROVIDER_LINK));
   await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
     json(route, { workTierPolicy: WORKSPACE_TIER_POLICY })
   );
@@ -716,9 +962,27 @@ async function captureScheme(browser, scheme) {
   await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
   await turns.getByTestId("composer-working").waitFor({ state: "visible" });
+  // The ADR-0135 D1 cascade notice, and this wait is a GATE rather than a
+  // convenience. The row it hangs on is the WORKER turn record in BODIES, which
+  // is the only shape a real cascade can land on; the seeded fallback in
+  // cascadeRail.tsx is keyed to that row's run id. If `turnRecordRunId` ever
+  // narrows back to the gateway schema, the capture stops here instead of
+  // shipping screenshots of a surface that cannot render in production, which
+  // is precisely how D1/F3 got through the gates the first time.
+  await turns.getByTestId("cascade-notice").waitFor({ state: "visible" });
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
+
+  // 3e-2. 그 안내 줄을 화면 안으로 (ADR-0135 D1). 이 줄은 아티팩트에 한 번도 뜬
+  //       적이 없다 — 렌더를 확인하지 못한 채 머지 리뷰까지 갔고, 거기서 구조적으로
+  //       렌더 불가라는 것이 드러났다(D1/F3). 워커 턴 행에 붙은 모습을 두 스킴
+  //       모두에서 남겨 다음 리뷰가 눈으로도 확인할 수 있게 한다.
+  await turns.getByTestId("cascade-notice").scrollIntoViewIfNeeded();
+  await turns.waitForTimeout(200);
+  const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
+  await turns.screenshot({ path: cascadeShot });
+  shots.push(cascadeShot);
 
   // 3f. the same turns with the rail down (SKILL §5 offline): the clocks go
   //     away rather than counting on a dead socket, and the banner says why.
@@ -762,6 +1026,159 @@ async function captureScheme(browser, scheme) {
   const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
   await settings.screenshot({ path: policyShot });
   shots.push(policyShot);
+
+  // 3h. 설정 > AI 연결 (MOMO-627 / ADR-0135 D1): the singleton card plus the
+  //     cascade it heads. Three rows that must stay apart at a glance, the head
+  //     being the only one this block cannot edit.
+  const aiLink = await context.newPage();
+  await aiLink.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiLink);
+  await aiLink.evaluate('location.hash = "/settings?section=ai"');
+  await aiLink.getByTestId("chain-list").waitFor({ state: "visible" });
+  const aiLinkShot = `${OUT_DIR}/settings-ai-chain-${scheme}.png`;
+  await aiLink.screenshot({ path: aiLinkShot });
+  shots.push(aiLinkShot);
+
+  // …and its foot, where the hop editor's own controls live. A block this tall
+  // is reviewed twice or the half nobody sees is the half that regresses.
+  await aiLink.getByTestId("chain-add").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiEditShot = `${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`;
+  await aiLink.screenshot({ path: aiEditShot });
+  shots.push(aiEditShot);
+
+  // …and the probe table, which is the one surface carrying all four
+  //     dispositions and therefore all four status tones in one frame.
+  await aiLink.getByRole("button", { name: "연결 확인" }).click();
+  await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
+  const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
+  await aiLink.screenshot({ path: aiProbeShot });
+  shots.push(aiProbeShot);
+
+  // …and a hop that was just added. This frame exists to prove a NEGATIVE: the
+  //     empty address field must NOT be red, must not be aria-invalid, and must
+  //     keep its format hint. Nothing has happened yet, so there is no error to
+  //     report; what the block owes the reader is the next step, once, at the
+  //     foot ("6차 provider 주소를 입력하면 저장할 수 있습니다.").
+  await aiLink.getByTestId("chain-add").click();
+  await aiLink.getByTestId("chain-blocked").waitFor({ state: "visible" });
+  await aiLink.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiNewRowShot = `${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`;
+  await aiLink.screenshot({ path: aiNewRowShot });
+  shots.push(aiNewRowShot);
+
+  // …and the probe table with that unsaved hop still on screen. The table is
+  //     numbered by the SAVED order, so once the two can disagree it has to say
+  //     which of them it is describing: one screen must not carry two meanings
+  //     of "3차".
+  await aiLink.getByTestId("chain-probe-scope").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiPendingShot = `${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`;
+  await aiLink.screenshot({ path: aiPendingShot });
+  shots.push(aiPendingShot);
+
+  // 3h-2. a 200 whose entries this client cannot read in full. Read-only, one
+  //     banner naming the entry, and no count anywhere that the rows below do
+  //     not support.
+  const aiPartial = await context.newPage();
+  await aiPartial.route("**/v1/provider/link/chain", (route) =>
+    json(route, PROVIDER_CHAIN_PARTIAL)
+  );
+  await aiPartial.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiPartial);
+  await aiPartial.evaluate('location.hash = "/settings?section=ai"');
+  await aiPartial.getByTestId("chain-partial").waitFor({ state: "visible" });
+  await aiPartial.getByTestId("chain-partial").scrollIntoViewIfNeeded();
+  await aiPartial.waitForTimeout(200);
+  const aiPartialShot = `${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`;
+  await aiPartial.screenshot({ path: aiPartialShot });
+  shots.push(aiPartialShot);
+
+  // 3i. the same panel against a server built BEFORE the chain landed, which is
+  //     the live momowebqa answer today (404, measured 2026-07-26). The block
+  //     has to say "this server has no chain yet", never draw an empty chain.
+  const aiLegacy = await context.newPage();
+  await aiLegacy.route("**/v1/provider/link/chain", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "not found" } }),
+    })
+  );
+  await aiLegacy.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiLegacy);
+  await aiLegacy.evaluate('location.hash = "/settings?section=ai"');
+  await aiLegacy.getByTestId("chain-unavailable").waitFor({ state: "visible" });
+  const aiLegacyShot = `${OUT_DIR}/settings-ai-no-chain-${scheme}.png`;
+  await aiLegacy.screenshot({ path: aiLegacyShot });
+  shots.push(aiLegacyShot);
+
+  // 3j. the self-host DEFAULT: one hop, mock mode, no operator link. This frame
+  //     exists because the panel used to call it broken. `probeHop` never calls
+  //     a non-external hop, so the check measured nothing, and "지금은 실행이
+  //     실패합니다" was a false statement about an instance whose turns succeed
+  //     through the bundled mock. It has to read as a mode, not as an outage.
+  const aiMock = await context.newPage();
+  await aiMock.route("**/v1/provider/link/chain", (route) =>
+    json(route, {
+      schema: "momo.provider_link.chain.v0",
+      entries: [MOCK_ONLY_HOP],
+      fallbackCount: 0,
+      attemptableCount: 1,
+    })
+  );
+  await aiMock.route("**/v1/provider/link/test", (route) =>
+    json(route, {
+      schema: "momo.provider_link.test.v0",
+      ok: false,
+      reason: "not_external_provider",
+      source: "environment",
+      mode: "local-mock",
+      endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+      checkedAtMs: Date.now(),
+      cascadeOk: false,
+      entries: [
+        {
+          position: 0,
+          source: "environment",
+          mode: "local-mock",
+          endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+          enabled: true,
+          ok: false,
+          reason: "not_external_provider",
+          disposition: "propagate",
+        },
+      ],
+    })
+  );
+  // The singleton above the chain is overridden too, or the shot would show a
+  // saved anthropic link heading a mock cascade: a frame the server cannot
+  // produce, which makes the screenshot worse than no screenshot. Registered
+  // after the two above for the same reason installMocks does it in that order.
+  await aiMock.route("**/v1/provider/link", (route) =>
+    json(route, {
+      schema: "momo.provider_link.v0",
+      configured: false,
+      source: "environment",
+      mode: "local-mock",
+      baseUrl: MOCK_ONLY_HOP.baseUrl,
+      endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+      bearerConfigured: true,
+      availability: "mock",
+      keyConfigured: true,
+      diagnostics: [],
+    })
+  );
+  await aiMock.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiMock);
+  await aiMock.evaluate('location.hash = "/settings?section=ai"');
+  await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
+  await aiMock.getByRole("button", { name: "연결 확인" }).click();
+  await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
+  const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
+  await aiMock.screenshot({ path: aiMockShot });
+  shots.push(aiMockShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

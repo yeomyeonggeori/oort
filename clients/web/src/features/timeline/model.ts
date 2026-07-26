@@ -1,4 +1,9 @@
-import type { Channel, Message, RosterMember } from "@/lib/api";
+import type {
+  Channel,
+  Message,
+  RequestRouting,
+  RosterMember,
+} from "@/lib/api";
 import { uuidEq } from "@/lib/api";
 
 // =============================================================================
@@ -215,6 +220,13 @@ export interface PendingMessage {
   /** newestSeq at the moment the send started; the echo must land above it. */
   sinceSeq: number | null;
   status: "sending" | "failed";
+  /**
+   * The composer's per-request model/effort override for THIS send (ADR-0134
+   * D1). Absent for every send that inherits, which is every send that predates
+   * this field. It rides the row so a retry replays the choice the person made:
+   * dropping it would send a different request under the same idempotency key.
+   */
+  routing?: RequestRouting;
 }
 
 /** True when `message` is the server's echo of `pending`. */

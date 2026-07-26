@@ -18,6 +18,7 @@ import {
 import { ApiError } from "@/lib/api";
 import { fetchUsageSummary } from "./api";
 import { errorMessage } from "./model";
+import { ProviderQuotaBlock } from "./ProviderQuotaBlock";
 import { SectionShell, StatusChip } from "./SettingsFields";
 import {
   USAGE_BUCKETS,
@@ -58,6 +59,15 @@ import {
 // per model. The bars are native <progress> elements because CSP is
 // style-src 'self' and a data-driven width cannot come from an inline style;
 // the platform control draws it from value/max.
+//
+// Two frames, separated (ADR-0135 D2, MOMO-628). 구독 잔여량 answers "can the
+// agents keep running right now" as a ratio of a window the provider owns;
+// everything under the rule answers "what did this workspace spend" in dollars
+// over a window you pick. 레퍼런스 서베이 §5 found those two get read as one
+// wherever a product stacks them without a break, so the rate frame is a block
+// of its own on top, the 기간/단위 controls sit BELOW the rule where they can
+// only be read as controls of the ledger they precede, and each frame says in
+// its own prose that the other one is a different number.
 //
 // Everything on screen is server-reported. The client does not add up the
 // ledger, does not decide which side of a budget limit the workspace is on, and
@@ -130,15 +140,30 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
     lastKnown: recallUsage(workspaceId, scope),
   });
 
+  // The lead is a static sentence and the block above it is a read that can
+  // fail, so a lead that promises 잔여량 was false on every server that answers
+  // 404 there, which today is all of them (R1 M9: the panel said "AI 구독의
+  // 잔여량과 ... 비용입니다" two lines above "이 서버는 아직 구독 잔여량을
+  // 제공하지 않습니다"). The ledger is what this section always has; the gauges
+  // are conditional, and the sentence says so in that order.
   const lines = [
-    "이 워크스페이스에서 에이전트가 쓴 비용과 토큰입니다.",
+    "이 워크스페이스에서 에이전트가 쓴 비용입니다. 이 서버가 AI 구독 잔여량을 제공하면 위에 함께 표시됩니다.",
     "워크스페이스 멤버라면 누구나 볼 수 있습니다.",
   ];
 
   return (
     <SectionShell title="사용량" lines={lines}>
+      {/* The rate frame, on its own above the rule. It is a read of its own with
+          its own four states: a server that predates ADR-0135 answers 404 here
+          and the ledger below still renders, because the two are separate
+          contracts and one being absent is not the other failing. */}
+      <ProviderQuotaBlock workspaceId={workspaceId} />
+
+      {/* The rule is the frame boundary, and the controls are inside it: a
+          기간 segment above the line would read as filtering the gauges, which
+          it cannot do (그 읽기는 파라미터를 받지 않는다). */}
       <div
-        className="flex flex-wrap items-center gap-4"
+        className="flex flex-wrap items-center gap-4 border-t border-line pt-4"
         data-testid="usage-controls"
       >
         <Segmented

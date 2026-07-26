@@ -29,6 +29,8 @@ import {
   SectionShell,
   StatusChip,
 } from "./SettingsFields";
+import { AiLinkChain, ChainProbeResult } from "./AiLinkChain";
+import { parseProbeEntries } from "./chainModel";
 
 // =============================================================================
 // AI 연결 (R-1 §5): the instance-global provider link, GET/PUT/DELETE plus the
@@ -72,6 +74,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   const [mode, setMode] = useState("external-hermes");
   const [formError, setFormError] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
+  // The chain block below owns its own draft, and the probe table above it is
+  // numbered by the SAVED order. When the two disagree the table says so
+  // rather than letting one screen carry two meanings of "3차".
+  const [chainPending, setChainPending] = useState(false);
 
   const invalidate = () =>
     client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
@@ -165,6 +171,12 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   }
 
   const link = query.data;
+  // Parsed rather than trusted: `entries` is an ADR-0135 D1 addition, so a
+  // server that predates it omits the key and anything in front of it can
+  // answer a body of another shape entirely. `parseProbeEntries` is total, so
+  // an unreadable answer degrades to the MOMO-572 single-hop sentence below
+  // instead of throwing inside render (see chainModel).
+  const probeEntries = parseProbeEntries(probe?.entries);
 
   return (
     <SectionShell title="AI 연결" lines={lines}>
@@ -336,15 +348,37 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
           {errorMessage(unlink.error)}
         </p>
       )}
-      {probe && (
-        <p
-          className={probe.ok ? "text-meta text-ok" : "text-meta text-warn"}
-          role="status"
-          data-testid="ai-link-probe"
-        >
-          {providerTestMessage(probe)}
-        </p>
-      )}
+      {/* One probe, two shapes. A server that carries the ADR-0135 D1 chain
+          answers `entries[]`, and then the per-hop table IS the result: its
+          first row is position 0, so repeating the single-hop sentence above it
+          would state the same fact twice in two different vocabularies. A
+          server built before the chain landed answers the MOMO-572 body, and
+          that sentence stays exactly as it was. */}
+      {probe &&
+        (probeEntries.length > 0 ? (
+          <ChainProbeResult
+            cascadeOk={probe.cascadeOk === true}
+            entries={probeEntries}
+            checkedAtMs={probe.checkedAtMs}
+            chainPending={chainPending}
+          />
+        ) : (
+          <p
+            className={probe.ok ? "text-meta text-ok" : "text-meta text-warn"}
+            role="status"
+            data-testid="ai-link-probe"
+          >
+            {providerTestMessage(probe)}
+          </p>
+        ))}
+
+      {/* A saved chain makes the table above describe a cascade that no longer
+          exists, exactly as save/unlink do for the singleton. Same clear. */}
+      <AiLinkChain
+        offline={offline}
+        onSaved={() => setProbe(null)}
+        onPendingChange={setChainPending}
+      />
     </SectionShell>
   );
 }

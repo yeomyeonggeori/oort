@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 
@@ -67,6 +74,20 @@ export function Subsection({
 /**
  * Label above control, not a fixed label column: a Korean label and a full URL
  * do not share one width without truncating or an off-grid fixed size.
+ *
+ * The error is BOUND to the control, not merely placed under it. `role="alert"`
+ * reads the message once, at the moment it appears; a person who tabs back to
+ * that input ten seconds later gets nothing from a live region that already
+ * fired. `aria-describedby` is what makes the input carry its own error every
+ * time it takes focus, and `aria-invalid` is what makes it announce itself as
+ * the field that is wrong. The clone is how a shared wrapper does that without
+ * every call site repeating two ids: an explicitly passed value always wins, so
+ * a caller that describes its input itself is never overwritten.
+ *
+ * The hint STAYS while the error shows. It used to be swapped out, which
+ * deleted "예: https://api.example.com/v1" at the exact moment "주소는 http://
+ * 또는 https:// 로 시작해야 합니다." appeared: the format rule was withdrawn
+ * from the one person who had just proved they needed it.
  */
 export function Field({
   label,
@@ -81,20 +102,34 @@ export function Field({
   error?: string | null;
   children: ReactNode;
 }) {
+  const errorId = `${htmlFor}-error`;
+  const control =
+    error && isValidElement<AriaDescribable>(children)
+      ? cloneElement(children, {
+          "aria-invalid": children.props["aria-invalid"] ?? true,
+          "aria-describedby": children.props["aria-describedby"] ?? errorId,
+        })
+      : children;
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <label htmlFor={htmlFor} className="text-meta text-ink-muted">
         {label}
       </label>
-      {children}
-      {hint && !error && <p className="text-meta text-ink-muted">{hint}</p>}
+      {control}
+      {hint && <p className="text-meta text-ink-muted">{hint}</p>}
       {error && (
-        <p className="text-meta text-danger" role="alert" id={`${htmlFor}-error`}>
+        <p className="text-meta text-danger" role="alert" id={errorId}>
           {error}
         </p>
       )}
     </div>
   );
+}
+
+/** The two attributes `Field` sets on whatever control it was handed. */
+interface AriaDescribable {
+  "aria-invalid"?: boolean | "true" | "false";
+  "aria-describedby"?: string;
 }
 
 export type ChipTone = "ok" | "warn" | "danger" | "accent" | "muted";
@@ -487,6 +522,7 @@ export function CopyButton({
  */
 export function ConfirmButton({
   label,
+  ariaLabel,
   question,
   confirmLabel,
   onConfirm,
@@ -494,6 +530,13 @@ export function ConfirmButton({
   testId,
 }: {
   label: string;
+  /**
+   * Full accessible name for a button one list renders per row. "삭제" eight
+   * times is eight identical stops in the tab order, and the row a screen
+   * reader is about to act on is not recoverable from the button alone. Must
+   * contain the visible label so speech input still matches it.
+   */
+  ariaLabel?: string;
   question: string;
   confirmLabel: string;
   onConfirm: () => void;
@@ -509,6 +552,7 @@ export function ConfirmButton({
         variant="outline"
         size="sm"
         disabled={disabled}
+        aria-label={ariaLabel}
         onClick={() => setAsking(true)}
         data-testid={testId}
       >
@@ -517,8 +561,14 @@ export function ConfirmButton({
     );
   }
 
+  // The question names the group, so two rows mid-confirmation stay two
+  // distinct groups instead of four anonymous 빼기/취소 stops.
   return (
-    <div className="flex flex-wrap items-center gap-2" role="group">
+    <div
+      className="flex flex-wrap items-center gap-2"
+      role="group"
+      aria-label={question}
+    >
       <span className="text-meta text-ink">{question}</span>
       <Button
         type="button"

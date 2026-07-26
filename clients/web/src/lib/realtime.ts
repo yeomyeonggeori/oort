@@ -389,6 +389,61 @@ export function asWorkSessionLifecycleFrame(
   return frame as WorkSessionLifecycleFrame;
 }
 
+// ---- provider cascade rail (ADR-0135 D1 / MOMO-622) -------------------------
+// A turn that fell over to the next provider publishes ONE frame per transition
+// on the CHANNEL namespace, beside the message rail (AgentWorker
+// `cascadeFallbackBroadcastPayload`). "조용한 전환 금지" is the whole reason it
+// exists: cost and governance moved to a different provider, and the person who
+// asked for the turn is entitled to know.
+//
+// Three facts about this frame, all from the worker that writes it:
+//   - it carries NO `seq` and no Centrifugo version, because it is not a
+//     message and claims no place in the channel's order;
+//   - `run_id` is a Swift `uuidString` (UPPERCASE) and can be null when the
+//     fallback happened before a run row existed, so every comparison folds
+//     case and a null id is dropped rather than guessed;
+//   - the payload carries redacted endpoint LABELS (host:port), never a base
+//     URL and never a bearer (ADR-0004 evidence rule).
+//
+// Unlike the agent progress rail this one does NOT gate replays. The `ch:`
+// namespace is recoverable, so a reconnect replays the gap, and that is wanted
+// here: a fallback is a durable fact about a finished turn, not a running
+// clock, and the outbox already keys one row per (run, transition) so the same
+// transition dedupes on `${runId}:${from}-${to}` instead of stacking.
+
+export interface CascadeFallbackFrame {
+  type: "provider.cascade.fallback";
+  v: number;
+  ts: number;
+  payload: {
+    channel_id: string;
+    run_id: string | null;
+    /** Cascade position that failed. 0 is the operator's provider link. */
+    from: number;
+    /** Cascade position that served the turn instead. */
+    to: number;
+    /** Machine label (`provider_unreachable`, …), never user copy. */
+    reason: string;
+    from_endpoint_label: string;
+    to_endpoint_label: string;
+  };
+}
+
+export function asCascadeFallbackFrame(
+  data: unknown
+): CascadeFallbackFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<CascadeFallbackFrame>;
+  if (frame.type !== "provider.cascade.fallback") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload) return null;
+  if (typeof payload.from !== "number" || typeof payload.to !== "number") {
+    return null;
+  }
+  if (typeof payload.reason !== "string") return null;
+  return frame as CascadeFallbackFrame;
+}
+
 export interface RealtimeHandle {
   /**
    * Watch one channel. Callers are independent: the timeline and the desktop
@@ -430,6 +485,15 @@ export interface RealtimeHandle {
       /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
       onResync: () => void;
     }
+  ) => () => void;
+  /**
+   * Watch provider cascade transitions in one channel (ADR-0135 D1). Shares the
+   * channel subscription with `subscribeChannel` through the same refcount.
+   */
+  subscribeCascade: (
+    workspaceId: string,
+    channelId: string,
+    handlers: { onFallback: (frame: CascadeFallbackFrame) => void }
   ) => () => void;
   dispose: () => void;
 }
@@ -641,10 +705,35 @@ export function createRealtime(
     );
   }
 
+  function subscribeCascade(
+    workspaceId: string,
+    channelId: string,
+    handlers: { onFallback: (frame: CascadeFallbackFrame) => void }
+  ): () => void {
+    // The SAME flags the message rail asks for, because `attach` hands back the
+    // one subscription this channel already has; whichever caller arrives first
+    // creates it. No replay gate: see the note above the frame type.
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onPublication = (ctx: { data?: unknown }) => {
+          const frame = asCascadeFallbackFrame(ctx.data);
+          if (frame) handlers.onFallback(frame);
+        };
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
     subscribeChannel,
     subscribeAgent,
     subscribeWorkSession,
+    subscribeCascade,
     dispose: () => {
       shared.clear();
       client.disconnect();

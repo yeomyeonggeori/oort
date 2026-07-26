@@ -47,6 +47,7 @@ export function MemberRow({
   selfMemberId,
   pending,
   onOpenDm,
+  onOpenProfile,
 }: {
   member: RosterMember;
   directory: Directory;
@@ -54,6 +55,8 @@ export function MemberRow({
   /** This row's DM request is in flight. */
   pending: boolean;
   onOpenDm: (member: RosterMember) => void;
+  /** Agent rows only: open the routing dialog for this agent (MOMO-626). */
+  onOpenProfile: (member: RosterMember) => void;
 }) {
   const isAgent = member.kind === "agent";
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
@@ -90,6 +93,27 @@ export function MemberRow({
     "data-member-kind": member.kind,
   };
 
+  // 에이전트 행에만 붙는 두 번째 액션 (MOMO-626): 이 에이전트가 어떤 모델과
+  // 추론 강도로 답하는지 정하는 자리. 행 자체는 여전히 DM 버튼이므로 별개의
+  // 버튼으로 둔다. 버튼 안에 버튼을 넣을 수 없기도 하지만, 그보다 "행을 누르면
+  // 대화가 열린다"는 이 화면의 한 문장을 지키기 위해서다.
+  const profileAction = isAgent ? (
+    <button
+      type="button"
+      onClick={() => onOpenProfile(member)}
+      data-testid="directory-row-profile"
+      data-member-id={member.id}
+      aria-label={`${member.displayName} 라우팅 설정 열기`}
+      className={cn(
+        "h-control-sm shrink-0 rounded-sm border border-line px-2 text-meta text-ink-muted",
+        "transition-colors hover:bg-surface-hover hover:text-ink",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      )}
+    >
+      라우팅
+    </button>
+  ) : null;
+
   if (availability.kind !== "ready") {
     return (
       <li>
@@ -103,32 +127,38 @@ export function MemberRow({
             {availability.kind === "self" && (
               <span className="shrink-0 text-meta text-ink-muted">나</span>
             )}
+            {profileAction}
           </span>
         </div>
       </li>
     );
   }
 
+  // 행 하나에 액션이 둘이 되면서, 전체를 감싸던 <button>이 <li> 안의 두 형제로
+  // 갈라졌다. ROW_CLASS/CONTENT_CLASS는 그대로 쓰므로 구분선, 여백, 640px 측정
+  // 폭, 그리고 그 상수들로 만든 로딩 스켈레톤의 예측은 변하지 않는다. 바뀐 것은
+  // hover 배경이 행 전체가 아니라 DM 버튼에 걸린다는 점 하나인데, 그편이 지금
+  // 사실에 더 가깝다: 배경이 덮은 곳을 눌러도 대화가 열리는 영역만 그렇다.
   return (
-    <li>
-      <button
-        type="button"
-        {...shared}
-        data-directory-row=""
-        disabled={pending}
-        // Name AND handle AND attribution: two rows here really do share a
-        // display name, so a label of the name alone would offer a screen
-        // reader two identical actions (model.memberRowLabel).
-        aria-label={memberRowLabel(member, owner?.displayName ?? null)}
-        onClick={() => onOpenDm(member)}
-        className={cn(
-          ROW_CLASS,
-          "transition-colors hover:bg-surface-hover",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-          "disabled:cursor-default disabled:opacity-50"
-        )}
-      >
-        <span className={CONTENT_CLASS}>
+    <li className={ROW_CLASS}>
+      <span className={CONTENT_CLASS}>
+        <button
+          type="button"
+          {...shared}
+          data-directory-row=""
+          disabled={pending}
+          // Name AND handle AND attribution: two rows here really do share a
+          // display name, so a label of the name alone would offer a screen
+          // reader two identical actions (model.memberRowLabel).
+          aria-label={memberRowLabel(member, owner?.displayName ?? null)}
+          onClick={() => onOpenDm(member)}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left",
+            "transition-colors hover:bg-surface-hover",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+            "disabled:cursor-default disabled:opacity-50"
+          )}
+        >
           <Avatar member={member} name={member.displayName} />
           {identity}
           {pending ? (
@@ -138,8 +168,9 @@ export function MemberRow({
               <MessageSquare className="size-4" />
             </span>
           )}
-        </span>
-      </button>
+        </button>
+        {profileAction}
+      </span>
     </li>
   );
 }

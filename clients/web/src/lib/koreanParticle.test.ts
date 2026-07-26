@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { attachParticle, hasFinalConsonant, particleFor } from "./koreanParticle";
+import {
+  attachDirection,
+  attachParticle,
+  directionParticle,
+  hasFinalConsonant,
+  particleFor,
+} from "./koreanParticle";
 
 describe("koreanParticle", () => {
   it("picks the particle from the last spoken syllable, both branches", () => {
@@ -29,5 +35,38 @@ describe("koreanParticle", () => {
     expect(hasFinalConsonant("   ")).toBe(false);
     expect(hasFinalConsonant("MOMO-613")).toBe(false);
     expect(hasFinalConsonant("김인턴")).toBe(true);
+  });
+});
+
+describe("directionParticle (로 / 으로)", () => {
+  // The measured defect: "provider가 503로 답했습니다." was on screen, and the
+  // status codes an operator meets most (500, 503, 400, 403, 406) are exactly
+  // the ones whose last digit is read with a final consonant.
+  it("reads the last digit the way it is spoken", () => {
+    expect(attachDirection("500")).toBe("500으로"); // 영, ㅇ
+    expect(attachDirection("503")).toBe("503으로"); // 삼, ㅁ
+    expect(attachDirection("406")).toBe("406으로"); // 육, ㄱ
+    expect(attachDirection("401")).toBe("401로"); // 일, ㄹ
+    expect(attachDirection("502")).toBe("502로"); // 이
+    expect(attachDirection("504")).toBe("504로"); // 사
+    expect(attachDirection("429")).toBe("429로"); // 구
+    expect(attachDirection("507")).toBe("507로"); // 칠, ㄹ
+    expect(attachDirection("408")).toBe("408로"); // 팔, ㄹ
+    expect(attachDirection("405")).toBe("405로"); // 오
+  });
+
+  // ㄹ is the one final consonant that keeps 로, which a two-slot 이/가-shaped
+  // table cannot express.
+  it("treats a ㄹ ending as open, and every other final consonant as closed", () => {
+    expect(directionParticle("서울")).toBe("로");
+    expect(directionParticle("목")).toBe("으로");
+    expect(directionParticle("다음")).toBe("으로");
+    expect(directionParticle("예비")).toBe("로");
+  });
+
+  it("leaves an anglicised or empty ending on the neutral form", () => {
+    expect(directionParticle("gateway.dawn.internal")).toBe("로");
+    expect(directionParticle("")).toBe("로");
+    expect(directionParticle("(503)")).toBe("으로");
   });
 });

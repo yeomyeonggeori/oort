@@ -11,6 +11,7 @@ import { SessionProvider } from "@/app/session";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
+import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
@@ -98,24 +99,30 @@ export function AppShell({
        * piece of state and no entry point can go stale (MOMO-614). The provider
        * wraps the switcher too, because the palette is the house keyboard path
        * to every action and this one had no seat in it. */}
+      {/* 에이전트 프로필도 같은 규칙이다(MOMO-626): 디렉터리 행, 타임라인의
+       * 에이전트 이름, 컴포저의 멘션 줄 셋이 하나의 다이얼로그를 연다. 진입점
+       * 마다 다이얼로그를 두면 폼 상태가 세 벌이 되고 그중 하나는 낡는다. */}
       <CreateChannelProvider>
-        <div className="app-shell">
-          <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
-          <main className="flex min-h-0 min-w-0">
-            <Outlet />
-          </main>
-        </div>
-        {/* Global keyboard paths that must work from any route (R-1 §2). */}
-        <InboxHotkeys />
-        {/* Renders nothing; watches the rail so a mention or an approval request
-         * reaches the OS while the window is in the background (MOMO-607). */}
-        {!stress && <DesktopNotifications />}
-        {/* Renders nothing; watches every agent's progress channel so the sidebar
-         * badge and the composer line describe the same turn (MOMO-613). Exactly
-         * one writer to the turn store is ever mounted. */}
-        {!stress && turnFixture === null && <AgentWorkingRail />}
-        {turnFixture !== null && <AgentTurnFixture mode={turnFixture} />}
-        <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
+        <AgentProfileProvider>
+          <div className="app-shell">
+            <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
+            <main className="flex min-h-0 min-w-0">
+              <Outlet />
+            </main>
+          </div>
+          {/* Global keyboard paths that must work from any route (R-1 §2). */}
+          <InboxHotkeys />
+          {/* Renders nothing; watches the rail so a mention or an approval
+           * request reaches the OS while the window is in the background
+           * (MOMO-607). */}
+          {!stress && <DesktopNotifications />}
+          {/* Renders nothing; watches every agent's progress channel so the
+           * sidebar badge and the composer line describe the same turn
+           * (MOMO-613). Exactly one writer to the turn store is ever mounted. */}
+          {!stress && turnFixture === null && <AgentWorkingRail />}
+          {turnFixture !== null && <AgentTurnFixture mode={turnFixture} />}
+          <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
+        </AgentProfileProvider>
       </CreateChannelProvider>
     </SessionProvider>
   );
