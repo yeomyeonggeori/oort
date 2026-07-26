@@ -6,7 +6,6 @@ import {
   type ReactNode,
 } from "react";
 import { Hash, Loader2, Lock } from "lucide-react";
-import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -16,6 +15,7 @@ import {
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
 import {
   channelNameIssue,
@@ -71,34 +71,6 @@ export interface ChannelDraft {
 }
 
 const EMPTY_DRAFT: ChannelDraft = { kind: "public", name: "", topic: "" };
-
-/**
- * 오프라인인가. 두 곳에 물어본다.
- *
- * 레일의 `disconnected`는 centrifuge가 재연결을 포기한 종단 절단에서만 오기
- * 때문에, 랜선을 뽑고 105초를 기다려도 상태는 `connecting`에 머문다. 즉 그
- * 신호 하나만 보면 이 표면의 오프라인 상태는 코드에만 있고 화면에는 없다.
- * 브라우저가 아는 사실(navigator.onLine)을 함께 읽어서, 실제로 끊긴 사람이
- * 실제로 배너를 본다. 두 신호는 겹칠 뿐 서로를 대체하지 않는다: 랜선은
- * 살아 있는데 서버만 죽은 경우는 레일이, 랜선이 빠진 경우는 브라우저가 안다.
- */
-function useOffline(): boolean {
-  const { connStatus } = useSession();
-  const [browserOffline, setBrowserOffline] = useState(
-    () => typeof navigator !== "undefined" && navigator.onLine === false
-  );
-  useEffect(() => {
-    const online = () => setBrowserOffline(false);
-    const offline = () => setBrowserOffline(true);
-    window.addEventListener("online", online);
-    window.addEventListener("offline", offline);
-    return () => {
-      window.removeEventListener("online", online);
-      window.removeEventListener("offline", offline);
-    };
-  }, []);
-  return browserOffline || connStatus === "disconnected";
-}
 
 /**
  * Label, control, then one line under it that is either the hint or the error.

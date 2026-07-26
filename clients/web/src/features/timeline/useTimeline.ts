@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMessages, sendMessage, type Message } from "@/lib/api";
+import {
+  fetchMessages,
+  sendMessage,
+  type Message,
+  type RequestRouting,
+} from "@/lib/api";
 import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
 import {
   addPending,
@@ -33,8 +38,13 @@ export interface UseTimelineResult {
   recoveryMarkers: RecoveryMarker[];
   /** Local echoes awaiting their server seq (M10). Never inside `state`. */
   pending: PendingMessage[];
-  /** The one send path: optimistic echo now, server seq when it lands. */
-  send: (body: string) => Promise<void>;
+  /**
+   * The one send path: optimistic echo now, server seq when it lands.
+   * `routing` is the composer's per-request override (ADR-0134 D1); it rides
+   * the pending row so a retry re-sends the choice the person actually made
+   * rather than quietly falling back to the inherited value.
+   */
+  send: (body: string, routing?: RequestRouting) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
@@ -122,7 +132,8 @@ export function useTimeline(
           workspaceId,
           row.channelId,
           row.clientMsgId,
-          row.body
+          row.body,
+          row.routing
         );
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
@@ -140,7 +151,7 @@ export function useTimeline(
   );
 
   const send = useCallback(
-    async (body: string) => {
+    async (body: string, routing?: RequestRouting) => {
       const channel = channelId;
       if (channel === null || body === "") return;
       const row: PendingMessage = {
@@ -148,6 +159,7 @@ export function useTimeline(
         channelId: channel,
         authorMemberId,
         body,
+        ...(routing ? { routing } : {}),
         // Local clock, used only for grouping and the time label on a row that
         // has not been ordered yet. Ordering still waits for seq.
         createdAtMs: Date.now(),

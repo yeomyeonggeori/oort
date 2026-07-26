@@ -601,20 +601,37 @@ export function fetchThreadReplies(
   );
 }
 
+/**
+ * Per-request model/effort override (ADR-0134 D1 `routing`). Optional on the
+ * wire and omitted entirely when nothing is overridden, so a send that inherits
+ * carries the exact body it carried before this ticket existed.
+ */
+export interface RequestRouting {
+  model?: string;
+  effort?: string;
+}
+
 export function sendMessage(
   workspaceId: string,
   channelId: string,
   clientMsgId: string,
-  bodyText: string
+  bodyText: string,
+  routing?: RequestRouting
 ): Promise<Message> {
+  // The key is absent, not null, when there is no override: the server's send
+  // path is closed-world, so a key it does not know is a 400 whether its value
+  // is meaningful or not.
+  const body: Record<string, unknown> = {
+    clientMsgId,
+    type: "text",
+    body: bodyText,
+  };
+  if (routing) body.routing = routing;
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages`,
-    {
-      method: "POST",
-      body: JSON.stringify({ clientMsgId, type: "text", body: bodyText }),
-    }
+    { method: "POST", body: JSON.stringify(body) }
   );
 }
 
@@ -932,4 +949,82 @@ export async function fetchAgentRuns(
     )}/channels/${encodeURIComponent(channelId)}/agent-runs?limit=${limit}`
   );
   return res.runs;
+}
+
+// ---- 모델·추론 강도 라우팅 (ADR-0134) ---------------------------------------
+// GET     /v1/provider/effort-table                    (D2, MOMO-621)
+// GET/PUT /v1/workspaces/{ws}/agents/{agent}/profile    (D3 상속 체인의 2층)
+//
+// The effort table is the ONE endpoint of this surface that is safe to probe:
+// no side effect, no tenant row, no credential-shaped field (ADR-0004), and any
+// authenticated principal may read it. features/routing/capability.ts uses that
+// property to decide what this server can honestly be asked for.
+//
+// The body is returned untyped and shaped by `parseEffortTable`
+// (features/routing/routingModel.ts), which is where the contract is pinned and
+// fixture-tested, the same split the usage summary uses.
+
+export function fetchEffortTable(signal?: AbortSignal): Promise<unknown> {
+  return request<unknown>("/v1/provider/effort-table", { signal });
+}
+
+/**
+ * The agent profile projection (openapi `AgentProfile`).
+ *
+ * `effortPref` is ADR-0134 D3's new tier and is absent from a server that
+ * predates it. Absent is not "none": the two are told apart by the routing
+ * capability probe, never by guessing from a missing key.
+ */
+export interface AgentProfile {
+  agentMemberId: string;
+  workspaceId: string;
+  instructions: string;
+  modelPref?: string;
+  effortPref?: string;
+  enabledTools: string[];
+  triggers: { mention: boolean; schedule?: unknown };
+  paused: boolean;
+  version: number;
+  updatedBy: string;
+  updatedAtMs: number;
+}
+
+/**
+ * Closed-world PUT body (`AgentProfileInput`): a key the server does not know is
+ * a 400, and it is a REPLACE, not a patch. `instructions` and `enabledTools`
+ * are therefore always sent back as read, so editing one routing field cannot
+ * erase the profile's instructions.
+ */
+export interface AgentProfileInput {
+  instructions: string;
+  enabledTools: string[];
+  modelPref?: string;
+  effortPref?: string;
+  triggers?: { mention: true; schedule?: unknown };
+}
+
+export async function fetchAgentProfile(
+  workspaceId: string,
+  agentMemberId: string
+): Promise<AgentProfile> {
+  const res = await request<{ profile: AgentProfile }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agents/${encodeURIComponent(agentMemberId)}/profile`
+  );
+  return res.profile;
+}
+
+export async function putAgentProfile(
+  workspaceId: string,
+  agentMemberId: string,
+  input: AgentProfileInput
+): Promise<AgentProfile> {
+  const res = await request<{ profile: AgentProfile }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agents/${encodeURIComponent(agentMemberId)}/profile`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+  return res.profile;
 }

@@ -1,0 +1,92 @@
+{
+  "_note": "ADR-0134 계약 픽스처. effortTable은 GET /v1/provider/effort-table 응답을 server/Sources/MomoServer/Routes/ProviderEffortTableRoutes.swift (track/engine, MOMO-621)에서 그대로 옮긴 것이고, profile 3종은 routingModel.test.ts와 scripts/capture-routing.mjs가 함께 쓰는 상속/오버라이드/무효클리어 시나리오다. agentMemberId는 서버가 주는 대로 대문자로 두었다: 클라이언트는 uuidEq로만 비교한다.",
+
+  "effortTable": {
+    "schema": "momo.provider.effort_table.v0",
+    "levels": ["low", "medium", "high", "xhigh", "max"],
+    "fallback": { "efforts": ["low", "medium", "high"], "defaultEffort": "medium" },
+    "providers": [
+      {
+        "provider": "hermes",
+        "models": [
+          {
+            "model": "hermes-agent",
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium"
+          },
+          {
+            "model": "hermes-default",
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultEffort": "medium"
+          },
+          {
+            "model": "hermes-fast",
+            "efforts": ["low", "medium"],
+            "defaultEffort": "low"
+          },
+          {
+            "model": "hermes-lite",
+            "efforts": ["low", "medium"],
+            "defaultEffort": "low"
+          }
+        ]
+      }
+    ]
+  },
+
+  "inherit": {
+    "_case": "상속: 프로필이 아무것도 지정하지 않았다. 모델은 에이전트 자신의 agent.model, effort는 지정 없음(서버가 effort를 아예 보내지 않는다).",
+    "agentModel": "hermes-agent",
+    "profile": {
+      "agentMemberId": "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90",
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instructions": "빌드 로그를 읽고 실패 원인만 요약합니다.",
+      "enabledTools": ["shell"],
+      "triggers": { "mention": true },
+      "paused": false,
+      "version": 3,
+      "updatedBy": "019F94E3-7A10-79CD-9DEE-208F47EDD9A8",
+      "updatedAtMs": 1785000000000
+    }
+  },
+
+  "override": {
+    "_case": "오버라이드: 프로필이 hermes-fast/low를 고정해 두었고, 이번 요청만 hermes-agent/xhigh로 올린다.",
+    "agentModel": "hermes-agent",
+    "profile": {
+      "agentMemberId": "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90",
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instructions": "빌드 로그를 읽고 실패 원인만 요약합니다.",
+      "modelPref": "hermes-fast",
+      "effortPref": "low",
+      "enabledTools": ["shell"],
+      "triggers": { "mention": true },
+      "paused": false,
+      "version": 7,
+      "updatedBy": "019F94E3-7A10-79CD-9DEE-208F47EDD9A8",
+      "updatedAtMs": 1785600000000
+    },
+    "draft": { "model": "hermes-agent", "effort": "xhigh" },
+    "expectedRouting": { "model": "hermes-agent", "effort": "xhigh" }
+  },
+
+  "invalidClear": {
+    "_case": "무효 클리어: max로 돌던 에이전트를 hermes-fast로 바꾸면 max가 유효값에서 빠진다. 조용히 리셋하지 않고 상속으로 비우고 안내한다 (ADR-0134 D3).",
+    "agentModel": "hermes-agent",
+    "profile": {
+      "agentMemberId": "019F9A01-0000-7000-8000-000000000404",
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instructions": "리뷰 코멘트를 초안으로 정리합니다.",
+      "modelPref": "hermes-agent",
+      "effortPref": "max",
+      "enabledTools": [],
+      "triggers": { "mention": true },
+      "paused": false,
+      "version": 12,
+      "updatedBy": "019F9A01-0000-7000-8000-000000000401",
+      "updatedAtMs": 1785700000000
+    },
+    "nextModel": "hermes-fast",
+    "expectedRouting": { "model": "hermes-fast" }
+  }
+}

@@ -1,0 +1,190 @@
+import { cn } from "@/design/lib/cn";
+import { Select } from "@/design/ui/select";
+import {
+  applyModelChange,
+  effectiveModel,
+  effortLabel,
+  effortsForModel,
+  modelOptions,
+  supportsEffort,
+  type EffortTable,
+  type RoutingDraft,
+} from "./routingModel";
+
+// =============================================================================
+// 모델 + 추론 강도, 한 쌍 (ADR-0134 D2·D3).
+//
+// 에이전트 프로필 다이얼로그와 컴포저 1회 오버라이드가 같은 컴포넌트를 쓴다.
+// 두 화면이 상속을 다르게 쓰면 사람이 같은 단어를 두 가지로 배우게 되고,
+// 자동 클리어 규칙도 두 벌이 되어 한쪽만 고쳐지는 순간이 온다.
+//
+// 상속은 첫 번째 옵션이고 빈 문자열이며, 라벨에 실제로 적용될 값이 함께 적힌다
+// (D3 "상속 (실제값 병기)"). 그 문구는 화면마다 상속의 상대가 달라서
+// (프로필 편집은 에이전트 기본, 컴포저는 프로필) 위에서 내려받는다.
+//
+// 모델을 바꾸면 강도 유효값이 바뀐다. 새 모델이 지금 강도를 받지 않으면
+// applyModelChange가 강도를 상속으로 비우고 무엇을 비웠는지 돌려주며, 이 컴포넌트
+// 는 그 문장을 강도 상자 밑에 붙인다. 조용히 사라지는 값은 없다.
+// =============================================================================
+
+export function RoutingFields({
+  idPrefix,
+  table,
+  inheritedModel,
+  modelInheritLabel,
+  effortInheritLabel,
+  draft,
+  onChange,
+  disabled = false,
+  /** 컨트롤을 잠근 이유. 잠갔으면 반드시 있다(숨기지 않고 사유를 적는다). */
+  disabledReason = null,
+  /** 마지막 자동 클리어로 비워진 강도. 없으면 null. */
+  clearedEffort = null,
+  /** 프로필에 저장돼 있지만 지금 모델에서 죽어 있는 강도 안내. */
+  ignoredNotice = null,
+  /**
+   * `stack`은 다이얼로그(512px 패널에서 한 칸씩), `row`는 컴포저다. 컴포저에서
+   * 세로로 쌓으면 1600px 창에서 모델 상자 하나가 1500px이 되는데, 모델 핸들은
+   * 20자를 넘지 않으므로 그 폭은 전부 빈 곳이고 라벨과 값이 멀어진다
+   * (tokens.md §4: 라벨에서 멀어진 값은 행이 아니라 배너로 읽힌다).
+   */
+  layout = "stack",
+}: {
+  idPrefix: string;
+  table: EffortTable | null;
+  inheritedModel: string;
+  modelInheritLabel: string;
+  effortInheritLabel: string;
+  draft: RoutingDraft;
+  onChange: (next: RoutingDraft, clearedEffort: string | null) => void;
+  disabled?: boolean;
+  disabledReason?: string | null;
+  clearedEffort?: string | null;
+  ignoredNotice?: string | null;
+  layout?: "stack" | "row";
+}) {
+  const modelId = `${idPrefix}-model`;
+  const effortId = `${idPrefix}-effort`;
+  const noticeId = `${idPrefix}-notice`;
+
+  // 표가 없으면 고를 수 있는 값이 하나도 없다. 그때는 서버가 준 것이 없다는
+  // 사실 그대로, 상속 하나만 남은 상자를 잠근다. 임의의 목록을 지어내면
+  // 서버가 400으로 거절할 값을 사람에게 권하는 셈이 된다.
+  const model = effectiveModel(draft, inheritedModel);
+  const models = table ? modelOptions(table, inheritedModel) : [];
+  const efforts = table ? effortsForModel(table, model).efforts : [];
+  const locked = disabled || table === null;
+
+  function changeModel(value: string) {
+    if (!table) return;
+    const next = value === "" ? null : value;
+    const result = applyModelChange(table, draft, next, inheritedModel);
+    onChange(result.draft, result.clearedEffort);
+  }
+
+  function changeEffort(value: string) {
+    onChange({ ...draft, effort: value === "" ? null : value }, null);
+  }
+
+  // 지금 걸려 있는 값이 목록에 없으면 그 값을 목록에 되살려 놓는다.
+  //
+  // `<select>`는 일치하는 option이 없으면 첫 항목을 대신 보여 준다. 그래서 표를
+  // 못 받은 서버에서는(목록이 비어 있다) 저장된 hermes-fast가 상자에서 "상속"
+  // 으로 읽히고, 바로 밑의 "지금 적용" 줄과 정면으로 어긋났다(momowebqa 형상
+  // 실측). 저장된 값을 화면이 임의로 다른 값처럼 보여 주는 것보다, 있는 그대로
+  // 두고 필요할 때 안내하는 쪽이 정직하다.
+  const orphanModel =
+    draft.model !== null && !models.includes(draft.model) ? draft.model : null;
+  const orphanEffort =
+    draft.effort !== null && !efforts.includes(draft.effort) ? draft.effort : null;
+  // 유효값을 아는 경우에만 "쓸 수 없음"이라고 말한다. 표가 없으면 그 판정을 할
+  // 근거 자체가 없다.
+  const orphanEffortUnusable =
+    orphanEffort !== null && table !== null && !supportsEffort(table, model, orphanEffort);
+
+  const row = layout === "row";
+  const fieldClass = row ? "flex min-w-0 flex-1 flex-col gap-1" : "flex min-w-0 flex-col gap-1";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className={cn(
+          row ? "flex max-w-pane-lg flex-wrap items-end gap-3" : "flex flex-col gap-3"
+        )}
+      >
+      <div className={fieldClass}>
+        <label htmlFor={modelId} className="text-meta text-ink-muted">
+          모델
+        </label>
+        <Select
+          id={modelId}
+          value={draft.model ?? ""}
+          disabled={locked}
+          onChange={(event) => changeModel(event.target.value)}
+          data-testid={modelId}
+          data-override={draft.model !== null ? "" : undefined}
+        >
+          <option value="">{modelInheritLabel}</option>
+          {models.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+          {orphanModel && <option value={orphanModel}>{orphanModel}</option>}
+        </Select>
+      </div>
+
+      <div className={fieldClass}>
+        <label htmlFor={effortId} className="text-meta text-ink-muted">
+          추론 강도
+        </label>
+        <Select
+          id={effortId}
+          value={draft.effort ?? ""}
+          disabled={locked}
+          onChange={(event) => changeEffort(event.target.value)}
+          aria-describedby={clearedEffort ? noticeId : undefined}
+          data-testid={effortId}
+          data-override={draft.effort !== null ? "" : undefined}
+        >
+          <option value="">{effortInheritLabel}</option>
+          {efforts.map((option) => (
+            <option key={option} value={option}>
+              {effortLabel(option)}
+            </option>
+          ))}
+          {orphanEffort && (
+            <option value={orphanEffort}>
+              {effortLabel(orphanEffort)}
+              {orphanEffortUnusable ? " (이 모델에서는 쓸 수 없음)" : ""}
+            </option>
+          )}
+        </Select>
+      </div>
+      </div>
+
+      {/* 안내는 상자 아래 한 줄씩, 폭을 나눠 쓰지 않는다. 문장은 두 칸으로
+          쪼개진 컬럼 안에서 세 줄로 접히는 순간 읽히지 않는다. */}
+      {clearedEffort && (
+        <p
+          id={noticeId}
+          role="status"
+          className="text-meta text-warn"
+          data-testid={`${idPrefix}-cleared`}
+        >
+          {clearedEffort}
+        </p>
+      )}
+      {ignoredNotice && (
+        <p className="text-meta text-warn" data-testid={`${idPrefix}-ignored`}>
+          {ignoredNotice}
+        </p>
+      )}
+      {locked && disabledReason && (
+        <p className="text-meta text-ink-muted" data-testid={`${idPrefix}-reason`}>
+          {disabledReason}
+        </p>
+      )}
+    </div>
+  );
+}

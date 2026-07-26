@@ -28,6 +28,7 @@ import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
+import { useAgentProfileOpen } from "@/features/routing/useAgentProfile";
 import { InlineBanner } from "@/features/common/States";
 
 // =============================================================================
@@ -89,7 +90,11 @@ export function QuickSwitcher({
   );
 
   // 폼 다이얼로그가 떠 있는 동안 전역 단축키는 물러선다 (R2 M4).
-  const formDialogOpen = useCreateChannelOpen();
+  // 두 훅을 각각 부른 뒤 합친다: ||를 그대로 쓰면 단축 평가 때문에 두 번째
+  // 훅이 어떤 렌더에서는 호출되지 않는다.
+  const createChannelOpen = useCreateChannelOpen();
+  const agentProfileOpen = useAgentProfileOpen();
+  const formDialogOpen = createChannelOpen || agentProfileOpen;
 
   // Everyone already reachable as a DM row. Those rows are the conversation,
   // so the 사람 section below lists the people you have not talked to yet.

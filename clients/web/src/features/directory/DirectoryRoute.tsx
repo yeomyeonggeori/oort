@@ -9,6 +9,7 @@ import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
 import { countLabel, groupDirectory, hasOtherMembers } from "./model";
 import { useOpenDm } from "./useOpenDm";
+import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 
 // =============================================================================
 // 멤버 디렉터리 (parity G-3 + G-4). The workspace roster as a list you can read,
@@ -67,6 +68,7 @@ export function DirectoryRoute() {
   const { session, workspaceId, connStatus } = useSession();
   const rosterQuery = useDirectory(workspaceId);
   const { pendingMemberId, error: dmError, openDm } = useOpenDm();
+  const openAgentProfile = useOpenAgentProfile();
   const [query, setQuery] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -163,6 +165,7 @@ export function DirectoryRoute() {
               selfMemberId={session.member.id}
               pending={pendingMemberId === member.id}
               onOpenDm={startDm}
+              onOpenProfile={(target) => openAgentProfile(target.id)}
             />
           ))}
         </ul>

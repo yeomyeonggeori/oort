@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { threadRollup, type Message, type RosterMember } from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
+import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
 import { rowPresentation } from "./rowModel";
@@ -71,6 +72,7 @@ export function MessageRow({
   onResend?: (message: Message) => Promise<void> | void;
 }) {
   const [resending, setResending] = useState(false);
+  const openAgentProfile = useOpenAgentProfile();
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
   const name = author?.displayName ?? message.authorMemberId.slice(0, 8);
@@ -110,14 +112,34 @@ export function MessageRow({
       <div className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex flex-wrap items-baseline gap-2">
-            <span
-              className={cn(
-                "text-body font-semibold",
-                isAgent ? AGENT_TEXT : "text-ink"
-              )}
-            >
-              {isAgent ? `@${author?.handle ?? name}` : name}
-            </span>
+            {/* 에이전트 이름은 진입점이다 (MOMO-626): 카드가 어떤 모델로
+                답했는지 보고 나서 그 값을 바꾸고 싶어지는 자리가 정확히 여기다.
+                사람 이름은 그대로 텍스트다 -- 사람에게는 바꿀 라우팅이 없다. */}
+            {isAgent && author ? (
+              <button
+                type="button"
+                onClick={() => openAgentProfile(author.id)}
+                data-testid="message-agent-name"
+                aria-label={`${author.displayName} 라우팅 설정 열기`}
+                className={cn(
+                  "rounded-sm text-body font-semibold",
+                  AGENT_TEXT,
+                  "hover:underline hover:underline-offset-2",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                )}
+              >
+                @{author.handle}
+              </button>
+            ) : (
+              <span
+                className={cn(
+                  "text-body font-semibold",
+                  isAgent ? AGENT_TEXT : "text-ink"
+                )}
+              >
+                {isAgent ? `@${author?.handle ?? name}` : name}
+              </span>
+            )}
             {owner && (
               <span className="text-meta text-ink-muted">
                 managed by {owner.displayName}
