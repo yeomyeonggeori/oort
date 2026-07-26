@@ -11,6 +11,7 @@ import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
+import { forgetQuota } from "@/features/settings/quotaModel";
 import { forgetUsage } from "@/features/settings/usageModel";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
@@ -51,9 +52,11 @@ export function App() {
                 // the previous member survives into the next login.
                 signOut();
                 queryClient.clear();
-                // The 사용량 fallback lives outside the query cache (it has to
-                // outlive the failing query), so it is cleared by hand here.
+                // The 사용량 fallbacks live outside the query cache (they have
+                // to outlive the failing query), so they are cleared by hand
+                // here: the cost ledger and the provider quota gauges alike.
                 forgetUsage();
+                forgetQuota();
               }}
             />
           }

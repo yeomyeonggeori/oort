@@ -34,18 +34,28 @@ export function SkeletonRows({
 /**
  * Inline banner used for both error and offline. Toast stacks are banned; the
  * message lives where the problem is.
+ *
+ * The bottom border is a SEPARATOR, not a frame: it exists to divide the banner
+ * from the content it sits on top of. `separator={false}` is for the one shape
+ * where there is nothing to divide from, a banner that is the only child of a
+ * box that already draws its own boundary. Drawing it there produced two
+ * parallel horizontal rules 16px apart in 설정 > 사용량, the louder of the two
+ * landing where no frame boundary is (MOMO-628 R1 M2). Default stays true, so
+ * every existing caller renders exactly as before.
  */
 export function InlineBanner({
   tone = "error",
   message,
   actionLabel,
   onAction,
+  separator = true,
   testId,
 }: {
   tone?: "error" | "neutral";
   message: string;
   actionLabel?: string;
   onAction?: () => void;
+  separator?: boolean;
   testId?: string;
 }) {
   return (
@@ -53,7 +63,8 @@ export function InlineBanner({
       role={tone === "error" ? "alert" : "status"}
       data-testid={testId}
       className={cn(
-        "flex items-start justify-between gap-3 border-b px-4 py-2 text-body",
+        "flex items-start justify-between gap-3 px-4 py-2 text-body",
+        separator && "border-b",
         tone === "error"
           ? "border-danger text-danger"
           : "border-line bg-surface-hover text-ink"

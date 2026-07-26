@@ -235,6 +235,22 @@ sidebar and `<main>`; the ⌘K switcher is a portalled dialog and stays outside
 the grid. Inside the sidebar column the workspace rail is `w-8` (32px), so the
 channel list keeps the remaining 208px.
 
+It carries three declarations that make it the window rather than a document,
+and the third is the one that is easy to delete as decoration. `minmax(0, 1fr)`
+sizes the row from a definite height instead of from its content; `overflow:
+clip` is the hard boundary (`clip`, not `hidden`: a hidden box is still a scroll
+container, so focusing something below the fold would scroll the sidebar away
+with no scrollbar to bring it back); and **`position: relative`** makes the box
+the containing block for what it promises to clip. Overflow clipping does not
+apply to an absolutely positioned descendant whose containing block is an
+ancestor of the clipping box, and a static grid is nobody's containing block, so
+every `sr-only` live region in the shell (`position: absolute`) was laid out
+against the initial containing block. Harmless while those positions sat inside
+the viewport, and a document 222px taller than the window the moment a panel grew
+enough to push one below the fold: measured on 설정 > 사용량 at 760x480 while
+adding 구독 잔여량 (MOMO-628), where `gate:shell` caught it as the MOMO-610
+regression it was written for. Any box that promises to clip needs all three.
+
 `dialog-panel` is the second named geometry utility (MOMO-614): a dialog sits one
 32px step below the top of the window, so its own ceiling is
 `calc(100dvh - var(--spacing-8) * 2)`. The rhythm scale has no viewport-relative
@@ -254,16 +270,35 @@ one, because a bar carries two unrelated meanings in this client:
 | `data-tone` | fill | used for |
 |---|---|---|
 | (absent) | `--accent` | determinate progress (설정 > 업데이트) |
-| `neutral` | `--line-strong` | a share of the largest row (사용량 > 모델별/에이전트별) |
+| `accent` | `--accent` | 구독 잔여량 게이지, 평시 (사용량 > 구독 잔여량) |
+| `neutral` | `--line-strong` | a share of the largest row (사용량 > 모델별/에이전트별), and a 잔여량 게이지 too old to be a live measure |
 | `ok` | `--ok` | 예산 한도 안 |
-| `warn` | `--warn` | 예산 소프트 한도 |
-| `danger` | `--danger` | 예산 하드 한도 |
+| `warn` | `--warn` | 예산 소프트 한도, 잔여량 주의 |
+| `danger` | `--danger` | 예산 하드 한도, 잔여량 임박 |
 
 A state bar takes the same token as the status chip next to it, **in every
 state**. A full bar in the accent colour beside a red "한도 도달" chip reads as
 a finished download, which is the opposite of what it means; an amber bar beside
 a green "한도 안" chip is the same mistake in the state that is on screen most
 of the time, so `ok` is a listed tone rather than a fall-through to the default.
+
+**Where a block draws MANY bars, the calm state gets no status token at all**
+(사용량 > 구독 잔여량, MOMO-628). The rule above was written for 예산, which is
+one bar; this block draws up to two per provider, and a column of 여유 chips over
+green bars is a status board reporting that nothing is happening. So the calm
+gauge gets no chip, and its bar takes `accent` rather than a status colour. The
+invariant §5a protects is intact, because the chip and the bar are still driven
+by one value and status colour still only ever means "look at this one".
+
+`accent` is written down rather than left to fall through, for the reason the
+`ok` row exists: the fall-through is invisible until it is wrong. It also has to
+be `accent` and not `neutral`. `neutral` is what the share bars in the same panel
+draw, and the two fill in **opposite directions**: a full share bar is the
+largest spender, a full remaining bar is a subscription barely touched. Two bars
+that mean opposite things must not be the same pixels (MOMO-628 R1 M10). What
+`neutral` means on a 잔여량 게이지 instead is "this is not a live measure": a
+reading past its freshness deadline, or one whose window has already reset,
+keeps rendering with no status colour and a grey bar.
 
 A share bar is a comparison device, so its **track** is the same length in every
 row of the list: the length carries the meaning, and a track that shortens
