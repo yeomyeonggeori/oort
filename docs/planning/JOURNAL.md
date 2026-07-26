@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-07-27 (Fable C 집행) · #826 iOS 전송 400 수리 — 9주 결함 종결
+- **랜딩**(track/engine `a27c0d3a`, PR #832): iOS가 `client_msg_id`·`run_id`(snake)를 보내 서버 closed-world 디코더에 **9주간 400**을 맞고 있었다. 수정은 두 줄이지만 **진짜 산출물은 게이트**다 — `scripts/verify_ios_wire.sh` 신설(격리 compose 28320~23, 매 실행 자체 픽스처, public MomoiOSKit 로그인→전송→history→멱등 재전송).
+- **red proof 성립(오케스트레이터 실측)**: 되돌리면 실서버가 `400 unknown message field`로 거부하고 게이트가 정확히 잡는다. 이 확인 없이는 게이트에 값이 없다.
+- **오케스트레이터 선수정 1건**(`bb570ae7`): 라이브 테스트가 픽스처 env 부재 시 **0.001초에 무음 통과**해 스크립트가 "전송 바이트 수용 PASS"를 찍을 수 있었다 — **이 티켓이 닫으려는 결함과 같은 계열**. `MOMO_IOS_WIRE_REQUIRED=1`로 스킵을 단방향화(플래그 있으면 변수 결측=실패). 실증 후 커밋.
+- **범위 교차검증(워커 착수 전 실시, 과잉수정 차단)**: iOS `Encodable` 요청 5종 전수 대조 → 결함은 `IOSSendMessageRequest` 하나뿐. **`IOSMarkReadRequest`의 `last_read_seq`는 서버도 snake**(DTOs.swift:295)라 일괄 변환했으면 회귀했다. 수신이 멀쩡했던 이유 = 서버 `MessageDTO`·iOS `IOSMessageDTO` 둘 다 CodingKeys 없이 camel 일치(`MomoCore.Message`의 snake는 실시간 이벤트용). 웹·어댑터·OpenAPI는 처음부터 camel — 주석이 거짓이었던 건 iOS 항목뿐.
+- **게이트 설계 수확**: `MomoiOSKit`이 `.macOS(.v14)` 선언이라 **Xcode·시뮬레이터 없이 호스트에서 34초 빌드**(실측) → iOS 게이트 정체 전례 3건(MOMO-504·506·518) 구조적 회피. `verify_ios_build.sh`도 정체 없이 PASS(69 tests).
+- **파이프라인**: Codex `gpt-5.6-terra` high 워커 첫 실전 — 필수 4항(clean 선검사·자격증명 탐색금지·픽스처는 발신코드에서·PR 후 STOP) 전부 준수, 이탈 0. 다음: main 반영은 성재 승인 대기.
+
+
 ## 2026-07-27 (Fable B 집행) · C1·C2 main 동기화 + 엔진 검증기 3종 + next.10
 - **머지**(성재 B 승인): track/engine 12커밋 → main → swift build 0 → track/uxui 13커밋 → main → 웹 typecheck 0. **main=track/engine=track/uxui=`a8caa836`**. '머지 직후 typecheck' 규율 유지.
 - **원점 게이트**: 마이그레이션 43 유니크 · server 327 · worker 86 · 웹 837 · gate:shell 전 창크기 PASS. **momowebqa 재배포 PASS** — 라이브 DB에 041~043 적용·`provider_link_chain`/`quota_snapshot` RLS FORCE·신규 라우트 3종 401.
