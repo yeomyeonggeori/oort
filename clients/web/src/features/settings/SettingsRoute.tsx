@@ -174,6 +174,7 @@ export function SettingsRoute() {
         <div className="min-w-0 flex-1 overflow-y-auto p-4">
           <RenderErrorBoundary
             key={section}
+            padded={false}
             title="이 설정을 열지 못했습니다"
             message="서버에서 받은 설정을 읽지 못했습니다."
             retryLabel="다시 불러오기"

@@ -52,8 +52,11 @@ export function App() {
           element={
             <RenderErrorBoundary
               title="momo를 열지 못했습니다"
-              message="이 서버에서 받은 내용을 읽지 못했습니다. 연결 화면에서 서버 주소를 다시 확인할 수 있습니다."
-              retryLabel="연결 화면으로"
+              // 이 행동은 화면 이동이 아니라 로그아웃이다(서버 refresh token
+              // 폐기 + 캐시 비우기). 그렇게 말하지 않으면 사용자는 돌아왔을 때
+              // 왜 다시 로그인해야 하는지 모른다.
+              message="이 서버에서 받은 내용을 읽지 못했습니다. 로그아웃하면 연결 화면에서 서버 주소를 다시 고를 수 있습니다."
+              retryLabel="로그아웃하고 연결 화면 열기"
               onRetry={() => {
                 signOut();
                 queryClient.clear();

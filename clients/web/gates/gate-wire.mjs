@@ -82,6 +82,50 @@ async function assertShell(page, surface) {
   }
 }
 
+// The route-level boundary has to clear itself when the user navigates, but the
+// obvious way to do that — keying it on the pathname — rebuilds the route
+// subtree on EVERY navigation. Measured when it did: clicking the channel you
+// are already reading wiped the composer draft and refetched history. So the
+// reset is a prop the boundary watches, and this asserts the property that
+// distinguishes the two: navigation must not cost the route its state.
+async function assertNavigationKeepsRouteState(context) {
+  const healthy = { id: "00000000-0000-7000-8000-000000000201", workspaceId, name: "general", kind: "channel", topic: null, muted: false };
+  // Registered last, so it is checked first and supersedes the fault handler.
+  await context.route("**/v1/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/v1/auth/login") return json(route, session);
+    if (path.endsWith("/channels")) return json(route, { channels: [healthy] });
+    if (path.endsWith("/roster")) return json(route, { members: [] });
+    if (path.endsWith("/read-state")) return json(route, { read_states: [] });
+    if (path.includes("/messages")) return json(route, { messages: [] });
+    return json(route, {});
+  });
+
+  const page = await context.newPage();
+  await page.goto(origin, { waitUntil: "networkidle" });
+  await page.getByTestId("login-email").fill("wire@example.test");
+  await page.getByTestId("login-password").fill("not-a-secret");
+  await page.getByTestId("login-submit").click();
+  await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
+
+  const composer = page.locator("textarea").first();
+  await composer.waitFor({ timeout: 15_000 });
+  const draft = "작성 중인 문장입니다";
+  await composer.fill(draft);
+
+  await page.getByRole("link", { name: /general/ }).first().click();
+  await page.waitForTimeout(400);
+
+  const kept = await page.locator("textarea").first().inputValue();
+  if (kept !== draft) {
+    throw new Error(
+      `navigation discarded the route subtree: composer draft was ${JSON.stringify(draft)} ` +
+      `and is now ${JSON.stringify(kept)} — the boundary must reset without remounting children`
+    );
+  }
+  await page.close();
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   const server = spawn(resolve(webRoot, "node_modules/.bin/vite"), ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: webRoot, stdio: "ignore" });
@@ -105,10 +149,12 @@ async function main() {
         await page.getByRole("button", { name: label, exact: true }).click();
         await assertShell(page, `settings ${section}`);
       }
+      await assertNavigationKeepsRouteState(context);
       await context.close();
     } finally { await browser.close(); }
   } finally { server.kill("SIGTERM"); }
-  console.log("GATE PASS: malformed wire responses kept the shell and navigation alive.");
+  console.log("GATE PASS: malformed wire responses kept the shell and navigation alive,");
+  console.log("           and navigation did not discard route state.");
 }
 
 main().catch((error) => { console.error(error); process.exit(1); });

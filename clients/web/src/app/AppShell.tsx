@@ -117,7 +117,7 @@ export function AppShell({
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
                * 소유한 표면 안에 머문다. */}
               <RenderErrorBoundary
-                key={routePath}
+                resetKey={routePath}
                 title="이 화면을 열지 못했습니다"
                 message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
                 retryLabel="다시 불러오기"
