@@ -2,10 +2,16 @@ import Foundation
 import Hummingbird
 
 /// MOMO-621 / ADR-0134 D1 — the optional per-request `routing { model?, effort? }`
-/// override on run creation.
+/// override, shared by both surfaces that start an agent run:
+///   - `POST .../agent-runs`  (work runs, MOMO-621)
+///   - `POST .../messages`    (agent mentions, MOMO-625)
 ///
-/// Closed-world both outside and inside: the run request grows exactly one new
-/// key (`routing`), and the routing object itself accepts only `model`/`effort`.
+/// Both surfaces use the same validator, the same resolution chain, and the same
+/// 400 rules, so a routing block can never mean two different things depending on
+/// how the run happened to be triggered.
+///
+/// Closed-world both outside and inside: each request grows exactly one new key
+/// (`routing`), and the routing object itself accepts only `model`/`effort`.
 /// ADR-0134 D1 B (smuggling routing through a free-form input field) was
 /// rejected precisely because it would break that contract.
 ///
@@ -45,7 +51,7 @@ struct RunRoutingInput: Equatable, Sendable {
             object["effort"],
             field: "routing.effort",
             limit: ProviderEffortTable.maxEffortLength
-        ).map(ProviderEffortTable.normalizedLevel)
+        ).map { try ProviderEffortTable.normalizedLevel($0, field: "routing.effort") }
         guard model != nil || effort != nil else { return nil }
         return RunRoutingInput(model: model, effort: effort)
     }
