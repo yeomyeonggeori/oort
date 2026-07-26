@@ -77,7 +77,9 @@
 ## 6. 확인된 안전 항목 (근거 있음)
 
 - **필드 계약 3쌍 완전 일치** — 웹이 ADR만 보고 쓴 픽스처가 엔진 실구현과 키·타입·케이싱·널러빌리티 모두 맞음. 위험했던 자리들(REST=camel/이벤트=snake 이중 규약, `disposition`의 `fall_over` 밑줄, `window` 와이어 키 vs `quota_window` 컬럼, ms/초·ratio/percent)까지 전부 일치.
-- **엔진 표면이 실제로 켜짐** — 시험 스택 기동 후 세 라우트 401(기존 momowebqa는 404). 626 프로필 저장 왕복·627 체인 CRUD·실제 폴오버 재현·628 ingest→게이지 값 대조 전부 PASS.
+- **엔진 표면이 실제로 켜짐** — 시험 스택(소스 컴파일, api+relay+worker 기동) 후 세 라우트 401(기존 momowebqa는 404). 626 프로필 저장 왕복·627 체인 CRUD·실제 폴오버 재현·628 ingest→게이지 값 대조 전부 PASS.
+  - **검증 한계(명시)**: 브라우저 자동화 불가(Chrome 확장 미연결, 헤드리스 툴 호스트 해석 실패)로 **렌더된 DOM은 미검증**. 대체로 라이브 서버 응답을 실제 웹 모델 함수(`parseEffortTable`·`chainModel`·`quotaModel`·`resolveInheritance`)에 통과시켜 "화면이 말하게 될 문자열"을 대조했다 — 계약 검증으로는 스크린샷보다 강하나 컴포넌트 조립·포커스·키보드는 확인되지 않았다.
+  - 그 외 미검증: F4(키 로테이션 미수행), F3의 "카드가 안 뜬다"의 렌더 확인(목 hermes가 워커 resume 불가 툴을 요구해 워커 턴이 최종 메시지로 정착하지 않음 — 다만 관측된 모든 워커 메시지에 `schema` 부재, 코드 경로 일의적).
 - **ENGINE_HANDOFF 재확인 3종 충족** — 400이 트랜잭션 이전·문구가 `routing`을 호명·rootId 조회보다 앞.
 - **SendMessageRequest closed-world 신규 장애 없음** — 1st-party 발신자 전수 대조(iOS만 기존 결함).
 - **마이그레이션 041/042/043 안전** — 전부 additive, NOT NULL 없음, RLS FORCE 적용, 롤백 불가 변경 없음, 싱글톤↔체인 이중저장 구조적 불가(`CHECK position >= 1` + PUT 0 거부).
