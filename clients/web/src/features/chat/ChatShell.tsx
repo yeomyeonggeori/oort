@@ -16,6 +16,7 @@ import {
   useReadStates,
 } from "@/features/workspace/useWorkspace";
 import { Timeline } from "@/features/timeline/Timeline";
+import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { WorkPanel } from "@/features/work/WorkPanel";
 import type { WorkScope } from "@/features/work/workSessionModel";
@@ -270,9 +271,17 @@ export function ChatShell() {
   );
 
   return (
-    // `relative` is the anchor the 작업 세션 pane needs on a narrow window,
-    // where it stops being a column beside the channel and becomes a drawer
-    // over it (tokens.css `work-pane`).
+    // 프로바이더 캐스캐이드 전환 (ADR-0135 D1) is channel-scoped and read by both
+    // the timeline and the thread panel, so the subscription lives once here
+    // rather than in each row.
+    <CascadeProvider
+      realtime={stressCount > 0 ? null : realtime}
+      workspaceId={workspaceId}
+      channelId={stressCount > 0 ? null : channelId}
+    >
+    {/* `relative` is the anchor the 작업 세션 pane needs on a narrow window,
+        where it stops being a column beside the channel and becomes a drawer
+        over it (tokens.css `work-pane`). */}
     <div className="relative flex min-w-0 flex-1">
       <div ref={coveredRef} className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
@@ -452,5 +461,6 @@ export function ChatShell() {
         />
       )}
     </div>
+    </CascadeProvider>
   );
 }

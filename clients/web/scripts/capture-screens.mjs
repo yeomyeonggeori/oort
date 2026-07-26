@@ -242,6 +242,11 @@ const BODIES = [
       schema: "momo.agent_gateway.timeline.v0",
       source: "hermes_gateway",
       status: "succeeded",
+      // The cascade fixture in src/features/timeline/cascadeRail.tsx keys its
+      // seeded fallback off THIS run id, which is the only way the ADR-0135 D1
+      // "2차 프로바이더로 처리됨" row can reach artifacts/design: the capture runs
+      // with no socket, so the frame that normally carries it never arrives.
+      // Change one and change the other.
       run_id: "0199aa11-2222-7000-8000-0000000000c3",
       agent_member_id: HERMES,
       usage: {
@@ -340,6 +345,195 @@ const WORK_HOSTS = [
     online: false,
   },
 ];
+
+// 설정 > AI 연결 (MOMO-627 / ADR-0135 D1). The singleton head plus four fallback
+// hops, because those five rows are what the block has to keep apart on screen:
+// a head that is read-only here, a live fallback, a hop the operator switched
+// off, a hop whose key the provider rejects, and a hop in a mock mode (the
+// self-host default, and the row that must NOT read as a failure). Bearers are
+// masked tails, exactly as the API answers (ADR-0004: the key never leaves the
+// server).
+const PROVIDER_LINK = {
+  schema: "momo.provider_link.v0",
+  configured: true,
+  source: "database",
+  mode: "external-hermes",
+  baseUrl: "https://api.anthropic.com/v1",
+  endpointLabel: "api.anthropic.com",
+  bearerConfigured: true,
+  bearerLast4: "8f21",
+  availability: "live",
+  keyConfigured: true,
+  updatedAtMs: Date.now() - 6 * 3_600_000,
+  diagnostics: [],
+};
+
+const PROVIDER_CHAIN = {
+  schema: "momo.provider_link.chain.v0",
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      baseUrl: PROVIDER_LINK.baseUrl,
+      endpointLabel: PROVIDER_LINK.endpointLabel,
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "8f21",
+      updatedAtMs: PROVIDER_LINK.updatedAtMs,
+    },
+    {
+      position: 1,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://gateway.dawn.internal:8443/v1",
+      endpointLabel: "gateway.dawn.internal:8443",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "c40a",
+      updatedAtMs: Date.now() - 2 * 3_600_000,
+    },
+    {
+      position: 2,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://backup.dawn.internal/v1",
+      endpointLabel: "backup.dawn.internal",
+      enabled: false,
+      bearerConfigured: true,
+      bearerLast4: "1b77",
+    },
+    {
+      position: 3,
+      source: "chain",
+      mode: "external-hermes",
+      baseUrl: "https://relay.dawn.internal/v1",
+      endpointLabel: "relay.dawn.internal",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "9e03",
+    },
+    {
+      position: 4,
+      source: "chain",
+      mode: "local-mock",
+      baseUrl: "http://127.0.0.1:8088/v1",
+      endpointLabel: "127.0.0.1:8088",
+      enabled: true,
+      bearerConfigured: true,
+      bearerLast4: "0000",
+    },
+  ],
+  // `entries.count - 1`: fallbacks only. `ProviderCascade.attemptable` filters
+  // the WHOLE plan, so the head counts there and the parked hop does not, which
+  // is why the summary sentence has to name what it is counting.
+  fallbackCount: 4,
+  attemptableCount: 4,
+};
+
+// The same body with one entry this client cannot read: position 2 lost its
+// `baseUrl`. A 200 does not rule that out (a proxy, a dev catch-all or a later
+// schema can all produce it), and the panel's answer to it is not cosmetic.
+// `PUT /v1/provider/link/chain` replaces the whole fallback list, so a hop that
+// never reached the draft is one the next save deletes from the server together
+// with the key stored at its position. The block goes read-only, names the
+// entry by its place in the answer, and states no count it cannot show.
+const PROVIDER_CHAIN_PARTIAL = {
+  ...PROVIDER_CHAIN,
+  entries: PROVIDER_CHAIN.entries.map((entry, index) => {
+    if (index !== 2) return entry;
+    const rest = { ...entry };
+    delete rest.baseUrl;
+    return rest;
+  }),
+};
+
+// A fresh self-host instance: no operator link, so the head is the boot-time
+// HERMES_* env trio pointed at the bundled mock. This is what momowebqa answers
+// today, and the state the panel must describe as a MODE rather than a failure.
+const MOCK_ONLY_HOP = {
+  position: 0,
+  source: "environment",
+  mode: "local-mock",
+  baseUrl: "http://127.0.0.1:8088/v1",
+  endpointLabel: "127.0.0.1:8088",
+  enabled: true,
+  bearerConfigured: true,
+  bearerLast4: "0000",
+};
+
+// The probe result a review has to look at: the head fell over, the second hop
+// answered, the parked hop was skipped, the fourth hop's key was rejected, and
+// the fifth is in a mock mode the probe declines to call at all. Every
+// disposition the server can emit, in one frame, with the tone each has to be
+// drawn in. `cascadeOk: true` because a cascade that fell over to a working
+// provider is the cascade doing its job.
+const PROVIDER_PROBE = {
+  schema: "momo.provider_link.test.v0",
+  ok: false,
+  reason: "provider_unreachable",
+  source: "database",
+  mode: "external-hermes",
+  endpointLabel: PROVIDER_LINK.endpointLabel,
+  checkedAtMs: Date.now(),
+  cascadeOk: true,
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      endpointLabel: "api.anthropic.com",
+      enabled: true,
+      ok: false,
+      reason: "provider_unreachable",
+      disposition: "fall_over",
+    },
+    {
+      position: 1,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "gateway.dawn.internal:8443",
+      enabled: true,
+      ok: true,
+      disposition: "ok",
+    },
+    {
+      position: 2,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "backup.dawn.internal",
+      enabled: false,
+      ok: false,
+      reason: "hop_disabled",
+      disposition: "skipped",
+    },
+    {
+      position: 3,
+      source: "chain",
+      mode: "external-hermes",
+      endpointLabel: "relay.dawn.internal",
+      enabled: true,
+      ok: false,
+      // 401/403. A caller error does NOT fall over: the next provider would
+      // fail the same way, so the cascade stops here (--danger).
+      reason: "provider_auth_failed",
+      disposition: "propagate",
+    },
+    {
+      position: 4,
+      source: "chain",
+      mode: "local-mock",
+      endpointLabel: "127.0.0.1:8088",
+      enabled: true,
+      ok: false,
+      // `probeHop` returns before calling anything for a non-external mode. It
+      // arrives as `propagate`, but nothing failed and nothing was measured, so
+      // this row is muted 목 모드 and is excluded from the headline's counts.
+      reason: "not_external_provider",
+      disposition: "propagate",
+    },
+  ],
+};
 
 // WorkTierPolicyRoutes.loadPolicy answers /me out of the workspace row when the
 // member has no row of their own, so an inherited member policy carries the
@@ -481,6 +675,15 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
+  // 설정 > AI 연결 (MOMO-627). The chain routes are matched BEFORE the singleton
+  // so `**/v1/provider/link` does not swallow `/link/chain` and `/link/test`.
+  await context.route("**/v1/provider/link/chain", (route) =>
+    json(route, PROVIDER_CHAIN)
+  );
+  await context.route("**/v1/provider/link/test", (route) =>
+    json(route, PROVIDER_PROBE)
+  );
+  await context.route("**/v1/provider/link", (route) => json(route, PROVIDER_LINK));
   await context.route("**/v1/workspaces/*/work-tier-policy", (route) =>
     json(route, { workTierPolicy: WORKSPACE_TIER_POLICY })
   );
@@ -762,6 +965,159 @@ async function captureScheme(browser, scheme) {
   const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
   await settings.screenshot({ path: policyShot });
   shots.push(policyShot);
+
+  // 3h. 설정 > AI 연결 (MOMO-627 / ADR-0135 D1): the singleton card plus the
+  //     cascade it heads. Three rows that must stay apart at a glance, the head
+  //     being the only one this block cannot edit.
+  const aiLink = await context.newPage();
+  await aiLink.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiLink);
+  await aiLink.evaluate('location.hash = "/settings?section=ai"');
+  await aiLink.getByTestId("chain-list").waitFor({ state: "visible" });
+  const aiLinkShot = `${OUT_DIR}/settings-ai-chain-${scheme}.png`;
+  await aiLink.screenshot({ path: aiLinkShot });
+  shots.push(aiLinkShot);
+
+  // …and its foot, where the hop editor's own controls live. A block this tall
+  // is reviewed twice or the half nobody sees is the half that regresses.
+  await aiLink.getByTestId("chain-add").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiEditShot = `${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`;
+  await aiLink.screenshot({ path: aiEditShot });
+  shots.push(aiEditShot);
+
+  // …and the probe table, which is the one surface carrying all four
+  //     dispositions and therefore all four status tones in one frame.
+  await aiLink.getByRole("button", { name: "연결 확인" }).click();
+  await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
+  const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
+  await aiLink.screenshot({ path: aiProbeShot });
+  shots.push(aiProbeShot);
+
+  // …and a hop that was just added. This frame exists to prove a NEGATIVE: the
+  //     empty address field must NOT be red, must not be aria-invalid, and must
+  //     keep its format hint. Nothing has happened yet, so there is no error to
+  //     report; what the block owes the reader is the next step, once, at the
+  //     foot ("6차 provider 주소를 입력하면 저장할 수 있습니다.").
+  await aiLink.getByTestId("chain-add").click();
+  await aiLink.getByTestId("chain-blocked").waitFor({ state: "visible" });
+  await aiLink.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiNewRowShot = `${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`;
+  await aiLink.screenshot({ path: aiNewRowShot });
+  shots.push(aiNewRowShot);
+
+  // …and the probe table with that unsaved hop still on screen. The table is
+  //     numbered by the SAVED order, so once the two can disagree it has to say
+  //     which of them it is describing: one screen must not carry two meanings
+  //     of "3차".
+  await aiLink.getByTestId("chain-probe-scope").scrollIntoViewIfNeeded();
+  await aiLink.waitForTimeout(200);
+  const aiPendingShot = `${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`;
+  await aiLink.screenshot({ path: aiPendingShot });
+  shots.push(aiPendingShot);
+
+  // 3h-2. a 200 whose entries this client cannot read in full. Read-only, one
+  //     banner naming the entry, and no count anywhere that the rows below do
+  //     not support.
+  const aiPartial = await context.newPage();
+  await aiPartial.route("**/v1/provider/link/chain", (route) =>
+    json(route, PROVIDER_CHAIN_PARTIAL)
+  );
+  await aiPartial.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiPartial);
+  await aiPartial.evaluate('location.hash = "/settings?section=ai"');
+  await aiPartial.getByTestId("chain-partial").waitFor({ state: "visible" });
+  await aiPartial.getByTestId("chain-partial").scrollIntoViewIfNeeded();
+  await aiPartial.waitForTimeout(200);
+  const aiPartialShot = `${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`;
+  await aiPartial.screenshot({ path: aiPartialShot });
+  shots.push(aiPartialShot);
+
+  // 3i. the same panel against a server built BEFORE the chain landed, which is
+  //     the live momowebqa answer today (404, measured 2026-07-26). The block
+  //     has to say "this server has no chain yet", never draw an empty chain.
+  const aiLegacy = await context.newPage();
+  await aiLegacy.route("**/v1/provider/link/chain", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "not found" } }),
+    })
+  );
+  await aiLegacy.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiLegacy);
+  await aiLegacy.evaluate('location.hash = "/settings?section=ai"');
+  await aiLegacy.getByTestId("chain-unavailable").waitFor({ state: "visible" });
+  const aiLegacyShot = `${OUT_DIR}/settings-ai-no-chain-${scheme}.png`;
+  await aiLegacy.screenshot({ path: aiLegacyShot });
+  shots.push(aiLegacyShot);
+
+  // 3j. the self-host DEFAULT: one hop, mock mode, no operator link. This frame
+  //     exists because the panel used to call it broken. `probeHop` never calls
+  //     a non-external hop, so the check measured nothing, and "지금은 실행이
+  //     실패합니다" was a false statement about an instance whose turns succeed
+  //     through the bundled mock. It has to read as a mode, not as an outage.
+  const aiMock = await context.newPage();
+  await aiMock.route("**/v1/provider/link/chain", (route) =>
+    json(route, {
+      schema: "momo.provider_link.chain.v0",
+      entries: [MOCK_ONLY_HOP],
+      fallbackCount: 0,
+      attemptableCount: 1,
+    })
+  );
+  await aiMock.route("**/v1/provider/link/test", (route) =>
+    json(route, {
+      schema: "momo.provider_link.test.v0",
+      ok: false,
+      reason: "not_external_provider",
+      source: "environment",
+      mode: "local-mock",
+      endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+      checkedAtMs: Date.now(),
+      cascadeOk: false,
+      entries: [
+        {
+          position: 0,
+          source: "environment",
+          mode: "local-mock",
+          endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+          enabled: true,
+          ok: false,
+          reason: "not_external_provider",
+          disposition: "propagate",
+        },
+      ],
+    })
+  );
+  // The singleton above the chain is overridden too, or the shot would show a
+  // saved anthropic link heading a mock cascade: a frame the server cannot
+  // produce, which makes the screenshot worse than no screenshot. Registered
+  // after the two above for the same reason installMocks does it in that order.
+  await aiMock.route("**/v1/provider/link", (route) =>
+    json(route, {
+      schema: "momo.provider_link.v0",
+      configured: false,
+      source: "environment",
+      mode: "local-mock",
+      baseUrl: MOCK_ONLY_HOP.baseUrl,
+      endpointLabel: MOCK_ONLY_HOP.endpointLabel,
+      bearerConfigured: true,
+      availability: "mock",
+      keyConfigured: true,
+      diagnostics: [],
+    })
+  );
+  await aiMock.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(aiMock);
+  await aiMock.evaluate('location.hash = "/settings?section=ai"');
+  await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
+  await aiMock.getByRole("button", { name: "연결 확인" }).click();
+  await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
+  const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
+  await aiMock.screenshot({ path: aiMockShot });
+  shots.push(aiMockShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
