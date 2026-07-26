@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-26 (Fable Wave B 완결) · 관전 표면 웹 이식 3장 전량 track/uxui 랜딩
+- **#802 터미널 관전 랜딩(#806)**: xterm.js 로컬 번들·코드 스플릿, observer 등급 소비 — **connect 프레임만 인코딩 가능(stdin/resize/kill 인코더 부재를 테스트로 각인)**, 실 PTY stdout 관전 실왕복(rm -rf 타이핑 0바이트 실측), 소유자 토글·관전 권한 배지. 리뷰 2R: 오프라인 거짓 라이브 H1 → live=소켓 OPEN+onLine+최근 수신 3중 게이트+경과 시계, 중단 시 전사 보존. 613 tests.
+- **Wave B 총계**: 801(패널)+803(diff 카드)+802(터미널) — 리뷰 6라운드, B4·H10·M48 전량 실측 해소.
+- **802 구조 발견**: ①브라우저 배포 시 prod CSP connect-src가 호스트 직결을 차단(무한 pending 아닌 100ms 정직 실패로 처리) — **웹(브라우저) 관전 개방은 connect-src 정책 결정 선행, Tauri 셸은 무관** ②'관전 N'=capability 행 수(TTL 60s)이지 헤드카운트 아님 — 정밀화는 ADR 후속 ③capability 전달: 브라우저=Sec-WebSocket-Protocol, mac=헤더 — **호스트 계약에 양쪽 수용 확정 필요**(엔진 후보) ④style-src 'unsafe-inline' 의존은 xterm+react-virtuoso 공통(스킬 정본 정정됨).
+- 엔진 후보 누적: 턴 중단용 work_session→agent_run 링크 노출 / 이벤트 body 한국어화(또는 클라 어휘 파생 정본화) / observer 헤드카운트 / 호스트 subprotocol 수용.
+- 대기: Wave B 3장 main 동기화(성재 승인) → next.9. ADR 0134~0136 검토.
+
+
 ## 2026-07-26 (Fable Wave B 1단계 랜딩 + 2단계 발진)
 - **랜딩(track/uxui)**: #801 작업 패널(MOMO-618, #804) · #803 diff/커밋/PR 카드(MOMO-620, #805). 리뷰 2R씩 — B3·H7·M32 전량 해소, 최종 577 tests·게이트 전량 그린.
 - **801 수확**: 실서버 Ed25519 호스트 등록→ACP 중계 6종 200 실왕복. R1 Blocker 2(상세 크롬 압사·partial 델타 원장 오염)·R2 High(거짓 라이브 캐럿→streamOpen 게이트, 드로어 포커스 누수→inert). **엔진 발견**: work_session→agent_run 링크 미노출로 '턴만 중단' 서버 경로 부재(ENGINE_HANDOFF 후보), 서버 이벤트 body 영어 렌더(별건 후보).
