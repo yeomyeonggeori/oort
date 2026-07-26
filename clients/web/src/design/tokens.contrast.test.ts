@@ -130,7 +130,16 @@ const FOREGROUNDS = [
   "warn",
 ] as const;
 
-/** Surfaces a bordered control (input, outline button) is allowed to sit on. */
+/**
+ * Surfaces a bordered control (input, `<select>`, outline button) may sit on.
+ *
+ * The two tinted surfaces are deliberately absent: `--line-strong` lands at
+ * 2.90:1 on `--accent-soft` and 2.94:1 on `--agent-soft` in dark, under the 3:1
+ * non-text minimum. They carry TEXT, which the 4.5:1 assertion above already
+ * covers, and nothing with an outline. The membership test below turns that into
+ * a measured fact instead of something a reviewer has to remember: file a
+ * surface in the wrong list, or improve a token without moving it, and it fails.
+ */
 const CONTROL_SURFACES = [
   "surface",
   "surface-raised",
@@ -168,6 +177,31 @@ describe("Dawn palette", () => {
     for (const layer of SCRIM) {
       expect(layer.rgb.join(","), "scrim tint").not.toBe("0,0,0");
       expect(layer.rgb.join(","), "scrim tint").not.toBe("255,255,255");
+    }
+  });
+
+  // Which surfaces may carry a bordered control is a MEASUREMENT, not a habit.
+  // A composition invented in a feature (the composer's routing line painted
+  // itself --accent-soft and put a --line-strong `<select>` on top) was invisible
+  // to this file because --accent-soft was simply not in the control table. So
+  // the table is now closed: every surface is classified, and its class must
+  // agree with the numbers in BOTH schemes.
+  it("classifies every surface by whether a bordered control may sit on it", () => {
+    for (const bg of SURFACES) {
+      const passes = SCHEMES.every(
+        (scheme) =>
+          contrast(pick("line-strong", scheme.index), pick(bg, scheme.index)) >= 3
+      );
+      expect(
+        passes,
+        `--line-strong on ${bg}: ${SCHEMES.map(
+          (scheme) =>
+            `${scheme.name} ${contrast(
+              pick("line-strong", scheme.index),
+              pick(bg, scheme.index)
+            ).toFixed(2)}`
+        ).join(", ")}`
+      ).toBe((CONTROL_SURFACES as readonly string[]).includes(bg));
     }
   });
 

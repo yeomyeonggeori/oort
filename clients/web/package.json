@@ -19,7 +19,8 @@
     "gate:shell": "node gates/gate-shell-layout.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
-    "capture:usage": "node scripts/capture-usage.mjs"
+    "capture:usage": "node scripts/capture-usage.mjs",
+    "capture:routing": "npm run build && node scripts/capture-routing.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",

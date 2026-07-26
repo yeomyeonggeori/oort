@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -6,7 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { SendHorizontal } from "lucide-react";
-import type { RosterMember } from "@/lib/api";
+import type { RequestRouting, RosterMember } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -27,6 +28,13 @@ import {
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
 import { memberNameParts } from "@/features/workspace/useWorkspace";
+import {
+  MENTION_ROUTING_ROW_CLASS,
+  MentionRoutingBar,
+} from "@/features/routing/MentionRoutingBar";
+import { useMentionRouting } from "@/features/routing/useMentionRouting";
+import { mentionRoutingTarget } from "@/features/routing/mentionTargets";
+import { routingPayload } from "@/features/routing/routingModel";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ⌘↵ sends, ↵ is a line
@@ -200,8 +208,12 @@ export function Composer({
   channelId: string;
   directory: Directory;
   channelLabel: string;
-  /** useTimeline's send: inserts the local echo, then reconciles by seq. */
-  onSend: (body: string) => Promise<void> | void;
+  /**
+   * useTimeline's send: inserts the local echo, then reconciles by seq.
+   * `routing` is ADR-0134 D1's per-request override and is undefined for every
+   * send that inherits, which is every send this ticket did not change.
+   */
+  onSend: (body: string, routing?: RequestRouting) => Promise<void> | void;
 }) {
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
@@ -237,6 +249,28 @@ export function Composer({
 
   const rows = Math.min(MAX_ROWS, Math.max(1, text.split("\n").length));
 
+  // 1회 오버라이드는 지금 이 글이 부르는 에이전트에 붙는다(ADR-0134 D1). 대상은
+  // 확정된 멘션이 아니라 **텍스트에 남아 있는 멘션**에서 다시 계산한다: 사람이
+  // 고른 뒤 그 핸들을 지웠다면 붙일 요청 자체가 없어졌기 때문이다.
+  const routingTarget = useMemo(
+    () => mentionRoutingTarget(text, directory.members),
+    [text, directory.members]
+  );
+  const routing = useMentionRouting(routingTarget);
+
+  // 줄이 한 번 생기면 이 글을 다 쓸 때까지 자리를 비워 둔다.
+  //
+  // 멘션을 확정했다 지웠다 하는 동안 줄이 붙었다 떨어지면 입력창이 캐럿 아래에서
+  // 세로로 튄다(R1 M11). 한 번의 작성에서 이동은 한 번이면 충분하고, 그 한 번은
+  // 사람이 에이전트를 부른 순간이다. 비어 있는 자리는 구분선 하나이고 아무것도
+  // 주장하지 않는다. 글을 비우거나 보내면 자리도 함께 사라진다.
+  const [rowReserved, setRowReserved] = useState(false);
+  const hasTarget = routingTarget.kind !== "none";
+  useEffect(() => {
+    if (hasTarget) setRowReserved(true);
+    else if (text.trim() === "") setRowReserved(false);
+  }, [hasTarget, text]);
+
   function applyMention(member: RosterMember) {
     if (!query) return;
     const next = `${text.slice(0, query.start)}@${member.handle} ${text.slice(caret)}`;
@@ -251,12 +285,17 @@ export function Composer({
   }
 
   function submit(body: string) {
+    // 오버라이드는 이 전송분과 함께 떠난다. 값을 먼저 읽어 두고 상태를 비우는
+    // 순서인 이유는 "1회"라는 라벨이 지켜져야 하기 때문이다: 보낸 뒤에도 줄이
+    // 켜져 있으면 다음 메시지가 고른 적 없는 강도로 나간다.
+    const payload = routingPayload(routing.draft);
     // Clear first, send second. The echo row carries the message from here on,
     // including its failure state and its retry, so there is nothing left for
     // the composer to hold on to.
     setText("");
     setMentionOpen(false);
-    void onSend(body);
+    routing.reset();
+    void onSend(body, payload);
   }
 
   function onSubmit(event: FormEvent) {
@@ -298,6 +337,27 @@ export function Composer({
 
   return (
     <div className="border-t border-line">
+      {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
+          보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
+          (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
+          무엇이 되는가"가 이 줄의 본래 내용이기 때문이다. */}
+      {hasTarget ? (
+        <MentionRoutingBar
+          channelId={channelId}
+          target={routingTarget}
+          draft={routing.draft}
+          onDraftChange={routing.setDraft}
+        />
+      ) : (
+        rowReserved && (
+          <div
+            className={MENTION_ROUTING_ROW_CLASS}
+            aria-hidden="true"
+            data-testid="composer-routing-reserved"
+          />
+        )
+      )}
+
       <form onSubmit={onSubmit} className="relative flex items-end gap-2 p-3">
         {showMentions && (
           <ul

@@ -601,20 +601,46 @@ export function fetchThreadReplies(
   );
 }
 
+/**
+ * Per-request model/effort override (ADR-0134 D1 `routing`).
+ *
+ * Contract of record for THIS surface is the mention tier, MOMO-625: it adds
+ * exactly one key to `SendMessageRequest.allowedKeys` and makes that request
+ * closed-world in the same commit, so a server that knows the key answers 400
+ * for a bad value and a server that does not know it drops the key in silence.
+ * Which of the two is on the other end is not guessable from a GET, so the
+ * composer never sends this block until `probeSendRouting` has proved the
+ * surface (features/routing/capability.ts).
+ *
+ * Optional on the wire and omitted entirely when nothing is overridden, so a
+ * send that inherits carries the exact body it carried before this ticket.
+ */
+export interface RequestRouting {
+  model?: string;
+  effort?: string;
+}
+
 export function sendMessage(
   workspaceId: string,
   channelId: string,
   clientMsgId: string,
-  bodyText: string
+  bodyText: string,
+  routing?: RequestRouting
 ): Promise<Message> {
+  // The key is absent, not null, when there is no override: the server's send
+  // path is closed-world, so a key it does not know is a 400 whether its value
+  // is meaningful or not.
+  const body: Record<string, unknown> = {
+    clientMsgId,
+    type: "text",
+    body: bodyText,
+  };
+  if (routing) body.routing = routing;
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages`,
-    {
-      method: "POST",
-      body: JSON.stringify({ clientMsgId, type: "text", body: bodyText }),
-    }
+    { method: "POST", body: JSON.stringify(body) }
   );
 }
 
@@ -932,4 +958,159 @@ export async function fetchAgentRuns(
     )}/channels/${encodeURIComponent(channelId)}/agent-runs?limit=${limit}`
   );
   return res.runs;
+}
+
+// ---- 모델·추론 강도 라우팅 (ADR-0134) ---------------------------------------
+// GET     /v1/provider/effort-table                    (D2, MOMO-621)
+// GET/PUT /v1/workspaces/{ws}/agents/{agent}/profile    (D3 상속 체인의 2층)
+//
+// The effort table is the ONE endpoint of this surface that is safe to probe:
+// no side effect, no tenant row, no credential-shaped field (ADR-0004), and any
+// authenticated principal may read it. features/routing/capability.ts uses that
+// property to decide what this server can honestly be asked for.
+//
+// The body is returned untyped and shaped by `parseEffortTable`
+// (features/routing/routingModel.ts), which is where the contract is pinned and
+// fixture-tested, the same split the usage summary uses.
+
+export function fetchEffortTable(signal?: AbortSignal): Promise<unknown> {
+  return request<unknown>("/v1/provider/effort-table", { signal });
+}
+
+/**
+ * The agent profile projection (openapi `AgentProfile`).
+ *
+ * `effortPref` is ADR-0134 D3's new tier and is absent from a server that
+ * predates it. Absent is not "none": the two are told apart by the routing
+ * capability probe, never by guessing from a missing key.
+ */
+export interface AgentProfile {
+  agentMemberId: string;
+  workspaceId: string;
+  instructions: string;
+  modelPref?: string;
+  effortPref?: string;
+  enabledTools: string[];
+  /**
+   * `mention` is pinned to true by the contract on both ends (openapi
+   * `AgentProfileTriggers.mention` is `enum: [true]`, and the server rejects
+   * anything else), so the only part that varies is `schedule`. Typed as the
+   * literal because a caller echoing this object back into a PUT is doing the
+   * right thing, and the type should not make it look like a re-decision.
+   */
+  triggers: AgentProfileTriggers;
+  paused: boolean;
+  version: number;
+  updatedBy: string;
+  updatedAtMs: number;
+}
+
+/**
+ * `schedule` is defined but not executed in v0 (openapi says so in as many
+ * words). It is still round-tripped verbatim: a client that edits routing and
+ * drops the key would delete a stored schedule, because the server upsert is
+ * `triggers = EXCLUDED.triggers` (AgentProfileRoutes.swift), not a merge.
+ */
+export interface AgentProfileTriggers {
+  mention: true;
+  schedule?: unknown;
+}
+
+/**
+ * Closed-world PUT body (`AgentProfileInput`): a key the server does not know is
+ * a 400, and it is a REPLACE, not a patch. `instructions` and `enabledTools`
+ * are therefore always sent back as read, so editing one routing field cannot
+ * erase the profile's instructions.
+ */
+export interface AgentProfileInput {
+  instructions: string;
+  enabledTools: string[];
+  modelPref?: string;
+  effortPref?: string;
+  triggers?: AgentProfileTriggers;
+}
+
+export async function fetchAgentProfile(
+  workspaceId: string,
+  agentMemberId: string
+): Promise<AgentProfile> {
+  const res = await request<{ profile: AgentProfile }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agents/${encodeURIComponent(agentMemberId)}/profile`
+  );
+  return res.profile;
+}
+
+export async function putAgentProfile(
+  workspaceId: string,
+  agentMemberId: string,
+  input: AgentProfileInput
+): Promise<AgentProfile> {
+  const res = await request<{ profile: AgentProfile }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agents/${encodeURIComponent(agentMemberId)}/profile`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+  return res.profile;
+}
+
+// ---- 전송 표면이 `routing`을 받는가 (ADR-0134 D1 멘션 tier, MOMO-625) --------
+//
+// GET 하나로 답할 수 없는 질문이다. `routing`은 `POST .../messages`의 본문 키이고
+// (MOMO-625가 `SendMessageRequest.allowedKeys`에 더한 단 하나의 키), 그 키를 모르는
+// 세대의 서버는 400을 주지 않고 **조용히 무시한다**. 즉 "거절이 없었다"는 사실은
+// 성공의 근거가 되지 못한다. 그래서 그 표면에 직접, 그러나 아무것도 남기지 않는
+// 방식으로 물어본다.
+//
+// 물음의 형태: **두 세대 모두가 반드시 거절하는 요청** 하나.
+//   rootId  이번에 만든 난수 UUID. 그런 메시지는 존재하지 않으므로 스레드 루트
+//           조회가 404로 끝난다. 트랜잭션은 열리지만 INSERT까지 가지 않는다.
+//   routing 유효 레벨 집합에 없는 effort 토큰.
+//
+// 그래서 답이 갈린다.
+//   MOMO-625 이후  decode 직후 `RunRoutingInput.validate`가 400을 던진다
+//                  (MessageRoutes.swift: 트랜잭션이 열리기 전).
+//   MOMO-625 이전  `routing`은 모르는 키라 무시되고 404 "thread root not found".
+//
+// 두 경로 모두 메시지를 만들지 않는다. momowebqa(=main 형상)에서 실측했다:
+// 404, 채널 seq 불변, 감사행 없음. 이 함수는 그래서 항상 throw한다.
+// 판정은 `features/routing/capability.ts`의 `verdictFromSendProbe`가 한다.
+//
+// ---- 엔진 랜딩 시 재확인 (MOMO-625가 main에 들어오는 순간) -------------------
+// 이 프로브의 무해함 가운데 **앞 세대(404)만** 이 브랜치에서 실측됐다. 뒤 세대의
+// 근거는 아직 track/engine에 있으므로(R2 M6), MOMO-625 랜딩 직후 살아 있는 서버
+// 한 대에 대고 아래 셋을 다시 재고 그 결과를 ENGINE_HANDOFF에 적는다.
+//   ① 400이 트랜잭션 이전에 나는가: 프로브 전후로 채널 newest seq가 불변이고
+//      message·agent_run·audit_log에 행이 생기지 않는다.
+//   ② 400 문구가 `routing`을 이름으로 부르는가: `verdictFromSendProbe`의 ready
+//      분기는 `/routing/i` 매칭이다. 서버가 그 리터럴 없이 거절하면 판정은
+//      unknown으로 떨어진다(잠기지만 영구는 아니다: [다시 확인]이 있다).
+//   ③ 검사 순서가 rootId 조회보다 앞인가: 뒤라면 랜딩한 서버도 404를 주고,
+//      화면은 되는 기능을 없다고 말하게 된다.
+// 셋 중 하나라도 어긋나면 프로브의 형태를 고치는 것이 맞고, 화면 문구가 아니다.
+
+/** 어떤 모델에서도 유효할 수 없는 토큰. 32바이트 상한(마이그레이션 041) 안. */
+const SEND_ROUTING_PROBE_EFFORT = "__momo-capability-probe__";
+
+export async function probeSendRouting(
+  workspaceId: string,
+  channelId: string
+): Promise<void> {
+  await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        clientMsgId: crypto.randomUUID(),
+        rootId: crypto.randomUUID(),
+        type: "text",
+        body: "",
+        routing: { effort: SEND_ROUTING_PROBE_EFFORT },
+      }),
+    }
+  );
 }

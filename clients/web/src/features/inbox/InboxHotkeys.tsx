@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateChannelOpen } from "@/features/channels/useCreateChannel";
+import { useAgentProfileOpen } from "@/features/routing/useAgentProfile";
 
 /**
  * ⌘⇧A opens the inbox from anywhere (R-1 §2 키보드 경로). It lives in the shell
@@ -14,7 +15,13 @@ import { useCreateChannelOpen } from "@/features/channels/useCreateChannel";
  */
 export function InboxHotkeys() {
   const navigate = useNavigate();
-  const formDialogOpen = useCreateChannelOpen();
+  // 폼 다이얼로그는 둘이다(채널 만들기, 에이전트 프로필). 둘 중 하나라도 떠
+  // 있으면 전역 단축키는 물러선다. 두 훅을 먼저 각각 부르고 나서 합치는 이유는
+  // ||가 단축 평가라서, 붙여 쓰면 첫 값이 참인 렌더에서 두 번째 훅이 호출되지
+  // 않아 훅 순서가 깨지기 때문이다.
+  const createChannelOpen = useCreateChannelOpen();
+  const agentProfileOpen = useAgentProfileOpen();
+  const formDialogOpen = createChannelOpen || agentProfileOpen;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (formDialogOpen) return;
