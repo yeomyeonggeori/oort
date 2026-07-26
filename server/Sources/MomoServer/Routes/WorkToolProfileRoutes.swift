@@ -359,7 +359,11 @@ struct WorkToolProfileRoutes: Sendable {
         return json
     }
 
-    private static func containsCredentialShape(_ value: JSONValue) -> Bool {
+    /// Shared credential-shape screen: rejects any object key or string value that
+    /// names a credential. Reused by `ProviderQuotaSnapshotRoutes` (MOMO-623 /
+    /// ADR-0135 D2) so the ADR-0004 non-ingress rule has one implementation
+    /// instead of two copies that can drift apart.
+    static func containsCredentialShape(_ value: JSONValue) -> Bool {
         let forbidden = ["authorization", "bearer", "password", "secret", "token", "apikey", "api_key", "api-key"]
         switch value {
         case .object(let object):
