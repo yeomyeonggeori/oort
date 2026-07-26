@@ -361,6 +361,18 @@ final class ProviderCascadeTests: XCTestCase {
             )),
             .markFailed
         )
+
+        // An unclassified failure is the interesting case, because before MOMO-630
+        // it was the *only* case and it requeued. A stream that reports `.error`
+        // without throwing leaves no typed failure behind (today unreachable:
+        // HermesTransport always follows `.error` with `finish(throwing:)`), and a
+        // future transport that changes that must not silently make every turn
+        // retry-amplify again. Unclassified is therefore terminal on purpose.
+        XCTAssertEqual(ProviderCascadeJobDisposition.resolve(nil), .markFailed)
+        XCTAssertEqual(
+            ProviderCascadeJobDisposition.resolve(HermesTransport.TransportError.httpStatus(503)),
+            .markFailed
+        )
     }
 
     /// A malformed SSE payload after a text delta must surface the typed
