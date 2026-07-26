@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-07-27 (Fable B 집행) · C1·C2 main 동기화 + 엔진 검증기 3종 + next.10
+- **머지**(성재 B 승인): track/engine 12커밋 → main → swift build 0 → track/uxui 13커밋 → main → 웹 typecheck 0. **main=track/engine=track/uxui=`a8caa836`**. '머지 직후 typecheck' 규율 유지.
+- **원점 게이트**: 마이그레이션 43 유니크 · server 327 · worker 86 · 웹 837 · gate:shell 전 창크기 PASS. **momowebqa 재배포 PASS** — 라이브 DB에 041~043 적용·`provider_link_chain`/`quota_snapshot` RLS FORCE·신규 라우트 3종 401.
+- **엔진 검증기 3종(오케스트레이터 직접, 포트 28290~28313)**: `verify_run_routing` **30 PASS**(F1 선수정의 라이브 증거 = 허용목록 밖 modelPref 400) · `verify_quota_snapshot` 전관문 PASS(ingest 자격·형상 400·latest-only·RLS FORCE·로그 무유출) · **`verify_provider_cascade` docker 라이브 17관문 전부 PASS**(hop0 무응답→hop1 서빙 실폴오버 + 감사행 `{from:0,to:1,provider_unreachable}` + outbox broadcast, **401은 전파되고 hop1 예산 무손실**, AES-GCM 봉인·운영자 403·RLS FORCE·로그 무유출).
+- **실측 한계(정직 고지)**: momowebqa **인증 웹 왕복은 미수행** — 이 세션 정책이 자격증명 취급(기존 계정 로그인·픽스처 비밀번호 프로비저닝)을 차단. 무인증 경계·DB 스키마·격리 스택 검증기로 대체했고, 웹 3표면 클릭 확인은 next.10 빌드로 성재 몫. 인수인계 §5에 명시.
+- **0.1.0-next.10 발행 + 기본 다운로드 전환 완료**: build 1320 @`a8caa836`, 서명(YWQQFQM38J)·공증·스테이플·Gatekeeper accepted·tar 왕복 서명 보존. zip sha256 `872ac750…`. `update-next.json`·`update-manifest-alpha.json` 둘 다 next.10(legacy 0.0.6 블록 보존). ADR-0134·0135가 사용자 빌드 도달.
+- **파이프라인 교훈 2건**: ①검증기 동시 실행이 `server/.build` SwiftPM 저장소 캐시를 깨뜨린다(캐스캐이드 1차 실패) — **docker 검증기는 순차** ②쉘 프로파일의 `POSTGRES_PORT`가 검증기 기본 포트를 덮어써 `momo_main` 상시 스택과 충돌 — 예약 포트를 항상 명시. 검증기 포트 다음=**28320대**.
+
+
 ## 2026-07-26 (Fable 인수인계) · 파이프라인 전환 + 다음 배치 패킷
 - **파이프라인 전환**: 워커가 Opus 5 서브에이전트 → **Codex `gpt-5.6-terra` high**(codex-fleet 계약). docker 게이트는 오케스트레이터가 직접, 워커는 PR 후 STOP.
 - **워커 프롬프트 필수 4항 정본화**(전부 이번 파동의 실사고 유래): ①착수 시 `git status` clean 선검사(워커 cwd 오염 — 818 작업이 819 워크트리 오염) ②자격증명 탐색·추측 금지(QA 계정 대상 추측 시도 1건 발생) ③픽스처는 발신 코드에서 유도(캐스캐이드 안내가 죽었는데 테스트·스크린샷 둘 다 손으로 만든 턴을 써서 210개 초록) ④merge/close 금지.

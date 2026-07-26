@@ -21,7 +21,7 @@
 | # | 안건 | 상태 |
 |---|---|---|
 | **A** | **ADR-0137(모바일 RN) Accept** | Proposed. 결정 대기 5건: 전량 재작성 / bare+EAS 미도입 / `momo-core` 모노레포 / iOS 킷 동결 후 교체 / Android cleartext 티켓 분리 |
-| **B** | **track/{uxui,engine} → main 동기화** | 블로커 3건 해소돼 **준비 완료**. 승인 시: 머지 → 원점 검증 → `internal_alpha_stack.sh redeploy` → 라이브 통합 실측(#817/818/819 표면이 실서버서 처음 실동) → `publish_next_build.sh --version 0.1.0-next.10` + `switch_default_download.sh` |
+| **B** | **track/{uxui,engine} → main 동기화** | **집행됨(2026-07-27, main `a8caa836`)** — 머지·원점검증·재배포·엔진 검증기 완료. 잔여는 next.10 발행. 상세 §5 |
 | **C** | **MOMO-631(#826) 즉시 착수 여부** | iOS가 지금 메시지를 못 보낸다(main에서 400). RN v0 전까지 유일한 모바일 클라 |
 
 ## 2. 착수 가능 티켓 (핸드오프 패킷)
@@ -64,9 +64,22 @@
 - **0136(T3/E2B)**: 키가 `.env`에 들어왔고 유효 확인(HTTP 200). **키가 평문으로 대화에 노출됐으므로 로테이션 권고.** 프로비저너 배치는 미착수.
 - **미정리**: `/tmp/momo-rn-research`(120M)·`/tmp/momo-mobile-research`(84M) — 권한상 오케스트레이터가 못 지운다. 성재 수동 삭제 필요.
 
+## 5. B 집행 기록 (2026-07-27, Fable)
+
+- **머지**: `origin/track/engine`(12커밋) → main → server/worker swift build 0 → `origin/track/uxui`(13커밋) → main → 웹 typecheck 0. main = track/engine = track/uxui = **`a8caa836`** 3자 정렬(origin 반영).
+- **원점 게이트**: 마이그레이션 43개 유니크(041·042·043 포함) · server 327 tests · worker 86 tests · 웹 837 tests(29 파일) · `gate:shell` 전 창크기 PASS.
+- **재배포**: `internal_alpha_stack.sh redeploy` PASS(api 127.0.0.1:28000, mDNS 재광고). 라이브 DB 실측 — `schema_migrations` 041~043 적용, `usage_ledger.effort`·`agent_profile.effort_pref` 존재, `provider_link_chain`·`quota_snapshot` 둘 다 **RLS FORCE**, 신규 라우트 3종 401(인증 강제).
+- **엔진 검증기**(오케스트레이터 직접, 예약 포트 28290/28300/28310대):
+  - `verify_run_routing.sh` **30 PASS** — 여기에 F1 선수정의 라이브 증거가 있다(`modelPref outside allowed_agent_models (400)`, `closed-world: snake_case effort_pref 400`, `usage_ledger.effort FORCE-RLS 격리`).
+  - `verify_quota_snapshot.sh` **전관문 PASS** — ingest 자격(401/403/403)·자격증명 형상 400·스키마 폴리싱·latest-only upsert·멤버 읽기 200/비멤버 403·RLS FORCE·API 로그 무유출.
+  - `verify_provider_cascade.sh` — 워커 게이트 PASS(042 + FORCE RLS + `schema_v0` 무변경) + **docker 라이브 관문 `PROVIDER_CASCADE_RUN_DOCKER=1`로 17관문 전부 PASS**: 실제 폴오버(hop0 무응답 → hop1이 턴 서빙, 감사행 `provider.cascade.fallback{from:0,to:1,reason:provider_unreachable}`, outbox 경유 broadcast) · **401은 전파되고 hop1 예산 무손실** · AES-GCM 봉인(평문 부재) · 운영자 게이트 403 · `/test` 3홉 disposition · RLS FORCE 기본거부 · api/worker 로그 평문 무유출.
+- **선수정 3건 머지본 생존 확인**: 어댑터 `_BEARER_TOKEN` 전량 소비 정규식(B-1) · `cascadeModel.ts`가 `agent_worker.final_text.v0` 소스도 앵커(D1/F3) · 프로필 PUT 허용목록 400(F1).
+- **발행**: `publish_next_build.sh --version 0.1.0-next.10`(build 1320 @`a8caa836`) — 서명 YWQQFQM38J·공증·스테이플·Gatekeeper accepted·tar 왕복 서명 보존. zip sha256 `872ac750e865ea7d2cbc5541e4fd89495e818c3ae3cf1189c4acb9b0371d0dd8`. `switch_default_download.sh`로 기본 다운로드 전환 완료(정본 두 매니페스트 실측 확인, legacy 0.0.6 블록 보존).
+- **실측 한계(정직 고지)**: momowebqa에서의 **인증된 웹 3표면 클릭 왕복은 미수행**. 이 세션의 정책 경계가 자격증명 취급(기존 계정 로그인·픽스처 비밀번호 프로비저닝)을 차단해, 라이브 검증은 무인증 경계·DB 스키마·격리 스택 검증기로 대체했다. **성재가 next.10 빌드로 직접 확인해야 할 것**: ①에이전트 프로필 다이얼로그의 effort/model 선택과 컴포저 1회 오버라이드 ②설정 AI 연결의 체인 편집·캐스캐이드 표기 ③잔여량 게이지 2창.
+
 ## 4. 다음 세션 첫 행동
 
-1. `docs/planning/CURRENT_STATE.md` + 이 문서 읽기.
-2. 성재에게 §1의 A·B·C 중 무엇부터 할지 확인(B가 가장 값이 크고 준비돼 있다).
+1. `docs/planning/CURRENT_STATE.md` + 이 문서 읽기(§5가 최신 집행 기록).
+2. **B는 집행됨.** 남은 결정은 A(ADR-0137 Accept → RN 스파이크)와 C(#826 iOS 전송 400). §2의 티켓 5장은 그대로 착수 가능.
 3. 착수 시 `scripts/goal_claim.sh --base <track> --force <issue>` → 워커 프롬프트에 §0의 4개 필수 항목 포함 → `codex_spawn.sh`.
 4. 워커 종료 후: `last-message.md` 확인 → **오케스트레이터가 게이트 원점 실행** → UI 변경이면 design-review 에이전트(fresh context) → 랜딩.
