@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-07-26 (Fable 모바일 전략) · RN 채택 결정 + ADR-0137 기안
+- **성재 결정: React Native** ("RN쪽으로 가자"). 리서치 2건 정본화: `2026-07-26-rn-adoption-plan.md`(RN 실전)·`2026-07-26-mobile-stack-research.md`(스택 비교). **ADR-0137 Proposed** 기안 — ADR-0123(SwiftUI iOS v0) 대체, 0133이 남긴 iOS 경로 공백 해소.
+- **재고 실측**: iOS는 SwiftUI 35파일·14,119줄·View 35종이 있으나 **2026-07-22 이후 0커밋**이고 **메시지 전송이 main에서 400**(9주 미검출 — 실서버 게이트 부재). Android 0줄. 웹은 `.app-shell`이 `240px 1fr` 무조건이라 **폰 폭에서 본문 150px**(오케스트레이터 실측) — 어떤 경로든 모바일 셸은 신작.
+- **자산 재사용 경계 실측**(웹 120파일 33,293줄 전수): 그대로 이식 7,516 + 얇은 어댑터 2,108 + 훅 1,820 + **테스트 7,728(안전망)**, UI 재작성 13,346(단 v0 범위는 ≈4,575). 가능한 이유 = **결정 함수가 플랫폼 사실을 파라미터로 받는 설계**(`windowFocused` 등).
+- **승계 확인**: `MomoiOSPushKit/PushNotification.swift` 329줄이 **Foundation·Security만 import, UIKit/SwiftUI 히트 0** → ADR-0120 푸시 구현 391줄 생존. fastlane 레인도 유효(Android 레인만 신설).
+- **기각 근거**: Tauri 모바일(푸시 부재·NSE entitlement 유실·buzz도 모바일은 Flutter) · Capacitor(silent push 미지원 공식 명시) · Flutter(TS/React 자산 공유 0) · KMP(UI 2벌).
+- **최대 미해소 리스크 = 한글 IME**(RN #48497·#55257 open, 확증 증상은 조합 밑줄 소실). 반증: Mattermost New Arch에 열린 CJK 이슈 0. **스파이크 1번 게이트, 실패 시 성재 재보고.**
+- **교훈(Zulip)**: RN 이탈의 진짜 이유는 RN이 아니라 **0.68 고착 + 자체 포크**. 업그레이드 규율이 상시 부채.
+
+
+## 2026-07-26 (Fable 리서치 3) · `rn-adoption-plan.md` §2/§4 보강 — 딥링크·시큐어스토리지·백그라운드·리스트가상화·notifee 폐기
+- **동시편집 조우**: 파일 편집 중 다른 세션이 같은 문서에 이미 §2(Expo vs bare)를 써넣은 걸 발견 — 중복 삽입분 제거하고 내 발견은 §2.3/2.4로 **추가(덮어쓰지 않음)**: iOS/Android **자산 비대칭**이 "bare+Expo낱개" 결론의 진짜 이유(iOS는 기존 NSE/fastlane 자산 보존, Android는 `expo prebuild --platform android`로 그린필드 부트스트랩 손해 없음, `deeeed/audiolab` 실사용 확인) + RocketChat·MetaMask·status-mobile 버전 실측 + LiveKit 공식 Expo 플러그인(⭐47).
+- **§4 신규 4.4~4.7**: 딥링크(RN core `Linking`만으로 충분, 추가 lib 불요) · 시큐어스토리지(keychain/secure-store vs MMKV — **MMKV 암호화는 키를 직접 관리해야 해 시크릿 1차 저장소 부적합**) · 백그라운드(iOS 상주 소켓 불가 — background-fetch도 "~15분마다"가 한계, 푸시가 유일한 신뢰 경로) · 리스트가상화(**FlashList v2는 New Arch 필수**, LegendList가 채팅 UX를 1급 설계 — 스파이크에서 둘 다 실측 권고).
+- **정정 1건**: `@notifee/react-native`는 "19개월 정체" 정도가 아니라 **레포 archived·공식 폐기**(README: "no longer actively maintained", 대체=expo-notifications 또는 신생 포크 `react-native-notify-kit`). §4.2 표에 갱신 각주 추가.
+- 다음: 없음(리서치 완료분). §7.5 미확인 목록은 그대로 유효.
+
 ## 2026-07-26 (Fable 머지 전 리뷰 + 블로커 수리) · C1·C2 머지 준비 완료
 - **머지 전 리뷰 4관점 실시**(성재 지시): 계약 드리프트·엔진 불변식/보안·머지 후 실동(실스택 기동)·유출 잔재. 보고서 `2026-07-26-c1c2-merge-review.md`. **기계 게이트는 전부 초록인 상태에서 Blocker 4건 발견** — 빌드가 심판이 아님을 재확인.
 - **선수정 3건 랜딩**(#829 engine, #830 uxui):
@@ -15,6 +31,13 @@
 - **교훈 정본화**: 픽스처는 ADR이 아니라 **발신 코드에서 유도**한다(D1이 그 실패). 웹/엔진 병렬 시 계약 대조를 별도 관문으로.
 - 다음: track→main 동기화(성재 승인) → 라이브 통합 → next.10.
 
+
+## 2026-07-26 (Fable 리서치 2) · **성재 RN 결정** → 실전 조사
+- **산출**: `docs/planning/2026-07-26-rn-adoption-plan.md`. 성재가 RN으로 결정(2026-07-26) → 팀리드 지시 6항목(Mattermost 해부·Expo vs bare·자산 경계·네이티브 능력·LiveKit·마이그레이션 전략).
+- **자산 경계 실측(작업계획 뼈대)**: `clients/web/src` 120파일 전수 import/DOM 분류 → **A 그대로이식 7,516 + B 어댑터 2,108 + C 훅 1,820 = 로직 11,444 LOC 이관**, 테스트 7,728 동반, UI 13,346 재작성. **단 v0 UI는 ≈4,600 LOC 상당**(ADR-0123 v0 스코프). 지뢰: `new URL`/`URLSearchParams` 9파일(폴리필 선결)·`crypto.randomUUID`·Hermes `Intl` tz.
+- **게이트 2개 해소**: ①**centrifuge-js가 RN 공식 지원**(npm description 명시, 5.7.0) → 실시간층+리플레이게이트 유지 확정, Android cleartext(`ws://*.local`)만 티켓 분리 ②**Expo config plugin으로 iOS NSE 주입 가능**(OneSignal 185★ 실증, 범용은 ★3). **기존 Swift NSE 62+`MomoiOSPushKit` 329 LOC와 fastlane/match/CI는 그대로 생존.**
+- **권고 3건**: brownfield 아닌 **전량 재작성**(Android 0 → brownfield는 비대칭 하이브리드=Airbnb "세 번째 플랫폼", 성공사례 전부 전담인력 대기업) · **bare RN + Expo 모듈 낱개, EAS 미도입**(Mattermost 방식, 우리 fastlane 자산 보존) · `packages/momo-core`는 **웹이 먼저 소비해 회귀 없음 증명 후** 모바일 부착.
+- **주의 2건**: "FlashList 쓰면 된다"는 **틀림** — Mattermost 채팅 타임라인은 FlatList이고 `inverted`+`maintainVisibleContentPosition` 위해 **RN Fabric ObjC++ 패치**까지 감. LiveKit RN은 v0 게이트 아님(음성 v0 제외)이나 v1 CallKit이 3개월 된 포크 의존 → 기존 `IOSHuddleLiveKitSession.swift` 재노출 권고. **최대 미해소 리스크는 여전히 한글 IME(스파이크 1번).**
 
 ## 2026-07-26 (Fable 리서치) · 모바일 스택 레퍼런스 — ADR-0133 P4a 입력
 - **산출**: `docs/planning/2026-07-26-mobile-stack-research.md`. 성재 발제(모바일 전략) → A 제품별 스택 / B 프레임워크 / C 모바일 에이전트 UX / 권고. 소스 직독 우선(tauri·plugins-workspace·buzz·element-x·zulip·mattermost·rocket.chat·signal 클론).
