@@ -5,6 +5,7 @@ import {
   effectiveModel,
   effortLabel,
   effortsForModel,
+  hasUnattestedModels,
   supportsEffort,
   type EffortTable,
   type RoutingDraft,
@@ -51,6 +52,8 @@ export function RoutingFields({
   clearedNotice = null,
   /** 프로필에 저장돼 있지만 지금 모델에서 죽어 있는 강도 안내. */
   ignoredNotice = null,
+  /** 모델 축에 대한 서버 거절. 폼 아래가 아니라 그 상자 옆에 붙는다. */
+  modelError = null,
   /**
    * `stack`은 다이얼로그(512px 패널에서 한 칸씩), `row`는 컴포저다. 컴포저에서
    * 세로로 쌓으면 1600px 창에서 모델 상자 하나가 1500px이 되는데, 모델 핸들은
@@ -75,6 +78,7 @@ export function RoutingFields({
   effortDisabledReason?: string | null;
   clearedNotice?: string | null;
   ignoredNotice?: string | null;
+  modelError?: string | null;
   layout?: "stack" | "row";
 }) {
   const modelId = `${idPrefix}-model`;
@@ -84,6 +88,7 @@ export function RoutingFields({
   const modelReasonId = `${idPrefix}-model-reason`;
   const effortReasonId = `${idPrefix}-effort-reason`;
   const modelSourceId = `${idPrefix}-model-source`;
+  const modelErrorId = `${idPrefix}-model-error`;
 
   const model = effectiveModel(draft, inheritedModel);
   const efforts = table ? effortsForModel(table, model).efforts : [];
@@ -128,20 +133,27 @@ export function RoutingFields({
   const row = layout === "row";
   const fieldClass = row ? "flex min-w-0 flex-1 flex-col gap-1" : "flex min-w-0 flex-col gap-1";
 
-  // 고를 수 있는 값이 지금 걸려 있는 값 하나뿐이면, 그 상자는 컨트롤이 아니라
-  // 표시다(tokens.md §4 "이미 일어난 일만 하는 컨트롤은 컨트롤이 아니다"). 왜
-  // 하나뿐인지 말하지 않으면 사람은 자기 워크스페이스에 모델이 하나라고 읽지만,
-  // 사실은 **이 서버에 고를 수 있는 모델 목록을 주는 경로가 없다**는 것이다:
-  // 허용목록(`workspace.settings.allowed_agent_models`)에는 REST가 없고, effort
-  // 표도 아직 없는 서버에서는 로스터에 실제로 도는 이름만 남는다(R2 M3).
+  // 모델 상자 밑 한 줄. 두 경우 모두 같은 사실의 두 얼굴이다: **이 서버에는
+  // 워크스페이스 허용목록(`workspace.settings.allowed_agent_models`)을 내려주는
+  // REST가 없다.**
+  //
+  //   하나뿐  고를 수 있는 값이 지금 걸려 있는 값 하나뿐이면 그 상자는 컨트롤이
+  //           아니라 표시다(tokens.md §4). 왜 하나뿐인지 말하지 않으면 사람은
+  //           자기 워크스페이스에 모델이 하나라고 읽는다(R2 M3).
+  //   여럿    목록에 올라온 이름 중 서버가 받아 준다고 증명된 것은 에이전트 자신의
+  //           모델뿐이다(`resolveProfileModel`의 허용집합 시작값). 나머지는 effort
+  //           표와 로스터에서 온 이름이고, 둘 다 허용목록이 아니다. 아무 말도 하지
+  //           않으면 "피커에 있는 것 = 고를 수 있는 것"으로 읽히는데 그것은 참이
+  //           아니다(2026-07-26 머지 리뷰 F1/F2).
   //
   // 되살려 놓은 orphan도 고를 수 있는 값이므로 함께 센다: 저장된 모델과 상속
-  // 모델이 서로 다르면 그 상자는 둘 사이를 오갈 수 있고, 그때는 할 말이 없다.
+  // 모델이 서로 다르면 그 상자는 둘 사이를 오갈 수 있다.
   const pickableModels = orphanModel === null ? models : [...models, orphanModel];
-  const modelSourceNotice =
-    !modelLocked && pickableModels.every((option) => option === inheritedModel)
-      ? "이 서버는 고를 수 있는 모델 목록을 알려주지 않습니다. 여기에는 지금 이 워크스페이스에서 쓰이는 모델만 올라옵니다."
-      : null;
+  const modelSourceNotice = modelLocked
+    ? null
+    : hasUnattestedModels(pickableModels, inheritedModel)
+      ? "이 서버는 워크스페이스가 허용한 모델 목록을 알려주지 않습니다. 허용목록 밖 모델은 거절되거나 적용되지 않습니다."
+      : "이 서버는 고를 수 있는 모델 목록을 알려주지 않습니다. 여기에는 지금 이 워크스페이스에서 쓰이는 모델만 올라옵니다.";
 
   const modelReason = modelLocked ? modelDisabledReason : null;
   const effortReason = effortLocked ? effortDisabledReason : null;
@@ -155,6 +167,23 @@ export function RoutingFields({
     const present = ids.filter((id): id is string => id !== null);
     return present.length > 0 ? present.join(" ") : undefined;
   };
+
+  // 거절 문장은 **거절당한 상자 바로 밑**에 선다. 나머지 안내가 두 상자 아래로
+  // 내려가 있는 것은 컴포저(`row`)에서 문장이 좁은 칸 안에 갇혀 세 줄로 접히기
+  // 때문인데, 다이얼로그(`stack`)에는 그 칸이 없다. 그 자리에 그대로 두면 모델에
+  // 대한 빨간 줄이 추론 강도 상자 밑에 붙어, 무엇을 고쳐야 하는지를 정확히 잃는다
+  // (실측: artifacts/routing/agent-profile-model-rejected-*). `row`에서는 지금처럼
+  // 줄 아래에 남는다.
+  const modelErrorLine = modelError ? (
+    <p
+      id={modelErrorId}
+      role="alert"
+      className={cn("text-meta text-danger", row && "mt-2")}
+      data-testid={`${idPrefix}-model-error`}
+    >
+      {modelError}
+    </p>
+  ) : null;
 
   return (
     <div className="flex flex-col">
@@ -172,7 +201,9 @@ export function RoutingFields({
             value={draft.model ?? ""}
             disabled={modelLocked}
             onChange={(event) => changeModel(event.target.value)}
+            aria-invalid={modelError ? true : undefined}
             aria-describedby={describe(
+              modelError ? modelErrorId : null,
               modelSourceNotice ? modelSourceId : null,
               modelReason ? modelReasonId : null
             )}
@@ -187,6 +218,7 @@ export function RoutingFields({
             ))}
             {orphanModel && <option value={orphanModel}>{orphanModel}</option>}
           </Select>
+          {!row && modelErrorLine}
         </div>
 
         <div className={fieldClass}>
@@ -247,6 +279,7 @@ export function RoutingFields({
           {ignoredNotice}
         </p>
       )}
+      {row && modelErrorLine}
       {modelSourceNotice && (
         <p
           id={modelSourceId}

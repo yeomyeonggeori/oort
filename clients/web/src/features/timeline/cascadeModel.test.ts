@@ -119,6 +119,26 @@ describe("merging (the replay rule)", () => {
   });
 });
 
+// =============================================================================
+// Which row carries the notice.
+//
+// Every fixture below is TRANSCRIBED FROM THE EMITTER, not from the ADR. That
+// is the whole point of this block: the first version of this module anchored
+// the notice on `props.schema === "momo.agent_gateway.timeline.v0"` and was
+// green, because the fixture here and the one in scripts/capture-screens.mjs
+// were both hand-written gateway turns. The rows that actually carry a cascade
+// are written by the WORKER, which never writes that key, so the notice could
+// not render on any real turn (2026-07-26 merge review D1/F3).
+//
+// Provenance of each shape, by file and function:
+//   worker turn record   workers/.../WorkerService.swift finalMessageProps
+//                        (+ MessageRoutes.messageSource for source_attribution)
+//   gateway turn record  server/.../AgentGatewayRoutes.swift timelineProps
+//   approval request     workers/.../WorkerService.swift approvalRequestProps
+//   tool result          workers/.../WorkerService.swift toolResultProps
+//   loop-guard trip      workers/.../WorkerService.swift guardTripProps
+// =============================================================================
+
 describe("which row carries the notice", () => {
   function message(props: Record<string, unknown> | undefined): Message {
     return {
@@ -134,6 +154,54 @@ describe("which row carries the notice", () => {
       ...(props ? { props } : {}),
     };
   }
+
+  const TRIGGER_ID = "0199aa11-2222-7000-8000-0000000000d1";
+
+  /**
+   * `WorkerService.finalMessageProps` key for key: `run_id` and `source` always,
+   * then the four optional keys the mention payload always fills
+   * (`MessageRoutes.mentionJobPayload`). There is NO `schema` key, and adding
+   * one here would put this fixture back where it started.
+   */
+  function workerTurnProps(
+    overrides: Record<string, unknown> = {}
+  ): Record<string, unknown> {
+    return {
+      run_id: RUN_ID,
+      source: "agent_worker.final_text.v0",
+      trigger_message_id: TRIGGER_ID,
+      trigger_message_seq: 1399,
+      author_member_id: "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90",
+      // `MessageRoutes.messageSource`, carried through the job payload verbatim.
+      source_attribution: {
+        source_id: `msg_${TRIGGER_ID}`,
+        kind: "message",
+        // `MessageRoutes.messageSource`'s own title format, transcribed. The
+        // marker below is on the value line because the pre-flight filters per
+        // line: this is a message seq, not a hex color.
+        title: "Message #1399", // design-preflight-allow
+        uri: `momo://workspaces/00000000-0000-7000-8000-000000000101/channels/00000000-0000-7000-8000-000000000201/messages/${TRIGGER_ID}`,
+        workspace_id: "00000000-0000-7000-8000-000000000101",
+        channel_id: "00000000-0000-7000-8000-000000000201",
+        message_id: TRIGGER_ID,
+        message_seq: 1399,
+        author_member_id: "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90",
+        permission_snapshot: "actor:channel_member agent:channel_member",
+        excerpt: "@hermes 이 diff 리뷰 부탁합니다.",
+      },
+      ...overrides,
+    };
+  }
+
+  // The row a real cascade lands on. `provider.cascade.fallback` is published by
+  // the worker only, and the worker's claim excludes gateway jobs
+  // (`AND method <> 'gateway'`, WorkerService.swift:165), so a turn that fell
+  // over is by construction a worker turn and never carries `schema`.
+  it("names the run of a settled worker turn record", () => {
+    expect(turnRecordRunId(message(workerTurnProps()))).toBe(
+      "0199aa11-2222-7000-8000-0000000000c3"
+    );
+  });
 
   it("names the run of a settled gateway turn record", () => {
     expect(
@@ -151,16 +219,75 @@ describe("which row carries the notice", () => {
   // One run writes an approval request, tool rows AND a turn record, and every
   // one of them carries the same run_id. Keying off that would print the same
   // notice three times in one turn.
+  //
+  // These four fixtures are the dedupe evidence, and they are exhaustive: the
+  // worker has exactly four `INSERT INTO message` sites (WorkerService.swift
+  // 752 / 1199 / 1453 / 2062) and only the last writes
+  // `source: "agent_worker.final_text.v0"`. The other three carry either a
+  // different `source` literal or none at all.
   it("ignores the other rows of the same run", () => {
+    // approvalRequestProps: approval_id + call_id, no `source` key at all.
     expect(
-      turnRecordRunId(message({ approval_id: "abc", run_id: RUN_ID }))
+      turnRecordRunId(
+        message({
+          approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+          run_id: RUN_ID,
+          channel_id: "00000000-0000-7000-8000-000000000201",
+          action_type: "shell",
+          call_id: "call_9f31",
+          tool_name: "shell",
+          title: "Approve shell",
+          summary: "Review the proposed tool call before momo executes it.",
+          arguments: { command: "ls" },
+          status: "pending",
+        })
+      )
     ).toBeNull();
-    expect(turnRecordRunId(message({ tool_name: "bash", run_id: RUN_ID }))).toBeNull();
+    // toolResultProps: `executor`, not `source`.
+    expect(
+      turnRecordRunId(
+        message({
+          call_id: "call_9f31",
+          tool_name: "shell",
+          approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+          run_id: RUN_ID,
+          payload_sha256: null,
+          output: { stdout: "ok" },
+          is_error: false,
+          executor: "agentworker.resume_approval.v0",
+        })
+      )
+    ).toBeNull();
+    // guardTripProps: a `source` key, and a DIFFERENT literal. A prefix match on
+    // `agent_worker.` would swallow this row and print the notice twice.
+    expect(
+      turnRecordRunId(
+        message({
+          code: "loop_guard_tripped",
+          gate: "G2",
+          reason: "consecutive auto responses reached the limit",
+          run_id: RUN_ID,
+          source: "agent_worker.loop_guard.v0",
+        })
+      )
+    ).toBeNull();
   });
 
   it("ignores an ordinary message", () => {
     expect(turnRecordRunId(message(undefined))).toBeNull();
     expect(turnRecordRunId(message({ mention_member_ids: [] }))).toBeNull();
+  });
+
+  // Uppercase in, lowercase out, on the worker path too: Swift `uuidString` is
+  // UPPERCASE and `cascadeFor` looks the map up by the folded id.
+  it("folds the worker run id to lower case", () => {
+    const map = mergeCascadeFallback(EMPTY_CASCADE, parseCascadeFallback(frame())!);
+    expect(cascadeFor(map, turnRecordRunId(message(workerTurnProps())))).toHaveLength(1);
+  });
+
+  it("drops a settled row that carries no usable run id", () => {
+    expect(turnRecordRunId(message(workerTurnProps({ run_id: "" })))).toBeNull();
+    expect(turnRecordRunId(message(workerTurnProps({ run_id: null })))).toBeNull();
   });
 });
 

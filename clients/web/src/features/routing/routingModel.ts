@@ -130,20 +130,39 @@ export function supportsEffort(
 }
 
 /**
- * 피커에 올릴 모델 목록.
+ * 피커에 올릴 모델 목록. **근거가 강한 순서**로 준다.
  *
- * 워크스페이스 허용목록(`workspace.settings.allowed_agent_models`, ADR-0131 D2)은
- * 읽을 수 있는 REST가 없다. 그래서 사전 필터는 우리가 실제로 아는 모델 이름의
- * 합집합이고, 허용목록 밖 모델은 서버가 400으로 답하며 그 문장을 그대로 필드 옆에
- * 붙인다. 여기서 없는 목록을 있는 척 좁히면, 고를 수 있어야 할 모델이 이유 없이
- * 사라진다.
+ * 서버가 실제로 재는 자는 `MessageRoutes.resolveProfileModel`이고, 그 함수의
+ * 허용집합은 `{에이전트 자신의 agent.model} ∪ workspace.settings.allowed_agent_models`
+ * 이다. 뒤쪽 절반을 내려주는 REST는 이 클라이언트가 부르는 어떤 경로에도 없다
+ * (로스터는 `agentModel`만, 프로필 응답에는 그 필드가 아예 없고, 워크스페이스
+ * 설정 GET 자체가 없다 — 2026-07-26 코드 확인). 그래서 **교집합은 계산할 수 없다.**
  *
- * 표가 `null`일 수 있는 것이 이 함수의 요점이다(R1 B2). 모델 축은 ADR-0131 D2라
- * 모든 세대의 서버가 가지고 있는데, effort 표는 ADR-0134 D2라 아직 없는 서버가
+ * 두 선택지 중 하나를 골라야 했다.
+ *
+ *   좁힌다   허용목록을 아는 척하고 목록을 줄인다. 실제로 허용된 모델이 피커에서
+ *            사라지는데 이 화면에는 직접 입력란이 없으므로 그 모델은 **영영 닿을
+ *            수 없게** 되고, 화면은 그 사실조차 말하지 못한다.
+ *   넓힌다   아는 이름을 모두 올리고, 허용 여부를 모른다는 사실을 화면에 적고,
+ *            서버가 거절하면 그 문장을 모델 필드 옆에 붙인다. 최악이 "한 번 거절
+ *            당하고 이유를 읽는다"로 끝난다.
+ *
+ * 후자를 택했다(2026-07-26 머지 리뷰 F1). 다만 **순서는 근거 순**으로 바꾼다.
+ * 이것은 공짜로 얻는 정보다:
+ *
+ *   1층  `agentModel` — `resolveProfileModel`이 허용집합을 이 값으로 시작하므로
+ *        서버가 반드시 받는다. 목록에서 유일하게 증명된 값이다.
+ *   2층  `known` — 이 워크스페이스가 지금 실제로 돌리는 모델들(로스터). 허용된다는
+ *        증명은 아니지만 지어낸 이름도 아니다.
+ *   3층  effort 표의 나머지 — 표는 provider x model의 **강도 능력표**이지 허용목록이
+ *        아니다. 머지 전에는 표가 404라 이 층이 비어 있었고, 표가 켜지면서 확정
+ *        거절 나는 이름이 피커에 올라온 것이 F1의 발생 경로다. 근거가 가장 약하므로
+ *        맨 뒤에 둔다.
+ *
+ * 표가 `null`일 수 있는 것도 여전히 이 함수의 요점이다(R1 B2). 모델 축은 ADR-0131
+ * D2라 모든 세대의 서버가 가지고 있는데, effort 표는 ADR-0134 D2라 아직 없는 서버가
  * 있다. 표를 목록의 유일한 출처로 두면 표가 없는 서버에서 모델 편집이 통째로
- * 사라진다. 그래서 두 번째 출처를 함께 받는다: `known`은 이 워크스페이스의
- * 에이전트들이 실제로 도는 모델 이름들이고(로스터에서 읽는다), 그것은 표 없이도
- * 참인 사실이다.
+ * 사라진다.
  */
 export function modelOptions(
   table: EffortTable | null,
@@ -155,10 +174,61 @@ export function modelOptions(
     if (model === "" || out.includes(model)) return;
     out.push(model);
   };
-  for (const entry of table?.entries ?? []) push(entry.model);
-  for (const model of known) push(model);
   push(agentModel);
+  for (const model of known) push(model);
+  for (const entry of table?.entries ?? []) push(entry.model);
   return out;
+}
+
+/**
+ * 이 목록에 서버가 받아 준다고 증명되지 않은 이름이 섞여 있는가.
+ *
+ * 증명된 값은 `agentModel` 하나뿐이다(`resolveProfileModel`의 허용집합 시작값).
+ * 나머지가 하나라도 있으면 화면은 "허용목록을 모른다"고 말해야 한다. 아무 말도
+ * 하지 않으면 피커에 올라온 것이 곧 고를 수 있는 것이라는 뜻이 되는데, 이 서버에
+ * 대해 그것은 참이 아니다.
+ */
+export function hasUnattestedModels(
+  options: readonly string[],
+  agentModel: string
+): boolean {
+  return options.some((option) => option !== agentModel);
+}
+
+/** 서버 거절이 어느 축에 대한 것인가. `null`이면 폼 전체에 붙인다. */
+export type RoutingRejectionField = "model" | "effort" | null;
+
+/**
+ * 400을 두 축 중 하나에 배달한다. 순수 함수라 단위 테스트가 규칙을 고정한다.
+ *
+ * 왜 필요한가: 허용목록 밖 모델에 대한 거절은 **모델을 바꾸라는 요청**이므로,
+ * 폼 맨 아래 한 줄이 아니라 그 상자 옆에 있어야 한다(채널 만들기의 409가 이미
+ * 같은 규칙을 쓴다). 엔진 절반이 프로필 PUT을 200 무음 폐기에서 400으로 바꾸는
+ * 중이라, 그 문장이 도착할 자리를 웹이 먼저 만들어 둔다.
+ *
+ * 서버 문구를 **정확히 맞히려 들지 않는다**. 문구는 엔진 쪽에서 아직 확정되지
+ * 않았고, 여기서 리터럴을 고정하면 한 글자만 달라져도 조용히 폼 아래로 떨어진다.
+ * 대신 축 이름이 등장하는지만 본다(`modelPref`, `routing.model`, `effortPref`가
+ * 모두 축 이름을 문장에 담는다). 아무것도 못 알아보면 `null`이고, 그때는 지금과
+ * 똑같이 폼 전체에 붙는다 — 필드 배달은 **알아볼 수 있을 때의 승급**이지,
+ * 못 알아보면 잃는 기능이 아니다.
+ *
+ * 강도가 먼저인 이유: 강도 거절은 "이 모델에서는 그 강도를 쓸 수 없다"처럼 두 축을
+ * 모두 부르지만 고쳐야 하는 것은 강도다. 반대 방향의 문장은 없다.
+ */
+export function routingRejectionField(
+  status: number,
+  message: string,
+  draft: RoutingDraft
+): RoutingRejectionField {
+  if (status !== 400) return null;
+  if (draft.effort !== null && /effort/i.test(message)) return "effort";
+  if (draft.model !== null && /model/i.test(message)) return "model";
+  // 이 폼이 새로 보내는 값은 두 축뿐이다. 나머지 키는 읽은 그대로 되돌려 보내는
+  // 값이라 방금 전까지 서버가 받아 주던 것들이다. 강도를 싣지도 않았는데 온 400은
+  // 그래서 모델에 대한 답일 수밖에 없다.
+  if (draft.model !== null && draft.effort === null) return "model";
+  return null;
 }
 
 /**

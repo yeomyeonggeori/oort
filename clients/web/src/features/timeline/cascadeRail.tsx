@@ -19,11 +19,15 @@ import {
 /**
  * The run id whose turn record the design capture seeds a fallback for.
  *
- * It matches the `run_id` on the settled turn record in
+ * It matches the `run_id` on the settled WORKER turn record in
  * `scripts/capture-screens.mjs` (BODIES), which is the only way the cascade row
  * can appear in artifacts/design: the capture runs against a mocked REST
  * surface with no socket, so the frame that normally carries this can never
  * arrive there. Change one and change the other.
+ *
+ * Worker, not gateway, and that is the whole correction of D1/F3: the worker is
+ * the only publisher of `provider.cascade.fallback` and its claim excludes
+ * gateway jobs, so a turn that fell over is always a worker turn.
  */
 const FIXTURE_RUN_ID = "0199aa11-2222-7000-8000-0000000000c3";
 

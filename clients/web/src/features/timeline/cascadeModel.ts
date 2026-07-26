@@ -129,8 +129,27 @@ export function cascadeFor(
 
 // ---- which row carries the notice -------------------------------------------
 
-/** `AgentGatewayRoutes.timelineProps`: the settled record of one agent turn. */
+/**
+ * A settled turn record, written once per run.
+ *
+ * There are TWO of them because there are two executors, and they mark
+ * themselves differently:
+ *
+ *   gateway  `AgentGatewayRoutes.timelineProps` writes `schema` (plus
+ *            `source: "hermes_gateway"`, `status`, `usage`).
+ *   worker   `WorkerService.finalMessageProps` writes NO `schema` key at all:
+ *            `{run_id, source, trigger_message_id, trigger_message_seq,
+ *            author_member_id, source_attribution}`.
+ *
+ * Anchoring on the schema alone was the D1/F3 blocker of the 2026-07-26 merge
+ * review, and it was not a near miss: `provider.cascade.fallback` is published
+ * by the WORKER only, and the worker's claim excludes gateway jobs
+ * (`AND method <> 'gateway'`, WorkerService.swift). A turn that fell over is
+ * therefore, by construction, a turn that can never carry the gateway schema,
+ * so the notice was structurally unrenderable on every row it exists for.
+ */
 const TURN_RECORD_SCHEMA = "momo.agent_gateway.timeline.v0";
+const WORKER_TURN_RECORD_SOURCE = "agent_worker.final_text.v0";
 
 /**
  * The run a message is the SETTLED RECORD of, or null.
@@ -138,13 +157,33 @@ const TURN_RECORD_SCHEMA = "momo.agent_gateway.timeline.v0";
  * Deliberately narrower than "any message carrying run_id". One run writes an
  * approval request, tool rows and a turn record, and every one of them carries
  * the same `run_id`; keying the notice off that would print the same line three
- * times in one turn. The gateway turn record is written once per run and is the
- * row whose cost and outcome the notice qualifies, so it is the one that says
- * where the turn was actually served.
+ * times in one turn.
+ *
+ * The two accepted marks keep that property, and the evidence is the emitter,
+ * not the ADR. The worker has exactly four `INSERT INTO message` sites and only
+ * the final-text one writes `source: "agent_worker.final_text.v0"`:
+ *
+ *   approval request  `approvalRequestProps` — `approval_id` + `call_id`, and
+ *                     no `source` key at all;
+ *   tool result       `toolResultProps` — `call_id` + `approval_id` + an
+ *                     `executor` key, again no `source`;
+ *   loop-guard trip   `guardTripProps` — a `source`, but a DIFFERENT literal
+ *                     (`agent_worker.loop_guard.v0`). Hence the exact
+ *                     comparison below: a `startsWith("agent_worker.")` would
+ *                     swallow the guard row and print the notice twice for a
+ *                     run that tripped.
+ *
+ * One per run is also enforced below the client: the worker looks for an
+ * existing `(run_id, author_member_id, type='text')` row and returns early if
+ * it finds one, so the settled final-text row cannot be written twice.
  */
 export function turnRecordRunId(message: Message): string | null {
   const props = message.props;
-  if (!props || props["schema"] !== TURN_RECORD_SCHEMA) return null;
+  if (!props) return null;
+  const settled =
+    props["schema"] === TURN_RECORD_SCHEMA ||
+    props["source"] === WORKER_TURN_RECORD_SOURCE;
+  if (!settled) return null;
   const runId = props["run_id"];
   return typeof runId === "string" && runId !== "" ? runId.toLowerCase() : null;
 }
