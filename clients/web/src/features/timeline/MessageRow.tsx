@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { threadRollup, type Message, type RosterMember } from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
-import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
 import { rowPresentation } from "./rowModel";
@@ -72,7 +71,6 @@ export function MessageRow({
   onResend?: (message: Message) => Promise<void> | void;
 }) {
   const [resending, setResending] = useState(false);
-  const openAgentProfile = useOpenAgentProfile();
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
   const name = author?.displayName ?? message.authorMemberId.slice(0, 8);
@@ -112,34 +110,23 @@ export function MessageRow({
       <div className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex flex-wrap items-baseline gap-2">
-            {/* 에이전트 이름은 진입점이다 (MOMO-626): 카드가 어떤 모델로
-                답했는지 보고 나서 그 값을 바꾸고 싶어지는 자리가 정확히 여기다.
-                사람 이름은 그대로 텍스트다 -- 사람에게는 바꿀 라우팅이 없다. */}
-            {isAgent && author ? (
-              <button
-                type="button"
-                onClick={() => openAgentProfile(author.id)}
-                data-testid="message-agent-name"
-                aria-label={`${author.displayName} 라우팅 설정 열기`}
-                className={cn(
-                  "rounded-sm text-body font-semibold",
-                  AGENT_TEXT,
-                  "hover:underline hover:underline-offset-2",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                )}
-              >
-                @{author.handle}
-              </button>
-            ) : (
-              <span
-                className={cn(
-                  "text-body font-semibold",
-                  isAgent ? AGENT_TEXT : "text-ink"
-                )}
-              >
-                {isAgent ? `@${author?.handle ?? name}` : name}
-              </span>
-            )}
+            {/* 이름은 이름이다 (R1 M8). MOMO-626 1차에서 에이전트 이름을 라우팅
+                다이얼로그를 여는 버튼으로 바꿨는데, 정지 상태에서는 텍스트와
+                구분되지 않으면서 한 번의 클릭으로 설정을 열었고, 가상 리스트에서
+                에이전트 그룹마다 탭 스톱이 하나씩 늘어 컴포저까지 가는 키보드
+                경로가 길어졌다. SKILL §6은 행 레벨 액션을 ContextMenu에 두라고
+                하는데 이 클라이언트에는 그 프리미티브가 없다(의존성에
+                @radix-ui/react-context-menu 없음). 없는 것을 여기서 손으로 만드는
+                대신 진입점을 제대로 생긴 세 곳에 둔다: 디렉터리 행의 [라우팅]
+                버튼, 컴포저 멘션 줄의 "기본값 편집", 그리고 ⌘K 팔레트. */}
+            <span
+              className={cn(
+                "text-body font-semibold",
+                isAgent ? AGENT_TEXT : "text-ink"
+              )}
+            >
+              {isAgent ? `@${author?.handle ?? name}` : name}
+            </span>
             {owner && (
               <span className="text-meta text-ink-muted">
                 managed by {owner.displayName}

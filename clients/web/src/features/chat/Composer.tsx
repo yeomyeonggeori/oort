@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -27,7 +28,10 @@ import {
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
 import { memberNameParts } from "@/features/workspace/useWorkspace";
-import { MentionRoutingBar } from "@/features/routing/MentionRoutingBar";
+import {
+  MENTION_ROUTING_ROW_CLASS,
+  MentionRoutingBar,
+} from "@/features/routing/MentionRoutingBar";
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
 import { mentionRoutingTarget } from "@/features/routing/mentionTargets";
 import { routingPayload } from "@/features/routing/routingModel";
@@ -254,6 +258,19 @@ export function Composer({
   );
   const routing = useMentionRouting(routingTarget);
 
+  // 줄이 한 번 생기면 이 글을 다 쓸 때까지 자리를 비워 둔다.
+  //
+  // 멘션을 확정했다 지웠다 하는 동안 줄이 붙었다 떨어지면 입력창이 캐럿 아래에서
+  // 세로로 튄다(R1 M11). 한 번의 작성에서 이동은 한 번이면 충분하고, 그 한 번은
+  // 사람이 에이전트를 부른 순간이다. 비어 있는 자리는 구분선 하나이고 아무것도
+  // 주장하지 않는다. 글을 비우거나 보내면 자리도 함께 사라진다.
+  const [rowReserved, setRowReserved] = useState(false);
+  const hasTarget = routingTarget.kind !== "none";
+  useEffect(() => {
+    if (hasTarget) setRowReserved(true);
+    else if (text.trim() === "") setRowReserved(false);
+  }, [hasTarget, text]);
+
   function applyMention(member: RosterMember) {
     if (!query) return;
     const next = `${text.slice(0, query.start)}@${member.handle} ${text.slice(caret)}`;
@@ -324,11 +341,22 @@ export function Composer({
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
           무엇이 되는가"가 이 줄의 본래 내용이기 때문이다. */}
-      <MentionRoutingBar
-        target={routingTarget}
-        draft={routing.draft}
-        onDraftChange={routing.setDraft}
-      />
+      {hasTarget ? (
+        <MentionRoutingBar
+          channelId={channelId}
+          target={routingTarget}
+          draft={routing.draft}
+          onDraftChange={routing.setDraft}
+        />
+      ) : (
+        rowReserved && (
+          <div
+            className={MENTION_ROUTING_ROW_CLASS}
+            aria-hidden="true"
+            data-testid="composer-routing-reserved"
+          />
+        )
+      )}
 
       <form onSubmit={onSubmit} className="relative flex items-end gap-2 p-3">
         {showMentions && (

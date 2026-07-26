@@ -4,6 +4,7 @@ import {
   INHERIT_DRAFT,
   agentEffortInheritLabel,
   agentModelInheritLabel,
+  appliedModelLabel,
   applyModelChange,
   clearedEffortNotice,
   draftEquals,
@@ -15,6 +16,7 @@ import {
   inheritedEffortLabel,
   inheritedModelLabel,
   isOverride,
+  knownAgentModels,
   modelOptions,
   parseEffortTable,
   resolveInheritance,
@@ -100,6 +102,36 @@ describe("유효값은 모델마다 다르다 (D2)", () => {
       "hermes-lite",
     ]);
     expect(modelOptions(table, "claude-opus-5")).toContain("claude-opus-5");
+  });
+
+  it("표가 없어도 모델 축은 고를 수 있다", () => {
+    // 모델은 ADR-0131 D2라 모든 세대의 서버가 가지고 있고, 표는 ADR-0134 D2라
+    // 아직 없는 서버가 있다. 표를 목록의 유일한 출처로 두면 표가 없는 서버에서
+    // MOMO-537(에이전트 기본 모델 편집)이 통째로 사라진다(R1 B2).
+    expect(
+      modelOptions(null, "hermes-agent", ["hermes-fast", "hermes-agent"])
+    ).toEqual(["hermes-fast", "hermes-agent"]);
+    expect(modelOptions(null, "")).toEqual([]);
+  });
+
+  it("로스터의 에이전트 모델은 중복 없이 등장 순서대로 모은다", () => {
+    expect(
+      knownAgentModels([
+        { kind: "agent", agentModel: "hermes-fast" },
+        { kind: "human", agentModel: null },
+        { kind: "agent", agentModel: "hermes-fast" },
+        { kind: "agent", agentModel: " hermes-agent " },
+        { kind: "agent", agentModel: "" },
+        { kind: "agent" },
+      ])
+    ).toEqual(["hermes-fast", "hermes-agent"]);
+  });
+
+  it("모델이 비어 있으면 적용 줄도 '지정 없음'이라고 말한다", () => {
+    // 빈 문자열을 그대로 문장에 끼우면 "모델 , 추론 강도 …"가 된다(R1 M4).
+    expect(appliedModelLabel("")).toBe("지정 없음");
+    expect(appliedModelLabel("   ")).toBe("지정 없음");
+    expect(appliedModelLabel("hermes-fast")).toBe("hermes-fast");
   });
 
   it("모르는 토큰은 서버가 준 그대로 보여준다", () => {

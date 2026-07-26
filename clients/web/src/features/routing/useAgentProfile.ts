@@ -8,7 +8,11 @@ import {
   type AgentProfileInput,
 } from "@/lib/api";
 import { useSession } from "@/app/session";
-import { isUnknownFieldRejection, noteRoutingUnsupported } from "./capability";
+import {
+  isUnknownFieldRejection,
+  noteRoutingUnsupported,
+  routingScope,
+} from "./capability";
 import type { RoutingDraft } from "./routingModel";
 
 // =============================================================================
@@ -18,29 +22,45 @@ import type { RoutingDraft } from "./routingModel";
 // 저장도 instructions와 enabledTools를 읽은 그대로 되돌려 보낸다. 이 규칙을
 // 어기면 라우팅을 손봤다는 이유로 에이전트의 지시문이 지워진다.
 //
-// `effortPref`는 이 서버가 아직 모를 수 있는 키다(ENGINE_HANDOFF X-14: 컬럼은
-// 마이그레이션 041에 있지만 REST writer는 없다). 그래서 값이 있을 때만 싣고,
-// closed-world 디코더가 "모르는 필드"로 거절하면 그 자리에서 capability를
-// 내리고(capability.ts의 learned downgrade) 저장이 안 됐다고 말한다. 조용히
-// 필드를 빼고 "저장했습니다"라고 답하는 것이 여기서 가장 나쁜 실패다.
+// **404는 막다른 길이 아니다**(R1 B3). 같은 경로의 PUT은 upsert이고, 프로필이
+// 없으면 만들어 준다(`AgentProfileRoutes.upsert`; momowebqa 실측: GET 404인
+// 에이전트에 PUT 하면 200 + version 1 생성). 즉 이 훅이 보내는 바로 그 PUT이
+// 프로필을 만든다. 그래서 404는 "없다"가 아니라 "아직 없다"이고, 저장할 대상이
+// 없는 것이 아니라 저장이 곧 생성이다. 이때만 instructions/enabledTools를 서버
+// 기본값(빈 문자열, 빈 배열)으로 채워 보내는데, 보존할 기존 값 자체가 없으므로
+// replace 규칙을 어기는 것이 아니다.
+//
+// `effortPref`는 이 서버가 아직 모를 수 있는 키다(ADR-0134 D3 신설, 엔진 랜딩은
+// MOMO-625). 그래서 값이 있을 때만 싣고, closed-world 디코더가 "모르는 필드"로
+// 거절하면 그 자리에서 capability를 내리고(capability.ts의 learned downgrade)
+// 저장이 안 됐다고 말한다. 조용히 필드를 빼고 "저장했습니다"라고 답하는 것이
+// 여기서 가장 나쁜 실패다.
 // =============================================================================
 
 export interface AgentProfileSaveFailure {
   message: string;
-  /** 서버가 이 필드 자체를 모른다고 답했다. capability가 내려간 상태다. */
-  unsupported: boolean;
+  /** 서버가 추론 강도 필드 자체를 모른다고 답했다. capability가 내려간 상태다. */
+  unsupportedEffort: boolean;
+}
+
+export interface AgentProfileSaveResult {
+  ok: boolean;
+  /** 저장 실패의 원인이 추론 강도 필드였다. 호출자는 그 값을 되돌린다. */
+  effortUnsupported: boolean;
 }
 
 export interface AgentProfileHandle {
   profile: AgentProfile | null;
+  /** 이 에이전트에는 아직 프로필 행이 없다(GET 404). 저장하면 만들어진다. */
+  missing: boolean;
   isPending: boolean;
+  /** 404를 제외한 진짜 실패만. 404는 `missing`으로 말한다. */
   error: unknown;
   refetch: () => void;
   saving: boolean;
   failure: AgentProfileSaveFailure | null;
   clearFailure: () => void;
-  /** 저장 성공이면 true. 실패는 failure에 남는다. */
-  save: (draft: RoutingDraft) => Promise<boolean>;
+  save: (draft: RoutingDraft) => Promise<AgentProfileSaveResult>;
 }
 
 export function useAgentProfile(agentMemberId: string | null): AgentProfileHandle {
@@ -61,15 +81,17 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
   });
 
   const profile = query.data ?? null;
+  const missing =
+    query.error instanceof ApiError && query.error.status === 404;
 
   const save = useCallback(
-    async (draft: RoutingDraft): Promise<boolean> => {
-      if (agentMemberId === null || profile === null) return false;
+    async (draft: RoutingDraft): Promise<AgentProfileSaveResult> => {
+      if (agentMemberId === null) return { ok: false, effortUnsupported: false };
       setSaving(true);
       setFailure(null);
       const input: AgentProfileInput = {
-        instructions: profile.instructions,
-        enabledTools: profile.enabledTools,
+        instructions: profile?.instructions ?? "",
+        enabledTools: profile?.enabledTools ?? [],
         // triggers.mention is fixed true by contract; sending the profile's own
         // value back keeps the replace faithful instead of re-deciding it here.
         triggers: { mention: true },
@@ -82,25 +104,27 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
           ["agent-profile", workspaceId.toLowerCase(), key],
           saved
         );
-        return true;
+        return { ok: true, effortUnsupported: false };
       } catch (error) {
-        if (isUnknownFieldRejection(error)) {
-          noteRoutingUnsupported();
+        // 모양 거절은 강도를 실었을 때만 강도에 대한 답이다. 강도를 싣지도 않았는데
+        // 온 "모르는 필드"는 다른 이야기이므로 그것으로 축을 내리지 않는다.
+        if (draft.effort !== null && isUnknownFieldRejection(error)) {
+          noteRoutingUnsupported(routingScope(workspaceId));
           setFailure({
             message:
-              "이 서버는 아직 에이전트 추론 강도 저장을 지원하지 않아 변경을 저장하지 못했습니다. 모델만 바꾸면 저장됩니다.",
-            unsupported: true,
+              "이 서버는 아직 추론 강도 저장을 지원하지 않습니다. 고른 강도는 되돌렸고, 모델만 바꿔서 다시 저장할 수 있습니다.",
+            unsupportedEffort: true,
           });
-          return false;
+          return { ok: false, effortUnsupported: true };
         }
         setFailure({
           message:
             error instanceof ApiError || error instanceof Error
               ? error.message
               : "변경을 저장하지 못했습니다.",
-          unsupported: false,
+          unsupportedEffort: false,
         });
-        return false;
+        return { ok: false, effortUnsupported: false };
       } finally {
         setSaving(false);
       }
@@ -114,8 +138,9 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
 
   return {
     profile,
+    missing,
     isPending: agentMemberId !== null && query.isPending,
-    error: query.error,
+    error: missing ? null : query.error,
     refetch,
     saving,
     failure,
@@ -125,9 +150,9 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
 }
 
 // ---- 다이얼로그를 어디서든 연다 ---------------------------------------------
-// 디렉터리 행과 타임라인의 에이전트 이름과 컴포저 멘션 줄, 세 곳이 같은 하나의
-// 다이얼로그를 연다. 진입점마다 다이얼로그를 하나씩 두면 폼 상태가 세 벌이 되고
-// 그중 하나는 반드시 낡는다(채널 만들기에서 이미 겪은 문제).
+// 디렉터리 행과 타임라인 행 메뉴와 컴포저 멘션 줄, 세 곳이 같은 하나의 다이얼로그
+// 를 연다. 진입점마다 다이얼로그를 하나씩 두면 폼 상태가 세 벌이 되고 그중 하나는
+// 반드시 낡는다(채널 만들기에서 이미 겪은 문제).
 
 export const OpenAgentProfileContext = createContext<
   ((agentMemberId: string) => void) | null

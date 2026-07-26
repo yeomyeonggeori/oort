@@ -1,38 +1,49 @@
 // =============================================================================
-// 이 서버가 요청 단위 라우팅을 지원하는가 (ADR-0134, MOMO-626).
+// 이 서버가 무엇을 할 수 있는가 (ADR-0134, MOMO-626).
 //
-// 왜 감지가 필요한가: 라우팅 엔진층(ADR-0134/0135)은 track/engine에만 있고,
-// 지금 살아 있는 서버들은 그 경로를 모른다. 그런 서버 앞에서 이 컨트롤을 그냥
-// 켜 두면 사람이 고른 모델·강도가 400으로 튕기고, 숨겨 버리면 "왜 없지"만
-// 남는다. 둘 다 틀렸다. 컨트롤은 남기고 이유를 적는다.
+// 이 화면은 서버 두 세대 앞에 동시에 선다. 그래서 "지원한다"는 말은 한 덩어리가
+// 아니라 **세 개의 서로 다른 사실**이고, 여기서는 그 셋을 따로 판정한다. 하나로
+// 뭉쳐 두면 한쪽 사실로 다른 쪽을 잠그게 되고, 그것이 R1 리뷰가 잡은 B1·B2다.
 //
-// 감지 방식(설계 근거):
-//   1. 프로브는 `GET /v1/provider/effort-table` 하나다. ADR-0134 D2 표면에서
-//      부작용이 없고, 테넌트 행을 읽지 않으며(어떤 인증 주체든 200),
-//      자격증명을 담지 않는 유일한 GET이라 프로브로 안전하다. 이 경로가 있으면
-//      그 서버에는 0134 엔진층이 올라가 있다.
-//   2. 프로브는 판정을 세 갈래로만 낸다. 200+아는 모양 = ready, 404/405/501 =
-//      absent(이 서버에는 그 기능이 없다), 그 밖(401/403/네트워크/모르는 모양)
-//      = unknown. **unknown을 absent로 접지 않는다**: "지원하지 않습니다"는
-//      서버가 그렇게 답했을 때만 할 수 있는 말이고, 못 물어본 것과 아니라고
-//      들은 것은 다른 사실이다.
-//   3. GET 하나가 PUT/POST를 약속하지는 못한다. 그래서 두 번째 신호를 배운다:
-//      라우팅 필드를 실은 쓰기가 "모르는 필드"류 400으로 거절되면 그 순간
-//      capability를 absent로 내리고(=learned downgrade) 서버가 준 사유를 그대로
-//      들고 온다. 실제로 track/engine 상태가 정확히 그 조합이다 — effort-table은
-//      있는데 `agent_profile.effort_pref` writer는 아직 없다(ENGINE_HANDOFF X-14).
-//      한 번 내려간 판정은 그 탭이 살아 있는 동안 유지되므로, 같은 거절을 두 번
-//      당하지 않는다.
+//   ① 모델 축 (agent_profile.model_pref)
+//      ADR-0131 D2. **모든 세대의 서버가 가지고 있다.** PUT profile은 modelPref를
+//      받고(momowebqa 실측 200), 멘션 run은 그 값을 실제로 쓴다
+//      (MessageRoutes.resolveProfileModel). 그래서 모델 편집은 이 파일의 어떤
+//      프로브 결과로도 잠기지 않는다. 여기에 판정 함수가 없는 이유가 그것이다.
 //
-// 배운 판정은 react-query 캐시가 아니라 모듈 스토어에 둔다. 프로브 결과는
-// 서버에서 온 데이터지만 이 판정은 "우리가 방금 거절당했다"는 클라이언트 사실
-// 이고, 쿼리 무효화로 지워지면 안 되기 때문이다.
+//   ② effort 축 (provider×model 표 + agent_profile.effort_pref)
+//      ADR-0134 D2/D3. 프로브는 `GET /v1/provider/effort-table` 하나다. 부작용이
+//      없고, 테넌트 행을 읽지 않으며, 자격증명을 담지 않는다(ADR-0004). 이 경로가
+//      있으면 그 서버에는 effort 축이 올라가 있다(MOMO-621).
+//
+//   ③ 메시지 한 건 오버라이드 (`POST .../messages`의 `routing` 블록)
+//      ADR-0134 D1 멘션 tier = MOMO-625. ②와 **별개의 커밋**이고, 실제로 ②만
+//      있는 서버가 존재한다(track/engine 현재 형상: PR 812는 머지, PR 816은 미머지).
+//      그런 서버는 `routing`을 400으로 거절하지 않고 **조용히 버린다**: 머지 전
+//      `SendMessageRequest`는 합성 Decodable이라 모르는 키를 무시한다
+//      (main `server/Sources/MomoServer/Routes/DTOs.swift:106` 실측, momowebqa
+//      왕복에서도 200). 그러므로 ②의 200을 ③의 근거로 쓰면 화면이 거짓말을 한다.
+//      ③은 서버에게 직접 물어봐야 하고, 그 방법이 아래 `probeSendRouting`이다.
+//
+// 판정의 규칙은 셋 모두 같다: **못 물어본 것과 아니라고 들은 것은 다른 사실이다.**
+// 404/405/501만 "없다"로 읽고, 401/403/네트워크/모르는 모양은 "확인하지 못했다"로
+// 남긴다. 그리고 어느 쪽으로도 확정되지 않으면 컨트롤은 잠긴 채로 둔다(fail
+// closed): 적용되지 않을지도 모르는 선택을 받아 두는 것이 이 표면에서 가장 나쁜
+// 실패다.
+//
+// 배운 판정은 react-query 캐시가 아니라 모듈 스토어에 둔다. 프로브 결과는 서버가
+// 준 데이터지만 이 판정은 "우리가 방금 거절당했다"는 클라이언트 사실이고, 쿼리
+// 무효화로 지워지면 안 되기 때문이다. 대신 **서버 주소+워크스페이스로 범위를 건다**:
+// 로그아웃하고 다른 서버로 들어간 사람에게 앞 서버의 판정을 물려주면, 그 화면은
+// 아무도 말한 적 없는 사실을 말하게 된다(R1 M5).
 // =============================================================================
 
 import { useCallback, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, fetchEffortTable } from "@/lib/api";
+import { ApiError, fetchEffortTable, probeSendRouting } from "@/lib/api";
 import { NetworkError } from "@/lib/http";
+import { apiBase } from "@/lib/serverBase";
+import { useSession } from "@/app/session";
 import { parseEffortTable, type EffortTable } from "./routingModel";
 
 export type RoutingSupport = "checking" | "ready" | "absent" | "unknown";
@@ -43,15 +54,22 @@ export interface CapabilityVerdict {
   reason: string | null;
 }
 
-/** absent 판정의 표준 문장. 표면마다 뒤에 자기 결과를 한 문장 덧붙인다. */
+/** effort 축 absent 판정의 표준 문장. 표면마다 뒤에 자기 결과를 한 문장 덧붙인다. */
 export const UNSUPPORTED_REASON =
-  "이 서버는 아직 요청 단위 모델·추론 강도 라우팅을 지원하지 않습니다.";
+  "이 서버는 아직 추론 강도 축을 지원하지 않습니다.";
+
+/** 메시지 한 건 오버라이드가 없는 서버의 표준 문장. */
+export const SEND_UNSUPPORTED_REASON =
+  "이 서버는 메시지 한 건에만 적용되는 모델·추론 강도를 아직 받지 않습니다.";
 
 const UNREADABLE_REASON =
   "서버가 보낸 모델·추론 강도 표를 읽지 못했습니다. 서버 버전을 확인하세요.";
 
 const FORBIDDEN_REASON =
   "이 계정으로는 모델·추론 강도 표를 읽을 수 없어 지원 여부를 확인하지 못했습니다.";
+
+const SEND_UNKNOWN_REASON =
+  "메시지 한 건 오버라이드를 이 서버가 받는지 확인하지 못했습니다.";
 
 /** 200 본문을 판정으로. 모르는 모양은 absent가 아니라 unknown이다. */
 export function verdictFromBody(raw: unknown): {
@@ -92,7 +110,7 @@ export function verdictFromError(error: unknown): CapabilityVerdict {
 }
 
 /**
- * 라우팅 필드를 실은 쓰기가 "이 서버는 그 필드를 모른다"고 거절당한 것인가.
+ * 프로필 쓰기가 "이 서버는 그 필드를 모른다"고 거절당한 것인가.
  *
  * 400 가운데 **모양 거절만** 골라낸다. 서버의 closed-world 디코더는 모르는 키를
  * "unknown … field"로 답하고(AgentProfileInput / CreateAgentRunRequest /
@@ -100,20 +118,79 @@ export function verdictFromError(error: unknown): CapabilityVerdict {
  * workspace.settings.allowed_agent_models"처럼 다른 문장이다. 후자까지 capability
  * 강등으로 읽으면, 허용목록 밖 모델을 한 번 고른 것 때문에 기능 전체가 없는
  * 것처럼 화면이 바뀐다.
+ *
+ * 404는 **여기에 들어오지 않는다**(R1 M3). 이 판정을 쓰는 유일한 호출자는 프로필
+ * PUT이고, 그 경로의 404는 "그 사이에 에이전트가 사라졌다"는 뜻이지 "이 서버에
+ * effort 축이 없다"는 뜻이 아니다. 경로 자체가 없는 서버는 effort-table 프로브가
+ * 이미 404로 답한다.
  */
 export function isUnknownFieldRejection(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
-  if (error.status === 404) return true;
   return error.status === 400 && /unknown/i.test(error.message);
 }
 
-// ---- 배운 판정 (learned downgrade) -----------------------------------------
-
-interface LearnedState {
-  reason: string;
+/**
+ * 전송 표면 프로브의 답을 판정으로. 순수 함수라 단위 테스트가 계약을 고정한다.
+ *
+ * 프로브는 "이 서버가 `routing` 블록을 읽고 검사하는가"만 묻는다. 물음의 형태는
+ * **반드시 거절당하는 요청**이다(존재할 수 없는 rootId + 유효하지 않은 effort
+ * 토큰). 두 세대의 답이 갈리는 지점이 정확히 그 사이에 있기 때문이다:
+ *
+ *   MOMO-625 이후  decode 직후 `RunRoutingInput.validate`가 돌아 400을 던진다.
+ *                  트랜잭션이 열리기 전이라 아무것도 쓰이지 않는다.
+ *   MOMO-625 이전  `routing`은 모르는 키라 무시되고, 다음 검사인 rootId 조회가
+ *                  404로 답한다. 이때도 아무것도 쓰이지 않는다
+ *                  (momowebqa 실측: 404 "thread root not found", seq 증가 없음).
+ *
+ * 어느 쪽으로도 확정되지 않으면 unknown이고, unknown이면 컨트롤은 잠긴다.
+ */
+export function verdictFromSendProbe(error: unknown): CapabilityVerdict {
+  if (error instanceof ApiError) {
+    // 서버가 routing을 이름으로 부르며 거절했다 = 그 블록을 읽었다.
+    if (error.status === 400 && /routing/i.test(error.message)) {
+      return { support: "ready", reason: null };
+    }
+    // routing을 한 번도 언급하지 않고 다음 검사로 넘어갔다 = 조용히 버렸다.
+    if (error.status === 404) {
+      return { support: "absent", reason: SEND_UNSUPPORTED_REASON };
+    }
+    if (error.status === 401 || error.status === 403) {
+      return {
+        support: "unknown",
+        reason: `${SEND_UNKNOWN_REASON} 이 채널에 글을 쓸 권한이 있는지 확인하세요.`,
+      };
+    }
+    return { support: "unknown", reason: `${SEND_UNKNOWN_REASON} ${error.message}` };
+  }
+  if (error instanceof NetworkError) {
+    return { support: "unknown", reason: error.message };
+  }
+  // 프로브가 성공했다는 것은 우리가 만든 없는 rootId가 통과했다는 뜻이고, 그것은
+  // 우리가 서버 형상을 잘못 읽고 있다는 신호다. 그 상태에서 ready를 주장하지 않는다.
+  return { support: "unknown", reason: SEND_UNKNOWN_REASON };
 }
 
-let learned: LearnedState | null = null;
+// ---- 서버 한 대에 대해 배운 것 ------------------------------------------------
+
+/**
+ * 판정의 범위. 주소가 바뀌면 다른 서버이고, 워크스페이스가 바뀌면 허용목록과
+ * 에이전트가 다르다. 둘 중 하나만 달라도 앞서 배운 것은 이 화면의 사실이 아니다.
+ */
+export function routingScope(workspaceId: string): string {
+  return `${apiBase()}|${workspaceId.toLowerCase()}`;
+}
+
+interface ServerFacts {
+  scope: string;
+  /** 프로필 effort 쓰기가 모양 거절을 당했다. */
+  effortWriterAbsent: boolean;
+  /** 전송 표면 프로브의 확정 판정. 아직 물어보지 않았으면 null. */
+  send: CapabilityVerdict | null;
+  /** 프로브가 지금 날아가 있는가. 중복 발사를 막는다. */
+  sendProbing: boolean;
+}
+
+let facts: ServerFacts | null = null;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -121,26 +198,52 @@ function emit(): void {
 }
 
 /**
- * 라우팅 필드를 실은 쓰기가 모양 거절을 당했다. 그 사실을 세션 동안 기억한다.
- *
- * `serverMessage`는 서버가 준 영어 원문이라 그대로 화면에 올리지 않는다.
- * 사람에게는 표준 문장을 주고, 원문은 콘솔에도 남기지 않는다(원문이 필요한
- * 사람은 네트워크 탭을 본다).
+ * 이 범위에 대해 지금까지 아는 것. 범위가 다르면 빈 상태를 **읽기만** 하고
+ * 저장하지는 않는다.
  */
-export function noteRoutingUnsupported(): void {
-  if (learned !== null) return;
-  learned = { reason: UNSUPPORTED_REASON };
+function factsFor(scope: string): ServerFacts {
+  if (facts !== null && facts.scope === scope) return facts;
+  return { scope, effortWriterAbsent: false, send: null, sendProbing: false };
+}
+
+/**
+ * 스토어는 항상 새 객체로 갈아 끼운다.
+ *
+ * `useSyncExternalStore`는 스냅샷을 `Object.is`로 비교해서 같은 참조면 렌더를
+ * 건너뛴다. 그래서 제자리 변경은 화면에 도달하지 못한다: 프로브가 답을 받아도
+ * 컴포저는 "확인 중"에 멈춰 있었다.
+ */
+function setFacts(next: ServerFacts): void {
+  facts = next;
   emit();
 }
 
+/**
+ * effort를 실은 프로필 쓰기가 모양 거절을 당했다. 그 사실을 이 서버에 대해 기억한다.
+ *
+ * 같은 커밋(MOMO-625)이 effort writer와 전송 표면 `routing`을 함께 올렸으므로,
+ * 이 거절은 두 축 모두에 대한 답이다. 서버가 준 영어 원문은 그대로 화면에 올리지
+ * 않는다(사람에게는 표준 문장을, 원문이 필요한 사람은 네트워크 탭을 본다).
+ */
+export function noteRoutingUnsupported(scope: string): void {
+  const state = factsFor(scope);
+  if (state.effortWriterAbsent && state.send !== null) return;
+  setFacts({
+    ...state,
+    effortWriterAbsent: true,
+    send: { support: "absent", reason: SEND_UNSUPPORTED_REASON },
+  });
+}
+
 /** 지금까지 배운 사유. 훅 밖에서도 읽을 수 있어야 판정이 한 벌로 남는다. */
-export function learnedRoutingReason(): string | null {
-  return learned?.reason ?? null;
+export function learnedRoutingReason(scope: string): string | null {
+  if (facts === null || facts.scope !== scope) return null;
+  return facts.effortWriterAbsent ? UNSUPPORTED_REASON : null;
 }
 
 /** 테스트용. 프로덕션 경로에서는 호출하지 않는다. */
 export function resetLearnedRoutingSupport(): void {
-  learned = null;
+  facts = null;
   emit();
 }
 
@@ -149,11 +252,11 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function snapshot(): LearnedState | null {
-  return learned;
+function snapshot(): ServerFacts | null {
+  return facts;
 }
 
-// ---- 훅 --------------------------------------------------------------------
+// ---- effort 축 --------------------------------------------------------------
 
 export interface RoutingCapability {
   support: RoutingSupport;
@@ -169,9 +272,11 @@ export interface RoutingCapability {
  * 값이 아니고, 바뀌었다면 [다시 확인]이 있다.
  */
 export function useRoutingCapability(): RoutingCapability {
-  const learnedState = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const { workspaceId } = useSession();
+  const scope = routingScope(workspaceId);
+  const state = useSyncExternalStore(subscribe, snapshot, snapshot);
   const query = useQuery({
-    queryKey: ["routing", "effort-table"],
+    queryKey: ["routing", "effort-table", scope],
     queryFn: async ({ signal }) => fetchEffortTable(signal),
     staleTime: Infinity,
     gcTime: Infinity,
@@ -188,8 +293,10 @@ export function useRoutingCapability(): RoutingCapability {
     void query.refetch();
   }, [query]);
 
-  if (learnedState !== null) {
-    return { support: "absent", table: null, reason: learnedState.reason, recheck };
+  const learned =
+    state !== null && state.scope === scope && state.effortWriterAbsent;
+  if (learned) {
+    return { support: "absent", table: null, reason: UNSUPPORTED_REASON, recheck };
   }
   if (query.isPending) {
     return { support: "checking", table: null, reason: null, recheck };
@@ -200,4 +307,56 @@ export function useRoutingCapability(): RoutingCapability {
   }
   const { verdict, table } = verdictFromBody(query.data);
   return { support: verdict.support, table, reason: verdict.reason, recheck };
+}
+
+// ---- 메시지 한 건 오버라이드 tier ---------------------------------------------
+
+export type SendRoutingSupport = "idle" | "checking" | "ready" | "absent" | "unknown";
+
+export interface SendRoutingCapability {
+  support: SendRoutingSupport;
+  reason: string | null;
+  /** 아직 안 물어봤으면 물어본다. 세션당 한 번, 서버당 한 번. */
+  prove: () => void;
+}
+
+/**
+ * 전송 표면이 `routing`을 받는가.
+ *
+ * 프로브는 사람이 [이번만 바꾸기]를 누를 때만 날아간다. 아무도 오버라이드를 쓰지
+ * 않는 세션에서는 요청이 0건이고, 쓰는 순간 딱 한 번이다. 결과는 서버 범위로
+ * 기억하므로 채널을 옮겨도 다시 묻지 않는다.
+ */
+export function useSendRoutingCapability(
+  channelId: string | null
+): SendRoutingCapability {
+  const { workspaceId } = useSession();
+  const scope = routingScope(workspaceId);
+  const state = useSyncExternalStore(subscribe, snapshot, snapshot);
+
+  const prove = useCallback(() => {
+    if (channelId === null) return;
+    const current = factsFor(scope);
+    if (current.send !== null || current.sendProbing) return;
+    setFacts({ ...current, sendProbing: true });
+    void (async () => {
+      let verdict: CapabilityVerdict;
+      try {
+        await probeSendRouting(workspaceId, channelId);
+        verdict = verdictFromSendProbe(null);
+      } catch (error) {
+        verdict = verdictFromSendProbe(error);
+      }
+      setFacts({ ...factsFor(scope), sendProbing: false, send: verdict });
+    })();
+  }, [scope, workspaceId, channelId]);
+
+  const mine = state !== null && state.scope === scope ? state : null;
+  if (mine?.send) {
+    return { support: mine.send.support, reason: mine.send.reason, prove };
+  }
+  if (mine?.sendProbing) {
+    return { support: "checking", reason: null, prove };
+  }
+  return { support: "idle", reason: null, prove };
 }

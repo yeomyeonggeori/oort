@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
-import { ApiError } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -13,14 +12,12 @@ import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
 import { RoutingFields } from "./RoutingFields";
+import { useRoutingCapability, type RoutingCapability } from "./capability";
 import {
-  UNSUPPORTED_REASON,
-  useRoutingCapability,
-  type RoutingCapability,
-} from "./capability";
-import {
+  INHERIT_DRAFT,
   agentEffortInheritLabel,
   agentModelInheritLabel,
+  appliedModelLabel,
   clearedEffortNotice,
   draftEquals,
   draftFromProfile,
@@ -28,6 +25,8 @@ import {
   effortLabel,
   effortsForModel,
   ignoredEffortNotice,
+  knownAgentModels,
+  modelOptions,
   resolveInheritance,
   type RoutingDraft,
   type RoutingInheritance,
@@ -50,33 +49,43 @@ import {
 // 버튼 2개), 생성이 아니라 편집이라 필드가 둘뿐이다. buzz의 200+ 파일 관리
 // 패널이 아니라 간편 편집 노선(레퍼런스 서베이 §7 반면교사).
 //
+// 두 축은 서버 세대가 다르다(R1 B2). **모델(ADR-0131 D2)은 지금 살아 있는 모든
+// 서버가 가지고 있고**(momowebqa 실측: modelPref만 실은 PUT → 200, 멘션 run이
+// `resolveProfileModel`로 그 값을 적용), **추론 강도(ADR-0134 D3)는 아직 없는
+// 서버가 있다**. 그래서 effort-table 프로브의 결과로 잠기는 것은 강도 상자
+// 하나뿐이다. 이 구분이 없으면 MOMO-537(에이전트 기본 모델 편집)이 현재 배포된
+// 모든 서버에서 작동 불능이 된다.
+//
 // 네 가지 상태가 전부 여기 있다(SKILL §5):
 //   로딩   프로필이 오기 전에는 같은 높이의 중립 바. 값이 도착할 때 폼이
 //          움직이지 않는다.
 //   오류   불러오지 못하면 무엇이 실패했고 무엇을 하면 되는지 + [다시 시도].
-//          404는 오류가 아니라 "아직 프로필이 없다"는 빈 상태로 나눠 말한다.
-//   빈     프로필 없음. 저장할 대상이 없으므로 폼 대신 사실만.
+//   빈     프로필 없음(404). **폼은 그대로 열려 있고 저장이 곧 생성이다** —
+//          같은 경로의 PUT이 upsert이기 때문이다(R1 B3). 한 줄 고지 + 액션 하나.
 //   오프라인 저장은 진짜로 불가능하므로 진짜 disabled + 이유 배너.
 // =============================================================================
 
 const FORM_ID = "agent-profile-form";
 
+/** 확인 중일 때 강도 상자에 붙는 사유. 잠긴 상자는 이유 없이 잠기지 않는다. */
+const CHECKING_REASON =
+  "이 서버가 추론 강도 축을 지원하는지 확인하는 중입니다.";
+
 /**
- * capability가 ready가 아닐 때 이 화면이 하는 말.
+ * 추론 강도 축에 대해 이 화면이 하는 말. **모델 축에 대해서는 아무 말도 하지 않는다.**
  *
  * 사유(왜 우리가 그렇게 믿는가)는 capability가 주고, 결과(그래서 이 화면에서
  * 무엇이 달라지는가)는 화면이 붙인다. 두 문장을 합쳐 두면 컴포저와 이 화면이
  * 서로 다른 결과를 같은 사유에 붙일 수 없다.
  */
-function capabilityNotice(capability: RoutingCapability): string | null {
-  if (capability.support === "ready" || capability.support === "checking") {
-    return null;
-  }
+function effortNotice(capability: RoutingCapability): string | null {
+  if (capability.support === "ready") return null;
+  if (capability.support === "checking") return CHECKING_REASON;
   const consequence =
     capability.support === "absent"
-      ? "모델과 추론 강도를 여기서 바꿀 수 없고, 에이전트는 서버가 정한 기본값으로 답합니다."
-      : "확인될 때까지 모델과 추론 강도를 바꿀 수 없습니다.";
-  return `${capability.reason ?? UNSUPPORTED_REASON} ${consequence}`;
+      ? "추론 강도는 여기서 정할 수 없습니다. 모델은 그대로 저장됩니다."
+      : "확인될 때까지 추론 강도는 정할 수 없습니다. 모델은 그대로 저장됩니다.";
+  return `${capability.reason ?? ""} ${consequence}`.trim();
 }
 
 /**
@@ -97,7 +106,7 @@ function AppliedLine({
   const fallback = inheritance.modelDefaultEffort;
   return (
     <p className="text-meta text-ink-muted" data-testid={testId}>
-      지금 적용: 모델 {inheritance.model.value}, 추론 강도{" "}
+      지금 적용: 모델 {appliedModelLabel(inheritance.model.value)}, 추론 강도{" "}
       {effort !== null
         ? effortLabel(effort)
         : fallback !== null
@@ -180,20 +189,29 @@ function AgentProfilePanel({
   // 이므로, 백그라운드 refetch가 타이핑 중인 선택을 되돌리지 않는다.
   const [draft, setDraft] = useState<RoutingDraft | null>(null);
   const [cleared, setCleared] = useState<string | null>(null);
+  // 프로필이 없으면 저장 전 상태는 "아무것도 지정하지 않음"이다. 그것이 곧
+  // 이 폼의 기준선이고, 사람이 무엇 하나라도 고르면 dirty가 된다.
   const saved = useMemo(
-    () => (handle.profile ? draftFromProfile(handle.profile) : null),
-    [handle.profile]
+    () =>
+      handle.profile
+        ? draftFromProfile(handle.profile)
+        : handle.missing
+          ? INHERIT_DRAFT
+          : null,
+    [handle.profile, handle.missing]
   );
   const current = draft ?? saved;
 
-  const notFound = handle.error instanceof ApiError && handle.error.status === 404;
   const agentName = member?.displayName ?? "에이전트";
   const title = `${agentName} 라우팅`;
   const description =
     "이 에이전트가 기본으로 쓸 모델과 추론 강도입니다. 비워 두면 상속합니다.";
-  const notice = capabilityNotice(capability);
-  const editable =
-    capability.support === "ready" && capability.table !== null && !offline;
+
+  const effortReady = capability.support === "ready" && capability.table !== null;
+  const notice = effortNotice(capability);
+  // 모델은 서버 세대와 무관하게 저장된다. 막는 것은 연결이 끊긴 상태 하나뿐이다.
+  const modelEditable = !offline;
+  const effortEditable = effortReady && !offline;
 
   const dirty =
     current !== null && saved !== null && !draftEquals(current, saved);
@@ -218,11 +236,19 @@ function AgentProfilePanel({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!current || handle.saving || !editable || !dirty) return;
-    const ok = await handle.save(current);
-    if (ok) {
+    if (!current || handle.saving || offline || !dirty) return;
+    const result = await handle.save(current);
+    if (result.ok) {
       setCleared(null);
       onOpenChange(false);
+      return;
+    }
+    // 서버가 강도 필드를 모른다고 답했다. 그 값을 폼에 남겨 두면 다음 저장도
+    // 같은 400을 받는다. 되돌려 놓고, 실패 문구가 시키는 "모델만 바꿔서 저장"이
+    // 실제로 가능한 상태로 만든다(R1 H1).
+    if (result.effortUnsupported) {
+      setDraft({ model: current.model, effort: null });
+      setCleared(null);
     }
   }
 
@@ -244,7 +270,7 @@ function AgentProfilePanel({
         size="sm"
         // 바쁜 것은 비활성이 아니다: 진행 중에는 대비를 유지하고 버튼 안
         // 스피너로 말하며, 클릭은 submit이 막는다(채널 만들기와 같은 규칙).
-        disabled={!editable || !dirty}
+        disabled={offline || !dirty}
         aria-busy={handle.saving || undefined}
         data-testid="agent-profile-save"
       >
@@ -274,22 +300,6 @@ function AgentProfilePanel({
     );
   }
 
-  if (notFound) {
-    return (
-      <Frame
-        title={title}
-        description={description}
-        footer={footer}
-        blockClose={false}
-      >
-        <p className="p-4 text-body text-ink-muted" data-testid="agent-profile-empty">
-          이 에이전트에는 아직 프로필이 없습니다. 프로필이 만들어지면 여기에서
-          모델과 추론 강도를 정할 수 있습니다.
-        </p>
-      </Frame>
-    );
-  }
-
   if (handle.error || current === null) {
     return (
       <Frame
@@ -313,6 +323,11 @@ function AgentProfilePanel({
   const inheritedModel = member?.agentModel ?? "";
   const inheritance = resolveInheritance(table, inheritedModel, handle.profile);
   const modelForEfforts = effectiveModel(current, inheritedModel);
+  const models = modelOptions(
+    table,
+    inheritedModel,
+    knownAgentModels(directory.members)
+  );
 
   return (
     <Frame
@@ -322,15 +337,11 @@ function AgentProfilePanel({
       onKeyDown={onKeyDown}
       blockClose={handle.saving}
     >
-      {notice && (
+      {handle.missing && (
         <InlineBanner
           tone="neutral"
-          message={notice}
-          actionLabel={capability.support === "unknown" ? "다시 확인" : undefined}
-          onAction={
-            capability.support === "unknown" ? capability.recheck : undefined
-          }
-          testId="agent-profile-capability"
+          message="이 에이전트에는 아직 프로필이 없습니다. 여기서 저장하면 프로필이 만들어집니다."
+          testId="agent-profile-empty"
         />
       )}
       {offline && (
@@ -350,6 +361,7 @@ function AgentProfilePanel({
         <RoutingFields
           idPrefix="agent-profile"
           table={table}
+          models={models}
           inheritedModel={inheritedModel}
           modelInheritLabel={agentModelInheritLabel(inheritedModel)}
           effortInheritLabel={agentEffortInheritLabel(
@@ -359,15 +371,15 @@ function AgentProfilePanel({
           onChange={(next, clearedEffort) =>
             onFieldChange(next, clearedEffort, inheritedModel)
           }
-          disabled={!editable}
-          disabledReason={
-            offline
-              ? "연결이 끊긴 동안에는 바꿀 수 없습니다."
-              : notice
-                ? "위에 적힌 이유로 지금은 바꿀 수 없습니다."
-                : null
+          modelDisabled={!modelEditable}
+          modelDisabledReason={
+            offline ? "연결이 끊긴 동안에는 바꿀 수 없습니다." : null
           }
-          clearedEffort={cleared}
+          effortDisabled={!effortEditable}
+          effortDisabledReason={
+            offline ? "연결이 끊긴 동안에는 바꿀 수 없습니다." : notice
+          }
+          clearedNotice={cleared}
           ignoredNotice={
             inheritance.ignoredEffortPref
               ? ignoredEffortNotice(
@@ -378,17 +390,31 @@ function AgentProfilePanel({
           }
         />
 
+        {capability.support === "unknown" && !offline && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            onClick={capability.recheck}
+            data-testid="agent-profile-recheck"
+          >
+            추론 강도 지원 다시 확인
+          </Button>
+        )}
+
         <AppliedLine inheritance={inheritance} testId="agent-profile-applied" />
 
-        {handle.failure && (
-          <p
-            className="text-meta text-danger"
-            role="alert"
-            data-testid="agent-profile-save-error"
-          >
-            {handle.failure.message}
-          </p>
-        )}
+        {/* 라이브 리전은 내용보다 먼저, 그리고 **렌더된 채로** 붙어 있어야 읽힌다
+            (R1 M6). display:none으로 감추면 접근성 트리에서 빠져 마운트를 미룬
+            것과 같아지므로, 비어 있을 때는 내용이 없어 높이가 0인 상태로 둔다. */}
+        <p
+          className="text-meta text-danger"
+          role="alert"
+          data-testid="agent-profile-save-error"
+        >
+          {handle.failure?.message}
+        </p>
       </form>
     </Frame>
   );

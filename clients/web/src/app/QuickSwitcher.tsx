@@ -28,7 +28,10 @@ import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
-import { useAgentProfileOpen } from "@/features/routing/useAgentProfile";
+import {
+  useAgentProfileOpen,
+  useOpenAgentProfile,
+} from "@/features/routing/useAgentProfile";
 import { InlineBanner } from "@/features/common/States";
 
 // =============================================================================
@@ -95,6 +98,19 @@ export function QuickSwitcher({
   const createChannelOpen = useCreateChannelOpen();
   const agentProfileOpen = useAgentProfileOpen();
   const formDialogOpen = createChannelOpen || agentProfileOpen;
+
+  // 에이전트 라우팅도 팔레트에 자리가 있다 (R1 M7). 같은 규칙이 채널 만들기를
+  // 여기에 앉혔고(SKILL §6 "모든 액션에 키보드 경로"), 이 액션은 그것보다 더
+  // 절실하다: 타임라인의 이름은 이제 이름일 뿐이므로 마우스 없이 이 다이얼로그에
+  // 닿는 길은 디렉터리로 이동한 뒤 행을 타고 들어가는 것뿐이었다.
+  const openAgentProfile = useOpenAgentProfile();
+  const agents = useMemo(
+    () =>
+      directory.members.filter(
+        (member) => member.kind === "agent" && member.status === "active"
+      ),
+    [directory.members]
+  );
 
   // Everyone already reachable as a DM row. Those rows are the conversation,
   // so the 사람 section below lists the people you have not talked to yet.
@@ -256,6 +272,30 @@ export function QuickSwitcher({
               <Plus className="size-4 opacity-70" />
               채널 만들기
             </Command.Item>
+          </Command.Group>
+        )}
+
+        {agents.length > 0 && (
+          <Command.Group heading="에이전트 설정">
+            {agents.map((agent) => (
+              <Command.Item
+                key={agent.id}
+                value={`${agent.displayName} ${agent.handle} 라우팅 모델 추론 강도 routing model effort`}
+                className={itemClass}
+                data-testid="switcher-agent-routing"
+                data-member-id={agent.id}
+                onSelect={() => {
+                  onOpenChange(false);
+                  // 채널 만들기와 같은 이유로 한 프레임 뒤에 연다: 같은 커밋에서
+                  // 팔레트가 닫히고 폼이 열리면 두 포커스 스코프가 겹친다.
+                  requestAnimationFrame(() => openAgentProfile(agent.id));
+                }}
+              >
+                <Bot className="size-4 text-agent" />
+                {agent.displayName} 라우팅
+                <span className="text-meta text-ink-muted">@{agent.handle}</span>
+              </Command.Item>
+            ))}
           </Command.Group>
         )}
 

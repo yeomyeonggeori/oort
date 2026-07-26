@@ -133,14 +133,65 @@ export function supportsEffort(
  * 피커에 올릴 모델 목록.
  *
  * 워크스페이스 허용목록(`workspace.settings.allowed_agent_models`, ADR-0131 D2)은
- * 읽을 수 있는 REST가 없다. 그래서 사전 필터는 표가 아는 모델 + 이 에이전트가
- * 실제로 쓰는 모델까지이고, 허용목록 밖 모델은 서버가 400으로 답하며 그 문장을
- * 그대로 필드 옆에 붙인다. 여기서 없는 목록을 있는 척 좁히면, 고를 수 있어야 할
- * 모델이 이유 없이 사라진다.
+ * 읽을 수 있는 REST가 없다. 그래서 사전 필터는 우리가 실제로 아는 모델 이름의
+ * 합집합이고, 허용목록 밖 모델은 서버가 400으로 답하며 그 문장을 그대로 필드 옆에
+ * 붙인다. 여기서 없는 목록을 있는 척 좁히면, 고를 수 있어야 할 모델이 이유 없이
+ * 사라진다.
+ *
+ * 표가 `null`일 수 있는 것이 이 함수의 요점이다(R1 B2). 모델 축은 ADR-0131 D2라
+ * 모든 세대의 서버가 가지고 있는데, effort 표는 ADR-0134 D2라 아직 없는 서버가
+ * 있다. 표를 목록의 유일한 출처로 두면 표가 없는 서버에서 모델 편집이 통째로
+ * 사라진다. 그래서 두 번째 출처를 함께 받는다: `known`은 이 워크스페이스의
+ * 에이전트들이 실제로 도는 모델 이름들이고(로스터에서 읽는다), 그것은 표 없이도
+ * 참인 사실이다.
  */
-export function modelOptions(table: EffortTable, agentModel: string): string[] {
-  const listed = table.entries.map((entry) => entry.model);
-  return listed.includes(agentModel) ? listed : [...listed, agentModel];
+export function modelOptions(
+  table: EffortTable | null,
+  agentModel: string,
+  known: readonly string[] = []
+): string[] {
+  const out: string[] = [];
+  const push = (model: string) => {
+    if (model === "" || out.includes(model)) return;
+    out.push(model);
+  };
+  for (const entry of table?.entries ?? []) push(entry.model);
+  for (const model of known) push(model);
+  push(agentModel);
+  return out;
+}
+
+/**
+ * 이 워크스페이스의 에이전트들이 실제로 도는 모델 이름들.
+ *
+ * 허용목록 REST가 없는 서버에서 모델 피커가 기댈 수 있는 두 번째 출처다. 로스터가
+ * 이미 손에 있고, 거기 적힌 `agentModel`은 서버가 그 에이전트에게 실제로 쓰는
+ * 값이므로 지어낸 이름이 아니다. 등장 순서를 유지해 목록이 렌더마다 흔들리지 않게
+ * 한다.
+ */
+export function knownAgentModels(
+  members: readonly { kind: string; agentModel?: string | null }[]
+): string[] {
+  const out: string[] = [];
+  for (const member of members) {
+    if (member.kind !== "agent") continue;
+    const model = member.agentModel?.trim();
+    if (!model || out.includes(model)) continue;
+    out.push(model);
+  }
+  return out;
+}
+
+/**
+ * "지금 적용" 줄에 쓰는 모델 이름.
+ *
+ * 로스터가 `agentModel`을 비워 보내는 경우가 있다(사람 멤버, 아직 모델이 정해지지
+ * 않은 에이전트). 그 빈 문자열을 그대로 문장에 끼우면 "모델 , 추론 강도 …"가 되어
+ * 화면이 값을 잃어버린 것처럼 보인다. 상속 라벨은 이미 이 경우를 처리하므로
+ * (`agentModelInheritLabel`) 적용 줄도 같은 말을 해야 한다(R1 M4).
+ */
+export function appliedModelLabel(model: string): string {
+  return model.trim() === "" ? "지정 없음" : model;
 }
 
 /** effort 토큰의 한국어 라벨. 모르는 토큰은 서버가 준 그대로 보여준다. */

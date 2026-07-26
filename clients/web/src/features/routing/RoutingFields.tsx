@@ -5,7 +5,6 @@ import {
   effectiveModel,
   effortLabel,
   effortsForModel,
-  modelOptions,
   supportsEffort,
   type EffortTable,
   type RoutingDraft,
@@ -25,21 +24,31 @@ import {
 // 모델을 바꾸면 강도 유효값이 바뀐다. 새 모델이 지금 강도를 받지 않으면
 // applyModelChange가 강도를 상속으로 비우고 무엇을 비웠는지 돌려주며, 이 컴포넌트
 // 는 그 문장을 강도 상자 밑에 붙인다. 조용히 사라지는 값은 없다.
+//
+// **두 상자는 따로 잠긴다**(R1 B2). 모델 축은 ADR-0131 D2라 모든 세대의 서버가
+// 가지고 있고, 추론 강도 축은 ADR-0134 D2라 아직 없는 서버가 있다. 그 둘을 한
+// 플래그로 묶으면 "강도 표가 없다"는 사실 하나가 모델 편집까지 꺼 버리고, 바로
+// 아래 "지금 적용: 모델 hermes-fast" 줄과 정면으로 모순된다. 잠금도 사유도 축
+// 단위다.
 // =============================================================================
 
 export function RoutingFields({
   idPrefix,
   table,
+  models,
   inheritedModel,
   modelInheritLabel,
   effortInheritLabel,
   draft,
   onChange,
-  disabled = false,
-  /** 컨트롤을 잠근 이유. 잠갔으면 반드시 있다(숨기지 않고 사유를 적는다). */
-  disabledReason = null,
-  /** 마지막 자동 클리어로 비워진 강도. 없으면 null. */
-  clearedEffort = null,
+  /** 모델 상자를 잠근다. 잠갔으면 `modelDisabledReason`이 반드시 있다. */
+  modelDisabled = false,
+  modelDisabledReason = null,
+  /** 강도 상자를 잠근다. 잠갔으면 `effortDisabledReason`이 반드시 있다. */
+  effortDisabled = false,
+  effortDisabledReason = null,
+  /** 마지막 자동 클리어를 설명하는 **완성된 문장**. 없으면 null. */
+  clearedNotice = null,
   /** 프로필에 저장돼 있지만 지금 모델에서 죽어 있는 강도 안내. */
   ignoredNotice = null,
   /**
@@ -51,33 +60,46 @@ export function RoutingFields({
   layout = "stack",
 }: {
   idPrefix: string;
+  /** 강도 유효값을 재는 자. 없으면 강도 축 자체를 모르는 서버다. */
   table: EffortTable | null;
+  /** 모델 피커에 올릴 이름들. 호출자가 아는 출처를 합쳐서 만든다. */
+  models: readonly string[];
   inheritedModel: string;
   modelInheritLabel: string;
   effortInheritLabel: string;
   draft: RoutingDraft;
   onChange: (next: RoutingDraft, clearedEffort: string | null) => void;
-  disabled?: boolean;
-  disabledReason?: string | null;
-  clearedEffort?: string | null;
+  modelDisabled?: boolean;
+  modelDisabledReason?: string | null;
+  effortDisabled?: boolean;
+  effortDisabledReason?: string | null;
+  clearedNotice?: string | null;
   ignoredNotice?: string | null;
   layout?: "stack" | "row";
 }) {
   const modelId = `${idPrefix}-model`;
   const effortId = `${idPrefix}-effort`;
-  const noticeId = `${idPrefix}-notice`;
+  const clearedId = `${idPrefix}-cleared-notice`;
+  const ignoredId = `${idPrefix}-ignored-notice`;
+  const modelReasonId = `${idPrefix}-model-reason`;
+  const effortReasonId = `${idPrefix}-effort-reason`;
 
-  // 표가 없으면 고를 수 있는 값이 하나도 없다. 그때는 서버가 준 것이 없다는
-  // 사실 그대로, 상속 하나만 남은 상자를 잠근다. 임의의 목록을 지어내면
-  // 서버가 400으로 거절할 값을 사람에게 권하는 셈이 된다.
   const model = effectiveModel(draft, inheritedModel);
-  const models = table ? modelOptions(table, inheritedModel) : [];
   const efforts = table ? effortsForModel(table, model).efforts : [];
-  const locked = disabled || table === null;
+  // 표가 없으면 고를 수 있는 강도가 하나도 없다. 그때는 서버가 준 것이 없다는
+  // 사실 그대로 상속 하나만 남은 상자를 잠근다. 임의의 목록을 지어내면 서버가
+  // 400으로 거절할 값을 사람에게 권하는 셈이 된다.
+  const effortLocked = effortDisabled || table === null;
+  const modelLocked = modelDisabled;
 
   function changeModel(value: string) {
-    if (!table) return;
     const next = value === "" ? null : value;
+    // 표가 없으면 강도 유효값을 잴 수 없다. 그때는 모델만 갈아 끼우고 강도는
+    // 건드리지 않는다(어차피 상자가 잠겨 있어 값은 상속뿐이다).
+    if (!table) {
+      onChange({ ...draft, model: next }, null);
+      return;
+    }
     const result = applyModelChange(table, draft, next, inheritedModel);
     onChange(result.draft, result.clearedEffort);
   }
@@ -105,84 +127,123 @@ export function RoutingFields({
   const row = layout === "row";
   const fieldClass = row ? "flex min-w-0 flex-1 flex-col gap-1" : "flex min-w-0 flex-col gap-1";
 
+  const modelReason = modelLocked ? modelDisabledReason : null;
+  const effortReason = effortLocked ? effortDisabledReason : null;
+  // 두 축이 같은 이유로 잠겼으면 문장도 하나다. 같은 말을 두 번 적으면 사람은
+  // 두 개의 다른 문제가 있다고 읽는다.
+  const sharedReason = modelReason !== null && modelReason === effortReason;
+
+  // 잠긴 이유는 상자를 짚은 사람에게 닿아야 한다. 화면 아래 어딘가에 적혀 있는
+  // 것만으로는 포커스가 상자에 있는 사람에게 전달되지 않는다(R1 M6).
+  const describe = (...ids: (string | null)[]): string | undefined => {
+    const present = ids.filter((id): id is string => id !== null);
+    return present.length > 0 ? present.join(" ") : undefined;
+  };
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col">
       <div
         className={cn(
           row ? "flex max-w-pane-lg flex-wrap items-end gap-3" : "flex flex-col gap-3"
         )}
       >
-      <div className={fieldClass}>
-        <label htmlFor={modelId} className="text-meta text-ink-muted">
-          모델
-        </label>
-        <Select
-          id={modelId}
-          value={draft.model ?? ""}
-          disabled={locked}
-          onChange={(event) => changeModel(event.target.value)}
-          data-testid={modelId}
-          data-override={draft.model !== null ? "" : undefined}
-        >
-          <option value="">{modelInheritLabel}</option>
-          {models.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-          {orphanModel && <option value={orphanModel}>{orphanModel}</option>}
-        </Select>
-      </div>
+        <div className={fieldClass}>
+          <label htmlFor={modelId} className="text-meta text-ink-muted">
+            모델
+          </label>
+          <Select
+            id={modelId}
+            value={draft.model ?? ""}
+            disabled={modelLocked}
+            onChange={(event) => changeModel(event.target.value)}
+            aria-describedby={describe(modelReason ? modelReasonId : null)}
+            data-testid={modelId}
+            data-override={draft.model !== null ? "" : undefined}
+          >
+            <option value="">{modelInheritLabel}</option>
+            {models.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+            {orphanModel && <option value={orphanModel}>{orphanModel}</option>}
+          </Select>
+        </div>
 
-      <div className={fieldClass}>
-        <label htmlFor={effortId} className="text-meta text-ink-muted">
-          추론 강도
-        </label>
-        <Select
-          id={effortId}
-          value={draft.effort ?? ""}
-          disabled={locked}
-          onChange={(event) => changeEffort(event.target.value)}
-          aria-describedby={clearedEffort ? noticeId : undefined}
-          data-testid={effortId}
-          data-override={draft.effort !== null ? "" : undefined}
-        >
-          <option value="">{effortInheritLabel}</option>
-          {efforts.map((option) => (
-            <option key={option} value={option}>
-              {effortLabel(option)}
-            </option>
-          ))}
-          {orphanEffort && (
-            <option value={orphanEffort}>
-              {effortLabel(orphanEffort)}
-              {orphanEffortUnusable ? " (이 모델에서는 쓸 수 없음)" : ""}
-            </option>
-          )}
-        </Select>
-      </div>
+        <div className={fieldClass}>
+          <label htmlFor={effortId} className="text-meta text-ink-muted">
+            추론 강도
+          </label>
+          <Select
+            id={effortId}
+            value={draft.effort ?? ""}
+            disabled={effortLocked}
+            onChange={(event) => changeEffort(event.target.value)}
+            aria-describedby={describe(
+              clearedNotice ? clearedId : null,
+              ignoredNotice ? ignoredId : null,
+              effortReason ? (sharedReason ? modelReasonId : effortReasonId) : null
+            )}
+            data-testid={effortId}
+            data-override={draft.effort !== null ? "" : undefined}
+          >
+            <option value="">{effortInheritLabel}</option>
+            {efforts.map((option) => (
+              <option key={option} value={option}>
+                {effortLabel(option)}
+              </option>
+            ))}
+            {orphanEffort && (
+              <option value={orphanEffort}>
+                {effortLabel(orphanEffort)}
+                {orphanEffortUnusable ? " (이 모델에서는 쓸 수 없음)" : ""}
+              </option>
+            )}
+          </Select>
+        </div>
       </div>
 
       {/* 안내는 상자 아래 한 줄씩, 폭을 나눠 쓰지 않는다. 문장은 두 칸으로
-          쪼개진 컬럼 안에서 세 줄로 접히는 순간 읽히지 않는다. */}
-      {clearedEffort && (
-        <p
-          id={noticeId}
-          role="status"
-          className="text-meta text-warn"
-          data-testid={`${idPrefix}-cleared`}
-        >
-          {clearedEffort}
-        </p>
-      )}
+          쪼개진 컬럼 안에서 세 줄로 접히는 순간 읽히지 않는다.
+
+          자동 클리어 줄은 **항상 마운트돼 있다**. 라이브 리전과 그 내용이 같은
+          프레임에 붙으면 다수의 스크린리더가 변경으로 읽지 않는다(R1 M6). 비어
+          있는 동안에는 줄 상자도 여백도 만들지 않으므로 레이아웃은 그대로다. */}
+      <p
+        id={clearedId}
+        role="status"
+        className="mt-2 text-meta text-warn empty:mt-0"
+        data-testid={`${idPrefix}-cleared`}
+      >
+        {clearedNotice}
+      </p>
+      {/* `empty:mt-0`만 쓰고 `hidden`은 쓰지 않는다. display:none은 접근성
+          트리에서 요소를 빼 버려서, 라이브 리전을 미리 마운트한 의미가 사라진다. */}
       {ignoredNotice && (
-        <p className="text-meta text-warn" data-testid={`${idPrefix}-ignored`}>
+        <p
+          id={ignoredId}
+          className="mt-2 text-meta text-warn"
+          data-testid={`${idPrefix}-ignored`}
+        >
           {ignoredNotice}
         </p>
       )}
-      {locked && disabledReason && (
-        <p className="text-meta text-ink-muted" data-testid={`${idPrefix}-reason`}>
-          {disabledReason}
+      {modelReason && (
+        <p
+          id={modelReasonId}
+          className="mt-2 text-meta text-ink-muted"
+          data-testid={`${idPrefix}-model-reason`}
+        >
+          {modelReason}
+        </p>
+      )}
+      {effortReason && !sharedReason && (
+        <p
+          id={effortReasonId}
+          className="mt-2 text-meta text-ink-muted"
+          data-testid={`${idPrefix}-effort-reason`}
+        >
+          {effortReason}
         </p>
       )}
     </div>

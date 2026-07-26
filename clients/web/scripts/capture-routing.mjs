@@ -10,10 +10,16 @@
 // src/features/routing/routingFixtures.json 하나를 그대로 읽는다: 단위 테스트가
 // 검증하는 값과 스크린샷이 보여 주는 값이 같아야 리뷰가 코드를 본 것이 된다.
 //
-// 세 서버 형상을 각각 찍는다. 이 티켓의 절반은 "서버가 아직 못 하는 일을 어떻게
-// 말하는가"이므로, 지원하는 서버만 찍으면 리뷰할 수 없다.
-//   ready    GET /v1/provider/effort-table 200  (엔진층이 올라간 서버)
-//   absent   같은 경로 404                       (momowebqa를 포함한 현재 서버들)
+// **세 서버 형상**을 각각 찍는다. 이 티켓의 절반은 "서버가 아직 못 하는 일을 어떻게
+// 말하는가"이므로, 지원하는 서버만 찍으면 리뷰할 수 없다. 그리고 그 형상은 두
+// 개가 아니라 세 개다: effort 축(MOMO-621)과 전송 표면 routing(MOMO-625)이 다른
+// 커밋이라, 앞의 것만 올라간 서버가 실제로 존재한다.
+//
+//   ready     effort-table 200 + 전송 프로브 400 routing  (두 층이 다 올라간 서버)
+//   sendless  effort-table 200 + 전송 프로브 404          (track/engine 현재 형상)
+//   absent    effort-table 404                            (momowebqa 등 현재 서버들)
+//
+// 폭도 두 가지로 본다(SKILL §11 리뷰 루프: 1280과 900).
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -29,6 +35,7 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5179);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+const NARROW = { width: 900, height: 800 };
 
 const FIXTURES = JSON.parse(
   readFileSync(resolve(WEB_ROOT, "src/features/routing/routingFixtures.json"), "utf8")
@@ -40,6 +47,8 @@ const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const HERMES = "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90";
 const KIM = "019f9a01-0000-7000-8000-000000000404";
 const TIDY = "019f9a01-0000-7000-8000-000000000405";
+/** 프로필 행이 아직 없는 에이전트. GET 404, PUT은 upsert로 만든다. */
+const NOTE = "019f9a01-0000-7000-8000-000000000406";
 
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
@@ -128,6 +137,22 @@ const ROSTER = [
     createdAtMs: 0,
     updatedAtMs: 0,
   },
+  {
+    id: NOTE,
+    workspaceId: WORKSPACE_ID,
+    kind: "agent",
+    status: "active",
+    role: "member",
+    displayName: "회의록봇",
+    handle: "note-bot",
+    channelCount: 1,
+    channelIds: [GENERAL_ID],
+    capabilities: [],
+    ownerHumanId: ME,
+    agentModel: "hermes-lite",
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
 ];
 
 const READ_STATES = [
@@ -167,10 +192,12 @@ function json(route, body, status = 200) {
 
 /**
  * `support`는 이 캡처가 흉내 내는 서버 형상이다.
- *   "ready"  effort-table 200 + effortPref를 아는 프로필
- *   "absent" effort-table 404 (현재 살아 있는 서버들)
+ *   "ready"     effort-table 200 + effortPref를 아는 프로필 + 전송 프로브 400
+ *   "sendless"  effort-table 200이지만 전송 표면은 routing을 모른다(404)
+ *   "absent"    effort-table 404 (momowebqa를 포함한 현재 살아 있는 서버들)
  */
 async function installMocks(context, support) {
+  const hasEffortAxis = support === "ready" || support === "sendless";
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
@@ -183,7 +210,7 @@ async function installMocks(context, support) {
     })
   );
   await context.route("**/v1/provider/effort-table", (route) =>
-    support === "ready"
+    hasEffortAxis
       ? json(route, FIXTURES.effortTable)
       : json(route, { error: { message: "not found" } }, 404)
   );
@@ -193,12 +220,18 @@ async function installMocks(context, support) {
     // 무효 클리어 픽스처(hermes-agent/max)를 들고 있다. 두 시나리오가 한 화면
     // 에서 동시에 보이도록 에이전트별로 나눠 준다.
     const lowered = url.toLowerCase();
+    // 회의록봇에는 프로필 행 자체가 없다. 살아 있는 서버에서 흔한 상태이고
+    // (momowebqa 실측: 두 에이전트 중 하나가 404), 같은 경로의 PUT이 upsert라
+    // 그 화면은 막다른 길이 아니라 "저장하면 만들어집니다"여야 한다.
+    if (lowered.includes(NOTE)) {
+      return json(route, { error: { message: "agent profile not found" } }, 404);
+    }
     const profile = lowered.includes(KIM)
       ? FIXTURES.invalidClear.profile
       : lowered.includes(TIDY)
         ? FIXTURES.inherit.profile
         : FIXTURES.override.profile;
-    if (support === "absent") {
+    if (!hasEffortAxis) {
       // effort_pref를 모르는 서버는 그 키 없이 답한다.
       const { effortPref, ...rest } = profile;
       void effortPref;
@@ -219,7 +252,24 @@ async function installMocks(context, support) {
     json(route, READ_STATES[0])
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
-    const url = new URL(route.request().url());
+    const request = route.request();
+    // POST는 전송 표면 프로브다(capability.probeSendRouting). 두 세대의 답이
+    // 갈리는 지점을 그대로 흉내 낸다: routing을 읽은 서버는 그 이름을 부르며
+    // 400을 주고, 모르는 서버는 그것을 버린 채 없는 rootId에 404를 준다.
+    if (request.method() === "POST") {
+      return support === "ready"
+        ? json(
+            route,
+            {
+              error: {
+                message: "routing.effort must be one of low, medium, high, xhigh, max",
+              },
+            },
+            400
+          )
+        : json(route, { error: { message: "thread root not found" } }, 404);
+    }
+    const url = new URL(request.url());
     if (url.searchParams.has("before") || url.searchParams.has("after")) {
       return json(route, { messages: [] });
     }
@@ -269,6 +319,7 @@ async function captureScheme(browser, scheme, support) {
   await installMocks(context, support);
   const shots = [];
   const tag = `${support}-${scheme}`;
+  const hasEffortAxis = support === "ready" || support === "sendless";
 
   // 1. 디렉터리: 에이전트 행에만 붙는 [라우팅] 진입점.
   const directory = await context.newPage();
@@ -287,15 +338,26 @@ async function captureScheme(browser, scheme, support) {
   await directory.getByTestId("agent-profile-cancel").click();
 
   // 2b. 저장된 오버라이드가 있는 에이전트(hermes: hermes-fast / 낮음).
+  //     absent 서버에서 특히 봐야 할 프레임이다: 모델 상자는 열려 있고, 잠긴
+  //     것은 강도 상자 하나이며, 그 사유가 "지금 적용: 모델 hermes-fast" 줄과
+  //     모순되지 않는다.
   await directory.locator(`[data-testid="directory-row-profile"][data-member-id="${HERMES}"]`).click();
   await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
   await shoot(directory, `${OUT_DIR}/agent-profile-saved-${tag}.png`, shots);
   await directory.getByTestId("agent-profile-cancel").click();
 
-  // 3. 프로필 다이얼로그: 모델을 바꿔 강도가 무효해지는 순간. ready 서버에서만
-  //    의미가 있다(absent에서는 상자가 잠겨 있고 그 사유가 이미 2번 프레임에
-  //    찍혀 있다).
-  if (support === "ready") {
+  // 2c. 프로필 행이 아직 없는 에이전트(회의록봇, GET 404). 폼은 열려 있고
+  //     저장이 곧 생성이다. 한 줄 고지 + 액션 하나(SKILL §5 empty).
+  await directory.locator(`[data-testid="directory-row-profile"][data-member-id="${NOTE}"]`).click();
+  await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+  await directory.getByTestId("agent-profile-empty").waitFor({ state: "visible" });
+  await shoot(directory, `${OUT_DIR}/agent-profile-new-${tag}.png`, shots);
+  await directory.getByTestId("agent-profile-cancel").click();
+
+  // 3. 프로필 다이얼로그: 모델을 바꿔 강도가 무효해지는 순간. 강도 축이 있는
+  //    서버에서만 의미가 있다(absent에서는 강도 상자가 잠겨 있고 그 사유가
+  //    이미 2b 프레임에 찍혀 있다).
+  if (hasEffortAxis) {
     // 김인턴이 hermes-agent/max를 들고 있으므로, hermes-fast로 내리면 max가
     // 유효값에서 빠진다.
     await directory
@@ -316,12 +378,16 @@ async function captureScheme(browser, scheme, support) {
   await chat.getByTestId("composer-routing").waitFor({ state: "visible" });
   await shoot(chat, `${OUT_DIR}/composer-routing-inherit-${tag}.png`, shots);
 
-  // 5. 펼친 상태: 두 상자와 (absent라면) 잠긴 이유.
+  // 5. 펼친 상태. 펼치는 순간 전송 표면 프로브가 날아가고, 그 답이 나오기 전
+  //    까지는 두 상자가 "확인 중"이라고 적힌 채 잠겨 있다. 답이 오면 열리거나
+  //    (ready) 사유가 남는다(sendless: effort 표는 있지만 전송은 못 받는 서버).
   await chat.getByTestId("composer-routing-toggle").click();
   await chat.getByTestId("composer-routing-model").waitFor({ state: "visible" });
+  await chat.waitForTimeout(300);
   await shoot(chat, `${OUT_DIR}/composer-routing-open-${tag}.png`, shots);
 
-  // 6. 오버라이드 활성: 줄 전체가 accent-soft로 바뀌고 "이번 한 번만"이 붙는다.
+  // 6. 오버라이드 활성: 줄이 accent-soft로 바뀌고 "이번 한 번만"이 붙는다.
+  //    전송 표면이 routing을 받는다고 서버가 직접 말한 서버에서만 가능하다.
   if (support === "ready") {
     await chat.getByTestId("composer-routing-model").selectOption("hermes-agent");
     await chat.getByTestId("composer-routing-effort").selectOption("xhigh");
@@ -331,14 +397,38 @@ async function captureScheme(browser, scheme, support) {
     await shoot(chat, `${OUT_DIR}/composer-routing-override-${tag}.png`, shots);
   }
 
-  // 7. 에이전트를 여러 명 부르면 붙일 수 없다고 말한다.
+  // 7. 에이전트를 여러 명 부르면 붙일 수 없다고 말한다. 이름은 두 개까지 적고
+  //    나머지는 수로 접는다(줄이 문단이 되지 않도록).
   await chat
     .getByTestId("composer-input")
-    .fill("@hermes @kim-intern 두 분 같이 확인 부탁합니다");
+    .fill("@hermes @kim-intern @tidy-bot 세 분 같이 확인 부탁합니다");
   await chat.getByTestId("composer-routing-many").waitFor({ state: "visible" });
   await shoot(chat, `${OUT_DIR}/composer-routing-many-${tag}.png`, shots);
-
   await context.close();
+
+  // 8. 좁은 폭(900). SKILL §11 리뷰 루프가 요구하는 두 번째 측정 폭이고, 줄이
+  //    펼쳐졌을 때 컴포저가 얼마나 자라는지가 여기서 보인다.
+  const narrowContext = await browser.newContext({
+    viewport: NARROW,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(narrowContext, support);
+  const narrow = await narrowContext.newPage();
+  await narrow.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(narrow);
+  await narrow.getByTestId("composer-input").waitFor({ state: "visible" });
+  await narrow
+    .getByTestId("composer-input")
+    .fill("@hermes 빌드 로그 요약만 부탁합니다");
+  await narrow.getByTestId("composer-routing").waitFor({ state: "visible" });
+  await narrow.getByTestId("composer-routing-toggle").click();
+  await narrow.getByTestId("composer-routing-model").waitFor({ state: "visible" });
+  await narrow.waitForTimeout(300);
+  await shoot(narrow, `${OUT_DIR}/narrow-900-composer-open-${tag}.png`, shots);
+  await narrowContext.close();
+
   return shots;
 }
 
@@ -361,7 +451,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       const all = [];
-      for (const support of ["ready", "absent"]) {
+      for (const support of ["ready", "sendless", "absent"]) {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme, support)));
         }

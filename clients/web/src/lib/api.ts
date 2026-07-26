@@ -602,9 +602,18 @@ export function fetchThreadReplies(
 }
 
 /**
- * Per-request model/effort override (ADR-0134 D1 `routing`). Optional on the
- * wire and omitted entirely when nothing is overridden, so a send that inherits
- * carries the exact body it carried before this ticket existed.
+ * Per-request model/effort override (ADR-0134 D1 `routing`).
+ *
+ * Contract of record for THIS surface is the mention tier, MOMO-625: it adds
+ * exactly one key to `SendMessageRequest.allowedKeys` and makes that request
+ * closed-world in the same commit, so a server that knows the key answers 400
+ * for a bad value and a server that does not know it drops the key in silence.
+ * Which of the two is on the other end is not guessable from a GET, so the
+ * composer never sends this block until `probeSendRouting` has proved the
+ * surface (features/routing/capability.ts).
+ *
+ * Optional on the wire and omitted entirely when nothing is overridden, so a
+ * send that inherits carries the exact body it carried before this ticket.
  */
 export interface RequestRouting {
   model?: string;
@@ -1027,4 +1036,50 @@ export async function putAgentProfile(
     { method: "PUT", body: JSON.stringify(input) }
   );
   return res.profile;
+}
+
+// ---- 전송 표면이 `routing`을 받는가 (ADR-0134 D1 멘션 tier, MOMO-625) --------
+//
+// GET 하나로 답할 수 없는 질문이다. `routing`은 `POST .../messages`의 본문 키이고
+// (MOMO-625가 `SendMessageRequest.allowedKeys`에 더한 단 하나의 키), 그 키를 모르는
+// 세대의 서버는 400을 주지 않고 **조용히 무시한다**. 즉 "거절이 없었다"는 사실은
+// 성공의 근거가 되지 못한다. 그래서 그 표면에 직접, 그러나 아무것도 남기지 않는
+// 방식으로 물어본다.
+//
+// 물음의 형태: **두 세대 모두가 반드시 거절하는 요청** 하나.
+//   rootId  이번에 만든 난수 UUID. 그런 메시지는 존재하지 않으므로 스레드 루트
+//           조회가 404로 끝난다. 트랜잭션은 열리지만 INSERT까지 가지 않는다.
+//   routing 유효 레벨 집합에 없는 effort 토큰.
+//
+// 그래서 답이 갈린다.
+//   MOMO-625 이후  decode 직후 `RunRoutingInput.validate`가 400을 던진다
+//                  (MessageRoutes.swift: 트랜잭션이 열리기 전).
+//   MOMO-625 이전  `routing`은 모르는 키라 무시되고 404 "thread root not found".
+//
+// 두 경로 모두 메시지를 만들지 않는다. momowebqa(=main 형상)에서 실측했다:
+// 404, 채널 seq 불변, 감사행 없음. 이 함수는 그래서 항상 throw한다.
+// 판정은 `features/routing/capability.ts`의 `verdictFromSendProbe`가 한다.
+
+/** 어떤 모델에서도 유효할 수 없는 토큰. 32바이트 상한(마이그레이션 041) 안. */
+const SEND_ROUTING_PROBE_EFFORT = "__momo-capability-probe__";
+
+export async function probeSendRouting(
+  workspaceId: string,
+  channelId: string
+): Promise<void> {
+  await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        clientMsgId: crypto.randomUUID(),
+        rootId: crypto.randomUUID(),
+        type: "text",
+        body: "",
+        routing: { effort: SEND_ROUTING_PROBE_EFFORT },
+      }),
+    }
+  );
 }
