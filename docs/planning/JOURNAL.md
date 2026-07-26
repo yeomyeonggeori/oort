@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-26 (Fable Wave B main·next.9 + ADR Accept + Wave C1 발진)
+- **Wave B main 동기화**(#807, 성재 승인) → 검증 그린(613 tests) → **next.9 발행+기본 다운로드 갱신**(sha 9a5bcfec…) — 관전 패널·터미널·diff 카드가 사용자 빌드 도달.
+- **ADR 0134·0135·0136 Accepted**(성재 "둘다 승인할게").
+- **Wave C1 발진**(wf_f0c67f72, Opus 5 병렬 4): #808 라우팅+effort(마이그레이션 041 고정) · #809 provider_link_chain+캐스캐이드(042) · #810 quota_snapshot(043) · #811 hermes adapter 다형화. 전부 track/engine.
+- **0136(T3/E2B)은 C2 보류**: E2B API 키·크레딧 충전이 선행 — 성재에게 요청함. 키 도착 시 프로비저너+원장+리허설 티켓화.
+
+
 ## 2026-07-26 (Fable Wave B 완결) · 관전 표면 웹 이식 3장 전량 track/uxui 랜딩
 - **#802 터미널 관전 랜딩(#806)**: xterm.js 로컬 번들·코드 스플릿, observer 등급 소비 — **connect 프레임만 인코딩 가능(stdin/resize/kill 인코더 부재를 테스트로 각인)**, 실 PTY stdout 관전 실왕복(rm -rf 타이핑 0바이트 실측), 소유자 토글·관전 권한 배지. 리뷰 2R: 오프라인 거짓 라이브 H1 → live=소켓 OPEN+onLine+최근 수신 3중 게이트+경과 시계, 중단 시 전사 보존. 613 tests.
 - **Wave B 총계**: 801(패널)+803(diff 카드)+802(터미널) — 리뷰 6라운드, B4·H10·M48 전량 실측 해소.
