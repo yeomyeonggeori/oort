@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-07-27 (Fable) · #825 캐스캐이드 재시도 증폭 차단 — 기존 게이트 사각지대 실증
+- **랜딩**(track/engine `e65ad53b`, PR #833). **진단 정정**: 패킷은 "분기 없이 재큐잉"이라 했으나 실제 뿌리는 **분류를 경계에서 버리는 것**이었다 — `ProviderCascade.step`은 이미 정확히 분류하는데 `ProviderCascadeRunner`가 `finish(throwing: failure)`로 원본만 던져 `reason`을 잃고, `WorkerService`가 문자열로 받아 전부 재큐잉했다. 수정 = 타입 경계 `ProviderCascadeFailure{reason,disposition,underlying}` 도입, `availabilityExhausted`만 재큐잉.
+- **증폭 실측**: 홉 9(`maxChainEntries` 8+position 0) × 논스트림 무조건 재요청 2 × `WORKER_MAX_ATTEMPTS` 8 = **144 요청·36분**. 실패 턴은 `usage==nil`→cost 0이라 **G5가 구조적으로 트립 못 한다**. 체인이 instance-global이라 아무 멤버나 멘션으로 운영자 자격증명 소진 가능.
+- **red proof의 수확이 크다**: 되돌리니 **기존 17관문이 전부 초록인 채** 신규 단정만 `{"status":"pending","attempts":1}`로 잡았다. 기존 B6는 "run 실패+폴백행 0"까지만 봤고 그건 수정 전에도 참이었다 — **증폭은 기존 게이트의 사각지대**였다. 동시에 워커 유닛 89개도 전부 초록(순수 함수라 호출부 오배선을 못 잡는다) → **통합 단정이 왜 필요한지의 실증**.
+- **오케스트레이터 추가**(`caf7ea0e`): 분류 불가 실패의 terminal 기본값(`resolve(nil)`→markFailed)이 사고가 아니라 결정이 되도록 단정 고정. 오늘은 도달 불가지만 transport가 `.error`를 던지지 않고 방출하기 시작하면 모든 턴이 재시도 없이 실패한다.
+- **기각한 우려 2건(실측)**: ①총 예산 60s가 긴 턴을 자르지 않는다 — AsyncHTTPClient deadline은 `defer{deadlineTask.cancel()}`로 **응답 헤드 도착 시 해제**(본문 스트리밍 무관), 러너 예산 검사도 홉 실패 후에만 돈다 ②`finalizeStreamingMessage`의 `id`는 로그 전용이라 부분 출력 덮어쓰기 없음.
+- 포함: 총 wall-clock 예산(`PROVIDER_CASCADE_TOTAL_TIMEOUT_MS` 60s, 5곳 배선) · 논스트림 폴백 조건화(이벤트 미방출+파싱 실패 한정 → 조각+전체답변 합성 오염 차단). 게이트 **docker 18 PASS**·worker 89. 검증기 포트 다음=**28340대**. main 반영 대기.
+
+
 ## 2026-07-27 (Fable C 집행) · #826 iOS 전송 400 수리 — 9주 결함 종결
 - **랜딩**(track/engine `a27c0d3a`, PR #832): iOS가 `client_msg_id`·`run_id`(snake)를 보내 서버 closed-world 디코더에 **9주간 400**을 맞고 있었다. 수정은 두 줄이지만 **진짜 산출물은 게이트**다 — `scripts/verify_ios_wire.sh` 신설(격리 compose 28320~23, 매 실행 자체 픽스처, public MomoiOSKit 로그인→전송→history→멱등 재전송).
 - **red proof 성립(오케스트레이터 실측)**: 되돌리면 실서버가 `400 unknown message field`로 거부하고 게이트가 정확히 잡는다. 이 확인 없이는 게이트에 값이 없다.
