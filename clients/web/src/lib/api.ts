@@ -991,11 +991,29 @@ export interface AgentProfile {
   modelPref?: string;
   effortPref?: string;
   enabledTools: string[];
-  triggers: { mention: boolean; schedule?: unknown };
+  /**
+   * `mention` is pinned to true by the contract on both ends (openapi
+   * `AgentProfileTriggers.mention` is `enum: [true]`, and the server rejects
+   * anything else), so the only part that varies is `schedule`. Typed as the
+   * literal because a caller echoing this object back into a PUT is doing the
+   * right thing, and the type should not make it look like a re-decision.
+   */
+  triggers: AgentProfileTriggers;
   paused: boolean;
   version: number;
   updatedBy: string;
   updatedAtMs: number;
+}
+
+/**
+ * `schedule` is defined but not executed in v0 (openapi says so in as many
+ * words). It is still round-tripped verbatim: a client that edits routing and
+ * drops the key would delete a stored schedule, because the server upsert is
+ * `triggers = EXCLUDED.triggers` (AgentProfileRoutes.swift), not a merge.
+ */
+export interface AgentProfileTriggers {
+  mention: true;
+  schedule?: unknown;
 }
 
 /**
@@ -1009,7 +1027,7 @@ export interface AgentProfileInput {
   enabledTools: string[];
   modelPref?: string;
   effortPref?: string;
-  triggers?: { mention: true; schedule?: unknown };
+  triggers?: AgentProfileTriggers;
 }
 
 export async function fetchAgentProfile(
@@ -1059,6 +1077,19 @@ export async function putAgentProfile(
 // 두 경로 모두 메시지를 만들지 않는다. momowebqa(=main 형상)에서 실측했다:
 // 404, 채널 seq 불변, 감사행 없음. 이 함수는 그래서 항상 throw한다.
 // 판정은 `features/routing/capability.ts`의 `verdictFromSendProbe`가 한다.
+//
+// ---- 엔진 랜딩 시 재확인 (MOMO-625가 main에 들어오는 순간) -------------------
+// 이 프로브의 무해함 가운데 **앞 세대(404)만** 이 브랜치에서 실측됐다. 뒤 세대의
+// 근거는 아직 track/engine에 있으므로(R2 M6), MOMO-625 랜딩 직후 살아 있는 서버
+// 한 대에 대고 아래 셋을 다시 재고 그 결과를 ENGINE_HANDOFF에 적는다.
+//   ① 400이 트랜잭션 이전에 나는가: 프로브 전후로 채널 newest seq가 불변이고
+//      message·agent_run·audit_log에 행이 생기지 않는다.
+//   ② 400 문구가 `routing`을 이름으로 부르는가: `verdictFromSendProbe`의 ready
+//      분기는 `/routing/i` 매칭이다. 서버가 그 리터럴 없이 거절하면 판정은
+//      unknown으로 떨어진다(잠기지만 영구는 아니다: [다시 확인]이 있다).
+//   ③ 검사 순서가 rootId 조회보다 앞인가: 뒤라면 랜딩한 서버도 404를 주고,
+//      화면은 되는 기능을 없다고 말하게 된다.
+// 셋 중 하나라도 어긋나면 프로브의 형태를 고치는 것이 맞고, 화면 문구가 아니다.
 
 /** 어떤 모델에서도 유효할 수 없는 토큰. 32바이트 상한(마이그레이션 041) 안. */
 const SEND_ROUTING_PROBE_EFFORT = "__momo-capability-probe__";

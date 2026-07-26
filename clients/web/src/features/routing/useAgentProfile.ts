@@ -37,10 +37,16 @@ import type { RoutingDraft } from "./routingModel";
 // 여기서 가장 나쁜 실패다.
 // =============================================================================
 
+/**
+ * 화면에 뜰 실패 문구 하나. 원인 분류는 여기에 두지 않는다(R2 M7).
+ *
+ * "강도 필드를 모른다"는 사실은 `AgentProfileSaveResult.effortUnsupported`가
+ * 저장 호출의 답으로 이미 전달하고, 그 값으로 폼을 되돌리는 것이 호출자의 일이다.
+ * 같은 사실을 실패 객체에도 복사해 두면 정본이 둘이 되고, 둘 중 아무도 읽지 않는
+ * 쪽이 남는다.
+ */
 export interface AgentProfileSaveFailure {
   message: string;
-  /** 서버가 추론 강도 필드 자체를 모른다고 답했다. capability가 내려간 상태다. */
-  unsupportedEffort: boolean;
 }
 
 export interface AgentProfileSaveResult {
@@ -92,9 +98,13 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
       const input: AgentProfileInput = {
         instructions: profile?.instructions ?? "",
         enabledTools: profile?.enabledTools ?? [],
-        // triggers.mention is fixed true by contract; sending the profile's own
-        // value back keeps the replace faithful instead of re-deciding it here.
-        triggers: { mention: true },
+        // 프로필이 들고 있던 triggers를 **그대로** 돌려보낸다(R2 H2). `{ mention:
+        // true }`를 새로 지어내면 replace 규칙을 instructions·enabledTools에만
+        // 지키고 triggers에서 어기는 것이 되고, 서버 upsert가 `triggers =
+        // EXCLUDED.triggers`라 저장돼 있던 schedule이 그 자리에서 사라진다
+        // (openapi `AgentProfileTriggers.schedule`은 v0가 실행하지 않을 뿐
+        // 정식 필드다). 프로필이 아직 없을 때만 서버 기본값과 같은 모양을 만든다.
+        triggers: profile?.triggers ?? { mention: true },
       };
       if (draft.model !== null) input.modelPref = draft.model;
       if (draft.effort !== null) input.effortPref = draft.effort;
@@ -113,7 +123,6 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
           setFailure({
             message:
               "이 서버는 아직 추론 강도 저장을 지원하지 않습니다. 고른 강도는 되돌렸고, 모델만 바꿔서 다시 저장할 수 있습니다.",
-            unsupportedEffort: true,
           });
           return { ok: false, effortUnsupported: true };
         }
@@ -122,7 +131,6 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
             error instanceof ApiError || error instanceof Error
               ? error.message
               : "변경을 저장하지 못했습니다.",
-          unsupportedEffort: false,
         });
         return { ok: false, effortUnsupported: false };
       } finally {

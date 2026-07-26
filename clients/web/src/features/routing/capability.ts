@@ -31,6 +31,14 @@
 // closed): 적용되지 않을지도 모르는 선택을 받아 두는 것이 이 표면에서 가장 나쁜
 // 실패다.
 //
+// **그 구분은 기억에도 그대로 적용된다**(R2 H1). `unknown`은 서버에 대한 사실이
+// 아니라 우리가 방금 못 물어봤다는 상태이므로, 확정 판정과 같은 칸에 넣어 두면
+// 500 한 번이 그 세션 내내 컨트롤을 잠근다. 그래서 이 파일은 확정(ready/absent)만
+// 기억하고, `unknown`은 **이번 물음의 결과**로만 들고 있다가 다음 물음에 자리를
+// 내준다. 잠긴 줄에는 [다시 확인]이 함께 서 있고(MentionRoutingBar), 줄을 다시
+// 펼치기만 해도 프로브가 새로 날아간다. 회복 경로가 새로고침뿐인 화면은 "확인될
+// 때까지"라고 적어 놓고 그 확인을 일으킬 방법을 주지 않는 화면이다.
+//
 // 배운 판정은 react-query 캐시가 아니라 모듈 스토어에 둔다. 프로브 결과는 서버가
 // 준 데이터지만 이 판정은 "우리가 방금 거절당했다"는 클라이언트 사실이고, 쿼리
 // 무효화로 지워지면 안 되기 때문이다. 대신 **서버 주소+워크스페이스로 범위를 건다**:
@@ -71,6 +79,21 @@ const FORBIDDEN_REASON =
 const SEND_UNKNOWN_REASON =
   "메시지 한 건 오버라이드를 이 서버가 받는지 확인하지 못했습니다.";
 
+/**
+ * 서버가 답은 했지만 그 답이 기능 유무에 대한 진술이 아닐 때, 사람에게 할 말.
+ *
+ * **서버가 준 영어 원문은 붙이지 않는다**(R2 M1). `error.message`를 한국어 문장
+ * 사이에 끼우면 화면에 "…확인하지 못했습니다. internal error 확인될 때까지…"가
+ * 그대로 렌더된다: 문장이 아니라 로그 조각이고, 이 파일이 `noteRoutingUnsupported`
+ * 에서 스스로 세운 규칙("원문이 필요한 사람은 네트워크 탭을 본다")과도 어긋난다.
+ * 대신 상태 코드를 사람이 판단할 수 있는 세 갈래로 접어서 말한다.
+ */
+function unsettledAnswerClause(status: number): string {
+  if (status === 429) return "요청이 잦아 서버가 이번 물음을 받지 않았습니다.";
+  if (status >= 500) return "서버가 오류로 답했습니다.";
+  return "서버가 이 물음을 받지 않았습니다.";
+}
+
 /** 200 본문을 판정으로. 모르는 모양은 absent가 아니라 unknown이다. */
 export function verdictFromBody(raw: unknown): {
   verdict: CapabilityVerdict;
@@ -101,7 +124,10 @@ export function verdictFromError(error: unknown): CapabilityVerdict {
     if (error.status === 401 || error.status === 403) {
       return { support: "unknown", reason: FORBIDDEN_REASON };
     }
-    return { support: "unknown", reason: `지원 여부를 확인하지 못했습니다. ${error.message}` };
+    return {
+      support: "unknown",
+      reason: `지원 여부를 확인하지 못했습니다. ${unsettledAnswerClause(error.status)}`,
+    };
   }
   if (error instanceof NetworkError) {
     return { support: "unknown", reason: error.message };
@@ -160,7 +186,10 @@ export function verdictFromSendProbe(error: unknown): CapabilityVerdict {
         reason: `${SEND_UNKNOWN_REASON} 이 채널에 글을 쓸 권한이 있는지 확인하세요.`,
       };
     }
-    return { support: "unknown", reason: `${SEND_UNKNOWN_REASON} ${error.message}` };
+    return {
+      support: "unknown",
+      reason: `${SEND_UNKNOWN_REASON} ${unsettledAnswerClause(error.status)}`,
+    };
   }
   if (error instanceof NetworkError) {
     return { support: "unknown", reason: error.message };
@@ -184,8 +213,16 @@ interface ServerFacts {
   scope: string;
   /** 프로필 effort 쓰기가 모양 거절을 당했다. */
   effortWriterAbsent: boolean;
-  /** 전송 표면 프로브의 확정 판정. 아직 물어보지 않았으면 null. */
+  /**
+   * 전송 표면에 대한 **확정** 판정(ready/absent)만. 아직 확정되지 않았으면 null.
+   * unknown이 여기 들어오지 않는 것이 R2 H1의 수정 전부다.
+   */
   send: CapabilityVerdict | null;
+  /**
+   * 마지막 물음이 확정하지 못한 이유. 화면은 이것을 사유로 읽고, 다음 물음은
+   * 이것 때문에 막히지 않는다.
+   */
+  sendUnknown: CapabilityVerdict | null;
   /** 프로브가 지금 날아가 있는가. 중복 발사를 막는다. */
   sendProbing: boolean;
 }
@@ -203,7 +240,13 @@ function emit(): void {
  */
 function factsFor(scope: string): ServerFacts {
   if (facts !== null && facts.scope === scope) return facts;
-  return { scope, effortWriterAbsent: false, send: null, sendProbing: false };
+  return {
+    scope,
+    effortWriterAbsent: false,
+    send: null,
+    sendUnknown: null,
+    sendProbing: false,
+  };
 }
 
 /**
@@ -232,7 +275,53 @@ export function noteRoutingUnsupported(scope: string): void {
     ...state,
     effortWriterAbsent: true,
     send: { support: "absent", reason: SEND_UNSUPPORTED_REASON },
+    // 확정이 도착했으므로 앞선 물음의 "확인하지 못했다"는 더 이상 이 서버의
+    // 상태가 아니다.
+    sendUnknown: null,
   });
+}
+
+/**
+ * 전송 표면에 물어봐도 되는가. 물어봐도 되면 "지금 날아갔다"고 표시하고 true.
+ *
+ * 막는 조건은 둘뿐이다: 이미 **확정된** 답이 있거나, 프로브가 지금 날아가 있거나.
+ * 앞 물음이 unknown으로 끝난 것은 막는 조건이 아니다(R2 H1). 500 한 번이나
+ * 네트워크 블립 한 번이 그 서버에 대한 사실이 되어 버리면, 화면은 "확인될 때까지
+ * 쓸 수 없습니다"라고 적어 놓고 그 확인을 일으킬 방법을 주지 않는 상태가 된다.
+ */
+export function beginSendProbe(scope: string): boolean {
+  const state = factsFor(scope);
+  if (state.send !== null || state.sendProbing) return false;
+  setFacts({ ...state, sendProbing: true, sendUnknown: null });
+  return true;
+}
+
+/**
+ * 프로브의 답을 적는다. 확정(ready/absent)만 서버에 대한 사실로 기억하고,
+ * unknown은 이번 물음의 결과로만 남겨 다음 물음이 자리를 덮어쓰게 한다.
+ */
+export function settleSendProbe(scope: string, verdict: CapabilityVerdict): void {
+  const settled = verdict.support !== "unknown";
+  setFacts({
+    ...factsFor(scope),
+    sendProbing: false,
+    send: settled ? verdict : null,
+    sendUnknown: settled ? null : verdict,
+  });
+}
+
+/** 테스트와 훅이 같은 창으로 스토어를 본다. 범위 밖이면 아무것도 배우지 않은 것. */
+export function sendProbeState(scope: string): {
+  settled: CapabilityVerdict | null;
+  unsettled: CapabilityVerdict | null;
+  probing: boolean;
+} {
+  const state = facts !== null && facts.scope === scope ? facts : null;
+  return {
+    settled: state?.send ?? null,
+    unsettled: state?.sendUnknown ?? null,
+    probing: state?.sendProbing ?? false,
+  };
 }
 
 /** 지금까지 배운 사유. 훅 밖에서도 읽을 수 있어야 판정이 한 벌로 남는다. */
@@ -316,7 +405,10 @@ export type SendRoutingSupport = "idle" | "checking" | "ready" | "absent" | "unk
 export interface SendRoutingCapability {
   support: SendRoutingSupport;
   reason: string | null;
-  /** 아직 안 물어봤으면 물어본다. 세션당 한 번, 서버당 한 번. */
+  /**
+   * 물어본다. 확정된 답이 있거나 프로브가 날아가 있으면 아무 일도 하지 않으므로,
+   * 줄을 펼치는 손과 [다시 확인] 버튼이 같은 동사를 부를 수 있다.
+   */
   prove: () => void;
 }
 
@@ -324,21 +416,23 @@ export interface SendRoutingCapability {
  * 전송 표면이 `routing`을 받는가.
  *
  * 프로브는 사람이 [이번만 바꾸기]를 누를 때만 날아간다. 아무도 오버라이드를 쓰지
- * 않는 세션에서는 요청이 0건이고, 쓰는 순간 딱 한 번이다. 결과는 서버 범위로
- * 기억하므로 채널을 옮겨도 다시 묻지 않는다.
+ * 않는 세션에서는 요청이 0건이고, 확정될 때까지만 물어본다. 확정된 뒤에는 채널을
+ * 옮겨도 다시 묻지 않고, 확정되지 못한 채 끝난 물음은 다음 펼침이나 [다시 확인]이
+ * 다시 던진다(R2 H1).
  */
 export function useSendRoutingCapability(
   channelId: string | null
 ): SendRoutingCapability {
   const { workspaceId } = useSession();
   const scope = routingScope(workspaceId);
-  const state = useSyncExternalStore(subscribe, snapshot, snapshot);
+  // 구독은 스토어가 바뀔 때 이 화면을 다시 그리기 위한 것이고, 값은 아래에서
+  // `sendProbeState`로 읽는다. 훅과 테스트가 같은 창으로 스토어를 보게 하려는
+  // 것이라, 판정을 읽는 방법이 두 벌로 갈라지지 않는다.
+  useSyncExternalStore(subscribe, snapshot, snapshot);
 
   const prove = useCallback(() => {
     if (channelId === null) return;
-    const current = factsFor(scope);
-    if (current.send !== null || current.sendProbing) return;
-    setFacts({ ...current, sendProbing: true });
+    if (!beginSendProbe(scope)) return;
     void (async () => {
       let verdict: CapabilityVerdict;
       try {
@@ -347,16 +441,22 @@ export function useSendRoutingCapability(
       } catch (error) {
         verdict = verdictFromSendProbe(error);
       }
-      setFacts({ ...factsFor(scope), sendProbing: false, send: verdict });
+      settleSendProbe(scope, verdict);
     })();
   }, [scope, workspaceId, channelId]);
 
-  const mine = state !== null && state.scope === scope ? state : null;
-  if (mine?.send) {
-    return { support: mine.send.support, reason: mine.send.reason, prove };
-  }
-  if (mine?.sendProbing) {
+  const probe = sendProbeState(scope);
+  // 순서가 곧 정직함이다: 지금 물어보는 중이면 앞 물음의 사유를 계속 말하지 않고,
+  // 확정된 답이 있으면 그것이 마지막 말이며, 그 둘이 아니면 확인하지 못한 이유가
+  // 남고, 아무것도 없으면 아직 아무도 묻지 않은 것이다.
+  if (probe.probing) {
     return { support: "checking", reason: null, prove };
+  }
+  if (probe.settled) {
+    return { support: probe.settled.support, reason: probe.settled.reason, prove };
+  }
+  if (probe.unsettled) {
+    return { support: "unknown", reason: probe.unsettled.reason, prove };
   }
   return { support: "idle", reason: null, prove };
 }

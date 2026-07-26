@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { RosterMember } from "@/lib/api";
+import { attachParticle } from "@/lib/koreanParticle";
 import { cn } from "@/design/lib/cn";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
@@ -54,10 +55,16 @@ import {
 // effort-table 200은 그 답이 되지 못한다. 그것은 MOMO-621이고, 전송 표면
 // `routing`은 MOMO-625다. 실제로 621만 올라간 서버가 존재한다(track/engine 현재
 // 형상). 그래서 이 줄은 [이번만 바꾸기]를 누르는 순간 전송 표면에 **직접** 물어본
-// 뒤에야 상자를 연다(capability.ts `probeSendRouting`, 서버당 한 번). 확정되기
+// 뒤에야 상자를 연다(capability.ts `probeSendRouting`, 확정될 때까지). 확정되기
 // 전까지는 상자가 잠긴 채 "확인 중"이라고 적혀 있고, 아니라고 들으면 잠긴 채로
 // 이유가 남는다. 그 상태에서도 상속 줄은 계속 참이다: 서버는 프로필 값을 그대로
 // 쓰므로, 이 줄이 말하는 내용은 오히려 그때 더 정확하다.
+//
+// **확인하지 못한 것은 아니라고 들은 것과 다르게 다룬다**(R2 H1). 500이나 네트워크
+// 블립으로 프로브가 확정에 실패하면 그 결과는 이 서버에 대한 사실이 아니므로
+// 기억하지 않는다: 줄에 [다시 확인]이 서고, 접었다 다시 펼치기만 해도 물음이 새로
+// 날아간다. 회복 경로가 새로고침뿐인 화면은 "확인될 때까지 쓸 수 없습니다"라고
+// 적어 놓고 그 확인을 일으킬 방법을 주지 않는 화면이다.
 // =============================================================================
 
 /** 이 줄이 접혀 있을 때의 고정 높이. 멘션이 붙었다 떨어질 때 컴포저가 튀지 않는다. */
@@ -154,13 +161,17 @@ export function MentionRoutingBar({
   if (target.kind === "many") {
     const named = target.agents.slice(0, NAMED_LIMIT).map((a) => `@${a.handle}`);
     const rest = target.agents.length - named.length;
+    // 조사는 목록이 무엇으로 끝나는지에 달려 있다(R2 M4). 두 명이면 문장은 라틴
+    // 핸들로 끝나 "를"이고, 셋 이상이면 "명"으로 끝나 "을"이다. 하드코딩한 "을"은
+    // 앞의 경우에 어긋나고, 같은 파일이 쓰는 clearedEffortNotice는 이미 이 규칙을
+    // 계산해서 쓴다.
+    const called = rest > 0 ? `${named.join(", ")} 외 ${rest}명` : named.join(", ");
     return (
       <p
         className="border-t border-line px-4 py-1 text-meta text-ink-muted"
         data-testid="composer-routing-many"
       >
-        {named.join(", ")}
-        {rest > 0 ? ` 외 ${rest}명` : ""}을 불렀습니다. 요청이 각각 만들어져서
+        {attachParticle(called, "object")} 불렀습니다. 요청이 각각 만들어져서
         이번 한 번만 바꾸기는 붙일 수 없고, 각 에이전트의 프로필 값이 그대로
         적용됩니다.
       </p>
@@ -192,9 +203,9 @@ export function MentionRoutingBar({
                 ? "이 에이전트에 지금 무엇이 걸려 있는지 확인하는 중입니다."
                 : null;
 
-  // 결론이 난 사유만 접힌 상태에서 보여 준다. 아직 물어보지도 않은 것을 두고
+  // 이미 답이 있는 사유만 접힌 상태에서 보여 준다. 아직 물어보지도 않은 것을 두고
   // "확인 중"이라고 적어 두면 아무도 누르지 않은 줄이 계속 바쁜 척을 한다.
-  const settledReason =
+  const standingReason =
     profileFailed ||
     capability.support === "absent" ||
     capability.support === "unknown" ||
@@ -202,6 +213,17 @@ export function MentionRoutingBar({
     sendTier.support === "unknown"
       ? reason
       : null;
+
+  // 확인하지 못해서 잠긴 줄에는 확인을 일으킬 손잡이가 있어야 한다(R2 H1).
+  // "확인될 때까지 쓸 수 없습니다"라고 적어 놓고 그 확인이 새로고침뿐이면, 그
+  // 문장은 다음 행동을 말한 것이 아니다(SKILL §5·§6). 프로필 다이얼로그가 effort
+  // 축에 [추론 강도 지원 다시 확인]을 둔 것과 같은 자리다.
+  const unsettled =
+    capability.support === "unknown" || sendTier.support === "unknown";
+  const recheckUnsettled = () => {
+    if (capability.support === "unknown") capability.recheck();
+    if (sendTier.support === "unknown") sendTier.prove();
+  };
 
   const ready =
     effortReady && sendTier.support === "ready" && !profileFailed && inheritance !== null;
@@ -239,6 +261,11 @@ export function MentionRoutingBar({
             다시 시도
           </RowAction>
         )}
+        {!profileFailed && unsettled && (
+          <RowAction onClick={recheckUnsettled} testId="composer-routing-recheck">
+            다시 확인
+          </RowAction>
+        )}
         {override && (
           <RowAction
             onClick={() => {
@@ -256,7 +283,8 @@ export function MentionRoutingBar({
             const next = !expanded;
             setExpanded(next);
             // 펼치는 순간에만 전송 표면에 물어본다. 오버라이드를 한 번도 쓰지
-            // 않는 세션은 이 요청을 한 건도 만들지 않는다.
+            // 않는 세션은 이 요청을 한 건도 만들지 않고, 확정된 뒤의 펼침은
+            // `prove`가 스스로 물러선다(capability.ts `beginSendProbe`).
             if (next && effortReady) sendTier.prove();
           }}
           testId="composer-routing-toggle"
@@ -322,12 +350,12 @@ export function MentionRoutingBar({
 
       {/* 접혀 있어도 서버가 못 하는 일이라면 그 사실은 보여야 한다. 펼쳐야만
           보이는 고지는 고지가 아니다. */}
-      {!expanded && settledReason && (
+      {!expanded && standingReason && (
         <p
           className="px-4 pb-1 text-meta text-ink-muted"
           data-testid="composer-routing-notice"
         >
-          {settledReason}
+          {standingReason}
         </p>
       )}
     </div>

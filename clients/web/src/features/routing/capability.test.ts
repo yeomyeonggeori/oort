@@ -5,10 +5,13 @@ import fixtures from "./routingFixtures.json";
 import {
   SEND_UNSUPPORTED_REASON,
   UNSUPPORTED_REASON,
+  beginSendProbe,
   isUnknownFieldRejection,
   learnedRoutingReason,
   noteRoutingUnsupported,
   resetLearnedRoutingSupport,
+  sendProbeState,
+  settleSendProbe,
   verdictFromBody,
   verdictFromError,
   verdictFromSendProbe,
@@ -74,6 +77,18 @@ describe("verdictFromError", () => {
   it("500은 기능이 없다는 뜻이 아니다", () => {
     expect(verdictFromError(new ApiError(500, "boom")).support).toBe("unknown");
   });
+
+  it("서버가 준 영어 원문을 한국어 문장에 끼우지 않는다", () => {
+    // R2 M1: `${사유} ${error.message}`는 화면에 "…확인하지 못했습니다. internal
+    // error 확인될 때까지…"를 그대로 렌더한다. 상태 코드는 사람이 판단할 수 있는
+    // 한국어 갈래로 접어서 말한다.
+    const verdict = verdictFromError(new ApiError(500, "internal error"));
+    expect(verdict.reason).not.toContain("internal error");
+    expect(verdict.reason).toBe("지원 여부를 확인하지 못했습니다. 서버가 오류로 답했습니다.");
+    expect(verdictFromError(new ApiError(429, "slow down")).reason).toContain(
+      "요청이 잦아"
+    );
+  });
 });
 
 describe("verdictFromSendProbe", () => {
@@ -110,6 +125,63 @@ describe("verdictFromSendProbe", () => {
 
   it("프로브가 성공하면 우리가 서버를 잘못 읽은 것이므로 ready라고 하지 않는다", () => {
     expect(verdictFromSendProbe(null).support).toBe("unknown");
+  });
+
+  it("확정하지 못한 답에 서버 원문을 싣지 않는다", () => {
+    const verdict = verdictFromSendProbe(new ApiError(500, "internal error"));
+    expect(verdict.reason).not.toContain("internal error");
+    expect(verdict.reason).toContain("서버가 오류로 답했습니다");
+  });
+});
+
+describe("전송 표면 프로브의 기억 (R2 H1)", () => {
+  // 여기서 지키는 문장: **unknown은 서버에 대한 사실이 아니다.** 확정(ready/absent)
+  // 만 기억하고, 확인하지 못한 물음은 다음 물음에 자리를 내준다. 이 구분이 없으면
+  // 500 한 번이 그 세션 내내 컨트롤을 잠그고, 화면은 "확인될 때까지"라고 적어 놓은
+  // 채 그 확인을 일으킬 방법을 주지 않는다.
+  const unknownVerdict = verdictFromSendProbe(new ApiError(500, "internal error"));
+
+  it("확인하지 못한 답은 다음 물음을 막지 않는다", () => {
+    expect(beginSendProbe(SCOPE)).toBe(true);
+    settleSendProbe(SCOPE, unknownVerdict);
+    expect(sendProbeState(SCOPE).settled).toBeNull();
+    expect(sendProbeState(SCOPE).unsettled?.support).toBe("unknown");
+
+    // 두 번째 물음이 실제로 나간다. 이것이 [다시 확인]과 재펼침이 기대는 성질이다.
+    expect(beginSendProbe(SCOPE)).toBe(true);
+    // 물어보는 동안에는 앞 물음의 사유를 더 이상 사실처럼 들고 있지 않는다.
+    expect(sendProbeState(SCOPE).unsettled).toBeNull();
+    expect(sendProbeState(SCOPE).probing).toBe(true);
+
+    settleSendProbe(SCOPE, { support: "ready", reason: null });
+    expect(sendProbeState(SCOPE).settled?.support).toBe("ready");
+  });
+
+  it("확정된 답은 한 번만 묻는다", () => {
+    expect(beginSendProbe(SCOPE)).toBe(true);
+    settleSendProbe(SCOPE, { support: "absent", reason: SEND_UNSUPPORTED_REASON });
+    expect(beginSendProbe(SCOPE)).toBe(false);
+    expect(sendProbeState(SCOPE).settled?.reason).toBe(SEND_UNSUPPORTED_REASON);
+  });
+
+  it("날아가 있는 동안에는 두 번 쏘지 않는다", () => {
+    expect(beginSendProbe(SCOPE)).toBe(true);
+    expect(beginSendProbe(SCOPE)).toBe(false);
+  });
+
+  it("프로필 쓰기의 모양 거절은 확정이므로 앞선 unknown을 지운다", () => {
+    beginSendProbe(SCOPE);
+    settleSendProbe(SCOPE, unknownVerdict);
+    noteRoutingUnsupported(SCOPE);
+    expect(sendProbeState(SCOPE).unsettled).toBeNull();
+    expect(sendProbeState(SCOPE).settled?.support).toBe("absent");
+  });
+
+  it("다른 서버에는 물려주지 않는다", () => {
+    beginSendProbe(SCOPE);
+    settleSendProbe(SCOPE, { support: "ready", reason: null });
+    expect(sendProbeState(OTHER_SCOPE).settled).toBeNull();
+    expect(beginSendProbe(OTHER_SCOPE)).toBe(true);
   });
 });
 

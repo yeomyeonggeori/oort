@@ -16,6 +16,13 @@ import { cn } from "@/design/lib/cn";
 //
 // Styling stays on the box only. The popup is OS-drawn and takes no classes;
 // that is the trade, and it is the right one here.
+//
+// The box itself is `input.tsx` to the pixel: same height, same 1px
+// `--line-strong` border, same `px-3`, same transparent fill. They are siblings
+// in the same forms, and a select that paints itself `bg-surface` reads as one
+// step darker inside a `bg-surface-raised` dialog while the input beside it does
+// not, with its label-to-text start line 4px off (R2 M2). Whatever the panel is
+// painted, both controls now sit on it the same way.
 export const Select = React.forwardRef<
   HTMLSelectElement,
   React.SelectHTMLAttributes<HTMLSelectElement>
@@ -23,7 +30,7 @@ export const Select = React.forwardRef<
   <select
     ref={ref}
     className={cn(
-      "h-control w-full min-w-0 rounded-sm border border-line-strong bg-surface px-2 text-body text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
+      "h-control w-full min-w-0 rounded-sm border border-line-strong bg-transparent px-3 text-body text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
       className
     )}
     {...props}

@@ -152,20 +152,28 @@ function Frame({
   );
 }
 
-/** 같은 높이의 중립 바. 값이 도착해도 폼이 위아래로 튀지 않는다. */
+/**
+ * 같은 높이의 중립 바. 값이 도착해도 폼이 위아래로 튀지 않는다.
+ *
+ * 바는 장식이라 접근성 트리에서 빼지만, **로딩 자체는 말한다**(R2 M5). 바만 두면
+ * 화면을 보지 않는 사람에게 이 다이얼로그는 제목과 설명 뒤로 아무 일도 일어나지
+ * 않는 상자이고(저장 버튼은 disabled), 상태 4종 중 loading이 그 경로에서만 비어
+ * 있게 된다. 문장은 도착과 함께 사라지므로 라이브 리전으로 읽힌다.
+ */
 function ProfileSkeleton() {
   return (
-    <div
-      className="flex flex-col gap-3 p-4"
-      aria-hidden="true"
-      data-testid="agent-profile-skeleton"
-    >
-      {[0, 1].map((row) => (
-        <div key={row} className="flex flex-col gap-1">
-          <span className="block h-4 w-16 rounded-sm bg-surface-hover" />
-          <span className="block h-control w-full rounded-sm bg-surface-hover" />
-        </div>
-      ))}
+    <div className="flex flex-col p-4" data-testid="agent-profile-skeleton">
+      <p className="sr-only" role="status" data-testid="agent-profile-loading">
+        에이전트 라우팅 설정을 불러오는 중입니다.
+      </p>
+      <div className="flex flex-col gap-3" aria-hidden="true">
+        {[0, 1].map((row) => (
+          <div key={row} className="flex flex-col gap-1">
+            <span className="block h-4 w-16 rounded-sm bg-surface-hover" />
+            <span className="block h-control w-full rounded-sm bg-surface-hover" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -35,14 +35,17 @@
   },
 
   "inherit": {
-    "_case": "상속: 프로필이 아무것도 지정하지 않았다. 모델은 에이전트 자신의 agent.model, effort는 지정 없음(서버가 effort를 아예 보내지 않는다).",
+    "_case": "상속: 프로필이 아무것도 지정하지 않았다. 모델은 에이전트 자신의 agent.model, effort는 지정 없음(서버가 effort를 아예 보내지 않는다). triggers.schedule은 openapi가 정의만 해 둔 옵셔널 필드(v0 미실행)이고, 여기 실려 있는 이유는 라우팅 저장이 그것을 지우지 않는다는 것을 캡처가 실측하기 위해서다 (PUT은 replace이고 서버 upsert는 triggers = EXCLUDED.triggers).",
     "agentModel": "hermes-agent",
     "profile": {
       "agentMemberId": "019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90",
       "workspaceId": "00000000-0000-7000-8000-000000000001",
       "instructions": "빌드 로그를 읽고 실패 원인만 요약합니다.",
       "enabledTools": ["shell"],
-      "triggers": { "mention": true },
+      "triggers": {
+        "mention": true,
+        "schedule": { "cron": "0 9 * * 1", "tz": "Asia/Seoul" }
+      },
       "paused": false,
       "version": 3,
       "updatedBy": "019F94E3-7A10-79CD-9DEE-208F47EDD9A8",

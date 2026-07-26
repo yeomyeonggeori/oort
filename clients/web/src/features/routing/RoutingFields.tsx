@@ -83,6 +83,7 @@ export function RoutingFields({
   const ignoredId = `${idPrefix}-ignored-notice`;
   const modelReasonId = `${idPrefix}-model-reason`;
   const effortReasonId = `${idPrefix}-effort-reason`;
+  const modelSourceId = `${idPrefix}-model-source`;
 
   const model = effectiveModel(draft, inheritedModel);
   const efforts = table ? effortsForModel(table, model).efforts : [];
@@ -127,6 +128,21 @@ export function RoutingFields({
   const row = layout === "row";
   const fieldClass = row ? "flex min-w-0 flex-1 flex-col gap-1" : "flex min-w-0 flex-col gap-1";
 
+  // 고를 수 있는 값이 지금 걸려 있는 값 하나뿐이면, 그 상자는 컨트롤이 아니라
+  // 표시다(tokens.md §4 "이미 일어난 일만 하는 컨트롤은 컨트롤이 아니다"). 왜
+  // 하나뿐인지 말하지 않으면 사람은 자기 워크스페이스에 모델이 하나라고 읽지만,
+  // 사실은 **이 서버에 고를 수 있는 모델 목록을 주는 경로가 없다**는 것이다:
+  // 허용목록(`workspace.settings.allowed_agent_models`)에는 REST가 없고, effort
+  // 표도 아직 없는 서버에서는 로스터에 실제로 도는 이름만 남는다(R2 M3).
+  //
+  // 되살려 놓은 orphan도 고를 수 있는 값이므로 함께 센다: 저장된 모델과 상속
+  // 모델이 서로 다르면 그 상자는 둘 사이를 오갈 수 있고, 그때는 할 말이 없다.
+  const pickableModels = orphanModel === null ? models : [...models, orphanModel];
+  const modelSourceNotice =
+    !modelLocked && pickableModels.every((option) => option === inheritedModel)
+      ? "이 서버는 고를 수 있는 모델 목록을 알려주지 않습니다. 여기에는 지금 이 워크스페이스에서 쓰이는 모델만 올라옵니다."
+      : null;
+
   const modelReason = modelLocked ? modelDisabledReason : null;
   const effortReason = effortLocked ? effortDisabledReason : null;
   // 두 축이 같은 이유로 잠겼으면 문장도 하나다. 같은 말을 두 번 적으면 사람은
@@ -156,7 +172,10 @@ export function RoutingFields({
             value={draft.model ?? ""}
             disabled={modelLocked}
             onChange={(event) => changeModel(event.target.value)}
-            aria-describedby={describe(modelReason ? modelReasonId : null)}
+            aria-describedby={describe(
+              modelSourceNotice ? modelSourceId : null,
+              modelReason ? modelReasonId : null
+            )}
             data-testid={modelId}
             data-override={draft.model !== null ? "" : undefined}
           >
@@ -226,6 +245,15 @@ export function RoutingFields({
           data-testid={`${idPrefix}-ignored`}
         >
           {ignoredNotice}
+        </p>
+      )}
+      {modelSourceNotice && (
+        <p
+          id={modelSourceId}
+          className="mt-2 text-meta text-ink-muted"
+          data-testid={`${idPrefix}-model-source`}
+        >
+          {modelSourceNotice}
         </p>
       )}
       {modelReason && (
