@@ -1117,6 +1117,10 @@ struct AgentGatewayRoutes: Sendable {
         let channelID: UUID
         let status: String
         let model: String
+        /// ADR-0134 D2 ledger fallbacks, read on the row that is already locked:
+        /// what the run requested, and the agent-tier preference behind it.
+        let requestedEffort: String?
+        let profileEffortPref: String?
     }
 
     struct GatewayLeaseSnapshot: Equatable, Sendable {
@@ -1187,7 +1191,8 @@ struct AgentGatewayRoutes: Sendable {
     ) async throws -> GatewayRunSnapshot? {
         let rows = try await conn.query(
             """
-            SELECT r.agent_member_id, r.channel_id, r.status::text, a.model
+            SELECT r.agent_member_id, r.channel_id, r.status::text, a.model,
+                   r.input->'routing'->>'effort', ap.effort_pref
               FROM agent_run r
               JOIN member m
                 ON m.id = r.agent_member_id
@@ -1197,6 +1202,9 @@ struct AgentGatewayRoutes: Sendable {
               JOIN agent a
                 ON a.member_id = m.id
                AND a.workspace_id = \(workspaceID)
+              LEFT JOIN agent_profile ap
+                ON ap.workspace_id = a.workspace_id
+               AND ap.agent_member_id = a.member_id
              WHERE r.id = \(runID)
                AND r.workspace_id = \(workspaceID)
                AND EXISTS (
@@ -1212,12 +1220,15 @@ struct AgentGatewayRoutes: Sendable {
             logger: logger
         ).collect()
         guard let row = rows.first else { return nil }
-        let (agentID, channelID, status, model) = try row.decode((UUID, UUID, String, String).self)
+        let (agentID, channelID, status, model, requestedEffort, profileEffortPref) =
+            try row.decode((UUID, UUID, String, String, String?, String?).self)
         return GatewayRunSnapshot(
             agentMemberID: agentID,
             channelID: channelID,
             status: status,
-            model: model
+            model: model,
+            requestedEffort: requestedEffort,
+            profileEffortPref: profileEffortPref
         )
     }
 
@@ -1328,16 +1339,24 @@ struct AgentGatewayRoutes: Sendable {
         let reasoningTokens = usage?.reasoningTokens ?? 0
         let costMicroUSD = usage?.costMicroUsd ?? 0
         let wasEstimated = usage == nil || (usage?.wasEstimated ?? true)
+        let model = usage?.model ?? run.model
+        let effort = ledgerEffort(
+            reported: usage?.effort,
+            requested: run.requestedEffort,
+            profilePreference: run.profileEffortPref,
+            model: model
+        )
 
         _ = try await conn.query(
             """
             INSERT INTO usage_ledger
               (workspace_id, run_id, agent_member_id, channel_id, model,
                prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens,
-               cost_micro_usd, was_estimated)
+               cost_micro_usd, was_estimated, effort)
             SELECT \(workspaceID), \(runID), \(run.agentMemberID), \(run.channelID),
-                   \(usage?.model ?? run.model), \(promptTokens), \(completionTokens),
-                   \(cachedTokens), \(reasoningTokens), \(costMicroUSD), \(wasEstimated)
+                   \(model), \(promptTokens), \(completionTokens),
+                   \(cachedTokens), \(reasoningTokens), \(costMicroUSD), \(wasEstimated),
+                   \(effort)
             WHERE NOT EXISTS (
               SELECT 1 FROM usage_ledger
                WHERE workspace_id = \(workspaceID)
@@ -1346,6 +1365,33 @@ struct AgentGatewayRoutes: Sendable {
             """,
             logger: logger
         )
+    }
+
+    /// ADR-0134 D2 ledger effort precedence.
+    ///
+    /// The adapter-reported value wins: the provider is the authority on what it
+    /// actually ran, so it is accepted whenever it is a known level, even if this
+    /// server's table does not list it for that model. The request/profile tiers
+    /// are inferences, so they are accepted only when the resolved model actually
+    /// supports them — which is also how a model change silently clears a stale
+    /// preference (D3) instead of writing a wrong analysis axis.
+    /// Nothing usable → NULL (the column is nullable by design).
+    static func ledgerEffort(
+        reported: String?,
+        requested: String?,
+        profilePreference: String?,
+        model: String
+    ) -> String? {
+        if let reported = ProviderEffortTable.knownLevel(reported) {
+            return reported
+        }
+        for candidate in [requested, profilePreference] {
+            guard let normalized = ProviderEffortTable.knownLevel(candidate) else { continue }
+            if ProviderEffortTable.supports(model: model, effort: normalized) {
+                return normalized
+            }
+        }
+        return nil
     }
 
     private static func workspaceID(_ context: AppRequestContext) throws -> UUID {
@@ -2240,6 +2286,10 @@ struct AgentMemoryDeliveryReceipt: Decodable, Equatable, Sendable {
 
 struct AgentGatewayUsage: Decodable {
     let model: String?
+    /// ADR-0134 D2: the effort the adapter actually ran with. Optional and
+    /// additive — an adapter that never learned about the axis keeps working and
+    /// the server falls back to the run's requested/inherited value.
+    let effort: String?
     let promptTokens: Int?
     let completionTokens: Int?
     let cachedTokens: Int?
@@ -2249,6 +2299,7 @@ struct AgentGatewayUsage: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case model
+        case effort
         case promptTokens
         case promptTokensSnake = "prompt_tokens"
         case completionTokens
@@ -2266,6 +2317,7 @@ struct AgentGatewayUsage: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         model = try c.decodeIfPresent(String.self, forKey: .model)
+        effort = try c.decodeIfPresent(String.self, forKey: .effort)
         promptTokens = try c.decodeIfPresent(Int.self, forKey: .promptTokens)
             ?? c.decodeIfPresent(Int.self, forKey: .promptTokensSnake)
         completionTokens = try c.decodeIfPresent(Int.self, forKey: .completionTokens)
@@ -2283,6 +2335,7 @@ struct AgentGatewayUsage: Decodable {
     func asObject() -> [String: Any] {
         [
             "model": model as Any,
+            "effort": effort as Any,
             "prompt_tokens": promptTokens as Any,
             "completion_tokens": completionTokens as Any,
             "cached_tokens": cachedTokens as Any,

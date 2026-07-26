@@ -174,6 +174,8 @@ enum AppBuilder {
         ).add(to: authed)
         // MOMO-582 / ADR-0114 증보1 B: per-workspace work host engine selection.
         WorkHostEngineRoutes(db: db).add(to: authed)
+        // MOMO-621 / ADR-0134 D2: provider×model effort table (routing picker SoT).
+        ProviderEffortTableRoutes().add(to: authed)
         let allowAgentCardHTTP = config.momoEnvironment.lowercased() == "local"
             && ProcessInfo.processInfo.environment["MOMO_AGENT_CARD_ALLOW_HTTP"] == "1"
         AgentCardRoutes(

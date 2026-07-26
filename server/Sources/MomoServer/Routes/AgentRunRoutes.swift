@@ -36,7 +36,12 @@ struct AgentRunRoutes: Sendable {
         )
 
         // MOMO-362: shape errors must become 4xx before opening a transaction.
+        // MOMO-621 / ADR-0134 D1: routing shape (closed-world keys, known effort
+        // level) is checked here; the allow-list / model×effort gates need tenant
+        // rows and therefore run inside the transaction below.
+        let requestRouting = try RunRoutingInput.validate(requestDTO.routing)
         let workInput = try WorkRunInput.require(requestDTO.input)
+            .adoptingRequestRouting(requestRouting)
         let inputJSON = try Self.encodeJSON(workInput.jsonValue)
         guard agentGateway.enabled else {
             throw HTTPError(
@@ -92,6 +97,17 @@ struct AgentRunRoutes: Sendable {
                 return WorkRunCreationResult.concurrencyLimit
             }
 
+            // ADR-0134 D1/D3: explicit routing is gated (400 on violation), an
+            // absent one inherits from the agent profile. Throwing here rolls the
+            // tx back before any row is written.
+            let routing = try RunRoutingResolution.resolve(
+                requested: workInput.routing,
+                baseModel: agent.model,
+                modelPref: agent.modelPref,
+                effortPref: agent.effortPref,
+                workspaceSettingsJSON: agent.workspaceSettingsJSON
+            )
+
             let rows = try await conn.query(
                 """
                 INSERT INTO agent_run
@@ -130,7 +146,8 @@ struct AgentRunRoutes: Sendable {
                 actorMemberID: principal.memberID,
                 agentMemberID: requestDTO.agentMemberId,
                 runID: runID,
-                model: agent.model,
+                model: routing.model,
+                effort: routing.effort,
                 input: workInput,
                 idempotencyKey: idempotencyKey,
                 createdAtMs: createdAtMs
@@ -169,14 +186,25 @@ struct AgentRunRoutes: Sendable {
                 logger: db.logger
             )
 
-            let auditDetail = Self.jsonString([
+            // The resolved model/effort are audited next to the requested block so
+            // "who ran on what" stays answerable without replaying inheritance
+            // (ADR-0134 D4: the selected model is never hidden).
+            var auditObject: [String: Any] = [
                 "schema": "momo.agent_work.queued.v0",
                 "run_id": runID.uuidString,
                 "channel_id": channelID.uuidString,
                 "agent_member_id": requestDTO.agentMemberId.uuidString,
                 "client_run_id": requestDTO.clientRunId.uuidString,
                 "input": Self.anyValue(workInput.jsonValue),
-            ])
+                "resolved_model": routing.model,
+            ]
+            if let requested = workInput.routing?.auditObject, !requested.isEmpty {
+                auditObject["routing"] = requested
+            }
+            if let effort = routing.effort { auditObject["resolved_effort"] = effort }
+            if let ignored = routing.ignoredModelPref { auditObject["ignored_model_pref"] = ignored }
+            if let ignored = routing.ignoredEffortPref { auditObject["ignored_effort_pref"] = ignored }
+            let auditDetail = Self.jsonString(auditObject)
             _ = try await conn.query(
                 """
                 INSERT INTO audit_log
@@ -535,11 +563,14 @@ struct AgentRunRoutes: Sendable {
                         AND active.agent_member_id = \(agentMemberID)
                         AND active.status IN
                             ('queued','running','awaiting_approval','paused')
-                   ) AS active_runs
+                   ) AS active_runs,
+                   ap.model_pref, ap.effort_pref, w.settings::text
               FROM member m
               JOIN agent a
                 ON a.member_id = m.id
                AND a.workspace_id = m.workspace_id
+              JOIN workspace w
+                ON w.id = m.workspace_id
               JOIN membership ms
                 ON ms.workspace_id = m.workspace_id
                AND ms.channel_id = \(channelID)
@@ -558,15 +589,19 @@ struct AgentRunRoutes: Sendable {
             logger: logger
         ).collect()
         guard let first = rows.first else { return nil }
-        let (model, maxRunSteps, maxConcurrentRuns, paused, activeRuns) = try first.decode(
-            (String, Int, Int, Bool, Int).self
+        let (model, maxRunSteps, maxConcurrentRuns, paused, activeRuns,
+             modelPref, effortPref, workspaceSettingsJSON) = try first.decode(
+            (String, Int, Int, Bool, Int, String?, String?, String).self
         )
         return EligibleWorkAgent(
             model: model,
             maxRunSteps: maxRunSteps,
             maxConcurrentRuns: maxConcurrentRuns,
             paused: paused,
-            activeRuns: activeRuns
+            activeRuns: activeRuns,
+            modelPref: modelPref,
+            effortPref: effortPref,
+            workspaceSettingsJSON: workspaceSettingsJSON
         )
     }
 
@@ -707,11 +742,16 @@ struct AgentRunRoutes: Sendable {
         agentMemberID: UUID,
         runID: UUID,
         model: String,
+        effort: String?,
         input: WorkRunInput,
         idempotencyKey: String,
         createdAtMs: Int64
     ) -> String {
-        jsonString([
+        // `model`/`effort` here are the RESOLVED values (request → profile), which
+        // is what the gateway hands the adapter (ADR-0130 payload convention) and
+        // what the worker records on the usage ledger. `effort` is omitted rather
+        // than null when nothing was chosen or inherited.
+        var payload: [String: Any] = [
             "run_id": runID.uuidString,
             "workspace_id": workspaceID.uuidString,
             "channel_id": channelID.uuidString,
@@ -725,7 +765,9 @@ struct AgentRunRoutes: Sendable {
             "delivery": "gateway",
             "created_from": "server.agent_work.v0",
             "created_at_ms": createdAtMs,
-        ])
+        ]
+        if let effort { payload["effort"] = effort }
+        return jsonString(payload)
     }
 
     private static func agentJobBroadcastPayload(
@@ -873,10 +915,24 @@ struct AgentRunRoutes: Sendable {
     }
 }
 
+/// Closed-world run creation body (ADR-0134 D1). The request grows exactly one
+/// new key, `routing`; every other unknown top-level field is a 400 so a
+/// smuggled model/effort/credential can never ride along unvalidated.
+///
+/// `routing` is kept as raw JSON here and validated in the route
+/// (`RunRoutingInput.validate`) so its 400s are plain `HTTPError`s raised before
+/// the tenant transaction opens, instead of decoder errors.
 struct CreateAgentRunRequest: Decodable, Sendable {
+    static let allowedKeys = Set([
+        "agentMemberId", "agent_member_id",
+        "clientRunId", "client_run_id",
+        "input", "routing",
+    ])
+
     let agentMemberId: UUID
     let clientRunId: UUID
     let input: JSONValue
+    let routing: JSONValue?
 
     private enum CodingKeys: String, CodingKey {
         case agentMemberId
@@ -884,25 +940,64 @@ struct CreateAgentRunRequest: Decodable, Sendable {
         case clientRunId
         case clientRunIdSnake = "client_run_id"
         case input
+        case routing
     }
 
     init(from decoder: Decoder) throws {
+        let dynamic = try decoder.container(keyedBy: CreateAgentRunCodingKey.self)
+        let unknownKeys = dynamic.allKeys
+            .map(\.stringValue)
+            .filter { !Self.allowedKeys.contains($0) }
+        if let first = unknownKeys.sorted().first {
+            throw DecodingError.dataCorruptedError(
+                forKey: CreateAgentRunCodingKey(first),
+                in: dynamic,
+                debugDescription: "unknown agent run request field"
+            )
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         agentMemberId = try container.decodeIfPresent(UUID.self, forKey: .agentMemberId)
             ?? container.decode(UUID.self, forKey: .agentMemberIdSnake)
         clientRunId = try container.decodeIfPresent(UUID.self, forKey: .clientRunId)
             ?? container.decode(UUID.self, forKey: .clientRunIdSnake)
         input = try container.decode(JSONValue.self, forKey: .input)
+        routing = try container.decodeIfPresent(JSONValue.self, forKey: .routing)
     }
 }
 
+private struct CreateAgentRunCodingKey: CodingKey, Hashable {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init(_ stringValue: String) { self.stringValue = stringValue }
+    init?(stringValue: String) { self.init(stringValue) }
+    init?(intValue: Int) { self.stringValue = String(intValue) }
+}
+
 struct WorkRunInput: Equatable, Sendable {
-    static let allowedKeys = Set(["type", "title", "brief", "repo", "branch"])
+    /// ADR-0134 D1: `routing` is the single new allowed key. The input stays
+    /// closed-world, and the routing object is itself closed-world.
+    static let allowedKeys = Set(["type", "title", "brief", "repo", "branch", "routing"])
 
     let title: String
     let brief: String
     let repo: String?
     let branch: String?
+    let routing: RunRoutingInput?
+
+    init(
+        title: String,
+        brief: String,
+        repo: String?,
+        branch: String?,
+        routing: RunRoutingInput? = nil
+    ) {
+        self.title = title
+        self.brief = brief
+        self.repo = repo
+        self.branch = branch
+        self.routing = routing
+    }
 
     var jsonValue: JSONValue {
         var object: [String: JSONValue] = [
@@ -912,7 +1007,25 @@ struct WorkRunInput: Equatable, Sendable {
         ]
         if let repo { object["repo"] = .string(repo) }
         if let branch { object["branch"] = .string(branch) }
+        if let routingJSON = routing?.jsonValue { object["routing"] = routingJSON }
         return .object(object)
+    }
+
+    /// Folds the top-level `routing` block into the input. Both spellings are
+    /// accepted (top-level per ADR-0134 D1's request shape, `input.routing` per
+    /// the allow-list wording), but they must agree — a disagreement is a 400
+    /// rather than a silent winner.
+    func adoptingRequestRouting(_ requestRouting: RunRoutingInput?) throws -> WorkRunInput {
+        guard let requestRouting else { return self }
+        if let existing = routing, existing != requestRouting {
+            throw HTTPError(
+                .badRequest,
+                message: "routing conflicts with input.routing"
+            )
+        }
+        return WorkRunInput(
+            title: title, brief: brief, repo: repo, branch: branch, routing: requestRouting
+        )
     }
 
     /// Validates only inputs that explicitly opt into `type: work`.
@@ -929,7 +1042,8 @@ struct WorkRunInput: Equatable, Sendable {
             title: try requiredString(object["title"], field: "title", limit: 200),
             brief: try requiredString(object["brief"], field: "brief", limit: 16_384),
             repo: try optionalString(object["repo"], field: "repo", limit: 2_048),
-            branch: try optionalString(object["branch"], field: "branch", limit: 512)
+            branch: try optionalString(object["branch"], field: "branch", limit: 512),
+            routing: try RunRoutingInput.validate(object["routing"])
         )
     }
 
@@ -1011,6 +1125,11 @@ private struct EligibleWorkAgent: Sendable {
     let maxConcurrentRuns: Int
     let paused: Bool
     let activeRuns: Int
+    /// ADR-0134 D3 inheritance inputs (agent tier + the workspace allow-list the
+    /// request tier is gated against).
+    let modelPref: String?
+    let effortPref: String?
+    let workspaceSettingsJSON: String
 }
 
 private enum WorkRunCreationResult: Sendable {

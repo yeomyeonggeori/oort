@@ -1,5 +1,17 @@
 # momo 진행 현황
 
+## MOMO-621 요청 단위 model·effort 라우팅 + effort 축 (ADR-0134 D1·D2·D3, #808, 2026-07-26)
+
+- 배경: run 생성 API는 closed-world라 "이 요청만 무겁게/가볍게"가 불가능했고, `effort` 개념은 1st-party 코드 전역에 부재했다(ADR-0134 Context). 정본 = `docs/adr/0134-request-level-model-effort-routing.md`(Accepted).
+- **D1 routing 블록**: `CreateAgentRunRequest`가 closed-world가 되고(`allowedKeys`에 `routing`만 추가, 미지 top-level 필드 400) 선택적 `routing { model?, effort? }`를 받는다. `WorkRunInput.allowedKeys`도 `routing` 하나만 늘려 `input.routing` 철자를 함께 허용하되 **둘이 불일치하면 400**(조용한 승자 없음). routing 객체 내부도 closed-world. 신규 파일 `server/Sources/MomoServer/Routes/RunRouting.swift`.
+- 게이트 비대칭(ADR 결정 그대로): **명시 요청**의 `routing.model`이 `workspace.settings.allowed_agent_models`(∪ `agent.model`) 밖이거나 `routing.effort`를 해석된 모델이 지원하지 않으면 **400**. **상속된** agent profile 선호는 사용 불가 시 조용히 무시 + `agent.work.queued` 감사행에 `ignored_model_pref`/`ignored_effort_pref` 기록(ADR-0131 D2 관례 유지). 허용목록 판정은 `MessageRoutes.allowedAgentModels`로 단일화해 두 표면이 갈라지지 않게 했다.
+- **D2 effort 축**: `GET /v1/provider/effort-table`(신규 `ProviderEffortTableRoutes.swift`, `authed` 그룹, 인증만 요구 — 테넌트 데이터·자격증명 0). 유효값은 **provider×model 테이블**(v0는 코드 상수, wire 모양은 provider→models→efforts로 확장 가능): `hermes-agent`/`hermes-default`는 low~max, `hermes-fast`/`hermes-lite`는 low/medium, 미등재 모델은 보수적 fallback low/medium/high. 정규 레벨 = `low|medium|high|xhigh|max`.
+- **마이그레이션 041**(`041_run_routing_effort.sql`, `schema_v0.sql` 무변경): `usage_ledger.effort text NULL` + `agent_profile.effort_pref text NULL`, 각각 길이 1~32 CHECK만(값 집합은 DB enum이 아니라 테이블 정본). 신규 테이블 없음 → RLS DO-block 등록 불필요, 두 테이블 모두 기존 FORCE RLS 유지.
+- **원장 2경로**: ①gateway `AgentGatewayRoutes.reconcileUsage` — `AgentGatewayUsage.effort`(어댑터 보고) → run의 요청 effort(`input.routing`) → agent profile `effort_pref` 순으로 `ledgerEffort`가 결정. 보고값은 provider가 실행 권위이므로 known level이면 채택, 추정 tier(요청/선호)는 해석 모델이 지원할 때만 채택하고 아니면 **NULL**(틀린 분석 축을 쓰지 않는다). ②worker `CostAccounting.reconcile(effort:)` — job payload의 해석된 effort를 기록(길이 초과/공백은 NULL로 정규화해 원장 tx 자체를 잃지 않는다).
+- **D3 상속 + adapter 전달**: routing 부재 시 agent profile `model_pref`(기존) + `effort_pref`(신규)를 적용한다. 해석된 `model`/`effort`는 `agent_job` outbox payload에 실려 gateway pending 응답으로 어댑터에 그대로 전달된다(ADR-0130 payload 관례). mention 경로도 같은 payload 키를 채워 worker 원장이 의미를 갖는다. `adapters/hermes/momo_adapter.py`는 payload effort를 정규화해 usage에 되돌려준다(런타임이 직접 보고하면 그 값이 우선).
+- 검증: `swift build` green(server·AgentWorker·`make build` 전 패키지, **신규 경고 0**) + server `swift test` **278/278 PASS**(신규 `RunRoutingTests` 27개: closed-world 400 매트릭스·effort 테이블 자기정합·허용목록/모델×effort 400 게이트·상속 폴백·무시 규칙·원장 effort 우선순위), AgentWorker `swift test` 72/72 PASS, hermes 어댑터 계약 61 tests PASS. `scripts/verify_run_routing.sh`(신설) **30관문 전부 PASS**(워크트리 compose 포트 21050/21052, `infra/docker-compose.e2e.yml` + `AGENT_GATEWAY_MODE=gateway` 오버레이, 종료 시 `down -v`): 041 컬럼/CHECK/FORCE RLS 실측 · effort-table 401/200/모양/무자격증명 · routing 400 5종 + 롤백(agent_run 0행) · 상속 및 무시 감사 · **에이전트 bearer로 gateway job claim → complete 실왕복으로 `usage_ledger.effort` 기록**(보고 우선 `medium`, 미보고 시 요청값 폴백 `medium`, 지원 불가 선호는 NULL) · 교차 테넌트 격리(own=2, foreign=0).
+- 미구현(후속): `agent_profile.effort_pref`를 쓰는 REST writer는 없다(프로필 PUT 본문은 closed-world 유지) — ADR-0134 D3 UI 티켓 소관. 워크스페이스 기본 tier(D3 최상위)와 auto 정책(D4)도 이번 범위 밖이다.
+
 ## MOMO-615 워크스페이스 사용량 요약 REST (AX-7 1층, #791, 2026-07-25)
 
 - 배경: `usage_ledger`는 `workspace_id` 축 + `usage_ledger_ws_time_idx (workspace_id, created_at DESC)`가 이미 완비돼 있고 **노출만 부재**했다. 계약 정본 = `docs/planning/handoffs/2026-07-25-usage-summary-contract.md`(MOMO-615 엔진 ↔ MOMO-616 웹 공유).
