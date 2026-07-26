@@ -155,7 +155,7 @@ CREATE_BODY="$(jq -cn \
   --arg name 'Profile Agent' --arg handle "$AGENT_HANDLE" \
   --arg owner "$OWNER_ID" \
   '{displayName:$name,handle:$handle,model:"hermes-default",baseUrl:"https://hermes.example/v1",ownerHumanId:$owner,
-    profile:{instructions:"initial profile",modelPref:"external-premium",
+    profile:{instructions:"initial profile",modelPref:"hermes-default",
       enabledTools:["github.list_repositories"],triggers:{mention:true,schedule:{cron:"0 9 * * 1"}}}}')"
 CREATE_RESPONSE="$(curl -fsS -X POST "$BASE_URL/v1/workspaces/$WS_ID/agents" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' --data "$CREATE_BODY")"
@@ -169,14 +169,14 @@ SQL
 PROFILE_URL="$BASE_URL/v1/workspaces/$WS_ID/agents/$AGENT_ID/profile"
 OWNER_GET="$(curl -fsS "$PROFILE_URL" -H "Authorization: Bearer $OWNER_TOKEN")"
 printf '%s' "$OWNER_GET" | jq -e '
-  .profile.version == 1 and .profile.modelPref == "external-premium"
+  .profile.version == 1 and .profile.modelPref == "hermes-default"
   and .profile.triggers.mention == true
   and .profile.triggers.schedule.cron == "0 9 * * 1"
 ' >/dev/null || fail "simultaneous creation profile or owner GET mismatch"
 pass "creation form persists profile atomically and agent owner can read it"
 
 PUT_BODY="$(jq -cn --arg instructions "$PROFILE_TEXT" \
-  '{instructions:$instructions,modelPref:"external-premium",
+  '{instructions:$instructions,modelPref:"hermes-default",
     enabledTools:["github.list_repositories"],triggers:{mention:true,schedule:{cron:"0 9 * * 1"}}}')"
 PUT_RESPONSE="$(curl -fsS -X PUT "$PROFILE_URL" -H "Authorization: Bearer $OWNER_TOKEN" \
   -H 'Content-Type: application/json' --data "$PUT_BODY")"
@@ -184,6 +184,23 @@ printf '%s' "$PUT_RESPONSE" | jq -e --arg instructions "$PROFILE_TEXT" '
   .profile.version == 2 and .profile.instructions == $instructions
   and .profile.enabledTools == ["github.list_repositories"]
 ' >/dev/null || fail "profile PUT/version increment mismatch"
+
+# F1 (2026-07-26 merge review): a modelPref outside the workspace allow-list used
+# to answer 200 and then be swapped for agent.model at run time. The write is now
+# a 400 — and it must not have touched the row before refusing. This workspace
+# sets no `allowed_agent_models`, so the allow-list is exactly {agent.model}.
+status="$(curl -sS -o "$TMP_DIR/model_pref.json" -w '%{http_code}' -X PUT "$PROFILE_URL" \
+  -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"instructions":"x","modelPref":"external-premium","enabledTools":[]}')"
+[ "$status" = "400" ] || fail "modelPref outside allowed_agent_models expected 400, got $status"
+STORED_MODEL_PREF="$(sql_value <<SQL
+SELECT coalesce(model_pref,'NULL') FROM agent_profile
+ WHERE workspace_id='$WS_ID' AND agent_member_id='$AGENT_ID';
+SQL
+)"
+[ "$STORED_MODEL_PREF" = "hermes-default" ] \
+  || fail "a rejected modelPref write mutated the row: '$STORED_MODEL_PREF'"
+pass "modelPref outside the workspace allow-list is a 400 with no partial write"
 
 status="$(curl -sS -o "$TMP_DIR/forbidden.json" -w '%{http_code}' "$PROFILE_URL" \
   -H "Authorization: Bearer $OTHER_TOKEN")"
@@ -203,6 +220,16 @@ SQL
 )"
 [ "$RLS_COUNT" = "0" ] || fail "cross-workspace RLS exposed profile"
 pass "agent_profile FORCE RLS isolates workspace rows"
+
+# The run-time half of ADR-0131 D2 still has to be exercised: a preference the
+# allow-list does not cover is silently ignored and audited, never an error. Since
+# F1 the REST writer refuses to create that state, so it is seeded directly —
+# which is also the real-world shape of it (a row written before the workspace
+# narrowed its allow-list).
+run_sql <<SQL
+UPDATE agent_profile SET model_pref='external-premium'
+ WHERE workspace_id='$WS_ID' AND agent_member_id='$AGENT_ID';
+SQL
 
 PLUGIN_PATH="$BASE_URL/v1/workspaces/$WS_ID/plugins/com.momo.plugins.github"
 curl -fsS -X POST "$PLUGIN_PATH/install" -H "Authorization: Bearer $ADMIN_TOKEN" \

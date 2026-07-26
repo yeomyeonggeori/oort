@@ -47,6 +47,9 @@ struct ProviderLinkRoutes: Sendable {
         group.put("/v1/provider/link", use: put)
         group.delete("/v1/provider/link", use: delete)
         group.post("/v1/provider/link/test", use: test)
+        // MOMO-622 / ADR-0135 D1: the cascade chain shares this surface's auth,
+        // master key, and operator transaction (see ProviderLinkChainRoutes).
+        addChain(to: group)
     }
 
     // MARK: - GET
@@ -131,50 +134,109 @@ struct ProviderLinkRoutes: Sendable {
 
     // MARK: - POST test
 
+    /// MOMO-622 / ADR-0135 D1 — the probe now covers the WHOLE cascade.
+    ///
+    /// Backward compatibility is strict: every field the MOMO-572 response
+    /// carried (`schema` included) keeps its exact old meaning and describes
+    /// **position 0**, so the existing macOS "AI 연결" panel is unaffected. The
+    /// chain adds only new keys — `entries[]` (per-hop results in attempt order)
+    /// and `cascadeOk` (would any attemptable hop serve a turn right now).
     @Sendable
     func test(_ request: Request, context: AppRequestContext) async throws -> Response {
         _ = try await requireOperator(context)
-        let stored: StoredProviderLink? = try await db.withProviderLinkReadConnection { conn in
-            try await ProviderLinkStore.read(conn: conn, logger: db.logger)
-        }
-        let resolved = resolve(stored: stored)
-        let mode = resolved.config.mode
-        let endpointLabel = resolved.config.endpointLabel
+        let (storedLink, storedChain) = try await readChainState()
+        let resolved = resolvedCascade(storedLink: storedLink, storedChain: storedChain)
+        let checkedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
 
-        let result: ProviderHealthResult
-        if mode != .externalHermes {
-            // Mock modes have no real provider to reach; report as not-external so
-            // the operator knows a real base_url/bearer must be configured first.
-            result = ProviderHealthResult(ok: false, reason: "not_external_provider")
-        } else if !resolved.config.keyConfigured {
-            result = ProviderHealthResult(ok: false, reason: "provider_not_configured")
-        } else {
-            result = await healthProbe.probe(
-                baseURL: resolved.config.hermesBaseURL,
-                bearer: resolved.config.hermesAPIKey
+        // Probe hops concurrently: sequential probing would multiply the live
+        // probe timeout by the chain length on one operator request.
+        let probe = healthProbe
+        let hops = resolved.hops
+        var results = [ProviderChainProbeOutcome?](repeating: nil, count: hops.count)
+        await withTaskGroup(of: (Int, ProviderChainProbeOutcome).self) { group in
+            for (index, hop) in hops.enumerated() {
+                group.addTask {
+                    (index, await Self.probeHop(hop, using: probe))
+                }
+            }
+            for await (index, outcome) in group {
+                results[index] = outcome
+            }
+        }
+
+        let entries = zip(hops, results).map { hop, outcome -> ProviderChainProbeDTO in
+            let outcome = outcome ?? ProviderChainProbeOutcome(
+                result: ProviderHealthResult(ok: false, reason: "probe_not_run"),
+                disposition: .propagate
+            )
+            return ProviderChainProbeDTO(
+                position: hop.position,
+                source: hop.source.rawValue,
+                mode: hop.mode.rawValue,
+                endpointLabel: hop.endpointLabel,
+                enabled: hop.enabled,
+                ok: outcome.result.ok,
+                reason: outcome.result.reason,
+                disposition: outcome.disposition.rawValue
             )
         }
 
+        // Position 0 drives the legacy top-level fields.
+        let head = entries.first
         let response = ProviderLinkTestResponse(
             schema: "momo.provider_link.test.v0",
-            ok: result.ok,
-            reason: result.reason,
-            source: resolved.source.rawValue,
-            mode: mode.rawValue,
-            endpointLabel: endpointLabel,
-            checkedAtMs: Int64(Date().timeIntervalSince1970 * 1000)
+            ok: head?.ok ?? false,
+            reason: head?.reason,
+            source: resolved.head.source.rawValue,
+            mode: resolved.head.config.mode.rawValue,
+            endpointLabel: resolved.head.config.endpointLabel,
+            checkedAtMs: checkedAtMs,
+            cascadeOk: entries.contains { $0.ok },
+            entries: entries
         )
         return try response.response(from: request, context: context)
     }
 
-    // MARK: - Resolution + response
-
-    private func resolve(stored: StoredProviderLink?) -> ResolvedProviderConfig {
-        let decrypted = stored.flatMap {
-            ProviderLinkStore.decrypt($0, masterKey: providerLinkMasterKey)
+    /// Probe one hop and classify what a real cascade would do with the outcome.
+    /// Mirrors the runtime rule exactly: only no-response / 5xx / 429 advance.
+    static func probeHop(
+        _ hop: ProviderCascadeHop,
+        using probe: any ProviderHealthProbing
+    ) async -> ProviderChainProbeOutcome {
+        guard hop.enabled else {
+            // A parked hop is never attempted, so it can neither serve nor fall
+            // over — it is simply skipped.
+            return ProviderChainProbeOutcome(
+                result: ProviderHealthResult(ok: false, reason: "hop_disabled"),
+                disposition: .skipped
+            )
         }
-        return ProviderLinkResolver.resolve(env: envProvider, link: decrypted)
+        if hop.mode != .externalHermes {
+            // Mock modes have no real provider to reach; report as not-external so
+            // the operator knows a real base_url/bearer must be configured first.
+            return ProviderChainProbeOutcome(
+                result: ProviderHealthResult(ok: false, reason: "not_external_provider"),
+                disposition: .propagate
+            )
+        }
+        guard hop.isUsable else {
+            return ProviderChainProbeOutcome(
+                result: ProviderHealthResult(ok: false, reason: "provider_not_configured"),
+                disposition: .propagate
+            )
+        }
+        let result = await probe.probe(baseURL: hop.baseURL, bearer: hop.bearer)
+        if result.ok {
+            return ProviderChainProbeOutcome(result: result, disposition: .ok)
+        }
+        let decision = ProviderCascadeClassifier.decide(probeReason: result.reason)
+        return ProviderChainProbeOutcome(
+            result: result,
+            disposition: decision.isFallOver ? .fallOver : .propagate
+        )
     }
+
+    // MARK: - Resolution + response
 
     private func makeResponse(stored: StoredProviderLink?) -> ProviderLinkResponse {
         let decrypted = stored.flatMap {
@@ -365,6 +427,10 @@ struct ProviderLinkResponse: ResponseEncodable, Encodable, Sendable {
     let diagnostics: [String]
 }
 
+/// MOMO-572 shape + the MOMO-622 chain extension. The first seven fields are
+/// byte-identical to the v0 contract and describe position 0; `cascadeOk` and
+/// `entries` are additive (unknown keys are ignored by the existing clients'
+/// `Decodable`), so the schema string deliberately stays `…test.v0`.
 struct ProviderLinkTestResponse: ResponseEncodable, Encodable, Sendable {
     let schema: String
     let ok: Bool
@@ -373,6 +439,40 @@ struct ProviderLinkTestResponse: ResponseEncodable, Encodable, Sendable {
     let mode: String
     let endpointLabel: String
     let checkedAtMs: Int64
+    /// True when at least one hop in the cascade could serve a turn right now.
+    let cascadeOk: Bool
+    /// Per-hop probe results in attempt order (position 0 first).
+    let entries: [ProviderChainProbeDTO]
+}
+
+/// What a real cascade would do with a probe outcome — the operator-visible
+/// projection of `ProviderCascadeDecision`.
+enum ProviderChainProbeDisposition: String, Sendable {
+    /// The hop answered; a turn would be served here.
+    case ok
+    /// No response / 5xx / 429 — a turn would advance to the next hop.
+    case fallOver = "fall_over"
+    /// Caller/config error (4xx, unconfigured, mock mode) — a turn would surface
+    /// this instead of re-spending on another provider.
+    case propagate
+    /// Hop parked by the operator (`enabled = false`); never attempted.
+    case skipped
+}
+
+struct ProviderChainProbeOutcome: Sendable {
+    let result: ProviderHealthResult
+    let disposition: ProviderChainProbeDisposition
+}
+
+struct ProviderChainProbeDTO: Encodable, Sendable {
+    let position: Int
+    let source: String
+    let mode: String
+    let endpointLabel: String
+    let enabled: Bool
+    let ok: Bool
+    let reason: String?
+    let disposition: String
 }
 
 /// Closed-world PUT body. Only baseUrl / bearer / mode are accepted; any other

@@ -61,6 +61,14 @@ from urllib.parse import urlencode, urlsplit
 
 log = logging.getLogger("momo.adapter")
 
+# Provider polymorphism (ADR-0135 D3) + request effort (ADR-0134 D2). Imported
+# both as a package member (hermes directory plugin) and as a sibling module
+# (`adapter.py` shim / repo-local gates put this directory on sys.path).
+try:  # pragma: no cover - exercised by whichever import style the host uses
+    from . import provider_chain  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover
+    import provider_chain  # type: ignore[no-redef]
+
 
 def _redact_credential_text(raw: Any, *, exact: Optional[str] = None) -> str:
     value = str(raw)
@@ -228,7 +236,36 @@ class MomoConfig:
             "MOMO_AGENT_ALLOW_INSECURE_HTTP", "0"
         ).lower() in ("1", "true", "yes")
     )
+    # Provider cascade (ADR-0135 D3). momo hands down the chain *shape*
+    # (base_url + mode, ordered); the bearer for each link is read only from
+    # this adapter's own environment under this prefix (ADR-0004).
+    provider_credential_env_prefix: str = field(
+        default_factory=lambda: os.environ.get(
+            "MOMO_PROVIDER_BEARER_ENV_PREFIX", "HERMES_PROVIDER_BEARER"
+        )
+        or "HERMES_PROVIDER_BEARER"
+    )
+    # Periodic remaining-quota probe (ADR-0135 D2). The adapter probes because it
+    # holds the credential; momo only receives numbers.
+    quota_probe_enabled: bool = field(
+        default_factory=lambda: os.environ.get(
+            "MOMO_QUOTA_PROBE_ENABLED", "1"
+        ).lower() in ("1", "true", "yes")
+    )
+    quota_probe_interval_s: float = field(
+        default_factory=lambda: _positive_float(
+            os.environ.get("MOMO_QUOTA_PROBE_INTERVAL_S"), 900.0
+        )
+    )
     request_timeout_s: float = 120.0
+
+
+def _positive_float(raw: Any, fallback: float) -> float:
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError, AttributeError):
+        return fallback
+    return value if value > 0 else fallback
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,6 +378,15 @@ def _momo_config_from(config: Any) -> MomoConfig:
         _extra_value(extra, "MOMO_WORK_HOST_ID", "momo_work_host_id", "work_host_id")
         or cfg.work_host_id
     )
+    cfg.provider_credential_env_prefix = (
+        _extra_value(
+            extra,
+            "MOMO_PROVIDER_BEARER_ENV_PREFIX",
+            "momo_provider_bearer_env_prefix",
+            "provider_credential_env_prefix",
+        )
+        or cfg.provider_credential_env_prefix
+    )
     insecure_flag = _extra_value(
         extra,
         "MOMO_AGENT_ALLOW_INSECURE_HTTP",
@@ -349,6 +395,24 @@ def _momo_config_from(config: Any) -> MomoConfig:
     )
     if insecure_flag:
         cfg.allow_insecure_http = insecure_flag.lower() in ("1", "true", "yes")
+    probe_flag = _extra_value(
+        extra,
+        "MOMO_QUOTA_PROBE_ENABLED",
+        "momo_quota_probe_enabled",
+        "quota_probe_enabled",
+    )
+    if probe_flag:
+        cfg.quota_probe_enabled = probe_flag.lower() in ("1", "true", "yes")
+    probe_interval = _extra_value(
+        extra,
+        "MOMO_QUOTA_PROBE_INTERVAL_S",
+        "momo_quota_probe_interval_s",
+        "quota_probe_interval_s",
+    )
+    if probe_interval:
+        cfg.quota_probe_interval_s = _positive_float(
+            probe_interval, cfg.quota_probe_interval_s
+        )
     return cfg
 
 
@@ -364,6 +428,10 @@ def _platform_config_from_momo(cfg: MomoConfig) -> Any:
         "MOMO_WORK_HOST_ID": cfg.work_host_id,
         "MOMO_AGENT_TOKEN": cfg.agent_token,
         "MOMO_AGENT_ALLOW_INSECURE_HTTP": "1" if cfg.allow_insecure_http else "0",
+        # Env var *name*, never a provider secret value (ADR-0004).
+        "MOMO_PROVIDER_BEARER_ENV_PREFIX": cfg.provider_credential_env_prefix,
+        "MOMO_QUOTA_PROBE_ENABLED": "1" if cfg.quota_probe_enabled else "0",
+        "MOMO_QUOTA_PROBE_INTERVAL_S": str(cfg.quota_probe_interval_s),
     }
     attempts = (
         {"platform": _platform_value(), "enabled": True, "extra": extra},
@@ -460,6 +528,18 @@ class MomoAdapter(BasePlatformAdapter):
         self._pending_gateway_results: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._gateway_result_reservations: set[str] = set()
         self._gateway_job_leases: dict[str, GatewayJobLease] = {}
+
+        # --- provider cascade / effort / quota probe -----------------------
+        # The chain shape arrives with each momo job; credentials come only from
+        # this adapter's own environment (ADR-0004 / ADR-0135 D3).
+        self._provider_credentials = provider_chain.ProviderCredentialStore(
+            prefix=self.cfg.provider_credential_env_prefix
+        )
+        self._provider_chain_entries: tuple[provider_chain.ProviderChainEntry, ...] = ()
+        self._provider_adapters: tuple[provider_chain.ProviderAdapter, ...] = ()
+        self._effort_table: Optional[provider_chain.EffortTable] = None
+        self._effort_table_fetched = False
+        self._quota_probe: Optional[provider_chain.QuotaProbeScheduler] = None
 
     # ----- HTTP helpers ----------------------------------------------------
 
@@ -808,6 +888,8 @@ class MomoAdapter(BasePlatformAdapter):
         except Exception:
             await self.close()
             raise
+        # Idle until momo hands down a chain; run_once() no-ops on an empty chain.
+        self._ensure_quota_probe()
         mark_connected = getattr(self, "_mark_connected", None)
         if callable(mark_connected):  # pragma: no cover - live Hermes SDK only
             mark_connected()
@@ -1873,6 +1955,215 @@ class MomoAdapter(BasePlatformAdapter):
             except Exception:
                 pass
 
+    # ----- provider cascade / effort / quota (ADR-0134 D2, ADR-0135 D2·D3) ---
+
+    async def _provider_transport(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Optional[Mapping[str, str]] = None,
+        json_body: Optional[Mapping[str, Any]] = None,
+    ) -> "provider_chain.ProviderResponse":
+        """HTTP transport handed to provider adapters (momo bearer never used)."""
+        session = await self._ensure_session()
+        request = (
+            session.get(url, headers=dict(headers or {}))
+            if str(method).upper() == "GET"
+            else session.post(url, json=dict(json_body or {}), headers=dict(headers or {}))
+        )
+        async with request as resp:
+            body = await resp.text()
+            response_headers = {
+                str(key).lower(): str(value) for key, value in resp.headers.items()
+            }
+            status = resp.status
+        return provider_chain.ProviderResponse(
+            status=status, body=body, headers=response_headers
+        )
+
+    def _sync_provider_chain(self, payload: Mapping[str, Any]) -> None:
+        """Install the momo-supplied chain (base_url + mode, ordered)."""
+        raw = payload.get("provider_chain")
+        if raw is None:
+            raw = payload.get("providerChain")
+        if raw is None:
+            return
+        try:
+            entries = provider_chain.parse_provider_chain(raw)
+        except provider_chain.ProviderCredentialLeak as exc:
+            # momo must never ship provider credentials into the adapter.
+            log.error("provider chain rejected (ADR-0004): %s", exc)
+            return
+        except provider_chain.ProviderChainError as exc:
+            log.warning("provider chain ignored: %s", exc)
+            return
+        if entries == self._provider_chain_entries:
+            return
+        self._provider_chain_entries = entries
+        self._provider_adapters = provider_chain.build_provider_adapters(
+            entries,
+            credentials=self._provider_credentials,
+            transport=self._provider_transport,
+            timeout_s=self.cfg.request_timeout_s,
+        )
+        log.info(
+            "provider chain installed: links=%s",
+            ",".join(
+                f"{entry.position}:{entry.provider_ref}:{entry.mode}" for entry in entries
+            )
+            or "none",
+        )
+        if self._provider_adapters:
+            self._ensure_quota_probe()
+
+    def _active_provider_mode(self) -> Optional[str]:
+        return self._provider_chain_entries[0].mode if self._provider_chain_entries else None
+
+    async def _effort_table_for(
+        self, payload: Mapping[str, Any]
+    ) -> Optional["provider_chain.EffortTable"]:
+        """provider×model effort table (ADR-0134 D2). momo owns the truth."""
+        raw = payload.get("effort_table")
+        if raw is None:
+            raw = payload.get("effortTable")
+        if isinstance(raw, Mapping):
+            return provider_chain.EffortTable.from_payload(raw)
+        if self._effort_table is not None:
+            return self._effort_table
+        if self._effort_table_fetched:
+            return None
+        self._effort_table_fetched = True
+        try:
+            response = await self._get(provider_chain.EFFORT_TABLE_PATH)
+        except Exception as exc:  # noqa: BLE001 - effort is optional, never fatal
+            log.info(
+                "provider effort table unavailable; request effort will be ignored: %s",
+                self._redact_gateway_error(exc),
+            )
+            return None
+        self._effort_table = provider_chain.EffortTable.from_payload(response)
+        return self._effort_table
+
+    async def _resolved_routing(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[Optional[str], Optional["provider_chain.EffortBinding"]]:
+        """Resolve `routing {model, effort}` against the effort table."""
+        raw_routing = payload.get("routing")
+        if not isinstance(raw_routing, Mapping):
+            raw_routing = payload.get("Routing") if isinstance(payload.get("Routing"), Mapping) else {}
+        routing: Mapping[str, Any] = raw_routing if isinstance(raw_routing, Mapping) else {}
+        model = str(routing.get("model") or payload.get("model") or "").strip() or None
+        effort = str(routing.get("effort") or payload.get("effort") or "").strip().lower()
+        if not effort:
+            return model, None
+        table = await self._effort_table_for(payload)
+        binding = provider_chain.resolve_effort(
+            table,
+            provider=self._active_provider_mode(),
+            model=model,
+            effort=effort,
+        )
+        return model, binding
+
+    async def _payload_with_provider_routing(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Apply chain + effort before the job reaches a provider."""
+        self._sync_provider_chain(payload)
+        model, binding = await self._resolved_routing(payload)
+        assembled = dict(payload)
+        if model:
+            assembled["model"] = model
+        if binding is None:
+            # An unsupported/unknown effort is dropped (already logged), never
+            # forwarded as a guess — ADR-0134 D2/D3.
+            assembled.pop("effort", None)
+            assembled.pop("provider_effort_request", None)
+            return assembled
+        assembled["effort"] = binding.effort
+        assembled["provider_effort_request"] = binding.request_fields()
+        return assembled
+
+    def _provider_fallback_sink(
+        self, payload: Mapping[str, Any]
+    ) -> "provider_chain.FallbackSink":
+        """Surface `provider.cascade.fallback {from,to,reason}` — never silent."""
+        workspace_id = str(
+            payload.get("workspace_id") or payload.get("workspaceId") or ""
+        )
+        run_id = str(payload.get("run_id") or payload.get("runId") or "")
+
+        async def report(record: "provider_chain.ProviderFallbackRecord") -> None:
+            if not workspace_id or not run_id:
+                return
+            detail = "provider.cascade.fallback " + json.dumps(
+                record.to_payload(), sort_keys=True
+            )
+            await self._report_gateway_event(
+                workspace_id, run_id, "running", detail, event_id=str(uuid.uuid4())
+            )
+
+        return report
+
+    async def _run_gateway_job_via_chain(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Execute the job over the momo-supplied provider chain."""
+        cascade = provider_chain.ProviderCascade(
+            self._provider_adapters, on_fallback=self._provider_fallback_sink(payload)
+        )
+        binding = None
+        effort_request = payload.get("provider_effort_request")
+        if isinstance(effort_request, Mapping) and effort_request:
+            key = next(iter(effort_request))
+            binding = provider_chain.EffortBinding(
+                effort=str(effort_request[key]), param=str(key)
+            )
+        request = provider_chain.chat_request(
+            model=payload.get("model"),
+            messages=self._payload_messages(payload),
+            effort=binding,
+        )
+        outcome = await cascade.chat(request)
+        result = provider_chain.gateway_result_from_chat(
+            outcome.result, model=payload.get("model")
+        )
+        return self._normalize_gateway_result(result, payload)
+
+    def _ensure_quota_probe(self) -> None:
+        if not self.cfg.quota_probe_enabled or self._closing:
+            return
+        if self._quota_probe is None:
+            self._quota_probe = provider_chain.QuotaProbeScheduler(
+                providers=lambda: self._provider_adapters,
+                publish=self._publish_quota_snapshot,
+                interval_s=self.cfg.quota_probe_interval_s,
+            )
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - constructed outside a loop
+            return
+        self._quota_probe.start()
+
+    async def _publish_quota_snapshot(self, payload: Mapping[str, Any]) -> None:
+        """POST the ADR-0135 D2 ingest body — numbers only, no credential."""
+        await self._post(
+            provider_chain.QUOTA_SNAPSHOT_PATH,
+            provider_chain.assert_snapshot_credential_free(payload),
+        )
+
+    async def probe_provider_quotas(self) -> list[dict[str, Any]]:
+        """Run one quota probe pass now (also the scheduler's unit of work)."""
+        self._ensure_quota_probe()
+        if self._quota_probe is None:
+            return []
+        return await self._quota_probe.run_once()
+
+    async def provider_chain_health(self) -> list["provider_chain.ProviderHealth"]:
+        """Chain-wide health probe (ADR-0135 D1 extends /test to every link)."""
+        return await provider_chain.ProviderCascade(self._provider_adapters).health()
+
     async def _run_gateway_job(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Ask the injected Hermes runtime to execute a momo job.
 
@@ -1880,6 +2171,7 @@ class MomoAdapter(BasePlatformAdapter):
         We support a few narrow method names to keep the momo plugin resilient
         without importing Hermes internals in repo-local tests.
         """
+        payload = await self._payload_with_provider_routing(payload)
         if (
             payload.get("resume_from_approval_id")
             and self.runtime is not None
@@ -1920,6 +2212,8 @@ class MomoAdapter(BasePlatformAdapter):
                 return self._normalize_gateway_result(result, payload)
 
         if self.runtime is None:
+            if self._provider_adapters:
+                return await self._run_gateway_job_via_chain(payload)
             raise RuntimeError("Hermes runtime handle is not configured")
 
         if hasattr(self.runtime, "run_momo_job"):
@@ -1946,12 +2240,45 @@ class MomoAdapter(BasePlatformAdapter):
                 and not isinstance(raw_messages, (str, bytes, bytearray))
                 else self._payload_messages(payload)
             )
-            result = self.runtime.chat(messages=messages, model=payload.get("model"))
+            kwargs = self._runtime_chat_effort_kwargs(payload)
+            result = self.runtime.chat(
+                messages=messages, model=payload.get("model"), **kwargs
+            )
             if inspect.isawaitable(result):
                 result = await result
             return self._normalize_gateway_result(result, payload)
 
+        if self._provider_adapters:
+            return await self._run_gateway_job_via_chain(payload)
+
         raise RuntimeError("Hermes runtime does not expose a momo-compatible job method")
+
+    def _runtime_chat_effort_kwargs(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Pass the mapped effort to `runtime.chat` only if it accepts it."""
+        effort_request = payload.get("provider_effort_request")
+        if not isinstance(effort_request, Mapping) or not effort_request:
+            return {}
+        chat = getattr(self.runtime, "chat", None)
+        try:
+            parameters = inspect.signature(chat).parameters
+        except (TypeError, ValueError):  # pragma: no cover - exotic callables
+            return {}
+        if any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        ):
+            return dict(effort_request)
+        accepted = {
+            key: value for key, value in effort_request.items() if key in parameters
+        }
+        if not accepted:
+            log.info(
+                "hermes runtime chat() does not accept %s; effort not forwarded",
+                ",".join(sorted(effort_request)),
+            )
+        return accepted
 
     async def _consume_gateway_stream(
         self, stream: Any, payload: Mapping[str, Any]
@@ -2321,7 +2648,8 @@ class MomoAdapter(BasePlatformAdapter):
             "status": status,
             "body": body,
             "error": error,
-            "usage": usage,
+            # ADR-0134 D2: carry the job's effort back to momo's usage ledger.
+            "usage": self._stamp_effort(usage, payload),
         }
 
     @staticmethod
@@ -2376,8 +2704,42 @@ class MomoAdapter(BasePlatformAdapter):
         }
 
     @staticmethod
-    def _zero_usage(payload: Mapping[str, Any]) -> dict[str, Any]:
-        return {
+    def _job_effort(payload: Mapping[str, Any]) -> Optional[str]:
+        """ADR-0134 D2: the reasoning effort momo resolved for this job.
+
+        momo already gated the value against the provider x model table before
+        writing the job payload, so the adapter only normalizes and forwards it.
+        Absent/blank means "no effort was chosen" and must stay absent — a guessed
+        default would corrupt the cost ledger's analysis axis.
+        """
+        raw = payload.get("effort")
+        if not isinstance(raw, str):
+            return None
+        normalized = raw.strip().lower()
+        if not normalized or len(normalized) > 32:
+            return None
+        return normalized
+
+    @classmethod
+    def _stamp_effort(cls, usage: Any, payload: Mapping[str, Any]) -> Any:
+        """Echo the job's effort on usage when the runtime did not report one.
+
+        momo's ledger prefers the runtime-reported effort (the provider is the
+        authority on what it actually ran); this only fills the gap for runtimes
+        that have not learned about the axis yet.
+        """
+        effort = cls._job_effort(payload)
+        if effort is None or not isinstance(usage, Mapping):
+            return usage
+        if usage.get("effort"):
+            return usage
+        stamped = dict(usage)
+        stamped["effort"] = effort
+        return stamped
+
+    @classmethod
+    def _zero_usage(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        usage: dict[str, Any] = {
             "model": payload.get("model") or "hermes-agent",
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -2386,6 +2748,10 @@ class MomoAdapter(BasePlatformAdapter):
             "cost_micro_usd": 0,
             "was_estimated": True,
         }
+        effort = cls._job_effort(payload)
+        if effort is not None:
+            usage["effort"] = effort
+        return usage
 
     @staticmethod
     def _normalize_approval_request(
@@ -2529,6 +2895,11 @@ class MomoAdapter(BasePlatformAdapter):
             except Exception:  # pragma: no cover - best-effort teardown
                 log.debug("momo adapter task teardown failed: %s", name, exc_info=True)
             setattr(self, name, None)
+        if self._quota_probe is not None:
+            try:
+                await self._quota_probe.stop()
+            except Exception:  # pragma: no cover - best-effort teardown
+                log.debug("quota probe teardown failed", exc_info=True)
         self._fail_queued_work(MomoConfigurationError("momo adapter closed"))
         await self._close_ws_only()
         if self._http is not None and not self._http.closed:
@@ -2592,6 +2963,9 @@ OPTIONAL_ENV = (
     "MOMO_HOME_CHANNEL",
     "MOMO_HOME_CHANNEL_NAME",
     "MOMO_AGENT_ALLOW_INSECURE_HTTP",
+    "MOMO_PROVIDER_BEARER_ENV_PREFIX",
+    "MOMO_QUOTA_PROBE_ENABLED",
+    "MOMO_QUOTA_PROBE_INTERVAL_S",
 )
 
 

@@ -39,6 +39,11 @@ struct MessageRoutes: Sendable {
         let principal = try context.requirePrincipal()
         let (workspaceID, channelID) = try Self.scopeIDs(context, principal: principal)
         let dto = try await request.decode(as: SendMessageRequest.self, context: context)
+        // MOMO-625 / ADR-0134 D1: routing shape (closed-world keys, known effort
+        // level) is checked here so it becomes a 4xx before the write transaction
+        // opens (MOMO-362). The allow-list / model×effort gates need tenant rows
+        // and therefore run per mentioned agent inside the transaction.
+        let requestRouting = try RunRoutingInput.validate(dto.routing)
 
         let type = dto.type ?? "text"
         let body = dto.body
@@ -293,6 +298,7 @@ struct MessageRoutes: Sendable {
                     sourceRunID: dto.runId,
                     body: body,
                     hlcTs: ts,
+                    requestRouting: requestRouting,
                     agentGateway: agentGateway
                 )
             }
@@ -1404,7 +1410,6 @@ struct MessageRoutes: Sendable {
         let id: UUID
         let handle: String
         let displayName: String
-        let model: String
         let toolSchemaJSON: String
         let configJSON: String
         let systemPrompt: String?
@@ -1413,7 +1418,17 @@ struct MessageRoutes: Sendable {
         let profileVersion: Int?
         let paused: Bool
         let enabledTools: Set<String>?
-        let ignoredModelPref: String?
+        /// MOMO-625 / ADR-0134 D3 — the inheritance inputs, kept **raw**.
+        ///
+        /// Before MOMO-625 the model/effort were resolved right here, because the
+        /// agent profile was the only tier. A per-request `routing` block is now
+        /// the last tier, so resolution moved to `enqueueMentionJob` and goes
+        /// through the same `RunRoutingResolution` the work-run path uses — one
+        /// implementation of the chain, no chance of the two surfaces drifting.
+        let baseModel: String
+        let modelPref: String?
+        let effortPref: String?
+        let workspaceSettingsJSON: String
     }
 
     private struct IssuedContextPacket {
@@ -1435,6 +1450,7 @@ struct MessageRoutes: Sendable {
         sourceRunID: UUID?,
         body: String,
         hlcTs: Int64,
+        requestRouting: RunRoutingInput?,
         agentGateway: AgentGatewayConfig
     ) async throws {
         let candidates = try await loadAgentMentionCandidates(
@@ -1486,6 +1502,7 @@ struct MessageRoutes: Sendable {
                 body: body,
                 hlcTs: hlcTs,
                 agent: agent,
+                requestRouting: requestRouting,
                 agentGateway: agentGateway
             )
         }
@@ -1503,6 +1520,7 @@ struct MessageRoutes: Sendable {
                    a.tool_schema::text, a.config::text, a.system_prompt, a.max_run_steps,
                    ap.instructions, ap.model_pref, ap.enabled_tools::text,
                    ap.version, COALESCE(ap.paused, false), w.settings::text,
+                   ap.effort_pref,
                    EXISTS (
                      SELECT 1
                        FROM membership ms
@@ -1534,15 +1552,11 @@ struct MessageRoutes: Sendable {
         return try rows.map { row in
             let (id, handle, displayName, baseModel, toolSchema, config, baseSystemPrompt,
                  maxRunSteps, profileInstructions, modelPref, enabledToolsJSON,
-                 profileVersion, paused, workspaceSettingsJSON, isChannelMember,
-                 isExternalRuntime) = try row.decode(
+                 profileVersion, paused, workspaceSettingsJSON, effortPref,
+                 isChannelMember, isExternalRuntime) = try row.decode(
                     (UUID, String, String, String, String, String, String?, Int,
-                     String?, String?, String?, Int?, Bool, String, Bool, Bool).self
+                     String?, String?, String?, Int?, Bool, String, String?, Bool, Bool).self
                  )
-            let modelResolution = resolveProfileModel(
-                baseModel: baseModel, modelPref: modelPref,
-                workspaceSettingsJSON: workspaceSettingsJSON
-            )
             let decodedEnabledTools: Set<String>? = enabledToolsJSON.flatMap {
                 guard let data = $0.data(using: .utf8),
                       let values = try? JSONDecoder().decode([String].self, from: data)
@@ -1557,7 +1571,6 @@ struct MessageRoutes: Sendable {
                 id: id,
                 handle: handle,
                 displayName: displayName,
-                model: modelResolution.model,
                 toolSchemaJSON: toolSchema,
                 configJSON: config,
                 systemPrompt: effectiveSystemPrompt(
@@ -1570,7 +1583,10 @@ struct MessageRoutes: Sendable {
                 profileVersion: profileVersion,
                 paused: paused,
                 enabledTools: enabledTools,
-                ignoredModelPref: modelResolution.ignoredPreference
+                baseModel: baseModel,
+                modelPref: modelPref,
+                effortPref: effortPref,
+                workspaceSettingsJSON: workspaceSettingsJSON
             )
         }
     }
@@ -1681,6 +1697,24 @@ struct MessageRoutes: Sendable {
         return sections.joined(separator: "\n\n")
     }
 
+    /// ADR-0131 D2 model allow-list: the agent's own `agent.model` plus whatever
+    /// `workspace.settings.allowed_agent_models` permits. Single-sourced so the
+    /// agent-preference path (below) and the ADR-0134 D1 request `routing.model`
+    /// gate cannot drift apart.
+    static func allowedAgentModels(
+        baseModel: String,
+        workspaceSettingsJSON: String
+    ) -> Set<String> {
+        var allowed = Set([baseModel])
+        if let data = workspaceSettingsJSON.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let configured = object["allowed_agent_models"] as? [String]
+                ?? object["allowedAgentModels"] as? [String]
+            allowed.formUnion(configured ?? [])
+        }
+        return allowed
+    }
+
     static func resolveProfileModel(
         baseModel: String,
         modelPref: String?,
@@ -1689,13 +1723,9 @@ struct MessageRoutes: Sendable {
         guard let preference = modelPref?.trimmingCharacters(in: .whitespacesAndNewlines),
               !preference.isEmpty
         else { return (baseModel, nil) }
-        var allowed = Set([baseModel])
-        if let data = workspaceSettingsJSON.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let configured = object["allowed_agent_models"] as? [String]
-                ?? object["allowedAgentModels"] as? [String]
-            allowed.formUnion(configured ?? [])
-        }
+        let allowed = allowedAgentModels(
+            baseModel: baseModel, workspaceSettingsJSON: workspaceSettingsJSON
+        )
         return allowed.contains(preference)
             ? (preference, nil)
             : (baseModel, preference)
@@ -1930,6 +1960,7 @@ struct MessageRoutes: Sendable {
         body: String,
         hlcTs: Int64,
         agent: AgentMentionCandidate,
+        requestRouting: RunRoutingInput?,
         agentGateway: AgentGatewayConfig
     ) async throws {
         let causality = try await mentionCausality(
@@ -1940,6 +1971,19 @@ struct MessageRoutes: Sendable {
             authorMemberID: authorMemberID,
             authorIsAgent: authorIsAgent,
             sourceRunID: sourceRunID
+        )
+        // MOMO-625 / ADR-0134 D1·D3 — identical to the work-run path: eligibility
+        // first (membership / paused / depth cap → 403·409), then the routing
+        // gate. An explicit violation throws `HTTPError(.badRequest)` and, because
+        // mention routing shares the send transaction (MOMO-215), rolls the whole
+        // send back — the message the user just chose a bad model for is not
+        // silently delivered with a different one.
+        let routing = try RunRoutingResolution.resolve(
+            requested: requestRouting,
+            baseModel: agent.baseModel,
+            modelPref: agent.modelPref,
+            effortPref: agent.effortPref,
+            workspaceSettingsJSON: agent.workspaceSettingsJSON
         )
         let idempotencyKey = "mention:\(messageID.uuidString):\(agent.id.uuidString)"
         let input = mentionRunInput(
@@ -1952,7 +1996,8 @@ struct MessageRoutes: Sendable {
             body: body,
             idempotencyKey: idempotencyKey,
             parentRunID: causality.parentRunID,
-            depth: causality.depth
+            depth: causality.depth,
+            requestRouting: requestRouting
         )
         // MOMO-302: materialize a same-channel history window (recent-N, thread
         // priority) so the worker assembles a conversation instead of a single
@@ -1984,7 +2029,7 @@ struct MessageRoutes: Sendable {
         guard let first = rows.first else { return }
         let runID = try first.decode(UUID.self)
 
-        if let ignoredModelPref = agent.ignoredModelPref {
+        if let ignoredModelPref = routing.ignoredModelPref {
             _ = try await conn.query(
                 """
                 INSERT INTO audit_log
@@ -1996,7 +2041,7 @@ struct MessageRoutes: Sendable {
                    jsonb_build_object(
                      'schema', 'momo.agent_profile.model_pref.ignored.v1',
                      'requested_model', \(ignoredModelPref),
-                     'selected_model', \(agent.model),
+                     'selected_model', \(routing.model),
                      'reason', 'not_in_workspace_allowed_models'
                    ))
                 """,
@@ -2023,6 +2068,7 @@ struct MessageRoutes: Sendable {
             authorMemberID: authorMemberID,
             runID: runID,
             agent: agent,
+            resolvedModel: routing.model,
             body: body,
             idempotencyKey: idempotencyKey,
             recentMessages: recentMessages
@@ -2036,6 +2082,7 @@ struct MessageRoutes: Sendable {
             authorMemberID: authorMemberID,
             runID: runID,
             agent: agent,
+            routing: routing,
             body: body,
             hlcTs: hlcTs,
             idempotencyKey: idempotencyKey,
@@ -2088,7 +2135,9 @@ struct MessageRoutes: Sendable {
             agent: agent,
             reason: "queued",
             runID: runID,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            requestRouting: requestRouting,
+            routing: routing
         )
         _ = try await conn.query(
             """
@@ -2188,7 +2237,8 @@ struct MessageRoutes: Sendable {
         body: String,
         idempotencyKey: String,
         parentRunID: UUID?,
-        depth: Int
+        depth: Int,
+        requestRouting: RunRoutingInput?
     ) -> String {
         var input: [String: Any] = [
             "schema": "momo.agent_run.input.v0",
@@ -2211,6 +2261,15 @@ struct MessageRoutes: Sendable {
             ),
         ]
         if let parentRunID { input["parent_run_id"] = parentRunID.uuidString }
+        // MOMO-625 / ADR-0134 D1: same echo convention as `WorkRunInput.jsonValue`
+        // — the stored input records what the caller ASKED for, never the resolved
+        // values, and the key is omitted entirely when nothing was requested so an
+        // inherited preference is not replayed as a client choice. Downstream this
+        // is also where `usage_ledger.effort` reads the request tier from
+        // (`agent_run.input->'routing'->>'effort'`, AgentGatewayRoutes).
+        if let requested = requestRouting?.auditObject, !requested.isEmpty {
+            input["routing"] = requested
+        }
         return jsonString(input)
     }
 
@@ -2222,6 +2281,7 @@ struct MessageRoutes: Sendable {
         authorMemberID: UUID,
         runID: UUID,
         agent: AgentMentionCandidate,
+        routing: RunRoutingResolution,
         body: String,
         hlcTs: Int64,
         idempotencyKey: String,
@@ -2246,7 +2306,10 @@ struct MessageRoutes: Sendable {
             "author_member_id": authorMemberID.uuidString,
             "trigger_message_id": messageID.uuidString,
             "trigger_message_seq": messageSeq,
-            "model": agent.model,
+            // ADR-0134 D4: the RESOLVED model is always on the payload — never
+            // hidden — so "who ran on what" is answerable without replaying the
+            // inheritance chain.
+            "model": routing.model,
             "prompt": body,
             // MOMO-302: worker-facing conversation window (recent-N/thread, ASC).
             "recent_messages": recentMessages,
@@ -2271,6 +2334,13 @@ struct MessageRoutes: Sendable {
         if let systemPrompt = agent.systemPrompt,
            !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             payload["system_prompt"] = systemPrompt
+        }
+        // ADR-0134 D2/D3: the effort axis rides the same job payload as `model`,
+        // so both the worker (usage_ledger) and the gateway adapter see it. The
+        // key is omitted entirely when nothing was requested or inherited (no
+        // null noise), which also covers an unusable preference being dropped.
+        if let effort = routing.effort {
+            payload["effort"] = effort
         }
         return jsonString(payload)
     }
@@ -2312,6 +2382,7 @@ struct MessageRoutes: Sendable {
         authorMemberID: UUID,
         runID: UUID,
         agent: AgentMentionCandidate,
+        resolvedModel: String,
         body: String,
         idempotencyKey: String,
         recentMessages: [[String: Any]]
@@ -2445,7 +2516,7 @@ struct MessageRoutes: Sendable {
             content["agent_profile"] = [
                 "version": profileVersion,
                 "tool_policy": "intersection",
-                "model": agent.model,
+                "model": resolvedModel,
             ]
         }
         let json = jsonString(content)
@@ -2697,7 +2768,9 @@ struct MessageRoutes: Sendable {
         agent: AgentMentionCandidate,
         reason: String,
         runID: UUID?,
-        idempotencyKey: String?
+        idempotencyKey: String?,
+        requestRouting: RunRoutingInput? = nil,
+        routing: RunRoutingResolution? = nil
     ) -> String {
         var detail: [String: Any] = [
             "schema": "momo.agent_mention.diagnostic.v0",
@@ -2715,6 +2788,20 @@ struct MessageRoutes: Sendable {
         ]
         if let runID { detail["run_id"] = runID.uuidString }
         if let idempotencyKey { detail["idempotency_key"] = idempotencyKey }
+        // MOMO-625 / ADR-0134 D1·D4: the same routing keys `agent.work.queued`
+        // records, so one audit query answers "what model/effort did this run get,
+        // and what did the caller ask for" across BOTH surfaces. The asymmetry is
+        // the decision: an explicit violation never reaches here (it is a 400),
+        // while an ignored inherited preference is only ever visible as audit.
+        if let routing {
+            detail["resolved_model"] = routing.model
+            if let effort = routing.effort { detail["resolved_effort"] = effort }
+            if let ignored = routing.ignoredModelPref { detail["ignored_model_pref"] = ignored }
+            if let ignored = routing.ignoredEffortPref { detail["ignored_effort_pref"] = ignored }
+        }
+        if let requested = requestRouting?.auditObject, !requested.isEmpty {
+            detail["routing"] = requested
+        }
         return jsonString(detail)
     }
 

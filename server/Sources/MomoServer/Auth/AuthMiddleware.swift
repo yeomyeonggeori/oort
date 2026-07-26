@@ -241,6 +241,12 @@ struct AuthMiddleware: RouterMiddleware {
         {
             return "agent:runs:callback"
         }
+        // MOMO-623 / ADR-0135 D2: quota snapshot INGEST only. The matching GET is
+        // deliberately absent, so an adapter credential can write the gauge but
+        // can never enumerate the instance's provider state.
+        if method == "POST", path == ProviderQuotaSnapshotRoutes.path {
+            return ProviderQuotaSnapshotRoutes.ingestScope
+        }
         return nil
     }
 }

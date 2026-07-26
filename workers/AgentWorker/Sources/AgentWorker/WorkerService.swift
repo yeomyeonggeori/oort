@@ -54,6 +54,10 @@ struct WorkerService: Service {
     // provider_link read+decrypt. Default value ⇒ no change to the memberwise init
     // callers (Main.swift).
     let providerLinkCache = ProviderLinkCache()
+    // MOMO-622 / ADR-0135 D1: same cache posture for the ordered fallback hops
+    // (`provider_link_chain`, migration 042). Default value ⇒ no change to the
+    // memberwise init callers (Main.swift).
+    let providerChainCache = ProviderChainCache()
 
     private static let decoder = JSONDecoder()
 
@@ -358,8 +362,17 @@ struct WorkerService: Service {
         // only model-invocation site; resume_approval never reaches this point), so
         // this single resolution covers both. The decrypted bearer stays local to
         // the transport and is never logged or written to the payload/ledger.
-        let effectiveHermes = await resolveTransport()
-        let stream = effectiveHermes.invoke(
+        //
+        // MOMO-622 / ADR-0135 D1: that resolution is now the HEAD of an ordered
+        // cascade. `cascadingInvoke` walks the hops and advances only on a
+        // provider-side availability failure (no response / 5xx / 429), recording
+        // every transition; a 4xx propagates untouched.
+        let cascade = await resolveCascade()
+        let stream = cascadingInvoke(
+            hops: cascade,
+            job: job,
+            runID: p.runID,
+            channelID: p.channelID,
             model: p.model,
             messages: messages,
             tools: WorkToolDispatcher.mergedToolDefinitions(into: p.tools),
@@ -509,7 +522,7 @@ struct WorkerService: Service {
         let u = usage ?? (prompt: 0, completion: 0, cached: 0, reasoning: 0)
         await cost.reconcile(
             workspaceID: job.workspaceID, runID: p.runID, agentMemberID: p.agentMemberID,
-            channelID: p.channelID, model: p.model,
+            channelID: p.channelID, model: p.model, effort: p.effort,
             promptTokens: u.prompt, completionTokens: u.completion,
             cachedTokens: u.cached, reasoningTokens: u.reasoning,
             wasEstimated: wasEstimated, reservedMicroUSD: reservedMicroUSD)
@@ -925,20 +938,32 @@ struct WorkerService: Service {
         ])
     }
 
-    // MARK: - Job-time provider resolution (MOMO-573 / ADR-0004 증보 1 P-1b)
+    // MARK: - Job-time provider resolution (MOMO-573 / ADR-0004 증보 1 P-1b,
+    //         extended to the cascade by MOMO-622 / ADR-0135 D1)
 
-    /// Resolve the `HermesTransport` for the current turn. Returns a transport
-    /// pointed at the operator's `provider_link` (DB base_url + decrypted bearer)
-    /// when a present, usable row exists; otherwise the boot-time env transport.
+    /// Resolve the ordered hop list for the current turn.
     ///
-    /// The DB read + AES-GCM decrypt are cached with a short TTL and skipped
-    /// entirely when the row is unchanged (see `ProviderLinkCache`), so this is
-    /// cheap on the hot path while still reflecting a GUI change from the next job
-    /// after the TTL window. Fails safe to env on any missing key / unreadable /
-    /// undecryptable / unusable row — never fails the turn blank.
-    private func resolveTransport() async -> HermesTransport {
+    /// `[0]` is the MOMO-573 head: a hop pointed at the operator's `provider_link`
+    /// (DB base_url + decrypted bearer) when a present, usable row exists,
+    /// otherwise the boot-time env transport. It is never dropped, so an instance
+    /// with no chain configured behaves exactly as it did before this ticket.
+    /// Positions >= 1 come from `provider_link_chain` (migration 042), filtered to
+    /// enabled + usable hops. The result always has at least one element.
+    ///
+    /// The DB reads + AES-GCM decrypts are cached with a short TTL and skipped
+    /// entirely when nothing changed (see `ProviderLinkCache` / `ProviderChainCache`),
+    /// so this is cheap on the hot path while still reflecting a GUI change from the
+    /// next job after the TTL window. Fails safe to env on any missing key /
+    /// unreadable / undecryptable / unusable row — never fails the turn blank.
+    private func resolveCascade() async -> [ProviderCascadeHop] {
+        let envHop = ProviderCascadeHop(
+            position: 0, source: .environment,
+            baseURL: hermes.baseURL, bearer: hermes.apiKey
+        )
         guard let masterKey = config.providerLinkMasterKey else {
-            return hermes   // no key configured ⇒ env transport (backward compatible)
+            // No key configured ⇒ env transport and no chain (the chain rows would
+            // be undecryptable anyway). Backward compatible with MOMO-573.
+            return [envHop]
         }
         let pg = self.pg
         let logger = self.logger
@@ -948,16 +973,185 @@ struct WorkerService: Service {
             logger: logger,
             read: { try await WorkerProviderLinkStore.read(pg: pg, logger: logger) }
         )
-        guard let override = ProviderLinkResolution.transportOverride(link: link) else {
-            return hermes
+        let head: ProviderCascadeHop
+        if let override = ProviderLinkResolution.transportOverride(link: link) {
+            head = ProviderCascadeHop(
+                position: 0, source: .providerLink,
+                baseURL: override.baseURL, bearer: override.bearer
+            )
+        } else {
+            head = envHop
         }
-        // Reuse the shared HTTPClient; only the endpoint + bearer differ.
-        return HermesTransport(
+        let chain = await providerChainCache.resolve(
+            masterKey: masterKey,
+            ttl: config.providerLinkCacheTTL,
+            logger: logger,
+            read: { try await WorkerProviderChainStore.read(pg: pg, logger: logger) }
+        )
+        return ProviderCascade.plan(head: head, chain: chain)
+    }
+
+    /// One hop as a transport. Reuses the shared HTTPClient; only the endpoint and
+    /// bearer differ. The bearer stays local to the transport — never logged,
+    /// never written to a payload/ledger/audit row (ADR-0004).
+    private func transport(for hop: ProviderCascadeHop) -> HermesTransport {
+        HermesTransport(
             httpClient: hermes.httpClient,
-            baseURL: override.baseURL,
-            apiKey: override.bearer,
+            baseURL: hop.baseURL,
+            apiKey: hop.bearer,
             logger: logger
         )
+    }
+
+    /// Invoke the model across the cascade (ADR-0135 D1) with this worker's
+    /// transport factory and the audit/outbox recorder wired in. The traversal
+    /// rule itself lives in `ProviderCascadeRunner` / `ProviderCascade.step` so it
+    /// is measurable without Postgres or Centrifugo.
+    ///
+    /// Every transition is recorded before the next hop is attempted — ADR-0135 D1
+    /// "조용한 전환 금지".
+    private func cascadingInvoke(
+        hops: [ProviderCascadeHop],
+        job: ClaimedJob,
+        runID: UUID?,
+        channelID: UUID,
+        model: String,
+        messages: [HermesTransport.ChatMessage],
+        tools: JSONValue?,
+        maxTokens: Int?
+    ) -> AsyncThrowingStream<AgentEvent, Error> {
+        ProviderCascadeRunner.invoke(
+            hops: hops,
+            model: model,
+            messages: messages,
+            tools: tools,
+            maxTokens: maxTokens,
+            makeTransport: { transport(for: $0) },
+            onFallback: { from, to, reason in
+                await recordCascadeFallback(
+                    job: job, runID: runID, channelID: channelID,
+                    from: from, to: to, reason: reason
+                )
+            }
+        )
+    }
+
+    /// Record a cascade transition: an `audit_log` row plus a run event published
+    /// through the outbox (single write path — never a direct broker publish).
+    ///
+    /// Best effort by design: a bookkeeping failure must not fail a turn the
+    /// second provider is about to serve. It is logged loudly instead.
+    private func recordCascadeFallback(
+        job: ClaimedJob,
+        runID: UUID?,
+        channelID: UUID,
+        from: ProviderCascadeHop,
+        to: ProviderCascadeHop,
+        reason: String
+    ) async {
+        let detail = Self.jsonString([
+            "schema": "momo.provider.cascade.fallback.v1",
+            "from": from.position,
+            "to": to.position,
+            "reason": reason,
+            "from_source": from.source.rawValue,
+            "to_source": to.source.rawValue,
+            // Endpoint labels only — host(:port), never the full URL and never the
+            // bearer (ADR-0004 evidence rule).
+            "from_endpoint_label": from.endpointLabel,
+            "to_endpoint_label": to.endpointLabel,
+        ])
+        let payload = Self.cascadeFallbackBroadcastPayload(
+            workspaceID: job.workspaceID,
+            channelID: channelID,
+            runID: runID,
+            outboxID: job.id,
+            from: from,
+            to: to,
+            reason: reason
+        )
+        logger.warning("provider cascade fell over to the next hop", metadata: [
+            "outboxId": .stringConvertible(job.id),
+            "runId": .string(runID?.uuidString ?? "nil"),
+            "from": .stringConvertible(from.position),
+            "to": .stringConvertible(to.position),
+            "reason": .string(reason),
+            "toEndpoint": .string(to.endpointLabel),
+        ])
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
+                    logger: logger)
+                _ = try await conn.query(
+                    """
+                    INSERT INTO audit_log
+                      (workspace_id, actor_member_id, action, target_type, target_id,
+                       run_id, detail)
+                    VALUES
+                      (\(job.workspaceID), \(job.payload.agentMemberID),
+                       'provider.cascade.fallback', 'provider_link_chain', NULL,
+                       \(runID), \(detail)::jsonb)
+                    """,
+                    logger: logger)
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(job.workspaceID), 'broadcast', 'publish',
+                       \(payload)::jsonb, \(channelID))
+                    """,
+                    logger: logger)
+            }
+        } catch {
+            logger.error("failed to record provider cascade fallback", metadata: [
+                "outboxId": .stringConvertible(job.id),
+                "error": .string(String(describing: error)),
+            ])
+        }
+    }
+
+    /// Centrifugo envelope for the `provider.cascade.fallback` run event. The card
+    /// renders "2차 프로바이더로 처리됨" from this; it carries positions, a coarse
+    /// reason, and redacted endpoint labels — never a bearer or a full base URL.
+    static func cascadeFallbackBroadcastPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        runID: UUID?,
+        outboxID: Int64,
+        from: ProviderCascadeHop,
+        to: ProviderCascadeHop,
+        reason: String
+    ) -> String {
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let ts = Int64(Date().timeIntervalSince1970 * 1000)
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "provider.cascade.fallback",
+                "v": 1,
+                "ts": ts,
+                "payload": [
+                    "channel_id": channelID.uuidString,
+                    // `as Any` on a nil Optional makes JSONSerialization reject the
+                    // whole object (jsonString would silently emit "{}") — NSNull
+                    // is the only safe spelling here.
+                    "run_id": runID.map { $0.uuidString as Any } ?? NSNull(),
+                    "from": from.position,
+                    "to": to.position,
+                    "reason": reason,
+                    "from_endpoint_label": from.endpointLabel,
+                    "to_endpoint_label": to.endpointLabel,
+                ],
+            ],
+            // No Centrifugo version: this event claims no channel seq (it is not a
+            // message), and the broker drops a publish whose version is not
+            // strictly greater than the channel's stored version. Idempotency
+            // stays on the key: one outbox row per (run, transition).
+            "idempotency_key":
+                "\(centChannel):provider.cascade.fallback:\(runID?.uuidString ?? String(outboxID)):\(from.position)-\(to.position)",
+        ])
     }
 
     // MARK: - approval resume executor (MOMO-178)

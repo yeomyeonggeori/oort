@@ -1,4 +1,5 @@
 import Foundation
+import Hummingbird
 import XCTest
 @testable import MomoServer
 
@@ -28,6 +29,69 @@ final class AgentProfileRoutesTests: XCTestCase {
         ])
         XCTAssertThrowsError(try AgentProfileValidation.validate(
             try JSONDecoder().decode(AgentProfileInput.self, from: data)
+        ))
+    }
+
+    // MARK: - effort_pref writer (MOMO-625 / ADR-0134 D3)
+
+    func testEffortPrefIsNormalizedAndOptional() throws {
+        let normalized = try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","effortPref":"  MAX  ","enabledTools":[]}
+        """#))
+        XCTAssertEqual(normalized.effortPref, "max")
+
+        // Absent = inherit; the column stays NULL rather than gaining a default.
+        XCTAssertNil(try AgentProfileValidation.validate(try decode(
+            #"{"instructions":"x","enabledTools":[]}"#
+        )).effortPref)
+    }
+
+    /// A *write* is an explicit choice, so an unusable level is a visible 400 —
+    /// the ADR-0134 D1 asymmetry. (Once stored, an unusable preference is still
+    /// silently ignored at run time; see `RunRoutingTests`.)
+    func testEffortPrefOutsideTheCanonicalLevelsIsRejected() {
+        for bogus in ["ultra", "none", "reasoning", "1", "  ", String(repeating: "x", count: 33)] {
+            XCTAssertThrowsError(
+                try AgentProfileValidation.validate(try decode(
+                    #"{"instructions":"x","effortPref":"\#(bogus)","enabledTools":[]}"#
+                )),
+                "effortPref '\(bogus)' must be a 400"
+            ) { error in
+                XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+            }
+        }
+    }
+
+    /// With `modelPref` set the body itself pins the model down, so the
+    /// provider×model effort table applies; without it only the level set can be
+    /// checked, because the resolved model is a run-time property.
+    func testEffortPrefIsGatedAgainstModelPrefOnlyWhenTheModelIsDetermined() throws {
+        XCTAssertThrowsError(try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","modelPref":"hermes-fast","effortPref":"max","enabledTools":[]}
+        """#))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+
+        let compatible = try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","modelPref":"hermes-fast","effortPref":"low","enabledTools":[]}
+        """#))
+        XCTAssertEqual(compatible.effortPref, "low")
+
+        // No modelPref → the resolved model is unknown here, so `max` is a legal
+        // preference to store even though some models will later ignore it.
+        let undetermined = try AgentProfileValidation.validate(try decode(#"""
+        {"instructions":"x","effortPref":"max","enabledTools":[]}
+        """#))
+        XCTAssertEqual(undetermined.effortPref, "max")
+    }
+
+    /// `effortPref` is the only key the profile contract grew.
+    func testProfileBodyStaysClosedWorldAroundEffortPref() {
+        XCTAssertThrowsError(try decode(
+            #"{"instructions":"x","enabledTools":[],"effort_pref":"low"}"#
+        ))
+        XCTAssertThrowsError(try decode(
+            #"{"instructions":"x","enabledTools":[],"effort":"low"}"#
         ))
     }
 
@@ -113,6 +177,77 @@ final class AgentProfileRoutesTests: XCTestCase {
         )
         XCTAssertEqual(denied.model, "hermes-default")
         XCTAssertEqual(denied.ignoredPreference, "external-premium")
+    }
+
+    // MARK: - modelPref allow-list at write time (F1, 2026-07-26 merge review)
+
+    /// Writing a `modelPref` the workspace does not allow used to answer 200 and
+    /// then be silently swapped for `agent.model` at run time, so the client was
+    /// told a model was in effect that never ran. The write is now a 400.
+    func testModelPrefOutsideTheWorkspaceAllowlistIsRejectedAtWriteTime() {
+        XCTAssertThrowsError(
+            try AgentProfileRoutes.assertModelPrefIsAllowed(
+                "external-premium",
+                baseModel: "hermes-default",
+                workspaceSettingsJSON: #"{"allowed_agent_models":["hermes-fast"]}"#
+            )
+        ) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+
+        // No allow-list configured at all: only the agent's own model is legal.
+        XCTAssertThrowsError(
+            try AgentProfileRoutes.assertModelPrefIsAllowed(
+                "hermes-fast", baseModel: "hermes-default", workspaceSettingsJSON: "{}"
+            )
+        )
+    }
+
+    /// The gate must accept exactly what the request tier accepts — the agent's
+    /// own model plus `allowed_agent_models` — or the two surfaces disagree
+    /// about the same string.
+    func testModelPrefWriteAcceptsTheSameSetTheRequestTierAccepts() throws {
+        let settings = #"{"allowed_agent_models":["hermes-fast","hermes-lite"]}"#
+        for candidate in ["hermes-default", "hermes-fast", "hermes-lite"] {
+            XCTAssertNoThrow(
+                try AgentProfileRoutes.assertModelPrefIsAllowed(
+                    candidate, baseModel: "hermes-default", workspaceSettingsJSON: settings
+                ),
+                "\(candidate) is accepted by RunRoutingResolution, so the writer must accept it"
+            )
+            XCTAssertTrue(
+                MessageRoutes.allowedAgentModels(
+                    baseModel: "hermes-default", workspaceSettingsJSON: settings
+                ).contains(candidate)
+            )
+        }
+
+        // Absent preference = inherit; nothing to check, never a 400.
+        XCTAssertNoThrow(
+            try AgentProfileRoutes.assertModelPrefIsAllowed(
+                nil, baseModel: "hermes-default", workspaceSettingsJSON: "{}"
+            )
+        )
+    }
+
+    /// ADR-0131 D2 is untouched for *inherited* preferences: a violating value
+    /// already sitting in `agent_profile` is still silently ignored at run time
+    /// and still audited, so reads keep working. Only the explicit write changed.
+    func testAlreadyStoredViolationStaysASilentRuntimeIgnore() {
+        let resolved = MessageRoutes.resolveProfileModel(
+            baseModel: "hermes-default", modelPref: "external-premium",
+            workspaceSettingsJSON: #"{"allowed_agent_models":["hermes-fast"]}"#
+        )
+        XCTAssertEqual(resolved.model, "hermes-default")
+        XCTAssertEqual(resolved.ignoredPreference, "external-premium")
+        XCTAssertThrowsError(
+            try AgentProfileRoutes.assertModelPrefIsAllowed(
+                "external-premium",
+                baseModel: "hermes-default",
+                workspaceSettingsJSON: #"{"allowed_agent_models":["hermes-fast"]}"#
+            ),
+            "the same value that is silently ignored at run time is a 400 to write"
+        )
     }
 
     func testProfileToolSelectionCanOnlyNarrowExistingGrants() {

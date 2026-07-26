@@ -61,10 +61,12 @@ response through `/gateway/complete`. Configure `MOMO_HOME_CHANNEL` and
 | File | Purpose |
 |---|---|
 | `momo_adapter.py` | `MomoAdapter(BasePlatformAdapter)` + `register(ctx)` / `register_platform()`. |
+| `provider_chain.py` | provider polymorphism (ADR-0135 D3): chat/health/probe interface, cascade, effort table, quota snapshots. |
 | `plugin.yaml` | Hermes platform plugin manifest (`kind: platform`, entrypoint `adapter.py`). On default macOS case-insensitive filesystems this also resolves as `PLUGIN.yaml`. |
 | `requirements.txt` | runtime deps (`aiohttp`, `websockets`). |
 | `tests/smoke_momo_adapter.py` | dependency-free local smoke: Centrifugo fixture in, REST calls captured, no network. |
 | `tests/test_momo_adapter_contract.py` | stdlib unittest for contract fixtures and smoke harness. |
+| `tests/test_provider_chain_contract.py` | stdlib unittest for cascade/effort/quota — no momo server, no provider, no network. |
 | `README.md` | this file. |
 
 ## Install
@@ -104,6 +106,34 @@ The adapter is env-driven (see `PLUGIN.yaml` `requires_env`/`optional_env`):
 | `MOMO_HOME_CHANNEL_NAME` | display name for the configured home channel (default `agent-lab` in the local setup). |
 | `MOMO_AGENT_TOKEN` | scoped per-agent momo bearer used for realtime, pending recovery, callbacks, and message writes. It is not a provider token. |
 | `MOMO_AGENT_ALLOW_INSECURE_HTTP` | optional explicit opt-in for trusted non-loopback private networks. Without it, non-loopback API/WS endpoints require `https`/`wss`. |
+| `MOMO_PROVIDER_BEARER_ENV_PREFIX` | env prefix this adapter reads *provider* bearers from (default `HERMES_PROVIDER_BEARER`; per link `HERMES_PROVIDER_BEARER__<PROVIDER_REF>`). The name of a variable, never a secret value. |
+| `MOMO_QUOTA_PROBE_ENABLED` | set `0` to disable the periodic remaining-quota probe (default enabled). |
+| `MOMO_QUOTA_PROBE_INTERVAL_S` | probe period in seconds, floor 30, default 900. |
+
+### Provider cascade, effort, quota probe (ADR-0134 D2 / ADR-0135 D2·D3)
+
+momo hands down the provider chain **shape only** — an ordered list of
+`{provider_ref, position, base_url, mode, enabled}`. Credentials never travel on
+that payload: each link's bearer is read from this adapter's own environment
+under `MOMO_PROVIDER_BEARER_ENV_PREFIX` (ADR-0004, "provider 자격증명 비유입"). A
+chain payload carrying a credential-shaped key is rejected outright, not sanitized.
+
+* **cascade** — links are tried in `position` order. Only *no response / 5xx /
+  429* (plus 408/425, matching `MomoAdapter._is_retryable_http_status` so the
+  adapter and the momo gateway classify identically) fall through to the next
+  link. Every other 4xx is a validation error and propagates unchanged — a user's
+  bad request must never be re-billed against a second provider. Each transition
+  is reported to momo as `provider.cascade.fallback {from, to, reason}`; silent
+  failover is a contract violation.
+* **effort** — a request's `routing {model, effort}` is validated against the
+  provider×model effort table momo owns (`GET /v1/provider/effort-table`). An
+  effort the model does not support — or an unavailable table — is dropped with a
+  log line and never guessed into the provider request.
+* **quota probe** — the adapter probes because it is the side holding the
+  credential, then posts *numbers only* to
+  `POST /v1/provider/quota-snapshots` as
+  `{provider_ref, window(short|weekly), remaining_ratio, resets_at, probed_at}`.
+  The body is asserted key-exact and credential-free before it is sent.
 
 Connection sequence (§6.3 / §7.1 / §4.3):
 

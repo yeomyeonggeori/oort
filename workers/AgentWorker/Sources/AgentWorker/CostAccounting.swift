@@ -104,6 +104,7 @@ struct CostAccounting: Sendable {
         agentMemberID: UUID,
         channelID: UUID,
         model: String,
+        effort: String?,
         promptTokens: Int,
         completionTokens: Int,
         cachedTokens: Int,
@@ -129,11 +130,11 @@ struct CostAccounting: Sendable {
                     INSERT INTO usage_ledger
                       (workspace_id, run_id, agent_member_id, channel_id, model,
                        prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens,
-                       cost_micro_usd, was_estimated)
+                       cost_micro_usd, was_estimated, effort)
                     VALUES
                       (\(workspaceID), \(runID), \(agentMemberID), \(channelID), \(model),
                        \(promptTokens), \(completionTokens), \(cachedTokens), \(reasoningTokens),
-                       \(cost), \(wasEstimated))
+                       \(cost), \(wasEstimated), \(Self.normalizedEffort(effort)))
                     """,
                     logger: logger
                 )
@@ -151,6 +152,7 @@ struct CostAccounting: Sendable {
 
                 logger.debug("budget reconcile", metadata: [
                     "model": .string(model),
+                    "effort": .string(Self.normalizedEffort(effort) ?? "none"),
                     "promptTokens": .stringConvertible(promptTokens),
                     "completionTokens": .stringConvertible(completionTokens),
                     "costMicroUSD": .stringConvertible(cost),
@@ -360,6 +362,20 @@ struct CostAccounting: Sendable {
             + microUSD(tokens: completionTokens, unitPriceText: pricing.output, rounding: .plain)
             + microUSD(tokens: cachedTokens, unitPriceText: pricing.cacheRead, rounding: .plain)
             + microUSD(tokens: reasoningTokens, unitPriceText: pricing.reasoning, rounding: .plain)
+    }
+
+    /// ADR-0134 D2: the effort the server resolved for this job, normalized to the
+    /// canonical lowercase token and bounded by migration 041's length CHECK
+    /// (1…32). A blank or oversized payload value becomes NULL rather than
+    /// aborting the whole reconcile transaction on a constraint violation — the
+    /// ledger row (cost SoT) must never be lost to a cosmetic analysis field.
+    /// The worker deliberately does not re-run the provider×model table here; the
+    /// server already gated the value before it reached the job payload.
+    static func normalizedEffort(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty, trimmed.count <= 32 else { return nil }
+        return trimmed
     }
 
     static func microUSD(

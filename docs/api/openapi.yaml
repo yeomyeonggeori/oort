@@ -686,7 +686,11 @@ paths:
         Human workspace owner/admin or agent owner only. instructions are
         limited to 8192 bytes; credential-shaped fields are rejected.
         enabledTools only narrows existing grants. mention=true is fixed and
-        schedule is reserved data with no v0 executor.
+        schedule is reserved data with no v0 executor. modelPref must be inside
+        workspace.settings.allowed_agent_models or equal to the agent's own model
+        (ADR-0131 D2); an explicit write of anything else is a 400, while a value
+        stored before the allow-list narrowed is still read back unchanged and
+        stays a silent run-time ignore.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -706,7 +710,9 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AgentProfileResponse"}
         "400":
-          description: Invalid profile, trigger, tool name, or credential-shaped field.
+          description: >
+            Invalid profile, trigger, tool name, credential-shaped field, or a
+            modelPref outside workspace.settings.allowed_agent_models.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}

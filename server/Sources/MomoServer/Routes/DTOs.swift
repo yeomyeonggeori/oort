@@ -103,7 +103,27 @@ struct MemberDTO: ResponseEncodable {
 // ---- Messages ----
 
 /// POST .../messages request body. `clientMsgId` drives idempotency (L4 §3.1).
+///
+/// MOMO-625 / ADR-0134 D1 (mention tier): the contract grows exactly one new
+/// key, `routing { model?, effort? }`, and becomes closed-world in the process.
+/// The mention path is the second surface that starts an agent run, so it needs
+/// the same per-request override the work-run path got in MOMO-621 — and the
+/// same guarantee that nothing else rides along. ADR-0134 D1 B (smuggling
+/// routing through a free-form field) was rejected, so `props` — the message's
+/// only free-form field — is deliberately NOT the carrier.
+///
+/// Closed-world is what makes the failure visible: without it a mistyped
+/// `routting` block would be silently dropped and the run would quietly use the
+/// inherited model — exactly the invisible failure D1 legislates against. Every
+/// first-party sender (macOS `MomoServerRESTChatBackend`, iOS
+/// `MomoServerConversationClient`, `adapters/hermes/momo_adapter.py`) already
+/// sends only these keys.
 struct SendMessageRequest: Decodable {
+    static let allowedKeys = Set([
+        "clientMsgId", "rootId", "type", "body", "props", "runId",
+        "attachmentIds", "routing",
+    ])
+
     let clientMsgId: UUID
     let rootId: UUID?
     let type: String?            // defaults to "text"
@@ -111,6 +131,46 @@ struct SendMessageRequest: Decodable {
     let props: [String: String]? // simplified structured payload for v0 stub
     let runId: UUID?
     let attachmentIds: [UUID]?
+    /// Kept as raw JSON and validated by `RunRoutingInput.validate` in the route,
+    /// so its 400s are plain `HTTPError`s raised before the write transaction
+    /// opens (MOMO-362) instead of decoder errors.
+    let routing: JSONValue?
+
+    private enum CodingKeys: String, CodingKey {
+        case clientMsgId, rootId, type, body, props, runId, attachmentIds, routing
+    }
+
+    init(from decoder: Decoder) throws {
+        let dynamic = try decoder.container(keyedBy: SendMessageCodingKey.self)
+        let unknownKeys = dynamic.allKeys
+            .map(\.stringValue)
+            .filter { !Self.allowedKeys.contains($0) }
+        if let first = unknownKeys.sorted().first {
+            throw DecodingError.dataCorruptedError(
+                forKey: SendMessageCodingKey(first),
+                in: dynamic,
+                debugDescription: "unknown message field"
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        clientMsgId = try container.decode(UUID.self, forKey: .clientMsgId)
+        rootId = try container.decodeIfPresent(UUID.self, forKey: .rootId)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+        body = try container.decodeIfPresent(String.self, forKey: .body)
+        props = try container.decodeIfPresent([String: String].self, forKey: .props)
+        runId = try container.decodeIfPresent(UUID.self, forKey: .runId)
+        attachmentIds = try container.decodeIfPresent([UUID].self, forKey: .attachmentIds)
+        routing = try container.decodeIfPresent(JSONValue.self, forKey: .routing)
+    }
+}
+
+private struct SendMessageCodingKey: CodingKey, Hashable {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init(_ stringValue: String) { self.stringValue = stringValue }
+    init?(stringValue: String) { self.init(stringValue) }
+    init?(intValue: Int) { self.stringValue = String(intValue) }
 }
 
 /// PATCH .../messages/{id} request. The authenticated author is the only
