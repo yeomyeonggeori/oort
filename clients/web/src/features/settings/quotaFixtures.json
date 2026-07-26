@@ -1,0 +1,113 @@
+{
+  "_note": "GET /v1/provider/quota-snapshots contract fixtures (ADR-0135 D2, MOMO-628). Transcribed from server/Sources/MomoServer/Routes/ProviderQuotaSnapshotRoutes.swift (ProviderQuotaSnapshotListResponse + ProviderQuotaSnapshotDTO) on track/engine, which momowebqa does not carry yet. Source of truth for quotaModel.test.ts AND scripts/capture-usage.mjs, so a screenshot and a test can never disagree about what the server said. Every instant is anchored to 2026-07-26T09:12:04Z (= 18:12 KST, 일요일); the capture script shifts the whole set by (now - anchor) so the reset labels render the same relative words whenever it is run. ageSeconds is the server's own figure and is NOT derived from probedAt, so shifting the instants leaves it consistent.",
+
+  "_anchor": "2026-07-26T09:12:04Z",
+
+  "healthy": {
+    "schema": "momo.provider_quota_snapshots.v0",
+    "observedAt": "2026-07-26T09:12:04Z",
+    "snapshots": [
+      {
+        "providerRef": "anthropic",
+        "window": "short",
+        "remainingRatio": 0.62,
+        "resetsAt": "2026-07-26T13:00:00Z",
+        "probedAt": "2026-07-26T09:08:20Z",
+        "ingestedAt": "2026-07-26T09:08:21Z",
+        "ageSeconds": 224
+      },
+      {
+        "providerRef": "anthropic",
+        "window": "weekly",
+        "remainingRatio": 0.41,
+        "resetsAt": "2026-07-27T15:00:00Z",
+        "probedAt": "2026-07-26T09:08:20Z",
+        "ingestedAt": "2026-07-26T09:08:21Z",
+        "ageSeconds": 224
+      },
+      {
+        "providerRef": "openai",
+        "window": "short",
+        "remainingRatio": 0.88,
+        "resetsAt": "2026-07-26T11:30:00Z",
+        "probedAt": "2026-07-26T09:10:28Z",
+        "ingestedAt": "2026-07-26T09:10:29Z",
+        "ageSeconds": 96
+      },
+      {
+        "providerRef": "openai",
+        "window": "weekly",
+        "remainingRatio": 0.73,
+        "resetsAt": "2026-07-30T15:00:00Z",
+        "probedAt": "2026-07-26T09:10:28Z",
+        "ingestedAt": "2026-07-26T09:10:29Z",
+        "ageSeconds": 96
+      }
+    ]
+  },
+
+  "staleSnapshot": {
+    "schema": "momo.provider_quota_snapshots.v0",
+    "observedAt": "2026-07-26T09:12:04Z",
+    "snapshots": [
+      {
+        "providerRef": "anthropic",
+        "window": "short",
+        "remainingRatio": 0.19,
+        "resetsAt": "2026-07-26T04:00:00Z",
+        "probedAt": "2026-07-26T01:39:04Z",
+        "ingestedAt": "2026-07-26T01:39:05Z",
+        "ageSeconds": 27180
+      },
+      {
+        "providerRef": "anthropic",
+        "window": "weekly",
+        "remainingRatio": 0.55,
+        "resetsAt": "2026-07-27T15:00:00Z",
+        "probedAt": "2026-07-26T01:39:04Z",
+        "ingestedAt": "2026-07-26T01:39:05Z",
+        "ageSeconds": 27180
+      }
+    ]
+  },
+
+  "absent": {
+    "schema": "momo.provider_quota_snapshots.v0",
+    "observedAt": "2026-07-26T09:12:04Z",
+    "snapshots": []
+  },
+
+  "nearLimit": {
+    "schema": "momo.provider_quota_snapshots.v0",
+    "observedAt": "2026-07-26T09:12:04Z",
+    "snapshots": [
+      {
+        "providerRef": "anthropic",
+        "window": "short",
+        "remainingRatio": 0.04,
+        "resetsAt": "2026-07-26T13:00:00Z",
+        "probedAt": "2026-07-26T09:11:23Z",
+        "ingestedAt": "2026-07-26T09:11:24Z",
+        "ageSeconds": 41
+      },
+      {
+        "providerRef": "anthropic",
+        "window": "weekly",
+        "remainingRatio": 0.18,
+        "resetsAt": "2026-07-27T15:00:00Z",
+        "probedAt": "2026-07-26T09:11:23Z",
+        "ingestedAt": "2026-07-26T09:11:24Z",
+        "ageSeconds": 41
+      },
+      {
+        "providerRef": "openai",
+        "window": "weekly",
+        "remainingRatio": 0.66,
+        "resetsAt": "2026-07-30T15:00:00Z",
+        "probedAt": "2026-07-26T09:11:01Z",
+        "ingestedAt": "2026-07-26T09:11:02Z",
+        "ageSeconds": 63
+      }
+    ]
+  }
+}

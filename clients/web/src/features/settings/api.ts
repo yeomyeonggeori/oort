@@ -473,3 +473,26 @@ export function fetchUsageSummary(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/usage/summary?${params.toString()}`
   );
 }
+
+// --- 구독 잔여량: GET /v1/provider/quota-snapshots --------------------------
+
+/**
+ * Provider quota snapshots (ADR-0135 D2, MOMO-628).
+ *
+ * Contract: server/Sources/MomoServer/Routes/ProviderQuotaSnapshotRoutes.swift
+ * (track/engine, ENGINE_HANDOFF X-14). The path carries no workspace segment
+ * and no query: the snapshots are instance-global telemetry, one latest row per
+ * (provider_ref, window), and membership is checked from the bearer rather than
+ * from the URL. Any active workspace member may read it, same convention as the
+ * usage summary.
+ *
+ * Only the WRITE side is scoped to an agent credential (`provider:quota:write`),
+ * which is the half that keeps ADR-0004 intact: the adapter holding the provider
+ * credential probes and posts numbers, and this client only ever reads them.
+ *
+ * Untyped on purpose and shaped by `parseQuotaSnapshots` (./quotaModel), where
+ * the contract is pinned and unit tested against the fixtures.
+ */
+export function fetchProviderQuotaSnapshots(): Promise<unknown> {
+  return settingsRequest<unknown>("/v1/provider/quota-snapshots");
+}

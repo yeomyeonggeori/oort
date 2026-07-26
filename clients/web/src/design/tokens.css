@@ -195,13 +195,27 @@
  *
  * Panes inside are then responsible for their own scrolling. Anything that
  * grows must sit in a `min-h-0 flex-1 overflow-y-auto` box; nothing may rely on
- * the document scrolling for it. */
+ * the document scrolling for it.
+ *
+ * `position: relative` is the third thing, and it is not decoration (MOMO-628).
+ * Overflow clipping does not apply to an absolutely positioned descendant whose
+ * containing block is an ancestor of the clipping box, and a static grid is not
+ * anybody's containing block. `sr-only` is `position: absolute`, so every
+ * screen-reader live region in the shell was placed against the initial
+ * containing block at its own static position: harmless while that position sat
+ * inside the viewport, and a document 222px taller than the window the moment a
+ * panel grew enough to push one below the fold (measured on 설정 > 사용량 at
+ * 760x480 while adding 구독 잔여량). The document then scrolled, the sidebar left
+ * the screen, and gate-shell-layout caught exactly the MOMO-610 regression it
+ * was written for. A box that promises to clip has to be the containing block
+ * for what it clips. */
 @utility app-shell {
   display: grid;
   grid-template-columns: var(--w-sidebar) 1fr;
   grid-template-rows: minmax(0, 1fr);
   block-size: 100%;
   min-block-size: 0;
+  position: relative;
   overflow: clip;
 }
 

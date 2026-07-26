@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 // =============================================================================
-// 설정 > 사용량 화면 캡처 (AX-7 1층 / MOMO-616).
+// 설정 > 사용량 화면 캡처 (AX-7 1층 MOMO-616 + 구독 잔여량 ADR-0135 D2 MOMO-628).
 //
-// Renders the real UsageSection against the three contract fixtures, in both
-// color schemes, plus the failure path that falls back to the last confirmed
-// answer. The payloads come from src/features/settings/usageFixtures.json, the
-// same file usageModel.test.ts asserts against, so a screenshot and a test can
-// never disagree about what the server said.
+// Renders the real UsageSection against the contract fixtures, in both color
+// schemes, plus the failure paths that fall back to the last confirmed answer.
+// The payloads come from src/features/settings/usageFixtures.json and
+// quotaFixtures.json, the same files usageModel.test.ts and quotaModel.test.ts
+// assert against, so a screenshot and a test can never disagree about what the
+// server said.
 //
 //   node scripts/capture-usage.mjs           # -> artifacts/design/usage-*.png
 //   OUT_DIR=/tmp/shots node scripts/capture-usage.mjs
 //
 // No credentials and no backend: /v1 is fulfilled from the fixtures below.
-// Contract: docs/planning/handoffs/2026-07-25-usage-summary-contract.md
+// Contracts: docs/planning/handoffs/2026-07-25-usage-summary-contract.md
+//            server/.../Routes/ProviderQuotaSnapshotRoutes.swift (X-14)
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -32,6 +34,36 @@ const VIEWPORT = { width: 1280, height: 800 };
 const FIXTURES = JSON.parse(
   readFileSync(resolve(WEB_ROOT, "src/features/settings/usageFixtures.json"), "utf8")
 );
+
+const QUOTA = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/quotaFixtures.json"), "utf8")
+);
+
+/**
+ * The quota fixtures carry absolute instants (a reset time is absolute by
+ * contract), so run six weeks later and every "오늘 22:00 리셋" would render as a
+ * date instead. Shifting the whole set by (now - anchor) keeps the relative
+ * words the same on any day the capture runs, and it stays consistent because
+ * nothing in the panel derives age from these instants: `ageSeconds` is the
+ * server's own figure and is left exactly as the fixture wrote it.
+ */
+function anchoredQuota(fixture) {
+  const shift = Date.now() - Date.parse(QUOTA._anchor);
+  const move = (iso) =>
+    typeof iso === "string" && !Number.isNaN(Date.parse(iso))
+      ? new Date(Date.parse(iso) + shift).toISOString()
+      : iso;
+  return {
+    ...fixture,
+    observedAt: move(fixture.observedAt),
+    snapshots: fixture.snapshots.map((row) => ({
+      ...row,
+      resetsAt: row.resetsAt === null ? null : move(row.resetsAt),
+      probedAt: move(row.probedAt),
+      ingestedAt: move(row.ingestedAt),
+    })),
+  };
+}
 
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
@@ -118,7 +150,7 @@ function json(route, body) {
  * instead of a payload answers that HTTP status: 404 is what a server built
  * before the engine ticket landed says, and the panel turns it into a sentence.
  */
-async function installMocks(context, usage) {
+async function installMocks(context, usage, quota = () => anchoredQuota(QUOTA.healthy)) {
   await context.route("**/v1/**", (route) =>
     json(route, { channels: [], members: [], read_states: [], messages: [] })
   );
@@ -156,6 +188,25 @@ async function installMocks(context, usage) {
                     "사용량을 집계하는 중입니다. 잠시 뒤에 다시 시도하세요.",
                 },
               }
+        ),
+      });
+    }
+    return json(route, body);
+  });
+  // Registered AFTER the /v1/** catch-all so it wins, same as the routes above.
+  // It has to exist in every variant, quota-focused or not: without it the
+  // catch-all answers an object with no `snapshots`, and the cost screenshots
+  // would all carry an empty quota block that no fixture describes.
+  await context.route("**/v1/provider/quota-snapshots", async (route) => {
+    const body = await quota();
+    if (typeof body === "number") {
+      return route.fulfill({
+        status: body,
+        contentType: "application/json",
+        body: JSON.stringify(
+          body === 404
+            ? {}
+            : { error: { message: "잔여량을 읽지 못했습니다." } }
         ),
       });
     }
@@ -205,14 +256,14 @@ async function openUsage(context, beforeUsage) {
 async function captureScheme(browser, scheme) {
   const shots = [];
 
-  async function shoot(name, usage, drive, beforeUsage) {
+  async function shoot(name, usage, drive, beforeUsage, quota) {
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion: "reduce",
     });
-    await installMocks(context, usage);
+    await installMocks(context, usage, quota);
     const page = await openUsage(context, beforeUsage);
     await drive(page);
     const path = `${OUT_DIR}/usage-${name}-${scheme}.png`;
@@ -337,6 +388,84 @@ async function captureScheme(browser, scheme) {
       await page.keyboard.press("Tab");
     }
   });
+
+  // ---- 구독 잔여량 (ADR-0135 D2 / MOMO-628) ---------------------------------
+  //
+  // The cost fixture stays normal in all of these: the point of the block is
+  // that it is a DIFFERENT frame from the money under the rule, and that only
+  // reads if both are on screen at once.
+
+  /** Every quota variant renders the ledger below it unchanged. */
+  const withQuota = (name, quota, drive) =>
+    shoot(name, () => FIXTURES.normal, drive, undefined, quota);
+
+  // 6. 2게이지 정상: two providers, short and weekly each, remaining rather than
+  //    consumed, with the reset written as an absolute instant (레퍼런스 §5).
+  await withQuota(
+    "quota-normal",
+    () => anchoredQuota(QUOTA.healthy),
+    async (page) => {
+      await page.getByTestId("usage-quota-provider").first().waitFor({ state: "visible" });
+    }
+  );
+
+  // 6a. 한도 임박: 임박 under a tenth, 주의 under a quarter, and a provider whose
+  //     adapter reports only the weekly window, which is stated rather than
+  //     drawn as an empty bar.
+  await withQuota(
+    "quota-near-limit",
+    () => anchoredQuota(QUOTA.nearLimit),
+    async (page) => {
+      await page
+        .locator('[data-testid="usage-quota-gauge"][data-tone="danger"]')
+        .waitFor({ state: "visible" });
+    }
+  );
+
+  // 6b. 스냅샷 노후: 7시간 지난 값 + 이미 지나간 리셋 시각. The figures keep
+  //     rendering with their age stated and their state colour removed, because
+  //     an old 19% may have been 100% for most of those hours.
+  await withQuota(
+    "quota-stale",
+    () => anchoredQuota(QUOTA.staleSnapshot),
+    async (page) => {
+      await page.getByTestId("usage-quota-reset-passed").first().waitFor({ state: "visible" });
+    }
+  );
+
+  // 6c. 스냅샷 부재: a 200 with an empty list, which is a server whose adapter
+  //     has not probed yet and not a failure. One line and one action.
+  await withQuota(
+    "quota-empty",
+    () => anchoredQuota(QUOTA.absent),
+    async (page) => {
+      await page.getByTestId("usage-quota-empty").waitFor({ state: "visible" });
+    }
+  );
+
+  // 6d. 조회 실패, 폴백할 값도 없을 때: a server that predates the ADR-0135
+  //     engine layer answers 404 (momowebqa does today), and the cost frame
+  //     below keeps rendering because the two are separate contracts.
+  await withQuota("quota-error", () => 404, async (page) => {
+    await page.getByTestId("usage-quota-error").waitFor({ state: "visible" });
+    await page.getByTestId("usage-totals").waitFor({ state: "visible" });
+  });
+
+  // 6e. 마지막 확인값: one good answer, then the server stops answering. The
+  //     cached gauges keep rendering, undimmed, and the banner states when they
+  //     were confirmed (레퍼런스 §5, Claude Code `Showing last-known usage`).
+  {
+    let served = 0;
+    await withQuota(
+      "quota-last-known",
+      () => (served++ === 0 ? anchoredQuota(QUOTA.healthy) : 503),
+      async (page) => {
+        await page.getByTestId("usage-quota-provider").first().waitFor({ state: "visible" });
+        await page.getByTestId("usage-quota-refresh").click();
+        await page.getByTestId("usage-quota-last-known").waitFor({ state: "visible" });
+      }
+    );
+  }
 
   return shots;
 }
