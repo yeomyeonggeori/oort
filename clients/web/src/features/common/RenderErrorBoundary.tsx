@@ -42,15 +42,24 @@ export class RenderErrorBoundary extends Component<{
     // The boundary intentionally avoids exposing application details in UI.
   }
 
-  componentDidUpdate(prevProps: { resetKey?: string | number }) {
+  componentDidMount() {
+    // 자식이 경계의 첫 렌더에서 던지면 update가 아니라 mount로 끝난다(딥링크·
+    // 새로고침·key로 갈리는 설정 섹션이 전부 이 경로다). 이걸 빼면 같은
+    // 컴포넌트가 호출 지점에 따라 포커스를 옮기기도 하고 안 옮기기도 한다.
+    if (this.state.failed) this.fallbackRef.current?.focus();
+  }
+
+  componentDidUpdate(
+    prevProps: { resetKey?: string | number },
+    prevState: { failed: boolean }
+  ) {
     if (this.state.failed && prevProps.resetKey !== this.props.resetKey) {
       this.setState({ failed: false });
       return;
     }
-    // The surface the keyboard was in has just been replaced. Without this the
-    // caret lands on <body> and the user tabs from the top of the document
-    // again — on every retry that fails, not only the first.
-    if (this.state.failed) this.fallbackRef.current?.focus();
+    // 실패로 '전환'된 순간에만 옮긴다. 조건이 "실패 중 아무 업데이트"이면
+    // 사이드바에 둔 포커스를 관계없는 리렌더가 도로 끌어온다(측정됨).
+    if (this.state.failed && !prevState.failed) this.fallbackRef.current?.focus();
   }
 
   private retry = () => {
@@ -66,12 +75,16 @@ export class RenderErrorBoundary extends Component<{
         tabIndex={-1}
         // measure matches SectionShell so a long Korean sentence does not run
         // the width of a 1280px window.
-        // 경계가 뜰 때 여기로 포커스를 옮긴다(tabIndex=-1). Chromium은 그
-        // 프로그램적 포커스에도 :focus-visible을 매칭하므로 링이 뜨는데, 이건
-        // 숨길 게 아니라 키보드 사용자에게 "지금 여기"를 알려주는 신호다.
-        // 집안 링과 같은 토큰을 쓴다.
+        // 경계가 뜰 때 여기로 포커스를 옮긴다(tabIndex=-1). Chromium은 이
+        // 프로그램적 포커스에 :focus-visible을 조건부로 매칭한다 — 직전 입력이
+        // 키보드였을 때만이다. 그래서 마우스로 온 사람은 링을 보지 않고, 키보드로
+        // 온 사람만 "지금 여기"를 본다. 링을 숨기는 대신 집안 토큰을 쓴다.
+        //
+        // self-start가 함께 있어야 한다: 이 section이 flex 부모의 유일한 자식일
+        // 때 판 전체 높이로 늘어나, 링이 콘텐츠가 아니라 판을 두르는 800px
+        // 세로줄로 그려진다(측정됨).
         className={cn(
-          "flex min-w-0 max-w-2xl flex-col items-start gap-3",
+          "flex min-w-0 max-w-2xl flex-col items-start gap-3 self-start",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
           this.props.padded && "p-4"
         )}

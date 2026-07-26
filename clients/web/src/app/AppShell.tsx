@@ -9,6 +9,7 @@ import {
 } from "@/lib/realtime";
 import { SessionProvider } from "@/app/session";
 import { queryClient } from "@/app/queryClient";
+import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
@@ -120,10 +121,8 @@ export function AppShell({
                 resetKey={routePath}
                 title="이 화면을 열지 못했습니다"
                 message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
-                retryLabel="다시 불러오기"
-                onRetry={() => {
-                  void queryClient.resetQueries();
-                }}
+                retryLabel="다시 시도"
+                onRetry={() => resetRouteQueries(queryClient)}
               >
                 <Outlet />
               </RenderErrorBoundary>
