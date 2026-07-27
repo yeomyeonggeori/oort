@@ -12,6 +12,9 @@
 #      schema_v0.sql is untouched in the working tree.
 #   2. GET /v1/provider/effort-table: 401 unauthenticated, 200 for a member, the
 #      provider×model shape, and no credential-shaped field (ADR-0004).
+#      GET .../agents/:agent/allowed-models: 401 unauthenticated, 200 for an
+#      active member with exactly the run-routing allow-set, and 403 for a
+#      same-workspace human with no workspace_membership row.
 #   3. routing gates on POST .../agent-runs:
 #        * routing.model inside workspace.settings.allowed_agent_models -> 201
 #          and the agent_job payload carries the RESOLVED model+effort
@@ -213,6 +216,9 @@ OTHER_WS_ID="00000000-0000-7000-8000-000000000002"
 CHANNEL_ID="00000000-0000-7000-8000-000000000202"
 RUN_TAG="$(date -u +%s)-$$"
 ADMIN_PASSWORD="routing-admin-$(uuid)"
+NONMEMBER_ID="$(uuid)"
+NONMEMBER_EMAIL="routing-nonmember-$RUN_TAG@momo.local"
+NONMEMBER_PASSWORD="routing-nonmember-$(uuid)"
 
 ADMIN_ID="$(sql_value <<SQL
 SELECT lower(member_id::text) FROM human WHERE workspace_id='$WS_ID' AND email='demo@momo.local';
@@ -251,6 +257,14 @@ UPDATE workspace
    SET settings = COALESCE(settings, '{}'::jsonb)
        || jsonb_build_object('allowed_agent_models', jsonb_build_array('hermes-fast','hermes-lite'))
  WHERE id='$WS_ID';
+
+-- Disposable fixture deliberately has no workspace_membership. Login is valid
+-- (it is an active human), while member-scoped reads must still answer 403.
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES ('$NONMEMBER_ID', '$WS_ID', 'human', 'active', 'Routing nonmember', 'routing-nonmember-$RUN_TAG');
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$NONMEMBER_ID', '$WS_ID', '$NONMEMBER_EMAIL', true,
+        momo_password_hash('$NONMEMBER_PASSWORD'), 'UTC');
 SQL
 
 login() {
@@ -260,6 +274,8 @@ login() {
 }
 ADMIN_TOKEN="$(login demo@momo.local "$ADMIN_PASSWORD")"
 [ -n "$ADMIN_TOKEN" ] || fail "admin login returned no token"
+NONMEMBER_TOKEN="$(login "$NONMEMBER_EMAIL" "$NONMEMBER_PASSWORD")"
+[ -n "$NONMEMBER_TOKEN" ] || fail "nonmember fixture login returned no token"
 
 STATUS=""
 BODY=""
@@ -303,6 +319,25 @@ printf '%s' "$BODY" | jq -e '(keys - ["schema","levels","fallback","providers"])
 printf '%s' "$BODY" | grep -Eiq 'api[_-]?key|bearer|token|secret|base_url' \
   && fail "ADR-0004: effort-table response leaked a credential-shaped field"
 pass "effort-table: provider×model shape, per-model xhigh/max difference, no credential field"
+
+# ---- 2b. agent-specific allowed model projection (MOMO-634) -----------------
+ALLOWED_MODELS_PATH="/v1/workspaces/$WS_ID/agents/$AGENT_ID/allowed-models"
+api GET "$ALLOWED_MODELS_PATH" ""
+expect 401 "allowed-models refuses an unauthenticated read"
+
+api GET "$ALLOWED_MODELS_PATH" "$ADMIN_TOKEN"
+expect 200 "allowed-models read for an active workspace member"
+printf '%s' "$BODY" | jq -e --arg base "$BASE_MODEL" '
+  (keys == ["allowedAgentModels"])
+  and (.allowedAgentModels | type == "array" and length > 0)
+  and (.allowedAgentModels == ([$base, "hermes-fast", "hermes-lite"] | sort))
+' >/dev/null || { echo "$BODY" >&2; fail "allowed-models shape or run-routing set"; }
+printf '%s' "$BODY" | grep -Eiq 'settings|api[_-]?key|bearer|token|secret|workspaceId|agentMemberId' \
+  && fail "allowed-models exposed metadata or a credential-shaped field"
+pass "allowed-models projects only the deterministic agent.model ∪ workspace allow-list"
+
+api GET "$ALLOWED_MODELS_PATH" "$NONMEMBER_TOKEN"
+expect 403 "allowed-models refuses a human without workspace membership"
 
 # =============================================================================
 # 3. routing gates on run creation

@@ -10,6 +10,7 @@ import { RoutingFields } from "./RoutingFields";
 import {
   SEND_UNSUPPORTED_REASON,
   UNSUPPORTED_REASON,
+  useAllowedAgentModels,
   useRoutingCapability,
   useSendRoutingCapability,
 } from "./capability";
@@ -19,6 +20,7 @@ import {
   clearedEffortNotice,
   effectiveModel,
   effortLabel,
+  ignoredModelNotice,
   inheritedEffortLabel,
   inheritedModelLabel,
   isOverride,
@@ -140,6 +142,7 @@ export function MentionRoutingBar({
   const openProfile = useOpenAgentProfile();
   const agent: RosterMember | null = target.kind === "one" ? target.agent : null;
   const profileHandle = useAgentProfile(agent?.id ?? null);
+  const allowedModels = useAllowedAgentModels(agent?.id ?? null);
 
   // 프로필을 못 읽었으면 상속값을 **주장하지 않는다**(R1 H2). 404는 실패가 아니라
   // "프로필이 없다"는 사실이고, 그때 상속의 상대는 에이전트 자신의 모델이다.
@@ -147,8 +150,10 @@ export function MentionRoutingBar({
   const table = capability.table;
   const inheritance = useMemo(() => {
     if (!agent || profileHandle.isPending || profileFailed) return null;
-    return resolveInheritance(table, agent.agentModel ?? "", profileHandle.profile);
-  }, [table, agent, profileHandle.isPending, profileHandle.profile, profileFailed]);
+    return resolveInheritance(
+      table, agent.agentModel ?? "", profileHandle.profile, allowedModels
+    );
+  }, [table, agent, profileHandle.isPending, profileHandle.profile, profileFailed, allowedModels]);
 
   // 오버라이드가 걸려 있는데 대상이 사라지면(멘션을 지웠다) 그 값도 갈 곳이
   // 없다. 줄 자체가 사라지므로 초안도 함께 비운다.
@@ -309,8 +314,10 @@ export function MentionRoutingBar({
             models={modelOptions(
               table,
               inheritance?.model.value ?? inheritedModel,
-              knownAgentModels(directory.members)
+              knownAgentModels(directory.members),
+              allowedModels
             )}
+            allowedModelsReceived={allowedModels !== null}
             inheritedModel={inheritance?.model.value ?? inheritedModel}
             modelInheritLabel={
               inheritance ? inheritedModelLabel(inheritance) : "상속"
@@ -336,6 +343,13 @@ export function MentionRoutingBar({
             effortDisabled={!ready}
             effortDisabledReason={reason}
             clearedNotice={cleared}
+            ignoredNotice={
+              inheritance?.ignoredModelPref
+                ? ignoredModelNotice(
+                    inheritance.ignoredModelPref, inheritance.model.value
+                  )
+                : null
+            }
           />
           {agent && (
             <RowAction

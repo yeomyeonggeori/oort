@@ -34,7 +34,15 @@ import {
   markAuthExpired,
   restoredLoginResponse,
 } from "./session";
-import { arrayField, num, record, responseRecord, str, WireShapeError } from "./wire";
+import {
+  arrayField,
+  num,
+  record,
+  responseRecord,
+  str,
+  stringArrayField,
+  WireShapeError,
+} from "./wire";
 
 export interface Member {
   id: string;
@@ -1137,6 +1145,34 @@ export async function fetchAgentProfile(
     )}/agents/${encodeURIComponent(agentMemberId)}/profile`
   );
   return res.profile;
+}
+
+/**
+ * The list is agent-specific (`agent.model ∪ allowed_agent_models`). `null`
+ * means this server did not send a usable list, so routing keeps its compatible
+ * broad-picker fallback rather than trapping a user behind an empty select.
+ */
+export async function fetchAgentAllowedModels(
+  workspaceId: string,
+  agentMemberId: string,
+  signal?: AbortSignal
+): Promise<string[] | null> {
+  const response = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agents/${encodeURIComponent(agentMemberId)}/allowed-models`,
+    { signal }
+  );
+  const models = stringArrayField(response, "allowedAgentModels");
+  if (
+    models === null ||
+    models.length === 0 ||
+    models.some((model) => model.trim() === "") ||
+    new Set(models).size !== models.length
+  ) {
+    return null;
+  }
+  return models;
 }
 
 export async function putAgentProfile(

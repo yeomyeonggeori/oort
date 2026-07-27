@@ -716,6 +716,12 @@ sample agent-profile-get get \
 guard_jq '.profile.instructions == "OpenAPI contract profile" and .profile.paused == false' \
   "profile read includes the pause projection"
 
+sample agent-allowed-models get \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/allowed-models" 200 "" "$ACCESS"
+guard_jq 'keys == ["allowedAgentModels"] and (.allowedAgentModels | type == "array" and length > 0)' \
+  "agent allowed-models is a credential-free non-empty projection"
+
 sample agent-run-cancel post \
   "/v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel" \
   "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/cancel" 200 "" "$ACCESS"

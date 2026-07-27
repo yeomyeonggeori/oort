@@ -8,6 +8,7 @@ struct AgentProfileRoutes: Sendable {
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/agents/:agent/profile", use: get)
+        group.get("/v1/workspaces/:ws/agents/:agent/allowed-models", use: allowedModels)
         group.put("/v1/workspaces/:ws/agents/:agent/profile", use: put)
         group.put("/v1/workspaces/:ws/agents/:agent/pause", use: putPause)
     }
@@ -30,6 +31,45 @@ struct AgentProfileRoutes: Sendable {
             throw HTTPError(.notFound, message: "agent profile not found")
         }
         return AgentProfileResponse(profile: profile)
+    }
+
+    /// The model picker is allowed to know the same effective set the write and
+    /// run-routing gates enforce, but it must not receive `workspace.settings`
+    /// wholesale: that JSON is an extensible bag and may later hold keys that
+    /// are not safe for all workspace members to read.
+    @Sendable
+    func allowedModels(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, agentMemberID) = try Self.scope(context, principal: principal)
+        let models = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal
+            )
+            let policy = try await Self.loadModelPolicy(
+                conn: conn, logger: db.logger,
+                workspaceID: workspaceID, agentMemberID: agentMemberID
+            )
+            // This is deliberately the existing single source used by the two
+            // enforcement paths. Do not reimplement `agent.model ∪ settings`.
+            return Self.allowedModelsResponse(
+                baseModel: policy.baseModel,
+                workspaceSettingsJSON: policy.workspaceSettingsJSON
+            )
+        }
+        return try models.response(from: request, context: context)
+    }
+
+    /// Keep the response mechanically tied to the enforcement authority. The
+    /// sorted array makes the wire result deterministic without changing the
+    /// set semantics of the gates.
+    static func allowedModelsResponse(
+        baseModel: String,
+        workspaceSettingsJSON: String
+    ) -> AllowedAgentModelsResponse {
+        AllowedAgentModelsResponse(allowedAgentModels: MessageRoutes.allowedAgentModels(
+            baseModel: baseModel,
+            workspaceSettingsJSON: workspaceSettingsJSON
+        ).sorted())
     }
 
     @Sendable
@@ -132,9 +172,12 @@ struct AgentProfileRoutes: Sendable {
             """
             SELECT a.model, w.settings::text
               FROM agent a
+              JOIN member m
+                ON m.workspace_id = a.workspace_id AND m.id = a.member_id
               JOIN workspace w ON w.id = a.workspace_id
              WHERE a.workspace_id = \(workspaceID)
                AND a.member_id = \(agentMemberID)
+               AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL
              LIMIT 1
             """,
             logger: logger
@@ -533,6 +576,12 @@ struct AgentProfileDTO: ResponseEncodable, Codable, Sendable {
 
 struct AgentProfileResponse: ResponseEncodable, Codable, Sendable {
     let profile: AgentProfileDTO
+}
+
+/// Credential-free, agent-specific projection of the effective model policy.
+/// The response intentionally contains no workspace settings or agent metadata.
+struct AllowedAgentModelsResponse: ResponseEncodable, Codable, Sendable, Equatable {
+    let allowedAgentModels: [String]
 }
 
 private struct AgentProfileCodingKey: CodingKey, Hashable {

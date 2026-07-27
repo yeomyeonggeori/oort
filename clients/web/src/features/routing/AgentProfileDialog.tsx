@@ -12,7 +12,11 @@ import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
 import { RoutingFields } from "./RoutingFields";
-import { useRoutingCapability, type RoutingCapability } from "./capability";
+import {
+  useAllowedAgentModels,
+  useRoutingCapability,
+  type RoutingCapability,
+} from "./capability";
 import {
   INHERIT_DRAFT,
   agentEffortInheritLabel,
@@ -25,6 +29,7 @@ import {
   effortLabel,
   effortsForModel,
   ignoredEffortNotice,
+  ignoredModelNotice,
   knownAgentModels,
   modelOptions,
   resolveInheritance,
@@ -189,6 +194,7 @@ function AgentProfilePanel({
   const directory = useDirectory(workspaceId).directory;
   const member = memberFor(directory, agentMemberId);
   const capability = useRoutingCapability();
+  const allowedModels = useAllowedAgentModels(agentMemberId);
   const offline = useOffline();
   const handle = useAgentProfile(agentMemberId);
   const formRef = useRef<HTMLFormElement>(null);
@@ -329,12 +335,15 @@ function AgentProfilePanel({
   // 표는 강도의 유효값을 재는 자일 뿐이므로, 표가 없어도 모델 층은 계산된다.
   const table = capability.table;
   const inheritedModel = member?.agentModel ?? "";
-  const inheritance = resolveInheritance(table, inheritedModel, handle.profile);
+  const inheritance = resolveInheritance(
+    table, inheritedModel, handle.profile, allowedModels
+  );
   const modelForEfforts = effectiveModel(current, inheritedModel);
   const models = modelOptions(
     table,
     inheritedModel,
-    knownAgentModels(directory.members)
+    knownAgentModels(directory.members),
+    allowedModels
   );
   // 거절이 어느 상자로 가는가. 모델로 배달된 문장은 폼 아래 알림에서 빠진다.
   const modelError =
@@ -377,6 +386,7 @@ function AgentProfilePanel({
           idPrefix="agent-profile"
           table={table}
           models={models}
+          allowedModelsReceived={allowedModels !== null}
           inheritedModel={inheritedModel}
           modelInheritLabel={agentModelInheritLabel(inheritedModel)}
           effortInheritLabel={agentEffortInheritLabel(
@@ -396,12 +406,14 @@ function AgentProfilePanel({
           }
           clearedNotice={cleared}
           ignoredNotice={
-            inheritance.ignoredEffortPref
-              ? ignoredEffortNotice(
+            inheritance.ignoredModelPref
+              ? ignoredModelNotice(inheritance.ignoredModelPref, inheritance.model.value)
+              : inheritance.ignoredEffortPref
+                ? ignoredEffortNotice(
                   inheritance.model.value,
                   inheritance.ignoredEffortPref
                 )
-              : null
+                : null
           }
           // 서버가 모델을 거절했으면 그 문장은 모델 상자 옆에 선다. 폼 아래 알림은
           // 그때 비는데, 같은 문장을 두 곳에 두면 사람은 서로 다른 두 문제가
