@@ -19,6 +19,15 @@ export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;
 
+export type DialogFocusTarget = Pick<HTMLElement, "isConnected" | "focus">;
+
+/** Returns focus to a programmatic dialog's opener when it still exists. */
+export function restoreDialogOpenerFocus(opener: DialogFocusTarget | null): boolean {
+  if (!opener?.isConnected) return false;
+  opener.focus();
+  return true;
+}
+
 /**
  * The scrim. `bg-scrim`, not `bg-ink/20`: the overlay's job is to push the page
  * back, and ink is nearly white in dark mode, so borrowing it there brightened
@@ -82,9 +91,8 @@ export const DialogContent = React.forwardRef<
           const opener = openerRef.current;
           // preventDefault also skips Radix's own handler, which would send the
           // caret to a trigger that does not exist here.
-          if (opener?.isConnected) {
+          if (restoreDialogOpenerFocus(opener)) {
             event.preventDefault();
-            opener.focus();
           }
         }}
         {...props}

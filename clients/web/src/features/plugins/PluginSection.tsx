@@ -30,12 +30,12 @@ import {
   administratorNames,
   approvalLabel,
   callerPolicySummary,
+  focusPluginActionAfterErrorDismissal,
   isWorkspaceAdmin,
   nonAdminInstallGuidance,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginDetailErrorMessage,
-  pluginMarketplaceColumnProperty,
   pluginMarketplaceNeedsDetailFocus,
   pluginRoleState,
   riskLabel,
@@ -74,10 +74,11 @@ export function PluginSection({ offline }: { offline: boolean }) {
   const [confirming, setConfirming] = useState<Extract<PluginAction, {
     kind: "uninstall" | "revokeGrant";
   }> | null>(null);
-  const [focusDetailFor, setFocusDetailFor] = useState<string | null>(null);
-  const marketplaceLayoutRef = useRef<HTMLDivElement>(null);
+  const [revealDetailFor, setRevealDetailFor] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const actionErrorRef = useRef<HTMLDivElement>(null);
+  const actionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const pointerSelectionRef = useRef<string | null>(null);
 
   const catalogQuery = useQuery({
     queryKey: ["plugins", workspaceId.toLowerCase()],
@@ -139,17 +140,17 @@ export function PluginSection({ offline }: { offline: boolean }) {
     : null;
 
   useEffect(() => {
-    if (focusDetailFor !== selectedId || !detailRef.current || detailsQuery.isPending) return;
-    const renderedColumns = marketplaceLayoutRef.current
-      ? window.getComputedStyle(marketplaceLayoutRef.current)
-        .getPropertyValue(pluginMarketplaceColumnProperty)
-      : null;
-    if (pluginMarketplaceNeedsDetailFocus(renderedColumns)) {
+    if (revealDetailFor !== selectedId || !detailRef.current || detailsQuery.isPending) return;
+    const scrollViewport = detailRef.current.closest<HTMLElement>("[data-settings-scroll-viewport]");
+    const viewport = scrollViewport?.getBoundingClientRect() ?? {
+      top: 0,
+      bottom: window.innerHeight,
+    };
+    if (pluginMarketplaceNeedsDetailFocus(detailRef.current.getBoundingClientRect(), viewport)) {
       detailRef.current.scrollIntoView({ block: "start" });
-      detailRef.current.focus({ preventScroll: true });
     }
-    setFocusDetailFor(null);
-  }, [detailsQuery.isPending, focusDetailFor, selectedId]);
+    setRevealDetailFor(null);
+  }, [detailsQuery.isPending, revealDetailFor, selectedId]);
 
   // On a one-column panel an inline mutation error may land just below the
   // trigger that caused it. The message must be in view, not merely mounted.
@@ -215,7 +216,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
         />
       )}
       {catalogQuery.data && visible.length > 0 && (
-        <div ref={marketplaceLayoutRef} className="plugin-marketplace-layout">
+        <div className="plugin-marketplace-layout">
           <ul className="flex flex-col overflow-hidden rounded-md border border-line" data-testid="plugin-list">
             {visible.map((plugin) => {
               const policy = catalogQuery.data?.toolsByPlugin.get(plugin.pluginId);
@@ -225,9 +226,15 @@ export function PluginSection({ offline }: { offline: boolean }) {
                   <button
                     type="button"
                     disabled={mutation.isPending}
+                    onPointerDown={() => {
+                      pointerSelectionRef.current = plugin.pluginId;
+                    }}
                     onClick={() => {
                       setSelectedId(plugin.pluginId);
-                      setFocusDetailFor(plugin.pluginId);
+                      setRevealDetailFor(
+                        pointerSelectionRef.current === plugin.pluginId ? plugin.pluginId : null
+                      );
+                      pointerSelectionRef.current = null;
                     }}
                     aria-current={active ? "true" : undefined}
                     className={active
@@ -256,9 +263,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
           {selected && (
             <div
               ref={detailRef}
-              tabIndex={-1}
               aria-label={`${selected.name} 상세`}
-              className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               <PluginDetailPanel
                 plugin={selected}
@@ -277,8 +282,14 @@ export function PluginSection({ offline }: { offline: boolean }) {
                 pendingAction={mutation.isPending ? mutation.variables : undefined}
                 actionError={actionError}
                 actionErrorRef={actionErrorRef}
-                onDismissActionError={() => mutation.reset()}
-                onAction={(action) => {
+                onDismissActionError={() => {
+                  mutation.reset();
+                  window.requestAnimationFrame(() => {
+                    focusPluginActionAfterErrorDismissal(actionButtonRef.current);
+                  });
+                }}
+                onAction={(action, actionButton) => {
+                  actionButtonRef.current = actionButton;
                   if (action.kind === "uninstall" || action.kind === "revokeGrant") setConfirming(action);
                   else mutation.mutate(action);
                 }}
@@ -288,12 +299,14 @@ export function PluginSection({ offline }: { offline: boolean }) {
         </div>
       )}
 
-      <ConfirmPluginAction
-        action={confirming}
-        pending={mutation.isPending}
-        onCancel={() => setConfirming(null)}
-        onConfirm={() => confirming && mutation.mutate(confirming)}
-      />
+      {confirming && (
+        <ConfirmPluginAction
+          action={confirming}
+          pending={mutation.isPending}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => mutation.mutate(confirming)}
+        />
+      )}
     </SectionShell>
   );
 }
@@ -321,7 +334,7 @@ function PluginDetailPanel({
   actionError: string | null;
   actionErrorRef: RefObject<HTMLDivElement>;
   onDismissActionError: () => void;
-  onAction: (action: PluginAction) => void;
+  onAction: (action: PluginAction, actionButton: HTMLButtonElement) => void;
 }) {
   if (isPending) return <SkeletonRows rows={3} />;
   if (isError || !detail) {
@@ -438,7 +451,7 @@ function PluginActions({
   offline: boolean;
   busy: boolean;
   pendingAction: PluginAction | undefined;
-  onAction: (action: PluginAction) => void;
+  onAction: (action: PluginAction, actionButton: HTMLButtonElement) => void;
 }) {
   const available = plugin.installed && plugin.enabled;
   const managementAction: PluginAction = available
@@ -449,6 +462,7 @@ function PluginActions({
     : { kind: "grant", pluginId: plugin.pluginId, pluginName: plugin.name, scope: singleScope };
   const isPending = (action: PluginAction) => busy && pendingAction?.kind === action.kind
     && pendingAction.pluginId === action.pluginId;
+  const isBlockedBySibling = (action: PluginAction) => busy && !isPending(action);
 
   const roleUnknownNotice = roleState === "unknown" && (
     <PluginRoleUnknownNotice onRetry={onRetryDirectory} />
@@ -469,6 +483,7 @@ function PluginActions({
               action={managementAction}
               label={plugin.installed ? "다시 활성화" : "워크스페이스에 설치"}
               busy={isPending(managementAction)}
+              blocked={isBlockedBySibling(managementAction)}
               offline={offline}
               onAction={onAction}
             />
@@ -484,7 +499,7 @@ function PluginActions({
       {!singleScope && (
         <p className="max-w-pane text-meta text-ink-muted">
           {scopeCount > 1
-            ? "여러 권한은 플러그인 연결 동의 화면이 추가된 뒤에 선택합니다. 현재 이 화면에서는 변경할 수 없습니다."
+            ? "여러 권한은 앱 연결 동의 화면이 추가된 뒤에 선택합니다. 현재 이 화면에서는 변경할 수 없습니다."
             : "허용할 권한이 없습니다."}
         </p>
       )}
@@ -496,6 +511,7 @@ function PluginActions({
             label={hasMyAccess ? "내 권한 회수" : "내 사용 허용"}
             variant="outline"
             busy={isPending(personalAction)}
+            blocked={isBlockedBySibling(personalAction)}
             offline={offline}
             onAction={onAction}
           />
@@ -507,6 +523,7 @@ function PluginActions({
             label="설치 해제"
             variant="destructive"
             busy={isPending(managementAction)}
+            blocked={isBlockedBySibling(managementAction)}
             offline={offline}
             onAction={onAction}
           />
@@ -537,6 +554,7 @@ function PluginActionButton({
   label,
   variant = "default",
   busy,
+  blocked,
   offline,
   onAction,
 }: {
@@ -544,19 +562,20 @@ function PluginActionButton({
   label: string;
   variant?: "default" | "outline" | "destructive";
   busy: boolean;
+  blocked: boolean;
   offline: boolean;
-  onAction: (action: PluginAction) => void;
+  onAction: (action: PluginAction, actionButton: HTMLButtonElement) => void;
 }) {
-  const state = pluginActionButtonState({ busy, offline });
+  const state = pluginActionButtonState({ busy, offline, blocked });
   return (
     <Button
       variant={variant}
       size="sm"
       disabled={state.disabled}
       aria-busy={state.ariaBusy}
-      onClick={() => {
-        if (busy || offline) return;
-        onAction(action);
+      onClick={(event) => {
+        if (busy || offline || blocked) return;
+        onAction(action, event.currentTarget);
       }}
     >
       {busy && <Loader2 aria-hidden="true" className="spinner-busy" />}
@@ -588,18 +607,22 @@ function DetailLink({ label, href }: { label: string; href: string }) {
 }
 
 function ConfirmPluginAction({ action, pending, onCancel, onConfirm }: {
-  action: Extract<PluginAction, { kind: "uninstall" | "revokeGrant" }> | null;
+  action: Extract<PluginAction, { kind: "uninstall" | "revokeGrant" }>;
   pending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const copy = action ? pluginActionConfirmation(action) : null;
+  const copy = pluginActionConfirmation(action);
   return (
-    <Dialog open={action !== null} onOpenChange={(open) => { if (!open && !pending) onCancel(); }}>
-      <DialogContent>
+    <Dialog open onOpenChange={(open) => { if (!open && !pending) onCancel(); }}>
+      <DialogContent
+        // Escape is owned by this confirmation. Letting it reach SettingsRoute
+        // would close the route while this dialog (or its pending write) remains.
+        onEscapeKeyDown={(event) => event.stopPropagation()}
+      >
         <div className="flex flex-col gap-3 p-4">
-          <DialogTitle>{copy?.title}</DialogTitle>
-          <DialogDescription>{copy?.description}</DialogDescription>
+          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogDescription>{copy.description}</DialogDescription>
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" disabled={pending} onClick={onCancel}>취소</Button>
             <Button
@@ -609,7 +632,7 @@ function ConfirmPluginAction({ action, pending, onCancel, onConfirm }: {
               onClick={() => { if (!pending) onConfirm(); }}
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? "변경 중" : copy?.confirmLabel}
+              {pending ? "변경 중" : copy.confirmLabel}
             </Button>
           </div>
         </div>

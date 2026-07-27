@@ -296,16 +296,11 @@
  * The 2:3 split is named here rather than written as an arbitrary component
  * value, and the narrow single column keeps the focused detail reachable. */
 @utility plugin-marketplace-layout {
-  /* This is the responsive contract for the detail handoff. PluginSection
-   * reads the rendered value, so the one-column scroll/focus behavior cannot
-   * carry a second pixel boundary that drifts from this grid. */
-  --plugin-marketplace-columns: 1;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-4);
 
   @media (width >= 1200px) {
-    --plugin-marketplace-columns: 2;
     display: grid;
     grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
     align-items: start;

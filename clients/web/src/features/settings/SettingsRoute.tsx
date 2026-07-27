@@ -175,7 +175,10 @@ export function SettingsRoute() {
           ))}
         </nav>
 
-        <div className="min-w-0 flex-1 overflow-y-auto p-4">
+        <div
+          className="min-w-0 flex-1 overflow-y-auto p-4"
+          data-settings-scroll-viewport
+        >
           <RenderErrorBoundary
             key={section}
             padded={false}

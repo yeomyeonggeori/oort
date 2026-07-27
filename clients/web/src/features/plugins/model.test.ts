@@ -1,14 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import {
   actionErrorForPlugin,
   administratorNames,
   callerPolicySummary,
+  focusPluginActionAfterErrorDismissal,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
   pluginDetailErrorMessage,
   pluginMarketplaceNeedsDetailFocus,
+  type PluginActionFocusTarget,
   pluginRoleState,
   workspaceInstallationLabel,
 } from "./model";
@@ -66,21 +68,35 @@ describe("plugin marketplace copy", () => {
       .toBe("known");
   });
 
-  it("uses the CSS-rendered column state for the narrow-detail handoff", () => {
-    expect(pluginMarketplaceNeedsDetailFocus("1")).toBe(true);
-    expect(pluginMarketplaceNeedsDetailFocus("2")).toBe(false);
-    expect(pluginMarketplaceNeedsDetailFocus(null)).toBe(true);
+  it("hands a detail off when its heading is clipped in either marketplace layout", () => {
+    const viewport = { top: 45, bottom: 800 } as DOMRect;
+    expect(pluginMarketplaceNeedsDetailFocus({ top: 56, bottom: 640 } as DOMRect, viewport)).toBe(false);
+    expect(pluginMarketplaceNeedsDetailFocus({ top: -93, bottom: 580 } as DOMRect, viewport)).toBe(true);
+    expect(pluginMarketplaceNeedsDetailFocus({ top: 816, bottom: 1200 } as DOMRect, viewport)).toBe(true);
   });
 
-  it("keeps a busy plugin action focusable while blocking only offline actions", () => {
+  it("keeps the active action focusable while locking its in-flight sibling", () => {
     expect(pluginActionButtonState({ busy: true, offline: false })).toEqual({
       disabled: false,
       ariaBusy: true,
+    });
+    expect(pluginActionButtonState({ busy: false, offline: false, blocked: true })).toEqual({
+      disabled: true,
+      ariaBusy: undefined,
     });
     expect(pluginActionButtonState({ busy: false, offline: true })).toEqual({
       disabled: true,
       ariaBusy: undefined,
     });
+  });
+
+  it("returns an error dismissal to the action that produced it", () => {
+    const focus = vi.fn();
+    const connected: PluginActionFocusTarget = { isConnected: true, focus };
+    const disconnected: PluginActionFocusTarget = { isConnected: false, focus };
+    expect(focusPluginActionAfterErrorDismissal(connected)).toBe(true);
+    expect(focus).toHaveBeenCalledOnce();
+    expect(focusPluginActionAfterErrorDismissal(disconnected)).toBe(false);
   });
 
   it("identifies administrators by handle and keeps an action error with its app", () => {

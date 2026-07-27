@@ -9,16 +9,29 @@ export type PluginAction =
 
 export type PluginRoleState = "checking" | "known" | "unknown";
 
-/**
- * The marketplace CSS owns the responsive boundary. JavaScript reads this
- * custom property from the rendered layout instead of carrying a second
- * viewport breakpoint that can drift from the grid.
- */
-export const pluginMarketplaceColumnProperty = "--plugin-marketplace-columns";
+type VerticalBounds = Pick<DOMRect, "top" | "bottom">;
 
-/** A selected detail needs a viewport handoff only while CSS renders one column. */
-export function pluginMarketplaceNeedsDetailFocus(columnCount: string | null): boolean {
-  return columnCount?.trim() !== "2";
+/**
+ * A selected detail needs a handoff whenever its heading is outside the
+ * settings scroll viewport. This is deliberately independent of the CSS grid:
+ * a two-column detail can be clipped above the fold after the catalog scrolls.
+ */
+export function pluginMarketplaceNeedsDetailFocus(
+  detail: VerticalBounds,
+  viewport: VerticalBounds
+): boolean {
+  return detail.top < viewport.top || detail.top >= viewport.bottom;
+}
+
+export type PluginActionFocusTarget = Pick<HTMLButtonElement, "isConnected" | "focus">;
+
+/** Keeps the keyboard position on the action that produced a dismissed error. */
+export function focusPluginActionAfterErrorDismissal(
+  actionButton: PluginActionFocusTarget | null
+): boolean {
+  if (!actionButton?.isConnected) return false;
+  actionButton.focus();
+  return true;
 }
 
 /**
@@ -29,11 +42,14 @@ export function pluginMarketplaceNeedsDetailFocus(columnCount: string | null): b
 export function pluginActionButtonState({
   busy,
   offline,
+  blocked = false,
 }: {
   busy: boolean;
   offline: boolean;
+  /** A sibling mutation is in progress, so this action must not replace it. */
+  blocked?: boolean;
 }): { disabled: boolean; ariaBusy: true | undefined } {
-  return { disabled: offline, ariaBusy: busy || undefined };
+  return { disabled: offline || blocked, ariaBusy: busy || undefined };
 }
 
 export function isWorkspaceAdmin(role: MembershipRole | undefined): boolean {
