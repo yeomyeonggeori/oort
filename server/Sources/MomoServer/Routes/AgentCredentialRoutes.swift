@@ -30,6 +30,9 @@ struct AgentCredentialRoutes: Sendable {
     static let maximumRotationGraceSeconds = 7 * 24 * 60 * 60
 
     let db: Database
+    /// Reuse the provider-link instance-operator boundary for the one scope
+    /// that can mutate instance-global quota telemetry.
+    let platformAdminEmails: [String]
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/agents/:agent/credentials", use: create)
@@ -52,6 +55,13 @@ struct AgentCredentialRoutes: Sendable {
         let graceSeconds = try Self.validatedRotationGraceSeconds(dto.rotationGraceSeconds)
         let graceDeadline = Date().addingTimeInterval(TimeInterval(graceSeconds))
         let rawToken = AgentBearerToken.mint(workspaceID: workspaceID)
+        if scopes.contains(ProviderQuotaSnapshotRoutes.ingestScope) {
+            _ = try await ProviderLinkRoutes.requireOperator(
+                db: db,
+                platformAdminEmails: platformAdminEmails,
+                context: context
+            )
+        }
         try await ChannelRoutes.requireWorkspaceAdmin(
             db: db,
             workspaceID: workspaceID,

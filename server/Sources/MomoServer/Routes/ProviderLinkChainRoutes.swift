@@ -157,15 +157,29 @@ extension ProviderLinkRoutes {
     func resolvedCascade(
         storedLink: StoredProviderLink?,
         storedChain: [StoredProviderChainEntry]
-    ) -> (head: ResolvedProviderConfig, hops: [ProviderCascadeHop], decryptedHead: DecryptedProviderLink?) {
+    ) -> (
+        head: ResolvedProviderConfig,
+        hops: [ProviderCascadeHop],
+        decryptedHead: DecryptedProviderLink?,
+        decryptedChain: [DecryptedProviderChainEntry]
+    ) {
         let decryptedHead = storedLink.flatMap {
             ProviderLinkStore.decrypt($0, masterKey: providerLinkMasterKey)
         }
         let head = ProviderLinkResolver.resolve(env: envProvider, link: decryptedHead)
-        let decryptedChain = storedChain.compactMap {
-            ProviderLinkChainStore.decrypt($0, masterKey: providerLinkMasterKey)
+        var decryptedChain: [DecryptedProviderChainEntry] = []
+        for stored in storedChain {
+            if let decrypted = ProviderLinkChainStore.decrypt(stored, masterKey: providerLinkMasterKey) {
+                decryptedChain.append(decrypted)
+            } else {
+                // Never silently erase an undecryptable configured hop from the
+                // operator's view: a later replace-all PUT must preserve it.
+                db.logger.error("provider_link_chain hop cannot be decrypted", metadata: [
+                    "position": .stringConvertible(stored.position),
+                ])
+            }
         }
-        return (head, ProviderCascade.plan(head: head, chain: decryptedChain), decryptedHead)
+        return (head, ProviderCascade.plan(head: head, chain: decryptedChain), decryptedHead, decryptedChain)
     }
 
     func chainResponse(
@@ -173,41 +187,42 @@ extension ProviderLinkRoutes {
         storedChain: [StoredProviderChainEntry]
     ) -> ProviderChainResponse {
         let resolved = resolvedCascade(storedLink: storedLink, storedChain: storedChain)
-        let storedByPosition = Dictionary(
-            uniqueKeysWithValues: storedChain.map { ($0.position, $0) }
+        let decryptedByPosition = Dictionary(
+            uniqueKeysWithValues: resolved.decryptedChain.map { ($0.position, $0) }
         )
         let headFromDatabase = resolved.head.source == .database
-        let entries = resolved.hops.map { hop -> ProviderChainEntryDTO in
-            if hop.position == 0 {
-                return ProviderChainEntryDTO(
-                    position: 0,
-                    source: hop.source.rawValue,
-                    mode: hop.mode.rawValue,
-                    baseUrl: hop.baseURL,
-                    endpointLabel: hop.endpointLabel,
-                    enabled: true,
-                    bearerConfigured: resolved.head.config.keyConfigured,
-                    bearerLast4: headFromDatabase
-                        ? resolved.decryptedHead.flatMap { ProviderLinkCrypto.maskedTail($0.bearer) }
-                        : nil,
-                    updatedAtMs: headFromDatabase ? storedLink?.updatedAtMs : nil,
-                    updatedBy: headFromDatabase ? storedLink?.updatedByMemberID?.uuidString : nil
-                )
-            }
-            let stored = storedByPosition[hop.position]
+        let headEntry = ProviderChainEntryDTO(
+            position: 0,
+            source: resolved.head.source.rawValue,
+            mode: resolved.head.config.mode.rawValue,
+            baseUrl: resolved.head.config.baseURL,
+            endpointLabel: AgentProviderConfig.redactedEndpointLabel(resolved.head.config.baseURL),
+            enabled: true,
+            bearerConfigured: resolved.head.config.keyConfigured,
+            bearerUnavailable: headFromDatabase && resolved.decryptedHead == nil,
+            bearerLast4: headFromDatabase
+                ? resolved.decryptedHead.flatMap { ProviderLinkCrypto.maskedTail($0.bearer) }
+                : nil,
+            updatedAtMs: headFromDatabase ? storedLink?.updatedAtMs : nil,
+            updatedBy: headFromDatabase ? storedLink?.updatedByMemberID?.uuidString : nil
+        )
+        let fallbackEntries = storedChain.map { stored -> ProviderChainEntryDTO in
+            let decrypted = decryptedByPosition[stored.position]
             return ProviderChainEntryDTO(
-                position: hop.position,
-                source: hop.source.rawValue,
-                mode: hop.mode.rawValue,
-                baseUrl: hop.baseURL,
-                endpointLabel: hop.endpointLabel,
-                enabled: hop.enabled,
-                bearerConfigured: hop.isUsable,
-                bearerLast4: ProviderLinkCrypto.maskedTail(hop.bearer),
-                updatedAtMs: stored?.updatedAtMs,
-                updatedBy: stored?.updatedByMemberID?.uuidString
+                position: stored.position,
+                source: ProviderCascadeHop.Source.chain.rawValue,
+                mode: stored.mode,
+                baseUrl: stored.baseURL,
+                endpointLabel: AgentProviderConfig.redactedEndpointLabel(stored.baseURL),
+                enabled: stored.enabled,
+                bearerConfigured: decrypted != nil,
+                bearerUnavailable: decrypted == nil,
+                bearerLast4: decrypted.flatMap { ProviderLinkCrypto.maskedTail($0.bearer) },
+                updatedAtMs: stored.updatedAtMs,
+                updatedBy: stored.updatedByMemberID?.uuidString
             )
         }
+        let entries = [headEntry] + fallbackEntries
         return ProviderChainResponse(
             schema: "momo.provider_link.chain.v0",
             entries: entries,
@@ -341,6 +356,9 @@ struct ProviderChainEntryDTO: Encodable, Sendable {
     let endpointLabel: String
     let enabled: Bool
     let bearerConfigured: Bool
+    /// The row exists but its ciphertext cannot be opened with the configured
+    /// master key. It remains visible so a replace-all PUT cannot erase it.
+    let bearerUnavailable: Bool
     let bearerLast4: String?
     let updatedAtMs: Int64?
     let updatedBy: String?

@@ -200,6 +200,20 @@ def spec_operations(spec):
     return operations
 
 
+def server_operations(manifest):
+    """Read registered server operations for inverse (server -> spec) coverage."""
+    operations = set()
+    for item in manifest.get("operations", []):
+        method = item.get("method", "").lower()
+        path = item.get("path", "")
+        if method not in HTTP_METHODS or not isinstance(path, str) or not path.startswith("/"):
+            raise SpecError(f"invalid server operation manifest entry: {item!r}")
+        operations.add((method, path))
+    if not operations:
+        raise SpecError("server route manifest contains no operations")
+    return operations
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True, help="OpenAPI spec as JSON")
@@ -210,6 +224,10 @@ def main():
         help="fail when a spec operation (method+path) has no sample — every "
         "documented route must be exercised against the live server",
     )
+    parser.add_argument(
+        "--server-route-manifest",
+        help="JSON {operations:[{method,path}]} registered by the server; fail when one is absent from the spec",
+    )
     args = parser.parse_args()
 
     with open(args.spec, encoding="utf-8") as handle:
@@ -217,12 +235,29 @@ def main():
     with open(args.manifest, encoding="utf-8") as handle:
         manifest = json.load(handle)
 
+    registered = None
+    if args.server_route_manifest:
+        with open(args.server_route_manifest, encoding="utf-8") as handle:
+            registered = server_operations(json.load(handle))
+
     samples = manifest.get("samples", [])
     if not samples:
         print("[openapi-shape] FAIL: manifest contains no samples", file=sys.stderr)
         return 1
 
     failures = 0
+    if registered is not None:
+        undocumented = sorted(registered - spec_operations(spec))
+        if undocumented:
+            failures += 1
+            print(
+                "[openapi-shape] FAIL server route coverage — registered operations absent from spec:",
+                file=sys.stderr,
+            )
+            for method, path in undocumented:
+                print(f"    - {method.upper()} {path}", file=sys.stderr)
+        else:
+            print(f"[openapi-shape] PASS server route coverage ({len(registered)} operations documented)")
     for sample in samples:
         name = sample.get("name", "<unnamed>")
         method = sample["method"]

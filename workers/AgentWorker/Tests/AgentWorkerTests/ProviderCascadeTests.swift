@@ -315,6 +315,25 @@ final class ProviderCascadeTests: XCTestCase {
                        "a 401 must not trigger HermesTransport's non-stream replay")
     }
 
+    /// A gateway error envelope with HTTP 200 is still a terminal response, not
+    /// an empty successful turn and not a reason to spend the next provider.
+    func testHTTP200ErrorEnvelopePropagatesInsteadOfCompletingAnEmptyTurn() async throws {
+        let failing = try MockProvider(behavior: .errorEnvelope("quota exceeded"))
+        let live = try MockProvider(behavior: .streamText("must never be reached"))
+        defer { failing.shutdown(); live.shutdown() }
+
+        let outcome = try await runCascade(hops: [
+            ProviderCascadeHop(position: 0, source: .providerLink,
+                               baseURL: failing.baseURL, bearer: "sk-a"),
+            ProviderCascadeHop(position: 1, source: .chain,
+                               baseURL: live.baseURL, bearer: "sk-b"),
+        ])
+        let failure = try XCTUnwrap(outcome.thrownError as? ProviderCascadeFailure)
+        XCTAssertEqual(failure.disposition, .propagate)
+        XCTAssertEqual(outcome.text, "")
+        XCTAssertEqual(await live.requestCount(), 0)
+    }
+
     /// With no chain configured the cascade is a single hop and a 5xx surfaces —
     /// identical to pre-MOMO-622 behavior.
     func testSingleHopChainSurfacesAvailabilityFailureWithoutFallback() async throws {
@@ -557,6 +576,8 @@ final class MockProvider: @unchecked Sendable {
         /// Yield text, then a malformed SSE frame. This exercises the regression:
         /// content already visible to the user must not trigger a full replay.
         case streamTextThenMalformed(String)
+        /// A gateway can encode an error in an HTTP 200 JSON envelope.
+        case errorEnvelope(String)
     }
 
     private let group: MultiThreadedEventLoopGroup
@@ -630,6 +651,19 @@ private final class MockProviderHandler: ChannelInboundHandler, @unchecked Senda
             context.write(wrapOutboundOut(.head(head)), promise: nil)
             var body = context.channel.allocator.buffer(capacity: 2)
             body.writeString("{}")
+            context.write(wrapOutboundOut(.body(.byteBuffer(body))), promise: nil)
+            context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
+
+        case .errorEnvelope(let message):
+            let payload = "{\"error\":{\"message\":\"\(message)\"}}"
+            let head = HTTPResponseHead(
+                version: .http1_1,
+                status: .ok,
+                headers: ["Content-Type": "application/json", "Content-Length": "\(payload.utf8.count)"]
+            )
+            context.write(wrapOutboundOut(.head(head)), promise: nil)
+            var body = context.channel.allocator.buffer(capacity: payload.utf8.count)
+            body.writeString(payload)
             context.write(wrapOutboundOut(.body(.byteBuffer(body))), promise: nil)
             context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
 

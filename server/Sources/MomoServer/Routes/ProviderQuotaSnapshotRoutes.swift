@@ -83,7 +83,17 @@ struct ProviderQuotaSnapshotRoutes: Sendable {
 
         let stored: (row: StoredQuotaSnapshot, applied: Bool) = try await db
             .withProviderQuotaIngestTransaction(workspaceID: principal.workspaceID) { conn in
-                try await Self.upsert(conn: conn, logger: db.logger, snapshot: snapshot)
+                let stored = try await Self.upsert(conn: conn, logger: db.logger, snapshot: snapshot)
+                try await Self.writeIngestAudit(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: principal.workspaceID,
+                    actorMemberID: principal.memberID,
+                    viaTokenID: principal.tokenID,
+                    snapshot: snapshot,
+                    applied: stored.applied
+                )
+                return stored
             }
 
         let response = ProviderQuotaSnapshotIngestResponse(
@@ -295,7 +305,7 @@ struct ProviderQuotaSnapshotRoutes: Sendable {
         // label ("hermes-primary-eu-west-1-fallback"), so the signal is an
         // unbroken alphanumeric RUN — words are short and separated, secrets are
         // not. 24 is comfortably above any real word and below every real key.
-        guard normalized.count >= 32 else { return false }
+        guard normalized.count >= 24 else { return false }
         var run = 0
         var longestRun = 0
         var sawDigit = false
@@ -396,6 +406,45 @@ struct ProviderQuotaSnapshotRoutes: Sendable {
             logger: logger
         ).collect()
         return try rows.map(decode)
+    }
+
+    /// Quota rows are instance-global, but each ingest is still attributable to
+    /// the agent bearer that submitted it. The audit records no bearer and no
+    /// provider response body — only the accepted gauge identity and outcome.
+    static func writeIngestAudit(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        actorMemberID: UUID,
+        viaTokenID: UUID,
+        snapshot: ValidatedSnapshot,
+        applied: Bool
+    ) async throws {
+        let detail = auditDetail([
+            "schema": "momo.provider_quota_snapshot.ingested.v1",
+            "provider_ref": snapshot.providerRef,
+            "window": snapshot.window,
+            "applied": applied,
+        ])
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, action, target_type, target_id,
+               via_token_id, detail)
+            VALUES
+              (\(workspaceID), \(actorMemberID), 'provider_quota_snapshot.ingested',
+               'quota_snapshot', NULL, \(viaTokenID), \(detail)::jsonb)
+            """,
+            logger: logger
+        )
+    }
+
+    static func auditDetail(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let value = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return value
     }
 
     private static func decode(_ row: PostgresRow) throws -> StoredQuotaSnapshot {
