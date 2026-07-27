@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-27 (Fable) · 배치 5장 중 3장 랜딩 · #839 design-review FAIL · 성재 지시로 일시 중지
+- **재개 문서 = `handoffs/2026-07-27-resume-batch.md`**(이것만 읽으면 재개 가능). #839 수정 패킷은 `handoffs/2026-07-27-839-2r-fix-packet.md`에 이미 쓰여 있고 **spawn 직전에 멈췄다.**
+- **랜딩 3장**: #840(첨부 unique 테넌트 분리, 044) · #838(웹 마켓플레이스 복원, design-review 4R PASS) · #841(한국어 보안 자료+신뢰 경계 다이어그램, `01026aa1`). **세 트랙 모두 main 앞·성재 승인 대기.**
+- **#839 FAIL(Blocker 1·High 4), 5건 전부 코드에서 재확인.** Blocker는 `dialog.tsx`가 "본문 스크롤 상자는 caller가 넣어라"라고 **주석으로 계약을 적어뒀는데 이 caller만 안 넣은 것** — **출하 시드 GitHub 1-scope가 900x600에서 승인 버튼이 화면 밖**이고 키보드 Tab이 **보이지 않는 승인 버튼에 도달해 Enter가 먹는다.** High 4: 다른 scope가 같은 라벨(`notion:comment`=`notion:admin`="notion 사용 권한") · `outcome.error` 참조처 0건이라 `pluginActionErrorMessage`가 죽은 코드가 되고 전량 실패에 선택까지 날아감 · 전량 성공 후 재조회가 opener를 언마운트해 포커스 body · 위험도가 앱 단위 한 줄뿐이라 **다이얼로그 뒤 상세 패널이 오히려 더 자세함**.
+- **교훈 갱신**: "기존 사용처를 먼저 읽어라"를 패킷에 넣어도 **계약 주석이 호출부가 아니라 컴포넌트 쪽에 있으면 놓친다.** 뷰포트 밖 컨트롤은 #838에 이어 **두 번째**라 이번엔 게이트(900x600)로 잠그게 했다.
+- **#842는 PR #847까지 왔다**(CSP 설정 + `gate-csp.mjs` 281줄, CSP 문자열을 `tauri.conf.json`에서 읽는 구조). `style-src 'unsafe-inline'`(xterm 실측)·넓은 `connect-src`(런타임 서버 주소+관전 호스트)는 근거가 레포에 있어 정당. **검증 미착수** — `gate:csp`·레드 증명·`cargo tauri` 실빌드가 내 몫이고, `frame-ancestors` 부재와 Tauri IPC CSP 주입은 확인 필요.
+
 ## 2026-07-27 (Fable) · 일반 사용자 대응 조사 3건 → 이슈 5장 + ADR 선행 분리
 - **성재 발제 3건**(브라우저 왕복 가입 / 보안은 어떻게 답하나 / 코덱스식 커넥터 UI)을 코드에서 전수 조사. 계획 정본 `2026-07-27-general-user-readiness-plan.md`.
 - **판정: 셋이 같은 결정을 가리킨다** — 셀프호스팅 도구에서 일반 유저 제품으로 무게중심 이동. ADR-0121 D6-A(기본 공개 서버 비내장)·D5-A(momo Cloud 범위 밖)가 막고 있어 **새 ADR이 필요한 경계 변경**이다. 그래서 **결정 불요분만 즉시 착수**로 갈랐다.
