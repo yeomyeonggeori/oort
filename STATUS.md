@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-632 웹 와이어 검증 레이어 + 백스크린 차단 (#827, 2026-07-27)
+
+- 웹 REST 두 퍼널이 `null`/배열/원시 JSON을 명시적 wire 오류로 전환하고, 목록·진단·정책 언랩은 total helper로 빈 상태 또는 query 오류로 내린다. 앱 루트와 설정 본문에는 재시도 가능한 오류 경계를 추가해 설정 한 섹션의 렌더 실패가 사이드바·탐색을 언마운트하지 않는다.
+- `npm run typecheck`, `npm test`(841), `npm run build`, `npm run lint`(기존 warning 4), `scripts/design_preflight_web.sh` PASS. 신규 `npm run gate:wire`는 `null`·`{}`·타입 전도 fixture로 root child와 sidebar를 단정하도록 준비했다. 이 워커 sandbox의 Chromium은 macOS Mach-port 권한에서 실행 불가여서 gate:shell/gate:wire와 의도적 pre-fix red proof는 오케스트레이터 실행 대기(runtime-unverified).
+
 ## MOMO-630 캐스캐이드 실패 분기 + 총 예산 (#825, 2026-07-27)
 
 - `ProviderCascadeRunner`는 이제 `ProviderCascadeFailure(reason, disposition, underlying)`를 경계 밖으로 전달한다. 워커는 **모든 홉의 가용성 소진만** 재큐잉하며, 4xx·cancelled·undecodable·부분 출력 후 실패·총 예산 초과는 `markJobFailed`와 동일한 사용자 실패 안내로 끝낸다. 원본 오류는 진단 문자열에 보존되어 401 등 원인을 `agent_run.error`에서 확인할 수 있다.

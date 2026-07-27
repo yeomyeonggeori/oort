@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import type { LoginResponse } from "@/lib/api";
 import {
   createRealtime,
@@ -8,6 +8,9 @@ import {
   type RealtimeStatus,
 } from "@/lib/realtime";
 import { SessionProvider } from "@/app/session";
+import { queryClient } from "@/app/queryClient";
+import { resetRouteQueries } from "@/app/retryScope";
+import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
@@ -34,6 +37,9 @@ export function AppShell({
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // The route boundary resets when the user navigates: a failed channel must
+  // not keep the next one from rendering.
+  const routePath = useLocation().pathname;
 
   // The pure-scroll gate (?stress=N) renders synthetic rows and must not open
   // a socket, otherwise the frame profile measures the network too.
@@ -107,7 +113,19 @@ export function AppShell({
           <div className="app-shell">
             <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
             <main className="flex min-h-0 min-w-0">
-              <Outlet />
+              {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
+               * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
+               * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
+               * 소유한 표면 안에 머문다. */}
+              <RenderErrorBoundary
+                resetKey={routePath}
+                title="이 화면을 열지 못했습니다"
+                message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
+                retryLabel="다시 시도"
+                onRetry={() => resetRouteQueries(queryClient)}
+              >
+                <Outlet />
+              </RenderErrorBoundary>
             </main>
           </div>
           {/* Global keyboard paths that must work from any route (R-1 §2). */}

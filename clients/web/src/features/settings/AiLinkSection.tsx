@@ -31,6 +31,7 @@ import {
 } from "./SettingsFields";
 import { AiLinkChain, ChainProbeResult } from "./AiLinkChain";
 import { parseProbeEntries } from "./chainModel";
+import { arrayField } from "@/lib/wire";
 
 // =============================================================================
 // AI 연결 (R-1 §5): the instance-global provider link, GET/PUT/DELETE plus the
@@ -176,7 +177,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   // answer a body of another shape entirely. `parseProbeEntries` is total, so
   // an unreadable answer degrades to the MOMO-572 single-hop sentence below
   // instead of throwing inside render (see chainModel).
-  const probeEntries = parseProbeEntries(probe?.entries);
+  const probeEntries = parseProbeEntries(arrayField(probe, "entries"));
+  const diagnostics = (arrayField(link, "diagnostics") ?? []).filter(
+    (line): line is string => typeof line === "string"
+  );
 
   return (
     <SectionShell title="AI 연결" lines={lines}>
@@ -226,9 +230,9 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             ]}
           />
 
-          {link.diagnostics.length > 0 && (
+          {diagnostics.length > 0 && (
             <ul className="flex flex-col gap-1">
-              {link.diagnostics.map((line) => (
+              {diagnostics.map((line) => (
                 <li key={line} className="text-meta text-warn">
                   {line}
                 </li>
