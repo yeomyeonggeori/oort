@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-28 (Fable) · #855 랜딩(트랙) · #850 1R FAIL→2R · #854 가동
+- **#855 T3 랜딩**(track/engine `05ff5720`, PR #863, sol medium): 리허설 대본→원장→프로비저너 3커밋. **pause 미계상이 GENERATED 컬럼으로 구조적**(과금 코드 빼기에 비의존 — 패킷 요구 정답), `usage_ledger` 비확장 근거 명시, 부트스트랩 토큰 digest-only+15분 1회용, RLS FORCE 4테이블, `confirmPaidCloud` 명시 동의. **검증**: 337 tests·격리 검증기 전관문(mock E2B)·red proof(pause 벽시계 과금 6s vs 4s 검출)·openapi 6경로. **한계**: 실 E2B 왕복은 D4 리허설 준비물(운영자 momo-workd template+공개 서버) 확보 후.
+- **#850 웹 허들 1R FAIL(B2·H1)** — 워커 산출물 자체는 견실(893 tests·gate:huddle 신설+red proof 2종·lazy-load 530KB 분리·keepalive leave·마이크 거부 분리 분류). Blocker는 통합 지점: ①`shrink-0` 우측 클러스터에 가변 폭 표면을 넣어 **760x480 참가 중 채널 제목 폭 0px**·offline 경고 화면 밖·작업 패널 토글 도달 불가 ②`error/unconfigured` 분기가 joined보다 먼저 반환해 **통화 중 일시 500 한 번에 마이크·나가기 소멸(핫마이크 출구 없음)**. H1: 출하 웹 CSP가 LiveKit 소켓을 침묵 거부하는데 SecurityError를 마이크 거부로 오분류할 위험(`cspBlockedHost` 선례 미사용). 2R 패킷 `handoffs/2026-07-28-850-2r-fix-packet.md`, sol medium 가동.
+- **검증 중 선존재 결함 수리 1건**: 패키징 CSP 재실행에서 gate:shell이 EvalError — `waitForFunction`이 술어를 페이지 월드에서 eval(#839 라운드 유래 5곳, #850 무관). CDP 면제인 `page.evaluate` 폴링으로 교체(`06974caf`), 평문=CSP 66단정 동일 PASS·부순 CSP FAIL 유지.
+- **#854 전사 v1 워커 가동**(sol medium, 하니스+골격+동의 게이트 범위).
+
 ## 2026-07-28 (Fable) · buzz 에이전트 탭 실사(HEAD 07-27) → 허브 탭 갭 판정 + 향후 티켓 2장
 - **성재 질문**: buzz Agents 탭 같은 "에이전트 베이스 탭"(프로필·권한·프롬프트·memory·이력·현재작업·cron)이 우리 설계에 있나 + buzz 갱신. **판정: 없다 — 조각 분산**(프로필 다이얼로그·디렉터리·앱 권한·인박스), 정본 `2026-07-28-buzz-agents-tab-delta.md`.
 - **buzz 델타 실사**(07-22 분석 이후 **179커밋**, HEAD `18eef633`): Agents 탭 = 목록+프로필 4탭(info/runtime/channels/**memories**)+정의 단일정본(`8c0e8cb`)+Respond to/MCP/실행위치+세션 전사+스냅샷/팀+**BYOH generic ACP**(`95fdf97`). **방향 신호 = 분산 표면의 Unified 수렴**(페르소나 카탈로그·디렉터리 섹션 삭제). buzz도 cron은 없다(Workflows가 그 자리). **안 따라가는 것 명시: 프로바이더 API 키 입력(ADR-0004 위반).**
