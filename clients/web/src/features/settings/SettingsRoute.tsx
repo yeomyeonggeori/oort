@@ -12,6 +12,7 @@ import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { InviteSection } from "./InviteSection";
+import { PluginSection } from "@/features/plugins/PluginSection";
 import { SectionShell } from "./SettingsFields";
 import { UsageSection } from "./UsageSection";
 import { WorkHostSection } from "./WorkHostSection";
@@ -35,6 +36,7 @@ type SectionId =
   | "ai"
   | "code"
   | "workspace"
+  | "plugins"
   | "usage"
   | "members";
 
@@ -65,6 +67,7 @@ const SECTIONS: SectionMeta[] = [
   { id: "ai", label: "AI 연결", group: "워크스페이스" },
   { id: "code", label: "코드 실행 호스트", group: "워크스페이스" },
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
+  { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "usage", label: "사용량", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
 ];
@@ -199,6 +202,7 @@ export function SettingsRoute() {
           {section === "workspace" && (
             <WorkspaceSection workspaceId={workspaceId} offline={offline} />
           )}
+          {section === "plugins" && <PluginSection offline={offline} />}
           {/* No `offline` prop: 사용량 is a read, and the realtime rail being
               down says nothing about whether this GET answers. The panel reads
               the browser's own offline state instead (react-query fetchStatus),

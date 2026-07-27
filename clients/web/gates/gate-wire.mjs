@@ -7,12 +7,16 @@
 // must remain usable while the affected panel reports its own empty/error state.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const githubManifest = JSON.parse(readFileSync(
+  resolve(webRoot, "../../server/Fixtures/plugin-manifests/github.json"),
+  "utf8"
+));
 const port = Number(process.env.WIRE_GATE_PORT || 5180);
 const origin = `http://127.0.0.1:${port}`;
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -27,7 +31,25 @@ function json(route, body) {
   return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+// Build the healthy half of this malformed-wire test from the actual registry
+// fixture and PluginCatalogResponse fields. The only invented bodies below are
+// deliberate malformed values the gate must survive.
+function healthyPluginCatalog() {
+  const plugin = githubManifest.plugin;
+  return {
+    plugins: [{
+      pluginId: plugin.id, name: plugin.name, version: plugin.version,
+      description: plugin.description, official: true, recommended: true,
+      egressDomains: githubManifest.momo.egressDomains,
+      recommendedFor: githubManifest.momo.recommendedFor,
+      installed: true, enabled: true,
+    }],
+    toolPolicy: { plugins: [] },
+  };
+}
+
 async function installFaults(context) {
+  let pluginFault = "catalog-null";
   await context.route("**/v1/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/v1/auth/login") return json(route, session);
@@ -42,9 +64,18 @@ async function installFaults(context) {
     if (path.endsWith("/work-tier-policy") || path.endsWith("/work-tier-policy/me")) return json(route, {});
     if (path.endsWith("/invites")) return json(route, { invites: {} });
     if (path.endsWith("/approvals")) return json(route, { approvals: "wrong" });
+    if (path.endsWith("/plugins")) {
+      if (pluginFault === "catalog-null") return json(route, { plugins: null, toolPolicy: { plugins: [] } });
+      if (pluginFault === "catalog-wrong") return json(route, { plugins: [{ pluginId: 3 }], toolPolicy: {} });
+      return json(route, healthyPluginCatalog());
+    }
+    if (path.endsWith(`/plugins/${githubManifest.plugin.id}`)) {
+      return json(route, pluginFault === "detail-null" ? { plugin: null } : {});
+    }
     if (path === "/v1/provider/link") return json(route, { configured: true, diagnostics: null });
     return json(route, {});
   });
+  return { setPluginFault: (next) => { pluginFault = next; } };
 }
 
 async function waitForServer() {
@@ -134,7 +165,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
-      await installFaults(context);
+      const faults = await installFaults(context);
       const page = await context.newPage();
       await page.goto(origin, { waitUntil: "networkidle" });
       await page.getByTestId("login-email").fill("wire@example.test");
@@ -145,10 +176,17 @@ async function main() {
       // 그리는지에 게이트가 묶이지 않도록 testid로 잡는다.
       await page.getByTestId("nav-settings").click();
       await page.waitForSelector('[data-testid="settings-route"]');
-      for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["account", "계정"]]) {
+      for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["plugins", "앱"], ["account", "계정"]]) {
         await page.getByRole("button", { name: label, exact: true }).click();
         await assertShell(page, `settings ${section}`);
       }
+      // A malformed catalog must stay an inline error. Once it recovers, the
+      // selected manifest gets its own bad body, which must not turn into a
+      // route-level render error either.
+      faults.setPluginFault("detail-null");
+      await page.getByRole("button", { name: "앱", exact: true }).click();
+      await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+      await assertShell(page, "settings plugins detail");
       await assertNavigationKeepsRouteState(context);
       await context.close();
     } finally { await browser.close(); }
