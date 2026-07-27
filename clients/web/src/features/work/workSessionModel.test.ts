@@ -19,6 +19,7 @@ import {
   workChannelsToWatch,
   workHostOnline,
   workHostTrust,
+  workSessionContinuityStatus,
   workSessionStatus,
   type WorkSessionEvent,
 } from "./workSessionModel";
@@ -117,6 +118,13 @@ describe("workSessionStatus", () => {
 
   it("reads an ended session with no exit code as a clean end", () => {
     expect(workSessionStatus(session({ status: "ended" })).key).toBe("done");
+  });
+
+  it("renders an unknown future status neutrally", () => {
+    expect(workSessionStatus({ status: "future", exitCode: undefined })).toEqual({
+      key: "unknown",
+      label: "상태 확인 필요",
+    });
   });
 });
 
@@ -500,6 +508,13 @@ describe("workHostTrust", () => {
     expect(workHostOnline(session(), undefined)).toBeNull();
   });
 
+  it("does not present a running session on an offline host as active", () => {
+    expect(
+      workSessionContinuityStatus(session(), [host({ online: false })])
+    ).toEqual({ key: "unavailable", label: "호스트 응답 없음" });
+    expect(workSessionContinuityStatus(session(), [host()]).key).toBe("running");
+  });
+
   it("drops the promise of coming steps when nobody has heard the host", () => {
     const promise = "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
     expect(emptyStepsDetail(session(), [host()])).toBe(promise);
@@ -534,6 +549,23 @@ describe("list surfaces", () => {
     expect(scopeSessions(rows, "channel", CHANNEL_ID.toUpperCase())).toHaveLength(1);
     expect(scopeSessions(rows, "all", CHANNEL_ID)).toHaveLength(2);
     expect(scopeSessions(rows, "channel", null)).toHaveLength(2);
+  });
+
+  it("shows only the viewer's non-ended sessions in the mine scope", () => {
+    const mine = session();
+    const other = session({
+      id: "other-running",
+      memberId: "00000000-0000-7000-8000-000000000999",
+    });
+    const ended = session({ id: "mine-ended", status: "ended" });
+    expect(
+      scopeSessions(
+        [mine, other, ended],
+        "mine",
+        CHANNEL_ID,
+        mine.memberId.toUpperCase()
+      ).map((row) => row.id)
+    ).toEqual([SESSION_ID]);
   });
 
   it("summarises with the newest meaningful line", () => {

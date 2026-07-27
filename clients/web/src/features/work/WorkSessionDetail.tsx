@@ -23,8 +23,9 @@ import {
   isSlowStep,
   ROW_STATE_LABEL,
   workHostName,
+  workHostOnline,
   workHostTrust,
-  workSessionStatus,
+  workSessionContinuityStatus,
   type WorkEventRow,
   type WorkSessionEvent,
 } from "./workSessionModel";
@@ -521,9 +522,10 @@ export function WorkSessionDetail({
     backRef.current?.focus();
   }, [session.id]);
 
-  const status = workSessionStatus(session);
+  const status = workSessionContinuityStatus(session, hosts);
   const trust = workHostTrust(session, hosts);
   const hostName = workHostName(session, hosts);
+  const hostOnline = workHostOnline(session, hosts);
   const owner = memberFor(directory, session.memberId);
   // Once the thread has actually been read, a session with no events at all has
   // been silent since it started, and that start IS the last known signal. Until
@@ -535,7 +537,10 @@ export function WorkSessionDetail({
   const lastSignalAtMs =
     folded.lastEventAtMs ?? (query.isSuccess ? session.startedAtMs : null);
   const slow =
-    live && trust === "local" && isSlowStep(session, lastSignalAtMs, nowMs);
+    live &&
+    hostOnline !== false &&
+    trust === "local" &&
+    isSlowStep(session, lastSignalAtMs, nowMs);
   const elapsed = elapsedLabel(
     session.startedAtMs,
     session.endedAtMs ?? nowMs
@@ -546,7 +551,8 @@ export function WorkSessionDetail({
   // already says why in words (the offline banner, the silence line, the
   // unverified host banner), and those sentences are the honest version of what
   // the caret was claiming.
-  const streamOpen = live && trust === "local" && !slow;
+  const streamOpen =
+    live && hostOnline !== false && trust === "local" && !slow;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="work-detail">
@@ -656,12 +662,20 @@ export function WorkSessionDetail({
             terminal is a different path entirely: capability plus a direct
             socket to the host, no relay in between. Drawn under the banner it
             read as the thing the banner was doubting. */}
-        <ObserverTerminal
-          session={session}
-          hostName={hostName}
-          wide={wide}
-          onWideChange={onWideChange}
-        />
+        {session.status === "running" && hostOnline === false ? (
+          <InlineBanner
+            tone="neutral"
+            message="호스트 응답이 없어 터미널을 관전할 수 없습니다. 목록으로 돌아가 '세션 스레드'를 선택하면 기록을 계속 확인할 수 있습니다."
+            testId="work-host-offline"
+          />
+        ) : (
+          <ObserverTerminal
+            session={session}
+            hostName={hostName}
+            wide={wide}
+            onWideChange={onWideChange}
+          />
+        )}
 
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a
             verified path yet, so this panel refuses to read its empty stream as

@@ -32,7 +32,9 @@ import {
   scopeSessions,
   sortSessions,
   workHostTrust,
-  workSessionStatus,
+  workHostName,
+  workHostOnline,
+  workSessionContinuityStatus,
   type WorkScope,
   type WorkSessionEvent,
 } from "./workSessionModel";
@@ -69,11 +71,14 @@ function ScopeButton({
   label,
   onClick,
   testId,
+  flexible = false,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
   testId: string;
+  /** Only the unbounded channel/DM label yields space to the fixed scopes. */
+  flexible?: boolean;
 }) {
   return (
     <button
@@ -82,7 +87,8 @@ function ScopeButton({
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "h-control-sm min-w-0 truncate rounded-sm px-2 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        "h-control-sm rounded-sm px-2 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        flexible ? "min-w-0 flex-1 truncate" : "shrink-0",
         active
           ? "bg-accent-soft text-accent"
           : "text-ink-muted hover:bg-surface-hover"
@@ -113,6 +119,7 @@ function peekDomId(sessionId: string): string {
  */
 function SessionRow({
   session,
+  hosts,
   channelName,
   peeked,
   live,
@@ -123,6 +130,7 @@ function SessionRow({
   rowRef,
 }: {
   session: WorkSession;
+  hosts: WorkHost[] | undefined;
   channelName: string;
   peeked: boolean;
   live: boolean;
@@ -132,8 +140,10 @@ function SessionRow({
   onPeek: () => void;
   rowRef: (element: HTMLButtonElement | null) => void;
 }) {
-  const status = workSessionStatus(session);
-  const slow = live && isSlowStep(session, lastEventAtMs, nowMs);
+  const hostOnline = workHostOnline(session, hosts);
+  const status = workSessionContinuityStatus(session, hosts);
+  const effectiveLive = live && hostOnline !== false;
+  const slow = effectiveLive && isSlowStep(session, lastEventAtMs, nowMs);
   const elapsed = elapsedLabel(session.startedAtMs, session.endedAtMs ?? nowMs);
   return (
     <button
@@ -168,7 +178,11 @@ function SessionRow({
           data-testid="work-session-elapsed"
           className={cn(
             "shrink-0 font-mono text-timestamp",
-            !live ? "text-ink-muted" : slow ? "text-warn" : "text-ink-muted"
+            !effectiveLive
+              ? "text-ink-muted"
+              : slow
+                ? "text-warn"
+                : "text-ink-muted"
           )}
         >
           {elapsed}
@@ -201,6 +215,109 @@ function SessionRow({
         </span>
       </span>
     </button>
+  );
+}
+
+function MySessionRow({
+  session,
+  hosts,
+  channelName,
+  openingThread,
+  onOpenDetail,
+  onOpenThread,
+  detailRef,
+}: {
+  session: WorkSession;
+  hosts: WorkHost[];
+  channelName: string;
+  openingThread: boolean;
+  onOpenDetail: () => void;
+  onOpenThread: () => void;
+  detailRef: (element: HTMLButtonElement | null) => void;
+}) {
+  const status = workSessionContinuityStatus(session, hosts);
+  const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
+  const hostOnline = workHostOnline(session, hosts);
+
+  return (
+    <li
+      className="border-b border-line px-4 py-2"
+      data-testid="my-work-session-row"
+      data-session-id={session.id}
+      data-status={status.key}
+      data-host-online={
+        hostOnline === null ? "unknown" : hostOnline ? "true" : "false"
+      }
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-body text-ink">
+          {session.label}
+        </span>
+        <span
+          className={cn(
+            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+            SESSION_STATUS_CLASS[status.key]
+          )}
+          data-testid="my-work-session-status"
+        >
+          {status.label}
+        </span>
+      </div>
+      <p className="mt-1 flex min-w-0 items-baseline gap-1 text-meta text-ink-muted">
+        {/* Shrink-only, never grow: the interpunct-separated fields read as ONE
+            sentence, so letting the name grow splits the line into a left/right
+            pair on short names (design-review 851-2R High). The unbounded name
+            is still the first truncation victim because every sibling is
+            shrink-0. */}
+        <span
+          className="min-w-0 truncate"
+          data-testid="my-work-session-host"
+        >
+          {hostName}
+        </span>
+        <span className="shrink-0">·</span>
+        <span className="shrink-0" data-testid="my-work-session-host-state">
+          {hostOnline === true
+            ? "온라인"
+            : hostOnline === false
+              ? "응답 없음"
+              : "상태 확인 필요"}
+        </span>
+        <span className="shrink-0">·</span>
+        <span className="shrink-0" data-testid="my-work-session-tool">
+          {session.tool}
+        </span>
+      </p>
+      <p className="flex min-w-0 items-baseline gap-1 text-meta text-ink-muted">
+        <span className="min-w-0 truncate">{channelName}</span>
+        <span className="shrink-0">· 시작</span>
+        <span data-numeric className="shrink-0 font-mono">
+          {clockLabel(session.startedAtMs)}
+        </span>
+      </p>
+      <div className="mt-2 flex flex-wrap justify-end gap-2">
+        <Button
+          ref={detailRef}
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onOpenDetail}
+          data-testid="my-work-session-detail"
+        >
+          세션 상세
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onOpenThread}
+          disabled={openingThread}
+          data-testid="my-work-session-thread"
+        >
+          {openingThread ? "스레드 여는 중" : "세션 스레드"}
+        </Button>
+      </div>
+    </li>
   );
 }
 
@@ -333,6 +450,9 @@ export function WorkPanel({
   onScopeChange,
   selectedId,
   onSelectedIdChange,
+  openingThreadId,
+  threadOpenError,
+  onOpenThread,
   onClose,
 }: {
   /** The open channel, or null when the route has none. */
@@ -347,6 +467,9 @@ export function WorkPanel({
   onScopeChange: (scope: WorkScope) => void;
   selectedId: string | null;
   onSelectedIdChange: (sessionId: string | null) => void;
+  openingThreadId: string | null;
+  threadOpenError: string | null;
+  onOpenThread: (session: WorkSession) => void;
   onClose: () => void;
 }) {
   const { session: auth, workspaceId, connStatus } = useSession();
@@ -354,10 +477,13 @@ export function WorkPanel({
   const directoryQuery = useDirectory(workspaceId);
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
+  const projectionsPending = sessionsQuery.isPending || hostsQuery.isPending;
+  const projectionError = sessionsQuery.error ?? hostsQuery.error;
 
   // With no open channel there is no channel scope to be in, whatever the
   // remembered preference says.
-  const scope: WorkScope = channelId === null ? "all" : requestedScope;
+  const scope: WorkScope =
+    channelId === null && requestedScope === "channel" ? "all" : requestedScope;
   const [peekId, setPeekId] = useState<string | null>(null);
 
   /**
@@ -421,8 +547,8 @@ export function WorkPanel({
     [sessionsQuery.data]
   );
   const visible = useMemo(
-    () => scopeSessions(sessions, scope, channelId),
-    [sessions, scope, channelId]
+    () => scopeSessions(sessions, scope, channelId, auth.member.id),
+    [sessions, scope, channelId, auth.member.id]
   );
   const rail = useWorkSessionRail(workspaceId, sessions, channelId);
 
@@ -589,12 +715,19 @@ export function WorkPanel({
             label={scopeLabel}
             onClick={() => onScopeChange("channel")}
             testId="work-scope-channel"
+            flexible
           />
           <ScopeButton
             active={scope === "all"}
             label="전체"
             onClick={() => onScopeChange("all")}
             testId="work-scope-all"
+          />
+          <ScopeButton
+            active={scope === "mine"}
+            label="내 세션"
+            onClick={() => onScopeChange("mine")}
+            testId="work-scope-mine"
           />
         </div>
         {/* The count is a claim about the server, so it waits for the server.
@@ -647,6 +780,13 @@ export function WorkPanel({
         </p>
       )}
 
+      {threadOpenError !== null && (
+        <InlineBanner
+          message={threadOpenError}
+          testId="work-thread-open-error"
+        />
+      )}
+
       {selected !== null ? (
         <WorkSessionDetail
           session={selected}
@@ -662,26 +802,53 @@ export function WorkPanel({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {sessionsQuery.isPending && <SkeletonRows rows={4} className="p-4" />}
-          {sessionsQuery.error !== null && (
+          {projectionsPending && (
+            <SkeletonRows rows={4} className="p-4" />
+          )}
+          {projectionError !== null && (
             <InlineBanner
-              message="세션 목록을 불러오지 못했습니다."
+              message={
+                sessionsQuery.error !== null
+                  ? "세션 목록을 불러오지 못했습니다."
+                  : "호스트 상태를 불러오지 못했습니다."
+              }
               actionLabel="다시 시도"
-              onAction={() => void sessionsQuery.refetch()}
+              onAction={() => {
+                if (sessionsQuery.error !== null) void sessionsQuery.refetch();
+                if (hostsQuery.error !== null) void hostsQuery.refetch();
+              }}
               testId="work-panel-error"
             />
           )}
-          {!sessionsQuery.isPending &&
-            sessionsQuery.error === null &&
+          {!projectionsPending &&
+            projectionError === null &&
+            scope === "mine" &&
+            hostsQuery.data?.length === 0 &&
+            visible.length === 0 && (
+              <EmptyInvite
+                headline="등록된 작업 호스트가 없습니다."
+                detail="코드 실행 호스트를 연결하면 내 활성 세션을 이어서 볼 수 있습니다."
+                testId="work-panel-hosts-empty"
+              />
+            )}
+          {!projectionsPending &&
+            projectionError === null &&
+            !(scope === "mine" &&
+              hostsQuery.data?.length === 0 &&
+              visible.length === 0) &&
             visible.length === 0 && (
               <EmptyInvite
                 headline={
-                  scope === "all"
+                  scope === "mine"
+                    ? "현재 이어갈 내 세션이 없습니다."
+                    : scope === "all"
                     ? "이 워크스페이스에는 아직 작업 세션이 없습니다."
                     : "이 채널에는 아직 작업 세션이 없습니다."
                 }
                 detail={
-                  scope === "channel"
+                  scope === "mine"
+                    ? "내가 시작한 실행 중 또는 연결이 끊긴 세션이 여기에 표시됩니다."
+                    : scope === "channel"
                     ? "다른 채널의 세션은 전체 범위에서 볼 수 있습니다."
                     : "에이전트가 작업을 시작하면 여기에 세션이 쌓입니다."
                 }
@@ -700,7 +867,33 @@ export function WorkPanel({
                 testId="work-panel-empty"
               />
             )}
-          {visible.length > 0 && (
+          {scope === "mine" &&
+            !projectionsPending &&
+            projectionError === null &&
+            visible.length > 0 && (
+              <ul data-testid="my-work-session-list">
+                {visible.map((session) => (
+                  <MySessionRow
+                    key={session.id}
+                    session={session}
+                    hosts={hostsQuery.data ?? []}
+                    channelName={nameOf(session.channelId)}
+                    openingThread={uuidEq(openingThreadId ?? undefined, session.id)}
+                    onOpenDetail={() => onSelectedIdChange(session.id)}
+                    onOpenThread={() => onOpenThread(session)}
+                    detailRef={(element) => {
+                      const key = session.id.toLowerCase();
+                      if (element) rowRefs.current.set(key, element);
+                      else rowRefs.current.delete(key);
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          {scope !== "mine" &&
+            !projectionsPending &&
+            projectionError === null &&
+            visible.length > 0 && (
             <ul data-testid="work-session-list">
               {visible.map((session) => {
                 const folded = foldedFor(session);
@@ -709,6 +902,7 @@ export function WorkPanel({
                   <li key={session.id} className="border-b border-line">
                     <SessionRow
                       session={session}
+                      hosts={hostsQuery.data}
                       channelName={nameOf(session.channelId)}
                       peeked={peeked}
                       live={live}
