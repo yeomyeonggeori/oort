@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
+
+- 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.
+- `npm run typecheck`·Vitest 877·`npm run build`·lint(기존 warning 4)·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 이 worker sandbox에서 Chromium이 런치 직후 종료되어 runtime-unverified이며, fresh design-review는 오케스트레이터 실행 대기다.
+
 ## MOMO-636 웹 플러그인 마켓플레이스 복원 (#838, 2026-07-27)
 
 - 설정의 `앱` 섹션에 catalog·원본 manifest 상세·egress 도메인·tool risk/approval tier·설치/해제와 본인 단일 scope grant 회수를 복원했다. 관리자 판정은 roster의 내 role이 owner/admin으로 확인될 때만 열며, 다중 scope는 원문 표시만 하고 변경하지 않는다.

@@ -2,16 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import {
   actionErrorForPlugin,
+  activePluginScopes,
   administratorNames,
   callerPolicySummary,
   focusPluginActionAfterErrorDismissal,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
+  pluginConsentScopeAction,
   pluginDetailErrorMessage,
   pluginMarketplaceNeedsDetailFocus,
   type PluginActionFocusTarget,
   pluginRoleState,
+  pluginScopeChangeMessage,
+  settlePluginScopeChanges,
   workspaceInstallationLabel,
 } from "./model";
 
@@ -50,12 +54,6 @@ describe("plugin marketplace copy", () => {
       title: "Linear 설치를 해제할까요?",
       description: "Linear 앱의 모든 멤버 권한이 함께 회수됩니다.",
       confirmLabel: "설치 해제",
-    });
-    expect(pluginActionConfirmation({
-      kind: "revokeGrant", pluginId: "linear", pluginName: "Linear", scope: "linear:read",
-    })).toMatchObject({
-      title: "Linear 권한을 회수할까요?",
-      confirmLabel: "내 권한 회수",
     });
   });
 
@@ -107,5 +105,51 @@ describe("plugin marketplace copy", () => {
     const error = new ApiError(403, "plugin serverPolicy rejects installation");
     expect(actionErrorForPlugin(action, "linear", error)).toBeNull();
     expect(actionErrorForPlugin(action, "github", error)).toContain("워크스페이스 정책");
+  });
+
+  it("builds scope grants only after the consent surface explicitly confirms", () => {
+    const input = {
+      kind: "grant" as const,
+      pluginId: "github",
+      pluginName: "GitHub",
+      declaredScopes: ["github:read", "github:write"],
+      selectedScopes: ["github:read", "not-declared:admin"],
+    };
+    expect(pluginConsentScopeAction({ ...input, confirmed: false })).toBeNull();
+    expect(pluginConsentScopeAction({ ...input, confirmed: true })).toEqual({
+      kind: "grantScopes",
+      pluginId: "github",
+      pluginName: "GitHub",
+      scopes: ["github:read"],
+    });
+  });
+
+  it("derives active scopes from the effective tool policy rather than installation", () => {
+    const tools = [
+      { name: "github.list", scopes: ["github:read"] },
+      { name: "github.create", scopes: ["github:write"] },
+    ];
+    expect(activePluginScopes(tools, [{
+      name: "github.list", risk: "read", approvalTier: "read_only",
+    }])).toEqual(["github:read"]);
+  });
+
+  it("keeps partial scope failures separate from completed server responses", async () => {
+    const calls: string[] = [];
+    const outcomes = await settlePluginScopeChanges(
+      ["github:read", "github:issues", "github:write"],
+      async (scope) => {
+        calls.push(scope);
+        if (scope === "github:issues") throw new Error("policy changed");
+      }
+    );
+    expect(calls).toEqual(["github:read", "github:issues", "github:write"]);
+    expect(outcomes.map((outcome) => [outcome.scope, outcome.succeeded])).toEqual([
+      ["github:read", true],
+      ["github:issues", false],
+      ["github:write", true],
+    ]);
+    expect(pluginScopeChangeMessage("grant", outcomes))
+      .toContain("2개 권한을 허용했습니다. 1개는 변경하지 못했습니다");
   });
 });
