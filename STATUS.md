@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## MOMO-636 웹 플러그인 마켓플레이스 복원 (#838, 2026-07-27)
+
+- 설정의 `앱` 섹션에 catalog·원본 manifest 상세·egress 도메인·tool risk/approval tier·설치/해제와 본인 단일 scope grant 회수를 복원했다. 관리자 판정은 roster의 내 role이 owner/admin으로 확인될 때만 열며, 다중 scope는 원문 표시만 하고 변경하지 않는다.
+- 웹 API는 `lib/wire.ts` helper로 plugin 6개 엔드포인트를 파싱하고 `null`·빈 객체·타입 전도는 해당 패널의 inline 오류로 내린다. typecheck·Vitest 861·build·design preflight 10/10 PASS, Playwright gate:wire/gate:shell은 이 worker sandbox의 Chromium Mach-port 권한 거부로 runtime-unverified다.
+- 4R design-review 반영: 확인 다이얼로그는 열릴 때만 마운트되어 opener를 복귀하고 Esc를 소비해 설정 라우트 이탈을 막는다. 오류 닫기는 원래 액션에 되돌리며, 상세 scroll은 열 수 대신 설정 패널 안의 실제 가시성으로 판정하고 진행 중인 형제 액션을 잠근다.
+- `npm run typecheck`·Vitest 871·`npm run build`·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 동일 Chromium Mach-port 권한 거부로 `runtime-unverified`다.
+
 ## MOMO-634 워크스페이스 허용 모델 REST + 웹 교집합 (#831, 2026-07-27)
 
 - `GET /v1/workspaces/:ws/agents/:agent/allowed-models`는 활성 워크스페이스 멤버에게만 `agent.model ∪ workspace.settings.allowed_agent_models`를 결정적으로 투영한다. 설정 JSON·프로필·자격증명은 내보내지 않으며, 기존 `MessageRoutes.allowedAgentModels` 단일 소스를 재사용한다.

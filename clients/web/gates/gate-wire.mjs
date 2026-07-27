@@ -7,12 +7,16 @@
 // must remain usable while the affected panel reports its own empty/error state.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const githubManifest = JSON.parse(readFileSync(
+  resolve(webRoot, "../../server/Fixtures/plugin-manifests/github.json"),
+  "utf8"
+));
 const port = Number(process.env.WIRE_GATE_PORT || 5180);
 const origin = `http://127.0.0.1:${port}`;
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -27,7 +31,25 @@ function json(route, body) {
   return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+// Build the healthy half of this malformed-wire test from the actual registry
+// fixture and PluginCatalogResponse fields. The only invented bodies below are
+// deliberate malformed values the gate must survive.
+function healthyPluginCatalog() {
+  const plugin = githubManifest.plugin;
+  return {
+    plugins: [{
+      pluginId: plugin.id, name: plugin.name, version: plugin.version,
+      description: plugin.description, official: true, recommended: true,
+      egressDomains: githubManifest.momo.egressDomains,
+      recommendedFor: githubManifest.momo.recommendedFor,
+      installed: true, enabled: true,
+    }],
+    toolPolicy: { plugins: [] },
+  };
+}
+
 async function installFaults(context) {
+  let pluginFault = "catalog-null";
   await context.route("**/v1/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/v1/auth/login") return json(route, session);
@@ -42,9 +64,18 @@ async function installFaults(context) {
     if (path.endsWith("/work-tier-policy") || path.endsWith("/work-tier-policy/me")) return json(route, {});
     if (path.endsWith("/invites")) return json(route, { invites: {} });
     if (path.endsWith("/approvals")) return json(route, { approvals: "wrong" });
+    if (path.endsWith("/plugins")) {
+      if (pluginFault === "catalog-null") return json(route, { plugins: null, toolPolicy: { plugins: [] } });
+      if (pluginFault === "catalog-wrong") return json(route, { plugins: [{ pluginId: 3 }], toolPolicy: {} });
+      return json(route, healthyPluginCatalog());
+    }
+    if (path.endsWith(`/plugins/${githubManifest.plugin.id}`)) {
+      return json(route, pluginFault === "detail-null" ? { plugin: null } : {});
+    }
     if (path === "/v1/provider/link") return json(route, { configured: true, diagnostics: null });
     return json(route, {});
   });
+  return { setPluginFault: (next) => { pluginFault = next; } };
 }
 
 async function waitForServer() {
@@ -126,6 +157,38 @@ async function assertNavigationKeepsRouteState(context) {
   await page.close();
 }
 
+// 망가진 응답에서 플러그인 판은 **말을 해야 한다** — 목록이든 인라인 오류든.
+// 아무것도 없는 빈 판은 사용자에게 "앱이 없다"로 읽히므로 실패로 취급한다.
+async function assertPluginSurfaceSpeaks(page, surface) {
+  // queryClient는 retry:1이라 실패 응답도 한 번 더 시도한다. 성급하게 재면
+  // 스켈레톤을 '빈 판'으로 오독한다(측정됨). 종단 상태가 나올 때까지 기다린다.
+  const deadline = Date.now() + 8000;
+  let state;
+  const read = () => page.evaluate(() => {
+    const has = (id) => Boolean(document.querySelector(`[data-testid="${id}"]`));
+    return {
+      list: has("plugin-list"),
+      detail: has("plugin-detail"),
+      empty: has("plugins-empty"),
+      catalogError: has("plugins-error"),
+      detailError: has("plugin-detail-error"),
+    };
+  });
+  for (;;) {
+    state = await read();
+    if (state.list || state.detail || state.empty || state.catalogError || state.detailError) break;
+    if (Date.now() > deadline) break;
+    await page.waitForTimeout(250);
+  }
+  // 검색·필터 컨트롤은 항상 렌더되므로 "텍스트가 있느냐"로는 아무것도 못 잡는다
+  // (측정됨). 결과 영역이 무엇을 말하는지만 본다.
+  if (!state.list && !state.detail && !state.empty && !state.catalogError && !state.detailError) {
+    throw new Error(
+      `plugins ${surface}: 판이 비었다 — 목록도 상세도 오류도 없다: ${JSON.stringify(state)}`
+    );
+  }
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   const server = spawn(resolve(webRoot, "node_modules/.bin/vite"), ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: webRoot, stdio: "ignore" });
@@ -134,7 +197,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
-      await installFaults(context);
+      const faults = await installFaults(context);
       const page = await context.newPage();
       await page.goto(origin, { waitUntil: "networkidle" });
       await page.getByTestId("login-email").fill("wire@example.test");
@@ -145,10 +208,25 @@ async function main() {
       // 그리는지에 게이트가 묶이지 않도록 testid로 잡는다.
       await page.getByTestId("nav-settings").click();
       await page.waitForSelector('[data-testid="settings-route"]');
-      for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["account", "계정"]]) {
+      for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["plugins", "앱"], ["account", "계정"]]) {
         await page.getByRole("button", { name: label, exact: true }).click();
         await assertShell(page, `settings ${section}`);
+        // 판이 무엇을 말하는지는 그 판에 있을 때만 잴 수 있다. 루프 뒤에서 재면
+        // 마지막 섹션(계정)을 보게 된다(측정됨).
+        if (section === "plugins") await assertPluginSurfaceSpeaks(page, "catalog-null");
       }
+      // A malformed catalog must stay an inline error. Once it recovers, the
+      // selected manifest gets its own bad body, which must not turn into a
+      // route-level render error either.
+      // 셸이 살아 있다는 것만으로는 부족하다: 이 파싱은 쿼리 함수 안이라 어떤
+      // throw든 react-query가 잡아 렌더 크래시가 되지 않는다. 즉 assertShell은
+      // 검증 유무와 무관하게 통과한다(측정됨). 판이 통째로 비는 것과 오류를
+      // 보고하는 것을 갈라야 이 게이트가 값을 갖는다.
+      faults.setPluginFault("detail-null");
+      await page.getByRole("button", { name: "앱", exact: true }).click();
+      await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+      await assertShell(page, "settings plugins detail");
+      await assertPluginSurfaceSpeaks(page, "detail-null");
       await assertNavigationKeepsRouteState(context);
       await context.close();
     } finally { await browser.close(); }
