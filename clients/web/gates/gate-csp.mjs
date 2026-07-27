@@ -22,6 +22,22 @@
 // LIMIT: this is Chromium against Vite preview, not the macOS WKWebView and not
 // Tauri's protocol/IPC injection. The cargo-tauri smoke owned by the
 // orchestrator remains the real-webview check.
+//
+// LIMIT: one path is not every path. A directive that only bites on a route this
+// walk never opens would pass here. The other two Playwright gates already walk
+// far more of the shell, and `vite.config.ts` reads the header from the
+// environment, so they can be replayed under the SAME packaged policy:
+//
+//   CSP=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(
+//     "../desktop/src-tauri/tauri.conf.json","utf8")).app.security.csp)')
+//   MOMO_CSP_GATE_HEADER="$CSP" npm run gate:wire
+//   MOMO_CSP_GATE_HEADER="$CSP" npm run gate:shell
+//
+// Measured 2026-07-27 (MOMO-640 review): both pass under the packaged policy,
+// and both fail with `MOMO_CSP_GATE_HEADER="default-src 'none'"` — which is what
+// proves the header actually reaches them rather than being silently dropped.
+// They collect no violation list of their own, so they catch a policy that
+// BREAKS a surface, not one that merely reports on it.
 // =============================================================================
 
 import { spawn } from "node:child_process";

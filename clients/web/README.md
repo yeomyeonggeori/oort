@@ -174,6 +174,31 @@ The shell layout gate needs neither creds nor a backend (it mocks `/v1` the way
 npm run build && npm run gate:shell      # SHELL_GATE_SCHEME=light for the paper scheme
 ```
 
+The desktop shell's Content-Security-Policy has its own gate (MOMO-640), which
+reads the policy out of `clients/desktop/src-tauri/tauri.conf.json` instead of
+repeating it, serves the built bundle behind that exact header, and requires
+zero `securitypolicyviolation` events through login → shell → xterm observer:
+
+```sh
+npm run build && npm run gate:csp
+CSP_GATE_PROVE_RED_STYLE=1 npm run gate:csp   # red proof: MUST fail (xterm needs style-src)
+```
+
+`gate:csp` walks one path. To put the same packaged policy in front of the much
+wider route walks the other two gates already do — `vite.config.ts` reads the
+header from the environment:
+
+```sh
+CSP=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(
+  "../desktop/src-tauri/tauri.conf.json","utf8")).app.security.csp)')
+MOMO_CSP_GATE_HEADER="$CSP" npm run gate:wire
+MOMO_CSP_GATE_HEADER="$CSP" npm run gate:shell
+```
+
+Both pass under the packaged policy and both fail under
+`MOMO_CSP_GATE_HEADER="default-src 'none'"` (measured 2026-07-27), which is how
+you confirm the header is really being served rather than quietly ignored.
+
 It asserts that the window never becomes a scrolling document: on every
 signed-in route at 1280x800 / 900x600 / 760x480 the document scroll offset stays
 0, the sidebar nav stays at its resting y, `.app-shell` is not itself a scroll
