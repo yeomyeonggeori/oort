@@ -1212,6 +1212,224 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-hosts/cloud:
+    post:
+      tags: [work-hosts]
+      operationId: provisionCloudWorkHost
+      summary: Explicitly provision one paid momo Cloud host on E2B.
+      description: >
+        Human bearer only. Requires confirmPaidCloud=true, positive workspace
+        credit, an available work-pool slot, and instance-operator E2B config.
+        Returns 202 while the E2B workd is consuming its one-shot bootstrap
+        token and 201 if registration completed before create returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCloudHostRequest"
+      responses:
+        "201":
+          description: E2B sandbox and cloud work host are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "202":
+          description: E2B sandbox exists; cloud workd registration is pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "400":
+          description: Paid-cloud confirmation missing or body invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Workspace credit or work-pool slot is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: E2B concurrency limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B operator config is absent or E2B failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/cloud/register:
+    post:
+      tags: [work-hosts]
+      operationId: registerCloudWorkHost
+      summary: Consume a one-shot bootstrap token and self-register cloud workd.
+      description: >
+        E2B workd only. Authorization uses `MomoBootstrap {token}`. The server
+        stores only the token SHA-256 digest and the workd-generated Ed25519
+        public key; the E2B team key and workd private key never enter this API.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: Authorization
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^MomoBootstrap "
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterWorkHostRequest"
+      responses:
+        "201":
+          description: Cloud workd registered as a workspace-scoped work_host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: Registration is not scope=workspace and type=cloud.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/workspaces/{workspaceId}/work-hosts/cloud/{provisionId}:
+    get:
+      tags: [work-hosts]
+      operationId: getCloudWorkHostProvision
+      summary: Read safe cloud provisioning state without provider credentials.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: provisionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current safe cloud host projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "404":
+          description: Provision request not found in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/pause:
+    post:
+      tags: [work-hosts]
+      operationId: pauseCloudWorkHost
+      summary: Pause E2B and open a zero-active-seconds pause interval.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Cloud host paused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "409":
+          description: Host is not running or its usage state changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B lifecycle request failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/resume:
+    post:
+      tags: [work-hosts]
+      operationId: resumeCloudWorkHost
+      summary: Resume E2B and start a new active-time interval.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Cloud host resumed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "409":
+          description: Host is not paused or its usage state changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B lifecycle request failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud:
+    delete:
+      tags: [work-hosts]
+      operationId: destroyCloudWorkHost
+      summary: Destroy a settled E2B sandbox and revoke its work_host.
+      description: Running/unsettled sessions must be ended first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Cloud host destroyed and its work_host revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "409":
+          description: Host is not ready or still has unsettled usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B lifecycle request failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat:
     post:
       tags: [work-hosts]
@@ -5406,6 +5624,46 @@ components:
           additionalProperties:
             type: boolean
           description: Boolean tool-availability flags only.
+
+    CreateCloudHostRequest:
+      type: object
+      required: [displayName, confirmPaidCloud]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        confirmPaidCloud:
+          type: boolean
+          description: Must be true for this one paid-cloud provisioning request.
+
+    CloudHost:
+      type: object
+      required: [provisionId, state, provider, createdAtMs]
+      properties:
+        provisionId:
+          type: string
+          format: uuid
+        hostId:
+          type: string
+          format: uuid
+          description: Present after cloud workd self-registration.
+        state:
+          type: string
+          enum: [provisioning, ready, running, paused, destroyed, failed]
+        provider:
+          type: string
+          enum: [e2b]
+        createdAtMs:
+          type: integer
+          format: int64
+
+    CloudHostResponse:
+      type: object
+      required: [cloudHost]
+      properties:
+        cloudHost:
+          $ref: "#/components/schemas/CloudHost"
 
     WorkHostHeartbeatRequest:
       type: object

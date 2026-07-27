@@ -1436,6 +1436,46 @@ scripts/local_gate.sh --profile host-runtime
 - DB migration은 app boot side effect가 아니라 `scripts/migrate.sh` 또는 smoke `migrate` job으로 명시 실행한다.
 - Backup/restore는 pgBackRest skeleton과 evidence template까지만 repo-local로 검증한다. 실제 backup/PITR restore rehearsal은 `runtime-unverified(public host)`다.
 
+### 8.1.2 momo Cloud T3 / E2B 프로비저너 (MOMO-647)
+
+T3는 opt-in이다. `E2B_API_KEY`가 없거나 프로비저너 설정이 불완전하면
+`POST /v1/workspaces/{ws}/work-hosts/cloud`만 503으로 닫히고 T1/T2는 영향받지 않는다.
+키는 인스턴스 운영자 시크릿이며 workspace 설정, 클라이언트, DB, 로그에 넣지 않는다.
+
+`E2B_TEMPLATE_ID`는 `momo-workd`를 포함하고 entrypoint에서 실행하는 운영자 소유
+template이어야 한다. 서버는 create 시 공개 HTTPS momo URL, workspace ID,
+`scope=workspace`, `type=cloud`, 15분짜리 1회 등록 token만 sandbox env로 전달한다.
+workd는 자체 Ed25519 키를 만든 뒤 cloud register REST에서 token을 소비한다. DB에는
+token SHA-256 digest만 남는다.
+
+```sh
+# 자격증명 없는 로컬 검증: mock E2B + PG18 + 실제 API/RLS
+# .env/.env.worktree를 읽지 않고 infra/.env.example만 compose 입력으로 쓴다.
+scripts/verify_t3_provisioner.sh
+
+# red proof: pause wall time를 과금하도록 되돌린 가정이면 의도적으로 non-zero
+T3_GATE_PROVE_RED_PAUSE=1 scripts/verify_t3_provisioner.sh
+```
+
+오케스트레이터의 실 E2B smoke 절차:
+
+1. 외부에서 접근 가능한 격리 MomoServer와 `momo-workd` E2B template을 준비한다.
+2. 서버 프로세스에만 `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
+   `MOMO_PUBLIC_BASE_URL=https://...`, `MOMO_T3_RATE_MICRO_USD_PER_SECOND`를 주입한다.
+   셸 trace를 끄고 키 값을 출력하지 않는다.
+3. 테스트 workspace에 `credit_entry(reason='topup')` 한 건과 빈 슬롯을 준비한다.
+4. human bearer로 `POST .../work-hosts/cloud`에
+   `{"displayName":"E2B smoke","confirmPaidCloud":true}`를 보낸다.
+5. GET projection이 `ready`와 cloud `hostId`를 돌려줄 때까지 기다린다. E2B dashboard에서
+   sandbox 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
+6. 그 host로 work session을 만들고 pause → 10초 대기 → resume → 종료한다.
+   `work_host_usage_interval`의 paused 행 `active_seconds=0`, 최종 합계와
+   `credit_entry(reason='t3_usage')` 차감을 대조한다.
+7. `DELETE .../work-hosts/{host}/cloud`로 sandbox를 destroy하고 E2B에 잔존 실행이
+   없는지 확인한다. 실패 중간에도 생성한 sandbox ID를 기준으로 반드시 정리한다.
+
+실호출 smoke는 외부 과금과 운영자 키가 필요하므로 worker가 임의 실행하지 않는다.
+
 ### 8.2 staging 최초 기동 절차 (host-runtime)
 
 ```sh

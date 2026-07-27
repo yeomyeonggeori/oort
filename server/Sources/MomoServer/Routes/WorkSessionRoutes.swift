@@ -180,7 +180,8 @@ struct WorkSessionRoutes: Sendable {
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                memberID: sessionOwnerMemberID
+                memberID: sessionOwnerMemberID,
+                targetHostID: hostID
             )
 
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
@@ -246,6 +247,13 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.internalServerError, message: "work session insert failed")
             }
             let workSession = try Self.decodeSession(sessionRow)
+            try await CloudUsageLedger.start(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID,
+                hostID: hostID
+            )
 
             let channel = Self.channelName(workspaceID: workspaceID, channelID: channelID)
             let messagePayload = MessageRoutes.broadcastPayload(
@@ -409,6 +417,12 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.conflict, message: "work session state changed; retry")
             }
             let workSession = try Self.decodeSession(updatedRow)
+            try await CloudUsageLedger.settle(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
             let props = Self.cardProps(
                 sessionID: sessionID,
                 tool: workSession.tool,
@@ -776,7 +790,8 @@ struct WorkSessionRoutes: Sendable {
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                memberID: principal.memberID
+                memberID: principal.memberID,
+                targetHostID: body.targetHostId
             )
 
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
@@ -807,6 +822,13 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.internalServerError, message: "resumed work session insert failed")
             }
             let newSession = try Self.decodeSession(newRow)
+            try await CloudUsageLedger.start(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: resumedSessionID,
+                hostID: body.targetHostId
+            )
 
             let endedRows = try await conn.query(
                 """

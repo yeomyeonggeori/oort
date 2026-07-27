@@ -515,6 +515,9 @@ add_static_commands() {
   add_cmd_once "workd verifier shell syntax" "bash -n scripts/verify_workd.sh"
   add_cmd_once "work pool verifier shell syntax" "bash -n scripts/verify_work_pool.sh"
   add_cmd_once "tier fallback verifier shell syntax" "bash -n scripts/verify_tier_fallback.sh"
+  add_cmd_once "T3 provisioner verifier shell syntax" "bash -n scripts/verify_t3_provisioner.sh"
+  add_cmd_once "mock E2B python syntax" \
+    'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile scripts/mock_e2b.py'
   add_cmd_once "work tool profile verifier shell syntax" "bash -n scripts/verify_work_tool_profile.sh"
   add_cmd_once "ACP host verifier shell syntax" "bash -n scripts/verify_acp_host.sh"
   add_cmd_once "terminal attach verifier shell syntax" "bash -n scripts/verify_terminal_attach.sh"

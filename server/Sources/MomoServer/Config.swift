@@ -65,6 +65,11 @@ struct Config: Sendable {
     // ---- Hermes gateway native platform adapter (MOMO-325) ----
     var agentGateway: AgentGatewayConfig
 
+    // ---- momo Cloud / E2B provisioner (ADR-0136) ----
+    // The operator key is optional at process boot. Only T3 routes fail closed
+    // with 503 when it is absent; T1/T2 routes do not depend on this config.
+    var cloudProvisioner: CloudProvisionerConfig
+
     /// Read an env var, falling back to `default`.
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -118,7 +123,10 @@ struct Config: Sendable {
                 .flatMap { $0.isEmpty ? nil : $0 },
             momoEnvironment: env("MOMO_ENV", "local"),
             agentProvider: AgentProviderConfig.load(environment: ProcessInfo.processInfo.environment),
-            agentGateway: AgentGatewayConfig.load(environment: ProcessInfo.processInfo.environment)
+            agentGateway: AgentGatewayConfig.load(environment: ProcessInfo.processInfo.environment),
+            cloudProvisioner: CloudProvisionerConfig.load(
+                environment: ProcessInfo.processInfo.environment
+            )
         )
     }
 

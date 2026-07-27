@@ -519,7 +519,7 @@ struct WorkHostRoutes: Sendable {
         )::text
         """
 
-    private static func loadHost(
+    static func loadHost(
         conn: PostgresConnection,
         logger: Logger,
         hostID: UUID
@@ -538,7 +538,7 @@ struct WorkHostRoutes: Sendable {
         return try decodeHost(row.decode(String.self))
     }
 
-    private static func decodeHost(_ json: String) throws -> WorkHostDTO {
+    static func decodeHost(_ json: String) throws -> WorkHostDTO {
         guard let data = json.data(using: .utf8),
               let host = try? JSONDecoder().decode(WorkHostDTO.self, from: data)
         else {
