@@ -198,7 +198,9 @@ enum AppBuilder {
                     && ProcessInfo.processInfo.environment["MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP"] == "1"
             )
         ).add(to: authed)
-        AgentCredentialRoutes(db: db).add(to: authed)
+        AgentCredentialRoutes(
+            db: db, platformAdminEmails: config.platformAdminEmails
+        ).add(to: authed)
         WorkspaceRoutes(
             db: db, platformAdminEmails: config.platformAdminEmails
         ).add(to: authed)

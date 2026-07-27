@@ -71,6 +71,8 @@ enum ProviderCascadeClassifier {
             switch transport {
             case .httpStatus(let code):
                 return decide(status: code)
+            case .invalidResponse, .errorEnvelope:
+                return .propagate(reason: undecodableReason)
             }
         }
         if error is CancellationError {

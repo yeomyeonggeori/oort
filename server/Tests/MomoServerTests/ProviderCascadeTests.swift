@@ -312,7 +312,7 @@ final class ProviderCascadeTests: XCTestCase {
         let dto = ProviderChainEntryDTO(
             position: 1, source: "chain", mode: "external-hermes",
             baseUrl: "https://a.example/v1", endpointLabel: "a.example",
-            enabled: true, bearerConfigured: true,
+            enabled: true, bearerConfigured: true, bearerUnavailable: false,
             bearerLast4: ProviderLinkCrypto.maskedTail("sk-live-abcdWXYZ"),
             updatedAtMs: 1, updatedBy: nil
         )
@@ -384,5 +384,51 @@ private final class NSLock_Box: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return body(&value)
+    }
+}
+
+// MARK: - MOMO-633 H-1: 인스턴스 전역 스코프의 발급 경계
+
+final class AgentCredentialScopeBoundaryTests: XCTestCase {
+    /// `provider:quota:write`는 워크스페이스가 없는 전역 게이지를 덮어쓸 수 있어
+    /// provider link와 같은 운영자 경계를 요구한다.
+    func testQuotaIngestScopeRequiresInstanceOperator() {
+        XCTAssertTrue(
+            AgentCredentialRoutes.requiresInstanceOperator(
+                scopes: [ProviderQuotaSnapshotRoutes.ingestScope]
+            )
+        )
+        XCTAssertTrue(
+            AgentCredentialRoutes.requiresInstanceOperator(
+                scopes: ["realtime:subscribe", ProviderQuotaSnapshotRoutes.ingestScope]
+            ),
+            "다른 스코프와 섞여 들어와도 경계는 걸려야 한다"
+        )
+    }
+
+    /// 이 단정이 이 파일에서 가장 중요하다. 경계를 스코프가 아니라 **발급 경로
+    /// 전체**에 걸면 워크스페이스 admin으로 자격증명을 발급하는 검증기 다섯 개가
+    /// 한꺼번에 깨진다. 그 회귀를 DB 없이 잡는다.
+    func testOrdinaryScopesStayWorkspaceAdmin() {
+        XCTAssertFalse(AgentCredentialRoutes.requiresInstanceOperator(scopes: []))
+        XCTAssertFalse(
+            AgentCredentialRoutes.requiresInstanceOperator(
+                scopes: AgentCredentialRoutes.defaultScopes
+            ),
+            "기본 스코프는 운영자를 요구하지 않는다"
+        )
+        XCTAssertFalse(
+            AgentCredentialRoutes.requiresInstanceOperator(scopes: ["realtime:subscribe"])
+        )
+    }
+
+    /// 기본 스코프에 ingest가 섞여 들어오면 모든 발급이 운영자를 요구하게 된다.
+    func testIngestScopeIsGrantableButNotDefault() {
+        XCTAssertFalse(
+            AgentCredentialRoutes.defaultScopes.contains(ProviderQuotaSnapshotRoutes.ingestScope)
+        )
+        XCTAssertTrue(
+            AgentCredentialRoutes.grantableScopes.contains(ProviderQuotaSnapshotRoutes.ingestScope)
+        )
     }
 }

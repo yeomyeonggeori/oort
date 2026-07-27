@@ -228,15 +228,14 @@ class FailureClassificationTests(unittest.TestCase):
                     provider_chain.PROPAGATE,
                 )
 
-    def test_rule_is_identical_to_the_momo_gateway_rule(self):
-        for status in list(range(400, 600)) + [None]:
+    def test_408_and_425_propagate_per_adr_even_though_callback_retries_differ(self):
+        for status in (408, 425):
             with self.subTest(status=status):
-                expected = (
-                    True
-                    if status is None
-                    else momo_adapter.MomoAdapter._is_retryable_http_status(status)
+                self.assertEqual(
+                    provider_chain.classify_provider_failure(status=status),
+                    provider_chain.PROPAGATE,
                 )
-                self.assertEqual(provider_chain.is_fallback_status(status), expected)
+                self.assertTrue(momo_adapter.MomoAdapter._is_retryable_http_status(status))
 
     def test_cancellation_is_never_a_fallback(self):
         self.assertEqual(
@@ -635,6 +634,15 @@ class QuotaProbeTests(unittest.TestCase):
             provider_chain.assert_snapshot_credential_free({**base, "remaining_ratio": 1.5})
         with self.assertRaises(provider_chain.ProviderQuotaContractError):
             provider_chain.assert_snapshot_credential_free({**base, "resets_at": "soon"})
+
+    def test_snapshot_without_reset_is_sent_as_explicit_null(self):
+        snapshot = provider_chain.snapshot_from_window_payload(
+            "primary", {"window": "short", "remaining_ratio": 0.5},
+            now=datetime(2026, 7, 26, 11, 0, tzinfo=timezone.utc),
+        )
+        self.assertIsNotNone(snapshot)
+        self.assertIsNone(snapshot.resets_at)
+        self.assertIsNone(snapshot.to_payload()["resets_at"])
 
     def test_probe_lifts_only_numbers_out_of_the_provider_body(self):
         transport = MockProviderTransport(

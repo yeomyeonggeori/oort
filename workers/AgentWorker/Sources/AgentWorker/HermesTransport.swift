@@ -139,11 +139,13 @@ struct HermesTransport: Sendable {
         var toolCallBuffers: [Int: (id: String, name: String, args: String)] = [:]
 
         var sse = SSEByteParser()
+        var sawProtocolEvent = false
         for try await chunk in response.body {
             if Task.isCancelled { break }
             let events = sse.consume(chunk)
             for event in events {
                 guard let dataLine = event.dataLine else { continue }
+                sawProtocolEvent = true
                 if dataLine == "[DONE]" {
                     // Flush any buffered tool calls (defensive: usually flushed by
                     // finish_reason, but [DONE] is the hard stop).
@@ -156,6 +158,9 @@ struct HermesTransport: Sendable {
             }
         }
         // Stream ended without [DONE] (some gateways just close) → flush.
+        guard sawProtocolEvent else {
+            throw TransportError.invalidResponse("stream contained no completion event")
+        }
         flushToolCalls(&toolCallBuffers, didEmitContent: didEmitContent, into: continuation)
     }
 
@@ -166,7 +171,15 @@ struct HermesTransport: Sendable {
         didEmitContent: @escaping @Sendable () -> Void,
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) throws {
+        if let envelope = try? Self.decoder.decode(GatewayErrorEnvelope.self, from: Data(json.utf8)),
+           let message = envelope.error?.message,
+           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw TransportError.errorEnvelope(message)
+        }
         let chunk = try Self.decoder.decode(ChatCompletionChunk.self, from: Data(json.utf8))
+        guard chunk.choices != nil || chunk.usage != nil else {
+            throw TransportError.invalidResponse("stream chunk has no choices or usage")
+        }
 
         // usage (last chunk only, when include_usage=true) → reconcile basis (§8.5).
         if let u = chunk.usage {
@@ -241,18 +254,24 @@ struct HermesTransport: Sendable {
         var buffer = try await response.body.collect(upTo: 4 * 1024 * 1024)
         let data = buffer.readData(length: buffer.readableBytes) ?? Data()
 
+        if let envelope = try? Self.decoder.decode(GatewayErrorEnvelope.self, from: data),
+           let message = envelope.error?.message,
+           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw TransportError.errorEnvelope(message)
+        }
         let completion = try Self.decoder.decode(ChatCompletion.self, from: data)
-        if let choice = completion.choices?.first {
-            if let content = choice.message?.content, !content.isEmpty {
-                continuation.yield(.textDelta(content))   // whole body as one delta
-            }
-            if let toolCalls = choice.message?.tool_calls {
-                for tc in toolCalls {
-                    continuation.yield(.toolCall(
-                        id: tc.id ?? "",
-                        name: tc.function?.name ?? "",
-                        arguments: tc.function?.arguments ?? "{}"))
-                }
+        guard let choice = completion.choices?.first else {
+            throw TransportError.invalidResponse("completion has no choices")
+        }
+        if let content = choice.message?.content, !content.isEmpty {
+            continuation.yield(.textDelta(content))   // whole body as one delta
+        }
+        if let toolCalls = choice.message?.tool_calls {
+            for tc in toolCalls {
+                continuation.yield(.toolCall(
+                    id: tc.id ?? "",
+                    name: tc.function?.name ?? "",
+                    arguments: tc.function?.arguments ?? "{}"))
             }
         }
         if let u = completion.usage {
@@ -266,6 +285,10 @@ struct HermesTransport: Sendable {
 
     enum TransportError: Error, Sendable {
         case httpStatus(Int)
+        /// A 200 body that is not an OpenAI completion must remain terminal;
+        /// treating it as an empty successful turn loses the user's request.
+        case invalidResponse(String)
+        case errorEnvelope(String)
     }
 
     private static func isProtocolFailure(_ error: any Error) -> Bool {
@@ -331,6 +354,13 @@ private struct ChatCompletion: Decodable {
         let content: String?
         let tool_calls: [ToolCallDelta]?
     }
+}
+
+/// Gateways occasionally return HTTP 200 with an OpenAI-style error envelope.
+/// It is a response, not availability failure, and therefore must not fall over.
+private struct GatewayErrorEnvelope: Decodable {
+    struct ErrorBody: Decodable { let message: String? }
+    let error: ErrorBody?
 }
 
 /// tool_calls element — identical shape in stream deltas and full messages.

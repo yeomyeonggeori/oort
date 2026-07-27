@@ -51,6 +51,7 @@ describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
       probedAt: "2026-07-26T09:08:20Z",
       ingestedAt: "2026-07-26T09:08:21Z",
       ageSeconds: 224,
+      observedAt: "2026-07-26T09:12:04Z",
     });
   });
 
@@ -59,8 +60,26 @@ describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
     expect(absent.observedAt).toBe("2026-07-26T09:12:04Z");
   });
 
+  it("drops a row with no server-computed age instead of inventing 방금 전", () => {
+    const parsed = parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v0",
+      observedAt: "2026-07-26T09:12:04Z",
+      snapshots: [{ providerRef: "anthropic", window: "short", remainingRatio: 0.5 }],
+    });
+    expect(parsed.snapshots).toEqual([]);
+  });
+
+  it("rejects an unknown schema before rendering a possibly incompatible gauge", () => {
+    expect(() => parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v1",
+      observedAt: "2026-07-26T09:12:04Z",
+      snapshots: [],
+    })).toThrow("지원하지 않는 잔여량 응답 형식");
+  });
+
   it("lower-cases the provider ref so one provider is one row", () => {
     const parsed = parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v0",
       observedAt: "2026-07-26T09:12:04Z",
       snapshots: [
         { providerRef: "Anthropic", window: "short", remainingRatio: 0.5, ageSeconds: 10 },
@@ -74,6 +93,8 @@ describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
     // The whole reason this parser is stricter than usageModel: a missing cost
     // is truthfully 0, a missing remaining ratio is not truthfully "exhausted".
     const parsed = parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v0",
+      observedAt: "2026-07-26T09:12:04Z",
       snapshots: [
         { providerRef: "anthropic", window: "short", ageSeconds: 10 },
         { providerRef: "anthropic", window: "weekly", remainingRatio: null, ageSeconds: 10 },
@@ -85,6 +106,8 @@ describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
 
   it("drops a window it cannot name and a row with no provider", () => {
     const parsed = parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v0",
+      observedAt: "2026-07-26T09:12:04Z",
       snapshots: [
         { providerRef: "anthropic", window: "monthly", remainingRatio: 0.5, ageSeconds: 1 },
         { providerRef: "", window: "short", remainingRatio: 0.5, ageSeconds: 1 },
@@ -97,6 +120,8 @@ describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
 
   it("clamps a ratio outside the track it is drawn in", () => {
     const parsed = parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v0",
+      observedAt: "2026-07-26T09:12:04Z",
       snapshots: [
         { providerRef: "a", window: "short", remainingRatio: 1.4, ageSeconds: 1 },
         { providerRef: "b", window: "short", remainingRatio: -0.2, ageSeconds: 1 },
@@ -110,8 +135,11 @@ describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
     expect(() => parseQuotaSnapshots([1, 2])).toThrow();
   });
 
-  it("survives a body with no snapshots key", () => {
-    expect(parseQuotaSnapshots({}).snapshots).toEqual([]);
+  it("survives a valid body with no snapshots key", () => {
+    expect(parseQuotaSnapshots({
+      schema: "momo.provider_quota_snapshots.v0",
+      observedAt: "2026-07-26T09:12:04Z",
+    }).snapshots).toEqual([]);
   });
 });
 
@@ -370,6 +398,14 @@ describe("quotaGauge", () => {
     expect(gauge.age.stale).toBe(false);
     expect(gauge.tone).toBe("neutral");
     expect(gauge.outdated).toBe(true);
+  });
+
+  it("uses the server observation anchor for reset state despite a fast browser clock", () => {
+    const snapshot = { ...nearLimit.snapshots[0], resetsAt: "2026-07-26T09:15:00Z" };
+    // Browser is ten minutes ahead; the server observed this answer at 09:12.
+    const gauge = quotaGauge(snapshot, NOW + 600_000, 0);
+    expect(gauge.reset?.passed).toBe(false);
+    expect(gauge.outdated).toBe(false);
   });
 
   it("never calls a 41-second-old reading 오래된 값", () => {

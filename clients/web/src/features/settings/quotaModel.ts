@@ -50,6 +50,8 @@ export interface QuotaSnapshot {
    *  the two clocks are the adapter's and the browser's, and a laptop that is
    *  four minutes fast would otherwise report a probe from the future. */
   ageSeconds: number;
+  /** Server observation instant; carries the reset-comparison clock anchor. */
+  observedAt: string;
 }
 
 export interface QuotaSnapshots {
@@ -99,6 +101,13 @@ function clampRatio(ratio: number): number {
 export function parseQuotaSnapshots(raw: unknown): QuotaSnapshots {
   const root = asRecord(raw);
   if (!root) throw new Error("잔여량 응답을 읽지 못했습니다.");
+  if (str(root, "schema") !== "momo.provider_quota_snapshots.v0") {
+    throw new Error("지원하지 않는 잔여량 응답 형식입니다.");
+  }
+  const observedAt = str(root, "observedAt");
+  if (Number.isNaN(Date.parse(observedAt))) {
+    throw new Error("잔여량 응답의 확인 시각을 읽지 못했습니다.");
+  }
 
   const rows = Array.isArray(root["snapshots"]) ? root["snapshots"] : [];
   const snapshots: QuotaSnapshot[] = [];
@@ -106,12 +115,13 @@ export function parseQuotaSnapshots(raw: unknown): QuotaSnapshots {
     const row = asRecord(item);
     const window = parseWindow(str(row, "window"));
     const ratio = finiteNumber(row, "remainingRatio");
+    const ageSeconds = finiteNumber(row, "ageSeconds");
     const providerRef = str(row, "providerRef").toLowerCase();
     // A window this client cannot name has no gauge to be drawn in, a row with
     // no ratio has no bar length, and a row with no provider has no heading.
     // All three are dropped: the panel then reports what it did receive and
     // says nothing about what it did not.
-    if (!window || ratio === null || !providerRef) continue;
+    if (!window || ratio === null || ageSeconds === null || ageSeconds < 0 || !providerRef) continue;
     const resets = str(row, "resetsAt");
     snapshots.push({
       providerRef,
@@ -120,11 +130,12 @@ export function parseQuotaSnapshots(raw: unknown): QuotaSnapshots {
       resetsAt: resets || null,
       probedAt: str(row, "probedAt"),
       ingestedAt: str(row, "ingestedAt"),
-      ageSeconds: Math.max(0, finiteNumber(row, "ageSeconds") ?? 0),
+      ageSeconds,
+      observedAt,
     });
   }
 
-  return { observedAt: str(root, "observedAt"), snapshots };
+  return { observedAt, snapshots };
 }
 
 // ---- grouping ---------------------------------------------------------------
@@ -400,7 +411,14 @@ export function quotaGauge(
 ): QuotaGauge {
   const seconds = agedSeconds(snapshot, elapsedMs);
   const age = quotaAge(seconds);
-  const reset = quotaReset(snapshot.resetsAt, nowMs);
+  // `observedAt + elapsed` keeps the server/provider absolute reset instant
+  // and the comparison clock on the same anchor. Browser clock offset therefore
+  // cannot erase a still-live gauge merely by moving `Date.now()` forward.
+  const observedAtMs = Date.parse(snapshot.observedAt);
+  const resetComparisonNowMs = Number.isNaN(observedAtMs)
+    ? nowMs
+    : observedAtMs + Math.max(0, elapsedMs);
+  const reset = quotaReset(snapshot.resetsAt, resetComparisonNowMs);
   // Two independent ways to be out of date, and the second is the stronger one:
   // once the window's own reset instant is behind us the ratio is not stale, it
   // is about a window that no longer exists.

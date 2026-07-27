@@ -31,6 +31,21 @@ struct AgentCredentialRoutes: Sendable {
 
     let db: Database
 
+    /// 워크스페이스 admin이 부여할 수 없는 스코프인가.
+    ///
+    /// 경계는 **스코프 단위**여야 한다. 발급 경로 전체를 운영자로 올리면
+    /// verify_agent_create·verify_agent_live_channel·verify_drive_mcp·
+    /// verify_lifecycle_completion·verify_hermes_gateway_adapter가 전부 깨진다 —
+    /// 그 다섯은 워크스페이스 admin으로 자격증명을 발급한다. 순수 함수로 두는
+    /// 이유는 그 규칙을 DB 없이 못박기 위해서다.
+    static func requiresInstanceOperator(scopes: [String]) -> Bool {
+        scopes.contains(ProviderQuotaSnapshotRoutes.ingestScope)
+    }
+
+    /// Reuse the provider-link instance-operator boundary for the one scope
+    /// that can mutate instance-global quota telemetry.
+    let platformAdminEmails: [String]
+
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/agents/:agent/credentials", use: create)
         group.get("/v1/workspaces/:ws/agents/:agent/credentials", use: list)
@@ -52,6 +67,13 @@ struct AgentCredentialRoutes: Sendable {
         let graceSeconds = try Self.validatedRotationGraceSeconds(dto.rotationGraceSeconds)
         let graceDeadline = Date().addingTimeInterval(TimeInterval(graceSeconds))
         let rawToken = AgentBearerToken.mint(workspaceID: workspaceID)
+        if Self.requiresInstanceOperator(scopes: scopes) {
+            _ = try await ProviderLinkRoutes.requireOperator(
+                db: db,
+                platformAdminEmails: platformAdminEmails,
+                context: context
+            )
+        }
         try await ChannelRoutes.requireWorkspaceAdmin(
             db: db,
             workspaceID: workspaceID,
