@@ -18,6 +18,7 @@
     "gate:resume": "node gates/gate-resume.mjs",
     "gate:shell": "node gates/gate-shell-layout.mjs",
     "gate:wire": "node gates/gate-wire.mjs",
+    "gate:csp": "node gates/gate-csp.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",
