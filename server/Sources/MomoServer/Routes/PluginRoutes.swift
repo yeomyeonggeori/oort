@@ -74,6 +74,9 @@ struct PluginRoutes: Sendable {
                     name: manifest.name,
                     version: manifest.version,
                     description: manifest.description,
+                    termsURL: manifest.termsURL,
+                    privacyPolicyURL: manifest.privacyPolicyURL,
+                    iconText: manifest.iconText,
                     official: decoded.official,
                     recommended: Self.onboardingRecommendedPluginIDs.contains(manifest.pluginID),
                     egressDomains: manifest.egressDomains,
@@ -157,6 +160,9 @@ struct PluginRoutes: Sendable {
                 name: manifest.name,
                 version: manifest.version,
                 description: manifest.description,
+                termsURL: manifest.termsURL,
+                privacyPolicyURL: manifest.privacyPolicyURL,
+                iconText: manifest.iconText,
                 official: row.official,
                 egressDomains: manifest.egressDomains,
                 recommendedFor: manifest.recommendedFor,
@@ -847,6 +853,9 @@ private struct PluginCatalogItemDTO: Codable, Sendable {
     let name: String
     let version: String
     let description: String
+    let termsURL: String?
+    let privacyPolicyURL: String?
+    let iconText: String?
     let official: Bool
     let recommended: Bool
     let egressDomains: [String]
@@ -887,6 +896,9 @@ private struct PluginDetailDTO: Codable, Sendable {
     let name: String
     let version: String
     let description: String
+    let termsURL: String?
+    let privacyPolicyURL: String?
+    let iconText: String?
     let official: Bool
     let egressDomains: [String]
     let recommendedFor: [String]

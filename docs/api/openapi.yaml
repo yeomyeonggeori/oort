@@ -6752,6 +6752,18 @@ components:
         name: {type: string}
         version: {type: string}
         description: {type: string}
+        termsURL:
+          type: string
+          format: uri
+          description: Optional HTTPS terms URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+        privacyPolicyURL:
+          type: string
+          format: uri
+          description: Optional HTTPS privacy-policy URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+        iconText:
+          type: string
+          maxLength: 8
+          description: Optional short text icon. Remote image URLs are not supported; clients derive a character fallback from name when omitted.
         official: {type: boolean}
         recommended:
           type: boolean
@@ -6833,6 +6845,18 @@ components:
         name: {type: string}
         version: {type: string}
         description: {type: string}
+        termsURL:
+          type: string
+          format: uri
+          description: Optional HTTPS terms URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+        privacyPolicyURL:
+          type: string
+          format: uri
+          description: Optional HTTPS privacy-policy URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+        iconText:
+          type: string
+          maxLength: 8
+          description: Optional short text icon. Remote image URLs are not supported; clients derive a character fallback from name when omitted.
         official: {type: boolean}
         egressDomains:
           type: array
