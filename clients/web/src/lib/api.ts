@@ -36,6 +36,7 @@ import {
 } from "./session";
 import {
   arrayField,
+  bool,
   num,
   record,
   responseRecord,
@@ -585,6 +586,260 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
   );
   return (arrayField(res, "members") ?? []).filter(isRosterMember);
+}
+
+// ---- Plugin registry: catalog, manifest and caller-owned grants ------------
+//
+// `PluginRoutes` deliberately separates these projections. The catalog carries
+// only installation state plus the calling member's effective tool policy;
+// declared scopes and publisher metadata stay in the manifest detail. Keep
+// that split here instead of inferring a grant from an installation.
+
+export interface PluginCatalogItem {
+  pluginId: string;
+  name: string;
+  version: string;
+  description: string;
+  official: boolean;
+  recommended: boolean;
+  egressDomains: string[];
+  recommendedFor: string[];
+  installed: boolean;
+  enabled: boolean;
+  termsURL?: string;
+  privacyPolicyURL?: string;
+  iconText?: string;
+}
+
+export interface PluginPolicyTool {
+  name: string;
+  risk: string;
+  approvalTier: string;
+}
+
+export interface PluginCatalog {
+  plugins: PluginCatalogItem[];
+  /** Present only for scopes this calling member currently has. */
+  toolsByPlugin: Map<string, PluginPolicyTool[]>;
+}
+
+export interface PluginManifestTool {
+  name: string;
+  description?: string;
+  scopes: string[];
+  risk?: string;
+  approvalTier?: string;
+}
+
+export interface PluginDetail {
+  pluginId: string;
+  name: string;
+  version: string;
+  description: string;
+  official: boolean;
+  egressDomains: string[];
+  recommendedFor: string[];
+  installed: boolean;
+  enabled: boolean;
+  termsURL?: string;
+  privacyPolicyURL?: string;
+  iconText?: string;
+  publisherName?: string;
+  publisherVerified?: boolean;
+  license?: string;
+  provenanceURL?: string;
+  tools: PluginManifestTool[];
+}
+
+export interface PluginMutation {
+  pluginId: string;
+  memberId?: string;
+  scope?: string;
+  status: string;
+  enabled: boolean;
+  capabilities: string[];
+}
+
+/** Manifest display links are navigation only, and must never become script URLs. */
+function httpsURL(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value).protocol === "https:" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function requiredPluginItem(value: unknown): PluginCatalogItem | null {
+  const pluginId = str(value, "pluginId");
+  const name = str(value, "name");
+  const version = str(value, "version");
+  const description = str(value, "description");
+  const official = bool(value, "official");
+  const recommended = bool(value, "recommended");
+  const egressDomains = stringArrayField(value, "egressDomains");
+  const recommendedFor = stringArrayField(value, "recommendedFor");
+  const installed = bool(value, "installed");
+  const enabled = bool(value, "enabled");
+  if (
+    pluginId === undefined || name === undefined || version === undefined ||
+    description === undefined || official === undefined || recommended === undefined ||
+    egressDomains === null || recommendedFor === null || installed === undefined ||
+    enabled === undefined
+  ) return null;
+  return {
+    pluginId, name, version, description, official, recommended,
+    egressDomains, recommendedFor, installed, enabled,
+    termsURL: httpsURL(str(value, "termsURL")),
+    privacyPolicyURL: httpsURL(str(value, "privacyPolicyURL")),
+    iconText: str(value, "iconText"),
+  };
+}
+
+function policyTool(value: unknown): PluginPolicyTool | null {
+  const name = str(value, "name");
+  const risk = str(value, "risk");
+  const approvalTier = str(value, "approvalTier");
+  return name === undefined || risk === undefined || approvalTier === undefined
+    ? null
+    : { name, risk, approvalTier };
+}
+
+/** Exported for the wire contract test; every field read uses lib/wire helpers. */
+export function pluginCatalogFromWire(value: unknown): PluginCatalog {
+  const root = responseRecord(value);
+  const plugins = arrayField(root, "plugins");
+  if (plugins === null) throw new WireShapeError();
+  const parsedPlugins = plugins.map(requiredPluginItem);
+  if (parsedPlugins.some((plugin) => plugin === null)) throw new WireShapeError();
+
+  const toolsByPlugin = new Map<string, PluginPolicyTool[]>();
+  const policy = record(root.toolPolicy);
+  const descriptors = policy === null ? null : arrayField(policy, "plugins");
+  if (descriptors !== null) {
+    for (const descriptor of descriptors) {
+      const pluginId = str(descriptor, "pluginId");
+      const tools = arrayField(descriptor, "tools");
+      if (pluginId === undefined || tools === null) continue;
+      const parsedTools = tools.map(policyTool);
+      if (parsedTools.some((tool) => tool === null)) continue;
+      toolsByPlugin.set(pluginId, parsedTools as PluginPolicyTool[]);
+    }
+  }
+  return { plugins: parsedPlugins as PluginCatalogItem[], toolsByPlugin };
+}
+
+function manifestTool(value: unknown, approvalTiers: Record<string, unknown> | null): PluginManifestTool | null {
+  const name = str(value, "name");
+  const scopes = stringArrayField(value, "scopes");
+  if (name === undefined || scopes === null) return null;
+  const approvalTier = approvalTiers ? approvalTiers[name] : undefined;
+  return {
+    name,
+    description: str(value, "description"),
+    scopes,
+    risk: str(value, "risk"),
+    approvalTier: typeof approvalTier === "string" ? approvalTier : undefined,
+  };
+}
+
+/** Parse only the manifest fields the product is allowed to display. */
+export function pluginDetailFromWire(value: unknown): PluginDetail {
+  const root = responseRecord(value);
+  const detail = record(root.plugin);
+  // Detail intentionally omits the catalog-only `recommended` bit. Supply no
+  // meaning beyond a type placeholder while sharing the required field check.
+  const item = detail === null ? null : requiredPluginItem({ ...detail, recommended: false });
+  const manifest = record(detail?.manifest);
+  if (item === null || manifest === null) throw new WireShapeError();
+  const plugin = record(manifest.plugin);
+  const publisher = record(plugin?.publisher);
+  const license = record(plugin?.license);
+  const provenance = record(plugin?.provenance);
+  const mcp = record(manifest.mcp);
+  const momo = record(manifest.momo);
+  const tools = mcp === null ? null : arrayField(mcp, "tools");
+  if (tools === null) throw new WireShapeError();
+  const approvalTiers = record(momo?.approvalTier);
+  const parsedTools = tools.map((tool) => manifestTool(tool, approvalTiers));
+  if (parsedTools.some((tool) => tool === null)) throw new WireShapeError();
+  return {
+    ...item,
+    publisherName: str(publisher, "name"),
+    publisherVerified: bool(publisher, "verified"),
+    license: str(license, "spdx"),
+    provenanceURL: httpsURL(str(provenance, "sourceURL")),
+    tools: parsedTools as PluginManifestTool[],
+  };
+}
+
+function pluginMutationFromWire(value: unknown): PluginMutation {
+  const root = responseRecord(value);
+  const pluginId = str(root, "pluginId");
+  const status = str(root, "status");
+  const enabled = bool(root, "enabled");
+  const capabilities = stringArrayField(root, "capabilities");
+  if (pluginId === undefined || status === undefined || enabled === undefined || capabilities === null) {
+    throw new WireShapeError();
+  }
+  return {
+    pluginId,
+    status,
+    enabled,
+    capabilities,
+    memberId: str(root, "memberId"),
+    scope: str(root, "scope"),
+  };
+}
+
+/** GET /plugins: catalog plus this caller's effective, credential-free policy. */
+export async function listPlugins(workspaceId: string): Promise<PluginCatalog> {
+  return pluginCatalogFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins`
+  ));
+}
+
+/** GET /plugins/:plugin: registry manifest, never a credential. */
+export async function getPlugin(workspaceId: string, pluginId: string): Promise<PluginDetail> {
+  return pluginDetailFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}`
+  ));
+}
+
+export async function installPlugin(workspaceId: string, pluginId: string): Promise<PluginMutation> {
+  return pluginMutationFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}/install`,
+    { method: "POST", body: JSON.stringify({ enabled: true }) }
+  ));
+}
+
+export async function revokePluginInstall(workspaceId: string, pluginId: string): Promise<PluginMutation> {
+  return pluginMutationFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}/install`,
+    { method: "DELETE" }
+  ));
+}
+
+export async function grantPluginScope(
+  workspaceId: string,
+  pluginId: string,
+  scope: string
+): Promise<PluginMutation> {
+  return pluginMutationFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}/grants`,
+    { method: "POST", body: JSON.stringify({ scope }) }
+  ));
+}
+
+export async function revokePluginScope(
+  workspaceId: string,
+  pluginId: string,
+  scope: string
+): Promise<PluginMutation> {
+  return pluginMutationFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}/grants/${encodeURIComponent(scope)}`,
+    { method: "DELETE" }
+  ));
 }
 
 interface WireReadState {

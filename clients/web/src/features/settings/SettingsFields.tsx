@@ -19,15 +19,18 @@ export function SectionShell({
   title,
   lines,
   children,
+  wide = false,
 }: {
   title: string;
   lines: string[];
   children: ReactNode;
+  /** Catalog/detail surfaces need both columns in the same viewport. */
+  wide?: boolean;
 }) {
   // A settings form is read line by line, so the panel keeps a measure instead
   // of stretching a slug field across a 1280px window.
   return (
-    <section className="flex min-w-0 max-w-2xl flex-col gap-4">
+    <section className={cn("flex min-w-0 flex-col gap-4", wide ? "max-w-none" : "max-w-2xl")}>
       <div className="flex flex-col gap-1">
         <h2 className="text-title font-semibold text-ink">{title}</h2>
         {lines.map((line) => (

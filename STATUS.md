@@ -1,5 +1,27 @@
 # momo 진행 현황
 
+## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
+
+- 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.
+- `npm run typecheck`·Vitest 877·`npm run build`·lint(기존 warning 4)·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 이 worker sandbox에서 Chromium이 런치 직후 종료되어 runtime-unverified이며, fresh design-review는 오케스트레이터 실행 대기다.
+- 3R: scope 포커스 완료를 실제 `activeElement` 도착으로 판정하고 160ms catalog/detail 편차 게이트를 추가했다. 동의 모달은 고정 헤더·스크롤 본문·고정 푸터로 분리했으며 진행 버튼 대비, 포커스 링 추종, 위험 칩, 혼합 실패·취소 후 receipt를 보강했다. typecheck·Vitest 881·build·preflight 10/10 PASS, `gate:shell`은 Chromium Mach-port 권한 거부로 오케스트레이터 실행 대기(`runtime-unverified`).
+- 4R: 짧은 창의 고정 헤더를 제목만 남기고 권한 위험·승인 칩을 첫 프레임에 노출했다. 설치자 데이터가 없는 관리자 명단은 문의 대상 역할로만 표현하며, 패널 도구 칩·scope 식별 폴백·scope별 오류·진행 중 체크박스 어포던스를 국소 정리했다. typecheck·Vitest 881·build·preflight 10/10 PASS, `gate:shell`은 Chromium Mach-port 권한 거부로 오케스트레이터 실행 대기(`runtime-unverified`).
+- **5R + 오케스트레이터 실측 완료(2026-07-28)**: 단일 원인 실패는 원인을 한 번만 말하고 영향받은 권한을 나열한다(403×N이 가장 흔한 실패 모양이라 4R의 권한별 반복이 자기모순이었다). `워크스페이스 설치됨` 칩을 제목 블록으로 올려 위조 불가능한 신호가 폴드 위에 남는다. **게이트 실행·red proof 4종 성립**: 포커스 핸드오프(160ms 편차에서 무조건-true 복원 시 타임아웃 FAIL) · 스크롤 상자(제거 시 버튼 top 878 vs 패널 568) · 링 여백(`scroll-pt-1` 제거 시 gap 0) · 단일 원인(분기 해제 시 `policyCauseCount:4`로 FAIL). 881 tests · `gate:wire`·`gate:shell` PASS · preflight 10/10. design-review **5R PASS(Blocker 0·High 0)**.
+
+## MOMO-640 웹 세션 저장 경계 + Tauri CSP (#842, 2026-07-27)
+
+- Tauri 셸 번들은 `tauri.conf.json`의 CSP로 same-origin script·font·asset만 허용하고, xterm의 검증된 런타임 style 쓰기와 런타임 API/realtime/관전 host 연결만 제한적으로 연다. `gate:csp`는 이 설정값을 직접 읽어 preview 헤더로 적용한 뒤 로그인→셸→xterm 관전 경로의 CSP 위반 0건을 단정한다.
+- 브라우저 refresh token의 현행 localStorage 경계는 이번 범위에서 변경하지 않았다. httpOnly cookie 전환은 임의 API origin·Tauri `tauri://localhost`·HTTP LAN 서버를 함께 다시 설계해야 하므로 별도 ADR 사안이다. 서버가 `allowCredentials: false`로 쿠키 경로를 **표현 불가능하게** 설계해 둔 것을 코드에서 확인했다(`CORSMiddleware.swift:88`, `Config.swift:316-318`) — 쿠키 전환은 그 결정을 되돌리는 일이다.
+- **오케스트레이터 실측 완료(2026-07-27)**: `gate:csp` PASS(exit 0)·**red proof 성립**(`CSP_GATE_PROVE_RED_STYLE=1` → style-src-elem 위반 22건 관측 후 exit 1). `gate:wire`·`gate:shell` 무회귀 PASS. 두 게이트를 **패키징된 CSP 헤더 아래에서 재실행해도 PASS**이고 `default-src 'none'`으로 바꾸면 둘 다 exit 1 — 헤더가 실제로 서빙된다는 증명이자 `gate:csp` 단일 경로보다 넓은 커버리지다(절차는 `clients/web/README.md`·게이트 헤더 주석에 고정).
+- **Tauri 실빌드 실측**: `cargo tauri build --bundles app --ci` exit 0, 번들 실행 시 **연결 화면이 WKWebView에서 정상 렌더**(스타일·폰트 적용). CSP 문자열이 바이너리에 그대로 포함됨을 확인. **IPC도 이 CSP 아래에서 동작한다** — 키체인 조회 프롬프트와 mDNS로 프리필된 서버 주소가 각각 웹뷰→Rust 왕복의 산 증거다. 한계: 릴리스 번들은 devtools가 없어 **런타임 콘솔 위반 목록은 읽지 못했고**, 로그인 이후 실서버 왕복은 자격증명 취급 범위 밖이라 미수행.
+
+## MOMO-636 웹 플러그인 마켓플레이스 복원 (#838, 2026-07-27)
+
+- 설정의 `앱` 섹션에 catalog·원본 manifest 상세·egress 도메인·tool risk/approval tier·설치/해제와 본인 단일 scope grant 회수를 복원했다. 관리자 판정은 roster의 내 role이 owner/admin으로 확인될 때만 열며, 다중 scope는 원문 표시만 하고 변경하지 않는다.
+- 웹 API는 `lib/wire.ts` helper로 plugin 6개 엔드포인트를 파싱하고 `null`·빈 객체·타입 전도는 해당 패널의 inline 오류로 내린다. typecheck·Vitest 861·build·design preflight 10/10 PASS, Playwright gate:wire/gate:shell은 이 worker sandbox의 Chromium Mach-port 권한 거부로 runtime-unverified다.
+- 4R design-review 반영: 확인 다이얼로그는 열릴 때만 마운트되어 opener를 복귀하고 Esc를 소비해 설정 라우트 이탈을 막는다. 오류 닫기는 원래 액션에 되돌리며, 상세 scroll은 열 수 대신 설정 패널 안의 실제 가시성으로 판정하고 진행 중인 형제 액션을 잠근다.
+- `npm run typecheck`·Vitest 871·`npm run build`·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 동일 Chromium Mach-port 권한 거부로 `runtime-unverified`다.
+
 ## MOMO-639 한국어 보안 판단 자료 + 신뢰 경계 다이어그램 (#841, 2026-07-27)
 
 - `docs/security/README.ko.md`에 Dawn 비경유/선택 push relay, RLS 부트 가드, 감사·첨부·Drive 위임 경계와 코드·ADR 행 단위 근거를 정리하고 Mermaid 신뢰 경계 다이어그램을 추가했다. 영문 `SECURITY.md`는 한국어 판단 자료로 연결하되 신고 절차의 정본으로 유지한다.
@@ -10,6 +32,7 @@
 - Migration 044는 전역 `attachment.drive_file_id` unique를 `(workspace_id, drive_file_id)` partial unique로 원자 교체하고, 기존 tenant 내부 중복을 삭제 없이 fail-closed한다. `verify_attachment_upload.sh`는 두 테넌트의 같은 Drive ID 삽입 성공·상호 RLS 비가시를 단정하며 `ATTACHMENT_GATE_LEGACY_UNIQUE_PROOF=1`은 격리 Compose에서 의도적 red proof를 만든다.
 - 플러그인 manifest `plugin`에 선택 `termsURL`·`privacyPolicyURL`(HTTPS)·`iconText`(최대 8 문자)를 허용해 catalog/detail API와 OpenAPI에 투영한다. 공식 4종 시드는 출처 없는 값을 추가하지 않아 모두 생략되고, 클라이언트는 링크 행·아이콘을 각각 생략/이름 기반 문자 폴백한다.
 - `bash -n`·migration 번호·YAML/JSON·diff 정적 검증만 완료; 이 worker sandbox에서는 Swift build/test·psql·Docker verifier가 `runtime-unverified`이며 오케스트레이터 실행 대기다.
+
 
 ## MOMO-634 워크스페이스 허용 모델 REST + 웹 교집합 (#831, 2026-07-27)
 

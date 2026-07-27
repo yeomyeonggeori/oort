@@ -21,6 +21,11 @@ const proxy = {
   "/health": { target: proxyTarget, changeOrigin: true },
 };
 
+// Used only by `gates/gate-csp.mjs`: it serves the production `dist/` through
+// Vite preview with the desktop shell policy read from tauri.conf.json. Keeping
+// the value out of this file means the gate cannot drift from the packaged CSP.
+const cspGateHeader = process.env.MOMO_CSP_GATE_HEADER;
+
 export default defineConfig({
   plugins: [react(), tailwind()],
   resolve: {
@@ -38,5 +43,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy,
+    ...(cspGateHeader
+      ? { headers: { "Content-Security-Policy": cspGateHeader } }
+      : {}),
   },
 });
