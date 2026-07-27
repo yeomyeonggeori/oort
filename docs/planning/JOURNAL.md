@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-28 (Fable) · 차기 배치 설계 검토 + ADR-0139 기안 + 패킷 4장 (spawn 대기)
+- **성재 지시**: 티켓 리뷰→구현방식·정합성 설계 검토→작업 준비. **구현은 sol medium**. 검토 결과는 계획 정본 §8.
+- **전제 재검증이 또 정정을 낳았다**: #851의 "마지막 활동 시각"은 서버 필드가 없다(startedAtMs·상태 전이로 대체, durable 최근활동은 별도 엔진 사안) · #853의 ADR 번호는 0146이 아니라 **0139**(0138은 온보딩 예약).
+- **ADR-0139 기안**(Proposed): D1 셸 래핑 PTY로 `idle`(도구 종료≠세션 종료, running↔idle 왕복, 타임아웃) · D2 호스트 링버퍼 replay(D10 유지 — 서버 바이트 비경유 불변) · D3 재부착 vs git 계보 재개 분기 명문화 · D4 T3 idle=샌드박스 pause + **활성시간 미계상**(원장 요구를 #855에 선반영). **성재 승인 대기.**
+- **설계 확정 사항**: #850 join 응답의 `livekitUrl`이 주소 권위(ADR-0110 동형)·실시간 와이어 3종은 `huddle_started/participants_changed/ended`·livekit-client는 xterm식 lazy-load·Tauri 마이크 권한은 워커 보고만 / #854는 1단계=실측 하니스(워커는 오디오 못 구함)+동의 fail-closed 게이트, Egress Redis는 prod 있음·dev 없음 / #855는 워커가 `.env`의 E2B 키를 읽지 않게 명시(스모크는 오케스트레이터 키 주입).
+- **패킷 4장**: `handoffs/2026-07-28-{850,851,854,855}-*.md`. 순서: uxui #850→#851(순차 머지, realtime.ts·api.ts 겹침), engine #855(리허설 문서부터)→#854. **성재 "진행" 지시 대기 — spawn 안 함.**
+
 ## 2026-07-28 (Fable) · main 동기화(성재 전건 승인) + 허들·회의록·연속성 실사 → 티켓 5장
 - **main 동기화 완료**: `main = track/engine = track/uxui = 99ea7330`. 배치 5장(#840·#841·#838·#842·#839) 전량 main. 원점 검증 — server build + **333 tests** · 웹 **881 tests** · typecheck 0 · `gate:wire`·`gate:shell`·`gate:csp` PASS · 마이그레이션 44개 번호 충돌 0.
 - **머지 시 정정 이행**: `docs/security/README.ko.md`의 "Tauri CSP는 현재 null"을 #842 반영으로 고쳤다. **넓은 `connect-src`의 이유(런타임 서버 주소·관전 호스트)와 `style-src 'unsafe-inline'`(터미널 렌더러)까지 함께 적었다** — CSP가 있다는 사실만 적으면 그게 막지 못하는 것을 오해하게 된다.

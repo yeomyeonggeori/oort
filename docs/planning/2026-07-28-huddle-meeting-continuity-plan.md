@@ -195,3 +195,35 @@ ADR-0122가 이미 정해둔 설계(재사용할 것):
 3. 어느 쪽이든 **한국어 회의 도메인 실측이 선행**한다 — 모델 확정 전에 파이프라인을 확정하지 않는다.
 
 **주의**: 외부 ASR은 ADR-0004(provider 자격증명 비유입)와는 다른 축이지만, **보안 문서가 말하는 "Dawn은 아무 데도 없다"의 예외를 만드는 결정**이다. 켜는 순간 그 문장이 조건부가 되므로 **ADR-0122 증보에 명시**해야 한다.
+
+---
+
+## 8. 설계 검토 (2026-07-28, 착수 전 전제 재검증 — 워커 모델 sol medium)
+
+지난 배치에서 티켓 6장 중 4장의 전제가 코드와 달랐으므로, 패킷 작성 전에 전부 재검증했다.
+
+### #850 웹 허들 — 전제 확인 + 설계 구체화 4건
+- **join 응답이 `livekitUrl`을 준다**(`JoinHuddleResponse`) — 클라이언트가 주소를 유도할 필요 없음(ADR-0110 동형). 패킷에 명시.
+- 실시간 와이어 타입은 **`huddle_started`·`huddle_participants_changed`·`huddle_ended`**(Core `RealtimeEnvelope.swift:44-46`이 정본) — 웹 `realtime.ts`에 파서 추가 필요.
+- `livekit-client`는 **xterm과 같은 lazy-load**(`terminalRuntime.ts` 선례) — 허들 안 여는 사람에게 0 비용. CSP는 통과(`connect-src` 넓음, npm 번들이라 `script-src 'self'` 충족).
+- **위험 1건**: Tauri WKWebView의 `getUserMedia` 마이크 권한 — 워커가 해결 금지·보고만, 실측은 오케스트레이터.
+
+### #851 내 세션 표면 — 전제 확인 + **범위 정정 1건**
+- 필요한 필드 전부 실재(`WorkSession.memberId/hostId/status/startedAtMs/resumedFromSessionId`, `WorkHost.online/lastSeenAtMs`). **서버 변경 불요** 확정.
+- **정정: 티켓의 "마지막 활동 시각"은 서버 필드가 없다.** 지어내지 말고 startedAtMs·상태 전이·실시간 이벤트로 표현 가능한 범위까지만(durable 최근활동이 필요하면 엔진 티켓 별도). 패킷에 반영.
+- ADR-0139(idle)가 이 표면에 얹히므로 **미지 상태 안전 렌더**만 요구(미리 구현 금지).
+
+### #853 → **ADR-0139 기안 완료** (`docs/adr/0139-work-session-idle-reattach.md`, Proposed)
+- 번호 정정: 티켓에 적었던 0146이 아니라 **0139**다(0138은 일반유저 온보딩에 예약). D1 셸 래핑 PTY로 `idle` 상태(도구 종료≠세션 종료) · D2 호스트 링버퍼 replay(D10 유지) · D3 재부착 vs 계보 재개 분기 명문화 · D4 T3 idle=pause+**활성시간 미계상**. **성재 승인 대기 — 승인 전 구현 착수 금지.**
+
+### #854 전사 v1 — **범위 재절단**: 1단계는 구현이 아니라 실측 하니스
+- 워커는 오디오를 못 구한다 → **하니스(모델 3종 CER·RTF 표) + 파이프라인 골격 + 동의 fail-closed 게이트**까지만. 실오디오 런과 모델 확정은 오케스트레이터/성재.
+- Egress의 Redis: **prod에는 있다**(`install.sh:66` postgres/redis/centrifugo). dev compose에는 없음 → dev는 profile에 포함.
+- 동의 게이트를 서버가 막으면 웹 동의 UI는 나중에 얹어도 안전 — 순서 정당화.
+
+### #855 T3 — 전제 확인(ADR-0136 D1: 서버측 프로비저너·workd Ed25519 자기등록 재사용) + 접합 1건
+- **ADR-0139 D4 요구를 원장 스키마에 선반영**: pause 구간 미계상을 표현할 것. 나중에 붙이면 과금 신뢰가 깨진다.
+- 워커는 `.env`의 E2B 키를 **읽지 않는다**(자격증명 계약) — 실호출 스모크는 오케스트레이터가 키 주입.
+
+### 실행 순서 권고
+uxui 레인 **#850 → #851**(순차 머지, 충돌 파일 realtime.ts·api.ts 겹침), engine 레인 **#855(2-1 리허설 문서부터) → #854**(또는 병렬 워크트리, 머지 순차). **#853은 성재 승인 게이트.** 패킷 4장: `handoffs/2026-07-28-{850,851,854,855}-*.md`.
