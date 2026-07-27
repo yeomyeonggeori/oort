@@ -48,13 +48,37 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, fetchEffortTable, probeSendRouting } from "@/lib/api";
+import {
+  ApiError,
+  fetchAgentAllowedModels,
+  fetchEffortTable,
+  probeSendRouting,
+} from "@/lib/api";
 import { NetworkError } from "@/lib/http";
 import { apiBase } from "@/lib/serverBase";
 import { useSession } from "@/app/session";
 import { parseEffortTable, type EffortTable } from "./routingModel";
 
 export type RoutingSupport = "checking" | "ready" | "absent" | "unknown";
+
+/**
+ * An agent-specific allow-list is additive capability data: a missing old
+ * endpoint, malformed 200 body, or transient failure all mean "not received",
+ * not an empty model policy. Callers keep the broad, explained fallback then.
+ */
+export function useAllowedAgentModels(agentMemberId: string | null): readonly string[] | null {
+  const { workspaceId } = useSession();
+  const key = agentMemberId?.toLowerCase() ?? null;
+  const query = useQuery({
+    queryKey: ["routing", "allowed-models", workspaceId.toLowerCase(), key],
+    queryFn: ({ signal }) =>
+      fetchAgentAllowedModels(workspaceId, agentMemberId as string, signal),
+    enabled: agentMemberId !== null,
+    retry: false,
+    staleTime: 30_000,
+  });
+  return query.data ?? null;
+}
 
 export interface CapabilityVerdict {
   support: Exclude<RoutingSupport, "checking">;

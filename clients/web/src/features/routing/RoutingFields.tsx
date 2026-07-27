@@ -54,6 +54,8 @@ export function RoutingFields({
   ignoredNotice = null,
   /** 모델 축에 대한 서버 거절. 폼 아래가 아니라 그 상자 옆에 붙는다. */
   modelError = null,
+  /** agent별 allow-list를 온전한 모양으로 받았을 때만 true다. */
+  allowedModelsReceived = false,
   /**
    * `stack`은 다이얼로그(512px 패널에서 한 칸씩), `row`는 컴포저다. 컴포저에서
    * 세로로 쌓으면 1600px 창에서 모델 상자 하나가 1500px이 되는데, 모델 핸들은
@@ -67,6 +69,7 @@ export function RoutingFields({
   table: EffortTable | null;
   /** 모델 피커에 올릴 이름들. 호출자가 아는 출처를 합쳐서 만든다. */
   models: readonly string[];
+  allowedModelsReceived?: boolean;
   inheritedModel: string;
   modelInheritLabel: string;
   effortInheritLabel: string;
@@ -133,9 +136,8 @@ export function RoutingFields({
   const row = layout === "row";
   const fieldClass = row ? "flex min-w-0 flex-1 flex-col gap-1" : "flex min-w-0 flex-col gap-1";
 
-  // 모델 상자 밑 한 줄. 두 경우 모두 같은 사실의 두 얼굴이다: **이 서버에는
-  // 워크스페이스 허용목록(`workspace.settings.allowed_agent_models`)을 내려주는
-  // REST가 없다.**
+  // 모델 상자 밑 한 줄. agent별 allow-list를 받지 못했을 때만 아래의
+  // 호환 완화책을 쓴다.
   //
   //   하나뿐  고를 수 있는 값이 지금 걸려 있는 값 하나뿐이면 그 상자는 컨트롤이
   //           아니라 표시다(tokens.md §4). 왜 하나뿐인지 말하지 않으면 사람은
@@ -149,7 +151,7 @@ export function RoutingFields({
   // 되살려 놓은 orphan도 고를 수 있는 값이므로 함께 센다: 저장된 모델과 상속
   // 모델이 서로 다르면 그 상자는 둘 사이를 오갈 수 있다.
   const pickableModels = orphanModel === null ? models : [...models, orphanModel];
-  const modelSourceNotice = modelLocked
+  const modelSourceNotice = modelLocked || allowedModelsReceived
     ? null
     : hasUnattestedModels(pickableModels, inheritedModel)
       ? "이 서버는 워크스페이스가 허용한 모델 목록을 알려주지 않습니다. 허용목록 밖 모델은 거절되거나 적용되지 않습니다."

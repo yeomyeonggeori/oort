@@ -134,9 +134,8 @@ export function supportsEffort(
  *
  * 서버가 실제로 재는 자는 `MessageRoutes.resolveProfileModel`이고, 그 함수의
  * 허용집합은 `{에이전트 자신의 agent.model} ∪ workspace.settings.allowed_agent_models`
- * 이다. 뒤쪽 절반을 내려주는 REST는 이 클라이언트가 부르는 어떤 경로에도 없다
- * (로스터는 `agentModel`만, 프로필 응답에는 그 필드가 아예 없고, 워크스페이스
- * 설정 GET 자체가 없다 — 2026-07-26 코드 확인). 그래서 **교집합은 계산할 수 없다.**
+ * 이다. 새 agent별 allow-list REST를 정상적으로 받았을 때는 그 집합과 교집합을
+ * 계산한다. 응답을 못 받았을 때는 여전히 교집합을 지어내지 않는다.
  *
  * 두 선택지 중 하나를 골라야 했다.
  *
@@ -147,7 +146,10 @@ export function supportsEffort(
  *            서버가 거절하면 그 문장을 모델 필드 옆에 붙인다. 최악이 "한 번 거절
  *            당하고 이유를 읽는다"로 끝난다.
  *
- * 후자를 택했다(2026-07-26 머지 리뷰 F1). 다만 **순서는 근거 순**으로 바꾼다.
+ * allow-list를 못 받았을 때는 후자를 택한다(2026-07-26 머지 리뷰 F1). 유효한
+ * allow-list를 받았을 때는 그 목록도 후보 출처로 합친 뒤 교집합을 적용한다. 그래야
+ * settings에만 있는 허용 모델도 직접 입력란 없이 피커에서 도달할 수 있다. 다만
+ * **기본 순서는 근거 순**으로 둔다.
  * 이것은 공짜로 얻는 정보다:
  *
  *   1층  `agentModel` — `resolveProfileModel`이 허용집합을 이 값으로 시작하므로
@@ -167,7 +169,8 @@ export function supportsEffort(
 export function modelOptions(
   table: EffortTable | null,
   agentModel: string,
-  known: readonly string[] = []
+  known: readonly string[] = [],
+  allowedModels: readonly string[] | null = null
 ): string[] {
   const out: string[] = [];
   const push = (model: string) => {
@@ -177,7 +180,12 @@ export function modelOptions(
   push(agentModel);
   for (const model of known) push(model);
   for (const entry of table?.entries ?? []) push(entry.model);
-  return out;
+  if (allowedModels === null) return out;
+  // Settings에만 있는 허용 모델도 피커에서 도달해야 한다. 이 추가 없이
+  // `out ∩ allowed`만 하면 직접 입력란이 없는 UI가 유효한 모델을 영구히 숨긴다.
+  for (const model of allowedModels) push(model);
+  const allowed = new Set(allowedModels);
+  return out.filter((model) => allowed.has(model));
 }
 
 /**
@@ -292,6 +300,9 @@ export type EffortSource = "none" | "profile";
 export interface RoutingInheritance {
   /** 지금 이 에이전트에 실제로 걸려 있는 모델과 그것을 정한 층. */
   model: { value: string; source: ModelSource };
+  /** A stored profile preference outside a received allow-list falls back to
+   * `agent.model` on the server. Keep the discarded value visible to the UI. */
+  ignoredModelPref: string | null;
   /**
    * 실제로 걸려 있는 effort. `null`은 아무 층도 지정하지 않았다는 뜻이고,
    * 그때 서버는 effort를 아예 보내지 않는다(RunRoutingResolution). 표의
@@ -322,11 +333,15 @@ export interface RoutingInheritance {
 export function resolveInheritance(
   table: EffortTable | null,
   agentModel: string,
-  profile: RoutingProfile | null
+  profile: RoutingProfile | null,
+  allowedModels: readonly string[] | null = null
 ): RoutingInheritance {
   const modelPref = trimmed(profile?.modelPref);
-  const model = modelPref ?? agentModel;
-  const modelSource: ModelSource = modelPref === null ? "agent" : "profile";
+  const modelPrefAllowed =
+    modelPref !== null && (allowedModels === null || allowedModels.includes(modelPref));
+  const ignoredModelPref = modelPref !== null && !modelPrefAllowed ? modelPref : null;
+  const model = modelPrefAllowed ? modelPref : agentModel;
+  const modelSource: ModelSource = modelPrefAllowed ? "profile" : "agent";
 
   const effortPref = trimmed(profile?.effortPref);
   if (table === null) {
@@ -334,6 +349,7 @@ export function resolveInheritance(
     // 있으면 그 값이 걸려 있다고만 말하고, 버려질지 여부는 주장하지 않는다.
     return {
       model: { value: model, source: modelSource },
+      ignoredModelPref,
       effort:
         effortPref === null
           ? { value: null, source: "none" }
@@ -346,6 +362,7 @@ export function resolveInheritance(
   const usable = effortPref !== null && supportsEffort(table, model, effortPref);
   return {
     model: { value: model, source: modelSource },
+    ignoredModelPref,
     effort: usable
       ? { value: effortPref, source: "profile" }
       : { value: null, source: "none" },
@@ -499,6 +516,11 @@ export function agentEffortInheritLabel(defaultEffort: string | null): string {
   return defaultEffort === null
     ? "상속 (지정 없음)"
     : `상속 (지정 없음, 모델 기본 ${effortLabel(defaultEffort)})`;
+}
+
+/** 프로필이 저장해 둔 모델이 현재 allow-list에서 제외됐다는 안내. */
+export function ignoredModelNotice(ignored: string, fallback: string): string {
+  return `프로필에 저장된 모델 ${ignored}은 현재 워크스페이스에서 허용되지 않아 ${fallback} 모델로 적용됩니다.`;
 }
 
 /** 프로필이 저장해 둔 effort가 지금 모델에서 죽어 있다는 안내. */

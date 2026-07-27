@@ -179,6 +179,44 @@ final class AgentProfileRoutesTests: XCTestCase {
         XCTAssertEqual(denied.ignoredPreference, "external-premium")
     }
 
+    func testAllowedModelsResponseUsesTheRunRoutingAllowlistAuthority() throws {
+        let baseModel = "hermes-agent"
+        let settings = #"{"allowed_agent_models":["hermes-lite","hermes-fast"]}"#
+        let response = AgentProfileRoutes.allowedModelsResponse(
+            baseModel: baseModel, workspaceSettingsJSON: settings
+        )
+
+        // The endpoint is a projection of the exact Set that the request and
+        // profile-write gates use, not a second parser of workspace settings.
+        XCTAssertEqual(
+            Set(response.allowedAgentModels),
+            MessageRoutes.allowedAgentModels(
+                baseModel: baseModel, workspaceSettingsJSON: settings
+            )
+        )
+        XCTAssertEqual(response.allowedAgentModels, ["hermes-agent", "hermes-fast", "hermes-lite"])
+
+        let wire = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(response))
+                as? [String: Any]
+        )
+        XCTAssertEqual(Set(wire.keys), ["allowedAgentModels"])
+    }
+
+    func testAllowedModelsRouteStaysMemberScoped() throws {
+        let routesURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/MomoServer/Routes/AgentProfileRoutes.swift")
+        let source = try String(contentsOf: routesURL, encoding: .utf8)
+        XCTAssertTrue(source.contains("agents/:agent/allowed-models"))
+        XCTAssertTrue(source.contains("func allowedModels("))
+        XCTAssertTrue(source.contains("WorkspaceAuthorization.requireMember"))
+        XCTAssertTrue(source.contains("Self.allowedModelsResponse("))
+        XCTAssertFalse(source.contains("BYPASSRLS"))
+    }
+
     // MARK: - modelPref allow-list at write time (F1, 2026-07-26 merge review)
 
     /// Writing a `modelPref` the workspace does not allow used to answer 200 and

@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-634 워크스페이스 허용 모델 REST + 웹 교집합 (#831, 2026-07-27)
+
+- `GET /v1/workspaces/:ws/agents/:agent/allowed-models`는 활성 워크스페이스 멤버에게만 `agent.model ∪ workspace.settings.allowed_agent_models`를 결정적으로 투영한다. 설정 JSON·프로필·자격증명은 내보내지 않으며, 기존 `MessageRoutes.allowedAgentModels` 단일 소스를 재사용한다.
+- 웹 모델 피커는 유효한 응답을 받았을 때만 교집합으로 좁히고, 404·네트워크·`null`/타입 전도 응답에서는 기존 넓은 목록·고지로 폴백한다. 이미 저장된 허용목록 밖 model preference의 base-model 폴백도 경고로 보존한다. Docker `verify_run_routing.sh`와 Playwright `gate:wire`·`gate:shell`은 오케스트레이터 검증 대기(`runtime-unverified`).
+
 ## MOMO-633 리뷰 잔여 묶음 (#828, 2026-07-27)
 
 - instance-global quota ingest scope는 provider-link와 같은 instance-operator 경계에서만 발급되고, 각 ingest는 actor/token·provider/window·적용 여부를 감사한다. 200 error envelope은 typed cascade terminal failure가 되고, 복호화 불가 cascade hop은 로그와 `bearerUnavailable` 표식으로 GET에 남아 replace-all PUT에서 보존된다. 24~31자 credential-shape도 거부한다.
