@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-07-28 (Fable) · 일반 사용자 대응 배치 5장 완주 — #842·#839 랜딩, #839는 5라운드
+- **배치 종결**: #840·#841(track/engine) · #838·#842·#839(track/uxui). **다섯 트랙 랜딩 전부 main 앞·성재 승인 대기.**
+- **#842 랜딩**(track/uxui `8d8ba3b3`, PR #847): Tauri CSP + `gate-csp.mjs`(CSP를 `tauri.conf.json`에서 읽음). red proof 성립(style-src-elem 22건 뒤 exit 1). **게이트 사각지대 하나를 내가 메웠다** — `gate:csp`는 한 경로만 걸으므로 `gate:wire`·`gate:shell`을 같은 CSP 헤더 아래 재실행했고(둘 다 PASS), `default-src 'none'`에선 둘 다 exit 1이었다. **그 마지막 확인이 없으면 "CSP 아래 통과"가 헤더 무시와 구별되지 않는다.** 절차를 README·게이트 주석에 고정. **실빌드**: `cargo tauri build` exit 0, 실웹뷰 연결 화면 렌더, **IPC 동작 증거는 키체인 프롬프트와 mDNS 프리필**(둘 다 웹뷰→Rust 왕복). 한계: 릴리스 번들 devtools 부재로 런타임 콘솔 위반 목록 미확인.
+- **#839는 5라운드**(PR #846). **매 라운드 지적이 직전 수정이 만든 것**이었다: 1R 스크롤 상자 부재(출하 시드가 900x600에서 **키보드가 안 보이는 승인 버튼에 도달**) → 2R **포커스 수정이 목 타이밍 덕에 초록**(120ms 편차에서 16/16 body) + 상자가 패널 전체를 감쌈 → 3R 헤더가 본문보다 커져 **권한 칩을 한 번도 못 본 채 승인 가능** + "설치 관리자"가 데이터에 없는 관계 단정 → 4R 단일 원인일 때 같은 문장 4회(403×N이 가장 흔한 실패) + 폴드 위 신원이 앱 자칭 이름뿐 → **5R PASS(B0·H0)**.
+- **red proof 4종 실측**: 무조건-true 복원 시 포커스 단정 타임아웃 · `overflow-y-auto` 제거 시 버튼 top 878 vs 패널 568 · `scroll-pt-1` 제거 시 링 여백 0 · 단일 원인 분기 해제 시 `policyCauseCount` 4. **2R의 "목이 같은 tick에 답해 초록"이 이 티켓의 핵심 교훈**이라 게이트가 catalog/detail을 160ms 어긋나게 만든다.
+- **내 실수·수정 2건**: ①1R 게이트 로그의 `buttonsInViewport:true`를 그대로 믿었는데 그 단정이 **측정 전에 `scrollIntoViewIfNeeded()`를 호출**하고 있었다("스크롤하면 닿는다"≠"열자마자 보인다"). ②4R 링 여백 단정이 **rAF 스크롤 전에** 재서 세 뷰포트 FAIL — 앱이 아니라 게이트 결함이었다.
+- **워커 모델 전환(성재 지시)**: terra xhigh → **sol medium**(다음 라운드부터). 전환 직전 terra 런 1건이 **시작 3초 만에 죽어 한 시간을 날렸다**(exit-code 미생성, `AuthorizationRequired`는 성공 런 10건에도 있는 무해 잡음이라 사인 아님). **감시가 "완료"만 보고 "죽음"을 못 본 것**이 진짜 결함 — 이후 spawn은 프로세스 소멸도 감시한다.
+- **성재 몫**: track→main 승인(5건) · `legal/privacy-policy.md` 빈칸 · #837 실기기 · ADR-0138/0113 · **#839 grant 기본 전체선택 유지 여부**(제품 판단, 의도적으로 안 바꿈).
+- **랜딩 후 필수**: `docs/security/README.ko.md:68`의 "Tauri CSP는 null" 정직 항목이 #842로 **거짓이 됐다.** main 통합 시 정정(넓은 `connect-src` 이유 포함).
+
 ## 2026-07-27 (Fable) · 배치 5장 중 3장 랜딩 · #839 design-review FAIL · 성재 지시로 일시 중지
 - **재개 문서 = `handoffs/2026-07-27-resume-batch.md`**(이것만 읽으면 재개 가능). #839 수정 패킷은 `handoffs/2026-07-27-839-2r-fix-packet.md`에 이미 쓰여 있고 **spawn 직전에 멈췄다.**
 - **랜딩 3장**: #840(첨부 unique 테넌트 분리, 044) · #838(웹 마켓플레이스 복원, design-review 4R PASS) · #841(한국어 보안 자료+신뢰 경계 다이어그램, `01026aa1`). **세 트랙 모두 main 앞·성재 승인 대기.**

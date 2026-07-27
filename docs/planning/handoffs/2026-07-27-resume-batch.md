@@ -4,6 +4,9 @@
 > `docs/planning/2026-07-27-general-user-readiness-plan.md`, 직전 배치는
 > `2026-07-26-next-batch-handoff.md`.
 
+> **워커 모델(2026-07-27 성재 지시)**: 다음 라운드부터 **`--model gpt-5.6-sol --effort medium`**.
+> 그 이전 배치(#840·#841·#842·#839 1R~3R)는 `gpt-5.6-terra --effort xhigh`였다.
+
 ## 0. 성재에게 이렇게 시키시면 됩니다
 
 | 하고 싶은 것 | 지시 문장 |
