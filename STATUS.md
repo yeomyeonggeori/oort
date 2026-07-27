@@ -4,6 +4,7 @@
 
 - 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.
 - `npm run typecheck`·Vitest 877·`npm run build`·lint(기존 warning 4)·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 이 worker sandbox에서 Chromium이 런치 직후 종료되어 runtime-unverified이며, fresh design-review는 오케스트레이터 실행 대기다.
+- 3R: scope 포커스 완료를 실제 `activeElement` 도착으로 판정하고 160ms catalog/detail 편차 게이트를 추가했다. 동의 모달은 고정 헤더·스크롤 본문·고정 푸터로 분리했으며 진행 버튼 대비, 포커스 링 추종, 위험 칩, 혼합 실패·취소 후 receipt를 보강했다. typecheck·Vitest 881·build·preflight 10/10 PASS, `gate:shell`은 Chromium Mach-port 권한 거부로 오케스트레이터 실행 대기(`runtime-unverified`).
 
 ## MOMO-636 웹 플러그인 마켓플레이스 복원 (#838, 2026-07-27)
 

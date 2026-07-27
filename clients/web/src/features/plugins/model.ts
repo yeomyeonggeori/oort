@@ -37,6 +37,11 @@ export function pluginMarketplaceNeedsDetailFocus(
 }
 
 export type PluginActionFocusTarget = Pick<HTMLButtonElement, "isConnected" | "focus">;
+export type PluginScopeFocusTarget = PluginActionFocusTarget & {
+  disabled?: boolean;
+  getAttribute?: (name: string) => string | null;
+  ownerDocument?: Pick<Document, "activeElement">;
+};
 
 /** Keeps the keyboard position on the action that produced a dismissed error. */
 export function focusPluginActionAfterErrorDismissal(
@@ -56,11 +61,17 @@ export function pluginScopeChangeFallbackKind(
 
 /** Keeps focus in the detail controls when a completed scope change unmounts its opener. */
 export function focusPluginScopeChangeFallback(
-  actionButton: PluginActionFocusTarget | null
+  actionButton: PluginScopeFocusTarget | null
 ): boolean {
-  if (!actionButton?.isConnected) return false;
+  if (
+    !actionButton?.isConnected ||
+    actionButton.disabled === true ||
+    actionButton.getAttribute?.("aria-disabled") === "true"
+  ) {
+    return false;
+  }
   actionButton.focus();
-  return true;
+  return actionButton.ownerDocument?.activeElement === actionButton as unknown as Element;
 }
 
 /**
@@ -113,18 +124,18 @@ export function approvalLabel(tier: string | undefined): string | null {
   return null;
 }
 
-/** Swift marketplace's `github:read` → `github 읽기 권한` rule, unchanged. */
+/** Turns a manifest identifier into a short sentence; the exact id is separate metadata. */
 export function scopeSentence(scope: string): string {
   const [resource, action] = scope.split(":", 2);
-  if (!resource || !action) return `사용 권한 (${scope})`;
+  if (!resource || !action) return "사용 권한";
   const name = resource.replaceAll("_", " ");
   if (action === "read") return `${name} 읽기 권한`;
   if (action === "write") return `${name} 쓰기 권한`;
-  // The manifest may add an action before this surface learns a Korean label.
-  // Keep the raw scope with the action: display-normalization alone could make
-  // two future resource/action pairs look alike, but the raw manifest value is
-  // unique and gives the operator an exact name to report to an administrator.
-  return `${name} ${action.replaceAll("_", " ")} 권한 (${scope})`;
+  if (action === "admin") return `${name} 관리 권한`;
+  if (action === "comment") return `${name} 댓글 권한`;
+  const managed = action.match(/^manage_(.+)_permissions$/);
+  if (managed) return `${name} ${managed[1].replaceAll("_", " ")} 관리 권한`;
+  return `${name} ${action.replaceAll("_", " ")} 권한`;
 }
 
 /** Manifest order is product order: it is the order the publisher declared. */
@@ -212,19 +223,23 @@ export type PluginScopeConsentCompletion =
 /**
  * A scope POST settles independently, so a transport success can still contain
  * only failures. Keep that selection in the dialog when every request failed:
- * retrying the same checked scopes is the next useful action. The first failed
- * scope is the representative error because requests run in manifest order;
- * it is deterministic and reports the earliest failed requested change rather
- * than hiding all actionable HTTP/network guidance behind a generic receipt.
+ * retrying the same checked scopes is the next useful action. Report every
+ * distinct actionable cause: a mixed 403/404 batch must not sound as if all
+ * requests failed for the first scope's reason.
  */
 export function pluginScopeConsentCompletion(
   outcomes: readonly PluginScopeChangeOutcome[]
 ): PluginScopeConsentCompletion {
   const failed = outcomes.filter((outcome) => !outcome.succeeded);
   if (outcomes.length > 0 && failed.length === outcomes.length) {
+    const errors = [...new Set(failed.map((outcome) =>
+      pluginActionErrorMessage(outcome.error)
+    ))];
     return {
       dismissDialog: false,
-      error: pluginActionErrorMessage(failed[0].error),
+      error: errors.length === 1
+        ? errors[0]
+        : `서로 다른 ${errors.length}가지 원인으로 권한을 변경하지 못했습니다. ${errors.join(" ")}`,
     };
   }
   return { dismissDialog: true };

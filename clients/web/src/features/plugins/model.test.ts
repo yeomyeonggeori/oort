@@ -106,10 +106,48 @@ describe("plugin marketplace copy", () => {
   });
 
   it("returns a completed grant to its still-present revoke control", () => {
-    const focus = vi.fn();
+    const ownerDocument = { activeElement: null as Element | null };
+    const target = {
+      isConnected: true,
+      disabled: false,
+      getAttribute: () => null,
+      ownerDocument,
+      focus: vi.fn(() => {
+        ownerDocument.activeElement = target as unknown as Element;
+      }),
+    };
     expect(pluginScopeChangeFallbackKind("grant")).toBe("revoke");
     expect(pluginScopeChangeFallbackKind("revoke")).toBe("grant");
-    expect(focusPluginScopeChangeFallback({ isConnected: true, focus })).toBe(true);
+    expect(focusPluginScopeChangeFallback(target)).toBe(true);
+    expect(target.focus).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim focus arrived when the replacement is blocked or focus is a no-op", () => {
+    const focus = vi.fn();
+    const ownerDocument = { activeElement: null as Element | null };
+    expect(focusPluginScopeChangeFallback({
+      isConnected: true,
+      disabled: true,
+      getAttribute: () => null,
+      ownerDocument,
+      focus,
+    })).toBe(false);
+    expect(focus).not.toHaveBeenCalled();
+    expect(focusPluginScopeChangeFallback({
+      isConnected: true,
+      disabled: false,
+      getAttribute: (name) => name === "aria-disabled" ? "true" : null,
+      ownerDocument,
+      focus,
+    })).toBe(false);
+    expect(focus).not.toHaveBeenCalled();
+    expect(focusPluginScopeChangeFallback({
+      isConnected: true,
+      disabled: false,
+      getAttribute: () => null,
+      ownerDocument,
+      focus,
+    })).toBe(false);
     expect(focus).toHaveBeenCalledOnce();
   });
 
@@ -161,8 +199,11 @@ describe("plugin marketplace copy", () => {
     expect(new Set(sentences).size).toBe(scopes.length);
     expect(scopeSentence("github:read")).toBe("github 읽기 권한");
     expect(scopeSentence("github:write")).toBe("github 쓰기 권한");
-    expect(scopeSentence("notion:comment")).toContain("comment");
-    expect(scopeSentence("notion:admin")).toContain("admin");
+    expect(scopeSentence("notion:comment")).toBe("notion 댓글 권한");
+    expect(scopeSentence("notion:admin")).toBe("notion 관리 권한");
+    expect(scopeSentence("google_workspace:manage_shared_drive_permissions"))
+      .toBe("google workspace shared drive 관리 권한");
+    expect(scopeSentence("no-separator")).toBe("사용 권한");
     expect(scopeSentence("notion:comment")).not.toBe(scopeSentence("notion:admin"));
   });
 
@@ -185,14 +226,15 @@ describe("plugin marketplace copy", () => {
       .toContain("2개 권한을 허용했습니다: github 읽기 권한, github 쓰기 권한. 1개는 변경하지 못했습니다");
   });
 
-  it("keeps a full scope failure in the dialog with its first actionable error", () => {
+  it("keeps a full scope failure in the dialog and reports every distinct cause", () => {
     const completion = pluginScopeConsentCompletion([
       { scope: "notion:comment", succeeded: false, error: new ApiError(403, "not allowed") },
-      { scope: "notion:admin", succeeded: false, error: new ApiError(409, "not installed") },
+      { scope: "notion:admin", succeeded: false, error: new ApiError(404, "not found") },
     ]);
-    expect(completion).toEqual({
-      dismissDialog: false,
-      error: "이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요.",
-    });
+    expect(completion.dismissDialog).toBe(false);
+    if (completion.dismissDialog) throw new Error("expected retained dialog");
+    expect(completion.error).toContain("서로 다른 2가지 원인");
+    expect(completion.error).toContain("관리자에게 정책과 권한을 확인하세요.");
+    expect(completion.error).toContain("앱 또는 내 권한을 찾지 못했습니다.");
   });
 });

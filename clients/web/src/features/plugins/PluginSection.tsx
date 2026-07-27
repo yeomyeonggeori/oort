@@ -165,10 +165,12 @@ export function PluginSection({ offline }: { offline: boolean }) {
         const kind = action.kind === "grantScopes" ? "grant" : "revoke";
         const outcomes = data as PluginScopeChangeOutcome[];
         const completion = pluginScopeConsentCompletion(outcomes);
+        // Keep a receipt even when the dialog stays open. If the user stops
+        // after a full failure, the panel still records that an attempt ran.
+        setScopeChange({ pluginId: action.pluginId, kind, outcomes });
         if (completion.dismissDialog) {
           setConsenting(null);
           setConsentError(null);
-          setScopeChange({ pluginId: action.pluginId, kind, outcomes });
           if (outcomes.every((outcome) => outcome.succeeded)) {
             setScopeFocusAfterChange(kind);
           }
@@ -218,13 +220,43 @@ export function PluginSection({ offline }: { offline: boolean }) {
     // new state and remains available after the catalog refetch, unlike the
     // opener that would otherwise leave focus on <body>.
     const fallbackKind = pluginScopeChangeFallbackKind(scopeFocusAfterChange);
-    const fallback = fallbackKind === "grant"
+    const fallback = () => fallbackKind === "grant"
       ? grantScopeButtonRef.current
       : revokeScopeButtonRef.current;
-    if (focusPluginScopeChangeFallback(fallback)) {
+    if (focusPluginScopeChangeFallback(fallback())) {
       setScopeFocusAfterChange(null);
+      return;
     }
-  }, [catalogQuery.data, scopeFocusAfterChange]);
+    // Catalog and detail refetches may settle on different frames. During that
+    // gap the complementary button exists but is disabled by the sibling-write
+    // lock, and calling focus() is a no-op. Wait for the busy state to clear and
+    // retry from its dependency instead of treating the call as arrival.
+    if (mutation.isPending) return;
+    let cancelled = false;
+    let attempts = 1;
+    let frame = 0;
+    const retry = () => {
+      if (cancelled) return;
+      if (focusPluginScopeChangeFallback(fallback())) {
+        setScopeFocusAfterChange(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 4) {
+        frame = window.requestAnimationFrame(retry);
+        return;
+      }
+      // A malformed response can remove both actions. The selected detail is a
+      // stable, named destination and is safer than abandoning focus on body.
+      detailRef.current?.focus();
+      setScopeFocusAfterChange(null);
+    };
+    frame = window.requestAnimationFrame(retry);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [catalogQuery.data, detailsQuery.data, mutation.isPending, scopeFocusAfterChange]);
 
   const lines = [
     "워크스페이스에 설치할 앱과 내 사용 권한을 관리합니다.",
@@ -289,6 +321,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
                 <li key={plugin.pluginId} className="border-b border-line last:border-b-0">
                   <button
                     type="button"
+                    data-testid={`plugin-catalog-${plugin.pluginId}`}
                     disabled={mutation.isPending}
                     onClick={() => {
                       // 입력 방식으로 가르지 않는다. onClick은 키보드 Enter/Space에서도
@@ -326,6 +359,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
           {selected && (
             <div
               ref={detailRef}
+              tabIndex={-1}
               aria-label={`${selected.name} 상세`}
             >
               <PluginDetailPanel
@@ -384,6 +418,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
       {consenting && (
         <PluginScopeConsentDialog
           consent={consenting}
+          managerNames={managerNames}
           pending={mutation.isPending}
           opener={actionButtonRef.current}
           error={consentError}
@@ -772,13 +807,41 @@ function PluginActionButton({
 
 function toolRiskAndApprovalLabels(tools: readonly PluginManifestTool[]): string[] {
   return [...new Set(tools.flatMap((tool) => [
-    approvalLabel(tool.approvalTier),
-    tool.risk ? `위험도 ${riskLabel(tool.risk)}` : null,
+    approvalLabel(tool.approvalTier) ? `승인: ${approvalLabel(tool.approvalTier)}` : null,
+    tool.risk ? `위험도: ${riskLabel(tool.risk)}` : null,
   ]).filter((value): value is string => value !== null))];
 }
 
+type ScopeBadge = {
+  label: string;
+  tone: "muted" | "warn" | "danger";
+};
+
+function scopeRiskAndApprovalBadges(tools: readonly PluginManifestTool[]): ScopeBadge[] {
+  const badges = tools.flatMap((tool): ScopeBadge[] => {
+    const approval = approvalLabel(tool.approvalTier);
+    const result: ScopeBadge[] = [];
+    if (approval) {
+      result.push({
+        label: `승인: ${approval}`,
+        tone: tool.approvalTier === "network_write"
+          ? "danger"
+          : tool.approvalTier === "workspace_write" ? "warn" : "muted",
+      });
+    }
+    if (tool.risk) {
+      result.push({
+        label: `위험도: ${riskLabel(tool.risk)}`,
+        tone: tool.risk === "admin" ? "danger" : tool.risk === "write" ? "warn" : "muted",
+      });
+    }
+    return result;
+  });
+  return [...new Map(badges.map((badge) => [badge.label, badge])).values()];
+}
+
 function ToolRow({ tool }: { tool: PluginManifestTool }) {
-  const tiers = toolRiskAndApprovalLabels([tool])
+  const tiers = toolRiskAndApprovalLabels([tool]);
   return (
     <li className="flex flex-col gap-1 border-b border-line p-3 last:border-b-0">
       <span className="text-body font-medium text-ink">{tool.name}</span>
@@ -800,6 +863,7 @@ function DetailLink({ label, href }: { label: string; href: string }) {
 
 function PluginScopeConsentDialog({
   consent,
+  managerNames,
   pending,
   opener,
   error,
@@ -808,6 +872,7 @@ function PluginScopeConsentDialog({
   onConfirm,
 }: {
   consent: PluginScopeConsent;
+  managerNames: string[];
   pending: boolean;
   /** The button that opened this programmatic dialog, never activeElement guesswork. */
   opener: HTMLButtonElement | null;
@@ -821,7 +886,8 @@ function PluginScopeConsentDialog({
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const isGrant = consent.kind === "grant";
   const selected = new Set(selectedScopes);
-  const canConfirm = !pending && selectedScopes.length > 0;
+  const hasSelection = selectedScopes.length > 0;
+  const canConfirm = !pending && hasSelection;
   const appIcon = consent.plugin.iconText?.trim()
     || consent.plugin.name.trim().charAt(0).toLocaleUpperCase();
 
@@ -846,37 +912,50 @@ function PluginScopeConsentDialog({
         onInteractOutside={(event) => { if (pending) event.preventDefault(); }}
         data-testid="plugin-scope-consent"
       >
+        <div className="flex flex-col gap-3 border-b border-line p-4">
+          <div className="flex items-center gap-2" aria-hidden="true">
+            <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-meta font-semibold text-ink">momo</span>
+            <ArrowRight className="size-4 text-ink-muted" />
+            <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <DialogTitle data-testid="plugin-scope-consent-title">
+              {isGrant ? `${consent.plugin.name} 앱에 권한을 허용할까요?` : `${consent.plugin.name} 앱 권한을 회수할까요?`}
+            </DialogTitle>
+            <DialogDescription>
+              {isGrant
+                ? "선택한 권한의 도구가 내 사용자 정책에 추가됩니다."
+                : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
+            </DialogDescription>
+          </div>
+          {isGrant && consent.plugin.installed && consent.plugin.enabled && (
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusChip tone="ok">워크스페이스 설치됨</StatusChip>
+              {managerNames.length > 0 && (
+                <span className="text-meta text-ink-muted">
+                  설치 관리자: {managerNames.join(", ")}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
         <div
           className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4"
           aria-busy={pending || undefined}
           data-testid="plugin-scope-consent-body"
+          onFocusCapture={(event) => {
+            // Radix FocusScope moves focus with preventScroll, so a ring can
+            // exist below this inner viewport after autofocus or Tab wrapping.
+            // Make the scroll owner follow the focused body control explicitly;
+            // the fixed footer never enters this handler.
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            window.requestAnimationFrame(() => {
+              target.scrollIntoView({ block: "nearest" });
+            });
+          }}
         >
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2" aria-hidden="true">
-              <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-meta font-semibold text-ink">momo</span>
-              <ArrowRight className="size-4 text-ink-muted" />
-              <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
-            </div>
-            <div className="flex flex-col gap-1">
-              <DialogTitle>{isGrant ? `${consent.plugin.name} 앱에 권한을 허용할까요?` : `${consent.plugin.name} 앱 권한을 회수할까요?`}</DialogTitle>
-              <DialogDescription>
-                {isGrant
-                  ? "선택한 권한의 도구가 내 사용자 정책에 추가됩니다."
-                  : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
-              </DialogDescription>
-            </div>
-            {isGrant && <span className="self-start"><StatusChip tone="accent">관리자가 승인함</StatusChip></span>}
-          </div>
-
-          <dl className="flex flex-col gap-2 border-y border-line py-3">
-            {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, momo 레지스트리가 확인함` : consent.plugin.publisherName} />}
-            {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
-            {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
-            {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
-            {consent.plugin.termsURL && <DetailLink label="이용약관" href={consent.plugin.termsURL} />}
-            {consent.plugin.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={consent.plugin.privacyPolicyURL} />}
-          </dl>
-
           <fieldset className="flex flex-col gap-2" aria-busy={pending || undefined}>
             <legend className="text-body font-semibold text-ink">
               {isGrant ? "허용할 권한" : "회수할 권한"}
@@ -886,10 +965,15 @@ function PluginScopeConsentDialog({
                 ? "권한마다 연결된 도구와 데이터 범위를 확인한 뒤 계속하세요."
                 : "회수하면 선택한 권한에 연결된 아래 도구를 더 이상 사용할 수 없습니다."}
             </p>
-            <p className="text-meta text-ink-muted" data-testid="plugin-scope-selection-count">
+            <p
+              className="text-meta text-ink-muted"
+              role="status"
+              aria-live="polite"
+              data-testid="plugin-scope-selection-count"
+            >
               {consent.scopes.length}개 중 {selectedScopes.length}개 선택
             </p>
-            {selectedScopes.length === 0 && (
+            {!hasSelection && (
               <p id="plugin-scope-selection-hint" className="text-meta text-ink-muted" role="status">
                 권한을 하나 이상 선택해야 계속할 수 있습니다.
               </p>
@@ -897,7 +981,7 @@ function PluginScopeConsentDialog({
             <ul className="flex flex-col overflow-hidden rounded-md border border-line">
               {consent.scopes.map((scope) => {
                 const scopeTools = toolsForPluginScope(consent.plugin.tools, scope);
-                const scopeTiers = toolRiskAndApprovalLabels(scopeTools);
+                const scopeBadges = scopeRiskAndApprovalBadges(scopeTools);
                 const checked = selected.has(scope);
                 return (
                   <li key={scope} className="border-b border-line p-3 last:border-b-0">
@@ -920,13 +1004,20 @@ function PluginScopeConsentDialog({
                       />
                       <span className="flex min-w-0 flex-col gap-1">
                         <span className="text-body font-medium text-ink">{scopeSentence(scope)}</span>
+                        <span className="break-all font-mono text-timestamp text-ink-muted">{scope}</span>
                         {scopeTools.map((tool) => (
                           <span key={tool.name} className="text-meta text-ink-muted">
                             {tool.description || tool.name}
                           </span>
                         ))}
-                        {scopeTiers.length > 0 && (
-                          <span className="text-meta text-ink-muted">{scopeTiers.join(", ")}</span>
+                        {scopeBadges.length > 0 && (
+                          <span className="flex flex-wrap gap-1">
+                            {scopeBadges.map((badge) => (
+                              <StatusChip key={badge.label} tone={badge.tone}>
+                                {badge.label}
+                              </StatusChip>
+                            ))}
+                          </span>
                         )}
                       </span>
                     </label>
@@ -955,38 +1046,46 @@ function PluginScopeConsentDialog({
             </div>
           )}
 
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-disabled={pending || undefined}
-              className={pending ? "opacity-50" : undefined}
-              data-testid="plugin-scope-cancel"
-              onClick={() => { if (!pending) onCancel(); }}
-            >
-              취소
-            </Button>
-            <Button
-              ref={confirmButtonRef}
-              size="sm"
-              aria-disabled={!canConfirm || undefined}
-              aria-busy={pending || undefined}
-              // Keyed to the hint's OWN condition rather than to canConfirm:
-              // canConfirm is also false while a confirmed change is in flight,
-              // and the hint is not rendered then, so reusing it would point
-              // this button at an id that is not in the document.
-              aria-describedby={selectedScopes.length === 0 ? "plugin-scope-selection-hint" : undefined}
-              className={!canConfirm ? "opacity-50" : undefined}
-              data-testid="plugin-scope-confirm"
-              onClick={() => {
-                if (!canConfirm) return;
-                onConfirm(selectedScopes);
-              }}
-            >
-              {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? "변경 중" : isGrant ? "선택한 권한 허용" : "선택한 권한 회수"}
-            </Button>
-          </div>
+          <dl className="flex flex-col gap-2 border-y border-line py-3">
+            {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, momo 레지스트리가 확인함` : consent.plugin.publisherName} />}
+            {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
+            {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
+            {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
+            {consent.plugin.termsURL && <DetailLink label="이용약관" href={consent.plugin.termsURL} />}
+            {consent.plugin.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={consent.plugin.privacyPolicyURL} />}
+          </dl>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-line p-4">
+          <Button
+            variant="outline"
+            size="sm"
+            aria-disabled={pending || undefined}
+            className={pending ? "opacity-50" : undefined}
+            data-testid="plugin-scope-cancel"
+            onClick={() => { if (!pending) onCancel(); }}
+          >
+            취소
+          </Button>
+          <Button
+            ref={confirmButtonRef}
+            size="sm"
+            aria-disabled={!pending && !hasSelection ? true : undefined}
+            aria-busy={pending || undefined}
+            // Selection absence is truly unavailable and may be dimmed. A
+            // request in flight remains full contrast because its spinner and
+            // "변경 중" label are the only progress signal.
+            aria-describedby={!hasSelection ? "plugin-scope-selection-hint" : undefined}
+            className={!hasSelection ? "opacity-50" : undefined}
+            data-testid="plugin-scope-confirm"
+            onClick={() => {
+              if (!canConfirm) return;
+              onConfirm(selectedScopes);
+            }}
+          >
+            {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
+            {pending ? "변경 중" : isGrant ? "선택한 권한 허용" : "선택한 권한 회수"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
