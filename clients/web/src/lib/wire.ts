@@ -34,6 +34,14 @@ export function arrayField<T = unknown>(source: unknown, key: string): T[] | nul
   return Array.isArray(value) ? value as T[] : null;
 }
 
+/** A collection of strings is usable only when every entry kept its wire type. */
+export function stringArrayField(source: unknown, key: string): string[] | null {
+  const values = arrayField(source, key);
+  return values !== null && values.every((value) => typeof value === "string")
+    ? values as string[]
+    : null;
+}
+
 /** A failed response shape is an unavailable response, not usable query data. */
 export class WireShapeError extends Error {
   constructor() {

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { arrayField, bool, num, record, responseRecord, str, WireShapeError } from "./wire";
+import {
+  arrayField,
+  bool,
+  num,
+  record,
+  responseRecord,
+  str,
+  stringArrayField,
+  WireShapeError,
+} from "./wire";
 
 describe("wire helpers", () => {
   it("treats null, arrays, and primitives as unavailable records", () => {
@@ -28,5 +37,13 @@ describe("wire helpers", () => {
     expect(arrayField({ diagnostics: ["server changed"] }, "diagnostics")).toEqual([
       "server changed",
     ]);
+  });
+
+  it("does not partially coerce a string collection", () => {
+    expect(stringArrayField({ allowedAgentModels: ["hermes-agent", "hermes-fast"] }, "allowedAgentModels"))
+      .toEqual(["hermes-agent", "hermes-fast"]);
+    expect(stringArrayField({ allowedAgentModels: ["hermes-agent", 2] }, "allowedAgentModels"))
+      .toBeNull();
+    expect(stringArrayField({ allowedAgentModels: null }, "allowedAgentModels")).toBeNull();
   });
 });

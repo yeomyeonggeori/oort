@@ -14,6 +14,7 @@ import {
   effortsForModel,
   hasUnattestedModels,
   ignoredEffortNotice,
+  ignoredModelNotice,
   inheritedEffortLabel,
   inheritedModelLabel,
   isOverride,
@@ -126,6 +127,17 @@ describe("유효값은 모델마다 다르다 (D2)", () => {
     ]);
   });
 
+  it("받은 agent별 허용집합과만 교집합을 만든다", () => {
+    expect(
+      modelOptions(
+        table,
+        "hermes-agent",
+        ["hermes-fast", "external-premium"],
+        ["hermes-agent", "hermes-fast", "workspace-only"]
+      )
+    ).toEqual(["hermes-agent", "hermes-fast", "workspace-only"]);
+  });
+
   it("증명된 값이 하나뿐인지 아닌지를 화면에 알려준다", () => {
     // 목록이 에이전트 자신의 모델뿐이면 할 말은 "목록을 주는 경로가 없다"이고,
     // 그 밖의 이름이 하나라도 섞이면 "허용 여부를 모른다"로 바뀐다.
@@ -144,6 +156,12 @@ describe("유효값은 모델마다 다르다 (D2)", () => {
       modelOptions(null, "hermes-agent", ["hermes-fast", "hermes-agent"])
     ).toEqual(["hermes-agent", "hermes-fast"]);
     expect(modelOptions(null, "")).toEqual([]);
+  });
+
+  it("허용집합을 못 받으면 목록을 지어내지 않고 기존 완화 동작을 유지한다", () => {
+    expect(
+      modelOptions(null, "hermes-agent", ["hermes-fast", "hermes-agent"], null)
+    ).toEqual(["hermes-agent", "hermes-fast"]);
   });
 
   it("로스터의 에이전트 모델은 중복 없이 등장 순서대로 모은다", () => {
@@ -287,6 +305,18 @@ describe("픽스처 3: 무효 클리어", () => {
     expect(inheritance.ignoredEffortPref).toBe("max");
     expect(ignoredEffortNotice("hermes-fast", "max")).toBe(
       "프로필에 저장된 추론 강도 최대는 hermes-fast에서 쓸 수 없어 적용되지 않습니다."
+    );
+  });
+
+  it("받은 허용집합 밖의 저장된 모델은 base model로 상속되지만 숨기지 않는다", () => {
+    const inheritance = resolveInheritance(table, "hermes-agent", {
+      modelPref: "external-premium",
+      effortPref: "max",
+    }, ["hermes-agent", "hermes-fast"]);
+    expect(inheritance.model).toEqual({ value: "hermes-agent", source: "agent" });
+    expect(inheritance.ignoredModelPref).toBe("external-premium");
+    expect(ignoredModelNotice("external-premium", "hermes-agent")).toBe(
+      "프로필에 저장된 모델 external-premium은 현재 워크스페이스에서 허용되지 않아 hermes-agent 모델로 적용됩니다."
     );
   });
 });
