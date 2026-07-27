@@ -78,7 +78,6 @@ export function PluginSection({ offline }: { offline: boolean }) {
   const detailRef = useRef<HTMLDivElement>(null);
   const actionErrorRef = useRef<HTMLDivElement>(null);
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
-  const pointerSelectionRef = useRef<string | null>(null);
 
   const catalogQuery = useQuery({
     queryKey: ["plugins", workspaceId.toLowerCase()],
@@ -226,15 +225,14 @@ export function PluginSection({ offline }: { offline: boolean }) {
                   <button
                     type="button"
                     disabled={mutation.isPending}
-                    onPointerDown={() => {
-                      pointerSelectionRef.current = plugin.pluginId;
-                    }}
                     onClick={() => {
+                      // 입력 방식으로 가르지 않는다. onClick은 키보드 Enter/Space에서도
+                      // 발화하고, 이 목록에는 로빙 화살표 선택이 없어 "탭하며 지나가다
+                      // 스크롤이 흔들린다"는 위험이 없다. 포인터로만 핸드오프하면
+                      // 키보드 사용자는 Enter를 눌러도 상세가 폴드 밖에 남는다(4R H-1).
+                      // 실제로 스크롤할지는 아래 가시성 판정이 rect로 결정한다.
                       setSelectedId(plugin.pluginId);
-                      setRevealDetailFor(
-                        pointerSelectionRef.current === plugin.pluginId ? plugin.pluginId : null
-                      );
-                      pointerSelectionRef.current = null;
+                      setRevealDetailFor(plugin.pluginId);
                     }}
                     aria-current={active ? "true" : undefined}
                     className={active
@@ -303,6 +301,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
         <ConfirmPluginAction
           action={confirming}
           pending={mutation.isPending}
+          opener={actionButtonRef.current}
           onCancel={() => setConfirming(null)}
           onConfirm={() => mutation.mutate(confirming)}
         />
@@ -606,9 +605,11 @@ function DetailLink({ label, href }: { label: string; href: string }) {
   return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink underline decoration-line-strong underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
 }
 
-function ConfirmPluginAction({ action, pending, onCancel, onConfirm }: {
+function ConfirmPluginAction({ action, pending, opener, onCancel, onConfirm }: {
   action: Extract<PluginAction, { kind: "uninstall" | "revokeGrant" }>;
   pending: boolean;
+  /** 이 확인을 연 버튼. activeElement 추정은 WebKit에서 <body>가 되므로 명시한다(4R H-2). */
+  opener: HTMLButtonElement | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -616,6 +617,7 @@ function ConfirmPluginAction({ action, pending, onCancel, onConfirm }: {
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !pending) onCancel(); }}>
       <DialogContent
+        opener={opener}
         // Escape is owned by this confirmation. Letting it reach SettingsRoute
         // would close the route while this dialog (or its pending write) remains.
         onEscapeKeyDown={(event) => event.stopPropagation()}

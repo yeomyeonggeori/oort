@@ -68,8 +68,15 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  */
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onCloseAutoFocus, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /** 닫힐 때 포커스를 돌려줄 엘리먼트. 생략하면 activeElement 추정으로 폴백한다. */
+    opener?: DialogFocusTarget | null;
+  }
+>(({ className, children, onCloseAutoFocus, opener, ...props }, ref) => {
+  // `document.activeElement` 추정은 Chromium에서만 맞다. WebKit은 마우스 클릭으로
+  // <button>에 포커스를 주지 않아 캡처값이 <body>가 되고, 닫힐 때 돌려줄 자리가
+  // 사라진다 — 데스크톱 셸이 WKWebView이므로 배포 대상의 절반이 그쪽이다.
+  // 호출부가 실제 엘리먼트를 알고 있으면 `opener`로 넘겨라. 추정은 폴백이다.
   const openerRef = React.useRef<HTMLElement | null>(null);
   if (openerRef.current === null && typeof document !== "undefined") {
     const active = document.activeElement;
@@ -88,10 +95,10 @@ export const DialogContent = React.forwardRef<
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event);
           if (event.defaultPrevented) return;
-          const opener = openerRef.current;
+          const target = opener ?? openerRef.current;
           // preventDefault also skips Radix's own handler, which would send the
           // caret to a trigger that does not exist here.
-          if (restoreDialogOpenerFocus(opener)) {
+          if (restoreDialogOpenerFocus(target)) {
             event.preventDefault();
           }
         }}
