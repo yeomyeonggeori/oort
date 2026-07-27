@@ -9,6 +9,33 @@ export type PluginAction =
 
 export type PluginRoleState = "checking" | "known" | "unknown";
 
+/**
+ * The marketplace CSS owns the responsive boundary. JavaScript reads this
+ * custom property from the rendered layout instead of carrying a second
+ * viewport breakpoint that can drift from the grid.
+ */
+export const pluginMarketplaceColumnProperty = "--plugin-marketplace-columns";
+
+/** A selected detail needs a viewport handoff only while CSS renders one column. */
+export function pluginMarketplaceNeedsDetailFocus(columnCount: string | null): boolean {
+  return columnCount?.trim() !== "2";
+}
+
+/**
+ * A write in progress is observable, not unavailable. Keeping the button
+ * enabled preserves the focused element through both success and failure;
+ * callers reject duplicate clicks while this state is true.
+ */
+export function pluginActionButtonState({
+  busy,
+  offline,
+}: {
+  busy: boolean;
+  offline: boolean;
+}): { disabled: boolean; ariaBusy: true | undefined } {
+  return { disabled: offline, ariaBusy: busy || undefined };
+}
+
 export function isWorkspaceAdmin(role: MembershipRole | undefined): boolean {
   return role === "owner" || role === "admin";
 }

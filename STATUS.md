@@ -4,8 +4,8 @@
 
 - 설정의 `앱` 섹션에 catalog·원본 manifest 상세·egress 도메인·tool risk/approval tier·설치/해제와 본인 단일 scope grant 회수를 복원했다. 관리자 판정은 roster의 내 role이 owner/admin으로 확인될 때만 열며, 다중 scope는 원문 표시만 하고 변경하지 않는다.
 - 웹 API는 `lib/wire.ts` helper로 plugin 6개 엔드포인트를 파싱하고 `null`·빈 객체·타입 전도는 해당 패널의 inline 오류로 내린다. typecheck·Vitest 861·build·design preflight 10/10 PASS, Playwright gate:wire/gate:shell은 이 worker sandbox의 Chromium Mach-port 권한 거부로 runtime-unverified다.
-- 2R design-review 반영: 실패 사유는 실행한 상세 패널의 액션 바로 아래에 한국어 상태별로 남기고, 워크스페이스 설치 상태와 내 권한 도구 위험도를 분리했다. roster 실패는 역할 미확인+재시도로, 파괴적 확인은 앱 이름+동사로 고정했다.
-- 넓은 뷰포트는 목록과 상세를 같은 행에 두고, 좁은 뷰포트에서 선택한 상세로 포커스를 이동한다. Vitest 867·typecheck·build·design preflight 10/10 PASS, Playwright 두 gate는 동일 Mach-port 제약으로 `runtime-unverified`다.
+- 3R design-review 반영: CSS가 렌더한 marketplace 열 수를 상세 scroll·focus가 직접 소비하고, action 버튼은 spinner+`aria-busy`로 남아 오류 배너가 시야에 들어온다. 설치된 앱의 역할 미확인도 재시도로 고지하며 다중 scope 안내는 삭제 action 위로 분리했다.
+- `npm run typecheck`·Vitest 869·`npm run build`·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 동일 Chromium Mach-port 권한 거부로 `runtime-unverified`다.
 
 ## MOMO-634 워크스페이스 허용 모델 REST + 웹 교집합 (#831, 2026-07-27)
 

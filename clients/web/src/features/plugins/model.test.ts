@@ -4,9 +4,11 @@ import {
   actionErrorForPlugin,
   administratorNames,
   callerPolicySummary,
+  pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
   pluginDetailErrorMessage,
+  pluginMarketplaceNeedsDetailFocus,
   pluginRoleState,
   workspaceInstallationLabel,
 } from "./model";
@@ -62,6 +64,23 @@ describe("plugin marketplace copy", () => {
       .toBe("unknown");
     expect(pluginRoleState({ isPending: false, isError: false, role: "owner" }))
       .toBe("known");
+  });
+
+  it("uses the CSS-rendered column state for the narrow-detail handoff", () => {
+    expect(pluginMarketplaceNeedsDetailFocus("1")).toBe(true);
+    expect(pluginMarketplaceNeedsDetailFocus("2")).toBe(false);
+    expect(pluginMarketplaceNeedsDetailFocus(null)).toBe(true);
+  });
+
+  it("keeps a busy plugin action focusable while blocking only offline actions", () => {
+    expect(pluginActionButtonState({ busy: true, offline: false })).toEqual({
+      disabled: false,
+      ariaBusy: true,
+    });
+    expect(pluginActionButtonState({ busy: false, offline: true })).toEqual({
+      disabled: true,
+      ariaBusy: undefined,
+    });
   });
 
   it("identifies administrators by handle and keeps an action error with its app", () => {

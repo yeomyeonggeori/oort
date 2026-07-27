@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import {
@@ -31,8 +32,11 @@ import {
   callerPolicySummary,
   isWorkspaceAdmin,
   nonAdminInstallGuidance,
+  pluginActionButtonState,
   pluginActionConfirmation,
   pluginDetailErrorMessage,
+  pluginMarketplaceColumnProperty,
+  pluginMarketplaceNeedsDetailFocus,
   pluginRoleState,
   riskLabel,
   scopeSentence,
@@ -71,7 +75,9 @@ export function PluginSection({ offline }: { offline: boolean }) {
     kind: "uninstall" | "revokeGrant";
   }> | null>(null);
   const [focusDetailFor, setFocusDetailFor] = useState<string | null>(null);
+  const marketplaceLayoutRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const actionErrorRef = useRef<HTMLDivElement>(null);
 
   const catalogQuery = useQuery({
     queryKey: ["plugins", workspaceId.toLowerCase()],
@@ -128,14 +134,32 @@ export function PluginSection({ offline }: { offline: boolean }) {
     onError: () => setConfirming(null),
   });
 
+  const actionError = mutation.isError
+    ? actionErrorForPlugin(mutation.variables, selectedId ?? "", mutation.error)
+    : null;
+
   useEffect(() => {
     if (focusDetailFor !== selectedId || !detailRef.current || detailsQuery.isPending) return;
-    if (window.matchMedia("(width < 1024px)").matches) {
+    const renderedColumns = marketplaceLayoutRef.current
+      ? window.getComputedStyle(marketplaceLayoutRef.current)
+        .getPropertyValue(pluginMarketplaceColumnProperty)
+      : null;
+    if (pluginMarketplaceNeedsDetailFocus(renderedColumns)) {
       detailRef.current.scrollIntoView({ block: "start" });
       detailRef.current.focus({ preventScroll: true });
     }
     setFocusDetailFor(null);
   }, [detailsQuery.isPending, focusDetailFor, selectedId]);
+
+  // On a one-column panel an inline mutation error may land just below the
+  // trigger that caused it. The message must be in view, not merely mounted.
+  useEffect(() => {
+    if (!actionError) return;
+    const frame = window.requestAnimationFrame(() => {
+      actionErrorRef.current?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [actionError]);
 
   const lines = [
     "워크스페이스에 설치할 앱과 내 사용 권한을 관리합니다.",
@@ -191,7 +215,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
         />
       )}
       {catalogQuery.data && visible.length > 0 && (
-        <div className="plugin-marketplace-layout">
+        <div ref={marketplaceLayoutRef} className="plugin-marketplace-layout">
           <ul className="flex flex-col overflow-hidden rounded-md border border-line" data-testid="plugin-list">
             {visible.map((plugin) => {
               const policy = catalogQuery.data?.toolsByPlugin.get(plugin.pluginId);
@@ -250,9 +274,9 @@ export function PluginSection({ offline }: { offline: boolean }) {
                 offline={offline}
                 hasMyAccess={(catalogQuery.data.toolsByPlugin.get(selected.pluginId)?.length ?? 0) > 0}
                 busy={mutation.isPending}
-                actionError={mutation.isError
-                  ? actionErrorForPlugin(mutation.variables, selected.pluginId, mutation.error)
-                  : null}
+                pendingAction={mutation.isPending ? mutation.variables : undefined}
+                actionError={actionError}
+                actionErrorRef={actionErrorRef}
                 onDismissActionError={() => mutation.reset()}
                 onAction={(action) => {
                   if (action.kind === "uninstall" || action.kind === "revokeGrant") setConfirming(action);
@@ -276,7 +300,8 @@ export function PluginSection({ offline }: { offline: boolean }) {
 
 function PluginDetailPanel({
   plugin, detail, isPending, isError, error, onRetry, canManage, roleState,
-  managerNames, onRetryDirectory, offline, hasMyAccess, busy, actionError,
+  managerNames, onRetryDirectory, offline, hasMyAccess, busy, pendingAction, actionError,
+  actionErrorRef,
   onDismissActionError, onAction,
 }: {
   plugin: PluginCatalogItem;
@@ -292,7 +317,9 @@ function PluginDetailPanel({
   offline: boolean;
   hasMyAccess: boolean;
   busy: boolean;
+  pendingAction: PluginAction | undefined;
   actionError: string | null;
+  actionErrorRef: RefObject<HTMLDivElement>;
   onDismissActionError: () => void;
   onAction: (action: PluginAction) => void;
 }) {
@@ -332,15 +359,18 @@ function PluginDetailPanel({
             onRetryDirectory={onRetryDirectory}
             offline={offline}
             busy={busy}
+            pendingAction={pendingAction}
             onAction={onAction}
           />
           {actionError && (
-            <InlineBanner
-              message={actionError}
-              actionLabel="오류 닫기"
-              onAction={onDismissActionError}
-              testId="plugin-action-error"
-            />
+            <div ref={actionErrorRef}>
+              <InlineBanner
+                message={actionError}
+                actionLabel="오류 닫기"
+                onAction={onDismissActionError}
+                testId="plugin-action-error"
+              />
+            </div>
           )}
         </div>
       </div>
@@ -395,7 +425,7 @@ function PluginMarketplaceSkeleton() {
 
 function PluginActions({
   plugin, singleScope, scopeCount, hasMyAccess, canManage, roleState, managerNames,
-  onRetryDirectory, offline, busy, onAction,
+  onRetryDirectory, offline, busy, pendingAction, onAction,
 }: {
   plugin: PluginCatalogItem;
   singleScope: string | null;
@@ -407,54 +437,131 @@ function PluginActions({
   onRetryDirectory: () => void;
   offline: boolean;
   busy: boolean;
+  pendingAction: PluginAction | undefined;
   onAction: (action: PluginAction) => void;
 }) {
-  if (busy) return <p className="text-meta text-ink-muted" role="status">변경 중</p>;
-  if (!plugin.installed || !plugin.enabled) {
-    if (roleState === "checking") return <p className="text-meta text-ink-muted" role="status">관리자 권한을 확인하는 중입니다.</p>;
-    if (roleState === "unknown") {
-      return (
-        <InlineBanner
-          message="내 역할을 확인하지 못했습니다. 설치 권한을 판단할 수 없습니다."
-          actionLabel="역할 다시 확인"
-          onAction={onRetryDirectory}
-          testId="plugin-role-error"
-        />
-      );
-    }
-    if (!canManage) return <p className="max-w-pane text-meta text-ink-muted">{nonAdminInstallGuidance(managerNames)}</p>;
-    return <Button size="sm" disabled={offline} onClick={() => onAction({
-      kind: "install", pluginId: plugin.pluginId, pluginName: plugin.name,
-    })}>
-      {plugin.installed ? "다시 활성화" : "워크스페이스에 설치"}
-    </Button>;
+  const available = plugin.installed && plugin.enabled;
+  const managementAction: PluginAction = available
+    ? { kind: "uninstall", pluginId: plugin.pluginId, pluginName: plugin.name }
+    : { kind: "install", pluginId: plugin.pluginId, pluginName: plugin.name };
+  const personalAction: PluginAction | null = !available || !singleScope ? null : hasMyAccess
+    ? { kind: "revokeGrant", pluginId: plugin.pluginId, pluginName: plugin.name, scope: singleScope }
+    : { kind: "grant", pluginId: plugin.pluginId, pluginName: plugin.name, scope: singleScope };
+  const isPending = (action: PluginAction) => busy && pendingAction?.kind === action.kind
+    && pendingAction.pluginId === action.pluginId;
+
+  const roleUnknownNotice = roleState === "unknown" && (
+    <PluginRoleUnknownNotice onRetry={onRetryDirectory} />
+  );
+
+  if (!available) {
+    return (
+      <div className="flex flex-col gap-2" aria-busy={busy || undefined}>
+        {roleState === "checking" && <p className="text-meta text-ink-muted" role="status">관리자 권한을 확인하는 중입니다.</p>}
+        {roleUnknownNotice}
+        {roleState === "known" && !canManage && (
+          <p className="max-w-pane text-meta text-ink-muted">{nonAdminInstallGuidance(managerNames)}</p>
+        )}
+        {canManage && (
+          <div key="plugin-actions" className="flex flex-wrap items-center gap-2">
+            <PluginActionButton
+              key="management"
+              action={managementAction}
+              label={plugin.installed ? "다시 활성화" : "워크스페이스에 설치"}
+              busy={isPending(managementAction)}
+              offline={offline}
+              onAction={onAction}
+            />
+          </div>
+        )}
+      </div>
+    );
   }
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {singleScope ? (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={offline}
-          onClick={() => onAction(hasMyAccess
-            ? { kind: "revokeGrant", pluginId: plugin.pluginId, pluginName: plugin.name, scope: singleScope }
-            : { kind: "grant", pluginId: plugin.pluginId, pluginName: plugin.name, scope: singleScope })}
-        >
-          {hasMyAccess ? "내 권한 회수" : "내 사용 허용"}
-        </Button>
-      ) : (
+    <div className="flex flex-col gap-2" aria-busy={busy || undefined}>
+      {roleUnknownNotice}
+      {!singleScope && (
         <p className="max-w-pane text-meta text-ink-muted">
           {scopeCount > 1
             ? "여러 권한은 플러그인 연결 동의 화면이 추가된 뒤에 선택합니다. 현재 이 화면에서는 변경할 수 없습니다."
             : "허용할 권한이 없습니다."}
         </p>
       )}
-      {canManage && <Button variant="destructive" size="sm" disabled={offline} onClick={() => onAction({
-        kind: "uninstall", pluginId: plugin.pluginId, pluginName: plugin.name,
-      })}>
-        설치 해제
-      </Button>}
+      <div key="plugin-actions" className="flex flex-wrap items-center gap-2">
+        {personalAction && (
+          <PluginActionButton
+            key="personal"
+            action={personalAction}
+            label={hasMyAccess ? "내 권한 회수" : "내 사용 허용"}
+            variant="outline"
+            busy={isPending(personalAction)}
+            offline={offline}
+            onAction={onAction}
+          />
+        )}
+        {canManage && (
+          <PluginActionButton
+            key="management"
+            action={managementAction}
+            label="설치 해제"
+            variant="destructive"
+            busy={isPending(managementAction)}
+            offline={offline}
+            onAction={onAction}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+function PluginRoleUnknownNotice({ onRetry }: { onRetry: () => void }) {
+  return (
+    <InlineBanner
+      message="내 역할을 확인하지 못했습니다. 설치 권한을 판단할 수 없습니다."
+      actionLabel="역할 다시 확인"
+      onAction={onRetry}
+      testId="plugin-role-error"
+    />
+  );
+}
+
+/**
+ * The management button keeps its element identity while an install becomes an
+ * uninstall (and back). Busy is therefore a visible in-button state, not an
+ * unmount or `disabled` transition that would throw keyboard focus to body.
+ */
+function PluginActionButton({
+  action,
+  label,
+  variant = "default",
+  busy,
+  offline,
+  onAction,
+}: {
+  action: PluginAction;
+  label: string;
+  variant?: "default" | "outline" | "destructive";
+  busy: boolean;
+  offline: boolean;
+  onAction: (action: PluginAction) => void;
+}) {
+  const state = pluginActionButtonState({ busy, offline });
+  return (
+    <Button
+      variant={variant}
+      size="sm"
+      disabled={state.disabled}
+      aria-busy={state.ariaBusy}
+      onClick={() => {
+        if (busy || offline) return;
+        onAction(action);
+      }}
+    >
+      {busy && <Loader2 aria-hidden="true" className="spinner-busy" />}
+      {busy ? "변경 중" : label}
+    </Button>
   );
 }
 
@@ -495,7 +602,13 @@ function ConfirmPluginAction({ action, pending, onCancel, onConfirm }: {
           <DialogDescription>{copy?.description}</DialogDescription>
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" disabled={pending} onClick={onCancel}>취소</Button>
-            <Button variant="destructive" size="sm" disabled={pending} onClick={onConfirm}>
+            <Button
+              variant="destructive"
+              size="sm"
+              aria-busy={pending || undefined}
+              onClick={() => { if (!pending) onConfirm(); }}
+            >
+              {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
               {pending ? "변경 중" : copy?.confirmLabel}
             </Button>
           </div>
