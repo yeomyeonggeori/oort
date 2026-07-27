@@ -291,6 +291,44 @@
   max-block-size: calc(100dvh - var(--spacing-8) * 2);
 }
 
+/* Marketplace is a decision surface: on a wide viewport its chosen app must
+ * remain beside the catalog, not below five rows and outside the viewport.
+ * The 2:3 split is named here rather than written as an arbitrary component
+ * value, and the narrow single column keeps the focused detail reachable. */
+@utility plugin-marketplace-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+
+  @media (width >= 1200px) {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    align-items: start;
+  }
+}
+
+/* At the 900px review viewport, the primary search field keeps the remaining
+ * width and the secondary filter stays at its named 192px measure. */
+@utility plugin-marketplace-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--spacing-3);
+
+  @media (width >= 900px) {
+    grid-template-columns: minmax(0, 1fr) var(--spacing-pane-sm);
+    align-items: end;
+  }
+}
+
+/* `surface-hover` is darker than the selected amber surface in dark mode.
+ * An unselected marketplace row therefore lifts to the raised surface instead;
+ * selection remains the strongest visible row state. */
+@utility plugin-marketplace-row {
+  &:not([aria-current="true"]):hover {
+    background-color: var(--surface-raised);
+  }
+}
+
 /* Determinate download progress (설정 > 업데이트, MOMO-606). A native
  * <progress> rather than a div with a width: CSP is style-src 'self', so the
  * only way to draw a bar whose length is data is to let the platform control do
