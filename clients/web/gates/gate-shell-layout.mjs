@@ -67,6 +67,66 @@ const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
 const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const HERMES = "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90";
+const NOTION_PLUGIN_ID = "com.momo.plugins.notion";
+
+// The marketplace has to tolerate a manifest with several independently
+// selectable scopes. This fixture keeps the registry response shape and the
+// gate's existing mock server, but makes its four consent rows tall enough to
+// exercise the short-window scroll contract.
+const NOTION_SCOPE_FIXTURE = [
+  ["notion:read", "notion.search", "Search pages available to the delegated user", "read", "read_only"],
+  ["notion:comment", "notion.comment", "Add a comment to a page shared with the delegated user", "write", "workspace_write"],
+  ["notion:write", "notion.create_page", "Create or update a page shared with the delegated user", "write", "network_write"],
+  ["notion:admin", "notion.manage_connections", "Manage delegated connection settings for this workspace", "admin", "workspace_write"],
+];
+
+const NOTION_MANIFEST = {
+  schemaVersion: "momo.plugin.v1",
+  plugin: {
+    id: NOTION_PLUGIN_ID,
+    name: "Notion",
+    version: "1.0.0",
+    description: "Official Notion hosted MCP integration",
+    publisher: { id: "makenotion", name: "Notion", verified: true },
+    license: { spdx: "MIT", kind: "open_source" },
+    provenance: {
+      sourceURL: "https://github.com/makenotion/notion-mcp-server",
+      releaseRef: "hosted",
+      verified: true,
+    },
+  },
+  mcp: {
+    protocolVersion: "2025-06-18",
+    transport: "streamable_http",
+    url: "https://mcp.notion.com/mcp",
+    server: { name: "makenotion/notion-mcp-server", version: "hosted" },
+    tools: NOTION_SCOPE_FIXTURE.map(([scope, name, description, risk]) => ({
+      name,
+      description,
+      scopes: [scope],
+      risk,
+    })),
+  },
+  momo: {
+    approvalTier: Object.fromEntries(NOTION_SCOPE_FIXTURE.map(([, name,,, tier]) => [name, tier])),
+    risk: "high",
+    egressDomains: ["mcp.notion.com"],
+    recommendedFor: ["knowledge-management", "documentation"],
+  },
+};
+
+const NOTION_CATALOG_ITEM = {
+  pluginId: NOTION_PLUGIN_ID,
+  name: NOTION_MANIFEST.plugin.name,
+  version: NOTION_MANIFEST.plugin.version,
+  description: NOTION_MANIFEST.plugin.description,
+  official: true,
+  recommended: false,
+  egressDomains: NOTION_MANIFEST.momo.egressDomains,
+  recommendedFor: NOTION_MANIFEST.momo.recommendedFor,
+  installed: true,
+  enabled: true,
+};
 
 const SESSION = {
   accessToken: "gate-only-not-a-credential",
@@ -227,9 +287,9 @@ const BODIES = [
   [HERMES, "확인했습니다. 여명 팔레트 토큰만 쓰고 있고 인디고 잔재는 없습니다."],
 ];
 
-function json(route, body) {
+function json(route, body, status = 200) {
   return route.fulfill({
-    status: 200,
+    status,
     contentType: "application/json",
     body: JSON.stringify(body),
   });
@@ -354,6 +414,50 @@ async function installMocks(context) {
       },
     })
   );
+
+  // The first confirmed batch fails scope-by-scope. The next one succeeds so
+  // the same shell run asserts both full-failure dialog retention and the
+  // full-grant focus handoff to the newly-mounted revoke control.
+  const activeNotionScopes = new Set();
+  let failedGrantResponses = 0;
+  const catalog = () => ({
+    plugins: [NOTION_CATALOG_ITEM],
+    toolPolicy: {
+      plugins: activeNotionScopes.size === 0 ? [] : [{
+        pluginId: NOTION_PLUGIN_ID,
+        mcp: { url: NOTION_MANIFEST.mcp.url, transport: NOTION_MANIFEST.mcp.transport },
+        egressDomains: NOTION_MANIFEST.momo.egressDomains,
+        tools: NOTION_MANIFEST.mcp.tools.filter((tool) => activeNotionScopes.has(tool.scopes[0]))
+          .map((tool) => ({
+            name: tool.name,
+            risk: tool.risk,
+            approvalTier: NOTION_MANIFEST.momo.approvalTier[tool.name],
+          })),
+      }],
+    },
+  });
+  const detail = () => ({
+    plugin: { ...NOTION_CATALOG_ITEM, manifest: NOTION_MANIFEST },
+  });
+  await context.route("**/v1/workspaces/*/plugins", (route) => json(route, catalog()));
+  await context.route(`**/v1/workspaces/*/plugins/${NOTION_PLUGIN_ID}`, (route) => json(route, detail()));
+  await context.route(`**/v1/workspaces/*/plugins/${NOTION_PLUGIN_ID}/grants`, (route) => {
+    if (route.request().method() !== "POST") return json(route, { status: "revoked" });
+    const scope = JSON.parse(route.request().postData() ?? "{}").scope;
+    if (failedGrantResponses < NOTION_SCOPE_FIXTURE.length) {
+      failedGrantResponses += 1;
+      return json(route, { error: "gate-only policy failure" }, 403);
+    }
+    activeNotionScopes.add(scope);
+    return json(route, {
+      pluginId: NOTION_PLUGIN_ID,
+      memberId: ME,
+      scope,
+      status: "active",
+      enabled: true,
+      capabilities: [],
+    }, 201);
+  });
 }
 
 /** Resting y of the sidebar nav in a shell that has not been pushed anywhere. */
@@ -420,6 +524,80 @@ async function go(page, hash) {
   await page.waitForTimeout(600);
 }
 
+/**
+ * The consent panel owns a scrollbox, not the document or the fixed panel.
+ * Red proof: remove only `overflow-y-auto` from PluginScopeConsentDialog's
+ * `plugin-scope-consent-body` class, rebuild, then run this gate. At 900x600
+ * the footer rect falls outside `dialog-panel` and this check fails.
+ */
+async function assertPluginScopeConsent(page, size) {
+  await go(page, "/settings?section=plugins");
+  const grant = page.getByTestId("plugin-scope-grant");
+  await grant.waitFor({ state: "visible" });
+  await grant.click();
+
+  const dialog = page.getByTestId("plugin-scope-consent");
+  const confirm = page.getByTestId("plugin-scope-confirm");
+  await dialog.waitFor({ state: "visible" });
+  await confirm.scrollIntoViewIfNeeded();
+  const layout = await page.evaluate(`(() => {
+    const panel = document.querySelector('[data-testid="plugin-scope-consent"]');
+    const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
+    const buttons = [
+      document.querySelector('[data-testid="plugin-scope-cancel"]'),
+      document.querySelector('[data-testid="plugin-scope-confirm"]'),
+    ];
+    if (!panel || !scrollbox || buttons.some((button) => !button)) return { missing: true };
+    const panelRect = panel.getBoundingClientRect();
+    const buttonRects = buttons.map((button) => button.getBoundingClientRect());
+    const inViewport = (rect) => rect.top >= 0 && rect.bottom <= window.innerHeight + 1;
+    const inPanel = (rect) => rect.top >= panelRect.top && rect.bottom <= panelRect.bottom;
+    return {
+      panel: { top: Math.round(panelRect.top), bottom: Math.round(panelRect.bottom) },
+      buttonRects: buttonRects.map((rect) => ({ top: Math.round(rect.top), bottom: Math.round(rect.bottom) })),
+      scrollboxOverflowY: getComputedStyle(scrollbox).overflowY,
+      scrollboxScrolls: scrollbox.scrollHeight > scrollbox.clientHeight,
+      buttonsInViewport: buttonRects.every(inViewport),
+      buttonsInPanel: buttonRects.every(inPanel),
+    };
+  })()`);
+  check(
+    `${size.name} 다중-scope 동의 확인·취소 버튼이 패널과 창 안에 있다`,
+    layout.missing !== true &&
+      layout.scrollboxOverflowY === "auto" &&
+      layout.scrollboxScrolls === true &&
+      layout.buttonsInViewport === true &&
+      layout.buttonsInPanel === true,
+    JSON.stringify(layout)
+  );
+
+  await confirm.click();
+  const consentError = page.getByTestId("plugin-scope-consent-error");
+  await consentError.waitFor({ state: "visible" });
+  const failure = await page.evaluate(`(() => ({
+    dialogOpen: Boolean(document.querySelector('[data-testid="plugin-scope-consent"]')),
+    error: document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent,
+  }))()`);
+  check(
+    `${size.name} 전량 scope 실패는 선택을 보존하고 403 원인을 말한다`,
+    failure.dialogOpen === true && failure.error?.includes("관리자에게 정책과 권한을 확인하세요."),
+    JSON.stringify(failure)
+  );
+  await consentError.getByRole("button", { name: "오류 닫기" }).click();
+  await page.waitForFunction(
+    'document.activeElement === document.querySelector(\'[data-testid="plugin-scope-confirm"]\')'
+  );
+
+  await confirm.click();
+  await dialog.waitFor({ state: "hidden" });
+  const revoke = page.getByTestId("plugin-scope-revoke");
+  await revoke.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    'document.activeElement === document.querySelector(\'[data-testid="plugin-scope-revoke"]\')'
+  );
+  check(`${size.name} 전량 허용 뒤 포커스가 회수 컨트롤로 간다`, true);
+}
+
 async function measureSize(browser, size) {
   const context = await browser.newContext({
     viewport: { width: size.width, height: size.height },
@@ -458,6 +636,8 @@ async function measureSize(browser, size) {
     await go(page, hash);
     await assertShellHeld(page, `${size.name} ${label}`, `${size.name}-${shot}`);
   }
+
+  if (size.name === "900x600") await assertPluginScopeConsent(page, size);
 
   // Clipping without scrolling would be the worse bug: the settings body pane
   // must still reach its last control, and doing so must not move the shell.

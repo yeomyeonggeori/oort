@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
+import driveManifest from "../../../../../server/Fixtures/plugin-manifests/drive.json";
+import githubManifest from "../../../../../server/Fixtures/plugin-manifests/github.json";
+import linearManifest from "../../../../../server/Fixtures/plugin-manifests/linear.json";
+import notionManifest from "../../../../../server/Fixtures/plugin-manifests/notion.json";
 import {
   actionErrorForPlugin,
   activePluginScopes,
   administratorNames,
   callerPolicySummary,
   focusPluginActionAfterErrorDismissal,
+  focusPluginScopeChangeFallback,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
@@ -14,7 +19,10 @@ import {
   pluginMarketplaceNeedsDetailFocus,
   type PluginActionFocusTarget,
   pluginRoleState,
+  pluginScopeChangeFallbackKind,
+  pluginScopeConsentCompletion,
   pluginScopeChangeMessage,
+  scopeSentence,
   settlePluginScopeChanges,
   workspaceInstallationLabel,
 } from "./model";
@@ -97,6 +105,14 @@ describe("plugin marketplace copy", () => {
     expect(focusPluginActionAfterErrorDismissal(disconnected)).toBe(false);
   });
 
+  it("returns a completed grant to its still-present revoke control", () => {
+    const focus = vi.fn();
+    expect(pluginScopeChangeFallbackKind("grant")).toBe("revoke");
+    expect(pluginScopeChangeFallbackKind("revoke")).toBe("grant");
+    expect(focusPluginScopeChangeFallback({ isConnected: true, focus })).toBe(true);
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
   it("identifies administrators by handle and keeps an action error with its app", () => {
     expect(administratorNames([{
       displayName: "김인턴", handle: "intern-kim", role: "admin", status: "active",
@@ -134,6 +150,22 @@ describe("plugin marketplace copy", () => {
     }])).toEqual(["github:read"]);
   });
 
+  it("gives every distinct seeded scope a distinct sentence without dropping unknown actions", () => {
+    const scopes = [...new Set([
+      githubManifest,
+      notionManifest,
+      linearManifest,
+      driveManifest,
+    ].flatMap((manifest) => manifest.mcp.tools.flatMap((tool) => tool.scopes)))];
+    const sentences = scopes.map(scopeSentence);
+    expect(new Set(sentences).size).toBe(scopes.length);
+    expect(scopeSentence("github:read")).toBe("github 읽기 권한");
+    expect(scopeSentence("github:write")).toBe("github 쓰기 권한");
+    expect(scopeSentence("notion:comment")).toContain("comment");
+    expect(scopeSentence("notion:admin")).toContain("admin");
+    expect(scopeSentence("notion:comment")).not.toBe(scopeSentence("notion:admin"));
+  });
+
   it("keeps partial scope failures separate from completed server responses", async () => {
     const calls: string[] = [];
     const outcomes = await settlePluginScopeChanges(
@@ -150,6 +182,17 @@ describe("plugin marketplace copy", () => {
       ["github:write", true],
     ]);
     expect(pluginScopeChangeMessage("grant", outcomes))
-      .toContain("2개 권한을 허용했습니다. 1개는 변경하지 못했습니다");
+      .toContain("2개 권한을 허용했습니다: github 읽기 권한, github 쓰기 권한. 1개는 변경하지 못했습니다");
+  });
+
+  it("keeps a full scope failure in the dialog with its first actionable error", () => {
+    const completion = pluginScopeConsentCompletion([
+      { scope: "notion:comment", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:admin", succeeded: false, error: new ApiError(409, "not installed") },
+    ]);
+    expect(completion).toEqual({
+      dismissDialog: false,
+      error: "이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요.",
+    });
   });
 });

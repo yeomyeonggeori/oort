@@ -47,6 +47,22 @@ export function focusPluginActionAfterErrorDismissal(
   return true;
 }
 
+/** A completed scope change replaces its own action with the complementary one. */
+export function pluginScopeChangeFallbackKind(
+  kind: PluginScopeChangeKind
+): PluginScopeChangeKind {
+  return kind === "grant" ? "revoke" : "grant";
+}
+
+/** Keeps focus in the detail controls when a completed scope change unmounts its opener. */
+export function focusPluginScopeChangeFallback(
+  actionButton: PluginActionFocusTarget | null
+): boolean {
+  if (!actionButton?.isConnected) return false;
+  actionButton.focus();
+  return true;
+}
+
 /**
  * A write in progress is observable, not unavailable. Keeping the button
  * enabled preserves the focused element through both success and failure;
@@ -100,11 +116,15 @@ export function approvalLabel(tier: string | undefined): string | null {
 /** Swift marketplace's `github:read` → `github 읽기 권한` rule, unchanged. */
 export function scopeSentence(scope: string): string {
   const [resource, action] = scope.split(":", 2);
-  if (!resource || !action) return "사용 권한 1개";
+  if (!resource || !action) return `사용 권한 (${scope})`;
   const name = resource.replaceAll("_", " ");
   if (action === "read") return `${name} 읽기 권한`;
   if (action === "write") return `${name} 쓰기 권한`;
-  return `${name} 사용 권한`;
+  // The manifest may add an action before this surface learns a Korean label.
+  // Keep the raw scope with the action: display-normalization alone could make
+  // two future resource/action pairs look alike, but the raw manifest value is
+  // unique and gives the operator an exact name to report to an administrator.
+  return `${name} ${action.replaceAll("_", " ")} 권한 (${scope})`;
 }
 
 /** Manifest order is product order: it is the order the publisher declared. */
@@ -185,6 +205,31 @@ export async function settlePluginScopeChanges(
   return outcomes;
 }
 
+export type PluginScopeConsentCompletion =
+  | { dismissDialog: true }
+  | { dismissDialog: false; error: string };
+
+/**
+ * A scope POST settles independently, so a transport success can still contain
+ * only failures. Keep that selection in the dialog when every request failed:
+ * retrying the same checked scopes is the next useful action. The first failed
+ * scope is the representative error because requests run in manifest order;
+ * it is deterministic and reports the earliest failed requested change rather
+ * than hiding all actionable HTTP/network guidance behind a generic receipt.
+ */
+export function pluginScopeConsentCompletion(
+  outcomes: readonly PluginScopeChangeOutcome[]
+): PluginScopeConsentCompletion {
+  const failed = outcomes.filter((outcome) => !outcome.succeeded);
+  if (outcomes.length > 0 && failed.length === outcomes.length) {
+    return {
+      dismissDialog: false,
+      error: pluginActionErrorMessage(failed[0].error),
+    };
+  }
+  return { dismissDialog: true };
+}
+
 export function pluginScopeChangeMessage(
   kind: PluginScopeChangeKind,
   outcomes: readonly PluginScopeChangeOutcome[]
@@ -192,11 +237,14 @@ export function pluginScopeChangeMessage(
   const completed = outcomes.filter((outcome) => outcome.succeeded);
   const failed = outcomes.filter((outcome) => !outcome.succeeded);
   const verb = kind === "grant" ? "허용" : "회수";
-  if (failed.length === 0) return `선택한 ${completed.length}개 권한을 ${verb}했습니다.`;
+  const completedNames = completed.map((outcome) => scopeSentence(outcome.scope)).join(", ");
+  if (failed.length === 0) {
+    return `선택한 ${completed.length}개 권한을 ${verb}했습니다: ${completedNames}`;
+  }
   if (completed.length === 0) {
     return `선택한 권한을 ${verb}하지 못했습니다. 현재 권한을 다시 확인하세요.`;
   }
-  return `${completed.length}개 권한을 ${verb}했습니다. ${failed.length}개는 변경하지 못했습니다: ${failed.map((outcome) => scopeSentence(outcome.scope)).join(", ")}`;
+  return `${completed.length}개 권한을 ${verb}했습니다: ${completedNames}. ${failed.length}개는 변경하지 못했습니다: ${failed.map((outcome) => scopeSentence(outcome.scope)).join(", ")}`;
 }
 
 export function pluginScopeChangeTone(

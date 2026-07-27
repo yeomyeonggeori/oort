@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { type MutableRefObject, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -35,6 +35,7 @@ import {
   callerPolicySummary,
   declaredPluginScopes,
   focusPluginActionAfterErrorDismissal,
+  focusPluginScopeChangeFallback,
   isWorkspaceAdmin,
   nonAdminInstallGuidance,
   pluginActionButtonState,
@@ -43,6 +44,8 @@ import {
   pluginDetailErrorMessage,
   pluginMarketplaceNeedsDetailFocus,
   pluginRoleState,
+  pluginScopeChangeFallbackKind,
+  pluginScopeConsentCompletion,
   pluginScopeChangeMessage,
   pluginScopeChangeTone,
   remainingPluginScopes,
@@ -95,11 +98,15 @@ export function PluginSection({ offline }: { offline: boolean }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Extract<PluginAction, { kind: "uninstall" }> | null>(null);
   const [consenting, setConsenting] = useState<PluginScopeConsent | null>(null);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [scopeChange, setScopeChange] = useState<PluginScopeChangeReceipt | null>(null);
+  const [scopeFocusAfterChange, setScopeFocusAfterChange] = useState<PluginScopeChangeKind | null>(null);
   const [revealDetailFor, setRevealDetailFor] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const actionErrorRef = useRef<HTMLDivElement>(null);
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const grantScopeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const revokeScopeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const catalogQuery = useQuery({
     queryKey: ["plugins", workspaceId.toLowerCase()],
@@ -155,12 +162,19 @@ export function PluginSection({ offline }: { offline: boolean }) {
     onSuccess: async (data, action) => {
       setConfirming(null);
       if (action.kind === "grantScopes" || action.kind === "revokeScopes") {
-        setConsenting(null);
-        setScopeChange({
-          pluginId: action.pluginId,
-          kind: action.kind === "grantScopes" ? "grant" : "revoke",
-          outcomes: data as PluginScopeChangeOutcome[],
-        });
+        const kind = action.kind === "grantScopes" ? "grant" : "revoke";
+        const outcomes = data as PluginScopeChangeOutcome[];
+        const completion = pluginScopeConsentCompletion(outcomes);
+        if (completion.dismissDialog) {
+          setConsenting(null);
+          setConsentError(null);
+          setScopeChange({ pluginId: action.pluginId, kind, outcomes });
+          if (outcomes.every((outcome) => outcome.succeeded)) {
+            setScopeFocusAfterChange(kind);
+          }
+        } else {
+          setConsentError(completion.error);
+        }
       }
       await client.invalidateQueries({ queryKey: ["plugins", workspaceId.toLowerCase()] });
     },
@@ -196,6 +210,21 @@ export function PluginSection({ offline }: { offline: boolean }) {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [actionError]);
+
+  useEffect(() => {
+    if (!scopeFocusAfterChange) return;
+    // A full grant removes its "내 사용 허용" opener and adds "내 권한 회수"
+    // (the inverse is true for a full revoke). The replacement describes the
+    // new state and remains available after the catalog refetch, unlike the
+    // opener that would otherwise leave focus on <body>.
+    const fallbackKind = pluginScopeChangeFallbackKind(scopeFocusAfterChange);
+    const fallback = fallbackKind === "grant"
+      ? grantScopeButtonRef.current
+      : revokeScopeButtonRef.current;
+    if (focusPluginScopeChangeFallback(fallback)) {
+      setScopeFocusAfterChange(null);
+    }
+  }, [catalogQuery.data, scopeFocusAfterChange]);
 
   const lines = [
     "워크스페이스에 설치할 앱과 내 사용 권한을 관리합니다.",
@@ -332,8 +361,11 @@ export function PluginSection({ offline }: { offline: boolean }) {
                 onOpenScopeConsent={(consent, actionButton) => {
                   actionButtonRef.current = actionButton;
                   setScopeChange(null);
+                  setConsentError(null);
                   setConsenting(consent);
                 }}
+                grantScopeButtonRef={grantScopeButtonRef}
+                revokeScopeButtonRef={revokeScopeButtonRef}
               />
             </div>
           )}
@@ -354,7 +386,12 @@ export function PluginSection({ offline }: { offline: boolean }) {
           consent={consenting}
           pending={mutation.isPending}
           opener={actionButtonRef.current}
-          onCancel={() => setConsenting(null)}
+          error={consentError}
+          onCancel={() => {
+            setConsentError(null);
+            setConsenting(null);
+          }}
+          onDismissError={() => setConsentError(null)}
           onConfirm={(selectedScopes) => {
             const action = pluginConsentScopeAction({
               kind: consenting.kind,
@@ -364,7 +401,10 @@ export function PluginSection({ offline }: { offline: boolean }) {
               selectedScopes,
               confirmed: true,
             });
-            if (action) mutation.mutate(action);
+            if (action) {
+              setConsentError(null);
+              mutation.mutate(action);
+            }
           }}
         />
       )}
@@ -376,6 +416,7 @@ function PluginDetailPanel({
   plugin, detail, isPending, isError, error, onRetry, canManage, roleState,
   managerNames, onRetryDirectory, offline, policyTools, busy, pendingAction, actionError,
   scopeChange, onDismissScopeChange, actionErrorRef, onDismissActionError, onAction, onOpenScopeConsent,
+  grantScopeButtonRef, revokeScopeButtonRef,
 }: {
   plugin: PluginCatalogItem;
   detail: PluginDetail | undefined;
@@ -398,6 +439,8 @@ function PluginDetailPanel({
   onDismissActionError: () => void;
   onAction: (action: PluginManagementAction, actionButton: HTMLButtonElement) => void;
   onOpenScopeConsent: (consent: PluginScopeConsent, actionButton: HTMLButtonElement) => void;
+  grantScopeButtonRef: MutableRefObject<HTMLButtonElement | null>;
+  revokeScopeButtonRef: MutableRefObject<HTMLButtonElement | null>;
 }) {
   if (isPending) return <SkeletonRows rows={3} />;
   if (isError || !detail) {
@@ -438,6 +481,8 @@ function PluginDetailPanel({
             pendingAction={pendingAction}
             onAction={onAction}
             onOpenScopeConsent={onOpenScopeConsent}
+            grantScopeButtonRef={grantScopeButtonRef}
+            revokeScopeButtonRef={revokeScopeButtonRef}
           />
           {scopeChange && (
             <InlineBanner
@@ -512,6 +557,7 @@ function PluginMarketplaceSkeleton() {
 function PluginActions({
   plugin, detail, scopes, activeScopes, canManage, roleState, managerNames,
   onRetryDirectory, offline, busy, pendingAction, onAction, onOpenScopeConsent,
+  grantScopeButtonRef, revokeScopeButtonRef,
 }: {
   plugin: PluginCatalogItem;
   detail: PluginDetail;
@@ -526,6 +572,8 @@ function PluginActions({
   pendingAction: PluginAction | undefined;
   onAction: (action: PluginManagementAction, actionButton: HTMLButtonElement) => void;
   onOpenScopeConsent: (consent: PluginScopeConsent, actionButton: HTMLButtonElement) => void;
+  grantScopeButtonRef: MutableRefObject<HTMLButtonElement | null>;
+  revokeScopeButtonRef: MutableRefObject<HTMLButtonElement | null>;
 }) {
   const available = plugin.installed && plugin.enabled;
   const managementAction: PluginManagementAction = available
@@ -588,6 +636,8 @@ function PluginActions({
           blocked={isScopeBlockedBySibling("grant")}
           offline={offline}
           onOpen={onOpenScopeConsent}
+          buttonRef={(button) => { grantScopeButtonRef.current = button; }}
+          testId="plugin-scope-grant"
         />}
         {activeScopes.length > 0 && <PluginScopeConsentButton
           kind="revoke"
@@ -599,6 +649,8 @@ function PluginActions({
           blocked={isScopeBlockedBySibling("revoke")}
           offline={offline}
           onOpen={onOpenScopeConsent}
+          buttonRef={(button) => { revokeScopeButtonRef.current = button; }}
+          testId="plugin-scope-revoke"
         />}
         {canManage && (
           <PluginActionButton
@@ -632,6 +684,8 @@ function PluginScopeConsentButton({
   blocked,
   offline,
   onOpen,
+  buttonRef,
+  testId,
 }: {
   kind: PluginScopeChangeKind;
   detail: PluginDetail;
@@ -642,14 +696,18 @@ function PluginScopeConsentButton({
   blocked: boolean;
   offline: boolean;
   onOpen: (consent: PluginScopeConsent, actionButton: HTMLButtonElement) => void;
+  buttonRef?: (button: HTMLButtonElement | null) => void;
+  testId?: string;
 }) {
   const state = pluginActionButtonState({ busy, offline, blocked });
   return (
     <Button
+      ref={buttonRef}
       variant={variant}
       size="sm"
       disabled={state.disabled}
       aria-busy={state.ariaBusy}
+      data-testid={testId}
       onClick={(event) => {
         if (busy || offline || blocked) return;
         onOpen({ kind, plugin: detail, scopes }, event.currentTarget);
@@ -712,9 +770,15 @@ function PluginActionButton({
   );
 }
 
+function toolRiskAndApprovalLabels(tools: readonly PluginManifestTool[]): string[] {
+  return [...new Set(tools.flatMap((tool) => [
+    approvalLabel(tool.approvalTier),
+    tool.risk ? `위험도 ${riskLabel(tool.risk)}` : null,
+  ]).filter((value): value is string => value !== null))];
+}
+
 function ToolRow({ tool }: { tool: PluginManifestTool }) {
-  const tiers = [approvalLabel(tool.approvalTier), tool.risk ? `위험도 ${riskLabel(tool.risk)}` : null]
-    .filter((value): value is string => value !== null);
+  const tiers = toolRiskAndApprovalLabels([tool])
   return (
     <li className="flex flex-col gap-1 border-b border-line p-3 last:border-b-0">
       <span className="text-body font-medium text-ink">{tool.name}</span>
@@ -738,26 +802,36 @@ function PluginScopeConsentDialog({
   consent,
   pending,
   opener,
+  error,
   onCancel,
+  onDismissError,
   onConfirm,
 }: {
   consent: PluginScopeConsent;
   pending: boolean;
   /** The button that opened this programmatic dialog, never activeElement guesswork. */
   opener: HTMLButtonElement | null;
+  error: string | null;
   onCancel: () => void;
+  onDismissError: () => void;
   onConfirm: (scopes: string[]) => void;
 }) {
   const [selectedScopes, setSelectedScopes] = useState<string[]>(() => consent.scopes);
+  const actionErrorRef = useRef<HTMLDivElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const isGrant = consent.kind === "grant";
   const selected = new Set(selectedScopes);
-  const knownRisks = [...new Set(consent.plugin.tools.flatMap((tool) => [
-    tool.risk ? `위험도 ${riskLabel(tool.risk)}` : null,
-    approvalLabel(tool.approvalTier),
-  ]).filter((value): value is string => value !== null))];
   const canConfirm = !pending && selectedScopes.length > 0;
   const appIcon = consent.plugin.iconText?.trim()
     || consent.plugin.name.trim().charAt(0).toLocaleUpperCase();
+
+  useEffect(() => {
+    if (!error) return;
+    const frame = window.requestAnimationFrame(() => {
+      actionErrorRef.current?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [error]);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !pending) onCancel(); }}>
@@ -772,7 +846,11 @@ function PluginScopeConsentDialog({
         onInteractOutside={(event) => { if (pending) event.preventDefault(); }}
         data-testid="plugin-scope-consent"
       >
-        <div className="flex flex-col gap-4 p-4" aria-busy={pending || undefined}>
+        <div
+          className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4"
+          aria-busy={pending || undefined}
+          data-testid="plugin-scope-consent-body"
+        >
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2" aria-hidden="true">
               <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-meta font-semibold text-ink">momo</span>
@@ -787,7 +865,7 @@ function PluginScopeConsentDialog({
                   : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
               </DialogDescription>
             </div>
-            <StatusChip tone="accent">관리자가 승인함</StatusChip>
+            {isGrant && <span className="self-start"><StatusChip tone="accent">관리자가 승인함</StatusChip></span>}
           </div>
 
           <dl className="flex flex-col gap-2 border-y border-line py-3">
@@ -795,7 +873,6 @@ function PluginScopeConsentDialog({
             {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
             {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
             {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
-            {knownRisks.length > 0 && <DetailRow label="도구 위험도와 승인 티어" value={knownRisks.join(", ")} />}
             {consent.plugin.termsURL && <DetailLink label="이용약관" href={consent.plugin.termsURL} />}
             {consent.plugin.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={consent.plugin.privacyPolicyURL} />}
           </dl>
@@ -809,9 +886,18 @@ function PluginScopeConsentDialog({
                 ? "권한마다 연결된 도구와 데이터 범위를 확인한 뒤 계속하세요."
                 : "회수하면 선택한 권한에 연결된 아래 도구를 더 이상 사용할 수 없습니다."}
             </p>
+            <p className="text-meta text-ink-muted" data-testid="plugin-scope-selection-count">
+              {consent.scopes.length}개 중 {selectedScopes.length}개 선택
+            </p>
+            {selectedScopes.length === 0 && (
+              <p id="plugin-scope-selection-hint" className="text-meta text-ink-muted" role="status">
+                권한을 하나 이상 선택해야 계속할 수 있습니다.
+              </p>
+            )}
             <ul className="flex flex-col overflow-hidden rounded-md border border-line">
               {consent.scopes.map((scope) => {
                 const scopeTools = toolsForPluginScope(consent.plugin.tools, scope);
+                const scopeTiers = toolRiskAndApprovalLabels(scopeTools);
                 const checked = selected.has(scope);
                 return (
                   <li key={scope} className="border-b border-line p-3 last:border-b-0">
@@ -839,6 +925,9 @@ function PluginScopeConsentDialog({
                             {tool.description || tool.name}
                           </span>
                         ))}
+                        {scopeTiers.length > 0 && (
+                          <span className="text-meta text-ink-muted">{scopeTiers.join(", ")}</span>
+                        )}
                       </span>
                     </label>
                   </li>
@@ -847,21 +936,44 @@ function PluginScopeConsentDialog({
             </ul>
           </fieldset>
 
+          {error && (
+            <div ref={actionErrorRef}>
+              <InlineBanner
+                message={error}
+                actionLabel="오류 닫기"
+                onAction={() => {
+                  onDismissError();
+                  // The banner was caused by this unchanged confirmation. Its
+                  // button remains the retry affordance, so return focus here
+                  // after dismissal instead of leaving it in the scrolling body.
+                  window.requestAnimationFrame(() => {
+                    focusPluginActionAfterErrorDismissal(confirmButtonRef.current);
+                  });
+                }}
+                testId="plugin-scope-consent-error"
+              />
+            </div>
+          )}
+
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
               size="sm"
               aria-disabled={pending || undefined}
               className={pending ? "opacity-50" : undefined}
+              data-testid="plugin-scope-cancel"
               onClick={() => { if (!pending) onCancel(); }}
             >
               취소
             </Button>
             <Button
+              ref={confirmButtonRef}
               size="sm"
               aria-disabled={!canConfirm || undefined}
               aria-busy={pending || undefined}
+              aria-describedby={!canConfirm ? "plugin-scope-selection-hint" : undefined}
               className={!canConfirm ? "opacity-50" : undefined}
+              data-testid="plugin-scope-confirm"
               onClick={() => {
                 if (!canConfirm) return;
                 onConfirm(selectedScopes);
