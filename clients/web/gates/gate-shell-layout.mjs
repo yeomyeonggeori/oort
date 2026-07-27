@@ -371,6 +371,10 @@ async function installMocks(context) {
     }
     return json(route, { messages: makeMessages(24) });
   });
+  await context.route(
+    "**/v1/workspaces/*/channels/*/huddles/active",
+    (route) => json(route, { huddle: null })
+  );
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: INVITES })
   );

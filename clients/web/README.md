@@ -184,6 +184,28 @@ npm run build && npm run gate:csp
 CSP_GATE_PROVE_RED_STYLE=1 npm run gate:csp   # red proof: MUST fail (xterm needs style-src)
 ```
 
+The huddle browser gate uses REST and Centrifugo protocol fixtures, without a
+backend, credentials, microphone, or LiveKit server. It locks the fail-closed
+503 state, active badge/participant names, and the `huddle_ended` transition,
+including an intentionally late active response:
+
+```sh
+npm run build && npm run gate:huddle
+HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle     # MUST fail
+HUDDLE_GATE_PROVE_RED_ENDED=1 npm run gate:huddle   # MUST fail
+```
+
+The gate writes the four fixture captures to `artifacts/huddle/`:
+`unconfigured.png`, `idle.png`, `active.png`, and `error.png`. A joined capture
+requires a real LiveKit room and browser microphone grant; the orchestrator
+records it as `artifacts/huddle/joined.png`.
+
+The Tauri WKWebView microphone prompt is deliberately not inferred from browser
+success. After the browser gate, the orchestrator must open the packaged shell,
+join once, verify bidirectional audio, deny microphone once, and record whether
+the shell needs `NSMicrophoneUsageDescription` or another entitlement/config
+change. That shell change is outside MOMO-643.
+
 `gate:csp` walks one path. To put the same packaged policy in front of the much
 wider route walks the other two gates already do — `vite.config.ts` reads the
 header from the environment:

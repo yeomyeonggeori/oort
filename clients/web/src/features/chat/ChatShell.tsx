@@ -28,11 +28,13 @@ import {
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
+import { HuddleHeaderControl } from "@/features/huddles/HuddleHeaderControl";
 import {
   EmptyInvite,
   InlineBanner,
   SkeletonRows,
 } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 
@@ -44,6 +46,7 @@ import { cn } from "@/design/lib/cn";
 
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
+  const isOffline = useOffline();
   const params = useParams();
   const navigate = useNavigate();
 
@@ -256,7 +259,7 @@ export function ChatShell() {
     return `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
   }, [channel, directory]);
 
-  const offline = stressCount === 0 && connStatus === "disconnected";
+  const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
 
   // 빈 워크스페이스에서 가장 큰 행동. 이 버튼은 /settings로 보내는 막다른
@@ -331,6 +334,15 @@ export function ChatShell() {
               >
                 재연결 {timeline.resume.resubscribeCount}회
               </span>
+            )}
+            {stressCount === 0 && channelId !== null && (
+              <HuddleHeaderControl
+                workspaceId={workspaceId}
+                channelId={channelId}
+                realtime={realtime}
+                offline={offline}
+                role={memberFor(directory, session.member.id)?.role}
+              />
             )}
             {/* The tooltip and the accessible name are the same string: two
                 names for one control is two controls to a reader who hears one

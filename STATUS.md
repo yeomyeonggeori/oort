@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-643 웹 허들 복원 (#850, 2026-07-28)
+
+- 웹 채널 헤더에 허들 미구성(503)·활성 없음·Live 참가자·참가 중·오류/오프라인 상태와 시작·참가·마이크·나가기를 복원했다. `huddle_started`·`huddle_participants_changed`·`huddle_ended`는 방어적으로 파싱하며, 종료 tombstone이 늦은 active 응답의 Live 배지 부활을 막는다.
+- `livekit-client`(Apache-2.0)는 참가 동작 뒤에만 lazy-load되고 join 응답의 `livekitUrl`만 사용한다. pagehide/beforeunload keepalive leave, 로컬 disconnect, 토큰 만료 안내를 추가했다. Tauri WKWebView 마이크 권한과 실오디오는 오케스트레이터 실측 대기(`runtime-unverified`).
+
 ## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
 
 - 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.
