@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## MOMO-640 웹 세션 저장 경계 + Tauri CSP (#842, 2026-07-27)
+
+- Tauri 셸 번들은 `tauri.conf.json`의 CSP로 same-origin script·font·asset만 허용하고, xterm의 검증된 런타임 style 쓰기와 런타임 API/realtime/관전 host 연결만 제한적으로 연다. `gate:csp`는 이 설정값을 직접 읽어 preview 헤더로 적용한 뒤 로그인→셸→xterm 관전 경로의 CSP 위반 0건을 단정한다.
+- 브라우저 refresh token의 현행 localStorage 경계는 이번 범위에서 변경하지 않았다. httpOnly cookie 전환은 임의 API origin·Tauri `tauri://localhost`·HTTP LAN 서버를 함께 다시 설계해야 하므로 별도 ADR 사안이다. 서버가 `allowCredentials: false`로 쿠키 경로를 **표현 불가능하게** 설계해 둔 것을 코드에서 확인했다(`CORSMiddleware.swift:88`, `Config.swift:316-318`) — 쿠키 전환은 그 결정을 되돌리는 일이다.
+- **오케스트레이터 실측 완료(2026-07-27)**: `gate:csp` PASS(exit 0)·**red proof 성립**(`CSP_GATE_PROVE_RED_STYLE=1` → style-src-elem 위반 22건 관측 후 exit 1). `gate:wire`·`gate:shell` 무회귀 PASS. 두 게이트를 **패키징된 CSP 헤더 아래에서 재실행해도 PASS**이고 `default-src 'none'`으로 바꾸면 둘 다 exit 1 — 헤더가 실제로 서빙된다는 증명이자 `gate:csp` 단일 경로보다 넓은 커버리지다(절차는 `clients/web/README.md`·게이트 헤더 주석에 고정).
+- **Tauri 실빌드 실측**: `cargo tauri build --bundles app --ci` exit 0, 번들 실행 시 **연결 화면이 WKWebView에서 정상 렌더**(스타일·폰트 적용). CSP 문자열이 바이너리에 그대로 포함됨을 확인. **IPC도 이 CSP 아래에서 동작한다** — 키체인 조회 프롬프트와 mDNS로 프리필된 서버 주소가 각각 웹뷰→Rust 왕복의 산 증거다. 한계: 릴리스 번들은 devtools가 없어 **런타임 콘솔 위반 목록은 읽지 못했고**, 로그인 이후 실서버 왕복은 자격증명 취급 범위 밖이라 미수행.
+
 ## MOMO-636 웹 플러그인 마켓플레이스 복원 (#838, 2026-07-27)
 
 - 설정의 `앱` 섹션에 catalog·원본 manifest 상세·egress 도메인·tool risk/approval tier·설치/해제와 본인 단일 scope grant 회수를 복원했다. 관리자 판정은 roster의 내 role이 owner/admin으로 확인될 때만 열며, 다중 scope는 원문 표시만 하고 변경하지 않는다.
