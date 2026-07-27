@@ -29,10 +29,17 @@ import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import {
+  HuddleHeaderBanner,
+  HuddleHeaderControl,
+  HuddleHeaderState,
+} from "@/features/huddles/HuddleHeaderControl";
+import type { HuddleController } from "@/features/huddles/useHuddle";
+import {
   EmptyInvite,
   InlineBanner,
   SkeletonRows,
 } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 
@@ -44,6 +51,7 @@ import { cn } from "@/design/lib/cn";
 
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
+  const isOffline = useOffline();
   const params = useParams();
   const navigate = useNavigate();
 
@@ -256,8 +264,94 @@ export function ChatShell() {
     return `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
   }, [channel, directory]);
 
-  const offline = stressCount === 0 && connStatus === "disconnected";
+  const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
+
+  const renderChannelHeader = (huddle: HuddleController | null) => (
+    <>
+      <header className="flex min-h-control-lg items-center justify-between gap-3 border-b border-line px-4 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span aria-hidden="true" className="shrink-0 text-ink-muted">
+            {channel?.kind === "dm" ? (
+              <MessageSquare className="size-4" />
+            ) : channel?.kind === "private" ? (
+              <Lock className="size-4" />
+            ) : (
+              <Hash className="size-4" />
+            )}
+          </span>
+          <h1
+            className={cn(
+              "min-w-0 truncate text-body font-semibold",
+              labelParts?.isAgent && stressCount === 0 && "text-agent"
+            )}
+          >
+            {stressCount > 0
+              ? `스크롤 측정 (${stressCount})`
+              : labelParts?.text ?? label}
+          </h1>
+          {stressCount === 0 && labelParts?.handle && (
+            <span
+              className="shrink-0 text-meta text-ink-muted"
+              data-testid="channel-handle"
+            >
+              {labelParts.handle}
+            </span>
+          )}
+          {memberSummary && (
+            <span className="min-w-0 truncate text-meta text-ink-muted">
+              {memberSummary}
+            </span>
+          )}
+          <span className="sr-only" data-testid="message-count">
+            메시지 {messages.length}개
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {timeline.resume.resubscribeCount > 0 && (
+            <span
+              className="text-timestamp text-ink-muted"
+              data-numeric
+              data-testid="resume-info"
+            >
+              재연결 {timeline.resume.resubscribeCount}회
+            </span>
+          )}
+          {huddle && (
+            <HuddleHeaderControl
+              huddle={huddle}
+              offline={offline}
+            />
+          )}
+          {/* The tooltip and the accessible name are the same string: two
+              names for one control is two controls to a reader who hears one
+              and sees the other. */}
+          {stressCount === 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setThread(null);
+                setWorkOpen((open) => !open);
+              }}
+              aria-pressed={workOpen}
+              aria-label="작업 세션 패널"
+              title="작업 세션 패널"
+              data-testid="open-work-panel"
+              className={cn(
+                "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                workOpen
+                  ? "bg-accent-soft text-accent"
+                  : "text-ink-muted hover:bg-surface-hover"
+              )}
+            >
+              <SquareTerminal className="size-4" />
+            </button>
+          )}
+        </div>
+      </header>
+      {huddle && <HuddleHeaderBanner huddle={huddle} offline={offline} />}
+    </>
+  );
 
   // 빈 워크스페이스에서 가장 큰 행동. 이 버튼은 /settings로 보내는 막다른
   // 골목이었고 (설정에는 그런 폼이 없다), 이제 같은 자리에서 채널 만들기
@@ -284,80 +378,18 @@ export function ChatShell() {
         over it (tokens.css `work-pane`). */}
     <div className="relative flex min-w-0 flex-1">
       <div ref={coveredRef} className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span aria-hidden="true" className="text-ink-muted">
-              {channel?.kind === "dm" ? (
-                <MessageSquare className="size-4" />
-              ) : channel?.kind === "private" ? (
-                <Lock className="size-4" />
-              ) : (
-                <Hash className="size-4" />
-              )}
-            </span>
-            <h1
-              className={cn(
-                "truncate text-body font-semibold",
-                labelParts?.isAgent && stressCount === 0 && "text-agent"
-              )}
-            >
-              {stressCount > 0
-                ? `스크롤 측정 (${stressCount})`
-                : labelParts?.text ?? label}
-            </h1>
-            {stressCount === 0 && labelParts?.handle && (
-              <span
-                className="shrink-0 text-meta text-ink-muted"
-                data-testid="channel-handle"
-              >
-                {labelParts.handle}
-              </span>
-            )}
-            {memberSummary && (
-              <span className="truncate text-meta text-ink-muted">
-                {memberSummary}
-              </span>
-            )}
-            <span className="sr-only" data-testid="message-count">
-              메시지 {messages.length}개
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {timeline.resume.resubscribeCount > 0 && (
-              <span
-                className="text-timestamp text-ink-muted"
-                data-numeric
-                data-testid="resume-info"
-              >
-                재연결 {timeline.resume.resubscribeCount}회
-              </span>
-            )}
-            {/* The tooltip and the accessible name are the same string: two
-                names for one control is two controls to a reader who hears one
-                and sees the other. */}
-            {stressCount === 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setThread(null);
-                  setWorkOpen((open) => !open);
-                }}
-                aria-pressed={workOpen}
-                aria-label="작업 세션 패널"
-                title="작업 세션 패널"
-                data-testid="open-work-panel"
-                className={cn(
-                  "flex size-control-sm items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-                  workOpen
-                    ? "bg-accent-soft text-accent"
-                    : "text-ink-muted hover:bg-surface-hover"
-                )}
-              >
-                <SquareTerminal className="size-4" />
-              </button>
-            )}
-          </div>
-        </header>
+        {stressCount === 0 && channelId !== null ? (
+          <HuddleHeaderState
+            workspaceId={workspaceId}
+            channelId={channelId}
+            realtime={realtime}
+            offline={offline}
+          >
+            {(huddle) => renderChannelHeader(huddle)}
+          </HuddleHeaderState>
+        ) : (
+          renderChannelHeader(null)
+        )}
 
         {offline && (
           <InlineBanner

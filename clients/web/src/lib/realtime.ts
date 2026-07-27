@@ -389,6 +389,62 @@ export function asWorkSessionLifecycleFrame(
   return frame as WorkSessionLifecycleFrame;
 }
 
+// ---- huddle lifecycle rail (ADR-0122 / MOMO-643) ---------------------------
+// Huddles use underscore event names because those are the Core/server contract,
+// not a web-side spelling choice. Their channel publication is only an
+// invalidation hint: participant display names remain a REST projection, so a
+// started/changed frame asks the caller to refetch instead of inventing rows
+// from participant_member_ids.
+
+export type HuddleEventType =
+  | "huddle_started"
+  | "huddle_participants_changed"
+  | "huddle_ended";
+
+export interface HuddleLifecycleFrame {
+  type: HuddleEventType;
+  v: number;
+  ts: number;
+  payload: {
+    huddle_id: string;
+    channel_id: string;
+    participant_member_ids: string[];
+  };
+}
+
+const HUDDLE_EVENT_TYPES: ReadonlySet<string> = new Set<HuddleEventType>([
+  "huddle_started",
+  "huddle_participants_changed",
+  "huddle_ended",
+]);
+
+/**
+ * A publication carrying a huddle transition, or null for every malformed
+ * field. This deliberately matches the defensive work-session parsers beside
+ * it: a type inversion never escapes into the UI as a plausible event.
+ */
+export function asHuddleLifecycleFrame(
+  data: unknown
+): HuddleLifecycleFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<HuddleLifecycleFrame>;
+  if (typeof frame.type !== "string" || !HUDDLE_EVENT_TYPES.has(frame.type)) {
+    return null;
+  }
+  if (typeof frame.v !== "number" || typeof frame.ts !== "number") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (
+    !payload ||
+    typeof payload.huddle_id !== "string" ||
+    typeof payload.channel_id !== "string" ||
+    !Array.isArray(payload.participant_member_ids) ||
+    !payload.participant_member_ids.every((id) => typeof id === "string")
+  ) {
+    return null;
+  }
+  return frame as HuddleLifecycleFrame;
+}
+
 // ---- provider cascade rail (ADR-0135 D1 / MOMO-622) -------------------------
 // A turn that fell over to the next provider publishes ONE frame per transition
 // on the CHANNEL namespace, beside the message rail (AgentWorker
@@ -494,6 +550,19 @@ export interface RealtimeHandle {
     workspaceId: string,
     channelId: string,
     handlers: { onFallback: (frame: CascadeFallbackFrame) => void }
+  ) => () => void;
+  /**
+   * Watch huddle lifecycle changes in one channel. The publication is an
+   * invalidation signal; the caller re-reads the active REST projection for
+   * names and joined timestamps.
+   */
+  subscribeHuddle: (
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onLifecycle: (frame: HuddleLifecycleFrame) => void;
+      onResync: () => void;
+    }
   ) => () => void;
   dispose: () => void;
 }
@@ -729,11 +798,45 @@ export function createRealtime(
     );
   }
 
+  function subscribeHuddle(
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onLifecycle: (frame: HuddleLifecycleFrame) => void;
+      onResync: () => void;
+    }
+  ): () => void {
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const gate = createReplayGate();
+        const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+          gate.onSubscribed(ctx);
+          // REST owns current liveness. This also heals a non-recovered gap.
+          handlers.onResync();
+        };
+        const onPublication = (ctx: { data?: unknown }) => {
+          if (gate.isReplaying()) return;
+          const frame = asHuddleLifecycleFrame(ctx.data);
+          if (frame) handlers.onLifecycle(frame);
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
     subscribeChannel,
     subscribeAgent,
     subscribeWorkSession,
     subscribeCascade,
+    subscribeHuddle,
     dispose: () => {
       shared.clear();
       client.disconnect();

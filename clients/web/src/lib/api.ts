@@ -226,6 +226,206 @@ export function uuidEq(a: string | undefined, b: string | undefined): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
+// ---- Huddles: channel-bound, temporary LiveKit audio rooms -----------------
+// GET  /v1/workspaces/{ws}/channels/{channel}/huddles/active
+// POST /v1/workspaces/{ws}/channels/{channel}/huddles
+// POST /v1/workspaces/{ws}/huddles/{huddle}/join
+// POST /v1/workspaces/{ws}/huddles/{huddle}/leave
+//
+// The join response is the only authority for the LiveKit address. It must not
+// be derived from apiBase(), the page origin, or the realtime URL (ADR-0122 and
+// the same address-authority boundary as ADR-0110).
+
+export interface HuddleParticipant {
+  memberId: string;
+  displayName: string;
+  joinedAtMs: number;
+}
+
+export interface Huddle {
+  id: string;
+  workspaceId: string;
+  channelId: string;
+  startedBy: string;
+  startedAtMs: number;
+  endedAtMs?: number;
+  participants: HuddleParticipant[];
+}
+
+export interface JoinedHuddle {
+  huddle: Huddle;
+  livekitUrl: string;
+  token: string;
+  expiresAtMs: number;
+  ttlSeconds: number;
+}
+
+export interface LeftHuddle {
+  huddle: Huddle;
+  ended: boolean;
+}
+
+function huddleParticipantFromWire(value: unknown): HuddleParticipant {
+  const memberId = str(value, "memberId");
+  const displayName = str(value, "displayName");
+  const joinedAtMs = num(value, "joinedAtMs");
+  if (
+    memberId === undefined ||
+    displayName === undefined ||
+    joinedAtMs === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return { memberId, displayName, joinedAtMs };
+}
+
+/** Defensive huddle decoder shared by all four REST projections. */
+export function huddleFromWire(value: unknown): Huddle {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const workspaceId = str(source, "workspaceId");
+  const channelId = str(source, "channelId");
+  const startedBy = str(source, "startedBy");
+  const startedAtMs = num(source, "startedAtMs");
+  const endedAtMs = num(source, "endedAtMs");
+  const participants = arrayField(source, "participants");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    channelId === undefined ||
+    startedBy === undefined ||
+    startedAtMs === undefined ||
+    participants === null ||
+    (source.endedAtMs !== undefined &&
+      source.endedAtMs !== null &&
+      typeof source.endedAtMs !== "number")
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id,
+    workspaceId,
+    channelId,
+    startedBy,
+    startedAtMs,
+    ...(endedAtMs === undefined ? {} : { endedAtMs }),
+    participants: participants.map(huddleParticipantFromWire),
+  };
+}
+
+function huddleResponse(value: unknown): Huddle {
+  const source = responseRecord(value);
+  return huddleFromWire(source.huddle);
+}
+
+export async function fetchActiveHuddle(
+  workspaceId: string,
+  channelId: string
+): Promise<Huddle | null> {
+  const source = await request<Record<string, unknown>>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/huddles/active`
+  );
+  if (source.huddle === null) return null;
+  return huddleFromWire(source.huddle);
+}
+
+export async function startHuddle(
+  workspaceId: string,
+  channelId: string
+): Promise<Huddle> {
+  const source = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/huddles`,
+    { method: "POST", body: "{}" }
+  );
+  return huddleResponse(source);
+}
+
+export async function joinHuddle(
+  workspaceId: string,
+  huddleId: string
+): Promise<JoinedHuddle> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/huddles/${encodeURIComponent(huddleId)}/join`,
+      { method: "POST", body: "{}" }
+    )
+  );
+  const livekitUrl = str(source, "livekitUrl");
+  const token = str(source, "token");
+  const expiresAtMs = num(source, "expiresAtMs");
+  const ttlSeconds = num(source, "ttlSeconds");
+  let livekitAddress: URL;
+  try {
+    livekitAddress = new URL(livekitUrl ?? "");
+  } catch {
+    throw new WireShapeError();
+  }
+  if (
+    token === undefined ||
+    expiresAtMs === undefined ||
+    ttlSeconds === undefined ||
+    !["ws:", "wss:", "http:", "https:"].includes(livekitAddress.protocol)
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    huddle: huddleFromWire(source.huddle),
+    livekitUrl: livekitAddress.toString(),
+    token,
+    expiresAtMs,
+    ttlSeconds,
+  };
+}
+
+export async function leaveHuddle(
+  workspaceId: string,
+  huddleId: string
+): Promise<LeftHuddle> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/huddles/${encodeURIComponent(huddleId)}/leave`,
+      { method: "POST", body: "{}" }
+    )
+  );
+  const ended = bool(source, "ended");
+  if (ended === undefined) throw new WireShapeError();
+  return { huddle: huddleFromWire(source.huddle), ended };
+}
+
+/**
+ * Page/Tauri-webview teardown cannot await React cleanup. A keepalive fetch is
+ * the browser primitive that lets the authenticated leave finish after the
+ * document starts unloading. The normal awaited leave remains the primary
+ * path; this is its last-chance duplicate and the server transition is safe to
+ * observe twice (the second request can answer conflict after the first won).
+ */
+export function leaveHuddleOnPageExit(
+  workspaceId: string,
+  huddleId: string
+): void {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const token = getAccessToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  void fetch(
+    `${apiBase()}/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/huddles/${encodeURIComponent(huddleId)}/leave`,
+    { method: "POST", headers, body: "{}", keepalive: true }
+  ).catch(() => {
+    // The document is leaving and cannot present a retry. The durable path is
+    // attempted above; the next active projection heals any missed departure.
+  });
+}
+
 interface RefreshResponse {
   accessToken: string;
   refreshToken: string;

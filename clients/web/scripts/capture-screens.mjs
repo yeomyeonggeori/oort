@@ -703,6 +703,10 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/channels/*/read-state", (route) =>
     json(route, READ_STATES[0])
   );
+  await context.route(
+    "**/v1/workspaces/*/channels/*/huddles/active",
+    (route) => json(route, { huddle: null })
+  );
   // 설정 > 코드 실행 호스트 (MOMO-617). The workspace default sits in 자동 재개
   // so the 재개 대상 control is on screen, and the member override inherits it,
   // which is the pair the panel has to keep apart.
