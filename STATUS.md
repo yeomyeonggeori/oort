@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-633 리뷰 잔여 묶음 (#828, 2026-07-27)
+
+- instance-global quota ingest scope는 provider-link와 같은 instance-operator 경계에서만 발급되고, 각 ingest는 actor/token·provider/window·적용 여부를 감사한다. 200 error envelope은 typed cascade terminal failure가 되고, 복호화 불가 cascade hop은 로그와 `bearerUnavailable` 표식으로 GET에 남아 replace-all PUT에서 보존된다. 24~31자 credential-shape도 거부한다.
+- 웹 quota reset 판단은 `observedAt + elapsed` 서버 앵커를 사용하고 `ageSeconds`/schema 결측을 지어내지 않는다. Python adapter는 ADR-0135대로 408/425를 fallback하지 않으며 reset 없는 ratio도 JSON null로 ingest한다. Swift 전체 build·Docker verifier 및 web Vitest는 현 sandbox의 Xcode manifest/미설치 node_modules 제약으로 runtime-unverified; 오케스트레이터 명령은 PR에 기록한다.
+
 ## MOMO-632 웹 와이어 검증 레이어 + 백스크린 차단 (#827, 2026-07-27)
 
 - 웹 REST 두 퍼널이 `null`/배열/원시 JSON을 명시적 wire 오류로 전환하고, 목록·진단·정책 언랩은 total helper로 빈 상태 또는 query 오류로 내린다. 앱 루트와 설정 본문에는 재시도 가능한 오류 경계를 추가해 설정 한 섹션의 렌더 실패가 사이드바·탐색을 언마운트하지 않는다.

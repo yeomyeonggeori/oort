@@ -4042,6 +4042,37 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/provider/link/chain:
+    get:
+      tags: [agents]
+      operationId: getProviderLinkChain
+      summary: Read every configured provider cascade hop, including unavailable ciphertext rows.
+      responses:
+        "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+    put:
+      tags: [agents]
+      operationId: replaceProviderLinkChain
+      summary: Atomically replace fallback provider cascade hops.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, additionalProperties: true}}}
+      responses:
+        "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+    delete:
+      tags: [agents]
+      operationId: clearProviderLinkChain
+      summary: Remove every fallback provider cascade hop.
+      responses:
+        "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+
+  /v1/provider/effort-table:
+    get:
+      tags: [agents]
+      operationId: getProviderEffortTable
+      summary: Read the provider and model effort capabilities used by routing.
+      responses:
+        "200": {description: Effort capability table, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5040,6 +5071,9 @@ components:
           minLength: 1
           maxLength: 200
           description: Applied only when listed in workspace.settings.allowed_agent_models.
+        effortPref:
+          type: string
+          enum: [low, medium, high, xhigh, max]
         enabledTools:
           type: array
           maxItems: 128
@@ -5074,6 +5108,7 @@ components:
         workspaceId: {type: string, format: uuid}
         instructions: {type: string}
         modelPref: {type: string}
+        effortPref: {type: string, enum: [low, medium, high, xhigh, max]}
         enabledTools:
           type: array
           items: {type: string}
@@ -6239,6 +6274,16 @@ components:
           description: >
             Completed attachments uploaded by this actor in this channel. They
             are linked to the new message inside the canonical message transaction.
+        routing:
+          $ref: "#/components/schemas/RunRoutingInput"
+          description: Per-request agent model/effort override for mention runs.
+
+    RunRoutingInput:
+      type: object
+      additionalProperties: false
+      properties:
+        model: {type: string, minLength: 1, maxLength: 200}
+        effort: {type: string, enum: [low, medium, high, xhigh, max]}
 
     EditMessageRequest:
       type: object

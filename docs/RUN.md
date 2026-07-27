@@ -780,6 +780,7 @@ make migrate                                                   # = sh scripts/mi
 
 - 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(workspace/human/basic channels; agent는 opt-in), `003_onboarding.sql`(M2 invite_code + redemption audit, schema_v0.sql 미수정), `006_local_hermes_agent_seed.sql`(agent demo/e2e opt-in).
 - `scripts/migrate.sh`는 `schema_migrations` 테이블로 적용 이력을 추적 → **멱등 재실행 안전**
+- 운영 중인 큰 테이블에 새 `CHECK`를 붙일 때는 `ADD CONSTRAINT ... NOT VALID`와 `VALIDATE CONSTRAINT`를 **서로 다른 migration 파일**로 분리한다. 파일 단위 단일 트랜잭션에서는 같은 파일의 `VALIDATE`가 락 보유 시간을 줄이지 않는다.
   (이미 적용된 버전은 SKIP). 각 파일은 `--single-transaction`으로 원자 적용.
 - 연결: `DATABASE_URL` 우선, 없으면 표준 `PG*` 환경변수(`PGHOST`/`PGUSER`/…) 폴백.
 - 기본 `MOMO_AGENT_SEED_MODE=none`: persistent dogfood/local-alpha에는 사람과 기본 채널만
