@@ -1,6 +1,10 @@
 {
-  "_comment": "MOMO-633 시점의 기존 미문서화 경로. 이 목록은 늘어나면 안 된다 — 새 라우트는 스펙과 함께 온다. 줄여 나가는 것이 목표이고, 여기서 지우면 게이트가 즉시 그 경로를 요구한다.",
+  "_comment": "MOMO-633 시점에 openapi.yaml에 없는 서버 경로. 이 게이트가 로드하는 스펙은 openapi.yaml 하나이므로 기준도 그것이다(operator 전용 경로도 여기 포함된다). 목록은 늘어나면 안 된다 — 새 라우트는 스펙과 함께 온다. 여기서 지우면 게이트가 즉시 그 경로의 문서화를 요구한다.",
   "operations": [
+    {
+      "method": "delete",
+      "path": "/v1/provider/link"
+    },
     {
       "method": "delete",
       "path": "/v1/workspaces/{}/channels/{}/members/{}"
@@ -28,6 +32,14 @@
     {
       "method": "get",
       "path": "/v1/platform/workspaces"
+    },
+    {
+      "method": "get",
+      "path": "/v1/provider/link"
+    },
+    {
+      "method": "get",
+      "path": "/v1/provider/quota-snapshots"
     },
     {
       "method": "get",
@@ -80,6 +92,14 @@
     {
       "method": "post",
       "path": "/v1/mcp/tools/call"
+    },
+    {
+      "method": "post",
+      "path": "/v1/provider/link/test"
+    },
+    {
+      "method": "post",
+      "path": "/v1/provider/quota-snapshots"
     },
     {
       "method": "post",
@@ -136,6 +156,10 @@
     {
       "method": "post",
       "path": "/v1/workspaces/{}/invites/{}/revoke"
+    },
+    {
+      "method": "put",
+      "path": "/v1/provider/link"
     },
     {
       "method": "put",

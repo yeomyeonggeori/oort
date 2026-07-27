@@ -200,6 +200,16 @@ def spec_operations(spec):
     return operations
 
 
+def positional_path(path):
+    """경로 파라미터를 이름이 아니라 위치로 비교한다.
+
+    서버는 `:ws`, 스펙은 `{workspaceId}`로 같은 자리를 다르게 부른다. 이름으로
+    비교하면 문서화된 경로가 전부 미문서화로 보인다(측정: 41건이 거짓 양성).
+    """
+    path = re.sub(r"\{[^}]+\}", "{}", path)
+    return re.sub(r":[A-Za-z_][A-Za-z0-9_]*", "{}", path)
+
+
 def server_operations(manifest):
     """Read registered server operations for inverse (server -> spec) coverage."""
     operations = set()
@@ -247,7 +257,10 @@ def main():
 
     failures = 0
     if registered is not None:
-        undocumented = sorted(registered - spec_operations(spec))
+        documented = {(m, positional_path(p)) for m, p in spec_operations(spec)}
+        undocumented = sorted(
+            (m, p) for m, p in registered if (m, positional_path(p)) not in documented
+        )
         if undocumented:
             failures += 1
             print(
