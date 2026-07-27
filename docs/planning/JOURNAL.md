@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-28 (Fable) · #850·#854 랜딩 — 허들이 웹에 복원되고 전사 v1이 섰다 · #851 가동
+- **#850 랜딩**(track/uxui, PR #862): design-review **2R PASS(B0·H0)**. 1R Blocker 2건(760 제목 소거·핫마이크 무출구) 실렌더 폐쇄 — "오디오와 REST 프로젝션은 다른 진실 평면" 원칙으로 joined 분기 최우선화. **red proof 4종**(기존 503/ended + 수동: joined 우선 복원·폭 계약 제거 → 각각 FAIL). lazy-load 실측(livekit 531KB 별도 청크·엔트리 무참조). 2R 신규 Medium 4(배너 시 at-bottom 이탈·오프라인 이중 배너·joined 중 503 카피 모순·넓은 창 참가자 굶김)는 후속 티켓 예정.
+- **#854 랜딩**(track/engine `9672006c`, PR #864): 339 tests · **동의 게이트 실서버 관통(무동의 409→동의 200→시작 201→녹음 중 무동의 join 409)** · compose transcription profile(Egress v1.9.1+전용 Redis) healthy · **하니스 3모델 실완주**(잠금 스냅샷·CER/RTF 산출, RTF@1스레드 small 3.05/medium 8.59/turbo 7.57 — "small이 실용 한계" 부합). **CER 0%는 합성 TTS라 품질 판정 아님** — 모델 확정은 실코퍼스 실측 후(성재 단계). 화자=트랙 소유 member 라벨(diarization 없음).
+- **선존재 409 티켓화(#865)**: `work-session-remote-create` 409를 base에서 재확인 — 세 배치째 전체 계약 게이트를 끊어 미티켓 방치 종료. fail-fast 구조 재고 포함.
+- **#851 내 세션 표면 워커 가동**(sol medium). 남은 큐: uxui #851→#858(ADR-0139 웹) · engine #856→#857→#859 · #860/#861(에이전트 허브).
+
 ## 2026-07-28 (Fable) · #855 랜딩(트랙) · #850 1R FAIL→2R · #854 가동
 - **#855 T3 랜딩**(track/engine `05ff5720`, PR #863, sol medium): 리허설 대본→원장→프로비저너 3커밋. **pause 미계상이 GENERATED 컬럼으로 구조적**(과금 코드 빼기에 비의존 — 패킷 요구 정답), `usage_ledger` 비확장 근거 명시, 부트스트랩 토큰 digest-only+15분 1회용, RLS FORCE 4테이블, `confirmPaidCloud` 명시 동의. **검증**: 337 tests·격리 검증기 전관문(mock E2B)·red proof(pause 벽시계 과금 6s vs 4s 검출)·openapi 6경로. **한계**: 실 E2B 왕복은 D4 리허설 준비물(운영자 momo-workd template+공개 서버) 확보 후.
 - **#850 웹 허들 1R FAIL(B2·H1)** — 워커 산출물 자체는 견실(893 tests·gate:huddle 신설+red proof 2종·lazy-load 530KB 분리·keepalive leave·마이크 거부 분리 분류). Blocker는 통합 지점: ①`shrink-0` 우측 클러스터에 가변 폭 표면을 넣어 **760x480 참가 중 채널 제목 폭 0px**·offline 경고 화면 밖·작업 패널 토글 도달 불가 ②`error/unconfigured` 분기가 joined보다 먼저 반환해 **통화 중 일시 500 한 번에 마이크·나가기 소멸(핫마이크 출구 없음)**. H1: 출하 웹 CSP가 LiveKit 소켓을 침묵 거부하는데 SecurityError를 마이크 거부로 오분류할 위험(`cspBlockedHost` 선례 미사용). 2R 패킷 `handoffs/2026-07-28-850-2r-fix-packet.md`, sol medium 가동.
