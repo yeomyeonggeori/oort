@@ -27,7 +27,7 @@ struct WorkPoolResponse: ResponseEncodable {
 /// GET exposes settings plus aggregate and caller usage to an active human
 /// workspace member. PUT replaces settings for an owner/admin and records the
 /// change in audit_log in the same tenant transaction. Usage is always derived
-/// from running work_session rows; this surface owns no mutable counter.
+/// from running/idle work_session rows; this surface owns no mutable counter.
 ///
 /// Pool exhaustion returns only a structured HTTP 409 in v0. Automatic queue
 /// start and its waiting-card UX are follow-up work, as is any warm VM pool.
@@ -211,7 +211,7 @@ struct WorkPoolRoutes: Sendable {
                   FROM work_session ws
                   JOIN work_host h ON h.id = ws.host_id
                  WHERE ws.workspace_id = \(workspaceID)
-                   AND ws.status = 'running'
+                   AND ws.status IN ('running', 'idle')
                    AND h.type <> 'cloud'
               )
               +
@@ -227,7 +227,7 @@ struct WorkPoolRoutes: Sendable {
                   JOIN work_host h ON h.id = ws.host_id
                  WHERE ws.workspace_id = \(workspaceID)
                    AND ws.member_id = \(memberID)
-                   AND ws.status = 'running'
+                   AND ws.status IN ('running', 'idle')
                    AND h.type <> 'cloud'
               )
               +
@@ -348,7 +348,7 @@ struct WorkPoolRoutes: Sendable {
               FROM work_pool p
               LEFT JOIN work_session ws
                 ON ws.workspace_id = p.workspace_id
-               AND ws.status = 'running'
+               AND ws.status IN ('running', 'idle')
              WHERE p.workspace_id = \(workspaceID)
              GROUP BY p.workspace_id, p.max_active, p.included_active_hours,
                       p.per_member_soft_limit

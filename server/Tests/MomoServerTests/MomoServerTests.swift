@@ -2517,6 +2517,8 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("MessageRoutes.broadcastPayload"))
         XCTAssertTrue(routes.contains("work.session.started"))
         XCTAssertTrue(routes.contains("work.session.ended"))
+        XCTAssertTrue(routes.contains("work.session.idle"))
+        XCTAssertTrue(routes.contains("work.session.resumed-to-running"))
         XCTAssertTrue(routes.contains("FOR UPDATE OF ws"))
         XCTAssertTrue(routes.contains("only the session owner can end it"))
         XCTAssertTrue(routes.contains("controlId is reserved for work host dispatch"))
@@ -2526,6 +2528,21 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("work host cannot end another host session"))
         XCTAssertTrue(routes.contains("JOIN membership ms"))
         XCTAssertFalse(routes.contains("BYPASSRLS"))
+
+        let idleMigration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/047_work_session_idle.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(idleMigration.contains("status IN ('running', 'idle', 'orphaned', 'ended')"))
+        XCTAssertTrue(idleMigration.contains("'idle_timeout'"))
+        XCTAssertTrue(idleMigration.contains("ADD COLUMN idle_at timestamptz"))
+        XCTAssertTrue(idleMigration.contains("status = 'idle'"))
+        XCTAssertFalse(
+            idleMigration.contains("status = 'running' AND exit_code IS NULL"),
+            "exit_code is the last tool result and must survive idle-to-running"
+        )
     }
 
     func testWorkSessionValidationCardAndNoVersionLifecyclePayload() throws {
@@ -2609,6 +2626,48 @@ final class MomoServerTests: XCTestCase {
             XCTAssertEqual(payload["tool"] as? String, "codex")
             XCTAssertEqual(payload["label"] as? String, "MOMO-483")
         }
+
+        let idleSession = WorkSessionDTO(
+            id: session.id,
+            workspaceId: session.workspaceId,
+            channelId: session.channelId,
+            memberId: session.memberId,
+            hostId: session.hostId,
+            rootMessageId: session.rootMessageId,
+            tool: session.tool,
+            label: session.label,
+            status: "idle",
+            observation: session.observation,
+            observerGrantCount: 0,
+            remoteAttachAvailable: true,
+            startedAtMs: session.startedAtMs,
+            endedAtMs: nil,
+            exitCode: 7,
+            endReason: nil,
+            resumedFromSessionId: nil
+        )
+        let idleRaw = WorkSessionRoutes.toolLifecyclePayload(
+            eventType: "work.session.idle",
+            session: idleSession,
+            seq: 44,
+            timestampMs: 1_782_463_261_000,
+            idempotencyDiscriminator: "idle-message"
+        )
+        let idleObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(idleRaw.utf8)) as? [String: Any]
+        )
+        XCTAssertNil(idleObject["version"])
+        let idleData = try XCTUnwrap(idleObject["data"] as? [String: Any])
+        XCTAssertEqual(idleData["type"] as? String, "work.session.idle")
+        XCTAssertEqual(idleData["seq"] as? Int, 44)
+        let idlePayload = try XCTUnwrap(idleData["payload"] as? [String: Any])
+        XCTAssertEqual(
+            Set(idlePayload.keys),
+            ["session_id", "channel_id", "root_message_id", "member_id",
+             "host_id", "status", "idle_at", "exit_code"]
+        )
+        XCTAssertEqual(idlePayload["status"] as? String, "idle")
+        XCTAssertEqual(idlePayload["exit_code"] as? Int, 7)
     }
 
     func testWorkSessionACPEventValidationAndNoVersionProjection() throws {
@@ -2836,7 +2895,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("digest(\\(token), 'sha256')"))
         XCTAssertTrue(routes.contains("c.expires_at > clock_timestamp()"))
         XCTAssertTrue(routes.contains("h.revoked_at IS NULL"))
-        XCTAssertTrue(routes.contains("ws.status = 'running'"))
+        XCTAssertTrue(routes.contains("ws.status IN ('running', 'idle')"))
         XCTAssertTrue(routes.contains("only the session owner can attach"))
         XCTAssertTrue(routes.contains("terminal attach requires a human bearer"))
         XCTAssertTrue(routes.contains("work.terminal_attach.issued"))
@@ -3133,7 +3192,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("work-pool\", use: get"))
         XCTAssertTrue(routes.contains("work-pool\", use: update"))
         XCTAssertTrue(routes.contains("FROM work_session"))
-        XCTAssertTrue(routes.contains("status = 'running'"))
+        XCTAssertTrue(routes.contains("status IN ('running', 'idle')"))
         XCTAssertTrue(routes.contains("FOR UPDATE"))
         XCTAssertTrue(routes.contains("pool_exhausted"))
         XCTAssertTrue(routes.contains("member_limit"))

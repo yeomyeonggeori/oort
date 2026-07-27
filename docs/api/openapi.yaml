@@ -1584,7 +1584,7 @@ paths:
         MomoHost-signed control-plane check performed immediately before the
         direct PTY host accepts a client connection. The opaque bearer is
         matched by SHA-256 digest; the raw token is never persisted or logged.
-        Validation joins the running work_session and unrevoked work_host on
+        Validation joins the running-or-idle work_session and unrevoked work_host on
         every call, so expiry, session end, and host revoke take effect
         immediately. The returned mode is authoritative: observer connections
         may receive output but the host must reject send_stdin, resize, and kill.
@@ -1682,7 +1682,7 @@ paths:
       summary: Read workspace work-pool settings and current derived usage.
       description: >
         Available to active human workspace members. Usage is counted from
-        running work_session rows; no mutable active counter exists. A missing
+        running-or-idle work_session rows; no mutable active counter exists. A missing
         settings row is created with v0 defaults in the same tenant transaction.
       security:
         - bearerAuth: []
@@ -1811,7 +1811,7 @@ paths:
         - name: active
           in: query
           required: false
-          description: Set to 1 to return running sessions only; 0 or omitted returns all.
+          description: Set to 1 to return running or idle sessions; 0 or omitted returns all.
           schema:
             type: integer
             enum: [0, 1]
@@ -1936,12 +1936,20 @@ paths:
     patch:
       tags: [work-sessions]
       operationId: updateWorkSession
-      summary: End a running session, change observation, or relay a normalized ACP event.
+      summary: Report tool lifecycle, end a live session, change observation, or relay an ACP event.
       description: >
-        The creating member, or the MomoHost-signed execution host bound to the
-        session, may end it. The ledger row and card props update beside a
-        no-version work.session.ended outbox; the message row is not edited and
-        no channel seq is minted. A human session owner may instead set
+        A MomoHost-signed execution host bound to the session reports
+        running-to-idle with the last tool exitCode and idle-to-running without
+        replacing the session. The corresponding realtime frames are
+        work.session.idle with payload keys session_id, channel_id,
+        root_message_id, member_id, host_id, status, idle_at, exit_code, and
+        work.session.resumed-to-running with the same identity/status fields
+        plus resumed_at and the preserved exit_code. Idle also commits one
+        system thread message ("작업 완료 — idle 대기") so NotifierWorker can
+        notify only the owner through the existing id-only push envelope.
+        The creating member, or the bound host, may explicitly end a running
+        or idle session. The ledger row and card props update beside a
+        no-version work.session.ended outbox. A human session owner may instead set
         observation to open or owner_only; owner_only invalidates live observer
         grants and blocks new ones. A MomoHost-signed caller may alternatively
         append one bounded normalized ACP event to the session thread ledger;
@@ -1961,7 +1969,7 @@ paths:
               $ref: "#/components/schemas/UpdateWorkSessionRequest"
       responses:
         "200":
-          description: Ended session, or its prior result on an idempotent retry.
+          description: Updated session, or its prior result on an idempotent retry.
           content:
             application/json:
               schema:
@@ -2045,7 +2053,7 @@ paths:
       description: >
         Human bearer only. mode defaults to controller, which remains session
         owner-only. observer requires active workspace and session-channel
-        membership while observation=open. The running session must carry a
+        membership while observation=open. The running or idle session must carry a
         MomoHost-signed remote PTY binding and its work_host must be unrevoked.
         The raw capability is returned exactly once, while PostgreSQL stores
         only its SHA-256 digest and timestamptz expiry. The same transaction
@@ -5861,10 +5869,10 @@ components:
           type: integer
         activeSessions:
           type: integer
-          description: Workspace running work_session count.
+          description: Workspace running-or-idle work_session count.
         memberActiveSessions:
           type: integer
-          description: Calling member's running work_session count.
+          description: Calling member's running-or-idle work_session count.
 
     WorkPoolResponse:
       type: object
@@ -5916,6 +5924,8 @@ components:
     UpdateWorkSessionRequest:
       oneOf:
         - $ref: "#/components/schemas/EndWorkSessionRequest"
+        - $ref: "#/components/schemas/SetWorkSessionIdleRequest"
+        - $ref: "#/components/schemas/SetWorkSessionRunningRequest"
         - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
         - $ref: "#/components/schemas/RelayWorkSessionACPEventRequest"
 
@@ -5970,6 +5980,29 @@ components:
         exitCode:
           type: integer
           format: int32
+          description: Optional last tool result; an idle session preserves its recorded value.
+
+    SetWorkSessionIdleRequest:
+      type: object
+      required: [status, exitCode]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [idle]
+        exitCode:
+          type: integer
+          format: int32
+          description: Result of the tool execution that just completed; not a session exit code.
+
+    SetWorkSessionRunningRequest:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [running]
 
     ResumeWorkSessionRequest:
       type: object
@@ -6067,7 +6100,7 @@ components:
           maxLength: 120
         status:
           type: string
-          enum: [running, orphaned, ended]
+          enum: [running, idle, orphaned, ended]
         observation:
           type: string
           enum: [open, owner_only]
@@ -6089,11 +6122,11 @@ components:
         exitCode:
           type: integer
           format: int32
-          description: Present only when the ending host reports an exit code.
+          description: Last tool execution result; it remains present across idle-to-running.
         endReason:
           type: string
-          enum: [orphaned, resumed]
-          description: Terminal host-loss or resume reason when applicable.
+          enum: [orphaned, resumed, idle_timeout]
+          description: Terminal host-loss, lineage resume, or idle-timeout reason.
         resumedFromSessionId:
           type: string
           format: uuid

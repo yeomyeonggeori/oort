@@ -68,7 +68,7 @@ enum CloudUsageLedger {
                   FROM work_session ws
                   JOIN work_host h ON h.id = ws.host_id
                  WHERE ws.workspace_id = \(workspaceID)
-                   AND ws.status = 'running'
+                   AND ws.status IN ('running', 'idle')
                    AND h.type <> 'cloud'
               )
               +
