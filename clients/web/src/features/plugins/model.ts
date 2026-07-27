@@ -138,6 +138,16 @@ export function scopeSentence(scope: string): string {
   return `${name} ${action.replaceAll("_", " ")} 권한`;
 }
 
+/**
+ * Compact summaries do not have the dialog's separate monospace id row.
+ * Preserve malformed or delimiter-free identifiers there so two unknown
+ * scopes never collapse into the same unreportable "사용 권한" label.
+ */
+export function identifiableScopeSentence(scope: string): string {
+  const sentence = scopeSentence(scope);
+  return sentence === "사용 권한" ? `${sentence} (${scope})` : sentence;
+}
+
 /** Manifest order is product order: it is the order the publisher declared. */
 export function declaredPluginScopes(tools: readonly PluginManifestTool[]): string[] {
   return [...new Set(tools.flatMap((tool) => tool.scopes))];
@@ -232,14 +242,15 @@ export function pluginScopeConsentCompletion(
 ): PluginScopeConsentCompletion {
   const failed = outcomes.filter((outcome) => !outcome.succeeded);
   if (outcomes.length > 0 && failed.length === outcomes.length) {
-    const errors = [...new Set(failed.map((outcome) =>
+    const causes = new Set(failed.map((outcome) =>
       pluginActionErrorMessage(outcome.error)
-    ))];
+    ));
+    const scopedErrors = failed.map((outcome) =>
+      `• ${scopeSentence(outcome.scope)} (${outcome.scope}): ${pluginActionErrorMessage(outcome.error)}`
+    );
     return {
       dismissDialog: false,
-      error: errors.length === 1
-        ? errors[0]
-        : `서로 다른 ${errors.length}가지 원인으로 권한을 변경하지 못했습니다. ${errors.join(" ")}`,
+      error: `선택한 권한을 변경하지 못했습니다. ${causes.size}가지 원인을 scope별로 확인하세요.\n${scopedErrors.join("\n")}`,
     };
   }
   return { dismissDialog: true };

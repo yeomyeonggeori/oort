@@ -88,7 +88,7 @@ const NOTION_MANIFEST = {
   schemaVersion: "momo.plugin.v1",
   plugin: {
     id: NOTION_PLUGIN_ID,
-    name: "Notion",
+    name: "긴 한글 이름의 Notion 워크스페이스 지식 연결",
     version: "1.0.0",
     description: "Official Notion hosted MCP integration",
     publisher: { id: "makenotion", name: "Notion", verified: true },
@@ -559,10 +559,11 @@ async function go(page, hash) {
 
 /**
  * The consent panel owns a fixed header and footer around one middle scrollbox.
- * Red proof for layout: move the footer back inside
- * `plugin-scope-consent-body`, rebuild, then run this gate. The initial
- * title+confirm visibility assertion fails at 760x480 for both the four-scope
- * Notion fixture and the shipped one-scope GitHub fixture.
+ * Red proof for layout: move the identity/description/installation context
+ * from the scroll body back into the fixed header, rebuild, then run this
+ * gate. The first-scope risk+approval visibility assertion fails at 760x480
+ * for both the long-name four-scope fixture and the shipped one-scope GitHub
+ * fixture, while the independent title+footer assertion stays green.
  *
  * Red proof for focus: revert focusPluginScopeChangeFallback to returning true
  * after focus() without checking disabled/aria-disabled/activeElement, and
@@ -583,13 +584,19 @@ async function assertPluginScopeConsent(page, size) {
     const panel = document.querySelector('[data-testid="plugin-scope-consent"]');
     const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
     const title = document.querySelector('[data-testid="plugin-scope-consent-title"]');
+    const firstBadges = document.querySelector('[data-testid^="plugin-scope-badges-"]');
+    const momoMark = document.querySelector('[data-testid="plugin-scope-momo-mark"]');
     const buttons = [
       document.querySelector('[data-testid="plugin-scope-cancel"]'),
       document.querySelector('[data-testid="plugin-scope-confirm"]'),
     ];
-    if (!panel || !scrollbox || !title || buttons.some((button) => !button)) return { missing: true };
+    if (!panel || !scrollbox || !title || !firstBadges || !momoMark || buttons.some((button) => !button)) {
+      return { missing: true };
+    }
     const panelRect = panel.getBoundingClientRect();
+    const scrollboxRect = scrollbox.getBoundingClientRect();
     const titleRect = title.getBoundingClientRect();
+    const badgeRect = firstBadges.getBoundingClientRect();
     const buttonRects = buttons.map((button) => button.getBoundingClientRect());
     const inViewport = (rect) => rect.top >= 0 && rect.bottom <= window.innerHeight + 1;
     const inPanel = (rect) => rect.top >= panelRect.top && rect.bottom <= panelRect.bottom;
@@ -602,6 +609,16 @@ async function assertPluginScopeConsent(page, size) {
       scrollTop: scrollbox.scrollTop,
       titleInViewport: inViewport(titleRect),
       titleInPanel: inPanel(titleRect),
+      firstBadgeText: firstBadges.textContent,
+      firstBadgesVisible:
+        badgeRect.top >= scrollboxRect.top &&
+        badgeRect.bottom <= scrollboxRect.bottom &&
+        inViewport(badgeRect) &&
+        inPanel(badgeRect),
+      momoMarkFits: momoMark.scrollWidth <= momoMark.clientWidth,
+      contactCopyHonest:
+        panel.textContent?.includes("문의할 수 있는 관리자:") === true &&
+        panel.textContent?.includes("설치 관리자:") === false,
       buttonsInViewport: buttonRects.every(inViewport),
       buttonsInPanel: buttonRects.every(inPanel),
     };
@@ -614,10 +631,29 @@ async function assertPluginScopeConsent(page, size) {
       layout.scrollTop === 0 &&
       layout.titleInViewport === true &&
       layout.titleInPanel === true &&
+      layout.firstBadgesVisible === true &&
+      layout.firstBadgeText?.includes("승인:") &&
+      layout.firstBadgeText?.includes("위험도:") &&
+      layout.momoMarkFits === true &&
+      layout.contactCopyHonest === true &&
       layout.buttonsInViewport === true &&
       layout.buttonsInPanel === true,
     JSON.stringify(layout)
   );
+
+  const scopeCheckboxes = dialog.getByRole("checkbox");
+  const scopeCount = await scopeCheckboxes.count();
+  for (let index = 0; index < scopeCount; index += 1) {
+    await scopeCheckboxes.nth(index).click();
+  }
+  check(
+    `${size.name} 선택 0개면 고정 액션이 필요한 다음 행동을 말한다`,
+    (await confirm.textContent())?.includes("권한을 하나 이상 선택") === true &&
+      await confirm.getAttribute("aria-disabled") === "true"
+  );
+  for (let index = 0; index < scopeCount; index += 1) {
+    await scopeCheckboxes.nth(index).click();
+  }
 
   await confirm.click();
   await page.waitForFunction(
@@ -630,6 +666,12 @@ async function assertPluginScopeConsent(page, size) {
       ariaDisabled: button?.getAttribute("aria-disabled"),
       dimmed: button?.classList.contains("opacity-50"),
       label: button?.textContent,
+      checkboxAriaDisabled: document.querySelector(
+        '[data-testid^="plugin-scope-row-"] input'
+      )?.getAttribute("aria-disabled"),
+      checkboxLabelCursor: getComputedStyle(
+        document.querySelector('[data-testid^="plugin-scope-row-"] label')
+      ).cursor,
     };
   })()`);
   check(
@@ -637,7 +679,9 @@ async function assertPluginScopeConsent(page, size) {
     busyConfirm.ariaBusy === "true" &&
       busyConfirm.ariaDisabled === null &&
       busyConfirm.dimmed === false &&
-      busyConfirm.label?.includes("변경 중"),
+      busyConfirm.label?.includes("변경 중") &&
+      busyConfirm.checkboxAriaDisabled === "true" &&
+      busyConfirm.checkboxLabelCursor !== "pointer",
     JSON.stringify(busyConfirm)
   );
   const consentError = page.getByTestId("plugin-scope-consent-error");
@@ -648,12 +692,43 @@ async function assertPluginScopeConsent(page, size) {
   }))()`);
   check(
     `${size.name} 전량 scope 실패는 선택을 보존하고 403 원인을 말한다`,
-    failure.dialogOpen === true && failure.error?.includes("관리자에게 정책과 권한을 확인하세요."),
+    failure.dialogOpen === true &&
+      failure.error?.includes("notion:read") &&
+      failure.error?.includes("관리자에게 정책과 권한을 확인하세요."),
     JSON.stringify(failure)
   );
   await consentError.getByRole("button", { name: "오류 닫기" }).click();
   await page.waitForFunction(
     'document.activeElement === document.querySelector(\'[data-testid="plugin-scope-confirm"]\')'
+  );
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(
+    `document.activeElement === document.querySelector(
+      '[data-testid=${JSON.stringify(`plugin-scope-${NOTION_SCOPE_FIXTURE[0][0]}`)}]'
+    )`
+  );
+  const wrappedFocus = await page.evaluate(`(() => {
+    const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
+    const checkbox = document.querySelector(
+      '[data-testid=${JSON.stringify(`plugin-scope-${NOTION_SCOPE_FIXTURE[0][0]}`)}]'
+    );
+    if (!scrollbox || !checkbox) return { missing: true };
+    const s = scrollbox.getBoundingClientRect();
+    const c = checkbox.getBoundingClientRect();
+    const style = getComputedStyle(checkbox);
+    return {
+      gapAboveElement: Math.round(c.top - s.top),
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset,
+    };
+  })()`);
+  check(
+    `${size.name} Tab 랩 뒤 첫 체크박스 포커스 링 위쪽 여백이 남는다`,
+    wrappedFocus.missing !== true &&
+      wrappedFocus.gapAboveElement >= 4 &&
+      wrappedFocus.outlineWidth === "2px" &&
+      wrappedFocus.outlineOffset === "2px",
+    JSON.stringify(wrappedFocus)
   );
 
   await page.getByTestId("plugin-scope-cancel").click();
@@ -686,14 +761,23 @@ async function assertPluginScopeConsent(page, size) {
       const panel = document.querySelector('[data-testid="plugin-scope-consent"]');
       const title = document.querySelector('[data-testid="plugin-scope-consent-title"]');
       const confirm = document.querySelector('[data-testid="plugin-scope-confirm"]');
-      if (!panel || !title || !confirm) return { missing: true };
+      const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
+      const firstBadges = document.querySelector('[data-testid^="plugin-scope-badges-"]');
+      if (!panel || !title || !confirm || !scrollbox || !firstBadges) return { missing: true };
       const p = panel.getBoundingClientRect();
       const t = title.getBoundingClientRect();
       const c = confirm.getBoundingClientRect();
+      const s = scrollbox.getBoundingClientRect();
+      const b = firstBadges.getBoundingClientRect();
       return {
         title: title.textContent,
         titleVisible: t.top >= p.top && t.bottom <= p.bottom && t.top >= 0,
         confirmVisible: c.top >= p.top && c.bottom <= p.bottom && c.bottom <= window.innerHeight + 1,
+        firstBadgeText: firstBadges.textContent,
+        firstBadgesVisible:
+          b.top >= s.top && b.bottom <= s.bottom &&
+          b.top >= p.top && b.bottom <= p.bottom &&
+          b.top >= 0 && b.bottom <= window.innerHeight + 1,
       };
     })()`);
     check(
@@ -701,7 +785,10 @@ async function assertPluginScopeConsent(page, size) {
       githubLayout.missing !== true &&
         githubLayout.title?.includes("GitHub") &&
         githubLayout.titleVisible === true &&
-        githubLayout.confirmVisible === true,
+        githubLayout.confirmVisible === true &&
+        githubLayout.firstBadgesVisible === true &&
+        githubLayout.firstBadgeText?.includes("승인:") &&
+        githubLayout.firstBadgeText?.includes("위험도:"),
       JSON.stringify(githubLayout)
     );
     await page.getByTestId("plugin-scope-cancel").click();

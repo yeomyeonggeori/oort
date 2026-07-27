@@ -36,6 +36,7 @@ import {
   declaredPluginScopes,
   focusPluginActionAfterErrorDismissal,
   focusPluginScopeChangeFallback,
+  identifiableScopeSentence,
   isWorkspaceAdmin,
   nonAdminInstallGuidance,
   pluginActionButtonState,
@@ -233,7 +234,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
     // retry from its dependency instead of treating the call as arrival.
     if (mutation.isPending) return;
     let cancelled = false;
-    let attempts = 1;
+    let attempts = 0;
     let frame = 0;
     const retry = () => {
       if (cancelled) return;
@@ -658,7 +659,7 @@ function PluginActions({
       {scopes.length === 0 && <p className="max-w-pane text-meta text-ink-muted">허용할 권한이 없습니다.</p>}
       {activeScopes.length > 0 && (
         <p className="max-w-pane text-meta text-ink-muted">
-          현재 허용: {activeScopes.map(scopeSentence).join(", ")}
+          현재 허용: {activeScopes.map(identifiableScopeSentence).join(", ")}
         </p>
       )}
       <div key="plugin-actions" className="flex flex-wrap items-center gap-2">
@@ -805,13 +806,6 @@ function PluginActionButton({
   );
 }
 
-function toolRiskAndApprovalLabels(tools: readonly PluginManifestTool[]): string[] {
-  return [...new Set(tools.flatMap((tool) => [
-    approvalLabel(tool.approvalTier) ? `승인: ${approvalLabel(tool.approvalTier)}` : null,
-    tool.risk ? `위험도: ${riskLabel(tool.risk)}` : null,
-  ]).filter((value): value is string => value !== null))];
-}
-
 type ScopeBadge = {
   label: string;
   tone: "muted" | "warn" | "danger";
@@ -841,14 +835,21 @@ function scopeRiskAndApprovalBadges(tools: readonly PluginManifestTool[]): Scope
 }
 
 function ToolRow({ tool }: { tool: PluginManifestTool }) {
-  const tiers = toolRiskAndApprovalLabels([tool]);
+  const badges = scopeRiskAndApprovalBadges([tool]);
   return (
     <li className="flex flex-col gap-1 border-b border-line p-3 last:border-b-0">
       <span className="text-body font-medium text-ink">{tool.name}</span>
       {tool.description && <span className="text-meta text-ink-muted">{tool.description}</span>}
       <span className="text-meta text-ink-muted">
-        {tool.scopes.map(scopeSentence).join(", ")}{tiers.length > 0 ? `, ${tiers.join(", ")}` : ""}
+        {tool.scopes.map(identifiableScopeSentence).join(", ")}
       </span>
+      {badges.length > 0 && (
+        <span className="flex flex-wrap gap-1">
+          {badges.map((badge) => (
+            <StatusChip key={badge.label} tone={badge.tone}>{badge.label}</StatusChip>
+          ))}
+        </span>
+      )}
     </li>
   );
 }
@@ -912,36 +913,18 @@ function PluginScopeConsentDialog({
         onInteractOutside={(event) => { if (pending) event.preventDefault(); }}
         data-testid="plugin-scope-consent"
       >
-        <div className="flex flex-col gap-3 border-b border-line p-4">
-          <div className="flex items-center gap-2" aria-hidden="true">
-            <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-meta font-semibold text-ink">momo</span>
-            <ArrowRight className="size-4 text-ink-muted" />
-            <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
-          </div>
-          <div className="flex flex-col gap-1">
-            <DialogTitle data-testid="plugin-scope-consent-title">
-              {isGrant ? `${consent.plugin.name} 앱에 권한을 허용할까요?` : `${consent.plugin.name} 앱 권한을 회수할까요?`}
-            </DialogTitle>
-            <DialogDescription>
-              {isGrant
-                ? "선택한 권한의 도구가 내 사용자 정책에 추가됩니다."
-                : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
-            </DialogDescription>
-          </div>
-          {isGrant && consent.plugin.installed && consent.plugin.enabled && (
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusChip tone="ok">워크스페이스 설치됨</StatusChip>
-              {managerNames.length > 0 && (
-                <span className="text-meta text-ink-muted">
-                  설치 관리자: {managerNames.join(", ")}
-                </span>
-              )}
-            </div>
-          )}
+        {/* Only the orientation anchor is fixed. Decorative identity, explanatory
+            copy and role-backed contacts live after the decision scopes in the
+            scroll flow, so a short window shows evidence before context while
+            the title and footer actions remain continuously visible. */}
+        <div className="border-b border-line p-4">
+          <DialogTitle data-testid="plugin-scope-consent-title">
+            {isGrant ? `${consent.plugin.name} 앱에 권한을 허용할까요?` : `${consent.plugin.name} 앱 권한을 회수할까요?`}
+          </DialogTitle>
         </div>
 
         <div
-          className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4"
+          className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 scroll-pt-1"
           aria-busy={pending || undefined}
           data-testid="plugin-scope-consent-body"
           onFocusCapture={(event) => {
@@ -984,8 +967,12 @@ function PluginScopeConsentDialog({
                 const scopeBadges = scopeRiskAndApprovalBadges(scopeTools);
                 const checked = selected.has(scope);
                 return (
-                  <li key={scope} className="border-b border-line p-3 last:border-b-0">
-                    <label className="flex cursor-pointer items-start gap-2">
+                  <li
+                    key={scope}
+                    className="border-b border-line p-3 last:border-b-0"
+                    data-testid={`plugin-scope-row-${scope}`}
+                  >
+                    <label className={`flex items-start gap-2 ${pending ? "cursor-default" : "cursor-pointer"}`}>
                       <input
                         type="checkbox"
                         checked={checked}
@@ -1011,7 +998,10 @@ function PluginScopeConsentDialog({
                           </span>
                         ))}
                         {scopeBadges.length > 0 && (
-                          <span className="flex flex-wrap gap-1">
+                          <span
+                            className="flex flex-wrap gap-1"
+                            data-testid={`plugin-scope-badges-${scope}`}
+                          >
                             {scopeBadges.map((badge) => (
                               <StatusChip key={badge.label} tone={badge.tone}>
                                 {badge.label}
@@ -1026,6 +1016,34 @@ function PluginScopeConsentDialog({
               })}
             </ul>
           </fieldset>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2" aria-hidden="true">
+              <span
+                className="flex h-control shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-line bg-surface-hover px-2 text-meta font-semibold text-ink"
+                data-testid="plugin-scope-momo-mark"
+              >
+                momo
+              </span>
+              <ArrowRight className="size-4 text-ink-muted" />
+              <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
+            </div>
+            <DialogDescription>
+              {isGrant
+                ? "선택한 권한의 도구가 내 사용자 정책에 추가됩니다."
+                : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
+            </DialogDescription>
+            {isGrant && consent.plugin.installed && consent.plugin.enabled && (
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusChip tone="ok">워크스페이스 설치됨</StatusChip>
+                {managerNames.length > 0 && (
+                  <span className="text-meta text-ink-muted">
+                    문의할 수 있는 관리자: {managerNames.join(", ")}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
 
           {error && (
             <div ref={actionErrorRef}>
@@ -1046,7 +1064,7 @@ function PluginScopeConsentDialog({
             </div>
           )}
 
-          <dl className="flex flex-col gap-2 border-y border-line py-3">
+          <dl className="flex flex-col gap-2 border-t border-line pt-3">
             {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, momo 레지스트리가 확인함` : consent.plugin.publisherName} />}
             {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
             {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
@@ -1084,7 +1102,11 @@ function PluginScopeConsentDialog({
             }}
           >
             {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-            {pending ? "변경 중" : isGrant ? "선택한 권한 허용" : "선택한 권한 회수"}
+            {pending
+              ? "변경 중"
+              : !hasSelection
+                ? "권한을 하나 이상 선택"
+                : isGrant ? "선택한 권한 허용" : "선택한 권한 회수"}
           </Button>
         </div>
       </DialogContent>

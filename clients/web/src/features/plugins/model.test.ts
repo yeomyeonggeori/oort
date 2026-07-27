@@ -11,6 +11,7 @@ import {
   callerPolicySummary,
   focusPluginActionAfterErrorDismissal,
   focusPluginScopeChangeFallback,
+  identifiableScopeSentence,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
@@ -204,6 +205,8 @@ describe("plugin marketplace copy", () => {
     expect(scopeSentence("google_workspace:manage_shared_drive_permissions"))
       .toBe("google workspace shared drive 관리 권한");
     expect(scopeSentence("no-separator")).toBe("사용 권한");
+    expect(identifiableScopeSentence("no-separator"))
+      .toBe("사용 권한 (no-separator)");
     expect(scopeSentence("notion:comment")).not.toBe(scopeSentence("notion:admin"));
   });
 
@@ -233,8 +236,8 @@ describe("plugin marketplace copy", () => {
     ]);
     expect(completion.dismissDialog).toBe(false);
     if (completion.dismissDialog) throw new Error("expected retained dialog");
-    expect(completion.error).toContain("서로 다른 2가지 원인");
-    expect(completion.error).toContain("관리자에게 정책과 권한을 확인하세요.");
-    expect(completion.error).toContain("앱 또는 내 권한을 찾지 못했습니다.");
+    expect(completion.error).toContain("2가지 원인을 scope별로 확인하세요.");
+    expect(completion.error).toContain("notion 댓글 권한 (notion:comment): 이 앱은");
+    expect(completion.error).toContain("notion 관리 권한 (notion:admin): 앱 또는 내 권한을");
   });
 });
