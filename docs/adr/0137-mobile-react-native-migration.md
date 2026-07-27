@@ -1,6 +1,6 @@
 # ADR-0137: 모바일 클라이언트 — React Native 채택 (iOS 재작성 + Android 신설)
 
-- Status: **Proposed** (2026-07-26, Fable 초안 — 스택 방향은 성재 2026-07-26 결정 "RN쪽으로 가자". 세부 결정 검토 대기)
+- Status: **Accepted** (2026-07-27, 성재 승인 — "ADR-0137 Accept 진행해줘". 스택 방향은 2026-07-26 결정 "RN쪽으로 가자", 세부 결정 5건은 아래 §성재 결정에 기록)
 - 관련: **ADR-0123(iOS 클라이언트 v0 — 본 ADR이 대체)**, ADR-0133(UI 스택 Tauri/React — iOS 경로를 P4a 스파이크로 미뤄둔 공백을 본 ADR이 해소), ADR-0120(푸시 id-only→NSE fetch — **승계**), ADR-0125(work host 등급), 리서치 정본 `docs/planning/2026-07-26-rn-adoption-plan.md`·`2026-07-26-mobile-stack-research.md`
 
 ## Context
@@ -86,10 +86,30 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 - (−) 한글 IME가 유일한 미해소 스택 리스크 — D6 스파이크 1번이 게이트.
 - 파생(Accepted 시): 스파이크 1장(D6 6항목) · `packages/momo-core` 추출 1장(웹 회귀 0 증명 포함) · RN 스캐폴드+폴리필+RQ 배선 1장 · v0 UI 배치(auth/sidebar/timeline/chat/inbox) · NSE 이식+TestFlight 1장 · Android 레인+cleartext 정책 1장. **MOMO-631은 이 ADR과 무관하게 즉시.**
 
-## 성재 결정 대기 (5)
+## 성재 결정 (5) — 2026-07-27 승인, 전부 권고안대로
 
-1. **이행 방식** — 전량 재작성 (권고) vs brownfield
-2. **Expo 수준** — bare + 모듈 낱개, EAS 미도입 (권고)
-3. **`momo-core` 모노레포화** — 한다, 순수 로직만, npm workspaces (권고)
-4. **기존 iOS 킷** — 동결 후 교체, 단 MOMO-631은 즉시 수리 (권고)
-5. **Android cleartext 정책** — 티켓 분리해 보안·심사와 함께 판단
+| # | 안건 | 결정 | 근거 조항 |
+|---|---|---|---|
+| 1 | 이행 방식 | **전량 재작성**(brownfield 기각) | D2 |
+| 2 | Expo 수준 | **bare RN + Expo 모듈 낱개, EAS 미도입** | D1 |
+| 3 | `momo-core` 모노레포화 | **한다 — 순수 로직만, npm workspaces** | D3 |
+| 4 | 기존 iOS 킷 | **동결 후 교체.** MOMO-631 즉시 수리 조건은 **이미 이행됨** | D8 |
+| 5 | Android cleartext | **티켓 분리** — 보안·심사와 함께 판단 | D6-3 |
+
+**4번 상태 갱신**: 승인 조건이던 MOMO-631(iOS 전송 키 400 + 라이브 와이어 게이트 부재)은
+**2026-07-27 main 랜딩 완료**(#826/PR #832). 9주간 iOS가 메시지를 보내지 못하던 결함이 닫혔고,
+재발을 막는 `scripts/verify_ios_wire.sh`가 함께 들어갔다. 따라서 킷은 이제 **버그픽스 전용 동결**
+상태로 들어간다 — RN v0가 parity 게이트를 통과하면 은퇴한다.
+
+**Accepted가 곧 착수 승인은 아니다**: D6대로 **첫 티켓은 구현이 아니라 스파이크**다. 6항목 중
+하나라도 실패하면 성재에게 재보고하고 계획을 고친다. 특히 **한글 IME는 1번 게이트**이며, 실패 시
+스택 선택 자체를 재검토한다(Flutter도 한글 이슈 계보가 있어 어느 스택이든 실기기 검증은 필요하다).
+
+## 이행 순서 (Accepted 시점 기준)
+
+1. **스파이크 1장** — D6의 6항목, 5~7일, 실기기. 한글 IME 최우선.
+2. `packages/momo-core` 추출 — **웹이 먼저 소비해 회귀 0을 증명한 뒤** 모바일이 붙는다(D3).
+3. RN 스캐폴드 + URL 폴리필 + react-query 배선.
+4. v0 UI 배치(auth/sidebar/timeline/chat/inbox ≈4,600 LOC).
+5. NSE 이식 + TestFlight.
+6. Android 레인 + cleartext 정책 티켓.

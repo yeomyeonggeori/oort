@@ -75,6 +75,8 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 ## 1. 마일스톤 표 (정본)
 
 > 트랙: 🖥 데스크탑(macOS) · 📱 모바일(iOS) · ⚙️ 공유/백엔드. 데스크탑·모바일은 **공유 Swift 코어(MomoCore)** 위에서 병렬 진행.
+>
+> **⚠️ 2026-07-27 정정 — 아래 표의 트랙 전제는 낡았다.** ADR-0133(UI 스택 SwiftUI→TS/React+Tauri, Accepted)과 **ADR-0137(모바일 React Native, Accepted 2026-07-27)** 로 공유 코어가 **Swift `MomoCore`에서 TS `packages/momo-core`로 이동**한다. macOS SwiftUI는 은퇴했고(기본 다운로드 = Tauri momo-next), iOS SwiftUI 킷은 **버그픽스 전용 동결 후 RN으로 교체**된다(ADR-0123은 0137이 대체). Android 트랙이 신설된다. 표의 M5(iOS)·M8(App Store) 행은 그 문법으로 다시 읽어야 하며, 실제 착수 순서는 **#837 스파이크 판정 이후** 확정된다. 정본은 ADR-0137 §이행 순서.
 
 | ID | 이름 | 트랙 | 목표(goal) | 핵심 산출물 | 종료 기준(exit) | 의존 |
 |---|---|---|---|---|---|---|

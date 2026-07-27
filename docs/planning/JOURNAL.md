@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-07-27 (Fable) · ADR-0137 Accepted + RN 스파이크 티켓 발급
+- **성재 승인**("ADR-0137 Accept 진행해줘"). 결정 5건 **전부 권고안대로**: 전량 재작성 · bare RN+Expo 모듈 낱개(EAS 미도입) · `momo-core` 모노레포(순수 로직만, npm workspaces) · iOS 킷 동결 후 교체 · Android cleartext 티켓 분리.
+- **4번 조건이 이미 충족됐다**: 승인 조건이던 MOMO-631(iOS 전송 400 + 라이브 와이어 게이트 부재)이 오늘 랜딩(#826/PR #832)돼, 킷은 이제 **버그픽스 전용 동결**로 들어간다. ADR-0123은 본 ADR이 대체.
+- **Accepted ≠ 착수 승인**을 ADR 본문에 명시했다 — D6대로 **첫 티켓은 구현이 아니라 스파이크**다. **#837 MOMO-635** 발급(실기기 5~7일, 6항목): ①한글 IME(**1번 게이트** — 확증 증상은 조합 밑줄 소실이고 "입력 불가"는 미재현, 반증으로 Mattermost CJK 이슈 0건. 2벌식·천지인·iOS 기본 한글 × 밑줄·백스페이스·controlled value) ②URL 폴리필+`momo://join`(15파일이 `new URL` 사용) ③centrifuge-js 실왕복+리플레이 게이트+Android cleartext 실측 ④Swift NSE 이식(ADR-0120 D2-A 생존 실증) ⑤리스트 3자 실측(`Animated.FlatList`/FlashList v2/`@legendapp/list` — 난점은 성능이 아니라 inverted+스크롤 보존) ⑥Android 동일 루프.
+- **수용 기준을 판정으로 못박았다**: 산출물은 코드가 아니라 보고서, 애매하면 FAIL, **1건이라도 FAIL이면 구현 착수 금지·성재 재보고**, 스파이크 코드는 버려지는 것이 정상.
+- 이후 순서: `momo-core` 추출(**웹이 먼저 소비해 회귀 0 증명 후** 모바일 부착) → RN 스캐폴드 → v0 UI(≈4,600 LOC) → NSE+TestFlight → Android 레인.
+
+
 ## 2026-07-27 (Fable) · #831 허용 모델 노출 REST — 잔여 티켓 소진, 검수 무결
 - **랜딩**(track/engine `f4acd3a4`, PR #836). **집행자 셋·노출자 0** 구조를 닫았다 — 패킷은 "읽는 곳이 `MessageRoutes` 하나뿐"이라 했으나 지금은 단일 소스 함수·`AgentProfileRoutes:118`(#828 F1)·`RunRouting:123-131` 셋이 집행한다.
 - **설계 세 판단이 전부 옳았다**: ①`GET .../agents/:agent/allowed-models`로 **에이전트별** 집합만 노출(`workspace.settings` 통째 노출 회피 — 확장 가능한 bag이라 나중에 안전하지 않은 키가 들어올 수 있다) ②`MessageRoutes.allowedAgentModels` 재사용으로 집행·노출이 갈라질 수 없게 ③웹은 **받았을 때만** 좁히고 미수신 시 완화 동작 유지 + settings에만 있는 모델을 후보에 합친 뒤 교집합(직접 입력란이 없어 좁히기만 하면 유효 모델이 영구히 숨는다).
