@@ -64,6 +64,7 @@ struct WorkdConfig: Sendable {
     let hostIDURL: URL
     let outputDirectory: URL
     let scope: String
+    let hostType: String
     let displayName: String
     let pollInterval: Duration
     let heartbeatInterval: Duration
@@ -105,6 +106,13 @@ struct WorkdConfig: Sendable {
             ?? defaultRoot.appendingPathComponent("workd-output", isDirectory: true).path)
         let scope = (environment["MOMO_WORKD_SCOPE"] ?? "member").lowercased()
         guard scope == "member" || scope == "workspace" else {
+            throw WorkdFailure.configuration
+        }
+        let hostType = (environment["MOMO_WORKD_HOST_TYPE"] ?? "workd").lowercased()
+        guard hostType == "workd" || hostType == "cloud" else {
+            throw WorkdFailure.configuration
+        }
+        guard hostType != "cloud" || scope == "workspace" else {
             throw WorkdFailure.configuration
         }
         let displayName = nonempty(environment["MOMO_WORKD_DISPLAY_NAME"])
@@ -152,6 +160,7 @@ struct WorkdConfig: Sendable {
             hostIDURL: hostIDURL,
             outputDirectory: outputDirectory,
             scope: scope,
+            hostType: hostType,
             displayName: displayName,
             pollInterval: .milliseconds(pollMs),
             heartbeatInterval: .milliseconds(heartbeatMs),

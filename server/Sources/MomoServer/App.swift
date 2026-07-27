@@ -117,6 +117,12 @@ enum AppBuilder {
         }
         let workHostRoutes = WorkHostRoutes(db: db)
         workHostRoutes.addPublic(to: router)
+        let cloudProvisionerRoutes = CloudProvisionerRoutes(
+            db: db,
+            httpClient: httpClient,
+            config: config.cloudProvisioner
+        )
+        cloudProvisionerRoutes.addPublic(to: router)
 
         // Gateway callbacks accept per-agent bearer credentials. The shared
         // secret is available only on this narrow group and only when the
@@ -154,6 +160,7 @@ enum AppBuilder {
         WorkToolProfileRoutes(db: db).add(to: authed)
         WorkTierPolicyRoutes(db: db).add(to: authed)
         workHostRoutes.addProtected(to: authed)
+        cloudProvisionerRoutes.addProtected(to: authed)
         SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)
         AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentRoutes(

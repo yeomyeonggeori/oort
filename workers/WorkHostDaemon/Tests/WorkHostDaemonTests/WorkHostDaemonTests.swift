@@ -64,8 +64,27 @@ final class WorkHostDaemonTests: XCTestCase {
             arguments: []
         ))
         XCTAssertNil(config.registrationToken)
+        XCTAssertEqual(config.hostType, "workd")
         XCTAssertEqual(config.childEnvironmentPolicy, .safeDefault)
         XCTAssertFalse(config.allowProfileLegacyEnvironment)
+    }
+
+    func testCloudHostTypeRequiresWorkspaceScope() throws {
+        let workspaceID = UUID().uuidString
+        XCTAssertThrowsError(try WorkdConfig.load(environment: [
+            "MOMO_WORKD_SERVER_URL": "https://momo.example.test",
+            "MOMO_WORKD_WORKSPACE_ID": workspaceID,
+            "MOMO_WORKD_HOST_TYPE": "cloud",
+            "MOMO_WORKD_SCOPE": "member",
+        ]))
+        let config = try WorkdConfig.load(environment: [
+            "MOMO_WORKD_SERVER_URL": "https://momo.example.test",
+            "MOMO_WORKD_WORKSPACE_ID": workspaceID,
+            "MOMO_WORKD_HOST_TYPE": "cloud",
+            "MOMO_WORKD_SCOPE": "workspace",
+        ])
+        XCTAssertEqual(config.hostType, "cloud")
+        XCTAssertEqual(config.scope, "workspace")
     }
 
     func testChildEnvironmentDefaultsToAllowlistAndSupportsExplicitPassthrough() throws {

@@ -3951,7 +3951,8 @@ final class MomoServerTests: XCTestCase {
                 displayName: "김인턴",
                 allowLocalLoopback: false
             ),
-            agentGateway: AgentGatewayConfig(mode: .worker, secret: "")
+            agentGateway: AgentGatewayConfig(mode: .worker, secret: ""),
+            cloudProvisioner: CloudProvisionerConfig.load(environment: [:])
         )
     }
 

@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-647 T3 프로비저너 + 활성시간 크레딧 원장 (#855, 2026-07-28)
+
+- `usage_ledger`의 토큰 요청 의미를 보존하고 T3 전용 `work_host_usage`/active·paused interval, `workspace_credit`/append-only `credit_entry`, E2B lifecycle binding을 migration 045로 신설했다. paused interval의 generated active seconds는 구조적으로 0이며 session 종료가 active 합계×시작 시 단가를 한 번만 차감한다.
+- 유료 cloud 명시 opt-in + balance/slot gate 뒤 E2B create, cloud workd의 1회 token digest·자체 Ed25519 등록, pause/resume/destroy를 `work_host` 표면에 연결했다. `E2B_API_KEY` 부재는 T3만 읽기 쉬운 503으로 닫고 T1/T2는 무영향이다.
+- 서버 337 tests·WorkHostDaemon 27 tests(환경 mock 부재 3 skip) PASS. 격리 PG18/mock-E2B verifier는 키/잔액/슬롯 거부·원장/차감·pause 미계상·RLS·destroy PASS, pause를 wall-time 과금으로 되돌린 red proof는 의도대로 exit 1. 실 E2B smoke는 운영자 키 주입으로 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
 
 - 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.

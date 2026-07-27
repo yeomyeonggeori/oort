@@ -185,7 +185,8 @@ struct WorkPoolRoutes: Sendable {
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
-        memberID: UUID
+        memberID: UUID,
+        targetHostID: UUID? = nil
     ) async throws {
         try await ensureDefaultPool(conn: conn, logger: logger, workspaceID: workspaceID)
         let settingsRows = try await conn.query(
@@ -204,23 +205,62 @@ struct WorkPoolRoutes: Sendable {
 
         let usageRows = try await conn.query(
             """
-            SELECT count(*)::int AS active_sessions,
-                   (count(*) FILTER (WHERE member_id = \(memberID)))::int
-                     AS member_active_sessions
-              FROM work_session
-             WHERE workspace_id = \(workspaceID)
-               AND status = 'running'
+            SELECT
+              (
+                SELECT count(*)::int
+                  FROM work_session ws
+                  JOIN work_host h ON h.id = ws.host_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.status = 'running'
+                   AND h.type <> 'cloud'
+              )
+              +
+              (
+                SELECT count(*)::int
+                  FROM work_cloud_host ch
+                 WHERE ch.workspace_id = \(workspaceID)
+                   AND ch.state IN ('provisioning', 'ready', 'running', 'paused')
+              ) AS active_sessions,
+              (
+                SELECT count(*)::int
+                  FROM work_session ws
+                  JOIN work_host h ON h.id = ws.host_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.member_id = \(memberID)
+                   AND ws.status = 'running'
+                   AND h.type <> 'cloud'
+              )
+              +
+              (
+                SELECT count(*)::int
+                  FROM work_cloud_host ch
+                 WHERE ch.workspace_id = \(workspaceID)
+                   AND ch.requester_member_id = \(memberID)
+                   AND ch.state IN ('provisioning', 'ready', 'running', 'paused')
+              ) AS member_active_sessions,
+              EXISTS (
+                SELECT 1
+                  FROM work_cloud_host ch
+                 WHERE ch.workspace_id = \(workspaceID)
+                   AND ch.host_id = \(targetHostID)
+                   AND ch.requester_member_id = \(memberID)
+                   AND ch.state IN ('ready', 'running')
+              ) AS consumes_cloud_reservation
             """,
             logger: logger
         ).collect()
         guard let usageRow = usageRows.first else {
             throw HTTPError(.internalServerError, message: "work pool usage is unavailable")
         }
-        let (activeSessions, memberActiveSessions) = try usageRow.decode((Int, Int).self)
-        guard activeSessions < maxActive else {
+        let (activeSessions, memberActiveSessions, consumesCloudReservation) =
+            try usageRow.decode((Int, Int, Bool).self)
+        guard consumesCloudReservation ? activeSessions <= maxActive : activeSessions < maxActive else {
             throw HTTPError(.conflict, message: "pool_exhausted")
         }
-        guard memberActiveSessions < memberLimit else {
+        guard consumesCloudReservation
+            ? memberActiveSessions <= memberLimit
+            : memberActiveSessions < memberLimit
+        else {
             throw HTTPError(.conflict, message: "member_limit")
         }
     }

@@ -7,7 +7,7 @@ import FoundationNetworking
 final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
     private struct RegisterRequest: Encodable {
         let scope: String
-        let type = "workd"
+        let type: String
         let displayName: String
         let publicKey: String
         let capabilities: [String: Bool]
@@ -66,18 +66,25 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
     func register(registrationToken: String) async throws -> UUID {
         let request = RegisterRequest(
             scope: config.scope,
+            type: config.hostType,
             displayName: config.displayName,
             publicKey: signer.publicKeyBase64,
             capabilities: [:]
         )
+        let path = config.hostType == "cloud"
+            ? "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts/cloud/register"
+            : "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts"
+        let authorization = config.hostType == "cloud"
+            ? "MomoBootstrap \(registrationToken)"
+            : "Bearer \(registrationToken)"
         let response: RegisterResponse = try await send(
             method: "POST",
-            path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts",
+            path: path,
             body: request,
-            authorization: "Bearer \(registrationToken)"
+            authorization: authorization
         )
         guard response.workHost.workspaceId == config.workspaceID,
-              response.workHost.type == "workd",
+              response.workHost.type == config.hostType,
               response.workHost.publicKey == signer.publicKeyBase64
         else { throw WorkdFailure.invalidResponse }
         return response.workHost.id
