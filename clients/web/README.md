@@ -209,16 +209,31 @@ The gate writes the four fixture captures to `artifacts/huddle/`:
 requires a real LiveKit room and browser microphone grant; the orchestrator
 records it as `artifacts/huddle/joined.png`.
 
-The my-session continuity gate also needs no backend or credentials. It
-deliberately returns sessions before hosts, then checks the final
-`online:false + running` presentation, the member filter, both direct entry
-paths, and the separate no-host/no-session/load-error states:
+The my-session continuity gate also needs no backend or credentials. Its long
+DM fixture locks `전체` and `내 세션` at full width while only the channel chip
+truncates. It deliberately returns sessions before hosts and checks that both
+the default channel scope and `내 세션` wait without claiming `실행 중`, then
+checks the final `online:false + running` presentation, detail/thread entry,
+focus return, member filter, host-empty rows with neutral host metadata, and
+the separate no-session/load-error states:
 
 ```sh
 npm run gate:my-sessions
 MY_SESSIONS_GATE_PROVE_RED_OFFLINE=1 npm run gate:my-sessions  # MUST fail
 MY_SESSIONS_GATE_PROVE_RED_FILTER=1 npm run gate:my-sessions   # MUST fail
 ```
+
+The three 2R regression assertions are direct reversal proofs:
+
+1. Restore `min-w-0 truncate` on every `ScopeButton`; the fixed-label geometry
+   assertion fails because the long DM clips `전체` or `내 세션`.
+2. Restore the mine-only host loading condition around `SkeletonRows` and the
+   non-mine list; the default channel assertion sees `실행 중` before the
+   delayed host response.
+3. Restore `(hostsQuery.data?.length ?? 0) > 0` on the mine list; the
+   `hosts-empty` scenario times out waiting for its two ledger-backed rows.
+
+The two existing environment red proofs remain mandatory and must exit nonzero.
 
 The Tauri WKWebView microphone prompt is deliberately not inferred from browser
 success. After the browser gate, the orchestrator must open the packaged shell,

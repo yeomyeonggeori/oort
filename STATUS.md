@@ -4,6 +4,7 @@
 
 - 웹 작업 세션 패널에 기존 채널·전체 범위를 보존한 `내 세션` 관점을 추가했다. 본인 소유의 종료되지 않은 세션만 호스트 이름·online·도구·채널·시작 시각·원장 상태와 함께 표시하며, 터미널 상세와 `rootMessageId` 스레드로 바로 이동한다.
 - `online:false + running`은 서버 상태를 orphaned로 추정하지 않고 `호스트 응답 없음`으로 표시하며 관전을 막는다. 호스트 응답이 늦는 동안 활성 행을 그리지 않고, 호스트 0건·세션 0건·로드 오류를 분리했다.
+- 2R에서 범위 칩의 축소 우선순위를 고정하고 세 관점 모두 host projection을 기다리게 했다. 오프라인 세션도 상세에는 진입하되 터미널만 거부하며, 호스트 0건이어도 원장 세션 행과 중립 미지 폴백을 보존한다.
 - typecheck·Vitest 897·production build·design preflight 10/10 PASS. `gate:my-sessions`와 red proof 2종은 오케스트레이터 실행 대기(`runtime-unverified`).
 
 ## MOMO-643 웹 허들 복원 (#850, 2026-07-28)

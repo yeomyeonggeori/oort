@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // GATE: MOMO-644 my-session continuity surface.
 //
-// No backend or credentials. The session projection resolves before the host
-// projection on purpose: the UI must wait for host truth instead of briefly
-// painting an offline host's running ledger row as active.
+// No backend or credentials. The long DM label locks scope-chip shrink priority,
+// and the session projection resolves before the host projection on purpose:
+// every scope must wait for host truth instead of briefly painting an offline
+// host's running ledger row as active. An empty host registry still keeps
+// ledger-backed rows visible with the neutral unknown-host fallback.
 //
 // Red proofs:
 //   MY_SESSIONS_GATE_PROVE_RED_OFFLINE=1 npm run gate:my-sessions
@@ -50,8 +52,9 @@ const auth = {
 const channel = {
   id: channelId,
   workspaceId,
-  kind: "public",
-  name: "제품-웹",
+  kind: "dm",
+  dmKey: `${memberId}:${otherMemberId}`,
+  memberIds: [memberId, otherMemberId],
   muted: false,
 };
 
@@ -76,7 +79,7 @@ const roster = [
     kind: "human",
     status: "active",
     role: "member",
-    displayName: "Nadia Rahman",
+    displayName: "Nadia Rahman · 제품 웹 품질과 세션 연속성 검증 담당",
     handle: "nadia",
     channelCount: 1,
     channelIds: [channelId],
@@ -149,7 +152,11 @@ function host(id, displayName, online) {
 }
 
 const hosts = [
-  host(offlineHostId, "성재 MacBook Pro", proveRedOffline),
+  host(
+    offlineHostId,
+    "성재의 매우 긴 MacBook Pro 개발 호스트 이름",
+    proveRedOffline
+  ),
   host(onlineHostId, "개발실 Mac mini", true),
   host(otherHostId, "Nadia MacBook Air", true),
 ];
@@ -302,7 +309,7 @@ async function waitForServer() {
   throw new Error("preview server never came up");
 }
 
-async function loginAndOpenMine(context) {
+async function loginAndOpenPanel(context) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   await page.goto(origin, { waitUntil: "domcontentloaded" });
@@ -323,17 +330,51 @@ async function loginAndOpenMine(context) {
   }
   await workPanelToggle.waitFor();
   await page.getByTestId("open-work-panel").click();
-  await page.getByTestId("work-scope-mine").click();
   return page;
 }
 
 async function assertContinuity(context) {
-  const page = await loginAndOpenMine(context);
-  await page.getByTestId("work-panel-summary").waitFor();
-  if ((await page.getByTestId("my-work-session-row").count()) !== 0) {
-    throw new Error(
-      "session rows rendered before the delayed host projection resolved"
+  const page = await loginAndOpenPanel(context);
+  const panel = page.getByTestId("work-panel");
+  await panel
+    .getByTestId("work-panel-summary")
+    .filter({ hasText: "세션 3개" })
+    .waitFor();
+
+  for (const [testId, expected] of [
+    ["work-scope-all", "전체"],
+    ["work-scope-mine", "내 세션"],
+  ]) {
+    const chip = panel.getByTestId(testId);
+    if ((await chip.textContent())?.trim() !== expected) {
+      throw new Error(`${testId} lost its complete fixed label`);
+    }
+    const clipped = await chip.evaluate(
+      (element) => element.scrollWidth > element.clientWidth
     );
+    if (clipped) throw new Error(`${testId} was clipped by the long DM label`);
+  }
+  const channelChip = panel.getByTestId("work-scope-channel");
+  if (
+    !(await channelChip.evaluate(
+      (element) => element.scrollWidth > element.clientWidth
+    ))
+  ) {
+    throw new Error("long DM label did not yield space before fixed scope labels");
+  }
+
+  if ((await page.getByTestId("work-session-row").count()) !== 0) {
+    throw new Error(
+      "channel rows rendered before the delayed host projection resolved"
+    );
+  }
+  if ((await panel.getByText("실행 중", { exact: true }).count()) !== 0) {
+    throw new Error("channel scope claimed running before host truth arrived");
+  }
+
+  await page.getByTestId("work-scope-mine").click();
+  if ((await page.getByTestId("my-work-session-row").count()) !== 0) {
+    throw new Error("mine rows rendered before the delayed host projection resolved");
   }
   await page
     .locator(`[data-session-id="${offlineSessionId}"]`)
@@ -361,12 +402,21 @@ async function assertContinuity(context) {
   ) {
     throw new Error("offline running session lost the host-unavailable copy");
   }
-  if (!(await offline.getByTestId("my-work-session-terminal").isDisabled())) {
-    throw new Error("offline running session still offers an active terminal");
+  await offline.getByTestId("my-work-session-detail").click();
+  await page.getByTestId("work-detail").waitFor();
+  await page.getByTestId("work-host-offline").waitFor();
+  if ((await page.getByTestId("work-observer-terminal").count()) !== 0) {
+    throw new Error("offline detail still offers terminal observation");
   }
+  await page.getByTestId("work-detail-back").click();
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "my-work-session-detail"
+  );
 
   const online = page.locator(`[data-session-id="${onlineSessionId}"]`);
-  await online.getByTestId("my-work-session-terminal").click();
+  await online.getByTestId("my-work-session-detail").click();
   await page.getByTestId("work-detail").waitFor();
   await page.getByTestId("work-detail-back").click();
   await online.getByTestId("my-work-session-thread").click();
@@ -377,13 +427,36 @@ async function assertContinuity(context) {
 async function assertTerminalState(context, state, testId) {
   state.mode = testId;
   state.hostDelayMs = 0;
-  const page = await loginAndOpenMine(context);
+  const page = await loginAndOpenPanel(context);
+  await page.getByTestId("work-scope-mine").click();
+  if (testId === "hosts-empty") {
+    const rows = page.getByTestId("my-work-session-row");
+    await rows.first().waitFor({ timeout: 10_000 });
+    if ((await rows.count()) !== 2) {
+      throw new Error(
+        `empty host registry hid ledger sessions: rendered ${await rows.count()}, expected 2`
+      );
+    }
+    if ((await page.getByTestId("work-panel-hosts-empty").count()) !== 0) {
+      throw new Error("host-empty invitation replaced existing session rows");
+    }
+    const first = rows.first();
+    if (
+      (await first.getByTestId("my-work-session-host").textContent())?.trim() !==
+        "알 수 없는 호스트" ||
+      (await first
+        .getByTestId("my-work-session-host-state")
+        .textContent())?.trim() !== "상태 확인 필요"
+    ) {
+      throw new Error("host-empty session lost its neutral unknown-host fallback");
+    }
+    await page.close();
+    return;
+  }
   const expected =
-    testId === "hosts-empty"
-      ? "work-panel-hosts-empty"
-      : testId === "sessions-empty"
-        ? "work-panel-empty"
-        : "work-panel-error";
+    testId === "sessions-empty"
+      ? "work-panel-empty"
+      : "work-panel-error";
   await page.getByTestId(expected).waitFor({ timeout: 10_000 });
   await page.close();
 }
@@ -418,7 +491,7 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "PASS my sessions: delayed hosts, offline running, owner filter, direct attach, and terminal states"
+    "PASS my sessions: scope shrink priority, shared host wait, offline detail, owner filter, host-empty rows, and terminal states"
   );
 }
 

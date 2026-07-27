@@ -55,6 +55,11 @@ import { cn } from "@/design/lib/cn";
 // between channels never drops the connection.
 // =============================================================================
 
+// A missing/deleted root must not turn one click into an unbounded walk through
+// channel history. Twenty-five full pages still cover 5,000 messages; after
+// that the existing not-found result is the honest answer this client has.
+const WORK_THREAD_ROOT_PAGE_LIMIT = 25;
+
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
   const isOffline = useOffline();
@@ -198,7 +203,11 @@ export function ChatShell() {
       try {
         let before: number | undefined;
         let root: Message | undefined;
-        for (;;) {
+        for (
+          let pageIndex = 0;
+          pageIndex < WORK_THREAD_ROOT_PAGE_LIMIT;
+          pageIndex += 1
+        ) {
           const page = await fetchMessages(
             workspaceId,
             workSession.channelId,

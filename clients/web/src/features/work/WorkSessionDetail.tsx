@@ -665,7 +665,7 @@ export function WorkSessionDetail({
         {session.status === "running" && hostOnline === false ? (
           <InlineBanner
             tone="neutral"
-            message="호스트 응답이 없어 터미널을 관전할 수 없습니다. 세션 스레드는 계속 확인할 수 있습니다."
+            message="호스트 응답이 없어 터미널을 관전할 수 없습니다. 목록으로 돌아가 '세션 스레드'를 선택하면 기록을 계속 확인할 수 있습니다."
             testId="work-host-offline"
           />
         ) : (

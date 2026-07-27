@@ -71,11 +71,14 @@ function ScopeButton({
   label,
   onClick,
   testId,
+  flexible = false,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
   testId: string;
+  /** Only the unbounded channel/DM label yields space to the fixed scopes. */
+  flexible?: boolean;
 }) {
   return (
     <button
@@ -84,7 +87,8 @@ function ScopeButton({
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "h-control-sm min-w-0 truncate rounded-sm px-2 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        "h-control-sm rounded-sm px-2 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        flexible ? "min-w-0 flex-1 truncate" : "shrink-0",
         active
           ? "bg-accent-soft text-accent"
           : "text-ink-muted hover:bg-surface-hover"
@@ -219,15 +223,17 @@ function MySessionRow({
   hosts,
   channelName,
   openingThread,
-  onOpenTerminal,
+  onOpenDetail,
   onOpenThread,
+  detailRef,
 }: {
   session: WorkSession;
   hosts: WorkHost[];
   channelName: string;
   openingThread: boolean;
-  onOpenTerminal: () => void;
+  onOpenDetail: () => void;
   onOpenThread: () => void;
+  detailRef: (element: HTMLButtonElement | null) => void;
 }) {
   const status = workSessionContinuityStatus(session, hosts);
   const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
@@ -257,36 +263,43 @@ function MySessionRow({
           {status.label}
         </span>
       </div>
-      <p className="mt-1 min-w-0 truncate text-meta text-ink-muted">
-        <span data-testid="my-work-session-host">{hostName}</span>
-        {" · "}
-        <span data-testid="my-work-session-host-state">
+      <p className="mt-1 flex min-w-0 items-baseline gap-1 text-meta text-ink-muted">
+        <span
+          className="min-w-0 flex-1 truncate"
+          data-testid="my-work-session-host"
+        >
+          {hostName}
+        </span>
+        <span className="shrink-0">·</span>
+        <span className="shrink-0" data-testid="my-work-session-host-state">
           {hostOnline === true
             ? "온라인"
             : hostOnline === false
               ? "응답 없음"
               : "상태 확인 필요"}
         </span>
-        {" · "}
-        {session.tool}
+        <span className="shrink-0">·</span>
+        <span className="shrink-0" data-testid="my-work-session-tool">
+          {session.tool}
+        </span>
       </p>
-      <p className="min-w-0 truncate text-meta text-ink-muted">
-        {channelName}
-        {" · 시작 "}
-        <span data-numeric className="font-mono">
+      <p className="flex min-w-0 items-baseline gap-1 text-meta text-ink-muted">
+        <span className="min-w-0 flex-1 truncate">{channelName}</span>
+        <span className="shrink-0">· 시작</span>
+        <span data-numeric className="shrink-0 font-mono">
           {clockLabel(session.startedAtMs)}
         </span>
       </p>
       <div className="mt-2 flex flex-wrap justify-end gap-2">
         <Button
+          ref={detailRef}
           type="button"
           variant="outline"
           size="sm"
-          onClick={onOpenTerminal}
-          disabled={hostOnline === false}
-          data-testid="my-work-session-terminal"
+          onClick={onOpenDetail}
+          data-testid="my-work-session-detail"
         >
-          터미널 관전
+          세션 상세
         </Button>
         <Button
           type="button"
@@ -459,6 +472,8 @@ export function WorkPanel({
   const directoryQuery = useDirectory(workspaceId);
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
+  const projectionsPending = sessionsQuery.isPending || hostsQuery.isPending;
+  const projectionError = sessionsQuery.error ?? hostsQuery.error;
 
   // With no open channel there is no channel scope to be in, whatever the
   // remembered preference says.
@@ -695,6 +710,7 @@ export function WorkPanel({
             label={scopeLabel}
             onClick={() => onScopeChange("channel")}
             testId="work-scope-channel"
+            flexible
           />
           <ScopeButton
             active={scope === "all"}
@@ -781,12 +797,10 @@ export function WorkPanel({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {(sessionsQuery.isPending ||
-            (scope === "mine" && hostsQuery.isPending)) && (
+          {projectionsPending && (
             <SkeletonRows rows={4} className="p-4" />
           )}
-          {(sessionsQuery.error !== null ||
-            (scope === "mine" && hostsQuery.error !== null)) && (
+          {projectionError !== null && (
             <InlineBanner
               message={
                 sessionsQuery.error !== null
@@ -801,23 +815,22 @@ export function WorkPanel({
               testId="work-panel-error"
             />
           )}
-          {!sessionsQuery.isPending &&
-            sessionsQuery.error === null &&
-            (scope !== "mine" || !hostsQuery.isPending) &&
-            (scope !== "mine" || hostsQuery.error === null) &&
+          {!projectionsPending &&
+            projectionError === null &&
             scope === "mine" &&
-            hostsQuery.data?.length === 0 && (
+            hostsQuery.data?.length === 0 &&
+            visible.length === 0 && (
               <EmptyInvite
                 headline="등록된 작업 호스트가 없습니다."
                 detail="코드 실행 호스트를 연결하면 내 활성 세션을 이어서 볼 수 있습니다."
                 testId="work-panel-hosts-empty"
               />
             )}
-          {!sessionsQuery.isPending &&
-            sessionsQuery.error === null &&
-            (scope !== "mine" || !hostsQuery.isPending) &&
-            (scope !== "mine" || hostsQuery.error === null) &&
-            !(scope === "mine" && hostsQuery.data?.length === 0) &&
+          {!projectionsPending &&
+            projectionError === null &&
+            !(scope === "mine" &&
+              hostsQuery.data?.length === 0 &&
+              visible.length === 0) &&
             visible.length === 0 && (
               <EmptyInvite
                 headline={
@@ -850,9 +863,8 @@ export function WorkPanel({
               />
             )}
           {scope === "mine" &&
-            !hostsQuery.isPending &&
-            hostsQuery.error === null &&
-            (hostsQuery.data?.length ?? 0) > 0 &&
+            !projectionsPending &&
+            projectionError === null &&
             visible.length > 0 && (
               <ul data-testid="my-work-session-list">
                 {visible.map((session) => (
@@ -862,13 +874,21 @@ export function WorkPanel({
                     hosts={hostsQuery.data ?? []}
                     channelName={nameOf(session.channelId)}
                     openingThread={uuidEq(openingThreadId ?? undefined, session.id)}
-                    onOpenTerminal={() => onSelectedIdChange(session.id)}
+                    onOpenDetail={() => onSelectedIdChange(session.id)}
                     onOpenThread={() => onOpenThread(session)}
+                    detailRef={(element) => {
+                      const key = session.id.toLowerCase();
+                      if (element) rowRefs.current.set(key, element);
+                      else rowRefs.current.delete(key);
+                    }}
                   />
                 ))}
               </ul>
             )}
-          {scope !== "mine" && visible.length > 0 && (
+          {scope !== "mine" &&
+            !projectionsPending &&
+            projectionError === null &&
+            visible.length > 0 && (
             <ul data-testid="work-session-list">
               {visible.map((session) => {
                 const folded = foldedFor(session);
