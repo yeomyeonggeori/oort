@@ -72,7 +72,7 @@ export function InlineBanner({
     >
       {/* Wraps, never truncates: this banner also runs in the sidebar column,
           and half an error message is worse than none. */}
-      <span className="min-w-0 flex-1 break-words">{message}</span>
+      <span className="min-w-0 flex-1 whitespace-pre-line break-words">{message}</span>
       {actionLabel && onAction && (
         <Button
           variant="outline"

@@ -1,17 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
+import driveManifest from "../../../../../server/Fixtures/plugin-manifests/drive.json";
+import githubManifest from "../../../../../server/Fixtures/plugin-manifests/github.json";
+import linearManifest from "../../../../../server/Fixtures/plugin-manifests/linear.json";
+import notionManifest from "../../../../../server/Fixtures/plugin-manifests/notion.json";
 import {
   actionErrorForPlugin,
+  activePluginScopes,
   administratorNames,
   callerPolicySummary,
   focusPluginActionAfterErrorDismissal,
+  focusPluginScopeChangeFallback,
+  identifiableScopeSentence,
   pluginActionButtonState,
   pluginActionConfirmation,
   pluginActionErrorMessage,
+  pluginConsentScopeAction,
   pluginDetailErrorMessage,
   pluginMarketplaceNeedsDetailFocus,
   type PluginActionFocusTarget,
   pluginRoleState,
+  pluginScopeChangeFallbackKind,
+  pluginScopeConsentCompletion,
+  pluginScopeChangeMessage,
+  scopeSentence,
+  settlePluginScopeChanges,
   workspaceInstallationLabel,
 } from "./model";
 
@@ -50,12 +63,6 @@ describe("plugin marketplace copy", () => {
       title: "Linear 설치를 해제할까요?",
       description: "Linear 앱의 모든 멤버 권한이 함께 회수됩니다.",
       confirmLabel: "설치 해제",
-    });
-    expect(pluginActionConfirmation({
-      kind: "revokeGrant", pluginId: "linear", pluginName: "Linear", scope: "linear:read",
-    })).toMatchObject({
-      title: "Linear 권한을 회수할까요?",
-      confirmLabel: "내 권한 회수",
     });
   });
 
@@ -99,6 +106,52 @@ describe("plugin marketplace copy", () => {
     expect(focusPluginActionAfterErrorDismissal(disconnected)).toBe(false);
   });
 
+  it("returns a completed grant to its still-present revoke control", () => {
+    const ownerDocument = { activeElement: null as Element | null };
+    const target = {
+      isConnected: true,
+      disabled: false,
+      getAttribute: () => null,
+      ownerDocument,
+      focus: vi.fn(() => {
+        ownerDocument.activeElement = target as unknown as Element;
+      }),
+    };
+    expect(pluginScopeChangeFallbackKind("grant")).toBe("revoke");
+    expect(pluginScopeChangeFallbackKind("revoke")).toBe("grant");
+    expect(focusPluginScopeChangeFallback(target)).toBe(true);
+    expect(target.focus).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim focus arrived when the replacement is blocked or focus is a no-op", () => {
+    const focus = vi.fn();
+    const ownerDocument = { activeElement: null as Element | null };
+    expect(focusPluginScopeChangeFallback({
+      isConnected: true,
+      disabled: true,
+      getAttribute: () => null,
+      ownerDocument,
+      focus,
+    })).toBe(false);
+    expect(focus).not.toHaveBeenCalled();
+    expect(focusPluginScopeChangeFallback({
+      isConnected: true,
+      disabled: false,
+      getAttribute: (name) => name === "aria-disabled" ? "true" : null,
+      ownerDocument,
+      focus,
+    })).toBe(false);
+    expect(focus).not.toHaveBeenCalled();
+    expect(focusPluginScopeChangeFallback({
+      isConnected: true,
+      disabled: false,
+      getAttribute: () => null,
+      ownerDocument,
+      focus,
+    })).toBe(false);
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
   it("identifies administrators by handle and keeps an action error with its app", () => {
     expect(administratorNames([{
       displayName: "김인턴", handle: "intern-kim", role: "admin", status: "active",
@@ -107,5 +160,98 @@ describe("plugin marketplace copy", () => {
     const error = new ApiError(403, "plugin serverPolicy rejects installation");
     expect(actionErrorForPlugin(action, "linear", error)).toBeNull();
     expect(actionErrorForPlugin(action, "github", error)).toContain("워크스페이스 정책");
+  });
+
+  it("builds scope grants only after the consent surface explicitly confirms", () => {
+    const input = {
+      kind: "grant" as const,
+      pluginId: "github",
+      pluginName: "GitHub",
+      declaredScopes: ["github:read", "github:write"],
+      selectedScopes: ["github:read", "not-declared:admin"],
+    };
+    expect(pluginConsentScopeAction({ ...input, confirmed: false })).toBeNull();
+    expect(pluginConsentScopeAction({ ...input, confirmed: true })).toEqual({
+      kind: "grantScopes",
+      pluginId: "github",
+      pluginName: "GitHub",
+      scopes: ["github:read"],
+    });
+  });
+
+  it("derives active scopes from the effective tool policy rather than installation", () => {
+    const tools = [
+      { name: "github.list", scopes: ["github:read"] },
+      { name: "github.create", scopes: ["github:write"] },
+    ];
+    expect(activePluginScopes(tools, [{
+      name: "github.list", risk: "read", approvalTier: "read_only",
+    }])).toEqual(["github:read"]);
+  });
+
+  it("gives every distinct seeded scope a distinct sentence without dropping unknown actions", () => {
+    const scopes = [...new Set([
+      githubManifest,
+      notionManifest,
+      linearManifest,
+      driveManifest,
+    ].flatMap((manifest) => manifest.mcp.tools.flatMap((tool) => tool.scopes)))];
+    const sentences = scopes.map(scopeSentence);
+    expect(new Set(sentences).size).toBe(scopes.length);
+    expect(scopeSentence("github:read")).toBe("github 읽기 권한");
+    expect(scopeSentence("github:write")).toBe("github 쓰기 권한");
+    expect(scopeSentence("notion:comment")).toBe("notion 댓글 권한");
+    expect(scopeSentence("notion:admin")).toBe("notion 관리 권한");
+    expect(scopeSentence("google_workspace:manage_shared_drive_permissions"))
+      .toBe("google workspace shared drive 관리 권한");
+    expect(scopeSentence("no-separator")).toBe("사용 권한");
+    expect(identifiableScopeSentence("no-separator"))
+      .toBe("사용 권한 (no-separator)");
+    expect(scopeSentence("notion:comment")).not.toBe(scopeSentence("notion:admin"));
+  });
+
+  it("keeps partial scope failures separate from completed server responses", async () => {
+    const calls: string[] = [];
+    const outcomes = await settlePluginScopeChanges(
+      ["github:read", "github:issues", "github:write"],
+      async (scope) => {
+        calls.push(scope);
+        if (scope === "github:issues") throw new Error("policy changed");
+      }
+    );
+    expect(calls).toEqual(["github:read", "github:issues", "github:write"]);
+    expect(outcomes.map((outcome) => [outcome.scope, outcome.succeeded])).toEqual([
+      ["github:read", true],
+      ["github:issues", false],
+      ["github:write", true],
+    ]);
+    expect(pluginScopeChangeMessage("grant", outcomes))
+      .toContain("2개 권한을 허용했습니다: github 읽기 권한, github 쓰기 권한. 1개는 변경하지 못했습니다");
+  });
+
+  it("keeps a full scope failure in the dialog and reports every distinct cause", () => {
+    const repeatedCause = pluginActionErrorMessage(new ApiError(403, "not allowed"));
+    const sameCauseCompletion = pluginScopeConsentCompletion([
+      { scope: "notion:read", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:comment", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:write", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:admin", succeeded: false, error: new ApiError(403, "not allowed") },
+    ]);
+    expect(sameCauseCompletion.dismissDialog).toBe(false);
+    if (sameCauseCompletion.dismissDialog) throw new Error("expected retained dialog");
+    expect(sameCauseCompletion.error.split(repeatedCause)).toHaveLength(2);
+    expect(sameCauseCompletion.error).toContain(
+      "영향받은 권한: notion 읽기 권한 (notion:read), notion 댓글 권한 (notion:comment), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)"
+    );
+
+    const completion = pluginScopeConsentCompletion([
+      { scope: "notion:comment", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:admin", succeeded: false, error: new ApiError(404, "not found") },
+    ]);
+    expect(completion.dismissDialog).toBe(false);
+    if (completion.dismissDialog) throw new Error("expected retained dialog");
+    expect(completion.error).toContain("2가지 원인을 권한별로 확인하세요.");
+    expect(completion.error).toContain("notion 댓글 권한 (notion:comment): 이 앱은");
+    expect(completion.error).toContain("notion 관리 권한 (notion:admin): 앱 또는 내 권한을");
   });
 });

@@ -1,11 +1,24 @@
-import { ApiError, type MembershipRole } from "@/lib/api";
+import {
+  ApiError,
+  type MembershipRole,
+  type PluginManifestTool,
+  type PluginPolicyTool,
+} from "@/lib/api";
 import { NetworkError } from "@/lib/http";
 
 export type PluginAction =
   | { kind: "install"; pluginId: string; pluginName: string }
   | { kind: "uninstall"; pluginId: string; pluginName: string }
-  | { kind: "grant"; pluginId: string; pluginName: string; scope: string }
-  | { kind: "revokeGrant"; pluginId: string; pluginName: string; scope: string };
+  | { kind: "grantScopes"; pluginId: string; pluginName: string; scopes: string[] }
+  | { kind: "revokeScopes"; pluginId: string; pluginName: string; scopes: string[] };
+
+export type PluginScopeChangeKind = "grant" | "revoke";
+
+export type PluginScopeChangeOutcome = {
+  scope: string;
+  succeeded: boolean;
+  error?: unknown;
+};
 
 export type PluginRoleState = "checking" | "known" | "unknown";
 
@@ -24,6 +37,11 @@ export function pluginMarketplaceNeedsDetailFocus(
 }
 
 export type PluginActionFocusTarget = Pick<HTMLButtonElement, "isConnected" | "focus">;
+export type PluginScopeFocusTarget = PluginActionFocusTarget & {
+  disabled?: boolean;
+  getAttribute?: (name: string) => string | null;
+  ownerDocument?: Pick<Document, "activeElement">;
+};
 
 /** Keeps the keyboard position on the action that produced a dismissed error. */
 export function focusPluginActionAfterErrorDismissal(
@@ -32,6 +50,28 @@ export function focusPluginActionAfterErrorDismissal(
   if (!actionButton?.isConnected) return false;
   actionButton.focus();
   return true;
+}
+
+/** A completed scope change replaces its own action with the complementary one. */
+export function pluginScopeChangeFallbackKind(
+  kind: PluginScopeChangeKind
+): PluginScopeChangeKind {
+  return kind === "grant" ? "revoke" : "grant";
+}
+
+/** Keeps focus in the detail controls when a completed scope change unmounts its opener. */
+export function focusPluginScopeChangeFallback(
+  actionButton: PluginScopeFocusTarget | null
+): boolean {
+  if (
+    !actionButton?.isConnected ||
+    actionButton.disabled === true ||
+    actionButton.getAttribute?.("aria-disabled") === "true"
+  ) {
+    return false;
+  }
+  actionButton.focus();
+  return actionButton.ownerDocument?.activeElement === actionButton as unknown as Element;
 }
 
 /**
@@ -84,14 +124,175 @@ export function approvalLabel(tier: string | undefined): string | null {
   return null;
 }
 
-/** Swift marketplace's `github:read` → `github 읽기 권한` rule, unchanged. */
+/** Turns a manifest identifier into a short sentence; the exact id is separate metadata. */
 export function scopeSentence(scope: string): string {
   const [resource, action] = scope.split(":", 2);
-  if (!resource || !action) return "사용 권한 1개";
+  if (!resource || !action) return "사용 권한";
   const name = resource.replaceAll("_", " ");
   if (action === "read") return `${name} 읽기 권한`;
   if (action === "write") return `${name} 쓰기 권한`;
-  return `${name} 사용 권한`;
+  if (action === "admin") return `${name} 관리 권한`;
+  if (action === "comment") return `${name} 댓글 권한`;
+  const managed = action.match(/^manage_(.+)_permissions$/);
+  if (managed) return `${name} ${managed[1].replaceAll("_", " ")} 관리 권한`;
+  return `${name} ${action.replaceAll("_", " ")} 권한`;
+}
+
+/**
+ * Compact summaries do not have the dialog's separate monospace id row.
+ * Preserve malformed or delimiter-free identifiers there so two unknown
+ * scopes never collapse into the same unreportable "사용 권한" label.
+ */
+export function identifiableScopeSentence(scope: string): string {
+  const sentence = scopeSentence(scope);
+  return sentence === "사용 권한" ? `${sentence} (${scope})` : sentence;
+}
+
+/** Manifest order is product order: it is the order the publisher declared. */
+export function declaredPluginScopes(tools: readonly PluginManifestTool[]): string[] {
+  return [...new Set(tools.flatMap((tool) => tool.scopes))];
+}
+
+/**
+ * The catalog only projects tools that the calling member can actually use.
+ * Joining those tool names back to manifest scope declarations gives the UI a
+ * scope-level view without inventing a new read endpoint.
+ */
+export function activePluginScopes(
+  tools: readonly PluginManifestTool[],
+  policyTools: readonly PluginPolicyTool[]
+): string[] {
+  const activeToolNames = new Set(policyTools.map((tool) => tool.name));
+  return declaredPluginScopes(tools).filter((scope) => tools.some(
+    (tool) => activeToolNames.has(tool.name) && tool.scopes.includes(scope)
+  ));
+}
+
+export function remainingPluginScopes(
+  declaredScopes: readonly string[],
+  activeScopes: readonly string[]
+): string[] {
+  const active = new Set(activeScopes);
+  return declaredScopes.filter((scope) => !active.has(scope));
+}
+
+/**
+ * A scope POST has exactly one construction path: an open consent surface
+ * must have been explicitly confirmed, and its selection is intersected with
+ * the manifest before it can become a mutation action.
+ */
+export function pluginConsentScopeAction({
+  kind,
+  pluginId,
+  pluginName,
+  declaredScopes,
+  selectedScopes,
+  confirmed,
+}: {
+  kind: PluginScopeChangeKind;
+  pluginId: string;
+  pluginName: string;
+  declaredScopes: readonly string[];
+  selectedScopes: readonly string[];
+  confirmed: boolean;
+}): Extract<PluginAction, { kind: "grantScopes" | "revokeScopes" }> | null {
+  if (!confirmed) return null;
+  const selected = new Set(selectedScopes);
+  const scopes = declaredScopes.filter((scope) => selected.has(scope));
+  if (scopes.length === 0) return null;
+  return kind === "grant"
+    ? { kind: "grantScopes", pluginId, pluginName, scopes }
+    : { kind: "revokeScopes", pluginId, pluginName, scopes };
+}
+
+/**
+ * The server accepts one scope per request. Continue after a failure so the
+ * receipt names every confirmed server response instead of collapsing a
+ * partial result into a misleading all-or-nothing state.
+ */
+export async function settlePluginScopeChanges(
+  scopes: readonly string[],
+  changeScope: (scope: string) => Promise<unknown>
+): Promise<PluginScopeChangeOutcome[]> {
+  const outcomes: PluginScopeChangeOutcome[] = [];
+  for (const scope of new Set(scopes)) {
+    try {
+      await changeScope(scope);
+      outcomes.push({ scope, succeeded: true });
+    } catch (error) {
+      outcomes.push({ scope, succeeded: false, error });
+    }
+  }
+  return outcomes;
+}
+
+export type PluginScopeConsentCompletion =
+  | { dismissDialog: true }
+  | { dismissDialog: false; error: string };
+
+/**
+ * A scope POST settles independently, so a transport success can still contain
+ * only failures. Keep that selection in the dialog when every request failed:
+ * retrying the same checked scopes is the next useful action. Report every
+ * distinct actionable cause: a mixed 403/404 batch must not sound as if all
+ * requests failed for the first scope's reason.
+ */
+export function pluginScopeConsentCompletion(
+  outcomes: readonly PluginScopeChangeOutcome[]
+): PluginScopeConsentCompletion {
+  const failed = outcomes.filter((outcome) => !outcome.succeeded);
+  if (outcomes.length > 0 && failed.length === outcomes.length) {
+    const causes = [...new Set(failed.map((outcome) =>
+      pluginActionErrorMessage(outcome.error)
+    ))];
+    if (causes.length === 1) {
+      const affectedScopes = failed.map((outcome) =>
+        `${scopeSentence(outcome.scope)} (${outcome.scope})`
+      );
+      return {
+        dismissDialog: false,
+        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]}\n영향받은 권한: ${affectedScopes.join(", ")}`,
+      };
+    }
+    const scopedErrors = failed.map((outcome) =>
+      `• ${scopeSentence(outcome.scope)} (${outcome.scope}): ${pluginActionErrorMessage(outcome.error)}`
+    );
+    return {
+      dismissDialog: false,
+      error: `선택한 권한을 변경하지 못했습니다. ${causes.length}가지 원인을 권한별로 확인하세요.\n${scopedErrors.join("\n")}`,
+    };
+  }
+  return { dismissDialog: true };
+}
+
+export function pluginScopeChangeMessage(
+  kind: PluginScopeChangeKind,
+  outcomes: readonly PluginScopeChangeOutcome[]
+): string {
+  const completed = outcomes.filter((outcome) => outcome.succeeded);
+  const failed = outcomes.filter((outcome) => !outcome.succeeded);
+  const verb = kind === "grant" ? "허용" : "회수";
+  const completedNames = completed.map((outcome) => scopeSentence(outcome.scope)).join(", ");
+  if (failed.length === 0) {
+    return `선택한 ${completed.length}개 권한을 ${verb}했습니다: ${completedNames}`;
+  }
+  if (completed.length === 0) {
+    return `선택한 권한을 ${verb}하지 못했습니다. 현재 권한을 다시 확인하세요.`;
+  }
+  return `${completed.length}개 권한을 ${verb}했습니다: ${completedNames}. ${failed.length}개는 변경하지 못했습니다: ${failed.map((outcome) => scopeSentence(outcome.scope)).join(", ")}`;
+}
+
+export function pluginScopeChangeTone(
+  outcomes: readonly PluginScopeChangeOutcome[]
+): "error" | "neutral" {
+  return outcomes.some((outcome) => !outcome.succeeded) ? "error" : "neutral";
+}
+
+export function toolsForPluginScope(
+  tools: readonly PluginManifestTool[],
+  scope: string
+): PluginManifestTool[] {
+  return tools.filter((tool) => tool.scopes.includes(scope));
 }
 
 export function callerPolicySummary(
@@ -184,18 +385,11 @@ export function pluginDetailErrorMessage(error: unknown): string {
 }
 
 export function pluginActionConfirmation(action: Extract<PluginAction, {
-  kind: "uninstall" | "revokeGrant";
+  kind: "uninstall";
 }>): { title: string; description: string; confirmLabel: string } {
-  if (action.kind === "uninstall") {
-    return {
-      title: `${action.pluginName} 설치를 해제할까요?`,
-      description: `${action.pluginName} 앱의 모든 멤버 권한이 함께 회수됩니다.`,
-      confirmLabel: "설치 해제",
-    };
-  }
   return {
-    title: `${action.pluginName} 권한을 회수할까요?`,
-    description: `${action.pluginName}의 ${scopeSentence(action.scope)}을 회수하면 이 권한으로 사용할 수 있던 도구가 즉시 사라집니다.`,
-    confirmLabel: "내 권한 회수",
+    title: `${action.pluginName} 설치를 해제할까요?`,
+    description: `${action.pluginName} 앱의 모든 멤버 권한이 함께 회수됩니다.`,
+    confirmLabel: "설치 해제",
   };
 }

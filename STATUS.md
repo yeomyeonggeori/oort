@@ -1,5 +1,13 @@
 # momo 진행 현황
 
+## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
+
+- 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.
+- `npm run typecheck`·Vitest 877·`npm run build`·lint(기존 warning 4)·design preflight 10/10 PASS. Playwright `gate:wire`·`gate:shell`은 이 worker sandbox에서 Chromium이 런치 직후 종료되어 runtime-unverified이며, fresh design-review는 오케스트레이터 실행 대기다.
+- 3R: scope 포커스 완료를 실제 `activeElement` 도착으로 판정하고 160ms catalog/detail 편차 게이트를 추가했다. 동의 모달은 고정 헤더·스크롤 본문·고정 푸터로 분리했으며 진행 버튼 대비, 포커스 링 추종, 위험 칩, 혼합 실패·취소 후 receipt를 보강했다. typecheck·Vitest 881·build·preflight 10/10 PASS, `gate:shell`은 Chromium Mach-port 권한 거부로 오케스트레이터 실행 대기(`runtime-unverified`).
+- 4R: 짧은 창의 고정 헤더를 제목만 남기고 권한 위험·승인 칩을 첫 프레임에 노출했다. 설치자 데이터가 없는 관리자 명단은 문의 대상 역할로만 표현하며, 패널 도구 칩·scope 식별 폴백·scope별 오류·진행 중 체크박스 어포던스를 국소 정리했다. typecheck·Vitest 881·build·preflight 10/10 PASS, `gate:shell`은 Chromium Mach-port 권한 거부로 오케스트레이터 실행 대기(`runtime-unverified`).
+- **5R + 오케스트레이터 실측 완료(2026-07-28)**: 단일 원인 실패는 원인을 한 번만 말하고 영향받은 권한을 나열한다(403×N이 가장 흔한 실패 모양이라 4R의 권한별 반복이 자기모순이었다). `워크스페이스 설치됨` 칩을 제목 블록으로 올려 위조 불가능한 신호가 폴드 위에 남는다. **게이트 실행·red proof 4종 성립**: 포커스 핸드오프(160ms 편차에서 무조건-true 복원 시 타임아웃 FAIL) · 스크롤 상자(제거 시 버튼 top 878 vs 패널 568) · 링 여백(`scroll-pt-1` 제거 시 gap 0) · 단일 원인(분기 해제 시 `policyCauseCount:4`로 FAIL). 881 tests · `gate:wire`·`gate:shell` PASS · preflight 10/10. design-review **5R PASS(Blocker 0·High 0)**.
+
 ## MOMO-640 웹 세션 저장 경계 + Tauri CSP (#842, 2026-07-27)
 
 - Tauri 셸 번들은 `tauri.conf.json`의 CSP로 same-origin script·font·asset만 허용하고, xterm의 검증된 런타임 style 쓰기와 런타임 API/realtime/관전 host 연결만 제한적으로 연다. `gate:csp`는 이 설정값을 직접 읽어 preview 헤더로 적용한 뒤 로그인→셸→xterm 관전 경로의 CSP 위반 0건을 단정한다.
