@@ -707,6 +707,10 @@ async function assertPluginScopeConsent(page, size) {
       '[data-testid=${JSON.stringify(`plugin-scope-${NOTION_SCOPE_FIXTURE[0][0]}`)}]'
     )`
   );
+  // The app scrolls the focused control into view on the NEXT frame (Radix
+  // moves focus with preventScroll), so a measurement taken the instant focus
+  // lands reads the pre-scroll position. Let the scroll settle first.
+  await page.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))");
   const wrappedFocus = await page.evaluate(`(() => {
     const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
     const checkbox = document.querySelector(
