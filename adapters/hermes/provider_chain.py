@@ -179,16 +179,13 @@ class ProviderCallError(RuntimeError):
 def is_fallback_status(status: Optional[int]) -> bool:
     """True when this HTTP status means "the provider produced no answer".
 
-    Matches `MomoAdapter._is_retryable_http_status` so the adapter and the momo
-    gateway classify a cascade candidate the same way: 429 (rate limited), any
-    5xx, and the two 4xx codes that are literally "no response was produced"
-    (408 Request Timeout, 425 Too Early). Every other 4xx is a validation/user
-    error and must surface to the user instead of silently re-billing a second
-    provider.
+    The cascade follows ADR-0135: only 429 (rate limited), any 5xx, or no HTTP
+    response advances to the next provider. Adapter-to-momo callback retries
+    are a separate transport policy; 408 and 425 remain terminal here.
     """
     if status is None:
         return True
-    return status in (408, 425, 429) or status >= 500
+    return status == 429 or status >= 500
 
 
 def classify_provider_failure(
@@ -536,7 +533,7 @@ class QuotaSnapshot:
     provider_ref: str
     window: str
     remaining_ratio: float
-    resets_at: str
+    resets_at: Optional[str]
     probed_at: str
 
     def to_payload(self) -> dict[str, Any]:
@@ -544,7 +541,7 @@ class QuotaSnapshot:
             "provider_ref": str(self.provider_ref),
             "window": str(self.window),
             "remaining_ratio": float(self.remaining_ratio),
-            "resets_at": str(self.resets_at),
+            "resets_at": self.resets_at,
             "probed_at": str(self.probed_at),
         }
         return assert_snapshot_credential_free(payload)
@@ -571,13 +568,18 @@ def assert_snapshot_credential_free(payload: Mapping[str, Any]) -> dict[str, Any
         raise ProviderQuotaContractError("remaining_ratio must be a number")
     if not 0.0 <= float(ratio) <= 1.0:
         raise ProviderQuotaContractError("remaining_ratio must be within [0,1]")
-    for key in ("provider_ref", "resets_at", "probed_at"):
+    for key in ("provider_ref", "probed_at"):
         value = payload[key]
         if not isinstance(value, str) or not value.strip():
             raise ProviderQuotaContractError(f"{key} must be a non-empty string")
-    for key in ("resets_at", "probed_at"):
+    for key in ("probed_at",):
         if not _looks_like_iso_utc(str(payload[key])):
             raise ProviderQuotaContractError(f"{key} must be an ISO-8601 UTC timestamp")
+    resets_at = payload["resets_at"]
+    if resets_at is not None and (
+        not isinstance(resets_at, str) or not _looks_like_iso_utc(resets_at)
+    ):
+        raise ProviderQuotaContractError("resets_at must be an ISO-8601 UTC timestamp or null")
     serialized = json.dumps(payload, sort_keys=True)
     if _CREDENTIAL_VALUE_SCANNER.search(serialized):
         raise ProviderQuotaContractError(
@@ -660,10 +662,10 @@ def snapshot_from_window_payload(
 
     moment = now or datetime.now(timezone.utc)
     resets_at_raw = _first(raw, "resets_at", "resetsAt", "reset_at", "resetAt")
-    resets_at = ""
+    resets_at: Optional[str] = None
     if isinstance(resets_at_raw, str) and _looks_like_iso_utc(resets_at_raw.strip()):
         resets_at = resets_at_raw.strip()
-    if not resets_at:
+    if resets_at is None:
         delta = parse_reset_delta_seconds(
             _first(
                 raw,
@@ -674,9 +676,8 @@ def snapshot_from_window_payload(
                 "reset",
             )
         )
-        if delta is None:
-            return None
-        resets_at = iso_utc(moment + timedelta(seconds=max(0.0, delta)))
+        if delta is not None:
+            resets_at = iso_utc(moment + timedelta(seconds=max(0.0, delta)))
     return QuotaSnapshot(
         provider_ref=provider_ref,
         window=window,
