@@ -107,6 +107,7 @@ services:
       MOMO_LIVEKIT_API_KEY: "$LIVEKIT_API_KEY"
       MOMO_LIVEKIT_API_SECRET: "$LIVEKIT_API_SECRET"
       MOMO_LIVEKIT_URL: "$LIVEKIT_URL"
+      MOMO_TRANSCRIPTION_MODEL: small
       MOMO_DRIVE_ARCHIVE_BACKEND: stub
       MOMO_DRIVE_ARCHIVE_STUB_BASE_URL: "http://127.0.0.1:$GATE_PORT"
 YAML
@@ -563,6 +564,19 @@ sample huddle-active get "/v1/workspaces/{workspaceId}/channels/{channelId}/hudd
 sample huddle-join post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/join" \
   "/v1/workspaces/$WS/huddles/$HUDDLE_ID/join" 200 "" "$ACCESS"
 guard_jq '.ttlSeconds == 600 and (.token | type == "string")' "huddle join returns a 10-minute grant"
+sample huddle-recording-without-consent post \
+  "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/recordings" 409 "" "$ACCESS"
+sample huddle-recording-consent post \
+  "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recording-consent" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/recording-consent" 200 "" "$ACCESS"
+guard_jq '.noticeVersion == 1 and (.consentedAtMs | type == "number")' \
+  "huddle recording consent returns a durable receipt"
+sample huddle-recording-start post \
+  "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/recordings" 201 "" "$ACCESS"
+guard_jq '.status == "requested" and .model == "small"' \
+  "huddle recording starts only after explicit consent"
 sample huddle-leave post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/leave" \
   "/v1/workspaces/$WS/huddles/$HUDDLE_ID/leave" 200 "" "$ACCESS"
 guard_jq '.ended == true and (.huddle.endedAtMs | type == "number")' \

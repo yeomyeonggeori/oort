@@ -76,6 +76,8 @@
 | Node.js 24.4.1 | MIT(검증됨, upstream LICENSE) | 선택적 eve profile 런타임 베이스 |
 | eve 0.27.0 | Apache-2.0(검증됨, npm package metadata/NOTICE) | 선택적 커스텀 에이전트 런타임 + momo 채널 |
 | @workflow/world-postgres 5.0.0-beta.27 | Apache-2.0(검증됨, npm package metadata/LICENSE) | eve durable workflow state용 별도 PostgreSQL world |
+| LiveKit Egress 1.9.1 | Apache-2.0(검증됨, upstream LICENSE) | 선택적 `transcription` profile 참가자 Track 녹음 |
+| faster-whisper 1.2.1 | MIT(검증됨, upstream LICENSE) | 개발/운영자용 사후 전사 실측 하니스 |
 
 `examples/eve-momo-channel/package-lock.json`의 eve world 런타임 그래프는
 Apache-2.0, MIT, ISC, BSD-2/3-Clause, 0BSD, BlueOak-1.0.0, Python-2.0 및

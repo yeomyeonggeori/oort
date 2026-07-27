@@ -168,6 +168,7 @@ cp infra/.env.example .env
 | `JWT_HMAC` | 서버 | App access(15m)/refresh(30d) 토큰 HS256 서명 시크릿(§7.1). |
 | `MOMO_LIVEKIT_API_KEY` / `MOMO_LIVEKIT_API_SECRET` | 서버 | ADR-0122 허들 room grant의 `iss`와 HS256 서명 키. App JWT/Centrifugo 키와 분리하며 secret은 응답·audit·로그에 넣지 않는다. |
 | `MOMO_LIVEKIT_URL` | 서버 | 클라이언트에 반환할 LiveKit `http(s)`/`ws(s)` endpoint. 세 LiveKit 값 중 하나라도 없거나 URL이 잘못되면 허들 API는 503 `허들 미구성`으로 fail-closed한다. LiveKit 컨테이너 기동은 V-2 범위다. |
+| `MOMO_TRANSCRIPTION_MODEL` | 서버 | MOMO-646 실측 뒤 운영자가 고르는 사후 전사 모델. 미설정이면 녹음 시작 REST는 503으로 fail-closed한다. |
 | `LIVEKIT_PORT` / `LIVEKIT_RTC_TCP_PORT` | compose `huddle` profile | LiveKit signaling/HTTP(기본 7880)와 TCP RTC fallback(기본 7881)의 호스트 포트. |
 | `LIVEKIT_RTC_UDP_START` / `LIVEKIT_RTC_UDP_END` | compose `huddle` profile | 컨테이너의 제한된 UDP media range 50000~50100에 대응하는 같은 크기의 호스트 포트 범위. 기본 50000~50100. |
 | `EVE_PORT` | compose `eve` profile | eve HTTP/health 포트. 기본 28140이며 verifier는 실행 전 28140~28142 선점을 검사한다. |
@@ -691,6 +692,29 @@ scripts/verify_huddle_livekit.sh
 
 `runtime-unverified(worker)`: MOMO-470 worker는 Docker를 실행하지 않는다. 위 verifier의
 PASS evidence는 momo-main 오케스트레이터가 실제 실행한 뒤에만 기록한다.
+
+### 3.2.1 녹음 Egress + 사후 전사 옵트인
+
+MOMO-646의 Egress와 dev 전용 Redis는 기본 stack 및 기존 `huddle` profile에 포함되지
+않는다. 참가자별 Track egress와 사후 전사를 검증할 때만 `transcription` profile을
+명시한다. 이 profile은 LiveKit도 함께 활성화하며 Centrifugo 설정은 바꾸지 않는다.
+
+```sh
+docker compose -f infra/docker-compose.yml --profile transcription \
+  up -d transcription-redis livekit livekit-egress
+docker compose -f infra/docker-compose.yml --profile transcription \
+  ps transcription-redis livekit livekit-egress
+```
+
+서버에는 모델 판정 뒤 `MOMO_TRANSCRIPTION_MODEL`을 주입한다. 값이 없으면 녹음 시작
+REST는 503으로 fail-closed한다. 참가자 전원의
+`POST /v1/workspaces/:ws/huddles/:huddle/recording-consent`가 선행되지 않으면
+`POST /v1/workspaces/:ws/huddles/:huddle/recordings`는 409를 반환한다. 마지막 참가자
+퇴장 시 `huddle_transcription_job`이 queued로 생성된다.
+
+한국어 실측과 더미 무음 셀프테스트는
+`scripts/transcription/README.md`를 따른다. Egress/실오디오/동의 REST red 증명은
+오케스트레이터가 실행하며 worker 단계에서는 `runtime-unverified`다.
 
 ### 3.3 E2E compose static validation
 

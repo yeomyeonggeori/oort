@@ -224,7 +224,11 @@ enum AppBuilder {
         InboundMCPRoutes(db: db).add(to: authed)
         PlatformAdminRoutes(db: db).add(to: authed)
         DeviceRoutes(db: db).add(to: authed)
-        HuddleRoutes(db: db, liveKit: config.liveKit).add(to: authed)
+        HuddleRoutes(
+            db: db,
+            liveKit: config.liveKit,
+            transcriptionModel: ProcessInfo.processInfo.environment["MOMO_TRANSCRIPTION_MODEL"]
+        ).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
         DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
         let memoryQueryEmbedding: any MemoryQueryEmbedding

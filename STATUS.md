@@ -6,6 +6,12 @@
 - 유료 cloud 명시 opt-in + balance/slot gate 뒤 E2B create, cloud workd의 1회 token digest·자체 Ed25519 등록, pause/resume/destroy를 `work_host` 표면에 연결했다. `E2B_API_KEY` 부재는 T3만 읽기 쉬운 503으로 닫고 T1/T2는 무영향이다.
 - 서버 337 tests·WorkHostDaemon 27 tests(환경 mock 부재 3 skip) PASS. 격리 PG18/mock-E2B verifier는 키/잔액/슬롯 거부·원장/차감·pause 미계상·RLS·destroy PASS, pause를 wall-time 과금으로 되돌린 red proof는 의도대로 exit 1. 실 E2B smoke는 운영자 키 주입으로 오케스트레이터 실행 대기(`runtime-unverified`).
 
+## MOMO-646 허들 녹음·전사 실측 하니스 (#854, 2026-07-28)
+
+- small/medium/large-v3-turbo의 고정 모델 snapshot을 같은 한국어 코퍼스에 실행해 CER·처리시간·RTF를 내는 하니스와 더미 무음 mock 셀프테스트를 추가했다. 참가자 Track별 전사→타임스탬프 병합→화자 라벨만 수행하며 모델 판정은 비워뒀다.
+- `transcription` compose profile에 pinned LiveKit Egress+dev Redis를 옵트인으로 추가했고, 전사 queue/track은 기존 attachment FK만 쓴다. 녹음 동의 원장·전원 동의 fail-closed REST·채널 시스템 고지·종료 시 queued job을 추가했다.
+- server build/test와 정적·mock 검증은 worker에서 수행한다. Docker Egress 기동, 실오디오 3모델 실측, 동의 없는 녹음 409 red 증명은 오케스트레이터 전까지 `runtime-unverified`다.
+
 ## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
 
 - 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.

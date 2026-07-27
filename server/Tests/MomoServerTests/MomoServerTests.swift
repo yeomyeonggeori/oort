@@ -4106,6 +4106,30 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(lastParticipantLeft.type, "huddle_ended")
     }
 
+    func testHuddleRecordingConsentGateFailsClosed() {
+        XCTAssertFalse(
+            HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: 0, consentedParticipantCount: 0
+            )
+        )
+        XCTAssertFalse(
+            HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: 2, consentedParticipantCount: 1
+            )
+        )
+        XCTAssertTrue(
+            HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: 2, consentedParticipantCount: 2
+            )
+        )
+        XCTAssertNil(HuddleRoutes.validatedTranscriptionModel(nil))
+        XCTAssertNil(HuddleRoutes.validatedTranscriptionModel("  "))
+        XCTAssertEqual(
+            HuddleRoutes.validatedTranscriptionModel(" faster-whisper-small "),
+            "faster-whisper-small"
+        )
+    }
+
     func testHuddleMigrationAndRouteStaticContracts() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -4131,6 +4155,39 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(routes.contains("CentrifugoClient"))
         XCTAssertFalse(routes.contains("/api/publish"))
         XCTAssertFalse(routes.contains("apiSecret"))
+    }
+
+    func testHuddleTranscriptionMigrationAndRouteStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/046_huddle_transcription.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE huddle_recording_consent"))
+        XCTAssertTrue(migration.contains("CREATE TABLE huddle_transcription_job"))
+        XCTAssertTrue(migration.contains("REFERENCES attachment(workspace_id, id)"))
+        XCTAssertTrue(migration.contains("WHERE status = 'queued'"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(migration.contains("audio_path"))
+        XCTAssertFalse(migration.contains("transcript_path"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/HuddleRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("recording-consent"))
+        XCTAssertTrue(routes.contains("explicit consent from every active participant"))
+        XCTAssertTrue(routes.contains("insertRecordingNotice"))
+        XCTAssertTrue(routes.contains("enqueueTranscriptionIfRecordingEnded"))
+        XCTAssertTrue(routes.contains("MessageRoutes.broadcastPayload"))
+        XCTAssertFalse(routes.lowercased().contains("diarization"))
     }
 
     func testWorkspaceSearchCursorRoundTripAndLiteralLikePattern() throws {

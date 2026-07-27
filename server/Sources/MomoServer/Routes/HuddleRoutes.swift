@@ -22,6 +22,19 @@ struct HuddleDTO: ResponseEncodable, Decodable, Sendable, Equatable {
 struct HuddleResponse: ResponseEncodable { let huddle: HuddleDTO }
 struct ActiveHuddleResponse: ResponseEncodable { let huddle: HuddleDTO? }
 struct LeaveHuddleResponse: ResponseEncodable { let huddle: HuddleDTO; let ended: Bool }
+struct HuddleRecordingConsentResponse: ResponseEncodable {
+    let huddleId: String
+    let memberId: String
+    let noticeVersion: Int
+    let consentedAtMs: Int64
+}
+struct HuddleRecordingResponse: ResponseEncodable {
+    let id: String
+    let huddleId: String
+    let model: String
+    let status: String
+    let requestedAtMs: Int64
+}
 struct JoinHuddleResponse: ResponseEncodable {
     let huddle: HuddleDTO
     let livekitUrl: String
@@ -39,17 +52,29 @@ enum HuddleLifecycle {
     }
 }
 
+enum HuddleRecordingConsentGate {
+    static func allowsRecording(activeParticipantCount: Int, consentedParticipantCount: Int) -> Bool {
+        activeParticipantCount > 0 && activeParticipantCount == consentedParticipantCount
+    }
+}
+
 /// ADR-0122 V-1 huddle lifecycle. Every mutation is one tenant transaction:
 /// PostgreSQL lifecycle + audit + broadcast outbox. The relay is the only
 /// Centrifugo publisher.
 struct HuddleRoutes: Sendable {
     let db: Database
     let liveKit: LiveKitConfig?
+    let transcriptionModel: String?
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/channels/:ch/huddles", use: start)
         group.post("/v1/workspaces/:ws/huddles/:huddle/join", use: join)
         group.post("/v1/workspaces/:ws/huddles/:huddle/leave", use: leave)
+        group.post(
+            "/v1/workspaces/:ws/huddles/:huddle/recording-consent",
+            use: consentToRecording
+        )
+        group.post("/v1/workspaces/:ws/huddles/:huddle/recordings", use: startRecording)
         group.get("/v1/workspaces/:ws/channels/:ch/huddles/active", use: active)
     }
 
@@ -130,6 +155,27 @@ struct HuddleRoutes: Sendable {
             )
             guard scope.endedAt == nil else {
                 throw HTTPError(.conflict, message: "huddle has ended")
+            }
+            let recordingRows = try await conn.query(
+                "SELECT 1 FROM huddle_recording WHERE huddle_id = \(huddleID) AND status IN ('requested','recording')",
+                logger: db.logger
+            ).collect()
+            if recordingRows.first != nil {
+                let consentRows = try await conn.query(
+                    """
+                    SELECT 1
+                      FROM huddle_recording_consent
+                     WHERE huddle_id = \(huddleID)
+                       AND member_id = \(principal.memberID)
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard consentRows.first != nil else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "recording consent is required before joining this recorded huddle"
+                    )
+                }
             }
             let inserted = try await conn.query(
                 """
@@ -217,6 +263,10 @@ struct HuddleRoutes: Sendable {
                     "UPDATE huddle SET ended_at = now() WHERE id = \(huddleID) AND ended_at IS NULL",
                     logger: db.logger
                 )
+                try await Self.enqueueTranscriptionIfRecordingEnded(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    huddleID: huddleID, channelID: scope.channelID
+                )
             }
             try await Self.insertEvent(
                 conn: conn, logger: db.logger, workspaceID: workspaceID,
@@ -237,6 +287,151 @@ struct HuddleRoutes: Sendable {
 
         return try LeaveHuddleResponse(huddle: outcome.0, ended: outcome.1)
             .response(from: request, context: context)
+    }
+
+    @Sendable
+    func consentToRecording(_ request: Request, context: AppRequestContext) async throws -> Response {
+        _ = try configuredLiveKit()
+        let principal = try context.requirePrincipal()
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let huddleID = try Self.huddleID(context)
+        let consentedAt: Date = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let scope = try await Self.lockHuddleForMember(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                huddleID: huddleID, principal: principal
+            )
+            guard scope.endedAt == nil else {
+                throw HTTPError(.conflict, message: "huddle has ended")
+            }
+            let rows = try await conn.query(
+                """
+                INSERT INTO huddle_recording_consent
+                  (workspace_id, huddle_id, member_id, notice_version)
+                VALUES (\(workspaceID), \(huddleID), \(principal.memberID), 1)
+                ON CONFLICT (huddle_id, member_id) DO UPDATE
+                  SET consented_at = huddle_recording_consent.consented_at
+                RETURNING consented_at
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.internalServerError, message: "recording consent was not stored")
+            }
+            let recordedAt = try row.decode(Date.self)
+            try await Self.insertAudit(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                principal: principal, action: "huddle.recording_consent.granted",
+                huddleID: huddleID,
+                detailJSON: try Self.auditDetail(
+                    schema: "momo.huddle.recording_consent.granted.v1",
+                    channelID: scope.channelID
+                )
+            )
+            return recordedAt
+        }
+        return try HuddleRecordingConsentResponse(
+            huddleId: huddleID.uuidString.lowercased(),
+            memberId: principal.memberID.uuidString.lowercased(),
+            noticeVersion: 1,
+            consentedAtMs: Int64(consentedAt.timeIntervalSince1970 * 1_000)
+        ).response(from: request, context: context)
+    }
+
+    @Sendable
+    func startRecording(_ request: Request, context: AppRequestContext) async throws -> Response {
+        _ = try configuredLiveKit()
+        guard let model = Self.validatedTranscriptionModel(transcriptionModel) else {
+            throw HTTPError(.serviceUnavailable, message: "huddle transcription is not configured")
+        }
+        let principal = try context.requirePrincipal()
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let huddleID = try Self.huddleID(context)
+        let outcome: (HuddleRecordingResponse, Bool) = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let scope = try await Self.lockHuddleForMember(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                huddleID: huddleID, principal: principal
+            )
+            guard scope.endedAt == nil else {
+                throw HTTPError(.conflict, message: "huddle has ended")
+            }
+            let existing = try await Self.loadRecording(
+                conn: conn, logger: db.logger, huddleID: huddleID
+            )
+            if let existing { return (existing, false) }
+
+            let participantIDs = try await Self.activeParticipantIDs(
+                conn: conn, logger: db.logger, huddleID: huddleID
+            )
+            let consentRows = try await conn.query(
+                """
+                SELECT member_id
+                  FROM huddle_recording_consent
+                 WHERE huddle_id = \(huddleID)
+                   AND member_id = ANY(\(participantIDs))
+                """,
+                logger: db.logger
+            ).collect()
+            guard HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: participantIDs.count,
+                consentedParticipantCount: consentRows.count
+            ) else {
+                throw HTTPError(
+                    .conflict,
+                    message: "recording requires explicit consent from every active participant"
+                )
+            }
+
+            let noticeMessageID = try await Self.insertRecordingNotice(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                channelID: scope.channelID, huddleID: huddleID,
+                authorMemberID: principal.memberID
+            )
+            let rows = try await conn.query(
+                """
+                INSERT INTO huddle_recording
+                  (workspace_id, huddle_id, channel_id, requested_by, model, notice_message_id)
+                VALUES
+                  (\(workspaceID), \(huddleID), \(scope.channelID), \(principal.memberID),
+                   \(model), \(noticeMessageID))
+                RETURNING id, requested_at
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.internalServerError, message: "recording request was not created")
+            }
+            let (recordingID, requestedAt) = try row.decode((UUID, Date).self)
+            try await Self.insertAudit(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                principal: principal, action: "huddle.recording.requested",
+                huddleID: huddleID,
+                detailJSON: try Self.auditDetail(
+                    schema: "momo.huddle.recording.requested.v1",
+                    channelID: scope.channelID,
+                    strings: [
+                        "recording_id": recordingID.uuidString.lowercased(),
+                        "model": model,
+                    ]
+                )
+            )
+            return (
+                HuddleRecordingResponse(
+                    id: recordingID.uuidString.lowercased(),
+                    huddleId: huddleID.uuidString.lowercased(),
+                    model: model,
+                    status: "requested",
+                    requestedAtMs: Int64(requestedAt.timeIntervalSince1970 * 1_000)
+                ),
+                true
+            )
+        }
+        var response = try outcome.0.response(from: request, context: context)
+        response.status = outcome.1 ? .created : .ok
+        return response
     }
 
     @Sendable
@@ -269,6 +464,13 @@ struct HuddleRoutes: Sendable {
             throw HTTPError(.serviceUnavailable, message: "허들 미구성")
         }
         return liveKit
+    }
+
+    static func validatedTranscriptionModel(_ raw: String?) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty, value.count <= 255
+        else { return nil }
+        return value
     }
 
     private func withTenantTransactionUnwrapped<Result: Sendable>(
@@ -400,6 +602,122 @@ struct HuddleRoutes: Sendable {
         return decoded
     }
 
+    private static func loadRecording(
+        conn: PostgresConnection,
+        logger: Logger,
+        huddleID: UUID
+    ) async throws -> HuddleRecordingResponse? {
+        let rows = try await conn.query(
+            """
+            SELECT id, model, status, requested_at
+              FROM huddle_recording
+             WHERE huddle_id = \(huddleID)
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else { return nil }
+        let (id, model, status, requestedAt) = try row.decode(
+            (UUID, String, String, Date).self
+        )
+        return HuddleRecordingResponse(
+            id: id.uuidString.lowercased(),
+            huddleId: huddleID.uuidString.lowercased(),
+            model: model,
+            status: status,
+            requestedAtMs: Int64(requestedAt.timeIntervalSince1970 * 1_000)
+        )
+    }
+
+    private static func insertRecordingNotice(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        huddleID: UUID,
+        authorMemberID: UUID
+    ) async throws -> UUID {
+        let hlcTs = Int64(Date().timeIntervalSince1970 * 1_000)
+        let body = "전원이 동의하여 녹음과 사후 전사가 시작됩니다. 계속 참여(Continue)하거나 허들을 나가세요(Leave)."
+        let props: [String: Any] = [
+            "kind": "huddle_recording_notice",
+            "huddle_id": huddleID.uuidString.lowercased(),
+            "notice_version": 1,
+        ]
+        let propsData = try JSONSerialization.data(withJSONObject: props, options: [.sortedKeys])
+        guard let propsJSON = String(data: propsData, encoding: .utf8) else {
+            throw HTTPError(.internalServerError, message: "recording notice encoding failed")
+        }
+        let rows = try await conn.query(
+            """
+            WITH bumped AS (
+              UPDATE channel_seq
+                 SET last_seq = last_seq + 1
+               WHERE workspace_id = \(workspaceID) AND channel_id = \(channelID)
+              RETURNING last_seq AS seq
+            )
+            INSERT INTO message
+              (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+               author_member_id, type, body, props)
+            SELECT \(workspaceID), \(channelID), b.seq, \(hlcTs), 0,
+                   \(authorMemberID), 'system'::message_type, \(body), \(propsJSON)::jsonb
+              FROM bumped b
+            RETURNING id, seq
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.internalServerError, message: "recording notice insert failed")
+        }
+        let (messageID, seq) = try row.decode((UUID, Int64).self)
+        let payload = MessageRoutes.broadcastPayload(
+            centChannel: "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)",
+            messageID: messageID,
+            channelID: channelID,
+            seq: seq,
+            type: "system",
+            body: body,
+            authorMemberID: authorMemberID,
+            hlcTs: hlcTs,
+            hlcCount: 0,
+            rootID: nil,
+            props: props
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox (workspace_id, kind, method, payload, partition_key)
+            VALUES (\(workspaceID), 'broadcast', 'publish', \(payload)::jsonb, \(channelID))
+            """,
+            logger: logger
+        )
+        return messageID
+    }
+
+    private static func enqueueTranscriptionIfRecordingEnded(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        huddleID: UUID,
+        channelID: UUID
+    ) async throws {
+        _ = try await conn.query(
+            """
+            WITH stopped AS (
+              UPDATE huddle_recording
+                 SET status = 'stopped', stopped_at = now()
+               WHERE huddle_id = \(huddleID)
+                 AND status IN ('requested','recording')
+              RETURNING id, model
+            )
+            INSERT INTO huddle_transcription_job
+              (workspace_id, huddle_id, recording_id, channel_id, model, status)
+            SELECT \(workspaceID), \(huddleID), stopped.id, \(channelID), stopped.model, 'queued'
+              FROM stopped
+            ON CONFLICT (recording_id) DO NOTHING
+            """,
+            logger: logger
+        )
+    }
+
     private static func insertEvent(
         conn: PostgresConnection,
         logger: Logger,
@@ -462,13 +780,15 @@ struct HuddleRoutes: Sendable {
     private static func auditDetail(
         schema: String,
         channelID: UUID,
-        flags: [String: Bool] = [:]
+        flags: [String: Bool] = [:],
+        strings: [String: String] = [:]
     ) throws -> String {
         var detail: [String: Any] = [
             "schema": schema,
             "channel_id": channelID.uuidString,
         ]
         for (key, value) in flags { detail[key] = value }
+        for (key, value) in strings { detail[key] = value }
         let data = try JSONSerialization.data(withJSONObject: detail, options: [.sortedKeys])
         guard let json = String(data: data, encoding: .utf8) else {
             throw HTTPError(.internalServerError, message: "huddle audit encoding failed")
