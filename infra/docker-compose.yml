@@ -79,7 +79,7 @@ services:
   # ---------------------------------------------------------------------------
   livekit:
     image: livekit/livekit-server:v1.13.3
-    profiles: ["huddle"]
+    profiles: ["huddle", "transcription"]
     restart: unless-stopped
     command: --config=/etc/livekit/livekit.yaml
     environment:
@@ -96,6 +96,52 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # LiveKit Egress — ADR-0122 post-call participant-track recording.
+  # Heavy/optional: `--profile transcription` starts this service and its
+  # dev-only Redis. Production already has the pinned Redis service used by
+  # Centrifugo; no Centrifugo configuration is changed here.
+  # ---------------------------------------------------------------------------
+  transcription-redis:
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    profiles: ["transcription"]
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  livekit-egress:
+    image: livekit/egress:v1.9.1
+    profiles: ["transcription"]
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${MOMO_LIVEKIT_API_KEY:-devkey}
+        api_secret: ${MOMO_LIVEKIT_API_SECRET:-change-me-livekit-api-secret}
+        ws_url: ws://livekit:7880
+        health_port: 8080
+        redis:
+          address: transcription-redis:6379
+    tmpfs:
+      - /tmp:size=2g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      transcription-redis:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
 
   # ---------------------------------------------------------------------------
   # eve — optional self-hosted custom-agent build/runtime environment.

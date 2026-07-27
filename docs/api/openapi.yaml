@@ -1144,6 +1144,83 @@ paths:
         "503":
           $ref: "#/components/responses/HuddleNotConfigured"
 
+  /v1/workspaces/{workspaceId}/huddles/{huddleId}/recording-consent:
+    post:
+      tags: [huddles]
+      operationId: consentToHuddleRecording
+      summary: Record the caller's explicit consent to recording and post-call transcription.
+      description: >
+        Idempotently records notice version 1. This endpoint does not start
+        recording; the caller may leave instead of consenting.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/HuddleId"
+      responses:
+        "200":
+          description: Consent receipt, including the original consent timestamp.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleRecordingConsentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Huddle ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/HuddleNotConfigured"
+
+  /v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings:
+    post:
+      tags: [huddles]
+      operationId: startHuddleRecording
+      summary: Request participant-track recording after every active participant consents.
+      description: >
+        Fails closed unless every current participant has a consent receipt.
+        The transaction appends a channel system notice and a recording request.
+        A recorded huddle rejects later joins that lack prior consent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/HuddleId"
+      responses:
+        "200":
+          description: Existing idempotent recording request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleRecordingResponse"
+        "201":
+          description: Recording request and channel notice committed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleRecordingResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Huddle ended or at least one active participant has not consented.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: LiveKit or transcription model is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-hosts:
     post:
       tags: [work-hosts]
@@ -6531,6 +6608,43 @@ components:
           $ref: "#/components/schemas/Huddle"
         ended:
           type: boolean
+
+    HuddleRecordingConsentResponse:
+      type: object
+      required: [huddleId, memberId, noticeVersion, consentedAtMs]
+      properties:
+        huddleId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        noticeVersion:
+          type: integer
+          enum: [1]
+        consentedAtMs:
+          type: integer
+          format: int64
+
+    HuddleRecordingResponse:
+      type: object
+      required: [id, huddleId, model, status, requestedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        huddleId:
+          type: string
+          format: uuid
+        model:
+          type: string
+          description: Operator-configured ASR model; MOMO-646 does not select a winner.
+        status:
+          type: string
+          enum: [requested, recording, stopped, failed]
+        requestedAtMs:
+          type: integer
+          format: int64
 
     # ---- Messages ----------------------------------------------------------------
     SendMessageRequest:

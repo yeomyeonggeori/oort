@@ -1,0 +1,13 @@
+{
+  "job_id": "85400000-0000-7000-8000-000000000001",
+  "model": "small",
+  "tracks": [
+    {
+      "member_id": "85400000-0000-7000-8000-000000000002",
+      "speaker": "성재",
+      "source_attachment_id": "85400000-0000-7000-8000-000000000003",
+      "audio_path": "/tmp/momo-transcription/job-854/member-1.wav",
+      "start_offset_ms": 0
+    }
+  ]
+}
