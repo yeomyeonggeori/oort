@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-07-27 (Fable) · #827 웹 와이어 검증 + 렌더 오류 경계 — design-review 4R 종결
+- **랜딩**(track/uxui `59d7df53`, PR #834). **전제부터 틀렸던 티켓**: 머지 리뷰가 실동 백스크린 6건으로 분류했으나 **전부 DRIFT-ONLY**다. Swift 합성 `Encodable`은 nil을 **JSON null이 아니라 키 부재**로 내보내고, 키 부재는 `undefined`라 react-query가 막는다. 언랩 10곳의 서버 필드가 전부 non-Optional, jsonb 경로는 SQL `COALESCE`로 차단. 재현은 **주입된** null이었다. 정본 정정 `58f1648d`.
+- **그래서 값의 성격이 바뀐다**: 실동 수리가 아니라 ①**에러 경계**(레포에 `componentDidCatch` 0건이었다 — 열거 안 한 지점까지 폭발 반경을 묶는 유일한 자산) ②드리프트 방어(퍼널 2곳=`settingsRequest`·`lib/api.ts`에서 차단, 8개 호출 지점 안 갈아엎음) ③**게이트 신설**.
+- **design-review 4라운드 → Blocker 0·High 0**. 1R FAIL(재시도 무동작·앱루트 경계가 셸을 삼킴·탈출구가 같은 상태로 회귀) → 2R FAIL(`key={routePath}`가 컴포저 초안 파괴·폴백 여백 0) → 3R PASS(링이 창 관통 800px 세로줄·전역 `resetQueries`가 사이드바 비움) → 4R PASS(`inbox-mentions` 셸 오분류) → 종결. **2R 이후 지적은 전부 오케스트레이터 수정이 만든 것**이고 매 라운드 실측이 붙어 있었다.
+- **가장 값한 지적 3개**: ①경계를 `key`로 리셋하면 자식 트리까지 재생성 — 이미 보던 채널 클릭에도 초안 소멸 ②필터 없는 `resetQueries()`가 사이드바를 비워 **이 PR 자신의 논지와 정면 모순** ③`inbox-mentions`를 셸로 분류해 멘션 때문에 던진 인박스가 **자기를 던지게 만든 캐시를 보존**(1R Blocker의 재발).
+- **기계 게이트 사각지대 실증**: `gate:wire`는 4라운드 내내 초록이었다. `assertShell`이 폴백 등장을 실패로 취급하므로 **폴백 자체의 품질은 구조적으로 못 본다**. 반대로 리뷰가 못 잡는 와이어 검증 회귀는 게이트가 잡았다 — 둘이 서로 다른 것을 본다.
+- **red proof 3종 전부 성립**: 와이어 검증 되돌림→`settings code`에서 잡힘 · `key=` 복귀→`navigation discarded the route subtree` · 필터 제거/`inbox-mentions` 복귀→단위 테스트 실패. 게이트 실적: 844 tests(폭발 반경 3건 신규)·`gate:wire`·`gate:shell`·preflight 10/10·lint error 0.
+- 후속 후보(비차단): 게이트가 "실패한 경계가 이동 시 리셋되는가"를 못 잠금 · 재시도 반복 실패 시 무변화(기존 결함, A/B 확인) · `role=alert`+포커스 이중 안내(WKWebView 실검증) · `forgetUsage`/`forgetQuota`는 쿼리 캐시 밖. main 반영 대기.
+
+
 ## 2026-07-27 (Fable) · #825 캐스캐이드 재시도 증폭 차단 — 기존 게이트 사각지대 실증
 - **랜딩**(track/engine `e65ad53b`, PR #833). **진단 정정**: 패킷은 "분기 없이 재큐잉"이라 했으나 실제 뿌리는 **분류를 경계에서 버리는 것**이었다 — `ProviderCascade.step`은 이미 정확히 분류하는데 `ProviderCascadeRunner`가 `finish(throwing: failure)`로 원본만 던져 `reason`을 잃고, `WorkerService`가 문자열로 받아 전부 재큐잉했다. 수정 = 타입 경계 `ProviderCascadeFailure{reason,disposition,underlying}` 도입, `availabilityExhausted`만 재큐잉.
 - **증폭 실측**: 홉 9(`maxChainEntries` 8+position 0) × 논스트림 무조건 재요청 2 × `WORKER_MAX_ATTEMPTS` 8 = **144 요청·36분**. 실패 턴은 `usage==nil`→cost 0이라 **G5가 구조적으로 트립 못 한다**. 체인이 instance-global이라 아무 멤버나 멘션으로 운영자 자격증명 소진 가능.
