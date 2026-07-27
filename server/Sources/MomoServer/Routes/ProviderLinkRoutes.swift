@@ -317,6 +317,19 @@ struct ProviderLinkRoutes: Sendable {
     /// fully completes with provider_link still RLS-locked. Only after this
     /// returns does a caller open `withProviderLinkTransaction`.
     func requireOperator(_ context: AppRequestContext) async throws -> AuthPrincipal {
+        try await Self.requireOperator(
+            db: db, platformAdminEmails: platformAdminEmails, context: context
+        )
+    }
+
+    /// Shared instance-global authorization boundary. Keep credential minting
+    /// on this exact path: a workspace admin must not mint an adapter bearer
+    /// that can overwrite every workspace's provider quota gauge.
+    static func requireOperator(
+        db: Database,
+        platformAdminEmails: [String],
+        context: AppRequestContext
+    ) async throws -> AuthPrincipal {
         let principal = try context.requirePrincipal()
         guard principal.kind == .human else {
             throw HTTPError(.forbidden, message: "human operator required")
