@@ -61,8 +61,51 @@ final class MomoServerTests: XCTestCase {
             XCTAssertEqual(URL(string: manifest.mcpURL)?.host, domain)
             XCTAssertEqual(manifest.egressDomains, egressDomains)
             XCTAssertEqual(manifest.hosted, hosted)
+            XCTAssertNil(manifest.termsURL)
+            XCTAssertNil(manifest.privacyPolicyURL)
+            XCTAssertNil(manifest.iconText)
             XCTAssertFalse(manifest.enabledByDefault)
             XCTAssertEqual(manifest.allowedRoles, ["owner", "admin"])
+        }
+    }
+
+    func testPluginManifestOptionalDisplayMetadataIsValidated() throws {
+        let fixture = try String(
+            contentsOf: try pluginFixtureDirectory().appendingPathComponent("github.json"),
+            encoding: .utf8
+        )
+        let displayManifest = fixture.replacingOccurrences(
+            of: "\"description\": \"Official GitHub hosted MCP integration\",",
+            with: """
+            \"description\": \"Official GitHub hosted MCP integration\",
+            \"termsURL\": \"https://publisher.example/terms\",
+            \"privacyPolicyURL\": \"https://publisher.example/privacy\",
+            \"iconText\": \"GH\",
+            """
+        )
+        let digest = "sha256:" + String(repeating: "a", count: 64)
+        let manifest = try PluginManifestValidator.validate(
+            manifestJSON: displayManifest,
+            expectedDigest: digest,
+            computedDigest: digest,
+            revoked: false
+        )
+        XCTAssertEqual(manifest.termsURL, "https://publisher.example/terms")
+        XCTAssertEqual(manifest.privacyPolicyURL, "https://publisher.example/privacy")
+        XCTAssertEqual(manifest.iconText, "GH")
+
+        let rejectedManifests = [
+            displayManifest.replacingOccurrences(of: "https://publisher.example/terms", with: "http://publisher.example/terms"),
+            displayManifest.replacingOccurrences(of: "\"iconText\": \"GH\"", with: "\"iconText\": \"  \""),
+            displayManifest.replacingOccurrences(of: "\"iconText\": \"GH\"", with: "\"iconURL\": \"https://publisher.example/icon.png\""),
+        ]
+        for rejectedManifest in rejectedManifests {
+            XCTAssertThrowsError(try PluginManifestValidator.validate(
+                manifestJSON: rejectedManifest,
+                expectedDigest: digest,
+                computedDigest: digest,
+                revoked: false
+            ))
         }
     }
 

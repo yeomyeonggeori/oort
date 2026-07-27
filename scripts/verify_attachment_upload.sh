@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MOMO-474/482/521 attachment archive upload + receive projection verifier.
+# MOMO-474/482/521/638 attachment archive upload + receive projection verifier.
 # Default is the existing Drive stub; ATTACHMENT_GATE_BACKEND=s3 adds MinIO.
 set -euo pipefail
 umask 077
@@ -22,13 +22,14 @@ done
 new_uuid() { "$PYTHON_BIN" -c 'import uuid; print(uuid.uuid4())'; }
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
-PROJECT="${ATTACHMENT_GATE_PROJECT:-momo474attachment}"
+PROJECT="${ATTACHMENT_GATE_PROJECT:-momo638attachment}"
 BACKEND="${ATTACHMENT_GATE_BACKEND:-drive}"
-API_PORT="${ATTACHMENT_GATE_PORT:-28040}"
-PG_PORT="${ATTACHMENT_GATE_POSTGRES_PORT:-28041}"
-CENT_PORT_HOST="${ATTACHMENT_GATE_CENT_PORT:-28042}"
-HERMES_PORT_HOST="${ATTACHMENT_GATE_HERMES_PORT:-28043}"
-MINIO_PORT_HOST="${ATTACHMENT_GATE_MINIO_PORT:-28044}"
+API_PORT="${ATTACHMENT_GATE_PORT:-28370}"
+PG_PORT="${ATTACHMENT_GATE_POSTGRES_PORT:-28371}"
+CENT_PORT_HOST="${ATTACHMENT_GATE_CENT_PORT:-28372}"
+HERMES_PORT_HOST="${ATTACHMENT_GATE_HERMES_PORT:-28373}"
+MINIO_PORT_HOST="${ATTACHMENT_GATE_MINIO_PORT:-28374}"
+LEGACY_UNIQUE_PROOF="${ATTACHMENT_GATE_LEGACY_UNIQUE_PROOF:-0}"
 BOOT_TIMEOUT="${ATTACHMENT_GATE_BOOT_TIMEOUT:-2400}"
 ASSERT_TIMEOUT="${ATTACHMENT_GATE_ASSERT_TIMEOUT:-240}"
 RUN_ID="$(date -u +%s)-$$"
@@ -37,6 +38,11 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-attachment.XXXXXX")"
 case "$BACKEND" in
   drive|s3) ;;
   *) echo "[attachment] ATTACHMENT_GATE_BACKEND must be drive or s3" >&2; exit 1 ;;
+esac
+
+case "$LEGACY_UNIQUE_PROOF" in
+  0|1) ;;
+  *) echo "[attachment] ATTACHMENT_GATE_LEGACY_UNIQUE_PROOF must be 0 or 1" >&2; exit 1 ;;
 esac
 
 check_reserved_ports() {
@@ -119,7 +125,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "[attachment] booting isolated $BACKEND API/relay stack '$PROJECT' on 28040-28044"
+echo "[attachment] booting isolated $BACKEND API/relay stack '$PROJECT' on $API_PORT-$MINIO_PORT_HOST"
 compose up -d api relay
 deadline=$(( $(date -u +%s) + BOOT_TIMEOUT ))
 until curl -fsS "$BASE_URL/health" >/dev/null 2>&1; do
@@ -142,6 +148,38 @@ run_sql() {
 }
 sql_scalar() { run_sql -tA | tr -d '[:space:]'; }
 
+# MOMO-638: assert that migration 044 replaced the global identifier index with
+# tenant-scoped uniqueness before creating a fixture that shares an identifier.
+got="$(run_sql -tA <<'SQL'
+SELECT i.indisunique::text || ':' || string_agg(a.attname, ',' ORDER BY index_key.ordinality)
+  FROM pg_index i
+  JOIN pg_class index_class ON index_class.oid = i.indexrelid
+  JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS index_key(attnum, ordinality) ON true
+  JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = index_key.attnum
+ WHERE index_class.relname = 'attachment_workspace_drive_file_uniq'
+ GROUP BY i.indisunique;
+SQL
+)"
+[ "$got" = "true:workspace_id,drive_file_id" ] || {
+  echo "[attachment] FAIL MOMO-638 workspace-scoped attachment index: $got" >&2
+  exit 1
+}
+got="$(printf "SELECT count(*) FROM pg_class WHERE relkind = 'i' AND relname = 'attachment_drive_file_uniq';\n" | sql_scalar)"
+[ "$got" = "0" ] || { echo "[attachment] FAIL legacy global attachment index remains" >&2; exit 1; }
+
+# Red-proof mode is restricted to the disposable verifier database. It restores
+# the pre-044 index shape so the cross-workspace fixture below must fail on its
+# second insert. The trap removes this compose project and its volume afterward.
+if [ "$LEGACY_UNIQUE_PROOF" = "1" ]; then
+  echo "[attachment] MOMO-638 red proof: restoring legacy global unique index"
+  run_sql <<'SQL'
+DROP INDEX attachment_workspace_drive_file_uniq;
+CREATE UNIQUE INDEX attachment_drive_file_uniq
+  ON attachment (drive_file_id)
+  WHERE drive_file_id IS NOT NULL;
+SQL
+fi
+
 WS_A="00000000-0000-7000-8000-000000000001"
 CH_A="00000000-0000-7000-8000-000000000201"
 M1_ID="$(new_uuid)"
@@ -155,6 +193,8 @@ WS_B="47400000-0000-7000-8000-000000000001"
 CH_B="47400000-0000-7000-8000-000000000201"
 MB_ID="47400000-0000-7000-8000-000000000101"
 AB_ID="47400000-0000-7000-8000-000000000301"
+CROSS_WORKSPACE_ATTACHMENT_ID="$(new_uuid)"
+CROSS_WORKSPACE_DRIVE_FILE_ID="stub-cross-workspace-$RUN_ID"
 
 run_sql <<SQL
 BEGIN;
@@ -182,10 +222,19 @@ INSERT INTO attachment
   (id, workspace_id, channel_id, uploader_member_id, drive_file_id,
    name, mime, size_bytes, status)
 VALUES
-  ('$AB_ID', '$WS_B', '$CH_B', '$MB_ID', 'stub-cross-workspace',
+  ('$AB_ID', '$WS_B', '$CH_B', '$MB_ID', '$CROSS_WORKSPACE_DRIVE_FILE_ID',
    'hidden.txt', 'text/plain', 6, 'complete');
+INSERT INTO attachment
+  (id, workspace_id, channel_id, uploader_member_id, drive_file_id,
+   name, mime, size_bytes, status)
+VALUES
+  ('$CROSS_WORKSPACE_ATTACHMENT_ID', '$WS_A', '$CH_A', '$M1_ID', '$CROSS_WORKSPACE_DRIVE_FILE_ID',
+   'visible.txt', 'text/plain', 7, 'complete');
 COMMIT;
 SQL
+
+got="$(printf "SELECT count(*) FROM attachment WHERE id IN ('%s', '%s');\n" "$AB_ID" "$CROSS_WORKSPACE_ATTACHMENT_ID" | sql_scalar)"
+[ "$got" = "2" ] || { echo "[attachment] FAIL shared drive-file fixture rows: $got" >&2; exit 1; }
 
 login() {
   curl -fsS -X POST "$BASE_URL/v1/auth/login" -H 'Content-Type: application/json' \
@@ -413,6 +462,26 @@ done
 
 got="$(printf "BEGIN; SET LOCAL ROLE momo_app; SET LOCAL app.workspace_id='%s'; SELECT count(*) FROM attachment WHERE workspace_id='%s'; COMMIT;\n" "$WS_A" "$WS_B" | sql_scalar)"
 [ "$got" = "0" ] || { echo "[attachment] FAIL RLS isolation: $got" >&2; exit 1; }
+got="$(run_sql -tA <<SQL | tr -d '[:space:]'
+BEGIN;
+SET LOCAL ROLE momo_app;
+SET LOCAL app.workspace_id = '$WS_A';
+SELECT
+  (SELECT count(*) FROM attachment WHERE id = '$CROSS_WORKSPACE_ATTACHMENT_ID')::text
+  || ':' ||
+  (SELECT count(*) FROM attachment WHERE id = '$AB_ID')::text;
+SET LOCAL app.workspace_id = '$WS_B';
+SELECT
+  (SELECT count(*) FROM attachment WHERE id = '$AB_ID')::text
+  || ':' ||
+  (SELECT count(*) FROM attachment WHERE id = '$CROSS_WORKSPACE_ATTACHMENT_ID')::text;
+COMMIT;
+SQL
+)"
+[ "$got" = "1:01:0" ] || {
+  echo "[attachment] FAIL MOMO-638 cross-workspace shared drive-file isolation: $got" >&2
+  exit 1
+}
 got="$(printf "SELECT count(*) FROM pg_class WHERE relname='attachment' AND relrowsecurity AND relforcerowsecurity;\n" | sql_scalar)"
 [ "$got" = "1" ] || { echo "[attachment] FAIL FORCE RLS metadata: $got" >&2; exit 1; }
 
@@ -440,4 +509,4 @@ api POST "$UPLOAD_PATH" "$M1_TOKEN" \
   "$(jq -cn '{name:"too-large.bin",mime:"application/octet-stream",size:104857601}')"
 expect_status 413 "100 MB limit"
 
-echo "MOMO-521 $BACKEND attachment upload + send/history/realtime + content/RLS/audit/redaction PASS"
+echo "MOMO-638/MOMO-521 $BACKEND attachment upload + tenant-scoped drive-file uniqueness + send/history/realtime + content/RLS/audit/redaction PASS"

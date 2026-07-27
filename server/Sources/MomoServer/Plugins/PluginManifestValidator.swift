@@ -14,6 +14,9 @@ struct ValidatedPluginManifest: Equatable, Sendable {
     let name: String
     let version: String
     let description: String
+    let termsURL: String?
+    let privacyPolicyURL: String?
+    let iconText: String?
     let mcpURL: String
     let mcpTransport: String
     let hosted: Bool
@@ -82,7 +85,14 @@ enum PluginManifestValidator {
         try rejectSecretLikeKeys(json, path: "manifest")
 
         let plugin = try object(root, "plugin", at: "manifest")
-        try requireKeys(plugin, exactly: ["id", "name", "version", "description", "publisher", "license", "provenance"], at: "plugin")
+        let requiredPluginKeys: Set<String> = [
+            "id", "name", "version", "description", "publisher", "license", "provenance",
+        ]
+        let optionalPluginDisplayKeys: Set<String> = ["termsURL", "privacyPolicyURL", "iconText"]
+        let pluginKeys = Set(plugin.keys)
+        guard requiredPluginKeys.isSubset(of: pluginKeys),
+              pluginKeys.isSubset(of: requiredPluginKeys.union(optionalPluginDisplayKeys))
+        else { throw rejected("unknown or missing field at plugin") }
         let pluginID = try string(plugin, "id", at: "plugin")
         guard pluginID.wholeMatch(of: /^[a-z0-9][a-z0-9._-]{2,127}$/) != nil else {
             throw rejected("invalid plugin id")
@@ -90,6 +100,9 @@ enum PluginManifestValidator {
         let name = try nonempty(string(plugin, "name", at: "plugin"), label: "plugin name")
         let version = try nonempty(string(plugin, "version", at: "plugin"), label: "plugin version")
         let description = try nonempty(string(plugin, "description", at: "plugin"), label: "plugin description")
+        let termsURL = try optionalHTTPSURL(plugin, "termsURL", at: "plugin")
+        let privacyPolicyURL = try optionalHTTPSURL(plugin, "privacyPolicyURL", at: "plugin")
+        let iconText = try optionalIconText(plugin, "iconText", at: "plugin")
 
         let publisher = try object(plugin, "publisher", at: "plugin")
         try requireKeys(publisher, exactly: ["id", "name", "verified"], at: "plugin.publisher")
@@ -257,6 +270,9 @@ enum PluginManifestValidator {
             name: name,
             version: version,
             description: description,
+            termsURL: termsURL,
+            privacyPolicyURL: privacyPolicyURL,
+            iconText: iconText,
             mcpURL: mcpURL,
             mcpTransport: mcpTransport,
             hosted: hosted,
@@ -409,6 +425,30 @@ enum PluginManifestValidator {
         _ object: [String: JSONValue], _ key: String, at path: String
     ) throws -> String {
         guard let value = object[key]?.stringValue else { throw rejected("\(path).\(key) must be a string") }
+        return value
+    }
+
+    private static func optionalHTTPSURL(
+        _ object: [String: JSONValue], _ key: String, at path: String
+    ) throws -> String? {
+        guard let raw = object[key] else { return nil }
+        guard let value = raw.stringValue,
+              let url = URL(string: value),
+              url.scheme == "https",
+              url.host != nil
+        else { throw rejected("\(path).\(key) must be an HTTPS URL") }
+        return value
+    }
+
+    private static func optionalIconText(
+        _ object: [String: JSONValue], _ key: String, at path: String
+    ) throws -> String? {
+        guard let raw = object[key] else { return nil }
+        guard let value = raw.stringValue,
+              value == value.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value.count <= 8
+        else { throw rejected("\(path).\(key) must be 1...8 display characters") }
         return value
     }
 
