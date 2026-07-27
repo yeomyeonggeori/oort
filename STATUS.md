@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-648 work_session idle 상태 + 수명주기 (#856, 2026-07-28)
+
+- Migration 047로 `running ↔ idle`과 `idle_timeout` 종료를 열고 `exit_code`를 마지막 도구 실행 결과로 재정의했다. 호스트 서명 REST 전이는 `work.session.idle`/`work.session.resumed-to-running` outbox·감사를 같은 트랜잭션에 기록하며, idle 완료 메시지는 소유자에게 id-only `momo.work` 푸시로 전달한다.
+- NotifierWorker sweep는 host 단절을 idle timeout보다 먼저 처리하고, 워크스페이스 `settings.work_session_idle_timeout_seconds` 한 키만 읽어 기본 24시간 뒤 `ended(idle_timeout)`로 전이한다. T3 pause/resume 호출은 #859용 훅 주석만 두었다.
+- server build·339 tests와 NotifierWorker build·4 tests, shell/YAML/migration 정적 검증 PASS. 격리 Docker verifier·timeout sweep 제거 red proof는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-647 T3 프로비저너 + 활성시간 크레딧 원장 (#855, 2026-07-28)
 
 - `usage_ledger`의 토큰 요청 의미를 보존하고 T3 전용 `work_host_usage`/active·paused interval, `workspace_credit`/append-only `credit_entry`, E2B lifecycle binding을 migration 045로 신설했다. paused interval의 generated active seconds는 구조적으로 0이며 session 종료가 active 합계×시작 시 단가를 한 번만 차감한다.
