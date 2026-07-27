@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-07-27 (Fable) · #828 리뷰 잔여 묶음 — 착수 전 전수 재현이 범위를 셋 바꿨다
+- **랜딩**(track/engine `8f4eab1b`, PR #835). 11항목을 워커에 넘기기 **전에 전부 코드에서 재현**했고, 그 결과: **M-1 제외**(041은 이미 적용됐고 `migrate.sh`가 파일 단위 `--single-transaction`이라 `NOT VALID` 처방이 무효 — 021 선례 자체가 효과 없는 패턴이었다. 규약만 문서화) · **M-6 방향 반대**(ADR-0135:17 "무응답/5xx/429만" — Swift가 정본대로이고 **Python이 위반자**, 게다가 독스트링이 존재하지 않는 parity를 주장) · **M-9 "6경로"는 실제 4경로**(quota-snapshots는 operator 스펙에 있음).
+- **H-1이 본체**: 같은 등급의 인스턴스 전역 자원인 provider link는 `requireOperator`를 요구하는데 `provider:quota:write`만 워크스페이스 admin이 자가 발급 가능했다(043에 `workspace_id` 없음·읽기 전역·ingest 무감사). **스코프 단위**로 막았다 — 발급 경로 전체를 올리면 워크스페이스 admin으로 자격증명을 발급하는 검증기 **5개**가 깨진다(사전 실측). 라이브에 해당 자격증명 0건이라 저위험.
+- **오케스트레이터가 잡은 것 7건**: 빌드 3건(워커가 샌드박스 탓에 Swift 빌드를 한 번도 못 돌려 **컴파일 불가 상태**로 PR이 왔다) · openapi 역방향 매니페스트가 **손으로 쓴 4줄**이라 다음 드리프트를 못 잡음 → 소스 유도 생성기로 교체 · **그 검사가 게이트에 배선조차 안 됨** · H-1 단정 부재 → 순수 함수로 3건 잠금 · 배선 후 실제 실행하니 **경로 파라미터를 이름으로 비교**해 41건 거짓 양성 · allowlist 기준 스펙 불일치.
+- **교훈: 배선했다고 도는 것이 아니다.** 나 자신도 "배선 완료"로 판단했는데 실제 스크립트를 직접 호출해보니 두 겹으로 틀려 있었다. 게이트는 만든 뒤 **반드시 실행해서** 초록·빨강 양쪽을 봐야 한다.
+- **게이트**: quota 11 · cascade 18(F4 신규 `bearerUnavailable`이 A4/A5 무회귀, #825 B6 유지) · server 330 · worker 90 · 웹 847 · 어댑터 59 · openapi 역방향 103경로. **red proof 3종 성립**.
+- **별건**: `verify_openapi_contract.sh`가 `work-session-remote-check`에서 409로 실패하는데 **base에서도 동일**(`spawn control is not dispatchable by this host`) — 기존 결함, 후속 티켓 필요. 추측으로 PR을 탓하지 않기 위해 base에서 같은 게이트를 돌려 확인했다.
+- 남긴 것: H-1 라이브 경로 단정(검증기에 운영자 개념 부재) · openapi allowlist 41건은 줄여 나갈 부채. main 반영 대기.
+
+
 ## 2026-07-27 (Fable) · #827 웹 와이어 검증 + 렌더 오류 경계 — design-review 4R 종결
 - **랜딩**(track/uxui `59d7df53`, PR #834). **전제부터 틀렸던 티켓**: 머지 리뷰가 실동 백스크린 6건으로 분류했으나 **전부 DRIFT-ONLY**다. Swift 합성 `Encodable`은 nil을 **JSON null이 아니라 키 부재**로 내보내고, 키 부재는 `undefined`라 react-query가 막는다. 언랩 10곳의 서버 필드가 전부 non-Optional, jsonb 경로는 SQL `COALESCE`로 차단. 재현은 **주입된** null이었다. 정본 정정 `58f1648d`.
 - **그래서 값의 성격이 바뀐다**: 실동 수리가 아니라 ①**에러 경계**(레포에 `componentDidCatch` 0건이었다 — 열거 안 한 지점까지 폭발 반경을 묶는 유일한 자산) ②드리프트 방어(퍼널 2곳=`settingsRequest`·`lib/api.ts`에서 차단, 8개 호출 지점 안 갈아엎음) ③**게이트 신설**.
