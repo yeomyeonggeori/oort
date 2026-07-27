@@ -157,6 +157,38 @@ async function assertNavigationKeepsRouteState(context) {
   await page.close();
 }
 
+// 망가진 응답에서 플러그인 판은 **말을 해야 한다** — 목록이든 인라인 오류든.
+// 아무것도 없는 빈 판은 사용자에게 "앱이 없다"로 읽히므로 실패로 취급한다.
+async function assertPluginSurfaceSpeaks(page, surface) {
+  // queryClient는 retry:1이라 실패 응답도 한 번 더 시도한다. 성급하게 재면
+  // 스켈레톤을 '빈 판'으로 오독한다(측정됨). 종단 상태가 나올 때까지 기다린다.
+  const deadline = Date.now() + 8000;
+  let state;
+  const read = () => page.evaluate(() => {
+    const has = (id) => Boolean(document.querySelector(`[data-testid="${id}"]`));
+    return {
+      list: has("plugin-list"),
+      detail: has("plugin-detail"),
+      empty: has("plugins-empty"),
+      catalogError: has("plugins-error"),
+      detailError: has("plugin-detail-error"),
+    };
+  });
+  for (;;) {
+    state = await read();
+    if (state.list || state.detail || state.empty || state.catalogError || state.detailError) break;
+    if (Date.now() > deadline) break;
+    await page.waitForTimeout(250);
+  }
+  // 검색·필터 컨트롤은 항상 렌더되므로 "텍스트가 있느냐"로는 아무것도 못 잡는다
+  // (측정됨). 결과 영역이 무엇을 말하는지만 본다.
+  if (!state.list && !state.detail && !state.empty && !state.catalogError && !state.detailError) {
+    throw new Error(
+      `plugins ${surface}: 판이 비었다 — 목록도 상세도 오류도 없다: ${JSON.stringify(state)}`
+    );
+  }
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   const server = spawn(resolve(webRoot, "node_modules/.bin/vite"), ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: webRoot, stdio: "ignore" });
@@ -179,14 +211,22 @@ async function main() {
       for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["plugins", "앱"], ["account", "계정"]]) {
         await page.getByRole("button", { name: label, exact: true }).click();
         await assertShell(page, `settings ${section}`);
+        // 판이 무엇을 말하는지는 그 판에 있을 때만 잴 수 있다. 루프 뒤에서 재면
+        // 마지막 섹션(계정)을 보게 된다(측정됨).
+        if (section === "plugins") await assertPluginSurfaceSpeaks(page, "catalog-null");
       }
       // A malformed catalog must stay an inline error. Once it recovers, the
       // selected manifest gets its own bad body, which must not turn into a
       // route-level render error either.
+      // 셸이 살아 있다는 것만으로는 부족하다: 이 파싱은 쿼리 함수 안이라 어떤
+      // throw든 react-query가 잡아 렌더 크래시가 되지 않는다. 즉 assertShell은
+      // 검증 유무와 무관하게 통과한다(측정됨). 판이 통째로 비는 것과 오류를
+      // 보고하는 것을 갈라야 이 게이트가 값을 갖는다.
       faults.setPluginFault("detail-null");
       await page.getByRole("button", { name: "앱", exact: true }).click();
       await page.getByRole("button", { name: "다시 시도", exact: true }).click();
       await assertShell(page, "settings plugins detail");
+      await assertPluginSurfaceSpeaks(page, "detail-null");
       await assertNavigationKeepsRouteState(context);
       await context.close();
     } finally { await browser.close(); }
