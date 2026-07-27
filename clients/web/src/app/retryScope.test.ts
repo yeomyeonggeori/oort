@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { resetRouteQueries, resetSettingsQueries } from "./retryScope";
+import { resetRouteQueries, resetSettingsQueries, SHELL_QUERY_KEYS } from "./retryScope";
 
 // 실제 키는 소스에서 그대로 가져왔다(추측한 모양이 아니라 발신 코드 기준).
 const SETTINGS_KEYS = [
@@ -9,16 +9,19 @@ const SETTINGS_KEYS = [
   ["settings", "provider-link"],
   ["settings", "work-tier-policy", "ws", "member"],
 ];
+// useWorkspace.ts의 사이드바 훅 셋에서 그대로 가져온 키.
 const SHELL_KEYS = [
   ["channels", "ws"],
   ["roster", "ws"],
   ["read-state", "ws"],
-  ["inbox-mentions", "ws"],
 ];
 const ROUTE_KEYS = [
   ["approvals", "ws"],
   ["agent-runs", "ws"],
   ["thread", "ws", "ch", "root"],
+  // 인박스 소유다. 셸로 잘못 분류하면 멘션 때문에 던진 인박스의 재시도가
+  // 원인 캐시를 그대로 남긴다.
+  ["inbox-mentions", "ws"],
 ];
 
 function seed(keys: string[][]) {
@@ -51,11 +54,11 @@ describe("오류 경계 재시도의 폭발 반경", () => {
     expect(present(client, SETTINGS_KEYS)).toBe(0);
   });
 
-  it("셸 키 목록이 사이드바가 실제로 읽는 것과 어긋나면 알아챌 수 있게 고정한다", () => {
-    // 사이드바가 새 쿼리를 쓰기 시작했는데 여기 없으면, 라우트 재시도가 그걸
-    // 조용히 비운다. 목록을 계약으로 못박아 둔다.
-    const client = seed(SHELL_KEYS);
-    resetRouteQueries(client);
-    expect(present(client, SHELL_KEYS)).toBe(SHELL_KEYS.length);
+  it("셸 집합은 사이드바가 읽는 세 키뿐이다", () => {
+    // 이 단정이 잡는 것은 '집합이 넓어지는 것'이다 — 라우트가 소유한 키가 셸로
+    // 들어오면 그 라우트의 재시도가 원인 캐시를 보존한다(4R High). 사이드바가
+    // 새 쿼리를 쓰기 시작하는 반대 방향은 여기서 못 잡는다: 그건 useWorkspace의
+    // 훅과 이 목록을 함께 읽어야 보인다.
+    expect([...SHELL_QUERY_KEYS].sort()).toEqual(["channels", "read-state", "roster"]);
   });
 });

@@ -12,12 +12,20 @@ import type { QueryClient } from "@tanstack/react-query";
 // 서로 다르게 흘러가지 않는다.
 // =============================================================================
 
-/** 사이드바가 사는 데이터. 어떤 라우트의 실패도 이걸 버릴 권한은 없다. */
+/**
+ * 사이드바가 사는 데이터 — `features/workspace/useWorkspace.ts`의
+ * `useChannels`(:87) · `useDirectory`(:70) · `useReadStates`(:102) 셋뿐이다.
+ * 어떤 라우트의 실패도 이걸 버릴 권한은 없다.
+ *
+ * `inbox-mentions`는 여기 있으면 안 된다: 사이드바가 아니라 `useInbox`의
+ * `useMentions`, 즉 InboxRoute가 소유한다. 그걸 셸로 분류하면 멘션 데이터
+ * 때문에 던진 인박스가 재시도로 **자기를 던지게 만든 캐시를 보존**해, 이
+ * 라우트에서만 "재시도는 입력을 바꿔야 한다"가 조용히 깨진다.
+ */
 export const SHELL_QUERY_KEYS: ReadonlySet<string> = new Set([
   "channels",
   "roster",
   "read-state",
-  "inbox-mentions",
 ]);
 
 /** 설정 쿼리는 전부 ["settings", ...] 접두를 쓴다. */
