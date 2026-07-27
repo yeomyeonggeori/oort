@@ -264,8 +264,13 @@ function MySessionRow({
         </span>
       </div>
       <p className="mt-1 flex min-w-0 items-baseline gap-1 text-meta text-ink-muted">
+        {/* Shrink-only, never grow: the interpunct-separated fields read as ONE
+            sentence, so letting the name grow splits the line into a left/right
+            pair on short names (design-review 851-2R High). The unbounded name
+            is still the first truncation victim because every sibling is
+            shrink-0. */}
         <span
-          className="min-w-0 flex-1 truncate"
+          className="min-w-0 truncate"
           data-testid="my-work-session-host"
         >
           {hostName}
@@ -284,7 +289,7 @@ function MySessionRow({
         </span>
       </p>
       <p className="flex min-w-0 items-baseline gap-1 text-meta text-ink-muted">
-        <span className="min-w-0 flex-1 truncate">{channelName}</span>
+        <span className="min-w-0 truncate">{channelName}</span>
         <span className="shrink-0">· 시작</span>
         <span data-numeric className="shrink-0 font-mono">
           {clockLabel(session.startedAtMs)}
