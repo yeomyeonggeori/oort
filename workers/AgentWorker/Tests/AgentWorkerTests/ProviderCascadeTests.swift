@@ -331,7 +331,8 @@ final class ProviderCascadeTests: XCTestCase {
         let failure = try XCTUnwrap(outcome.thrownError as? ProviderCascadeFailure)
         XCTAssertEqual(failure.disposition, .propagate)
         XCTAssertEqual(outcome.text, "")
-        XCTAssertEqual(await live.requestCount(), 0)
+        let liveRequestCount = await live.requestCount()
+        XCTAssertEqual(liveRequestCount, 0, "다음 홉은 시도되지 않아야 한다")
     }
 
     /// With no chain configured the cascade is a single hop and a 5xx surfaces —

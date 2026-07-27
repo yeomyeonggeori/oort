@@ -1,0 +1,145 @@
+{
+  "_comment": "MOMO-633 시점의 기존 미문서화 경로. 이 목록은 늘어나면 안 된다 — 새 라우트는 스펙과 함께 온다. 줄여 나가는 것이 목표이고, 여기서 지우면 게이트가 즉시 그 경로를 요구한다.",
+  "operations": [
+    {
+      "method": "delete",
+      "path": "/v1/workspaces/{}/channels/{}/members/{}"
+    },
+    {
+      "method": "delete",
+      "path": "/v1/workspaces/{}/devices/{}"
+    },
+    {
+      "method": "get",
+      "path": "/v1/mcp"
+    },
+    {
+      "method": "get",
+      "path": "/v1/mcp/tools"
+    },
+    {
+      "method": "get",
+      "path": "/v1/platform/invites"
+    },
+    {
+      "method": "get",
+      "path": "/v1/platform/members"
+    },
+    {
+      "method": "get",
+      "path": "/v1/platform/workspaces"
+    },
+    {
+      "method": "get",
+      "path": "/v1/provider/work-host-engine"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/agent-runs/{}"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/agents/{}/credentials"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/agents/{}/gateway/jobs/pending"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/channels/{}/agent-runs"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/channels/{}/cost-snapshots"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/devices"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/invites"
+    },
+    {
+      "method": "get",
+      "path": "/v1/workspaces/{}/usage/summary"
+    },
+    {
+      "method": "patch",
+      "path": "/v1/workspaces/{}"
+    },
+    {
+      "method": "post",
+      "path": "/v1/agent-runs/{}/approval-decisions"
+    },
+    {
+      "method": "post",
+      "path": "/v1/mcp/tools/call"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/agent-runs/{}/gateway/complete"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/agent-runs/{}/gateway/events"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/agents/{}/credentials"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/agents/{}/credentials/{}/revoke"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/agents/{}/gateway/jobs/{}/lease/release"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/agents/{}/gateway/jobs/{}/lease/renew"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/channels/{}/agent-runs"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/channels/{}/members"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/devices"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/invites"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/invites/redeem"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/invites/{}/regenerate"
+    },
+    {
+      "method": "post",
+      "path": "/v1/workspaces/{}/invites/{}/revoke"
+    },
+    {
+      "method": "put",
+      "path": "/v1/provider/work-host-engine"
+    }
+  ]
+}

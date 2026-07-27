@@ -195,8 +195,10 @@ extension ProviderLinkRoutes {
             position: 0,
             source: resolved.head.source.rawValue,
             mode: resolved.head.config.mode.rawValue,
-            baseUrl: resolved.head.config.baseURL,
-            endpointLabel: AgentProviderConfig.redactedEndpointLabel(resolved.head.config.baseURL),
+            baseUrl: resolved.head.config.hermesBaseURL,
+            endpointLabel: AgentProviderConfig.redactedEndpointLabel(
+                resolved.head.config.hermesBaseURL
+            ),
             enabled: true,
             bearerConfigured: resolved.head.config.keyConfigured,
             bearerUnavailable: headFromDatabase && resolved.decryptedHead == nil,

@@ -1,8 +1,0 @@
-{
-  "operations": [
-    {"method": "get", "path": "/v1/provider/link/chain"},
-    {"method": "put", "path": "/v1/provider/link/chain"},
-    {"method": "delete", "path": "/v1/provider/link/chain"},
-    {"method": "get", "path": "/v1/provider/effort-table"}
-  ]
-}

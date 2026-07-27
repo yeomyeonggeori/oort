@@ -954,9 +954,18 @@ guard_jq '.revokedAccess == true and .revokedRefresh == true' "logout revoked bo
 # ---- 5) Validate every sample against the spec (+ full operation coverage) ---
 jq -s '{samples: .}' "$MANIFEST" >"$TMP_DIR/manifest.json"
 echo "[openapi] validating $(jq '.samples | length' "$TMP_DIR/manifest.json") samples against the spec"
+# 역방향(서버 -> 스펙) 커버리지. 기존 검사는 스펙에 있는 것만 훑으므로 서버에만
+# 있는 경로는 구조적으로 보이지 않았다(MOMO-633). 매니페스트는 소스에서 유도한다 —
+# 손으로 쓴 목록은 이미 고친 것의 체크리스트일 뿐 다음 드리프트를 못 잡는다.
+"$PYTHON_BIN" "$SCRIPT_DIR/openapi_server_routes.py" \
+  --routes-dir "$REPO_ROOT/server/Sources/MomoServer/Routes" \
+  --allowlist "$REPO_ROOT/docs/api/openapi.undocumented-allowlist.json" \
+  >"$TMP_DIR/server-routes.json"
+
 "$PYTHON_BIN" "$SCRIPT_DIR/openapi_shape_check.py" \
   --spec "$SPEC_JSON" \
   --manifest "$TMP_DIR/manifest.json" \
+  --server-route-manifest "$TMP_DIR/server-routes.json" \
   --require-operation-coverage
 
 echo "[openapi] PASS OpenAPI contract drift gate (evidence: $TMP_DIR)"
