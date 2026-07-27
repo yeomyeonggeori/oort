@@ -1,5 +1,10 @@
 # Security Policy
 
+Korean, implementation-evidence-oriented security material (including the
+trust-boundary diagram and current limitations) is available in
+[`docs/security/README.ko.md`](docs/security/README.ko.md). This policy remains
+the authoritative source for supported versions and vulnerability reporting.
+
 ## Supported versions
 
 momo is pre-1.0. Security fixes are provided for the latest published `v0.x`

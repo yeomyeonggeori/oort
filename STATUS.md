@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-639 한국어 보안 판단 자료 + 신뢰 경계 다이어그램 (#841, 2026-07-27)
+
+- `docs/security/README.ko.md`에 Dawn 비경유/선택 push relay, RLS 부트 가드, 감사·첨부·Drive 위임 경계와 코드·ADR 행 단위 근거를 정리하고 Mermaid 신뢰 경계 다이어그램을 추가했다. 영문 `SECURITY.md`는 한국어 판단 자료로 연결하되 신고 절차의 정본으로 유지한다.
+- 알려진 한계(첨부 악성코드·MIME sniffing 부재, 브라우저 refresh token localStorage, Tauri CSP 없음, 외부 인증 없음, 구 alpha 미서명, 개인 Drive 미지원)를 같은 문서에 명시했다. Mermaid browser renderer는 worker sandbox의 Chrome process launch 제약으로 `runtime-unverified`; 링크·행 앵커·문서 gate는 확인했다.
+
 ## MOMO-638 첨부 tenant unique + manifest 표시 메타데이터 (#840, 2026-07-27)
 
 - Migration 044는 전역 `attachment.drive_file_id` unique를 `(workspace_id, drive_file_id)` partial unique로 원자 교체하고, 기존 tenant 내부 중복을 삭제 없이 fail-closed한다. `verify_attachment_upload.sh`는 두 테넌트의 같은 Drive ID 삽입 성공·상호 RLS 비가시를 단정하며 `ATTACHMENT_GATE_LEGACY_UNIQUE_PROOF=1`은 격리 Compose에서 의도적 red proof를 만든다.
