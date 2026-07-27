@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-640 웹 세션 저장 경계 + Tauri CSP (#842, 2026-07-27)
+
+- Tauri 셸 번들은 `tauri.conf.json`의 CSP로 same-origin script·font·asset만 허용하고, xterm의 검증된 런타임 style 쓰기와 런타임 API/realtime/관전 host 연결만 제한적으로 연다. `gate:csp`는 이 설정값을 직접 읽어 preview 헤더로 적용한 뒤 로그인→셸→xterm 관전 경로의 CSP 위반 0건을 단정한다.
+- 브라우저 refresh token의 현행 localStorage 경계는 이번 범위에서 변경하지 않았다. httpOnly cookie 전환은 임의 API origin·Tauri `tauri://localhost`·HTTP LAN 서버를 함께 다시 설계해야 하므로 별도 ADR 사안이다. Chromium 및 Tauri 실웹뷰 gate는 오케스트레이터 검증 대기(`runtime-unverified`).
+
 ## MOMO-636 웹 플러그인 마켓플레이스 복원 (#838, 2026-07-27)
 
 - 설정의 `앱` 섹션에 catalog·원본 manifest 상세·egress 도메인·tool risk/approval tier·설치/해제와 본인 단일 scope grant 회수를 복원했다. 관리자 판정은 roster의 내 role이 owner/admin으로 확인될 때만 열며, 다중 scope는 원문 표시만 하고 변경하지 않는다.
