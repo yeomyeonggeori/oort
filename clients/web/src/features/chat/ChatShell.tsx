@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
-import { updateReadState, uuidEq, type Message } from "@/lib/api";
+import {
+  fetchMessages,
+  updateReadState,
+  uuidEq,
+  type Message,
+  type WorkSession,
+} from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
@@ -170,6 +176,85 @@ export function ChatShell() {
   const [workOpen, setWorkOpen] = useState(false);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
   const [workSessionId, setWorkSessionId] = useState<string | null>(null);
+  const [openingWorkThreadId, setOpeningWorkThreadId] = useState<string | null>(
+    null
+  );
+  const [workThreadOpenError, setWorkThreadOpenError] = useState<string | null>(
+    null
+  );
+  const [pendingWorkThread, setPendingWorkThread] = useState<{
+    channelId: string;
+    root: Message;
+  } | null>(null);
+  const workThreadRequestRef = useRef(0);
+
+  const openWorkSessionThread = useCallback(
+    async (workSession: WorkSession) => {
+      const request = workThreadRequestRef.current + 1;
+      workThreadRequestRef.current = request;
+      setOpeningWorkThreadId(workSession.id);
+      setWorkThreadOpenError(null);
+
+      try {
+        let before: number | undefined;
+        let root: Message | undefined;
+        for (;;) {
+          const page = await fetchMessages(
+            workspaceId,
+            workSession.channelId,
+            before === undefined ? { limit: 200 } : { before, limit: 200 }
+          );
+          root = page.messages.find((message) =>
+            uuidEq(message.id, workSession.rootMessageId)
+          );
+          if (
+            root ||
+            page.nextBefore === undefined ||
+            page.nextBefore === before ||
+            page.messages.length === 0 ||
+            workThreadRequestRef.current !== request
+          ) {
+            break;
+          }
+          before = page.nextBefore;
+        }
+        if (workThreadRequestRef.current !== request) return;
+        if (!root) {
+          setWorkThreadOpenError(
+            "세션 스레드의 시작 메시지를 찾지 못했습니다. 채널 기록을 새로고침한 뒤 다시 시도하세요."
+          );
+          return;
+        }
+        setPendingWorkThread({ channelId: workSession.channelId, root });
+        if (!uuidEq(channelId ?? undefined, workSession.channelId)) {
+          navigate(`/c/${workSession.channelId}`);
+        }
+      } catch {
+        if (workThreadRequestRef.current === request) {
+          setWorkThreadOpenError(
+            "세션 스레드를 불러오지 못했습니다. 다시 시도하세요."
+          );
+        }
+      } finally {
+        if (workThreadRequestRef.current === request) {
+          setOpeningWorkThreadId(null);
+        }
+      }
+    },
+    [workspaceId, channelId, navigate]
+  );
+
+  useEffect(() => {
+    if (
+      pendingWorkThread === null ||
+      !uuidEq(channelId ?? undefined, pendingWorkThread.channelId)
+    ) {
+      return;
+    }
+    setThread(pendingWorkThread.root);
+    setPendingWorkThread(null);
+    setWorkOpen(false);
+  }, [channelId, pendingWorkThread]);
 
   // Under 900px the 작업 세션 pane stops being a column beside the channel and
   // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset
@@ -481,6 +566,9 @@ export function ChatShell() {
           onScopeChange={setWorkScope}
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
+          openingThreadId={openingWorkThreadId}
+          threadOpenError={workThreadOpenError}
+          onOpenThread={(workSession) => void openWorkSessionThread(workSession)}
           onClose={() => {
             // The panel hands the caret back to the toggle that opened it, and
             // that toggle lives in the surface this drawer just made `inert`.
@@ -488,6 +576,9 @@ export function ChatShell() {
             // the panel, i.e. after that focus() call, so it comes off here
             // first. The effect above re-syncs and finds nothing to do.
             coveredRef.current?.removeAttribute("inert");
+            workThreadRequestRef.current += 1;
+            setOpeningWorkThreadId(null);
+            setWorkThreadOpenError(null);
             setWorkOpen(false);
           }}
         />

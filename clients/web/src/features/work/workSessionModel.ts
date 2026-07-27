@@ -88,7 +88,13 @@ export interface FoldedSession {
 
 // ---- session status ---------------------------------------------------------
 
-export type WorkSessionStatusKey = "running" | "orphaned" | "done" | "failed";
+export type WorkSessionStatusKey =
+  | "running"
+  | "unavailable"
+  | "orphaned"
+  | "done"
+  | "failed"
+  | "unknown";
 
 export interface WorkSessionStatus {
   key: WorkSessionStatusKey;
@@ -104,15 +110,20 @@ export interface WorkSessionStatus {
  * into 오류: the session is not known to have failed, its host went away, and
  * those are different facts to the person deciding whether to resume.
  */
-export function workSessionStatus(session: WorkSession): WorkSessionStatus {
+export function workSessionStatus(
+  session: Pick<WorkSession, "exitCode"> & { status: string }
+): WorkSessionStatus {
   if (session.status === "running") return { key: "running", label: "실행 중" };
   if (session.status === "orphaned") {
     return { key: "orphaned", label: "호스트 연결 끊김" };
   }
-  if (typeof session.exitCode === "number" && session.exitCode !== 0) {
-    return { key: "failed", label: "오류로 종료" };
+  if (session.status === "ended") {
+    if (typeof session.exitCode === "number" && session.exitCode !== 0) {
+      return { key: "failed", label: "오류로 종료" };
+    }
+    return { key: "done", label: "종료됨" };
   }
-  return { key: "done", label: "종료됨" };
+  return { key: "unknown", label: "상태 확인 필요" };
 }
 
 export const ROW_STATE_LABEL: Readonly<Record<WorkRowState, string>> = {
@@ -601,6 +612,21 @@ export function workHostOnline(
 }
 
 /**
+ * Status shown on a continuity row. The ledger remains authoritative:
+ * heartbeat loss changes only the presentation of `running`, never the
+ * session's stored state.
+ */
+export function workSessionContinuityStatus(
+  session: WorkSession,
+  hosts: readonly WorkHost[] | undefined
+): WorkSessionStatus {
+  if (session.status === "running" && workHostOnline(session, hosts) === false) {
+    return { key: "unavailable", label: "호스트 응답 없음" };
+  }
+  return workSessionStatus(session);
+}
+
+/**
  * The copy under "아직 진행 내역이 없습니다" for a session whose thread came
  * back empty. A running session on a host the registry has not heard from gets
  * the fact instead of the promise (see `workHostOnline`).
@@ -674,7 +700,7 @@ export function composeExcerpt(
 
 // ---- panel scope ------------------------------------------------------------
 
-export type WorkScope = "channel" | "all";
+export type WorkScope = "channel" | "all" | "mine";
 
 /**
  * The scope label is shown at all times, never only when it is unusual. The
@@ -685,8 +711,16 @@ export type WorkScope = "channel" | "all";
 export function scopeSessions(
   sessions: readonly WorkSession[],
   scope: WorkScope,
-  channelId: string | null
+  channelId: string | null,
+  viewerMemberId?: string
 ): WorkSession[] {
+  if (scope === "mine") {
+    return sessions.filter(
+      (session) =>
+        session.status !== "ended" &&
+        uuidEq(session.memberId, viewerMemberId)
+    );
+  }
   if (scope === "all" || channelId === null) return [...sessions];
   return sessions.filter((session) => uuidEq(session.channelId, channelId));
 }

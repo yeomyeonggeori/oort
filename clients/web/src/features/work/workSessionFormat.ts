@@ -15,9 +15,11 @@ import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
  */
 export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>> = {
   running: "bg-surface-hover text-warn",
+  unavailable: "bg-surface-hover text-ink-muted",
   orphaned: "bg-accent-soft text-accent",
   done: "bg-surface-hover text-ok",
   failed: "bg-surface-hover text-danger",
+  unknown: "bg-surface-hover text-ink-muted",
 };
 
 /** Step state. 완료 stays muted: a wall of green is not a reading aid. */

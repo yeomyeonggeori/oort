@@ -209,6 +209,17 @@ The gate writes the four fixture captures to `artifacts/huddle/`:
 requires a real LiveKit room and browser microphone grant; the orchestrator
 records it as `artifacts/huddle/joined.png`.
 
+The my-session continuity gate also needs no backend or credentials. It
+deliberately returns sessions before hosts, then checks the final
+`online:false + running` presentation, the member filter, both direct entry
+paths, and the separate no-host/no-session/load-error states:
+
+```sh
+npm run gate:my-sessions
+MY_SESSIONS_GATE_PROVE_RED_OFFLINE=1 npm run gate:my-sessions  # MUST fail
+MY_SESSIONS_GATE_PROVE_RED_FILTER=1 npm run gate:my-sessions   # MUST fail
+```
+
 The Tauri WKWebView microphone prompt is deliberately not inferred from browser
 success. After the browser gate, the orchestrator must open the packaged shell,
 join once, verify bidirectional audio, deny microphone once, and record whether
