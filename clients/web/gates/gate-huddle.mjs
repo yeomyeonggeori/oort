@@ -7,7 +7,10 @@
 //   1. HTTP 503 "허들 미구성" is an operator state, not a generic failure;
 //   2. active Live badge and participant display names come from REST;
 //   3. huddle_ended removes the badge even when an older active GET resolves
-//      afterwards (the intentionally inverted response timing).
+//      afterwards (the intentionally inverted response timing);
+//   4. at 760x480 joined controls have a finite width, leaving the channel title
+//      measurable and the work-panel toggle inside the viewport;
+//   5. after audio joined, a projection 500 cannot hide Live, microphone or exit.
 //
 // Red proofs:
 //   HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle
@@ -90,12 +93,12 @@ const activeHuddle = {
   participants: [
     {
       memberId: teammateId,
-      displayName: "Nadia Rahman",
+      displayName: "Nadia Rahman — 제품 디자인 운영",
       joinedAtMs: 1_722_000_001_000,
     },
     {
       memberId,
-      displayName: "곽성재",
+      displayName: "곽성재 — 웹 클라이언트",
       joinedAtMs: 1_722_000_002_000,
     },
   ],
@@ -231,6 +234,18 @@ async function installRoutes(context, state) {
         huddle: state.mode === "active" ? activeHuddle : null,
       });
     }
+    if (path.endsWith(`/huddles/${huddleId}/join`)) {
+      return json(route, {
+        huddle: activeHuddle,
+        livekitUrl: "wss://livekit.gate.invalid",
+        token: "gate-livekit-token",
+        expiresAtMs: Date.now() + 60_000,
+        ttlSeconds: 60,
+      });
+    }
+    if (path.endsWith(`/huddles/${huddleId}/leave`)) {
+      return json(route, { huddle: activeHuddle, ended: false });
+    }
     return json(route, {});
   });
 }
@@ -320,6 +335,49 @@ async function main() {
         fullPage: true,
       });
 
+      await page.getByTestId("huddle-join").click();
+      await page.getByTestId("huddle-microphone").waitFor();
+      await page.getByTestId("huddle-leave").waitFor();
+      await page.setViewportSize({ width: 760, height: 480 });
+      const geometry = await page.evaluate(() => {
+        const title = document.querySelector("h1")?.getBoundingClientRect();
+        const workToggle = document
+          .querySelector("[data-testid='open-work-panel']")
+          ?.getBoundingClientRect();
+        return {
+          titleWidth: title?.width ?? 0,
+          workToggleRight: workToggle?.right ?? Number.POSITIVE_INFINITY,
+        };
+      });
+      if (geometry.titleWidth <= 0) {
+        throw new Error(`joined header erased channel title: ${JSON.stringify(geometry)}`);
+      }
+      if (geometry.workToggleRight > 760) {
+        throw new Error(`work-panel toggle escaped viewport: ${JSON.stringify(geometry)}`);
+      }
+
+      state.mode = "error";
+      await page.evaluate(({ id, ch }) => {
+        window.__huddleGatePublish?.({
+          type: "huddle_participants_changed",
+          v: 1,
+          ts: Date.now(),
+          payload: {
+            huddle_id: id,
+            channel_id: ch,
+            participant_member_ids: [],
+          },
+        });
+      }, { id: huddleId, ch: channelId });
+      await page.getByTestId("huddle-error").waitFor();
+      await page.getByTestId("huddle-microphone").waitFor();
+      await page.getByTestId("huddle-leave").waitFor();
+      if (!(await page.getByTestId("huddle-live").count())) {
+        throw new Error("projection 500 hid joined Live state");
+      }
+      state.mode = "active";
+      await page.setViewportSize({ width: 1280, height: 800 });
+
       await page.evaluate(
         ({ id, ch, proveRed }) => {
           window.__huddleGatePublish?.({
@@ -381,7 +439,7 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "GATE PASS: 503 is configuration state, active participants render, and huddle_ended removes Live."
+    "GATE PASS: configuration, joined width/exit controls, projection failure isolation, and huddle_ended ordering hold."
   );
 }
 

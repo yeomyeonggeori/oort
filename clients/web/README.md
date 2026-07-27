@@ -185,15 +185,24 @@ CSP_GATE_PROVE_RED_STYLE=1 npm run gate:csp   # red proof: MUST fail (xterm need
 ```
 
 The huddle browser gate uses REST and Centrifugo protocol fixtures, without a
-backend, credentials, microphone, or LiveKit server. It locks the fail-closed
-503 state, active badge/participant names, and the `huddle_ended` transition,
-including an intentionally late active response:
+backend, credentials, microphone, or LiveKit server. Its `huddle-gate` build
+mode replaces only the audio connector while preserving the production lazy
+import in normal builds. It locks the fail-closed 503 state, active
+badge/participant names, the `huddle_ended` transition, the joined 760x480
+header width contract, and joined exit controls across an injected projection
+500:
 
 ```sh
 npm run build && npm run gate:huddle
 HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle     # MUST fail
 HUDDLE_GATE_PROVE_RED_ENDED=1 npm run gate:huddle   # MUST fail
 ```
+
+Width red proof: temporarily remove `max-w-pane` from
+`HuddleHeaderControl.tsx`; the 760px title/toggle geometry assertion must fail
+with a long participant fixture. Projection-isolation red proof: restore the
+old `status === "error"` early return above the joined branch; the joined
+microphone/leave assertions after the injected 500 must fail.
 
 The gate writes the four fixture captures to `artifacts/huddle/`:
 `unconfigured.png`, `idle.png`, `active.png`, and `error.png`. A joined capture

@@ -4,6 +4,7 @@
 
 - 웹 채널 헤더에 허들 미구성(503)·활성 없음·Live 참가자·참가 중·오류/오프라인 상태와 시작·참가·마이크·나가기를 복원했다. `huddle_started`·`huddle_participants_changed`·`huddle_ended`는 방어적으로 파싱하며, 종료 tombstone이 늦은 active 응답의 Live 배지 부활을 막는다.
 - `livekit-client`(Apache-2.0)는 참가 동작 뒤에만 lazy-load되고 join 응답의 `livekitUrl`만 사용한다. pagehide/beforeunload keepalive leave, 로컬 disconnect, 토큰 만료 안내를 추가했다. Tauri WKWebView 마이크 권한과 실오디오는 오케스트레이터 실측 대기(`runtime-unverified`).
+- 2R: 허들 헤더 표면을 320px 계약 안에서 참가자 요약부터 축소하고 오류·오프라인 문장을 아래 `InlineBanner` 행으로 옮겼다. joined의 Live·마이크·나가기는 REST 프로젝션 500/503과 분리했으며, LiveKit `connect-src` CSP 거부와 마이크 캡처 `SecurityError`를 서로 다른 국면으로 분류한다.
 
 ## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
 

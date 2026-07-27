@@ -99,20 +99,31 @@ export function reduceHuddleProjection(
 export type HuddleErrorKind =
   | "unconfigured"
   | "membership"
+  | "csp-blocked"
   | "microphone-denied"
   | "microphone-missing"
   | "expired"
   | "connection"
   | "unknown";
 
-export function huddleErrorKind(error: unknown): HuddleErrorKind {
+export function huddleErrorKind(
+  error: unknown,
+  phase: "unknown" | "microphone" = "unknown"
+): HuddleErrorKind {
   if (error instanceof ApiError) {
     if (error.status === 503) return "unconfigured";
     if (error.status === 403) return "membership";
   }
+  if (error instanceof Error && error.name === "HuddleCspBlockedError") {
+    return "csp-blocked";
+  }
+  if (error instanceof Error && error.name === "HuddleMicrophoneError") {
+    return "microphone-denied";
+  }
   if (
     error instanceof DOMException &&
-    (error.name === "NotAllowedError" || error.name === "SecurityError")
+    (error.name === "NotAllowedError" ||
+      (phase === "microphone" && error.name === "SecurityError"))
   ) {
     return "microphone-denied";
   }
@@ -141,6 +152,8 @@ export function huddleErrorCopy(kind: HuddleErrorKind): string {
       return "이 서버는 허들을 사용하지 않습니다. 운영자가 LiveKit을 구성하면 사용할 수 있습니다.";
     case "membership":
       return "이 채널에서 허들을 사용할 권한이 없습니다. 채널 멤버십을 확인하세요.";
+    case "csp-blocked":
+      return "이 배포의 보안 정책이 LiveKit 주소를 허용하지 않습니다. 운영자 확인이 필요합니다.";
     case "microphone-denied":
       return "마이크 권한이 거부되어 참가하지 못했습니다. 브라우저 설정에서 마이크를 허용한 뒤 다시 참가하세요.";
     case "microphone-missing":

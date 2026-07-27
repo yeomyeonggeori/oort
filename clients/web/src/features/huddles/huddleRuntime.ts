@@ -17,6 +17,19 @@ import {
   Track,
   type RemoteTrack,
 } from "livekit-client";
+import { cspBlockedHost } from "@/features/work/observerStream";
+
+class HuddleCspBlockedError extends Error {
+  override name = "HuddleCspBlockedError";
+}
+
+class HuddleMicrophoneError extends Error {
+  override name = "HuddleMicrophoneError";
+
+  constructor(cause: unknown) {
+    super("LiveKit microphone publication failed", { cause });
+  }
+}
 
 export interface HuddleAudioSession {
   disconnect: () => Promise<void>;
@@ -64,10 +77,36 @@ export async function connectHuddleAudio(
   });
 
   try {
-    await room.connect(options.livekitUrl, options.token, {
-      autoSubscribe: true,
+    // Like the observer socket, a connect-src refusal may never reach the
+    // socket callbacks. Listen on document before dialling so a deployment
+    // policy failure is named immediately instead of becoming a retryable
+    // timeout or a misleading microphone SecurityError.
+    let rejectPolicy: ((reason: HuddleCspBlockedError) => void) | null = null;
+    const policyRefusal = new Promise<never>((_resolve, reject) => {
+      rejectPolicy = reject;
     });
-    await room.localParticipant.setMicrophoneEnabled(true);
+    const onViolation = (event: SecurityPolicyViolationEvent) => {
+      if (!cspBlockedHost(event, options.livekitUrl)) return;
+      rejectPolicy?.(new HuddleCspBlockedError());
+    };
+    document.addEventListener("securitypolicyviolation", onViolation);
+    try {
+      await Promise.race([
+        room.connect(options.livekitUrl, options.token, {
+          autoSubscribe: true,
+        }),
+        policyRefusal,
+      ]);
+    } finally {
+      document.removeEventListener("securitypolicyviolation", onViolation);
+    }
+    try {
+      await room.localParticipant.setMicrophoneEnabled(true);
+    } catch (error) {
+      // SecurityError only means microphone denial in this explicit media
+      // capture phase. The connection phase has its own CSP classification.
+      throw new HuddleMicrophoneError(error);
+    }
   } catch (error) {
     intentionalDisconnect = true;
     await room.disconnect();
@@ -82,7 +121,11 @@ export async function connectHuddleAudio(
       attachedAudio.clear();
     },
     async setMicrophoneMuted(muted: boolean) {
-      await room.localParticipant.setMicrophoneEnabled(!muted);
+      try {
+        await room.localParticipant.setMicrophoneEnabled(!muted);
+      } catch (error) {
+        throw new HuddleMicrophoneError(error);
+      }
     },
   };
 }

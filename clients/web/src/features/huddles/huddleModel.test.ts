@@ -142,6 +142,19 @@ describe("huddle user states", () => {
     expect(huddleErrorCopy("expired")).toContain("다시 참가");
   });
 
+  it("keeps SecurityError scoped to media capture and names CSP refusal", () => {
+    const security = new DOMException("Blocked", "SecurityError");
+    expect(huddleErrorKind(security)).toBe("unknown");
+    expect(huddleErrorKind(security, "microphone")).toBe(
+      "microphone-denied"
+    );
+    const csp = new Error("connect-src refused LiveKit");
+    csp.name = "HuddleCspBlockedError";
+    expect(huddleErrorKind(csp)).toBe("csp-blocked");
+    expect(huddleErrorCopy("csp-blocked")).toContain("보안 정책");
+    expect(huddleErrorCopy("csp-blocked")).toContain("운영자");
+  });
+
   it("keeps a dense participant summary while preserving mixed team names", () => {
     expect(huddleParticipantSummary(ACTIVE)).toBe("곽성재, Nadia Rahman");
     expect(

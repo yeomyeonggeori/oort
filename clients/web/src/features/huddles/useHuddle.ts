@@ -20,6 +20,7 @@ import type {
   RealtimeHandle,
 } from "@/lib/realtime";
 import type { HuddleAudioSession } from "./huddleRuntime";
+import { loadHuddleRuntime } from "./huddleRuntimeLoader";
 import {
   huddleErrorCopy,
   huddleErrorKind,
@@ -170,23 +171,30 @@ export function useHuddle(
         // Also invalidates a start/join attempt that has not assigned joinedRef
         // yet. Its eventual join response is rolled back instead of connecting
         // audio to a room the channel already declared ended.
-        if (
-          uuidEq(joinedRef.current?.huddleId, frame.payload.huddle_id) ||
-          uuidEq(joinAttemptHuddleRef.current ?? undefined, frame.payload.huddle_id)
-        ) {
+        const endedJoined = uuidEq(
+          joinedRef.current?.huddleId,
+          frame.payload.huddle_id
+        );
+        const endedJoinAttempt = uuidEq(
+          joinAttemptHuddleRef.current ?? undefined,
+          frame.payload.huddle_id
+        );
+        if (endedJoined || endedJoinAttempt) {
           activationRef.current += 1;
         }
         dispatch({
           type: "huddle-ended",
           huddleId: frame.payload.huddle_id,
         });
-        if (uuidEq(joinedRef.current?.huddleId, frame.payload.huddle_id)) {
+        if (endedJoined) {
           joinedRef.current = null;
           setJoinedVersion((value) => value + 1);
           clearExpiry();
           setMuted(false);
           void disconnectAudio();
           setNotice("허들이 종료되어 오디오 연결을 닫았습니다.");
+        } else if (endedJoinAttempt) {
+          setNotice("허들이 종료되어 참가를 취소했습니다.");
         }
         return;
       }
@@ -277,7 +285,7 @@ export function useHuddle(
 
       // Start loading the optional SDK beside the join request. Both begin only
       // after a user action, and neither depends on the other's result.
-      const runtimePromise = import("./huddleRuntime");
+      const runtimePromise = loadHuddleRuntime();
       const joinedPromise = joinHuddle(workspaceId, huddle.id);
       const [runtime, joined] = await Promise.all([
         runtimePromise,
@@ -385,7 +393,7 @@ export function useHuddle(
       if (mountedRef.current) setMuted(target);
     } catch (error) {
       if (mountedRef.current) {
-        setNotice(huddleErrorCopy(huddleErrorKind(error)));
+        setNotice(huddleErrorCopy(huddleErrorKind(error, "microphone")));
       }
     } finally {
       if (mountedRef.current) setBusy(null);
