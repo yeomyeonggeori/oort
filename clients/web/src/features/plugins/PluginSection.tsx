@@ -971,7 +971,11 @@ function PluginScopeConsentDialog({
               size="sm"
               aria-disabled={!canConfirm || undefined}
               aria-busy={pending || undefined}
-              aria-describedby={!canConfirm ? "plugin-scope-selection-hint" : undefined}
+              // Keyed to the hint's OWN condition rather than to canConfirm:
+              // canConfirm is also false while a confirmed change is in flight,
+              // and the hint is not rendered then, so reusing it would point
+              // this button at an id that is not in the document.
+              aria-describedby={selectedScopes.length === 0 ? "plugin-scope-selection-hint" : undefined}
               className={!canConfirm ? "opacity-50" : undefined}
               data-testid="plugin-scope-confirm"
               onClick={() => {
