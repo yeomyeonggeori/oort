@@ -913,14 +913,19 @@ function PluginScopeConsentDialog({
         onInteractOutside={(event) => { if (pending) event.preventDefault(); }}
         data-testid="plugin-scope-consent"
       >
-        {/* Only the orientation anchor is fixed. Decorative identity, explanatory
-            copy and role-backed contacts live after the decision scopes in the
-            scroll flow, so a short window shows evidence before context while
-            the title and footer actions remain continuously visible. */}
-        <div className="border-b border-line p-4">
-          <DialogTitle data-testid="plugin-scope-consent-title">
+        {/* Keep only an orientation anchor and one server-backed trust signal
+            fixed. Installation is workspace state, not publisher-authored
+            identity; all explanatory and publisher detail remains after the
+            decision scopes so the first permission evidence stays above fold. */}
+        <div className="flex items-start gap-2 border-b border-line p-4">
+          <DialogTitle className="min-w-0 flex-1" data-testid="plugin-scope-consent-title">
             {isGrant ? `${consent.plugin.name} 앱에 권한을 허용할까요?` : `${consent.plugin.name} 앱 권한을 회수할까요?`}
           </DialogTitle>
+          {isGrant && consent.plugin.installed && consent.plugin.enabled && (
+            <span data-testid="plugin-scope-installation-signal">
+              <StatusChip tone="ok">워크스페이스 설치됨</StatusChip>
+            </span>
+          )}
         </div>
 
         <div
@@ -1033,14 +1038,11 @@ function PluginScopeConsentDialog({
                 ? "선택한 권한의 도구가 내 사용자 정책에 추가됩니다."
                 : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
             </DialogDescription>
-            {isGrant && consent.plugin.installed && consent.plugin.enabled && (
+            {isGrant && consent.plugin.installed && consent.plugin.enabled && managerNames.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
-                <StatusChip tone="ok">워크스페이스 설치됨</StatusChip>
-                {managerNames.length > 0 && (
-                  <span className="text-meta text-ink-muted">
-                    문의할 수 있는 관리자: {managerNames.join(", ")}
-                  </span>
-                )}
+                <span className="text-meta text-ink-muted">
+                  문의할 수 있는 관리자: {managerNames.join(", ")}
+                </span>
               </div>
             )}
           </div>

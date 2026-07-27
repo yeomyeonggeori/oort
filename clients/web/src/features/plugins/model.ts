@@ -242,15 +242,24 @@ export function pluginScopeConsentCompletion(
 ): PluginScopeConsentCompletion {
   const failed = outcomes.filter((outcome) => !outcome.succeeded);
   if (outcomes.length > 0 && failed.length === outcomes.length) {
-    const causes = new Set(failed.map((outcome) =>
+    const causes = [...new Set(failed.map((outcome) =>
       pluginActionErrorMessage(outcome.error)
-    ));
+    ))];
+    if (causes.length === 1) {
+      const affectedScopes = failed.map((outcome) =>
+        `${scopeSentence(outcome.scope)} (${outcome.scope})`
+      );
+      return {
+        dismissDialog: false,
+        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]}\n영향받은 권한: ${affectedScopes.join(", ")}`,
+      };
+    }
     const scopedErrors = failed.map((outcome) =>
       `• ${scopeSentence(outcome.scope)} (${outcome.scope}): ${pluginActionErrorMessage(outcome.error)}`
     );
     return {
       dismissDialog: false,
-      error: `선택한 권한을 변경하지 못했습니다. ${causes.size}가지 원인을 scope별로 확인하세요.\n${scopedErrors.join("\n")}`,
+      error: `선택한 권한을 변경하지 못했습니다. ${causes.length}가지 원인을 권한별로 확인하세요.\n${scopedErrors.join("\n")}`,
     };
   }
   return { dismissDialog: true };

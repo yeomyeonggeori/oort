@@ -584,18 +584,22 @@ async function assertPluginScopeConsent(page, size) {
     const panel = document.querySelector('[data-testid="plugin-scope-consent"]');
     const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
     const title = document.querySelector('[data-testid="plugin-scope-consent-title"]');
+    const installationSignal = document.querySelector(
+      '[data-testid="plugin-scope-installation-signal"]'
+    );
     const firstBadges = document.querySelector('[data-testid^="plugin-scope-badges-"]');
     const momoMark = document.querySelector('[data-testid="plugin-scope-momo-mark"]');
     const buttons = [
       document.querySelector('[data-testid="plugin-scope-cancel"]'),
       document.querySelector('[data-testid="plugin-scope-confirm"]'),
     ];
-    if (!panel || !scrollbox || !title || !firstBadges || !momoMark || buttons.some((button) => !button)) {
+    if (!panel || !scrollbox || !title || !installationSignal || !firstBadges || !momoMark || buttons.some((button) => !button)) {
       return { missing: true };
     }
     const panelRect = panel.getBoundingClientRect();
     const scrollboxRect = scrollbox.getBoundingClientRect();
     const titleRect = title.getBoundingClientRect();
+    const installationSignalRect = installationSignal.getBoundingClientRect();
     const badgeRect = firstBadges.getBoundingClientRect();
     const buttonRects = buttons.map((button) => button.getBoundingClientRect());
     const inViewport = (rect) => rect.top >= 0 && rect.bottom <= window.innerHeight + 1;
@@ -609,6 +613,9 @@ async function assertPluginScopeConsent(page, size) {
       scrollTop: scrollbox.scrollTop,
       titleInViewport: inViewport(titleRect),
       titleInPanel: inPanel(titleRect),
+      installationSignalText: installationSignal.textContent,
+      installationSignalInViewport: inViewport(installationSignalRect),
+      installationSignalInPanel: inPanel(installationSignalRect),
       firstBadgeText: firstBadges.textContent,
       firstBadgesVisible:
         badgeRect.top >= scrollboxRect.top &&
@@ -631,6 +638,9 @@ async function assertPluginScopeConsent(page, size) {
       layout.scrollTop === 0 &&
       layout.titleInViewport === true &&
       layout.titleInPanel === true &&
+      layout.installationSignalText?.includes("워크스페이스 설치됨") &&
+      layout.installationSignalInViewport === true &&
+      layout.installationSignalInPanel === true &&
       layout.firstBadgesVisible === true &&
       layout.firstBadgeText?.includes("승인:") &&
       layout.firstBadgeText?.includes("위험도:") &&
@@ -689,11 +699,16 @@ async function assertPluginScopeConsent(page, size) {
   const failure = await page.evaluate(`(() => ({
     dialogOpen: Boolean(document.querySelector('[data-testid="plugin-scope-consent"]')),
     error: document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent,
+    policyCauseCount: (
+      document.querySelector('[data-testid="plugin-scope-consent-error"]')?.textContent
+        ?.match(/이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다\\./g) ?? []
+    ).length,
   }))()`);
   check(
-    `${size.name} 전량 scope 실패는 선택을 보존하고 403 원인을 말한다`,
+    `${size.name} 전량 권한 실패는 선택을 보존하고 같은 403 원인을 한 번만 말한다`,
     failure.dialogOpen === true &&
-      failure.error?.includes("notion:read") &&
+      NOTION_SCOPE_FIXTURE.every(([scope]) => failure.error?.includes(scope)) &&
+      failure.policyCauseCount === 1 &&
       failure.error?.includes("관리자에게 정책과 권한을 확인하세요."),
     JSON.stringify(failure)
   );
