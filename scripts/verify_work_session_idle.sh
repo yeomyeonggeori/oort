@@ -261,18 +261,18 @@ got="$(sql_value <<SQL
 SELECT
   (SELECT count(*) FROM outbox
     WHERE payload->'data'->>'type'='work.session.idle'
-      AND payload->'data'->'payload'->>'session_id'
-          IN ('$ROUNDTRIP_SESSION','$TIMEOUT_SESSION','$OFFLINE_SESSION')) || ':' ||
+      AND lower(payload->'data'->'payload'->>'session_id')
+          IN (lower('$ROUNDTRIP_SESSION'),lower('$TIMEOUT_SESSION'),lower('$OFFLINE_SESSION'))) || ':' ||
   (SELECT count(*) FROM outbox
     WHERE payload->'data'->>'type'='work.session.resumed-to-running'
-      AND payload->'data'->'payload'->>'session_id'='$ROUNDTRIP_SESSION') || ':' ||
+      AND lower(payload->'data'->'payload'->>'session_id')=lower('$ROUNDTRIP_SESSION')) || ':' ||
   (SELECT count(*) FROM outbox
     WHERE payload->'data'->>'type'='work.session.ended'
-      AND payload->'data'->'payload'->>'session_id'='$TIMEOUT_SESSION'
+      AND lower(payload->'data'->'payload'->>'session_id')=lower('$TIMEOUT_SESSION')
       AND payload->'data'->'payload'->>'end_reason'='idle_timeout') || ':' ||
   (SELECT count(*) FROM outbox
     WHERE payload->'data'->>'type'='work.session.orphaned'
-      AND payload->'data'->'payload'->>'session_id'='$OFFLINE_SESSION') || ':' ||
+      AND lower(payload->'data'->'payload'->>'session_id')=lower('$OFFLINE_SESSION')) || ':' ||
   (SELECT count(*) FROM audit_log
     WHERE action='work.session.idle'
       AND target_id IN ('$ROUNDTRIP_SESSION','$TIMEOUT_SESSION','$OFFLINE_SESSION')) || ':' ||
@@ -295,7 +295,7 @@ SQL
 got="$(sql_value <<SQL
 SELECT count(*) FROM message
  WHERE props->>'kind'='work_session_idle'
-   AND props->>'session_id' IN ('$ROUNDTRIP_SESSION','$TIMEOUT_SESSION','$OFFLINE_SESSION')
+   AND lower(props->>'session_id') IN (lower('$ROUNDTRIP_SESSION'),lower('$TIMEOUT_SESSION'),lower('$OFFLINE_SESSION'))
    AND body='작업 완료 — idle 대기'
    AND (props - ARRAY['kind','session_id','owner_member_id'])='{}'::jsonb;
 SQL
@@ -311,7 +311,7 @@ while [ "$(date -u +%s)" -lt "$deadline" ]; do
 SELECT count(*) FROM push_dispatch_log l
 JOIN message m ON m.id=l.message_id
 WHERE m.props->>'kind'='work_session_idle'
-  AND m.props->>'session_id' IN ('$ROUNDTRIP_SESSION','$TIMEOUT_SESSION','$OFFLINE_SESSION')
+  AND lower(m.props->>'session_id') IN (lower('$ROUNDTRIP_SESSION'),lower('$TIMEOUT_SESSION'),lower('$OFFLINE_SESSION'))
   AND l.member_id='$OWNER_ID' AND l.apns_status=200;
 SQL
 )"
@@ -330,7 +330,8 @@ curl -fsS "http://127.0.0.1:$PUSH_PORT/received" | jq -e '
        (keys - [
          "apns_token", "apns_env", "apns_topic", "collapse_id", "badge",
          "reason", "thread_id", "category", "approval_id", "channel_id",
-         "message_id", "device_id", "member_id"
+         "message_id", "device_id", "member_id",
+         "schema", "server_id", "workspace_id", "device_platform"
        ]) == []
      )
    | select(

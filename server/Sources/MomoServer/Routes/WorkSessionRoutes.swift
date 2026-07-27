@@ -731,6 +731,12 @@ struct WorkSessionRoutes: Sendable {
                 "host_id": decoded.4.uuidString,
             ]
             if let exitCode { auditDetail["exit_code"] = exitCode }
+            // A workHost principal signs with Ed25519 and carries the HOST id in
+            // `tokenID`; that id is not a `token` row, so writing it here is an
+            // audit_log_via_token_id FK violation (500, caught live by
+            // verify_work_session_idle). No token was used, so NULL is the true
+            // statement; the acting host is already named in detail.host_id.
+            let viaTokenID: UUID? = principal.kind == .workHost ? nil : principal.tokenID
             _ = try await conn.query(
                 """
                 INSERT INTO audit_log
@@ -738,7 +744,7 @@ struct WorkSessionRoutes: Sendable {
                    target_type, target_id, via_token_id, detail)
                 VALUES
                   (\(workspaceID), \(decoded.3), \(decoded.3), \(eventType),
-                   'work_session', \(sessionID), \(principal.tokenID),
+                   'work_session', \(sessionID), \(viaTokenID),
                    \(Self.jsonString(auditDetail))::jsonb)
                 """,
                 logger: db.logger
