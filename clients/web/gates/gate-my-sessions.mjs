@@ -306,12 +306,22 @@ async function loginAndOpenMine(context) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   await page.goto(origin, { waitUntil: "domcontentloaded" });
-  if ((await page.getByTestId("login-submit").count()) > 0) {
+  // domcontentloaded fires before React commits, so a count() probe taken here
+  // races the first render: it can read 0 for a login form that is about to
+  // appear, skip sign-in, and then wait forever for the shell. Wait until ONE
+  // of the two possible surfaces actually exists before deciding which one.
+  const loginSubmit = page.getByTestId("login-submit");
+  const workPanelToggle = page.getByTestId("open-work-panel");
+  await Promise.race([
+    loginSubmit.waitFor({ timeout: 30_000 }).catch(() => {}),
+    workPanelToggle.waitFor({ timeout: 30_000 }).catch(() => {}),
+  ]);
+  if ((await loginSubmit.count()) > 0) {
     await page.getByTestId("login-email").fill("gate@example.test");
     await page.getByTestId("login-password").fill("not-a-secret");
-    await page.getByTestId("login-submit").click();
+    await loginSubmit.click();
   }
-  await page.getByTestId("open-work-panel").waitFor();
+  await workPanelToggle.waitFor();
   await page.getByTestId("open-work-panel").click();
   await page.getByTestId("work-scope-mine").click();
   return page;
