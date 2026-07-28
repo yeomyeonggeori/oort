@@ -9,13 +9,26 @@ final class ManagedProcess: @unchecked Sendable {
 
     let runtime: Runtime
     let output: FileHandle
+    let ptyOutputState: ShellPTYOutputState?
     var exitCode: Int?
     var acknowledged = false
     var endReported = false
+    var toolState: ToolState = .running
+    var pendingTransitions: [ProcessManager.ToolTransition] = []
 
-    init(runtime: Runtime, output: FileHandle) {
+    enum ToolState {
+        case running
+        case idle
+    }
+
+    init(
+        runtime: Runtime,
+        output: FileHandle,
+        ptyOutputState: ShellPTYOutputState? = nil
+    ) {
         self.runtime = runtime
         self.output = output
+        self.ptyOutputState = ptyOutputState
     }
 }
 
@@ -25,9 +38,25 @@ actor ProcessManager {
         let exitCode: Int
     }
 
+    struct ToolTransition: Sendable, Equatable {
+        enum Status: Sendable, Equatable {
+            case running
+            case idle(exitCode: Int)
+        }
+
+        let sessionID: UUID
+        let status: Status
+    }
+
+    enum AttachMode: Sendable {
+        case controller
+        case observer
+    }
+
     private var templates: [String: CommandTemplate]
     private let outputDirectory: URL
     private let hostEnvironment: [String: String]
+    private let ringBufferBytes: Int
     private let acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)?
     private var sessions: [UUID: ManagedProcess] = [:]
 
@@ -35,11 +64,13 @@ actor ProcessManager {
         templates: [String: CommandTemplate],
         outputDirectory: URL,
         hostEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        ringBufferBytes: Int = PTYReplayBuffer.defaultCapacityBytes,
         acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)? = nil
     ) {
         self.templates = templates
         self.outputDirectory = outputDirectory
         self.hostEnvironment = hostEnvironment
+        self.ringBufferBytes = max(1, ringBufferBytes)
         self.acpEventRelay = acpEventRelay
     }
 
@@ -62,13 +93,28 @@ actor ProcessManager {
             let output = try FileHandle(forWritingTo: outputURL)
             switch template.transport {
             case .pty:
-                let process = try HostPTYProcess.launch(
-                    executable: template.executable,
-                    arguments: template.arguments,
-                    environment: childEnvironment(for: template)
+                let environment = childEnvironment(for: template)
+                let launch = ShellWrappedPTYLaunch.make(
+                    template: template,
+                    environment: environment
                 )
-                process.onOutput { data in try? output.write(contentsOf: data) }
-                sessions[sessionID] = ManagedProcess(runtime: .pty(process), output: output)
+                let process = try HostPTYProcess.launch(
+                    executable: launch.shellExecutable,
+                    arguments: launch.shellArguments,
+                    environment: environment
+                )
+                let outputState = ShellPTYOutputState(
+                    markerNonce: launch.markerNonce,
+                    output: output,
+                    capacityBytes: ringBufferBytes
+                )
+                process.onOutput { data in outputState.consume(data) }
+                sessions[sessionID] = ManagedProcess(
+                    runtime: .pty(process),
+                    output: output,
+                    ptyOutputState: outputState
+                )
+                try process.write(launch.bootstrap)
             case .acp:
                 let eventURL = outputDirectory.appendingPathComponent(
                     "\(sessionID.uuidString.lowercased()).acp-events.jsonl"
@@ -136,16 +182,56 @@ actor ProcessManager {
         }
     }
 
+    func connect(ptyID: String) throws -> AsyncStream<PTYReplayEvent> {
+        guard let sessionID = UUID(uuidString: ptyID),
+              let managed = sessions[sessionID],
+              let state = managed.ptyOutputState
+        else { throw WorkdFailure.stdinUnavailable }
+        return state.replay.connect()
+    }
+
+    func write(_ data: Data, toPTY ptyID: String, mode: AttachMode) throws {
+        guard mode == .controller,
+              let sessionID = UUID(uuidString: ptyID),
+              let managed = sessions[sessionID],
+              case .pty(let process) = managed.runtime
+        else { throw WorkdFailure.stdinUnavailable }
+        try process.write(data)
+    }
+
+    func ptyID(for sessionID: UUID) -> String? {
+        guard sessions[sessionID]?.ptyOutputState != nil else { return nil }
+        return sessionID.uuidString.lowercased()
+    }
+
     func terminate(_ sessionID: UUID) async throws -> Int {
         guard let managed = sessions[sessionID] else {
             throw WorkdFailure.processTerminate
         }
         switch managed.runtime {
         case .pty(let process):
-            process.terminate()
-            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            // An interactive login shell may intentionally ignore SIGTERM.
+            // Interrupt its current foreground tool, then ask the shell to
+            // leave through its PTY so logout hooks and the working directory
+            // are released cleanly; fall back to terminate.
+            try? process.write(Data([0x03]))
+            try? await Task.sleep(for: .milliseconds(50))
+            try? process.write(Data("exit\n".utf8))
+            let gracefulDeadline = ContinuousClock.now.advanced(by: .milliseconds(500))
+            while process.isRunning, ContinuousClock.now < gracefulDeadline {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            if process.isRunning { process.terminate() }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(2))
             while process.isRunning, ContinuousClock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(50))
+            }
+            if process.isRunning {
+                process.forceTerminate()
+                let forcedDeadline = ContinuousClock.now.advanced(by: .seconds(1))
+                while process.isRunning, ContinuousClock.now < forcedDeadline {
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
             }
             guard !process.isRunning else { throw WorkdFailure.processTerminate }
             let code = process.exitCode ?? -1
@@ -174,11 +260,47 @@ actor ProcessManager {
         }
     }
 
+    func toolTransitions() -> [ToolTransition] {
+        for (sessionID, managed) in sessions {
+            guard managed.acknowledged, let outputState = managed.ptyOutputState else { continue }
+            for event in outputState.drainLifecycleEvents() {
+                switch (managed.toolState, event) {
+                case (.running, .idle(let exitCode)):
+                    managed.toolState = .idle
+                    managed.pendingTransitions.append(ToolTransition(
+                        sessionID: sessionID,
+                        status: .idle(exitCode: exitCode)
+                    ))
+                case (.idle, .running):
+                    managed.toolState = .running
+                    managed.pendingTransitions.append(ToolTransition(
+                        sessionID: sessionID,
+                        status: .running
+                    ))
+                case (.running, .running), (.idle, .idle):
+                    break
+                }
+            }
+        }
+        return sessions.values.flatMap(\.pendingTransitions)
+    }
+
+    func markTransitionReported(_ transition: ToolTransition) {
+        guard let managed = sessions[transition.sessionID],
+              managed.pendingTransitions.first == transition
+        else { return }
+        managed.pendingTransitions.removeFirst()
+    }
+
     func markEndReported(_ sessionID: UUID) {
-        guard let managed = sessions[sessionID] else { return }
+        guard let managed = sessions.removeValue(forKey: sessionID) else { return }
         managed.endReported = true
         if case .pty(let process) = managed.runtime { process.close() }
-        try? managed.output.close()
+        if let state = managed.ptyOutputState {
+            state.close()
+        } else {
+            try? managed.output.close()
+        }
     }
 
     func outputURL(for sessionID: UUID) -> URL {

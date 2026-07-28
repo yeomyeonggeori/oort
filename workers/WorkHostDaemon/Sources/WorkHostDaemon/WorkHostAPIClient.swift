@@ -40,6 +40,8 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
         let errorLabel: String?
     }
     private struct EndSessionRequest: Encodable { let status = "ended"; let exitCode: Int? }
+    private struct IdleSessionRequest: Encodable { let status = "idle"; let exitCode: Int }
+    private struct RunningSessionRequest: Encodable { let status = "running" }
     private struct ACPEventRequest: Encodable { let event: ACPProjectedEvent }
 
     private let config: WorkdConfig
@@ -177,6 +179,24 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
             hostID: hostID,
             body: EndSessionRequest(exitCode: exitCode)
+        )
+    }
+
+    func reportSessionIdle(hostID: UUID, sessionID: UUID, exitCode: Int) async throws {
+        let _: SessionResponse = try await sendSigned(
+            method: "PATCH",
+            path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
+            hostID: hostID,
+            body: IdleSessionRequest(exitCode: exitCode)
+        )
+    }
+
+    func reportSessionRunning(hostID: UUID, sessionID: UUID) async throws {
+        let _: SessionResponse = try await sendSigned(
+            method: "PATCH",
+            path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
+            hostID: hostID,
+            body: RunningSessionRequest()
         )
     }
 
