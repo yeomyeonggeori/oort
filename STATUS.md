@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-649 daemon shell PTY + host-local replay core (#857, 2026-07-28)
+
+- PTY 도구는 로그인 셸의 canonical profile-command wrapper로 실행되어 종료 뒤 같은 PTY·workdir을 보존하고 signed lifecycle PATCH로 `idle(exitCode)`을 보고한다. 일반 셸 명령은 상태 소음에서 제외하며 같은 canonical command 재실행만 `running` 복귀를 만든다.
+- PTY별 기본 256KiB bounded host-local ring과 원자적 `replay bytes → replay_end(byte_offset) → live bytes` attach 계약을 추가했다. kill/end는 셸·ring·subscriber를 정리하고 observer input은 거부한다. WorkHostDaemon 32 tests PASS(외부 mock 부재 3 skip).
+- 기존 repo에는 public WSS workd adapter와 create의 `ptyId/attachEndpoint` 배선이 없어 데몬↔서버↔웹 xterm 실왕복 및 빠른 동일-host daemon 재시작 orphan 정리는 `runtime-unverified`이며 후속 계약이 필요하다. 서버/relay에는 raw PTY byte 경로를 추가하지 않았다.
+
 ## MOMO-648 work_session idle 상태 + 수명주기 (#856, 2026-07-28)
 
 - Migration 047로 `running ↔ idle`과 `idle_timeout` 종료를 열고 `exit_code`를 마지막 도구 실행 결과로 재정의했다. 호스트 서명 REST 전이는 `work.session.idle`/`work.session.resumed-to-running` outbox·감사를 같은 트랜잭션에 기록하며, idle 완료 메시지는 소유자에게 id-only `momo.work` 푸시로 전달한다.

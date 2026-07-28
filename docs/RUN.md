@@ -1186,6 +1186,19 @@ PTY·ACP·ACP가 생성한 terminal 자식은 기본적으로 `PATH`, `HOME`, `U
 요청은 호스트가 `MOMO_WORKD_ALLOW_PROFILE_LEGACY_ENV=1`로 별도 동의해야만 효력이 있다.
 어떤 모드에서도 `MOMO_WORKD_*`는 자식에 전달되지 않는다.
 
+PTY transport의 도구는 사용자의 로그인 셸 안에 profile launch command와 같은 이름의
+wrapper function으로 실행된다. 이 함수가 시작/종료 marker를 host 내부에서만 내고 workd가
+marker를 raw 출력에서 제거한 뒤 `running ↔ idle` signed PATCH로 바꾼다. 따라서 `ls`나
+prompt helper 같은 일반 셸 명령은 lifecycle을 흔들지 않고, 같은 canonical tool command를
+다시 실행할 때만 running으로 돌아간다. idle 중 셸·PTY·현재 workdir은 유지된다.
+
+PTY scrollback은 host 메모리의 bounded ring이며 기본 256KiB다.
+`MOMO_WORKD_PTY_RING_BYTES`로 4KiB~16MiB 사이에서 조정할 수 있다. `connect(ptyID)`는 같은
+lock 아래 retained binary bytes, JSON control
+`{"byte_offset":N,"type":"replay_end"}`, 이후 live binary bytes를 enqueue한다. adapter는
+control frame을 xterm에 쓰면 안 된다. 서버·relay·DB에는 이 byte와 ring이 저장되지 않는다.
+kill/end는 foreground Ctrl-C→shell exit→필요 시 강제 종료 후 ring/subscriber를 제거한다.
+
 동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
 
 ```sh
@@ -1254,7 +1267,13 @@ PTY를 생성하거나 터미널 byte stream을 중계하지 않는다. owner hu
 
 서버 DB에는 raw capability가 아닌 SHA-256 digest만 있고 audit에는 owner와 issued/expires만
 남는다. terminal stdout/stderr/stdin/resize는 MomoServer, OutboxRelay, Centrifugo를 통과하지
-않는다. 실제 workd/provisioner PTY adapter와 SwiftTerm direct attach는 후속 goal이다.
+않는다. MOMO-649는 workd 내부의 stable `ptyID` attach/replay API까지 구현했지만, 기존
+repo에는 public WSS listener/TLS reverse-proxy 설정과 create의
+`ptyId`/`attachEndpoint` 배선이 아직 없다. 따라서 public workd/provisioner adapter와
+SwiftTerm/web direct attach 실왕복은 계속 후속 계약이다. 데몬이 죽어 host heartbeat가
+offline grace를 넘으면 기존 orphan sweep이 세션을 전환한다. 같은 host ID로 grace 전에
+재시작하면 메모리 PTY를 복구할 수도, stale session을 명시 보고할 API도 현재 없으므로 이
+빠른 재시작 경우는 별도 reconcile 계약 전까지 `runtime-unverified`다.
 
 ```sh
 # runtime-db profile에도 포함됨. 기본 전용 포트: API 27970,
@@ -1267,6 +1286,24 @@ verifier는 네 포트가 비어 있는지 먼저 검사한 뒤 owner 발급, ag
 서버·relay 원장/로그 부재를 단정한다. Ed25519 서명에는 `find_openssl` 방식으로 실제 지원
 binary를 고른다. 이 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행하며,
 그 전까지 terminal attach runtime은 `runtime-unverified`다.
+
+MOMO-649 worker 검증과 red proof:
+
+```sh
+swift test --disable-sandbox --package-path workers/WorkHostDaemon \
+  --filter WorkHostDaemonTests
+
+# red proof: PTYReplayBuffer.connect()의 retained `.bytes(retained)` yield 한 줄을
+# 임시 제거한 작업 복사본에서 아래 테스트가 "expected retained PTY replay"로 FAIL해야 한다.
+swift test --disable-sandbox --package-path workers/WorkHostDaemon \
+  --filter testShellWrappedToolIdlesKeepsPTYAndReportsOnlyCanonicalToolRerun
+```
+
+오케스트레이터는 먼저 위 daemon suite와 `scripts/verify_work_session_idle.sh`,
+`scripts/verify_terminal_attach.sh`를 실행하고 UUID 문자열을 비교할 때 양쪽을 lowercase로
+정규화한다. public WSS adapter/reconcile 계약이 랜딩한 뒤에는 마지막으로 실제 workd가 만든
+`ptyId/attachEndpoint`를 server grant에서 받아 웹 `ObserverTerminal`로 연결해
+종료 직전 marker 출력→`replay_end` 비표시→동시 live marker 1회 수신을 xterm에서 확인한다.
 
 ---
 
