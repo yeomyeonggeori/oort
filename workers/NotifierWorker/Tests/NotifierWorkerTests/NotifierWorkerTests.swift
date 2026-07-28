@@ -3,6 +3,30 @@ import Crypto
 @testable import NotifierWorker
 
 final class NotifierWorkerTests: XCTestCase {
+    func testT3DefaultOffDoesNotStartReconcilerPolling() async {
+        actor Counter {
+            var value = 0
+            func increment() { value += 1 }
+        }
+        let counter = Counter()
+
+        await NotifierService.runCloudLifecycleReconcilerIfEnabled(false) {
+            await counter.increment()
+        }
+        let disabledCount = await counter.value
+        XCTAssertEqual(
+            disabledCount,
+            0,
+            "named regression: T3 default-off must not enter reconciler polling"
+        )
+
+        await NotifierService.runCloudLifecycleReconcilerIfEnabled(true) {
+            await counter.increment()
+        }
+        let enabledCount = await counter.value
+        XCTAssertEqual(enabledCount, 1)
+    }
+
     func testResumeReconcilerTreats404And410AsTerminalMissingSandbox() {
         for status in [404, 410] {
             XCTAssertTrue(NotifierService.isTerminalMissingResume(

@@ -24,6 +24,7 @@ struct CloudCreditRoutes: Sendable {
 
     let db: Database
     let platformAdminEmails: [String]
+    let cloudProvisionerConfig: CloudProvisionerConfig
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/admin/workspaces/:ws/credits/topups", use: topup)
@@ -31,6 +32,7 @@ struct CloudCreditRoutes: Sendable {
 
     @Sendable
     func topup(_ request: Request, context: AppRequestContext) async throws -> Response {
+        try CloudProvisionerRoutes.requireEnabled(cloudProvisionerConfig)
         let principal = try await Self.requireCreditWriter(
             db: db,
             platformAdminEmails: platformAdminEmails,

@@ -1497,10 +1497,22 @@ scripts/local_gate.sh --profile host-runtime
 - DB migration은 app boot side effect가 아니라 `scripts/migrate.sh` 또는 smoke `migrate` job으로 명시 실행한다.
 - Backup/restore는 pgBackRest skeleton과 evidence template까지만 repo-local로 검증한다. 실제 backup/PITR restore rehearsal은 `runtime-unverified(public host)`다.
 
+`PLATFORM_ADMIN_EMAILS` 또는 `PLATFORM_ADMIN_LOGIN_SECRET` 변경 뒤에는 API를 재시작하고
+각 운영자가 기존 `/v1/auth/login`으로 다시 로그인한다. 로그인은 그 멤버의 기존
+`platform:read`/`platform:credits:write` 세션 토큰을 `revoked_at`으로 일괄 폐기한 뒤
+현재 allowlist+secret으로 새 pair를 발급한다. allowlist에서 제거된 운영자가 먼저
+refresh하더라도 refresh 자체는 유지하되 새 pair에서 두 privileged scope만 제거하고
+남은 privileged sibling token을 일괄 폐기한다. 별도 토큰 문법이나 raw token 저장은 없다.
+
 ### 8.1.2 momo Cloud T3 / E2B 프로비저너 (MOMO-647)
 
-T3는 opt-in이다. `E2B_API_KEY`가 없거나 프로비저너 설정이 불완전하면
-`POST /v1/workspaces/{ws}/work-hosts/cloud`만 503으로 닫히고 T1/T2는 영향받지 않는다.
+T3는 기본 비활성이며 재설계 진행 중(#888)이다. `MOMO_T3_ENABLED=1`을 명시한
+경우에만 opt-in된다. 비활성에서는 provisioning·조회·register·pause/resume·destroy와
+topup이 읽히는 503으로 닫히고 NotifierWorker reconciler는 DB claim조차 실행하지 않는다.
+T1/T2 세션 생성·idle·재부착은 이 설정을 읽지 않는다.
+
+옵트인 뒤에도 `E2B_API_KEY`가 없거나 프로비저너 설정이 불완전하면 T3만 503으로
+닫히고 T1/T2는 영향받지 않는다.
 키는 인스턴스 운영자 시크릿이며 workspace 설정, 클라이언트, DB, 로그에 넣지 않는다.
 
 `E2B_TEMPLATE_ID`는 `momo-workd`를 포함하고 entrypoint에서 실행하는 운영자 소유
@@ -1533,7 +1545,8 @@ Docker를 실행하지 않으며 오케스트레이터가 위 명령으로 이 r
 오케스트레이터의 실 E2B smoke 절차:
 
 1. 외부에서 접근 가능한 격리 MomoServer와 `momo-workd` E2B template을 준비한다.
-2. 서버 프로세스에만 `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
+2. 서버·NotifierWorker 프로세스에 `MOMO_T3_ENABLED=1`을, 서버 프로세스에만
+   `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
    `MOMO_PUBLIC_BASE_URL=https://...`, `MOMO_T3_RATE_MICRO_USD_PER_SECOND`를 주입한다.
    셸 trace를 끄고 키 값을 출력하지 않는다.
 3. instance-operator bearer로
