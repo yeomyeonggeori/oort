@@ -1,0 +1,31 @@
+{
+  "backend": {
+    "name": "faster-whisper",
+    "version": "1.2.1",
+    "sourceCommit": "65882eee9f5cdbeeb2d877f1131d48cf241b327d"
+  },
+  "models": [
+    {
+      "name": "small",
+      "repository": "Systran/faster-whisper-small",
+      "revision": "536b0662742c02347bc0e980a01041f333bce120"
+    },
+    {
+      "name": "medium",
+      "repository": "Systran/faster-whisper-medium",
+      "revision": "08e178d48790749d25932bbc082711ddcfdfbc4f"
+    },
+    {
+      "name": "large-v3-turbo",
+      "repository": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+      "revision": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+    }
+  ],
+  "decode": {
+    "language": "ko",
+    "beamSize": 5,
+    "temperature": 0.0,
+    "vadFilter": false,
+    "conditionOnPreviousText": true
+  }
+}

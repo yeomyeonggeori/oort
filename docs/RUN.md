@@ -168,6 +168,7 @@ cp infra/.env.example .env
 | `JWT_HMAC` | 서버 | App access(15m)/refresh(30d) 토큰 HS256 서명 시크릿(§7.1). |
 | `MOMO_LIVEKIT_API_KEY` / `MOMO_LIVEKIT_API_SECRET` | 서버 | ADR-0122 허들 room grant의 `iss`와 HS256 서명 키. App JWT/Centrifugo 키와 분리하며 secret은 응답·audit·로그에 넣지 않는다. |
 | `MOMO_LIVEKIT_URL` | 서버 | 클라이언트에 반환할 LiveKit `http(s)`/`ws(s)` endpoint. 세 LiveKit 값 중 하나라도 없거나 URL이 잘못되면 허들 API는 503 `허들 미구성`으로 fail-closed한다. LiveKit 컨테이너 기동은 V-2 범위다. |
+| `MOMO_TRANSCRIPTION_MODEL` | 서버 | MOMO-646 실측 뒤 운영자가 고르는 사후 전사 모델. 미설정이면 녹음 시작 REST는 503으로 fail-closed한다. |
 | `LIVEKIT_PORT` / `LIVEKIT_RTC_TCP_PORT` | compose `huddle` profile | LiveKit signaling/HTTP(기본 7880)와 TCP RTC fallback(기본 7881)의 호스트 포트. |
 | `LIVEKIT_RTC_UDP_START` / `LIVEKIT_RTC_UDP_END` | compose `huddle` profile | 컨테이너의 제한된 UDP media range 50000~50100에 대응하는 같은 크기의 호스트 포트 범위. 기본 50000~50100. |
 | `EVE_PORT` | compose `eve` profile | eve HTTP/health 포트. 기본 28140이며 verifier는 실행 전 28140~28142 선점을 검사한다. |
@@ -692,6 +693,29 @@ scripts/verify_huddle_livekit.sh
 `runtime-unverified(worker)`: MOMO-470 worker는 Docker를 실행하지 않는다. 위 verifier의
 PASS evidence는 momo-main 오케스트레이터가 실제 실행한 뒤에만 기록한다.
 
+### 3.2.1 녹음 Egress + 사후 전사 옵트인
+
+MOMO-646의 Egress와 dev 전용 Redis는 기본 stack 및 기존 `huddle` profile에 포함되지
+않는다. 참가자별 Track egress와 사후 전사를 검증할 때만 `transcription` profile을
+명시한다. 이 profile은 LiveKit도 함께 활성화하며 Centrifugo 설정은 바꾸지 않는다.
+
+```sh
+docker compose -f infra/docker-compose.yml --profile transcription \
+  up -d transcription-redis livekit livekit-egress
+docker compose -f infra/docker-compose.yml --profile transcription \
+  ps transcription-redis livekit livekit-egress
+```
+
+서버에는 모델 판정 뒤 `MOMO_TRANSCRIPTION_MODEL`을 주입한다. 값이 없으면 녹음 시작
+REST는 503으로 fail-closed한다. 참가자 전원의
+`POST /v1/workspaces/:ws/huddles/:huddle/recording-consent`가 선행되지 않으면
+`POST /v1/workspaces/:ws/huddles/:huddle/recordings`는 409를 반환한다. 마지막 참가자
+퇴장 시 `huddle_transcription_job`이 queued로 생성된다.
+
+한국어 실측과 더미 무음 셀프테스트는
+`scripts/transcription/README.md`를 따른다. Egress/실오디오/동의 REST red 증명은
+오케스트레이터가 실행하며 worker 단계에서는 `runtime-unverified`다.
+
 ### 3.3 E2E compose static validation
 
 MOMO-186 e2e layer는 local gate가 전체 service boundary를 재현하기 위한 초안이다. dev compose를 대체하지 않고, prod compose의 image-based/source-checkout-free 원칙도 건드리지 않는다.
@@ -1162,6 +1186,19 @@ PTY·ACP·ACP가 생성한 terminal 자식은 기본적으로 `PATH`, `HOME`, `U
 요청은 호스트가 `MOMO_WORKD_ALLOW_PROFILE_LEGACY_ENV=1`로 별도 동의해야만 효력이 있다.
 어떤 모드에서도 `MOMO_WORKD_*`는 자식에 전달되지 않는다.
 
+PTY transport의 도구는 사용자의 로그인 셸 안에 profile launch command와 같은 이름의
+wrapper function으로 실행된다. 이 함수가 시작/종료 marker를 host 내부에서만 내고 workd가
+marker를 raw 출력에서 제거한 뒤 `running ↔ idle` signed PATCH로 바꾼다. 따라서 `ls`나
+prompt helper 같은 일반 셸 명령은 lifecycle을 흔들지 않고, 같은 canonical tool command를
+다시 실행할 때만 running으로 돌아간다. idle 중 셸·PTY·현재 workdir은 유지된다.
+
+PTY scrollback은 host 메모리의 bounded ring이며 기본 256KiB다.
+`MOMO_WORKD_PTY_RING_BYTES`로 4KiB~16MiB 사이에서 조정할 수 있다. `connect(ptyID)`는 같은
+lock 아래 retained binary bytes, JSON control
+`{"byte_offset":N,"type":"replay_end"}`, 이후 live binary bytes를 enqueue한다. adapter는
+control frame을 xterm에 쓰면 안 된다. 서버·relay·DB에는 이 byte와 ring이 저장되지 않는다.
+kill/end는 foreground Ctrl-C→shell exit→필요 시 강제 종료 후 ring/subscriber를 제거한다.
+
 동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
 
 ```sh
@@ -1230,7 +1267,13 @@ PTY를 생성하거나 터미널 byte stream을 중계하지 않는다. owner hu
 
 서버 DB에는 raw capability가 아닌 SHA-256 digest만 있고 audit에는 owner와 issued/expires만
 남는다. terminal stdout/stderr/stdin/resize는 MomoServer, OutboxRelay, Centrifugo를 통과하지
-않는다. 실제 workd/provisioner PTY adapter와 SwiftTerm direct attach는 후속 goal이다.
+않는다. MOMO-649는 workd 내부의 stable `ptyID` attach/replay API까지 구현했지만, 기존
+repo에는 public WSS listener/TLS reverse-proxy 설정과 create의
+`ptyId`/`attachEndpoint` 배선이 아직 없다. 따라서 public workd/provisioner adapter와
+SwiftTerm/web direct attach 실왕복은 계속 후속 계약이다. 데몬이 죽어 host heartbeat가
+offline grace를 넘으면 기존 orphan sweep이 세션을 전환한다. 같은 host ID로 grace 전에
+재시작하면 메모리 PTY를 복구할 수도, stale session을 명시 보고할 API도 현재 없으므로 이
+빠른 재시작 경우는 별도 reconcile 계약 전까지 `runtime-unverified`다.
 
 ```sh
 # runtime-db profile에도 포함됨. 기본 전용 포트: API 27970,
@@ -1243,6 +1286,24 @@ verifier는 네 포트가 비어 있는지 먼저 검사한 뒤 owner 발급, ag
 서버·relay 원장/로그 부재를 단정한다. Ed25519 서명에는 `find_openssl` 방식으로 실제 지원
 binary를 고른다. 이 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행하며,
 그 전까지 terminal attach runtime은 `runtime-unverified`다.
+
+MOMO-649 worker 검증과 red proof:
+
+```sh
+swift test --disable-sandbox --package-path workers/WorkHostDaemon \
+  --filter WorkHostDaemonTests
+
+# red proof: PTYReplayBuffer.connect()의 retained `.bytes(retained)` yield 한 줄을
+# 임시 제거한 작업 복사본에서 아래 테스트가 "expected retained PTY replay"로 FAIL해야 한다.
+swift test --disable-sandbox --package-path workers/WorkHostDaemon \
+  --filter testShellWrappedToolIdlesKeepsPTYAndReportsOnlyCanonicalToolRerun
+```
+
+오케스트레이터는 먼저 위 daemon suite와 `scripts/verify_work_session_idle.sh`,
+`scripts/verify_terminal_attach.sh`를 실행하고 UUID 문자열을 비교할 때 양쪽을 lowercase로
+정규화한다. public WSS adapter/reconcile 계약이 랜딩한 뒤에는 마지막으로 실제 workd가 만든
+`ptyId/attachEndpoint`를 server grant에서 받아 웹 `ObserverTerminal`로 연결해
+종료 직전 marker 출력→`replay_end` 비표시→동시 live marker 1회 수신을 xterm에서 확인한다.
 
 ---
 
@@ -1435,6 +1496,75 @@ scripts/local_gate.sh --profile host-runtime
 - `scripts/verify_external_agent_provider.sh`: opt-in credentialed external agent runtime gate. credentials가 없으면 `runtime-unverified(external provider credentials)` evidence로 skip하고, credentials가 있으면 OpenAI-compatible SSE preflight + local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복 + `/v1/agent-runtime/status` redaction을 검증한다.
 - DB migration은 app boot side effect가 아니라 `scripts/migrate.sh` 또는 smoke `migrate` job으로 명시 실행한다.
 - Backup/restore는 pgBackRest skeleton과 evidence template까지만 repo-local로 검증한다. 실제 backup/PITR restore rehearsal은 `runtime-unverified(public host)`다.
+
+`PLATFORM_ADMIN_EMAILS` 또는 `PLATFORM_ADMIN_LOGIN_SECRET` 변경 뒤에는 API를 재시작하고
+각 운영자가 기존 `/v1/auth/login`으로 다시 로그인한다. 로그인은 그 멤버의 기존
+`platform:read`/`platform:credits:write` 세션 토큰을 `revoked_at`으로 일괄 폐기한 뒤
+현재 allowlist+secret으로 새 pair를 발급한다. allowlist에서 제거된 운영자가 먼저
+refresh하더라도 refresh 자체는 유지하되 새 pair에서 두 privileged scope만 제거하고
+남은 privileged sibling token을 일괄 폐기한다. 별도 토큰 문법이나 raw token 저장은 없다.
+
+### 8.1.2 momo Cloud T3 / E2B 프로비저너 (MOMO-647)
+
+T3는 기본 비활성이며 재설계 진행 중(#888)이다. `MOMO_T3_ENABLED=1`을 명시한
+경우에만 opt-in된다. 비활성에서는 provisioning·조회·register·pause/resume·destroy와
+topup이 읽히는 503으로 닫히고 NotifierWorker reconciler는 DB claim조차 실행하지 않는다.
+T1/T2 세션 생성·idle·재부착은 이 설정을 읽지 않는다.
+
+옵트인 뒤에도 `E2B_API_KEY`가 없거나 프로비저너 설정이 불완전하면 T3만 503으로
+닫히고 T1/T2는 영향받지 않는다.
+키는 인스턴스 운영자 시크릿이며 workspace 설정, 클라이언트, DB, 로그에 넣지 않는다.
+
+`E2B_TEMPLATE_ID`는 `momo-workd`를 포함하고 entrypoint에서 실행하는 운영자 소유
+template이어야 한다. 서버는 create 시 공개 HTTPS momo URL, workspace ID,
+`scope=workspace`, `type=cloud`, 15분짜리 1회 등록 token만 sandbox env로 전달한다.
+workd는 자체 Ed25519 키를 만든 뒤 cloud register REST에서 token을 소비한다. DB에는
+token SHA-256 digest만 남는다.
+
+```sh
+# 자격증명 없는 로컬 검증: mock E2B + PG18 + 실제 API/RLS
+# .env/.env.worktree를 읽지 않고 infra/.env.example만 compose 입력으로 쓴다.
+scripts/verify_t3_provisioner.sh
+
+# red proof: pause wall time를 과금하도록 되돌린 가정이면 의도적으로 non-zero
+T3_GATE_PROVE_RED_PAUSE=1 scripts/verify_t3_provisioner.sh
+
+# named structural red proofs (each must exit non-zero with the same name)
+for proof in terminal-settlement resume-intent host-uniqueness \
+  provider-reconcile create-idempotency operator-topup; do
+  T3_GATE_RUN_DOCKER=0 T3_GATE_PROVE_RED="$proof" \
+    scripts/verify_t3_provisioner.sh && exit 1
+done
+```
+
+검증기는 `idempotencyRef` create 재시도, host당 두 번째 unsettled session 거부,
+human resume REST(호스트 보고 없이 완료), terminal/orphan 멱등 정산, paused stale 제외,
+instance-operator topup 감사·멱등을 실제 REST/sweep/mock-E2B 경로로 확인한다. worker는
+Docker를 실행하지 않으며 오케스트레이터가 위 명령으로 이 runtime gate를 닫는다.
+
+오케스트레이터의 실 E2B smoke 절차:
+
+1. 외부에서 접근 가능한 격리 MomoServer와 `momo-workd` E2B template을 준비한다.
+2. 서버·NotifierWorker 프로세스에 `MOMO_T3_ENABLED=1`을, 서버 프로세스에만
+   `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
+   `MOMO_PUBLIC_BASE_URL=https://...`, `MOMO_T3_RATE_MICRO_USD_PER_SECOND`를 주입한다.
+   셸 trace를 끄고 키 값을 출력하지 않는다.
+3. instance-operator bearer로
+   `POST /v1/admin/workspaces/{ws}/credits/topups`에 양수 `amountMicroUsd`와 UUID
+   `idempotencyRef`를 보내고 빈 슬롯을 확인한다. SQL 직접 충전은 검증 경계를 우회하므로
+   사용하지 않는다.
+4. human bearer로 `POST .../work-hosts/cloud`에
+   `{"displayName":"E2B smoke","confirmPaidCloud":true,"idempotencyRef":"<uuid>"}`를
+   보내고, 같은 ref 재전송이 같은 provision/sandbox를 반환하는지 확인한다.
+5. GET projection이 `ready`와 cloud `hostId`를 돌려줄 때까지 기다린다. E2B dashboard에서
+   sandbox 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
+6. 그 host로 work session을 만들고 pause → 10초 대기 → resume → 종료한다.
+   `work_host_usage_interval`의 paused 행 `active_seconds=0`, 최종 합계와
+   `credit_entry(reason='t3_usage')` 차감을 대조한다.
+7. `DELETE .../work-hosts/{host}/cloud`로 sandbox를 destroy하고 E2B에 잔존 실행이
+   없는지 확인한다. 실패 중간에도 생성한 sandbox ID를 기준으로 반드시 정리한다.
+
+실호출 smoke는 외부 과금과 운영자 키가 필요하므로 worker가 임의 실행하지 않는다.
 
 ### 8.2 staging 최초 기동 절차 (host-runtime)
 

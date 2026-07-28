@@ -14,6 +14,8 @@ import PostgresNIO
 /// through PostgreSQL pgcrypto (`momo_password_verify`). Issued tokens are
 /// persisted (hashed) in the `token` table so `revoked_at` can kill them.
 struct AuthRoutes: Sendable {
+    static let privilegedScopes = ["platform:read", CloudCreditRoutes.writeScope]
+
     private enum LoginResolution: Sendable {
         case active(MemberDTO)
         case suspended
@@ -96,8 +98,17 @@ struct AuthRoutes: Sendable {
             platformAdminEmails: platformAdminEmails,
             platformAdminLoginSecret: platformAdminLoginSecret
         ) {
-            scopes.append("platform:read")
+            scopes.append(contentsOf: Self.privilegedScopes)
         }
+        // Existing login is also the operator-facing bulk rotation path. A
+        // login after allowlist removal (without the admin secret) clears this
+        // member's old privileged sessions; a login with a newly rotated
+        // secret clears the old generation before issuing the replacement.
+        // Ordinary messages-only sessions are untouched.
+        _ = try await tokenStore.revokePrivilegedSessionTokens(
+            memberID: memberID,
+            workspaceID: workspaceID
+        )
         let access = try await jwt.signAccess(
             memberID: memberID, workspaceID: workspaceID, scopes: scopes)
         let refresh = try await jwt.signRefresh(
@@ -169,7 +180,35 @@ struct AuthRoutes: Sendable {
             throw HTTPError(.unauthorized, message: "refresh token already used or revoked")
         }
 
-        let scopes = payload.scopes
+        let carriedPrivilegedScopes = payload.scopes.filter {
+            Self.privilegedScopes.contains($0)
+        }
+        let remainsPrivileged: Bool
+        if carriedPrivilegedScopes.isEmpty {
+            remainsPrivileged = true
+        } else {
+            remainsPrivileged = try await Self.isCurrentPlatformOperator(
+                db: db,
+                workspaceID: workspaceID,
+                memberID: memberID,
+                platformAdminEmails: platformAdminEmails,
+                platformAdminLoginSecret: platformAdminLoginSecret
+            )
+        }
+        let scopes = Self.refreshedScopes(
+            previous: payload.scopes,
+            remainsPrivileged: remainsPrivileged
+        )
+        if !carriedPrivilegedScopes.isEmpty && !remainsPrivileged {
+            // The presented refresh row is already atomically revoked above.
+            // Kill sibling privileged access/refresh rows as one bulk
+            // operation so removal from the allowlist takes effect now, while
+            // the newly issued messages-only pair keeps ordinary use alive.
+            _ = try await tokenStore.revokePrivilegedSessionTokens(
+                memberID: memberID,
+                workspaceID: workspaceID
+            )
+        }
         let access = try await jwt.signAccess(
             memberID: memberID, workspaceID: workspaceID, scopes: scopes)
         let refresh = try await jwt.signRefresh(
@@ -317,6 +356,56 @@ struct AuthRoutes: Sendable {
         // a plain `==` short-circuits and leaks match-prefix length via timing.
         return platformAdminEmails.contains(email.lowercased())
             && ConstantTime.equals(platformAdminSecret, platformAdminLoginSecret)
+    }
+
+    static func refreshedScopes(
+        previous: [String],
+        remainsPrivileged: Bool
+    ) -> [String] {
+        remainsPrivileged
+            ? previous
+            : previous.filter { !privilegedScopes.contains($0) }
+    }
+
+    /// Refresh never receives the operator secret again. It therefore
+    /// revalidates the current durable identity (active verified human email
+    /// still in the current allowlist) and requires that the privileged login
+    /// credential remains configured. Secret rotation is completed through
+    /// the existing login route, which bulk-revokes the prior privileged
+    /// session generation before issuing a new one.
+    static func isCurrentPlatformOperator(
+        db: Database,
+        workspaceID: UUID,
+        memberID: UUID,
+        platformAdminEmails: [String],
+        platformAdminLoginSecret: String?
+    ) async throws -> Bool {
+        guard platformAdminLoginSecret?.isEmpty == false else { return false }
+        let normalizedAllowlist = Set(platformAdminEmails.map { $0.lowercased() })
+        guard !normalizedAllowlist.isEmpty else { return false }
+        let email: String? = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT h.email
+                  FROM human h
+                  JOIN member m
+                    ON m.id = h.member_id
+                   AND m.workspace_id = h.workspace_id
+                 WHERE h.workspace_id = \(workspaceID)
+                   AND h.member_id = \(memberID)
+                   AND h.email_verified = true
+                   AND m.kind = 'human'
+                   AND m.status = 'active'
+                   AND m.deleted_at IS NULL
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(String.self)
+        }
+        return email.map { normalizedAllowlist.contains($0.lowercased()) } ?? false
     }
 
     /// Persist a freshly issued access/refresh pair for revocation (MOMO-300).

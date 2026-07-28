@@ -25,6 +25,8 @@ Major bundled/linked components:
 - Node.js (MIT) — https://github.com/nodejs/node
 - eve (Apache-2.0) — https://github.com/vercel/eve
 - Workflow Postgres World (Apache-2.0) — https://github.com/vercel/workflow
+- LiveKit Egress (Apache-2.0) — https://github.com/livekit/egress
+- faster-whisper (MIT) — https://github.com/SYSTRAN/faster-whisper
 
 TODO(Codex): regenerate from Package.resolved via scripts/gen-notices.sh; verify
 each SPDX identifier against the upstream LICENSE file. Report any non-permissive

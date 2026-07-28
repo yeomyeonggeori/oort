@@ -95,7 +95,7 @@ struct TerminalAttachValidationResponse: ResponseEncodable, Codable, Sendable, E
 /// MomoServer issues an opaque, short-lived bearer to an authorized human.
 /// The direct PTY host validates that bearer through its existing MomoHost
 /// signature before accepting a client connection. Validation joins the live
-/// work_host and running work_session on every call, making expiry, session end,
+/// work_host and active (running or idle) work_session on every call, making expiry, session end,
 /// and host revocation immediately authoritative. There is intentionally no
 /// stream, websocket, stdin, stdout, resize, or relay route in this server.
 struct TerminalAttachRoutes: Sendable {
@@ -171,7 +171,7 @@ struct TerminalAttachRoutes: Sendable {
                     memberID: principal.memberID
                 )
             }
-            guard status == "running", revokedAt == nil,
+            guard (status == "running" || status == "idle"), revokedAt == nil,
                   let binding = try RemotePTYBinding.validated(
                     ptyID: ptyID,
                     attachEndpoint: attachEndpoint
@@ -304,7 +304,7 @@ struct TerminalAttachRoutes: Sendable {
                    AND c.host_id = \(hostID)
                    AND c.token_hash = digest(\(token), 'sha256')
                    AND c.expires_at > clock_timestamp()
-                   AND ws.status = 'running'
+                   AND ws.status IN ('running', 'idle')
                    AND ws.pty_id IS NOT NULL
                    AND ws.attach_endpoint IS NOT NULL
                    AND h.revoked_at IS NULL

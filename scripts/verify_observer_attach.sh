@@ -172,6 +172,13 @@ INSERT INTO agent
 VALUES
   ('$AGENT_ID', '$WS_ID', 'hermes-agent', 'http://localhost:8088/v1',
    'MOMO-516 verifier', '$OWNER_ID');
+-- fffe303b(#564) 이후 라우트 authz는 workspace_membership을 읽는다. 이 픽스처는
+-- SQL 지름길로 멤버를 심으므로(실 REST join이면 자동 생성) 직접 넣어야 한다.
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$OBSERVER_ID', 'member'),
+  ('$WS_ID', '$AGENT_ID', 'member');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
@@ -201,21 +208,24 @@ api() {
 }
 host_api() {
   local method="$1" path="$2" host_id="$3" body="${4:-}"
-  local sent_at payload signature out="$TMP_DIR/response.json"
+  local sent_at request_id body_hash payload signature out="$TMP_DIR/response.json"
   sent_at="$(now_ms)"
+  request_id="$(new_uuid | tr '[:upper:]' '[:lower:]')"
+  body_hash="$(printf '%s' "$body" | "$OPENSSL_BIN" dgst -sha256 | awk '{print $NF}')"
   payload="$TMP_DIR/work-host-request-$sent_at.txt"
-  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
+  printf 'momo.work_host.request.v2\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
     "$method" "$path" \
     "$(printf '%s' "$WS_ID" | tr '[:upper:]' '[:lower:]')" \
     "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
-    "$sent_at" >"$payload"
+    "$sent_at" "$body_hash" "$request_id" >"$payload"
   signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" \
     -in "$payload" | "$OPENSSL_BIN" base64 -A)"
   local -a args=(-sS -o "$out" -w '%{http_code}' -X "$method"
     -H 'Content-Type: application/json'
     -H "Authorization: MomoHost $host_id"
     -H "X-Momo-Work-Host-Sent-At: $sent_at"
-    -H "X-Momo-Work-Host-Signature: $signature")
+    -H "X-Momo-Work-Host-Signature: $signature"
+    -H "X-Momo-Work-Host-Request-ID: $request_id")
   [ -n "$body" ] && args+=(--data "$body")
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
   RESPONSE_BODY="$(<"$out")"

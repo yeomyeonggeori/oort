@@ -27,7 +27,7 @@ struct WorkPoolResponse: ResponseEncodable {
 /// GET exposes settings plus aggregate and caller usage to an active human
 /// workspace member. PUT replaces settings for an owner/admin and records the
 /// change in audit_log in the same tenant transaction. Usage is always derived
-/// from running work_session rows; this surface owns no mutable counter.
+/// from running/idle work_session rows; this surface owns no mutable counter.
 ///
 /// Pool exhaustion returns only a structured HTTP 409 in v0. Automatic queue
 /// start and its waiting-card UX are follow-up work, as is any warm VM pool.
@@ -185,7 +185,8 @@ struct WorkPoolRoutes: Sendable {
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
-        memberID: UUID
+        memberID: UUID,
+        targetHostID: UUID? = nil
     ) async throws {
         try await ensureDefaultPool(conn: conn, logger: logger, workspaceID: workspaceID)
         let settingsRows = try await conn.query(
@@ -204,23 +205,62 @@ struct WorkPoolRoutes: Sendable {
 
         let usageRows = try await conn.query(
             """
-            SELECT count(*)::int AS active_sessions,
-                   (count(*) FILTER (WHERE member_id = \(memberID)))::int
-                     AS member_active_sessions
-              FROM work_session
-             WHERE workspace_id = \(workspaceID)
-               AND status = 'running'
+            SELECT
+              (
+                SELECT count(*)::int
+                  FROM work_session ws
+                  JOIN work_host h ON h.id = ws.host_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.status IN ('running', 'idle')
+                   AND h.type <> 'cloud'
+              )
+              +
+              (
+                SELECT count(*)::int
+                  FROM work_cloud_host ch
+                 WHERE ch.workspace_id = \(workspaceID)
+                   AND ch.state IN ('provisioning', 'ready', 'running', 'paused')
+              ) AS active_sessions,
+              (
+                SELECT count(*)::int
+                  FROM work_session ws
+                  JOIN work_host h ON h.id = ws.host_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.member_id = \(memberID)
+                   AND ws.status IN ('running', 'idle')
+                   AND h.type <> 'cloud'
+              )
+              +
+              (
+                SELECT count(*)::int
+                  FROM work_cloud_host ch
+                 WHERE ch.workspace_id = \(workspaceID)
+                   AND ch.requester_member_id = \(memberID)
+                   AND ch.state IN ('provisioning', 'ready', 'running', 'paused')
+              ) AS member_active_sessions,
+              EXISTS (
+                SELECT 1
+                  FROM work_cloud_host ch
+                 WHERE ch.workspace_id = \(workspaceID)
+                   AND ch.host_id = \(targetHostID)
+                   AND ch.requester_member_id = \(memberID)
+                   AND ch.state IN ('ready', 'running')
+              ) AS consumes_cloud_reservation
             """,
             logger: logger
         ).collect()
         guard let usageRow = usageRows.first else {
             throw HTTPError(.internalServerError, message: "work pool usage is unavailable")
         }
-        let (activeSessions, memberActiveSessions) = try usageRow.decode((Int, Int).self)
-        guard activeSessions < maxActive else {
+        let (activeSessions, memberActiveSessions, consumesCloudReservation) =
+            try usageRow.decode((Int, Int, Bool).self)
+        guard consumesCloudReservation ? activeSessions <= maxActive : activeSessions < maxActive else {
             throw HTTPError(.conflict, message: "pool_exhausted")
         }
-        guard memberActiveSessions < memberLimit else {
+        guard consumesCloudReservation
+            ? memberActiveSessions <= memberLimit
+            : memberActiveSessions < memberLimit
+        else {
             throw HTTPError(.conflict, message: "member_limit")
         }
     }
@@ -308,7 +348,7 @@ struct WorkPoolRoutes: Sendable {
               FROM work_pool p
               LEFT JOIN work_session ws
                 ON ws.workspace_id = p.workspace_id
-               AND ws.status = 'running'
+               AND ws.status IN ('running', 'idle')
              WHERE p.workspace_id = \(workspaceID)
              GROUP BY p.workspace_id, p.max_active, p.included_active_hours,
                       p.per_member_soft_limit

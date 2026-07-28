@@ -64,9 +64,11 @@ struct WorkdConfig: Sendable {
     let hostIDURL: URL
     let outputDirectory: URL
     let scope: String
+    let hostType: String
     let displayName: String
     let pollInterval: Duration
     let heartbeatInterval: Duration
+    let ringBufferBytes: Int
     let localCommandOverrides: [String: LocalCommandOverride]
     let childEnvironmentPolicy: ChildEnvironmentPolicy
     let allowProfileLegacyEnvironment: Bool
@@ -107,6 +109,13 @@ struct WorkdConfig: Sendable {
         guard scope == "member" || scope == "workspace" else {
             throw WorkdFailure.configuration
         }
+        let hostType = (environment["MOMO_WORKD_HOST_TYPE"] ?? "workd").lowercased()
+        guard hostType == "workd" || hostType == "cloud" else {
+            throw WorkdFailure.configuration
+        }
+        guard hostType != "cloud" || scope == "workspace" else {
+            throw WorkdFailure.configuration
+        }
         let displayName = nonempty(environment["MOMO_WORKD_DISPLAY_NAME"])
             ?? ProcessInfo.processInfo.hostName
         guard displayName.count <= 80 else { throw WorkdFailure.configuration }
@@ -120,6 +129,11 @@ struct WorkdConfig: Sendable {
             environment["MOMO_WORKD_HEARTBEAT_INTERVAL_MS"],
             defaultValue: 30_000,
             range: 1_000...90_000
+        )
+        let ringBufferBytes = try boundedInteger(
+            environment["MOMO_WORKD_PTY_RING_BYTES"],
+            defaultValue: PTYReplayBuffer.defaultCapacityBytes,
+            range: 4_096...(16 * 1_024 * 1_024)
         )
         let localCommandOverrides = try localCommandOverrides(environment: environment)
         let childEnvironmentPolicy = try childEnvironmentPolicy(environment: environment)
@@ -152,9 +166,11 @@ struct WorkdConfig: Sendable {
             hostIDURL: hostIDURL,
             outputDirectory: outputDirectory,
             scope: scope,
+            hostType: hostType,
             displayName: displayName,
             pollInterval: .milliseconds(pollMs),
             heartbeatInterval: .milliseconds(heartbeatMs),
+            ringBufferBytes: ringBufferBytes,
             localCommandOverrides: localCommandOverrides,
             childEnvironmentPolicy: childEnvironmentPolicy,
             allowProfileLegacyEnvironment: allowProfileLegacyEnvironment,
@@ -355,6 +371,18 @@ struct WorkdConfig: Sendable {
     ) throws -> Int {
         let value = raw.flatMap(Int.init) ?? defaultValue
         guard range.contains(value) else { throw WorkdFailure.configuration }
+        return value
+    }
+
+    private static func boundedInteger(
+        _ raw: String?,
+        defaultValue: Int,
+        range: ClosedRange<Int>
+    ) throws -> Int {
+        guard let raw = nonempty(raw) else { return defaultValue }
+        guard let value = Int(raw), range.contains(value) else {
+            throw WorkdFailure.configuration
+        }
         return value
     }
 

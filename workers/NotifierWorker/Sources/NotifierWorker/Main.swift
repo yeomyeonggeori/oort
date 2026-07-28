@@ -54,7 +54,7 @@ struct NotifierWorkerMain {
         )
 
         let notifier = NotifierService(
-            pg: pg, relay: relay, config: config, logger: logger)
+            pg: pg, relay: relay, httpClient: httpClient, config: config, logger: logger)
 
         let group = ServiceGroup(
             configuration: .init(

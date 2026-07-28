@@ -166,10 +166,17 @@ member는 `POST /v1/workspaces/:ws/channels/:ch/agent-runs`에 target agent,
 호스트에서 이루어지고 provider·repo 자격증명은 momo에 들어오지 않는다.
 
 같은 channel route의 GET은 Work run 목록, `GET /v1/workspaces/:ws/agent-runs/:run`은
-상세 projection을 제공한다. 사람의 두 읽기 경로는 active channel membership를 요구하고,
-agent bearer에는 공개되지 않는다. gateway callback은 계속 bearer actor의 자기 run에만
-결속된다. approval callback은 `read_only|workspace_write|network_write` tier를 approval
-payload와 timeline card metadata에 보존하며 danger 상당 값은 400으로 fail-closed한다.
+해당 채널에서 볼 수 있는 agent run의 상세 projection을 제공한다. 사람의 두 읽기 경로는
+active channel membership를 요구하고, agent bearer에는 공개되지 않는다. gateway callback은
+계속 bearer actor의 자기 run에만 결속된다. approval callback은
+`read_only|workspace_write|network_write` tier를 approval payload와 timeline card metadata에
+보존하며 danger 상당 값은 400으로 fail-closed한다.
+
+`GET /v1/workspaces/:ws/agents/:agent/runs`는 같은 `agent_run`을 에이전트별로 모은
+워크스페이스 전역 최신순 cursor 목록이다. 호출자는 active human workspace member여야
+하고, 각 run은 호출자가 현재 속한 채널로 다시 필터된다. 채널 목록과 공통 요약 필드 선택을
+공유하되 전역 응답은 id/status/time/channel/200자 trigger summary만 보내며
+input/output/error·gateway payload·전문 transcript는 기존 권한부 detail 경계에 남긴다.
 
 ### Interactive Work Console session ledger
 
@@ -236,9 +243,14 @@ ADR-0125 D1/D2의 `momo-workd`는 사용자 호스트에서 실행되는 outboun
 최초 실행은 로컬에 mode `0600` Ed25519 raw private key를 만들고, 일회성 human bearer로
 `type=workd` host를 등록한 뒤 bearer 파일을 삭제한다. 이후 heartbeat는
 `momo.work_host.heartbeat.v1` 바이트 계약을, pending poll·session 생성/종료·control ack는
-`momo.work_host.request.v1`의 method/path/workspace/host/timestamp 계약을 서명한다. 서버는
-이 서명 주체에 pending poll·session 생성/종료·control ack·terminal attach validation의
-정확히 다섯 REST action만 허용하며 revoke와 owner 활성 상태를 요청마다 재검증한다.
+`momo.work_host.request.v2`의
+`method/path/workspace/host/timestamp/raw-body-SHA-256/request-ID` 계약을 서명한다. request
+ID는 workspace별로 원자적으로 한 번만 소비하고 5분 허용 창보다 긴 10분 동안 보관하며,
+인증 시 만료 행을 정리한다. v1 병행 수용은 본문 교체·재전송 결함을 그대로 열어 두므로
+허용하지 않는다. self-host 배포는 서버와 데몬을 한 릴리스 단위로 갱신하며 버전 불일치는
+401로 fail-closed한다. 서버는 이 서명 주체에 pending poll·work-tool profile 조회·session
+생성/종료·control ack·terminal attach validation의 정확히 여섯 REST action만 허용하며
+revoke와 owner 활성 상태를 요청마다 재검증한다.
 
 데몬은 `GET .../work-hosts/:id/pending-controls`로 자기 앞 `dispatched` 행만 polling한다.
 `spawn`은 기존 session REST를 먼저 기록한 뒤 profile의 host-local PTY 또는 ACP stdio
@@ -248,6 +260,31 @@ template, environment, key/path/PID와 stdout/stderr는 host-local이며 raw 출
 파일에만 남는다. ACP `session/update`는 카드 최소 공통분모로만 투영하고 extension은 `_meta`
 host-local 저장이며, permission은 human decision 전 fail-closed한다. Centrifugo control
 subscription은 후속 범위다.
+
+### momo Cloud T3 provisioner + active-time ledger
+
+ADR-0136의 T3는 MomoServer가 E2B REST를 호출하는 opt-in 경로다. 사용자가 유료 cloud를
+명시 확인하면 서버가 먼저 workspace credit과 `work_pool` slot을 잠금 검사하고,
+`work_cloud_host(state=provisioning)` 예약을 만든 뒤 E2B sandbox를 생성한다.
+E2B API key는 인스턴스 운영자 process env에만 있고 tenant 설정·DB·응답·로그로 내려가지
+않는다. E2B template의 `momo-workd`는 15분짜리 1회 bootstrap token을 소비하면서 자체
+Ed25519 키로 `work_host(type=cloud, scope=workspace)`를 등록한다. DB에는 token digest만
+남고 private key는 sandbox 밖으로 나오지 않는다.
+
+T3 session 생성은 host당 미정산 1건 partial unique 아래 `work_host_usage` 한 행과 첫
+`work_host_usage_interval(state=active)`을 같은 tenant transaction에서 연다. pause는 E2B
+pause 성공 뒤 active interval을 닫고 `state=paused` 구간을 열며, resume은 paused 구간을
+닫고 새 active 구간을 연다. interval의 generated `active_seconds`는 active일 때만 wall
+time이고 paused이면 구조적으로 0이다. session 종료 transaction은 열린 구간을 닫아 active
+합계를 고정하고, 시작 시 snapshot한 초당 단가로 append-only
+`credit_entry(reason=t3_usage)`를 기록한다. terminal/orphan 경로는
+`settle_t3_work_session` 한 primitive로 이 정산과 cloud slot 해제·destroy intent를
+원자화한다. provider 호출은 DB 밖에서 intent UUID idempotency key로 실행되고
+NotifierWorker reconciler가 `pausing|resuming|destroy_pending` 및 미확정 provisioning을
+수렴시킨다. trigger가 `workspace_credit` balance를 갱신한다. 잔액 소진은 새 T3만 막고
+이미 실행 중인 session은 종료시키지 않는다. paused host는 stale heartbeat sweep에서
+제외되지만 `idle_at` timeout에서는 heartbeat 없이 terminal 정산된다.
+`usage_ledger`는 계속 모델 요청/토큰 비용 전용이다.
 
 ### Remote PTY attach control plane
 

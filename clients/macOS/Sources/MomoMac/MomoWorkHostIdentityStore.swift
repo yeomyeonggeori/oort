@@ -49,10 +49,12 @@ final class MomoWorkHostSigner: @unchecked Sendable {
         path: String,
         workspace: WorkspaceID,
         host: WorkHostID,
-        sentAtMs: Int64
+        sentAtMs: Int64,
+        bodyDigest: String,
+        requestID: UUID
     ) -> Data {
         Data(
-            "momo.work_host.request.v1\n"
+            "momo.work_host.request.v2\n"
                 .appending(method.uppercased())
                 .appending("\n")
                 .appending(path)
@@ -62,8 +64,16 @@ final class MomoWorkHostSigner: @unchecked Sendable {
                 .appending(host.description.lowercased())
                 .appending("\n")
                 .appending(String(sentAtMs))
+                .appending("\n")
+                .appending(bodyDigest)
+                .appending("\n")
+                .appending(requestID.uuidString.lowercased())
                 .utf8
         )
+    }
+
+    static func sha256Hex(_ body: Data) -> String {
+        SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -319,18 +329,22 @@ actor MomoWorkHostRegistrar {
             signers[workspace] = signer
         }
         let path = "/v1/workspaces/\(workspace.description)/work-tool-profiles"
+        let requestID = UUID()
         let payload = MomoWorkHostSigner.requestPayload(
             method: "GET",
             path: path,
             workspace: workspace,
             host: host,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: MomoWorkHostSigner.sha256Hex(Data()),
+            requestID: requestID
         )
         let signature = try signer.signatureBase64(for: payload)
         let profiles = try await backend.enabledWorkToolProfiles(
             workspace: workspace,
             host: host,
             sentAtMs: sentAtMs,
+            requestID: requestID,
             signature: signature
         )
         guard profiles.allSatisfy({ $0.workspaceId == workspace && $0.enabled }) else {

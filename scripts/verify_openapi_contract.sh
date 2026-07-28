@@ -107,6 +107,7 @@ services:
       MOMO_LIVEKIT_API_KEY: "$LIVEKIT_API_KEY"
       MOMO_LIVEKIT_API_SECRET: "$LIVEKIT_API_SECRET"
       MOMO_LIVEKIT_URL: "$LIVEKIT_URL"
+      MOMO_TRANSCRIPTION_MODEL: small
       MOMO_DRIVE_ARCHIVE_BACKEND: stub
       MOMO_DRIVE_ARCHIVE_STUB_BASE_URL: "http://127.0.0.1:$GATE_PORT"
 YAML
@@ -410,22 +411,25 @@ native_webhook_sample() {
 work_host_signed_sample() {
   local name="$1" method="$2" template="$3" path="$4" expected="$5"
   local host_id="$6" private_key="$7" body="${8:-}"
-  local sent_at payload signature out="$TMP_DIR/last-response.json" verb
+  local sent_at request_id body_hash payload signature out="$TMP_DIR/last-response.json" verb
   sent_at="$($PYTHON_BIN -c 'import time; print(time.time_ns() // 1_000_000)')"
+  request_id="$($PYTHON_BIN -c 'import uuid; print(uuid.uuid4())')"
+  body_hash="$(printf '%s' "$body" | "$OPENSSL_BIN" dgst -sha256 | awk '{print $NF}')"
   verb="$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')"
   payload="$TMP_DIR/work-host-request-$name.txt"
-  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
+  printf 'momo.work_host.request.v2\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
     "$verb" "$path" \
     "$(printf '%s' "$WS" | tr '[:upper:]' '[:lower:]')" \
     "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
-    "$sent_at" >"$payload"
+    "$sent_at" "$body_hash" "$request_id" >"$payload"
   signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$private_key" \
     -in "$payload" | "$OPENSSL_BIN" base64 -A)"
   local -a args=(-sS -o "$out" -w "%{http_code}" -X "$verb"
     -H 'Content-Type: application/json'
     -H "Authorization: MomoHost $host_id"
     -H "X-Momo-Work-Host-Sent-At: $sent_at"
-    -H "X-Momo-Work-Host-Signature: $signature")
+    -H "X-Momo-Work-Host-Signature: $signature"
+    -H "X-Momo-Work-Host-Request-ID: $request_id")
   [ -n "$body" ] && args+=(--data "$body")
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
   RESPONSE_BODY="$(cat "$out")"
@@ -563,6 +567,19 @@ sample huddle-active get "/v1/workspaces/{workspaceId}/channels/{channelId}/hudd
 sample huddle-join post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/join" \
   "/v1/workspaces/$WS/huddles/$HUDDLE_ID/join" 200 "" "$ACCESS"
 guard_jq '.ttlSeconds == 600 and (.token | type == "string")' "huddle join returns a 10-minute grant"
+sample huddle-recording-without-consent post \
+  "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/recordings" 409 "" "$ACCESS"
+sample huddle-recording-consent post \
+  "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recording-consent" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/recording-consent" 200 "" "$ACCESS"
+guard_jq '.noticeVersion == 1 and (.consentedAtMs | type == "number")' \
+  "huddle recording consent returns a durable receipt"
+sample huddle-recording-start post \
+  "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/recordings" 201 "" "$ACCESS"
+guard_jq '.status == "requested" and .model == "small"' \
+  "huddle recording starts only after explicit consent"
 sample huddle-leave post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/leave" \
   "/v1/workspaces/$WS/huddles/$HUDDLE_ID/leave" 200 "" "$ACCESS"
 guard_jq '.ended == true and (.huddle.endedAtMs | type == "number")' \
@@ -721,6 +738,21 @@ sample agent-allowed-models get \
   "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/allowed-models" 200 "" "$ACCESS"
 guard_jq 'keys == ["allowedAgentModels"] and (.allowedAgentModels | type == "array" and length > 0)' \
   "agent allowed-models is a credential-free non-empty projection"
+
+sample agent-run-history get \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/runs" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/runs?limit=1" 200 "" "$ACCESS"
+guard_jq '
+  (.runs | type == "array" and length == 1)
+  and all(.runs[];
+    ((keys - [
+      "id","channelId","triggerMessageId","triggerSummary","status",
+      "startedAtMs","finishedAtMs","createdAtMs","updatedAtMs"
+    ]) | length) == 0
+    and ((has("input") or has("output") or has("error") or has("payload")
+          or has("transcript") or has("workspaceId") or has("agentMemberId")) | not)
+  )
+' "agent run history exposes only the credential-free summary projection"
 
 sample agent-run-cancel post \
   "/v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel" \

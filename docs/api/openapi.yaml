@@ -13,7 +13,7 @@ openapi: 3.0.3
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, and interactive Work
 # Console control surfaces. Other routes (invite admin,
-# workspace identity, agent credentials/runs, cost projection, platform admin,
+# workspace identity, legacy agent credential/run surfaces, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
 # Operator/instance-admin surfaces (e.g. the MOMO-572 provider link) are
 # documented separately in docs/api/openapi.operator.yaml.
@@ -683,6 +683,56 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
 
+  /v1/workspaces/{workspaceId}/agents/{agentId}/runs:
+    get:
+      tags: [agents]
+      operationId: listAgentRuns
+      summary: List one agent's workspace-global run history.
+      description: >
+        Human active workspace members receive a newest-first keyset page of
+        this agent's runs, restricted to channels where the caller has active
+        membership. The UUID cursor identifies the final `(created_at, id)`
+        row from the previous page. Each item is a bounded, credential-free
+        summary shared with the channel run-list projection; input/output/error,
+        gateway payloads, and full transcripts remain available only through
+        the existing authorized run-detail surface.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: cursor
+          in: query
+          schema: {type: string, format: uuid}
+          description: Run ID at the exclusive older-page boundary.
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Visible run summaries ordered by created time and ID descending.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunSummaryPage"}
+        "400":
+          description: Malformed or inaccessible cursor.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not an active human workspace member.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Active agent not found in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
   /v1/workspaces/{workspaceId}/agents/{agentId}/profile:
     get:
       tags: [agents]
@@ -1144,6 +1194,83 @@ paths:
         "503":
           $ref: "#/components/responses/HuddleNotConfigured"
 
+  /v1/workspaces/{workspaceId}/huddles/{huddleId}/recording-consent:
+    post:
+      tags: [huddles]
+      operationId: consentToHuddleRecording
+      summary: Record the caller's explicit consent to recording and post-call transcription.
+      description: >
+        Idempotently records notice version 1. This endpoint does not start
+        recording; the caller may leave instead of consenting.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/HuddleId"
+      responses:
+        "200":
+          description: Consent receipt, including the original consent timestamp.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleRecordingConsentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Huddle ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/HuddleNotConfigured"
+
+  /v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings:
+    post:
+      tags: [huddles]
+      operationId: startHuddleRecording
+      summary: Request participant-track recording after every active participant consents.
+      description: >
+        Fails closed unless every current participant has a consent receipt.
+        The transaction appends a channel system notice and a recording request.
+        A recorded huddle rejects later joins that lack prior consent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/HuddleId"
+      responses:
+        "200":
+          description: Existing idempotent recording request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleRecordingResponse"
+        "201":
+          description: Recording request and channel notice committed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleRecordingResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Huddle ended or at least one active participant has not consented.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: LiveKit or transcription model is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-hosts:
     post:
       tags: [work-hosts]
@@ -1212,6 +1339,266 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-hosts/cloud:
+    post:
+      tags: [work-hosts]
+      operationId: provisionCloudWorkHost
+      summary: Explicitly provision one paid momo Cloud host on E2B.
+      description: >
+        Human bearer only. Requires confirmPaidCloud=true, positive workspace
+        credit, an available work-pool slot, and instance-operator E2B config.
+        Returns 202 while the E2B workd is consuming its one-shot bootstrap
+        token and 201 if registration completed before create returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCloudHostRequest"
+      responses:
+        "201":
+          description: E2B sandbox and cloud work host are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "202":
+          description: E2B sandbox exists; cloud workd registration is pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "400":
+          description: Paid-cloud confirmation missing or body invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Workspace credit or work-pool slot is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: E2B concurrency limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B operator config is absent or E2B failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/admin/workspaces/{workspaceId}/credits/topups:
+    post:
+      tags: [work-hosts]
+      operationId: topupCloudCredit
+      summary: Append one idempotent positive workspace credit topup.
+      description: >
+        Paid-credit writer only: a human token carrying
+        platform:credits:write. platform:read and verified allowlist identity
+        alone are insufficient. The credit entry, balance trigger, and audit
+        row commit in one transaction.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudCreditTopupRequest"
+      responses:
+        "200":
+          description: Topup applied, or the identical idempotent result replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudCreditTopupResponse"
+        "400":
+          description: Amount or idempotency reference is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The reference was previously used with another amount.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/cloud/register:
+    post:
+      tags: [work-hosts]
+      operationId: registerCloudWorkHost
+      summary: Consume a one-shot bootstrap token and self-register cloud workd.
+      description: >
+        E2B workd only. Authorization uses `MomoBootstrap {token}`. The server
+        stores only the token SHA-256 digest and the workd-generated Ed25519
+        public key; the E2B team key and workd private key never enter this API.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: Authorization
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^MomoBootstrap "
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterWorkHostRequest"
+      responses:
+        "201":
+          description: Cloud workd registered as a workspace-scoped work_host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: Registration is not scope=workspace and type=cloud.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/workspaces/{workspaceId}/work-hosts/cloud/{provisionId}:
+    get:
+      tags: [work-hosts]
+      operationId: getCloudWorkHostProvision
+      summary: Read safe cloud provisioning state without provider credentials.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: provisionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current safe cloud host projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "404":
+          description: Provision request not found in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/pause:
+    post:
+      tags: [work-hosts]
+      operationId: pauseCloudWorkHost
+      summary: Pause E2B and open a zero-active-seconds pause interval.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Cloud host paused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "409":
+          description: Host is not running or its usage state changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B lifecycle request failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/resume:
+    post:
+      tags: [work-hosts]
+      operationId: resumeCloudWorkHost
+      summary: Resume E2B and start a new active-time interval.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Cloud host resumed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "409":
+          description: Host is not paused or its usage state changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B lifecycle request failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud:
+    delete:
+      tags: [work-hosts]
+      operationId: destroyCloudWorkHost
+      summary: Destroy a settled E2B sandbox and revoke its work_host.
+      description: Running/unsettled sessions must be ended first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Cloud host destroyed and its work_host revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudHostResponse"
+        "409":
+          description: Host is not ready or still has unsettled usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: E2B lifecycle request failed or is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat:
     post:
       tags: [work-hosts]
@@ -1257,10 +1644,12 @@ paths:
       summary: Poll dispatched controls targeted at this execution host.
       description: >
         ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8
-        bytes `momo.work_host.request.v1\nGET\n<path>\n<lowercase workspace
-        UUID>\n<lowercase host UUID>\n<sentAtMs>` with its registered Ed25519
-        key. Only unrevoked status=dispatched controls targeted at that host
-        are returned; no human or agent bearer is accepted.
+        bytes `momo.work_host.request.v2\nGET\n<path>\n<lowercase workspace
+        UUID>\n<lowercase host UUID>\n<sentAtMs>\n<SHA-256(raw empty body),
+        lowercase hex>\n<lowercase request UUID>` with its registered Ed25519
+        key. The request UUID is consumed atomically once and retained for ten
+        minutes. Only unrevoked status=dispatched controls targeted at that
+        host are returned; no human or agent bearer is accepted.
       security:
         - workHostAuth: []
       parameters:
@@ -1268,6 +1657,7 @@ paths:
         - $ref: "#/components/parameters/WorkHostId"
         - $ref: "#/components/parameters/WorkHostSentAt"
         - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
       responses:
         "200":
           description: Bounded oldest-first dispatched controls for this host.
@@ -1289,7 +1679,7 @@ paths:
         MomoHost-signed control-plane check performed immediately before the
         direct PTY host accepts a client connection. The opaque bearer is
         matched by SHA-256 digest; the raw token is never persisted or logged.
-        Validation joins the running work_session and unrevoked work_host on
+        Validation joins the running-or-idle work_session and unrevoked work_host on
         every call, so expiry, session end, and host revoke take effect
         immediately. The returned mode is authoritative: observer connections
         may receive output but the host must reject send_stdin, resize, and kill.
@@ -1302,6 +1692,7 @@ paths:
         - $ref: "#/components/parameters/WorkHostId"
         - $ref: "#/components/parameters/WorkHostSentAt"
         - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
       requestBody:
         required: true
         content:
@@ -1387,7 +1778,7 @@ paths:
       summary: Read workspace work-pool settings and current derived usage.
       description: >
         Available to active human workspace members. Usage is counted from
-        running work_session rows; no mutable active counter exists. A missing
+        running-or-idle work_session rows; no mutable active counter exists. A missing
         settings row is created with v0 defaults in the same tenant transaction.
       security:
         - bearerAuth: []
@@ -1516,7 +1907,7 @@ paths:
         - name: active
           in: query
           required: false
-          description: Set to 1 to return running sessions only; 0 or omitted returns all.
+          description: Set to 1 to return running or idle sessions; 0 or omitted returns all.
           schema:
             type: integer
             enum: [0, 1]
@@ -1641,12 +2032,25 @@ paths:
     patch:
       tags: [work-sessions]
       operationId: updateWorkSession
-      summary: End a running session, change observation, or relay a normalized ACP event.
+      summary: Report tool lifecycle, end a live session, change observation, or relay an ACP event.
       description: >
-        The creating member, or the MomoHost-signed execution host bound to the
-        session, may end it. The ledger row and card props update beside a
-        no-version work.session.ended outbox; the message row is not edited and
-        no channel seq is minted. A human session owner may instead set
+        A MomoHost-signed execution host bound to the session reports
+        running-to-idle with the last tool exitCode and idle-to-running without
+        replacing the session. The corresponding realtime frames are
+        work.session.idle with payload keys session_id, channel_id,
+        root_message_id, member_id, host_id, status, idle_at, exit_code, and
+        work.session.resumed-to-running with the same identity/status fields
+        plus resumed_at and the preserved exit_code. Idle also commits one
+        system thread message ("작업 완료 — idle 대기") so NotifierWorker can
+        notify only the owner through the existing id-only push envelope. When
+        the bound host is a momo Cloud host, running-to-idle also pauses its E2B
+        sandbox and opens a zero-active-seconds paused interval; idle-to-running
+        resumes E2B before reopening active usage. A provider-confirmed missing
+        sandbox closes usage, destroys and revokes the cloud host, and schedules
+        the existing offline sweep to publish the orphaned lifecycle.
+        The creating member, or the bound host, may explicitly end a running
+        or idle session. The ledger row and card props update beside a
+        no-version work.session.ended outbox. A human session owner may instead set
         observation to open or owner_only; owner_only invalidates live observer
         grants and blocks new ones. A MomoHost-signed caller may alternatively
         append one bounded normalized ACP event to the session thread ledger;
@@ -1666,7 +2070,7 @@ paths:
               $ref: "#/components/schemas/UpdateWorkSessionRequest"
       responses:
         "200":
-          description: Ended session, or its prior result on an idempotent retry.
+          description: Updated session, or its prior result on an idempotent retry.
           content:
             application/json:
               schema:
@@ -1697,8 +2101,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: The bound momo Cloud sandbox no longer exists; orphaned fallback is scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The momo Cloud provisioner is unavailable; non-cloud hosts do not use it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume:
     post:
@@ -1750,7 +2166,7 @@ paths:
       description: >
         Human bearer only. mode defaults to controller, which remains session
         owner-only. observer requires active workspace and session-channel
-        membership while observation=open. The running session must carry a
+        membership while observation=open. The running or idle session must carry a
         MomoHost-signed remote PTY binding and its work_host must be unrevoked.
         The raw capability is returned exactly once, while PostgreSQL stores
         only its SHA-256 digest and timestamptz expiry. The same transaction
@@ -4119,9 +4535,10 @@ components:
       in: header
       name: Authorization
       description: >
-        `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At
-        and X-Momo-Work-Host-Signature. This is an Ed25519 request signature,
-        not a durable bearer credential.
+        `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At,
+        X-Momo-Work-Host-Request-ID, and X-Momo-Work-Host-Signature. The v2
+        Ed25519 payload also binds SHA-256(raw request body); this is not a
+        durable bearer credential.
 
   parameters:
     WorkspaceId:
@@ -4181,6 +4598,16 @@ components:
       description: Raw 64-byte Ed25519 signature in standard base64.
       schema:
         type: string
+    WorkHostRequestId:
+      name: X-Momo-Work-Host-Request-ID
+      in: header
+      required: true
+      description: >
+        Unique UUID bound into the v2 signature and atomically accepted once
+        within its ten-minute replay-retention lifetime.
+      schema:
+        type: string
+        format: uuid
     WorkControlId:
       name: workControlId
       in: path
@@ -5165,6 +5592,44 @@ components:
           minItems: 1
           items: {type: string, minLength: 1, maxLength: 200}
 
+    AgentRunSummary:
+      type: object
+      additionalProperties: false
+      required: [id, channelId, status, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        triggerMessageId:
+          type: string
+          format: uuid
+          description: Message that triggered this run, when applicable.
+        triggerSummary:
+          type: string
+          maxLength: 200
+          description: >
+            Bounded validated Work title or mention prompt excerpt. No raw
+            input object, tool payload, output, error, or transcript is exposed.
+        status:
+          type: string
+          enum: [queued, running, awaiting_approval, paused, succeeded, failed, cancelled, timed_out]
+        startedAtMs: {type: integer, format: int64}
+        finishedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    AgentRunSummaryPage:
+      type: object
+      additionalProperties: false
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/AgentRunSummary"}
+        nextCursor:
+          type: string
+          format: uuid
+          description: Final run ID when another older page exists.
+
     AgentRunCancelResponse:
       type: object
       additionalProperties: false
@@ -5407,6 +5872,85 @@ components:
             type: boolean
           description: Boolean tool-availability flags only.
 
+    CreateCloudHostRequest:
+      type: object
+      required: [displayName, confirmPaidCloud, idempotencyRef]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        confirmPaidCloud:
+          type: boolean
+          description: Must be true for this one paid-cloud provisioning request.
+        idempotencyRef:
+          type: string
+          format: uuid
+          description: >
+            Client-stable create key. Reusing it converges a lost 201 response
+            onto the same E2B sandbox and never creates a second paid host.
+
+    CloudCreditTopupRequest:
+      type: object
+      required: [amountMicroUsd, idempotencyRef]
+      additionalProperties: false
+      properties:
+        amountMicroUsd:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000000000000
+        idempotencyRef:
+          type: string
+          format: uuid
+
+    CloudCreditTopupResponse:
+      type: object
+      required: [workspaceId, amountMicroUsd, idempotencyRef, balanceMicroUsd]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        amountMicroUsd:
+          type: integer
+          format: int64
+        idempotencyRef:
+          type: string
+          format: uuid
+        balanceMicroUsd:
+          type: integer
+          format: int64
+
+    CloudHost:
+      type: object
+      required: [provisionId, state, provider, createdAtMs]
+      properties:
+        provisionId:
+          type: string
+          format: uuid
+        hostId:
+          type: string
+          format: uuid
+          description: Present after cloud workd self-registration.
+        state:
+          type: string
+          enum:
+            [provisioning, ready, running, pausing, paused, resuming,
+             destroy_pending, destroyed, failed]
+        provider:
+          type: string
+          enum: [e2b]
+        createdAtMs:
+          type: integer
+          format: int64
+
+    CloudHostResponse:
+      type: object
+      required: [cloudHost]
+      properties:
+        cloudHost:
+          $ref: "#/components/schemas/CloudHost"
+
     WorkHostHeartbeatRequest:
       type: object
       required: [sentAtMs, signature]
@@ -5526,10 +6070,10 @@ components:
           type: integer
         activeSessions:
           type: integer
-          description: Workspace running work_session count.
+          description: Workspace running-or-idle work_session count.
         memberActiveSessions:
           type: integer
-          description: Calling member's running work_session count.
+          description: Calling member's running-or-idle work_session count.
 
     WorkPoolResponse:
       type: object
@@ -5581,6 +6125,8 @@ components:
     UpdateWorkSessionRequest:
       oneOf:
         - $ref: "#/components/schemas/EndWorkSessionRequest"
+        - $ref: "#/components/schemas/SetWorkSessionIdleRequest"
+        - $ref: "#/components/schemas/SetWorkSessionRunningRequest"
         - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
         - $ref: "#/components/schemas/RelayWorkSessionACPEventRequest"
 
@@ -5635,6 +6181,29 @@ components:
         exitCode:
           type: integer
           format: int32
+          description: Optional last tool result; an idle session preserves its recorded value.
+
+    SetWorkSessionIdleRequest:
+      type: object
+      required: [status, exitCode]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [idle]
+        exitCode:
+          type: integer
+          format: int32
+          description: Result of the tool execution that just completed; not a session exit code.
+
+    SetWorkSessionRunningRequest:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [running]
 
     ResumeWorkSessionRequest:
       type: object
@@ -5732,7 +6301,7 @@ components:
           maxLength: 120
         status:
           type: string
-          enum: [running, orphaned, ended]
+          enum: [running, idle, orphaned, ended]
         observation:
           type: string
           enum: [open, owner_only]
@@ -5754,11 +6323,11 @@ components:
         exitCode:
           type: integer
           format: int32
-          description: Present only when the ending host reports an exit code.
+          description: Last tool execution result; it remains present across idle-to-running.
         endReason:
           type: string
-          enum: [orphaned, resumed]
-          description: Terminal host-loss or resume reason when applicable.
+          enum: [orphaned, resumed, idle_timeout]
+          description: Terminal host-loss, lineage resume, or idle-timeout reason.
         resumedFromSessionId:
           type: string
           format: uuid
@@ -6273,6 +6842,43 @@ components:
           $ref: "#/components/schemas/Huddle"
         ended:
           type: boolean
+
+    HuddleRecordingConsentResponse:
+      type: object
+      required: [huddleId, memberId, noticeVersion, consentedAtMs]
+      properties:
+        huddleId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        noticeVersion:
+          type: integer
+          enum: [1]
+        consentedAtMs:
+          type: integer
+          format: int64
+
+    HuddleRecordingResponse:
+      type: object
+      required: [id, huddleId, model, status, requestedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        huddleId:
+          type: string
+          format: uuid
+        model:
+          type: string
+          description: Operator-configured ASR model; MOMO-646 does not select a winner.
+        status:
+          type: string
+          enum: [requested, recording, stopped, failed]
+        requestedAtMs:
+          type: integer
+          format: int64
 
     # ---- Messages ----------------------------------------------------------------
     SendMessageRequest:

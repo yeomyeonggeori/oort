@@ -3,6 +3,47 @@ import Crypto
 @testable import NotifierWorker
 
 final class NotifierWorkerTests: XCTestCase {
+    func testT3DefaultOffDoesNotStartReconcilerPolling() async {
+        actor Counter {
+            var value = 0
+            func increment() { value += 1 }
+        }
+        let counter = Counter()
+
+        await NotifierService.runCloudLifecycleReconcilerIfEnabled(false) {
+            await counter.increment()
+        }
+        let disabledCount = await counter.value
+        XCTAssertEqual(
+            disabledCount,
+            0,
+            "named regression: T3 default-off must not enter reconciler polling"
+        )
+
+        await NotifierService.runCloudLifecycleReconcilerIfEnabled(true) {
+            await counter.increment()
+        }
+        let enabledCount = await counter.value
+        XCTAssertEqual(enabledCount, 1)
+    }
+
+    func testResumeReconcilerTreats404And410AsTerminalMissingSandbox() {
+        for status in [404, 410] {
+            XCTAssertTrue(NotifierService.isTerminalMissingResume(
+                state: "resuming", status: status
+            ))
+            XCTAssertTrue(NotifierService.acceptsLifecycleResponse(
+                state: "resuming", status: status
+            ))
+        }
+        XCTAssertFalse(NotifierService.isTerminalMissingResume(
+            state: "pausing", status: 404
+        ))
+        XCTAssertFalse(NotifierService.acceptsLifecycleResponse(
+            state: "resuming", status: 500
+        ))
+    }
+
     func testRelaySignerProducesVerifiableEd25519Signature() throws {
         let privateKey = Curve25519.Signing.PrivateKey()
         let signer = try PushRelayRequestSigner(rawSeed: privateKey.rawRepresentation)
@@ -77,6 +118,11 @@ final class NotifierWorkerTests: XCTestCase {
             NotifierService.category(
                 messageType: "approval_request", propsKind: "resume_offer",
                 reason: "resume_offer"),
+            "momo.work")
+        XCTAssertEqual(
+            NotifierService.category(
+                messageType: "system", propsKind: "work_session_idle",
+                reason: "work_session_idle"),
             "momo.work")
     }
 

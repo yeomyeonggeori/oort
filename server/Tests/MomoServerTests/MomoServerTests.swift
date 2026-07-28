@@ -635,6 +635,25 @@ final class MomoServerTests: XCTestCase {
         ))
     }
 
+    func testPrivilegedRefreshDropsOnlyPrivilegedScopesWhenQualificationIsGone() {
+        let previous = [
+            "messages:write",
+            "platform:read",
+            "messages:read",
+            CloudCreditRoutes.writeScope,
+        ]
+
+        XCTAssertEqual(
+            AuthRoutes.refreshedScopes(previous: previous, remainsPrivileged: false),
+            ["messages:write", "messages:read"],
+            "named regression: allowlist removal must strip both privileged scopes"
+        )
+        XCTAssertEqual(
+            AuthRoutes.refreshedScopes(previous: previous, remainsPrivileged: true),
+            previous
+        )
+    }
+
     func testRealtimeTokenTTLIsClampedToShortWindow() {
         XCTAssertEqual(Config.clampedCentConnectionTokenTTL(-1), 60)
         XCTAssertEqual(Config.clampedCentConnectionTokenTTL(59), 60)
@@ -2517,6 +2536,8 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("MessageRoutes.broadcastPayload"))
         XCTAssertTrue(routes.contains("work.session.started"))
         XCTAssertTrue(routes.contains("work.session.ended"))
+        XCTAssertTrue(routes.contains("work.session.idle"))
+        XCTAssertTrue(routes.contains("work.session.resumed-to-running"))
         XCTAssertTrue(routes.contains("FOR UPDATE OF ws"))
         XCTAssertTrue(routes.contains("only the session owner can end it"))
         XCTAssertTrue(routes.contains("controlId is reserved for work host dispatch"))
@@ -2526,6 +2547,21 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("work host cannot end another host session"))
         XCTAssertTrue(routes.contains("JOIN membership ms"))
         XCTAssertFalse(routes.contains("BYPASSRLS"))
+
+        let idleMigration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/047_work_session_idle.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(idleMigration.contains("status IN ('running', 'idle', 'orphaned', 'ended')"))
+        XCTAssertTrue(idleMigration.contains("'idle_timeout'"))
+        XCTAssertTrue(idleMigration.contains("ADD COLUMN idle_at timestamptz"))
+        XCTAssertTrue(idleMigration.contains("status = 'idle'"))
+        XCTAssertFalse(
+            idleMigration.contains("status = 'running' AND exit_code IS NULL"),
+            "exit_code is the last tool result and must survive idle-to-running"
+        )
     }
 
     func testWorkSessionValidationCardAndNoVersionLifecyclePayload() throws {
@@ -2609,6 +2645,48 @@ final class MomoServerTests: XCTestCase {
             XCTAssertEqual(payload["tool"] as? String, "codex")
             XCTAssertEqual(payload["label"] as? String, "MOMO-483")
         }
+
+        let idleSession = WorkSessionDTO(
+            id: session.id,
+            workspaceId: session.workspaceId,
+            channelId: session.channelId,
+            memberId: session.memberId,
+            hostId: session.hostId,
+            rootMessageId: session.rootMessageId,
+            tool: session.tool,
+            label: session.label,
+            status: "idle",
+            observation: session.observation,
+            observerGrantCount: 0,
+            remoteAttachAvailable: true,
+            startedAtMs: session.startedAtMs,
+            endedAtMs: nil,
+            exitCode: 7,
+            endReason: nil,
+            resumedFromSessionId: nil
+        )
+        let idleRaw = WorkSessionRoutes.toolLifecyclePayload(
+            eventType: "work.session.idle",
+            session: idleSession,
+            seq: 44,
+            timestampMs: 1_782_463_261_000,
+            idempotencyDiscriminator: "idle-message"
+        )
+        let idleObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(idleRaw.utf8)) as? [String: Any]
+        )
+        XCTAssertNil(idleObject["version"])
+        let idleData = try XCTUnwrap(idleObject["data"] as? [String: Any])
+        XCTAssertEqual(idleData["type"] as? String, "work.session.idle")
+        XCTAssertEqual(idleData["seq"] as? Int, 44)
+        let idlePayload = try XCTUnwrap(idleData["payload"] as? [String: Any])
+        XCTAssertEqual(
+            Set(idlePayload.keys),
+            ["session_id", "channel_id", "root_message_id", "member_id",
+             "host_id", "status", "idle_at", "exit_code"]
+        )
+        XCTAssertEqual(idlePayload["status"] as? String, "idle")
+        XCTAssertEqual(idlePayload["exit_code"] as? Int, 7)
     }
 
     func testWorkSessionACPEventValidationAndNoVersionProjection() throws {
@@ -2836,7 +2914,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("digest(\\(token), 'sha256')"))
         XCTAssertTrue(routes.contains("c.expires_at > clock_timestamp()"))
         XCTAssertTrue(routes.contains("h.revoked_at IS NULL"))
-        XCTAssertTrue(routes.contains("ws.status = 'running'"))
+        XCTAssertTrue(routes.contains("ws.status IN ('running', 'idle')"))
         XCTAssertTrue(routes.contains("only the session owner can attach"))
         XCTAssertTrue(routes.contains("terminal attach requires a human bearer"))
         XCTAssertTrue(routes.contains("work.terminal_attach.issued"))
@@ -3133,7 +3211,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("work-pool\", use: get"))
         XCTAssertTrue(routes.contains("work-pool\", use: update"))
         XCTAssertTrue(routes.contains("FROM work_session"))
-        XCTAssertTrue(routes.contains("status = 'running'"))
+        XCTAssertTrue(routes.contains("status IN ('running', 'idle')"))
         XCTAssertTrue(routes.contains("FOR UPDATE"))
         XCTAssertTrue(routes.contains("pool_exhausted"))
         XCTAssertTrue(routes.contains("member_limit"))
@@ -3218,11 +3296,13 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
-    func testWorkHostSignedRequestBindsMethodPathTenantHostAndTimestamp() throws {
+    func testWorkHostSignedRequestV2BindsBodyDigestAndRequestID() throws {
         let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000488")!
+        let requestID = UUID(uuidString: "00000000-0000-7000-8000-000000000657")!
         let sentAtMs: Int64 = 1_784_582_400_000
         let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/pending-controls"
+        let bodyDigest = WorkHostAuthenticator.sha256Hex(Data())
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
         let payload = WorkHostAuthenticator.requestSigningPayload(
@@ -3230,11 +3310,13 @@ final class MomoServerTests: XCTestCase {
             path: path,
             workspaceID: workspaceID,
             hostID: hostID,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         )
         XCTAssertEqual(
             String(decoding: payload, as: UTF8.self),
-            "momo.work_host.request.v1\nGET\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
+            "momo.work_host.request.v2\nGET\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)\n\(bodyDigest)\n\(requestID.uuidString.lowercased())"
         )
         let signature = try privateKey.signature(for: payload).base64EncodedString()
         XCTAssertTrue(WorkHostAuthenticator.verifySignature(
@@ -3244,7 +3326,9 @@ final class MomoServerTests: XCTestCase {
             path: path,
             workspaceID: workspaceID,
             hostID: hostID,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         ))
         XCTAssertFalse(WorkHostAuthenticator.verifySignature(
             publicKey: publicKey,
@@ -3253,7 +3337,9 @@ final class MomoServerTests: XCTestCase {
             path: path,
             workspaceID: workspaceID,
             hostID: hostID,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         ))
         XCTAssertEqual(
             WorkHostAuthenticator.hostID(
@@ -3276,6 +3362,72 @@ final class MomoServerTests: XCTestCase {
             sentAtMs + WorkHostRoutes.heartbeatClockSkewMs + 1,
             now: now
         ))
+    }
+
+    func testWorkHostSignedRequestRejectsBodySubstitutionByName() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000488")!
+        let requestID = UUID(uuidString: "00000000-0000-7000-8000-000000000657")!
+        let sentAtMs: Int64 = 1_784_582_400_000
+        let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-sessions/\(UUID().uuidString.lowercased())"
+        let signedBody = Data(#"{"exitCode":0,"status":"idle"}"#.utf8)
+        let substitutedBody = Data(#"{"status":"ended"}"#.utf8)
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
+        let signature = try privateKey.signature(for: WorkHostAuthenticator.requestSigningPayload(
+            method: "PATCH",
+            path: path,
+            workspaceID: workspaceID,
+            hostID: hostID,
+            sentAtMs: sentAtMs,
+            bodyDigest: WorkHostAuthenticator.sha256Hex(signedBody),
+            requestID: requestID
+        )).base64EncodedString()
+
+        XCTAssertFalse(
+            WorkHostAuthenticator.verifySignature(
+                publicKey: publicKey,
+                signature: signature,
+                method: "PATCH",
+                path: path,
+                workspaceID: workspaceID,
+                hostID: hostID,
+                sentAtMs: sentAtMs,
+                bodyDigest: WorkHostAuthenticator.sha256Hex(substitutedBody),
+                requestID: requestID
+            ),
+            "body substitution must invalidate the named v2 signature assertion"
+        )
+    }
+
+    func testWorkHostRequestReplayMigrationIsTenantScopedAtomicAndPrunable() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/048_work_host_request_replay.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("PRIMARY KEY (workspace_id, request_id)"))
+        XCTAssertTrue(migration.contains("work_host_request_expiry_idx"))
+        XCTAssertTrue(migration.contains("FOREACH t IN ARRAY ARRAY['work_host_request']"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("CREATE POLICY ws_isolation ON %I"))
+        XCTAssertTrue(migration.contains("interval '5 minutes'"))
+
+        let authenticator = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Auth/WorkHostAuthenticator.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(authenticator.contains("ON CONFLICT (workspace_id, request_id) DO NOTHING"))
+        XCTAssertTrue(authenticator.contains("DELETE FROM work_host_request"))
+        XCTAssertTrue(authenticator.contains("interval '10 minutes'"))
+        XCTAssertFalse(authenticator.contains("BYPASSRLS"))
     }
 
     func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {
@@ -3951,7 +4103,8 @@ final class MomoServerTests: XCTestCase {
                 displayName: "김인턴",
                 allowLocalLoopback: false
             ),
-            agentGateway: AgentGatewayConfig(mode: .worker, secret: "")
+            agentGateway: AgentGatewayConfig(mode: .worker, secret: ""),
+            cloudProvisioner: CloudProvisionerConfig.load(environment: [:])
         )
     }
 
@@ -4105,6 +4258,30 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(lastParticipantLeft.type, "huddle_ended")
     }
 
+    func testHuddleRecordingConsentGateFailsClosed() {
+        XCTAssertFalse(
+            HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: 0, consentedParticipantCount: 0
+            )
+        )
+        XCTAssertFalse(
+            HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: 2, consentedParticipantCount: 1
+            )
+        )
+        XCTAssertTrue(
+            HuddleRecordingConsentGate.allowsRecording(
+                activeParticipantCount: 2, consentedParticipantCount: 2
+            )
+        )
+        XCTAssertNil(HuddleRoutes.validatedTranscriptionModel(nil))
+        XCTAssertNil(HuddleRoutes.validatedTranscriptionModel("  "))
+        XCTAssertEqual(
+            HuddleRoutes.validatedTranscriptionModel(" faster-whisper-small "),
+            "faster-whisper-small"
+        )
+    }
+
     func testHuddleMigrationAndRouteStaticContracts() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -4130,6 +4307,39 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(routes.contains("CentrifugoClient"))
         XCTAssertFalse(routes.contains("/api/publish"))
         XCTAssertFalse(routes.contains("apiSecret"))
+    }
+
+    func testHuddleTranscriptionMigrationAndRouteStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/046_huddle_transcription.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE huddle_recording_consent"))
+        XCTAssertTrue(migration.contains("CREATE TABLE huddle_transcription_job"))
+        XCTAssertTrue(migration.contains("REFERENCES attachment(workspace_id, id)"))
+        XCTAssertTrue(migration.contains("WHERE status = 'queued'"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(migration.contains("audio_path"))
+        XCTAssertFalse(migration.contains("transcript_path"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/HuddleRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("recording-consent"))
+        XCTAssertTrue(routes.contains("explicit consent from every active participant"))
+        XCTAssertTrue(routes.contains("insertRecordingNotice"))
+        XCTAssertTrue(routes.contains("enqueueTranscriptionIfRecordingEnded"))
+        XCTAssertTrue(routes.contains("MessageRoutes.broadcastPayload"))
+        XCTAssertFalse(routes.lowercased().contains("diarization"))
     }
 
     func testWorkspaceSearchCursorRoundTripAndLiteralLikePattern() throws {

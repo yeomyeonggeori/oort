@@ -65,6 +65,7 @@ final class WorkDaemon: Sendable {
                 "error_label": .string(Self.label(for: error)),
             ])
         }
+        await reportToolTransitions()
         await reportNaturalExits()
     }
 
@@ -262,6 +263,38 @@ final class WorkDaemon: Sendable {
                 logger.warning("work host session end report failed", metadata: [
                     "error_label": .string(Self.label(for: error)),
                 ])
+            }
+        }
+    }
+
+    private func reportToolTransitions() async {
+        for transition in await processes.toolTransitions() {
+            do {
+                switch transition.status {
+                case .idle(let exitCode):
+                    // TODO(#859): this lifecycle report is the T3 pause
+                    // integration point; MOMO-649 only reports the host fact.
+                    try await api.reportSessionIdle(
+                        hostID: hostID,
+                        sessionID: transition.sessionID,
+                        exitCode: exitCode
+                    )
+                case .running:
+                    // TODO(#859): resume the paused T3 sandbox before reporting
+                    // running; local T2 shells need no provisioner operation.
+                    try await api.reportSessionRunning(
+                        hostID: hostID,
+                        sessionID: transition.sessionID
+                    )
+                }
+                await processes.markTransitionReported(transition)
+            } catch {
+                logger.warning("work host tool lifecycle report failed", metadata: [
+                    "error_label": .string(Self.label(for: error)),
+                ])
+                // Preserve order: a running report must never overtake the
+                // preceding idle report on a transient network failure.
+                return
             }
         }
     }

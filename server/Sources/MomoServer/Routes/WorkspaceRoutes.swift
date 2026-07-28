@@ -148,13 +148,20 @@ struct WorkspaceRoutes: Sendable {
             //    workspace_slug_uniq constraint is the authoritative, race-free
             //    detector — a cross-tenant SELECT would see nothing under RLS.
             do {
-                _ = try await conn.query(
-                    """
-                    INSERT INTO workspace (id, slug, name)
-                    VALUES (\(newWorkspaceID), \(slug), \(name))
-                    """,
-                    logger: db.logger
-                )
+            _ = try await conn.query(
+                """
+                INSERT INTO workspace (id, slug, name)
+                VALUES (\(newWorkspaceID), \(slug), \(name))
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO workspace_credit (workspace_id, balance_micro_usd)
+                VALUES (\(newWorkspaceID), 0)
+                """,
+                logger: db.logger
+            )
             } catch let error as PSQLError where error.serverInfo?[.sqlState] == "23505" {
                 throw HTTPError(.conflict, message: "workspace slug already exists")
             }

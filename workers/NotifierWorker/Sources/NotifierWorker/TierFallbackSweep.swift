@@ -16,12 +16,19 @@ extension NotifierService {
         let autoTarget: String?
         let rootMessageSeq: Int64
         let observation: String
+        let exitCode: Int?
+    }
+
+    struct IdleTimeoutCandidate: Sendable {
+        let session: StaleWorkSession
+        let timeoutSeconds: Int
     }
 
     /// ADR-0125 D11 reuses the notifier's existing bounded poll rather than
-    /// adding another daemon. Each sweep claims stale running sessions with
+    /// adding another daemon. Each sweep claims stale running/idle sessions with
     /// SKIP LOCKED and commits lifecycle, card/control, audit, and realtime
-    /// outbox rows in the same PostgreSQL transaction.
+    /// outbox rows in the same PostgreSQL transaction. Host loss is always
+    /// processed before ADR-0139 idle timeout.
     func sweepTierFallback() async {
         do {
             let transitioned = try await pg.withTransaction(logger: logger) { conn in
@@ -30,7 +37,8 @@ extension NotifierService {
                     SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
                            ws.host_id, ws.root_message_id, ws.tool, ws.label,
                            COALESCE(policy.mode, 'ask') AS mode,
-                           policy.auto_target, root.seq, ws.observation
+                           policy.auto_target, root.seq, ws.observation,
+                           ws.exit_code
                       FROM work_session ws
                       JOIN work_host h
                         ON h.id = ws.host_id
@@ -44,7 +52,14 @@ extension NotifierService {
                          ORDER BY CASE WHEN p.member_id = ws.member_id THEN 0 ELSE 1 END
                          LIMIT 1
                       ) policy ON true
-                     WHERE ws.status = 'running'
+                     WHERE ws.status IN ('running', 'idle')
+                       AND NOT EXISTS (
+                         SELECT 1
+                           FROM work_cloud_host ch
+                          WHERE ch.workspace_id = ws.workspace_id
+                            AND ch.host_id = ws.host_id
+                            AND ch.state IN ('pausing', 'paused', 'resuming')
+                       )
                        AND COALESCE(h.last_seen_at, h.created_at)
                              < clock_timestamp()
                                - make_interval(secs => \(config.hostOfflineGraceSeconds))
@@ -57,7 +72,7 @@ extension NotifierService {
                 let sessions = try rows.map { row -> StaleWorkSession in
                     let value = try row.decode(
                         (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                         String, String?, Int64, String).self
+                         String, String?, Int64, String, Int?).self
                     )
                     return StaleWorkSession(
                         id: value.0,
@@ -71,7 +86,8 @@ extension NotifierService {
                         mode: value.8,
                         autoTarget: value.9,
                         rootMessageSeq: value.10,
-                        observation: value.11
+                        observation: value.11,
+                        exitCode: value.12
                     )
                 }
                 for session in sessions {
@@ -85,12 +101,188 @@ extension NotifierService {
                     "graceSeconds": .stringConvertible(config.hostOfflineGraceSeconds),
                 ])
             }
+            let timedOut = try await sweepIdleTimeouts()
+            if timedOut > 0 {
+                logger.info("ended idle work sessions", metadata: [
+                    "count": .stringConvertible(timedOut),
+                ])
+            }
         } catch {
             // Poll fallback retries. No partial state escapes the transaction.
             logger.error("tier fallback sweep failed", metadata: [
                 "error": .string(String(describing: error)),
             ])
         }
+    }
+
+    private func sweepIdleTimeouts() async throws -> Int {
+        try await pg.withTransaction(logger: logger) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       'ask'::text, NULL::text, root.seq, ws.observation,
+                       ws.exit_code, timeout.idle_timeout_seconds
+                  FROM work_session ws
+                  JOIN workspace w ON w.id = ws.workspace_id
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
+                  JOIN message root ON root.id = ws.root_message_id
+                  CROSS JOIN LATERAL (
+                    SELECT CASE
+                      WHEN jsonb_typeof(
+                             w.settings->'work_session_idle_timeout_seconds'
+                           ) = 'number'
+                       AND w.settings->>'work_session_idle_timeout_seconds'
+                             ~ '^[1-9][0-9]{0,8}$'
+                      THEN (w.settings->>'work_session_idle_timeout_seconds')::int
+                      ELSE 86400
+                    END AS idle_timeout_seconds
+                  ) timeout
+                 WHERE ws.status = 'idle'
+                   AND (
+                     COALESCE(h.last_seen_at, h.created_at)
+                       >= clock_timestamp()
+                            - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                     OR EXISTS (
+                       SELECT 1
+                         FROM work_cloud_host ch
+                        WHERE ch.workspace_id = ws.workspace_id
+                          AND ch.host_id = ws.host_id
+                          AND ch.state IN ('pausing', 'paused', 'resuming')
+                     )
+                   )
+                   AND ws.idle_at <= clock_timestamp()
+                         - make_interval(secs => timeout.idle_timeout_seconds)
+                 ORDER BY ws.idle_at, ws.id
+                 FOR UPDATE OF ws SKIP LOCKED
+                 LIMIT \(config.claimBatchSize)
+                """,
+                logger: logger
+            ).collect()
+            let candidates = try rows.map { row -> IdleTimeoutCandidate in
+                let value = try row.decode(
+                    (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
+                     String, String?, Int64, String, Int?, Int).self
+                )
+                return IdleTimeoutCandidate(
+                    session: StaleWorkSession(
+                        id: value.0,
+                        workspaceID: value.1,
+                        channelID: value.2,
+                        memberID: value.3,
+                        hostID: value.4,
+                        rootMessageID: value.5,
+                        tool: value.6,
+                        label: value.7,
+                        mode: value.8,
+                        autoTarget: value.9,
+                        rootMessageSeq: value.10,
+                        observation: value.11,
+                        exitCode: value.12
+                    ),
+                    timeoutSeconds: value.13
+                )
+            }
+            for candidate in candidates {
+                try await transitionIdleTimeout(conn: conn, candidate: candidate)
+            }
+            return candidates.count
+        }
+    }
+
+    private func transitionIdleTimeout(
+        conn: PostgresConnection,
+        candidate: IdleTimeoutCandidate
+    ) async throws {
+        let session = candidate.session
+        let rows = try await conn.query(
+            """
+            UPDATE work_session ws
+               SET status = 'ended',
+                   idle_at = NULL,
+                   ended_at = clock_timestamp(),
+                   end_reason = 'idle_timeout'
+             WHERE ws.id = \(session.id)
+               AND ws.status = 'idle'
+               AND EXISTS (
+                 SELECT 1
+                   FROM work_host h
+                  WHERE h.id = ws.host_id
+                    AND h.workspace_id = ws.workspace_id
+                    AND (
+                      COALESCE(h.last_seen_at, h.created_at)
+                        >= clock_timestamp()
+                             - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                      OR EXISTS (
+                        SELECT 1
+                          FROM work_cloud_host ch
+                         WHERE ch.workspace_id = ws.workspace_id
+                           AND ch.host_id = ws.host_id
+                           AND ch.state IN ('pausing', 'paused', 'resuming')
+                      )
+                    )
+               )
+            RETURNING ended_at
+            """,
+            logger: logger
+        ).collect()
+        guard let endedAt = try rows.first?.decode(Date.self) else { return }
+        _ = try await conn.query(
+            "SELECT settle_t3_work_session(\(session.workspaceID), \(session.id))",
+            logger: logger
+        ).collect()
+        let endedAtMs = Self.epochMs(endedAt)
+        var rootProps: [String: Any] = [
+            "kind": "work_session",
+            "session_id": session.id.uuidString,
+            "tool": session.tool,
+            "label": session.label,
+            "status": "ended",
+            "ended_at": endedAtMs,
+            "end_reason": "idle_timeout",
+        ]
+        if let exitCode = session.exitCode {
+            rootProps["exit_code"] = exitCode
+        }
+        _ = try await conn.query(
+            "UPDATE message SET props = \(Self.jsonString(rootProps))::jsonb WHERE id = \(session.rootMessageID)",
+            logger: logger
+        )
+        var extra: [String: Any] = [
+            "status": "ended",
+            "ended_at": endedAtMs,
+            "end_reason": "idle_timeout",
+        ]
+        if let exitCode = session.exitCode {
+            extra["exit_code"] = exitCode
+        }
+        let endedPayload = Self.lifecyclePayload(
+            eventType: "work.session.ended",
+            session: session,
+            timestampMs: endedAtMs,
+            extra: extra
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox (workspace_id, kind, method, payload, partition_key)
+            VALUES (\(session.workspaceID), 'broadcast', 'publish',
+                    \(endedPayload)::jsonb, \(session.channelID))
+            """,
+            logger: logger
+        )
+        try await insertAudit(
+            conn: conn,
+            session: session,
+            action: "work.session.idle_timeout",
+            targetID: session.id,
+            detail: [
+                "schema": "momo.work_session.idle_timeout.v1",
+                "idle_timeout_seconds": candidate.timeoutSeconds,
+                "source_host_id": session.hostID.uuidString,
+            ]
+        )
     }
 
     private func transitionStaleSession(
@@ -102,20 +294,24 @@ extension NotifierService {
             terminal
                 ? """
                   UPDATE work_session
-                     SET status = 'ended', ended_at = clock_timestamp(),
-                         exit_code = NULL, end_reason = 'orphaned'
-                   WHERE id = \(session.id) AND status = 'running'
+                     SET status = 'ended', idle_at = NULL,
+                         ended_at = clock_timestamp(), end_reason = 'orphaned'
+                   WHERE id = \(session.id) AND status IN ('running', 'idle')
                   RETURNING COALESCE(ended_at, clock_timestamp())
                   """
                 : """
                   UPDATE work_session
-                     SET status = 'orphaned'
-                   WHERE id = \(session.id) AND status = 'running'
+                     SET status = 'orphaned', idle_at = NULL
+                   WHERE id = \(session.id) AND status IN ('running', 'idle')
                   RETURNING clock_timestamp()
                   """,
             logger: logger
         ).collect()
         guard let transitionedAt = try rows.first?.decode(Date.self) else { return }
+        _ = try await conn.query(
+            "SELECT settle_t3_work_session(\(session.workspaceID), \(session.id))",
+            logger: logger
+        ).collect()
         let transitionedAtMs = Self.epochMs(transitionedAt)
         var rootProps: [String: Any] = [
             "kind": "work_session",
@@ -124,6 +320,9 @@ extension NotifierService {
             "label": session.label,
             "status": terminal ? "ended" : "orphaned",
         ]
+        if let exitCode = session.exitCode {
+            rootProps["exit_code"] = exitCode
+        }
         if terminal {
             rootProps["ended_at"] = transitionedAtMs
             rootProps["end_reason"] = "orphaned"
@@ -132,13 +331,17 @@ extension NotifierService {
             "UPDATE message SET props = \(Self.jsonString(rootProps))::jsonb WHERE id = \(session.rootMessageID)",
             logger: logger
         )
+        var orphanExtra: [String: Any] = terminal
+            ? ["status": "ended", "end_reason": "orphaned", "ended_at": transitionedAtMs]
+            : ["status": "orphaned"]
+        if let exitCode = session.exitCode {
+            orphanExtra["exit_code"] = exitCode
+        }
         let orphanPayload = Self.lifecyclePayload(
             eventType: "work.session.orphaned",
             session: session,
             timestampMs: transitionedAtMs,
-            extra: terminal
-                ? ["status": "ended", "end_reason": "orphaned", "ended_at": transitionedAtMs]
-                : ["status": "orphaned"]
+            extra: orphanExtra
         )
         _ = try await conn.query(
             """
@@ -450,7 +653,7 @@ extension NotifierService {
                    count(*) FILTER (WHERE member_id = \(session.memberID))::int
               FROM work_session
              WHERE workspace_id = \(session.workspaceID)
-               AND status = 'running'
+               AND status IN ('running', 'idle')
             """,
             logger: logger
         ).collect()

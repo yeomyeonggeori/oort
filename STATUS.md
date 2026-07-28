@@ -1,5 +1,64 @@
 # momo 진행 현황
 
+## privileged refresh 차단 + T3 기본 비활성 (#884+#887, 2026-07-28)
+
+- refresh는 현재 verified human email·allowlist·운영자 secret 설정을 다시 확인해 자격 상실 시 `platform:read`와 `platform:credits:write`만 제거하고 일반 messages scope는 유지한다. 기존 로그인 경로가 같은 멤버의 privileged session token을 일괄 revoke해 allowlist/secret 변경 뒤 재로그인을 rotation 경계로 쓴다.
+- T3는 `MOMO_T3_ENABLED=1` 명시 옵트인 없이는 provisioning/register/조회/pause/resume/destroy/topup을 읽히는 503으로 닫고 NotifierWorker reconciler에 진입하지 않는다. T1/T2 계약은 이 설정을 읽지 않으며 기존 T3 verifier는 opt-in으로 유지한다.
+- Migration 049의 중복 미정산 usage fail-closed는 비활성 여부와 무관한 과금 원장 무결성 경계라 완화하지 않았다. 중복 설치의 복구 도구는 #886 범위다. 서버 349·NotifierWorker 6·WorkHostDaemon 32 테스트(3 skip)와 T3 정적 gate는 green이고, Docker 검증기 9종은 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
+## T3 2차 수리 (#882, 2026-07-28)
+
+- topup을 `platform:credits:write` human scope로 분리해 `platform:read` 전용 토큰의 유료 실행 권한 획득을 차단했다. 같은 provider-link 가드의 mutation 사용처는 전수 조사했으며 기존 운영자 GUI/ADR 계약과 결합된 provider link·chain 및 quota credential 발급은 후속 권한 재설계 대상으로 남겼다.
+- lifecycle reconciler는 provider 호출 뒤 host row lock+operation/state 재검증을 선행하고 최종 CAS 1행을 단정한다. resume 404/410은 정산·slot 해제·host revoke·orphan 적격화를 한 transaction에 확정하며, stale provider 결과는 종속 상태를 바꾸지 않는다.
+- concurrent create ref는 advisory transaction lock으로 직렬화하고 Migration 049는 기존 중복 미정산 usage의 lowercased host 목록을 읽히는 오류로 제시한다. server 347 tests와 정적 T3 fixture gate PASS; Docker 행동 gate 2회(terminal missing / reconciler race) 및 전체 8종 verifier는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## T3 수명주기·정산 수리 (#876+#877+#878, 2026-07-28)
+
+- Migration 049의 단일 terminal 정산 primitive가 interval 종료·generated active 합계·멱등 차감·cloud slot 해제·destroy intent를 한 transaction에 묶고, host당 미정산 usage 1건을 partial unique로 강제한다. paused cloud host는 정상 heartbeat 부재로 stale sweep에서 제외하되 idle timeout은 heartbeat 없이 정산한다.
+- pause/resume/destroy는 provider 호출 전 durable intent+version CAS를 기록하고 NotifierWorker가 provider idempotency key로 미확정 lifecycle/provisioning을 수렴한다. resume는 human REST가 provider→session/cloud/interval을 완료하며 signed host report는 시작 조건이 아니다.
+- instance-operator 전용 양수 topup REST와 workspace 0-balance 초기화, create idempotency ref·결정적 one-shot bootstrap token을 추가했다. server 346 tests, NotifierWorker 4 tests, WorkHostDaemon 32 tests와 정적 T3/OpenAPI/migration gate를 worker에서 확인하며 Docker mock 8종·실 E2B smoke는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-657 WorkHost 서명 body 결속 + replay 차단 (#875, 2026-07-28)
+
+- WorkHost 요청 서명을 v2로 즉시 절단해 raw body SHA-256와 UUID request ID를 결속하고, request ID는 FORCE RLS 원장에서 원자적으로 1회 소비·10분 보존하며 매 인증 시 만료분을 정리한다. workd·macOS app host·검증 스크립트를 함께 전환했다.
+- server 344 tests, WorkHostDaemon 32 tests, macOS Work Console 33 focused tests와 shell 정적 검증 PASS. 격리 Docker verifier의 body 교체·request ID replay·정상 경로·digest 제거 red proof 및 요청된 7개 회귀는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-653 에이전트별 전역 run 이력 REST (#861, 2026-07-28)
+
+- `GET /v1/workspaces/:ws/agents/:agent/runs`를 추가해 active human workspace member가 자신이 현재 속한 채널의 해당 agent run만 `(created_at,id)` 최신순 cursor로 조회한다. 채널 목록과 공통 요약 선택을 공유하고 id/status/time/channel/최대 200자 trigger summary만 노출하며 input/output/error·gateway payload·전문 transcript는 배제한다.
+- OpenAPI·역방향 route gate sample·엔진→UXUI handoff와 격리 verifier를 동반했다. verifier는 실제 REST 로그인 nonmember 403, cursor 경계/빈 페이지/삽입 안정성, target agent·채널·타 workspace/FORCE RLS 불가시, 채널/전역 같은 run 요약 동일성을 단정한다.
+- server build·342 tests와 shell/OpenAPI 정적 검증 PASS. 격리 Docker verifier와 두 red proof(OpenAPI 경로 제거, target-agent predicate 되돌림)는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-651 T3 idle pause + 활성시간 미계상 실배선 (#859, 2026-07-28)
+
+- cloud host의 signed `running→idle` 전이만 E2B pause와 `active→paused` interval 경계를 호출하고, `idle→running`은 E2B resume 뒤 `paused→active`를 재개한다. 일반 workd/desktop 호스트는 cloud 설정·프로비저너·원장을 건드리지 않는다.
+- E2B가 resume에 404/410을 답하면 paused 원장을 정산하고 cloud host를 `destroyed`·revoke한 뒤 기존 offline sweep이 `orphaned` 이벤트·감사·resume fallback을 수행한다. pause/resume provider 지연은 lifecycle audit의 `cloud_provisioner_latency_ms`로 조회 가능하다.
+- 서버 build·339 tests와 T3 verifier 정적 검증 PASS. signed REST→mock E2B→원장→Notifier sweep Docker gate, idle hook 제거 red proof, 실 E2B pause/resume smoke는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-649 daemon shell PTY + host-local replay core (#857, 2026-07-28)
+
+- PTY 도구는 로그인 셸의 canonical profile-command wrapper로 실행되어 종료 뒤 같은 PTY·workdir을 보존하고 signed lifecycle PATCH로 `idle(exitCode)`을 보고한다. 일반 셸 명령은 상태 소음에서 제외하며 같은 canonical command 재실행만 `running` 복귀를 만든다.
+- PTY별 기본 256KiB bounded host-local ring과 원자적 `replay bytes → replay_end(byte_offset) → live bytes` attach 계약을 추가했다. kill/end는 셸·ring·subscriber를 정리하고 observer input은 거부한다. WorkHostDaemon 32 tests PASS(외부 mock 부재 3 skip).
+- 기존 repo에는 public WSS workd adapter와 create의 `ptyId/attachEndpoint` 배선이 없어 데몬↔서버↔웹 xterm 실왕복 및 빠른 동일-host daemon 재시작 orphan 정리는 `runtime-unverified`이며 후속 계약이 필요하다. 서버/relay에는 raw PTY byte 경로를 추가하지 않았다.
+
+## MOMO-648 work_session idle 상태 + 수명주기 (#856, 2026-07-28)
+
+- Migration 047로 `running ↔ idle`과 `idle_timeout` 종료를 열고 `exit_code`를 마지막 도구 실행 결과로 재정의했다. 호스트 서명 REST 전이는 `work.session.idle`/`work.session.resumed-to-running` outbox·감사를 같은 트랜잭션에 기록하며, idle 완료 메시지는 소유자에게 id-only `momo.work` 푸시로 전달한다.
+- NotifierWorker sweep는 host 단절을 idle timeout보다 먼저 처리하고, 워크스페이스 `settings.work_session_idle_timeout_seconds` 한 키만 읽어 기본 24시간 뒤 `ended(idle_timeout)`로 전이한다. T3 pause/resume 호출은 #859용 훅 주석만 두었다.
+- server build·339 tests와 NotifierWorker build·4 tests, shell/YAML/migration 정적 검증 PASS. 격리 Docker verifier·timeout sweep 제거 red proof는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-647 T3 프로비저너 + 활성시간 크레딧 원장 (#855, 2026-07-28)
+
+- `usage_ledger`의 토큰 요청 의미를 보존하고 T3 전용 `work_host_usage`/active·paused interval, `workspace_credit`/append-only `credit_entry`, E2B lifecycle binding을 migration 045로 신설했다. paused interval의 generated active seconds는 구조적으로 0이며 session 종료가 active 합계×시작 시 단가를 한 번만 차감한다.
+- 유료 cloud 명시 opt-in + balance/slot gate 뒤 E2B create, cloud workd의 1회 token digest·자체 Ed25519 등록, pause/resume/destroy를 `work_host` 표면에 연결했다. `E2B_API_KEY` 부재는 T3만 읽기 쉬운 503으로 닫고 T1/T2는 무영향이다.
+- 서버 337 tests·WorkHostDaemon 27 tests(환경 mock 부재 3 skip) PASS. 격리 PG18/mock-E2B verifier는 키/잔액/슬롯 거부·원장/차감·pause 미계상·RLS·destroy PASS, pause를 wall-time 과금으로 되돌린 red proof는 의도대로 exit 1. 실 E2B smoke는 운영자 키 주입으로 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-646 허들 녹음·전사 실측 하니스 (#854, 2026-07-28)
+
+- small/medium/large-v3-turbo의 고정 모델 snapshot을 같은 한국어 코퍼스에 실행해 CER·처리시간·RTF를 내는 하니스와 더미 무음 mock 셀프테스트를 추가했다. 참가자 Track별 전사→타임스탬프 병합→화자 라벨만 수행하며 모델 판정은 비워뒀다.
+- `transcription` compose profile에 pinned LiveKit Egress+dev Redis를 옵트인으로 추가했고, 전사 queue/track은 기존 attachment FK만 쓴다. 녹음 동의 원장·전원 동의 fail-closed REST·채널 시스템 고지·종료 시 queued job을 추가했다.
+- server build/test와 정적·mock 검증은 worker에서 수행한다. Docker Egress 기동, 실오디오 3모델 실측, 동의 없는 녹음 409 red 증명은 오케스트레이터 전까지 `runtime-unverified`다.
+
 ## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
 
 - 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.

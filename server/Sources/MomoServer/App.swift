@@ -117,6 +117,12 @@ enum AppBuilder {
         }
         let workHostRoutes = WorkHostRoutes(db: db)
         workHostRoutes.addPublic(to: router)
+        let cloudProvisionerRoutes = CloudProvisionerRoutes(
+            db: db,
+            httpClient: httpClient,
+            config: config.cloudProvisioner
+        )
+        cloudProvisionerRoutes.addPublic(to: router)
 
         // Gateway callbacks accept per-agent bearer credentials. The shared
         // secret is available only on this narrow group and only when the
@@ -147,13 +153,18 @@ enum AppBuilder {
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         ContextPacketRoutes(db: db).add(to: authed)
-        WorkSessionRoutes(db: db).add(to: authed)
+        WorkSessionRoutes(
+            db: db,
+            httpClient: httpClient,
+            cloudProvisionerConfig: config.cloudProvisioner
+        ).add(to: authed)
         TerminalAttachRoutes(db: db).add(to: authed)
         WorkPoolRoutes(db: db).add(to: authed)
         WorkControlRoutes(db: db).add(to: authed)
         WorkToolProfileRoutes(db: db).add(to: authed)
         WorkTierPolicyRoutes(db: db).add(to: authed)
         workHostRoutes.addProtected(to: authed)
+        cloudProvisionerRoutes.addProtected(to: authed)
         SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)
         AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentRoutes(
@@ -204,6 +215,11 @@ enum AppBuilder {
         WorkspaceRoutes(
             db: db, platformAdminEmails: config.platformAdminEmails
         ).add(to: authed)
+        CloudCreditRoutes(
+            db: db,
+            platformAdminEmails: config.platformAdminEmails,
+            cloudProvisionerConfig: config.cloudProvisioner
+        ).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         MemberLifecycleRoutes(db: db).add(to: authed)
@@ -217,7 +233,11 @@ enum AppBuilder {
         InboundMCPRoutes(db: db).add(to: authed)
         PlatformAdminRoutes(db: db).add(to: authed)
         DeviceRoutes(db: db).add(to: authed)
-        HuddleRoutes(db: db, liveKit: config.liveKit).add(to: authed)
+        HuddleRoutes(
+            db: db,
+            liveKit: config.liveKit,
+            transcriptionModel: ProcessInfo.processInfo.environment["MOMO_TRANSCRIPTION_MODEL"]
+        ).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
         DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
         let memoryQueryEmbedding: any MemoryQueryEmbedding

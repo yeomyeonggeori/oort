@@ -1,5 +1,6 @@
 # ADR-0139: Work 세션 idle 유지·재부착·스크롤백 replay
 
+- **운영 상태(2026-07-28): T3 접합은 기본 비활성이다. 재설계 진행 중(#888)이며 `MOMO_T3_ENABLED=1` 명시 옵트인 없이는 T3 pause/resume이 503으로 닫힌다. T1/T2 idle·재부착 계약은 그대로 활성이다.**
 - Status: **Accepted** (2026-07-28, 성재 — "ADR-0139 승인할게". 기안 Fable, 이슈 #853)
 - 파생: MOMO-648(엔진 상태 모델) → MOMO-649(호스트 데몬 셸 래핑·링버퍼·replay) → MOMO-650(웹 idle·재부착) · MOMO-651(T3 pause 접합 — MOMO-648+#855 랜딩 후)
 - 관련: ADR-0114(세션=스레드·D6 터미널 병행), ADR-0125(D10 바이트 비경유·D11 git 계보 재개 — 본 ADR은 **증보**이지 대체가 아님), ADR-0136(활성시간 원장 — D4가 접합), `docs/security/README.ko.md`("실행 내용 미보관" 주장 유지가 제약)
@@ -30,6 +31,11 @@
 ### D4. T3에서 idle = **샌드박스 pause**, pause 중 활성시간 미계상
 - E2B pause/resume(keep_memory) sub-second·Blaxel 0-컴퓨트 스탠바이 실측(research/17-01). idle 진입 시 프로비저너가 pause, 재부착 시 resume.
 - **원장 규칙: pause 구간은 활성시간(H)에 세지 않는다.** ADR-0136 D2 원장 스키마가 이 구간을 표현해야 한다(#855에 요구사항 전달됨). 과금 신뢰: idle을 이유로 한 자동 과금 없음.
+- paused cloud workd의 heartbeat 부재는 정상 신호이므로 stale-host sweep 대상에서
+  제외한다. 대신 `idle_at` timeout은 paused 원장 상태를 직접 인정해 heartbeat 없이도
+  terminal 정산한다. resume는 멈춘 workd의 signed report가 시작하지 않는다. human
+  REST가 durable `resuming` intent → provider resume → session/cloud/interval CAS를
+  완료하고, 이후 host report는 완료 확인일 뿐이다.
 
 ## Consequences
 - (+) "닫아도 돌고, 끝나면 기다리고, 돌아오면 이어 쓴다"가 T1~T3 동일 문법. (+) 서버 불변식·보안 문서 주장 무변경. (+) 기존 orphaned/재개 자산 재사용.

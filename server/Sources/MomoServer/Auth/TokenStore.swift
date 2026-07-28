@@ -244,6 +244,38 @@ struct TokenStore: Sendable {
         }
     }
 
+    /// Revoke every still-live session token for one member that carries an
+    /// instance-privileged scope. This deliberately preserves ordinary
+    /// messages-only sessions.
+    ///
+    /// AuthRoutes uses this existing token-store revocation boundary when an
+    /// operator signs in again after an allowlist/secret change, and when a
+    /// refresh discovers that the member is no longer currently eligible.
+    func revokePrivilegedSessionTokens(
+        memberID: UUID,
+        workspaceID: UUID
+    ) async throws -> Int {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                UPDATE token
+                   SET revoked_at = COALESCE(revoked_at, now())
+                 WHERE workspace_id = \(workspaceID)
+                   AND actor_member_id = \(memberID)
+                   AND kind = 'session'
+                   AND revoked_at IS NULL
+                   AND (
+                     'platform:read' = ANY(scopes)
+                     OR 'platform:credits:write' = ANY(scopes)
+                   )
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            return rows.count
+        }
+    }
+
     /// True when the member still holds at least one active (unrevoked,
     /// unexpired) session token in the workspace.
     ///

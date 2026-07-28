@@ -107,6 +107,8 @@ HEALTH_MAX_TIME="${HEALTH_MAX_TIME:-5}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-auth-hardening.XXXXXX")"
 SERVER_LOG="$TMP_DIR/momo-server.log"
 SERVER_PID=""
+CURRENT_PLATFORM_ADMIN_EMAILS=""
+CURRENT_PLATFORM_ADMIN_SECRET=""
 
 cleanup() {
   if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
@@ -130,6 +132,14 @@ terminate_tree() {
     terminate_tree "$child"
   done
   kill "$pid" >/dev/null 2>&1 || true
+}
+
+stop_server() {
+  if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+    terminate_tree "$SERVER_PID"
+    wait "$SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  SERVER_PID=""
 }
 
 api() {
@@ -226,6 +236,13 @@ SET email = EXCLUDED.email,
     password_hash = EXCLUDED.password_hash,
     tz = EXCLUDED.tz;
 
+-- 07-21 fffe303b(#564) 이후 라우트 authz는 workspace_membership을 읽는다. 이
+-- 픽스처는 SQL 지름길로 멤버를 심으므로(실 REST join이면 자동 생성) 직접
+-- 넣어야 한다. 없으면 첫 roster 호출부터 403이다(base에서도 재현 — 선존재).
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$DEMO_WORKSPACE_ID', '$FIXTURE_MEMBER_ID', 'member')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role = EXCLUDED.role;
+
 INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
 VALUES ('$FIXTURE_MEMBERSHIP_ID', '$DEMO_WORKSPACE_ID',
         '$DEMO_CHANNEL_ID', '$FIXTURE_MEMBER_ID', 'member')
@@ -290,6 +307,9 @@ start_server() {
     HOST="127.0.0.1" \
     PORT="$PORT" \
     CENT_PROXY_SECRET="$PROXY_TEST_SECRET" \
+    PLATFORM_ADMIN_EMAILS="$CURRENT_PLATFORM_ADMIN_EMAILS" \
+    PLATFORM_ADMIN_LOGIN_SECRET="$CURRENT_PLATFORM_ADMIN_SECRET" \
+    MOMO_T3_ENABLED=1 \
     RATE_LIMIT_WINDOW_SECONDS=60 \
     RATE_LIMIT_PER_MEMBER="$MEMBER_RATE_LIMIT" \
     RATE_LIMIT_PER_IP=1200 \
@@ -713,5 +733,77 @@ echo "[auth-hardening] PASS rate_limit.exceeded audit_log rows: $RATE_AUDIT" >&2
 api GET /health
 expect_status 200 "/health is excluded from rate limiting"
 
+# --------------------------------------------------------------------------
+# 5. Privileged refresh revalidation + bulk sibling revocation (#884)
+# --------------------------------------------------------------------------
+stop_server
+CURRENT_PLATFORM_ADMIN_EMAILS="$FIXTURE_EMAIL"
+CURRENT_PLATFORM_ADMIN_SECRET="auth-hardening-admin-secret"
+start_server
+
+ADMIN_LOGIN_BODY="$(jq -cn \
+  --arg email "$FIXTURE_EMAIL" \
+  --arg workspace "$DEMO_WORKSPACE_ID" \
+  --arg secret "$CURRENT_PLATFORM_ADMIN_SECRET" \
+  '{email:$email,password:"dev-password",workspace:$workspace,platformAdminSecret:$secret}')"
+api POST /v1/auth/login "$ADMIN_LOGIN_BODY"
+expect_status 200 "operator login before allowlist removal"
+PRIVILEGED_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.accessToken')"
+PRIVILEGED_REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -er '.refreshToken')"
+printf '%s' "$PRIVILEGED_ACCESS" | python3 -c '
+import base64, json, sys
+parts = sys.stdin.read().strip().split(".")
+payload = parts[1] + "=" * (-len(parts[1]) % 4)
+scopes = json.loads(base64.urlsafe_b64decode(payload))["scopes"]
+required = {"platform:read", "platform:credits:write"}
+raise SystemExit(0 if required.issubset(scopes) else 1)
+' || {
+  echo "[auth-hardening] FAIL operator login did not mint both privileged scopes" >&2
+  exit 1
+}
+
+stop_server
+if [ "${AUTH_GATE_PROVE_RED_PRIVILEGED_REFRESH:-0}" = "1" ]; then
+  # Behavioral red proof: keep the operator eligible across the restart,
+  # simulating the pre-fix refresh behavior. The named scope-removal assertion
+  # below must turn red.
+  CURRENT_PLATFORM_ADMIN_EMAILS="$FIXTURE_EMAIL"
+else
+  CURRENT_PLATFORM_ADMIN_EMAILS=""
+fi
+start_server
+
+PRIVILEGED_REFRESH_BODY="$(jq -cn \
+  --arg refreshToken "$PRIVILEGED_REFRESH" \
+  '{refreshToken:$refreshToken}')"
+api POST /v1/auth/refresh "$PRIVILEGED_REFRESH_BODY"
+expect_status 200 "allowlist removal preserves ordinary refresh"
+DOWNGRADED_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.accessToken')"
+printf '%s' "$DOWNGRADED_ACCESS" | python3 -c '
+import base64, json, sys
+parts = sys.stdin.read().strip().split(".")
+payload = parts[1] + "=" * (-len(parts[1]) % 4)
+scopes = set(json.loads(base64.urlsafe_b64decode(payload))["scopes"])
+forbidden = {"platform:read", "platform:credits:write"}
+raise SystemExit(0 if scopes.isdisjoint(forbidden) else 1)
+' || {
+  echo "[auth-hardening] FAIL named privileged-refresh-revalidation: refreshed token retained a privileged scope" >&2
+  exit 1
+}
+echo "[auth-hardening] PASS named privileged-refresh-revalidation stripped both privileged scopes" >&2
+
+api GET /v1/platform/workspaces "" "$DOWNGRADED_ACCESS"
+expect_status 403 "downgraded refresh cannot read cross-tenant platform workspaces"
+api POST "/v1/admin/workspaces/$DEMO_WORKSPACE_ID/credits/topups" \
+  "$(jq -cn --arg ref "$(python3 -c 'import uuid; print(uuid.uuid4())')" \
+    '{amountMicroUsd:1,idempotencyRef:$ref}')" \
+  "$DOWNGRADED_ACCESS"
+expect_status 403 "downgraded refresh cannot top up T3 credit"
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID/channels/$DEMO_CHANNEL_ID/messages" \
+  "" "$DOWNGRADED_ACCESS"
+expect_status 200 "downgraded refresh keeps messages read path"
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID/roster" "" "$PRIVILEGED_ACCESS"
+expect_status 401 "allowlist loss bulk-revokes sibling privileged access tokens"
+
 echo "[auth-hardening] MOMO-300 auth hardening gate PASS"
-echo "[auth-hardening] evidence: proxy-secret 401, server-minted exact access-row binding allow, refresh/missing/arbitrary/mismatched/revoked binding deny, revoked-token 401, logout idempotent + audit, refresh rotation replay 401, member 429 + Retry-After + audit"
+echo "[auth-hardening] evidence: proxy-secret 401, server-minted exact access-row binding allow, refresh/missing/arbitrary/mismatched/revoked binding deny, revoked-token 401, logout idempotent + audit, refresh rotation replay 401, privileged refresh downgrade (platform read/topup 403 + messages 200 + sibling revoke), member 429 + Retry-After + audit"

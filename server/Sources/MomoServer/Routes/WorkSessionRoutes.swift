@@ -1,3 +1,4 @@
+import AsyncHTTPClient
 import Foundation
 import Hummingbird
 import Logging
@@ -89,12 +90,18 @@ struct WorkSessionRoutes: Sendable {
 
     let db: Database
     private let acpEventLimiter: SlidingWindowRateLimiter
+    private let httpClient: HTTPClient
+    private let cloudProvisionerConfig: CloudProvisionerConfig
 
     init(
         db: Database,
+        httpClient: HTTPClient,
+        cloudProvisionerConfig: CloudProvisionerConfig,
         acpEventLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter()
     ) {
         self.db = db
+        self.httpClient = httpClient
+        self.cloudProvisionerConfig = cloudProvisionerConfig
         self.acpEventLimiter = acpEventLimiter
     }
 
@@ -180,7 +187,8 @@ struct WorkSessionRoutes: Sendable {
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                memberID: sessionOwnerMemberID
+                memberID: sessionOwnerMemberID,
+                targetHostID: hostID
             )
 
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
@@ -246,6 +254,13 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.internalServerError, message: "work session insert failed")
             }
             let workSession = try Self.decodeSession(sessionRow)
+            try await CloudUsageLedger.start(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID,
+                hostID: hostID
+            )
 
             let channel = Self.channelName(workspaceID: workspaceID, channelID: channelID)
             let messagePayload = MessageRoutes.broadcastPayload(
@@ -324,8 +339,37 @@ struct WorkSessionRoutes: Sendable {
                 sessionID: sessionID
             )
         }
-        guard requestDTO.status == "ended" else {
-            throw HTTPError(.badRequest, message: "status must be ended")
+        switch requestDTO.status {
+        case "idle":
+            guard let exitCode = requestDTO.exitCode else {
+                throw HTTPError(.badRequest, message: "idle transition requires exitCode")
+            }
+            return try await transitionToolLifecycle(
+                targetStatus: "idle",
+                exitCode: exitCode,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        case "running":
+            guard requestDTO.exitCode == nil else {
+                throw HTTPError(.badRequest, message: "running transition does not accept exitCode")
+            }
+            return try await transitionToolLifecycle(
+                targetStatus: "running",
+                exitCode: nil,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        case "ended":
+            break
+        default:
+            throw HTTPError(.badRequest, message: "status must be idle, running, or ended")
         }
 
         let session = try await withTenantTransactionUnwrapped(
@@ -390,11 +434,12 @@ struct WorkSessionRoutes: Sendable {
                 """
                 UPDATE work_session
                    SET status = 'ended',
+                       idle_at = NULL,
                        ended_at = clock_timestamp(),
-                       exit_code = \(requestDTO.exitCode),
+                       exit_code = COALESCE(\(requestDTO.exitCode), exit_code),
                        end_reason = NULL
                  WHERE id = \(sessionID)
-                   AND status = 'running'
+                   AND status IN ('running', 'idle')
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
                           root_message_id, tool, label, status, observation,
                           0::bigint AS observer_grant_count,
@@ -409,6 +454,12 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.conflict, message: "work session state changed; retry")
             }
             let workSession = try Self.decodeSession(updatedRow)
+            try await CloudUsageLedger.settle(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
             let props = Self.cardProps(
                 sessionID: sessionID,
                 tool: workSession.tool,
@@ -443,6 +494,571 @@ struct WorkSessionRoutes: Sendable {
 
         return try WorkSessionResponse(workSession: session)
             .response(from: request, context: context)
+    }
+
+    private func transitionToolLifecycle(
+        targetStatus: String,
+        exitCode: Int?,
+        request: Request,
+        context: AppRequestContext,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> Response {
+        guard principal.kind == .workHost else {
+            throw HTTPError(
+                .forbidden,
+                message: "tool lifecycle transitions require work host signature"
+            )
+        }
+        let transitionAt = Date()
+        let transitionAtMs = Int64(transitionAt.timeIntervalSince1970 * 1_000)
+        let cloudLifecycle = try await performCloudLifecycleIfNeeded(
+            targetStatus: targetStatus,
+            principal: principal,
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        )
+
+        let session = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       ws.status, ws.observation,
+                       0::bigint AS observer_grant_count,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code,
+                       ws.end_reason, ws.resumed_from_session_id,
+                       root.seq
+                  FROM work_session ws
+                  JOIN message root ON root.id = ws.root_message_id
+                 WHERE ws.id = \(sessionID)
+                 FOR UPDATE OF ws
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let decoded = try row.decode(
+                (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
+                 String, String, Int64, Bool, Date, Date?, Int?, String?, UUID?, Int64).self
+            )
+            guard decoded.4 == principal.tokenID else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "work host cannot update another host session"
+                )
+            }
+            try await Self.requireChannelMember(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                channelID: decoded.2,
+                memberID: decoded.3
+            )
+
+            if decoded.8 == targetStatus {
+                return Self.sessionDTO(
+                    from: (
+                        decoded.0, decoded.1, decoded.2, decoded.3, decoded.4,
+                        decoded.5, decoded.6, decoded.7, decoded.8, decoded.12,
+                        decoded.13, decoded.14, decoded.15, decoded.16
+                    ),
+                    observation: decoded.9,
+                    observerGrantCount: decoded.10,
+                    remoteAttachAvailable: decoded.11
+                )
+            }
+            let expectedStatus = targetStatus == "idle" ? "running" : "idle"
+            guard decoded.8 == expectedStatus else {
+                throw HTTPError(
+                    .conflict,
+                    message: "work session cannot transition from \(decoded.8) to \(targetStatus)"
+                )
+            }
+
+            let updatedRows: [PostgresRow]
+            if targetStatus == "idle" {
+                if cloudLifecycle != nil {
+                    try await CloudUsageLedger.pause(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        sessionID: sessionID
+                    )
+                    try await updateCloudHostState(
+                        conn: conn,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        expected: "pausing",
+                        next: "paused"
+                    )
+                }
+                updatedRows = try await conn.query(
+                    """
+                    UPDATE work_session
+                       SET status = 'idle',
+                           idle_at = \(transitionAt),
+                           exit_code = \(exitCode),
+                           ended_at = NULL,
+                           end_reason = NULL
+                     WHERE id = \(sessionID)
+                       AND status = 'running'
+                    RETURNING id, workspace_id, channel_id, member_id, host_id,
+                              root_message_id, tool, label, status, observation,
+                              0::bigint AS observer_grant_count,
+                              (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)
+                                AS remote_attach_available,
+                              started_at, ended_at, exit_code, end_reason,
+                              resumed_from_session_id
+                    """,
+                    logger: db.logger
+                ).collect()
+            } else {
+                if cloudLifecycle != nil {
+                    try await CloudUsageLedger.resume(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        sessionID: sessionID
+                    )
+                    try await updateCloudHostState(
+                        conn: conn,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        expected: "paused",
+                        next: "running"
+                    )
+                }
+                updatedRows = try await conn.query(
+                    """
+                    UPDATE work_session
+                       SET status = 'running',
+                           idle_at = NULL,
+                           ended_at = NULL,
+                           end_reason = NULL
+                     WHERE id = \(sessionID)
+                       AND status = 'idle'
+                    RETURNING id, workspace_id, channel_id, member_id, host_id,
+                              root_message_id, tool, label, status, observation,
+                              0::bigint AS observer_grant_count,
+                              (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)
+                                AS remote_attach_available,
+                              started_at, ended_at, exit_code, end_reason,
+                              resumed_from_session_id
+                    """,
+                    logger: db.logger
+                ).collect()
+            }
+            guard let updatedRow = updatedRows.first else {
+                throw HTTPError(.conflict, message: "work session state changed; retry")
+            }
+            let workSession = try Self.decodeSession(updatedRow)
+            let props = Self.cardProps(
+                sessionID: sessionID,
+                tool: workSession.tool,
+                label: workSession.label,
+                status: targetStatus,
+                exitCode: workSession.exitCode
+            )
+            _ = try await conn.query(
+                "UPDATE message SET props = \(Self.jsonString(props))::jsonb WHERE id = \(decoded.5)",
+                logger: db.logger
+            )
+
+            let channel = Self.channelName(workspaceID: workspaceID, channelID: decoded.2)
+            let eventType: String
+            let eventSeq: Int64
+            let idempotencyDiscriminator: String
+            var messagePayload: String?
+            if targetStatus == "idle" {
+                let idleMessageProps: [String: Any] = [
+                    "kind": "work_session_idle",
+                    "session_id": sessionID.uuidString,
+                    "owner_member_id": decoded.3.uuidString,
+                ]
+                let messageRows = try await conn.query(
+                    """
+                    WITH bumped AS (
+                      UPDATE channel_seq
+                         SET last_seq = last_seq + 1
+                       WHERE workspace_id = \(workspaceID)
+                         AND channel_id = \(decoded.2)
+                      RETURNING last_seq AS seq
+                    )
+                    INSERT INTO message
+                      (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                       author_member_id, type, body, props, root_id)
+                    SELECT \(workspaceID), \(decoded.2), b.seq, \(transitionAtMs), 0,
+                           \(decoded.3), 'system'::message_type,
+                           '작업 완료 — idle 대기',
+                           \(Self.jsonString(idleMessageProps))::jsonb, \(decoded.5)
+                      FROM bumped b
+                    RETURNING id, seq
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let messageRow = messageRows.first else {
+                    throw HTTPError(
+                        .internalServerError,
+                        message: "idle notification message insert failed"
+                    )
+                }
+                let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+                eventType = "work.session.idle"
+                eventSeq = seq
+                idempotencyDiscriminator = messageID.uuidString
+                messagePayload = MessageRoutes.broadcastPayload(
+                    centChannel: channel,
+                    messageID: messageID,
+                    channelID: decoded.2,
+                    seq: seq,
+                    type: "system",
+                    body: "작업 완료 — idle 대기",
+                    authorMemberID: decoded.3,
+                    hlcTs: transitionAtMs,
+                    hlcCount: 0,
+                    rootID: decoded.5,
+                    props: idleMessageProps
+                )
+            } else {
+                eventType = "work.session.resumed-to-running"
+                eventSeq = decoded.17
+                idempotencyDiscriminator = String(transitionAtMs)
+            }
+            let transitionPayload = Self.toolLifecyclePayload(
+                eventType: eventType,
+                session: workSession,
+                seq: eventSeq,
+                timestampMs: transitionAtMs,
+                idempotencyDiscriminator: idempotencyDiscriminator
+            )
+            if let messagePayload {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(messagePayload)::jsonb, \(decoded.2)),
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(transitionPayload)::jsonb, \(decoded.2))
+                    """,
+                    logger: db.logger
+                )
+            } else {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(transitionPayload)::jsonb, \(decoded.2))
+                    """,
+                    logger: db.logger
+                )
+            }
+            var auditDetail: [String: Any] = [
+                "schema": targetStatus == "idle"
+                    ? "momo.work_session.idle.v1"
+                    : "momo.work_session.resumed_to_running.v1",
+                "session_id": sessionID.uuidString,
+                "host_id": decoded.4.uuidString,
+            ]
+            if let exitCode { auditDetail["exit_code"] = exitCode }
+            if let cloudLifecycle {
+                auditDetail["cloud_provider"] = "e2b"
+                auditDetail["cloud_action"] = cloudLifecycle.action
+                auditDetail["cloud_provisioner_latency_ms"] = cloudLifecycle.latencyMs
+            }
+            // A workHost principal signs with Ed25519 and carries the HOST id in
+            // `tokenID`; that id is not a `token` row, so writing it here is an
+            // audit_log_via_token_id FK violation (500, caught live by
+            // verify_work_session_idle). No token was used, so NULL is the true
+            // statement; the acting host is already named in detail.host_id.
+            let viaTokenID: UUID? = principal.kind == .workHost ? nil : principal.tokenID
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(decoded.3), \(decoded.3), \(eventType),
+                   'work_session', \(sessionID), \(viaTokenID),
+                   \(Self.jsonString(auditDetail))::jsonb)
+                """,
+                logger: db.logger
+            )
+            return workSession
+        }
+
+        return try WorkSessionResponse(workSession: session)
+            .response(from: request, context: context)
+    }
+
+    private struct CloudLifecycleEvidence: Sendable {
+        let action: String
+        let latencyMs: Int64
+    }
+
+    private struct CloudLifecycleTarget: Sendable {
+        let sandboxID: String
+    }
+
+    /// Host identity is the T3 boundary: ordinary workd/desktop hosts return
+    /// before cloud config, provider calls, or usage-ledger mutations.
+    private func performCloudLifecycleIfNeeded(
+        targetStatus: String,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> CloudLifecycleEvidence? {
+        guard let target = try await cloudLifecycleTarget(
+            targetStatus: targetStatus,
+            principal: principal,
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        ) else { return nil }
+
+        let readyConfig = try CloudProvisionerRoutes.readyConfig(cloudProvisionerConfig)
+        let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
+        // A paused daemon cannot initiate its own resume. Human REST records a
+        // durable resuming intent, calls the provider, then advances both the
+        // session and ledger. A later signed host report is confirmation only.
+        guard targetStatus == "idle" else {
+            throw HTTPError(
+                .conflict,
+                message: "paused momo Cloud sessions must be resumed by the human cloud resume endpoint"
+            )
+        }
+        let action = "pause"
+        let startedAt = Date()
+        do {
+            try await provisioner.pause(sandboxID: target.sandboxID)
+        } catch {
+            throw CloudProvisionerRoutes.httpError(error)
+        }
+        return CloudLifecycleEvidence(
+            action: action,
+            latencyMs: Self.elapsedMilliseconds(since: startedAt)
+        )
+    }
+
+    private func cloudLifecycleTarget(
+        targetStatus: String,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> CloudLifecycleTarget? {
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.host_id, ws.status, h.type, ws.channel_id, ws.member_id,
+                       ch.provider_sandbox_id, ch.state
+                  FROM work_session ws
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
+                  LEFT JOIN work_cloud_host ch
+                    ON ch.host_id = h.id
+                   AND ch.workspace_id = h.workspace_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.id = \(sessionID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            let (hostID, sessionStatus, hostType, channelID, memberID, sandboxID, cloudState) =
+                try row.decode(
+                    (UUID, String, String, UUID, UUID, String?, String?).self
+                )
+            guard hostID == principal.tokenID else { return nil }
+            if sessionStatus == targetStatus { return nil }
+            let expectedSessionStatus = targetStatus == "idle" ? "running" : "idle"
+            guard sessionStatus == expectedSessionStatus else { return nil }
+            guard hostType == "cloud" else { return nil }
+            // T1/T2 return above without consulting T3 configuration. A cloud
+            // transition fails before writing a durable provider intent when
+            // the unreleased T3 surface is not explicitly enabled.
+            try CloudProvisionerRoutes.requireEnabled(cloudProvisionerConfig)
+            try await Self.requireChannelMember(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                channelID: channelID,
+                memberID: memberID
+            )
+            guard let sandboxID, let cloudState else {
+                throw HTTPError(
+                    .serviceUnavailable,
+                    message: "momo Cloud 샌드박스 연결 정보가 준비되지 않았습니다."
+                )
+            }
+            if targetStatus == "running" {
+                guard cloudState == "running" else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "human cloud resume intent must complete before host confirmation"
+                    )
+                }
+                return nil
+            }
+            let expectedCloudState = "running"
+            guard cloudState == expectedCloudState else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud 호스트 상태가 세션 상태와 일치하지 않습니다."
+                )
+            }
+            let operationID = UUID()
+            let intentRows = try await conn.query(
+                """
+                UPDATE work_cloud_host
+                   SET state = 'pausing',
+                       lifecycle_operation_id = \(operationID),
+                       lifecycle_operation_kind = 'pause',
+                       lifecycle_operation_started_at = clock_timestamp(),
+                       lifecycle_operation_version = lifecycle_operation_version + 1,
+                       updated_at = clock_timestamp()
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND state = 'running'
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            guard intentRows.first != nil else {
+                throw HTTPError(.conflict, message: "momo Cloud host lifecycle changed; retry")
+            }
+            return CloudLifecycleTarget(sandboxID: sandboxID)
+        }
+    }
+
+    private func updateCloudHostState(
+        conn: PostgresConnection,
+        workspaceID: UUID,
+        hostID: UUID,
+        expected: String,
+        next: String
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            UPDATE work_cloud_host
+               SET state = \(next), updated_at = clock_timestamp()
+             WHERE workspace_id = \(workspaceID)
+               AND host_id = \(hostID)
+               AND state = \(expected)
+            RETURNING id
+            """,
+            logger: db.logger
+        ).collect()
+        guard rows.first != nil else {
+            throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+        }
+    }
+
+    /// A provider-confirmed missing sandbox is terminal. Close the paid usage
+    /// interval, revoke the dead host, and make it immediately eligible for the
+    /// existing offline sweep, which owns orphaned events/cards/auto fallback.
+    private func recordMissingCloudSandbox(
+        workspaceID: UUID,
+        sessionID: UUID,
+        hostID: UUID,
+        latencyMs: Int64,
+        error: Error
+    ) async throws {
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT member_id
+                  FROM work_session
+                 WHERE workspace_id = \(workspaceID)
+                   AND id = \(sessionID)
+                   AND host_id = \(hostID)
+                   AND status = 'idle'
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let memberID = try rows.first?.decode(UUID.self) else {
+                throw HTTPError(.conflict, message: "work session state changed; retry")
+            }
+            try await CloudUsageLedger.settle(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+            let cloudRows = try await conn.query(
+                """
+                UPDATE work_cloud_host
+                   SET state = 'destroyed', updated_at = clock_timestamp()
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND state IN ('paused', 'ready')
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            guard cloudRows.first != nil else {
+                throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+            }
+            _ = try await conn.query(
+                """
+                UPDATE work_host
+                   SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+                       last_seen_at = clock_timestamp() - interval '100 years'
+                 WHERE workspace_id = \(workspaceID)
+                   AND id = \(hostID)
+                """,
+                logger: db.logger
+            )
+            let upstreamStatus: Int?
+            if case CloudProvisionerError.upstreamStatus(let status) = error {
+                upstreamStatus = status
+            } else {
+                upstreamStatus = nil
+            }
+            let detail: [String: Any] = [
+                "schema": "momo.work_cloud.resume_failed.v1",
+                "host_id": hostID.uuidString,
+                "session_id": sessionID.uuidString,
+                "provider": "e2b",
+                "reason": "sandbox_missing",
+                "upstream_status": upstreamStatus ?? NSNull(),
+                "provisioner_latency_ms": latencyMs,
+                "orphan_transition": "host_offline_sweep",
+            ]
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(memberID), \(memberID),
+                   'work.cloud.resume_failed', 'work_host', \(hostID), NULL,
+                   \(Self.jsonString(detail))::jsonb)
+                """,
+                logger: db.logger
+            )
+        }
+    }
+
+    private static func isMissingSandbox(_ error: Error) -> Bool {
+        guard case CloudProvisionerError.upstreamStatus(let status) = error else {
+            return false
+        }
+        return status == 404 || status == 410
+    }
+
+    private static func elapsedMilliseconds(since startedAt: Date) -> Int64 {
+        max(0, Int64(Date().timeIntervalSince(startedAt) * 1_000))
     }
 
     private func recordACPEvent(
@@ -660,7 +1276,7 @@ struct WorkSessionRoutes: Sendable {
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
                        ws.status, ws.observation,
                        CASE
-                         WHEN ws.status = 'running'
+                         WHEN ws.status IN ('running', 'idle')
                           AND ws.observation = 'open'
                           AND h.revoked_at IS NULL
                          THEN (
@@ -776,7 +1392,8 @@ struct WorkSessionRoutes: Sendable {
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                memberID: principal.memberID
+                memberID: principal.memberID,
+                targetHostID: body.targetHostId
             )
 
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
@@ -807,6 +1424,13 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.internalServerError, message: "resumed work session insert failed")
             }
             let newSession = try Self.decodeSession(newRow)
+            try await CloudUsageLedger.start(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: resumedSessionID,
+                hostID: body.targetHostId
+            )
 
             let endedRows = try await conn.query(
                 """
@@ -934,7 +1558,7 @@ struct WorkSessionRoutes: Sendable {
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
                        ws.status, ws.observation,
                        CASE
-                         WHEN ws.status = 'running'
+                         WHEN ws.status IN ('running', 'idle')
                           AND ws.observation = 'open'
                           AND h.revoked_at IS NULL
                          THEN (
@@ -972,7 +1596,7 @@ struct WorkSessionRoutes: Sendable {
                    AND ms.left_at IS NULL
                  WHERE ws.workspace_id = \(workspaceID)
                    AND c.archived_at IS NULL
-                   AND (NOT \(activeOnly) OR ws.status = 'running')
+                   AND (NOT \(activeOnly) OR ws.status IN ('running', 'idle'))
                  ORDER BY ws.started_at DESC, ws.id DESC
                  LIMIT 200
                 """,
@@ -1046,6 +1670,44 @@ struct WorkSessionRoutes: Sendable {
             "idempotency_key": "\(channel):\(eventType):\(session.id)",
         ]
         return jsonString(object)
+    }
+
+    static func toolLifecyclePayload(
+        eventType: String,
+        session: WorkSessionDTO,
+        seq: Int64,
+        timestampMs: Int64,
+        idempotencyDiscriminator: String
+    ) -> String {
+        var payload: [String: Any] = [
+            "session_id": session.id,
+            "channel_id": session.channelId,
+            "root_message_id": session.rootMessageId,
+            "member_id": session.memberId,
+            "host_id": session.hostId,
+            "status": session.status,
+        ]
+        if let exitCode = session.exitCode {
+            payload["exit_code"] = exitCode
+        }
+        if eventType == "work.session.idle" {
+            payload["idle_at"] = timestampMs
+        } else {
+            payload["resumed_at"] = timestampMs
+        }
+        let channel = "ch:ws\(session.workspaceId).\(session.channelId)"
+        return jsonString([
+            "channel": channel,
+            "data": [
+                "type": eventType,
+                "v": 1,
+                "ts": timestampMs,
+                "seq": seq,
+                "payload": payload,
+            ],
+            "idempotency_key":
+                "\(channel):\(eventType):\(session.id):\(idempotencyDiscriminator)",
+        ])
     }
 
     struct ValidatedACPEvent: @unchecked Sendable {

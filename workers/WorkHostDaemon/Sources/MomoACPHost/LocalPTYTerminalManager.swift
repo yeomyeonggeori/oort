@@ -79,6 +79,15 @@ public final class HostPTYProcess: @unchecked Sendable {
         if process.isRunning { process.terminate() }
     }
 
+    public func forceTerminate() {
+        guard process.isRunning else { return }
+#if canImport(Darwin)
+        _ = Darwin.kill(process.processIdentifier, SIGKILL)
+#else
+        _ = Glibc.kill(process.processIdentifier, SIGKILL)
+#endif
+    }
+
     public func close() {
         output.readabilityHandler = nil
         try? input.close()
@@ -126,10 +135,14 @@ private func openPseudoTerminal() throws -> (master: Int32, slave: Int32) {
 public actor LocalPTYTerminalManager: ACPTerminalHandler {
     private final class Terminal: @unchecked Sendable {
         let process: HostPTYProcess
-        var buffer = Data()
+        let replay: PTYReplayBuffer
+        var pendingOutput = Data()
         var truncated = false
 
-        init(process: HostPTYProcess) { self.process = process }
+        init(process: HostPTYProcess, capacityBytes: Int) {
+            self.process = process
+            replay = PTYReplayBuffer(capacityBytes: capacityBytes)
+        }
     }
 
     private let defaultWorkingDirectory: URL
@@ -140,7 +153,7 @@ public actor LocalPTYTerminalManager: ACPTerminalHandler {
     public init(
         defaultWorkingDirectory: URL,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
-        maxBufferedBytes: Int = 1_048_576
+        maxBufferedBytes: Int = PTYReplayBuffer.defaultCapacityBytes
     ) {
         self.defaultWorkingDirectory = defaultWorkingDirectory
         self.baseEnvironment = baseEnvironment
@@ -158,7 +171,7 @@ public actor LocalPTYTerminalManager: ACPTerminalHandler {
             environment: environment
         )
         let id = UUID().uuidString.lowercased()
-        let terminal = Terminal(process: process)
+        let terminal = Terminal(process: process, capacityBytes: maxBufferedBytes)
         terminals[id] = terminal
         process.onOutput { [weak self] data in
             Task { await self?.append(data, terminalID: id) }
@@ -170,8 +183,8 @@ public actor LocalPTYTerminalManager: ACPTerminalHandler {
         guard let terminal = terminals[terminalID] else {
             throw ACPHostError.terminalUnavailable
         }
-        let data = terminal.buffer
-        terminal.buffer.removeAll(keepingCapacity: true)
+        let data = terminal.pendingOutput
+        terminal.pendingOutput.removeAll(keepingCapacity: true)
         let wasTruncated = terminal.truncated
         terminal.truncated = false
         return ACPTerminalOutput(
@@ -200,15 +213,26 @@ public actor LocalPTYTerminalManager: ACPTerminalHandler {
 
     public func release(terminalID: String) async {
         guard let terminal = terminals.removeValue(forKey: terminalID) else { return }
+        terminal.replay.finish()
         terminal.process.terminate()
         terminal.process.close()
     }
 
+    /// Direct attach contract used by host transports. Replay and live output
+    /// are joined atomically by `PTYReplayBuffer`; no tool is respawned.
+    public func connect(terminalID: String) async throws -> AsyncStream<PTYReplayEvent> {
+        guard let terminal = terminals[terminalID] else {
+            throw ACPHostError.terminalUnavailable
+        }
+        return terminal.replay.connect()
+    }
+
     private func append(_ data: Data, terminalID: String) {
         guard let terminal = terminals[terminalID] else { return }
-        terminal.buffer.append(data)
-        if terminal.buffer.count > maxBufferedBytes {
-            terminal.buffer.removeFirst(terminal.buffer.count - maxBufferedBytes)
+        terminal.replay.append(data)
+        terminal.pendingOutput.append(data)
+        if terminal.pendingOutput.count > maxBufferedBytes {
+            terminal.pendingOutput.removeFirst(terminal.pendingOutput.count - maxBufferedBytes)
             terminal.truncated = true
         }
     }

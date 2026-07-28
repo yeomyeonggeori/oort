@@ -53,6 +53,7 @@ struct WorkHostDaemonMain {
             let processes = ProcessManager(
                 templates: templates,
                 outputDirectory: config.outputDirectory,
+                ringBufferBytes: config.ringBufferBytes,
                 acpEventRelay: { sessionID, event in
                     try await runtimeClient.relayACPEvent(
                         hostID: hostID, sessionID: sessionID, event: event
