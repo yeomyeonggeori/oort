@@ -81,7 +81,12 @@ struct NotifierService: Service {
                 for await _ in wakes {
                     if Task.isCancelled { break }
                     await sweepTierFallback()
-                    await reconcileCloudLifecycle()
+                    // T3 is unreleased and default-off. Do not even enter the
+                    // reconciler (and therefore do not perform an empty claim
+                    // poll) unless the operator explicitly opts in.
+                    await Self.runCloudLifecycleReconcilerIfEnabled(config.t3Enabled) {
+                        await reconcileCloudLifecycle()
+                    }
                     await drainToEmpty()
                 }
             }
@@ -94,6 +99,14 @@ struct NotifierService: Service {
             try await group.next()
             group.cancelAll()
         }
+    }
+
+    static func runCloudLifecycleReconcilerIfEnabled(
+        _ enabled: Bool,
+        operation: @Sendable () async -> Void
+    ) async {
+        guard enabled else { return }
+        await operation()
     }
 
     // MARK: - Startup sweep

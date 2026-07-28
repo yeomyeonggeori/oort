@@ -19,8 +19,24 @@ final class CloudProvisionerTests: XCTestCase {
         ))
     }
 
-    func testMissingE2BKeyFailsOnlyCloudConfigClosed() {
+    func testT3IsDisabledByDefaultEvenWhenE2BConfigurationExists() {
         let config = CloudProvisionerConfig.load(environment: [
+            "E2B_API_KEY": "operator-secret",
+            "E2B_TEMPLATE_ID": "momo-workd",
+            "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
+        ])
+        XCTAssertFalse(config.enabled)
+        XCTAssertThrowsError(try config.requireReady()) { error in
+            XCTAssertEqual(error as? CloudProvisionerError, .disabled)
+        }
+        XCTAssertThrowsError(try CloudProvisionerRoutes.readyConfig(config)) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .serviceUnavailable)
+        }
+    }
+
+    func testExplicitT3OptInStillRequiresE2BKey() {
+        let config = CloudProvisionerConfig.load(environment: [
+            "MOMO_T3_ENABLED": "1",
             "E2B_TEMPLATE_ID": "momo-workd",
             "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
         ])
@@ -34,6 +50,7 @@ final class CloudProvisionerTests: XCTestCase {
 
     func testCloudConfigClampsAndRequiresPublicHTTPS() throws {
         let valid = CloudProvisionerConfig.load(environment: [
+            "MOMO_T3_ENABLED": "1",
             "E2B_API_KEY": "operator-secret",
             "E2B_TEMPLATE_ID": "momo-workd",
             "MOMO_PUBLIC_BASE_URL": "https://momo.example.test/",
@@ -46,6 +63,7 @@ final class CloudProvisionerTests: XCTestCase {
         XCTAssertEqual(ready.publicServerURL, "https://momo.example.test")
 
         let insecure = CloudProvisionerConfig.load(environment: [
+            "MOMO_T3_ENABLED": "1",
             "E2B_API_KEY": "operator-secret",
             "E2B_TEMPLATE_ID": "momo-workd",
             "MOMO_PUBLIC_BASE_URL": "http://momo.example.test",

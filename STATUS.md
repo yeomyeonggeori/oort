@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## privileged refresh 차단 + T3 기본 비활성 (#884+#887, 2026-07-28)
+
+- refresh는 현재 verified human email·allowlist·운영자 secret 설정을 다시 확인해 자격 상실 시 `platform:read`와 `platform:credits:write`만 제거하고 일반 messages scope는 유지한다. 기존 로그인 경로가 같은 멤버의 privileged session token을 일괄 revoke해 allowlist/secret 변경 뒤 재로그인을 rotation 경계로 쓴다.
+- T3는 `MOMO_T3_ENABLED=1` 명시 옵트인 없이는 provisioning/register/조회/pause/resume/destroy/topup을 읽히는 503으로 닫고 NotifierWorker reconciler에 진입하지 않는다. T1/T2 계약은 이 설정을 읽지 않으며 기존 T3 verifier는 opt-in으로 유지한다.
+- Migration 049의 중복 미정산 usage fail-closed는 비활성 여부와 무관한 과금 원장 무결성 경계라 완화하지 않았다. 중복 설치의 복구 도구는 #886 범위다. 서버 349·NotifierWorker 6·WorkHostDaemon 32 테스트(3 skip)와 T3 정적 gate는 green이고, Docker 검증기 9종은 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## T3 2차 수리 (#882, 2026-07-28)
 
 - topup을 `platform:credits:write` human scope로 분리해 `platform:read` 전용 토큰의 유료 실행 권한 획득을 차단했다. 같은 provider-link 가드의 mutation 사용처는 전수 조사했으며 기존 운영자 GUI/ADR 계약과 결합된 provider link·chain 및 quota credential 발급은 후속 권한 재설계 대상으로 남겼다.

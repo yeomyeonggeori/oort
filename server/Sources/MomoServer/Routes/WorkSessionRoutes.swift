@@ -883,6 +883,10 @@ struct WorkSessionRoutes: Sendable {
             let expectedSessionStatus = targetStatus == "idle" ? "running" : "idle"
             guard sessionStatus == expectedSessionStatus else { return nil }
             guard hostType == "cloud" else { return nil }
+            // T1/T2 return above without consulting T3 configuration. A cloud
+            // transition fails before writing a durable provider intent when
+            // the unreleased T3 surface is not explicitly enabled.
+            try CloudProvisionerRoutes.requireEnabled(cloudProvisionerConfig)
             try await Self.requireChannelMember(
                 conn: conn,
                 logger: db.logger,

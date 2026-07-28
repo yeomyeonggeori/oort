@@ -6,6 +6,7 @@ import NIOFoundationCompat
 struct CloudProvisionerConfig: Sendable, Equatable {
     static let defaultAPIBaseURL = "https://api.e2b.app"
 
+    let enabled: Bool
     let apiBaseURL: String
     let apiKey: String?
     let templateID: String?
@@ -24,6 +25,7 @@ struct CloudProvisionerConfig: Sendable, Equatable {
         let timeout = nonempty("E2B_SANDBOX_TIMEOUT_SECONDS").flatMap(Int.init) ?? 3_600
         let rate = nonempty("MOMO_T3_RATE_MICRO_USD_PER_SECOND").flatMap(Int64.init) ?? 25
         return CloudProvisionerConfig(
+            enabled: nonempty("MOMO_T3_ENABLED") == "1",
             apiBaseURL: nonempty("E2B_API_BASE_URL") ?? defaultAPIBaseURL,
             apiKey: nonempty("E2B_API_KEY"),
             templateID: nonempty("E2B_TEMPLATE_ID"),
@@ -34,6 +36,7 @@ struct CloudProvisionerConfig: Sendable, Equatable {
     }
 
     func requireReady() throws -> ReadyCloudProvisionerConfig {
+        guard enabled else { throw CloudProvisionerError.disabled }
         guard let apiKey else { throw CloudProvisionerError.missingAPIKey }
         guard let templateID else { throw CloudProvisionerError.missingTemplate }
         guard let publicServerURL,
@@ -69,6 +72,7 @@ struct ReadyCloudProvisionerConfig: Sendable, Equatable {
 }
 
 enum CloudProvisionerError: Error, Sendable, Equatable {
+    case disabled
     case missingAPIKey
     case missingTemplate
     case invalidPublicServerURL

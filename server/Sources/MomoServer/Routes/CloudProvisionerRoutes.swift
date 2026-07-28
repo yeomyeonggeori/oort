@@ -223,6 +223,7 @@ struct CloudProvisionerRoutes: Sendable {
 
     @Sendable
     func register(_ request: Request, context: AppRequestContext) async throws -> Response {
+        try Self.requireEnabled(config)
         let workspaceID = try Self.workspaceID(context)
         let token = try Self.bootstrapToken(request)
         let digest = Self.tokenDigest(token)
@@ -310,6 +311,7 @@ struct CloudProvisionerRoutes: Sendable {
 
     @Sendable
     func get(_ request: Request, context: AppRequestContext) async throws -> Response {
+        try Self.requireEnabled(config)
         let principal = try Self.requireHuman(context)
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let provisionID = try Self.parameterUUID("provision", context: context)
@@ -366,6 +368,7 @@ struct CloudProvisionerRoutes: Sendable {
         request: Request,
         context: AppRequestContext
     ) async throws -> Response {
+        try Self.requireEnabled(config)
         let principal = try Self.requireHuman(context)
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let hostID = try Self.parameterUUID("host", context: context)
@@ -725,6 +728,9 @@ struct CloudProvisionerRoutes: Sendable {
         -> ReadyCloudProvisionerConfig
     {
         do { return try config.requireReady() }
+        catch CloudProvisionerError.disabled {
+            throw disabledError()
+        }
         catch CloudProvisionerError.missingAPIKey {
             throw HTTPError(
                 .serviceUnavailable,
@@ -736,6 +742,17 @@ struct CloudProvisionerRoutes: Sendable {
                 message: "momo Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
             )
         }
+    }
+
+    static func requireEnabled(_ config: CloudProvisionerConfig) throws {
+        guard config.enabled else { throw disabledError() }
+    }
+
+    static func disabledError() -> HTTPError {
+        HTTPError(
+            .serviceUnavailable,
+            message: "momo Cloud(T3)는 기본 비활성입니다. 재설계 진행 중(#888)입니다."
+        )
     }
 
     static func httpError(_ error: Error) -> HTTPError {

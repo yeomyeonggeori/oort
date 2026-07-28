@@ -91,12 +91,14 @@ OWNER_PASSWORD="t3-$RUN_TAG"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-t3-provisioner.XXXXXX")"
 BASE_URL="http://127.0.0.1:$API_PORT"
 GATE_E2B_KEY=""
+GATE_T3_ENABLED=""
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" \
     HERMES_PORT="$HERMES_PORT_HOST" PUSH_RELAY_PORT="$PUSH_PORT_HOST" \
     E2B_API_BASE_URL="http://host.docker.internal:$MOCK_E2B_PORT" \
     E2B_API_KEY="$GATE_E2B_KEY" E2B_TEMPLATE_ID="momo-workd" \
+    MOMO_T3_ENABLED="$GATE_T3_ENABLED" \
     MOMO_PUBLIC_BASE_URL="https://momo.invalid" \
     MOMO_T3_RATE_MICRO_USD_PER_SECOND=25 \
     PLATFORM_ADMIN_EMAILS="$OWNER_EMAIL" \
@@ -149,7 +151,8 @@ wait_api() {
   done
 }
 
-log "booting isolated PG18/API with E2B key absent"
+GATE_E2B_KEY="local-mock-not-a-credential"
+log "booting isolated PG18/API with T3 default-off despite configured E2B key"
 compose up -d api
 wait_api
 
@@ -293,11 +296,37 @@ CLOUD_PATH="/v1/workspaces/$WS_ID/work-hosts/cloud"
 CREATE_BODY="$(jq -cn --arg ref "$CREATE_REF" \
   '{displayName:"T3 gate",confirmPaidCloud:true,idempotencyRef:$ref}')"
 api POST "$CLOUD_PATH" "$CREATE_BODY"
-expect_status 503 "missing E2B key must fail only T3 closed"
-printf '%s' "$BODY" | jq -er '.error.message | contains("E2B")' >/dev/null
-pass "missing key returns readable 503"
+expect_status 503 "named default-off provisioning 503"
+printf '%s' "$BODY" | jq -er '.error.message | contains("기본 비활성") and contains("#888")' >/dev/null
 
-GATE_E2B_KEY="local-mock-not-a-credential"
+DUMMY_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+api GET "/v1/workspaces/$WS_ID/work-hosts/cloud/$DUMMY_ID"
+expect_status 503 "named default-off cloud projection 503"
+api POST "/v1/workspaces/$WS_ID/work-hosts/$DUMMY_ID/cloud/pause"
+expect_status 503 "named default-off cloud pause 503"
+api POST "/v1/workspaces/$WS_ID/work-hosts/$DUMMY_ID/cloud/resume"
+expect_status 503 "named default-off cloud resume 503"
+api DELETE "/v1/workspaces/$WS_ID/work-hosts/$DUMMY_ID/cloud"
+expect_status 503 "named default-off cloud destroy 503"
+api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
+  "$(jq -cn --arg ref "$TOPUP_REF" \
+    '{amountMicroUsd:1000000,idempotencyRef:$ref}')"
+expect_status 503 "named default-off cloud topup 503"
+api POST "/v1/workspaces/$WS_ID/work-hosts/cloud/register" '{}'
+expect_status 503 "named default-off cloud register 503"
+pass "default-off closes every T3 HTTP surface with readable 503"
+
+if [ "${T3_GATE_PROVE_RED_DEFAULT_OFF:-0}" = "1" ]; then
+  GATE_T3_ENABLED="1"
+  compose up -d --force-recreate api
+  wait_api
+  api POST "$CLOUD_PATH" "$CREATE_BODY"
+  expect_status 503 "red proof named default-off provisioning 503"
+  printf '%s' "$BODY" | jq -er '.error.message | contains("기본 비활성")' >/dev/null \
+    || fail "red proof named default-off provisioning 503"
+fi
+
+GATE_T3_ENABLED="1"
 compose up -d --force-recreate api
 wait_api
 

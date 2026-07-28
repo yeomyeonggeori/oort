@@ -30,6 +30,7 @@ struct Config: Sendable {
     var claimBatchSize: Int      // candidate rows claimed per iteration
     var maxAttempts: Int         // give up → status='failed' after this many tries
     var hostOfflineGraceSeconds: Int // ADR-0125 D11 stale heartbeat grace
+    var t3Enabled: Bool
     var e2bAPIBaseURL: String
     var e2bAPIKey: String?
     var e2bTemplateID: String?
@@ -69,6 +70,8 @@ struct Config: Sendable {
             claimBatchSize: envInt("NOTIFIER_CLAIM_BATCH", 32),
             maxAttempts: envInt("NOTIFIER_MAX_ATTEMPTS", 8),
             hostOfflineGraceSeconds: max(1, envInt("MOMO_HOST_OFFLINE_GRACE_S", 90)),
+            t3Enabled: ProcessInfo.processInfo.environment["MOMO_T3_ENABLED"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines) == "1",
             e2bAPIBaseURL: env("E2B_API_BASE_URL", "https://api.e2b.app")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             e2bAPIKey: ProcessInfo.processInfo.environment["E2B_API_KEY"],
