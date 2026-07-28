@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## MOMO-652 웹 에이전트 허브 탭 v1 (#860, 2026-07-28)
+
+- 웹 사이드바의 워크스페이스 전역 `에이전트` 표면에 roster 기반 목록, agentWorkingSignal 현재 작업, 프로필·지시문·모델·pause, 읽기 전용 capability/도구 제한, 메모리 list/search·invalidate·visibility grants, #861 cursor run 이력·기존 상세를 통합했다. 기존 빠른 라우팅 프로필 다이얼로그 진입점은 유지하고 같은 query/save 로직을 재사용한다.
+- 메모리 policy·전체 삭제·외부 제공자 동의와 schedule 실행기는 범위 밖으로 유지했으며, 예약 데이터는 "실행기 미구현"으로 표시한다. typecheck·Vitest 909·production build·lint(기존 warning 4)·design preflight 10/10·design-review(Blocker 0, High 0) PASS; `gate:agent-hub`와 기존 Playwright 게이트는 오케스트레이터 실행 대기(`runtime-unverified`).
+- 2R은 900px 아래 roster/detail 단일 컬럼, 비례형 상세 라벨 축과 shrink 불가 탭을 적용했다. 프로필 404는 공용 `missing` 판정으로 실패와 분리하고, sidebar/허브 작업 칩은 rail 연결 신뢰도를 공유하며 stale 만료는 오프라인에도 전진한다. 빈 alert·내부 run 문구·오프라인 지시문 대비·메모리 kind/무효 상태·cron 문구와 effort-table gate 목을 함께 고쳤다.
+- 2R 검증: typecheck·Vitest 909·production build·lint(기존 warning 4)·design preflight 10/10 PASS. `gate:agent-hub`에는 760x480 `dd` 실폭, 긴 이름 탭 한 줄, profile 404 비실패, effort ready 단정을 추가했으며 Playwright 실행과 기존 red proof 3종은 오케스트레이터 대기(`runtime-unverified`).
+
 ## MOMO-650 웹 idle 표시 + 재부착 동선 (#858, 2026-07-28)
 
 - 웹 Work 세션 모델·목록·상세·관전 attach에 `idle`을 살아 있는 중립 상태(`완료 · 대기 중`)로 추가하고, `exitCode`는 종료 판정이 아닌 `마지막 실행 결과`로 표시한다. `work.session.idle`·`work.session.resumed-to-running`은 전 필드 타입을 방어적으로 파싱한 뒤 REST 원장을 다시 읽으며, 목록 응답 전후 어느 순서로 도착해도 stale 응답을 폐기한다.

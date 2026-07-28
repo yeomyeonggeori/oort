@@ -281,6 +281,34 @@
   }
 }
 
+/* Agent Hub keeps its roster and detail side by side while both have useful
+ * reading width. In a narrow shell they become one column, so neither is asked
+ * to survive in the remainder left after two fixed rails. The roster keeps one
+ * named pane of height and scrolls inside it; detail receives the rest. */
+@utility agent-hub-layout {
+  display: flex;
+  min-block-size: 0;
+  flex: 1;
+
+  @media (width < 900px) {
+    flex-direction: column;
+  }
+}
+
+@utility agent-hub-roster {
+  inline-size: var(--spacing-pane);
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-inline-end: 1px solid var(--line);
+
+  @media (width < 900px) {
+    inline-size: auto;
+    block-size: var(--spacing-pane-sm);
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--line);
+  }
+}
+
 /* Dialog panel measure (R-1 §5 다이얼로그, MOMO-614). A dialog sits one 32px
  * step below the top of the window, so its own maximum height is the window
  * minus that step twice. The rhythm scale has no viewport-relative step and

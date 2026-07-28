@@ -235,6 +235,30 @@ The three 2R regression assertions are direct reversal proofs:
 
 The two existing environment red proofs remain mandatory and must exit nonzero.
 
+The agent-hub gate is also fixture-only and needs no credentials or backend.
+It runs three response schedules (`roster → memory → history`, `history →
+roster → memory`, `memory → history → roster`) and asserts that lower-cased
+agent keys keep late data on the right detail surface. The first schedule also
+walks the four product writes/reads: roster selection, memory invalidation and
+refetch, agent-global run cursor pagination plus detail, and pause projection.
+Playwright execution belongs to the orchestrator:
+
+```sh
+npm run gate:agent-hub
+AGENT_HUB_GATE_PROVE_RED_INVALIDATE=1 npm run gate:agent-hub  # MUST fail: memory invalidate round-trip
+AGENT_HUB_GATE_PROVE_RED_HISTORY=1 npm run gate:agent-hub     # MUST fail: history cursor page
+AGENT_HUB_GATE_PROVE_RED_PAUSE=1 npm run gate:agent-hub       # MUST fail: pause projection
+```
+
+되돌림 증명은 이름 있는 환경변수 하나만 켜서 실행한다. 제품 행이나 단정을
+삭제하지 않는다. 각 실행은 위에 적힌 이름(`memory invalidate round-trip`,
+`history cursor page`, `pause projection`)으로 실패해야 하며, 환경변수를 끈
+정상 실행은 다시 PASS해야 한다.
+
+These red proofs change named fixture seams instead of deleting a product or
+assertion line, so the failure remains repeatable in a clean throwaway
+worktree.
+
 The Tauri WKWebView microphone prompt is deliberately not inferred from browser
 success. After the browser gate, the orchestrator must open the packaged shell,
 join once, verify bidirectional audio, deny microphone once, and record whether

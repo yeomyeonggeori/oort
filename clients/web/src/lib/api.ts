@@ -1528,6 +1528,107 @@ export interface AgentRun {
   updatedAtMs: number;
 }
 
+export interface AgentRunSummary {
+  id: string;
+  channelId: string;
+  triggerMessageId?: string;
+  triggerSummary?: string;
+  status: AgentRunStatus;
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface AgentRunSummaryPage {
+  runs: AgentRunSummary[];
+  nextCursor?: string;
+}
+
+const AGENT_RUN_STATUSES = new Set<AgentRunStatus>([
+  "queued",
+  "running",
+  "awaiting_approval",
+  "paused",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+]);
+
+function optionalFiniteNumber(
+  source: Record<string, unknown>,
+  key: string
+): number | undefined {
+  const value = source[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new WireShapeError();
+  }
+  return value;
+}
+
+function optionalString(
+  source: Record<string, unknown>,
+  key: string
+): string | undefined {
+  const value = source[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new WireShapeError();
+  return value;
+}
+
+function agentRunSummaryFromWire(value: unknown): AgentRunSummary {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const channelId = str(source, "channelId");
+  const status = str(source, "status");
+  const createdAtMs = num(source, "createdAtMs");
+  const updatedAtMs = num(source, "updatedAtMs");
+  if (
+    id === undefined ||
+    channelId === undefined ||
+    status === undefined ||
+    !AGENT_RUN_STATUSES.has(status as AgentRunStatus) ||
+    createdAtMs === undefined ||
+    updatedAtMs === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id: id.toLowerCase(),
+    channelId: channelId.toLowerCase(),
+    status: status as AgentRunStatus,
+    createdAtMs,
+    updatedAtMs,
+    ...(optionalString(source, "triggerMessageId") === undefined
+      ? {}
+      : { triggerMessageId: optionalString(source, "triggerMessageId")?.toLowerCase() }),
+    ...(optionalString(source, "triggerSummary") === undefined
+      ? {}
+      : { triggerSummary: optionalString(source, "triggerSummary") }),
+    ...(optionalFiniteNumber(source, "startedAtMs") === undefined
+      ? {}
+      : { startedAtMs: optionalFiniteNumber(source, "startedAtMs") }),
+    ...(optionalFiniteNumber(source, "finishedAtMs") === undefined
+      ? {}
+      : { finishedAtMs: optionalFiniteNumber(source, "finishedAtMs") }),
+  };
+}
+
+/** Parse the bounded MOMO-653 history page without accepting partial rows. */
+export function agentRunSummaryPageFromWire(value: unknown): AgentRunSummaryPage {
+  const source = responseRecord(value);
+  const runs = arrayField(source, "runs");
+  if (runs === null) throw new WireShapeError();
+  const nextCursor = optionalString(source, "nextCursor");
+  return {
+    runs: runs.map(agentRunSummaryFromWire),
+    ...(nextCursor === undefined ? {} : { nextCursor: nextCursor.toLowerCase() }),
+  };
+}
+
 export async function fetchAgentRuns(
   workspaceId: string,
   channelId: string,
@@ -1539,6 +1640,60 @@ export async function fetchAgentRuns(
     )}/channels/${encodeURIComponent(channelId)}/agent-runs?limit=${limit}`
   );
   return res.runs;
+}
+
+export async function fetchAgentRunSummaries(
+  workspaceId: string,
+  agentMemberId: string,
+  cursor?: string,
+  limit = 20
+): Promise<AgentRunSummaryPage> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set("cursor", cursor.toLowerCase());
+  return agentRunSummaryPageFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/agents/${encodeURIComponent(
+      agentMemberId.toLowerCase()
+    )}/runs?${query.toString()}`
+  ));
+}
+
+function agentRunDetailFromWire(value: unknown): AgentRun {
+  const source = responseRecord(value);
+  const summary = agentRunSummaryFromWire(source);
+  const workspaceId = str(source, "workspaceId");
+  const agentMemberId = str(source, "agentMemberId");
+  const stepCount = num(source, "stepCount");
+  const maxSteps = num(source, "maxSteps");
+  if (
+    workspaceId === undefined ||
+    agentMemberId === undefined ||
+    stepCount === undefined ||
+    maxSteps === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  const input = record(source.input);
+  return {
+    ...summary,
+    workspaceId: workspaceId.toLowerCase(),
+    agentMemberId: agentMemberId.toLowerCase(),
+    stepCount,
+    maxSteps,
+    ...(input === null ? {} : { input }),
+  };
+}
+
+export async function fetchAgentRunDetail(
+  workspaceId: string,
+  runId: string
+): Promise<AgentRun> {
+  return agentRunDetailFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}`
+  ));
 }
 
 // ---- 모델·추론 강도 라우팅 (ADR-0134) ---------------------------------------
@@ -1663,6 +1818,287 @@ export async function putAgentProfile(
     { method: "PUT", body: JSON.stringify(input) }
   );
   return res.profile;
+}
+
+export async function putAgentPause(
+  workspaceId: string,
+  agentMemberId: string,
+  paused: boolean
+): Promise<AgentProfile> {
+  const res = await request<{ profile: AgentProfile }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/agents/${encodeURIComponent(
+      agentMemberId.toLowerCase()
+    )}/pause`,
+    { method: "PUT", body: JSON.stringify({ paused }) }
+  );
+  return res.profile;
+}
+
+// ---- Agent-scoped memory browser (MOMO-652 / ADR-0129) --------------------
+
+export type MemoryScope = "member" | "agent" | "workspace" | "conversation";
+
+export interface MemorySourceRef {
+  messageId: string;
+  channelId: string;
+}
+
+export interface MemoryItem {
+  id: string;
+  workspaceId: string;
+  scope: MemoryScope;
+  subjectMemberId?: string;
+  agentMemberId?: string;
+  channelId?: string;
+  kind: string;
+  body: string;
+  confidence: number;
+  validAtMs: number;
+  invalidAtMs?: number;
+  invalidatedByMemoryId?: string;
+  createdByKind: "human" | "agent" | "worker";
+  createdByMemberId?: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  sourceRefs: MemorySourceRef[];
+}
+
+export interface MemorySearchHit {
+  memory: MemoryItem;
+  score: number;
+}
+
+export interface MemoryVisibilityGrant {
+  id: string;
+  workspaceId: string;
+  memoryId: string;
+  granteeKind: "member" | "agent";
+  granteeId: string;
+  grantedBy: string;
+  createdAtMs: number;
+  revokedAtMs?: number;
+}
+
+const MEMORY_SCOPES = new Set<MemoryScope>([
+  "member",
+  "agent",
+  "workspace",
+  "conversation",
+]);
+const MEMORY_CREATORS = new Set<MemoryItem["createdByKind"]>([
+  "human",
+  "agent",
+  "worker",
+]);
+
+function memorySourceRefFromWire(value: unknown): MemorySourceRef {
+  const messageId = str(value, "messageId");
+  const channelId = str(value, "channelId");
+  if (messageId === undefined || channelId === undefined) {
+    throw new WireShapeError();
+  }
+  return {
+    messageId: messageId.toLowerCase(),
+    channelId: channelId.toLowerCase(),
+  };
+}
+
+function optionalLowerId(
+  source: Record<string, unknown>,
+  key: string
+): string | undefined {
+  return optionalString(source, key)?.toLowerCase();
+}
+
+export function memoryItemFromWire(value: unknown): MemoryItem {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const workspaceId = str(source, "workspaceId");
+  const scope = str(source, "scope");
+  const kind = str(source, "kind");
+  const body = str(source, "body");
+  const confidence = num(source, "confidence");
+  const validAtMs = num(source, "validAtMs");
+  const createdByKind = str(source, "createdByKind");
+  const createdAtMs = num(source, "createdAtMs");
+  const updatedAtMs = num(source, "updatedAtMs");
+  const refs = arrayField(source, "sourceRefs");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    scope === undefined ||
+    !MEMORY_SCOPES.has(scope as MemoryScope) ||
+    kind === undefined ||
+    body === undefined ||
+    confidence === undefined ||
+    validAtMs === undefined ||
+    createdByKind === undefined ||
+    !MEMORY_CREATORS.has(createdByKind as MemoryItem["createdByKind"]) ||
+    createdAtMs === undefined ||
+    updatedAtMs === undefined ||
+    refs === null
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id: id.toLowerCase(),
+    workspaceId: workspaceId.toLowerCase(),
+    scope: scope as MemoryScope,
+    kind,
+    body,
+    confidence,
+    validAtMs,
+    createdByKind: createdByKind as MemoryItem["createdByKind"],
+    createdAtMs,
+    updatedAtMs,
+    sourceRefs: refs.map(memorySourceRefFromWire),
+    ...(optionalLowerId(source, "subjectMemberId") === undefined
+      ? {}
+      : { subjectMemberId: optionalLowerId(source, "subjectMemberId") }),
+    ...(optionalLowerId(source, "agentMemberId") === undefined
+      ? {}
+      : { agentMemberId: optionalLowerId(source, "agentMemberId") }),
+    ...(optionalLowerId(source, "channelId") === undefined
+      ? {}
+      : { channelId: optionalLowerId(source, "channelId") }),
+    ...(optionalFiniteNumber(source, "invalidAtMs") === undefined
+      ? {}
+      : { invalidAtMs: optionalFiniteNumber(source, "invalidAtMs") }),
+    ...(optionalLowerId(source, "invalidatedByMemoryId") === undefined
+      ? {}
+      : {
+          invalidatedByMemoryId: optionalLowerId(
+            source,
+            "invalidatedByMemoryId"
+          ),
+        }),
+    ...(optionalLowerId(source, "createdByMemberId") === undefined
+      ? {}
+      : { createdByMemberId: optionalLowerId(source, "createdByMemberId") }),
+  };
+}
+
+export function memoryPageFromWire(value: unknown): MemoryItem[] {
+  const memories = arrayField(responseRecord(value), "memories");
+  if (memories === null) throw new WireShapeError();
+  return memories.map(memoryItemFromWire);
+}
+
+export function memorySearchFromWire(value: unknown): MemorySearchHit[] {
+  const hits = arrayField(responseRecord(value), "hits");
+  if (hits === null) throw new WireShapeError();
+  return hits.map((value) => {
+    const source = record(value);
+    const score = num(source, "score");
+    if (source === null || score === undefined) throw new WireShapeError();
+    return { memory: memoryItemFromWire(source.memory), score };
+  });
+}
+
+function memoryGrantFromWire(value: unknown): MemoryVisibilityGrant {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const workspaceId = str(source, "workspaceId");
+  const memoryId = str(source, "memoryId");
+  const granteeKind = str(source, "granteeKind");
+  const granteeId = str(source, "granteeId");
+  const grantedBy = str(source, "grantedBy");
+  const createdAtMs = num(source, "createdAtMs");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    memoryId === undefined ||
+    (granteeKind !== "member" && granteeKind !== "agent") ||
+    granteeId === undefined ||
+    grantedBy === undefined ||
+    createdAtMs === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id: id.toLowerCase(),
+    workspaceId: workspaceId.toLowerCase(),
+    memoryId: memoryId.toLowerCase(),
+    granteeKind,
+    granteeId: granteeId.toLowerCase(),
+    grantedBy: grantedBy.toLowerCase(),
+    createdAtMs,
+    ...(optionalFiniteNumber(source, "revokedAtMs") === undefined
+      ? {}
+      : { revokedAtMs: optionalFiniteNumber(source, "revokedAtMs") }),
+  };
+}
+
+export function memoryGrantPageFromWire(value: unknown): MemoryVisibilityGrant[] {
+  const grants = arrayField(responseRecord(value), "grants");
+  if (grants === null) throw new WireShapeError();
+  return grants.map(memoryGrantFromWire);
+}
+
+export async function listAgentMemories(
+  workspaceId: string,
+  agentMemberId: string,
+  limit = 50
+): Promise<MemoryItem[]> {
+  const query = new URLSearchParams({
+    agent: agentMemberId.toLowerCase(),
+    limit: String(limit),
+  });
+  return memoryPageFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/memories?${query.toString()}`
+  ));
+}
+
+export async function searchAgentMemories(
+  workspaceId: string,
+  agentMemberId: string,
+  queryText: string,
+  limit = 20
+): Promise<MemorySearchHit[]> {
+  const query = new URLSearchParams({
+    q: queryText,
+    agent: agentMemberId.toLowerCase(),
+    limit: String(limit),
+  });
+  return memorySearchFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/memories/search?${query.toString()}`
+  ));
+}
+
+export async function invalidateMemory(
+  workspaceId: string,
+  memoryId: string
+): Promise<MemoryItem> {
+  const source = responseRecord(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/memories/${encodeURIComponent(
+      memoryId.toLowerCase()
+    )}/invalidate`,
+    { method: "POST", body: "{}" }
+  ));
+  return memoryItemFromWire(source.memory);
+}
+
+export async function listMemoryVisibilityGrants(
+  workspaceId: string,
+  memoryId: string
+): Promise<MemoryVisibilityGrant[]> {
+  return memoryGrantPageFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/memories/${encodeURIComponent(
+      memoryId.toLowerCase()
+    )}/grants`
+  ));
 }
 
 // ---- 전송 표면이 `routing`을 받는가 (ADR-0134 D1 멘션 tier, MOMO-625) --------
