@@ -226,6 +226,12 @@ async function installRealtimeSocket(page) {
                 },
               };
             }
+            if (command.unsubscribe) {
+              // gate-my-sessions의 원본 목에는 있던 분기가 복사에서 빠졌다.
+              // 응답 없는 unsubscribe는 centrifuge를 disconnect로 몰아
+              // useOffline이 true가 되고 쓰기 버튼이 전부 disabled였다(실측).
+              return { id: command.id, unsubscribe: {} };
+            }
             return { id: command.id };
           });
         queueMicrotask(() => {
@@ -256,6 +262,18 @@ async function installRoutes(context, timing) {
     const url = new URL(request.url());
     const path = url.pathname;
     if (path === "/v1/auth/login") return json(route, session);
+    if (path === "/v1/auth/realtime-token") {
+      // gate-my-sessions에는 있던 목이 복사에서 빠졌다. 토큰이 안 오면 레일이
+      // disconnected로 떨어져 useOffline이 true — 쓰기 버튼 전부 disabled(실측).
+      return json(route, {
+        token: "gate-realtime-token",
+        tokenType: "Bearer",
+        expiresAtMs: Date.now() + 60_000,
+        ttlSeconds: 60,
+        workspaceId,
+        memberId,
+      });
+    }
     if (path === "/v1/auth/refresh") {
       return json(route, {
         accessToken: session.accessToken,
