@@ -74,3 +74,23 @@ cat $R/exit-code 2>/dev/null && tail -20 $R/last-message.md || echo "아직 실�
 - **서버 outbox payload의 UUID는 대문자**(Swift uuidString). 셸 텍스트 비교는 lower() 정규화 — 감사(uuid 타입)만 통과하는 비대칭이 진단 단서였다.
 - **exit code를 파이프로 가리지 말 것** — `| tail`이 검증기 실패를 0으로 만든 재범 1회. red proof는 "빨간 이유"까지 확인(포트 충돌 exit 1을 성립으로 오기했다 정정한 사례).
 - design-review 지적의 반복 형태: **"자기 원칙을 자기가 만진 나머지 분기에 미적용"**(#851) · **"기존 셸과의 통합 지점"**(#850). 패킷에 "새 표면이 앉는 자리의 기존 계약"을 명시하는 것이 라운드를 줄인다.
+
+## 7. main 반영 완료 (2026-07-28, 성재 "main 반영해줘")
+
+**결과: `main` = `track/engine` = `track/uxui` = `b3797eb6`** (engine +34, uxui +19 흡수).
+
+- **머지 장소**: `main` 워크트리에 **병렬 GPT 5.6 · momo-main 세션의 미커밋 편집**(`CURRENT_STATE.md`·`JOURNAL.md`·
+  `2026-07-28-fable-agent-platform-redteam-review.md`)이 있어, 공유 워크트리를 건드리지 않으려고 **detached 임시
+  워크트리에서 머지**한 뒤 push하고 워크트리를 제거했다. 남의 작업물을 stash/커밋하지 않았다 — 그 6개 파일은
+  ff-only pull 이후에도 그대로 남아 있다.
+- **충돌 1건**: `STATUS.md` — 두 트랙이 각자 앞머리에 섹션을 덧붙인 형태라 **양쪽 전부 보존**(engine 블록 → uxui 블록).
+  rerere에 해상이 기록됐다.
+- **머지 지점 원점 검증(전부 green)**: server build + **349 tests** · NotifierWorker build + tests ·
+  WorkHostDaemon build + **32 tests(3 skip)** · web typecheck + **Vitest 909** + production build ·
+  **Playwright 게이트 6종**(wire·shell·csp·huddle·my-sessions·agent-hub) · 마이그레이션 번호 043–049 유일.
+- **미실행 3종**: `gate:resume`·`gate:seq`·`gate:inject`는 실행 스택 + `MOMO_EMAIL/PASSWORD`가 필요한 통합
+  게이트라 자격증명 부재로 즉시 종료(코드 실패 아님). 실스택 검증은 별도 구간에서.
+- **JOURNAL 항목은 의도적으로 보류** — 병렬 세션이 같은 파일을 편집 중이라 덮어쓰기를 피했다. 그 세션의 편집이
+  랜딩된 뒤 이 기록을 `JOURNAL.md`로 옮긴다.
+- **주의(병렬 세션 어긋남)**: 그 세션의 재계획은 #876~#878을 "유일한 active 배치"로 잡고 있으나 해당 배치는 이미
+  랜딩됐고 후속 #882·#887까지 main에 들어왔다. 중복 착수 위험 — 통합 전 정합 확인 필요.
