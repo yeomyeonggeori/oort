@@ -383,6 +383,14 @@ api POST "/v1/workspaces/$WS_ID/work-sessions" \
   "$(jq -cn --arg ch "$CHANNEL_ID" --arg host "$HOST_ID" \
     '{channelId:$ch,hostId:$host,tool:"codex",label:"must reject duplicate host usage"}')"
 expect_status 409 "second unsettled session on one paid host"
+# 409만 보면 슬롯 한도·잔액 부족도 같은 코드를 낸다 — 이 단정이 주장하는 것은
+# "같은 유료 sandbox에 두 번째 미정산 세션이 붙지 않는다"이므로 사유까지 본다.
+# (실측: unique index를 지워도 이 단정이 통과했다. 사유 확인이 없으면 무엇이
+#  막았는지 모른 채 초록이 된다.)
+printf '%s' "$BODY" | grep -q "이미 정산 전 세션이 있습니다" || {
+  echo "[t3-provisioner] FAIL second session rejected for the wrong reason: $BODY" >&2
+  exit 1
+}
 pass "host-level unsettled usage uniqueness rejects double billing"
 sleep 2
 
