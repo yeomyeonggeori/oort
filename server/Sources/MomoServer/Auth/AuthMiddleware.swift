@@ -46,19 +46,19 @@ struct AuthMiddleware: RouterMiddleware {
             guard let workHostAuthenticator else {
                 throw WorkHostAuthenticator.unauthorized()
             }
-            let identity = try await workHostAuthenticator.authenticate(
+            let authenticated = try await workHostAuthenticator.authenticate(
                 authorization: authorization,
                 request: request
             )
             var context = context
             context.principal = AuthPrincipal(
-                memberID: identity.ownerMemberID,
-                workspaceID: identity.workspaceID,
+                memberID: authenticated.identity.ownerMemberID,
+                workspaceID: authenticated.identity.workspaceID,
                 scopes: [],
                 kind: .workHost,
-                tokenID: identity.hostID
+                tokenID: authenticated.identity.hostID
             )
-            return try await next(request, context)
+            return try await next(authenticated.request, context)
         }
 
         guard let header = request.headers[.authorization],

@@ -411,22 +411,25 @@ native_webhook_sample() {
 work_host_signed_sample() {
   local name="$1" method="$2" template="$3" path="$4" expected="$5"
   local host_id="$6" private_key="$7" body="${8:-}"
-  local sent_at payload signature out="$TMP_DIR/last-response.json" verb
+  local sent_at request_id body_hash payload signature out="$TMP_DIR/last-response.json" verb
   sent_at="$($PYTHON_BIN -c 'import time; print(time.time_ns() // 1_000_000)')"
+  request_id="$($PYTHON_BIN -c 'import uuid; print(uuid.uuid4())')"
+  body_hash="$(printf '%s' "$body" | "$OPENSSL_BIN" dgst -sha256 | awk '{print $NF}')"
   verb="$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')"
   payload="$TMP_DIR/work-host-request-$name.txt"
-  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
+  printf 'momo.work_host.request.v2\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
     "$verb" "$path" \
     "$(printf '%s' "$WS" | tr '[:upper:]' '[:lower:]')" \
     "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
-    "$sent_at" >"$payload"
+    "$sent_at" "$body_hash" "$request_id" >"$payload"
   signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$private_key" \
     -in "$payload" | "$OPENSSL_BIN" base64 -A)"
   local -a args=(-sS -o "$out" -w "%{http_code}" -X "$verb"
     -H 'Content-Type: application/json'
     -H "Authorization: MomoHost $host_id"
     -H "X-Momo-Work-Host-Sent-At: $sent_at"
-    -H "X-Momo-Work-Host-Signature: $signature")
+    -H "X-Momo-Work-Host-Signature: $signature"
+    -H "X-Momo-Work-Host-Request-ID: $request_id")
   [ -n "$body" ] && args+=(--data "$body")
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
   RESPONSE_BODY="$(cat "$out")"

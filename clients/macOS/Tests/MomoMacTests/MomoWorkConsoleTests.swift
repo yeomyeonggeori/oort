@@ -103,19 +103,23 @@ final class MomoWorkConsoleTests: XCTestCase {
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let host = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000901")!
         let sentAtMs: Int64 = 1_784_452_800_000
+        let requestID = UUID(uuidString: "00000000-0000-7000-8000-000000000657")!
         let path = "/v1/workspaces/\(workspace.description)/work-tool-profiles"
+        let bodyDigest = MomoWorkHostSigner.sha256Hex(Data())
         let signer = MomoWorkHostSigner.generate()
         let payload = MomoWorkHostSigner.requestPayload(
             method: "GET",
             path: path,
             workspace: workspace,
             host: host,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         )
 
         XCTAssertEqual(
             String(data: payload, encoding: .utf8),
-            "momo.work_host.request.v1\nGET\n\(path)\n\(workspace.description.lowercased())\n\(host.description.lowercased())\n\(sentAtMs)"
+            "momo.work_host.request.v2\nGET\n\(path)\n\(workspace.description.lowercased())\n\(host.description.lowercased())\n\(sentAtMs)\n\(bodyDigest)\n\(requestID.uuidString.lowercased())"
         )
         let publicKeyData = try XCTUnwrap(Data(base64Encoded: signer.publicKeyBase64))
         let signature = try XCTUnwrap(Data(base64Encoded: signer.signatureBase64(for: payload)))
@@ -1282,6 +1286,7 @@ final class MomoWorkConsoleTests: XCTestCase {
             workspace: workspace,
             host: host,
             sentAtMs: 1_784_452_800_000,
+            requestID: UUID(uuidString: "00000000-0000-7000-8000-000000000657")!,
             signature: "host-signature"
         )
         let created = try await backend.createWorkToolProfile(workspace: workspace, draft: draft)
@@ -1320,6 +1325,10 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertEqual(
             requests[1].value(forHTTPHeaderField: "X-Momo-Work-Host-Signature"),
             "host-signature"
+        )
+        XCTAssertEqual(
+            requests[1].value(forHTTPHeaderField: "X-Momo-Work-Host-Request-ID"),
+            "00000000-0000-7000-8000-000000000657"
         )
         for (index, request) in requests.enumerated() {
             if index != 1 {

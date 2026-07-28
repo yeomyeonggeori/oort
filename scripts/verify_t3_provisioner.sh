@@ -183,18 +183,24 @@ api() {
 }
 host_api() {
   local method="$1" path="$2" host_id="$3" data="${4:-}"
-  local sent_at payload signature
+  local sent_at request_id body_hash payload signature
   sent_at="$(now_ms)"
+  request_id="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+  body_hash="$(printf '%s' "$data" | "$OPENSSL_BIN" dgst -sha256 | awk '{print $NF}')"
   payload="$TMP_DIR/work-host-request-$sent_at.txt"
-  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
-    "$method" "$path" "$WS_ID" "$host_id" "$sent_at" >"$payload"
+  printf 'momo.work_host.request.v2\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+    "$method" "$path" \
+    "$(printf '%s' "$WS_ID" | tr '[:upper:]' '[:lower:]')" \
+    "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
+    "$sent_at" "$body_hash" "$request_id" >"$payload"
   signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" \
     -in "$payload" | "$OPENSSL_BIN" base64 -A)"
   local -a args=(-sS -o "$TMP_DIR/response.json" -w '%{http_code}' -X "$method"
     -H 'Content-Type: application/json'
     -H "Authorization: MomoHost $host_id"
     -H "X-Momo-Work-Host-Sent-At: $sent_at"
-    -H "X-Momo-Work-Host-Signature: $signature")
+    -H "X-Momo-Work-Host-Signature: $signature"
+    -H "X-Momo-Work-Host-Request-ID: $request_id")
   [ -n "$data" ] && args+=(--data "$data")
   STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
   BODY="$(<"$TMP_DIR/response.json")"

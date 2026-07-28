@@ -243,9 +243,14 @@ ADR-0125 D1/D2의 `momo-workd`는 사용자 호스트에서 실행되는 outboun
 최초 실행은 로컬에 mode `0600` Ed25519 raw private key를 만들고, 일회성 human bearer로
 `type=workd` host를 등록한 뒤 bearer 파일을 삭제한다. 이후 heartbeat는
 `momo.work_host.heartbeat.v1` 바이트 계약을, pending poll·session 생성/종료·control ack는
-`momo.work_host.request.v1`의 method/path/workspace/host/timestamp 계약을 서명한다. 서버는
-이 서명 주체에 pending poll·session 생성/종료·control ack·terminal attach validation의
-정확히 다섯 REST action만 허용하며 revoke와 owner 활성 상태를 요청마다 재검증한다.
+`momo.work_host.request.v2`의
+`method/path/workspace/host/timestamp/raw-body-SHA-256/request-ID` 계약을 서명한다. request
+ID는 workspace별로 원자적으로 한 번만 소비하고 5분 허용 창보다 긴 10분 동안 보관하며,
+인증 시 만료 행을 정리한다. v1 병행 수용은 본문 교체·재전송 결함을 그대로 열어 두므로
+허용하지 않는다. self-host 배포는 서버와 데몬을 한 릴리스 단위로 갱신하며 버전 불일치는
+401로 fail-closed한다. 서버는 이 서명 주체에 pending poll·work-tool profile 조회·session
+생성/종료·control ack·terminal attach validation의 정확히 여섯 REST action만 허용하며
+revoke와 owner 활성 상태를 요청마다 재검증한다.
 
 데몬은 `GET .../work-hosts/:id/pending-controls`로 자기 앞 `dispatched` 행만 polling한다.
 `spawn`은 기존 session REST를 먼저 기록한 뒤 profile의 host-local PTY 또는 ACP stdio

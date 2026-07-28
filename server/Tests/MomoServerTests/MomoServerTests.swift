@@ -3277,11 +3277,13 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
-    func testWorkHostSignedRequestBindsMethodPathTenantHostAndTimestamp() throws {
+    func testWorkHostSignedRequestV2BindsBodyDigestAndRequestID() throws {
         let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000488")!
+        let requestID = UUID(uuidString: "00000000-0000-7000-8000-000000000657")!
         let sentAtMs: Int64 = 1_784_582_400_000
         let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/pending-controls"
+        let bodyDigest = WorkHostAuthenticator.sha256Hex(Data())
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
         let payload = WorkHostAuthenticator.requestSigningPayload(
@@ -3289,11 +3291,13 @@ final class MomoServerTests: XCTestCase {
             path: path,
             workspaceID: workspaceID,
             hostID: hostID,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         )
         XCTAssertEqual(
             String(decoding: payload, as: UTF8.self),
-            "momo.work_host.request.v1\nGET\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
+            "momo.work_host.request.v2\nGET\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)\n\(bodyDigest)\n\(requestID.uuidString.lowercased())"
         )
         let signature = try privateKey.signature(for: payload).base64EncodedString()
         XCTAssertTrue(WorkHostAuthenticator.verifySignature(
@@ -3303,7 +3307,9 @@ final class MomoServerTests: XCTestCase {
             path: path,
             workspaceID: workspaceID,
             hostID: hostID,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         ))
         XCTAssertFalse(WorkHostAuthenticator.verifySignature(
             publicKey: publicKey,
@@ -3312,7 +3318,9 @@ final class MomoServerTests: XCTestCase {
             path: path,
             workspaceID: workspaceID,
             hostID: hostID,
-            sentAtMs: sentAtMs
+            sentAtMs: sentAtMs,
+            bodyDigest: bodyDigest,
+            requestID: requestID
         ))
         XCTAssertEqual(
             WorkHostAuthenticator.hostID(
@@ -3335,6 +3343,72 @@ final class MomoServerTests: XCTestCase {
             sentAtMs + WorkHostRoutes.heartbeatClockSkewMs + 1,
             now: now
         ))
+    }
+
+    func testWorkHostSignedRequestRejectsBodySubstitutionByName() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000488")!
+        let requestID = UUID(uuidString: "00000000-0000-7000-8000-000000000657")!
+        let sentAtMs: Int64 = 1_784_582_400_000
+        let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-sessions/\(UUID().uuidString.lowercased())"
+        let signedBody = Data(#"{"exitCode":0,"status":"idle"}"#.utf8)
+        let substitutedBody = Data(#"{"status":"ended"}"#.utf8)
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
+        let signature = try privateKey.signature(for: WorkHostAuthenticator.requestSigningPayload(
+            method: "PATCH",
+            path: path,
+            workspaceID: workspaceID,
+            hostID: hostID,
+            sentAtMs: sentAtMs,
+            bodyDigest: WorkHostAuthenticator.sha256Hex(signedBody),
+            requestID: requestID
+        )).base64EncodedString()
+
+        XCTAssertFalse(
+            WorkHostAuthenticator.verifySignature(
+                publicKey: publicKey,
+                signature: signature,
+                method: "PATCH",
+                path: path,
+                workspaceID: workspaceID,
+                hostID: hostID,
+                sentAtMs: sentAtMs,
+                bodyDigest: WorkHostAuthenticator.sha256Hex(substitutedBody),
+                requestID: requestID
+            ),
+            "body substitution must invalidate the named v2 signature assertion"
+        )
+    }
+
+    func testWorkHostRequestReplayMigrationIsTenantScopedAtomicAndPrunable() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/048_work_host_request_replay.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("PRIMARY KEY (workspace_id, request_id)"))
+        XCTAssertTrue(migration.contains("work_host_request_expiry_idx"))
+        XCTAssertTrue(migration.contains("FOREACH t IN ARRAY ARRAY['work_host_request']"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("CREATE POLICY ws_isolation ON %I"))
+        XCTAssertTrue(migration.contains("interval '5 minutes'"))
+
+        let authenticator = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Auth/WorkHostAuthenticator.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(authenticator.contains("ON CONFLICT (workspace_id, request_id) DO NOTHING"))
+        XCTAssertTrue(authenticator.contains("DELETE FROM work_host_request"))
+        XCTAssertTrue(authenticator.contains("interval '10 minutes'"))
+        XCTAssertFalse(authenticator.contains("BYPASSRLS"))
     }
 
     func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {

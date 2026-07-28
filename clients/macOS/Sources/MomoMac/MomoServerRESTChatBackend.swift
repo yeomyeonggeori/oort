@@ -1547,6 +1547,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         workspace requestedWorkspace: WorkspaceID,
         host: WorkHostID,
         sentAtMs: Int64,
+        requestID: UUID,
         signature: String
     ) async throws -> [MomoWorkToolProfile] {
         let context = try requireSessionContext()
@@ -1560,6 +1561,10 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         request.setValue("MomoHost \(host.description.lowercased())", forHTTPHeaderField: "Authorization")
         request.setValue(String(sentAtMs), forHTTPHeaderField: "X-Momo-Work-Host-Sent-At")
         request.setValue(signature, forHTTPHeaderField: "X-Momo-Work-Host-Signature")
+        request.setValue(
+            requestID.uuidString.lowercased(),
+            forHTTPHeaderField: "X-Momo-Work-Host-Request-ID"
+        )
         let response = try await execute(request, response: MomoWorkToolProfilesResponseDTO.self)
         try ensureSessionCurrent(context)
         guard response.workToolProfiles.allSatisfy({

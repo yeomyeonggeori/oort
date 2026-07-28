@@ -34,16 +34,22 @@ final class WorkHostDaemonTests: XCTestCase {
             "momo.work_host.heartbeat.v1\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
         )
         let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-sessions"
+        let body = Data(#"{"status":"idle","exitCode":0}"#.utf8)
+        let bodyDigest = WorkHostSigner.sha256Hex(body)
+        let requestID = UUID(uuidString: "00000000-0000-7000-8000-000000000657")!
         XCTAssertEqual(
             String(decoding: signer.requestPayload(
                 method: "post",
                 path: path,
                 workspaceID: workspaceID,
                 hostID: hostID,
-                sentAtMs: sentAtMs
+                sentAtMs: sentAtMs,
+                bodyDigest: bodyDigest,
+                requestID: requestID
             ), as: UTF8.self),
-            "momo.work_host.request.v1\nPOST\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
+            "momo.work_host.request.v2\nPOST\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)\n\(bodyDigest)\n\(requestID.uuidString.lowercased())"
         )
+        XCTAssertEqual(bodyDigest, "d89791a80dedfe73bf7c3138b057ff6acd66f84679e2632ed8c42281b7453172")
     }
 
     func testConfigRejectsRemotePlaintextAndParsesLocalTemplates() throws {
