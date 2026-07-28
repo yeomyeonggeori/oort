@@ -661,7 +661,17 @@ function AgentProfileSection({
             }}
             rows={7}
             disabled={offline}
-            className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-100"
+            className={cn(
+              "w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+              // Offline dims the SURFACE, not the text. The house rule for a
+              // disabled control is opacity-50, but here that also greys the
+              // cached instructions the offline banner promises you can still
+              // read. Dropping the dimming entirely (design-review 2R High)
+              // made this the only control in the client that looks operable
+              // while disabled. Muting the field's ground and border keeps the
+              // "not now" signal where it belongs and leaves the words legible.
+              "disabled:cursor-not-allowed disabled:border-line disabled:bg-surface-hover disabled:opacity-100"
+            )}
             placeholder="답변 방식, 검증 기준, 작업 경계를 적습니다."
             data-testid="agent-hub-instructions"
           />
