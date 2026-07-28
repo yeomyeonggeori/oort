@@ -1403,9 +1403,10 @@ paths:
       operationId: topupCloudCredit
       summary: Append one idempotent positive workspace credit topup.
       description: >
-        Instance-operator only: a human with platform:read or a verified,
-        allowlisted instance-operator identity. The credit entry, balance
-        trigger, and audit row commit in one transaction.
+        Paid-credit writer only: a human token carrying
+        platform:credits:write. platform:read and verified allowlist identity
+        alone are insufficient. The credit entry, balance trigger, and audit
+        row commit in one transaction.
       security:
         - bearerAuth: []
       parameters:

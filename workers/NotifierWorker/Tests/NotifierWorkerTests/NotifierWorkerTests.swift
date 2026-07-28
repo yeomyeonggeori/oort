@@ -3,6 +3,23 @@ import Crypto
 @testable import NotifierWorker
 
 final class NotifierWorkerTests: XCTestCase {
+    func testResumeReconcilerTreats404And410AsTerminalMissingSandbox() {
+        for status in [404, 410] {
+            XCTAssertTrue(NotifierService.isTerminalMissingResume(
+                state: "resuming", status: status
+            ))
+            XCTAssertTrue(NotifierService.acceptsLifecycleResponse(
+                state: "resuming", status: status
+            ))
+        }
+        XCTAssertFalse(NotifierService.isTerminalMissingResume(
+            state: "pausing", status: 404
+        ))
+        XCTAssertFalse(NotifierService.acceptsLifecycleResponse(
+            state: "resuming", status: 500
+        ))
+    }
+
     func testRelaySignerProducesVerifiableEd25519Signature() throws {
         let privateKey = Curve25519.Signing.PrivateKey()
         let signer = try PushRelayRequestSigner(rawSeed: privateKey.rawRepresentation)

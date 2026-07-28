@@ -14,12 +14,14 @@ struct CloudCreditTopupResponse: ResponseEncodable, Encodable {
     let balanceMicroUsd: Int64
 }
 
-/// Instance-operator-only paid-credit mutation surface.
+/// Paid-credit mutation surface.
 ///
-/// Authorization is intentionally identical to the instance-global provider
-/// link boundary: platform:read or a verified allowlisted instance operator.
+/// Cross-tenant reads and paid execution authority are deliberately separate:
+/// `platform:read` must never be sufficient to increase a workspace balance.
 /// The append-only credit row, balance trigger, and audit row commit together.
 struct CloudCreditRoutes: Sendable {
+    static let writeScope = "platform:credits:write"
+
     let db: Database
     let platformAdminEmails: [String]
 
@@ -29,7 +31,7 @@ struct CloudCreditRoutes: Sendable {
 
     @Sendable
     func topup(_ request: Request, context: AppRequestContext) async throws -> Response {
-        let principal = try await ProviderLinkRoutes.requireOperator(
+        let principal = try await Self.requireCreditWriter(
             db: db,
             platformAdminEmails: platformAdminEmails,
             context: context
@@ -127,5 +129,67 @@ struct CloudCreditRoutes: Sendable {
             idempotencyRef: refID.uuidString.lowercased(),
             balanceMicroUsd: balance
         ).response(from: request, context: context)
+    }
+
+    static func isCreditWriter(kind: AuthPrincipalKind, scopes: [String]) -> Bool {
+        kind == .human && scopes.contains(writeScope)
+    }
+
+    /// Two authorized paths, and `platform:read` is neither.
+    ///
+    /// The scope path is for platform tokens. The listed-instance-operator path
+    /// (workspace admin + verified allowlisted email, both checked in the DB
+    /// under RLS) is how a self-hosted operator does this at all — a self-host
+    /// instance may never mint a platform token, and dropping that path would
+    /// leave its T3 balance unreachable except by touching the database.
+    ///
+    /// What the security fix removed is `platform:read` SUFFICIENCY: a
+    /// cross-tenant READ credential must never move money (design-review /
+    /// adversarial-review #882). The allowlisted human operator is a different,
+    /// deliberate authorization, not a bypass.
+    static func requireCreditWriter(
+        db: Database,
+        platformAdminEmails: [String],
+        context: AppRequestContext
+    ) async throws -> AuthPrincipal {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .human else {
+            throw HTTPError(.forbidden, message: "human operator required")
+        }
+        if principal.scopes.contains(writeScope) { return principal }
+        let (role, verifiedEmail) = try await db.withTenantConnection(
+            workspaceID: principal.workspaceID
+        ) { conn in
+            let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: principal.workspaceID,
+                memberID: principal.memberID
+            )
+            var email: String?
+            let rows = try await conn.query(
+                """
+                SELECT email FROM human
+                WHERE member_id = \(principal.memberID)
+                  AND workspace_id = \(principal.workspaceID)
+                  AND email_verified = true
+                """,
+                logger: db.logger
+            )
+            for try await row in rows {
+                email = try row.decode(String.self)
+            }
+            return (role, email)
+        }
+        guard role?.isAdmin ?? false,
+              let verifiedEmail,
+              platformAdminEmails.contains(verifiedEmail.lowercased())
+        else {
+            throw HTTPError(
+                .forbidden,
+                message: "\(writeScope) scope or listed instance operator required"
+            )
+        }
+        return principal
     }
 }

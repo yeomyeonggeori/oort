@@ -123,15 +123,124 @@ extension NotifierService {
             idempotencyKey: operationID.uuidString.lowercased(),
             apiKey: apiKey
         ).status.code
-        let accepted = switch intent.state {
-        case "pausing": status == 204
-        case "resuming": status == 200 || status == 201
-        case "destroy_pending": status == 204 || status == 404 || status == 410
-        default: false
-        }
+        let missingSandbox = Self.isTerminalMissingResume(
+            state: intent.state, status: Int(status)
+        )
+        let accepted = Self.acceptsLifecycleResponse(
+            state: intent.state, status: Int(status)
+        )
         guard accepted else { throw CloudReconcileError.upstream(Int(status)) }
 
         try await pg.withTransaction(logger: logger) { conn in
+            // The provider call intentionally happens outside PostgreSQL. Lock
+            // and revalidate the durable intent before touching usage/session
+            // state: a terminal sweep may have replaced it while E2B was in
+            // flight.
+            let lockedRows = try await conn.query(
+                """
+                SELECT state, lifecycle_operation_id, host_id
+                  FROM work_cloud_host
+                 WHERE id = \(intent.id)
+                   AND workspace_id = \(intent.workspaceID)
+                 FOR UPDATE
+                """,
+                logger: logger
+            ).collect()
+            guard let locked = lockedRows.first else {
+                throw CloudReconcileError.staleIntent
+            }
+            let (lockedState, lockedOperationID, lockedHostID) =
+                try locked.decode((String, UUID?, UUID?).self)
+            guard lockedState == intent.state,
+                  lockedOperationID == operationID,
+                  lockedHostID == hostID
+            else {
+                throw CloudReconcileError.staleIntent
+            }
+
+            if missingSandbox {
+                let usageRows = try await conn.query(
+                    """
+                    SELECT u.session_id, ws.member_id
+                      FROM work_host_usage u
+                      JOIN work_session ws
+                        ON ws.workspace_id = u.workspace_id
+                       AND ws.id = u.session_id
+                     WHERE u.workspace_id = \(intent.workspaceID)
+                       AND u.host_id = \(hostID)
+                       AND u.settled_at IS NULL
+                     FOR UPDATE OF u, ws
+                    """,
+                    logger: logger
+                ).collect()
+                var expectedFinalState = intent.state
+                var terminalSession: (id: UUID, memberID: UUID)?
+                if let usageRow = usageRows.first {
+                    let (sessionID, memberID) =
+                        try usageRow.decode((UUID, UUID).self)
+                    terminalSession = (sessionID, memberID)
+                    _ = try await conn.query(
+                        """
+                        SELECT settle_t3_work_session(
+                          \(intent.workspaceID), \(sessionID)
+                        )
+                        """,
+                        logger: logger
+                    ).collect()
+                    expectedFinalState = "destroy_pending"
+                }
+                let terminalRows = try await conn.query(
+                    """
+                    UPDATE work_cloud_host
+                       SET state = 'destroyed', updated_at = clock_timestamp()
+                     WHERE id = \(intent.id)
+                       AND workspace_id = \(intent.workspaceID)
+                       AND lifecycle_operation_id = \(operationID)
+                       AND state = \(expectedFinalState)
+                    RETURNING id
+                    """,
+                    logger: logger
+                ).collect()
+                guard terminalRows.count == 1 else {
+                    throw CloudReconcileError.staleIntent
+                }
+                _ = try await conn.query(
+                    """
+                    UPDATE work_host
+                       SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+                           last_seen_at = clock_timestamp() - interval '100 years'
+                     WHERE workspace_id = \(intent.workspaceID)
+                       AND id = \(hostID)
+                    """,
+                    logger: logger
+                )
+                if let terminalSession {
+                    _ = try await conn.query(
+                        """
+                        INSERT INTO audit_log
+                          (workspace_id, actor_member_id, subject_member_id,
+                           action, target_type, target_id, via_token_id, detail)
+                        VALUES
+                          (\(intent.workspaceID), \(terminalSession.memberID),
+                           \(terminalSession.memberID),
+                           'work.cloud.resume_failed', 'work_host', \(hostID), NULL,
+                           jsonb_build_object(
+                             'schema', 'momo.work_cloud.resume_failed.v1',
+                             'host_id', lower(\(hostID)::text),
+                             'session_id', lower(\(terminalSession.id)::text),
+                             'provider', 'e2b',
+                             'reason', 'sandbox_missing',
+                             'upstream_status', \(Int(status)),
+                             'orphan_transition', 'host_offline_sweep',
+                             'source', 'lifecycle_reconciler'
+                           ))
+                        """,
+                        logger: logger
+                    )
+                }
+                return
+            }
+
             if intent.state == "pausing" || intent.state == "resuming" {
                 let expectedInterval = intent.state == "pausing" ? "active" : "paused"
                 let nextInterval = intent.state == "pausing" ? "paused" : "active"
@@ -172,7 +281,7 @@ extension NotifierService {
                     logger: logger
                 )
             }
-            _ = try await conn.query(
+            let updatedRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
                    SET state = \(intent.state == "pausing" ? "paused" :
@@ -181,9 +290,24 @@ extension NotifierService {
                  WHERE id = \(intent.id)
                    AND lifecycle_operation_id = \(operationID)
                    AND state = \(intent.state)
+                RETURNING id
                 """,
                 logger: logger
-            )
+            ).collect()
+            guard updatedRows.count == 1 else {
+                throw CloudReconcileError.staleIntent
+            }
+            if intent.state == "destroy_pending" {
+                _ = try await conn.query(
+                    """
+                    UPDATE work_host
+                       SET revoked_at = COALESCE(revoked_at, clock_timestamp())
+                     WHERE workspace_id = \(intent.workspaceID)
+                       AND id = \(hostID)
+                    """,
+                    logger: logger
+                )
+            }
         }
     }
 
@@ -291,9 +415,28 @@ extension NotifierService {
         }
         return value
     }
+
+    static func isTerminalMissingResume(state: String, status: Int) -> Bool {
+        state == "resuming" && (status == 404 || status == 410)
+    }
+
+    static func acceptsLifecycleResponse(state: String, status: Int) -> Bool {
+        switch state {
+        case "pausing":
+            return status == 204
+        case "resuming":
+            return status == 200 || status == 201
+                || isTerminalMissingResume(state: state, status: status)
+        case "destroy_pending":
+            return status == 204 || status == 404 || status == 410
+        default:
+            return false
+        }
+    }
 }
 
 private enum CloudReconcileError: Error {
     case upstream(Int)
     case invalidResponse
+    case staleIntent
 }

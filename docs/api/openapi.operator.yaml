@@ -12,8 +12,9 @@ openapi: 3.0.3
 # This companion spec documents the operator surface so consumers such as the
 # P-2 provider-config UXUI have a precise, machine-readable contract. All
 # operations require a human App JWT that is EITHER a platform operator (the
-# `platform:read` scope, issued at login for a PLATFORM_ADMIN_EMAILS address
-# presenting PLATFORM_ADMIN_LOGIN_SECRET) OR a workspace owner/admin (MOMO-576 /
+# `platform:read` scope (and the separate `platform:credits:write` scope),
+# issued at login for a PLATFORM_ADMIN_EMAILS address presenting
+# PLATFORM_ADMIN_LOGIN_SECRET) OR a workspace owner/admin (MOMO-576 /
 # ADR-0004 증보1 D3 — provider_link is instance-global; owner/admin is opened for
 # the internal single-workspace build and re-tightened before multi-WS exposure).
 #

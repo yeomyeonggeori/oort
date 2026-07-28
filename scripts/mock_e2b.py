@@ -21,6 +21,9 @@ _REQUESTS: list[dict[str, Any]] = []
 _STATE: dict[str, str] = {}
 _CREATE_KEYS: dict[str, str] = {}
 _MISSING_ON_RESUME = False
+_RESUME_MODE = ""
+_RESUME_STAGE = 0
+_RESUME_RELEASE = threading.Event()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -42,11 +45,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self) -> None:
-        global _MISSING_ON_RESUME
+        global _MISSING_ON_RESUME, _RESUME_MODE, _RESUME_STAGE
         if self.path == "/controls/resume-missing":
             with _LOCK:
                 _MISSING_ON_RESUME = True
             self._json(200, {"resumeMissing": True})
+            return
+        if self.path == "/controls/resume-drop-then-missing":
+            with _LOCK:
+                _RESUME_MODE = "drop_then_missing"
+                _RESUME_STAGE = 0
+            self._json(200, {"resumeMode": _RESUME_MODE})
+            return
+        if self.path == "/controls/resume-drop-then-block":
+            with _LOCK:
+                _RESUME_MODE = "drop_then_block"
+                _RESUME_STAGE = 0
+                _RESUME_RELEASE.clear()
+            self._json(200, {"resumeMode": _RESUME_MODE})
+            return
+        if self.path == "/controls/release-resume":
+            _RESUME_RELEASE.set()
+            self._json(200, {"released": True})
             return
         if self.path == "/sandboxes":
             body = self._body()
@@ -86,8 +106,26 @@ class Handler(BaseHTTPRequestHandler):
             with _LOCK:
                 _REQUESTS.append({"method": "POST", "path": self.path})
                 missing = _MISSING_ON_RESUME
+                mode = _RESUME_MODE
+                stage = _RESUME_STAGE
+                if mode:
+                    _RESUME_STAGE += 1
                 if missing:
                     _STATE["momo647sandbox"] = "missing"
+                if mode == "drop_then_missing":
+                    _STATE["momo647sandbox"] = "missing"
+            if mode in {"drop_then_missing", "drop_then_block"} and stage == 0:
+                # Simulate an ambiguous REST failure after the provider has
+                # observed the idempotent request: the API keeps `resuming`.
+                self.close_connection = True
+                self.connection.shutdown(2)
+                self.connection.close()
+                return
+            if mode == "drop_then_missing":
+                self._json(404, {"error": "sandbox not found"})
+                return
+            if mode == "drop_then_block":
+                _RESUME_RELEASE.wait(timeout=30)
             if missing:
                 self._json(404, {"error": "sandbox not found"})
                 return

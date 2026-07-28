@@ -54,44 +54,6 @@ grep -q "human cloud resume intent must complete" \
   server/Sources/MomoServer/Routes/WorkSessionRoutes.swift \
   || fail "named gate host-report-is-confirmation"
 
-# One named, deterministic red proof per repaired boundary. Each mode removes
-# exactly the contract marker its green assertion above consumes and must exit
-# non-zero with the boundary name (no timing/row-count ambiguity).
-case "${T3_GATE_PROVE_RED:-}" in
-  terminal-settlement)
-    sed '/CREATE FUNCTION settle_t3_work_session/d' "$LIFECYCLE_MIGRATION" |
-      grep -q "CREATE FUNCTION settle_t3_work_session" ||
-      fail "red proof terminal-settlement-primitive"
-    ;;
-  resume-intent)
-    sed '/human cloud resume intent must complete/d' \
-      server/Sources/MomoServer/Routes/WorkSessionRoutes.swift |
-      grep -q "human cloud resume intent must complete" ||
-      fail "red proof host-report-is-confirmation"
-    ;;
-  host-uniqueness)
-    sed '/work_host_usage_one_unsettled_per_host_idx/d' "$LIFECYCLE_MIGRATION" |
-      grep -q "work_host_usage_one_unsettled_per_host_idx" ||
-      fail "red proof one-unsettled-usage-per-host"
-    ;;
-  provider-reconcile)
-    sed "/state IN ('pausing', 'resuming', 'destroy_pending')/d" \
-      workers/NotifierWorker/Sources/NotifierWorker/CloudLifecycleReconciler.swift |
-      grep -q "state IN ('pausing', 'resuming', 'destroy_pending')" ||
-      fail "red proof provider-intent-reconciler"
-    ;;
-  create-idempotency)
-    sed '/Idempotency-Key/d' server/Sources/MomoServer/Cloud/E2BProvisioner.swift |
-      grep -q "Idempotency-Key" ||
-      fail "red proof crash-safe-provider-create"
-    ;;
-  operator-topup)
-    sed '\\#/v1/admin/workspaces/:ws/credits/topups#d' \
-      server/Sources/MomoServer/Routes/CloudCreditRoutes.swift |
-      grep -q "/v1/admin/workspaces/:ws/credits/topups" ||
-      fail "red proof operator-topup-rest"
-    ;;
-esac
 if git diff --name-only HEAD -- schema_v0.sql | grep -q .; then
   fail "schema_v0.sql must not change"
 fi
@@ -138,6 +100,7 @@ compose() {
     MOMO_PUBLIC_BASE_URL="https://momo.invalid" \
     MOMO_T3_RATE_MICRO_USD_PER_SECOND=25 \
     PLATFORM_ADMIN_EMAILS="$OWNER_EMAIL" \
+    PLATFORM_ADMIN_LOGIN_SECRET="local-gate-admin-secret" \
     MOMO_HOST_OFFLINE_GRACE_S=1 NOTIFIER_POLL_INTERVAL_MS=100 \
     docker compose --env-file "$SAFE_ENV_FILE" -p "$PROJECT" -f "$COMPOSE_FILE" \
       --profile push "$@"
@@ -237,12 +200,53 @@ SQL
 TOKEN="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   -H 'Content-Type: application/json' \
   --data "$(jq -cn --arg e "$OWNER_EMAIL" --arg p "$OWNER_PASSWORD" --arg w "$WS_ID" \
-    '{email:$e,password:$p,workspace:$w}')" | jq -er '.accessToken')"
+    '{email:$e,password:$p,workspace:$w,
+      platformAdminSecret:"local-gate-admin-secret"}')" | jq -er '.accessToken')"
 OWNER_TOKEN="$TOKEN"
 NONOP_TOKEN="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   -H 'Content-Type: application/json' \
   --data "$(jq -cn --arg e "$NONOP_EMAIL" --arg p "$NONOP_PASSWORD" --arg w "$WS_ID" \
     '{email:$e,password:$p,workspace:$w}')" | jq -er '.accessToken')"
+# 읽기 스코프의 불충분함을 증명하려면 토큰 주인이 **인스턴스 운영자가 아니어야**
+# 한다. OWNER_ID로 만들면 그 사람은 허용목록 운영자이기도 해서, 통과/거부가
+# 스코프 때문인지 신원 때문인지 갈리지 않는다(실측: 운영자 경로 복원 후 이
+# 단정이 200으로 뒤집혔다). 비운영자 멤버로 발급한다.
+READ_ONLY_TOKEN="$(python3 - "$NONOP_ID" "$WS_ID" <<'PY'
+import base64, hashlib, hmac, json, sys, time, uuid
+def enc(value):
+    raw = json.dumps(value, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+header = enc({"alg": "HS256", "kid": "app", "typ": "JWT"})
+now = int(time.time())
+payload = enc({
+    "sub": sys.argv[1].lower(), "exp": now + 900, "iat": now,
+    "jti": str(uuid.uuid4()), "ws": sys.argv[2].lower(),
+    "scopes": ["platform:read"], "typ": "access",
+})
+body = f"{header}.{payload}"
+signature = base64.urlsafe_b64encode(
+    hmac.new(b"change-me-jwt-hmac", body.encode(), hashlib.sha256).digest()
+).rstrip(b"=").decode()
+print(f"{body}.{signature}")
+PY
+)"
+if [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "topup-scope" ]; then
+  # Behavioral red proof: present an actual credit-writer token to the
+  # read-only denial assertion. The named REST assertion must turn red.
+  READ_ONLY_TOKEN="$OWNER_TOKEN"
+fi
+run_sql <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+INSERT INTO token
+  (workspace_id, kind, actor_member_id, token_hash, scopes, label, expires_at)
+VALUES
+  ('$WS_ID', 'session', '$OWNER_ID', digest('$READ_ONLY_TOKEN', 'sha256'),
+   ARRAY['platform:read'], 't3-read-only-proof',
+   clock_timestamp() + interval '15 minutes')
+ON CONFLICT (token_hash) DO NOTHING;
+COMMIT;
+SQL
 
 STATUS=""
 BODY=""
@@ -302,6 +306,11 @@ expect_status 409 "missing credit ledger"
 printf '%s' "$BODY" | jq -er '.error.message | contains("크레딧")' >/dev/null
 pass "missing balance rejects before E2B create"
 
+TOKEN="$READ_ONLY_TOKEN"
+api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
+  "$(jq -cn --arg ref "$TOPUP_REF" \
+    '{amountMicroUsd:1000000,idempotencyRef:$ref}')"
+expect_status 403 "read-scope-topup-denial"
 TOKEN="$NONOP_TOKEN"
 api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
   "$(jq -cn --arg ref "$TOPUP_REF" \
@@ -343,13 +352,48 @@ UPDATE work_pool SET max_active=2, per_member_soft_limit=2 WHERE workspace_id='$
 COMMIT;
 SQL
 
-api POST "$CLOUD_PATH" "$CREATE_BODY"
-expect_status 202 "mock E2B provision"
-PROVISION_ID="$(printf '%s' "$BODY" | jq -er '.cloudHost.provisionId')"
+CREATE_PIDS=()
+for attempt in 1 2; do
+  attempt_body="$CREATE_BODY"
+  if [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "concurrent-create" ] \
+    && [ "$attempt" = "2" ]; then
+    attempt_body="$(jq -cn --arg ref "$(python3 -c 'import uuid; print(uuid.uuid4())')" \
+      '{displayName:"T3 gate",confirmPaidCloud:true,idempotencyRef:$ref}')"
+  fi
+  (
+    curl -sS -o "$TMP_DIR/concurrent-$attempt.json" -w '%{http_code}' \
+      -X POST "$BASE_URL$CLOUD_PATH" \
+      -H 'Content-Type: application/json' \
+      -H "Authorization: Bearer $TOKEN" \
+      --data "$attempt_body" >"$TMP_DIR/concurrent-$attempt.status"
+  ) &
+  CREATE_PIDS+=("$!")
+done
+for create_pid in "${CREATE_PIDS[@]}"; do
+  wait "$create_pid"
+done
+[ "$(<"$TMP_DIR/concurrent-1.status")" = "202" ] \
+  && [ "$(<"$TMP_DIR/concurrent-2.status")" = "202" ] || {
+  cat "$TMP_DIR"/concurrent-*.json >&2
+  fail "concurrent-create-idempotency"
+}
+PROVISION_ID="$(jq -er '.cloudHost.provisionId' "$TMP_DIR/concurrent-1.json")"
+[ "$(jq -er '.cloudHost.provisionId' "$TMP_DIR/concurrent-2.json" \
+  | tr '[:upper:]' '[:lower:]')" = \
+  "$(printf '%s' "$PROVISION_ID" | tr '[:upper:]' '[:lower:]')" ] \
+  || fail "concurrent-create-idempotency"
+[ "$(sql_value <<SQL
+SELECT count(*) FROM work_cloud_host
+ WHERE workspace_id='$WS_ID' AND create_idempotency_key='$CREATE_REF';
+SQL
+)" = "1" ] || fail "concurrent-create-idempotency"
+CREATE_CALLS="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/sandboxes")] | length')"
+pass "concurrent retries converged on one provision row and sandbox identity"
 api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 202 "lost-create-response idempotent retry"
 [ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq '[.requests[] | select(.path == "/sandboxes")] | length')" = "1" ] \
+  | jq '[.requests[] | select(.path == "/sandboxes")] | length')" = "$CREATE_CALLS" ] \
   || fail "create response retry duplicated paid sandbox"
 BOOTSTRAP_TOKEN="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
   | jq -er '.requests[0].body.envVars.MOMO_WORKD_REGISTRATION_TOKEN')"
@@ -432,16 +476,78 @@ sleep 2
 host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"idle","exitCode":0}'
 expect_status 200 "second idle->pause REST transition"
 sleep 2
-curl -fsS -X POST "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-missing" \
-  >/dev/null
+CONNECT_CALLS_BEFORE="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')"
+# reconciler-cas가 빠져 있어 이 블록 전체를 건너뛰었고, 안쪽 fail 단정에 닿지
+# 못해 red proof가 초록이었다(실측 exit 0). 두 red 모드 모두 이 경로를 지나야
+# 한다 — 레이스를 만드는 준비가 여기 있기 때문이다.
+if [ "${T3_GATE_RECONCILER_RACE:-0}" = "1" ] \
+  || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ] \
+  || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "reconciler-cas" ]; then
+  curl -fsS -X POST \
+    "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-drop-then-block" >/dev/null
+else
+  curl -fsS -X POST \
+    "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-drop-then-missing" >/dev/null
+fi
 api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/resume"
-expect_status 410 "missing sandbox resume"
+expect_status 503 "ambiguous resume response loss"
 compose up -d notifier
 
 deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
-ORPHAN_RESULT=""
-while [ "$(date -u +%s)" -lt "$deadline" ]; do
-  ORPHAN_RESULT="$(sql_value <<SQL
+if [ "${T3_GATE_RECONCILER_RACE:-0}" = "1" ] \
+  || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ]; then
+  while [ "$(date -u +%s)" -lt "$deadline" ]; do
+    CONNECT_CALLS="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+      | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')"
+    [ "$CONNECT_CALLS" -ge "$((CONNECT_CALLS_BEFORE + 2))" ] && break
+    sleep 1
+  done
+  [ "${CONNECT_CALLS:-0}" -ge "$((CONNECT_CALLS_BEFORE + 2))" ] \
+    || fail "reconciler-race-provider-call-not-observed"
+  if [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ] \
+    || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "reconciler-cas" ]; then
+    curl -fsS -X POST \
+      "http://127.0.0.1:$MOCK_E2B_PORT/controls/release-resume" >/dev/null
+    sleep 1
+    RED_STATE="$(sql_value <<SQL
+SELECT status || ':' || ch.state
+  FROM work_session ws
+  JOIN work_cloud_host ch ON ch.host_id=ws.host_id
+ WHERE ws.id='$SESSION_ID';
+SQL
+)"
+    if [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ]; then
+      fail "red proof resume-404-terminal-settlement observed $RED_STATE"
+    fi
+    fail "red proof reconciler-cas-dependent-state-rollback observed $RED_STATE"
+  fi
+  TOKEN="$OWNER_TOKEN"
+  api PATCH "$SESSION_PATH" '{"status":"ended","exitCode":0}'
+  expect_status 200 "actual REST terminal transition during reconcile"
+  curl -fsS -X POST \
+    "http://127.0.0.1:$MOCK_E2B_PORT/controls/release-resume" >/dev/null
+  RACE_RESULT=""
+  while [ "$(date -u +%s)" -lt "$deadline" ]; do
+    RACE_RESULT="$(sql_value <<SQL
+SELECT
+  (SELECT status FROM work_session WHERE id='$SESSION_ID') || ':' ||
+  (SELECT count(*) FROM work_host_usage
+    WHERE session_id='$SESSION_ID' AND settled_at IS NOT NULL) || ':' ||
+  (SELECT count(*) FROM work_cloud_host
+    WHERE host_id='$HOST_ID' AND state <> 'running');
+SQL
+)"
+    [ "$RACE_RESULT" = "ended:1:1" ] && break
+    sleep 1
+  done
+  [ "$RACE_RESULT" = "ended:1:1" ] \
+    || fail "reconciler-cas-dependent-state-rollback: $RACE_RESULT"
+  pass "stale reconciler result cannot revive terminal dependent state"
+else
+  ORPHAN_RESULT=""
+  while [ "$(date -u +%s)" -lt "$deadline" ]; do
+    ORPHAN_RESULT="$(sql_value <<SQL
 SELECT
   (SELECT count(*) FROM work_session
     WHERE id='$SESSION_ID' AND status='orphaned') || ':' ||
@@ -463,14 +569,15 @@ SELECT
       AND lower(props->>'session_id')=lower('$SESSION_ID'));
 SQL
 )"
-  [ "$ORPHAN_RESULT" = "1:1:1:1:1:1:1" ] && break
-  sleep 1
-done
-[ "$ORPHAN_RESULT" = "1:1:1:1:1:1:1" ] || {
-  compose logs --tail 160 api notifier >&2 || true
-  fail "resume missing did not reach named orphaned sweep path: $ORPHAN_RESULT"
-}
-pass "missing sandbox -> destroyed/revoked -> existing orphaned sweep"
+    [ "$ORPHAN_RESULT" = "1:1:1:1:1:1:1" ] && break
+    sleep 1
+  done
+  [ "$ORPHAN_RESULT" = "1:1:1:1:1:1:1" ] || {
+    compose logs --tail 160 api notifier >&2 || true
+    fail "resume-404-terminal-settlement: $ORPHAN_RESULT"
+  }
+  pass "ambiguous REST loss -> reconciler 404 -> terminal settlement and orphan sweep"
+fi
 
 INTERVALS="$(sql_value <<SQL
 SELECT count(*) || ':' ||
@@ -550,7 +657,9 @@ SQL
     || fail "red proof: reverted pause accounting bills $REVERTED_TOTAL vs active-only $LEDGER_ACTIVE"
 fi
 
-curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq -e '.states.momo647sandbox == "missing"' >/dev/null
+if [ "${T3_GATE_RECONCILER_RACE:-0}" != "1" ]; then
+  curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+    | jq -e '.states.momo647sandbox == "missing"' >/dev/null
+fi
 
 pass "idle pause/resume, orphan fallback, ledger consistency, credit debit, RLS isolation"

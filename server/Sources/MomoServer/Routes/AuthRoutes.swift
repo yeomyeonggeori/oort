@@ -97,6 +97,7 @@ struct AuthRoutes: Sendable {
             platformAdminLoginSecret: platformAdminLoginSecret
         ) {
             scopes.append("platform:read")
+            scopes.append(CloudCreditRoutes.writeScope)
         }
         let access = try await jwt.signAccess(
             memberID: memberID, workspaceID: workspaceID, scopes: scopes)
