@@ -7,6 +7,7 @@ import PostgresNIO
 ///
 ///   POST /v1/workspaces/{ws}/channels/{ch}/agent-runs
 ///   GET  /v1/workspaces/{ws}/channels/{ch}/agent-runs?type=work
+///   GET  /v1/workspaces/{ws}/agents/{agent}/runs
 ///   GET  /v1/workspaces/{ws}/agent-runs/{run}
 ///   POST /v1/workspaces/{ws}/agent-runs/{run}/cancel
 ///
@@ -19,6 +20,7 @@ struct AgentRunRoutes: Sendable {
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/channels/:ch/agent-runs", use: create)
         group.get("/v1/workspaces/:ws/channels/:ch/agent-runs", use: list)
+        group.get("/v1/workspaces/:ws/agents/:agent/runs", use: listByAgent)
         group.get("/v1/workspaces/:ws/agent-runs/:run", use: detail)
         group.post("/v1/workspaces/:ws/agent-runs/:run/cancel", use: cancel)
     }
@@ -293,6 +295,100 @@ struct AgentRunRoutes: Sendable {
         return try AgentRunPageDTO(runs: result.runs).response(from: request, context: context)
     }
 
+    /// Workspace-global history for one agent, reduced to the fields needed by
+    /// an agent hub. The caller still sees only runs in channels where they have
+    /// active membership. The query deliberately uses the summary projection,
+    /// so input/output/error and gateway-adjacent payloads never cross this read
+    /// boundary (MOMO-653).
+    @Sendable
+    func listByAgent(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try Self.requireHumanPrincipal(context)
+        let workspaceID = try Self.workspaceScope(context, principal: principal)
+        let agentMemberID = try Self.agentID(context)
+        let query = request.uri.queryParameters
+        let cursor = try Self.validatedCursor(query["cursor"].map(String.init))
+        let limit = Self.validatedLimit(query["limit"].map(String.init))
+
+        let page: AgentRunSummaryPageDTO = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            _ = try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal
+            )
+
+            let agentRows = try await conn.query(
+                """
+                SELECT 1
+                  FROM member m
+                 WHERE m.workspace_id = \(workspaceID)
+                   AND m.id = \(agentMemberID)
+                   AND m.kind = 'agent'
+                   AND m.status = 'active'
+                   AND m.deleted_at IS NULL
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            guard !agentRows.isEmpty else {
+                throw HTTPError(.notFound, message: "active agent not found")
+            }
+
+            if let cursor {
+                let cursorRows = try await conn.query(
+                    """
+                    SELECT 1
+                      FROM agent_run r
+                      JOIN membership visible
+                        ON visible.workspace_id = r.workspace_id
+                       AND visible.channel_id = r.channel_id
+                       AND visible.member_id = \(principal.memberID)
+                       AND visible.left_at IS NULL
+                     WHERE r.workspace_id = \(workspaceID)
+                       AND r.agent_member_id = \(agentMemberID)
+                       AND r.id = \(cursor)
+                     LIMIT 1
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard !cursorRows.isEmpty else {
+                    throw HTTPError(.badRequest, message: "agent run cursor was not found")
+                }
+            }
+
+            let rows = try await conn.query(
+                """
+                SELECT \(unescaped: Self.runSummaryProjectionSQL(alias: "r"))
+                  FROM agent_run r
+                  JOIN membership visible
+                    ON visible.workspace_id = r.workspace_id
+                   AND visible.channel_id = r.channel_id
+                   AND visible.member_id = \(principal.memberID)
+                   AND visible.left_at IS NULL
+                 WHERE r.workspace_id = \(workspaceID)
+                   AND r.agent_member_id = \(agentMemberID)
+                   AND (\(cursor)::uuid IS NULL OR (r.created_at, r.id) < (
+                         SELECT cursor_row.created_at, cursor_row.id
+                           FROM agent_run cursor_row
+                          WHERE cursor_row.workspace_id = \(workspaceID)
+                            AND cursor_row.agent_member_id = \(agentMemberID)
+                            AND cursor_row.id = \(cursor)::uuid
+                       ))
+                 ORDER BY r.created_at DESC, r.id DESC
+                 LIMIT \(limit + 1)
+                """,
+                logger: db.logger
+            ).collect()
+            let decoded = try rows.map(Self.decodeRunSummary)
+            let hasMore = decoded.count > limit
+            let runs = Array(decoded.prefix(limit))
+            return AgentRunSummaryPageDTO(
+                runs: runs,
+                nextCursor: hasMore ? runs.last?.id : nil
+            )
+        }
+        return try page.response(from: request, context: context)
+    }
+
     @Sendable
     func detail(_ request: Request, context: AppRequestContext) async throws -> Response {
         let principal = try context.requirePrincipal()
@@ -312,10 +408,9 @@ struct AgentRunRoutes: Sendable {
                                 AND ms.member_id = \(principal.memberID)
                                 AND ms.left_at IS NULL
                            ) AS has_channel_membership
-                      FROM agent_run r
+                     FROM agent_run r
                      WHERE r.id = \(runID)
                        AND r.workspace_id = \(workspaceID)
-                       AND r.input->>'type' = 'work'
                      LIMIT 1
                     """,
                     logger: db.logger
@@ -323,9 +418,9 @@ struct AgentRunRoutes: Sendable {
                 guard let first = rows.first else { return nil }
                 let (json, hasMembership) = try first.decode((String, Bool).self)
                 return (try Self.decodeRun(json), hasMembership)
-            }
+        }
         guard let row else {
-            throw HTTPError(.notFound, message: "work run not found")
+            throw HTTPError(.notFound, message: "agent run not found")
         }
         guard Self.canReadRun(
             principalKind: principal.kind,
@@ -520,6 +615,14 @@ struct AgentRunRoutes: Sendable {
         min(max(raw.flatMap(Int.init) ?? 50, 1), 200)
     }
 
+    static func validatedCursor(_ raw: String?) throws -> UUID? {
+        guard let raw else { return nil }
+        guard let cursor = UUID(uuidString: raw) else {
+            throw HTTPError(.badRequest, message: "invalid agent run cursor")
+        }
+        return cursor
+    }
+
     static func canReadRun(
         principalKind: AuthPrincipalKind,
         principalMemberID: UUID,
@@ -697,25 +800,49 @@ struct AgentRunRoutes: Sendable {
     private static func runProjectionSQL(alias: String) -> String {
         """
         jsonb_build_object(
-          'id', \(alias).id::text,
+          \(runSummaryFieldsSQL(alias: alias)),
           'workspaceId', \(alias).workspace_id::text,
           'agentMemberId', \(alias).agent_member_id::text,
-          'channelId', \(alias).channel_id::text,
-          'triggerMessageId', \(alias).trigger_message_id::text,
           'parentRunId', \(alias).parent_run_id::text,
-          'status', \(alias).status::text,
           'stepCount', \(alias).step_count,
           'maxSteps', \(alias).max_steps,
           'depth', \(alias).depth,
           'input', \(alias).input,
           'output', \(alias).output,
-          'error', \(alias).error,
-          'startedAtMs', CASE WHEN \(alias).started_at IS NULL THEN NULL
-            ELSE floor(extract(epoch FROM \(alias).started_at) * 1000)::bigint END,
-          'finishedAtMs', CASE WHEN \(alias).finished_at IS NULL THEN NULL
-            ELSE floor(extract(epoch FROM \(alias).finished_at) * 1000)::bigint END,
-          'createdAtMs', floor(extract(epoch FROM \(alias).created_at) * 1000)::bigint,
-          'updatedAtMs', floor(extract(epoch FROM \(alias).updated_at) * 1000)::bigint
+          'error', \(alias).error
+        )::text
+        """
+    }
+
+    /// The channel list is a historical full projection consumed by existing
+    /// clients. The agent-global list is intentionally smaller, but both call
+    /// this exact field fragment so shared summary values cannot drift.
+    static func runSummaryFieldsSQL(alias: String) -> String {
+        """
+        'id', \(alias).id::text,
+        'channelId', \(alias).channel_id::text,
+        'triggerMessageId', \(alias).trigger_message_id::text,
+        'triggerSummary', CASE
+          WHEN \(alias).input->>'type' = 'work'
+            THEN left(nullif(btrim(\(alias).input->>'title'), ''), 200)
+          WHEN \(alias).input->>'surface' = 'mention'
+            THEN left(nullif(btrim(\(alias).input->>'prompt'), ''), 200)
+          ELSE NULL
+        END,
+        'status', \(alias).status::text,
+        'startedAtMs', CASE WHEN \(alias).started_at IS NULL THEN NULL
+          ELSE floor(extract(epoch FROM \(alias).started_at) * 1000)::bigint END,
+        'finishedAtMs', CASE WHEN \(alias).finished_at IS NULL THEN NULL
+          ELSE floor(extract(epoch FROM \(alias).finished_at) * 1000)::bigint END,
+        'createdAtMs', floor(extract(epoch FROM \(alias).created_at) * 1000)::bigint,
+        'updatedAtMs', floor(extract(epoch FROM \(alias).updated_at) * 1000)::bigint
+        """
+    }
+
+    private static func runSummaryProjectionSQL(alias: String) -> String {
+        """
+        jsonb_build_object(
+          \(runSummaryFieldsSQL(alias: alias))
         )::text
         """
     }
@@ -732,6 +859,18 @@ struct AgentRunRoutes: Sendable {
             return try JSONDecoder().decode(AgentRunDTO.self, from: data)
         } catch {
             throw HTTPError(.internalServerError, message: "work run JSON decoding failed")
+        }
+    }
+
+    private static func decodeRunSummary(_ row: PostgresRow) throws -> AgentRunSummaryDTO {
+        let json = try row.decode(String.self)
+        guard let data = json.data(using: .utf8) else {
+            throw HTTPError(.internalServerError, message: "agent run summary JSON encoding failed")
+        }
+        do {
+            return try JSONDecoder().decode(AgentRunSummaryDTO.self, from: data)
+        } catch {
+            throw HTTPError(.internalServerError, message: "agent run summary JSON decoding failed")
         }
     }
 
@@ -867,6 +1006,14 @@ struct AgentRunRoutes: Sendable {
             throw HTTPError(.badRequest, message: "invalid run id")
         }
         return runID
+    }
+
+    private static func agentID(_ context: AppRequestContext) throws -> UUID {
+        let raw = try context.parameters.require("agent")
+        guard let agentID = UUID(uuidString: raw) else {
+            throw HTTPError(.badRequest, message: "invalid agent id")
+        }
+        return agentID
     }
 
     private static func encodeJSON(_ value: JSONValue) throws -> String {
@@ -1101,6 +1248,7 @@ struct AgentRunDTO: ResponseEncodable, Codable, Equatable, Sendable {
     let agentMemberId: String
     let channelId: String
     let triggerMessageId: String?
+    let triggerSummary: String?
     let parentRunId: String?
     let status: String
     let stepCount: Int
@@ -1117,6 +1265,23 @@ struct AgentRunDTO: ResponseEncodable, Codable, Equatable, Sendable {
 
 struct AgentRunPageDTO: ResponseEncodable, Codable, Sendable {
     let runs: [AgentRunDTO]
+}
+
+struct AgentRunSummaryDTO: ResponseEncodable, Codable, Equatable, Sendable {
+    let id: String
+    let channelId: String
+    let triggerMessageId: String?
+    let triggerSummary: String?
+    let status: String
+    let startedAtMs: Int64?
+    let finishedAtMs: Int64?
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
+struct AgentRunSummaryPageDTO: ResponseEncodable, Codable, Equatable, Sendable {
+    let runs: [AgentRunSummaryDTO]
+    let nextCursor: String?
 }
 
 private struct EligibleWorkAgent: Sendable {

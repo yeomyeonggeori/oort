@@ -166,10 +166,17 @@ member는 `POST /v1/workspaces/:ws/channels/:ch/agent-runs`에 target agent,
 호스트에서 이루어지고 provider·repo 자격증명은 momo에 들어오지 않는다.
 
 같은 channel route의 GET은 Work run 목록, `GET /v1/workspaces/:ws/agent-runs/:run`은
-상세 projection을 제공한다. 사람의 두 읽기 경로는 active channel membership를 요구하고,
-agent bearer에는 공개되지 않는다. gateway callback은 계속 bearer actor의 자기 run에만
-결속된다. approval callback은 `read_only|workspace_write|network_write` tier를 approval
-payload와 timeline card metadata에 보존하며 danger 상당 값은 400으로 fail-closed한다.
+해당 채널에서 볼 수 있는 agent run의 상세 projection을 제공한다. 사람의 두 읽기 경로는
+active channel membership를 요구하고, agent bearer에는 공개되지 않는다. gateway callback은
+계속 bearer actor의 자기 run에만 결속된다. approval callback은
+`read_only|workspace_write|network_write` tier를 approval payload와 timeline card metadata에
+보존하며 danger 상당 값은 400으로 fail-closed한다.
+
+`GET /v1/workspaces/:ws/agents/:agent/runs`는 같은 `agent_run`을 에이전트별로 모은
+워크스페이스 전역 최신순 cursor 목록이다. 호출자는 active human workspace member여야
+하고, 각 run은 호출자가 현재 속한 채널로 다시 필터된다. 채널 목록과 공통 요약 필드 선택을
+공유하되 전역 응답은 id/status/time/channel/200자 trigger summary만 보내며
+input/output/error·gateway payload·전문 transcript는 기존 권한부 detail 경계에 남긴다.
 
 ### Interactive Work Console session ledger
 

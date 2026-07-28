@@ -13,7 +13,7 @@ openapi: 3.0.3
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, and interactive Work
 # Console control surfaces. Other routes (invite admin,
-# workspace identity, agent credentials/runs, cost projection, platform admin,
+# workspace identity, legacy agent credential/run surfaces, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
 # Operator/instance-admin surfaces (e.g. the MOMO-572 provider link) are
 # documented separately in docs/api/openapi.operator.yaml.
@@ -679,6 +679,56 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404":
           description: Active agent not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+  /v1/workspaces/{workspaceId}/agents/{agentId}/runs:
+    get:
+      tags: [agents]
+      operationId: listAgentRuns
+      summary: List one agent's workspace-global run history.
+      description: >
+        Human active workspace members receive a newest-first keyset page of
+        this agent's runs, restricted to channels where the caller has active
+        membership. The UUID cursor identifies the final `(created_at, id)`
+        row from the previous page. Each item is a bounded, credential-free
+        summary shared with the channel run-list projection; input/output/error,
+        gateway payloads, and full transcripts remain available only through
+        the existing authorized run-detail surface.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: cursor
+          in: query
+          schema: {type: string, format: uuid}
+          description: Run ID at the exclusive older-page boundary.
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Visible run summaries ordered by created time and ID descending.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunSummaryPage"}
+        "400":
+          description: Malformed or inaccessible cursor.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not an active human workspace member.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Active agent not found in this workspace.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -5484,6 +5534,44 @@ components:
           type: array
           minItems: 1
           items: {type: string, minLength: 1, maxLength: 200}
+
+    AgentRunSummary:
+      type: object
+      additionalProperties: false
+      required: [id, channelId, status, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        triggerMessageId:
+          type: string
+          format: uuid
+          description: Message that triggered this run, when applicable.
+        triggerSummary:
+          type: string
+          maxLength: 200
+          description: >
+            Bounded validated Work title or mention prompt excerpt. No raw
+            input object, tool payload, output, error, or transcript is exposed.
+        status:
+          type: string
+          enum: [queued, running, awaiting_approval, paused, succeeded, failed, cancelled, timed_out]
+        startedAtMs: {type: integer, format: int64}
+        finishedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    AgentRunSummaryPage:
+      type: object
+      additionalProperties: false
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/AgentRunSummary"}
+        nextCursor:
+          type: string
+          format: uuid
+          description: Final run ID when another older page exists.
 
     AgentRunCancelResponse:
       type: object
