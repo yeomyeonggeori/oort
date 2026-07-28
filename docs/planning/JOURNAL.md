@@ -17,6 +17,13 @@
 - 판정: xterm+현 PTY/replay 유지, Herdr/Ghostty 교체 금지; Windows 경계에서만 current/Rust PTY/Herdr 비교. plugin v2→skill lifecycle→기존 agent_run 기반 Automation 순서.
 - 검증: docs 41/41 PASS(누락된 prod example WorkHost 2변수는 fixture 주입, `OPS-WORKHOST-ENV-DRIFT` 검수 대상). 다음은 Fable 검수→성재 승인; ROADMAP/BUILD_TICKETS/Issue와 track→main은 건드리지 않았다.
 
+## 2026-07-28 (Fable) · #860 랜딩(uxui 큐 비움) · **#875 보안 서명 v2 랜딩** · T3 수리 배치 투입
+- **#860 랜딩**(track/uxui `7974b923`): design-review 2R PASS. 1R Blocker 2건은 기하(760에서 `dd` 폭 0px로 값 소멸 · 긴 이름에서 탭 낙하), High는 **404를 "상태 확인 실패"로 보고**(레포가 `useAgentProfile.ts`에 "404는 아직 없다"를 적어둔 자리 — 첫 설치 워크스페이스 전 에이전트가 거짓 실패 배지). 2R High 1건은 **내 패킷 문구가 만든 것**이라 직접 수리: "가독 유지"라고만 써서 워커가 흐림을 통째로 제거 → 클라이언트에서 **유일하게 disabled인데 조작 가능해 보이는 컨트롤**이 됐다. 방향은 "흐린 글자"가 아니라 **"흐린 바닥 위 읽히는 글자"**. **uxui 큐 비었음.**
+- **#875 랜딩**(track/engine `ac258c8e`): 서명 v2 = base에 **body SHA-256 + 1회용 request ID**. 실서버 단정 — 캡처 서명의 body 교체 재제출 **401**, 같은 request ID 재사용 **401**, 만료 정리. **red proof 성립**(digest 결속 제거 시 body 교체가 통과해 이름 있는 실패). **호스트 서명 경로 검증기 8종 전수 PASS.** v2 즉시 절단 판단 수용 — 불일치는 401 fail-closed, **서버와 workd는 한 릴리스 단위**(릴리스 노트 필수 항목).
+- **검수 중 게이트 결함 2건 수리**: #860 게이트가 `realtime-token` 목·`unsubscribe` 응답 결손으로 **레일 down → 전 버튼 disabled**(소켓 로그로 원인 분리) · #875 보안 블록이 roundtrip에 전이를 한 번 더 얹는데 개수 단정을 안 고쳐 3:1↔4:2 — **숫자를 올리면 단정 의미가 흐려지므로 블록을 맨 뒤로 이동**.
+- **T3 수리 배치 투입**(#876+#877+#878 한 묶음, 성재 승인): 정산 통합·pause 순환 의존·host당 유일성·provider 경합·provisioning idempotency·**topup REST 신설**. 불변식 명시(pause 0 계상 GENERATED 보장·서명 v2·자격증명 비유입·D10).
+- **성재 결정**: ①main 동기화는 **엔진 마무리 후 uxui와 함께** ②수리 순서 승인 ③리허설은 topup REST 랜딩 후(현재는 DB 우회를 뜻함 — 성재가 만들 것은 없고 E2B 템플릿·공개 서버는 내 몫).
+
 ## 2026-07-28 (Fable) · Codex 공식 플러그인 도입 + adversarial-review가 교차 결함 6건 적발 — **track/engine main 동기화 보류**
 - **성재 지적으로 `openai/codex-plugin-cc` 확인** — 내가 "공식 플러그인 없다"고 한 것은 **틀렸다**(공식 마켓플레이스 인덱스에 없을 뿐 별도 마켓플레이스로 추가하는 OpenAI 공식 플러그인, ⭐30k). 설치·setup 완료(ChatGPT 로그인 재사용). 어제 비교표의 오류 2건 정정: 플러그인도 detached 워커를 spawn하므로 **세션 독립·병렬은 fleet 전유물이 아니다**.
 - **파일럿 1회에 값이 나왔다**: track/engine(main +21)에 `adversarial-review --base origin/main` → **needs-attention, high 6 + medium 2**. 개별 PR 게이트는 전부 초록이었는데 **여러 PR이 합쳐진 뒤에만 드러나는 교차 결함**을 잡았다(#856 sweep × #859 pause × #855 원장). 우리 게이트가 못 본 이유도 명확: mock E2B는 pause돼도 응답하고 검증기는 정상 종료 경로만 돈다.
