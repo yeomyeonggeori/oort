@@ -4,6 +4,21 @@ import XCTest
 @testable import MomoServer
 
 final class CloudProvisionerTests: XCTestCase {
+    func testCloudCreditTopupRejectsPlatformReadWithoutWriteScope() {
+        XCTAssertFalse(CloudCreditRoutes.isCreditWriter(
+            kind: .human,
+            scopes: ["platform:read"]
+        ))
+        XCTAssertTrue(CloudCreditRoutes.isCreditWriter(
+            kind: .human,
+            scopes: ["platform:read", CloudCreditRoutes.writeScope]
+        ))
+        XCTAssertFalse(CloudCreditRoutes.isCreditWriter(
+            kind: .agent,
+            scopes: [CloudCreditRoutes.writeScope]
+        ))
+    }
+
     func testMissingE2BKeyFailsOnlyCloudConfigClosed() {
         let config = CloudProvisionerConfig.load(environment: [
             "E2B_TEMPLATE_ID": "momo-workd",
@@ -78,6 +93,8 @@ final class CloudProvisionerTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(sql.contains("work_host_usage_one_unsettled_per_host_idx"))
+        XCTAssertTrue(sql.contains("cannot enforce one unsettled T3 usage per host"))
+        XCTAssertTrue(sql.contains("lower(host_id::text)"))
         XCTAssertTrue(sql.contains("CREATE FUNCTION settle_t3_work_session"))
         XCTAssertTrue(sql.contains("ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING"))
         XCTAssertTrue(sql.contains("'pausing', 'paused', 'resuming'"))

@@ -14,14 +14,15 @@ struct CloudCreditTopupResponse: ResponseEncodable, Encodable {
     let balanceMicroUsd: Int64
 }
 
-/// Instance-operator-only paid-credit mutation surface.
+/// Paid-credit mutation surface.
 ///
-/// Authorization is intentionally identical to the instance-global provider
-/// link boundary: platform:read or a verified allowlisted instance operator.
+/// Cross-tenant reads and paid execution authority are deliberately separate:
+/// `platform:read` must never be sufficient to increase a workspace balance.
 /// The append-only credit row, balance trigger, and audit row commit together.
 struct CloudCreditRoutes: Sendable {
+    static let writeScope = "platform:credits:write"
+
     let db: Database
-    let platformAdminEmails: [String]
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/admin/workspaces/:ws/credits/topups", use: topup)
@@ -29,11 +30,7 @@ struct CloudCreditRoutes: Sendable {
 
     @Sendable
     func topup(_ request: Request, context: AppRequestContext) async throws -> Response {
-        let principal = try await ProviderLinkRoutes.requireOperator(
-            db: db,
-            platformAdminEmails: platformAdminEmails,
-            context: context
-        )
+        let principal = try Self.requireCreditWriter(context)
         let rawWorkspaceID = try context.parameters.require("ws")
         guard let workspaceID = UUID(uuidString: rawWorkspaceID) else {
             throw HTTPError(.badRequest, message: "invalid workspace id")
@@ -127,5 +124,17 @@ struct CloudCreditRoutes: Sendable {
             idempotencyRef: refID.uuidString.lowercased(),
             balanceMicroUsd: balance
         ).response(from: request, context: context)
+    }
+
+    static func isCreditWriter(kind: AuthPrincipalKind, scopes: [String]) -> Bool {
+        kind == .human && scopes.contains(writeScope)
+    }
+
+    static func requireCreditWriter(_ context: AppRequestContext) throws -> AuthPrincipal {
+        let principal = try context.requirePrincipal()
+        guard isCreditWriter(kind: principal.kind, scopes: principal.scopes) else {
+            throw HTTPError(.forbidden, message: "\(writeScope) scope required")
+        }
+        return principal
     }
 }

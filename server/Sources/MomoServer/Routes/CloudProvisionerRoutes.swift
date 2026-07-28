@@ -73,6 +73,21 @@ struct CloudProvisionerRoutes: Sendable {
             try await InviteRoutes.requireWorkspaceMember(
                 conn: conn, logger: db.logger, principal: principal
             )
+            // A row lock cannot serialize a key which does not exist yet.
+            // Lock the normalized tenant+client key before the first lookup so
+            // concurrent retries cannot both observe absence and race the
+            // partial unique index into a 500.
+            _ = try await conn.query(
+                """
+                SELECT pg_advisory_xact_lock(
+                  hashtextextended(
+                    lower(\(workspaceID)::text) || ':' || lower(\(createKey)::text),
+                    0
+                  )
+                )
+                """,
+                logger: db.logger
+            ).collect()
             let existingRows = try await conn.query(
                 """
                 SELECT id, requested_display_name, provider_sandbox_id IS NULL

@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## T3 2차 수리 (#882, 2026-07-28)
+
+- topup을 `platform:credits:write` human scope로 분리해 `platform:read` 전용 토큰의 유료 실행 권한 획득을 차단했다. 같은 provider-link 가드의 mutation 사용처는 전수 조사했으며 기존 운영자 GUI/ADR 계약과 결합된 provider link·chain 및 quota credential 발급은 후속 권한 재설계 대상으로 남겼다.
+- lifecycle reconciler는 provider 호출 뒤 host row lock+operation/state 재검증을 선행하고 최종 CAS 1행을 단정한다. resume 404/410은 정산·slot 해제·host revoke·orphan 적격화를 한 transaction에 확정하며, stale provider 결과는 종속 상태를 바꾸지 않는다.
+- concurrent create ref는 advisory transaction lock으로 직렬화하고 Migration 049는 기존 중복 미정산 usage의 lowercased host 목록을 읽히는 오류로 제시한다. server 347 tests와 정적 T3 fixture gate PASS; Docker 행동 gate 2회(terminal missing / reconciler race) 및 전체 8종 verifier는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## T3 수명주기·정산 수리 (#876+#877+#878, 2026-07-28)
 
 - Migration 049의 단일 terminal 정산 primitive가 interval 종료·generated active 합계·멱등 차감·cloud slot 해제·destroy intent를 한 transaction에 묶고, host당 미정산 usage 1건을 partial unique로 강제한다. paused cloud host는 정상 heartbeat 부재로 stale sweep에서 제외하되 idle timeout은 heartbeat 없이 정산한다.
