@@ -1230,8 +1230,11 @@ export function sendThreadReply(
 // memberships server-side (it JOINs `membership`), so a channel filter is a
 // presentation choice, never an access control.
 
-/** `running` while the host holds it, `orphaned` when the host went away. */
-export type WorkSessionStatusWire = "running" | "orphaned" | "ended";
+/**
+ * `idle` still belongs to the live host and keeps its PTY attached. It is not
+ * an ended session: `exitCode` is the last tool result across every state.
+ */
+export type WorkSessionStatusWire = "running" | "idle" | "orphaned" | "ended";
 
 export interface WorkSession {
   id: string;
@@ -1280,6 +1283,24 @@ export async function endWorkSession(
       workspaceId
     )}/work-sessions/${encodeURIComponent(sessionId)}`,
     { method: "PATCH", body: JSON.stringify({ status: "ended" }) }
+  );
+  return res.workSession;
+}
+
+/** Continue an orphaned git lineage on an explicitly chosen eligible host. */
+export async function resumeWorkSession(
+  workspaceId: string,
+  sessionId: string,
+  targetHostId: string
+): Promise<WorkSession> {
+  const res = await request<{ workSession: WorkSession }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/resume`,
+    {
+      method: "POST",
+      body: JSON.stringify({ targetHostId }),
+    }
   );
   return res.workSession;
 }

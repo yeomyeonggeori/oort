@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Message, WorkHost, WorkSession } from "@/lib/api";
-import type { WorkSessionACPFrame } from "@/lib/realtime";
 import {
+  asWorkSessionToolTransitionFrame,
+  type WorkSessionACPFrame,
+} from "@/lib/realtime";
+import {
+  canReattachWorkSession,
   composeExcerpt,
   emptyStepsDetail,
   eventFromFrame,
@@ -20,6 +24,8 @@ import {
   workHostOnline,
   workHostTrust,
   workSessionContinuityStatus,
+  workSessionIdleNotice,
+  workSessionResumeTargets,
   workSessionStatus,
   type WorkSessionEvent,
 } from "./workSessionModel";
@@ -105,15 +111,19 @@ function events(...messages: Message[]): WorkSessionEvent[] {
 }
 
 describe("workSessionStatus", () => {
-  it("splits ended on the exit code and keeps orphaned its own state", () => {
+  it("keeps idle neutral and does not treat the last tool result as an ending", () => {
     expect(workSessionStatus(session()).key).toBe("running");
+    expect(workSessionStatus(session({ status: "idle", exitCode: 0 }))).toEqual({
+      key: "idle",
+      label: "완료 · 대기 중",
+    });
     expect(workSessionStatus(session({ status: "orphaned" })).key).toBe("orphaned");
     expect(
       workSessionStatus(session({ status: "ended", exitCode: 0 })).key
     ).toBe("done");
     expect(
       workSessionStatus(session({ status: "ended", exitCode: 137 })).key
-    ).toBe("failed");
+    ).toBe("done");
   });
 
   it("reads an ended session with no exit code as a clean end", () => {
@@ -125,6 +135,101 @@ describe("workSessionStatus", () => {
       key: "unknown",
       label: "상태 확인 필요",
     });
+  });
+});
+
+describe("work-session idle wire", () => {
+  const transition = {
+    type: "work.session.idle",
+    v: 1,
+    ts: 1_785_163_200_000,
+    seq: 41,
+    payload: {
+      session_id: SESSION_ID,
+      channel_id: CHANNEL_ID.toUpperCase(),
+      root_message_id: ROOT_ID,
+      member_id: "00000000-0000-7000-8000-000000000101",
+      host_id: HOST_ID,
+      status: "idle",
+      exit_code: 0,
+      idle_at: 1_785_163_200_000,
+    },
+  } as const;
+
+  it("accepts uppercase Swift UUIDs without rewriting identity", () => {
+    const parsed = asWorkSessionToolTransitionFrame(transition);
+    expect(parsed?.payload.session_id).toBe(SESSION_ID);
+    expect(parsed?.payload.status).toBe("idle");
+    expect(
+      asWorkSessionToolTransitionFrame({
+        ...transition,
+        payload: { ...transition.payload, exit_code: undefined },
+      })
+    ).not.toBeNull();
+  });
+
+  it("drops every type inversion and mismatched transition state", () => {
+    expect(
+      asWorkSessionToolTransitionFrame({
+        ...transition,
+        payload: { ...transition.payload, idle_at: "now" },
+      })
+    ).toBeNull();
+    expect(
+      asWorkSessionToolTransitionFrame({
+        ...transition,
+        payload: { ...transition.payload, exit_code: "0" },
+      })
+    ).toBeNull();
+    expect(
+      asWorkSessionToolTransitionFrame({
+        ...transition,
+        payload: { ...transition.payload, status: "running" },
+      })
+    ).toBeNull();
+    expect(
+      asWorkSessionToolTransitionFrame({
+        ...transition,
+        type: "work.session.resumed-to-running",
+        payload: {
+          ...transition.payload,
+          status: "running",
+          idle_at: undefined,
+          resumed_at: 1_785_163_201_000,
+        },
+      })
+    ).not.toBeNull();
+  });
+
+  it("recognises only the typed durable idle reply", () => {
+    const message: Message = {
+      id: "00000000-0000-7000-8000-000000000901",
+      channelId: CHANNEL_ID,
+      rootId: ROOT_ID,
+      seq: 41,
+      hlcTs: transition.ts,
+      hlcCount: 0,
+      authorMemberId: transition.payload.member_id,
+      type: "system",
+      body: "작업 완료",
+      createdAtMs: transition.ts,
+      props: {
+        kind: "work_session_idle",
+        session_id: SESSION_ID,
+        owner_member_id: transition.payload.member_id,
+      },
+    };
+    expect(workSessionIdleNotice(message)).toMatchObject({
+      sessionId: SESSION_ID,
+      eventLabel: "대기 전환",
+    });
+    expect(workSessionIdleNotice({ ...message, rootId: undefined })).toBeNull();
+    expect(
+      workSessionIdleNotice({
+        ...message,
+        props: { ...message.props, session_id: 7 },
+      })
+    ).toBeNull();
   });
 });
 
@@ -443,14 +548,14 @@ describe("foldSessionEvents", () => {
     ).toEqual(["done", "done"]);
   });
 
-  it("does not blame the last step for the session's exit code", () => {
+  it("keeps the last tool result out of both step and session failure states", () => {
     const folded = foldSessionEvents(
       events(reply("agent.status", { tool_call_name: "shell", detail: "빌드" })),
       session({ status: "ended", exitCode: 1 })
     );
     expect(folded.rows[0].state).toBe("done");
     expect(workSessionStatus(session({ status: "ended", exitCode: 1 })).key).toBe(
-      "failed"
+      "done"
     );
   });
 });
@@ -513,6 +618,58 @@ describe("workHostTrust", () => {
       workSessionContinuityStatus(session(), [host({ online: false })])
     ).toEqual({ key: "unavailable", label: "호스트 응답 없음" });
     expect(workSessionContinuityStatus(session(), [host()]).key).toBe("running");
+    expect(
+      workSessionContinuityStatus(
+        session({ status: "idle" }),
+        [host({ online: false })]
+      ).key
+    ).toBe("unavailable");
+    expect(canReattachWorkSession(session({ status: "idle" }), [host()])).toBe(
+      true
+    );
+    expect(
+      canReattachWorkSession(
+        session({ status: "orphaned" }),
+        [host()]
+      )
+    ).toBe(false);
+  });
+
+  it("offers only eligible online hosts for an orphaned lineage resume", () => {
+    const viewer = "00000000-0000-7000-8000-000000000101";
+    const source = session({ status: "orphaned" });
+    const candidates = [
+      host({ id: HOST_ID, displayName: "죽은 원본", online: true }),
+      host({
+        id: "00000000-0000-7000-8000-000000000201",
+        displayName: "나의 온라인 호스트",
+      }),
+      host({
+        id: "00000000-0000-7000-8000-000000000202",
+        ownerMemberId: "00000000-0000-7000-8000-000000000999",
+        displayName: "다른 멤버 호스트",
+      }),
+      host({
+        id: "00000000-0000-7000-8000-000000000203",
+        ownerMemberId: "00000000-0000-7000-8000-000000000999",
+        scope: "workspace",
+        displayName: "공용 온라인 호스트",
+      }),
+      host({
+        id: "00000000-0000-7000-8000-000000000204",
+        displayName: "폐기된 호스트",
+        revokedAtMs: 1,
+      }),
+    ];
+    expect(
+      workSessionResumeTargets(source, candidates, viewer).map((item) => item.id)
+    ).toEqual([
+      "00000000-0000-7000-8000-000000000203",
+      "00000000-0000-7000-8000-000000000201",
+    ]);
+    expect(
+      workSessionResumeTargets(session({ status: "idle" }), candidates, viewer)
+    ).toEqual([]);
   });
 
   it("drops the promise of coming steps when nobody has heard the host", () => {
@@ -532,13 +689,14 @@ describe("workHostTrust", () => {
 });
 
 describe("list surfaces", () => {
-  it("puts running sessions first, then newest", () => {
+  it("puts running, idle and orphaned sessions ahead of ended ones", () => {
     const ordered = sortSessions([
       session({ id: "a", status: "ended", startedAtMs: 300 }),
       session({ id: "b", status: "running", startedAtMs: 100 }),
       session({ id: "c", status: "orphaned", startedAtMs: 200 }),
+      session({ id: "d", status: "idle", startedAtMs: 50 }),
     ]);
-    expect(ordered.map((s) => s.id)).toEqual(["b", "c", "a"]);
+    expect(ordered.map((s) => s.id)).toEqual(["b", "d", "c", "a"]);
   });
 
   it("scopes to the open channel case-insensitively, or shows everything", () => {
@@ -607,6 +765,15 @@ describe("list surfaces", () => {
     expect(watched[0]).toBe(CHANNEL_ID);
     expect(watched).toHaveLength(3);
     expect(uncovered.length).toBeGreaterThan(0);
+  });
+
+  it("keeps idle channels subscribed for resumed-to-running frames", () => {
+    const idleChannel = "00000000-0000-7000-8000-000000000299";
+    const result = workChannelsToWatch(
+      [session({ status: "idle", channelId: idleChannel })],
+      null
+    );
+    expect(result.watched).toEqual([idleChannel]);
   });
 });
 

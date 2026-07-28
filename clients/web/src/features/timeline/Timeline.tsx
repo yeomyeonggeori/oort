@@ -78,6 +78,7 @@ export function Timeline({
   onStartReached,
   onRetry,
   onOpenThread,
+  onOpenWorkSession,
   onResend,
   onResendPending,
   onInviteMember,
@@ -98,6 +99,7 @@ export function Timeline({
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
+  onOpenWorkSession?: (sessionId: string) => void;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
   onInviteMember?: () => void;
@@ -238,6 +240,7 @@ export function Timeline({
             startsGroup={item.startsGroup}
             directory={directory}
             onOpenThread={onOpenThread}
+            onOpenWorkSession={onOpenWorkSession}
             onResend={onResend}
           />
         );

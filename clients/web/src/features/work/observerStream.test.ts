@@ -319,13 +319,14 @@ describe("newlineCount", () => {
 });
 
 describe("observeGate", () => {
-  it("offers watching only for a running session with a host terminal", () => {
+  it("offers watching for running and idle sessions with a host terminal", () => {
     expect(observeGate(session(), false).available).toBe(true);
+    expect(observeGate(session({ status: "idle" }), false).available).toBe(true);
   });
 
   it("states the reason instead of a dead control", () => {
     expect(observeGate(session({ status: "ended" }), true).reason).toContain(
-      "끝난 세션"
+      "닫힌 세션"
     );
     expect(
       observeGate(session({ remoteAttachAvailable: false }), true).reason
@@ -346,13 +347,14 @@ describe("observeGate", () => {
       session({ status: "ended", observation: "owner_only" }),
       true
     );
-    expect(gate.reason).toContain("끝난 세션");
+    expect(gate.reason).toContain("닫힌 세션");
   });
 });
 
 describe("observation scope control", () => {
-  it("belongs to the owner of a running session", () => {
+  it("belongs to the owner while a running or idle session keeps its PTY", () => {
     expect(canChangeObservation(session(), OWNER)).toBe(true);
+    expect(canChangeObservation(session({ status: "idle" }), OWNER)).toBe(true);
     // Ids cross the wire in mixed case (uuidEq), so this must fold.
     expect(canChangeObservation(session(), OWNER.toUpperCase())).toBe(true);
     expect(canChangeObservation(session(), "00000000-0000-7000-8000-000000000102")).toBe(
@@ -365,6 +367,7 @@ describe("observation scope control", () => {
 describe("observationStillPermits", () => {
   it("drops a live socket the ledger no longer allows", () => {
     expect(observationStillPermits(session())).toBeNull();
+    expect(observationStillPermits(session({ status: "idle" }))).toBeNull();
     expect(observationStillPermits(session({ status: "ended" }))).toBe(
       "session_ended"
     );
