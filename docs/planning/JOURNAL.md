@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-28 (Fable) · #851 랜딩 · #856 검증 — 라이브가 결함 4+4건을 드러냄
+- **#851 랜딩**(track/uxui `526b1641`, PR #866): design-review 2R PASS. 1R FAIL(B1·H3)은 전부 "자기 원칙(원장 정본·host 진실 대기)을 자기가 만진 나머지 분기에 미적용" 형태 — 칩 축소 우선순위·세 관점 대기 공유·오프라인 상세 진입 분리·hosts-empty 마스킹. 2R 신규 High(메타 줄 grow로 문장 분열)는 오케스트레이터가 직접 수리. red proof 3종(기존 2+수동 라벨 클립).
+- **#856 라이브 검증이 값진 하루**: ①서버 결함 — workHost principal(Ed25519) 감사의 via_token_id FK 위반(레포 첫 사례, 전 전이 500) → NULL이 정직(토큰 미사용, 호스트는 detail에) ②워커 검증기 결함 3 — UUID 대소문자(payload 대문자 vs 셸 소문자, **감사는 uuid 비교라 통과한 비대칭이 단서**)·push 허용목록에 dispatch.v2 표준 필드 4종 누락. 수리 후 전 관문 PASS + red proof 성립(sweep 되돌리면 timeout/orphan 0:0).
+- **선존재 드리프트 발견(중대)**: 07-21 fffe303b(#564 멤버십 수명주기) 이후 라우트 authz가 `workspace_membership`을 요구하는데 **기존 검증기 4종(work_session·terminal_attach·observer_attach·push_notifier)의 픽스처가 채널 membership만 SQL로 심어 그 뒤로 전부 403 — 일주일간 아무도 안 돌려 몰랐다.** SQL 지름길 픽스처가 실경로를 우회하는 패턴의 **6번째 사례**(실 REST join이면 자동 생성). base에서 재현 확정, #856 무관. 픽스처 4종에 workspace_membership 주입으로 수리(주석에 근거).
+- **내 실수 기록**: red proof 첫 실행이 포트 충돌 exit 1이었는데 성립으로 오기 → 재실행해 진짜 성립 확인. 검증기 첫 실행을 `| tail` 파이프로 exit 가림(같은 교훈 재범).
+
 ## 2026-07-28 (Fable) · #850·#854 랜딩 — 허들이 웹에 복원되고 전사 v1이 섰다 · #851 가동
 - **#850 랜딩**(track/uxui, PR #862): design-review **2R PASS(B0·H0)**. 1R Blocker 2건(760 제목 소거·핫마이크 무출구) 실렌더 폐쇄 — "오디오와 REST 프로젝션은 다른 진실 평면" 원칙으로 joined 분기 최우선화. **red proof 4종**(기존 503/ended + 수동: joined 우선 복원·폭 계약 제거 → 각각 FAIL). lazy-load 실측(livekit 531KB 별도 청크·엔트리 무참조). 2R 신규 Medium 4(배너 시 at-bottom 이탈·오프라인 이중 배너·joined 중 503 카피 모순·넓은 창 참가자 굶김)는 후속 티켓 예정.
 - **#854 랜딩**(track/engine `9672006c`, PR #864): 339 tests · **동의 게이트 실서버 관통(무동의 409→동의 200→시작 201→녹음 중 무동의 join 409)** · compose transcription profile(Egress v1.9.1+전용 Redis) healthy · **하니스 3모델 실완주**(잠금 스냅샷·CER/RTF 산출, RTF@1스레드 small 3.05/medium 8.59/turbo 7.57 — "small이 실용 한계" 부합). **CER 0%는 합성 TTS라 품질 판정 아님** — 모델 확정은 실코퍼스 실측 후(성재 단계). 화자=트랙 소유 member 라벨(diarization 없음).
