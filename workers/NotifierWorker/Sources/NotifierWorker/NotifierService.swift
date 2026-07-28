@@ -42,6 +42,7 @@ import ServiceLifecycle
 struct NotifierService: Service {
     let pg: PostgresClient
     let relay: PushRelayClient
+    let httpClient: HTTPClient
     let config: Config
     let logger: Logger
 
@@ -80,6 +81,7 @@ struct NotifierService: Service {
                 for await _ in wakes {
                     if Task.isCancelled { break }
                     await sweepTierFallback()
+                    await reconcileCloudLifecycle()
                     await drainToEmpty()
                 }
             }

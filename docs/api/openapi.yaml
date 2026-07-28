@@ -1397,6 +1397,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/admin/workspaces/{workspaceId}/credits/topups:
+    post:
+      tags: [work-hosts]
+      operationId: topupCloudCredit
+      summary: Append one idempotent positive workspace credit topup.
+      description: >
+        Instance-operator only: a human with platform:read or a verified,
+        allowlisted instance-operator identity. The credit entry, balance
+        trigger, and audit row commit in one transaction.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudCreditTopupRequest"
+      responses:
+        "200":
+          description: Topup applied, or the identical idempotent result replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudCreditTopupResponse"
+        "400":
+          description: Amount or idempotency reference is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The reference was previously used with another amount.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-hosts/cloud/register:
     post:
       tags: [work-hosts]
@@ -5832,7 +5873,7 @@ components:
 
     CreateCloudHostRequest:
       type: object
-      required: [displayName, confirmPaidCloud]
+      required: [displayName, confirmPaidCloud, idempotencyRef]
       properties:
         displayName:
           type: string
@@ -5841,6 +5882,43 @@ components:
         confirmPaidCloud:
           type: boolean
           description: Must be true for this one paid-cloud provisioning request.
+        idempotencyRef:
+          type: string
+          format: uuid
+          description: >
+            Client-stable create key. Reusing it converges a lost 201 response
+            onto the same E2B sandbox and never creates a second paid host.
+
+    CloudCreditTopupRequest:
+      type: object
+      required: [amountMicroUsd, idempotencyRef]
+      additionalProperties: false
+      properties:
+        amountMicroUsd:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000000000000
+        idempotencyRef:
+          type: string
+          format: uuid
+
+    CloudCreditTopupResponse:
+      type: object
+      required: [workspaceId, amountMicroUsd, idempotencyRef, balanceMicroUsd]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        amountMicroUsd:
+          type: integer
+          format: int64
+        idempotencyRef:
+          type: string
+          format: uuid
+        balanceMicroUsd:
+          type: integer
+          format: int64
 
     CloudHost:
       type: object
@@ -5855,7 +5933,9 @@ components:
           description: Present after cloud workd self-registration.
         state:
           type: string
-          enum: [provisioning, ready, running, paused, destroyed, failed]
+          enum:
+            [provisioning, ready, running, pausing, paused, resuming,
+             destroy_pending, destroyed, failed]
         provider:
           type: string
           enum: [e2b]

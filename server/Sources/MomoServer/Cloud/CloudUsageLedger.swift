@@ -131,6 +131,23 @@ enum CloudUsageLedger {
                 message: "momo Cloud 호스트가 실행 준비 상태가 아닙니다. 현재 상태: \(state)"
             )
         }
+        let existingRows = try await conn.query(
+            """
+            SELECT session_id
+              FROM work_host_usage
+             WHERE workspace_id = \(workspaceID)
+               AND host_id = \(hostID)
+               AND settled_at IS NULL
+             FOR UPDATE
+            """,
+            logger: logger
+        ).collect()
+        guard existingRows.first == nil else {
+            throw HTTPError(
+                .conflict,
+                message: "이 momo Cloud 호스트에는 이미 정산 전 세션이 있습니다."
+            )
+        }
 
         let usageRows = try await conn.query(
             """
@@ -253,82 +270,10 @@ enum CloudUsageLedger {
         workspaceID: UUID,
         sessionID: UUID
     ) async throws {
-        let usageRows = try await conn.query(
-            """
-            SELECT id, unit_rate_micro_usd_second, settled_at
-              FROM work_host_usage
-             WHERE workspace_id = \(workspaceID)
-               AND session_id = \(sessionID)
-             FOR UPDATE
-            """,
+        _ = try await conn.query(
+            "SELECT settle_t3_work_session(\(workspaceID), \(sessionID))",
             logger: logger
         ).collect()
-        guard let usageRow = usageRows.first else { return }
-        let (usageID, unitRate, settledAt) = try usageRow.decode((UUID, Int64, Date?).self)
-        if settledAt != nil { return }
-
-        _ = try await conn.query(
-            """
-            UPDATE work_host_usage_interval
-               SET ended_at = clock_timestamp()
-             WHERE usage_id = \(usageID)
-               AND ended_at IS NULL
-            """,
-            logger: logger
-        )
-        let totalRows = try await conn.query(
-            """
-            SELECT COALESCE(sum(active_seconds), 0)::bigint
-              FROM work_host_usage_interval
-             WHERE usage_id = \(usageID)
-            """,
-            logger: logger
-        ).collect()
-        guard let activeSeconds = try totalRows.first?.decode(Int64.self) else {
-            throw HTTPError(.internalServerError, message: "momo Cloud 활성시간을 정산하지 못했습니다.")
-        }
-        _ = try await conn.query(
-            """
-            UPDATE work_host_usage
-               SET ended_at = clock_timestamp(),
-                   active_seconds = \(activeSeconds),
-                   settled_at = clock_timestamp()
-             WHERE id = \(usageID)
-               AND settled_at IS NULL
-            """,
-            logger: logger
-        )
-        if activeSeconds > 0 {
-            let debit = activeSeconds.multipliedReportingOverflow(by: unitRate)
-            guard !debit.overflow else {
-                throw HTTPError(.internalServerError, message: "momo Cloud 크레딧 정산 범위를 초과했습니다.")
-            }
-            _ = try await conn.query(
-                """
-                INSERT INTO credit_entry
-                  (workspace_id, delta_micro_usd, reason, ref_id)
-                VALUES
-                  (\(workspaceID), \(-debit.partialValue), 't3_usage', \(sessionID))
-                ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING
-                """,
-                logger: logger
-            )
-        }
-        _ = try await conn.query(
-            """
-            UPDATE work_cloud_host ch
-               SET state = CASE
-                     WHEN state IN ('running', 'paused') THEN 'ready'
-                     ELSE state
-                   END,
-                   updated_at = clock_timestamp()
-              FROM work_host_usage u
-             WHERE u.id = \(usageID)
-               AND ch.host_id = u.host_id
-               AND ch.workspace_id = \(workspaceID)
-            """,
-            logger: logger
-        )
     }
 
     private struct OpenUsage: Sendable {

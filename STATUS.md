@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## T3 수명주기·정산 수리 (#876+#877+#878, 2026-07-28)
+
+- Migration 049의 단일 terminal 정산 primitive가 interval 종료·generated active 합계·멱등 차감·cloud slot 해제·destroy intent를 한 transaction에 묶고, host당 미정산 usage 1건을 partial unique로 강제한다. paused cloud host는 정상 heartbeat 부재로 stale sweep에서 제외하되 idle timeout은 heartbeat 없이 정산한다.
+- pause/resume/destroy는 provider 호출 전 durable intent+version CAS를 기록하고 NotifierWorker가 provider idempotency key로 미확정 lifecycle/provisioning을 수렴한다. resume는 human REST가 provider→session/cloud/interval을 완료하며 signed host report는 시작 조건이 아니다.
+- instance-operator 전용 양수 topup REST와 workspace 0-balance 초기화, create idempotency ref·결정적 one-shot bootstrap token을 추가했다. server 346 tests, NotifierWorker 4 tests, WorkHostDaemon 32 tests와 정적 T3/OpenAPI/migration gate를 worker에서 확인하며 Docker mock 8종·실 E2B smoke는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-657 WorkHost 서명 body 결속 + replay 차단 (#875, 2026-07-28)
 
 - WorkHost 요청 서명을 v2로 즉시 절단해 raw body SHA-256와 UUID request ID를 결속하고, request ID는 FORCE RLS 원장에서 원자적으로 1회 소비·10분 보존하며 매 인증 시 만료분을 정리한다. workd·macOS app host·검증 스크립트를 함께 전환했다.

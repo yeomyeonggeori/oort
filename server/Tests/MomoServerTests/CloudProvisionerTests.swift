@@ -48,6 +48,43 @@ final class CloudProvisionerTests: XCTestCase {
         XCTAssertEqual(digest, CloudProvisionerRoutes.tokenDigest(token))
     }
 
+    func testCrashSafeBootstrapTokenIsStableForProvisionId() {
+        let provisionID = UUID(uuidString: "00000000-0000-7000-8000-000000000876")!
+        let first = CloudProvisionerRoutes.bootstrapToken(
+            provisionID: provisionID, apiKey: "operator-test-key"
+        )
+        let replay = CloudProvisionerRoutes.bootstrapToken(
+            provisionID: provisionID, apiKey: "operator-test-key"
+        )
+        XCTAssertEqual(first, replay)
+        XCTAssertNotEqual(first, "operator-test-key")
+        XCTAssertNotEqual(
+            first,
+            CloudProvisionerRoutes.bootstrapToken(
+                provisionID: UUID(), apiKey: "operator-test-key"
+            )
+        )
+    }
+
+    func testLifecycleRepairMigrationNamesEveryStructuralGate() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sql = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/049_t3_lifecycle_settlement.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(sql.contains("work_host_usage_one_unsettled_per_host_idx"))
+        XCTAssertTrue(sql.contains("CREATE FUNCTION settle_t3_work_session"))
+        XCTAssertTrue(sql.contains("ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING"))
+        XCTAssertTrue(sql.contains("'pausing', 'paused', 'resuming'"))
+        XCTAssertTrue(sql.contains("'destroy_pending'"))
+        XCTAssertFalse(sql.contains("ALTER TABLE usage_ledger"))
+    }
+
     func testT3MigrationSeparatesTokenAndActiveTimeLedgers() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
