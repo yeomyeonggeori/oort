@@ -337,6 +337,12 @@ VALUES
   ('$M1_ID', '$DEMO_WORKSPACE_ID', '$M1_EMAIL', true, momo_password_hash('$M1_PASSWORD'), 'UTC'),
   ('$M2_ID', '$DEMO_WORKSPACE_ID', '$M2_EMAIL', true, momo_password_hash('$M2_PASSWORD'), 'UTC');
 
+-- fffe303b(#564) 이후 라우트 authz는 workspace_membership을 읽는다. 이 픽스처는
+-- SQL 지름길로 멤버를 심으므로(실 REST join이면 자동 생성) 직접 넣어야 한다.
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$DEMO_WORKSPACE_ID', '$M1_ID', 'member'),
+  ('$DEMO_WORKSPACE_ID', '$M2_ID', 'member');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$M1_ID', 'member'),

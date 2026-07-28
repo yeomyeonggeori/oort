@@ -173,6 +173,13 @@ INSERT INTO agent
 VALUES
   ('$AGENT_ID', '$WS_ID', 'hermes-agent', 'http://localhost:8088/v1',
    'MOMO-511 verifier', '$OWNER_ID');
+-- fffe303b(#564) 이후 라우트 authz는 workspace_membership을 읽는다. 이 픽스처는
+-- SQL 지름길로 멤버를 심으므로(실 REST join이면 자동 생성) 직접 넣어야 한다.
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$OTHER_ID', 'member'),
+  ('$WS_ID', '$AGENT_ID', 'member');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
