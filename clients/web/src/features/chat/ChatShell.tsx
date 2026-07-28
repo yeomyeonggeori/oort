@@ -193,6 +193,23 @@ export function ChatShell() {
   } | null>(null);
   const workThreadRequestRef = useRef(0);
 
+  const openWorkSession = useCallback((sessionId: string) => {
+    setThread(null);
+    setWorkScope("channel");
+    setWorkSessionId(sessionId);
+    setWorkOpen(true);
+  }, []);
+
+  // A scope chip means "show me that list". The panel keeps its selected
+  // session across close/reopen (returning to where you were), so while a
+  // detail is open the chips would otherwise change state with no visible
+  // effect — a live-looking control that does nothing. Clearing the selection
+  // makes the chip's promise and the screen agree.
+  const changeWorkScope = useCallback((scope: WorkScope) => {
+    setWorkSessionId(null);
+    setWorkScope(scope);
+  }, []);
+
   const openWorkSessionThread = useCallback(
     async (workSession: WorkSession) => {
       const request = workThreadRequestRef.current + 1;
@@ -509,6 +526,7 @@ export function ChatShell() {
                 setWorkOpen(false);
                 setThread(message);
               }}
+              onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
@@ -564,6 +582,7 @@ export function ChatShell() {
           channelId={channelId}
           root={thread}
           directory={directory}
+          onOpenWorkSession={openWorkSession}
           onClose={() => setThread(null)}
         />
       )}
@@ -572,7 +591,7 @@ export function ChatShell() {
         <WorkPanel
           channelId={channelId}
           scope={workScope}
-          onScopeChange={setWorkScope}
+          onScopeChange={changeWorkScope}
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
           openingThreadId={openingWorkThreadId}

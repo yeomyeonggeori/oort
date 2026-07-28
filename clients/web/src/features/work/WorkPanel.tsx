@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
-import { uuidEq, type Channel, type WorkHost, type WorkSession } from "@/lib/api";
+import {
+  resumeWorkSession,
+  uuidEq,
+  type Channel,
+  type WorkHost,
+  type WorkSession,
+} from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
@@ -25,6 +31,7 @@ import {
   emptyStepsDetail,
   eventsForSession,
   foldSessionEvents,
+  canReattachWorkSession,
   isSlowStep,
   lastLine,
   peekRows,
@@ -35,6 +42,7 @@ import {
   workHostName,
   workHostOnline,
   workSessionContinuityStatus,
+  workSessionResumeTargets,
   type WorkScope,
   type WorkSessionEvent,
 } from "./workSessionModel";
@@ -223,21 +231,34 @@ function MySessionRow({
   hosts,
   channelName,
   openingThread,
+  resumeOpen,
+  resumeTargets,
+  resumingHostId,
+  resumeError,
   onOpenDetail,
   onOpenThread,
+  onToggleResume,
+  onResume,
   detailRef,
 }: {
   session: WorkSession;
   hosts: WorkHost[];
   channelName: string;
   openingThread: boolean;
+  resumeOpen: boolean;
+  resumeTargets: WorkHost[];
+  resumingHostId: string | null;
+  resumeError: string | null;
   onOpenDetail: () => void;
   onOpenThread: () => void;
+  onToggleResume: () => void;
+  onResume: (hostId: string) => void;
   detailRef: (element: HTMLButtonElement | null) => void;
 }) {
   const status = workSessionContinuityStatus(session, hosts);
   const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
   const hostOnline = workHostOnline(session, hosts);
+  const canReattach = canReattachWorkSession(session, hosts);
 
   return (
     <li
@@ -304,19 +325,79 @@ function MySessionRow({
           onClick={onOpenDetail}
           data-testid="my-work-session-detail"
         >
-          세션 상세
+          {canReattach ? "이어서 보기" : "세션 상세"}
         </Button>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={onOpenThread}
-          disabled={openingThread}
+          onClick={
+            session.status === "orphaned" ? onToggleResume : onOpenThread
+          }
+          disabled={openingThread || resumingHostId !== null}
+          aria-expanded={
+            session.status === "orphaned" ? resumeOpen : undefined
+          }
           data-testid="my-work-session-thread"
         >
-          {openingThread ? "스레드 여는 중" : "세션 스레드"}
+          {openingThread
+            ? "스레드 여는 중"
+            : session.status === "orphaned"
+              ? "새 호스트에서 재개"
+              : "세션 스레드"}
         </Button>
       </div>
+      {session.status === "orphaned" && resumeOpen && (
+        <div
+          className="mt-2 rounded-md border border-line bg-surface-raised px-3 py-2"
+          data-testid="work-session-resume-targets"
+        >
+          <p className="text-meta text-ink">
+            Git 계보만 새 호스트로 이어집니다.
+          </p>
+          <p className="mt-1 text-meta text-ink-muted">
+            이전 호스트의 터미널 상태와 미커밋 변경은 옮겨지지 않습니다.
+          </p>
+          {resumeError !== null && (
+            <p className="mt-2 text-meta text-danger" role="alert">
+              {resumeError}
+            </p>
+          )}
+          {resumeTargets.length === 0 ? (
+            <p className="mt-2 text-meta text-ink-muted">
+              온라인인 다른 호스트가 없습니다. 호스트를 연결한 뒤 다시
+              시도하세요.
+            </p>
+          ) : (
+            <div
+              className="mt-2 flex flex-wrap justify-end gap-2"
+              role="group"
+              aria-label="재개할 호스트"
+            >
+              {resumeTargets.map((host) => (
+                <Button
+                  key={host.id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onResume(host.id)}
+                  disabled={resumingHostId !== null}
+                  aria-label={`${host.displayName}에서 재개`}
+                  className="min-w-0 max-w-full"
+                  data-testid="work-session-resume-host"
+                  data-host-id={host.id}
+                >
+                  <span className="min-w-0 truncate">
+                    {uuidEq(resumingHostId ?? undefined, host.id)
+                      ? "재개하는 중"
+                      : host.displayName}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -362,6 +443,7 @@ function SessionPeek({
     [query.events, session, truncated]
   );
   const tail = peekRows(rows);
+  const canReattach = canReattachWorkSession(session, hosts);
   return (
     <div
       id={peekDomId(session.id)}
@@ -437,7 +519,7 @@ function SessionPeek({
           onClick={onOpen}
           data-testid="work-session-open"
         >
-          전체 보기
+          {canReattach ? "이어서 보기" : "전체 보기"}
         </Button>
       </div>
     </div>
@@ -485,6 +567,9 @@ export function WorkPanel({
   const scope: WorkScope =
     channelId === null && requestedScope === "channel" ? "all" : requestedScope;
   const [peekId, setPeekId] = useState<string | null>(null);
+  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
+  const [resumingHostId, setResumingHostId] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   /**
    * The pane takes the whole chat surface instead of its 320px strip.
@@ -608,7 +693,39 @@ export function WorkPanel({
 
   useEffect(() => {
     setPeekId(null);
+    setResumeSessionId(null);
+    setResumeError(null);
   }, [scope, channelId]);
+
+  const resumeOnHost = useCallback(
+    async (session: WorkSession, targetHostId: string) => {
+      if (resumingHostId !== null) return;
+      setResumingHostId(targetHostId);
+      setResumeError(null);
+      try {
+        const resumed = await resumeWorkSession(
+          workspaceId,
+          session.id,
+          targetHostId
+        );
+        await sessionsQuery.refetch();
+        setResumeSessionId(null);
+        onSelectedIdChange(resumed.id);
+      } catch {
+        setResumeError(
+          "새 호스트에서 재개하지 못했습니다. 호스트 상태를 확인한 뒤 다시 시도하세요."
+        );
+      } finally {
+        setResumingHostId(null);
+      }
+    },
+    [
+      onSelectedIdChange,
+      resumingHostId,
+      sessionsQuery,
+      workspaceId,
+    ]
+  );
 
   /**
    * Folded rows per session, so the row summary and the peek agree exactly.
@@ -847,7 +964,7 @@ export function WorkPanel({
                 }
                 detail={
                   scope === "mine"
-                    ? "내가 시작한 실행 중 또는 연결이 끊긴 세션이 여기에 표시됩니다."
+                    ? "내가 시작한 실행 중, 대기 중 또는 연결이 끊긴 세션이 여기에 표시됩니다."
                     : scope === "channel"
                     ? "다른 채널의 세션은 전체 범위에서 볼 수 있습니다."
                     : "에이전트가 작업을 시작하면 여기에 세션이 쌓입니다."
@@ -879,8 +996,32 @@ export function WorkPanel({
                     hosts={hostsQuery.data ?? []}
                     channelName={nameOf(session.channelId)}
                     openingThread={uuidEq(openingThreadId ?? undefined, session.id)}
+                    resumeOpen={uuidEq(
+                      resumeSessionId ?? undefined,
+                      session.id
+                    )}
+                    resumeTargets={workSessionResumeTargets(
+                      session,
+                      hostsQuery.data ?? [],
+                      auth.member.id
+                    )}
+                    resumingHostId={resumingHostId}
+                    resumeError={
+                      uuidEq(resumeSessionId ?? undefined, session.id)
+                        ? resumeError
+                        : null
+                    }
                     onOpenDetail={() => onSelectedIdChange(session.id)}
                     onOpenThread={() => onOpenThread(session)}
+                    onToggleResume={() => {
+                      setResumeError(null);
+                      setResumeSessionId((current) =>
+                        uuidEq(current ?? undefined, session.id)
+                          ? null
+                          : session.id
+                      );
+                    }}
+                    onResume={(hostId) => void resumeOnHost(session, hostId)}
                     detailRef={(element) => {
                       const key = session.id.toLowerCase();
                       if (element) rowRefs.current.set(key, element);

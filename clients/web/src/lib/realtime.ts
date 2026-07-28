@@ -307,6 +307,33 @@ export interface WorkSessionLifecycleFrame {
   };
 }
 
+export type WorkSessionToolTransitionType =
+  | "work.session.idle"
+  | "work.session.resumed-to-running";
+
+/**
+ * A tool completion or restart inside one still-live work session
+ * (ADR-0139 D1). Swift emits every UUID through `uuidString`, so these ids are
+ * uppercase on the wire; callers compare them through `uuidEq`.
+ */
+export interface WorkSessionToolTransitionFrame {
+  type: WorkSessionToolTransitionType;
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    session_id: string;
+    channel_id: string;
+    root_message_id: string;
+    member_id: string;
+    host_id: string;
+    status: "idle" | "running";
+    exit_code?: number;
+    idle_at?: number;
+    resumed_at?: number;
+  };
+}
+
 export interface WorkSessionACPFrame {
   type: WorkSessionACPType;
   v: number;
@@ -387,6 +414,61 @@ export function asWorkSessionLifecycleFrame(
   const payload = frame.payload as Record<string, unknown> | undefined;
   if (!payload || typeof payload.session_id !== "string") return null;
   return frame as WorkSessionLifecycleFrame;
+}
+
+const WORK_TOOL_TRANSITION_TYPES: ReadonlySet<string> =
+  new Set<WorkSessionToolTransitionType>([
+    "work.session.idle",
+    "work.session.resumed-to-running",
+  ]);
+
+/**
+ * A publication carrying a live-session tool transition. Every field is
+ * checked before the frame reaches React: a string/number inversion returns
+ * null rather than creating a plausible but wrong state.
+ */
+export function asWorkSessionToolTransitionFrame(
+  data: unknown
+): WorkSessionToolTransitionFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionToolTransitionFrame>;
+  if (
+    typeof frame.type !== "string" ||
+    !WORK_TOOL_TRANSITION_TYPES.has(frame.type) ||
+    typeof frame.v !== "number" ||
+    typeof frame.ts !== "number" ||
+    typeof frame.seq !== "number"
+  ) {
+    return null;
+  }
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (
+    !payload ||
+    typeof payload.session_id !== "string" ||
+    typeof payload.channel_id !== "string" ||
+    typeof payload.root_message_id !== "string" ||
+    typeof payload.member_id !== "string" ||
+    typeof payload.host_id !== "string" ||
+    typeof payload.status !== "string" ||
+    (payload.exit_code !== undefined && typeof payload.exit_code !== "number")
+  ) {
+    return null;
+  }
+  if (frame.type === "work.session.idle") {
+    if (payload.status !== "idle" || typeof payload.idle_at !== "number") {
+      return null;
+    }
+    if (payload.resumed_at !== undefined) return null;
+  } else {
+    if (
+      payload.status !== "running" ||
+      typeof payload.resumed_at !== "number"
+    ) {
+      return null;
+    }
+    if (payload.idle_at !== undefined) return null;
+  }
+  return frame as WorkSessionToolTransitionFrame;
 }
 
 // ---- huddle lifecycle rail (ADR-0122 / MOMO-643) ---------------------------
@@ -535,6 +617,7 @@ export interface RealtimeHandle {
     channelId: string,
     handlers: {
       onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
+      onToolTransition: (frame: WorkSessionToolTransitionFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       /** An observer capability was issued: re-read the count from Postgres. */
       onObserver: (frame: WorkSessionObserverFrame) => void;
@@ -723,6 +806,7 @@ export function createRealtime(
     channelId: string,
     handlers: {
       onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
+      onToolTransition: (frame: WorkSessionToolTransitionFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       onObserver: (frame: WorkSessionObserverFrame) => void;
       onResync: () => void;
@@ -754,6 +838,11 @@ export function createRealtime(
           const lifecycle = asWorkSessionLifecycleFrame(ctx.data);
           if (lifecycle) {
             handlers.onLifecycle(lifecycle);
+            return;
+          }
+          const transition = asWorkSessionToolTransitionFrame(ctx.data);
+          if (transition) {
+            handlers.onToolTransition(transition);
             return;
           }
           const observer = asWorkSessionObserverFrame(ctx.data);

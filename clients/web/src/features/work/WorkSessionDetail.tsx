@@ -362,10 +362,13 @@ function SessionActions({
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
 
-  const running = session.status === "running";
+  const running = session.status === "running" || session.status === "idle";
   const owner = uuidEq(session.memberId, auth.member.id);
   const endReason = !running
-    ? "이미 끝난 세션입니다."
+    ? session.status === "orphaned"
+      // Same M1 rule as observerStream: orphaned is resumable, not closed.
+      ? "호스트 연결이 끊긴 세션입니다."
+      : "이미 닫힌 세션입니다."
     : !owner
       ? "세션을 시작한 사람만 종료할 수 있습니다."
       : null;
@@ -636,7 +639,7 @@ export function WorkSessionDetail({
             </MetaRow>
             {hostName !== null && <MetaRow label="호스트">{hostName}</MetaRow>}
             {session.exitCode !== undefined && (
-              <MetaRow label="종료 코드">
+              <MetaRow label="마지막 실행 결과">
                 <span data-numeric className="font-mono">
                   {session.exitCode}
                 </span>
@@ -662,7 +665,8 @@ export function WorkSessionDetail({
             terminal is a different path entirely: capability plus a direct
             socket to the host, no relay in between. Drawn under the banner it
             read as the thing the banner was doubting. */}
-        {session.status === "running" && hostOnline === false ? (
+        {(session.status === "running" || session.status === "idle") &&
+        hostOnline === false ? (
           <InlineBanner
             tone="neutral"
             message="호스트 응답이 없어 터미널을 관전할 수 없습니다. 목록으로 돌아가 '세션 스레드'를 선택하면 기록을 계속 확인할 수 있습니다."
@@ -693,7 +697,11 @@ export function WorkSessionDetail({
                   // 종료됨 chip is a small lie the banner used to tell on every
                   // finished remote session (seen on momowebqa 2026-07-26).
                   `원격 호스트에서 ${
-                    session.status === "running" ? "실행 중인" : "실행된"
+                    session.status === "running"
+                      ? "실행 중인"
+                      : session.status === "idle"
+                        ? "대기 중인"
+                        : "실행된"
                   } 세션입니다. 진행 내역 중계는 아직 검증되지 않았으므로, 아래 단계 목록에는 세션 원장에 남은 것만 나옵니다.`
                 : "이 세션의 호스트를 확인하지 못했습니다. 아래 진행 내역이 모두 도착했는지 보장할 수 없습니다."
             }

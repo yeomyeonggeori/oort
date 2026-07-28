@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-650 웹 idle 표시 + 재부착 동선 (#858, 2026-07-28)
+
+- 웹 Work 세션 모델·목록·상세·관전 attach에 `idle`을 살아 있는 중립 상태(`완료 · 대기 중`)로 추가하고, `exitCode`는 종료 판정이 아닌 `마지막 실행 결과`로 표시한다. `work.session.idle`·`work.session.resumed-to-running`은 전 필드 타입을 방어적으로 파싱한 뒤 REST 원장을 다시 읽으며, 목록 응답 전후 어느 순서로 도착해도 stale 응답을 폐기한다.
+- online `running|idle`의 `이어서 보기`는 기존 상세→읽기 전용 관전 attach를 재사용한다. orphaned의 `새 호스트에서 재개`는 별도 호스트 선택기를 열고 기존 resume API로 git 계보만 이어가며, 선택 전에 이전 PTY·미커밋 변경이 옮겨지지 않음을 고지한다. `work_session_idle` 채널 메시지는 과거 이벤트 문법의 클릭 가능한 `대기 전환` 카드로 렌더해 현재 상태와 충돌하지 않는다.
+- typecheck·Vitest 902·production build·lint(기존 warning 4)·design preflight 10/10 PASS. `gate:my-sessions` 번들은 성공했으나 worker의 Chromium Mach-port 권한 거부로 브라우저 단정·red proof와 기존 wire/shell/csp/huddle/resume 게이트는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-644 내 세션 연속성 표면 (#851, 2026-07-28)
 
 - 웹 작업 세션 패널에 기존 채널·전체 범위를 보존한 `내 세션` 관점을 추가했다. 본인 소유의 종료되지 않은 세션만 호스트 이름·online·도구·채널·시작 시각·원장 상태와 함께 표시하며, 터미널 상세와 `rootMessageId` 스레드로 바로 이동한다.

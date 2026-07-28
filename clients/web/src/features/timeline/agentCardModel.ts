@@ -414,7 +414,11 @@ function approvalCard(
   const card: AgentApprovalCard = {
     kind: "approval",
     approvalId,
-    title: readString(props, "title") ?? message.body ?? "승인 요청",
+    // ADR-0139 D3: a dead-host lineage resume must never borrow the same
+    // "이어서" wording as a live-host PTY reattach.
+    title: isResumeOffer
+      ? "새 호스트에서 재개"
+      : readString(props, "title") ?? message.body ?? "승인 요청",
     status,
     isResumeOffer,
     detail: payloadDetail(props),

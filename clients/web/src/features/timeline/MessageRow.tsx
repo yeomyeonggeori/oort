@@ -7,6 +7,8 @@ import { ArtifactCard } from "./ArtifactCard";
 import { CascadeNotice } from "./CascadeNotice";
 import { turnRecordRunId } from "./cascadeModel";
 import { rowPresentation } from "./rowModel";
+import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
+import { workSessionIdleNotice } from "@/features/work/workSessionModel";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -63,12 +65,14 @@ export function MessageRow({
   startsGroup,
   directory,
   onOpenThread,
+  onOpenWorkSession,
   onResend,
 }: {
   message: Message;
   startsGroup: boolean;
   directory: Directory;
   onOpenThread?: (message: Message) => void;
+  onOpenWorkSession?: (sessionId: string) => void;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
 }) {
@@ -95,6 +99,7 @@ export function MessageRow({
     () => rowPresentation(message),
     [message]
   );
+  const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
 
   return (
     <article
@@ -143,7 +148,7 @@ export function MessageRow({
             </time>
           </div>
         )}
-        {keepsBody && (
+        {keepsBody && idleNotice === null && (
           <p
             className={cn(
               "whitespace-pre-wrap break-words text-body leading-relaxed",
@@ -152,6 +157,12 @@ export function MessageRow({
           >
             {deleted ? "삭제된 메시지" : message.body}
           </p>
+        )}
+        {idleNotice && (
+          <WorkSessionIdleCard
+            notice={idleNotice}
+            onOpen={onOpenWorkSession}
+          />
         )}
         {artifact ? (
           <ArtifactCard

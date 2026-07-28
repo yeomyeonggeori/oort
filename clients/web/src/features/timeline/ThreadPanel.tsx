@@ -17,12 +17,14 @@ export function ThreadPanel({
   channelId,
   root,
   directory,
+  onOpenWorkSession,
   onClose,
 }: {
   workspaceId: string;
   channelId: string;
   root: Message;
   directory: Directory;
+  onOpenWorkSession?: (sessionId: string) => void;
   onClose: () => void;
 }) {
   const query = useQuery({
@@ -52,7 +54,12 @@ export function ThreadPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <MessageRow message={root} startsGroup directory={directory} />
+        <MessageRow
+          message={root}
+          startsGroup
+          directory={directory}
+          onOpenWorkSession={onOpenWorkSession}
+        />
         <div className="mx-4 my-2 h-px bg-line" />
 
         {query.isLoading && <SkeletonRows rows={3} className="p-4" />}
@@ -76,6 +83,7 @@ export function ThreadPanel({
             message={reply}
             startsGroup={startsAuthorGroup(replies[index - 1], reply)}
             directory={directory}
+            onOpenWorkSession={onOpenWorkSession}
           />
         ))}
       </div>

@@ -526,10 +526,17 @@ export function observeGate(
   session: Pick<WorkSession, "status" | "observation" | "remoteAttachAvailable">,
   isOwner: boolean
 ): ObserveGate {
-  if (session.status !== "running") {
+  if (session.status !== "running" && session.status !== "idle") {
+    // orphaned is NOT a closed session — the same screen's lineage offers
+    // 새 호스트에서 재개. Calling it closed here demotes a resumable state to a
+    // final one and contradicts the D3 vocabulary one pane over
+    // (design-review 858 M1). Name the actual reason instead.
     return {
       available: false,
-      reason: "끝난 세션은 관전할 수 없습니다. 진행 내역은 아래에 남아 있습니다.",
+      reason:
+        session.status === "orphaned"
+          ? "호스트 연결이 끊겨 관전할 수 없습니다. 진행 내역은 아래에 남아 있습니다."
+          : "닫힌 세션은 관전할 수 없습니다. 진행 내역은 아래에 남아 있습니다.",
     };
   }
   if (!session.remoteAttachAvailable) {
@@ -550,12 +557,15 @@ export function observeGate(
   return { available: true, reason: null };
 }
 
-/** The scope toggle is the OWNER's control, and only while the session runs. */
+/** The scope toggle is the OWNER's control while the host keeps the PTY. */
 export function canChangeObservation(
   session: Pick<WorkSession, "status" | "memberId">,
   viewerMemberId: string
 ): boolean {
-  return session.status === "running" && uuidEq(session.memberId, viewerMemberId);
+  return (
+    (session.status === "running" || session.status === "idle") &&
+    uuidEq(session.memberId, viewerMemberId)
+  );
 }
 
 /**
@@ -572,7 +582,9 @@ export function canChangeObservation(
 export function observationStillPermits(
   session: Pick<WorkSession, "status" | "observation">
 ): ObserverFailure | null {
-  if (session.status !== "running") return "session_ended";
+  if (session.status !== "running" && session.status !== "idle") {
+    return "session_ended";
+  }
   if (session.observation !== "open") return "observation_closed";
   return null;
 }
