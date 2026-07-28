@@ -251,7 +251,9 @@ struct NotifierService: Service {
     }
 
     static func category(messageType: String, propsKind: String?, reason: String) -> String {
-        if propsKind == "resume_offer" { return "momo.work" }
+        if propsKind == "resume_offer" || propsKind == "work_session_idle" {
+            return "momo.work"
+        }
         if messageType == "approval_request" { return "momo.approval" }
         if propsKind == "work_session" { return "momo.work" }
         if reason == "mention" { return "momo.mention" }
@@ -319,6 +321,7 @@ struct NotifierService: Service {
         //     mention:  message.props.mention_member_ids (server projection)
         //     approval: active HUMAN channel members for approval_request
         //     resume:   the orphaned session owner for resume_offer
+        //     idle:     the completed tool's session owner
         //   minus the author, joined to their ACTIVE push tokens (exactly one
         //   per device+env — 010 partial unique index).
         // Reason precedence per member: approval_request > mention > dm.
@@ -346,6 +349,9 @@ struct NotifierService: Service {
                        WHEN (SELECT props_kind FROM msg) = 'resume_offer'
                             AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg))
                          THEN 'resume_offer'
+                       WHEN (SELECT props_kind FROM msg) = 'work_session_idle'
+                            AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg))
+                         THEN 'work_session_idle'
                        WHEN (SELECT message_type FROM msg) = 'approval_request'
                             AND mem.kind = 'human' THEN 'approval_request'
                        WHEN EXISTS (
@@ -367,7 +373,7 @@ struct NotifierService: Service {
                  AND ms.left_at IS NULL
                  AND (
                    ms.member_id <> (SELECT author_member_id FROM msg)
-                   OR (SELECT props_kind FROM msg) = 'resume_offer'
+                   OR (SELECT props_kind FROM msg) IN ('resume_offer', 'work_session_idle')
                  )
             )
             SELECT r.member_id, t.id, d.id, d.platform::text,

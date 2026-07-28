@@ -332,8 +332,37 @@ struct WorkSessionRoutes: Sendable {
                 sessionID: sessionID
             )
         }
-        guard requestDTO.status == "ended" else {
-            throw HTTPError(.badRequest, message: "status must be ended")
+        switch requestDTO.status {
+        case "idle":
+            guard let exitCode = requestDTO.exitCode else {
+                throw HTTPError(.badRequest, message: "idle transition requires exitCode")
+            }
+            return try await transitionToolLifecycle(
+                targetStatus: "idle",
+                exitCode: exitCode,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        case "running":
+            guard requestDTO.exitCode == nil else {
+                throw HTTPError(.badRequest, message: "running transition does not accept exitCode")
+            }
+            return try await transitionToolLifecycle(
+                targetStatus: "running",
+                exitCode: nil,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        case "ended":
+            break
+        default:
+            throw HTTPError(.badRequest, message: "status must be idle, running, or ended")
         }
 
         let session = try await withTenantTransactionUnwrapped(
@@ -398,11 +427,12 @@ struct WorkSessionRoutes: Sendable {
                 """
                 UPDATE work_session
                    SET status = 'ended',
+                       idle_at = NULL,
                        ended_at = clock_timestamp(),
-                       exit_code = \(requestDTO.exitCode),
+                       exit_code = COALESCE(\(requestDTO.exitCode), exit_code),
                        end_reason = NULL
                  WHERE id = \(sessionID)
-                   AND status = 'running'
+                   AND status IN ('running', 'idle')
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
                           root_message_id, tool, label, status, observation,
                           0::bigint AS observer_grant_count,
@@ -449,6 +479,273 @@ struct WorkSessionRoutes: Sendable {
                 VALUES
                   (\(workspaceID), 'broadcast', 'publish',
                    \(endedPayload)::jsonb, \(decoded.2))
+                """,
+                logger: db.logger
+            )
+            return workSession
+        }
+
+        return try WorkSessionResponse(workSession: session)
+            .response(from: request, context: context)
+    }
+
+    private func transitionToolLifecycle(
+        targetStatus: String,
+        exitCode: Int?,
+        request: Request,
+        context: AppRequestContext,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> Response {
+        guard principal.kind == .workHost else {
+            throw HTTPError(
+                .forbidden,
+                message: "tool lifecycle transitions require work host signature"
+            )
+        }
+        let transitionAt = Date()
+        let transitionAtMs = Int64(transitionAt.timeIntervalSince1970 * 1_000)
+
+        let session = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       ws.status, ws.observation,
+                       0::bigint AS observer_grant_count,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code,
+                       ws.end_reason, ws.resumed_from_session_id,
+                       root.seq
+                  FROM work_session ws
+                  JOIN message root ON root.id = ws.root_message_id
+                 WHERE ws.id = \(sessionID)
+                 FOR UPDATE OF ws
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let decoded = try row.decode(
+                (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
+                 String, String, Int64, Bool, Date, Date?, Int?, String?, UUID?, Int64).self
+            )
+            guard decoded.4 == principal.tokenID else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "work host cannot update another host session"
+                )
+            }
+            try await Self.requireChannelMember(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                channelID: decoded.2,
+                memberID: decoded.3
+            )
+
+            if decoded.8 == targetStatus {
+                return Self.sessionDTO(
+                    from: (
+                        decoded.0, decoded.1, decoded.2, decoded.3, decoded.4,
+                        decoded.5, decoded.6, decoded.7, decoded.8, decoded.12,
+                        decoded.13, decoded.14, decoded.15, decoded.16
+                    ),
+                    observation: decoded.9,
+                    observerGrantCount: decoded.10,
+                    remoteAttachAvailable: decoded.11
+                )
+            }
+            let expectedStatus = targetStatus == "idle" ? "running" : "idle"
+            guard decoded.8 == expectedStatus else {
+                throw HTTPError(
+                    .conflict,
+                    message: "work session cannot transition from \(decoded.8) to \(targetStatus)"
+                )
+            }
+
+            let updatedRows: [PostgresRow]
+            if targetStatus == "idle" {
+                // TODO(#859): invoke the T3 provisioner pause hook here after
+                // the server transition contract lands; #856 must not pause it.
+                updatedRows = try await conn.query(
+                    """
+                    UPDATE work_session
+                       SET status = 'idle',
+                           idle_at = \(transitionAt),
+                           exit_code = \(exitCode),
+                           ended_at = NULL,
+                           end_reason = NULL
+                     WHERE id = \(sessionID)
+                       AND status = 'running'
+                    RETURNING id, workspace_id, channel_id, member_id, host_id,
+                              root_message_id, tool, label, status, observation,
+                              0::bigint AS observer_grant_count,
+                              (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)
+                                AS remote_attach_available,
+                              started_at, ended_at, exit_code, end_reason,
+                              resumed_from_session_id
+                    """,
+                    logger: db.logger
+                ).collect()
+            } else {
+                // TODO(#859): invoke the T3 provisioner resume hook here after
+                // the server transition contract lands; #856 must not resume it.
+                updatedRows = try await conn.query(
+                    """
+                    UPDATE work_session
+                       SET status = 'running',
+                           idle_at = NULL,
+                           ended_at = NULL,
+                           end_reason = NULL
+                     WHERE id = \(sessionID)
+                       AND status = 'idle'
+                    RETURNING id, workspace_id, channel_id, member_id, host_id,
+                              root_message_id, tool, label, status, observation,
+                              0::bigint AS observer_grant_count,
+                              (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)
+                                AS remote_attach_available,
+                              started_at, ended_at, exit_code, end_reason,
+                              resumed_from_session_id
+                    """,
+                    logger: db.logger
+                ).collect()
+            }
+            guard let updatedRow = updatedRows.first else {
+                throw HTTPError(.conflict, message: "work session state changed; retry")
+            }
+            let workSession = try Self.decodeSession(updatedRow)
+            let props = Self.cardProps(
+                sessionID: sessionID,
+                tool: workSession.tool,
+                label: workSession.label,
+                status: targetStatus,
+                exitCode: workSession.exitCode
+            )
+            _ = try await conn.query(
+                "UPDATE message SET props = \(Self.jsonString(props))::jsonb WHERE id = \(decoded.5)",
+                logger: db.logger
+            )
+
+            let channel = Self.channelName(workspaceID: workspaceID, channelID: decoded.2)
+            let eventType: String
+            let eventSeq: Int64
+            let idempotencyDiscriminator: String
+            var messagePayload: String?
+            if targetStatus == "idle" {
+                let idleMessageProps: [String: Any] = [
+                    "kind": "work_session_idle",
+                    "session_id": sessionID.uuidString,
+                    "owner_member_id": decoded.3.uuidString,
+                ]
+                let messageRows = try await conn.query(
+                    """
+                    WITH bumped AS (
+                      UPDATE channel_seq
+                         SET last_seq = last_seq + 1
+                       WHERE workspace_id = \(workspaceID)
+                         AND channel_id = \(decoded.2)
+                      RETURNING last_seq AS seq
+                    )
+                    INSERT INTO message
+                      (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                       author_member_id, type, body, props, root_id)
+                    SELECT \(workspaceID), \(decoded.2), b.seq, \(transitionAtMs), 0,
+                           \(decoded.3), 'system'::message_type,
+                           '작업 완료 — idle 대기',
+                           \(Self.jsonString(idleMessageProps))::jsonb, \(decoded.5)
+                      FROM bumped b
+                    RETURNING id, seq
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let messageRow = messageRows.first else {
+                    throw HTTPError(
+                        .internalServerError,
+                        message: "idle notification message insert failed"
+                    )
+                }
+                let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+                eventType = "work.session.idle"
+                eventSeq = seq
+                idempotencyDiscriminator = messageID.uuidString
+                messagePayload = MessageRoutes.broadcastPayload(
+                    centChannel: channel,
+                    messageID: messageID,
+                    channelID: decoded.2,
+                    seq: seq,
+                    type: "system",
+                    body: "작업 완료 — idle 대기",
+                    authorMemberID: decoded.3,
+                    hlcTs: transitionAtMs,
+                    hlcCount: 0,
+                    rootID: decoded.5,
+                    props: idleMessageProps
+                )
+            } else {
+                eventType = "work.session.resumed-to-running"
+                eventSeq = decoded.17
+                idempotencyDiscriminator = String(transitionAtMs)
+            }
+            let transitionPayload = Self.toolLifecyclePayload(
+                eventType: eventType,
+                session: workSession,
+                seq: eventSeq,
+                timestampMs: transitionAtMs,
+                idempotencyDiscriminator: idempotencyDiscriminator
+            )
+            if let messagePayload {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(messagePayload)::jsonb, \(decoded.2)),
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(transitionPayload)::jsonb, \(decoded.2))
+                    """,
+                    logger: db.logger
+                )
+            } else {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(transitionPayload)::jsonb, \(decoded.2))
+                    """,
+                    logger: db.logger
+                )
+            }
+            var auditDetail: [String: Any] = [
+                "schema": targetStatus == "idle"
+                    ? "momo.work_session.idle.v1"
+                    : "momo.work_session.resumed_to_running.v1",
+                "session_id": sessionID.uuidString,
+                "host_id": decoded.4.uuidString,
+            ]
+            if let exitCode { auditDetail["exit_code"] = exitCode }
+            // A workHost principal signs with Ed25519 and carries the HOST id in
+            // `tokenID`; that id is not a `token` row, so writing it here is an
+            // audit_log_via_token_id FK violation (500, caught live by
+            // verify_work_session_idle). No token was used, so NULL is the true
+            // statement; the acting host is already named in detail.host_id.
+            let viaTokenID: UUID? = principal.kind == .workHost ? nil : principal.tokenID
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(decoded.3), \(decoded.3), \(eventType),
+                   'work_session', \(sessionID), \(viaTokenID),
+                   \(Self.jsonString(auditDetail))::jsonb)
                 """,
                 logger: db.logger
             )
@@ -674,7 +971,7 @@ struct WorkSessionRoutes: Sendable {
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
                        ws.status, ws.observation,
                        CASE
-                         WHEN ws.status = 'running'
+                         WHEN ws.status IN ('running', 'idle')
                           AND ws.observation = 'open'
                           AND h.revoked_at IS NULL
                          THEN (
@@ -956,7 +1253,7 @@ struct WorkSessionRoutes: Sendable {
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
                        ws.status, ws.observation,
                        CASE
-                         WHEN ws.status = 'running'
+                         WHEN ws.status IN ('running', 'idle')
                           AND ws.observation = 'open'
                           AND h.revoked_at IS NULL
                          THEN (
@@ -994,7 +1291,7 @@ struct WorkSessionRoutes: Sendable {
                    AND ms.left_at IS NULL
                  WHERE ws.workspace_id = \(workspaceID)
                    AND c.archived_at IS NULL
-                   AND (NOT \(activeOnly) OR ws.status = 'running')
+                   AND (NOT \(activeOnly) OR ws.status IN ('running', 'idle'))
                  ORDER BY ws.started_at DESC, ws.id DESC
                  LIMIT 200
                 """,
@@ -1068,6 +1365,44 @@ struct WorkSessionRoutes: Sendable {
             "idempotency_key": "\(channel):\(eventType):\(session.id)",
         ]
         return jsonString(object)
+    }
+
+    static func toolLifecyclePayload(
+        eventType: String,
+        session: WorkSessionDTO,
+        seq: Int64,
+        timestampMs: Int64,
+        idempotencyDiscriminator: String
+    ) -> String {
+        var payload: [String: Any] = [
+            "session_id": session.id,
+            "channel_id": session.channelId,
+            "root_message_id": session.rootMessageId,
+            "member_id": session.memberId,
+            "host_id": session.hostId,
+            "status": session.status,
+        ]
+        if let exitCode = session.exitCode {
+            payload["exit_code"] = exitCode
+        }
+        if eventType == "work.session.idle" {
+            payload["idle_at"] = timestampMs
+        } else {
+            payload["resumed_at"] = timestampMs
+        }
+        let channel = "ch:ws\(session.workspaceId).\(session.channelId)"
+        return jsonString([
+            "channel": channel,
+            "data": [
+                "type": eventType,
+                "v": 1,
+                "ts": timestampMs,
+                "seq": seq,
+                "payload": payload,
+            ],
+            "idempotency_key":
+                "\(channel):\(eventType):\(session.id):\(idempotencyDiscriminator)",
+        ])
     }
 
     struct ValidatedACPEvent: @unchecked Sendable {
