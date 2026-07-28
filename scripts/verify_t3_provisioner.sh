@@ -207,7 +207,11 @@ NONOP_TOKEN="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   -H 'Content-Type: application/json' \
   --data "$(jq -cn --arg e "$NONOP_EMAIL" --arg p "$NONOP_PASSWORD" --arg w "$WS_ID" \
     '{email:$e,password:$p,workspace:$w}')" | jq -er '.accessToken')"
-READ_ONLY_TOKEN="$(python3 - "$OWNER_ID" "$WS_ID" <<'PY'
+# 읽기 스코프의 불충분함을 증명하려면 토큰 주인이 **인스턴스 운영자가 아니어야**
+# 한다. OWNER_ID로 만들면 그 사람은 허용목록 운영자이기도 해서, 통과/거부가
+# 스코프 때문인지 신원 때문인지 갈리지 않는다(실측: 운영자 경로 복원 후 이
+# 단정이 200으로 뒤집혔다). 비운영자 멤버로 발급한다.
+READ_ONLY_TOKEN="$(python3 - "$NONOP_ID" "$WS_ID" <<'PY'
 import base64, hashlib, hmac, json, sys, time, uuid
 def enc(value):
     raw = json.dumps(value, separators=(",", ":")).encode()
@@ -474,8 +478,12 @@ expect_status 200 "second idle->pause REST transition"
 sleep 2
 CONNECT_CALLS_BEFORE="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
   | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')"
+# reconciler-cas가 빠져 있어 이 블록 전체를 건너뛰었고, 안쪽 fail 단정에 닿지
+# 못해 red proof가 초록이었다(실측 exit 0). 두 red 모드 모두 이 경로를 지나야
+# 한다 — 레이스를 만드는 준비가 여기 있기 때문이다.
 if [ "${T3_GATE_RECONCILER_RACE:-0}" = "1" ] \
-  || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ]; then
+  || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ] \
+  || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "reconciler-cas" ]; then
   curl -fsS -X POST \
     "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-drop-then-block" >/dev/null
 else
