@@ -236,6 +236,13 @@ SET email = EXCLUDED.email,
     password_hash = EXCLUDED.password_hash,
     tz = EXCLUDED.tz;
 
+-- 07-21 fffe303b(#564) 이후 라우트 authz는 workspace_membership을 읽는다. 이
+-- 픽스처는 SQL 지름길로 멤버를 심으므로(실 REST join이면 자동 생성) 직접
+-- 넣어야 한다. 없으면 첫 roster 호출부터 403이다(base에서도 재현 — 선존재).
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$DEMO_WORKSPACE_ID', '$FIXTURE_MEMBER_ID', 'member')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role = EXCLUDED.role;
+
 INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
 VALUES ('$FIXTURE_MEMBERSHIP_ID', '$DEMO_WORKSPACE_ID',
         '$DEMO_CHANNEL_ID', '$FIXTURE_MEMBER_ID', 'member')
