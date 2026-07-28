@@ -17,6 +17,14 @@
 - 판정: xterm+현 PTY/replay 유지, Herdr/Ghostty 교체 금지; Windows 경계에서만 current/Rust PTY/Herdr 비교. plugin v2→skill lifecycle→기존 agent_run 기반 Automation 순서.
 - 검증: docs 41/41 PASS(누락된 prod example WorkHost 2변수는 fixture 주입, `OPS-WORKHOST-ENV-DRIFT` 검수 대상). 다음은 Fable 검수→성재 승인; ROADMAP/BUILD_TICKETS/Issue와 track→main은 건드리지 않았다.
 
+## 2026-07-28 (Fable) · Codex 공식 플러그인 도입 + adversarial-review가 교차 결함 6건 적발 — **track/engine main 동기화 보류**
+- **성재 지적으로 `openai/codex-plugin-cc` 확인** — 내가 "공식 플러그인 없다"고 한 것은 **틀렸다**(공식 마켓플레이스 인덱스에 없을 뿐 별도 마켓플레이스로 추가하는 OpenAI 공식 플러그인, ⭐30k). 설치·setup 완료(ChatGPT 로그인 재사용). 어제 비교표의 오류 2건 정정: 플러그인도 detached 워커를 spawn하므로 **세션 독립·병렬은 fleet 전유물이 아니다**.
+- **파일럿 1회에 값이 나왔다**: track/engine(main +21)에 `adversarial-review --base origin/main` → **needs-attention, high 6 + medium 2**. 개별 PR 게이트는 전부 초록이었는데 **여러 PR이 합쳐진 뒤에만 드러나는 교차 결함**을 잡았다(#856 sweep × #859 pause × #855 원장). 우리 게이트가 못 본 이유도 명확: mock E2B는 pause돼도 응답하고 검증기는 정상 종료 경로만 돈다.
+- **오케스트레이터가 코드로 실증한 3건**: ①**서명이 body를 인증하지 않는다** — base가 `method|path|ws|host|sentAt`뿐이라 같은 PATCH 경로에서 캡처 서명을 **다른 body로 재사용** 가능(idle/running/ended가 body로 갈림 → 세션 종료·과금 조작) ②**sweep이 T3 원장을 안 닫는다** — TierFallbackSweep에 credit/usage 참조 0건, 특히 **paused workd는 heartbeat 불가라 stale sweep 표적**이 되며 미정산+슬롯 점유 ③**pause 순환 의존** — sandbox를 pause하면 resume을 트리거할 workd도 멈춘다.
+- **판정: track/engine main 동기화 보류.** 안전(서명)+과금 신뢰(미정산·이중과금) 결함이라 승인 요청 전 수리가 맞다. T1/T2·uxui 트랙은 무관.
+- **티켓 5장**: #875(보안 서명, 최상) · #876(정산 통합) · #877(순환 의존·host당 세션 유일성·provider 경합) · #878(provisioning idempotency + **topup REST 부재** — 리허설 4단계가 현재는 DB 우회를 뜻함) · #879(interval floor 정밀도·replay 큐 무제한).
+- **#860 2R 검수 완료**(909 tests·gate:agent-hub+red proof 3종·기존 5종 무회귀). 1R FAIL(B2·H4)의 핵심은 **760x480에서 상세 값 폭 0px**과 **404를 "상태 확인 실패"로 보고**(레포가 `useAgentProfile.ts`에 "404는 아직 없다"를 주석으로 적어둔 자리). design-review 2R 가동 중.
+
 ## 2026-07-28 (Fable) · #858·#861 랜딩 — ADR-0139 파생 4장 완결 · #860(허브) 가동
 - **#858 랜딩**(track/uxui `00df3bb4`, PR #872): design-review **PASS(B0·H0)** — D3 어휘 분리("이어서 보기" vs "새 호스트에서 재개") 세 표면 일관·idle 제3 상태 톤·미커밋 고지가 선택보다 먼저. 오케스트레이터 수리 5건: 앱 2(**스코프 칩이 열린 상세를 안 닫음** — 죽은 컨트롤 · **orphaned를 "닫힌 세션"으로 부름** — 재개 가능 상태의 종결 강등, 리뷰 M1) + 게이트 3(접힌 details visible 대기·이중 매칭·낡은 행수). red proof 4종(TRANSITION 포함 — stale 응답 덮어쓰기).
 - **#861 랜딩**(track/engine `af931652`, PR #873): 에이전트별 전역 run REST. 검증기 전관문(채널/전역 요약 동일성 포함)·**red proof에서 내 절단 위치 오류 2회 뒤 진짜 성립**(같은 문자열의 첫 매칭이 커서 검증 쿼리 — 메인 필터를 자르자 이름 있는 실패). 교훈: **red proof는 자른 것이 하중을 받는 술어인지까지 확인**.
