@@ -258,6 +258,18 @@ final class WorkHostDaemonTests: XCTestCase {
         var iterator = buffer.connect().makeAsyncIterator()
         buffer.append(Data("after".utf8))
 
+        // Bounded stream, not bounded next(): with the retained-replay yield
+        // removed (the red proof), a bare `await iterator.next()` waits forever
+        // and the regression shows up as a HANG, not a red assertion — measured
+        // live as swift-test pinned at 0% CPU for 10 minutes. The iterator is
+        // not Sendable, so instead of racing next() across tasks, a watchdog
+        // finishes the buffer (Sendable) after a deadline: a starved stream
+        // then yields nil and the equality assertions below go red by name.
+        let watchdog = Task { [buffer] in
+            try? await Task.sleep(for: .seconds(3))
+            buffer.finish()
+        }
+        defer { watchdog.cancel() }
         let replay = await iterator.next()
         let marker = await iterator.next()
         let live = await iterator.next()
@@ -426,10 +438,20 @@ final class WorkHostDaemonTests: XCTestCase {
             return XCTFail("expected explicit replay boundary")
         }
         try await manager.write("printf 'live-tail\\n'\n", to: sessionID)
-        guard case .bytes(let live)? = await attached.next() else {
-            return XCTFail("expected live bytes after replay boundary")
+        // PTY delivery granularity is machine-dependent: the TTY echo of the
+        // typed command can arrive split into arbitrarily small fragments (a
+        // bare "print" was measured as the first chunk on a loaded host), so a
+        // single-chunk assertion is a timing artifact. Accumulate live bytes
+        // until the marker shows up; the deadline keeps a real regression red.
+        var liveText = ""
+        let liveDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !liveText.contains("live-tail"), ContinuousClock.now < liveDeadline {
+            guard case .bytes(let live)? = await attached.next() else {
+                return XCTFail("expected live bytes after replay boundary")
+            }
+            liveText += String(decoding: live, as: UTF8.self)
         }
-        XCTAssertTrue(String(decoding: live, as: UTF8.self).contains("live-tail"))
+        XCTAssertTrue(liveText.contains("live-tail"))
 
         try await manager.write("ls >/dev/null\n", to: sessionID)
         try await Task.sleep(for: .milliseconds(150))
