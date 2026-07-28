@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MOMO-647 / ADR-0136 T3 provisioner + active-time credit ledger gate.
+# MOMO-647/MOMO-651 — ADR-0136 ledger + ADR-0139 D4 idle pause gate.
 set -euo pipefail
 umask 077
 
@@ -10,6 +10,23 @@ cd "$REPO_ROOT"
 log() { echo "[t3-provisioner] $*"; }
 fail() { echo "[t3-provisioner] FAIL $*" >&2; exit 1; }
 pass() { echo "[t3-provisioner] PASS $*"; }
+
+find_openssl() {
+  local candidate probe
+  probe="$(mktemp "${TMPDIR:-/tmp}/momo-t3-openssl.XXXXXX")"
+  for candidate in openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl /usr/bin/openssl; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" genpkey -algorithm ED25519 -out "$probe" >/dev/null 2>&1; then
+      rm -f "$probe"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  rm -f "$probe"
+  fail "no OpenSSL with Ed25519 support found"
+}
+
+now_ms() { python3 -c 'import time; print(time.time_ns() // 1_000_000)'; }
 
 MIGRATION="server/Migrations/045_t3_provisioner_credit_ledger.sql"
 test -f "$MIGRATION" || fail "missing $MIGRATION"
@@ -35,6 +52,7 @@ fi
 for tool in docker curl jq python3; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing $tool"
 done
+OPENSSL_BIN="$(find_openssl)"
 
 # Deliberately never source .env/.env.worktree. MOMO-647 E2B credentials are
 # orchestrator-owned; this gate uses a literal fake key against a local mock.
@@ -45,8 +63,10 @@ API_PORT="${T3_GATE_API_PORT:-28050}"
 PG_PORT="${T3_GATE_POSTGRES_PORT:-28051}"
 CENT_PORT_HOST="${T3_GATE_CENTRIFUGO_PORT:-28052}"
 HERMES_PORT_HOST="${T3_GATE_HERMES_PORT:-28053}"
+PUSH_PORT_HOST="${T3_GATE_PUSH_RELAY_PORT:-28054}"
 MOCK_E2B_PORT="${T3_GATE_MOCK_E2B_PORT:-28055}"
 BOOT_TIMEOUT="${T3_GATE_BOOT_TIMEOUT:-2400}"
+ASSERT_TIMEOUT="${T3_GATE_ASSERT_TIMEOUT:-120}"
 RUN_TAG="$(date -u +%s)-$$"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-t3-provisioner.XXXXXX")"
 BASE_URL="http://127.0.0.1:$API_PORT"
@@ -54,12 +74,14 @@ GATE_E2B_KEY=""
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" \
-    HERMES_PORT="$HERMES_PORT_HOST" \
+    HERMES_PORT="$HERMES_PORT_HOST" PUSH_RELAY_PORT="$PUSH_PORT_HOST" \
     E2B_API_BASE_URL="http://host.docker.internal:$MOCK_E2B_PORT" \
     E2B_API_KEY="$GATE_E2B_KEY" E2B_TEMPLATE_ID="momo-workd" \
     MOMO_PUBLIC_BASE_URL="https://momo.invalid" \
     MOMO_T3_RATE_MICRO_USD_PER_SECOND=25 \
-    docker compose --env-file "$SAFE_ENV_FILE" -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
+    MOMO_HOST_OFFLINE_GRACE_S=1 NOTIFIER_POLL_INTERVAL_MS=100 \
+    docker compose --env-file "$SAFE_ENV_FILE" -p "$PROJECT" -f "$COMPOSE_FILE" \
+      --profile push "$@"
 }
 
 cleanup() {
@@ -122,6 +144,12 @@ OWNER_EMAIL="t3-owner-$RUN_TAG@momo.local"
 OWNER_PASSWORD="t3-$RUN_TAG"
 TOPUP_REF="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 DUMMY_PROVISION="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+PRIVATE_KEY="$TMP_DIR/work-host-private.pem"
+PUBLIC_DER="$TMP_DIR/work-host-public.der"
+"$OPENSSL_BIN" genpkey -algorithm ED25519 -out "$PRIVATE_KEY" >/dev/null 2>&1
+"$OPENSSL_BIN" pkey -in "$PRIVATE_KEY" -pubout -outform DER \
+  -out "$PUBLIC_DER" >/dev/null 2>&1
+PUBLIC_KEY="$(tail -c 32 "$PUBLIC_DER" | "$OPENSSL_BIN" base64 -A)"
 
 run_sql <<SQL
 BEGIN;
@@ -149,6 +177,24 @@ api() {
   local method="$1" path="$2" data="${3:-}"
   local -a args=(-sS -o "$TMP_DIR/response.json" -w '%{http_code}' -X "$method"
     -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN")
+  [ -n "$data" ] && args+=(--data "$data")
+  STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
+  BODY="$(<"$TMP_DIR/response.json")"
+}
+host_api() {
+  local method="$1" path="$2" host_id="$3" data="${4:-}"
+  local sent_at payload signature
+  sent_at="$(now_ms)"
+  payload="$TMP_DIR/work-host-request-$sent_at.txt"
+  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
+    "$method" "$path" "$WS_ID" "$host_id" "$sent_at" >"$payload"
+  signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" \
+    -in "$payload" | "$OPENSSL_BIN" base64 -A)"
+  local -a args=(-sS -o "$TMP_DIR/response.json" -w '%{http_code}' -X "$method"
+    -H 'Content-Type: application/json'
+    -H "Authorization: MomoHost $host_id"
+    -H "X-Momo-Work-Host-Sent-At: $sent_at"
+    -H "X-Momo-Work-Host-Signature: $signature")
   [ -n "$data" ] && args+=(--data "$data")
   STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
   BODY="$(<"$TMP_DIR/response.json")"
@@ -215,7 +261,6 @@ SELECT count(*) FROM work_cloud_host
 SQL
 )" = "1" ] || fail "raw bootstrap token reached PostgreSQL"
 
-PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
 REGISTER_BODY="$(jq -cn --arg key "$PUBLIC_KEY" \
   '{scope:"workspace",type:"cloud",displayName:"T3 gate",publicKey:$key,
     capabilities:{"tool.codex":true}}')"
@@ -236,15 +281,83 @@ expect_status 201 "T3 work session create"
 SESSION_ID="$(printf '%s' "$BODY" | jq -er '.workSession.id')"
 sleep 2
 
-api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/pause"
-expect_status 200 "T3 pause"
+SESSION_PATH="/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID"
+host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"idle","exitCode":0}'
+expect_status 200 "idle->pause REST transition"
+[ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/pause")] | length')" = "1" ] \
+  || fail "idle->pause did not call E2B pause exactly once"
+[ "$(sql_value <<SQL
+SELECT count(*) FROM work_session ws
+JOIN work_cloud_host ch ON ch.host_id=ws.host_id
+JOIN work_host_usage u ON u.session_id=ws.id
+JOIN work_host_usage_interval i ON i.usage_id=u.id
+WHERE ws.id='$SESSION_ID' AND ws.status='idle' AND ch.state='paused'
+  AND i.state='paused' AND i.ended_at IS NULL;
+SQL
+)" = "1" ] || fail "idle->pause did not open the paused interval boundary"
+pass "idle->pause called E2B and opened paused usage"
+
 sleep 2
-api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/resume"
-expect_status 200 "T3 resume"
+host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"running"}'
+expect_status 200 "running->resume REST transition"
+[ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')" = "1" ] \
+  || fail "running->resume did not call E2B connect exactly once"
+[ "$(sql_value <<SQL
+SELECT count(*) FROM work_session ws
+JOIN work_cloud_host ch ON ch.host_id=ws.host_id
+JOIN work_host_usage u ON u.session_id=ws.id
+JOIN work_host_usage_interval i ON i.usage_id=u.id
+WHERE ws.id='$SESSION_ID' AND ws.status='running' AND ch.state='running'
+  AND i.state='active' AND i.ended_at IS NULL;
+SQL
+)" = "1" ] || fail "running->resume did not reopen the active interval boundary"
+pass "running->resume called E2B and reopened active usage"
+
 sleep 2
-api PATCH "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
-  '{"status":"ended","exitCode":0}'
-expect_status 200 "T3 session end and settle"
+host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"idle","exitCode":0}'
+expect_status 200 "second idle->pause REST transition"
+sleep 2
+curl -fsS -X POST "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-missing" \
+  >/dev/null
+host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"running"}'
+expect_status 410 "missing sandbox resume"
+compose up -d notifier
+
+deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+ORPHAN_RESULT=""
+while [ "$(date -u +%s)" -lt "$deadline" ]; do
+  ORPHAN_RESULT="$(sql_value <<SQL
+SELECT
+  (SELECT count(*) FROM work_session
+    WHERE id='$SESSION_ID' AND status='orphaned') || ':' ||
+  (SELECT count(*) FROM work_cloud_host
+    WHERE host_id='$HOST_ID' AND state='destroyed') || ':' ||
+  (SELECT count(*) FROM work_host
+    WHERE id='$HOST_ID' AND revoked_at IS NOT NULL) || ':' ||
+  (SELECT count(*) FROM audit_log
+    WHERE action='work.cloud.resume_failed'
+      AND lower(detail->>'session_id')=lower('$SESSION_ID')
+      AND detail->>'reason'='sandbox_missing') || ':' ||
+  (SELECT count(*) FROM audit_log
+    WHERE action='work.session.orphaned' AND target_id='$SESSION_ID') || ':' ||
+  (SELECT count(*) FROM outbox
+    WHERE payload->'data'->>'type'='work.session.orphaned'
+      AND lower(payload->'data'->'payload'->>'session_id')=lower('$SESSION_ID')) || ':' ||
+  (SELECT count(*) FROM message
+    WHERE props->>'kind'='resume_offer'
+      AND lower(props->>'session_id')=lower('$SESSION_ID'));
+SQL
+)"
+  [ "$ORPHAN_RESULT" = "1:1:1:1:1:1:1" ] && break
+  sleep 1
+done
+[ "$ORPHAN_RESULT" = "1:1:1:1:1:1:1" ] || {
+  compose logs --tail 160 api notifier >&2 || true
+  fail "resume missing did not reach named orphaned sweep path: $ORPHAN_RESULT"
+}
+pass "missing sandbox -> destroyed/revoked -> existing orphaned sweep"
 
 INTERVALS="$(sql_value <<SQL
 SELECT count(*) || ':' ||
@@ -258,9 +371,9 @@ SQL
 IFS=: read -r INTERVAL_COUNT PAUSED_ZERO ACTIVE_SECONDS <<EOF
 $INTERVALS
 EOF
-[ "$INTERVAL_COUNT" = "3" ] || fail "expected active/paused/active intervals, got $INTERVALS"
-[ "$PAUSED_ZERO" = "1" ] || fail "paused interval counted as active: $INTERVALS"
-[ "$ACTIVE_SECONDS" -ge 2 ] && [ "$ACTIVE_SECONDS" -le 6 ] \
+[ "$INTERVAL_COUNT" = "4" ] || fail "expected active/paused/active/paused intervals, got $INTERVALS"
+[ "$PAUSED_ZERO" = "2" ] || fail "paused interval counted as active: $INTERVALS"
+[ "$ACTIVE_SECONDS" -ge 2 ] && [ "$ACTIVE_SECONDS" -le 8 ] \
   || fail "unexpected active seconds $ACTIVE_SECONDS"
 
 LEDGER_ACTIVE="$(sql_value <<SQL
@@ -274,6 +387,19 @@ SELECT -delta_micro_usd FROM credit_entry
 SQL
 )"
 [ "$DEBIT" = "$((ACTIVE_SECONDS * 25))" ] || fail "credit debit mismatch"
+
+LATENCY_AUDIT="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE target_id='$SESSION_ID'
+   AND action IN ('work.session.idle','work.session.resumed-to-running')
+   AND detail->>'cloud_provider'='e2b'
+   AND jsonb_typeof(detail->'cloud_provisioner_latency_ms')='number'
+   AND (detail->>'cloud_provisioner_latency_ms')::bigint >= 0;
+SQL
+)"
+[ "$LATENCY_AUDIT" = "3" ] \
+  || fail "pause/resume latency evidence missing from lifecycle audit: $LATENCY_AUDIT"
+pass "pause/resume latency is queryable from audit; pause wall time bills zero"
 
 # Tenant isolation under the real NOBYPASSRLS app role.
 RLS_VISIBLE="$(run_sql -tA <<SQL | tr -d '[:space:]'
@@ -311,9 +437,7 @@ SQL
     || fail "red proof: reverted pause accounting bills $REVERTED_TOTAL vs active-only $LEDGER_ACTIVE"
 fi
 
-api DELETE "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud"
-expect_status 200 "T3 destroy"
 curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq -e '.states.momo647sandbox == "destroyed"' >/dev/null
+  | jq -e '.states.momo647sandbox == "missing"' >/dev/null
 
-pass "ledger consistency, pause exclusion, credit debit, RLS isolation, lifecycle"
+pass "idle pause/resume, orphan fallback, ledger consistency, credit debit, RLS isolation"

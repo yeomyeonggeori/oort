@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-651 T3 idle pause + 활성시간 미계상 실배선 (#859, 2026-07-28)
+
+- cloud host의 signed `running→idle` 전이만 E2B pause와 `active→paused` interval 경계를 호출하고, `idle→running`은 E2B resume 뒤 `paused→active`를 재개한다. 일반 workd/desktop 호스트는 cloud 설정·프로비저너·원장을 건드리지 않는다.
+- E2B가 resume에 404/410을 답하면 paused 원장을 정산하고 cloud host를 `destroyed`·revoke한 뒤 기존 offline sweep이 `orphaned` 이벤트·감사·resume fallback을 수행한다. pause/resume provider 지연은 lifecycle audit의 `cloud_provisioner_latency_ms`로 조회 가능하다.
+- 서버 build·339 tests와 T3 verifier 정적 검증 PASS. signed REST→mock E2B→원장→Notifier sweep Docker gate, idle hook 제거 red proof, 실 E2B pause/resume smoke는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-649 daemon shell PTY + host-local replay core (#857, 2026-07-28)
 
 - PTY 도구는 로그인 셸의 canonical profile-command wrapper로 실행되어 종료 뒤 같은 PTY·workdir을 보존하고 signed lifecycle PATCH로 `idle(exitCode)`을 보고한다. 일반 셸 명령은 상태 소음에서 제외하며 같은 canonical command 재실행만 `running` 복귀를 만든다.

@@ -1,3 +1,4 @@
+import AsyncHTTPClient
 import Foundation
 import Hummingbird
 import Logging
@@ -89,12 +90,18 @@ struct WorkSessionRoutes: Sendable {
 
     let db: Database
     private let acpEventLimiter: SlidingWindowRateLimiter
+    private let httpClient: HTTPClient
+    private let cloudProvisionerConfig: CloudProvisionerConfig
 
     init(
         db: Database,
+        httpClient: HTTPClient,
+        cloudProvisionerConfig: CloudProvisionerConfig,
         acpEventLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter()
     ) {
         self.db = db
+        self.httpClient = httpClient
+        self.cloudProvisionerConfig = cloudProvisionerConfig
         self.acpEventLimiter = acpEventLimiter
     }
 
@@ -506,6 +513,12 @@ struct WorkSessionRoutes: Sendable {
         }
         let transitionAt = Date()
         let transitionAtMs = Int64(transitionAt.timeIntervalSince1970 * 1_000)
+        let cloudLifecycle = try await performCloudLifecycleIfNeeded(
+            targetStatus: targetStatus,
+            principal: principal,
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        )
 
         let session = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
@@ -570,8 +583,22 @@ struct WorkSessionRoutes: Sendable {
 
             let updatedRows: [PostgresRow]
             if targetStatus == "idle" {
-                // TODO(#859): invoke the T3 provisioner pause hook here after
-                // the server transition contract lands; #856 must not pause it.
+                if cloudLifecycle != nil {
+                    try await CloudUsageLedger.pause(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        sessionID: sessionID
+                    )
+                    try await updateCloudHostState(
+                        conn: conn,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        expected: "running",
+                        next: "paused"
+                    )
+                }
                 updatedRows = try await conn.query(
                     """
                     UPDATE work_session
@@ -593,8 +620,22 @@ struct WorkSessionRoutes: Sendable {
                     logger: db.logger
                 ).collect()
             } else {
-                // TODO(#859): invoke the T3 provisioner resume hook here after
-                // the server transition contract lands; #856 must not resume it.
+                if cloudLifecycle != nil {
+                    try await CloudUsageLedger.resume(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        sessionID: sessionID
+                    )
+                    try await updateCloudHostState(
+                        conn: conn,
+                        workspaceID: workspaceID,
+                        hostID: decoded.4,
+                        expected: "paused",
+                        next: "running"
+                    )
+                }
                 updatedRows = try await conn.query(
                     """
                     UPDATE work_session
@@ -731,6 +772,11 @@ struct WorkSessionRoutes: Sendable {
                 "host_id": decoded.4.uuidString,
             ]
             if let exitCode { auditDetail["exit_code"] = exitCode }
+            if let cloudLifecycle {
+                auditDetail["cloud_provider"] = "e2b"
+                auditDetail["cloud_action"] = cloudLifecycle.action
+                auditDetail["cloud_provisioner_latency_ms"] = cloudLifecycle.latencyMs
+            }
             // A workHost principal signs with Ed25519 and carries the HOST id in
             // `tokenID`; that id is not a `token` row, so writing it here is an
             // audit_log_via_token_id FK violation (500, caught live by
@@ -754,6 +800,241 @@ struct WorkSessionRoutes: Sendable {
 
         return try WorkSessionResponse(workSession: session)
             .response(from: request, context: context)
+    }
+
+    private struct CloudLifecycleEvidence: Sendable {
+        let action: String
+        let latencyMs: Int64
+    }
+
+    private struct CloudLifecycleTarget: Sendable {
+        let sandboxID: String
+    }
+
+    /// Host identity is the T3 boundary: ordinary workd/desktop hosts return
+    /// before cloud config, provider calls, or usage-ledger mutations.
+    private func performCloudLifecycleIfNeeded(
+        targetStatus: String,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> CloudLifecycleEvidence? {
+        guard let target = try await cloudLifecycleTarget(
+            targetStatus: targetStatus,
+            principal: principal,
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        ) else { return nil }
+
+        let readyConfig = try CloudProvisionerRoutes.readyConfig(cloudProvisionerConfig)
+        let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
+        let action = targetStatus == "idle" ? "pause" : "resume"
+        let startedAt = Date()
+        do {
+            if targetStatus == "idle" {
+                try await provisioner.pause(sandboxID: target.sandboxID)
+            } else {
+                try await provisioner.resume(sandboxID: target.sandboxID)
+            }
+        } catch {
+            let latencyMs = Self.elapsedMilliseconds(since: startedAt)
+            if targetStatus == "running", Self.isMissingSandbox(error) {
+                try await recordMissingCloudSandbox(
+                    workspaceID: workspaceID,
+                    sessionID: sessionID,
+                    hostID: principal.tokenID,
+                    latencyMs: latencyMs,
+                    error: error
+                )
+                throw HTTPError(
+                    .gone,
+                    message: "momo Cloud 샌드박스가 사라져 세션을 orphaned 전이 대기 상태로 변경했습니다."
+                )
+            }
+            throw CloudProvisionerRoutes.httpError(error)
+        }
+        return CloudLifecycleEvidence(
+            action: action,
+            latencyMs: Self.elapsedMilliseconds(since: startedAt)
+        )
+    }
+
+    private func cloudLifecycleTarget(
+        targetStatus: String,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> CloudLifecycleTarget? {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.host_id, ws.status, h.type, ws.channel_id, ws.member_id,
+                       ch.provider_sandbox_id, ch.state
+                  FROM work_session ws
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
+                  LEFT JOIN work_cloud_host ch
+                    ON ch.host_id = h.id
+                   AND ch.workspace_id = h.workspace_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.id = \(sessionID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            let (hostID, sessionStatus, hostType, channelID, memberID, sandboxID, cloudState) =
+                try row.decode(
+                    (UUID, String, String, UUID, UUID, String?, String?).self
+                )
+            guard hostID == principal.tokenID else { return nil }
+            if sessionStatus == targetStatus { return nil }
+            let expectedSessionStatus = targetStatus == "idle" ? "running" : "idle"
+            guard sessionStatus == expectedSessionStatus else { return nil }
+            guard hostType == "cloud" else { return nil }
+            try await Self.requireChannelMember(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                channelID: channelID,
+                memberID: memberID
+            )
+            guard let sandboxID, let cloudState else {
+                throw HTTPError(
+                    .serviceUnavailable,
+                    message: "momo Cloud 샌드박스 연결 정보가 준비되지 않았습니다."
+                )
+            }
+            let expectedCloudState = targetStatus == "idle" ? "running" : "paused"
+            guard cloudState == expectedCloudState else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud 호스트 상태가 세션 상태와 일치하지 않습니다."
+                )
+            }
+            return CloudLifecycleTarget(sandboxID: sandboxID)
+        }
+    }
+
+    private func updateCloudHostState(
+        conn: PostgresConnection,
+        workspaceID: UUID,
+        hostID: UUID,
+        expected: String,
+        next: String
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            UPDATE work_cloud_host
+               SET state = \(next), updated_at = clock_timestamp()
+             WHERE workspace_id = \(workspaceID)
+               AND host_id = \(hostID)
+               AND state = \(expected)
+            RETURNING id
+            """,
+            logger: db.logger
+        ).collect()
+        guard rows.first != nil else {
+            throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+        }
+    }
+
+    /// A provider-confirmed missing sandbox is terminal. Close the paid usage
+    /// interval, revoke the dead host, and make it immediately eligible for the
+    /// existing offline sweep, which owns orphaned events/cards/auto fallback.
+    private func recordMissingCloudSandbox(
+        workspaceID: UUID,
+        sessionID: UUID,
+        hostID: UUID,
+        latencyMs: Int64,
+        error: Error
+    ) async throws {
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT member_id
+                  FROM work_session
+                 WHERE workspace_id = \(workspaceID)
+                   AND id = \(sessionID)
+                   AND host_id = \(hostID)
+                   AND status = 'idle'
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let memberID = try rows.first?.decode(UUID.self) else {
+                throw HTTPError(.conflict, message: "work session state changed; retry")
+            }
+            try await CloudUsageLedger.settle(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+            let cloudRows = try await conn.query(
+                """
+                UPDATE work_cloud_host
+                   SET state = 'destroyed', updated_at = clock_timestamp()
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND state IN ('paused', 'ready')
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            guard cloudRows.first != nil else {
+                throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+            }
+            _ = try await conn.query(
+                """
+                UPDATE work_host
+                   SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+                       last_seen_at = clock_timestamp() - interval '100 years'
+                 WHERE workspace_id = \(workspaceID)
+                   AND id = \(hostID)
+                """,
+                logger: db.logger
+            )
+            let upstreamStatus: Int?
+            if case CloudProvisionerError.upstreamStatus(let status) = error {
+                upstreamStatus = status
+            } else {
+                upstreamStatus = nil
+            }
+            let detail: [String: Any] = [
+                "schema": "momo.work_cloud.resume_failed.v1",
+                "host_id": hostID.uuidString,
+                "session_id": sessionID.uuidString,
+                "provider": "e2b",
+                "reason": "sandbox_missing",
+                "upstream_status": upstreamStatus ?? NSNull(),
+                "provisioner_latency_ms": latencyMs,
+                "orphan_transition": "host_offline_sweep",
+            ]
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(memberID), \(memberID),
+                   'work.cloud.resume_failed', 'work_host', \(hostID), NULL,
+                   \(Self.jsonString(detail))::jsonb)
+                """,
+                logger: db.logger
+            )
+        }
+    }
+
+    private static func isMissingSandbox(_ error: Error) -> Bool {
+        guard case CloudProvisionerError.upstreamStatus(let status) = error else {
+            return false
+        }
+        return status == 404 || status == 410
+    }
+
+    private static func elapsedMilliseconds(since startedAt: Date) -> Int64 {
+        max(0, Int64(Date().timeIntervalSince(startedAt) * 1_000))
     }
 
     private func recordACPEvent(

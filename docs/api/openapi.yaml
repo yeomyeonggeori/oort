@@ -1946,7 +1946,12 @@ paths:
         work.session.resumed-to-running with the same identity/status fields
         plus resumed_at and the preserved exit_code. Idle also commits one
         system thread message ("작업 완료 — idle 대기") so NotifierWorker can
-        notify only the owner through the existing id-only push envelope.
+        notify only the owner through the existing id-only push envelope. When
+        the bound host is a momo Cloud host, running-to-idle also pauses its E2B
+        sandbox and opens a zero-active-seconds paused interval; idle-to-running
+        resumes E2B before reopening active usage. A provider-confirmed missing
+        sandbox closes usage, destroys and revokes the cloud host, and schedules
+        the existing offline sweep to publish the orphaned lifecycle.
         The creating member, or the bound host, may explicitly end a running
         or idle session. The ledger row and card props update beside a
         no-version work.session.ended outbox. A human session owner may instead set
@@ -2000,8 +2005,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: The bound momo Cloud sandbox no longer exists; orphaned fallback is scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The momo Cloud provisioner is unavailable; non-cloud hosts do not use it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume:
     post:
