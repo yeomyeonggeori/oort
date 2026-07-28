@@ -20,6 +20,7 @@ Major bundled/linked components:
 - SwiftCentrifuge / centrifuge-swift (MIT) — https://github.com/centrifugal/centrifuge-swift
 - SwiftTerm (MIT) — https://github.com/migueldeicaza/SwiftTerm
 - xterm.js / @xterm/xterm (MIT) — https://github.com/xtermjs/xterm.js
+- LiveKit JavaScript Client SDK / livekit-client (Apache-2.0) — https://github.com/livekit/client-sdk-js
 - SwiftProtobuf (Apache-2.0) — https://github.com/apple/swift-protobuf
 - pgvector (PostgreSQL License) — https://github.com/pgvector/pgvector
 - Node.js (MIT) — https://github.com/nodejs/node

@@ -12,6 +12,7 @@ import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
+import { AgentHubRoute } from "@/features/agentHub/AgentHubRoute";
 import { forgetQuota } from "@/features/settings/quotaModel";
 import { forgetUsage } from "@/features/settings/usageModel";
 
@@ -87,6 +88,7 @@ export function App() {
           <Route path="inbox" element={<InboxRoute />} />
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
+          <Route path="agents" element={<AgentHubRoute />} />
           <Route path="settings" element={<SettingsRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

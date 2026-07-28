@@ -59,6 +59,32 @@
 - `transcription` compose profile에 pinned LiveKit Egress+dev Redis를 옵트인으로 추가했고, 전사 queue/track은 기존 attachment FK만 쓴다. 녹음 동의 원장·전원 동의 fail-closed REST·채널 시스템 고지·종료 시 queued job을 추가했다.
 - server build/test와 정적·mock 검증은 worker에서 수행한다. Docker Egress 기동, 실오디오 3모델 실측, 동의 없는 녹음 409 red 증명은 오케스트레이터 전까지 `runtime-unverified`다.
 
+## MOMO-652 웹 에이전트 허브 탭 v1 (#860, 2026-07-28)
+
+- 웹 사이드바의 워크스페이스 전역 `에이전트` 표면에 roster 기반 목록, agentWorkingSignal 현재 작업, 프로필·지시문·모델·pause, 읽기 전용 capability/도구 제한, 메모리 list/search·invalidate·visibility grants, #861 cursor run 이력·기존 상세를 통합했다. 기존 빠른 라우팅 프로필 다이얼로그 진입점은 유지하고 같은 query/save 로직을 재사용한다.
+- 메모리 policy·전체 삭제·외부 제공자 동의와 schedule 실행기는 범위 밖으로 유지했으며, 예약 데이터는 "실행기 미구현"으로 표시한다. typecheck·Vitest 909·production build·lint(기존 warning 4)·design preflight 10/10·design-review(Blocker 0, High 0) PASS; `gate:agent-hub`와 기존 Playwright 게이트는 오케스트레이터 실행 대기(`runtime-unverified`).
+- 2R은 900px 아래 roster/detail 단일 컬럼, 비례형 상세 라벨 축과 shrink 불가 탭을 적용했다. 프로필 404는 공용 `missing` 판정으로 실패와 분리하고, sidebar/허브 작업 칩은 rail 연결 신뢰도를 공유하며 stale 만료는 오프라인에도 전진한다. 빈 alert·내부 run 문구·오프라인 지시문 대비·메모리 kind/무효 상태·cron 문구와 effort-table gate 목을 함께 고쳤다.
+- 2R 검증: typecheck·Vitest 909·production build·lint(기존 warning 4)·design preflight 10/10 PASS. `gate:agent-hub`에는 760x480 `dd` 실폭, 긴 이름 탭 한 줄, profile 404 비실패, effort ready 단정을 추가했으며 Playwright 실행과 기존 red proof 3종은 오케스트레이터 대기(`runtime-unverified`).
+
+## MOMO-650 웹 idle 표시 + 재부착 동선 (#858, 2026-07-28)
+
+- 웹 Work 세션 모델·목록·상세·관전 attach에 `idle`을 살아 있는 중립 상태(`완료 · 대기 중`)로 추가하고, `exitCode`는 종료 판정이 아닌 `마지막 실행 결과`로 표시한다. `work.session.idle`·`work.session.resumed-to-running`은 전 필드 타입을 방어적으로 파싱한 뒤 REST 원장을 다시 읽으며, 목록 응답 전후 어느 순서로 도착해도 stale 응답을 폐기한다.
+- online `running|idle`의 `이어서 보기`는 기존 상세→읽기 전용 관전 attach를 재사용한다. orphaned의 `새 호스트에서 재개`는 별도 호스트 선택기를 열고 기존 resume API로 git 계보만 이어가며, 선택 전에 이전 PTY·미커밋 변경이 옮겨지지 않음을 고지한다. `work_session_idle` 채널 메시지는 과거 이벤트 문법의 클릭 가능한 `대기 전환` 카드로 렌더해 현재 상태와 충돌하지 않는다.
+- typecheck·Vitest 902·production build·lint(기존 warning 4)·design preflight 10/10 PASS. `gate:my-sessions` 번들은 성공했으나 worker의 Chromium Mach-port 권한 거부로 브라우저 단정·red proof와 기존 wire/shell/csp/huddle/resume 게이트는 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-644 내 세션 연속성 표면 (#851, 2026-07-28)
+
+- 웹 작업 세션 패널에 기존 채널·전체 범위를 보존한 `내 세션` 관점을 추가했다. 본인 소유의 종료되지 않은 세션만 호스트 이름·online·도구·채널·시작 시각·원장 상태와 함께 표시하며, 터미널 상세와 `rootMessageId` 스레드로 바로 이동한다.
+- `online:false + running`은 서버 상태를 orphaned로 추정하지 않고 `호스트 응답 없음`으로 표시하며 관전을 막는다. 호스트 응답이 늦는 동안 활성 행을 그리지 않고, 호스트 0건·세션 0건·로드 오류를 분리했다.
+- 2R에서 범위 칩의 축소 우선순위를 고정하고 세 관점 모두 host projection을 기다리게 했다. 오프라인 세션도 상세에는 진입하되 터미널만 거부하며, 호스트 0건이어도 원장 세션 행과 중립 미지 폴백을 보존한다.
+- typecheck·Vitest 897·production build·design preflight 10/10 PASS. `gate:my-sessions`와 red proof 2종은 오케스트레이터 실행 대기(`runtime-unverified`).
+
+## MOMO-643 웹 허들 복원 (#850, 2026-07-28)
+
+- 웹 채널 헤더에 허들 미구성(503)·활성 없음·Live 참가자·참가 중·오류/오프라인 상태와 시작·참가·마이크·나가기를 복원했다. `huddle_started`·`huddle_participants_changed`·`huddle_ended`는 방어적으로 파싱하며, 종료 tombstone이 늦은 active 응답의 Live 배지 부활을 막는다.
+- `livekit-client`(Apache-2.0)는 참가 동작 뒤에만 lazy-load되고 join 응답의 `livekitUrl`만 사용한다. pagehide/beforeunload keepalive leave, 로컬 disconnect, 토큰 만료 안내를 추가했다. Tauri WKWebView 마이크 권한과 실오디오는 오케스트레이터 실측 대기(`runtime-unverified`).
+- 2R: 허들 헤더 표면을 320px 계약 안에서 참가자 요약부터 축소하고 오류·오프라인 문장을 아래 `InlineBanner` 행으로 옮겼다. joined의 Live·마이크·나가기는 REST 프로젝션 500/503과 분리했으며, LiveKit `connect-src` CSP 거부와 마이크 캡처 `SecurityError`를 서로 다른 국면으로 분류한다.
+
 ## MOMO-637 플러그인 연결 동의 모달 + 다중 scope (#839, 2026-07-27)
 
 - 웹 앱 권한 변경은 명시 동의 모달을 거친 뒤에만 scope별 grant/revoke POST를 만들며, 선언된 scope의 체크박스 선택·관리자 승인·발행자/출처·egress·위험도/승인 티어·선택 약관 링크를 실제 manifest 데이터로 표시한다. 부분 실패는 성공한 scope와 실패한 scope를 분리해 표시하고, 현재 유효 tool policy에서 scope별 권한 상태를 다시 계산한다.

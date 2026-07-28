@@ -184,6 +184,87 @@ npm run build && npm run gate:csp
 CSP_GATE_PROVE_RED_STYLE=1 npm run gate:csp   # red proof: MUST fail (xterm needs style-src)
 ```
 
+The huddle browser gate uses REST and Centrifugo protocol fixtures, without a
+backend, credentials, microphone, or LiveKit server. Its `huddle-gate` build
+mode replaces only the audio connector while preserving the production lazy
+import in normal builds. It locks the fail-closed 503 state, active
+badge/participant names, the `huddle_ended` transition, the joined 760x480
+header width contract, and joined exit controls across an injected projection
+500:
+
+```sh
+npm run build && npm run gate:huddle
+HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle     # MUST fail
+HUDDLE_GATE_PROVE_RED_ENDED=1 npm run gate:huddle   # MUST fail
+```
+
+Width red proof: temporarily remove `max-w-pane` from
+`HuddleHeaderControl.tsx`; the 760px title/toggle geometry assertion must fail
+with a long participant fixture. Projection-isolation red proof: restore the
+old `status === "error"` early return above the joined branch; the joined
+microphone/leave assertions after the injected 500 must fail.
+
+The gate writes the four fixture captures to `artifacts/huddle/`:
+`unconfigured.png`, `idle.png`, `active.png`, and `error.png`. A joined capture
+requires a real LiveKit room and browser microphone grant; the orchestrator
+records it as `artifacts/huddle/joined.png`.
+
+The my-session continuity gate also needs no backend or credentials. Its long
+DM fixture locks `전체` and `내 세션` at full width while only the channel chip
+truncates. It deliberately returns sessions before hosts and checks that both
+the default channel scope and `내 세션` wait without claiming `실행 중`, then
+checks the final `online:false + running` presentation, detail/thread entry,
+focus return, member filter, host-empty rows with neutral host metadata, and
+the separate no-session/load-error states:
+
+```sh
+npm run gate:my-sessions
+MY_SESSIONS_GATE_PROVE_RED_OFFLINE=1 npm run gate:my-sessions  # MUST fail
+MY_SESSIONS_GATE_PROVE_RED_FILTER=1 npm run gate:my-sessions   # MUST fail
+```
+
+The three 2R regression assertions are direct reversal proofs:
+
+1. Restore `min-w-0 truncate` on every `ScopeButton`; the fixed-label geometry
+   assertion fails because the long DM clips `전체` or `내 세션`.
+2. Restore the mine-only host loading condition around `SkeletonRows` and the
+   non-mine list; the default channel assertion sees `실행 중` before the
+   delayed host response.
+3. Restore `(hostsQuery.data?.length ?? 0) > 0` on the mine list; the
+   `hosts-empty` scenario times out waiting for its two ledger-backed rows.
+
+The two existing environment red proofs remain mandatory and must exit nonzero.
+
+The agent-hub gate is also fixture-only and needs no credentials or backend.
+It runs three response schedules (`roster → memory → history`, `history →
+roster → memory`, `memory → history → roster`) and asserts that lower-cased
+agent keys keep late data on the right detail surface. The first schedule also
+walks the four product writes/reads: roster selection, memory invalidation and
+refetch, agent-global run cursor pagination plus detail, and pause projection.
+Playwright execution belongs to the orchestrator:
+
+```sh
+npm run gate:agent-hub
+AGENT_HUB_GATE_PROVE_RED_INVALIDATE=1 npm run gate:agent-hub  # MUST fail: memory invalidate round-trip
+AGENT_HUB_GATE_PROVE_RED_HISTORY=1 npm run gate:agent-hub     # MUST fail: history cursor page
+AGENT_HUB_GATE_PROVE_RED_PAUSE=1 npm run gate:agent-hub       # MUST fail: pause projection
+```
+
+되돌림 증명은 이름 있는 환경변수 하나만 켜서 실행한다. 제품 행이나 단정을
+삭제하지 않는다. 각 실행은 위에 적힌 이름(`memory invalidate round-trip`,
+`history cursor page`, `pause projection`)으로 실패해야 하며, 환경변수를 끈
+정상 실행은 다시 PASS해야 한다.
+
+These red proofs change named fixture seams instead of deleting a product or
+assertion line, so the failure remains repeatable in a clean throwaway
+worktree.
+
+The Tauri WKWebView microphone prompt is deliberately not inferred from browser
+success. After the browser gate, the orchestrator must open the packaged shell,
+join once, verify bidirectional audio, deny microphone once, and record whether
+the shell needs `NSMicrophoneUsageDescription` or another entitlement/config
+change. That shell change is outside MOMO-643.
+
 `gate:csp` walks one path. To put the same packaged policy in front of the much
 wider route walks the other two gates already do — `vite.config.ts` reads the
 header from the environment:

@@ -60,6 +60,7 @@ async function installFaults(context) {
     if (path.endsWith("/roster")) return json(route, { members: {} });
     if (path.endsWith("/read-state")) return json(route, { read_states: "wrong" });
     if (path.includes("/messages")) return json(route, { messages: null });
+    if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: null });
     if (path.endsWith("/work-tier-policy") || path.endsWith("/work-tier-policy/me")) return json(route, {});
     if (path.endsWith("/invites")) return json(route, { invites: {} });
@@ -129,6 +130,7 @@ async function assertNavigationKeepsRouteState(context) {
     if (path.endsWith("/roster")) return json(route, { members: [] });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
 

@@ -307,6 +307,33 @@ export interface WorkSessionLifecycleFrame {
   };
 }
 
+export type WorkSessionToolTransitionType =
+  | "work.session.idle"
+  | "work.session.resumed-to-running";
+
+/**
+ * A tool completion or restart inside one still-live work session
+ * (ADR-0139 D1). Swift emits every UUID through `uuidString`, so these ids are
+ * uppercase on the wire; callers compare them through `uuidEq`.
+ */
+export interface WorkSessionToolTransitionFrame {
+  type: WorkSessionToolTransitionType;
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    session_id: string;
+    channel_id: string;
+    root_message_id: string;
+    member_id: string;
+    host_id: string;
+    status: "idle" | "running";
+    exit_code?: number;
+    idle_at?: number;
+    resumed_at?: number;
+  };
+}
+
 export interface WorkSessionACPFrame {
   type: WorkSessionACPType;
   v: number;
@@ -387,6 +414,117 @@ export function asWorkSessionLifecycleFrame(
   const payload = frame.payload as Record<string, unknown> | undefined;
   if (!payload || typeof payload.session_id !== "string") return null;
   return frame as WorkSessionLifecycleFrame;
+}
+
+const WORK_TOOL_TRANSITION_TYPES: ReadonlySet<string> =
+  new Set<WorkSessionToolTransitionType>([
+    "work.session.idle",
+    "work.session.resumed-to-running",
+  ]);
+
+/**
+ * A publication carrying a live-session tool transition. Every field is
+ * checked before the frame reaches React: a string/number inversion returns
+ * null rather than creating a plausible but wrong state.
+ */
+export function asWorkSessionToolTransitionFrame(
+  data: unknown
+): WorkSessionToolTransitionFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionToolTransitionFrame>;
+  if (
+    typeof frame.type !== "string" ||
+    !WORK_TOOL_TRANSITION_TYPES.has(frame.type) ||
+    typeof frame.v !== "number" ||
+    typeof frame.ts !== "number" ||
+    typeof frame.seq !== "number"
+  ) {
+    return null;
+  }
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (
+    !payload ||
+    typeof payload.session_id !== "string" ||
+    typeof payload.channel_id !== "string" ||
+    typeof payload.root_message_id !== "string" ||
+    typeof payload.member_id !== "string" ||
+    typeof payload.host_id !== "string" ||
+    typeof payload.status !== "string" ||
+    (payload.exit_code !== undefined && typeof payload.exit_code !== "number")
+  ) {
+    return null;
+  }
+  if (frame.type === "work.session.idle") {
+    if (payload.status !== "idle" || typeof payload.idle_at !== "number") {
+      return null;
+    }
+    if (payload.resumed_at !== undefined) return null;
+  } else {
+    if (
+      payload.status !== "running" ||
+      typeof payload.resumed_at !== "number"
+    ) {
+      return null;
+    }
+    if (payload.idle_at !== undefined) return null;
+  }
+  return frame as WorkSessionToolTransitionFrame;
+}
+
+// ---- huddle lifecycle rail (ADR-0122 / MOMO-643) ---------------------------
+// Huddles use underscore event names because those are the Core/server contract,
+// not a web-side spelling choice. Their channel publication is only an
+// invalidation hint: participant display names remain a REST projection, so a
+// started/changed frame asks the caller to refetch instead of inventing rows
+// from participant_member_ids.
+
+export type HuddleEventType =
+  | "huddle_started"
+  | "huddle_participants_changed"
+  | "huddle_ended";
+
+export interface HuddleLifecycleFrame {
+  type: HuddleEventType;
+  v: number;
+  ts: number;
+  payload: {
+    huddle_id: string;
+    channel_id: string;
+    participant_member_ids: string[];
+  };
+}
+
+const HUDDLE_EVENT_TYPES: ReadonlySet<string> = new Set<HuddleEventType>([
+  "huddle_started",
+  "huddle_participants_changed",
+  "huddle_ended",
+]);
+
+/**
+ * A publication carrying a huddle transition, or null for every malformed
+ * field. This deliberately matches the defensive work-session parsers beside
+ * it: a type inversion never escapes into the UI as a plausible event.
+ */
+export function asHuddleLifecycleFrame(
+  data: unknown
+): HuddleLifecycleFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<HuddleLifecycleFrame>;
+  if (typeof frame.type !== "string" || !HUDDLE_EVENT_TYPES.has(frame.type)) {
+    return null;
+  }
+  if (typeof frame.v !== "number" || typeof frame.ts !== "number") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (
+    !payload ||
+    typeof payload.huddle_id !== "string" ||
+    typeof payload.channel_id !== "string" ||
+    !Array.isArray(payload.participant_member_ids) ||
+    !payload.participant_member_ids.every((id) => typeof id === "string")
+  ) {
+    return null;
+  }
+  return frame as HuddleLifecycleFrame;
 }
 
 // ---- provider cascade rail (ADR-0135 D1 / MOMO-622) -------------------------
@@ -479,6 +617,7 @@ export interface RealtimeHandle {
     channelId: string,
     handlers: {
       onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
+      onToolTransition: (frame: WorkSessionToolTransitionFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       /** An observer capability was issued: re-read the count from Postgres. */
       onObserver: (frame: WorkSessionObserverFrame) => void;
@@ -494,6 +633,19 @@ export interface RealtimeHandle {
     workspaceId: string,
     channelId: string,
     handlers: { onFallback: (frame: CascadeFallbackFrame) => void }
+  ) => () => void;
+  /**
+   * Watch huddle lifecycle changes in one channel. The publication is an
+   * invalidation signal; the caller re-reads the active REST projection for
+   * names and joined timestamps.
+   */
+  subscribeHuddle: (
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onLifecycle: (frame: HuddleLifecycleFrame) => void;
+      onResync: () => void;
+    }
   ) => () => void;
   dispose: () => void;
 }
@@ -654,6 +806,7 @@ export function createRealtime(
     channelId: string,
     handlers: {
       onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
+      onToolTransition: (frame: WorkSessionToolTransitionFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       onObserver: (frame: WorkSessionObserverFrame) => void;
       onResync: () => void;
@@ -685,6 +838,11 @@ export function createRealtime(
           const lifecycle = asWorkSessionLifecycleFrame(ctx.data);
           if (lifecycle) {
             handlers.onLifecycle(lifecycle);
+            return;
+          }
+          const transition = asWorkSessionToolTransitionFrame(ctx.data);
+          if (transition) {
+            handlers.onToolTransition(transition);
             return;
           }
           const observer = asWorkSessionObserverFrame(ctx.data);
@@ -729,11 +887,45 @@ export function createRealtime(
     );
   }
 
+  function subscribeHuddle(
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onLifecycle: (frame: HuddleLifecycleFrame) => void;
+      onResync: () => void;
+    }
+  ): () => void {
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const gate = createReplayGate();
+        const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+          gate.onSubscribed(ctx);
+          // REST owns current liveness. This also heals a non-recovered gap.
+          handlers.onResync();
+        };
+        const onPublication = (ctx: { data?: unknown }) => {
+          if (gate.isReplaying()) return;
+          const frame = asHuddleLifecycleFrame(ctx.data);
+          if (frame) handlers.onLifecycle(frame);
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
     subscribeChannel,
     subscribeAgent,
     subscribeWorkSession,
     subscribeCascade,
+    subscribeHuddle,
     dispose: () => {
       shared.clear();
       client.disconnect();

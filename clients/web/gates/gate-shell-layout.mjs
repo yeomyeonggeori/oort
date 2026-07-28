@@ -34,6 +34,25 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
+
+// CSP-safe wait: page.evaluate travels over CDP and is exempt from the page's
+// own Content-Security-Policy, while waitForFunction re-evaluates its predicate
+// INSIDE the page world, which a script-src without 'unsafe-eval' refuses.
+// Measured 2026-07-28 running this gate behind the packaged Tauri CSP
+// (MOMO_CSP_GATE_HEADER replay from clients/web/README.md): every
+// waitForFunction call threw EvalError while every page.evaluate succeeded.
+async function waitForPageCondition(page, expression, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const satisfied = await page.evaluate(`(() => Boolean(${expression}))()`);
+    if (satisfied) return;
+    if (Date.now() > deadline) {
+      throw new Error(`waitForPageCondition timed out: ${expression}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // 설정 > 사용량 (MOMO-616) is the tallest settings panel, so it is measured from
@@ -371,6 +390,10 @@ async function installMocks(context) {
     }
     return json(route, { messages: makeMessages(24) });
   });
+  await context.route(
+    "**/v1/workspaces/*/channels/*/huddles/active",
+    (route) => json(route, { huddle: null })
+  );
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: INVITES })
   );
@@ -666,7 +689,8 @@ async function assertPluginScopeConsent(page, size) {
   }
 
   await confirm.click();
-  await page.waitForFunction(
+  await waitForPageCondition(
+    page,
     'document.querySelector(\'[data-testid="plugin-scope-confirm"]\')?.getAttribute("aria-busy") === "true"'
   );
   const busyConfirm = await page.evaluate(`(() => {
@@ -713,11 +737,13 @@ async function assertPluginScopeConsent(page, size) {
     JSON.stringify(failure)
   );
   await consentError.getByRole("button", { name: "오류 닫기" }).click();
-  await page.waitForFunction(
+  await waitForPageCondition(
+    page,
     'document.activeElement === document.querySelector(\'[data-testid="plugin-scope-confirm"]\')'
   );
   await page.keyboard.press("Tab");
-  await page.waitForFunction(
+  await waitForPageCondition(
+    page,
     `document.activeElement === document.querySelector(
       '[data-testid=${JSON.stringify(`plugin-scope-${NOTION_SCOPE_FIXTURE[0][0]}`)}]'
     )`
@@ -765,7 +791,8 @@ async function assertPluginScopeConsent(page, size) {
   await dialog.waitFor({ state: "hidden" });
   const revoke = page.getByTestId("plugin-scope-revoke");
   await revoke.waitFor({ state: "visible" });
-  await page.waitForFunction(
+  await waitForPageCondition(
+    page,
     'document.activeElement === document.querySelector(\'[data-testid="plugin-scope-revoke"]\')'
   );
   check(`${size.name} 전량 허용 뒤 포커스가 회수 컨트롤로 간다`, true);
@@ -943,9 +970,7 @@ async function measureTimeline(browser) {
   const page = await context.newPage();
   await page.goto(`${ORIGIN}/?stress=1000`, { waitUntil: "networkidle" });
   await signIn(page);
-  await page.waitForFunction("window.__spike && window.__spike.count === 1000", null, {
-    timeout: 20_000,
-  });
+  await waitForPageCondition(page, "window.__spike && window.__spike.count === 1000", 20_000);
   await page.waitForSelector('[data-testid="timeline-message"]', { timeout: 20_000 });
 
   const timeline = await page.evaluate(`(async () => {

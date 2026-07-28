@@ -317,15 +317,13 @@ function ApprovalBody({
       detail={card.detail}
       footer={
         card.isResumeOffer ? (
-          // No web resume path has landed: the offer is stated, and the card
-          // says where it can actually be acted on instead of showing a button
-          // that would do nothing.
           <p
             className="border-t border-line px-3 py-2 text-meta text-ink-muted"
             data-testid="resume-offer-note"
           >
-            중단된 작업을 이어서 진행할 수 있습니다. 재개는 데스크톱 앱에서
-            하세요.
+            git 계보만 새 호스트로 이어집니다. 이전 호스트의 터미널 상태와
+            커밋하지 않은 변경은 옮겨지지 않습니다. 작업 세션 패널의 내
+            세션에서 온라인 호스트를 선택하세요.
           </p>
         ) : !settled && card.approvalId !== null ? (
           <ApprovalActions

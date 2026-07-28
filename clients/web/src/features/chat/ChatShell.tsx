@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
-import { updateReadState, uuidEq, type Message } from "@/lib/api";
+import {
+  fetchMessages,
+  updateReadState,
+  uuidEq,
+  type Message,
+  type WorkSession,
+} from "@/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
@@ -29,10 +35,17 @@ import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import {
+  HuddleHeaderBanner,
+  HuddleHeaderControl,
+  HuddleHeaderState,
+} from "@/features/huddles/HuddleHeaderControl";
+import type { HuddleController } from "@/features/huddles/useHuddle";
+import {
   EmptyInvite,
   InlineBanner,
   SkeletonRows,
 } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 
@@ -42,8 +55,14 @@ import { cn } from "@/design/lib/cn";
 // between channels never drops the connection.
 // =============================================================================
 
+// A missing/deleted root must not turn one click into an unbounded walk through
+// channel history. Twenty-five full pages still cover 5,000 messages; after
+// that the existing not-found result is the honest answer this client has.
+const WORK_THREAD_ROOT_PAGE_LIMIT = 25;
+
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
+  const isOffline = useOffline();
   const params = useParams();
   const navigate = useNavigate();
 
@@ -162,6 +181,106 @@ export function ChatShell() {
   const [workOpen, setWorkOpen] = useState(false);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
   const [workSessionId, setWorkSessionId] = useState<string | null>(null);
+  const [openingWorkThreadId, setOpeningWorkThreadId] = useState<string | null>(
+    null
+  );
+  const [workThreadOpenError, setWorkThreadOpenError] = useState<string | null>(
+    null
+  );
+  const [pendingWorkThread, setPendingWorkThread] = useState<{
+    channelId: string;
+    root: Message;
+  } | null>(null);
+  const workThreadRequestRef = useRef(0);
+
+  const openWorkSession = useCallback((sessionId: string) => {
+    setThread(null);
+    setWorkScope("channel");
+    setWorkSessionId(sessionId);
+    setWorkOpen(true);
+  }, []);
+
+  // A scope chip means "show me that list". The panel keeps its selected
+  // session across close/reopen (returning to where you were), so while a
+  // detail is open the chips would otherwise change state with no visible
+  // effect — a live-looking control that does nothing. Clearing the selection
+  // makes the chip's promise and the screen agree.
+  const changeWorkScope = useCallback((scope: WorkScope) => {
+    setWorkSessionId(null);
+    setWorkScope(scope);
+  }, []);
+
+  const openWorkSessionThread = useCallback(
+    async (workSession: WorkSession) => {
+      const request = workThreadRequestRef.current + 1;
+      workThreadRequestRef.current = request;
+      setOpeningWorkThreadId(workSession.id);
+      setWorkThreadOpenError(null);
+
+      try {
+        let before: number | undefined;
+        let root: Message | undefined;
+        for (
+          let pageIndex = 0;
+          pageIndex < WORK_THREAD_ROOT_PAGE_LIMIT;
+          pageIndex += 1
+        ) {
+          const page = await fetchMessages(
+            workspaceId,
+            workSession.channelId,
+            before === undefined ? { limit: 200 } : { before, limit: 200 }
+          );
+          root = page.messages.find((message) =>
+            uuidEq(message.id, workSession.rootMessageId)
+          );
+          if (
+            root ||
+            page.nextBefore === undefined ||
+            page.nextBefore === before ||
+            page.messages.length === 0 ||
+            workThreadRequestRef.current !== request
+          ) {
+            break;
+          }
+          before = page.nextBefore;
+        }
+        if (workThreadRequestRef.current !== request) return;
+        if (!root) {
+          setWorkThreadOpenError(
+            "세션 스레드의 시작 메시지를 찾지 못했습니다. 채널 기록을 새로고침한 뒤 다시 시도하세요."
+          );
+          return;
+        }
+        setPendingWorkThread({ channelId: workSession.channelId, root });
+        if (!uuidEq(channelId ?? undefined, workSession.channelId)) {
+          navigate(`/c/${workSession.channelId}`);
+        }
+      } catch {
+        if (workThreadRequestRef.current === request) {
+          setWorkThreadOpenError(
+            "세션 스레드를 불러오지 못했습니다. 다시 시도하세요."
+          );
+        }
+      } finally {
+        if (workThreadRequestRef.current === request) {
+          setOpeningWorkThreadId(null);
+        }
+      }
+    },
+    [workspaceId, channelId, navigate]
+  );
+
+  useEffect(() => {
+    if (
+      pendingWorkThread === null ||
+      !uuidEq(channelId ?? undefined, pendingWorkThread.channelId)
+    ) {
+      return;
+    }
+    setThread(pendingWorkThread.root);
+    setPendingWorkThread(null);
+    setWorkOpen(false);
+  }, [channelId, pendingWorkThread]);
 
   // Under 900px the 작업 세션 pane stops being a column beside the channel and
   // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset
@@ -256,8 +375,94 @@ export function ChatShell() {
     return `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
   }, [channel, directory]);
 
-  const offline = stressCount === 0 && connStatus === "disconnected";
+  const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
+
+  const renderChannelHeader = (huddle: HuddleController | null) => (
+    <>
+      <header className="flex min-h-control-lg items-center justify-between gap-3 border-b border-line px-4 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span aria-hidden="true" className="shrink-0 text-ink-muted">
+            {channel?.kind === "dm" ? (
+              <MessageSquare className="size-4" />
+            ) : channel?.kind === "private" ? (
+              <Lock className="size-4" />
+            ) : (
+              <Hash className="size-4" />
+            )}
+          </span>
+          <h1
+            className={cn(
+              "min-w-0 truncate text-body font-semibold",
+              labelParts?.isAgent && stressCount === 0 && "text-agent"
+            )}
+          >
+            {stressCount > 0
+              ? `스크롤 측정 (${stressCount})`
+              : labelParts?.text ?? label}
+          </h1>
+          {stressCount === 0 && labelParts?.handle && (
+            <span
+              className="shrink-0 text-meta text-ink-muted"
+              data-testid="channel-handle"
+            >
+              {labelParts.handle}
+            </span>
+          )}
+          {memberSummary && (
+            <span className="min-w-0 truncate text-meta text-ink-muted">
+              {memberSummary}
+            </span>
+          )}
+          <span className="sr-only" data-testid="message-count">
+            메시지 {messages.length}개
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {timeline.resume.resubscribeCount > 0 && (
+            <span
+              className="text-timestamp text-ink-muted"
+              data-numeric
+              data-testid="resume-info"
+            >
+              재연결 {timeline.resume.resubscribeCount}회
+            </span>
+          )}
+          {huddle && (
+            <HuddleHeaderControl
+              huddle={huddle}
+              offline={offline}
+            />
+          )}
+          {/* The tooltip and the accessible name are the same string: two
+              names for one control is two controls to a reader who hears one
+              and sees the other. */}
+          {stressCount === 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setThread(null);
+                setWorkOpen((open) => !open);
+              }}
+              aria-pressed={workOpen}
+              aria-label="작업 세션 패널"
+              title="작업 세션 패널"
+              data-testid="open-work-panel"
+              className={cn(
+                "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                workOpen
+                  ? "bg-accent-soft text-accent"
+                  : "text-ink-muted hover:bg-surface-hover"
+              )}
+            >
+              <SquareTerminal className="size-4" />
+            </button>
+          )}
+        </div>
+      </header>
+      {huddle && <HuddleHeaderBanner huddle={huddle} offline={offline} />}
+    </>
+  );
 
   // 빈 워크스페이스에서 가장 큰 행동. 이 버튼은 /settings로 보내는 막다른
   // 골목이었고 (설정에는 그런 폼이 없다), 이제 같은 자리에서 채널 만들기
@@ -284,80 +489,18 @@ export function ChatShell() {
         over it (tokens.css `work-pane`). */}
     <div className="relative flex min-w-0 flex-1">
       <div ref={coveredRef} className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span aria-hidden="true" className="text-ink-muted">
-              {channel?.kind === "dm" ? (
-                <MessageSquare className="size-4" />
-              ) : channel?.kind === "private" ? (
-                <Lock className="size-4" />
-              ) : (
-                <Hash className="size-4" />
-              )}
-            </span>
-            <h1
-              className={cn(
-                "truncate text-body font-semibold",
-                labelParts?.isAgent && stressCount === 0 && "text-agent"
-              )}
-            >
-              {stressCount > 0
-                ? `스크롤 측정 (${stressCount})`
-                : labelParts?.text ?? label}
-            </h1>
-            {stressCount === 0 && labelParts?.handle && (
-              <span
-                className="shrink-0 text-meta text-ink-muted"
-                data-testid="channel-handle"
-              >
-                {labelParts.handle}
-              </span>
-            )}
-            {memberSummary && (
-              <span className="truncate text-meta text-ink-muted">
-                {memberSummary}
-              </span>
-            )}
-            <span className="sr-only" data-testid="message-count">
-              메시지 {messages.length}개
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {timeline.resume.resubscribeCount > 0 && (
-              <span
-                className="text-timestamp text-ink-muted"
-                data-numeric
-                data-testid="resume-info"
-              >
-                재연결 {timeline.resume.resubscribeCount}회
-              </span>
-            )}
-            {/* The tooltip and the accessible name are the same string: two
-                names for one control is two controls to a reader who hears one
-                and sees the other. */}
-            {stressCount === 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setThread(null);
-                  setWorkOpen((open) => !open);
-                }}
-                aria-pressed={workOpen}
-                aria-label="작업 세션 패널"
-                title="작업 세션 패널"
-                data-testid="open-work-panel"
-                className={cn(
-                  "flex size-control-sm items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-                  workOpen
-                    ? "bg-accent-soft text-accent"
-                    : "text-ink-muted hover:bg-surface-hover"
-                )}
-              >
-                <SquareTerminal className="size-4" />
-              </button>
-            )}
-          </div>
-        </header>
+        {stressCount === 0 && channelId !== null ? (
+          <HuddleHeaderState
+            workspaceId={workspaceId}
+            channelId={channelId}
+            realtime={realtime}
+            offline={offline}
+          >
+            {(huddle) => renderChannelHeader(huddle)}
+          </HuddleHeaderState>
+        ) : (
+          renderChannelHeader(null)
+        )}
 
         {offline && (
           <InlineBanner
@@ -383,6 +526,7 @@ export function ChatShell() {
                 setWorkOpen(false);
                 setThread(message);
               }}
+              onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
@@ -438,6 +582,7 @@ export function ChatShell() {
           channelId={channelId}
           root={thread}
           directory={directory}
+          onOpenWorkSession={openWorkSession}
           onClose={() => setThread(null)}
         />
       )}
@@ -446,9 +591,12 @@ export function ChatShell() {
         <WorkPanel
           channelId={channelId}
           scope={workScope}
-          onScopeChange={setWorkScope}
+          onScopeChange={changeWorkScope}
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
+          openingThreadId={openingWorkThreadId}
+          threadOpenError={workThreadOpenError}
+          onOpenThread={(workSession) => void openWorkSessionThread(workSession)}
           onClose={() => {
             // The panel hands the caret back to the toggle that opened it, and
             // that toggle lives in the surface this drawer just made `inert`.
@@ -456,6 +604,9 @@ export function ChatShell() {
             // the panel, i.e. after that focus() call, so it comes off here
             // first. The effect above re-syncs and finds nothing to do.
             coveredRef.current?.removeAttribute("inert");
+            workThreadRequestRef.current += 1;
+            setOpeningWorkThreadId(null);
+            setWorkThreadOpenError(null);
             setWorkOpen(false);
           }}
         />

@@ -193,6 +193,16 @@ export function useWorkSessionRail(
     void queryClient.invalidateQueries({ queryKey: ["work-session-events"] });
   }, [publish, queryClient, workspaceId]);
 
+  const refetchSessionsAfterTransition = useCallback(() => {
+    const queryKey = ["work-sessions", workspaceId];
+    // A transition can beat the first list response. Cancelling the in-flight
+    // query before invalidating makes React Query discard that stale response
+    // and start one read whose snapshot is after the transition.
+    void queryClient
+      .cancelQueries({ queryKey })
+      .then(() => queryClient.invalidateQueries({ queryKey }));
+  }, [queryClient, workspaceId]);
+
   useEffect(() => {
     if (!realtime) return;
     const channels = watchKey === "" ? [] : watchKey.split(",");
@@ -208,9 +218,17 @@ export function useWorkSessionRail(
             const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
             if (kept.length !== liveRef.current.length) publish(kept);
           }
-          void queryClient.invalidateQueries({
-            queryKey: ["work-sessions", workspaceId],
-          });
+          refetchSessionsAfterTransition();
+        },
+        onToolTransition: (frame) => {
+          // idle keeps the session alive but closes the current tool stream.
+          // Drop only that session's transient tail; REST remains the state SoT.
+          if (frame.type === "work.session.idle") {
+            const id = frame.payload.session_id;
+            const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
+            if (kept.length !== liveRef.current.length) publish(kept);
+          }
+          refetchSessionsAfterTransition();
         },
         // The observer count is read from Postgres, never from the frame that
         // announced it (MOMO-619). The frame says a capability was issued; the
@@ -242,7 +260,15 @@ export function useWorkSessionRail(
     return () => {
       for (const stop of stops) stop();
     };
-  }, [realtime, workspaceId, watchKey, queryClient, publish, resync]);
+  }, [
+    realtime,
+    workspaceId,
+    watchKey,
+    queryClient,
+    publish,
+    resync,
+    refetchSessionsAfterTransition,
+  ]);
 
   return { liveEvents, uncovered };
 }

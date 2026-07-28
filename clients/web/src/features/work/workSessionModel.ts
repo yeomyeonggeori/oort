@@ -86,9 +86,52 @@ export interface FoldedSession {
   lastEventAtMs: number | null;
 }
 
+// ---- timeline completion notice -------------------------------------------
+
+export interface WorkSessionIdleNotice {
+  sessionId: string;
+  ownerMemberId: string;
+  eventLabel: "대기 전환";
+}
+
+/**
+ * The durable channel reply written with a running -> idle transition.
+ * Everything else remains an ordinary system message. IDs are returned as
+ * written because Swift sends uppercase UUIDs and the consumer compares them
+ * case-insensitively through `uuidEq`.
+ */
+export function workSessionIdleNotice(
+  message: Message
+): WorkSessionIdleNotice | null {
+  const props = message.props;
+  if (
+    message.type !== "system" ||
+    typeof message.rootId !== "string" ||
+    !props ||
+    props.kind !== "work_session_idle" ||
+    typeof props.session_id !== "string" ||
+    props.session_id === "" ||
+    typeof props.owner_member_id !== "string" ||
+    props.owner_member_id === ""
+  ) {
+    return null;
+  }
+  return {
+    sessionId: props.session_id,
+    ownerMemberId: props.owner_member_id,
+    eventLabel: "대기 전환",
+  };
+}
+
 // ---- session status ---------------------------------------------------------
 
-export type WorkSessionStatusKey = "running" | "orphaned" | "done" | "failed";
+export type WorkSessionStatusKey =
+  | "running"
+  | "idle"
+  | "unavailable"
+  | "orphaned"
+  | "done"
+  | "unknown";
 
 export interface WorkSessionStatus {
   key: WorkSessionStatusKey;
@@ -96,23 +139,27 @@ export interface WorkSessionStatus {
 }
 
 /**
- * Four session states out of three server ones. `ended` splits on the exit
- * code, which is the only place the ledger says a session finished badly; an
- * `ended` row with no code at all is a clean end, not a silent failure.
+ * `exitCode` is ADR-0139's last tool result, not a session-ending result. It
+ * therefore never decides whether an `ended` session failed.
  *
  * `orphaned` keeps the mac wording (호스트 연결 끊김) rather than being folded
  * into 오류: the session is not known to have failed, its host went away, and
  * those are different facts to the person deciding whether to resume.
  */
-export function workSessionStatus(session: WorkSession): WorkSessionStatus {
+export function workSessionStatus(
+  session: Pick<WorkSession, "exitCode"> & { status: string }
+): WorkSessionStatus {
   if (session.status === "running") return { key: "running", label: "실행 중" };
+  if (session.status === "idle") {
+    return { key: "idle", label: "완료 · 대기 중" };
+  }
   if (session.status === "orphaned") {
     return { key: "orphaned", label: "호스트 연결 끊김" };
   }
-  if (typeof session.exitCode === "number" && session.exitCode !== 0) {
-    return { key: "failed", label: "오류로 종료" };
+  if (session.status === "ended") {
+    return { key: "done", label: "종료됨" };
   }
-  return { key: "done", label: "종료됨" };
+  return { key: "unknown", label: "상태 확인 필요" };
 }
 
 export const ROW_STATE_LABEL: Readonly<Record<WorkRowState, string>> = {
@@ -124,7 +171,14 @@ export const ROW_STATE_LABEL: Readonly<Record<WorkRowState, string>> = {
 
 /** Newest first, running sessions ahead of finished ones. */
 export function sortSessions(sessions: readonly WorkSession[]): WorkSession[] {
-  const rank = (s: WorkSession) => (s.status === "running" ? 0 : s.status === "orphaned" ? 1 : 2);
+  const rank = (s: WorkSession) =>
+    s.status === "running"
+      ? 0
+      : s.status === "idle"
+        ? 1
+        : s.status === "orphaned"
+          ? 2
+          : 3;
   return [...sessions].sort(
     (a, b) => rank(a) - rank(b) || b.startedAtMs - a.startedAtMs
   );
@@ -325,9 +379,9 @@ function planFrom(value: unknown): WorkPlanItem[] {
  *   - a rejected approval is `error`, and so is the tool row it stopped;
  *   - everything else is `done`.
  *
- * A non-zero session exit code is deliberately NOT painted onto the last tool
- * row: the ledger says the session failed, not which step did, and inventing
- * the attribution is the false story the four states exist to avoid.
+ * A non-zero `exitCode` is deliberately NOT painted onto the last tool row:
+ * ADR-0139 defines it as the last tool result, not a session failure and not
+ * proof that this projected step produced it.
  *
  * `truncated` says the thread was longer than the panel read, so the newest
  * rows are the ones MISSING. Every "this is what is happening now" promotion
@@ -600,6 +654,63 @@ export function workHostOnline(
   return host ? host.online : null;
 }
 
+/** Same-PTY reattach is offered only when both ledger and heartbeat agree. */
+export function canReattachWorkSession(
+  session: Pick<WorkSession, "hostId" | "status">,
+  hosts: readonly WorkHost[] | undefined
+): boolean {
+  return (
+    (session.status === "running" || session.status === "idle") &&
+    workHostOnline(session, hosts) === true
+  );
+}
+
+/**
+ * Explicit targets for an orphaned lineage resume. This mirrors the accepted
+ * server boundary and the mac console: the dead source host is excluded, and
+ * another member's private host is never offered.
+ */
+export function workSessionResumeTargets(
+  session: Pick<WorkSession, "hostId" | "status">,
+  hosts: readonly WorkHost[],
+  viewerMemberId: string
+): WorkHost[] {
+  if (session.status !== "orphaned") return [];
+  return hosts
+    .filter(
+      (host) =>
+        host.revokedAtMs === undefined &&
+        host.online &&
+        !uuidEq(host.id, session.hostId) &&
+        (host.scope === "workspace" ||
+          uuidEq(host.ownerMemberId, viewerMemberId))
+    )
+    .sort((a, b) => {
+      const byName = a.displayName.localeCompare(b.displayName, "ko");
+      return byName === 0
+        ? a.id.toLowerCase().localeCompare(b.id.toLowerCase())
+        : byName;
+    });
+}
+
+/**
+ * Status shown on a continuity row. The ledger remains authoritative:
+ * heartbeat loss changes only the presentation of `running`, never the
+ * session's stored state.
+ */
+export function workSessionContinuityStatus(
+  session: WorkSession,
+  hosts: readonly WorkHost[] | undefined
+): WorkSessionStatus {
+  if (
+    (session.status === "running" || session.status === "idle") &&
+    workHostOnline(session, hosts) === false
+  ) {
+    return { key: "unavailable", label: "호스트 응답 없음" };
+  }
+  return workSessionStatus(session);
+}
+
 /**
  * The copy under "아직 진행 내역이 없습니다" for a session whose thread came
  * back empty. A running session on a host the registry has not heard from gets
@@ -609,8 +720,14 @@ export function emptyStepsDetail(
   session: Pick<WorkSession, "hostId" | "status">,
   hosts: readonly WorkHost[] | undefined
 ): string {
-  if (session.status === "running" && workHostOnline(session, hosts) === false) {
+  if (
+    (session.status === "running" || session.status === "idle") &&
+    workHostOnline(session, hosts) === false
+  ) {
     return "이 호스트에서 최근 신호를 받은 기록이 없습니다. 새 단계가 도착하지 않을 수 있습니다.";
+  }
+  if (session.status === "idle") {
+    return "마지막 실행은 끝났고 호스트가 같은 터미널을 열어 두고 있습니다.";
   }
   return "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
 }
@@ -674,7 +791,7 @@ export function composeExcerpt(
 
 // ---- panel scope ------------------------------------------------------------
 
-export type WorkScope = "channel" | "all";
+export type WorkScope = "channel" | "all" | "mine";
 
 /**
  * The scope label is shown at all times, never only when it is unusual. The
@@ -685,15 +802,23 @@ export type WorkScope = "channel" | "all";
 export function scopeSessions(
   sessions: readonly WorkSession[],
   scope: WorkScope,
-  channelId: string | null
+  channelId: string | null,
+  viewerMemberId?: string
 ): WorkSession[] {
+  if (scope === "mine") {
+    return sessions.filter(
+      (session) =>
+        session.status !== "ended" &&
+        uuidEq(session.memberId, viewerMemberId)
+    );
+  }
   if (scope === "all" || channelId === null) return [...sessions];
   return sessions.filter((session) => uuidEq(session.channelId, channelId));
 }
 
 /**
  * Channels worth holding a live subscription for: the open one first, then the
- * channels of running sessions. Capped, because one subscription per channel is
+ * channels of running or idle sessions. Capped, because one subscription per channel is
  * a real cost and a workspace may have hundreds; what the cap leaves out is
  * reported rather than hidden (the same grammar the sidebar uses for the agent
  * turn pill).
@@ -715,7 +840,9 @@ export function workChannelsToWatch(
   };
   if (openChannelId !== null) push(openChannelId);
   for (const session of sessions) {
-    if (session.status === "running") push(session.channelId);
+    if (session.status === "running" || session.status === "idle") {
+      push(session.channelId);
+    }
   }
   return { watched: ordered.slice(0, cap), uncovered: ordered.slice(cap) };
 }

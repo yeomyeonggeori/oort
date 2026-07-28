@@ -10,14 +10,16 @@ import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
 /**
  * Session ledger state. 호스트 연결 끊김 wears the accent because it is the one
  * state waiting on a PERSON (resume it, or let it go), the same way the timeline
- * card paints 승인 대기; a failed exit wears --danger, and a clean end wears
- * --ok because a session that finished is good news, not neutral.
+ * card paints 승인 대기. Idle stays neutral, while a deliberately closed
+ * session wears --ok because its lifecycle ended cleanly.
  */
 export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>> = {
   running: "bg-surface-hover text-warn",
+  idle: "bg-surface-hover text-ink-muted",
+  unavailable: "bg-surface-hover text-ink-muted",
   orphaned: "bg-accent-soft text-accent",
   done: "bg-surface-hover text-ok",
-  failed: "bg-surface-hover text-danger",
+  unknown: "bg-surface-hover text-ink-muted",
 };
 
 /** Step state. 완료 stays muted: a wall of green is not a reading aid. */

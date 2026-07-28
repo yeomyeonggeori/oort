@@ -188,6 +188,9 @@ async function installMocks(context) {
     if (path.includes("/replies") || path.includes("/messages")) {
       return json(route, { messages: [] });
     }
+    if (path.endsWith("/huddles/active")) {
+      return json(route, { huddle: null });
+    }
     return json(route, {
       channels: [], members: [], read_states: [], invites: [], approvals: [], runs: [],
     });

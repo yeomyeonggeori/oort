@@ -96,6 +96,7 @@ describe("approval card (web-legacy basic-mode vocabulary)", () => {
     if (card?.kind !== "approval") return;
     expect(card.isResumeOffer).toBe(true);
     expect(card.approvalId).toBeNull();
+    expect(card.title).toBe("새 호스트에서 재개");
   });
 
   it("falls back to the message body when the server sent no title", () => {
