@@ -79,6 +79,15 @@ export function memoryScopeLabel(scope: MemoryScope): string {
   return MEMORY_SCOPE_LABELS[scope];
 }
 
+const MEMORY_KIND_LABELS: Record<string, string> = {
+  fact: "사실",
+  preference: "선호",
+};
+
+export function memoryKindLabel(kind: string): string {
+  return MEMORY_KIND_LABELS[kind] ?? kind;
+}
+
 export function canInvalidateMemory(
   role: RosterMember["role"],
   viewerMemberId: string,

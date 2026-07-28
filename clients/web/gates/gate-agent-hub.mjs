@@ -74,7 +74,8 @@ const roster = [
     kind: "agent",
     status: "active",
     role: "member",
-    displayName: "김인턴",
+    displayName:
+      "김인턴 프로덕션 릴리스 품질 보증 및 고객 영향 분석 담당 에이전트",
     handle: "kim-intern",
     channelCount: 1,
     channelIds: [channelId],
@@ -300,14 +301,29 @@ async function installRoutes(context, timing) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path === "/v1/provider/effort-table") {
       return json(route, {
-        providers: {
-          hermes: {
-            models: {
-              "hermes-agent": { efforts: ["medium", "high"], defaultEffort: "medium" },
-              "hermes-fast": { efforts: ["low", "high"], defaultEffort: "low" },
-            },
-          },
+        schema: "momo.provider.effort_table.v0",
+        levels: ["low", "medium", "high", "xhigh", "max"],
+        fallback: {
+          efforts: ["low", "medium", "high"],
+          defaultEffort: "medium",
         },
+        providers: [
+          {
+            provider: "hermes",
+            models: [
+              {
+                model: "hermes-agent",
+                efforts: ["low", "medium", "high", "xhigh", "max"],
+                defaultEffort: "medium",
+              },
+              {
+                model: "hermes-fast",
+                efforts: ["low", "medium"],
+                defaultEffort: "low",
+              },
+            ],
+          },
+        ],
       });
     }
     if (path.endsWith("/allowed-models")) {
@@ -315,6 +331,9 @@ async function installRoutes(context, timing) {
     }
     if (path.endsWith("/profile")) {
       const id = path.split("/").at(-2);
+      if (id.toLowerCase() === otherAgentId.toLowerCase()) {
+        return json(route, { error: "agent profile not found" }, 404);
+      }
       return json(route, { profile: profile(id, state.paused && id.toLowerCase() === agentId.toLowerCase()) });
     }
     if (path.endsWith("/pause") && request.method() === "PUT") {
@@ -422,6 +441,39 @@ async function exerciseScenario(browser, timing, interactive) {
   if (firstId !== agentId.toLowerCase()) {
     throw new Error(`${timing.name}: UUID normalization mixed the selected agent`);
   }
+  await page.waitForFunction(
+    (id) => {
+      const row = document.querySelector(`[data-agent-id="${id}"]`);
+      return row && !row.textContent?.includes("상태 확인 중");
+    },
+    otherAgentId.toLowerCase()
+  );
+  const missingProfileCopy = await page
+    .locator(`[data-agent-id="${otherAgentId.toLowerCase()}"]`)
+    .textContent();
+  if (
+    missingProfileCopy?.includes("상태 확인 실패") ||
+    !missingProfileCopy?.includes("활성")
+  ) {
+    throw new Error(
+      `${timing.name}: profile 404 was promoted to a roster failure`
+    );
+  }
+
+  const tabLineCounts = await page
+    .locator('[data-testid^="agent-hub-tab-"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return range.getClientRects().length;
+      })
+    );
+  if (tabLineCounts.some((count) => count !== 1)) {
+    throw new Error(
+      `${timing.name}: long agent name forced a section tab onto multiple lines`
+    );
+  }
 
   await page.getByTestId("agent-hub-tab-memory").click();
   await page.getByTestId("agent-memory-list").waitFor();
@@ -465,6 +517,15 @@ async function exerciseScenario(browser, timing, interactive) {
     }
 
     await page.getByTestId("agent-hub-tab-profile").click();
+    const effortSelect = page.getByTestId("agent-hub-routing-effort");
+    if (
+      await effortSelect.isDisabled() ||
+      (await effortSelect.locator("option").count()) < 2
+    ) {
+      throw new Error(
+        "effort table ready path: real schema did not unlock effort choices"
+      );
+    }
     await page.getByTestId("agent-hub-pause").click();
     await page.waitForTimeout(300);
     const resumeButton = await page
@@ -473,6 +534,31 @@ async function exerciseScenario(browser, timing, interactive) {
     if (!state.paused || resumeButton !== 1) {
       throw new Error(
         `pause projection: expected paused=true and resume action, state=${state.paused}, resume=${resumeButton}`
+      );
+    }
+
+    await page.setViewportSize({ width: 760, height: 480 });
+    const ownerSummary = page.getByTestId("agent-hub-owner-summary");
+    await ownerSummary.scrollIntoViewIfNeeded();
+    const ownerBox = await ownerSummary.boundingBox();
+    const ownerVisible = await ownerSummary.isVisible();
+    if (!ownerVisible || ownerBox === null || ownerBox.width <= 0) {
+      throw new Error(
+        `narrow detail value width: expected visible dd wider than zero at 760x480, got ${ownerBox?.width ?? "missing"}`
+      );
+    }
+    const narrowTabLineCounts = await page
+      .locator('[data-testid^="agent-hub-tab-"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return range.getClientRects().length;
+        })
+      );
+    if (narrowTabLineCounts.some((count) => count !== 1)) {
+      throw new Error(
+        "narrow section tabs: a tab label wrapped instead of keeping its intrinsic width"
       );
     }
   }
@@ -502,9 +588,11 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "GATE PASS: agent roster, memory invalidation, history cursor, pause projection,"
+    "GATE PASS: agent roster, profile 404, narrow detail, tab width, effort readiness,"
   );
-  console.log("           and three skewed response timings stayed agent-scoped.");
+  console.log(
+    "           memory invalidation, history cursor, pause projection, and three skewed timings stayed agent-scoped."
+  );
 }
 
 main().catch((error) => {

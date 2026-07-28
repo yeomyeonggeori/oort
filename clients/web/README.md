@@ -250,6 +250,11 @@ AGENT_HUB_GATE_PROVE_RED_HISTORY=1 npm run gate:agent-hub     # MUST fail: histo
 AGENT_HUB_GATE_PROVE_RED_PAUSE=1 npm run gate:agent-hub       # MUST fail: pause projection
 ```
 
+되돌림 증명은 이름 있는 환경변수 하나만 켜서 실행한다. 제품 행이나 단정을
+삭제하지 않는다. 각 실행은 위에 적힌 이름(`memory invalidate round-trip`,
+`history cursor page`, `pause projection`)으로 실패해야 하며, 환경변수를 끈
+정상 실행은 다시 PASS해야 한다.
+
 These red proofs change named fixture seams instead of deleting a product or
 assertion line, so the failure remains repeatable in a clean throwaway
 worktree.

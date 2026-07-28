@@ -14,13 +14,13 @@ import {
   Users,
 } from "lucide-react";
 import type { Channel } from "@/lib/api";
-import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import {
   agentTurnsInChannel,
   useAgentWorkingSignals,
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
+import { AgentTurnBadge as AgentTurnStatusBadge } from "@/features/agents/AgentTurnBadge";
 import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
@@ -85,36 +85,14 @@ function AgentTurnBadge({
     memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME)
   );
   if (!copy) return null;
-  const label = live
-    ? copy.label
-    : `${copy.label} 연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.`;
   return (
-    <span
-      className={cn(
-        "shrink-0 rounded-sm px-1",
-        // Offline (SKILL §5): the pill keeps saying what was last confirmed, but
-        // it drops the status color, so a remembered claim does not sit on the
-        // row looking exactly as live as a confirmed one.
-        !live && "text-ink-muted",
-        live && copy.state === "working" && "bg-agent-soft text-agent",
-        live && copy.state === "awaiting_approval" && "border border-warn text-warn",
-        // Last, and deliberately: tailwind-merge files an unknown text-* class
-        // under text-COLOR, so a role written before a color is deleted from the
-        // output. cn() now knows these five roles (design/lib/cn.ts) and this
-        // order survives either way.
-        "text-timestamp"
-      )}
-      data-testid="agent-turn-badge"
-      data-live={live ? "" : undefined}
-      data-state={copy.state}
-      title={label}
-    >
-      {/* A bare aria-label on a generic span is not reliably announced, so the
-          sentence is real (hidden) text, and the compact half is hidden from
-          assistive tech rather than read twice. */}
-      <span className="sr-only">{label}</span>
-      <span aria-hidden="true">{copy.text}</span>
-    </span>
+    <AgentTurnStatusBadge
+      state={copy.state}
+      text={copy.text}
+      label={copy.label}
+      live={live}
+      testId="agent-turn-badge"
+    />
   );
 }
 

@@ -28,6 +28,7 @@ import {
   useAgentWorkingSignals,
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
+import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
 import {
   memberFor,
   useDirectory,
@@ -50,7 +51,10 @@ import {
   modelOptions,
   type RoutingDraft,
 } from "@/features/routing/routingModel";
-import { useAgentProfile } from "@/features/routing/useAgentProfile";
+import {
+  isAgentProfileMissing,
+  useAgentProfile,
+} from "@/features/routing/useAgentProfile";
 import {
   fetchAgentProfile,
   fetchAgentRunDetail,
@@ -70,6 +74,7 @@ import {
 import {
   agentMembers,
   canInvalidateMemory,
+  memoryKindLabel,
   memoryScopeLabel,
   mergeRunPages,
   normalizedId,
@@ -145,6 +150,7 @@ function AgentListRow({
   profileFailed,
   selected,
   signals,
+  live,
   onSelect,
 }: {
   agent: RosterMember;
@@ -153,6 +159,7 @@ function AgentListRow({
   profileFailed: boolean;
   selected: boolean;
   signals: ReturnType<typeof signalsForAgent>;
+  live: boolean;
   onSelect: () => void;
 }) {
   const current = signals[0];
@@ -195,12 +202,17 @@ function AgentListRow({
           <span className="truncate text-meta text-ink-muted">@{agent.handle}</span>
           {current && (
             <span className="flex items-center gap-1">
-              <StatusChip
-                tone={current.state === "working" ? "agent" : "warn"}
+              <AgentTurnBadge
+                state={current.state}
+                text={current.state === "working" ? "작업 중" : "승인 대기"}
+                label={
+                  current.state === "working"
+                    ? `${agent.displayName} 에이전트가 작업 중입니다.`
+                    : `${agent.displayName} 에이전트가 승인을 기다립니다.`
+                }
+                live={live}
                 testId="agent-hub-current-work"
-              >
-                {current.state === "working" ? "작업 중" : "승인 대기"}
-              </StatusChip>
+              />
               {signals.length > 1 && (
                 <span className="text-timestamp text-ink-muted" data-numeric>
                   {signals.length}개 채널
@@ -215,8 +227,9 @@ function AgentListRow({
 }
 
 export function AgentHubRoute() {
-  const { workspaceId } = useSession();
+  const { workspaceId, connStatus } = useSession();
   const offline = useOffline();
+  const railLive = connStatus === "connected";
   const directoryQuery = useDirectory(workspaceId);
   const agents = useMemo(
     () => agentMembers(directoryQuery.directory.members),
@@ -238,7 +251,9 @@ export function AgentHubRoute() {
           {
             data: profiles[index]?.data ?? null,
             pending: profiles[index]?.isPending ?? true,
-            failed: profiles[index]?.isError ?? false,
+            failed:
+              (profiles[index]?.isError ?? false) &&
+              !isAgentProfileMissing(profiles[index]?.error),
           },
         ])
       ),
@@ -247,7 +262,9 @@ export function AgentHubRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const allSignals = useAgentWorkingSignals();
-  const nowMs = useTickingNow(allSignals.size > 0 && !offline);
+  // This clock expires remembered signals even while the rail is down. Color
+  // certainty is handled separately by AgentTurnBadge's `live` input.
+  const nowMs = useTickingNow(allSignals.size > 0);
 
   useEffect(() => {
     setSelectedId((current) => {
@@ -293,8 +310,8 @@ export function AgentHubRoute() {
         />
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="w-pane shrink-0 overflow-y-auto border-r border-line">
+      <div className="agent-hub-layout">
+        <aside className="agent-hub-roster">
           {directoryQuery.isPending && agents.length === 0 ? (
             <AgentHubLoading
               message="에이전트 명부를 불러오는 중입니다."
@@ -336,6 +353,7 @@ export function AgentHubRoute() {
                     profileFailed={state?.failed ?? false}
                     selected={uuidEq(agent.id, selectedId ?? undefined)}
                     signals={signalsForAgent(allSignals, agent.id, nowMs)}
+                    live={railLive}
                     onSelect={() => setSelectedId(normalizedId(agent.id))}
                   />
                 );
@@ -349,7 +367,7 @@ export function AgentHubRoute() {
             <>
               <div className="border-b border-line px-4 py-2">
                 <div className="flex w-full max-w-pane-lg items-center justify-between gap-3">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <h2 className="truncate text-title font-semibold text-ink">
                       {selected.displayName}
                     </h2>
@@ -357,10 +375,13 @@ export function AgentHubRoute() {
                       @{selected.handle}
                     </p>
                   </div>
-                  <nav aria-label={`${selected.displayName} 상세`}>
-                    <ul className="flex gap-1">
+                  <nav
+                    className="shrink-0"
+                    aria-label={`${selected.displayName} 상세`}
+                  >
+                    <ul className="flex gap-1 whitespace-nowrap">
                       {SECTIONS.map((item) => (
-                        <li key={item.id}>
+                        <li key={item.id} className="shrink-0">
                           <button
                             type="button"
                             onClick={() => setSection(item.id)}
@@ -389,6 +410,7 @@ export function AgentHubRoute() {
                     directory={directoryQuery.directory}
                     offline={offline}
                     signals={signalsForAgent(allSignals, selected.id, nowMs)}
+                    live={railLive}
                   />
                 )}
                 {section === "memory" && (
@@ -421,11 +443,13 @@ function AgentProfileSection({
   directory,
   offline,
   signals,
+  live,
 }: {
   agent: RosterMember;
   directory: Directory;
   offline: boolean;
   signals: ReturnType<typeof signalsForAgent>;
+  live: boolean;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -559,23 +583,37 @@ function AgentProfileSection({
           </p>
         </div>
         <dl className="flex flex-col gap-2 text-body">
-          <div className="flex gap-2">
-            <dt className="w-pane-sm shrink-0 text-ink-muted">관리 주체</dt>
-            <dd className="min-w-0 text-ink">
+          <div className="grid grid-cols-3 gap-2">
+            <dt className="min-w-0 text-ink-muted">관리 주체</dt>
+            <dd
+              className="col-span-2 min-w-0 text-ink"
+              data-testid="agent-hub-owner-summary"
+            >
               {owner ? `${owner.displayName} (@${owner.handle})` : "확인할 수 없음"}
             </dd>
           </div>
-          <div className="flex gap-2">
-            <dt className="w-pane-sm shrink-0 text-ink-muted">현재 작업</dt>
+          <div className="grid grid-cols-3 gap-2">
+            <dt className="min-w-0 text-ink-muted">현재 작업</dt>
             <dd
-              className="min-w-0 text-ink"
+              className="col-span-2 min-w-0 text-ink"
               data-testid="agent-hub-work-summary"
             >
-              {currentWork
-                ? currentWork.state === "working"
-                  ? "작업 중"
-                  : "승인 대기"
-                : "현재 확인된 작업 없음"}
+              {currentWork ? (
+                <AgentTurnBadge
+                  state={currentWork.state}
+                  text={
+                    currentWork.state === "working" ? "작업 중" : "승인 대기"
+                  }
+                  label={
+                    currentWork.state === "working"
+                      ? `${agent.displayName} 에이전트가 작업 중입니다.`
+                      : `${agent.displayName} 에이전트가 승인을 기다립니다.`
+                  }
+                  live={live}
+                />
+              ) : (
+                "현재 확인된 작업 없음"
+              )}
             </dd>
           </div>
         </dl>
@@ -623,7 +661,7 @@ function AgentProfileSection({
             }}
             rows={7}
             disabled={offline}
-            className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-100"
             placeholder="답변 방식, 검증 기준, 작업 경계를 적습니다."
             data-testid="agent-hub-instructions"
           />
@@ -680,7 +718,8 @@ function AgentProfileSection({
           />
         </section>
 
-        {(localError || handle.failure?.field !== "model") && (
+        {(localError ||
+          (handle.failure !== null && handle.failure.field !== "model")) && (
           <p role="alert" className="text-body text-danger">
             {localError ?? handle.failure?.message}
           </p>
@@ -705,7 +744,7 @@ function AgentProfileSection({
         <p className="text-body text-ink-muted" data-testid="agent-hub-schedule">
           {handle.profile?.triggers.schedule === undefined
             ? "예약된 작업이 없습니다. 예약 실행기는 아직 구현되지 않았습니다."
-            : "예약 정보가 저장되어 있습니다. 예약됨, 실행기는 아직 구현되지 않았습니다."}
+            : "예약 정보가 저장되어 있습니다. 실행기는 아직 구현되지 않았습니다."}
         </p>
       </section>
     </div>
@@ -982,7 +1021,10 @@ function AgentMemorySection({
                   <div className="min-w-0">
                     <div className="mb-1 flex flex-wrap gap-1">
                       <StatusChip>{memoryScopeLabel(memory.scope)}</StatusChip>
-                      <StatusChip>{memory.kind}</StatusChip>
+                      <StatusChip>{memoryKindLabel(memory.kind)}</StatusChip>
+                      {memory.invalidAtMs !== undefined && (
+                        <StatusChip>무효화됨</StatusChip>
+                      )}
                     </div>
                     <p className="whitespace-pre-wrap break-words text-body text-ink">
                       {memory.body}
@@ -995,7 +1037,7 @@ function AgentMemorySection({
                       , {DATE_TIME.format(memory.updatedAtMs)}
                     </p>
                   </div>
-                  {mayInvalidate && (
+                  {mayInvalidate && memory.invalidAtMs === undefined && (
                     <Button
                       type="button"
                       variant="outline"
@@ -1371,7 +1413,7 @@ function AgentRunDetailDialog({
         <div className="flex flex-col gap-1 border-b border-line p-4">
           <DialogTitle>작업 상세</DialogTitle>
           <DialogDescription>
-            기존 run 상세 경로에서 읽은 실행 상태와 검증된 작업 요약입니다.
+            이 작업의 실행 상태와 기록된 작업 요약을 봅니다.
           </DialogDescription>
         </div>
         {query.isPending ? (
@@ -1451,9 +1493,12 @@ function RunDetailField({
   numeric?: boolean;
 }) {
   return (
-    <div className="flex gap-2">
-      <dt className="w-pane-sm shrink-0 text-ink-muted">{label}</dt>
-      <dd className="min-w-0 text-ink" data-numeric={numeric ? "" : undefined}>
+    <div className="grid grid-cols-3 gap-2">
+      <dt className="min-w-0 text-ink-muted">{label}</dt>
+      <dd
+        className="col-span-2 min-w-0 text-ink"
+        data-numeric={numeric ? "" : undefined}
+      >
         {children}
       </dd>
     </div>

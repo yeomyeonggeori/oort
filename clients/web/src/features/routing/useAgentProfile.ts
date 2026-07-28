@@ -82,6 +82,11 @@ export interface AgentProfileHandle {
   save: (draft: RoutingDraft) => Promise<AgentProfileSaveResult>;
 }
 
+/** GET 404 means the upsert-backed profile has not been created yet. */
+export function isAgentProfileMissing(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
 export function useAgentProfile(agentMemberId: string | null): AgentProfileHandle {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -100,8 +105,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
   });
 
   const profile = query.data ?? null;
-  const missing =
-    query.error instanceof ApiError && query.error.status === 404;
+  const missing = isAgentProfileMissing(query.error);
 
   const replace = useCallback(
     async (

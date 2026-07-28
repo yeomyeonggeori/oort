@@ -4,6 +4,7 @@ import type { AgentWorkingSignal } from "@/features/agents/agentWorkingSignal";
 import {
   agentMembers,
   canInvalidateMemory,
+  memoryKindLabel,
   mergeRunPages,
   signalsForAgent,
 } from "./model";
@@ -84,5 +85,8 @@ describe("agent hub model", () => {
     expect(canInvalidateMemory("admin", "ME", undefined)).toBe(true);
     expect(canInvalidateMemory("member", "ME", "me")).toBe(true);
     expect(canInvalidateMemory("member", "ME", "OTHER")).toBe(false);
+    expect(memoryKindLabel("preference")).toBe("선호");
+    expect(memoryKindLabel("fact")).toBe("사실");
+    expect(memoryKindLabel("project_note")).toBe("project_note");
   });
 });
