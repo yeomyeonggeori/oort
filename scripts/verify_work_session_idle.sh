@@ -288,36 +288,6 @@ ROUNDTRIP_SESSION="$(create_session "$ROUNDTRIP_HOST" 'Idle roundtrip')"
 TIMEOUT_SESSION="$(create_session "$TIMEOUT_HOST" 'Idle timeout')"
 OFFLINE_SESSION="$(create_session "$OFFLINE_HOST" 'Idle offline')"
 
-SECURITY_PATH="/v1/workspaces/$WS_ID/work-sessions/$ROUNDTRIP_SESSION"
-SECURITY_SIGNED_BODY='{"status":"idle","exitCode":7}'
-prepare_host_request PATCH "$SECURITY_PATH" "$ROUNDTRIP_HOST" "$SECURITY_SIGNED_BODY"
-SECURITY_REQUEST_ID="$SIGNED_REQUEST_ID"
-send_prepared_host_request '{"status":"ended"}'
-expect_status 401 "body substitution with captured valid signature"
-send_prepared_host_request "$SECURITY_SIGNED_BODY"
-expect_status 200 "normal v2 signed request"
-send_prepared_host_request "$SECURITY_SIGNED_BODY"
-expect_status 401 "same request ID replay"
-
-run_sql <<SQL
-UPDATE work_host_request
-   SET consumed_at=clock_timestamp()-interval '11 minutes',
-       expires_at=clock_timestamp()-interval '1 minute'
- WHERE workspace_id='$WS_ID'
-   AND request_id=lower('$SECURITY_REQUEST_ID')::uuid;
-SQL
-transition "$ROUNDTRIP_HOST" "$ROUNDTRIP_SESSION" \
-  '{"status":"running"}' "fresh request ID after replay rejection"
-got="$(sql_value <<SQL
-SELECT count(*) FROM work_host_request
- WHERE workspace_id='$WS_ID'
-   AND request_id=lower('$SECURITY_REQUEST_ID')::uuid;
-SQL
-)"
-[ "$got" = "0" ] || {
-  echo "[work-session-idle] FAIL expired request ID cleanup: $got" >&2
-  exit 1
-}
 
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/devices" \
   "$(jq -cn --arg id "$DEVICE_ID" \
@@ -450,6 +420,41 @@ curl -fsS "http://127.0.0.1:$PUSH_PORT/received" | jq -e '
      )]
   | length == 3' >/dev/null || {
   echo "[work-session-idle] FAIL id-only completion push envelope" >&2
+  exit 1
+}
+
+# 서명 v2 보안 검사는 맨 끝에 둔다. 이 블록이 roundtrip 세션에 idle·running
+# 전이를 한 번 더 얹으므로 위의 "세션당 정확히 1건" 개수 단정보다 먼저 돌면
+# 그 단정의 의미가 흐려진다(실측: 3:1 기대에 4:2가 왔다).
+
+SECURITY_PATH="/v1/workspaces/$WS_ID/work-sessions/$ROUNDTRIP_SESSION"
+SECURITY_SIGNED_BODY='{"status":"idle","exitCode":7}'
+prepare_host_request PATCH "$SECURITY_PATH" "$ROUNDTRIP_HOST" "$SECURITY_SIGNED_BODY"
+SECURITY_REQUEST_ID="$SIGNED_REQUEST_ID"
+send_prepared_host_request '{"status":"ended"}'
+expect_status 401 "body substitution with captured valid signature"
+send_prepared_host_request "$SECURITY_SIGNED_BODY"
+expect_status 200 "normal v2 signed request"
+send_prepared_host_request "$SECURITY_SIGNED_BODY"
+expect_status 401 "same request ID replay"
+
+run_sql <<SQL
+UPDATE work_host_request
+   SET consumed_at=clock_timestamp()-interval '11 minutes',
+       expires_at=clock_timestamp()-interval '1 minute'
+ WHERE workspace_id='$WS_ID'
+   AND request_id=lower('$SECURITY_REQUEST_ID')::uuid;
+SQL
+transition "$ROUNDTRIP_HOST" "$ROUNDTRIP_SESSION" \
+  '{"status":"running"}' "fresh request ID after replay rejection"
+got="$(sql_value <<SQL
+SELECT count(*) FROM work_host_request
+ WHERE workspace_id='$WS_ID'
+   AND request_id=lower('$SECURITY_REQUEST_ID')::uuid;
+SQL
+)"
+[ "$got" = "0" ] || {
+  echo "[work-session-idle] FAIL expired request ID cleanup: $got" >&2
   exit 1
 }
 
