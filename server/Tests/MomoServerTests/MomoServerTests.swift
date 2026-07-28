@@ -635,6 +635,25 @@ final class MomoServerTests: XCTestCase {
         ))
     }
 
+    func testPrivilegedRefreshDropsOnlyPrivilegedScopesWhenQualificationIsGone() {
+        let previous = [
+            "messages:write",
+            "platform:read",
+            "messages:read",
+            CloudCreditRoutes.writeScope,
+        ]
+
+        XCTAssertEqual(
+            AuthRoutes.refreshedScopes(previous: previous, remainsPrivileged: false),
+            ["messages:write", "messages:read"],
+            "named regression: allowlist removal must strip both privileged scopes"
+        )
+        XCTAssertEqual(
+            AuthRoutes.refreshedScopes(previous: previous, remainsPrivileged: true),
+            previous
+        )
+    }
+
     func testRealtimeTokenTTLIsClampedToShortWindow() {
         XCTAssertEqual(Config.clampedCentConnectionTokenTTL(-1), 60)
         XCTAssertEqual(Config.clampedCentConnectionTokenTTL(59), 60)
