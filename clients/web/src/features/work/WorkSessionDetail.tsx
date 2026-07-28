@@ -365,7 +365,10 @@ function SessionActions({
   const running = session.status === "running" || session.status === "idle";
   const owner = uuidEq(session.memberId, auth.member.id);
   const endReason = !running
-    ? "이미 닫힌 세션입니다."
+    ? session.status === "orphaned"
+      // Same M1 rule as observerStream: orphaned is resumable, not closed.
+      ? "호스트 연결이 끊긴 세션입니다."
+      : "이미 닫힌 세션입니다."
     : !owner
       ? "세션을 시작한 사람만 종료할 수 있습니다."
       : null;
