@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-652 웹 에이전트 허브 탭 v1 (#860, 2026-07-28)
+
+- 웹 사이드바의 워크스페이스 전역 `에이전트` 표면에 roster 기반 목록, agentWorkingSignal 현재 작업, 프로필·지시문·모델·pause, 읽기 전용 capability/도구 제한, 메모리 list/search·invalidate·visibility grants, #861 cursor run 이력·기존 상세를 통합했다. 기존 빠른 라우팅 프로필 다이얼로그 진입점은 유지하고 같은 query/save 로직을 재사용한다.
+- 메모리 policy·전체 삭제·외부 제공자 동의와 schedule 실행기는 범위 밖으로 유지했으며, 예약 데이터는 "실행기 미구현"으로 표시한다. typecheck·Vitest 909·production build·lint(기존 warning 4)·design preflight 10/10·design-review(Blocker 0, High 0) PASS; `gate:agent-hub`와 기존 Playwright 게이트는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-650 웹 idle 표시 + 재부착 동선 (#858, 2026-07-28)
 
 - 웹 Work 세션 모델·목록·상세·관전 attach에 `idle`을 살아 있는 중립 상태(`완료 · 대기 중`)로 추가하고, `exitCode`는 종료 판정이 아닌 `마지막 실행 결과`로 표시한다. `work.session.idle`·`work.session.resumed-to-running`은 전 필드 타입을 방어적으로 파싱한 뒤 REST 원장을 다시 읽으며, 목록 응답 전후 어느 순서로 도착해도 stale 응답을 폐기한다.

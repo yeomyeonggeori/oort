@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Activity,
+  Bot,
   Hash,
   Inbox,
   Lock,
@@ -294,6 +295,7 @@ export function Sidebar({
               <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
+              <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
             </ul>
 
             <SidebarSection

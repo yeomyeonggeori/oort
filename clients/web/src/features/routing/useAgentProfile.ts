@@ -77,6 +77,8 @@ export interface AgentProfileHandle {
   saving: boolean;
   failure: AgentProfileSaveFailure | null;
   clearFailure: () => void;
+  /** Replace the complete profile while preserving the server's closed world. */
+  replace: (input: AgentProfileInput) => Promise<AgentProfileSaveResult>;
   save: (draft: RoutingDraft) => Promise<AgentProfileSaveResult>;
 }
 
@@ -101,24 +103,14 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
   const missing =
     query.error instanceof ApiError && query.error.status === 404;
 
-  const save = useCallback(
-    async (draft: RoutingDraft): Promise<AgentProfileSaveResult> => {
+  const replace = useCallback(
+    async (
+      input: AgentProfileInput,
+      draft?: RoutingDraft
+    ): Promise<AgentProfileSaveResult> => {
       if (agentMemberId === null) return { ok: false, effortUnsupported: false };
       setSaving(true);
       setFailure(null);
-      const input: AgentProfileInput = {
-        instructions: profile?.instructions ?? "",
-        enabledTools: profile?.enabledTools ?? [],
-        // 프로필이 들고 있던 triggers를 **그대로** 돌려보낸다(R2 H2). `{ mention:
-        // true }`를 새로 지어내면 replace 규칙을 instructions·enabledTools에만
-        // 지키고 triggers에서 어기는 것이 되고, 서버 upsert가 `triggers =
-        // EXCLUDED.triggers`라 저장돼 있던 schedule이 그 자리에서 사라진다
-        // (openapi `AgentProfileTriggers.schedule`은 v0가 실행하지 않을 뿐
-        // 정식 필드다). 프로필이 아직 없을 때만 서버 기본값과 같은 모양을 만든다.
-        triggers: profile?.triggers ?? { mention: true },
-      };
-      if (draft.model !== null) input.modelPref = draft.model;
-      if (draft.effort !== null) input.effortPref = draft.effort;
       try {
         const saved = await putAgentProfile(workspaceId, agentMemberId, input);
         client.setQueryData(
@@ -129,7 +121,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
       } catch (error) {
         // 모양 거절은 강도를 실었을 때만 강도에 대한 답이다. 강도를 싣지도 않았는데
         // 온 "모르는 필드"는 다른 이야기이므로 그것으로 축을 내리지 않는다.
-        if (draft.effort !== null && isUnknownFieldRejection(error)) {
+        if (input.effortPref !== undefined && isUnknownFieldRejection(error)) {
           noteRoutingUnsupported(routingScope(workspaceId));
           setFailure({
             message:
@@ -148,7 +140,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
           // 무엇이 있는지도 이 클라이언트에 내려오지 않는다. 우리가 아는 것은
           // 어느 상자를 고쳐야 하는가뿐이고, 그것이 여기서 더하는 전부다.
           field:
-            error instanceof ApiError
+            error instanceof ApiError && draft !== undefined
               ? routingRejectionField(error.status, error.message, draft)
               : null,
         });
@@ -157,7 +149,27 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
         setSaving(false);
       }
     },
-    [agentMemberId, profile, workspaceId, client, key]
+    [agentMemberId, workspaceId, client, key]
+  );
+
+  const save = useCallback(
+    async (draft: RoutingDraft): Promise<AgentProfileSaveResult> => {
+      const input: AgentProfileInput = {
+        instructions: profile?.instructions ?? "",
+        enabledTools: profile?.enabledTools ?? [],
+        // 프로필이 들고 있던 triggers를 **그대로** 돌려보낸다(R2 H2). `{ mention:
+        // true }`를 새로 지어내면 replace 규칙을 instructions·enabledTools에만
+        // 지키고 triggers에서 어기는 것이 되고, 서버 upsert가 `triggers =
+        // EXCLUDED.triggers`라 저장돼 있던 schedule이 그 자리에서 사라진다
+        // (openapi `AgentProfileTriggers.schedule`은 v0가 실행하지 않을 뿐
+        // 정식 필드다). 프로필이 아직 없을 때만 서버 기본값과 같은 모양을 만든다.
+        triggers: profile?.triggers ?? { mention: true },
+      };
+      if (draft.model !== null) input.modelPref = draft.model;
+      if (draft.effort !== null) input.effortPref = draft.effort;
+      return replace(input, draft);
+    },
+    [profile, replace]
   );
 
   const refetch = useCallback(() => {
@@ -173,6 +185,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
     saving,
     failure,
     clearFailure: useCallback(() => setFailure(null), []),
+    replace,
     save,
   };
 }
