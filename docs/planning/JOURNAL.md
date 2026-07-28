@@ -17,6 +17,12 @@
 - 판정: xterm+현 PTY/replay 유지, Herdr/Ghostty 교체 금지; Windows 경계에서만 current/Rust PTY/Herdr 비교. plugin v2→skill lifecycle→기존 agent_run 기반 Automation 순서.
 - 검증: docs 41/41 PASS(누락된 prod example WorkHost 2변수는 fixture 주입, `OPS-WORKHOST-ENV-DRIFT` 검수 대상). 다음은 Fable 검수→성재 승인; ROADMAP/BUILD_TICKETS/Issue와 track→main은 건드리지 않았다.
 
+## 2026-07-28 (Fable) · #858·#861 랜딩 — ADR-0139 파생 4장 완결 · #860(허브) 가동
+- **#858 랜딩**(track/uxui `00df3bb4`, PR #872): design-review **PASS(B0·H0)** — D3 어휘 분리("이어서 보기" vs "새 호스트에서 재개") 세 표면 일관·idle 제3 상태 톤·미커밋 고지가 선택보다 먼저. 오케스트레이터 수리 5건: 앱 2(**스코프 칩이 열린 상세를 안 닫음** — 죽은 컨트롤 · **orphaned를 "닫힌 세션"으로 부름** — 재개 가능 상태의 종결 강등, 리뷰 M1) + 게이트 3(접힌 details visible 대기·이중 매칭·낡은 행수). red proof 4종(TRANSITION 포함 — stale 응답 덮어쓰기).
+- **#861 랜딩**(track/engine `af931652`, PR #873): 에이전트별 전역 run REST. 검증기 전관문(채널/전역 요약 동일성 포함)·**red proof에서 내 절단 위치 오류 2회 뒤 진짜 성립**(같은 문자열의 첫 매칭이 커서 검증 쿼리 — 메인 필터를 자르자 이름 있는 실패). 교훈: **red proof는 자른 것이 하중을 받는 술어인지까지 확인**.
+- **ADR-0139 파생 4장 전부 완결**: #856(엔진 idle)·#857(데몬 replay)·#859(T3 pause)·#858(웹). 남은 이월: #869(WSS 어댑터 — 실왕복 마지막 조각)·#870(재시작 reconciliation).
+- **#860(에이전트 허브 탭) 가동** — 최대 신설면은 **메모리 뷰**(서버 13 endpoints, 웹 소비자 0건이던 것). #861 이력 축·실배선된 working signal 소비. 남은 큐: #860 랜딩 → #869/#870 → main 동기화(성재 승인).
+
 ## 2026-07-28 (Fable) · 재개 — #857·#859 랜딩, ADR-0139 엔진 3장 완결 · #858 검수 중 · 워커=sol high(Fast)
 - **모델 지시 해석 정정**: "sol high fast"의 fast는 모델명이 아니라 **service tier**(`priority`="Fast" 1.5x — config.toml 전역 설정). `gpt-5.6-sol-fast`는 400 즉사(실측·감시가 60초 내 포착). 이후 sol high로 spawn.
 - **#857 랜딩**(PR #868): host-internal replay core(셸 래핑·256KiB 링·replay 마커 계약). 워커 STOP 판단 수용 — 데몬에 공개 WSS 리스너 부재는 새 경계라 임의 설계 안 함 → **#869**(WSS attach 어댑터 — 웹 재부착 실왕복의 마지막 조각)·**#870**(재시작 reconciliation) 티켓화. 검수에서 테스트 결함 2건 수리: **기계 의존 청크 단정**(첫 라이브 청크가 "print" 다섯 글자 — 5/5 결정적 실패, 워커 샌드박스에선 우연히 통과) · **행(hang)형 red proof**(swift-test 0% CPU 10분 실측 → 워치독 finish로 3.1초 이름 있는 실패로).
