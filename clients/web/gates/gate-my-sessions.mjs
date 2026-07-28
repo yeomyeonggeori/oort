@@ -509,12 +509,12 @@ async function assertContinuity(context, state) {
     throw new Error(`mine filter rendered ${await rows.count()} rows, expected 3`);
   }
   if (
-    (await page.locator(`[data-session-id="${otherSessionId}"]`).count()) !== 0
+    (await page.locator(`li[data-testid="my-work-session-row"][data-session-id="${otherSessionId}"]`).count()) !== 0
   ) {
     throw new Error("mine filter exposed another member's session");
   }
 
-  const offline = page.locator(`[data-session-id="${offlineSessionId}"]`);
+  const offline = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${offlineSessionId}"]`);
   if ((await offline.getAttribute("data-status")) !== "unavailable") {
     throw new Error(
       `offline running session rendered as ${await offline.getAttribute("data-status")}`
@@ -539,7 +539,7 @@ async function assertContinuity(context, state) {
       "my-work-session-detail"
   );
 
-  const online = page.locator(`[data-session-id="${onlineSessionId}"]`);
+  const online = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${onlineSessionId}"]`);
   if (
     (await online.getByTestId("my-work-session-status").textContent())?.trim() !==
       "완료 · 대기 중" ||
@@ -548,7 +548,7 @@ async function assertContinuity(context, state) {
   ) {
     throw new Error("idle row lost its neutral status or same-PTY action");
   }
-  const orphaned = page.locator(`[data-session-id="${orphanedSessionId}"]`);
+  const orphaned = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${orphanedSessionId}"]`);
   if (
     (await orphaned.getByTestId("my-work-session-thread").textContent())?.trim() !==
     "새 호스트에서 재개"
@@ -563,6 +563,10 @@ async function assertContinuity(context, state) {
   }
   await online.getByTestId("my-work-session-detail").click();
   await page.getByTestId("work-detail").waitFor();
+  // The meta block ships collapsed (<details>), so the exit-code row exists
+  // but is not VISIBLE until the summary is opened — a blind-authored wait
+  // here timed out against perfectly correct UI. Open it like a person would.
+  await page.getByTestId("work-detail-meta").locator("summary").click();
   await page.getByText("마지막 실행 결과", { exact: true }).waitFor();
   await page.getByTestId("work-observer-start").waitFor();
   await page.getByTestId("work-detail-back").click();
@@ -662,7 +666,7 @@ async function assertTransitionBeforeList(context, state) {
     }
   );
   await page.getByTestId("work-scope-mine").click();
-  const idle = page.locator(`[data-session-id="${onlineSessionId}"]`);
+  const idle = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${onlineSessionId}"]`);
   await idle.waitFor({ timeout: 10_000 });
   if ((await idle.getAttribute("data-status")) !== "idle") {
     throw new Error("idle frame before the first list response was overwritten");
@@ -678,9 +682,11 @@ async function assertTerminalState(context, state, testId) {
   if (testId === "hosts-empty") {
     const rows = page.getByTestId("my-work-session-row");
     await rows.first().waitFor({ timeout: 10_000 });
-    if ((await rows.count()) !== 2) {
+    // 3 = this fixture's owner-ledger sessions (offline/idle/orphaned). The
+    // stale "2" predated the idle/orphaned fixtures this branch added.
+    if ((await rows.count()) !== 3) {
       throw new Error(
-        `empty host registry hid ledger sessions: rendered ${await rows.count()}, expected 2`
+        `empty host registry hid ledger sessions: rendered ${await rows.count()}, expected 3`
       );
     }
     if ((await page.getByTestId("work-panel-hosts-empty").count()) !== 0) {
