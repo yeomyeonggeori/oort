@@ -14,6 +14,60 @@ for command_name in docker curl jq python3; do
   }
 done
 
+if [ "${WORK_HOST_SIGNING_GATE_PROVE_RED_BODY_DIGEST:-0}" = "1" ] \
+  && [ "${WORK_HOST_SIGNING_GATE_RED_CHILD:-0}" != "1" ]; then
+  RED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/momo-work-host-signing-red.XXXXXX")"
+  RED_LOG="$RED_ROOT/red-proof.log"
+  python3 - "$REPO_ROOT" "$RED_ROOT/repo" <<'PY'
+import os
+import shutil
+import sys
+
+source, destination = sys.argv[1:]
+ignored = {".git", ".build", ".swiftpm", "DerivedData", "node_modules"}
+
+def ignore(directory, names):
+    return {
+        name for name in names
+        if name in ignored or name == ".env" or name.startswith(".env.")
+    }
+
+shutil.copytree(source, destination, ignore=ignore)
+PY
+  python3 - "$RED_ROOT/repo/server/Sources/MomoServer/Auth/WorkHostAuthenticator.swift" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+source = path.read_text()
+needle = """                .appending(bodyDigest)
+                .appending("\\n")
+"""
+if source.count(needle) != 1:
+    raise SystemExit("[work-session-idle] red proof mutation marker drifted")
+path.write_text(source.replace(needle, "", 1))
+PY
+  set +e
+  WORK_HOST_SIGNING_GATE_RED_CHILD=1 \
+    bash "$RED_ROOT/repo/scripts/verify_work_session_idle.sh" >"$RED_LOG" 2>&1
+  RED_STATUS=$?
+  set -e
+  if [ "$RED_STATUS" -eq 0 ] \
+    || ! grep -q "FAIL body substitution with captured valid signature" "$RED_LOG"; then
+    cat "$RED_LOG" >&2
+    case "$RED_ROOT" in
+      "${TMPDIR:-/tmp}"/momo-work-host-signing-red.*) rm -r -- "$RED_ROOT" ;;
+    esac
+    echo "[work-session-idle] FAIL body-digest red proof did not fail by name" >&2
+    exit 1
+  fi
+  case "$RED_ROOT" in
+    "${TMPDIR:-/tmp}"/momo-work-host-signing-red.*) rm -r -- "$RED_ROOT" ;;
+  esac
+  echo "[work-session-idle] PASS red proof: omitting body digest fails the named substitution assertion"
+  exit 0
+fi
+
 find_openssl() {
   local candidate probe
   probe="$(mktemp "${TMPDIR:-/tmp}/momo-idle-openssl.XXXXXX")"
@@ -152,23 +206,48 @@ api() {
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
   RESPONSE_BODY="$(<"$out")"
 }
+prepare_host_request() {
+  local method="$1" path="$2" host_id="$3" body="${4:-}"
+  local body_hash payload
+  SIGNED_METHOD="$method"
+  SIGNED_PATH="$path"
+  SIGNED_HOST_ID="$host_id"
+  SIGNED_SENT_AT="$(now_ms)"
+  SIGNED_REQUEST_ID="$(new_uuid | tr '[:upper:]' '[:lower:]')"
+  body_hash="$(printf '%s' "$body" | "$OPENSSL_BIN" dgst -sha256 | awk '{print $NF}')"
+  payload="$TMP_DIR/work-host-request-$SIGNED_REQUEST_ID.txt"
+  if [ "${WORK_HOST_SIGNING_GATE_RED_CHILD:-0}" = "1" ]; then
+    printf 'momo.work_host.request.v2\n%s\n%s\n%s\n%s\n%s\n%s' \
+      "$method" "$path" \
+      "$(printf '%s' "$WS_ID" | tr '[:upper:]' '[:lower:]')" \
+      "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
+      "$SIGNED_SENT_AT" "$SIGNED_REQUEST_ID" >"$payload"
+  else
+    printf 'momo.work_host.request.v2\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+    "$method" "$path" \
+    "$(printf '%s' "$WS_ID" | tr '[:upper:]' '[:lower:]')" \
+    "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
+      "$SIGNED_SENT_AT" "$body_hash" "$SIGNED_REQUEST_ID" >"$payload"
+  fi
+  SIGNED_SIGNATURE="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" \
+    -in "$payload" | "$OPENSSL_BIN" base64 -A)"
+}
+send_prepared_host_request() {
+  local body="${1:-}" out="$TMP_DIR/response.json"
+  local -a args=(-sS -o "$out" -w '%{http_code}' -X "$SIGNED_METHOD"
+    -H 'Content-Type: application/json'
+    -H "Authorization: MomoHost $SIGNED_HOST_ID"
+    -H "X-Momo-Work-Host-Sent-At: $SIGNED_SENT_AT"
+    -H "X-Momo-Work-Host-Signature: $SIGNED_SIGNATURE"
+    -H "X-Momo-Work-Host-Request-ID: $SIGNED_REQUEST_ID")
+  [ -n "$body" ] && args+=(--data "$body")
+  RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$SIGNED_PATH")"
+  RESPONSE_BODY="$(<"$out")"
+}
 host_api() {
   local method="$1" path="$2" host_id="$3" body="${4:-}"
-  local sent_at payload signature out="$TMP_DIR/response.json"
-  sent_at="$(now_ms)"
-  payload="$TMP_DIR/work-host-request-$sent_at.txt"
-  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
-    "$method" "$path" "$WS_ID" "$host_id" "$sent_at" >"$payload"
-  signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" \
-    -in "$payload" | "$OPENSSL_BIN" base64 -A)"
-  local -a args=(-sS -o "$out" -w '%{http_code}' -X "$method"
-    -H 'Content-Type: application/json'
-    -H "Authorization: MomoHost $host_id"
-    -H "X-Momo-Work-Host-Sent-At: $sent_at"
-    -H "X-Momo-Work-Host-Signature: $signature")
-  [ -n "$body" ] && args+=(--data "$body")
-  RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
-  RESPONSE_BODY="$(<"$out")"
+  prepare_host_request "$method" "$path" "$host_id" "$body"
+  send_prepared_host_request "$body"
 }
 expect_status() {
   [ "$RESPONSE_STATUS" = "$1" ] || {
@@ -208,6 +287,37 @@ OFFLINE_HOST="$(register_host 'Idle offline host')"
 ROUNDTRIP_SESSION="$(create_session "$ROUNDTRIP_HOST" 'Idle roundtrip')"
 TIMEOUT_SESSION="$(create_session "$TIMEOUT_HOST" 'Idle timeout')"
 OFFLINE_SESSION="$(create_session "$OFFLINE_HOST" 'Idle offline')"
+
+SECURITY_PATH="/v1/workspaces/$WS_ID/work-sessions/$ROUNDTRIP_SESSION"
+SECURITY_SIGNED_BODY='{"status":"idle","exitCode":7}'
+prepare_host_request PATCH "$SECURITY_PATH" "$ROUNDTRIP_HOST" "$SECURITY_SIGNED_BODY"
+SECURITY_REQUEST_ID="$SIGNED_REQUEST_ID"
+send_prepared_host_request '{"status":"ended"}'
+expect_status 401 "body substitution with captured valid signature"
+send_prepared_host_request "$SECURITY_SIGNED_BODY"
+expect_status 200 "normal v2 signed request"
+send_prepared_host_request "$SECURITY_SIGNED_BODY"
+expect_status 401 "same request ID replay"
+
+run_sql <<SQL
+UPDATE work_host_request
+   SET consumed_at=clock_timestamp()-interval '11 minutes',
+       expires_at=clock_timestamp()-interval '1 minute'
+ WHERE workspace_id='$WS_ID'
+   AND request_id=lower('$SECURITY_REQUEST_ID')::uuid;
+SQL
+transition "$ROUNDTRIP_HOST" "$ROUNDTRIP_SESSION" \
+  '{"status":"running"}' "fresh request ID after replay rejection"
+got="$(sql_value <<SQL
+SELECT count(*) FROM work_host_request
+ WHERE workspace_id='$WS_ID'
+   AND request_id=lower('$SECURITY_REQUEST_ID')::uuid;
+SQL
+)"
+[ "$got" = "0" ] || {
+  echo "[work-session-idle] FAIL expired request ID cleanup: $got" >&2
+  exit 1
+}
 
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/devices" \
   "$(jq -cn --arg id "$DEVICE_ID" \
@@ -343,4 +453,4 @@ curl -fsS "http://127.0.0.1:$PUSH_PORT/received" | jq -e '
   exit 1
 }
 
-echo "[work-session-idle] PASS REST roundtrip / offline-before-timeout / idle timeout / events / audit / id-only push"
+echo "[work-session-idle] PASS body substitution / one-time request ID / cleanup / REST roundtrip / offline-before-timeout / idle timeout / events / audit / id-only push"

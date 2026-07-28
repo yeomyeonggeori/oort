@@ -2,6 +2,7 @@
 import Foundation
 import HTTPTypes
 import Hummingbird
+import NIOCore
 
 struct WorkHostIdentity: Sendable, Equatable {
     let hostID: UUID
@@ -12,38 +13,53 @@ struct WorkHostIdentity: Sendable, Equatable {
 /// Authenticates the narrow REST surface used by ADR-0125 D2 execution hosts.
 ///
 /// The host has no durable bearer. It presents its registry id through the
-/// `MomoHost` authorization scheme and signs method/path/tenant/host/timestamp
-/// bytes with the Ed25519 key registered in `work_host`. TLS protects the body;
-/// the signed path and strict allowlist prevent a captured signature from being
-/// moved to another API surface. Revocation is checked on every request.
+/// `MomoHost` authorization scheme and signs method/path/tenant/host/timestamp,
+/// the raw body SHA-256, and a one-time request UUID with the Ed25519 key
+/// registered in `work_host`. Revocation and atomic request-id consumption are
+/// checked on every request.
 struct WorkHostAuthenticator: Sendable {
     static let sentAtHeader = HTTPField.Name("X-Momo-Work-Host-Sent-At")!
     static let signatureHeader = HTTPField.Name("X-Momo-Work-Host-Signature")!
+    static let requestIDHeader = HTTPField.Name("X-Momo-Work-Host-Request-ID")!
+    static let maximumSignedBodyBytes = 1_048_576
 
     let db: Database
 
     func authenticate(
         authorization: String,
         request: Request
-    ) async throws -> WorkHostIdentity {
-        guard Self.isAllowed(method: request.method.rawValue, path: request.uri.path),
+    ) async throws -> (identity: WorkHostIdentity, request: Request) {
+        var request = request
+        let bodyDigest: String
+        do {
+            let buffer = try await request.collectBody(upTo: Self.maximumSignedBodyBytes)
+            bodyDigest = Self.sha256Hex(Data(buffer.readableBytesView))
+        } catch {
+            throw Self.unauthorized()
+        }
+        let method = request.method.rawValue
+        let path = request.uri.path
+
+        guard Self.isAllowed(method: method, path: path),
               let hostID = Self.hostID(fromAuthorization: authorization),
-              let workspaceID = Self.workspaceID(fromPath: request.uri.path),
+              let workspaceID = Self.workspaceID(fromPath: path),
               let sentAtText = request.headers[Self.sentAtHeader],
               let sentAtMs = Int64(sentAtText),
-              let signature = request.headers[Self.signatureHeader]
+              let signature = request.headers[Self.signatureHeader],
+              let requestIDText = request.headers[Self.requestIDHeader],
+              let requestID = UUID(uuidString: requestIDText)
         else {
             throw Self.unauthorized()
         }
         try Self.validateTimestamp(sentAtMs)
 
-        if let pathHostID = Self.scopedHostID(fromPath: request.uri.path),
+        if let pathHostID = Self.scopedHostID(fromPath: path),
            pathHostID != hostID
         {
             throw Self.unauthorized()
         }
 
-        let identity: WorkHostIdentity? = try await db.withTenantConnection(
+        let identity: WorkHostIdentity? = try await db.withTenantTransaction(
             workspaceID: workspaceID
         ) { conn in
             let rows = try await conn.query(
@@ -68,12 +84,37 @@ struct WorkHostAuthenticator: Sendable {
             guard Self.verifySignature(
                 publicKey: publicKey,
                 signature: signature,
-                method: request.method.rawValue,
-                path: request.uri.path,
+                method: method,
+                path: path,
                 workspaceID: workspaceID,
                 hostID: hostID,
-                sentAtMs: sentAtMs
+                sentAtMs: sentAtMs,
+                bodyDigest: bodyDigest,
+                requestID: requestID
             ) else { return nil }
+
+            _ = try await conn.query(
+                """
+                DELETE FROM work_host_request
+                 WHERE workspace_id = \(workspaceID)
+                   AND expires_at <= clock_timestamp()
+                """,
+                logger: db.logger
+            )
+            let consumed = try await conn.query(
+                """
+                INSERT INTO work_host_request
+                  (workspace_id, request_id, host_id, expires_at)
+                VALUES
+                  (\(workspaceID), \(requestID), \(hostID),
+                   clock_timestamp() + interval '10 minutes')
+                ON CONFLICT (workspace_id, request_id) DO NOTHING
+                RETURNING request_id
+                """,
+                logger: db.logger
+            ).collect()
+            guard consumed.count == 1 else { return nil }
+
             return WorkHostIdentity(
                 hostID: hostID,
                 workspaceID: workspaceID,
@@ -81,7 +122,7 @@ struct WorkHostAuthenticator: Sendable {
             )
         }
         guard let identity else { throw Self.unauthorized() }
-        return identity
+        return (identity, request)
     }
 
     static func requestSigningPayload(
@@ -89,10 +130,12 @@ struct WorkHostAuthenticator: Sendable {
         path: String,
         workspaceID: UUID,
         hostID: UUID,
-        sentAtMs: Int64
+        sentAtMs: Int64,
+        bodyDigest: String,
+        requestID: UUID
     ) -> Data {
         Data(
-            "momo.work_host.request.v1\n"
+            "momo.work_host.request.v2\n"
                 .appending(method.uppercased())
                 .appending("\n")
                 .appending(path)
@@ -102,6 +145,10 @@ struct WorkHostAuthenticator: Sendable {
                 .appending(hostID.uuidString.lowercased())
                 .appending("\n")
                 .appending(String(sentAtMs))
+                .appending("\n")
+                .appending(bodyDigest)
+                .appending("\n")
+                .appending(requestID.uuidString.lowercased())
                 .utf8
         )
     }
@@ -113,7 +160,9 @@ struct WorkHostAuthenticator: Sendable {
         path: String,
         workspaceID: UUID,
         hostID: UUID,
-        sentAtMs: Int64
+        sentAtMs: Int64,
+        bodyDigest: String,
+        requestID: UUID
     ) -> Bool {
         guard let keyBytes = Data(base64Encoded: publicKey), keyBytes.count == 32,
               let signatureBytes = Data(base64Encoded: signature), signatureBytes.count == 64,
@@ -126,9 +175,15 @@ struct WorkHostAuthenticator: Sendable {
                 path: path,
                 workspaceID: workspaceID,
                 hostID: hostID,
-                sentAtMs: sentAtMs
+                sentAtMs: sentAtMs,
+                bodyDigest: bodyDigest,
+                requestID: requestID
             )
         )
+    }
+
+    static func sha256Hex(_ body: Data) -> String {
+        SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
     }
 
     static func isAllowed(method: String, path: String) -> Bool {

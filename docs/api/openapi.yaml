@@ -1602,10 +1602,12 @@ paths:
       summary: Poll dispatched controls targeted at this execution host.
       description: >
         ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8
-        bytes `momo.work_host.request.v1\nGET\n<path>\n<lowercase workspace
-        UUID>\n<lowercase host UUID>\n<sentAtMs>` with its registered Ed25519
-        key. Only unrevoked status=dispatched controls targeted at that host
-        are returned; no human or agent bearer is accepted.
+        bytes `momo.work_host.request.v2\nGET\n<path>\n<lowercase workspace
+        UUID>\n<lowercase host UUID>\n<sentAtMs>\n<SHA-256(raw empty body),
+        lowercase hex>\n<lowercase request UUID>` with its registered Ed25519
+        key. The request UUID is consumed atomically once and retained for ten
+        minutes. Only unrevoked status=dispatched controls targeted at that
+        host are returned; no human or agent bearer is accepted.
       security:
         - workHostAuth: []
       parameters:
@@ -1613,6 +1615,7 @@ paths:
         - $ref: "#/components/parameters/WorkHostId"
         - $ref: "#/components/parameters/WorkHostSentAt"
         - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
       responses:
         "200":
           description: Bounded oldest-first dispatched controls for this host.
@@ -1647,6 +1650,7 @@ paths:
         - $ref: "#/components/parameters/WorkHostId"
         - $ref: "#/components/parameters/WorkHostSentAt"
         - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
       requestBody:
         required: true
         content:
@@ -4489,9 +4493,10 @@ components:
       in: header
       name: Authorization
       description: >
-        `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At
-        and X-Momo-Work-Host-Signature. This is an Ed25519 request signature,
-        not a durable bearer credential.
+        `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At,
+        X-Momo-Work-Host-Request-ID, and X-Momo-Work-Host-Signature. The v2
+        Ed25519 payload also binds SHA-256(raw request body); this is not a
+        durable bearer credential.
 
   parameters:
     WorkspaceId:
@@ -4551,6 +4556,16 @@ components:
       description: Raw 64-byte Ed25519 signature in standard base64.
       schema:
         type: string
+    WorkHostRequestId:
+      name: X-Momo-Work-Host-Request-ID
+      in: header
+      required: true
+      description: >
+        Unique UUID bound into the v2 signature and atomically accepted once
+        within its ten-minute replay-retention lifetime.
+      schema:
+        type: string
+        format: uuid
     WorkControlId:
       name: workControlId
       in: path

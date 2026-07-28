@@ -503,7 +503,7 @@ export interface paths {
         };
         /**
          * Poll dispatched controls targeted at this execution host.
-         * @description ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8 bytes `momo.work_host.request.v1\nGET\n<path>\n<lowercase workspace UUID>\n<lowercase host UUID>\n<sentAtMs>` with its registered Ed25519 key. Only unrevoked status=dispatched controls targeted at that host are returned; no human or agent bearer is accepted.
+         * @description ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8 bytes `momo.work_host.request.v2\nGET\n<path>\n<lowercase workspace UUID>\n<lowercase host UUID>\n<sentAtMs>\n<lowercase raw-body SHA-256 hex>\n<lowercase request UUID>` with its registered Ed25519 key. The request UUID is consumed once. Only unrevoked status=dispatched controls targeted at that host are returned; no human or agent bearer is accepted.
          */
         get: operations["listPendingWorkHostControls"];
         put?: never;
@@ -2502,6 +2502,8 @@ export interface components {
         WorkHostId: string;
         /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
         WorkHostSentAt: number;
+        /** @description Unique UUID consumed once by WorkHost request authentication. */
+        WorkHostRequestId: string;
         /** @description Raw 64-byte Ed25519 signature in standard base64. */
         WorkHostSignature: string;
         /** @description UUIDv7 work control ledger id. */
@@ -3772,6 +3774,8 @@ export interface operations {
             header: {
                 /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
                 "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
+                /** @description Unique UUID consumed once by WorkHost request authentication. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
                 /** @description Raw 64-byte Ed25519 signature in standard base64. */
                 "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
             };
@@ -3804,6 +3808,8 @@ export interface operations {
             header: {
                 /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
                 "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
+                /** @description Unique UUID consumed once by WorkHost request authentication. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
                 /** @description Raw 64-byte Ed25519 signature in standard base64. */
                 "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
             };

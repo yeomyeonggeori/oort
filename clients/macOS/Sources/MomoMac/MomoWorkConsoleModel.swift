@@ -418,6 +418,7 @@ protocol MomoWorkHostBackend: Sendable {
         workspace: WorkspaceID,
         host: WorkHostID,
         sentAtMs: Int64,
+        requestID: UUID,
         signature: String
     ) async throws -> [MomoWorkToolProfile]
 }
@@ -427,6 +428,7 @@ extension MomoWorkHostBackend {
         workspace: WorkspaceID,
         host: WorkHostID,
         sentAtMs: Int64,
+        requestID: UUID,
         signature: String
     ) async throws -> [MomoWorkToolProfile] {
         throw MomoWorkConsoleError.toolProfileUnavailable

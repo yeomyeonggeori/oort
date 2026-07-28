@@ -220,23 +220,29 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
         body: Body?
     ) async throws -> Response {
         let sentAtMs = Self.nowMs()
+        let requestID = UUID()
+        let encodedBody = try body.map { try encoder.encode($0) }
+        let bodyDigest = WorkHostSigner.sha256Hex(encodedBody ?? Data())
         let signature = try signer.signatureBase64(
             for: signer.requestPayload(
                 method: method,
                 path: path,
                 workspaceID: config.workspaceID,
                 hostID: hostID,
-                sentAtMs: sentAtMs
+                sentAtMs: sentAtMs,
+                bodyDigest: bodyDigest,
+                requestID: requestID
             )
         )
-        return try await send(
+        return try await sendEncoded(
             method: method,
             path: path,
-            body: body,
+            body: encodedBody,
             authorization: "MomoHost \(hostID.uuidString.lowercased())",
             extraHeaders: [
                 "X-Momo-Work-Host-Sent-At": String(sentAtMs),
                 "X-Momo-Work-Host-Signature": signature,
+                "X-Momo-Work-Host-Request-ID": requestID.uuidString.lowercased(),
             ]
         )
     }
@@ -248,6 +254,22 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
         authorization: String? = nil,
         extraHeaders: [String: String] = [:]
     ) async throws -> Response {
+        try await sendEncoded(
+            method: method,
+            path: path,
+            body: try body.map { try encoder.encode($0) },
+            authorization: authorization,
+            extraHeaders: extraHeaders
+        )
+    }
+
+    private func sendEncoded<Response: Decodable>(
+        method: String,
+        path: String,
+        body: Data?,
+        authorization: String? = nil,
+        extraHeaders: [String: String] = [:]
+    ) async throws -> Response {
         guard let url = URL(string: config.serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else {
             throw WorkdFailure.configuration
         }
@@ -256,7 +278,7 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
         for (name, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: name) }
-        if let body { request.httpBody = try encoder.encode(body) }
+        request.httpBody = body
 
         let data: Data
         let response: URLResponse

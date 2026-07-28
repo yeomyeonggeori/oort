@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-657 WorkHost 서명 body 결속 + replay 차단 (#875, 2026-07-28)
+
+- WorkHost 요청 서명을 v2로 즉시 절단해 raw body SHA-256와 UUID request ID를 결속하고, request ID는 FORCE RLS 원장에서 원자적으로 1회 소비·10분 보존하며 매 인증 시 만료분을 정리한다. workd·macOS app host·검증 스크립트를 함께 전환했다.
+- server 344 tests, WorkHostDaemon 32 tests, macOS Work Console 33 focused tests와 shell 정적 검증 PASS. 격리 Docker verifier의 body 교체·request ID replay·정상 경로·digest 제거 red proof 및 요청된 7개 회귀는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-653 에이전트별 전역 run 이력 REST (#861, 2026-07-28)
 
 - `GET /v1/workspaces/:ws/agents/:agent/runs`를 추가해 active human workspace member가 자신이 현재 속한 채널의 해당 agent run만 `(created_at,id)` 최신순 cursor로 조회한다. 채널 목록과 공통 요약 선택을 공유하고 id/status/time/channel/최대 200자 trigger summary만 노출하며 input/output/error·gateway payload·전문 transcript는 배제한다.

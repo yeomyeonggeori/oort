@@ -40,10 +40,12 @@ final class WorkHostSigner: @unchecked Sendable {
         path: String,
         workspaceID: UUID,
         hostID: UUID,
-        sentAtMs: Int64
+        sentAtMs: Int64,
+        bodyDigest: String,
+        requestID: UUID
     ) -> Data {
         Data(
-            "momo.work_host.request.v1\n"
+            "momo.work_host.request.v2\n"
                 .appending(method.uppercased())
                 .appending("\n")
                 .appending(path)
@@ -53,8 +55,16 @@ final class WorkHostSigner: @unchecked Sendable {
                 .appending(hostID.uuidString.lowercased())
                 .appending("\n")
                 .appending(String(sentAtMs))
+                .appending("\n")
+                .appending(bodyDigest)
+                .appending("\n")
+                .appending(requestID.uuidString.lowercased())
                 .utf8
         )
+    }
+
+    static func sha256Hex(_ body: Data) -> String {
+        SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
     }
 }
 

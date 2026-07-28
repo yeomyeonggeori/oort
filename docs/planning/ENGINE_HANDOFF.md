@@ -6,6 +6,7 @@
 
 > **2026-07-21 순차 배치 정본**: UXUI 잔여 전량(A-13·A-14 포함 9항목)의 실행 순서·수용기준·함정은 `docs/planning/handoffs/2026-07-21-uxui-sequential-batch.md`가 정본이다 — UXUI 세션은 그 문서 순서대로 처리한다(성재 지시).
 > **2026-07-21 패브릭 배치 가산(PLN-20260721-01 인수)**: 순차 배치의 ⑧(MOMO-518 diff 카드)은 패브릭 Wave U의 첫 장을 겸한다(수용기준은 패브릭 패킷 §2가 우선 — research/19-05 반영 필수). 순차 배치 완료 후 **⑩ MOMO-529**(메모리 브라우저 — 엔진 527·528 랜딩 대기), **⑪ MOMO-532**(도구 관리+ACP 카드 — 엔진 533·531 랜딩 대기)를 잇는다. 정본: `docs/planning/handoffs/2026-07-21-agent-native-fabric-batch.md`.
+> **2026-07-28 MOMO-657 엔진 보안 동기화**: WorkHost request 서명이 v2(raw-body SHA-256 + 1회용 request UUID)로 즉시 절단된다. UXUI 소유 macOS app-host 발신부도 같은 엔진 PR에서 최소 동기화해 서버/앱 업데이트 불일치의 전면 401을 피했다. 추가 UI 소비 작업은 없다.
 
 ## A. UI 작업 큐 — UXUI 트랙 소비 대상
 
