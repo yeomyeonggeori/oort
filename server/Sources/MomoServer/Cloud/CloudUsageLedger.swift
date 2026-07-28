@@ -170,7 +170,8 @@ enum CloudUsageLedger {
         hostID: UUID
     ) async throws -> UUID {
         let usage = try await lockOpenUsage(
-            conn: conn, logger: logger, workspaceID: workspaceID, hostID: hostID
+            conn: conn, logger: logger, workspaceID: workspaceID, hostID: hostID,
+            sessionID: nil
         )
         try await transitionInterval(
             conn: conn,
@@ -183,6 +184,27 @@ enum CloudUsageLedger {
         return usage.sessionID
     }
 
+    static func pause(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        hostID: UUID,
+        sessionID: UUID
+    ) async throws {
+        let usage = try await lockOpenUsage(
+            conn: conn, logger: logger, workspaceID: workspaceID, hostID: hostID,
+            sessionID: sessionID
+        )
+        try await transitionInterval(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            usageID: usage.id,
+            expected: "active",
+            next: "paused"
+        )
+    }
+
     static func resume(
         conn: PostgresConnection,
         logger: Logger,
@@ -190,7 +212,8 @@ enum CloudUsageLedger {
         hostID: UUID
     ) async throws -> UUID {
         let usage = try await lockOpenUsage(
-            conn: conn, logger: logger, workspaceID: workspaceID, hostID: hostID
+            conn: conn, logger: logger, workspaceID: workspaceID, hostID: hostID,
+            sessionID: nil
         )
         try await transitionInterval(
             conn: conn,
@@ -201,6 +224,27 @@ enum CloudUsageLedger {
             next: "active"
         )
         return usage.sessionID
+    }
+
+    static func resume(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        hostID: UUID,
+        sessionID: UUID
+    ) async throws {
+        let usage = try await lockOpenUsage(
+            conn: conn, logger: logger, workspaceID: workspaceID, hostID: hostID,
+            sessionID: sessionID
+        )
+        try await transitionInterval(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            usageID: usage.id,
+            expected: "paused",
+            next: "active"
+        )
     }
 
     static func settle(
@@ -296,19 +340,36 @@ enum CloudUsageLedger {
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
-        hostID: UUID
+        hostID: UUID,
+        sessionID: UUID?
     ) async throws -> OpenUsage {
-        let rows = try await conn.query(
-            """
-            SELECT id, session_id
-              FROM work_host_usage
-             WHERE workspace_id = \(workspaceID)
-               AND host_id = \(hostID)
-               AND settled_at IS NULL
-             FOR UPDATE
-            """,
-            logger: logger
-        ).collect()
+        let rows: [PostgresRow]
+        if let sessionID {
+            rows = try await conn.query(
+                """
+                SELECT id, session_id
+                  FROM work_host_usage
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND session_id = \(sessionID)
+                   AND settled_at IS NULL
+                 FOR UPDATE
+                """,
+                logger: logger
+            ).collect()
+        } else {
+            rows = try await conn.query(
+                """
+                SELECT id, session_id
+                  FROM work_host_usage
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND settled_at IS NULL
+                 FOR UPDATE
+                """,
+                logger: logger
+            ).collect()
+        }
         guard let row = rows.first else {
             throw HTTPError(.conflict, message: "실행 중인 momo Cloud 세션이 없습니다.")
         }

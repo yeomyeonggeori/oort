@@ -19,6 +19,7 @@ from typing import Any
 _LOCK = threading.Lock()
 _REQUESTS: list[dict[str, Any]] = []
 _STATE: dict[str, str] = {}
+_MISSING_ON_RESUME = False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -40,6 +41,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self) -> None:
+        global _MISSING_ON_RESUME
+        if self.path == "/controls/resume-missing":
+            with _LOCK:
+                _MISSING_ON_RESUME = True
+            self._json(200, {"resumeMissing": True})
+            return
         if self.path == "/sandboxes":
             body = self._body()
             if not isinstance(body, dict) or not isinstance(body.get("templateID"), str):
@@ -73,6 +80,13 @@ class Handler(BaseHTTPRequestHandler):
             self._body()
             with _LOCK:
                 _REQUESTS.append({"method": "POST", "path": self.path})
+                missing = _MISSING_ON_RESUME
+                if missing:
+                    _STATE["momo647sandbox"] = "missing"
+            if missing:
+                self._json(404, {"error": "sandbox not found"})
+                return
+            with _LOCK:
                 _STATE["momo647sandbox"] = "running"
             self._json(
                 200,
