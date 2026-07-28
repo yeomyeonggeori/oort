@@ -138,7 +138,12 @@ struct E2BProvisioner: CloudProvisioning {
             ]
         )
         let data = try JSONEncoder().encode(body)
-        let response = try await execute(method: .post, path: "/sandboxes", body: data)
+        let response = try await execute(
+            method: .post,
+            path: "/sandboxes",
+            body: data,
+            idempotencyKey: provisionID.uuidString.lowercased()
+        )
         guard response.status.code == 201 else {
             throw CloudProvisionerError.upstreamStatus(Int(response.status.code))
         }
@@ -182,7 +187,8 @@ struct E2BProvisioner: CloudProvisioning {
     private func execute(
         method: RequestMethod,
         path: String,
-        body: Data?
+        body: Data?,
+        idempotencyKey: String? = nil
     ) async throws -> HTTPClientResponse {
         var request = HTTPClientRequest(url: config.apiBaseURL + path)
         switch method {
@@ -191,6 +197,9 @@ struct E2BProvisioner: CloudProvisioning {
         }
         request.headers.add(name: "X-API-Key", value: config.apiKey)
         request.headers.add(name: "Accept", value: "application/json")
+        if let idempotencyKey {
+            request.headers.add(name: "Idempotency-Key", value: idempotencyKey)
+        }
         if let body {
             request.headers.add(name: "Content-Type", value: "application/json")
             request.body = .bytes(ByteBuffer(data: body))

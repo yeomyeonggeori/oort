@@ -8,6 +8,7 @@ import PostgresNIO
 struct CreateCloudHostRequest: Decodable {
     let displayName: String
     let confirmPaidCloud: Bool
+    let idempotencyRef: String
 }
 
 struct CloudHostDTO: ResponseEncodable, Codable, Sendable, Equatable {
@@ -60,16 +61,39 @@ struct CloudProvisionerRoutes: Sendable {
         }
         let displayName = try WorkHostRoutes.validatedDisplayName(input.displayName)
         let readyConfig = try Self.readyConfig(config)
-        let token = Self.randomToken()
-        let digest = Self.tokenDigest(token)
         let expiresAt = Date().addingTimeInterval(Self.bootstrapTTLSeconds)
+        guard let createKey = UUID(uuidString: input.idempotencyRef) else {
+            throw HTTPError(.badRequest, message: "idempotencyRef must be a UUID")
+        }
 
-        let provisionID: UUID = try await withTenantTransactionUnwrapped(
+        let (provisionID, needsProviderCreate): (UUID, Bool) =
+            try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
             try await InviteRoutes.requireWorkspaceMember(
                 conn: conn, logger: db.logger, principal: principal
             )
+            let existingRows = try await conn.query(
+                """
+                SELECT id, requested_display_name, provider_sandbox_id IS NULL
+                  FROM work_cloud_host
+                 WHERE workspace_id = \(workspaceID)
+                   AND create_idempotency_key = \(createKey)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            if let existingRow = existingRows.first {
+                let (existingID, existingName, missingSandbox) =
+                    try existingRow.decode((UUID, String?, Bool).self)
+                guard existingName == nil || existingName == displayName else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "idempotencyRef was already used with a different displayName"
+                    )
+                }
+                return (existingID, missingSandbox)
+            }
             try await CloudUsageLedger.reserveProvisioningSlot(
                 conn: conn,
                 logger: db.logger,
@@ -80,14 +104,21 @@ struct CloudProvisionerRoutes: Sendable {
             guard let provisionID = try idRows.first?.decode(UUID.self) else {
                 throw HTTPError(.internalServerError, message: "momo Cloud 요청 ID를 만들지 못했습니다.")
             }
+            let token = Self.bootstrapToken(
+                provisionID: provisionID,
+                apiKey: readyConfig.apiKey
+            )
+            let digest = Self.tokenDigest(token)
             _ = try await conn.query(
                 """
                 INSERT INTO work_cloud_host
                   (id, workspace_id, requester_member_id, bootstrap_token_digest,
-                   bootstrap_expires_at, unit_rate_micro_usd_second)
+                   bootstrap_expires_at, unit_rate_micro_usd_second,
+                   create_idempotency_key, requested_display_name)
                 VALUES
                   (\(provisionID), \(workspaceID), \(principal.memberID), \(digest),
-                   \(expiresAt), \(readyConfig.unitRateMicroUSDSecond))
+                   \(expiresAt), \(readyConfig.unitRateMicroUSDSecond),
+                   \(createKey), \(displayName))
                 """,
                 logger: db.logger
             )
@@ -108,8 +139,21 @@ struct CloudProvisionerRoutes: Sendable {
                 """,
                 logger: db.logger
             )
-            return provisionID
+            return (provisionID, true)
         }
+
+        if !needsProviderCreate {
+            return try await cloudHostResponse(
+                request: request,
+                context: context,
+                workspaceID: workspaceID,
+                provisionID: provisionID
+            )
+        }
+        let token = Self.bootstrapToken(
+            provisionID: provisionID,
+            apiKey: readyConfig.apiKey
+        )
 
         let sandbox: CloudSandbox
         do {
@@ -122,7 +166,9 @@ struct CloudProvisionerRoutes: Sendable {
                 displayName: displayName
             )
         } catch {
-            try? await markFailed(workspaceID: workspaceID, provisionID: provisionID)
+            // A timeout/invalid response is ambiguous: E2B may have committed a
+            // paid sandbox. Keep the durable provisioning intent so the same
+            // provider idempotency key can replay and converge it.
             throw Self.httpError(error)
         }
 
@@ -309,27 +355,32 @@ struct CloudProvisionerRoutes: Sendable {
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let hostID = try Self.parameterUUID("host", context: context)
         let readyConfig = try Self.readyConfig(config)
-        let expectedState: String
-        switch action {
-        case .pause: expectedState = "running"
-        case .resume: expectedState = "paused"
-        case .destroy: expectedState = "ready"
-        }
-        let sandboxID = try await lifecyclePreflight(
+        let intent = try await beginLifecycleIntent(
             workspaceID: workspaceID,
             principal: principal,
             hostID: hostID,
-            expectedState: expectedState,
-            requireNoOpenUsage: action == .destroy
+            action: action
         )
         let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
         do {
             switch action {
-            case .pause: try await provisioner.pause(sandboxID: sandboxID)
-            case .resume: try await provisioner.resume(sandboxID: sandboxID)
-            case .destroy: try await provisioner.destroy(sandboxID: sandboxID)
+            case .pause: try await provisioner.pause(sandboxID: intent.sandboxID)
+            case .resume: try await provisioner.resume(sandboxID: intent.sandboxID)
+            case .destroy: try await provisioner.destroy(sandboxID: intent.sandboxID)
             }
         } catch {
+            if action == .resume, Self.isMissingSandbox(error) {
+                try await markResumeSandboxMissing(
+                    workspaceID: workspaceID,
+                    hostID: hostID,
+                    operationID: intent.operationID,
+                    principal: principal
+                )
+                throw HTTPError(
+                    .gone,
+                    message: "momo Cloud 샌드박스가 사라져 orphan 정리를 예약했습니다."
+                )
+            }
             throw Self.httpError(error)
         }
 
@@ -338,12 +389,73 @@ struct CloudProvisionerRoutes: Sendable {
         ) { conn in
             switch action {
             case .pause:
-                _ = try await CloudUsageLedger.pause(
+                let sessionID = try await CloudUsageLedger.pause(
                     conn: conn, logger: db.logger, workspaceID: workspaceID, hostID: hostID
                 )
+                _ = try await conn.query(
+                    """
+                    UPDATE work_session
+                       SET status = 'idle', idle_at = clock_timestamp()
+                     WHERE workspace_id = \(workspaceID)
+                       AND id = \(sessionID)
+                       AND status = 'running'
+                    """,
+                    logger: db.logger
+                )
             case .resume:
-                _ = try await CloudUsageLedger.resume(
+                let sessionID = try await CloudUsageLedger.resume(
                     conn: conn, logger: db.logger, workspaceID: workspaceID, hostID: hostID
+                )
+                let sessionRows = try await conn.query(
+                    """
+                    UPDATE work_session
+                       SET status = 'running', idle_at = NULL
+                     WHERE workspace_id = \(workspaceID)
+                       AND id = \(sessionID)
+                       AND status = 'idle'
+                    RETURNING id
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard sessionRows.first != nil else {
+                    throw HTTPError(.conflict, message: "work session state changed; reconciliation pending")
+                }
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    SELECT ws.workspace_id, 'broadcast', 'publish',
+                           jsonb_build_object(
+                             'channel', 'ch:ws' || lower(ws.workspace_id::text)
+                               || '.' || lower(ws.channel_id::text),
+                             'data', jsonb_build_object(
+                               'type', 'work.session.resumed-to-running',
+                               'v', 1,
+                               'ts', floor(
+                                 extract(epoch FROM clock_timestamp()) * 1000
+                               )::bigint,
+                               'seq', root.seq,
+                               'payload', jsonb_build_object(
+                                 'session_id', lower(ws.id::text),
+                                 'channel_id', lower(ws.channel_id::text),
+                                 'root_message_id', lower(ws.root_message_id::text),
+                                 'member_id', lower(ws.member_id::text),
+                                 'host_id', lower(ws.host_id::text),
+                                 'status', 'running',
+                                 'resumed_at', floor(
+                                   extract(epoch FROM clock_timestamp()) * 1000
+                                 )::bigint
+                               )
+                             ),
+                             'idempotency_key',
+                               'cloud-resume:' || lower(\(intent.operationID)::text)
+                           ),
+                           ws.channel_id
+                      FROM work_session ws
+                      JOIN message root ON root.id = ws.root_message_id
+                     WHERE ws.id = \(sessionID)
+                    """,
+                    logger: db.logger
                 )
             case .destroy:
                 let usageRows = try await conn.query(
@@ -369,18 +481,19 @@ struct CloudProvisionerRoutes: Sendable {
             case .resume: nextState = "running"
             case .destroy: nextState = "destroyed"
             }
-            let rows = try await conn.query(
+            let updatedRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
                    SET state = \(nextState), updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
-                   AND state = \(expectedState)
+                   AND lifecycle_operation_id = \(intent.operationID)
+                   AND state = \(intent.intentState)
                 RETURNING id, host_id, state, provider, created_at
                 """,
                 logger: db.logger
             ).collect()
-            guard let row = rows.first else {
+            guard let row = updatedRows.first else {
                 throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
             }
             if action == .destroy {
@@ -421,14 +534,19 @@ struct CloudProvisionerRoutes: Sendable {
             .response(from: request, context: context)
     }
 
-    private func lifecyclePreflight(
+    private struct LifecycleIntent: Sendable {
+        let sandboxID: String
+        let operationID: UUID
+        let intentState: String
+    }
+
+    private func beginLifecycleIntent(
         workspaceID: UUID,
         principal: AuthPrincipal,
         hostID: UUID,
-        expectedState: String,
-        requireNoOpenUsage: Bool
-    ) async throws -> String {
-        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        action: LifecycleAction
+    ) async throws -> LifecycleIntent {
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             guard let role = try await WorkspaceAuthorization.activeRole(
                 conn: conn,
                 logger: db.logger,
@@ -461,13 +579,24 @@ struct CloudProvisionerRoutes: Sendable {
             guard requesterID == principal.memberID || role.isAdmin else {
                 throw HTTPError(.forbidden, message: "momo Cloud 호스트 소유자 또는 관리자만 변경할 수 있습니다.")
             }
+            let expectedState: String
+            let intentState: String
+            let operationKind: String
+            switch action {
+            case .pause:
+                expectedState = "running"; intentState = "pausing"; operationKind = "pause"
+            case .resume:
+                expectedState = "paused"; intentState = "resuming"; operationKind = "resume"
+            case .destroy:
+                expectedState = "ready"; intentState = "destroy_pending"; operationKind = "destroy"
+            }
             guard state == expectedState else {
                 throw HTTPError(
                     .conflict,
                     message: "momo Cloud 호스트를 이 상태에서 변경할 수 없습니다. 현재 상태: \(state)"
                 )
             }
-            guard !requireNoOpenUsage || !hasOpenUsage else {
+            guard action != .destroy || !hasOpenUsage else {
                 throw HTTPError(
                     .conflict,
                     message: "실행 중인 세션을 먼저 종료한 뒤 momo Cloud 호스트를 삭제하세요."
@@ -476,20 +605,89 @@ struct CloudProvisionerRoutes: Sendable {
             guard let sandboxID else {
                 throw HTTPError(.serviceUnavailable, message: "E2B 샌드박스 연결 정보가 준비되지 않았습니다.")
             }
-            return sandboxID
+            let operationID = UUID()
+            let updatedRows = try await conn.query(
+                """
+                UPDATE work_cloud_host
+                   SET state = \(intentState),
+                       lifecycle_operation_id = \(operationID),
+                       lifecycle_operation_kind = \(operationKind),
+                       lifecycle_operation_started_at = clock_timestamp(),
+                       lifecycle_operation_version = lifecycle_operation_version + 1,
+                       updated_at = clock_timestamp()
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND state = \(expectedState)
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            guard updatedRows.first != nil else {
+                throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+            }
+            return LifecycleIntent(
+                sandboxID: sandboxID,
+                operationID: operationID,
+                intentState: intentState
+            )
         }
     }
 
-    private func markFailed(workspaceID: UUID, provisionID: UUID) async throws {
-        try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+    private func markResumeSandboxMissing(
+        workspaceID: UUID,
+        hostID: UUID,
+        operationID: UUID,
+        principal: AuthPrincipal
+    ) async throws {
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+            let usageRows = try await conn.query(
+                """
+                SELECT session_id
+                  FROM work_host_usage
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND settled_at IS NULL
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            let sessionID = try usageRows.first?.decode(UUID.self)
             _ = try await conn.query(
                 """
                 UPDATE work_cloud_host
-                   SET state = 'failed',
-                       bootstrap_expires_at = clock_timestamp(),
-                       updated_at = clock_timestamp()
-                 WHERE id = \(provisionID)
-                   AND state = 'provisioning'
+                   SET state = 'destroyed', updated_at = clock_timestamp()
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND state = 'resuming'
+                   AND lifecycle_operation_id = \(operationID)
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                UPDATE work_host
+                   SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+                       last_seen_at = clock_timestamp() - interval '100 years'
+                 WHERE workspace_id = \(workspaceID)
+                   AND id = \(hostID)
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type,
+                   target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(principal.memberID), 'work.cloud.resume_failed',
+                   'work_host', \(hostID), \(principal.tokenID),
+                   jsonb_build_object(
+                     'schema', 'momo.work_cloud.resume_failed.v1',
+                     'host_id', \(hostID),
+                     'session_id', \(sessionID),
+                     'reason', 'sandbox_missing',
+                     'orphan_transition', 'host_offline_sweep'
+                   ))
                 """,
                 logger: db.logger
             )
@@ -538,6 +736,13 @@ struct CloudProvisionerRoutes: Sendable {
         )
     }
 
+    private static func isMissingSandbox(_ error: Error) -> Bool {
+        guard case CloudProvisionerError.upstreamStatus(let status) = error else {
+            return false
+        }
+        return status == 404 || status == 410
+    }
+
     static func tokenDigest(_ token: String) -> String {
         SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -549,6 +754,49 @@ struct CloudProvisionerRoutes: Sendable {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Stable across a lost create response without persisting raw bootstrap
+    /// material. The E2B operator key remains process-only and the provider
+    /// create call uses the same provision UUID as its idempotency key.
+    static func bootstrapToken(provisionID: UUID, apiKey: String) -> String {
+        let key = SymmetricKey(data: Data(apiKey.utf8))
+        let payload = Data(
+            "momo.cloud.bootstrap.v1:\(provisionID.uuidString.lowercased())".utf8
+        )
+        return Data(HMAC<SHA256>.authenticationCode(for: payload, using: key))
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private func cloudHostResponse(
+        request: Request,
+        context: AppRequestContext,
+        workspaceID: UUID,
+        provisionID: UUID
+    ) async throws -> Response {
+        let dto: CloudHostDTO = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT id, host_id, state, provider, created_at
+                  FROM work_cloud_host
+                 WHERE id = \(provisionID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "momo Cloud 요청을 찾을 수 없습니다.")
+            }
+            return try Self.decodeCloudHost(row)
+        }
+        var response = try CloudHostResponse(cloudHost: dto)
+            .response(from: request, context: context)
+        response.status = dto.hostId == nil ? .accepted : .created
+        return response
     }
 
     private static func bootstrapToken(_ request: Request) throws -> String {

@@ -19,6 +19,7 @@ from typing import Any
 _LOCK = threading.Lock()
 _REQUESTS: list[dict[str, Any]] = []
 _STATE: dict[str, str] = {}
+_CREATE_KEYS: dict[str, str] = {}
 _MISSING_ON_RESUME = False
 
 
@@ -52,8 +53,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict) or not isinstance(body.get("templateID"), str):
                 self.send_error(400)
                 return
-            sandbox_id = "momo647sandbox"
+            idempotency_key = self.headers.get("Idempotency-Key", "")
             with _LOCK:
+                sandbox_id = _CREATE_KEYS.setdefault(
+                    idempotency_key or f"unkeyed-{len(_CREATE_KEYS)}",
+                    "momo647sandbox",
+                )
                 _REQUESTS.append({"method": "POST", "path": self.path, "body": body})
                 _STATE[sandbox_id] = "running"
             self._json(

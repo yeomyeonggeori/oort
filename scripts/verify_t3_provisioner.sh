@@ -29,13 +29,69 @@ find_openssl() {
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1_000_000)'; }
 
 MIGRATION="server/Migrations/045_t3_provisioner_credit_ledger.sql"
+LIFECYCLE_MIGRATION="server/Migrations/049_t3_lifecycle_settlement.sql"
 test -f "$MIGRATION" || fail "missing $MIGRATION"
+test -f "$LIFECYCLE_MIGRATION" || fail "missing $LIFECYCLE_MIGRATION"
 grep -q "CREATE TABLE work_host_usage_interval" "$MIGRATION" \
   || fail "active/pause interval ledger missing"
 grep -q "WHEN state = 'active' AND ended_at IS NOT NULL" "$MIGRATION" \
   || fail "active seconds must be generated only for active intervals"
 grep -q "ALTER TABLE %I FORCE ROW LEVEL SECURITY" "$MIGRATION" \
   || fail "new tenant tables must FORCE RLS"
+grep -q "CREATE FUNCTION settle_t3_work_session" "$LIFECYCLE_MIGRATION" \
+  || fail "named gate terminal-settlement-primitive"
+grep -q "work_host_usage_one_unsettled_per_host_idx" "$LIFECYCLE_MIGRATION" \
+  || fail "named gate one-unsettled-usage-per-host"
+grep -q "state IN ('pausing', 'resuming', 'destroy_pending')" \
+  workers/NotifierWorker/Sources/NotifierWorker/CloudLifecycleReconciler.swift \
+  || fail "named gate provider-intent-reconciler"
+grep -q "Idempotency-Key" server/Sources/MomoServer/Cloud/E2BProvisioner.swift \
+  || fail "named gate crash-safe-provider-create"
+grep -q "/v1/admin/workspaces/:ws/credits/topups" \
+  server/Sources/MomoServer/Routes/CloudCreditRoutes.swift \
+  || fail "named gate operator-topup-rest"
+grep -q "human cloud resume intent must complete" \
+  server/Sources/MomoServer/Routes/WorkSessionRoutes.swift \
+  || fail "named gate host-report-is-confirmation"
+
+# One named, deterministic red proof per repaired boundary. Each mode removes
+# exactly the contract marker its green assertion above consumes and must exit
+# non-zero with the boundary name (no timing/row-count ambiguity).
+case "${T3_GATE_PROVE_RED:-}" in
+  terminal-settlement)
+    sed '/CREATE FUNCTION settle_t3_work_session/d' "$LIFECYCLE_MIGRATION" |
+      grep -q "CREATE FUNCTION settle_t3_work_session" ||
+      fail "red proof terminal-settlement-primitive"
+    ;;
+  resume-intent)
+    sed '/human cloud resume intent must complete/d' \
+      server/Sources/MomoServer/Routes/WorkSessionRoutes.swift |
+      grep -q "human cloud resume intent must complete" ||
+      fail "red proof host-report-is-confirmation"
+    ;;
+  host-uniqueness)
+    sed '/work_host_usage_one_unsettled_per_host_idx/d' "$LIFECYCLE_MIGRATION" |
+      grep -q "work_host_usage_one_unsettled_per_host_idx" ||
+      fail "red proof one-unsettled-usage-per-host"
+    ;;
+  provider-reconcile)
+    sed "/state IN ('pausing', 'resuming', 'destroy_pending')/d" \
+      workers/NotifierWorker/Sources/NotifierWorker/CloudLifecycleReconciler.swift |
+      grep -q "state IN ('pausing', 'resuming', 'destroy_pending')" ||
+      fail "red proof provider-intent-reconciler"
+    ;;
+  create-idempotency)
+    sed '/Idempotency-Key/d' server/Sources/MomoServer/Cloud/E2BProvisioner.swift |
+      grep -q "Idempotency-Key" ||
+      fail "red proof crash-safe-provider-create"
+    ;;
+  operator-topup)
+    sed '\\#/v1/admin/workspaces/:ws/credits/topups#d' \
+      server/Sources/MomoServer/Routes/CloudCreditRoutes.swift |
+      grep -q "/v1/admin/workspaces/:ws/credits/topups" ||
+      fail "red proof operator-topup-rest"
+    ;;
+esac
 if git diff --name-only HEAD -- schema_v0.sql | grep -q .; then
   fail "schema_v0.sql must not change"
 fi
@@ -68,6 +124,8 @@ MOCK_E2B_PORT="${T3_GATE_MOCK_E2B_PORT:-28055}"
 BOOT_TIMEOUT="${T3_GATE_BOOT_TIMEOUT:-2400}"
 ASSERT_TIMEOUT="${T3_GATE_ASSERT_TIMEOUT:-120}"
 RUN_TAG="$(date -u +%s)-$$"
+OWNER_EMAIL="t3-owner-$RUN_TAG@momo.local"
+OWNER_PASSWORD="t3-$RUN_TAG"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-t3-provisioner.XXXXXX")"
 BASE_URL="http://127.0.0.1:$API_PORT"
 GATE_E2B_KEY=""
@@ -79,6 +137,7 @@ compose() {
     E2B_API_KEY="$GATE_E2B_KEY" E2B_TEMPLATE_ID="momo-workd" \
     MOMO_PUBLIC_BASE_URL="https://momo.invalid" \
     MOMO_T3_RATE_MICRO_USD_PER_SECOND=25 \
+    PLATFORM_ADMIN_EMAILS="$OWNER_EMAIL" \
     MOMO_HOST_OFFLINE_GRACE_S=1 NOTIFIER_POLL_INTERVAL_MS=100 \
     docker compose --env-file "$SAFE_ENV_FILE" -p "$PROJECT" -f "$COMPOSE_FILE" \
       --profile push "$@"
@@ -140,9 +199,11 @@ sql_value() { run_sql -tA | tr -d '[:space:]'; }
 WS_ID="00000000-0000-7000-8000-000000000001"
 CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 OWNER_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
-OWNER_EMAIL="t3-owner-$RUN_TAG@momo.local"
-OWNER_PASSWORD="t3-$RUN_TAG"
+NONOP_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+NONOP_EMAIL="t3-nonop-$RUN_TAG@momo.local"
+NONOP_PASSWORD="t3-nonop-$RUN_TAG"
 TOPUP_REF="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+CREATE_REF="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 DUMMY_PROVISION="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 PRIVATE_KEY="$TMP_DIR/work-host-private.pem"
 PUBLIC_DER="$TMP_DIR/work-host-public.der"
@@ -163,12 +224,24 @@ INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES ('$WS_ID', '$OWNER_ID', 'owner');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner');
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES ('$NONOP_ID', '$WS_ID', 'human', 'active', 'T3 Non Operator', 't3-nonop-$RUN_TAG');
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$NONOP_ID', '$WS_ID', '$NONOP_EMAIL', true,
+        momo_password_hash('$NONOP_PASSWORD'), 'UTC');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$WS_ID', '$NONOP_ID', 'admin');
 COMMIT;
 SQL
 
 TOKEN="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   -H 'Content-Type: application/json' \
   --data "$(jq -cn --arg e "$OWNER_EMAIL" --arg p "$OWNER_PASSWORD" --arg w "$WS_ID" \
+    '{email:$e,password:$p,workspace:$w}')" | jq -er '.accessToken')"
+OWNER_TOKEN="$TOKEN"
+NONOP_TOKEN="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  --data "$(jq -cn --arg e "$NONOP_EMAIL" --arg p "$NONOP_PASSWORD" --arg w "$WS_ID" \
     '{email:$e,password:$p,workspace:$w}')" | jq -er '.accessToken')"
 
 STATUS=""
@@ -213,7 +286,9 @@ expect_status() {
 }
 
 CLOUD_PATH="/v1/workspaces/$WS_ID/work-hosts/cloud"
-api POST "$CLOUD_PATH" '{"displayName":"T3 gate","confirmPaidCloud":true}'
+CREATE_BODY="$(jq -cn --arg ref "$CREATE_REF" \
+  '{displayName:"T3 gate",confirmPaidCloud:true,idempotencyRef:$ref}')"
+api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 503 "missing E2B key must fail only T3 closed"
 printf '%s' "$BODY" | jq -er '.error.message | contains("E2B")' >/dev/null
 pass "missing key returns readable 503"
@@ -222,16 +297,30 @@ GATE_E2B_KEY="local-mock-not-a-credential"
 compose up -d --force-recreate api
 wait_api
 
-api POST "$CLOUD_PATH" '{"displayName":"T3 gate","confirmPaidCloud":true}'
+api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 409 "missing credit ledger"
 printf '%s' "$BODY" | jq -er '.error.message | contains("크레딧")' >/dev/null
 pass "missing balance rejects before E2B create"
 
+TOKEN="$NONOP_TOKEN"
+api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
+  "$(jq -cn --arg ref "$TOPUP_REF" \
+    '{amountMicroUsd:1000000,idempotencyRef:$ref}')"
+expect_status 403 "ordinary workspace admin topup rejection"
+TOKEN="$OWNER_TOKEN"
+api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
+  "$(jq -cn --arg ref "$TOPUP_REF" \
+    '{amountMicroUsd:1000000,idempotencyRef:$ref}')"
+expect_status 200 "instance-operator topup"
+printf '%s' "$BODY" | jq -e '.balanceMicroUsd == 1000000' >/dev/null
+api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
+  "$(jq -cn --arg ref "$TOPUP_REF" \
+    '{amountMicroUsd:1000000,idempotencyRef:$ref}')"
+expect_status 200 "idempotent instance-operator topup replay"
+
 run_sql <<SQL
 BEGIN;
 SET LOCAL row_security = off;
-INSERT INTO credit_entry (workspace_id, delta_micro_usd, reason, ref_id)
-VALUES ('$WS_ID', 1000000, 'topup', '$TOPUP_REF');
 UPDATE work_pool SET max_active=1, per_member_soft_limit=1 WHERE workspace_id='$WS_ID';
 INSERT INTO work_cloud_host
   (id, workspace_id, requester_member_id, state, bootstrap_token_digest,
@@ -241,7 +330,7 @@ VALUES
    repeat('0',64), clock_timestamp()+interval '10 minutes', 25);
 COMMIT;
 SQL
-api POST "$CLOUD_PATH" '{"displayName":"T3 gate","confirmPaidCloud":true}'
+api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 409 "slot exhaustion"
 printf '%s' "$BODY" | jq -er '.error.message | contains("슬롯")' >/dev/null
 pass "slot exhaustion returns readable reason"
@@ -254,9 +343,14 @@ UPDATE work_pool SET max_active=2, per_member_soft_limit=2 WHERE workspace_id='$
 COMMIT;
 SQL
 
-api POST "$CLOUD_PATH" '{"displayName":"T3 gate","confirmPaidCloud":true}'
+api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 202 "mock E2B provision"
 PROVISION_ID="$(printf '%s' "$BODY" | jq -er '.cloudHost.provisionId')"
+api POST "$CLOUD_PATH" "$CREATE_BODY"
+expect_status 202 "lost-create-response idempotent retry"
+[ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/sandboxes")] | length')" = "1" ] \
+  || fail "create response retry duplicated paid sandbox"
 BOOTSTRAP_TOKEN="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
   | jq -er '.requests[0].body.envVars.MOMO_WORKD_REGISTRATION_TOKEN')"
 [ "$(sql_value <<SQL
@@ -285,6 +379,19 @@ api POST "/v1/workspaces/$WS_ID/work-sessions" \
     '{channelId:$ch,hostId:$host,tool:"codex",label:"T3 ledger gate"}')"
 expect_status 201 "T3 work session create"
 SESSION_ID="$(printf '%s' "$BODY" | jq -er '.workSession.id')"
+api POST "/v1/workspaces/$WS_ID/work-sessions" \
+  "$(jq -cn --arg ch "$CHANNEL_ID" --arg host "$HOST_ID" \
+    '{channelId:$ch,hostId:$host,tool:"codex",label:"must reject duplicate host usage"}')"
+expect_status 409 "second unsettled session on one paid host"
+# 409만 보면 슬롯 한도·잔액 부족도 같은 코드를 낸다 — 이 단정이 주장하는 것은
+# "같은 유료 sandbox에 두 번째 미정산 세션이 붙지 않는다"이므로 사유까지 본다.
+# (실측: unique index를 지워도 이 단정이 통과했다. 사유 확인이 없으면 무엇이
+#  막았는지 모른 채 초록이 된다.)
+printf '%s' "$BODY" | grep -q "이미 정산 전 세션이 있습니다" || {
+  echo "[t3-provisioner] FAIL second session rejected for the wrong reason: $BODY" >&2
+  exit 1
+}
+pass "host-level unsettled usage uniqueness rejects double billing"
 sleep 2
 
 SESSION_PATH="/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID"
@@ -305,8 +412,8 @@ SQL
 pass "idle->pause called E2B and opened paused usage"
 
 sleep 2
-host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"running"}'
-expect_status 200 "running->resume REST transition"
+api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/resume"
+expect_status 200 "human resume intent REST transition"
 [ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
   | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')" = "1" ] \
   || fail "running->resume did not call E2B connect exactly once"
@@ -327,7 +434,7 @@ expect_status 200 "second idle->pause REST transition"
 sleep 2
 curl -fsS -X POST "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-missing" \
   >/dev/null
-host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"running"}'
+api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/resume"
 expect_status 410 "missing sandbox resume"
 compose up -d notifier
 
@@ -403,7 +510,7 @@ SELECT count(*) FROM audit_log
    AND (detail->>'cloud_provisioner_latency_ms')::bigint >= 0;
 SQL
 )"
-[ "$LATENCY_AUDIT" = "3" ] \
+[ "$LATENCY_AUDIT" = "2" ] \
   || fail "pause/resume latency evidence missing from lifecycle audit: $LATENCY_AUDIT"
 pass "pause/resume latency is queryable from audit; pause wall time bills zero"
 

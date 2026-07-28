@@ -20,6 +20,17 @@
 - 신규 원장 2개(마이그레이션): `work_host_usage(session_id, host_id, workspace_id, started_at, ended_at, active_seconds)` — T3만 기록 v0. `workspace_credit(workspace_id, balance_micro_usd, updated_at)` + `credit_entry(워크스페이스, delta, reason(topup|t3_usage), ref)` 이중 기입.
 - 정산: 프로비저너가 세션 종료 시 active_seconds×단가를 credit_entry로 차감. 잔액 0 이하 → 신규 T3 세션 거부(**기존 세션은 죽이지 않는다** — 진행 중 작업 보호, 소프트/하드 분리 원칙).
 - 충전 v0 = 운영자 수동(관리 REST). auto top-up(Threshold+Target)·결제 연동은 v1.
+- **2026-07-28 수명주기 수리(#876~878)**: host당 미정산 usage는 v0에서 1건만
+  허용한다. terminal/orphan은 interval 종료·active 합계 확정·멱등 차감·slot 해제와
+  provider destroy intent를 한 DB transaction에서 만든다. pause/resume/destroy는
+  `pausing|resuming|destroy_pending` intent+version CAS를 provider 호출보다 먼저
+  커밋하고, provider 호출은 intent UUID를 idempotency key로 사용한 뒤 별도
+  transaction/reconciler가 확정한다.
+- E2B create도 client create ref와 provision UUID를 각각 DB/provider idempotency key로
+  사용한다. bootstrap token은 process-only E2B key와 provision UUID에서 결정적으로
+  유도하므로 응답 유실 뒤에도 raw token을 저장하지 않고 같은 sandbox로 수렴한다.
+- 관리 topup REST는 instance-operator 경계(`platform:read` 또는 verified allowlist)만
+  허용하고 양수 금액·UUID ref·감사를 한 transaction에 기록한다.
 
 ### D3. 관측 — 레이트 미터 + 큐
 - 사용량 섹션에 T3 블록: **동시 세션 N/M 레이트 미터**(잔액과 프레임 분리 — 레퍼런스 교차 발견) + 월 활성시간 + 크레딧 잔액.

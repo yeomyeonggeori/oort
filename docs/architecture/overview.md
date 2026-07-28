@@ -271,14 +271,19 @@ E2B API key는 인스턴스 운영자 process env에만 있고 tenant 설정·DB
 Ed25519 키로 `work_host(type=cloud, scope=workspace)`를 등록한다. DB에는 token digest만
 남고 private key는 sandbox 밖으로 나오지 않는다.
 
-T3 session 생성은 `work_host_usage` 한 행과 첫
+T3 session 생성은 host당 미정산 1건 partial unique 아래 `work_host_usage` 한 행과 첫
 `work_host_usage_interval(state=active)`을 같은 tenant transaction에서 연다. pause는 E2B
 pause 성공 뒤 active interval을 닫고 `state=paused` 구간을 열며, resume은 paused 구간을
 닫고 새 active 구간을 연다. interval의 generated `active_seconds`는 active일 때만 wall
 time이고 paused이면 구조적으로 0이다. session 종료 transaction은 열린 구간을 닫아 active
 합계를 고정하고, 시작 시 snapshot한 초당 단가로 append-only
-`credit_entry(reason=t3_usage)`를 기록한다. trigger가 `workspace_credit` balance를
-갱신한다. 잔액 소진은 새 T3만 막고 이미 실행 중인 session은 종료시키지 않는다.
+`credit_entry(reason=t3_usage)`를 기록한다. terminal/orphan 경로는
+`settle_t3_work_session` 한 primitive로 이 정산과 cloud slot 해제·destroy intent를
+원자화한다. provider 호출은 DB 밖에서 intent UUID idempotency key로 실행되고
+NotifierWorker reconciler가 `pausing|resuming|destroy_pending` 및 미확정 provisioning을
+수렴시킨다. trigger가 `workspace_credit` balance를 갱신한다. 잔액 소진은 새 T3만 막고
+이미 실행 중인 session은 종료시키지 않는다. paused host는 stale heartbeat sweep에서
+제외되지만 `idle_at` timeout에서는 heartbeat 없이 terminal 정산된다.
 `usage_ledger`는 계속 모델 요청/토큰 비용 전용이다.
 
 ### Remote PTY attach control plane

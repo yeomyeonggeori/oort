@@ -53,6 +53,13 @@ extension NotifierService {
                          LIMIT 1
                       ) policy ON true
                      WHERE ws.status IN ('running', 'idle')
+                       AND NOT EXISTS (
+                         SELECT 1
+                           FROM work_cloud_host ch
+                          WHERE ch.workspace_id = ws.workspace_id
+                            AND ch.host_id = ws.host_id
+                            AND ch.state IN ('pausing', 'paused', 'resuming')
+                       )
                        AND COALESCE(h.last_seen_at, h.created_at)
                              < clock_timestamp()
                                - make_interval(secs => \(config.hostOfflineGraceSeconds))
@@ -134,9 +141,18 @@ extension NotifierService {
                     END AS idle_timeout_seconds
                   ) timeout
                  WHERE ws.status = 'idle'
-                   AND COALESCE(h.last_seen_at, h.created_at)
-                         >= clock_timestamp()
-                              - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                   AND (
+                     COALESCE(h.last_seen_at, h.created_at)
+                       >= clock_timestamp()
+                            - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                     OR EXISTS (
+                       SELECT 1
+                         FROM work_cloud_host ch
+                        WHERE ch.workspace_id = ws.workspace_id
+                          AND ch.host_id = ws.host_id
+                          AND ch.state IN ('pausing', 'paused', 'resuming')
+                     )
+                   )
                    AND ws.idle_at <= clock_timestamp()
                          - make_interval(secs => timeout.idle_timeout_seconds)
                  ORDER BY ws.idle_at, ws.id
@@ -195,15 +211,28 @@ extension NotifierService {
                    FROM work_host h
                   WHERE h.id = ws.host_id
                     AND h.workspace_id = ws.workspace_id
-                    AND COALESCE(h.last_seen_at, h.created_at)
-                          >= clock_timestamp()
-                               - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                    AND (
+                      COALESCE(h.last_seen_at, h.created_at)
+                        >= clock_timestamp()
+                             - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                      OR EXISTS (
+                        SELECT 1
+                          FROM work_cloud_host ch
+                         WHERE ch.workspace_id = ws.workspace_id
+                           AND ch.host_id = ws.host_id
+                           AND ch.state IN ('pausing', 'paused', 'resuming')
+                      )
+                    )
                )
             RETURNING ended_at
             """,
             logger: logger
         ).collect()
         guard let endedAt = try rows.first?.decode(Date.self) else { return }
+        _ = try await conn.query(
+            "SELECT settle_t3_work_session(\(session.workspaceID), \(session.id))",
+            logger: logger
+        ).collect()
         let endedAtMs = Self.epochMs(endedAt)
         var rootProps: [String: Any] = [
             "kind": "work_session",
@@ -279,6 +308,10 @@ extension NotifierService {
             logger: logger
         ).collect()
         guard let transitionedAt = try rows.first?.decode(Date.self) else { return }
+        _ = try await conn.query(
+            "SELECT settle_t3_work_session(\(session.workspaceID), \(session.id))",
+            logger: logger
+        ).collect()
         let transitionedAtMs = Self.epochMs(transitionedAt)
         var rootProps: [String: Any] = [
             "kind": "work_session",

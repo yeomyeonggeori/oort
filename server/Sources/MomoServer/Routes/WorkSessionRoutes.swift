@@ -595,7 +595,7 @@ struct WorkSessionRoutes: Sendable {
                         conn: conn,
                         workspaceID: workspaceID,
                         hostID: decoded.4,
-                        expected: "running",
+                        expected: "pausing",
                         next: "paused"
                     )
                 }
@@ -828,29 +828,20 @@ struct WorkSessionRoutes: Sendable {
 
         let readyConfig = try CloudProvisionerRoutes.readyConfig(cloudProvisionerConfig)
         let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
-        let action = targetStatus == "idle" ? "pause" : "resume"
+        // A paused daemon cannot initiate its own resume. Human REST records a
+        // durable resuming intent, calls the provider, then advances both the
+        // session and ledger. A later signed host report is confirmation only.
+        guard targetStatus == "idle" else {
+            throw HTTPError(
+                .conflict,
+                message: "paused momo Cloud sessions must be resumed by the human cloud resume endpoint"
+            )
+        }
+        let action = "pause"
         let startedAt = Date()
         do {
-            if targetStatus == "idle" {
-                try await provisioner.pause(sandboxID: target.sandboxID)
-            } else {
-                try await provisioner.resume(sandboxID: target.sandboxID)
-            }
+            try await provisioner.pause(sandboxID: target.sandboxID)
         } catch {
-            let latencyMs = Self.elapsedMilliseconds(since: startedAt)
-            if targetStatus == "running", Self.isMissingSandbox(error) {
-                try await recordMissingCloudSandbox(
-                    workspaceID: workspaceID,
-                    sessionID: sessionID,
-                    hostID: principal.tokenID,
-                    latencyMs: latencyMs,
-                    error: error
-                )
-                throw HTTPError(
-                    .gone,
-                    message: "momo Cloud 샌드박스가 사라져 세션을 orphaned 전이 대기 상태로 변경했습니다."
-                )
-            }
             throw CloudProvisionerRoutes.httpError(error)
         }
         return CloudLifecycleEvidence(
@@ -865,7 +856,7 @@ struct WorkSessionRoutes: Sendable {
         workspaceID: UUID,
         sessionID: UUID
     ) async throws -> CloudLifecycleTarget? {
-        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             let rows = try await conn.query(
                 """
                 SELECT ws.host_id, ws.status, h.type, ws.channel_id, ws.member_id,
@@ -905,12 +896,41 @@ struct WorkSessionRoutes: Sendable {
                     message: "momo Cloud 샌드박스 연결 정보가 준비되지 않았습니다."
                 )
             }
-            let expectedCloudState = targetStatus == "idle" ? "running" : "paused"
+            if targetStatus == "running" {
+                guard cloudState == "running" else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "human cloud resume intent must complete before host confirmation"
+                    )
+                }
+                return nil
+            }
+            let expectedCloudState = "running"
             guard cloudState == expectedCloudState else {
                 throw HTTPError(
                     .conflict,
                     message: "momo Cloud 호스트 상태가 세션 상태와 일치하지 않습니다."
                 )
+            }
+            let operationID = UUID()
+            let intentRows = try await conn.query(
+                """
+                UPDATE work_cloud_host
+                   SET state = 'pausing',
+                       lifecycle_operation_id = \(operationID),
+                       lifecycle_operation_kind = 'pause',
+                       lifecycle_operation_started_at = clock_timestamp(),
+                       lifecycle_operation_version = lifecycle_operation_version + 1,
+                       updated_at = clock_timestamp()
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                   AND state = 'running'
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            guard intentRows.first != nil else {
+                throw HTTPError(.conflict, message: "momo Cloud host lifecycle changed; retry")
             }
             return CloudLifecycleTarget(sandboxID: sandboxID)
         }

@@ -215,6 +215,9 @@ enum AppBuilder {
         WorkspaceRoutes(
             db: db, platformAdminEmails: config.platformAdminEmails
         ).add(to: authed)
+        CloudCreditRoutes(
+            db: db, platformAdminEmails: config.platformAdminEmails
+        ).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         MemberLifecycleRoutes(db: db).add(to: authed)

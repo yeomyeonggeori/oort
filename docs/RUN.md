@@ -1516,7 +1516,19 @@ scripts/verify_t3_provisioner.sh
 
 # red proof: pause wall time를 과금하도록 되돌린 가정이면 의도적으로 non-zero
 T3_GATE_PROVE_RED_PAUSE=1 scripts/verify_t3_provisioner.sh
+
+# named structural red proofs (each must exit non-zero with the same name)
+for proof in terminal-settlement resume-intent host-uniqueness \
+  provider-reconcile create-idempotency operator-topup; do
+  T3_GATE_RUN_DOCKER=0 T3_GATE_PROVE_RED="$proof" \
+    scripts/verify_t3_provisioner.sh && exit 1
+done
 ```
+
+검증기는 `idempotencyRef` create 재시도, host당 두 번째 unsettled session 거부,
+human resume REST(호스트 보고 없이 완료), terminal/orphan 멱등 정산, paused stale 제외,
+instance-operator topup 감사·멱등을 실제 REST/sweep/mock-E2B 경로로 확인한다. worker는
+Docker를 실행하지 않으며 오케스트레이터가 위 명령으로 이 runtime gate를 닫는다.
 
 오케스트레이터의 실 E2B smoke 절차:
 
@@ -1524,9 +1536,13 @@ T3_GATE_PROVE_RED_PAUSE=1 scripts/verify_t3_provisioner.sh
 2. 서버 프로세스에만 `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
    `MOMO_PUBLIC_BASE_URL=https://...`, `MOMO_T3_RATE_MICRO_USD_PER_SECOND`를 주입한다.
    셸 trace를 끄고 키 값을 출력하지 않는다.
-3. 테스트 workspace에 `credit_entry(reason='topup')` 한 건과 빈 슬롯을 준비한다.
+3. instance-operator bearer로
+   `POST /v1/admin/workspaces/{ws}/credits/topups`에 양수 `amountMicroUsd`와 UUID
+   `idempotencyRef`를 보내고 빈 슬롯을 확인한다. SQL 직접 충전은 검증 경계를 우회하므로
+   사용하지 않는다.
 4. human bearer로 `POST .../work-hosts/cloud`에
-   `{"displayName":"E2B smoke","confirmPaidCloud":true}`를 보낸다.
+   `{"displayName":"E2B smoke","confirmPaidCloud":true,"idempotencyRef":"<uuid>"}`를
+   보내고, 같은 ref 재전송이 같은 provision/sandbox를 반환하는지 확인한다.
 5. GET projection이 `ready`와 cloud `hostId`를 돌려줄 때까지 기다린다. E2B dashboard에서
    sandbox 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
 6. 그 host로 work session을 만들고 pause → 10초 대기 → resume → 종료한다.
