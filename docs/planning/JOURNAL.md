@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-07-28 (GPT 5.6 · momo-main) · PLN-20260728-01 독립 red team → 조건부 반려
+- 원 builder DAG를 보안·UX·과설계로 독립 검수해 신뢰 경계 4건을 확인: plugin delegation·terminal은 해당 레인 현재 blocker, WorkHost/approval은 remote·personal-write 확대 전 blocker다.
+- provider 1개의 host-owned connect+단일 runtime bridge 뒤 plugin v1 read-only 1개 + 기존 owner/profile/run을 재사용한 owner-only one-schedule로 축소했다.
+- SkillSpector 격리 pilot은 LOW/SAFE였지만 benign `keychain` HIGH false positive와 96-package 비용으로 advisory-only 판정했다.
+- superseding research/Fable 패킷 작성. ROADMAP/BUILD_TICKETS/STATUS/Issue/track→main은 미변경; 다음은 Fable 중복 검수→성재 A~E 승인.
+
+## 2026-07-28 (GPT 5.6 · momo-main) · PLN-20260728-01 경쟁/플랫폼 갭 감사 → Fable 검수 대기
+- 코드·GitHub·공식 경쟁사 자료를 대조해 Tauri/RN, plugin/skill/Automation/MCP Apps, terminal, motion 감사 문서와 builder 별칭/DAG를 작성했다.
+- 사실 교정: Codex JSON-RPC는 이미 채택, MemoryRoutes는 13 endpoints, PR #868은 track/engine merge 완료(#857 needs-review는 main 전 정상), #859는 구현 없음, #839/#842는 코드와 Issue 상태가 어긋난다.
+- 판정: xterm+현 PTY/replay 유지, Herdr/Ghostty 교체 금지; Windows 경계에서만 current/Rust PTY/Herdr 비교. plugin v2→skill lifecycle→기존 agent_run 기반 Automation 순서.
+- 검증: docs 41/41 PASS(누락된 prod example WorkHost 2변수는 fixture 주입, `OPS-WORKHOST-ENV-DRIFT` 검수 대상). 다음은 Fable 검수→성재 승인; ROADMAP/BUILD_TICKETS/Issue와 track→main은 건드리지 않았다.
+
+## 2026-07-28 (Fable) · 재개 — #857·#859 랜딩, ADR-0139 엔진 3장 완결 · #858 검수 중 · 워커=sol high(Fast)
+- **모델 지시 해석 정정**: "sol high fast"의 fast는 모델명이 아니라 **service tier**(`priority`="Fast" 1.5x — config.toml 전역 설정). `gpt-5.6-sol-fast`는 400 즉사(실측·감시가 60초 내 포착). 이후 sol high로 spawn.
+- **#857 랜딩**(PR #868): host-internal replay core(셸 래핑·256KiB 링·replay 마커 계약). 워커 STOP 판단 수용 — 데몬에 공개 WSS 리스너 부재는 새 경계라 임의 설계 안 함 → **#869**(WSS attach 어댑터 — 웹 재부착 실왕복의 마지막 조각)·**#870**(재시작 reconciliation) 티켓화. 검수에서 테스트 결함 2건 수리: **기계 의존 청크 단정**(첫 라이브 청크가 "print" 다섯 글자 — 5/5 결정적 실패, 워커 샌드박스에선 우연히 통과) · **행(hang)형 red proof**(swift-test 0% CPU 10분 실측 → 워치독 finish로 3.1초 이름 있는 실패로).
+- **#859 랜딩**(PR #871): T3 idle=pause 실배선. 신규 4관문(pause 1회 호출+paused interval·resume·**사라진 sandbox→destroyed→기존 orphaned sweep 합류**·latency 조회+pause 과금 0) + red proof 2종 이름 있는 실패. T1/T2 무영향.
+- **#858 검수 중**: 워커 산출(902 tests·red proof 4종 설계)에서 **앱 결함 1**(스코프 칩이 열린 상세를 안 닫음 — 죽은 컨트롤 → 칩=목록 약속으로 수리) + **게이트 결함 3**(접힌 details visible 대기·타임라인 카드 이중 매칭·낡은 행수) 수리(`0bdabe2d`). gate:my-sessions 3연속 그린·red proof 4종 성립. design-review 가동 중.
+- **#861 spawn**(전역 run REST — #860 허브 탭 선행). 남은 큐: #858 랜딩 → #860 · 별도 #869/#870.
+
 ## 2026-07-28 (Fable) · 성재 지시 일시 중단 — #856 랜딩·#857 가동 중·재개 문서 2
 - **재개 문서 = `handoffs/2026-07-28-resume-batch2.md`.** #856 랜딩(track/engine `1396b072`) 후 #857(데몬 셸 래핑·링버퍼·replay) sol medium spawn 직후 중단. **워커는 죽이지 않았다** — PR 후 STOP 계약이라 방치 안전, 결과는 RUN_DIR에 남는다.
 - 배치 누적: engine #855·#854·#856 / uxui #850·#851 — 전부 트랙 랜딩, **main 동기화 성재 승인 대기.** 다음 큐 #859→#858→#860/#861(패킷 미작성, 티켓에 상세 완비).
