@@ -142,6 +142,8 @@ protocol WorkHostAPI: Sendable {
         errorLabel: String?
     ) async throws
     func endSession(hostID: UUID, sessionID: UUID, exitCode: Int?) async throws
+    func reportSessionIdle(hostID: UUID, sessionID: UUID, exitCode: Int) async throws
+    func reportSessionRunning(hostID: UUID, sessionID: UUID) async throws
     func relayACPEvent(
         hostID: UUID,
         sessionID: UUID,
