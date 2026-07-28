@@ -736,6 +736,21 @@ sample agent-allowed-models get \
 guard_jq 'keys == ["allowedAgentModels"] and (.allowedAgentModels | type == "array" and length > 0)' \
   "agent allowed-models is a credential-free non-empty projection"
 
+sample agent-run-history get \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/runs" \
+  "/v1/workspaces/$WS/agents/$KIM_INTERN_MEMBER_ID/runs?limit=1" 200 "" "$ACCESS"
+guard_jq '
+  (.runs | type == "array" and length == 1)
+  and all(.runs[];
+    ((keys - [
+      "id","channelId","triggerMessageId","triggerSummary","status",
+      "startedAtMs","finishedAtMs","createdAtMs","updatedAtMs"
+    ]) | length) == 0
+    and ((has("input") or has("output") or has("error") or has("payload")
+          or has("transcript") or has("workspaceId") or has("agentMemberId")) | not)
+  )
+' "agent run history exposes only the credential-free summary projection"
+
 sample agent-run-cancel post \
   "/v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel" \
   "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/cancel" 200 "" "$ACCESS"

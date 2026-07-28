@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-653 에이전트별 전역 run 이력 REST (#861, 2026-07-28)
+
+- `GET /v1/workspaces/:ws/agents/:agent/runs`를 추가해 active human workspace member가 자신이 현재 속한 채널의 해당 agent run만 `(created_at,id)` 최신순 cursor로 조회한다. 채널 목록과 공통 요약 선택을 공유하고 id/status/time/channel/최대 200자 trigger summary만 노출하며 input/output/error·gateway payload·전문 transcript는 배제한다.
+- OpenAPI·역방향 route gate sample·엔진→UXUI handoff와 격리 verifier를 동반했다. verifier는 실제 REST 로그인 nonmember 403, cursor 경계/빈 페이지/삽입 안정성, target agent·채널·타 workspace/FORCE RLS 불가시, 채널/전역 같은 run 요약 동일성을 단정한다.
+- server build·342 tests와 shell/OpenAPI 정적 검증 PASS. 격리 Docker verifier와 두 red proof(OpenAPI 경로 제거, target-agent predicate 되돌림)는 오케스트레이터 실행 대기(`runtime-unverified`).
+
 ## MOMO-651 T3 idle pause + 활성시간 미계상 실배선 (#859, 2026-07-28)
 
 - cloud host의 signed `running→idle` 전이만 E2B pause와 `active→paused` interval 경계를 호출하고, `idle→running`은 E2B resume 뒤 `paused→active`를 재개한다. 일반 workd/desktop 호스트는 cloud 설정·프로비저너·원장을 건드리지 않는다.
