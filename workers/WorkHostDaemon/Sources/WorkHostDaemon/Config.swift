@@ -69,6 +69,11 @@ struct WorkdConfig: Sendable {
     let pollInterval: Duration
     let heartbeatInterval: Duration
     let ringBufferBytes: Int
+    /// MOMO-661 per-attach-subscriber pending-queue bound. A stalled attach
+    /// client is severed with `.overflow` once it exceeds this; it never grows
+    /// daemon memory beyond it. Clamped to at least `ringBufferBytes` by
+    /// `PTYReplayBuffer` so the attach replay always fits.
+    let subscriberQueueBytes: Int
     let localCommandOverrides: [String: LocalCommandOverride]
     let childEnvironmentPolicy: ChildEnvironmentPolicy
     let allowProfileLegacyEnvironment: Bool
@@ -135,6 +140,12 @@ struct WorkdConfig: Sendable {
             defaultValue: PTYReplayBuffer.defaultCapacityBytes,
             range: 4_096...(16 * 1_024 * 1_024)
         )
+        let subscriberQueueBytes = try boundedInteger(
+            environment["MOMO_WORKD_PTY_SUBSCRIBER_QUEUE_BYTES"],
+            defaultValue: ringBufferBytes
+                * PTYReplayBuffer.defaultSubscriberQueueMultiple,
+            range: 4_096...(64 * 1_024 * 1_024)
+        )
         let localCommandOverrides = try localCommandOverrides(environment: environment)
         let childEnvironmentPolicy = try childEnvironmentPolicy(environment: environment)
         let allowProfileLegacyEnvironment = environment["MOMO_WORKD_ALLOW_PROFILE_LEGACY_ENV"] == "1"
@@ -171,6 +182,7 @@ struct WorkdConfig: Sendable {
             pollInterval: .milliseconds(pollMs),
             heartbeatInterval: .milliseconds(heartbeatMs),
             ringBufferBytes: ringBufferBytes,
+            subscriberQueueBytes: subscriberQueueBytes,
             localCommandOverrides: localCommandOverrides,
             childEnvironmentPolicy: childEnvironmentPolicy,
             allowProfileLegacyEnvironment: allowProfileLegacyEnvironment,

@@ -44,6 +44,29 @@ struct PendingWorkControlsResponse: ResponseEncodable {
     let workControls: [WorkControlDTO]
 }
 
+/// MOMO-656: the ledger's view of what this host is still supposed to be
+/// serving. Deliberately narrower than `WorkSessionDTO` — a daemon needs only
+/// enough to answer "can I still serve this?", never channel/member routing.
+struct WorkHostLiveSessionDTO: Codable, Sendable, Equatable {
+    let id: String
+    let tool: String
+    let label: String
+    let status: String
+    let startedAtMs: Int64
+}
+
+struct WorkHostLiveSessionsResponse: ResponseEncodable {
+    let workSessions: [WorkHostLiveSessionDTO]
+}
+
+struct WorkHostReconcileRequest: Decodable {
+    let lostSessionIds: [UUID]
+}
+
+struct WorkHostReconcileResponse: ResponseEncodable {
+    let reportedSessionIds: [String]
+}
+
 /// ADR-0125 D1/D8 durable work-host identity registry.
 ///
 /// Protected human routes:
@@ -51,8 +74,10 @@ struct PendingWorkControlsResponse: ResponseEncodable {
 ///   GET    /v1/workspaces/{ws}/work-hosts
 ///   DELETE /v1/workspaces/{ws}/work-hosts/{host}
 ///
-/// Protected host-signature route (MomoHost authorization, never bearer):
+/// Protected host-signature routes (MomoHost authorization, never bearer):
 ///   GET    /v1/workspaces/{ws}/work-hosts/{host}/pending-controls
+///   GET    /v1/workspaces/{ws}/work-hosts/{host}/live-sessions
+///   POST   /v1/workspaces/{ws}/work-hosts/{host}/reconcile
 ///
 /// Public signature-authenticated route (no durable bearer on the host):
 ///   POST   /v1/workspaces/{ws}/work-hosts/{host}/heartbeat
@@ -73,8 +98,20 @@ struct WorkHostRoutes: Sendable {
             "/v1/workspaces/:ws/work-hosts/:host/pending-controls",
             use: pendingControls
         )
+        group.get(
+            "/v1/workspaces/:ws/work-hosts/:host/live-sessions",
+            use: liveSessions
+        )
+        group.post(
+            "/v1/workspaces/:ws/work-hosts/:host/reconcile",
+            use: reconcile
+        )
         group.delete("/v1/workspaces/:ws/work-hosts/:host", use: revoke)
     }
+
+    /// MOMO-656 upper bound on one reconciliation report. Larger than any
+    /// plausible per-host session count; a host claiming more is malformed.
+    static let maximumReconciledSessions = 200
 
     func addPublic(to router: Router<AppRequestContext>) {
         router.post("/v1/workspaces/:ws/work-hosts/:host/heartbeat", use: heartbeat)
@@ -282,6 +319,142 @@ struct WorkHostRoutes: Sendable {
 
         return try PendingWorkControlsResponse(workControls: controls)
             .response(from: request, context: context)
+    }
+
+    /// MOMO-656 step 1. What the ledger still believes this host is serving.
+    /// A daemon compares this against its own in-memory process table right
+    /// after boot; anything it cannot serve is reported through `reconcile`.
+    @Sendable
+    func liveSessions(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> Response {
+        let (workspaceID, hostID) = try Self.requireSelfSignedHost(context)
+
+        let sessions: [WorkHostLiveSessionDTO] = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ws.id, ws.tool, ws.label, ws.status,
+                       floor(extract(epoch from ws.started_at) * 1000)::bigint
+                  FROM work_session ws
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
+                   AND h.revoked_at IS NULL
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.host_id = \(hostID)
+                   AND ws.status IN ('running', 'idle')
+                 ORDER BY ws.started_at, ws.id
+                 LIMIT \(Self.maximumReconciledSessions)
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.map { row in
+                let value = try row.decode((UUID, String, String, String, Int64).self)
+                return WorkHostLiveSessionDTO(
+                    id: value.0.uuidString.lowercased(),
+                    tool: value.1,
+                    label: value.2,
+                    status: value.3,
+                    startedAtMs: value.4
+                )
+            }
+        }
+
+        return try WorkHostLiveSessionsResponse(workSessions: sessions)
+            .response(from: request, context: context)
+    }
+
+    /// MOMO-656 step 2. The host states, under its own signature, that it
+    /// cannot revive these sessions — the fast-restart case where heartbeats
+    /// never lapsed so the ADR-0125 D11 offline sweep would never notice.
+    ///
+    /// This route performs no lifecycle transition of its own. It only stamps
+    /// `host_lost_at`, which makes the rows immediately eligible for the same
+    /// sweep that owns the orphaned status, the resume card, the lineage, and
+    /// the tier policy branch. No new user-visible state is invented here.
+    @Sendable
+    func reconcile(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> Response {
+        let (workspaceID, hostID) = try Self.requireSelfSignedHost(context)
+        let requestDTO = try await request.decode(
+            as: WorkHostReconcileRequest.self,
+            context: context
+        )
+        guard requestDTO.lostSessionIds.count <= Self.maximumReconciledSessions else {
+            throw HTTPError(
+                .badRequest,
+                message: "lostSessionIds must contain at most \(Self.maximumReconciledSessions) entries"
+            )
+        }
+        let lostSessionIDs = Array(Set(requestDTO.lostSessionIds))
+        guard !lostSessionIDs.isEmpty else {
+            return try WorkHostReconcileResponse(reportedSessionIds: [])
+                .response(from: request, context: context)
+        }
+
+        let reported: [String] = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            // The host_lost_at stamp and its audit trail commit together, and
+            // a repeated report keeps the first timestamp so a retry after a
+            // lost response never moves the sweep deadline.
+            let rows = try await conn.query(
+                """
+                WITH reported AS (
+                  UPDATE work_session
+                     SET host_lost_at = COALESCE(host_lost_at, clock_timestamp())
+                   WHERE workspace_id = \(workspaceID)
+                     AND host_id = \(hostID)
+                     AND status IN ('running', 'idle')
+                     AND id = ANY(\(lostSessionIDs))
+                  RETURNING id, member_id
+                )
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, detail)
+                SELECT \(workspaceID), reported.member_id, reported.member_id,
+                       'work.session.host_lost'::text,
+                       'work_session'::text, reported.id, NULL::uuid,
+                       jsonb_build_object(
+                         'schema', 'momo.work_session.host_lost.v1'::text,
+                         'source_host_id', \(hostID)::uuid,
+                         'reason', 'host_restart_lost_pty'::text
+                       )
+                  FROM reported
+                RETURNING target_id
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.map { try $0.decode(UUID.self).uuidString.lowercased() }
+        }
+
+        return try WorkHostReconcileResponse(reportedSessionIds: reported.sorted())
+            .response(from: request, context: context)
+    }
+
+    /// Both reconciliation routes are host-signed and self-scoped: a host may
+    /// only read and report its own sessions, in its own workspace.
+    private static func requireSelfSignedHost(
+        _ context: AppRequestContext
+    ) throws -> (workspaceID: UUID, hostID: UUID) {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .workHost else {
+            throw HTTPError(
+                .forbidden,
+                message: "work host reconciliation requires work host signature"
+            )
+        }
+        let workspaceID = try publicWorkspaceID(context)
+        let hostID = try Self.hostID(context)
+        guard workspaceID == principal.workspaceID, hostID == principal.tokenID else {
+            throw heartbeatUnauthorized()
+        }
+        return (workspaceID, hostID)
     }
 
     @Sendable

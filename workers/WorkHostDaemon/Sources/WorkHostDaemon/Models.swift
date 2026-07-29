@@ -109,6 +109,17 @@ struct WorkSession: Codable, Sendable, Equatable {
     let resumedFromSessionId: UUID?
 }
 
+/// MOMO-656 narrow projection of what the ledger still believes this host is
+/// serving. The daemon needs only the identity and the tool label it would put
+/// in a log line; routing and membership stay server-side.
+struct WorkHostLiveSession: Codable, Sendable, Equatable {
+    let id: UUID
+    let tool: String
+    let label: String
+    let status: String
+    let startedAtMs: Int64
+}
+
 struct WorkToolLaunchTemplate: Codable, Sendable, Equatable {
     let command: String
     let arguments: [String]
@@ -133,6 +144,16 @@ protocol WorkHostAPI: Sendable {
     func heartbeat(hostID: UUID) async throws
     func workToolProfiles(hostID: UUID) async throws -> [WorkToolProfile]
     func pendingControls(hostID: UUID) async throws -> [WorkControl]
+    /// MOMO-656 restart reconciliation, step 1: what does the ledger still
+    /// think this host is serving?
+    func liveSessions(hostID: UUID) async throws -> [WorkHostLiveSession]
+    /// MOMO-656 restart reconciliation, step 2: state under host signature
+    /// that these sessions cannot be revived. Returns the ids the server
+    /// accepted, so a partially stale report is visible in the daemon log.
+    func reportLostSessions(
+        hostID: UUID,
+        sessionIDs: [UUID]
+    ) async throws -> [UUID]
     func createSession(hostID: UUID, control: WorkControl) async throws -> WorkSession
     func acknowledge(
         hostID: UUID,
