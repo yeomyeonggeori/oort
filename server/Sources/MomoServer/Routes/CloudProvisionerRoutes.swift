@@ -1,4 +1,5 @@
 import AsyncHTTPClient
+import CloudProviderKit
 import Crypto
 import Foundation
 import Hummingbird
@@ -9,6 +10,29 @@ struct CreateCloudHostRequest: Decodable {
     let displayName: String
     let confirmPaidCloud: Bool
     let idempotencyRef: String
+}
+
+/// ADR-0142 D1 — a workspace operator enrolls a host they already own.
+/// `scope` is accepted only so a personal request can be refused by name
+/// rather than silently promoted to a workspace host.
+struct EnrollBYOCHostRequest: Decodable {
+    let displayName: String
+    let scope: String?
+    let idempotencyRef: String
+}
+
+struct BYOCEnrollmentDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let provisionId: String
+    let provider: String
+    let state: String
+    /// Shown exactly once. Only its SHA-256 digest reaches PostgreSQL.
+    let bootstrapToken: String
+    let bootstrapExpiresAtMs: Int64
+    let registerUrl: String
+}
+
+struct BYOCEnrollmentResponse: ResponseEncodable {
+    let enrollment: BYOCEnrollmentDTO
 }
 
 struct CloudHostDTO: ResponseEncodable, Codable, Sendable, Equatable {
@@ -23,12 +47,15 @@ struct CloudHostResponse: ResponseEncodable {
     let cloudHost: CloudHostDTO
 }
 
-/// ADR-0136 server-side T3 provisioner.
+/// ADR-0136 + ADR-0142 server-side T3 provisioner.
 ///
-/// Create is a one-shot paid-cloud opt-in. E2B receives a short-lived bootstrap
-/// token and starts the operator-owned workd template; cloud workd then creates
-/// its own Ed25519 key and consumes that token at `register`. The E2B team key
-/// remains process-only configuration.
+/// Two acquisition paths, one lifecycle. `create` is the managed path: the
+/// configured provider adapter receives a short-lived bootstrap token and
+/// starts the operator-owned workd image. `enroll` is the BYOC path: the
+/// workspace operator gets that same one-shot token and installs workd on
+/// their own machine. Both end at the same `register`, where workd creates its
+/// own Ed25519 key and consumes the token. Provider credentials stay
+/// process-only configuration and never enter a workspace row or response.
 struct CloudProvisionerRoutes: Sendable {
     static let bootstrapTTLSeconds: TimeInterval = 15 * 60
 
@@ -38,6 +65,7 @@ struct CloudProvisionerRoutes: Sendable {
 
     func addProtected(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/work-hosts/cloud", use: create)
+        group.post("/v1/workspaces/:ws/work-hosts/byoc/enrollments", use: enroll)
         group.get("/v1/workspaces/:ws/work-hosts/cloud/:provision", use: get)
         group.post("/v1/workspaces/:ws/work-hosts/:host/cloud/pause", use: pause)
         group.post("/v1/workspaces/:ws/work-hosts/:host/cloud/resume", use: resume)
@@ -61,6 +89,22 @@ struct CloudProvisionerRoutes: Sendable {
         }
         let displayName = try WorkHostRoutes.validatedDisplayName(input.displayName)
         let readyConfig = try Self.readyConfig(config)
+        // ADR-0142 D2: policy asks the capability, never the provider name. A
+        // degenerate adapter (BYOC) has no create at all, so this instance
+        // sends the operator to the enrollment path instead of pretending.
+        guard readyConfig.defaultCapabilities.supports(.create) else {
+            throw HTTPError(
+                .conflict,
+                message: "이 인스턴스의 T3 provider는 호스트 생성을 지원하지 않습니다. BYOC 등록을 사용하세요."
+            )
+        }
+        let providerID = readyConfig.defaultProviderID
+        guard let bootstrapSecret = readyConfig.bootstrapSecret(for: providerID) else {
+            throw HTTPError(
+                .serviceUnavailable,
+                message: "momo Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
+            )
+        }
         let expiresAt = Date().addingTimeInterval(Self.bootstrapTTLSeconds)
         guard let createKey = UUID(uuidString: input.idempotencyRef) else {
             throw HTTPError(.badRequest, message: "idempotencyRef must be a UUID")
@@ -121,17 +165,21 @@ struct CloudProvisionerRoutes: Sendable {
             }
             let token = Self.bootstrapToken(
                 provisionID: provisionID,
-                apiKey: readyConfig.apiKey
+                secret: bootstrapSecret
             )
             let digest = Self.tokenDigest(token)
+            // Migration 054 dropped the provider default: the adapter that owns
+            // a host is stated at insert time, never inferred later.
             _ = try await conn.query(
                 """
                 INSERT INTO work_cloud_host
-                  (id, workspace_id, requester_member_id, bootstrap_token_digest,
+                  (id, workspace_id, requester_member_id, provider,
+                   bootstrap_token_digest,
                    bootstrap_expires_at, unit_rate_micro_usd_second,
                    create_idempotency_key, requested_display_name)
                 VALUES
-                  (\(provisionID), \(workspaceID), \(principal.memberID), \(digest),
+                  (\(provisionID), \(workspaceID), \(principal.memberID),
+                   \(providerID), \(digest),
                    \(expiresAt), \(readyConfig.unitRateMicroUSDSecond),
                    \(createKey), \(displayName))
                 """,
@@ -148,7 +196,7 @@ struct CloudProvisionerRoutes: Sendable {
                    \(principal.tokenID),
                    jsonb_build_object(
                      'schema', 'momo.work_cloud.provision.requested.v1',
-                     'provider', 'e2b',
+                     'provider', \(providerID),
                      'paid_cloud_confirmed', true
                    ))
                 """,
@@ -167,23 +215,27 @@ struct CloudProvisionerRoutes: Sendable {
         }
         let token = Self.bootstrapToken(
             provisionID: provisionID,
-            apiKey: readyConfig.apiKey
+            secret: bootstrapSecret
         )
 
-        let sandbox: CloudSandbox
+        let instance: CloudInstanceRef
         do {
-            sandbox = try await E2BProvisioner(
-                httpClient: httpClient, config: readyConfig
-            ).create(
-                provisionID: provisionID,
-                workspaceID: workspaceID,
-                registrationToken: token,
-                displayName: displayName
-            )
+            instance = try await readyConfig
+                .adapter(for: providerID, httpClient: httpClient)
+                .create(
+                    spec: CloudInstanceSpec(
+                        provisionID: provisionID,
+                        workspaceID: workspaceID,
+                        displayName: displayName,
+                        registrationToken: token,
+                        serverURL: readyConfig.publicServerURL
+                    ),
+                    idempotencyKey: provisionID.uuidString.lowercased()
+                )
         } catch {
-            // A timeout/invalid response is ambiguous: E2B may have committed a
-            // paid sandbox. Keep the durable provisioning intent so the same
-            // provider idempotency key can replay and converge it.
+            // A timeout/invalid response is ambiguous: the provider may have
+            // committed a paid instance. Keep the durable provisioning intent
+            // so the same idempotency key can replay and converge it.
             throw Self.httpError(error)
         }
 
@@ -196,7 +248,7 @@ struct CloudProvisionerRoutes: Sendable {
                 let rows = try await conn.query(
                     """
                     UPDATE work_cloud_host
-                       SET provider_sandbox_id = \(sandbox.id),
+                       SET provider_sandbox_id = \(instance.instanceID),
                            state = CASE WHEN host_id IS NULL THEN 'provisioning' ELSE 'ready' END,
                            updated_at = clock_timestamp()
                      WHERE id = \(provisionID)
@@ -211,14 +263,162 @@ struct CloudProvisionerRoutes: Sendable {
                 return try Self.decodeCloudHost(row)
             }
         } catch {
-            try? await E2BProvisioner(httpClient: httpClient, config: readyConfig)
-                .destroy(sandboxID: sandbox.id)
+            try? await readyConfig
+                .adapter(for: providerID, httpClient: httpClient)
+                .destroy(
+                    ref: instance,
+                    idempotencyKey: "cleanup-\(provisionID.uuidString.lowercased())"
+                )
             throw error
         }
 
         var response = try CloudHostResponse(cloudHost: cloudHost)
             .response(from: request, context: context)
         response.status = cloudHost.hostId == nil ? .accepted : .created
+        return response
+    }
+
+    /// ADR-0142 D1 — BYOC enrollment.
+    ///
+    /// Same lifecycle, different acquisition: momo issues the one-shot token
+    /// and the operator installs `momo-workd` wherever they like. There is no
+    /// provider call here at all, which is the whole point — momo never gained
+    /// the right to boot or kill that machine.
+    @Sendable
+    func enroll(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try Self.requireHuman(context)
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let input = try await request.decode(as: EnrollBYOCHostRequest.self, context: context)
+        // ADR-0142 D1: workspace-shared only. The schema does not block a
+        // personal host; this REST does, by name, so a personal request is
+        // refused instead of quietly becoming a workspace-wide host.
+        if let scope = input.scope, scope != "workspace" {
+            throw HTTPError(
+                .badRequest,
+                message: "BYOC 등록은 워크스페이스 공용만 지원합니다. 개인 호스트는 아직 열려 있지 않습니다."
+            )
+        }
+        let displayName = try WorkHostRoutes.validatedDisplayName(input.displayName)
+        let readyConfig = try Self.readyConfig(config)
+        let capabilities = try Self.byocCapabilities(readyConfig)
+        guard let enrollKey = UUID(uuidString: input.idempotencyRef) else {
+            throw HTTPError(.badRequest, message: "idempotencyRef must be a UUID")
+        }
+        let expiresAt = Date().addingTimeInterval(Self.bootstrapTTLSeconds)
+        let token = Self.randomToken()
+        let digest = Self.tokenDigest(token)
+
+        let enrollment: (provisionID: UUID, expiresAt: Date, replayed: Bool) =
+            try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+            try await InviteRoutes.requireWorkspaceMember(
+                conn: conn, logger: db.logger, principal: principal
+            )
+            guard let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                memberID: principal.memberID
+            ), role.isAdmin else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "BYOC 호스트 등록은 워크스페이스 관리자만 할 수 있습니다."
+                )
+            }
+            // Same serialization the managed create uses: a row lock cannot
+            // order a key which does not exist yet.
+            _ = try await conn.query(
+                """
+                SELECT pg_advisory_xact_lock(
+                  hashtextextended(
+                    lower(\(workspaceID)::text) || ':' || lower(\(enrollKey)::text),
+                    0
+                  )
+                )
+                """,
+                logger: db.logger
+            ).collect()
+            let existingRows = try await conn.query(
+                """
+                SELECT id, bootstrap_expires_at
+                  FROM work_cloud_host
+                 WHERE workspace_id = \(workspaceID)
+                   AND create_idempotency_key = \(enrollKey)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            if let existingRow = existingRows.first {
+                let (existingID, existingExpiry) = try existingRow.decode((UUID, Date).self)
+                return (existingID, existingExpiry, true)
+            }
+            try await CloudUsageLedger.reserveProvisioningSlot(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                memberID: principal.memberID
+            )
+            let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
+            guard let provisionID = try idRows.first?.decode(UUID.self) else {
+                throw HTTPError(.internalServerError, message: "BYOC 등록 ID를 만들지 못했습니다.")
+            }
+            // The degenerate adapter's instance handle is the enrollment
+            // itself: there is no provider-side object to name.
+            let instanceID = "byoc-" + provisionID.uuidString.lowercased()
+            _ = try await conn.query(
+                """
+                INSERT INTO work_cloud_host
+                  (id, workspace_id, requester_member_id, provider,
+                   provider_sandbox_id, bootstrap_token_digest,
+                   bootstrap_expires_at, unit_rate_micro_usd_second,
+                   create_idempotency_key, requested_display_name)
+                VALUES
+                  (\(provisionID), \(workspaceID), \(principal.memberID),
+                   \(capabilities.providerID), \(instanceID), \(digest),
+                   \(expiresAt), \(readyConfig.unitRateMicroUSDSecond),
+                   \(enrollKey), \(displayName))
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, subject_member_id, action,
+                   target_type, target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(principal.memberID), \(principal.memberID),
+                   'work.cloud.byoc.enrolled', 'work_cloud_host', \(provisionID),
+                   \(principal.tokenID),
+                   jsonb_build_object(
+                     'schema', 'momo.work_cloud.byoc.enrolled.v1',
+                     'provider', \(capabilities.providerID),
+                     'scope', 'workspace'
+                   ))
+                """,
+                logger: db.logger
+            )
+            return (provisionID, expiresAt, false)
+        }
+
+        // A replayed idempotencyRef cannot re-reveal a token momo never kept.
+        guard !enrollment.replayed else {
+            throw HTTPError(
+                .conflict,
+                message: "이 idempotencyRef의 등록 토큰은 이미 발급됐습니다. 새 ref로 다시 요청하세요."
+            )
+        }
+        var response = try BYOCEnrollmentResponse(
+            enrollment: BYOCEnrollmentDTO(
+                provisionId: enrollment.provisionID.uuidString,
+                provider: capabilities.providerID,
+                state: "provisioning",
+                bootstrapToken: token,
+                bootstrapExpiresAtMs: Int64(enrollment.expiresAt.timeIntervalSince1970 * 1_000),
+                registerUrl: readyConfig.publicServerURL
+                    + "/v1/workspaces/" + workspaceID.uuidString.lowercased()
+                    + "/work-hosts/cloud/register"
+            )
+        ).response(from: request, context: context)
+        response.status = .created
         return response
     }
 
@@ -391,14 +591,20 @@ struct CloudProvisionerRoutes: Sendable {
             workspaceID: workspaceID,
             principal: principal,
             hostID: hostID,
-            action: action
+            action: action,
+            readyConfig: readyConfig
         )
-        let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
+        // The adapter is chosen by the host's own registry key, not by whatever
+        // this process provisions new hosts with today (ADR-0142 D2).
+        let adapter = try readyConfig.adapter(
+            for: intent.providerID, httpClient: httpClient
+        )
         do {
+            let key = intent.operationID.uuidString.lowercased()
             switch action {
-            case .pause: try await provisioner.pause(sandboxID: intent.sandboxID)
-            case .resume: try await provisioner.resume(sandboxID: intent.sandboxID)
-            case .destroy: try await provisioner.destroy(sandboxID: intent.sandboxID)
+            case .pause: try await adapter.pause(ref: intent.ref, idempotencyKey: key)
+            case .resume: try await adapter.resume(ref: intent.ref, idempotencyKey: key)
+            case .destroy: try await adapter.destroy(ref: intent.ref, idempotencyKey: key)
             }
         } catch {
             if action == .resume, Self.isMissingSandbox(error) {
@@ -407,6 +613,7 @@ struct CloudProvisionerRoutes: Sendable {
                     cloudHostID: intent.cloudHostID,
                     hostID: hostID,
                     operationID: intent.operationID,
+                    providerID: intent.providerID,
                     principal: principal
                 )
                 throw HTTPError(
@@ -570,16 +777,22 @@ struct CloudProvisionerRoutes: Sendable {
 
     private struct LifecycleIntent: Sendable {
         let cloudHostID: UUID
-        let sandboxID: String
+        let providerID: String
+        let instanceID: String
         let operationID: UUID
         let intentState: String
+
+        var ref: CloudInstanceRef {
+            CloudInstanceRef(providerID: providerID, instanceID: instanceID)
+        }
     }
 
     private func beginLifecycleIntent(
         workspaceID: UUID,
         principal: AuthPrincipal,
         hostID: UUID,
-        action: LifecycleAction
+        action: LifecycleAction,
+        readyConfig: ReadyCloudProvisionerConfig
     ) async throws -> LifecycleIntent {
         guard let cloudHostID = try await t3CloudHostID(
             workspaceID: workspaceID,
@@ -601,7 +814,7 @@ struct CloudProvisionerRoutes: Sendable {
             }
             let rows = try await conn.query(
                 """
-                SELECT id, requester_member_id, provider_sandbox_id, state,
+                SELECT id, requester_member_id, provider_sandbox_id, state, provider,
                        EXISTS (
                          SELECT 1
                            FROM work_host_usage u
@@ -618,8 +831,9 @@ struct CloudProvisionerRoutes: Sendable {
             guard let row = rows.first else {
                 throw HTTPError(.notFound, message: "momo Cloud 호스트를 찾을 수 없습니다.")
             }
-            let (lockedCloudHostID, requesterID, sandboxID, state, hasOpenUsage) =
-                try row.decode((UUID, UUID, String?, String, Bool).self)
+            let (lockedCloudHostID, requesterID, sandboxID, state, rowProviderID,
+                 hasOpenUsage) =
+                try row.decode((UUID, UUID, String?, String, String, Bool).self)
             guard lockedCloudHostID == cloudHostID else {
                 throw HTTPError(
                     .conflict,
@@ -628,6 +842,26 @@ struct CloudProvisionerRoutes: Sendable {
             }
             guard requesterID == principal.memberID || role.isAdmin else {
                 throw HTTPError(.forbidden, message: "momo Cloud 호스트 소유자 또는 관리자만 변경할 수 있습니다.")
+            }
+            // Refuse rather than route a host to the wrong substrate: an
+            // adapter that does not know this instance would answer "missing"
+            // and terminally settle a live paid session.
+            let rowCapabilities: CloudProviderCapabilities
+            do {
+                rowCapabilities = try readyConfig
+                    .adapter(for: rowProviderID, httpClient: httpClient)
+                    .capabilities
+            } catch {
+                throw HTTPError(
+                    .serviceUnavailable,
+                    message: "이 호스트의 provider 어댑터가 이 인스턴스에 설치돼 있지 않습니다."
+                )
+            }
+            if action != .destroy, !rowCapabilities.supportsPause {
+                throw HTTPError(
+                    .conflict,
+                    message: "이 호스트의 provider는 일시정지/재개를 지원하지 않습니다."
+                )
             }
             let expectedState: String
             let intentState: String
@@ -653,7 +887,10 @@ struct CloudProvisionerRoutes: Sendable {
                 )
             }
             guard let sandboxID else {
-                throw HTTPError(.serviceUnavailable, message: "E2B 샌드박스 연결 정보가 준비되지 않았습니다.")
+                throw HTTPError(
+                    .serviceUnavailable,
+                    message: "momo Cloud 인스턴스 연결 정보가 준비되지 않았습니다."
+                )
             }
             let operationID = UUID()
             let updatedRows = try await conn.query(
@@ -677,7 +914,8 @@ struct CloudProvisionerRoutes: Sendable {
             }
             return LifecycleIntent(
                 cloudHostID: cloudHostID,
-                sandboxID: sandboxID,
+                providerID: rowProviderID,
+                instanceID: sandboxID,
                 operationID: operationID,
                 intentState: intentState
             )
@@ -689,6 +927,7 @@ struct CloudProvisionerRoutes: Sendable {
         cloudHostID: UUID,
         hostID: UUID,
         operationID: UUID,
+        providerID: String,
         principal: AuthPrincipal
     ) async throws {
         try await withTenantLifecycleTransactionUnwrapped(
@@ -765,6 +1004,7 @@ struct CloudProvisionerRoutes: Sendable {
                      'schema', 'momo.work_cloud.resume_failed.v1',
                      'host_id', \(hostID),
                      'session_id', \(sessionID),
+                     'provider', \(providerID),
                      'reason', 'sandbox_missing',
                      'orphan_transition', 'host_offline_sweep'
                    ))
@@ -854,18 +1094,37 @@ struct CloudProvisionerRoutes: Sendable {
         -> ReadyCloudProvisionerConfig
     {
         do { return try config.requireReady() }
-        catch CloudProvisionerError.disabled {
+        catch CloudProvisionerConfigError.disabled {
             throw disabledError()
         }
-        catch CloudProvisionerError.missingAPIKey {
+        catch CloudProvisionerConfigError.missingEndpoint {
             throw HTTPError(
                 .serviceUnavailable,
-                message: "momo Cloud를 사용할 수 없습니다. 인스턴스 운영자에게 E2B 설정을 요청하세요."
+                message: "momo Cloud를 사용할 수 없습니다. 인스턴스 운영자에게 provider 설정을 요청하세요."
+            )
+        }
+        catch CloudProvisionerConfigError.unknownProvider {
+            throw HTTPError(
+                .serviceUnavailable,
+                message: "설정된 T3 provider가 어댑터 레지스트리에 없습니다. 인스턴스 운영자에게 문의하세요."
             )
         } catch {
             throw HTTPError(
                 .serviceUnavailable,
                 message: "momo Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
+            )
+        }
+    }
+
+    static func byocCapabilities(
+        _ readyConfig: ReadyCloudProvisionerConfig
+    ) throws -> CloudProviderCapabilities {
+        do {
+            return try readyConfig.capabilities(for: CloudProviderRegistry.byocProviderID)
+        } catch {
+            throw HTTPError(
+                .serviceUnavailable,
+                message: "BYOC 어댑터가 이 인스턴스에 설치돼 있지 않습니다."
             )
         }
     }
@@ -885,7 +1144,13 @@ struct CloudProvisionerRoutes: Sendable {
         if case CloudProvisionerError.upstreamStatus(let status) = error, status == 429 {
             return HTTPError(
                 .tooManyRequests,
-                message: "E2B 동시 실행 한도에 도달했습니다. 잠시 후 다시 시도하세요."
+                message: "provider 동시 실행 한도에 도달했습니다. 잠시 후 다시 시도하세요."
+            )
+        }
+        if case CloudProvisionerError.unsupported(let operation, let providerID) = error {
+            return HTTPError(
+                .conflict,
+                message: "이 호스트의 provider(\(providerID))는 \(operation.rawValue) 연산을 지원하지 않습니다."
             )
         }
         return HTTPError(
@@ -894,11 +1159,11 @@ struct CloudProvisionerRoutes: Sendable {
         )
     }
 
-    private static func isMissingSandbox(_ error: Error) -> Bool {
-        guard case CloudProvisionerError.upstreamStatus(let status) = error else {
-            return false
-        }
-        return status == 404 || status == 410
+    /// The provider stated the instance is gone. `.unknown`/transport failures
+    /// never reach here — settling a paid session on an unanswered question is
+    /// exactly the silent failure ADR-0142 D3.1 forbids.
+    static func isMissingSandbox(_ error: Error) -> Bool {
+        (error as? CloudProvisionerError) == .instanceMissing
     }
 
     static func tokenDigest(_ token: String) -> String {
@@ -915,10 +1180,10 @@ struct CloudProvisionerRoutes: Sendable {
     }
 
     /// Stable across a lost create response without persisting raw bootstrap
-    /// material. The E2B operator key remains process-only and the provider
-    /// create call uses the same provision UUID as its idempotency key.
-    static func bootstrapToken(provisionID: UUID, apiKey: String) -> String {
-        let key = SymmetricKey(data: Data(apiKey.utf8))
+    /// material. The provider operator key remains process-only and the create
+    /// call uses the same provision UUID as its idempotency key.
+    static func bootstrapToken(provisionID: UUID, secret: String) -> String {
+        let key = SymmetricKey(data: Data(secret.utf8))
         let payload = Data(
             "momo.cloud.bootstrap.v1:\(provisionID.uuidString.lowercased())".utf8
         )

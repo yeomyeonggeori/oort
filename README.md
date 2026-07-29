@@ -111,8 +111,12 @@ control. The bundled sidecar ships opencode (MIT, default) and goose
 install. The sidecar is a credential consumer: engine LLM keys and Codex OAuth
 tokens stay with the user host and do not enter momo's server, database, or
 ledger. The five-minute connect steps, engine selection, and the local Codex
-path are in [`docs/WORK_HOST_QUICKSTART.md`](docs/WORK_HOST_QUICKSTART.md). See
-[ADR-0114](docs/adr/0114-interactive-work-console.md) and
+path are in [`docs/WORK_HOST_QUICKSTART.md`](docs/WORK_HOST_QUICKSTART.md). To
+attach a server you already own as a shared cloud host, follow the two-step
+guide in [`docs/BYOC_CLOUD_HOST.md`](docs/BYOC_CLOUD_HOST.md) — installing momo
+does not require an account with any cloud provider. See
+[ADR-0114](docs/adr/0114-interactive-work-console.md),
+[ADR-0142](docs/adr/0142-t3-provider-interface-byoc.md) and
 [ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md).
 
 ## Reference integrations
