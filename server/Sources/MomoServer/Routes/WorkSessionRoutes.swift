@@ -790,7 +790,20 @@ struct WorkSessionRoutes: Sendable {
 
             let updatedRows: [PostgresRow]
             if targetStatus == "idle" {
-                if cloudLifecycle != nil {
+                if let cloudLifecycle {
+                    // ADR-0140 D4 ③. Revalidate before the ledger moves: an
+                    // in-flight pause whose intent was replaced must not be the
+                    // reason a running sandbox stops being billed.
+                    guard try await T3LifecycleIntent.isCurrent(
+                        conn: conn,
+                        logger: db.logger,
+                        cloudHostID: cloudLifecycle.cloudHostID,
+                        operationID: cloudLifecycle.operationID,
+                        version: cloudLifecycle.version,
+                        expectedState: "pausing"
+                    ) else {
+                        throw T3LifecycleIntent.staleResponse
+                    }
                     try await CloudUsageLedger.pause(
                         conn: conn,
                         logger: db.logger,
@@ -798,11 +811,9 @@ struct WorkSessionRoutes: Sendable {
                         hostID: decoded.4,
                         sessionID: sessionID
                     )
-                    try await updateCloudHostState(
+                    try await confirmCloudHostState(
                         conn: conn,
-                        workspaceID: workspaceID,
-                        hostID: decoded.4,
-                        expected: "pausing",
+                        cloudHostID: cloudLifecycle.cloudHostID,
                         next: "paused"
                     )
                 }
@@ -828,6 +839,11 @@ struct WorkSessionRoutes: Sendable {
                 ).collect()
             } else {
                 if cloudLifecycle != nil {
+                    // Unreachable for T3 today — `performCloudLifecycleIfNeeded`
+                    // refuses a host-initiated cloud resume, because a paused
+                    // daemon cannot ask to be woken. Kept as a CAS rather than
+                    // deleted so that if the refusal is ever lifted this path
+                    // fails loudly instead of writing from a stale reading.
                     try await CloudUsageLedger.resume(
                         conn: conn,
                         logger: db.logger,
@@ -835,13 +851,23 @@ struct WorkSessionRoutes: Sendable {
                         hostID: decoded.4,
                         sessionID: sessionID
                     )
-                    try await updateCloudHostState(
-                        conn: conn,
-                        workspaceID: workspaceID,
-                        hostID: decoded.4,
-                        expected: "paused",
-                        next: "running"
-                    )
+                    let resumedRows = try await conn.query(
+                        """
+                        UPDATE work_cloud_host
+                           SET state = 'running', updated_at = clock_timestamp()
+                         WHERE workspace_id = \(workspaceID)
+                           AND host_id = \(decoded.4)
+                           AND state = 'paused'
+                        RETURNING id
+                        """,
+                        logger: db.logger
+                    ).collect()
+                    guard resumedRows.first != nil else {
+                        throw HTTPError(
+                            .conflict,
+                            message: "momo Cloud 호스트 상태가 변경되었습니다."
+                        )
+                    }
                 }
                 updatedRows = try await conn.query(
                     """
@@ -1014,12 +1040,18 @@ struct WorkSessionRoutes: Sendable {
         let providerID: String
         let action: String
         let latencyMs: Int64
+        /// ADR-0140 D4 ③ — the intent this evidence answers. The confirming
+        /// transaction revalidates it before touching the ledger.
+        let operationID: UUID
+        let version: Int64
     }
 
     private struct CloudLifecycleTarget: Sendable {
         let cloudHostID: UUID
         let providerID: String
         let instanceID: String
+        let operationID: UUID
+        let version: Int64
 
         var ref: CloudInstanceRef {
             CloudInstanceRef(providerID: providerID, instanceID: instanceID)
@@ -1061,9 +1093,11 @@ struct WorkSessionRoutes: Sendable {
         let action = "pause"
         let startedAt = Date()
         do {
+            // ADR-0140 D4 ②: the durable operation is the idempotency key, so a
+            // retry of *this* intent cannot be mistaken for a new pause.
             try await adapter.pause(
                 ref: target.ref,
-                idempotencyKey: target.cloudHostID.uuidString.lowercased()
+                idempotencyKey: target.operationID.uuidString.lowercased()
             )
         } catch {
             throw CloudProvisionerRoutes.httpError(error)
@@ -1072,7 +1106,9 @@ struct WorkSessionRoutes: Sendable {
             cloudHostID: target.cloudHostID,
             providerID: target.providerID,
             action: action,
-            latencyMs: Self.elapsedMilliseconds(since: startedAt)
+            latencyMs: Self.elapsedMilliseconds(since: startedAt),
+            operationID: target.operationID,
+            version: target.version
         )
     }
 
@@ -1162,6 +1198,9 @@ struct WorkSessionRoutes: Sendable {
                 )
             }
             let operationID = UUID()
+            // ADR-0140 D4 ①: intent, deadline and version are committed
+            // together. A `pausing` row that cannot say when it stops being
+            // allowed to stay there is the deadlock T-4 removes.
             let intentRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
@@ -1170,17 +1209,22 @@ struct WorkSessionRoutes: Sendable {
                        lifecycle_operation_kind = 'pause',
                        lifecycle_operation_started_at = clock_timestamp(),
                        lifecycle_operation_version = lifecycle_operation_version + 1,
+                       lifecycle_operation_attempts = 0,
+                       lifecycle_operation_next_attempt_at = NULL,
+                       lifecycle_operation_deadline_at =
+                         clock_timestamp() + t3_lifecycle_default_deadline('pause'),
                        updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
                    AND state = 'running'
-                RETURNING id
+                RETURNING id, lifecycle_operation_version
                 """,
                 logger: db.logger
             ).collect()
-            guard intentRows.first != nil else {
+            guard let intentRow = intentRows.first else {
                 throw HTTPError(.conflict, message: "momo Cloud host lifecycle changed; retry")
             }
+            let operationVersion = try intentRow.decode((UUID, Int64).self).1
             guard let cloudHostID else {
                 throw HTTPError(
                     .conflict,
@@ -1196,25 +1240,28 @@ struct WorkSessionRoutes: Sendable {
             return CloudLifecycleTarget(
                 cloudHostID: cloudHostID,
                 providerID: rowProviderID,
-                instanceID: sandboxID
+                instanceID: sandboxID,
+                operationID: operationID,
+                version: operationVersion
             )
         }
     }
 
-    private func updateCloudHostState(
+    /// Keyed on identity: `T3LifecycleIntent.isCurrent` has already proved this
+    /// is the current operation and still holds the row lock, so a compare-and-
+    /// swap here would only restate an answer that cannot have changed.
+    private func confirmCloudHostState(
         conn: PostgresConnection,
-        workspaceID: UUID,
-        hostID: UUID,
-        expected: String,
+        cloudHostID: UUID,
         next: String
     ) async throws {
         let rows = try await conn.query(
             """
             UPDATE work_cloud_host
-               SET state = \(next), updated_at = clock_timestamp()
-             WHERE workspace_id = \(workspaceID)
-               AND host_id = \(hostID)
-               AND state = \(expected)
+               SET state = \(next),
+                   lifecycle_operation_next_attempt_at = NULL,
+                   updated_at = clock_timestamp()
+             WHERE id = \(cloudHostID)
             RETURNING id
             """,
             logger: db.logger
