@@ -232,6 +232,48 @@ final class CloudProvisionerTests: XCTestCase {
         XCTAssertFalse(canonicalSQL.contains("ALTER TABLE usage_ledger"))
     }
 
+    func testIntervalPrecisionMigrationFloorsExactlyOnceAndKeepsPauseZero() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let precisionSQL = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/058_t3_interval_micro_precision.sql"
+            ),
+            encoding: .utf8
+        )
+        // The pause-zero guarantee stays generated, not enforced by billing code.
+        XCTAssertTrue(precisionSQL.contains("active_micros bigint GENERATED ALWAYS AS"))
+        XCTAssertTrue(precisionSQL.contains("WHEN state = 'active' AND ended_at IS NOT NULL"))
+        XCTAssertTrue(precisionSQL.contains("ELSE 0"))
+        // Exactly one truncation, and a CHECK that keeps it that way.
+        XCTAssertTrue(precisionSQL.contains("CREATE OR REPLACE FUNCTION t3_terminate"))
+        XCTAssertTrue(precisionSQL.contains("v_active_seconds := v_active_micros / 1000000"))
+        XCTAssertTrue(
+            precisionSQL.contains("CONSTRAINT work_host_usage_active_micros_ck CHECK")
+        )
+        XCTAssertTrue(precisionSQL.contains("active_seconds = active_micros / 1000000"))
+        // Already settled invoices are never recomputed.
+        XCTAssertFalse(precisionSQL.contains("WHERE settled_at IS NOT NULL"))
+        XCTAssertFalse(precisionSQL.contains("ALTER TABLE usage_ledger"))
+        // The sealed 053 statement is carried over, not reopened.
+        XCTAssertTrue(precisionSQL.contains("settled_reason = p_reason"))
+        XCTAssertTrue(precisionSQL.contains("acquire_t3_lifecycle_lock(v_cloud_host_id)"))
+        XCTAssertTrue(precisionSQL.contains("set_config('momo.t3_settlement', 'on', true)"))
+
+        let ledgerSwift = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Cloud/CloudUsageLedger.swift"
+            ),
+            encoding: .utf8
+        )
+        // Interval boundaries are one instant, and no rounding lives in Swift.
+        XCTAssertTrue(ledgerSwift.contains("closed.ended_at"))
+        XCTAssertFalse(ledgerSwift.contains("active_micros"))
+        XCTAssertFalse(ledgerSwift.contains("active_seconds"))
+    }
+
     func testT3MigrationSeparatesTokenAndActiveTimeLedgers() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

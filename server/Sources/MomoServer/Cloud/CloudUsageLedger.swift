@@ -8,6 +8,9 @@ import PostgresNIO
 /// Token request accounting remains in `usage_ledger`. This ledger owns one T3
 /// session and its active/paused intervals; lifecycle callers acquire the
 /// cloud-host advisory before entering this file's existing row-lock ladder.
+///
+/// Intervals record exact microseconds (migration 058). Nothing here rounds:
+/// the whole billable second is produced once, inside `t3_terminate`.
 enum CloudUsageLedger {
     enum TerminationReason: String, Sendable {
         case ended
@@ -345,13 +348,28 @@ enum CloudUsageLedger {
         expected: String,
         next: String
     ) async throws {
+        // One statement, one boundary timestamp. Closing and opening in two
+        // statements left an unbilled seam between them — invisible while every
+        // interval was floored to a whole second (migration 045), real once
+        // migration 058 bills exact microseconds. The next interval now starts
+        // at the instant the previous one ended, so a pause round trip loses
+        // nothing and overlaps nothing. An empty `closed` CTE means another
+        // writer already changed the state: nothing is inserted, no row comes
+        // back, and the caller still answers 409.
         let rows = try await conn.query(
             """
-            UPDATE work_host_usage_interval
-               SET ended_at = clock_timestamp()
-             WHERE usage_id = \(usageID)
-               AND state = \(expected)
-               AND ended_at IS NULL
+            WITH closed AS (
+              UPDATE work_host_usage_interval
+                 SET ended_at = clock_timestamp()
+               WHERE usage_id = \(usageID)
+                 AND state = \(expected)
+                 AND ended_at IS NULL
+              RETURNING ended_at
+            )
+            INSERT INTO work_host_usage_interval
+              (usage_id, workspace_id, state, started_at)
+            SELECT \(usageID), \(workspaceID), \(next), closed.ended_at
+              FROM closed
             RETURNING id
             """,
             logger: logger
@@ -362,14 +380,5 @@ enum CloudUsageLedger {
                 message: "momo Cloud 세션 상태가 이미 변경되었습니다. 새로고침 후 다시 시도하세요."
             )
         }
-        _ = try await conn.query(
-            """
-            INSERT INTO work_host_usage_interval
-              (usage_id, workspace_id, state, started_at)
-            VALUES
-              (\(usageID), \(workspaceID), \(next), clock_timestamp())
-            """,
-            logger: logger
-        )
     }
 }

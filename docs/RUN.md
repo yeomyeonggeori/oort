@@ -1627,7 +1627,8 @@ T3_CONTINUITY_PROVE_RED=dishonest-probe scripts/verify_t3_provider_continuity.sh
    인스턴스 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
 6. 그 host로 work session을 만들고 pause → 10초 대기 → resume → 종료한다.
    provider가 pause를 지원하지 않는다고 선언했다면 pause 호출 자체가 일어나지 않아야 한다.
-   `work_host_usage_interval`의 paused 행 `active_seconds=0`, 최종 합계와
+   `work_host_usage_interval`의 paused 행 `active_micros=0`,
+   `work_host_usage.active_seconds = active_micros / 1000000`(절사는 정산 1회),
    `credit_entry(reason='t3_usage')` 차감을 대조한다.
 7. `DELETE .../work-hosts/{host}/cloud`로 인스턴스를 destroy하고 provider 쪽에 잔존 실행이
    없는지 확인한다. 실패 중간에도 생성한 인스턴스 ID를 기준으로 반드시 정리한다.
