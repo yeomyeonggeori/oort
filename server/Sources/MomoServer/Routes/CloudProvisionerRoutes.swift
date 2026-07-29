@@ -613,6 +613,7 @@ struct CloudProvisionerRoutes: Sendable {
                     cloudHostID: intent.cloudHostID,
                     hostID: hostID,
                     operationID: intent.operationID,
+                    version: intent.version,
                     providerID: intent.providerID,
                     principal: principal
                 )
@@ -628,6 +629,22 @@ struct CloudProvisionerRoutes: Sendable {
             workspaceID: workspaceID,
             cloudHostID: intent.cloudHostID
         ) { conn in
+            // ADR-0140 D4 ③. The provider answered a question about *this*
+            // operation; between asking and answering, a sweep, the reconciler,
+            // or another caller may have replaced it. Applying the answer then
+            // is the second-review defect verbatim, so the answer is discarded
+            // instead — the row lock this takes is held to commit, which is why
+            // the writes below can key on identity alone.
+            guard try await T3LifecycleIntent.isCurrent(
+                conn: conn,
+                logger: db.logger,
+                cloudHostID: intent.cloudHostID,
+                operationID: intent.operationID,
+                version: intent.version,
+                expectedState: intent.intentState
+            ) else {
+                throw T3LifecycleIntent.staleResponse
+            }
             switch action {
             case .pause:
                 let sessionID = try await CloudUsageLedger.pause(
@@ -722,14 +739,16 @@ struct CloudProvisionerRoutes: Sendable {
             case .resume: nextState = "running"
             case .destroy: nextState = "destroyed"
             }
+            // Keyed on identity: the revalidation above already proved this is
+            // the current operation and still holds the row lock.
             let updatedRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
-                   SET state = \(nextState), updated_at = clock_timestamp()
+                   SET state = \(nextState),
+                       lifecycle_operation_next_attempt_at = NULL,
+                       updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
-                   AND host_id = \(hostID)
-                   AND lifecycle_operation_id = \(intent.operationID)
-                   AND state = \(intent.intentState)
+                   AND id = \(intent.cloudHostID)
                 RETURNING id, host_id, state, provider, created_at
                 """,
                 logger: db.logger
@@ -780,6 +799,10 @@ struct CloudProvisionerRoutes: Sendable {
         let providerID: String
         let instanceID: String
         let operationID: UUID
+        /// ADR-0140 D4 ③: the version this response will be revalidated
+        /// against. Anything that touches the operation while the provider call
+        /// is in flight moves it, and the response is then discarded.
+        let version: Int64
         let intentState: String
 
         var ref: CloudInstanceRef {
@@ -893,6 +916,10 @@ struct CloudProvisionerRoutes: Sendable {
                 )
             }
             let operationID = UUID()
+            // ADR-0140 D4 ①. The deadline is committed with the intent, not
+            // derived later: `*ing` without a bound is the permanent deadlock
+            // this stage exists to remove, and migration 057 refuses the row
+            // outright if a future writer omits it.
             let updatedRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
@@ -901,22 +928,29 @@ struct CloudProvisionerRoutes: Sendable {
                        lifecycle_operation_kind = \(operationKind),
                        lifecycle_operation_started_at = clock_timestamp(),
                        lifecycle_operation_version = lifecycle_operation_version + 1,
+                       lifecycle_operation_attempts = 0,
+                       lifecycle_operation_next_attempt_at = NULL,
+                       lifecycle_operation_deadline_at =
+                         clock_timestamp()
+                         + t3_lifecycle_default_deadline(\(operationKind)),
                        updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
                    AND state = \(expectedState)
-                RETURNING id
+                RETURNING id, lifecycle_operation_version
                 """,
                 logger: db.logger
             ).collect()
-            guard updatedRows.first != nil else {
+            guard let intentRow = updatedRows.first else {
                 throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
             }
+            let version = try intentRow.decode((UUID, Int64).self).1
             return LifecycleIntent(
                 cloudHostID: cloudHostID,
                 providerID: rowProviderID,
                 instanceID: sandboxID,
                 operationID: operationID,
+                version: version,
                 intentState: intentState
             )
         }
@@ -927,6 +961,7 @@ struct CloudProvisionerRoutes: Sendable {
         cloudHostID: UUID,
         hostID: UUID,
         operationID: UUID,
+        version: Int64,
         providerID: String,
         principal: AuthPrincipal
     ) async throws {
@@ -935,6 +970,18 @@ struct CloudProvisionerRoutes: Sendable {
             cloudHostID: cloudHostID,
             lockWorkspaceCredit: true
         ) { conn in
+            // A terminal settlement is the least reversible thing T3 does, so
+            // it is the last place a superseded response may be applied.
+            guard try await T3LifecycleIntent.isCurrent(
+                conn: conn,
+                logger: db.logger,
+                cloudHostID: cloudHostID,
+                operationID: operationID,
+                version: version,
+                expectedState: "resuming"
+            ) else {
+                throw T3LifecycleIntent.staleResponse
+            }
             let usageRows = try await conn.query(
                 """
                 SELECT session_id

@@ -26,6 +26,15 @@ Honesty is the point, not realism (ADR-0142 D3.1):
     that answer to `present`, which is the red-proof lever: momo must refuse to
     settle a session on a provider that contradicts itself, and the verifier
     must go red by name rather than hang.
+  * A refusal is a refusal. `fail-pause` / `fail-resume` / `fail-destroy` answer
+    503 and, crucially, *do not move the instance* — so an ADR-0140 D4
+    convergence a verifier observes is a convergence on the real condition and
+    not on a state the mock quietly changed for it. `probe-unavailable` makes
+    the fact lookup itself fail, which must read as `unknown`, never `absent`.
+  * `pause-block-then-fail` holds the first pause open (the instance stays
+    running throughout) and fails every later one. It is the only way to hand
+    momo a provider response whose durable intent has already been superseded,
+    which is what the MOMO-668 stale-response red proof needs.
 
 `/requests` is a local inspection surface for verifiers; production substrates
 have no such endpoint. Request bodies carry a one-shot workd bootstrap token,
@@ -62,11 +71,16 @@ def _reset(provider_id: str, supports_pause: bool, dishonest_probe: bool) -> Non
             "createKeys": {},      # Idempotency-Key -> instanceId
             "resumeMode": "",
             "resumeStage": 0,
+            "pauseMode": "",       # ""|"fail"|"block_then_fail"
+            "pauseStage": 0,
+            "destroyMode": "",     # ""|"fail"
+            "probeUnavailable": False,
         }
     )
 
 
 _RESUME_RELEASE = threading.Event()
+_PAUSE_RELEASE = threading.Event()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -100,6 +114,11 @@ class Handler(BaseHTTPRequestHandler):
             _STATE["requests"].append({"method": "GET", "path": self.path})
             state = _STATE["instances"].get(instance_id)
             dishonest = _STATE["dishonestProbe"]
+        if _STATE["probeUnavailable"]:
+            # "I could not ask" — the third probe value. Answering 404 here
+            # would let momo settle a live paid session on an outage.
+            self._json(503, {"error": "provider control plane unavailable"})
+            return
         if state is None:
             self._json(404, {"error": "unknown instance"})
             return
@@ -151,11 +170,41 @@ class Handler(BaseHTTPRequestHandler):
                 _RESUME_RELEASE.clear()
             elif name == "release-resume":
                 _RESUME_RELEASE.set()
+            elif name == "fail-pause":
+                _STATE["pauseMode"] = "fail"
+            elif name == "pause-block-then-fail":
+                # The stale-response lever (MOMO-668): the first pause is held
+                # open long enough for its intent to be superseded, and every
+                # later pause fails, so a state that says `paused` afterwards
+                # can only have come from the superseded response.
+                _STATE["pauseMode"] = "block_then_fail"
+                _STATE["pauseStage"] = 0
+                _PAUSE_RELEASE.clear()
+            elif name == "release-pause":
+                _PAUSE_RELEASE.set()
+            elif name == "fail-resume":
+                _STATE["resumeMode"] = "fail"
+            elif name == "fail-destroy":
+                _STATE["destroyMode"] = "fail"
+            elif name == "probe-unavailable":
+                _STATE["probeUnavailable"] = True
+            elif name == "heal":
+                _STATE["pauseMode"] = ""
+                _STATE["pauseStage"] = 0
+                _STATE["resumeMode"] = ""
+                _STATE["resumeStage"] = 0
+                _STATE["destroyMode"] = ""
+                _STATE["probeUnavailable"] = False
+                _PAUSE_RELEASE.set()
+                _RESUME_RELEASE.set()
             else:
                 self.send_error(404)
                 return
             snapshot = {
                 "resumeMode": _STATE["resumeMode"],
+                "pauseMode": _STATE["pauseMode"],
+                "destroyMode": _STATE["destroyMode"],
+                "probeUnavailable": _STATE["probeUnavailable"],
                 "dishonestProbe": _STATE["dishonestProbe"],
                 "instances": dict(_STATE["instances"]),
             }
@@ -185,7 +234,23 @@ class Handler(BaseHTTPRequestHandler):
         with _LOCK:
             _STATE["requests"].append({"method": "POST", "path": self.path})
             supports = _STATE["supportsPause"]
+            mode = _STATE["pauseMode"]
+            stage = _STATE["pauseStage"]
+            if mode:
+                _STATE["pauseStage"] += 1
             state = _STATE["instances"].get(instance_id)
+        if mode == "block_then_fail":
+            if stage == 0:
+                # Held open on purpose. The instance is *not* paused while this
+                # waits, which is what makes a later `paused` state a provable
+                # lie rather than a race nobody can pin down.
+                _PAUSE_RELEASE.wait(timeout=120)
+            else:
+                self._json(503, {"error": "provider refused the pause"})
+                return
+        elif mode == "fail":
+            self._json(503, {"error": "provider refused the pause"})
+            return
         if not supports:
             # Declared unsupported in the registry. Say so instead of no-op'ing
             # a 204 that would let the ledger bill a running instance as paused.
@@ -224,6 +289,9 @@ class Handler(BaseHTTPRequestHandler):
             _RESUME_RELEASE.wait(timeout=30)
             with _LOCK:
                 state = _STATE["instances"].get(instance_id)
+        if mode == "fail":
+            self._json(503, {"error": "provider refused the resume"})
+            return
         if not supports:
             self._json(405, {"error": "this substrate does not support resume"})
             return
@@ -242,9 +310,15 @@ class Handler(BaseHTTPRequestHandler):
         instance_id = match.group(1)
         with _LOCK:
             _STATE["requests"].append({"method": "DELETE", "path": self.path})
+            failing = _STATE["destroyMode"] == "fail"
             known = instance_id in _STATE["instances"]
-            if known:
+            if known and not failing:
                 _STATE["instances"][instance_id] = "absent"
+        if failing:
+            # A destroy that does not happen leaves a paid instance running.
+            # ADR-0140 D4 says momo must keep asking, forever.
+            self._json(503, {"error": "provider refused the destroy"})
+            return
         if not known:
             self._json(404, {"error": "unknown instance"})
             return
