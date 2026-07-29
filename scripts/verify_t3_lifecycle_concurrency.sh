@@ -538,7 +538,7 @@ run_lock_order_red_proof() {
     "$sql_a" "$REST_CLOUD_ID" "$REST_HOST_ID" 5 "$REST_SESSION_ID"
   {
     printf '%s\n' '\set VERBOSITY verbose' 'BEGIN;'
-    printf "UPDATE work_session SET status='ended' WHERE id='%s';\n" "$REST_SESSION_ID"
+    printf "UPDATE work_session SET status='ended', idle_at=NULL, ended_at=clock_timestamp(), end_reason=NULL WHERE id='%s';\n" "$REST_SESSION_ID"
     printf "SELECT t3_terminate('%s','%s','ended');\n" "$WS_ID" "$REST_SESSION_ID"
     printf '%s\n' 'ROLLBACK;'
   } >"$sql_b"
