@@ -1,6 +1,7 @@
 # ADR-0142: T3 Provider 인터페이스 — BYOC 1급, momo Cloud는 그 위의 관리형 구현
 
-- Status: **Proposed** (2026-07-29, 기안 Fable — 성재 방향 확정: "E2B 폐기 확정, BYOC-first, 등록 단위는 워크스페이스 공용만")
+- Status: **Accepted** (2026-07-29, 성재 — "ADR-0142, 0143 승인할게". 기안 Fable)
+- 파생: 이행 1~3은 #892 재개와 함께 티켓화. momo Cloud 실 provider(substrate)는 ADR-0144(기안 중).
 - 관련: ADR-0136(프로비저너·크레딧 — **provider 축만 개정**, 크레딧·슬롯 결정은 유지), ADR-0140(수명주기 — 전부 유지, D4가 이 ADR의 어댑터 계약이 됨), ADR-0125(work host fabric), ADR-0004(자격증명 비유입)
 - 입력: `docs/planning/2026-07-29-gpt-work-runtime-review.md` §3 + 우로보로스 인터뷰(interview_20260729_053912)
 - 발단: 성재(2026-07-29) — "E2B는 사실상 폐기. 셀프호스팅 유저는 의존성 0 + 세팅 쉬움. 워크스페이스 유저는 momo 통해 cloud 구매 또는 직접 호스팅 연동."

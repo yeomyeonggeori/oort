@@ -1,6 +1,6 @@
 # ADR-0143: Workstream — 목표와 실행의 분리, actor-independent 연속성
 
-- Status: **Proposed** (2026-07-29, 기안 Fable — 성재 방향 확정: "이대로 기안")
+- Status: **Accepted** (2026-07-29, 성재 — "ADR-0142, 0143 승인할게". 기안 Fable)
 - 관련: ADR-0114(세션=스레드 — **유지·확장**), ADR-0125 D11(계보 재개 — 유지), ADR-0139(idle·재부착 — 유지), ADR-0141(보류 — WIP push·Takeover가 이 ADR의 이웃), ADR-0132(부재≠오류)
 - 입력: GPT 설계 문서(성재 전달)의 핵심 기여 2건 + `docs/planning/2026-07-29-gpt-work-runtime-review.md` + 우로보로스 인터뷰(interview_20260729_053912)
 - 발단: 성재 확인 요구 — "한 사람이 시작한 일을 다른 사람이나 에이전트가 자연스럽게 이어받을 수 있는가?" 현행 답은 **불가능**이다.
