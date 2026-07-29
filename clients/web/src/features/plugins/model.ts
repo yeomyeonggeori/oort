@@ -236,6 +236,14 @@ export type PluginScopeConsentCompletion =
  * retrying the same checked scopes is the next useful action. Report every
  * distinct actionable cause: a mixed 403/404 batch must not sound as if all
  * requests failed for the first scope's reason.
+ *
+ * Both shapes group BY CAUSE, one cause once, with the scopes it hit listed
+ * under it. The per-scope shape this replaced repeated a whole sentence of
+ * remedy for every scope, so a four-scope failure ran 281px inside a 272px
+ * scrollbox at 760x480 and lost its bottom padding (MOMO-642 5). Grouping is
+ * also what the reader needs: the cause is the thing they can act on, and the
+ * scopes are the set it applies to, which is exactly what the single-cause
+ * shape already said. Two shapes, one sentence structure.
  */
 export function pluginScopeConsentCompletion(
   outcomes: readonly PluginScopeChangeOutcome[]
@@ -245,21 +253,25 @@ export function pluginScopeConsentCompletion(
     const causes = [...new Set(failed.map((outcome) =>
       pluginActionErrorMessage(outcome.error)
     ))];
+    const affectedBy = (cause: string) => failed
+      .filter((outcome) => pluginActionErrorMessage(outcome.error) === cause)
+      .map((outcome) => `${scopeSentence(outcome.scope)} (${outcome.scope})`)
+      .join(", ");
     if (causes.length === 1) {
-      const affectedScopes = failed.map((outcome) =>
-        `${scopeSentence(outcome.scope)} (${outcome.scope})`
-      );
       return {
         dismissDialog: false,
-        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]}\n영향받은 권한: ${affectedScopes.join(", ")}`,
+        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]}\n영향받은 권한: ${affectedBy(causes[0])}`,
       };
     }
-    const scopedErrors = failed.map((outcome) =>
-      `• ${scopeSentence(outcome.scope)} (${outcome.scope}): ${pluginActionErrorMessage(outcome.error)}`
+    // One forced break per cause, not two: `whitespace-pre-line` drops the
+    // indent that would make a continuation line read as one, and an unindented
+    // second line under a bullet reads as a third bullet that lost its dot.
+    const groupedCauses = causes.map((cause) =>
+      `• ${cause} 영향받은 권한: ${affectedBy(cause)}`
     );
     return {
       dismissDialog: false,
-      error: `선택한 권한을 변경하지 못했습니다. ${causes.length}가지 원인을 권한별로 확인하세요.\n${scopedErrors.join("\n")}`,
+      error: `선택한 권한을 변경하지 못했습니다. 원인 ${causes.length}가지를 확인하세요.\n${groupedCauses.join("\n")}`,
     };
   }
   return { dismissDialog: true };

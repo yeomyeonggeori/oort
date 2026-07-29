@@ -2,6 +2,7 @@ import { type MutableRefObject, type RefObject, useEffect, useMemo, useRef, useS
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -922,8 +923,12 @@ function PluginScopeConsentDialog({
             {isGrant ? `${consent.plugin.name} 앱에 권한을 허용할까요?` : `${consent.plugin.name} 앱 권한을 회수할까요?`}
           </DialogTitle>
           {isGrant && consent.plugin.installed && consent.plugin.enabled && (
+            // 중립 톤이다. 이건 상태 진술이지 승인 권유가 아니다. ok 초록으로
+            // 두면 폴드 위 유일한 색이 "설치됨"에 붙어, 아래 위험도 칩보다 먼저
+            // 눈에 들어오며 승인을 권하는 것처럼 읽혔다(MOMO-642 7). 이 화면에서
+            // 색은 위험 신호의 것이다.
             <span data-testid="plugin-scope-installation-signal">
-              <StatusChip tone="ok">워크스페이스 설치됨</StatusChip>
+              <StatusChip tone="muted">워크스페이스 설치됨</StatusChip>
             </span>
           )}
         </div>
@@ -953,6 +958,13 @@ function PluginScopeConsentDialog({
                 ? "권한마다 연결된 도구와 데이터 범위를 확인한 뒤 계속하세요."
                 : "회수하면 선택한 권한에 연결된 아래 도구를 더 이상 사용할 수 없습니다."}
             </p>
+            {/* The ONE live region for selection state. Unchecking the last box
+                used to say the same thing three times in one keystroke: this
+                count, a second role="status" hint that mounted underneath it,
+                and the confirm button's own aria-describedby pointing at that
+                hint (MOMO-642 6). The requirement now lives where the blocked
+                action is, as the button's own label, and this line reports the
+                count. One change, one announcement. */}
             <p
               className="text-meta text-ink-muted"
               role="status"
@@ -961,11 +973,6 @@ function PluginScopeConsentDialog({
             >
               {consent.scopes.length}개 중 {selectedScopes.length}개 선택
             </p>
-            {!hasSelection && (
-              <p id="plugin-scope-selection-hint" className="text-meta text-ink-muted" role="status">
-                권한을 하나 이상 선택해야 계속할 수 있습니다.
-              </p>
-            )}
             <ul className="flex flex-col overflow-hidden rounded-md border border-line">
               {consent.scopes.map((scope) => {
                 const scopeTools = toolsForPluginScope(consent.plugin.tools, scope);
@@ -977,7 +984,13 @@ function PluginScopeConsentDialog({
                     className="border-b border-line p-3 last:border-b-0"
                     data-testid={`plugin-scope-row-${scope}`}
                   >
-                    <label className={`flex items-start gap-2 ${pending ? "cursor-default" : "cursor-pointer"}`}>
+                    {/* 진행 중에는 포인터에도 사실대로 말한다. 쓰기 중 체크박스는
+                        aria-disabled="true"에 onChange가 조기 반환하는데,
+                        cursor-default는 "여긴 클릭 대상이 아님"까지만 말하고
+                        "지금은 못 바꿈"은 말하지 않아 포인터 사용자만 모르는
+                        상태였다(MOMO-642 3). 체크 표시 자체는 흐리지 않는다 —
+                        지금 서버로 보내는 중인 선택이 무엇인지가 그 상태다. */}
+                    <label className={`flex items-start gap-2 ${pending ? "cursor-not-allowed" : "cursor-pointer"}`}>
                       <input
                         type="checkbox"
                         checked={checked}
@@ -1023,21 +1036,32 @@ function PluginScopeConsentDialog({
           </fieldset>
 
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2" aria-hidden="true">
-              <span
-                className="flex h-control shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-line bg-surface-hover px-2 text-meta font-semibold text-ink"
-                data-testid="plugin-scope-momo-mark"
-              >
-                momo
-              </span>
-              <ArrowRight className="size-4 text-ink-muted" />
-              <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
-            </div>
-            <DialogDescription>
-              {isGrant
-                ? "선택한 권한의 도구가 내 사용자 정책에 추가됩니다."
-                : "선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다."}
-            </DialogDescription>
+            {/* 악수 글리프는 캡션과 한 몸이다. 4R이 고정 헤더를 제목만 남기면서
+                이 장식은 권한 목록과 설명 사이에 라벨 없이 떠 있었고, 회수
+                다이얼로그에서도 그려져 연결을 끊는 화면에서 momo→앱 화살표가
+                반대말을 했다(MOMO-642 1). 이제 문장 옆에 서서 그 문장이 캡션이
+                되고, 방향이 반대인 회수에서는 그리지 않는다. */}
+            {isGrant ? (
+              <div className="flex items-center gap-3">
+                <span className="flex shrink-0 items-center gap-2" aria-hidden="true">
+                  <span
+                    className="flex h-control shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-line bg-surface-hover px-2 text-meta font-semibold text-ink"
+                    data-testid="plugin-scope-momo-mark"
+                  >
+                    momo
+                  </span>
+                  <ArrowRight className="size-4 text-ink-muted" />
+                  <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
+                </span>
+                <DialogDescription className="min-w-0 flex-1">
+                  선택한 권한의 도구가 내 사용자 정책에 추가됩니다.
+                </DialogDescription>
+              </div>
+            ) : (
+              <DialogDescription>
+                선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다.
+              </DialogDescription>
+            )}
             {isGrant && consent.plugin.installed && consent.plugin.enabled && managerNames.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-meta text-ink-muted">
@@ -1051,6 +1075,9 @@ function PluginScopeConsentDialog({
             <div ref={actionErrorRef}>
               <InlineBanner
                 message={error}
+                // 이 배너만 줄바꿈을 담는다: pluginScopeConsentCompletion이
+                // 원인과 그 원인이 막은 권한을 줄로 나눠 쓴다(MOMO-642 4).
+                lines
                 actionLabel="오류 닫기"
                 onAction={() => {
                   onDismissError();
@@ -1092,11 +1119,37 @@ function PluginScopeConsentDialog({
             size="sm"
             aria-disabled={!pending && !hasSelection ? true : undefined}
             aria-busy={pending || undefined}
-            // Selection absence is truly unavailable and may be dimmed. A
-            // request in flight remains full contrast because its spinner and
-            // "변경 중" label are the only progress signal.
-            aria-describedby={!hasSelection ? "plugin-scope-selection-hint" : undefined}
-            className={!hasSelection ? "opacity-50" : undefined}
+            // 막힌 이유를 말하는 문장은 이 라벨 하나뿐이다(MOMO-642 6이 중복
+            // 힌트 <p>와 aria-describedby를 지운 뒤로). 그런데 그것을 흐리게 만든
+            // 것이 opacity-50이었다: 채움과 라벨이 함께 50%로 합성돼 요구 문장이
+            // 라이트 2.20:1 / 다크 3.21:1까지 내려갔고, 이 PR 이전 같은 요구가
+            // 서 있던 text-ink-muted 본문(5.7:1)보다도 못 읽혔다. WCAG는 비활성
+            // 컨트롤을 면제하지만, 이 클라이언트가 스스로 지키는 기준 아래로
+            // 내려간 유일한 문장이 하필 "왜 못 하는가"인 것은 설계 결함이다
+            // (MOMO-642 R1 H-1).
+            //
+            // 그래서 흐리게 하는 대신 **강조를 거둔다**: 결정이 불가능한 동안
+            // 버튼은 주 액션의 채움을 잃고 조용한 액센트 표면에 앉는다. 자리와
+            // 색 계열은 그대로여서 여전히 "결정의 자리"로 읽히고, 라벨은 13.17:1
+            // (라이트) / 12.45:1(다크)로 올라온다. 두 값은 tokens.contrast가
+            // 이미 재고 있는 --ink x --accent-soft 쌍이다 — 합성된 불투명도는
+            // 어떤 테스트도 볼 수 없지만 이 쌍은 회귀하면 잡힌다.
+            //
+            // announce는 늘리지 않는다: 요구는 여전히 라벨에만 있고, 개수는
+            // 위의 단 하나뿐인 live region에만 있다.
+            //
+            // min-w-action pins the footer geometry. This label states the
+            // decision state, so it changed width by 24px between "권한을 하나
+            // 이상 선택" and "선택한 권한 허용" and dragged 취소 sideways under
+            // the pointer on every toggle of the last checkbox (MOMO-642 2).
+            // The minimum clears the longest label, so only the text moves.
+            //
+            // 진행 중은 여전히 풀 컨트라스트다: 스피너와 "변경 중" 라벨이 유일한
+            // 진행 신호다.
+            className={cn(
+              "min-w-action",
+              !hasSelection && "bg-accent-soft text-ink hover:opacity-100"
+            )}
             data-testid="plugin-scope-confirm"
             onClick={() => {
               if (!canConfirm) return;
@@ -1142,6 +1195,10 @@ function ConfirmPluginAction({ action, pending, opener, onCancel, onConfirm }: {
               variant="destructive"
               size="sm"
               aria-busy={pending || undefined}
+              // 같은 이유로 여기도 고정폭이다(MOMO-642 2). 이 라벨도 진행 중에
+              // "변경 중"으로 바뀌므로, 두 다이얼로그 푸터가 서로 다른 규칙을
+              // 갖는 대신 결정 버튼 하나의 최소 측정값을 공유한다.
+              className="min-w-action"
               onClick={() => { if (!pending) onConfirm(); }}
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}

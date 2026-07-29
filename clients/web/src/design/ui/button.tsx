@@ -13,7 +13,13 @@ const buttonVariants = cva(
         secondary:
           "border border-line bg-surface-raised text-ink hover:bg-surface-hover",
         ghost: "text-ink hover:bg-surface-hover",
-        destructive: "bg-danger text-on-danger hover:opacity-90",
+        // 파괴 채움은 --danger가 아니라 --danger-fill이다(MOMO-642 R1 H-2). 위험
+        // 위계의 자(채도)가 전경 톤만 다스리는 동안 이 한 줄이 그 자 바깥에
+        // 있었고, 그래서 `설치 해제`가 주 버튼 `내 사용 허용`보다 채도가 높아
+        // 파괴 보조가 주 액션을 이겼다. 채움 순서(accent > danger-fill)도 이제
+        // 토큰에서 재진다 — tokens.css의 --danger-fill 주석과 tokens.contrast의
+        // "ranks the primary action fill above the destructive fill" 참조.
+        destructive: "bg-danger-fill text-on-danger-fill hover:opacity-90",
         outline:
           "border border-line-strong bg-transparent text-ink hover:bg-surface-hover",
       },
