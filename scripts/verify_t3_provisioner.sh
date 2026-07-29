@@ -32,14 +32,20 @@ MIGRATION="server/Migrations/045_t3_provisioner_credit_ledger.sql"
 SETTLEMENT_MIGRATION="server/Migrations/049_t3_lifecycle_settlement.sql"
 LIFECYCLE_MIGRATION="server/Migrations/051_t3_unsettled_usage_constraint.sql"
 CANONICAL_MIGRATION="server/Migrations/053_t3_lifecycle_canonicalization.sql"
+PRECISION_MIGRATION="server/Migrations/058_t3_interval_micro_precision.sql"
 test -f "$MIGRATION" || fail "missing $MIGRATION"
 test -f "$SETTLEMENT_MIGRATION" || fail "missing $SETTLEMENT_MIGRATION"
 test -f "$LIFECYCLE_MIGRATION" || fail "missing $LIFECYCLE_MIGRATION"
 test -f "$CANONICAL_MIGRATION" || fail "missing $CANONICAL_MIGRATION"
+test -f "$PRECISION_MIGRATION" || fail "missing $PRECISION_MIGRATION"
 grep -q "CREATE TABLE work_host_usage_interval" "$MIGRATION" \
   || fail "active/pause interval ledger missing"
 grep -q "WHEN state = 'active' AND ended_at IS NOT NULL" "$MIGRATION" \
   || fail "active seconds must be generated only for active intervals"
+grep -q "active_micros bigint GENERATED ALWAYS AS" "$PRECISION_MIGRATION" \
+  || fail "named gate generated-microsecond-interval"
+grep -q "WHEN state = 'active' AND ended_at IS NOT NULL" "$PRECISION_MIGRATION" \
+  || fail "named gate structural-pause-zero-retained"
 grep -q "ALTER TABLE %I FORCE ROW LEVEL SECURITY" "$MIGRATION" \
   || fail "new tenant tables must FORCE RLS"
 grep -q "CREATE FUNCTION settle_t3_work_session" "$SETTLEMENT_MIGRATION" \
@@ -644,10 +650,13 @@ SQL
   pass "ambiguous REST loss -> reconciler 404 -> terminal settlement and orphan sweep"
 fi
 
+# Migration 058: intervals carry exact microseconds and the billable second is
+# produced once, at settlement. `ACTIVE_SECONDS` is therefore floor(Σ micros),
+# not Σ floor(interval) — the same arithmetic the ledger row must show.
 INTERVALS="$(sql_value <<SQL
 SELECT count(*) || ':' ||
-       count(*) FILTER (WHERE i.state='paused' AND i.active_seconds=0) || ':' ||
-       COALESCE(sum(i.active_seconds),0)
+       count(*) FILTER (WHERE i.state='paused' AND i.active_micros=0) || ':' ||
+       (COALESCE(sum(i.active_micros),0)::bigint / 1000000)
   FROM work_host_usage_interval i
   JOIN work_host_usage u ON u.id=i.usage_id
  WHERE u.session_id='$SESSION_ID';
@@ -661,11 +670,36 @@ EOF
 [ "$ACTIVE_SECONDS" -ge 2 ] && [ "$ACTIVE_SECONDS" -le 8 ] \
   || fail "unexpected active seconds $ACTIVE_SECONDS"
 
+# Every pause boundary is a single instant: the interval that opens starts
+# exactly where the previous one ended. A gap here is unbilled active time that
+# per-interval flooring used to hide.
+SEAMS="$(sql_value <<SQL
+SELECT count(*) FROM (
+  SELECT i.started_at,
+         lag(i.ended_at) OVER (ORDER BY i.started_at, i.id) AS previous_end
+    FROM work_host_usage_interval i
+    JOIN work_host_usage u ON u.id=i.usage_id
+   WHERE u.session_id='$SESSION_ID'
+) boundary
+ WHERE previous_end IS NOT NULL AND started_at <> previous_end;
+SQL
+)"
+[ "$SEAMS" = "0" ] || fail "pause boundary lost or overlapped time in $SEAMS interval seams"
+
 LEDGER_ACTIVE="$(sql_value <<SQL
 SELECT active_seconds FROM work_host_usage WHERE session_id='$SESSION_ID';
 SQL
 )"
 [ "$LEDGER_ACTIVE" = "$ACTIVE_SECONDS" ] || fail "usage aggregate mismatch"
+LEDGER_MICROS="$(sql_value <<SQL
+SELECT (u.active_micros = COALESCE(sum(i.active_micros),0)::bigint)::text
+  FROM work_host_usage u
+  JOIN work_host_usage_interval i ON i.usage_id=u.id
+ WHERE u.session_id='$SESSION_ID'
+ GROUP BY u.active_micros;
+SQL
+)"
+[ "$LEDGER_MICROS" = "true" ] || fail "settled active_micros is not the interval sum"
 DEBIT="$(sql_value <<SQL
 SELECT -delta_micro_usd FROM credit_entry
  WHERE workspace_id='$WS_ID' AND reason='t3_usage' AND ref_id='$SESSION_ID';

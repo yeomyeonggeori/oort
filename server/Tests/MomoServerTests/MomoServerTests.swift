@@ -3044,6 +3044,20 @@ final class MomoServerTests: XCTestCase {
         )
         XCTAssertEqual(observerRequest.mode, .observer)
 
+        // MOMO-674: a host re-checking a stream it already holds opts in
+        // explicitly, and a body that predates the field still means "a client
+        // is dialling in right now" — the TTL-enforcing path.
+        let dial = try JSONDecoder().decode(
+            ValidateTerminalAttachRequest.self,
+            from: Data(#"{"capability_token":"\#(token)"}"#.utf8)
+        )
+        XCTAssertNil(dial.stream)
+        let revalidation = try JSONDecoder().decode(
+            ValidateTerminalAttachRequest.self,
+            from: Data(#"{"capability_token":"\#(token)","stream":true}"#.utf8)
+        )
+        XCTAssertEqual(revalidation.stream, true)
+
         let validation = TerminalAttachValidationResponse(
             workSessionID: UUID().uuidString,
             ptyID: "pty-511",
@@ -3096,6 +3110,26 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("digest(\\(token), 'sha256')"))
         XCTAssertTrue(routes.contains("c.expires_at > clock_timestamp()"))
         XCTAssertTrue(routes.contains("h.revoked_at IS NULL"))
+        // MOMO-674: revalidation relaxes the dial window and NOTHING else. The
+        // clauses that decide who may watch stay inside the same join, so a
+        // stream that outlives the TTL is still cut the moment the session ends,
+        // the host is revoked, observation closes, or the grantee leaves.
+        XCTAssertTrue(
+            routes.contains("AND (\\(revalidating) OR c.expires_at > clock_timestamp())"),
+            "only the expiry clause may be conditional on stream revalidation"
+        )
+        XCTAssertFalse(
+            routes.contains("\\(revalidating) OR h.revoked_at IS NULL"),
+            "host revocation is never relaxed for an open stream"
+        )
+        XCTAssertFalse(
+            routes.contains("\\(revalidating) OR ws.status"),
+            "session state is never relaxed for an open stream"
+        )
+        XCTAssertFalse(
+            routes.contains("\\(revalidating) OR ws.observation"),
+            "observation scope is never relaxed for an open stream"
+        )
         XCTAssertTrue(routes.contains("ws.status IN ('running', 'idle')"))
         XCTAssertTrue(routes.contains("only the session owner can attach"))
         XCTAssertTrue(routes.contains("terminal attach requires a human bearer"))

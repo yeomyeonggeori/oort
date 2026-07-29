@@ -89,10 +89,67 @@ enum MomoRemoteTerminalError: Error, Equatable, Sendable {
     case revokedOrUnavailable
     case rateLimited
     case networkDisconnected
+    /// MOMO-661/674: the host severed this stream because this client fell too
+    /// far behind its ring, so there is a GAP in what arrived. Kept apart from
+    /// `networkDisconnected` because the two ask for different things: nothing
+    /// is wrong with the network here, and telling someone to check it sends
+    /// them to look at the one thing that is fine.
+    case outputOverflowed
+}
+
+/// What arrived on the attach socket, once the two kinds of frame are told
+/// apart (MOMO-655/674).
+///
+/// The host sends pty output as BINARY frames and its two replay markers as
+/// TEXT frames carrying exactly the JSON `PTYReplayEndFrame` /
+/// `PTYReplayOverflowFrame` pin down on the daemon side. That split is what
+/// lets a marker exist at all: there is no in-band escape a pty stream could
+/// carry that some program's output could not also produce.
+///
+/// This client used to feed every frame straight into SwiftTerm, which was
+/// harmless only while no host implementation existed. With one landed
+/// (#869), the unfiltered path prints `{"byte_offset":8317,"type":"replay_end"}`
+/// into the operator's scrollback at the exact moment the terminal is supposed
+/// to look like it simply caught up. The web has held this line since MOMO-655
+/// (`classifyHostFrame`); this is the same rule on the same wire.
+enum MomoTerminalHostFrame: Sendable, Equatable {
+    /// Terminal bytes. Write them.
+    case output(Data)
+    /// Everything before this was scrollback, everything after is live.
+    case replayEnd(byteOffset: Int)
+    /// This reader fell behind and the host cut the stream at `byteOffset`. The
+    /// contract is "you have a gap, resynchronize", which on this client is the
+    /// existing 다시 연결 path, not a new one.
+    case replayOverflow(byteOffset: Int)
+
+    /// Classify a TEXT frame. Binary frames are never markers and never reach
+    /// this; a text frame that is not a marker is ordinary output, because a
+    /// host may legitimately send output as text and dropping unknown text
+    /// would silently swallow it.
+    static func classify(text: String) -> MomoTerminalHostFrame {
+        let bytes = Data(text.utf8)
+        // Cheap reject first: pty output is overwhelmingly not JSON, and this
+        // runs on every text frame.
+        guard text.count <= 128, text.hasPrefix("{"),
+              let object = try? JSONSerialization.jsonObject(with: bytes),
+              let dictionary = object as? [String: Any],
+              let type = dictionary["type"] as? String,
+              type == "replay_end" || type == "replay_overflow",
+              // The offset is part of the contract, not decoration: a marker
+              // without one is not the frame this client knows, so it is
+              // treated as output rather than guessed at.
+              let offset = dictionary["byte_offset"] as? Int
+        else { return .output(bytes) }
+        return type == "replay_end"
+            ? .replayEnd(byteOffset: offset)
+            : .replayOverflow(byteOffset: offset)
+    }
 }
 
 protocol MomoRemoteTerminalTransport: Sendable {
-    func connect(grant: MomoTerminalAttachGrant) async throws -> AsyncThrowingStream<Data, Error>
+    func connect(
+        grant: MomoTerminalAttachGrant
+    ) async throws -> AsyncThrowingStream<MomoTerminalHostFrame, Error>
     func sendInput(_ data: Data, ptyId: String) async throws
     func resize(columns: Int, rows: Int, ptyId: String) async throws
     func kill(ptyId: String) async throws
@@ -107,7 +164,9 @@ actor MomoURLSessionRemoteTerminalTransport: MomoRemoteTerminalTransport {
         self.session = session
     }
 
-    func connect(grant: MomoTerminalAttachGrant) async throws -> AsyncThrowingStream<Data, Error> {
+    func connect(
+        grant: MomoTerminalAttachGrant
+    ) async throws -> AsyncThrowingStream<MomoTerminalHostFrame, Error> {
         guard socket == nil, let endpoint = grant.webSocketEndpoint else {
             throw MomoRemoteTerminalError.invalidGrant
         }
@@ -127,9 +186,13 @@ actor MomoURLSessionRemoteTerminalTransport: MomoRemoteTerminalTransport {
                         let message = try await task.receive()
                         switch message {
                         case .data(let data):
-                            continuation.yield(data)
+                            // A BINARY frame is pty output by definition. It is
+                            // never classified: a program that prints the exact
+                            // marker JSON must reach the terminal, not be eaten
+                            // as a control frame.
+                            continuation.yield(.output(data))
                         case .string(let text):
-                            continuation.yield(Data(text.utf8))
+                            continuation.yield(MomoTerminalHostFrame.classify(text: text))
                         @unknown default:
                             throw MomoRemoteTerminalError.networkDisconnected
                         }
@@ -249,9 +312,25 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
             receiveTask = Task { [weak self] in
                 guard let self else { return }
                 do {
-                    for try await data in output {
-                        self.receivedByteCount += data.count
-                        self.terminalView.feed(byteArray: [UInt8](data)[...])
+                    for try await frame in output {
+                        switch frame {
+                        case .output(let data):
+                            self.receivedByteCount += data.count
+                            self.terminalView.feed(byteArray: [UInt8](data)[...])
+                        case .replayEnd:
+                            // Nothing to show and nothing to count. The marker
+                            // says the replay ended, not that the agent printed
+                            // something, so it is not "output arrived" either.
+                            continue
+                        case .replayOverflow:
+                            // The host cuts the socket right behind this frame
+                            // (close 1001). Naming the reason here rather than
+                            // waiting for that close is what keeps the banner
+                            // from blaming the network for a gap the host
+                            // caused, and 다시 연결 is already the way out.
+                            self.state = .failed(.outputOverflowed)
+                            return
+                        }
                     }
                     if self.state == .connected { self.state = .failed(.networkDisconnected) }
                 } catch {
