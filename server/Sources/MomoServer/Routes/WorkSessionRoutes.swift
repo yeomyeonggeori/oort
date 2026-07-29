@@ -1623,7 +1623,8 @@ struct WorkSessionRoutes: Sendable {
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
                        ws.status, ws.observation,
                        ws.started_at, ws.ended_at, ws.exit_code,
-                       ws.end_reason, ws.resumed_from_session_id, root.seq
+                       ws.end_reason, ws.resumed_from_session_id, root.seq,
+                       ws.workstream_id
                   FROM work_session ws
                   JOIN message root ON root.id = ws.root_message_id
                  WHERE ws.id = \(sourceSessionID)
@@ -1636,7 +1637,8 @@ struct WorkSessionRoutes: Sendable {
             }
             let source = try row.decode(
                 (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                 String, String, Date, Date?, Int?, String?, UUID?, Int64).self
+                 String, String, Date, Date?, Int?, String?, UUID?, Int64,
+                 UUID).self
             )
             try await WorkToolProfileRoutes.requireEnabled(
                 conn: conn,
@@ -1644,12 +1646,15 @@ struct WorkSessionRoutes: Sendable {
                 workspaceID: workspaceID,
                 toolKey: source.6
             )
-            guard source.3 == principal.memberID else {
-                throw HTTPError(.forbidden, message: "only the session owner can resume it")
-            }
             guard source.8 == "orphaned" else {
                 throw HTTPError(.conflict, message: "only an orphaned work session can resume")
             }
+            // ADR-0143 D2/D3: continuity belongs to the workstream, not to the
+            // Run's actor. Eligibility is therefore active membership of the
+            // anchor channel — the source member_id stays an execution record
+            // and is never transferred. This membership predicate is the only
+            // permission gate; reverting it is the red proof in
+            // scripts/verify_workstream_continuity.sh.
             try await Self.requireChannelMember(
                 conn: conn,
                 logger: db.logger,
@@ -1692,11 +1697,11 @@ struct WorkSessionRoutes: Sendable {
                 INSERT INTO work_session
                   (id, workspace_id, channel_id, member_id, host_id,
                    root_message_id, tool, label, status, observation,
-                   resumed_from_session_id)
+                   resumed_from_session_id, workstream_id)
                 VALUES
                   (\(resumedSessionID), \(workspaceID), \(source.2), \(principal.memberID),
                    \(body.targetHostId), \(source.5), \(source.6), \(source.7),
-                   'running', \(source.9), \(sourceSessionID))
+                   'running', \(source.9), \(sourceSessionID), \(source.16))
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
                           root_message_id, tool, label, status, observation,
                           0::bigint AS observer_grant_count,
@@ -1805,6 +1810,8 @@ struct WorkSessionRoutes: Sendable {
                 "source_session_id": sourceSessionID.uuidString,
                 "resumed_session_id": resumedSessionID.uuidString,
                 "target_host_id": body.targetHostId.uuidString,
+                "workstream_id": source.16.uuidString,
+                "source_member_id": source.3.uuidString,
                 "automatic": false,
             ]
             _ = try await conn.query(

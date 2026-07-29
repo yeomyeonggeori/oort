@@ -7,6 +7,14 @@
 - PTY replay 구독자 큐에 구성 가능한 바이트 상한을 두고(`MOMO_WORKD_PTY_SUBSCRIBER_QUEUE_BYTES`, 기본 ring×4·ring 미만 불가), 초과 구독자는 프레임을 조용히 버리는 대신 `.overflow(byteOffset:)` 종단 프레임으로 절단한다. PTY는 연속 바이트라 드롭이 xterm에 무증상 깨짐으로 나타나고, 절단은 재연결→ring replay→새 `replay_end`라는 기존 계약을 그대로 재사용하기 때문이다. 큐 계정은 `AsyncStream(unfolding:)`으로 소비 시점에만 감소해 정확하다.
 - WorkHostDaemon 38 tests(3 skip, 기준 32에서 +6: 재시작 보고·서비스중 세션 제외·전송 실패 재시도, 정지 구독자 red proof·정상 소비자·overflow 프레임 형태), server `testWorkHostRestartReconciliationReusesTheOrphanSweepWithoutNewUX`, server·NotifierWorker 빌드 무회귀는 green이다. `scripts/verify_workd_reconcile.sh`(실제 SIGKILL 재기동 → 보고 → orphaned + resume_offer, grace 1시간으로 heartbeat 경로 배제, SQL 지름길 없음)는 오케스트레이터 실행 대기(`runtime-unverified`)다.
 
+## MOMO-671 workstream 계층 — 암시 생성·계보 연결·재개 자격 확장 (#898, 2026-07-29)
+
+- Migration 055가 스레드 root message에 앵커되는 `workstream`(목표 문장·`active|paused|done|cancelled`·workspace/channel FK)과 `work_session.workstream_id` 복합 FK(`(workspace_id, id)` 참조)를 추가하고, 기존 세션을 스레드 기준으로 소급 생성·연결한 뒤 `SET NOT NULL`로 미연결 Run을 이름 있는 실패로 막는다.
+- 암시 생성은 REST 핸들러가 아니라 `BEFORE INSERT` 트리거가 소유한다 — human create·human resume·NotifierWorker 자동 resume·픽스처까지 모든 insert 경로가 같은 스레드의 workstream에 붙으므로 미부착 Run을 만들 수 있는 코드 경로가 없다. 동시 첫 Run은 `ON CONFLICT (root_message_id) DO UPDATE`로 승자 row를 채택한다.
+- 계보 재개 자격을 '소유자 본인'에서 **앵커 채널 활성 멤버**로 확장했다(ADR-0143 D2/D3). `work_session.member_id`는 그 Run의 실행자로 남아 이전되지 않고, 새 Run은 `resumed_from_session_id` 계보와 같은 workstream을 함께 유지한다. 이 변경에 맞춰 `verify_tier_fallback.sh`의 거부 케이스를 채널 비멤버로 교체했다.
+- 조회 REST 3종(`GET /workstreams`(status·channelId·sessionId·limit), `/workstreams/{id}`, `/workstreams/{id}/runs`)과 OpenAPI 스펙을 함께 넣었다. 노출 최소(#831): host-local·자격증명 표면 없음, 비멤버는 목록 0건과 상세/이력 404(존재 탐지 불가), 재개만 403.
+- server 351 tests(기준 349 + workstream 2)·`check_migration_numbers.sh`(54 files)·OpenAPI 라우트 역커버리지 green. Docker 격리 검증기 `scripts/verify_workstream_continuity.sh`(암시 생성 → 비멤버 403/404 → 같은 채널 멤버 B 이어받기 → A·B 병기 이력 → 트리거·FORCE RLS 단정)와 스크립트 헤더에 적은 red proof(자격 술어를 옛 소유자 가드로 되돌리면 `[workstream] FAIL channel-member takeover: expected HTTP 201, got 403`), 기존 verifier 회귀는 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-670 T3 provider 어댑터 + E2B 제거 + BYOC 등록 공식화 (#897, 2026-07-29)
 
 - `services/CloudProviderKit`이 `create/pause/resume/destroy/probe` 어댑터 계약과 capability 선언을 소유하고 MomoServer·NotifierWorker가 같은 정의를 컴파일한다. 정책 코드는 provider 상수를 알지 못하고 `capabilities`만 읽으며, 미지원 연산은 흉내내지 않고 선언·거부한다. `probe`는 존재/부재/**불명** 3값이라 "물어보지 못했다"가 "사라졌다"로 승격되지 않는다.

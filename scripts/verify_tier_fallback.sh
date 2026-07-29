@@ -32,6 +32,9 @@ CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 CROSS_WS_ID="51900000-0000-7000-8000-000000000099"
 OWNER_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 OTHER_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+# ADR-0143 D3 moved resume eligibility from "the session owner" to "a member of
+# the anchor channel", so the refusal case has to be a genuine non-member.
+OUTSIDER_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 TARGET_HOST_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 CLOUD_HOST_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 REVOKED_HOST_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
@@ -47,8 +50,10 @@ AUTO_ROOT_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 DEVICE_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 OWNER_EMAIL="tier-owner-$RUN_ID@momo.local"
 OTHER_EMAIL="tier-other-$RUN_ID@momo.local"
+OUTSIDER_EMAIL="tier-outsider-$RUN_ID@momo.local"
 OWNER_PASSWORD="owner-$RUN_ID"
 OTHER_PASSWORD="other-$RUN_ID"
+OUTSIDER_PASSWORD="outsider-$RUN_ID"
 PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
 
 compose() {
@@ -101,11 +106,13 @@ SET LOCAL row_security = off;
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES
   ('$OWNER_ID', '$WS_ID', 'human', 'active', 'Tier Owner', 'tier-owner-$RUN_ID'),
-  ('$OTHER_ID', '$WS_ID', 'human', 'active', 'Tier Other', 'tier-other-$RUN_ID');
+  ('$OTHER_ID', '$WS_ID', 'human', 'active', 'Tier Other', 'tier-other-$RUN_ID'),
+  ('$OUTSIDER_ID', '$WS_ID', 'human', 'active', 'Tier Outsider', 'tier-out-$RUN_ID');
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
   ('$OWNER_ID', '$WS_ID', '$OWNER_EMAIL', true, momo_password_hash('$OWNER_PASSWORD'), 'UTC'),
-  ('$OTHER_ID', '$WS_ID', '$OTHER_EMAIL', true, momo_password_hash('$OTHER_PASSWORD'), 'UTC');
+  ('$OTHER_ID', '$WS_ID', '$OTHER_EMAIL', true, momo_password_hash('$OTHER_PASSWORD'), 'UTC'),
+  ('$OUTSIDER_ID', '$WS_ID', '$OUTSIDER_EMAIL', true, momo_password_hash('$OUTSIDER_PASSWORD'), 'UTC');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
@@ -113,7 +120,8 @@ VALUES
 INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES
   ('$WS_ID', '$OWNER_ID', 'owner'),
-  ('$WS_ID', '$OTHER_ID', 'member');
+  ('$WS_ID', '$OTHER_ID', 'member'),
+  ('$WS_ID', '$OUTSIDER_ID', 'member');
 INSERT INTO work_host
   (id, workspace_id, scope, owner_member_id, type, display_name, public_key,
    capabilities, last_seen_at, revoked_at)
@@ -158,6 +166,7 @@ login() {
 }
 OWNER_TOKEN="$(login "$OWNER_EMAIL" "$OWNER_PASSWORD")"
 OTHER_TOKEN="$(login "$OTHER_EMAIL" "$OTHER_PASSWORD")"
+OUTSIDER_TOKEN="$(login "$OUTSIDER_EMAIL" "$OUTSIDER_PASSWORD")"
 
 RESPONSE_STATUS=""
 RESPONSE_BODY=""
@@ -265,9 +274,11 @@ curl -fsS "http://127.0.0.1:$PUSH_PORT/received" | jq -e \
     exit 1
   }
 
-api "$OTHER_TOKEN" POST "/v1/workspaces/$WS_ID/work-sessions/$ASK_SESSION_ID/resume" \
+# ADR-0143 D3: the gate is anchor-channel membership, not ownership. The
+# outsider is a workspace member with no membership row for this channel.
+api "$OUTSIDER_TOKEN" POST "/v1/workspaces/$WS_ID/work-sessions/$ASK_SESSION_ID/resume" \
   "$(jq -cn --arg host "$TARGET_HOST_ID" '{targetHostId:$host}')"
-expect_status 403 "non-owner resume"
+expect_status 403 "non-member resume"
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/work-sessions/$ASK_SESSION_ID/resume" \
   "$(jq -cn --arg host "$REVOKED_HOST_ID" '{targetHostId:$host}')"
 expect_status 409 "revoked target resume"

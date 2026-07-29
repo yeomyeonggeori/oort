@@ -2651,6 +2651,97 @@ final class MomoServerTests: XCTestCase {
         )
     }
 
+    /// MOMO-671 / ADR-0143. These are the two invariants that would silently
+    /// regress: implicit creation must stay in the ledger trigger (so no insert
+    /// path can produce an unattached Run), and resume eligibility must stay
+    /// channel membership rather than session ownership.
+    func testWorkstreamMigrationAndResumeEligibility() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/055_workstream.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE workstream"))
+        XCTAssertTrue(
+            migration.contains("status IN ('active', 'paused', 'done', 'cancelled')")
+        )
+        XCTAssertTrue(
+            migration.contains("root_message_id      uuid NOT NULL UNIQUE REFERENCES message(id)")
+        )
+        XCTAssertTrue(migration.contains("ADD COLUMN workstream_id uuid"))
+        XCTAssertTrue(
+            migration.contains("REFERENCES workstream (workspace_id, id)"),
+            "the Run FK must be composite so a Run cannot point at another tenant"
+        )
+        XCTAssertTrue(migration.contains("ALTER COLUMN workstream_id SET NOT NULL"))
+        XCTAssertTrue(migration.contains("CREATE TRIGGER work_session_attach_workstream_trg"))
+        XCTAssertTrue(migration.contains("BEFORE INSERT ON work_session"))
+        XCTAssertTrue(migration.contains("ON CONFLICT (root_message_id)"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(
+            migration.contains("pty_id"),
+            "host-local binding must not leak into the goal layer"
+        )
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkSessionRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertFalse(
+            routes.contains("only the session owner can resume it"),
+            "ADR-0143 D2 replaced the resume owner guard with channel membership"
+        )
+        XCTAssertTrue(routes.contains("resumed_from_session_id, workstream_id"))
+        XCTAssertTrue(routes.contains("only the session owner can end it"))
+
+        let workstreamRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkstreamRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(workstreamRoutes.contains("JOIN membership ms"))
+        XCTAssertTrue(workstreamRoutes.contains("workstream not found"))
+        XCTAssertFalse(workstreamRoutes.contains("BYPASSRLS"))
+        for leaked in ["pty_id", "attach_endpoint", "cwd"] {
+            XCTAssertFalse(
+                workstreamRoutes.contains(leaked),
+                "\(leaked) must stay out of the workstream projection"
+            )
+        }
+    }
+
+    func testWorkstreamQueryFilterValidation() throws {
+        XCTAssertNil(try WorkstreamRoutes.validatedStatus(nil))
+        XCTAssertNil(try WorkstreamRoutes.validatedStatus(""))
+        XCTAssertEqual(try WorkstreamRoutes.validatedStatus("active"), "active")
+        XCTAssertEqual(try WorkstreamRoutes.validatedStatus("cancelled"), "cancelled")
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedStatus("Active"))
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedStatus("archived"))
+
+        XCTAssertEqual(
+            try WorkstreamRoutes.validatedLimit(nil),
+            WorkstreamRoutes.defaultListLimit
+        )
+        XCTAssertEqual(try WorkstreamRoutes.validatedLimit("200"), 200)
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedLimit("0"))
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedLimit("201"))
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedLimit("many"))
+
+        XCTAssertNil(try WorkstreamRoutes.optionalUUID(nil, label: "sessionId"))
+        XCTAssertThrowsError(try WorkstreamRoutes.optionalUUID("nope", label: "sessionId"))
+        let id = UUID(uuidString: "00000000-0000-7000-8000-000000000671")!
+        XCTAssertEqual(
+            try WorkstreamRoutes.optionalUUID(id.uuidString, label: "sessionId"),
+            id
+        )
+    }
+
     func testWorkSessionValidationCardAndNoVersionLifecyclePayload() throws {
         XCTAssertEqual(try WorkSessionRoutes.validatedTool("codex"), "codex")
         XCTAssertEqual(try WorkSessionRoutes.validatedTool("bash"), "bash")
