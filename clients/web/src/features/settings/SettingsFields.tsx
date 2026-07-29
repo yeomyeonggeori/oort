@@ -31,7 +31,11 @@ export function SectionShell({
   // of stretching a slug field across a 1280px window.
   return (
     <section className={cn("flex min-w-0 flex-col gap-4", wide ? "max-w-none" : "max-w-2xl")}>
-      <div className="flex flex-col gap-1">
+      {/* 제목과 설명은 한국어 산문이므로 음절이 아니라 어절에서 끊는다
+          (MOMO-676 M-5). 헤더 블록에만 걸고 children에는 걸지 않는다: 아래에는
+          슬러그·토큰·수치처럼 산문이 아닌 값이 있고, 그것들은 각자의 규칙을
+          갖는다. word-break는 상속되므로 한 번의 선언으로 두 줄 다 덮인다. */}
+      <div className="flex break-keep flex-col gap-1">
         <h2 className="text-title font-semibold text-ink">{title}</h2>
         {lines.map((line) => (
           <p key={line} className="text-body text-ink-muted">

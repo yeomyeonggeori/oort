@@ -152,6 +152,17 @@
    * 가로이고 pane도 아니므로, 리듬 스케일에 없는 이 측정값도 이름을 갖는다. */
   --spacing-action: 144px;
 
+  /* 같은 규칙의 짧은 푸터 (MOMO-676 M-3). 한 다이얼로그의 두 푸터 버튼은 같은
+   * 폭이고, 그 폭은 **그 푸터가 보일 수 있는 가장 긴 라벨**이 정한다. 위 144px는
+   * 동의 다이얼로그의 "권한을 하나 이상 선택"(실측 127px)에서 나온 값이라, 라벨이
+   * "설치 해제" <-> "변경 중"으로 ~16px만 움직이는 설치 해제 확인 다이얼로그에
+   * 가져다 쓰면 취소 47px 옆에 144px가 서서 푸터가 3:1이 된다. 이 푸터의 실측
+   * (Chromium, 빌드된 CSS, size="sm")은 취소 47px · 설치 해제 69px · 스피너를 단
+   * "변경 중" 82px이므로, 가장 긴 상태에 14px 여유를 남기는 96px가 세 라벨을 모두
+   * 담고 양쪽을 같은 폭으로 세운다. 가로이고 pane도 아니므로 --spacing-action과
+   * 같은 이유로 이름을 갖는다. */
+  --spacing-action-sm: 96px;
+
   /* Panes are a third dimension: a secondary column is wider than any rhythm
    * step, so it gets a NAME rather than an off-grid number. Keeping them here
    * means w-pane / max-h-pane exist and w-[320px] still never compiles. */
