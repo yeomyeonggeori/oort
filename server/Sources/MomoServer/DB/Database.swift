@@ -104,6 +104,54 @@ struct Database: Sendable {
         }
     }
 
+    /// Run a T3 lifecycle transaction through the canonical ADR-0140 prelude.
+    /// Host advisories are the first PostgreSQL statements; optional workspace
+    /// rows and cloud-host rows are then locked coarse-to-fine before `body`.
+    func withTenantT3LifecycleTransaction<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostID: UUID,
+        lockWorkPool: Bool = false,
+        lockWorkspaceCredit: Bool = false,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        try await withTenantT3LifecycleTransaction(
+            workspaceID: workspaceID,
+            cloudHostIDs: [cloudHostID],
+            lockWorkPool: lockWorkPool,
+            lockWorkspaceCredit: lockWorkspaceCredit,
+            body
+        )
+    }
+
+    func withTenantT3LifecycleTransaction<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostIDs: [UUID],
+        lockWorkPool: Bool = false,
+        lockWorkspaceCredit: Bool = false,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        let orderedHostIDs = Array(Set(cloudHostIDs)).sorted {
+            $0.uuidString.lowercased() < $1.uuidString.lowercased()
+        }
+        precondition(!orderedHostIDs.isEmpty)
+        do {
+            return try await client.withTransaction(logger: logger) { conn in
+                try await T3LifecycleLock.acquirePrelude(
+                    conn: conn,
+                    logger: logger,
+                    workspaceID: workspaceID,
+                    orderedCloudHostIDs: orderedHostIDs,
+                    lockWorkPool: lockWorkPool,
+                    lockWorkspaceCredit: lockWorkspaceCredit
+                )
+                return try await body(conn)
+            }
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
     /// Run a one-off read with the tenant scope set (no explicit BEGIN needed for a
     /// single statement, but RLS still requires the GUC — so we use a transaction).
     func withTenantConnection<Result: Sendable>(

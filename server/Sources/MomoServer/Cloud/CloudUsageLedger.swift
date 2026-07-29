@@ -6,9 +6,17 @@ import PostgresNIO
 /// ADR-0136 T3-only credit and active-time ledger.
 ///
 /// Token request accounting remains in `usage_ledger`. This ledger owns one T3
-/// session and its active/paused intervals; all callers already hold the tenant
-/// transaction and serialize lifecycle changes by locking the usage row.
+/// session and its active/paused intervals; lifecycle callers acquire the
+/// cloud-host advisory before entering this file's existing row-lock ladder.
 enum CloudUsageLedger {
+    enum TerminationReason: String, Sendable {
+        case ended
+        case idleTimeout = "idle_timeout"
+        case orphaned
+        case providerMissing = "provider_missing"
+        case destroyed
+    }
+
     static func reserveProvisioningSlot(
         conn: PostgresConnection,
         logger: Logger,
@@ -264,16 +272,23 @@ enum CloudUsageLedger {
         )
     }
 
-    static func settle(
+    @discardableResult
+    static func terminate(
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
-        sessionID: UUID
-    ) async throws {
-        _ = try await conn.query(
-            "SELECT settle_t3_work_session(\(workspaceID), \(sessionID))",
+        sessionID: UUID,
+        reason: TerminationReason
+    ) async throws -> Bool {
+        let rows = try await conn.query(
+            """
+            SELECT t3_terminate(
+              \(workspaceID), \(sessionID), \(reason.rawValue)
+            )
+            """,
             logger: logger
         ).collect()
+        return try rows.first?.decode(Bool.self) ?? false
     }
 
     private struct OpenUsage: Sendable {
