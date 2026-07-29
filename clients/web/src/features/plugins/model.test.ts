@@ -250,8 +250,38 @@ describe("plugin marketplace copy", () => {
     ]);
     expect(completion.dismissDialog).toBe(false);
     if (completion.dismissDialog) throw new Error("expected retained dialog");
-    expect(completion.error).toContain("2가지 원인을 권한별로 확인하세요.");
-    expect(completion.error).toContain("notion 댓글 권한 (notion:comment): 이 앱은");
-    expect(completion.error).toContain("notion 관리 권한 (notion:admin): 앱 또는 내 권한을");
+    expect(completion.error).toContain("원인 2가지를 확인하세요.");
+    expect(completion.error).toContain(
+      `• ${repeatedCause} 영향받은 권한: notion 댓글 권한 (notion:comment)`
+    );
+    expect(completion.error).toContain(
+      `• ${pluginActionErrorMessage(new ApiError(404, "not found"))} 영향받은 권한: notion 관리 권한 (notion:admin)`
+    );
+  });
+
+  // The banner lives inside a 272px scrollbox at 760x480, and a cause is a
+  // sentence of remedy. Repeating it once per scope overflowed by 13px on a
+  // four-scope failure (MOMO-642 5), so grouping is a height budget as much as
+  // it is copy: N causes cost N sentences, never N x scopes.
+  it("says each cause once no matter how many scopes it hit", () => {
+    const policy = pluginActionErrorMessage(new ApiError(403, "not allowed"));
+    const missing = pluginActionErrorMessage(new ApiError(404, "not found"));
+    const completion = pluginScopeConsentCompletion([
+      { scope: "notion:read", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:comment", succeeded: false, error: new ApiError(404, "not found") },
+      { scope: "notion:write", succeeded: false, error: new ApiError(403, "not allowed") },
+      { scope: "notion:admin", succeeded: false, error: new ApiError(403, "not allowed") },
+    ]);
+    if (completion.dismissDialog) throw new Error("expected retained dialog");
+    expect(completion.error.split(policy)).toHaveLength(2);
+    expect(completion.error.split(missing)).toHaveLength(2);
+    expect(completion.error).toContain(
+      `• ${policy} 영향받은 권한: notion 읽기 권한 (notion:read), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)`
+    );
+    expect(completion.error).toContain(
+      `• ${missing} 영향받은 권한: notion 댓글 권한 (notion:comment)`
+    );
+    // Four failures, three lines: the headline and one per cause.
+    expect(completion.error.split("\n")).toHaveLength(3);
   });
 });

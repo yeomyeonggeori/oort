@@ -82,21 +82,64 @@ function composite(layer: ScrimLayer, hex: string): [number, number, number] {
   ) as [number, number, number];
 }
 
-/** OKLab hue angle in degrees, used to police hue families (AI-tell bans). */
-export function hueAngle(hex: string): number {
+/** The two OKLab opponent axes. Hue is their angle, chroma their length. */
+function oklabAB(hex: string): [number, number] {
   const [r, g, b] = linearize(hex);
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return [
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+/** OKLab hue angle in degrees, used to police hue families (AI-tell bans). */
+export function hueAngle(hex: string): number {
+  const [A, B] = oklabAB(hex);
   return (((Math.atan2(B, A) * 180) / Math.PI) + 360) % 360;
+}
+
+/**
+ * OKLab chroma: how colorful a token is, independent of how light it is.
+ *
+ * This is the ruler for the risk hierarchy (MOMO-641). Luminance contrast
+ * cannot order status tokens once they all clear AA by a wide margin: the dark
+ * `--danger` that shipped before this measured 10.55:1 on `--surface` against
+ * `--warn`'s 8.03:1 and still read as the quieter of the two, because it was a
+ * pale pink (C 0.068) standing next to a saturated yellow (C 0.141). At equal
+ * legibility the eye ranks by colorfulness, so that is what is measured here,
+ * with the AA table above kept as the floor underneath it.
+ */
+export function chroma(hex: string): number {
+  return Math.hypot(...oklabAB(hex));
 }
 
 /** Shortest angular distance between two hues, in degrees. */
 function hueGap(a: string, b: string): number {
   const d = Math.abs(hueAngle(a) - hueAngle(b)) % 360;
   return d > 180 ? 360 - d : d;
+}
+
+/**
+ * Perceptual distance in OKLab. Chroma orders two tones; this says whether they
+ * are still two tones at all. Quieting the destructive fill (MOMO-642 R1 H-2)
+ * moves it TOWARD the accent on the one axis the order is measured on, so the
+ * order has to be bought without merging the two fills into one colour.
+ */
+function deltaE(a: string, b: string): number {
+  const [aA, aB] = oklabAB(a);
+  const [bA, bB] = oklabAB(b);
+  return Math.hypot(oklabL(a) - oklabL(b), aA - bA, aB - bB);
+}
+
+/** OKLab lightness, the third axis deltaE needs. */
+function oklabL(hex: string): number {
+  const [r, g, b] = linearize(hex);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
 }
 
 export function contrast(a: string, b: string): number {
@@ -161,7 +204,8 @@ describe("Dawn palette", () => {
       "line",
       "line-strong",
       "on-accent",
-      "on-danger",
+      "danger-fill",
+      "on-danger-fill",
     ];
     for (const token of expected) expect(TOKENS[token], token).toBeDefined();
   });
@@ -222,12 +266,15 @@ describe("Dawn palette", () => {
         }
       });
 
-      it("filled accent and danger carry AA label text", () => {
+      it("filled accent and destructive fill carry AA label text", () => {
         expect(
           contrast(pick("on-accent", scheme.index), pick("accent", scheme.index))
         ).toBeGreaterThanOrEqual(4.5);
         expect(
-          contrast(pick("on-danger", scheme.index), pick("danger", scheme.index))
+          contrast(
+            pick("on-danger-fill", scheme.index),
+            pick("danger-fill", scheme.index)
+          )
         ).toBeGreaterThanOrEqual(4.5);
       });
 
@@ -279,6 +326,102 @@ describe("Dawn palette", () => {
           ),
           `agent vs accent hue gap (${scheme.name})`
         ).toBeGreaterThanOrEqual(90);
+      });
+
+      // The risk hierarchy is an ORDER, not a taste: --danger > --warn >
+      // --ink-muted, in both schemes. Four shipping surfaces put two of these
+      // tones side by side and would silently invert with the tokens: the app
+      // consent dialog and the ToolRow chips under 설정 > 앱, the quota chips
+      // and bars under 설정 > 사용량, the AI 연결 체인 status lines, and the
+      // workspace rail's connection dot. Ratios, not bare `>`, so a token that
+      // merely ties cannot pass (the old dark danger sat at 0.48x of warn).
+      it("ranks danger louder than warn, and warn louder than muted", () => {
+        const c = (token: string) => chroma(pick(token, scheme.index));
+        expect(
+          Number((c("danger") / c("warn")).toFixed(2)),
+          `danger vs warn chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(1.15);
+        expect(
+          Number((c("warn") / c("ink-muted")).toFixed(2)),
+          `warn vs ink-muted chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(2);
+      });
+
+      // The SECOND surface class the chroma ruler governs: action FILLS.
+      //
+      // The ruler above orders risk tones against each other. It said nothing
+      // about the surfaces where --danger was painted as a fill, so the ruler
+      // stepped straight over `<Button variant="destructive">` and by its own
+      // measurement the destructive secondary outranked the primary action:
+      // 설치 해제 (C 0.178 light / 0.166 dark) stood beside 내 사용 허용 (0.136 /
+      // 0.134) in 설정 > 앱 상세, at 1.31x and 1.24x. One --danger cannot serve
+      // both orders — in dark it must clear warn by 1.15x (C >= 0.162) AND stay
+      // under accent (C <= 0.116), an empty interval — so the fill has its own
+      // token and its own assertion here (MOMO-642 R1 H-2).
+      //
+      // Ratios again rather than a bare `>`, for the same reason: a tie is not
+      // an order. Applies to every destructive fill in the client, since they
+      // all come from the one `destructive` variant.
+      it("ranks the primary action fill above the destructive fill", () => {
+        const c = (token: string) => chroma(pick(token, scheme.index));
+        expect(
+          Number((c("accent") / c("danger-fill")).toFixed(2)),
+          `accent vs danger-fill chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(1.15);
+      });
+
+      // Quieter, not merged. Lowering the destructive fill's chroma walks it
+      // toward the accent on the very axis the order is read from, so the two
+      // fills must stay apart as colours. Measured 0.092 light / 0.131 dark,
+      // both WIDER than the 0.073 / 0.122 the two had before the split.
+      it("keeps the destructive fill a different colour from the accent fill", () => {
+        expect(
+          Number(
+            deltaE(
+              pick("danger-fill", scheme.index),
+              pick("accent", scheme.index)
+            ).toFixed(3)
+          ),
+          `danger-fill vs accent deltaE (${scheme.name})`
+        ).toBeGreaterThanOrEqual(0.08);
+      });
+
+      // ...and still recognisably the risk colour. A fill allowed to drift out
+      // of the --danger hue family would satisfy both assertions above by
+      // ceasing to look destructive, which is the cheapest way to pass this
+      // file and the worst way to ship. The floor under "quieter" is the same
+      // one --warn already stands on: a tone that carries meaning is at least
+      // twice as colourful as the quietest foreground.
+      it("keeps the destructive fill in the danger hue family", () => {
+        expect(
+          Math.round(
+            hueGap(pick("danger-fill", scheme.index), pick("danger", scheme.index))
+          ),
+          `danger-fill vs danger hue gap (${scheme.name})`
+        ).toBeLessThanOrEqual(15);
+        expect(
+          Number(
+            (
+              chroma(pick("danger-fill", scheme.index)) /
+              chroma(pick("ink-muted", scheme.index))
+            ).toFixed(2)
+          ),
+          `danger-fill vs ink-muted chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(2);
+      });
+
+      // The floor under that order: chroma may not be bought with legibility.
+      // --danger outreads the quietest foreground on every surface it can land
+      // on, so a louder red can never also be a dimmer one.
+      it("keeps danger above the quietest foreground in contrast too", () => {
+        for (const bg of SURFACES) {
+          expect(
+            contrast(pick("danger", scheme.index), pick(bg, scheme.index)),
+            `danger vs ink-muted on ${bg} (${scheme.name})`
+          ).toBeGreaterThan(
+            contrast(pick("ink-muted", scheme.index), pick(bg, scheme.index))
+          );
+        }
       });
 
       it("keeps accent and agent out of the indigo/violet AI-tell band", () => {
