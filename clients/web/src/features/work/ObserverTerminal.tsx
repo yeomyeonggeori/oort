@@ -16,6 +16,7 @@ import {
   canChangeObservation,
   classifyClose,
   classifyGrantFailure,
+  classifyHostFrame,
   connectFrame,
   cspBlockedHost,
   HOST_COLUMNS,
@@ -450,6 +451,13 @@ export function ObserverTerminal({
       if (runRef.current !== run) return;
       const data = event.data;
       if (typeof data === "string") {
+        // MOMO-655: the host's replay markers arrive as text frames and are not
+        // terminal bytes. Writing one would print JSON into the reader's
+        // scrollback at the moment the panel is meant to look like it caught up.
+        // They are also not "arrival" for the liveness clock: a marker says the
+        // replay ended, not that the agent printed something.
+        const frame = classifyHostFrame(data);
+        if (frame.kind !== "output") return;
         terminal.write(data);
         bytesRef.current += TEXT_ENCODER.encode(data).length;
         linesRef.current += newlineCount(data);
