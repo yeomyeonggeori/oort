@@ -33,6 +33,11 @@
 #                                  BASE_URL mode must configure the target API.
 #   OPENAPI_GATE_KEEP=1            Keep the compose stack up after the run.
 #   OPENAPI_SPEC                   Spec path (default: docs/api/openapi.yaml).
+#   OPENAPI_GATE_FAIL_FAST=1       Abort on the first failed assertion instead
+#                                  of running to the end and reporting all of
+#                                  them (default: run to the end).
+#   OPENAPI_GATE_MAX_FAILURES      Abort after this many failures to bound
+#                                  cascade noise (default: 30).
 # =============================================================================
 set -euo pipefail
 
@@ -115,6 +120,49 @@ SPEC_JSON="$TMP_DIR/openapi.json"
 MANIFEST="$TMP_DIR/manifest.jsonl"
 : >"$MANIFEST"
 
+# ---- Failure accumulation (MOMO-654) ----------------------------------------
+# The gate used to abort on the FIRST assertion failure. With a ~40min cold
+# Swift build per run that turns "N drifted operations" into N docker runs, and
+# it hides the reverse-coverage report entirely — the run dies long before the
+# spec/shape validation stage. Assertions now RECORD and continue; the run ends
+# with the full failure list and a non-zero exit.
+#
+# Only assertions are soft. Extractions (an id needed by later requests) stay
+# hard, because continuing past a missing id produces cascading 404 noise that
+# buries the real defect. The EXIT trap prints everything collected so far even
+# when such a hard abort happens, so a hard stop still reports the earlier
+# soft failures.
+FAILURE_LOG="$TMP_DIR/failures.txt"
+: >"$FAILURE_LOG"
+FAILURE_COUNT=0
+GATE_FAIL_FAST="${OPENAPI_GATE_FAIL_FAST:-0}"
+MAX_FAILURES="${OPENAPI_GATE_MAX_FAILURES:-30}"
+
+gate_fail() {
+  local name="$1" detail="$2" body="${3:-}"
+  FAILURE_COUNT=$((FAILURE_COUNT + 1))
+  printf '%s\n' "[$FAILURE_COUNT] $name: $detail" >>"$FAILURE_LOG"
+  echo "[openapi] FAIL $name: $detail" >&2
+  [ -n "$body" ] && printf '%s\n' "$body" >&2
+  if [ "$GATE_FAIL_FAST" = "1" ]; then
+    echo "[openapi] OPENAPI_GATE_FAIL_FAST=1 — aborting at first failure" >&2
+    exit 1
+  fi
+  if [ "$FAILURE_COUNT" -ge "$MAX_FAILURES" ]; then
+    echo "[openapi] failure cap reached ($MAX_FAILURES) — aborting" >&2
+    exit 1
+  fi
+  return 0
+}
+
+print_failure_summary() {
+  [ "$FAILURE_COUNT" -gt 0 ] || return 0
+  echo "" >&2
+  echo "[openapi] ===== $FAILURE_COUNT failed assertion(s) =====" >&2
+  cat "$FAILURE_LOG" >&2
+  echo "[openapi] ============================================" >&2
+}
+
 DEMO_WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 GENERAL_CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 KIM_INTERN_MEMBER_ID="00000000-0000-7000-8000-000000000102"
@@ -144,6 +192,7 @@ compose() {
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
+  print_failure_summary
   if [ "$MANAGED_STACK" -eq 1 ]; then
     if [ "${OPENAPI_GATE_KEEP:-0}" = "1" ]; then
       echo "[openapi] OPENAPI_GATE_KEEP=1 — leaving compose project '$PROJECT' up"
@@ -341,9 +390,11 @@ sample() {
   local name="$1" method="$2" template="$3" path="$4" expected="$5" body="${6:-}" token="${7:-}"
   api "$method" "$path" "$body" "$token"
   if [ "$RESPONSE_STATUS" != "$expected" ]; then
-    echo "[openapi] FAIL $name: expected HTTP $expected, got $RESPONSE_STATUS" >&2
-    echo "$RESPONSE_BODY" >&2
-    exit 1
+    # Not recorded in the manifest: a wrong-status body must never be validated
+    # as if it were the documented shape. The reverse-coverage check then also
+    # reports the operation as unsampled, so nothing here can PASS silently.
+    gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS" "$RESPONSE_BODY"
+    return 0
   fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   local file
@@ -359,9 +410,8 @@ sample() {
 record_sample() {
   local name="$1" method="$2" template="$3" expected="$4"
   if [ "$RESPONSE_STATUS" != "$expected" ]; then
-    echo "[openapi] FAIL $name: expected HTTP $expected, got $RESPONSE_STATUS" >&2
-    echo "$RESPONSE_BODY" >&2
-    exit 1
+    gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS" "$RESPONSE_BODY"
+    return 0
   fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   local file
@@ -376,10 +426,10 @@ record_sample() {
 
 record_binary_sample() {
   local name="$1" method="$2" template="$3" expected="$4" body_file="$5" media_type="$6"
-  [ "$RESPONSE_STATUS" = "$expected" ] || {
-    echo "[openapi] FAIL $name: expected HTTP $expected, got $RESPONSE_STATUS" >&2
-    exit 1
-  }
+  if [ "$RESPONSE_STATUS" != "$expected" ]; then
+    gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS"
+    return 0
+  fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   jq -cn --arg name "$name" --arg method "$method" --arg path "$template" \
     --arg status "$expected" --arg body_file "$body_file" --arg media_type "$media_type" \
@@ -439,11 +489,9 @@ work_host_signed_sample() {
 guard_jq() {
   local label="${*: -1}"
   set -- "${@:1:$(($# - 1))}"
-  printf '%s' "$RESPONSE_BODY" | jq -e "$@" >/dev/null || {
-    echo "[openapi] FAIL guard: $label" >&2
-    echo "$RESPONSE_BODY" >&2
-    exit 1
-  }
+  printf '%s' "$RESPONSE_BODY" | jq -e "$@" >/dev/null \
+    || gate_fail "guard" "$label" "$RESPONSE_BODY"
+  return 0
 }
 
 WS="$DEMO_WORKSPACE_ID"
@@ -775,13 +823,15 @@ sample plugin-detail get "/v1/workspaces/{workspaceId}/plugins/{pluginId}" \
 api post "$DRIVE_PATH/install" '{"enabled":true}' "$ACCESS"
 case "$RESPONSE_STATUS" in
   200|201) record_sample plugin-install post "/v1/workspaces/{workspaceId}/plugins/{pluginId}/install" "$RESPONSE_STATUS" ;;
-  *) echo "[openapi] FAIL plugin-install: expected HTTP 200/201, got $RESPONSE_STATUS" >&2; exit 1 ;;
+  *) gate_fail plugin-install "expected HTTP 200/201, got $RESPONSE_STATUS" "$RESPONSE_BODY" ;;
 esac
 sample plugin-grant post "/v1/workspaces/{workspaceId}/plugins/{pluginId}/grants" \
   "$DRIVE_PATH/grants" 201 '{"scope":"drive:read"}' "$ACCESS"
 
 api post "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" \
   '{"label":"MOMO-459 OpenAPI gate"}' "$ACCESS"
+# Hard stop by design: every later agent-authenticated sample needs this token,
+# so continuing would emit a wall of cascading 401s instead of one root cause.
 [ "$RESPONSE_STATUS" = "201" ] || {
   echo "[openapi] FAIL agent credential issue: expected 201, got $RESPONSE_STATUS" >&2
   exit 1
@@ -829,6 +879,15 @@ sample work-control-create post "/v1/workspaces/{workspaceId}/work-controls" \
 WORK_CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id')"
 guard_jq '.workControl.kind == "spawn" and .workControl.status == "dispatched"' \
   "whitelisted spawn dispatches immediately"
+# A signed host may only materialise the session the dispatched spawn control
+# describes: WorkSessionRoutes.requireDispatchedSpawnControl matches on
+# payload->>'tool' AND payload->>'label'. Derive both from the control the
+# server actually stored instead of restating literals — the previous literal
+# pair drifted apart (control "OpenAPI control" vs session "OpenAPI remote
+# PTY") and the create returned 409 "spawn control is not dispatchable by this
+# host", blocking the whole gate (MOMO-654).
+WORK_CONTROL_TOOL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.payload.tool')"
+WORK_CONTROL_LABEL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.payload.label')"
 
 REMOTE_PTY_ID="openapi-pty-$RUN_EPOCH"
 REMOTE_ATTACH_ENDPOINT="wss://workd.momo.test/v1/terminal"
@@ -839,8 +898,13 @@ work_host_signed_sample work-session-remote-create post \
   "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
       --arg control "$WORK_CONTROL_ID" --arg pty "$REMOTE_PTY_ID" \
       --arg endpoint "$REMOTE_ATTACH_ENDPOINT" \
-      '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI remote PTY",
+      --arg tool "$WORK_CONTROL_TOOL" --arg label "$WORK_CONTROL_LABEL" \
+      '{channelId:$ch,hostId:$host,tool:$tool,label:$label,
         controlId:$control,ptyId:$pty,attachEndpoint:$endpoint}')"
+guard_jq --arg label "$WORK_CONTROL_LABEL" --arg host "$(printf '%s' "$WORK_HOST_ID" | tr '[:upper:]' '[:lower:]')" \
+  '.workSession.label == $label and (.workSession.hostId | ascii_downcase) == $host and
+   .workSession.status == "running"' \
+  "dispatched spawn control materialises the host-signed remote session"
 WORK_CONTROL_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
 
 sample terminal-attach-issue post \
@@ -1000,10 +1064,20 @@ echo "[openapi] validating $(jq '.samples | length' "$TMP_DIR/manifest.json") sa
   --allowlist "$REPO_ROOT/docs/api/openapi.undocumented-allowlist.json" \
   >"$TMP_DIR/server-routes.json"
 
+# The shape/coverage check runs even when assertions already failed: with
+# fail-fast it never ran at all, so drift in the surviving samples stayed
+# invisible. Its exit code is captured, not propagated by set -e, so the run
+# can still print the combined summary below.
+SHAPE_RC=0
 "$PYTHON_BIN" "$SCRIPT_DIR/openapi_shape_check.py" \
   --spec "$SPEC_JSON" \
   --manifest "$TMP_DIR/manifest.json" \
   --server-route-manifest "$TMP_DIR/server-routes.json" \
-  --require-operation-coverage
+  --require-operation-coverage || SHAPE_RC=$?
+
+if [ "$FAILURE_COUNT" -gt 0 ] || [ "$SHAPE_RC" -ne 0 ]; then
+  echo "[openapi] FAIL OpenAPI contract drift gate — $FAILURE_COUNT assertion failure(s), shape check rc=$SHAPE_RC (evidence: $TMP_DIR)" >&2
+  exit 1
+fi
 
 echo "[openapi] PASS OpenAPI contract drift gate (evidence: $TMP_DIR)"

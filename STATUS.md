@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## MOMO-654 OpenAPI 계약 게이트 remote-create 409 해소 + 완주 구조 (#865, 2026-07-29)
+
+- `work-session-remote-create` 409(`spawn control is not dispatchable by this host`)는 서버 회귀가 아니라 게이트 픽스처 결함이다. `requireDispatchedSpawnControl`은 `wc.payload->>'tool'`과 `wc.payload->>'label'` 동시 일치를 요구하는데(#526에서 도입), #545가 이 샘플을 host 서명 생성으로 바꾸면서 세션 label만 `OpenAPI remote PTY`로 두고 control payload는 `OpenAPI control`로 남겨 두 리터럴이 갈라졌다. 즉 #545 이후 이 샘플은 통과한 적이 없으며 base에서도 동일하게 재현된다(JOURNAL 2026-07-27 기록과 일치).
+- 수리는 SQL 지름길 없이 실제 REST 경로만 쓴다. 세션 생성 body의 tool/label을 `work-control-create` 201 응답이 돌려준 `.workControl.payload`에서 유도해 리터럴 중복을 제거했고, 생성 결과를 label·hostId·status로 단정하는 guard를 추가했다.
+- 샘플 하나가 나머지 전체를 막던 fail-fast 구조를 실패 누적형으로 바꿨다. 상태/shape 단정 실패는 기록 후 계속 진행하고(잘못된 body는 manifest에 넣지 않아 역방향 커버리지에서 미샘플로 드러난다), 후속 요청이 의존하는 id 추출 실패만 즉시 중단하되 EXIT trap이 그때까지 누적된 실패를 항상 출력한다. `OPENAPI_GATE_FAIL_FAST=1`로 기존 동작을, `OPENAPI_GATE_MAX_FAILURES`(기본 30)로 연쇄 잡음 상한을 제어한다. 최종 shape/커버리지 검사는 단정 실패가 있어도 실행된다.
+- 서버 코드 변경 없음(`swift build` green). 스크립트는 `bash -n`·shellcheck에서 base 대비 새 경고 분류 없음(추가된 SC2016 1건은 jq `--arg` 관용구). 게이트 자체는 Docker 스택이 필요하므로 `runtime-unverified` — 오케스트레이터가 `scripts/verify_openapi_contract.sh` 완주 PASS를 확인해야 한다.
+
 ## MOMO-667 T3 수명주기 정본화 (#891, 2026-07-29)
 
 - Migration 053이 정산을 이유 보존형 `t3_terminate` 한 문으로 모으고 직접 `settled_at` 변경과 비실재 cloud-host 전이를 이름 있는 트리거 예외로 봉인한다. 기존 `settle_t3_work_session`은 설치 DB·운영 도구 호환 shim만 유지하며 런타임·repair는 명시 reason 경유로 이행했다.
