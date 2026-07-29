@@ -7,6 +7,7 @@ import {
   canChangeObservation,
   classifyClose,
   classifyGrantFailure,
+  classifyHostFrame,
   connectFrame,
   cspBlockedHost,
   HOST_CONNECT_TIMEOUT_MS,
@@ -468,5 +469,56 @@ describe("link notes", () => {
     expect(OBSERVER_LINK_NOTE.offline).toContain("다시 연결할 수 있습니다");
     // Unverified: the honest claim is that nobody knows yet.
     expect(OBSERVER_LINK_NOTE.unverified).toContain("다음 출력이 도착해야");
+  });
+});
+
+describe("host frames", () => {
+  // Byte for byte what the daemon encodes (PTYReplayEndFrame /
+  // PTYReplayOverflowFrame, JSONEncoder with .sortedKeys).
+  const REPLAY_END = '{"byte_offset":8317,"type":"replay_end"}';
+  const REPLAY_OVERFLOW = '{"byte_offset":99,"type":"replay_overflow"}';
+
+  it("recognizes the two markers the host sends as text frames", () => {
+    expect(classifyHostFrame(REPLAY_END)).toEqual({
+      kind: "replay_end",
+      byteOffset: 8317,
+    });
+    expect(classifyHostFrame(REPLAY_OVERFLOW)).toEqual({
+      kind: "replay_overflow",
+      byteOffset: 99,
+    });
+  });
+
+  it("treats everything else as output, including JSON a program printed", () => {
+    // The failure this guards: a marker written into xterm shows the reader
+    // JSON at the exact moment the panel should look like it caught up. The
+    // mirror failure is worse, so the bar for claiming "marker" is the exact
+    // shape and nothing looser.
+    for (const text of [
+      "npm ERR! code E404\r\n",
+      '{"type":"replay_end"}', // no offset: not the frame this client knows
+      '{"byte_offset":"8317","type":"replay_end"}',
+      '{"byte_offset":1,"type":"replay_start"}',
+      '{"ok":true}',
+      "{ not json",
+      "",
+      // A program printing the marker's own text is still program output: it
+      // arrived as terminal bytes, not as a control frame, and this classifier
+      // only ever sees text frames.
+      `$ echo '${REPLAY_END}'\r\n`,
+    ]) {
+      expect(classifyHostFrame(text)).toEqual({ kind: "output" });
+    }
+  });
+
+  it("is refused by the panel before xterm ever sees it", () => {
+    // Guard rope: the write path must consult the classifier. A future edit that
+    // drops the check restores the JSON-in-scrollback bug silently otherwise.
+    const source = readFileSync(
+      new URL("./ObserverTerminal.tsx", import.meta.url),
+      "utf8"
+    );
+    expect(source).toContain("classifyHostFrame(data)");
+    expect(source).toMatch(/if \(frame\.kind !== "output"\) return;/);
   });
 });

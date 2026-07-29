@@ -1,6 +1,12 @@
 import Foundation
 import MomoACPHost
 
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
+
 enum WorkTransport: String, Sendable, Equatable {
     case pty
     case acp
@@ -79,6 +85,12 @@ struct WorkdConfig: Sendable {
     let allowProfileLegacyEnvironment: Bool
     let registrationTokenURL: URL?
     var registrationToken: String?
+    /// MOMO-655. Nil means this host serves no direct terminal attach: no
+    /// listener is bound, no `attach_endpoint` is published, and every session
+    /// it starts reports `remote_attach_available: false` exactly as before.
+    /// Attach is opt-in because it is the one thing a work host does that a
+    /// browser on someone else's machine dials directly.
+    let terminalAttach: TerminalAttachConfig?
     /// WH-1 (ADR-0114 증보1 B): the sidecar-driven engine this host launches.
     /// Boot default is opencode; a DB-backed server setting (migration 040) wins
     /// over env at dispatch time via `resolveEngine`.
@@ -170,6 +182,8 @@ struct WorkdConfig: Sendable {
             try SecureLocalStore.readOptionalSecret(at: $0)
         } ?? directRegistrationToken
 
+        let terminalAttach = try terminalAttachConfig(environment: environment)
+
         return WorkdConfig(
             serverURL: serverURL,
             workspaceID: workspaceID,
@@ -188,7 +202,49 @@ struct WorkdConfig: Sendable {
             allowProfileLegacyEnvironment: allowProfileLegacyEnvironment,
             registrationTokenURL: registrationTokenURL,
             registrationToken: registrationToken,
+            terminalAttach: terminalAttach,
             engine: engine
+        )
+    }
+
+    /// MOMO-655 attach listener configuration.
+    ///
+    /// `MOMO_WORKD_ATTACH_PUBLIC_URL` is the switch: without it there is no
+    /// listener at all. It is the address CLIENTS dial, which on any real
+    /// deployment is a TLS reverse proxy and not this socket — which is why the
+    /// bind address defaults to loopback. Setting a non-loopback bind is
+    /// allowed (a proxy in another container needs it) but it is the operator
+    /// saying so, not a default.
+    static func terminalAttachConfig(
+        environment: [String: String]
+    ) throws -> TerminalAttachConfig? {
+        guard let rawEndpoint = nonempty(environment["MOMO_WORKD_ATTACH_PUBLIC_URL"]) else {
+            return nil
+        }
+        guard let publicEndpoint = TerminalAttachConfig.validatedPublicEndpoint(rawEndpoint) else {
+            throw WorkdFailure.configuration
+        }
+        let bindAddress = nonempty(environment["MOMO_WORKD_ATTACH_BIND"])
+            ?? TerminalAttachConfig.defaultBindAddress
+        var parsedAddress = in_addr()
+        guard inet_pton(AF_INET, bindAddress, &parsedAddress) == 1 else {
+            throw WorkdFailure.configuration
+        }
+        let port = try boundedInteger(
+            environment["MOMO_WORKD_ATTACH_PORT"],
+            defaultValue: Int(TerminalAttachConfig.defaultPort),
+            range: 1...65_535
+        )
+        let maxConnections = try boundedInteger(
+            environment["MOMO_WORKD_ATTACH_MAX_CONNECTIONS"],
+            defaultValue: TerminalAttachConfig.defaultMaxConnections,
+            range: 1...512
+        )
+        return TerminalAttachConfig(
+            bindAddress: bindAddress,
+            port: UInt16(port),
+            publicEndpoint: publicEndpoint,
+            maxConnections: maxConnections
         )
     }
 

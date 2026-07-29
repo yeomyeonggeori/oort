@@ -1,5 +1,14 @@
 # momo 진행 현황
 
+## MOMO-655 데몬 public WSS attach 어댑터 + create ptyId/attachEndpoint 배선 (#869, 2026-07-29)
+
+- #857이 남긴 seam(셸 래핑·256KiB 링·`PTYReplayBuffer.connect()`의 retained→`replayEnd`→live 순서)에 **inbound 리스너**를 붙였다. `momo-workd`는 `MOMO_WORKD_ATTACH_PUBLIC_URL`이 설정된 경우에만 RFC 6455 서버를 열고, 미설정이면 소켓 자체를 열지 않는다(기존 동작 무변경). 서버·웹·mac 계약은 전부 기존 것을 그대로 소비했다 — 새 인증 문법·새 프레임 어휘·서버 raw-byte 경유는 없다(ADR-0125 D10).
+- **capability 판정은 데몬이 하지 않는다.** 업그레이드 요청의 bearer(mac=`Authorization: Bearer`, 브라우저=서브프로토콜 `momo.terminal.v1, <token>`)를 문법만 검사한 뒤 호스트 서명으로 `POST .../work-hosts/{host}/terminal-attach/validate`를 호출하고, 만료·세션 종료·호스트 revoke·채널 멤버십·controller/observer 등급을 그 한 번의 서버 답에서 받는다. observer의 `send_stdin`은 UI가 아니라 이 층에서 1008로 끊긴다.
+- replay 마커가 wire를 그대로 탄다: PTY 바이트는 **binary** 프레임, `replay_end`/`replay_overflow`는 `PTYReplayEndFrame`/`PTYReplayOverflowFrame`이 고정한 JSON **text** 프레임이다. 웹 `ObserverTerminal`은 text 프레임을 xterm에 쓰지 않고 마커로 소비한다(이전 코드였다면 화면에 JSON이 그대로 찍혔을 경로다).
+- create 응답 배선은 **PATCH 한 갈래**로 통일했다(신규 라우트 0개). 서버가 세션 id를 발급하므로 `pty_id = session id`인 호스트는 create 시점에 바인딩을 알 수 없고, tier fallback resume은 애초에 create를 호출하지 않아 재개 세션은 영구히 attach 불가였다. `PATCH /work-sessions/{id}`에 work-host 서명 전용 `ptyId`/`attachEndpoint` 분기를 두어 두 경로를 함께 닫았다 — running/idle에서만, 자기 host 세션에만, 빈 바인딩에만 쓰고 동일 쌍 재전송은 멱등, 다른 쌍은 409.
+- TLS는 데몬이 하지 않는다(self-host 현실). 리스너는 평문 TCP이고 기본 바인드는 `127.0.0.1`이라, 프록시 미구성은 "LAN 평문 노출"이 아니라 "닿지 않음"으로 실패한다. 리버스 프록시 구성·재등록 절차(capability 갱신 REST가 없어 `terminal_attach` 플래그는 재등록 필요)·알려진 한계(capability는 접속 시 1회 검증, `resize`/`kill` 무시, IPv4 바인드)는 `docs/runbooks/workd-terminal-attach.md`.
+- WorkHostDaemon 53 tests(3 skip, 기준 38에서 +15) green. 그중 하나는 실제 루프백 소켓·실제 PTY·실제 핸드셰이크로 **직전 출력(binary) → `replay_end`(text) → controller stdin → 라이브 출력**을 왕복 단정한다. server 357 tests(+1: 빈 host `wss:///path` 거절 — Foundation이 nil이 아닌 빈 문자열을 돌려줘 기존 `host != nil`만으로는 통과했다)·server/daemon `swift build`·웹 typecheck+vitest green. 데몬↔서버↔브라우저 xterm 실왕복은 Docker 스택이 필요해 `runtime-unverified` — PR 본문의 절차대로 오케스트레이터가 확인해야 한다.
+
 ## MOMO-668 T3 T-4 수렴 — deadline 필수화·국면별 수렴 규칙·낡은 응답 폐기 (#892, 2026-07-29)
 
 - **deadline을 구조로 만들었다.** Migration 057이 `lifecycle_operation_deadline_at`을 추가하고, BEFORE 트리거가 누락 시 kind별 정본 상한(pause/resume 120s·destroy 300s)을 채우며 CHECK가 `*ing` + deadline NULL 조합을 아예 표현 불가로 만든다. 즉 "미래의 어떤 경로가 deadline을 빼먹으면?"이라는 질문이 성립하지 않는다 — 2차 리뷰의 영구 교착은 규약이 아니라 스키마로 닫혔다. 기존 `*ing` 행은 자기가 이미 기록한 `started_at` 기준으로 소급되어(지금 기준이 아니라) 오래 멈춰 있던 행은 즉시 만기다. **052/053은 손대지 않았다** — `t3_terminate`가 deadline 없이 `destroy_pending`을 써도 트리거가 채우므로 봉인된 정산 단일 문을 다시 열 필요가 없었다.
