@@ -860,7 +860,7 @@ actor MockWorkHostAPI: WorkHostAPI {
     private var liveSessionFailures: Int
     private var reportFailures: Int
     private var bindFailures: Int
-    private let attachGrant: TerminalAttachGrant?
+    private var attachGrant: TerminalAttachGrant?
     private(set) var events: [String] = []
 
     init(
@@ -960,10 +960,24 @@ actor MockWorkHostAPI: WorkHostAPI {
     }
     func validateTerminalAttach(
         hostID: UUID,
-        capabilityToken: String
+        capabilityToken: String,
+        stream: Bool
     ) async throws -> TerminalAttachGrant {
-        events.append("validate:\(capabilityToken)")
+        events.append("validate:\(stream ? "stream:" : "")\(capabilityToken)")
         guard let grant = attachGrant else { throw WorkdFailure.authentication }
         return grant
+    }
+
+    /// MOMO-674: what a revoke looks like from this daemon's side — the same
+    /// signed call it already makes starts answering "no".
+    func revokeAttachGrant() {
+        attachGrant = nil
+    }
+
+    /// MOMO-674: the server answering about a DIFFERENT pty under an open
+    /// stream, which nothing produces today and which the daemon must still
+    /// refuse to keep serving through.
+    func replaceAttachGrant(with grant: TerminalAttachGrant) {
+        attachGrant = grant
     }
 }

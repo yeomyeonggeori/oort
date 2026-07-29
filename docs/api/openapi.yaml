@@ -1813,8 +1813,10 @@ paths:
         every call, so expiry, session end, and host revoke take effect
         immediately. The returned mode is authoritative: observer connections
         may receive output but the host must reject send_stdin, resize, and kill.
-        This endpoint returns binding metadata only: terminal
-        bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
+        The host also calls this on a timer for every stream it is already
+        serving (`stream: true`), which is what makes a revoke reach a socket
+        that is already open. This endpoint returns binding metadata only:
+        terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
       security:
         - workHostAuth: []
       parameters:
@@ -6911,6 +6913,18 @@ components:
         capability_token:
           type: string
           description: Opaque grant presented by the direct client to its target host.
+        stream:
+          type: boolean
+          default: false
+          description: >
+            True when the host is re-checking a stream it has already accepted
+            rather than admitting a new client. It relaxes exactly one clause,
+            the capability expiry, because that TTL bounds the mint-to-dial
+            window and the host closed that window under a full validation.
+            Every authorization clause still applies on every call, so an open
+            terminal is cut within one revalidation period when the session
+            ends, the host is revoked, observation closes, the grantee leaves
+            the channel, or the grantee is deactivated.
 
     TerminalAttachValidationResponse:
       type: object

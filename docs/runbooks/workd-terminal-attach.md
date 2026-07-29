@@ -16,6 +16,7 @@ momo 서버는 capability 발급과 검증만 한다.
 | `MOMO_WORKD_ATTACH_BIND` | `127.0.0.1` | 리스너 바인드 주소(IPv4) |
 | `MOMO_WORKD_ATTACH_PORT` | `28650` | 리스너 포트 |
 | `MOMO_WORKD_ATTACH_MAX_CONNECTIONS` | `32` | 동시 attach 소켓 상한. 초과분은 즉시 거절 |
+| `MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS` | `30000` | **열려 있는** 스트림이 서버에 권한을 다시 묻는 주기. 범위 1000~3600000 |
 
 ## TLS는 데몬이 하지 않는다 — 리버스 프록시가 한다
 
@@ -86,13 +87,43 @@ MOMO_WORKD_REGISTRATION_TOKEN=... \
    **보관된 바이트(binary 프레임) → `replay_end`(text 프레임) → 라이브(binary)**.
 
 `replay_end` / `replay_overflow`는 터미널 바이트가 아니라 **text 제어 프레임**이다.
-클라이언트는 이걸 xterm에 쓰면 안 된다(웹은 `ObserverTerminal`에서 걸러낸다).
+클라이언트는 이걸 xterm에 쓰면 안 된다(웹은 `ObserverTerminal`, mac은
+`MomoRemoteTerminalSession`에서 걸러낸다).
+
+## 스트림이 열린 뒤의 권한 회수 (MOMO-674)
+
+`capability_token`의 60초 TTL은 **발급~다이얼 창**이다. 스트림 수명이 아니다.
+그래서 데몬은 열려 있는 소켓마다 같은 서명 호출을 주기적으로 한 번 더 한다:
+
+```
+POST .../work-hosts/{host}/terminal-attach/validate
+{"capability_token": "...", "stream": true}
+```
+
+`stream: true`는 서버 쪽에서 **만료 절만** 건너뛴다. 세션 running/idle · 호스트
+미revoke · grantee가 살아 있는 사람 · observer면 채널 멤버십과
+`observation = 'open'` — 권한을 정하는 절은 매 호출에 그대로 걸린다. 따라서
+소유자가 "소유자만 보기"로 닫거나 세션이 끝나거나 호스트가 revoke되면, **이미
+열려 있던 스트림도 한 주기 안에** 1008 `capability revoked`로 끊긴다.
+
+주기는 `MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS`(기본 30초)이며 TTL과 무관한
+별개의 정책값이다. 이 주기가 곧 **회수 지연 상한**이다: 30초로 두면 권한이
+사라진 관전자가 최대 30초 더 본다.
+
+재검증은 스트림을 건드리지 않는다 — 별도 태스크의 REST 왕복이고, 성공하는 동안
+바이트는 그대로 흐른다. 끊는 것은 거절뿐이다.
+
+**기각한 대안: 서버→데몬 revoke 신호.** 서버가 취소 시점에 해당 호스트로
+"이 capability를 끊어라"를 밀어 주는 쪽이 지연은 0에 가깝다. 그러나 그러려면
+서버에 outbound 호스트 채널이 새로 필요하다 — 데몬은 지금 **outbound 폴링만**
+하고(ADR-0125 D2) inbound 인증 표면은 attach 리스너 하나뿐인데, 여기에 서버발
+신호를 받으려면 (a) 새 REST/스트림 라우트 + 스펙 + 샘플, (b) 그 채널의 인증·재시도·
+중복 억제, (c) 신호를 놓친 데몬을 위한 **결국 같은 주기 재검증** 폴백이 함께 온다.
+(c)가 필요한 이상 큰 쪽은 작은 쪽의 상위집합이고, 회수 지연을 30초에서 0으로
+줄이는 대가로 얻는 표면이 그만큼 크지 않다. 30초가 부족한 배치는 env로 낮춘다.
 
 ## 알아 둘 한계
 
-- **capability는 접속 시 1회만 검증한다.** 60초 TTL은 발급~다이얼 사이의 창을
-  좁히는 값이지, 스트림 수명이 아니다. 스트림이 열린 뒤의 회수는 클라이언트 쪽
-  규칙(웹 `observationStillPermits`)에 의존한다. 서버발 강제 절단은 후속 과제.
 - **`resize` / `kill` 프레임은 무시한다.** `HostPTYProcess`에 winsize API가 없고,
   kill은 이미 `work_control` 원장을 지나는 감사 경로가 있다. 호스트 PTY 폭은
   80칼럼 고정이며 웹은 그 사실을 `HOST_COLUMNS`로 문서화하고 있다.
