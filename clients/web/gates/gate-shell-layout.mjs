@@ -593,6 +593,17 @@ async function go(page, hash) {
  * remove mutation.isPending from its effect dependencies. This gate's catalog
  * answers immediately while the detail refetch waits 160ms; the revoke-focus
  * assertion then times out with document.activeElement === document.body.
+ *
+ * Red proof for the blocked-decision legibility: put the 0선택 branch back on
+ * `opacity-50` instead of the quiet accent surface, rebuild, run this gate. The
+ * 선택 0개 assertion fails at all three sizes in BOTH schemes with
+ * {"opacity":"0.5","dimmed":true}, which is exactly what shipped before
+ * MOMO-642 R1 H-1 and what the label-text-only version of this check could not
+ * see. The `contrast` field stays high there (5.72 light / 8.94 dark) because
+ * getComputedStyle reports the un-composited pair: element opacity is a
+ * separate multiplier the browser applies after, which is why the assertion
+ * reads opacity and the token pair together rather than the number alone. The
+ * composited truth behind that 0.5 is 2.20:1 light / 3.21:1 dark.
  */
 async function assertPluginScopeConsent(page, size) {
   await go(page, "/settings?section=plugins");
@@ -679,10 +690,58 @@ async function assertPluginScopeConsent(page, size) {
   for (let index = 0; index < scopeCount; index += 1) {
     await scopeCheckboxes.nth(index).click();
   }
+  // 0선택 상태에서 "왜 못 하는가"를 말하는 문장은 이 라벨 하나뿐이다. 그것이
+  // 읽히는지까지 재지 않으면, 이 단정은 문장이 opacity-50으로 2.20:1까지
+  // 내려가도 통과한다(MOMO-642 R1 H-1이 실제로 그렇게 통과했다). 그래서 여기서
+  // 읽는 것은 실제 합성 결과다: 요소 opacity가 1이고, 계산된 전경/배경 쌍의
+  // WCAG 대비가 AA를 넘어야 한다. 토큰 쌍 자체(--ink x --accent-soft)는
+  // tokens.contrast.test.ts가 두 스킴에서 재고, 이 게이트는 그 쌍이 실제로 이
+  // 버튼에 도달했는지를 잰다.
+  //
+  // 측정 전 색 전이가 끝나기를 기다린다. 버튼은 transition-colors를 갖고 있고,
+  // getComputedStyle은 전이 중이면 **보간된 현재 프레임**을 돌려준다. 마지막
+  // 체크를 해제한 직후에 재면 아직 --accent에 가까운 중간색이 나와서, 이 단정은
+  // 실제 색이 무엇이든 클릭 직후의 잔상을 재게 된다(실측: 해제 직후 rgb(240 168
+  // 80) = --accent). 기본 전이는 150ms이므로 그 두 배 넘게 기다린다.
+  await page.waitForTimeout(400);
+  const blockedConfirm = await page.evaluate(`(() => {
+    const button = document.querySelector('[data-testid="plugin-scope-confirm"]');
+    if (!button) return { missing: true };
+    const style = getComputedStyle(button);
+    const parse = (value) => value
+      .slice(value.indexOf("(") + 1, value.indexOf(")"))
+      .split(",")
+      .slice(0, 3)
+      .map((part) => Number(part.trim()));
+    const luminance = (channels) => {
+      const [r, g, b] = channels.map((value) => {
+        const s = value / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const fg = luminance(parse(style.color));
+    const bg = luminance(parse(style.backgroundColor));
+    const [hi, lo] = fg > bg ? [fg, bg] : [bg, fg];
+    return {
+      label: button.textContent,
+      ariaDisabled: button.getAttribute("aria-disabled"),
+      opacity: style.opacity,
+      dimmed: button.classList.contains("opacity-50"),
+      color: style.color,
+      background: style.backgroundColor,
+      contrast: Number(((hi + 0.05) / (lo + 0.05)).toFixed(2)),
+    };
+  })()`);
   check(
-    `${size.name} 선택 0개면 고정 액션이 필요한 다음 행동을 말한다`,
-    (await confirm.textContent())?.includes("권한을 하나 이상 선택") === true &&
-      await confirm.getAttribute("aria-disabled") === "true"
+    `${size.name} 선택 0개면 고정 액션이 필요한 다음 행동을 읽히게 말한다`,
+    blockedConfirm.missing !== true &&
+      blockedConfirm.label?.includes("권한을 하나 이상 선택") === true &&
+      blockedConfirm.ariaDisabled === "true" &&
+      blockedConfirm.dimmed === false &&
+      blockedConfirm.opacity === "1" &&
+      blockedConfirm.contrast >= 4.5,
+    JSON.stringify(blockedConfirm)
   );
   for (let index = 0; index < scopeCount; index += 1) {
     await scopeCheckboxes.nth(index).click();

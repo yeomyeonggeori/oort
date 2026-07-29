@@ -1119,16 +1119,37 @@ function PluginScopeConsentDialog({
             size="sm"
             aria-disabled={!pending && !hasSelection ? true : undefined}
             aria-busy={pending || undefined}
-            // Selection absence is truly unavailable and may be dimmed. A
-            // request in flight remains full contrast because its spinner and
-            // "변경 중" label are the only progress signal.
+            // 막힌 이유를 말하는 문장은 이 라벨 하나뿐이다(MOMO-642 6이 중복
+            // 힌트 <p>와 aria-describedby를 지운 뒤로). 그런데 그것을 흐리게 만든
+            // 것이 opacity-50이었다: 채움과 라벨이 함께 50%로 합성돼 요구 문장이
+            // 라이트 2.20:1 / 다크 3.21:1까지 내려갔고, 이 PR 이전 같은 요구가
+            // 서 있던 text-ink-muted 본문(5.7:1)보다도 못 읽혔다. WCAG는 비활성
+            // 컨트롤을 면제하지만, 이 클라이언트가 스스로 지키는 기준 아래로
+            // 내려간 유일한 문장이 하필 "왜 못 하는가"인 것은 설계 결함이다
+            // (MOMO-642 R1 H-1).
+            //
+            // 그래서 흐리게 하는 대신 **강조를 거둔다**: 결정이 불가능한 동안
+            // 버튼은 주 액션의 채움을 잃고 조용한 액센트 표면에 앉는다. 자리와
+            // 색 계열은 그대로여서 여전히 "결정의 자리"로 읽히고, 라벨은 13.17:1
+            // (라이트) / 12.45:1(다크)로 올라온다. 두 값은 tokens.contrast가
+            // 이미 재고 있는 --ink x --accent-soft 쌍이다 — 합성된 불투명도는
+            // 어떤 테스트도 볼 수 없지만 이 쌍은 회귀하면 잡힌다.
+            //
+            // announce는 늘리지 않는다: 요구는 여전히 라벨에만 있고, 개수는
+            // 위의 단 하나뿐인 live region에만 있다.
             //
             // min-w-action pins the footer geometry. This label states the
             // decision state, so it changed width by 24px between "권한을 하나
             // 이상 선택" and "선택한 권한 허용" and dragged 취소 sideways under
             // the pointer on every toggle of the last checkbox (MOMO-642 2).
             // The minimum clears the longest label, so only the text moves.
-            className={cn("min-w-action", !hasSelection && "opacity-50")}
+            //
+            // 진행 중은 여전히 풀 컨트라스트다: 스피너와 "변경 중" 라벨이 유일한
+            // 진행 신호다.
+            className={cn(
+              "min-w-action",
+              !hasSelection && "bg-accent-soft text-ink hover:opacity-100"
+            )}
             data-testid="plugin-scope-confirm"
             onClick={() => {
               if (!canConfirm) return;
