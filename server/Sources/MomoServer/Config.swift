@@ -65,9 +65,11 @@ struct Config: Sendable {
     // ---- Hermes gateway native platform adapter (MOMO-325) ----
     var agentGateway: AgentGatewayConfig
 
-    // ---- momo Cloud / E2B provisioner (ADR-0136) ----
-    // The operator key is optional at process boot. Only T3 routes fail closed
-    // with 503 when it is absent; T1/T2 routes do not depend on this config.
+    // ---- momo Cloud T3 provider adapter (ADR-0136 + ADR-0142) ----
+    // `MOMO_T3_PROVIDER` names an adapter-registry identifier and each managed
+    // provider reads its own `MOMO_T3_PROVIDER_<ID>_*` namespace. Operator
+    // credentials are optional at process boot; only T3 routes fail closed with
+    // 503 when they are absent, and T1/T2 routes never read this config.
     var cloudProvisioner: CloudProvisionerConfig
 
     /// Read an env var, falling back to `default`.

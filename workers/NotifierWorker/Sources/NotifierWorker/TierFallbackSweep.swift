@@ -22,6 +22,15 @@ extension NotifierService {
         let observation: String
         let exitCode: Int?
         let cloudHostID: UUID?
+        /// MOMO-656: true when the owning daemon reported, under its own
+        /// signature, that it cannot revive this session (`host_lost_at`).
+        /// The transition is identical either way — only the audit provenance
+        /// differs, so no new lifecycle state or end_reason is introduced.
+        let hostReportedLost: Bool
+
+        var orphanSource: String {
+            hostReportedLost ? "host_reconciliation" : "host_offline_sweep"
+        }
     }
 
     struct IdleTimeoutCandidate: Sendable {
@@ -49,7 +58,8 @@ extension NotifierService {
                                FROM work_cloud_host ch
                               WHERE ch.workspace_id = ws.workspace_id
                                 AND ch.host_id = ws.host_id
-                           ) AS cloud_host_id
+                           ) AS cloud_host_id,
+                           ws.host_lost_at IS NOT NULL AS host_reported_lost
                       FROM work_session ws
                       JOIN work_host h
                         ON h.id = ws.host_id
@@ -71,9 +81,16 @@ extension NotifierService {
                             AND ch.host_id = ws.host_id
                             AND ch.state IN ('pausing', 'paused', 'resuming')
                        )
-                       AND COALESCE(h.last_seen_at, h.created_at)
-                             < clock_timestamp()
-                               - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                       AND (
+                         -- MOMO-656: a daemon that restarts inside the grace
+                         -- window keeps last_seen_at fresh, so heartbeat age
+                         -- alone can never see its lost PTYs. Its own signed
+                         -- report is the second, equally authoritative signal.
+                         ws.host_lost_at IS NOT NULL
+                         OR COALESCE(h.last_seen_at, h.created_at)
+                              < clock_timestamp()
+                                - make_interval(secs => \(config.hostOfflineGraceSeconds))
+                       )
                      ORDER BY COALESCE(h.last_seen_at, h.created_at), ws.id
                      LIMIT \(config.claimBatchSize)
                     """,
@@ -82,7 +99,7 @@ extension NotifierService {
                 return try rows.map { row -> StaleWorkSession in
                     let value = try row.decode(
                         (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                         String, String?, Int64, String, Int?, UUID?).self
+                         String, String?, Int64, String, Int?, UUID?, Bool).self
                     )
                     return StaleWorkSession(
                         id: value.0,
@@ -98,7 +115,8 @@ extension NotifierService {
                         rootMessageSeq: value.10,
                         observation: value.11,
                         exitCode: value.12,
-                        cloudHostID: value.13
+                        cloudHostID: value.13,
+                        hostReportedLost: value.14
                     )
                 }
             }
@@ -161,7 +179,8 @@ extension NotifierService {
                            FROM work_cloud_host ch
                           WHERE ch.workspace_id = ws.workspace_id
                             AND ch.host_id = ws.host_id
-                       ) AS cloud_host_id
+                       ) AS cloud_host_id,
+                       false AS host_reported_lost
                   FROM work_session ws
                   JOIN workspace w ON w.id = ws.workspace_id
                   JOIN work_host h
@@ -180,6 +199,10 @@ extension NotifierService {
                     END AS idle_timeout_seconds
                   ) timeout
                  WHERE ws.status = 'idle'
+                   -- MOMO-656: host loss is always processed before ADR-0139
+                   -- idle timeout, so a session the host reported lost never
+                   -- takes the terminal idle_timeout branch instead.
+                   AND ws.host_lost_at IS NULL
                    AND (
                      COALESCE(h.last_seen_at, h.created_at)
                        >= clock_timestamp()
@@ -202,7 +225,7 @@ extension NotifierService {
             return try rows.map { row -> IdleTimeoutCandidate in
                 let value = try row.decode(
                     (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                     String, String?, Int64, String, Int?, Int, UUID?).self
+                     String, String?, Int64, String, Int?, Int, UUID?, Bool).self
                 )
                 return IdleTimeoutCandidate(
                     session: StaleWorkSession(
@@ -219,7 +242,8 @@ extension NotifierService {
                         rootMessageSeq: value.10,
                         observation: value.11,
                         exitCode: value.12,
-                        cloudHostID: value.14
+                        cloudHostID: value.14,
+                        hostReportedLost: value.15
                     ),
                     timeoutSeconds: value.13
                 )
@@ -304,6 +328,7 @@ extension NotifierService {
                AND ws.workspace_id = \(session.workspaceID)
                AND ws.host_id = \(session.hostID)
                AND ws.status = 'idle'
+               AND ws.host_lost_at IS NULL
                AND ws.idle_at <= clock_timestamp()
                      - make_interval(secs => \(timeoutSeconds))
                AND (
@@ -429,6 +454,7 @@ extension NotifierService {
                 ? """
                   UPDATE work_session
                      SET status = 'ended', idle_at = NULL,
+                         host_lost_at = NULL,
                          ended_at = clock_timestamp(), end_reason = 'orphaned'
                    WHERE id = \(session.id)
                      AND workspace_id = \(session.workspaceID)
@@ -459,22 +485,29 @@ extension NotifierService {
                           AND ch.host_id = work_session.host_id
                           AND ch.state IN ('pausing', 'paused', 'resuming')
                      )
-                     AND EXISTS (
-                       SELECT 1
-                         FROM work_host h
-                        WHERE h.id = work_session.host_id
-                          AND h.workspace_id = work_session.workspace_id
-                          AND COALESCE(h.last_seen_at, h.created_at)
-                                < clock_timestamp()
-                                  - make_interval(
-                                      secs => \(config.hostOfflineGraceSeconds)
-                                    )
+                     AND (
+                       -- MOMO-656: re-check the same disjunction the candidate
+                       -- query used. Losing the race means the host came back
+                       -- AND the marker was cleared, not just one of the two.
+                       work_session.host_lost_at IS NOT NULL
+                       OR EXISTS (
+                         SELECT 1
+                           FROM work_host h
+                          WHERE h.id = work_session.host_id
+                            AND h.workspace_id = work_session.workspace_id
+                            AND COALESCE(h.last_seen_at, h.created_at)
+                                  < clock_timestamp()
+                                    - make_interval(
+                                        secs => \(config.hostOfflineGraceSeconds)
+                                      )
+                       )
                      )
                   RETURNING COALESCE(ended_at, clock_timestamp())
                   """
                 : """
                   UPDATE work_session
-                     SET status = 'orphaned', idle_at = NULL
+                     SET status = 'orphaned', idle_at = NULL,
+                         host_lost_at = NULL
                    WHERE id = \(session.id)
                      AND workspace_id = \(session.workspaceID)
                      AND host_id = \(session.hostID)
@@ -504,16 +537,22 @@ extension NotifierService {
                           AND ch.host_id = work_session.host_id
                           AND ch.state IN ('pausing', 'paused', 'resuming')
                      )
-                     AND EXISTS (
-                       SELECT 1
-                         FROM work_host h
-                        WHERE h.id = work_session.host_id
-                          AND h.workspace_id = work_session.workspace_id
-                          AND COALESCE(h.last_seen_at, h.created_at)
-                                < clock_timestamp()
-                                  - make_interval(
-                                      secs => \(config.hostOfflineGraceSeconds)
-                                    )
+                     AND (
+                       -- MOMO-656: re-check the same disjunction the candidate
+                       -- query used. Losing the race means the host came back
+                       -- AND the marker was cleared, not just one of the two.
+                       work_session.host_lost_at IS NOT NULL
+                       OR EXISTS (
+                         SELECT 1
+                           FROM work_host h
+                          WHERE h.id = work_session.host_id
+                            AND h.workspace_id = work_session.workspace_id
+                            AND COALESCE(h.last_seen_at, h.created_at)
+                                  < clock_timestamp()
+                                    - make_interval(
+                                        secs => \(config.hostOfflineGraceSeconds)
+                                      )
+                       )
                      )
                   RETURNING clock_timestamp()
                   """,
@@ -573,6 +612,10 @@ extension NotifierService {
                 "schema": "momo.work_session.orphaned.v1",
                 "policy_mode": session.mode,
                 "source_host_id": session.hostID.uuidString,
+                // MOMO-656 provenance. The user-visible outcome is identical,
+                // so this distinction stays in the audit trail and never
+                // becomes a status or end_reason value the clients must render.
+                "orphan_source": session.orphanSource,
             ]
         )
 

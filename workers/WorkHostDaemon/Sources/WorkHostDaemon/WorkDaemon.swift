@@ -38,7 +38,24 @@ final class WorkDaemon: Sendable {
 
     func run() async {
         var nextHeartbeat = ContinuousClock.now
+        // MOMO-656: the boot snapshot is taken exactly once and then retried
+        // as-is. Re-reading the ledger on every retry would eventually observe
+        // a session the orphan sweep just resumed onto this same host and
+        // report it lost too — a report is only honest about what existed
+        // before this process started polling for controls.
+        var lostSnapshot: [UUID]?
+        var reconciled = false
         while !Task.isCancelled {
+            // Reconcile before dispatching anything. A fast restart keeps
+            // heartbeats inside the offline grace window, so this report is
+            // the only signal that the ledger's running/idle rows lost their
+            // PTYs.
+            if !reconciled {
+                if lostSnapshot == nil { lostSnapshot = await lostSessionSnapshot() }
+                if let lost = lostSnapshot {
+                    reconciled = await reportLostSessions(lost)
+                }
+            }
             if ContinuousClock.now >= nextHeartbeat {
                 do {
                     try await api.heartbeat(hostID: hostID)
@@ -67,6 +84,47 @@ final class WorkDaemon: Sendable {
         }
         await reportToolTransitions()
         await reportNaturalExits()
+    }
+
+    /// MOMO-656 step 1. Everything the ledger still attributes to this host
+    /// that this process cannot serve. `nil` means the ledger read failed and
+    /// the caller must retry — an empty array means "nothing was lost", which
+    /// is a real, terminal answer.
+    func lostSessionSnapshot() async -> [UUID]? {
+        let live: [WorkHostLiveSession]
+        do {
+            live = try await api.liveSessions(hostID: hostID)
+        } catch {
+            logger.warning("work host live session read failed", metadata: [
+                "error_label": .string(Self.label(for: error)),
+            ])
+            return nil
+        }
+        let servable = await processes.servableSessionIDs()
+        return live.map(\.id).filter { !servable.contains($0) }
+    }
+
+    /// MOMO-656 step 2. Reports the snapshot under the host signature. The
+    /// server only stamps eligibility; the existing orphan sweep still owns
+    /// the transition, the resume card, and the lineage.
+    func reportLostSessions(_ sessionIDs: [UUID]) async -> Bool {
+        guard !sessionIDs.isEmpty else { return true }
+        do {
+            let reported = try await api.reportLostSessions(
+                hostID: hostID,
+                sessionIDs: sessionIDs
+            )
+            logger.info("work host restart reconciliation reported", metadata: [
+                "lost_count": .stringConvertible(sessionIDs.count),
+                "accepted_count": .stringConvertible(reported.count),
+            ])
+            return true
+        } catch {
+            logger.warning("work host restart reconciliation failed", metadata: [
+                "error_label": .string(Self.label(for: error)),
+            ])
+            return false
+        }
     }
 
     private func handle(_ control: WorkControl) async {

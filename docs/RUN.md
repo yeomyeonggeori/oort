@@ -1504,25 +1504,36 @@ scripts/local_gate.sh --profile host-runtime
 refresh하더라도 refresh 자체는 유지하되 새 pair에서 두 privileged scope만 제거하고
 남은 privileged sibling token을 일괄 폐기한다. 별도 토큰 문법이나 raw token 저장은 없다.
 
-### 8.1.2 momo Cloud T3 / E2B 프로비저너 (MOMO-647)
+### 8.1.2 momo Cloud T3 provider 어댑터 (MOMO-647 · MOMO-670/ADR-0142)
 
 T3는 기본 비활성이며 재설계 진행 중(#888)이다. `MOMO_T3_ENABLED=1`을 명시한
 경우에만 opt-in된다. 비활성에서는 provisioning·조회·register·pause/resume·destroy와
 topup이 읽히는 503으로 닫히고 NotifierWorker reconciler는 DB claim조차 실행하지 않는다.
 T1/T2 세션 생성·idle·재부착은 이 설정을 읽지 않는다.
 
-옵트인 뒤에도 `E2B_API_KEY`가 없거나 프로비저너 설정이 불완전하면 T3만 503으로
-닫히고 T1/T2는 영향받지 않는다.
-키는 인스턴스 운영자 시크릿이며 workspace 설정, 클라이언트, DB, 로그에 넣지 않는다.
+ADR-0142로 provider는 **어댑터 레지스트리 식별자**가 됐다. `MOMO_T3_PROVIDER`가 새로
+프로비저닝할 어댑터를 고르고, 관리형 provider는 각자 `MOMO_T3_PROVIDER_<ID>_*`
+네임스페이스(`_API_BASE_URL`·`_API_KEY`·`_IMAGE_REF`·`_INSTANCE_TIMEOUT_SECONDS`)를 읽는다.
+정책 코드는 provider 상수를 알지 못하며 `capabilities`(pause 지원 여부, resume 의미,
+연속 실행 상한)만 본다.
 
-`E2B_TEMPLATE_ID`는 `momo-workd`를 포함하고 entrypoint에서 실행하는 운영자 소유
-template이어야 한다. 서버는 create 시 공개 HTTPS momo URL, workspace ID,
-`scope=workspace`, `type=cloud`, 15분짜리 1회 등록 token만 sandbox env로 전달한다.
-workd는 자체 Ed25519 키를 만든 뒤 cloud register REST에서 token을 소비한다. DB에는
-token SHA-256 digest만 남는다.
+- **미설정 = `byoc`** — 자기 인프라의 VM을 붙이는 기본형이다. provider 자격증명이
+  하나도 필요 없다. 절차는 [`docs/BYOC_CLOUD_HOST.md`](BYOC_CLOUD_HOST.md).
+- **관리형 provider** — 옵트인 뒤에도 해당 provider의 endpoint가 불완전하면 T3만 503으로
+  닫히고 T1/T2는 영향받지 않는다. 레지스트리에 없는 provider 이름은 설정 로드에서 즉시
+  실패한다(fail closed). 키는 인스턴스 운영자 시크릿이며 workspace 설정, 클라이언트, DB,
+  로그에 넣지 않는다.
+- 어댑터는 **이미 등록된 호스트의 `work_cloud_host.provider`로 해석**된다. 운영자가 기본
+  provider를 바꿔도 기존 호스트는 계속 조작 가능하다.
+
+`_IMAGE_REF`는 `momo-workd`를 포함하고 entrypoint에서 실행하는 운영자 소유 이미지여야
+한다. 서버는 create 시 공개 HTTPS momo URL, workspace ID, `scope=workspace`,
+`type=cloud`, 15분짜리 1회 등록 token만 인스턴스 env로 전달한다. workd는 자체 Ed25519
+키를 만든 뒤 cloud register REST에서 token을 소비한다. DB에는 token SHA-256 digest만
+남는다. 이 흐름은 BYOC와 관리형이 **동일하다** — 다른 것은 인스턴스를 누가 만드느냐뿐이다.
 
 ```sh
-# 자격증명 없는 로컬 검증: mock E2B + PG18 + 실제 API/RLS
+# 자격증명 없는 로컬 검증: mock provider(mock-a) + PG18 + 실제 API/RLS
 # .env/.env.worktree를 읽지 않고 infra/.env.example만 compose 입력으로 쓴다.
 scripts/verify_t3_provisioner.sh
 
@@ -1539,7 +1550,7 @@ done
 
 검증기는 `idempotencyRef` create 재시도, host당 두 번째 unsettled session 거부,
 human resume REST(호스트 보고 없이 완료), terminal/orphan 멱등 정산, paused stale 제외,
-instance-operator topup 감사·멱등을 실제 REST/sweep/mock-E2B 경로로 확인한다. worker는
+instance-operator topup 감사·멱등을 실제 REST/sweep/mock provider 경로로 확인한다. worker는
 Docker를 실행하지 않으며 오케스트레이터가 위 명령으로 이 runtime gate를 닫는다.
 
 MOMO-666의 교착 안전망은 별도 격리 하니스로 검증한다. 정상 모드는 두 PostgreSQL
@@ -1566,11 +1577,30 @@ advisory 문장을 뺀다. 매 실행마다 새 compose project/volume을 만들
 출력된 project를 확인한 뒤 같은 project 이름에 `docker compose ... down -v`를
 실행한다. 정상 증명은 red proof와 별도 fresh 실행이어야 한다.
 
-오케스트레이터의 실 E2B smoke 절차:
+ADR-0142 D3의 **교차 provider 연속성**은 별도 격리 검증기가 닫는다. mock-a에서 만든
+세션의 인스턴스가 죽으면 어댑터가 죽음을 정직하게 보고하고, reconciler가 이름 있는
+`provider_missing` 종결로 수렴한 뒤, **기존 resume REST 그대로** mock-b의 새 Run으로
+재개되며 `resumed_from_session_id`가 두 세션을 잇는다.
 
-1. 외부에서 접근 가능한 격리 MomoServer와 `momo-workd` E2B template을 준비한다.
-2. 서버·NotifierWorker 프로세스에 `MOMO_T3_ENABLED=1`을, 서버 프로세스에만
-   `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
+```sh
+# worker: Docker 없이 어댑터/레지스트리/마이그레이션 정적 계약만 확인
+T3_GATE_RUN_DOCKER=0 scripts/verify_t3_provider_continuity.sh
+
+# orchestrator: mock-a 사망 → provider_missing 수렴 → mock-b 재개 → 계보 단정
+scripts/verify_t3_provider_continuity.sh
+
+# orchestrator red proof: mock-a의 probe가 죽은 인스턴스를 running이라고 거짓 보고한다.
+# momo는 자기모순 provider 위에서 정산하기를 거부하므로 수렴이 일어나지 않고,
+# 검증기는 유한 deadline에서 `provider-missing-convergence` 이름으로 non-zero가 된다.
+T3_CONTINUITY_PROVE_RED=dishonest-probe scripts/verify_t3_provider_continuity.sh
+```
+
+오케스트레이터의 실 provider smoke 절차(관리형 substrate를 실제로 붙였을 때):
+
+1. 외부에서 접근 가능한 격리 MomoServer와 `momo-workd`를 실행하는 운영자 이미지를 준비한다.
+2. 서버·NotifierWorker 프로세스에 `MOMO_T3_ENABLED=1`과 `MOMO_T3_PROVIDER=<id>`를,
+   서버·NotifierWorker 프로세스에 그 provider의 `MOMO_T3_PROVIDER_<ID>_API_BASE_URL`,
+   `MOMO_T3_PROVIDER_<ID>_API_KEY`, `MOMO_T3_PROVIDER_<ID>_IMAGE_REF`,
    `MOMO_PUBLIC_BASE_URL=https://...`, `MOMO_T3_RATE_MICRO_USD_PER_SECOND`를 주입한다.
    셸 trace를 끄고 키 값을 출력하지 않는다.
 3. instance-operator bearer로
@@ -1578,15 +1608,20 @@ advisory 문장을 뺀다. 매 실행마다 새 compose project/volume을 만들
    `idempotencyRef`를 보내고 빈 슬롯을 확인한다. SQL 직접 충전은 검증 경계를 우회하므로
    사용하지 않는다.
 4. human bearer로 `POST .../work-hosts/cloud`에
-   `{"displayName":"E2B smoke","confirmPaidCloud":true,"idempotencyRef":"<uuid>"}`를
-   보내고, 같은 ref 재전송이 같은 provision/sandbox를 반환하는지 확인한다.
-5. GET projection이 `ready`와 cloud `hostId`를 돌려줄 때까지 기다린다. E2B dashboard에서
-   sandbox 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
+   `{"displayName":"provider smoke","confirmPaidCloud":true,"idempotencyRef":"<uuid>"}`를
+   보내고, 같은 ref 재전송이 같은 provision/인스턴스를 반환하는지 확인한다.
+5. GET projection이 `ready`와 cloud `hostId`를 돌려줄 때까지 기다린다. provider 콘솔에서
+   인스턴스 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
 6. 그 host로 work session을 만들고 pause → 10초 대기 → resume → 종료한다.
+   provider가 pause를 지원하지 않는다고 선언했다면 pause 호출 자체가 일어나지 않아야 한다.
    `work_host_usage_interval`의 paused 행 `active_seconds=0`, 최종 합계와
    `credit_entry(reason='t3_usage')` 차감을 대조한다.
-7. `DELETE .../work-hosts/{host}/cloud`로 sandbox를 destroy하고 E2B에 잔존 실행이
-   없는지 확인한다. 실패 중간에도 생성한 sandbox ID를 기준으로 반드시 정리한다.
+7. `DELETE .../work-hosts/{host}/cloud`로 인스턴스를 destroy하고 provider 쪽에 잔존 실행이
+   없는지 확인한다. 실패 중간에도 생성한 인스턴스 ID를 기준으로 반드시 정리한다.
+
+BYOC 호스트는 4~5단계 대신
+`POST .../work-hosts/byoc/enrollments`로 1회 토큰을 받고 운영자가 직접 workd를 설치한다.
+BYOC 해지 시 VM·디스크·스냅샷 삭제는 **소유자 책임**이다 — momo는 지울 수 없다.
 
 실호출 smoke는 외부 과금과 운영자 키가 필요하므로 worker가 임의 실행하지 않는다.
 

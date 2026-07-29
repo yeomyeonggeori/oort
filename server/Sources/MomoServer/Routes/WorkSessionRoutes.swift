@@ -1,4 +1,5 @@
 import AsyncHTTPClient
+import CloudProviderKit
 import Foundation
 import Hummingbird
 import Logging
@@ -942,7 +943,7 @@ struct WorkSessionRoutes: Sendable {
             ]
             if let exitCode { auditDetail["exit_code"] = exitCode }
             if let cloudLifecycle {
-                auditDetail["cloud_provider"] = "e2b"
+                auditDetail["cloud_provider"] = cloudLifecycle.providerID
                 auditDetail["cloud_action"] = cloudLifecycle.action
                 auditDetail["cloud_provisioner_latency_ms"] = cloudLifecycle.latencyMs
             }
@@ -973,13 +974,19 @@ struct WorkSessionRoutes: Sendable {
 
     private struct CloudLifecycleEvidence: Sendable {
         let cloudHostID: UUID
+        let providerID: String
         let action: String
         let latencyMs: Int64
     }
 
     private struct CloudLifecycleTarget: Sendable {
         let cloudHostID: UUID
-        let sandboxID: String
+        let providerID: String
+        let instanceID: String
+
+        var ref: CloudInstanceRef {
+            CloudInstanceRef(providerID: providerID, instanceID: instanceID)
+        }
     }
 
     /// Host identity is the T3 boundary: ordinary workd/desktop hosts return
@@ -998,7 +1005,9 @@ struct WorkSessionRoutes: Sendable {
         ) else { return nil }
 
         let readyConfig = try CloudProvisionerRoutes.readyConfig(cloudProvisionerConfig)
-        let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
+        let adapter = try readyConfig.adapter(
+            for: target.providerID, httpClient: httpClient
+        )
         // A paused daemon cannot initiate its own resume. Human REST records a
         // durable resuming intent, calls the provider, then advances both the
         // session and ledger. A later signed host report is confirmation only.
@@ -1008,15 +1017,23 @@ struct WorkSessionRoutes: Sendable {
                 message: "paused momo Cloud sessions must be resumed by the human cloud resume endpoint"
             )
         }
+        // ADR-0142 D2: idle pause is an optimization, not an obligation. A
+        // provider that declares no pause is skipped rather than faked; the
+        // session still goes idle and active-time billing already stops.
+        guard adapter.capabilities.supportsPause else { return nil }
         let action = "pause"
         let startedAt = Date()
         do {
-            try await provisioner.pause(sandboxID: target.sandboxID)
+            try await adapter.pause(
+                ref: target.ref,
+                idempotencyKey: target.cloudHostID.uuidString.lowercased()
+            )
         } catch {
             throw CloudProvisionerRoutes.httpError(error)
         }
         return CloudLifecycleEvidence(
             cloudHostID: target.cloudHostID,
+            providerID: target.providerID,
             action: action,
             latencyMs: Self.elapsedMilliseconds(since: startedAt)
         )
@@ -1039,7 +1056,7 @@ struct WorkSessionRoutes: Sendable {
             let rows = try await conn.query(
                 """
                 SELECT ws.host_id, ws.status, h.type, ws.channel_id, ws.member_id,
-                       ch.provider_sandbox_id, ch.state, ch.id
+                       ch.provider_sandbox_id, ch.state, ch.id, ch.provider
                   FROM work_session ws
                   JOIN work_host h
                     ON h.id = ws.host_id
@@ -1055,10 +1072,13 @@ struct WorkSessionRoutes: Sendable {
             guard let row = rows.first else { return nil }
             let (
                 hostID, sessionStatus, hostType, channelID, memberID,
-                sandboxID, cloudState, cloudHostID
+                sandboxID, cloudState, cloudHostID, rowProviderID
             ) =
                 try row.decode(
-                    (UUID, String, String, UUID, UUID, String?, String?, UUID?).self
+                    (
+                        UUID, String, String, UUID, UUID, String?, String?, UUID?,
+                        String?
+                    ).self
                 )
             guard cloudHostID == expectedCloudHostID else {
                 throw HTTPError(
@@ -1130,9 +1150,16 @@ struct WorkSessionRoutes: Sendable {
                     message: "momo Cloud host lifecycle changed; retry"
                 )
             }
+            guard let rowProviderID else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud host lifecycle changed; retry"
+                )
+            }
             return CloudLifecycleTarget(
                 cloudHostID: cloudHostID,
-                sandboxID: sandboxID
+                providerID: rowProviderID,
+                instanceID: sandboxID
             )
         }
     }
@@ -1227,11 +1254,11 @@ struct WorkSessionRoutes: Sendable {
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
                    AND state = 'destroy_pending'
-                RETURNING id
+                RETURNING provider
                 """,
                 logger: db.logger
             ).collect()
-            guard cloudRows.first != nil else {
+            guard let rowProviderID = try cloudRows.first?.decode(String.self) else {
                 throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
             }
             _ = try await conn.query(
@@ -1254,7 +1281,7 @@ struct WorkSessionRoutes: Sendable {
                 "schema": "momo.work_cloud.resume_failed.v1",
                 "host_id": hostID.uuidString,
                 "session_id": sessionID.uuidString,
-                "provider": "e2b",
+                "provider": rowProviderID,
                 "reason": "sandbox_missing",
                 "upstream_status": upstreamStatus ?? NSNull(),
                 "provisioner_latency_ms": latencyMs,
@@ -1596,7 +1623,8 @@ struct WorkSessionRoutes: Sendable {
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
                        ws.status, ws.observation,
                        ws.started_at, ws.ended_at, ws.exit_code,
-                       ws.end_reason, ws.resumed_from_session_id, root.seq
+                       ws.end_reason, ws.resumed_from_session_id, root.seq,
+                       ws.workstream_id
                   FROM work_session ws
                   JOIN message root ON root.id = ws.root_message_id
                  WHERE ws.id = \(sourceSessionID)
@@ -1609,7 +1637,8 @@ struct WorkSessionRoutes: Sendable {
             }
             let source = try row.decode(
                 (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                 String, String, Date, Date?, Int?, String?, UUID?, Int64).self
+                 String, String, Date, Date?, Int?, String?, UUID?, Int64,
+                 UUID).self
             )
             try await WorkToolProfileRoutes.requireEnabled(
                 conn: conn,
@@ -1617,12 +1646,15 @@ struct WorkSessionRoutes: Sendable {
                 workspaceID: workspaceID,
                 toolKey: source.6
             )
-            guard source.3 == principal.memberID else {
-                throw HTTPError(.forbidden, message: "only the session owner can resume it")
-            }
             guard source.8 == "orphaned" else {
                 throw HTTPError(.conflict, message: "only an orphaned work session can resume")
             }
+            // ADR-0143 D2/D3: continuity belongs to the workstream, not to the
+            // Run's actor. Eligibility is therefore active membership of the
+            // anchor channel — the source member_id stays an execution record
+            // and is never transferred. This membership predicate is the only
+            // permission gate; reverting it is the red proof in
+            // scripts/verify_workstream_continuity.sh.
             try await Self.requireChannelMember(
                 conn: conn,
                 logger: db.logger,
@@ -1665,11 +1697,11 @@ struct WorkSessionRoutes: Sendable {
                 INSERT INTO work_session
                   (id, workspace_id, channel_id, member_id, host_id,
                    root_message_id, tool, label, status, observation,
-                   resumed_from_session_id)
+                   resumed_from_session_id, workstream_id)
                 VALUES
                   (\(resumedSessionID), \(workspaceID), \(source.2), \(principal.memberID),
                    \(body.targetHostId), \(source.5), \(source.6), \(source.7),
-                   'running', \(source.9), \(sourceSessionID))
+                   'running', \(source.9), \(sourceSessionID), \(source.16))
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
                           root_message_id, tool, label, status, observation,
                           0::bigint AS observer_grant_count,
@@ -1778,6 +1810,8 @@ struct WorkSessionRoutes: Sendable {
                 "source_session_id": sourceSessionID.uuidString,
                 "resumed_session_id": resumedSessionID.uuidString,
                 "target_host_id": body.targetHostId.uuidString,
+                "workstream_id": source.16.uuidString,
+                "source_member_id": source.3.uuidString,
                 "automatic": false,
             ]
             _ = try await conn.query(

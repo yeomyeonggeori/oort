@@ -235,6 +235,12 @@ def main():
         "documented route must be exercised against the live server",
     )
     parser.add_argument(
+        "--known-unsampled",
+        help="text file of 'METHOD /path' spec operations exempt from "
+        "operation coverage (named pre-existing debt); an entry that HAS a "
+        "sample is stale and fails the gate so the list can only shrink",
+    )
+    parser.add_argument(
         "--server-route-manifest",
         help="JSON {operations:[{method,path}]} registered by the server; fail when one is absent from the spec",
     )
@@ -306,7 +312,27 @@ def main():
 
     if args.require_operation_coverage:
         sampled = {(s["method"].lower(), s["path"]) for s in samples}
-        uncovered = sorted(spec_operations(spec) - sampled)
+        known_unsampled = set()
+        if args.known_unsampled:
+            with open(args.known_unsampled, encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    method, _, path = line.partition(" ")
+                    known_unsampled.add((method.lower(), path.strip()))
+        stale = sorted(known_unsampled & sampled)
+        if stale:
+            failures += 1
+            print(
+                "[openapi-shape] FAIL stale known-unsampled entries — these "
+                "operations now have live samples; delete them from the debt "
+                "list (it may only shrink):",
+                file=sys.stderr,
+            )
+            for method, path in stale:
+                print(f"    - {method.upper()} {path}", file=sys.stderr)
+        uncovered = sorted(spec_operations(spec) - sampled - known_unsampled)
         if uncovered:
             failures += 1
             print(
@@ -317,9 +343,15 @@ def main():
             for method, path in uncovered:
                 print(f"    - {method.upper()} {path}", file=sys.stderr)
         else:
+            suffix = (
+                f", {len(known_unsampled)} named debt entries "
+                f"(scripts/openapi_known_unsampled.txt)"
+                if known_unsampled else ""
+            )
             print(
                 f"[openapi-shape] PASS operation coverage "
-                f"({len(spec_operations(spec))} operations sampled)"
+                f"({len(spec_operations(spec) - known_unsampled)} operations "
+                f"sampled{suffix})"
             )
 
     total = len(samples)

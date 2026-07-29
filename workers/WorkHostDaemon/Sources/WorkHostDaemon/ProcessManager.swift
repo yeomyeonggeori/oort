@@ -57,6 +57,7 @@ actor ProcessManager {
     private let outputDirectory: URL
     private let hostEnvironment: [String: String]
     private let ringBufferBytes: Int
+    private let subscriberQueueBytes: Int
     private let acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)?
     private var sessions: [UUID: ManagedProcess] = [:]
 
@@ -65,12 +66,15 @@ actor ProcessManager {
         outputDirectory: URL,
         hostEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         ringBufferBytes: Int = PTYReplayBuffer.defaultCapacityBytes,
+        subscriberQueueBytes: Int? = nil,
         acpEventRelay: (@Sendable (UUID, ACPProjectedEvent) async throws -> Void)? = nil
     ) {
         self.templates = templates
         self.outputDirectory = outputDirectory
         self.hostEnvironment = hostEnvironment
         self.ringBufferBytes = max(1, ringBufferBytes)
+        self.subscriberQueueBytes = subscriberQueueBytes
+            ?? max(1, ringBufferBytes) * PTYReplayBuffer.defaultSubscriberQueueMultiple
         self.acpEventRelay = acpEventRelay
     }
 
@@ -106,7 +110,8 @@ actor ProcessManager {
                 let outputState = ShellPTYOutputState(
                     markerNonce: launch.markerNonce,
                     output: output,
-                    capacityBytes: ringBufferBytes
+                    capacityBytes: ringBufferBytes,
+                    subscriberQueueBytes: subscriberQueueBytes
                 )
                 process.onOutput { data in outputState.consume(data) }
                 sessions[sessionID] = ManagedProcess(
@@ -242,6 +247,14 @@ actor ProcessManager {
             managed.exitCode = 143
             return 143
         }
+    }
+
+    /// MOMO-656: sessions this daemon can still serve right now. Everything a
+    /// restart lost — PTY master fds, ring buffers, ACP clients — lives only in
+    /// `sessions`, so a freshly booted process legitimately answers with the
+    /// empty set and the reconciler reports every ledger session as lost.
+    func servableSessionIDs() -> Set<UUID> {
+        Set(sessions.keys)
     }
 
     func markAcknowledged(_ sessionID: UUID) {

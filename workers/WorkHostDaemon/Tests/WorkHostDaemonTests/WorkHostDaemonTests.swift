@@ -258,6 +258,204 @@ final class WorkHostDaemonTests: XCTestCase {
         XCTAssertFalse(events.contains(where: { $0.contains("momo-workd-echo") }))
     }
 
+    // MOMO-656 / #870. A restarted daemon has an empty process table, so every
+    // running/idle session the ledger still attributes to this host is
+    // unrevivable and must be reported explicitly — heartbeats never lapsed, so
+    // the offline sweep would never notice on its own.
+    func testRestartReconciliationReportsEveryUnservableLedgerSession() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-daemon-reconcile-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostID = UUID()
+        let workspaceID = UUID()
+        let lostA = UUID()
+        let lostB = UUID()
+        let api = MockWorkHostAPI(
+            controls: [],
+            profiles: [],
+            session: Self.session(
+                id: UUID(),
+                workspaceID: workspaceID,
+                hostID: hostID
+            ),
+            liveSessions: [
+                Self.liveSession(id: lostA, status: "running"),
+                Self.liveSession(id: lostB, status: "idle"),
+            ]
+        )
+        let manager = ProcessManager(
+            templates: [:],
+            outputDirectory: directory
+        )
+        let daemon = WorkDaemon(
+            hostID: hostID,
+            api: api,
+            processes: manager,
+            pollInterval: .milliseconds(10),
+            heartbeatInterval: .seconds(30),
+            logger: Logger(label: "test")
+        )
+
+        // A fresh process serves nothing, which is exactly the #870 condition.
+        let servable = await manager.servableSessionIDs()
+        XCTAssertTrue(servable.isEmpty)
+
+        let firstSnapshot = await daemon.lostSessionSnapshot()
+        let snapshot = try XCTUnwrap(firstSnapshot)
+        XCTAssertEqual(Set(snapshot), [lostA, lostB])
+        let firstReport = await daemon.reportLostSessions(snapshot)
+        XCTAssertTrue(firstReport)
+
+        let expected = "reconcile:" + [lostA, lostB]
+            .map(\.uuidString).sorted().joined(separator: ",")
+        let events = await api.events
+        XCTAssertTrue(events.contains(expected), "\(events)")
+
+        // Idempotent by construction: the second snapshot is empty because the
+        // ledger no longer lists the reported sessions as live.
+        let secondSnapshot = await daemon.lostSessionSnapshot()
+        let second = try XCTUnwrap(secondSnapshot)
+        XCTAssertTrue(second.isEmpty)
+        let secondReport = await daemon.reportLostSessions(second)
+        XCTAssertTrue(secondReport)
+        let reconcileCalls = await api.events
+        XCTAssertEqual(reconcileCalls.filter { $0.hasPrefix("reconcile:") }.count, 1)
+    }
+
+    // A session this process is still serving is not lost. Without this filter
+    // a mid-life reconciliation would orphan live work.
+    func testRestartReconciliationSkipsSessionsThisProcessStillServes() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-daemon-reconcile-live-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostID = UUID()
+        let workspaceID = UUID()
+        let channelID = UUID()
+        let servedID = UUID()
+        let lostID = UUID()
+        let spawn = Self.control(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            hostID: hostID,
+            kind: "spawn",
+            payload: .object(["tool": .string("shell"), "label": .string("served")])
+        )
+        let api = MockWorkHostAPI(
+            controls: [[spawn]],
+            profiles: [Self.profile(
+                workspaceID: workspaceID,
+                toolKey: "shell",
+                command: "sh"
+            )],
+            session: Self.session(
+                id: servedID,
+                workspaceID: workspaceID,
+                channelID: channelID,
+                hostID: hostID
+            ),
+            liveSessions: [
+                Self.liveSession(id: servedID, status: "running"),
+                Self.liveSession(id: lostID, status: "running"),
+            ]
+        )
+        let manager = ProcessManager(
+            templates: ["shell": CommandTemplate(executable: "/bin/cat", arguments: [])],
+            outputDirectory: directory
+        )
+        let daemon = WorkDaemon(
+            hostID: hostID,
+            api: api,
+            processes: manager,
+            pollInterval: .milliseconds(10),
+            heartbeatInterval: .seconds(30),
+            localCommandOverrides: [
+                "shell": LocalCommandOverride(executable: "/bin/cat", arguments: [])
+            ],
+            logger: Logger(label: "test")
+        )
+        await daemon.pollOnce()
+        let servable = await manager.servableSessionIDs()
+        XCTAssertTrue(servable.contains(servedID))
+
+        let snapshotResult = await daemon.lostSessionSnapshot()
+        let snapshot = try XCTUnwrap(snapshotResult)
+        XCTAssertEqual(snapshot, [lostID])
+        _ = try? await manager.terminate(servedID)
+        await manager.markEndReported(servedID)
+    }
+
+    // A transport failure must not silently swallow the report: the daemon has
+    // to keep the boot snapshot and retry it unchanged.
+    func testRestartReconciliationRetriesFailedReportWithTheSameSnapshot() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-daemon-reconcile-retry-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostID = UUID()
+        let lostID = UUID()
+        let api = MockWorkHostAPI(
+            controls: [],
+            profiles: [],
+            session: Self.session(id: UUID(), workspaceID: UUID(), hostID: hostID),
+            liveSessions: [Self.liveSession(id: lostID, status: "running")],
+            liveSessionFailures: 1,
+            reportFailures: 1
+        )
+        let daemon = WorkDaemon(
+            hostID: hostID,
+            api: api,
+            processes: ProcessManager(templates: [:], outputDirectory: directory),
+            pollInterval: .milliseconds(10),
+            heartbeatInterval: .seconds(30),
+            logger: Logger(label: "test")
+        )
+        let failedSnapshot = await daemon.lostSessionSnapshot()
+        XCTAssertNil(failedSnapshot)
+        let retriedSnapshot = await daemon.lostSessionSnapshot()
+        let snapshot = try XCTUnwrap(retriedSnapshot)
+        XCTAssertEqual(snapshot, [lostID])
+        let failedReport = await daemon.reportLostSessions(snapshot)
+        XCTAssertFalse(failedReport)
+        let retriedReport = await daemon.reportLostSessions(snapshot)
+        XCTAssertTrue(retriedReport)
+    }
+
+    private static func liveSession(
+        id: UUID,
+        status: String
+    ) -> WorkHostLiveSession {
+        WorkHostLiveSession(
+            id: id,
+            tool: "shell",
+            label: "reconcile fixture",
+            status: status,
+            startedAtMs: 1
+        )
+    }
+
+    private static func session(
+        id: UUID,
+        workspaceID: UUID,
+        channelID: UUID = UUID(),
+        hostID: UUID
+    ) -> WorkSession {
+        WorkSession(
+            id: id,
+            workspaceId: workspaceID,
+            channelId: channelID,
+            memberId: UUID(),
+            hostId: hostID,
+            rootMessageId: UUID(),
+            tool: "shell",
+            label: "reconcile fixture",
+            status: "running",
+            startedAtMs: 1,
+            endedAtMs: nil,
+            exitCode: nil,
+            endReason: nil,
+            resumedFromSessionId: nil
+        )
+    }
+
     func testPTYReplayJoinsRetainedMarkerAndLiveWithoutGapOrDuplicate() async throws {
         let buffer = PTYReplayBuffer(capacityBytes: 64)
         buffer.append(Data("before-".utf8))
@@ -297,6 +495,86 @@ final class WorkHostDaemonTests: XCTestCase {
         XCTAssertEqual(replay, .bytes(Data("23456789".utf8)))
         XCTAssertEqual(marker, .replayEnd(byteOffset: 10))
         buffer.finish()
+    }
+
+    // MOMO-661 ② red proof. Before the bound, a stalled subscriber's
+    // continuation buffer grew with every append and the daemon's memory grew
+    // with it. The bound is asserted twice over: the subscriber's own pending
+    // queue never exceeds it, and the severed subscriber is dropped entirely.
+    func testStalledReplaySubscriberIsBoundedAndSeveredWithAGapMarker() async throws {
+        let buffer = PTYReplayBuffer(
+            capacityBytes: 64,
+            subscriberQueueBytes: 256
+        )
+        var iterator = buffer.connect().makeAsyncIterator()
+        // Drain the (empty) replay boundary so only live bytes are queued.
+        let boundary = await iterator.next()
+        XCTAssertEqual(boundary, .replayEnd(byteOffset: 0))
+
+        // Never pull again: the subscriber is now the stalled attach client.
+        let chunk = Data(repeating: 0x61, count: 100)
+        for _ in 0..<64 { buffer.append(chunk) }
+
+        let queued = buffer.subscriberQueuedByteCounts
+        XCTAssertEqual(queued.count, 1)
+        XCTAssertLessThanOrEqual(
+            try XCTUnwrap(queued.first),
+            256,
+            "stalled subscriber queue must never exceed its configured bound"
+        )
+        // Retained scrollback stays on its own, smaller bound.
+        XCTAssertEqual(buffer.retainedByteCount, 64)
+
+        // The severed subscriber gets exactly one terminal gap marker, then end
+        // of stream — never silently corrupted bytes.
+        guard case .overflow(let byteOffset)? = await iterator.next() else {
+            return XCTFail("expected a terminal overflow marker on the severed stream")
+        }
+        XCTAssertGreaterThan(byteOffset, 0)
+        let afterOverflow = await iterator.next()
+        XCTAssertNil(afterOverflow)
+        XCTAssertTrue(buffer.subscriberQueuedByteCounts.isEmpty)
+
+        // Resynchronization is the ordinary attach path, not a new protocol.
+        var resynced = buffer.connect().makeAsyncIterator()
+        let resyncedReplay = await resynced.next()
+        XCTAssertEqual(resyncedReplay, .bytes(Data(repeating: 0x61, count: 64)))
+        let resyncedBoundary = await resynced.next()
+        XCTAssertEqual(resyncedBoundary, .replayEnd(byteOffset: 6_400))
+        buffer.finish()
+    }
+
+    // A subscriber that keeps up is never severed, no matter how much flows
+    // through — the bound is on the backlog, not on lifetime throughput.
+    func testKeepingUpReplaySubscriberIsNeverSevered() async throws {
+        let buffer = PTYReplayBuffer(
+            capacityBytes: 64,
+            subscriberQueueBytes: 128
+        )
+        var iterator = buffer.connect().makeAsyncIterator()
+        let boundary = await iterator.next()
+        XCTAssertEqual(boundary, .replayEnd(byteOffset: 0))
+        for index in 0..<50 {
+            buffer.append(Data(repeating: UInt8(0x30 + index % 10), count: 100))
+            guard case .bytes(let live)? = await iterator.next() else {
+                return XCTFail("a draining subscriber must keep receiving live bytes")
+            }
+            XCTAssertEqual(live.count, 100)
+        }
+        XCTAssertEqual(buffer.subscriberQueuedByteCounts, [0])
+        buffer.finish()
+        let terminated = await iterator.next()
+        XCTAssertNil(terminated)
+    }
+
+    func testReplayOverflowControlFrameHasStableTerminalWireShape() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let encoded = try encoder.encode(PTYReplayOverflowFrame(byteOffset: 42))
+        XCTAssertEqual(
+            String(decoding: encoded, as: UTF8.self),
+            #"{"byte_offset":42,"type":"replay_overflow"}"#
+        )
     }
 
     func testReplayEndControlFrameHasStableNonTerminalWireShape() throws {
@@ -576,12 +854,55 @@ actor MockWorkHostAPI: WorkHostAPI {
     private var controlBatches: [[WorkControl]]
     private let profiles: [WorkToolProfile]
     private let session: WorkSession
+    private var ledgerLiveSessions: [WorkHostLiveSession]
+    /// Number of calls that must fail before the mock starts answering, so the
+    /// daemon's reconciliation retry path is exercised rather than assumed.
+    private var liveSessionFailures: Int
+    private var reportFailures: Int
     private(set) var events: [String] = []
 
-    init(controls: [[WorkControl]], profiles: [WorkToolProfile], session: WorkSession) {
+    init(
+        controls: [[WorkControl]],
+        profiles: [WorkToolProfile],
+        session: WorkSession,
+        liveSessions: [WorkHostLiveSession] = [],
+        liveSessionFailures: Int = 0,
+        reportFailures: Int = 0
+    ) {
         controlBatches = controls
         self.profiles = profiles
         self.session = session
+        ledgerLiveSessions = liveSessions
+        self.liveSessionFailures = liveSessionFailures
+        self.reportFailures = reportFailures
+    }
+
+    func liveSessions(hostID: UUID) async throws -> [WorkHostLiveSession] {
+        events.append("live-sessions:\(hostID)")
+        if liveSessionFailures > 0 {
+            liveSessionFailures -= 1
+            throw WorkdFailure.transport
+        }
+        return ledgerLiveSessions
+    }
+
+    func reportLostSessions(
+        hostID: UUID,
+        sessionIDs: [UUID]
+    ) async throws -> [UUID] {
+        events.append(
+            "reconcile:" + sessionIDs.map(\.uuidString).sorted().joined(separator: ",")
+        )
+        if reportFailures > 0 {
+            reportFailures -= 1
+            throw WorkdFailure.transport
+        }
+        // The server only stamps still-live rows; the mock mirrors that by
+        // accepting only sessions it still lists.
+        let live = Set(ledgerLiveSessions.map(\.id))
+        let accepted = sessionIDs.filter { live.contains($0) }
+        ledgerLiveSessions.removeAll { accepted.contains($0.id) }
+        return accepted
     }
 
     func heartbeat(hostID: UUID) async throws { events.append("heartbeat:\(hostID)") }

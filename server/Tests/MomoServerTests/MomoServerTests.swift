@@ -2506,6 +2506,93 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    // MOMO-656 / #870. A daemon that restarts inside the offline grace window
+    // keeps its heartbeat fresh, so the sweep alone can never notice its lost
+    // PTYs. The host reports them; the sweep still owns every transition.
+    func testWorkHostRestartReconciliationReusesTheOrphanSweepWithoutNewUX() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let serverRoot = repoRoot.appendingPathComponent("server")
+
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/056_work_session_host_reconciliation.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("ADD COLUMN host_lost_at timestamptz"))
+        XCTAssertTrue(migration.contains("work_session_host_lost_idx"))
+        // The marker must never become a lifecycle state or an end_reason the
+        // clients would have to render, so the status/end_reason constraints
+        // are left exactly as migration 047 defined them.
+        XCTAssertFalse(migration.contains("ADD CONSTRAINT"))
+        XCTAssertFalse(migration.contains("DROP CONSTRAINT"))
+
+        let hostRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkHostRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(hostRoutes.contains("work-hosts/:host/live-sessions"))
+        XCTAssertTrue(hostRoutes.contains("work-hosts/:host/reconcile"))
+        XCTAssertTrue(hostRoutes.contains("requireSelfSignedHost"))
+        XCTAssertTrue(hostRoutes.contains(
+            "SET host_lost_at = COALESCE(host_lost_at, clock_timestamp())"
+        ))
+        XCTAssertTrue(hostRoutes.contains("AND status IN ('running', 'idle')"))
+        XCTAssertTrue(hostRoutes.contains("'momo.work_session.host_lost.v1'::text"))
+        // The route stamps eligibility only. Any status write here would be a
+        // second orphan implementation racing the sweep.
+        XCTAssertFalse(hostRoutes.contains("SET status = 'orphaned'"))
+        XCTAssertFalse(hostRoutes.contains("resume_offer"))
+
+        let authenticator = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Auth/WorkHostAuthenticator.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(authenticator.contains("\"live-sessions\""))
+        XCTAssertTrue(authenticator.contains("\"reconcile\""))
+        let reconcileWorkspaceID = UUID().uuidString.lowercased()
+        let reconcileHostID = UUID().uuidString.lowercased()
+        let livePath =
+            "/v1/workspaces/\(reconcileWorkspaceID)/work-hosts/\(reconcileHostID)/live-sessions"
+        let reconcilePath =
+            "/v1/workspaces/\(reconcileWorkspaceID)/work-hosts/\(reconcileHostID)/reconcile"
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "GET", path: livePath))
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "POST", path: reconcilePath))
+        // Method confusion must not open the other verb on either path.
+        XCTAssertFalse(WorkHostAuthenticator.isAllowed(method: "POST", path: livePath))
+        XCTAssertFalse(WorkHostAuthenticator.isAllowed(method: "GET", path: reconcilePath))
+        XCTAssertEqual(
+            WorkHostAuthenticator.scopedHostID(fromPath: reconcilePath)?
+                .uuidString.lowercased(),
+            reconcileHostID
+        )
+
+        let sweep = try String(
+            contentsOf: repoRoot.appendingPathComponent(
+                "workers/NotifierWorker/Sources/NotifierWorker/TierFallbackSweep.swift"
+            ),
+            encoding: .utf8
+        )
+        // Host loss now has two equally authoritative signals.
+        XCTAssertTrue(sweep.contains("ws.host_lost_at IS NOT NULL AS host_reported_lost"))
+        XCTAssertTrue(sweep.contains("work_session.host_lost_at IS NOT NULL"))
+        // ...and is still processed before ADR-0139 idle timeout.
+        XCTAssertTrue(sweep.contains("AND ws.host_lost_at IS NULL"))
+        // The marker is consumed by the transition, so a returning host that
+        // starts fresh sessions is not swept again.
+        XCTAssertTrue(sweep.contains("host_lost_at = NULL"))
+        XCTAssertTrue(sweep.contains("\"orphan_source\": session.orphanSource"))
+        XCTAssertTrue(sweep.contains("host_reconciliation"))
+    }
+
     func testWorkSessionMigrationAndRouteKeepLedgerBoundary() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -2561,6 +2648,97 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(
             idleMigration.contains("status = 'running' AND exit_code IS NULL"),
             "exit_code is the last tool result and must survive idle-to-running"
+        )
+    }
+
+    /// MOMO-671 / ADR-0143. These are the two invariants that would silently
+    /// regress: implicit creation must stay in the ledger trigger (so no insert
+    /// path can produce an unattached Run), and resume eligibility must stay
+    /// channel membership rather than session ownership.
+    func testWorkstreamMigrationAndResumeEligibility() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/055_workstream.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE workstream"))
+        XCTAssertTrue(
+            migration.contains("status IN ('active', 'paused', 'done', 'cancelled')")
+        )
+        XCTAssertTrue(
+            migration.contains("root_message_id      uuid NOT NULL UNIQUE REFERENCES message(id)")
+        )
+        XCTAssertTrue(migration.contains("ADD COLUMN workstream_id uuid"))
+        XCTAssertTrue(
+            migration.contains("REFERENCES workstream (workspace_id, id)"),
+            "the Run FK must be composite so a Run cannot point at another tenant"
+        )
+        XCTAssertTrue(migration.contains("ALTER COLUMN workstream_id SET NOT NULL"))
+        XCTAssertTrue(migration.contains("CREATE TRIGGER work_session_attach_workstream_trg"))
+        XCTAssertTrue(migration.contains("BEFORE INSERT ON work_session"))
+        XCTAssertTrue(migration.contains("ON CONFLICT (root_message_id)"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(
+            migration.contains("pty_id"),
+            "host-local binding must not leak into the goal layer"
+        )
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkSessionRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertFalse(
+            routes.contains("only the session owner can resume it"),
+            "ADR-0143 D2 replaced the resume owner guard with channel membership"
+        )
+        XCTAssertTrue(routes.contains("resumed_from_session_id, workstream_id"))
+        XCTAssertTrue(routes.contains("only the session owner can end it"))
+
+        let workstreamRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkstreamRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(workstreamRoutes.contains("JOIN membership ms"))
+        XCTAssertTrue(workstreamRoutes.contains("workstream not found"))
+        XCTAssertFalse(workstreamRoutes.contains("BYPASSRLS"))
+        for leaked in ["pty_id", "attach_endpoint", "cwd"] {
+            XCTAssertFalse(
+                workstreamRoutes.contains(leaked),
+                "\(leaked) must stay out of the workstream projection"
+            )
+        }
+    }
+
+    func testWorkstreamQueryFilterValidation() throws {
+        XCTAssertNil(try WorkstreamRoutes.validatedStatus(nil))
+        XCTAssertNil(try WorkstreamRoutes.validatedStatus(""))
+        XCTAssertEqual(try WorkstreamRoutes.validatedStatus("active"), "active")
+        XCTAssertEqual(try WorkstreamRoutes.validatedStatus("cancelled"), "cancelled")
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedStatus("Active"))
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedStatus("archived"))
+
+        XCTAssertEqual(
+            try WorkstreamRoutes.validatedLimit(nil),
+            WorkstreamRoutes.defaultListLimit
+        )
+        XCTAssertEqual(try WorkstreamRoutes.validatedLimit("200"), 200)
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedLimit("0"))
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedLimit("201"))
+        XCTAssertThrowsError(try WorkstreamRoutes.validatedLimit("many"))
+
+        XCTAssertNil(try WorkstreamRoutes.optionalUUID(nil, label: "sessionId"))
+        XCTAssertThrowsError(try WorkstreamRoutes.optionalUUID("nope", label: "sessionId"))
+        let id = UUID(uuidString: "00000000-0000-7000-8000-000000000671")!
+        XCTAssertEqual(
+            try WorkstreamRoutes.optionalUUID(id.uuidString, label: "sessionId"),
+            id
         )
     }
 

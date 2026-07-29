@@ -1,5 +1,36 @@
 # momo 진행 현황
 
+## MOMO-654 OpenAPI 계약 게이트 remote-create 409 해소 + 완주 구조 (#865, 2026-07-29)
+
+- `work-session-remote-create` 409(`spawn control is not dispatchable by this host`)는 서버 회귀가 아니라 게이트 픽스처 결함이다. `requireDispatchedSpawnControl`은 `wc.payload->>'tool'`과 `wc.payload->>'label'` 동시 일치를 요구하는데(#526에서 도입), #545가 이 샘플을 host 서명 생성으로 바꾸면서 세션 label만 `OpenAPI remote PTY`로 두고 control payload는 `OpenAPI control`로 남겨 두 리터럴이 갈라졌다. 즉 #545 이후 이 샘플은 통과한 적이 없으며 base에서도 동일하게 재현된다(JOURNAL 2026-07-27 기록과 일치).
+- 수리는 SQL 지름길 없이 실제 REST 경로만 쓴다. 세션 생성 body의 tool/label을 `work-control-create` 201 응답이 돌려준 `.workControl.payload`에서 유도해 리터럴 중복을 제거했고, 생성 결과를 label·hostId·status로 단정하는 guard를 추가했다.
+- 샘플 하나가 나머지 전체를 막던 fail-fast 구조를 실패 누적형으로 바꿨다. 상태/shape 단정 실패는 기록 후 계속 진행하고(잘못된 body는 manifest에 넣지 않아 역방향 커버리지에서 미샘플로 드러난다), 후속 요청이 의존하는 id 추출 실패만 즉시 중단하되 EXIT trap이 그때까지 누적된 실패를 항상 출력한다. `OPENAPI_GATE_FAIL_FAST=1`로 기존 동작을, `OPENAPI_GATE_MAX_FAILURES`(기본 30)로 연쇄 잡음 상한을 제어한다. 최종 shape/커버리지 검사는 단정 실패가 있어도 실행된다.
+- 서버 코드 변경 없음(`swift build` green). 스크립트는 `bash -n`·shellcheck에서 base 대비 새 경고 분류 없음(추가된 SC2016 1건은 jq `--arg` 관용구). 게이트 자체는 Docker 스택이 필요하므로 `runtime-unverified` — 오케스트레이터가 `scripts/verify_openapi_contract.sh` 완주 PASS를 확인해야 한다.
+
+## MOMO-656/661 데몬 재시작 reconciliation + replay 구독자 큐 상한 (#870 #879, 2026-07-29)
+
+- 데몬은 기동 시 `GET .../work-hosts/{host}/live-sessions`로 원장이 아직 자기 것으로 보는 running/idle 세션을 읽고, 자기 프로세스 표에 없는 것(재시작 직후에는 전부)을 서명 REST `POST .../reconcile`로 명시 보고한다. 부팅 스냅샷은 1회만 뜨고 실패 시 그대로 재시도해, 재개가 같은 호스트로 내려온 새 세션을 자기 보고가 다시 잡는 일이 없다.
+- 서버는 전이를 하지 않는다. Migration 054의 `work_session.host_lost_at`은 sweep 적격화 표식일 뿐이며 orphaned 상태·재개 카드·계보·tier policy 분기는 기존 ADR-0125 D11 sweep이 그대로 소유한다. `end_reason`은 늘리지 않았다 — 사용자에게는 같은 사실이고 그 값은 클라이언트가 렌더하는 어휘라서, 출처 구분은 `audit_log`(`momo.work_session.host_lost.v1` + orphan 감사의 `orphan_source`)에만 남겼다. host가 보고한 세션은 idle timeout 분기에서 제외해 host loss가 항상 먼저 처리된다.
+- PTY replay 구독자 큐에 구성 가능한 바이트 상한을 두고(`MOMO_WORKD_PTY_SUBSCRIBER_QUEUE_BYTES`, 기본 ring×4·ring 미만 불가), 초과 구독자는 프레임을 조용히 버리는 대신 `.overflow(byteOffset:)` 종단 프레임으로 절단한다. PTY는 연속 바이트라 드롭이 xterm에 무증상 깨짐으로 나타나고, 절단은 재연결→ring replay→새 `replay_end`라는 기존 계약을 그대로 재사용하기 때문이다. 큐 계정은 `AsyncStream(unfolding:)`으로 소비 시점에만 감소해 정확하다.
+- WorkHostDaemon 38 tests(3 skip, 기준 32에서 +6: 재시작 보고·서비스중 세션 제외·전송 실패 재시도, 정지 구독자 red proof·정상 소비자·overflow 프레임 형태), server `testWorkHostRestartReconciliationReusesTheOrphanSweepWithoutNewUX`, server·NotifierWorker 빌드 무회귀는 green이다. `scripts/verify_workd_reconcile.sh`(실제 SIGKILL 재기동 → 보고 → orphaned + resume_offer, grace 1시간으로 heartbeat 경로 배제, SQL 지름길 없음)는 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
+## MOMO-671 workstream 계층 — 암시 생성·계보 연결·재개 자격 확장 (#898, 2026-07-29)
+
+- Migration 055가 스레드 root message에 앵커되는 `workstream`(목표 문장·`active|paused|done|cancelled`·workspace/channel FK)과 `work_session.workstream_id` 복합 FK(`(workspace_id, id)` 참조)를 추가하고, 기존 세션을 스레드 기준으로 소급 생성·연결한 뒤 `SET NOT NULL`로 미연결 Run을 이름 있는 실패로 막는다.
+- 암시 생성은 REST 핸들러가 아니라 `BEFORE INSERT` 트리거가 소유한다 — human create·human resume·NotifierWorker 자동 resume·픽스처까지 모든 insert 경로가 같은 스레드의 workstream에 붙으므로 미부착 Run을 만들 수 있는 코드 경로가 없다. 동시 첫 Run은 `ON CONFLICT (root_message_id) DO UPDATE`로 승자 row를 채택한다.
+- 계보 재개 자격을 '소유자 본인'에서 **앵커 채널 활성 멤버**로 확장했다(ADR-0143 D2/D3). `work_session.member_id`는 그 Run의 실행자로 남아 이전되지 않고, 새 Run은 `resumed_from_session_id` 계보와 같은 workstream을 함께 유지한다. 이 변경에 맞춰 `verify_tier_fallback.sh`의 거부 케이스를 채널 비멤버로 교체했다.
+- 조회 REST 3종(`GET /workstreams`(status·channelId·sessionId·limit), `/workstreams/{id}`, `/workstreams/{id}/runs`)과 OpenAPI 스펙을 함께 넣었다. 노출 최소(#831): host-local·자격증명 표면 없음, 비멤버는 목록 0건과 상세/이력 404(존재 탐지 불가), 재개만 403.
+- server 351 tests(기준 349 + workstream 2)·`check_migration_numbers.sh`(54 files)·OpenAPI 라우트 역커버리지 green. Docker 격리 검증기 `scripts/verify_workstream_continuity.sh`(암시 생성 → 비멤버 403/404 → 같은 채널 멤버 B 이어받기 → A·B 병기 이력 → 트리거·FORCE RLS 단정)와 스크립트 헤더에 적은 red proof(자격 술어를 옛 소유자 가드로 되돌리면 `[workstream] FAIL channel-member takeover: expected HTTP 201, got 403`), 기존 verifier 회귀는 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
+## MOMO-670 T3 provider 어댑터 + E2B 제거 + BYOC 등록 공식화 (#897, 2026-07-29)
+
+- `services/CloudProviderKit`이 `create/pause/resume/destroy/probe` 어댑터 계약과 capability 선언을 소유하고 MomoServer·NotifierWorker가 같은 정의를 컴파일한다. 정책 코드는 provider 상수를 알지 못하고 `capabilities`만 읽으며, 미지원 연산은 흉내내지 않고 선언·거부한다. `probe`는 존재/부재/**불명** 3값이라 "물어보지 못했다"가 "사라졌다"로 승격되지 않는다.
+- Migration 054가 `work_cloud_host.provider`의 단일 벤더 CHECK와 default를 걷어내고 어댑터 레지스트리 식별자로 바꾼다. reconciler·REST는 프로세스 기본값이 아니라 **행에 적힌 provider**로 어댑터를 해석하므로, 운영자가 기본 provider를 바꿔도 기존 호스트가 계속 조작 가능하다. 레지스트리에 없는 이름은 설정 로드에서 fail closed.
+- BYOC를 REST로 공식화했다(`POST /v1/workspaces/:ws/work-hosts/byoc/enrollments`, 워크스페이스 공용만 — personal은 스키마가 아니라 REST에서 이름 있게 거절). 기존 1회 부트스트랩 토큰·자체 Ed25519 등록 흐름을 그대로 재사용하며, 토큰은 digest만 저장하므로 같은 ref 재요청은 409다. 셀프호스트 2단 가이드는 `docs/BYOC_CLOUD_HOST.md`.
+- 검증 fixture를 mock provider 2종으로 일반화했다(`scripts/mock_provider.py`: mock-a=pause 지원/메모리 보존, mock-b=pause 거부/cold boot). mock은 정직성이 계약이다 — pause된 인스턴스는 실행이 필요한 호출을 409로 거절하고, 죽은 인스턴스는 probe에 `absent`를 답한다. 정책 코드·검증기·인프라·문서의 벤더 문자열 잔존은 0이며 `verify_t3_provisioner.sh`가 `provider-neutral-policy-code` 이름으로 이를 상시 감시한다(needle을 런타임 조립해 자기 텍스트에 매칭되지 않는다).
+- 연속성 무상태 검증기 `scripts/verify_t3_provider_continuity.sh`를 추가했다: mock-a 사망 → 어댑터의 정직한 보고 → reconciler의 이름 있는 `provider_missing` 수렴 → **기존 resume REST 그대로** mock-b의 새 Run 재개 → `resumed_from_session_id` 계보·단일 정산 단정. red proof는 `T3_CONTINUITY_PROVE_RED=dishonest-probe` — probe가 죽음을 숨기면 momo가 자기모순 provider 위에서 정산하기를 거부하므로 수렴이 없고, 검증기는 유한 deadline에서 `provider-missing-convergence` 이름으로 빨개진다(행·타임아웃 아님).
+- 서버 354·NotifierWorker 7·CloudProviderKit 9·WorkHostDaemon 32(3 skip) 테스트, `check_migration_numbers.sh`, 두 T3 검증기의 정적 절반, compose/OpenAPI YAML 파싱이 green이다. Docker 행동 검증(연속성 정상/red proof, 기존 T3 provisioner·동시성 gate, T1/T2 무회귀)은 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-667 T3 수명주기 정본화 (#891, 2026-07-29)
 
 - Migration 053이 정산을 이유 보존형 `t3_terminate` 한 문으로 모으고 직접 `settled_at` 변경과 비실재 cloud-host 전이를 이름 있는 트리거 예외로 봉인한다. 기존 `settle_t3_work_session`은 설치 DB·운영 도구 호환 shim만 유지하며 런타임·repair는 명시 reason 경유로 이행했다.

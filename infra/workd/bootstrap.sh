@@ -12,6 +12,10 @@ BINARY_PATH="${MOMO_WORKD_BINARY:-}"
 SERVER_URL="${MOMO_WORKD_SERVER_URL:-}"
 WORKSPACE_ID="${MOMO_WORKD_WORKSPACE_ID:-}"
 SCOPE="${MOMO_WORKD_SCOPE:-member}"
+# ADR-0142 D1: a BYOC cloud host is a workspace-shared host the owner runs. It
+# differs from an ordinary workd only in which register endpoint consumes the
+# one-shot token, so it is a flag here rather than a second bootstrap script.
+HOST_TYPE="${MOMO_WORKD_HOST_TYPE:-workd}"
 DISPLAY_NAME="${MOMO_WORKD_DISPLAY_NAME:-momo workd}"
 CHILD_ENV_MODE="${MOMO_WORKD_CHILD_ENV_MODE:-allowlist}"
 ENV_PASSTHROUGH="${MOMO_WORKD_ENV_PASSTHROUGH:-}"
@@ -29,6 +33,7 @@ Options:
   --server-url HTTPS_URL    momo server origin
   --workspace UUID          Workspace to register the host in
   --scope member|workspace  Registry scope (default: member)
+  --host-type workd|cloud   cloud = BYOC T3 host (requires --scope workspace)
   --display-name NAME       Host display label
   --token-file FILE         Local 0600 one-time human bearer file
   --service auto|systemd|launchd
@@ -54,6 +59,7 @@ while [ "$#" -gt 0 ]; do
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --workspace) WORKSPACE_ID="${2:-}"; shift 2 ;;
     --scope) SCOPE="${2:-}"; shift 2 ;;
+    --host-type) HOST_TYPE="${2:-}"; shift 2 ;;
     --display-name) DISPLAY_NAME="${2:-}"; shift 2 ;;
     --token-file) TOKEN_FILE="${2:-}"; shift 2 ;;
     --service) SERVICE_KIND="${2:-}"; shift 2 ;;
@@ -69,6 +75,12 @@ done
 [ -n "$SERVER_URL" ] || fail "--server-url is required"
 case "$SERVER_URL" in https://*) ;; *) fail "remote workd requires an https server URL" ;; esac
 case "$SCOPE" in member|workspace) ;; *) fail "scope must be member or workspace" ;; esac
+case "$HOST_TYPE" in workd|cloud) ;; *) fail "host type must be workd or cloud" ;; esac
+# The daemon enforces this too; failing here keeps the operator from copying a
+# binary and a live token onto a machine that could never register.
+if [ "$HOST_TYPE" = "cloud" ] && [ "$SCOPE" != "workspace" ]; then
+  fail "a BYOC cloud host is workspace-shared: use --scope workspace"
+fi
 case "$SERVICE_KIND" in auto|systemd|launchd) ;; *) fail "service must be auto, systemd, or launchd" ;; esac
 [ "${#DISPLAY_NAME}" -le 80 ] && [ -n "$DISPLAY_NAME" ] || fail "display name must contain 1...80 characters"
 
@@ -146,6 +158,7 @@ ENV_FILE="$TMP_DIR/workd.env"
   printf 'MOMO_WORKD_SERVER_URL=%s\n' "$(shell_quote "$SERVER_URL")"
   printf 'MOMO_WORKD_WORKSPACE_ID=%s\n' "$(shell_quote "$WORKSPACE_ID")"
   printf 'MOMO_WORKD_SCOPE=%s\n' "$(shell_quote "$SCOPE")"
+  printf 'MOMO_WORKD_HOST_TYPE=%s\n' "$(shell_quote "$HOST_TYPE")"
   printf 'MOMO_WORKD_DISPLAY_NAME=%s\n' "$(shell_quote "$DISPLAY_NAME")"
   printf 'MOMO_WORKD_CHILD_ENV_MODE=%s\n' "$(shell_quote "$CHILD_ENV_MODE")"
   printf 'MOMO_WORKD_ENV_PASSTHROUGH=%s\n' "$(shell_quote "$ENV_PASSTHROUGH")"

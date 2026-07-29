@@ -23,6 +23,10 @@ let package = Package(
     dependencies: [
         .package(path: "../services/OutboundHTTPPolicy"),
         .package(path: "../services/MomoMetrics"),
+        // ADR-0142 D2: the T3 provider adapter contract is shared with
+        // NotifierWorker so REST intents and the lifecycle reconciler cannot
+        // drift into two different provider contracts.
+        .package(path: "../services/CloudProviderKit"),
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.25.0"),
@@ -39,6 +43,7 @@ let package = Package(
             dependencies: [
                 .product(name: "OutboundHTTPPolicy", package: "OutboundHTTPPolicy"),
                 .product(name: "MomoMetrics", package: "MomoMetrics"),
+                .product(name: "CloudProviderKit", package: "CloudProviderKit"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOFoundationCompat", package: "swift-nio"),
