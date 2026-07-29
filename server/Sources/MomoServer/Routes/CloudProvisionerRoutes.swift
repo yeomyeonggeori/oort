@@ -693,7 +693,8 @@ struct CloudProvisionerRoutes: Sendable {
     ) async throws {
         try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
-            cloudHostID: cloudHostID
+            cloudHostID: cloudHostID,
+            lockWorkspaceCredit: true
         ) { conn in
             let usageRows = try await conn.query(
                 """
@@ -702,18 +703,42 @@ struct CloudProvisionerRoutes: Sendable {
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
                    AND settled_at IS NULL
-                 FOR UPDATE
                 """,
                 logger: db.logger
             ).collect()
             let sessionID = try usageRows.first?.decode(UUID.self)
+            if let sessionID {
+                try await CloudUsageLedger.terminate(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    sessionID: sessionID,
+                    reason: .providerMissing
+                )
+            } else {
+                _ = try await conn.query(
+                    """
+                    UPDATE work_cloud_host
+                       SET state = 'destroy_pending',
+                           lifecycle_operation_kind = 'destroy',
+                           lifecycle_operation_version =
+                             lifecycle_operation_version + 1,
+                           updated_at = clock_timestamp()
+                     WHERE workspace_id = \(workspaceID)
+                       AND host_id = \(hostID)
+                       AND state = 'resuming'
+                       AND lifecycle_operation_id = \(operationID)
+                    """,
+                    logger: db.logger
+                )
+            }
             _ = try await conn.query(
                 """
                 UPDATE work_cloud_host
                    SET state = 'destroyed', updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
-                   AND state = 'resuming'
+                   AND state = 'destroy_pending'
                    AND lifecycle_operation_id = \(operationID)
                 """,
                 logger: db.logger
@@ -803,6 +828,7 @@ struct CloudProvisionerRoutes: Sendable {
     private func withTenantLifecycleTransactionUnwrapped<Result: Sendable>(
         workspaceID: UUID,
         cloudHostID: UUID?,
+        lockWorkspaceCredit: Bool = false,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         do {
@@ -810,6 +836,7 @@ struct CloudProvisionerRoutes: Sendable {
                 return try await db.withTenantT3LifecycleTransaction(
                     workspaceID: workspaceID,
                     cloudHostID: cloudHostID,
+                    lockWorkspaceCredit: lockWorkspaceCredit,
                     body
                 )
             }

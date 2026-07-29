@@ -31,9 +31,11 @@ now_ms() { python3 -c 'import time; print(time.time_ns() // 1_000_000)'; }
 MIGRATION="server/Migrations/045_t3_provisioner_credit_ledger.sql"
 SETTLEMENT_MIGRATION="server/Migrations/049_t3_lifecycle_settlement.sql"
 LIFECYCLE_MIGRATION="server/Migrations/051_t3_unsettled_usage_constraint.sql"
+CANONICAL_MIGRATION="server/Migrations/053_t3_lifecycle_canonicalization.sql"
 test -f "$MIGRATION" || fail "missing $MIGRATION"
 test -f "$SETTLEMENT_MIGRATION" || fail "missing $SETTLEMENT_MIGRATION"
 test -f "$LIFECYCLE_MIGRATION" || fail "missing $LIFECYCLE_MIGRATION"
+test -f "$CANONICAL_MIGRATION" || fail "missing $CANONICAL_MIGRATION"
 grep -q "CREATE TABLE work_host_usage_interval" "$MIGRATION" \
   || fail "active/pause interval ledger missing"
 grep -q "WHEN state = 'active' AND ended_at IS NOT NULL" "$MIGRATION" \
@@ -42,6 +44,12 @@ grep -q "ALTER TABLE %I FORCE ROW LEVEL SECURITY" "$MIGRATION" \
   || fail "new tenant tables must FORCE RLS"
 grep -q "CREATE FUNCTION settle_t3_work_session" "$SETTLEMENT_MIGRATION" \
   || fail "named gate terminal-settlement-primitive"
+grep -q "CREATE FUNCTION t3_terminate" "$CANONICAL_MIGRATION" \
+  || fail "named gate canonical-terminal-settlement-primitive"
+grep -q "t3 settlement must go through t3_terminate" "$CANONICAL_MIGRATION" \
+  || fail "named gate direct-settlement-seal"
+grep -q "CREATE TABLE work_cloud_host_transition" "$CANONICAL_MIGRATION" \
+  || fail "named gate cloud-host-transition-table"
 grep -q "work_host_usage_one_unsettled_per_host_idx" "$LIFECYCLE_MIGRATION" \
   || fail "named gate one-unsettled-usage-per-host"
 grep -q "state IN ('pausing', 'resuming', 'destroy_pending')" \

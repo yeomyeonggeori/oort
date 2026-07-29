@@ -110,6 +110,12 @@ final class CloudProvisionerTests: XCTestCase {
             ),
             encoding: .utf8
         )
+        let canonicalSQL = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/053_t3_lifecycle_canonicalization.sql"
+            ),
+            encoding: .utf8
+        )
         let constraintSQL = try String(
             contentsOf: serverRoot.appendingPathComponent(
                 "Migrations/051_t3_unsettled_usage_constraint.sql"
@@ -123,7 +129,14 @@ final class CloudProvisionerTests: XCTestCase {
         XCTAssertTrue(settlementSQL.contains("ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING"))
         XCTAssertTrue(settlementSQL.contains("'pausing', 'paused', 'resuming'"))
         XCTAssertTrue(settlementSQL.contains("'destroy_pending'"))
+        XCTAssertTrue(canonicalSQL.contains("CREATE FUNCTION t3_terminate"))
+        XCTAssertTrue(canonicalSQL.contains("t3 settlement must go through t3_terminate"))
+        XCTAssertTrue(canonicalSQL.contains("illegal cloud host transition % -> %"))
+        XCTAssertTrue(canonicalSQL.contains("CREATE TABLE work_cloud_host_transition"))
+        XCTAssertTrue(canonicalSQL.contains("settled_reason = p_reason"))
+        XCTAssertTrue(canonicalSQL.contains("reason=destroyed"))
         XCTAssertFalse(settlementSQL.contains("ALTER TABLE usage_ledger"))
+        XCTAssertFalse(canonicalSQL.contains("ALTER TABLE usage_ledger"))
     }
 
     func testT3MigrationSeparatesTokenAndActiveTimeLedgers() throws {
