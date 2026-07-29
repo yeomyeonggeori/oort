@@ -1736,6 +1736,70 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/live-sessions:
+    get:
+      tags: [work-hosts, work-sessions]
+      operationId: listWorkHostLiveSessions
+      summary: Host-signed view of this host's running/idle sessions.
+      description: >
+        Signature-authenticated (momo.work_host.request.v2). A restarting
+        daemon asks the ledger which sessions it is still expected to serve
+        before deciding what it can revive (MOMO-656).
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Sessions the ledger still attributes to this host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostLiveSessionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/reconcile:
+    post:
+      tags: [work-hosts, work-sessions]
+      operationId: reconcileWorkHostSessions
+      summary: Host-signed report of sessions it cannot revive.
+      description: >
+        Signature-authenticated (momo.work_host.request.v2). Stamps
+        host_lost_at on the named sessions so the existing offline sweep
+        owns the orphaned transition, resume card, and lineage — the fast
+        restart case where heartbeats never lapsed (MOMO-656). Performs no
+        lifecycle transition of its own.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkHostReconcileRequest"
+      responses:
+        "200":
+          description: Sessions accepted for sweep-owned orphaning.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostReconcileResponse"
+        "400":
+          description: Malformed report (over 200 entries or bad UUIDs).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/terminal-attach/validate:
     post:
       tags: [work-hosts, work-sessions]
@@ -6236,6 +6300,38 @@ components:
         cloudHost:
           $ref: "#/components/schemas/CloudHost"
 
+    WorkHostLiveSessionDTO:
+      type: object
+      required: [id, tool, label, status, startedAtMs]
+      properties:
+        id: { type: string, format: uuid }
+        tool: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [running, idle] }
+        startedAtMs: { type: integer, format: int64 }
+    WorkHostLiveSessionsResponse:
+      type: object
+      required: [workSessions]
+      properties:
+        workSessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkHostLiveSessionDTO"
+    WorkHostReconcileRequest:
+      type: object
+      required: [lostSessionIds]
+      properties:
+        lostSessionIds:
+          type: array
+          maxItems: 200
+          items: { type: string, format: uuid }
+    WorkHostReconcileResponse:
+      type: object
+      required: [reportedSessionIds]
+      properties:
+        reportedSessionIds:
+          type: array
+          items: { type: string, format: uuid }
     WorkHostHeartbeatRequest:
       type: object
       required: [sentAtMs, signature]

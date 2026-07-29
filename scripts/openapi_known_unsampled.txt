@@ -1,0 +1,48 @@
+# openapi_known_unsampled.txt — 게이트가 처음 완주하며 드러난 선존재 미샘플 부채 (MOMO-673/#904).
+# 한 줄 = "METHOD /path". 여기 실린 스펙 연산은 operation-coverage 실패에서 제외되되,
+# 실샘플이 생기면(=더는 미샘플이 아니면) 게이트가 '낡은 부채 항목' 이름으로 실패한다 —
+# 목록은 줄어들 수만 있다. 새 라우트를 여기 추가하는 것은 금지: 새 연산은 샘플과 함께 랜딩하라.
+DELETE /v1/provider/link/chain
+DELETE /v1/workspaces/{workspaceId}/channels/{channelId}/members/me
+DELETE /v1/workspaces/{workspaceId}/event-subscriptions/{subscriptionId}
+DELETE /v1/workspaces/{workspaceId}/members/me
+DELETE /v1/workspaces/{workspaceId}/memories
+DELETE /v1/workspaces/{workspaceId}/memories/{memoryId}/grants
+DELETE /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud
+GET /v1/provider/effort-table
+GET /v1/provider/link/chain
+GET /v1/workspaces/{workspaceId}/audit
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/replies
+GET /v1/workspaces/{workspaceId}/context-packets/{packetId}
+GET /v1/workspaces/{workspaceId}/event-subscriptions
+GET /v1/workspaces/{workspaceId}/memories
+GET /v1/workspaces/{workspaceId}/memories/search
+GET /v1/workspaces/{workspaceId}/memories/{memoryId}/grants
+GET /v1/workspaces/{workspaceId}/memory-external-provider-consent
+GET /v1/workspaces/{workspaceId}/memory-policy
+GET /v1/workspaces/{workspaceId}/work-hosts/cloud/{provisionId}
+GET /v1/workspaces/{workspaceId}/work-tier-policy
+GET /v1/workspaces/{workspaceId}/work-tier-policy/me
+GET /v1/workspaces/{workspaceId}/workstreams
+GET /v1/workspaces/{workspaceId}/workstreams/{workstreamId}
+GET /v1/workspaces/{workspaceId}/workstreams/{workstreamId}/runs
+PATCH /v1/workspaces/{workspaceId}/memories/{memoryId}
+POST /v1/admin/workspaces/{workspaceId}/credits/topups
+POST /v1/workspaces/{workspaceId}/agents/from-card
+POST /v1/workspaces/{workspaceId}/agents/from-card/{registrationId}/confirm
+POST /v1/workspaces/{workspaceId}/event-subscriptions
+POST /v1/workspaces/{workspaceId}/memories
+POST /v1/workspaces/{workspaceId}/memories/{memoryId}/grants
+POST /v1/workspaces/{workspaceId}/memories/{memoryId}/invalidate
+POST /v1/workspaces/{workspaceId}/work-hosts/byoc/enrollments
+POST /v1/workspaces/{workspaceId}/work-hosts/cloud
+POST /v1/workspaces/{workspaceId}/work-hosts/cloud/register
+POST /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/pause
+POST /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/resume
+POST /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume
+PUT /v1/provider/link/chain
+PUT /v1/workspaces/{workspaceId}/event-subscriptions/{subscriptionId}
+PUT /v1/workspaces/{workspaceId}/memory-external-provider-consent
+PUT /v1/workspaces/{workspaceId}/memory-policy
+PUT /v1/workspaces/{workspaceId}/work-tier-policy
+PUT /v1/workspaces/{workspaceId}/work-tier-policy/me

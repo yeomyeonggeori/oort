@@ -588,6 +588,17 @@ work_host_signed_sample work-host-pending-controls get \
   "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/pending-controls" 200 \
   "$WORK_HOST_ID" "$WORK_HOST_PRIVATE_KEY"
 guard_jq '.workControls == []' "new host has no dispatched controls"
+# MOMO-656 restart reconciliation surface: live view + no-op loss report.
+work_host_signed_sample work-host-live-sessions get \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/live-sessions" \
+  "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/live-sessions" 200 \
+  "$WORK_HOST_ID" "$WORK_HOST_PRIVATE_KEY"
+guard_jq '.workSessions == []' "fresh host owes the ledger no live sessions"
+work_host_signed_sample work-host-reconcile post \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/reconcile" \
+  "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/reconcile" 200 \
+  "$WORK_HOST_ID" "$WORK_HOST_PRIVATE_KEY" '{"lostSessionIds":[]}'
+guard_jq '.reportedSessionIds == []' "empty loss report is a no-op"
 
 # work sessions: create card/root -> active list -> owner end
 sample work-session-create post "/v1/workspaces/{workspaceId}/work-sessions" \
@@ -1073,7 +1084,8 @@ SHAPE_RC=0
   --spec "$SPEC_JSON" \
   --manifest "$TMP_DIR/manifest.json" \
   --server-route-manifest "$TMP_DIR/server-routes.json" \
-  --require-operation-coverage || SHAPE_RC=$?
+  --require-operation-coverage \
+  --known-unsampled "$SCRIPT_DIR/openapi_known_unsampled.txt" || SHAPE_RC=$?
 
 if [ "$FAILURE_COUNT" -gt 0 ] || [ "$SHAPE_RC" -ne 0 ]; then
   echo "[openapi] FAIL OpenAPI contract drift gate — $FAILURE_COUNT assertion failure(s), shape check rc=$SHAPE_RC (evidence: $TMP_DIR)" >&2
