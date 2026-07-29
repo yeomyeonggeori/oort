@@ -34,26 +34,45 @@ export function channelPath(channelId: string, seq?: number): string {
   return seq === undefined ? path : `${path}?seq=${seq}`;
 }
 
+/**
+ * Route for a channel anchored at a message ID rather than a seq (MOMO-677).
+ *
+ * The goal layer knows its anchor thread by `rootMessageId` and never sees a
+ * seq: the workstream projection carries no ordering number, and deriving one
+ * would mean guessing. So the same jump gets a second key rather than a second
+ * mechanism — one path helper, one watcher, two identities the timeline already
+ * publishes on its rows.
+ */
+export function messageAnchorPath(channelId: string, messageId: string): string {
+  return `/c/${encodeURIComponent(channelId)}?msg=${encodeURIComponent(
+    messageId.toLowerCase()
+  )}`;
+}
+
 export function messageSelector(seq: number): string {
   return `[data-testid="timeline-message"][data-seq="${seq}"]`;
 }
 
+/** UUIDs cross the wire mixed-case; the row publishes its id lower-cased. */
+export function messageIdSelector(messageId: string): string {
+  return `[data-testid="timeline-message"][data-message-id="${messageId.toLowerCase()}"]`;
+}
+
+export interface WatchOptions {
+  doc?: Document;
+  now?: () => number;
+  schedule?: (fn: () => void, ms: number) => number;
+  cancel?: (handle: number) => void;
+  watchMs?: number;
+}
+
 /**
- * Scroll the message with this seq into view once it mounts. Returns a cancel
- * function. If the row never appears (it is older than the loaded head), the
- * watcher expires silently: the channel is open, which is the outcome that
+ * Scroll the row matching this selector into view once it mounts. Returns a
+ * cancel function. If the row never appears (it is older than the loaded head),
+ * the watcher expires silently: the channel is open, which is the outcome that
  * matters, and a message that says "not found" would be worse than nothing.
  */
-export function watchForMessage(
-  seq: number,
-  options: {
-    doc?: Document;
-    now?: () => number;
-    schedule?: (fn: () => void, ms: number) => number;
-    cancel?: (handle: number) => void;
-    watchMs?: number;
-  } = {}
-): () => void {
+function watchForRow(selector: string, options: WatchOptions = {}): () => void {
   const doc = options.doc ?? document;
   const now = options.now ?? (() => Date.now());
   const schedule = options.schedule ?? window.setTimeout.bind(window);
@@ -65,7 +84,7 @@ export function watchForMessage(
 
   const tick = () => {
     if (stopped) return;
-    const row = doc.querySelector<HTMLElement>(messageSelector(seq));
+    const row = doc.querySelector<HTMLElement>(selector);
     if (row) {
       row.scrollIntoView({ block: "center" });
       row.classList.add(HIGHLIGHT_CLASS);
@@ -82,4 +101,17 @@ export function watchForMessage(
     stopped = true;
     if (handle !== null) cancel(handle);
   };
+}
+
+/** Jump to a message by its channel-ordered seq (인박스 · 활동). */
+export function watchForMessage(seq: number, options: WatchOptions = {}): () => void {
+  return watchForRow(messageSelector(seq), options);
+}
+
+/** Jump to a message by its id (작업 흐름의 앵커 스레드). */
+export function watchForMessageId(
+  messageId: string,
+  options: WatchOptions = {}
+): () => void {
+  return watchForRow(messageIdSelector(messageId), options);
 }
