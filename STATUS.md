@@ -1,5 +1,15 @@
 # momo 진행 현황
 
+## MOMO-661① T3 interval 과금 마이크로초 정밀도 — floor는 정산에서 1회 (#879, 2026-07-29)
+
+- **Σfloor(구간) → floor(Σ구간).** Migration 058이 `work_host_usage_interval.active_seconds`(045:66-72)를 `active_micros`로 재정의하고, `t3_terminate`가 마이크로초 합계를 **한 번만** 초로 절사한다. 실측: 1.9초 active × 12회 + pause 왕복 12회 세션에서 **058 이전 12초 / 058 이후 22초**(참값 22.8초) — 경계마다 버려지던 10초가 회복되고 잔여 절사는 세션당 0.8초 1회다. 이 12초는 시뮬레이션이 아니라 001~057만 적용한 DB에서 **실제 pre-058 `t3_terminate`를 호출해 측정**한 값이다.
+- **pause 0 계상 보장은 그대로 GENERATED다.** 정밀도 변경은 `THEN` 가지 안에서만 일어났고 `state = 'active'` 가드와 `ELSE 0`, `STORED` 생성성은 그대로다 — 어떤 문장도 `active_micros`를 쓸 수 없다(PostgreSQL 428C9로 거절, 검증기가 단정). 4주짜리 열린 pause 구간을 정산이 닫아도 0을 청구한다.
+- **밀리초가 아니라 마이크로초인 이유:** PostgreSQL timestamptz/interval의 해상도 자체가 마이크로초다. ms로 두면 경계마다 더 작은 2차 절사를 새로 만들 뿐이라, us에서는 generated 컬럼이 근사가 아니라 구간의 정확한 재진술이 되고 원장에 남는 반올림은 정산 1회뿐이다.
+- **`work_host_usage.active_seconds`의 의미 변화(문서화 대상):** 이름·타입·과금 역할은 그대로(단가가 초당이므로)지만 값의 정의가 Σfloor(구간) → floor(Σ구간)으로 바뀌었다. 새 `active_micros` 결과 컬럼과 `work_host_usage_active_micros_ck`가 `active_seconds = active_micros / 1000000`을 **제약으로** 고정해 "절사 1회"가 관행이 아니라 스키마다. **058 이전에 정산된 행은 재계산하지 않는다** — `credit_entry`는 트리거로 append-only이고 과거 청구는 사실이다. 그 행들은 `active_micros IS NULL`로 식별된다.
+- **경계의 seam도 닫았다.** interval을 닫는 문과 여는 문이 갈라져 있어 그 사이가 미청구(REST)이거나 `now()`(트랜잭션 시각) 때문에 겹쳐 이중청구(reconciler)될 수 있었다 — 초 단위 floor가 가리던 오차다. `CloudUsageLedger.transitionInterval`과 reconciler `confirm()`이 한 문장에서 닫고 열며 새 구간의 `started_at`을 직전 `ended_at`으로 못박고, 058이 컬럼 default를 `clock_timestamp()`로 바꿔 구조적으로 역전을 막는다.
+- 049의 `one_unsettled` partial unique·052 advisory·053의 봉인 트리거/잠금 사다리/멱등/`settled_reason`·057 deadline은 손대지 않았다(058은 `t3_terminate`의 산술만 교체한 `CREATE OR REPLACE`).
+- **검증.** server 358 tests(기준 357 + 058 구조 단정 1)·NotifierWorker 7 tests·server/NotifierWorker `swift build`·`check_migration_numbers.sh` 58 files green. 신규 `scripts/verify_t3_interval_precision.sh` **실주행 green**(격리 PG18에 001~057 적용 → pre-058 손실 실측 → 러너로 058 적용 + 멱등 마커 → 기존 settled 행 불변 단정 → 동일 픽스처 재정산 → 10초 회복·잔여 800000us·차감 550 단정), red proof `T3_PRECISION_PROVE_RED=interval-floor` **실주행 red**(exit 1, `interval-floor truncation loss: ... billed 12s where the microsecond ledger owes 22s`). Docker 스택이 필요한 `scripts/verify_t3_provisioner.sh`(active_micros·seam 단정으로 갱신)와 나머지 T3 검증기 무회귀는 `runtime-unverified` — 오케스트레이터 실행 대기.
+
 ## MOMO-655 데몬 public WSS attach 어댑터 + create ptyId/attachEndpoint 배선 (#869, 2026-07-29)
 
 - #857이 남긴 seam(셸 래핑·256KiB 링·`PTYReplayBuffer.connect()`의 retained→`replayEnd`→live 순서)에 **inbound 리스너**를 붙였다. `momo-workd`는 `MOMO_WORKD_ATTACH_PUBLIC_URL`이 설정된 경우에만 RFC 6455 서버를 열고, 미설정이면 소켓 자체를 열지 않는다(기존 동작 무변경). 서버·웹·mac 계약은 전부 기존 것을 그대로 소비했다 — 새 인증 문법·새 프레임 어휘·서버 raw-byte 경유는 없다(ADR-0125 D10).
