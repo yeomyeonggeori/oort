@@ -1,5 +1,20 @@
 # momo 진행 현황
 
+## MOMO-674 attach 후속 3종 — 상설 실왕복 검증기·스트림 중 재검증·mac 마커 필터 (#908, 2026-07-29)
+
+- **① 실왕복 검증기를 정식화했다.** #906 검수 하니스를 `scripts/verify_workd_attach.sh`로 승격하되 **복제가 아니라 `verify_workd.sh` 확장**이다(`WORKD_GATE_ATTACH=1`, `verify_acp_host.sh`가 이미 쓰는 모양). attach 단정에 필요한 픽스처 — 격리 스택·실제 Ed25519 신원·서명 폴링·승인된 spawn·**이미 출력을 낸 실제 로그인 셸 PTY** — 가 정확히 그 파일이고, 사본은 계속 참으로 유지해야 할 두 번째 대상이 된다. 브라우저 경로(자가서명 TLS 프록시 뒤 평문 리스너 + `Sec-WebSocket-Protocol: momo.terminal.v1, <token>`)를 고른 이유는 mac의 Authorization 헤더가 실 소켓 XCTest로 이미 덮여 있고 서브프로토콜 베어러는 여기 말고 어디서도 실행되지 않기 때문이다. 프록시는 TLS만 끊고 HTTP를 파싱하지 않으므로 "subprotocol을 그대로 중계"가 약속이 아니라 구조다.
+  - 단정: 리스너 ready 1회 · `terminal_attach` 호스트 capability · 데몬이 PATCH로 올린 `pty_id`/`attach_endpoint` · 서버 발급 capability + 감사 행 · **직전 출력(binary) → `replay_end`(text) 정확히 1개 → `send_stdin` → 라이브 출력** · 열린 observer 스트림이 소유자의 관전 차단에 1008로 끊기고 observer capability 행이 사라짐 · attach 키스트로크/출력/원문 토큰의 서버 원장 부재. 실패는 전부 단계 이름(`replay_end`·`replay_end_exactly_once`·`live`·`revoked_close`)으로 난다.
+  - 라이브 단정은 입력과 기대 출력을 셸이 제거하는 `''`로 갈라 두어 **터미널 에코만으로는 통과할 수 없다**(죽은 셸이 "라이브"로 읽히던 함정).
+  - red proof 두 겹: 매 실행 `terminal_attach_probe.py --selftest`(마커 없음·overflow로 대체·라이브 중 두 번째 마커 3종이 각자 이름으로 실패, Docker 불필요) + 선택 `WORKD_ATTACH_PROVE_RED=replay-marker`(레포 **사본**에서 `PTYReplayEndFrame.type`을 바꿔 재빌드한 데몬으로 검증기가 반드시 실패해야 통과, 워크트리 무수정).
+  - 포트 28430~28433 + `API_PORT+71`(wss)/`+72`(리스너), 충돌 grep 선행. `local_gate.sh` runtime-db·shell/python 문법 목록·auto-classification 등록 완료.
+- **② 스트림 중 capability 재검증 — 작은 쪽을 구현했다.** 열린 소켓마다 데몬이 이미 하는 서명 `validate`를 주기적으로 한 번 더 하고(`stream: true`), 거절이면 1008 `capability revoked`로 끊는다. 서버는 그 플래그로 **만료 절만** 건너뛴다: 60초 TTL은 발급~다이얼 창을 좁히는 값이고 그 창은 호스트가 이미 전량 검증으로 닫았기 때문이다. 세션 상태·호스트 revoke·grantee 생존·observer의 채널 멤버십/`observation='open'`은 매 호출 그대로 걸린다 — 완화된 것은 "다이얼 창"이지 "누가 볼 수 있는가"가 아니며, 서버 계약 테스트가 그 문자열을 잠근다(다른 절에 `revalidating`이 붙으면 실패). 신규 라우트·스키마·마이그레이션 0개. 재검증은 pump/read와 나란한 세 번째 태스크라 **스트림을 끊지 않는다**.
+  - 주기는 capability TTL과 별개인 스트림 수명 정책: `MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS`(기본 30000, 범위 1000~3600000). 이 값이 곧 **회수 지연 상한**이다.
+  - 부수 수정: issue 경로의 만료 observer 행 GC가 즉시 삭제였는데, 이제 같은 행을 스트림 수명 동안 재검증하므로 팀원 한 명의 관전 시작이 다른 관전자를 한 주기 안에 끊었다. 보존창을 1시간으로 넓혔다 — 관전 권한 배지는 스스로 `expires_at > clock_timestamp()`를 세므로 **사용자에게 보이는 수는 그대로**다.
+  - **기각: 서버발 revoke 신호.** 지연은 0에 가깝지만 데몬은 outbound 폴링만 하므로(ADR-0125 D2) ⓐ 새 인증 표면 + 스펙/샘플, ⓑ 그 채널의 재시도·중복 억제, ⓒ 신호를 놓친 데몬용 **결국 같은 주기 재검증** 폴백이 함께 온다. ⓒ가 필요한 이상 큰 쪽은 작은 쪽의 상위집합이고, 회수 지연 30초→0의 대가로는 표면이 과하다. 근거는 `docs/runbooks/workd-terminal-attach.md`.
+- **③ mac 마커 필터.** 스트림 원소를 `MomoTerminalHostFrame`(output/replayEnd/replayOverflow)으로 바꿔 프레임 종류를 전송 계층에서 잃지 않게 했다. **binary는 정의상 PTY 출력이라 절대 분류하지 않는다** — 마커와 똑같은 바이트를 출력하는 프로그램이 있어도 화면에 가야 한다. text만 분류하고, 마커가 아닌 text와 `byte_offset` 없는 마커는 그대로 출력으로 흘린다(웹 `classifyHostFrame`과 동일). overflow는 기존 재동기화 계약(배너의 다시 연결)을 쓰되 `networkDisconnected`로 접지 않고 `outputOverflowed`를 새로 뒀다 — 네트워크는 멀쩡한데 "연결 상태를 확인하세요"는 유일하게 정상인 곳을 보게 만든다.
+- **검증.** WorkHostDaemon 56 tests(3 skip, 기준 53에서 +3: 실 소켓·실 PTY로 성공 중 스트림 무중단 + revoke 1008 + grant 교체 거절, 주기 경계값) · MomoServer 357 tests · MomoMac 710 tests(+3) green. MomoMac의 기존 실패 3건(invite mail·터미널 팔레트 스냅샷 2)은 base에서도 동일하게 실패하며 이 변경과 무관하다. `bash -n`·shellcheck(`-S warning`) clean, `py_compile`, `--selftest` PASS, 프록시+프로브 TLS 왕복 로컬 실측. **`scripts/verify_workd_attach.sh` 실주행은 Docker가 필요해 `runtime-unverified`** — 오케스트레이터 실행 대기다.
+  - 오케스트레이터 실행 목록: `scripts/verify_workd_attach.sh` · `WORKD_ATTACH_PROVE_RED=replay-marker scripts/verify_workd_attach.sh` · 무회귀로 `scripts/verify_workd.sh`(attach 미설정 경로 = 리스너 미개방).
+
 ## MOMO-673 OpenAPI 계약 게이트 미샘플 44건 백필 — 부채 목록 소거 (#904, 2026-07-29)
 
 - `scripts/openapi_known_unsampled.txt`의 44건이 전부 **실샘플**로 대체돼 목록이 비었다. 스펙 128개 연산 전부가 샘플러를 갖는다(정적 대조로 확인). 파일은 지우지 않고 남긴다 — 게이트가 `--known-unsampled`로 계속 읽고, "빈 목록"이 곧 부채 0의 정본이며, 여기에 줄이 다시 생기면 리뷰에서 즉시 보이기 때문이다. 서버 코드 변경 0.

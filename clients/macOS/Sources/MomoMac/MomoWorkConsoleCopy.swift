@@ -145,6 +145,10 @@ extension MomoWorkspaceCopy {
         case (.rateLimited, .english): "There were too many connection attempts. Reconnect in a moment."
         case (.networkDisconnected, .korean): "네트워크 연결이 끊겼습니다. 연결 상태를 확인한 뒤 다시 연결하세요."
         case (.networkDisconnected, .english): "The network connection was lost. Check your connection, then reconnect."
+        // MOMO-661/674: a gap, not an outage. The network sentence one line up
+        // would send the operator to check the one thing that is working.
+        case (.outputOverflowed, .korean): "출력이 너무 빨라 일부를 놓쳤습니다. 다시 연결하면 최신 출력부터 이어집니다."
+        case (.outputOverflowed, .english): "Output came faster than this Mac could read it, so part of it is missing. Reconnect to continue from the latest output."
         case (.invalidGrant, .korean), (.invalidFrame, .korean): "원격 터미널 응답을 확인하지 못했습니다. 다시 연결하세요."
         case (.invalidGrant, .english), (.invalidFrame, .english): "The remote terminal response was invalid. Reconnect to try again."
         }

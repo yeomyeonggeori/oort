@@ -671,6 +671,125 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertEqual(session.state, .ended)
     }
 
+    /// MOMO-674: the two replay markers are control frames, not terminal bytes.
+    ///
+    /// Before this the mac wrote every text frame straight into SwiftTerm, so a
+    /// real host (#869) would have printed `{"byte_offset":...}` into the
+    /// operator's scrollback at the exact moment the terminal is meant to look
+    /// like it caught up. The web has filtered this since MOMO-655; this is the
+    /// same rule on the same wire.
+    @MainActor
+    func testRemoteTerminalNeverPrintsReplayMarkersIntoTheTerminal() async throws {
+        let transport = MockRemoteTerminalTransport()
+        let session = MomoRemoteTerminalSession(
+            grantProvider: {
+                try MomoTerminalAttachGrant(
+                    endpoint: URL(string: "wss://workd.momo.test/pty")!,
+                    capabilityToken: "marker-memory-only",
+                    ptyId: "pty-674"
+                )
+            },
+            transport: transport
+        )
+        await session.start()
+        session.terminalView.frame = CGRect(x: 0, y: 0, width: 800, height: 400)
+        session.terminalView.resize(cols: 80, rows: 24)
+        session.terminalView.layoutSubtreeIfNeeded()
+
+        await transport.emit(Data("pytest -q tests/test_billing.py\r\n".utf8))
+        await transport.emitText(#"{"byte_offset":31,"type":"replay_end"}"#)
+        await transport.emit(Data("32 passed in 4.10s\r\n".utf8))
+        try await waitUntil("live output after the marker") {
+            session.tail(lineCount: 80).contains("32 passed")
+        }
+
+        let visible = session.tail(lineCount: 80)
+        XCTAssertFalse(visible.contains("replay_end"), visible)
+        XCTAssertFalse(visible.contains("byte_offset"), visible)
+        // The marker is not "output arrived" either: it says the replay ended,
+        // not that the agent printed something.
+        XCTAssertEqual(
+            session.receivedByteCount,
+            "pytest -q tests/test_billing.py\r\n".utf8.count
+                + "32 passed in 4.10s\r\n".utf8.count
+        )
+
+        // A text frame that is NOT a marker is ordinary output. A host may send
+        // output as text, and dropping unknown text would silently swallow it.
+        await transport.emitText("plain text output line\r\n")
+        try await waitUntil("unclassified text still reaches the terminal") {
+            session.tail(lineCount: 80).contains("plain text output line")
+        }
+    }
+
+    /// A BINARY frame is pty output by definition, even when its bytes happen to
+    /// be the marker JSON. Classifying it would eat a program's own output.
+    func testReplayMarkerClassificationMatchesTheWebContract() {
+        XCTAssertEqual(
+            MomoTerminalHostFrame.classify(text: #"{"byte_offset":8317,"type":"replay_end"}"#),
+            .replayEnd(byteOffset: 8_317)
+        )
+        XCTAssertEqual(
+            MomoTerminalHostFrame.classify(text: #"{"byte_offset":12,"type":"replay_overflow"}"#),
+            .replayOverflow(byteOffset: 12)
+        )
+        for ordinary in [
+            "hello",
+            "{not json",
+            #"{"type":"replay_end"}"#,
+            #"{"byte_offset":"8317","type":"replay_end"}"#,
+            #"{"byte_offset":1,"type":"something_else"}"#,
+            "{" + String(repeating: "a", count: 200) + "}",
+        ] {
+            XCTAssertEqual(
+                MomoTerminalHostFrame.classify(text: ordinary),
+                .output(Data(ordinary.utf8)),
+                ordinary
+            )
+        }
+    }
+
+    /// MOMO-661: overflow means a GAP, and the way out is the reconnect this
+    /// surface already offers. It must not be reported as a network problem,
+    /// which would send the operator to check the one thing that is fine.
+    @MainActor
+    func testReplayOverflowEndsTheStreamWithItsOwnReasonAndOffersReconnect() async throws {
+        let transport = MockRemoteTerminalTransport()
+        let session = MomoRemoteTerminalSession(
+            grantProvider: {
+                try MomoTerminalAttachGrant(
+                    endpoint: URL(string: "wss://workd.momo.test/pty")!,
+                    capabilityToken: "overflow-memory-only",
+                    ptyId: "pty-661"
+                )
+            },
+            transport: transport
+        )
+        await session.start()
+        session.terminalView.frame = CGRect(x: 0, y: 0, width: 800, height: 400)
+        session.terminalView.resize(cols: 80, rows: 24)
+        session.terminalView.layoutSubtreeIfNeeded()
+        await transport.emit(Data("build log\r\n".utf8))
+        await transport.emitText(#"{"byte_offset":262144,"type":"replay_overflow"}"#)
+
+        try await waitUntil("overflow is named") {
+            session.state == .failed(.outputOverflowed)
+        }
+        XCTAssertFalse(session.tail(lineCount: 80).contains("replay_overflow"))
+        for language in [MomoUILanguage.korean, MomoUILanguage.english] {
+            let copy = MomoWorkspaceCopy(language: language)
+                .remoteTerminalError(.outputOverflowed)
+            XCTAssertFalse(copy.isEmpty)
+            XCTAssertFalse(copy.contains("—"), copy)
+            XCTAssertNotEqual(
+                copy,
+                MomoWorkspaceCopy(language: language)
+                    .remoteTerminalError(.networkDisconnected),
+                "a gap is not an outage"
+            )
+        }
+    }
+
     @MainActor
     func testRemoteTerminalMapsGrantAndTransportFailuresForRetry() async throws {
         let forbidden = MomoRemoteTerminalSession(
@@ -1557,13 +1676,15 @@ private actor WorkHostBackendSpy: MomoWorkHostBackend {
 private actor MockRemoteTerminalTransport: MomoRemoteTerminalTransport {
     private let connectFailure: MomoRemoteTerminalError?
     private var recordedFrames: [String] = []
-    private var continuation: AsyncThrowingStream<Data, Error>.Continuation?
+    private var continuation: AsyncThrowingStream<MomoTerminalHostFrame, Error>.Continuation?
 
     init(connectFailure: MomoRemoteTerminalError? = nil) {
         self.connectFailure = connectFailure
     }
 
-    func connect(grant: MomoTerminalAttachGrant) throws -> AsyncThrowingStream<Data, Error> {
+    func connect(
+        grant: MomoTerminalAttachGrant
+    ) throws -> AsyncThrowingStream<MomoTerminalHostFrame, Error> {
         if let connectFailure { throw connectFailure }
         recordedFrames.append(try MomoTerminalAttachFrame.connect(ptyId: grant.ptyId))
         return AsyncThrowingStream { continuation in
@@ -1590,8 +1711,14 @@ private actor MockRemoteTerminalTransport: MomoRemoteTerminalTransport {
         continuation = nil
     }
 
+    /// A BINARY frame: pty output, always written.
     func emit(_ data: Data) {
-        continuation?.yield(data)
+        continuation?.yield(.output(data))
+    }
+
+    /// A TEXT frame, classified exactly as the transport classifies one.
+    func emitText(_ text: String) {
+        continuation?.yield(MomoTerminalHostFrame.classify(text: text))
     }
 
     func fail(_ error: MomoRemoteTerminalError) {
