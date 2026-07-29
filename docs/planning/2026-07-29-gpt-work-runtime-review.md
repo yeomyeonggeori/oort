@@ -88,3 +88,12 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 2. #891 완주·검수·머지(계속) — provider-일반형이라 E2B 결정과 무관하게 유효
 3. #892는 ADR-0142 결정 전 보류(권고)
 4. 다음 워커 spawn부터 Claude Opus medium
+
+## 7. 성재 결정 (2026-07-29 수령 — §6 질문 4건의 답)
+
+1. **E2B 폐기 확정 — BYOC-first 역전** (권고안 채택)
+2. **BYOC 등록 단위 = 워크스페이스 공용만** (개인 BYOC는 후속 — 권고안 '둘 다'에서 축소)
+3. **Workstream 이대로 기안** (스레드 앵커·암시 생성·채널 멤버십 파생·member_id 의미 축소)
+4. **#892 보류** (ADR-0142 Accepted 후 새 인터페이스 대상으로 재개)
+
+→ ADR-0142(`docs/adr/0142-t3-provider-interface-byoc.md`)·ADR-0143(`docs/adr/0143-workstream-actor-independent-continuity.md`) 기안 완료(Proposed). 승인 대기.
