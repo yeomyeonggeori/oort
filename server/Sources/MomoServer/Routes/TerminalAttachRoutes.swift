@@ -32,7 +32,8 @@ struct RemotePTYBinding: Sendable, Equatable {
               let components = URLComponents(string: attachEndpoint),
               let scheme = components.scheme?.lowercased(),
               scheme == "https" || scheme == "wss",
-              components.host != nil,
+              // Foundation reports an empty string, not nil, for "wss:///path".
+              let host = components.host, !host.isEmpty,
               components.user == nil,
               components.password == nil,
               components.query == nil,

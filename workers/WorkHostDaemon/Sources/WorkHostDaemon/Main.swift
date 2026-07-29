@@ -71,9 +71,30 @@ struct WorkHostDaemonMain {
                 localCommandOverrides: config.localCommandOverrides,
                 childEnvironmentPolicy: config.childEnvironmentPolicy,
                 allowProfileLegacyEnvironment: config.allowProfileLegacyEnvironment,
+                attachEndpoint: config.terminalAttach?.publicEndpoint,
                 logger: logger
             )
-            await daemon.run()
+            // MOMO-655: the attach listener runs beside the control loop, not
+            // inside it. A bind failure is fatal (an operator who configured an
+            // endpoint must not get a host that quietly serves nothing), but a
+            // host with no attach configured never opens a socket at all.
+            if let attach = config.terminalAttach {
+                let server = TerminalAttachServer(
+                    config: attach,
+                    hostID: hostID,
+                    api: runtimeClient,
+                    processes: processes,
+                    logger: logger
+                )
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask { try await server.run() }
+                    group.addTask { await daemon.run() }
+                    try await group.next()
+                    group.cancelAll()
+                }
+            } else {
+                await daemon.run()
+            }
         } catch {
             logger.error("momo-workd stopped", metadata: [
                 "error_label": .string(WorkDaemon.label(for: error)),

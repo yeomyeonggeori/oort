@@ -31,39 +31,24 @@ final class NotifierWorkerTests: XCTestCase {
 
     /// ADR-0140 D4 restated in adapter terms (ADR-0142 D2): the reconciler
     /// decides from what the adapter *says*, not from an HTTP status it had to
-    /// interpret itself. Only a resume against an instance the adapter reports
-    /// missing is terminal; everything else is either accepted or retried.
-    func testResumeAgainstAMissingInstanceIsTheOnlyTerminalOutcome() {
-        XCTAssertEqual(
-            NotifierService.lifecycleOutcome(state: "resuming", error: .instanceMissing),
-            .providerMissing
-        )
-        XCTAssertEqual(
-            NotifierService.lifecycleOutcome(state: "resuming", error: nil), .accepted
-        )
-        for state in ["pausing", "destroy_pending"] {
-            XCTAssertEqual(
-                NotifierService.lifecycleOutcome(state: state, error: nil), .accepted
-            )
-            // A pause or destroy that failed is retried by the durable intent.
-            // Settling a paid session on it would be the silent failure
-            // ADR-0142 D3.1 bans.
+    /// interpret itself, and the decision table lives in CloudProviderKit so
+    /// the REST confirm path cannot hold a second opinion of it.
+    ///
+    /// The states the reconciler drives map onto the phases one-to-one; a state
+    /// that is not an in-flight operation has no convergence at all.
+    func testEveryInFlightStateHasExactlyOneConvergencePhase() {
+        XCTAssertEqual(CloudLifecyclePhase(state: "pausing"), .pausing)
+        XCTAssertEqual(CloudLifecyclePhase(state: "resuming"), .resuming)
+        XCTAssertEqual(CloudLifecyclePhase(state: "destroy_pending"), .destroyPending)
+        for settled in ["provisioning", "ready", "running", "paused", "destroyed", "failed"] {
             XCTAssertNil(
-                NotifierService.lifecycleOutcome(state: state, error: .instanceMissing)
+                CloudLifecyclePhase(state: settled),
+                "named regression: \(settled) is not an in-flight operation"
             )
         }
-        // An unreachable provider is not a dead instance.
-        XCTAssertNil(
-            NotifierService.lifecycleOutcome(state: "resuming", error: .requestFailed)
-        )
-        XCTAssertNil(
-            NotifierService.lifecycleOutcome(state: "resuming", error: .upstreamStatus(500))
-        )
-        // A capability refusal is a configuration fact, never a settlement.
-        XCTAssertNil(NotifierService.lifecycleOutcome(
-            state: "resuming", error: .unsupported(.resume, providerID: "byoc")
-        ))
-        XCTAssertNil(NotifierService.lifecycleOutcome(state: "provisioning", error: nil))
+        for phase in CloudLifecyclePhase.allCases {
+            XCTAssertEqual(CloudLifecyclePhase(state: phase.state), phase)
+        }
     }
 
     /// ADR-0142 D4: the reconciler addresses adapters by the registry id stored

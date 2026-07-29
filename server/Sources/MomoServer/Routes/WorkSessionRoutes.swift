@@ -25,6 +25,16 @@ struct UpdateWorkSessionRequest: Decodable {
     let exitCode: Int?
     let observation: WorkSessionObservation?
     let event: WorkSessionACPEvent?
+    /// MOMO-655. The host publishes its own attach binding here, not only at
+    /// create. Create allocates the session id server-side, so a host whose pty
+    /// id IS the session id cannot know the binding until the row exists; and a
+    /// tier-fallback resume never calls create at all (the server preallocates
+    /// the session and dispatches a spawn control), which left every resumed
+    /// session permanently unattachable. One work-host-signed PATCH covers both
+    /// without adding a route, and reuses `RemotePTYBinding.validated` so the
+    /// stored value obeys exactly the same grammar as the create path.
+    let ptyId: String?
+    let attachEndpoint: String?
 }
 
 struct WorkSessionACPEvent: Codable, Sendable, Equatable {
@@ -324,6 +334,33 @@ struct WorkSessionRoutes: Sendable {
             as: UpdateWorkSessionRequest.self,
             context: context
         )
+        if requestDTO.ptyId != nil || requestDTO.attachEndpoint != nil {
+            guard requestDTO.status == nil, requestDTO.exitCode == nil,
+                  requestDTO.observation == nil, requestDTO.event == nil
+            else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "remote PTY binding cannot be combined with lifecycle fields"
+                )
+            }
+            guard let binding = try RemotePTYBinding.validated(
+                ptyID: requestDTO.ptyId,
+                attachEndpoint: requestDTO.attachEndpoint
+            ) else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "ptyId and attachEndpoint must be provided together"
+                )
+            }
+            return try await bindRemotePTY(
+                binding,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        }
         if let event = requestDTO.event {
             guard requestDTO.status == nil, requestDTO.exitCode == nil,
                   requestDTO.observation == nil
@@ -753,7 +790,20 @@ struct WorkSessionRoutes: Sendable {
 
             let updatedRows: [PostgresRow]
             if targetStatus == "idle" {
-                if cloudLifecycle != nil {
+                if let cloudLifecycle {
+                    // ADR-0140 D4 ③. Revalidate before the ledger moves: an
+                    // in-flight pause whose intent was replaced must not be the
+                    // reason a running sandbox stops being billed.
+                    guard try await T3LifecycleIntent.isCurrent(
+                        conn: conn,
+                        logger: db.logger,
+                        cloudHostID: cloudLifecycle.cloudHostID,
+                        operationID: cloudLifecycle.operationID,
+                        version: cloudLifecycle.version,
+                        expectedState: "pausing"
+                    ) else {
+                        throw T3LifecycleIntent.staleResponse
+                    }
                     try await CloudUsageLedger.pause(
                         conn: conn,
                         logger: db.logger,
@@ -761,11 +811,9 @@ struct WorkSessionRoutes: Sendable {
                         hostID: decoded.4,
                         sessionID: sessionID
                     )
-                    try await updateCloudHostState(
+                    try await confirmCloudHostState(
                         conn: conn,
-                        workspaceID: workspaceID,
-                        hostID: decoded.4,
-                        expected: "pausing",
+                        cloudHostID: cloudLifecycle.cloudHostID,
                         next: "paused"
                     )
                 }
@@ -791,6 +839,11 @@ struct WorkSessionRoutes: Sendable {
                 ).collect()
             } else {
                 if cloudLifecycle != nil {
+                    // Unreachable for T3 today — `performCloudLifecycleIfNeeded`
+                    // refuses a host-initiated cloud resume, because a paused
+                    // daemon cannot ask to be woken. Kept as a CAS rather than
+                    // deleted so that if the refusal is ever lifted this path
+                    // fails loudly instead of writing from a stale reading.
                     try await CloudUsageLedger.resume(
                         conn: conn,
                         logger: db.logger,
@@ -798,13 +851,23 @@ struct WorkSessionRoutes: Sendable {
                         hostID: decoded.4,
                         sessionID: sessionID
                     )
-                    try await updateCloudHostState(
-                        conn: conn,
-                        workspaceID: workspaceID,
-                        hostID: decoded.4,
-                        expected: "paused",
-                        next: "running"
-                    )
+                    let resumedRows = try await conn.query(
+                        """
+                        UPDATE work_cloud_host
+                           SET state = 'running', updated_at = clock_timestamp()
+                         WHERE workspace_id = \(workspaceID)
+                           AND host_id = \(decoded.4)
+                           AND state = 'paused'
+                        RETURNING id
+                        """,
+                        logger: db.logger
+                    ).collect()
+                    guard resumedRows.first != nil else {
+                        throw HTTPError(
+                            .conflict,
+                            message: "momo Cloud 호스트 상태가 변경되었습니다."
+                        )
+                    }
                 }
                 updatedRows = try await conn.query(
                     """
@@ -977,12 +1040,18 @@ struct WorkSessionRoutes: Sendable {
         let providerID: String
         let action: String
         let latencyMs: Int64
+        /// ADR-0140 D4 ③ — the intent this evidence answers. The confirming
+        /// transaction revalidates it before touching the ledger.
+        let operationID: UUID
+        let version: Int64
     }
 
     private struct CloudLifecycleTarget: Sendable {
         let cloudHostID: UUID
         let providerID: String
         let instanceID: String
+        let operationID: UUID
+        let version: Int64
 
         var ref: CloudInstanceRef {
             CloudInstanceRef(providerID: providerID, instanceID: instanceID)
@@ -1024,9 +1093,11 @@ struct WorkSessionRoutes: Sendable {
         let action = "pause"
         let startedAt = Date()
         do {
+            // ADR-0140 D4 ②: the durable operation is the idempotency key, so a
+            // retry of *this* intent cannot be mistaken for a new pause.
             try await adapter.pause(
                 ref: target.ref,
-                idempotencyKey: target.cloudHostID.uuidString.lowercased()
+                idempotencyKey: target.operationID.uuidString.lowercased()
             )
         } catch {
             throw CloudProvisionerRoutes.httpError(error)
@@ -1035,7 +1106,9 @@ struct WorkSessionRoutes: Sendable {
             cloudHostID: target.cloudHostID,
             providerID: target.providerID,
             action: action,
-            latencyMs: Self.elapsedMilliseconds(since: startedAt)
+            latencyMs: Self.elapsedMilliseconds(since: startedAt),
+            operationID: target.operationID,
+            version: target.version
         )
     }
 
@@ -1125,6 +1198,9 @@ struct WorkSessionRoutes: Sendable {
                 )
             }
             let operationID = UUID()
+            // ADR-0140 D4 ①: intent, deadline and version are committed
+            // together. A `pausing` row that cannot say when it stops being
+            // allowed to stay there is the deadlock T-4 removes.
             let intentRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
@@ -1133,17 +1209,22 @@ struct WorkSessionRoutes: Sendable {
                        lifecycle_operation_kind = 'pause',
                        lifecycle_operation_started_at = clock_timestamp(),
                        lifecycle_operation_version = lifecycle_operation_version + 1,
+                       lifecycle_operation_attempts = 0,
+                       lifecycle_operation_next_attempt_at = NULL,
+                       lifecycle_operation_deadline_at =
+                         clock_timestamp() + t3_lifecycle_default_deadline('pause'),
                        updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
                    AND state = 'running'
-                RETURNING id
+                RETURNING id, lifecycle_operation_version
                 """,
                 logger: db.logger
             ).collect()
-            guard intentRows.first != nil else {
+            guard let intentRow = intentRows.first else {
                 throw HTTPError(.conflict, message: "momo Cloud host lifecycle changed; retry")
             }
+            let operationVersion = try intentRow.decode((UUID, Int64).self).1
             guard let cloudHostID else {
                 throw HTTPError(
                     .conflict,
@@ -1159,25 +1240,28 @@ struct WorkSessionRoutes: Sendable {
             return CloudLifecycleTarget(
                 cloudHostID: cloudHostID,
                 providerID: rowProviderID,
-                instanceID: sandboxID
+                instanceID: sandboxID,
+                operationID: operationID,
+                version: operationVersion
             )
         }
     }
 
-    private func updateCloudHostState(
+    /// Keyed on identity: `T3LifecycleIntent.isCurrent` has already proved this
+    /// is the current operation and still holds the row lock, so a compare-and-
+    /// swap here would only restate an answer that cannot have changed.
+    private func confirmCloudHostState(
         conn: PostgresConnection,
-        workspaceID: UUID,
-        hostID: UUID,
-        expected: String,
+        cloudHostID: UUID,
         next: String
     ) async throws {
         let rows = try await conn.query(
             """
             UPDATE work_cloud_host
-               SET state = \(next), updated_at = clock_timestamp()
-             WHERE workspace_id = \(workspaceID)
-               AND host_id = \(hostID)
-               AND state = \(expected)
+               SET state = \(next),
+                   lifecycle_operation_next_attempt_at = NULL,
+                   updated_at = clock_timestamp()
+             WHERE id = \(cloudHostID)
             RETURNING id
             """,
             logger: db.logger
@@ -1465,6 +1549,111 @@ struct WorkSessionRoutes: Sendable {
                 observerGrantCount: decoded.10,
                 remoteAttachAvailable: decoded.11
             )
+        }
+        return try WorkSessionResponse(workSession: session)
+            .response(from: request, context: context)
+    }
+
+    /// MOMO-655: the host states where its PTY can be reached, once.
+    ///
+    /// This is deliberately not a general "edit the session" path. It writes the
+    /// two attach columns and nothing else, only under the signature of the host
+    /// the session is already bound to, only while that session can actually be
+    /// served (running or idle), and only onto an empty binding — a re-send of
+    /// the identical pair succeeds so a lost ack costs nothing, while a
+    /// DIFFERENT endpoint on a live session is refused rather than silently
+    /// redirecting every future observer at a new address. There is no unbind:
+    /// the row ends with the session.
+    private func bindRemotePTY(
+        _ binding: RemotePTYBinding,
+        request: Request,
+        context: AppRequestContext,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> Response {
+        guard principal.kind == .workHost else {
+            throw HTTPError(
+                .forbidden,
+                message: "remote PTY binding requires work host signature"
+            )
+        }
+        let session = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT host_id, status, pty_id, attach_endpoint
+                  FROM work_session
+                 WHERE id = \(sessionID)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let (hostID, status, existingPTYID, existingEndpoint) = try row.decode(
+                (UUID, String, String?, String?).self
+            )
+            guard hostID == principal.tokenID else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "work host cannot bind another host session"
+                )
+            }
+            guard status == "running" || status == "idle" else {
+                throw HTTPError(
+                    .conflict,
+                    message: "remote PTY binding requires a running or idle session"
+                )
+            }
+            if existingPTYID != nil || existingEndpoint != nil {
+                guard existingPTYID == binding.ptyID,
+                      existingEndpoint == binding.attachEndpoint
+                else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "work session already has a different remote PTY binding"
+                    )
+                }
+            }
+            try await Self.requireRemotePTYCapableHost(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                hostID: hostID
+            )
+            _ = try await conn.query(
+                """
+                UPDATE work_session
+                   SET pty_id = \(binding.ptyID),
+                       attach_endpoint = \(binding.attachEndpoint)
+                 WHERE id = \(sessionID)
+                """,
+                logger: db.logger
+            )
+            let updatedRows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       ws.status, ws.observation,
+                       0::bigint AS observer_grant_count,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code,
+                       ws.end_reason, ws.resumed_from_session_id
+                  FROM work_session ws
+                 WHERE ws.id = \(sessionID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let updatedRow = updatedRows.first else {
+                throw HTTPError(
+                    .internalServerError,
+                    message: "remote PTY binding update failed"
+                )
+            }
+            return try Self.decodeSession(updatedRow)
         }
         return try WorkSessionResponse(workSession: session)
             .response(from: request, context: context)

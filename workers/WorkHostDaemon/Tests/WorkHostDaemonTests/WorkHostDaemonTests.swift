@@ -859,6 +859,8 @@ actor MockWorkHostAPI: WorkHostAPI {
     /// daemon's reconciliation retry path is exercised rather than assumed.
     private var liveSessionFailures: Int
     private var reportFailures: Int
+    private var bindFailures: Int
+    private let attachGrant: TerminalAttachGrant?
     private(set) var events: [String] = []
 
     init(
@@ -867,8 +869,12 @@ actor MockWorkHostAPI: WorkHostAPI {
         session: WorkSession,
         liveSessions: [WorkHostLiveSession] = [],
         liveSessionFailures: Int = 0,
-        reportFailures: Int = 0
+        reportFailures: Int = 0,
+        bindFailures: Int = 0,
+        attachGrant: TerminalAttachGrant? = nil
     ) {
+        self.bindFailures = bindFailures
+        self.attachGrant = attachGrant
         controlBatches = controls
         self.profiles = profiles
         self.session = session
@@ -939,5 +945,25 @@ actor MockWorkHostAPI: WorkHostAPI {
         event: ACPProjectedEvent
     ) async throws {
         events.append("acp:\(sessionID):\(event.type)")
+    }
+    func bindRemotePTY(
+        hostID: UUID,
+        sessionID: UUID,
+        ptyID: String,
+        attachEndpoint: String
+    ) async throws {
+        events.append("bind:\(sessionID):\(ptyID):\(attachEndpoint)")
+        if bindFailures > 0 {
+            bindFailures -= 1
+            throw WorkdFailure.transport
+        }
+    }
+    func validateTerminalAttach(
+        hostID: UUID,
+        capabilityToken: String
+    ) async throws -> TerminalAttachGrant {
+        events.append("validate:\(capabilityToken)")
+        guard let grant = attachGrant else { throw WorkdFailure.authentication }
+        return grant
     }
 }

@@ -63,6 +63,64 @@ export function terminalOwnsKey(event: KeyboardEvent): boolean {
   return true;
 }
 
+/**
+ * What a TEXT frame from the host actually is (MOMO-655).
+ *
+ * The host sends pty output as BINARY frames and its two replay markers as TEXT
+ * frames carrying exactly the JSON that `PTYReplayEndFrame` /
+ * `PTYReplayOverflowFrame` pin down on the daemon side. That split is the whole
+ * reason a marker can exist at all: there is no in-band escape a pty stream
+ * could carry that some program's output could not also produce.
+ *
+ * This client used to write every text frame straight into xterm, which was
+ * harmless only because no host implementation existed yet. With one landed, the
+ * unfiltered path prints `{"byte_offset":8317,"type":"replay_end"}` into the
+ * reader's scrollback at the exact moment the panel is supposed to look like it
+ * simply caught up. Hence: text frames are classified, never written.
+ *
+ * A text frame that is NOT a marker still reaches the terminal. A host is
+ * allowed to send output as text (the mac transport already forwards both), and
+ * dropping unknown text would silently swallow real output.
+ */
+export type HostFrame =
+  /** `replay_end`: everything before this was scrollback, everything after is live. */
+  | { kind: "replay_end"; byteOffset: number }
+  /**
+   * `replay_overflow`: this reader fell too far behind and the host severed the
+   * stream at `byteOffset`. The contract is "you have a gap, resynchronize", so
+   * the socket close that follows is what the surface reports; the frame itself
+   * only has to stay off the screen.
+   */
+  | { kind: "replay_overflow"; byteOffset: number }
+  /** Ordinary output. Write it. */
+  | { kind: "output" };
+
+export function classifyHostFrame(text: string): HostFrame {
+  // Cheap reject first: pty output is overwhelmingly not JSON, and this runs on
+  // every text frame.
+  if (text.length > 128 || text.charCodeAt(0) !== 123 /* { */) {
+    return { kind: "output" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "output" };
+  }
+  if (typeof parsed !== "object" || parsed === null) return { kind: "output" };
+  const frame = parsed as { type?: unknown; byte_offset?: unknown };
+  if (frame.type !== "replay_end" && frame.type !== "replay_overflow") {
+    return { kind: "output" };
+  }
+  // The offset is part of the contract, not decoration: a marker without one is
+  // not the frame this client knows, so it is treated as output rather than
+  // guessed at.
+  if (typeof frame.byte_offset !== "number" || !Number.isFinite(frame.byte_offset)) {
+    return { kind: "output" };
+  }
+  return { kind: frame.type, byteOffset: frame.byte_offset };
+}
+
 /** Host-side id grammar, mirrored from `RemotePTYBinding.validated`. */
 export function isValidPtyId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
