@@ -122,6 +122,8 @@ adversarial-review가 세 라운드 돌면서 결함의 **성격이 같았다**.
   | `destroy_pending` 실패 | **무한 재시도**(지수 백오프). 유일하게 포기하지 않는 intent — 유료 자원이 남는다 |
   | intent deadline 초과 | reconciler가 provider에 **상태를 조회**해 사실로 판정. 조회 불가면 위 규칙 적용 |
 
+  **증보(2026-07-29, #892 이행 중 확정)**: `pausing` + provider가 인스턴스 **부재**를 답한 경우는 `running` 복귀가 아니라 `t3_terminate('provider_missing')`이다 — 존재하지 않는 샌드박스를 running으로 두면 이 행의 근거("의심스러우면 사실에 맞는 쪽") 자체를 뒤집는다. 또한 `unknown`은 절대 `absent`로 읽지 않으며(ADR-0142 D3), deadline 초과 후 `resuming`+존재 확인은 "늦게 성공"으로 confirm한다. 전체 표의 정본은 `CloudProviderKit/CloudLifecycleConvergence.swift`(셀 단위 유닛 테스트 포함).
+
 - **`*ing` 상태에 deadline을 필수화한다**(`lifecycle_operation_started_at` + 상한). deadline 없는 중간 상태가 2차 리뷰의 영구 교착이었다.
 - B — 2PC/분산 트랜잭션: E2B가 참여자가 될 수 없다. **기각(불가능).**
 

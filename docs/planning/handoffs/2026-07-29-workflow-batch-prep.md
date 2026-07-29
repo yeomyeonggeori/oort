@@ -47,3 +47,15 @@
 - red proof 실측: A(dishonest-probe·pause 과금 회귀) · B(자격 술어 되돌림) · C(큐 상한 무력화— 워커 실측) · D(구조상 불필요 — 원인 판정형).
 - 신규 발견→티켓: #903(verify_workd 선존재, bisect 필요) · #904(미샘플 44건 백필).
 - **main 반영은 성재 승인 대기.** engine이 main보다 +4 머지 앞섬.
+
+## 6. 배치 2 완료 기록 (2026-07-29)
+
+**3/3 랜딩** — track/engine: G #903(`559ce690`) → E #892(`b76cd2c8`) → F #869(`7bc08b5b`). 워크플로 32분 병렬(Opus ×3, 654k tokens).
+
+- **ADR-0140 이행 전체 완결**(T-2·T-3·T-4) — MOMO_T3_ENABLED 기본 활성화는 실 provider smoke 후 별건(성재).
+- **ADR-0139 재부착 체감 완결** — 실왕복 실측(replay 13,886B → replay_end 1개 → live). 데몬↔서버↔wss프록시↔클라이언트 전 구간.
+- G의 판정: verify_workd 실패는 #857 계약 변화 미반영(선존재) — bisect 없이 원장 증거로 특정. 무회귀 세트 4종 확정.
+- ADR-0140 D4 증보 반영(pausing+부재→provider_missing 등 — E 이행 중 확정).
+- 오케스트레이터 수리: E 검증기 3건(sweep 간섭·destroy 라우트 오기·red 사본 .env.example) + F 실왕복 하니스 신작.
+- 잔여 티켓: #904(미샘플 44 백필) · #908(attach 후속 3종) · #879①(floor 정밀도) · #886~#849 기존 열림분.
+- **main 반영은 성재 승인 대기** — engine이 main보다 배치 2(3머지+검증기 수리) 앞섬.
