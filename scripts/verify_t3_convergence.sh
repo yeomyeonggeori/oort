@@ -56,7 +56,8 @@ ignored = {".git", ".build", ".swiftpm", "DerivedData", "node_modules"}
 def ignore(directory, names):
     return {
         name for name in names
-        if name in ignored or name == ".env" or name.startswith(".env.")
+        if name in ignored or name == ".env"
+        or (name.startswith(".env.") and name != ".env.example")
     }
 
 
@@ -201,7 +202,7 @@ compose() {
     MOMO_T3_RATE_MICRO_USD_PER_SECOND=25 \
     PLATFORM_ADMIN_EMAILS="$OWNER_EMAIL" \
     PLATFORM_ADMIN_LOGIN_SECRET="local-gate-admin-secret" \
-    MOMO_HOST_OFFLINE_GRACE_S=1 NOTIFIER_POLL_INTERVAL_MS=100 \
+    MOMO_HOST_OFFLINE_GRACE_S=3600 NOTIFIER_POLL_INTERVAL_MS=100 \
     docker compose --env-file "$SAFE_ENV_FILE" -p "$PROJECT" -f "$COMPOSE_FILE" \
       --profile push "$@"
 }
@@ -502,7 +503,7 @@ control heal
 provision_host "conv-destroy"
 HOST_B="$PROVISIONED_HOST_ID"
 control fail-destroy
-api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_B/cloud/destroy"
+api DELETE "/v1/workspaces/$WS_ID/work-hosts/$HOST_B/cloud"
 expect_failure "a refused destroy must not answer 2xx"
 
 BACKOFF=""
