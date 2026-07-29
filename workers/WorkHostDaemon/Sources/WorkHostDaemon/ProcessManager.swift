@@ -48,9 +48,20 @@ actor ProcessManager {
         let status: Status
     }
 
-    enum AttachMode: Sendable {
+    enum AttachMode: Sendable, Equatable {
         case controller
         case observer
+
+        /// `TerminalAttachValidationResponse.mode`. An unknown grade is nil, not
+        /// a default: a server that grows a third mode must not have it silently
+        /// read as the one that can type.
+        init?(serverValue: String) {
+            switch serverValue {
+            case "controller": self = .controller
+            case "observer": self = .observer
+            default: return nil
+            }
+        }
     }
 
     private var templates: [String: CommandTemplate]

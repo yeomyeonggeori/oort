@@ -170,4 +170,21 @@ protocol WorkHostAPI: Sendable {
         sessionID: UUID,
         event: ACPProjectedEvent
     ) async throws
+    /// MOMO-655: publish where this host's PTY for `sessionID` can be reached.
+    /// The server owns the column and the authorization; the host only states
+    /// the fact once, right after the PTY exists.
+    func bindRemotePTY(
+        hostID: UUID,
+        sessionID: UUID,
+        ptyID: String,
+        attachEndpoint: String
+    ) async throws
+    /// MOMO-655: ask the server whether this capability bearer may attach, and
+    /// to what. The daemon never answers this itself (ADR-0125 D10) — expiry,
+    /// revocation, session state, membership and observer/controller grade are
+    /// all one server answer, re-checked under the host signature per call.
+    func validateTerminalAttach(
+        hostID: UUID,
+        capabilityToken: String
+    ) async throws -> TerminalAttachGrant
 }

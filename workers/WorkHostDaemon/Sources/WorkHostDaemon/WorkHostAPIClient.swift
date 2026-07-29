@@ -48,6 +48,33 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
     private struct IdleSessionRequest: Encodable { let status = "idle"; let exitCode: Int }
     private struct RunningSessionRequest: Encodable { let status = "running" }
     private struct ACPEventRequest: Encodable { let event: ACPProjectedEvent }
+    private struct BindRemotePTYRequest: Encodable {
+        let ptyId: String
+        let attachEndpoint: String
+    }
+    /// `TerminalAttachRoutes` speaks snake_case on this pair alone; the rest of
+    /// the work-host surface is camelCase, so the mapping is spelled out here
+    /// rather than by switching a global key strategy.
+    private struct ValidateTerminalAttachRequest: Encodable {
+        let capabilityToken: String
+
+        enum CodingKeys: String, CodingKey {
+            case capabilityToken = "capability_token"
+        }
+    }
+    private struct ValidateTerminalAttachResponse: Decodable {
+        let workSessionId: String
+        let ptyId: String
+        let expiresAt: String
+        let mode: String
+
+        enum CodingKeys: String, CodingKey {
+            case workSessionId = "work_session_id"
+            case ptyId = "pty_id"
+            case expiresAt = "expires_at"
+            case mode
+        }
+    }
 
     private let config: WorkdConfig
     private let signer: WorkHostSigner
@@ -76,7 +103,12 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             type: config.hostType,
             displayName: config.displayName,
             publicKey: signer.publicKeyBase64,
-            capabilities: [:]
+            // MOMO-655: `requireRemotePTYCapableHost` gates every attach binding
+            // on this flag, so a host that will serve terminals has to declare
+            // it at registration. There is no capability-update route: an
+            // already-registered host that turns attach on re-registers (see
+            // docs/runbooks/workd-terminal-attach.md).
+            capabilities: config.terminalAttach == nil ? [:] : ["terminal_attach": true]
         )
         let path = config.hostType == "cloud"
             ? "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts/cloud/register"
@@ -241,6 +273,43 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
             hostID: hostID,
             body: ACPEventRequest(event: event)
+        )
+    }
+
+    func bindRemotePTY(
+        hostID: UUID,
+        sessionID: UUID,
+        ptyID: String,
+        attachEndpoint: String
+    ) async throws {
+        let _: SessionResponse = try await sendSigned(
+            method: "PATCH",
+            path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-sessions/\(sessionID.uuidString.lowercased())",
+            hostID: hostID,
+            body: BindRemotePTYRequest(ptyId: ptyID, attachEndpoint: attachEndpoint)
+        )
+    }
+
+    func validateTerminalAttach(
+        hostID: UUID,
+        capabilityToken: String
+    ) async throws -> TerminalAttachGrant {
+        guard TerminalAttachHandshake.isValidCapabilityToken(capabilityToken) else {
+            throw WorkdFailure.authentication
+        }
+        let response: ValidateTerminalAttachResponse = try await sendSigned(
+            method: "POST",
+            path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/terminal-attach/validate",
+            hostID: hostID,
+            body: ValidateTerminalAttachRequest(capabilityToken: capabilityToken)
+        )
+        guard let sessionID = UUID(uuidString: response.workSessionId),
+              let mode = ProcessManager.AttachMode(serverValue: response.mode)
+        else { throw WorkdFailure.invalidResponse }
+        return TerminalAttachGrant(
+            workSessionID: sessionID,
+            ptyID: response.ptyId,
+            mode: mode
         )
     }
 

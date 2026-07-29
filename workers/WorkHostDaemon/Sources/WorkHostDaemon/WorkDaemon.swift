@@ -8,6 +8,9 @@ final class WorkDaemon: Sendable {
     private let pollInterval: Duration
     private let heartbeatInterval: Duration
     private let localCommandOverrides: [String: LocalCommandOverride]
+    /// MOMO-655: where clients are told to dial this host's PTYs, or nil when
+    /// this host serves no attach.
+    private let attachEndpoint: String?
     private let childEnvironmentPolicy: ChildEnvironmentPolicy
     private let allowProfileLegacyEnvironment: Bool
     private let logger: Logger
@@ -23,8 +26,10 @@ final class WorkDaemon: Sendable {
         localCommandOverrides: [String: LocalCommandOverride] = [:],
         childEnvironmentPolicy: ChildEnvironmentPolicy = .safeDefault,
         allowProfileLegacyEnvironment: Bool = false,
+        attachEndpoint: String? = nil,
         logger: Logger
     ) {
+        self.attachEndpoint = attachEndpoint
         self.hostID = hostID
         self.api = api
         self.processes = processes
@@ -202,6 +207,7 @@ final class WorkDaemon: Sendable {
             await acknowledgeFailure(controlID: control.id, label: "process_start_failed")
             return
         }
+        await publishAttachBinding(sessionID: sessionID)
         await spawnedSessions.insert(sessionID, for: control.id)
         // The process may finish while the ack response is in flight. Mark it
         // locally before the network call so natural completion is still
@@ -219,6 +225,31 @@ final class WorkDaemon: Sendable {
             // Keep the local control->session binding. A later poll retries the
             // same ack and never starts a duplicate process.
             logger.warning("work host spawn ack failed", metadata: [
+                "error_label": .string(Self.label(for: error)),
+            ])
+        }
+    }
+
+    /// MOMO-655 step 2 of the seam: the PTY exists, so say where it can be
+    /// reached. Deliberately best-effort — a session whose binding never lands
+    /// is a session nobody can watch, which is exactly the state every session
+    /// was in before this ticket, and losing the WORK over a failed
+    /// watchability announcement would be a strictly worse trade. Only a PTY
+    /// transport gets one; an ACP session has no attachable terminal, and
+    /// `ProcessManager.ptyID(for:)` answers nil for it.
+    private func publishAttachBinding(sessionID: UUID) async {
+        guard let attachEndpoint,
+              let ptyID = await processes.ptyID(for: sessionID)
+        else { return }
+        do {
+            try await api.bindRemotePTY(
+                hostID: hostID,
+                sessionID: sessionID,
+                ptyID: ptyID,
+                attachEndpoint: attachEndpoint
+            )
+        } catch {
+            logger.warning("work host attach binding failed", metadata: [
                 "error_label": .string(Self.label(for: error)),
             ])
         }
