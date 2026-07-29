@@ -341,11 +341,16 @@ extension NotifierService {
                    WHERE i.usage_id = u.id
                      AND i.state = \(expectedInterval)
                      AND i.ended_at IS NULL
-                  RETURNING i.usage_id
+                  RETURNING i.usage_id, i.ended_at
                 ), opened AS (
+                  -- The next interval starts at the instant the previous one
+                  -- ended, not at this transaction's clock. Migration 058 bills
+                  -- exact microseconds, so a seam here would be unbilled active
+                  -- time (or, with the old now() default, billed twice).
                   INSERT INTO work_host_usage_interval
-                    (usage_id, workspace_id, state)
-                  SELECT c.usage_id, \(intent.workspaceID), \(nextInterval)
+                    (usage_id, workspace_id, state, started_at)
+                  SELECT c.usage_id, \(intent.workspaceID), \(nextInterval),
+                         c.ended_at
                     FROM closed c
                   RETURNING usage_id
                 )

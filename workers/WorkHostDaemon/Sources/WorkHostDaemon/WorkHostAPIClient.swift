@@ -57,9 +57,13 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
     /// rather than by switching a global key strategy.
     private struct ValidateTerminalAttachRequest: Encodable {
         let capabilityToken: String
+        /// MOMO-674: present only on a revalidation, so a server that predates
+        /// the field sees the byte-identical body #869 shipped.
+        let stream: Bool?
 
         enum CodingKeys: String, CodingKey {
             case capabilityToken = "capability_token"
+            case stream
         }
     }
     private struct ValidateTerminalAttachResponse: Decodable {
@@ -292,7 +296,8 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
 
     func validateTerminalAttach(
         hostID: UUID,
-        capabilityToken: String
+        capabilityToken: String,
+        stream: Bool
     ) async throws -> TerminalAttachGrant {
         guard TerminalAttachHandshake.isValidCapabilityToken(capabilityToken) else {
             throw WorkdFailure.authentication
@@ -301,7 +306,10 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             method: "POST",
             path: "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/terminal-attach/validate",
             hostID: hostID,
-            body: ValidateTerminalAttachRequest(capabilityToken: capabilityToken)
+            body: ValidateTerminalAttachRequest(
+                capabilityToken: capabilityToken,
+                stream: stream ? true : nil
+            )
         )
         guard let sessionID = UUID(uuidString: response.workSessionId),
               let mode = ProcessManager.AttachMode(serverValue: response.mode)

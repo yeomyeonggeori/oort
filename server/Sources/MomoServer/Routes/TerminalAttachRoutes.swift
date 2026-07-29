@@ -71,9 +71,28 @@ struct IssueTerminalAttachRequest: Decodable, Sendable {
 
 struct ValidateTerminalAttachRequest: Decodable, Sendable {
     let capabilityToken: String
+    /// MOMO-674: this call is the host RE-checking a stream it already accepted,
+    /// not a client dialling in.
+    ///
+    /// The only clause it changes is expiry, and the reason is what the TTL is
+    /// FOR: 60 seconds bounds the window between minting a bearer and dialling
+    /// with it, because that is when the token is in a clipboard, a URL bar, a
+    /// proxy log. Once this host has accepted a socket on that token — after a
+    /// full, TTL-enforcing validation — the dial window is closed and the token
+    /// has no further job. What still has to be true every 30 seconds is the
+    /// AUTHORIZATION, and every other clause in the join below is exactly that:
+    /// the session is still running or idle, the host is not revoked, the
+    /// grantee is still an active human, an observer's channel membership and
+    /// the session's open observation still hold.
+    ///
+    /// It is not a wider door. Only a MomoHost signature reaches this route, and
+    /// a host only sets this for a socket it is already serving, so nothing a
+    /// stolen token can do with it that serving the stream would not already do.
+    let stream: Bool?
 
     enum CodingKeys: String, CodingKey {
         case capabilityToken = "capability_token"
+        case stream
     }
 }
 
@@ -95,13 +114,28 @@ struct TerminalAttachValidationResponse: ResponseEncodable, Codable, Sendable, E
 ///
 /// MomoServer issues an opaque, short-lived bearer to an authorized human.
 /// The direct PTY host validates that bearer through its existing MomoHost
-/// signature before accepting a client connection. Validation joins the live
-/// work_host and active (running or idle) work_session on every call, making expiry, session end,
-/// and host revocation immediately authoritative. There is intentionally no
-/// stream, websocket, stdin, stdout, resize, or relay route in this server.
+/// signature before accepting a client connection, and re-validates it on a
+/// timer for as long as the stream is open (`stream: true`). Validation joins
+/// the live work_host and active (running or idle) work_session on every call,
+/// making expiry, session end, and host revocation immediately authoritative.
+/// There is intentionally no stream, websocket, stdin, stdout, resize, or relay
+/// route in this server.
 struct TerminalAttachRoutes: Sendable {
     static let capabilityTTLSeconds: Int64 = 60
     static let capabilityPrefix = "momo_terminal_attach_v1"
+
+    /// How long a spent observer row is kept before the next issue on the same
+    /// session sweeps it (MOMO-674).
+    ///
+    /// This used to be zero — expired meant collectable. That was safe only
+    /// while a capability was checked once: now a host re-validates the SAME row
+    /// for the life of the stream, so deleting it the moment its dial window
+    /// closes would make one teammate pressing 관전 시작 cut every other observer
+    /// off the session within a revalidation period. Nothing user-visible reads
+    /// these rows — the 관전 권한 badge counts `expires_at > clock_timestamp()`
+    /// itself, so a row lingering past its expiry is invisible to it — which is
+    /// why the window can be widened without touching what any client says.
+    static let observerCapabilityRetention = "1 hour"
 
     let db: Database
 
@@ -182,7 +216,7 @@ struct TerminalAttachRoutes: Sendable {
             }
 
             _ = try await conn.query(
-                "DELETE FROM terminal_attach_capability WHERE work_session_id = \(sessionID) AND mode = 'observer' AND expires_at <= clock_timestamp()",
+                "DELETE FROM terminal_attach_capability WHERE work_session_id = \(sessionID) AND mode = 'observer' AND expires_at <= clock_timestamp() - interval '\(unescaped: Self.observerCapabilityRetention)'",
                 logger: db.logger
             )
             let issuedRows = try await conn.query(
@@ -280,6 +314,7 @@ struct TerminalAttachRoutes: Sendable {
             context: context
         )
         let token = try Self.validatedCapabilityToken(requestDTO.capabilityToken)
+        let revalidating = requestDTO.stream ?? false
 
         let validated: TerminalAttachValidationResponse? = try await db.withTenantConnection(
             workspaceID: workspaceID
@@ -304,7 +339,7 @@ struct TerminalAttachRoutes: Sendable {
                  WHERE c.workspace_id = \(workspaceID)
                    AND c.host_id = \(hostID)
                    AND c.token_hash = digest(\(token), 'sha256')
-                   AND c.expires_at > clock_timestamp()
+                   AND (\(revalidating) OR c.expires_at > clock_timestamp())
                    AND ws.status IN ('running', 'idle')
                    AND ws.pty_id IS NOT NULL
                    AND ws.attach_endpoint IS NOT NULL

@@ -240,11 +240,25 @@ struct WorkdConfig: Sendable {
             defaultValue: TerminalAttachConfig.defaultMaxConnections,
             range: 1...512
         )
+        // MOMO-674 stream lifetime policy, deliberately independent of the
+        // server's 60 second capability TTL: that TTL bounds mint→dial, this
+        // bounds how stale an authorization an OPEN terminal may run on. The
+        // floor is one second because the call is a signed round trip, and the
+        // ceiling is an hour because past that "we re-check" stops being true.
+        let revalidateMs = try boundedInteger(
+            environment["MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS"],
+            defaultValue: Int(
+                TerminalAttachConfig.defaultRevalidateInterval
+                    .components.seconds * 1_000
+            ),
+            range: 1_000...3_600_000
+        )
         return TerminalAttachConfig(
             bindAddress: bindAddress,
             port: UInt16(port),
             publicEndpoint: publicEndpoint,
-            maxConnections: maxConnections
+            maxConnections: maxConnections,
+            revalidateInterval: .milliseconds(revalidateMs)
         )
     }
 

@@ -1224,6 +1224,19 @@ verifier는 workd 등록과 signed heartbeat/poll, auto-approved mock echo spawn
 `work_session` started→ended, 위조 poll 401, FORCE RLS, raw marker의 서버 원장 부재를 단정한다.
 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행한다.
 
+터미널 attach(#869/#908)까지 포함한 실왕복은 같은 픽스처를 확장한 별도 진입점이다.
+
+```sh
+# runtime-db profile에도 포함됨. 기본 포트: API 28430, Centrifugo 28431,
+# PostgreSQL 28432, Hermes 예약 28433, wss 프록시 28501, 데몬 리스너 28502.
+scripts/verify_workd_attach.sh
+```
+
+자가서명 TLS 프록시 뒤의 평문 리스너에 브라우저 문법(`Sec-WebSocket-Protocol:
+momo.terminal.v1, <token>`)으로 붙어 **직전 출력 → `replay_end` 1개 → `send_stdin` →
+라이브 출력**을 단정하고, 열린 observer 스트림이 소유자의 관전 차단에 1008로 끊기는지를
+단정한다(MOMO-674). red proof는 `WORKD_ATTACH_PROVE_RED=replay-marker`.
+
 #### ACP agent mode (MOMO-531)
 
 enabled `work_tool_profile`의 `tierDefaults.transport`가 `acp`일 때 workd와 앱 세션
@@ -1614,7 +1627,8 @@ T3_CONTINUITY_PROVE_RED=dishonest-probe scripts/verify_t3_provider_continuity.sh
    인스턴스 1개, 서버에서 type=cloud Ed25519 host 1개와 bootstrap token 1회 소비를 확인한다.
 6. 그 host로 work session을 만들고 pause → 10초 대기 → resume → 종료한다.
    provider가 pause를 지원하지 않는다고 선언했다면 pause 호출 자체가 일어나지 않아야 한다.
-   `work_host_usage_interval`의 paused 행 `active_seconds=0`, 최종 합계와
+   `work_host_usage_interval`의 paused 행 `active_micros=0`,
+   `work_host_usage.active_seconds = active_micros / 1000000`(절사는 정산 1회),
    `credit_entry(reason='t3_usage')` 차감을 대조한다.
 7. `DELETE .../work-hosts/{host}/cloud`로 인스턴스를 destroy하고 provider 쪽에 잔존 실행이
    없는지 확인한다. 실패 중간에도 생성한 인스턴스 ID를 기준으로 반드시 정리한다.
