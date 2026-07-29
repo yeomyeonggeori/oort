@@ -2998,6 +2998,10 @@ final class MomoServerTests: XCTestCase {
             "wss://user:secret@workd.momo.test/v1/pty",
             "wss://workd.momo.test/v1/pty?token=raw",
             "wss://workd.momo.test/v1/pty#secret",
+            // MOMO-655: Foundation hands back an empty host, not nil, for an
+            // authority-less URL, so `host != nil` alone let this through and a
+            // client would have dialled its own origin instead of a host.
+            "wss:///v1/pty",
         ] {
             XCTAssertThrowsError(try RemotePTYBinding.validated(
                 ptyID: "pty-511",

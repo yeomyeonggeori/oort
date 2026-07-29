@@ -25,6 +25,16 @@ struct UpdateWorkSessionRequest: Decodable {
     let exitCode: Int?
     let observation: WorkSessionObservation?
     let event: WorkSessionACPEvent?
+    /// MOMO-655. The host publishes its own attach binding here, not only at
+    /// create. Create allocates the session id server-side, so a host whose pty
+    /// id IS the session id cannot know the binding until the row exists; and a
+    /// tier-fallback resume never calls create at all (the server preallocates
+    /// the session and dispatches a spawn control), which left every resumed
+    /// session permanently unattachable. One work-host-signed PATCH covers both
+    /// without adding a route, and reuses `RemotePTYBinding.validated` so the
+    /// stored value obeys exactly the same grammar as the create path.
+    let ptyId: String?
+    let attachEndpoint: String?
 }
 
 struct WorkSessionACPEvent: Codable, Sendable, Equatable {
@@ -324,6 +334,33 @@ struct WorkSessionRoutes: Sendable {
             as: UpdateWorkSessionRequest.self,
             context: context
         )
+        if requestDTO.ptyId != nil || requestDTO.attachEndpoint != nil {
+            guard requestDTO.status == nil, requestDTO.exitCode == nil,
+                  requestDTO.observation == nil, requestDTO.event == nil
+            else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "remote PTY binding cannot be combined with lifecycle fields"
+                )
+            }
+            guard let binding = try RemotePTYBinding.validated(
+                ptyID: requestDTO.ptyId,
+                attachEndpoint: requestDTO.attachEndpoint
+            ) else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "ptyId and attachEndpoint must be provided together"
+                )
+            }
+            return try await bindRemotePTY(
+                binding,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        }
         if let event = requestDTO.event {
             guard requestDTO.status == nil, requestDTO.exitCode == nil,
                   requestDTO.observation == nil
@@ -1465,6 +1502,111 @@ struct WorkSessionRoutes: Sendable {
                 observerGrantCount: decoded.10,
                 remoteAttachAvailable: decoded.11
             )
+        }
+        return try WorkSessionResponse(workSession: session)
+            .response(from: request, context: context)
+    }
+
+    /// MOMO-655: the host states where its PTY can be reached, once.
+    ///
+    /// This is deliberately not a general "edit the session" path. It writes the
+    /// two attach columns and nothing else, only under the signature of the host
+    /// the session is already bound to, only while that session can actually be
+    /// served (running or idle), and only onto an empty binding — a re-send of
+    /// the identical pair succeeds so a lost ack costs nothing, while a
+    /// DIFFERENT endpoint on a live session is refused rather than silently
+    /// redirecting every future observer at a new address. There is no unbind:
+    /// the row ends with the session.
+    private func bindRemotePTY(
+        _ binding: RemotePTYBinding,
+        request: Request,
+        context: AppRequestContext,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> Response {
+        guard principal.kind == .workHost else {
+            throw HTTPError(
+                .forbidden,
+                message: "remote PTY binding requires work host signature"
+            )
+        }
+        let session = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT host_id, status, pty_id, attach_endpoint
+                  FROM work_session
+                 WHERE id = \(sessionID)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let (hostID, status, existingPTYID, existingEndpoint) = try row.decode(
+                (UUID, String, String?, String?).self
+            )
+            guard hostID == principal.tokenID else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "work host cannot bind another host session"
+                )
+            }
+            guard status == "running" || status == "idle" else {
+                throw HTTPError(
+                    .conflict,
+                    message: "remote PTY binding requires a running or idle session"
+                )
+            }
+            if existingPTYID != nil || existingEndpoint != nil {
+                guard existingPTYID == binding.ptyID,
+                      existingEndpoint == binding.attachEndpoint
+                else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "work session already has a different remote PTY binding"
+                    )
+                }
+            }
+            try await Self.requireRemotePTYCapableHost(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                hostID: hostID
+            )
+            _ = try await conn.query(
+                """
+                UPDATE work_session
+                   SET pty_id = \(binding.ptyID),
+                       attach_endpoint = \(binding.attachEndpoint)
+                 WHERE id = \(sessionID)
+                """,
+                logger: db.logger
+            )
+            let updatedRows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       ws.status, ws.observation,
+                       0::bigint AS observer_grant_count,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code,
+                       ws.end_reason, ws.resumed_from_session_id
+                  FROM work_session ws
+                 WHERE ws.id = \(sessionID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let updatedRow = updatedRows.first else {
+                throw HTTPError(
+                    .internalServerError,
+                    message: "remote PTY binding update failed"
+                )
+            }
+            return try Self.decodeSession(updatedRow)
         }
         return try WorkSessionResponse(workSession: session)
             .response(from: request, context: context)

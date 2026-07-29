@@ -2340,6 +2340,9 @@ paths:
         append one bounded normalized ACP event to the session thread ledger;
         the message row and message.new plus ACP realtime outbox projections
         commit atomically. Raw ACP metadata and terminal streams are forbidden.
+        A MomoHost-signed caller may also publish its direct PTY attach binding
+        (ptyId + attachEndpoint) onto its own running or idle session exactly
+        once; the same call with a different binding is 409.
       security:
         - bearerAuth: []
         - workHostAuth: []
@@ -6510,6 +6513,31 @@ components:
         - $ref: "#/components/schemas/SetWorkSessionRunningRequest"
         - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
         - $ref: "#/components/schemas/RelayWorkSessionACPEventRequest"
+        - $ref: "#/components/schemas/BindWorkSessionRemotePTYRequest"
+
+    BindWorkSessionRemotePTYRequest:
+      type: object
+      required: [ptyId, attachEndpoint]
+      additionalProperties: false
+      description: >
+        MomoHost-signed publication of the direct PTY attach binding for a
+        running or idle session the caller already owns (MOMO-655, ADR-0125
+        D10). Create allocates the session id server-side and a tier-fallback
+        resume never calls create at all, so this is the only way those sessions
+        can carry a binding. Writing a DIFFERENT binding onto a session that
+        already has one is 409; re-sending the identical pair is idempotent.
+        The server stores and authorizes the endpoint and never proxies bytes.
+      properties:
+        ptyId:
+          type: string
+          maxLength: 128
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        attachEndpoint:
+          type: string
+          maxLength: 2048
+          description: >
+            Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query,
+            and fragment are forbidden.
 
     RelayWorkSessionACPEventRequest:
       type: object
