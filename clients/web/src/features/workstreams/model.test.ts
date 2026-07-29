@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, type WorkHost, type WorkstreamRun } from "@/lib/api";
 import {
+  WORKSTREAM_FILTER_TABS,
+  WORKSTREAM_FILTERS,
   WORKSTREAM_STATUS_CLASS,
   WORKSTREAM_STATUS_LABEL,
   actorCount,
@@ -11,6 +13,9 @@ import {
   isWorkstreamMissing,
   parseStatusFilter,
   runClockLabel,
+  workstreamFilterLabel,
+  workstreamFilterOf,
+  workstreamStatusOf,
 } from "./model";
 
 const alice = "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaa01";
@@ -205,5 +210,48 @@ describe("isWorkstreamMissing", () => {
       isWorkstreamMissing(new ApiError(403, "active channel membership required"))
     ).toBe(false);
     expect(isWorkstreamMissing(new Error("offline"))).toBe(false);
+  });
+});
+
+describe("작업 흐름 상태 필터 어휘", () => {
+  it("keeps `all` out of the server's alphabet", () => {
+    // `all`은 서버의 상태가 아니라 `?status=`의 부재다. 컨트롤이 다섯 값을
+    // 말하더라도 요청으로 나가는 것은 넷 아니면 아무것도 아니어야 한다.
+    expect(WORKSTREAM_FILTERS).toEqual([
+      "all",
+      "active",
+      "paused",
+      "done",
+      "cancelled",
+    ]);
+    expect(workstreamStatusOf("all")).toBeNull();
+    expect(workstreamStatusOf("paused")).toBe("paused");
+    expect(workstreamFilterOf(null)).toBe("all");
+    expect(workstreamFilterOf("done")).toBe("done");
+  });
+
+  it("names every value with the same vocabulary the chips use", () => {
+    expect(workstreamFilterLabel("all")).toBe("전체");
+    for (const status of ["active", "paused", "done", "cancelled"] as const) {
+      expect(workstreamFilterLabel(status)).toBe(
+        WORKSTREAM_STATUS_LABEL[status]
+      );
+    }
+  });
+
+  it("keeps the tab ids and the v1 test ids apart, on purpose", () => {
+    // 게이트가 `workstream-filter-done`으로 서버 필터 왕복을 잡는다. 컨트롤을
+    // 공용 탭으로 바꾸면서 엘리먼트 id는 탭 규약을 따르되, test id는 v1이 정한
+    // 문자열을 그대로 지킨다.
+    for (const value of WORKSTREAM_FILTERS) {
+      expect(WORKSTREAM_FILTER_TABS.testId(value)).toBe(
+        `workstream-filter-${value}`
+      );
+      expect(WORKSTREAM_FILTER_TABS.tabId(value)).not.toBe(
+        WORKSTREAM_FILTER_TABS.panelId(value)
+      );
+    }
+    expect(WORKSTREAM_FILTER_TABS.values).toBe(WORKSTREAM_FILTERS);
+    expect(WORKSTREAM_FILTER_TABS.labelFor).toBe(workstreamFilterLabel);
   });
 });

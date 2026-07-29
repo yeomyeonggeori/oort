@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { workSessionResumeTargets } from "@/features/work/workSessionModel";
 import { channelLabel, type Directory } from "@/features/workspace/useWorkspace";
+import type { FilterTabsSpec } from "@/features/common/FilterTabs";
 
 // =============================================================================
 // 작업 흐름 (ADR-0143): the goal layer, as a set of pure functions.
@@ -69,6 +70,59 @@ export function parseStatusFilter(raw: string | null): WorkstreamStatus | null {
     ? (raw as WorkstreamStatus)
     : null;
 }
+
+/**
+ * The five answers to "어떤 상태?", in the shape the shared tab control takes.
+ *
+ * `all` is not a server status, it is the ABSENCE of `?status=`, so it lives
+ * only in this vocabulary and is translated back to `null` before any request.
+ * The two converters below are the whole translation layer, and they are
+ * functions rather than an inline `?? "all"` at the call site because the URL
+ * (status | null) and the control (five values) are two different alphabets and
+ * a surface that mixed them would send `?status=all` to a server that has no
+ * such row.
+ */
+export const WORKSTREAM_FILTERS = ["all", ...WORKSTREAM_STATUSES] as const;
+
+export type WorkstreamFilter = (typeof WORKSTREAM_FILTERS)[number];
+
+export function workstreamFilterLabel(value: WorkstreamFilter): string {
+  return value === "all" ? "전체" : WORKSTREAM_STATUS_LABEL[value];
+}
+
+export function workstreamFilterOf(
+  status: WorkstreamStatus | null
+): WorkstreamFilter {
+  return status ?? "all";
+}
+
+export function workstreamStatusOf(
+  filter: WorkstreamFilter
+): WorkstreamStatus | null {
+  return filter === "all" ? null : filter;
+}
+
+/**
+ * 상태 필터는 인박스 탭과 같은 컨트롤이다 (features/common/FilterTabs).
+ *
+ * 처음에는 `role="group"` + `aria-pressed` 버튼 다섯 개를 손으로 만들었고, 그
+ * 대가가 실측됐다: 탭 정거장 5개(집의 컨트롤은 roving tabindex로 1개), ←/→ 이동
+ * 없음, 그리고 선택 알약이 `bg-accent-soft text-accent`라 `멈춤` 상태칩과 픽셀
+ * 단위로 같은 배지가 됐다 — 목록의 한 행에 "멈춤" 배지가 둘 있는 화면(1R H2).
+ * 공용 탭은 선택을 `bg-accent-soft font-medium text-ink`로 칠하므로 상태칩과
+ * 잉크 색·크기·높이가 모두 다르다.
+ */
+export const WORKSTREAM_FILTER_TABS: FilterTabsSpec<WorkstreamFilter> = {
+  label: "작업 흐름 상태",
+  values: WORKSTREAM_FILTERS,
+  labelFor: workstreamFilterLabel,
+  tabId: (value) => `workstream-tab-${value}`,
+  panelId: (value) => `workstream-panel-${value}`,
+  // 엘리먼트 id와 달리 test id는 v1이 정한 문자열을 그대로 지킨다: 게이트가
+  // `workstream-filter-done`으로 서버 필터 왕복을 잡고 있고, 리뷰가 맞다고 인정한
+  // 단정을 컨트롤 교체로 깨뜨릴 이유가 없다.
+  testId: (value) => `workstream-filter-${value}`,
+};
 
 /**
  * A run clock that survives leaving today, in two pieces.

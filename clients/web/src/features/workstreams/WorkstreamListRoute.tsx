@@ -3,16 +3,20 @@ import { Link, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
+import { FilterTabs } from "@/features/common/FilterTabs";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { relativeLabel } from "@/features/inbox/model";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
-import { WORKSTREAM_STATUSES, type Workstream } from "@/lib/api";
+import { type Workstream } from "@/lib/api";
 import {
+  WORKSTREAM_FILTER_TABS,
   WORKSTREAM_STATUS_CLASS,
   WORKSTREAM_STATUS_LABEL,
   channelDisplayName,
   parseStatusFilter,
+  workstreamFilterOf,
+  workstreamStatusOf,
 } from "./model";
 import { useWorkstreams } from "./useWorkstreams";
 
@@ -38,6 +42,14 @@ import { useWorkstreams } from "./useWorkstreams";
 // "minimum exposure"), and an empty state that said "권한이 없습니다" would hand
 // back the existence signal the server just refused to give.
 // =============================================================================
+
+// 헤더와 행이 같은 오른쪽 끝을 갖게 하는 한 줄. 구분선과 hover 배경은 판 전폭,
+// 내용만 여기서 멈춘다 — MemberRow가 적어두고 실측한 계약 그대로다
+// (MemberRow.tsx §measure, DirectoryRoute 헤더 176-182). v1은 헤더는 내용을,
+// 목록은 컨테이너를 캡했고 그래서 1280에서 오른쪽 가장자리가 셋이었다(헤더
+// 카운트 896, ul 880, 상태칩 864 — 1R H1). 한 상수를 헤더와 행이 같이 쓰면 그
+// 어긋남은 다시 생길 수 없다.
+const MEASURE_CLASS = "w-full max-w-pane-lg";
 
 function StatusChip({ status }: { status: Workstream["status"] }) {
   return (
@@ -72,46 +84,52 @@ function WorkstreamRow({
     >
       <Link
         to={`/workstreams/${workstream.id}`}
-        className="flex flex-col gap-1 px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="flex px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
-        <span className="flex min-w-0 items-center gap-2">
-          {/* The goal is at most 200 characters (migration 055), so it fits one
-              row's worth of reading; it truncates rather than wrapping because
-              the row's job is scanning, and the detail shows it in full. */}
-          <span
-            className="min-w-0 flex-1 truncate text-body text-ink"
-            data-testid="workstream-goal"
-          >
-            {workstream.goal}
+        <span
+          className={cn(MEASURE_CLASS, "flex min-w-0 flex-col gap-1")}
+          data-testid="workstream-row-content"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {/* The goal is at most 200 characters (migration 055), so it fits
+                one row's worth of reading; it truncates rather than wrapping
+                because the row's job is scanning, and the detail shows it in
+                full. */}
+            <span
+              className="min-w-0 flex-1 truncate text-body text-ink"
+              data-testid="workstream-goal"
+            >
+              {workstream.goal}
+            </span>
+            <StatusChip status={workstream.status} />
           </span>
-          <StatusChip status={workstream.status} />
-        </span>
-        <span className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
-          <span className="min-w-0 truncate" data-testid="workstream-channel">
-            {channelName}
-          </span>
-          <span className="shrink-0">· 실행</span>
-          {/* Two counts on one line, so both are tabular: 실행 12 over 실행 3
-              must line up down the column, and the pair is the fact that
-              decides whether anyone is on this goal right now. */}
-          <span
-            className="shrink-0 font-mono"
-            data-numeric
-            data-testid="workstream-run-count"
-          >
-            {workstream.runCount}
-          </span>
-          <span className="shrink-0">· 활성</span>
-          <span
-            className="shrink-0 font-mono"
-            data-numeric
-            data-testid="workstream-active-count"
-          >
-            {workstream.activeRunCount}
-          </span>
-          <span className="shrink-0">· 갱신</span>
-          <span className="shrink-0" data-testid="workstream-updated">
-            {relativeLabel(workstream.updatedAtMs, nowMs)}
+          <span className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
+            <span className="min-w-0 truncate" data-testid="workstream-channel">
+              {channelName}
+            </span>
+            <span className="shrink-0">· 실행</span>
+            {/* Two counts on one line, so both are tabular: 실행 12 over 실행 3
+                must line up down the column, and the pair is the fact that
+                decides whether anyone is on this goal right now. */}
+            <span
+              className="shrink-0 font-mono"
+              data-numeric
+              data-testid="workstream-run-count"
+            >
+              {workstream.runCount}
+            </span>
+            <span className="shrink-0">· 활성</span>
+            <span
+              className="shrink-0 font-mono"
+              data-numeric
+              data-testid="workstream-active-count"
+            >
+              {workstream.activeRunCount}
+            </span>
+            <span className="shrink-0">· 갱신</span>
+            <span className="shrink-0" data-testid="workstream-updated">
+              {relativeLabel(workstream.updatedAtMs, nowMs)}
+            </span>
           </span>
         </span>
       </Link>
@@ -136,6 +154,7 @@ export function WorkstreamListRoute() {
 
   const workstreams = query.data ?? [];
   const settled = !query.isPending && query.error === null;
+  const filter = workstreamFilterOf(status);
 
   function setStatus(next: Workstream["status"] | null) {
     const nextParams = new URLSearchParams(params);
@@ -147,10 +166,17 @@ export function WorkstreamListRoute() {
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="workstream-route">
       <header className="flex flex-col gap-2 border-b border-line px-4 py-2">
-        <div className="flex w-full max-w-pane-lg items-baseline justify-between gap-3">
-          <div className="min-w-0">
+        <div
+          className={cn(MEASURE_CLASS, "flex items-baseline justify-between gap-3")}
+          data-testid="workstream-header-content"
+        >
+          {/* 한국어 산문이므로 음절이 아니라 어절에서 끊는다(MOMO-676 M-5).
+              keep-all은 부모에, break-words는 자식에 둔다: 둘은 tailwind-merge의
+              같은 `break` 그룹이라 한 엘리먼트에 쓰면 하나가 조용히 사라진다
+              (common/States.tsx가 세운 형태). */}
+          <div className="min-w-0 break-keep">
             <h1 className="text-body font-semibold text-ink">작업 흐름</h1>
-            <p className="text-meta text-ink-muted">
+            <p className="break-words text-meta text-ink-muted">
               목표 하나와 그 목표를 실행한 사람들. 멈춘 목표는 같은 채널 멤버가
               이어받습니다.
             </p>
@@ -167,47 +193,15 @@ export function WorkstreamListRoute() {
             </span>
           )}
         </div>
-        {/* The filter is the server's own `?status=` vocabulary. Announced as
-            one control, because a screen reader reading five loose buttons has
-            not been told they are five answers to one question. */}
-        <div
-          role="group"
-          aria-label="상태"
-          className="flex min-w-0 flex-wrap items-center gap-1"
-          data-testid="workstream-filter"
-        >
-          <button
-            type="button"
-            aria-pressed={status === null}
-            onClick={() => setStatus(null)}
-            data-testid="workstream-filter-all"
-            className={cn(
-              "h-control-sm shrink-0 rounded-sm px-2 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-              status === null
-                ? "bg-accent-soft text-accent"
-                : "text-ink-muted hover:bg-surface-hover"
-            )}
-          >
-            전체
-          </button>
-          {WORKSTREAM_STATUSES.map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={status === value}
-              onClick={() => setStatus(value)}
-              data-testid={`workstream-filter-${value}`}
-              className={cn(
-                "h-control-sm shrink-0 rounded-sm px-2 text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-                status === value
-                  ? "bg-accent-soft text-accent"
-                  : "text-ink-muted hover:bg-surface-hover"
-              )}
-            >
-              {WORKSTREAM_STATUS_LABEL[value]}
-            </button>
-          ))}
-        </div>
+        {/* 인박스와 같은 탭 컨트롤이다(features/common/FilterTabs). 값만 이
+            표면의 것이고 — 서버의 `?status=` 어휘 다섯 — 키보드 계약(정거장 1개,
+            ←/→ 이동)과 기하는 그 컨트롤의 것이다. 여기서 다시 만들면 같은 화면의
+            같은 질문이 두 가지 방식으로 답해진다. */}
+        <FilterTabs
+          spec={WORKSTREAM_FILTER_TABS}
+          value={filter}
+          onChange={(next) => setStatus(workstreamStatusOf(next))}
+        />
       </header>
 
       {/* The banner dates what is on screen and stops there. It used to add
@@ -223,7 +217,15 @@ export function WorkstreamListRoute() {
         />
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* 탭이 지배하는 패널. 탭이 자기 패널을 `aria-controls`로 가리키므로 그
+          패널이 실제로 존재해야 하고, 그 관계를 아는 것은 라우트다(인박스와 같은
+          형태). */}
+      <div
+        role="tabpanel"
+        id={WORKSTREAM_FILTER_TABS.panelId(filter)}
+        aria-labelledby={WORKSTREAM_FILTER_TABS.tabId(filter)}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {query.isPending ? (
           <SkeletonRows rows={5} className="p-4" />
         ) : query.error ? (
@@ -260,12 +262,12 @@ export function WorkstreamListRoute() {
             />
           )
         ) : (
-          /* Same reading measure as the header above and the detail behind
-             each row (max-w-pane-lg): let a row run the full surface and its
-             right-aligned status chip ends up a screen away from the goal it
-             describes, which is the exact failure the card measure exists for
-             (tokens.md §4). */
-          <ul className="max-w-pane-lg" data-testid="workstream-list">
+          /* 측정 폭은 이 컨테이너가 아니라 각 행의 내용이 갖는다(MEASURE_CLASS).
+             ul을 캡하면 구분선과 hover 배경까지 640px에서 잘려, 판 전폭으로
+             그어지는 헤더 구분선과 어긋난 두 번째 오른쪽 가장자리가 생긴다 —
+             1R H1이 실측한 셋 중 하나가 바로 이 ul이었다. 집의 계약은
+             "구분선·hover는 전폭, 내용만 캡"이다(MemberRow.tsx §measure). */
+          <ul data-testid="workstream-list">
             {workstreams.map((workstream) => (
               <WorkstreamRow
                 key={workstream.id}
