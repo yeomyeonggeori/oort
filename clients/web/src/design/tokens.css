@@ -62,7 +62,9 @@
 
   /* --- status ------------------------------------------------------------
    * 위험 위계는 취향이 아니라 순서다: --danger > --warn > --ink-muted. 한 표면에
-   * 두 톤이 나란히 서면 더 위험한 쪽이 먼저 눈에 들어와야 한다(MOMO-641).
+   * 두 톤이 나란히 서면 더 위험한 쪽이 먼저 눈에 들어와야 한다(MOMO-641). 이
+   * 순서가 다스리는 것은 **전경 톤**이다: 글자·칩·점·막대처럼 위험도끼리 겨루는
+   * 자리(references/tokens.md §3a 표 A).
    *
    * 그 순서를 재는 자는 대비가 아니라 **채도(OKLab C)**다. 다크의 옛 --danger
    * (#f2b8b5)는 --warn(#d4a72c)보다 대비가 오히려 높았는데도(10.55 vs 8.03 on
@@ -75,7 +77,29 @@
    * 대비는 바닥선(모든 표면 AA + --ink-muted보다 높음)으로 남긴다. 세 조건 전부
    * tokens.contrast.test.ts가 두 스킴에서 잰다. */
   --danger: light-dark(#b3261e, #ff796b);
-  --on-danger: light-dark(#fffefb, #17161a);
+
+  /* 파괴 액션의 **채움** (MOMO-642 R1 H-2). 채도를 순서의 자로 세운 뒤, 그 자가
+   * 다스리는 표면 목록에서 채움 버튼이 빠져 있었다. 그래서 위 --danger가 그대로
+   * bg-danger로 칠해졌고, 설정 > 앱 상세 행에서 코랄 `설치 해제`가 앰버 주 버튼
+   * `내 사용 허용` 옆에 서서 **이 팔레트 자신의 자로 재면 파괴 보조가 주 액션을
+   * 이겼다**(라이트 1.31x, 다크 1.24x). MOMO-641이 고친 역전과 같은 종류가 방향만
+   * 바뀐 것이다.
+   *
+   * 토큰을 하나 더 두는 것은 취향이 아니라 산술의 결과다. 다크에서 전경 톤은
+   * --warn(C 0.1407)을 1.15배 이겨야 하므로 C >= 0.162가 필요하고, 주 액션
+   * --accent(C 0.1336)를 이기지 않으려면 C <= 0.116이어야 한다. 두 구간의
+   * 교집합은 공집합이다: 하나의 --danger로 두 순서를 동시에 만족시킬 수 있는
+   * 빨강은 존재하지 않는다. 그래서 위험을 **말하는** 톤과 위험을 **실행하는**
+   * 채움이 이름을 나눠 갖는다.
+   *
+   * 채움은 더 크게 외치는 대신 더 무겁게 가라앉는다: 같은 색상(hue 차 9/6도로
+   * 같은 위험 계열)에서 채도만 accent 아래로 내리고 명도를 낮췄다. 그 결과 두
+   * 채움은 오히려 **전보다 더 멀어졌다**(OKLab dE 라이트 0.073 -> 0.092, 다크
+   * 0.122 -> 0.131) — 조용해진 것이지 주 버튼에 섞인 것이 아니다. 네 조건 전부
+   * (accent > 채움 채도비 >= 1.15, dE >= 0.08, 위험 계열 hue 차 <= 15도, 라벨 AA)
+   * tokens.contrast.test.ts가 두 스킴에서 잰다. */
+  --danger-fill: light-dark(#8c393d, #dc817e);
+  --on-danger-fill: light-dark(#fffefb, #17161a);
   --ok: light-dark(#187533, #57ab5a);
   --warn: light-dark(#8a5c00, #d4a72c);
 
@@ -197,7 +221,8 @@
   --color-agent-soft: var(--agent-soft);
   --color-scrim: var(--scrim);
   --color-danger: var(--danger);
-  --color-on-danger: var(--on-danger);
+  --color-danger-fill: var(--danger-fill);
+  --color-on-danger-fill: var(--on-danger-fill);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
 }

@@ -121,6 +121,27 @@ function hueGap(a: string, b: string): number {
   return d > 180 ? 360 - d : d;
 }
 
+/**
+ * Perceptual distance in OKLab. Chroma orders two tones; this says whether they
+ * are still two tones at all. Quieting the destructive fill (MOMO-642 R1 H-2)
+ * moves it TOWARD the accent on the one axis the order is measured on, so the
+ * order has to be bought without merging the two fills into one colour.
+ */
+function deltaE(a: string, b: string): number {
+  const [aA, aB] = oklabAB(a);
+  const [bA, bB] = oklabAB(b);
+  return Math.hypot(oklabL(a) - oklabL(b), aA - bA, aB - bB);
+}
+
+/** OKLab lightness, the third axis deltaE needs. */
+function oklabL(hex: string): number {
+  const [r, g, b] = linearize(hex);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+}
+
 export function contrast(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
@@ -183,7 +204,8 @@ describe("Dawn palette", () => {
       "line",
       "line-strong",
       "on-accent",
-      "on-danger",
+      "danger-fill",
+      "on-danger-fill",
     ];
     for (const token of expected) expect(TOKENS[token], token).toBeDefined();
   });
@@ -244,12 +266,15 @@ describe("Dawn palette", () => {
         }
       });
 
-      it("filled accent and danger carry AA label text", () => {
+      it("filled accent and destructive fill carry AA label text", () => {
         expect(
           contrast(pick("on-accent", scheme.index), pick("accent", scheme.index))
         ).toBeGreaterThanOrEqual(4.5);
         expect(
-          contrast(pick("on-danger", scheme.index), pick("danger", scheme.index))
+          contrast(
+            pick("on-danger-fill", scheme.index),
+            pick("danger-fill", scheme.index)
+          )
         ).toBeGreaterThanOrEqual(4.5);
       });
 
@@ -319,6 +344,69 @@ describe("Dawn palette", () => {
         expect(
           Number((c("warn") / c("ink-muted")).toFixed(2)),
           `warn vs ink-muted chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(2);
+      });
+
+      // The SECOND surface class the chroma ruler governs: action FILLS.
+      //
+      // The ruler above orders risk tones against each other. It said nothing
+      // about the surfaces where --danger was painted as a fill, so the ruler
+      // stepped straight over `<Button variant="destructive">` and by its own
+      // measurement the destructive secondary outranked the primary action:
+      // 설치 해제 (C 0.178 light / 0.166 dark) stood beside 내 사용 허용 (0.136 /
+      // 0.134) in 설정 > 앱 상세, at 1.31x and 1.24x. One --danger cannot serve
+      // both orders — in dark it must clear warn by 1.15x (C >= 0.162) AND stay
+      // under accent (C <= 0.116), an empty interval — so the fill has its own
+      // token and its own assertion here (MOMO-642 R1 H-2).
+      //
+      // Ratios again rather than a bare `>`, for the same reason: a tie is not
+      // an order. Applies to every destructive fill in the client, since they
+      // all come from the one `destructive` variant.
+      it("ranks the primary action fill above the destructive fill", () => {
+        const c = (token: string) => chroma(pick(token, scheme.index));
+        expect(
+          Number((c("accent") / c("danger-fill")).toFixed(2)),
+          `accent vs danger-fill chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(1.15);
+      });
+
+      // Quieter, not merged. Lowering the destructive fill's chroma walks it
+      // toward the accent on the very axis the order is read from, so the two
+      // fills must stay apart as colours. Measured 0.092 light / 0.131 dark,
+      // both WIDER than the 0.073 / 0.122 the two had before the split.
+      it("keeps the destructive fill a different colour from the accent fill", () => {
+        expect(
+          Number(
+            deltaE(
+              pick("danger-fill", scheme.index),
+              pick("accent", scheme.index)
+            ).toFixed(3)
+          ),
+          `danger-fill vs accent deltaE (${scheme.name})`
+        ).toBeGreaterThanOrEqual(0.08);
+      });
+
+      // ...and still recognisably the risk colour. A fill allowed to drift out
+      // of the --danger hue family would satisfy both assertions above by
+      // ceasing to look destructive, which is the cheapest way to pass this
+      // file and the worst way to ship. The floor under "quieter" is the same
+      // one --warn already stands on: a tone that carries meaning is at least
+      // twice as colourful as the quietest foreground.
+      it("keeps the destructive fill in the danger hue family", () => {
+        expect(
+          Math.round(
+            hueGap(pick("danger-fill", scheme.index), pick("danger", scheme.index))
+          ),
+          `danger-fill vs danger hue gap (${scheme.name})`
+        ).toBeLessThanOrEqual(15);
+        expect(
+          Number(
+            (
+              chroma(pick("danger-fill", scheme.index)) /
+              chroma(pick("ink-muted", scheme.index))
+            ).toFixed(2)
+          ),
+          `danger-fill vs ink-muted chroma (${scheme.name})`
         ).toBeGreaterThanOrEqual(2);
       });
 
