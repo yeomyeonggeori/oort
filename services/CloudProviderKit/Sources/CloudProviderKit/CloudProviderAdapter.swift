@@ -49,7 +49,7 @@ public enum CloudProviderOperation: String, Sendable, Equatable, CaseIterable {
 
 /// What survives a pause/resume round trip.
 public enum CloudResumeSemantics: String, Sendable, Equatable {
-    /// Process and memory state are restored (E2B-style snapshot resume).
+    /// Process and memory state are restored from a snapshot on resume.
     case memory
     /// Only durable storage survives; the instance boots again from cold.
     case coldBoot
