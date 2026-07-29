@@ -23,6 +23,11 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
     private struct RegisterResponse: Decodable { let workHost: RegisteredHost }
     private struct HeartbeatRequest: Encodable { let sentAtMs: Int64; let signature: String }
     private struct PendingResponse: Decodable { let workControls: [WorkControl] }
+    private struct LiveSessionsResponse: Decodable {
+        let workSessions: [WorkHostLiveSession]
+    }
+    private struct ReconcileRequest: Encodable { let lostSessionIds: [UUID] }
+    private struct ReconcileResponse: Decodable { let reportedSessionIds: [UUID] }
     private struct WorkToolProfilesResponse: Decodable {
         let workToolProfiles: [WorkToolProfile]
     }
@@ -117,6 +122,32 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             body: Optional<String>.none
         )
         return response.workControls
+    }
+
+    func liveSessions(hostID: UUID) async throws -> [WorkHostLiveSession] {
+        let path = "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/live-sessions"
+        let response: LiveSessionsResponse = try await sendSigned(
+            method: "GET",
+            path: path,
+            hostID: hostID,
+            body: Optional<String>.none
+        )
+        return response.workSessions
+    }
+
+    func reportLostSessions(
+        hostID: UUID,
+        sessionIDs: [UUID]
+    ) async throws -> [UUID] {
+        guard !sessionIDs.isEmpty else { return [] }
+        let path = "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/reconcile"
+        let response: ReconcileResponse = try await sendSigned(
+            method: "POST",
+            path: path,
+            hostID: hostID,
+            body: ReconcileRequest(lostSessionIds: sessionIDs)
+        )
+        return response.reportedSessionIds
     }
 
     func workToolProfiles(hostID: UUID) async throws -> [WorkToolProfile] {

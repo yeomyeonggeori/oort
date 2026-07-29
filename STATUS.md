@@ -7,6 +7,13 @@
 - 샘플 하나가 나머지 전체를 막던 fail-fast 구조를 실패 누적형으로 바꿨다. 상태/shape 단정 실패는 기록 후 계속 진행하고(잘못된 body는 manifest에 넣지 않아 역방향 커버리지에서 미샘플로 드러난다), 후속 요청이 의존하는 id 추출 실패만 즉시 중단하되 EXIT trap이 그때까지 누적된 실패를 항상 출력한다. `OPENAPI_GATE_FAIL_FAST=1`로 기존 동작을, `OPENAPI_GATE_MAX_FAILURES`(기본 30)로 연쇄 잡음 상한을 제어한다. 최종 shape/커버리지 검사는 단정 실패가 있어도 실행된다.
 - 서버 코드 변경 없음(`swift build` green). 스크립트는 `bash -n`·shellcheck에서 base 대비 새 경고 분류 없음(추가된 SC2016 1건은 jq `--arg` 관용구). 게이트 자체는 Docker 스택이 필요하므로 `runtime-unverified` — 오케스트레이터가 `scripts/verify_openapi_contract.sh` 완주 PASS를 확인해야 한다.
 
+## MOMO-656/661 데몬 재시작 reconciliation + replay 구독자 큐 상한 (#870 #879, 2026-07-29)
+
+- 데몬은 기동 시 `GET .../work-hosts/{host}/live-sessions`로 원장이 아직 자기 것으로 보는 running/idle 세션을 읽고, 자기 프로세스 표에 없는 것(재시작 직후에는 전부)을 서명 REST `POST .../reconcile`로 명시 보고한다. 부팅 스냅샷은 1회만 뜨고 실패 시 그대로 재시도해, 재개가 같은 호스트로 내려온 새 세션을 자기 보고가 다시 잡는 일이 없다.
+- 서버는 전이를 하지 않는다. Migration 054의 `work_session.host_lost_at`은 sweep 적격화 표식일 뿐이며 orphaned 상태·재개 카드·계보·tier policy 분기는 기존 ADR-0125 D11 sweep이 그대로 소유한다. `end_reason`은 늘리지 않았다 — 사용자에게는 같은 사실이고 그 값은 클라이언트가 렌더하는 어휘라서, 출처 구분은 `audit_log`(`momo.work_session.host_lost.v1` + orphan 감사의 `orphan_source`)에만 남겼다. host가 보고한 세션은 idle timeout 분기에서 제외해 host loss가 항상 먼저 처리된다.
+- PTY replay 구독자 큐에 구성 가능한 바이트 상한을 두고(`MOMO_WORKD_PTY_SUBSCRIBER_QUEUE_BYTES`, 기본 ring×4·ring 미만 불가), 초과 구독자는 프레임을 조용히 버리는 대신 `.overflow(byteOffset:)` 종단 프레임으로 절단한다. PTY는 연속 바이트라 드롭이 xterm에 무증상 깨짐으로 나타나고, 절단은 재연결→ring replay→새 `replay_end`라는 기존 계약을 그대로 재사용하기 때문이다. 큐 계정은 `AsyncStream(unfolding:)`으로 소비 시점에만 감소해 정확하다.
+- WorkHostDaemon 38 tests(3 skip, 기준 32에서 +6: 재시작 보고·서비스중 세션 제외·전송 실패 재시도, 정지 구독자 red proof·정상 소비자·overflow 프레임 형태), server `testWorkHostRestartReconciliationReusesTheOrphanSweepWithoutNewUX`, server·NotifierWorker 빌드 무회귀는 green이다. `scripts/verify_workd_reconcile.sh`(실제 SIGKILL 재기동 → 보고 → orphaned + resume_offer, grace 1시간으로 heartbeat 경로 배제, SQL 지름길 없음)는 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-671 workstream 계층 — 암시 생성·계보 연결·재개 자격 확장 (#898, 2026-07-29)
 
 - Migration 055가 스레드 root message에 앵커되는 `workstream`(목표 문장·`active|paused|done|cancelled`·workspace/channel FK)과 `work_session.workstream_id` 복합 FK(`(workspace_id, id)` 참조)를 추가하고, 기존 세션을 스레드 기준으로 소급 생성·연결한 뒤 `SET NOT NULL`로 미연결 Run을 이름 있는 실패로 막는다.
