@@ -104,20 +104,26 @@ final class CloudProvisionerTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let sql = try String(
+        let settlementSQL = try String(
             contentsOf: serverRoot.appendingPathComponent(
                 "Migrations/049_t3_lifecycle_settlement.sql"
             ),
             encoding: .utf8
         )
-        XCTAssertTrue(sql.contains("work_host_usage_one_unsettled_per_host_idx"))
-        XCTAssertTrue(sql.contains("cannot enforce one unsettled T3 usage per host"))
-        XCTAssertTrue(sql.contains("lower(host_id::text)"))
-        XCTAssertTrue(sql.contains("CREATE FUNCTION settle_t3_work_session"))
-        XCTAssertTrue(sql.contains("ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING"))
-        XCTAssertTrue(sql.contains("'pausing', 'paused', 'resuming'"))
-        XCTAssertTrue(sql.contains("'destroy_pending'"))
-        XCTAssertFalse(sql.contains("ALTER TABLE usage_ledger"))
+        let constraintSQL = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/051_t3_unsettled_usage_constraint.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(constraintSQL.contains("work_host_usage_one_unsettled_per_host_idx"))
+        XCTAssertTrue(constraintSQL.contains("cannot enforce one unsettled T3 usage per host"))
+        XCTAssertTrue(constraintSQL.contains("lower(host_id::text)"))
+        XCTAssertTrue(settlementSQL.contains("CREATE FUNCTION settle_t3_work_session"))
+        XCTAssertTrue(settlementSQL.contains("ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING"))
+        XCTAssertTrue(settlementSQL.contains("'pausing', 'paused', 'resuming'"))
+        XCTAssertTrue(settlementSQL.contains("'destroy_pending'"))
+        XCTAssertFalse(settlementSQL.contains("ALTER TABLE usage_ledger"))
     }
 
     func testT3MigrationSeparatesTokenAndActiveTimeLedgers() throws {

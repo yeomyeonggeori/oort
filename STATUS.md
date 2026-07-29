@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-665 migration 049 fail-closed 탈출구 (#886, 2026-07-29)
+
+- Migration 049를 정산 primitive 전용으로 축소하고, 050 운영자 repair 함수와 051 이름 있는 fail-closed/unique 강제를 분리했다. 기존 049 적용 DB는 파일명 기반 `schema_migrations`로 049를 skip하며 051의 `IF NOT EXISTS` 인덱스를 안전하게 통과한다.
+- `docs/runbooks/t3-unsettled-usage-repair.md`와 `scripts/verify_t3_migration_repair.sh`가 host/count 진단 → repair → 재적용/2-pass 멱등 → MomoServer health, repair 생략 red proof와 기존 049 DB를 한 흐름으로 증명한다. Docker 행동 gate는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## privileged refresh 차단 + T3 기본 비활성 (#884+#887, 2026-07-28)
 
 - refresh는 현재 verified human email·allowlist·운영자 secret 설정을 다시 확인해 자격 상실 시 `platform:read`와 `platform:credits:write`만 제거하고 일반 messages scope는 유지한다. 기존 로그인 경로가 같은 멤버의 privileged session token을 일괄 revoke해 allowlist/secret 변경 뒤 재로그인을 rotation 경계로 쓴다.
