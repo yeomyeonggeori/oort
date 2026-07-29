@@ -145,3 +145,24 @@ curl -s -H "Authorization: Bearer $MOMO_TOKEN" \
 `remoteAttachAvailable: false`면 순서대로 의심한다: attach 미설정 →
 `terminal_attach` capability 미등록(재등록 필요) → 세션이 ACP 전송(PTY 없음).
 데몬 로그의 `work host attach binding failed`가 셋을 구분해 준다.
+
+## 상설 검증기
+
+```sh
+scripts/verify_workd_attach.sh
+```
+
+격리 스택(28430~28433) + 실제 `momo-workd` + 자가서명 TLS 프록시(API_PORT+71) 앞에서
+브라우저와 같은 방식(서브프로토콜 베어러)으로 다이얼해 **직전 출력 → `replay_end`
+1개 → `send_stdin` → 라이브 출력**을 단정하고, 이어서 열린 observer 스트림이
+소유자의 "소유자만 보기"에 1008로 끊기는지를 단정한다. 실패는 전부 단계 이름으로
+나온다(`replay_end`, `replay_end_exactly_once`, `live`, `revoked_close`).
+
+red proof 두 겹:
+
+- 매 실행: `terminal_attach_probe.py --selftest`이 마커를 깨뜨린 wire 3종(마커 없음,
+  `replay_overflow`로 대체, 라이브 중 두 번째 마커)에서 각자 이름으로 실패하는지
+  확인한다. Docker 불필요.
+- 선택: `WORKD_ATTACH_PROVE_RED=replay-marker scripts/verify_workd_attach.sh`가
+  레포 **사본**에서 `PTYReplayEndFrame.type`을 바꿔 `momo-workd`를 다시 빌드하고,
+  그 데몬으로는 검증기가 반드시 실패해야 통과한다. 워크트리는 건드리지 않는다.
