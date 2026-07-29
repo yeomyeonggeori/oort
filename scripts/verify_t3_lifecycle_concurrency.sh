@@ -151,13 +151,13 @@ WITH bumped AS (
 INSERT INTO message
   (id, workspace_id, channel_id, seq, hlc_ts, hlc_count,
    author_member_id, type, props)
-SELECT '$REST_ROOT_ID', '$WS_ID', '$CHANNEL_ID', last_seq - 1,
-       890001, 0, '$MEMBER_ID', 'system',
+SELECT '$REST_ROOT_ID'::uuid, '$WS_ID'::uuid, '$CHANNEL_ID'::uuid, last_seq - 1,
+       890001, 0, '$MEMBER_ID'::uuid, 'system'::message_type,
        '{"kind":"work_session","status":"running"}'::jsonb
   FROM bumped
 UNION ALL
-SELECT '$SWEEP_ROOT_ID', '$WS_ID', '$CHANNEL_ID', last_seq,
-       890002, 0, '$MEMBER_ID', 'system',
+SELECT '$SWEEP_ROOT_ID'::uuid, '$WS_ID'::uuid, '$CHANNEL_ID'::uuid, last_seq,
+       890002, 0, '$MEMBER_ID'::uuid, 'system'::message_type,
        '{"kind":"work_session","status":"running"}'::jsonb
   FROM bumped;
 INSERT INTO work_host
