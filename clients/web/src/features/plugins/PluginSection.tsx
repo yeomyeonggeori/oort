@@ -60,6 +60,7 @@ import {
   type PluginRoleState,
   type PluginScopeChangeKind,
   type PluginScopeChangeOutcome,
+  type PluginScopeConsentFailure,
 } from "./model";
 
 type Filter = "all" | "installed" | "permitted";
@@ -100,7 +101,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Extract<PluginAction, { kind: "uninstall" }> | null>(null);
   const [consenting, setConsenting] = useState<PluginScopeConsent | null>(null);
-  const [consentError, setConsentError] = useState<string | null>(null);
+  const [consentError, setConsentError] = useState<PluginScopeConsentFailure | null>(null);
   const [scopeChange, setScopeChange] = useState<PluginScopeChangeReceipt | null>(null);
   const [scopeFocusAfterChange, setScopeFocusAfterChange] = useState<PluginScopeChangeKind | null>(null);
   const [revealDetailFor, setRevealDetailFor] = useState<string | null>(null);
@@ -177,7 +178,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
             setScopeFocusAfterChange(kind);
           }
         } else {
-          setConsentError(completion.error);
+          setConsentError({ error: completion.error, causes: completion.causes });
         }
       }
       await client.invalidateQueries({ queryKey: ["plugins", workspaceId.toLowerCase()] });
@@ -315,7 +316,11 @@ export function PluginSection({ offline }: { offline: boolean }) {
       )}
       {catalogQuery.data && visible.length > 0 && (
         <div className="plugin-marketplace-layout">
-          <ul className="flex flex-col overflow-hidden rounded-md border border-line" data-testid="plugin-list">
+          {/* 한국어 산문은 어절에서 끊는다(MOMO-676 M-5). word-break는 상속되므로
+              표면의 뿌리에 한 번만 선언하고, 식별자를 담은 자식(스코프 id, URL,
+              도메인)은 자기 자리에서 break-all로 이 규칙을 덮는다. ASCII는
+              keep-all의 영향을 받지 않으므로 영문 매니페스트 문구도 안전하다. */}
+          <ul className="flex break-keep flex-col overflow-hidden rounded-md border border-line" data-testid="plugin-list">
             {visible.map((plugin) => {
               const policy = catalogQuery.data?.toolsByPlugin.get(plugin.pluginId);
               const active = plugin.pluginId === selectedId;
@@ -345,7 +350,17 @@ export function PluginSection({ offline }: { offline: boolean }) {
                       </span>
                       <span className="text-body font-semibold text-ink">{plugin.name}</span>
                       {plugin.official && <StatusChip tone="accent">공식</StatusChip>}
-                      <StatusChip tone={plugin.enabled ? "ok" : "muted"}>{workspaceInstallationLabel(plugin)}</StatusChip>
+                      {/* 다이얼로그와 같은 중립 톤이다(MOMO-676 M-1). MOMO-642 7이
+                          동의 다이얼로그의 같은 문자열을 ok 초록에서 내린 근거는
+                          "위험 칩과 경쟁하지 않는 다른 표면"이었는데, 마켓플레이스는
+                          1200px 위에서 2컬럼이라 이 행과 상세의 위험도·승인 칩이 한
+                          뷰포트에 함께 선다: 근거가 성립하지 않는다. 더 나쁜 것은 같은
+                          문장이 표면마다 색이 달랐다는 점이다 — 행에서 초록, 다이얼로그
+                          에서 회색이면 사실 진술이 아니라 상태가 변한 것처럼 읽힌다.
+                          칩은 색 없이도 말한다: 설치됨/비활성/미설치는 세 문자열이
+                          이미 구분하고 있고(StatusChip은 색에만 의미를 싣지 않는다),
+                          이 표면에서 색은 위험 신호의 것이다. */}
+                      <StatusChip tone="muted">{workspaceInstallationLabel(plugin)}</StatusChip>
                     </span>
                     <span className="text-meta text-ink-muted">{plugin.description}</span>
                     <span className="flex flex-wrap gap-2 text-meta text-ink-muted">
@@ -494,7 +509,7 @@ function PluginDetailPanel({
   const scopes = declaredPluginScopes(detail.tools);
   const activeScopes = activePluginScopes(detail.tools, policyTools);
   return (
-    <section className="flex min-w-0 flex-col gap-3 rounded-md border border-line bg-surface-raised p-4" aria-label={`${plugin.name} 상세`} data-testid="plugin-detail">
+    <section className="flex min-w-0 break-keep flex-col gap-3 rounded-md border border-line bg-surface-raised p-4" aria-label={`${plugin.name} 상세`} data-testid="plugin-detail">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -690,11 +705,19 @@ function PluginActions({
           testId="plugin-scope-revoke"
         />}
         {canManage && (
+          // 채움은 **커밋의 것**이다(MOMO-642 10). 이 표면에는 제거가 둘 있는데
+          // 하나(`내 권한 회수`)는 조용한 아웃라인 오프너였고 다른 하나
+          // (`설치 해제`)는 파괴 채움이었다. 둘 다 확인 다이얼로그를 여는 오프너
+          // 이므로 여기서 지워지는 것은 아무것도 없다: 무게가 붙어야 할 자리는
+          // 실제로 쓰는 버튼, 즉 각자의 확인 버튼이다. 그래서 두 오프너는 같은
+          // 아웃라인이고, 차이는 커밋에서 말한다 — 내 정책만 바꾸는 회수는 액센트
+          // 채움, 워크스페이스 전원의 권한을 함께 거두는 설치 해제는 파괴 채움.
+          // (--danger-fill 자체는 그대로다. 바뀐 것은 그 채움을 누가 입느냐다.)
           <PluginActionButton
             key="management"
             action={managementAction}
             label="설치 해제"
-            variant="destructive"
+            variant="outline"
             busy={isPending(managementAction)}
             blocked={isBlockedBySibling(managementAction)}
             offline={offline}
@@ -878,7 +901,7 @@ function PluginScopeConsentDialog({
   pending: boolean;
   /** The button that opened this programmatic dialog, never activeElement guesswork. */
   opener: HTMLButtonElement | null;
-  error: string | null;
+  error: PluginScopeConsentFailure | null;
   onCancel: () => void;
   onDismissError: () => void;
   onConfirm: (scopes: string[]) => void;
@@ -912,6 +935,9 @@ function PluginScopeConsentDialog({
           if (pending) event.preventDefault();
         }}
         onInteractOutside={(event) => { if (pending) event.preventDefault(); }}
+        // 결정 표면 전체가 한국어 산문이다(MOMO-676 M-5). 스코프 id와 URL은
+        // 자기 자리의 break-all로 이 규칙을 덮는다.
+        className="break-keep"
         data-testid="plugin-scope-consent"
       >
         {/* Keep only an orientation anchor and one server-backed trust signal
@@ -989,8 +1015,13 @@ function PluginScopeConsentDialog({
                         cursor-default는 "여긴 클릭 대상이 아님"까지만 말하고
                         "지금은 못 바꿈"은 말하지 않아 포인터 사용자만 모르는
                         상태였다(MOMO-642 3). 체크 표시 자체는 흐리지 않는다 —
-                        지금 서버로 보내는 중인 선택이 무엇인지가 그 상태다. */}
-                    <label className={`flex items-start gap-2 ${pending ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                        지금 서버로 보내는 중인 선택이 무엇인지가 그 상태다.
+                        커서는 wait다(MOMO-676 M-2). not-allowed는 "이건 원래 안
+                        되는 것"이라 말하지만 이 잠김은 쓰기가 끝나면 풀린다. 같은
+                        파일의 카탈로그 행이 같은 조건(이 뮤테이션 진행 중)에
+                        disabled:cursor-wait를 쓰고 있어, 한 조건에 커서가 둘이라는
+                        모순이기도 했다. 한 조건, 한 커서. */}
+                    <label className={`flex items-start gap-2 ${pending ? "cursor-wait" : "cursor-pointer"}`}>
                       <input
                         type="checkbox"
                         checked={checked}
@@ -1010,11 +1041,27 @@ function PluginScopeConsentDialog({
                       <span className="flex min-w-0 flex-col gap-1">
                         <span className="text-body font-medium text-ink">{scopeSentence(scope)}</span>
                         <span className="break-all font-mono text-timestamp text-ink-muted">{scope}</span>
-                        {scopeTools.map((tool) => (
-                          <span key={tool.name} className="text-meta text-ink-muted">
-                            {tool.description || tool.name}
+                        {/* 결정 문구는 이 클라이언트의 문장이다(MOMO-642 9).
+                            여기 있던 줄은 매니페스트의 tools[].description,
+                            즉 배포자가 자기 언어로 쓴 자유 문구였고, 출하 시드
+                            4종 전부 영문이라 한국어 결정 화면에 영어가 섞였다.
+                            제3자 매니페스트가 어떤 언어로 오든 같은 일이 난다.
+                            그래서 이 줄은 그 권한이 여는 도구를 **식별**한다:
+                            무엇을 허용하는지는 위의 권한 문장과 아래의 위험도·
+                            승인 칩이 한국어로 말하고, 도구는 바로 위 스코프 id와
+                            같은 방식으로 이름 그대로 선다. 배포자가 쓴 산문은
+                            지워지지 않고 증거 표면(앱 상세 > 도구와 권한)에
+                            남는다 — 결정 표면과 증거 표면의 구분은 회수
+                            다이얼로그에서 배포자·라이선스·출처를 걷어낸 것과
+                            같은 선이다(MOMO-642 8). */}
+                        {scopeTools.length > 0 && (
+                          <span className="text-meta text-ink-muted">
+                            연결된 도구:{" "}
+                            <span className="break-all font-mono">
+                              {scopeTools.map((tool) => tool.name).join(", ")}
+                            </span>
                           </span>
-                        ))}
+                        )}
                         {scopeBadges.length > 0 && (
                           <span
                             className="flex flex-wrap gap-1"
@@ -1074,10 +1121,11 @@ function PluginScopeConsentDialog({
           {error && (
             <div ref={actionErrorRef}>
               <InlineBanner
-                message={error}
-                // 이 배너만 줄바꿈을 담는다: pluginScopeConsentCompletion이
-                // 원인과 그 원인이 막은 권한을 줄로 나눠 쓴다(MOMO-642 4).
-                lines
+                message={error.error}
+                // 원인이 여럿이면 그것은 목록이다(MOMO-676 M-4). 배너가 ul/li로
+                // 그리므로 여기서 넘기는 것은 문장 배열이지 서식이 아니다 —
+                // "• "를 붙이거나 \n으로 잇던 자리가 이 prop이다.
+                items={error.causes}
                 actionLabel="오류 닫기"
                 onAction={() => {
                   onDismissError();
@@ -1093,14 +1141,22 @@ function PluginScopeConsentDialog({
             </div>
           )}
 
-          <dl className="flex flex-col gap-2 border-t border-line pt-3">
-            {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, momo 레지스트리가 확인함` : consent.plugin.publisherName} />}
-            {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
-            {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
-            {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
-            {consent.plugin.termsURL && <DetailLink label="이용약관" href={consent.plugin.termsURL} />}
-            {consent.plugin.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={consent.plugin.privacyPolicyURL} />}
-          </dl>
+          {/* 배포자·라이선스·출처·도메인·약관은 **허용하는 결정의 근거**다
+              (MOMO-642 8). 회수는 그 근거를 따지는 자리가 아니다: 누가 만들었고
+              어떤 라이선스이며 어디로 나가는지는 연결을 끊겠다는 결정을 하나도
+              바꾸지 않고, 결정과 무관한 여섯 줄이 "무엇을 잃는가"를 아래로 민다.
+              앱 상세 패널이 이 증거를 언제든 그대로 보여주므로 사라지는 정보는
+              없다. */}
+          {isGrant && (
+            <dl className="flex flex-col gap-2 border-t border-line pt-3">
+              {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, momo 레지스트리가 확인함` : consent.plugin.publisherName} />}
+              {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
+              {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
+              {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
+              {consent.plugin.termsURL && <DetailLink label="이용약관" href={consent.plugin.termsURL} />}
+              {consent.plugin.privacyPolicyURL && <DetailLink label="개인정보 처리방침" href={consent.plugin.privacyPolicyURL} />}
+            </dl>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-line p-4">
@@ -1108,7 +1164,11 @@ function PluginScopeConsentDialog({
             variant="outline"
             size="sm"
             aria-disabled={pending || undefined}
-            className={pending ? "opacity-50" : undefined}
+            // 한 푸터, 한 폭(MOMO-676 M-3). 결정 버튼이 라벨로 상태를 말하느라
+            // 최소 폭을 갖는데 취소만 내용 폭(47px)이면 푸터가 3:1로 기울고,
+            // 시스템 다이얼로그의 형태(양쪽 동일 폭)에서도 벗어난다. 강조는
+            // 채움이 하지 폭이 하지 않는다.
+            className={cn("min-w-action", pending && "opacity-50")}
             data-testid="plugin-scope-cancel"
             onClick={() => { if (!pending) onCancel(); }}
           >
@@ -1185,20 +1245,26 @@ function ConfirmPluginAction({ action, pending, opener, onCancel, onConfirm }: {
         // Escape is owned by this confirmation. Letting it reach SettingsRoute
         // would close the route while this dialog (or its pending write) remains.
         onEscapeKeyDown={(event) => event.stopPropagation()}
+        // 제목과 설명이 한국어 산문이다(MOMO-676 M-5).
+        className="break-keep"
       >
         <div className="flex flex-col gap-3 p-4">
           <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription>{copy.description}</DialogDescription>
+          {/* 같은 규칙이지만 같은 숫자는 아니다(MOMO-676 M-3). 규칙은 "한 푸터의
+              두 버튼은 같은 폭, 그 폭은 그 푸터가 보일 수 있는 가장 긴 라벨이
+              정한다"이고, 144px는 동의 다이얼로그의 "권한을 하나 이상 선택"
+              (실측 127px)에서 나온 값이다. 이 푸터의 실측은 취소 47px · 설치
+              해제 69px · 스피너를 단 "변경 중" 82px이라 라벨 스왑이 13px밖에
+              안 움직이는데, 144px를 빌려오면 47px 옆에 144px가 서서 3:1이 된다.
+              여기 가장 긴 상태를 14px 여유로 담는 96px를 양쪽이 함께 쓴다. */}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" disabled={pending} onClick={onCancel}>취소</Button>
+            <Button variant="outline" size="sm" className="min-w-action-sm" disabled={pending} onClick={onCancel}>취소</Button>
             <Button
               variant="destructive"
               size="sm"
               aria-busy={pending || undefined}
-              // 같은 이유로 여기도 고정폭이다(MOMO-642 2). 이 라벨도 진행 중에
-              // "변경 중"으로 바뀌므로, 두 다이얼로그 푸터가 서로 다른 규칙을
-              // 갖는 대신 결정 버튼 하나의 최소 측정값을 공유한다.
-              className="min-w-action"
+              className="min-w-action-sm"
               onClick={() => { if (!pending) onConfirm(); }}
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}

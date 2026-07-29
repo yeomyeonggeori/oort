@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # MOMO-488 / ADR-0125 D2 outbound workd registration, dispatch, and RLS gate.
+#
+# WORKD_GATE_ATTACH=1 additionally drives the MOMO-655/674 inbound attach leg
+# against the SAME daemon, session and pty this file already stands up — see
+# scripts/verify_workd_attach.sh, which is the entry point for it. Extending
+# this verifier rather than copying it is deliberate: the fixture (isolated
+# stack, real Ed25519 identity, signed poll, approved spawn, a real login-shell
+# PTY that has already printed something) is exactly what an attach assertion
+# needs, and a second copy of it would be a second thing to keep true. It is
+# also the shape verify_acp_host.sh already uses (WORKD_GATE_ACP=1).
 set -euo pipefail
 umask 077
 
@@ -46,6 +55,20 @@ RUN_TAG="$(date -u +%s)-$$"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-workd.XXXXXX")"
 WORKD_PID=""
 
+# MOMO-674 attach leg. Both ports are derived from the API port so a caller only
+# has to reserve one contiguous block: +71 is the TLS front the client dials
+# (what a deployment's reverse proxy would be) and +72 is the daemon's own
+# plaintext listener behind it, which is the deployed shape and not a shortcut.
+ATTACH_MODE="${WORKD_GATE_ATTACH:-0}"
+ATTACH_TLS_PORT=$((API_PORT + 71))
+ATTACH_PLAIN_PORT=$((API_PORT + 72))
+ATTACH_ENDPOINT="wss://127.0.0.1:$ATTACH_TLS_PORT/v1/terminal-attach"
+# Short on purpose: the revoke assertion below waits one of these, so a 30 second
+# production default would make the gate wait 30 seconds to learn nothing extra.
+ATTACH_REVALIDATE_MS="${WORKD_GATE_ATTACH_REVALIDATE_MS:-2000}"
+ATTACH_PROXY_PID=""
+ATTACH_PROBE_PID=""
+
 WS_ID="00000000-0000-7000-8000-000000000001"
 CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 CROSS_WS_ID="48800000-0000-7000-8000-000000000099"
@@ -55,7 +78,14 @@ RUN_ID="$(new_uuid)"
 OWNER_EMAIL="workd-owner-$RUN_TAG@momo.local"
 OWNER_PASSWORD="owner-$(new_uuid)"
 RAW_MARKER="MOMO_WORKD_RAW_${RUN_TAG//-/_}"
-WORKD_BIN="$REPO_ROOT/workers/WorkHostDaemon/.build/debug/momo-workd"
+# MOMO-674: what the attach client types, and what its OUTPUT must contain.
+#
+# They differ by an empty-string concatenation that the shell removes, so the
+# marker the assertion looks for cannot be satisfied by the pty echoing the
+# keystrokes back. Without that split a dead shell would still "pass" live.
+ATTACH_LIVE_MARKER="MOMO_WORKD_LIVE_${RUN_TAG//-/_}"
+ATTACH_LIVE_INPUT="echo MOMO_WORKD_LIVE_''${RUN_TAG//-/_}"
+WORKD_BIN="${WORKD_GATE_BIN:-$REPO_ROOT/workers/WorkHostDaemon/.build/debug/momo-workd}"
 ACP_MODE="${WORKD_GATE_ACP:-0}"
 TOOL_KEY="shell"
 TOOL_LABEL="MOMO-488 mock echo"
@@ -76,6 +106,12 @@ compose() {
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
+  for attach_pid in "$ATTACH_PROBE_PID" "$ATTACH_PROXY_PID"; do
+    if [ -n "$attach_pid" ] && kill -0 "$attach_pid" >/dev/null 2>&1; then
+      kill "$attach_pid" >/dev/null 2>&1 || true
+      wait "$attach_pid" >/dev/null 2>&1 || true
+    fi
+  done
   if [ -n "$WORKD_PID" ] && kill -0 "$WORKD_PID" >/dev/null 2>&1; then
     kill "$WORKD_PID" >/dev/null 2>&1 || true
     wait "$WORKD_PID" >/dev/null 2>&1 || true
@@ -95,6 +131,23 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+if [ "$ATTACH_MODE" = "1" ]; then
+  need openssl
+  ATTACH_CERT="$TMP_DIR/attach-proxy.crt"
+  ATTACH_KEY="$TMP_DIR/attach-proxy.key"
+  # A per-run self-signed certificate. The client below does not verify it: the
+  # thing under test is the daemon behind the proxy, and pinning a certificate
+  # the harness itself minted would only assert that the harness agrees with
+  # itself. Real clients verify; docs/runbooks/workd-terminal-attach.md says so.
+  openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$ATTACH_KEY" -out "$ATTACH_CERT" -days 1 \
+    -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1 || {
+    echo "[workd] FAIL attach-proxy-certificate: openssl could not mint one" >&2
+    exit 1
+  }
+  chmod 600 "$ATTACH_KEY"
+fi
 
 if [ ! -x "$WORKD_BIN" ]; then
   echo "[workd] building momo-workd (normally already built by runtime-db swift gate)"
@@ -185,7 +238,20 @@ else
   PROFILE_EXECUTABLE_KEY="MOMO_WORKD_PROFILE_SHELL_EXECUTABLE=/bin/sh"
   PROFILE_ARGUMENTS_KEY="MOMO_WORKD_PROFILE_SHELL_ARGUMENTS_JSON=$SHELL_ARGS_JSON"
 fi
+# MOMO-655: the public URL is the switch. Without it the daemon opens no socket
+# at all, which is why the non-attach run of this same file proves the listener
+# is opt-in rather than merely unused.
+ATTACH_ENV=()
+if [ "$ATTACH_MODE" = "1" ]; then
+  ATTACH_ENV=(
+    "MOMO_WORKD_ATTACH_PUBLIC_URL=$ATTACH_ENDPOINT"
+    "MOMO_WORKD_ATTACH_BIND=127.0.0.1"
+    "MOMO_WORKD_ATTACH_PORT=$ATTACH_PLAIN_PORT"
+    "MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS=$ATTACH_REVALIDATE_MS"
+  )
+fi
 env "$PROFILE_EXECUTABLE_KEY" "$PROFILE_ARGUMENTS_KEY" \
+${ATTACH_ENV[@]+"${ATTACH_ENV[@]}"} \
 MOMO_WORKD_SERVER_URL="$BASE_URL" \
 MOMO_WORKD_ALLOW_INSECURE_HTTP=1 \
 MOMO_WORKD_WORKSPACE_ID="$WS_ID" \
@@ -351,6 +417,170 @@ mode="$(stat -f '%Lp' "$OUTPUT_FILE" 2>/dev/null || stat -c '%a' "$OUTPUT_FILE" 
   exit 1
 }
 
+# =============================================================================
+# MOMO-655/674 — the attach round trip, on the session that just printed.
+#
+# Everything above proved the OUTBOUND half (register, poll, spawn, local raw
+# output). This is the inbound half, and it runs here rather than at the end for
+# one reason: attach needs a live pty, and the next block ends the session.
+#
+# The client is a browser-shaped one — TLS through a proxy, capability in the
+# `Sec-WebSocket-Protocol` list — because that is the path with no library
+# behind it. The mac's Authorization header is already covered by an XCTest with
+# a real socket; the subprotocol path is only ever exercised here.
+# =============================================================================
+if [ "$ATTACH_MODE" = "1" ]; then
+  attach_fail() {
+    echo "[workd] FAIL $1: $2" >&2
+    sed -n '1,200p' "$TMP_DIR/workd.log" >&2 || true
+    exit 1
+  }
+
+  # The listener is opt-in and says so exactly once, at boot.
+  ready_count="$(grep -c 'terminal attach listener ready' "$TMP_DIR/workd.log" || true)"
+  [ "$ready_count" = "1" ] || attach_fail attach-listener-ready \
+    "expected exactly one listener-ready line, got $ready_count"
+
+  got="$(sql_value <<SQL
+SELECT count(*) FROM work_host
+ WHERE id='$HOST_ID' AND (capabilities->>'terminal_attach')::boolean IS TRUE;
+SQL
+)"
+  [ "$got" = "1" ] || attach_fail attach-host-capability \
+    "work_host.capabilities.terminal_attach is not registered ($got)"
+
+  # The binding the daemon published for THIS session, through the signed PATCH
+  # branch #869 added. No SQL wrote it.
+  got="$(sql_value <<SQL
+SELECT count(*) FROM work_session
+ WHERE id='$SESSION_ID' AND pty_id='$SESSION_ID'
+   AND attach_endpoint='$ATTACH_ENDPOINT';
+SQL
+)"
+  [ "$got" = "1" ] || attach_fail attach-session-binding \
+    "work_session pty_id/attach_endpoint is not the daemon's published binding ($got)"
+
+  # ---- capability, minted by the server for a real human bearer -------------
+  api "$OWNER_TOKEN" POST \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID/terminal-attach" \
+    '{"mode":"controller"}'
+  expect_status 200 "controller terminal attach capability"
+  ATTACH_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.capability_token')"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    --arg endpoint "$ATTACH_ENDPOINT" --arg pty "$SESSION_ID" \
+    '.attach_endpoint == $endpoint and (.pty_id | ascii_downcase) == ($pty | ascii_downcase)' \
+    >/dev/null || attach_fail attach-capability-shape \
+    "the grant did not name the host endpoint and pty the ledger holds"
+  case "$ATTACH_TOKEN" in
+    momo_terminal_attach_v1.*) ;;
+    *) attach_fail attach-capability-shape "unexpected capability token grammar" ;;
+  esac
+
+  got="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action='work.terminal_attach.issued'
+   AND target_id='$SESSION_ID';
+SQL
+)"
+  [ "$got" = "1" ] || attach_fail attach-capability-audit \
+    "the issued capability left no audit row ($got)"
+
+  # ---- the TLS front the daemon's wss:// endpoint claims exists -------------
+  "$PYTHON_BIN" "$REPO_ROOT/scripts/terminal_attach_tls_proxy.py" \
+    --listen-port "$ATTACH_TLS_PORT" --target-port "$ATTACH_PLAIN_PORT" \
+    --cert "$ATTACH_CERT" --key "$ATTACH_KEY" \
+    --ready-file "$TMP_DIR/attach-proxy.ready" \
+    >"$TMP_DIR/attach-proxy.log" 2>&1 &
+  ATTACH_PROXY_PID=$!
+  deadline=$(( $(date -u +%s) + 30 ))
+  until [ -f "$TMP_DIR/attach-proxy.ready" ]; do
+    if [ "$(date -u +%s)" -ge "$deadline" ] \
+      || ! kill -0 "$ATTACH_PROXY_PID" >/dev/null 2>&1; then
+      cat "$TMP_DIR/attach-proxy.log" >&2 || true
+      echo "[workd] FAIL attach-proxy-listen: the wss front never bound" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
+  # ---- 1: replay -> exactly one replay_end -> 2: send_stdin -> live ---------
+  "$PYTHON_BIN" "$REPO_ROOT/scripts/terminal_attach_probe.py" \
+    --url "$ATTACH_ENDPOINT" \
+    --token "$ATTACH_TOKEN" \
+    --pty-id "$SESSION_ID" \
+    --expect-replay "$RAW_MARKER" \
+    --live-input "$ATTACH_LIVE_INPUT"$'\n' \
+    --expect-live "$ATTACH_LIVE_MARKER" \
+    --timeout "$ASSERT_TIMEOUT" || {
+    echo "[workd] FAIL attach-round-trip: see the named probe stage above" >&2
+    exit 1
+  }
+
+  # ---- 3: a revoke reaches a stream that is ALREADY open (MOMO-674) --------
+  #
+  # The observer grade is the case the ticket names. The probe holds the socket
+  # open past its own capability TTL, the owner closes observation through the
+  # ordinary REST control, and the stream has to end with 1008 — not with the
+  # ledger quietly disagreeing with what a teammate is still watching.
+  api "$OWNER_TOKEN" POST \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID/terminal-attach" \
+    '{"mode":"observer"}'
+  expect_status 200 "observer terminal attach capability"
+  OBSERVER_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.capability_token')"
+
+  rm -f "$TMP_DIR/attach-observer.ready"
+  "$PYTHON_BIN" "$REPO_ROOT/scripts/terminal_attach_probe.py" \
+    --url "$ATTACH_ENDPOINT" \
+    --token "$OBSERVER_TOKEN" \
+    --pty-id "$SESSION_ID" \
+    --expect-replay "$RAW_MARKER" \
+    --ready-file "$TMP_DIR/attach-observer.ready" \
+    --expect-close-code 1008 \
+    --timeout "$ASSERT_TIMEOUT" \
+    --close-timeout 90 &
+  ATTACH_PROBE_PID=$!
+  deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+  until [ -f "$TMP_DIR/attach-observer.ready" ]; do
+    if [ "$(date -u +%s)" -ge "$deadline" ] \
+      || ! kill -0 "$ATTACH_PROBE_PID" >/dev/null 2>&1; then
+      wait "$ATTACH_PROBE_PID" || true
+      ATTACH_PROBE_PID=""
+      echo "[workd] FAIL attach-observer-stream: the observer never reached replay_end" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
+  api "$OWNER_TOKEN" PATCH "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
+    '{"observation":"owner_only"}'
+  expect_status 200 "owner closes observation while a stream is open"
+
+  if ! wait "$ATTACH_PROBE_PID"; then
+    ATTACH_PROBE_PID=""
+    echo "[workd] FAIL attach-revoked-close: the open observer stream survived a revoke" >&2
+    exit 1
+  fi
+  ATTACH_PROBE_PID=""
+
+  got="$(sql_value <<SQL
+SELECT count(*) FROM terminal_attach_capability
+ WHERE work_session_id='$SESSION_ID' AND mode='observer';
+SQL
+)"
+  [ "$got" = "0" ] || attach_fail attach-observer-capability-cleared \
+    "closing observation left $got observer capability rows"
+
+  # Restore the scope so the lifecycle assertions below see the session the rest
+  # of this file describes.
+  api "$OWNER_TOKEN" PATCH "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
+    '{"observation":"open"}'
+  expect_status 200 "owner reopens observation"
+
+  kill "$ATTACH_PROXY_PID" >/dev/null 2>&1 || true
+  wait "$ATTACH_PROXY_PID" >/dev/null 2>&1 || true
+  ATTACH_PROXY_PID=""
+fi
+
 # MOMO-672: pin the host-reported running -> idle fact that #857 introduced,
 # then take the idle -> ended leg as the owner. `kill` controls require a
 # running session, so the owner PATCH is the only non-notifier path out of idle;
@@ -441,6 +671,31 @@ SQL
   exit 1
 }
 
+# MOMO-674: the same boundary for the bytes a HUMAN typed through attach. The
+# attach socket never touches momo (ADR-0125 D10), so neither its keystrokes nor
+# their output may appear anywhere in the ledger — including the audit row the
+# capability itself writes.
+if [ "$ATTACH_MODE" = "1" ]; then
+  got="$(sql_value <<SQL
+SELECT
+  (SELECT count(*) FROM message
+    WHERE workspace_id='$WS_ID'
+      AND (coalesce(body,'') LIKE '%$ATTACH_LIVE_MARKER%'
+           OR props::text LIKE '%$ATTACH_LIVE_MARKER%')) +
+  (SELECT count(*) FROM audit_log
+    WHERE workspace_id='$WS_ID' AND detail::text LIKE '%$ATTACH_LIVE_MARKER%') +
+  (SELECT count(*) FROM outbox
+    WHERE workspace_id='$WS_ID' AND payload::text LIKE '%$ATTACH_LIVE_MARKER%') +
+  (SELECT count(*) FROM audit_log
+    WHERE workspace_id='$WS_ID' AND detail::text LIKE '%momo_terminal_attach_v1.%');
+SQL
+)"
+  [ "$got" = "0" ] || {
+    echo "[workd] FAIL attach-ledger-boundary: attach stdin/output or a raw capability reached the ledger ($got)" >&2
+    exit 1
+  }
+fi
+
 FORGED_SIGNATURE="$($PYTHON_BIN -c \
   'import base64; print(base64.b64encode(bytes(64)).decode("ascii"))')"
 POLL_PATH="/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/pending-controls"
@@ -484,6 +739,8 @@ SQL
 
 if [ "$ACP_MODE" = "1" ]; then
   echo "MOMO-546 ACP local JSONL + server message ledger/outbox relay + session lifecycle/RLS PASS"
+elif [ "$ATTACH_MODE" = "1" ]; then
+  echo "MOMO-655/674 attach: wss proxy + subprotocol bearer -> replay -> one replay_end -> send_stdin -> live output, revoked stream cut with 1008, plus the full MOMO-488 workd lifecycle/RLS PASS"
 else
   echo "MOMO-488 workd registration/heartbeat + signed polling + local-only raw output + session lifecycle/RLS PASS"
 fi

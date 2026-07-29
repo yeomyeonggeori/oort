@@ -39,6 +39,15 @@ struct TerminalAttachConfig: Sendable, Equatable {
     static let defaultBindAddress = "127.0.0.1"
     static let defaultPort: UInt16 = 28_650
     static let defaultMaxConnections = 32
+    /// MOMO-674. Deliberately NOT the capability TTL, and not derived from it.
+    ///
+    /// The 60 second TTL is a dial window (mint → connect). This is a stream
+    /// lifetime policy: how stale an authorization decision an open terminal is
+    /// allowed to run on. 30 seconds is the compromise the two failure modes
+    /// leave: an observer whose access was just closed keeps seeing output for
+    /// at most half a minute, and a host under N live streams spends N signed
+    /// requests per 30s rather than per second.
+    static let defaultRevalidateInterval = Duration.seconds(30)
 
     let bindAddress: String
     let port: UInt16
@@ -47,6 +56,22 @@ struct TerminalAttachConfig: Sendable, Equatable {
     /// socket's, whenever the two differ.
     let publicEndpoint: String
     let maxConnections: Int
+    /// How often an OPEN stream re-asks the server whether it may still be open.
+    let revalidateInterval: Duration
+
+    init(
+        bindAddress: String,
+        port: UInt16,
+        publicEndpoint: String,
+        maxConnections: Int,
+        revalidateInterval: Duration = TerminalAttachConfig.defaultRevalidateInterval
+    ) {
+        self.bindAddress = bindAddress
+        self.port = port
+        self.publicEndpoint = publicEndpoint
+        self.maxConnections = maxConnections
+        self.revalidateInterval = revalidateInterval
+    }
 
     /// Same grammar the server enforces in `RemotePTYBinding.validated`, checked
     /// here so a typo fails at daemon boot instead of as a 400 on the first
@@ -272,7 +297,12 @@ final class TerminalAttachServer: @unchecked Sendable {
             let (handshake, pipelined) = try await readHandshake(socket)
             let grant = try await validate(handshake.capabilityToken)
             try await socket.send(handshake.response)
-            try await stream(socket: socket, grant: grant, pipelined: pipelined)
+            try await stream(
+                socket: socket,
+                grant: grant,
+                capabilityToken: handshake.capabilityToken,
+                pipelined: pipelined
+            )
         } catch let rejection as TerminalAttachHandshake.Rejection {
             try? await socket.send(TerminalAttachHandshake.rejection(rejection))
         } catch {
@@ -322,7 +352,8 @@ final class TerminalAttachServer: @unchecked Sendable {
         do {
             return try await api.validateTerminalAttach(
                 hostID: hostID,
-                capabilityToken: token
+                capabilityToken: token,
+                stream: false
             )
         } catch {
             logger.info("terminal attach capability rejected", metadata: [
@@ -332,9 +363,75 @@ final class TerminalAttachServer: @unchecked Sendable {
         }
     }
 
+    /// MOMO-674 — the answer to "an authorization that was true once".
+    ///
+    /// Attach used to ask the server exactly once, at connect. That made the
+    /// 60 second capability TTL read like a session length and it is not one: it
+    /// bounds mint→dial. Everything the server decides AFTER the dial — the
+    /// session ended, the host was revoked, the owner closed observation, an
+    /// observer left the channel — could not reach a socket already held between
+    /// a browser and this host, so a revoked observer kept watching.
+    ///
+    /// This is the smaller of the two designs the ticket weighed, and the one
+    /// that adds no surface: the same signed `validate` call this daemon already
+    /// makes, on a timer, carrying `stream: true` so the server skips only the
+    /// dial-window clause. The rejected alternative (a server→daemon revoke
+    /// signal) is written up in docs/runbooks/workd-terminal-attach.md.
+    ///
+    /// IT DOES NOT INTERRUPT THE STREAM. It runs beside the pump and the reader
+    /// as a third task, touches neither, and the bytes keep moving across every
+    /// successful check. Only a refusal ends anything, and it ends it by name:
+    /// close 1008, which is the code the mac and the web already classify as
+    /// "this grant is gone" rather than as a dropped network.
+    private func revalidate(
+        socket: AttachSocket,
+        grant: TerminalAttachGrant,
+        capabilityToken: String
+    ) async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: config.revalidateInterval)
+            } catch {
+                return
+            }
+            let renewed: TerminalAttachGrant
+            do {
+                renewed = try await api.validateTerminalAttach(
+                    hostID: hostID,
+                    capabilityToken: capabilityToken,
+                    stream: true
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                logger.info("terminal attach stream revoked", metadata: [
+                    "error_label": .string(WorkDaemon.label(for: error)),
+                ])
+                try? await socket.send(WebSocketWire.closeFrame(
+                    code: 1_008,
+                    reason: "capability revoked"
+                ))
+                return
+            }
+            // A grant that came back naming a different pty, session or grade is
+            // not this stream's grant. Nothing in the server can produce that
+            // today; if something ever does, the honest move is to stop rather
+            // than to keep serving under an answer about something else.
+            guard renewed == grant else {
+                logger.warning("terminal attach grant changed under an open stream")
+                try? await socket.send(WebSocketWire.closeFrame(
+                    code: 1_008,
+                    reason: "capability revoked"
+                ))
+                return
+            }
+        }
+    }
+
     private func stream(
         socket: AttachSocket,
         grant: TerminalAttachGrant,
+        capabilityToken: String,
         pipelined: Data
     ) async throws {
         var decoder = WebSocketFrameDecoder()
@@ -365,6 +462,13 @@ final class TerminalAttachServer: @unchecked Sendable {
             group.addTask { [self, decoder] in
                 var decoder = decoder
                 await read(socket: socket, decoder: &decoder, grant: grant)
+            }
+            group.addTask { [self] in
+                await revalidate(
+                    socket: socket,
+                    grant: grant,
+                    capabilityToken: capabilityToken
+                )
             }
             await group.next()
             group.cancelAll()

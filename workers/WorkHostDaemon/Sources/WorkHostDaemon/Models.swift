@@ -183,8 +183,13 @@ protocol WorkHostAPI: Sendable {
     /// to what. The daemon never answers this itself (ADR-0125 D10) — expiry,
     /// revocation, session state, membership and observer/controller grade are
     /// all one server answer, re-checked under the host signature per call.
+    ///
+    /// MOMO-674: `stream` is true when the caller is re-checking a socket it has
+    /// already accepted. It changes exactly one thing on the server — the
+    /// dial-window expiry clause — and nothing about who is authorized.
     func validateTerminalAttach(
         hostID: UUID,
-        capabilityToken: String
+        capabilityToken: String,
+        stream: Bool
     ) async throws -> TerminalAttachGrant
 }

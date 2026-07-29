@@ -447,6 +447,225 @@ final class TerminalAttachTests: XCTestCase {
         await manager.markEndReported(sessionID)
     }
 
+    // MARK: - the authorization that stops being true (MOMO-674)
+
+    /// The hole #869 left named: attach asked once, so a revoke that landed
+    /// AFTER the socket opened could not reach it.
+    ///
+    /// This drives the real listener, the real pty and the real framing, then
+    /// makes the server start refusing mid-stream. Two facts are pinned: the
+    /// bytes kept moving across successful re-checks (the revalidation does not
+    /// interrupt the stream), and the refusal ends the socket with 1008 — the
+    /// code both clients already read as "this grant is gone" rather than as a
+    /// dropped network.
+    func testOpenStreamIsCutWithin1008WhenTheServerStopsAuthorizingIt() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-attach-revalidate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostID = UUID()
+        let sessionID = UUID()
+        let ptyID = sessionID.uuidString.lowercased()
+        let manager = Self.processManager(directory: directory)
+        try await manager.start(
+            sessionID: sessionID,
+            channelID: UUID(),
+            tool: "cat-tool",
+            prompt: "attach"
+        )
+        defer {
+            Task {
+                _ = try? await manager.terminate(sessionID)
+                await manager.markEndReported(sessionID)
+            }
+        }
+
+        let port = try Self.freePort()
+        let api = MockWorkHostAPI(
+            controls: [],
+            profiles: [],
+            session: Self.session(
+                id: sessionID,
+                workspaceID: UUID(),
+                channelID: UUID(),
+                hostID: hostID
+            ),
+            attachGrant: TerminalAttachGrant(
+                workSessionID: sessionID,
+                ptyID: ptyID,
+                mode: .controller
+            )
+        )
+        let server = TerminalAttachServer(
+            config: TerminalAttachConfig(
+                bindAddress: "127.0.0.1",
+                port: port,
+                publicEndpoint: "wss://host.example/v1/terminal-attach",
+                maxConnections: 4,
+                revalidateInterval: .milliseconds(100)
+            ),
+            hostID: hostID,
+            api: api,
+            processes: manager,
+            logger: Logger(label: "test")
+        )
+        let listening = Task { try await server.run() }
+        defer { listening.cancel() }
+
+        let client = try TestAttachClient(port: port, deadline: .seconds(10))
+        defer { client.close() }
+        try client.handshake(token: Self.token())
+        client.send(Self.clientFrame(
+            opcode: .text,
+            payload: Data(#"{"pty_id":"\#(ptyID)","type":"connect"}"#.utf8)
+        ))
+        try client.drainUntilReplayEnd()
+
+        // Several revalidation periods with the grant still good: the stream is
+        // untouched and live output still arrives on the same socket.
+        try await Task.sleep(for: .milliseconds(500))
+        client.send(Self.clientFrame(
+            opcode: .text,
+            payload: Data(
+                #"{"data":"\#(Data("echo momo-still-live\n".utf8).base64EncodedString())","pty_id":"\#(ptyID)","type":"send_stdin"}"#.utf8
+            )
+        ))
+        var live = Data()
+        let liveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while !String(decoding: live, as: UTF8.self).contains("momo-still-live"),
+              ContinuousClock.now < liveDeadline
+        {
+            let message = try client.nextMessage()
+            if message.opcode == .binary { live.append(message.payload) }
+        }
+        XCTAssertTrue(
+            String(decoding: live, as: UTF8.self).contains("momo-still-live"),
+            "revalidation must not interrupt a stream it keeps authorizing"
+        )
+        let beforeRevoke = await api.events
+        XCTAssertTrue(
+            beforeRevoke.contains("validate:stream:\(Self.token())"),
+            "the open stream must be re-asking the server, not assuming: \(beforeRevoke)"
+        )
+
+        await api.revokeAttachGrant()
+        var close: WebSocketMessage?
+        let closeDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while close == nil, ContinuousClock.now < closeDeadline {
+            let message = try client.nextMessage()
+            if message.opcode == .close { close = message }
+        }
+        let payload = try XCTUnwrap(close?.payload, "the revoked stream was never closed")
+        XCTAssertEqual(Int(payload[payload.startIndex]) << 8 | Int(payload[payload.startIndex + 1]), 1_008)
+        XCTAssertEqual(
+            String(decoding: payload.dropFirst(2), as: UTF8.self),
+            "capability revoked"
+        )
+    }
+
+    /// A grant that comes back naming a different pty is not this stream's
+    /// grant. Nothing on the server produces that today; the daemon still stops
+    /// rather than serving bytes under an answer about something else.
+    func testRevalidationRefusesAGrantThatChangedUnderAnOpenStream() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-attach-regrant-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostID = UUID()
+        let sessionID = UUID()
+        let ptyID = sessionID.uuidString.lowercased()
+        let manager = Self.processManager(directory: directory)
+        try await manager.start(
+            sessionID: sessionID,
+            channelID: UUID(),
+            tool: "cat-tool",
+            prompt: "attach"
+        )
+        defer {
+            Task {
+                _ = try? await manager.terminate(sessionID)
+                await manager.markEndReported(sessionID)
+            }
+        }
+        let port = try Self.freePort()
+        let api = MockWorkHostAPI(
+            controls: [],
+            profiles: [],
+            session: Self.session(
+                id: sessionID,
+                workspaceID: UUID(),
+                channelID: UUID(),
+                hostID: hostID
+            ),
+            attachGrant: TerminalAttachGrant(
+                workSessionID: sessionID,
+                ptyID: ptyID,
+                mode: .controller
+            )
+        )
+        let server = TerminalAttachServer(
+            config: TerminalAttachConfig(
+                bindAddress: "127.0.0.1",
+                port: port,
+                publicEndpoint: "wss://host.example/v1/terminal-attach",
+                maxConnections: 4,
+                revalidateInterval: .milliseconds(100)
+            ),
+            hostID: hostID,
+            api: api,
+            processes: manager,
+            logger: Logger(label: "test")
+        )
+        let listening = Task { try await server.run() }
+        defer { listening.cancel() }
+
+        let client = try TestAttachClient(port: port, deadline: .seconds(10))
+        defer { client.close() }
+        try client.handshake(token: Self.token())
+        client.send(Self.clientFrame(
+            opcode: .text,
+            payload: Data(#"{"pty_id":"\#(ptyID)","type":"connect"}"#.utf8)
+        ))
+        try client.drainUntilReplayEnd()
+
+        await api.replaceAttachGrant(with: TerminalAttachGrant(
+            workSessionID: sessionID,
+            ptyID: UUID().uuidString.lowercased(),
+            mode: .controller
+        ))
+        var close: WebSocketMessage?
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while close == nil, ContinuousClock.now < deadline {
+            let message = try client.nextMessage()
+            if message.opcode == .close { close = message }
+        }
+        let payload = try XCTUnwrap(close?.payload)
+        XCTAssertEqual(Int(payload[payload.startIndex]) << 8 | Int(payload[payload.startIndex + 1]), 1_008)
+    }
+
+    func testRevalidateIntervalIsItsOwnPolicyAndBounded() throws {
+        let attach = "wss://host.example/v1/terminal-attach"
+        let byDefault = try XCTUnwrap(try WorkdConfig.terminalAttachConfig(environment: [
+            "MOMO_WORKD_ATTACH_PUBLIC_URL": attach,
+        ]))
+        // Not the server's 60 second capability TTL, and not derived from it.
+        XCTAssertEqual(byDefault.revalidateInterval, .seconds(30))
+
+        let configured = try XCTUnwrap(try WorkdConfig.terminalAttachConfig(environment: [
+            "MOMO_WORKD_ATTACH_PUBLIC_URL": attach,
+            "MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS": "5000",
+        ]))
+        XCTAssertEqual(configured.revalidateInterval, .seconds(5))
+
+        for bad in ["0", "999", "3600001", "not-a-number"] {
+            XCTAssertThrowsError(
+                try WorkdConfig.terminalAttachConfig(environment: [
+                    "MOMO_WORKD_ATTACH_PUBLIC_URL": attach,
+                    "MOMO_WORKD_ATTACH_REVALIDATE_INTERVAL_MS": bad,
+                ]),
+                bad
+            )
+        }
+    }
+
     func testAttachRejectsAnUnknownCapabilityBeforeAnyPTYIsTouched() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("momo-attach-deny-\(UUID().uuidString)")
@@ -755,6 +974,21 @@ final class TestAttachClient {
             try fill()
         }
         throw Failure.timedOut
+    }
+
+    /// Consume the replay leg (binary frames, then the single `replay_end` text
+    /// marker) so a test that is about what happens AFTER it can start there.
+    func drainUntilReplayEnd() throws {
+        while true {
+            let message = try nextMessage()
+            if message.opcode == .text,
+               let object = try? JSONSerialization.jsonObject(with: message.payload)
+                as? [String: Any],
+               object["type"] as? String == "replay_end"
+            {
+                return
+            }
+        }
     }
 
     func nextMessage() throws -> WebSocketMessage {

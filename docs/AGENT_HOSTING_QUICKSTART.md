@@ -228,5 +228,6 @@ from-card로 온보딩한 외부 에이전트의 멘션 왕복은 그 에이전�
 - [`docs/WORK_HOST_QUICKSTART.md`](WORK_HOST_QUICKSTART.md): 배포판 운영자용(사이드카 동봉 엔진).
 - [`docs/RUN.md`](RUN.md) §5.4: momo-workd 실행 세부, 환경변수, SSH 사용자 서비스 초안.
 - `scripts/verify_workd.sh`: 등록·서명·spawn·세션 수명주기·RLS 격리 검증(격리 스택).
+- `scripts/verify_workd_attach.sh`: 위 검증기를 확장해 터미널 attach 실왕복(wss 프록시·서브프로토콜 베어러·replay/`replay_end`/라이브)과 스트림 중 권한 회수 1008을 단정.
 - `scripts/verify_acp_host.sh`: ACP `initialize` -> `session/new` -> `session/prompt` 왕복과
   로컬 JSONL·서버 원장 소비 검증(격리 스택).

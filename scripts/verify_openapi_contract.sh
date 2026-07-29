@@ -21,6 +21,15 @@
 #                                  for fixture install. Target must be a
 #                                  DISPOSABLE gate stack seeded from
 #                                  server/Migrations (fixtures write rows).
+#                                  BASE_URL mode must ALSO configure the target
+#                                  API exactly like the managed override below
+#                                  (PLATFORM_ADMIN_EMAILS with the gate email,
+#                                  MOMO_T3_ENABLED=1 + https MOMO_PUBLIC_BASE_URL,
+#                                  MOMO_AGENT_CARD_ALLOW_HTTP=1,
+#                                  MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP=1) and
+#                                  reach the public-shaped mock endpoint;
+#                                  otherwise those operations answer 403/503/400
+#                                  and the run fails by name.
 #   OPENAPI_GATE_DATABASE_URL      psql URL for fixture install in BASE_URL mode.
 #   OPENAPI_GATE_COMPOSE_PROJECT   Compose project name (default: momo389gate).
 #   OPENAPI_GATE_PORT              API host port      (default: 18980).
@@ -31,6 +40,14 @@
 #                                  the api container cold-builds Swift).
 #   OPENAPI_GATE_LIVEKIT_*         Optional API_KEY/API_SECRET/URL overrides.
 #                                  BASE_URL mode must configure the target API.
+#   OPENAPI_GATE_PUBLIC_SUBNET     /24 for the public-shaped mock endpoint the
+#                                  Agent Card + event-subscription samples need
+#                                  (default 11.38.0.0/24; the mock answers on
+#                                  <prefix>.2:8089). Loopback and RFC1918 are
+#                                  refused by the production SSRF validator on
+#                                  purpose, so those two operations cannot be
+#                                  sampled against 127.0.0.1 or a compose
+#                                  bridge address (MOMO-673).
 #   OPENAPI_GATE_KEEP=1            Keep the compose stack up after the run.
 #   OPENAPI_SPEC                   Spec path (default: docs/api/openapi.yaml).
 #   OPENAPI_GATE_FAIL_FAST=1       Abort on the first failed assertion instead
@@ -101,21 +118,7 @@ RUN_EPOCH="$(date -u +%s)"
 RUN_ID="${RUN_EPOCH}-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-openapi-gate-$RUN_ID"
 mkdir -p "$TMP_DIR"
-COMPOSE_OVERRIDE="$TMP_DIR/livekit-env.yml"
-LIVEKIT_API_KEY="${OPENAPI_GATE_LIVEKIT_API_KEY:-openapi-gate-key}"
-LIVEKIT_API_SECRET="${OPENAPI_GATE_LIVEKIT_API_SECRET:-openapi-gate-secret-$RUN_ID}"
-LIVEKIT_URL="${OPENAPI_GATE_LIVEKIT_URL:-ws://127.0.0.1:7880}"
-cat >"$COMPOSE_OVERRIDE" <<YAML
-services:
-  api:
-    environment:
-      MOMO_LIVEKIT_API_KEY: "$LIVEKIT_API_KEY"
-      MOMO_LIVEKIT_API_SECRET: "$LIVEKIT_API_SECRET"
-      MOMO_LIVEKIT_URL: "$LIVEKIT_URL"
-      MOMO_TRANSCRIPTION_MODEL: small
-      MOMO_DRIVE_ARCHIVE_BACKEND: stub
-      MOMO_DRIVE_ARCHIVE_STUB_BASE_URL: "http://127.0.0.1:$GATE_PORT"
-YAML
+COMPOSE_OVERRIDE="$TMP_DIR/gate-env.yml"
 SPEC_JSON="$TMP_DIR/openapi.json"
 MANIFEST="$TMP_DIR/manifest.jsonl"
 : >"$MANIFEST"
@@ -180,6 +183,98 @@ RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 APPROVAL_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 CONTROL_RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 CANCEL_RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+
+# ---- Compose override (MOMO-673) ---------------------------------------------
+# Written AFTER the identity block because the operator allowlist is keyed on
+# this run's throwaway gate email.
+#
+#   PLATFORM_ADMIN_EMAILS  MOMO-583 listed-instance-operator path for
+#     /v1/provider/link/chain and the credit topup. The gate login sends no
+#     platformAdminSecret, so the issued token still carries only
+#     messages:read/write — the allowlist authorizes the *identity*, it does not
+#     widen the token's scopes (AuthRoutes.shouldGrantPlatformRead).
+#   MOMO_T3_ENABLED + MOMO_PUBLIC_BASE_URL  unlock the T3 surface. MOMO_T3_PROVIDER
+#     stays unset on purpose: the default adapter is then BYOC (ADR-0142 D1),
+#     which needs no provider credential and no host-side mock, and whose
+#     documented refusals ARE the create/pause/resume contract.
+#   MOMO_AGENT_CARD_ALLOW_HTTP / MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP  relax only
+#     the HTTPS requirement. The SSRF address checks stay fully active, which is
+#     why the mock below sits on a public-shaped subnet instead of loopback.
+GATE_PUBLIC_SUBNET="${OPENAPI_GATE_PUBLIC_SUBNET:-11.38.0.0/24}"
+# The mock's address is derived from the subnet, so an unexpected shape would
+# silently produce a garbage IP and fail much later as an unexplained 400.
+case "$GATE_PUBLIC_SUBNET" in
+  *.0/24) ;;
+  *)
+    echo "[openapi] OPENAPI_GATE_PUBLIC_SUBNET must be an x.y.z.0/24 block: $GATE_PUBLIC_SUBNET" >&2
+    exit 1
+    ;;
+esac
+GATE_PUBLIC_HOST_IP="${GATE_PUBLIC_SUBNET%.0/24}.2"
+GATE_PUBLIC_ORIGIN="http://$GATE_PUBLIC_HOST_IP:8089"
+LIVEKIT_API_KEY="${OPENAPI_GATE_LIVEKIT_API_KEY:-openapi-gate-key}"
+LIVEKIT_API_SECRET="${OPENAPI_GATE_LIVEKIT_API_SECRET:-openapi-gate-secret-$RUN_ID}"
+LIVEKIT_URL="${OPENAPI_GATE_LIVEKIT_URL:-ws://127.0.0.1:7880}"
+cat >"$COMPOSE_OVERRIDE" <<YAML
+services:
+  api:
+    environment:
+      MOMO_LIVEKIT_API_KEY: "$LIVEKIT_API_KEY"
+      MOMO_LIVEKIT_API_SECRET: "$LIVEKIT_API_SECRET"
+      MOMO_LIVEKIT_URL: "$LIVEKIT_URL"
+      MOMO_TRANSCRIPTION_MODEL: small
+      MOMO_DRIVE_ARCHIVE_BACKEND: stub
+      MOMO_DRIVE_ARCHIVE_STUB_BASE_URL: "http://127.0.0.1:$GATE_PORT"
+      MOMO_ENV: local
+      PLATFORM_ADMIN_EMAILS: "$GATE_EMAIL"
+      MOMO_AGENT_CARD_ALLOW_HTTP: "1"
+      MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP: "1"
+      MOMO_T3_ENABLED: "1"
+      MOMO_PUBLIC_BASE_URL: "https://openapi-gate.momo.invalid"
+      MOMO_T3_RATE_MICRO_USD_PER_SECOND: "25"
+    networks:
+      - default
+      - openapi-public-test
+  mock-public-endpoint:
+    image: python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+    mem_limit: 256m
+    labels:
+      com.momo.janitor.managed: "true"
+      com.momo.janitor.match-label: com.docker.compose.project
+    restart: "no"
+    command:
+      - python3
+      - -c
+      - |
+        import http.server, json, os, socketserver
+        os.makedirs('/cards/.well-known', exist_ok=True)
+        with open('/cards/.well-known/agent-card.json', 'w') as handle:
+            json.dump({
+                'name': 'OpenAPI Gate Card Agent',
+                'description': 'MOMO-673 openapi contract gate agent card',
+                'url': '$GATE_PUBLIC_ORIGIN/a2a',
+                'capabilities': {'streaming': True, 'pushNotifications': False},
+                'securitySchemes': {
+                    'bearer': {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT'}
+                },
+                'security': [{'bearer': []}],
+                'skills': [{'id': 'summarize', 'name': 'Summarize'}],
+            }, handle)
+        os.chdir('/cards')
+        socketserver.TCPServer.allow_reuse_address = True
+        with socketserver.TCPServer(
+            ('0.0.0.0', 8089), http.server.SimpleHTTPRequestHandler
+        ) as httpd:
+            httpd.serve_forever()
+    networks:
+      openapi-public-test:
+        ipv4_address: $GATE_PUBLIC_HOST_IP
+networks:
+  openapi-public-test:
+    ipam:
+      config:
+        - subnet: $GATE_PUBLIC_SUBNET
+YAML
 
 compose() {
   PORT="$GATE_PORT" \
@@ -266,7 +361,9 @@ else
   BASE_URL="http://127.0.0.1:$GATE_PORT"
   MANAGED_STACK=1
   echo "[openapi] booting e2e compose project '$PROJECT' (api on $BASE_URL)"
-  compose up -d api
+  # mock-public-endpoint is the public-shaped Agent Card / webhook destination
+  # the SSRF-validated operations need; it carries no gate state of its own.
+  compose up -d api mock-public-endpoint
 
   echo "[openapi] waiting for $BASE_URL/health (timeout ${BOOT_TIMEOUT}s; cold Swift build can take many minutes)"
   deadline=$(( $(date -u +%s) + BOOT_TIMEOUT ))
@@ -284,15 +381,33 @@ else
     sleep 3
   done
   echo "[openapi] server health is green"
+
+  # The mock is only reachable from inside the compose network, so its
+  # readiness is probed from its own container rather than from the host.
+  echo "[openapi] waiting for the public-shaped mock endpoint ($GATE_PUBLIC_ORIGIN)"
+  mock_deadline=$(( $(date -u +%s) + 120 ))
+  until compose exec -T mock-public-endpoint python3 -c \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8089/.well-known/agent-card.json', timeout=2).read()" \
+    >/dev/null 2>&1; do
+    if [ "$(date -u +%s)" -ge "$mock_deadline" ]; then
+      echo "[openapi] mock-public-endpoint never served the agent card" >&2
+      compose logs --tail 80 mock-public-endpoint >&2 || true
+      exit 1
+    fi
+    sleep 2
+  done
+  echo "[openapi] mock endpoint is serving"
 fi
 
 # ---- 3) Fixtures (dedicated gate member; seed rows untouched) ----------------
+# Extra psql flags are forwarded so a caller can ask for a bare scalar (-tA)
+# without a second, differently-configured helper.
 run_sql() {
   if [ -n "$EXTERNAL_BASE_URL" ]; then
-    psql "$OPENAPI_GATE_DATABASE_URL" -v ON_ERROR_STOP=1 --no-psqlrc -q
+    psql "$OPENAPI_GATE_DATABASE_URL" -v ON_ERROR_STOP=1 --no-psqlrc -q "$@"
   else
     compose exec -T postgres psql -U "${POSTGRES_USER:-momo}" -d "${POSTGRES_DB:-momo}" \
-      -v ON_ERROR_STOP=1 --no-psqlrc -q
+      -v ON_ERROR_STOP=1 --no-psqlrc -q "$@"
   fi
 }
 
@@ -486,6 +601,19 @@ work_host_signed_sample() {
   record_sample "$name" "$method" "$template" "$expected"
 }
 
+# Cloud workd self-registration uses a one-shot `MomoBootstrap {token}` header
+# instead of a bearer, so it cannot go through `sample`.
+bootstrap_sample() {
+  local name="$1" template="$2" path="$3" expected="$4" token="$5" body="$6"
+  local out="$TMP_DIR/last-response.json"
+  RESPONSE_STATUS="$(curl -sS -o "$out" -w "%{http_code}" -X POST "$BASE_URL$path" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: MomoBootstrap $token" \
+    --data "$body")"
+  RESPONSE_BODY="$(cat "$out")"
+  record_sample "$name" post "$template" "$expected"
+}
+
 guard_jq() {
   local label="${*: -1}"
   set -- "${@:1:$(($# - 1))}"
@@ -517,6 +645,38 @@ REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -r '.refreshToken')"
 
 sample realtime-token post "/v1/auth/realtime-token" "/v1/auth/realtime-token" 200 "" "$ACCESS"
 
+# provider: instance-global operator surface (MOMO-583 listed-operator identity)
+# + the credential-free effort table. The chain is replaced and cleared inside
+# this block so nothing later observes a fallback hop the gate installed.
+sample provider-effort-table get "/v1/provider/effort-table" \
+  "/v1/provider/effort-table" 200 "" "$ACCESS"
+guard_jq '.schema == "momo.provider.effort_table.v0" and (.levels | length) > 0' \
+  "effort table projects the canonical level superset"
+
+sample provider-chain-get get "/v1/provider/link/chain" \
+  "/v1/provider/link/chain" 200 "" "$ACCESS"
+guard_jq '.schema == "momo.provider_link.chain.v0" and .entries[0].position == 0' \
+  "baseline chain projects position 0 as the head"
+
+sample provider-chain-put put "/v1/provider/link/chain" \
+  "/v1/provider/link/chain" 200 \
+  "$(jq -cn '{entries:[{position:1,
+      baseUrl:"https://fallback.openapi.example.test/v1",
+      bearer:"openapi-gate-fallback-bearer",
+      mode:"external-hermes",enabled:true}]}')" \
+  "$ACCESS"
+guard_jq '.fallbackCount == 1 and (.entries | length) == 2' \
+  "replace-all installs exactly one fallback hop"
+if printf '%s' "$RESPONSE_BODY" | grep -Fq -- 'openapi-gate-fallback-bearer'; then
+  gate_fail provider-chain-put \
+    "plaintext bearer echoed in the chain projection" "$RESPONSE_BODY"
+fi
+
+sample provider-chain-delete delete "/v1/provider/link/chain" \
+  "/v1/provider/link/chain" 200 "" "$ACCESS"
+guard_jq '.fallbackCount == 0 and (.entries | length) == 1' \
+  "clear leaves the cascade at position 0 alone"
+
 sample agent-create post "/v1/workspaces/{workspaceId}/agents" \
   "/v1/workspaces/$WS/agents" 201 \
   "$(jq -cn --arg handle "openapi-agent-$RUN_EPOCH" \
@@ -528,6 +688,24 @@ guard_jq --arg handle "openapi-agent-$RUN_EPOCH" \
   '.agent.handle == $handle and .agent.displayName == "OpenAPI Created Agent"
    and (.agent.id | type == "string")' \
   "agent creation returns only the created member identity"
+
+# A2A Agent Card onboarding: public card fetch -> administrator consent. The
+# card host is the public-shaped compose mock, because the production SSRF
+# validator refuses loopback and RFC1918 destinations even in local mode.
+sample agent-card-register post "/v1/workspaces/{workspaceId}/agents/from-card" \
+  "/v1/workspaces/$WS/agents/from-card" 201 \
+  "$(jq -cn --arg url "$GATE_PUBLIC_ORIGIN" '{url:$url}')" "$ACCESS"
+guard_jq '.registration.status == "pending_consent"
+  and .registration.name == "OpenAPI Gate Card Agent"' \
+  "card fetch stores public provenance pending consent"
+CARD_REGISTRATION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.registration.id')"
+
+sample agent-card-confirm post \
+  "/v1/workspaces/{workspaceId}/agents/from-card/{registrationId}/confirm" \
+  "/v1/workspaces/$WS/agents/from-card/$CARD_REGISTRATION_ID/confirm" 201 "" "$ACCESS"
+guard_jq '.status == "confirmed" and .tokenType == "Bearer"
+  and (.agent.id | type == "string") and (.token | type == "string")' \
+  "consent creates the agent member and its first gateway bearer"
 
 # roster + compat alias
 sample roster get "/v1/workspaces/{workspaceId}/roster" "/v1/workspaces/$WS/roster" 200 "" "$ACCESS"
@@ -617,6 +795,133 @@ sample work-session-end patch "/v1/workspaces/{workspaceId}/work-sessions/{workS
 guard_jq '.workSession.status == "ended" and .workSession.exitCode == 0 and (.workSession.endedAtMs | type == "number")' \
   "work session ends with exit status"
 
+# tier policy: workspace default + member override. Both stay on `ask` — `auto`
+# would pin the resume sample below to one concrete target and turn an
+# unrelated host change into a false drift report.
+sample work-tier-policy-get get "/v1/workspaces/{workspaceId}/work-tier-policy" \
+  "/v1/workspaces/$WS/work-tier-policy" 200 "" "$ACCESS"
+sample work-tier-policy-put put "/v1/workspaces/{workspaceId}/work-tier-policy" \
+  "/v1/workspaces/$WS/work-tier-policy" 200 '{"mode":"ask"}' "$ACCESS"
+guard_jq '.workTierPolicy.mode == "ask"' "workspace default records the ask policy"
+sample work-tier-policy-me-get get "/v1/workspaces/{workspaceId}/work-tier-policy/me" \
+  "/v1/workspaces/$WS/work-tier-policy/me" 200 "" "$ACCESS"
+sample work-tier-policy-me-put put "/v1/workspaces/{workspaceId}/work-tier-policy/me" \
+  "/v1/workspaces/$WS/work-tier-policy/me" 200 '{"mode":"ask"}' "$ACCESS"
+guard_jq '.workTierPolicy.mode == "ask" and .workTierPolicy.inherited == false' \
+  "member override stops inheriting the workspace default"
+
+# resume: only an ORPHANED source may continue on another host, and only the
+# host-loss sweep (NotifierWorker, a profile this gate does not boot) produces
+# that status. The precondition is therefore installed in SQL exactly as
+# scripts/verify_workstream_continuity.sh does; the resume itself is live HTTP.
+api post "/v1/workspaces/$WS/work-sessions" \
+  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
+      '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI resume source"}')" \
+  "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || {
+  echo "[openapi] FAIL resume source session: expected 201, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+RESUME_SOURCE_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
+run_sql <<SQL
+UPDATE work_session SET status = 'orphaned', idle_at = NULL
+ WHERE workspace_id = '$WS' AND id = '$RESUME_SOURCE_SESSION_ID';
+SQL
+sample work-session-resume post \
+  "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume" \
+  "/v1/workspaces/$WS/work-sessions/$RESUME_SOURCE_SESSION_ID/resume" 201 \
+  "$(jq -cn --arg host "$WORK_HOST_ID" '{targetHostId:$host}')" "$ACCESS"
+guard_jq --arg source "$(printf '%s' "$RESUME_SOURCE_SESSION_ID" | tr '[:upper:]' '[:lower:]')" \
+  '.workSession.status == "running"
+   and (.workSession.resumedFromSessionId | ascii_downcase) == $source' \
+  "resume opens a new Run with durable lineage"
+RESUMED_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
+# Give the pool slot back: every later work-pool/T3 admission check counts
+# running sessions, so leaving this one alive would make an unrelated sample
+# fail on capacity.
+api patch "/v1/workspaces/$WS/work-sessions/$RESUMED_SESSION_ID" \
+  '{"status":"ended","exitCode":0}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "200" ] || {
+  echo "[openapi] FAIL resumed session cleanup: expected 200, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+
+# workstreams: the goal layer is created by the work_session trigger, so the
+# Runs above already anchor one.
+sample workstreams-list get "/v1/workspaces/{workspaceId}/workstreams" \
+  "/v1/workspaces/$WS/workstreams?limit=50" 200 "" "$ACCESS"
+guard_jq '(.workstreams | length) >= 1' "workstream list is non-empty"
+WORKSTREAM_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workstreams[0].id')"
+sample workstream-detail get "/v1/workspaces/{workspaceId}/workstreams/{workstreamId}" \
+  "/v1/workspaces/$WS/workstreams/$WORKSTREAM_ID" 200 "" "$ACCESS"
+sample workstream-runs get \
+  "/v1/workspaces/{workspaceId}/workstreams/{workstreamId}/runs" \
+  "/v1/workspaces/$WS/workstreams/$WORKSTREAM_ID/runs" 200 "" "$ACCESS"
+guard_jq '(.runs | length) >= 1' "workstream run history is non-empty"
+
+# T3 (ADR-0136/0142). MOMO_T3_PROVIDER is unset, so the default adapter is the
+# degenerate BYOC one: it owns no instance lifetime, which is exactly why
+# create/pause/resume answer their documented 409 instead of pretending. The
+# enrollment token is the only way to reach the register endpoint without a
+# managed provider, and destroy is the one lifecycle verb BYOC does implement.
+sample credit-topup post "/v1/admin/workspaces/{workspaceId}/credits/topups" \
+  "/v1/admin/workspaces/$WS/credits/topups" 200 \
+  "$(jq -cn --arg ref "$(uuidgen | tr '[:upper:]' '[:lower:]')" \
+      '{amountMicroUsd:1000000,idempotencyRef:$ref}')" "$ACCESS"
+guard_jq '.amountMicroUsd == 1000000 and (.balanceMicroUsd | type == "number")' \
+  "operator topup returns the new workspace balance"
+
+sample cloud-host-create post "/v1/workspaces/{workspaceId}/work-hosts/cloud" \
+  "/v1/workspaces/$WS/work-hosts/cloud" 409 \
+  "$(jq -cn --arg ref "$(uuidgen | tr '[:upper:]' '[:lower:]')" \
+      '{displayName:"OpenAPI managed cloud host",confirmPaidCloud:true,idempotencyRef:$ref}')" \
+  "$ACCESS"
+
+sample byoc-enrollment post \
+  "/v1/workspaces/{workspaceId}/work-hosts/byoc/enrollments" \
+  "/v1/workspaces/$WS/work-hosts/byoc/enrollments" 201 \
+  "$(jq -cn --arg ref "$(uuidgen | tr '[:upper:]' '[:lower:]')" \
+      '{displayName:"OpenAPI BYOC host",scope:"workspace",idempotencyRef:$ref}')" \
+  "$ACCESS"
+guard_jq '.enrollment.provider == "byoc" and .enrollment.state == "provisioning"' \
+  "BYOC enrollment issues a one-shot token for the operator-owned host"
+CLOUD_PROVISION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.enrollment.provisionId')"
+CLOUD_BOOTSTRAP_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.enrollment.bootstrapToken')"
+
+CLOUD_HOST_PRIVATE_KEY="$TMP_DIR/cloud-host-private.pem"
+CLOUD_HOST_PUBLIC_DER="$TMP_DIR/cloud-host-public.der"
+"$OPENSSL_BIN" genpkey -algorithm ED25519 -out "$CLOUD_HOST_PRIVATE_KEY" >/dev/null 2>&1
+"$OPENSSL_BIN" pkey -in "$CLOUD_HOST_PRIVATE_KEY" -pubout -outform DER \
+  -out "$CLOUD_HOST_PUBLIC_DER" >/dev/null 2>&1
+CLOUD_HOST_PUBLIC_KEY="$(tail -c 32 "$CLOUD_HOST_PUBLIC_DER" | "$OPENSSL_BIN" base64 -A)"
+bootstrap_sample cloud-host-register \
+  "/v1/workspaces/{workspaceId}/work-hosts/cloud/register" \
+  "/v1/workspaces/$WS/work-hosts/cloud/register" 201 \
+  "$CLOUD_BOOTSTRAP_TOKEN" \
+  "$(jq -cn --arg key "$CLOUD_HOST_PUBLIC_KEY" \
+      '{scope:"workspace",type:"cloud",displayName:"OpenAPI BYOC workd",
+        publicKey:$key,capabilities:{"tool.codex":true}}')"
+CLOUD_HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id')"
+
+sample cloud-provision-get get \
+  "/v1/workspaces/{workspaceId}/work-hosts/cloud/{provisionId}" \
+  "/v1/workspaces/$WS/work-hosts/cloud/$CLOUD_PROVISION_ID" 200 "" "$ACCESS"
+guard_jq --arg host "$(printf '%s' "$CLOUD_HOST_ID" | tr '[:upper:]' '[:lower:]')" \
+  '.cloudHost.state == "ready" and (.cloudHost.hostId | ascii_downcase) == $host' \
+  "the consumed bootstrap token binds the provision to its work host"
+
+sample cloud-host-pause post \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/pause" \
+  "/v1/workspaces/$WS/work-hosts/$CLOUD_HOST_ID/cloud/pause" 409 "" "$ACCESS"
+sample cloud-host-resume post \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/resume" \
+  "/v1/workspaces/$WS/work-hosts/$CLOUD_HOST_ID/cloud/resume" 409 "" "$ACCESS"
+sample cloud-host-destroy delete \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud" \
+  "/v1/workspaces/$WS/work-hosts/$CLOUD_HOST_ID/cloud" 200 "" "$ACCESS"
+guard_jq '.cloudHost.state == "destroyed"' \
+  "destroy releases momo's binding to the operator-owned host"
+
 # huddles: start -> active badge -> join grant -> last leave/end
 sample huddle-start post "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles" \
   "/v1/workspaces/$WS/channels/$GENERAL_ID/huddles" 201 "" "$ACCESS"
@@ -698,6 +1003,126 @@ sample workspace-message-search get \
   "/v1/workspaces/$WS/search/messages?q=openapi%20drift&limit=20" 200 "" "$ACCESS"
 guard_jq '(.hits | length) >= 1 and all(.hits[]; .matchOffset >= 0)' \
   "workspace search returns the sent message with a match offset"
+
+# thread replies: one-level reply under the message just sent.
+api post "/v1/workspaces/$WS/channels/$GENERAL_ID/messages" \
+  "$(jq -cn --arg c "$(uuidgen)" --arg root "$SENT_ID" \
+      '{clientMsgId:$c,rootId:$root,body:"openapi drift gate reply"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || {
+  echo "[openapi] FAIL thread reply seed: expected 201, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+sample thread-replies get \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/replies" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/messages/$SENT_ID/replies?limit=50" \
+  200 "" "$ACCESS"
+guard_jq --arg root "$(printf '%s' "$SENT_ID" | tr '[:upper:]' '[:lower:]')" \
+  '(.messages | length) >= 1
+   and all(.messages[]; (.rootId | ascii_downcase) == $root)' \
+  "reply page contains only replies of the requested root"
+
+# context packet: an agent mention freezes one packet inside the send
+# transaction. The packet id is not projected by any REST read, so it is taken
+# from the ledger — the sample itself is the live GET.
+api post "/v1/workspaces/$WS/channels/$GENERAL_ID/messages" \
+  "$(jq -cn --arg c "$(uuidgen)" '{clientMsgId:$c,body:"@kim-intern openapi drift gate packet"}')" \
+  "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || {
+  echo "[openapi] FAIL context packet seed message: expected 201, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+MENTION_MESSAGE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
+CONTEXT_PACKET_ID="$(run_sql -tA <<SQL | tr -d '[:space:]'
+SELECT lower(cp.packet_id::text)
+  FROM context_packet cp
+  JOIN agent_run ar
+    ON ar.workspace_id = cp.workspace_id AND ar.id = cp.run_id
+ WHERE cp.workspace_id = '$WS'
+   AND ar.trigger_message_id = '$MENTION_MESSAGE_ID'
+ LIMIT 1;
+SQL
+)"
+[ -n "$CONTEXT_PACKET_ID" ] || {
+  echo "[openapi] FAIL: agent mention issued no context packet" >&2
+  exit 1
+}
+sample context-packet get "/v1/workspaces/{workspaceId}/context-packets/{packetId}" \
+  "/v1/workspaces/$WS/context-packets/$CONTEXT_PACKET_ID" 200 "" "$ACCESS"
+guard_jq --arg packet "$CONTEXT_PACKET_ID" \
+  '(.packetId | ascii_downcase) == $packet' \
+  "packet read returns the frozen packet the run consumed"
+
+# memory plane. Ordering is load-bearing: PATCH must precede invalidate (an
+# invalidated item is 409 on edit) and the workspace purge is last, because it
+# disables the policy every other memory write depends on.
+sample memory-policy-get get "/v1/workspaces/{workspaceId}/memory-policy" \
+  "/v1/workspaces/$WS/memory-policy" 200 "" "$ACCESS"
+sample memory-policy-put put "/v1/workspaces/{workspaceId}/memory-policy" \
+  "/v1/workspaces/$WS/memory-policy" 200 '{"enabled":true}' "$ACCESS"
+guard_jq '.memoryPolicy.enabled == true' "memory policy is explicitly enabled"
+
+sample memory-consent-get get \
+  "/v1/workspaces/{workspaceId}/memory-external-provider-consent" \
+  "/v1/workspaces/$WS/memory-external-provider-consent" 200 "" "$ACCESS"
+sample memory-consent-put put \
+  "/v1/workspaces/{workspaceId}/memory-external-provider-consent" \
+  "/v1/workspaces/$WS/memory-external-provider-consent" 200 \
+  '{"consented":false}' "$ACCESS"
+guard_jq '.memoryExternalProviderConsent.consented == false' \
+  "external-provider consent stays default-deny"
+
+sample memory-create post "/v1/workspaces/{workspaceId}/memories" \
+  "/v1/workspaces/$WS/memories" 200 \
+  "$(jq -cn --arg subject "$GATE_MEMBER_ID" --arg message "$SENT_ID" \
+      --arg channel "$GENERAL_ID" \
+      '{scope:"member",subjectMemberId:$subject,kind:"fact",
+        body:"openapi drift gate remembers the contract sample",confidence:1,
+        sourceRefs:[{messageId:$message,channelId:$channel}]}')" "$ACCESS"
+guard_jq '.memory.scope == "member" and (.memory.id | type == "string")' \
+  "memory create returns the stored item"
+MEMORY_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.memory.id')"
+
+sample memory-list get "/v1/workspaces/{workspaceId}/memories" \
+  "/v1/workspaces/$WS/memories?limit=50" 200 "" "$ACCESS"
+guard_jq --arg id "$(printf '%s' "$MEMORY_ID" | tr '[:upper:]' '[:lower:]')" \
+  'any(.memories[]; (.id | ascii_downcase) == $id)' \
+  "memory list contains the created item"
+
+sample memory-search get "/v1/workspaces/{workspaceId}/memories/search" \
+  "/v1/workspaces/$WS/memories/search?q=contract%20sample&limit=20" 200 "" "$ACCESS"
+
+MEMORY_GRANT_BODY="$(jq -cn --arg id "$KIM_INTERN_MEMBER_ID" \
+  '{granteeKind:"agent",granteeId:$id}')"
+sample memory-grant post "/v1/workspaces/{workspaceId}/memories/{memoryId}/grants" \
+  "/v1/workspaces/$WS/memories/$MEMORY_ID/grants" 200 "$MEMORY_GRANT_BODY" "$ACCESS"
+guard_jq '.grant.granteeKind == "agent" and .grant.revokedAtMs == null' \
+  "explicit visibility grant is active"
+sample memory-grants-list get "/v1/workspaces/{workspaceId}/memories/{memoryId}/grants" \
+  "/v1/workspaces/$WS/memories/$MEMORY_ID/grants" 200 "" "$ACCESS"
+guard_jq '(.grants | length) >= 1' "grant ledger is non-empty"
+sample memory-grant-revoke delete \
+  "/v1/workspaces/{workspaceId}/memories/{memoryId}/grants" \
+  "/v1/workspaces/$WS/memories/$MEMORY_ID/grants" 200 "$MEMORY_GRANT_BODY" "$ACCESS"
+guard_jq '(.grant.revokedAtMs | type == "number")' "revoke keeps the ledger row"
+
+sample memory-update patch "/v1/workspaces/{workspaceId}/memories/{memoryId}" \
+  "/v1/workspaces/$WS/memories/$MEMORY_ID" 200 \
+  '{"body":"openapi drift gate remembers the edited contract sample","confidence":0.9}' \
+  "$ACCESS"
+guard_jq '.memory.body == "openapi drift gate remembers the edited contract sample"
+  and (.memory.confidence | type == "number")' \
+  "memory edit rewrites the bounded body"
+
+sample memory-invalidate post \
+  "/v1/workspaces/{workspaceId}/memories/{memoryId}/invalidate" \
+  "/v1/workspaces/$WS/memories/$MEMORY_ID/invalidate" 200 '{}' "$ACCESS"
+guard_jq '(.memory.invalidAtMs | type == "number")' \
+  "invalidation is a time transition, not a delete"
+
+sample memories-purge delete "/v1/workspaces/{workspaceId}/memories" \
+  "/v1/workspaces/$WS/memories" 200 "" "$ACCESS"
+guard_jq '.memoryPolicy.enabled == false and (.deletedCount | type == "number")' \
+  "workspace purge disables the policy and reports the deleted count"
 
 # read-state: cursor advance + bulk read
 sample read-state-put put \
@@ -1057,6 +1482,53 @@ sample slack-webhook post "/hooks/{token}" "$SLACK_URL" 201 \
 
 sample webhook-revoke delete "/v1/workspaces/{workspaceId}/webhooks/{installationId}" \
   "$WEBHOOKS_PATH/$NATIVE_INSTALL" 200 "" "$ACCESS"
+
+# outbound event subscriptions: the destination is DNS/IP-validated, so it is
+# the same public-shaped mock the Agent Card samples use.
+EVENT_SUBSCRIPTIONS_PATH="/v1/workspaces/$WS/event-subscriptions"
+sample event-subscription-create post \
+  "/v1/workspaces/{workspaceId}/event-subscriptions" "$EVENT_SUBSCRIPTIONS_PATH" 201 \
+  "$(jq -cn --arg url "$GATE_PUBLIC_ORIGIN/events" \
+      '{url:$url,eventKinds:["mention","approval_request"]}')" "$ACCESS"
+EVENT_SUBSCRIPTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.eventSubscription.id')"
+guard_jq '(.secret | type == "string")' "create issues the signing secret exactly once"
+
+sample event-subscriptions-list get \
+  "/v1/workspaces/{workspaceId}/event-subscriptions" "$EVENT_SUBSCRIPTIONS_PATH" 200 "" "$ACCESS"
+guard_jq 'all(.eventSubscriptions[]; (has("secret") or has("secretRef")) | not)' \
+  "list never re-exposes signing material"
+
+sample event-subscription-update put \
+  "/v1/workspaces/{workspaceId}/event-subscriptions/{subscriptionId}" \
+  "$EVENT_SUBSCRIPTIONS_PATH/$EVENT_SUBSCRIPTION_ID" 200 '{"enabled":false}' "$ACCESS"
+guard_jq '.eventSubscription.enabled == false' "update disables delivery"
+
+sample event-subscription-delete delete \
+  "/v1/workspaces/{workspaceId}/event-subscriptions/{subscriptionId}" \
+  "$EVENT_SUBSCRIPTIONS_PATH/$EVENT_SUBSCRIPTION_ID" 200 "" "$ACCESS"
+
+# audit ledger: sampled here because every block above has already written to it.
+sample workspace-audit get "/v1/workspaces/{workspaceId}/audit" \
+  "/v1/workspaces/$WS/audit?limit=50" 200 "" "$ACCESS"
+guard_jq '(.events | length) >= 1' "audit page is non-empty"
+
+# self-service departures. These revoke the caller's own sessions, so they run
+# on the /v1/join member's token — using the gate token would kill every
+# remaining sample instead of exercising one operation.
+api post "/v1/auth/login" \
+  "$(jq -cn --arg e "$JOIN_EMAIL" --arg w "$WS" \
+      '{email:$e,password:"gate-join-pw",workspace:$w}')"
+[ "$RESPONSE_STATUS" = "200" ] || {
+  echo "[openapi] FAIL joined-member login: expected 200, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+JOIN_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.accessToken')"
+
+sample channel-leave delete \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/members/me" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/members/me" 200 "" "$JOIN_ACCESS"
+sample workspace-leave delete "/v1/workspaces/{workspaceId}/members/me" \
+  "/v1/workspaces/$WS/members/me" 200 "" "$JOIN_ACCESS"
 
 # error envelope + logout (last: revokes the session)
 sample unauthorized get "/v1/workspaces/{workspaceId}/roster" "/v1/workspaces/$WS/roster" 401 ""

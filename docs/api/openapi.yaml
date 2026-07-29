@@ -1813,8 +1813,10 @@ paths:
         every call, so expiry, session end, and host revoke take effect
         immediately. The returned mode is authoritative: observer connections
         may receive output but the host must reject send_stdin, resize, and kill.
-        This endpoint returns binding metadata only: terminal
-        bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
+        The host also calls this on a timer for every stream it is already
+        serving (`stream: true`), which is what makes a revoke reach a socket
+        that is already open. This endpoint returns binding metadata only:
+        terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
       security:
         - workHostAuth: []
       parameters:
@@ -4781,12 +4783,24 @@ paths:
       tags: [agents]
       operationId: getProviderLinkChain
       summary: Read every configured provider cascade hop, including unavailable ciphertext rows.
+      description: >
+        Instance-global operator surface (MOMO-583 / ADR-0135 D1): a human
+        principal carrying the platform:read scope, or an owner/admin whose
+        verified email is on the instance operator allowlist. Position 0 is the
+        legacy provider-link singleton and remains editable only through it.
+        Bearers are never echoed — a hop carries a masked 4-character tail only
+        (ADR-0004).
       responses:
         "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
     put:
       tags: [agents]
       operationId: replaceProviderLinkChain
       summary: Atomically replace fallback provider cascade hops.
+      description: >
+        Same operator boundary as the read. Replaces positions >= 1 in one
+        transaction; position 0 is rejected by name. Omitting an entry's bearer
+        keeps the ciphertext already stored at that position, so a hop can be
+        reordered or parked without re-typing a write-only secret.
       requestBody:
         required: true
         content: {application/json: {schema: {type: object, additionalProperties: true}}}
@@ -4796,6 +4810,9 @@ paths:
       tags: [agents]
       operationId: clearProviderLinkChain
       summary: Remove every fallback provider cascade hop.
+      description: >
+        Same operator boundary as the read. Drops every fallback hop; the
+        response then projects the cascade as position 0 alone.
       responses:
         "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
 
@@ -4804,6 +4821,11 @@ paths:
       tags: [agents]
       operationId: getProviderEffortTable
       summary: Read the provider and model effort capabilities used by routing.
+      description: >
+        Any authenticated principal. The table carries no tenant row and no
+        provider credential (ADR-0134 D2), and a model absent from it resolves
+        to the conservative low/medium/high fallback rather than silently
+        accepting a level the provider would reject.
       responses:
         "200": {description: Effort capability table, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
 
@@ -6911,6 +6933,18 @@ components:
         capability_token:
           type: string
           description: Opaque grant presented by the direct client to its target host.
+        stream:
+          type: boolean
+          default: false
+          description: >
+            True when the host is re-checking a stream it has already accepted
+            rather than admitting a new client. It relaxes exactly one clause,
+            the capability expiry, because that TTL bounds the mint-to-dial
+            window and the host closed that window under a full validation.
+            Every authorization clause still applies on every call, so an open
+            terminal is cut within one revalidation period when the session
+            ends, the host is revoked, observation closes, the grantee leaves
+            the channel, or the grantee is deactivated.
 
     TerminalAttachValidationResponse:
       type: object
