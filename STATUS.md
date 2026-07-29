@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-667 T3 수명주기 정본화 (#891, 2026-07-29)
+
+- Migration 053이 정산을 이유 보존형 `t3_terminate` 한 문으로 모으고 직접 `settled_at` 변경과 비실재 cloud-host 전이를 이름 있는 트리거 예외로 봉인한다. 기존 `settle_t3_work_session`은 설치 DB·운영 도구 호환 shim만 유지하며 런타임·repair는 명시 reason 경유로 이행했다.
+- 서버와 NotifierWorker의 공용 prelude가 advisory → work_pool/workspace_credit → cloud host 순서를 소유하고, 종료·provider missing·idle/orphan sweep·계보 resume가 usage → interval → session → host 사다리를 따른다. T1/T2는 cloud host가 없으므로 이 prelude 비용을 지지 않는다.
+- 서버 349·NotifierWorker 6 테스트, migration 번호·T3 정적 gate·shellcheck는 green이다. 기존 2개와 workspace 축을 포함한 Docker 동시성 시나리오, 두 red proof, T1/T2 및 기존 T3 행동 검증기는 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-666 T3 수명주기 교착 안전망 (#890, 2026-07-29)
 
 - T3 수명주기 쓰기는 정규화한 cloud-host UUID와 `momo.t3` 네임스페이스의 2-int transaction advisory key를 첫 SQL로 획득한다. T1/T2와 고빈도 heartbeat는 이 직렬화 경계에 들어오지 않는다.

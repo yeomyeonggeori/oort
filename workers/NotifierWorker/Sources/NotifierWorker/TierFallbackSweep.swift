@@ -3,6 +3,10 @@ import Logging
 import PostgresNIO
 
 extension NotifierService {
+    private enum TierFallbackLifecycleError: Error {
+        case staleAfterT3Termination(UUID)
+    }
+
     struct StaleWorkSession: Sendable {
         let id: UUID
         let workspaceID: UUID
@@ -103,8 +107,12 @@ extension NotifierService {
                 do {
                     let didTransition = try await pg.withTransaction(logger: logger) { conn in
                         if let cloudHostID = session.cloudHostID {
-                            try await T3LifecycleLock.acquire(
-                                conn: conn, logger: logger, cloudHostID: cloudHostID
+                            try await T3LifecycleLock.acquirePrelude(
+                                conn: conn,
+                                logger: logger,
+                                workspaceID: session.workspaceID,
+                                cloudHostID: cloudHostID,
+                                lockWorkspaceCredit: true
                             )
                         }
                         return try await transitionStaleSession(
@@ -223,8 +231,12 @@ extension NotifierService {
             do {
                 let didTransition = try await pg.withTransaction(logger: logger) { conn in
                     if let cloudHostID = session.cloudHostID {
-                        try await T3LifecycleLock.acquire(
-                            conn: conn, logger: logger, cloudHostID: cloudHostID
+                        try await T3LifecycleLock.acquirePrelude(
+                            conn: conn,
+                            logger: logger,
+                            workspaceID: session.workspaceID,
+                            cloudHostID: cloudHostID,
+                            lockWorkspaceCredit: true
                         )
                     }
                     return try await transitionIdleTimeout(
@@ -266,6 +278,20 @@ extension NotifierService {
         ).collect()
         guard let timeoutSeconds = try timeoutRows.first?.decode(Int.self) else {
             return false
+        }
+        let didTerminate: Bool
+        if session.cloudHostID != nil {
+            let terminationRows = try await conn.query(
+                """
+                SELECT t3_terminate(
+                  \(session.workspaceID), \(session.id), 'idle_timeout'
+                )
+                """,
+                logger: logger
+            ).collect()
+            didTerminate = try terminationRows.first?.decode(Bool.self) ?? false
+        } else {
+            didTerminate = false
         }
         let rows = try await conn.query(
             """
@@ -320,11 +346,12 @@ extension NotifierService {
             """,
             logger: logger
         ).collect()
-        guard let endedAt = try rows.first?.decode(Date.self) else { return false }
-        _ = try await conn.query(
-            "SELECT settle_t3_work_session(\(session.workspaceID), \(session.id))",
-            logger: logger
-        ).collect()
+        guard let endedAt = try rows.first?.decode(Date.self) else {
+            if didTerminate {
+                throw TierFallbackLifecycleError.staleAfterT3Termination(session.id)
+            }
+            return false
+        }
         let endedAtMs = Self.epochMs(endedAt)
         var rootProps: [String: Any] = [
             "kind": "work_session",
@@ -383,6 +410,20 @@ extension NotifierService {
         session: StaleWorkSession
     ) async throws -> Bool {
         let terminal = session.mode == "t1_only"
+        let didTerminate: Bool
+        if session.cloudHostID != nil {
+            let terminationRows = try await conn.query(
+                """
+                SELECT t3_terminate(
+                  \(session.workspaceID), \(session.id), 'orphaned'
+                )
+                """,
+                logger: logger
+            ).collect()
+            didTerminate = try terminationRows.first?.decode(Bool.self) ?? false
+        } else {
+            didTerminate = false
+        }
         let rows = try await conn.query(
             terminal
                 ? """
@@ -478,11 +519,12 @@ extension NotifierService {
                   """,
             logger: logger
         ).collect()
-        guard let transitionedAt = try rows.first?.decode(Date.self) else { return false }
-        _ = try await conn.query(
-            "SELECT settle_t3_work_session(\(session.workspaceID), \(session.id))",
-            logger: logger
-        ).collect()
+        guard let transitionedAt = try rows.first?.decode(Date.self) else {
+            if didTerminate {
+                throw TierFallbackLifecycleError.staleAfterT3Termination(session.id)
+            }
+            return false
+        }
         let transitionedAtMs = Self.epochMs(transitionedAt)
         var rootProps: [String: Any] = [
             "kind": "work_session",

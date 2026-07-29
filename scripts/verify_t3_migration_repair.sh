@@ -313,6 +313,15 @@ grep -F "+ APPLY 051_t3_unsettled_usage_constraint.sql" "$SUCCESS_LOG" >/dev/nul
 grep -F "[migrate] IDEMPOTENCY_OK second-pass applied=0" "$SUCCESS_LOG" >/dev/null \
   || fail "migration runner second-pass idempotency marker missing"
 [ "$(sql_value "$RECOVERY_DB" -c "
+  SELECT position(
+    't3_terminate' IN pg_get_functiondef(
+      'repair_t3_duplicate_unsettled_usage()'::regprocedure
+    )
+  ) > 0;
+")" = "t" ] \
+  || fail "053 did not replace repair delegation with t3_terminate"
+pass "053 canonicalizes subsequent repair calls through t3_terminate"
+[ "$(sql_value "$RECOVERY_DB" -c "
   SELECT count(*) FROM pg_indexes
    WHERE schemaname = 'public'
      AND indexname = 'work_host_usage_one_unsettled_per_host_idx';

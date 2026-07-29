@@ -150,7 +150,8 @@ struct WorkSessionRoutes: Sendable {
 
         let session = try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
-            cloudHostID: targetCloudHostID
+            cloudHostID: targetCloudHostID,
+            lockWorkPool: targetCloudHostID != nil
         ) { conn in
             try await revalidateT3CloudHost(
                 conn: conn,
@@ -389,7 +390,8 @@ struct WorkSessionRoutes: Sendable {
         )
         let session = try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
-            cloudHostID: cloudHostID
+            cloudHostID: cloudHostID,
+            lockWorkspaceCredit: cloudHostID != nil
         ) { conn in
             try await revalidateT3CloudHost(
                 conn: conn,
@@ -397,6 +399,54 @@ struct WorkSessionRoutes: Sendable {
                 sessionID: sessionID,
                 expectedCloudHostID: cloudHostID
             )
+            if cloudHostID != nil {
+                // Authorization is checked without taking the session row lock.
+                // t3_terminate then owns usage -> session, after the shared
+                // prelude has already locked credit -> cloud host.
+                let preflightRows = try await conn.query(
+                    """
+                    SELECT member_id, host_id, channel_id
+                      FROM work_session
+                     WHERE workspace_id = \(workspaceID)
+                       AND id = \(sessionID)
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let preflightRow = preflightRows.first else {
+                    throw HTTPError(.notFound, message: "work session not found")
+                }
+                let (ownerMemberID, hostID, channelID) =
+                    try preflightRow.decode((UUID, UUID, UUID).self)
+                if principal.kind == .workHost {
+                    guard hostID == principal.tokenID else {
+                        throw HTTPError(
+                            .forbidden,
+                            message: "work host cannot end another host session"
+                        )
+                    }
+                } else {
+                    guard ownerMemberID == principal.memberID else {
+                        throw HTTPError(
+                            .forbidden,
+                            message: "only the session owner can end it"
+                        )
+                    }
+                }
+                try await Self.requireChannelMember(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    memberID: ownerMemberID
+                )
+                try await CloudUsageLedger.terminate(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    sessionID: sessionID,
+                    reason: .ended
+                )
+            }
             let rows = try await conn.query(
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
@@ -476,12 +526,6 @@ struct WorkSessionRoutes: Sendable {
                 throw HTTPError(.conflict, message: "work session state changed; retry")
             }
             let workSession = try Self.decodeSession(updatedRow)
-            try await CloudUsageLedger.settle(
-                conn: conn,
-                logger: db.logger,
-                workspaceID: workspaceID,
-                sessionID: sessionID
-            )
             let props = Self.cardProps(
                 sessionID: sessionID,
                 tool: workSession.tool,
@@ -1137,9 +1181,31 @@ struct WorkSessionRoutes: Sendable {
         }
         try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
-            cloudHostID: cloudHostID
+            cloudHostID: cloudHostID,
+            lockWorkspaceCredit: true
         ) { conn in
-            let rows = try await conn.query(
+            let preflightRows = try await conn.query(
+                """
+                SELECT member_id
+                  FROM work_session
+                 WHERE workspace_id = \(workspaceID)
+                   AND id = \(sessionID)
+                   AND host_id = \(hostID)
+                   AND status = 'idle'
+                """,
+                logger: db.logger
+            ).collect()
+            guard let memberID = try preflightRows.first?.decode(UUID.self) else {
+                throw HTTPError(.conflict, message: "work session state changed; retry")
+            }
+            try await CloudUsageLedger.terminate(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                sessionID: sessionID,
+                reason: .providerMissing
+            )
+            let lockedRows = try await conn.query(
                 """
                 SELECT member_id
                   FROM work_session
@@ -1151,22 +1217,16 @@ struct WorkSessionRoutes: Sendable {
                 """,
                 logger: db.logger
             ).collect()
-            guard let memberID = try rows.first?.decode(UUID.self) else {
+            guard try lockedRows.first?.decode(UUID.self) == memberID else {
                 throw HTTPError(.conflict, message: "work session state changed; retry")
             }
-            try await CloudUsageLedger.settle(
-                conn: conn,
-                logger: db.logger,
-                workspaceID: workspaceID,
-                sessionID: sessionID
-            )
             let cloudRows = try await conn.query(
                 """
                 UPDATE work_cloud_host
                    SET state = 'destroyed', updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
-                   AND state IN ('paused', 'ready')
+                   AND state = 'destroy_pending'
                 RETURNING id
                 """,
                 logger: db.logger
@@ -1505,7 +1565,9 @@ struct WorkSessionRoutes: Sendable {
 
         let resumed = try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
-            cloudHostIDs: lifecycleHostIDs
+            cloudHostIDs: lifecycleHostIDs,
+            lockWorkPool: !lifecycleHostIDs.isEmpty,
+            lockWorkspaceCredit: sourceCloudHostID != nil
         ) { conn in
             try await revalidateT3CloudHost(
                 conn: conn,
@@ -1519,6 +1581,15 @@ struct WorkSessionRoutes: Sendable {
                 hostID: body.targetHostId,
                 expectedCloudHostID: targetCloudHostID
             )
+            if sourceCloudHostID != nil {
+                try await CloudUsageLedger.terminate(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    sessionID: sourceSessionID,
+                    reason: .orphaned
+                )
+            }
             let rows = try await conn.query(
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
@@ -2090,11 +2161,15 @@ struct WorkSessionRoutes: Sendable {
     private func withTenantLifecycleTransactionUnwrapped<Result: Sendable>(
         workspaceID: UUID,
         cloudHostID: UUID?,
+        lockWorkPool: Bool = false,
+        lockWorkspaceCredit: Bool = false,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
             cloudHostIDs: cloudHostID.map { [$0] } ?? [],
+            lockWorkPool: lockWorkPool,
+            lockWorkspaceCredit: lockWorkspaceCredit,
             body
         )
     }
@@ -2102,6 +2177,8 @@ struct WorkSessionRoutes: Sendable {
     private func withTenantLifecycleTransactionUnwrapped<Result: Sendable>(
         workspaceID: UUID,
         cloudHostIDs: [UUID],
+        lockWorkPool: Bool = false,
+        lockWorkspaceCredit: Bool = false,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         do {
@@ -2109,6 +2186,8 @@ struct WorkSessionRoutes: Sendable {
                 return try await db.withTenantT3LifecycleTransaction(
                     workspaceID: workspaceID,
                     cloudHostIDs: cloudHostIDs,
+                    lockWorkPool: lockWorkPool,
+                    lockWorkspaceCredit: lockWorkspaceCredit,
                     body
                 )
             }

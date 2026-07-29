@@ -104,17 +104,21 @@ struct Database: Sendable {
         }
     }
 
-    /// Run a T3 lifecycle transaction with the host-scoped advisory lock as the
-    /// first PostgreSQL statement. The tenant GUC follows immediately so every
-    /// application query remains under FORCE RLS.
+    /// Run a T3 lifecycle transaction through the canonical ADR-0140 prelude.
+    /// Host advisories are the first PostgreSQL statements; optional workspace
+    /// rows and cloud-host rows are then locked coarse-to-fine before `body`.
     func withTenantT3LifecycleTransaction<Result: Sendable>(
         workspaceID: UUID,
         cloudHostID: UUID,
+        lockWorkPool: Bool = false,
+        lockWorkspaceCredit: Bool = false,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         try await withTenantT3LifecycleTransaction(
             workspaceID: workspaceID,
             cloudHostIDs: [cloudHostID],
+            lockWorkPool: lockWorkPool,
+            lockWorkspaceCredit: lockWorkspaceCredit,
             body
         )
     }
@@ -122,6 +126,8 @@ struct Database: Sendable {
     func withTenantT3LifecycleTransaction<Result: Sendable>(
         workspaceID: UUID,
         cloudHostIDs: [UUID],
+        lockWorkPool: Bool = false,
+        lockWorkspaceCredit: Bool = false,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         let orderedHostIDs = Array(Set(cloudHostIDs)).sorted {
@@ -130,14 +136,13 @@ struct Database: Sendable {
         precondition(!orderedHostIDs.isEmpty)
         do {
             return try await client.withTransaction(logger: logger) { conn in
-                for cloudHostID in orderedHostIDs {
-                    try await T3LifecycleLock.acquire(
-                        conn: conn, logger: logger, cloudHostID: cloudHostID
-                    )
-                }
-                _ = try await conn.query(
-                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
-                    logger: logger
+                try await T3LifecycleLock.acquirePrelude(
+                    conn: conn,
+                    logger: logger,
+                    workspaceID: workspaceID,
+                    orderedCloudHostIDs: orderedHostIDs,
+                    lockWorkPool: lockWorkPool,
+                    lockWorkspaceCredit: lockWorkspaceCredit
                 )
                 return try await body(conn)
             }

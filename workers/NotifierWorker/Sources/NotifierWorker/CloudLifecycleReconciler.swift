@@ -47,8 +47,11 @@ extension NotifierService {
                     let intent: CloudIntent? = try await pg.withTransaction(
                         logger: logger
                     ) { conn in
-                        try await T3LifecycleLock.acquire(
-                            conn: conn, logger: logger, cloudHostID: candidateID
+                        try await T3LifecycleLock.acquirePrelude(
+                            conn: conn,
+                            logger: logger,
+                            workspaceID: nil,
+                            cloudHostID: candidateID
                         )
                         let rows = try await conn.query(
                             """
@@ -163,8 +166,12 @@ extension NotifierService {
         guard accepted else { throw CloudReconcileError.upstream(Int(status)) }
 
         try await pg.withTransaction(logger: logger) { conn in
-            try await T3LifecycleLock.acquire(
-                conn: conn, logger: logger, cloudHostID: intent.id
+            try await T3LifecycleLock.acquirePrelude(
+                conn: conn,
+                logger: logger,
+                workspaceID: intent.workspaceID,
+                cloudHostID: intent.id,
+                lockWorkspaceCredit: missingSandbox
             )
             // The provider call intentionally happens outside PostgreSQL. Lock
             // and revalidate the durable intent before touching usage/session
@@ -195,33 +202,56 @@ extension NotifierService {
             if missingSandbox {
                 let usageRows = try await conn.query(
                     """
-                    SELECT u.session_id, ws.member_id
-                      FROM work_host_usage u
-                      JOIN work_session ws
-                        ON ws.workspace_id = u.workspace_id
-                       AND ws.id = u.session_id
-                     WHERE u.workspace_id = \(intent.workspaceID)
-                       AND u.host_id = \(hostID)
-                       AND u.settled_at IS NULL
-                     FOR UPDATE OF u, ws
+                    SELECT session_id
+                      FROM work_host_usage
+                     WHERE workspace_id = \(intent.workspaceID)
+                       AND host_id = \(hostID)
+                       AND settled_at IS NULL
+                     FOR UPDATE
                     """,
                     logger: logger
                 ).collect()
-                var expectedFinalState = intent.state
                 var terminalSession: (id: UUID, memberID: UUID)?
                 if let usageRow = usageRows.first {
-                    let (sessionID, memberID) =
-                        try usageRow.decode((UUID, UUID).self)
+                    let sessionID = try usageRow.decode(UUID.self)
+                    let sessionRows = try await conn.query(
+                        """
+                        SELECT member_id
+                          FROM work_session
+                         WHERE workspace_id = \(intent.workspaceID)
+                           AND id = \(sessionID)
+                         FOR UPDATE
+                        """,
+                        logger: logger
+                    ).collect()
+                    guard let memberID = try sessionRows.first?.decode(UUID.self) else {
+                        throw CloudReconcileError.staleIntent
+                    }
                     terminalSession = (sessionID, memberID)
                     _ = try await conn.query(
                         """
-                        SELECT settle_t3_work_session(
-                          \(intent.workspaceID), \(sessionID)
+                        SELECT t3_terminate(
+                          \(intent.workspaceID), \(sessionID), 'provider_missing'
                         )
                         """,
                         logger: logger
                     ).collect()
-                    expectedFinalState = "destroy_pending"
+                } else {
+                    _ = try await conn.query(
+                        """
+                        UPDATE work_cloud_host
+                           SET state = 'destroy_pending',
+                               lifecycle_operation_kind = 'destroy',
+                               lifecycle_operation_version =
+                                 lifecycle_operation_version + 1,
+                               updated_at = clock_timestamp()
+                         WHERE id = \(intent.id)
+                           AND workspace_id = \(intent.workspaceID)
+                           AND lifecycle_operation_id = \(operationID)
+                           AND state = \(intent.state)
+                        """,
+                        logger: logger
+                    )
                 }
                 let terminalRows = try await conn.query(
                     """
@@ -230,7 +260,7 @@ extension NotifierService {
                      WHERE id = \(intent.id)
                        AND workspace_id = \(intent.workspaceID)
                        AND lifecycle_operation_id = \(operationID)
-                       AND state = \(expectedFinalState)
+                       AND state = 'destroy_pending'
                     RETURNING id
                     """,
                     logger: logger
@@ -386,8 +416,11 @@ extension NotifierService {
               !sandboxID.isEmpty
         else { throw CloudReconcileError.invalidResponse }
         let updated = try await pg.withTransaction(logger: logger) { conn in
-            try await T3LifecycleLock.acquire(
-                conn: conn, logger: logger, cloudHostID: intent.id
+            try await T3LifecycleLock.acquirePrelude(
+                conn: conn,
+                logger: logger,
+                workspaceID: intent.workspaceID,
+                cloudHostID: intent.id
             )
             return try await conn.query(
                 """
