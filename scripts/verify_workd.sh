@@ -293,8 +293,16 @@ printf '%s' "$RESPONSE_BODY" | jq -e \
   '.workControl.status == "dispatched" and .workControl.kind == "spawn"' >/dev/null
 CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id | ascii_downcase')"
 
+# MOMO-672: #857 (68d6ca91) turned the `pty` transport into a persistent login
+# shell that wraps the tool in a shell function, so a finished tool no longer
+# exits the child process — the host reports `idle`, and `ended` became the
+# operator/idle-timeout transition. Settle on either terminal-for-the-host
+# status here and drive the remaining idle -> ended leg explicitly below, so the
+# full running -> ended ledger stays covered instead of hanging on a transition
+# the daemon stopped making.
 deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
 SESSION_ID=""
+SESSION_STATUS=""
 while [ "$(date -u +%s)" -lt "$deadline" ]; do
   row="$(sql_value <<SQL
 SELECT coalesce(wc.session_id::text,'') || ':' || wc.status || ':' ||
@@ -305,8 +313,9 @@ SELECT coalesce(wc.session_id::text,'') || ':' || wc.status || ':' ||
 SQL
 )"
   case "$row" in
-    *:acked:ended:*)
+    *:acked:idle:*|*:acked:ended:*)
       SESSION_ID="${row%%:*}"
+      SESSION_STATUS="$(printf '%s' "$row" | cut -d: -f3)"
       break
       ;;
   esac
@@ -319,7 +328,7 @@ SQL
 done
 [ -n "$SESSION_ID" ] || {
   sed -n '1,160p' "$TMP_DIR/workd.log" >&2
-  echo "[workd] spawn ack/session end timeout" >&2
+  echo "[workd] spawn ack/session settle timeout" >&2
   exit 1
 }
 
@@ -341,6 +350,26 @@ mode="$(stat -f '%Lp' "$OUTPUT_FILE" 2>/dev/null || stat -c '%a' "$OUTPUT_FILE" 
   echo "[workd] raw output file mode is not 0600" >&2
   exit 1
 }
+
+# MOMO-672: pin the host-reported running -> idle fact that #857 introduced,
+# then take the idle -> ended leg as the owner. `kill` controls require a
+# running session, so the owner PATCH is the only non-notifier path out of idle;
+# it keeps the exit code the host already reported (COALESCE on the server).
+if [ "$SESSION_STATUS" = "idle" ]; then
+  got="$(sql_value <<SQL
+SELECT count(*) FROM outbox
+ WHERE payload->'data'->>'type'='work.session.idle'
+   AND payload->'data'->'payload'->>'session_id' ILIKE '$SESSION_ID';
+SQL
+)"
+  [ "$got" = "1" ] || {
+    echo "[workd] FAIL host-reported running-to-idle evidence: $got" >&2
+    exit 1
+  }
+  api "$OWNER_TOKEN" PATCH "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
+    '{"status":"ended"}'
+  expect_status 200 "owner ends idle work session"
+fi
 
 got="$(sql_value <<SQL
 SELECT
