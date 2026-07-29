@@ -23,49 +23,80 @@ extension NotifierService {
     func reconcileCloudLifecycle() async {
         guard let apiKey = config.e2bAPIKey, !apiKey.isEmpty else { return }
         do {
-            let intents = try await pg.withTransaction(logger: logger) { conn in
-                let rows = try await conn.query(
-                    """
-                    WITH claimed AS (
-                      SELECT id
-                        FROM work_cloud_host
-                       WHERE (
-                         state = 'provisioning' AND provider_sandbox_id IS NULL
-                         AND updated_at < clock_timestamp() - interval '5 seconds'
-                       ) OR (
-                         state IN ('pausing', 'resuming', 'destroy_pending')
-                         AND lifecycle_operation_started_at
-                               < clock_timestamp() - interval '5 seconds'
-                       )
-                       ORDER BY updated_at, id
-                       FOR UPDATE SKIP LOCKED
-                       LIMIT \(config.claimBatchSize)
-                    )
-                    UPDATE work_cloud_host ch
-                       SET lifecycle_operation_started_at = CASE
-                             WHEN ch.state = 'provisioning'
-                               THEN ch.lifecycle_operation_started_at
-                             ELSE clock_timestamp()
-                           END,
-                           updated_at = clock_timestamp()
-                      FROM claimed
-                     WHERE ch.id = claimed.id
-                    RETURNING ch.id, ch.workspace_id, ch.host_id,
-                              ch.provider_sandbox_id, ch.state,
-                              ch.lifecycle_operation_id,
-                              ch.requested_display_name
-                    """,
-                    logger: logger
-                ).collect()
-                return try rows.map {
-                    let value = try $0.decode(
-                        (UUID, UUID, UUID?, String?, String, UUID?, String?).self
-                    )
-                    return CloudIntent(
-                        id: value.0, workspaceID: value.1, hostID: value.2,
-                        sandboxID: value.3, state: value.4,
-                        operationID: value.5, displayName: value.6
-                    )
+            let candidateRows = try await pg.query(
+                """
+                SELECT id
+                  FROM work_cloud_host
+                 WHERE (
+                   state = 'provisioning' AND provider_sandbox_id IS NULL
+                   AND updated_at < clock_timestamp() - interval '5 seconds'
+                 ) OR (
+                   state IN ('pausing', 'resuming', 'destroy_pending')
+                   AND lifecycle_operation_started_at
+                         < clock_timestamp() - interval '5 seconds'
+                 )
+                 ORDER BY updated_at, id
+                 LIMIT \(config.claimBatchSize)
+                """,
+                logger: logger
+            ).collect()
+            let candidateIDs = try candidateRows.map { try $0.decode(UUID.self) }
+            var intents: [CloudIntent] = []
+            for candidateID in candidateIDs {
+                do {
+                    let intent: CloudIntent? = try await pg.withTransaction(
+                        logger: logger
+                    ) { conn in
+                        try await T3LifecycleLock.acquire(
+                            conn: conn, logger: logger, cloudHostID: candidateID
+                        )
+                        let rows = try await conn.query(
+                            """
+                            UPDATE work_cloud_host
+                               SET lifecycle_operation_started_at = CASE
+                                     WHEN state = 'provisioning'
+                                       THEN lifecycle_operation_started_at
+                                     ELSE clock_timestamp()
+                                   END,
+                                   updated_at = clock_timestamp()
+                             WHERE id = \(candidateID)
+                               AND (
+                                 (
+                                   state = 'provisioning'
+                                   AND provider_sandbox_id IS NULL
+                                   AND updated_at
+                                         < clock_timestamp() - interval '5 seconds'
+                                 ) OR (
+                                   state IN (
+                                     'pausing', 'resuming', 'destroy_pending'
+                                   )
+                                   AND lifecycle_operation_started_at
+                                         < clock_timestamp() - interval '5 seconds'
+                                 )
+                               )
+                            RETURNING id, workspace_id, host_id,
+                                      provider_sandbox_id, state,
+                                      lifecycle_operation_id,
+                                      requested_display_name
+                            """,
+                            logger: logger
+                        ).collect()
+                        guard let row = rows.first else { return nil }
+                        let value = try row.decode(
+                            (UUID, UUID, UUID?, String?, String, UUID?, String?).self
+                        )
+                        return CloudIntent(
+                            id: value.0, workspaceID: value.1, hostID: value.2,
+                            sandboxID: value.3, state: value.4,
+                            operationID: value.5, displayName: value.6
+                        )
+                    }
+                    if let intent { intents.append(intent) }
+                } catch {
+                    logger.warning("cloud lifecycle intent claim failed", metadata: [
+                        "provisionID": .string(candidateID.uuidString.lowercased()),
+                        "error": .string(String(describing: error)),
+                    ])
                 }
             }
             for intent in intents {
@@ -132,6 +163,9 @@ extension NotifierService {
         guard accepted else { throw CloudReconcileError.upstream(Int(status)) }
 
         try await pg.withTransaction(logger: logger) { conn in
+            try await T3LifecycleLock.acquire(
+                conn: conn, logger: logger, cloudHostID: intent.id
+            )
             // The provider call intentionally happens outside PostgreSQL. Lock
             // and revalidate the durable intent before touching usage/session
             // state: a terminal sweep may have replaced it while E2B was in
@@ -351,19 +385,27 @@ extension NotifierService {
               let sandboxID = json["sandboxID"] as? String,
               !sandboxID.isEmpty
         else { throw CloudReconcileError.invalidResponse }
-        let updated = try await pg.query(
-            """
-            UPDATE work_cloud_host
-               SET provider_sandbox_id = \(sandboxID),
-                   state = CASE WHEN host_id IS NULL THEN 'provisioning' ELSE 'ready' END,
-                   updated_at = clock_timestamp()
-             WHERE id = \(intent.id)
-               AND state = 'provisioning'
-               AND provider_sandbox_id IS NULL
-            RETURNING id
-            """,
-            logger: logger
-        ).collect()
+        let updated = try await pg.withTransaction(logger: logger) { conn in
+            try await T3LifecycleLock.acquire(
+                conn: conn, logger: logger, cloudHostID: intent.id
+            )
+            return try await conn.query(
+                """
+                UPDATE work_cloud_host
+                   SET provider_sandbox_id = \(sandboxID),
+                       state = CASE
+                         WHEN host_id IS NULL THEN 'provisioning'
+                         ELSE 'ready'
+                       END,
+                       updated_at = clock_timestamp()
+                 WHERE id = \(intent.id)
+                   AND state = 'provisioning'
+                   AND provider_sandbox_id IS NULL
+                RETURNING id
+                """,
+                logger: logger
+            ).collect()
+        }
         if updated.first == nil {
             _ = try await providerRequest(
                 method: .delete,

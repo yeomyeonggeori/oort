@@ -6,8 +6,8 @@ import PostgresNIO
 /// ADR-0136 T3-only credit and active-time ledger.
 ///
 /// Token request accounting remains in `usage_ledger`. This ledger owns one T3
-/// session and its active/paused intervals; all callers already hold the tenant
-/// transaction and serialize lifecycle changes by locking the usage row.
+/// session and its active/paused intervals; lifecycle callers acquire the
+/// cloud-host advisory before entering this file's existing row-lock ladder.
 enum CloudUsageLedger {
     static func reserveProvisioningSlot(
         conn: PostgresConnection,

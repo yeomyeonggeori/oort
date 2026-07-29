@@ -143,10 +143,21 @@ struct WorkSessionRoutes: Sendable {
             }
         }
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
+        let targetCloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            hostID: hostID
+        )
 
-        let session = try await withTenantTransactionUnwrapped(
-            workspaceID: workspaceID
+        let session = try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: targetCloudHostID
         ) { conn in
+            try await revalidateT3CloudHost(
+                conn: conn,
+                workspaceID: workspaceID,
+                hostID: hostID,
+                expectedCloudHostID: targetCloudHostID
+            )
             try await WorkToolProfileRoutes.requireEnabled(
                 conn: conn,
                 logger: db.logger,
@@ -372,9 +383,20 @@ struct WorkSessionRoutes: Sendable {
             throw HTTPError(.badRequest, message: "status must be idle, running, or ended")
         }
 
-        let session = try await withTenantTransactionUnwrapped(
-            workspaceID: workspaceID
+        let cloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        )
+        let session = try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: cloudHostID
         ) { conn in
+            try await revalidateT3CloudHost(
+                conn: conn,
+                workspaceID: workspaceID,
+                sessionID: sessionID,
+                expectedCloudHostID: cloudHostID
+            )
             let rows = try await conn.query(
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
@@ -496,6 +518,96 @@ struct WorkSessionRoutes: Sendable {
             .response(from: request, context: context)
     }
 
+    private func t3CloudHostID(
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> UUID? {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT ch.id
+                  FROM work_session ws
+                  LEFT JOIN work_cloud_host ch
+                    ON ch.workspace_id = ws.workspace_id
+                   AND ch.host_id = ws.host_id
+                 WHERE ws.workspace_id = \(workspaceID)
+                   AND ws.id = \(sessionID)
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(UUID?.self) ?? nil
+        }
+    }
+
+    private func t3CloudHostID(
+        workspaceID: UUID,
+        hostID: UUID
+    ) async throws -> UUID? {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT id
+                  FROM work_cloud_host
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(UUID.self)
+        }
+    }
+
+    private func revalidateT3CloudHost(
+        conn: PostgresConnection,
+        workspaceID: UUID,
+        sessionID: UUID,
+        expectedCloudHostID: UUID?
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT ch.id
+              FROM work_session ws
+              LEFT JOIN work_cloud_host ch
+                ON ch.workspace_id = ws.workspace_id
+               AND ch.host_id = ws.host_id
+             WHERE ws.workspace_id = \(workspaceID)
+               AND ws.id = \(sessionID)
+            """,
+            logger: db.logger
+        ).collect()
+        let currentCloudHostID = try rows.first?.decode(UUID?.self) ?? nil
+        guard currentCloudHostID == expectedCloudHostID else {
+            throw HTTPError(
+                .conflict,
+                message: "work session cloud lifecycle changed; retry"
+            )
+        }
+    }
+
+    private func revalidateT3CloudHost(
+        conn: PostgresConnection,
+        workspaceID: UUID,
+        hostID: UUID,
+        expectedCloudHostID: UUID?
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT id
+              FROM work_cloud_host
+             WHERE workspace_id = \(workspaceID)
+               AND host_id = \(hostID)
+            """,
+            logger: db.logger
+        ).collect()
+        let currentCloudHostID = try rows.first?.decode(UUID.self)
+        guard currentCloudHostID == expectedCloudHostID else {
+            throw HTTPError(
+                .conflict,
+                message: "work host cloud lifecycle changed; retry"
+            )
+        }
+    }
+
     private func transitionToolLifecycle(
         targetStatus: String,
         exitCode: Int?,
@@ -513,16 +625,29 @@ struct WorkSessionRoutes: Sendable {
         }
         let transitionAt = Date()
         let transitionAtMs = Int64(transitionAt.timeIntervalSince1970 * 1_000)
+        let preflightCloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        )
         let cloudLifecycle = try await performCloudLifecycleIfNeeded(
             targetStatus: targetStatus,
             principal: principal,
             workspaceID: workspaceID,
             sessionID: sessionID
         )
+        let transactionCloudHostID =
+            cloudLifecycle?.cloudHostID ?? preflightCloudHostID
 
-        let session = try await withTenantTransactionUnwrapped(
-            workspaceID: workspaceID
+        let session = try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: transactionCloudHostID
         ) { conn in
+            try await revalidateT3CloudHost(
+                conn: conn,
+                workspaceID: workspaceID,
+                sessionID: sessionID,
+                expectedCloudHostID: transactionCloudHostID
+            )
             let rows = try await conn.query(
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
@@ -803,11 +928,13 @@ struct WorkSessionRoutes: Sendable {
     }
 
     private struct CloudLifecycleEvidence: Sendable {
+        let cloudHostID: UUID
         let action: String
         let latencyMs: Int64
     }
 
     private struct CloudLifecycleTarget: Sendable {
+        let cloudHostID: UUID
         let sandboxID: String
     }
 
@@ -845,6 +972,7 @@ struct WorkSessionRoutes: Sendable {
             throw CloudProvisionerRoutes.httpError(error)
         }
         return CloudLifecycleEvidence(
+            cloudHostID: target.cloudHostID,
             action: action,
             latencyMs: Self.elapsedMilliseconds(since: startedAt)
         )
@@ -856,11 +984,18 @@ struct WorkSessionRoutes: Sendable {
         workspaceID: UUID,
         sessionID: UUID
     ) async throws -> CloudLifecycleTarget? {
-        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        let expectedCloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            sessionID: sessionID
+        )
+        return try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: expectedCloudHostID
+        ) { conn in
             let rows = try await conn.query(
                 """
                 SELECT ws.host_id, ws.status, h.type, ws.channel_id, ws.member_id,
-                       ch.provider_sandbox_id, ch.state
+                       ch.provider_sandbox_id, ch.state, ch.id
                   FROM work_session ws
                   JOIN work_host h
                     ON h.id = ws.host_id
@@ -874,10 +1009,19 @@ struct WorkSessionRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let row = rows.first else { return nil }
-            let (hostID, sessionStatus, hostType, channelID, memberID, sandboxID, cloudState) =
+            let (
+                hostID, sessionStatus, hostType, channelID, memberID,
+                sandboxID, cloudState, cloudHostID
+            ) =
                 try row.decode(
-                    (UUID, String, String, UUID, UUID, String?, String?).self
+                    (UUID, String, String, UUID, UUID, String?, String?, UUID?).self
                 )
+            guard cloudHostID == expectedCloudHostID else {
+                throw HTTPError(
+                    .conflict,
+                    message: "work session cloud lifecycle changed; retry"
+                )
+            }
             guard hostID == principal.tokenID else { return nil }
             if sessionStatus == targetStatus { return nil }
             let expectedSessionStatus = targetStatus == "idle" ? "running" : "idle"
@@ -936,7 +1080,16 @@ struct WorkSessionRoutes: Sendable {
             guard intentRows.first != nil else {
                 throw HTTPError(.conflict, message: "momo Cloud host lifecycle changed; retry")
             }
-            return CloudLifecycleTarget(sandboxID: sandboxID)
+            guard let cloudHostID else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud host lifecycle changed; retry"
+                )
+            }
+            return CloudLifecycleTarget(
+                cloudHostID: cloudHostID,
+                sandboxID: sandboxID
+            )
         }
     }
 
@@ -973,7 +1126,19 @@ struct WorkSessionRoutes: Sendable {
         latencyMs: Int64,
         error: Error
     ) async throws {
-        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        guard let cloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            hostID: hostID
+        ) else {
+            throw HTTPError(
+                .conflict,
+                message: "momo Cloud host lifecycle changed; retry"
+            )
+        }
+        try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: cloudHostID
+        ) { conn in
             let rows = try await conn.query(
                 """
                 SELECT member_id
@@ -1328,8 +1493,32 @@ struct WorkSessionRoutes: Sendable {
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let sourceSessionID = try Self.sessionID(context)
         let body = try await request.decode(as: ResumeWorkSessionRequest.self, context: context)
+        let sourceCloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            sessionID: sourceSessionID
+        )
+        let targetCloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            hostID: body.targetHostId
+        )
+        let lifecycleHostIDs = [sourceCloudHostID, targetCloudHostID].compactMap { $0 }
 
-        let resumed = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        let resumed = try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostIDs: lifecycleHostIDs
+        ) { conn in
+            try await revalidateT3CloudHost(
+                conn: conn,
+                workspaceID: workspaceID,
+                sessionID: sourceSessionID,
+                expectedCloudHostID: sourceCloudHostID
+            )
+            try await revalidateT3CloudHost(
+                conn: conn,
+                workspaceID: workspaceID,
+                hostID: body.targetHostId,
+                expectedCloudHostID: targetCloudHostID
+            )
             let rows = try await conn.query(
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
@@ -1892,6 +2081,41 @@ struct WorkSessionRoutes: Sendable {
     ) async throws -> Result {
         do {
             return try await db.withTenantTransaction(workspaceID: workspaceID, body)
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
+    private func withTenantLifecycleTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostID: UUID?,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostIDs: cloudHostID.map { [$0] } ?? [],
+            body
+        )
+    }
+
+    private func withTenantLifecycleTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostIDs: [UUID],
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            if !cloudHostIDs.isEmpty {
+                return try await db.withTenantT3LifecycleTransaction(
+                    workspaceID: workspaceID,
+                    cloudHostIDs: cloudHostIDs,
+                    body
+                )
+            }
+            return try await db.withTenantTransaction(
+                workspaceID: workspaceID,
+                body
+            )
         } catch let error as PostgresTransactionError {
             if let http = error.closureError as? HTTPError { throw http }
             throw error

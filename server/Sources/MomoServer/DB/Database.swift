@@ -104,6 +104,49 @@ struct Database: Sendable {
         }
     }
 
+    /// Run a T3 lifecycle transaction with the host-scoped advisory lock as the
+    /// first PostgreSQL statement. The tenant GUC follows immediately so every
+    /// application query remains under FORCE RLS.
+    func withTenantT3LifecycleTransaction<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        try await withTenantT3LifecycleTransaction(
+            workspaceID: workspaceID,
+            cloudHostIDs: [cloudHostID],
+            body
+        )
+    }
+
+    func withTenantT3LifecycleTransaction<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostIDs: [UUID],
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        let orderedHostIDs = Array(Set(cloudHostIDs)).sorted {
+            $0.uuidString.lowercased() < $1.uuidString.lowercased()
+        }
+        precondition(!orderedHostIDs.isEmpty)
+        do {
+            return try await client.withTransaction(logger: logger) { conn in
+                for cloudHostID in orderedHostIDs {
+                    try await T3LifecycleLock.acquire(
+                        conn: conn, logger: logger, cloudHostID: cloudHostID
+                    )
+                }
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                return try await body(conn)
+            }
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
     /// Run a one-off read with the tenant scope set (no explicit BEGIN needed for a
     /// single statement, but RLS still requires the GUC — so we use a transaction).
     func withTenantConnection<Result: Sendable>(

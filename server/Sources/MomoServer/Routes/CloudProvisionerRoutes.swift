@@ -189,8 +189,9 @@ struct CloudProvisionerRoutes: Sendable {
 
         let cloudHost: CloudHostDTO
         do {
-            cloudHost = try await withTenantTransactionUnwrapped(
-                workspaceID: workspaceID
+            cloudHost = try await withTenantLifecycleTransactionUnwrapped(
+                workspaceID: workspaceID,
+                cloudHostID: provisionID
             ) { conn in
                 let rows = try await conn.query(
                     """
@@ -237,8 +238,15 @@ struct CloudProvisionerRoutes: Sendable {
         let publicKey = try WorkHostRoutes.validatedPublicKey(input.publicKey)
         let capabilities = try WorkHostRoutes.validatedCapabilities(input.capabilities)
         let capabilitiesJSON = Self.jsonString(capabilities)
+        let expectedProvisionID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            bootstrapTokenDigest: digest
+        )
 
-        let host = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        let host = try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: expectedProvisionID
+        ) { conn in
             let rows = try await conn.query(
                 """
                 SELECT id, requester_member_id, provider_sandbox_id IS NOT NULL
@@ -256,6 +264,12 @@ struct CloudProvisionerRoutes: Sendable {
                 throw HTTPError(.unauthorized, message: "invalid or expired cloud bootstrap token")
             }
             let (provisionID, ownerID, sandboxKnown) = try row.decode((UUID, UUID, Bool).self)
+            guard provisionID == expectedProvisionID else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud registration lifecycle changed; retry"
+                )
+            }
             let hostRows = try await conn.query(
                 """
                 INSERT INTO work_host
@@ -390,6 +404,7 @@ struct CloudProvisionerRoutes: Sendable {
             if action == .resume, Self.isMissingSandbox(error) {
                 try await markResumeSandboxMissing(
                     workspaceID: workspaceID,
+                    cloudHostID: intent.cloudHostID,
                     hostID: hostID,
                     operationID: intent.operationID,
                     principal: principal
@@ -402,8 +417,9 @@ struct CloudProvisionerRoutes: Sendable {
             throw Self.httpError(error)
         }
 
-        let cloudHost = try await withTenantTransactionUnwrapped(
-            workspaceID: workspaceID
+        let cloudHost = try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: intent.cloudHostID
         ) { conn in
             switch action {
             case .pause:
@@ -553,6 +569,7 @@ struct CloudProvisionerRoutes: Sendable {
     }
 
     private struct LifecycleIntent: Sendable {
+        let cloudHostID: UUID
         let sandboxID: String
         let operationID: UUID
         let intentState: String
@@ -564,7 +581,16 @@ struct CloudProvisionerRoutes: Sendable {
         hostID: UUID,
         action: LifecycleAction
     ) async throws -> LifecycleIntent {
-        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        guard let cloudHostID = try await t3CloudHostID(
+            workspaceID: workspaceID,
+            hostID: hostID
+        ) else {
+            throw HTTPError(.notFound, message: "momo Cloud 호스트를 찾을 수 없습니다.")
+        }
+        return try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: cloudHostID
+        ) { conn in
             guard let role = try await WorkspaceAuthorization.activeRole(
                 conn: conn,
                 logger: db.logger,
@@ -575,7 +601,7 @@ struct CloudProvisionerRoutes: Sendable {
             }
             let rows = try await conn.query(
                 """
-                SELECT requester_member_id, provider_sandbox_id, state,
+                SELECT id, requester_member_id, provider_sandbox_id, state,
                        EXISTS (
                          SELECT 1
                            FROM work_host_usage u
@@ -592,8 +618,14 @@ struct CloudProvisionerRoutes: Sendable {
             guard let row = rows.first else {
                 throw HTTPError(.notFound, message: "momo Cloud 호스트를 찾을 수 없습니다.")
             }
-            let (requesterID, sandboxID, state, hasOpenUsage) =
-                try row.decode((UUID, String?, String, Bool).self)
+            let (lockedCloudHostID, requesterID, sandboxID, state, hasOpenUsage) =
+                try row.decode((UUID, UUID, String?, String, Bool).self)
+            guard lockedCloudHostID == cloudHostID else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud host lifecycle changed; retry"
+                )
+            }
             guard requesterID == principal.memberID || role.isAdmin else {
                 throw HTTPError(.forbidden, message: "momo Cloud 호스트 소유자 또는 관리자만 변경할 수 있습니다.")
             }
@@ -644,6 +676,7 @@ struct CloudProvisionerRoutes: Sendable {
                 throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
             }
             return LifecycleIntent(
+                cloudHostID: cloudHostID,
                 sandboxID: sandboxID,
                 operationID: operationID,
                 intentState: intentState
@@ -653,11 +686,15 @@ struct CloudProvisionerRoutes: Sendable {
 
     private func markResumeSandboxMissing(
         workspaceID: UUID,
+        cloudHostID: UUID,
         hostID: UUID,
         operationID: UUID,
         principal: AuthPrincipal
     ) async throws {
-        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        try await withTenantLifecycleTransactionUnwrapped(
+            workspaceID: workspaceID,
+            cloudHostID: cloudHostID
+        ) { conn in
             let usageRows = try await conn.query(
                 """
                 SELECT session_id
@@ -712,12 +749,74 @@ struct CloudProvisionerRoutes: Sendable {
         }
     }
 
+    private func t3CloudHostID(
+        workspaceID: UUID,
+        hostID: UUID
+    ) async throws -> UUID? {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT id
+                  FROM work_cloud_host
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_id = \(hostID)
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(UUID.self)
+        }
+    }
+
+    private func t3CloudHostID(
+        workspaceID: UUID,
+        bootstrapTokenDigest: String
+    ) async throws -> UUID? {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT id
+                  FROM work_cloud_host
+                 WHERE workspace_id = \(workspaceID)
+                   AND bootstrap_token_digest = \(bootstrapTokenDigest)
+                   AND bootstrap_consumed_at IS NULL
+                   AND bootstrap_expires_at > clock_timestamp()
+                   AND state = 'provisioning'
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(UUID.self)
+        }
+    }
+
     private func withTenantTransactionUnwrapped<Result: Sendable>(
         workspaceID: UUID,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         do {
             return try await db.withTenantTransaction(workspaceID: workspaceID, body)
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
+    private func withTenantLifecycleTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        cloudHostID: UUID?,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            if let cloudHostID {
+                return try await db.withTenantT3LifecycleTransaction(
+                    workspaceID: workspaceID,
+                    cloudHostID: cloudHostID,
+                    body
+                )
+            }
+            return try await db.withTenantTransaction(
+                workspaceID: workspaceID,
+                body
+            )
         } catch let error as PostgresTransactionError {
             if let http = error.closureError as? HTTPError { throw http }
             throw error
