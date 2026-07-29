@@ -388,10 +388,10 @@ BEGIN;
 SET LOCAL row_security = off;
 UPDATE work_pool SET max_active=1, per_member_soft_limit=1 WHERE workspace_id='$WS_ID';
 INSERT INTO work_cloud_host
-  (id, workspace_id, requester_member_id, state, bootstrap_token_digest,
+  (id, workspace_id, requester_member_id, provider, state, bootstrap_token_digest,
    bootstrap_expires_at, unit_rate_micro_usd_second)
 VALUES
-  ('$DUMMY_PROVISION', '$WS_ID', '$OWNER_ID', 'provisioning',
+  ('$DUMMY_PROVISION', '$WS_ID', '$OWNER_ID', 'mock-a', 'provisioning',
    repeat('0',64), clock_timestamp()+interval '10 minutes', 25);
 COMMIT;
 SQL
