@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-666 T3 수명주기 교착 안전망 (#890, 2026-07-29)
+
+- T3 수명주기 쓰기는 정규화한 cloud-host UUID와 `momo.t3` 네임스페이스의 2-int transaction advisory key를 첫 SQL로 획득한다. T1/T2와 고빈도 heartbeat는 이 직렬화 경계에 들어오지 않는다.
+- stale-host·idle-timeout sweep은 후보 조회 뒤 세션마다 독립 transaction으로 재확인·처리해 한 세션 실패가 배치 전체를 되감지 않으며, 실패 로그는 session ID와 이름을 남긴다.
+- 두 PostgreSQL 연결의 advisory 보유/대기를 `pg_locks`·`pg_stat_activity`로 단정하는 reconciler×REST 종료 및 reconciler×sweep 하니스를 추가했다. server 349·NotifierWorker 6 테스트와 기존 verifier 9종 셸 정적 계약은 green이며 Docker 정상/40P01 red proof 및 기존 행동 검증기 9종은 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-665 migration 049 fail-closed 탈출구 (#886, 2026-07-29)
 
 - Migration 049를 정산 primitive 전용으로 축소하고, 050 운영자 repair 함수와 051 이름 있는 fail-closed/unique 강제를 분리했다. 기존 049 적용 DB는 파일명 기반 `schema_migrations`로 049를 skip하며 051의 `IF NOT EXISTS` 인덱스를 안전하게 통과한다.

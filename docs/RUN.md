@@ -1542,6 +1542,30 @@ human resume REST(호스트 보고 없이 완료), terminal/orphan 멱등 정산
 instance-operator topup 감사·멱등을 실제 REST/sweep/mock-E2B 경로로 확인한다. worker는
 Docker를 실행하지 않으며 오케스트레이터가 위 명령으로 이 runtime gate를 닫는다.
 
+MOMO-666의 교착 안전망은 별도 격리 하니스로 검증한다. 정상 모드는 두 PostgreSQL
+연결을 동시에 열어 reconciler가 cloud-host 행 잠금을 보유한 동안 REST 종료 또는
+sweep 연결이 같은 host advisory에서 대기하는 상태를 `pg_locks`와
+`pg_stat_activity`로 먼저 단정한다. 이 동시성 단정 뒤 두 연결이 40P01 없이
+끝나야 PASS다.
+
+```sh
+# worker: Docker 없이 migration/key/wiring/shell 정적 계약만 확인
+T3_CONCURRENCY_RUN_DOCKER=0 scripts/verify_t3_lifecycle_concurrency.sh
+
+# orchestrator: reconciler × REST 종료, reconciler × sweep 정상 증명
+scripts/verify_t3_lifecycle_concurrency.sh
+
+# orchestrator red proof: 격리 시나리오의 REST 경로만 첫 advisory를 생략한다.
+# 이름 있는 `deadlock detected`와 SQLSTATE 40P01을 확인한 뒤 의도적으로 non-zero다.
+T3_CONCURRENCY_PROVE_RED=1 scripts/verify_t3_lifecycle_concurrency.sh
+```
+
+red proof는 production 파일이나 DB helper를 바꾸지 않고 생성한 REST 연결 SQL에서만
+advisory 문장을 뺀다. 매 실행마다 새 compose project/volume을 만들고 종료 시
+폐기하므로 별도 코드 되돌림은 없다. `T3_CONCURRENCY_KEEP=1`로 증거를 보존했다면
+출력된 project를 확인한 뒤 같은 project 이름에 `docker compose ... down -v`를
+실행한다. 정상 증명은 red proof와 별도 fresh 실행이어야 한다.
+
 오케스트레이터의 실 E2B smoke 절차:
 
 1. 외부에서 접근 가능한 격리 MomoServer와 `momo-workd` E2B template을 준비한다.
