@@ -142,7 +142,8 @@ describe("continuationState", () => {
         host({ id: "44444444-4444-7444-8444-444444444402", online: false }),
       ],
       alice,
-      false
+      false,
+      "active"
     );
     expect(state.kind).toBe("ready");
     if (state.kind !== "ready") return;
@@ -153,18 +154,58 @@ describe("continuationState", () => {
   });
 
   it("names the reason instead of disabling one button for four causes", () => {
-    expect(continuationState([], [host()], alice, false).kind).toBe("no-runs");
-    expect(
-      continuationState([run({ status: "running" })], [host()], alice, false).kind
-    ).toBe("no-stopped-run");
-    expect(continuationState([orphaned], [], alice, false).kind).toBe("no-host");
-    expect(continuationState([orphaned], [host()], alice, true).kind).toBe(
-      "offline"
+    expect(continuationState([], [host()], alice, false, "active").kind).toBe(
+      "no-runs"
     );
+    expect(
+      continuationState(
+        [run({ status: "running" })],
+        [host()],
+        alice,
+        false,
+        "active"
+      ).kind
+    ).toBe("no-stopped-run");
+    expect(continuationState([orphaned], [], alice, false, "active").kind).toBe(
+      "no-host"
+    );
+    expect(
+      continuationState([orphaned], [host()], alice, true, "active").kind
+    ).toBe("offline");
+  });
+
+  it("does not offer to continue a goal that is over", () => {
+    // 1R M1: the state read the run ledger and never the GOAL, so a completed
+    // workstream that still holds an orphaned Run (a host dies after the work
+    // is called done) rendered an enabled 이어받기 180px under its 완료 chip.
+    for (const status of ["done", "cancelled"] as const) {
+      const state = continuationState(
+        [orphaned],
+        [host()],
+        alice,
+        false,
+        status
+      );
+      expect(state).toEqual({ kind: "closed", status });
+    }
+    expect(
+      continuationState([orphaned], [host()], alice, false, "paused").kind
+    ).toBe("ready");
+  });
+
+  it("does not promise a reconnection to a goal that is over", () => {
+    // Offline is a transport fact and 완료 is a fact about the work. The
+    // offline sentence ends with "다시 연결되면 이 자리에서 이어받을 수
+    // 있습니다", which for a finished goal is a promise nothing can keep, so
+    // the goal's own status has to be asked first.
+    const state = continuationState([orphaned], [host()], alice, true, "done");
+    expect(state.kind).toBe("closed");
   });
 
   it("has a sentence for every blocked branch", () => {
     for (const state of [
+      { kind: "closed", status: "done" } as const,
+      { kind: "closed", status: "cancelled" } as const,
       { kind: "offline" } as const,
       { kind: "no-runs" } as const,
       { kind: "no-stopped-run" } as const,
@@ -177,6 +218,20 @@ describe("continuationState", () => {
       expect(copy).not.toContain("미커밋");
       expect(copy).not.toMatch(/[—–]/);
     }
+  });
+
+  it("tells 완료 and 취소됨 apart in the sentence it says", () => {
+    const done = continuationBlockedCopy({ kind: "closed", status: "done" });
+    const cancelled = continuationBlockedCopy({
+      kind: "closed",
+      status: "cancelled",
+    });
+    expect(done).toContain("완료");
+    expect(cancelled).toContain("취소");
+    expect(done).not.toBe(cancelled);
+    // 끝난 목표에 이어받기를 다시 권하지 않는다: 다음 행동은 새 작업이다.
+    expect(done).not.toContain("이어받을 수 있습니다");
+    expect(cancelled).not.toContain("이어받을 수 있습니다");
   });
 });
 

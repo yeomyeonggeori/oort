@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
@@ -28,6 +28,7 @@ import {
   uuidEq,
   type WorkHost,
   type WorkstreamRun,
+  type WorkstreamStatus,
 } from "@/lib/api";
 import {
   WORKSTREAM_STATUS_CLASS,
@@ -77,7 +78,11 @@ function MetaRow({
   testId?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-2 py-1">
+    // 한국어 산문이 섞이는 값(채널 이름, 사람 이름)이 들어오므로 음절이 아니라
+    // 어절에서 끊는다(MOMO-676 M-5). keep-all은 이 행에, break-words는 dd에:
+    // 둘은 tailwind-merge의 같은 `break` 그룹이라 한 엘리먼트에 함께 두면 끊기지
+    // 않는 긴 토큰을 받아내는 쪽이 조용히 사라진다(common/States.tsx의 형태).
+    <div className="flex flex-wrap items-baseline gap-2 break-keep py-1">
       <dt className="shrink-0 text-meta text-ink-muted">{label}</dt>
       <dd
         className="min-w-0 flex-1 break-words text-meta text-ink"
@@ -188,10 +193,13 @@ function ContinuationBlock({
   runs,
   hosts,
   runsPending,
+  status,
 }: {
   runs: WorkstreamRun[];
   hosts: WorkHost[] | undefined;
   runsPending: boolean;
+  /** 목표 자체의 상태. 실행 원장이 답할 수 없는 첫 번째 질문이다. */
+  status: WorkstreamStatus;
 }) {
   const { session, workspaceId } = useSession();
   const offline = useOffline();
@@ -200,13 +208,30 @@ function ContinuationBlock({
   const [pendingHostId, setPendingHostId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const doneRef = useRef<HTMLParagraphElement>(null);
 
   const state = continuationState(
     runs,
     hosts ?? [],
     session.member.id,
-    offline
+    offline,
+    status
   );
+
+  // 성공하면 방금 누른 버튼이 사라진다. 이어받기가 성공한 순간 그 실행은 더 이상
+  // 고아가 아니고, 상태가 `ready`에서 `no-stopped-run`으로 넘어가면서 호스트 목록도
+  // 토글 버튼도 언마운트되기 때문이다. 아무것도 하지 않으면 포커스는 <body>로
+  // 떨어지고, 키보드 사용자는 안내만 듣고 문서 최상단에 남는다(1R M2). 오류
+  // 경로에는 이 문제가 없다 — 실패하면 버튼이 그대로 있다.
+  //
+  // 그래서 방금 누른 것을 대신한 자리, 즉 결과 문장으로 포커스를 옮긴다. 집의
+  // 형태 그대로다: tabIndex=-1 + 프로그램적 포커스 + 토큰 링
+  // (common/RenderErrorBoundary, settings/InviteSection). Chromium은 직전 입력이
+  // 키보드였을 때만 :focus-visible을 매칭하므로, 마우스로 누른 사람은 링을 보지
+  // 않는다. 이 자리에서 Tab을 누르면 새 실행이 추가된 실행 이력으로 들어간다.
+  useEffect(() => {
+    if (done && error === null) doneRef.current?.focus({ preventScroll: true });
+  }, [done, error]);
 
   const takeOver = useCallback(
     async (run: WorkstreamRun, hostId: string) => {
@@ -246,15 +271,22 @@ function ContinuationBlock({
     [queryClient, workspaceId]
   );
 
-  if (runsPending) {
+  // 끝난 목표에는 이력을 기다릴 이유가 없다. 목표의 상태는 이 페이지가 이미
+  // 렌더하고 있는 사실이고, 완료된 목표 아래에서 "확인한 뒤에 알려 드립니다"는
+  // 결국 오지 않을 답을 기다리게 하는 문장이다.
+  if (runsPending && state.kind !== "closed") {
     return (
+      // 이 블록은 이 표면에서 가장 긴 한국어 산문을 담는다. 어절에서 끊는 규칙은
+      // section이 갖고(word-break는 상속된다), 긴 토큰을 받아내는 break-words는
+      // 각 문단이 갖는다 — 한 엘리먼트에 함께 두면 tailwind-merge가 하나를
+      // 지운다(MOMO-676 M-5, common/States.tsx).
       <section
-        className="border-b border-line px-4 py-2"
+        className="break-keep border-b border-line px-4 py-2"
         data-testid="workstream-continue"
         data-state="pending"
       >
         <h2 className="pb-1 text-meta text-ink-muted">이어받기</h2>
-        <p className="text-meta text-ink-muted">
+        <p className="break-words text-meta text-ink-muted">
           실행 이력을 확인한 뒤에 이어받을 수 있는지 알려 드립니다.
         </p>
       </section>
@@ -263,7 +295,7 @@ function ContinuationBlock({
 
   return (
     <section
-      className="border-b border-line px-4 py-2"
+      className="break-keep border-b border-line px-4 py-2"
       data-testid="workstream-continue"
       data-state={state.kind}
     >
@@ -276,7 +308,7 @@ function ContinuationBlock({
           host would vanish the same way. */}
       {error !== null && (
         <p
-          className="mb-2 text-meta text-danger"
+          className="mb-2 break-words text-meta text-danger"
           role="alert"
           data-testid="workstream-continue-error"
         >
@@ -288,7 +320,9 @@ function ContinuationBlock({
           about the working tree that Run starts from. */}
       {done && error === null && (
         <p
-          className="mb-2 text-meta text-ok"
+          ref={doneRef}
+          tabIndex={-1}
+          className="mb-2 break-words text-meta text-ok focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           role="status"
           data-testid="workstream-continue-done"
         >
@@ -296,7 +330,10 @@ function ContinuationBlock({
         </p>
       )}
       {state.kind !== "ready" ? (
-        <p className="text-meta text-ink-muted" data-testid="workstream-continue-blocked">
+        <p
+          className="break-words text-meta text-ink-muted"
+          data-testid="workstream-continue-blocked"
+        >
           {continuationBlockedCopy(state)}
         </p>
       ) : (
@@ -304,7 +341,7 @@ function ContinuationBlock({
           {/* The label is user data and decides its own particle: this roster
               runs 회귀 재현 and codex-workbench side by side, and "codex를" is
               a machine refusing to read what it just printed. */}
-          <p className="text-meta text-ink">
+          <p className="break-words text-meta text-ink">
             멈춘 실행{" "}
             <span className="text-ink-muted">{state.run.label}</span>
             {particleFor(state.run.label, "object")} 새 호스트에서 이어받습니다.
@@ -314,7 +351,7 @@ function ContinuationBlock({
               resume, deliberately word for word: one surface promising less
               than the other about the same act is how a reader learns which one
               to distrust. */}
-          <p className="mt-1 text-meta text-ink-muted">
+          <p className="mt-1 break-words text-meta text-ink-muted">
             Git 계보만 새 호스트로 이어집니다. 이전 호스트의 터미널 상태와
             미커밋 변경은 옮겨지지 않습니다.
           </p>
@@ -465,7 +502,12 @@ export function WorkstreamDetailRoute() {
         ) : (
           <div className="flex max-w-pane-lg flex-col">
             <section className="border-b border-line px-4 py-2">
-              <div className="flex min-w-0 items-start gap-2">
+              {/* 목표는 사람이 쓴 한국어 문장이다. keep-all이 없으면 96자짜리
+                  목표에서 `추가한다`가 `추가`/`한다`로 쪼개졌다(1280·900에서
+                  재현, 1R H3). 규칙은 부모가, break-words는 h1이 갖는다:
+                  tailwind-merge가 둘을 한 그룹으로 접기 때문이다
+                  (common/States.tsx가 세운 형태). */}
+              <div className="flex min-w-0 items-start gap-2 break-keep">
                 {/* The goal wraps and never truncates: it is the title of this
                     page, and half a goal is a different goal. */}
                 <h1
@@ -556,6 +598,7 @@ export function WorkstreamDetailRoute() {
               runs={runs}
               hosts={hostsQuery.data}
               runsPending={runsQuery.isPending}
+              status={workstream.status}
             />
 
             <section>

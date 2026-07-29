@@ -196,10 +196,18 @@ export function continuableRun(
 
 export type ContinuationState =
   | { kind: "ready"; run: WorkstreamRun; targets: WorkHost[] }
+  | { kind: "closed"; status: Extract<WorkstreamStatus, "done" | "cancelled"> }
   | { kind: "offline" }
   | { kind: "no-runs" }
   | { kind: "no-stopped-run" }
   | { kind: "no-host"; run: WorkstreamRun };
+
+/** 목표 자체가 끝난 상태. 실행이 아니라 GOAL에 대한 사실이다. */
+function closedStatus(
+  status: WorkstreamStatus
+): Extract<WorkstreamStatus, "done" | "cancelled"> | null {
+  return status === "done" || status === "cancelled" ? status : null;
+}
 
 /**
  * Whether 이어받기 can be offered, and when it cannot, which fact stopped it.
@@ -208,13 +216,26 @@ export type ContinuationState =
  * a reason rather than a boolean: "아직 실행이 없습니다", "이어받을 수 있는
  * 실행이 없습니다" and "온라인인 호스트가 없습니다" are three different next
  * actions, and a disabled button with one generic tooltip is none of them.
+ *
+ * The workstream's OWN status is the first question, ahead of transport and
+ * ahead of the run ledger, and it is a separate question from the runs: a goal
+ * that was completed or cancelled can still hold an orphaned Run (a host dies
+ * after the work is called done), and reading only the runs offered "새 호스트에서
+ * 이어받기" 180px under a 완료 chip (1R M1, measured). It has to outrank
+ * `offline` too, because the offline sentence promises "다시 연결되면 이 자리에서
+ * 이어받을 수 있습니다", and for a finished goal that promise is simply false.
+ * The status is the one the page is already rendering, so the block cannot
+ * disagree with the chip in its own header.
  */
 export function continuationState(
   runs: readonly WorkstreamRun[],
   hosts: readonly WorkHost[],
   viewerMemberId: string,
-  offline: boolean
+  offline: boolean,
+  status: WorkstreamStatus
 ): ContinuationState {
+  const closed = closedStatus(status);
+  if (closed !== null) return { kind: "closed", status: closed };
   if (offline) return { kind: "offline" };
   if (runs.length === 0) return { kind: "no-runs" };
   const run = continuableRun(runs);
@@ -238,6 +259,14 @@ export function continuationBlockedCopy(
   state: Exclude<ContinuationState, { kind: "ready" }>
 ): string {
   switch (state.kind) {
+    case "closed":
+      // 완료와 취소는 같은 "끝"이 아니다: 하나는 목표가 이루어진 것이고 하나는
+      // 목표를 접은 것이라, 다음 행동을 권하는 어조가 다르다. 둘 다 이 목표로
+      // 돌아오라고 하지 않고 앵커 스레드를 가리키는 이유는, 새 목표를 만드는 일이
+      // 이 표면에 없기 때문이다(명시적 create는 ADR-0143 P2, 대화가 정본 ADR-0114).
+      return state.status === "done"
+        ? "이 목표는 완료됐습니다. 이어서 할 일이 있으면 앵커 대화에서 새 작업으로 시작하세요."
+        : "이 목표는 취소됐습니다. 다시 해야 한다면 앵커 대화에서 새 작업으로 시작하세요.";
     case "offline":
       return "연결이 끊겨 지금은 이어받을 수 없습니다. 다시 연결되면 이 자리에서 이어받을 수 있습니다.";
     case "no-runs":
