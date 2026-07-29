@@ -1,5 +1,17 @@
 # momo 진행 현황
 
+## MOMO-673 OpenAPI 계약 게이트 미샘플 44건 백필 — 부채 목록 소거 (#904, 2026-07-29)
+
+- `scripts/openapi_known_unsampled.txt`의 44건이 전부 **실샘플**로 대체돼 목록이 비었다. 스펙 128개 연산 전부가 샘플러를 갖는다(정적 대조로 확인). 파일은 지우지 않고 남긴다 — 게이트가 `--known-unsampled`로 계속 읽고, "빈 목록"이 곧 부채 0의 정본이며, 여기에 줄이 다시 생기면 리뷰에서 즉시 보이기 때문이다. 서버 코드 변경 0.
+- **부채가 부채였던 이유는 게으름이 아니라 환경이었다.** 44건 대부분은 게이트 스택이 켜지 않던 세 조건에 걸려 있었다: ① provider chain·크레딧 topup의 MOMO-583 운영자 신원, ② T3(`MOMO_T3_ENABLED`), ③ Agent Card·event-subscription의 SSRF 검증기가 요구하는 **공인 형태 목적지**. 그래서 백필의 절반은 샘플이 아니라 compose override다.
+  - 운영자 신원은 `PLATFORM_ADMIN_EMAILS`에 그 런의 일회용 게이트 이메일을 넣어 얻는다. 게이트 로그인은 `platformAdminSecret`을 보내지 않으므로 **토큰 스코프는 그대로 messages:read/write다** — 허용목록은 신원을 인가할 뿐 토큰 권한을 넓히지 않는다(`AuthRoutes.shouldGrantPlatformRead`).
+  - T3는 `MOMO_T3_PROVIDER`를 **일부러 비워** BYOC 어댑터를 기본으로 둔다(ADR-0142 D1). 자격증명도, 호스트측 mock provider 프로세스도 필요 없고, BYOC가 인스턴스 수명을 소유하지 않는다는 사실 자체가 create/pause/resume의 문서화된 409를 만든다 — 거절이 곧 계약이다. register는 BYOC 등록 토큰으로 통과하고, destroy는 BYOC가 실제로 구현하는 유일한 수명주기 동사라 200이다.
+  - 공인 형태 목적지는 compose override의 `mock-public-endpoint`(기본 11.38.0.0/24, `<prefix>.2:8089`)다. 프로덕션 SSRF 주소 검사는 그대로 살아 있고 HTTPS 요구만 완화한다(`MOMO_AGENT_CARD_ALLOW_HTTP`/`MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP`). 이 mock 하나가 Agent Card 2건과 event-subscription 4건을 함께 연다.
+- **파괴적 연산은 순서로 풀었다.** 메모리 평면은 PATCH→invalidate→workspace purge 순이어야 하고(무효화된 항목은 편집 409, purge는 정책 자체를 끈다), `DELETE .../members/me`·`.../channels/{ch}/members/me`는 호출자 세션을 revoke하므로 게이트 토큰이 아니라 `/v1/join` 멤버 토큰으로 맨 뒤에서 돈다. cloud destroy는 pause/resume 409가 아무 상태도 바꾸지 않는다는 것(`beginLifecycleIntent`가 capability 검사에서 UPDATE 이전에 던진다)을 읽고 그 뒤에 배치했다.
+- **SQL 지름길은 두 곳뿐이고 둘 다 "REST로 만들 수 없는 선행 상태"다.** resume은 `orphaned` 세션을 요구하는데 그 상태는 NotifierWorker sweep만 만들고 이 게이트는 그 프로필을 띄우지 않는다(`verify_workstream_continuity.sh`와 동일한 처방). context packet id는 어떤 REST 읽기에도 투영되지 않아 원장에서 꺼낸다. 두 경우 모두 **샘플 자체는 라이브 HTTP**다.
+- 관측(드리프트 아님, 별건 후보): `/v1/provider/link/chain` 3종과 `/v1/provider/effort-table`은 `security:` 선언이 없고 응답 스키마가 `additionalProperties: true` 자리표시자라, 샘플이 생겨도 게이트가 이 네 연산의 본문 드리프트를 구조적으로 감지하지 못한다. 이번 PR은 스키마를 건드리지 않고 인가 경계만 `description`으로 적었다.
+- 검증: `bash -n` green, shellcheck는 base 대비 **새 경고 0**(잔존 SC1007 2건은 무변경 라인), compose override YAML 렌더+파싱·내장 mock 파이썬 컴파일 green, `docs/api/openapi.yaml`은 description을 제거하면 base와 구조 동일(스키마 무변경). 게이트 완주는 Docker 스택이 필요해 **`runtime-unverified`** — 오케스트레이터가 `scripts/verify_openapi_contract.sh` PASS(및 `[openapi-shape] PASS operation coverage`에서 부채 주석이 사라진 것)를 확인해야 한다.
+
 ## MOMO-661① T3 interval 과금 마이크로초 정밀도 — floor는 정산에서 1회 (#879, 2026-07-29)
 
 - **Σfloor(구간) → floor(Σ구간).** Migration 058이 `work_host_usage_interval.active_seconds`(045:66-72)를 `active_micros`로 재정의하고, `t3_terminate`가 마이크로초 합계를 **한 번만** 초로 절사한다. 실측: 1.9초 active × 12회 + pause 왕복 12회 세션에서 **058 이전 12초 / 058 이후 22초**(참값 22.8초) — 경계마다 버려지던 10초가 회복되고 잔여 절사는 세션당 0.8초 1회다. 이 12초는 시뮬레이션이 아니라 001~057만 적용한 DB에서 **실제 pre-058 `t3_terminate`를 호출해 측정**한 값이다.
