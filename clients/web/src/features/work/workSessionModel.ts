@@ -669,9 +669,15 @@ export function canReattachWorkSession(
  * Explicit targets for an orphaned lineage resume. This mirrors the accepted
  * server boundary and the mac console: the dead source host is excluded, and
  * another member's private host is never offered.
+ *
+ * The parameter is structural rather than `Pick<WorkSession, …>` because the
+ * workstream run projection (ADR-0143) describes the same Run with a widened
+ * `status`, and eligibility has to be asked in ONE place: a second copy of this
+ * rule beside the goal layer is how two surfaces start offering different hosts
+ * for the same act.
  */
 export function workSessionResumeTargets(
-  session: Pick<WorkSession, "hostId" | "status">,
+  session: { hostId: string; status: string },
   hosts: readonly WorkHost[],
   viewerMemberId: string
 ): WorkHost[] {

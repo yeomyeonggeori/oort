@@ -7,6 +7,7 @@ import {
   Inbox,
   Lock,
   MessageSquare,
+  Milestone,
   Plus,
   Search,
   Settings,
@@ -274,6 +275,14 @@ export function Sidebar({
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+              {/* 작업 흐름 sits with the global destinations for the reason
+                  에이전트 does (MOMO-652): it is a place you GO, not a thing you
+                  are subscribed to. It is also the one work surface that cannot
+                  live in the channel drawer beside it — 작업 세션 is scoped to
+                  the channel you are already in and, in its most used range, to
+                  your own sessions, while someone looking for work to pick up is
+                  by definition looking for work that is not theirs (ADR-0143). */}
+              <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
             </ul>
 
             <SidebarSection

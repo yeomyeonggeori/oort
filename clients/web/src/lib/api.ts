@@ -1391,6 +1391,247 @@ export async function fetchWorkHosts(workspaceId: string): Promise<WorkHost[]> {
   return arrayField<WorkHost>(res, "workHosts") ?? [];
 }
 
+// ---- Workstreams: the goal layer over Runs (ADR-0143, WorkstreamRoutes) -----
+// GET /v1/workspaces/{ws}/workstreams?status=&channelId=&sessionId=&limit=
+// GET /v1/workspaces/{ws}/workstreams/{workstream}
+// GET /v1/workspaces/{ws}/workstreams/{workstream}/runs
+//
+// A workstream is one GOAL anchored on a thread root message; a work session is
+// one RUN of it. `run.memberId` is that Run's actor and is never transferred
+// (D2), so the run list is the evidence that a goal outlived the person who
+// started it: A's run and B's run stand side by side under one goal.
+//
+// THE THREE READS ARE DELIBERATELY ASYMMETRIC AND A CLIENT MUST NOT EVEN THEM
+// OUT (WorkstreamRoutes "minimum exposure"): a caller outside the anchor channel
+// gets ZERO rows from the list and 404 — not 403 — from the detail and the run
+// list, so these reads cannot be used to probe for other people's work. Only
+// `resumeWorkSession` answers 403, and only because by then the caller is acting
+// on a session they were shown. `isNotFound` is exported so a surface can say
+// "찾을 수 없습니다" for the first case and talk about permission only for the
+// second; a UI that renders 404 as "권한이 없습니다" hands back exactly the
+// existence signal the server refused.
+//
+// There is no write here on purpose: explicit create/split/merge is ADR-0143 P2,
+// and continuing a workstream reuses the lineage resume above rather than
+// inventing a second verb for the same act.
+
+export const WORKSTREAM_STATUSES = [
+  "active",
+  "paused",
+  "done",
+  "cancelled",
+] as const;
+
+export type WorkstreamStatus = (typeof WORKSTREAM_STATUSES)[number];
+
+export interface Workstream {
+  id: string;
+  workspaceId: string;
+  channelId: string;
+  /** The anchor thread. The workstream extends the thread, never replaces it. */
+  rootMessageId: string;
+  goal: string;
+  status: WorkstreamStatus;
+  /** Provenance only. Eligibility to continue is channel membership (D3). */
+  createdByMemberId: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  runCount: number;
+  activeRunCount: number;
+}
+
+/**
+ * One Run of a workstream. `status` stays a plain string rather than the work
+ * session union: `workSessionStatus()` already answers "상태 확인 필요" for a
+ * value it does not know, and a goal's whole history failing to render because
+ * the ledger grew a fifth state is a worse answer than one unnamed row.
+ */
+export interface WorkstreamRun {
+  id: string;
+  memberId: string;
+  hostId: string;
+  tool: string;
+  label: string;
+  status: string;
+  startedAtMs: number;
+  endedAtMs?: number;
+  exitCode?: number;
+  endReason?: string;
+  /** Set when this Run continued another one — the lineage, inside one goal. */
+  resumedFromSessionId?: string;
+}
+
+export interface WorkstreamRunList {
+  workstreamId: string;
+  runs: WorkstreamRun[];
+}
+
+export interface WorkstreamQuery {
+  status?: WorkstreamStatus;
+  channelId?: string;
+  sessionId?: string;
+  limit?: number;
+}
+
+function isWorkstreamStatus(value: string): value is WorkstreamStatus {
+  return (WORKSTREAM_STATUSES as readonly string[]).includes(value);
+}
+
+export function workstreamFromWire(value: unknown): Workstream {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const workspaceId = str(source, "workspaceId");
+  const channelId = str(source, "channelId");
+  const rootMessageId = str(source, "rootMessageId");
+  const goal = str(source, "goal");
+  const status = str(source, "status");
+  const createdByMemberId = str(source, "createdByMemberId");
+  const createdAtMs = num(source, "createdAtMs");
+  const updatedAtMs = num(source, "updatedAtMs");
+  const runCount = num(source, "runCount");
+  const activeRunCount = num(source, "activeRunCount");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    channelId === undefined ||
+    rootMessageId === undefined ||
+    goal === undefined ||
+    status === undefined ||
+    !isWorkstreamStatus(status) ||
+    createdByMemberId === undefined ||
+    createdAtMs === undefined ||
+    updatedAtMs === undefined ||
+    runCount === undefined ||
+    activeRunCount === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id: id.toLowerCase(),
+    workspaceId: workspaceId.toLowerCase(),
+    channelId: channelId.toLowerCase(),
+    rootMessageId: rootMessageId.toLowerCase(),
+    goal,
+    status,
+    createdByMemberId: createdByMemberId.toLowerCase(),
+    createdAtMs,
+    updatedAtMs,
+    runCount,
+    activeRunCount,
+  };
+}
+
+export function workstreamListFromWire(value: unknown): Workstream[] {
+  const source = responseRecord(value);
+  const workstreams = arrayField(source, "workstreams");
+  if (workstreams === null) throw new WireShapeError();
+  return workstreams.map(workstreamFromWire);
+}
+
+export function workstreamRunFromWire(value: unknown): WorkstreamRun {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const memberId = str(source, "memberId");
+  const hostId = str(source, "hostId");
+  const tool = str(source, "tool");
+  const label = str(source, "label");
+  const status = str(source, "status");
+  const startedAtMs = num(source, "startedAtMs");
+  if (
+    id === undefined ||
+    memberId === undefined ||
+    hostId === undefined ||
+    tool === undefined ||
+    label === undefined ||
+    status === undefined ||
+    startedAtMs === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  const endedAtMs = optionalFiniteNumber(source, "endedAtMs");
+  const exitCode = optionalFiniteNumber(source, "exitCode");
+  const endReason = optionalString(source, "endReason");
+  const resumedFromSessionId = optionalString(source, "resumedFromSessionId");
+  return {
+    id: id.toLowerCase(),
+    memberId: memberId.toLowerCase(),
+    hostId: hostId.toLowerCase(),
+    tool,
+    label,
+    status,
+    startedAtMs,
+    ...(endedAtMs === undefined ? {} : { endedAtMs }),
+    ...(exitCode === undefined ? {} : { exitCode }),
+    ...(endReason === undefined ? {} : { endReason }),
+    ...(resumedFromSessionId === undefined
+      ? {}
+      : { resumedFromSessionId: resumedFromSessionId.toLowerCase() }),
+  };
+}
+
+export function workstreamRunListFromWire(value: unknown): WorkstreamRunList {
+  const source = responseRecord(value);
+  const workstreamId = str(source, "workstreamId");
+  const runs = arrayField(source, "runs");
+  if (workstreamId === undefined || runs === null) throw new WireShapeError();
+  return {
+    workstreamId: workstreamId.toLowerCase(),
+    runs: runs.map(workstreamRunFromWire),
+  };
+}
+
+export async function fetchWorkstreams(
+  workspaceId: string,
+  query: WorkstreamQuery = {}
+): Promise<Workstream[]> {
+  const params = new URLSearchParams();
+  if (query.status !== undefined) params.set("status", query.status);
+  if (query.channelId !== undefined) {
+    params.set("channelId", query.channelId.toLowerCase());
+  }
+  if (query.sessionId !== undefined) {
+    params.set("sessionId", query.sessionId.toLowerCase());
+  }
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const search = params.toString();
+  return workstreamListFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/workstreams${
+        search === "" ? "" : `?${search}`
+      }`
+    )
+  );
+}
+
+export async function fetchWorkstream(
+  workspaceId: string,
+  workstreamId: string
+): Promise<Workstream> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/workstreams/${encodeURIComponent(workstreamId.toLowerCase())}`
+    )
+  );
+  return workstreamFromWire(source.workstream);
+}
+
+export async function fetchWorkstreamRuns(
+  workspaceId: string,
+  workstreamId: string
+): Promise<WorkstreamRunList> {
+  return workstreamRunListFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/workstreams/${encodeURIComponent(workstreamId.toLowerCase())}/runs`
+    )
+  );
+}
+
 // ---- Approvals: read projection over the decision ledger --------------------
 // GET /v1/workspaces/{ws}/approvals?status=&limit= (ApprovalDecisionRoutes).
 // Rows are scoped by channel membership server-side, snake_case on the wire,
