@@ -102,9 +102,9 @@ describe("Button keeps its label color at every size", () => {
     );
   });
 
-  it("destructive keeps text-on-danger at small size", () => {
+  it("destructive keeps text-on-danger-fill at small size", () => {
     expect(cn(buttonVariants({ variant: "destructive", size: "sm" }))).toContain(
-      "text-on-danger"
+      "text-on-danger-fill"
     );
   });
 });

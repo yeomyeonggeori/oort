@@ -48,8 +48,9 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--on-accent` | `#fffefb` | `#17161a` | label on a filled accent |
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
 | `--agent-soft` | `#e6ebf2` | `#1e2836` | agent avatar/badge backing |
-| `--danger` | `#b3261e` | `#f2b8b5` | destructive, failure |
-| `--on-danger` | `#fffefb` | `#17161a` | label on filled danger |
+| `--danger` | `#b3261e` | `#ff796b` | risk **tone**: destructive/failure text, chips, dots, bars |
+| `--danger-fill` | `#8c393d` | `#dc817e` | destructive button **fill** (never the tone above: §3a table B) |
+| `--on-danger-fill` | `#fffefb` | `#17161a` | label on a destructive fill |
 | `--ok` | `#187533` | `#57ab5a` | connected, done |
 | `--warn` | `#8a5c00` | `#d4a72c` | connecting, stalled |
 | `--scrim` | `rgb(36 33 28 / 0.24)` | `rgb(9 8 11 / 0.62)` | the layer under a dialog or the ⌘K palette |
@@ -89,7 +90,8 @@ Worst case across every foreground x every surface, both schemes:
 | dark | `--line-strong` on `--surface-hover` | **3.00:1** | 3.0 (non-text) |
 
 Filled controls: `--on-accent` on `--accent` is 5.72 (light) / 8.94 (dark);
-`--on-danger` on `--danger` is 6.48 / 10.55.
+`--on-danger-fill` on `--danger-fill` is 7.52 / 6.42. The destructive fill is a
+token of its own, not `--danger` painted as a background: see §3a table B.
 
 Body text (`--ink`) never drops below 12.4:1 in either scheme, which is the
 point of a warm-paper base rather than a gray one.
@@ -102,6 +104,96 @@ taste regresses just as quietly:
   into the same color by a well-meant tweak.
 - **the indigo/violet AI-tell band** (OKLab hue 265..330) is asserted empty for
   both `--accent` and `--agent`. Measured: accent 49/69, agent 250/251.
+
+### 3a. Risk hierarchy: `--danger` > `--warn` > `--ink-muted`
+
+The status tokens carry an **order**, and it is measured (MOMO-641). Where two
+of them stand on one surface, the more dangerous one has to arrive at the eye
+first, in both schemes.
+
+**The ruler is OKLab chroma, not contrast.** Contrast stops discriminating once
+every token clears AA by a wide margin, and it actively lies at that point: the
+dark `--danger` that shipped until MOMO-641 measured **10.55:1** on `--surface`
+against `--warn`'s 8.03:1 and still read as the quieter of the two, because it
+was a pale pink (C 0.068) next to a saturated yellow (C 0.141). Light had the
+order right all along for the same reason (0.178 > 0.108 > 0.011), which is why
+the inversion only ever showed after dark. Measured now:
+
+| scheme | `--danger` | `--warn` | `--ink-muted` | danger / warn |
+|---|---|---|---|---|
+| light | 0.178 | 0.108 | 0.011 | 1.65x |
+| dark | 0.166 | 0.141 | 0.016 | 1.18x |
+
+The test asserts the ratios (>= 1.15x and >= 2x), not a bare `>`, so a token
+that merely ties cannot pass; the old dark danger sat at 0.48x.
+
+**Contrast stays as the floor, and it is a floor with teeth**: `--danger`
+outreads `--ink-muted` on every surface in both schemes, so a louder red can
+never be bought by making it a dimmer one. What it may NOT be asked to do is
+outread `--warn` in dark: sRGB has no red that is both more colorful than
+`#d4a72c` and as luminous, so requiring both would have made the order
+unreachable rather than merely unmet. Dark danger now measures 5.72:1 at its
+worst surface (`--accent-soft`), above the AA floor and above muted's 5.17.
+
+**The ruler measures two different classes of surface, and each has its own
+order.** Naming only the first is how MOMO-641's fix produced MOMO-642 R1 H-2:
+the tables below are the complete list, and a surface that is in neither is a
+surface the ruler has not been extended to yet.
+
+**Table A — risk tones competing with each other.** Foreground marks (text,
+chips, dots) plus the bar fills that are themselves a risk read. Order:
+`--danger` > `--warn` > `--ink-muted`.
+
+| surface | file |
+|---|---|
+| app consent dialog scope badges | `features/plugins/PluginSection.tsx` |
+| `ToolRow` chips, 설정 > 앱 | `features/plugins/PluginSection.tsx` |
+| quota chips, 설정 > 사용량 | `features/settings/SettingsFields.tsx` |
+| quota bars (`progress-bar[data-tone]`) | `design/tokens.css` |
+| 상태 lines, AI 연결 체인 | `features/settings/` |
+| workspace rail connection dot (`bg-danger`) | `features/sidebar/WorkspaceRail.tsx` |
+
+A bar is in table A and not table B because a bar competes with the other bars
+beside it, which are all risk reads. It never stands next to the primary action.
+
+**Table B — action fills competing with the primary action.** Every filled
+button, i.e. every `<Button variant="default">` against every
+`<Button variant="destructive">`. Order: `--accent` > `--danger-fill`. A
+destructive secondary may not outrank the action the reader came for.
+
+| surface | file |
+|---|---|
+| 설정 > 앱 상세 행: `설치 해제` beside `내 사용 허용` / `권한 추가` | `features/plugins/PluginSection.tsx` |
+| 앱 설치 해제 확인 | `features/plugins/PluginSection.tsx` |
+| 에이전트 `메모리 무효화` 확인 | `features/agentHub/AgentHubRoute.tsx` |
+| 작업 세션 `종료 확정` | `features/work/WorkSessionDetail.tsx` |
+| 관전 `관전 닫기` | `features/work/ObserverTerminal.tsx` |
+| 설정 2단 확인 (`ConfirmInline`) | `features/settings/SettingsFields.tsx` |
+| 승인 카드 `승인 확정` / `거부 확정` (one button, both variants) | `features/timeline/AgentCard.tsx` |
+
+Only the first row puts the two fills on screen together today; the rest are the
+same variant and would invert the moment they did. Measured:
+
+| scheme | `--accent` | `--danger-fill` | accent / fill | before (`--danger` as fill) |
+|---|---|---|---|---|
+| light | 0.136 | 0.113 | 1.20x | 0.178 = **1.31x the wrong way** |
+| dark | 0.134 | 0.113 | 1.18x | 0.166 = **1.24x the wrong way** |
+
+**Why two tokens and not one retune.** In dark, table A needs the danger tone to
+clear `--warn` (C 0.141) by 1.15x, so C >= 0.162; table B needs it to sit under
+`--accent` (C 0.134), so C <= 0.116. The interval is empty. No single red can
+hold both orders, so the tone that *states* risk and the fill that *executes* it
+have separate names. Light would have admitted a compromise value; it uses the
+same split, because one surface class per token beats two schemes with different
+structures.
+
+**Quieter, not merged.** Dropping the fill's chroma moves it toward the accent
+along the very axis the order is read on, so the split is measured a second way:
+OKLab deltaE between the two fills is 0.092 (light) / 0.131 (dark), *wider* than
+the 0.073 / 0.122 the two had before. The fill also stays inside the danger hue
+family (gap to `--danger` 9 / 6 degrees, asserted <= 15) and at least 2x as
+colorful as `--ink-muted`, so "quieter" can never decay into "neutral" or into
+"some other color that happens to pass".
 
 ## 4. Non-color scales
 
@@ -175,6 +267,14 @@ inherits that rule.
   controls carry `pane-wide-toggle`, which hides them below 900px where the pane
   is already the whole surface (79 columns at 880): a control whose only effect
   has already happened is not a control.
+
+`min-w-action` 144px (MOMO-642) is the last width name: the minimum a dialog's
+primary button holds. It exists because a button that states the decision state
+in its LABEL ("권한을 하나 이상 선택" -> "선택한 권한 허용") changes width when
+that state changes, and a trailing-aligned footer then slides its sibling 24px
+sideways under the pointer on every checkbox toggle. Pinning a minimum wide
+enough for the longest label (measured 127px) leaves only the text inside the
+button moving. It is a MINIMUM: a footer whose labels outgrow it still fits them.
 
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
