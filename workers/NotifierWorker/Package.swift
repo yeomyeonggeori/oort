@@ -26,6 +26,9 @@ let package = Package(
         .executable(name: "NotifierWorker", targets: ["NotifierWorker"]),
     ],
     dependencies: [
+        // ADR-0142 D2: same T3 provider adapter contract MomoServer compiles
+        // against — the reconciler must not own a second copy of it.
+        .package(path: "../../services/CloudProviderKit"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
@@ -36,6 +39,7 @@ let package = Package(
         .executableTarget(
             name: "NotifierWorker",
             dependencies: [
+                .product(name: "CloudProviderKit", package: "CloudProviderKit"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),

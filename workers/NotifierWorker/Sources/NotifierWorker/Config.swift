@@ -1,3 +1,4 @@
+import CloudProviderKit
 import Foundation
 
 /// Notifier configuration loaded from environment variables.
@@ -30,12 +31,12 @@ struct Config: Sendable {
     var claimBatchSize: Int      // candidate rows claimed per iteration
     var maxAttempts: Int         // give up → status='failed' after this many tries
     var hostOfflineGraceSeconds: Int // ADR-0125 D11 stale heartbeat grace
-    var t3Enabled: Bool
-    var e2bAPIBaseURL: String
-    var e2bAPIKey: String?
-    var e2bTemplateID: String?
-    var momoPublicBaseURL: String?
-    var e2bSandboxTimeoutSeconds: Int
+    // ADR-0142 D2/D4: the reconciler holds the same provider adapter settings
+    // MomoServer does — `MOMO_T3_PROVIDER` plus each provider's own
+    // `MOMO_T3_PROVIDER_<ID>_*` namespace. No provider-named key survives here.
+    var cloudProvider: CloudProviderSettings
+
+    var t3Enabled: Bool { cloudProvider.enabled }
 
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -70,15 +71,8 @@ struct Config: Sendable {
             claimBatchSize: envInt("NOTIFIER_CLAIM_BATCH", 32),
             maxAttempts: envInt("NOTIFIER_MAX_ATTEMPTS", 8),
             hostOfflineGraceSeconds: max(1, envInt("MOMO_HOST_OFFLINE_GRACE_S", 90)),
-            t3Enabled: ProcessInfo.processInfo.environment["MOMO_T3_ENABLED"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines) == "1",
-            e2bAPIBaseURL: env("E2B_API_BASE_URL", "https://api.e2b.app")
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-            e2bAPIKey: ProcessInfo.processInfo.environment["E2B_API_KEY"],
-            e2bTemplateID: ProcessInfo.processInfo.environment["E2B_TEMPLATE_ID"],
-            momoPublicBaseURL: ProcessInfo.processInfo.environment["MOMO_PUBLIC_BASE_URL"],
-            e2bSandboxTimeoutSeconds: max(
-                60, envInt("E2B_SANDBOX_TIMEOUT_SECONDS", 3_600)
+            cloudProvider: CloudProviderSettings.load(
+                environment: ProcessInfo.processInfo.environment
             )
         )
     }

@@ -194,7 +194,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/services && cp -Rp /workspace/server /tmp/momo-src/server && cp -Rp /workspace/services/OutboundHTTPPolicy /tmp/momo-src/services/OutboundHTTPPolicy && cp -Rp /workspace/services/MomoMetrics /tmp/momo-src/services/MomoMetrics && cd /tmp/momo-src && swift run -j 8 --package-path server --scratch-path /tmp/momo-swiftpm/server MomoServer",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/services && cp -Rp /workspace/server /tmp/momo-src/server && cp -Rp /workspace/services/OutboundHTTPPolicy /tmp/momo-src/services/OutboundHTTPPolicy && cp -Rp /workspace/services/MomoMetrics /tmp/momo-src/services/MomoMetrics && cp -Rp /workspace/services/CloudProviderKit /tmp/momo-src/services/CloudProviderKit && cd /tmp/momo-src && swift run -j 8 --package-path server --scratch-path /tmp/momo-swiftpm/server MomoServer",
       ]
     environment:
       <<: *e2e-common-env
@@ -463,7 +463,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers && cp -Rp /workspace/workers/NotifierWorker /tmp/momo-src/workers/NotifierWorker && cd /tmp/momo-src && swift run -j 8 --package-path workers/NotifierWorker --scratch-path /tmp/momo-swiftpm/notifier NotifierWorker",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers /tmp/momo-src/services && cp -Rp /workspace/workers/NotifierWorker /tmp/momo-src/workers/NotifierWorker && cp -Rp /workspace/services/CloudProviderKit /tmp/momo-src/services/CloudProviderKit && cd /tmp/momo-src && swift run -j 8 --package-path workers/NotifierWorker --scratch-path /tmp/momo-swiftpm/notifier NotifierWorker",
       ]
     environment:
       <<: *e2e-common-env
