@@ -54,6 +54,7 @@ struct WorkHostDaemonMain {
                 templates: templates,
                 outputDirectory: config.outputDirectory,
                 ringBufferBytes: config.ringBufferBytes,
+                subscriberQueueBytes: config.subscriberQueueBytes,
                 acpEventRelay: { sessionID, event in
                     try await runtimeClient.relayACPEvent(
                         hostID: hostID, sessionID: sessionID, event: event

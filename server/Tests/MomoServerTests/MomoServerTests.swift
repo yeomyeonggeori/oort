@@ -2506,6 +2506,93 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    // MOMO-656 / #870. A daemon that restarts inside the offline grace window
+    // keeps its heartbeat fresh, so the sweep alone can never notice its lost
+    // PTYs. The host reports them; the sweep still owns every transition.
+    func testWorkHostRestartReconciliationReusesTheOrphanSweepWithoutNewUX() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let serverRoot = repoRoot.appendingPathComponent("server")
+
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/054_work_session_host_reconciliation.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("ADD COLUMN host_lost_at timestamptz"))
+        XCTAssertTrue(migration.contains("work_session_host_lost_idx"))
+        // The marker must never become a lifecycle state or an end_reason the
+        // clients would have to render, so the status/end_reason constraints
+        // are left exactly as migration 047 defined them.
+        XCTAssertFalse(migration.contains("ADD CONSTRAINT"))
+        XCTAssertFalse(migration.contains("DROP CONSTRAINT"))
+
+        let hostRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkHostRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(hostRoutes.contains("work-hosts/:host/live-sessions"))
+        XCTAssertTrue(hostRoutes.contains("work-hosts/:host/reconcile"))
+        XCTAssertTrue(hostRoutes.contains("requireSelfSignedHost"))
+        XCTAssertTrue(hostRoutes.contains(
+            "SET host_lost_at = COALESCE(host_lost_at, clock_timestamp())"
+        ))
+        XCTAssertTrue(hostRoutes.contains("AND status IN ('running', 'idle')"))
+        XCTAssertTrue(hostRoutes.contains("'momo.work_session.host_lost.v1'::text"))
+        // The route stamps eligibility only. Any status write here would be a
+        // second orphan implementation racing the sweep.
+        XCTAssertFalse(hostRoutes.contains("SET status = 'orphaned'"))
+        XCTAssertFalse(hostRoutes.contains("resume_offer"))
+
+        let authenticator = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Auth/WorkHostAuthenticator.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(authenticator.contains("\"live-sessions\""))
+        XCTAssertTrue(authenticator.contains("\"reconcile\""))
+        let reconcileWorkspaceID = UUID().uuidString.lowercased()
+        let reconcileHostID = UUID().uuidString.lowercased()
+        let livePath =
+            "/v1/workspaces/\(reconcileWorkspaceID)/work-hosts/\(reconcileHostID)/live-sessions"
+        let reconcilePath =
+            "/v1/workspaces/\(reconcileWorkspaceID)/work-hosts/\(reconcileHostID)/reconcile"
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "GET", path: livePath))
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "POST", path: reconcilePath))
+        // Method confusion must not open the other verb on either path.
+        XCTAssertFalse(WorkHostAuthenticator.isAllowed(method: "POST", path: livePath))
+        XCTAssertFalse(WorkHostAuthenticator.isAllowed(method: "GET", path: reconcilePath))
+        XCTAssertEqual(
+            WorkHostAuthenticator.scopedHostID(fromPath: reconcilePath)?
+                .uuidString.lowercased(),
+            reconcileHostID
+        )
+
+        let sweep = try String(
+            contentsOf: repoRoot.appendingPathComponent(
+                "workers/NotifierWorker/Sources/NotifierWorker/TierFallbackSweep.swift"
+            ),
+            encoding: .utf8
+        )
+        // Host loss now has two equally authoritative signals.
+        XCTAssertTrue(sweep.contains("ws.host_lost_at IS NOT NULL AS host_reported_lost"))
+        XCTAssertTrue(sweep.contains("work_session.host_lost_at IS NOT NULL"))
+        // ...and is still processed before ADR-0139 idle timeout.
+        XCTAssertTrue(sweep.contains("AND ws.host_lost_at IS NULL"))
+        // The marker is consumed by the transition, so a returning host that
+        // starts fresh sessions is not swept again.
+        XCTAssertTrue(sweep.contains("host_lost_at = NULL"))
+        XCTAssertTrue(sweep.contains("\"orphan_source\": session.orphanSource"))
+        XCTAssertTrue(sweep.contains("host_reconciliation"))
+    }
+
     func testWorkSessionMigrationAndRouteKeepLedgerBoundary() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

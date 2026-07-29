@@ -77,10 +77,18 @@ final class ShellPTYOutputState: @unchecked Sendable {
     private var undecoded = Data()
     private var lifecycleEvents: [ToolLifecycleEvent] = []
 
-    init(markerNonce: String, output: FileHandle, capacityBytes: Int) {
+    init(
+        markerNonce: String,
+        output: FileHandle,
+        capacityBytes: Int,
+        subscriberQueueBytes: Int? = nil
+    ) {
         markerPrefix = Data("\u{1B}]777;momo-tool-\(markerNonce):".utf8)
         self.output = output
-        replay = PTYReplayBuffer(capacityBytes: capacityBytes)
+        replay = PTYReplayBuffer(
+            capacityBytes: capacityBytes,
+            subscriberQueueBytes: subscriberQueueBytes
+        )
     }
 
     func consume(_ incoming: Data) {

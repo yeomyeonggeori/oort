@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## MOMO-656/661 데몬 재시작 reconciliation + replay 구독자 큐 상한 (#870 #879, 2026-07-29)
+
+- 데몬은 기동 시 `GET .../work-hosts/{host}/live-sessions`로 원장이 아직 자기 것으로 보는 running/idle 세션을 읽고, 자기 프로세스 표에 없는 것(재시작 직후에는 전부)을 서명 REST `POST .../reconcile`로 명시 보고한다. 부팅 스냅샷은 1회만 뜨고 실패 시 그대로 재시도해, 재개가 같은 호스트로 내려온 새 세션을 자기 보고가 다시 잡는 일이 없다.
+- 서버는 전이를 하지 않는다. Migration 054의 `work_session.host_lost_at`은 sweep 적격화 표식일 뿐이며 orphaned 상태·재개 카드·계보·tier policy 분기는 기존 ADR-0125 D11 sweep이 그대로 소유한다. `end_reason`은 늘리지 않았다 — 사용자에게는 같은 사실이고 그 값은 클라이언트가 렌더하는 어휘라서, 출처 구분은 `audit_log`(`momo.work_session.host_lost.v1` + orphan 감사의 `orphan_source`)에만 남겼다. host가 보고한 세션은 idle timeout 분기에서 제외해 host loss가 항상 먼저 처리된다.
+- PTY replay 구독자 큐에 구성 가능한 바이트 상한을 두고(`MOMO_WORKD_PTY_SUBSCRIBER_QUEUE_BYTES`, 기본 ring×4·ring 미만 불가), 초과 구독자는 프레임을 조용히 버리는 대신 `.overflow(byteOffset:)` 종단 프레임으로 절단한다. PTY는 연속 바이트라 드롭이 xterm에 무증상 깨짐으로 나타나고, 절단은 재연결→ring replay→새 `replay_end`라는 기존 계약을 그대로 재사용하기 때문이다. 큐 계정은 `AsyncStream(unfolding:)`으로 소비 시점에만 감소해 정확하다.
+- WorkHostDaemon 38 tests(3 skip, 기준 32에서 +6: 재시작 보고·서비스중 세션 제외·전송 실패 재시도, 정지 구독자 red proof·정상 소비자·overflow 프레임 형태), server `testWorkHostRestartReconciliationReusesTheOrphanSweepWithoutNewUX`, server·NotifierWorker 빌드 무회귀는 green이다. `scripts/verify_workd_reconcile.sh`(실제 SIGKILL 재기동 → 보고 → orphaned + resume_offer, grace 1시간으로 heartbeat 경로 배제, SQL 지름길 없음)는 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-667 T3 수명주기 정본화 (#891, 2026-07-29)
 
 - Migration 053이 정산을 이유 보존형 `t3_terminate` 한 문으로 모으고 직접 `settled_at` 변경과 비실재 cloud-host 전이를 이름 있는 트리거 예외로 봉인한다. 기존 `settle_t3_work_session`은 설치 DB·운영 도구 호환 shim만 유지하며 런타임·repair는 명시 reason 경유로 이행했다.

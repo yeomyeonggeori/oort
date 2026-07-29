@@ -198,6 +198,26 @@ struct WorkHostAuthenticator: Sendable {
         {
             return true
         }
+        // MOMO-656 restart reconciliation. Signed like every other host route;
+        // `scopedHostID(fromPath:)` already pins both to the signing host.
+        if method == "GET",
+           segments.count == 6,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "work-hosts",
+           segments[5] == "live-sessions"
+        {
+            return true
+        }
+        if method == "POST",
+           segments.count == 6,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "work-hosts",
+           segments[5] == "reconcile"
+        {
+            return true
+        }
         if method == "GET",
            segments.count == 4,
            segments[0] == "v1",
