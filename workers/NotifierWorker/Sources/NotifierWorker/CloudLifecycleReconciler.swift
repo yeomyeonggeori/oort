@@ -1,4 +1,5 @@
 import AsyncHTTPClient
+import CloudProviderKit
 import Crypto
 import Foundation
 import NIOCore
@@ -6,7 +7,6 @@ import NIOFoundationCompat
 import PostgresNIO
 
 extension NotifierService {
-    private enum ProviderMethod { case post, delete }
     private struct CloudIntent: Sendable {
         let id: UUID
         let workspaceID: UUID
@@ -15,13 +15,25 @@ extension NotifierService {
         let state: String
         let operationID: UUID?
         let displayName: String?
+        let providerID: String
+
+        var ref: CloudInstanceRef? {
+            guard let sandboxID else { return nil }
+            return CloudInstanceRef(providerID: providerID, instanceID: sandboxID)
+        }
+    }
+
+    /// ADR-0140 D4 convergence decision for one provider round trip.
+    enum CloudLifecycleOutcome: Sendable, Equatable {
+        case accepted
+        case providerMissing
     }
 
     /// Converges provider calls which intentionally live outside PostgreSQL.
     /// Claims are leased by timestamp and every provider request carries the
     /// durable operation/provision UUID as its idempotency key.
     func reconcileCloudLifecycle() async {
-        guard let apiKey = config.e2bAPIKey, !apiKey.isEmpty else { return }
+        guard let readyConfig = try? config.cloudProvider.requireReady() else { return }
         do {
             let candidateRows = try await pg.query(
                 """
@@ -80,18 +92,20 @@ extension NotifierService {
                             RETURNING id, workspace_id, host_id,
                                       provider_sandbox_id, state,
                                       lifecycle_operation_id,
-                                      requested_display_name
+                                      requested_display_name, provider
                             """,
                             logger: logger
                         ).collect()
                         guard let row = rows.first else { return nil }
                         let value = try row.decode(
-                            (UUID, UUID, UUID?, String?, String, UUID?, String?).self
+                            (UUID, UUID, UUID?, String?, String, UUID?, String?, String)
+                                .self
                         )
                         return CloudIntent(
                             id: value.0, workspaceID: value.1, hostID: value.2,
                             sandboxID: value.3, state: value.4,
-                            operationID: value.5, displayName: value.6
+                            operationID: value.5, displayName: value.6,
+                            providerID: value.7
                         )
                     }
                     if let intent { intents.append(intent) }
@@ -104,7 +118,7 @@ extension NotifierService {
             }
             for intent in intents {
                 do {
-                    try await reconcile(intent: intent, apiKey: apiKey)
+                    try await reconcile(intent: intent, readyConfig: readyConfig)
                 } catch {
                     logger.warning("cloud lifecycle reconciliation will retry", metadata: [
                         "provisionID": .string(intent.id.uuidString.lowercased()),
@@ -120,50 +134,66 @@ extension NotifierService {
         }
     }
 
-    private func reconcile(intent: CloudIntent, apiKey: String) async throws {
+    private func reconcile(
+        intent: CloudIntent,
+        readyConfig: ReadyCloudProviderSettings
+    ) async throws {
+        let adapter = try readyConfig.adapter(
+            for: intent.providerID, httpClient: httpClient
+        )
         if intent.state == "provisioning" {
-            try await reconcileProvision(intent: intent, apiKey: apiKey)
+            try await reconcileProvision(
+                intent: intent, readyConfig: readyConfig, adapter: adapter
+            )
             return
         }
-        guard let sandboxID = intent.sandboxID,
+        guard let ref = intent.ref,
               let operationID = intent.operationID,
               let hostID = intent.hostID
         else { return }
-        let path: String
-        let method: ProviderMethod
-        let body: Data?
-        switch intent.state {
-        case "pausing":
-            path = "/sandboxes/\(try safeID(sandboxID))/pause"
-            method = .post
-            body = nil
-        case "resuming":
-            path = "/sandboxes/\(try safeID(sandboxID))/connect"
-            method = .post
-            body = try JSONSerialization.data(
-                withJSONObject: ["timeout": config.e2bSandboxTimeoutSeconds]
-            )
-        case "destroy_pending":
-            path = "/sandboxes/\(try safeID(sandboxID))"
-            method = .delete
-            body = nil
-        default:
-            return
+        let idempotencyKey = operationID.uuidString.lowercased()
+        var adapterError: CloudProviderError?
+        do {
+            switch intent.state {
+            case "pausing":
+                try await adapter.pause(ref: ref, idempotencyKey: idempotencyKey)
+            case "resuming":
+                try await adapter.resume(ref: ref, idempotencyKey: idempotencyKey)
+            case "destroy_pending":
+                try await adapter.destroy(ref: ref, idempotencyKey: idempotencyKey)
+            default:
+                return
+            }
+        } catch let error as CloudProviderError {
+            adapterError = error
         }
-        let status = try await providerRequest(
-            method: method,
-            path: path,
-            body: body,
-            idempotencyKey: operationID.uuidString.lowercased(),
-            apiKey: apiKey
-        ).status.code
-        let missingSandbox = Self.isTerminalMissingResume(
-            state: intent.state, status: Int(status)
-        )
-        let accepted = Self.acceptsLifecycleResponse(
-            state: intent.state, status: Int(status)
-        )
-        guard accepted else { throw CloudReconcileError.upstream(Int(status)) }
+        guard let outcome = Self.lifecycleOutcome(
+            state: intent.state, error: adapterError
+        ) else {
+            throw CloudReconcileError.provider(adapterError ?? .invalidResponse)
+        }
+        let missingSandbox = outcome == .providerMissing
+        var probeAnswer = CloudInstancePresence.unknown
+        if missingSandbox {
+            // ADR-0142 D3.1: before terminally settling a paid session, ask the
+            // adapter for the fact. A provider that hides a death (answers
+            // `present` for an instance it just refused to resume) contradicts
+            // itself, and momo refuses to convert that contradiction into a
+            // settlement — the intent stays claimable and named in the log.
+            probeAnswer = (try? await adapter.probe(ref: ref)) ?? .unknown
+            if probeAnswer == .present {
+                logger.warning("provider denied its own missing instance", metadata: [
+                    "provisionID": .string(intent.id.uuidString.lowercased()),
+                    "provider": .string(intent.providerID),
+                    "probe": .string(probeAnswer.rawValue),
+                ])
+                // Throwing leaves the durable intent claimable rather than
+                // downgrading it to a non-terminal path: the contradiction is
+                // the operator's to resolve, and retrying is the only move that
+                // cannot silently bill or silently strand the session.
+                throw CloudReconcileError.dishonestProvider
+            }
+        }
 
         try await pg.withTransaction(logger: logger) { conn in
             try await T3LifecycleLock.acquirePrelude(
@@ -175,8 +205,8 @@ extension NotifierService {
             )
             // The provider call intentionally happens outside PostgreSQL. Lock
             // and revalidate the durable intent before touching usage/session
-            // state: a terminal sweep may have replaced it while E2B was in
-            // flight.
+            // state: a terminal sweep may have replaced it while the provider
+            // call was in flight.
             let lockedRows = try await conn.query(
                 """
                 SELECT state, lifecycle_operation_id, host_id
@@ -292,9 +322,9 @@ extension NotifierService {
                              'schema', 'momo.work_cloud.resume_failed.v1',
                              'host_id', lower(\(hostID)::text),
                              'session_id', lower(\(terminalSession.id)::text),
-                             'provider', 'e2b',
+                             'provider', \(intent.providerID),
                              'reason', 'sandbox_missing',
-                             'upstream_status', \(Int(status)),
+                             'provider_probe', \(probeAnswer.rawValue),
                              'orphan_transition', 'host_offline_sweep',
                              'source', 'lifecycle_reconciler'
                            ))
@@ -375,46 +405,29 @@ extension NotifierService {
         }
     }
 
-    private func reconcileProvision(intent: CloudIntent, apiKey: String) async throws {
-        guard let templateID = config.e2bTemplateID,
-              let publicURL = config.momoPublicBaseURL,
+    private func reconcileProvision(
+        intent: CloudIntent,
+        readyConfig: ReadyCloudProviderSettings,
+        adapter: any CloudProviderAdapter
+    ) async throws {
+        // A degenerate adapter never had a create to converge: a BYOC row's
+        // instance handle exists from enrollment onward.
+        guard adapter.capabilities.supports(.create),
+              let secret = readyConfig.bootstrapSecret(for: intent.providerID),
               let displayName = intent.displayName
         else { return }
-        let token = bootstrapToken(provisionID: intent.id, apiKey: apiKey)
-        let object: [String: Any] = [
-            "templateID": templateID,
-            "timeout": config.e2bSandboxTimeoutSeconds,
-            "autoPause": false,
-            "secure": true,
-            "metadata": [
-                "momo_provision_id": intent.id.uuidString.lowercased(),
-                "momo_workspace_id": intent.workspaceID.uuidString.lowercased(),
-            ],
-            "envVars": [
-                "MOMO_WORKD_SERVER_URL": publicURL,
-                "MOMO_WORKD_WORKSPACE_ID": intent.workspaceID.uuidString.lowercased(),
-                "MOMO_WORKD_SCOPE": "workspace",
-                "MOMO_WORKD_HOST_TYPE": "cloud",
-                "MOMO_WORKD_DISPLAY_NAME": displayName,
-                "MOMO_WORKD_REGISTRATION_TOKEN": token,
-            ],
-        ]
-        let response = try await providerRequest(
-            method: .post,
-            path: "/sandboxes",
-            body: try JSONSerialization.data(withJSONObject: object),
-            idempotencyKey: intent.id.uuidString.lowercased(),
-            apiKey: apiKey
+        let token = bootstrapToken(provisionID: intent.id, secret: secret)
+        let instance = try await adapter.create(
+            spec: CloudInstanceSpec(
+                provisionID: intent.id,
+                workspaceID: intent.workspaceID,
+                displayName: displayName,
+                registrationToken: token,
+                serverURL: readyConfig.publicServerURL
+            ),
+            idempotencyKey: intent.id.uuidString.lowercased()
         )
-        guard response.status.code == 201 else {
-            throw CloudReconcileError.upstream(Int(response.status.code))
-        }
-        var buffer = try await response.body.collect(upTo: 64 * 1024)
-        let data = buffer.readData(length: buffer.readableBytes) ?? Data()
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let sandboxID = json["sandboxID"] as? String,
-              !sandboxID.isEmpty
-        else { throw CloudReconcileError.invalidResponse }
+        let sandboxID = instance.instanceID
         let updated = try await pg.withTransaction(logger: logger) { conn in
             try await T3LifecycleLock.acquirePrelude(
                 conn: conn,
@@ -440,40 +453,15 @@ extension NotifierService {
             ).collect()
         }
         if updated.first == nil {
-            _ = try await providerRequest(
-                method: .delete,
-                path: "/sandboxes/\(try safeID(sandboxID))",
-                body: nil,
-                idempotencyKey: "cleanup-\(intent.id.uuidString.lowercased())",
-                apiKey: apiKey
+            try await adapter.destroy(
+                ref: instance,
+                idempotencyKey: "cleanup-\(intent.id.uuidString.lowercased())"
             )
         }
     }
 
-    private func providerRequest(
-        method: ProviderMethod,
-        path: String,
-        body: Data?,
-        idempotencyKey: String,
-        apiKey: String
-    ) async throws -> HTTPClientResponse {
-        var request = HTTPClientRequest(url: config.e2bAPIBaseURL + path)
-        switch method {
-        case .post: request.method = .POST
-        case .delete: request.method = .DELETE
-        }
-        request.headers.add(name: "X-API-Key", value: apiKey)
-        request.headers.add(name: "Accept", value: "application/json")
-        request.headers.add(name: "Idempotency-Key", value: idempotencyKey)
-        if let body {
-            request.headers.add(name: "Content-Type", value: "application/json")
-            request.body = .bytes(ByteBuffer(data: body))
-        }
-        return try await httpClient.execute(request, timeout: .seconds(30))
-    }
-
-    private func bootstrapToken(provisionID: UUID, apiKey: String) -> String {
-        let key = SymmetricKey(data: Data(apiKey.utf8))
+    private func bootstrapToken(provisionID: UUID, secret: String) -> String {
+        let key = SymmetricKey(data: Data(secret.utf8))
         let payload = Data(
             "momo.cloud.bootstrap.v1:\(provisionID.uuidString.lowercased())".utf8
         )
@@ -484,34 +472,30 @@ extension NotifierService {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    private func safeID(_ value: String) throws -> String {
-        guard value.wholeMatch(of: /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/) != nil else {
-            throw CloudReconcileError.invalidResponse
-        }
-        return value
-    }
-
-    static func isTerminalMissingResume(state: String, status: Int) -> Bool {
-        state == "resuming" && (status == 404 || status == 410)
-    }
-
-    static func acceptsLifecycleResponse(state: String, status: Int) -> Bool {
+    /// ADR-0140 D4 in adapter terms. `nil` means "not converged — retry".
+    ///
+    /// Only a resume whose adapter states the instance is gone is terminal.
+    /// `destroy` already treats absence as success inside the adapter, and a
+    /// pause that failed is simply retried; neither may settle a paid session.
+    static func lifecycleOutcome(
+        state: String,
+        error: CloudProviderError?
+    ) -> CloudLifecycleOutcome? {
         switch state {
-        case "pausing":
-            return status == 204
+        case "pausing", "destroy_pending":
+            return error == nil ? .accepted : nil
         case "resuming":
-            return status == 200 || status == 201
-                || isTerminalMissingResume(state: state, status: status)
-        case "destroy_pending":
-            return status == 204 || status == 404 || status == 410
+            if error == nil { return .accepted }
+            return error == .instanceMissing ? .providerMissing : nil
         default:
-            return false
+            return nil
         }
     }
 }
 
 private enum CloudReconcileError: Error {
-    case upstream(Int)
+    case provider(CloudProviderError)
+    case dishonestProvider
     case invalidResponse
     case staleIntent
 }

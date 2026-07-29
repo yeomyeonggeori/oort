@@ -1,5 +1,7 @@
-import XCTest
+import AsyncHTTPClient
+import CloudProviderKit
 import Crypto
+import XCTest
 @testable import NotifierWorker
 
 final class NotifierWorkerTests: XCTestCase {
@@ -27,21 +29,71 @@ final class NotifierWorkerTests: XCTestCase {
         XCTAssertEqual(enabledCount, 1)
     }
 
-    func testResumeReconcilerTreats404And410AsTerminalMissingSandbox() {
-        for status in [404, 410] {
-            XCTAssertTrue(NotifierService.isTerminalMissingResume(
-                state: "resuming", status: status
-            ))
-            XCTAssertTrue(NotifierService.acceptsLifecycleResponse(
-                state: "resuming", status: status
-            ))
+    /// ADR-0140 D4 restated in adapter terms (ADR-0142 D2): the reconciler
+    /// decides from what the adapter *says*, not from an HTTP status it had to
+    /// interpret itself. Only a resume against an instance the adapter reports
+    /// missing is terminal; everything else is either accepted or retried.
+    func testResumeAgainstAMissingInstanceIsTheOnlyTerminalOutcome() {
+        XCTAssertEqual(
+            NotifierService.lifecycleOutcome(state: "resuming", error: .instanceMissing),
+            .providerMissing
+        )
+        XCTAssertEqual(
+            NotifierService.lifecycleOutcome(state: "resuming", error: nil), .accepted
+        )
+        for state in ["pausing", "destroy_pending"] {
+            XCTAssertEqual(
+                NotifierService.lifecycleOutcome(state: state, error: nil), .accepted
+            )
+            // A pause or destroy that failed is retried by the durable intent.
+            // Settling a paid session on it would be the silent failure
+            // ADR-0142 D3.1 bans.
+            XCTAssertNil(
+                NotifierService.lifecycleOutcome(state: state, error: .instanceMissing)
+            )
         }
-        XCTAssertFalse(NotifierService.isTerminalMissingResume(
-            state: "pausing", status: 404
+        // An unreachable provider is not a dead instance.
+        XCTAssertNil(
+            NotifierService.lifecycleOutcome(state: "resuming", error: .requestFailed)
+        )
+        XCTAssertNil(
+            NotifierService.lifecycleOutcome(state: "resuming", error: .upstreamStatus(500))
+        )
+        // A capability refusal is a configuration fact, never a settlement.
+        XCTAssertNil(NotifierService.lifecycleOutcome(
+            state: "resuming", error: .unsupported(.resume, providerID: "byoc")
         ))
-        XCTAssertFalse(NotifierService.acceptsLifecycleResponse(
-            state: "resuming", status: 500
-        ))
+        XCTAssertNil(NotifierService.lifecycleOutcome(state: "provisioning", error: nil))
+    }
+
+    /// ADR-0142 D4: the reconciler addresses adapters by the registry id stored
+    /// on the host row. A host provisioned before the operator switched the
+    /// default must still be actionable, and BYOC must resolve without any
+    /// operator credential at all.
+    func testAdapterIsResolvedByStoredProviderNotByTheProcessDefault() throws {
+        let settings = CloudProviderSettings.load(environment: [
+            "MOMO_T3_ENABLED": "1",
+            "MOMO_T3_PROVIDER": "mock-b",
+            "MOMO_T3_PROVIDER_MOCK_A_API_BASE_URL": "https://a.example.test",
+            "MOMO_T3_PROVIDER_MOCK_A_API_KEY": "a-not-a-credential",
+            "MOMO_T3_PROVIDER_MOCK_B_API_BASE_URL": "https://b.example.test",
+            "MOMO_T3_PROVIDER_MOCK_B_API_KEY": "b-not-a-credential",
+            "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
+        ])
+        let ready = try settings.requireReady()
+        let client = HTTPClient(eventLoopGroupProvider: .singleton)
+        defer { try? client.syncShutdown() }
+        XCTAssertEqual(
+            try ready.adapter(for: "mock-a", httpClient: client)
+                .capabilities.providerID,
+            "mock-a"
+        )
+        let byoc = try ready.adapter(
+            for: CloudProviderRegistry.byocProviderID, httpClient: client
+        )
+        XCTAssertFalse(byoc.capabilities.managesInstanceLifetime)
+        XCTAssertNil(ready.bootstrapSecret(for: CloudProviderRegistry.byocProviderID))
+        XCTAssertThrowsError(try ready.adapter(for: "mock-c", httpClient: client))
     }
 
     func testRelaySignerProducesVerifiableEd25519Signature() throws {

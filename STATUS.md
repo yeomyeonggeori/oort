@@ -1,5 +1,14 @@
 # momo 진행 현황
 
+## MOMO-670 T3 provider 어댑터 + E2B 제거 + BYOC 등록 공식화 (#897, 2026-07-29)
+
+- `services/CloudProviderKit`이 `create/pause/resume/destroy/probe` 어댑터 계약과 capability 선언을 소유하고 MomoServer·NotifierWorker가 같은 정의를 컴파일한다. 정책 코드는 provider 상수를 알지 못하고 `capabilities`만 읽으며, 미지원 연산은 흉내내지 않고 선언·거부한다. `probe`는 존재/부재/**불명** 3값이라 "물어보지 못했다"가 "사라졌다"로 승격되지 않는다.
+- Migration 054가 `work_cloud_host.provider`의 단일 벤더 CHECK와 default를 걷어내고 어댑터 레지스트리 식별자로 바꾼다. reconciler·REST는 프로세스 기본값이 아니라 **행에 적힌 provider**로 어댑터를 해석하므로, 운영자가 기본 provider를 바꿔도 기존 호스트가 계속 조작 가능하다. 레지스트리에 없는 이름은 설정 로드에서 fail closed.
+- BYOC를 REST로 공식화했다(`POST /v1/workspaces/:ws/work-hosts/byoc/enrollments`, 워크스페이스 공용만 — personal은 스키마가 아니라 REST에서 이름 있게 거절). 기존 1회 부트스트랩 토큰·자체 Ed25519 등록 흐름을 그대로 재사용하며, 토큰은 digest만 저장하므로 같은 ref 재요청은 409다. 셀프호스트 2단 가이드는 `docs/BYOC_CLOUD_HOST.md`.
+- 검증 fixture를 mock provider 2종으로 일반화했다(`scripts/mock_provider.py`: mock-a=pause 지원/메모리 보존, mock-b=pause 거부/cold boot). mock은 정직성이 계약이다 — pause된 인스턴스는 실행이 필요한 호출을 409로 거절하고, 죽은 인스턴스는 probe에 `absent`를 답한다. 정책 코드·검증기·인프라·문서의 벤더 문자열 잔존은 0이며 `verify_t3_provisioner.sh`가 `provider-neutral-policy-code` 이름으로 이를 상시 감시한다(needle을 런타임 조립해 자기 텍스트에 매칭되지 않는다).
+- 연속성 무상태 검증기 `scripts/verify_t3_provider_continuity.sh`를 추가했다: mock-a 사망 → 어댑터의 정직한 보고 → reconciler의 이름 있는 `provider_missing` 수렴 → **기존 resume REST 그대로** mock-b의 새 Run 재개 → `resumed_from_session_id` 계보·단일 정산 단정. red proof는 `T3_CONTINUITY_PROVE_RED=dishonest-probe` — probe가 죽음을 숨기면 momo가 자기모순 provider 위에서 정산하기를 거부하므로 수렴이 없고, 검증기는 유한 deadline에서 `provider-missing-convergence` 이름으로 빨개진다(행·타임아웃 아님).
+- 서버 354·NotifierWorker 7·CloudProviderKit 9·WorkHostDaemon 32(3 skip) 테스트, `check_migration_numbers.sh`, 두 T3 검증기의 정적 절반, compose/OpenAPI YAML 파싱이 green이다. Docker 행동 검증(연속성 정상/red proof, 기존 T3 provisioner·동시성 gate, T1/T2 무회귀)은 오케스트레이터 실행 대기(`runtime-unverified`)다.
+
 ## MOMO-667 T3 수명주기 정본화 (#891, 2026-07-29)
 
 - Migration 053이 정산을 이유 보존형 `t3_terminate` 한 문으로 모으고 직접 `settled_at` 변경과 비실재 cloud-host 전이를 이름 있는 트리거 예외로 봉인한다. 기존 `settle_t3_work_session`은 설치 DB·운영 도구 호환 shim만 유지하며 런타임·repair는 명시 reason 경유로 이행했다.

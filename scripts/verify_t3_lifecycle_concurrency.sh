@@ -201,18 +201,18 @@ VALUES
   ('$SWEEP_SESSION_ID', '$WS_ID', '$CHANNEL_ID', '$MEMBER_ID',
    '$SWEEP_HOST_ID', '$SWEEP_ROOT_ID', 'codex', 'MOMO-667 sweep', 'running');
 INSERT INTO work_cloud_host
-  (id, workspace_id, requester_member_id, host_id, provider_sandbox_id,
+  (id, workspace_id, requester_member_id, host_id, provider, provider_sandbox_id,
    state, bootstrap_token_digest, bootstrap_expires_at, bootstrap_consumed_at,
    unit_rate_micro_usd_second)
 VALUES
-  ('$REST_CLOUD_ID', '$WS_ID', '$MEMBER_ID', '$REST_HOST_ID', 'momo891-rest',
+  ('$REST_CLOUD_ID', '$WS_ID', '$MEMBER_ID', '$REST_HOST_ID', 'mock-a', 'momo891-rest',
    'running', repeat('1', 64), clock_timestamp() + interval '1 hour',
    clock_timestamp(), 1),
-  ('$SWEEP_CLOUD_ID', '$WS_ID', '$MEMBER_ID', '$SWEEP_HOST_ID', 'momo891-sweep',
+  ('$SWEEP_CLOUD_ID', '$WS_ID', '$MEMBER_ID', '$SWEEP_HOST_ID', 'mock-a', 'momo891-sweep',
    'running', repeat('2', 64), clock_timestamp() + interval '1 hour',
    clock_timestamp(), 1),
   ('$TRANSITION_CLOUD_ID', '$WS_ID', '$MEMBER_ID', '$TRANSITION_HOST_ID',
-   'momo891-transition', 'ready', repeat('3', 64),
+   'mock-a', 'momo891-transition', 'ready', repeat('3', 64),
    clock_timestamp() + interval '1 hour', clock_timestamp(), 1);
 INSERT INTO workspace_credit (workspace_id, balance_micro_usd, updated_at)
 VALUES ('$WS_ID', 100000, clock_timestamp())
