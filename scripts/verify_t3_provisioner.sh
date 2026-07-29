@@ -29,8 +29,10 @@ find_openssl() {
 now_ms() { python3 -c 'import time; print(time.time_ns() // 1_000_000)'; }
 
 MIGRATION="server/Migrations/045_t3_provisioner_credit_ledger.sql"
-LIFECYCLE_MIGRATION="server/Migrations/049_t3_lifecycle_settlement.sql"
+SETTLEMENT_MIGRATION="server/Migrations/049_t3_lifecycle_settlement.sql"
+LIFECYCLE_MIGRATION="server/Migrations/051_t3_unsettled_usage_constraint.sql"
 test -f "$MIGRATION" || fail "missing $MIGRATION"
+test -f "$SETTLEMENT_MIGRATION" || fail "missing $SETTLEMENT_MIGRATION"
 test -f "$LIFECYCLE_MIGRATION" || fail "missing $LIFECYCLE_MIGRATION"
 grep -q "CREATE TABLE work_host_usage_interval" "$MIGRATION" \
   || fail "active/pause interval ledger missing"
@@ -38,7 +40,7 @@ grep -q "WHEN state = 'active' AND ended_at IS NOT NULL" "$MIGRATION" \
   || fail "active seconds must be generated only for active intervals"
 grep -q "ALTER TABLE %I FORCE ROW LEVEL SECURITY" "$MIGRATION" \
   || fail "new tenant tables must FORCE RLS"
-grep -q "CREATE FUNCTION settle_t3_work_session" "$LIFECYCLE_MIGRATION" \
+grep -q "CREATE FUNCTION settle_t3_work_session" "$SETTLEMENT_MIGRATION" \
   || fail "named gate terminal-settlement-primitive"
 grep -q "work_host_usage_one_unsettled_per_host_idx" "$LIFECYCLE_MIGRATION" \
   || fail "named gate one-unsettled-usage-per-host"

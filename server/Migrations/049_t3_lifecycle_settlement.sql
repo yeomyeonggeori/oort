@@ -39,39 +39,6 @@ CREATE UNIQUE INDEX work_cloud_host_create_idempotency_idx
   ON work_cloud_host (workspace_id, create_idempotency_key)
   WHERE create_idempotency_key IS NOT NULL;
 
--- v0 deliberately rejects two unsettled sessions on one paid sandbox. A future
--- multi-session design must replace this with an explicit host reference count.
--- Fail closed instead of silently choosing which paid usage to keep. The
--- exception names every violating host so an operator can reconcile billing
--- evidence before retrying the migration.
-DO $$
-DECLARE
-  v_duplicate_hosts text;
-BEGIN
-  SELECT string_agg(
-           lower(host_id::text) || ' (' || usage_count || ')',
-           ', ' ORDER BY host_id
-         )
-    INTO v_duplicate_hosts
-    FROM (
-      SELECT host_id, count(*) AS usage_count
-        FROM work_host_usage
-       WHERE settled_at IS NULL
-       GROUP BY host_id
-      HAVING count(*) > 1
-    ) duplicates;
-
-  IF v_duplicate_hosts IS NOT NULL THEN
-    RAISE EXCEPTION
-      'cannot enforce one unsettled T3 usage per host; reconcile host(s): %',
-      v_duplicate_hosts;
-  END IF;
-END $$;
-
-CREATE UNIQUE INDEX work_host_usage_one_unsettled_per_host_idx
-  ON work_host_usage (host_id)
-  WHERE settled_at IS NULL;
-
 -- Close the interval, finalize active seconds, append the debit exactly once,
 -- free the paid slot, revoke the host, and leave a durable destroy intent. The
 -- generated active_seconds from migration 045 remains the sole pause-accounting
@@ -165,5 +132,3 @@ END $$;
 
 COMMENT ON FUNCTION settle_t3_work_session(uuid, uuid) IS
   'Idempotent T3 terminal settlement and durable provider-destroy intent.';
-COMMENT ON INDEX work_host_usage_one_unsettled_per_host_idx IS
-  'v0 one paid session per cloud host; prevents double billing and sandbox-wide pause races.';
