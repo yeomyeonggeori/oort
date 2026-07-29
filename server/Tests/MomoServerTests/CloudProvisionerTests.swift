@@ -1,3 +1,4 @@
+import CloudProviderKit
 import Foundation
 import Hummingbird
 import XCTest
@@ -19,58 +20,116 @@ final class CloudProvisionerTests: XCTestCase {
         ))
     }
 
-    func testT3IsDisabledByDefaultEvenWhenE2BConfigurationExists() {
+    /// ADR-0142 D4: a fully configured managed provider still stays shut until
+    /// the operator opts in. Configuration presence is not consent.
+    func testT3IsDisabledByDefaultEvenWhenProviderConfigurationExists() {
         let config = CloudProvisionerConfig.load(environment: [
-            "E2B_API_KEY": "operator-secret",
-            "E2B_TEMPLATE_ID": "momo-workd",
+            "MOMO_T3_PROVIDER": "mock-a",
+            "MOMO_T3_PROVIDER_MOCK_A_API_BASE_URL": "https://provider.example.test",
+            "MOMO_T3_PROVIDER_MOCK_A_API_KEY": "operator-secret",
             "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
         ])
         XCTAssertFalse(config.enabled)
         XCTAssertThrowsError(try config.requireReady()) { error in
-            XCTAssertEqual(error as? CloudProvisionerError, .disabled)
+            XCTAssertEqual(error as? CloudProvisionerConfigError, .disabled)
         }
         XCTAssertThrowsError(try CloudProvisionerRoutes.readyConfig(config)) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .serviceUnavailable)
         }
     }
 
-    func testExplicitT3OptInStillRequiresE2BKey() {
+    /// A managed provider with no endpoint fails closed by name rather than
+    /// booting a T3 surface that would 500 on first use.
+    func testManagedProviderOptInStillRequiresItsOwnEndpoint() {
         let config = CloudProvisionerConfig.load(environment: [
             "MOMO_T3_ENABLED": "1",
-            "E2B_TEMPLATE_ID": "momo-workd",
+            "MOMO_T3_PROVIDER": "mock-a",
             "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
         ])
         XCTAssertThrowsError(try config.requireReady()) { error in
-            XCTAssertEqual(error as? CloudProvisionerError, .missingAPIKey)
+            XCTAssertEqual(
+                error as? CloudProvisionerConfigError, .missingEndpoint("mock-a")
+            )
         }
         XCTAssertThrowsError(try CloudProvisionerRoutes.readyConfig(config)) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .serviceUnavailable)
         }
+    }
+
+    /// A provider identifier outside the adapter registry is refused at load,
+    /// not discovered later by a reconciler holding an unroutable host row.
+    func testUnknownProviderFailsClosed() {
+        let config = CloudProvisionerConfig.load(environment: [
+            "MOMO_T3_ENABLED": "1",
+            "MOMO_T3_PROVIDER": "not-a-registered-substrate",
+            "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
+        ])
+        XCTAssertThrowsError(try config.requireReady()) { error in
+            XCTAssertEqual(
+                error as? CloudProvisionerConfigError,
+                .unknownProvider("not-a-registered-substrate")
+            )
+        }
+    }
+
+    /// ADR-0142 D1: BYOC is the base form and needs no operator credential —
+    /// `enabled` plus a public HTTPS URL is a complete T3 configuration.
+    func testBYOCIsReadyWithoutAnyProviderCredential() throws {
+        let config = CloudProvisionerConfig.load(environment: [
+            "MOMO_T3_ENABLED": "1",
+            "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
+        ])
+        XCTAssertEqual(config.defaultProviderID, CloudProviderRegistry.byocProviderID)
+        let ready = try config.requireReady()
+        XCTAssertFalse(ready.defaultCapabilities.managesInstanceLifetime)
+        XCTAssertFalse(ready.defaultCapabilities.supports(.create))
     }
 
     func testCloudConfigClampsAndRequiresPublicHTTPS() throws {
         let valid = CloudProvisionerConfig.load(environment: [
             "MOMO_T3_ENABLED": "1",
-            "E2B_API_KEY": "operator-secret",
-            "E2B_TEMPLATE_ID": "momo-workd",
+            "MOMO_T3_PROVIDER": "mock-a",
+            "MOMO_T3_PROVIDER_MOCK_A_API_BASE_URL": "https://provider.example.test/",
+            "MOMO_T3_PROVIDER_MOCK_A_API_KEY": "operator-secret",
+            "MOMO_T3_PROVIDER_MOCK_A_INSTANCE_TIMEOUT_SECONDS": "1",
             "MOMO_PUBLIC_BASE_URL": "https://momo.example.test/",
-            "E2B_SANDBOX_TIMEOUT_SECONDS": "1",
             "MOMO_T3_RATE_MICRO_USD_PER_SECOND": "0",
         ])
         let ready = try valid.requireReady()
-        XCTAssertEqual(ready.sandboxTimeoutSeconds, 60)
+        XCTAssertEqual(ready.endpoints["mock-a"]?.instanceTimeoutSeconds, 60)
+        XCTAssertEqual(ready.endpoints["mock-a"]?.apiBaseURL, "https://provider.example.test")
         XCTAssertEqual(ready.unitRateMicroUSDSecond, 1)
         XCTAssertEqual(ready.publicServerURL, "https://momo.example.test")
 
         let insecure = CloudProvisionerConfig.load(environment: [
             "MOMO_T3_ENABLED": "1",
-            "E2B_API_KEY": "operator-secret",
-            "E2B_TEMPLATE_ID": "momo-workd",
             "MOMO_PUBLIC_BASE_URL": "http://momo.example.test",
         ])
         XCTAssertThrowsError(try insecure.requireReady()) { error in
-            XCTAssertEqual(error as? CloudProvisionerError, .invalidPublicServerURL)
+            XCTAssertEqual(
+                error as? CloudProvisionerConfigError, .invalidPublicServerURL
+            )
         }
+    }
+
+    /// A host provisioned before the operator switched `MOMO_T3_PROVIDER` must
+    /// stay actionable: the reconciler addresses adapters by the stored
+    /// `work_cloud_host.provider`, not by today's default.
+    func testNonDefaultRegisteredProviderStaysAddressable() throws {
+        let config = CloudProvisionerConfig.load(environment: [
+            "MOMO_T3_ENABLED": "1",
+            "MOMO_T3_PROVIDER": "mock-b",
+            "MOMO_T3_PROVIDER_MOCK_A_API_BASE_URL": "https://a.example.test",
+            "MOMO_T3_PROVIDER_MOCK_A_API_KEY": "a-secret",
+            "MOMO_T3_PROVIDER_MOCK_B_API_BASE_URL": "https://b.example.test",
+            "MOMO_T3_PROVIDER_MOCK_B_API_KEY": "b-secret",
+            "MOMO_PUBLIC_BASE_URL": "https://momo.example.test",
+        ])
+        let ready = try config.requireReady()
+        XCTAssertEqual(ready.defaultProviderID, "mock-b")
+        XCTAssertNotNil(ready.endpoints["mock-a"])
+        XCTAssertTrue(try ready.capabilities(for: "mock-a").supports(.pause))
+        XCTAssertFalse(try ready.capabilities(for: "mock-b").supports(.pause))
     }
 
     func testBootstrapTokenDigestIsDeterministicWithoutRawToken() {
@@ -84,18 +143,52 @@ final class CloudProvisionerTests: XCTestCase {
     func testCrashSafeBootstrapTokenIsStableForProvisionId() {
         let provisionID = UUID(uuidString: "00000000-0000-7000-8000-000000000876")!
         let first = CloudProvisionerRoutes.bootstrapToken(
-            provisionID: provisionID, apiKey: "operator-test-key"
+            provisionID: provisionID, secret: "operator-test-key"
         )
         let replay = CloudProvisionerRoutes.bootstrapToken(
-            provisionID: provisionID, apiKey: "operator-test-key"
+            provisionID: provisionID, secret: "operator-test-key"
         )
         XCTAssertEqual(first, replay)
         XCTAssertNotEqual(first, "operator-test-key")
         XCTAssertNotEqual(
             first,
             CloudProvisionerRoutes.bootstrapToken(
-                provisionID: UUID(), apiKey: "operator-test-key"
+                provisionID: UUID(), secret: "operator-test-key"
             )
+        )
+    }
+
+    /// ADR-0142 D4: the single-vendor CHECK from 045:103 is gone and the
+    /// column is an adapter registry identifier. The shape constraint and the
+    /// dropped default are both load-bearing — a row with an unstated provider
+    /// is a row no reconciler can route.
+    func testProviderRegistryMigrationRemovesTheSingleVendorConstraint() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sql = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/054_t3_provider_registry.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(sql.contains("DROP CONSTRAINT work_cloud_host_provider_ck"))
+        XCTAssertTrue(sql.contains("CHECK (provider ~ '^[a-z0-9][a-z0-9-]{0,31}$')"))
+        XCTAssertTrue(sql.contains("ALTER COLUMN provider DROP DEFAULT"))
+        XCTAssertFalse(sql.contains("CHECK (provider = "))
+    }
+
+    /// The env namespace is derived, not hand-maintained: a registry id with a
+    /// hyphen must still produce a legal environment variable prefix.
+    func testProviderEnvironmentNamespaceIsDerivedFromRegistryID() {
+        XCTAssertEqual(
+            CloudProviderSettings.environmentNamespace(for: "mock-a"),
+            "MOMO_T3_PROVIDER_MOCK_A"
+        )
+        XCTAssertEqual(
+            CloudProviderSettings.environmentNamespace(for: "byoc"),
+            "MOMO_T3_PROVIDER_BYOC"
         )
     }
 

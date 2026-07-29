@@ -2519,7 +2519,7 @@ final class MomoServerTests: XCTestCase {
 
         let migration = try String(
             contentsOf: serverRoot.appendingPathComponent(
-                "Migrations/054_work_session_host_reconciliation.sql"
+                "Migrations/056_work_session_host_reconciliation.sql"
             ),
             encoding: .utf8
         )

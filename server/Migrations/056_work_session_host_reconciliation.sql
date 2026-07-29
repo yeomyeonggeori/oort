@@ -1,5 +1,5 @@
 -- =============================================================================
--- 054_work_session_host_reconciliation.sql — MOMO-656 / #870
+-- 056_work_session_host_reconciliation.sql — MOMO-656 / #870
 --
 -- A work host daemon that restarts faster than `MOMO_HOST_OFFLINE_GRACE_S`
 -- keeps its `work_host.last_seen_at` fresh, so the ADR-0125 D11 offline sweep

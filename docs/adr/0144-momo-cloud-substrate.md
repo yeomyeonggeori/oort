@@ -1,6 +1,7 @@
 # ADR-0144: momo Cloud substrate — k8s 위 microVM 격리·이미지/캐시·샌드박스 자격증명
 
-- Status: **Proposed** (2026-07-29, 기안 Fable — 성재 지시 "0144도 기안 진행해줘")
+- Status: **Accepted** (2026-07-29, 성재 — "144는 승인할게". 기안 Fable)
+- 파생: 이행 1(PoC)은 베어메탈 노드 조달(성재) 후. 이행 2(k8s adapter)는 ADR-0142 어댑터 인터페이스 랜딩 후.
 - 관련: **ADR-0142(Accepted)의 "momo Cloud 실 provider 선정" 별건이 이 ADR이다.** ADR-0140(수명주기 — substrate 무관 유지), ADR-0127(첨부 S3 — SaaS 백엔드), ADR-0004(자격증명 비유입)
 - 발단: 성재(2026-07-29) — "Slack처럼 momo 호스트로서 k8s를 하나 띄우고, 사람들이 편하게 워크스페이스·에이전트 연동·개발·컴퓨트 사용을 보조."
 - 입력: `docs/planning/2026-07-29-gpt-work-runtime-review.md` §8(인프라 감사 — 빈 곳 ①②③) + 격리 기술 리서치(§리서치 근거)

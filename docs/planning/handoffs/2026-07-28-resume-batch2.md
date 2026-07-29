@@ -94,3 +94,12 @@ cat $R/exit-code 2>/dev/null && tail -20 $R/last-message.md || echo "아직 실�
   랜딩된 뒤 이 기록을 `JOURNAL.md`로 옮긴다.
 - **주의(병렬 세션 어긋남)**: 그 세션의 재계획은 #876~#878을 "유일한 active 배치"로 잡고 있으나 해당 배치는 이미
   랜딩됐고 후속 #882·#887까지 main에 들어왔다. 중복 착수 위험 — 통합 전 정합 확인 필요.
+
+## 8. 2차 main 반영 (2026-07-29, 성재 "main 반영도 가능하면 같이")
+
+**결과: `main` = `track/engine` = `track/uxui` = `ff1e9066`** (engine의 #886·#890·#891 + ADR-0140~0144 흡수).
+
+- 머지 지점 검증(전부 green): server build + **349 tests** · NotifierWorker · WorkHostDaemon · 마이그레이션 번호 043~053 유일. **웹은 diff 0이라 게이트 생략**(근거: `git diff origin/main..HEAD -- clients/web` 빈 결과).
+- ADR 상태: **0142·0143 Accepted**(성재 승인) · **0144 Proposed**(momo Cloud substrate — Kata microVM·이미지/캐시·샌드박스 내 LLM 로그인). 0141은 계속 보류.
+- 병렬 GPT 세션의 미커밋 6건은 이번에도 detached 워크트리 머지로 보존.
+- 다음 배치 후보(성재 트리거 대기): ①ADR-0142 이행+#892 재개(어댑터·E2B 제거·T-4 수렴 한 배치) ②ADR-0143 이행(workstream 마이그레이션+재개 자격 확장) ③ADR-0144 승인 시 PoC(베어메탈 1노드 Kata 실측). 워커 모델 = **Claude Opus medium**.
