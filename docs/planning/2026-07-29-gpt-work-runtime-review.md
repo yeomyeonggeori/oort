@@ -64,3 +64,27 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 ## 4. 파이프라인 지시 반영 (2026-07-29 성재)
 
 - 기획=Fable 유지, **워커 모델 sol medium → Claude Opus medium 전환**(다음 spawn부터, 가동 중 #891은 완주).
+
+## 5. 우로보로스 인터뷰 산출 (interview_20260729_053912, 모호성 0.17→0.10)
+
+인터뷰가 결정 공백 5개를 찾았고, Fable 판단으로 채운 것과 성재 몫으로 남긴 것을 구분한다.
+
+**Fable 판단으로 확정 (ADR 기안에 반영할 것):**
+1. **BYOC = 순수 compute 모델** (federated SoT 아님) — momo 서버가 control plane, BYOC는 workd 등록으로 붙는 compute. T2 데몬과 같은 문법의 연장이라 하드 불변식(PG=SoT)과 정합. federated는 기각.
+2. **인계 = 소유권 이전이 아니라 "같은 Workstream 아래 새 Run"** — `work_session.member_id`는 불변 실행 기록으로 의미 축소(이전 안 함). 기존 계보 재개와 같은 문법이라 마이그레이션 최소. Writer Lease가 필요한 유일한 지점은 라이브 PTY takeover뿐(ADR-0141 재론에 귀속).
+3. **Workstream 권한 = 채널 멤버십 파생** (새 권한 체계 발명 금지). 명시 할당은 P2. WIP push의 git 원격 접근은 momo 권한 밖 — 비대칭을 ADR에 명문화.
+4. **cross-provider 연속성 = ADR-0142의 부정형 의무 2개로 보장** — ①어댑터는 죽음을 정직하게 보고(provider_missing) ②연속성 필수 상태를 provider 내부에 두지 않음(스냅샷=최적화, 원본 금지). 수용 기준: mock provider 2종 간 재개 시 계보+WIP 복원. BYOC 해지 시 provider 내부 잔여 스냅샷 삭제만 사용자 책임(고지 의무).
+5. **ADR-0143 P1 수용 기준**: 스레드 첫 Run 시 Workstream 암시 생성 · 같은 채널 멤버 B의 이어받기(새 Run이 같은 Workstream에 연결, 실행 이력에 A·B 병기) · 비멤버 403(RLS 강제 — 정보성 경고 불가) · WIP 메타 노출은 원장까지(git fetch 권한은 범위 밖).
+
+**성재 몫으로 남긴 결정** (아래 §6):
+- E2B 폐기 확정 여부 + BYOC-first 역전 승인
+- BYOC 등록 단위(워크스페이스 공용 vs 개인 vs 둘 다)
+- Workstream 방향(스레드 앵커·암시 생성) 승인
+- #892(T-4) 보류 여부
+
+## 6. 다음 행동
+
+1. 성재 결정 4건 수령 → ADR-0142(provider+BYOC)·ADR-0143(Workstream) 기안
+2. #891 완주·검수·머지(계속) — provider-일반형이라 E2B 결정과 무관하게 유효
+3. #892는 ADR-0142 결정 전 보류(권고)
+4. 다음 워커 spawn부터 Claude Opus medium
