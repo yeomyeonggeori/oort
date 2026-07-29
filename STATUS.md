@@ -1,5 +1,13 @@
 # momo 진행 현황
 
+## MOMO-672 verify_workd spawn ack 회귀 — 원인 커밋 확정 + 검증기 수리 (#903, 2026-07-29)
+
+- 원인은 서버·데몬 회귀가 아니라 **검증기가 낡은 종단 상태를 기다린 것**이다. `68d6ca91` "feat(workd): 로그인 셸 도구 idle 수명주기 연결 (#857)"이 `pty` transport를 "도구를 직접 실행하고 종료하면 세션 ended"에서 "영속 로그인 셸이 도구를 함수로 감싸고, 도구가 끝나면 OSC 마커로 **idle** 보고"로 바꿨다. `verify_workd.sh`는 여전히 `work_control acked` + `work_session ended`를 함께 기다렸으므로 데몬이 더 이상 하지 않는 전이에서 240초 타임아웃했다. bisect 대신 실런 증거로 확정: base 실패 시점 원장은 `work_control=acked` · `work_session=idle` · `exit_code=0`(즉 spawn·dispatch·ack·로컬 출력은 전부 정상).
+- 수리(검증기 픽스처): 종단 대기를 `acked:idle` 또는 `acked:ended`로 넓히고, idle로 정착한 경우 ① `work.session.idle` outbox 1건(호스트가 보고한 running→idle 사실)을 단정한 뒤 ② 소유자 `PATCH /work-sessions/{id}` `{"status":"ended"}`로 idle→ended 구간을 명시 주행한다. `kill` control은 running 세션만 허용하므로(#526 계보 가드) 소유자 PATCH가 notifier 없이 idle을 빠져나가는 유일한 경로다. exit code는 서버 `COALESCE`로 보존되어 기존 `1:1:1:1` 원장 단정(acked / ended+exit_code 0 / work.session.started / work.session.ended)이 그대로 유지된다. ACP 모드(`WORKD_GATE_ACP=1`)는 자연 종료가 여전히 `ended`라 이 분기를 타지 않는다.
+- red proof: 종단 대기를 `*:acked:ended:*` 단독으로 되돌리면 base와 동일하게 `[workd] spawn ack/session end timeout`으로 실패한다(이번 조사에서 실측한 base 실패가 그 증거 자체다).
+- `scripts/verify_workd.sh`는 **이미 `local_gate.sh` 런타임 목록(라인 685)에 포함**돼 있다 — 빠져나간 곳은 핸드오프 패킷들이 관행적으로 나열하던 무회귀 세트(`verify_work_session_idle`·`verify_work_session`·`verify_work_host`)였다. 검수 절차 문서는 이 PR에서 건드리지 않았고, 대신 local_gate coverage note를 실제 계약(running→idle→ended)으로 갱신했다.
+- 검증: `scripts/verify_workd.sh` 실측 green(docker 직접 실행, compose 프로젝트 `momo488workd` 전용 사용 후 `down -v`) · WorkHostDaemon·MomoServer swift 테스트 무회귀.
+
 ## MOMO-654 OpenAPI 계약 게이트 remote-create 409 해소 + 완주 구조 (#865, 2026-07-29)
 
 - `work-session-remote-create` 409(`spawn control is not dispatchable by this host`)는 서버 회귀가 아니라 게이트 픽스처 결함이다. `requireDispatchedSpawnControl`은 `wc.payload->>'tool'`과 `wc.payload->>'label'` 동시 일치를 요구하는데(#526에서 도입), #545가 이 샘플을 host 서명 생성으로 바꾸면서 세션 label만 `OpenAPI remote PTY`로 두고 control payload는 `OpenAPI control`로 남겨 두 리터럴이 갈라졌다. 즉 #545 이후 이 샘플은 통과한 적이 없으며 base에서도 동일하게 재현된다(JOURNAL 2026-07-27 기록과 일치).
