@@ -158,6 +158,8 @@ enum AppBuilder {
             httpClient: httpClient,
             cloudProvisionerConfig: config.cloudProvisioner
         ).add(to: authed)
+        // MOMO-671 / ADR-0143: goal-layer read projections over work_session.
+        WorkstreamRoutes(db: db).add(to: authed)
         TerminalAttachRoutes(db: db).add(to: authed)
         WorkPoolRoutes(db: db).add(to: authed)
         WorkControlRoutes(db: db).add(to: authed)
