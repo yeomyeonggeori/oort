@@ -263,16 +263,37 @@ subscription은 후속 범위다.
 
 ### momo Cloud T3 provisioner + active-time ledger
 
-ADR-0136의 T3는 MomoServer가 E2B REST를 호출하는 opt-in 경로다. 사용자가 유료 cloud를
-명시 확인하면 서버가 먼저 workspace credit과 `work_pool` slot을 잠금 검사하고,
-`work_cloud_host(state=provisioning)` 예약을 만든 뒤 E2B sandbox를 생성한다.
-E2B API key는 인스턴스 운영자 process env에만 있고 tenant 설정·DB·응답·로그로 내려가지
-않는다. E2B template의 `momo-workd`는 15분짜리 1회 bootstrap token을 소비하면서 자체
-Ed25519 키로 `work_host(type=cloud, scope=workspace)`를 등록한다. DB에는 token digest만
-남고 private key는 sandbox 밖으로 나오지 않는다.
+ADR-0136의 T3는 opt-in 경로이고, ADR-0142가 그 실행 주체를 **이원화**했다. 호스트를
+얻는 길은 두 가지이며 **수명주기·과금·관찰은 획득 경로와 무관하게 동일하다.**
+
+- **BYOC(기본형)**: 워크스페이스 운영자가 자기 VM에 `momo-workd`를 설치하고 momo가 발급한
+  1회 토큰으로 등록한다. momo는 그 호스트를 만들지도 부수지도 않는다 — 등록·배정·관찰·과금만
+  한다. 등록 단위는 워크스페이스 공용이며, personal은 스키마가 아니라 REST에서 닫는다.
+- **관리형 provider**: 어댑터가 같은 등록 흐름을 자동으로 수행한다. 어댑터의 유일한 추가
+  권한은 "인스턴스를 만들고 부수는 것"이다.
+
+어댑터 계약(`services/CloudProviderKit`)은 `create`/`pause`/`resume`/`destroy`/`probe`이고
+MomoServer와 NotifierWorker가 **같은 정의**를 컴파일한다. provider별 사실(pause 지원 여부,
+resume이 메모리를 보존하는지, 연속 실행 상한, 동시 실행 한도)은 전부 `capabilities` 선언에
+있으며 **정책 코드가 provider 상수를 아는 것은 금지**된다. 지원하지 않는 연산은 흉내내지 않고
+capability로 선언하고 거부한다. `probe`는 존재/부재/**불명** 3값이다 — "물어보지 못했다"를
+"사라졌다"로 바꾸면 유료 세션이 조용히 정산되기 때문이다.
+
+`work_cloud_host.provider`는 이 레지스트리의 키다(migration 054에서 단일 벤더 CHECK 제거,
+default 제거 — provider를 말하지 않은 행은 아무도 조정할 수 없는 행이다). 사용자가 유료
+cloud를 명시 확인하면 서버가 먼저 workspace credit과 `work_pool` slot을 잠금 검사하고,
+`work_cloud_host(state=provisioning)` 예약을 만든 뒤 어댑터가 인스턴스를 생성한다.
+provider 운영자 키는 인스턴스 운영자 process env에만 있고 tenant 설정·DB·응답·로그로
+내려가지 않는다(ADR-0004). 인스턴스의 `momo-workd`는 15분짜리 1회 bootstrap token을
+소비하면서 자체 Ed25519 키로 `work_host(type=cloud, scope=workspace)`를 등록한다. DB에는
+token digest만 남고 private key는 인스턴스 밖으로 나오지 않는다.
+
+연속성에 필요한 상태는 provider 안에 두지 않는다. 스냅샷·pause 이미지는 최적화이고 원본은
+git(계보·WIP)과 momo 원장이다. 따라서 **교차 provider 재개는 별도 절차가 아니라 기존 재개
+경로 그 자체**이며, 어댑터가 죽음을 정직하게 보고하는 것이 그 전제다(ADR-0142 D3).
 
 T3 session 생성은 host당 미정산 1건 partial unique 아래 `work_host_usage` 한 행과 첫
-`work_host_usage_interval(state=active)`을 같은 tenant transaction에서 연다. pause는 E2B
+`work_host_usage_interval(state=active)`을 같은 tenant transaction에서 연다. pause는 어댑터
 pause 성공 뒤 active interval을 닫고 `state=paused` 구간을 열며, resume은 paused 구간을
 닫고 새 active 구간을 연다. interval의 generated `active_seconds`는 active일 때만 wall
 time이고 paused이면 구조적으로 0이다. session 종료 transaction은 열린 구간을 닫아 active
@@ -291,7 +312,7 @@ NotifierWorker reconciler가 `pausing|resuming|destroy_pending` 및 미확정 pr
 ADR-0125 D10에서 원격 host/workd/provisioner는 도구를 PTY로 `create`하고 안정적인
 `pty_id`와 credential-free HTTPS/WSS `attach_endpoint`를 signed `work_session` 생성 요청에
 결속한다. 같은 `pty_id`에 대한 `connect`, `send_stdin`, `resize`, `kill`이 하나의 세션을
-조작한다는 것이 E2B-compatible 추상 계약이며, 실제 host PTY adapter는 후속 구현이다.
+조작한다는 것이 provider-중립 추상 계약이며, 실제 host PTY adapter는 후속 구현이다.
 
 human bearer는 `POST /v1/workspaces/:ws/work-sessions/:id/terminal-attach`에
 `mode=controller|observer`를 요청한다. 기본 controller는 기존처럼 세션 소유자 전용이고,

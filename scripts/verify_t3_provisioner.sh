@@ -55,8 +55,22 @@ grep -q "work_host_usage_one_unsettled_per_host_idx" "$LIFECYCLE_MIGRATION" \
 grep -q "state IN ('pausing', 'resuming', 'destroy_pending')" \
   workers/NotifierWorker/Sources/NotifierWorker/CloudLifecycleReconciler.swift \
   || fail "named gate provider-intent-reconciler"
-grep -q "Idempotency-Key" server/Sources/MomoServer/Cloud/E2BProvisioner.swift \
+grep -q "Idempotency-Key" \
+  services/CloudProviderKit/Sources/CloudProviderKit/HTTPCloudProviderAdapter.swift \
   || fail "named gate crash-safe-provider-create"
+grep -q "func probe" \
+  services/CloudProviderKit/Sources/CloudProviderKit/CloudProviderAdapter.swift \
+  || fail "named gate provider-adapter-contract"
+# ADR-0142 D4: no vendor name may survive in policy code or in the fixtures
+# that verify it. The needle is assembled at runtime so this guard cannot match
+# itself and go green on its own text.
+RETIRED_VENDOR="$(printf 'e2%s' b)"
+if grep -rniq -- "$RETIRED_VENDOR" \
+  server/Sources services/CloudProviderKit/Sources \
+  workers/NotifierWorker/Sources scripts/mock_provider.py \
+  scripts/verify_t3_provider_continuity.sh "$0"; then
+  fail "named gate provider-neutral-policy-code"
+fi
 grep -q "/v1/admin/workspaces/:ws/credits/topups" \
   server/Sources/MomoServer/Routes/CloudCreditRoutes.swift \
   || fail "named gate operator-topup-rest"
@@ -70,7 +84,7 @@ fi
 scripts/check_migration_numbers.sh server/Migrations >/dev/null
 bash -n "$0"
 PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" \
-  python3 -m py_compile scripts/mock_e2b.py
+  python3 -m py_compile scripts/mock_provider.py
 
 if [ "${T3_GATE_RUN_DOCKER:-1}" != "1" ]; then
   pass "static migration and fixture checks"
@@ -82,8 +96,9 @@ for tool in docker curl jq python3; do
 done
 OPENSSL_BIN="$(find_openssl)"
 
-# Deliberately never source .env/.env.worktree. MOMO-647 E2B credentials are
-# orchestrator-owned; this gate uses a literal fake key against a local mock.
+# Deliberately never source .env/.env.worktree. Provider operator keys are
+# orchestrator-owned; this gate uses a literal fake key against a local mock
+# substrate that speaks the same neutral REST shape as a real adapter target.
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 SAFE_ENV_FILE="$REPO_ROOT/infra/.env.example"
 PROJECT="${T3_GATE_PROJECT:-momo855t3}"
@@ -92,7 +107,7 @@ PG_PORT="${T3_GATE_POSTGRES_PORT:-28051}"
 CENT_PORT_HOST="${T3_GATE_CENTRIFUGO_PORT:-28052}"
 HERMES_PORT_HOST="${T3_GATE_HERMES_PORT:-28053}"
 PUSH_PORT_HOST="${T3_GATE_PUSH_RELAY_PORT:-28054}"
-MOCK_E2B_PORT="${T3_GATE_MOCK_E2B_PORT:-28055}"
+MOCK_PROVIDER_PORT="${T3_GATE_MOCK_PROVIDER_PORT:-28055}"
 BOOT_TIMEOUT="${T3_GATE_BOOT_TIMEOUT:-2400}"
 ASSERT_TIMEOUT="${T3_GATE_ASSERT_TIMEOUT:-120}"
 RUN_TAG="$(date -u +%s)-$$"
@@ -100,14 +115,16 @@ OWNER_EMAIL="t3-owner-$RUN_TAG@momo.local"
 OWNER_PASSWORD="t3-$RUN_TAG"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-t3-provisioner.XXXXXX")"
 BASE_URL="http://127.0.0.1:$API_PORT"
-GATE_E2B_KEY=""
+GATE_PROVIDER_KEY=""
 GATE_T3_ENABLED=""
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" \
     HERMES_PORT="$HERMES_PORT_HOST" PUSH_RELAY_PORT="$PUSH_PORT_HOST" \
-    E2B_API_BASE_URL="http://host.docker.internal:$MOCK_E2B_PORT" \
-    E2B_API_KEY="$GATE_E2B_KEY" E2B_TEMPLATE_ID="momo-workd" \
+    MOMO_T3_PROVIDER="mock-a" \
+    MOMO_T3_PROVIDER_MOCK_A_API_BASE_URL="http://host.docker.internal:$MOCK_PROVIDER_PORT" \
+    MOMO_T3_PROVIDER_MOCK_A_API_KEY="$GATE_PROVIDER_KEY" \
+    MOMO_T3_PROVIDER_MOCK_A_IMAGE_REF="momo-workd" \
     MOMO_T3_ENABLED="$GATE_T3_ENABLED" \
     MOMO_PUBLIC_BASE_URL="https://momo.invalid" \
     MOMO_T3_RATE_MICRO_USD_PER_SECOND=25 \
@@ -121,9 +138,9 @@ compose() {
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
-  if [ -n "${MOCK_E2B_PID:-}" ]; then
-    kill "$MOCK_E2B_PID" >/dev/null 2>&1 || true
-    wait "$MOCK_E2B_PID" >/dev/null 2>&1 || true
+  if [ -n "${MOCK_PROVIDER_PID:-}" ]; then
+    kill "$MOCK_PROVIDER_PID" >/dev/null 2>&1 || true
+    wait "$MOCK_PROVIDER_PID" >/dev/null 2>&1 || true
   fi
   if [ "${T3_GATE_KEEP:-0}" = "1" ]; then
     log "leaving compose project '$PROJECT' up; evidence $TMP_DIR"
@@ -140,12 +157,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-python3 scripts/mock_e2b.py --host 0.0.0.0 --port "$MOCK_E2B_PORT" \
-  >"$TMP_DIR/mock-e2b.log" 2>&1 &
-MOCK_E2B_PID=$!
+python3 scripts/mock_provider.py --host 0.0.0.0 --port "$MOCK_PROVIDER_PORT" \
+  >"$TMP_DIR/mock-provider.log" 2>&1 &
+MOCK_PROVIDER_PID=$!
 deadline=$(( $(date -u +%s) + 30 ))
-until curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/health" >/dev/null 2>&1; do
-  [ "$(date -u +%s)" -lt "$deadline" ] || fail "mock E2B health timeout"
+until curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/health" >/dev/null 2>&1; do
+  [ "$(date -u +%s)" -lt "$deadline" ] || fail "mock provider health timeout"
   sleep 1
 done
 
@@ -161,8 +178,8 @@ wait_api() {
   done
 }
 
-GATE_E2B_KEY="local-mock-not-a-credential"
-log "booting isolated PG18/API with T3 default-off despite configured E2B key"
+GATE_PROVIDER_KEY="local-mock-not-a-credential"
+log "booting isolated PG18/API with T3 default-off despite a configured provider key"
 compose up -d api
 wait_api
 
@@ -343,7 +360,7 @@ wait_api
 api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 409 "missing credit ledger"
 printf '%s' "$BODY" | jq -er '.error.message | contains("크레딧")' >/dev/null
-pass "missing balance rejects before E2B create"
+pass "missing balance rejects before any provider create"
 
 TOKEN="$READ_ONLY_TOKEN"
 api POST "/v1/admin/workspaces/$WS_ID/credits/topups" \
@@ -371,10 +388,10 @@ BEGIN;
 SET LOCAL row_security = off;
 UPDATE work_pool SET max_active=1, per_member_soft_limit=1 WHERE workspace_id='$WS_ID';
 INSERT INTO work_cloud_host
-  (id, workspace_id, requester_member_id, state, bootstrap_token_digest,
+  (id, workspace_id, requester_member_id, provider, state, bootstrap_token_digest,
    bootstrap_expires_at, unit_rate_micro_usd_second)
 VALUES
-  ('$DUMMY_PROVISION', '$WS_ID', '$OWNER_ID', 'provisioning',
+  ('$DUMMY_PROVISION', '$WS_ID', '$OWNER_ID', 'mock-a', 'provisioning',
    repeat('0',64), clock_timestamp()+interval '10 minutes', 25);
 COMMIT;
 SQL
@@ -426,16 +443,16 @@ SELECT count(*) FROM work_cloud_host
  WHERE workspace_id='$WS_ID' AND create_idempotency_key='$CREATE_REF';
 SQL
 )" = "1" ] || fail "concurrent-create-idempotency"
-CREATE_CALLS="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq '[.requests[] | select(.path == "/sandboxes")] | length')"
+CREATE_CALLS="$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/v1/instances")] | length')"
 pass "concurrent retries converged on one provision row and sandbox identity"
 api POST "$CLOUD_PATH" "$CREATE_BODY"
 expect_status 202 "lost-create-response idempotent retry"
-[ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq '[.requests[] | select(.path == "/sandboxes")] | length')" = "$CREATE_CALLS" ] \
+[ "$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+  | jq '[.requests[] | select(.path == "/v1/instances")] | length')" = "$CREATE_CALLS" ] \
   || fail "create response retry duplicated paid sandbox"
-BOOTSTRAP_TOKEN="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq -er '.requests[0].body.envVars.MOMO_WORKD_REGISTRATION_TOKEN')"
+BOOTSTRAP_TOKEN="$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+  | jq -er '[.requests[] | select(.path == "/v1/instances")][0].body.env.MOMO_WORKD_REGISTRATION_TOKEN')"
 [ "$(sql_value <<SQL
 SELECT count(*) FROM work_cloud_host
  WHERE id='$PROVISION_ID'
@@ -455,7 +472,16 @@ STATUS="$(curl -sS -o "$TMP_DIR/response.json" -w '%{http_code}' -X POST \
 BODY="$(<"$TMP_DIR/response.json")"
 expect_status 201 "cloud workd self-registration"
 HOST_ID="$(printf '%s' "$BODY" | jq -er '.workHost.id')"
-pass "mock E2B create + one-shot Ed25519 cloud registration"
+pass "mock provider create + one-shot Ed25519 cloud registration"
+INSTANCE_ID="$(sql_value <<SQL
+SELECT provider_sandbox_id FROM work_cloud_host WHERE id='$PROVISION_ID';
+SQL
+)"
+[ -n "$INSTANCE_ID" ] || fail "provision row kept no provider instance handle"
+[ "$(sql_value <<SQL
+SELECT provider FROM work_cloud_host WHERE id='$PROVISION_ID';
+SQL
+)" = "mock-a" ] || fail "provision row did not record its adapter registry id"
 
 api POST "/v1/workspaces/$WS_ID/work-sessions" \
   "$(jq -cn --arg ch "$CHANNEL_ID" --arg host "$HOST_ID" \
@@ -480,9 +506,9 @@ sleep 2
 SESSION_PATH="/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID"
 host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"idle","exitCode":0}'
 expect_status 200 "idle->pause REST transition"
-[ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/pause")] | length')" = "1" ] \
-  || fail "idle->pause did not call E2B pause exactly once"
+[ "$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+  | jq --arg iid "$INSTANCE_ID" '[.requests[] | select(.path == "/v1/instances/" + $iid + "/pause")] | length')" = "1" ] \
+  || fail "idle->pause did not call provider pause exactly once"
 [ "$(sql_value <<SQL
 SELECT count(*) FROM work_session ws
 JOIN work_cloud_host ch ON ch.host_id=ws.host_id
@@ -492,14 +518,14 @@ WHERE ws.id='$SESSION_ID' AND ws.status='idle' AND ch.state='paused'
   AND i.state='paused' AND i.ended_at IS NULL;
 SQL
 )" = "1" ] || fail "idle->pause did not open the paused interval boundary"
-pass "idle->pause called E2B and opened paused usage"
+pass "idle->pause called the provider adapter and opened paused usage"
 
 sleep 2
 api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/resume"
 expect_status 200 "human resume intent REST transition"
-[ "$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')" = "1" ] \
-  || fail "running->resume did not call E2B connect exactly once"
+[ "$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+  | jq --arg iid "$INSTANCE_ID" '[.requests[] | select(.path == "/v1/instances/" + $iid + "/resume")] | length')" = "1" ] \
+  || fail "running->resume did not call provider resume exactly once"
 [ "$(sql_value <<SQL
 SELECT count(*) FROM work_session ws
 JOIN work_cloud_host ch ON ch.host_id=ws.host_id
@@ -509,14 +535,14 @@ WHERE ws.id='$SESSION_ID' AND ws.status='running' AND ch.state='running'
   AND i.state='active' AND i.ended_at IS NULL;
 SQL
 )" = "1" ] || fail "running->resume did not reopen the active interval boundary"
-pass "running->resume called E2B and reopened active usage"
+pass "running->resume called the provider adapter and reopened active usage"
 
 sleep 2
 host_api PATCH "$SESSION_PATH" "$HOST_ID" '{"status":"idle","exitCode":0}'
 expect_status 200 "second idle->pause REST transition"
 sleep 2
-CONNECT_CALLS_BEFORE="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-  | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')"
+CONNECT_CALLS_BEFORE="$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+  | jq --arg iid "$INSTANCE_ID" '[.requests[] | select(.path == "/v1/instances/" + $iid + "/resume")] | length')"
 # reconciler-cas가 빠져 있어 이 블록 전체를 건너뛰었고, 안쪽 fail 단정에 닿지
 # 못해 red proof가 초록이었다(실측 exit 0). 두 red 모드 모두 이 경로를 지나야
 # 한다 — 레이스를 만드는 준비가 여기 있기 때문이다.
@@ -524,10 +550,10 @@ if [ "${T3_GATE_RECONCILER_RACE:-0}" = "1" ] \
   || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ] \
   || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "reconciler-cas" ]; then
   curl -fsS -X POST \
-    "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-drop-then-block" >/dev/null
+    "http://127.0.0.1:$MOCK_PROVIDER_PORT/controls/resume-drop-then-block" >/dev/null
 else
   curl -fsS -X POST \
-    "http://127.0.0.1:$MOCK_E2B_PORT/controls/resume-drop-then-missing" >/dev/null
+    "http://127.0.0.1:$MOCK_PROVIDER_PORT/controls/resume-drop-then-missing" >/dev/null
 fi
 api POST "/v1/workspaces/$WS_ID/work-hosts/$HOST_ID/cloud/resume"
 expect_status 503 "ambiguous resume response loss"
@@ -537,8 +563,8 @@ deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
 if [ "${T3_GATE_RECONCILER_RACE:-0}" = "1" ] \
   || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ]; then
   while [ "$(date -u +%s)" -lt "$deadline" ]; do
-    CONNECT_CALLS="$(curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-      | jq '[.requests[] | select(.path == "/sandboxes/momo647sandbox/connect")] | length')"
+    CONNECT_CALLS="$(curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+      | jq --arg iid "$INSTANCE_ID" '[.requests[] | select(.path == "/v1/instances/" + $iid + "/resume")] | length')"
     [ "$CONNECT_CALLS" -ge "$((CONNECT_CALLS_BEFORE + 2))" ] && break
     sleep 1
   done
@@ -547,7 +573,7 @@ if [ "${T3_GATE_RECONCILER_RACE:-0}" = "1" ] \
   if [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "resume-terminal" ] \
     || [ "${T3_GATE_PROVE_RED_REPAIR:-}" = "reconciler-cas" ]; then
     curl -fsS -X POST \
-      "http://127.0.0.1:$MOCK_E2B_PORT/controls/release-resume" >/dev/null
+      "http://127.0.0.1:$MOCK_PROVIDER_PORT/controls/release-resume" >/dev/null
     sleep 1
     RED_STATE="$(sql_value <<SQL
 SELECT status || ':' || ch.state
@@ -565,7 +591,7 @@ SQL
   api PATCH "$SESSION_PATH" '{"status":"ended","exitCode":0}'
   expect_status 200 "actual REST terminal transition during reconcile"
   curl -fsS -X POST \
-    "http://127.0.0.1:$MOCK_E2B_PORT/controls/release-resume" >/dev/null
+    "http://127.0.0.1:$MOCK_PROVIDER_PORT/controls/release-resume" >/dev/null
   RACE_RESULT=""
   while [ "$(date -u +%s)" -lt "$deadline" ]; do
     RACE_RESULT="$(sql_value <<SQL
@@ -651,7 +677,7 @@ LATENCY_AUDIT="$(sql_value <<SQL
 SELECT count(*) FROM audit_log
  WHERE target_id='$SESSION_ID'
    AND action IN ('work.session.idle','work.session.resumed-to-running')
-   AND detail->>'cloud_provider'='e2b'
+   AND detail->>'cloud_provider'='mock-a'
    AND jsonb_typeof(detail->'cloud_provisioner_latency_ms')='number'
    AND (detail->>'cloud_provisioner_latency_ms')::bigint >= 0;
 SQL
@@ -697,8 +723,8 @@ SQL
 fi
 
 if [ "${T3_GATE_RECONCILER_RACE:-0}" != "1" ]; then
-  curl -fsS "http://127.0.0.1:$MOCK_E2B_PORT/requests" \
-    | jq -e '.states.momo647sandbox == "missing"' >/dev/null
+  curl -fsS "http://127.0.0.1:$MOCK_PROVIDER_PORT/requests" \
+    | jq -e --arg iid "$INSTANCE_ID" '.instances[$iid] == "absent"' >/dev/null
 fi
 
 pass "idle pause/resume, orphan fallback, ledger consistency, credit debit, RLS isolation"

@@ -1348,12 +1348,15 @@ paths:
     post:
       tags: [work-hosts]
       operationId: provisionCloudWorkHost
-      summary: Explicitly provision one paid momo Cloud host on E2B.
+      summary: Explicitly provision one paid momo Cloud host on the configured provider.
       description: >
         Human bearer only. Requires confirmPaidCloud=true, positive workspace
-        credit, an available work-pool slot, and instance-operator E2B config.
-        Returns 202 while the E2B workd is consuming its one-shot bootstrap
-        token and 201 if registration completed before create returned.
+        credit, an available work-pool slot, and a managed provider adapter
+        configured on this instance (ADR-0142 D2). Returns 202 while the cloud
+        workd is consuming its one-shot bootstrap token and 201 if registration
+        completed before create returned. An instance whose provider is the
+        degenerate BYOC adapter answers 409 and points at the enrollment path
+        below rather than pretending it can create hosts.
       security:
         - bearerAuth: []
       parameters:
@@ -1366,13 +1369,13 @@ paths:
               $ref: "#/components/schemas/CreateCloudHostRequest"
       responses:
         "201":
-          description: E2B sandbox and cloud work host are ready.
+          description: Provider instance and cloud work host are ready.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CloudHostResponse"
         "202":
-          description: E2B sandbox exists; cloud workd registration is pending.
+          description: Provider instance exists; cloud workd registration is pending.
           content:
             application/json:
               schema:
@@ -1390,13 +1393,69 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
-          description: E2B concurrency limit reached.
+          description: Provider concurrency limit reached.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: E2B operator config is absent or E2B failed.
+          description: Provider adapter config is absent or the provider failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/byoc/enrollments:
+    post:
+      tags: [work-hosts]
+      operationId: enrollBYOCWorkHost
+      summary: Issue a one-shot token so a host the workspace already owns can enroll.
+      description: >
+        ADR-0142 D1. The base acquisition path: a workspace admin installs
+        `momo-workd` on their own VM and spends this token at the cloud
+        register endpoint. momo never creates or destroys a BYOC host — its
+        lifetime belongs to its owner — but scheduling, observation and billing
+        are identical to a managed host. Workspace-shared hosts only; a
+        `scope` other than `workspace` is refused by name. The token is
+        returned exactly once: only its SHA-256 digest reaches storage, so a
+        replayed idempotencyRef answers 409 rather than re-revealing it.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnrollBYOCHostRequest"
+      responses:
+        "201":
+          description: Enrollment token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BYOCEnrollmentResponse"
+        "400":
+          description: Personal scope requested or body invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only a workspace admin or owner may enroll a host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: This idempotencyRef already revealed its token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: T3 is disabled or the BYOC adapter is not installed.
           content:
             application/json:
               schema:
@@ -1450,9 +1509,11 @@ paths:
       operationId: registerCloudWorkHost
       summary: Consume a one-shot bootstrap token and self-register cloud workd.
       description: >
-        E2B workd only. Authorization uses `MomoBootstrap {token}`. The server
-        stores only the token SHA-256 digest and the workd-generated Ed25519
-        public key; the E2B team key and workd private key never enter this API.
+        Cloud workd only, on either acquisition path (managed provider or
+        BYOC). Authorization uses `MomoBootstrap {token}`. The server stores
+        only the token SHA-256 digest and the workd-generated Ed25519 public
+        key; the provider operator key and the workd private key never enter
+        this API.
       security: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -1517,7 +1578,7 @@ paths:
     post:
       tags: [work-hosts]
       operationId: pauseCloudWorkHost
-      summary: Pause E2B and open a zero-active-seconds pause interval.
+      summary: Pause the provider instance and open a zero-active-seconds pause interval.
       security:
         - bearerAuth: []
       parameters:
@@ -1537,7 +1598,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: E2B lifecycle request failed or is not configured.
+          description: Provider lifecycle request failed or is not configured.
           content:
             application/json:
               schema:
@@ -1547,7 +1608,7 @@ paths:
     post:
       tags: [work-hosts]
       operationId: resumeCloudWorkHost
-      summary: Resume E2B and start a new active-time interval.
+      summary: Resume the provider instance and start a new active-time interval.
       security:
         - bearerAuth: []
       parameters:
@@ -1567,7 +1628,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: E2B lifecycle request failed or is not configured.
+          description: Provider lifecycle request failed or is not configured.
           content:
             application/json:
               schema:
@@ -1577,7 +1638,7 @@ paths:
     delete:
       tags: [work-hosts]
       operationId: destroyCloudWorkHost
-      summary: Destroy a settled E2B sandbox and revoke its work_host.
+      summary: Destroy a settled provider instance and revoke its work_host.
       description: Running/unsettled sessions must be ended first.
       security:
         - bearerAuth: []
@@ -1598,7 +1659,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: E2B lifecycle request failed or is not configured.
+          description: Provider lifecycle request failed or is not configured.
           content:
             application/json:
               schema:
@@ -2200,10 +2261,12 @@ paths:
         plus resumed_at and the preserved exit_code. Idle also commits one
         system thread message ("작업 완료 — idle 대기") so NotifierWorker can
         notify only the owner through the existing id-only push envelope. When
-        the bound host is a momo Cloud host, running-to-idle also pauses its E2B
-        sandbox and opens a zero-active-seconds paused interval; idle-to-running
-        resumes E2B before reopening active usage. A provider-confirmed missing
-        sandbox closes usage, destroys and revokes the cloud host, and schedules
+        the bound host is a momo Cloud host whose adapter declares pause
+        support, running-to-idle also pauses its provider instance and opens a
+        zero-active-seconds paused interval; idle-to-running resumes it before
+        reopening active usage. An adapter that declares no pause is skipped
+        rather than faked. A provider-confirmed missing
+        instance closes usage, destroys and revokes the cloud host, and schedules
         the existing offline sweep to publish the orphaned lifecycle.
         The creating member, or the bound host, may explicitly end a running
         or idle session. The ledger row and card props update beside a
@@ -6053,7 +6116,60 @@ components:
           format: uuid
           description: >
             Client-stable create key. Reusing it converges a lost 201 response
-            onto the same E2B sandbox and never creates a second paid host.
+            onto the same provider instance and never creates a second paid
+            host.
+
+    EnrollBYOCHostRequest:
+      type: object
+      required: [displayName, idempotencyRef]
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        scope:
+          type: string
+          enum: [workspace]
+          description: >
+            Accepted only so a personal request can be refused by name instead
+            of being silently promoted to a workspace-wide host.
+        idempotencyRef:
+          type: string
+          format: uuid
+
+    BYOCEnrollment:
+      type: object
+      required:
+        [provisionId, provider, state, bootstrapToken, bootstrapExpiresAtMs,
+         registerUrl]
+      properties:
+        provisionId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          description: Always the degenerate `byoc` adapter identifier.
+        state:
+          type: string
+        bootstrapToken:
+          type: string
+          description: >
+            Shown exactly once. Only its SHA-256 digest is stored, so momo
+            cannot show it again.
+        bootstrapExpiresAtMs:
+          type: integer
+          format: int64
+        registerUrl:
+          type: string
+          description: Absolute URL the operator's workd registers against.
+
+    BYOCEnrollmentResponse:
+      type: object
+      required: [enrollment]
+      properties:
+        enrollment:
+          $ref: "#/components/schemas/BYOCEnrollment"
 
     CloudCreditTopupRequest:
       type: object
@@ -6104,7 +6220,11 @@ components:
              destroy_pending, destroyed, failed]
         provider:
           type: string
-          enum: [e2b]
+          pattern: "^[a-z0-9][a-z0-9-]{0,31}$"
+          description: >
+            ADR-0142 D2 adapter registry identifier — `byoc` for a host the
+            workspace owns, or the id of a managed substrate adapter. Not a
+            closed vendor enum: adding a substrate must not change this API.
         createdAtMs:
           type: integer
           format: int64

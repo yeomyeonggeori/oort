@@ -1,4 +1,5 @@
 import AsyncHTTPClient
+import CloudProviderKit
 import Foundation
 import Hummingbird
 import Logging
@@ -942,7 +943,7 @@ struct WorkSessionRoutes: Sendable {
             ]
             if let exitCode { auditDetail["exit_code"] = exitCode }
             if let cloudLifecycle {
-                auditDetail["cloud_provider"] = "e2b"
+                auditDetail["cloud_provider"] = cloudLifecycle.providerID
                 auditDetail["cloud_action"] = cloudLifecycle.action
                 auditDetail["cloud_provisioner_latency_ms"] = cloudLifecycle.latencyMs
             }
@@ -973,13 +974,19 @@ struct WorkSessionRoutes: Sendable {
 
     private struct CloudLifecycleEvidence: Sendable {
         let cloudHostID: UUID
+        let providerID: String
         let action: String
         let latencyMs: Int64
     }
 
     private struct CloudLifecycleTarget: Sendable {
         let cloudHostID: UUID
-        let sandboxID: String
+        let providerID: String
+        let instanceID: String
+
+        var ref: CloudInstanceRef {
+            CloudInstanceRef(providerID: providerID, instanceID: instanceID)
+        }
     }
 
     /// Host identity is the T3 boundary: ordinary workd/desktop hosts return
@@ -998,7 +1005,9 @@ struct WorkSessionRoutes: Sendable {
         ) else { return nil }
 
         let readyConfig = try CloudProvisionerRoutes.readyConfig(cloudProvisionerConfig)
-        let provisioner = E2BProvisioner(httpClient: httpClient, config: readyConfig)
+        let adapter = try readyConfig.adapter(
+            for: target.providerID, httpClient: httpClient
+        )
         // A paused daemon cannot initiate its own resume. Human REST records a
         // durable resuming intent, calls the provider, then advances both the
         // session and ledger. A later signed host report is confirmation only.
@@ -1008,15 +1017,23 @@ struct WorkSessionRoutes: Sendable {
                 message: "paused momo Cloud sessions must be resumed by the human cloud resume endpoint"
             )
         }
+        // ADR-0142 D2: idle pause is an optimization, not an obligation. A
+        // provider that declares no pause is skipped rather than faked; the
+        // session still goes idle and active-time billing already stops.
+        guard adapter.capabilities.supportsPause else { return nil }
         let action = "pause"
         let startedAt = Date()
         do {
-            try await provisioner.pause(sandboxID: target.sandboxID)
+            try await adapter.pause(
+                ref: target.ref,
+                idempotencyKey: target.cloudHostID.uuidString.lowercased()
+            )
         } catch {
             throw CloudProvisionerRoutes.httpError(error)
         }
         return CloudLifecycleEvidence(
             cloudHostID: target.cloudHostID,
+            providerID: target.providerID,
             action: action,
             latencyMs: Self.elapsedMilliseconds(since: startedAt)
         )
@@ -1039,7 +1056,7 @@ struct WorkSessionRoutes: Sendable {
             let rows = try await conn.query(
                 """
                 SELECT ws.host_id, ws.status, h.type, ws.channel_id, ws.member_id,
-                       ch.provider_sandbox_id, ch.state, ch.id
+                       ch.provider_sandbox_id, ch.state, ch.id, ch.provider
                   FROM work_session ws
                   JOIN work_host h
                     ON h.id = ws.host_id
@@ -1055,10 +1072,13 @@ struct WorkSessionRoutes: Sendable {
             guard let row = rows.first else { return nil }
             let (
                 hostID, sessionStatus, hostType, channelID, memberID,
-                sandboxID, cloudState, cloudHostID
+                sandboxID, cloudState, cloudHostID, rowProviderID
             ) =
                 try row.decode(
-                    (UUID, String, String, UUID, UUID, String?, String?, UUID?).self
+                    (
+                        UUID, String, String, UUID, UUID, String?, String?, UUID?,
+                        String?
+                    ).self
                 )
             guard cloudHostID == expectedCloudHostID else {
                 throw HTTPError(
@@ -1130,9 +1150,16 @@ struct WorkSessionRoutes: Sendable {
                     message: "momo Cloud host lifecycle changed; retry"
                 )
             }
+            guard let rowProviderID else {
+                throw HTTPError(
+                    .conflict,
+                    message: "momo Cloud host lifecycle changed; retry"
+                )
+            }
             return CloudLifecycleTarget(
                 cloudHostID: cloudHostID,
-                sandboxID: sandboxID
+                providerID: rowProviderID,
+                instanceID: sandboxID
             )
         }
     }
@@ -1227,11 +1254,11 @@ struct WorkSessionRoutes: Sendable {
                  WHERE workspace_id = \(workspaceID)
                    AND host_id = \(hostID)
                    AND state = 'destroy_pending'
-                RETURNING id
+                RETURNING provider
                 """,
                 logger: db.logger
             ).collect()
-            guard cloudRows.first != nil else {
+            guard let rowProviderID = try cloudRows.first?.decode(String.self) else {
                 throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
             }
             _ = try await conn.query(
@@ -1254,7 +1281,7 @@ struct WorkSessionRoutes: Sendable {
                 "schema": "momo.work_cloud.resume_failed.v1",
                 "host_id": hostID.uuidString,
                 "session_id": sessionID.uuidString,
-                "provider": "e2b",
+                "provider": rowProviderID,
                 "reason": "sandbox_missing",
                 "upstream_status": upstreamStatus ?? NSNull(),
                 "provisioner_latency_ms": latencyMs,
