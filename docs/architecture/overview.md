@@ -295,9 +295,14 @@ git(계보·WIP)과 momo 원장이다. 따라서 **교차 provider 재개는 별
 T3 session 생성은 host당 미정산 1건 partial unique 아래 `work_host_usage` 한 행과 첫
 `work_host_usage_interval(state=active)`을 같은 tenant transaction에서 연다. pause는 어댑터
 pause 성공 뒤 active interval을 닫고 `state=paused` 구간을 열며, resume은 paused 구간을
-닫고 새 active 구간을 연다. interval의 generated `active_seconds`는 active일 때만 wall
-time이고 paused이면 구조적으로 0이다. session 종료 transaction은 열린 구간을 닫아 active
-합계를 고정하고, 시작 시 snapshot한 초당 단가로 append-only
+닫고 새 active 구간을 연다. 새 구간의 `started_at`은 직전 구간의 `ended_at`과 같은 시각이라
+경계에 틈도 겹침도 없다. interval의 generated `active_micros`는 active일 때만 wall time이고
+paused이면 구조적으로 0이다(마이그레이션 058 전에는 초 단위 `active_seconds`였고, 구간마다
+floor해서 pause 경계마다 최대 1초씩 유실됐다 — MOMO-661). session 종료 transaction은 열린
+구간을 닫고 **마이크로초 합계를 한 번만 floor해** `work_host_usage.active_seconds`(=청구
+초)를 고정한다. 즉 `active_seconds`는 이제 Σfloor(구간)이 아니라 floor(Σ구간)이며, 절사는
+정산 1회로 제한된다(058 이전에 정산된 행은 소급 재계산하지 않는다 — `active_micros IS NULL`이
+그 표식이다). 그 초 수와 시작 시 snapshot한 초당 단가로 append-only
 `credit_entry(reason=t3_usage)`를 기록한다. terminal/orphan 경로는
 `settle_t3_work_session` 한 primitive로 이 정산과 cloud slot 해제·destroy intent를
 원자화한다. provider 호출은 DB 밖에서 intent UUID idempotency key로 실행되고
