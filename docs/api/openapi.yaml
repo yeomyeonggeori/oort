@@ -74,6 +74,11 @@ tags:
     description: Registered execution hosts authenticated by Ed25519 heartbeats.
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
+  - name: workstreams
+    description: >
+      ADR-0143 goal layer anchored on a thread root. Continuity lives on the
+      workstream, so a work session is one Run of it and work_session.memberId is
+      that Run's actor rather than the owner of the work.
   - name: work-pool
     description: Workspace-shared concurrent work-session quota and current derived usage.
   - name: work-controls
@@ -1926,6 +1931,158 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/workstreams:
+    get:
+      tags: [workstreams]
+      operationId: listWorkstreams
+      summary: List workstreams anchored in channels the caller belongs to.
+      description: >
+        ADR-0143 D3 visibility is channel membership; no workstream-level ACL
+        exists. sessionId narrows the list to the workstream a given Run belongs
+        to, which is how a client resolves a session to its goal layer without
+        widening the work session projection.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, paused, done, cancelled]
+        - name: channelId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: sessionId
+          in: query
+          required: false
+          description: Return only the workstream that owns this work session.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Workstreams ordered newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkstreamListResponse"
+        "400":
+          description: Invalid status, channelId, sessionId, or limit filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: A work host signature cannot read the goal layer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/workstreams/{workstreamId}:
+    get:
+      tags: [workstreams]
+      operationId: getWorkstream
+      summary: Read one workstream anchored in a channel the caller belongs to.
+      description: >
+        A workstream outside the caller's channels answers 404, not 403, so this
+        route cannot be used to probe for the existence of other people's work.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkstreamId"
+      responses:
+        "200":
+          description: Workstream projection with Run counters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkstreamResponse"
+        "400":
+          description: Invalid workstream id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: A work host signature cannot read the goal layer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such workstream, or it is anchored outside the caller's channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/workstreams/{workstreamId}/runs:
+    get:
+      tags: [workstreams]
+      operationId: listWorkstreamRuns
+      summary: List the Runs of a workstream oldest-first.
+      description: >
+        ADR-0143 D2 execution history. Every Run keeps the member that executed
+        it, so a workstream continued by a second member lists both. Host-local
+        state (pty id, attach endpoint, cwd) is deliberately unprojected.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkstreamId"
+      responses:
+        "200":
+          description: Runs ordered oldest-first, bounded to 200 rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkstreamRunListResponse"
+        "400":
+          description: Invalid workstream id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: A work host signature cannot read the goal layer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such workstream, or it is anchored outside the caller's channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -4575,6 +4732,14 @@ components:
       schema:
         type: string
         format: uuid
+    WorkstreamId:
+      name: workstreamId
+      in: path
+      required: true
+      description: UUIDv7 workstream (goal layer) id.
+      schema:
+        type: string
+        format: uuid
     WorkHostId:
       name: workHostId
       in: path
@@ -6348,6 +6513,127 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkSession"
+
+    Workstream:
+      type: object
+      required:
+        [id, workspaceId, channelId, rootMessageId, goal, status,
+         createdByMemberId, createdAtMs, updatedAtMs, runCount, activeRunCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        rootMessageId:
+          type: string
+          format: uuid
+          description: Anchor thread root. The workstream extends the thread; it does not replace it.
+        goal:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: >
+            Goal statement. Implicit creation seeds it from the first Run's label;
+            explicit declaration and editing are ADR-0143 P2.
+        status:
+          type: string
+          enum: [active, paused, done, cancelled]
+        createdByMemberId:
+          type: string
+          format: uuid
+          description: >
+            Provenance of the first Run only. Resume eligibility derives from
+            channel membership, never from this member.
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+        runCount:
+          type: integer
+          format: int64
+          minimum: 0
+        activeRunCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Runs currently running or idle.
+
+    WorkstreamRun:
+      type: object
+      required: [id, memberId, hostId, tool, label, status, startedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: work_session id of this Run.
+        memberId:
+          type: string
+          format: uuid
+          description: The member who executed this Run. Immutable execution record.
+        hostId:
+          type: string
+          format: uuid
+        tool:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+        status:
+          type: string
+          enum: [running, idle, orphaned, ended]
+        startedAtMs:
+          type: integer
+          format: int64
+        endedAtMs:
+          type: integer
+          format: int64
+        exitCode:
+          type: integer
+          format: int32
+        endReason:
+          type: string
+          enum: [orphaned, resumed, idle_timeout]
+        resumedFromSessionId:
+          type: string
+          format: uuid
+          description: Lineage of the Run this one continued, inside the same workstream.
+
+    WorkstreamResponse:
+      type: object
+      required: [workstream]
+      properties:
+        workstream:
+          $ref: "#/components/schemas/Workstream"
+
+    WorkstreamListResponse:
+      type: object
+      required: [workstreams]
+      properties:
+        workstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workstream"
+
+    WorkstreamRunListResponse:
+      type: object
+      required: [workstreamId, runs]
+      properties:
+        workstreamId:
+          type: string
+          format: uuid
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkstreamRun"
 
     TerminalAttachCapabilityResponse:
       type: object
