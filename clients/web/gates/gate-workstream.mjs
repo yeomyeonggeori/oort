@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // GATE: MOMO-677 작업 흐름 (ADR-0143 web surface).
 //
-// Fixture-only: no backend, no credentials. Four things are locked here, and
-// they are the four claims the surface makes that a screenshot cannot check:
+// Fixture-only: no backend, no credentials. Seven things are locked here, and
+// they are the claims the surface makes that a screenshot cannot check:
 //
 //   1. 목록 렌더 — rows carry the goal, the four-value status chip, the run and
 //      active counts, and the server's own `?status=` filter actually reaches
@@ -11,12 +11,24 @@
 //      evidence of ADR-0143 D2: continuity belongs to the workstream, so the
 //      Run that A started and the Run the agent continued stand side by side.
 //   3. 이어받기 왕복 — the takeover POSTs the EXISTING lineage resume with the
-//      chosen host, and the reader's own Run then joins the history.
+//      chosen host, the reader's own Run then joins the history, and the focus
+//      lands on the confirmation instead of falling to <body> when the button
+//      that was just pressed unmounts (1R M2).
 //   4. 비멤버 404/403 분기 — a workstream outside the reader's channels answers
 //      404 and the UI says "찾을 수 없습니다" without a word about permission,
 //      while the resume path's 403 is the only place membership is named. A UI
 //      that promoted the 404 to "권한이 없습니다" would hand back the existence
 //      signal the server refused (WorkstreamRoutes, minimum exposure).
+//   5. 헤더·행 측정 폭 — 헤더 내용과 행 내용이 같은 오른쪽 끝에서 멈추고,
+//      구분선과 hover 배경은 그보다 넓게 판 전폭으로 간다. 집의 계약이고
+//      (MemberRow.tsx §measure) v1은 헤더는 내용을, 목록은 컨테이너를 캡해서
+//      오른쪽 가장자리를 셋 만들었다(1R H1, 1280 실측: 896/880/864).
+//   6. 필터 탭 키보드 — 상태 필터는 인박스와 같은 탭 컨트롤이므로 탭 정거장이
+//      1개(roving tabindex)이고 ←/→로 이동하며, 선택된 알약이 `멈춤` 상태칩과
+//      같은 배지가 아니다(1R H2, 손으로 만든 버튼 5개는 정거장이 5개였다).
+//   7. 끝난 목표 — 완료·취소된 목표는 원장에 고아 실행이 남아 있어도 이어받기를
+//      제안하지 않고, 그 자리에 자기 문장을 놓는다(1R M1). 실행만 보고 목표를
+//      보지 않으면 완료 칩 180px 아래에 활성화된 이어받기가 그려진다.
 //
 // Named red proofs, run from a throwaway worktree:
 //   WORKSTREAM_GATE_PROVE_RED_RUNS=1 npm run gate:workstream
@@ -26,8 +38,19 @@
 //   WORKSTREAM_GATE_PROVE_RED_DENIAL=1 npm run gate:workstream
 //     expected failure: "비멤버 404/403 분기"
 //
-// Each seam changes fixture BEHAVIOR, never a product or assertion line, so a
-// proof is repeatable and does not ask a reviewer to delete anything.
+// Each of those three seams changes fixture BEHAVIOR, never a product or
+// assertion line, so a proof is repeatable and does not ask a reviewer to
+// delete anything.
+//
+// 5와 6은 그 형태로 붉힐 수 없다: 둘 다 제품 코드의 성질이지 데이터의 성질이
+// 아니라서, 어떤 픽스처도 측정 폭이나 tabIndex를 바꾸지 못한다. 그래서 절차는
+// 제품 한 줄을 되돌리는 것이고, 되돌릴 줄이 정확히 무엇인지 여기 적어둔다
+// (되돌린 뒤 `npm run gate:workstream`, 확인하고 `git checkout --` 로 복구):
+//   헤더·행 측정 폭 — WorkstreamListRoute의 <ul>에 className="max-w-pane-lg"를
+//     도로 붙인다. 행 내용이 헤더보다 16px 왼쪽에서 끝나고 단정이 그 차이를
+//     픽셀로 출력한다.
+//   필터 탭 키보드 — features/common/FilterTabs의 tabIndex={selected ? 0 : -1}을
+//     tabIndex={0}으로 바꾼다. 정거장이 1개에서 5개가 된다.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -59,6 +82,7 @@ const foreignWorkstreamId = "00000000-0000-7000-8000-000000000403";
 const aliceRunId = "00000000-0000-7000-8000-000000000501";
 const agentRunId = "00000000-0000-7000-8000-000000000502";
 const viewerRunId = "00000000-0000-7000-8000-000000000503";
+const doneRunId = "00000000-0000-7000-8000-000000000504";
 
 const deadHostId = "00000000-0000-7000-8000-000000000601";
 const liveHostId = "00000000-0000-7000-8000-000000000602";
@@ -232,6 +256,20 @@ function newState(mode) {
         resumedFromSessionId: aliceRunId,
       },
     ],
+    // 완료된 목표의 원장. 고아 실행이 하나 남아 있는 것이 요점이다: 일을 완료로
+    // 부른 뒤 호스트가 죽으면 실제로 이 모양이 되고, 실행만 보는 UI는 완료 칩
+    // 아래에 이어받기를 제안한다(1R M1).
+    doneRuns: [
+      {
+        id: doneRunId,
+        memberId: viewerId,
+        hostId: deadHostId,
+        tool: "codex",
+        label: "출시 노트 초안",
+        status: "orphaned",
+        startedAtMs: now - 30 * HOUR,
+      },
+    ],
     workstreams: [
       {
         id: activeWorkstreamId,
@@ -368,10 +406,12 @@ async function installRoutes(context, state) {
       if (state.mode === "non-member" || id === foreignWorkstreamId) {
         return json(route, { error: { message: "workstream not found" } }, 404);
       }
-      return json(route, {
-        workstreamId: id,
-        runs: id === activeWorkstreamId ? visibleRuns(state) : [],
-      });
+      const runsOf = () => {
+        if (id === activeWorkstreamId) return visibleRuns(state);
+        if (id === doneWorkstreamId) return state.doneRuns;
+        return [];
+      };
+      return json(route, { workstreamId: id, runs: runsOf() });
     }
 
     const detailMatch = lower.match(/\/workstreams\/([^/]+)$/);
@@ -520,6 +560,58 @@ async function claim(name, action) {
   }
 }
 
+/**
+ * 헤더 내용과 행 내용은 같은 오른쪽 끝에서 멈추고, 구분선과 hover 배경은 그보다
+ * 넓다. 이 두 문장이 집의 측정 계약 전부다(MemberRow.tsx §measure).
+ *
+ * 픽셀로 비교하는 이유: v1의 목록에도 "헤더와 같은 읽기 폭"이라 적힌 주석이
+ * 있었고, 그 주석이 참이 아니었다. 클래스 이름을 읽는 단정은 같은 거짓말을
+ * 통과시킨다 — 헤더는 내용을, 목록은 컨테이너를 캡해도 양쪽 다 max-w-pane-lg를
+ * 쓰고 있기 때문이다.
+ */
+async function assertSharedRightEdge(page, where) {
+  const edges = await page.evaluate(() => {
+    const right = (selector) => {
+      const node = document.querySelector(selector);
+      return node ? node.getBoundingClientRect().right : null;
+    };
+    return {
+      header: right('[data-testid="workstream-header-content"]'),
+      content: right('[data-testid="workstream-row-content"]'),
+      separator: right('[data-testid="workstream-row"]'),
+      list: right('[data-testid="workstream-list"]'),
+    };
+  });
+  if (edges.header === null || edges.content === null) {
+    throw new Error(
+      `헤더·행 측정 폭: ${where}에서 잴 것을 찾지 못했다 (${JSON.stringify(edges)})`
+    );
+  }
+  if (Math.abs(edges.header - edges.content) > 1) {
+    throw new Error(
+      `헤더·행 측정 폭: ${where}에서 헤더와 행이 다른 곳에서 끝난다 (헤더 ${edges.header}, 행 ${edges.content})`
+    );
+  }
+  // 구분선(=행 전체)은 내용보다 최소한 좌우 여백만큼 넓다. 같아지면 판 전폭으로
+  // 그어져야 할 선이 내용과 함께 잘렸다는 뜻이다.
+  if (edges.separator - edges.content < 16) {
+    throw new Error(
+      `헤더·행 측정 폭: ${where}에서 구분선이 내용과 함께 잘렸다 (구분선 ${edges.separator}, 내용 ${edges.content})`
+    );
+  }
+  if (Math.abs(edges.list - edges.separator) > 1) {
+    throw new Error(
+      `헤더·행 측정 폭: ${where}에서 목록 컨테이너가 행보다 좁다 (목록 ${edges.list}, 행 ${edges.separator})`
+    );
+  }
+  // 통과해도 숫자를 남긴다: 이 단정이 무엇을 재고 있는지 리뷰어가 캡처 없이 볼 수
+  // 있어야 하고, 1R이 어긋남을 픽셀로 지적했으므로 반박도 픽셀이어야 한다.
+  console.log(
+    `measure ${where}: 헤더 우단 ${edges.header}, 행 내용 우단 ${edges.content}, 구분선 우단 ${edges.separator}`
+  );
+  return edges;
+}
+
 /** No surface in this shell may make the document scroll sideways (MOMO-610). */
 async function assertNoHorizontalScroll(page, where) {
   const overflow = await page.evaluate(() => ({
@@ -600,6 +692,120 @@ async function assertListAndHistory(browser) {
   }
   await page.getByTestId("workstream-empty-all").click();
   await claim("목록 렌더", () =>
+    page.waitForFunction(
+      () =>
+        document.querySelectorAll('[data-testid="workstream-row"]').length === 2,
+      undefined,
+      { timeout: 10_000 }
+    )
+  );
+
+  // ---- 5. 헤더·행 측정 폭 ----------------------------------------------------
+  // 1280은 리뷰가 어긋남을 실측한 폭이고, 1600은 640px 캡이 확실히 무는 폭이다.
+  // 캡이 물지 않는 판에서는 어떤 구현이든 우연히 같은 곳에서 끝나므로, 넓은 판이
+  // 이 단정을 의미 있게 만든다.
+  await assertSharedRightEdge(page, "목록 1280");
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const wide = await assertSharedRightEdge(page, "목록 1600");
+  if (wide.separator - wide.content < 200) {
+    throw new Error(
+      `헤더·행 측정 폭: 1600에서 읽기 폭 캡이 물지 않았다 (구분선 ${wide.separator}, 내용 ${wide.content}) — 단정이 아무것도 재지 않는다`
+    );
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  // ---- 6. 필터 탭 키보드 -----------------------------------------------------
+  const tabs = await page.evaluate(() => {
+    const nodes = Array.from(
+      document.querySelectorAll('[data-testid^="workstream-filter-"]')
+    );
+    return {
+      count: nodes.length,
+      roles: nodes.map((node) => node.getAttribute("role")),
+      listRole: nodes[0]?.parentElement?.getAttribute("role") ?? null,
+      listLabel: nodes[0]?.parentElement?.getAttribute("aria-label") ?? null,
+      stops: nodes.filter((node) => node.tabIndex >= 0).length,
+      selected: nodes
+        .filter((node) => node.getAttribute("aria-selected") === "true")
+        .map((node) => node.getAttribute("data-testid")),
+      selectedStop:
+        nodes.find((node) => node.getAttribute("aria-selected") === "true")
+          ?.tabIndex ?? null,
+      selectedClass:
+        nodes.find((node) => node.getAttribute("aria-selected") === "true")
+          ?.className ?? "",
+      // 선택된 탭만 검사한다: 이 셸의 탭 위젯은 활성 패널 하나만 렌더하므로
+      // (인박스도 같다) 비활성 탭의 aria-controls는 아직 없는 id를 가리킨다.
+      // 살아 있어야 하는 것은 지금 읽히는 관계다.
+      selectedControls: (() => {
+        const selected = nodes.find(
+          (node) => node.getAttribute("aria-selected") === "true"
+        );
+        const id = selected?.getAttribute("aria-controls") ?? null;
+        const panel = id === null ? null : document.getElementById(id);
+        return panel !== null && panel.getAttribute("role") === "tabpanel";
+      })(),
+    };
+  });
+  if (tabs.count !== 5 || tabs.listRole !== "tablist") {
+    throw new Error(
+      `필터 탭 키보드: 다섯 값이 한 tablist 안에 있지 않다 (${tabs.count}개, 부모 role ${tabs.listRole})`
+    );
+  }
+  if (tabs.roles.some((role) => role !== "tab")) {
+    throw new Error(
+      `필터 탭 키보드: 탭이 아닌 컨트롤이 섞였다 (${JSON.stringify(tabs.roles)})`
+    );
+  }
+  if (tabs.stops !== 1 || tabs.selectedStop !== 0) {
+    throw new Error(
+      `필터 탭 키보드: 탭 정거장이 ${tabs.stops}개다. 다섯 값은 한 질문이므로 정거장은 하나이고, 그 하나는 선택된 탭이어야 한다`
+    );
+  }
+  if (tabs.selected.length !== 1 || tabs.selected[0] !== "workstream-filter-all") {
+    throw new Error(
+      `필터 탭 키보드: 선택 상태가 aria-selected로 말해지지 않는다 (${JSON.stringify(tabs.selected)})`
+    );
+  }
+  if (!tabs.selectedControls) {
+    throw new Error(
+      "필터 탭 키보드: 선택된 탭이 지배하는 tabpanel이 없다. aria-controls가 가리키는 자리에 목록이 있어야 한다"
+    );
+  }
+  // 선택 알약이 상태칩의 잉크를 쓰면 목록 한 화면에 `멈춤` 배지가 둘이 된다
+  // (model.ts WORKSTREAM_STATUS_CLASS.paused = bg-accent-soft text-accent).
+  if (tabs.selectedClass.includes("text-accent")) {
+    throw new Error(
+      `필터 탭 키보드: 선택된 필터가 상태칩과 같은 배지다 (${tabs.selectedClass})`
+    );
+  }
+  await page.getByTestId("workstream-filter-all").focus();
+  await page.keyboard.press("ArrowRight");
+  await claim("필터 탭 키보드", () =>
+    page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="workstream-filter-active"]')
+          ?.getAttribute("aria-selected") === "true",
+      undefined,
+      { timeout: 10_000 }
+    )
+  );
+  if (!state.listStatusParams.includes("active")) {
+    throw new Error(
+      `필터 탭 키보드: ←/→ 이동이 서버 필터를 바꾸지 않았다 (${JSON.stringify(state.listStatusParams)})`
+    );
+  }
+  const movedFocus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? null
+  );
+  if (movedFocus !== "workstream-filter-active") {
+    throw new Error(
+      `필터 탭 키보드: 선택은 옮겼는데 포커스가 따라가지 않았다 (${movedFocus})`
+    );
+  }
+  await page.getByTestId("workstream-filter-all").click();
+  await claim("필터 탭 키보드", () =>
     page.waitForFunction(
       () =>
         document.querySelectorAll('[data-testid="workstream-row"]').length === 2,
@@ -695,6 +901,17 @@ async function assertListAndHistory(browser) {
   await claim("이어받기 왕복", () =>
     page.getByTestId("workstream-continue-done").waitFor({ timeout: 10_000 })
   );
+  // 성공은 방금 누른 버튼을 없앤다(고아였던 실행이 더 이상 고아가 아니다). 포커스를
+  // 옮기지 않으면 키보드 사용자는 안내만 듣고 <body>에 남는다(1R M2). 오류 경로는
+  // 버튼이 그대로라 이 문제가 없으므로, 단정은 성공 경로에만 있다.
+  const landed = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? null
+  );
+  if (landed !== "workstream-continue-done") {
+    throw new Error(
+      `이어받기 왕복: 성공한 이어받기가 포커스를 ${landed ?? "<body>"}로 떨어뜨렸다`
+    );
+  }
   await claim("이어받기 왕복", () =>
     page.waitForFunction(
       () =>
@@ -730,6 +947,64 @@ async function assertListAndHistory(browser) {
     );
   }
 
+  await context.close();
+}
+
+/**
+ * 끝난 목표는 이어받기를 제안하지 않는다.
+ *
+ * 모델 테스트가 잡을 수 없는 절반이 여기 있다: `continuationState`가 상태를 받게
+ * 만드는 것과, 상세 라우트가 그 자리에 실제로 workstream.status를 넘기는 것은
+ * 다른 일이다. 인자를 안 넘기면 타입이 잡지만, 엉뚱한 값을 넘기면 아무도 안
+ * 잡는다.
+ */
+async function assertClosedGoal(browser) {
+  const state = newState("member");
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, state);
+  await login(page);
+  await page.goto(`${origin}/#/workstreams/${doneWorkstreamId}`);
+  await claim("끝난 목표", () =>
+    page.getByTestId("workstream-run-list").waitFor({ timeout: 15_000 })
+  );
+  if ((await text(page.getByTestId("workstream-detail-status"))) !== "완료") {
+    throw new Error("끝난 목표: 픽스처가 완료된 목표를 그리지 않았다");
+  }
+  const block = page.getByTestId("workstream-continue");
+  const kind = await block.getAttribute("data-state");
+  if (kind !== "closed") {
+    throw new Error(
+      `끝난 목표: 완료된 목표의 이어받기 상태가 ${kind}다. 같은 화면의 원장에는 고아 실행이 있으므로, 목표 자체를 안 보면 여기서 ready가 나온다`
+    );
+  }
+  if ((await page.getByTestId("workstream-continue-toggle").count()) !== 0) {
+    throw new Error(
+      "끝난 목표: 완료 칩 아래에 활성화된 이어받기 버튼이 남아 있다"
+    );
+  }
+  const copy = await text(page.getByTestId("workstream-continue-blocked"));
+  if (!copy.includes("완료") || copy.includes("이어받을 수 있습니다")) {
+    throw new Error(
+      `끝난 목표: 끝난 목표에 이어받기를 다시 권하고 있다 (${copy})`
+    );
+  }
+  // 증거는 남는다: 제안이 사라지는 것과 이력이 사라지는 것은 다른 일이다. 남아
+  // 있는 그 실행이 바로 고아 실행이라, 이 화면은 "이어받을 수 있는 실행이 있는데도
+  // 제안하지 않는다"를 보여준다.
+  const rows = page.getByTestId("workstream-run-row");
+  if ((await rows.count()) !== 1) {
+    throw new Error("끝난 목표: 제안을 거두면서 실행 이력까지 거뒀다");
+  }
+  if ((await rows.first().getAttribute("data-status")) !== "orphaned") {
+    throw new Error(
+      "끝난 목표: 픽스처가 고아 실행을 남기지 않아 단정이 아무것도 재지 않는다"
+    );
+  }
   await context.close();
 }
 
@@ -817,6 +1092,12 @@ async function captureScreens(browser) {
   const shots = [];
   for (const scheme of ["light", "dark"]) {
     const state = newState("member");
+    // 리뷰가 읽어야 하는 문장은 짧은 문장이 아니다. 긴 한국어 목표가 상세에서 어떻게
+    // 접히는지 — 어절에서 끊는가, 음절 한가운데서 끊는가(MOMO-676 M-5) — 는 단정이
+    // 아니라 캡처로만 보이고, 1R H3이 지적한 것이 정확히 그 자리다. 같은 문장을 목록은
+    // 말줄임으로, 상세는 줄바꿈으로 처리하므로 한 문장이 두 주장을 다 보여준다.
+    state.workstreams[0].goal =
+      "결제 실패 알림이 같은 주문에 두 번 가는 문제를 재현하고 원인을 좁힌 다음 재발 방지 테스트를 추가한다";
     // A paused goal exists only in this capture: nothing writes a workstream
     // out of `active` yet (status transitions are ADR-0143 P2), so the accent
     // chip would otherwise never be reviewable in either scheme.
@@ -853,6 +1134,19 @@ async function captureScreens(browser) {
     const detailShot = resolve(outDir, `detail-${scheme}.png`);
     await page.screenshot({ path: detailShot });
     shots.push(detailShot);
+
+    // 끝난 목표. 새로 생긴 문장이 사는 유일한 자리이고, 리뷰가 읽을 수 있어야 한다:
+    // 완료 칩 아래에서 이어받기가 사라지되 실행 이력은 남는다는 것이 이 화면의 주장
+    // 전부다(1R M1).
+    await page.goto(`${origin}/#/workstreams/${doneWorkstreamId}`);
+    await claim("캡처", () =>
+      page
+        .locator('[data-testid="workstream-continue"][data-state="closed"]')
+        .waitFor({ timeout: 15_000 })
+    );
+    const closedShot = resolve(outDir, `closed-${scheme}.png`);
+    await page.screenshot({ path: closedShot });
+    shots.push(closedShot);
     await context.close();
   }
   return shots;
@@ -873,6 +1167,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await assertListAndHistory(browser);
+      await assertClosedGoal(browser);
       await assertDenialAsymmetry(browser);
       captured = await captureScreens(browser);
     } finally {
@@ -888,8 +1183,12 @@ async function main() {
     "           agent identity and lineage, takeover round trip through the existing resume,"
   );
   console.log(
-    "           and the 404/403 asymmetry kept the way the server means it."
+    "           the 404/403 asymmetry kept the way the server means it, header and rows"
   );
+  console.log(
+    "           sharing one right edge, one tab stop on the filter, and no takeover offered"
+  );
+  console.log("           under a finished goal.");
   console.log(`screenshots: ${captured.join(", ")}`);
 }
 
