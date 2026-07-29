@@ -42,6 +42,13 @@ export function SkeletonRows({
  * parallel horizontal rules 16px apart in 설정 > 사용량, the louder of the two
  * landing where no frame boundary is (MOMO-628 R1 M2). Default stays true, so
  * every existing caller renders exactly as before.
+ *
+ * `lines` is the same shape of opt-in, for text FORMATTING. Exactly one caller
+ * (the app consent dialog's per-cause failure) composes its message with `\n`,
+ * and that caller alone taught this shared banner to honour them: forty-odd
+ * call sites from the sidebar to 설정 inherited a formatting behaviour none of
+ * them asked for (MOMO-642 4). A banner message is one sentence unless the
+ * caller says it is a list.
  */
 export function InlineBanner({
   tone = "error",
@@ -49,6 +56,7 @@ export function InlineBanner({
   actionLabel,
   onAction,
   separator = true,
+  lines = false,
   testId,
 }: {
   tone?: "error" | "neutral";
@@ -56,6 +64,8 @@ export function InlineBanner({
   actionLabel?: string;
   onAction?: () => void;
   separator?: boolean;
+  /** Render the `\n` in `message` as line breaks instead of collapsing them. */
+  lines?: boolean;
   testId?: string;
 }) {
   return (
@@ -72,7 +82,14 @@ export function InlineBanner({
     >
       {/* Wraps, never truncates: this banner also runs in the sidebar column,
           and half an error message is worse than none. */}
-      <span className="min-w-0 flex-1 whitespace-pre-line break-words">{message}</span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 break-words",
+          lines && "whitespace-pre-line"
+        )}
+      >
+        {message}
+      </span>
       {actionLabel && onAction && (
         <Button
           variant="outline"

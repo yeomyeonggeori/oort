@@ -48,7 +48,7 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--on-accent` | `#fffefb` | `#17161a` | label on a filled accent |
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
 | `--agent-soft` | `#e6ebf2` | `#1e2836` | agent avatar/badge backing |
-| `--danger` | `#b3261e` | `#f2b8b5` | destructive, failure |
+| `--danger` | `#b3261e` | `#ff796b` | destructive, failure |
 | `--on-danger` | `#fffefb` | `#17161a` | label on filled danger |
 | `--ok` | `#187533` | `#57ab5a` | connected, done |
 | `--warn` | `#8a5c00` | `#d4a72c` | connecting, stalled |
@@ -89,7 +89,7 @@ Worst case across every foreground x every surface, both schemes:
 | dark | `--line-strong` on `--surface-hover` | **3.00:1** | 3.0 (non-text) |
 
 Filled controls: `--on-accent` on `--accent` is 5.72 (light) / 8.94 (dark);
-`--on-danger` on `--danger` is 6.48 / 10.55.
+`--on-danger` on `--danger` is 6.48 / 7.03.
 
 Body text (`--ink`) never drops below 12.4:1 in either scheme, which is the
 point of a warm-paper base rather than a gray one.
@@ -102,6 +102,41 @@ taste regresses just as quietly:
   into the same color by a well-meant tweak.
 - **the indigo/violet AI-tell band** (OKLab hue 265..330) is asserted empty for
   both `--accent` and `--agent`. Measured: accent 49/69, agent 250/251.
+
+### 3a. Risk hierarchy: `--danger` > `--warn` > `--ink-muted`
+
+The status tokens carry an **order**, and it is measured (MOMO-641). Where two
+of them stand on one surface, the more dangerous one has to arrive at the eye
+first, in both schemes.
+
+**The ruler is OKLab chroma, not contrast.** Contrast stops discriminating once
+every token clears AA by a wide margin, and it actively lies at that point: the
+dark `--danger` that shipped until MOMO-641 measured **10.55:1** on `--surface`
+against `--warn`'s 8.03:1 and still read as the quieter of the two, because it
+was a pale pink (C 0.068) next to a saturated yellow (C 0.141). Light had the
+order right all along for the same reason (0.178 > 0.108 > 0.011), which is why
+the inversion only ever showed after dark. Measured now:
+
+| scheme | `--danger` | `--warn` | `--ink-muted` | danger / warn |
+|---|---|---|---|---|
+| light | 0.178 | 0.108 | 0.011 | 1.65x |
+| dark | 0.166 | 0.141 | 0.016 | 1.18x |
+
+The test asserts the ratios (>= 1.15x and >= 2x), not a bare `>`, so a token
+that merely ties cannot pass; the old dark danger sat at 0.48x.
+
+**Contrast stays as the floor, and it is a floor with teeth**: `--danger`
+outreads `--ink-muted` on every surface in both schemes, so a louder red can
+never be bought by making it a dimmer one. What it may NOT be asked to do is
+outread `--warn` in dark: sRGB has no red that is both more colorful than
+`#d4a72c` and as luminous, so requiring both would have made the order
+unreachable rather than merely unmet. Dark danger now measures 5.72:1 at its
+worst surface (`--accent-soft`), above the AA floor and above muted's 5.17.
+
+Surfaces this order governs, all of which put two of the tones side by side:
+the app consent dialog and the `ToolRow` chips under 설정 > 앱, the quota chips
+and bars under 설정 > 사용량, the 상태 lines in AI 연결 체인, and the workspace
+rail's connection dot.
 
 ## 4. Non-color scales
 
@@ -175,6 +210,14 @@ inherits that rule.
   controls carry `pane-wide-toggle`, which hides them below 900px where the pane
   is already the whole surface (79 columns at 880): a control whose only effect
   has already happened is not a control.
+
+`min-w-action` 144px (MOMO-642) is the last width name: the minimum a dialog's
+primary button holds. It exists because a button that states the decision state
+in its LABEL ("권한을 하나 이상 선택" -> "선택한 권한 허용") changes width when
+that state changes, and a trailing-aligned footer then slides its sibling 24px
+sideways under the pointer on every checkbox toggle. Pinning a minimum wide
+enough for the longest label (measured 127px) leaves only the text inside the
+button moving. It is a MINIMUM: a footer whose labels outgrow it still fits them.
 
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the

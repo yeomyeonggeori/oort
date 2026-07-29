@@ -82,15 +82,37 @@ function composite(layer: ScrimLayer, hex: string): [number, number, number] {
   ) as [number, number, number];
 }
 
-/** OKLab hue angle in degrees, used to police hue families (AI-tell bans). */
-export function hueAngle(hex: string): number {
+/** The two OKLab opponent axes. Hue is their angle, chroma their length. */
+function oklabAB(hex: string): [number, number] {
   const [r, g, b] = linearize(hex);
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return [
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+/** OKLab hue angle in degrees, used to police hue families (AI-tell bans). */
+export function hueAngle(hex: string): number {
+  const [A, B] = oklabAB(hex);
   return (((Math.atan2(B, A) * 180) / Math.PI) + 360) % 360;
+}
+
+/**
+ * OKLab chroma: how colorful a token is, independent of how light it is.
+ *
+ * This is the ruler for the risk hierarchy (MOMO-641). Luminance contrast
+ * cannot order status tokens once they all clear AA by a wide margin: the dark
+ * `--danger` that shipped before this measured 10.55:1 on `--surface` against
+ * `--warn`'s 8.03:1 and still read as the quieter of the two, because it was a
+ * pale pink (C 0.068) standing next to a saturated yellow (C 0.141). At equal
+ * legibility the eye ranks by colorfulness, so that is what is measured here,
+ * with the AA table above kept as the floor underneath it.
+ */
+export function chroma(hex: string): number {
+  return Math.hypot(...oklabAB(hex));
 }
 
 /** Shortest angular distance between two hues, in degrees. */
@@ -279,6 +301,39 @@ describe("Dawn palette", () => {
           ),
           `agent vs accent hue gap (${scheme.name})`
         ).toBeGreaterThanOrEqual(90);
+      });
+
+      // The risk hierarchy is an ORDER, not a taste: --danger > --warn >
+      // --ink-muted, in both schemes. Four shipping surfaces put two of these
+      // tones side by side and would silently invert with the tokens: the app
+      // consent dialog and the ToolRow chips under 설정 > 앱, the quota chips
+      // and bars under 설정 > 사용량, the AI 연결 체인 status lines, and the
+      // workspace rail's connection dot. Ratios, not bare `>`, so a token that
+      // merely ties cannot pass (the old dark danger sat at 0.48x of warn).
+      it("ranks danger louder than warn, and warn louder than muted", () => {
+        const c = (token: string) => chroma(pick(token, scheme.index));
+        expect(
+          Number((c("danger") / c("warn")).toFixed(2)),
+          `danger vs warn chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(1.15);
+        expect(
+          Number((c("warn") / c("ink-muted")).toFixed(2)),
+          `warn vs ink-muted chroma (${scheme.name})`
+        ).toBeGreaterThanOrEqual(2);
+      });
+
+      // The floor under that order: chroma may not be bought with legibility.
+      // --danger outreads the quietest foreground on every surface it can land
+      // on, so a louder red can never also be a dimmer one.
+      it("keeps danger above the quietest foreground in contrast too", () => {
+        for (const bg of SURFACES) {
+          expect(
+            contrast(pick("danger", scheme.index), pick(bg, scheme.index)),
+            `danger vs ink-muted on ${bg} (${scheme.name})`
+          ).toBeGreaterThan(
+            contrast(pick("ink-muted", scheme.index), pick(bg, scheme.index))
+          );
+        }
       });
 
       it("keeps accent and agent out of the indigo/violet AI-tell band", () => {

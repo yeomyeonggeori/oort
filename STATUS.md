@@ -1,5 +1,13 @@
 # momo 진행 현황
 
+## MOMO-642 동의 모달 후속 7종 + MOMO-641 다크 danger 위계 (#849 #848, 2026-07-29)
+
+- **다크 `--danger` 역전은 대비 문제가 아니었다(#848).** 옛 `#f2b8b5`는 `--warn`보다 대비가 **높은데도**(10.55 vs 8.03 on `--surface`) 조용하게 읽혔다 — 둘 다 AA를 한참 넘겨 가독성으로는 구분되지 않고, 남는 차이가 채도였다(OKLab C 0.068 vs 0.141, 역전). 라이트는 처음부터 채도 순서가 맞아서(0.178 > 0.108 > 0.011) 위계도 맞았다. 그래서 **순서의 자를 채도로 고정**하고 `#ff796b`(C 0.166, hue 28 — 라이트 danger의 29와 같은 계열)로 바꿨다. sRGB에서 빨강은 노랑만큼 밝아질 수 없으므로 "채도도 높고 대비도 warn보다 높은 다크 danger"는 존재하지 않는다: 대비는 순서의 자가 아니라 **바닥선**으로 남긴다(모든 표면 AA + 모든 표면에서 `--ink-muted`보다 높음, 최악 5.72:1 on `--accent-soft`). 라이트 토큰은 한 글자도 건드리지 않았다.
+- 세 조건 전부 `tokens.contrast.test.ts`가 두 스킴에서 잰다(채도비 >= 1.15x / >= 2x, danger > muted 대비, 기존 AA 표). red proof: 다크 danger를 `#f2b8b5`로 되돌리면 `danger vs warn chroma (dark): expected 0.48 to be >= 1.15`로 실패한다. 위계 순서와 그 근거는 `references/tokens.md` §3a에 명문화했고, 두 톤을 함께 쓰는 표면 전수(앱 동의 다이얼로그·`ToolRow` 칩·설정 > 사용량 칩과 `<progress>` 막대·AI 연결 체인·워크스페이스 레일 연결 점)를 같은 곳에 적었다.
+- **#849 후속 1~7.** ① 악수 글리프는 설명 문장 옆으로 옮겨 그 문장을 캡션으로 갖고, 방향이 반대인 **회수 다이얼로그에서는 그리지 않는다**. ② 다이얼로그 결정 버튼에 `min-w-action`(144px, 신규 이름)을 줘 라벨이 바뀌어도 푸터가 움직이지 않는다 — 실측 `취소` left가 세 선택 상태(전체/0개/1개)에서 420px로 동일, 이전에는 24px 이동했다. 같은 이유가 성립하는 `설치 해제` 확인 다이얼로그에도 함께 적용했다. ③ 진행 중 체크박스는 `cursor-not-allowed`로 포인터에도 사실대로 말한다(체크 표시 자체는 흐리지 않는다 — 지금 전송 중인 선택이 무엇인지가 그 상태다). ④ `InlineBanner`의 `whitespace-pre-line`을 `lines` caller opt-in으로 되돌렸다(실측상 `\n`을 담는 배너 메시지는 여전히 그 하나뿐). ⑤ 다중 원인 실패 배너를 **원인 기준 그룹핑**으로 바꿔 원인 문장이 scope 수만큼 반복되지 않는다 — 760x480 4-scope/2-원인 실측 **171px vs 스크롤박스 272px**(이전 281 vs 272, 13px 넘침). ⑥ 0개 선택 3중 announce를 하나로 정리했다: 중복 힌트 `<p>`와 `aria-describedby`를 지우고, 요구는 막힌 액션의 라벨에, 카운트는 하나뿐인 live region에 남겼다. ⑦ 폴드 위 유일한 색이던 `워크스페이스 설치됨` 칩을 중립 톤으로 내렸다 — 이 화면에서 색은 위험 신호의 것이다.
+- 범위 밖으로 남긴 것: #849 8~10(회수 다이얼로그의 배포자/라이선스, 매니페스트 영문 description, 파괴 버튼 톤)과 카탈로그 목록 행의 `설치됨` ok 칩(위험 칩과 경쟁하지 않는 다른 표면).
+- 검증(전부 로컬 실주행, docker 비의존): `npm run typecheck` · `npm run lint`(기존 경고 4건 외 무증가) · `npm test` **917 passed**(기준 912 + 대비 4 + 모델 1) · `npm run build` · `scripts/design_preflight_web.sh` **10/10 PASS** · `npm run gate:shell` **GATE PASS**(1280x800·900x600·760x480 전 단정, `momoMarkFits`·설치 신호 가시성·`policyCauseCount 1`·첫 권한 칩 가시성·포커스 링 4px 포함, `checkboxLabelCursor`는 `not-allowed`로 관측). 라이트·다크 양 스킴 스크린샷 확인. **design-review는 오케스트레이터 몫**(토큰 변경이므로 필수).
+
 ## MOMO-655 데몬 public WSS attach 어댑터 + create ptyId/attachEndpoint 배선 (#869, 2026-07-29)
 
 - #857이 남긴 seam(셸 래핑·256KiB 링·`PTYReplayBuffer.connect()`의 retained→`replayEnd`→live 순서)에 **inbound 리스너**를 붙였다. `momo-workd`는 `MOMO_WORKD_ATTACH_PUBLIC_URL`이 설정된 경우에만 RFC 6455 서버를 열고, 미설정이면 소켓 자체를 열지 않는다(기존 동작 무변경). 서버·웹·mac 계약은 전부 기존 것을 그대로 소비했다 — 새 인증 문법·새 프레임 어휘·서버 raw-byte 경유는 없다(ADR-0125 D10).

@@ -60,8 +60,21 @@
    * 스크림 걸린 어떤 표면보다 --surface-raised가 밝아야 한다. */
   --scrim: light-dark(rgb(36 33 28 / 0.24), rgb(9 8 11 / 0.62));
 
-  /* --- status ------------------------------------------------------------ */
-  --danger: light-dark(#b3261e, #f2b8b5);
+  /* --- status ------------------------------------------------------------
+   * 위험 위계는 취향이 아니라 순서다: --danger > --warn > --ink-muted. 한 표면에
+   * 두 톤이 나란히 서면 더 위험한 쪽이 먼저 눈에 들어와야 한다(MOMO-641).
+   *
+   * 그 순서를 재는 자는 대비가 아니라 **채도(OKLab C)**다. 다크의 옛 --danger
+   * (#f2b8b5)는 --warn(#d4a72c)보다 대비가 오히려 높았는데도(10.55 vs 8.03 on
+   * --surface) 더 조용하게 읽혔다: 둘 다 AA를 한참 넘겨 가독성으로는 구분되지
+   * 않고, 남는 차이가 채도였기 때문이다(0.068 vs 0.141 — 역전). 라이트는
+   * 처음부터 채도 순서가 맞았고(0.178 > 0.108 > 0.011) 그래서 위계도 맞았다.
+   *
+   * sRGB에서 빨강은 노랑만큼 밝아질 수 없으므로 "채도도 높고 대비도 warn보다
+   * 높은 다크 danger"는 존재하지 않는다. 그래서 순서의 척도를 채도로 고정하고,
+   * 대비는 바닥선(모든 표면 AA + --ink-muted보다 높음)으로 남긴다. 세 조건 전부
+   * tokens.contrast.test.ts가 두 스킴에서 잰다. */
+  --danger: light-dark(#b3261e, #ff796b);
   --on-danger: light-dark(#fffefb, #17161a);
   --ok: light-dark(#187533, #57ab5a);
   --warn: light-dark(#8a5c00, #d4a72c);
@@ -106,6 +119,14 @@
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
   --spacing-control-lg: 40px;
+
+  /* 결정 버튼의 최소 가로 (MOMO-642 2). 다이얼로그의 주 버튼이 라벨로 결정 상태를
+   * 말하면("권한을 하나 이상 선택" -> "선택한 권한 허용") 그 라벨이 바뀔 때마다
+   * 버튼 폭이 바뀌고, 오른쪽 정렬된 푸터는 옆의 취소 버튼을 포인터 아래에서
+   * 24px 밀어낸다. 가장 긴 라벨(실측 127px)이 들어가는 최소 폭을 이름으로
+   * 고정하면 상태가 바뀌어도 움직이는 것은 버튼 안의 글자뿐이다. 높이가 아니라
+   * 가로이고 pane도 아니므로, 리듬 스케일에 없는 이 측정값도 이름을 갖는다. */
+  --spacing-action: 144px;
 
   /* Panes are a third dimension: a secondary column is wider than any rhythm
    * step, so it gets a NAME rather than an off-grid number. Keeping them here
