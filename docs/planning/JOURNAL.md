@@ -1416,6 +1416,10 @@
 - 한 일: **B1.7(Rust 이미지+compose) 랜딩** — PR #932 → track/engine(`a7c3551e`). 259MB 이미지(api|relay|migrate 3역할)·prod-미러 compose·env 파리티(JWT_HMAC 정본 승격). **실전 게이트 전 곡선 green**(migrate 59+멱등→set-owner→login→send→list→실 Centrifugo version==seq→시크릿 0). 게이트 실측 결함 2건 직접 수정(cargo mtime 캐시 touch·entrypoint set-owner 케이스) — 둘 다 워커가 원리적으로 못 잡는 docker 계층. NCP 런북 트리거 3(이미지 경로) 개통.
 - 열린 것: **B2.2**(T3 표면·재부착 0139·T3 route) 다음 배치. 레지스트리 퍼블리시(성재/오케스트레이터 몫). ADR-0146 세부·ADR-0140 정오표(성재). #925·#926·#893.
 
+## 2026-07-31 (오후) · Fable · 오케스트레이션
+- 한 일: **B2.2(T3 REST 표면) 랜딩** — PR #933 → track/engine(`9e065d0f`). T3 route 12개(기본 OFF·503), momo-t3/auth 공개 API 추가(cloud_host·work_host_store). 워커 실측이 패킷 가정 3건 뒤집음(usage/summary 구조적 부적합→제외·smoke=byoc·topup 포함) — 3건 전부 Swift/마이그레이션 실측으로 검증 후 수용. 게이트: T3 smoke 곡선 2/2(봉인 트리거 red 포함)+전 스위트 공유 DB 무회귀 green. **NCP T3 부분 smoke REST 완비.**
+- 열린 것: 다음 배치(B2.3 게이트웨이·재부착 0139 / NCP T3 smoke 실행 — amd64 크로스빌드 선행 / B1.2 breadth) 성재 방향. ADR-0146 세부·ADR-0140 정오표. #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
