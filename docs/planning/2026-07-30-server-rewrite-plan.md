@@ -26,7 +26,7 @@ buzz 관계: **패턴 인용만**(Axum 파이프라인·sqlx·백프레셔·git-
 ### D2. 불변식 보존 스펙 — `docs/architecture/invariants-in-rust.md` (신설, 재작성의 수용 계약)
 - 하드 불변식 6개 각각 → Rust에서의 강제 지점 표. 결론은 대부분 "DB가 강제(마이그레이션 재사용) + Rust는 위반 불가능하게 배선":
   - PG=SoT / 단일 쓰기경로 → 쓰기 API 단일 모듈, 직접 INSERT 금지 lint.
-  - gapless `message.seq` → 기존 seq 부여 트리거/함수 재사용(PG sequence 금지 유지).
+  - gapless `message.seq` → `channel_seq` row-lock `UPDATE...RETURNING` 앱코드 복제 + `message_seq_uniq UNIQUE` 백스톱(실측: PG 트리거·시퀀스 아님).
   - agent=member → 동일 스키마.
   - RLS FORCE → 세션 `SET app.current_*` 배선을 Axum 미들웨어에서. 마이그레이션의 FORCE 정책 그대로.
   - provider 비유입(ADR-0004) → 어댑터 경계 재확인.
@@ -37,7 +37,7 @@ buzz 관계: **패턴 인용만**(Axum 파이프라인·sqlx·백프레셔·git-
 - **단일 쓰기경로·RLS 무손상**이 설계 하드 제약. 성재 승인 시 Accepted → 구현은 메신저 코어 배치에 포함.
 
 ### D4. buzz 인용 카탈로그 — `docs/planning/2026-07-30-buzz-reference-catalog.md` (신설)
-- buzz의 어느 파일·패턴을 인용하고 무엇을 거부하는지 표. 취함: Axum handler 파이프라인, sqlx 쿼리 스타일, connection semaphore 백프레셔, git-over-http, 검색 인덱싱. 거부: Nostr 이벤트 모델·kind dispatch·클라 publish·RLS 부재.
+- buzz의 어느 파일·패턴을 인용하고 무엇을 거부하는지 표. 취함: Axum handler 파이프라인, sqlx 쿼리 스타일, connection semaphore 백프레셔, 검색 인덱싱. 거부: Nostr 이벤트 모델·kind dispatch·클라 publish·RLS 부재. 제외(momo 무관): git-over-http(momo는 네이티브 git 서버 도메인 없음 — GitHub은 플러그인).
 - 라이선스 준수(Apache 2.0 인용 표기 규약) 명시.
 
 ### D5. 커토버 & parity 전략 — `docs/planning/2026-07-30-cutover-and-parity.md` (신설)

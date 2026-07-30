@@ -13,7 +13,7 @@
 
 - **불변식은 재작성하지 않는다 — DB에 이미 살아 있다.** 단일 쓰기경로·gapless `message.seq`·RLS FORCE·provider 비유입은 59 마이그레이션(44/59가 트리거·제약·RLS로 강제)에 박혀 있다. **마이그레이션은 Postgres DDL이라 언어 독립 → 그대로 재사용.** 따라서 재작성 대상은 "불변식"이 아니라 **애플리케이션 계층**(서버 52 route files ≈ 42k + workd 6k + NotifierWorker 3k Swift ≈ 51k LOC)을 **동일 스키마 위에 Rust로 다시 얹는 일**이다. ADR-0140 교훈("코드 규약은 깨지고 DB 제약은 살았다")이 여기서 보증이 된다 — 정합성의 최종 강제자가 DB이므로 앱 언어 교체가 불변식을 위협하지 않는다.
 
-- **buzz에서 취하는 것 = 패턴 인용만.** Axum handler 파이프라인, sqlx 사용법, connection 백프레셔(semaphore), git-over-http, 검색 인덱싱. **채택하지 않는 것 = Nostr 이벤트 모델 전체**(클라-서명-publish·`created_at` 순서·kind 정수 dispatch·RLS 부재) — momo 불변식과 정면 충돌(아래 스파이크 판정).
+- **buzz에서 취하는 것 = 패턴 인용만.** Axum handler 파이프라인, sqlx 사용법, connection 백프레셔(semaphore), 검색 인덱싱. **채택하지 않는 것 = Nostr 이벤트 모델 전체**(클라-서명-publish·`created_at` 순서·kind 정수 dispatch·RLS 부재) — momo 불변식과 정면 충돌(아래 스파이크 판정). (git-over-http는 momo에 네이티브 git 서버 도메인이 없어 제외 — GitHub은 플러그인.)
 
 - **buzz에서 선택 차용 = 에이전트 행동 provenance(성재 지시).** buzz의 최대 강점(모든 행동이 서명된 이벤트 = 암호학적 감사추적) 중 momo 도메인에 유효한 조각만 취한다. momo는 이미 **workd가 Ed25519로 페이로드를 서명**하는 원시 기능을 보유 → 특정 에이전트 원본 행동에 서명을 **additive하게** 얹는다. **단일 쓰기경로·RLS는 불변**(서버가 여전히 유일 저자, 서명은 검증 가능한 provenance 메타데이터로만). 설계는 **ADR-0146**으로 분리.
 
