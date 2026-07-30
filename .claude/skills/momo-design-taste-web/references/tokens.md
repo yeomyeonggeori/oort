@@ -276,6 +276,16 @@ sideways under the pointer on every checkbox toggle. Pinning a minimum wide
 enough for the longest label (measured 127px) leaves only the text inside the
 button moving. It is a MINIMUM: a footer whose labels outgrow it still fits them.
 
+`min-w-action-sm` 96px (MOMO-676) is the same rule at the other end, and the two
+names together encode it: **one footer, one width**, measured from the longest
+label THAT footer can show. Borrowing the other dialog's number is what the
+second name prevents. 144px beside a 47px 취소 made the 설치 해제 confirmation a
+3:1 footer measured off a label that dialog never renders. Measured in Chromium
+against the built CSS at `size="sm"`: 취소 47px, 설치 해제 69px, and the busy
+"변경 중" with its spinner 82px, so 96px holds every label with 14px to spare and
+stands the pair at equal width. Both buttons in a footer carry the minimum, which
+is the system-down form: emphasis belongs to the fill, never to the width.
+
 Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
 bar gets a named token instead of widening the closed set.
@@ -313,6 +323,21 @@ role means adding it to that list too, and `cn.test.ts` is the check.
 Fonts are system stacks only (`--font-sans` includes `Apple SD Gothic Neo` and
 `Noto Sans KR` so Korean does not fall back to a metric-mismatched face). No
 webfont, no CDN: CSP forbids it and the desktop shell must render offline.
+
+**Korean prose wraps at word boundaries, not syllables** (MOMO-676 M-5).
+CSS `word-break: normal` treats every Hangul syllable as a break opportunity, so
+"변경할 수 없습니다" splits mid-word wherever the line happens to end, and a
+narrow measure (a banner beside its 오류 닫기 button, a dialog at 760px) reaches
+that state on nearly every line. `break-keep` (`word-break: keep-all`) is the
+fix, and it is applied to the ROOT of a prose surface, never globally: the
+property inherits, ASCII is unaffected by it (`keep-all` only forbids breaks
+between CJK), and identifier children (`break-all` on scope ids, URLs, egress
+domains) override it in the cascade. Two constraints go with it. It must not
+land on the same element as `break-words` — tailwind-merge files both under one
+`break` group and silently keeps the last one, dropping the
+`overflow-wrap: break-word` that catches an unbreakable run — so the pair lives
+on parent and child. And it is a prose rule: code, ids, and `data-numeric`
+columns are not prose and do not get it.
 
 **Numbers.** `[data-numeric]` applies `font-variant-numeric: tabular-nums` in
 the base layer, so counters, seq values, costs, and dates/clocks do not jitter

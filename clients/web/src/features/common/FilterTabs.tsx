@@ -1,0 +1,117 @@
+import { useCallback, useRef } from "react";
+import { cn } from "@/design/lib/cn";
+
+// =============================================================================
+// N개의 값 중 하나를 고르는 세그먼트 컨트롤 (R-1 §2).
+//
+// Hand-built rather than a primitive: @radix-ui/react-tabs is not a dependency
+// of this client and P1 wave2 adds no packages, so this implements the WAI-ARIA
+// tabs pattern directly (roving tabindex, aria-selected, ←/→ traversal) and the
+// route owns the panel it controls.
+//
+// 인박스의 세 필터를 위해 지어졌고, 작업 흐름의 다섯 필터가 두 번째 호출자다.
+// 두 번째 표면이 이걸 쓰지 않고 role="group" + aria-pressed 버튼을 손으로 다시
+// 만들었을 때 실제로 잃은 것: 탭 정거장이 1개가 아니라 5개가 되고, ←/→ 이동이
+// 없어지고, 선택 알약이 그 표면의 상태칩과 같은 배지가 됐다(MOMO-677 1R H2).
+// 그래서 값의 집합·이름·id 규칙만 호출자의 spec으로 빼고 키보드 계약과 기하는
+// 이 파일 한 곳에 남긴다. 두 번째 구현이 아니라 두 번째 호출자여야 한다.
+//
+// 값을 열거하지 않고 제네릭으로 받는 이유: 필터 값은 서버의 어휘이고
+// (`?filter=`, `?status=`), 그 어휘를 이 컴포넌트가 알면 표면이 하나 늘 때마다
+// 여기를 고쳐야 한다. 그래서 inbox/ 가 아니라 common/ 에 산다.
+// =============================================================================
+
+/**
+ * 한 표면의 필터 어휘. 그 표면의 model 옆에 두어, 절반만 설정된 탭 묶음(이름은
+ * 정했는데 패널 id는 없는 식)이 나올 수 없게 한다.
+ */
+export interface FilterTabsSpec<T extends string> {
+  /** tablist의 접근성 이름. 느슨한 버튼 N개가 아니라 한 질문임을 말한다. */
+  label: string;
+  values: readonly T[];
+  labelFor: (value: T) => string;
+  /** 탭 엘리먼트의 id. 라우트가 패널의 `aria-labelledby`로 되짚는다. */
+  tabId: (value: T) => string;
+  /** 이 탭이 지배하는 패널의 id. 라우트가 자기 패널에 붙인다. */
+  panelId: (value: T) => string;
+  testId: (value: T) => string;
+}
+
+const BASE =
+  "inline-flex h-control-sm items-center gap-2 rounded-sm px-3 text-body transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+
+export function FilterTabs<T extends string>({
+  spec,
+  value,
+  onChange,
+  counts,
+}: {
+  spec: FilterTabsSpec<T>;
+  value: T;
+  onChange: (value: T) => void;
+  /** Rendered only where a server projection actually supplies a number. */
+  counts?: Partial<Record<T, number>>;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const step = event.key === "ArrowRight" ? 1 : -1;
+      const index = spec.values.indexOf(value);
+      const next =
+        spec.values[(index + step + spec.values.length) % spec.values.length];
+      onChange(next);
+      listRef.current
+        ?.querySelector<HTMLElement>(`#${spec.tabId(next)}`)
+        ?.focus();
+    },
+    [spec, value, onChange]
+  );
+
+  return (
+    <div
+      ref={listRef}
+      role="tablist"
+      aria-label={spec.label}
+      onKeyDown={onKeyDown}
+      // flex-wrap은 다섯 값을 받으면서 붙었다: 세 개는 어느 판에서도 한 줄에
+      // 들어가지만 다섯 개는 좁은 판에서 문서를 옆으로 밀 수 있고, 이 셸에서
+      // 가로 스크롤을 만드는 표면은 없다(MOMO-610). 세 개짜리 호출자에서는
+      // 렌더가 바뀌지 않는다.
+      className="flex min-w-0 flex-wrap items-center gap-1"
+    >
+      {spec.values.map((filter) => {
+        const selected = filter === value;
+        const count = counts?.[filter] ?? 0;
+        return (
+          <button
+            key={filter}
+            type="button"
+            role="tab"
+            id={spec.tabId(filter)}
+            aria-controls={spec.panelId(filter)}
+            aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
+            data-testid={spec.testId(filter)}
+            onClick={() => onChange(filter)}
+            className={cn(
+              BASE,
+              selected
+                ? "bg-accent-soft font-medium text-ink"
+                : "text-ink-muted hover:bg-surface-hover"
+            )}
+          >
+            {spec.labelFor(filter)}
+            {count > 0 && (
+              <span className="text-timestamp text-ink-muted" data-numeric>
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

@@ -243,6 +243,9 @@ describe("plugin marketplace copy", () => {
     expect(sameCauseCompletion.error).toContain(
       "영향받은 권한: notion 읽기 권한 (notion:read), notion 댓글 권한 (notion:comment), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)"
     );
+    // 원인이 하나면 목록이 아니다: 표제 아래 홀로 선 불릿은 아무것도 가리키지
+    // 않는다. 한 원인은 한 문단으로 남고, 배너는 ul을 그리지 않는다(MOMO-676 M-4).
+    expect(sameCauseCompletion.causes).toEqual([]);
 
     const completion = pluginScopeConsentCompletion([
       { scope: "notion:comment", succeeded: false, error: new ApiError(403, "not allowed") },
@@ -251,12 +254,12 @@ describe("plugin marketplace copy", () => {
     expect(completion.dismissDialog).toBe(false);
     if (completion.dismissDialog) throw new Error("expected retained dialog");
     expect(completion.error).toContain("원인 2가지를 확인하세요.");
-    expect(completion.error).toContain(
-      `• ${repeatedCause} 영향받은 권한: notion 댓글 권한 (notion:comment)`
-    );
-    expect(completion.error).toContain(
-      `• ${pluginActionErrorMessage(new ApiError(404, "not found"))} 영향받은 권한: notion 관리 권한 (notion:admin)`
-    );
+    // 항목은 문장이지 서식이 아니다: "• "도 "\n"도 여기서 나오지 않는다.
+    expect(completion.causes).toEqual([
+      `${repeatedCause} 영향받은 권한: notion 댓글 권한 (notion:comment)`,
+      `${pluginActionErrorMessage(new ApiError(404, "not found"))} 영향받은 권한: notion 관리 권한 (notion:admin)`,
+    ]);
+    expect(completion.error).not.toContain("\n");
   });
 
   // The banner lives inside a 272px scrollbox at 760x480, and a cause is a
@@ -273,15 +276,14 @@ describe("plugin marketplace copy", () => {
       { scope: "notion:admin", succeeded: false, error: new ApiError(403, "not allowed") },
     ]);
     if (completion.dismissDialog) throw new Error("expected retained dialog");
-    expect(completion.error.split(policy)).toHaveLength(2);
-    expect(completion.error.split(missing)).toHaveLength(2);
-    expect(completion.error).toContain(
-      `• ${policy} 영향받은 권한: notion 읽기 권한 (notion:read), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)`
-    );
-    expect(completion.error).toContain(
-      `• ${missing} 영향받은 권한: notion 댓글 권한 (notion:comment)`
-    );
-    // Four failures, three lines: the headline and one per cause.
-    expect(completion.error.split("\n")).toHaveLength(3);
+    const reported = [completion.error, ...completion.causes].join(" ");
+    expect(reported.split(policy)).toHaveLength(2);
+    expect(reported.split(missing)).toHaveLength(2);
+    expect(completion.causes).toEqual([
+      `${policy} 영향받은 권한: notion 읽기 권한 (notion:read), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)`,
+      `${missing} 영향받은 권한: notion 댓글 권한 (notion:comment)`,
+    ]);
+    // Four failures, one headline and one item per cause.
+    expect(completion.causes).toHaveLength(2);
   });
 });
