@@ -35,3 +35,15 @@
 
 ## 5. 병행성
 - 이 준비는 서버 재작성(B1~B5)과 독립 문서. 재작성 배치가 트리거(§1)를 채우면 이 런북으로 실행.
+
+
+## 7. 실행 결과 (2026-07-31 — 완주 ✅)
+
+**NCP 실서버(101.79.11.189, x86_64)에서 Rust 스택 전체 smoke 성공.**
+- 준비: buildx linux/amd64 크로스빌드(52MB tgz) → scp → docker load(236MB). Docker 29.6.2 설치. 서버측 시크릿 생성(0600).
+- 메신저: migrate 59+IDEMPOTENCY_OK → set-owner → login → send(seq=1) → **실 Centrifugo history pubs=1**.
+- **T3(BYOC)**: topup 5,000,000 → enroll(bootstrapToken, digest만 저장) → register(Ed25519 pubkey) → 세션 running → end → **settled=true·active_s=3·balance=4,999,925(= 정확히 3s×25µUSD 차감)**. 로그 시크릿 0.
+- 리소스: RAM 375Mi/7.8G·디스크 74%(2vCPU에서 여유).
+- 곡선이 밝힌 운영 요건(런북 §3에 추가할 것): `MOMO_T3_ENABLED=1`·`PLATFORM_ADMIN_EMAILS`(topup 권한)·`MOMO_PUBLIC_BASE_URL`(**https 필수** — ready_t3 가드)·enrollment 응답은 `{"enrollment":{...}}` 중첩.
+- 스택은 가동 상태로 유지(성재 "냅둬"). 파일: `/opt/momo/infra/rust/`(compose·t3.override·smoke.secrets.env 0600), owner pw `/root/.smoke-owner-pw`.
+- **판단 재료 확보: `MOMO_T3_ENABLED` — BYOC 곡선 전체가 실서버에서 성립.**
