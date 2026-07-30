@@ -22,6 +22,7 @@
     "gate:huddle": "vite build --mode huddle-gate && node gates/gate-huddle.mjs",
     "gate:my-sessions": "vite build --mode my-sessions-gate && node gates/gate-my-sessions.mjs",
     "gate:agent-hub": "vite build --mode agent-hub-gate && node gates/gate-agent-hub.mjs",
+    "gate:workstream": "vite build --mode workstream-gate && node gates/gate-workstream.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",

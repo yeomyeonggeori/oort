@@ -13,6 +13,8 @@ import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { AgentHubRoute } from "@/features/agentHub/AgentHubRoute";
+import { WorkstreamListRoute } from "@/features/workstreams/WorkstreamListRoute";
+import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRoute";
 import { forgetQuota } from "@/features/settings/quotaModel";
 import { forgetUsage } from "@/features/settings/usageModel";
 
@@ -89,6 +91,15 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
+          {/* 작업 흐름 (MOMO-677). Two routes, not a pane inside one channel:
+              the detail has to be linkable on its own, because handing a
+              stopped goal to someone else is the entire point of the surface
+              and "여기 좀 이어받아 줘" travels as a URL. */}
+          <Route path="workstreams" element={<WorkstreamListRoute />} />
+          <Route
+            path="workstreams/:workstreamId"
+            element={<WorkstreamDetailRoute />}
+          />
           <Route path="settings" element={<SettingsRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

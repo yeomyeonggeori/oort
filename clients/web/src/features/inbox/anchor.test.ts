@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { channelPath, messageSelector, watchForMessage } from "./anchor";
+import {
+  channelPath,
+  messageAnchorPath,
+  messageIdSelector,
+  messageSelector,
+  watchForMessage,
+  watchForMessageId,
+} from "./anchor";
 
 describe("channelPath", () => {
   it("opens the channel when the source projection carries no seq", () => {
@@ -18,6 +25,62 @@ describe("channelPath", () => {
     expect(messageSelector(147)).toBe(
       '[data-testid="timeline-message"][data-seq="147"]'
     );
+  });
+});
+
+describe("messageAnchorPath", () => {
+  it("anchors by id for a projection that never sees a seq", () => {
+    expect(
+      messageAnchorPath(
+        "00000000-0000-7000-8000-000000000201",
+        "019F94E3-0E04-79CD-9DEE-208F47EDD9A8"
+      )
+    ).toBe(
+      "/c/00000000-0000-7000-8000-000000000201?msg=019f94e3-0e04-79cd-9dee-208f47edd9a8"
+    );
+  });
+
+  it("folds the wire's upper-cased UUID, which a CSS selector would not", () => {
+    expect(messageIdSelector("019F94E3-0E04-79CD-9DEE-208F47EDD9A8")).toBe(
+      '[data-testid="timeline-message"][data-message-id="019f94e3-0e04-79cd-9dee-208f47edd9a8"]'
+    );
+  });
+});
+
+describe("watchForMessageId", () => {
+  it("scrolls the anchor card into view and expires quietly when it never mounts", () => {
+    const row = {
+      scrollIntoView: vi.fn(),
+      classList: { add: vi.fn(), remove: vi.fn() },
+    };
+    const found: (() => void)[] = [];
+    watchForMessageId("019F94E3-0E04-79CD-9DEE-208F47EDD9A8", {
+      doc: {
+        querySelector: (selector: string) =>
+          selector ===
+          '[data-testid="timeline-message"][data-message-id="019f94e3-0e04-79cd-9dee-208f47edd9a8"]'
+            ? row
+            : null,
+      } as unknown as Document,
+      now: () => 0,
+      schedule: (fn: () => void) => found.push(fn),
+      cancel: () => {},
+    });
+    expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+
+    let clock = 0;
+    const queued: (() => void)[] = [];
+    watchForMessageId("019f94e3-0e04-79cd-9dee-208f47edd9a9", {
+      doc: { querySelector: () => null } as unknown as Document,
+      now: () => clock,
+      schedule: (fn: () => void) => queued.push(fn),
+      cancel: () => {},
+      watchMs: 100,
+    });
+    expect(queued).toHaveLength(1);
+    clock = 1_000;
+    queued[0]();
+    expect(queued).toHaveLength(1);
   });
 });
 
