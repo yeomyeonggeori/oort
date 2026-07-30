@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import {
   fetchMessages,
@@ -21,6 +21,7 @@ import {
   useInvalidateReadStates,
   useReadStates,
 } from "@/features/workspace/useWorkspace";
+import { watchForMessage, watchForMessageId } from "@/features/inbox/anchor";
 import { Timeline } from "@/features/timeline/Timeline";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
@@ -281,6 +282,51 @@ export function ChatShell() {
     setPendingWorkThread(null);
     setWorkOpen(false);
   }, [channelId, pendingWorkThread]);
+
+  // ── URL이 데리고 온 자리 (MOMO-679) ────────────────────────────────────────
+  //
+  // 세 파라미터가 같은 성질이다: 다른 표면이 이 채널 안의 한 지점을 가리키며
+  // 보낸 것. `?seq=`와 `?msg=`는 v1부터 링크에 실려 다녔지만 아무도 읽지
+  // 않았다 — 점프는 인박스·활동 행의 onClick이 직접 워처를 돌려서만 일어났고,
+  // 그래서 그 주소를 복사해 새 탭에 붙여넣으면 채널만 열렸다(PR 918 R1 Low가
+  // `?msg=`에서 지적하고 `?seq=`도 같은 성질이라고 적어둔 그것). 둘은 같은
+  // 성질이므로 한 곳에서 함께 읽는다. onClick 경로는 그대로 둔다: 같은 주소를
+  // 두 번 누르면 파라미터가 바뀌지 않아 이 효과는 다시 돌지 않는다.
+  //
+  // `?work=`는 작업 흐름 상세의 실행 이력이 쓰는 새 열쇠다. 작업 세션은 라우트가
+  // 아니라 이 채널 표면 안의 패널이라, 링크가 채널과 세션을 함께 말한다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const anchorWork = searchParams.get("work");
+  const anchorMsg = searchParams.get("msg");
+  const anchorSeq = searchParams.get("seq");
+
+  useEffect(() => {
+    if (anchorWork === null) return;
+    openWorkSession(anchorWork);
+    // 읽고 나면 주소에서 지운다. 패널의 열림/닫힘은 이 컴포넌트의 상태이므로,
+    // 파라미터가 남으면 사람이 패널을 닫은 뒤에도 주소는 열려 있다고 말한다.
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("work");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [anchorWork, openWorkSession, setSearchParams]);
+
+  // 워처는 행이 실제로 마운트된 뒤에만 찾을 것이 있다. 가상 목록이라 첫 페이지가
+  // 도착하기 전에는 DOM에 행이 하나도 없고, 워처의 3초 창은 그 사이에 지나간다.
+  const anchorReady = messages.length > 0;
+  useEffect(() => {
+    if (!anchorReady) return undefined;
+    if (anchorMsg !== null) return watchForMessageId(anchorMsg);
+    if (anchorSeq !== null) {
+      const seq = Number(anchorSeq);
+      if (Number.isFinite(seq)) return watchForMessage(seq);
+    }
+    return undefined;
+  }, [anchorReady, anchorMsg, anchorSeq, channelId]);
 
   // Under 900px the 작업 세션 pane stops being a column beside the channel and
   // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset

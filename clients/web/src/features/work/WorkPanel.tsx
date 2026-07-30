@@ -20,6 +20,7 @@ import {
   elapsedLabel,
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
+import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   useSessionEvents,
@@ -53,6 +54,7 @@ import {
   SESSION_STATUS_CLASS,
   silenceLabel,
 } from "./workSessionFormat";
+import { HostPicker } from "./HostPicker";
 import { WorkSessionDetail } from "./WorkSessionDetail";
 
 // =============================================================================
@@ -110,6 +112,15 @@ function ScopeButton({
 /** DOM id of the peek a row controls, so the two are linked for a11y. */
 function peekDomId(sessionId: string): string {
   return `work-peek-${sessionId.toLowerCase()}`;
+}
+
+/** Same idea for the host picker: the row's toggle controls exactly this group. */
+function resumeHostsDomId(sessionId: string): string {
+  return `work-resume-hosts-${sessionId.toLowerCase()}`;
+}
+
+function resumeHostsLabelDomId(sessionId: string): string {
+  return `work-resume-hosts-label-${sessionId.toLowerCase()}`;
 }
 
 /**
@@ -174,7 +185,7 @@ function SessionRow({
         </span>
         <span
           className={cn(
-            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+            CHIP_CLASS,
             SESSION_STATUS_CLASS[status.key]
           )}
         >
@@ -259,6 +270,23 @@ function MySessionRow({
   const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
   const hostOnline = workHostOnline(session, hosts);
   const canReattach = canReattachWorkSession(session, hosts);
+  const orphaned = session.status === "orphaned";
+  // 고를 것이 실제로 있을 때만 폼이 그려진다. 없으면 그 자리에 문장이 오고,
+  // 토글은 가리킬 그룹이 없다(아래 aria-controls, 2R M4).
+  const hasTargets = resumeTargets.length > 0;
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  // 실패한 재개의 포커스 복구 (2R H1). 확정 버튼은 진행 중에도 enabled라 대개
+  // 그대로 남아 있고, 그러면 사람이 그것을 쥔 채다 — 빼앗지 않는다. 자격 호스트가
+  // 마지막 하나였고 그 사이에 사라졌다면 폼째로 언마운트되고 포커스가 <body>로
+  // 떨어지는데, 그때만 오류 문장이 받는다. 판정은 이 파일이 스코프 변경에서 쓰는
+  // stranded와 같은 형태다.
+  useEffect(() => {
+    if (resumeError === null) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    errorRef.current?.focus({ preventScroll: true });
+  }, [resumeError]);
 
   return (
     <li
@@ -276,7 +304,7 @@ function MySessionRow({
         </span>
         <span
           className={cn(
-            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+            CHIP_CLASS,
             SESSION_STATUS_CLASS[status.key]
           )}
           data-testid="my-work-session-status"
@@ -327,74 +355,86 @@ function MySessionRow({
         >
           {canReattach ? "이어서 보기" : "세션 상세"}
         </Button>
+        {/* 열기 전에는 이 토글이 이 행의 결정이므로 채움이고, 열린 뒤에는 결정이
+            확정 버튼으로 옮겨가므로 ghost로 물러난다. 라벨도 함께 바뀐다 —
+            `aria-expanded={true}`인데 이름이 아직 "새 호스트에서 재개"면 보이는
+            이름과 안내되는 상태가 어긋난다(2R M9). 작업 흐름 상세의 같은 토글이
+            쓰는 규칙 그대로이고, 컨트롤을 공유하면서 그 컨트롤이 존재하는 이유인
+            규칙만 쪼갤 수는 없다. 고아가 아닌 행의 `세션 스레드`는 이 행의
+            결정이 아니므로 계속 outline이다. */}
         <Button
           type="button"
-          variant="outline"
+          variant={orphaned ? (resumeOpen ? "ghost" : "default") : "outline"}
           size="sm"
-          onClick={
-            session.status === "orphaned" ? onToggleResume : onOpenThread
-          }
+          onClick={orphaned ? onToggleResume : onOpenThread}
           disabled={openingThread || resumingHostId !== null}
-          aria-expanded={
-            session.status === "orphaned" ? resumeOpen : undefined
-          }
+          aria-expanded={orphaned ? resumeOpen : undefined}
+          {...(orphaned && resumeOpen && hasTargets
+            ? { "aria-controls": resumeHostsDomId(session.id) }
+            : {})}
           data-testid="my-work-session-thread"
         >
           {openingThread
             ? "스레드 여는 중"
-            : session.status === "orphaned"
-              ? "새 호스트에서 재개"
+            : orphaned
+              ? resumeOpen
+                ? "호스트 선택 닫기"
+                : "새 호스트에서 재개"
               : "세션 스레드"}
         </Button>
       </div>
-      {session.status === "orphaned" && resumeOpen && (
+      {orphaned && resumeOpen && (
+        // 이 블록은 이 행에서 가장 긴 한국어 산문을 담는다. 어절에서 끊는 규칙은
+        // 이 컨테이너가 갖고(word-break는 상속된다), 긴 토큰을 받아내는
+        // break-words는 각 문단이 갖는다 — 한 엘리먼트에 함께 두면
+        // tailwind-merge가 하나를 지운다(MOMO-676 M-5). 쌍둥이 표면의 같은
+        // 문장들은 `<section class="break-keep">` 아래에 있는데 이쪽만 없어서,
+        // 261px 실측에서 재개 오류의 `확인한`이 음절에서 쪼개졌다(2R M5).
         <div
-          className="mt-2 rounded-md border border-line bg-surface-raised px-3 py-2"
+          className="mt-2 break-keep rounded-md border border-line bg-surface-raised px-3 py-2"
           data-testid="work-session-resume-targets"
         >
-          <p className="text-meta text-ink">
+          <p className="break-words text-meta text-ink">
             Git 계보만 새 호스트로 이어집니다.
           </p>
-          <p className="mt-1 text-meta text-ink-muted">
+          <p className="mt-1 break-words text-meta text-ink-muted">
             이전 호스트의 터미널 상태와 미커밋 변경은 옮겨지지 않습니다.
           </p>
           {resumeError !== null && (
-            <p className="mt-2 text-meta text-danger" role="alert">
+            <p
+              ref={errorRef}
+              tabIndex={-1}
+              className="mt-2 break-words text-meta text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              role="alert"
+            >
               {resumeError}
             </p>
           )}
-          {resumeTargets.length === 0 ? (
-            <p className="mt-2 text-meta text-ink-muted">
+          {!hasTargets ? (
+            <p className="mt-2 break-words text-meta text-ink-muted">
               온라인인 다른 호스트가 없습니다. 호스트를 연결한 뒤 다시
               시도하세요.
             </p>
           ) : (
-            <div
-              className="mt-2 flex flex-wrap justify-end gap-2"
-              role="group"
-              aria-label="재개할 호스트"
-            >
-              {resumeTargets.map((host) => (
-                <Button
-                  key={host.id}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onResume(host.id)}
-                  disabled={resumingHostId !== null}
-                  aria-label={`${host.displayName}에서 재개`}
-                  className="min-w-0 max-w-full"
-                  data-testid="work-session-resume-host"
-                  data-host-id={host.id}
-                >
-                  <span className="min-w-0 truncate">
-                    {uuidEq(resumingHostId ?? undefined, host.id)
-                      ? "재개하는 중"
-                      : host.displayName}
-                  </span>
-                </Button>
-              ))}
-            </div>
+            // 작업 흐름 상세의 이어받기와 같은 컨트롤이다(HostPicker). 두 표면이
+            // 제안하는 act가 같고 그 아래 두 줄의 문장은 이미 한 글자까지 같게
+            // 쓰기로 한 것이라, 컨트롤만 두 벌로 두면 같은 약속이 두 가지 무게와
+            // 두 가지 폭으로 보인다.
+            <HostPicker
+              id={resumeHostsDomId(session.id)}
+              labelId={resumeHostsLabelDomId(session.id)}
+              copy={{
+                group: "재개할 호스트",
+                confirm: "재개",
+                action: (name) => `${name}에서 재개`,
+                busy: (name) => `${name}에서 재개하는 중`,
+              }}
+              targets={resumeTargets}
+              busyHostId={resumingHostId}
+              onPick={onResume}
+              selectTestId="work-session-resume-host-select"
+              confirmTestId="work-session-resume-confirm"
+            />
           )}
         </div>
       )}

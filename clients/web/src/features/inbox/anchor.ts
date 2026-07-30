@@ -49,13 +49,49 @@ export function messageAnchorPath(channelId: string, messageId: string): string 
   )}`;
 }
 
+/**
+ * Route for a channel with the 작업 세션 패널 opened on one session (MOMO-679).
+ *
+ * A goal's run ledger lists work sessions, and those live in a PANE inside the
+ * channel surface rather than on a route of their own, so a row that hands the
+ * reader to one has to name both the channel and the session. It travels in the
+ * URL rather than in component state because the two surfaces are different
+ * routes: 작업 흐름 상세 unmounts on the way there, and a message passed through
+ * state would have nowhere to live in between.
+ */
+export function workSessionPath(channelId: string, sessionId: string): string {
+  return `/c/${encodeURIComponent(channelId)}?work=${encodeURIComponent(
+    sessionId.toLowerCase()
+  )}`;
+}
+
 export function messageSelector(seq: number): string {
   return `[data-testid="timeline-message"][data-seq="${seq}"]`;
 }
 
-/** UUIDs cross the wire mixed-case; the row publishes its id lower-cased. */
+/**
+ * UUIDs cross the wire mixed-case; the row publishes its id lower-cased.
+ *
+ * The id is INTERPOLATED INTO A CSS SELECTOR, so it is escaped rather than
+ * assumed to be a uuid. `querySelector` throws `SyntaxError` on a malformed
+ * selector, and since ChatShell now reads this anchor out of `?msg=` the value
+ * arrives from the address bar: one pasted link carrying a quote would take the
+ * whole channel surface down instead of quietly failing to find a row.
+ *
+ * The value sits inside a QUOTED attribute value, and a CSS string can hold
+ * anything except an unescaped `"`, an unescaped `\` and a raw newline. So those
+ * three are exactly what this escapes, rather than reaching for `CSS.escape`:
+ * that helper escapes for the IDENTIFIER grammar (it would also backslash every
+ * `-` leading a digit and every space), it is a DOM global this module otherwise
+ * does not need, and a conditional fallback would leave the branch these tests
+ * run in different from the branch the product runs in.
+ */
 export function messageIdSelector(messageId: string): string {
-  return `[data-testid="timeline-message"][data-message-id="${messageId.toLowerCase()}"]`;
+  const escaped = messageId
+    .toLowerCase()
+    .replace(/["\\]/g, "\\$&")
+    .replace(/[\n\r\f]/g, " ");
+  return `[data-testid="timeline-message"][data-message-id="${escaped}"]`;
 }
 
 export interface WatchOptions {

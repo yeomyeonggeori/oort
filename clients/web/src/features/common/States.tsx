@@ -65,6 +65,7 @@ export function InlineBanner({
   actionLabel,
   onAction,
   separator = true,
+  heading = false,
   testId,
 }: {
   tone?: "error" | "neutral";
@@ -74,8 +75,20 @@ export function InlineBanner({
   actionLabel?: string;
   onAction?: () => void;
   separator?: boolean;
+  /**
+   * This banner REPLACED the page, so its sentence is the page's heading.
+   *
+   * Default false, and it has to stay that way: nearly every caller sits under
+   * a heading that is still on screen (the route header, the goal a detail page
+   * is about), and a second `h1` there would be two documents in one pane. The
+   * opt-in is for the branch where the content is gone and the banner is all
+   * that is left, which otherwise renders a route with no heading at all
+   * (PR 918 R1 Low).
+   */
+  heading?: boolean;
   testId?: string;
 }) {
+  const Message = heading ? "h1" : "span";
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
@@ -96,7 +109,7 @@ export function InlineBanner({
       {/* Wraps, never truncates: this banner also runs in the sidebar column,
           and half an error message is worse than none. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="break-words">{message}</span>
+        <Message className="break-words">{message}</Message>
         {items && items.length > 0 && (
           <ul className="flex list-outside list-disc flex-col gap-1 ps-4">
             {items.map((item) => (
@@ -131,25 +144,34 @@ export function EmptyInvite({
   headline,
   detail,
   actions,
+  heading = false,
   testId,
   dataAttrs,
 }: {
   headline: string;
   detail?: string;
   actions?: React.ReactNode;
+  /**
+   * This state REPLACED the page, so its headline is the page's heading. Same
+   * opt-in and same reason as `InlineBanner.heading`: an empty list inside a
+   * route that still shows its own `h1` must not add a second one, and a 404
+   * that replaced the whole route must not leave the document with none.
+   */
+  heading?: boolean;
   testId?: string;
   /** Extra data-* hooks, e.g. which variant of an empty state this is. */
   dataAttrs?: Record<string, string>;
 }) {
+  const Headline = heading ? "h1" : "p";
   return (
     <div
       className="flex break-keep flex-col items-start gap-3 px-4 py-6"
       data-testid={testId}
       {...dataAttrs}
     >
-      <p className="text-body font-medium text-ink">
+      <Headline className="text-body font-medium text-ink">
         {headline}
-      </p>
+      </Headline>
       {detail && (
         <p className="text-body text-ink-muted">{detail}</p>
       )}
