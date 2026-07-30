@@ -1388,6 +1388,10 @@
 - 한 일: 성재 "B0 착수" = Phase 0 승인. **B0(Rust 워크스페이스 골격) 착수** — 핸드오프 패킷(`handoffs/2026-07-30-B0-rust-skeleton-packet.md`) 작성, track/engine을 main으로 ff 동기화(Phase 0 문서 반영), goal 워크트리 `feat/B0-rust-skeleton`(base track/engine) 생성, **백그라운드 워커(Opus 5) 스폰**. 범위: 공유 5 crate 스켈레톤(db·outbox·wire·auth·provider)·마이그레이션 러너(기존 59 제자리)·outbox chokepoint·workd 서명 바이트동일 이식·provenance API 스켈레톤(테이블 금지). 도메인/바이너리는 B1+.
 - 열린 것: **B0 워커 결과 대기** → PR→track/engine, 오케스트레이터 docker 게이트(마이그레이션 러너·GUC cross-tenant red). ADR-0146 세부 확정(B1 전). NCP smoke(§독립)·#925·#926·#893 병존.
 
+## 2026-07-30 (오후 3) · Fable · 오케스트레이션
+- 한 일: **B0(Rust 워크스페이스 골격) 랜딩** — PR #927 → track/engine(`d1e51ddf`). `server-rust/` Cargo 워크스페이스 + 공유 5 crate(db·outbox·wire·auth·provider). 오케스트레이터 검수: 코드 리뷰(with_tenant_tx GUC·emit chokepoint·서명 바이트파리티 Swift 대조) + **docker 게이트 직접 재검증**(conformance_pg: 마이그레이션 러너 psql로 59개 fresh pgvector/pg18 적용·GUC red 통과). 게이트가 러너 결함 1건 실측(sqlx::raw_sql이 시드 `\if` 못 씀 → psql shell-out 전환, red-proof 커밋 보존) → 워커 수정 → 재검증 green.
+- 열린 것: **B1(메신저 코어) 착수 준비** — 패킷 작성 → 워커. B1 러너는 psql 정본. OutboxKind push_candidate 누락 후속. ADR-0146 세부 확정(B1 전). NCP smoke·#925·#926·#893 병존.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
