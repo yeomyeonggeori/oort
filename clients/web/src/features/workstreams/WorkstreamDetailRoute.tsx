@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
+import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { messageAnchorPath, watchForMessageId } from "@/features/inbox/anchor";
-import { relativeLabel } from "@/features/inbox/model";
 import {
-  memberFor,
-  memberNameParts,
-  useChannels,
-  useDirectory,
-} from "@/features/workspace/useWorkspace";
+  messageAnchorPath,
+  watchForMessageId,
+  workSessionPath,
+} from "@/features/inbox/anchor";
+import { relativeLabel } from "@/features/inbox/model";
+import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
+import { HostPicker } from "@/features/work/HostPicker";
 import { useWorkHosts } from "@/features/work/useWorkSessions";
 import {
   workHostName,
@@ -25,7 +26,6 @@ import { particleFor } from "@/lib/koreanParticle";
 import {
   ApiError,
   resumeWorkSession,
-  uuidEq,
   type WorkHost,
   type WorkstreamRun,
   type WorkstreamStatus,
@@ -40,6 +40,8 @@ import {
   continuationState,
   isWorkstreamMissing,
   runClockLabel,
+  workstreamActor,
+  type WorkstreamActor,
 } from "./model";
 import { useWorkstream, useWorkstreamRuns } from "./useWorkstreams";
 
@@ -115,79 +117,110 @@ function RunClockLabel({ at, nowMs }: { at: number; nowMs: number }) {
 function RunRow({
   run,
   hosts,
-  actorName,
-  actorIsAgent,
+  channelId,
+  actor,
   nowMs,
 }: {
   run: WorkstreamRun;
   hosts: WorkHost[] | undefined;
-  actorName: string;
-  actorIsAgent: boolean;
+  /** 이 목표의 앵커 채널. 실행이 사는 작업 세션 패널이 거기에 있다. */
+  channelId: string;
+  actor: WorkstreamActor;
   nowMs: number;
 }) {
   const status = workSessionStatus(run);
   return (
     <li
-      className="border-b border-line px-4 py-2"
+      className="border-b border-line"
       data-testid="workstream-run-row"
       data-run-id={run.id}
       data-member-id={run.memberId}
       data-status={run.status}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        {/* Agent identity is the --agent token on the name and nothing else:
-            same row, same type, no second background (design-taste-web §9).
-            It matters here more than anywhere: "A → 에이전트 → C" is the
-            sentence this list exists to make readable. */}
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-body",
-            actorIsAgent ? "text-agent" : "text-ink"
-          )}
-          data-testid="workstream-run-actor"
-        >
-          {actorName}
-        </span>
-        {run.resumedFromSessionId !== undefined && (
-          <span
-            className="shrink-0 rounded-sm bg-surface-hover px-2 py-px text-timestamp text-ink-muted"
-            data-testid="workstream-run-lineage"
-          >
-            이어받음
+      {/* 행은 링크다 (PR 918 R1 M5). v1의 이력은 읽을 수만 있고 갈 데가 없었다 —
+          한 실행이 무엇을 했는지, 지금 무엇을 하고 있는지는 이 표면이 아니라
+          작업 세션 상세와 관전 터미널이 답하는 질문인데, 원장에서 거기로 가는
+          길이 없어서 채널을 찾아 패널을 열고 같은 세션을 다시 고르는 것이
+          유일한 경로였다. 목록 행이 상세로 가는 것과 같은 형태로, 같은
+          hover·focus 계약으로 간다. */}
+      <Link
+        to={workSessionPath(channelId, run.id)}
+        className="flex flex-col px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        data-testid="workstream-run-link"
+      >
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            {/* Agent identity is the --agent token on the name and nothing else:
+                same row, same type, no second background (design-taste-web §9).
+                It matters here more than anywhere: "A → 에이전트 → C" is the
+                sentence this list exists to make readable. */}
+            <span
+              className={cn(
+                "min-w-0 truncate text-body",
+                actor.isAgent ? "text-agent" : "text-ink"
+              )}
+              data-testid="workstream-run-actor"
+            >
+              {actor.name}
+            </span>
+            {/* 그 에이전트를 누가 책임지는가 (skill §9, PR 918 R1 M6). 원장의
+                요점이 "A -> 에이전트 -> C"인데 가운데 칸에 책임 주체가 없으면,
+                이어받기를 물어볼 사람이 화면에 없다. 문장은 멤버 디렉터리·
+                타임라인이 이미 쓰는 것과 같다. */}
+            {actor.ownerName !== null && (
+              <span
+                className="min-w-0 truncate text-meta text-ink-muted"
+                data-testid="workstream-run-owner"
+              >
+                managed by {actor.ownerName}
+              </span>
+            )}
           </span>
-        )}
-        <span
-          className={cn(
-            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
-            SESSION_STATUS_CLASS[status.key]
+          {run.resumedFromSessionId !== undefined && (
+            <span
+              className={cn(CHIP_CLASS, "bg-surface-hover text-ink-muted")}
+              data-testid="workstream-run-lineage"
+            >
+              이어받음
+            </span>
           )}
-          data-testid="workstream-run-status"
-        >
-          {status.label}
+          <span
+            className={cn(CHIP_CLASS, SESSION_STATUS_CLASS[status.key])}
+            data-testid="workstream-run-status"
+          >
+            {status.label}
+          </span>
         </span>
-      </div>
-      <p className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
-        <span className="min-w-0 truncate">{run.label}</span>
-        <span className="shrink-0">·</span>
-        <span className="shrink-0">{run.tool}</span>
-        <span className="shrink-0">·</span>
-        <span className="shrink-0" data-testid="workstream-run-host">
-          {workHostName(run, hosts) ?? "알 수 없는 호스트"}
+        <span className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
+          <span className="min-w-0 truncate">{run.label}</span>
+          <span className="shrink-0">·</span>
+          <span className="shrink-0">{run.tool}</span>
+          <span className="shrink-0">·</span>
+          <span className="shrink-0" data-testid="workstream-run-host">
+            {workHostName(run, hosts) ?? "알 수 없는 호스트"}
+          </span>
         </span>
-      </p>
-      <p className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
-        <span className="shrink-0">시작</span>
-        <RunClockLabel at={run.startedAtMs} nowMs={nowMs} />
-        {run.endedAtMs !== undefined && (
-          <>
-            <span className="shrink-0">· 종료</span>
-            <RunClockLabel at={run.endedAtMs} nowMs={nowMs} />
-          </>
-        )}
-      </p>
+        <span className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
+          <span className="shrink-0">시작</span>
+          <RunClockLabel at={run.startedAtMs} nowMs={nowMs} />
+          {run.endedAtMs !== undefined && (
+            <>
+              <span className="shrink-0">· 종료</span>
+              <RunClockLabel at={run.endedAtMs} nowMs={nowMs} />
+            </>
+          )}
+        </span>
+      </Link>
     </li>
   );
 }
+
+/**
+ * 이 표면에는 이어받기 블록이 하나뿐이므로 id는 상수다. 토글이 `aria-controls`로
+ * 이 그룹을 가리키고, 그룹은 눈에 보이는 라벨을 `aria-labelledby`로 되짚는다.
+ */
+const HOST_GROUP_ID = "workstream-continue-hosts";
+const HOST_GROUP_LABEL_ID = "workstream-continue-hosts-label";
 
 function ContinuationBlock({
   runs,
@@ -355,12 +388,17 @@ function ContinuationBlock({
             Git 계보만 새 호스트로 이어집니다. 이전 호스트의 터미널 상태와
             미커밋 변경은 옮겨지지 않습니다.
           </p>
+          {/* 열기 전에는 이 토글이 블록의 결정이므로 채움이고, 열린 뒤에는
+              결정이 호스트 버튼으로 옮겨가므로 ghost로 물러난다. v1은 둘이 같은
+              outline·같은 size라, `호스트 선택 닫기`와 `성재 맥북`이 같은 무게로
+              쌓였다(PR 918 R1 M3, skill §8 "default action emphasized"). */}
           <div className="mt-2 flex flex-wrap justify-end gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant={open ? "ghost" : "default"}
               size="sm"
               aria-expanded={open}
+              {...(open ? { "aria-controls": HOST_GROUP_ID } : {})}
               disabled={pendingHostId !== null}
               onClick={() => {
                 setError(null);
@@ -372,37 +410,20 @@ function ContinuationBlock({
             </Button>
           </div>
           {open && (
-            <div
-              className="mt-2 flex flex-wrap justify-end gap-2"
-              role="group"
-              aria-label="이어받을 호스트"
-              data-testid="workstream-continue-targets"
-            >
-              {state.targets.map((host) => (
-                <Button
-                  key={host.id}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={pendingHostId !== null}
-                  aria-busy={uuidEq(pendingHostId ?? undefined, host.id) || undefined}
-                  aria-label={`${host.displayName}에서 이어받기`}
-                  className="min-w-0 max-w-full"
-                  data-testid="workstream-continue-host"
-                  data-host-id={host.id}
-                  onClick={() => void takeOver(state.run, host.id)}
-                >
-                  {uuidEq(pendingHostId ?? undefined, host.id) && (
-                    <Loader2 aria-hidden="true" className="spinner-busy" />
-                  )}
-                  <span className="min-w-0 truncate">
-                    {uuidEq(pendingHostId ?? undefined, host.id)
-                      ? "이어받는 중"
-                      : host.displayName}
-                  </span>
-                </Button>
-              ))}
-            </div>
+            <HostPicker
+              id={HOST_GROUP_ID}
+              labelId={HOST_GROUP_LABEL_ID}
+              copy={{
+                group: "이어받을 호스트",
+                action: (name) => `${name}에서 이어받기`,
+                busy: (name) => `${name}에서 이어받는 중`,
+              }}
+              targets={state.targets}
+              busyHostId={pendingHostId}
+              onPick={(hostId) => void takeOver(state.run, hostId)}
+              groupTestId="workstream-continue-targets"
+              hostTestId="workstream-continue-host"
+            />
           )}
         </>
       )}
@@ -437,24 +458,9 @@ export function WorkstreamDetailRoute() {
   );
 
 
-  /**
-   * Who ran it. This roster really does carry two members called 김인턴 (a
-   * human and an agent), so the name goes through the shared disambiguator
-   * rather than being read off `displayName`: two rows reading 김인턴 under a
-   * goal are not a history, they are a coin toss.
-   */
-  function actorOf(memberId: string): { name: string; isAgent: boolean } {
-    const parts = memberNameParts(
-      directoryQuery.directory,
-      memberId,
-      "알 수 없는 멤버"
-    );
-    const member = memberFor(directoryQuery.directory, memberId);
-    return {
-      name: parts.handle ? `${parts.name} ${parts.handle}` : parts.name,
-      isAgent: member?.kind === "agent",
-    };
-  }
+  /** Who ran it, named by the rule the whole surface shares (model.ts). */
+  const actorOf = (memberId: string) =>
+    workstreamActor(directoryQuery.directory, memberId);
 
   return (
     <div
@@ -482,18 +488,28 @@ export function WorkstreamDetailRoute() {
              that such a workstream exists; calling it "권한이 없습니다" here
              would hand back that confirmation in the client. Only the takeover
              call talks about membership, because only it answers 403. */
+          /* 이 분기와 아래 오류 분기에는 목표가 없다. 목표가 이 페이지의 h1인데
+             (아래 성공 분기) 그 두 분기는 h1을 하나도 렌더하지 않아, 문서에
+             제목이 없는 라우트가 됐다(PR 918 R1 Low). 그 자리를 대신 차지한
+             문장이 곧 이 페이지의 제목이므로 그 문장이 h1을 받는다. 목록의 빈
+             상태들은 헤더의 h1이 아직 화면에 있으므로 받지 않는다 — 규칙은
+             "페이지를 대신했는가"이지 "빈 상태인가"가 아니다. */
           <EmptyInvite
+            heading
             headline="이 작업 흐름을 찾을 수 없습니다."
             detail="주소가 오래됐거나, 내가 속한 채널의 작업 흐름이 아닙니다."
             actions={
               <Button variant="outline" size="sm" asChild>
-                <Link to="/workstreams">작업 흐름 목록</Link>
+                {/* 동사로 끝나는 라벨(skill §7). 명사구 `작업 흐름 목록`은
+                    버튼이 아니라 표지판처럼 읽힌다. */}
+                <Link to="/workstreams">작업 흐름 목록 보기</Link>
               </Button>
             }
             testId="workstream-detail-missing"
           />
         ) : query.error || workstream === null ? (
           <InlineBanner
+            heading
             message="작업 흐름을 불러오지 못했습니다."
             actionLabel="다시 시도"
             onAction={() => void query.refetch()}
@@ -518,7 +534,8 @@ export function WorkstreamDetailRoute() {
                 </h1>
                 <span
                   className={cn(
-                    "mt-1 shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+                    CHIP_CLASS,
+                    "mt-1",
                     WORKSTREAM_STATUS_CLASS[workstream.status]
                   )}
                   data-testid="workstream-detail-status"
@@ -620,19 +637,16 @@ export function WorkstreamDetailRoute() {
                 />
               ) : (
                 <ul data-testid="workstream-run-list">
-                  {runs.map((run) => {
-                    const actor = actorOf(run.memberId);
-                    return (
-                      <RunRow
-                        key={run.id}
-                        run={run}
-                        hosts={hostsQuery.data}
-                        actorName={actor.name}
-                        actorIsAgent={actor.isAgent}
-                        nowMs={nowMs}
-                      />
-                    );
-                  })}
+                  {runs.map((run) => (
+                    <RunRow
+                      key={run.id}
+                      run={run}
+                      hosts={hostsQuery.data}
+                      channelId={workstream.channelId}
+                      actor={actorOf(run.memberId)}
+                      nowMs={nowMs}
+                    />
+                  ))}
                 </ul>
               )}
             </section>

@@ -20,6 +20,7 @@ import {
   elapsedLabel,
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
+import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   useSessionEvents,
@@ -53,6 +54,7 @@ import {
   SESSION_STATUS_CLASS,
   silenceLabel,
 } from "./workSessionFormat";
+import { HostPicker } from "./HostPicker";
 import { WorkSessionDetail } from "./WorkSessionDetail";
 
 // =============================================================================
@@ -110,6 +112,15 @@ function ScopeButton({
 /** DOM id of the peek a row controls, so the two are linked for a11y. */
 function peekDomId(sessionId: string): string {
   return `work-peek-${sessionId.toLowerCase()}`;
+}
+
+/** Same idea for the host picker: the row's toggle controls exactly this group. */
+function resumeHostsDomId(sessionId: string): string {
+  return `work-resume-hosts-${sessionId.toLowerCase()}`;
+}
+
+function resumeHostsLabelDomId(sessionId: string): string {
+  return `work-resume-hosts-label-${sessionId.toLowerCase()}`;
 }
 
 /**
@@ -174,7 +185,7 @@ function SessionRow({
         </span>
         <span
           className={cn(
-            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+            CHIP_CLASS,
             SESSION_STATUS_CLASS[status.key]
           )}
         >
@@ -276,7 +287,7 @@ function MySessionRow({
         </span>
         <span
           className={cn(
-            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+            CHIP_CLASS,
             SESSION_STATUS_CLASS[status.key]
           )}
           data-testid="my-work-session-status"
@@ -338,6 +349,9 @@ function MySessionRow({
           aria-expanded={
             session.status === "orphaned" ? resumeOpen : undefined
           }
+          {...(session.status === "orphaned" && resumeOpen
+            ? { "aria-controls": resumeHostsDomId(session.id) }
+            : {})}
           data-testid="my-work-session-thread"
         >
           {openingThread
@@ -369,32 +383,23 @@ function MySessionRow({
               시도하세요.
             </p>
           ) : (
-            <div
-              className="mt-2 flex flex-wrap justify-end gap-2"
-              role="group"
-              aria-label="재개할 호스트"
-            >
-              {resumeTargets.map((host) => (
-                <Button
-                  key={host.id}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onResume(host.id)}
-                  disabled={resumingHostId !== null}
-                  aria-label={`${host.displayName}에서 재개`}
-                  className="min-w-0 max-w-full"
-                  data-testid="work-session-resume-host"
-                  data-host-id={host.id}
-                >
-                  <span className="min-w-0 truncate">
-                    {uuidEq(resumingHostId ?? undefined, host.id)
-                      ? "재개하는 중"
-                      : host.displayName}
-                  </span>
-                </Button>
-              ))}
-            </div>
+            // 작업 흐름 상세의 이어받기와 같은 컨트롤이다(HostPicker). 두 표면이
+            // 제안하는 act가 같고 그 아래 두 줄의 문장은 이미 한 글자까지 같게
+            // 쓰기로 한 것이라, 컨트롤만 두 벌로 두면 같은 약속이 두 가지 무게와
+            // 두 가지 폭으로 보인다.
+            <HostPicker
+              id={resumeHostsDomId(session.id)}
+              labelId={resumeHostsLabelDomId(session.id)}
+              copy={{
+                group: "재개할 호스트",
+                action: (name) => `${name}에서 재개`,
+                busy: (name) => `${name}에서 재개하는 중`,
+              }}
+              targets={resumeTargets}
+              busyHostId={resumingHostId}
+              onPick={onResume}
+              hostTestId="work-session-resume-host"
+            />
           )}
         </div>
       )}
