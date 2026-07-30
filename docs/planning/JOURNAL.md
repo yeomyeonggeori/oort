@@ -1428,6 +1428,10 @@
 - 한 일: **B2.3(momo-notifier) 랜딩** — PR #934 → track/engine. T3 내구성 워커(D4 수렴 reconciler+host-lost sweep, SQL 0줄·정산 t3_terminate 1곳). 게이트 d4 4/4 green. 게이트가 잡은 것: 픽스처 UNIQUE 충돌 → 워커가 원인 지점 수정(adopt_running_instance — 내 retire 패치가 '가짜 죽음'을 만들던 것까지 판정·제거, 수렴표는 무결). **NCP 비용 효율화 실행**(성재 승인): compose stop→서버 정지, ncp-power.py 도구, "테스트할 때만 켠다" 정책 런북 §8.
 - 열린 것: B2.3 이탈 후속 티켓(sweep 사용자 가시 후속·audit_log 스텁·관리형 어댑터). 다음 배치(B2.4 gateway/재부착 0139 등) 성재 방향. MOMO_T3_ENABLED 판단(재료 확보). #925·#926·#893.
 
+## 2026-07-31 (밤) · Fable · 오케스트레이션
+- 한 일: **B2.4 랜딩**(PR #935) — 재부착/replay(0139, seq 커서 — wall-clock red 증명)·terminal attach 서버 계약(해시 저장·MomoHost 서명 validate)·**audit_log 실구현**(B0 스텁 해소, host 서명은 via_token_id NULL 규칙 API化). 게이트 3/3+무회귀 green. 이탈 2건 수용(/reattach 투영 route 신설 — Swift 4-route 합성의 D3 판정 통합, momo-auth host 자격 파일). **ADR-0146 Accepted**(3결정: 2단계 페이로드·에이전트/workd 먼저·감사전용 UX)·**ADR-0140 정오표** 반영.
+- 열린 것: 다음 배치 = **provenance 구현**(0146 Accept로 준비 완료: record_provenance·action_signature 060·3표면 emit) 또는 AgentGateway(B2.5). audit 미배선 5건(PR #935 표). #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
