@@ -249,6 +249,11 @@ async fn seed_cloud_host(
     provider_sandbox_id: &str,
     digest: &str,
 ) -> CloudHostFixture {
+    // `work_cloud_host.provider_sandbox_id` is UNIQUE; every test seeds its own
+    // host, so suffix the caller's label with a fresh uuid — otherwise only the
+    // first test's insert survives and the rest die on 23505 (gate 실측).
+    let provider_sandbox_id = format!("{provider_sandbox_id}-{}", Uuid::new_v4());
+    let provider_sandbox_id = provider_sandbox_id.as_str();
     // A cloud work host identity, exactly as the bootstrap registration creates
     // it (workspace scope, type 'cloud').
     let host_id: Uuid = sqlx::query_scalar(
