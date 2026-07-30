@@ -470,6 +470,47 @@ pub async fn send_message(
     Ok(sent)
 }
 
+/// Look a message up by the idempotency triple, without writing anything
+/// (B2.6).
+///
+/// This is the read half of the `(channel_id, author_member_id, client_msg_id)`
+/// unique index that [`send_message_in_tx`] writes against — the same predicate,
+/// so a caller can ask *"has this idempotency key already produced a message?"*
+/// **before** deciding whether a send is legal, instead of learning it from the
+/// send's `deduped` flag afterwards.
+///
+/// The gateway completion needs exactly that ordering (Swift
+/// `AgentGatewayRoutes.existingFinalMessage`, :1305-1326): on an already-terminal
+/// run it must *replay* the final message when one exists and *refuse* with a 409
+/// when one does not. Calling [`send_message_in_tx`] first would insert one in
+/// the second case, silently turning a cancelled run into a completed one.
+///
+/// `deleted_at` is deliberately **not** filtered: the row still occupies the
+/// unique index, so pretending it is absent would let a caller "re-send" into a
+/// constraint violation.
+pub async fn find_client_message_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    author_member_id: Uuid,
+    client_msg_id: Uuid,
+) -> Result<Option<StoredMessage>, DbError> {
+    let sql = format!(
+        "SELECT {STORED_COLS} FROM message \
+          WHERE channel_id = $1 AND author_member_id = $2 AND client_msg_id = $3 \
+          LIMIT 1"
+    );
+    let row = sqlx::query(&sql)
+        .bind(channel_id)
+        .bind(author_member_id)
+        .bind(client_msg_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(decode_stored)
+        .transpose()
+        .map_err(DbError::from)
+}
+
 /// List a channel's live messages in ascending `seq` order (the authoritative
 /// per-channel order), capped at `limit`.
 pub async fn list_messages(

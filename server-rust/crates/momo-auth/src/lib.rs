@@ -36,6 +36,17 @@
 //! cryptographic verdict is [`workhost::verify_work_host_request`] and header
 //! parsing is the route's, the same split the heartbeat already uses.
 
+//! B2.6 adds the fourth credential surface and the one that finally makes an
+//! agent a first-class caller: the **agent bearer** ([`agent_bearer`] — a
+//! `token` row with `kind = 'agent_bearer'`, presented as the opaque
+//! `momo_agent_v1.<ws>.<secret>` envelope). It is here, next to
+//! [`token_store`], because both read the same table under the same revocation
+//! contract; and its route→scope allow-list ([`agent_scope`]) is here rather
+//! than in the route layer because "which routes an agent credential may reach"
+//! is a property of the credential, not of any one handler.
+
+pub mod agent_bearer;
+pub mod agent_scope;
 pub mod issue;
 pub mod jwt;
 pub mod token_store;
@@ -44,6 +55,15 @@ pub mod work_host_store;
 pub mod workhost;
 pub mod workspace_authorization;
 
+pub use agent_bearer::{
+    agent_bearer_workspace_id, authenticate_agent_bearer_in_tx, AgentBearerIdentity,
+    AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX, AUDIT_ACTION_SCOPE_DENIED,
+    AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
+};
+pub use agent_scope::{
+    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,
+    SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
+};
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
 };

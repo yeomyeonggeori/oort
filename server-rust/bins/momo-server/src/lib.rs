@@ -30,7 +30,7 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use momo_db::PgPool;
 
-use crate::config::T3Settings;
+use crate::config::{AgentGatewaySettings, T3Settings};
 
 /// Shared handler state. Cheap to clone (pool handle + `Arc`'d strings).
 #[derive(Clone)]
@@ -45,6 +45,10 @@ pub struct AppState {
     /// otherwise, so a deployment that never configured T3 answers 503 on every
     /// T3 route instead of half-provisioning something billable.
     pub t3: Arc<T3Settings>,
+    /// AgentGateway settings (B2.6). **`worker` mode** unless
+    /// [`AppState::with_agent_gateway`] says otherwise, so the callback surface
+    /// answers 403 on a deployment that never chose it.
+    pub agent_gateway: Arc<AgentGatewaySettings>,
 }
 
 impl AppState {
@@ -54,6 +58,7 @@ impl AppState {
             jwt_secret: Arc::new(jwt_secret),
             realtime_ws_url: Arc::new(realtime_ws_url),
             t3: Arc::new(T3Settings::default()),
+            agent_gateway: Arc::new(AgentGatewaySettings::default()),
         }
     }
 
@@ -62,6 +67,12 @@ impl AppState {
     /// the fail-closed default.
     pub fn with_t3(mut self, settings: T3Settings) -> Self {
         self.t3 = Arc::new(settings);
+        self
+    }
+
+    /// Attach the operator's AgentGateway configuration (B2.6), same rationale.
+    pub fn with_agent_gateway(mut self, settings: AgentGatewaySettings) -> Self {
+        self.agent_gateway = Arc::new(settings);
         self
     }
 }
@@ -157,6 +168,38 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/admin/workspaces/{ws}/credits/topups",
             post(routes::credits::topup),
+        )
+        // agent runs (B2.6) — creation is human-only; the gateway callbacks below
+        // are the agent/gateway half of the same run's life.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/agent-runs",
+            post(routes::agent_runs::create),
+        )
+        // agent gateway (MOMO-325 / migration 008)
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/gateway/jobs/pending",
+            get(routes::agent_gateway::pending_jobs),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/gateway/jobs/{job}/lease/renew",
+            post(routes::agent_gateway::renew_lease),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/gateway/jobs/{job}/lease/release",
+            post(routes::agent_gateway::release_lease),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}/gateway/events",
+            post(routes::agent_gateway::event),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}/gateway/complete",
+            post(routes::agent_gateway::complete),
+        )
+        // LLM spend (MOMO-615) — the read side of the ledger B2.6 finally writes.
+        .route(
+            "/v1/workspaces/{ws}/usage/summary",
+            get(routes::usage::summary),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

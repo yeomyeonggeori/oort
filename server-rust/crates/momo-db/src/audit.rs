@@ -184,6 +184,45 @@ pub async fn write_audit(conn: &mut PgConnection, entry: &AuditEntry) -> Result<
     Ok(id)
 }
 
+/// Has an event with this `detail.event_id` already been recorded against this
+/// run and action? (B2.6.)
+///
+/// An at-least-once callback surface needs a de-duplication key, and momo has no
+/// separate event table — the audit row **is** the record that something
+/// happened, so it is also the record that it must not happen twice. The read
+/// lives here rather than in the caller because `audit_log` SQL belongs to this
+/// module, exactly like `token` belongs to `momo-auth` and `outbox` to
+/// `momo-outbox`; a second copy of this predicate elsewhere would be a second
+/// de-duplication contract.
+///
+/// Call it inside the same tenant transaction as the write it guards, so the
+/// check and the insert cannot straddle a commit boundary.
+pub async fn run_event_recorded(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    action: &str,
+    event_id: Uuid,
+) -> Result<bool, DbError> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM audit_log \
+          WHERE workspace_id = $1 \
+            AND run_id = $2 \
+            AND action = $3 \
+            AND target_type = 'agent_run' \
+            AND target_id = $2 \
+            AND detail->>'event_id' = $4::text \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(action)
+    .bind(event_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

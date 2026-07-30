@@ -558,6 +558,285 @@ pub struct CloudCreditTopupResponse {
     pub balance_micro_usd: i64,
 }
 
+// ---------------------------------------------------------------------------
+// agent runs + agent gateway (B2.6)
+//
+// NOTE the asymmetry, which is measured and not a mistake: the gateway
+// *request* bodies are snake_case (`job_id`, `lease_id`, `text_delta` —
+// `AgentGatewayRoutes.swift:1865-1874`, :2237-2245) because a Python/Node
+// adapter writes them, while every *response* stays camelCase like the rest of
+// the API. Spelling both out beats one `rename_all` that would silently break
+// one side.
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` (Swift
+/// `CreateAgentRunRequest` :1072-1091).
+///
+/// `deny_unknown_fields` is the port of Swift's explicit `allowedKeys` check: a
+/// typo'd field must be a 400, not a silently ignored instruction.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAgentRunRequest {
+    #[serde(alias = "agent_member_id")]
+    pub agent_member_id: Uuid,
+    #[serde(alias = "client_run_id")]
+    pub client_run_id: Uuid,
+    pub input: Value,
+    #[serde(default)]
+    pub routing: Option<Value>,
+}
+
+/// Swift `AgentRunDTO` (:1245-1264).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunResponse {
+    pub id: String,
+    pub workspace_id: String,
+    pub agent_member_id: String,
+    pub channel_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<String>,
+    pub status: String,
+    pub step_count: i32,
+    pub max_steps: i32,
+    pub depth: i32,
+    pub input: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// `?limit=` on the pending-jobs claim.
+#[derive(Debug, Deserialize)]
+pub struct PendingJobsQuery {
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+impl PendingJobsQuery {
+    /// Swift parses with `Int($0)` and clamps; an unparsable value falls back to
+    /// the default rather than 400ing, matching the `flatMap` there (:64).
+    pub fn limit(&self) -> Option<i64> {
+        self.limit
+            .as_deref()
+            .and_then(|raw| raw.trim().parse().ok())
+    }
+}
+
+/// Swift `AgentGatewayPendingJobDTO` (:2362-2369).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentGatewayPendingJob {
+    pub id: i64,
+    pub run_id: String,
+    pub payload: Value,
+    pub created_at_ms: i64,
+    pub lease_id: String,
+    pub lease_expires_at_ms: i64,
+}
+
+/// Swift `AgentGatewayPendingJobsResponse` (:2371-2373).
+#[derive(Debug, Serialize)]
+pub struct AgentGatewayPendingJobsResponse {
+    pub jobs: Vec<AgentGatewayPendingJob>,
+}
+
+/// Swift `AgentGatewayLeaseRequest` (:2380-2398).
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentGatewayLeaseRequest {
+    #[serde(default, rename = "job_id")]
+    pub job_id: Option<i64>,
+    #[serde(default, rename = "lease_id")]
+    pub lease_id: Option<Uuid>,
+}
+
+/// Swift `AgentGatewayLeaseResponse` (:2400-2405).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentGatewayLeaseResponse {
+    pub status: &'static str,
+    pub job_id: i64,
+    pub lease_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_expires_at_ms: Option<i64>,
+}
+
+/// Swift `AgentGatewayEventRequest` (:1852-1874), minus the `tool_call` and
+/// `approval_request` branches this batch does not port.
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentGatewayEventRequest {
+    #[serde(default, rename = "event_id")]
+    pub event_id: Option<Uuid>,
+    #[serde(default, rename = "job_id")]
+    pub job_id: Option<i64>,
+    #[serde(default, rename = "lease_id")]
+    pub lease_id: Option<Uuid>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default, rename = "text_delta")]
+    pub text_delta: Option<String>,
+}
+
+/// Swift `AgentGatewayEventResponse` (:2349-2353). `workControl` is omitted
+/// rather than null — Swift's synthesized `Encodable` uses `encodeIfPresent`, and
+/// this batch never produces one.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentGatewayEventResponse {
+    pub status: &'static str,
+    pub run_id: String,
+}
+
+/// Swift `AgentGatewayCompleteRequest` (:2228-2258), minus `memory_delivery`.
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentGatewayCompleteRequest {
+    #[serde(default, rename = "job_id")]
+    pub job_id: Option<i64>,
+    #[serde(default, rename = "lease_id")]
+    pub lease_id: Option<Uuid>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub usage: Option<AgentGatewayUsageDto>,
+}
+
+/// Swift `AgentGatewayUsage` (:2287-2347).
+///
+/// Every token field accepts **both** spellings because Swift's hand-written
+/// `init(from:)` tries the camelCase key and then the snake_case one; an adapter
+/// that sends `prompt_tokens` and one that sends `promptTokens` must produce the
+/// same ledger row, not one row and one zero.
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentGatewayUsageDto {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default, alias = "prompt_tokens")]
+    pub prompt_tokens: Option<i32>,
+    #[serde(default, alias = "completion_tokens")]
+    pub completion_tokens: Option<i32>,
+    #[serde(default, alias = "cached_tokens")]
+    pub cached_tokens: Option<i32>,
+    #[serde(default, alias = "reasoning_tokens")]
+    pub reasoning_tokens: Option<i32>,
+    #[serde(default, alias = "cost_micro_usd")]
+    pub cost_micro_usd: Option<i64>,
+    #[serde(default, alias = "was_estimated")]
+    pub was_estimated: Option<bool>,
+}
+
+/// Swift `AgentGatewayCompleteResponse` (:2355-2360).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentGatewayCompleteResponse {
+    pub status: &'static str,
+    pub run_id: String,
+    pub message_id: String,
+    pub seq: i64,
+}
+
+// ---------------------------------------------------------------------------
+// usage summary (Swift UsageSummaryRoutes.swift:356-426)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct UsageSummaryQuery {
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub bucket: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UsageSummaryRange {
+    pub from: String,
+    pub to: String,
+    pub bucket: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryTotals {
+    pub cost_micro_usd: i64,
+    pub estimated_micro_usd: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryBucket {
+    pub start: String,
+    pub cost_micro_usd: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryModel {
+    pub model: String,
+    pub cost_micro_usd: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryAgent {
+    pub agent_member_id: String,
+    pub display_name: String,
+    pub cost_micro_usd: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryBudget {
+    pub grain: String,
+    pub limit_micro_usd: i64,
+    pub spent_micro_usd: i64,
+    pub reserved_micro_usd: i64,
+    pub state: &'static str,
+    pub period_start: String,
+}
+
+/// The `budget` key is **never** omitted: Swift hand-writes `encode(to:)`
+/// precisely so `"budget": null` survives (`UsageSummaryRoutes.swift:414-425`),
+/// and a client that reads `budget === undefined` as "no budget configured"
+/// would break if the key vanished.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryResponse {
+    pub range: UsageSummaryRange,
+    pub totals: UsageSummaryTotals,
+    pub buckets: Vec<UsageSummaryBucket>,
+    pub by_model: Vec<UsageSummaryModel>,
+    pub by_agent: Vec<UsageSummaryAgent>,
+    pub budget: Option<UsageSummaryBudget>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

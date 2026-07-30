@@ -35,8 +35,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // endpoint or a key — those stay in the process (invariant #7).
         t3_enabled = config.t3.enabled,
         t3_provider = %config.t3.default_provider_id,
+        // Which agent runtime path is live, and whether the deprecated shared
+        // secret is still accepted. The secret itself is never logged.
+        agent_gateway_mode = config.agent_gateway.mode.as_str(),
+        agent_gateway_legacy_secret = config.agent_gateway.legacy_secret_enabled(),
         "momo-server starting"
     );
+    if config.agent_gateway.legacy_secret_enabled() {
+        tracing::warn!(
+            "MOMO_ALLOW_LEGACY_GATEWAY_SECRET is on; rotate gateway callers to \
+             per-agent bearers — the shared secret names no member, so its actions \
+             are unattributable"
+        );
+    }
 
     let pool = momo_db::connect(&config.db).await?;
     let state = AppState::new(
@@ -45,7 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.realtime_ws_url.clone(),
     )
     // B2.2: T3 stays off unless the operator configured it (MOMO_T3_ENABLED=1).
-    .with_t3(config.t3.clone());
+    .with_t3(config.t3.clone())
+    // B2.6: the gateway callback surface stays 403 unless the operator selected
+    // AGENT_GATEWAY_MODE=gateway.
+    .with_agent_gateway(config.agent_gateway.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

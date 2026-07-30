@@ -36,7 +36,8 @@ pub use identity::{
     verify_password_login, Member, MemberKind, PasswordLogin, Workspace,
 };
 pub use message::{
-    build_broadcast_payload, cent_channel, clamp_history_limit, list_channel_page, list_messages,
-    send_message, send_message_in_tx, send_signed_message_in_tx, HistoryCursor, MessageSignature,
-    MessageType, NewMessage, SentMessage, StoredMessage, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
+    build_broadcast_payload, cent_channel, clamp_history_limit, find_client_message_in_tx,
+    list_channel_page, list_messages, send_message, send_message_in_tx, send_signed_message_in_tx,
+    HistoryCursor, MessageSignature, MessageType, NewMessage, SentMessage, StoredMessage,
+    HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
 };
