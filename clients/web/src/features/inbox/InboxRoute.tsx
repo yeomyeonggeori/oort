@@ -7,9 +7,10 @@ import {
   SkeletonRows,
 } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
+import { FilterTabs } from "@/features/common/FilterTabs";
 import { FeedList } from "./FeedRow";
-import { FilterTabs } from "./FilterTabs";
 import {
+  INBOX_FILTER_TABS,
   panelId,
   parseFilter,
   relativeLabel,
@@ -139,6 +140,7 @@ export function InboxRoute() {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-2">
         <h1 className="text-body font-semibold">인박스</h1>
         <FilterTabs
+          spec={INBOX_FILTER_TABS}
           value={filter}
           onChange={(next) => setParams({ filter: next }, { replace: true })}
           counts={{

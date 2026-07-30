@@ -226,9 +226,16 @@ export async function settlePluginScopeChanges(
   return outcomes;
 }
 
+export type PluginScopeConsentFailure = {
+  /** The one sentence that names what failed. Always the banner's message. */
+  error: string;
+  /** One entry per distinct cause, and empty when a single cause fits `error`. */
+  causes: string[];
+};
+
 export type PluginScopeConsentCompletion =
   | { dismissDialog: true }
-  | { dismissDialog: false; error: string };
+  | ({ dismissDialog: false } & PluginScopeConsentFailure);
 
 /**
  * A scope POST settles independently, so a transport success can still contain
@@ -242,8 +249,15 @@ export type PluginScopeConsentCompletion =
  * remedy for every scope, so a four-scope failure ran 281px inside a 272px
  * scrollbox at 760x480 and lost its bottom padding (MOMO-642 5). Grouping is
  * also what the reader needs: the cause is the thing they can act on, and the
- * scopes are the set it applies to, which is exactly what the single-cause
- * shape already said. Two shapes, one sentence structure.
+ * scopes are the set it applies to.
+ *
+ * What each shape returns is now the shape itself, not typography (MOMO-676
+ * M-4). One cause is one sentence and stays prose; several causes are a LIST
+ * and are handed over as one, for the banner to render as `ul`/`li`. The
+ * previous version composed `"• " + sentence` and joined with `\n`, which gave
+ * the reader a bullet drawn in text with no hanging indent and gave a screen
+ * reader one long sentence inside a `role="alert"`. This function does not
+ * decide how a list looks; it decides that there is one.
  */
 export function pluginScopeConsentCompletion(
   outcomes: readonly PluginScopeChangeOutcome[]
@@ -257,21 +271,19 @@ export function pluginScopeConsentCompletion(
       .filter((outcome) => pluginActionErrorMessage(outcome.error) === cause)
       .map((outcome) => `${scopeSentence(outcome.scope)} (${outcome.scope})`)
       .join(", ");
+    // A list of one is not a list: a lone bullet under a headline is a marker
+    // pointing at nothing. The single-cause report stays one paragraph.
     if (causes.length === 1) {
       return {
         dismissDialog: false,
-        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]}\n영향받은 권한: ${affectedBy(causes[0])}`,
+        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]} 영향받은 권한: ${affectedBy(causes[0])}`,
+        causes: [],
       };
     }
-    // One forced break per cause, not two: `whitespace-pre-line` drops the
-    // indent that would make a continuation line read as one, and an unindented
-    // second line under a bullet reads as a third bullet that lost its dot.
-    const groupedCauses = causes.map((cause) =>
-      `• ${cause} 영향받은 권한: ${affectedBy(cause)}`
-    );
     return {
       dismissDialog: false,
-      error: `선택한 권한을 변경하지 못했습니다. 원인 ${causes.length}가지를 확인하세요.\n${groupedCauses.join("\n")}`,
+      error: `선택한 권한을 변경하지 못했습니다. 원인 ${causes.length}가지를 확인하세요.`,
+      causes: causes.map((cause) => `${cause} 영향받은 권한: ${affectedBy(cause)}`),
     };
   }
   return { dismissDialog: true };

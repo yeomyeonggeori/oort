@@ -102,9 +102,16 @@ export function MessageRow({
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
 
   return (
+    // `data-message-id` is the row's second published identity (MOMO-677).
+    // `seq` orders the channel and is what the inbox jumps by; a projection
+    // that knows a message only by id (the workstream anchor thread) has no
+    // seq to derive, so it addresses the row the way it actually knows it.
+    // Lower-cased at the source: Swift sends UUIDs upper-cased and a CSS
+    // attribute selector does not fold case.
     <article
       data-testid="timeline-message"
       data-seq={message.seq}
+      data-message-id={message.id.toLowerCase()}
       data-author-kind={author?.kind ?? "unknown"}
       className={cn(
         "flex gap-2 px-4 hover:bg-surface-hover",

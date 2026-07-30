@@ -259,6 +259,32 @@ These red proofs change named fixture seams instead of deleting a product or
 assertion line, so the failure remains repeatable in a clean throwaway
 worktree.
 
+The workstream gate (MOMO-677 / ADR-0143) is fixture-only as well. It locks the
+four claims 작업 흐름 makes that a screenshot cannot check: the list rows plus
+the fact that the status filter reaches the SERVER (`?status=` is read off the
+request, not assumed); one goal's run history carrying BOTH actors, with the
+agent Run keeping its identity token and the continued Run saying it continued
+one; the takeover POSTing the existing lineage resume with the chosen host, and
+the reader's own Run then joining that history; and the 404/403 asymmetry, where
+a workstream outside the reader's channels answers 404 and the surface says
+"찾을 수 없습니다" with no word about permission, while the resume path's 403 is
+the only place membership is named. It also writes list/detail captures in both
+schemes to `artifacts/workstream/` for the design review.
+
+```sh
+npm run gate:workstream
+WORKSTREAM_GATE_PROVE_RED_RUNS=1 npm run gate:workstream    # MUST fail: 실행 이력 A·B 병기
+WORKSTREAM_GATE_PROVE_RED_RESUME=1 npm run gate:workstream  # MUST fail: 이어받기 왕복
+WORKSTREAM_GATE_PROVE_RED_DENIAL=1 npm run gate:workstream  # MUST fail: 비멤버 404/403 분기
+```
+
+각 되돌림은 픽스처 행동만 바꾼다. `_RUNS`는 이력 투영이 첫 실행자 말고 전부
+잊게 만들고(= ADR-0143이 대체한 "소유권 이전" 원장), `_RESUME`은 재개 POST가
+200을 주면서 새 Run을 원장에 기록하지 않게 하며, `_DENIAL`은 비멤버 상세를
+404 대신 403으로 답하게 한다. 실패 문구는 전부 이름을 갖는다: 게이트의 모든
+대기가 `claim(이름, ...)`을 지나므로, 만료된 대기도 `Timeout 10000ms exceeded`가
+아니라 어떤 주장이 깨졌는지로 출력된다.
+
 The Tauri WKWebView microphone prompt is deliberately not inferred from browser
 success. After the browser gate, the orchestrator must open the packaged shell,
 join once, verify bidirectional audio, deny microphone once, and record whether

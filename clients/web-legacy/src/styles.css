@@ -1037,6 +1037,14 @@ body {
   color: var(--ok);
 }
 
+/* An idle session still holds a work-pool slot and can be resumed, so it reads
+   at full text strength. Muted stays reserved for `ended` (finished) and green
+   stays exclusive to `running` — dimming idle would show a live session as
+   finished on the only channel that is not text. */
+.work-status-idle {
+  color: var(--text);
+}
+
 .work-status-orphaned {
   color: var(--warn);
 }

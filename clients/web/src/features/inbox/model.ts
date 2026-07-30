@@ -1,5 +1,6 @@
 import type { Approval, AgentRun, Message } from "@/lib/api";
 import { uuidEq } from "@/lib/api";
+import type { FilterTabsSpec } from "@/features/common/FilterTabs";
 
 // =============================================================================
 // Inbox / activity model (R-1 §2), pure. Everything the two surfaces render is
@@ -44,6 +45,23 @@ export function tabId(filter: InboxFilter): string {
 export function panelId(filter: InboxFilter): string {
   return `inbox-panel-${filter}`;
 }
+
+/**
+ * 이 표면의 필터 어휘 한 벌 (shared FilterTabs). 라벨과 id 규칙이 컨트롤 안이
+ * 아니라 모델에 있는 이유는 두 번째 호출자가 생겼기 때문이다: 작업 흐름도 같은
+ * 탭 컨트롤을 쓰고, 어휘만 다르다.
+ *
+ * `testId`가 `tabId`인 것은 우연이 아니라 기존 계약이다. 이 표면의 탭은 처음부터
+ * 엘리먼트 id와 같은 문자열을 test id로 썼고, 게이트와 e2e가 그 문자열을 잡는다.
+ */
+export const INBOX_FILTER_TABS: FilterTabsSpec<InboxFilter> = {
+  label: "인박스 필터",
+  values: INBOX_FILTERS,
+  labelFor: filterLabel,
+  tabId,
+  panelId,
+  testId: tabId,
+};
 
 export type FeedTone = "warn" | "accent" | "agent" | "muted";
 export type OutcomeTone = "ok" | "danger" | "warn" | "muted";
