@@ -66,3 +66,71 @@
 - Go vs Rust vs Swift 서버 포지셔닝: https://cyberdefence.org.in/blog/go-rust-swift-comparison/ · https://levelupgo.dev/blog/go-vs-rust-2026-honest-backend-comparison
 - tRPC/end-to-end 타입 안전이 드리프트를 컴파일 타임에 잡음: https://leapcell.io/blog/achieving-end-to-end-type-safety-in-full-stack-typescript-with-trpc · https://www.pkgpulse.com/guides/hono-rpc-vs-trpc-vs-ts-rest-type-safe-api-clients-2026
 - 백엔드 프레임워크 2026 성능·실시간 비교(Axum/Hono/Phoenix): https://www.index.dev/blog/best-backend-frameworks-ranked
+
+---
+
+# 개정 (2026-07-30, 성재 반문 3건) — 첫 권고를 재고한다
+
+성재 반문: ①서버가 얇은 이유가 뭐냐, 불필요해서냐 ②buzz는 어떻게 하고 있냐 ③언어 편의(TS)가 아니라 **내구성·안정성·정합성·스케일·효율**로 판단하라, Hono 고른 근거도 모르겠다. — **세 질문 다 내 첫 분석의 약한 곳을 정확히 짚었다. 정정한다.**
+
+## 6-1. "얇다"는 부정확했다 — 정합성을 DB로 밀어넣은 것이다
+
+실측: 라우트 34k LOC(MessageRoutes 2976·WorkSessionRoutes 2676·AgentGateway 2405…), lock/트랜잭션 27파일, 서명검증 6파일, outbox 18파일, **59개 중 44개 마이그레이션이 DB 레벨 강제(트리거·CHECK·GENERATED·advisory)를 포함**. 이건 얇지 않다.
+
+내가 "얇다"고 한 뜻은 "PG=SoT라 서버가 비즈니스 상태를 메모리에 안 들고 DB가 소유한다"였는데, 그게 "하는 일이 적다/불필요하다"로 읽힐 수 있었다. **정확히는: 정합성의 최종 수호자를 DB로 밀어넣은 아키텍처다.** ADR-0140의 교훈이 그대로다 — "코드 규약은 매 라운드 깨지고, DB 제약(트리거·부분 unique·advisory)은 세 라운드 내내 살았다". 불필요해서가 아니라 **의도적 설계**이고, 이건 다음 항의 buzz 모델을 번역한 결과다.
+
+**이 사실이 언어 선택을 바꾼다**: 정합성이 DB로 강제되므로, 서버 언어의 타입 시스템이 "데이터 정합성"에 기여하는 몫은 제한적이다(진실은 PG가 지킨다). 하지만 **오케스트레이션의 동시성 안전**(잠금 순서·race — T3 재설계 3라운드의 실제 난제)은 여전히 서버 코드의 몫이고, 여기서 언어의 동시성/타입 모델이 실제로 중요하다.
+
+## 6-2. buzz 실측 — momo의 원류이고, 서버가 Rust다
+
+buzz = **Jack Dorsey/Block이 2026-07-21 출시**한 Slack+GitHub 대체, AI 에이전트를 1급 시민으로([techcrunch](https://techcrunch.com/2026/07/21/jack-dorsey-is-taking-on-slack-with-buzz-a-group-chat-platform-for-teams-and-their-ai-agents/)). 스택 실측([github.com/block/buzz](https://github.com/block/buzz), [self-host 가이드](https://miget.com/blog/how-to-self-host-buzz)):
+
+> **Nostr relay written in Rust, built on Axum, speaking WebSocket and REST, backed by PostgreSQL (events + full-text search), Redis for pub/sub, S3/MinIO for object storage. TypeScript + React clients. Apache 2.0.**
+
+**momo와 거의 1:1 대응이다:**
+
+| 축 | buzz | momo |
+|---|---|---|
+| 서버 | **Rust / Axum** | **Swift / Hummingbird** ← 유일하게 어긋난 자리 |
+| 진실 저장 | PostgreSQL(signed events) | PostgreSQL(SoT) |
+| pub/sub·relay | Redis | Centrifugo |
+| 객체 저장 | S3/MinIO | Drive/S3(ADR-0127) |
+| 신원 | 사람·봇 암호화 키(Ed25519) | member.kind=agent + Ed25519 서명 |
+| 모델 | signed event 로그 | 단일 쓰기경로 REST→PG→outbox→relay |
+| 클라이언트 | TS + React | TS + React + Tauri |
+
+→ **성재 진단이 완전히 맞다.** momo는 buzz를 참조해 자체 구축했는데, **buzz 자신이 서버를 Rust/Axum으로 짰고 momo만 Swift로 했다.** 이게 "잔재"의 정확한 정체다 — buzz→momo 이식 때 데스크탑(Tauri)만 옮기고 서버 언어는 원본(Rust)도, 이식본(Swift)도 아닌 어중간한 곳에 남았다.
+
+## 6-3. 판단축을 성재 기준으로 재정렬 → Rust/Axum이 유력하다
+
+언어 편의(TS) 빼고 **내구성·안정성·정합성·스케일·효율**로만 재평가:
+
+| 축 | Rust/Axum | TS/Encore | Go | 판정 근거 |
+|---|---|---|---|---|
+| **정합성** | 최상 — 오케스트레이션 race(T3 난제)를 타입·소유권으로 컴파일 타임에. DB 강제와 이중 안전망 | 중 — 런타임 zod 경계, 단일 스레드라 일부 race 회피 | 중 | momo의 실제 버그가 동시성/잠금(ADR-0140) |
+| **스케일/효율** | 최상 — buzz가 relay를 Rust로 택한 이유 | 상 — 무상태라 수평 확장 쉬움(PG=SoT) | 상 | Centrifugo가 실시간 흡수, 서버는 REST 처리 |
+| **내구성/안정성** | 최상 — 메모리 안전, Axum/Tokio/sqlx 성숙 | 상 — Node 성숙 | 상 | 셋 다 프로덕션 성숙(Swift만 니치) |
+| **참조 모델 정합** | **최상 — buzz와 동일 스택** | 하 — 서버만 갈라짐 | 하 | buzz가 오픈소스라 상호참조·재사용 여지 |
+| **타입 공유(드리프트)** | 상 — ts-rs codegen(#919 문제 완화) | 최상 — tRPC codegen 0 | 하 | momo 실측 문제(#913/#919) |
+| **workd 통일** | 가능 — 서버+workd 한 crate 도메인 공유 | 불가(workd는 시스템 데몬) | 불가 | workd 6k Swift도 이관 대상 |
+| **개발 속도·채용** | 하 — 러닝커브 | 최상 | 상 | 성재가 부차로 둠 |
+
+**정합성·스케일·참조모델 축에서 Rust/Axum이 앞선다.** 내 첫 TS 권고는 "개발속도·타입공유"에 가중치를 뒀는데, 성재가 그 가중치를 명시적으로 낮췄다. 그리고 **buzz가 이미 이 도메인(에이전트 네이티브 메신저 + signed events + relay)에서 Rust/Axum을 택했다**는 것이 결정적 증거다 — 남이 같은 문제를 풀며 내린 답이다.
+
+## 6-4. Hono 권고 철회 — 성재 직관이 맞다
+
+첫 문서의 "TS + Hono"에서 Hono는 틀렸다. Hono는 **엣지 런타임·경량용**이고 DB 불가지론이라, momo의 강한 정합성·트랜잭션·분산 백엔드에 부적합하다([hono vs encore](https://encore.dev/articles/hono-vs-encore): *"Hono is less suited for traditional distributed backend systems requiring strong consistency guarantees"*). **TS로 간다면 momo 특성엔 Encore.ts**가 맞다 — PG 통합·마이그레이션·트랜잭션 롤백·분산 트레이싱·타입 안전 서비스 통신이 내장이고 "traditional backend with databases"를 겨냥한다. NestJS는 구조는 좋으나 인프라(ORM·트랜잭션)를 직접 배선. 하지만 §6-3 기준에선 TS 자체가 Rust에 밀린다.
+
+## 6-5. buzz 오픈소스가 여는 제3의 선택지
+
+buzz가 **Apache 2.0**이라, "Swift를 무엇으로 재작성하나"가 아니라 **"buzz(Rust) 코어를 재사용/참조하고 그 위에 momo 고유(T3 work runtime·workstream)를 얹나"**라는 선택지가 생긴다. 메신저 코어(채널·스레드·서명·relay·git)는 buzz와 거의 같으므로 재사용 여지가 크고, momo 차별점(원격 T3 실행·과금·workstream)만 우리 것으로 남는다. **이 경우 재작성이 아니라 "기반 교체 + 고유 로직 이식"이라 비용이 급감할 수 있다.** 단 buzz 신제품(2026-07)의 성숙도·라이선스 상호작용·momo 불변식과의 정확한 일치는 별도 검증이 필요하다.
+
+## 6-6. 갱신된 권고
+
+**§6-3 기준(정합성·스케일·내구성·참조모델)으로는 Rust/Axum이 momo best fit이다.** 근거: ①momo의 실제 난제가 동시성/정합성(T3)이고 Rust가 여기 직접 기여 ②참조 모델 buzz가 같은 도메인에서 Rust/Axum을 택함 ③workd까지 Rust 통일 시 도메인 공유 ④relay 성능. TS(Encore.ts)는 개발속도·타입공유를 최우선할 때의 대안이나, 성재가 그 축을 낮췄다.
+
+**그리고 성재가 먼저 판단해야 할 새 질문**: buzz가 오픈소스이므로 — momo를 계속 자체구축하나, 아니면 **buzz 코어를 기반으로 삼고 momo 고유만 얹나**? 이 결정이 "재작성 언어"보다 상위 결정이다. 여기 따라 이관 규모가 10배 차이 난다.
+
+## 리서치 근거 (개정, 2026-07-30)
+- buzz 정체·아키텍처: https://techcrunch.com/2026/07/21/jack-dorsey-is-taking-on-slack-with-buzz-a-group-chat-platform-for-teams-and-their-ai-agents/ · https://github.com/block/buzz · https://miget.com/blog/how-to-self-host-buzz · https://quasa.io/media/buzz-by-block-how-the-nostr-based-ai-workspace-works-for-beginners
+- Encore.ts가 강정합성 DB 백엔드에 적합, Hono는 엣지·경량: https://encore.dev/articles/hono-vs-encore · https://encore.dev/articles/nestjs-vs-encore
