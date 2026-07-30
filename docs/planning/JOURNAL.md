@@ -1400,6 +1400,10 @@
 - 한 일: **B1(메신저 코어 write-path 척추) 랜딩** — PR #928 → track/engine(`2cc97bb4`). `momo-messaging`(identity·channel·message: seq CTE·emit_outbox 같은 tx·멱등, Swift 파리티). 오케스트레이터 검수: message.rs 코드 리뷰(membership 테이블 적응·cent_channel 대문자 파리티 Swift 대조) + **docker conformance 게이트 직접 재검증 5/5**(D2 #1/#3/#4/#5/#6, pgvector/pg18+bootstrap_roles+momo_app). 게이트가 테스트 오라클 결함 실측(011 push_candidate 트리거가 outbox 늘려 계수 이중 → kind='broadcast' 필터로 수정, 코드는 정확) → 재실행 green.
 - 열린 것: **다음 배치 방향 성재 지시 대기**(B1.2 척추 후속 / B2 T3 / momo-server HTTP 조립). provenance는 ADR-0146 Accept 후. NCP smoke Rust 트리거 대기·서버 정지+키 재발급 성재 몫. #925·#926·#893 병존.
 
+## 2026-07-30 (밤) · Fable · 오케스트레이션
+- 한 일: **B1.5(momo-server+momo-relay 조립) 랜딩** — PR #929 → track/engine(`c98b6474`). 첫 부팅 가능한 Rust 스택(Axum 서버+relay). 게이트: relay 3/3(#2 전송전용 e2e·claim 경합·백오프)+HTTP smoke green, D2 #1~#6 실행 스택 증명. **revocation 보안 갭**(워커 자기신고)을 티켓 대신 같은 PR 수정으로 —`momo-auth/token_store.rs` fail-closed 이식(revoke→401 red 포함), 워커의 실측 정정(tenant tx 안 조회) 검증 후 수용. 잔여 티켓 후보: logout/refresh route·러너 멱등 추적.
+- 열린 것: **다음 배치 후보 — B2(T3, #7 provider red 포함) / B1.2(메신저 breadth) / logout·refresh.** ADR-0146 세부(성재). NCP 현상 유지(성재 지시). #925·#926·#893 병존.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).

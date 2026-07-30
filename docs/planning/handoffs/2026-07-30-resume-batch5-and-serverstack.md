@@ -28,7 +28,10 @@
   - **B1 후속 노트**: `momo-outbox`의 `OutboxKind` enum이 `push_candidate`(011) 누락 — notifier/push 이식 시 추가.
   - **B1(메신저 코어) 랜딩 완료**(track/engine `2cc97bb4`, PR #928). `momo-messaging` crate — write-path 척추(identity·channel·message: seq row-lock CTE·emit_outbox 같은 tx·멱등, Swift MessageRoutes 파리티). **오케스트레이터 conformance 게이트 5/5 통과**(fresh pgvector/pg18+bootstrap_roles+momo_app): D2 red #1 SoT·#3 원자성·#4 gapless seq(동시 12)·#5 에이전트=member·#6 RLS cross-tenant. 무회귀 green.
     - **게이트가 잡은 것(테스트 오라클 수정)**: message insert가 011 `push_candidate_enqueue_trg`를 발화(정상·Swift 동일) → 채널당 outbox = broadcast(앱)+push_candidate(트리거). 테스트가 kind 미필터로 이중 계수 → `kind='broadcast'` 필터로 수정(코드는 정확). **relay=broadcast 소비, NotifierWorker=push_candidate 소비** — B1.2/relay/notifier 이식 시 유의.
-    - **다음 후보**: B1.2(read-state·mention·DM·huddle·search 척추 후속) 또는 B2(T3) 또는 momo-server 조립(HTTP route). provenance는 ADR-0146 Accept 후. **성재 방향 지시 대기.**
+    - **B1.5(momo-server 조립+momo-relay) 랜딩 완료**(track/engine `c98b6474`, PR #929). **첫 부팅 가능한 Rust 스택**: `bins/momo-server`(Axum: JWT 미들웨어+login/messages route, Swift 경로·401 문자열 파리티)+`bins/momo-relay`(claim SKIP LOCKED·백오프·LISTEN·Centrifugo publish, broadcast만). **게이트 전부 green**(relay 3/3: #2 e2e·경합·백오프 / HTTP smoke: login→send→list→401·403). D2 #1~#6 전부 실행 스택에서 증명(잔여 #7=B2).
+      - **revocation 후속 수정 포함**(f55de1e5): 워커 자기신고 보안 갭 → 같은 PR에서 fail-closed 이식. `momo-auth/token_store.rs`가 `token` SQL 단독 소유(pgcrypto digest sha256·tenant tx 안 조회 — Swift withTenantConnection=withTenantTransaction 실측). revoke→401 red 케이스 포함.
+      - **다음 조각(티켓 후보)**: ①logout/refresh route(revoke 트리거 API 표면) ②러너 schema_migrations 멱등 추적(테스트 바이너리마다 fresh DB 필요한 현상) ③OutboxKind push_candidate(기록됨).
+    - **NCP: 성재 지시(2026-07-30) — 여유 있으니 현상 유지**(정지 안 함). 키 재발급도 보류.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
 **성재 결정 대기 지점**: ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격 — B1 전까지. (Phase 0 전체 승인은 완료: "B0 착수해줘".)
