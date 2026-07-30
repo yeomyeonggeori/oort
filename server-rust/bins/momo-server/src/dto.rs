@@ -131,6 +131,15 @@ pub struct SendMessageRequest {
     pub attachment_ids: Option<Vec<Uuid>>,
     #[serde(default)]
     pub routing: Option<Value>,
+    /// ADR-0146 provenance: base64 Ed25519 signature over the
+    /// `momo.provenance.message.v1` bytes (`momo_wire::provenance`).
+    ///
+    /// Optional by design — an unsigned send is the unchanged path. There is no
+    /// companion `publicKey` field and there must never be one: the key is
+    /// resolved server-side from the sender's registration, because a key the
+    /// request supplies verifies its own signature and proves nothing.
+    #[serde(default)]
+    pub signature: Option<String>,
 }
 
 /// A message on the wire (Swift `MessageDTO` / openapi `Message`).

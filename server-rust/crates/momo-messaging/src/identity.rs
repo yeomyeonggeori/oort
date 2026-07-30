@@ -206,6 +206,35 @@ pub async fn verify_password_login(
     }
 }
 
+/// Resolve the Ed25519 signing key registered for a member (ADR-0146).
+///
+/// # Measured: no such registry exists in this schema
+///
+/// `public_key` appears on exactly one table — `work_host`
+/// (`021_work_host.sql:17`) — and a work host is not a member. `member`,
+/// `agent`, `device` and `agent_card_registration` carry no key column, and the
+/// Swift `AgentCredentialRoutes` mints bearer tokens, not keypairs. So today this
+/// resolves to `None` for **every** member, and a signed send is refused rather
+/// than recorded.
+///
+/// That refusal is the point. The alternative — trusting a public key the request
+/// supplied — would let any caller mint a keypair, sign its own message, and
+/// produce an `action_signature` row that verifies perfectly and attests to
+/// nothing. A provenance log forgeable by its own subject is worse than none,
+/// because it is believed.
+///
+/// The function is real rather than inlined so the gap has one name, one call
+/// site, and one thing to change: the fast-follow adds a member signing-key
+/// registration surface (migration + route) and this body becomes its lookup.
+/// Everything above it — `send_signed_message_in_tx`, the route's refusal, the
+/// conformance tests — is already written against the final shape.
+pub async fn resolve_member_signing_key(
+    _conn: &mut PgConnection,
+    _member_id: Uuid,
+) -> Result<Option<String>, DbError> {
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

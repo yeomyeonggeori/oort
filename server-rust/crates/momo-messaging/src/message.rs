@@ -32,11 +32,15 @@ use chrono::{DateTime, Utc};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_wire::payload::BroadcastPayload;
+use momo_wire::{
+    record_provenance, EntityRef, MessageContent, ProvenanceError, SignedAction, Signer,
+    ENTITY_MESSAGE,
+};
 use serde_json::{json, Map, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use crate::error::MessagingError;
+use crate::error::{MessagingError, ProvenanceRejected};
 
 /// `message_type` enum (`001_init.sql:15`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,6 +358,101 @@ pub async fn send_message_in_tx(
         deduped,
         outbox_id,
     })
+}
+
+/// A provenance assertion accompanying a message send (ADR-0146).
+///
+/// `signer_pubkey_b64` is the key **the server resolved** for `signer_member_id`
+/// — never one the request supplied. A client-supplied key verifies its own
+/// signature and proves nothing, so the resolution step is where the trust
+/// actually lives; see [`crate::identity::resolve_member_signing_key`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageSignature {
+    pub signer_member_id: Uuid,
+    /// Base64 32-byte Ed25519 public key, from the registry.
+    pub signer_pubkey_b64: String,
+    /// Base64 64-byte Ed25519 signature over the
+    /// `momo.provenance.message.v1` bytes.
+    pub signature_b64: String,
+}
+
+/// Send a message **with** an actor signature, recording provenance in the same
+/// transaction as the write (ADR-0146 §범위 1).
+///
+/// This is additive, and deliberately a second function rather than a parameter
+/// on [`send_message_in_tx`]: the unsigned path is byte-for-byte unchanged, so
+/// "unsigned actions keep working" is a property of the code shape rather than
+/// of a branch someone has to keep correct.
+///
+/// ## Two-stage, in order
+///
+/// 1. The actor signed *content* — channel, author, `client_msg_id`, type, body
+///    and props — before this server assigned anything.
+/// 2. The write happens (or dedups). Only now does `message.id` exist.
+/// 3. `record_provenance` re-derives the stage-1 bytes **from the stored row**,
+///    verifies the signature over them, and writes the sidecar keyed by that
+///    `message.id`. Deriving from the stored row rather than from the request is
+///    what makes the digest describe what was actually persisted: a client that
+///    signed over props the server strips fails here, visibly.
+///
+/// A deduped retry still records: the assertion is about the same message, and
+/// `action_signature_signature_uniq` collapses the repeat to one row.
+///
+/// Rejections travel in the `Ok` half (see [`ProvenanceRejected`]) so this fits
+/// the `with_tenant_tx` closure. The caller must roll the transaction back on a
+/// rejection — that is what stops a refused signature from leaving the message
+/// behind as if it had been sent unsigned.
+pub async fn send_signed_message_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+    signature: &MessageSignature,
+) -> Result<Result<SentMessage, ProvenanceRejected>, DbError> {
+    let Some(client_msg_id) = input.client_msg_id else {
+        return Ok(Err(ProvenanceRejected::MissingClientMsgId));
+    };
+    if signature.signer_member_id != input.author_member_id {
+        return Ok(Err(ProvenanceRejected::SignerIsNotAuthor));
+    }
+
+    let sent = send_message_in_tx(conn, workspace_id, input).await?;
+    let message = &sent.message;
+
+    // Canonical props = the STORED jsonb, serialized compactly with sorted keys
+    // (`serde_json::Map` is a `BTreeMap` in this build, and jsonb already
+    // normalizes key order), so the digest describes the row rather than the
+    // request.
+    let props_json = serde_json::to_string(&message.props).map_err(|error| {
+        DbError::from(sqlx::Error::Decode(
+            format!("stored props are not serializable: {error}").into(),
+        ))
+    })?;
+    let action = SignedAction::Message(MessageContent {
+        workspace_id,
+        channel_id: message.channel_id,
+        author_member_id: message.author_member_id,
+        client_msg_id,
+        message_type: message.message_type.as_db_label(),
+        body: message.body.as_deref(),
+        props_json: &props_json,
+    });
+
+    match record_provenance(
+        conn,
+        workspace_id,
+        &EntityRef::new(ENTITY_MESSAGE, message.id),
+        &Signer::member(&signature.signer_pubkey_b64, signature.signer_member_id),
+        &signature.signature_b64,
+        &action,
+    )
+    .await
+    {
+        Ok(_) => Ok(Ok(sent)),
+        Err(ProvenanceError::SignatureRejected { .. }) => {
+            Ok(Err(ProvenanceRejected::SignatureRejected))
+        }
+        Err(ProvenanceError::Db(error)) => Err(DbError::from(error)),
+    }
 }
 
 /// Send a message: the spine wrapped in the tenant transaction (sole RLS GUC

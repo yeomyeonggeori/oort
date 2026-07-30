@@ -28,8 +28,9 @@
 //!
 //! Every statement is `momo_t3::terminal_attach`; the audit row is
 //! `momo_db::audit::write_audit`; the observer broadcast is
-//! `momo_outbox::emit_outbox`, the workspace's only egress. This module is
-//! translation only.
+//! `momo_outbox::emit_outbox`, the workspace's only egress; the ADR-0146
+//! provenance row is `momo_wire::record_provenance`, the only writer of
+//! `action_signature`. This module is translation only.
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -45,6 +46,10 @@ use momo_t3::{
     mint_capability_token, sweep_spent_observer_capabilities_in_tx,
     validate_attach_capability_in_tx, AttachMode, T3Error,
 };
+use momo_wire::{
+    record_provenance, EntityRef, ProvenanceError, Signer,
+    ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE,
+};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -57,7 +62,8 @@ use crate::routes::shared::{
     audit_via_token_id, path_uuid, require_human, settle, tenant_tx, workspace_scope, Rejectable,
 };
 use crate::work_host_auth::{
-    authenticate_signed_host_request, signed_request_unauthorized, MAX_SIGNED_BODY_BYTES,
+    authenticate_signed_host_request, signed_request_unauthorized, VerifiedHostSignature,
+    MAX_SIGNED_BODY_BYTES,
 };
 use crate::AppState;
 
@@ -342,19 +348,38 @@ pub async fn validate(
     let token = request.capability_token.clone();
     let revalidating = request.stream.unwrap_or(false);
     let signing_host = signed.host_id;
+    let host_signature = signed.signature.clone();
 
     let validated = settle(
         "terminal_attach.validate",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                Ok(Ok(validate_attach_capability_in_tx(
+                let validated = validate_attach_capability_in_tx(
                     conn,
                     workspace_id,
                     signing_host,
                     &token,
                     revalidating,
                 )
-                .await?))
+                .await?;
+                // ADR-0146: record the host's v2 signature against the session
+                // it just claimed access to — but only on success. A refused
+                // capability is not an action, and writing a row for it would
+                // turn the provenance log into a probe log.
+                if let Some(validated) = validated.as_ref() {
+                    if let Err(rejection) = record_attach_validation(
+                        conn,
+                        workspace_id,
+                        signing_host,
+                        validated.work_session_id,
+                        &host_signature,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(rejection));
+                    }
+                }
+                Ok(Ok(validated))
             })
         })
         .await,
@@ -372,6 +397,43 @@ pub async fn validate(
 /// `invalidCapability` (:460-462).
 fn invalid_capability() -> ApiError {
     ApiError::unauthorized("invalid terminal attach capability")
+}
+
+/// Record the host's verified v2 signature as provenance for the attach it just
+/// validated (ADR-0146 §범위 2 — the workd work-event surface).
+///
+/// The entity is the **work session**, not the host: "which host proved it may
+/// attach to this session" is the question an auditor asks, and the session id is
+/// what makes the row joinable to the rest of the T3 record. The signer is the
+/// host's stored key with no member attribution — a host is not a member, and
+/// naming its owning human here would record that a person signed something they
+/// did not (the `audit_log.via_token_id` rule, `momo_db::audit` docs).
+async fn record_attach_validation(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    host_id: Uuid,
+    work_session_id: Uuid,
+    signature: &VerifiedHostSignature,
+) -> Rejectable<()> {
+    let action = signature.action(workspace_id, host_id);
+    match record_provenance(
+        conn,
+        workspace_id,
+        &EntityRef::new(ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE, work_session_id),
+        &Signer::work_host(&signature.signer_pubkey_b64),
+        &signature.signature_b64,
+        &action,
+    )
+    .await
+    {
+        Ok(_) => Ok(Ok(())),
+        // Unreachable while the authenticator and the chokepoint agree on the
+        // v2 bytes. If they ever disagree, the attach is refused with the
+        // signature 401 rather than served without its proof — the chokepoint's
+        // verdict wins, which is the whole point of re-verifying inside it.
+        Err(ProvenanceError::SignatureRejected { .. }) => Ok(Err(signed_request_unauthorized())),
+        Err(ProvenanceError::Db(error)) => Err(T3Error::from(momo_db::DbError::from(error))),
+    }
 }
 
 #[cfg(test)]

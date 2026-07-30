@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 59 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 60 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 59 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 60 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -310,20 +310,23 @@ mod tests {
     use super::*;
 
     /// Structural conformance without a DB: the on-disk migration set is exactly
-    /// 001..=059, contiguous, correctly ordered, and starts at `001_init`.
+    /// 001..=060, contiguous, correctly ordered, and starts at `001_init`.
+    ///
+    /// 060 is ADR-0146's `action_signature` sidecar — the first migration this
+    /// rewrite added rather than inherited (B2.5).
     #[test]
-    fn discovers_contiguous_migrations_001_to_059() {
+    fn discovers_contiguous_migrations_001_to_060() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            59,
-            "expected 59 migrations under {}",
+            60,
+            "expected 60 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 59);
+        assert_eq!(migrations.last().unwrap().version, 60);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
