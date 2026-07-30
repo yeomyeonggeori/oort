@@ -1404,6 +1404,14 @@
 - 한 일: **B1.5(momo-server+momo-relay 조립) 랜딩** — PR #929 → track/engine(`c98b6474`). 첫 부팅 가능한 Rust 스택(Axum 서버+relay). 게이트: relay 3/3(#2 전송전용 e2e·claim 경합·백오프)+HTTP smoke green, D2 #1~#6 실행 스택 증명. **revocation 보안 갭**(워커 자기신고)을 티켓 대신 같은 PR 수정으로 —`momo-auth/token_store.rs` fail-closed 이식(revoke→401 red 포함), 워커의 실측 정정(tenant tx 안 조회) 검증 후 수용. 잔여 티켓 후보: logout/refresh route·러너 멱등 추적.
 - 열린 것: **다음 배치 후보 — B2(T3, #7 provider red 포함) / B1.2(메신저 breadth) / logout·refresh.** ADR-0146 세부(성재). NCP 현상 유지(성재 지시). #925·#926·#893 병존.
 
+## 2026-07-31 (새벽) · Fable · 오케스트레이션
+- 한 일: **B1.6(소품 3종) 랜딩** — PR #930 → track/engine(`b5264a00`). logout/refresh(원자 revoke 게이트)·러너 멱등(2-run red)·push_candidate enum. 게이트를 **한 DB 연속 실행**으로 돌려 멱등 러너 실증 — 그 과정에서 relay 테스트의 공유 DB 격리 갭 실측(잔여 pending broadcast claim) → 하니스 잔여 정산 수정, 오염 DB 3/3 재현. B2.1(T3 척추) 병렬 진행 중.
+- 열린 것: B2.1 결과 대기(→ conformance 5종 게이트·#7 완성). audit_log(write_audit 스텁) 후속 티켓 후보. ADR-0146 세부(성재). #925·#926·#893.
+
+## 2026-07-31 (새벽 2) · Fable · 오케스트레이션
+- 한 일: **B2.1(T3 수명주기+과금 척추) 랜딩** — PR #931 → track/engine(`f0467c02`). `momo-t3`: t3_terminate 단일 호출·전이표 트리거 에러 매핑(사본 0)·advisory 선획득 prelude(GUC 단일배선 보존)·mock 2종·#7 red. 게이트가 픽스처 UNIQUE 충돌 실측(sandbox_id 리터럴) → 무작위화 수정 → **conformance 5/5**. 머지 후 engine 통합 검증: 5 스위트 18케이스+단위 전부 green, 한 DB 연속. **D2 하드 불변식 7/7 Rust 스택 증명 완료.** ADR-0140:107 outbox 과기술 발견(053/058 실측 무) → 정오표 성재 승인 대기.
+- 열린 것: 다음 배치(B2.2 T3 표면 / B1.2 breadth / Rust 이미지·compose→NCP 부분 smoke) 성재 방향. ADR-0146 세부. audit_log 티켓 후보. #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).

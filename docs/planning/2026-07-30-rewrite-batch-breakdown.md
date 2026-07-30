@@ -26,6 +26,7 @@
 - work_session·agent_run·work_control·approval·hosts·terminal·tier·pool + provisioner(`momo-provider` 계약) + billing 원장. ADR-0140/0139/0142/0144 이식(로직·설계는 ADR에 있음, Swift→Rust 번역).
 - **provenance emit: workd 작업 이벤트 서명**(표면 2) + **상태 전이 서명**(표면 3 — 승인/위계 결정).
 - 수용: D2 #7(provider 비유입) green + T3 수명주기 saga parity + 과금 정밀도 parity.
+- **B2.1 랜딩됨(PR #931, `f0467c02`)** — 수명주기+과금 척추 슬라이스. conformance 5/5, **D2 7/7 완성**. 잔여(B2.2): gateway·terminal·tier·pool·approval·재부착(0139)·reconciliation·Kata(0144)·T3 HTTP route.
 
 ## B3 — workstream (`momo-t3` workstream 모듈)
 - ADR-0143 actor-독립 연속성·목표층(work_session 위 읽기 프로젝션).
