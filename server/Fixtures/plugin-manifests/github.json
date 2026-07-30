@@ -31,7 +31,7 @@
     "tools": [
       {
         "name": "github.list_repositories",
-        "description": "List repositories available to the delegated user",
+        "description": "권한을 위임한 사용자가 접근할 수 있는 저장소 목록을 조회합니다.",
         "inputSchema": {
           "type": "object",
           "properties": {},
@@ -46,7 +46,7 @@
       },
       {
         "name": "github.search_issues",
-        "description": "Search issues in repositories available to the delegated user",
+        "description": "권한을 위임한 사용자가 접근할 수 있는 저장소에서 이슈를 검색합니다.",
         "inputSchema": {
           "type": "object",
           "properties": {

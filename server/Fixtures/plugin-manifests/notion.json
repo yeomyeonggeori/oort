@@ -20,7 +20,7 @@
     "server": { "name": "makenotion/notion-mcp-server", "version": "hosted" },
     "tools": [{
       "name": "notion.search",
-      "description": "Search pages available to the delegated user",
+      "description": "권한을 위임한 사용자가 접근할 수 있는 페이지를 검색합니다.",
       "inputSchema": {
         "type": "object",
         "properties": { "query": { "type": "string" } },
