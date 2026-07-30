@@ -195,9 +195,343 @@ impl HistoryQuery {
     }
 }
 
+// ---------------------------------------------------------------------------
+// work hosts (B2.2 — Swift `WorkHostRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-hosts` and `POST …/work-hosts/cloud/register` request
+/// (Swift `RegisterWorkHostRequest`, :7-13).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegisterWorkHostRequest {
+    pub scope: String,
+    #[serde(rename = "type")]
+    pub host_type: String,
+    pub display_name: String,
+    pub public_key: String,
+    #[serde(default)]
+    pub capabilities: Option<BTreeMap<String, bool>>,
+}
+
+/// `POST …/work-hosts/{host}/heartbeat` request (Swift, :15-18).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkHostHeartbeatRequest {
+    pub sent_at_ms: i64,
+    pub signature: String,
+}
+
+/// Swift `WorkHostDTO` (:20-33). `lastSeenAtMs`/`revokedAtMs` are `Int64?` in a
+/// synthesized `Encodable`, so a null is **omitted**, not emitted.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkHostDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub scope: String,
+    pub owner_member_id: String,
+    #[serde(rename = "type")]
+    pub host_type: String,
+    pub display_name: String,
+    pub public_key: String,
+    /// Boolean availability flags only — never paths, credentials or state.
+    pub capabilities: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub online: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkHostResponse {
+    pub work_host: WorkHostDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkHostListResponse {
+    pub work_hosts: Vec<WorkHostDto>,
+}
+
+// ---------------------------------------------------------------------------
+// cloud hosts (B2.2 — Swift `CloudProvisionerRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-hosts/byoc/enrollments` request (Swift `EnrollBYOCHostRequest`,
+/// :18-22). `scope` is accepted only so a personal request can be refused *by
+/// name* rather than silently promoted to a workspace-wide host.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnrollByocHostRequest {
+    pub display_name: String,
+    #[serde(default)]
+    pub scope: Option<String>,
+    pub idempotency_ref: String,
+}
+
+/// Swift `BYOCEnrollmentDTO` (:24-32). `bootstrapToken` is shown exactly once;
+/// only its digest ever reached PostgreSQL.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ByocEnrollmentDto {
+    pub provision_id: String,
+    pub provider: String,
+    pub state: String,
+    pub bootstrap_token: String,
+    pub bootstrap_expires_at_ms: i64,
+    pub register_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ByocEnrollmentResponse {
+    pub enrollment: ByocEnrollmentDto,
+}
+
+/// Swift `CloudHostDTO` (:38-44).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudHostDto {
+    pub provision_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    pub state: String,
+    pub provider: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudHostResponse {
+    pub cloud_host: CloudHostDto,
+}
+
+// ---------------------------------------------------------------------------
+// work sessions (B2.2 — Swift `WorkSessionRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-sessions` request (Swift `CreateWorkSessionRequest`, :8-16).
+///
+/// `controlId`/`ptyId`/`attachEndpoint` are decoded so they can be refused
+/// **visibly** (ADR-0134 D1): each belongs to a work-host-signed path this batch
+/// does not serve, and accepting-then-dropping them would silently change what
+/// the caller asked for.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateWorkSessionRequest {
+    pub channel_id: Uuid,
+    pub host_id: Uuid,
+    pub tool: String,
+    pub label: String,
+    #[serde(default)]
+    pub control_id: Option<Uuid>,
+    #[serde(default)]
+    pub pty_id: Option<String>,
+    #[serde(default)]
+    pub attach_endpoint: Option<String>,
+}
+
+/// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
+/// :23-38). This batch serves `status: "ended"`; the other arms
+/// (idle/running transitions, ACP events, observation, remote-PTY binding) are
+/// work-host-signed or B2.3 surfaces and are refused by name.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateWorkSessionRequest {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub observation: Option<String>,
+    #[serde(default)]
+    pub event: Option<Value>,
+    #[serde(default)]
+    pub pty_id: Option<String>,
+    #[serde(default)]
+    pub attach_endpoint: Option<String>,
+}
+
+/// `POST …/work-sessions/{session}/resume` request (Swift, :53-55).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResumeWorkSessionRequest {
+    pub target_host_id: Uuid,
+}
+
+/// Swift `WorkSessionDTO` (:57-75).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSessionDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub channel_id: String,
+    pub member_id: String,
+    pub host_id: String,
+    pub root_message_id: String,
+    pub tool: String,
+    pub label: String,
+    pub status: String,
+    pub observation: String,
+    pub observer_grant_count: i64,
+    pub remote_attach_available: bool,
+    pub started_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resumed_from_session_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSessionResponse {
+    pub work_session: WorkSessionDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSessionListResponse {
+    pub work_sessions: Vec<WorkSessionDto>,
+}
+
+/// Query string of `GET …/work-sessions` (`activeFilter`, :2107-2113): only
+/// `"0"`, `"1"` or absent — anything else is a 400, deliberately stricter than
+/// the message-history parser.
+#[derive(Debug, Default, Deserialize)]
+pub struct WorkSessionListQuery {
+    #[serde(default)]
+    pub active: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// cloud credit (B2.2 — Swift `CloudCreditRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/admin/workspaces/{ws}/credits/topups` request (Swift, :5-8).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudCreditTopupRequest {
+    pub amount_micro_usd: i64,
+    pub idempotency_ref: String,
+}
+
+/// Swift `CloudCreditTopupResponse` (:10-15).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCreditTopupResponse {
+    pub workspace_id: String,
+    pub amount_micro_usd: i64,
+    pub idempotency_ref: String,
+    pub balance_micro_usd: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn work_host_dto_omits_null_timestamps_like_swift() {
+        let dto = WorkHostDto {
+            id: "h".into(),
+            workspace_id: "w".into(),
+            scope: "workspace".into(),
+            owner_member_id: "m".into(),
+            host_type: "cloud".into(),
+            display_name: "box".into(),
+            public_key: "k".into(),
+            capabilities: serde_json::json!({"terminal_attach": true}),
+            last_seen_at_ms: None,
+            revoked_at_ms: None,
+            created_at_ms: 7,
+            online: false,
+        };
+        let json = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(json["ownerMemberId"], "m");
+        assert_eq!(json["type"], "cloud", "`type` is not renamed to hostType");
+        assert_eq!(json["capabilities"]["terminal_attach"], true);
+        assert_eq!(json["createdAtMs"], 7);
+        assert!(json.get("lastSeenAtMs").is_none());
+        assert!(json.get("revokedAtMs").is_none());
+    }
+
+    #[test]
+    fn work_session_dto_uses_swift_keys() {
+        let dto = WorkSessionDto {
+            id: "s".into(),
+            workspace_id: "w".into(),
+            channel_id: "c".into(),
+            member_id: "m".into(),
+            host_id: "h".into(),
+            root_message_id: "r".into(),
+            tool: "claude".into(),
+            label: "run".into(),
+            status: "running".into(),
+            observation: "open".into(),
+            observer_grant_count: 0,
+            remote_attach_available: false,
+            started_at_ms: 5,
+            ended_at_ms: None,
+            exit_code: None,
+            end_reason: None,
+            resumed_from_session_id: None,
+        };
+        let json = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(json["rootMessageId"], "r");
+        assert_eq!(json["observerGrantCount"], 0);
+        assert_eq!(json["remoteAttachAvailable"], false);
+        assert_eq!(json["startedAtMs"], 5);
+        assert!(json.get("endedAtMs").is_none());
+        assert!(json.get("exitCode").is_none());
+    }
+
+    #[test]
+    fn work_session_requests_are_closed_world() {
+        let ok: CreateWorkSessionRequest = serde_json::from_value(serde_json::json!({
+            "channelId": Uuid::nil(),
+            "hostId": Uuid::nil(),
+            "tool": "claude",
+            "label": "run",
+        }))
+        .expect("known keys decode");
+        assert_eq!(ok.tool, "claude");
+        assert!(ok.control_id.is_none());
+
+        let rejected: Result<CreateWorkSessionRequest, _> =
+            serde_json::from_value(serde_json::json!({
+                "channelId": Uuid::nil(),
+                "hostId": Uuid::nil(),
+                "tool": "claude",
+                "label": "run",
+                "labell": "typo",
+            }));
+        assert!(rejected.is_err(), "a typo must fail loudly");
+    }
+
+    #[test]
+    fn enrollment_dto_uses_swift_keys() {
+        let json = serde_json::to_value(ByocEnrollmentResponse {
+            enrollment: ByocEnrollmentDto {
+                provision_id: "p".into(),
+                provider: "byoc".into(),
+                state: "provisioning".into(),
+                bootstrap_token: "t".into(),
+                bootstrap_expires_at_ms: 9,
+                register_url: "https://x/register".into(),
+            },
+        })
+        .expect("serialize");
+        assert_eq!(json["enrollment"]["provisionId"], "p");
+        assert_eq!(json["enrollment"]["bootstrapToken"], "t");
+        assert_eq!(json["enrollment"]["bootstrapExpiresAtMs"], 9);
+        assert_eq!(json["enrollment"]["registerUrl"], "https://x/register");
+    }
 
     #[test]
     fn message_dto_omits_null_optionals_like_swift() {

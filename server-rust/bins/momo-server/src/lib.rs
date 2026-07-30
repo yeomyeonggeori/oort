@@ -25,9 +25,11 @@ pub mod routes;
 
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use momo_db::PgPool;
+
+use crate::config::T3Settings;
 
 /// Shared handler state. Cheap to clone (pool handle + `Arc`'d strings).
 #[derive(Clone)]
@@ -38,6 +40,10 @@ pub struct AppState {
     pub jwt_secret: Arc<String>,
     /// Advertised realtime WebSocket endpoint (ADR-0110).
     pub realtime_ws_url: Arc<String>,
+    /// T3 (momo Cloud) settings. **Off** unless [`AppState::with_t3`] says
+    /// otherwise, so a deployment that never configured T3 answers 503 on every
+    /// T3 route instead of half-provisioning something billable.
+    pub t3: Arc<T3Settings>,
 }
 
 impl AppState {
@@ -46,7 +52,16 @@ impl AppState {
             pool,
             jwt_secret: Arc::new(jwt_secret),
             realtime_ws_url: Arc::new(realtime_ws_url),
+            t3: Arc::new(T3Settings::default()),
         }
+    }
+
+    /// Attach the operator's T3 configuration (B2.2). A builder rather than a
+    /// `new` parameter so every existing call site keeps compiling *and* keeps
+    /// the fail-closed default.
+    pub fn with_t3(mut self, settings: T3Settings) -> Self {
+        self.t3 = Arc::new(settings);
+        self
     }
 }
 
@@ -71,11 +86,58 @@ impl std::fmt::Debug for AppState {
 /// **must** stay outside the middleware: the middleware's MOMO-300 revocation
 /// check would turn a second logout into a 401, and logout is specified as
 /// idempotent (200 with `alreadyRevoked=true`).
+///
+/// B2.2 adds two more public routes, and both are public for a reason that is
+/// measured, not assumed:
+///   * `…/work-hosts/{host}/heartbeat` — Swift mounts it with `addPublic`
+///     (`WorkHostRoutes.swift:116-118`); a daemon authenticates with an Ed25519
+///     signature over the heartbeat payload, never with a bearer token.
+///   * `…/work-hosts/cloud/register` — Swift `addPublic`
+///     (`CloudProvisionerRoutes.swift:75-77`); the workd spending its one-shot
+///     bootstrap token has no bearer credential yet, by construction.
+///
+/// Everything else this batch mounts sits behind [`auth::require_principal`].
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
             post(routes::messages::send).get(routes::messages::history),
+        )
+        // work hosts (ADR-0125 registry)
+        .route(
+            "/v1/workspaces/{ws}/work-hosts",
+            post(routes::work_hosts::register).get(routes::work_hosts::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}",
+            delete(routes::work_hosts::revoke),
+        )
+        // cloud hosts (ADR-0142 BYOC)
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/byoc/enrollments",
+            post(routes::cloud_hosts::enroll),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/cloud/{provision}",
+            get(routes::cloud_hosts::get_cloud_host),
+        )
+        // work sessions (ADR-0114 ledger + ADR-0140 billing)
+        .route(
+            "/v1/workspaces/{ws}/work-sessions",
+            post(routes::work_sessions::create).get(routes::work_sessions::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}",
+            patch(routes::work_sessions::end),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/resume",
+            post(routes::work_sessions::resume),
+        )
+        // paid credit
+        .route(
+            "/v1/admin/workspaces/{ws}/credits/topups",
+            post(routes::credits::topup),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -89,6 +151,43 @@ pub fn build_app(state: AppState) -> Router {
         .route("/v1/auth/login", post(routes::auth_routes::login))
         .route("/v1/auth/refresh", post(routes::auth_routes::refresh))
         .route("/v1/auth/logout", post(routes::auth_routes::logout))
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/heartbeat",
+            post(routes::work_hosts::heartbeat),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/cloud/register",
+            post(routes::cloud_hosts::register_cloud_host),
+        )
         .merge(protected)
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Building the router must not panic.
+    ///
+    /// `axum`/`matchit` rejects conflicting routes when the `Router` is built,
+    /// not when it is compiled — and B2.2 mounted several paths that overlap by
+    /// shape (`…/work-hosts/{host}` vs `…/work-hosts/cloud/{provision}`,
+    /// `…/work-hosts/{host}/heartbeat` vs `…/work-hosts/cloud/register`). Without
+    /// this test the first proof that they coexist would be a boot-time panic in
+    /// a docker gate; with it, `cargo test` says so in milliseconds.
+    ///
+    /// `connect_lazy` builds a pool handle without touching the network (it does
+    /// want a Tokio context), so this stays a DB-free unit test.
+    #[tokio::test]
+    async fn the_router_builds_without_conflicting_routes() {
+        let pool = momo_db::sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
+            .expect("a lazy pool never dials");
+        let state = AppState::new(
+            pool,
+            "test-secret".to_string(),
+            "ws://127.0.0.1:8000/connection/websocket".to_string(),
+        );
+        let _router = build_app(state);
+    }
 }

@@ -40,21 +40,33 @@
 //! breaks when reverted.
 
 pub mod billing;
+pub mod cloud_host;
 pub mod error;
 pub mod lifecycle;
 pub mod provider;
 
 pub use billing::{
-    pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx, start_usage_in_tx,
-    usage_snapshot_in_tx, workspace_credit_balance_in_tx, AdmittedSlot, StartedUsage,
-    UsageSnapshot,
+    acquire_slot_in_tx, pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx,
+    start_usage_in_tx, topup_credit_in_tx, usage_snapshot_in_tx, workspace_credit_balance_in_tx,
+    AdmittedSlot, SlotOccupancy, StartedUsage, TopupOutcome, UsageSnapshot,
+};
+pub use cloud_host::{
+    allocate_uuid_v7, bootstrap_token_digest, claim_bootstrap_in_tx,
+    cloud_host_id_for_bootstrap_digest, cloud_host_id_for_host, cloud_host_id_for_host_in_tx,
+    cloud_host_id_for_session_in_tx, enroll_byoc_cloud_host_in_tx,
+    find_enrollment_by_idempotency_key_in_tx, load_cloud_host_in_tx, lock_enrollment_key_in_tx,
+    mint_bootstrap_token, BootstrapToken, ClaimedBootstrap, CloudHostEnrollment, CloudHostRecord,
+    NewByocEnrollment, BOOTSTRAP_TTL_SECONDS,
 };
 pub use error::T3Error;
 pub use lifecycle::{
-    bind_cloud_host_in_tx, cloud_host_state_in_tx, create_work_session_in_tx,
-    load_work_session_in_tx, resolve_cloud_host_id, terminate, terminate_in_tx,
-    transition_cloud_host_in_tx, with_t3_lifecycle_tx, CloudHostState, NewWorkSession,
-    T3LockLadder, TerminationReason, WorkSession,
+    bind_cloud_host_in_tx, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
+    create_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
+    is_active_channel_member_in_tx, list_work_session_details_in_tx, load_work_session_in_tx,
+    lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, resolve_cloud_host_id,
+    terminate, terminate_in_tx, transition_cloud_host_in_tx, update_session_card_props_in_tx,
+    with_t3_lifecycle_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx, CloudHostState,
+    NewWorkSession, T3LockLadder, TerminationReason, WorkSession, WorkSessionDetail,
 };
 pub use provider::{
     ByocProviderAdapter, MockCall, MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,

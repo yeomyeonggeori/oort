@@ -41,6 +41,19 @@ pub struct AdmittedSlot {
     pub balance_micro_usd: i64,
 }
 
+/// What the session-start slot check saw. Deliberately **not** [`AdmittedSlot`]:
+/// that type carries a credit balance, and session start does not read one —
+/// a shared type would have forced a sentinel value that reads like a balance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlotOccupancy {
+    pub occupied: i32,
+    pub max_active: i32,
+    pub member_occupied: i32,
+    pub per_member_soft_limit: i32,
+    /// The target host already holds a slot, so this session consumes none.
+    pub consumes_existing_reservation: bool,
+}
+
 /// The ledger rows opened for one paid session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StartedUsage {
@@ -158,6 +171,200 @@ pub async fn reserve_provisioning_slot_in_tx(
         per_member_soft_limit,
         balance_micro_usd,
     })
+}
+
+/// Session-start admission — the *other* slot check
+/// (`WorkPoolRoutes.acquireSlot`, :184-266), added in B2.2.
+///
+/// It is not [`reserve_provisioning_slot_in_tx`] and must not be replaced by it:
+///
+/// * **No credit check.** A workspace's balance gates *acquiring a paid host*
+///   (enrollment), not starting a session on a host it already pays for.
+///   Checking it again here would refuse a running host mid-session the moment a
+///   balance hit zero — which is the reconciliation worker's decision (ADR-0140
+///   D4), not this call's.
+/// * **The reservation branch.** When the target host is a cloud host already in
+///   `ready`/`running` for this member, its slot is *already counted* by the
+///   occupancy query. The comparison therefore relaxes to `<=`: a session
+///   starting on a host the member already holds consumes no new slot, and
+///   without this branch every T3 session would be refused at the ceiling it
+///   itself occupies.
+///
+/// The hard rule ("one unsettled usage per cloud host") is still the partial
+/// unique index (051:33); this is admission, not enforcement.
+pub async fn acquire_slot_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    target_host_id: Uuid,
+) -> Result<SlotOccupancy, T3Error> {
+    sqlx::query(
+        "INSERT INTO work_pool (workspace_id) VALUES ($1) ON CONFLICT (workspace_id) DO NOTHING",
+    )
+    .bind(workspace_id)
+    .execute(&mut *conn)
+    .await?;
+
+    let pool_row = sqlx::query(
+        "SELECT max_active, per_member_soft_limit \
+           FROM work_pool WHERE workspace_id = $1 FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(T3Error::WorkPoolMissing)?;
+    let max_active: i32 = pool_row.try_get("max_active")?;
+    let per_member_soft_limit: i32 = pool_row.try_get("per_member_soft_limit")?;
+
+    let usage_row = sqlx::query(
+        "SELECT \
+           ( SELECT count(*)::int \
+               FROM work_session ws \
+               JOIN work_host h ON h.id = ws.host_id \
+              WHERE ws.workspace_id = $1 \
+                AND ws.status IN ('running', 'idle') \
+                AND h.type <> 'cloud' ) \
+         + ( SELECT count(*)::int \
+               FROM work_cloud_host ch \
+              WHERE ch.workspace_id = $1 \
+                AND ch.state IN ('provisioning', 'ready', 'running', 'paused') ) AS occupied, \
+           ( SELECT count(*)::int \
+               FROM work_session ws \
+               JOIN work_host h ON h.id = ws.host_id \
+              WHERE ws.workspace_id = $1 \
+                AND ws.member_id = $2 \
+                AND ws.status IN ('running', 'idle') \
+                AND h.type <> 'cloud' ) \
+         + ( SELECT count(*)::int \
+               FROM work_cloud_host ch \
+              WHERE ch.workspace_id = $1 \
+                AND ch.requester_member_id = $2 \
+                AND ch.state IN ('provisioning', 'ready', 'running', 'paused') ) \
+             AS member_occupied, \
+           EXISTS ( \
+             SELECT 1 FROM work_cloud_host ch \
+              WHERE ch.workspace_id = $1 \
+                AND ch.host_id = $3 \
+                AND ch.requester_member_id = $2 \
+                AND ch.state IN ('ready', 'running') ) AS consumes_cloud_reservation",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(target_host_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let occupied: i32 = usage_row.try_get("occupied")?;
+    let member_occupied: i32 = usage_row.try_get("member_occupied")?;
+    let consumes_reservation: bool = usage_row.try_get("consumes_cloud_reservation")?;
+
+    let workspace_admitted = if consumes_reservation {
+        occupied <= max_active
+    } else {
+        occupied < max_active
+    };
+    if !workspace_admitted {
+        return Err(T3Error::SlotsExhausted {
+            occupied,
+            max_active,
+        });
+    }
+    let member_admitted = if consumes_reservation {
+        member_occupied <= per_member_soft_limit
+    } else {
+        member_occupied < per_member_soft_limit
+    };
+    if !member_admitted {
+        return Err(T3Error::MemberSlotLimit {
+            occupied: member_occupied,
+            limit: per_member_soft_limit,
+        });
+    }
+
+    Ok(SlotOccupancy {
+        occupied,
+        max_active,
+        member_occupied,
+        per_member_soft_limit,
+        consumes_existing_reservation: consumes_reservation,
+    })
+}
+
+/// Outcome of a credit top-up (`CloudCreditRoutes.topup` :66-127).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopupOutcome {
+    /// A new `credit_entry` was appended; the balance is post-trigger.
+    Applied { balance_micro_usd: i64 },
+    /// This `(reason, ref_id)` was already spent for the SAME amount — the
+    /// idempotent replay. The balance is reported unchanged.
+    Replayed { balance_micro_usd: i64 },
+    /// The ref was already spent for a DIFFERENT amount. A 409, never a second
+    /// debit: reusing a reference for another amount is a client bug, and
+    /// silently applying it would mint credit.
+    RefConflict,
+}
+
+/// Append a paid-credit top-up and read the balance the trigger produced.
+///
+/// The balance is **never** written here: `credit_entry` is append-only
+/// (045:138-146) and `apply_credit_entry` (045:122-136) is what moves
+/// `workspace_credit`. This function therefore cannot create money the ledger
+/// does not record — which is the whole reason the table is shaped that way.
+///
+/// The workspace `FOR SHARE` is Swift's (:59-65): it makes "the workspace exists"
+/// true for the duration of the statement rather than at the instant it was read.
+pub async fn topup_credit_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    amount_micro_usd: i64,
+    idempotency_ref: Uuid,
+) -> Result<Option<TopupOutcome>, T3Error> {
+    let workspace_exists: Option<i32> =
+        sqlx::query_scalar("SELECT 1 FROM workspace WHERE id = $1 FOR SHARE")
+            .bind(workspace_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if workspace_exists.is_none() {
+        return Ok(None);
+    }
+
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO credit_entry (workspace_id, delta_micro_usd, reason, ref_id) \
+         VALUES ($1, $2, 'topup', $3) \
+         ON CONFLICT (workspace_id, reason, ref_id) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(amount_micro_usd)
+    .bind(idempotency_ref)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if inserted.is_none() {
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT delta_micro_usd FROM credit_entry \
+              WHERE workspace_id = $1 AND reason = 'topup' AND ref_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(idempotency_ref)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if existing != Some(amount_micro_usd) {
+            return Ok(Some(TopupOutcome::RefConflict));
+        }
+    }
+
+    let balance = workspace_credit_balance_in_tx(conn, workspace_id)
+        .await?
+        .ok_or(T3Error::CreditLedgerMissing)?;
+    Ok(Some(if inserted.is_some() {
+        TopupOutcome::Applied {
+            balance_micro_usd: balance,
+        }
+    } else {
+        TopupOutcome::Replayed {
+            balance_micro_usd: balance,
+        }
+    }))
 }
 
 /// Open the active-time ledger for a session that is starting on a cloud host.

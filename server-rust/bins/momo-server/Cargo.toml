@@ -21,6 +21,12 @@ path = "src/main.rs"
 momo-db = { path = "../../crates/momo-db" }
 momo-auth = { path = "../../crates/momo-auth" }
 momo-messaging = { path = "../../crates/momo-messaging" }
+# B2.2 (T3 REST surface). `momo-t3` owns every T3 statement this batch mounts;
+# `momo-outbox` is the single egress chokepoint the work-session lifecycle
+# broadcasts go through — momo-t3 deliberately owns no outbox SQL, so the route
+# emits them in the same transaction (momo-t3 lib.rs, "It owns no outbox SQL").
+momo-t3 = { path = "../../crates/momo-t3" }
+momo-outbox = { path = "../../crates/momo-outbox" }
 
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time"] }
@@ -42,3 +48,9 @@ reqwest.workspace = true
 tokio = { workspace = true, features = ["net", "time"] }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+# B2.2 T3 smoke only: the test plays the part of a cloud workd, so it needs the
+# shared signing format and a throwaway keypair. Neither is linked into the
+# server binary.
+momo-wire = { path = "../../crates/momo-wire" }
+ed25519-dalek.workspace = true
+base64.workspace = true

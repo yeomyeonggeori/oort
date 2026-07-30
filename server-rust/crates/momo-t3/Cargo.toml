@@ -9,6 +9,11 @@ rust-version.workspace = true
 # shared infrastructure — consumed through its public API, never re-implemented.
 momo-db = { path = "../momo-db" }             # the sole RLS GUC seam
 momo-provider = { path = "../momo-provider" } # the sole provider-specific seam
+momo-wire = { path = "../momo-wire" }         # B2.2: the bootstrap-token digest
+                                              # format is a server<->workd
+                                              # contract, so it is minted with
+                                              # the shared sha256 helper, not a
+                                              # second local implementation.
 
 async-trait.workspace = true
 futures.workspace = true

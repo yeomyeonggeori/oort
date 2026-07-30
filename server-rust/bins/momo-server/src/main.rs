@@ -31,6 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db_host = %config.db.host,
         db_port = config.db.port,
         db_name = %config.db.database,
+        // Whether momo Cloud is on, and which adapter new hosts use. Never an
+        // endpoint or a key — those stay in the process (invariant #7).
+        t3_enabled = config.t3.enabled,
+        t3_provider = %config.t3.default_provider_id,
         "momo-server starting"
     );
 
@@ -39,7 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool,
         config.jwt_secret.clone(),
         config.realtime_ws_url.clone(),
-    );
+    )
+    // B2.2: T3 stays off unless the operator configured it (MOMO_T3_ENABLED=1).
+    .with_t3(config.t3.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
