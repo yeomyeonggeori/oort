@@ -22,6 +22,7 @@ pub mod config;
 pub mod dto;
 pub mod error;
 pub mod routes;
+pub mod work_host_auth;
 
 use std::sync::Arc;
 
@@ -96,6 +97,14 @@ impl std::fmt::Debug for AppState {
 ///     (`CloudProvisionerRoutes.swift:75-77`); the workd spending its one-shot
 ///     bootstrap token has no bearer credential yet, by construction.
 ///
+/// B2.4 adds a third, for the same measured reason: a **daemon** holds a signing
+/// key, never a bearer.
+///   * `…/work-hosts/{host}/terminal-attach/validate` — the direct PTY host
+///     asking whether a capability is still good. Authenticated inside the
+///     handler by [`work_host_auth`] (v2 request signature + one-time request
+///     id, migration 048); mounting it behind the bearer middleware would have
+///     inverted its authorization.
+///
 /// Everything else this batch mounts sits behind [`auth::require_principal`].
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
@@ -134,6 +143,16 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/resume",
             post(routes::work_sessions::resume),
         )
+        // reattach + replay (ADR-0139)
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/reattach",
+            get(routes::reattach::reattach),
+        )
+        // terminal attach capability (ADR-0125 D10 / ADR-0126 D1)
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/terminal-attach",
+            post(routes::terminal_attach::issue),
+        )
         // paid credit
         .route(
             "/v1/admin/workspaces/{ws}/credits/topups",
@@ -158,6 +177,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/work-hosts/cloud/register",
             post(routes::cloud_hosts::register_cloud_host),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate",
+            post(routes::terminal_attach::validate),
         )
         .merge(protected)
         .with_state(state)

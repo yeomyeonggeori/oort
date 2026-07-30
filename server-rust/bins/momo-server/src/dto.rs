@@ -411,6 +411,123 @@ pub struct WorkSessionListQuery {
 }
 
 // ---------------------------------------------------------------------------
+// session reattach + replay (B2.4 — ADR-0139)
+// ---------------------------------------------------------------------------
+
+/// Query string of `GET …/work-sessions/{session}/reattach`.
+///
+/// The names are `MessageRoutes.replies`' (`cursor`, `limit`, :528-530) because
+/// the replay half **is** that surface, scoped to one session's thread. The two
+/// parsers keep Swift's asymmetry, which is not an oversight: `limit` is read
+/// leniently (`Int($0) ?? 50`, then clamped) because a bad page size has a safe
+/// default, while `cursor` is strict (400 on garbage) because a bad cursor has
+/// no safe default — silently restarting a replay from 0 would re-deliver a
+/// whole session's events as if they were new.
+#[derive(Debug, Default, Deserialize)]
+pub struct ReattachQuery {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+impl ReattachQuery {
+    pub fn limit(&self) -> Option<i64> {
+        self.limit.as_deref().and_then(|raw| raw.parse().ok())
+    }
+}
+
+/// `GET …/work-sessions/{session}/reattach` response.
+///
+/// One round trip answers the three questions a returning client has, and the
+/// verdict is server-side on purpose (ADR-0139 D3): "이어서 보기" and "새
+/// 호스트에서 재개" are different acts with different consequences, so the
+/// server names which one applies rather than letting each client re-derive it
+/// from `status` + host liveness and drift.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSessionReattachResponse {
+    pub work_session: WorkSessionDto,
+    /// `"reattach"` | `"resume_lineage"` | `"replay_only"` — snake_case values,
+    /// like every other closed vocabulary on this wire (`owner_only`,
+    /// `idle_timeout`).
+    pub verdict: &'static str,
+    /// The host heartbeated inside its 90s window. **Advisory**: it never
+    /// changes `verdict`, because exactly one endpoint writes `last_seen_at` and
+    /// hosts that are demonstrably relaying have been measured reporting
+    /// `online: false` (web `workSessionModel.ts:630-648`).
+    pub host_online: bool,
+    pub host_revoked: bool,
+    /// The card's `seq` — the anchor for a client holding no cursor.
+    pub root_message_seq: i64,
+    /// Highest `seq` in the thread; `null` when the card has no replies yet. A
+    /// client already holding this value is up to date.
+    pub last_event_seq: Option<i64>,
+    /// The replayed thread page, oldest-first, strictly after the cursor.
+    pub events: Vec<MessageDto>,
+    /// Next `cursor`, or `null` when this page reached the end. Encoded even
+    /// when null, matching Swift `ThreadRepliesPage`.
+    pub next_cursor: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// terminal attach capability (B2.4 — Swift `TerminalAttachRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-sessions/{session}/terminal-attach` request (Swift
+/// `IssueTerminalAttachRequest`, :68-70).
+///
+/// The body is optional in every shape — absent, empty, or `{}` all mean
+/// `controller` (Swift `issueMode` returns `.controller` on a zero-byte body,
+/// :423-424) — so this is decoded by hand in the handler rather than through
+/// `Json<…>`, which rejects an empty body.
+#[derive(Debug, Default, Deserialize)]
+pub struct IssueTerminalAttachRequest {
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// `POST …/terminal-attach` response (Swift `TerminalAttachCapabilityResponse`,
+/// :51-61).
+///
+/// **snake_case, unlike every camelCase body above.** That is the Swift
+/// contract the mac and web clients already consume (`api.ts:1340-1348`
+/// documents it explicitly); renaming it here would break both to satisfy a
+/// style rule.
+#[derive(Debug, Serialize)]
+pub struct TerminalAttachCapabilityResponse {
+    /// The HOST's own endpoint. momo never proxies it.
+    pub attach_endpoint: String,
+    /// The opaque 60-second bearer. Returned once; only its SHA-256 is stored.
+    pub capability_token: String,
+    pub pty_id: String,
+}
+
+/// `POST …/work-hosts/{host}/terminal-attach/validate` request (Swift
+/// `ValidateTerminalAttachRequest`, :72-97).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateTerminalAttachRequest {
+    pub capability_token: String,
+    /// `true` = the host is re-checking a socket it already serves. Relaxes the
+    /// expiry clause and **only** the expiry clause (MOMO-674).
+    #[serde(default)]
+    pub stream: Option<bool>,
+}
+
+/// `POST …/terminal-attach/validate` response (Swift
+/// `TerminalAttachValidationResponse`, :99-111). snake_case, same reason.
+#[derive(Debug, Serialize)]
+pub struct TerminalAttachValidationResponse {
+    pub work_session_id: String,
+    pub pty_id: String,
+    /// ISO-8601 with fractional seconds, rendered by PostgreSQL.
+    pub expires_at: String,
+    /// `"controller"` | `"observer"`.
+    pub mode: &'static str,
+}
+
+// ---------------------------------------------------------------------------
 // cloud credit (B2.2 — Swift `CloudCreditRoutes.swift`)
 // ---------------------------------------------------------------------------
 
