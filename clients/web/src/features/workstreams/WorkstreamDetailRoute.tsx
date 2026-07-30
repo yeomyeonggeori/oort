@@ -242,6 +242,7 @@ function ContinuationBlock({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const doneRef = useRef<HTMLParagraphElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
 
   const state = continuationState(
     runs,
@@ -265,6 +266,20 @@ function ContinuationBlock({
   useEffect(() => {
     if (done && error === null) doneRef.current?.focus({ preventScroll: true });
   }, [done, error]);
+
+  // 실패 경로에도 같은 복구가 필요하다 (2R H1). 1R의 "실패하면 버튼이 그대로
+  // 있다"는 확정 버튼이 진행 중에 disabled가 되지 않게 된 지금은 대체로 참이지만,
+  // 항상 참은 아니다: 마지막 자격 호스트에서 실패하면 `state.kind`가 ready를
+  // 벗어나면서 그 버튼도 함께 언마운트된다(바로 그래서 오류 문장이 ready 가지
+  // 바깥에 산다). 그때만 오류 문장이 포커스를 받는다 — 버튼이 살아남아 사람이
+  // 아직 그것을 쥐고 있으면 빼앗지 않는다. stranded 판정은 WorkPanel이 스코프
+  // 변경에서 쓰는 것과 같은 형태다.
+  useEffect(() => {
+    if (error === null) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    errorRef.current?.focus({ preventScroll: true });
+  }, [error]);
 
   const takeOver = useCallback(
     async (run: WorkstreamRun, hostId: string) => {
@@ -341,7 +356,9 @@ function ContinuationBlock({
           host would vanish the same way. */}
       {error !== null && (
         <p
-          className="mb-2 break-words text-meta text-danger"
+          ref={errorRef}
+          tabIndex={-1}
+          className="mb-2 break-words text-meta text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           role="alert"
           data-testid="workstream-continue-error"
         >
@@ -415,6 +432,7 @@ function ContinuationBlock({
               labelId={HOST_GROUP_LABEL_ID}
               copy={{
                 group: "이어받을 호스트",
+                confirm: "이어받기",
                 action: (name) => `${name}에서 이어받기`,
                 busy: (name) => `${name}에서 이어받는 중`,
               }}
@@ -422,7 +440,8 @@ function ContinuationBlock({
               busyHostId={pendingHostId}
               onPick={(hostId) => void takeOver(state.run, hostId)}
               groupTestId="workstream-continue-targets"
-              hostTestId="workstream-continue-host"
+              selectTestId="workstream-continue-host-select"
+              confirmTestId="workstream-continue-confirm"
             />
           )}
         </>
