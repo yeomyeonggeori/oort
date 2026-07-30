@@ -250,6 +250,21 @@ fn relay_for(pool: PgPool, api_url: &str) -> Relay {
 // fixtures
 // ---------------------------------------------------------------------------
 
+/// Shared-DB isolation (B1.6): earlier conformance binaries (e.g. messaging)
+/// leave their own `pending` broadcast rows behind, and a relay claim would
+/// pick those up before this test's rows — skewing "publish attempted once"
+/// counts. Settle any residue as `done` up front; with `--test-threads=1` each
+/// test then only ever claims the rows it seeds itself.
+async fn settle_residual_broadcasts(su: &PgPool) {
+    sqlx::query(
+        "UPDATE outbox SET status = 'done', processed_at = now() \
+          WHERE kind = 'broadcast' AND status IN ('pending', 'processing')",
+    )
+    .execute(su)
+    .await
+    .expect("settle residual pending broadcasts");
+}
+
 async fn seed_workspace(su: &PgPool, ws: Uuid) {
     sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
         .bind(ws)
@@ -335,6 +350,7 @@ async fn d2_2_relay_publishes_the_outbox_contract_and_settles_done() {
     let _guard = relay_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
     let fixture = fixture(&su).await;
     let (mock, api_url) = start_mock_centrifugo(StatusCode::OK).await;
 
@@ -417,6 +433,7 @@ async fn two_relay_instances_never_double_publish_a_row() {
     let _guard = relay_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
     let fixture = fixture(&su).await;
     let (mock, api_url) = start_mock_centrifugo(StatusCode::OK).await;
 
@@ -482,6 +499,7 @@ async fn a_5xx_publish_requeues_with_backoff_instead_of_dropping() {
     let _guard = relay_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
     let fixture = fixture(&su).await;
     let (mock, api_url) = start_mock_centrifugo(StatusCode::INTERNAL_SERVER_ERROR).await;
 
