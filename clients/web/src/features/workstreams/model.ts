@@ -8,7 +8,12 @@ import {
   type WorkstreamStatus,
 } from "@/lib/api";
 import { workSessionResumeTargets } from "@/features/work/workSessionModel";
-import { channelLabel, type Directory } from "@/features/workspace/useWorkspace";
+import {
+  channelLabel,
+  memberFor,
+  memberNameParts,
+  type Directory,
+} from "@/features/workspace/useWorkspace";
 import type { FilterTabsSpec } from "@/features/common/FilterTabs";
 
 // =============================================================================
@@ -161,6 +166,44 @@ export function runClockLabel(atMs: number, nowMs: number): RunClock {
         ? day
         : `${at.getFullYear()}년 ${day}`,
     time,
+  };
+}
+
+/**
+ * 이 목표를 실행한 사람(또는 에이전트)을 한 문장에서 부를 수 있는 형태로.
+ *
+ * 이 로스터에는 김인턴이 둘 있다(사람 하나, 에이전트 하나). 그래서 이름은
+ * `displayName`에서 읽는 것이 아니라 공용 disambiguator를 지난다: 한 목표 아래
+ * 김인턴 두 줄은 이력이 아니라 동전 던지기다.
+ *
+ * `ownerName`은 skill §9가 요구하는 병기다. agent actor에 `--agent` 토큰만
+ * 얹으면 "A -> 에이전트 -> C" 원장에서 그 에이전트를 **누가 책임지는지**가
+ * 빠지고, 이 표면은 정확히 그 원장을 읽으라고 존재한다(PR 918 R1 M6). 문장은
+ * 멤버 디렉터리·타임라인이 이미 쓰는 `managed by {owner}` 그대로다 — 같은
+ * 사실을 두 표면이 다른 말로 부르면 읽는 사람이 둘을 다른 사실로 읽는다.
+ *
+ * 오너를 로스터에서 찾지 못하면 비운다. MemberRow가 하는 것과 같고, 없는 이름을
+ * 지어내는 것보다 낫다.
+ */
+export interface WorkstreamActor {
+  name: string;
+  isAgent: boolean;
+  /** 에이전트를 책임지는 사람. 사람 actor에는 언제나 null이다. */
+  ownerName: string | null;
+}
+
+export function workstreamActor(
+  directory: Directory,
+  memberId: string
+): WorkstreamActor {
+  const parts = memberNameParts(directory, memberId, "알 수 없는 멤버");
+  const member = memberFor(directory, memberId);
+  const isAgent = member?.kind === "agent";
+  const owner = isAgent ? memberFor(directory, member?.ownerHumanId) : null;
+  return {
+    name: parts.handle ? `${parts.name} ${parts.handle}` : parts.name,
+    isAgent,
+    ownerName: owner?.displayName ?? null,
   };
 }
 

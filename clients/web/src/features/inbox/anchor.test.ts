@@ -6,6 +6,7 @@ import {
   messageSelector,
   watchForMessage,
   watchForMessageId,
+  workSessionPath,
 } from "./anchor";
 
 describe("channelPath", () => {
@@ -43,6 +44,42 @@ describe("messageAnchorPath", () => {
   it("folds the wire's upper-cased UUID, which a CSS selector would not", () => {
     expect(messageIdSelector("019F94E3-0E04-79CD-9DEE-208F47EDD9A8")).toBe(
       '[data-testid="timeline-message"][data-message-id="019f94e3-0e04-79cd-9dee-208f47edd9a8"]'
+    );
+  });
+
+  // 이 값은 이제 주소창에서 온다(ChatShell이 `?msg=`를 읽는다). 따옴표 하나가
+  // 섞이면 `querySelector`가 SyntaxError를 던지는데, 그것은 점프 하나가 실패하는
+  // 것이 아니라 채널 표면 전체가 넘어지는 일이다(PR 918 R1 Low).
+  it("closes the quoted value a non-uuid could otherwise break out of", () => {
+    expect(messageIdSelector('abc"], script')).toBe(
+      '[data-testid="timeline-message"][data-message-id="abc\\"], script"]'
+    );
+  });
+
+  it("escapes the backslash that would otherwise eat the closing quote", () => {
+    expect(messageIdSelector("abc\\")).toBe(
+      '[data-testid="timeline-message"][data-message-id="abc\\\\"]'
+    );
+  });
+
+  it("keeps a raw newline out of the string, which CSS does not allow", () => {
+    expect(messageIdSelector("abc\ndef")).toBe(
+      '[data-testid="timeline-message"][data-message-id="abc def"]'
+    );
+  });
+});
+
+describe("workSessionPath", () => {
+  // 작업 세션은 라우트가 아니라 채널 표면 안의 패널이라, 링크가 채널과 세션을
+  // 함께 말한다. 작업 흐름 상세의 실행 이력 행이 쓰는 열쇠다(MOMO-679 M5).
+  it("names the channel and the session the panel should open on", () => {
+    expect(
+      workSessionPath(
+        "00000000-0000-7000-8000-000000000201",
+        "019F94E3-0E04-79CD-9DEE-208F47EDD9A8"
+      )
+    ).toBe(
+      "/c/00000000-0000-7000-8000-000000000201?work=019f94e3-0e04-79cd-9dee-208f47edd9a8"
     );
   });
 });

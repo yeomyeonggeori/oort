@@ -91,7 +91,16 @@ export function FilterTabs<T extends string>({
             type="button"
             role="tab"
             id={spec.tabId(filter)}
-            aria-controls={spec.panelId(filter)}
+            // 선택된 탭만 자기 패널을 가리킨다. 이 위젯의 호출자는 활성 패널
+            // 하나만 렌더하므로(인박스도 작업 흐름도 그렇다) 비활성 탭의
+            // `aria-controls`는 문서에 없는 id를 가리키는 참조였다: 따라가면
+            // 아무 데도 가지 않고, 검사 도구에는 깨진 참조로 잡힌다. 워크스트림만
+            // 고치면 형제 표면과 갈라지므로, 두 호출자가 공유하는 이 컨트롤에서
+            // 한 번 고친다(PR 918 R1 "함께 볼 것"). 관계를 아예 지우지 않고 선택된
+            // 탭에만 두는 이유는 그 하나가 지금 실제로 화면에 있는 관계이기
+            // 때문이고, 같은 형태를 이 레포가 이미 두 곳에서 쓴다
+            // (WorkPanel의 peek, WorkSessionDetail의 발췌 폼).
+            {...(selected ? { "aria-controls": spec.panelId(filter) } : {})}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             data-testid={spec.testId(filter)}

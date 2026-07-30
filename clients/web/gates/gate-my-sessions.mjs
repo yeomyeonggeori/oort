@@ -7,6 +7,28 @@
 // host's running ledger row as active. An empty host registry still keeps
 // ledger-backed rows visible with the neutral unknown-host fallback.
 //
+// **좁은 판의 호스트 피커도 여기서 잰다** (MOMO-679 2R H2). 이 게이트가 여는
+// 작업 세션 pane은 320px이고 그 안의 재개 블록 내용은 ~262px인데, 공용
+// HostPicker의 두 번째 호출자가 바로 그 자리다. 1440 상세 한 줄에서만 피커를
+// 보던 것이 2R H2의 원인이었으므로, 진짜 pane 측정 폭의 단정은 형제 게이트가
+// 아니라 여기 있어야 한다: `<select>` 한 줄 + 채움 버튼 하나, 칠해진 컨트롤은
+// 정확히 하나, 그룹 높이는 자격 호스트 수와 무관.
+//
+// 같은 화면에서 재개 토글의 위계도 잰다(2R M9): 닫히면 채움, 열리면 ghost +
+// `호스트 선택 닫기`. 형제 표면과 컨트롤을 공유하면서 그 컨트롤이 존재하는
+// 이유인 규칙만 한쪽에 두고 오면, `aria-expanded=true`인데 이름은 여전히 여는
+// 이름이 된다.
+//
+// 붉히는 절차(제품 한 줄 되돌리기, `git checkout --` 로 복구):
+//   좁은 pane 피커 — features/work/HostPicker 확정 버튼의 `max-w-full`을
+//     `w-full`로 바꾼다. 실측된 실패: "확정 버튼이 전폭이 됐다 (261px / 폼
+//     261px)". 쌓임 절반은 같은 파일의 `<Select>` 블록을 v1의
+//     `targets.map(...)` 버튼 N개로 되돌리면 붉는다(고르는 컨트롤이 사라지므로
+//     재개 왕복이 먼저 실패한다).
+//   재개 토글 위계 — WorkPanel의 `variant={orphaned ? (resumeOpen ? "ghost" :
+//     "default") : "outline"}`을 `variant="outline"` 고정으로 되돌린다.
+//     실측된 실패: "닫힌 재개 토글이 채움 없이 서 있다 (rgba(0, 0, 0, 0))".
+//
 // Red proofs:
 //   MY_SESSIONS_GATE_PROVE_RED_OFFLINE=1 npm run gate:my-sessions
 //   MY_SESSIONS_GATE_PROVE_RED_FILTER=1 npm run gate:my-sessions
@@ -35,6 +57,7 @@ const offlineHostId = "00000000-0000-7000-8000-000000000701";
 const onlineHostId = "00000000-0000-7000-8000-000000000702";
 const otherHostId = "00000000-0000-7000-8000-000000000703";
 const orphanedHostId = "00000000-0000-7000-8000-000000000704";
+const longNameHostId = "00000000-0000-7000-8000-000000000705";
 const offlineRootId = "00000000-0000-7000-8000-000000000801";
 const onlineRootId = "00000000-0000-7000-8000-000000000802";
 const otherRootId = "00000000-0000-7000-8000-000000000803";
@@ -182,6 +205,11 @@ const hosts = [
   host(onlineHostId, "개발실 Mac mini", true),
   host(otherHostId, "Nadia MacBook Air", true),
   host(orphanedHostId, "응답이 끊긴 원격 Mac", false),
+  // 세 번째 자격 호스트이자 가장 긴 이름. 262px 판에서 v1의 버튼 N개 형태는
+  // 이 이름을 전폭 채움으로 만들면서 **가장 긴 이름에 가장 큰 강조**를 줬다
+  // (2R H2). 폭이 이름을 따라가지 않는다는 주장은 이름 길이가 제각각인
+  // 목록에서만 증명되므로, 자격 호스트 중 하나는 반드시 길어야 한다.
+  host(longNameHostId, "성재의 매우 긴 MacBook Pro 개발 호스트 이름 02", true),
 ];
 
 function rootMessage(id, authorMemberId, body, seq) {
@@ -436,6 +464,130 @@ async function loginPage(context) {
   return page;
 }
 
+/**
+ * 진짜 pane 측정 폭에서의 호스트 피커 (MOMO-679 2R H2).
+ *
+ * 320px 판 안, px-4 와 재개 블록의 px-3 을 빼고 남는 ~262px이 공용 HostPicker의
+ * 두 번째 호출자가 실제로 사는 폭이다. 형제 게이트는 1280/600에서 같은 형태를
+ * 재지만 이만큼 좁은 판이 그 표면에는 없다.
+ *
+ * 세 가지를 잰다. 셋 다 v1의 "자격 호스트마다 채움 버튼 하나" 형태가 이 폭에서
+ * 무너진 자리다:
+ *   - 그룹 높이가 자격 호스트 수와 무관하다(`<select>` 한 줄 + 버튼 한 줄).
+ *     쌓이면 폭이 가장 큰 변별자가 되고 이름이 긴 호스트가 가장 큰 컨트롤을 갖는다.
+ *   - 칠해진 컨트롤이 정확히 하나다. N개의 동급 채움은 아무것도 강조하지 않는다.
+ *   - 확정 버튼이 전폭이 아니다(§8이 금지한 iOS 폼).
+ */
+async function assertNarrowPanePicker(page, row) {
+  const shape = await row
+    .getByTestId("work-session-resume-targets")
+    .evaluate((group) => {
+      const transparent = (value) =>
+        value === null || value === "rgba(0, 0, 0, 0)" || value === "transparent";
+      const picker = group.querySelector('[role="group"]');
+      const select = group.querySelector(
+        '[data-testid="work-session-resume-host-select"]'
+      );
+      const confirm = group.querySelector(
+        '[data-testid="work-session-resume-confirm"]'
+      );
+      const labelId = picker?.getAttribute("aria-labelledby") ?? null;
+      const label = labelId === null ? null : document.getElementById(labelId);
+      const box = (node) =>
+        node === null
+          ? null
+          : {
+              width: Math.round(node.getBoundingClientRect().width),
+              height: Math.round(node.getBoundingClientRect().height),
+              right: Math.round(node.getBoundingClientRect().right),
+            };
+      return {
+        blockWidth: Math.round(group.getBoundingClientRect().width),
+        labelFor: label?.getAttribute("for") ?? null,
+        selectId: select?.getAttribute("id") ?? null,
+        selectRects: select === null ? 0 : select.getClientRects().length,
+        options:
+          select === null
+            ? []
+            : Array.from(select.options).map((option) => option.textContent ?? ""),
+        filled:
+          picker === null
+            ? []
+            : Array.from(picker.querySelectorAll("button, select"))
+                .filter(
+                  (node) => !transparent(getComputedStyle(node).backgroundColor)
+                )
+                .map((node) => node.getAttribute("data-testid")),
+        pickerBox: box(picker),
+        selectBox: box(select),
+        confirmBox: box(confirm),
+      };
+    });
+
+  // 이 단정이 실제로 좁은 pane을 재고 있는가.
+  if (shape.blockWidth > 300) {
+    throw new Error(
+      `좁은 pane 피커: 재개 블록이 ${shape.blockWidth}px다. pane이 320px가 아니면 이 단정은 아무것도 재지 않는다`
+    );
+  }
+  if (shape.options.length < 3) {
+    throw new Error(
+      `좁은 pane 피커: 자격 호스트가 ${shape.options.length}개다. 쌓이는지 아닌지는 셋 이상에서만 보인다`
+    );
+  }
+  const longest = shape.options.reduce(
+    (max, name) => Math.max(max, name.length),
+    0
+  );
+  if (longest < 20) {
+    throw new Error(
+      `좁은 pane 피커: 가장 긴 호스트 이름이 ${longest}자다. 폭이 이름을 따라가지 않는다는 주장은 긴 이름에서만 증명된다`
+    );
+  }
+  if (shape.labelFor === null || shape.labelFor !== shape.selectId) {
+    throw new Error(
+      `좁은 pane 피커: 라벨이 고르는 컨트롤에 묶이지 않았다 (for ${shape.labelFor}, select ${shape.selectId})`
+    );
+  }
+  if (shape.selectRects !== 1) {
+    throw new Error(
+      `좁은 pane 피커: 고르는 컨트롤이 ${shape.selectRects}줄이다. 한 줄이어야 선택지 수와 높이가 무관하다`
+    );
+  }
+  // label 16 + gap 4 + h-control 32 + gap 8 + h-control-sm 28 = 88 (실측 90).
+  const HEIGHT_MAX = 100;
+  if (shape.pickerBox === null || shape.pickerBox.height > HEIGHT_MAX) {
+    throw new Error(
+      `좁은 pane 피커: 자격 호스트 ${shape.options.length}개가 폼을 ${shape.pickerBox?.height}px로 키웠다 (상한 ${HEIGHT_MAX}). 호스트마다 제 줄을 가지면 이름이 긴 호스트가 가장 큰 컨트롤을 갖는다`
+    );
+  }
+  if (
+    shape.filled.length !== 1 ||
+    shape.filled[0] !== "work-session-resume-confirm"
+  ) {
+    throw new Error(
+      `좁은 pane 피커: 칠해진 컨트롤이 ${shape.filled.length}개다 (${JSON.stringify(shape.filled)}). 결정은 하나다`
+    );
+  }
+  if (
+    shape.confirmBox === null ||
+    shape.confirmBox.width >= shape.pickerBox.width
+  ) {
+    throw new Error(
+      `좁은 pane 피커: 확정 버튼이 전폭이 됐다 (${shape.confirmBox?.width}px / 폼 ${shape.pickerBox.width}px)`
+    );
+  }
+  if (shape.confirmBox.right > shape.pickerBox.right) {
+    throw new Error(
+      `좁은 pane 피커: 확정 버튼이 폼 밖으로 나갔다 (${shape.confirmBox.right} > ${shape.pickerBox.right})`
+    );
+  }
+  console.log(
+    `narrow pane picker: 블록 ${shape.blockWidth}px, 폼 ${shape.pickerBox.width}x${shape.pickerBox.height}px, ` +
+      `선택지 ${shape.options.length}개(최장 ${longest}자), select ${shape.selectBox?.width}px, 확정 버튼 ${shape.confirmBox.width}px`
+  );
+}
+
 async function assertContinuity(context, state) {
   const page = await loginPage(context);
 
@@ -570,12 +722,49 @@ async function assertContinuity(context, state) {
   await page.getByText("마지막 실행 결과", { exact: true }).waitFor();
   await page.getByTestId("work-observer-start").waitFor();
   await page.getByTestId("work-detail-back").click();
-  await orphaned.getByTestId("my-work-session-thread").click();
+  // 위계는 형제 표면과 같은 규칙이다 (2R M9). 닫힌 재개 토글은 이 행의 결정이라
+  // 채움이고(같은 행의 `세션 상세`는 outline인 보조다), 열리면 결정이 확정
+  // 버튼으로 옮겨가므로 ghost로 물러나면서 이름도 바뀐다. 컨트롤은 공유하면서
+  // 그 컨트롤이 존재하는 이유인 규칙만 한쪽에 두고 오면, `aria-expanded=true`인데
+  // 이름은 여전히 여는 이름이 된다.
+  const resumeToggle = orphaned.getByTestId("my-work-session-thread");
+  const transparentFill = (value) =>
+    value === "rgba(0, 0, 0, 0)" || value === "transparent";
+  const closedFill = await resumeToggle.evaluate(
+    (node) => getComputedStyle(node).backgroundColor
+  );
+  if (transparentFill(closedFill)) {
+    throw new Error(
+      `닫힌 재개 토글이 채움 없이 서 있다 (${closedFill}). 고아 행에서 되돌리기 가장 어려운 act가 가장 가벼우면 안 된다`
+    );
+  }
+  await resumeToggle.click();
   const targets = orphaned.getByTestId("work-session-resume-targets");
   await targets.waitFor();
   await targets
     .getByText("미커밋 변경은 옮겨지지 않습니다.", { exact: false })
     .waitFor();
+  await page.mouse.move(0, 0);
+  await page.waitForFunction(
+    () =>
+      document.getAnimations().every((animation) => animation.playState !== "running"),
+    undefined,
+    { timeout: 5_000 }
+  );
+  if ((await resumeToggle.textContent())?.trim() !== "호스트 선택 닫기") {
+    throw new Error(
+      `열린 재개 토글의 이름이 아직 여는 이름이다 (${await resumeToggle.textContent()})`
+    );
+  }
+  const openFill = await resumeToggle.evaluate(
+    (node) => getComputedStyle(node).backgroundColor
+  );
+  if (!transparentFill(openFill)) {
+    throw new Error(
+      `열린 재개 토글이 아직 칠해져 있다 (${openFill}). 결정이 확정 버튼으로 옮겨갔으면 토글은 물러나야 한다`
+    );
+  }
+  await assertNarrowPanePicker(page, orphaned);
   const resumeResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -584,7 +773,10 @@ async function assertContinuity(context, state) {
         .toLowerCase()
         .endsWith(`/work-sessions/${orphanedSessionId}/resume`)
   );
-  await targets.locator(`[data-host-id="${onlineHostId}"]`).click();
+  await targets
+    .getByTestId("work-session-resume-host-select")
+    .selectOption(onlineHostId);
+  await targets.getByTestId("work-session-resume-confirm").click();
   await resumeResponse;
   if (state.resumeTargetId !== onlineHostId) {
     throw new Error("orphaned lineage resume did not POST the chosen host");
@@ -750,7 +942,7 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "PASS my sessions: idle card, reattach/resume copy split, transition timing, shared host wait, owner filter, and terminal states"
+    "PASS my sessions: idle card, reattach/resume copy split, transition timing, shared host wait, owner filter, terminal states, and a host picker that holds one select plus one filled button at the 262px pane measure"
   );
 }
 

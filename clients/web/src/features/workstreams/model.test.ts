@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type WorkHost, type WorkstreamRun } from "@/lib/api";
+import {
+  ApiError,
+  type RosterMember,
+  type WorkHost,
+  type WorkstreamRun,
+} from "@/lib/api";
+import { makeDirectory } from "@/features/workspace/useWorkspace";
 import {
   WORKSTREAM_FILTER_TABS,
   WORKSTREAM_FILTERS,
@@ -13,6 +19,7 @@ import {
   isWorkstreamMissing,
   parseStatusFilter,
   runClockLabel,
+  workstreamActor,
   workstreamFilterLabel,
   workstreamFilterOf,
   workstreamStatusOf,
@@ -308,5 +315,77 @@ describe("작업 흐름 상태 필터 어휘", () => {
     }
     expect(WORKSTREAM_FILTER_TABS.values).toBe(WORKSTREAM_FILTERS);
     expect(WORKSTREAM_FILTER_TABS.labelFor).toBe(workstreamFilterLabel);
+  });
+});
+
+describe("실행한 사람의 이름", () => {
+  const human = "cccccccc-cccc-7ccc-8ccc-cccccccccc01";
+  const agent = "dddddddd-dddd-7ddd-8ddd-dddddddddd01";
+  const orphanAgent = "eeeeeeee-eeee-7eee-8eee-eeeeeeeeee01";
+
+  function member(overrides: Partial<RosterMember> = {}): RosterMember {
+    return {
+      id: human,
+      workspaceId: "99999999-9999-7999-8999-999999999901",
+      kind: "human",
+      status: "active",
+      displayName: "김인턴",
+      handle: "intern",
+      channelCount: 1,
+      channelIds: [],
+      capabilities: [],
+      createdAtMs: 0,
+      updatedAtMs: 0,
+      ...overrides,
+    };
+  }
+
+  const directory = makeDirectory([
+    member(),
+    member({
+      id: agent,
+      kind: "agent",
+      displayName: "김인턴",
+      handle: "kim-intern",
+      ownerHumanId: human,
+    }),
+    member({
+      id: orphanAgent,
+      kind: "agent",
+      displayName: "헤르메스",
+      handle: "hermes",
+      ownerHumanId: "ffffffff-ffff-7fff-8fff-ffffffffff01",
+    }),
+  ]);
+
+  it("disambiguates two members who really do share a display name", () => {
+    // 이 로스터에는 김인턴이 둘 있다(사람 하나, 에이전트 하나). 한 목표 아래
+    // 김인턴 두 줄은 이력이 아니라 동전 던지기다.
+    expect(workstreamActor(directory, human).name).toBe("김인턴 @intern");
+    expect(workstreamActor(directory, agent).name).toBe("김인턴 @kim-intern");
+  });
+
+  it("carries the owner an agent actor is accountable to (skill §9)", () => {
+    const actor = workstreamActor(directory, agent);
+    expect(actor.isAgent).toBe(true);
+    expect(actor.ownerName).toBe("김인턴");
+  });
+
+  it("never attributes a human to an owner", () => {
+    const actor = workstreamActor(directory, human);
+    expect(actor.isAgent).toBe(false);
+    expect(actor.ownerName).toBeNull();
+  });
+
+  it("leaves the attribution empty rather than inventing an owner", () => {
+    // 오너가 로스터에 없으면 비운다. MemberRow가 하는 것과 같다.
+    expect(workstreamActor(directory, orphanAgent).ownerName).toBeNull();
+  });
+
+  it("names a member this client has never seen without pretending to know", () => {
+    const actor = workstreamActor(directory, "00000000-0000-7000-8000-000000000001");
+    expect(actor.name).toBe("알 수 없는 멤버");
+    expect(actor.isAgent).toBe(false);
+    expect(actor.ownerName).toBeNull();
   });
 });

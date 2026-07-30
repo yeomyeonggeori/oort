@@ -3,11 +3,16 @@ import { Link, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
+import { CHIP_CLASS } from "@/features/common/chip";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { relativeLabel } from "@/features/inbox/model";
-import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
+import {
+  useChannels,
+  useDirectory,
+  type Directory,
+} from "@/features/workspace/useWorkspace";
 import { type Workstream } from "@/lib/api";
 import {
   WORKSTREAM_FILTER_TABS,
@@ -15,6 +20,7 @@ import {
   WORKSTREAM_STATUS_LABEL,
   channelDisplayName,
   parseStatusFilter,
+  workstreamActor,
   workstreamFilterOf,
   workstreamStatusOf,
 } from "./model";
@@ -51,13 +57,18 @@ import { useWorkstreams } from "./useWorkstreams";
 // 어긋남은 다시 생길 수 없다.
 const MEASURE_CLASS = "w-full max-w-pane-lg";
 
+/**
+ * 목록이 시작한 사람을 부르는 이름. 상세와 같은 규칙을 지나므로(에이전트 병기는
+ * 상세의 실행 이력이 가진다) 한 사람이 두 화면에서 두 이름으로 불리지 않는다.
+ */
+function starterName(directory: Directory, memberId: string): string {
+  return workstreamActor(directory, memberId).name;
+}
+
 function StatusChip({ status }: { status: Workstream["status"] }) {
   return (
     <span
-      className={cn(
-        "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
-        WORKSTREAM_STATUS_CLASS[status]
-      )}
+      className={cn(CHIP_CLASS, WORKSTREAM_STATUS_CLASS[status])}
       data-testid="workstream-status"
       data-status={status}
     >
@@ -69,10 +80,13 @@ function StatusChip({ status }: { status: Workstream["status"] }) {
 function WorkstreamRow({
   workstream,
   channelName,
+  starterName,
   nowMs,
 }: {
   workstream: Workstream;
   channelName: string;
+  /** 이 목표를 시작한 사람. 접두사가 같은 두 목표를 가르는 두 번째 사실이다. */
+  starterName: string;
   nowMs: number;
 }) {
   return (
@@ -87,16 +101,27 @@ function WorkstreamRow({
         className="flex px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <span
-          className={cn(MEASURE_CLASS, "flex min-w-0 flex-col gap-1")}
+          className={cn(MEASURE_CLASS, "flex min-w-0 flex-col gap-1 break-keep")}
           data-testid="workstream-row-content"
         >
-          <span className="flex min-w-0 items-center gap-2">
-            {/* The goal is at most 200 characters (migration 055), so it fits
-                one row's worth of reading; it truncates rather than wrapping
-                because the row's job is scanning, and the detail shows it in
-                full. */}
+          {/* 칩은 목표의 첫 줄에 맞춰 선다(items-baseline). 목표가 두 줄이 되면
+              가운데 정렬은 칩을 두 줄 사이 허공에 놓는다. */}
+          <span className="flex min-w-0 items-baseline gap-2">
+            {/* 목표는 최대 200자다(마이그레이션 055). 한 줄 말줄임은 그 200자를
+                ~545px 폭에서 30자쯤으로 자르고, 행에 남는 나머지 사실은 채널
+                이름뿐이라 접두사가 같은 두 목표는 구분되지 않았다(PR 918 R1 M4).
+                두 줄까지 접으면 그 폭에서 60자 넘게 읽히고, 첫 문장이 아니라
+                문장 두 개가 서로 다르다는 것이 보인다.
+
+                `title`은 붙이지 않는다: 네이티브 툴팁은 키보드로 열 수 없고
+                포인터에만 답하는데, 전체 목표는 이 행이 이미 링크하고 있는
+                상세에서 잘리지 않고 읽힌다. 접힌 것을 펴는 길이 이미 하나
+                있으면 두 번째 길은 되도록 쓰지 않는 쪽이 낫다.
+
+                keep-all은 부모(row-content)가, break-words는 여기가 갖는다:
+                tailwind-merge는 둘을 한 `break` 그룹으로 접는다. */}
             <span
-              className="min-w-0 flex-1 truncate text-body text-ink"
+              className="line-clamp-2 min-w-0 flex-1 break-words text-body text-ink"
               data-testid="workstream-goal"
             >
               {workstream.goal}
@@ -106,6 +131,14 @@ function WorkstreamRow({
           <span className="flex min-w-0 flex-wrap items-baseline gap-1 text-meta text-ink-muted">
             <span className="min-w-0 truncate" data-testid="workstream-channel">
               {channelName}
+            </span>
+            {/* 시작한 사람. 목표 문장만으로 가르기 어려운 두 행을 실제로 가르는
+                두 번째 사실이고, 목록이 곧 작업 큐라 "누가 벌여둔 일인가"는
+                이어받으러 온 사람이 다음으로 묻는 것이다. 이미 상세가 같은
+                사실을 같은 이름 규칙으로 말한다(workstreamActor). */}
+            <span className="shrink-0">· 시작</span>
+            <span className="min-w-0 truncate" data-testid="workstream-starter">
+              {starterName}
             </span>
             <span className="shrink-0">· 실행</span>
             {/* Two counts on one line, so both are tabular: 실행 12 over 실행 3
@@ -277,6 +310,10 @@ export function WorkstreamListRoute() {
                   channels,
                   directoryQuery.directory,
                   session.member.id
+                )}
+                starterName={starterName(
+                  directoryQuery.directory,
+                  workstream.createdByMemberId
                 )}
                 nowMs={nowMs}
               />

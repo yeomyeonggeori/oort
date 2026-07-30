@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -12,7 +13,9 @@ import {
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
+import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
 import { ObserverTerminal } from "./ObserverTerminal";
 import { useSessionEvents } from "./useWorkSessions";
 import {
@@ -192,7 +195,7 @@ function EventRow({ row, streamOpen }: { row: WorkEventRow; streamOpen: boolean 
           data-testid="work-row-chip"
           data-state={row.state}
           className={cn(
-            "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium",
+            CHIP_CLASS,
             ROW_STATE_CLASS[row.state]
           )}
         >
@@ -500,6 +503,11 @@ export function WorkSessionDetail({
     [liveEvents, session.id]
   );
   const query = useSessionEvents(workspaceId, session, mine);
+  // 이 실행이 어느 목표에 속하는지 (MOMO-679). 반대 방향 — 목표에서 실행으로 —
+  // 은 작업 흐름 상세의 이력 행이 이미 걸어주지만, 돌아오는 길이 없어서 이 표면은
+  // 사이드바로만 도달 가능했다(PR 918 R1 M5).
+  const goalQuery = useSessionWorkstream(workspaceId, session.id);
+  const goal = goalQuery.data ?? null;
   const truncated = query.truncated;
   const folded = useMemo(
     () => foldSessionEvents(query.events, session, truncated),
@@ -595,7 +603,7 @@ export function WorkSessionDetail({
               {elapsed}
             </span>
             <span
-              className={cn("shrink-0 rounded-sm px-2 py-px text-timestamp font-medium", SESSION_STATUS_CLASS[status.key])}
+              className={cn(CHIP_CLASS, SESSION_STATUS_CLASS[status.key])}
               data-testid="work-detail-status"
               data-status={status.key}
             >
@@ -618,6 +626,25 @@ export function WorkSessionDetail({
             </p>
           )}
         </div>
+
+        {/* 이 세션이 무엇을 위한 실행인지, 그리고 그 목표로 돌아가는 길.
+            원장에서 목표로 가는 링크가 하나도 없으면 작업 흐름 표면은
+            사이드바에서 출발할 때만 도달 가능하고, 그러면 "이 실행은 누가
+            이어받을 수 있나"를 여기서 물은 사람이 갈 데가 없다. 목표에 묶이지
+            않은 세션은 이 줄을 갖지 않는다 — 명시적 생성은 아직 없으므로
+            (ADR-0143 P2) 그것이 흔한 상태다. */}
+        {goal !== null && (
+          <p className="border-b border-line text-meta text-ink-muted">
+            <Link
+              to={`/workstreams/${goal.id}`}
+              className="block truncate px-4 py-1 hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+              data-testid="work-detail-workstream"
+              data-workstream-id={goal.id}
+            >
+              목표 · <span className="text-ink">{goal.goal}</span>
+            </Link>
+          </p>
+        )}
 
         {/* The ledger facts, behind the platform's own disclosure control. They
             are reference material you check once, and as always-open chrome

@@ -1,4 +1,5 @@
 import { cn } from "@/design/lib/cn";
+import { CHIP_CLASS } from "@/features/common/chip";
 import {
   APPROVAL_STATUS_LABEL,
   TURN_STATUS_LABEL,
@@ -40,8 +41,6 @@ const APPROVAL_CHIP_CLASS: Readonly<Record<ApprovalStatus, string>> = {
   expired: "bg-surface-hover text-ink-muted",
   cancelled: "bg-surface-hover text-ink-muted",
 };
-
-const CHIP_CLASS = "shrink-0 rounded-sm px-2 py-px text-timestamp font-medium";
 
 /** Agent turn lifecycle chip: queued / thinking / streaming / done / error … */
 export function TurnChip({ status }: { status: AgentTurnStatus }) {
