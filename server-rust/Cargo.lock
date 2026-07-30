@@ -834,6 +834,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-messaging"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "momo-db",
+ "momo-outbox",
+ "momo-wire",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "momo-outbox"
 version = "0.0.0"
 dependencies = [
