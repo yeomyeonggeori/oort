@@ -17,6 +17,7 @@
 - identity(member/agent·workspace·roster·profile/card/credential) · channels(channel·DM·read-state·mention) · message(seq row-lock + `emit_outbox`) · huddle · search/memory.
 - **provenance emit: 에이전트 메시지 서명**(ADR-0146 표면 1) — `record_provenance` 사용.
 - 수용: D2 red 7개 중 #1~#6 green(#7은 provider=B2) + 에이전트 메시지 서명 검증 + 웹 표면 design-review Blocker 0.
+- **랜딩됨(PR #928, track/engine `2cc97bb4`)** — 척추만(identity·channel·message+seq+emit_outbox). conformance #1/#3/#4/#5/#6 green(#2·#7·provenance·HTTP·huddle/search/DM/read-state/mention은 후속). 교훈: message insert가 011 push_candidate 트리거 발화 → outbox 계수는 kind 필터.
 
 ## B2 — T3 work runtime (`momo-t3` work-runtime·provisioner·billing 모듈)
 - work_session·agent_run·work_control·approval·hosts·terminal·tier·pool + provisioner(`momo-provider` 계약) + billing 원장. ADR-0140/0139/0142/0144 이식(로직·설계는 ADR에 있음, Swift→Rust 번역).

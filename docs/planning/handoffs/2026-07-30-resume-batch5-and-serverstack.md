@@ -26,7 +26,9 @@
 - **B0 랜딩 완료**(track/engine `d1e51ddf`, PR #927 머지). `server-rust/` Cargo 워크스페이스 + 공유 5 crate. **오케스트레이터 docker 게이트 통과**(conformance `momo-db/tests/conformance_pg.rs`, #[ignore]): 마이그레이션 러너가 psql로 001~059 전부 fresh pgvector/pg18에 적용(FORCE-RLS 73), `with_tenant_tx` GUC 바인딩 확인. 무회귀 fmt/clippy/test green.
   - **게이트가 잡은 결함(수정됨)**: 러너 초안이 `sqlx::raw_sql`(서버 직송)이라 시드 마이그레이션(002/006/012)의 psql `\if :MOMO_AGENT_SEED_ENABLED` 조건부에서 42601 실패 → **psql shell-out**(migrate.sh 방식, `-v MOMO_AGENT_SEED_ENABLED`)으로 전환해 green. **B1+ 러너는 psql 경유가 정본**(sqlx::raw_sql 금지).
   - **B1 후속 노트**: `momo-outbox`의 `OutboxKind` enum이 `push_candidate`(011) 누락 — notifier/push 이식 시 추가.
-  - **다음 = B1(메신저 코어)**: identity·channels·message(seq·emit_outbox)·huddle·search + 에이전트 메시지 서명(ADR-0146). D2 red #1~#6 green 목표. 패킷 작성 → 워커 스폰.
+  - **B1(메신저 코어) 랜딩 완료**(track/engine `2cc97bb4`, PR #928). `momo-messaging` crate — write-path 척추(identity·channel·message: seq row-lock CTE·emit_outbox 같은 tx·멱등, Swift MessageRoutes 파리티). **오케스트레이터 conformance 게이트 5/5 통과**(fresh pgvector/pg18+bootstrap_roles+momo_app): D2 red #1 SoT·#3 원자성·#4 gapless seq(동시 12)·#5 에이전트=member·#6 RLS cross-tenant. 무회귀 green.
+    - **게이트가 잡은 것(테스트 오라클 수정)**: message insert가 011 `push_candidate_enqueue_trg`를 발화(정상·Swift 동일) → 채널당 outbox = broadcast(앱)+push_candidate(트리거). 테스트가 kind 미필터로 이중 계수 → `kind='broadcast'` 필터로 수정(코드는 정확). **relay=broadcast 소비, NotifierWorker=push_candidate 소비** — B1.2/relay/notifier 이식 시 유의.
+    - **다음 후보**: B1.2(read-state·mention·DM·huddle·search 척추 후속) 또는 B2(T3) 또는 momo-server 조립(HTTP route). provenance는 ADR-0146 Accept 후. **성재 방향 지시 대기.**
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
 **성재 결정 대기 지점**: ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격 — B1 전까지. (Phase 0 전체 승인은 완료: "B0 착수해줘".)
@@ -35,7 +37,12 @@
 
 정본(판단 근거): `docs/planning/2026-07-30-server-stack-reassessment.md`(§0~§7).
 
-## 2. NCP T3 smoke — 서버 스택과 독립, 디스크 결정만 남음
+## 2. NCP T3 smoke — **Swift 보류, Rust 트리거 후 실행** (성재 2026-07-30)
+
+> **런북 정본: `docs/planning/2026-07-30-ncp-rust-smoke-prep.md`.** 현재 Swift 이미지로는 안 함. Rust 서버(B2~ 세션·과금·workd)가 서면 그 런북대로 진행. 트리거·자산·절차 거기에.
+> **성재 몫(비용·보안)**: NCP 서버 놀며 과금 중 + API 키 노출 → **서버 정지 + 키 재발급 권고**(정지/재발급은 성재 트리거). 자산·IP는 보존.
+
+(아래는 자산 상세 — 런북과 중복, 참고용)
 
 - 서버 `momo-t3-smoke`(인스턴스 143929369) **RUN**, 공인 IP `101.79.11.189`, **SSH 접속 확인됨**(pem 직접 로그인 불가 — `getRootPassword`로 비번 복호화 후 `sshpass`, 비번은 `scratchpad/.ncp-root-pw` 0600).
 - Ubuntu 22.04.3 · 2 vCPU · RAM 7GB · **디스크 가용 4.4GB** · docker 미설치.
@@ -70,4 +77,5 @@
 - **푸시된 커밋 amend/force-push 금지**(배치4 N 위반) — 새 커밋으로. 배치5부터 공통 규율.
 - "아무 non-2xx나 통과" 단정 금지(404와 거부 구분 못 함).
 - 워커 자기신고 이탈이 정착 — 대부분 타당(근거와 함께).
+- **재사용 트리거가 outbox를 늘린다**: message insert가 011 push_candidate·033 webhook 트리거를 발화해 앱 broadcast 외 추가 outbox 행 생성(정상). conformance의 outbox 계수는 `kind` 필터 필수(B1 게이트 실측). relay=broadcast, notifier=push_candidate 분리 소비.
 - **마이그레이션 러너는 psql 경유**(Rust 재작성) — 시드 마이그레이션이 psql `\if` 조건부라 `sqlx::raw_sql`(서버 직송) 불가. migrate.sh와 동일 플래그로 shell-out. B0 게이트가 실측으로 잡음.
