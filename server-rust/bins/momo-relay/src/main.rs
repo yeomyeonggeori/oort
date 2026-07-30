@@ -7,9 +7,12 @@ use momo_relay::{Relay, RelayConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `RUST_LOG` first, then the prod compose's `LOG_LEVEL`, then `info`
+    // (`momo_relay::config::log_filter`).
+    let filter = momo_relay::config::log_filter();
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
+            tracing_subscriber::EnvFilter::try_new(&filter)
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();

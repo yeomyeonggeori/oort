@@ -1,7 +1,11 @@
 //! Relay configuration, sourced only from the environment.
 //!
-//! Keys match the Swift relay (`relay/OutboxRelay/.../Config.swift`) so one
-//! compose env drives either implementation:
+//! Keys match the Swift relay (`relay/OutboxRelay/.../Config.swift`) **and the
+//! prod compose `relay` service verbatim** (`infra/prod/docker-compose.prod.yml:200-216`),
+//! so one env block drives either implementation. Keys that compose sets and
+//! this process does not consume (`MOMO_ENV`, `OUTBOUND_WEBHOOK_MASTER_KEY`,
+//! `MOMO_METRICS_*`) are ignored and never block a boot; a missing *required*
+//! key is always fatal:
 //!   * `RELAY_DATABASE_URL` (preferred) or `DATABASE_URL` — the relay connects as
 //!     the **BYPASSRLS `momo_relay` role** so it drains every tenant (L4 §2.2).
 //!   * `CENT_API_URL` (default `http://localhost:8000/api`), `CENT_API_KEY`
@@ -74,6 +78,21 @@ impl RelayConfig {
     }
 }
 
+/// The tracing filter directive: `RUST_LOG` wins, else the prod compose's
+/// `LOG_LEVEL` (`docker-compose.prod.yml:189` sets it for the stack), else
+/// `info`. Same rule as `momo-server`, kept per-binary because each process owns
+/// its own environment contract.
+pub fn log_filter() -> String {
+    choose_log_filter(env("RUST_LOG").as_deref(), env("LOG_LEVEL").as_deref())
+}
+
+fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String {
+    rust_log
+        .or(log_level)
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| "info".to_string())
+}
+
 impl RelayConfig {
     /// Config for tests/embedding: everything explicit, nothing from env.
     pub fn for_target(
@@ -90,5 +109,17 @@ impl RelayConfig {
             claim_batch_size: 64,
             max_attempts: 8,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_filter_prefers_rust_log_then_the_compose_log_level() {
+        assert_eq!(choose_log_filter(None, None), "info");
+        assert_eq!(choose_log_filter(None, Some("debug")), "debug");
+        assert_eq!(choose_log_filter(Some("warn"), Some("debug")), "warn");
     }
 }

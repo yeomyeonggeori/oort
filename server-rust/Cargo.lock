@@ -1096,6 +1096,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-migrate"
+version = "0.0.0"
+dependencies = [
+ "momo-db",
+]
+
+[[package]]
 name = "momo-outbox"
 version = "0.0.0"
 dependencies = [

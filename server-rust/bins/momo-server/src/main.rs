@@ -11,9 +11,13 @@ use momo_server::{build_app, AppState};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `RUST_LOG` first, then the prod compose's `LOG_LEVEL`, then `info`
+    // (`config::log_filter`). An unparsable directive degrades to `info` rather
+    // than killing the process over a logging knob.
+    let filter = momo_server::config::log_filter();
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
+            tracing_subscriber::EnvFilter::try_new(&filter)
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();

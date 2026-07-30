@@ -6,6 +6,16 @@
 //! LiveKit, …) is intentionally NOT ported here — each lands with the batch that
 //! needs it.
 //!
+//! **The deployed env contract is `infra/prod/docker-compose.prod.yml`'s `api`
+//! service (:148-189), not this file** (B1.7): every key read here is spelled the
+//! way that compose spells it — `MOMO_ENV`, `HOST`, `PORT`, `DATABASE_URL`,
+//! `JWT_HMAC`, `MOMO_CENTRIFUGO_WS_URL`, `LOG_LEVEL` — so one env block boots
+//! either implementation. Keys that compose sets and this server does not yet
+//! consume (`CENT_*`, `HERMES_*`, `AGENT_*`, `MOMO_S3_*`, the webhook/provider
+//! master keys, `MOMO_METRICS_*`) are **ignored, never fatal**: an unread
+//! variable must not block a boot. The reverse — a *required* key missing — is
+//! always fatal, never a baked-in default.
+//!
 //! There is no `.env` reader anywhere in this crate: injecting the environment
 //! is the operator's job (compose/systemd), so no secret is ever read from a file
 //! by this process, and no secret value is ever logged.
@@ -20,7 +30,7 @@ pub enum ConfigError {
     MissingDatabase,
     #[error("DATABASE_URL is not a postgres connection string: {0}")]
     InvalidDatabaseUrl(&'static str),
-    #[error("set MOMO_JWT_SECRET (or JWT_HMAC) to the app JWT signing secret")]
+    #[error("set JWT_HMAC (or MOMO_JWT_SECRET) to the app JWT signing secret")]
     MissingJwtSecret,
     #[error("{0} must be a number")]
     NotANumber(&'static str),
@@ -64,8 +74,14 @@ impl Config {
     /// secret rather than falling back to a baked-in development credential.
     pub fn from_env() -> Result<Config, ConfigError> {
         let db = pool_config_from_env()?;
-        let jwt_secret = env("MOMO_JWT_SECRET")
-            .or_else(|| env("JWT_HMAC"))
+        // `JWT_HMAC` is the canonical name: it is what the prod compose api
+        // service injects (`docker-compose.prod.yml:153`) and what every
+        // deploy/verifier script already exports. `MOMO_JWT_SECRET` stays as a
+        // compatibility fallback for the B1.5 local harnesses; if both are set
+        // the deployed name wins, so a stale developer export can never silently
+        // sign tokens with a different key than the operator configured.
+        let jwt_secret = env("JWT_HMAC")
+            .or_else(|| env("MOMO_JWT_SECRET"))
             .ok_or(ConfigError::MissingJwtSecret)?;
 
         Ok(Config {
@@ -230,9 +246,35 @@ pub fn realtime_ws_url_from_env() -> Result<String, ConfigError> {
     Ok(format!("ws://127.0.0.1:{port}/connection/websocket"))
 }
 
+/// The tracing filter directive for this process.
+///
+/// `RUST_LOG` wins (the Rust ecosystem convention, and the only way to express a
+/// per-target filter); otherwise the prod compose's `LOG_LEVEL`
+/// (`docker-compose.prod.yml:189`) is honoured so an operator turning the stack
+/// to `debug` actually changes what the Rust binaries emit — before B1.7 that
+/// variable was silently inert. Neither set → `info`.
+pub fn log_filter() -> String {
+    choose_log_filter(env("RUST_LOG").as_deref(), env("LOG_LEVEL").as_deref())
+}
+
+fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String {
+    rust_log
+        .or(log_level)
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| "info".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_filter_prefers_rust_log_then_the_compose_log_level() {
+        assert_eq!(choose_log_filter(None, None), "info");
+        assert_eq!(choose_log_filter(None, Some("debug")), "debug");
+        assert_eq!(choose_log_filter(Some("warn"), Some("debug")), "warn");
+        assert_eq!(choose_log_filter(None, Some(" info ")), "info");
+    }
 
     #[test]
     fn parses_a_full_database_url() {
