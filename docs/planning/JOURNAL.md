@@ -1396,6 +1396,10 @@
 - 한 일: **B1(메신저 코어 write-path 척추) 착수** — 성재 "권고대로"(ⓑ: provenance 제외, 메신저 코어 먼저) + NCP 준비 지시. B1 패킷 작성(identity·channel·message+seq+emit_outbox+DB conformance #1/#3/#4/#5/#6, HTTP·huddle/search·provenance 제외), track/engine에 main 머지(드리프트 제어), 워크트리 `B1-messaging`, 워커 Opus 5 스폰. **NCP smoke 런북**(`ncp-rust-smoke-prep.md`) 작성 — Swift 보류·Rust 트리거(B2~) 후 실행, 서버 파킹/키 재발급 성재 권고.
 - 열린 것: **B1 워커 결과 대기** → PR·오케스트레이터 conformance 게이트(pgvector/pg18+bootstrap_roles+momo_app cross-tenant). ADR-0146 세부 확정(provenance 얹기 전). **성재 몫: NCP 서버 정지+키 재발급.** #925·#926·#893 병존.
 
+## 2026-07-30 (오후 5) · Fable · 오케스트레이션
+- 한 일: **B1(메신저 코어 write-path 척추) 랜딩** — PR #928 → track/engine(`2cc97bb4`). `momo-messaging`(identity·channel·message: seq CTE·emit_outbox 같은 tx·멱등, Swift 파리티). 오케스트레이터 검수: message.rs 코드 리뷰(membership 테이블 적응·cent_channel 대문자 파리티 Swift 대조) + **docker conformance 게이트 직접 재검증 5/5**(D2 #1/#3/#4/#5/#6, pgvector/pg18+bootstrap_roles+momo_app). 게이트가 테스트 오라클 결함 실측(011 push_candidate 트리거가 outbox 늘려 계수 이중 → kind='broadcast' 필터로 수정, 코드는 정확) → 재실행 green.
+- 열린 것: **다음 배치 방향 성재 지시 대기**(B1.2 척추 후속 / B2 T3 / momo-server HTTP 조립). provenance는 ADR-0146 Accept 후. NCP smoke Rust 트리거 대기·서버 정지+키 재발급 성재 몫. #925·#926·#893 병존.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
