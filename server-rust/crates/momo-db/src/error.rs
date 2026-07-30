@@ -17,4 +17,20 @@ pub enum DbError {
 
     #[error("malformed migration filename: {0}")]
     MigrationName(String),
+
+    #[error(
+        "psql client not found on PATH or Homebrew libpq locations \
+         (install the PostgreSQL 18 client / libpq)"
+    )]
+    PsqlNotFound,
+
+    #[error("failed to spawn psql at {psql}: {source}")]
+    PsqlSpawn {
+        psql: String,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("migration {version} failed (psql exit code {code:?})")]
+    MigrationFailed { version: String, code: Option<i32> },
 }

@@ -15,10 +15,14 @@
 //! Full cross-tenant *data* red (as `momo_app` with seeded rows) is a B1
 //! conformance concern (needs multi-table seed); B0 proves apply + GUC wiring.
 
-use momo_db::migrate::{default_migrations_dir, discover_migrations, run_migrations};
+use momo_db::migrate::{default_migrations_dir, discover_migrations, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use uuid::Uuid;
+
+fn database_url() -> String {
+    std::env::var("DATABASE_URL").expect("set DATABASE_URL to a fresh pgvector/pg18 superuser DB")
+}
 
 async fn superuser_pool() -> PgPool {
     let url = std::env::var("DATABASE_URL")
@@ -40,19 +44,18 @@ async fn migration_runner_applies_all_59_and_matches_schema() {
     let migs = discover_migrations(&default_migrations_dir()).expect("discover");
     assert_eq!(migs.len(), 59, "expected 59 migrations, got {}", migs.len());
 
-    // THE runner — applies 001..059 in place (incl. pgvector 028). A psql
-    // backslash/COPY-FROM-STDIN file, or an ordering/role dependency, would
-    // surface here as a real finding.
-    run_migrations(&mut conn, &default_migrations_dir())
-        .await
+    // THE runner — applies 001..059 in place via psql (incl. pgvector 028 and
+    // the seed migrations' `\if` meta-commands). An ordering/role dependency or
+    // a psql-rejected file would surface here as a real finding. Product default
+    // seed mode (no legacy agent fixtures).
+    run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
         .expect("all 59 migrations apply on a fresh pgvector/pg18 DB");
 
     // outbox table + full enum (emit.rs OutboxKind must be a subset of these)
-    let outbox_exists: bool =
-        sqlx::query_scalar("SELECT to_regclass('public.outbox') IS NOT NULL")
-            .fetch_one(&mut *conn)
-            .await
-            .unwrap();
+    let outbox_exists: bool = sqlx::query_scalar("SELECT to_regclass('public.outbox') IS NOT NULL")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
     assert!(outbox_exists, "outbox table must exist");
 
     let labels: Vec<String> =
@@ -60,7 +63,12 @@ async fn migration_runner_applies_all_59_and_matches_schema() {
             .fetch_all(&mut *conn)
             .await
             .unwrap();
-    for want in ["broadcast", "agent_job", "push_candidate", "webhook_delivery"] {
+    for want in [
+        "broadcast",
+        "agent_job",
+        "push_candidate",
+        "webhook_delivery",
+    ] {
         assert!(
             labels.iter().any(|l| l == want),
             "outbox_kind missing '{want}'; got {labels:?}"
@@ -74,7 +82,10 @@ async fn migration_runner_applies_all_59_and_matches_schema() {
     .fetch_one(&mut *conn)
     .await
     .unwrap();
-    assert!(seq_uniq, "message_seq_uniq UNIQUE(channel_id, seq) must exist");
+    assert!(
+        seq_uniq,
+        "message_seq_uniq UNIQUE(channel_id, seq) must exist"
+    );
     let channel_seq: bool =
         sqlx::query_scalar("SELECT to_regclass('public.channel_seq') IS NOT NULL")
             .fetch_one(&mut *conn)
@@ -94,7 +105,9 @@ async fn migration_runner_applies_all_59_and_matches_schema() {
         "expected many FORCE-RLS tables (D2 #6), got {forced}"
     );
 
-    println!("conformance: 59 migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}");
+    println!(
+        "conformance: 59 migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}"
+    );
 }
 
 #[tokio::test]
@@ -105,11 +118,10 @@ async fn with_tenant_tx_sets_the_rls_guc() {
 
     let read: String = with_tenant_tx(&pool, ws, move |c| {
         Box::pin(async move {
-            let v: String =
-                sqlx::query_scalar("SELECT current_setting('app.workspace_id', true)")
-                    .fetch_one(&mut *c)
-                    .await
-                    .map_err(DbError::from)?;
+            let v: String = sqlx::query_scalar("SELECT current_setting('app.workspace_id', true)")
+                .fetch_one(&mut *c)
+                .await
+                .map_err(DbError::from)?;
             Ok(v)
         })
     })
