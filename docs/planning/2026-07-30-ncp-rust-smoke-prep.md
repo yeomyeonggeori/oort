@@ -47,3 +47,9 @@
 - 곡선이 밝힌 운영 요건(런북 §3에 추가할 것): `MOMO_T3_ENABLED=1`·`PLATFORM_ADMIN_EMAILS`(topup 권한)·`MOMO_PUBLIC_BASE_URL`(**https 필수** — ready_t3 가드)·enrollment 응답은 `{"enrollment":{...}}` 중첩.
 - 스택은 가동 상태로 유지(성재 "냅둬"). 파일: `/opt/momo/infra/rust/`(compose·t3.override·smoke.secrets.env 0600), owner pw `/root/.smoke-owner-pw`.
 - **판단 재료 확보: `MOMO_T3_ENABLED` — BYOC 곡선 전체가 실서버에서 성립.**
+## 8. 비용 효율화 (2026-07-31 성재 승인 — "효율적으로 써도 좋다")
+
+- **정책: 테스트할 때만 켠다.** RUN 상태면 유휴여도 시간당 ~100원(월 ~7.2만원 — 크레딧 20만원을 3개월 미만에 소진). 정지 시 컴퓨트 과금 중단(스토리지만 소액), 데이터·IP·docker 볼륨 전부 보존.
+- **도구**: `scratchpad/ncp-power.py stop|start|status`(서명 v2, 자격 ~/.ncp/credentials.env). 재개 절차 = `start` → 1~2분 대기 → SSH → `cd /opt/momo/infra/rust && docker compose --env-file smoke.secrets.env -f docker-compose.rust.yml -f t3.override.yml up -d`.
+- **2026-07-31 실행**: compose stop(정상 종료·볼륨 보존) → `stopServerInstances` 성공. **현재 서버 정지 상태.**
+- 부하 테스트 예산: Rust 스택 실측 RAM 375Mi — s2-g3(2vCPU/8G)로 충분. 부하 시에도 "켜서 돌리고 끄기"면 시간 단위 과금이라 크레딧 내 수십 회 세션 가능.
