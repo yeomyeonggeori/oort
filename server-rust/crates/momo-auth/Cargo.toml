@@ -16,7 +16,9 @@ sqlx.workspace = true
 serde.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
+# B2.2: `workhost::normalize_public_key_b64` validates a registration key the way
+# Swift does (32 raw bytes that decompress to a usable Ed25519 point), so these
+# two moved from dev-dependencies to dependencies. No new crate enters the tree:
+# `momo-wire` already links both.
 ed25519-dalek.workspace = true
 base64.workspace = true

@@ -49,6 +49,89 @@ pub struct Config {
     /// The ONLY authority for the realtime WebSocket address (ADR-0110): clients
     /// must never derive it from the API origin.
     pub realtime_ws_url: String,
+    /// T3 (momo Cloud) settings — **off unless the operator turns them on**
+    /// (B2.2).
+    pub t3: T3Settings,
+}
+
+/// Process-level T3 configuration (B2.2).
+///
+/// Port of Swift `CloudProviderSettings.load` + `requireReady`
+/// (`services/CloudProviderKit/.../CloudProviderSettings.swift:49-113`) reduced
+/// to what the REST surface reads. Two things are deliberately **absent**:
+///
+/// * **provider endpoints/credentials.** They are loaded by
+///   `momo_t3::provider::registry` into the process only (ADR-0142 D4,
+///   invariant #7) and no route ever sees them. This struct carries the
+///   *default provider id*, which is a registry key, not a credential.
+/// * **any `.env` reading.** As with the rest of this file, injecting the
+///   environment is the operator's job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct T3Settings {
+    /// `MOMO_T3_ENABLED == "1"`. Swift's default is OFF and so is this one:
+    /// "momo Cloud(T3)는 기본 비활성입니다" (`CloudProvisionerRoutes.disabledError`).
+    pub enabled: bool,
+    /// `MOMO_T3_PROVIDER`, a registry id. Default `byoc` — the one adapter that
+    /// needs no operator credential at all.
+    pub default_provider_id: String,
+    /// `MOMO_PUBLIC_BASE_URL`. Handed to a workd as the address it registers
+    /// against, so it must be an absolute https URL or T3 stays shut.
+    pub public_base_url: Option<String>,
+    /// `MOMO_T3_RATE_MICRO_USD_PER_SECOND` (default 25, floor 1).
+    pub unit_rate_micro_usd_second: i64,
+    /// `PLATFORM_ADMIN_EMAILS`, lowercased. The listed-instance-operator path of
+    /// `CloudCreditRoutes.requireCreditWriter`.
+    pub platform_admin_emails: Vec<String>,
+}
+
+impl Default for T3Settings {
+    fn default() -> Self {
+        T3Settings {
+            enabled: false,
+            default_provider_id: "byoc".to_string(),
+            public_base_url: None,
+            unit_rate_micro_usd_second: 25,
+            platform_admin_emails: Vec::new(),
+        }
+    }
+}
+
+impl T3Settings {
+    pub fn from_env() -> T3Settings {
+        T3Settings {
+            enabled: env("MOMO_T3_ENABLED").as_deref() == Some("1"),
+            default_provider_id: env("MOMO_T3_PROVIDER")
+                .map(|value| value.trim().to_lowercase())
+                .unwrap_or_else(|| "byoc".to_string()),
+            public_base_url: env("MOMO_PUBLIC_BASE_URL").map(|value| value.trim().to_string()),
+            unit_rate_micro_usd_second: env("MOMO_T3_RATE_MICRO_USD_PER_SECOND")
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(25)
+                .max(1),
+            platform_admin_emails: env("PLATFORM_ADMIN_EMAILS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|value| value.trim().to_lowercase())
+                .filter(|value| !value.is_empty())
+                .collect(),
+        }
+    }
+
+    /// `requireReady`'s public-URL half: absolute **https** with a host, trailing
+    /// slashes trimmed. Returns `None` when T3 must stay shut.
+    ///
+    /// https is not decoration: this URL is where a workd will send a bearer
+    /// bootstrap token, so an http endpoint would put a one-shot credential on
+    /// the wire in clear text.
+    pub fn ready_public_base_url(&self) -> Option<String> {
+        let raw = self.public_base_url.as_deref()?.trim();
+        let rest = raw.strip_prefix("https://")?;
+        let host = rest.split('/').next().unwrap_or("");
+        if host.is_empty() {
+            return None;
+        }
+        Some(raw.trim_end_matches('/').to_string())
+    }
 }
 
 fn env(key: &str) -> Option<String> {
@@ -91,6 +174,7 @@ impl Config {
             jwt_secret,
             environment: env_or("MOMO_ENV", "local"),
             realtime_ws_url: realtime_ws_url_from_env()?,
+            t3: T3Settings::from_env(),
         })
     }
 }
@@ -309,6 +393,40 @@ mod tests {
         let parts = parse_database_url("postgres://u:p@[::1]:6543/momo").expect("parse");
         assert_eq!(parts.host, "::1");
         assert_eq!(parts.port, 6543);
+    }
+
+    #[test]
+    fn t3_is_off_and_byoc_by_default() {
+        let settings = T3Settings::default();
+        assert!(
+            !settings.enabled,
+            "momo Cloud must be opt-in (Swift parity)"
+        );
+        assert_eq!(settings.default_provider_id, "byoc");
+        assert_eq!(settings.unit_rate_micro_usd_second, 25);
+        assert!(settings.platform_admin_emails.is_empty());
+        assert_eq!(settings.ready_public_base_url(), None);
+    }
+
+    #[test]
+    fn the_public_base_url_must_be_absolute_https() {
+        let with = |raw: &str| T3Settings {
+            public_base_url: Some(raw.to_string()),
+            ..T3Settings::default()
+        };
+        assert_eq!(
+            with("https://momo.example.com/").ready_public_base_url(),
+            Some("https://momo.example.com".to_string()),
+            "trailing slashes are trimmed so the register URL joins cleanly"
+        );
+        // A bootstrap token is a bearer credential: plaintext transport is a
+        // configuration error, not a warning.
+        assert_eq!(
+            with("http://momo.example.com").ready_public_base_url(),
+            None
+        );
+        assert_eq!(with("https://").ready_public_base_url(), None);
+        assert_eq!(with("momo.example.com").ready_public_base_url(), None);
     }
 
     #[test]

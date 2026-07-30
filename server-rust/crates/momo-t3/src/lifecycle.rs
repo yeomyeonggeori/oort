@@ -381,6 +381,43 @@ pub async fn create_work_session_in_tx(
     decode_work_session(&row)
 }
 
+/// Open a work session under a caller-chosen id (B2.2).
+///
+/// Swift allocates the session id before the row exists (`SELECT uuidv7()`,
+/// `WorkSessionRoutes.swift:217-221`) because the *card message* has to carry it:
+/// the system message's `client_msg_id` and its `props.session_id` are the
+/// session id, and the session's `root_message_id` is that message. One of the
+/// two rows must therefore know the other's id first, and Swift chose the
+/// session's. [`create_work_session_in_tx`] (DB-defaulted id) stays for callers
+/// with no such ordering constraint.
+pub async fn create_work_session_with_id_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    new: NewWorkSession,
+) -> Result<WorkSession, T3Error> {
+    let sql = format!(
+        "INSERT INTO work_session \
+           (id, workspace_id, channel_id, member_id, host_id, root_message_id, tool, label, \
+            started_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \
+                 COALESCE((SELECT created_at FROM message WHERE id = $6), clock_timestamp())) \
+         RETURNING {WORK_SESSION_COLUMNS}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(session_id)
+        .bind(workspace_id)
+        .bind(new.channel_id)
+        .bind(new.member_id)
+        .bind(new.host_id)
+        .bind(new.root_message_id)
+        .bind(&new.tool)
+        .bind(&new.label)
+        .fetch_one(&mut *conn)
+        .await?;
+    decode_work_session(&row)
+}
+
 /// Read one session inside the current transaction.
 pub async fn load_work_session_in_tx(
     conn: &mut PgConnection,
@@ -397,6 +434,388 @@ pub async fn load_work_session_in_tx(
         .fetch_optional(&mut *conn)
         .await?;
     row.as_ref().map(decode_work_session).transpose()
+}
+
+// ---------------------------------------------------------------------------
+// the REST projection (B2.2)
+// ---------------------------------------------------------------------------
+
+/// A session in the shape the wire DTO needs (`WorkSessionDTO`,
+/// `WorkSessionRoutes.swift:57-75`), added in B2.2.
+///
+/// Separate from [`WorkSession`] on purpose: [`WorkSession`] is the *domain*
+/// row the lifecycle reasons about, this is a read projection that also carries
+/// the two computed columns the DTO promises (`observerGrantCount`,
+/// `remoteAttachAvailable`) and epoch-millisecond timestamps computed in SQL, so
+/// the route re-derives nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkSessionDetail {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub channel_id: Uuid,
+    pub member_id: Uuid,
+    pub host_id: Uuid,
+    pub root_message_id: Uuid,
+    pub tool: String,
+    pub label: String,
+    pub status: String,
+    pub observation: String,
+    pub observer_grant_count: i64,
+    pub remote_attach_available: bool,
+    pub started_at_ms: i64,
+    pub ended_at_ms: Option<i64>,
+    pub exit_code: Option<i32>,
+    pub end_reason: Option<String>,
+    pub resumed_from_session_id: Option<Uuid>,
+}
+
+/// The DTO projection without the observer-grant subquery — used by every
+/// single-row read and every `RETURNING`, exactly as Swift does
+/// (`0::bigint AS observer_grant_count`, :268/:493/:555).
+const DETAIL_COLUMNS: &str = "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
+     ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
+     0::bigint AS observer_grant_count, \
+     (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL) AS remote_attach_available, \
+     floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
+     CASE WHEN ws.ended_at IS NULL THEN NULL \
+          ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
+     ws.exit_code, ws.end_reason, ws.resumed_from_session_id";
+
+/// Same projection for a bare `RETURNING` (no `ws` alias available).
+const DETAIL_RETURNING: &str = "id, workspace_id, channel_id, member_id, host_id, \
+     root_message_id, tool, label, status, observation, \
+     0::bigint AS observer_grant_count, \
+     (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL) AS remote_attach_available, \
+     floor(extract(epoch from started_at) * 1000)::bigint AS started_at_ms, \
+     CASE WHEN ended_at IS NULL THEN NULL \
+          ELSE floor(extract(epoch from ended_at) * 1000)::bigint END AS ended_at_ms, \
+     exit_code, end_reason, resumed_from_session_id";
+
+fn decode_detail(row: &sqlx::postgres::PgRow) -> Result<WorkSessionDetail, T3Error> {
+    Ok(WorkSessionDetail {
+        id: row.try_get("id")?,
+        workspace_id: row.try_get("workspace_id")?,
+        channel_id: row.try_get("channel_id")?,
+        member_id: row.try_get("member_id")?,
+        host_id: row.try_get("host_id")?,
+        root_message_id: row.try_get("root_message_id")?,
+        tool: row.try_get("tool")?,
+        label: row.try_get("label")?,
+        status: row.try_get("status")?,
+        observation: row.try_get("observation")?,
+        observer_grant_count: row.try_get("observer_grant_count")?,
+        remote_attach_available: row.try_get("remote_attach_available")?,
+        started_at_ms: row.try_get("started_at_ms")?,
+        ended_at_ms: row.try_get("ended_at_ms")?,
+        exit_code: row.try_get("exit_code")?,
+        end_reason: row.try_get("end_reason")?,
+        resumed_from_session_id: row.try_get("resumed_from_session_id")?,
+    })
+}
+
+/// One session plus its card message's `seq`, locked for a lifecycle write
+/// (`FOR UPDATE OF ws`, `WorkSessionRoutes.swift:488-504`).
+///
+/// The `seq` comes back with the row because the lifecycle broadcast carries it
+/// (`lifecyclePayload`, :2148) — re-reading it after the update would race the
+/// same channel's next message.
+pub async fn lock_work_session_detail_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<(WorkSessionDetail, i64)>, T3Error> {
+    let sql = format!(
+        "SELECT {DETAIL_COLUMNS}, root.seq AS root_seq \
+           FROM work_session ws \
+           JOIN message root ON root.id = ws.root_message_id \
+          WHERE ws.workspace_id = $1 AND ws.id = $2 \
+          FOR UPDATE OF ws"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else { return Ok(None) };
+    let seq: i64 = row.try_get("root_seq")?;
+    Ok(Some((decode_detail(&row)?, seq)))
+}
+
+/// Authorization pre-flight for the T3 end path (`WorkSessionRoutes.swift:444-457`):
+/// owner, host and channel **without** taking the session row lock, because
+/// `t3_terminate` owns the `usage → session` rungs and must reach them after the
+/// shared prelude already holds `credit → cloud host`.
+pub async fn work_session_scope_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<(Uuid, Uuid, Uuid)>, T3Error> {
+    let row = sqlx::query(
+        "SELECT member_id, host_id, channel_id FROM work_session \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some((
+        row.try_get("member_id")?,
+        row.try_get("host_id")?,
+        row.try_get("channel_id")?,
+    )))
+}
+
+/// End a session's **ledger-independent** lifecycle: the tier-agnostic
+/// `status = 'ended'` write (`WorkSessionRoutes.swift:543-562`).
+///
+/// This is emphatically **not** settlement. On a T3 session the caller has
+/// already run [`terminate_in_tx`] (the only statement allowed to touch
+/// `settled_at`) inside the same transaction; this write is what a T1/T2 session
+/// does too, and it carries no billing meaning at all.
+///
+/// `Ok(None)` means the row was not in `('running','idle')` — someone else moved
+/// it first, which Swift answers with 409 rather than a silent no-op.
+pub async fn end_work_session_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    exit_code: Option<i32>,
+) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let sql = format!(
+        "UPDATE work_session \
+            SET status = 'ended', \
+                idle_at = NULL, \
+                ended_at = clock_timestamp(), \
+                exit_code = COALESCE($3, exit_code), \
+                end_reason = NULL \
+          WHERE workspace_id = $1 \
+            AND id = $2 \
+            AND status IN ('running', 'idle') \
+        RETURNING {DETAIL_RETURNING}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_id)
+        .bind(exit_code)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref().map(decode_detail).transpose()
+}
+
+/// The channel-scoped session list (`WorkSessionRoutes.list` :2038-2087).
+///
+/// The `membership` join is the authorization: a caller sees a session only in
+/// a channel they are still a member of, and the observer-grant count is
+/// computed under the same predicate rather than trusted from the caller.
+pub async fn list_work_session_details_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    active_only: bool,
+) -> Result<Vec<WorkSessionDetail>, T3Error> {
+    let sql = "SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
+                      ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
+                      CASE \
+                        WHEN ws.status IN ('running', 'idle') \
+                         AND ws.observation = 'open' \
+                         AND h.revoked_at IS NULL \
+                        THEN ( \
+                          SELECT count(*) \
+                            FROM terminal_attach_capability tac \
+                            JOIN member observer \
+                              ON observer.id = tac.owner_member_id \
+                             AND observer.workspace_id = tac.workspace_id \
+                             AND observer.kind = 'human' \
+                             AND observer.status = 'active' \
+                             AND observer.deleted_at IS NULL \
+                            JOIN membership observer_membership \
+                              ON observer_membership.workspace_id = tac.workspace_id \
+                             AND observer_membership.channel_id = ws.channel_id \
+                             AND observer_membership.member_id = tac.owner_member_id \
+                             AND observer_membership.left_at IS NULL \
+                           WHERE tac.work_session_id = ws.id \
+                             AND tac.mode = 'observer' \
+                             AND tac.expires_at > clock_timestamp()) \
+                        ELSE 0 \
+                      END AS observer_grant_count, \
+                      (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL) \
+                        AS remote_attach_available, \
+                      floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
+                      CASE WHEN ws.ended_at IS NULL THEN NULL \
+                           ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END \
+                        AS ended_at_ms, \
+                      ws.exit_code, ws.end_reason, ws.resumed_from_session_id \
+                 FROM work_session ws \
+                 JOIN channel c ON c.id = ws.channel_id \
+                 JOIN work_host h \
+                   ON h.id = ws.host_id \
+                  AND h.workspace_id = ws.workspace_id \
+                 JOIN membership ms \
+                   ON ms.channel_id = ws.channel_id \
+                  AND ms.member_id = $2 \
+                  AND ms.left_at IS NULL \
+                WHERE ws.workspace_id = $1 \
+                  AND c.archived_at IS NULL \
+                  AND (NOT $3 OR ws.status IN ('running', 'idle')) \
+                ORDER BY ws.started_at DESC, ws.id DESC \
+                LIMIT 200";
+    let rows = sqlx::query(sql)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(active_only)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter().map(decode_detail).collect()
+}
+
+/// The workspace has this tool registered **and enabled**
+/// (`WorkToolProfileRoutes.requireEnabled` :255-275, called by every spawn).
+///
+/// A `FOR SHARE` rather than a plain read: the profile must not be disabled
+/// between the check and the session insert in the same transaction. The row is
+/// seeded for every workspace by `momo_seed_work_tool_profiles`
+/// (029:115-158, and on every owner/admin membership insert), so this gate
+/// answers "did an admin turn it off", not "was it ever set up".
+pub async fn work_tool_is_enabled_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    tool_key: &str,
+) -> Result<bool, T3Error> {
+    let found: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM work_tool_profile \
+          WHERE workspace_id = $1 AND tool_key = $2 AND enabled \
+          FOR SHARE",
+    )
+    .bind(workspace_id)
+    .bind(tool_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// Active membership of the channel a session lives in
+/// (`WorkSessionRoutes.requireChannelMember` :2435-2466).
+///
+/// Wider than `momo_messaging::is_channel_member` on purpose, and the extra
+/// predicates are the point: the channel must not be archived and the member
+/// must still be `active`/not soft-deleted. A session is a durable, *billable*
+/// attachment to a thread, so it is gated on the thread still being alive.
+pub async fn is_active_channel_member_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, T3Error> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 \
+           FROM channel c \
+           JOIN membership ms \
+             ON ms.workspace_id = c.workspace_id \
+            AND ms.channel_id = c.id \
+            AND ms.member_id = $3 \
+            AND ms.left_at IS NULL \
+           JOIN member m \
+             ON m.id = ms.member_id \
+            AND m.workspace_id = c.workspace_id \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+          WHERE c.workspace_id = $1 \
+            AND c.id = $2 \
+            AND c.archived_at IS NULL \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// The successor row of a resume (`WorkSessionRoutes.resume` :1884-1903): same
+/// thread, same tool/label, new host, `resumed_from_session_id` set.
+///
+/// `workstream_id` is deliberately not passed even though Swift passes it: the
+/// successor shares the source's `root_message_id`, so
+/// `work_session_attach_workstream_trg` (055:161) resolves the *same* workstream
+/// from the same thread. Passing it would be a second copy of that rule.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_resumed_work_session_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    source: &WorkSessionDetail,
+    member_id: Uuid,
+    target_host_id: Uuid,
+) -> Result<WorkSessionDetail, T3Error> {
+    let sql = format!(
+        "INSERT INTO work_session \
+           (id, workspace_id, channel_id, member_id, host_id, root_message_id, \
+            tool, label, status, observation, resumed_from_session_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', $9, $10) \
+         RETURNING {DETAIL_RETURNING}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(session_id)
+        .bind(workspace_id)
+        .bind(source.channel_id)
+        .bind(member_id)
+        .bind(target_host_id)
+        .bind(source.root_message_id)
+        .bind(&source.tool)
+        .bind(&source.label)
+        .bind(&source.observation)
+        .bind(source.id)
+        .fetch_one(&mut *conn)
+        .await?;
+    decode_detail(&row)
+}
+
+/// Close the orphaned source of a resume with `end_reason = 'resumed'`
+/// (:1916-1934). `Ok(None)` → someone else moved it → 409.
+pub async fn mark_work_session_resumed_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let sql = format!(
+        "UPDATE work_session \
+            SET status = 'ended', \
+                ended_at = clock_timestamp(), \
+                exit_code = NULL, \
+                end_reason = 'resumed' \
+          WHERE workspace_id = $1 AND id = $2 AND status = 'orphaned' \
+        RETURNING {DETAIL_RETURNING}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref().map(decode_detail).transpose()
+}
+
+/// Re-render the session card in place (`UPDATE message SET props`, :576-579).
+///
+/// The card is the session's user-visible surface and its `props` mirror the
+/// session row; leaving them stale would make a re-rendered history show a
+/// finished session as still running. This is the **only** `message` write in
+/// this crate and it touches exactly the one row the session already owns
+/// (`work_session.root_message_id`), never the message body, seq or author.
+pub async fn update_session_card_props_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    root_message_id: Uuid,
+    props_json: &str,
+) -> Result<(), T3Error> {
+    sqlx::query("UPDATE message SET props = $3::jsonb WHERE workspace_id = $1 AND id = $2")
+        .bind(workspace_id)
+        .bind(root_message_id)
+        .bind(props_json)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }
 
 /// Bind a registered `work_host` to its provisioning `work_cloud_host` row and

@@ -1148,9 +1148,14 @@ name = "momo-server"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "base64",
+ "ed25519-dalek",
  "momo-auth",
  "momo-db",
  "momo-messaging",
+ "momo-outbox",
+ "momo-t3",
+ "momo-wire",
  "reqwest",
  "serde",
  "serde_json",
@@ -1170,6 +1175,7 @@ dependencies = [
  "futures",
  "momo-db",
  "momo-provider",
+ "momo-wire",
  "sqlx",
  "thiserror 1.0.69",
  "tokio",

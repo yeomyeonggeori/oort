@@ -21,10 +21,19 @@
 //! a caller-supplied `&mut PgConnection`, so the RLS GUC seam stays solely in
 //! `momo_db::with_tenant_tx` (invariant #6).
 
+//! B2.2 adds the two DB-backed halves the T3 REST surface needs and that no
+//! other crate may own: the **WorkHost credential registry**
+//! ([`work_host_store`] — a `work_host` row is a credential exactly like a
+//! `token` row) and the **workspace-role authority**
+//! ([`workspace_authorization`], the single `workspace_membership` predicate),
+//! plus heartbeat-signature verification in [`workhost`].
+
 pub mod issue;
 pub mod jwt;
 pub mod token_store;
+pub mod work_host_store;
 pub mod workhost;
+pub mod workspace_authorization;
 
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
@@ -37,4 +46,13 @@ pub use token_store::{
     token_state, without_privileged_scopes, RevokeOutcome, TokenRejection, TokenState,
     PRIVILEGED_SCOPES, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
-pub use workhost::verify_work_host_request;
+pub use work_host_store::{
+    insert_work_host, list_work_hosts, load_work_host, lock_work_host_credential,
+    lock_work_host_ownership, mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost,
+    WorkHostCredential, WorkHostOwnership, WorkHostRecord, ONLINE_WINDOW_SECONDS,
+};
+pub use workhost::{
+    heartbeat_timestamp_is_fresh, normalize_public_key_b64, verify_work_host_heartbeat,
+    verify_work_host_request, HEARTBEAT_CLOCK_SKEW_MS,
+};
+pub use workspace_authorization::{active_workspace_role, verified_operator_email, WorkspaceRole};
