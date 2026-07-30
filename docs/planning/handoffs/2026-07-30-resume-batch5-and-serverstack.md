@@ -23,10 +23,10 @@
 - **D2** `docs/architecture/invariants-in-rust.md` — 하드 불변식 7개 × [Rust 강제·DB 백스톱·되돌리면 실패 red]. 논리: 불변식은 DB(재사용), 앱은 우회 불가 배선+red 증명.
 - **D3** ADR-0146 — provenance 서명 **범위 확정(성재: "상태 전이까지 넓게")**: 3표면(메시지·workd 이벤트·상태 전이), 사이드카 `action_signature`, `record_provenance` chokepoint, 불변식 무손상. 세부 페이로드·device 키 시점·UX는 상세 후 성재 최종 Accept.
 - **D4** `buzz-reference-catalog.md` · **D5** `cutover-and-parity.md`(**빅뱅 확정**) · **D6** `rewrite-batch-breakdown.md`(**B0 골격** + B1~B5, provenance 분산).
-- **다음**: 성재 Phase 0 승인 → B0(골격)부터 워커 착수. **승인 전 재작성 코드 금지.**
+- **진행 중**: 성재가 Phase 0 승인("B0 착수해줘") → **B0(워크스페이스 골격) 워커 착수됨**(백그라운드 서브에이전트 Opus 5). 워크트리 `~/projects/momo-tracks/momo-worktrees/B0-rust-skeleton`(브랜치 `feat/B0-rust-skeleton`, base=track/engine). 패킷 `docs/planning/handoffs/2026-07-30-B0-rust-skeleton-packet.md`. 완료 시 PR→track/engine, 오케스트레이터가 docker 게이트(마이그레이션 러너 fresh PG 001~059 적용·`with_tenant_tx` GUC cross-tenant red) 실행.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
-**성재 최종 결정 대기 지점**: (1) Phase 0 설계 패키지 전체 승인, (2) ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격.
+**성재 결정 대기 지점**: ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격 — B1 전까지. (Phase 0 전체 승인은 완료: "B0 착수해줘".)
 
 **스파이크 판정(기록됨, ADR-0145)**: buzz ↔ momo는 스택 표면만 1:1, 정합성·격리 코어는 정반대. 불변식 3개(단일쓰기경로·gapless seq·RLS FORCE)가 buzz Nostr 코어(클라-서명-publish·created_at·RLS 전무)와 정면 충돌. 둘 다 "relay=SoT"는 같음(차이는 저자·순서·격리강제). 곡선 정정: buzz=secp256k1 Schnorr, momo=Ed25519. buzz clone: scratchpad/buzz.
 
