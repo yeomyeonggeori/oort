@@ -1,0 +1,26 @@
+[package]
+name = "momo-messaging"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# shared infrastructure (B0) — consumed by public API only, never re-implemented.
+momo-db = { path = "../momo-db" }         # with_tenant_tx = the sole RLS GUC seam
+momo-outbox = { path = "../momo-outbox" } # emit_outbox = the sole outbox egress
+momo-wire = { path = "../momo-wire" }     # shared broadcast payload DTO
+
+sqlx.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# DB-backed conformance harness (tests/conformance_pg.rs, #[ignore]) — the D2 red
+# tests the orchestrator runs against a fresh pgvector/pg18 DB. Not part of the
+# DB-free `cargo test --workspace` unit pass.
+tokio = { workspace = true }
+futures = { workspace = true }
