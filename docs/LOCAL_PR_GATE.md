@@ -115,7 +115,7 @@ Profiles:
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
-| `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + generated-types sync check (openapi-typescript output vs committed `src/api/schema.d.ts`) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
+| `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
@@ -308,10 +308,16 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
 
 1. worktree-clean guard, `npm ci`, `eslint`, `tsc --noEmit` inside
    `clients/web-legacy`.
-2. Generated-types sync: `npm run generate:types` re-renders
-   `src/api/schema.d.ts` from `docs/api/openapi.yaml` and the gate fails if
-   the committed file differs — spec changes and client types cannot drift
-   apart in one PR.
+2. Generated-types sync — `scripts/verify_web_generated_types.sh`:
+   `npm run generate:types` re-renders `src/api/schema.d.ts` from
+   `docs/api/openapi.yaml` and the step fails if the committed file differs —
+   spec changes and client types cannot drift apart in one PR. Failures are
+   named: `generator-failed` (unparseable spec or missing/broken
+   openapi-typescript) is reported separately from `types-stale`, and the
+   regenerated file is restored on every exit path so a drift failure never
+   resurfaces as a worktree-clean failure on the next run. MOMO-678 repaired
+   this step after it sat permanently red (64 committed paths vs 101
+   documented) — a step that always fails carries no signal.
 3. `vite build` (production bundle must stay CSP-safe: no inline script;
    ADR-0119 permits inline style, and the browser smoke enforces the policy).
 4. License gate: `clients/web-legacy/scripts/check-licenses.mjs` walks the full

@@ -71,8 +71,14 @@ export default function ObserverTerminal({
     };
   }, []);
 
+  // running OR idle, matching the issuer: the spec says "The running or idle
+  // session must carry a MomoHost-signed remote PTY binding"
+  // (issueTerminalAttachCapability) and the server guards on exactly that pair
+  // (TerminalAttachRoutes.swift `status == "running" || status == "idle"`).
+  // Gating on running alone hid an observation the server would have granted —
+  // ADR-0139 introduced `idle` and this branch was never widened with it.
   const available =
-    session.status === "running" &&
+    (session.status === "running" || session.status === "idle") &&
     session.observation === "open" &&
     session.remoteAttachAvailable;
   const busy = state.status === "requesting" || state.status === "connecting";
@@ -129,7 +135,8 @@ export default function ObserverTerminal({
       {state.message && <p className="observer-error">{state.message}</p>}
       {!available && (
         <p className="muted observer-help">
-          실행 중이고 공개 관전이 허용된 원격 PTY 세션만 연결할 수 있습니다.
+          실행 중이거나 대기 중이고 공개 관전이 허용된 원격 PTY 세션만 연결할 수
+          있습니다.
         </p>
       )}
       <div className="observer-terminal-actions">
