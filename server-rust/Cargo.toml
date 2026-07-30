@@ -1,9 +1,9 @@
 # momo server — Rust/Axum rewrite (ADR-0145 B안). B0 = workspace skeleton + 5
-# shared infrastructure crates. Domain crates (messaging/t3/integrations) and
-# binaries (server/relay/notifier/workd/agent-worker) land in B1+.
+# shared infrastructure crates; B1 = momo-messaging (write-path spine);
+# B1.5 = the first bootable binaries (momo-server, momo-relay).
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "bins/*"]
 
 [workspace.package]
 edition = "2021"
@@ -43,6 +43,17 @@ hex = "0.4"
 # auth
 jsonwebtoken = "9"
 
+# HTTP (B1.5 binaries)
+#   axum   — momo-server's router/middleware (D1 §1 stack decision).
+#   reqwest — momo-relay's Centrifugo `/api/publish` client. Invariant #2 keeps
+#             this dependency out of momo-server: only the relay publishes.
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
+
 # errors / logging
 thiserror = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
