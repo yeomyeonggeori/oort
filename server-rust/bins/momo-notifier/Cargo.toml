@@ -1,0 +1,38 @@
+[package]
+name = "momo-notifier"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The two loops are a library so conformance tests can run exactly one iteration
+# against an injected provider substrate; `src/main.rs` is the env→run shell.
+[lib]
+name = "momo_notifier"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-notifier"
+path = "src/main.rs"
+
+[dependencies]
+# Every statement this binary causes lives in momo-t3 (ADR-0140 D4 is a domain
+# rule, not a worker's private habit): claim, revalidate, converge, settle. This
+# crate owns no SQL — see the module docs in `src/lib.rs`.
+momo-db = { path = "../../crates/momo-db" }
+momo-provider = { path = "../../crates/momo-provider" }
+momo-t3 = { path = "../../crates/momo-t3" }
+
+tokio = { workspace = true, features = ["signal", "time", "sync"] }
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# Conformance harness (tests/notifier_conformance_pg.rs, all #[ignore]): the
+# real migrations + bootstrap roles, with the in-process mock substrate as the
+# provider so a death can be staged honestly.
+chrono.workspace = true
+futures.workspace = true
+sqlx.workspace = true
+uuid.workspace = true

@@ -113,9 +113,13 @@ pub(crate) fn t3_error(context: &str, error: T3Error) -> ApiError {
         ),
         // A ladder misuse, a missing work_pool row, or a reason this server
         // chose itself are all server bugs, not client input.
+        // `StaleAfterSettlement` belongs to the B2.3 sweep (the notifier races
+        // itself against a session someone else moved) and cannot arise on a
+        // route, so it is internal here rather than a client-facing conflict.
         other @ (T3Error::EmptyLockLadder
         | T3Error::WorkPoolMissing
-        | T3Error::InvalidTerminationReason) => ApiError::internal(context, other),
+        | T3Error::InvalidTerminationReason
+        | T3Error::StaleAfterSettlement(_)) => ApiError::internal(context, other),
     }
 }
 

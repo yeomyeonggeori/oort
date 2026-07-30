@@ -95,6 +95,13 @@ pub enum T3Error {
     #[error("work session not found")]
     SessionNotFound,
 
+    /// B2.3 sweep: `t3_terminate` settled the ledger, and the session row was
+    /// then moved by someone else before the transition could apply. Returned so
+    /// the transaction rolls back — an invoice must not stand for a session this
+    /// process did not actually end.
+    #[error("t3 session {0} changed after settlement")]
+    StaleAfterSettlement(uuid::Uuid),
+
     #[error("cloud host not found")]
     CloudHostNotFound,
 
