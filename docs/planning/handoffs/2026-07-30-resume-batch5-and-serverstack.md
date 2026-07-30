@@ -37,7 +37,11 @@
       - **B1.7(Rust 이미지+compose) 랜딩 완료**(track/engine `a7c3551e`, PR #932). 이미지 259MB(멀티스테이지·비루트·`--locked`), `infra/rust/` compose(janitor 라벨·루프백 온리·api에 CENT 자격 미주입=#2 자세·별도 볼륨). **오케스트레이터 실전 게이트 전 곡선 green**: build→기동→migrate 59+IDEMPOTENCY_OK→set-owner→login→send(seq=1)→list→**실 Centrifugo history version==seq**→outbox done→로그 시크릿 0→down -v.
         - 게이트 실측 결함 2건(오케스트레이터 수정): ①cargo mtime 캐시 — 스텁 의존캐시 후 COPY 실소스가 재빌드 안 일으켜 빈 rlib 재사용(E0432) → 빌드 전 touch ②`compose run migrate set-owner`가 command: 대체 → entrypoint에 set-owner 케이스. **둘 다 워커가 docker 못 돌려 원리적으로 못 잡는 계층** — 파이프라인 교훈 재확인.
         - **NCP 런북 §1 트리거 3번 개통**: 이미지 빌드 경로 완성. 남은 것=레지스트리 퍼블리시(성재/오케스트레이터) 또는 `docker save/load`. §3 절차의 Rust 스왑판 준비 완료(`infra/rust/README.md` §6 대응표).
-      - **다음: B2.2**(T3 표면 나머지: gateway·terminal·pool·approval·재부착 0139·T3 HTTP route). audit_log 티켓 후보 지속.
+      - **B2.2(T3 REST 표면) 랜딩 완료**(track/engine `9e065d0f`, PR #933). route 12개(work-hosts 등록·목록·revoke·heartbeat/BYOC enrollments·cloud register·provision/work-sessions create·end·resume·list/credits topup) — raw SQL 0, `T3Settings` 기본 OFF(미설정 시 503). **T3 smoke 곡선 게이트 2/2 + 전 스위트 공유 DB 무회귀 green.** red=세션 생존 중 settled_at 직접 UPDATE→053 봉인 트리거 23514 거부.
+        - **워커 실측이 패킷 가정 3건 뒤집음(전부 검증 후 수용)**: ①usage/summary 제외 — usage_ledger(모델·토큰 과금)만 집계, t3_terminate는 work_host_usage+credit_entry에 씀(045:4 "의도적 미확장") → T3 과금을 구조적으로 못 보여줌, LLM-run 배치로 이관 ②smoke provider=byoc(mock-a는 momo-server에 outbound HTTP 필요 → #2 금지) ③topup 포함 — 잔액 검사는 BYOC 등록의 reserveProvisioningSlot에서 fail-closed, 워크스페이스 잔액 0 시작.
+        - **NCP T3 부분 smoke 열림**: BYOC 등록→세션→과금→종료 REST 완비. 필요물 = linux/amd64 크로스빌드(+퍼블리시 or save/load) + 성재 트리거.
+        - 잔여(B2.3+): AgentGateway·terminal·tier·pool·approval·재부착 0139·reconciliation·work-host 서명 경로 3종(pending-controls·live-sessions·reconcile). audit_log 티켓 후보 지속.
+      - **성재 문답 기록(2026-07-31)**: ①워커 docker 불가 = 동의 경계(Option A: workspace-write+network만, docker 소켓=호스트 루트 상당이라 밖) + 병렬 데몬 충돌·자원 누적 전례 + 결과적으로 오케스트레이터 게이트가 품질 장치 — 유지 권고. ②NCP smoke의 목적 = 배포 리허설(D5 예행)·환경 갭 실측(**arm64 Mac→linux/amd64 크로스빌드 필요**·저사양 리소스)·실환경 왕복·T3 smoke 발판(B2.2 후 BYOC→세션→과금→종료 → MOMO_T3_ENABLED 판단). 성재: "NCP smoke 하는 건 상관없다"(시점은 미지정).
     - **NCP: 성재 지시(2026-07-30) — 여유 있으니 현상 유지**(정지 안 함). 키 재발급도 보류.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
