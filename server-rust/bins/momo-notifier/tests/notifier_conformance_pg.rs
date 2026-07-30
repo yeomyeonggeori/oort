@@ -40,7 +40,7 @@ use chrono::{DateTime, Utc};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
 use momo_notifier::{FixedAdapterResolver, Notifier, NotifierConfig};
-use momo_provider::{CloudInstanceSpec, CloudProviderAdapter as _};
+use momo_provider::{CloudInstancePresence, CloudInstanceRef, CloudProviderAdapter as _};
 use momo_t3::provider::registry::MOCK_A_PROVIDER_ID;
 use momo_t3::{
     bind_cloud_host_in_tx, create_work_session_in_tx, reserve_provisioning_slot_in_tx,
@@ -400,35 +400,47 @@ async fn seed_paid_session_for(su: &PgPool, app: &PgPool, tenant: &Tenant) -> Pa
     }
 }
 
-/// Give the fixture a sandbox the mock substrate actually knows.
+/// Tell the substrate about the sandbox the fixture row already names.
 ///
-/// The mock names the instances it creates, so the fixture row is pointed at the
-/// instance rather than the other way round. Without this the substrate would
-/// answer `absent` for a host it never saw — which is exactly the false death
-/// these tests must not be able to manufacture by accident.
+/// The direction matters. `MockProviderAdapter::create` names instances from a
+/// per-adapter counter (`mock-a-1`, `mock-a-2`, …), so making the row follow the
+/// substrate gives every freshly built adapter in a test the *same* first id
+/// while `work_cloud_host.provider_sandbox_id` is UNIQUE (045:95) — the rows
+/// collide, and any way of resolving that collision leaves some row naming an
+/// instance its substrate never created. Then `probe` answers `absent` for a
+/// machine that is alive, and ADR-0140 D4 dutifully converges that **false
+/// death** into a settlement. A verifier that can manufacture a death cannot
+/// prove anything about deaths.
+///
+/// So the row keeps the unique id [`seed_paid_session_for`] gave it, and the
+/// substrate adopts it. The assertion below is the guard: after this call the
+/// instance must read `present`, or the fixture — not the convergence table — is
+/// what the test is measuring.
 async fn adopt_instance(
     adapter: &MockProviderAdapter,
     su: &PgPool,
     session: PaidSession,
 ) -> String {
-    let spec = CloudInstanceSpec {
-        provision_id: session.cloud_host_id,
-        workspace_id: session.workspace_id,
-        display_name: "notifier conformance".to_string(),
-        registration_token: "one-shot".to_string(),
-        server_url: "https://momo.invalid".to_string(),
+    let instance_id: String =
+        sqlx::query_scalar("SELECT provider_sandbox_id FROM work_cloud_host WHERE id = $1")
+            .bind(session.cloud_host_id)
+            .fetch_one(su)
+            .await
+            .expect("read the fixture's provider sandbox id");
+    adapter.adopt_running_instance(&instance_id);
+
+    let instance = CloudInstanceRef {
+        provider_id: MOCK_A_PROVIDER_ID.to_string(),
+        instance_id: instance_id.clone(),
     };
-    let created = adapter
-        .create(&spec, &session.cloud_host_id.to_string())
-        .await
-        .expect("mock create");
-    sqlx::query("UPDATE work_cloud_host SET provider_sandbox_id = $2 WHERE id = $1")
-        .bind(session.cloud_host_id)
-        .bind(&created.instance_id)
-        .execute(su)
-        .await
-        .expect("point the row at the mock instance");
-    created.instance_id
+    assert_eq!(
+        adapter.probe(&instance).await.expect("probe the fixture"),
+        CloudInstancePresence::Present,
+        "fixture guard: the substrate must report this host's sandbox alive before a \
+         test stages anything — a fixture that starts from an invented death would \
+         make every convergence assertion below meaningless"
+    );
+    instance_id
 }
 
 /// How the staged intent's deadline should read.

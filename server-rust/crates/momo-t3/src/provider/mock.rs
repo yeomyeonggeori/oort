@@ -109,6 +109,27 @@ impl MockProviderAdapter {
 
     // ---- controls (verifier levers) --------------------------------------
 
+    /// Declare an instance the substrate already has, under an id **momo chose**.
+    ///
+    /// [`CloudProviderAdapter::create`] names the instances it makes, which is
+    /// right for a managed provisioning flow and wrong for every other way a
+    /// `work_cloud_host` row comes to name a sandbox: a BYOC enrollment, an
+    /// operator's import, or a reconciler attaching to an instance that existed
+    /// before this process did.
+    ///
+    /// Without this, a verifier that seeds the row first has only one move left —
+    /// rewrite `provider_sandbox_id` to match the mock's counter — and that column
+    /// is UNIQUE (045:95), so two substrates in one test collide and something has
+    /// to give. Whatever gives, the losing row ends up naming an instance its
+    /// substrate never created, and `probe` answers `Absent` for a machine that is
+    /// alive. That is a **false death**: the one answer a verification substrate
+    /// must never invent, because ADR-0140 D4 converges it into a settlement.
+    pub fn adopt_running_instance(&self, instance_id: &str) {
+        self.lock()
+            .instances
+            .insert(instance_id.to_string(), MockInstanceState::Running);
+    }
+
     /// Every live instance dies where it stands, and nothing tells momo — the
     /// condition ADR-0140 D4 converges to `provider_missing`.
     pub fn kill_all_instances(&self) {
@@ -443,6 +464,36 @@ mod tests {
             adapter.instance_state(&instance.instance_id),
             Some(MockInstanceState::Running),
             "an unsupported pause must leave the instance exactly as it was"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_adopted_instance_is_alive_and_can_still_die() {
+        let adapter = MockProviderAdapter::mock_a();
+        // The id momo chose, not one this substrate counted out.
+        let instance = CloudInstanceRef {
+            provider_id: MOCK_A_PROVIDER_ID.to_string(),
+            instance_id: "mock-a-0189d3f000007000800000000000".to_string(),
+        };
+        assert_eq!(
+            adapter.probe(&instance).await.unwrap(),
+            CloudInstancePresence::Absent,
+            "an instance the substrate has never heard of is absent"
+        );
+
+        adapter.adopt_running_instance(&instance.instance_id);
+        assert_eq!(
+            adapter.probe(&instance).await.unwrap(),
+            CloudInstancePresence::Present,
+            "named regression: a substrate must not report a false death for an \
+             instance it merely did not name itself (ADR-0140 D4 settles on `absent`)"
+        );
+
+        adapter.kill_all_instances();
+        assert_eq!(
+            adapter.probe(&instance).await.unwrap(),
+            CloudInstancePresence::Absent,
+            "an adopted instance is a real one: it can still die"
         );
     }
 
