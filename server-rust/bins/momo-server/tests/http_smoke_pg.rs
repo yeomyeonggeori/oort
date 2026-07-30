@@ -1,14 +1,19 @@
 //! End-to-end HTTP smoke for `momo-server` (ADR-0145 B안, batch B1.5).
 //!
 //! Boots the *real* router on an ephemeral port against a real Postgres and
-//! drives it over HTTP: login → send → history, plus the 401/403 rejections.
-//! `#[ignore]` because it needs a throwaway `pgvector/pgvector:pg18` superuser DB
-//! with the runtime roles. Run:
+//! drives it over HTTP: login → send → history, the 401/403 rejections, and the
+//! MOMO-300 revocation contract. `#[ignore]` because it needs a real DB. Run:
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
 //!   cargo test -p momo-server --test http_smoke_pg -- --ignored --nocapture
 //! ```
+//!
+//! **Give each test binary a FRESH database.** The harness applies the
+//! migrations itself and is not idempotent against an already-migrated DB, so
+//! reusing the database another conformance binary just ran against (e.g.
+//! `momo-relay`'s) fails in the migration step, not in an assertion. One
+//! throwaway `pgvector/pgvector:pg18` container per test binary.
 //!
 //! Harness contract: `DATABASE_URL` is a **superuser** (migrations via psql +
 //! `infra/e2e/bootstrap_roles.sql`, fixture seeding bypasses RLS); the server
@@ -23,6 +28,7 @@ use std::sync::Mutex;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
@@ -447,4 +453,97 @@ async fn http_smoke_login_send_list_and_401s() {
         403,
         "a non-member of the channel is refused, not shown an empty page"
     );
+
+    // ---- MOMO-300 revocation (fail-closed) -------------------------------
+    // Red test: delete the `token_state` call from the middleware and both
+    // assertions below flip to 200/201, because the JWT signature is still
+    // perfectly valid in each case.
+
+    // (a) a validly signed token that was never recorded → 401 unknown token.
+    // Signed here with the server's own secret, so ONLY the missing row can
+    // explain the rejection.
+    let orphan = momo_auth::sign_access(
+        fixture.member,
+        fixture.workspace,
+        &["messages:read".to_string()],
+        TEST_JWT_SECRET,
+    )
+    .expect("sign an unrecorded access token");
+    let unknown = http
+        .get(&messages_url)
+        .bearer_auth(&orphan.token)
+        .send()
+        .await
+        .expect("unrecorded token");
+    assert_eq!(
+        unknown.status(),
+        401,
+        "a token with no `token` row must not authenticate (fail closed)"
+    );
+    let unknown: Value = unknown.json().await.expect("error body");
+    assert_eq!(unknown["error"]["message"], json!("unknown token"));
+
+    // (b) revoke the live session row → the same token stops working.
+    // The RETURNING count also proves login RECORDED the token: without the
+    // insert this is 0 rows and the assertion fails.
+    let revoked = sqlx::query(
+        "UPDATE token \
+            SET revoked_at = now() \
+          WHERE token_hash = digest($1::text, 'sha256') \
+            AND revoked_at IS NULL \
+        RETURNING id, kind::text AS kind, label",
+    )
+    .bind(&access_token)
+    .fetch_all(&su)
+    .await
+    .expect("revoke the access token row");
+    assert_eq!(
+        revoked.len(),
+        1,
+        "login must record exactly one `token` row for the access token"
+    );
+    assert_eq!(
+        revoked[0].get::<String, _>("kind"),
+        "session",
+        "session JWTs are recorded as kind='session' (Swift parity)"
+    );
+    assert_eq!(
+        revoked[0].get::<Option<String>, _>("label").as_deref(),
+        Some("access"),
+        "the access half carries label='access' (Swift parity)"
+    );
+
+    let dead = http
+        .get(&messages_url)
+        .bearer_auth(&access_token)
+        .send()
+        .await
+        .expect("revoked token");
+    assert_eq!(
+        dead.status(),
+        401,
+        "a revoked session must die immediately, signature notwithstanding"
+    );
+    let dead: Value = dead.json().await.expect("error body");
+    assert_eq!(dead["error"]["message"], json!("token has been revoked"));
+
+    // The refresh half was recorded too, so a later logout can kill it.
+    let refresh_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM token \
+          WHERE token_hash = digest($1::text, 'sha256') AND label = 'refresh'",
+    )
+    .bind(refresh_token)
+    .fetch_one(&su)
+    .await
+    .expect("count refresh rows");
+    assert_eq!(refresh_rows, 1, "the refresh half is recorded as well");
+
+    // And the raw JWT is never persisted — only its sha256.
+    let raw_leak: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM token WHERE encode(token_hash, 'escape') = $1")
+            .bind(&access_token)
+            .fetch_one(&su)
+            .await
+            .expect("scan for a raw token");
+    assert_eq!(raw_leak, 0, "the raw JWT must never be stored");
 }

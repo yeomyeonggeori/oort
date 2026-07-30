@@ -10,17 +10,23 @@
 //!   * suspended → 403, everything else that fails → 401 `invalid credentials`
 //!     (one bucket, so the response cannot enumerate accounts);
 //!   * on success an access (15m) + refresh (30d) HS256 pair is minted with the
-//!     shared `momo-auth` claims and coarse v0 scopes.
+//!     shared `momo-auth` claims and coarse v0 scopes;
+//!   * **both halves are recorded in the `token` table** (`kind='session'`,
+//!     `label='access'|'refresh'`, only `sha256(jwt)` stored) — Swift
+//!     `recordSessionTokens` (`AuthRoutes.swift:412-426`). This is what makes the
+//!     middleware's MOMO-300 revocation check meaningful: minting without a row
+//!     would turn every subsequent request into a 401 `unknown token`.
 //!
-//! Deviations (deliberate, see PR body): no `token`-table persistence/revocation
-//! (MOMO-300) and no platform-admin scope elevation — both need surfaces this
-//! batch does not own. Absent elevation the issued scopes are strictly the
-//! narrower set, so the deviation fails closed.
+//! Deviations (deliberate, see PR body): no platform-admin scope elevation and
+//! no privileged-session sweep on login. Absent elevation the issued scopes are
+//! strictly the narrower set, so the deviation fails closed.
 
 use axum::extract::State;
 use axum::Json;
-use momo_auth::{sign_access, sign_refresh};
-use momo_db::with_tenant_tx;
+use momo_auth::{
+    record_session_token, sign_access, sign_refresh, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+};
+use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{verify_password_login, PasswordLogin};
 use uuid::Uuid;
 
@@ -36,6 +42,17 @@ pub const DEMO_WORKSPACE_ID: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0
 /// these from membership/role (L4 §7.2).
 fn base_scopes() -> Vec<String> {
     vec!["messages:write".to_string(), "messages:read".to_string()]
+}
+
+/// The freshly minted pair, moved into the recording transaction. Holds raw
+/// tokens only long enough to hash them inside Postgres — nothing here is logged.
+struct SessionTokens {
+    member_id: Uuid,
+    scopes: Vec<String>,
+    access_token: String,
+    access_expires_at: i64,
+    refresh_token: String,
+    refresh_expires_at: i64,
 }
 
 pub async fn login(
@@ -69,6 +86,46 @@ pub async fn login(
         .map_err(|error| ApiError::internal("auth.login.sign_access", error))?;
     let refresh = sign_refresh(member.id, workspace_id, &scopes, &state.jwt_secret)
         .map_err(|error| ApiError::internal("auth.login.sign_refresh", error))?;
+
+    // Record both halves so they can be revoked later (MOMO-300). One
+    // transaction rather than Swift's two connections: a session whose access
+    // row committed but whose refresh row did not would be unrevocable by a
+    // single logout, so the pair is atomic here.
+    let session = SessionTokens {
+        member_id: member.id,
+        scopes: scopes.clone(),
+        access_token: access.token.clone(),
+        access_expires_at: access.expires_at,
+        refresh_token: refresh.token.clone(),
+        refresh_expires_at: refresh.expires_at,
+    };
+    with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            record_session_token(
+                conn,
+                workspace_id,
+                session.member_id,
+                &session.access_token,
+                SESSION_LABEL_ACCESS,
+                &session.scopes,
+                session.access_expires_at,
+            )
+            .await?;
+            record_session_token(
+                conn,
+                workspace_id,
+                session.member_id,
+                &session.refresh_token,
+                SESSION_LABEL_REFRESH,
+                &session.scopes,
+                session.refresh_expires_at,
+            )
+            .await?;
+            Ok::<(), DbError>(())
+        })
+    })
+    .await
+    .map_err(|error| db_error("auth.login.record_session", error))?;
 
     Ok(Json(LoginResponse {
         access_token: access.token,

@@ -1061,6 +1061,7 @@ dependencies = [
  "jsonwebtoken",
  "momo-wire",
  "serde",
+ "sqlx",
  "thiserror 1.0.69",
  "uuid",
 ]

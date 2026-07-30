@@ -11,6 +11,12 @@
 //!   cargo test -p momo-relay --test relay_conformance_pg -- --ignored --nocapture
 //! ```
 //!
+//! **Give each test binary a FRESH database.** The harness applies the
+//! migrations itself and is not idempotent against an already-migrated DB, so
+//! reusing the database another conformance binary just ran against (e.g.
+//! `momo-server`'s `http_smoke_pg`) fails in the migration step, not in an
+//! assertion. One throwaway `pgvector/pgvector:pg18` container per test binary.
+//!
 //! Harness contract (same as `momo-messaging`'s conformance file):
 //!   * `DATABASE_URL` connects as a **superuser** (applies the migrations via psql
 //!     + `infra/e2e/bootstrap_roles.sql`, and seeds fixtures bypassing RLS);
