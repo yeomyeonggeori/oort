@@ -1420,6 +1420,14 @@
 - 한 일: **B2.2(T3 REST 표면) 랜딩** — PR #933 → track/engine(`9e065d0f`). T3 route 12개(기본 OFF·503), momo-t3/auth 공개 API 추가(cloud_host·work_host_store). 워커 실측이 패킷 가정 3건 뒤집음(usage/summary 구조적 부적합→제외·smoke=byoc·topup 포함) — 3건 전부 Swift/마이그레이션 실측으로 검증 후 수용. 게이트: T3 smoke 곡선 2/2(봉인 트리거 red 포함)+전 스위트 공유 DB 무회귀 green. **NCP T3 부분 smoke REST 완비.**
 - 열린 것: 다음 배치(B2.3 게이트웨이·재부착 0139 / NCP T3 smoke 실행 — amd64 크로스빌드 선행 / B1.2 breadth) 성재 방향. ADR-0146 세부·ADR-0140 정오표. #925·#926·#893.
 
+## 2026-07-31 (오후 2) · Fable · 오케스트레이션
+- 한 일: **NCP T3 smoke 완주** — amd64 크로스빌드→전송→Docker 설치→스택 기동→메신저 곡선(실 Centrifugo)+**T3 BYOC 곡선(topup→enroll→register→세션→종료→settled=true·3s×25µUSD 정확 차감)**. 리소스 RAM 375Mi. 곡선이 밝힌 운영 요건(https base URL 등) 런북 §7 기록. **B2.3(momo-notifier) 워커 병렬 진행 중.**
+- 열린 것: B2.3 결과 대기. MOMO_T3_ENABLED 판단(성재 — 재료 확보됨). NCP 스택 가동 유지 중(비용 유의). #925·#926·#893.
+
+## 2026-07-31 (저녁) · Fable · 오케스트레이션
+- 한 일: **B2.3(momo-notifier) 랜딩** — PR #934 → track/engine. T3 내구성 워커(D4 수렴 reconciler+host-lost sweep, SQL 0줄·정산 t3_terminate 1곳). 게이트 d4 4/4 green. 게이트가 잡은 것: 픽스처 UNIQUE 충돌 → 워커가 원인 지점 수정(adopt_running_instance — 내 retire 패치가 '가짜 죽음'을 만들던 것까지 판정·제거, 수렴표는 무결). **NCP 비용 효율화 실행**(성재 승인): compose stop→서버 정지, ncp-power.py 도구, "테스트할 때만 켠다" 정책 런북 §8.
+- 열린 것: B2.3 이탈 후속 티켓(sweep 사용자 가시 후속·audit_log 스텁·관리형 어댑터). 다음 배치(B2.4 gateway/재부착 0139 등) 성재 방향. MOMO_T3_ENABLED 판단(재료 확보). #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
