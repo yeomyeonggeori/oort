@@ -34,7 +34,7 @@
       - **B2.1 랜딩 완료**(track/engine `f0467c02`, PR #931): `momo-t3`(lifecycle·billing·provider mock 2종+BYOC). t3_terminate 호출 1곳·앱 정산 SQL 0·전이표 사본 0·`with_tenant_tx_prelude`(advisory 선획득, GUC 단일배선 보존). **conformance 5/5**(정산 단일문+봉인·전이표·advisory 직렬화·이중정산 멱등·**#7 비유입**) → **D2 불변식 7/7 전부 Rust 스택에서 증명 완료.** 게이트가 잡은 것: 픽스처 provider_sandbox_id UNIQUE 충돌(리터럴 시드) → uuid 접미사 수정.
       - **머지 후 통합 검증**: engine에서 한 DB 연속 실행 — db 3/3·messaging 5/5·smoke 2/2·relay 3/3·t3 5/5 + 단위 26 스위트 all green.
       - **ADR-0140 정오표 대기(성재 승인)**: ADR:107 "t3_terminate가 outbox 이벤트까지 한 tx에" — 053/058 실측엔 outbox 없음(브로드캐스트는 route층 emit_outbox 몫). 실측을 정본으로 ADR 문구 정정 필요.
-      - **다음 후보**: B2.2(T3 표면 나머지: gateway·terminal·pool·approval·재부착 0139) / B1.2(메신저 breadth) / **Rust 이미지+compose**(현 스택으로 NCP 메신저-부분 smoke 가능해짐 — 런북 트리거 재평가). audit_log(write_audit 스텁) 티켓 후보 지속.
+      - **B1.7(Rust 이미지+compose) 착수 중**(성재 "권장대로" — 배포 경로 우선, B2.2 후속. 워커 Opus 5, 워크트리 `B17-rust-image`). 범위=Dockerfile 멀티스테이지(api|relay|migrate entrypoint)+migrate bin+prod env 이름 파리티(JWT_HMAC 등 실측 정렬)+`infra/rust/` compose(최소셋)+README. 완료 시 **오케스트레이터가 docker build→compose 기동→실Centrifugo 왕복 smoke**. 패킷 `handoffs/2026-07-31-B1.7-rust-image-packet.md`. 이후 B2.2. audit_log 티켓 후보 지속.
     - **NCP: 성재 지시(2026-07-30) — 여유 있으니 현상 유지**(정지 안 함). 키 재발급도 보류.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
