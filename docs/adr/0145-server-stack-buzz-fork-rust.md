@@ -1,6 +1,28 @@
 # ADR-0145: 서버 스택 전환 — buzz fork 기반 Rust로, 지금 착수
 
-- Status: **Accepted** (2026-07-30, 성재 — "buzz fork + 고유 이식 / 지금 최우선 착수". 기안 Fable)
+- Status: **개정 대기** (2026-07-30 성재가 A안 fork 결정 → **선행 스파이크가 fork 불성립 판정, B안(참조 재작성) 전환을 성재 승인 대기**. 아래 §스파이크 판정 참조. 기안 Fable)
+
+## 스파이크 판정 (2026-07-30, fork 전 필수 검증) — **A안 불성립**
+
+buzz 코드 실측(github.com/block/buzz `18eef63`, ~180k LOC Rust, 24 마이그레이션)으로 판정: **buzz ↔ momo는 스택 표면(PG·Redis·S3·TS클라)만 1:1이고, 정합성·격리 코어는 정반대다.** momo 하드 불변식 6개 중 **3개가 buzz의 Nostr relay 코어와 정면 충돌**:
+
+| momo 불변식 | buzz | 화해 |
+|---|---|---|
+| 단일 쓰기경로(서버-authored, 클라 직접 publish 금지) | **클라가 Schnorr 서명 이벤트를 직접 publish**(Nostr의 존재 이유) | ❌ 정반대 |
+| gapless `message.seq`(PG sequence 금지) | 순서=`created_at`(클라 wall-clock)+event id, **gapless seq 부재** | ❌ 근본 충돌 |
+| RLS FORCE + 역할분리 | **RLS 전무** — 격리=community-key 복합키+앱 ctx | ❌ DB 강제 부재 |
+
+- 데이터 모델부터 다르다: momo `message`는 서버-authored·**무서명**이라 buzz `events`(content-hash id + 필수 Schnorr sig) 테이블에 **넣을 수조차 없다.**
+- **정정**: buzz는 **secp256k1 Schnorr**(nostr crate), momo는 **Ed25519**. 이 ADR/재검토가 "buzz=Ed25519"라 적은 건 오류.
+- buzz는 momo 고유(work_*·usage·credit·workstream)가 **전무** → 어느 방식이든 100% momo가 짠다. 그래서 fork 절감이 **실질 증발**한다 — 메신저 코어를 momo 불변식에 맞추려면 buzz 코어를 도려내야 하므로 "얹히는" 게 아니라 "도려내는" 관계.
+- **결론**: A안(fork)으로는 momo 불변식 3개(쓰기경로·seq·RLS)를 상속 불가. 이를 지키려면 buzz를 **의존이 아니라 코드 레퍼런스**로만 써야 한다 = **B안(참조 재작성)**.
+
+**→ 스파이크 권고: A안 → B안 후퇴. ADR을 "fork" 전제에서 "reference rewrite" 전제로 개정(성재 승인 필요).** B안에서도 서버=Rust/Axum·workd Rust 이식·지금 착수는 유지되고, momo 하드 불변식 3개를 그대로 보존한 채 buzz는 Axum+sqlx 골격·kind dispatch·git-over-http 등의 **패턴 레퍼런스**로만 쓴다.
+
+---
+
+### (아래는 fork 전제로 기안된 원안 — B안 승인 시 개정된다)
+
 - 관련: ADR-0133(UI = Tauri/React — 이 결정의 클라이언트 짝), ADR-0004(자격증명 비유입·permissive 스택), ADR-0125/0136/0139/0140/0142/0144(T3 work runtime — **이식 대상**), ADR-0143(workstream — 이식 대상)
 - 입력: `docs/planning/2026-07-30-server-stack-reassessment.md`(§0~§7, 리서치 근거)
 - 발단: 성재 — "서버가 왜 굳이 Swift냐. buzz 기반 rust/tauri migration 때 데스크탑에만 집중해 생긴 잔재 같다."

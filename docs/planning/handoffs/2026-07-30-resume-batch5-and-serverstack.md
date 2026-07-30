@@ -11,7 +11,9 @@
 
 **성재 결정: buzz fork + 고유 이식(§7 A안) · 지금 최우선 착수.** → **ADR-0145 Accepted**(`docs/adr/0145-server-stack-buzz-fork-rust.md`).
 
-**착수 첫 단계 = buzz 대조 스파이크(fork 전 필수 선행)** — 백그라운드 서브에이전트로 투입됨. buzz(github.com/block/buzz) 코드를 읽고 ①Nostr 이벤트 모델 ↔ momo 불변식(PG=SoT·단일 쓰기경로·RLS FORCE) 화해 가부 ②buzz 스키마 ↔ momo 59 마이그레이션 대조 ③재사용 층 vs momo 고유(T3·workstream) 경계 ④이식 계획·fork 방식 판정. **스파이크 결과가 ADR-0145 세부를 확정. 스파이크 없이 fork 코드 착수 금지.**
+**스파이크 완료 → A안(fork) 불성립 판정.** momo 하드 불변식 3개(단일 쓰기경로·gapless seq·RLS FORCE)가 buzz의 Nostr relay 코어(클라 직접 서명 publish·created_at 순서·RLS 전무)와 **정면 충돌**. buzz는 momo 고유(T3·workstream·과금) 전무 → fork 절감 실질 증발. (곡선도 다름: buzz=secp256k1 Schnorr, momo=Ed25519.) **스파이크 권고 = B안(참조 재작성): 서버=Rust/Axum·workd Rust·지금 착수는 유지하되 momo 불변식 3개 보존, buzz는 코드 레퍼런스로만.** → **성재가 B안 전환 승인해야 이행 착수.** ADR-0145에 스파이크 판정 기록됨. buzz clone: scratchpad/buzz.
+
+(원래 착수 첫 단계였던 buzz 대조 스파이크는 완료됨) buzz(github.com/block/buzz) 코드를 읽고 ①Nostr 이벤트 모델 ↔ momo 불변식(PG=SoT·단일 쓰기경로·RLS FORCE) 화해 가부 ②buzz 스키마 ↔ momo 59 마이그레이션 대조 ③재사용 층 vs momo 고유(T3·workstream) 경계 ④이식 계획·fork 방식 판정. **스파이크 결과가 ADR-0145 세부를 확정. 스파이크 없이 fork 코드 착수 금지.**
 - 스파이크 완료 시: 결과 검토 → 이행 배치(메신저 코어 검증→T3 이식→workstream 이식→클라이언트 재배선) 설계.
 - **Nostr 수용이 momo 불변식과 안 맞으면 A안→B안(참조 재작성) 후퇴** — 스파이크가 그 판정.
 - 병행: NCP smoke는 서버 스택과 독립(§2)이라 계속 가능.
