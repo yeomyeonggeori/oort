@@ -62,9 +62,15 @@ impl std::fmt::Debug for AppState {
 
 /// Build the application router.
 ///
-/// Public routes (`/healthz`, `/health`, `/v1/auth/login`) are mounted OUTSIDE
-/// the auth middleware, exactly like the Swift server's public router group;
-/// everything else sits behind [`auth::require_principal`].
+/// Public routes (`/healthz`, `/health`, `/v1/auth/login`, `/v1/auth/refresh`,
+/// `/v1/auth/logout`) are mounted OUTSIDE the auth middleware, exactly like the
+/// Swift server's public router group (`AuthRoutes.swift:36-44`); everything
+/// else sits behind [`auth::require_principal`].
+///
+/// refresh and logout verify the presented JWT themselves. logout in particular
+/// **must** stay outside the middleware: the middleware's MOMO-300 revocation
+/// check would turn a second logout into a 401, and logout is specified as
+/// idempotent (200 with `alreadyRevoked=true`).
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route(
@@ -81,6 +87,8 @@ pub fn build_app(state: AppState) -> Router {
         // Swift serves `/health`; every verification script polls it. Keep both.
         .route("/health", get(routes::health::health))
         .route("/v1/auth/login", post(routes::auth_routes::login))
+        .route("/v1/auth/refresh", post(routes::auth_routes::refresh))
+        .route("/v1/auth/logout", post(routes::auth_routes::logout))
         .merge(protected)
         .with_state(state)
 }

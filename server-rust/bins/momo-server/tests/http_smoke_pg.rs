@@ -1,19 +1,23 @@
 //! End-to-end HTTP smoke for `momo-server` (ADR-0145 B안, batch B1.5).
 //!
 //! Boots the *real* router on an ephemeral port against a real Postgres and
-//! drives it over HTTP: login → send → history, the 401/403 rejections, and the
-//! MOMO-300 revocation contract. `#[ignore]` because it needs a real DB. Run:
+//! drives it over HTTP: login → send → history, the 401/403 rejections, the
+//! MOMO-300 revocation contract, and (B1.6) the logout / refresh-rotation
+//! contract. `#[ignore]` because it needs a real DB. Run:
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
 //!   cargo test -p momo-server --test http_smoke_pg -- --ignored --nocapture
 //! ```
 //!
-//! **Give each test binary a FRESH database.** The harness applies the
-//! migrations itself and is not idempotent against an already-migrated DB, so
-//! reusing the database another conformance binary just ran against (e.g.
-//! `momo-relay`'s) fails in the migration step, not in an assertion. One
-//! throwaway `pgvector/pgvector:pg18` container per test binary.
+//! **A fresh database is no longer required (B1.6).** The migration runner now
+//! tracks `schema_migrations` like `scripts/migrate.sh`, so applying the
+//! migrations against a database another conformance binary already migrated
+//! SKIPs every file instead of failing in the migration step; `bootstrap_roles.sql`
+//! was already re-runnable (`IF NOT EXISTS` + `ALTER ROLE`). Test binaries may
+//! therefore share one `pgvector/pgvector:pg18` container. A throwaway container
+//! per binary is still the cleanest isolation and remains supported — every test
+//! seeds its own random-UUID fixture, so neither mode changes an assertion.
 //!
 //! Harness contract: `DATABASE_URL` is a **superuser** (migrations via psql +
 //! `infra/e2e/bootstrap_roles.sql`, fixture seeding bypasses RLS); the server
@@ -546,4 +550,317 @@ async fn http_smoke_login_send_list_and_401s() {
             .await
             .expect("scan for a raw token");
     assert_eq!(raw_leak, 0, "the raw JWT must never be stored");
+}
+
+// ---------------------------------------------------------------------------
+// B1.6 — logout / refresh (the revocation *trigger* surface)
+// ---------------------------------------------------------------------------
+
+/// Log in and return `(accessToken, refreshToken)`.
+async fn login(http: &reqwest::Client, base: &str, fixture: &Fixture) -> (String, String) {
+    let body: Value = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login")
+        .json()
+        .await
+        .expect("login body");
+    (
+        body["accessToken"]
+            .as_str()
+            .expect("accessToken")
+            .to_string(),
+        body["refreshToken"]
+            .as_str()
+            .expect("refreshToken")
+            .to_string(),
+    )
+}
+
+/// **RED for B1.6 소품 A.** Drives the two routes that make MOMO-300 revocation
+/// reachable over HTTP:
+///
+///  * logout revokes the presented session → the same access token stops
+///    working (401 `token has been revoked`). Delete the `revoke_token` call
+///    from `routes::auth_routes::logout` and this flips to 200: the JWT
+///    signature is still perfectly valid, which is the whole point of the
+///    `token` row.
+///  * logout is idempotent — a second call is 200 with `alreadyRevoked=true`
+///    (Swift :229-235). Mount logout *behind* the auth middleware and this goes
+///    red with a 401 instead.
+///  * refresh rotates: the new access token works, and replaying the spent
+///    refresh token is 401 `refresh token already used or revoked`. Drop the
+///    `revoked_now` check and the replay assertion flips to 200 (Swift's
+///    single-use gate, :169-181).
+///  * a refresh token belonging to another session is a 403 and revokes
+///    nothing (Swift :261-276).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn http_smoke_logout_and_refresh_rotation() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let messages_url = format!(
+        "{base}/v1/workspaces/{}/channels/{}/messages",
+        fixture.workspace, fixture.channel
+    );
+
+    // ---- logout kills the presented session ------------------------------
+    let (access, refresh) = login(&http, &base, &fixture).await;
+    let alive = http
+        .get(&messages_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("pre-logout history");
+    assert_eq!(alive.status(), 200, "the session works before logout");
+
+    let out = http
+        .post(format!("{base}/v1/auth/logout"))
+        .bearer_auth(&access)
+        .json(&json!({"refreshToken": refresh}))
+        .send()
+        .await
+        .expect("logout");
+    assert_eq!(out.status(), 200, "logout answers 200");
+    let out: Value = out.json().await.expect("logout body");
+    assert_eq!(out["status"], json!("ok"));
+    assert_eq!(
+        out["revokedAccess"],
+        json!(true),
+        "logout must revoke the presented access token"
+    );
+    assert_eq!(
+        out["revokedRefresh"],
+        json!(true),
+        "and the refresh half handed in with the body"
+    );
+    assert_eq!(out["alreadyRevoked"], json!(false));
+
+    let dead = http
+        .get(&messages_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("post-logout history");
+    assert_eq!(
+        dead.status(),
+        401,
+        "after logout the same access token must die, signature notwithstanding"
+    );
+    let dead: Value = dead.json().await.expect("error body");
+    assert_eq!(dead["error"]["message"], json!("token has been revoked"));
+
+    // the logged-out refresh token cannot mint a new session either
+    let stale = http
+        .post(format!("{base}/v1/auth/refresh"))
+        .json(&json!({"refreshToken": refresh}))
+        .send()
+        .await
+        .expect("refresh after logout");
+    assert_eq!(
+        stale.status(),
+        401,
+        "logout must end rotation, not just the access token"
+    );
+    let stale: Value = stale.json().await.expect("error body");
+    assert_eq!(stale["error"]["message"], json!("token has been revoked"));
+
+    // ---- logout is idempotent -------------------------------------------
+    let again = http
+        .post(format!("{base}/v1/auth/logout"))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("second logout");
+    assert_eq!(
+        again.status(),
+        200,
+        "logging out twice stays 200 (the route is outside the revocation check)"
+    );
+    let again: Value = again.json().await.expect("second logout body");
+    assert_eq!(
+        again["revokedAccess"],
+        json!(false),
+        "nothing new to revoke"
+    );
+    assert_eq!(again["alreadyRevoked"], json!(true));
+
+    // ---- refresh rotates -------------------------------------------------
+    let (access2, refresh2) = login(&http, &base, &fixture).await;
+    let rotated = http
+        .post(format!("{base}/v1/auth/refresh"))
+        .json(&json!({"refreshToken": refresh2}))
+        .send()
+        .await
+        .expect("refresh");
+    assert_eq!(rotated.status(), 200, "a live refresh token rotates");
+    let rotated: Value = rotated.json().await.expect("refresh body");
+    let access3 = rotated["accessToken"].as_str().expect("accessToken");
+    let refresh3 = rotated["refreshToken"].as_str().expect("refreshToken");
+    assert_ne!(access3, access2, "rotation issues a NEW access token");
+    assert_ne!(refresh3, refresh2, "and a new refresh token");
+
+    let fresh = http
+        .get(&messages_url)
+        .bearer_auth(access3)
+        .send()
+        .await
+        .expect("history with the rotated token");
+    assert_eq!(
+        fresh.status(),
+        200,
+        "the rotated access token must be recorded, or the middleware 401s it"
+    );
+
+    // single-use: replaying the spent refresh token is dead
+    let replay = http
+        .post(format!("{base}/v1/auth/refresh"))
+        .json(&json!({"refreshToken": refresh2}))
+        .send()
+        .await
+        .expect("refresh replay");
+    assert_eq!(replay.status(), 401, "a refresh token is single-use");
+    let replay: Value = replay.json().await.expect("error body");
+    assert_eq!(
+        replay["error"]["message"],
+        json!("token has been revoked"),
+        "the rotated row is revoked, so the pre-check names it precisely"
+    );
+
+    // the pre-rotation access token is untouched by rotation (Swift parity:
+    // refresh revokes the refresh row only), and the new refresh works once.
+    let rotated_again = http
+        .post(format!("{base}/v1/auth/refresh"))
+        .json(&json!({"refreshToken": refresh3}))
+        .send()
+        .await
+        .expect("second rotation");
+    assert_eq!(rotated_again.status(), 200, "the new refresh token spends");
+
+    // ---- wrong-typ and mismatched-session bodies -------------------------
+    let access_as_refresh = http
+        .post(format!("{base}/v1/auth/refresh"))
+        .json(&json!({"refreshToken": access3}))
+        .send()
+        .await
+        .expect("access on the refresh path");
+    assert_eq!(
+        access_as_refresh.status(),
+        401,
+        "an access token must never rotate a session"
+    );
+    let access_as_refresh: Value = access_as_refresh.json().await.expect("error body");
+    assert_eq!(
+        access_as_refresh["error"]["message"],
+        json!("not a refresh token")
+    );
+
+    // A second member's refresh token may not be revoked through this session.
+    let other = Uuid::new_v4();
+    let other_email = format!("{other}@smoke.test");
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'human', $3, $3)",
+    )
+    .bind(other)
+    .bind(fixture.workspace)
+    .bind(other.to_string())
+    .execute(&su)
+    .await
+    .expect("seed other member");
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, password_hash) \
+         VALUES ($1, $2, $3, momo_password_hash($4))",
+    )
+    .bind(other)
+    .bind(fixture.workspace)
+    .bind(&other_email)
+    .bind(TEST_PASSWORD)
+    .execute(&su)
+    .await
+    .expect("seed other human");
+    let other_login: Value = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": other_email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("other login")
+        .json()
+        .await
+        .expect("other login body");
+    let other_refresh = other_login["refreshToken"].as_str().expect("refreshToken");
+
+    let (access4, _refresh4) = login(&http, &base, &fixture).await;
+    let mismatched = http
+        .post(format!("{base}/v1/auth/logout"))
+        .bearer_auth(&access4)
+        .json(&json!({"refreshToken": other_refresh}))
+        .send()
+        .await
+        .expect("logout with a foreign refresh token");
+    assert_eq!(
+        mismatched.status(),
+        403,
+        "a refresh token from another session is refused"
+    );
+    let mismatched_body: Value = mismatched.json().await.expect("error body");
+    assert_eq!(
+        mismatched_body["error"]["message"],
+        json!("refresh token does not match this session")
+    );
+
+    // …and the refusal revoked NOTHING: validation happens before any write.
+    let foreign_revoked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM token \
+          WHERE token_hash = digest($1::text, 'sha256') AND revoked_at IS NOT NULL",
+    )
+    .bind(other_refresh)
+    .fetch_one(&su)
+    .await
+    .expect("count foreign revocations");
+    assert_eq!(
+        foreign_revoked, 0,
+        "a rejected logout must not have revoked the foreign token"
+    );
+    let still_alive = http
+        .get(&messages_url)
+        .bearer_auth(&access4)
+        .send()
+        .await
+        .expect("history after the rejected logout");
+    assert_eq!(
+        still_alive.status(),
+        200,
+        "the rejected logout must not half-revoke the caller's own session"
+    );
+
+    // logout with no body at all revokes just the access half.
+    let bodyless = http
+        .post(format!("{base}/v1/auth/logout"))
+        .bearer_auth(&access4)
+        .send()
+        .await
+        .expect("logout without a body");
+    assert_eq!(bodyless.status(), 200, "the body is optional");
+    let bodyless: Value = bodyless.json().await.expect("logout body");
+    assert_eq!(bodyless["revokedAccess"], json!(true));
+    assert_eq!(
+        bodyless["revokedRefresh"],
+        json!(false),
+        "no refresh token was presented, so none was revoked"
+    );
 }

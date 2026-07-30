@@ -46,7 +46,11 @@ use crate::AppState;
 
 /// Extract the raw bearer token from an `Authorization` header, case-insensitive
 /// on the scheme (Swift lowercases before comparing).
-fn bearer_token(header: &str) -> Option<&str> {
+///
+/// `pub(crate)` because `POST /v1/auth/logout` sits *outside* this middleware
+/// (Swift `AuthRoutes.add(to:)` :36-44) yet must read the header by the exact
+/// same rule — two parsers would be two contracts.
+pub(crate) fn bearer_token(header: &str) -> Option<&str> {
     let (scheme, token) = header.split_once(' ')?;
     if !scheme.eq_ignore_ascii_case("bearer") {
         return None;
@@ -77,6 +81,10 @@ pub async fn require_principal(
         verify_app_access(&raw_token, &state.jwt_secret).map_err(|error| match error {
             AuthError::InvalidToken(_) => ApiError::unauthorized("invalid or expired token"),
             AuthError::NotAccessToken => ApiError::unauthorized("not an access token"),
+            // Unreachable on this path (`verify_app_access` never returns it),
+            // but named rather than caught by a wildcard so a future variant
+            // fails the build instead of silently reusing another message.
+            AuthError::NotRefreshToken => ApiError::unauthorized("not a refresh token"),
             AuthError::MalformedClaims => ApiError::unauthorized("malformed token claims"),
         })?;
 

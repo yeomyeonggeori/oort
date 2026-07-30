@@ -3,19 +3,22 @@
 //! These are the orchestrator's docker-gate red tests for **invariant #2
 //! (Centrifugo = transport-only)** and the relay's delivery contract. Each has a
 //! named assertion that goes red if the behaviour is reverted. They are
-//! `#[ignore]` because they need a throwaway `pgvector/pgvector:pg18` superuser
-//! DB plus the runtime roles. Run:
+//! `#[ignore]` because they need a `pgvector/pgvector:pg18` superuser DB plus
+//! the runtime roles. Run:
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
 //!   cargo test -p momo-relay --test relay_conformance_pg -- --ignored --nocapture
 //! ```
 //!
-//! **Give each test binary a FRESH database.** The harness applies the
-//! migrations itself and is not idempotent against an already-migrated DB, so
-//! reusing the database another conformance binary just ran against (e.g.
-//! `momo-server`'s `http_smoke_pg`) fails in the migration step, not in an
-//! assertion. One throwaway `pgvector/pgvector:pg18` container per test binary.
+//! **A fresh database is no longer required (B1.6).** The migration runner now
+//! tracks `schema_migrations` like `scripts/migrate.sh`, so running it against a
+//! database another conformance binary already migrated (e.g. `momo-server`'s
+//! `http_smoke_pg`) SKIPs every file instead of failing in the migration step.
+//! Sharing one container across binaries is therefore safe; a throwaway
+//! `pgvector/pgvector:pg18` container per binary stays the cleanest isolation.
+//! The relay's own assertions are unaffected either way — they serialize on a
+//! process-wide lock and filter to the test's own channel (see below).
 //!
 //! Harness contract (same as `momo-messaging`'s conformance file):
 //!   * `DATABASE_URL` connects as a **superuser** (applies the migrations via psql
@@ -247,6 +250,21 @@ fn relay_for(pool: PgPool, api_url: &str) -> Relay {
 // fixtures
 // ---------------------------------------------------------------------------
 
+/// Shared-DB isolation (B1.6): earlier conformance binaries (e.g. messaging)
+/// leave their own `pending` broadcast rows behind, and a relay claim would
+/// pick those up before this test's rows — skewing "publish attempted once"
+/// counts. Settle any residue as `done` up front; with `--test-threads=1` each
+/// test then only ever claims the rows it seeds itself.
+async fn settle_residual_broadcasts(su: &PgPool) {
+    sqlx::query(
+        "UPDATE outbox SET status = 'done', processed_at = now() \
+          WHERE kind = 'broadcast' AND status IN ('pending', 'processing')",
+    )
+    .execute(su)
+    .await
+    .expect("settle residual pending broadcasts");
+}
+
 async fn seed_workspace(su: &PgPool, ws: Uuid) {
     sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
         .bind(ws)
@@ -332,6 +350,7 @@ async fn d2_2_relay_publishes_the_outbox_contract_and_settles_done() {
     let _guard = relay_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
     let fixture = fixture(&su).await;
     let (mock, api_url) = start_mock_centrifugo(StatusCode::OK).await;
 
@@ -414,6 +433,7 @@ async fn two_relay_instances_never_double_publish_a_row() {
     let _guard = relay_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
     let fixture = fixture(&su).await;
     let (mock, api_url) = start_mock_centrifugo(StatusCode::OK).await;
 
@@ -479,6 +499,7 @@ async fn a_5xx_publish_requeues_with_backoff_instead_of_dropping() {
     let _guard = relay_test_lock().await;
     ensure_schema_and_roles();
     let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
     let fixture = fixture(&su).await;
     let (mock, api_url) = start_mock_centrifugo(StatusCode::INTERNAL_SERVER_ERROR).await;
 
