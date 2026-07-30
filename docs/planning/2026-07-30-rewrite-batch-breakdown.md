@@ -11,6 +11,7 @@
 - Cargo 워크스페이스 + 공유 인프라 5 crate 스켈레톤: `momo-db`(pool·`with_tenant_tx` GUC·마이그레이션 러너=기존 59 SQL 그대로)·`momo-outbox`(`emit_outbox` chokepoint + relay 소비자)·`momo-wire`(서명 포맷·페이로드)·`momo-auth`(JWT·principal·WorkHost 검증)·`momo-provider`(CloudProviderKit 이식).
 - provenance 프리미티브 착수: `momo-wire` 서명 페이로드 정의 + `record_provenance` chokepoint 골격 + `action_signature` 마이그레이션(060+).
 - 수용: 마이그레이션 러너가 기존 DB를 손대지 않고 세움 + `with_tenant_tx`가 RLS GUC 세팅(D2 #6 red 통과) + `emit_outbox`가 유일 outbox 소유(D2 #3 골격).
+- **랜딩됨(PR #927, track/engine `d1e51ddf`)**. 게이트 교훈: **러너는 psql 경유 정본**(시드 마이그레이션 `\if` 조건부 → `sqlx::raw_sql` 불가). B1+ 준수.
 
 ## B1 — 메신저 코어 (`momo-messaging`)
 - identity(member/agent·workspace·roster·profile/card/credential) · channels(channel·DM·read-state·mention) · message(seq row-lock + `emit_outbox`) · huddle · search/memory.

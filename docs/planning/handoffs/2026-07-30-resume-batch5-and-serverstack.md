@@ -23,10 +23,13 @@
 - **D2** `docs/architecture/invariants-in-rust.md` — 하드 불변식 7개 × [Rust 강제·DB 백스톱·되돌리면 실패 red]. 논리: 불변식은 DB(재사용), 앱은 우회 불가 배선+red 증명.
 - **D3** ADR-0146 — provenance 서명 **범위 확정(성재: "상태 전이까지 넓게")**: 3표면(메시지·workd 이벤트·상태 전이), 사이드카 `action_signature`, `record_provenance` chokepoint, 불변식 무손상. 세부 페이로드·device 키 시점·UX는 상세 후 성재 최종 Accept.
 - **D4** `buzz-reference-catalog.md` · **D5** `cutover-and-parity.md`(**빅뱅 확정**) · **D6** `rewrite-batch-breakdown.md`(**B0 골격** + B1~B5, provenance 분산).
-- **다음**: 성재 Phase 0 승인 → B0(골격)부터 워커 착수. **승인 전 재작성 코드 금지.**
+- **B0 랜딩 완료**(track/engine `d1e51ddf`, PR #927 머지). `server-rust/` Cargo 워크스페이스 + 공유 5 crate. **오케스트레이터 docker 게이트 통과**(conformance `momo-db/tests/conformance_pg.rs`, #[ignore]): 마이그레이션 러너가 psql로 001~059 전부 fresh pgvector/pg18에 적용(FORCE-RLS 73), `with_tenant_tx` GUC 바인딩 확인. 무회귀 fmt/clippy/test green.
+  - **게이트가 잡은 결함(수정됨)**: 러너 초안이 `sqlx::raw_sql`(서버 직송)이라 시드 마이그레이션(002/006/012)의 psql `\if :MOMO_AGENT_SEED_ENABLED` 조건부에서 42601 실패 → **psql shell-out**(migrate.sh 방식, `-v MOMO_AGENT_SEED_ENABLED`)으로 전환해 green. **B1+ 러너는 psql 경유가 정본**(sqlx::raw_sql 금지).
+  - **B1 후속 노트**: `momo-outbox`의 `OutboxKind` enum이 `push_candidate`(011) 누락 — notifier/push 이식 시 추가.
+  - **다음 = B1(메신저 코어)**: identity·channels·message(seq·emit_outbox)·huddle·search + 에이전트 메시지 서명(ADR-0146). D2 red #1~#6 green 목표. 패킷 작성 → 워커 스폰.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
-**성재 최종 결정 대기 지점**: (1) Phase 0 설계 패키지 전체 승인, (2) ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격.
+**성재 결정 대기 지점**: ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격 — B1 전까지. (Phase 0 전체 승인은 완료: "B0 착수해줘".)
 
 **스파이크 판정(기록됨, ADR-0145)**: buzz ↔ momo는 스택 표면만 1:1, 정합성·격리 코어는 정반대. 불변식 3개(단일쓰기경로·gapless seq·RLS FORCE)가 buzz Nostr 코어(클라-서명-publish·created_at·RLS 전무)와 정면 충돌. 둘 다 "relay=SoT"는 같음(차이는 저자·순서·격리강제). 곡선 정정: buzz=secp256k1 Schnorr, momo=Ed25519. buzz clone: scratchpad/buzz.
 
@@ -67,3 +70,4 @@
 - **푸시된 커밋 amend/force-push 금지**(배치4 N 위반) — 새 커밋으로. 배치5부터 공통 규율.
 - "아무 non-2xx나 통과" 단정 금지(404와 거부 구분 못 함).
 - 워커 자기신고 이탈이 정착 — 대부분 타당(근거와 함께).
+- **마이그레이션 러너는 psql 경유**(Rust 재작성) — 시드 마이그레이션이 psql `\if` 조건부라 `sqlx::raw_sql`(서버 직송) 불가. migrate.sh와 동일 플래그로 shell-out. B0 게이트가 실측으로 잡음.
