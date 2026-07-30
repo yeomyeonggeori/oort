@@ -69,6 +69,91 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    /// 자사 카탈로그의 tools[].description 은 두 곳에 산다: 정본인 픽스처와,
+    /// 그것을 plugin_registry 에 심는 재시드 마이그레이션(013/015/031 → 059).
+    /// 둘이 갈라지면 배포된 DB가 앱 상세("도구와 권한")에서 픽스처와 다른 문장을
+    /// 보여주는데, 어느 화면도 그 사실을 알려주지 않는다. 문자열 동일성을 여기서
+    /// 잠근다. 이 단정은 자사 4종만 다룬다 — 제3자 매니페스트는 어떤 언어로도
+    /// 들어올 수 있어 데이터 번역으로 닫히지 않고, 그래서 결정 표면(동의
+    /// 다이얼로그)은 배포자 산문 대신 도구 이름으로 도구를 식별한다(#914/#917).
+    func testOfficialPluginManifestToolDescriptionsAreKoreanAndMatchReseedMigration() throws {
+        let expected: [(fixture: String, tool: String, korean: String, legacy: String)] = [
+            ("github", "github.list_repositories",
+             "권한을 위임한 사용자가 접근할 수 있는 저장소 목록을 조회합니다.",
+             "List repositories available to the delegated user"),
+            ("github", "github.search_issues",
+             "권한을 위임한 사용자가 접근할 수 있는 저장소에서 이슈를 검색합니다.",
+             "Search issues in repositories available to the delegated user"),
+            ("notion", "notion.search",
+             "권한을 위임한 사용자가 접근할 수 있는 페이지를 검색합니다.",
+             "Search pages available to the delegated user"),
+            ("linear", "linear.list_issues",
+             "권한을 위임한 사용자가 접근할 수 있는 이슈 목록을 조회합니다.",
+             "List issues available to the delegated user"),
+            ("drive", "drive.search_files",
+             "설정된 공유 드라이브 안에서 파일을 검색합니다.",
+             "Search files within the configured shared drive"),
+            ("drive", "drive.get_file_metadata",
+             "설정된 공유 드라이브에 있는 파일의 메타데이터를 조회합니다.",
+             "Get metadata for a file in the configured shared drive"),
+            ("drive", "drive.export_text",
+             "Google Workspace 문서를 텍스트로 내보내거나 크기 한도 안의 텍스트 파일을 내려받습니다.",
+             "Export a Google Workspace document or download a bounded text file"),
+        ]
+        let fixtures = try pluginFixtureDirectory()
+        let fixtureNames = ["github", "notion", "linear", "drive"]
+
+        var declared: [String: String] = [:]
+        for fixtureName in fixtureNames {
+            let data = try Data(contentsOf: fixtures.appendingPathComponent("\(fixtureName).json"))
+            let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let mcp = try XCTUnwrap(root["mcp"] as? [String: Any])
+            let tools = try XCTUnwrap(mcp["tools"] as? [[String: Any]])
+            for tool in tools {
+                let name = try XCTUnwrap(tool["name"] as? String)
+                let description = try XCTUnwrap(tool["description"] as? String)
+                // 새 도구가 영문으로 들어오면 이 표를 갱신하지 않고는 통과하지 못한다.
+                XCTAssertTrue(
+                    description.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) },
+                    "\(name) description must be Korean"
+                )
+                declared[name] = description
+            }
+        }
+        XCTAssertEqual(declared.count, expected.count)
+
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let reseed = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/059_official_manifest_tool_description_ko.sql"
+            ),
+            encoding: .utf8
+        )
+        for entry in expected {
+            XCTAssertEqual(declared[entry.tool], entry.korean, "\(entry.tool) fixture description")
+            XCTAssertTrue(reseed.contains("'\(entry.tool)'"), "\(entry.tool) missing from reseed")
+            XCTAssertTrue(reseed.contains("'\(entry.korean)'"), "\(entry.tool) korean text missing from reseed")
+            // 재시드는 "아직 013/015/031 원문 그대로인 행"만 건드린다 — 배포자가 고친
+            // 매니페스트를 덮어쓰지 않고, 재실행에서도 0행이라 멱등이다.
+            XCTAssertTrue(reseed.contains("'\(entry.legacy)'"), "\(entry.tool) legacy guard missing from reseed")
+        }
+        XCTAssertTrue(reseed.contains("pr.plugin_id IN (SELECT DISTINCT plugin_id FROM ko)"))
+        XCTAssertTrue(reseed.contains("pr.manifest IS DISTINCT FROM rw.manifest"))
+
+        // manifest 만 바꾸고 digest 를 두면 런타임 admission 이 카탈로그 전체를
+        // fail-closed 로 닫는다. 재시드가 회전시키는 식이 런타임이 계산하는 식과
+        // 같은 문자열이어야 한다.
+        XCTAssertTrue(reseed.contains("'sha256:' || encode(sha256(convert_to(rw.manifest::text, 'UTF8')), 'hex')"))
+        let pluginRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/PluginRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(pluginRoutes.contains("'sha256:' || encode(sha256(convert_to(pr.manifest::text, 'UTF8')), 'hex')"))
+    }
+
     func testPluginManifestOptionalDisplayMetadataIsValidated() throws {
         let fixture = try String(
             contentsOf: try pluginFixtureDirectory().appendingPathComponent("github.json"),
