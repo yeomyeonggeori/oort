@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-28 (GPT 5.6 · momo-main) · Fable 산출물 통합 → 리소스 최적 정본 후보
+- #860/#875 완료를 재계획에서 제거하고, clean/pushed #876~#878 배치 하나만 active로 고정했다.
+- 3-Issue/1-PR가 운영 계약과 충돌함을 발견해 #876 umbrella+absorbed(권고) 또는 명시적 예외 승인 gate를 추가했다.
+- 새 reconciler와 #870, interval/replay와 #879를 구현 전 dedupe하고 #869는 잔여 WSS 조각만 남기는 순서로 축소했다.
+- WIP=code 1·planner 1·Docker-heavy 1, verifier 1회 묶음+통합 adversarial-review 1회. 공용 정본/Issue/track→main은 미변경; Fable 검수·성재 4결정 대기.
+
 ## 2026-07-28 (GPT 5.6 · momo-main) · PLN-20260728-01 독립 red team → 조건부 반려
 - 원 builder DAG를 보안·UX·과설계로 독립 검수해 신뢰 경계 4건을 확인: plugin delegation·terminal은 해당 레인 현재 blocker, WorkHost/approval은 remote·personal-write 확대 전 blocker다.
 - provider 1개의 host-owned connect+단일 runtime bridge 뒤 plugin v1 read-only 1개 + 기존 owner/profile/run을 재사용한 owner-only one-schedule로 축소했다.
@@ -1372,6 +1378,10 @@
 - 한 일: 협업 파이프라인 정본화(docs/planning/* 신설, CLAUDE.md, momo-planning 스킬, PR 이탈 섹션). 이슈 #307(ready)/#308/#309(blocked) 발급 + 핸드오프 패킷. ADR-0102 기안(Proposed).
 - 열린 것: **ADR-0102 성재 결정 대기(권고 C)** · #307 착수는 성재가 Codex에 직접 요청 예정 · 기획/문서 배치는 main에 커밋됨(성재 승인, 이전 세션의 코드 핫픽스 변경은 여전히 미커밋 — 그 배치의 주인이 처리).
 - 다음: 성재의 0102 결정 → 파생 티켓. #307 PR 오면 momo-main 리뷰 사이클 가동.
+
+## 2026-07-30 (오후) · Fable · 기획
+- 한 일: 서버 스택 **B안 확정**(성재 승인) — Swift/Hummingbird→Rust/Axum **재작성**, buzz는 fork 아니라 코드 레퍼런스, momo 불변식 6개 보존. **ADR-0145 Accepted**로 개정(A안 fork→스파이크 불성립→B안). **ADR-0146 Proposed** 발제(에이전트 행동 provenance 서명, buzz 강점 조각을 Ed25519 additive로 차용, 단일쓰기경로·RLS 무손상). **실행 정본 `docs/planning/2026-07-30-server-rewrite-plan.md`** 신설 — 설계-우선(Phase 0 D1~D6 → 구현 배치 B1~B5). 저위험 핵심 = 불변식이 DB에 살아 마이그레이션 재사용, 재작성은 앱 계층 번역.
+- 열린 것: **Phase 0 설계 착수**(D1 타깃 아키텍처·D2 불변식 보존 스펙·D3 ADR-0146 확정·D4 buzz 인용 카탈로그·D5 커토버(빅뱅 권고)·D6 배치분할). Phase 0 승인 전 코드 착수 없음. NCP smoke(§독립)·열린 티켓 #925·#926·#893 병존.
 
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).

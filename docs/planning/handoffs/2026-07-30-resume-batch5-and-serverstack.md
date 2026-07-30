@@ -7,26 +7,25 @@
 
 **배치 1~5 전부 랜딩·main 반영 완료**(main=engine=uxui=`39e45765`). 실작업 PR 0건(열린 PR은 dependabot뿐). **진행 중 작업 없음.** 성재가 **서버 스택 재검토(Swift→?)**를 P0 방향 결정으로 올렸고, 리서치·판단 완료 → **성재 결정 대기**.
 
-## 1. 서버 스택 — **결정됨 (2026-07-30 성재)**: buzz fork + Rust, 지금 착수
+## 1. 서버 스택 — **확정 (2026-07-30 성재 B안 승인)**: Rust/Axum 재작성, buzz는 레퍼런스, 설계부터
 
-**성재 결정: buzz fork + 고유 이식(§7 A안) · 지금 최우선 착수.** → **ADR-0145 Accepted**(`docs/adr/0145-server-stack-buzz-fork-rust.md`).
+**성재 결정 체인**: A안(fork) 선택 → 선행 스파이크가 fork 불성립 판정 → **B안(참조 재작성) 승인 + provenance 서명 차용 포함 + "설계부터 시작"**.
 
-**스파이크 완료 → A안(fork) 불성립 판정.** momo 하드 불변식 3개(단일 쓰기경로·gapless seq·RLS FORCE)가 buzz의 Nostr relay 코어(클라 직접 서명 publish·created_at 순서·RLS 전무)와 **정면 충돌**. buzz는 momo 고유(T3·workstream·과금) 전무 → fork 절감 실질 증발. (곡선도 다름: buzz=secp256k1 Schnorr, momo=Ed25519.) **스파이크 권고 = B안(참조 재작성): 서버=Rust/Axum·workd Rust·지금 착수는 유지하되 momo 불변식 3개 보존, buzz는 코드 레퍼런스로만.** → **성재가 B안 전환 승인해야 이행 착수.** ADR-0145에 스파이크 판정 기록됨. buzz clone: scratchpad/buzz.
+**확정 상태**:
+- **ADR-0145 Accepted** — Swift/Hummingbird → Rust/Axum **재작성**, buzz는 fork 아니라 **코드 레퍼런스**, momo 불변식 6개 보존.
+- **ADR-0146 Proposed** — 에이전트 행동 provenance 서명(buzz 강점 조각 차용, Ed25519 additive, 단일쓰기경로·RLS 무손상). D3에서 확정.
+- **실행 정본 = `docs/planning/2026-07-30-server-rewrite-plan.md`** — 설계-우선. Phase 0 산출물 D1~D6 확정 → 구현 배치 B1~B5.
 
-(원래 착수 첫 단계였던 buzz 대조 스파이크는 완료됨) buzz(github.com/block/buzz) 코드를 읽고 ①Nostr 이벤트 모델 ↔ momo 불변식(PG=SoT·단일 쓰기경로·RLS FORCE) 화해 가부 ②buzz 스키마 ↔ momo 59 마이그레이션 대조 ③재사용 층 vs momo 고유(T3·workstream) 경계 ④이식 계획·fork 방식 판정. **스파이크 결과가 ADR-0145 세부를 확정. 스파이크 없이 fork 코드 착수 금지.**
-- 스파이크 완료 시: 결과 검토 → 이행 배치(메신저 코어 검증→T3 이식→workstream 이식→클라이언트 재배선) 설계.
-- **Nostr 수용이 momo 불변식과 안 맞으면 A안→B안(참조 재작성) 후퇴** — 스파이크가 그 판정.
-- 병행: NCP smoke는 서버 스택과 독립(§2)이라 계속 가능.
+**저위험 핵심**: 불변식은 DB에 산다(59 마이그레이션, 44/59 강제) → 마이그레이션 언어독립·그대로 재사용 → 재작성 = "불변식 재구현"이 아니라 "앱 계층(52 route·workd·NotifierWorker ≈ 51k Swift)을 동일 스키마 위에 Rust로". 동일 DB·게이트 픽스처 = conformance oracle.
 
-정본(판단 근거): `docs/planning/2026-07-30-server-stack-reassessment.md` (§0~§7).
+**다음 한 걸음 = Phase 0 설계 (기획 레이어가 직접, 워커 아님)**:
+- D1 타깃 아키텍처(`docs/architecture/server-rust.md`) · D2 불변식 보존 스펙(`invariants-in-rust.md`) · D3 provenance=ADR-0146 확정 · D4 buzz 인용 카탈로그 · D5 커토버(빅뱅 권고)·parity · D6 배치 분할.
+- Phase 0 승인 없이 재작성 코드 착수 금지.
+- 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
-**핵심 결론**:
-- **Swift 서버 = 잔재 확정.** momo가 참조한 **buzz(Block/Dorsey, 2026-07 출시, github.com/block/buzz)가 서버를 Rust/Axum으로 짰고** momo만 Swift로 어긋났다. buzz ↔ momo 스택이 1:1 대응(Rust/Axum·PG·Redis→Centrifugo·S3·TS+React 클라이언트).
-- 성재 축(정합성·스케일·내구성)으로 재평가 시 **Rust/Axum 유력**(TS/Encore.ts 차점, Hono는 철회 — 엣지용이라 부적합). 내 첫 TS 권고는 "개발속도" 가중치였는데 성재가 낮춤.
-- **buzz가 Apache 2.0** → "재작성 언어"보다 상위 결정: **자체구축 유지 vs buzz 코어 기반**. §7에 3방식(A fork / B 참조재작성 / C upstream), **B 권고**.
-- momo 고유(T3 work runtime·workstream)는 어느 방식이든 우리가 짠다 — buzz는 메신저 하부층만 대체.
+**스파이크 판정(기록됨, ADR-0145)**: buzz ↔ momo는 스택 표면만 1:1, 정합성·격리 코어는 정반대. 불변식 3개(단일쓰기경로·gapless seq·RLS FORCE)가 buzz Nostr 코어(클라-서명-publish·created_at·RLS 전무)와 정면 충돌. 둘 다 "relay=SoT"는 같음(차이는 저자·순서·격리강제). 곡선 정정: buzz=secp256k1 Schnorr, momo=Ed25519. buzz clone: scratchpad/buzz.
 
-**성재에게 물을 것(AskUserQuestion 준비됨)**: ①방향(buzz기반 / Rust재작성 / TS재작성 / Swift유지) ②타이밍(지금·사용자0이 가장 쌈 / T3·workstream 안정 후 / 출시 후). **compaction으로 질문이 유실되면 이 문서 §1 보고 다시 물어라.**
+정본(판단 근거): `docs/planning/2026-07-30-server-stack-reassessment.md`(§0~§7).
 
 ## 2. NCP T3 smoke — 서버 스택과 독립, 디스크 결정만 남음
 
