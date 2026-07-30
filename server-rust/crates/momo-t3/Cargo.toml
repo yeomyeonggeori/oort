@@ -21,6 +21,14 @@ sqlx.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
+# B2.4 (terminal attach + reattach replay):
+#   base64     — the capability bearer is `base64URL(randomBytes(32))`, the exact
+#                spelling `WebhookCrypto.randomReference()` produces; a second
+#                encoder would be a second grammar.
+#   serde_json — a replayed thread row carries `message.props` (jsonb) through
+#                unchanged; the domain must not re-shape a client contract.
+base64.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 # DB-backed conformance harness (tests/conformance_pg.rs, all #[ignore]) — the

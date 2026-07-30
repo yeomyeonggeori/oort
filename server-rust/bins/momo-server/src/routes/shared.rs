@@ -46,6 +46,25 @@ pub(crate) fn require_human(principal: &Principal, message: &'static str) -> Res
     }
 }
 
+/// The `audit_log.via_token_id` a principal may legitimately claim (B2.4).
+///
+/// `via_token_id` is `REFERENCES token(id)`. A human bearer's `token_id` IS such
+/// a row, so it is the delegation provenance the column exists to record. A
+/// work-host principal's `token_id` slot carries its **host** id, which is not a
+/// `token` row: writing it there is a foreign-key violation, and the Swift
+/// server took that as a live 500 before fixing it to NULL
+/// (`WorkSessionRoutes.swift:1009-1017` — "No token was used, so NULL is the
+/// true statement; the acting host is already named in detail.host_id").
+///
+/// Centralised here rather than repeated per route so the next audit call site
+/// cannot re-introduce the same 500.
+pub(crate) fn audit_via_token_id(principal: &Principal) -> Option<Uuid> {
+    match principal.kind {
+        PrincipalKind::WorkHost => None,
+        PrincipalKind::Human | PrincipalKind::Agent => principal.token_id,
+    }
+}
+
 /// `momo Cloud(T3)는 기본 비활성입니다` — Swift `CloudProvisionerRoutes.disabledError`
 /// (:1183-1188), 503 verbatim so an operator sees the same sentence they would
 /// from the Swift server.
@@ -231,6 +250,23 @@ mod tests {
         assert_eq!(
             workspace_scope(&credential.to_string(), &principal(credential)).expect("match"),
             credential
+        );
+    }
+
+    /// The FK rule that cost the Swift server a live 500.
+    #[test]
+    fn a_host_signature_never_claims_a_token_row_as_provenance() {
+        let token = Uuid::from_u128(2);
+        let human = principal(Uuid::from_u128(10));
+        assert_eq!(audit_via_token_id(&human), Some(token));
+
+        let mut host = principal(Uuid::from_u128(10));
+        host.kind = PrincipalKind::WorkHost;
+        assert_eq!(
+            audit_via_token_id(&host),
+            None,
+            "a work host's token_id is a HOST id; audit_log.via_token_id \
+             REFERENCES token(id) and would reject it"
         );
     }
 

@@ -28,9 +28,18 @@
 //! ([`workspace_authorization`], the single `workspace_membership` predicate),
 //! plus heartbeat-signature verification in [`workhost`].
 
+//! B2.4 adds the third credential path this server authenticates: the **signed
+//! work-host request** ([`work_host_request`] — v2 payload + one-time request
+//! id, migration 048). B2.2 stopped at the heartbeat signature, which is a
+//! liveness ping; a request *acts*, so it binds method/path/body digest and is
+//! replay-protected by consuming its id. Only the DB halves live here — the
+//! cryptographic verdict is [`workhost::verify_work_host_request`] and header
+//! parsing is the route's, the same split the heartbeat already uses.
+
 pub mod issue;
 pub mod jwt;
 pub mod token_store;
+pub mod work_host_request;
 pub mod work_host_store;
 pub mod workhost;
 pub mod workspace_authorization;
@@ -45,6 +54,10 @@ pub use token_store::{
     carries_privileged_scope, record_session_token, revoke_privileged_session_tokens, revoke_token,
     token_state, without_privileged_scopes, RevokeOutcome, TokenRejection, TokenState,
     PRIVILEGED_SCOPES, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+};
+pub use work_host_request::{
+    consume_work_host_request_id, load_work_host_signing_credential, WorkHostSigningCredential,
+    REQUEST_REPLAY_RETENTION_MINUTES,
 };
 pub use work_host_store::{
     insert_work_host, list_work_hosts, load_work_host, lock_work_host_credential,

@@ -24,8 +24,13 @@
 //! ## What this crate is not
 //!
 //! No HTTP surface (this is a domain crate — a route layer mounts it), no
-//! AgentGateway, terminal attach, tier policy, pool policy, approvals,
-//! reattach/replay (ADR-0139) or Kata (ADR-0144) — all of that is B2.4+.
+//! AgentGateway, tier policy, pool policy, approvals or Kata (ADR-0144).
+//!
+//! B2.4 added the two ADR-0139 halves: [`reattach`] (session snapshot + the
+//! `message.seq` replay cursor, and the D3 reattach-vs-lineage branch) and
+//! [`terminal_attach`] (the ADR-0125 D10 capability control plane — mint,
+//! sweep, validate). Neither carries a terminal byte: the PTY ring buffer and
+//! its `replay_end` splice stay on the host daemon (D2), which is B5.
 //!
 //! B2.3 added the **domain half of ADR-0140 D4 convergence** — [`convergence`]
 //! (the rule table), [`reconcile`] (claim → revalidate → apply) and [`sweep`]
@@ -50,8 +55,10 @@ pub mod convergence;
 pub mod error;
 pub mod lifecycle;
 pub mod provider;
+pub mod reattach;
 pub mod reconcile;
 pub mod sweep;
+pub mod terminal_attach;
 
 pub use billing::{
     acquire_slot_in_tx, pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx,
@@ -83,10 +90,21 @@ pub use lifecycle::{
 pub use provider::{
     ByocProviderAdapter, MockCall, MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,
 };
+pub use reattach::{
+    clamp_replay_limit, list_session_events_in_tx, load_session_reattach_state_in_tx,
+    ReattachVerdict, SessionEvent, SessionReattachState, REPLAY_LIMIT_DEFAULT, REPLAY_LIMIT_MAX,
+};
 pub use reconcile::{
     apply_convergence_to_intent, claim_lifecycle_intent, due_lifecycle_candidates,
     ActionableIntent, AppliedConvergence, ClaimedIntent, LifecycleCandidate,
 };
 pub use sweep::{
     converge_stale_session, stale_session_candidates, StaleConvergence, StaleSessionCandidate,
+};
+pub use terminal_attach::{
+    active_observer_capability_count_in_tx, is_valid_capability_token,
+    issue_attach_capability_in_tx, lock_attach_target_in_tx, mint_capability_token,
+    sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx, validated_binding,
+    AttachMode, AttachTarget, IssuedCapability, RemotePtyBinding, ValidatedAttach,
+    CAPABILITY_PREFIX, CAPABILITY_TTL_SECONDS, OBSERVER_CAPABILITY_RETENTION,
 };
