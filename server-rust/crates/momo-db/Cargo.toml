@@ -1,0 +1,20 @@
+[package]
+name = "momo-db"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sqlx.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# DB-backed conformance harness (tests/conformance_pg.rs, #[ignore]) — the seed
+# of the D5 conformance suite. Orchestrator-added B0 docker gate.
+tokio = { workspace = true }
+uuid = { workspace = true }

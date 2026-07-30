@@ -1,0 +1,48 @@
+# momo server — Rust/Axum rewrite (ADR-0145 B안). B0 = workspace skeleton + 5
+# shared infrastructure crates. Domain crates (messaging/t3/integrations) and
+# binaries (server/relay/notifier/workd/agent-worker) land in B1+.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.0"
+license = "Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# DB — sqlx runtime query API only (no compile-time query! macro: B0 must build
+# without a live DB, so the "macros" feature is deliberately absent).
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "uuid",
+  "chrono",
+  "json",
+] }
+
+# shared value types
+uuid = { version = "1", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# crypto / wire (workd Ed25519 signature parity)
+ed25519-dalek = "2"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+
+# auth
+jsonwebtoken = "9"
+
+# errors / logging
+thiserror = "1"
+tracing = "0.1"
