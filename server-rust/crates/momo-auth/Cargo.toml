@@ -1,0 +1,17 @@
+[package]
+name = "momo-auth"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+momo-wire = { path = "../momo-wire" }
+jsonwebtoken.workspace = true
+serde.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+ed25519-dalek.workspace = true
+base64.workspace = true
