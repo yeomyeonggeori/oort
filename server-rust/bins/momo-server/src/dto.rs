@@ -52,6 +52,44 @@ pub struct LoginResponse {
     pub realtime_web_socket_url: String,
 }
 
+/// `POST /v1/auth/refresh` request (Swift `RefreshRequest`, `DTOs.swift:49-51`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+/// `POST /v1/auth/refresh` response (Swift `RefreshResponse`, `DTOs.swift:55-58`)
+/// — the presented refresh token is revoked (rotation) and a fresh pair issued.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+/// `POST /v1/auth/logout` optional request body (Swift `LogoutRequest`,
+/// `DTOs.swift:63-65`). The access token comes from `Authorization`; the client
+/// may also hand in its refresh token so the whole session dies at once.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogoutRequest {
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+}
+
+/// `POST /v1/auth/logout` response (Swift `LogoutResponse`, `DTOs.swift:69-74`).
+/// Idempotent: a repeat call is 200 with `alreadyRevoked=true` and revokes
+/// nothing new.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogoutResponse {
+    pub status: &'static str,
+    pub revoked_access: bool,
+    pub revoked_refresh: bool,
+    pub already_revoked: bool,
+}
+
 /// Swift `MemberDTO`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -247,6 +285,51 @@ mod tests {
         }))
         .expect("snake_case");
         assert_eq!(snake.platform_admin_secret.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn refresh_dtos_use_swift_keys() {
+        let request: RefreshRequest =
+            serde_json::from_value(serde_json::json!({"refreshToken": "r"})).expect("decode");
+        assert_eq!(request.refresh_token, "r");
+
+        let json = serde_json::to_value(RefreshResponse {
+            access_token: "a".into(),
+            refresh_token: "r2".into(),
+        })
+        .expect("serialize");
+        assert_eq!(json["accessToken"], "a");
+        assert_eq!(json["refreshToken"], "r2");
+    }
+
+    #[test]
+    fn logout_body_is_optional_in_every_shape() {
+        // Swift decodes the body with `try?`: an empty object, a null, or an
+        // absent refreshToken all mean "revoke the access token only".
+        let empty: LogoutRequest =
+            serde_json::from_value(serde_json::json!({})).expect("empty object");
+        assert_eq!(empty.refresh_token, None);
+        let null: LogoutRequest =
+            serde_json::from_value(serde_json::json!({"refreshToken": null})).expect("null");
+        assert_eq!(null.refresh_token, None);
+        let given: LogoutRequest =
+            serde_json::from_value(serde_json::json!({"refreshToken": "r"})).expect("given");
+        assert_eq!(given.refresh_token.as_deref(), Some("r"));
+    }
+
+    #[test]
+    fn logout_response_uses_swift_keys() {
+        let json = serde_json::to_value(LogoutResponse {
+            status: "ok",
+            revoked_access: true,
+            revoked_refresh: false,
+            already_revoked: false,
+        })
+        .expect("serialize");
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["revokedAccess"], true);
+        assert_eq!(json["revokedRefresh"], false);
+        assert_eq!(json["alreadyRevoked"], false);
     }
 
     #[test]
