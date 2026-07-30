@@ -17,6 +17,27 @@
 //!   * every assertion under test runs as the runtime **`momo_app`** role
 //!     (`NOBYPASSRLS`), the only faithful way to exercise the DB policies.
 //!
+//! ## Shared-DB isolation: why this suite needs no residue sweep
+//!
+//! `momo-relay`'s suite opens with `settle_residual_broadcasts`, which marks
+//! every leftover `pending` broadcast `done` before it starts. That is necessary
+//! *there* because `claim_broadcast_batch` is a **global** consumer claim —
+//! `WHERE kind = 'broadcast' AND status = 'pending'`, no workspace predicate, on
+//! a pool that sets no tenant GUC — so an earlier binary's rows land in the
+//! relay's own batch.
+//!
+//! The gateway claim is not that shape. `claim_gateway_jobs_in_tx` filters on
+//! `workspace_id`, `partition_key = <agent>` **and**
+//! `payload->>'agent_member_id' = <agent>`, and runs inside `with_tenant_tx`
+//! under FORCE RLS; every test here seeds a brand-new workspace and agent uuid.
+//! No other suite's rows can enter the claim set, so a residue sweep here would
+//! be cargo-culting the relay's fix onto a claim that does not have its problem
+//! — and would quietly mark unrelated suites' jobs `done`. Do not add one.
+//!
+//! Every assertion below is likewise scoped to its own fresh `workspace_id`, so
+//! this suite returns the same verdict on a fresh database and on one a full
+//! `--test-threads=1` gate run has already been through.
+//!
 //! What each test breaks when reverted:
 //!
 //! | test | revert that makes it red |
@@ -26,6 +47,7 @@
 //! | `b26_3_an_unauthorized_gateway_callback_is_refused` | widen `gateway_lease_authorized`, or drop the run/agent binding from `lock_gateway_lease_in_tx` |
 //! | `b26_4_the_shared_schema_still_carries_this_batchs_columns` | any migration edit that moves `usage_ledger.effort`, the `agent_run` idempotency key, or the 008 lease columns |
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
@@ -33,7 +55,7 @@ use std::sync::Mutex;
 use momo_agent::{
     create_agent_run_in_tx, find_agent_run_by_trigger_in_tx, lock_gateway_run_in_tx,
     record_run_usage_in_tx, usage_summary_in_tx, validated_window, NewAgentRun, RunStatus,
-    RunTrigger, RunUsageReport,
+    RunTrigger, RunUsageReport, MAX_EFFORT_LENGTH,
 };
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
@@ -283,25 +305,41 @@ async fn create_run_with_job(app: &PgPool, tenant: &Tenant, client_run_id: Uuid)
     .expect("create a run and its gateway job")
 }
 
-/// Claim the run's job, returning the lease the gateway would then present.
-async fn claim_lease(app: &PgPool, tenant: &Tenant, run_id: Uuid) -> GatewayLeaseBinding {
+/// Claim the agent's pending jobs **in one batch** — what a real gateway consumer
+/// does — and index the minted leases by run id.
+///
+/// The batch shape is the contract, not an implementation detail: one claim
+/// leases every eligible job it sees (up to `limit`) and mints a *separate*
+/// `lease_owner` on each. A helper that claimed "the job for run X" would work
+/// once and then find nothing, because the first call already leased the rest for
+/// `GATEWAY_LEASE_SECONDS` — which is exactly the property
+/// `b26_3`'s second assertion goes on to prove.
+async fn claim_agent_jobs(app: &PgPool, tenant: &Tenant) -> BTreeMap<Uuid, GatewayLeaseBinding> {
     let workspace_id = tenant.workspace_id;
     let agent_id = tenant.agent_id;
     with_tenant_tx(app, workspace_id, move |conn| {
         Box::pin(async move {
-            let claimed = claim_gateway_jobs_in_tx(conn, workspace_id, agent_id, 10).await?;
-            let job = claimed
+            let claimed = claim_gateway_jobs_in_tx(conn, workspace_id, agent_id, 10)
+                .await
+                .map_err(momo_db::DbError::from)?;
+            Ok(claimed
                 .into_iter()
-                .find(|job| job.run_id_field() == run_id.to_string())
-                .expect("the run's job is claimable");
-            Ok(GatewayLeaseBinding {
-                job_id: job.id,
-                lease_id: job.lease_id,
-            })
+                .map(|job| {
+                    let run_id = Uuid::parse_str(job.run_id_field())
+                        .expect("every agent_job this suite enqueues names its run");
+                    (
+                        run_id,
+                        GatewayLeaseBinding {
+                            job_id: job.id,
+                            lease_id: job.lease_id,
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>())
         })
     })
     .await
-    .expect("claim the gateway job")
+    .expect("claim the agent's gateway jobs")
 }
 
 // ---------------------------------------------------------------------------
@@ -585,9 +623,19 @@ async fn b26_3_an_unauthorized_gateway_callback_is_refused() {
 
     let (run_a, _) = create_run_with_job(&app, &tenant, Uuid::new_v4()).await;
     let (run_b, _) = create_run_with_job(&app, &tenant, Uuid::new_v4()).await;
-    let lease_a = claim_lease(&app, &tenant, run_a).await;
-    let lease_b = claim_lease(&app, &tenant, run_b).await;
+
+    // One claim, both jobs — and a distinct lease on each. Two consumers holding
+    // one lease id would make every ownership assertion below vacuous.
+    let leases = claim_agent_jobs(&app, &tenant).await;
+    assert_eq!(
+        leases.len(),
+        2,
+        "a single claim leases every eligible job for the agent, not one per call"
+    );
+    let lease_a = leases[&run_a];
+    let lease_b = leases[&run_b];
     assert_ne!(lease_a.lease_id, lease_b.lease_id);
+    assert_ne!(lease_a.job_id, lease_b.job_id);
 
     let workspace_id = tenant.workspace_id;
     let agent_id = tenant.agent_id;
@@ -737,21 +785,49 @@ async fn b26_4_the_shared_schema_still_carries_this_batchs_columns() {
         effort_check,
         "the 1..32 length CHECK is the DB half of momo_agent::effort's cap"
     );
-    // The cap is enforced by the database, not only by the Rust normalizer.
-    let over_length = sqlx::query(
-        "INSERT INTO usage_ledger \
-           (workspace_id, agent_member_id, model, effort) \
-         VALUES ($1, $2, 'm', $3)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(Uuid::new_v4())
-    .bind("x".repeat(33))
-    .execute(&su)
-    .await;
-    assert!(
-        over_length.is_err(),
-        "a 33-character effort must be refused by Postgres even as superuser"
+    // The cap is enforced by the DATABASE, not only by the Rust normalizer.
+    //
+    // The insert uses a REAL tenant on purpose: with a random workspace/member
+    // the row would be refused for referential reasons and a bare `is_err()`
+    // would pass while proving nothing about the CHECK. Satisfying the foreign
+    // keys leaves the length constraint as the only thing that can refuse it —
+    // and the assertion names it, so the test cannot go green on a different
+    // error.
+    let ledger_tenant = seed_tenant(&su).await;
+    let insert_effort = |effort: String| {
+        let su = su.clone();
+        let workspace_id = ledger_tenant.workspace_id;
+        let agent_id = ledger_tenant.agent_id;
+        async move {
+            sqlx::query(
+                "INSERT INTO usage_ledger \
+                   (workspace_id, agent_member_id, model, effort) \
+                 VALUES ($1, $2, 'm', $3)",
+            )
+            .bind(workspace_id)
+            .bind(agent_id)
+            .bind(effort)
+            .execute(&su)
+            .await
+        }
+    };
+
+    let refused = insert_effort("x".repeat(MAX_EFFORT_LENGTH + 1))
+        .await
+        .expect_err("a 33-character effort must be refused even as superuser");
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|error| error.constraint()),
+        Some("usage_ledger_effort_ck"),
+        "the row must be refused by the 041 length CHECK specifically — a \
+         different error would mean this assertion is not testing the cap"
     );
+    // Positive control: the boundary value is accepted, so the CHECK is a cap
+    // rather than a blanket refusal.
+    insert_effort("x".repeat(MAX_EFFORT_LENGTH))
+        .await
+        .expect("a 32-character effort is inside the 041 bound");
 
     // usage_ledger has no natural uniqueness on run_id — which is precisely why
     // record_run_usage_in_tx's NOT EXISTS guard must run under the run's lock.
