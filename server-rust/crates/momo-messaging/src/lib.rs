@@ -14,10 +14,15 @@
 //! The invariant-bearing entry point is [`message::send_message`]; see that
 //! module for the step-by-step mapping to Swift `MessageRoutes.swift:123-282`.
 //!
-//! Deliberately **out of scope for B1** (later batches): agent-action provenance
-//! signing (ADR-0146), HTTP/Axum routes and the `momo-server` binary (this is a
-//! domain crate — the API is shaped so a route layer can mount it), and the
-//! huddle / search-memory / DM / read-state / mention-semantics surfaces.
+//! * Action provenance is written only through [`momo_wire::record_provenance`]
+//!   (ADR-0146, B2.5) — this crate owns no `INSERT INTO action_signature`, the
+//!   same discipline it holds for the outbox. [`message::send_signed_message_in_tx`]
+//!   is the signed twin of the spine; the unsigned path is untouched.
+//!
+//! Deliberately **out of scope for B1** (later batches): HTTP/Axum routes and the
+//! `momo-server` binary (this is a domain crate — the API is shaped so a route
+//! layer can mount it), and the huddle / search-memory / DM / read-state /
+//! mention-semantics surfaces.
 
 pub mod channel;
 pub mod error;
@@ -25,13 +30,13 @@ pub mod identity;
 pub mod message;
 
 pub use channel::{create_channel, create_channel_in_tx, Channel, ChannelKind, NewChannel};
-pub use error::MessagingError;
+pub use error::{MessagingError, ProvenanceRejected};
 pub use identity::{
-    get_member, get_workspace, is_channel_member, verify_password_login, Member, MemberKind,
-    PasswordLogin, Workspace,
+    get_member, get_workspace, is_channel_member, resolve_member_signing_key,
+    verify_password_login, Member, MemberKind, PasswordLogin, Workspace,
 };
 pub use message::{
     build_broadcast_payload, cent_channel, clamp_history_limit, list_channel_page, list_messages,
-    send_message, send_message_in_tx, HistoryCursor, MessageType, NewMessage, SentMessage,
-    StoredMessage, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
+    send_message, send_message_in_tx, send_signed_message_in_tx, HistoryCursor, MessageSignature,
+    MessageType, NewMessage, SentMessage, StoredMessage, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
 };

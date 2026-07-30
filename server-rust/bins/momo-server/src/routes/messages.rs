@@ -17,6 +17,11 @@
 //!     this crate has no HTTP client at all.
 //!   * the workspace scope comes from the *credential*, and the `{ws}` path
 //!     parameter must match it (Swift `scopeIDs`, 403 on mismatch).
+//!   * **ADR-0146 provenance is optional and never authority.** A send with no
+//!     `signature` takes the unchanged path. A send *with* one goes through
+//!     `send_signed_message_in_tx`, whose signing key this server resolves —
+//!     the request never supplies it. No signature grants any capability; it
+//!     only records who asserted the content.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -25,8 +30,9 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    clamp_history_limit, is_channel_member, list_channel_page, send_message_in_tx, HistoryCursor,
-    MessageType, NewMessage, StoredMessage,
+    clamp_history_limit, is_channel_member, list_channel_page, resolve_member_signing_key,
+    send_message_in_tx, send_signed_message_in_tx, HistoryCursor, MessageSignature, MessageType,
+    NewMessage, ProvenanceRejected, StoredMessage,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -126,6 +132,75 @@ fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
     }
 }
 
+/// Why a send failed *inside* the transaction.
+///
+/// `with_tenant_tx` commits on `Ok` and rolls back on `Err`, so a caller-fault
+/// rejection has to be an `Err` — otherwise refusing a signature would still
+/// commit the message it refused. `momo_db::with_tenant_tx_prelude` is generic
+/// over the error type for exactly this reason.
+#[derive(Debug)]
+enum SendFailure {
+    Db(DbError),
+    /// A rejection with its final client response already decided.
+    Rejected(ApiError),
+}
+
+impl From<DbError> for SendFailure {
+    fn from(error: DbError) -> Self {
+        SendFailure::Db(error)
+    }
+}
+
+/// `with_tenant_tx` with [`SendFailure`] as the error type — the same no-op
+/// prelude shape `routes::shared::tenant_tx` uses for T3, spelled for this
+/// domain instead of borrowing T3's error type.
+async fn tenant_tx_or_reject<T, F>(
+    pool: &momo_db::PgPool,
+    workspace_id: Uuid,
+    body: F,
+) -> Result<T, SendFailure>
+where
+    T: Send,
+    F: for<'c> FnOnce(
+            &'c mut momo_db::PgConnection,
+        )
+            -> crate::routes::shared::futures_box::BoxFuture<'c, Result<T, SendFailure>>
+        + Send,
+{
+    momo_db::with_tenant_tx_prelude(
+        pool,
+        workspace_id,
+        |_conn| Box::pin(async move { Ok(()) }),
+        |_conn| Box::pin(async move { Ok(()) }),
+        body,
+    )
+    .await
+}
+
+/// The refusal when a member sent a signature but has no registered signing key.
+///
+/// 501, not 400: the request is well-formed and the caller did nothing wrong —
+/// this server simply has no member key registry yet (see
+/// `momo_messaging::resolve_member_signing_key`, and the ADR-0146 fast-follow).
+/// Answering 400 would blame the client for a gap that is ours.
+fn no_signing_key() -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "message signing requires a registered member signing key, which momo-server \
+         does not serve yet",
+    )
+}
+
+/// A refused provenance assertion → the client-facing sentence.
+///
+/// All three are 400: the signature, the missing `clientMsgId` and the wrong
+/// signer are each something the caller can fix. The message is the rejection's
+/// own `Display`, so the vocabulary lives in one place
+/// (`momo_messaging::ProvenanceRejected`).
+fn rejected_signature(rejected: ProvenanceRejected) -> ApiError {
+    ApiError::bad_request(rejected.to_string())
+}
+
 /// `POST /v1/workspaces/{ws}/channels/{ch}/messages` — the single write path.
 pub async fn send(
     State(state): State<AppState>,
@@ -157,19 +232,51 @@ pub async fn send(
         hlc_count: None,
     };
 
+    let provenance_signature = request.signature.clone();
+
     // Membership check + write in ONE tenant transaction (Swift parity): a
-    // caller who leaves the channel mid-flight cannot slip a message in.
-    let sent = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+    // caller who leaves the channel mid-flight cannot slip a message in. A
+    // provenance rejection leaves through the transaction's ERROR channel
+    // ([`SendFailure`]) precisely so the message rolls back with it — returned as
+    // a value it would commit, and a signed send would silently degrade into an
+    // unsigned one.
+    let sent = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             if !is_channel_member(conn, channel_id, principal.member_id).await? {
                 return Ok(None);
             }
-            let sent = send_message_in_tx(conn, workspace_id, new_message).await?;
-            Ok::<_, DbError>(Some(sent))
+            let Some(signature_b64) = provenance_signature else {
+                let sent = send_message_in_tx(conn, workspace_id, new_message).await?;
+                return Ok(Some(sent));
+            };
+            // The key is the server's to resolve, never the request's to assert.
+            let Some(signer_pubkey_b64) =
+                resolve_member_signing_key(conn, principal.member_id).await?
+            else {
+                return Err(SendFailure::Rejected(no_signing_key()));
+            };
+            match send_signed_message_in_tx(
+                conn,
+                workspace_id,
+                new_message,
+                &MessageSignature {
+                    signer_member_id: principal.member_id,
+                    signer_pubkey_b64,
+                    signature_b64,
+                },
+            )
+            .await?
+            {
+                Ok(sent) => Ok(Some(sent)),
+                Err(rejected) => Err(SendFailure::Rejected(rejected_signature(rejected))),
+            }
         })
     })
     .await
-    .map_err(|error| db_error("messages.send", error))?;
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.send", error),
+    })?;
 
     let sent = sent.ok_or_else(|| ApiError::forbidden("not a member of this channel"))?;
 
@@ -230,6 +337,46 @@ mod tests {
             scopes: vec![],
             kind: PrincipalKind::Human,
         }
+    }
+
+    /// A signature is never accepted alongside a caller-supplied key, and the
+    /// absence of a registry is *our* gap, so it answers 501 rather than
+    /// blaming the caller with a 400.
+    #[test]
+    fn a_signature_without_a_registered_key_is_501_not_400() {
+        let error = no_signing_key();
+        assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
+        assert!(
+            error.message.contains("registered member signing key"),
+            "the sentence must name the missing surface: {}",
+            error.message
+        );
+    }
+
+    /// Each rejection keeps its own sentence — a caller must be able to tell
+    /// "your signature is wrong" from "you signed for someone else".
+    #[test]
+    fn every_provenance_rejection_is_a_400_with_its_own_sentence() {
+        let sentences: Vec<String> = [
+            ProvenanceRejected::SignatureRejected,
+            ProvenanceRejected::MissingClientMsgId,
+            ProvenanceRejected::SignerIsNotAuthor,
+        ]
+        .into_iter()
+        .map(|rejected| {
+            let error = rejected_signature(rejected);
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            error.message
+        })
+        .collect();
+        let mut unique = sentences.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(
+            unique.len(),
+            sentences.len(),
+            "{sentences:?} must all differ"
+        );
     }
 
     #[test]
@@ -312,6 +459,7 @@ mod tests {
             run_id: None,
             attachment_ids: None,
             routing: None,
+            signature: None,
         };
         assert!(reject_unsupported(&base()).is_ok());
 

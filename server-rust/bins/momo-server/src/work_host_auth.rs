@@ -34,6 +34,16 @@
 //!
 //! Every failure is the same 401 with the same sentence, so the response tells
 //! an attacker nothing about which check failed.
+//!
+//! ## Provenance (ADR-0146, B2.5)
+//!
+//! Nothing above changes. The one addition is that a *successful* verification
+//! now hands the route a [`VerifiedHostSignature`] so the route can record the
+//! proof against the entity its own transaction produces. Authentication and
+//! provenance stay separate: this function still decides only "may this host
+//! act", and `momo_wire::record_provenance` still re-verifies from scratch
+//! before it writes — the chokepoint trusts no caller's word that a signature
+//! was checked.
 
 use axum::http::{HeaderMap, Method};
 use momo_auth::{
@@ -41,6 +51,7 @@ use momo_auth::{
     verify_work_host_request,
 };
 use momo_db::{with_tenant_tx, DbError};
+use momo_wire::SignedAction;
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -64,11 +75,52 @@ pub(crate) fn signed_request_unauthorized() -> ApiError {
 
 /// A verified host identity. Named rather than a bare `Uuid` so a handler cannot
 /// mistake "the host in the path" for "the host that signed".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedHostRequest {
     pub workspace_id: Uuid,
     pub host_id: Uuid,
     pub owner_member_id: Uuid,
+    /// ADR-0146 provenance carrier — see [`VerifiedHostSignature`].
+    pub signature: VerifiedHostSignature,
+}
+
+/// Everything needed to re-derive the exact bytes this host signed.
+///
+/// It exists because authentication and provenance happen in **different
+/// transactions**: the v2 signature is verified (and its request id consumed)
+/// before the route knows which entity the action will land on — `validate`
+/// learns the `work_session_id` only from its own query. Carrying the verified
+/// material forward lets the route write the provenance row next to the entity
+/// it names, instead of guessing an entity at authentication time.
+///
+/// The fields are the v2 payload's, not a re-encoding: `path` is the raw request
+/// path and `body_digest` the digest that was actually signed, so
+/// [`Self::action`] reproduces the identical bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedHostSignature {
+    /// The **stored** host key the signature verified against.
+    pub signer_pubkey_b64: String,
+    pub signature_b64: String,
+    pub method: String,
+    pub path: String,
+    pub sent_at_ms: i64,
+    pub body_digest: String,
+    pub request_id: Uuid,
+}
+
+impl VerifiedHostSignature {
+    /// The signed action, for `momo_wire::record_provenance`.
+    pub fn action(&self, workspace_id: Uuid, host_id: Uuid) -> SignedAction<'_> {
+        SignedAction::WorkHostRequest {
+            method: &self.method,
+            path: &self.path,
+            workspace_id,
+            host_id,
+            sent_at_ms: self.sent_at_ms,
+            body_digest: &self.body_digest,
+            request_id: self.request_id,
+        }
+    }
 }
 
 /// `hostID(fromAuthorization:)` (:277-281): `MomoHost <uuid>`, scheme compared
@@ -176,6 +228,15 @@ pub(crate) async fn authenticate_signed_host_request(
                 workspace_id,
                 host_id,
                 owner_member_id: credential.owner_member_id,
+                signature: VerifiedHostSignature {
+                    signer_pubkey_b64: credential.public_key,
+                    signature_b64: signature,
+                    method: method_text,
+                    path: path_text,
+                    sent_at_ms,
+                    body_digest,
+                    request_id,
+                },
             }))
         })
     })

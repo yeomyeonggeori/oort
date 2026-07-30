@@ -22,6 +22,36 @@ pub enum MessagingError {
     ChannelNameConflict,
 }
 
+/// Why a *signed* send was refused (ADR-0146).
+///
+/// Separate from [`MessagingError`] because every variant is a caller fault with
+/// a distinct client-visible meaning, and because
+/// [`crate::message::send_signed_message_in_tx`] must still return [`DbError`]
+/// to the `with_tenant_tx` closure — the rejection travels in the `Ok` half, the
+/// same split `momo-server`'s route layer already uses for its rejections.
+///
+/// Refusing is deliberate: a message whose signature does not verify must not be
+/// stored *unsigned* either. Silently dropping the assertion would let a sender
+/// believe an action was attributed when it was not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ProvenanceRejected {
+    /// The signature does not verify over the message's canonical bytes under
+    /// the signer's registered key.
+    #[error("message provenance signature does not verify")]
+    SignatureRejected,
+    /// The signed bytes bind `client_msg_id`; without one there is nothing to
+    /// bind the signature to, and the message surface's replay boundary
+    /// (`(channel_id, author_member_id, client_msg_id)` uniqueness) does not
+    /// exist for this row.
+    #[error("a signed message must carry a clientMsgId")]
+    MissingClientMsgId,
+    /// A member may sign only its own message: the author is inside the signed
+    /// bytes, so a mismatch is either a bug or an attempt to attribute someone
+    /// else's speech.
+    #[error("a member may only sign its own message")]
+    SignerIsNotAuthor,
+}
+
 impl From<sqlx::Error> for MessagingError {
     fn from(err: sqlx::Error) -> Self {
         MessagingError::Db(DbError::from(err))

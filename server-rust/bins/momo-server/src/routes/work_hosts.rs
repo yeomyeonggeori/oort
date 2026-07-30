@@ -53,6 +53,9 @@ use momo_auth::{
     Principal, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError};
+use momo_wire::{
+    record_provenance, EntityRef, ProvenanceError, SignedAction, Signer, ENTITY_WORK_HOST_HEARTBEAT,
+};
 
 use crate::dto::{
     RegisterWorkHostRequest, WorkHostDto, WorkHostHeartbeatRequest, WorkHostListResponse,
@@ -289,6 +292,24 @@ pub async fn revoke(
 /// database is touched, so a flood of stale heartbeats costs no row lock; then
 /// the row is locked, the signature verified against the stored key, and only
 /// then is `last_seen_at` stamped. Every rejection is the same 401.
+///
+/// ## Provenance (ADR-0146, B2.5)
+///
+/// This is one of exactly **two** places in this server where an Ed25519
+/// signature from an actor actually arrives (the other is
+/// [`crate::work_host_auth`]'s v2 request signature). Measured, not assumed:
+/// `register`/`revoke` above are bearer-authenticated humans, and the cloud
+/// register path spends a bootstrap token — none of the three carries a
+/// signature, so none of them can be given provenance without a human device key
+/// (fast-follow). So the heartbeat is wired, and the wiring is *additive*: the
+/// signature was already verified for authentication, and `record_provenance`
+/// re-derives the same bytes and stores the proof. The liveness stamp is the
+/// host-signature-induced state transition ADR-0146 §범위 3 names, and it is the
+/// only one this build has.
+///
+/// The record is written **after** `touch_work_host_last_seen`, in the same
+/// transaction: a host revoked mid-flight leaves neither a stamp nor a
+/// provenance row.
 pub async fn heartbeat(
     State(state): State<AppState>,
     Path((workspace, host)): Path<(String, String)>,
@@ -328,6 +349,34 @@ pub async fn heartbeat(
             }
             if !touch_work_host_last_seen(conn, host_id).await? {
                 return Ok(None);
+            }
+            // ADR-0146: the same verified signature, recorded as provenance.
+            // A re-presented heartbeat inside the skew window hits
+            // `action_signature_signature_uniq` and records once, not twice.
+            let action = SignedAction::WorkHostHeartbeat {
+                workspace_id,
+                host_id,
+                sent_at_ms,
+            };
+            match record_provenance(
+                conn,
+                workspace_id,
+                &EntityRef::new(ENTITY_WORK_HOST_HEARTBEAT, host_id),
+                // A host is not a member: the signer is its stored key, and
+                // attributing this to the owning human would be a false record.
+                &Signer::work_host(&credential.public_key),
+                &signature,
+                &action,
+            )
+            .await
+            {
+                Ok(_) => {}
+                // Unreachable while the two verifications agree, and it must
+                // stay unreachable: if it ever fires, the heartbeat answers the
+                // same indistinguishable 401 rather than 500ing or — worse —
+                // stamping liveness for a signature the sidecar refused.
+                Err(ProvenanceError::SignatureRejected { .. }) => return Ok(None),
+                Err(ProvenanceError::Db(error)) => return Err(DbError::from(error)),
             }
             Ok::<_, DbError>(load_work_host(conn, host_id).await?)
         })

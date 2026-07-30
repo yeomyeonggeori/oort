@@ -6,6 +6,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# B2.5: `record_provenance` is the sole `action_signature` writer (ADR-0146), so
+# the chokepoint and the SQL it owns live in one file — which is why this crate
+# now takes sqlx. The B0 skeleton left the executor generic precisely to avoid
+# this dependency while the table did not exist; migration 060 created it.
+sqlx.workspace = true
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -14,3 +19,10 @@ sha2.workspace = true
 base64.workspace = true
 hex.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# DB-backed provenance conformance (tests/provenance_pg.rs, #[ignore]) — the four
+# ADR-0146 reds the orchestrator runs against a fresh pgvector/pg18 DB. Not part
+# of the DB-free `cargo test --workspace` unit pass.
+momo-db = { path = "../momo-db" }
+tokio = { workspace = true }
