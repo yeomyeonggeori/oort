@@ -25,7 +25,10 @@ pub mod tenant;
 pub use error::DbError;
 pub use migrate::{run_migrations, SeedMode};
 pub use pool::{connect, PoolConfig};
-pub use tenant::{with_provider_link_admin_tx, with_provider_quota_ingest_tx, with_tenant_tx};
+pub use tenant::{
+    with_provider_link_admin_tx, with_provider_quota_ingest_tx, with_tenant_tx,
+    with_tenant_tx_prelude,
+};
 
 // Re-export the sqlx types domain crates build on, so B1+ crates depend on one
 // pinned sqlx through `momo-db` rather than each pinning their own.
