@@ -289,14 +289,20 @@ async fn d2_1_sot_message_and_outbox_persist_in_pg() {
     assert_eq!(retry.message.seq, 1, "retry returns the original seq");
     assert!(retry.outbox_id.is_none(), "retry emits no outbox row");
 
-    let outbox_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE partition_key = $1")
-            .bind(channel.id)
-            .fetch_one(&su)
-            .await
-            .unwrap();
+    // Count only the app-emitted `broadcast`. A message insert also fires the
+    // reused DB trigger `push_candidate_enqueue_trg` (011), which enqueues one
+    // `push_candidate` outbox row (partition_key=channel_id) — a legitimate,
+    // Swift-faithful side effect of the trigger layer, not the app's egress. The
+    // single-write-path invariant here is about the broadcast the app authors.
+    let broadcast_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE partition_key = $1 AND kind = 'broadcast'",
+    )
+    .bind(channel.id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
     assert_eq!(
-        outbox_count, 1,
+        broadcast_count, 1,
         "idempotent retry must not double-broadcast"
     );
 }
@@ -414,14 +420,18 @@ async fn d2_4_gapless_seq_under_concurrent_sends() {
             .unwrap();
     assert_eq!(persisted, expected, "persisted seqs are gapless 1..=N");
 
-    let outbox_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE partition_key = $1")
-            .bind(channel)
-            .fetch_one(&su)
-            .await
-            .unwrap();
+    // Count only the app-emitted `broadcast` (the 011 push_candidate trigger
+    // adds one `push_candidate` row per message with the same partition_key —
+    // faithful trigger-layer behavior, out of this invariant's scope).
+    let broadcast_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE partition_key = $1 AND kind = 'broadcast'",
+    )
+    .bind(channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
     assert_eq!(
-        outbox_count, N,
+        broadcast_count, N,
         "each committed send emits exactly one broadcast"
     );
 }
