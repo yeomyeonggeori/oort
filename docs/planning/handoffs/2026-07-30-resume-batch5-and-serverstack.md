@@ -37,7 +37,8 @@
       - **B1.7(Rust 이미지+compose) 랜딩 완료**(track/engine `a7c3551e`, PR #932). 이미지 259MB(멀티스테이지·비루트·`--locked`), `infra/rust/` compose(janitor 라벨·루프백 온리·api에 CENT 자격 미주입=#2 자세·별도 볼륨). **오케스트레이터 실전 게이트 전 곡선 green**: build→기동→migrate 59+IDEMPOTENCY_OK→set-owner→login→send(seq=1)→list→**실 Centrifugo history version==seq**→outbox done→로그 시크릿 0→down -v.
         - 게이트 실측 결함 2건(오케스트레이터 수정): ①cargo mtime 캐시 — 스텁 의존캐시 후 COPY 실소스가 재빌드 안 일으켜 빈 rlib 재사용(E0432) → 빌드 전 touch ②`compose run migrate set-owner`가 command: 대체 → entrypoint에 set-owner 케이스. **둘 다 워커가 docker 못 돌려 원리적으로 못 잡는 계층** — 파이프라인 교훈 재확인.
         - **NCP 런북 §1 트리거 3번 개통**: 이미지 빌드 경로 완성. 남은 것=레지스트리 퍼블리시(성재/오케스트레이터) 또는 `docker save/load`. §3 절차의 Rust 스왑판 준비 완료(`infra/rust/README.md` §6 대응표).
-      - **다음: B2.2**(T3 표면 나머지: gateway·terminal·pool·approval·재부착 0139·T3 HTTP route). audit_log 티켓 후보 지속.
+      - **B2.2(T3 REST 표면) 착수 중**(워커 Opus 5, 워크트리 `B22-t3-rest`, 패킷 `handoffs/2026-07-31-B2.2-t3-rest-packet.md`). 범위=work-hosts(BYOC 등록·heartbeat 서명검증)·work-sessions(create/end=t3_terminate/resume/list)·usage summary(+topup 실측 판단)·**T3 smoke 곡선 1개**. NCP T3 부분 smoke를 여는 최소 API. gateway·terminal·pool·approval·재부착 0139는 B2.3+. audit_log 티켓 후보 지속.
+      - **성재 문답 기록(2026-07-31)**: ①워커 docker 불가 = 동의 경계(Option A: workspace-write+network만, docker 소켓=호스트 루트 상당이라 밖) + 병렬 데몬 충돌·자원 누적 전례 + 결과적으로 오케스트레이터 게이트가 품질 장치 — 유지 권고. ②NCP smoke의 목적 = 배포 리허설(D5 예행)·환경 갭 실측(**arm64 Mac→linux/amd64 크로스빌드 필요**·저사양 리소스)·실환경 왕복·T3 smoke 발판(B2.2 후 BYOC→세션→과금→종료 → MOMO_T3_ENABLED 판단). 성재: "NCP smoke 하는 건 상관없다"(시점은 미지정).
     - **NCP: 성재 지시(2026-07-30) — 여유 있으니 현상 유지**(정지 안 함). 키 재발급도 보류.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
