@@ -1,0 +1,59 @@
+# Build-context excludes for `-f server-rust/Dockerfile` (BuildKit reads
+# `<dockerfile>.dockerignore` in preference to the context root's file). The
+# context is the repo root — this image needs `server-rust/`, `server/Migrations`,
+# three SQL files under `infra/`, and LICENSE/NOTICE; everything else is weight.
+#
+# It is a superset of the repo-root `.dockerignore`, because when this file
+# exists it REPLACES that one: every secret-bearing pattern there is repeated
+# here. If a builder ignores per-Dockerfile ignore files, the root
+# `.dockerignore` applies instead and the build still succeeds (larger context).
+
+# --- never in any image context (mirrors the repo root .dockerignore) --------
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+infra/prod/secrets.env
+infra/prod/*.sops.env
+infra/prod/*.plain.env
+infra/prod/*.decrypted
+infra/prod/age.key
+infra/prod/keys.txt
+**/*.secret.env
+**/*.secrets.env
+local-gate-evidence
+
+# --- build output (server-rust/target alone is multi-GB) --------------------
+target
+**/target
+.build
+**/.build
+**/.swiftpm
+**/DerivedData
+**/node_modules
+**/__pycache__
+
+# --- trees this image never copies ------------------------------------------
+adapters
+clients
+docs
+examples
+fastlane
+legal
+relay
+research
+services
+scripts
+workers
+server/Sources
+server/Tests
+server/Package.swift
+server/Package.resolved
+infra/eve
+infra/workd
+infra/prod/docker
+BUILD_TICKETS.md
+ROADMAP.md
+STATUS.md
+schema_v0.sql

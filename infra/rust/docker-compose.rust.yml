@@ -1,0 +1,225 @@
+# momo Rust stack — prod-shaped compose for the messenger-partial smoke.
+# ADR-0145 B안 / batch B1.7. Companion runbook: infra/rust/README.md,
+# docs/planning/2026-07-30-ncp-rust-smoke-prep.md §3.
+#
+# This file mirrors infra/prod/docker-compose.prod.yml — same image digests for
+# postgres and centrifugo, same service names, same command/env contract
+# (`command: ["api"]`, `DATABASE_URL`, `JWT_HMAC`, `CENT_API_*`) — reduced to the
+# minimum set the Rust binaries can actually serve today:
+#
+#   postgres · centrifugo · runtime-roles · migrate · api · relay
+#
+# Deliberately absent (B1.7 scope, not an omission): caddy (no TLS edge here —
+# api/centrifugo publish to loopback instead), redis (Centrifugo runs its
+# memory engine, single node), prometheus, worker, notifier, web/linkshort, T3
+# and workd. They return when their Rust counterparts land (B2+).
+#
+# Static validation (no daemon needed):
+#   docker compose --env-file infra/rust/rust-smoke.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml config
+
+name: ${COMPOSE_PROJECT_NAME:-momo-rust}
+
+# The janitor labels are load bearing on this host: unlabeled stacks were the
+# blind spot behind the Docker VM resource accumulation, and every service here
+# must be reclaimable by project label.
+x-momo-janitor-labels: &momo-janitor-labels
+  com.momo.janitor.managed: "true"
+  com.momo.janitor.match-label: com.docker.compose.project
+
+# ONE image, three commands (server-rust/Dockerfile). Compose interpolates this
+# anchor per service, so api/relay/migrate/runtime-roles can never drift apart.
+x-rust-image: &rust-image ${MOMO_RUST_IMAGE:?set MOMO_RUST_IMAGE}
+
+services:
+  # Same digest as prod (docker-compose.prod.yml:64) — PG18 + pgvector, because
+  # migrations 027/028 create vector columns.
+  postgres:
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    mem_limit: ${MOMO_POSTGRES_MEM_LIMIT:-2g}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Same digest as prod (:103). Config is the existing infra/centrifugo.json —
+  # no new Centrifugo configuration is introduced by this batch. It carries no
+  # `engine` block, so Centrifugo uses its in-memory engine; prod's redis engine
+  # exists for multi-node fan-out, which a single-VPS smoke does not need.
+  centrifugo:
+    image: centrifugo/centrifugo:v6@sha256:8ba0c9443dadedc21b20254b3fc76f35c1998b29acc7cdec877ea0c3636c237e
+    mem_limit: ${MOMO_CENTRIFUGO_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    command: centrifugo --config=/centrifugo/centrifugo.json
+    environment:
+      CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
+      CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
+      CENTRIFUGO_LOG_LEVEL: ${CENTRIFUGO_LOG_LEVEL:-info}
+      # The mounted config ships a `dev-insecure-...` placeholder for this
+      # header. Overriding it here means no committed placeholder secret can
+      # ever reach a deployed stack — even though the subscribe proxy is inert
+      # until the Rust api serves /v1/centrifugo/subscribe (a later batch).
+      CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS: '{"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}"}'
+    ports:
+      # Loopback only: the smoke reads /api/history from the host, and nothing
+      # about this stack should be reachable from the internet without Caddy.
+      - "127.0.0.1:${CENT_HOST_PORT:-8000}:8000"
+    volumes:
+      - ../centrifugo.json:/centrifugo/centrifugo.json:ro
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "centrifugo", "healthcheck", "--config=/centrifugo/centrifugo.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # MOMO-554 parity (prod :319): idempotent runtime-role creation / password
+  # rotation, run BEFORE migrate so its ALTER DEFAULT PRIVILEGES cover every
+  # table the migrations are about to create.
+  runtime-roles:
+    image: *rust-image
+    command: ["migrate"]
+    mem_limit: ${MOMO_RUNTIME_ROLES_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
+    restart: "no"
+    environment:
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
+      MOMO_RUNTIME_ROLE_PROVISION: "1"
+      MOMO_APP_POSTGRES_PASSWORD: ${MOMO_APP_POSTGRES_PASSWORD:?set MOMO_APP_POSTGRES_PASSWORD}
+      RELAY_POSTGRES_PASSWORD: ${RELAY_POSTGRES_PASSWORD:?set RELAY_POSTGRES_PASSWORD}
+      WORKER_POSTGRES_PASSWORD: ${WORKER_POSTGRES_PASSWORD:?set WORKER_POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+
+  # One-shot, source-checkout-free migration (prod :298). MOMO_BOOTSTRAP_RUNTIME_ROLES=0
+  # makes this fail closed unless runtime-roles produced the exact posture, so the
+  # committed development role passwords in infra/e2e/bootstrap_roles.sql are
+  # never applied by this stack.
+  #
+  # Ops one-shots use the same service:
+  #   docker compose ... run --rm migrate set-owner
+  migrate:
+    image: *rust-image
+    command: ["migrate"]
+    mem_limit: ${MOMO_MIGRATE_MEM_LIMIT:-1g}
+    labels: *momo-janitor-labels
+    restart: "no"
+    environment:
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
+      MOMO_BOOTSTRAP_RUNTIME_ROLES: "0"
+      # `none` is the product default (no legacy agent fixtures, seeded owner
+      # password locked by migration 012). A local smoke may select `e2e`.
+      MOMO_AGENT_SEED_MODE: ${MOMO_AGENT_SEED_MODE:-none}
+      MIGRATE_IDEMPOTENCY_CHECK: ${MIGRATE_IDEMPOTENCY_CHECK:-1}
+      # Consumed only by `run --rm migrate set-owner`; unset otherwise.
+      MOMO_INITIAL_OWNER_EMAIL: ${MOMO_INITIAL_OWNER_EMAIL:-}
+      MOMO_INITIAL_OWNER_PASSWORD: ${MOMO_INITIAL_OWNER_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime-roles:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+  # prod :142. Env names are the prod names; the values differ only in that the
+  # keys this server does not read are not injected at all:
+  #   * CENT_API_KEY / CENT_API_URL — momo-server has NO HTTP client (invariant
+  #     #2: publishing is the relay's alone), so handing it the Centrifugo
+  #     credential would grant a capability the process must not have;
+  #   * HERMES_*/AGENT_*/S3/webhook+provider master keys — no route consumes
+  #     them yet, and an unread secret in the environment is pure exposure.
+  # Both come back with the batch that implements the feature.
+  api:
+    image: *rust-image
+    command: ["api"]
+    mem_limit: ${MOMO_API_MEM_LIMIT:-1g}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      MOMO_ENV: ${MOMO_ENV:-staging}
+      HOST: 0.0.0.0
+      PORT: 8080
+      # momo_app — NOBYPASSRLS, so every request is filtered by the same RLS
+      # policies production uses (invariant #6).
+      DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
+      JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
+      # ADR-0110: the ONLY authority for the realtime address handed to clients.
+      # No default — a wrong guess silently points every client at nothing.
+      MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      # Loopback only (no Caddy in this stack). The NCP smoke drives it over an
+      # SSH tunnel; nothing is published to the public interface.
+      - "127.0.0.1:${MOMO_RUST_API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # prod :200. The relay is the workspace's only Centrifugo writer, so it is the
+  # only service here holding CENT_API_KEY.
+  relay:
+    image: *rust-image
+    command: ["relay"]
+    mem_limit: ${MOMO_RELAY_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      MOMO_ENV: ${MOMO_ENV:-staging}
+      # momo_relay — BYPASSRLS: the drain loop crosses every tenant (L4 §2.2).
+      RELAY_DATABASE_URL: ${RELAY_DATABASE_URL:?set RELAY_DATABASE_URL}
+      CENT_API_URL: http://centrifugo:8000/api
+      CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
+      RELAY_POLL_INTERVAL_MS: ${RELAY_POLL_INTERVAL_MS:-300}
+      RELAY_CLAIM_BATCH: ${RELAY_CLAIM_BATCH:-64}
+      RELAY_MAX_ATTEMPTS: ${RELAY_MAX_ATTEMPTS:-8}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+networks:
+  private:
+    labels: *momo-janitor-labels
+
+volumes:
+  pgdata:
+    # A distinct default from prod's `momo-pgdata`: this stack must never adopt
+    # or overwrite a Swift-stack volume on the same host.
+    name: ${DB_VOLUME_NAME:-momo-rust-pgdata}
