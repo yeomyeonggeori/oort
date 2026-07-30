@@ -58,6 +58,12 @@ RUN set -eux; \
 COPY server-rust/crates crates
 COPY server-rust/bins bins
 RUN set -eux; \
+    # cargo rebuild detection is mtime-based and COPY'd files can carry stale
+    # timestamps, so the stub-compiled (empty) workspace rlibs would be reused
+    # verbatim — momo-migrate then fails with E0432 on `momo_db::migrate`
+    # (B1.7 docker-gate 실측). Touch every real source so the workspace crates
+    # always rebuild; the ~200 third-party deps stay cached.
+    find crates bins -name '*.rs' -exec touch {} +; \
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-migrate; \
     install -Dm755 target/release/momo-server /out/momo-server; \

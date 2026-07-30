@@ -25,6 +25,13 @@ case "$command" in
     # not interpret them.
     exec /usr/local/bin/momo-migrate "$@"
     ;;
+  set-owner)
+    # `docker compose run <service> set-owner` REPLACES the service's
+    # `command: ["migrate"]`, so the sub-command arrives here as the role
+    # (B1.7 docker-gate 실측). Route it to the migrate binary so the runbook's
+    # `run --rm migrate set-owner` invocation works as documented.
+    exec /usr/local/bin/momo-migrate set-owner "$@"
+    ;;
   *)
     echo "[momo] unknown command: $command" >&2
     echo "usage: momo-rust-entrypoint {api|relay|migrate}" >&2
