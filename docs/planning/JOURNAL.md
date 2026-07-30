@@ -1432,6 +1432,10 @@
 - 한 일: **B2.4 랜딩**(PR #935) — 재부착/replay(0139, seq 커서 — wall-clock red 증명)·terminal attach 서버 계약(해시 저장·MomoHost 서명 validate)·**audit_log 실구현**(B0 스텁 해소, host 서명은 via_token_id NULL 규칙 API化). 게이트 3/3+무회귀 green. 이탈 2건 수용(/reattach 투영 route 신설 — Swift 4-route 합성의 D3 판정 통합, momo-auth host 자격 파일). **ADR-0146 Accepted**(3결정: 2단계 페이로드·에이전트/workd 먼저·감사전용 UX)·**ADR-0140 정오표** 반영.
 - 열린 것: 다음 배치 = **provenance 구현**(0146 Accept로 준비 완료: record_provenance·action_signature 060·3표면 emit) 또는 AgentGateway(B2.5). audit 미배선 5건(PR #935 표). #925·#926·#893.
 
+## 2026-08-01 (새벽) · Fable · 오케스트레이션
+- 한 일: **B2.5(provenance, ADR-0146 이행) 랜딩**(PR #936) — 마이그레이션 060 action_signature(재작성 후 첫 신규·RLS FORCE·append-only+retention 진입점)·record_provenance 실구현(사이드카 SQL 단독 소유)·workd 서명 2지점(heartbeat·validate) 배선·에이전트 메시지는 검증 경로 완성+키 등록 부재로 501 이름 붙은 거부(제출 공개키 불신 — 위조 가능 provenance는 없느니만 못함). 게이트 전 스위트 31/31 green. 워커 판단 2건 수용: 서명 미도착 지점(등록·revoke) 미배선, heartbeat 볼륨 대비 retention 해치.
+- 열린 것: fast-follow 티켓(에이전트 키 등록 표면·retention 잡·사람 device 키). **다음 배치 = B2.6 AgentGateway**(마지막 큰 T3 표면). #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
