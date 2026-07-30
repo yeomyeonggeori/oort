@@ -26,7 +26,7 @@
 - **B0 랜딩 완료**(track/engine `d1e51ddf`, PR #927 머지). `server-rust/` Cargo 워크스페이스 + 공유 5 crate. **오케스트레이터 docker 게이트 통과**(conformance `momo-db/tests/conformance_pg.rs`, #[ignore]): 마이그레이션 러너가 psql로 001~059 전부 fresh pgvector/pg18에 적용(FORCE-RLS 73), `with_tenant_tx` GUC 바인딩 확인. 무회귀 fmt/clippy/test green.
   - **게이트가 잡은 결함(수정됨)**: 러너 초안이 `sqlx::raw_sql`(서버 직송)이라 시드 마이그레이션(002/006/012)의 psql `\if :MOMO_AGENT_SEED_ENABLED` 조건부에서 42601 실패 → **psql shell-out**(migrate.sh 방식, `-v MOMO_AGENT_SEED_ENABLED`)으로 전환해 green. **B1+ 러너는 psql 경유가 정본**(sqlx::raw_sql 금지).
   - **B1 후속 노트**: `momo-outbox`의 `OutboxKind` enum이 `push_candidate`(011) 누락 — notifier/push 이식 시 추가.
-  - **다음 = B1(메신저 코어)**: identity·channels·message(seq·emit_outbox)·huddle·search + 에이전트 메시지 서명(ADR-0146). D2 red #1~#6 green 목표. 패킷 작성 → 워커 스폰.
+  - **B1(메신저 코어) 착수 중**(워커 Opus 5, 워크트리 `momo-worktrees/B1-messaging`, base track/engine). 범위=write-path 척추(identity·channel·message+seq+emit_outbox)+DB conformance(D2 red #1/#3/#4/#5/#6). **provenance·HTTP 바이너리·huddle/search 제외**(ⓑ 결정: provenance는 ADR-0146 Accept 후, ⓑ 성재 승인 "권고대로"). 패킷 `handoffs/2026-07-30-B1-messaging-core-packet.md`. 완료 시 PR→track/engine + 오케스트레이터 conformance 게이트.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
 **성재 결정 대기 지점**: ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격 — B1 전까지. (Phase 0 전체 승인은 완료: "B0 착수해줘".)
@@ -35,7 +35,12 @@
 
 정본(판단 근거): `docs/planning/2026-07-30-server-stack-reassessment.md`(§0~§7).
 
-## 2. NCP T3 smoke — 서버 스택과 독립, 디스크 결정만 남음
+## 2. NCP T3 smoke — **Swift 보류, Rust 트리거 후 실행** (성재 2026-07-30)
+
+> **런북 정본: `docs/planning/2026-07-30-ncp-rust-smoke-prep.md`.** 현재 Swift 이미지로는 안 함. Rust 서버(B2~ 세션·과금·workd)가 서면 그 런북대로 진행. 트리거·자산·절차 거기에.
+> **성재 몫(비용·보안)**: NCP 서버 놀며 과금 중 + API 키 노출 → **서버 정지 + 키 재발급 권고**(정지/재발급은 성재 트리거). 자산·IP는 보존.
+
+(아래는 자산 상세 — 런북과 중복, 참고용)
 
 - 서버 `momo-t3-smoke`(인스턴스 143929369) **RUN**, 공인 IP `101.79.11.189`, **SSH 접속 확인됨**(pem 직접 로그인 불가 — `getRootPassword`로 비번 복호화 후 `sshpass`, 비번은 `scratchpad/.ncp-root-pw` 0600).
 - Ubuntu 22.04.3 · 2 vCPU · RAM 7GB · **디스크 가용 4.4GB** · docker 미설치.
