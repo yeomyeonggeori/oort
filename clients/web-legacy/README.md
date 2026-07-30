@@ -21,8 +21,10 @@ W-6(#605)는 read-only Work 세션 목록과 root thread 관전, observer 터미
   정적 서빙하고 같은 오리진의 `/v1/*`를 api로 프록시한다(`infra/prod/Caddyfile`).
   CORS 없음, 서버 코드 무변경.
 - REST 계약: `docs/api/openapi.yaml`이 정본. `src/api/schema.d.ts`는
-  `npm run gen:api`(openapi-typescript)로 생성해 **커밋**한다 — web 게이트가
-  스펙과의 동기화를 diff로 강제한다.
+  `npm run gen:api`(openapi-typescript)로 생성해 **커밋**한다 — web 게이트의
+  `scripts/verify_web_generated_types.sh`가 스펙과의 동기화를 diff로 강제하고,
+  생성기 실패(`generator-failed`)와 생성물 낡음(`types-stale`)을 다른 이름으로
+  구분한다(MOMO-678). 스펙을 고치는 PR은 재생성 결과를 같은 PR에 커밋해야 한다.
 
 ## 서버 연결
 

@@ -15,8 +15,15 @@ const dateTime = new Intl.DateTimeFormat("ko-KR", {
   timeStyle: "short",
 });
 
+// The record is exhaustive over WorkSession["status"] on purpose: when the spec
+// grows a state (ADR-0139 added `idle`), regenerating src/api/schema.d.ts turns
+// the omission into a typecheck failure instead of a blank badge. `idle` reuses
+// the canonical clients/web wording (workSessionModel.ts) — an idle session is
+// finished with its last tool but still alive and resumable, which is a
+// different fact from `ended`.
 const STATUS_LABEL: Record<WorkSession["status"], string> = {
   running: "실행 중",
+  idle: "완료 · 대기 중",
   orphaned: "호스트 이탈",
   ended: "종료",
 };

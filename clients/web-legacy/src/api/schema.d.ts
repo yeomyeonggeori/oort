@@ -338,6 +338,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one agent's effective workspace model allow-list.
+         * @description Any active workspace member may read this credential-free projection. The response is exactly the agent's own model plus workspace.settings.allowed_agent_models; it deliberately does not expose the workspace settings object or agent profile fields.
+         */
+        get: operations["getAgentAllowedModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List one agent's workspace-global run history.
+         * @description Human active workspace members receive a newest-first keyset page of this agent's runs, restricted to channels where the caller has active membership. The UUID cursor identifies the final `(created_at, id)` row from the previous page. Each item is a bounded, credential-free summary shared with the channel run-list projection; input/output/error, gateway payloads, and full transcripts remain available only through the existing authorized run-detail surface.
+         */
+        get: operations["listAgentRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an agent's credential-free native profile.
+         * @description Human workspace owner/admin or the agent's active human owner only.
+         */
+        get: operations["getAgentProfile"];
+        /**
+         * Create or replace an agent profile and increment its version.
+         * @description Human workspace owner/admin or agent owner only. instructions are limited to 8192 bytes; credential-shaped fields are rejected. enabledTools only narrows existing grants. mention=true is fixed and schedule is reserved data with no v0 executor. modelPref must be inside workspace.settings.allowed_agent_models or equal to the agent's own model (ADR-0131 D2); an explicit write of anything else is a 400, while a value stored before the allow-list narrowed is still read back unchanged and stays a silent run-time ignore.
+         */
+        put: operations["putAgentProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Pause or resume new run enqueue for an agent.
+         * @description ADR-0132 D2. Human workspace owner/admin or the agent's active human owner only. Pausing does not remove membership or cancel an existing run; existing runs use the separate human cancel endpoint.
+         */
+        put: operations["putAgentPause"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel one agent run as a human channel member.
+         * @description ADR-0132 D1. Any active human member of the run's channel may cancel. Agent and work-host bearers are rejected. The server atomically marks the run cancelled, retires pending agent jobs, cancels pending approvals, writes an audit event and a channel system line, and returns linked work-session IDs. Linked work sessions are not terminated; callers must use the existing work.control kill path separately.
+         */
+        post: operations["cancelAgentRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/from-card": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch an A2A v0.3 Agent Card for administrator consent.
+         * @description Human workspace owner/admin only. The server fetches `/.well-known/agent-card.json` with a five-second timeout, a 256KB response limit, at most two manually validated redirects, and DNS/IP SSRF checks on every hop. HTTPS is required except for an explicit local-development opt-in. A successful parse stores public card provenance and display-only security requirements with status=pending_consent; failures persist nothing. Provider credentials and secret-shaped card fields are rejected.
+         */
+        post: operations["registerAgentFromCard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/from-card/{registrationId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a pending Agent Card and issue its first gateway bearer.
+         * @description Human workspace owner/admin only. The member(kind=agent), agent row, workspace membership, one-time per-agent gateway bearer digest, registration transition, and audit rows commit in one tenant transaction. The raw bearer is returned once with no-store headers; no card-provided credential is accepted or persisted.
+         */
+        post: operations["confirmAgentFromCard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/channels": {
         parameters: {
             query?: never;
@@ -450,6 +594,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recording-consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the caller's explicit consent to recording and post-call transcription.
+         * @description Idempotently records notice version 1. This endpoint does not start recording; the caller may leave instead of consenting.
+         */
+        post: operations["consentToHuddleRecording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/huddles/{huddleId}/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request participant-track recording after every active participant consents.
+         * @description Fails closed unless every current participant has a consent receipt. The transaction appends a channel system notice and a recording request. A recorded huddle rejects later joins that lack prior consent.
+         */
+        post: operations["startHuddleRecording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/work-hosts": {
         parameters: {
             query?: never;
@@ -469,6 +653,157 @@ export interface paths {
          */
         post: operations["registerWorkHost"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/cloud": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly provision one paid momo Cloud host on the configured provider.
+         * @description Human bearer only. Requires confirmPaidCloud=true, positive workspace credit, an available work-pool slot, and a managed provider adapter configured on this instance (ADR-0142 D2). Returns 202 while the cloud workd is consuming its one-shot bootstrap token and 201 if registration completed before create returned. An instance whose provider is the degenerate BYOC adapter answers 409 and points at the enrollment path below rather than pretending it can create hosts.
+         */
+        post: operations["provisionCloudWorkHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/byoc/enrollments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a one-shot token so a host the workspace already owns can enroll.
+         * @description ADR-0142 D1. The base acquisition path: a workspace admin installs `momo-workd` on their own VM and spends this token at the cloud register endpoint. momo never creates or destroys a BYOC host — its lifetime belongs to its owner — but scheduling, observation and billing are identical to a managed host. Workspace-shared hosts only; a `scope` other than `workspace` is refused by name. The token is returned exactly once: only its SHA-256 digest reaches storage, so a replayed idempotencyRef answers 409 rather than re-revealing it.
+         */
+        post: operations["enrollBYOCWorkHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/workspaces/{workspaceId}/credits/topups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append one idempotent positive workspace credit topup.
+         * @description Paid-credit writer only: a human token carrying platform:credits:write. platform:read and verified allowlist identity alone are insufficient. The credit entry, balance trigger, and audit row commit in one transaction.
+         */
+        post: operations["topupCloudCredit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/cloud/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consume a one-shot bootstrap token and self-register cloud workd.
+         * @description Cloud workd only, on either acquisition path (managed provider or BYOC). Authorization uses `MomoBootstrap {token}`. The server stores only the token SHA-256 digest and the workd-generated Ed25519 public key; the provider operator key and the workd private key never enter this API.
+         */
+        post: operations["registerCloudWorkHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/cloud/{provisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read safe cloud provisioning state without provider credentials. */
+        get: operations["getCloudWorkHostProvision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause the provider instance and open a zero-active-seconds pause interval. */
+        post: operations["pauseCloudWorkHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume the provider instance and start a new active-time interval. */
+        post: operations["resumeCloudWorkHost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Destroy a settled provider instance and revoke its work_host.
+         * @description Running/unsettled sessions must be ended first.
+         */
+        delete: operations["destroyCloudWorkHost"];
         options?: never;
         head?: never;
         patch?: never;
@@ -503,11 +838,51 @@ export interface paths {
         };
         /**
          * Poll dispatched controls targeted at this execution host.
-         * @description ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8 bytes `momo.work_host.request.v2\nGET\n<path>\n<lowercase workspace UUID>\n<lowercase host UUID>\n<sentAtMs>\n<lowercase raw-body SHA-256 hex>\n<lowercase request UUID>` with its registered Ed25519 key. The request UUID is consumed once. Only unrevoked status=dispatched controls targeted at that host are returned; no human or agent bearer is accepted.
+         * @description ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8 bytes `momo.work_host.request.v2\nGET\n<path>\n<lowercase workspace UUID>\n<lowercase host UUID>\n<sentAtMs>\n<SHA-256(raw empty body), lowercase hex>\n<lowercase request UUID>` with its registered Ed25519 key. The request UUID is consumed atomically once and retained for ten minutes. Only unrevoked status=dispatched controls targeted at that host are returned; no human or agent bearer is accepted.
          */
         get: operations["listPendingWorkHostControls"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/live-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Host-signed view of this host's running/idle sessions.
+         * @description Signature-authenticated (momo.work_host.request.v2). A restarting daemon asks the ledger which sessions it is still expected to serve before deciding what it can revive (MOMO-656).
+         */
+        get: operations["listWorkHostLiveSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Host-signed report of sessions it cannot revive.
+         * @description Signature-authenticated (momo.work_host.request.v2). Stamps host_lost_at on the named sessions so the existing offline sweep owns the orphaned transition, resume card, and lineage — the fast restart case where heartbeats never lapsed (MOMO-656). Performs no lifecycle transition of its own.
+         */
+        post: operations["reconcileWorkHostSessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -525,7 +900,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a direct terminal attach capability as its target host.
-         * @description MomoHost-signed control-plane check performed immediately before the direct PTY host accepts a client connection. The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running work_session and unrevoked work_host on every call, so expiry, session end, and host revoke take effect immediately. The returned mode is authoritative: observer connections may receive output but the host must reject send_stdin, resize, and kill. This endpoint returns binding metadata only: terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
+         * @description MomoHost-signed control-plane check performed immediately before the direct PTY host accepts a client connection. The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running-or-idle work_session and unrevoked work_host on every call, so expiry, session end, and host revoke take effect immediately. The returned mode is authoritative: observer connections may receive output but the host must reject send_stdin, resize, and kill. The host also calls this on a timer for every stream it is already serving (`stream: true`), which is what makes a revoke reach a socket that is already open. This endpoint returns binding metadata only: terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
          */
         post: operations["validateTerminalAttachCapability"];
         delete?: never;
@@ -563,7 +938,7 @@ export interface paths {
         };
         /**
          * Read workspace work-pool settings and current derived usage.
-         * @description Available to active human workspace members. Usage is counted from running work_session rows; no mutable active counter exists. A missing settings row is created with v0 defaults in the same tenant transaction.
+         * @description Available to active human workspace members. Usage is counted from running-or-idle work_session rows; no mutable active counter exists. A missing settings row is created with v0 defaults in the same tenant transaction.
          */
         get: operations["getWorkPool"];
         /**
@@ -593,6 +968,66 @@ export interface paths {
          * @description The work_session row, authoritative message seq, system card, message.new outbox, and no-version work.session.started outbox commit in one tenant transaction. Host-local cwd/path/process and credentials are deliberately absent.
          */
         post: operations["createWorkSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/workstreams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List workstreams anchored in channels the caller belongs to.
+         * @description ADR-0143 D3 visibility is channel membership; no workstream-level ACL exists. sessionId narrows the list to the workstream a given Run belongs to, which is how a client resolves a session to its goal layer without widening the work session projection.
+         */
+        get: operations["listWorkstreams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/workstreams/{workstreamId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one workstream anchored in a channel the caller belongs to.
+         * @description A workstream outside the caller's channels answers 404, not 403, so this route cannot be used to probe for the existence of other people's work.
+         */
+        get: operations["getWorkstream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/workstreams/{workstreamId}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the Runs of a workstream oldest-first.
+         * @description ADR-0143 D2 execution history. Every Run keeps the member that executed it, so a workstream continued by a second member lists both. Host-local state (pty id, attach endpoint, cwd) is deliberately unprojected.
+         */
+        get: operations["listWorkstreamRuns"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -649,10 +1084,10 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * End a running session or change its observation policy.
-         * @description The creating member, or the MomoHost-signed execution host bound to the session, may end it. The ledger row and card props update beside a no-version work.session.ended outbox; the message row is not edited and no channel seq is minted. A human session owner may instead set observation to open or owner_only; owner_only invalidates live observer grants and blocks new ones.
+         * Report tool lifecycle, end a live session, change observation, or relay an ACP event.
+         * @description A MomoHost-signed execution host bound to the session reports running-to-idle with the last tool exitCode and idle-to-running without replacing the session. The corresponding realtime frames are work.session.idle with payload keys session_id, channel_id, root_message_id, member_id, host_id, status, idle_at, exit_code, and work.session.resumed-to-running with the same identity/status fields plus resumed_at and the preserved exit_code. Idle also commits one system thread message ("작업 완료 — idle 대기") so NotifierWorker can notify only the owner through the existing id-only push envelope. When the bound host is a momo Cloud host whose adapter declares pause support, running-to-idle also pauses its provider instance and opens a zero-active-seconds paused interval; idle-to-running resumes it before reopening active usage. An adapter that declares no pause is skipped rather than faked. A provider-confirmed missing instance closes usage, destroys and revokes the cloud host, and schedules the existing offline sweep to publish the orphaned lifecycle. The creating member, or the bound host, may explicitly end a running or idle session. The ledger row and card props update beside a no-version work.session.ended outbox. A human session owner may instead set observation to open or owner_only; owner_only invalidates live observer grants and blocks new ones. A MomoHost-signed caller may alternatively append one bounded normalized ACP event to the session thread ledger; the message row and message.new plus ACP realtime outbox projections commit atomically. Raw ACP metadata and terminal streams are forbidden. A MomoHost-signed caller may also publish its direct PTY attach binding (ptyId + attachEndpoint) onto its own running or idle session exactly once; the same call with a different binding is 409.
          */
-        patch: operations["endWorkSession"];
+        patch: operations["updateWorkSession"];
         trace?: never;
     };
     "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume": {
@@ -686,7 +1121,7 @@ export interface paths {
         put?: never;
         /**
          * Issue an ephemeral capability for direct remote PTY attach.
-         * @description Human bearer only. mode defaults to controller, which remains session owner-only. observer requires active workspace and session-channel membership while observation=open. The running session must carry a MomoHost-signed remote PTY binding and its work_host must be unrevoked. The raw capability is returned exactly once, while PostgreSQL stores only its SHA-256 digest and timestamptz expiry. The same transaction audits only owner, mode, issue time, and expiry. Observer issuance also enqueues work.session.observer with a count-only projection. attach_endpoint contains no bearer or credential; the client connects there directly with the separate capability_token. MomoServer and relay expose no PTY stream.
+         * @description Human bearer only. mode defaults to controller, which remains session owner-only. observer requires active workspace and session-channel membership while observation=open. The running or idle session must carry a MomoHost-signed remote PTY binding and its work_host must be unrevoked. The raw capability is returned exactly once, while PostgreSQL stores only its SHA-256 digest and timestamptz expiry. The same transaction audits only owner, mode, issue time, and expiry. Observer issuance also enqueues work.session.observer with a count-only projection. attach_endpoint contains no bearer or credential; the client connects there directly with the separate capability_token. MomoServer and relay expose no PTY stream.
          */
         post: operations["issueTerminalAttachCapability"];
         delete?: never;
@@ -774,6 +1209,90 @@ export interface paths {
          * @description Human bearer only. A real setting change and its audit_log row commit in the same tenant transaction; retries are idempotent.
          */
         delete: operations["disableWorkAutoApproval"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/event-subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List outbound event subscriptions without signing material. */
+        get: operations["listEventSubscriptions"];
+        put?: never;
+        /**
+         * Register a public webhook destination and issue its signing secret once.
+         * @description The destination is DNS-resolved and checked against private, loopback, link-local, multicast, and reserved ranges before the row is created. Production requires HTTPS. The secret is derived from a non-secret random reference and returned only by this response; list/update/delete never expose either the secret or reference.
+         */
+        post: operations["createEventSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/event-subscriptions/{subscriptionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update destination, event selection, or enabled state.
+         * @description Re-enabling resets accumulated delivery failures. Updating never rotates or returns signing material. A new URL receives the same SSRF validation as create and is checked again by the relay at delivery time.
+         */
+        put: operations["updateEventSubscription"];
+        post?: never;
+        /** Delete an outbound event subscription. */
+        delete: operations["deleteEventSubscription"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-tool-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the workspace tool catalog or its enabled work-host projection.
+         * @description Human callers require workspace owner/admin authority and receive all profiles. A MomoHost-signed caller receives enabled profiles only. Launch templates contain a portable command key and arguments. The environment policy contains key names only; no executable path, environment value, provider credential, or token is accepted or returned.
+         */
+        get: operations["listWorkToolProfiles"];
+        put?: never;
+        /** Register a workspace work tool profile. */
+        post: operations["createWorkToolProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-tool-profiles/{tool}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace supplied fields of a registered work tool profile.
+         * @description Disabling a profile also clears its auto-approval rows. New spawn, approval dispatch, session creation, and resume all fail closed while the profile is disabled.
+         */
+        put: operations["updateWorkToolProfile"];
+        post?: never;
+        /** Delete a workspace work tool profile and clear auto-approval rows. */
+        delete: operations["deleteWorkToolProfile"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1279,6 +1798,223 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/context-packets/{packetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect the immutable Context Packet consumed by an agent run.
+         * @description Returns the original frozen packet, including expired historical packets. The caller must still be an active member of the run channel. This read never refreshes or mutates packet content.
+         */
+        get: operations["getContextPacket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List active, source-readable workspace memories. */
+        get: operations["listMemories"];
+        put?: never;
+        /**
+         * Create a sourced memory through the tenant write path.
+         * @description Source references contain message/channel identifiers only; message bodies are not copied.
+         */
+        post: operations["createMemory"];
+        /**
+         * Disable workspace memory and purge all memory projections.
+         * @description Human workspace admin only. Individual memory DELETE does not exist; normal removal is invalidation.
+         */
+        delete: operations["disableAndDeleteAllMemories"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memories/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search active memories with FTS and vector reciprocal-rank fusion.
+         * @description Runs through the caller's normal FORCE RLS tenant path and current source-channel membership. Items without embeddings remain eligible through FTS. Query embedding failure degrades to FTS-only retrieval.
+         */
+        get: operations["searchMemories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memories/{memoryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Edit the bounded body or confidence of an active memory. */
+        patch: operations["updateMemory"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memories/{memoryId}/invalidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Time-invalidate a memory without deleting its source or lifecycle evidence. */
+        post: operations["invalidateMemory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memories/{memoryId}/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active and revoked explicit visibility grants for one memory.
+         * @description Workspace owner/admin, the member-scope subject, or the human owner of an agent-scope memory only. The read runs through FORCE RLS.
+         */
+        get: operations["listMemoryVisibilityGrants"];
+        put?: never;
+        /**
+         * Grant explicit memory visibility to one active member or agent.
+         * @description Workspace owner/admin, the member-scope subject, or the human owner of an agent-scope memory only. A revoked ledger row is reactivated; posting an already-active grant is idempotent. Grant changes and audit evidence commit in one ordinary tenant transaction through FORCE RLS.
+         */
+        post: operations["grantMemoryVisibility"];
+        /**
+         * Revoke explicit memory visibility without deleting its ledger row.
+         * @description Uses the same manager boundary as grant creation. The first call marks revokedAtMs and writes audit evidence; revoking the same row again is an idempotent 200 with no duplicate revoke audit row.
+         */
+        delete: operations["revokeMemoryVisibility"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memory-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the workspace memory switch. */
+        get: operations["getMemoryPolicy"];
+        /** Enable memory, or disable and purge it atomically. */
+        put: operations["putMemoryPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/memory-external-provider-consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read external-provider memory consent and the server policy verdict.
+         * @description Active workspace members may read this projection. Provider trust is classified by the server from its configured provider mode and endpoint; credentials and raw endpoint query data are never returned. The consent value is a separate axis from the workspace memory enabled switch.
+         */
+        get: operations["getMemoryExternalProviderConsent"];
+        /**
+         * Replace the workspace external-provider memory consent.
+         * @description Human workspace admin only. Existing workspaces default to false, and every update is recorded in the workspace audit ledger. This operation does not enable/disable or purge workspace memory.
+         */
+        put: operations["putMemoryExternalProviderConsent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/provider/link/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read every configured provider cascade hop, including unavailable ciphertext rows.
+         * @description Instance-global operator surface (MOMO-583 / ADR-0135 D1): a human principal carrying the platform:read scope, or an owner/admin whose verified email is on the instance operator allowlist. Position 0 is the legacy provider-link singleton and remains editable only through it. Bearers are never echoed — a hop carries a masked 4-character tail only (ADR-0004).
+         */
+        get: operations["getProviderLinkChain"];
+        /**
+         * Atomically replace fallback provider cascade hops.
+         * @description Same operator boundary as the read. Replaces positions >= 1 in one transaction; position 0 is rejected by name. Omitting an entry's bearer keeps the ciphertext already stored at that position, so a hop can be reordered or parked without re-typing a write-only secret.
+         */
+        put: operations["replaceProviderLinkChain"];
+        post?: never;
+        /**
+         * Remove every fallback provider cascade hop.
+         * @description Same operator boundary as the read. Drops every fallback hop; the response then projects the cascade as position 0 alone.
+         */
+        delete: operations["clearProviderLinkChain"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/provider/effort-table": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the provider and model effort capabilities used by routing.
+         * @description Any authenticated principal — human access token or agent gateway bearer, both sent as `Authorization: Bearer`. The table carries no tenant row and no provider credential (ADR-0134 D2), and a model absent from it resolves to the conservative low/medium/high fallback rather than silently accepting a level the provider would reject.
+         */
+        get: operations["getProviderEffortTable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1288,6 +2024,181 @@ export interface components {
             error: {
                 message: string;
             };
+        };
+        /** @enum {string} */
+        MemoryScope: "workspace" | "member" | "agent" | "conversation";
+        /** @enum {string} */
+        MemoryKind: "profile" | "fact" | "episode" | "procedure";
+        MemorySourceRefRequest: {
+            /** Format: uuid */
+            messageId: string;
+            /** Format: uuid */
+            channelId: string;
+        };
+        MemorySourceRef: {
+            /** Format: uuid */
+            messageId: string;
+            /** Format: uuid */
+            channelId: string;
+        };
+        CreateMemoryRequest: {
+            scope: components["schemas"]["MemoryScope"];
+            /** Format: uuid */
+            subjectMemberId?: string;
+            /** Format: uuid */
+            agentMemberId?: string;
+            /** Format: uuid */
+            channelId?: string;
+            kind: components["schemas"]["MemoryKind"];
+            body: string;
+            /** Format: double */
+            confidence: number;
+            /** Format: int64 */
+            validAtMs?: number;
+            sourceRefs: components["schemas"]["MemorySourceRefRequest"][];
+        };
+        UpdateMemoryRequest: {
+            body?: string;
+            /** Format: double */
+            confidence?: number;
+        };
+        InvalidateMemoryRequest: {
+            /** Format: uuid */
+            invalidatedByMemoryId?: string;
+        };
+        MemoryVisibilityGrantRequest: {
+            /** @enum {string} */
+            granteeKind: "member" | "agent";
+            /** Format: uuid */
+            granteeId: string;
+        };
+        MemoryVisibilityGrant: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: uuid */
+            memoryId: string;
+            /** @enum {string} */
+            granteeKind: "member" | "agent";
+            /** Format: uuid */
+            granteeId: string;
+            /** Format: uuid */
+            grantedBy: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            revokedAtMs?: number;
+        };
+        MemoryVisibilityGrantResponse: {
+            grant: components["schemas"]["MemoryVisibilityGrant"];
+        };
+        MemoryVisibilityGrantPageResponse: {
+            grants: components["schemas"]["MemoryVisibilityGrant"][];
+        };
+        PutMemoryPolicyRequest: {
+            enabled: boolean;
+        };
+        PutMemoryExternalProviderConsentRequest: {
+            consented: boolean;
+        };
+        ContextPacketResponse: {
+            /** Format: uuid */
+            packetId: string;
+            /** Format: uuid */
+            runId: string;
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            expiresAtMs: number;
+            expired: boolean;
+            /** @description Frozen momo.context_packet.v0 JSON object. */
+            content: {
+                [key: string]: unknown;
+            };
+        };
+        MemoryItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            scope: components["schemas"]["MemoryScope"];
+            /** Format: uuid */
+            subjectMemberId?: string;
+            /** Format: uuid */
+            agentMemberId?: string;
+            /** Format: uuid */
+            channelId?: string;
+            kind: components["schemas"]["MemoryKind"];
+            body: string;
+            /** Format: double */
+            confidence: number;
+            /** Format: int64 */
+            validAtMs: number;
+            /** Format: int64 */
+            invalidAtMs?: number;
+            /** Format: uuid */
+            invalidatedByMemoryId?: string;
+            /** @enum {string} */
+            createdByKind: "human" | "agent" | "worker";
+            /** Format: uuid */
+            createdByMemberId?: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+            sourceRefs: components["schemas"]["MemorySourceRef"][];
+        };
+        MemoryItemResponse: {
+            memory: components["schemas"]["MemoryItem"];
+        };
+        MemoryPageResponse: {
+            memories: components["schemas"]["MemoryItem"][];
+        };
+        MemorySearchHit: {
+            memory: components["schemas"]["MemoryItem"];
+            /** Format: double */
+            score: number;
+            ftsRank?: number;
+            vectorRank?: number;
+            /** Format: double */
+            vectorDistance?: number;
+        };
+        MemorySearchResponse: {
+            hits: components["schemas"]["MemorySearchHit"][];
+        };
+        MemoryPolicy: {
+            /** Format: uuid */
+            workspaceId: string;
+            enabled: boolean;
+            /** Format: uuid */
+            updatedBy?: string;
+            /** Format: int64 */
+            updatedAtMs?: number;
+        };
+        MemoryPolicyResponse: {
+            memoryPolicy: components["schemas"]["MemoryPolicy"];
+            deletedCount?: number;
+        };
+        MemoryExternalProviderConsent: {
+            /** Format: uuid */
+            workspaceId: string;
+            /** @default false */
+            consented: boolean;
+            /** @enum {string} */
+            providerTrust: "local-mock" | "self-hosted" | "external";
+            /** @description Redacted provider scheme/host/port/path without credentials or query. */
+            providerEndpointLabel: string;
+            extractionAllowed: boolean;
+            /** Format: uuid */
+            updatedBy?: string;
+            /** Format: int64 */
+            updatedAtMs?: number;
+        };
+        MemoryExternalProviderConsentResponse: {
+            memoryExternalProviderConsent: components["schemas"]["MemoryExternalProviderConsent"];
         };
         LoginRequest: {
             /** @description Human member email within the workspace. */
@@ -1435,6 +2346,11 @@ export interface components {
             channelIds: string[];
             /** @description Public capability projection for agents; empty for humans. */
             capabilities: string[];
+            /**
+             * @description Present for agents only; additive origin projection from the confirmed card ledger.
+             * @enum {string}
+             */
+            origin?: "card" | "local";
             email?: string;
             timeZone?: string;
             agentModel?: string;
@@ -1550,6 +2466,90 @@ export interface components {
              * @description Optional active human owner in this workspace; defaults to the caller.
              */
             ownerHumanId?: string;
+            profile?: components["schemas"]["AgentProfileInput"];
+        };
+        AgentProfileInput: {
+            /** @description UTF-8 content is limited to 8192 bytes by the server. */
+            instructions: string;
+            /** @description Applied only when listed in workspace.settings.allowed_agent_models. */
+            modelPref?: string;
+            /** @enum {string} */
+            effortPref?: "low" | "medium" | "high" | "xhigh" | "max";
+            enabledTools: string[];
+            triggers?: components["schemas"]["AgentProfileTriggers"];
+        };
+        AgentPauseInput: {
+            paused: boolean;
+        };
+        AgentProfileTriggers: {
+            /** @enum {boolean} */
+            mention: true;
+            /** @description Reserved definition only; v0 does not execute schedules. */
+            schedule?: unknown;
+        };
+        AgentProfile: {
+            /** Format: uuid */
+            agentMemberId: string;
+            /** Format: uuid */
+            workspaceId: string;
+            instructions: string;
+            modelPref?: string;
+            /** @enum {string} */
+            effortPref?: "low" | "medium" | "high" | "xhigh" | "max";
+            enabledTools: string[];
+            triggers: components["schemas"]["AgentProfileTriggers"];
+            paused: boolean;
+            version: number;
+            /** Format: uuid */
+            updatedBy: string;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        AgentProfileResponse: {
+            profile: components["schemas"]["AgentProfile"];
+        };
+        AllowedAgentModelsResponse: {
+            allowedAgentModels: string[];
+        };
+        AgentRunSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            channelId: string;
+            /**
+             * Format: uuid
+             * @description Message that triggered this run, when applicable.
+             */
+            triggerMessageId?: string;
+            /** @description Bounded validated Work title or mention prompt excerpt. No raw input object, tool payload, output, error, or transcript is exposed. */
+            triggerSummary?: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "awaiting_approval" | "paused" | "succeeded" | "failed" | "cancelled" | "timed_out";
+            /** Format: int64 */
+            startedAtMs?: number;
+            /** Format: int64 */
+            finishedAtMs?: number;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        AgentRunSummaryPage: {
+            runs: components["schemas"]["AgentRunSummary"][];
+            /**
+             * Format: uuid
+             * @description Final run ID when another older page exists.
+             */
+            nextCursor?: string;
+        };
+        AgentRunCancelResponse: {
+            /** Format: uuid */
+            runId: string;
+            /** @enum {string} */
+            status: "cancelled";
+            linkedWorkSessionIds: string[];
+            /** @enum {boolean} */
+            workSessionsTerminated: false;
         };
         AgentMember: {
             /** Format: uuid */
@@ -1559,6 +2559,157 @@ export interface components {
         };
         CreateAgentResponse: {
             agent: components["schemas"]["AgentMember"];
+        };
+        RegisterAgentCardRequest: {
+            /**
+             * Format: uri
+             * @description Agent origin or exact /.well-known/agent-card.json URL; userinfo, query, and fragment are forbidden.
+             */
+            url: string;
+        };
+        AgentCardRegistration: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "pending_consent" | "confirmed";
+            name: string;
+            description?: string;
+            /** Format: uri */
+            url: string;
+            capabilities: {
+                [key: string]: unknown;
+            };
+            /** @description Display-only summary; never includes submitted credentials or secrets. */
+            securitySchemes: {
+                [key: string]: unknown;
+            };
+            /** Format: uuid */
+            agentMemberId?: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            confirmedAtMs?: number;
+        };
+        AgentCardRegistrationResponse: {
+            registration: components["schemas"]["AgentCardRegistration"];
+        };
+        AgentCredential: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agentMemberId: string;
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+            scopes: string[];
+            label?: string;
+            /** Format: int64 */
+            lastUsedAtMs?: number;
+            /** Format: int64 */
+            expiresAtMs?: number;
+            /** Format: int64 */
+            revokedAtMs?: number;
+            /** Format: int64 */
+            createdAtMs: number;
+        };
+        ConfirmAgentCardResponse: {
+            /** Format: uuid */
+            registrationId: string;
+            /** @enum {string} */
+            status: "confirmed";
+            agent: components["schemas"]["AgentMember"];
+            credential: components["schemas"]["AgentCredential"];
+            /** @description One-time-issued scoped gateway bearer; only its SHA-256 digest is persisted. */
+            token: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            /** Format: int64 */
+            confirmedAtMs: number;
+        };
+        /** @description One projected cascade hop. Position 0 is the `provider_link` singleton (or the boot-time HERMES_* env trio when no row exists); positions >= 1 come from `provider_link_chain`. The bearer itself is never projected — only whether one is configured/openable and a masked tail (ADR-0004). */
+        ProviderChainEntry: {
+            /** @description 0 is the singleton head; fallback hops run 1..8. */
+            position: number;
+            /**
+             * @description Position 0 resolves to `database` (a provider_link row) or `environment` (the env fallback); every fallback hop is `chain`.
+             * @enum {string}
+             */
+            source: "database" | "environment" | "chain";
+            /** @enum {string} */
+            mode: "local-mock" | "internal-host-mock" | "external-hermes";
+            baseUrl: string;
+            /** @description Scheme, host, port, and path only — userinfo, query, and fragment are stripped before the hop is projected or audited. */
+            endpointLabel: string;
+            enabled: boolean;
+            bearerConfigured: boolean;
+            /** @description The row exists but its ciphertext cannot be opened with the configured master key. It stays visible so a replace-all PUT cannot silently erase it. */
+            bearerUnavailable: boolean;
+            /** @description Masked 4-character bearer tail. Absent — never null — when no bearer is readable for this hop. */
+            bearerLast4?: string;
+            /**
+             * Format: int64
+             * @description Absent for an env-sourced position 0.
+             */
+            updatedAtMs?: number;
+            /**
+             * Format: uuid
+             * @description Absent when the row has no recorded editor.
+             */
+            updatedBy?: string;
+        };
+        ProviderChainResponse: {
+            /** @enum {string} */
+            schema: "momo.provider_link.chain.v0";
+            /** @description The whole cascade in attempt order, position 0 first. */
+            entries: components["schemas"]["ProviderChainEntry"][];
+            /** @description Configured hops beyond position 0. */
+            fallbackCount: number;
+            /** @description Hops a real turn would actually attempt (enabled AND usable). */
+            attemptableCount: number;
+        };
+        /** @description One fallback hop in the replace-all body. Closed-world: any key outside this set is rejected with 400, so no provider OAuth or raw-provider-key field can enter through this API (ADR-0004 Rules #1-#2). */
+        PutProviderChainEntry: {
+            /** @description Position 0 is the provider-link singleton and is rejected by name; it stays editable only through `PUT /v1/provider/link`. */
+            position: number;
+            /** @description Validated exactly like an agent endpoint — no userinfo, query, or fragment credential material; HTTPS unless the server opted into local loopback HTTP. */
+            baseUrl: string;
+            /** @description Write-only; never echoed back. Omit to keep the ciphertext already stored at this position — required only for a position that does not exist yet. */
+            bearer?: string;
+            /**
+             * @description Defaults to external-hermes when omitted.
+             * @enum {string}
+             */
+            mode?: "local-mock" | "internal-host-mock" | "external-hermes";
+            /** @description Defaults to true when omitted. */
+            enabled?: boolean;
+        };
+        PutProviderChainRequest: {
+            /** @description The complete new set of fallback hops. This is a replace-all: any configured position absent from the list is dropped. */
+            entries: components["schemas"]["PutProviderChainEntry"][];
+        };
+        ProviderEffortModel: {
+            model: string;
+            /** @description Levels this model accepts — a subset of `levels`. */
+            efforts: ("low" | "medium" | "high" | "xhigh" | "max")[];
+            /** @enum {string} */
+            defaultEffort: "low" | "medium" | "high" | "xhigh" | "max";
+        };
+        ProviderEffortProvider: {
+            provider: string;
+            models: components["schemas"]["ProviderEffortModel"][];
+        };
+        /** @description Applied to any model absent from the table — deliberately the conservative low/medium/high triple. */
+        ProviderEffortFallback: {
+            efforts: ("low" | "medium" | "high" | "xhigh" | "max")[];
+            /** @enum {string} */
+            defaultEffort: "low" | "medium" | "high" | "xhigh" | "max";
+        };
+        ProviderEffortTableResponse: {
+            /** @enum {string} */
+            schema: "momo.provider.effort_table.v0";
+            /** @description Canonical superset in ascending order. A value outside this set is never a valid `routing.effort` regardless of model. */
+            levels: ("low" | "medium" | "high" | "xhigh" | "max")[];
+            fallback: components["schemas"]["ProviderEffortFallback"];
+            providers: components["schemas"]["ProviderEffortProvider"][];
         };
         Channel: {
             /** Format: uuid */
@@ -1638,6 +2789,95 @@ export interface components {
                 [key: string]: boolean;
             };
         };
+        CreateCloudHostRequest: {
+            displayName: string;
+            /** @description Must be true for this one paid-cloud provisioning request. */
+            confirmPaidCloud: boolean;
+            /**
+             * Format: uuid
+             * @description Client-stable create key. Reusing it converges a lost 201 response onto the same provider instance and never creates a second paid host.
+             */
+            idempotencyRef: string;
+        };
+        EnrollBYOCHostRequest: {
+            displayName: string;
+            /**
+             * @description Accepted only so a personal request can be refused by name instead of being silently promoted to a workspace-wide host.
+             * @enum {string}
+             */
+            scope?: "workspace";
+            /** Format: uuid */
+            idempotencyRef: string;
+        };
+        BYOCEnrollment: {
+            /** Format: uuid */
+            provisionId: string;
+            /** @description Always the degenerate `byoc` adapter identifier. */
+            provider: string;
+            state: string;
+            /** @description Shown exactly once. Only its SHA-256 digest is stored, so momo cannot show it again. */
+            bootstrapToken: string;
+            /** Format: int64 */
+            bootstrapExpiresAtMs: number;
+            /** @description Absolute URL the operator's workd registers against. */
+            registerUrl: string;
+        };
+        BYOCEnrollmentResponse: {
+            enrollment: components["schemas"]["BYOCEnrollment"];
+        };
+        CloudCreditTopupRequest: {
+            /** Format: int64 */
+            amountMicroUsd: number;
+            /** Format: uuid */
+            idempotencyRef: string;
+        };
+        CloudCreditTopupResponse: {
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: int64 */
+            amountMicroUsd: number;
+            /** Format: uuid */
+            idempotencyRef: string;
+            /** Format: int64 */
+            balanceMicroUsd: number;
+        };
+        CloudHost: {
+            /** Format: uuid */
+            provisionId: string;
+            /**
+             * Format: uuid
+             * @description Present after cloud workd self-registration.
+             */
+            hostId?: string;
+            /** @enum {string} */
+            state: "provisioning" | "ready" | "running" | "pausing" | "paused" | "resuming" | "destroy_pending" | "destroyed" | "failed";
+            /** @description ADR-0142 D2 adapter registry identifier — `byoc` for a host the workspace owns, or the id of a managed substrate adapter. Not a closed vendor enum: adding a substrate must not change this API. */
+            provider: string;
+            /** Format: int64 */
+            createdAtMs: number;
+        };
+        CloudHostResponse: {
+            cloudHost: components["schemas"]["CloudHost"];
+        };
+        WorkHostLiveSessionDTO: {
+            /** Format: uuid */
+            id: string;
+            tool: string;
+            label: string;
+            /** @enum {string} */
+            status: "running" | "idle";
+            /** Format: int64 */
+            startedAtMs: number;
+        };
+        WorkHostLiveSessionsResponse: {
+            workSessions: components["schemas"]["WorkHostLiveSessionDTO"][];
+        };
+        WorkHostReconcileRequest: {
+            lostSessionIds: string[];
+        };
+        WorkHostReconcileResponse: {
+            reportedSessionIds: string[];
+        };
         WorkHostHeartbeatRequest: {
             /** Format: int64 */
             sentAtMs: number;
@@ -1690,9 +2930,9 @@ export interface components {
             maxActive: number;
             includedActiveHours?: number | null;
             perMemberSoftLimit: number;
-            /** @description Workspace running work_session count. */
+            /** @description Workspace running-or-idle work_session count. */
             activeSessions: number;
-            /** @description Calling member's running work_session count. */
+            /** @description Calling member's running-or-idle work_session count. */
             memberActiveSessions: number;
         };
         WorkPoolResponse: {
@@ -1706,8 +2946,7 @@ export interface components {
              * @description Registered work_host identity enforced by a database FK.
              */
             hostId: string;
-            /** @enum {string} */
-            tool: "claude" | "codex" | "opencode" | "shell";
+            tool: string;
             /** @description Display-only label. Filesystem cwd/path is never stored. */
             label: string;
             /**
@@ -1720,12 +2959,55 @@ export interface components {
             /** @description Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query, and fragment are forbidden. MomoServer never proxies this stream. */
             attachEndpoint?: string;
         };
-        UpdateWorkSessionRequest: components["schemas"]["EndWorkSessionRequest"] | components["schemas"]["UpdateWorkSessionObservationRequest"];
+        UpdateWorkSessionRequest: components["schemas"]["EndWorkSessionRequest"] | components["schemas"]["SetWorkSessionIdleRequest"] | components["schemas"]["SetWorkSessionRunningRequest"] | components["schemas"]["UpdateWorkSessionObservationRequest"] | components["schemas"]["RelayWorkSessionACPEventRequest"] | components["schemas"]["BindWorkSessionRemotePTYRequest"];
+        /** @description MomoHost-signed publication of the direct PTY attach binding for a running or idle session the caller already owns (MOMO-655, ADR-0125 D10). Create allocates the session id server-side and a tier-fallback resume never calls create at all, so this is the only way those sessions can carry a binding. Writing a DIFFERENT binding onto a session that already has one is 409; re-sending the identical pair is idempotent. The server stores and authorizes the endpoint and never proxies bytes. */
+        BindWorkSessionRemotePTYRequest: {
+            ptyId: string;
+            /** @description Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query, and fragment are forbidden. */
+            attachEndpoint: string;
+        };
+        RelayWorkSessionACPEventRequest: {
+            event: components["schemas"]["WorkSessionACPEvent"];
+        };
+        /** @description At most 65536 encoded bytes. The server accepts at most 240 events per work session per 60 seconds. payload is an ADR-0004 allowlisted summary; _meta.acp, credentials, command/env/path, and terminal output are rejected. */
+        WorkSessionACPEvent: {
+            /**
+             * Format: uuid
+             * @description Stable idempotency key retained across relay retries.
+             */
+            event_id: string;
+            /** @enum {string} */
+            type: "agent.partial" | "agent.status" | "approval.requested" | "approval.decided";
+            /** @enum {integer} */
+            v: 1;
+            /** Format: int64 */
+            ts: number;
+            /** @description Normalized progress, plan, approval, or terminal lifecycle summary. Terminal created/ended uses agent.status with terminal_event and an optional exit_code; raw terminal bytes never enter this object. */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
         EndWorkSessionRequest: {
             /** @enum {string} */
             status: "ended";
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Optional last tool result; an idle session preserves its recorded value.
+             */
             exitCode?: number;
+        };
+        SetWorkSessionIdleRequest: {
+            /** @enum {string} */
+            status: "idle";
+            /**
+             * Format: int32
+             * @description Result of the tool execution that just completed; not a session exit code.
+             */
+            exitCode: number;
+        };
+        SetWorkSessionRunningRequest: {
+            /** @enum {string} */
+            status: "running";
         };
         ResumeWorkSessionRequest: {
             /**
@@ -1782,11 +3064,10 @@ export interface components {
             hostId: string;
             /** Format: uuid */
             rootMessageId: string;
-            /** @enum {string} */
-            tool: "claude" | "codex" | "opencode" | "shell";
+            tool: string;
             label: string;
             /** @enum {string} */
-            status: "running" | "orphaned" | "ended";
+            status: "running" | "idle" | "orphaned" | "ended";
             /** @enum {string} */
             observation: "open" | "owner_only";
             /**
@@ -1805,14 +3086,14 @@ export interface components {
             endedAtMs?: number;
             /**
              * Format: int32
-             * @description Present only when the ending host reports an exit code.
+             * @description Last tool execution result; it remains present across idle-to-running.
              */
             exitCode?: number;
             /**
-             * @description Terminal host-loss or resume reason when applicable.
+             * @description Terminal host-loss, lineage resume, or idle-timeout reason.
              * @enum {string}
              */
-            endReason?: "orphaned" | "resumed";
+            endReason?: "orphaned" | "resumed" | "idle_timeout";
             /**
              * Format: uuid
              * @description Source orphaned session; the root thread remains unchanged.
@@ -1824,6 +3105,81 @@ export interface components {
         };
         WorkSessionListResponse: {
             workSessions: components["schemas"]["WorkSession"][];
+        };
+        Workstream: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: uuid */
+            channelId: string;
+            /**
+             * Format: uuid
+             * @description Anchor thread root. The workstream extends the thread; it does not replace it.
+             */
+            rootMessageId: string;
+            /** @description Goal statement. Implicit creation seeds it from the first Run's label; explicit declaration and editing are ADR-0143 P2. */
+            goal: string;
+            /** @enum {string} */
+            status: "active" | "paused" | "done" | "cancelled";
+            /**
+             * Format: uuid
+             * @description Provenance of the first Run only. Resume eligibility derives from channel membership, never from this member.
+             */
+            createdByMemberId: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+            /** Format: int64 */
+            runCount: number;
+            /**
+             * Format: int64
+             * @description Runs currently running or idle.
+             */
+            activeRunCount: number;
+        };
+        WorkstreamRun: {
+            /**
+             * Format: uuid
+             * @description work_session id of this Run.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The member who executed this Run. Immutable execution record.
+             */
+            memberId: string;
+            /** Format: uuid */
+            hostId: string;
+            tool: string;
+            label: string;
+            /** @enum {string} */
+            status: "running" | "idle" | "orphaned" | "ended";
+            /** Format: int64 */
+            startedAtMs: number;
+            /** Format: int64 */
+            endedAtMs?: number;
+            /** Format: int32 */
+            exitCode?: number;
+            /** @enum {string} */
+            endReason?: "orphaned" | "resumed" | "idle_timeout";
+            /**
+             * Format: uuid
+             * @description Lineage of the Run this one continued, inside the same workstream.
+             */
+            resumedFromSessionId?: string;
+        };
+        WorkstreamResponse: {
+            workstream: components["schemas"]["Workstream"];
+        };
+        WorkstreamListResponse: {
+            workstreams: components["schemas"]["Workstream"][];
+        };
+        WorkstreamRunListResponse: {
+            /** Format: uuid */
+            workstreamId: string;
+            runs: components["schemas"]["WorkstreamRun"][];
         };
         TerminalAttachCapabilityResponse: {
             /** @description Credential-free direct HTTPS or WSS host endpoint. */
@@ -1842,6 +3198,11 @@ export interface components {
         ValidateTerminalAttachRequest: {
             /** @description Opaque grant presented by the direct client to its target host. */
             capability_token: string;
+            /**
+             * @description True when the host is re-checking a stream it has already accepted rather than admitting a new client. It relaxes exactly one clause, the capability expiry, because that TTL bounds the mint-to-dial window and the host closed that window under a full validation. Every authorization clause still applies on every call, so an open terminal is cut within one revalidation period when the session ends, the host is revoked, observation closes, the grantee leaves the channel, or the grantee is deactivated.
+             * @default false
+             */
+            stream: boolean;
         };
         TerminalAttachValidationResponse: {
             /** Format: uuid */
@@ -1882,8 +3243,7 @@ export interface components {
         };
         /** @description Closed field union selected by kind: spawn requires exactly tool+label, input exactly text, read accepts only optional tail_lines, and kill is empty. No path, cwd, environment, process state, or credential fields are accepted. */
         WorkControlPayload: {
-            /** @enum {string} */
-            tool?: "claude" | "codex" | "opencode" | "shell";
+            tool?: string;
             label?: string;
             text?: string;
             tail_lines?: number;
@@ -1927,13 +3287,127 @@ export interface components {
             workControl: components["schemas"]["WorkControl"];
         };
         WorkAutoApproveResponse: {
-            /** @enum {string} */
-            tool: "claude" | "codex" | "opencode" | "shell";
+            tool: string;
             enabled: boolean;
         };
         WorkAutoApprovalsResponse: {
             /** @description Enabled tool identifiers sorted lexicographically. */
-            tools: ("claude" | "codex" | "opencode" | "shell")[];
+            tools: string[];
+        };
+        /** @enum {string} */
+        EventSubscriptionKind: "mention" | "approval_request" | "work.status_changed";
+        EventSubscription: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: uri */
+            url: string;
+            eventKinds: components["schemas"]["EventSubscriptionKind"][];
+            enabled: boolean;
+            deliveryFailureCount: number;
+            /** Format: int64 */
+            disabledAtMs?: number;
+            /** @enum {string} */
+            disabledReason?: "disabled_by_admin" | "server_5xx_threshold";
+            /** Format: uuid */
+            createdBy: string;
+            /** Format: uuid */
+            updatedBy: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        CreateEventSubscriptionRequest: {
+            /** Format: uri */
+            url: string;
+            eventKinds: components["schemas"]["EventSubscriptionKind"][];
+            /** @default true */
+            enabled: boolean;
+        };
+        UpdateEventSubscriptionRequest: {
+            /** Format: uri */
+            url?: string;
+            eventKinds?: components["schemas"]["EventSubscriptionKind"][];
+            enabled?: boolean;
+        };
+        EventSubscriptionResponse: {
+            eventSubscription: components["schemas"]["EventSubscription"];
+        };
+        EventSubscriptionsResponse: {
+            eventSubscriptions: components["schemas"]["EventSubscription"][];
+        };
+        CreatedEventSubscriptionResponse: {
+            eventSubscription: components["schemas"]["EventSubscription"];
+            /** @description One-time HMAC signing secret. Never returned again. */
+            secret: string;
+            /** @enum {string} */
+            signatureVersion: "v1";
+            /** @enum {string} */
+            algorithm: "HMAC-SHA256";
+        };
+        /** @description Portable host-local command key plus arguments; never an executable path or credential. */
+        WorkToolLaunchTemplate: {
+            command: string;
+            arguments: string[];
+        };
+        WorkToolProfile: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            toolKey: string;
+            displayName: string;
+            launchTemplate: components["schemas"]["WorkToolLaunchTemplate"];
+            tierDefaults: {
+                [key: string]: unknown;
+            };
+            envPolicy: components["schemas"]["WorkToolEnvironmentPolicy"];
+            enabled: boolean;
+            /** Format: uuid */
+            createdBy: string;
+            /** Format: uuid */
+            updatedBy: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        CreateWorkToolProfileRequest: {
+            toolKey: string;
+            displayName: string;
+            launchTemplate: components["schemas"]["WorkToolLaunchTemplate"];
+            tierDefaults?: {
+                [key: string]: unknown;
+            };
+            envPolicy?: components["schemas"]["WorkToolEnvironmentPolicy"];
+            /** @default true */
+            enabled: boolean;
+        };
+        UpdateWorkToolProfileRequest: {
+            displayName?: string;
+            launchTemplate?: components["schemas"]["WorkToolLaunchTemplate"];
+            tierDefaults?: {
+                [key: string]: unknown;
+            };
+            envPolicy?: components["schemas"]["WorkToolEnvironmentPolicy"];
+            enabled?: boolean;
+        };
+        /** @description Child-process environment mode and requested host key names. Values are never stored. Passthrough cannot widen the host-approved list, and legacy mode is honored only when the host opts in. */
+        WorkToolEnvironmentPolicy: {
+            /**
+             * @default allowlist
+             * @enum {string}
+             */
+            mode: "allowlist" | "legacy";
+            passthrough?: string[];
+        };
+        WorkToolProfileResponse: {
+            workToolProfile: components["schemas"]["WorkToolProfile"];
+        };
+        WorkToolProfilesResponse: {
+            workToolProfiles: components["schemas"]["WorkToolProfile"][];
         };
         HuddleParticipant: {
             /** Format: uuid */
@@ -1981,6 +3455,28 @@ export interface components {
             huddle: components["schemas"]["Huddle"];
             ended: boolean;
         };
+        HuddleRecordingConsentResponse: {
+            /** Format: uuid */
+            huddleId: string;
+            /** Format: uuid */
+            memberId: string;
+            /** @enum {integer} */
+            noticeVersion: 1;
+            /** Format: int64 */
+            consentedAtMs: number;
+        };
+        HuddleRecordingResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            huddleId: string;
+            /** @description Operator-configured ASR model; MOMO-646 does not select a winner. */
+            model: string;
+            /** @enum {string} */
+            status: "requested" | "recording" | "stopped" | "failed";
+            /** Format: int64 */
+            requestedAtMs: number;
+        };
         SendMessageRequest: {
             /**
              * Format: uuid
@@ -2009,6 +3505,13 @@ export interface components {
             runId?: string;
             /** @description Completed attachments uploaded by this actor in this channel. They are linked to the new message inside the canonical message transaction. */
             attachmentIds?: string[];
+            /** @description Per-request agent model/effort override for mention runs. */
+            routing?: components["schemas"]["RunRoutingInput"];
+        };
+        RunRoutingInput: {
+            model?: string;
+            /** @enum {string} */
+            effort?: "low" | "medium" | "high" | "xhigh" | "max";
         };
         EditMessageRequest: {
             body: string;
@@ -2255,6 +3758,18 @@ export interface components {
             name: string;
             version: string;
             description: string;
+            /**
+             * Format: uri
+             * @description Optional HTTPS terms URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+             */
+            termsURL?: string;
+            /**
+             * Format: uri
+             * @description Optional HTTPS privacy-policy URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+             */
+            privacyPolicyURL?: string;
+            /** @description Optional short text icon. Remote image URLs are not supported; clients derive a character fallback from name when omitted. */
+            iconText?: string;
             official: boolean;
             /** @description True for the fixed onboarding set (GitHub, Drive, external webhook). */
             recommended: boolean;
@@ -2290,6 +3805,18 @@ export interface components {
             name: string;
             version: string;
             description: string;
+            /**
+             * Format: uri
+             * @description Optional HTTPS terms URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+             */
+            termsURL?: string;
+            /**
+             * Format: uri
+             * @description Optional HTTPS privacy-policy URL. Omitted when the manifest does not declare one; clients must not render an empty link.
+             */
+            privacyPolicyURL?: string;
+            /** @description Optional short text icon. Remote image URLs are not supported; clients derive a character fallback from name when omitted. */
+            iconText?: string;
             official: boolean;
             egressDomains: string[];
             recommendedFor: string[];
@@ -2468,6 +3995,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description The instance-global operator boundary (MOMO-583): the caller is not a human principal, or carries neither the `platform:read` scope nor an owner/admin role with a verified email on the instance operator allowlist. A workspace admin alone is not enough. */
+        ProviderOperatorForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description LiveKit API key, secret, or URL is absent/invalid; huddles fail closed. */
         HuddleNotConfigured: {
             headers: {
@@ -2498,18 +4034,22 @@ export interface components {
         HuddleId: string;
         /** @description UUIDv7 work session ledger id. */
         WorkSessionId: string;
+        /** @description UUIDv7 workstream (goal layer) id. */
+        WorkstreamId: string;
         /** @description UUIDv7 registered execution host id. */
         WorkHostId: string;
         /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
         WorkHostSentAt: number;
-        /** @description Unique UUID consumed once by WorkHost request authentication. */
-        WorkHostRequestId: string;
         /** @description Raw 64-byte Ed25519 signature in standard base64. */
         WorkHostSignature: string;
+        /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+        WorkHostRequestId: string;
         /** @description UUIDv7 work control ledger id. */
         WorkControlId: string;
-        /** @description Closed execution tool identifier. */
-        WorkTool: "claude" | "codex" | "opencode" | "shell";
+        /** @description UUIDv7 memory item id. */
+        MemoryId: string;
+        /** @description Workspace-registered execution tool key. */
+        WorkTool: string;
         /** @description Attachment UUID owned by PostgreSQL. */
         AttachmentId: string;
         /** @description Stable plugin manifest identifier. */
@@ -3380,6 +4920,365 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    getAgentAllowedModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deterministic effective model names for this agent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllowedAgentModelsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Active agent not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listAgentRuns: {
+        parameters: {
+            query?: {
+                /** @description Run ID at the exclusive older-page boundary. */
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visible run summaries ordered by created time and ID descending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunSummaryPage"];
+                };
+            };
+            /** @description Malformed or inaccessible cursor. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not an active human workspace member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active agent not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAgentProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current profile ledger projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Active agent or profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    putAgentProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Upserted profile with monotonically incremented version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileResponse"];
+                };
+            };
+            /** @description Invalid profile, trigger, tool name, credential-shaped field, or a modelPref outside workspace.settings.allowed_agent_models. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Active agent not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    putAgentPause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPauseInput"];
+            };
+        };
+        responses: {
+            /** @description Current profile projection including the pause state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Active agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelAgentRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Run is cancelled; repeated cancellation is idempotent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunCancelResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human channel membership required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Run is already terminal in a non-cancelled state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    registerAgentFromCard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterAgentCardRequest"];
+            };
+        };
+        responses: {
+            /** @description Public card metadata is pending administrator consent. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCardRegistrationResponse"];
+                };
+            };
+            /** @description Unsafe URL, failed fetch, redirect violation, oversize response, or invalid card. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    confirmAgentFromCard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                registrationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent member and initial gateway credential created atomically. */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmAgentCardResponse"];
+                };
+            };
+            /** @description Invalid registration identifier. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Pending registration not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Registration was already confirmed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     listChannels: {
         parameters: {
             query?: {
@@ -3655,6 +5554,97 @@ export interface operations {
             503: components["responses"]["HuddleNotConfigured"];
         };
     };
+    consentToHuddleRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Huddle UUID; also used as the LiveKit room name. */
+                huddleId: components["parameters"]["HuddleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Consent receipt, including the original consent timestamp. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HuddleRecordingConsentResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Huddle ended. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["HuddleNotConfigured"];
+        };
+    };
+    startHuddleRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Huddle UUID; also used as the LiveKit room name. */
+                huddleId: components["parameters"]["HuddleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing idempotent recording request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HuddleRecordingResponse"];
+                };
+            };
+            /** @description Recording request and channel notice committed. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HuddleRecordingResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Huddle ended or at least one active participant has not consented. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description LiveKit or transcription model is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listWorkHosts: {
         parameters: {
             query?: never;
@@ -3728,6 +5718,388 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    provisionCloudWorkHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCloudHostRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider instance and cloud work host are ready. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudHostResponse"];
+                };
+            };
+            /** @description Provider instance exists; cloud workd registration is pending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudHostResponse"];
+                };
+            };
+            /** @description Paid-cloud confirmation missing or body invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace credit or work-pool slot is unavailable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Provider concurrency limit reached. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Provider adapter config is absent or the provider failed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    enrollBYOCWorkHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollBYOCHostRequest"];
+            };
+        };
+        responses: {
+            /** @description Enrollment token issued. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BYOCEnrollmentResponse"];
+                };
+            };
+            /** @description Personal scope requested or body invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only a workspace admin or owner may enroll a host. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description This idempotencyRef already revealed its token. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description T3 is disabled or the BYOC adapter is not installed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    topupCloudCredit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloudCreditTopupRequest"];
+            };
+        };
+        responses: {
+            /** @description Topup applied, or the identical idempotent result replayed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudCreditTopupResponse"];
+                };
+            };
+            /** @description Amount or idempotency reference is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description The reference was previously used with another amount. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    registerCloudWorkHost: {
+        parameters: {
+            query?: never;
+            header: {
+                Authorization: string;
+            };
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterWorkHostRequest"];
+            };
+        };
+        responses: {
+            /** @description Cloud workd registered as a workspace-scoped work_host. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkHostResponse"];
+                };
+            };
+            /** @description Registration is not scope=workspace and type=cloud. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getCloudWorkHostProvision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                provisionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current safe cloud host projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudHostResponse"];
+                };
+            };
+            /** @description Provision request not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    pauseCloudWorkHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cloud host paused. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudHostResponse"];
+                };
+            };
+            /** @description Host is not running or its usage state changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Provider lifecycle request failed or is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resumeCloudWorkHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cloud host resumed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudHostResponse"];
+                };
+            };
+            /** @description Host is not paused or its usage state changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Provider lifecycle request failed or is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    destroyCloudWorkHost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cloud host destroyed and its work_host revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudHostResponse"];
+                };
+            };
+            /** @description Host is not ready or still has unsettled usage. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Provider lifecycle request failed or is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     heartbeatWorkHost: {
         parameters: {
             query?: never;
@@ -3774,10 +6146,10 @@ export interface operations {
             header: {
                 /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
                 "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
-                /** @description Unique UUID consumed once by WorkHost request authentication. */
-                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
                 /** @description Raw 64-byte Ed25519 signature in standard base64. */
                 "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
+                /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
             };
             path: {
                 /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
@@ -3802,16 +6174,83 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    listWorkHostLiveSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions the ledger still attributes to this host. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkHostLiveSessionsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    reconcileWorkHostSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkHostReconcileRequest"];
+            };
+        };
+        responses: {
+            /** @description Sessions accepted for sweep-owned orphaning. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkHostReconcileResponse"];
+                };
+            };
+            /** @description Malformed report (over 200 entries or bad UUIDs). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     validateTerminalAttachCapability: {
         parameters: {
             query?: never;
             header: {
                 /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
                 "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
-                /** @description Unique UUID consumed once by WorkHost request authentication. */
-                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
                 /** @description Raw 64-byte Ed25519 signature in standard base64. */
                 "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
+                /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
             };
             path: {
                 /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
@@ -4004,7 +6443,7 @@ export interface operations {
     listWorkSessions: {
         parameters: {
             query?: {
-                /** @description Set to 1 to return running sessions only; 0 or omitted returns all. */
+                /** @description Set to 1 to return running or idle sessions; 0 or omitted returns all. */
                 active?: 0 | 1;
             };
             header?: never;
@@ -4084,6 +6523,163 @@ export interface operations {
             };
             /** @description No session was created. error.message is the stable machine-readable reason pool_exhausted or member_limit. v0 does not enqueue or emit an outbox event; automatic queue start and waiting-card UX are follow-ups. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkstreams: {
+        parameters: {
+            query?: {
+                status?: "active" | "paused" | "done" | "cancelled";
+                channelId?: string;
+                /** @description Return only the workstream that owns this work session. */
+                sessionId?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workstreams ordered newest-first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkstreamListResponse"];
+                };
+            };
+            /** @description Invalid status, channelId, sessionId, or limit filter. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description A work host signature cannot read the goal layer. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getWorkstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 workstream (goal layer) id. */
+                workstreamId: components["parameters"]["WorkstreamId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workstream projection with Run counters. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkstreamResponse"];
+                };
+            };
+            /** @description Invalid workstream id. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description A work host signature cannot read the goal layer. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such workstream, or it is anchored outside the caller's channels. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkstreamRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 workstream (goal layer) id. */
+                workstreamId: components["parameters"]["WorkstreamId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Runs ordered oldest-first, bounded to 200 rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkstreamRunListResponse"];
+                };
+            };
+            /** @description Invalid workstream id. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description A work host signature cannot read the goal layer. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such workstream, or it is anchored outside the caller's channels. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4254,7 +6850,7 @@ export interface operations {
             };
         };
     };
-    endWorkSession: {
+    updateWorkSession: {
         parameters: {
             query?: never;
             header?: never;
@@ -4272,7 +6868,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Ended session, or its prior result on an idempotent retry. */
+            /** @description Updated session, or its prior result on an idempotent retry. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4318,7 +6914,25 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The bound momo Cloud sandbox no longer exists; orphaned fallback is scheduled. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["RateLimited"];
+            /** @description The momo Cloud provisioner is unavailable; non-cloud hosts do not use it. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     resumeWorkSession: {
@@ -4619,7 +7233,7 @@ export interface operations {
             path: {
                 /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
                 workspaceId: components["parameters"]["WorkspaceId"];
-                /** @description Closed execution tool identifier. */
+                /** @description Workspace-registered execution tool key. */
                 tool: components["parameters"]["WorkTool"];
             };
             cookie?: never;
@@ -4664,7 +7278,7 @@ export interface operations {
             path: {
                 /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
                 workspaceId: components["parameters"]["WorkspaceId"];
-                /** @description Closed execution tool identifier. */
+                /** @description Workspace-registered execution tool key. */
                 tool: components["parameters"]["WorkTool"];
             };
             cookie?: never;
@@ -4698,6 +7312,347 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listEventSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Newest-first subscription projections; secret and secret_ref are absent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSubscriptionsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createEventSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEventSubscriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Subscription, audit record, and one-time signing secret created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedEventSubscriptionResponse"];
+                };
+            };
+            /** @description Invalid event kinds or unsafe/unresolvable destination. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateEventSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                subscriptionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateEventSubscriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated subscription and audit record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSubscriptionResponse"];
+                };
+            };
+            /** @description Empty/invalid update or unsafe destination. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Subscription not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteEventSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                subscriptionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted subscription snapshot and audit record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSubscriptionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Subscription not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkToolProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deterministically ordered profile projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkToolProfilesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace admin or signed work-host authority required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createWorkToolProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkToolProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Profile and same-transaction audit record created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkToolProfileResponse"];
+                };
+            };
+            /** @description Invalid profile or credential/path-shaped launch template. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Tool key is already registered. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateWorkToolProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Workspace-registered execution tool key. */
+                tool: components["parameters"]["WorkTool"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkToolProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated profile and same-transaction audit record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkToolProfileResponse"];
+                };
+            };
+            /** @description Empty or invalid update. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Tool profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteWorkToolProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Workspace-registered execution tool key. */
+                tool: components["parameters"]["WorkTool"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted profile snapshot and same-transaction audit record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkToolProfileResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner or admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Tool profile not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             429: components["responses"]["RateLimited"];
         };
@@ -6281,6 +9236,658 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getContextPacket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                packetId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable packet metadata and content. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextPacketResponse"];
+                };
+            };
+            /** @description Malformed workspace or packet id. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Packet is absent or not visible through current run-channel membership. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listMemories: {
+        parameters: {
+            query?: {
+                scope?: components["schemas"]["MemoryScope"];
+                agent?: string;
+                includeInvalid?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Memory page filtered through current source-channel membership. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryPageResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Memory, lifecycle, audit, and memory.updated outbox records committed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryItemResponse"];
+                };
+            };
+            /** @description Invalid scope, kind, body, confidence, subject, or source shape. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Workspace memory is disabled. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    disableAndDeleteAllMemories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Policy disabled and all memory items/candidates deleted atomically. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryPolicyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    searchMemories: {
+        parameters: {
+            query: {
+                q: string;
+                scope?: components["schemas"]["MemoryScope"];
+                agent?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description RRF-ranked memory hits; FTS-only and vector-only hits are valid. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySearchResponse"];
+                };
+            };
+            /** @description Query, scope, agent, or limit is malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 memory item id. */
+                memoryId: components["parameters"]["MemoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated memory and committed lifecycle/audit/outbox evidence. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryItemResponse"];
+                };
+            };
+            /** @description No editable field or invalid value. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Memory does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Memory is disabled or the item was already invalidated. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    invalidateMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 memory item id. */
+                memoryId: components["parameters"]["MemoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvalidateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Invalidated memory and committed lifecycle/audit/outbox evidence. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryItemResponse"];
+                };
+            };
+            /** @description Invalid replacement memory or self-invalidation. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Memory does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listMemoryVisibilityGrants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 memory item id. */
+                memoryId: components["parameters"]["MemoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Grant ledger rows, with active grants first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryVisibilityGrantPageResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Memory does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    grantMemoryVisibility: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 memory item id. */
+                memoryId: components["parameters"]["MemoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryVisibilityGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Active grant projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryVisibilityGrantResponse"];
+                };
+            };
+            /** @description Invalid grantee kind/id or no matching active grantee. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Memory does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    revokeMemoryVisibility: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 memory item id. */
+                memoryId: components["parameters"]["MemoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryVisibilityGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Revoked grant projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryVisibilityGrantResponse"];
+                };
+            };
+            /** @description Invalid grantee kind or identifier. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Memory or visibility grant does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getMemoryPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current policy; absent rows project as enabled by default. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryPolicyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    putMemoryPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutMemoryPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated policy and deleted count when disabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryPolicyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getMemoryExternalProviderConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current explicit consent, provider trust, and extraction verdict. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryExternalProviderConsentResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    putMemoryExternalProviderConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutMemoryExternalProviderConsentRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated consent and the server policy verdict. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryExternalProviderConsentResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getProviderLinkChain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider chain projection, position 0 first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderChainResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ProviderOperatorForbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    replaceProviderLinkChain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutProviderChainRequest"];
+            };
+        };
+        responses: {
+            /** @description Chain projection after the replace, position 0 first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderChainResponse"];
+                };
+            };
+            /** @description Unknown body key, position 0 or a duplicate position, more than eight hops, an unusable baseUrl, an unknown mode, an empty bearer, or a new position submitted without one. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ProviderOperatorForbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    clearProviderLinkChain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Chain projection after the clear — position 0 alone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderChainResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ProviderOperatorForbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getProviderEffortTable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Effort capability table. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEffortTableResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             429: components["responses"]["RateLimited"];
         };
     };
