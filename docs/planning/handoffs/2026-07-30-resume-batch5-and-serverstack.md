@@ -7,9 +7,16 @@
 
 **배치 1~5 전부 랜딩·main 반영 완료**(main=engine=uxui=`39e45765`). 실작업 PR 0건(열린 PR은 dependabot뿐). **진행 중 작업 없음.** 성재가 **서버 스택 재검토(Swift→?)**를 P0 방향 결정으로 올렸고, 리서치·판단 완료 → **성재 결정 대기**.
 
-## 1. 서버 스택 결정 — 여기서 멈췄다 (최우선)
+## 1. 서버 스택 — **결정됨 (2026-07-30 성재)**: buzz fork + Rust, 지금 착수
 
-정본: `docs/planning/2026-07-30-server-stack-reassessment.md` (§0~§7, 리서치 근거 포함).
+**성재 결정: buzz fork + 고유 이식(§7 A안) · 지금 최우선 착수.** → **ADR-0145 Accepted**(`docs/adr/0145-server-stack-buzz-fork-rust.md`).
+
+**착수 첫 단계 = buzz 대조 스파이크(fork 전 필수 선행)** — 백그라운드 서브에이전트로 투입됨. buzz(github.com/block/buzz) 코드를 읽고 ①Nostr 이벤트 모델 ↔ momo 불변식(PG=SoT·단일 쓰기경로·RLS FORCE) 화해 가부 ②buzz 스키마 ↔ momo 59 마이그레이션 대조 ③재사용 층 vs momo 고유(T3·workstream) 경계 ④이식 계획·fork 방식 판정. **스파이크 결과가 ADR-0145 세부를 확정. 스파이크 없이 fork 코드 착수 금지.**
+- 스파이크 완료 시: 결과 검토 → 이행 배치(메신저 코어 검증→T3 이식→workstream 이식→클라이언트 재배선) 설계.
+- **Nostr 수용이 momo 불변식과 안 맞으면 A안→B안(참조 재작성) 후퇴** — 스파이크가 그 판정.
+- 병행: NCP smoke는 서버 스택과 독립(§2)이라 계속 가능.
+
+정본(판단 근거): `docs/planning/2026-07-30-server-stack-reassessment.md` (§0~§7).
 
 **핵심 결론**:
 - **Swift 서버 = 잔재 확정.** momo가 참조한 **buzz(Block/Dorsey, 2026-07 출시, github.com/block/buzz)가 서버를 Rust/Axum으로 짰고** momo만 Swift로 어긋났다. buzz ↔ momo 스택이 1:1 대응(Rust/Axum·PG·Redis→Centrifugo·S3·TS+React 클라이언트).
