@@ -31,7 +31,10 @@
     - **B1.5(momo-server 조립+momo-relay) 랜딩 완료**(track/engine `c98b6474`, PR #929). **첫 부팅 가능한 Rust 스택**: `bins/momo-server`(Axum: JWT 미들웨어+login/messages route, Swift 경로·401 문자열 파리티)+`bins/momo-relay`(claim SKIP LOCKED·백오프·LISTEN·Centrifugo publish, broadcast만). **게이트 전부 green**(relay 3/3: #2 e2e·경합·백오프 / HTTP smoke: login→send→list→401·403). D2 #1~#6 전부 실행 스택에서 증명(잔여 #7=B2).
       - **revocation 후속 수정 포함**(f55de1e5): 워커 자기신고 보안 갭 → 같은 PR에서 fail-closed 이식. `momo-auth/token_store.rs`가 `token` SQL 단독 소유(pgcrypto digest sha256·tenant tx 안 조회 — Swift withTenantConnection=withTenantTransaction 실측). revoke→401 red 케이스 포함.
       - **병렬 배치 진행 중(성재 "B2+소품 병렬")**: **B2.1**(T3 수명주기+과금 척추 — `momo-t3` 신설: with_t3_lifecycle_tx advisory·t3_terminate 호출만·mock provider 2종·#7 red·conformance 5종. 워크트리 `B21-t3-lifecycle`) ∥ **B1.6 랜딩 완료**(track/engine `b5264a00`, PR #930): logout/refresh route(원자 revoke 게이트·구 토큰 401 red)+러너 schema_migrations 멱등(2-run red — 공유 DB 모드 개방)+OutboxKind push_candidate. **게이트 전부 green, 한 DB 연속 실행으로 실증**. 게이트가 잡은 것: 공유 DB에서 relay 테스트가 타 스위트 잔여 pending broadcast를 claim(격리 갭) → 하니스에 잔여 정산 추가(오염 DB 3/3 재현). B1.6 워커 이탈 기록: audit_log 미이식(write_audit 스텁 잔존 — 후속 티켓 후보)·refresh privileged 재검증은 fail-closed 좁은 쪽.
-      - B2.1은 계속 진행 중. 완료 시 오케스트레이터 게이트(conformance 5종) → 머지 시 track/engine과 B1.6 랜딩분 합류(표면 분리라 clean 예상).
+      - **B2.1 랜딩 완료**(track/engine `f0467c02`, PR #931): `momo-t3`(lifecycle·billing·provider mock 2종+BYOC). t3_terminate 호출 1곳·앱 정산 SQL 0·전이표 사본 0·`with_tenant_tx_prelude`(advisory 선획득, GUC 단일배선 보존). **conformance 5/5**(정산 단일문+봉인·전이표·advisory 직렬화·이중정산 멱등·**#7 비유입**) → **D2 불변식 7/7 전부 Rust 스택에서 증명 완료.** 게이트가 잡은 것: 픽스처 provider_sandbox_id UNIQUE 충돌(리터럴 시드) → uuid 접미사 수정.
+      - **머지 후 통합 검증**: engine에서 한 DB 연속 실행 — db 3/3·messaging 5/5·smoke 2/2·relay 3/3·t3 5/5 + 단위 26 스위트 all green.
+      - **ADR-0140 정오표 대기(성재 승인)**: ADR:107 "t3_terminate가 outbox 이벤트까지 한 tx에" — 053/058 실측엔 outbox 없음(브로드캐스트는 route층 emit_outbox 몫). 실측을 정본으로 ADR 문구 정정 필요.
+      - **다음 후보**: B2.2(T3 표면 나머지: gateway·terminal·pool·approval·재부착 0139) / B1.2(메신저 breadth) / **Rust 이미지+compose**(현 스택으로 NCP 메신저-부분 smoke 가능해짐 — 런북 트리거 재평가). audit_log(write_audit 스텁) 티켓 후보 지속.
     - **NCP: 성재 지시(2026-07-30) — 여유 있으니 현상 유지**(정지 안 함). 키 재발급도 보류.
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
 
