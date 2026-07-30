@@ -18,10 +18,15 @@
 
 **저위험 핵심**: 불변식은 DB에 산다(59 마이그레이션, 44/59 강제) → 마이그레이션 언어독립·그대로 재사용 → 재작성 = "불변식 재구현"이 아니라 "앱 계층(52 route·workd·NotifierWorker ≈ 51k Swift)을 동일 스키마 위에 Rust로". 동일 DB·게이트 픽스처 = conformance oracle.
 
-**다음 한 걸음 = Phase 0 설계 (기획 레이어가 직접, 워커 아님)**:
-- D1 타깃 아키텍처(`docs/architecture/server-rust.md`) · D2 불변식 보존 스펙(`invariants-in-rust.md`) · D3 provenance=ADR-0146 확정 · D4 buzz 인용 카탈로그 · D5 커토버(빅뱅 권고)·parity · D6 배치 분할.
-- Phase 0 승인 없이 재작성 코드 착수 금지.
+**Phase 0 설계 6/6 완료** (기획 레이어 직접 작성, 성재 최종 승인 대기):
+- **D1** `docs/architecture/server-rust.md` — crate 레이아웃 **확정**(공유 5: db·outbox·wire·auth·provider / 도메인 3 굵게: messaging·t3·integrations / 바이너리 5). 성재 승인: 공유 인프라 별도 crate + 도메인 굵게 출발(모듈 승격선).
+- **D2** `docs/architecture/invariants-in-rust.md` — 하드 불변식 7개 × [Rust 강제·DB 백스톱·되돌리면 실패 red]. 논리: 불변식은 DB(재사용), 앱은 우회 불가 배선+red 증명.
+- **D3** ADR-0146 — provenance 서명 **범위 확정(성재: "상태 전이까지 넓게")**: 3표면(메시지·workd 이벤트·상태 전이), 사이드카 `action_signature`, `record_provenance` chokepoint, 불변식 무손상. 세부 페이로드·device 키 시점·UX는 상세 후 성재 최종 Accept.
+- **D4** `buzz-reference-catalog.md` · **D5** `cutover-and-parity.md`(**빅뱅 확정**) · **D6** `rewrite-batch-breakdown.md`(**B0 골격** + B1~B5, provenance 분산).
+- **다음**: 성재 Phase 0 승인 → B0(골격)부터 워커 착수. **승인 전 재작성 코드 금지.**
 - 병행: NCP smoke는 서버 스택과 독립(§2) — 현행 Swift 이미지로 진행 가능.
+
+**성재 최종 결정 대기 지점**: (1) Phase 0 설계 패키지 전체 승인, (2) ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격.
 
 **스파이크 판정(기록됨, ADR-0145)**: buzz ↔ momo는 스택 표면만 1:1, 정합성·격리 코어는 정반대. 불변식 3개(단일쓰기경로·gapless seq·RLS FORCE)가 buzz Nostr 코어(클라-서명-publish·created_at·RLS 전무)와 정면 충돌. 둘 다 "relay=SoT"는 같음(차이는 저자·순서·격리강제). 곡선 정정: buzz=secp256k1 Schnorr, momo=Ed25519. buzz clone: scratchpad/buzz.
 

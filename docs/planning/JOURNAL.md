@@ -1381,7 +1381,8 @@
 
 ## 2026-07-30 (오후) · Fable · 기획
 - 한 일: 서버 스택 **B안 확정**(성재 승인) — Swift/Hummingbird→Rust/Axum **재작성**, buzz는 fork 아니라 코드 레퍼런스, momo 불변식 6개 보존. **ADR-0145 Accepted**로 개정(A안 fork→스파이크 불성립→B안). **ADR-0146 Proposed** 발제(에이전트 행동 provenance 서명, buzz 강점 조각을 Ed25519 additive로 차용, 단일쓰기경로·RLS 무손상). **실행 정본 `docs/planning/2026-07-30-server-rewrite-plan.md`** 신설 — 설계-우선(Phase 0 D1~D6 → 구현 배치 B1~B5). 저위험 핵심 = 불변식이 DB에 살아 마이그레이션 재사용, 재작성은 앱 계층 번역.
-- 열린 것: **Phase 0 설계 착수**(D1 타깃 아키텍처·D2 불변식 보존 스펙·D3 ADR-0146 확정·D4 buzz 인용 카탈로그·D5 커토버(빅뱅 권고)·D6 배치분할). Phase 0 승인 전 코드 착수 없음. NCP smoke(§독립)·열린 티켓 #925·#926·#893 병존.
+- 이어서: **Phase 0 설계 6/6 완료**. D1 crate 레이아웃 확정(공유5 db·outbox·wire·auth·provider + 도메인3 굵게 messaging·t3·integrations + 바이너리5 — 성재 승인: 공유는 별도 crate, 도메인 굵게 출발). D2 불변식 7개×[강제·DB백스톱·red]. D3 ADR-0146 범위 확정(성재 "상태 전이까지 넓게" → 3표면 서명·사이드카 action_signature·record_provenance chokepoint·불변식 무손상). D4 buzz 인용 카탈로그·D5 커토버 빅뱅 확정·D6 배치분할(B0 골격+B1~B5, provenance 분산).
+- 열린 것: **성재 Phase 0 전체 승인 대기** → 승인 시 B0(워크스페이스 골격)부터 워커 착수. ADR-0146 세부(페이로드 바이트·device 키 시점·UX 표식) 확정 후 Accept 승격. 승인 전 재작성 코드 금지. NCP smoke(§독립)·열린 티켓 #925·#926·#893 병존.
 
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).

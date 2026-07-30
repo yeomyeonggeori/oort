@@ -1,39 +1,52 @@
-# ADR-0146: 에이전트 행동 provenance 서명 (buzz에서 선택 차용)
+# ADR-0146: 행동 provenance 서명 (buzz에서 선택 차용)
 
-- Status: **Proposed** (2026-07-30 성재 지시로 발제 — B안 재작성에서 buzz의 강점 조각을 취함. 기안 Fable)
-- 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유)
-- 발단: 서버 스택 재검토에서 "momo가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시.
+- Status: **Proposed — 범위 확정(2026-07-30 성재: "상태 전이까지 넓게")**, 세부 설계 완료 후 성재 최종 Accept. 기안 Fable
+- 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
+- 발단: 서버 스택 재검토에서 "momo가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
 ## 맥락
 
-buzz(Nostr)의 최대 강점은 **모든 행동이 서명된 이벤트 하나의 로그 = 위·변조 내성 감사추적**이다. "이 에이전트가 정말 이걸 했나"가 서버 로그 신뢰 문제가 아니라 **서명 검증 문제**가 된다. 에이전트를 1급 멤버로 올리는 momo에서 이 provenance는 값지다.
+buzz(Nostr)의 최대 강점은 **모든 행동이 서명된 이벤트 = 위·변조 내성 감사추적**이다. "이 행위자가 정말 이걸 했나"가 서버 로그 신뢰가 아니라 **서명 검증** 문제가 된다. momo는 Nostr 모델 전체(클라-서명-publish·created_at·RLS 부재)를 못 받지만(ADR-0145 스파이크), **이점 조각만 additive하게** 취한다 — momo는 이미 workd가 Ed25519로 서명하므로 신규 암호 스택 불요.
 
-momo는 Nostr 모델 전체(클라-서명-publish·created_at·RLS 부재)를 못 받는다(ADR-0145 스파이크). 그러나 **이점 조각만 additive하게** 취할 수 있다 — momo는 이미 **workd가 Ed25519로 실행 페이로드를 서명**하는 원시 기능을 보유하므로 신규 암호 스택이 불필요하다.
+## 결정 (범위 확정)
 
-## 결정 (제안)
+**서버-authored 단일 쓰기경로·RLS FORCE·gapless seq를 하나도 바꾸지 않고**, 행위자에게 귀속되는 행동에 Ed25519 서명을 **검증 가능한 provenance 메타데이터로 additive하게** 부착한다. 범위 = **세 표면 전부**(성재 결정):
 
-**서버-authored 단일 쓰기경로·RLS FORCE를 하나도 바꾸지 않고**, 에이전트 원본 행동에 Ed25519 서명을 **검증 가능한 메타데이터로 additive하게** 부착한다.
+1. **메시지** — 행위자가 보낸 `message` (`momo-messaging`).
+2. **작업 이벤트** — workd 실행 결과·작업 이벤트 (`momo-t3`, workd 서명키 재사용).
+3. **상태 전이** — 감사 민감 행동: 권한 부여, 리뷰/승인 결정, 위계 변경 등 (`momo-t3`·`momo-integrations`).
 
-불변식과의 관계(설계 하드 제약):
-- **서버는 여전히 유일 저자.** 서명은 클라/에이전트가 서버를 우회해 publish하는 권한을 주지 **않는다**(buzz와 정반대 지점). 쓰기경로는 그대로 `REST→PG→outbox→relay`.
-- **서명은 정합성의 소스가 아니다.** 순서는 여전히 gapless `message.seq`. 서명은 진위(authenticity)만, 순서(ordering)엔 무관.
-- **RLS FORCE 불변.** 서명 컬럼/테이블도 동일 테넌트 RLS 아래.
-- **자격증명 비유입(ADR-0004) 불변.** 서명키는 에이전트/workd 신원키이지 provider 자격증명이 아니다.
+## 불변식과의 관계 (D2 교차검증 — 재작성이 못 깨는 것)
 
-## Phase 0 설계가 확정할 열린 항목
+| D2 불변식 | 이 서명이 미치는 영향 |
+|---|---|
+| 단일 쓰기경로 | **불변.** 서명은 서버 우회 publish 권한을 주지 **않는다**(buzz와 정반대 지점). 흐름 = 행위자가 서명 assertion 제출 → 서버가 검증 → **서버가 여전히 유일 저자로 row write** → 서명은 사이드카에 저장 |
+| gapless `message.seq` | **불변.** 서명은 authenticity만, 순서 무관. 서버-부여 seq/id는 서명 후 붙으므로 2단계(행위자가 content 서명 → 서버가 seq 부여) |
+| RLS FORCE | **불변.** 서명 사이드카도 동일 테넌트 RLS 아래 |
+| provider 비유입(ADR-0004) | **불변.** 서명키 = 행위자 신원키(agent/workd/device)이지 provider 자격증명 아님 |
 
-1. **서명 대상 범위** — 무엇에 서명하나. 후보: (a) 에이전트가 보낸 `message`, (b) workd 실행 결과/작업 이벤트, (c) 권한·리뷰 승인류 상태 전이. 최소 착수 = (b)는 이미 서명됨 → (a) 에이전트 메시지로 확장.
-2. **서명 페이로드 정의** — 무엇의 바이트에 서명하나(정규화된 content + author pubkey + 서버가 부여한 seq를 포함? seq 포함 시 서버-부여값이라 클라가 미리 서명 불가 → 2단계: 에이전트가 content 서명, 서버가 seq 부여 후 재-envelope). 위조·재생 방지 경계 명시.
-3. **저장 위치** — `message`에 nullable `author_sig`+`author_pubkey` 컬럼 vs 사이드카 `event_signature` 테이블. 무서명(사람/서버 발) 레코드와 공존해야 하므로 nullable.
-4. **키 관리·검증 경로** — 에이전트 pubkey 등록(member에 결속), 검증 시점(수신 시 서버 검증 후 저장 vs 클라 표시 시 검증), 키 로테이션.
-5. **UX 표면** — provenance를 어디까지 노출(에이전트 메시지에 "서명됨" 뱃지 / 감사 로그 전용 / 무노출·내부검증만). ux-bible 원칙과 조율.
+## 설계 (범위 확정에 따른 5개 항목 해소)
 
-## Consequences (예상)
+1. **대상 범위** → 위 세 표면 전부(넓게).
+2. **서명자 모델(행위자 유형별)**:
+   - 에이전트 → 에이전트 신원키(member 결속, `AgentCredential`/`AgentCard` 경로 활용).
+   - workd → 기존 workd Ed25519 키(`Signing.swift` 포맷 확장).
+   - **사람 → device 키**(`DeviceRoutes` 존재) — **유일한 선행 의존**. 사람 행동 서명은 device-key 결속이 필요하므로, **에이전트·workd 행위자는 즉시 적용, 사람 행위자는 device 키 배선 후 fast-follow**(범위는 넓게 확정, 사람분만 단계적). 이 phasing이 "무서명 공존"을 만든다 → nullable.
+3. **저장 → 사이드카 테이블 `action_signature`** (신규 마이그레이션 060+, append-only·기존 스키마 불변). 세 표면이 여러 테이블에 걸치므로 표별 nullable 컬럼보다 `(entity_type, entity_id, signer_member_id, signer_pubkey, signature, signed_payload_digest)` 사이드카가 넓은 범위에 확장성 우위. 테넌트 RLS FORCE.
+4. **검증 경로 → 쓰기시 chokepoint 검증**. `momo-wire`가 표면별 정규 서명 페이로드 정의, 공유 헬퍼 `record_provenance(tx, entity_ref, signer, signature)`(= provenance판 `emit_outbox` chokepoint)가 서명 검증 후 사이드카 write. 검증 실패 = 거부. 사후 재검증 가능(감사).
+5. **UX 표면** → 에이전트/서명된 행동에 "서명됨(검증됨)" 표식 + 감사 로그. **부분 서명 위험**: "서명됨 vs 무서명" 공존이 오히려 신뢰를 흐릴 수 있으므로, 표식 규약을 ux-bible과 조율(무서명이 "미검증"으로 오독되지 않게). D3 상세에서 확정.
 
-- (+) 에이전트 행동의 암호학적 감사추적 — 자체호스팅 조직이 "봇이 뭘 했나"를 서버 신뢰 없이 검증.
-- (+) Nostr 전체를 받지 않고 이점만 — 불변식 무손상.
-- (−) 서명/검증 오버헤드, 키 관리 표면 추가.
-- (−) 무서명 레코드와 공존 → "서명됨 vs 아님"의 UX·신뢰 모델을 명확히 해야(부분 서명이 오히려 오해 유발 위험).
+## Consequences
 
-## 미해결
-- 위 5개 열린 항목. B안 재작성 D3 설계 산출물에서 확정 → 성재 승인 시 Accepted.
+- (+) 세 표면 전반의 암호학적 감사추적 — 자체호스팅 조직이 "누가/어느 에이전트가 뭘 했나"를 서버 신뢰 없이 검증.
+- (+) Nostr 전체를 받지 않고 이점만 — 불변식 무손상(위 표).
+- (+) 공유 chokepoint(`record_provenance`)로 교차 관심사를 구조화 — `emit_outbox`와 대칭.
+- (−) **B1 범위 팽창**: provenance가 교차 관심사(messaging·t3·integrations 전부) → 공유 프리미티브는 B1, 각 도메인의 서명 emit은 해당 배치에 분산. 계획 반영 필요.
+- (−) 서명/검증 오버헤드, 키 관리 표면(특히 사람 device 키) 추가.
+- (−) 무서명 레코드 공존의 UX·신뢰 모델 명확화 부담.
+
+## 미해결 (D3 상세 설계)
+- 표면별 정규 서명 페이로드 바이트 정의(재생·위조 경계).
+- device-key 결속(사람 행위자) 배선 시점(B1 내 vs fast-follow).
+- "서명됨/무서명" UX 표식 규약(ux-bible).
+- → 확정 후 성재 최종 Accept.

@@ -23,44 +23,36 @@ buzz 관계: **패턴 인용만**(Axum 파이프라인·sqlx·백프레셔·git-
 - 런타임 짝: Centrifugo(전송전용) 유지, workd 계약(UTF-8 바이트 서명) 유지.
 - **열린 결정**: crate 격리 강도, ORM.
 
-### D2. 불변식 보존 스펙 — `docs/architecture/invariants-in-rust.md` (신설, 재작성의 수용 계약)
-- 하드 불변식 6개 각각 → Rust에서의 강제 지점 표. 결론은 대부분 "DB가 강제(마이그레이션 재사용) + Rust는 위반 불가능하게 배선":
-  - PG=SoT / 단일 쓰기경로 → 쓰기 API 단일 모듈, 직접 INSERT 금지 lint.
-  - gapless `message.seq` → `channel_seq` row-lock `UPDATE...RETURNING` 앱코드 복제 + `message_seq_uniq UNIQUE` 백스톱(실측: PG 트리거·시퀀스 아님).
-  - agent=member → 동일 스키마.
-  - RLS FORCE → 세션 `SET app.current_*` 배선을 Axum 미들웨어에서. 마이그레이션의 FORCE 정책 그대로.
-  - provider 비유입(ADR-0004) → 어댑터 경계 재확인.
-- **각 불변식마다 "이 불변식을 깨는 red 테스트"를 명시**(재작성이 그걸 통과시키면 실패). 게이트 픽스처에서 유도.
+### D2. 불변식 보존 스펙 — `docs/architecture/invariants-in-rust.md` ✅ 작성됨
+- 하드 불변식 **7개** 각각 → `[Rust 강제 지점·DB 백스톱·되돌리면 실패하는 red 테스트]` 표. RLS는 `momo-db::with_tenant_tx` GUC 단일 지점(미들웨어 아님, 실측), seq=row-lock+UNIQUE. 논리: 불변식은 DB에 있고(재사용) 앱이 우회 못 하게 배선+red로 증명.
 
-### D3. provenance 서명 설계 → **ADR-0146 확정** (이미 Proposed 발제됨)
-- 5개 열린 항목(대상 범위·페이로드·저장·키/검증·UX) 확정. 최소 착수 = 에이전트 메시지 서명, 무서명 레코드와 nullable 공존.
-- **단일 쓰기경로·RLS 무손상**이 설계 하드 제약. 성재 승인 시 Accepted → 구현은 메신저 코어 배치에 포함.
+### D3. provenance 서명 → **ADR-0146 범위 확정** ✅ (2026-07-30 성재: "상태 전이까지 넓게")
+- 범위 = 세 표면 전부(메시지·workd 작업 이벤트·상태 전이). 서명자 유형별(에이전트·workd 즉시, 사람은 device 키 fast-follow). 저장=사이드카 `action_signature`(060+). 검증=`record_provenance` chokepoint(= provenance판 `emit_outbox`). **단일 쓰기경로·seq·RLS 무손상**(D2 교차검증표).
+- **교차 관심사**: 공유 프리미티브 B0/B1, 서명 emit은 각 배치 분산(D6). 세부(페이로드 바이트·device 키 시점·UX 표식)는 D3 상세→성재 최종 Accept.
 
-### D4. buzz 인용 카탈로그 — `docs/planning/2026-07-30-buzz-reference-catalog.md` (신설)
-- buzz의 어느 파일·패턴을 인용하고 무엇을 거부하는지 표. 취함: Axum handler 파이프라인, sqlx 쿼리 스타일, connection semaphore 백프레셔, 검색 인덱싱. 거부: Nostr 이벤트 모델·kind dispatch·클라 publish·RLS 부재. 제외(momo 무관): git-over-http(momo는 네이티브 git 서버 도메인 없음 — GitHub은 플러그인).
-- 라이선스 준수(Apache 2.0 인용 표기 규약) 명시.
+### D4. buzz 인용 카탈로그 — `docs/planning/2026-07-30-buzz-reference-catalog.md` ✅ 작성됨
+- 취함(패턴): Axum 파이프라인·sqlx·백프레셔·서브시스템 격리 원칙·검색 인덱싱. 거부(불변식 충돌): Nostr 모델·클라 publish·created_at·kind dispatch·RLS 부재·NIP 상호운용. 제외(무관): git-over-http. 선택 차용: provenance 서명(ADR-0146). Apache 2.0 출처 주석 규약.
 
-### D5. 커토버 & parity 전략 — `docs/planning/2026-07-30-cutover-and-parity.md` (신설)
-- **빅뱅 재작성 vs strangler**. 권고: **빅뱅**(사용자 0·출시 전·동일 DB → strangler 이중운영 오버헤드 불필요). D5에서 확정.
-- parity oracle: 기존 게이트/통합 테스트를 Rust 서버에 그대로 조준(동일 마이그레이션 DB) → "동일 요청 → 동일 DB 상태·응답" conformance suite.
-- 롤백 경로(Swift 서버는 태그 보존, 동일 DB라 되돌리기 가능).
+### D5. 커토버 & parity — `docs/planning/2026-07-30-cutover-and-parity.md` ✅ **빅뱅 확정**
+- 빅뱅(사용자 0·동일 DB → strangler 불필요). parity oracle=동일 마이그레이션 DB에 기존 게이트/픽스처 조준("동일 요청→동일 상태·응답"). 롤백=이미지 교체(스키마 불변). D2 red 7개 conformance 편입.
 
-### D6. 이행 배치 분할 — `docs/planning/handoffs/` 패킷 초안
-- 아래 §구현 배치를 핸드오프 패킷으로. 각 배치 = 수용기준 + red-proof + 오케스트레이터가 돌릴 게이트 명시.
+### D6. 배치 분할 — `docs/planning/2026-07-30-rewrite-batch-breakdown.md` ✅ 작성됨
+- **B0(골격) 신설** + B1~B5. provenance 교차 관심사 분산 명시. Phase 0 승인 후 각 배치를 handoffs/ 패킷으로 전개(수용기준·red-proof·게이트).
 
 ---
 
-## 구현 배치 (Phase 0 승인 후. 워커 병렬)
+## 구현 배치 (Phase 0 승인 후. 워커 병렬) — 상세 D6
 
-> 순서는 의존 기준. 각 배치는 이전 배치의 conformance 통과가 전제.
+> 순서: `B0 → B1 → {B2,B3} → B4 → B5`. 각 배치는 이전 conformance 통과가 전제.
 
-- **B1. 메신저 코어** — auth·member(agent 포함)·channel·thread·message 쓰기경로·seq·outbox/relay·RLS 미들웨어 + **provenance 서명(ADR-0146)**. D2 불변식 red 테스트 전부 green. 가장 크고 가장 중요.
-- **B2. T3 work runtime 이식** — T1/T2/T3 실행·샌드박스·과금 원장·수명주기 saga(ADR-0140)·재부착/replay(ADR-0139)·provider 어댑터/BYOC(ADR-0142)·Kata substrate(ADR-0144). 로직·설계는 ADR에 있고 Swift→Rust 번역.
-- **B3. workstream 이식** — actor-독립 연속성(ADR-0143)·목표층.
-- **B4. 클라이언트 재배선** — Tauri/React 클라이언트를 Rust 서버 API에 맞춤(계약 diff만; 대개 동일).
-- **B5. workd Rust** — 서버와 도메인 crate 공유 이득. D5에서 동시/후행 결정.
+- **B0. 워크스페이스 골격** — Cargo 워크스페이스 + 공유 5 crate 스켈레톤(db·outbox·wire·auth·provider) + 마이그레이션 러너(기존 59 그대로) + provenance 프리미티브(`record_provenance`·`action_signature` 060+).
+- **B1. 메신저 코어**(`momo-messaging`) — identity·channels·message(seq·`emit_outbox`)·huddle·search + **에이전트 메시지 서명**. D2 red #1~#6 green.
+- **B2. T3**(`momo-t3`) — 실행·과금·saga(0140)·재부착(0139)·provider/BYOC(0142)·Kata(0144) + **workd 이벤트·상태 전이 서명**. D2 #7 green.
+- **B3. workstream** — actor-독립 연속성(0143) + 상태 전이 서명 잔여.
+- **B4. 클라 재배선** + `momo-integrations` 마무리.
+- **B5. workd Rust** — `momo-wire` 공유, 재부착 실왕복 재검증. 동시/후행은 D1 §4.
 
-각 배치 완료 정의: 해당 영역 게이트/conformance green + design-review(웹 표면 시) + red-proof.
+각 배치 완료 정의: 해당 영역 conformance green + design-review(웹 표면) + red-proof.
 
 ---
 
