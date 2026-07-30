@@ -23,7 +23,7 @@ pub mod pool;
 pub mod tenant;
 
 pub use error::DbError;
-pub use migrate::{run_migrations, SeedMode};
+pub use migrate::{run_migrations, MigrationReport, SeedMode};
 pub use pool::{connect, PoolConfig};
 pub use tenant::{with_provider_link_admin_tx, with_provider_quota_ingest_tx, with_tenant_tx};
 

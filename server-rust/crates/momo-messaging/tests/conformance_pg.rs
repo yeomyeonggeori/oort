@@ -3,7 +3,7 @@
 //! These are the orchestrator's docker-gate red tests: each proves one hard
 //! invariant with a **named assertion that goes red if the invariant is
 //! reverted** (momo red-test discipline, D2 §2). They are `#[ignore]` because
-//! they need a throwaway `pgvector/pgvector:pg18` superuser DB plus the runtime
+//! they need a `pgvector/pgvector:pg18` superuser DB plus the runtime
 //! `momo_app` role. Run (per D2 #1/#3/#4/#5/#6):
 //!
 //! ```text
@@ -19,6 +19,13 @@
 //!
 //! Each `#[test]` seeds fresh random UUIDs, so the whole file can run against one
 //! DB; the schema/role bootstrap runs once per process (guarded).
+//!
+//! **A fresh database is no longer required (B1.6).** The migration runner tracks
+//! `schema_migrations` like `scripts/migrate.sh`, so a DB another conformance
+//! binary already migrated gets every file SKIPped instead of re-applied (which
+//! used to fail in the migration step, not in an assertion). Binaries may share
+//! one container; a throwaway `pgvector/pgvector:pg18` per binary remains the
+//! cleanest isolation.
 
 use std::path::PathBuf;
 use std::process::Command;
