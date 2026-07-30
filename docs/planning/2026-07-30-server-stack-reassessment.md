@@ -134,3 +134,43 @@ buzz가 **Apache 2.0**이라, "Swift를 무엇으로 재작성하나"가 아니�
 ## 리서치 근거 (개정, 2026-07-30)
 - buzz 정체·아키텍처: https://techcrunch.com/2026/07/21/jack-dorsey-is-taking-on-slack-with-buzz-a-group-chat-platform-for-teams-and-their-ai-agents/ · https://github.com/block/buzz · https://miget.com/blog/how-to-self-host-buzz · https://quasa.io/media/buzz-by-block-how-the-nostr-based-ai-workspace-works-for-beginners
 - Encore.ts가 강정합성 DB 백엔드에 적합, Hono는 엣지·경량: https://encore.dev/articles/hono-vs-encore · https://encore.dev/articles/nestjs-vs-encore
+
+---
+
+# 7. buzz 기반으로 간다면 — 진행 판단 (성재 요청)
+
+## 7-1. 먼저 나눠야 할 것: momo에서 buzz가 대체할 수 있는 것 vs 없는 것
+
+| 계층 | buzz가 이미 가진 것 | momo 고유(buzz엔 없음) |
+|---|---|---|
+| **메신저 코어** | 채널·스레드·DM·리액션·서명 이벤트·relay·git 이벤트·에이전트=1급 member | (없음 — 이 층은 buzz와 거의 동일) |
+| **동의/권한** | 서명 신원·감사 로그 | 플러그인 동의 모달·scope grant·capability 투영(#839 계열) |
+| **T3 work runtime** | **없음** | **momo의 진짜 차별점** — T1/T2/T3 통합 실행(ADR-0125), 원격 샌드박스·과금 원장·수명주기 saga(ADR-0136/0140), idle 재부착·replay(ADR-0139), provider 어댑터·BYOC(ADR-0142), Kata substrate(ADR-0144) |
+| **workstream** | git events까지만 | 목표 계층·actor-independent 인계(ADR-0143) |
+
+**핵심**: buzz는 "메신저 코어"를 대체하고, **momo가 방금 다섯 배치에 쏟은 T3 work runtime·workstream은 buzz에 없다.** 즉 buzz 기반으로 가도 momo 고유 로직은 여전히 우리가 짠다 — buzz가 없애주는 것은 메시지·채널·서명·relay 같은 하부 공통층이다.
+
+## 7-2. 넘어야 할 두 벽
+
+1. **프로토콜 차이**: buzz는 **Nostr**(분산·자기주권·signed events)다. momo는 **자체 REST + 단일 쓰기경로 + RLS FORCE**(중앙 control plane)다. buzz relay를 self-host하면 실질적으론 중앙 서버로 쓰지만, Nostr 이벤트 모델을 momo의 outbox·RLS 불변식과 어떻게 화해시킬지가 첫 검증 과제다. (momo의 BYOC control-plane 결정과 Nostr의 분산성은 표면상 상충 — 실제로는 buzz도 relay 중심이라 조정 가능해 보이나 확인 필요.)
+2. **성숙도·나이**: buzz는 2026-07 출시 신제품이다. momo는 그보다 성숙한 자체 코드가 있다. buzz를 기반에 깔면 momo가 남의 초기 코드베이스 위에 서게 된다 — upstream 파손 리스크.
+
+## 7-3. buzz 관계 3방식
+
+| 방식 | 설명 | 재작성 절감 | 리스크 |
+|---|---|---|---|
+| **A. Fork + 고유 이식** | buzz를 fork, 메신저 코어는 그대로, T3·workstream을 Rust로 얹음 | **최대** | upstream diverge·유지보수, Nostr 모델 수용 |
+| **B. 참조 재작성** | buzz 코드를 참고만, momo는 자체구축 유지하되 서버를 Rust/Axum으로 재작성 | 중 | 재작성 비용 여전(단 buzz 코드가 레퍼런스라 빠름) |
+| **C. Upstream 확장** | buzz를 upstream 의존으로 두고 momo 고유를 모듈/플러그인으로 | 최대(코어 유지보수 위임) | 고유 로직이 buzz 아키텍처에 종속, buzz 로드맵에 인질 |
+
+## 7-4. 나의 종합 판단
+
+- **가장 값진 자산(T3 work runtime)은 어느 방식이든 우리가 짠다** — buzz 기반의 이득은 "메신저 하부층 재작성 회피"에 한정된다. 그 층은 momo에서 이미 상당히 안정적이라(메시지·채널·서명은 초기부터 랜딩), 절감 폭이 처음 인상보다 작을 수 있다.
+- **B(참조 재작성)가 리스크·정체성 균형이 가장 낫다** — buzz를 레퍼런스로 삼아 Rust/Axum 재작성 속도를 올리되, momo가 남의 초기 코드에 종속되지 않는다. Nostr 프로토콜을 강제로 받지 않아도 된다.
+- **A(fork)는 "buzz의 Nostr 모델을 momo 정체성으로 받아들일 수 있다"가 확인될 때만** — 그게 되면 절감이 극대. 이건 별도 스파이크(buzz 코드를 읽고 momo 불변식과 대조)가 선행돼야 하는 판단이다.
+- **C(upstream 확장)는 권하지 않음** — momo의 차별점(T3)이 buzz 로드맵에 인질이 된다.
+
+## 7-5. 이 결정이 여는/닫는 것
+
+- T3 실 provider(ADR-0144 PoC), NCP smoke는 **서버 스택과 독립** — workd·provider 어댑터 계약은 언어 무관(서명 페이로드는 UTF-8 바이트). 그러니 서버 스택 결정을 기다리지 않고 smoke는 진행 가능하다.
+- 단 **서버 재작성을 할 거면 그 전에 T3/workstream 로직이 안정돼야** 두 번 옮기지 않는다 — 지금 다섯 배치가 방금 끝나 마침 안정 지점에 가깝다.
