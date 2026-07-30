@@ -25,8 +25,13 @@
 //!
 //! No HTTP surface (this is a domain crate — a route layer mounts it), no
 //! AgentGateway, terminal attach, tier policy, pool policy, approvals,
-//! reattach/replay (ADR-0139), Kata (ADR-0144), or reconciliation worker
-//! (ADR-0140 D4 convergence) — all of that is B2.2+.
+//! reattach/replay (ADR-0139) or Kata (ADR-0144) — all of that is B2.4+.
+//!
+//! B2.3 added the **domain half of ADR-0140 D4 convergence** — [`convergence`]
+//! (the rule table), [`reconcile`] (claim → revalidate → apply) and [`sweep`]
+//! (host loss → `t3_terminate('orphaned')`). The worker that runs them on a
+//! timer is `bins/momo-notifier`; it holds no SQL of its own, which is what
+//! keeps the rules in one place.
 //!
 //! It owns **no `outbox` SQL**: `momo-outbox::emit_outbox` remains the single
 //! egress (invariant #3), and the lifecycle events a route layer wants to
@@ -41,9 +46,12 @@
 
 pub mod billing;
 pub mod cloud_host;
+pub mod convergence;
 pub mod error;
 pub mod lifecycle;
 pub mod provider;
+pub mod reconcile;
+pub mod sweep;
 
 pub use billing::{
     acquire_slot_in_tx, pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx,
@@ -58,6 +66,10 @@ pub use cloud_host::{
     mint_bootstrap_token, BootstrapToken, ClaimedBootstrap, CloudHostEnrollment, CloudHostRecord,
     NewByocEnrollment, BOOTSTRAP_TTL_SECONDS,
 };
+pub use convergence::{
+    after_deadline, after_provider_call, provider_denies_its_own_absence,
+    CloudLifecycleConvergence, CloudLifecyclePhase,
+};
 pub use error::T3Error;
 pub use lifecycle::{
     bind_cloud_host_in_tx, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
@@ -70,4 +82,11 @@ pub use lifecycle::{
 };
 pub use provider::{
     ByocProviderAdapter, MockCall, MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,
+};
+pub use reconcile::{
+    apply_convergence_to_intent, claim_lifecycle_intent, due_lifecycle_candidates,
+    ActionableIntent, AppliedConvergence, ClaimedIntent, LifecycleCandidate,
+};
+pub use sweep::{
+    converge_stale_session, stale_session_candidates, StaleConvergence, StaleSessionCandidate,
 };

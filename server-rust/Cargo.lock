@@ -1103,6 +1103,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-notifier"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "momo-db",
+ "momo-provider",
+ "momo-t3",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "momo-outbox"
 version = "0.0.0"
 dependencies = [
