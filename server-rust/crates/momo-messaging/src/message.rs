@@ -395,9 +395,106 @@ pub async fn list_messages(
         .map_err(DbError::from)
 }
 
+/// Which page of a channel's history to read (Swift `MessageRoutes.history`
+/// cursors, `MessageRoutes.swift:363-370`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryCursor {
+    /// No cursor — newest messages first (`ORDER BY seq DESC`).
+    Newest,
+    /// `before=<seq>`: strictly older messages, newest-first.
+    Before(i64),
+    /// `after=<seq>`: the realtime-recovery backfill — strictly newer messages
+    /// in ASCENDING order. Takes precedence over `before` when both are given
+    /// (Swift checks `after` first).
+    After(i64),
+}
+
+impl HistoryCursor {
+    /// Resolve the `before`/`after` query pair the way Swift does: `after` wins.
+    pub fn from_query(before: Option<i64>, after: Option<i64>) -> Self {
+        match (after, before) {
+            (Some(after), _) => HistoryCursor::After(after),
+            (None, Some(before)) => HistoryCursor::Before(before),
+            (None, None) => HistoryCursor::Newest,
+        }
+    }
+}
+
+/// Default history page size (Swift `?? 50`).
+pub const HISTORY_LIMIT_DEFAULT: i64 = 50;
+/// Maximum history page size (Swift `min(max(…, 1), 200)`).
+pub const HISTORY_LIMIT_MAX: i64 = 200;
+
+/// Clamp a client-supplied page size to `1..=200`, defaulting to 50 — byte-for-
+/// byte the Swift clamp so a client cannot widen the page by asking.
+pub fn clamp_history_limit(limit: Option<i64>) -> i64 {
+    limit
+        .unwrap_or(HISTORY_LIMIT_DEFAULT)
+        .clamp(1, HISTORY_LIMIT_MAX)
+}
+
+/// Read one page of a channel's history with Swift's ordering and cursor
+/// semantics ([`HistoryCursor`]).
+///
+/// Differs from [`list_messages`] in exactly the ways the REST contract
+/// requires: newest-first by default, seq-cursor paging, and **tombstones stay
+/// visible** (no `deleted_at IS NULL` filter) so a client that reconnects
+/// converges on deletions instead of silently keeping a deleted message.
+pub async fn list_channel_page(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    cursor: HistoryCursor,
+    limit: i64,
+) -> Result<Vec<StoredMessage>, DbError> {
+    let (predicate, order) = match cursor {
+        HistoryCursor::Newest => ("", "DESC"),
+        HistoryCursor::Before(_) => ("AND seq < $3 ", "DESC"),
+        HistoryCursor::After(_) => ("AND seq > $3 ", "ASC"),
+    };
+    let sql = format!(
+        "SELECT {STORED_COLS} FROM message \
+          WHERE channel_id = $1 {predicate}\
+          ORDER BY seq {order} \
+          LIMIT $2"
+    );
+    let mut query = sqlx::query(&sql).bind(channel_id).bind(limit);
+    match cursor {
+        HistoryCursor::Newest => {}
+        HistoryCursor::Before(seq) | HistoryCursor::After(seq) => query = query.bind(seq),
+    }
+    let rows = query.fetch_all(&mut *conn).await?;
+    rows.iter()
+        .map(decode_stored)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_cursor_prefers_after_over_before() {
+        assert_eq!(
+            HistoryCursor::from_query(Some(10), Some(3)),
+            HistoryCursor::After(3),
+            "backfill (after) takes precedence, matching Swift"
+        );
+        assert_eq!(
+            HistoryCursor::from_query(Some(10), None),
+            HistoryCursor::Before(10)
+        );
+        assert_eq!(HistoryCursor::from_query(None, None), HistoryCursor::Newest);
+    }
+
+    #[test]
+    fn history_limit_clamps_to_swift_bounds() {
+        assert_eq!(clamp_history_limit(None), 50);
+        assert_eq!(clamp_history_limit(Some(0)), 1);
+        assert_eq!(clamp_history_limit(Some(-5)), 1);
+        assert_eq!(clamp_history_limit(Some(75)), 75);
+        assert_eq!(clamp_history_limit(Some(10_000)), 200);
+    }
 
     #[test]
     fn message_type_labels_round_trip() {

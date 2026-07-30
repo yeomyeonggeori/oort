@@ -141,6 +141,71 @@ pub async fn is_channel_member(
     Ok(exists)
 }
 
+/// Outcome of [`verify_password_login`] — the three states Swift
+/// `AuthRoutes.LoginResolution` distinguishes, kept distinct because they map to
+/// different HTTP codes (401 vs 403).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PasswordLogin {
+    /// Credentials verified and the member is `active`.
+    Active(Member),
+    /// Credentials verified but the member is `suspended` → 403, not 401.
+    Suspended,
+    /// Unknown email, wrong password, or a non-active/non-suspended status.
+    /// Deliberately one bucket so the response cannot enumerate accounts.
+    Invalid,
+}
+
+/// Resolve a human member by email and verify the submitted password.
+///
+/// Ports Swift `AuthRoutes.login`'s resolution query (`AuthRoutes.swift:61-83`)
+/// exactly, including where the password check happens: **inside Postgres**, via
+/// the `momo_password_verify(raw, stored_hash)` pgcrypto helper added by
+/// `005_auth_password_hash.sql`. Keeping the algorithm in the DB is what makes
+/// the Rust and Swift servers accept the same bcrypt hashes without porting a
+/// crypto stack — and the function is `STABLE`/NULL-safe, so an SSO-only human
+/// (`password_hash IS NULL`) simply fails to verify.
+///
+/// The connection must already carry the tenant GUC (open it with
+/// [`momo_db::with_tenant_tx`]); the RLS policies then scope the lookup to the
+/// workspace being logged into. Neither the raw password nor the stored hash is
+/// ever returned or logged by this function.
+pub async fn verify_password_login(
+    conn: &mut PgConnection,
+    email: &str,
+    password: &str,
+) -> Result<PasswordLogin, DbError> {
+    if password.is_empty() {
+        // Swift rejects an empty password before touching the DB.
+        return Ok(PasswordLogin::Invalid);
+    }
+    let row = sqlx::query(
+        "SELECT m.id, m.workspace_id, m.kind::text AS kind, m.status::text AS status, \
+                m.display_name, m.handle, \
+                momo_password_verify($1, h.password_hash) AS password_ok \
+           FROM human h \
+           JOIN member m ON m.id = h.member_id \
+          WHERE h.email = $2",
+    )
+    .bind(password)
+    .bind(email)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(PasswordLogin::Invalid);
+    };
+    let password_ok: Option<bool> = row.try_get("password_ok")?;
+    if password_ok != Some(true) {
+        return Ok(PasswordLogin::Invalid);
+    }
+    let member = decode_member(&row)?;
+    match member.status.as_str() {
+        "suspended" => Ok(PasswordLogin::Suspended),
+        "active" => Ok(PasswordLogin::Active(member)),
+        _ => Ok(PasswordLogin::Invalid),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

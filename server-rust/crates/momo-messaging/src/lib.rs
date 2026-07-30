@@ -26,8 +26,12 @@ pub mod message;
 
 pub use channel::{create_channel, create_channel_in_tx, Channel, ChannelKind, NewChannel};
 pub use error::MessagingError;
-pub use identity::{get_member, get_workspace, is_channel_member, Member, MemberKind, Workspace};
+pub use identity::{
+    get_member, get_workspace, is_channel_member, verify_password_login, Member, MemberKind,
+    PasswordLogin, Workspace,
+};
 pub use message::{
-    build_broadcast_payload, cent_channel, list_messages, send_message, send_message_in_tx,
-    MessageType, NewMessage, SentMessage, StoredMessage,
+    build_broadcast_payload, cent_channel, clamp_history_limit, list_channel_page, list_messages,
+    send_message, send_message_in_tx, HistoryCursor, MessageType, NewMessage, SentMessage,
+    StoredMessage, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
 };

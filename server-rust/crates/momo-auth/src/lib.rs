@@ -10,8 +10,12 @@
 //! DB-backed revocation check (MOMO-300 `token` table) and the full middleware
 //! wiring are B1 — noted at the call sites.
 
+pub mod issue;
 pub mod jwt;
 pub mod workhost;
 
+pub use issue::{
+    sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
+};
 pub use jwt::{verify_app_access, AppClaims, AuthError, Principal, PrincipalKind};
 pub use workhost::verify_work_host_request;
