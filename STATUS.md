@@ -1,5 +1,17 @@
 # momo 진행 현황
 
+## MOMO-680 자사 플러그인 매니페스트 도구 설명 한국어화 (#921, 2026-07-30)
+
+- **웹 레인(#914/#917)이 인계한 데이터 변경을 닫았다.** `server/Fixtures/plugin-manifests/{github,notion,linear,drive}.json`의 `tools[].description` 7건이 한국어가 되고, 마이그레이션 **059**가 같은 문자열을 `plugin_registry`에 재시드한다. 서버 코드 변경 0 · 웹/맥 클라이언트 변경 0.
+- **웹이 세운 원칙은 그대로다.** 결정 표면(동의 다이얼로그)은 배포자 자유 문구를 결정 문구로 승격하지 않고 도구 이름으로 식별하며, 배포자 산문은 증거 표면(앱 상세 > 도구와 권한)에만 남는다. 제3자 매니페스트는 어떤 언어로도 들어올 수 있어 데이터 번역이 근본 해법이 아니고, 그래서 이 티켓은 **자사 픽스처 4종의 문구 품질만** 다룬다. 그 판단을 마이그레이션 헤더와 새 테스트 주석에 붙여 다음 사람이 "왜 4개뿐인가"를 다시 묻지 않게 했다.
+- **번역은 "무엇을 허용하는지"를 보존한다.** 원문의 안전 정보 두 축을 문장에 그대로 남겼다 — 위임 경계("권한을 위임한 사용자가 접근할 수 있는 …")와 드라이브 경계("설정된 공유 드라이브 **안에서**", 개인 Drive 전체가 아니라는 사실). 도구 이름(`github.search_issues` 등)은 번역하지 않았고, 과장어·명령형 없음.
+- **digest를 함께 회전시키지 않으면 카탈로그가 전부 닫힌다.** `plugin_registry.manifest_digest`는 런타임 admission의 expected 값이고 `PluginRoutes.registryRow`가 `'sha256:' || encode(sha256(convert_to(pr.manifest::text,'UTF8')),'hex')`를 computed로 계산해 대조한다(불일치 = 409 `plugin manifest rejected`). 059는 **런타임과 같은 식**을 그대로 써서 회전시키고, 새 테스트가 두 문자열이 같음을 잠근다 — 한쪽만 리팩터링되면 테스트가 먼저 깨진다.
+- **대상은 3-튜플 매칭이라 배포자 편집을 덮지 않는다.** `(plugin_id, 도구 이름, 013/015/031 원문 영문 description)`이 정확히 일치하는 도구만 다시 쓰고, 배열은 **이름으로** 매칭한다(031이 github에 `search_issues`를 덧붙인 뒤라 인덱스 고정은 깨지기 쉽고, 배열 순서는 배포자가 선언한 제품 순서라 보존한다). 실측 검증: 한 도구를 원문 영문으로, 다른 도구를 배포자 문구로 바꿔 놓고 059를 재실행하면 **영문만 한국어로 복구되고 배포자 문구는 그대로**이며 digest는 계속 일치했다.
+- **재시드는 두 층에서 멱등이다.** 러너 2-pass가 `IDEMPOTENCY_OK second-pass applied=0 skipped=59`를 남기고(파일명 skip), 059 파일을 **직접 재실행하면 `UPDATE 0`**이다(`IS DISTINCT FROM` + 위 3-튜플 가드) — 러너를 우회해도 무해하다.
+- **검증(실주행).** `swift build` green · MomoServer **359 tests** green(신규 1 포함) · `check_migration_numbers.sh` PASS(59 files) · 픽스처 4종 JSON 파싱 green. 격리 PG18(`pgvector:0.8.5-pg18-trixie`, 임시 컨테이너·작업 후 회수)에 **001~059 전량 적용 실주행**: 도구 7건 전부 한국어로 저장, `manifest_digest = computed`가 5행 전부 `t`(자사 4종 + `external_webhook`), 059 직접 재실행 `UPDATE 0`.
+- 새 테스트 `testOfficialPluginManifestToolDescriptionsAreKoreanAndMatchReseedMigration`는 픽스처를 파싱해 도구별 문자열을 대조하고, **모든 도구 description에 한글이 있어야** 통과한다 — 나중에 영문 도구가 하나 추가되면 표를 갱신하지 않고는 green이 안 된다(자매 도구 누락 방지).
+- **관측(이 PR 범위 밖, 판단 필요).** `external_webhook`(014 seed) 매니페스트의 `tools[0].description`은 여전히 영문이다("Registry-only marker; ingress is available only through the webhook REST surface"). 픽스처 파일이 없는 서버 소유 마커 행이고 `installAllowed:false`/`approvalPolicy:"deny"`라 허용 가능한 동작의 설명이 아니며, 맥 클라이언트는 `isChannelIntegration`으로 상세를 **아예 로드하지 않아**(`MomoPluginMarketplaceStore.loadDetail`) 도구 행으로 노출되지 않는다. 다만 **웹에는 그 채널-통합 예외가 없어** 앱 상세에서 이 문장이 보일 수 있다 — 데이터 번역보다 웹의 예외 처리 쪽 문제로 보여 손대지 않았다.
+
 ## MOMO-675 provider link/chain·effort-table 응답 스키마 승격 — 자리표시자 제거 (#913, 2026-07-30)
 
 - **#904가 남긴 관측을 닫았다.** `GET/PUT/DELETE /v1/provider/link/chain`과 `GET /v1/provider/effort-table`의 응답이 `{type: object, additionalProperties: true}`였다. shape check는 스키마에 적힌 것만 대조하고 `additionalProperties: true`는 **명시적 opt-out**이므로(`openapi_shape_check.py:150-152`), 이 네 연산은 샘플이 있어도 필드가 사라지든 새 키가 생기든 통과했다. 서버 코드 변경 0 — 스펙이 코드를 따라간 방향이다.

@@ -21,7 +21,7 @@
     "tools": [
       {
         "name": "drive.search_files",
-        "description": "Search files within the configured shared drive",
+        "description": "설정된 공유 드라이브 안에서 파일을 검색합니다.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -37,7 +37,7 @@
       },
       {
         "name": "drive.get_file_metadata",
-        "description": "Get metadata for a file in the configured shared drive",
+        "description": "설정된 공유 드라이브에 있는 파일의 메타데이터를 조회합니다.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -53,7 +53,7 @@
       },
       {
         "name": "drive.export_text",
-        "description": "Export a Google Workspace document or download a bounded text file",
+        "description": "Google Workspace 문서를 텍스트로 내보내거나 크기 한도 안의 텍스트 파일을 내려받습니다.",
         "inputSchema": {
           "type": "object",
           "properties": {

@@ -20,7 +20,7 @@
     "server": { "name": "linear-hosted-mcp", "version": "hosted" },
     "tools": [{
       "name": "linear.list_issues",
-      "description": "List issues available to the delegated user",
+      "description": "권한을 위임한 사용자가 접근할 수 있는 이슈 목록을 조회합니다.",
       "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
       "schemaDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "scopes": ["linear:read"],
