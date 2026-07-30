@@ -69,6 +69,69 @@ where
     }
 }
 
+/// Run `body` inside a tenant transaction, with two caller-supplied preludes
+/// sandwiching the RLS GUC.
+///
+/// Added for ADR-0140 D2 (B2.1). The T3 lifecycle ladder needs statements on
+/// **both** sides of `set_config('app.workspace_id', …)`:
+///
+/// * `before_guc` — `pg_advisory_xact_lock` must be the transaction's *first*
+///   statement, ahead of every row lock. It touches no RLS table, so it does
+///   not need the tenant scope, and the Swift prelude
+///   (`Cloud/T3LifecycleLock.swift:17-27`) puts it first for exactly that
+///   reason. This guard ports that order faithfully.
+/// * `after_guc` — the coarse-to-fine row locks (`work_pool`,
+///   `workspace_credit`, `work_cloud_host`). Every one of those tables is
+///   `FORCE ROW LEVEL SECURITY`, so they must come after the GUC — and before
+///   `body`, so that a domain closure can never take them out of order.
+///
+/// Routing this through `momo-db` rather than opening a second transaction
+/// helper elsewhere is what preserves invariant #6: `bind_workspace_guc` stays
+/// the one and only wiring point for `app.workspace_id` in the workspace.
+///
+/// Generic over the error type so a domain crate can classify PostgreSQL
+/// failures (trigger rejections, constraint violations) into its own domain
+/// errors instead of flattening them to [`DbError`]; `E: From<DbError>` keeps
+/// the transaction plumbing's own failures representable.
+pub async fn with_tenant_tx_prelude<T, E, P, Q, F>(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    before_guc: P,
+    after_guc: Q,
+    body: F,
+) -> Result<T, E>
+where
+    T: Send,
+    E: From<DbError> + Send,
+    P: for<'c> FnOnce(&'c mut PgConnection) -> BoxFuture<'c, Result<(), E>> + Send,
+    Q: for<'c> FnOnce(&'c mut PgConnection) -> BoxFuture<'c, Result<(), E>> + Send,
+    F: for<'c> FnOnce(&'c mut PgConnection) -> BoxFuture<'c, Result<T, E>> + Send,
+{
+    let mut tx = pool.begin().await.map_err(DbError::from)?;
+    if let Err(err) = before_guc(&mut tx).await {
+        let _ = tx.rollback().await;
+        return Err(err);
+    }
+    if let Err(err) = bind_workspace_guc(&mut tx, workspace_id).await {
+        let _ = tx.rollback().await;
+        return Err(E::from(err));
+    }
+    if let Err(err) = after_guc(&mut tx).await {
+        let _ = tx.rollback().await;
+        return Err(err);
+    }
+    match body(&mut tx).await {
+        Ok(value) => {
+            tx.commit().await.map_err(DbError::from)?;
+            Ok(value)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
 /// Operator provider-link transaction (MOMO-572 / ADR-0004 증보 1). Binds both
 /// `app.workspace_id` (for the operator's workspace-scoped audit write) and
 /// `app.provider_link_admin` to unlock the GUC-gated `provider_link` policy.
