@@ -4790,8 +4790,16 @@ paths:
         legacy provider-link singleton and remains editable only through it.
         Bearers are never echoed — a hop carries a masked 4-character tail only
         (ADR-0004).
+      security: [{bearerAuth: []}]
       responses:
-        "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        "200":
+          description: Provider chain projection, position 0 first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderChainResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/ProviderOperatorForbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
     put:
       tags: [agents]
       operationId: replaceProviderLinkChain
@@ -4801,11 +4809,29 @@ paths:
         transaction; position 0 is rejected by name. Omitting an entry's bearer
         keeps the ciphertext already stored at that position, so a hop can be
         reordered or parked without re-typing a write-only secret.
+      security: [{bearerAuth: []}]
       requestBody:
         required: true
-        content: {application/json: {schema: {type: object, additionalProperties: true}}}
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PutProviderChainRequest"}
       responses:
-        "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        "200":
+          description: Chain projection after the replace, position 0 first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderChainResponse"}
+        "400":
+          description: >
+            Unknown body key, position 0 or a duplicate position, more than
+            eight hops, an unusable baseUrl, an unknown mode, an empty bearer,
+            or a new position submitted without one.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/ProviderOperatorForbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
     delete:
       tags: [agents]
       operationId: clearProviderLinkChain
@@ -4813,8 +4839,16 @@ paths:
       description: >
         Same operator boundary as the read. Drops every fallback hop; the
         response then projects the cascade as position 0 alone.
+      security: [{bearerAuth: []}]
       responses:
-        "200": {description: Provider chain projection, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        "200":
+          description: Chain projection after the clear — position 0 alone.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderChainResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/ProviderOperatorForbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/provider/effort-table:
     get:
@@ -4822,12 +4856,20 @@ paths:
       operationId: getProviderEffortTable
       summary: Read the provider and model effort capabilities used by routing.
       description: >
-        Any authenticated principal. The table carries no tenant row and no
-        provider credential (ADR-0134 D2), and a model absent from it resolves
-        to the conservative low/medium/high fallback rather than silently
-        accepting a level the provider would reject.
+        Any authenticated principal — human access token or agent gateway
+        bearer, both sent as `Authorization: Bearer`. The table carries no
+        tenant row and no provider credential (ADR-0134 D2), and a model absent
+        from it resolves to the conservative low/medium/high fallback rather
+        than silently accepting a level the provider would reject.
+      security: [{bearerAuth: []}]
       responses:
-        "200": {description: Effort capability table, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        "200":
+          description: Effort capability table.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderEffortTableResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
 components:
   securitySchemes:
@@ -5053,6 +5095,16 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     Forbidden:
       description: Not an active workspace member, or workspace scope mismatch.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ProviderOperatorForbidden:
+      description: >
+        The instance-global operator boundary (MOMO-583): the caller is not a
+        human principal, or carries neither the `platform:read` scope nor an
+        owner/admin role with a verified email on the instance operator
+        allowlist. A workspace admin alone is not enough.
       content:
         application/json:
           schema:
@@ -6046,6 +6098,178 @@ components:
           description: One-time-issued scoped gateway bearer; only its SHA-256 digest is persisted.
         tokenType: {type: string, enum: [Bearer]}
         confirmedAtMs: {type: integer, format: int64}
+
+    # ---- Provider cascade + effort table (ADR-0135 D1 / ADR-0134 D2) --------
+    ProviderChainEntry:
+      type: object
+      description: >
+        One projected cascade hop. Position 0 is the `provider_link` singleton
+        (or the boot-time HERMES_* env trio when no row exists); positions >= 1
+        come from `provider_link_chain`. The bearer itself is never projected —
+        only whether one is configured/openable and a masked tail (ADR-0004).
+      required:
+        [position, source, mode, baseUrl, endpointLabel, enabled,
+         bearerConfigured, bearerUnavailable]
+      properties:
+        position:
+          type: integer
+          description: 0 is the singleton head; fallback hops run 1..8.
+        source:
+          type: string
+          enum: [database, environment, chain]
+          description: >
+            Position 0 resolves to `database` (a provider_link row) or
+            `environment` (the env fallback); every fallback hop is `chain`.
+        mode:
+          type: string
+          enum: [local-mock, internal-host-mock, external-hermes]
+        baseUrl:
+          type: string
+        endpointLabel:
+          type: string
+          description: >
+            Scheme, host, port, and path only — userinfo, query, and fragment
+            are stripped before the hop is projected or audited.
+        enabled:
+          type: boolean
+        bearerConfigured:
+          type: boolean
+        bearerUnavailable:
+          type: boolean
+          description: >
+            The row exists but its ciphertext cannot be opened with the
+            configured master key. It stays visible so a replace-all PUT cannot
+            silently erase it.
+        bearerLast4:
+          type: string
+          description: >
+            Masked 4-character bearer tail. Absent — never null — when no
+            bearer is readable for this hop.
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: Absent for an env-sourced position 0.
+        updatedBy:
+          type: string
+          format: uuid
+          description: Absent when the row has no recorded editor.
+
+    ProviderChainResponse:
+      type: object
+      required: [schema, entries, fallbackCount, attemptableCount]
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider_link.chain.v0]
+        entries:
+          type: array
+          description: The whole cascade in attempt order, position 0 first.
+          items: {$ref: "#/components/schemas/ProviderChainEntry"}
+        fallbackCount:
+          type: integer
+          description: Configured hops beyond position 0.
+        attemptableCount:
+          type: integer
+          description: Hops a real turn would actually attempt (enabled AND usable).
+
+    PutProviderChainEntry:
+      type: object
+      description: >
+        One fallback hop in the replace-all body. Closed-world: any key outside
+        this set is rejected with 400, so no provider OAuth or raw-provider-key
+        field can enter through this API (ADR-0004 Rules #1-#2).
+      required: [position, baseUrl]
+      additionalProperties: false
+      properties:
+        position:
+          type: integer
+          minimum: 1
+          description: >
+            Position 0 is the provider-link singleton and is rejected by name;
+            it stays editable only through `PUT /v1/provider/link`.
+        baseUrl:
+          type: string
+          description: >
+            Validated exactly like an agent endpoint — no userinfo, query, or
+            fragment credential material; HTTPS unless the server opted into
+            local loopback HTTP.
+        bearer:
+          type: string
+          writeOnly: true
+          description: >
+            Write-only; never echoed back. Omit to keep the ciphertext already
+            stored at this position — required only for a position that does
+            not exist yet.
+        mode:
+          type: string
+          enum: [local-mock, internal-host-mock, external-hermes]
+          description: Defaults to external-hermes when omitted.
+        enabled:
+          type: boolean
+          description: Defaults to true when omitted.
+
+    PutProviderChainRequest:
+      type: object
+      required: [entries]
+      additionalProperties: false
+      properties:
+        entries:
+          type: array
+          maxItems: 8
+          description: >
+            The complete new set of fallback hops. This is a replace-all: any
+            configured position absent from the list is dropped.
+          items: {$ref: "#/components/schemas/PutProviderChainEntry"}
+
+    ProviderEffortModel:
+      type: object
+      required: [model, efforts, defaultEffort]
+      properties:
+        model: {type: string}
+        efforts:
+          type: array
+          description: Levels this model accepts — a subset of `levels`.
+          items: {type: string, enum: [low, medium, high, xhigh, max]}
+        defaultEffort: {type: string, enum: [low, medium, high, xhigh, max]}
+
+    ProviderEffortProvider:
+      type: object
+      required: [provider, models]
+      properties:
+        provider: {type: string}
+        models:
+          type: array
+          items: {$ref: "#/components/schemas/ProviderEffortModel"}
+
+    ProviderEffortFallback:
+      type: object
+      description: >
+        Applied to any model absent from the table — deliberately the
+        conservative low/medium/high triple.
+      required: [efforts, defaultEffort]
+      properties:
+        efforts:
+          type: array
+          items: {type: string, enum: [low, medium, high, xhigh, max]}
+        defaultEffort: {type: string, enum: [low, medium, high, xhigh, max]}
+
+    ProviderEffortTableResponse:
+      type: object
+      required: [schema, levels, fallback, providers]
+      properties:
+        schema:
+          type: string
+          enum: [momo.provider.effort_table.v0]
+        levels:
+          type: array
+          description: >
+            Canonical superset in ascending order. A value outside this set is
+            never a valid `routing.effort` regardless of model.
+          items: {type: string, enum: [low, medium, high, xhigh, max]}
+        fallback: {$ref: "#/components/schemas/ProviderEffortFallback"}
+        providers:
+          type: array
+          items: {$ref: "#/components/schemas/ProviderEffortProvider"}
 
     # ---- Channels ----------------------------------------------------------------
     Channel:
