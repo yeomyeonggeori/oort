@@ -17,4 +17,7 @@ pub mod emit;
 pub mod relay;
 
 pub use emit::{emit_outbox, OutboxKind};
-pub use relay::{claim_batch, ClaimedRow};
+pub use relay::{
+    backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,
+    ClaimedRow, NOTIFY_CHANNEL,
+};

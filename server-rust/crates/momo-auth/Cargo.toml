@@ -8,6 +8,11 @@ rust-version.workspace = true
 [dependencies]
 momo-wire = { path = "../momo-wire" }
 jsonwebtoken.workspace = true
+# `token_store` owns the MOMO-300 revocation lookup, so this crate touches the
+# DB — runtime query API only (no `query!` macro: the workspace must build
+# without a live database). It takes a caller-supplied connection, so the RLS
+# GUC seam stays in momo-db.
+sqlx.workspace = true
 serde.workspace = true
 uuid.workspace = true
 thiserror.workspace = true

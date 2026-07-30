@@ -1,0 +1,44 @@
+[package]
+name = "momo-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The router is a library so integration tests can boot the real app on an
+# ephemeral port; `src/main.rs` is a thin env→config→serve shell.
+[lib]
+name = "momo_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-server"
+path = "src/main.rs"
+
+[dependencies]
+# shared infrastructure + domain (B0/B1). The route layer consumes these public
+# APIs only — it owns no SQL of its own (D1 §3).
+momo-db = { path = "../../crates/momo-db" }
+momo-auth = { path = "../../crates/momo-auth" }
+momo-messaging = { path = "../../crates/momo-messaging" }
+
+axum.workspace = true
+tokio = { workspace = true, features = ["net", "signal", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# NOTE (invariant #2): there is deliberately no HTTP client here. momo-server
+# never talks to Centrifugo — publishing belongs to momo-relay alone.
+
+[dev-dependencies]
+# `reqwest` is the HTTP *client* the smoke test drives the server with — not a
+# server-side dependency. momo-server itself still has no outbound HTTP client
+# (invariant #2: publishing is momo-relay's alone).
+reqwest.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+serde_json = { workspace = true }
+uuid = { workspace = true }
