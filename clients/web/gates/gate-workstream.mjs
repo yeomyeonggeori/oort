@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // GATE: MOMO-677 작업 흐름 (ADR-0143 web surface).
 //
-// Fixture-only: no backend, no credentials. Ten things are locked here, and
+// Fixture-only: no backend, no credentials. Twelve things are locked here, and
 // they are the claims the surface makes that a screenshot cannot check:
 //
 //   1. 목록 렌더 — rows carry the goal, the four-value status chip, the run and
@@ -29,11 +29,22 @@
 //   7. 끝난 목표 — 완료·취소된 목표는 원장에 고아 실행이 남아 있어도 이어받기를
 //      제안하지 않고, 그 자리에 자기 문장을 놓는다(1R M1). 실행만 보고 목표를
 //      보지 않으면 완료 칩 180px 아래에 활성화된 이어받기가 그려진다.
-//   8. 피커 위계와 폭 — 자격 호스트가 셋인 화면에서, 결정(호스트 버튼)이 그것을
-//      접는 토글보다 무겁고, 그룹 라벨이 스크린리더 전용이 아니며, 하나를 눌러
-//      진행 상태로 만들어도 형제 버튼의 좌표와 폭이 1px도 움직이지 않는다
-//      (MOMO-679 M3). 픽스처가 자격 호스트를 하나만 주던 동안에는 이 셋 중
-//      어느 것도 화면에 나타난 적이 없다.
+//   8. 피커 형태와 위계 — 자격 호스트가 넷인 화면에서, 고르는 일은 `<select>`
+//      한 줄이 지고 결정은 채움 버튼 **하나**가 진다. 열린 토글은 ghost로
+//      물러나고, 그룹 라벨은 스크린리더 전용이 아니며, 그룹 안에서 칠해진
+//      컨트롤은 정확히 하나다(MOMO-679 M3, 2R H2). 픽스처가 자격 호스트를
+//      하나만 주던 동안에는 이 중 어느 것도 화면에 나타난 적이 없다.
+//  11. 진행 중 버튼 — 이어받기가 나가 있는 동안 확정 버튼은 disabled가 아니고,
+//      불투명도 1이고, 라벨 대비가 AA를 지키며(라이트·다크 양쪽 실측),
+//      **Enter로 눌렀을 때 포커스가 그 버튼에 남는다**. v1은 진행 중인 자기
+//      자신까지 disabled로 만들어 라벨을 라이트 2.20:1 / 다크 3.23:1로 떨어뜨렸고,
+//      Chromium이 포커스된 요소를 blur해 키보드 사용자를 문서 최상단으로
+//      던졌다(2R H1). 폭과 좌표가 진행 전후로 같은지도 여기서 잰다.
+//  12. 좁은 판 피커 — 600px 창(상세 열 360px, 내용 328px)에서 피커가 같은 형태를
+//      유지한다: `<select>` 한 줄 + 버튼 한 줄, 그룹 높이가 호스트 수와 무관.
+//      1440 한 줄에서만 보던 것이 2R H2의 원인이었다 — 그 폭에서는 무엇을 해도
+//      한 줄에 들어간다. 실제 pane 측정 폭(320px 판, 내용 ~262px)의 같은 단정은
+//      `gate:my-sessions`가 두 번째 호출자에서 잰다.
 //   9. 목록 목표 말줄임 — 200자를 허용하는 목표(055)가 640px 읽기 폭에서 두
 //      줄까지 접힌다. 한 줄 말줄임은 40자만 남기고, 행의 나머지 사실은 채널
 //      이름뿐이라 접두사가 같은 두 목표가 같은 행이 됐다(MOMO-679 M4). 행이
@@ -57,21 +68,32 @@
 // assertion line, so a proof is repeatable and does not ask a reviewer to
 // delete anything.
 //
-// 5·6·8·9는 그 형태로 붉힐 수 없다: 넷 다 제품 코드의 성질이지 데이터의 성질이
-// 아니라서, 어떤 픽스처도 측정 폭이나 tabIndex나 버튼 폭을 바꾸지 못한다.
-// 그래서 절차는 제품 한 줄을 되돌리는 것이고, 되돌릴 줄이 정확히 무엇인지 여기
-// 적어둔다 (되돌린 뒤 `npm run gate:workstream`, 확인하고 `git checkout --` 로
-// 복구):
+// 5·6·8·9·11·12는 그 형태로 붉힐 수 없다: 여섯 다 제품 코드의 성질이지 데이터의
+// 성질이 아니라서, 어떤 픽스처도 측정 폭이나 tabIndex나 버튼의 대비를 바꾸지
+// 못한다. 그래서 절차는 제품 한 줄을 되돌리는 것이고, 되돌릴 줄이 정확히
+// 무엇인지 여기 적어둔다 (되돌린 뒤 `npm run gate:workstream`, 확인하고
+// `git checkout --` 로 복구):
 //   헤더·행 측정 폭 — WorkstreamListRoute의 <ul>에 className="max-w-pane-lg"를
 //     도로 붙인다. 행 내용이 헤더보다 16px 왼쪽에서 끝나고 단정이 그 차이를
 //     픽셀로 출력한다.
 //   필터 탭 키보드 — features/common/FilterTabs의 tabIndex={selected ? 0 : -1}을
 //     tabIndex={0}으로 바꾼다. 정거장이 1개에서 5개가 된다.
-//   피커 위계와 폭 — features/work/HostPicker의 상설 아이콘 자리를 v1의 라벨
-//     스왑으로 되돌린다(`busy ? <Loader2/> : <Monitor/>` 를 `busy && <Loader2/>`
-//     로, 이름 자리를 `busy ? "이어받는 중" : host.displayName` 로). 누른 버튼이
-//     넓어지면서 형제의 x가 밀리고, 단정이 움직인 버튼의 좌표를 출력한다.
-//     위계 쪽은 같은 파일의 variant="default"를 "outline"으로 되돌리면 붉는다.
+//   피커 형태와 위계 — features/work/HostPicker의 확정 버튼 variant="default"를
+//     "outline"으로 되돌린다. 실측된 실패: "피커 형태: 그룹 안에서 칠해진
+//     컨트롤이 0개다 ([])". 위계의 나머지 절반은 WorkstreamDetailRoute의 토글
+//     variant={open ? "ghost" : "default"}를 "outline" 고정으로 되돌리면 붉는다.
+//   진행 중 버튼 — HostPicker의 확정 버튼에 `disabled={busy}`를 붙인다(= v1의
+//     `disabled={busyHostId !== null}`). 실측된 실패:
+//       진행 중 버튼(light): ... disabled다 (라벨 대비 2.23:1, opacity 0.5, 포커스 <body>)
+//       진행 중 버튼(dark):  ... disabled다 (라벨 대비 3.14:1, opacity 0.5, 포커스 <body>)
+//     2R가 손으로 잰 2.20 / 3.23이 그대로 나오고, 포커스 절반은 Chromium이
+//     blur한 결과를 `<body>`로 출력한다.
+//   좁은 판 피커 — HostPicker 확정 버튼의 `max-w-full`을 `w-full`로 바꾼다.
+//     실측된 실패: "좁은 판 피커: 확정 버튼이 전폭이 됐다 (328px / 그룹 328px)".
+//     같은 단정의 쌓임 절반은 `<Select>` 블록을 v1의 `targets.map(...)` 버튼
+//     N개로 되돌리면 붉는데, 그 되돌림은 #8과 #12를 함께 무너뜨리므로 가장 먼저
+//     나오는 실패는 왕복 단정의 "이어받기 왕복: waited for this and it never
+//     happened"(고르는 컨트롤 자체가 사라졌다)이다.
 //   목록 목표 말줄임 — WorkstreamListRoute의 목표 span에서 `line-clamp-2`를
 //     `truncate`로 되돌린다. 단정이 "1줄로 그려졌다"로 실패한다.
 //
@@ -117,6 +139,10 @@ const privateHostId = "00000000-0000-7000-8000-000000000604";
 // 피커가 여러 선택지를 담은 화면을 아무도 본 적이 없었다(MOMO-679 M3).
 const runnerHostId = "00000000-0000-7000-8000-000000000605";
 const spareHostId = "00000000-0000-7000-8000-000000000606";
+// 네 번째. 이름이 긴 호스트다: v1의 버튼 N개 형태에서는 이 이름이 좁은 판에서
+// 전폭 버튼이 되면서 **가장 긴 이름이 가장 큰 강조**를 가져갔다(2R H2). 폭이
+// 이름을 따라가지 않는다는 주장은 이름 길이가 제각각인 줄에서만 증명된다.
+const longNameHostId = "00000000-0000-7000-8000-000000000607";
 
 const proveRedRuns = process.env.WORKSTREAM_GATE_PROVE_RED_RUNS === "1";
 const proveRedResume = process.env.WORKSTREAM_GATE_PROVE_RED_RESUME === "1";
@@ -263,6 +289,17 @@ const hosts = [
     ownerMemberId: viewerId,
     type: "app",
     displayName: "성재 예비 맥미니",
+    capabilities: { pty: true },
+    createdAtMs: 0,
+    online: true,
+  },
+  {
+    id: longNameHostId,
+    workspaceId,
+    scope: "workspace",
+    ownerMemberId: aliceId,
+    type: "workd",
+    displayName: "빌드 팜 러너 03 (서울 리전 상시 대기)",
     capabilities: { pty: true },
     createdAtMs: 0,
     online: true,
@@ -758,119 +795,327 @@ async function assertGoalFold(page) {
 }
 
 /**
- * 피커의 위계와 폭 (MOMO-679 M3).
+ * 열린 피커의 DOM 모양을 한 번에 읽어온다. 세 곳(형태 단정·진행 중 단정·좁은 판
+ * 단정)이 같은 것을 재므로 읽는 코드도 하나여야 한다.
  *
- * 세 가지를 픽셀과 계산된 스타일로 잰다. 클래스 이름을 읽는 단정은 이 셋 중
- * 어느 것도 재지 못한다: variant가 바뀌어도 셋 다 그대로일 수 있고, 반대로
- * 클래스가 그대로여도 라벨 하나가 폭을 흔들 수 있다.
- *
- *   - 결정 버튼이 그것을 접는 버튼보다 무겁다. 열린 토글은 채움이 없고
- *     (ghost), 호스트 버튼은 채움이 있다. v1은 둘 다 outline이었다.
- *   - 그룹 라벨이 스크린리더 전용이 아니다. 눈에 보이는 텍스트가 있고,
- *     그룹은 그것을 aria-labelledby로 되짚는다.
- *   - **형제 버튼이 움직이지 않는다.** 하나를 눌러 진행 상태로 만든 뒤 나머지
- *     둘의 좌표를 다시 재고, 1px이라도 움직이면 실패다. 이것이 M3의 실제
- *     피해였다 — `flex-wrap justify-end`에서 라벨이 바뀌면 아직 포인터가 있는
- *     자리의 형제가 미끄러진다.
+ * 칠해진 컨트롤을 세는 것이 핵심이다. 클래스 이름을 읽는 단정은 variant가
+ * 바뀌어도 통과할 수 있고, 반대로 클래스가 그대로여도 채움이 사라질 수 있다.
  */
-async function assertPickerHierarchy(page, closedToggleFill) {
+const readPicker = () => {
+  const group = document.querySelector(
+    '[data-testid="workstream-continue-targets"]'
+  );
+  const toggle = document.querySelector(
+    '[data-testid="workstream-continue-toggle"]'
+  );
+  const select = document.querySelector(
+    '[data-testid="workstream-continue-host-select"]'
+  );
+  const confirm = document.querySelector(
+    '[data-testid="workstream-continue-confirm"]'
+  );
+  const labelId = group?.getAttribute("aria-labelledby") ?? null;
+  const label = labelId === null ? null : document.getElementById(labelId);
+  const transparent = (value) =>
+    value === null || value === "rgba(0, 0, 0, 0)" || value === "transparent";
+  const box = (node) => {
+    if (node === null) return null;
+    const rect = node.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      bottom: Math.round(rect.bottom),
+      right: Math.round(rect.right),
+    };
+  };
+  return {
+    role: group?.getAttribute("role") ?? null,
+    groupId: group?.getAttribute("id") ?? null,
+    srOnlyLabel: group?.getAttribute("aria-label") ?? null,
+    labelId,
+    labelText: label?.textContent?.trim() ?? null,
+    labelVisible: label !== null && label.getBoundingClientRect().width > 0,
+    labelFor: label?.getAttribute("for") ?? null,
+    controls: toggle?.getAttribute("aria-controls") ?? null,
+    toggleFill: toggle ? getComputedStyle(toggle).backgroundColor : null,
+    toggleClass: toggle?.className ?? null,
+    toggleLabel: toggle?.textContent?.trim() ?? null,
+    selectId: select?.getAttribute("id") ?? null,
+    selectValue: select === null ? null : select.value,
+    selectDisabled: select === null ? null : select.disabled,
+    selectFill: select ? getComputedStyle(select).backgroundColor : null,
+    selectRects: select === null ? 0 : select.getClientRects().length,
+    options:
+      select === null
+        ? []
+        : Array.from(select.options).map((option) => ({
+            value: option.value,
+            label: option.textContent ?? "",
+          })),
+    confirmLabel: confirm?.textContent?.trim() ?? null,
+    confirmName: confirm?.getAttribute("aria-label") ?? null,
+    confirmBusy: confirm?.getAttribute("aria-busy") ?? null,
+    confirmDisabled: confirm === null ? null : confirm.disabled,
+    confirmOpacity: confirm ? getComputedStyle(confirm).opacity : null,
+    confirmHostId: confirm?.getAttribute("data-host-id") ?? null,
+    // 그룹 안에서 칠해진 컨트롤의 수. 하나여야 한다: 결정은 하나다.
+    filled:
+      group === null
+        ? []
+        : Array.from(group.querySelectorAll("button, select"))
+            .filter(
+              (node) => !transparent(getComputedStyle(node).backgroundColor)
+            )
+            .map((node) => node.getAttribute("data-testid")),
+    groupBox: box(group),
+    selectBox: box(select),
+    confirmBox: box(confirm),
+  };
+};
+
+/**
+ * 피커의 형태와 위계 (MOMO-679 M3, 2R H2).
+ *
+ *   - 고르는 일은 플랫폼 `<select>` 한 줄이 진다. 라벨은 그 select를 `for`로
+ *     가리키는 진짜 `<label>`이고, 옵션은 서버가 준 자격 호스트 그대로다.
+ *   - 결정은 채움 버튼 하나가 진다. 그룹 안에서 칠해진 컨트롤은 정확히 하나다 —
+ *     N개의 동급 채움은 아무것도 강조하지 않는다(skill §8).
+ *   - 열린 토글은 ghost로 물러나고 라벨이 `호스트 선택 닫기`로 바뀐다. 닫는
+ *     버튼이 여는 버튼과 같은 이름이면 `aria-expanded`와 어긋난다.
+ */
+async function assertPickerShape(page, closedToggleFill, expectedTargets, where) {
   // 채움을 재기 전에 포인터를 치우고 전환이 끝나기를 기다린다. 방금 누른 토글
   // 위에 커서가 남아 있으면 `hover:bg-surface-hover`가 잡히고, 150ms짜리
   // `transition-colors` 중간이면 지워지는 중인 이전 채움이 잡힌다 — 둘 다 이
-  // 단정이 물으려는 것(어느 버튼이 결정인가)과 무관한 값이다.
+  // 단정이 물으려는 것(어느 컨트롤이 결정인가)과 무관한 값이다.
   await page.mouse.move(0, 0);
   await settle(page);
-  const shape = await page.evaluate(() => {
-    const group = document.querySelector(
-      '[data-testid="workstream-continue-targets"]'
-    );
-    const toggle = document.querySelector(
-      '[data-testid="workstream-continue-toggle"]'
-    );
-    const hosts = Array.from(
-      document.querySelectorAll('[data-testid="workstream-continue-host"]')
-    );
-    const labelId = group?.getAttribute("aria-labelledby") ?? null;
-    const label = labelId === null ? null : document.getElementById(labelId);
-    return {
-      role: group?.getAttribute("role") ?? null,
-      labelId,
-      labelText: label?.textContent?.trim() ?? null,
-      labelVisible:
-        label !== null && label.getBoundingClientRect().width > 0,
-      srOnlyLabel: group?.getAttribute("aria-label") ?? null,
-      controls: toggle?.getAttribute("aria-controls") ?? null,
-      groupId: group?.getAttribute("id") ?? null,
-      toggleFill: toggle ? getComputedStyle(toggle).backgroundColor : null,
-      toggleClass: toggle?.className ?? null,
-      hostFills: hosts.map((node) => getComputedStyle(node).backgroundColor),
-      boxes: hosts.map((node) => {
-        const box = node.getBoundingClientRect();
-        return {
-          hostId: node.getAttribute("data-host-id"),
-          x: Math.round(box.x),
-          y: Math.round(box.y),
-          width: Math.round(box.width),
-        };
-      }),
-    };
-  });
+  const shape = await page.evaluate(readPicker);
 
   if (shape.role !== "group" || shape.labelId === null || shape.labelText === null) {
     throw new Error(
-      `피커 위계: 호스트 줄이 이름을 가진 그룹이 아니다 (${JSON.stringify(shape)})`
+      `피커 형태: 호스트 폼이 이름을 가진 그룹이 아니다 (${JSON.stringify(shape)})`
     );
   }
   if (!shape.labelVisible) {
     throw new Error(
-      `피커 위계: 그룹 라벨이 화면에 없다. 스크린리더만 무엇을 고르는 중인지 안다 (${shape.labelText})`
+      `피커 형태: 그룹 라벨이 화면에 없다. 스크린리더만 무엇을 고르는 중인지 안다 (${shape.labelText})`
     );
   }
   if (shape.srOnlyLabel !== null) {
     throw new Error(
-      `피커 위계: 보이는 라벨과 aria-label이 둘 다 있다. 이름이 둘이면 하나는 곧 거짓말이 된다 (${shape.srOnlyLabel})`
+      `피커 형태: 보이는 라벨과 aria-label이 둘 다 있다. 이름이 둘이면 하나는 곧 거짓말이 된다 (${shape.srOnlyLabel})`
+    );
+  }
+  if (shape.labelFor === null || shape.labelFor !== shape.selectId) {
+    throw new Error(
+      `피커 형태: 라벨이 고르는 컨트롤에 묶이지 않았다 (for ${shape.labelFor}, select ${shape.selectId})`
     );
   }
   if (shape.controls === null || shape.controls !== shape.groupId) {
     throw new Error(
-      `피커 위계: 토글이 자기가 여는 그룹을 가리키지 않는다 (aria-controls ${shape.controls}, 그룹 ${shape.groupId})`
+      `피커 형태: 토글이 자기가 여는 그룹을 가리키지 않는다 (aria-controls ${shape.controls}, 그룹 ${shape.groupId})`
     );
   }
-  // 채움의 유무로 잰다. 열린 토글은 배경이 없고(ghost), 호스트 버튼은 있다.
+  if (shape.toggleLabel !== "호스트 선택 닫기") {
+    throw new Error(
+      `피커 형태: 열린 토글의 이름이 아직 여는 이름이다 (${shape.toggleLabel}). aria-expanded=true와 어긋난다`
+    );
+  }
+  const optionIds = shape.options.map((option) => option.value);
+  if (JSON.stringify(optionIds) !== JSON.stringify(expectedTargets)) {
+    throw new Error(
+      `피커 형태: 선택지가 서버의 자격 호스트와 다르다 (${JSON.stringify(optionIds)})`
+    );
+  }
+  if (shape.selectValue !== expectedTargets[0]) {
+    throw new Error(
+      `피커 형태: 아무것도 고르지 않은 폼이다 (value ${shape.selectValue}). 기본값이 없으면 확정 버튼이 무엇을 확정하는지 화면에 없다`
+    );
+  }
+  // 채움의 유무로 잰다. 열린 토글은 배경이 없고(ghost), 확정 버튼은 있다.
   if (shape.toggleFill === closedToggleFill) {
     throw new Error(
-      `피커 위계: 토글이 열리고도 같은 무게다 (${shape.toggleFill} / ${shape.toggleClass}). 결정이 호스트 버튼으로 옮겨갔으면 토글은 물러나야 한다`
+      `피커 형태: 토글이 열리고도 같은 무게다 (${shape.toggleFill} / ${shape.toggleClass}). 결정이 확정 버튼으로 옮겨갔으면 토글은 물러나야 한다`
     );
   }
   const transparent = (value) =>
     value === null || value === "rgba(0, 0, 0, 0)" || value === "transparent";
   if (!transparent(shape.toggleFill)) {
     throw new Error(
-      `피커 위계: 열린 토글이 아직 칠해져 있다 (${shape.toggleFill})`
+      `피커 형태: 열린 토글이 아직 칠해져 있다 (${shape.toggleFill})`
     );
   }
-  for (const fill of shape.hostFills) {
-    if (transparent(fill)) {
-      throw new Error(
-        `피커 위계: 호스트 버튼이 채움 없이 서 있다 (${JSON.stringify(shape.hostFills)}). 이 줄에서 되돌리기 가장 어려운 버튼이 가장 가벼우면 안 된다`
-      );
-    }
-  }
-  if (shape.hostFills.some((fill) => fill !== shape.hostFills[0])) {
+  if (
+    shape.filled.length !== 1 ||
+    shape.filled[0] !== "workstream-continue-confirm"
+  ) {
     throw new Error(
-      `피커 위계: 같은 선택지들이 서로 다른 무게다 (${JSON.stringify(shape.hostFills)})`
+      `피커 형태: 그룹 안에서 칠해진 컨트롤이 ${shape.filled.length}개다 (${JSON.stringify(shape.filled)}). 결정은 하나이고, N개의 동급 채움은 아무것도 강조하지 않는다`
     );
   }
   console.log(
-    `picker: 라벨 "${shape.labelText}", 호스트 ${shape.boxes.length}개, 폭 ${shape.boxes
-      .map((box) => box.width)
-      .join("/")}`
+    `picker ${where}: 라벨 "${shape.labelText}", 선택지 ${shape.options.length}개, ` +
+      `select ${shape.selectBox?.width}px, 확정 버튼 ${shape.confirmBox?.width}px, 그룹 높이 ${shape.groupBox?.height}px`
+  );
+  return shape;
+}
+
+/** 사람이 재는 것과 같은 폭·높이 상한. tokens: label 16 + gap 4 + h-control 32 + gap 8 + h-control-sm 28. */
+const PICKER_GROUP_HEIGHT_MAX = 96;
+
+/**
+ * 좁은 판에서도 같은 형태다 (2R H2).
+ *
+ * 게이트가 1440 한 줄에서만 피커를 보던 것이 2R H2의 원인이었다: 그 폭에서는
+ * 어떤 형태든 한 줄에 들어가므로, 무엇이 쌓이는지 아무도 볼 수 없었다. 여기서
+ * 재는 것은 **호스트 수와 무관한 높이**다 — 선택지가 넷이든 마흔이든 `<select>`
+ * 한 줄과 버튼 한 줄이므로 그룹 높이가 같다. v1의 버튼 N개 형태는 이 폭에서
+ * 줄마다 하나씩 쌓이면서 높이가 선택지 수를 따라간다.
+ */
+async function assertNarrowPicker(browser) {
+  const state = newState("member");
+  // 이 표면에는 pane이 없으므로 pane 측정 폭에 가장 가까운 판을 만든다: 600px
+  // 창에서 사이드바 240을 뺀 상세 열이 360px, 좌우 여백을 뺀 내용이 328px로,
+  // 두 번째 호출자의 262px과 같은 자릿수다. 그 262px 자체는
+  // gate:my-sessions가 진짜 pane 안에서 잰다.
+  const context = await browser.newContext({
+    viewport: { width: 600, height: 800 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, state);
+  await login(page);
+  await page.goto(`${origin}/#/workstreams/${activeWorkstreamId}`);
+  await claim("좁은 판 피커", () =>
+    page.getByTestId("workstream-continue-toggle").waitFor({ timeout: 15_000 })
+  );
+  const toggle = page.getByTestId("workstream-continue-toggle");
+  const closedToggleFill = await toggle.evaluate(
+    (node) => getComputedStyle(node).backgroundColor
+  );
+  await toggle.click();
+  await claim("좁은 판 피커", () =>
+    page
+      .getByTestId("workstream-continue-host-select")
+      .waitFor({ timeout: 10_000 })
+  );
+  const shape = await assertPickerShape(
+    page,
+    closedToggleFill,
+    [longNameHostId, liveHostId, spareHostId, runnerHostId],
+    "600"
   );
 
-  // 진행 상태로 만들었을 때 형제가 움직이지 않는가. 진행 중인 순간의 기하가
-  // 대상이므로 요청을 붙잡아 세운 채로 재고, 놓아줄 때는 원장에 아무것도 쓰지
-  // 않도록 끊는다 — 이 단정은 왕복이 아니라 폭에 대한 것이고, 여기서 이어받기가
-  // 성사되면 바로 아래의 왕복 단정이 잴 것을 잃는다.
+  // 이 단정이 실제로 좁은 판을 재고 있는가. 넓은 판에서는 어떤 형태든 통과한다.
+  if (shape.groupBox === null || shape.groupBox.width > 400) {
+    throw new Error(
+      `좁은 판 피커: 그룹이 ${shape.groupBox?.width}px다. 이 폭에서는 무엇이든 한 줄에 들어가므로 단정이 아무것도 재지 않는다`
+    );
+  }
+  if (shape.options.length < 3) {
+    throw new Error(
+      `좁은 판 피커: 선택지가 ${shape.options.length}개다. 쌓이는지 아닌지는 셋 이상에서만 보인다`
+    );
+  }
+  const longest = shape.options.reduce(
+    (max, option) => Math.max(max, option.label.length),
+    0
+  );
+  if (longest < 20) {
+    throw new Error(
+      `좁은 판 피커: 가장 긴 호스트 이름이 ${longest}자다. 폭이 이름을 따라가지 않는다는 주장은 긴 이름에서만 증명된다`
+    );
+  }
+  if (shape.groupBox.height > PICKER_GROUP_HEIGHT_MAX) {
+    throw new Error(
+      `좁은 판 피커: 선택지 ${shape.options.length}개가 그룹을 ${shape.groupBox.height}px로 키웠다 (상한 ${PICKER_GROUP_HEIGHT_MAX}). 호스트마다 제 줄을 가지면 폭이 가장 큰 변별자가 되고, 이름이 긴 호스트가 가장 큰 컨트롤을 갖는다`
+    );
+  }
+  if (shape.selectRects !== 1) {
+    throw new Error(
+      `좁은 판 피커: 고르는 컨트롤이 ${shape.selectRects}줄이다. 한 줄이어야 선택지 수와 높이가 무관하다`
+    );
+  }
+  if (shape.confirmBox === null || shape.confirmBox.right > shape.groupBox.right) {
+    throw new Error(
+      `좁은 판 피커: 확정 버튼이 그룹 밖으로 나갔다 (버튼 우단 ${shape.confirmBox?.right}, 그룹 우단 ${shape.groupBox.right})`
+    );
+  }
+  if (shape.confirmBox.width >= shape.groupBox.width) {
+    throw new Error(
+      `좁은 판 피커: 확정 버튼이 전폭이 됐다 (${shape.confirmBox.width}px / 그룹 ${shape.groupBox.width}px). 전폭 채움은 §8이 금지한 iOS 폼이다`
+    );
+  }
+  await assertNoHorizontalScroll(page, "picker at 600");
+  console.log(
+    `narrow picker: 그룹 ${shape.groupBox.width}x${shape.groupBox.height}px, 선택지 ${shape.options.length}개(최장 ${longest}자), 확정 버튼 ${shape.confirmBox.width}px`
+  );
+  await context.close();
+}
+
+/** WCAG 상대 휘도. 게이트 안에서 재는 이유는 §3의 대비표가 토큰 쌍만 알기 때문이다. */
+function relativeLuminance([r, g, b]) {
+  const channel = (value) => {
+    const v = value / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  );
+}
+
+function contrastRatio(fg, bg) {
+  const a = relativeLuminance(fg);
+  const b = relativeLuminance(bg);
+  const [hi, lo] = a > b ? [a, b] : [b, a];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * 진행 중인 확정 버튼 (2R H1).
+ *
+ * 네 가지를 진행 중인 그 순간에 잰다. 요청을 붙잡아 세운 채로 재고, 놓아줄 때는
+ * 원장에 아무것도 쓰지 않도록 끊는다.
+ *
+ *   - disabled가 아니다. 진행 중인 쓰기는 관측 가능한 것이지 불가용한 것이
+ *     아니다(tokens §5b, plugins/model.ts).
+ *   - **라벨 대비가 AA다.** 합성해서 잰다: `disabled:opacity-50`은 계산된
+ *     color/background-color를 바꾸지 않으므로, 그 둘만 읽는 단정은 v1도
+ *     통과시킨다. 실제로 화면에 그려지는 색은 버튼이 자기 배후 위에 알파로
+ *     합성된 것이고, 그 값이 v1에서 라이트 2.20:1 / 다크 3.23:1이었다.
+ *   - **Enter로 눌렀을 때 포커스가 남는다.** Chromium은 포커스된 요소가
+ *     disabled가 되는 순간 blur한다. 이것이 H1의 실제 피해였다.
+ *   - 폭과 좌표가 진행 전후로 같다(MOMO-676 M-3의 상설 아이콘 자리).
+ *
+ * 실패 경로의 포커스도 여기서 닫는다: 요청이 끊겨 오류가 뜬 뒤에도 포커스는
+ * 문서 최상단이 아니라 사람이 쥐고 있던 그 버튼에 있어야 한다.
+ */
+async function assertBusyAffordance(browser, scheme) {
+  const state = newState("member");
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    reducedMotion: "reduce",
+    colorScheme: scheme,
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, state);
+  await login(page);
+  await page.goto(`${origin}/#/workstreams/${activeWorkstreamId}`);
+  await claim("진행 중 버튼", () =>
+    page.getByTestId("workstream-continue-toggle").waitFor({ timeout: 15_000 })
+  );
+  await page.getByTestId("workstream-continue-toggle").click();
+  const confirm = page.getByTestId("workstream-continue-confirm");
+  await claim("진행 중 버튼", () => confirm.waitFor({ timeout: 10_000 }));
+  await page.mouse.move(0, 0);
+  await settle(page);
+  const before = await page.evaluate(readPicker);
+
   let release = () => {};
   const held = new Promise((resolveHold) => {
     release = resolveHold;
@@ -879,66 +1124,143 @@ async function assertPickerHierarchy(page, closedToggleFill) {
     await held;
     await route.abort();
   });
-  const first = page.getByTestId("workstream-continue-host").first();
-  await first.click();
-  await claim("피커 위계", () =>
+
+  // 키보드로 누른다. 마우스 클릭은 Chromium이 blur한 결과를 감추기 쉽다 —
+  // 눌린 버튼이 disabled가 되면 포커스는 어차피 <body>지만, 애초에 포인터
+  // 사용자는 포커스를 보지 않는다. H1이 실제로 다친 사람은 키보드 사용자다.
+  await confirm.focus();
+  await page.keyboard.press("Enter");
+  await claim("진행 중 버튼", () =>
     page.waitForFunction(
       () =>
         document.querySelector(
-          '[data-testid="workstream-continue-host"][data-busy]'
+          '[data-testid="workstream-continue-confirm"][data-busy]'
         ) !== null,
       undefined,
       { timeout: 10_000 }
     )
   );
-  const moved = await page.evaluate((before) => {
-    const now = Array.from(
-      document.querySelectorAll('[data-testid="workstream-continue-host"]')
-    ).map((node) => {
-      const box = node.getBoundingClientRect();
-      return {
-        hostId: node.getAttribute("data-host-id"),
-        x: Math.round(box.x),
-        y: Math.round(box.y),
-        width: Math.round(box.width),
-      };
-    });
-    return before
-      .map((was, index) => ({ was, now: now[index] }))
-      .filter(
-        (pair) =>
-          pair.now === undefined ||
-          pair.was.x !== pair.now.x ||
-          pair.was.y !== pair.now.y ||
-          pair.was.width !== pair.now.width
+
+  const busy = await page.evaluate(() => {
+    /** "rgb(a, b, c)" / "rgba(a, b, c, α)" -> { rgb, alpha }. */
+    const parse = (value) => {
+      const match = String(value).match(
+        /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/
       );
-  }, shape.boxes);
-  if (moved.length > 0) {
+      if (match === null) return null;
+      return {
+        rgb: [Number(match[1]), Number(match[2]), Number(match[3])],
+        alpha: match[4] === undefined ? 1 : Number(match[4]),
+      };
+    };
+    // 버튼이 실제로 어떤 색 위에 합성되는지. `rgba(0,0,0,0)`을 색으로 읽으면
+    // 검정 배후 위에서 재게 되고, 그 숫자는 화면의 것이 아니다.
+    const opaqueBehind = (node) => {
+      let current = node.parentElement;
+      while (current !== null) {
+        const fill = parse(getComputedStyle(current).backgroundColor);
+        if (fill !== null && fill.alpha > 0.99) return fill.rgb;
+        current = current.parentElement;
+      }
+      return [255, 255, 255];
+    };
+    const node = document.querySelector(
+      '[data-testid="workstream-continue-confirm"]'
+    );
+    const style = getComputedStyle(node);
+    const alpha = Number(style.opacity);
+    const backdrop = opaqueBehind(node);
+    const blend = (color) =>
+      color === null
+        ? null
+        : color.rgb.map(
+            (value, index) => alpha * value + (1 - alpha) * backdrop[index]
+          );
+    return {
+      disabled: node.disabled,
+      ariaBusy: node.getAttribute("aria-busy"),
+      ariaLabel: node.getAttribute("aria-label"),
+      opacity: alpha,
+      // 화면에 실제로 그려지는 두 색. 버튼은 자기 배경과 글자를 함께 그린 뒤
+      // opacity로 배후 위에 합성되므로, 둘 다 같은 배후와 섞인다.
+      fill: blend(parse(style.backgroundColor)),
+      ink: blend(parse(style.color)),
+      spinner:
+        node.querySelector(".spinner-busy") !== null ||
+        node.querySelector("svg") !== null,
+      focused:
+        document.activeElement?.getAttribute("data-testid") ?? "<body>",
+      selectDisabled: document.querySelector(
+        '[data-testid="workstream-continue-host-select"]'
+      )?.disabled,
+    };
+  });
+
+  // 대비를 **먼저** 잰다. disabled 하나로 끝내면 붉은 증명이 숫자를 내놓지 않고,
+  // 이 단정이 존재하는 이유가 바로 그 숫자다(2R H1: 라이트 2.20 / 다크 3.23).
+  const ratio = contrastRatio(busy.ink, busy.fill);
+  if (busy.disabled === true) {
     throw new Error(
-      `피커 위계: 하나를 누르자 버튼들이 움직였다 (${JSON.stringify(moved)}). 포인터가 아직 그 자리에 있다`
+      `진행 중 버튼(${scheme}): 진행 중인 버튼이 disabled다 (라벨 대비 ${ratio.toFixed(2)}:1, opacity ${busy.opacity}, 포커스 ${busy.focused}). 진행 중인 쓰기는 관측 가능한 것이지 불가용한 것이 아니다 (tokens.md §5b)`
+    );
+  }
+  if (busy.ariaBusy !== "true") {
+    throw new Error(
+      `진행 중 버튼(${scheme}): aria-busy가 없다 (${busy.ariaBusy})`
+    );
+  }
+  if (!busy.ariaLabel?.includes("중")) {
+    throw new Error(
+      `진행 중 버튼(${scheme}): 접근성 이름이 진행을 말하지 않는다 (${busy.ariaLabel})`
+    );
+  }
+  if (busy.opacity < 0.999) {
+    throw new Error(
+      `진행 중 버튼(${scheme}): 진행 중 라벨이 opacity ${busy.opacity}로 흐려졌다`
+    );
+  }
+  if (ratio < 4.5) {
+    throw new Error(
+      `진행 중 버튼(${scheme}): 진행 중 라벨 대비가 ${ratio.toFixed(2)}:1이다 (AA 4.5). 그것이 유일한 진행 신호일 때 disabled:opacity-50이 정확히 이 일을 한다`
+    );
+  }
+  if (busy.focused !== "workstream-continue-confirm") {
+    throw new Error(
+      `진행 중 버튼(${scheme}): Enter를 누른 직후 포커스가 ${busy.focused}로 갔다. Chromium은 포커스된 요소가 disabled가 되는 순간 blur한다`
+    );
+  }
+  if (busy.selectDisabled !== true) {
+    throw new Error(
+      `진행 중 버튼(${scheme}): 요청이 나가 있는데 대상 선택이 아직 열려 있다. 진짜로 불가용한 쪽은 이쪽이다`
+    );
+  }
+  const after = await page.evaluate(readPicker);
+  if (JSON.stringify(before.confirmBox) !== JSON.stringify(after.confirmBox)) {
+    throw new Error(
+      `진행 중 버튼(${scheme}): 누르자 버튼이 움직였다 (${JSON.stringify(before.confirmBox)} -> ${JSON.stringify(after.confirmBox)}). 상설 아이콘 자리가 사라졌다`
     );
   }
   console.log(
-    `picker: 진행 중에도 ${shape.boxes.length}개 버튼의 좌표와 폭이 모두 그대로다`
+    `busy(${scheme}): enabled, opacity ${busy.opacity}, 라벨 대비 ${ratio.toFixed(2)}:1, 포커스 ${busy.focused}, 폭 ${after.confirmBox.width}px 고정`
   );
+
+  // 끊어서 실패시킨다. 실패해도 포커스는 사람이 쥐고 있던 자리에 남는다.
+  // (unroute 하지 않는다: 붙잡아 둔 라우트가 abort로 끝나기 전에 핸들러를
+  // 떼면 그 요청을 두 번 처리하게 된다. 컨텍스트가 곧 닫히므로 필요도 없다.)
   release();
-  await claim("피커 위계", () =>
-    page.waitForFunction(
-      () =>
-        document.querySelector(
-          '[data-testid="workstream-continue-host"][data-busy]'
-        ) === null,
-      undefined,
-      { timeout: 10_000 }
-    )
+  await claim("진행 중 버튼", () =>
+    page.getByTestId("workstream-continue-error").waitFor({ timeout: 10_000 })
   );
-  await page.unroute("**/resume");
-  // 끊긴 요청은 실패로 끝나므로 피커는 그대로 열려 있고, 원장은 손대지 않았다.
-  if ((await page.getByTestId("workstream-continue-host").count()) !== 3) {
+  const afterFailure = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "<body>"
+  );
+  if (afterFailure === "<body>") {
     throw new Error(
-      "피커 위계: 폭을 재는 동안 이어받기가 성사돼 버렸다. 아래 왕복 단정이 잴 것이 남지 않는다"
+      `진행 중 버튼(${scheme}): 실패한 이어받기가 포커스를 문서 최상단으로 떨어뜨렸다`
     );
   }
+  console.log(`busy(${scheme}): 실패 뒤에도 포커스는 ${afterFailure}에 남는다`);
+  await context.close();
 }
 
 /** No surface in this shell may make the document scroll sideways (MOMO-610). */
@@ -1233,39 +1555,39 @@ async function assertListAndHistory(browser) {
     (node) => getComputedStyle(node).backgroundColor
   );
   await toggle.click();
-  const targets = page.getByTestId("workstream-continue-host");
-  await claim("이어받기 왕복", () => targets.first().waitFor({ timeout: 10_000 }));
-  const targetIds = await targets.evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute("data-host-id"))
-  );
-  // 셋: workspace scope 하나, 읽는 사람 소유의 member scope 하나, 그리고 v1부터
+  const hostSelect = page.getByTestId("workstream-continue-host-select");
+  await claim("이어받기 왕복", () => hostSelect.waitFor({ timeout: 10_000 }));
+
+  // ---- 8. 피커 형태와 위계 (MOMO-679 M3, 2R H2) -----------------------------
+  // 넷: workspace scope 둘, 읽는 사람 소유의 member scope 하나, 그리고 v1부터
   // 있던 것. 죽은 소스 호스트·꺼진 러너·남의 개인 호스트는 여전히 빠진다.
   // 순서는 `workSessionResumeTargets`의 것이다(displayName localeCompare "ko",
-  // 한글이 라틴 앞). 순서까지 적어두는 이유는 아래 왕복 단정이 "첫 번째"가 아니라
+  // 한글이 라틴 앞). 순서까지 적어두는 이유는 아래 왕복 단정이 기본값이 아니라
   // 이름으로 호스트를 고르기 때문이다: 정렬이 바뀌면 여기서 먼저 실패한다.
-  const expectedTargets = [liveHostId, spareHostId, runnerHostId];
-  if (JSON.stringify(targetIds) !== JSON.stringify(expectedTargets)) {
-    throw new Error(
-      `이어받기 왕복: host eligibility drifted from the server boundary (${JSON.stringify(targetIds)})`
-    );
-  }
-
-  // ---- 8. 피커 위계와 폭 (MOMO-679 M3) -------------------------------------
-  await assertPickerHierarchy(page, closedToggleFill);
+  const expectedTargets = [
+    longNameHostId,
+    liveHostId,
+    spareHostId,
+    runnerHostId,
+  ];
+  await assertPickerShape(page, closedToggleFill, expectedTargets, "1280");
 
   const resumeResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       response.url().toLowerCase().includes("/resume")
   );
-  // 첫 번째가 아니라 이름으로 고른다. 자격 호스트가 셋이 된 뒤로 "첫 번째"는
-  // 정렬 순서에 달린 값이고, 이 단정이 확인하려는 것은 **누른 그 호스트**가
-  // 요청에 실린다는 것이다.
-  await page
-    .locator(
-      `[data-testid="workstream-continue-host"][data-host-id="${liveHostId}"]`
-    )
-    .click();
+  // 기본값이 아니라 이름으로 고른다. 이 단정이 확인하려는 것은 **고른 그
+  // 호스트**가 요청에 실린다는 것이고, 기본값을 그대로 확정하면 폼이 선택을
+  // 나르는지 아니면 언제나 첫 번째를 보내는지 구별되지 않는다.
+  await hostSelect.selectOption(liveHostId);
+  const confirm = page.getByTestId("workstream-continue-confirm");
+  if ((await confirm.getAttribute("data-host-id")) !== liveHostId) {
+    throw new Error(
+      `이어받기 왕복: 확정 버튼이 고른 호스트를 따라가지 않는다 (${await confirm.getAttribute("data-host-id")})`
+    );
+  }
+  await confirm.click();
   await claim("이어받기 왕복", () => resumeResponse);
   if (
     state.resumeSessionId !== agentRunId ||
@@ -1480,13 +1802,26 @@ async function assertDenialAsymmetry(browser) {
     page.getByTestId("workstream-run-list").waitFor({ timeout: 15_000 })
   );
   await page.getByTestId("workstream-continue-toggle").click();
-  await page.getByTestId("workstream-continue-host").first().click();
+  const refused = page.getByTestId("workstream-continue-confirm");
+  await claim("비멤버 404/403 분기", () => refused.waitFor({ timeout: 10_000 }));
+  await refused.focus();
+  await page.keyboard.press("Enter");
   const error = page.getByTestId("workstream-continue-error");
   await claim("비멤버 404/403 분기", () => error.waitFor({ timeout: 10_000 }));
   const errorCopy = await text(error);
   if (!errorCopy.includes("멤버")) {
     throw new Error(
       `비멤버 404/403 분기: a 403 did not name membership (${errorCopy})`
+    );
+  }
+  // 거절도 결과다. 서버가 거절한 뒤 키보드 사용자가 문서 최상단에 있으면 그
+  // 문장을 읽으러 되돌아올 길이 없다(2R H1의 나머지 절반).
+  const refusedFocus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "<body>"
+  );
+  if (refusedFocus === "<body>") {
+    throw new Error(
+      "비멤버 404/403 분기: 거절된 이어받기가 포커스를 문서 최상단으로 떨어뜨렸다"
     );
   }
   if ((await page.getByTestId("workstream-continue-done").count()) !== 0) {
@@ -1616,19 +1951,26 @@ async function captureScreens(browser) {
     shots.push(detailShot);
 
     // 호스트 피커가 열린 화면. 다중 호스트를 아무도 본 적이 없었다는 것이 M3
-    // 지적의 절반이었고(픽스처가 언제나 하나만 줬다), 위계와 라벨과 폭은 셋 다
-    // 이 화면에서만 눈으로 확인된다.
+    // 지적의 절반이었고(픽스처가 언제나 하나만 줬다), 위계와 라벨과 채움은 셋 다
+    // 이 화면에서만 눈으로 확인된다. 넓은 판과 좁은 판을 함께 찍는다: 2R H2가
+    // 지적한 것이 정확히 "넓은 판에서만 본 형태"였다.
     await page.getByTestId("workstream-continue-toggle").click();
     await claim("캡처", () =>
       page
-        .getByTestId("workstream-continue-host")
-        .first()
+        .getByTestId("workstream-continue-host-select")
         .waitFor({ timeout: 15_000 })
     );
     await settle(page);
     const pickerShot = resolve(outDir, `picker-${scheme}.png`);
     await page.screenshot({ path: pickerShot });
     shots.push(pickerShot);
+
+    await page.setViewportSize({ width: 600, height: 800 });
+    await settle(page);
+    const narrowShot = resolve(outDir, `picker-narrow-${scheme}.png`);
+    await page.screenshot({ path: narrowShot });
+    shots.push(narrowShot);
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     // 끝난 목표. 새로 생긴 문장이 사는 유일한 자리이고, 리뷰가 읽을 수 있어야 한다:
     // 완료 칩 아래에서 이어받기가 사라지되 실행 이력은 남는다는 것이 이 화면의 주장
@@ -1666,6 +2008,11 @@ async function main() {
       await assertClosedGoal(browser);
       await assertLedgerRoundTrip(browser);
       await assertDenialAsymmetry(browser);
+      await assertNarrowPicker(browser);
+      // 양쪽 스킴에서 잰다. 2R H1의 두 숫자(라이트 2.20:1, 다크 3.23:1)는 한쪽만
+      // 재서는 나오지 않는 값이고, 다크에서 더 나빴다.
+      await assertBusyAffordance(browser, "light");
+      await assertBusyAffordance(browser, "dark");
       captured = await captureScreens(browser);
     } finally {
       await browser.close();
@@ -1686,12 +2033,15 @@ async function main() {
     "           sharing one right edge, one tab stop on the filter, no takeover offered"
   );
   console.log(
-    "           under a finished goal, a host picker whose siblings hold still while one is"
+    "           under a finished goal, a host picker that is one select plus one filled"
   );
   console.log(
-    "           busy, a two-line goal fold in the list, and the ledger walking to a session"
+    "           button at 600 as well as 1280, a busy confirm that stays enabled, keeps AA"
   );
-  console.log("           and back to the same goal.");
+  console.log(
+    "           in both schemes and keeps the caret, a two-line goal fold in the list, and"
+  );
+  console.log("           the ledger walking to a session and back to the same goal.");
   console.log(`screenshots: ${captured.join(", ")}`);
 }
 
