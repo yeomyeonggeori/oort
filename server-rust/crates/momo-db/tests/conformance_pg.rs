@@ -1,0 +1,125 @@
+//! DB-backed B0 conformance (orchestrator docker gate for ADR-0145 B안).
+//!
+//! Proves the two things the DB-free unit tests cannot:
+//!  1. the Rust migration runner reproduces the Swift bootstrap schema on a
+//!     fresh `pgvector/pgvector:pg18` DB — all 59 files apply in place, unmodified
+//!     (incl. the `vector`/`pg_trgm`/`pgcrypto` extensions and the DDL the whole
+//!     enforcement layer lives in);
+//!  2. `with_tenant_tx` actually sets the `app.workspace_id` RLS GUC (the single
+//!     wiring point for invariant #6).
+//!
+//! `#[ignore]` — needs a throwaway superuser DB. Run:
+//!   DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
+//!     cargo test -p momo-db --test conformance_pg -- --ignored --nocapture
+//!
+//! Full cross-tenant *data* red (as `momo_app` with seeded rows) is a B1
+//! conformance concern (needs multi-table seed); B0 proves apply + GUC wiring.
+
+use momo_db::migrate::{default_migrations_dir, discover_migrations, run_migrations};
+use momo_db::sqlx;
+use momo_db::{with_tenant_tx, DbError, PgPool};
+use uuid::Uuid;
+
+async fn superuser_pool() -> PgPool {
+    let url = std::env::var("DATABASE_URL")
+        .expect("set DATABASE_URL to a fresh pgvector/pg18 superuser DB");
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
+        .await
+        .expect("connect to conformance DB")
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB"]
+async fn migration_runner_applies_all_59_and_matches_schema() {
+    let pool = superuser_pool().await;
+    let mut conn = pool.acquire().await.expect("acquire");
+
+    // discovery = exactly the 59 versioned files, contiguous
+    let migs = discover_migrations(&default_migrations_dir()).expect("discover");
+    assert_eq!(migs.len(), 59, "expected 59 migrations, got {}", migs.len());
+
+    // THE runner — applies 001..059 in place (incl. pgvector 028). A psql
+    // backslash/COPY-FROM-STDIN file, or an ordering/role dependency, would
+    // surface here as a real finding.
+    run_migrations(&mut conn, &default_migrations_dir())
+        .await
+        .expect("all 59 migrations apply on a fresh pgvector/pg18 DB");
+
+    // outbox table + full enum (emit.rs OutboxKind must be a subset of these)
+    let outbox_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.outbox') IS NOT NULL")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert!(outbox_exists, "outbox table must exist");
+
+    let labels: Vec<String> =
+        sqlx::query_scalar("SELECT unnest(enum_range(NULL::outbox_kind))::text")
+            .fetch_all(&mut *conn)
+            .await
+            .unwrap();
+    for want in ["broadcast", "agent_job", "push_candidate", "webhook_delivery"] {
+        assert!(
+            labels.iter().any(|l| l == want),
+            "outbox_kind missing '{want}'; got {labels:?}"
+        );
+    }
+
+    // gapless seq backstop (invariant #4): app-code row-lock + DB UNIQUE
+    let seq_uniq: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='message_seq_uniq')",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap();
+    assert!(seq_uniq, "message_seq_uniq UNIQUE(channel_id, seq) must exist");
+    let channel_seq: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.channel_seq') IS NOT NULL")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert!(channel_seq, "channel_seq table must exist");
+
+    // invariant #6 backstop lives in the DB: many tables carry FORCE RLS
+    let forced: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class WHERE relkind='r' AND relforcerowsecurity",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap();
+    assert!(
+        forced >= 30,
+        "expected many FORCE-RLS tables (D2 #6), got {forced}"
+    );
+
+    println!("conformance: 59 migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB"]
+async fn with_tenant_tx_sets_the_rls_guc() {
+    let pool = superuser_pool().await;
+    let ws = Uuid::from_u128(0x0000_1234_5678_9abc_def0_1234_5678_9abc);
+
+    let read: String = with_tenant_tx(&pool, ws, move |c| {
+        Box::pin(async move {
+            let v: String =
+                sqlx::query_scalar("SELECT current_setting('app.workspace_id', true)")
+                    .fetch_one(&mut *c)
+                    .await
+                    .map_err(DbError::from)?;
+            Ok(v)
+        })
+    })
+    .await
+    .expect("tenant tx");
+
+    assert_eq!(
+        read,
+        ws.to_string(),
+        "with_tenant_tx must set app.workspace_id to the bound workspace id"
+    );
+    println!("conformance: with_tenant_tx bound app.workspace_id = {read}");
+}
