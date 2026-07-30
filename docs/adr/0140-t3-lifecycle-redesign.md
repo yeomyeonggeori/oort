@@ -104,7 +104,7 @@ adversarial-review가 세 라운드 돌면서 결함의 **성격이 같았다**.
 
 ### D3. 정산 단일 문 — "과금 종료"를 상태 전이에서 분리하고 트리거로 봉인한다
 
-- **A (권고)**: 모든 T3 과금 종료는 `t3_terminate(workspace_id, session_id, reason)` **하나**를 지난다. 이 함수가 D2 사다리로 잠그고 → 열린 interval 마감 → usage 정산 → 차감 append(멱등) → cloud slot 해제 → host revoke → durable destroy intent → outbox 이벤트를 **한 트랜잭션에** 수행한다.
+- **A (권고)**: 모든 T3 과금 종료는 `t3_terminate(workspace_id, session_id, reason)` **하나**를 지난다. 이 함수가 D2 사다리로 잠그고 → 열린 interval 마감 → usage 정산 → 차감 append(멱등) → cloud slot 해제 → host revoke → durable destroy intent를 **한 트랜잭션에** 수행한다. *(정오표 2026-07-31, 성재 승인: 원문의 “outbox 이벤트” 포함 기술은 과기술 — 053/058 실측상 t3_terminate는 outbox를 쓰지 않으며 브로드캐스트는 route 층 `emit_outbox` 몫. Swift·Rust 구현 모두 실측 기준으로 일관.)*
 - **핵심: 규약이 아니라 강제.** `work_host_usage`에 BEFORE UPDATE 트리거를 걸어, `settled_at`을 NULL에서 값으로 바꾸는 UPDATE는 `t3_terminate`가 세운 트랜잭션 로컬 플래그(`SET LOCAL momo.t3_settlement = on`)가 있을 때만 통과시킨다. **우회 경로는 발견되는 것이 아니라 즉시 실패한다.**
 - **과금 종료 시점의 정본**: `reason ∈ {ended, idle_timeout, orphaned, provider_missing, destroyed}`. 세션이 `orphaned`로 갈 때 정산하는 현행 의미(호스트가 죽었으므로 더 이상 적립되지 않는다)를 **명시 결정으로 승격**한다 — 지금은 sweep 코드에만 있다. 계보 재개가 원본을 닫을 때 정산하지 않는 것은 그때 이미 `reason='orphaned'`로 정산됐기 때문이며, **`t3_terminate`의 멱등성이 그 의존을 불변식이 아니라 사실로 만든다**(두 번 불러도 안전하므로 계보 경로도 그냥 부른다).
 - B — 호출자 규약 유지 + 리뷰로 감시: 세 라운드 동안 실패한 방법이다. **기각.**
