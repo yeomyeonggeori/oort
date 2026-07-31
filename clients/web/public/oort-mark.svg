@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!--
+    oort 마크, 배경 없는 판 (B4.4). 앱 밖에서 쓰는 사본이다: 문서, 배포 페이지,
+    링크 미리보기처럼 이 클라이언트의 CSS가 닿지 않는 자리.
+
+    앱 **안에서는 이 파일을 쓰지 않는다.** 셸과 로그인은
+    src/design/brand/OortMark.tsx를 쓰고, 거기서는 색이 currentColor라 부모가 정한
+    토큰을 그대로 물려받는다. 같은 path를 두 벌 두는 대신 한쪽은 인라인 컴포넌트,
+    한쪽은 파일로 나눈 이유는 닿는 색이 다르기 때문이다.
+
+    배경이 없으니 밝은 판과 어두운 판 양쪽에 얹힐 수 있고, 그래서 획 색만 스킴을
+    따라간다. 값은 tokens.css의 --accent 두 스킴을 옮긴 것이다(라이트 #a54c08,
+    다크 #f0a850).
+  -->
+  <style>
+    .mark { stroke: #a54c08; }
+    @media (prefers-color-scheme: dark) { .mark { stroke: #f0a850; } }
+  </style>
+  <g class="mark" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9.9 16.92A6.2 6.2 0 1 0 5.93 13.81L4.38 19.88Z"/>
+    <path d="M15.89 5.92A10.4 3.6 -22 0 1 18.08 11.36M6.91 15.88A10.4 3.6 -22 0 1 4.72 10.44"/>
+  </g>
+</svg>

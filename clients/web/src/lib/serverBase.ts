@@ -30,7 +30,7 @@ export type ServerUrlCheck =
   | { ok: false; message: string };
 
 /** Neutral example, never a real host: RFC 2606 reserves example.com. */
-export const SERVER_URL_PLACEHOLDER = "https://momo.example.com";
+export const SERVER_URL_PLACEHOLDER = "https://oort.example.com";
 
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 

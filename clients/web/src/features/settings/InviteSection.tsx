@@ -144,7 +144,7 @@ export function InviteSection({
   const serverBaseUrl = resolveServerBaseUrl();
   const card: InviteCardInput | null = issued
     ? {
-        workspaceName: workspace.data?.name ?? "momo",
+        workspaceName: workspace.data?.name ?? "oort",
         serverBaseUrl,
         code: issued.code,
         expiresAtMs: issued.invite.expiresAtMs,

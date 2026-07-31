@@ -3,7 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>momo</title>
+    <title>oort</title>
+    <!--
+      탭 아이콘은 SVG 한 장이다. 브라우저가 어떤 배율로 그리든 같은 path를 다시
+      그리므로 16/32/48 사본을 두지 않는다. apple-touch-icon만 래스터인데, iOS 홈
+      화면이 SVG를 읽지 않기 때문이고 같은 SVG에서 180px로 떠낸 것이다.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!--
+      브라우저 크롬(주소창·상태바)이 앱 표면과 같은 종이를 쓰게 한다. 값은
+      src/design/tokens.css의 --surface 두 스킴을 옮긴 것이고, 팔레트가 바뀌면
+      여기도 같이 바뀐다.
+    -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f6f3" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17161a" />
   </head>
   <body>
     <div id="root"></div>

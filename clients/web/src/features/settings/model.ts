@@ -92,7 +92,7 @@ export const CLOUD_TARGET = "cloud";
 export function workHostTypeLabel(type: string): string {
   if (type === "app") return "데스크톱 앱";
   if (type === "workd") return "workd 데몬";
-  if (type === "cloud") return "momo Cloud";
+  if (type === "cloud") return "oort Cloud";
   return type;
 }
 
@@ -238,7 +238,7 @@ export function autoTargetLabel(
   hosts: AutoTargetHost[]
 ): string {
   if (!target) return "고른 대상 없음";
-  if (target === CLOUD_TARGET) return "momo Cloud";
+  if (target === CLOUD_TARGET) return "oort Cloud";
   const host = hosts.find((h) => h.id.toLowerCase() === target.toLowerCase());
   if (!host) return "등록 목록에 없는 호스트";
   return host.revokedAtMs ? `${host.displayName} (해지됨)` : host.displayName;
@@ -372,7 +372,7 @@ export function inviteCardText(input: InviteCardInput): string {
   return [
     `${input.workspaceName} 워크스페이스에 초대합니다.`,
     "",
-    "1. momo 앱을 설치하고 아래 링크를 엽니다.",
+    "1. oort 앱을 설치하고 아래 링크를 엽니다.",
     `   ${buildJoinLink(input.serverBaseUrl, input.code)}`,
     "",
     "2. 링크가 앱에서 열리지 않으면 직접 입력하세요.",

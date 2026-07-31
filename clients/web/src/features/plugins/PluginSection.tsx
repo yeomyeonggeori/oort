@@ -559,7 +559,7 @@ function PluginDetailPanel({
       </div>
 
       <dl className="flex flex-col gap-2">
-        {detail.publisherName && <DetailRow label="배포자" value={detail.publisherVerified ? `${detail.publisherName}, momo 레지스트리가 확인함` : detail.publisherName} />}
+        {detail.publisherName && <DetailRow label="배포자" value={detail.publisherVerified ? `${detail.publisherName}, oort 레지스트리가 확인함` : detail.publisherName} />}
         {detail.license && <DetailRow label="라이선스" value={detail.license} />}
         {detail.provenanceURL && <DetailLink label="출처" href={detail.provenanceURL} />}
         {detail.termsURL && <DetailLink label="이용약관" href={detail.termsURL} />}
@@ -1095,7 +1095,7 @@ function PluginScopeConsentDialog({
                     className="flex h-control shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-line bg-surface-hover px-2 text-meta font-semibold text-ink"
                     data-testid="plugin-scope-momo-mark"
                   >
-                    momo
+                    oort
                   </span>
                   <ArrowRight className="size-4 text-ink-muted" />
                   <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
@@ -1149,7 +1149,7 @@ function PluginScopeConsentDialog({
               없다. */}
           {isGrant && (
             <dl className="flex flex-col gap-2 border-t border-line pt-3">
-              {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, momo 레지스트리가 확인함` : consent.plugin.publisherName} />}
+              {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, oort 레지스트리가 확인함` : consent.plugin.publisherName} />}
               {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
               {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
               {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}
