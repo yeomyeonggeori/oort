@@ -219,6 +219,90 @@ pub(crate) fn settle<T>(
     }
 }
 
+// ---------------------------------------------------------------------------
+// B2.6 — the same two patterns for the agent surface
+//
+// The agent routes speak `DbError`, not `T3Error`: nothing they touch is a T3
+// lifecycle object, and borrowing `T3Error` would have put agent-run outcomes
+// through a table written for cloud-host settlement.
+// ---------------------------------------------------------------------------
+
+/// [`Rejectable`]'s agent-side twin: `Ok(Err(_))` is a rejection (the
+/// transaction still commits, because every rejection is returned before the
+/// first write), `Err(_)` is a failure that rolls back.
+pub(crate) type DbRejectable<T> = Result<Result<T, ApiError>, DbError>;
+
+/// A plain tenant transaction whose closure speaks [`DbError`].
+pub(crate) async fn agent_tenant_tx<T, F>(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    body: F,
+) -> Result<T, DbError>
+where
+    T: Send,
+    F: for<'c> FnOnce(&'c mut PgConnection) -> futures_box::BoxFuture<'c, Result<T, DbError>>
+        + Send,
+{
+    momo_db::with_tenant_tx(pool, workspace_id, body).await
+}
+
+/// Collapse a [`DbRejectable`] into the handler's own result.
+pub(crate) fn settle_db<T>(context: &str, outcome: DbRejectable<T>) -> Result<T, ApiError> {
+    match outcome {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(rejection)) => Err(rejection),
+        Err(error) => Err(ApiError::internal(context, error)),
+    }
+}
+
+/// Milliseconds since the epoch — the `*AtMs` wire convention every DTO in this
+/// API uses (Swift `Int64(date.timeIntervalSince1970 * 1000)`).
+pub(crate) fn epoch_ms(at: chrono::DateTime<chrono::Utc>) -> i64 {
+    at.timestamp_millis()
+}
+
+/// Project an `agent_run` row onto the wire DTO (Swift `runProjectionSQL`,
+/// `AgentRunRoutes.swift:800-840`).
+///
+/// `triggerSummary` is the same `CASE` the projection SQL computes, kept here so
+/// the two run-shaped surfaces cannot drift: a work run shows its title, a
+/// mention run shows its prompt, and anything else shows nothing rather than
+/// leaking a raw input blob into a list view.
+pub(crate) fn run_response(run: &momo_agent::AgentRunRow) -> crate::dto::AgentRunResponse {
+    const SUMMARY_LIMIT: usize = 200;
+    let summary = match run.input.get("type").and_then(serde_json::Value::as_str) {
+        Some("work") => run.input.get("title").and_then(serde_json::Value::as_str),
+        _ => match run.input.get("surface").and_then(serde_json::Value::as_str) {
+            Some("mention") => run.input.get("prompt").and_then(serde_json::Value::as_str),
+            _ => None,
+        },
+    }
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(|value| value.chars().take(SUMMARY_LIMIT).collect::<String>());
+
+    crate::dto::AgentRunResponse {
+        id: run.id.to_string(),
+        workspace_id: run.workspace_id.to_string(),
+        agent_member_id: run.agent_member_id.to_string(),
+        channel_id: run.channel_id.to_string(),
+        trigger_message_id: run.trigger_message_id.map(|id| id.to_string()),
+        trigger_summary: summary,
+        parent_run_id: run.parent_run_id.map(|id| id.to_string()),
+        status: run.status.as_db_label().to_string(),
+        step_count: run.step_count,
+        max_steps: run.max_steps,
+        depth: run.depth,
+        input: run.input.clone(),
+        output: run.output.clone(),
+        error: run.error.clone(),
+        started_at_ms: run.started_at.map(epoch_ms),
+        finished_at_ms: run.finished_at.map(epoch_ms),
+        created_at_ms: epoch_ms(run.created_at),
+        updated_at_ms: epoch_ms(run.updated_at),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

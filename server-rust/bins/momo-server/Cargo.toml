@@ -27,6 +27,12 @@ momo-messaging = { path = "../../crates/momo-messaging" }
 # emits them in the same transaction (momo-t3 lib.rs, "It owns no outbox SQL").
 momo-t3 = { path = "../../crates/momo-t3" }
 momo-outbox = { path = "../../crates/momo-outbox" }
+# B2.6 (AgentGateway + LLM billing). `momo-agent` owns every `agent_run` and
+# `usage_ledger` statement this batch mounts; the gateway job lease is
+# `momo-outbox`'s (it is columns on an outbox row) and the final timeline message
+# goes through `momo-messaging`'s send path — so this route layer still owns no
+# SQL of its own beyond the two membership predicates it shares with Swift.
+momo-agent = { path = "../../crates/momo-agent" }
 # B2.4: the signed work-host REQUEST authenticator hashes the raw body with the
 # shared `momo-wire` helper, so the server's digest and the daemon's signer are
 # one implementation — the exact drift Swift had between two copies of the
@@ -38,6 +44,7 @@ tokio = { workspace = true, features = ["net", "signal", "time"] }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

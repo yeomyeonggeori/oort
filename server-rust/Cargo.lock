@@ -1053,6 +1053,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-agent"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "momo-db",
+ "momo-outbox",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "momo-auth"
 version = "0.0.0"
 dependencies = [
@@ -1167,7 +1181,9 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "base64",
+ "chrono",
  "ed25519-dalek",
+ "momo-agent",
  "momo-auth",
  "momo-db",
  "momo-messaging",

@@ -34,6 +34,10 @@ pub enum ConfigError {
     MissingJwtSecret,
     #[error("{0} must be a number")]
     NotANumber(&'static str),
+    /// A security contract the operator asked for but did not supply the input
+    /// for. Names the environment **key**, never the value.
+    #[error("invalid security config: {0}")]
+    InvalidSecurity(&'static str),
 }
 
 /// Everything the server needs to boot.
@@ -52,6 +56,170 @@ pub struct Config {
     /// T3 (momo Cloud) settings — **off unless the operator turns them on**
     /// (B2.2).
     pub t3: T3Settings,
+    /// AgentGateway settings — **`worker` mode unless the operator selects
+    /// `gateway`** (B2.6).
+    pub agent_gateway: AgentGatewaySettings,
+}
+
+/// MOMO-325 native gateway mode (Swift `AgentGatewayMode`, `Config.swift:150-155`).
+///
+/// `worker` is the product default: AgentWorker claims `agent_job` outbox rows
+/// and calls the provider directly, and the gateway callback surface does not
+/// exist. `gateway` is the Hermes platform-adapter path this batch implements —
+/// the server owns the authoritative run/ledger shell and accepts status/result
+/// callbacks over REST.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentGatewayMode {
+    #[default]
+    Worker,
+    Gateway,
+}
+
+impl AgentGatewayMode {
+    /// Swift `AgentGatewayMode.parse` (:150-155): trimmed, lowercased, and
+    /// **anything unrecognised falls back to `worker`** — a typo must not
+    /// silently expose the callback surface.
+    pub fn parse(raw: Option<&str>) -> AgentGatewayMode {
+        match raw
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("gateway") => AgentGatewayMode::Gateway,
+            _ => AgentGatewayMode::Worker,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentGatewayMode::Worker => "worker",
+            AgentGatewayMode::Gateway => "gateway",
+        }
+    }
+}
+
+/// Process-level AgentGateway configuration (Swift `AgentGatewayConfig`,
+/// `Config.swift:468-492`).
+///
+/// `secret` is the **deprecated** shared secret, kept only so an existing Hermes
+/// deployment can finish rotating to per-agent bearers. It is inert unless all
+/// three of mode/flag/quality hold ([`AgentGatewaySettings::legacy_secret_enabled`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentGatewaySettings {
+    pub mode: AgentGatewayMode,
+    /// `AGENT_GATEWAY_SECRET`. Never logged, never echoed; used for a
+    /// constant-time comparison and for redacting itself out of gateway-reported
+    /// error text.
+    pub secret: String,
+    /// `MOMO_ALLOW_LEGACY_GATEWAY_SECRET`.
+    pub allow_legacy_secret: bool,
+}
+
+impl AgentGatewaySettings {
+    pub fn from_env() -> AgentGatewaySettings {
+        AgentGatewaySettings {
+            mode: AgentGatewayMode::parse(env("AGENT_GATEWAY_MODE").as_deref()),
+            secret: env("AGENT_GATEWAY_SECRET").unwrap_or_default(),
+            allow_legacy_secret: bool_flag(env("MOMO_ALLOW_LEGACY_GATEWAY_SECRET").as_deref()),
+        }
+    }
+
+    /// Whether the gateway callback surface exists at all (Swift `enabled`).
+    pub fn enabled(&self) -> bool {
+        self.mode == AgentGatewayMode::Gateway
+    }
+
+    /// Whether `secret` is a real value rather than a placeholder (Swift
+    /// `secretConfigured`).
+    pub fn secret_configured(&self) -> bool {
+        !is_unsafe_secret(&self.secret)
+    }
+
+    /// The legacy shared-secret header is accepted only when gateway mode is on,
+    /// the operator explicitly opted in, **and** the secret is not a placeholder
+    /// (Swift `legacySecretEnabled` :489-491).
+    ///
+    /// The third condition is the one that matters: without it, setting the
+    /// opt-in flag with an unset `AGENT_GATEWAY_SECRET` would make the empty
+    /// string a valid credential for every callback on the instance.
+    pub fn legacy_secret_enabled(&self) -> bool {
+        self.enabled() && self.allow_legacy_secret && self.secret_configured()
+    }
+
+    /// Swift `validateSecurityForBoot`'s first check (`Config.swift:163-171`):
+    /// asking for the legacy path without a usable secret is a **boot error**,
+    /// not a warning — the operator asked for a credential that cannot exist.
+    pub fn boot_error(&self) -> Option<&'static str> {
+        if self.enabled() && self.allow_legacy_secret && !self.secret_configured() {
+            Some("AGENT_GATEWAY_SECRET is required when MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1")
+        } else {
+            None
+        }
+    }
+}
+
+/// Swift `AgentProviderConfig.boolFlag` (`Config.swift:679-686`).
+pub fn bool_flag(raw: Option<&str>) -> bool {
+    matches!(
+        raw.map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Swift `AgentProviderConfig.isUnsafeSecret` (`Config.swift:646-657`), verbatim.
+///
+/// Ported rather than reduced to "is it empty" because the placeholder list is
+/// what catches the actual failure mode: a `.env.example` copied to `.env` with
+/// `change-me` left in place boots, looks configured, and accepts a secret the
+/// whole internet knows.
+pub fn is_unsafe_secret(value: &str) -> bool {
+    let lowered = value.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return true;
+    }
+    const RESERVED: [&str; 11] = [
+        "password",
+        "secret",
+        "token",
+        "default",
+        "dev",
+        "test",
+        "staging",
+        "prod",
+        "production",
+        "admin",
+        "momo",
+    ];
+    if RESERVED.contains(&lowered.as_str()) {
+        return true;
+    }
+    [
+        "change-me",
+        "changeme",
+        "dev-insecure",
+        "placeholder",
+        "example",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
+/// Constant-time string comparison (Swift `ConstantTime.equals`,
+/// `Auth/ConstantTime.swift:13-22`).
+///
+/// Used for the legacy gateway secret. A `==` here would leak the secret one byte
+/// at a time to an attacker who can measure the response, which is precisely the
+/// attack a shared secret with no other binding is exposed to.
+pub fn constant_time_eq(lhs: &str, rhs: &str) -> bool {
+    let (lhs, rhs) = (lhs.as_bytes(), rhs.as_bytes());
+    if lhs.len() != rhs.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (left, right) in lhs.iter().zip(rhs.iter()) {
+        diff |= left ^ right;
+    }
+    diff == 0
 }
 
 /// Process-level T3 configuration (B2.2).
@@ -167,6 +335,14 @@ impl Config {
             .or_else(|| env("MOMO_JWT_SECRET"))
             .ok_or(ConfigError::MissingJwtSecret)?;
 
+        // B2.6: fail the boot, do not degrade. Swift's `validateSecurityForBoot`
+        // throws here too — an instance that advertises a credential path it
+        // cannot honour is worse than one that refuses to start.
+        let agent_gateway = AgentGatewaySettings::from_env();
+        if let Some(message) = agent_gateway.boot_error() {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
@@ -175,6 +351,7 @@ impl Config {
             environment: env_or("MOMO_ENV", "local"),
             realtime_ws_url: realtime_ws_url_from_env()?,
             t3: T3Settings::from_env(),
+            agent_gateway,
         })
     }
 }
@@ -358,6 +535,127 @@ mod tests {
         assert_eq!(choose_log_filter(None, Some("debug")), "debug");
         assert_eq!(choose_log_filter(Some("warn"), Some("debug")), "warn");
         assert_eq!(choose_log_filter(None, Some(" info ")), "info");
+    }
+
+    // -- B2.6 agent gateway ------------------------------------------------
+
+    fn gateway(mode: AgentGatewayMode, secret: &str, allow: bool) -> AgentGatewaySettings {
+        AgentGatewaySettings {
+            mode,
+            secret: secret.to_string(),
+            allow_legacy_secret: allow,
+        }
+    }
+
+    /// The default must be the closed one: an operator who set nothing has no
+    /// gateway callback surface at all.
+    #[test]
+    fn the_gateway_is_off_unless_the_operator_spells_gateway() {
+        assert_eq!(
+            AgentGatewaySettings::default().mode,
+            AgentGatewayMode::Worker
+        );
+        assert!(!AgentGatewaySettings::default().enabled());
+        for raw in [None, Some("worker"), Some("Gatway"), Some(""), Some("1")] {
+            assert_eq!(AgentGatewayMode::parse(raw), AgentGatewayMode::Worker);
+        }
+        for raw in ["gateway", " GATEWAY ", "Gateway"] {
+            assert_eq!(
+                AgentGatewayMode::parse(Some(raw)),
+                AgentGatewayMode::Gateway
+            );
+        }
+    }
+
+    /// All three conditions, and the third is the security-relevant one.
+    #[test]
+    fn the_legacy_secret_needs_mode_optin_and_a_real_value() {
+        let real = "R7dGqk2mV9xPz1sLb4nJ8yTw3hCf6uEa";
+        assert!(gateway(AgentGatewayMode::Gateway, real, true).legacy_secret_enabled());
+        assert!(
+            !gateway(AgentGatewayMode::Worker, real, true).legacy_secret_enabled(),
+            "worker mode has no gateway surface to authenticate against"
+        );
+        assert!(
+            !gateway(AgentGatewayMode::Gateway, real, false).legacy_secret_enabled(),
+            "the deprecated path requires an explicit opt-in"
+        );
+        assert!(
+            !gateway(AgentGatewayMode::Gateway, "", true).legacy_secret_enabled(),
+            "an empty secret must never become a valid credential"
+        );
+        assert!(
+            !gateway(AgentGatewayMode::Gateway, "change-me-please", true).legacy_secret_enabled(),
+            "a placeholder must never become a valid credential"
+        );
+    }
+
+    /// Asking for a credential path with no usable secret is fatal at boot, not
+    /// a warning that leaves the instance half-open.
+    #[test]
+    fn an_optin_without_a_secret_is_a_boot_error() {
+        assert_eq!(
+            gateway(AgentGatewayMode::Gateway, "changeme", true).boot_error(),
+            Some("AGENT_GATEWAY_SECRET is required when MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1")
+        );
+        // Without the opt-in the missing secret is simply unused, not an error.
+        assert_eq!(
+            gateway(AgentGatewayMode::Gateway, "", false).boot_error(),
+            None
+        );
+        assert_eq!(
+            gateway(AgentGatewayMode::Worker, "", true).boot_error(),
+            None
+        );
+    }
+
+    #[test]
+    fn the_placeholder_list_matches_swift() {
+        for value in [
+            "",
+            "  ",
+            "secret",
+            "PASSWORD",
+            "dev",
+            "prod",
+            "momo",
+            "admin",
+            "token",
+            "default",
+            "test",
+            "staging",
+            "production",
+            "change-me",
+            "xCHANGEMEx",
+            "dev-insecure-key",
+            "my-placeholder",
+            "example-secret",
+        ] {
+            assert!(is_unsafe_secret(value), "{value:?} must be rejected");
+        }
+        for value in ["R7dGqk2mV9xPz1sLb4nJ8yTw3hCf6uEa", "correct horse battery"] {
+            assert!(!is_unsafe_secret(value), "{value:?} must be accepted");
+        }
+    }
+
+    #[test]
+    fn bool_flag_matches_swift() {
+        for raw in ["1", "true", "yes", "on", " TRUE "] {
+            assert!(bool_flag(Some(raw)));
+        }
+        for raw in ["0", "false", "no", "off", "", "maybe"] {
+            assert!(!bool_flag(Some(raw)));
+        }
+        assert!(!bool_flag(None));
+    }
+
+    #[test]
+    fn constant_time_eq_agrees_with_equality() {
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "abd"));
+        assert!(!constant_time_eq("abc", "ab"));
+        assert!(!constant_time_eq("", "a"));
+        assert!(constant_time_eq("", ""));
     }
 
     #[test]
