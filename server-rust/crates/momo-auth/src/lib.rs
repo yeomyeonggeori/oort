@@ -45,10 +45,18 @@
 //! than in the route layer because "which routes an agent credential may reach"
 //! is a property of the credential, not of any one handler.
 
+//! B4 adds the **realtime** half of the credential story ([`realtime`]): the
+//! short-lived Centrifugo *connection* token, plus the `token`-row predicate the
+//! subscribe proxy re-checks on every subscribe
+//! ([`token_store::has_active_realtime_credential`]). Both live here for the
+//! same reason the rest does — one is a signing key this crate already owns a
+//! sibling of, and the other is `token` SQL, which no other crate may write.
+
 pub mod agent_bearer;
 pub mod agent_scope;
 pub mod issue;
 pub mod jwt;
+pub mod realtime;
 pub mod token_store;
 pub mod work_host_request;
 pub mod work_host_store;
@@ -70,10 +78,16 @@ pub use issue::{
 pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
 };
+pub use realtime::{
+    realtime_info_string, sign_centrifugo_connection, CentrifugoConnectionClaims,
+    IssuedRealtimeToken, RealtimeTokenMeta, CONNECTION_TOKEN_TTL_SECONDS, REALTIME_INFO_SCHEMA,
+    REALTIME_META_SCHEMA,
+};
 pub use token_store::{
-    carries_privileged_scope, record_session_token, revoke_privileged_session_tokens, revoke_token,
-    token_state, without_privileged_scopes, RevokeOutcome, TokenRejection, TokenState,
-    PRIVILEGED_SCOPES, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    carries_privileged_scope, has_active_realtime_credential, record_session_token,
+    revoke_privileged_session_tokens, revoke_token, token_state, without_privileged_scopes,
+    RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE,
+    SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{
     consume_work_host_request_id, load_work_host_signing_credential, WorkHostSigningCredential,

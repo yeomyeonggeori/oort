@@ -30,7 +30,7 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use momo_db::PgPool;
 
-use crate::config::{AgentGatewaySettings, T3Settings};
+use crate::config::{AgentGatewaySettings, RealtimeSettings, T3Settings};
 
 /// Shared handler state. Cheap to clone (pool handle + `Arc`'d strings).
 #[derive(Clone)]
@@ -49,6 +49,11 @@ pub struct AppState {
     /// [`AppState::with_agent_gateway`] says otherwise, so the callback surface
     /// answers 403 on a deployment that never chose it.
     pub agent_gateway: Arc<AgentGatewaySettings>,
+    /// Centrifugo connection-token / subscribe-proxy settings (B4). **Empty**
+    /// unless [`AppState::with_realtime`] says otherwise, so an instance that
+    /// never configured the broker refuses to mint connection tokens and denies
+    /// every subscribe callback rather than half-authorizing one.
+    pub realtime: Arc<RealtimeSettings>,
 }
 
 impl AppState {
@@ -59,6 +64,7 @@ impl AppState {
             realtime_ws_url: Arc::new(realtime_ws_url),
             t3: Arc::new(T3Settings::default()),
             agent_gateway: Arc::new(AgentGatewaySettings::default()),
+            realtime: Arc::new(RealtimeSettings::default()),
         }
     }
 
@@ -73,6 +79,14 @@ impl AppState {
     /// Attach the operator's AgentGateway configuration (B2.6), same rationale.
     pub fn with_agent_gateway(mut self, settings: AgentGatewaySettings) -> Self {
         self.agent_gateway = Arc::new(settings);
+        self
+    }
+
+    /// Attach the operator's Centrifugo configuration (B4), same rationale: the
+    /// default is a realtime rail that cannot be opened, not one opened on a
+    /// guessed secret.
+    pub fn with_realtime(mut self, settings: RealtimeSettings) -> Self {
+        self.realtime = Arc::new(settings);
         self
     }
 }
@@ -122,6 +136,15 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
             post(routes::messages::send).get(routes::messages::history),
+        )
+        // B4 — the client's first authenticated read after login. Without it the
+        // sidebar has nothing and there is no way into a conversation.
+        .route("/v1/workspaces/{ws}/channels", get(routes::channels::list))
+        // B4 — the Centrifugo connection token (Swift mounts it protected too:
+        // `AuthRoutes.addProtected`, :46-49).
+        .route(
+            "/v1/auth/realtime-token",
+            post(routes::realtime::issue_token),
         )
         // messenger breadth (B1.2) — DM, read state, search. All three sit
         // behind the same credential gate as messages: there is no anonymous
@@ -243,6 +266,16 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate",
             post(routes::terminal_attach::validate),
+        )
+        // B4 adds the fourth, and it is public for the same measured reason: the
+        // caller is **Centrifugo**, which holds no bearer at all. It presents the
+        // `X-Centrifugo-Proxy-Secret` static header instead, checked in constant
+        // time inside the handler (Swift mounts it with the same rationale,
+        // `CentrifugoRoutes.swift:35-39`). Putting it behind the bearer
+        // middleware would make the broker permanently unable to ask.
+        .route(
+            "/v1/centrifugo/subscribe",
+            post(routes::realtime::subscribe),
         )
         .merge(protected)
         .with_state(state)

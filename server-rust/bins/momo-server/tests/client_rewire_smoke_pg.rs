@@ -1,0 +1,682 @@
+//! **The web client's real boot sequence, replayed against the real server** (B4).
+//!
+//! Every other smoke in this crate is organised by server surface. This one is
+//! organised by *client*: it issues exactly the calls
+//! `clients/web/src/**` makes, in the order it makes them, with the bodies it
+//! sends — because the gap B4 exists to close was never a missing feature, it
+//! was three surfaces that no server-side test had a reason to ask for.
+//!
+//! The sequence, and where each step is written on the client side:
+//!
+//! | # | call | client |
+//! |---|---|---|
+//! | 1 | `POST /v1/auth/login` | `lib/api.ts:548` |
+//! | 2 | `POST /v1/auth/realtime-token` | `lib/api.ts:698` (centrifuge-js `getToken`) |
+//! | 3 | Centrifugo → `POST /v1/centrifugo/subscribe` for `ch:ws….<CH>` | `lib/realtime.ts:73,736` |
+//! | 4 | `GET /v1/workspaces/{ws}/channels` | `features/workspace/useWorkspace.ts:85` |
+//! | 5 | `GET /v1/workspaces/{ws}/read-state` | `useWorkspace.ts:100` |
+//! | 6 | `GET …/channels/{ch}/messages` | `lib/api.ts:1107` |
+//! | 7 | `POST …/channels/{ch}/messages` | `lib/api.ts:1170` |
+//! | 8 | `PUT …/channels/{ch}/read-state` | `lib/api.ts:1085` |
+//!
+//! Step 3 is the one that needs saying out loud: the *client* never calls the
+//! subscribe proxy — **Centrifugo does**, forwarding the connection token's
+//! `meta` because `infra/centrifugo.json` sets `include_connection_meta`. So the
+//! test plays Centrifugo: it verifies the connection token with the broker's
+//! HMAC key (proving Centrifugo could), pulls `meta` out of it, and posts the
+//! callback with the proxy secret header. Anything less would test a shape this
+//! server invented rather than the one the broker sends.
+//!
+//! The join between the REST half and the realtime half is asserted directly:
+//! the `outbox` row the send writes must name the SAME Centrifugo channel string
+//! the client subscribed to in step 3. A drift there is the failure mode where
+//! everything looks healthy and no message ever arrives.
+//!
+//! `#[ignore]` because it needs a real Postgres. Run:
+//!
+//! ```text
+//! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
+//!   cargo test -p momo-server --test client_rewire_smoke_pg -- --ignored --nocapture
+//! ```
+//!
+//! Harness contract is the one `http_smoke_pg.rs` documents: `DATABASE_URL` is a
+//! superuser (migrations + fixture seeding), the server runs on `momo_app`
+//! (NOBYPASSRLS), and the migration runner is re-runnable so binaries may share
+//! one container.
+
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::Mutex;
+
+use momo_auth::{CentrifugoConnectionClaims, REALTIME_INFO_SCHEMA, REALTIME_META_SCHEMA};
+use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
+use momo_db::sqlx;
+use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use momo_db::sqlx::Row;
+use momo_db::PgPool;
+use momo_messaging::{cent_channel, create_channel, ChannelKind, NewChannel};
+use momo_server::config::RealtimeSettings;
+use momo_server::routes::realtime::PROXY_SECRET_HEADER;
+use momo_server::{build_app, AppState};
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// harness (same contract as http_smoke_pg.rs)
+// ---------------------------------------------------------------------------
+
+const TEST_JWT_SECRET: &str = "client-rewire-app-signing-secret";
+/// Deliberately different from the app secret: the whole point of the second key
+/// is that a broker-side leak cannot mint API access tokens.
+const TEST_CENT_TOKEN_HMAC: &str = "client-rewire-centrifugo-token-secret";
+const TEST_PROXY_SECRET: &str = "client-rewire-proxy-shared-secret";
+const TEST_PASSWORD: &str = "client-rewire-password";
+
+fn database_url() -> String {
+    std::env::var("DATABASE_URL").expect("set DATABASE_URL to a pgvector/pg18 superuser DB")
+}
+
+fn momo_app_password() -> String {
+    std::env::var("MOMO_APP_PASSWORD").unwrap_or_else(|_| "momo_app_dev_pw".to_string())
+}
+
+async fn superuser_pool() -> PgPool {
+    PgPoolOptions::new()
+        .max_connections(8)
+        .connect(&database_url())
+        .await
+        .expect("connect to conformance DB as superuser")
+}
+
+async fn momo_app_pool() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    let options = options.username("momo_app").password(&momo_app_password());
+    PgPoolOptions::new()
+        .max_connections(8)
+        .connect_with(options)
+        .await
+        .expect("connect as momo_app (run bootstrap_roles.sql first)")
+}
+
+fn resolve_psql() -> PathBuf {
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join("psql");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    for candidate in [
+        "/opt/homebrew/opt/libpq/bin/psql",
+        "/usr/local/opt/libpq/bin/psql",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return path;
+        }
+    }
+    panic!("psql client not found on PATH or Homebrew libpq locations");
+}
+
+fn apply_bootstrap_roles() {
+    let path = PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../infra/e2e/bootstrap_roles.sql"
+    ));
+    let status = Command::new(resolve_psql())
+        .arg(database_url())
+        .args(["-v", "ON_ERROR_STOP=1"])
+        .arg("--no-psqlrc")
+        .arg("--quiet")
+        .arg("--single-transaction")
+        .arg("-f")
+        .arg(path)
+        .status()
+        .expect("spawn psql for bootstrap_roles.sql");
+    assert!(status.success(), "bootstrap_roles.sql failed to apply");
+}
+
+fn ensure_schema_and_roles() {
+    static READY: Mutex<bool> = Mutex::new(false);
+    let mut ready = READY.lock().unwrap();
+    if *ready {
+        return;
+    }
+    run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
+        .expect("apply all migrations");
+    apply_bootstrap_roles();
+    *ready = true;
+}
+
+/// Boot the real router with the realtime rail CONFIGURED — the deployed shape,
+/// not the fail-closed default the unit tests exercise.
+async fn start_server(pool: PgPool) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_realtime(RealtimeSettings {
+        cent_token_hmac: Some(TEST_CENT_TOKEN_HMAC.to_string()),
+        cent_proxy_secret: Some(TEST_PROXY_SECRET.to_string()),
+        connection_token_ttl_seconds: momo_auth::CONNECTION_TOKEN_TTL_SECONDS,
+    });
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+// ---------------------------------------------------------------------------
+// fixtures (superuser → bypass RLS)
+// ---------------------------------------------------------------------------
+
+struct Fixture {
+    workspace: Uuid,
+    member: Uuid,
+    email: String,
+    /// The channel the member belongs to (created via the domain crate, so it
+    /// carries its `channel_seq` row and an owner membership).
+    channel: Uuid,
+    /// A channel in the SAME workspace the member is NOT a member of.
+    foreign_channel: Uuid,
+}
+
+async fn seed_member(su: &PgPool, workspace: Uuid, kind: &str) -> Uuid {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, $3::member_kind, $4, $4)",
+    )
+    .bind(member)
+    .bind(workspace)
+    .bind(kind)
+    .bind(member.to_string())
+    .execute(su)
+    .await
+    .expect("seed member");
+    // migration 026: workspace authority is its own row, and every read that
+    // asks "are you in this workspace" goes through it.
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, 'member')",
+    )
+    .bind(workspace)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("seed workspace_membership");
+    member
+}
+
+async fn seed(su: &PgPool, app: &PgPool) -> Fixture {
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(workspace.to_string())
+        .execute(su)
+        .await
+        .expect("seed workspace");
+
+    let member = seed_member(su, workspace, "human").await;
+    let email = format!("{member}@rewire.test");
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, password_hash) \
+         VALUES ($1, $2, $3, momo_password_hash($4))",
+    )
+    .bind(member)
+    .bind(workspace)
+    .bind(&email)
+    .bind(TEST_PASSWORD)
+    .execute(su)
+    .await
+    .expect("seed human");
+
+    let channel = create_channel(
+        app,
+        workspace,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: format!("general-{}", Uuid::new_v4()),
+            topic: Some("도그푸딩".to_string()),
+            created_by: member,
+        },
+    )
+    .await
+    .expect("create channel");
+
+    // A second member owns a channel this member never joined. It exists so the
+    // subscribe proxy has something real to refuse.
+    let stranger = seed_member(su, workspace, "human").await;
+    let foreign = create_channel(
+        app,
+        workspace,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: format!("private-to-someone-else-{}", Uuid::new_v4()),
+            topic: None,
+            created_by: stranger,
+        },
+    )
+    .await
+    .expect("create foreign channel");
+
+    Fixture {
+        workspace,
+        member,
+        email,
+        channel: channel.id,
+        foreign_channel: foreign.id,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the client's own vocabulary
+// ---------------------------------------------------------------------------
+
+/// Verify + decode a connection token exactly as Centrifugo would: HS256 against
+/// `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY` (= `CENT_TOKEN_HMAC`).
+fn decode_connection_token(token: &str, secret: &str) -> CentrifugoConnectionClaims {
+    let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    jsonwebtoken::decode::<CentrifugoConnectionClaims>(
+        token,
+        &jsonwebtoken::DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .expect("Centrifugo must be able to verify the connection token")
+    .claims
+}
+
+/// The subscribe callback Centrifugo sends: the connection's user + the token's
+/// `meta`, forwarded verbatim.
+async fn subscribe_proxy(
+    http: &reqwest::Client,
+    base: &str,
+    proxy_secret: &str,
+    claims: &CentrifugoConnectionClaims,
+    channel: &str,
+) -> (u16, Value) {
+    let response = http
+        .post(format!("{base}/v1/centrifugo/subscribe"))
+        .header(PROXY_SECRET_HEADER, proxy_secret)
+        .json(&json!({
+            "client": Uuid::new_v4().to_string(),
+            "user": claims.sub,
+            "channel": channel,
+            "meta": { "schema": claims.meta.schema, "token_id": claims.meta.token_id },
+        }))
+        .send()
+        .await
+        .expect("subscribe proxy callback");
+    let status = response.status().as_u16();
+    let body = response.json::<Value>().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+fn assert_allowed(body: &Value) {
+    assert!(
+        body.get("result").is_some() && body.get("error").is_none(),
+        "expected an allow envelope, got {body}"
+    );
+}
+
+fn assert_denied(body: &Value, reason: &str) {
+    assert!(body.get("result").is_none(), "expected a deny, got {body}");
+    assert_eq!(body["error"]["code"], json!(403), "{body}");
+    assert_eq!(body["error"]["message"], json!(reason), "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// the smoke
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_web_clients_boot_channel_and_message_sequence_round_trips() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // -- 1. login (lib/api.ts:548) ----------------------------------------
+    let login: Value = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login")
+        .json()
+        .await
+        .expect("login body");
+    let access = login["accessToken"]
+        .as_str()
+        .expect("accessToken")
+        .to_string();
+    let realtime_ws_url = login["realtimeWebSocketUrl"]
+        .as_str()
+        .expect("ADR-0110: the WS address is the server's answer, never derived");
+    assert!(realtime_ws_url.starts_with("ws"), "{realtime_ws_url}");
+
+    // -- 2. realtime token (centrifuge-js getToken, lib/api.ts:698) -------
+    let token_body: Value = http
+        .post(format!("{base}/v1/auth/realtime-token"))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("realtime-token")
+        .json()
+        .await
+        .expect("realtime token body");
+    assert_eq!(token_body["tokenType"], json!("centrifugo.connection.jwt"));
+    assert!(token_body["ttlSeconds"].as_i64().expect("ttlSeconds") > 0);
+    assert!(
+        token_body["expiresAtMs"].as_i64().expect("expiresAtMs") > 1_700_000_000_000,
+        "expiresAtMs is milliseconds, not seconds: {token_body}"
+    );
+    let connection_token = token_body["token"].as_str().expect("token").to_string();
+
+    // Centrifugo verifies it with ITS key, and only with its key.
+    let claims = decode_connection_token(&connection_token, TEST_CENT_TOKEN_HMAC);
+    assert!(
+        jsonwebtoken::decode::<CentrifugoConnectionClaims>(
+            &connection_token,
+            &jsonwebtoken::DecodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+            &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
+        )
+        .is_err(),
+        "the app JWT secret must not verify a Centrifugo connection token"
+    );
+    assert_eq!(claims.meta.schema, REALTIME_META_SCHEMA);
+    assert!(
+        claims.info.contains(REALTIME_INFO_SCHEMA),
+        "info claim: {}",
+        claims.info
+    );
+    assert_eq!(
+        claims.sub.to_lowercase(),
+        fixture.member.to_string(),
+        "Centrifugo's user id is the member id"
+    );
+
+    // -- 3. Centrifugo asks whether this subscription is allowed ----------
+    let channel_name = cent_channel(fixture.workspace, fixture.channel);
+    let (status, allowed) =
+        subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &channel_name).await;
+    assert_eq!(status, 200, "a proxy decision is always HTTP 200");
+    assert_allowed(&allowed);
+
+    // …and refuses a channel this member never joined. Same workspace, same
+    // credential: only membership differs.
+    let foreign_name = cent_channel(fixture.workspace, fixture.foreign_channel);
+    let (_, denied) =
+        subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &foreign_name).await;
+    assert_denied(&denied, "not a member of this channel");
+
+    // A caller without the shared secret is not Centrifugo. This one IS an HTTP
+    // error, not a deny envelope: it is a transport-level rejection.
+    let forged = http
+        .post(format!("{base}/v1/centrifugo/subscribe"))
+        .json(&json!({"user": claims.sub, "channel": channel_name}))
+        .send()
+        .await
+        .expect("forged callback");
+    assert_eq!(
+        forged.status().as_u16(),
+        401,
+        "network position alone must not authenticate the callback"
+    );
+
+    // An unparseable channel fails closed rather than defaulting to allow.
+    let (_, garbage) = subscribe_proxy(
+        &http,
+        &base,
+        TEST_PROXY_SECRET,
+        &claims,
+        "totally:not-a-momo-channel",
+    )
+    .await;
+    assert_denied(&garbage, "unrecognized channel");
+
+    // -- 4. channel list (useWorkspace.ts:85) -----------------------------
+    let channels: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("channels")
+        .json()
+        .await
+        .expect("channels body");
+    let rows = channels["channels"].as_array().expect("channels array");
+    assert_eq!(
+        rows.len(),
+        1,
+        "the list is the caller's memberships, not the workspace's channels: {channels}"
+    );
+    let row = &rows[0];
+    assert_eq!(row["id"], json!(fixture.channel.to_string()));
+    assert_eq!(row["kind"], json!("public"));
+    assert_eq!(row["muted"], json!(false), "muted is a required bool");
+    assert!(
+        row.get("archivedAtMs").is_none(),
+        "the web sidebar filters on `archivedAtMs === undefined`: {row}"
+    );
+    assert_eq!(row["topic"], json!("도그푸딩"));
+
+    // -- 5. read-state projection (useWorkspace.ts:100) -------------------
+    let read_state: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/read-state",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("read-state")
+        .json()
+        .await
+        .expect("read-state body");
+    let states = read_state["read_states"]
+        .as_array()
+        .expect("snake_case `read_states`, as lib/api.ts:1067 reads it");
+    assert!(
+        states
+            .iter()
+            .any(|entry| entry["channel_id"] == json!(fixture.channel.to_string())),
+        "{read_state}"
+    );
+
+    // -- 6. history before anything was said ------------------------------
+    let messages_url = format!(
+        "{base}/v1/workspaces/{}/channels/{}/messages",
+        fixture.workspace, fixture.channel
+    );
+    let empty: Value = http
+        .get(&messages_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("history")
+        .json()
+        .await
+        .expect("history body");
+    assert_eq!(empty["messages"].as_array().expect("array").len(), 0);
+
+    // -- 7. send (lib/api.ts:1170 — the composer's exact body) ------------
+    let client_msg_id = Uuid::new_v4();
+    let sent = http
+        .post(&messages_url)
+        .bearer_auth(&access)
+        .json(&json!({
+            "clientMsgId": client_msg_id,
+            "type": "text",
+            "body": "도그푸딩 첫 메시지",
+        }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(sent.status().as_u16(), 201);
+    let sent: Value = sent.json().await.expect("send body");
+    assert_eq!(sent["seq"], json!(1));
+    assert_eq!(sent["authorMemberId"], json!(fixture.member.to_string()));
+
+    // THE JOIN: the outbox row the send wrote must name the SAME Centrifugo
+    // channel the client subscribed to in step 3. If these two ever disagree,
+    // every call above still passes and no message is ever delivered.
+    let published_channel: String = sqlx::query(
+        "SELECT payload->>'channel' AS channel \
+           FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("the send emitted exactly one broadcast outbox row")
+    .try_get("channel")
+    .expect("payload.channel");
+    assert_eq!(
+        published_channel, channel_name,
+        "the relay publishes to the channel the subscribe proxy authorized"
+    );
+
+    // -- 8. advance the read cursor (lib/api.ts:1085) ---------------------
+    let advanced: Value = http
+        .put(format!(
+            "{base}/v1/workspaces/{}/channels/{}/read-state",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&access)
+        .json(&json!({ "last_read_seq": 1 }))
+        .send()
+        .await
+        .expect("read cursor")
+        .json()
+        .await
+        .expect("read-state body");
+    assert_eq!(advanced["last_read_seq"], json!(1));
+    assert_eq!(advanced["unread_count"], json!(0));
+
+    // -- 9. history now carries the message, and it round-trips ------------
+    let page: Value = http
+        .get(&messages_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("history")
+        .json()
+        .await
+        .expect("history body");
+    let listed = page["messages"].as_array().expect("array");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["body"], json!("도그푸딩 첫 메시지"));
+    assert_eq!(listed[0]["state"], json!("sent"));
+
+    // -- 10. logout cuts the realtime rail, not just REST ------------------
+    // This is the property the whole `meta.token_id` binding exists for: the
+    // connection token is still cryptographically valid and still inside its
+    // TTL, and the subscribe must stop being authorized anyway.
+    let logout = http
+        .post(format!("{base}/v1/auth/logout"))
+        .bearer_auth(&access)
+        .json(&json!({ "refreshToken": login["refreshToken"] }))
+        .send()
+        .await
+        .expect("logout");
+    assert_eq!(logout.status().as_u16(), 200);
+
+    let still_valid = decode_connection_token(&connection_token, TEST_CENT_TOKEN_HMAC);
+    assert_eq!(still_valid.meta.token_id, claims.meta.token_id);
+    let (_, after_logout) =
+        subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &channel_name).await;
+    assert_denied(&after_logout, "realtime credential is no longer active");
+}
+
+/// An instance that never configured the broker must refuse to mint a connection
+/// token and must refuse every proxy callback — not fall back to a guessed
+/// secret. This boots the SAME router with the default (empty) realtime settings.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_unconfigured_realtime_rail_fails_closed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+
+    // Default AppState: no `with_realtime`.
+    let state = AppState::new(
+        app_pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, build_app(state)).await;
+    });
+    let base = format!("http://{address}");
+    let http = reqwest::Client::new();
+
+    let login: Value = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login")
+        .json()
+        .await
+        .expect("login body");
+    let access = login["accessToken"].as_str().expect("accessToken");
+
+    let token = http
+        .post(format!("{base}/v1/auth/realtime-token"))
+        .bearer_auth(access)
+        .send()
+        .await
+        .expect("realtime-token");
+    assert_eq!(
+        token.status().as_u16(),
+        503,
+        "no CENT_TOKEN_HMAC means no connection token, not one signed with the app key"
+    );
+
+    let callback = http
+        .post(format!("{base}/v1/centrifugo/subscribe"))
+        .header(PROXY_SECRET_HEADER, "anything")
+        .json(&json!({
+            "user": fixture.member.to_string(),
+            "channel": cent_channel(fixture.workspace, fixture.channel),
+        }))
+        .send()
+        .await
+        .expect("callback");
+    assert_eq!(
+        callback.status().as_u16(),
+        401,
+        "an unset CENT_PROXY_SECRET must deny, never accept any header"
+    );
+}

@@ -66,3 +66,7 @@ uuid = { workspace = true }
 momo-wire = { path = "../../crates/momo-wire" }
 ed25519-dalek.workspace = true
 base64.workspace = true
+# B4 client-rewire smoke only: the test plays the part of CENTRIFUGO, so it
+# verifies the connection token with the broker's HMAC key exactly as the broker
+# would. Already in the tree via momo-auth; never linked for a server-side use.
+jsonwebtoken.workspace = true

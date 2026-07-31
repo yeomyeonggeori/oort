@@ -70,8 +70,10 @@ services:
       CENTRIFUGO_LOG_LEVEL: ${CENTRIFUGO_LOG_LEVEL:-info}
       # The mounted config ships a `dev-insecure-...` placeholder for this
       # header. Overriding it here means no committed placeholder secret can
-      # ever reach a deployed stack — even though the subscribe proxy is inert
-      # until the Rust api serves /v1/centrifugo/subscribe (a later batch).
+      # ever reach a deployed stack. **B4: this is now load bearing** — the Rust
+      # api serves /v1/centrifugo/subscribe and rejects any callback that does
+      # not present exactly this value, so the two services must agree or every
+      # subscribe is denied.
       CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS: '{"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}"}'
     ports:
       # Loopback only: the smoke reads /api/history from the host, and nothing
@@ -148,6 +150,11 @@ services:
   #   * HERMES_*/AGENT_*/S3/webhook+provider master keys — no route consumes
   #     them yet, and an unread secret in the environment is pure exposure.
   # Both come back with the batch that implements the feature.
+  #
+  # B4 adds the two Centrifugo keys the api DOES read, and they are the
+  # *authorization* half of the broker, never the publish half: CENT_TOKEN_HMAC
+  # signs connection tokens and CENT_PROXY_SECRET authenticates the subscribe
+  # callback. Neither can publish anything, so invariant #2 is untouched.
   api:
     image: *rust-image
     command: ["api"]
@@ -165,6 +172,11 @@ services:
       # ADR-0110: the ONLY authority for the realtime address handed to clients.
       # No default — a wrong guess silently points every client at nothing.
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
+      # B4 (prod parity :159, :164). Must equal what the centrifugo service above
+      # is given, or the rail fails closed in the two ways it can: a connection
+      # token the broker cannot verify, or a subscribe callback the api 401s.
+      CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
+      CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       # Loopback only (no Caddy in this stack). The NCP smoke drives it over an

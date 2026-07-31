@@ -305,6 +305,64 @@ pub fn without_privileged_scopes(scopes: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The scope an **agent** bearer must carry to hold a realtime connection
+/// (Swift `TokenStore.hasActiveRealtimeCredential` :336 and
+/// `AuthRoutes.realtimeToken` :311-313).
+pub const SCOPE_REALTIME_SUBSCRIBE: &str = "realtime:subscribe";
+
+/// The realtime-credential liveness predicate, kept as a `const` so the unit
+/// test can assert it still names both credential shapes and the
+/// [`SCOPE_REALTIME_SUBSCRIBE`] literal.
+const ACTIVE_REALTIME_CREDENTIAL_SQL: &str = "SELECT EXISTS( \
+       SELECT 1 \
+         FROM token t \
+         JOIN member m \
+           ON m.id = t.actor_member_id \
+          AND m.workspace_id = t.workspace_id \
+          AND m.status = 'active' \
+          AND m.deleted_at IS NULL \
+        WHERE t.id = $1 \
+          AND t.actor_member_id = $2 \
+          AND t.workspace_id = $3 \
+          AND t.revoked_at IS NULL \
+          AND (t.expires_at IS NULL OR t.expires_at > now()) \
+          AND ( \
+            (m.kind = 'human' AND t.kind = 'session' AND t.label = 'access') \
+            OR \
+            (m.kind = 'agent' AND t.kind = 'agent_bearer' \
+             AND 'realtime:subscribe' = ANY(t.scopes)) \
+          ))";
+
+/// Is the credential a Centrifugo connection token was minted from **still
+/// alive**? Ports Swift `TokenStore.hasActiveRealtimeCredential`
+/// (`TokenStore.swift:312-344`) predicate for predicate.
+///
+/// This is the reason a revocation takes effect on the realtime rail at all. A
+/// Centrifugo connection JWT lives for minutes and the broker will happily keep
+/// a connection open for its whole TTL; the subscribe proxy calls this on every
+/// subscribe attempt, so a logged-out session cannot open a *new* subscription
+/// even while its connection token is still cryptographically valid.
+///
+/// It also refuses to let one credential borrow another's liveness: the row must
+/// belong to `member_id` in `workspace_id`, be the member's own credential shape
+/// (a human's session **access** row, or an agent bearer carrying
+/// `realtime:subscribe`), and still be unrevoked and unexpired.
+///
+/// `conn` must already carry the tenant GUC (`momo_db::with_tenant_tx`).
+pub async fn has_active_realtime_credential(
+    conn: &mut PgConnection,
+    token_id: Uuid,
+    member_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(ACTIVE_REALTIME_CREDENTIAL_SQL)
+        .bind(token_id)
+        .bind(member_id)
+        .bind(workspace_id)
+        .fetch_one(&mut *conn)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +464,26 @@ mod tests {
             first, repeat,
             "logout idempotency and the refresh single-use gate both read revoked_now"
         );
+    }
+
+    /// The realtime predicate must keep naming BOTH credential shapes and the
+    /// agent scope literal. Dropping the `label = 'access'` clause would let a
+    /// refresh token hold a realtime connection; dropping the scope clause would
+    /// let any agent bearer subscribe.
+    #[test]
+    fn the_realtime_predicate_names_both_credential_shapes() {
+        for needle in [
+            "kind = 'session'",
+            "t.label = 'access'",
+            "t.kind = 'agent_bearer'",
+            SCOPE_REALTIME_SUBSCRIBE,
+            "t.revoked_at IS NULL",
+            "m.status = 'active'",
+        ] {
+            assert!(
+                ACTIVE_REALTIME_CREDENTIAL_SQL.contains(needle),
+                "realtime credential predicate lost `{needle}`"
+            );
+        }
     }
 }
