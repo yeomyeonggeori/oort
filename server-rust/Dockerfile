@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# One immutable momo **Rust** application image, three runtime commands:
-# api (momo-server), relay (momo-relay), migrate (momo-migrate).
+# One immutable momo **Rust** application image, four runtime commands:
+# api (momo-server), relay (momo-relay), agent-worker (momo-agent-worker),
+# migrate (momo-migrate).
 # ADR-0145 B안 / batch B1.7 — the deploy path for the Rust stack.
 #
 #   docker build -f server-rust/Dockerfile -t momo-rust:dev .
@@ -12,9 +13,14 @@
 # (`server/Migrations`, `infra/e2e`, `infra/prod`). Those files are copied in,
 # never modified.
 #
-# Not in this image (deliberate, B1.7 scope): worker / NotifierWorker / T3 /
-# workd / LinkShort / the web SPA. `infra/prod/docker/momo.Dockerfile` remains
-# the Swift image and is untouched.
+# B5.1 adds `agent-worker`: the agent turn loop is what makes a mention produce
+# an answer, so an image that cannot run it cannot dogfood the product. It ships
+# beside api/relay rather than in an image of its own because all four are one
+# `cargo build` of one workspace.
+#
+# Not in this image (deliberate): momo-notifier (its compose wiring is still
+# open), the Swift workers / T3 / workd / LinkShort / the web SPA.
+# `infra/prod/docker/momo.Dockerfile` remains the Swift image and is untouched.
 
 ARG RUST_IMAGE=rust:1-slim-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
@@ -41,6 +47,7 @@ COPY server-rust/crates/momo-provider/Cargo.toml crates/momo-provider/
 COPY server-rust/crates/momo-settings/Cargo.toml crates/momo-settings/
 COPY server-rust/crates/momo-t3/Cargo.toml crates/momo-t3/
 COPY server-rust/crates/momo-wire/Cargo.toml crates/momo-wire/
+COPY server-rust/bins/momo-agent-worker/Cargo.toml bins/momo-agent-worker/
 COPY server-rust/bins/momo-migrate/Cargo.toml bins/momo-migrate/
 COPY server-rust/bins/momo-notifier/Cargo.toml bins/momo-notifier/
 COPY server-rust/bins/momo-relay/Cargo.toml bins/momo-relay/
@@ -53,7 +60,8 @@ RUN set -eux; \
       printf 'fn main() {}\n' > "$dir/src/main.rs"; \
     done; \
     cargo build --release --locked \
-      --bin momo-server --bin momo-relay --bin momo-migrate; \
+      --bin momo-server --bin momo-relay --bin momo-agent-worker \
+      --bin momo-migrate; \
     find crates bins -name '*.rs' -delete
 
 # Real sources. `--locked` keeps the dependency graph byte-identical to the
@@ -68,9 +76,11 @@ RUN set -eux; \
     # always rebuild; the ~200 third-party deps stay cached.
     find crates bins -name '*.rs' -exec touch {} +; \
     cargo build --release --locked \
-      --bin momo-server --bin momo-relay --bin momo-migrate; \
+      --bin momo-server --bin momo-relay --bin momo-agent-worker \
+      --bin momo-migrate; \
     install -Dm755 target/release/momo-server /out/momo-server; \
     install -Dm755 target/release/momo-relay /out/momo-relay; \
+    install -Dm755 target/release/momo-agent-worker /out/momo-agent-worker; \
     install -Dm755 target/release/momo-migrate /out/momo-migrate
 
 # ---------------------------------------------------------------------------
@@ -78,7 +88,7 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
 LABEL org.opencontainers.image.title="momo-rust" \
-      org.opencontainers.image.description="momo Rust runtime — api | relay | migrate" \
+      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | migrate" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 # postgresql-client is NOT optional: the migration runner shells out to psql
