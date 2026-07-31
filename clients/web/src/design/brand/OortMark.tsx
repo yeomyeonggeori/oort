@@ -64,23 +64,3 @@ export function OortMark({
   );
 }
 
-/**
- * 마크 + 글자. 로그인 카드 머리와 같이 제품을 **소개하는** 자리에만 쓴다.
- * 셸 안에서는 워크스페이스가 주인공이므로 마크만 선다.
- *
- * 글자는 이미지가 아니라 텍스트다: 웹폰트를 들이지 않는 규칙(CSP·오프라인)
- * 아래에서 워드마크를 이미지로 만들면 스킴·해상도마다 사본이 생기고 선택·번역·
- * 확대가 전부 죽는다. 시스템 스택에 자간만 좁혀 세운다.
- */
-export function OortLockup({ className }: { className?: string }) {
-  return (
-    <span className={className}>
-      <span className="flex items-center gap-2">
-        <OortMark className="size-6 shrink-0 text-accent" />
-        <span className="text-title font-semibold tracking-tight text-ink">
-          oort
-        </span>
-      </span>
-    </span>
-  );
-}

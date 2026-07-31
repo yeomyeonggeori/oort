@@ -586,7 +586,7 @@ export function handleFromEmail(email: string): string {
     .map((ch) => (/[a-z0-9-]/.test(ch) ? ch : "-"))
     .join("");
   const trimmed = mapped.replace(/^-+/, "").replace(/-+$/, "");
-  return trimmed === "" ? "momo-user" : trimmed;
+  return trimmed === "" ? "oort-user" : trimmed;
 }
 
 function browserTimeZone(): string | undefined {
