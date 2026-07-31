@@ -32,6 +32,7 @@ ENV CARGO_TERM_COLOR=never \
 # on every source edit. The stubs are deleted immediately afterwards — the real
 # sources land in the next COPY and only the workspace crates rebuild.
 COPY server-rust/Cargo.toml server-rust/Cargo.lock ./
+COPY server-rust/crates/momo-agent/Cargo.toml crates/momo-agent/
 COPY server-rust/crates/momo-auth/Cargo.toml crates/momo-auth/
 COPY server-rust/crates/momo-db/Cargo.toml crates/momo-db/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
@@ -40,6 +41,7 @@ COPY server-rust/crates/momo-provider/Cargo.toml crates/momo-provider/
 COPY server-rust/crates/momo-t3/Cargo.toml crates/momo-t3/
 COPY server-rust/crates/momo-wire/Cargo.toml crates/momo-wire/
 COPY server-rust/bins/momo-migrate/Cargo.toml bins/momo-migrate/
+COPY server-rust/bins/momo-notifier/Cargo.toml bins/momo-notifier/
 COPY server-rust/bins/momo-relay/Cargo.toml bins/momo-relay/
 COPY server-rust/bins/momo-server/Cargo.toml bins/momo-server/
 RUN set -eux; \
