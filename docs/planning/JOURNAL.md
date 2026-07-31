@@ -1473,6 +1473,10 @@
 - 한 일: **도그푸딩 게이트 상향(성재: 에이전트 티키타카 도달 시) → B5 아크 착수. B5.1(momo-agent-worker) 랜딩**(PR #944) — agent_job 소비→provider 호출(실1+mock)→응답을 send_message 척추로(에이전트=member)·run 전이·ledger. 워커 발견 2건 수용: per-agent 직렬화를 SQL 보장으로(다중 워커 안전)+008 리스 재사용(죽은 워커가 에이전트를 영구 침묵시키는 걸 차단), client_msg_id=run_id로 exactly-once. 게이트가 오라클 JSON 경로 오류 1건 실측(봉투 data.payload.id) → 수정 후 4/4+전 무회귀 55케이스 green. NCP 재정지.
 - 열린 것: **B5.2**(멘션→run 라우팅+에이전트 생성/초대 표면) → B5.3(허브 UI D-4/D-5·routing) → 티키타카 smoke → 도그푸딩. 후속: 스레드 응답 리더·model_price 리더·notifier compose 편입. #925·#926·#893.
 
+## 2026-08-01 (저녁) · Fable · 오케스트레이션
+- 한 일: **B5.2(멘션 라우팅+에이전트 초대) 랜딩**(PR #945) — @멘션→run+job(멱등·insert/finish 합성 정합)·에이전트 생성/프로필(자격증명 필드 fail-closed)·컨텍스트 윈도 리더. **게이트에서 티키타카 e2e 첫 green**(HTTP send→run→실워커 iteration→에이전트 응답 seq·ledger). 전 스위트 59케이스. 워커 판단 수용: A2A는 depth 캡 강제 불가라 fail-closed(감사만)·paused 라인은 단일 쓰기경로 경유(Swift의 직접 INSERT 대신).
+- 열린 것: **B5.3**(허브 UI D-4/D-5·routing 실구현·프로필 편집/pause 토글·**채널 초대 REST** — 에이전트를 채널에 넣는 표면, B5.2 발견 갭) → 티키타카 smoke(실 provider) → 도그푸딩. A2A 티키타카는 후속 설계.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
