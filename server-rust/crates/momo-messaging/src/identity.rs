@@ -141,6 +141,76 @@ pub async fn is_channel_member(
     Ok(exists)
 }
 
+/// A member's authority **in the workspace** (`workspace_membership.role`,
+/// migration 026 / ADR-0128). Channel roles never imply workspace authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceRole {
+    Owner,
+    Admin,
+    Member,
+    Guest,
+}
+
+impl WorkspaceRole {
+    pub fn as_db_label(self) -> &'static str {
+        match self {
+            WorkspaceRole::Owner => "owner",
+            WorkspaceRole::Admin => "admin",
+            WorkspaceRole::Member => "member",
+            WorkspaceRole::Guest => "guest",
+        }
+    }
+
+    pub fn from_db_label(label: &str) -> Option<Self> {
+        match label {
+            "owner" => Some(WorkspaceRole::Owner),
+            "admin" => Some(WorkspaceRole::Admin),
+            "member" => Some(WorkspaceRole::Member),
+            "guest" => Some(WorkspaceRole::Guest),
+            _ => None,
+        }
+    }
+
+    pub fn is_admin(self) -> bool {
+        matches!(self, WorkspaceRole::Owner | WorkspaceRole::Admin)
+    }
+}
+
+/// The caller's active workspace role, or `None` when they are not an active
+/// member of it (Swift `WorkspaceAuthorization.activeRole`, :34-78 — the
+/// single workspace-role authority every route shares).
+///
+/// "Active" is two conditions, and both matter: a `workspace_membership` row
+/// **and** a member that is `status='active'` and not soft-deleted. Checking
+/// only the membership row would let a suspended account keep reading, since
+/// suspension is recorded on `member`, not on the membership.
+///
+/// The B1.2 surfaces (DM, read-state, search) call this for their 403 gate,
+/// exactly like their Swift counterparts, before any tenant read.
+pub async fn active_workspace_role(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<Option<WorkspaceRole>, DbError> {
+    let label: Option<String> = sqlx::query_scalar(
+        "SELECT wm.role::text \
+           FROM workspace_membership wm \
+           JOIN member m \
+             ON m.workspace_id = wm.workspace_id \
+            AND m.id = wm.member_id \
+          WHERE wm.workspace_id = $1 \
+            AND wm.member_id = $2 \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(label.as_deref().and_then(WorkspaceRole::from_db_label))
+}
+
 /// Outcome of [`verify_password_login`] — the three states Swift
 /// `AuthRoutes.LoginResolution` distinguishes, kept distinct because they map to
 /// different HTTP codes (401 vs 403).
@@ -245,5 +315,29 @@ mod tests {
             assert_eq!(MemberKind::from_db_label(kind.as_db_label()), Some(kind));
         }
         assert_eq!(MemberKind::from_db_label("robot"), None);
+    }
+
+    #[test]
+    fn workspace_role_labels_round_trip() {
+        for role in [
+            WorkspaceRole::Owner,
+            WorkspaceRole::Admin,
+            WorkspaceRole::Member,
+            WorkspaceRole::Guest,
+        ] {
+            assert_eq!(WorkspaceRole::from_db_label(role.as_db_label()), Some(role));
+        }
+        assert_eq!(WorkspaceRole::from_db_label("superuser"), None);
+    }
+
+    /// ADR-0128: only owner/admin carry workspace authority. A `guest` reading
+    /// as an admin would be the exact privilege confusion the role split exists
+    /// to prevent.
+    #[test]
+    fn only_owner_and_admin_are_admins() {
+        assert!(WorkspaceRole::Owner.is_admin());
+        assert!(WorkspaceRole::Admin.is_admin());
+        assert!(!WorkspaceRole::Member.is_admin());
+        assert!(!WorkspaceRole::Guest.is_admin());
     }
 }

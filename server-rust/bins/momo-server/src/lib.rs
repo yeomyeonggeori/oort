@@ -26,7 +26,7 @@ pub mod work_host_auth;
 
 use std::sync::Arc;
 
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use momo_db::PgPool;
 
@@ -122,6 +122,25 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
             post(routes::messages::send).get(routes::messages::history),
+        )
+        // messenger breadth (B1.2) — DM, read state, search. All three sit
+        // behind the same credential gate as messages: there is no anonymous
+        // read of a workspace's conversations.
+        .route(
+            "/v1/workspaces/{ws}/dms",
+            get(routes::dms::list).post(routes::dms::open),
+        )
+        .route(
+            "/v1/workspaces/{ws}/read-state",
+            get(routes::read_state::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/read-state",
+            put(routes::read_state::update),
+        )
+        .route(
+            "/v1/workspaces/{ws}/search/messages",
+            get(routes::search::messages),
         )
         // work hosts (ADR-0125 registry)
         .route(

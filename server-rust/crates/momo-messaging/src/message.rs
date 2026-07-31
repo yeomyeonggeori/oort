@@ -27,6 +27,15 @@
 //! [`send_message`] wraps the spine in [`momo_db::with_tenant_tx`], the sole RLS
 //! GUC seam (invariant #6). The `*_in_tx` seam is public so a route layer can
 //! compose several domain writes in one transaction.
+//!
+//! **B1.2** adds one step *between* 2 and 3, and only for the REST send path
+//! ([`send_message_with_mentions_in_tx`]): the mention pass
+//! ([`crate::read_state::record_mentions_in_tx`]). It sits there because Swift's
+//! broadcast payload carries `props.mention_member_ids`
+//! (`MessageRoutes.swift:184-201, 253-259`) — building the payload first would
+//! publish a message whose mention decision the DB row already contradicts. The
+//! spine's own statement is unchanged; the step is a composition, which is why
+//! [`send_message_in_tx`] and every non-REST producer behave exactly as in B1.
 
 use chrono::{DateTime, Utc};
 use momo_db::{with_tenant_tx, DbError, PgPool};
@@ -253,14 +262,34 @@ pub fn build_broadcast_payload(
     serde_json::to_value(envelope).expect("broadcast payload serializes")
 }
 
-/// The write-path spine, running on a caller-supplied connection so it composes
-/// inside one tenant transaction with other domain writes. See the module docs
-/// for the invariant-by-invariant walkthrough.
-pub async fn send_message_in_tx(
+/// Whether a send parses `@mentions` out of its body before broadcasting
+/// (B1.2). Private because it is an internal composition detail: callers choose
+/// by picking [`send_message_in_tx`] or [`send_message_with_mentions_in_tx`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MentionPolicy {
+    /// The B1 spine's behaviour, unchanged: no mention parsing. Used by the
+    /// non-REST producers (work-session cards, gateway completions) whose Swift
+    /// counterparts also decide mentions separately.
+    Skip,
+    /// Swift `MessageRoutes.send` (:184-201): on a first insert of a `text`
+    /// message, parse mentions, write them to the server-owned props, bump the
+    /// recipients' `mention_count` — and only then build the broadcast, so the
+    /// realtime payload carries the mention decision the DB row now holds.
+    Record,
+}
+
+/// Steps 1+2 of the spine: row-locked seq bump and idempotent insert, in one
+/// statement. Returns the stored row and whether it was a dedup hit.
+///
+/// Split out of [`send_message_in_tx`] (B1.2) so a caller can interleave work
+/// between the insert and the broadcast — specifically the mention pass, which
+/// must run *before* the payload is built because Swift's payload carries
+/// `props.mention_member_ids`. The statement itself is byte-for-byte the B1 one.
+async fn insert_message_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: NewMessage,
-) -> Result<SentMessage, DbError> {
+) -> Result<(StoredMessage, bool), DbError> {
     let hlc_ts = input
         .hlc_ts
         .unwrap_or_else(|| Utc::now().timestamp_millis());
@@ -323,41 +352,177 @@ pub async fn send_message_in_tx(
         }
     };
 
-    // Step 3: enqueue the broadcast through the single outbox egress, same tx.
-    // Skipped on a deduped retry so a resend never double-broadcasts.
-    let outbox_id = if deduped {
-        None
-    } else {
-        let payload = build_broadcast_payload(
+    Ok((message, deduped))
+}
+
+/// Step 3 (+ the optional B1.2 mention pass): finish a send by enqueuing the
+/// broadcast through the single outbox egress, on the same connection and
+/// therefore inside the same transaction as the insert.
+///
+/// A deduped retry emits nothing and records no mentions: the message it
+/// returns already exists, so re-running either would double-count a badge and
+/// double-publish a message the client has seen.
+async fn finish_send_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    mut message: StoredMessage,
+    deduped: bool,
+    mentions: MentionPolicy,
+) -> Result<SentMessage, DbError> {
+    if deduped {
+        return Ok(SentMessage {
+            message,
+            deduped,
+            outbox_id: None,
+        });
+    }
+
+    if mentions == MentionPolicy::Record && message.message_type == MessageType::Text {
+        let recipients = crate::read_state::record_mentions_in_tx(
+            &mut *conn,
             workspace_id,
             message.channel_id,
             message.id,
             message.seq,
-            message.message_type,
-            message.body.as_deref(),
             message.author_member_id,
-            message.hlc_ts,
-            message.hlc_count,
-            message.root_id,
-            &message.props,
-        );
-        let id = emit_outbox(
-            &mut *conn,
-            workspace_id,
-            OutboxKind::Broadcast,
-            "publish",
-            &payload,
-            Some(message.channel_id),
+            message.body.as_deref(),
         )
         .await?;
-        Some(id)
-    };
+        if !recipients.is_empty() {
+            // Mirror the DB row the statement above just wrote, so the payload
+            // built below describes what was persisted (Swift's
+            // `responsePropsJSON`) rather than what was requested.
+            let tokens: Vec<Value> = recipients
+                .iter()
+                .copied()
+                .map(|id| json!(crate::read_state::mention_id_token(id)))
+                .collect();
+            match message.props.as_object_mut() {
+                Some(object) => {
+                    object.insert(
+                        crate::read_state::MENTION_PROPS_KEY.into(),
+                        Value::Array(tokens),
+                    );
+                }
+                None => {
+                    message.props = json!({
+                        crate::read_state::MENTION_PROPS_KEY: Value::Array(tokens),
+                    });
+                }
+            }
+        }
+    }
+
+    let payload = build_broadcast_payload(
+        workspace_id,
+        message.channel_id,
+        message.id,
+        message.seq,
+        message.message_type,
+        message.body.as_deref(),
+        message.author_member_id,
+        message.hlc_ts,
+        message.hlc_count,
+        message.root_id,
+        &message.props,
+    );
+    let outbox_id = emit_outbox(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &payload,
+        Some(message.channel_id),
+    )
+    .await?;
 
     Ok(SentMessage {
         message,
         deduped,
-        outbox_id,
+        outbox_id: Some(outbox_id),
     })
+}
+
+/// The write-path spine, running on a caller-supplied connection so it composes
+/// inside one tenant transaction with other domain writes. See the module docs
+/// for the invariant-by-invariant walkthrough.
+pub async fn send_message_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+) -> Result<SentMessage, DbError> {
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
+    finish_send_in_tx(conn, workspace_id, message, deduped, MentionPolicy::Skip).await
+}
+
+/// The REST send path's spine (B1.2): [`send_message_in_tx`] plus the mention
+/// pass, with an optional provenance assertion — one function because Swift's
+/// `MessageRoutes.send` is one path, and because the three steps have an order
+/// that must not be re-arranged by a caller:
+///
+/// 1. **insert** — assigns `seq` and `message.id`;
+/// 2. **provenance** (when signed) — verified over the props **as inserted**, so
+///    a client can sign what it sent. Recording after the mention pass would
+///    make every mentioning message fail verification, since no client can
+///    predict the ids the server is about to add;
+/// 3. **mentions, then broadcast** — the payload carries
+///    `props.mention_member_ids` exactly like Swift's, so a realtime client
+///    highlights a mention without a second fetch.
+///
+/// A rejected signature travels in the `Ok` half (see [`ProvenanceRejected`]);
+/// the caller must roll the transaction back so a refused assertion cannot leave
+/// the message behind as if it had been sent unsigned.
+pub async fn send_message_with_mentions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+    signature: Option<&MessageSignature>,
+) -> Result<Result<SentMessage, ProvenanceRejected>, DbError> {
+    if let Some(signature) = signature {
+        if input.client_msg_id.is_none() {
+            return Ok(Err(ProvenanceRejected::MissingClientMsgId));
+        }
+        if signature.signer_member_id != input.author_member_id {
+            return Ok(Err(ProvenanceRejected::SignerIsNotAuthor));
+        }
+    }
+
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
+
+    if let Some(signature) = signature {
+        // `client_msg_id` was checked above; the stored row is the digest's
+        // subject, so re-read it from the message rather than the request.
+        let client_msg_id = match client_msg_id_of(&mut *conn, &message).await? {
+            Some(id) => id,
+            None => return Ok(Err(ProvenanceRejected::MissingClientMsgId)),
+        };
+        if let Err(rejected) =
+            record_message_provenance(&mut *conn, workspace_id, &message, client_msg_id, signature)
+                .await?
+        {
+            return Ok(Err(rejected));
+        }
+    }
+
+    let sent =
+        finish_send_in_tx(conn, workspace_id, message, deduped, MentionPolicy::Record).await?;
+    Ok(Ok(sent))
+}
+
+/// The stored row's `client_msg_id` — the value the provenance digest binds.
+///
+/// Read back from the row rather than taken from the request because on a
+/// deduped retry the *stored* message is the assertion's subject, and its key is
+/// the one already in the unique index.
+async fn client_msg_id_of(
+    conn: &mut PgConnection,
+    message: &StoredMessage,
+) -> Result<Option<Uuid>, DbError> {
+    let id: Option<Uuid> = sqlx::query_scalar("SELECT client_msg_id FROM message WHERE id = $1")
+        .bind(message.id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(id)
 }
 
 /// A provenance assertion accompanying a message send (ADR-0146).
@@ -416,12 +581,29 @@ pub async fn send_signed_message_in_tx(
     }
 
     let sent = send_message_in_tx(conn, workspace_id, input).await?;
-    let message = &sent.message;
+    match record_message_provenance(conn, workspace_id, &sent.message, client_msg_id, signature)
+        .await?
+    {
+        Ok(()) => Ok(Ok(sent)),
+        Err(rejected) => Ok(Err(rejected)),
+    }
+}
 
-    // Canonical props = the STORED jsonb, serialized compactly with sorted keys
-    // (`serde_json::Map` is a `BTreeMap` in this build, and jsonb already
-    // normalizes key order), so the digest describes the row rather than the
-    // request.
+/// Verify one signature over a stored message and write the provenance sidecar.
+///
+/// Canonical props = the **stored** jsonb, serialized compactly with sorted keys
+/// (`serde_json::Map` is a `BTreeMap` in this build, and jsonb already
+/// normalizes key order), so the digest describes the row rather than the
+/// request. Shared by [`send_signed_message_in_tx`] and
+/// [`send_message_with_mentions_in_tx`] so the two signed paths cannot drift
+/// into signing different bytes.
+async fn record_message_provenance(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message: &StoredMessage,
+    client_msg_id: Uuid,
+    signature: &MessageSignature,
+) -> Result<Result<(), ProvenanceRejected>, DbError> {
     let props_json = serde_json::to_string(&message.props).map_err(|error| {
         DbError::from(sqlx::Error::Decode(
             format!("stored props are not serializable: {error}").into(),
@@ -447,7 +629,7 @@ pub async fn send_signed_message_in_tx(
     )
     .await
     {
-        Ok(_) => Ok(Ok(sent)),
+        Ok(_) => Ok(Ok(())),
         Err(ProvenanceError::SignatureRejected { .. }) => {
             Ok(Err(ProvenanceRejected::SignatureRejected))
         }
