@@ -1605,6 +1605,70 @@ pub struct CreateInviteRequest {
     pub expires_at_ms: Option<i64>,
 }
 
+// ---------------------------------------------------------------------------
+// public join (B4.3 — Swift `JoinRoutes` + `DTOs.swift:781-836`)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/join` request (Swift `JoinRequest`, `DTOs.swift:785-818`).
+///
+/// Swift hand-writes this decoder to accept two spellings of `displayName` and
+/// three of `timeZone`, so the aliases below are contract, not convenience — an
+/// onboarding form that posts `display_name` must not silently create a member
+/// with an empty name.
+///
+/// Unlike the message DTOs this one is **not** `deny_unknown_fields`: Swift's
+/// keyed container ignores unknown keys, and a public onboarding form is exactly
+/// where a stray extra field is likeliest to appear. Rejecting one would break a
+/// client the Swift server accepts.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JoinRequest {
+    pub code: String,
+    pub email: String,
+    /// Absent decodes to `""`, which the validator answers 400 for — the same
+    /// path Swift takes (`?? ""` then `normalizedDisplayName`).
+    #[serde(default, alias = "display_name")]
+    pub display_name: String,
+    #[serde(default)]
+    pub handle: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default, alias = "time_zone", alias = "tz")]
+    pub time_zone: Option<String>,
+}
+
+/// One channel the join put the new member into (Swift `JoinMembershipDTO`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JoinMembershipDto {
+    pub id: String,
+    pub channel_id: String,
+    pub role: String,
+}
+
+/// `POST /v1/join` response (Swift `JoinResponse`, `DTOs.swift:826-836`).
+///
+/// It is a login response plus the redemption record: the client is signed in
+/// when this returns, which is the point of the endpoint — an onboarding flow
+/// that had to follow the join with a separate login would be two chances to
+/// fail instead of one.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JoinResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub workspace_id: String,
+    pub member: MemberDto,
+    /// ADR-0110: the only authority for the realtime WebSocket address.
+    pub realtime_web_socket_url: String,
+    pub memberships: Vec<JoinMembershipDto>,
+    pub invite: InviteCodeDto,
+    pub redemption_id: String,
+    /// `true` when this join created the account (201), `false` when an existing
+    /// human rejoined (200).
+    pub created_member: bool,
+}
+
 /// Swift `CreateWorkspaceRequest` (`WorkspaceRoutes.swift`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1910,5 +1974,115 @@ mod tests {
             cursor: None,
         };
         assert_eq!(sized.limit(), Some(7));
+    }
+
+    /// Swift's hand-written join decoder accepts two spellings of `displayName`
+    /// and three of `timeZone`. A form that posts the snake_case one must not
+    /// create a member with an empty display name.
+    #[test]
+    fn the_join_request_accepts_every_spelling_swift_accepts() {
+        let camel: JoinRequest = serde_json::from_value(serde_json::json!({
+            "code": "abc",
+            "email": "ada@example.com",
+            "displayName": "Ada",
+            "timeZone": "Asia/Seoul",
+            "password": "hunter2",
+        }))
+        .expect("camelCase decodes");
+        assert_eq!(camel.display_name, "Ada");
+        assert_eq!(camel.time_zone.as_deref(), Some("Asia/Seoul"));
+
+        let snake: JoinRequest = serde_json::from_value(serde_json::json!({
+            "code": "abc",
+            "email": "ada@example.com",
+            "display_name": "Ada",
+            "time_zone": "Asia/Seoul",
+        }))
+        .expect("snake_case decodes");
+        assert_eq!(snake.display_name, "Ada");
+        assert_eq!(snake.time_zone.as_deref(), Some("Asia/Seoul"));
+
+        let tz: JoinRequest = serde_json::from_value(serde_json::json!({
+            "code": "abc",
+            "email": "ada@example.com",
+            "displayName": "Ada",
+            "tz": "Asia/Seoul",
+        }))
+        .expect("the third timeZone spelling decodes");
+        assert_eq!(tz.time_zone.as_deref(), Some("Asia/Seoul"));
+
+        // Absent display name decodes to "" so the validator answers 400 with
+        // Swift's wording, rather than serde answering with its own.
+        let bare: JoinRequest = serde_json::from_value(serde_json::json!({
+            "code": "abc",
+            "email": "ada@example.com",
+        }))
+        .expect("an absent display name is a validation problem, not a decode one");
+        assert_eq!(bare.display_name, "");
+        assert!(bare.password.is_none());
+        assert!(bare.handle.is_none());
+
+        // A public onboarding form may carry extra keys; Swift ignores them.
+        assert!(
+            serde_json::from_value::<JoinRequest>(serde_json::json!({
+                "code": "abc",
+                "email": "ada@example.com",
+                "displayName": "Ada",
+                "utmSource": "newsletter",
+            }))
+            .is_ok(),
+            "an unknown key must not 400 a request the Swift server accepts"
+        );
+    }
+
+    /// The response carries the redemption record and never the code that
+    /// produced it.
+    #[test]
+    fn the_join_response_omits_nothing_the_client_needs_and_carries_no_code() {
+        let json = serde_json::to_value(JoinResponse {
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            workspace_id: "ws".into(),
+            member: MemberDto {
+                id: "m".into(),
+                workspace_id: "ws".into(),
+                kind: "human".into(),
+                display_name: "Ada".into(),
+                handle: "ada".into(),
+            },
+            realtime_web_socket_url: "ws://localhost:8000/connection/websocket".into(),
+            memberships: vec![JoinMembershipDto {
+                id: "ms".into(),
+                channel_id: "c".into(),
+                role: "member".into(),
+            }],
+            invite: InviteCodeDto {
+                id: "i".into(),
+                workspace_id: "ws".into(),
+                code_preview: "aB3-x9".into(),
+                role: "member".into(),
+                max_uses: 5,
+                used_count: 1,
+                expires_at_ms: 1_700_000_000_000,
+                revoked_at_ms: None,
+                revoked_by: None,
+                revocation_reason: None,
+                created_by: "o".into(),
+                created_at_ms: 1_600_000_000_000,
+                updated_at_ms: 1_600_000_000_000,
+            },
+            redemption_id: "r".into(),
+            created_member: true,
+        })
+        .expect("serialize");
+        assert_eq!(json["accessToken"], "access");
+        assert_eq!(json["createdMember"], serde_json::json!(true));
+        assert_eq!(json["memberships"][0]["channelId"], "c");
+        assert_eq!(json["redemptionId"], "r");
+        assert_eq!(json["invite"]["codePreview"], "aB3-x9");
+        assert!(
+            json["invite"].get("code").is_none(),
+            "the raw code leaves the server exactly once, from the create call: {json}"
+        );
     }
 }

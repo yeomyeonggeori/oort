@@ -93,7 +93,11 @@ pub const DEMO_WORKSPACE_ID: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0
 
 /// Coarse v0 scopes (Swift `AuthRoutes.login`). A real implementation derives
 /// these from membership/role (L4 §7.2).
-fn base_scopes() -> Vec<String> {
+///
+/// `pub(crate)` since B4.3: `POST /v1/join` signs the caller in on success and
+/// must issue the *same* scopes login does. A second literal list there would be
+/// a second answer to "what does a fresh session get".
+pub(crate) fn base_scopes() -> Vec<String> {
     vec!["messages:write".to_string(), "messages:read".to_string()]
 }
 
@@ -118,7 +122,10 @@ struct SessionTokens {
 /// logout, so the pair is atomic here. Recording is also what makes the
 /// middleware's MOMO-300 revocation check meaningful — minting without a row
 /// would turn every subsequent request into a 401 `unknown token`.
-async fn issue_and_record_session(
+///
+/// `pub(crate)` since B4.3 so `POST /v1/join` mints its session through this and
+/// not a copy: a joined session must be revocable exactly like a logged-in one.
+pub(crate) async fn issue_and_record_session(
     state: &AppState,
     workspace_id: Uuid,
     member_id: Uuid,

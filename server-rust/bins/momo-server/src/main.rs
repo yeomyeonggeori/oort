@@ -47,8 +47,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // never the master key, never an operator's address.
         provider_link_configurable = config.settings.provider_link_master_key.is_some(),
         instance_operators = config.settings.platform_admin_emails.len(),
+        // B4.3: what guards the one unauthenticated write (`POST /v1/join`).
+        rate_limit_per_ip = config.rate_limit.per_ip_limit,
+        rate_limit_window_seconds = config.rate_limit.window_seconds,
         "momo-server starting"
     );
+    if config.rate_limit.per_ip_limit == 0 {
+        tracing::warn!(
+            "RATE_LIMIT_PER_IP=0 disables the per-IP limiter; POST /v1/join is the \
+             only unauthenticated write on this instance and it accepts an invite \
+             code in the body"
+        );
+    }
     if config.realtime.cent_token_hmac.is_none() || config.realtime.cent_proxy_secret.is_none() {
         tracing::warn!(
             "CENT_TOKEN_HMAC / CENT_PROXY_SECRET not both set; the realtime rail is \
@@ -81,16 +91,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // B4.2: the AI-연결 family stays 503 unless the operator supplied
     // PROVIDER_LINK_MASTER_KEY, and the instance-global surfaces admit only a
     // `platform:read` token unless PLATFORM_ADMIN_EMAILS lists someone.
-    .with_settings(config.settings.clone());
+    .with_settings(config.settings.clone())
+    // B4.3: the per-IP limiter in front of `POST /v1/join`. On by default —
+    // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
+    // when someone does.
+    .with_rate_limit(config.rate_limit);
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // `into_make_service_with_connect_info` is what gives the rate limiter a
+    // socket peer to fall back on when there is no `X-Forwarded-For` — i.e. a
+    // directly exposed deployment. Without it every un-proxied request would be
+    // unattributable and therefore unlimited.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

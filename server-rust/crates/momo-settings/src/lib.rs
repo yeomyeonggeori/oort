@@ -33,13 +33,22 @@
 //! | [`engine`] | `work_host_engine` per-workspace selection | `Provider/WorkHostEngineStore.swift` |
 //! | [`tier`] | `work_tier_policy` workspace default + member override | `Routes/WorkTierPolicyRoutes.swift` |
 //! | [`quota`] | `quota_snapshot` read side | `Routes/ProviderQuotaSnapshotRoutes.swift:list` |
-//! | [`invite`] | `invite_code` create/list | `Routes/InviteRoutes.swift` |
+//! | [`invite`] | `invite_code` create/list/read | `Routes/InviteRoutes.swift` |
+//! | [`join`] | spending an invite (`POST /v1/join`) | `Routes/JoinRoutes.swift` |
 //! | [`workspace`] | tenant provisioning (`POST /v1/workspaces`) | `Routes/WorkspaceRoutes.create` |
+//!
+//! **B4.3 adds [`join`], the half that spends what [`invite`] mints.** It is in
+//! this crate and not another because `invite_code` has exactly one owner, and
+//! that includes the one statement that runs *before* the tenant GUC exists:
+//! `momo_join_private.invite_workspace_id` (migration 009), the EXECUTE-only
+//! definer function that maps a code to its workspace and nothing else. See
+//! [`join`]'s module docs for why that placement is the invariant-preserving one.
 
 pub mod chain;
 pub mod crypto;
 pub mod engine;
 pub mod invite;
+pub mod join;
 pub mod link;
 pub mod provider;
 pub mod quota;
@@ -58,8 +67,15 @@ pub use engine::{
     ALLOWED_ENGINES, DEFAULT_ENGINE,
 };
 pub use invite::{
-    clamp_invite_list_limit, create_invite, list_invites, normalized_invite_role,
+    clamp_invite_list_limit, create_invite, list_invites, normalized_invite_role, read_invite,
     validated_expires_at_ms, validated_max_uses, CreatedInvite, InviteCode, InviteSpecInvalid,
+};
+pub use join::{
+    fallback_handle, is_valid_handle, normalized_invite_code, normalized_join_display_name,
+    normalized_join_email, normalized_join_password, normalized_join_time_zone,
+    normalized_requested_handle, redeem_invite_in_tx, resolve_invite_workspace, role_rank,
+    JoinError, JoinOutcome, JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember,
+    JoinedMembership,
 };
 pub use link::{
     decrypt_link, delete_link, read_link, resolve_link, upsert_link, DecryptedProviderLink,
