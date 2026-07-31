@@ -1469,6 +1469,10 @@
 - 한 일: B4.3(join #942)·B4.4(UI+oort 브랜딩 #943) 랜딩 → 최종 이미지+SPA 배포 → **join 실왕복 검증(발급→가입→신규 로그인) green** → 팀 초대 코드 발급(maxUses 20). https://app.oor7.com 라이브(title=oort·favicon 정상). B4.3 게이트에서 실측 결함 3건 직접 해결(pool.close 데드락=44분 행 진범·만료 픽스처 제약·suspended 도달 경로 — 전부 테스트 계층, 제품 무결). B4.4는 design-review Blocker(SVG 주석 이중하이픈) 해소 후 통과.
 - 열린 것: 팀 온보딩(성재가 초대 코드 배포)·도그푸딩 피드백 수렴 루프·후속 배치(에이전트 허브 D-4/D-5·routing·oort:// 스킴 티켓). 서버 도그푸딩 기간 상시 가동.
 
+## 2026-08-01 (오후) · Fable · 오케스트레이션
+- 한 일: **도그푸딩 게이트 상향(성재: 에이전트 티키타카 도달 시) → B5 아크 착수. B5.1(momo-agent-worker) 랜딩**(PR #944) — agent_job 소비→provider 호출(실1+mock)→응답을 send_message 척추로(에이전트=member)·run 전이·ledger. 워커 발견 2건 수용: per-agent 직렬화를 SQL 보장으로(다중 워커 안전)+008 리스 재사용(죽은 워커가 에이전트를 영구 침묵시키는 걸 차단), client_msg_id=run_id로 exactly-once. 게이트가 오라클 JSON 경로 오류 1건 실측(봉투 data.payload.id) → 수정 후 4/4+전 무회귀 55케이스 green. NCP 재정지.
+- 열린 것: **B5.2**(멘션→run 라우팅+에이전트 생성/초대 표면) → B5.3(허브 UI D-4/D-5·routing) → 티키타카 smoke → 도그푸딩. 후속: 스레드 응답 리더·model_price 리더·notifier compose 편입. #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
