@@ -1453,6 +1453,10 @@
 - **판정: 내부 도그푸딩 1차(메신저) 게이트 열림.** 절차 = NCP 기동(ncp-power.py start→compose up, 새 이미지 재전송 필요 — B1.5 이후 랜딩분 포함 재빌드)+CENT env 필수화+웹 SPA 배포(UXUI 트랙 협조·ENGINE_HANDOFF §R/R′ 소비). 2차(T3)는 D-4/D-5+B5 후.
 - 열린 것: 도그푸딩 1차 실행(성재 트리거 — 서버 기동·팀 초대)·후속 배치(설정 나머지 18쌍→에이전트 허브 D-4/D-5→routing 실구현)·STATUS.md는 momo-main. #925·#926·#893.
 
+## 2026-08-01 (심야) · Fable · 오케스트레이션
+- 한 일: **도그푸딩 1차 스택 가동**(성재 "도그푸딩 시작") — NCP 기동→amd64 재빌드(결함: Dockerfile 매니페스트 목록에 B2.3/B2.6 신규 crate 누락→빌드 101→옛 이미지 배포 실측, 목록 수정 커밋 `track/engine` 직행)→재배포→api CENT env 필수화(B4)로 부팅 거부→오버라이드 주입→**도그푸딩 시퀀스 실서버 green**(login·roster·채널 생성(kind)·realtime-token·channels). **교훈: 이미지 빌드를 배치 게이트에 편입 필요**(cargo test는 Dockerfile 누락 못 봄).
+- 열린 것: **웹 SPA 배포 = UXUI 트랙 몫**(ENGINE_HANDOFF §R·R′) → 팀 초대 → 도그푸딩 개시. 서버 가동 중(도그푸딩 기간 상시 — 비용 성재 인지). 후속 배치(설정 18쌍→에이전트 허브→routing)와 병렬.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
