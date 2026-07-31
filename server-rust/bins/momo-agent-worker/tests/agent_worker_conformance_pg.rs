@@ -532,7 +532,7 @@ async fn b51_1_a_turn_answers_in_the_channel_and_bills_the_run() {
     let broadcasts: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM outbox \
           WHERE workspace_id = $1 AND kind = 'broadcast' \
-            AND payload->'data'->>'id' = $2::text",
+            AND payload->'data'->'payload'->>'id' = $2::text",
     )
     .bind(tenant.workspace_id)
     .bind(message_id.to_string())
