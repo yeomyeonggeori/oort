@@ -1444,6 +1444,10 @@
 - 한 일: **B1.2(메신저 breadth) 랜딩**(PR #938) — DM(3중 멱등)·read-state(seq 커서·unread 산술·mention 원장)·search(pg_trgm 파리티·튜플 커서). 게이트 전 스위트 40/40 green. 백미: **교차서버 UUID 대소문자 계약 실측**(Foundation 대문자 vs Rust 소문자 — 3곳 명시 정렬, 안 맞추면 Swift가 쓴 멘션을 Rust가 못 셈) + B1 트리거 교훈을 kind별 단언으로 박제. 이탈 4건 수용(search 리미터=미들웨어 후속·agent mention 라우팅=agent_run 표면·호출부 2곳 후속·base64 의존).
 - 열린 것: **다음 = B4(클라 재배선)** — 랜딩 시 내부 팀 테스트 1차(메신저 도그푸딩) 트리거. 후속 소품(리미터 미들웨어·mention 호출부 2·huddle/attachment). #925·#926·#893.
 
+## 2026-08-01 (저녁) · Fable · 오케스트레이션
+- 한 일: **B4(클라 재배선) 랜딩**(PR #939) — 클라 소비 68쌍 전수 실측: 동일 14·서버측 마감 3(realtime-token JWT kid 분리·centrifugo subscribe 콜백=B1.7 inert 표면 해소·channels 사이드바)·**UI 수정 0**·미구현 51 카탈로그. 게이트 42/42 green(CENT env 주입). 정본 diff 매트릭스 `2026-08-01-b4-contract-diff.md`, ENGINE_HANDOFF §R 신설. 이탈 수용(routing 프로브 '고치지 말 것' 판단 등).
+- 열린 것: **도그푸딩 1차 게이트 = 미구현 51 중 시퀀스 차단분**(우선순위: roster→채널 생성(D-7)→스레드→설정 — B4.1 후보). compose에 CENT_TOKEN_HMAC/PROXY_SECRET 필수화 반영 필요. STATUS.md 갱신은 momo-main 몫. #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
