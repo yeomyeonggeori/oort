@@ -1457,6 +1457,10 @@
 - 한 일: **도그푸딩 1차 스택 가동**(성재 "도그푸딩 시작") — NCP 기동→amd64 재빌드(결함: Dockerfile 매니페스트 목록에 B2.3/B2.6 신규 crate 누락→빌드 101→옛 이미지 배포 실측, 목록 수정 커밋 `track/engine` 직행)→재배포→api CENT env 필수화(B4)로 부팅 거부→오버라이드 주입→**도그푸딩 시퀀스 실서버 green**(login·roster·채널 생성(kind)·realtime-token·channels). **교훈: 이미지 빌드를 배치 게이트에 편입 필요**(cargo test는 Dockerfile 누락 못 봄).
 - 열린 것: **웹 SPA 배포 = UXUI 트랙 몫**(ENGINE_HANDOFF §R·R′) → 팀 초대 → 도그푸딩 개시. 서버 가동 중(도그푸딩 기간 상시 — 비용 성재 인지). 후속 배치(설정 18쌍→에이전트 허브→routing)와 병렬.
 
+## 2026-08-02 · Fable · 오케스트레이션
+- 한 일: **B4.2(설정 표면 완결 D-3) 랜딩**(PR #941) — 18쌍 마감(provider link/chain·work-host-engine·effort-table·quota·tier-policy·invites·workspace 생성). 미구현 46→28(A 화면부재 22·B 실행경로 대기 5·C /v1/join 경계 1). 게이트 46/46 green + **docker build 게이트 첫 편입 통과**. 워커 판단 수용: link/test 라이브 프로브는 불변식 #2 사안이라 probe_not_run 어휘로(거짓말 배제), effort-table 서빙의 capability 뒤집힘은 실측상 무해. 신규 운영 env: PROVIDER_LINK_MASTER_KEY(JWT_HMAC과 같으면 부팅 거부).
+- 열린 것: **도메인 대기(성재 — A 레코드→101.79.11.189)** → caddy+TLS+SPA 서빙 배선. half-open: 초대 발급만·/v1/join 미구현(도그푸딩 팀 초대에 필요할 수 있음 — 도메인 붙일 때 판단). 후속: 에이전트 허브(D-4/D-5)·routing. #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
