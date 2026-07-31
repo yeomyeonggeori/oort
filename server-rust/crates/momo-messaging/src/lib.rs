@@ -40,7 +40,11 @@ pub mod message;
 pub mod read_state;
 pub mod search;
 
-pub use channel::{create_channel, create_channel_in_tx, Channel, ChannelKind, NewChannel};
+pub use channel::{
+    clamp_channel_list_limit, create_channel, create_channel_in_tx, list_workspace_channels,
+    Channel, ChannelKind, ChannelSummary, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT,
+    CHANNEL_LIST_LIMIT_MAX,
+};
 pub use dm::{
     canonical_participants, dm_lock_key, dm_participant_key, list_direct_messages,
     open_direct_message_in_tx, validate_direct_message_target, DirectMessage,
@@ -48,9 +52,9 @@ pub use dm::{
 };
 pub use error::{MessagingError, ProvenanceRejected};
 pub use identity::{
-    active_workspace_role, get_member, get_workspace, is_channel_member,
-    resolve_member_signing_key, verify_password_login, Member, MemberKind, PasswordLogin,
-    Workspace, WorkspaceRole,
+    active_workspace_role, can_observe_agent, get_member, get_workspace, is_active_agent,
+    is_channel_member, resolve_member_signing_key, verify_password_login, Member, MemberKind,
+    PasswordLogin, Workspace, WorkspaceRole,
 };
 pub use message::{
     build_broadcast_payload, cent_channel, clamp_history_limit, find_client_message_in_tx,

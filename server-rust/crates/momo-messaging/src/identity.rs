@@ -141,6 +141,91 @@ pub async fn is_channel_member(
     Ok(exists)
 }
 
+/// May `observer_member_id` watch `agent_member_id`'s progress inside
+/// `channel_id`? Ports Swift `CentrifugoRoutes.canObserveAgent`
+/// (`CentrifugoRoutes.swift:131-168`) clause for clause.
+///
+/// The rule is **exact-channel co-membership**, and every part of it earns its
+/// place: the target must be an active `agent` member, the observer must be an
+/// active member of the workspace, and BOTH must currently be members of that
+/// one unarchived channel. Weakening it to "the observer is in the channel"
+/// would leak an agent's live tool calls to a channel it was removed from;
+/// weakening it to "they share some channel" would make the `agent:` namespace's
+/// per-channel granularity decorative.
+///
+/// `conn` must already carry the tenant GUC (`momo_db::with_tenant_tx`);
+/// `workspace_id` is still bound explicitly because Swift's predicate names it,
+/// and defence in depth on a subscribe callback is worth one bound parameter.
+pub async fn can_observe_agent(
+    conn: &mut PgConnection,
+    observer_member_id: Uuid,
+    agent_member_id: Uuid,
+    channel_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<bool, DbError> {
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS( \
+           SELECT 1 \
+             FROM member agent_member \
+             JOIN member observer_member \
+               ON observer_member.id = $1 \
+              AND observer_member.workspace_id = $4 \
+              AND observer_member.status = 'active' \
+            WHERE agent_member.id = $2 \
+              AND agent_member.workspace_id = $4 \
+              AND agent_member.kind = 'agent' \
+              AND agent_member.status = 'active' \
+              AND EXISTS ( \
+                SELECT 1 \
+                  FROM channel progress_channel \
+                  JOIN membership observer_ms \
+                    ON observer_ms.channel_id = progress_channel.id \
+                   AND observer_ms.member_id = observer_member.id \
+                   AND observer_ms.left_at IS NULL \
+                  JOIN membership agent_ms \
+                    ON agent_ms.channel_id = progress_channel.id \
+                   AND agent_ms.member_id = agent_member.id \
+                   AND agent_ms.left_at IS NULL \
+                 WHERE progress_channel.id = $3 \
+                   AND progress_channel.workspace_id = $4 \
+                   AND progress_channel.archived_at IS NULL \
+              ))",
+    )
+    .bind(observer_member_id)
+    .bind(agent_member_id)
+    .bind(channel_id)
+    .bind(workspace_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(allowed)
+}
+
+/// Is `agent_member_id` an active **agent** member of `workspace_id`? Ports
+/// Swift `CentrifugoRoutes.isActiveAgent` (:170-188).
+///
+/// Used only by the private `agentwork:` job stream, where the subscriber and
+/// the subject are the same member: there is nothing to co-check, only whether
+/// the agent still exists as an active member.
+pub async fn is_active_agent(
+    conn: &mut PgConnection,
+    agent_member_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<bool, DbError> {
+    let active: bool = sqlx::query_scalar(
+        "SELECT EXISTS( \
+           SELECT 1 FROM member \
+            WHERE id = $1 \
+              AND workspace_id = $2 \
+              AND kind = 'agent' \
+              AND status = 'active')",
+    )
+    .bind(agent_member_id)
+    .bind(workspace_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(active)
+}
+
 /// A member's authority **in the workspace** (`workspace_membership.role`,
 /// migration 026 / ADR-0128). Channel roles never imply workspace authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

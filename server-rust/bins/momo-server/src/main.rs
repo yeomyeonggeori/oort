@@ -39,8 +39,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // secret is still accepted. The secret itself is never logged.
         agent_gateway_mode = config.agent_gateway.mode.as_str(),
         agent_gateway_legacy_secret = config.agent_gateway.legacy_secret_enabled(),
+        // B4: whether the realtime rail can be served at all. Booleans only —
+        // neither Centrifugo secret is ever logged.
+        realtime_token_issuable = config.realtime.cent_token_hmac.is_some(),
+        realtime_subscribe_proxy = config.realtime.cent_proxy_secret.is_some(),
         "momo-server starting"
     );
+    if config.realtime.cent_token_hmac.is_none() || config.realtime.cent_proxy_secret.is_none() {
+        tracing::warn!(
+            "CENT_TOKEN_HMAC / CENT_PROXY_SECRET not both set; the realtime rail is \
+             fail-closed (no connection tokens, every subscribe callback 401). \
+             REST still serves."
+        );
+    }
     if config.agent_gateway.legacy_secret_enabled() {
         tracing::warn!(
             "MOMO_ALLOW_LEGACY_GATEWAY_SECRET is on; rotate gateway callers to \
@@ -59,7 +70,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_t3(config.t3.clone())
     // B2.6: the gateway callback surface stays 403 unless the operator selected
     // AGENT_GATEWAY_MODE=gateway.
-    .with_agent_gateway(config.agent_gateway.clone());
+    .with_agent_gateway(config.agent_gateway.clone())
+    // B4: connection-token issuance and the subscribe proxy stay shut unless the
+    // operator supplied CENT_TOKEN_HMAC / CENT_PROXY_SECRET.
+    .with_realtime(config.realtime.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

@@ -3,12 +3,14 @@
 pub mod agent_gateway;
 pub mod agent_runs;
 pub mod auth_routes;
+pub mod channels;
 pub mod cloud_hosts;
 pub mod credits;
 pub mod dms;
 pub mod health;
 pub mod messages;
 pub mod read_state;
+pub mod realtime;
 pub mod reattach;
 pub mod search;
 pub mod shared;

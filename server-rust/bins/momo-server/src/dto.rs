@@ -862,17 +862,113 @@ pub struct ChannelDto {
     pub created_by: Option<String>,
     /// Always `None` on the DM surface: `list` filters archived channels out and
     /// `open` un-archives before returning (Swift hardcodes `NULL` for the same
-    /// reason).
+    /// reason). **Set** on the B4 channel list when `include_archived=true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
     pub muted: bool,
 }
 
-/// Swift `WorkspaceChannelsResponse` (:471-473) — the `GET …/dms` body.
+/// Swift `WorkspaceChannelsResponse` (:471-473) — the body of `GET …/dms` and
+/// (B4) `GET …/channels`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceChannelsResponse {
     pub channels: Vec<ChannelDto>,
+}
+
+// ---------------------------------------------------------------------------
+// realtime (B4 — Swift `AuthRoutes.realtimeToken` + `CentrifugoRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/auth/realtime-token` response (Swift `RealtimeTokenResponse`,
+/// `DTOs.swift:76-84`).
+///
+/// `token` is a Centrifugo **connection** token and nothing else: it names the
+/// connecting member and carries no channel grant, so it is useless without the
+/// per-subscribe proxy decision. The web client reads only `token`
+/// (`clients/web/src/lib/api.ts:698-703`); the other five fields are what let a
+/// client reason about renewal without decoding a JWT it does not own.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeTokenResponse {
+    pub token: String,
+    pub token_type: &'static str,
+    pub expires_at_ms: i64,
+    pub ttl_seconds: i64,
+    pub workspace_id: String,
+    pub member_id: String,
+}
+
+/// Centrifugo subscribe-proxy callback body (Swift `SubscribeProxyRequest`,
+/// `DTOs.swift:906-911`).
+///
+/// `meta` arrives only because `include_connection_meta` is on in
+/// `infra/centrifugo.json`; it is the connection token's `meta` claim, which is
+/// how a subscribe is bound back to the credential that opened the connection.
+#[derive(Debug, Default, Deserialize)]
+pub struct SubscribeProxyRequest {
+    #[serde(default)]
+    pub client: Option<String>,
+    #[serde(default)]
+    pub user: Option<String>,
+    pub channel: String,
+    #[serde(default)]
+    pub meta: Option<SubscribeProxyMeta>,
+}
+
+/// The `meta` object forwarded from the connection token (Swift
+/// `RealtimeTokenMeta`). Only `token_id` is read; `schema` is accepted so a
+/// future version can be told apart from a missing field.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SubscribeProxyMeta {
+    #[serde(default)]
+    pub schema: Option<String>,
+    #[serde(default, rename = "token_id")]
+    pub token_id: Option<String>,
+}
+
+/// Centrifugo proxy allow/deny envelope (Swift `SubscribeProxyResponse`,
+/// `DTOs.swift:913-928`).
+///
+/// **A deny is a 200 with an `error` object, not an HTTP error status.** That is
+/// the Centrifugo proxy protocol: a non-2xx is read as *the proxy is broken*
+/// (which Centrifugo may retry or fail open on, depending on config), while
+/// `{"error":{...}}` is read as *this subscription is refused*. Answering 403
+/// here would turn every ordinary permission decision into a transport fault.
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<SubscribeProxyResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<SubscribeProxyError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyResult {}
+
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyError {
+    pub code: u32,
+    pub message: String,
+}
+
+impl SubscribeProxyResponse {
+    pub fn allow() -> Self {
+        SubscribeProxyResponse {
+            result: Some(SubscribeProxyResult {}),
+            error: None,
+        }
+    }
+
+    pub fn deny(message: impl Into<String>) -> Self {
+        SubscribeProxyResponse {
+            result: None,
+            error: Some(SubscribeProxyError {
+                code: 403,
+                message: message.into(),
+            }),
+        }
+    }
 }
 
 /// `POST …/dms` request (Swift `OpenDirectMessageRequest`, :485-498), which

@@ -162,9 +162,160 @@ pub async fn get_channel(
     }
 }
 
+// ---------------------------------------------------------------------------
+// the workspace channel list (B4 — Swift `ChannelRoutes.fetchChannels` :401-460)
+// ---------------------------------------------------------------------------
+
+/// Swift `ChannelRoutes.validatedLimit` bounds (`ChannelRoutes.swift`): default
+/// 200, hard ceiling 500.
+pub const CHANNEL_LIST_LIMIT_DEFAULT: i64 = 200;
+pub const CHANNEL_LIST_LIMIT_MAX: i64 = 500;
+
+/// Clamp a requested page size into `1..=CHANNEL_LIST_LIMIT_MAX`, falling back to
+/// the default for anything absent or unparseable (Swift `Int($0) ?? 200`).
+pub fn clamp_channel_list_limit(requested: Option<i64>) -> i64 {
+    match requested {
+        Some(value) if value > 0 => value.min(CHANNEL_LIST_LIMIT_MAX),
+        _ => CHANNEL_LIST_LIMIT_DEFAULT,
+    }
+}
+
+/// One row of `GET /v1/workspaces/{ws}/channels` — every channel the CALLER is
+/// a current member of, DMs included.
+///
+/// Two fields are about the caller rather than the channel and must stay that
+/// way: `muted` is this member's `notification_pref` row (ADR-0124 — muting is
+/// per-member, never channel-wide), and `member_ids` is populated **only for
+/// DMs**, matching Swift, because a DM's identity is its pair while a public
+/// channel's roster is a separate read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelSummary {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub kind: ChannelKind,
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub dm_key: Option<String>,
+    /// Active participants — DMs only; empty for public/private channels.
+    pub member_ids: Vec<Uuid>,
+    pub created_by: Option<Uuid>,
+    /// Milliseconds since the epoch, or `None` for a live channel.
+    pub archived_at_ms: Option<i64>,
+    /// The CALLING member's push-suppression preference for this channel.
+    pub muted: bool,
+}
+
+fn decode_channel_summary(row: &sqlx::postgres::PgRow) -> Result<ChannelSummary, sqlx::Error> {
+    let kind_label: String = row.try_get("kind")?;
+    let kind = ChannelKind::from_db_label(&kind_label).ok_or_else(|| {
+        sqlx::Error::Decode(format!("unknown channel_kind '{kind_label}'").into())
+    })?;
+    Ok(ChannelSummary {
+        id: row.try_get("id")?,
+        workspace_id: row.try_get("workspace_id")?,
+        kind,
+        name: row.try_get("name")?,
+        topic: row.try_get("topic")?,
+        dm_key: row.try_get("dm_key")?,
+        member_ids: row.try_get("member_ids")?,
+        created_by: row.try_get("created_by")?,
+        archived_at_ms: row.try_get("archived_at_ms")?,
+        muted: row.try_get("muted")?,
+    })
+}
+
+/// Every channel `member_id` currently belongs to in `workspace_id`, ordered the
+/// way Swift orders them: public, then private, then DM, each group by
+/// case-folded name.
+///
+/// The `JOIN membership` is the access control, not a filter: there is no branch
+/// here that could return a channel the caller has left, and RLS scopes the
+/// whole statement to the tenant on top of that. Archived channels are excluded
+/// unless asked for, because the sidebar's default question is "where can I
+/// talk", not "what has ever existed".
+pub async fn list_workspace_channels(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    include_archived: bool,
+    limit: i64,
+) -> Result<Vec<ChannelSummary>, DbError> {
+    let rows = sqlx::query(
+        "SELECT c.id, \
+                c.workspace_id, \
+                c.kind::text AS kind, \
+                c.name, \
+                c.topic, \
+                c.dm_key, \
+                c.created_by, \
+                CASE WHEN c.archived_at IS NULL THEN NULL \
+                     ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
+                END AS archived_at_ms, \
+                CASE WHEN c.kind = 'dm' THEN COALESCE(( \
+                       SELECT array_agg(participant.member_id ORDER BY participant.member_id::text) \
+                         FROM membership participant \
+                        WHERE participant.channel_id = c.id \
+                          AND participant.left_at IS NULL \
+                     ), '{}'::uuid[]) \
+                     ELSE '{}'::uuid[] \
+                END AS member_ids, \
+                EXISTS ( \
+                  SELECT 1 FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND (np.muted_until IS NULL OR np.muted_until > now()) \
+                ) AS muted \
+           FROM channel c \
+           JOIN membership actor_membership \
+             ON actor_membership.channel_id = c.id \
+            AND actor_membership.member_id = $2 \
+            AND actor_membership.left_at IS NULL \
+          WHERE c.workspace_id = $1 \
+            AND ($3 OR c.archived_at IS NULL) \
+          ORDER BY CASE c.kind::text \
+                     WHEN 'public' THEN 0 \
+                     WHEN 'private' THEN 1 \
+                     ELSE 2 \
+                   END, \
+                   lower(COALESCE(c.name, '')), \
+                   c.id \
+          LIMIT $4",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(include_archived)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(decode_channel_summary)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_channel_list_limit_is_clamped_not_trusted() {
+        assert_eq!(clamp_channel_list_limit(None), CHANNEL_LIST_LIMIT_DEFAULT);
+        assert_eq!(
+            clamp_channel_list_limit(Some(0)),
+            CHANNEL_LIST_LIMIT_DEFAULT
+        );
+        assert_eq!(
+            clamp_channel_list_limit(Some(-4)),
+            CHANNEL_LIST_LIMIT_DEFAULT
+        );
+        assert_eq!(clamp_channel_list_limit(Some(12)), 12);
+        assert_eq!(
+            clamp_channel_list_limit(Some(10_000)),
+            CHANNEL_LIST_LIMIT_MAX,
+            "a client cannot ask for an unbounded page"
+        );
+    }
 
     #[test]
     fn channel_kind_labels_round_trip() {

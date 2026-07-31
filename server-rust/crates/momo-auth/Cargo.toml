@@ -14,6 +14,10 @@ jsonwebtoken.workspace = true
 # GUC seam stays in momo-db.
 sqlx.workspace = true
 serde.workspace = true
+# B4: the Centrifugo connection token's `info` claim is a JSON **string**, so
+# this crate renders one (`realtime::realtime_info_string`). No new crate enters
+# the dependency tree — `jsonwebtoken` already links serde_json.
+serde_json.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 # B2.2: `workhost::normalize_public_key_b64` validates a registration key the way

@@ -3,6 +3,7 @@
 > 규칙: `docs/TRACKS.md` §4. 상태: `ready`(대기) → `proposed`(성재 제안됨) → `in-progress` → `done`.
 > UXUI 세션은 세션 시작 시 §A를 읽고 ready를 성재에게 "이거 구현할까요?"로 제안하고, 집으면 상태를 갱신한다.
 > 2026-07-18 밤 통합판: UXUI 실서버 연동 배치(A-1/2/3/5/7 + A-4 답글 전송)와 엔진 배치(음소거 MOMO-477·상호작용 MOMO-478·X-1)가 main에 랜딩.
+> **2026-07-31 B4(Rust 백엔드 전환) 실측**: 새 §R 섹션 — 클라 소비 표면 68쌍 전수 대조 결과와 UI 영향. UXUI 코드 수정 요구는 R-1 한 건, 나머지는 가용성 사실이다. 정본 `docs/planning/2026-08-01-b4-contract-diff.md`.
 
 > **2026-07-21 순차 배치 정본**: UXUI 잔여 전량(A-13·A-14 포함 9항목)의 실행 순서·수용기준·함정은 `docs/planning/handoffs/2026-07-21-uxui-sequential-batch.md`가 정본이다 — UXUI 세션은 그 문서 순서대로 처리한다(성재 지시).
 > **2026-07-21 패브릭 배치 가산(PLN-20260721-01 인수)**: 순차 배치의 ⑧(MOMO-518 diff 카드)은 패브릭 Wave U의 첫 장을 겸한다(수용기준은 패브릭 패킷 §2가 우선 — research/19-05 반영 필수). 순차 배치 완료 후 **⑩ MOMO-529**(메모리 브라우저 — 엔진 527·528 랜딩 대기), **⑪ MOMO-532**(도구 관리+ACP 카드 — 엔진 533·531 랜딩 대기)를 잇는다. 정본: `docs/planning/handoffs/2026-07-21-agent-native-fabric-batch.md`.
@@ -58,6 +59,20 @@
 | X-12 | `ready` | A-22(MOMO-569) "who can talk"(수신 게이트) 서버 계약 부재. 에이전트가 누구의 발화에 응답하는지(owner-only / anyone / allowlist)를 결정·집행할 서버 필드와 지점이 없다. UI 토글만 만들면 서버가 무시하는 가짜 통제가 된다. | ①agent profile에 `inbound_policy: owner_only|anyone|allowlist` + `inbound_allowlist: [member_id]` 필드(GET/PUT `.../agents/:agent/profile` version 왕복, ADR-0131 계보)를 가산하고 ②단일 쓰기경로의 **agent_job enqueue 지점**(REST→PG→outbox, `outbox_kind=agent_job`)에서 발화자↔policy를 서버 권위로 판정해 미허용은 job을 만들지 않는다(멘션·DM 포함). 결정은 audit_log에 기록. 그 전까지 UXUI는 수신 게이트 컨트롤을 노출하지 않고 managed-by 표기만 소비한다. | ADR-0131 profile version, `schema_v0.sql` agent/outbox, `AgentProfileRoutes.swift`·enqueue 경로 감사, buzz Wave U″-2 (2026-07-23) |
 | X-11 | `ready` | A-16(MOMO-529) 전체 수용기준 중 ① `memory_visibility_grant` 목록/회수 REST가 없고 ② run/응답에서 저장 packet ID를 발견할 투영 또는 run별 packet 조회가 없으며 ③ 서버가 발행하는 `memory.updated`가 Core `RealtimeEnvelope`에서 unknown type으로 폐기되고 ④ source_ref에는 message/channel ID만 있으나 ID 단건 조회가 없어 현재 history·검색 cache 밖의 출처로 이동할 수 없다. 현재 공개 계약은 packet ID를 이미 아는 호출자의 단건 GET뿐이다. | 관리자/소유자용 visibility grant list+revoke REST와 OpenAPI, `agent_run`의 credential-free `contextPacketId` 또는 `GET .../agent-runs/:run/context-packets`, Core realtime `memory.updated`, membership을 재검증하는 message ID 단건 조회(또는 source_ref에 seq 투영)를 가산한다. 그 전까지 UXUI는 grant 회수를 거짓 개방하지 않고, packet ID가 기존 메시지 props에 있을 때만 저장 packet을 조회하며, REST mutation 성공 후 재조회하고 source jump 실패를 인라인으로 고지한다. | ADR-0129 D4~D6, BUILD_TICKETS MOMO-529 델타 3, `MemoryRoutes.swift`, `ContextPacketRoutes.swift`, `RealtimeEnvelope.swift` 감사 (2026-07-22) |
 | X-15 | `ready` | MOMO-627(ADR-0135 D1 UI) 전환 표기가 **세션 한정**이라 D1의 감사 요건(전환은 기록한다 · 조용한 전환 금지)을 절반만 만족한다. ① `provider.cascade.fallback` 프레임이 유일한 사용자 증거이고 조회 REST가 없어(X-14에도 없음) 채널을 나중에 여는 사람·새로고침한 사람은 "…프로바이더로 처리됨"을 영영 못 본다. `ch:`가 recoverable이어도 신규 subscribe는 과거 히스토리를 재생하지 않는다. ② 프레임은 와이어 `position`만 싣는데 position은 자격증명 정체성이라 삭제 시 갭이 남으므로(체인 PUT 규칙) 클라이언트는 position→시도 순번 매핑을 만들 수 없고, 체인 GET은 운영자 전용이라 일반 멤버가 읽을 수 없다. | ① 턴 레코드(`momo.agent_gateway.timeline.v0`) props에 전환 요약을 싣거나 run별 전환 조회 REST를 가산한다. ② 프레임/레코드에 그 전환 시점의 **시도 순번(attempt index)**을 함께 실어 클라이언트가 position을 서수로 오역하지 않게 한다. 그 전까지 웹 UI는 서수를 쓰지 않고 엔드포인트 레이블만 주어로 쓰며(`cascadeModel.ts`), 전환 기록이 없는 턴에 "1차에서 처리됨"을 주장하지 않는다. | ADR-0135 D1, `WorkerService.cascadeFallbackBroadcastPayload`, `ProviderLinkChainRoutes.swift`, #818 리뷰 R1 H1/M8 (2026-07-26) |
+
+## R. Rust 백엔드(ADR-0145 B안) 전환이 UI에 미치는 영향 — B4 실측 (2026-07-31)
+
+> 출처: `docs/planning/2026-08-01-b4-contract-diff.md`(클라 소비 표면 68쌍 전수 실측 정본).
+> **UXUI 트랙에 요구하는 코드 수정은 R-1 한 건뿐이다.** 나머지는 "이 백엔드에서는 이 화면이 아직 안 된다"는 **가용성 사실**이며, 새 UI를 만들지 말라는 뜻이지 고치라는 뜻이 아니다.
+> 계약 불일치로 인한 클라 수정 요구는 **0건**이다 — 실측한 모든 갭은 서버(Rust)가 Swift 계약을 아직 안 따라간 것이었고, 부팅 경로 3건은 B4에서 서버측으로 닫았다.
+
+| # | 상태 | 항목 | UI가 할 일 | 근거 |
+|---|---|---|---|---|
+| R-1 | `ready` | **실시간 미구성 서버(503) 카피** — `POST /v1/auth/realtime-token`이 새 상태 **503 `realtime is not configured on this server`**를 답할 수 있다. Rust 서버는 `CENT_TOKEN_HMAC` 없이는 connection 토큰을 발급하지 않고(베이크된 기본 시크릿 금지, fail-closed), centrifuge-js는 `getToken` 실패 사유를 구분하지 않으므로 화면에는 "연결 끊김"만 남아 사용자가 자기 네트워크를 의심한다 | `fetchRealtimeToken`이 `ApiError(503)`을 구분해 실시간 배너/`RuntimeBadge`가 "이 서버는 실시간이 구성되지 않았습니다(운영자 설정 필요)"를 말하게 한다. 재시도 루프를 돌리지 않는다 — 재시도로 해결되는 상태가 아니다 | `server-rust/bins/momo-server/src/routes/realtime.rs::issue_token`, `clients/web/src/lib/api.ts:698`, `lib/realtime.ts:659` |
+| R-2 | `info` | **`routing` 선택기 잠금은 정상이다** — Rust 서버에서 `probeSendRouting`은 `400 "rootId (thread replies) is not served by momo-server yet"`을 받고 판정이 `unknown`으로 떨어져 컴포저의 모델/추론강도 선택기가 잠긴다 | **아무것도 하지 않는다.** 서버 검사 순서를 뒤집어 프로브를 `ready`로 만들면 선택기는 열리지만 실제 전송은 전부 400이다 — 갭을 닫는 게 아니라 거짓말이 된다. `routing` 실구현 배치까지 잠금 유지 | diff 문서 §4.1, `routes/messages.rs:117-140`, `features/routing/capability.ts:197-224` |
+| R-3 | `info` | **이름 표시 저하** — `GET …/roster`가 Rust 서버에 없어 `useDirectory`가 빈 디렉터리로 폴백한다. 타임라인·사이드바가 uuid 파생 라벨을 쓴다(렌더는 막히지 않음) | 새 폴백 UI를 만들지 않는다. roster 배치 랜딩 시 자동 복구 | diff 문서 §7 D-1 |
+| R-4 | `info` | **Rust 백엔드에서 404인 라우트** — 설정 전체(프로바이더 링크/체인/엔진/티어정책/초대/워크스페이스), 승인, 워크스트림, 에이전트 허브, 플러그인, 메모리, 허들, 스레드 답글, 채널 생성 | 도그푸딩 시연 범위에서 제외한다. 이 라우트들의 오류 상태를 "버그"로 리포트하지 않는다 | diff 문서 §4·§7 |
+| R-5 | `info` | **운영 전제 변경** — Rust `api` 컨테이너에 `CENT_TOKEN_HMAC`·`CENT_PROXY_SECRET`을 centrifugo와 **같은 값으로** 주입해야 실시간이 열린다. 하나라도 없으면 connection 토큰 503 / subscribe 콜백 401로 fail-closed | 빌드 고지 시 "실시간 되는 스택인지" 확인. UI 변경 없음 | `infra/rust/docker-compose.rust.yml` (B4에서 반영) |
 
 ## B. 엔진 역요청 — 전량 완료 (main)
 

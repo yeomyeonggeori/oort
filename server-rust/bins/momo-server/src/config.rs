@@ -59,6 +59,9 @@ pub struct Config {
     /// AgentGateway settings — **`worker` mode unless the operator selects
     /// `gateway`** (B2.6).
     pub agent_gateway: AgentGatewaySettings,
+    /// Centrifugo connection-token / subscribe-proxy settings — **fail-closed
+    /// unless the operator supplies the two secrets** (B4).
+    pub realtime: RealtimeSettings,
 }
 
 /// MOMO-325 native gateway mode (Swift `AgentGatewayMode`, `Config.swift:150-155`).
@@ -222,6 +225,89 @@ pub fn constant_time_eq(lhs: &str, rhs: &str) -> bool {
     diff == 0
 }
 
+/// Process-level **realtime** configuration (B4).
+///
+/// Two secrets, two different jobs, and neither has a baked-in default — the
+/// same rule the rest of this file follows. `infra/prod/docker-compose.prod.yml`
+/// already injects both into the `api` service (:159, :164), so this reads the
+/// deployed spelling rather than inventing one.
+///
+/// * `CENT_TOKEN_HMAC` signs the short-lived Centrifugo **connection** token.
+///   Distinct from `JWT_HMAC` on purpose (Swift registers them under separate
+///   kids, `Auth/JWT.swift:104-113`): one key for the broker, one for REST, so a
+///   broker-side leak cannot mint API access tokens.
+/// * `CENT_PROXY_SECRET` authenticates Centrifugo's **subscribe proxy**
+///   callback. Absent, the callback route refuses every request — network
+///   position alone never authenticates it (MOMO-300).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RealtimeSettings {
+    /// `CENT_TOKEN_HMAC`. `None` = this instance cannot issue connection tokens
+    /// and `POST /v1/auth/realtime-token` answers 503.
+    pub cent_token_hmac: Option<String>,
+    /// `CENT_PROXY_SECRET`. `None` = every subscribe callback is a 401.
+    pub cent_proxy_secret: Option<String>,
+    /// `CENT_CONNECTION_TOKEN_TTL_SECONDS`, clamped by
+    /// [`clamp_connection_token_ttl`] (Swift default 300).
+    pub connection_token_ttl_seconds: i64,
+}
+
+/// Connection-token TTL bounds, Swift `Config.clampedCentConnectionTokenTTL`
+/// (`Config.swift:138-140`) verbatim: `[60s, 30m]`.
+///
+/// Both ends are real. Below the floor every reconnect becomes a token fetch,
+/// so a flaky network turns into a request storm against the auth path. Above
+/// the ceiling a revoked session keeps a *usable* connection token for as long
+/// as the operator typed, which is the window the whole `meta.token_id` binding
+/// exists to keep short.
+pub fn clamp_connection_token_ttl(seconds: i64) -> i64 {
+    seconds.clamp(60, 30 * 60)
+}
+
+impl RealtimeSettings {
+    pub fn from_env() -> RealtimeSettings {
+        RealtimeSettings {
+            cent_token_hmac: env("CENT_TOKEN_HMAC"),
+            cent_proxy_secret: env("CENT_PROXY_SECRET"),
+            connection_token_ttl_seconds: clamp_connection_token_ttl(
+                env("CENT_CONNECTION_TOKEN_TTL_SECONDS")
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .unwrap_or(momo_auth::CONNECTION_TOKEN_TTL_SECONDS),
+            ),
+        }
+    }
+
+    /// Swift `Config.validateSecurityForBoot` (:163-180) for the one key it
+    /// checks here: in a **strict** environment a missing or placeholder
+    /// `CENT_PROXY_SECRET` is a boot error, because both outcomes are bad and
+    /// silent — either nobody can subscribe, or (had we skipped verification)
+    /// anybody could forge the callback. Local/dev is left alone, exactly like
+    /// Swift, so a laptop stack still boots on the committed placeholder.
+    pub fn boot_error(&self, environment: &str) -> Option<&'static str> {
+        if !requires_strict_secrets(environment) {
+            return None;
+        }
+        let usable = self
+            .cent_proxy_secret
+            .as_deref()
+            .is_some_and(|secret| !is_unsafe_secret(secret));
+        if usable {
+            None
+        } else {
+            Some("CENT_PROXY_SECRET is missing or uses a placeholder/dev value")
+        }
+    }
+}
+
+/// Swift `AgentProviderConfig.requiresStrictExternalProvider`
+/// (`Config.swift:637-644`), verbatim: the deployed environments where a
+/// placeholder secret is a boot error rather than a developer convenience.
+pub fn requires_strict_secrets(environment: &str) -> bool {
+    matches!(
+        environment.trim().to_ascii_lowercase().as_str(),
+        "staging" | "prod" | "production" | "internal-host"
+    )
+}
+
 /// Process-level T3 configuration (B2.2).
 ///
 /// Port of Swift `CloudProviderSettings.load` + `requireReady`
@@ -343,15 +429,25 @@ impl Config {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
+        let environment = env_or("MOMO_ENV", "local");
+        // B4: same fail-the-boot posture. An instance that advertises a realtime
+        // rail whose proxy callback can never be authenticated would look healthy
+        // and serve nothing.
+        let realtime = RealtimeSettings::from_env();
+        if let Some(message) = realtime.boot_error(&environment) {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
             db,
             jwt_secret,
-            environment: env_or("MOMO_ENV", "local"),
+            environment,
             realtime_ws_url: realtime_ws_url_from_env()?,
             t3: T3Settings::from_env(),
             agent_gateway,
+            realtime,
         })
     }
 }
@@ -535,6 +631,82 @@ mod tests {
         assert_eq!(choose_log_filter(None, Some("debug")), "debug");
         assert_eq!(choose_log_filter(Some("warn"), Some("debug")), "warn");
         assert_eq!(choose_log_filter(None, Some(" info ")), "info");
+    }
+
+    // -- B4 realtime -------------------------------------------------------
+
+    fn realtime(proxy_secret: Option<&str>) -> RealtimeSettings {
+        RealtimeSettings {
+            cent_token_hmac: None,
+            cent_proxy_secret: proxy_secret.map(str::to_string),
+            connection_token_ttl_seconds: momo_auth::CONNECTION_TOKEN_TTL_SECONDS,
+        }
+    }
+
+    /// The default must be the closed one: an instance that configured nothing
+    /// cannot mint a connection token and cannot authenticate a proxy callback.
+    #[test]
+    fn the_realtime_rail_is_shut_unless_the_operator_supplies_both_secrets() {
+        let default = RealtimeSettings::default();
+        assert!(default.cent_token_hmac.is_none());
+        assert!(default.cent_proxy_secret.is_none());
+    }
+
+    /// Swift throws at boot for a placeholder proxy secret in a deployed
+    /// environment, and tolerates it locally. Both halves matter: the first
+    /// stops a stack that would either deny everything or accept a forged
+    /// callback, the second keeps a laptop bootable.
+    #[test]
+    fn a_placeholder_proxy_secret_is_a_boot_error_only_in_strict_environments() {
+        for environment in ["staging", "prod", "production", "internal-host", "PROD"] {
+            assert!(
+                realtime(None).boot_error(environment).is_some(),
+                "{environment}: a missing CENT_PROXY_SECRET must fail the boot"
+            );
+            assert!(
+                realtime(Some("dev-insecure-cent-proxy-secret"))
+                    .boot_error(environment)
+                    .is_some(),
+                "{environment}: the committed placeholder must fail the boot"
+            );
+            assert!(
+                realtime(Some("Zk3-a-real-rotated-value"))
+                    .boot_error(environment)
+                    .is_none(),
+                "{environment}: a real secret boots"
+            );
+        }
+        for environment in ["local", "dev-machine", ""] {
+            assert!(
+                realtime(None).boot_error(environment).is_none(),
+                "{environment}: local is not strict"
+            );
+        }
+    }
+
+    /// Swift's exact bounds. A 5-second token would make every reconnect a
+    /// token fetch; a day-long one would outlive the revocation it is bound to.
+    #[test]
+    fn the_connection_token_ttl_is_clamped_to_swifts_window() {
+        assert_eq!(clamp_connection_token_ttl(300), 300);
+        assert_eq!(clamp_connection_token_ttl(5), 60);
+        assert_eq!(clamp_connection_token_ttl(0), 60);
+        assert_eq!(clamp_connection_token_ttl(-1), 60);
+        assert_eq!(clamp_connection_token_ttl(86_400), 1_800);
+        assert_eq!(
+            clamp_connection_token_ttl(momo_auth::CONNECTION_TOKEN_TTL_SECONDS),
+            momo_auth::CONNECTION_TOKEN_TTL_SECONDS,
+            "the default must survive its own clamp"
+        );
+    }
+
+    #[test]
+    fn strict_environments_are_the_deployed_ones() {
+        assert!(requires_strict_secrets("prod"));
+        assert!(requires_strict_secrets(" Staging "));
+        assert!(requires_strict_secrets("internal-host"));
+        assert!(!requires_strict_secrets("local"));
+        assert!(!requires_strict_secrets("test"));
     }
 
     // -- B2.6 agent gateway ------------------------------------------------
