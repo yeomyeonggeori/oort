@@ -1,5 +1,7 @@
 # B4 — 클라이언트 소비 API 표면 × Rust 서버 계약 diff 매트릭스
 
+> **갱신 2026-07-31 (B4.1)**: 도그푸딩 차단분 5쌍을 서버측으로 마감했다. 재분류·게이트 판정은 **§9**가 정본이고, §0~§8은 B4 시점의 측정 기록으로 남긴다(§4.1과 §7의 표는 §9의 델타를 함께 읽어야 현재 사실이 된다).
+>
 > 측정일 2026-07-31 · 측정 대상 `feat/B4-rewire`(base `track/engine` @ `dba8a44f`)
 > 측정 방법: 클라이언트 코드에서 경로 리터럴 전수 추출 → 각 호출부의 요청/응답 필드 판독 → `server-rust/bins/momo-server/src/lib.rs` 라우트 테이블 및 각 route/DTO와 대조.
 > **원칙**: 갭은 서버(Rust)를 고쳐 닫는다. Swift 서버 계약 = 정답, 클라가 이미 쓰는 형태가 기준.
@@ -226,3 +228,71 @@ Rust 서버에 라우트가 없다. 클라는 404를 받고 각 화면의 오류
 | conformance smoke | `bins/momo-server/tests/client_rewire_smoke_pg.rs` — `#[ignore]` 2건(docker 미실행, 작성만) |
 
 `client_rewire_smoke_pg.rs`는 **서버 표면이 아니라 클라이언트 시퀀스로** 구성돼 있다: 웹이 부르는 8개 호출을 부르는 순서 그대로 재생하고, 3단계에서는 **Centrifugo 역할을 직접 수행**한다(브로커의 HMAC 키로 connection 토큰을 검증 → `meta`를 꺼내 → proxy secret 헤더를 붙여 콜백). 마지막에 REST 절반과 실시간 절반을 **직접 접합**한다 — 전송이 쓴 `outbox` 행의 `payload.channel`이 3단계에서 인가한 Centrifugo 채널 문자열과 같아야 한다. 이 둘이 어긋나면 위의 모든 호출이 통과하면서 메시지는 영영 도착하지 않는다.
+
+---
+
+## 9. B4.1 재분류 — 도그푸딩 차단분 마감 (2026-07-31)
+
+> 대상 `feat/B41-dogfood`(base `track/engine` @ `98c52194`). §1.2의 판정 기준을 그대로 쓰되, **①의 "도그푸딩 1차 시퀀스"를 실제 사용자 행동 순서로 확장**했다: 로그인 → **누가 있는지** → **방 만들기** → 대화(스레드 포함) → 읽음 → 실시간 → **설정 읽기**. B4가 "부팅해서 말할 수 있는가"를 닫았다면 B4.1은 "그 다음 한 시간을 보낼 수 있는가"를 닫는다.
+
+### 9.1 마감한 표면 — 미구현 51 → 46
+
+| # | 메서드 · 경로 | 원 분류 | 클라 호출부 | Rust 구현 |
+|---|---|---|---|---|
+| 1 | `GET /v1/workspaces/{ws}/roster` (+ `…/members` 별칭) | 워크스페이스·명부 (D-1) | `api.ts:784` `fetchRoster` | `momo_messaging::list_workspace_roster` + `routes/roster.rs` |
+| 2 | `POST /v1/workspaces/{ws}/channels` | 채널 생성 (D-7) | `api.ts:750` `createChannel` | `momo_messaging::create_channel_detailed_in_tx` + `routes/channels.rs::create` |
+| 3 | `POST …/channels/{ch}/messages` (`rootId` 동반) | 스레드·라우팅 (D-2) | `api.ts:1202` `sendThreadReply` | 기존 send 경로 + `validate_thread_root_in_tx` · `ThreadPolicy::Maintain` |
+| 4 | `GET …/channels/{ch}/messages/{root}/replies` | 스레드·라우팅 (D-2) | `api.ts:1131` `fetchThreadReplies` | `momo_messaging::list_thread_replies` + `routes/messages.rs::replies` |
+| 5 | `GET /v1/workspaces/{ws}` | 워크스페이스·명부 (D-3 일부) | `settings/api.ts:399` `fetchWorkspace` | `read_workspace_for_active_member` + `routes/workspaces.rs` |
+
+**68쌍 밖 +1**: `PUT …/channels/{ch}/notification-pref`. 웹 정본은 이 경로를 부르지 않지만(그래서 68쌍에 없다) macOS·iOS가 부르고(`MomoServerRESTChatBackend.swift:684`, `MomoServerConversationClient.swift:189`), 무엇보다 **B4가 이미 발행하고 있는 `muted` 필드의 유일한 쓰기 지점**이다. 읽기만 있는 설정은 보여줄 수는 있어도 바꿀 수 없는 설정이다.
+
+| 분류 | B4 | **B4.1** | 뜻 |
+|---|---|---|---|
+| 동일 | 14 | 14 | 변동 없음 |
+| 서버측 마감(누계) | 3 | **8** | B4 3 + B4.1 5 |
+| 미구현 표면 | 51 | **46** | 5쌍 감소 |
+| UI 수정 필요 | 0 | **0** | B4.1도 클라 수정 요구 0건 — UI 파일 무접촉 |
+| (68쌍 밖) 추가 마감 | — | **1** | `notification-pref`(mac/iOS 소비 + `muted`의 쓰기 반쪽) |
+
+영역별 잔여: 초대 가입 1 · 워크스페이스·명부 **3**(`POST /v1/workspaces` · `GET·POST …/invites`) · 채널 생성 **0** · 스레드·라우팅 **1**(`routing`만) · 승인 2 · 워크스트림 3 · 에이전트 7 · 메모리 4 · 플러그인 6 · 허들 4 · 프로바이더·설정 15 = **46**.
+
+### 9.2 §4.1 델타 — `routing` 프로브 판정이 `unknown` → `absent`로 바뀐다
+
+§4.1이 기록한 `unknown` 판정은 **`rootId`가 먼저 거절당했기 때문에** 나온 값이었다. `rootId`를 서빙하는 순간 그 우연은 사라지고, 검사 순서가 **결정**이 된다:
+
+- 만약 `routing` 거절을 먼저 답하면 → `400 "routing is not served by momo-server yet"` → `/routing/i` 매칭 → 판정 **`ready`** → 컴포저가 모델/강도 선택기를 열고, 그 선택기로 보낸 모든 전송이 400. **§4.1이 금지한 바로 그 거짓말이다.**
+- 실제 구현: **존재하지 않는 root를 먼저 답한다** → `404 "thread root not found"` → 판정 **`absent`** → 선택기 미노출, 「다시 확인」 없음.
+
+`absent`는 `unknown`보다 **정확하다**. 이 서버에는 routing 축이 없고, 「다시 확인」은 다시 확인해도 달라지지 않는다. 순서는 `routes/messages.rs::thread_root_then_routing`에 한 함수로 격리했고, `the_routing_probe_is_answered_by_the_root_not_by_routing`가 뒤집히면 red다. **`routing`을 실제로 구현하는 배치가 그 함수를 지운다.**
+
+원칙으로 적으면: **대상 해석(404)이 기능 협상(400)보다 앞선다.** 없는 것에 대고 "그 기능은 지원 안 합니다"라고 답하지 않는다.
+
+### 9.3 §7 D-표 갱신
+
+| # | 차단 | B4.1 판정 |
+|---|---|---|
+| D-1 | roster 부재 | **해소.** 사람·에이전트 이름 복원(웹 `isRosterMember`가 요구하는 키 전량 발행) |
+| D-2 | 스레드 부재 | **해소.** 답글 전송·조회·롤업(history 동승)·`thread.updated` 발행 |
+| D-3 | 설정 전체 404 | **부분 해소.** 워크스페이스 이름/`updatedAtMs` 읽기 + 채널 음소거 쓰기는 열림. **AI 연결·체인·티어 정책·초대·워크스페이스 생성/이름변경은 여전히 404** |
+| D-4 | 승인·에이전트 허브·플러그인·워크스트림·메모리 | 미변동 |
+| D-5 | 에이전트 실행 경로 미검증 | 미변동 |
+| D-6 | `routing` 선택기 | **표현이 바뀜**: 잠금+「다시 확인」 → 조용한 미노출(§9.2). 여전히 **고치면 안 됨** |
+| D-7 | 채널 생성 404 | **해소.** 201/409/400, 생성자 `owner` 멤버십 동봉 |
+
+### 9.4 도그푸딩 게이트 판정
+
+> **판정: 도그푸딩 1차 시퀀스 차단분 = 0. 단, 코드상 판정이며 런타임 미검증(`runtime-unverified`).**
+
+- **닫힌 시퀀스**: 로그인 → 세션 복원 → **명부(누가 있는지)** → 채널 목록 → **채널 생성** → 진입 → 히스토리 · 갭 힐 → 전송(멱등) → **스레드 왕복(답글 전송·조회·배지)** → 읽음 커서 → 실시간 토큰 → `ch:` 구독 인가 → `message.new`·`thread.updated` 수신 → DM → **설정 읽기(워크스페이스) · 음소거 토글** → 로그아웃(실시간 절단).
+- **남은 것은 시퀀스 차단이 아니라 화면 부재다**: 46쌍(설정 15 · 에이전트 7 · 플러그인 6 · 메모리 4 · 허들 4 · 워크스트림 3 · 초대·명부 4 · 승인 2 · `routing` 1)은 각각 그 화면을 못 열게 하지만, 위 시퀀스를 막지는 않는다. **2차 도그푸딩(에이전트를 실제로 일 시키기)은 D-4/D-5가 열려야 한다.**
+- **판정의 한계, 정직하게**: 이 배치의 검증은 `cargo check/test/fmt/clippy` + 구조 grep + `#[ignore]` conformance **작성**까지다. docker 스택을 띄운 실행은 하지 않았다(패킷 규율). 따라서 위 시퀀스는 **"서버 코드가 그 순서를 서빙하도록 쓰였다"**는 뜻이고, **"실제로 한 바퀴 돌았다"**는 뜻이 아니다. 후자는 아래 red 절차를 오케스트레이터가 돌려야 확정된다.
+
+**red 절차(오케스트레이터, docker 필요)**
+```bash
+cd server-rust
+DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
+  cargo test -p momo-server --test client_rewire_smoke_pg -- --ignored --nocapture
+```
+- `the_dogfooding_sequence_round_trips` — 로그인→roster(`kind` 필터·`/members` 별칭 포함)→채널 생성(201/409/400)→routing 프로브 404 단정→스레드 왕복(2단 답글 400)→롤업 snake_case 단정→`thread.updated` outbox(no-`version`) 단정→워크스페이스 읽기→음소거 왕복+audit 2행+비멤버 403.
+- `a_foreign_tenants_rows_are_zero_under_the_callers_guc` — 타 테넌트의 roster·channels·replies·rollup·workspace read가 **0행/NotFound**, 같은 질의가 소유 테넌트 GUC에서는 행을 찾는다(질의가 깨진 게 아니라 경계가 막은 것임을 증명).

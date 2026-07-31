@@ -102,6 +102,9 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         client_msg_id: None,
         created_at_ms: event.created_at_ms,
         state: Some(event.state),
+        // A replayed row is a reply inside the session thread, and a reply
+        // carries no rollup of its own — momo threads are one level deep.
+        thread: None,
     }
 }
 

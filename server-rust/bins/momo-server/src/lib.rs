@@ -137,9 +137,33 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages",
             post(routes::messages::send).get(routes::messages::history),
         )
+        // B4.1 — one level of threads, the way the client already asks for them:
+        // replies are read here and written through the send above with a
+        // `rootId`. There is no second write path.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies",
+            get(routes::messages::replies),
+        )
         // B4 — the client's first authenticated read after login. Without it the
         // sidebar has nothing and there is no way into a conversation.
-        .route("/v1/workspaces/{ws}/channels", get(routes::channels::list))
+        // B4.1 adds the write beside it (D-7): a dogfooding workspace that
+        // cannot grow past its seeded channels is not being used.
+        .route(
+            "/v1/workspaces/{ws}/channels",
+            get(routes::channels::list).post(routes::channels::create),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/notification-pref",
+            put(routes::channels::notification_pref),
+        )
+        // B4.1 — the roster. Not a feature: without it every message, mention
+        // and sidebar row is labelled with a uuid prefix (diff matrix D-1).
+        // Swift serves the same handler at both paths (`RosterRoutes.swift:18-19`).
+        .route("/v1/workspaces/{ws}/roster", get(routes::roster::roster))
+        .route("/v1/workspaces/{ws}/members", get(routes::roster::roster))
+        // B4.1 — the settings panel's first read (workspace name + the rename
+        // endpoint's concurrency token).
+        .route("/v1/workspaces/{ws}", get(routes::workspaces::get))
         // B4 — the Centrifugo connection token (Swift mounts it protected too:
         // `AuthRoutes.addProtected`, :46-49).
         .route(

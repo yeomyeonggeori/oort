@@ -74,6 +74,20 @@
 | R-4 | `info` | **Rust 백엔드에서 404인 라우트** — 설정 전체(프로바이더 링크/체인/엔진/티어정책/초대/워크스페이스), 승인, 워크스트림, 에이전트 허브, 플러그인, 메모리, 허들, 스레드 답글, 채널 생성 | 도그푸딩 시연 범위에서 제외한다. 이 라우트들의 오류 상태를 "버그"로 리포트하지 않는다 | diff 문서 §4·§7 |
 | R-5 | `info` | **운영 전제 변경** — Rust `api` 컨테이너에 `CENT_TOKEN_HMAC`·`CENT_PROXY_SECRET`을 centrifugo와 **같은 값으로** 주입해야 실시간이 열린다. 하나라도 없으면 connection 토큰 503 / subscribe 콜백 401로 fail-closed | 빌드 고지 시 "실시간 되는 스택인지" 확인. UI 변경 없음 | `infra/rust/docker-compose.rust.yml` (B4에서 반영) |
 
+### R′. B4.1 도그푸딩 차단분 마감 (2026-07-31, `feat/B41-dogfood` → track/engine)
+
+> 근거 정본 `docs/planning/2026-08-01-b4-contract-diff.md` **§9**. **UI 파일은 한 줄도 건드리지 않았다** — 아래는 전부 "이제 이 화면이 실데이터로 열린다"는 가용성 통지이며, R-1 외에 UXUI에 요구하는 코드 수정은 여전히 0건이다.
+
+| # | 상태 | 항목 | UI가 할 일 | 근거 |
+|---|---|---|---|---|
+| R-6 | `ready` | **roster 복구(R-3 해소)** — `GET …/roster`(+`…/members` 별칭) 랜딩. 웹 `isRosterMember`가 요구하는 키(`channelCount`·`channelIds`·`capabilities`·`createdAtMs`·`updatedAtMs`)를 **빈 값이어도 생략하지 않고** 발행하므로 행이 조용히 드랍되지 않는다. 에이전트 행은 `origin`(`card`/`local`)·`agentModel`·`ownerHumanId` 동반. guest는 자기와 공유 채널의 멤버만 보이고, 그 좁힘이 `channelCount`/`channelIds`에도 같이 적용된다 | `useDirectory` 폴백 UI를 새로 만들지 않는다. 이름이 uuid 파생 라벨에서 실이름으로 자동 복구된다 | `routes/roster.rs`, `momo_messaging::list_workspace_roster`, diff §9.1 |
+| R-7 | `ready` | **채널 생성 개방(D-7)** — `POST …/channels` 201, 이름 충돌 409(대소문자 무시), 스펙 위반 400. 응답 `{channel, creatorMembership}`이고 생성자는 이미 `owner` 멤버십을 갖는다. **워크스페이스 owner/admin만** 생성 가능(ADR-0128 — 채널 권한이 아니라 워크스페이스 권한) | 사이드바의 채널 생성 액션을 실데이터로 개방 가능. 이름 규칙은 클라(`CreateChannelInput`)가 이미 같은 규칙으로 정규화하므로 400은 "둘이 어긋났다"는 신호다 | `routes/channels.rs::create`, `momo_messaging::normalize_channel_*`, diff §9.1 |
+| R-8 | `ready` | **스레드 개방(D-2)** — `rootId` 동반 전송, `GET …/messages/{root}/replies`(ASC, `cursor`/`limit`, `nextCursor`), history/replies에 `thread` 롤업 동승(**snake_case** `reply_count`/`last_reply_seq`/`last_reply_at` — `threadRollup()`이 읽는 그대로), 답글마다 `thread.updated` 브로드캐스트(**`version` 없음** — 답글의 `message.new`가 그 seq를 이미 점유했고 브로커는 비증가 version을 조용히 드랍한다). 2단 답글 400, 삭제된 root에 답글 400, 그러나 **삭제된 root의 답글 조회는 200**(대화의 종료가 기록의 삭제는 아니다) | 스레드 패널/배지를 실데이터로 개방 가능. `threadRollup()`은 무수정 | `routes/messages.rs::replies`, `momo_messaging::{list_thread_replies,build_thread_updated_payload}`, diff §9.1 |
+| R-9 | `ready` | **설정 최소분(D-3 부분)** — `GET /v1/workspaces/{ws}` → `{workspace:{id,slug,name,updatedAtMs}}`(rename의 낙관적 동시성 토큰 포함), `PUT …/channels/{ch}/notification-pref` → `{muted}`(본인 것만, 감사행 동반). **여전히 404**: AI 연결·체인·work-host-engine·티어 정책·초대·`POST /v1/workspaces`·`PATCH /v1/workspaces/{ws}` | 설정 패널의 워크스페이스 이름 섹션과 채널 음소거 토글만 개방. 나머지 섹션의 404는 계속 "이 백엔드 범위 밖"이며 버그 리포트 대상이 아니다 | `routes/workspaces.rs`, `routes/channels.rs::notification_pref`, diff §9.3 |
+| R-10 | `info` | **R-2 정정 — `routing` 프로브 판정이 `unknown` → `absent`.** `rootId`를 서빙하게 되면서 프로브의 답이 `400 rootId…`에서 `404 thread root not found`로 바뀌었다. 컴포저의 모델/강도 선택기는 **잠금+「다시 확인」이 아니라 조용한 미노출**이 된다 | **여전히 아무것도 하지 않는다.** 바뀐 것은 표현이지 사실이 아니다 — 이 서버에는 routing 축이 없고, `absent`가 `unknown`보다 정확하다(「다시 확인」해도 달라지지 않는 상태였다). 서버 검사 순서를 뒤집어 `ready`를 만들면 선택기는 열리지만 그 선택기로 보낸 전송은 전부 400 | diff §9.2, `routes/messages.rs::thread_root_then_routing` |
+| R-11 | `info` | **R-4 축소** — 404 목록에서 **roster·채널 생성·스레드 답글·워크스페이스 읽기**가 빠진다. 잔여 404: 설정(프로바이더 링크/체인/엔진/티어정책/초대/워크스페이스 생성·이름변경), 승인, 워크스트림, 에이전트 허브, 플러그인, 메모리, 허들, `routing` — 46쌍 | 도그푸딩 시연 범위를 그만큼 넓힐 수 있다. 단 R-12가 닫히기 전까지는 "코드상 열림"이지 "돌려봤다"가 아니다 | diff §9.1·§9.4 |
+| R-12 | `blocked-on-verification` | **B4.1 런타임 미검증** — 이 배치는 docker 스택을 띄우지 않았다(패킷 규율). 도그푸딩 시퀀스 conformance는 **작성만** 됐고 `#[ignore]`다 | UXUI는 이 표면들로 성재에게 시연하기 전에 오케스트레이터의 docker red 절차 결과를 확인한다. 절차는 diff §9.4 | `bins/momo-server/tests/client_rewire_smoke_pg.rs`(`the_dogfooding_sequence_round_trips`, `a_foreign_tenants_rows_are_zero_under_the_callers_guc`) |
+
 ## B. 엔진 역요청 — 전량 완료 (main)
 
 B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · B-4 알림 음소거(ADR-0124, MOMO-477) — 2026-07-18 종결.

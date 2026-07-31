@@ -154,6 +154,40 @@ pub struct StoredMessage {
     pub created_at: DateTime<Utc>,
 }
 
+/// The reply rollup a client draws as "3 replies" under a root message
+/// (`thread`, `001_init.sql:202`; Swift `ThreadRollupDTO`, `DTOs.swift:186-197`).
+///
+/// Only ever present for a **root** message with at least one reply: a reply
+/// carries no rollup of its own (momo threads are one level, like Slack's), and
+/// a root with `reply_count = 0` carries none either, because the badge's
+/// absence is what "no thread here" looks like.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThreadRollup {
+    pub reply_count: i32,
+    pub last_reply_seq: i64,
+    pub last_reply_at_ms: i64,
+}
+
+/// Swift `MessageRoutes.threadRollup` (:990-1006): all three parts or nothing.
+/// A `reply_count` without a `last_reply_seq` is a half-written rollup, and
+/// emitting it would put a badge on a thread a client cannot then open.
+fn thread_rollup(
+    reply_count: Option<i32>,
+    last_reply_seq: Option<i64>,
+    last_reply_at_ms: Option<i64>,
+) -> Option<ThreadRollup> {
+    match (reply_count, last_reply_seq, last_reply_at_ms) {
+        (Some(reply_count), Some(last_reply_seq), Some(last_reply_at_ms)) if reply_count > 0 => {
+            Some(ThreadRollup {
+                reply_count,
+                last_reply_seq,
+                last_reply_at_ms,
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Outcome of [`send_message`] / [`send_message_in_tx`].
 #[derive(Debug, Clone)]
 pub struct SentMessage {
@@ -164,6 +198,11 @@ pub struct SentMessage {
     /// The `outbox.id` of the broadcast enqueued for this send, or `None` on a
     /// deduped retry (which emits nothing).
     pub outbox_id: Option<i64>,
+    /// The rollup for THIS message's own thread, present only when it is a root
+    /// that already has replies (Swift computes it for `rootID == nil` only,
+    /// `MessageRoutes.swift:326-333`). A reply never reports the thread it just
+    /// joined here — the `thread.updated` broadcast does that.
+    pub thread: Option<ThreadRollup>,
 }
 
 /// The `message.*` column list shared by insert-RETURNING and read queries, so a
@@ -260,6 +299,28 @@ pub fn build_broadcast_payload(
     };
     // Infallible: BroadcastPayload is a plain struct of JSON-native fields.
     serde_json::to_value(envelope).expect("broadcast payload serializes")
+}
+
+/// Whether a send maintains the `thread` rollup (B4.1). Private for the same
+/// reason as [`MentionPolicy`]: the caller chooses by picking an entry point.
+///
+/// **Measured, and the reason the spine keeps `Skip`:** in the Swift server the
+/// only `INSERT INTO thread` in the whole codebase is inside
+/// `MessageRoutes.send` (`MessageRoutes.swift:215`). The non-REST producers —
+/// work-session event cards, gateway completions — write messages that *do*
+/// carry a `root_id` and deliberately do **not** bump the rollup, because a
+/// session's event log is not a conversation someone replied to. Making the
+/// spine maintain the rollup would put a "1,283 replies" badge on every work
+/// session card. So this is Swift parity, not a shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThreadPolicy {
+    /// The B1 spine's behaviour, unchanged: no rollup write, no `thread.updated`
+    /// publication, no rollup on the response.
+    Skip,
+    /// Swift `MessageRoutes.send`: bump the root's rollup, publish
+    /// `thread.updated` beside the reply, and answer a root send with its own
+    /// current rollup.
+    Maintain,
 }
 
 /// Whether a send parses `@mentions` out of its body before broadcasting
@@ -368,12 +429,18 @@ async fn finish_send_in_tx(
     mut message: StoredMessage,
     deduped: bool,
     mentions: MentionPolicy,
+    threads: ThreadPolicy,
 ) -> Result<SentMessage, DbError> {
     if deduped {
+        // A retry still reports the root's rollup: the caller asked "what is
+        // this message", and the answer includes the thread hanging under it,
+        // whether or not this particular call created anything.
+        let thread = own_thread_rollup(&mut *conn, &message, threads).await?;
         return Ok(SentMessage {
             message,
             deduped,
             outbox_id: None,
+            thread,
         });
     }
 
@@ -413,6 +480,26 @@ async fn finish_send_in_tx(
         }
     }
 
+    // The rollup is bumped BEFORE the broadcast is enqueued, so the
+    // `thread.updated` row that follows describes a `thread` row that already
+    // exists in this transaction — and so a rolled-back reply takes its rollup
+    // increment with it. Swift's order exactly (`MessageRoutes.swift:209-281`).
+    let updated_thread = match (threads, message.root_id) {
+        (ThreadPolicy::Maintain, Some(root_id)) => Some(
+            bump_thread_rollup_in_tx(
+                &mut *conn,
+                workspace_id,
+                message.channel_id,
+                root_id,
+                message.seq,
+                message.created_at,
+                message.author_member_id,
+            )
+            .await?,
+        ),
+        _ => None,
+    };
+
     let payload = build_broadcast_payload(
         workspace_id,
         message.channel_id,
@@ -436,11 +523,42 @@ async fn finish_send_in_tx(
     )
     .await?;
 
+    // Additive second publication on the same channel, same partition key, so
+    // the relay keeps it behind the reply it describes.
+    if let (Some(root_id), Some(rollup)) = (message.root_id, updated_thread) {
+        let thread_payload =
+            build_thread_updated_payload(workspace_id, message.channel_id, root_id, &rollup);
+        emit_outbox(
+            &mut *conn,
+            workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &thread_payload,
+            Some(message.channel_id),
+        )
+        .await?;
+    }
+
+    let thread = own_thread_rollup(&mut *conn, &message, threads).await?;
     Ok(SentMessage {
         message,
         deduped,
         outbox_id: Some(outbox_id),
+        thread,
     })
+}
+
+/// The rollup a send answers with: the message's OWN thread, and only when the
+/// message is a root (Swift `responseThread`, :326-333).
+async fn own_thread_rollup(
+    conn: &mut PgConnection,
+    message: &StoredMessage,
+    threads: ThreadPolicy,
+) -> Result<Option<ThreadRollup>, DbError> {
+    match (threads, message.root_id) {
+        (ThreadPolicy::Maintain, None) => fetch_thread_rollup_in_tx(conn, message.id).await,
+        _ => Ok(None),
+    }
 }
 
 /// The write-path spine, running on a caller-supplied connection so it composes
@@ -452,7 +570,15 @@ pub async fn send_message_in_tx(
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
     let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
-    finish_send_in_tx(conn, workspace_id, message, deduped, MentionPolicy::Skip).await
+    finish_send_in_tx(
+        conn,
+        workspace_id,
+        message,
+        deduped,
+        MentionPolicy::Skip,
+        ThreadPolicy::Skip,
+    )
+    .await
 }
 
 /// The REST send path's spine (B1.2): [`send_message_in_tx`] plus the mention
@@ -465,9 +591,16 @@ pub async fn send_message_in_tx(
 ///    a client can sign what it sent. Recording after the mention pass would
 ///    make every mentioning message fail verification, since no client can
 ///    predict the ids the server is about to add;
-/// 3. **mentions, then broadcast** — the payload carries
+/// 3. **mentions, then the thread rollup, then broadcast** — the payload carries
 ///    `props.mention_member_ids` exactly like Swift's, so a realtime client
-///    highlights a mention without a second fetch.
+///    highlights a mention without a second fetch; and when the send is a reply,
+///    the root's rollup is bumped first so the `thread.updated` publication
+///    committed beside the reply describes a row that already exists.
+///
+/// The caller must have validated the `root_id` (see
+/// [`validate_thread_root_in_tx`]) before calling this: the rollup bump takes
+/// the root's row lock and would happily create one for a root in another
+/// channel.
 ///
 /// A rejected signature travels in the `Ok` half (see [`ProvenanceRejected`]);
 /// the caller must roll the transaction back so a refused assertion cannot leave
@@ -504,8 +637,15 @@ pub async fn send_message_with_mentions_in_tx(
         }
     }
 
-    let sent =
-        finish_send_in_tx(conn, workspace_id, message, deduped, MentionPolicy::Record).await?;
+    let sent = finish_send_in_tx(
+        conn,
+        workspace_id,
+        message,
+        deduped,
+        MentionPolicy::Record,
+        ThreadPolicy::Maintain,
+    )
+    .await?;
     Ok(Ok(sent))
 }
 
@@ -755,6 +895,47 @@ pub fn clamp_history_limit(limit: Option<i64>) -> i64 {
         .clamp(1, HISTORY_LIMIT_MAX)
 }
 
+/// A history row plus the reply rollup that rides with it (Swift's history
+/// `LEFT JOIN thread`, `MessageRoutes.swift:397-398`).
+///
+/// The rollup travels on the page rather than behind a second request because
+/// the alternative is one round trip per visible root message just to decide
+/// whether to draw a badge — the "2-hop closure" the web client's `Message`
+/// type is written against (`clients/web/src/lib/api.ts:165-171`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PagedMessage {
+    pub message: StoredMessage,
+    /// Present only for a root message with replies.
+    pub thread: Option<ThreadRollup>,
+}
+
+/// The history/replies column list with the rollup join attached. Column names
+/// are unqualified in the result set, so [`decode_stored`] reads it unchanged.
+const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m.hlc_count, \
+     m.author_member_id, m.type::text AS message_type, m.state::text AS state, m.body, m.props, \
+     m.root_id, m.created_at, t.reply_count, t.last_reply_seq, \
+     CASE WHEN t.last_reply_at IS NULL THEN NULL \
+          ELSE floor(extract(epoch from t.last_reply_at) * 1000)::bigint \
+     END AS last_reply_at_ms";
+
+/// The join predicate. `m.root_id IS NULL` is not redundant with
+/// `t.root_id = m.id`: a reply's id could in principle key its own `thread` row,
+/// and this clause is what keeps momo threads one level deep in the projection
+/// as well as in the write path.
+const PAGED_THREAD_JOIN: &str =
+    "LEFT JOIN thread t ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0";
+
+fn decode_paged(row: &sqlx::postgres::PgRow) -> Result<PagedMessage, sqlx::Error> {
+    Ok(PagedMessage {
+        message: decode_stored(row)?,
+        thread: thread_rollup(
+            row.try_get("reply_count")?,
+            row.try_get("last_reply_seq")?,
+            row.try_get("last_reply_at_ms")?,
+        ),
+    })
+}
+
 /// Read one page of a channel's history with Swift's ordering and cursor
 /// semantics ([`HistoryCursor`]).
 ///
@@ -767,16 +948,16 @@ pub async fn list_channel_page(
     channel_id: Uuid,
     cursor: HistoryCursor,
     limit: i64,
-) -> Result<Vec<StoredMessage>, DbError> {
+) -> Result<Vec<PagedMessage>, DbError> {
     let (predicate, order) = match cursor {
         HistoryCursor::Newest => ("", "DESC"),
-        HistoryCursor::Before(_) => ("AND seq < $3 ", "DESC"),
-        HistoryCursor::After(_) => ("AND seq > $3 ", "ASC"),
+        HistoryCursor::Before(_) => ("AND m.seq < $3 ", "DESC"),
+        HistoryCursor::After(_) => ("AND m.seq > $3 ", "ASC"),
     };
     let sql = format!(
-        "SELECT {STORED_COLS} FROM message \
-          WHERE channel_id = $1 {predicate}\
-          ORDER BY seq {order} \
+        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} \
+          WHERE m.channel_id = $1 {predicate}\
+          ORDER BY m.seq {order} \
           LIMIT $2"
     );
     let mut query = sqlx::query(&sql).bind(channel_id).bind(limit);
@@ -786,9 +967,327 @@ pub async fn list_channel_page(
     }
     let rows = query.fetch_all(&mut *conn).await?;
     rows.iter()
-        .map(decode_stored)
+        .map(decode_paged)
         .collect::<Result<_, _>>()
         .map_err(DbError::from)
+}
+
+// ---------------------------------------------------------------------------
+// threads (B4.1 — Swift `MessageRoutes.replies` + the send's rootId branch)
+// ---------------------------------------------------------------------------
+
+/// Why a `rootId` was refused (Swift `MessageRoutes.swift:109-121` and
+/// `validateRepliesRoot`, :976-984).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ThreadRootInvalid {
+    /// No such message **in this channel**. Deliberately indistinguishable from
+    /// a root that exists in another channel: making those two answers differ
+    /// would turn the send endpoint into a cross-channel existence oracle for
+    /// anyone who can post anywhere in the workspace.
+    #[error("thread root not found")]
+    NotFound,
+    /// The root is a tombstone. Replying under a deleted message would resurrect
+    /// a conversation the author ended.
+    #[error("thread root is deleted")]
+    Deleted,
+    /// The root is itself a reply. momo threads are one level (Slack's model):
+    /// allowing a second level would make "the thread" ambiguous for every
+    /// reader and every rollup.
+    #[error("thread root must be a top-level message")]
+    NotTopLevel,
+}
+
+/// What a `rootId` actually resolves to in a channel. One read, two different
+/// questions asked of it — see [`validate_thread_root_in_tx`] (writing) and
+/// [`validate_replies_root_in_tx`] (reading).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadRootState {
+    /// No such message in this channel.
+    Missing,
+    /// It exists but is a tombstone.
+    Deleted,
+    /// It exists but is itself a reply.
+    Reply,
+    /// A live top-level message.
+    Live,
+}
+
+/// Resolve a `rootId` inside the caller's transaction. The channel predicate is
+/// the non-disclosure boundary; see [`ThreadRootInvalid::NotFound`].
+///
+/// `Deleted` outranks `Reply` because that is Swift's check order
+/// (`MessageRoutes.swift:115-120`) and the two can co-occur.
+pub async fn thread_root_state_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    root_id: Uuid,
+) -> Result<ThreadRootState, DbError> {
+    let row = sqlx::query(
+        "SELECT state::text AS state, deleted_at, root_id \
+           FROM message \
+          WHERE id = $1 AND channel_id = $2 \
+          LIMIT 1",
+    )
+    .bind(root_id)
+    .bind(channel_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(ThreadRootState::Missing);
+    };
+    let state: String = row.try_get("state")?;
+    let deleted_at: Option<DateTime<Utc>> = row.try_get("deleted_at")?;
+    let parent_root: Option<Uuid> = row.try_get("root_id")?;
+    Ok(if state == "deleted" || deleted_at.is_some() {
+        ThreadRootState::Deleted
+    } else if parent_root.is_some() {
+        ThreadRootState::Reply
+    } else {
+        ThreadRootState::Live
+    })
+}
+
+/// The **write** side's reading of a root: a reply may only be attached to a
+/// live top-level message (Swift `MessageRoutes.send`, :95-121).
+pub async fn validate_thread_root_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    root_id: Uuid,
+) -> Result<Result<(), ThreadRootInvalid>, DbError> {
+    Ok(
+        match thread_root_state_in_tx(conn, channel_id, root_id).await? {
+            ThreadRootState::Live => Ok(()),
+            ThreadRootState::Missing => Err(ThreadRootInvalid::NotFound),
+            ThreadRootState::Deleted => Err(ThreadRootInvalid::Deleted),
+            ThreadRootState::Reply => Err(ThreadRootInvalid::NotTopLevel),
+        },
+    )
+}
+
+/// The **read** side's reading of the same root, and it is deliberately looser:
+/// a tombstoned root still has legible replies (Swift `validateRepliesRoot`,
+/// :976-984, checks existence and top-level-ness and nothing else). Deleting a
+/// root ends the conversation; it does not erase what was said under it.
+pub async fn validate_replies_root_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    root_id: Uuid,
+) -> Result<Result<(), ThreadRootInvalid>, DbError> {
+    Ok(
+        match thread_root_state_in_tx(conn, channel_id, root_id).await? {
+            ThreadRootState::Live | ThreadRootState::Deleted => Ok(()),
+            ThreadRootState::Missing => Err(ThreadRootInvalid::NotFound),
+            ThreadRootState::Reply => Err(ThreadRootInvalid::NotTopLevel),
+        },
+    )
+}
+
+/// Increment a root's rollup and return the post-increment state (Swift's
+/// `INSERT INTO thread … ON CONFLICT (root_id) DO UPDATE`, :213-239).
+///
+/// `ON CONFLICT DO UPDATE` takes the root row's lock, which is what makes
+/// concurrent replies serialize: two simultaneous replies cannot both read
+/// `reply_count = 4` and both write 5. `participant_ids` is appended only when
+/// the author is new to the thread, so it stays a set without a second read.
+async fn bump_thread_rollup_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    root_id: Uuid,
+    reply_seq: i64,
+    reply_at: DateTime<Utc>,
+    author_member_id: Uuid,
+) -> Result<ThreadRollup, DbError> {
+    let row = sqlx::query(
+        "INSERT INTO thread \
+           (root_id, workspace_id, channel_id, reply_count, last_reply_seq, \
+            last_reply_at, participant_ids) \
+         VALUES ($1, $2, $3, 1, $4, $5, ARRAY[$6]::uuid[]) \
+         ON CONFLICT (root_id) DO UPDATE \
+           SET reply_count = thread.reply_count + 1, \
+               last_reply_seq = EXCLUDED.last_reply_seq, \
+               last_reply_at = EXCLUDED.last_reply_at, \
+               participant_ids = CASE \
+                 WHEN EXCLUDED.participant_ids[1] = ANY(thread.participant_ids) \
+                   THEN thread.participant_ids \
+                 ELSE array_append(thread.participant_ids, EXCLUDED.participant_ids[1]) \
+               END \
+         RETURNING reply_count, last_reply_seq, \
+                   floor(extract(epoch from last_reply_at) * 1000)::bigint AS last_reply_at_ms",
+    )
+    .bind(root_id)
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(reply_seq)
+    .bind(reply_at)
+    .bind(author_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+
+    thread_rollup(
+        row.try_get("reply_count")?,
+        row.try_get("last_reply_seq")?,
+        row.try_get("last_reply_at_ms")?,
+    )
+    .ok_or_else(|| {
+        DbError::from(sqlx::Error::Decode(
+            "thread rollup update returned an incomplete row".into(),
+        ))
+    })
+}
+
+/// The current rollup for one root, or `None` when it has no replies.
+pub async fn fetch_thread_rollup_in_tx(
+    conn: &mut PgConnection,
+    root_id: Uuid,
+) -> Result<Option<ThreadRollup>, DbError> {
+    let row = sqlx::query(
+        "SELECT reply_count, last_reply_seq, \
+                floor(extract(epoch from last_reply_at) * 1000)::bigint AS last_reply_at_ms \
+           FROM thread \
+          WHERE root_id = $1 AND reply_count > 0 \
+          LIMIT 1",
+    )
+    .bind(root_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(thread_rollup(
+        row.try_get("reply_count")?,
+        row.try_get("last_reply_seq")?,
+        row.try_get("last_reply_at_ms")?,
+    ))
+}
+
+/// The additive `thread.updated` publication committed beside a reply (Swift
+/// `threadUpdatedPayload`, :2889-2924).
+///
+/// **No `version` key, deliberately.** The rollup reuses the reply's own seq,
+/// and Centrifugo silently drops a publish whose version is not strictly greater
+/// than the channel's stored version — which the reply's `message.new` has
+/// already claimed. Idempotency therefore rides on the key alone.
+pub fn build_thread_updated_payload(
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    root_id: Uuid,
+    rollup: &ThreadRollup,
+) -> Value {
+    let channel = cent_channel(workspace_id, channel_id);
+    let data = json!({
+        "type": "thread.updated",
+        "v": 1,
+        "ts": rollup.last_reply_at_ms,
+        "seq": rollup.last_reply_seq,
+        "payload": {
+            "channel_id": channel_id.to_string().to_uppercase(),
+            "root_id": root_id.to_string().to_uppercase(),
+            "reply_count": rollup.reply_count,
+            "last_reply_seq": rollup.last_reply_seq,
+            "last_reply_at": rollup.last_reply_at_ms,
+        },
+    });
+    let envelope = BroadcastPayload {
+        channel: channel.clone(),
+        data,
+        version: None,
+        idempotency_key: Some(format!(
+            "{channel}:thread.updated:{}:{}",
+            root_id.to_string().to_uppercase(),
+            rollup.last_reply_seq
+        )),
+    };
+    serde_json::to_value(envelope).expect("thread.updated payload serializes")
+}
+
+/// Default replies page size (Swift `?? 50`).
+pub const REPLIES_LIMIT_DEFAULT: i64 = 50;
+/// Maximum replies page size (Swift `min(max(…, 1), 200)`).
+pub const REPLIES_LIMIT_MAX: i64 = 200;
+
+/// Clamp a replies page size to `1..=200`, defaulting to 50.
+pub fn clamp_replies_limit(limit: Option<i64>) -> i64 {
+    limit
+        .unwrap_or(REPLIES_LIMIT_DEFAULT)
+        .clamp(1, REPLIES_LIMIT_MAX)
+}
+
+/// A malformed `?cursor=` (Swift `repliesCursor`, :967-975).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("cursor must be a non-negative message seq")]
+pub struct RepliesCursorInvalid;
+
+/// Parse `?cursor=`. **Strict, unlike `limit`** — and the asymmetry is Swift's,
+/// for a reason: a bad page size has a safe default, a bad cursor does not.
+/// Silently restarting from 0 would replay a whole thread as if it were new.
+pub fn parse_replies_cursor(raw: Option<&str>) -> Result<Option<i64>, RepliesCursorInvalid> {
+    let Some(raw) = raw else { return Ok(None) };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    match trimmed.parse::<i64>() {
+        Ok(cursor) if cursor >= 0 => Ok(Some(cursor)),
+        _ => Err(RepliesCursorInvalid),
+    }
+}
+
+/// One oldest-first page of a thread's replies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadReplyPage {
+    pub messages: Vec<PagedMessage>,
+    /// The seq to pass as the next `?cursor=`, or `None` at the end of the
+    /// thread. Present only when a further page exists — it is computed by
+    /// over-reading one row, never by guessing from `messages.len() == limit`.
+    pub next_cursor: Option<i64>,
+}
+
+/// Read one ascending page of `root_id`'s replies (Swift `MessageRoutes.replies`
+/// SQL, :564-617). The caller must have validated the root
+/// ([`validate_thread_root_in_tx`]) and the caller's channel membership.
+///
+/// Ascending, unlike history: a thread is read from its beginning, because its
+/// first reply is the one that gives the rest their context.
+pub async fn list_thread_replies(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    root_id: Uuid,
+    cursor: Option<i64>,
+    limit: i64,
+) -> Result<ThreadReplyPage, DbError> {
+    // Over-read by one: "is there more" must be a fact, not an inference from a
+    // full page (a thread with exactly `limit` replies would otherwise advertise
+    // a next page that is empty).
+    let sql = format!(
+        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} \
+          WHERE m.channel_id = $1 AND m.root_id = $2 AND m.seq > $3 \
+          ORDER BY m.seq ASC \
+          LIMIT $4"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(channel_id)
+        .bind(root_id)
+        .bind(cursor.unwrap_or(0))
+        .bind(limit + 1)
+        .fetch_all(&mut *conn)
+        .await?;
+
+    let has_more = rows.len() as i64 > limit;
+    let messages: Vec<PagedMessage> = rows
+        .iter()
+        .take(limit as usize)
+        .map(decode_paged)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)?;
+    let next_cursor = if has_more {
+        messages.last().map(|paged| paged.message.seq)
+    } else {
+        None
+    };
+    Ok(ThreadReplyPage {
+        messages,
+        next_cursor,
+    })
 }
 
 #[cfg(test)]
@@ -899,6 +1398,104 @@ mod tests {
         assert_eq!(inner["root_id"], Value::Null);
         // Empty props are omitted, matching Swift.
         assert!(inner.get("props").is_none());
+    }
+
+    #[test]
+    fn replies_limit_clamps_and_the_cursor_refuses_garbage() {
+        assert_eq!(clamp_replies_limit(None), REPLIES_LIMIT_DEFAULT);
+        assert_eq!(clamp_replies_limit(Some(0)), 1);
+        assert_eq!(clamp_replies_limit(Some(10_000)), REPLIES_LIMIT_MAX);
+
+        assert_eq!(parse_replies_cursor(None), Ok(None));
+        assert_eq!(parse_replies_cursor(Some("  ")), Ok(None));
+        assert_eq!(parse_replies_cursor(Some(" 12 ")), Ok(Some(12)));
+        assert_eq!(parse_replies_cursor(Some("0")), Ok(Some(0)));
+        // A bad cursor has no safe default: restarting from 0 would replay the
+        // whole thread as new.
+        assert_eq!(parse_replies_cursor(Some("-1")), Err(RepliesCursorInvalid));
+        assert_eq!(
+            parse_replies_cursor(Some("nope")),
+            Err(RepliesCursorInvalid)
+        );
+    }
+
+    /// A half-written rollup must not produce a badge a client cannot open.
+    #[test]
+    fn a_rollup_needs_all_three_parts_and_a_reply() {
+        assert_eq!(
+            thread_rollup(Some(2), Some(9), Some(1_700_000_000_000)),
+            Some(ThreadRollup {
+                reply_count: 2,
+                last_reply_seq: 9,
+                last_reply_at_ms: 1_700_000_000_000,
+            })
+        );
+        assert_eq!(thread_rollup(Some(0), Some(9), Some(1)), None);
+        assert_eq!(thread_rollup(None, Some(9), Some(1)), None);
+        assert_eq!(thread_rollup(Some(2), None, Some(1)), None);
+        assert_eq!(thread_rollup(Some(2), Some(9), None), None);
+    }
+
+    #[test]
+    fn every_thread_root_rejection_keeps_its_own_sentence() {
+        assert_eq!(
+            ThreadRootInvalid::NotFound.to_string(),
+            "thread root not found",
+            "the web routing probe matches this sentence by shape (404) — see \
+             docs/planning/2026-08-01-b4-contract-diff.md §4.1"
+        );
+        assert_eq!(
+            ThreadRootInvalid::Deleted.to_string(),
+            "thread root is deleted"
+        );
+        assert_eq!(
+            ThreadRootInvalid::NotTopLevel.to_string(),
+            "thread root must be a top-level message"
+        );
+    }
+
+    #[test]
+    fn thread_updated_payload_matches_swift_envelope() {
+        let ws = Uuid::from_u128(1);
+        let ch = Uuid::from_u128(2);
+        let root = Uuid::from_u128(3);
+        let rollup = ThreadRollup {
+            reply_count: 4,
+            last_reply_seq: 11,
+            last_reply_at_ms: 1_700_000_000_123,
+        };
+        let payload = build_thread_updated_payload(ws, ch, root, &rollup);
+
+        assert_eq!(payload["channel"], json!(cent_channel(ws, ch)));
+        assert_eq!(payload["data"]["type"], json!("thread.updated"));
+        assert_eq!(payload["data"]["v"], json!(1));
+        assert_eq!(payload["data"]["seq"], json!(11));
+        assert_eq!(payload["data"]["ts"], json!(1_700_000_000_123_i64));
+        assert_eq!(payload["data"]["payload"]["reply_count"], json!(4));
+        assert_eq!(payload["data"]["payload"]["last_reply_seq"], json!(11));
+        assert_eq!(
+            payload["data"]["payload"]["last_reply_at"],
+            json!(1_700_000_000_123_i64)
+        );
+        assert_eq!(
+            payload["data"]["payload"]["root_id"],
+            json!(root.to_string().to_uppercase()),
+            "Swift writes `rootID.uuidString`, which is uppercase"
+        );
+        // The reply's own message.new already claimed this seq as the channel
+        // version; re-claiming it would make Centrifugo drop the publish.
+        assert!(
+            payload.get("version").is_none(),
+            "thread.updated must carry no version: {payload}"
+        );
+        assert_eq!(
+            payload["idempotency_key"],
+            json!(format!(
+                "{}:thread.updated:{}:11",
+                cent_channel(ws, ch),
+                root.to_string().to_uppercase()
+            ))
+        );
     }
 
     #[test]
