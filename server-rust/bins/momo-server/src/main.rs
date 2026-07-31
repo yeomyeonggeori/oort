@@ -43,6 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // neither Centrifugo secret is ever logged.
         realtime_token_issuable = config.realtime.cent_token_hmac.is_some(),
         realtime_subscribe_proxy = config.realtime.cent_proxy_secret.is_some(),
+        // B4.2: whether the two settings gates are open. A boolean and a count —
+        // never the master key, never an operator's address.
+        provider_link_configurable = config.settings.provider_link_master_key.is_some(),
+        instance_operators = config.settings.platform_admin_emails.len(),
         "momo-server starting"
     );
     if config.realtime.cent_token_hmac.is_none() || config.realtime.cent_proxy_secret.is_none() {
@@ -73,7 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_agent_gateway(config.agent_gateway.clone())
     // B4: connection-token issuance and the subscribe proxy stay shut unless the
     // operator supplied CENT_TOKEN_HMAC / CENT_PROXY_SECRET.
-    .with_realtime(config.realtime.clone());
+    .with_realtime(config.realtime.clone())
+    // B4.2: the AI-연결 family stays 503 unless the operator supplied
+    // PROVIDER_LINK_MASTER_KEY, and the instance-global surfaces admit only a
+    // `platform:read` token unless PLATFORM_ADMIN_EMAILS lists someone.
+    .with_settings(config.settings.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

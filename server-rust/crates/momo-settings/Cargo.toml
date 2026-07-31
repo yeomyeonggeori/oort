@@ -1,0 +1,30 @@
+[package]
+name = "momo-settings"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The RLS GUC seam and the audit writer. Every statement in this crate takes a
+# caller-supplied `&mut PgConnection`, so `momo_db::with_tenant_tx` /
+# `with_provider_link_admin_tx` stay the only wiring points for the GUCs
+# (invariant #6).
+momo-db = { path = "../momo-db" }
+
+sqlx.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# ADR-0004 증보 1: the operator-supplied provider bearer is stored as an AES-GCM
+# sealed box and must be replayable as an `Authorization` header, so it needs
+# authenticated *reversible* encryption — not the deterministic HMAC derivation
+# the webhook secrets use. Swift reaches CryptoKit's `AES.GCM`; this is the same
+# construction (256-bit key, 96-bit nonce, 128-bit tag, `nonce||ct||tag`
+# combined layout) so a row sealed by either server opens on the other.
+aes-gcm = "0.10"
+sha2.workspace = true

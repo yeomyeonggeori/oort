@@ -32,6 +32,31 @@ async fn bind_workspace_guc(
     Ok(())
 }
 
+/// Re-point an already-open tenant transaction at a **different** workspace.
+///
+/// This exists for exactly one caller — tenant provisioning (`POST /v1/workspaces`,
+/// ADR-0117 §D1-A) — and the reason it lives here rather than in that caller is
+/// invariant #6: `app.workspace_id` is set in this module and nowhere else, so a
+/// grep for `set_config('app.workspace_id'` still returns this file alone.
+///
+/// The provisioning transaction genuinely needs two scopes in order: it
+/// authorizes the operator under **their own** workspace (that read must pass
+/// RLS), then seeds the new tenant's rows under the **new** workspace (those
+/// writes must pass the same policies, because the seed is not exempt from
+/// them). `SET LOCAL` semantics still apply, so the rebind unwinds with the
+/// transaction.
+///
+/// It is deliberately not a general-purpose helper: any *other* use would be a
+/// route reading one tenant and writing another inside one transaction, which is
+/// the shape RLS exists to make impossible.
+pub async fn rebind_tenant_guc(conn: &mut PgConnection, workspace_id: Uuid) -> Result<(), DbError> {
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 /// Set an additional boolean GUC (`'on'`) on an open transaction. Used by the
 /// operator-scoped variants below; callers MUST have verified the operator
 /// scope BEFORE opening the transaction — the GUC is the last gate, not the

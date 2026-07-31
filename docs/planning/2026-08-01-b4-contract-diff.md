@@ -1,5 +1,7 @@
 # B4 — 클라이언트 소비 API 표면 × Rust 서버 계약 diff 매트릭스
 
+> **갱신 2026-08-02 (B4.2)**: 설정 표면(D-3) 18쌍을 서버측으로 마감했다. 현재 사실의 정본은 **§10**이다. §9는 B4.1 시점, §0~§8은 B4 시점의 측정 기록으로 남긴다 — §4의 영역별 잔여표는 §9 → §10 순서로 델타를 겹쳐 읽어야 지금의 수가 된다.
+>
 > **갱신 2026-07-31 (B4.1)**: 도그푸딩 차단분 5쌍을 서버측으로 마감했다. 재분류·게이트 판정은 **§9**가 정본이고, §0~§8은 B4 시점의 측정 기록으로 남긴다(§4.1과 §7의 표는 §9의 델타를 함께 읽어야 현재 사실이 된다).
 >
 > 측정일 2026-07-31 · 측정 대상 `feat/B4-rewire`(base `track/engine` @ `dba8a44f`)
@@ -296,3 +298,137 @@ DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
 ```
 - `the_dogfooding_sequence_round_trips` — 로그인→roster(`kind` 필터·`/members` 별칭 포함)→채널 생성(201/409/400)→routing 프로브 404 단정→스레드 왕복(2단 답글 400)→롤업 snake_case 단정→`thread.updated` outbox(no-`version`) 단정→워크스페이스 읽기→음소거 왕복+audit 2행+비멤버 403.
 - `a_foreign_tenants_rows_are_zero_under_the_callers_guc` — 타 테넌트의 roster·channels·replies·rollup·workspace read가 **0행/NotFound**, 같은 질의가 소유 테넌트 GUC에서는 행을 찾는다(질의가 깨진 게 아니라 경계가 막은 것임을 증명).
+
+---
+
+## 10. B4.2 재분류 — 설정 표면 마감 (2026-08-02)
+
+> 대상 `feat/B42-settings`(base `track/engine` @ `547e3000`). §1.2의 판정 기준을 그대로 쓰되, ①의 범위를 **"화면을 열 수 있는가"**로 옮겼다. B4는 "부팅해서 말할 수 있는가", B4.1은 "그 다음 한 시간을 보낼 수 있는가"를 닫았다. B4.2가 닫는 것은 **설정 화면 전체가 오류 상태로 열리던 D-3**이다.
+
+### 10.1 마감한 표면 — 미구현 46 → 28
+
+스코프는 취향이 아니라 §7의 D-3 한 줄이다: *"AI 연결·체인·티어 정책·초대·워크스페이스 이름까지 전부 오류 상태"*. 그 문장이 가리키는 미구현 쌍을 전수 실측하면 정확히 18쌍이고, 전부 이 배치에서 닫았다.
+
+| # | 메서드 · 경로 | 원 분류 | 클라 호출부 | Rust 구현 |
+|---|---|---|---|---|
+| 1-3 | `GET·PUT·DELETE /v1/provider/link` | 프로바이더·설정 | `settings/api.ts:132,136,143` | `momo_settings::{read,upsert,delete}_link` + `routes/provider_link.rs` |
+| 4 | `POST /v1/provider/link/test` | 프로바이더·설정 | `settings/api.ts:149` | `routes/provider_link.rs::test` — **부분**(§10.3) |
+| 5-7 | `GET·PUT·DELETE /v1/provider/link/chain` | 프로바이더·설정 | `settings/api.ts:238,242,251` | `momo_settings::chain` + `routes/provider_link.rs::*_chain` |
+| 8-9 | `GET·PUT /v1/provider/work-host-engine` | 프로바이더·설정 | `settings/api.ts:268,272` | `momo_settings::engine` + `routes/provider_settings.rs` |
+| 10 | `GET /v1/provider/effort-table` | 프로바이더·설정 | `api.ts:1953` | `momo_agent::effort`(기존 표) 투영 + `routes/provider_settings.rs` |
+| 11 | `GET /v1/provider/quota-snapshots` | 프로바이더·설정 | `settings/api.ts:504` | `momo_settings::quota` + `routes/provider_settings.rs` |
+| 12-15 | `GET·PUT …/work-tier-policy[/me]` | 프로바이더·설정 | `settings/api.ts:312,324` | `momo_settings::tier` + `routes/work_tier_policy.rs` |
+| 16-17 | `GET·POST /v1/workspaces/{ws}/invites` | 워크스페이스·명부 | `settings/api.ts:442,449` | `momo_settings::invite` + `routes/invites.rs` |
+| 18 | `POST /v1/workspaces` | 워크스페이스·명부 | `settings/api.ts:389` | `momo_settings::workspace::create_workspace_in_tx` + `routes/workspaces.rs::create` |
+
+| 분류 | B4 | B4.1 | **B4.2** | 뜻 |
+|---|---|---|---|---|
+| 동일 | 14 | 14 | 14 | 변동 없음 |
+| 서버측 마감(누계) | 3 | 8 | **26** | B4 3 + B4.1 5 + B4.2 18 |
+| 미구현 표면 | 51 | 46 | **28** | 18쌍 감소 |
+| UI 수정 필요 | 0 | 0 | **0** | B4.2도 클라 수정 요구 0건 — UI 파일 무접촉 |
+| (68쌍 밖) 추가 마감(누계) | — | 1 | **1** | `notification-pref`(변동 없음) |
+
+영역별 잔여: 초대 **가입** 1(`POST /v1/join`) · 워크스페이스·명부 **0** · 스레드·라우팅 1(`routing`만) · 승인 2 · 워크스트림 3 · 에이전트 7 · 메모리 4 · 플러그인 6 · 허들 4 = **28**.
+
+### 10.2 남은 미구현 28쌍의 **성격** — 수가 아니라 종류로
+
+남은 것을 세 종류로 갈라 두는 이유는, "28"이라는 수가 이제 서로 다른 세 가지 사정을 한 칸에 담고 있기 때문이다.
+
+| 성격 | 쌍 | 무엇이 막고 있나 | 열리는 조건 |
+|---|---|---|---|
+| **A. 화면 부재** — 서버에 라우트가 없고, 만들면 그만 | 22 (승인 2 · 워크스트림 3 · 메모리 4 · 플러그인 6 · 허들 4 · 에이전트 3(`agent-runs` 조회 계열)) | 아무것도. 배치가 안 왔을 뿐이다 | 각 배치 |
+| **B. 실행 경로 결정 대기** — 라우트를 쓰면 *동작*을 정해야 한다 | 5 (`GET·PUT …/agents/{a}/profile` · `PUT …/agents/{a}/pause` · `GET …/agents/{a}/allowed-models` · `routing`) | 에이전트 실행 축(D-4/D-5)이 열려야 프로필·일시정지·모델 허용목록이 의미를 갖는다. `routing`은 §4.1/§9.2가 **고치면 안 된다**고 못 박은 그 항목 그대로다 | 에이전트 배치(D-4/D-5) |
+| **C. 경계 결정 대기** — 서버 코드로는 못 닫는다 | 1 (`POST /v1/join`) | 공개(비인증) 표면이고, 성공 시 **세션 토큰 쌍을 발급**한다. 초대 코드 소비·멤버 생성·비밀번호 해시·온보딩 인사까지 한 트랜잭션이라, 초대 *발급*만 있는 지금 상태는 "만들 수는 있고 아직 쓸 수는 없는 링크"다 | 별도 배치(초대 소비). **이 배치가 만든 유일한 반쪽 문이며 §10.5에 이탈로 적었다** |
+
+`POST /v1/provider/link/test`는 마감했지만 반쪽이 남았다 — 아래가 그 전부다.
+
+### 10.3 `/v1/provider/link/test` — 닫은 것과, 닫을 수 없었던 것
+
+Swift의 `probeHop`은 네 갈래로 답한다. 앞의 셋은 **네트워크가 필요 없는 설정 판정**이고, 이 서버가 그대로 답한다:
+
+| 상태 | reason | disposition |
+|---|---|---|
+| 꺼둔 hop | `hop_disabled` | `skipped` |
+| 목 모드 | `not_external_provider` | `propagate` |
+| 주소/키 비어 있음 | `provider_not_configured` | `propagate` |
+| **켜져 있고 외부이고 사용 가능** | Swift는 `GET {baseURL}/models`를 실제로 호출 | — |
+
+네 번째만 소켓이 필요하고, **momo-server에는 HTTP 클라이언트가 없다**. 그것은 누락이 아니라 명시된 자세다(`bins/momo-server/Cargo.toml`: *"there is deliberately no HTTP client here"*, 불변식 #2). 클라이언트를 추가하는 것은 스택·경계 변경이라 **Accepted ADR 없이 worker가 할 수 없다**(CLAUDE.md 하드룰).
+
+그래서 그 hop은 `ok:false` + `reason:"probe_not_run"`으로 답한다. 셋 중 가장 정직한 선택이기 때문이다:
+
+- `provider_unreachable` → **거짓말**. 이 서버는 그 주소를 부른 적이 없다.
+- `skipped` → 패널이 "꺼둠"으로 렌더한다(`chainModel.ts:612`). 켜 둔 hop을 운영자가 껐다고 말하는 셈이다.
+- `probe_not_run` → 패널에 이미 있는 어휘이고 "확인이 끝나지 않았습니다"로 렌더된다(`chainModel.ts:probeReasonCopy`). 최상단 문장은 `providerTestMessage`의 기본 갈래를 타 "연결을 확인하지 못했습니다"가 된다. **일어난 일 그대로다.**
+
+닫는 방법은 둘 중 하나이고 둘 다 이 배치 밖이다: ① 아웃바운드 프로브 클라이언트를 허용하는 ADR, 또는 ② ADR-0135 D2-A가 quota에 대해 이미 택한 길 — 자격증명을 쥔 쪽이 프로브하고 momo는 숫자만 받는 것. 후자가 ADR-0004와 결이 같다.
+
+### 10.4 §9.2 델타 — effort-table을 서빙하면 `capability.ts`의 ② 판정이 뒤집힌다
+
+`GET /v1/provider/effort-table`은 웹의 **effort 축 capability 프로브**다(`features/routing/capability.ts:14-17`: *"이 경로가 있으면 그 서버에는 effort 축이 올라가 있다"*). 404였을 때 판정은 `absent`였고, 이제 200이므로 `ready`가 된다. 그런데 그 축의 2층인 `GET·PUT …/agents/{a}/profile`은 이 서버에서 **여전히 404**다.
+
+§4.1의 규율("고치는 게 아니라 거짓말이 되는 변경은 하지 않는다")에 걸리는지 **실측했다**. 걸리지 않는다 — 판정을 소비하는 두 곳 모두 프로필을 먼저 검사하기 때문이다:
+
+- `MentionRoutingBar.tsx:148` — `profileFailed`(프로필 404)가 사유 체인의 **맨 앞**이다. 줄은 "이 에이전트의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했습니다"로 잠긴 채 남고, `capability.support === "ready"`는 그 뒤로 밀린다.
+- `AgentProfileDialog.tsx` — 프로필을 못 읽으면 다이얼로그가 열리지 않으므로, effort 선택기에 도달하는 경로가 없다.
+- 메시지 한 건 오버라이드(③ tier)는 별도 프로브(`probeSendRouting`)를 쓰고, 그 판정은 §9.2대로 `absent` 그대로다.
+
+즉 `ready`로 뒤집혀도 **열리는 선택기는 없다**. 그래도 이 사실을 여기 적어 두는 이유는, 에이전트 배치가 프로필을 열 때 effort 축이 이미 `ready`로 보고되고 있다는 전제에서 출발해야 하기 때문이다.
+
+### 10.5 §7 D-표 갱신
+
+| # | 차단 | B4.2 판정 |
+|---|---|---|
+| D-1 | roster 부재 | 해소(B4.1) |
+| D-2 | 스레드 부재 | 해소(B4.1) |
+| D-3 | 설정 라우트 전체 404 | **해소.** AI 연결·체인·확인(부분, §10.3)·코드 실행 호스트·추론 강도·구독 잔여량·티어 정책(2 스코프)·초대 발급/목록·워크스페이스 생성이 전부 열림. **남는 것은 초대 *가입*(`POST /v1/join`) 하나** |
+| D-4 | 승인·에이전트 허브·플러그인·워크스트림·메모리 | 미변동 |
+| D-5 | 에이전트 실행 경로 미검증 | 미변동 |
+| D-6 | `routing` 선택기 | 미변동(§9.2). **여전히 고치면 안 됨** — §10.4가 그 판정을 건드리지 않았음을 실측으로 확인 |
+| D-7 | 채널 생성 404 | 해소(B4.1) |
+
+### 10.6 운영 전제(이 배치가 추가한 것)
+
+| 키 | 없을 때 | 왜 그렇게 |
+|---|---|---|
+| `PROVIDER_LINK_MASTER_KEY` | `/v1/provider/link[…]` 6개가 **503** | 마이그레이션 039/042가 봉인한 AES-GCM 키다. 없으면 저장된 ciphertext를 열 수도, 새로 봉인할 수도 없다. 200을 답하려면 bearer 상태를 **지어내야** 한다 |
+| `PLATFORM_ADMIN_EMAILS` | 인스턴스-전역 표면(provider link 6 + `POST /v1/workspaces`)이 `platform:read` 토큰에만 열림 | MOMO-583: 임의의 워크스페이스 owner는 인스턴스 운영자가 아니다. 비어 있는 허용목록은 **아무에게도** 권한을 주지 않는다 |
+| (부팅) `PROVIDER_LINK_MASTER_KEY` == `JWT_HMAC` 또는 == `OUTBOUND_WEBHOOK_MASTER_KEY` | **부팅 실패** | 재사용하면 provider bearer 유출이 곧 토큰 서명 유출이 된다. 키 *부재*는 표면을 닫을 뿐이지만, 키 *재사용*은 침묵하는 결함이라 부팅에서 막는다 |
+
+### 10.7 검증
+
+| 게이트 | 결과 |
+|---|---|
+| `cargo check --workspace --all-targets` | green |
+| `cargo test --workspace` | 392 passed / 0 failed / 46 ignored (momo-server lib 146, momo-settings 38) |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | warning 0 |
+| route raw SQL | `grep -c 'sqlx::query' bins/momo-server/src/` = **0** |
+| 신규 route의 `emit_outbox`·Centrifugo·HTTP 클라이언트 | **0** |
+| `set_config('app.workspace_id'` 세터 | `crates/momo-db/src/tenant.rs` **단독**(신규 `rebind_tenant_guc` 포함) |
+| 새 마이그레이션 | 0 (`server/Migrations/*.sql` = 60, 변동 없음) |
+| UI 파일 | 무접촉(`clients/**` diff 0) |
+| Dockerfile 매니페스트 목록 | 신규 crate `momo-settings` 추가 — crates/bins 목록 == 실제 디렉터리 목록 |
+| conformance smoke | `bins/momo-server/tests/settings_conformance_pg.rs` — `#[ignore]` 2건(docker 미실행, 작성만) |
+
+`settings_conformance_pg.rs`도 **클라이언트 시퀀스로** 구성돼 있다: `SettingsRoute.tsx`가 여는 패널 순서대로 11단계를 재생하고, 마지막에 단일 호출로는 보이지 않는 세 가지를 직접 접합한다 — ① PUT이 저장한 bearer가 GET에 4자 tail로만 돌아오고 저장된 `bytea`·audit `detail` 어디에도 평문이 없다, ② 설정 쓰기 전후로 `outbox` 행 수가 **변하지 않는다**(설정은 타임라인 사건이 아니다), ③ 타 테넌트 GUC에서 같은 질의가 0행이고 **같은 질의가 소유 테넌트 GUC에서는 행을 찾는다**(0이 정책 때문이지 질의가 깨져서가 아님을 증명).
+
+**red 절차(오케스트레이터, docker 필요)**
+```bash
+cd server-rust
+DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
+  cargo test -p momo-server --test settings_conformance_pg -- --ignored --nocapture
+```
+- `the_settings_panels_read_and_write_round_trip` — 로그인→워크스페이스 읽기→provider link(env→저장→재읽기→삭제)→체인(position 0 거절·replace-all·bearer 유지 park)→확인 프로브(`probe_not_run` 단정)→work-host-engine(읽기가 행을 만들지 않음·미지 라벨 400)→effort-table→quota→티어 정책(default·`/me` 상속·autoTarget 교차검증 400)→초대(코드 1회성·목록에 코드 부재)→워크스페이스 생성(201·owner+#general+`channel_seq`·중복 slug 409)→outbox 불변·audit 5종·audit 무-평문.
+- `a_foreign_tenants_settings_rows_are_zero_under_the_callers_guc` — 타 테넌트 GUC에서 `work_host_engine`·`work_tier_policy`·`invite_code` 0행 / 소유 테넌트 GUC에서 발견, 그리고 `provider_link`는 **자기 워크스페이스에서도** 일반 테넌트 트랜잭션이 0행(GUC 게이트) · 운영자 트랜잭션에서만 보임 · 다른 마스터키로는 열리지 않음.
+
+### 10.8 이탈 (deviation)
+
+| # | 이탈 | 판정 |
+|---|---|---|
+| 1 | `POST /v1/provider/link/test`의 **라이브 프로브 미구현** | §10.3. 불변식 #2의 "HTTP 클라이언트 없음" 자세를 깨는 것은 ADR 사안이라 worker가 하지 않았다. 마감은 했으되 **부분**으로 분류 |
+| 2 | 초대 **발급**만 열고 **가입**(`POST /v1/join`)은 열지 않음 | 패킷 스코프(§1 "초대")를 좁게 읽었다. 결과적으로 "만들 수는 있고 아직 쓸 수는 없는 링크"가 생겼다 — §10.2 C가 그 상태를 명시한다. `/v1/join`은 공개 표면 + 세션 토큰 발급 + 멤버 생성이라 별도 배치가 옳다는 판단이지만, **half-open door이므로 이탈로 기록한다** |
+| 3 | 신규 crate `momo-settings` 추가 | 패킷이 예고한 경우(Dockerfile 매니페스트 갱신 필수)에 해당. 매니페스트 목록 == 디렉터리 목록으로 검증 |
+| 4 | `momo_db::rebind_tenant_guc` 신설 | 워크스페이스 프로비저닝은 한 트랜잭션 안에서 두 테넌트 스코프가 필요하다(운영자 권한 읽기 → 신규 테넌트 시드). GUC 세터를 `momo-db` 밖으로 내보내지 않기 위해 헬퍼를 그 파일에 추가했다 — 불변식 #6의 grep 단일성 유지 |
+| 5 | `momo_db::AuditEntry::about_optional` 신설 | 티어 정책 한 write가 두 스코프를 서빙한다. 워크스페이스 기본행의 `subject_member_id`는 NULL이어야 하는데 `by()`가 넣은 값을 지울 방법이 없었다 |

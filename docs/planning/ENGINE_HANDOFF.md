@@ -88,6 +88,21 @@
 | R-11 | `info` | **R-4 축소** — 404 목록에서 **roster·채널 생성·스레드 답글·워크스페이스 읽기**가 빠진다. 잔여 404: 설정(프로바이더 링크/체인/엔진/티어정책/초대/워크스페이스 생성·이름변경), 승인, 워크스트림, 에이전트 허브, 플러그인, 메모리, 허들, `routing` — 46쌍 | 도그푸딩 시연 범위를 그만큼 넓힐 수 있다. 단 R-12가 닫히기 전까지는 "코드상 열림"이지 "돌려봤다"가 아니다 | diff §9.1·§9.4 |
 | R-12 | `blocked-on-verification` | **B4.1 런타임 미검증** — 이 배치는 docker 스택을 띄우지 않았다(패킷 규율). 도그푸딩 시퀀스 conformance는 **작성만** 됐고 `#[ignore]`다 | UXUI는 이 표면들로 성재에게 시연하기 전에 오케스트레이터의 docker red 절차 결과를 확인한다. 절차는 diff §9.4 | `bins/momo-server/tests/client_rewire_smoke_pg.rs`(`the_dogfooding_sequence_round_trips`, `a_foreign_tenants_rows_are_zero_under_the_callers_guc`) |
 
+### R″. B4.2 설정 표면 마감 (2026-08-02, `feat/B42-settings` → track/engine)
+
+> 근거 정본 `docs/planning/2026-08-01-b4-contract-diff.md` **§10**. **UI 파일은 한 줄도 건드리지 않았다.** UXUI에 요구하는 코드 수정은 R-13 한 건뿐이고(R-1과 같은 종류 — 새로 생긴 서버 상태에 대한 카피), 나머지는 "이제 이 패널이 실데이터로 열린다"는 가용성 통지다.
+
+| # | 상태 | 항목 | UI가 할 일 | 근거 |
+|---|---|---|---|---|
+| R-13 | `ready` | **provider 미구성 서버(503) 카피** — `PROVIDER_LINK_MASTER_KEY`가 없는 인스턴스에서 `/v1/provider/link[…]` 6개가 **503**을 답한다(R-1의 실시간 503과 같은 fail-closed 자세: 키 없이 저장된 ciphertext를 열거나 새로 봉인할 수 없고, 200을 답하려면 bearer 상태를 지어내야 한다). 지금 AI 연결 패널은 이 상태를 "저장 실패"와 구분하지 않는다 | `fetchProviderLink`/`putProviderLink`가 `ApiError(503)`을 구분해 "이 서버는 AI 연결 저장이 구성되지 않았습니다(운영자 설정 필요)"를 말하게 한다. 재시도 루프를 돌리지 않는다 — 재시도로 해결되는 상태가 아니다. 서버 메시지는 이미 한국어 완성문이라 그대로 써도 된다 | `routes/provider_link.rs::master_key`, `settings/api.ts:132-153`, diff §10.6 |
+| R-14 | `ready` | **설정 패널 전면 개방(R-9 확장, D-3 해소)** — AI 연결(GET·PUT·DELETE)·프로바이더 체인(GET·PUT·DELETE)·연결 확인(POST)·코드 실행 호스트(GET·PUT)·추론 강도 표(GET)·구독 잔여량(GET)·티어 정책(GET·PUT ×2 스코프)·초대 목록/발급(GET·POST)·워크스페이스 생성(POST)이 전부 실데이터로 열린다 | 설정 화면의 해당 섹션들을 도그푸딩 시연 범위에 넣을 수 있다. 클라 파서(`model.ts`·`chainModel.ts`·`quotaModel.ts`)는 **무수정** — 계약이 Swift 정본 그대로다 | diff §10.1 |
+| R-15 | `info` | **연결 확인(`POST …/link/test`)은 반쪽이다** — 켜져 있고 외부이고 사용 가능한 hop은 `ok:false` + `reason:"probe_not_run"`으로 답한다. momo-server에는 HTTP 클라이언트가 없고(불변식 #2), 추가는 ADR 사안이다. 꺼둔 hop·목 모드·키 없음은 정상 판정된다 | **아무것도 하지 않는다.** `chainModel.ts:probeReasonCopy`가 이미 `probe_not_run`을 "확인이 끝나지 않았습니다"로 렌더하고, 최상단은 `providerTestMessage` 기본 갈래를 타 "연결을 확인하지 못했습니다"가 된다 — 일어난 일 그대로다. 이것을 "연결 실패"로 바꿔 쓰지 않는다 | diff §10.3 |
+| R-16 | `info` | **초대는 발급만 열렸다** — `POST …/invites`가 코드를 1회 반환하지만 `POST /v1/join`(그 코드를 소비하는 공개 가입 경로)은 **여전히 404**다. 지금 이 백엔드에서 만든 초대 링크는 **아직 아무도 쓸 수 없다** | 초대 발급 UI는 열되, 시연에서 "이 링크로 지금 가입할 수 있다"고 말하지 않는다. 초대 소비 배치 랜딩 시 자동 해소 | diff §10.2 C, §10.8 이탈 2 |
+| R-17 | `info` | **effort 축 capability 프로브가 `ready`로 뒤집힌다** — `GET /v1/provider/effort-table`이 서빙되므로 `capability.ts`의 ② 판정이 `absent` → `ready`가 된다. 단 그 축의 2층인 `…/agents/{a}/profile`은 아직 404다 | **아무것도 하지 않는다.** 실측 결과 판정을 쓰는 두 곳 모두 프로필 실패를 먼저 검사하므로(`MentionRoutingBar.tsx:148` `profileFailed`가 사유 체인 맨 앞, `AgentProfileDialog`는 프로필 없이 열리지 않음) 열리는 선택기가 없다. 메시지 한 건 오버라이드(③)는 별도 프로브라 `absent` 유지 | diff §10.4 |
+| R-18 | `info` | **R-11 축소** — 잔여 404: 초대 **가입**(`/v1/join`) 1 · 승인 2 · 워크스트림 3 · 에이전트 7 · 메모리 4 · 플러그인 6 · 허들 4 · `routing` 1 = **28쌍**. 설정·워크스페이스·명부 계열은 0 | 시연 범위를 그만큼 넓힐 수 있다. 단 R-19 전까지는 "코드상 열림" | diff §10.1 |
+| R-19 | `blocked-on-verification` | **B4.2 런타임 미검증** — docker 스택을 띄우지 않았다(패킷 규율). 설정 conformance는 **작성만** 됐고 `#[ignore]`다 | 이 표면들로 성재에게 시연하기 전에 오케스트레이터의 docker red 절차 결과를 확인한다. 절차는 diff §10.7 | `bins/momo-server/tests/settings_conformance_pg.rs` |
+| R-20 | `info` | **운영 전제 추가** — `PROVIDER_LINK_MASTER_KEY`(없으면 AI 연결 6개 503) · `PLATFORM_ADMIN_EMAILS`(비어 있으면 인스턴스-전역 표면은 `platform:read` 토큰에만 열림 — 임의의 워크스페이스 owner는 인스턴스 운영자가 아니다, MOMO-583). 마스터키가 `JWT_HMAC`/`OUTBOUND_WEBHOOK_MASTER_KEY`와 같으면 **부팅 실패** | 빌드 고지 시 "AI 연결이 되는 스택인지" 확인. UI 변경 없음 | diff §10.6 |
+
 ## B. 엔진 역요청 — 전량 완료 (main)
 
 B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · B-4 알림 음소거(ADR-0124, MOMO-477) — 2026-07-18 종결.

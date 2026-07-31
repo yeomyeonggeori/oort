@@ -30,7 +30,7 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use momo_db::PgPool;
 
-use crate::config::{AgentGatewaySettings, RealtimeSettings, T3Settings};
+use crate::config::{AgentGatewaySettings, RealtimeSettings, SettingsConfig, T3Settings};
 
 /// Shared handler state. Cheap to clone (pool handle + `Arc`'d strings).
 #[derive(Clone)]
@@ -54,6 +54,12 @@ pub struct AppState {
     /// never configured the broker refuses to mint connection tokens and denies
     /// every subscribe callback rather than half-authorizing one.
     pub realtime: Arc<RealtimeSettings>,
+    /// 설정 표면 configuration (B4.2). **Empty** unless
+    /// [`AppState::with_settings`] says otherwise, so an instance that never
+    /// configured a provider master key answers 503 on the AI-연결 family rather
+    /// than guessing at a key, and an empty `PLATFORM_ADMIN_EMAILS` grants the
+    /// listed-instance-operator path to nobody.
+    pub settings: Arc<SettingsConfig>,
 }
 
 impl AppState {
@@ -65,6 +71,7 @@ impl AppState {
             t3: Arc::new(T3Settings::default()),
             agent_gateway: Arc::new(AgentGatewaySettings::default()),
             realtime: Arc::new(RealtimeSettings::default()),
+            settings: Arc::new(SettingsConfig::default()),
         }
     }
 
@@ -87,6 +94,14 @@ impl AppState {
     /// guessed secret.
     pub fn with_realtime(mut self, settings: RealtimeSettings) -> Self {
         self.realtime = Arc::new(settings);
+        self
+    }
+
+    /// Attach the 설정 표면 configuration (B4.2), same rationale again: the
+    /// default is a provider-link family that answers "not configured", not one
+    /// that opens stored ciphertext with a guessed key.
+    pub fn with_settings(mut self, settings: SettingsConfig) -> Self {
+        self.settings = Arc::new(settings);
         self
     }
 }
@@ -164,6 +179,60 @@ pub fn build_app(state: AppState) -> Router {
         // B4.1 — the settings panel's first read (workspace name + the rename
         // endpoint's concurrency token).
         .route("/v1/workspaces/{ws}", get(routes::workspaces::get))
+        // B4.2 — 설정 표면 (diff matrix D-3). Three authorization tiers sit in
+        // this block and the grouping is deliberate:
+        //
+        //   * `/v1/provider/link[…]` and `POST /v1/workspaces` are
+        //     INSTANCE-GLOBAL: one row (or one new tenant) that every workspace
+        //     on this instance shares, so they take the MOMO-583 gate
+        //     (`platform:read` or a listed instance operator).
+        //   * `work-host-engine`, `work-tier-policy` and the invite pair are
+        //     PER-WORKSPACE rows under the uniform RLS policy, so a workspace
+        //     owner/admin is the right authority.
+        //   * `effort-table` and `quota-snapshots` are reads with no tenant row
+        //     and no secret — any authenticated principal, and any active
+        //     member, respectively.
+        .route("/v1/workspaces", post(routes::workspaces::create))
+        .route(
+            "/v1/provider/link",
+            get(routes::provider_link::get)
+                .put(routes::provider_link::put)
+                .delete(routes::provider_link::delete),
+        )
+        .route("/v1/provider/link/test", post(routes::provider_link::test))
+        .route(
+            "/v1/provider/link/chain",
+            get(routes::provider_link::get_chain)
+                .put(routes::provider_link::put_chain)
+                .delete(routes::provider_link::delete_chain),
+        )
+        .route(
+            "/v1/provider/work-host-engine",
+            get(routes::provider_settings::get_work_host_engine)
+                .put(routes::provider_settings::put_work_host_engine),
+        )
+        .route(
+            "/v1/provider/effort-table",
+            get(routes::provider_settings::get_effort_table),
+        )
+        .route(
+            "/v1/provider/quota-snapshots",
+            get(routes::provider_settings::get_quota_snapshots),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-tier-policy",
+            get(routes::work_tier_policy::get_workspace_default)
+                .put(routes::work_tier_policy::put_workspace_default),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-tier-policy/me",
+            get(routes::work_tier_policy::get_member_override)
+                .put(routes::work_tier_policy::put_member_override),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites",
+            get(routes::invites::list).post(routes::invites::create),
+        )
         // B4 — the Centrifugo connection token (Swift mounts it protected too:
         // `AuthRoutes.addProtected`, :46-49).
         .route(

@@ -20,31 +20,80 @@ pub const MAX_EFFORT_LENGTH: usize = 32;
 /// reject downstream.
 pub const FALLBACK_EFFORTS: [&str; 3] = ["low", "medium", "high"];
 
+/// The level an unlisted model starts at (Swift :89).
+pub const FALLBACK_DEFAULT_EFFORT: &str = "medium";
+
 /// One row of the v0 constant table (Swift :61-86). `hermes` is momo's
 /// provider-agnostic gateway handle namespace (ADR-0130).
-struct EffortEntry {
-    model: &'static str,
-    efforts: &'static [&'static str],
+///
+/// `provider` and `default_effort` exist because B4.2 serves this table over the
+/// wire (`GET /v1/provider/effort-table`), and the response is shaped
+/// provider → models → efforts so a later DB/registry source can replace the
+/// constant without a client-visible contract change. They live **here** rather
+/// than in the route so the picker's vocabulary and the ledger writer's stay one
+/// table — two copies is how a picker comes to offer a level the writer drops.
+pub struct EffortEntry {
+    pub provider: &'static str,
+    pub model: &'static str,
+    pub efforts: &'static [&'static str],
+    /// The level chosen when nothing else in the ADR-0134 D3 chain says
+    /// otherwise. Never above what `efforts` lists.
+    pub default_effort: &'static str,
 }
 
 const ENTRIES: [EffortEntry; 4] = [
     EffortEntry {
+        provider: "hermes",
         model: "hermes-agent",
         efforts: &["low", "medium", "high", "xhigh", "max"],
+        default_effort: "medium",
     },
     EffortEntry {
+        provider: "hermes",
         model: "hermes-default",
         efforts: &["low", "medium", "high", "xhigh", "max"],
+        default_effort: "medium",
     },
     EffortEntry {
+        provider: "hermes",
         model: "hermes-fast",
         efforts: &["low", "medium"],
+        default_effort: "low",
     },
     EffortEntry {
+        provider: "hermes",
         model: "hermes-lite",
         efforts: &["low", "medium"],
+        default_effort: "low",
     },
 ];
+
+/// The table grouped by provider, in first-seen order (Swift
+/// `ProviderEffortTable.response` :144-171).
+///
+/// First-seen rather than sorted: the order of `ENTRIES` is the order an operator
+/// reads them in, and re-sorting would make the wire order an accident of
+/// spelling.
+pub fn providers() -> Vec<(&'static str, Vec<&'static EffortEntry>)> {
+    let mut grouped: Vec<(&'static str, Vec<&'static EffortEntry>)> = Vec::new();
+    for entry in ENTRIES.iter() {
+        match grouped.iter_mut().find(|(name, _)| *name == entry.provider) {
+            Some((_, models)) => models.push(entry),
+            None => grouped.push((entry.provider, vec![entry])),
+        }
+    }
+    grouped
+}
+
+/// The level `model` starts at (Swift `defaultEffort` :100-102).
+pub fn default_effort(model: &str) -> &'static str {
+    let normalized = model.trim();
+    ENTRIES
+        .iter()
+        .find(|entry| entry.model == normalized)
+        .map(|entry| entry.default_effort)
+        .unwrap_or(FALLBACK_DEFAULT_EFFORT)
+}
 
 /// The levels `model` accepts, falling back to [`FALLBACK_EFFORTS`] (Swift :96).
 pub fn supported_efforts(model: &str) -> &'static [&'static str] {
@@ -134,6 +183,55 @@ mod tests {
         assert!(!supports("gpt-9-ultra", "max"));
         assert!(supports("hermes-agent", "max"));
         assert!(!supports("hermes-fast", "high"));
+        assert_eq!(default_effort("gpt-9-ultra"), FALLBACK_DEFAULT_EFFORT);
+    }
+
+    /// Every default must be a level its own model actually accepts — a table
+    /// that starts a model above its ceiling hands out a guaranteed 400.
+    #[test]
+    fn every_default_effort_is_a_level_its_model_accepts() {
+        for entry in ENTRIES.iter() {
+            assert!(
+                entry.efforts.contains(&entry.default_effort),
+                "{} defaults to {}, which it does not list",
+                entry.model,
+                entry.default_effort
+            );
+            assert!(EFFORT_LEVELS.contains(&entry.default_effort));
+        }
+        assert!(FALLBACK_EFFORTS.contains(&FALLBACK_DEFAULT_EFFORT));
+        assert_eq!(default_effort("hermes-fast"), "low");
+        assert_eq!(default_effort("  hermes-agent  "), "medium");
+    }
+
+    /// Providers come out in first-seen order, and every model lands under
+    /// exactly one of them.
+    #[test]
+    fn the_table_groups_by_provider_in_first_seen_order() {
+        let grouped = providers();
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].0, "hermes");
+        assert_eq!(
+            grouped[0]
+                .1
+                .iter()
+                .map(|entry| entry.model)
+                .collect::<Vec<_>>(),
+            vec![
+                "hermes-agent",
+                "hermes-default",
+                "hermes-fast",
+                "hermes-lite"
+            ]
+        );
+        assert_eq!(
+            grouped
+                .iter()
+                .map(|(_, models)| models.len())
+                .sum::<usize>(),
+            ENTRIES.len(),
+            "no model may be dropped or duplicated by the grouping"
+        );
     }
 
     /// The provider is the authority on what it ran.
