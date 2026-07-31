@@ -31,12 +31,23 @@
 //! and a caller composes all of them inside a single `with_tenant_tx` so the run,
 //! its message, its broadcast and its bill commit together or not at all.
 //!
-//! ## Scope (B2.6)
+//! ## Scope (B2.6 → B5.2)
 //!
-//! The billing spine only: create → progress → complete → charge, plus the
-//! summary read. Streaming/partial relay, the `tool_call` work-control branch,
-//! approvals, memory-delivery receipts, mention routing semantics and the ACP
-//! adapter are **not** ported here — see the PR body's deviation list.
+//! B2.6 brought the billing spine only: create → progress → complete → charge,
+//! plus the summary read.
+//!
+//! **B5.2 adds the two agent-domain surfaces the spine was missing**, and both
+//! keep the split above rather than widening it:
+//!
+//! | module | tables it reads/writes | still not owned |
+//! |---|---|---|
+//! | [`mention`] | reads `member`/`agent`/`agent_profile`/`membership`/`workspace` | the outbox row, the message, the audit row — it returns JSON, the caller writes |
+//! | [`provisioning`] | writes `member`/`agent`/`workspace_membership`/`agent_profile` | `workspace_ban` (momo-settings), the audit row (momo-db) |
+//!
+//! Streaming/partial relay, the `tool_call` work-control branch, approvals,
+//! memory-delivery receipts (`context_packet`), the per-request `routing` tier
+//! and the ACP adapter are **not** ported here — see the PR body's deviation
+//! list.
 //!
 //! ## Verification
 //!
@@ -47,6 +58,8 @@
 
 pub mod effort;
 pub mod error;
+pub mod mention;
+pub mod provisioning;
 pub mod run;
 pub mod usage;
 
@@ -55,6 +68,22 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
+pub use mention::{
+    allowed_agent_models, context_window_size, effective_system_prompt,
+    load_mention_candidates_in_tx, max_output_tokens, mention_diagnostic_detail,
+    mention_job_broadcast_payload, mention_job_payload, mention_run_input, message_source,
+    paused_mention_body, paused_mention_props, resolve_mention_routing, MentionCandidate,
+    MentionRouting, MentionTrigger, AGENT_INTERACTION_SAFETY_PREAMBLE,
+    AGENT_PROFILE_POLICY_PREAMBLE, MENTION_JOB_CREATED_FROM, MENTION_JOB_METHOD_GATEWAY,
+    MENTION_JOB_METHOD_WORKER, MENTION_RUN_INPUT_SCHEMA,
+};
+pub use provisioning::{
+    agent_owner_in_tx, create_agent_identity_in_tx, load_agent_model_policy_in_tx,
+    load_agent_profile_in_tx, normalized_model, normalized_system_prompt,
+    reject_credential_shaped_fields, upsert_agent_profile_in_tx, validate_agent_profile,
+    validated_config, AgentCreation, AgentMember, AgentProfile, AgentProfileSpec, AgentSpecInvalid,
+    NewAgentMember,
+};
 pub use run::{
     completion_status, create_agent_run_in_tx, find_agent_run_by_trigger_in_tx, finish_run_in_tx,
     is_active_agent_in_tx, is_active_human_channel_member_in_tx, live_run_count_in_tx,

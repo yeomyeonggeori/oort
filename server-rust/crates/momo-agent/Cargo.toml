@@ -27,6 +27,12 @@ thiserror.workspace = true
 #                       same broadcast. A second INSERT here would drift from it.
 # This crate therefore owns no `outbox` and no `message` SQL, exactly like
 # `momo-t3` owns no `outbox` SQL.
+#
+# B5.2 kept both absences under pressure, which is the point of writing them
+# down: `mention.rs` builds the `agent_job` payload but does not enqueue it, and
+# `mention.rs` builds the paused-agent system line's body/props but does not
+# insert the message. The route layer composes all three in one transaction
+# (bins/momo-server/src/routes/agent_mentions.rs), so the chokepoints hold.
 
 [dev-dependencies]
 # DB-backed conformance harness (tests/conformance_pg.rs, all #[ignore]) — the

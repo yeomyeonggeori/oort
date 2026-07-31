@@ -1687,6 +1687,97 @@ pub struct CreateWorkspaceResponse {
     pub name: String,
 }
 
+// ---------------------------------------------------------------------------
+// agent creation + profile (B5.2)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/agents` (Swift `CreateAgentRequest` :277-320).
+///
+/// `deny_unknown_fields` is the port of Swift's hand-written closed-world
+/// decoder ("unknown create-agent field"), and it is a security property rather
+/// than tidiness here: a caller trying to smuggle a credential in under an
+/// invented key gets a 400 instead of having it ignored — and the keys that ARE
+/// accepted are then walked by `reject_credential_shaped_fields`.
+///
+/// The wire spelling is **camelCase** with a snake_case alias on every
+/// multi-word key: Swift's `CreateAgentRequest` decodes `displayName`/`baseUrl`,
+/// and the alias keeps a curl/script caller that spells them the other way
+/// working rather than answering "unknown field" for a body that is obviously
+/// right. `deny_unknown_fields` still applies to everything else.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateAgentRequest {
+    #[serde(alias = "display_name")]
+    pub display_name: String,
+    pub handle: String,
+    pub model: String,
+    #[serde(alias = "base_url")]
+    pub base_url: String,
+    #[serde(default, alias = "system_prompt")]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub config: Option<Value>,
+    #[serde(default, alias = "owner_human_id")]
+    pub owner_human_id: Option<Uuid>,
+    #[serde(default)]
+    pub profile: Option<AgentProfileInput>,
+}
+
+/// The optional initial profile on create (Swift `AgentProfileInput` :424-455).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentProfileInput {
+    pub instructions: String,
+    #[serde(default, alias = "model_pref")]
+    pub model_pref: Option<String>,
+    #[serde(default, alias = "effort_pref")]
+    pub effort_pref: Option<String>,
+    #[serde(default, alias = "enabled_tools")]
+    pub enabled_tools: Vec<String>,
+    #[serde(default)]
+    pub triggers: Option<Value>,
+}
+
+/// Swift `AgentMemberDTO` (:339-343).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMemberDto {
+    pub id: String,
+    pub handle: String,
+    pub display_name: String,
+}
+
+/// Swift `CreateAgentResponse` (:345-347).
+#[derive(Debug, Serialize)]
+pub struct CreateAgentResponse {
+    pub agent: AgentMemberDto,
+}
+
+/// Swift `AgentProfileDTO` (:562-575).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfileDto {
+    pub agent_member_id: String,
+    pub workspace_id: String,
+    pub instructions: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_pref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort_pref: Option<String>,
+    pub enabled_tools: Vec<String>,
+    pub triggers: Value,
+    pub paused: bool,
+    pub version: i32,
+    pub updated_by: String,
+    pub updated_at_ms: i64,
+}
+
+/// Swift `AgentProfileResponse` (:577-579).
+#[derive(Debug, Serialize)]
+pub struct AgentProfileResponse {
+    pub profile: AgentProfileDto,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

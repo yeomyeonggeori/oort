@@ -50,6 +50,8 @@ use crate::dto::{
     ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
+use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
+use crate::routes::shared::audit_via_token_id;
 use crate::AppState;
 
 /// Server-owned props key: a save-time parsing result that a client may never
@@ -285,6 +287,14 @@ pub async fn send(
     let client_msg_id = request.client_msg_id;
     let root_id = request.root_id;
     let has_routing = request.routing.is_some();
+    // B5.2 — the mention routing's inputs, resolved before the closure takes
+    // ownership of the request. `body` is cloned rather than borrowed because
+    // `new_message` consumes the original and the routing needs the same text.
+    let mention_body = request.body.clone().unwrap_or_default();
+    let author_is_agent = principal.kind == momo_auth::PrincipalKind::Agent;
+    let via_token_id = audit_via_token_id(&principal);
+    let gateway_enabled = state.agent_gateway.enabled();
+    let context_max_messages = state.mentions.context_max_messages;
     let new_message = NewMessage {
         channel_id,
         author_member_id: principal.member_id,
@@ -341,7 +351,7 @@ pub async fn send(
                     })
                 }
             };
-            match send_message_with_mentions_in_tx(
+            let sent = match send_message_with_mentions_in_tx(
                 conn,
                 workspace_id,
                 new_message,
@@ -349,9 +359,38 @@ pub async fn send(
             )
             .await?
             {
-                Ok(sent) => Ok(Some(sent)),
-                Err(rejected) => Err(SendFailure::Rejected(rejected_signature(rejected))),
+                Ok(sent) => sent,
+                Err(rejected) => return Err(SendFailure::Rejected(rejected_signature(rejected))),
+            };
+
+            // B5.2 — mention → agent run, in THIS transaction and only on a real
+            // insert. Swift's guard is the same three conditions
+            // (`MessageRoutes.swift:284`, `if didInsert, type == "text", let body`)
+            // and each one earns its place: a deduped retry must not queue a
+            // second turn, a non-text message has no `@handle` to parse, and an
+            // empty body cannot mention anyone. The run is enqueued after the
+            // broadcast so `props.mention_member_ids` — the human-facing half of
+            // the same decision — is already on the row it describes.
+            if !sent.deduped && message_type == MessageType::Text && !mention_body.is_empty() {
+                route_agent_mentions_in_tx(
+                    conn,
+                    MentionSend {
+                        workspace_id,
+                        channel_id,
+                        message_id: sent.message.id,
+                        message_seq: sent.message.seq,
+                        author_member_id: principal.member_id,
+                        author_is_agent,
+                        body: &mention_body,
+                        hlc_ts: sent.message.hlc_ts,
+                        via_token_id,
+                        gateway_enabled,
+                        context_max_messages,
+                    },
+                )
+                .await?;
             }
+            Ok(Some(sent))
         })
     })
     .await

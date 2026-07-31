@@ -1290,9 +1290,252 @@ pub async fn list_thread_replies(
     })
 }
 
+// ---------------------------------------------------------------------------
+// the agent context window (MOMO-302, consumed by B5.2's mention routing)
+// ---------------------------------------------------------------------------
+
+/// How long a projected body may be before it is elided (Swift
+/// `recentMessageBody` :1928-1932). Characters, not bytes — a Korean history
+/// window must not be cut mid-codepoint.
+const CONTEXT_BODY_MAX_CHARS: usize = 2_000;
+
+/// The same-channel history window an agent turn is assembled from — Swift
+/// `MessageRoutes.loadRecentMessages` (:1753-1858) and
+/// `recentMessageProjection` (:1865-1893).
+///
+/// It lives in this crate because it is a **`message` read**, and this crate owns
+/// every `message` statement (`momo-agent` deliberately owns none). It returns
+/// the wire projection rather than a domain struct for the same reason
+/// [`build_broadcast_payload`] does: the shape is a contract with a consumer
+/// outside this process (`momo_agent_worker::payload::RecentMessage`), so it is
+/// built once, here, instead of being re-assembled by every caller.
+///
+/// ## Two rules the ordering encodes
+///
+/// * **A thread is the session boundary.** When the trigger sits inside a
+///   thread, the root and its replies are taken first and only the leftover
+///   budget is filled from the channel — otherwise a busy channel would push the
+///   conversation the agent was actually asked about out of its own window.
+/// * **The window is replayed oldest-first.** Rows are selected `DESC` (so the
+///   `LIMIT` keeps the *newest* N) and then sorted `ASC`, because a chat
+///   completion reads a transcript forwards.
+///
+/// `type='system'` and deleted messages are excluded: a system line is momo
+/// talking to the user, not a turn in the conversation.
+pub async fn agent_context_window_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    trigger_message_id: Uuid,
+    max_messages: i64,
+) -> Result<Vec<Value>, DbError> {
+    if max_messages <= 0 {
+        return Ok(Vec::new());
+    }
+    let root_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT root_id FROM message WHERE id = $1 AND channel_id = $2 LIMIT 1")
+            .bind(trigger_message_id)
+            .bind(channel_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .flatten();
+
+    const CONTEXT_COLS: &str = "m.seq, m.id, m.author_member_id, mem.kind::text AS author_kind, \
+         mem.display_name, m.type::text AS message_type, m.body, m.props";
+    const CONTEXT_FILTER: &str = "m.type <> 'system' AND m.state <> 'deleted' \
+         AND m.deleted_at IS NULL";
+
+    let mut rows = Vec::new();
+    match root_id {
+        Some(root_id) => {
+            let thread_sql = format!(
+                "SELECT {CONTEXT_COLS} FROM message m \
+                   JOIN member mem ON mem.id = m.author_member_id \
+                  WHERE m.channel_id = $1 AND (m.root_id = $2 OR m.id = $2) \
+                    AND {CONTEXT_FILTER} \
+                  ORDER BY m.seq DESC LIMIT $3"
+            );
+            let thread_rows = sqlx::query(&thread_sql)
+                .bind(channel_id)
+                .bind(root_id)
+                .bind(max_messages)
+                .fetch_all(&mut *conn)
+                .await?;
+            let remaining = max_messages - thread_rows.len() as i64;
+            rows.extend(thread_rows);
+            if remaining > 0 {
+                let fill_sql = format!(
+                    "SELECT {CONTEXT_COLS} FROM message m \
+                       JOIN member mem ON mem.id = m.author_member_id \
+                      WHERE m.channel_id = $1 AND m.id <> $2 \
+                        AND m.root_id IS DISTINCT FROM $2 \
+                        AND {CONTEXT_FILTER} \
+                      ORDER BY m.seq DESC LIMIT $3"
+                );
+                rows.extend(
+                    sqlx::query(&fill_sql)
+                        .bind(channel_id)
+                        .bind(root_id)
+                        .bind(remaining)
+                        .fetch_all(&mut *conn)
+                        .await?,
+                );
+            }
+        }
+        None => {
+            let sql = format!(
+                "SELECT {CONTEXT_COLS} FROM message m \
+                   JOIN member mem ON mem.id = m.author_member_id \
+                  WHERE m.channel_id = $1 AND {CONTEXT_FILTER} \
+                  ORDER BY m.seq DESC LIMIT $2"
+            );
+            rows.extend(
+                sqlx::query(&sql)
+                    .bind(channel_id)
+                    .bind(max_messages)
+                    .fetch_all(&mut *conn)
+                    .await?,
+            );
+        }
+    }
+
+    // Dedupe by id (a thread row wins over its channel-fill twin), then replay
+    // oldest-first.
+    let mut seen: Vec<Uuid> = Vec::with_capacity(rows.len());
+    let mut ordered: Vec<(i64, Value)> = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let id: Uuid = row.try_get("id").map_err(DbError::from)?;
+        if seen.contains(&id) {
+            continue;
+        }
+        seen.push(id);
+        let seq: i64 = row.try_get("seq").map_err(DbError::from)?;
+        let message_type: String = row.try_get("message_type").map_err(DbError::from)?;
+        let body: Option<String> = row.try_get("body").map_err(DbError::from)?;
+        let props: Value = row.try_get("props").map_err(DbError::from)?;
+        let author_member_id: Uuid = row.try_get("author_member_id").map_err(DbError::from)?;
+        let author_kind: String = row.try_get("author_kind").map_err(DbError::from)?;
+        let author_display: String = row.try_get("display_name").map_err(DbError::from)?;
+        ordered.push((
+            seq,
+            json!({
+                "message_id": id.to_string().to_uppercase(),
+                "channel_id": channel_id.to_string().to_uppercase(),
+                "seq": seq,
+                "author_member_id": author_member_id.to_string().to_uppercase(),
+                "author_kind": author_kind,
+                "author_display": author_display,
+                "type": message_type,
+                "body": context_message_body(&message_type, body.as_deref(), &props),
+                "source_id": format!("msg_{}", id.to_string().to_uppercase()),
+            }),
+        ));
+    }
+    ordered.sort_by_key(|(seq, _)| *seq);
+    Ok(ordered.into_iter().map(|(_, value)| value).collect())
+}
+
+/// Render a display body for the window — Swift `recentMessageBody` (:1898-1934).
+///
+/// Structured types carry their payload in `props` with `body = NULL`, so they
+/// collapse to a terse summary rather than projecting an **empty** chat turn:
+/// several OpenAI-compatible endpoints reject a message with empty `content`,
+/// which would fail the whole turn over a tool call that happened to be in the
+/// window. Raw `props` JSON is never put into the transcript.
+pub fn context_message_body(message_type: &str, body: Option<&str>, props: &Value) -> String {
+    let prop_str = |key: &str| {
+        props
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    match message_type {
+        "tool_call" => match prop_str("name") {
+            Some(name) => format!("[tool_call: {name}]"),
+            None => "[tool_call]".to_string(),
+        },
+        "tool_result" => "[tool_result]".to_string(),
+        "diff" => match prop_str("path") {
+            Some(path) => format!("[diff: {path}]"),
+            None => "[diff]".to_string(),
+        },
+        "artifact" => match prop_str("title") {
+            Some(title) => format!("[artifact: {title}]"),
+            None => "[artifact]".to_string(),
+        },
+        "approval_request" => "[approval_request]".to_string(),
+        _ => {
+            let text = body.unwrap_or_default();
+            if text.chars().count() > CONTEXT_BODY_MAX_CHARS {
+                let mut truncated: String = text.chars().take(CONTEXT_BODY_MAX_CHARS).collect();
+                truncated.push('…');
+                truncated
+            } else {
+                text.to_string()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A structured message must never project as empty content: several
+    /// OpenAI-compatible gateways answer 400 for an empty `content`, so one tool
+    /// call in the window would otherwise fail the whole turn.
+    #[test]
+    fn structured_types_summarize_instead_of_projecting_nothing() {
+        assert_eq!(
+            context_message_body("tool_call", None, &json!({"name": "read_file"})),
+            "[tool_call: read_file]"
+        );
+        assert_eq!(
+            context_message_body("tool_call", None, &json!({})),
+            "[tool_call]"
+        );
+        assert_eq!(
+            context_message_body("tool_result", None, &json!({})),
+            "[tool_result]"
+        );
+        assert_eq!(
+            context_message_body("diff", None, &json!({"path": "src/lib.rs"})),
+            "[diff: src/lib.rs]"
+        );
+        assert_eq!(
+            context_message_body("artifact", None, &json!({"title": "plan"})),
+            "[artifact: plan]"
+        );
+        assert_eq!(
+            context_message_body("approval_request", None, &json!({})),
+            "[approval_request]"
+        );
+        for rendered in [
+            context_message_body("tool_call", None, &json!({"secret": "sk-live"})),
+            context_message_body("diff", None, &json!({"patch": "sk-live"})),
+        ] {
+            assert!(
+                !rendered.contains("sk-live"),
+                "raw props must not reach the transcript: {rendered}"
+            );
+        }
+    }
+
+    /// The elision is by CHARACTER: a byte cut would split a Korean codepoint.
+    #[test]
+    fn a_long_text_body_is_elided_by_characters() {
+        let long = "가".repeat(CONTEXT_BODY_MAX_CHARS + 5);
+        let rendered = context_message_body("text", Some(&long), &json!({}));
+        assert_eq!(rendered.chars().count(), CONTEXT_BODY_MAX_CHARS + 1);
+        assert!(rendered.ends_with('…'));
+
+        assert_eq!(
+            context_message_body("text", Some("안녕"), &json!({})),
+            "안녕"
+        );
+        assert_eq!(context_message_body("text", None, &json!({})), "");
+    }
 
     #[test]
     fn history_cursor_prefers_after_over_before() {

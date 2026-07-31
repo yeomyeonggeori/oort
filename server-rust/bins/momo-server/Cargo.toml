@@ -76,3 +76,9 @@ base64.workspace = true
 # verifies the connection token with the broker's HMAC key exactly as the broker
 # would. Already in the tree via momo-auth; never linked for a server-side use.
 jsonwebtoken.workspace = true
+# B5.2 conformance only: `tests/mention_routing_conformance_pg.rs` runs ONE real
+# worker iteration in-process after the send, so the 티키타카 is proved end to end
+# instead of stopping at "a row was enqueued". Dev-only — the server binary
+# neither links nor starts a worker, and the two processes still meet through
+# nothing but the `outbox` row.
+momo-agent-worker = { path = "../momo-agent-worker" }

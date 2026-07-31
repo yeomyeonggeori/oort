@@ -1,7 +1,9 @@
 //! HTTP routes. Each module owns one Swift route file's parity surface.
 
 pub mod agent_gateway;
+pub mod agent_mentions;
 pub mod agent_runs;
+pub mod agents;
 pub mod auth_routes;
 pub mod channels;
 pub mod cloud_hosts;
