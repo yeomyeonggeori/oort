@@ -62,6 +62,9 @@ pub struct Config {
     /// Centrifugo connection-token / subscribe-proxy settings — **fail-closed
     /// unless the operator supplies the two secrets** (B4).
     pub realtime: RealtimeSettings,
+    /// 설정 표면 settings (B4.2) — provider master key, the env provider tier,
+    /// and the instance-operator allow-list. Fail-closed by default.
+    pub settings: SettingsConfig,
 }
 
 /// MOMO-325 native gateway mode (Swift `AgentGatewayMode`, `Config.swift:150-155`).
@@ -298,6 +301,114 @@ impl RealtimeSettings {
     }
 }
 
+/// Settings-surface configuration (B4.2) — everything the 설정 표면 needs that
+/// is not already in [`Config`].
+///
+/// Two of the three fields are *fail-closed switches*, not tuning:
+///
+/// * `provider_link_master_key` absent ⇒ the whole `/v1/provider/link[…]` family
+///   answers **503**. It is the AES-GCM key migrations 039/042 sealed every
+///   stored bearer under; without it this server can neither open a stored row
+///   nor seal a new one, and answering anything other than "not configured"
+///   would mean guessing at an operator credential.
+/// * `platform_admin_emails` empty ⇒ the listed-instance-operator path is closed
+///   and only a `platform:read` token reaches the instance-global surfaces. That
+///   is the MOMO-583 posture: an arbitrary workspace owner is **not** an
+///   instance operator, and an unset allow-list grants nobody.
+///
+/// `env_provider` is the boot-time `HERMES_*` trio — the *env tier* of the
+/// ADR-0004 증보 1 precedence (DB link > env). It carries a bearer, so it is
+/// never `Debug`-printed; see the manual impl below.
+#[derive(Clone)]
+pub struct SettingsConfig {
+    /// `PROVIDER_LINK_MASTER_KEY`. Held in memory only; never logged, never
+    /// echoed, never used for anything but AES-GCM key derivation.
+    pub provider_link_master_key: Option<String>,
+    /// The `HERMES_*` env trio, resolved once at boot.
+    pub env_provider: momo_settings::ProviderConfig,
+    /// `PLATFORM_ADMIN_EMAILS`, lowercased — the same key [`T3Settings`] reads.
+    /// One operator allow-list, two consumers.
+    pub platform_admin_emails: Vec<String>,
+    /// `MOMO_ENV`, carried here rather than read off [`Config`] because the
+    /// base-URL gate needs it on every provider write: in a strict environment
+    /// (`staging`/`prod`/…) an operator's local-loopback flag stops applying, so
+    /// the environment label is an input to an authorization-shaped decision and
+    /// belongs beside the other settings inputs.
+    pub environment: String,
+}
+
+impl Default for SettingsConfig {
+    /// Fail-closed: no master key (the AI-연결 family answers 503), no listed
+    /// operator, and `local` — which is the *permissive* environment label, so a
+    /// test or an embedded boot never has a strict gate silently applied to it.
+    fn default() -> Self {
+        SettingsConfig {
+            provider_link_master_key: None,
+            env_provider: momo_settings::ProviderConfig::default(),
+            platform_admin_emails: Vec::new(),
+            environment: "local".to_string(),
+        }
+    }
+}
+
+impl std::fmt::Debug for SettingsConfig {
+    /// Hand-written for the same reason [`crate::AppState`]'s is: `env_provider`
+    /// holds `HERMES_API_KEY`, and a `{:?}` in a log line is exactly how a
+    /// provider bearer reaches a log aggregator.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SettingsConfig")
+            .field(
+                "provider_link_master_key_configured",
+                &self.provider_link_master_key.is_some(),
+            )
+            .field("provider_mode", &self.env_provider.mode.as_str())
+            .field("platform_admin_emails", &self.platform_admin_emails.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl SettingsConfig {
+    pub fn from_env() -> SettingsConfig {
+        SettingsConfig {
+            provider_link_master_key: env("PROVIDER_LINK_MASTER_KEY"),
+            env_provider: momo_settings::ProviderConfig::from_env(env),
+            platform_admin_emails: platform_admin_emails_from_env(),
+            environment: env_or("MOMO_ENV", "local"),
+        }
+    }
+
+    /// Swift's `Config` refuses to boot when the provider master key REUSES
+    /// another master key (migration 039 header: never `JWT_HMAC`, never
+    /// `OUTBOUND_WEBHOOK_MASTER_KEY`).
+    ///
+    /// Reuse would make a provider-bearer leak a token-signing leak: one
+    /// compromised value would both open every stored provider credential and
+    /// mint App JWTs. **Absence** is not an error — it closes the surface with a
+    /// 503 instead, because an instance that never configured a DB provider link
+    /// is a perfectly good instance.
+    pub fn boot_error(&self, jwt_secret: &str) -> Option<&'static str> {
+        let key = self.provider_link_master_key.as_deref()?;
+        if key == jwt_secret {
+            return Some("PROVIDER_LINK_MASTER_KEY must not reuse JWT_HMAC");
+        }
+        if env("OUTBOUND_WEBHOOK_MASTER_KEY").as_deref() == Some(key) {
+            return Some("PROVIDER_LINK_MASTER_KEY must not reuse OUTBOUND_WEBHOOK_MASTER_KEY");
+        }
+        None
+    }
+}
+
+/// `PLATFORM_ADMIN_EMAILS` → lowercased, comma-split, blanks dropped.
+fn platform_admin_emails_from_env() -> Vec<String> {
+    env("PLATFORM_ADMIN_EMAILS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
 /// Swift `AgentProviderConfig.requiresStrictExternalProvider`
 /// (`Config.swift:637-644`), verbatim: the deployed environments where a
 /// placeholder secret is a boot error rather than a developer convenience.
@@ -438,6 +549,15 @@ impl Config {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
+        // B4.2: the only settings misconfiguration worth refusing a boot over.
+        // A *missing* provider master key closes the surface (503); a *reused*
+        // one silently merges two blast radii, so it is fatal here rather than
+        // discovered after a leak.
+        let settings = SettingsConfig::from_env();
+        if let Some(message) = settings.boot_error(&jwt_secret) {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
@@ -448,6 +568,7 @@ impl Config {
             t3: T3Settings::from_env(),
             agent_gateway,
             realtime,
+            settings,
         })
     }
 }

@@ -255,6 +255,119 @@ pub(crate) fn settle_db<T>(context: &str, outcome: DbRejectable<T>) -> Result<T,
     }
 }
 
+// ---------------------------------------------------------------------------
+// B4.2 — the operator authorization matrix
+//
+// The 설정 표면 has TWO operator gates and Swift is explicit that the split is
+// deliberate (`ProviderLinkRoutes.swift:24-27`): **instance-global ⇒ platform
+// scope or listed instance operator; per-workspace ⇒ owner/admin.**
+//
+// The reason is blast radius, not seniority. `provider_link` has no
+// `workspace_id`: whoever edits it changes provider resolution for EVERY
+// workspace on the instance, so the MOMO-576 "any workspace owner" rule was a
+// cross-tenant control leak the moment ADR-0117 opened multi-workspace, and
+// MOMO-583 removed it. `work_host_engine` and `work_tier_policy` are RLS-scoped
+// rows that only affect their own tenant, so an owner/admin is the right
+// authority there.
+//
+// Both helpers do their DB read in the operator's OWN workspace and complete
+// **before** any operator GUC is bound — 권한 판정 → GUC 세팅, never the reverse.
+// ---------------------------------------------------------------------------
+
+/// Swift's cross-tenant read scope (`platform:read`).
+const PLATFORM_READ_SCOPE: &str = "platform:read";
+
+/// Instance-global gate (Swift `ProviderLinkRoutes.requireOperator` :328-377):
+/// a human that either carries `platform:read` or is an owner/admin of its own
+/// workspace **and** whose verified email is listed in `PLATFORM_ADMIN_EMAILS`.
+///
+/// The allow-list path is not a bypass: a self-hosted instance can never mint a
+/// platform token, so without it the AI-연결 panel would be unreachable except
+/// through the database. What stays removed is *arbitrary* workspace-owner
+/// sufficiency.
+pub(crate) async fn require_instance_operator(
+    state: &crate::AppState,
+    principal: &Principal,
+) -> Result<(), ApiError> {
+    require_human(principal, "human operator required")?;
+    if principal
+        .scopes
+        .iter()
+        .any(|scope| scope == PLATFORM_READ_SCOPE)
+    {
+        return Ok(());
+    }
+    let workspace_id = principal.workspace_id;
+    let member_id = principal.member_id;
+    let checked = settle_db(
+        "settings.authorize_instance_operator",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let role = momo_auth::active_workspace_role(conn, workspace_id, member_id).await?;
+                let email =
+                    momo_auth::verified_operator_email(conn, workspace_id, member_id).await?;
+                Ok(Ok((role, email)))
+            })
+        })
+        .await,
+    )?;
+
+    let listed = checked.0.is_some_and(|role| role.is_admin())
+        && checked
+            .1
+            .is_some_and(|email| state.settings.platform_admin_emails.contains(&email));
+    if listed {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "platform:read scope or listed instance operator required",
+        ))
+    }
+}
+
+/// Per-workspace gate (Swift `ProviderLinkRoutes.isOperatorAuthorized` :281-289
+/// as used by `WorkHostEngineRoutes.requireOperator` :127-154): a human that
+/// carries `platform:read` **or** is an owner/admin of its own workspace.
+///
+/// The platform path needs no DB lookup, so only the role fallback opens a
+/// tenant read.
+pub(crate) async fn require_workspace_operator(
+    state: &crate::AppState,
+    principal: &Principal,
+    workspace_id: Uuid,
+) -> Result<(), ApiError> {
+    require_human(principal, "human operator required")?;
+    if principal
+        .scopes
+        .iter()
+        .any(|scope| scope == PLATFORM_READ_SCOPE)
+    {
+        return Ok(());
+    }
+    let member_id = principal.member_id;
+    let role = settle_db(
+        "settings.authorize_workspace_operator",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                Ok(Ok(momo_auth::active_workspace_role(
+                    conn,
+                    workspace_id,
+                    member_id,
+                )
+                .await?))
+            })
+        })
+        .await,
+    )?;
+    if role.is_some_and(|role| role.is_admin()) {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "platform:read scope or workspace owner/admin required",
+        ))
+    }
+}
+
 /// Milliseconds since the epoch — the `*AtMs` wire convention every DTO in this
 /// API uses (Swift `Int64(date.timeIntervalSince1970 * 1000)`).
 pub(crate) fn epoch_ms(at: chrono::DateTime<chrono::Utc>) -> i64 {

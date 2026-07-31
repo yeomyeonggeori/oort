@@ -1269,6 +1269,360 @@ pub struct WorkspaceMessageSearchResponse {
     pub next_cursor: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// settings — 설정 표면 (B4.2)
+//
+// Contract sources: `clients/web/src/features/settings/api.ts` (the interfaces
+// the panel decodes) checked against the Swift routes each one transcribes.
+//
+// One rule runs through every DTO below and is worth stating once: **no field
+// here can hold a provider credential.** The provider bearer is write-only —
+// accepted in a PUT body, never echoed — and the only thing that comes back is a
+// masked 4-character tail plus a boolean (ADR-0004 Rules #1-#2).
+// ---------------------------------------------------------------------------
+
+/// `GET|PUT|DELETE /v1/provider/link` response (Swift `ProviderLinkResponse`,
+/// `ProviderLinkRoutes.swift:427-441`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLinkResponse {
+    pub schema: &'static str,
+    /// A usable row exists in this instance's database (as opposed to the env
+    /// fallback being in force).
+    pub configured: bool,
+    /// `database` | `environment` — which tier won the ADR-0004 증보 1
+    /// precedence.
+    pub source: String,
+    pub mode: String,
+    pub base_url: String,
+    pub endpoint_label: String,
+    pub bearer_configured: bool,
+    /// Last 4 characters of the stored bearer. Absent unless `source=database`,
+    /// and absent for any secret shorter than 8 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer_last4: Option<String>,
+    pub availability: String,
+    pub key_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
+    pub diagnostics: Vec<String>,
+}
+
+/// Closed-world `PUT /v1/provider/link` body (Swift `PutProviderLinkRequest`
+/// :494-520). `deny_unknown_fields` is the ADR-0004 Rules #1-#2 enforcement
+/// point: no `codex_oauth_*` / `openai_*` / raw-provider-key field can ever be
+/// introduced through this API by a client that simply sends one.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutProviderLinkRequest {
+    pub base_url: String,
+    /// Write-only. Never read back by any surface.
+    pub bearer: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// One hop of the cascade as projected to the operator (Swift
+/// `ProviderChainEntryDTO`, `ProviderLinkChainRoutes.swift:353-367`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderChainEntryDto {
+    /// 0 is the `provider_link` singleton; fallback hops start at 1.
+    pub position: i32,
+    /// `provider_link` | `environment` | `chain`.
+    pub source: String,
+    pub mode: String,
+    pub base_url: String,
+    pub endpoint_label: String,
+    pub enabled: bool,
+    pub bearer_configured: bool,
+    /// The row exists but its ciphertext will not open with the configured
+    /// master key. It stays visible so a replace-all PUT cannot erase it.
+    pub bearer_unavailable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer_last4: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
+}
+
+/// `GET|PUT|DELETE /v1/provider/link/chain` response (Swift
+/// `ProviderChainResponse` :341-349).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderChainResponse {
+    pub schema: &'static str,
+    /// The whole cascade in attempt order, position 0 first.
+    pub entries: Vec<ProviderChainEntryDto>,
+    /// Configured fallback hops — everything beyond position 0.
+    pub fallback_count: usize,
+    /// Hops a real turn would attempt (enabled AND usable), **position 0
+    /// included**. Two live fallbacks behind a live head answer 3, not 2.
+    pub attemptable_count: usize,
+}
+
+/// Closed-world `PUT /v1/provider/link/chain` body (Swift
+/// `PutProviderChainRequest` :385-454).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutProviderChainRequest {
+    pub entries: Vec<PutProviderChainEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutProviderChainEntry {
+    pub position: i32,
+    pub base_url: String,
+    /// Write-only, and **optional**: absent means "keep the bearer already
+    /// stored at this position", so an operator can reorder or park a hop
+    /// without re-typing a secret the API can never show them again.
+    #[serde(default)]
+    pub bearer: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// `POST /v1/provider/link/test` per-hop probe result (Swift
+/// `ProviderChainProbeDTO`, `ProviderLinkRoutes.swift:480-489`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderChainProbeDto {
+    pub position: i32,
+    pub source: String,
+    pub mode: String,
+    pub endpoint_label: String,
+    pub enabled: bool,
+    pub ok: bool,
+    /// Machine label, not user copy — the client maps it
+    /// (`features/settings/chainModel.ts:probeReasonCopy`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// `ok` | `fall_over` | `propagate` | `skipped`.
+    pub disposition: String,
+}
+
+/// `POST /v1/provider/link/test` response (Swift `ProviderLinkTestResponse`
+/// :447-459). The first seven fields describe **position 0** and keep their
+/// exact MOMO-572 meaning; `cascadeOk`/`entries` are the ADR-0135 D1 extension.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLinkTestResponse {
+    pub schema: &'static str,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub source: String,
+    pub mode: String,
+    pub endpoint_label: String,
+    pub checked_at_ms: i64,
+    pub cascade_ok: bool,
+    pub entries: Vec<ProviderChainProbeDto>,
+}
+
+/// `GET|PUT /v1/provider/work-host-engine` response (Swift
+/// `WorkHostEngineResponse`, `WorkHostEngineRoutes.swift:189-195`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkHostEngineResponse {
+    pub engine: String,
+    /// `database` once a workspace has chosen; `default` means no row exists and
+    /// the boot default applies **without any write**.
+    pub source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+    pub schema: &'static str,
+}
+
+/// Closed-world `PUT /v1/provider/work-host-engine` body (Swift
+/// `PutWorkHostEngineRequest` :200-221) — engine label only, so no credential or
+/// host-local path can be smuggled through (ADR-0004).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutWorkHostEngineRequest {
+    pub engine: String,
+}
+
+/// `GET /v1/provider/effort-table` (Swift `ProviderEffortTableResponse`,
+/// `ProviderEffortTableRoutes.swift:192-197`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEffortTableResponse {
+    pub schema: &'static str,
+    /// The canonical superset, ascending.
+    pub levels: Vec<&'static str>,
+    pub fallback: ProviderEffortFallbackDto,
+    pub providers: Vec<ProviderEffortProviderDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEffortFallbackDto {
+    pub efforts: Vec<&'static str>,
+    pub default_effort: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEffortProviderDto {
+    pub provider: &'static str,
+    pub models: Vec<ProviderEffortModelDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEffortModelDto {
+    pub model: &'static str,
+    pub efforts: Vec<&'static str>,
+    pub default_effort: &'static str,
+}
+
+/// One provider quota gauge (Swift `ProviderQuotaSnapshotDTO`,
+/// `ProviderQuotaSnapshotRoutes.swift:487-513`).
+///
+/// `resetsAt` is contractually `string | null`, so unlike every other optional in
+/// this file it is **emitted as null** rather than omitted — Swift hand-writes
+/// `encode` for exactly that reason.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderQuotaSnapshotDto {
+    pub provider_ref: String,
+    /// ADR-0135's wire name; the column is `quota_window` (reserved keyword).
+    pub window: String,
+    /// 0..1 **remaining**, never consumed.
+    pub remaining_ratio: f64,
+    pub resets_at: Option<String>,
+    pub probed_at: String,
+    pub ingested_at: String,
+    /// Computed on the server clock, never derivable by the client from
+    /// `probedAt` (the two clocks are the adapter's and a browser's).
+    pub age_seconds: i64,
+}
+
+/// `GET /v1/provider/quota-snapshots` (Swift
+/// `ProviderQuotaSnapshotListResponse` :522-526).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderQuotaSnapshotListResponse {
+    pub schema: &'static str,
+    pub observed_at: String,
+    pub snapshots: Vec<ProviderQuotaSnapshotDto>,
+}
+
+/// Swift `WorkTierPolicyDTO` (`WorkTierPolicyRoutes.swift:11-18`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkTierPolicyDto {
+    pub workspace_id: String,
+    /// Absent on the workspace default row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<String>,
+    pub mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_target: Option<String>,
+    /// No member row exists and the workspace default is what is in force — so
+    /// the panel says that instead of implying a saved override.
+    pub inherited: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+}
+
+/// Swift `WorkTierPolicyResponse` (:20-22). The client unwraps
+/// `res.workTierPolicy` and rejects a body without it
+/// (`settings/api.ts:316-322`), so the envelope is contract.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkTierPolicyResponse {
+    pub work_tier_policy: WorkTierPolicyDto,
+}
+
+/// Swift `PutWorkTierPolicyRequest` (:6-9).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutWorkTierPolicyRequest {
+    pub mode: String,
+    #[serde(default)]
+    pub auto_target: Option<String>,
+}
+
+/// Swift `InviteCodeDTO`, as the settings panel decodes it
+/// (`features/settings/api.ts:413-428`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteCodeDto {
+    pub id: String,
+    pub workspace_id: String,
+    /// Last 6 characters of the code. The code itself is returned exactly once,
+    /// by the create call, and never stored in plaintext.
+    pub code_preview: String,
+    pub role: String,
+    pub max_uses: i32,
+    pub used_count: i32,
+    pub expires_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revocation_reason: Option<String>,
+    pub created_by: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// `GET /v1/workspaces/{ws}/invites` (Swift `InviteListResponse`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteListResponse {
+    pub invites: Vec<InviteCodeDto>,
+}
+
+/// `POST /v1/workspaces/{ws}/invites` (Swift `CreateInviteResponse`) — the only
+/// response in the API that ever carries a raw invite code.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateInviteResponse {
+    pub invite: InviteCodeDto,
+    pub code: String,
+}
+
+/// Swift `CreateInviteRequest`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateInviteRequest {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub max_uses: Option<i32>,
+    #[serde(default)]
+    pub expires_at_ms: Option<i64>,
+}
+
+/// Swift `CreateWorkspaceRequest` (`WorkspaceRoutes.swift`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceRequest {
+    pub slug: String,
+    pub name: String,
+}
+
+/// `POST /v1/workspaces` 201 body (Swift `CreateWorkspaceResponse` :246-251).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceResponse {
+    pub schema: &'static str,
+    pub workspace_id: String,
+    pub slug: String,
+    pub name: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -33,6 +33,12 @@ momo-outbox = { path = "../../crates/momo-outbox" }
 # goes through `momo-messaging`'s send path — so this route layer still owns no
 # SQL of its own beyond the two membership predicates it shares with Swift.
 momo-agent = { path = "../../crates/momo-agent" }
+# B4.2 (설정 표면). `momo-settings` owns every provider_link / provider_link_chain
+# / work_host_engine / work_tier_policy / quota_snapshot / invite_code statement
+# this batch mounts, plus the AES-GCM sealing of the provider bearer — so the
+# route layer still owns no SQL of its own and the plaintext bearer exists only
+# between the PUT body that carried it and the seal call.
+momo-settings = { path = "../../crates/momo-settings" }
 # B2.4: the signed work-host REQUEST authenticator hashes the raw body with the
 # shared `momo-wire` helper, so the server's digest and the daemon's signer are
 # one implementation — the exact drift Swift had between two copies of the

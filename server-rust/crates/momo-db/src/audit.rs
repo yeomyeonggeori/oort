@@ -112,6 +112,20 @@ impl AuditEntry {
         self
     }
 
+    /// Set the subject when the action *may* be directed at someone, and
+    /// **clear** it when it is not.
+    ///
+    /// Added for the tier policy (B4.2), where one write serves two scopes: a
+    /// member override has a subject, a workspace default has none. Swift writes
+    /// the stored `member_id` straight into the column, NULL included
+    /// (`WorkTierPolicyRoutes.swift:166`), so a `None` here has to erase the
+    /// subject [`by`] copied in — otherwise the workspace-wide row would claim
+    /// the acting admin as the member it applies to.
+    pub fn about_optional(mut self, subject_member_id: Option<Uuid>) -> Self {
+        self.subject_member_id = subject_member_id;
+        self
+    }
+
     /// Both halves of the target, together — a `target_type` without a
     /// `target_id` names nothing.
     pub fn target(mut self, target_type: impl Into<String>, target_id: Uuid) -> Self {
@@ -252,9 +266,15 @@ mod tests {
         );
         // …until the action is directed at someone else.
         let other = Uuid::from_u128(8);
-        let redirected = entry.about(other);
+        let redirected = entry.clone().about(other);
         assert_eq!(redirected.actor_member_id, Some(member));
         assert_eq!(redirected.subject_member_id, Some(other));
+
+        // …and a scope with no subject erases the one `by` copied in, rather
+        // than leaving the actor standing in for "everyone".
+        let workspace_wide = entry.about_optional(None);
+        assert_eq!(workspace_wide.actor_member_id, Some(member));
+        assert_eq!(workspace_wide.subject_member_id, None);
     }
 
     /// The FK rule that cost the Swift server a live 500: a host-signed action
