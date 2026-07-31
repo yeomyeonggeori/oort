@@ -71,11 +71,11 @@ pub use invite::{
     validated_expires_at_ms, validated_max_uses, CreatedInvite, InviteCode, InviteSpecInvalid,
 };
 pub use join::{
-    fallback_handle, is_valid_handle, normalized_invite_code, normalized_join_display_name,
-    normalized_join_email, normalized_join_password, normalized_join_time_zone,
-    normalized_requested_handle, redeem_invite_in_tx, resolve_invite_workspace, role_rank,
-    JoinError, JoinOutcome, JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember,
-    JoinedMembership,
+    fallback_handle, is_handle_banned_in_tx, is_valid_handle, normalized_invite_code,
+    normalized_join_display_name, normalized_join_email, normalized_join_password,
+    normalized_join_time_zone, normalized_requested_handle, redeem_invite_in_tx,
+    resolve_invite_workspace, role_rank, JoinError, JoinOutcome, JoinRejection, JoinRequestValues,
+    JoinSpecInvalid, JoinedMember, JoinedMembership,
 };
 pub use link::{
     decrypt_link, delete_link, read_link, resolve_link, upsert_link, DecryptedProviderLink,

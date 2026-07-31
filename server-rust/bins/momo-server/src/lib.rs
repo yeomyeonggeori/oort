@@ -32,7 +32,8 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings,
+    AgentGatewaySettings, MentionSettings, RateLimitConfig, RealtimeSettings, SettingsConfig,
+    T3Settings,
 };
 use crate::rate_limit::SlidingWindowRateLimiter;
 
@@ -78,6 +79,10 @@ pub struct AppState {
     /// (`POST /v1/join`) is the one unauthenticated write on the instance, so
     /// "the operator configured nothing" has to mean *limited*, not *open*.
     pub rate_limit: Arc<RateLimitState>,
+    /// Mention→run routing knobs (B5.2). The default is the shipped one, not a
+    /// disabled state: routing an `@mention` to its agent is the product, so an
+    /// instance that configured nothing still does it.
+    pub mentions: Arc<MentionSettings>,
 }
 
 impl AppState {
@@ -91,6 +96,7 @@ impl AppState {
             realtime: Arc::new(RealtimeSettings::default()),
             settings: Arc::new(SettingsConfig::default()),
             rate_limit: Arc::new(RateLimitState::default()),
+            mentions: Arc::new(MentionSettings::default()),
         }
     }
 
@@ -132,6 +138,12 @@ impl AppState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
         });
+        self
+    }
+
+    /// Attach the mention-routing knobs (B5.2).
+    pub fn with_mentions(mut self, settings: MentionSettings) -> Self {
+        self.mentions = Arc::new(settings);
         self
     }
 }
@@ -339,6 +351,15 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/agent-runs",
             post(routes::agent_runs::create),
+        )
+        // B5.2 — "에이전트 초대". There is no bot to install: an agent is a
+        // `member` with `kind='agent'`, so creating one puts it in the roster
+        // beside the humans and makes it mentionable as soon as it is added to a
+        // channel. The profile read is the minimum a hub UI consumes.
+        .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/profile",
+            get(routes::agents::get_profile),
         )
         // agent gateway (MOMO-325 / migration 008)
         .route(

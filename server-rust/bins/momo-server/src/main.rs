@@ -95,7 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // B4.3: the per-IP limiter in front of `POST /v1/join`. On by default —
     // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
     // when someone does.
-    .with_rate_limit(config.rate_limit);
+    .with_rate_limit(config.rate_limit)
+    // B5.2: mention→run routing is always on (routing an `@mention` to its agent
+    // is the product); the only knob is how much history rides the job.
+    .with_mentions(config.mentions.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

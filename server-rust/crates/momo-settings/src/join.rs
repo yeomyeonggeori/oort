@@ -626,6 +626,29 @@ pub fn role_rank(role: &str) -> i32 {
     }
 }
 
+/// Is this **handle** banned from the workspace? — Swift
+/// `JoinRoutes.requireNotBanned(email: nil, handle:)`, the spelling
+/// `AgentRoutes.createAgentIdentity` (:113-115) uses.
+///
+/// Exported (unlike [`is_banned`]) because agent creation has no email to check
+/// and needs the handle half on its own. It stays in this crate rather than
+/// being re-written in `momo-agent`: `workspace_ban` has one owner, so "may this
+/// handle exist" has one answer.
+pub async fn is_handle_banned_in_tx(
+    conn: &mut PgConnection,
+    handle: &str,
+) -> Result<bool, DbError> {
+    let banned: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM workspace_ban WHERE handle_norm = lower($1::text) \
+         )",
+    )
+    .bind(handle)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(banned)
+}
+
 async fn is_banned(conn: &mut PgConnection, email: &str, handle: &str) -> Result<bool, DbError> {
     // The `::text` casts are Swift's (`requireNotBanned` :543-544) and they are
     // load-bearing here for a different reason: `lower` is overloaded on

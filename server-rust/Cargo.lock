@@ -1282,6 +1282,7 @@ dependencies = [
  "ed25519-dalek",
  "jsonwebtoken",
  "momo-agent",
+ "momo-agent-worker",
  "momo-auth",
  "momo-db",
  "momo-messaging",

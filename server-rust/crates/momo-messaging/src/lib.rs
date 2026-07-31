@@ -27,10 +27,15 @@
 //! read-only. The one outbox row B1.2 adds (the read-state broadcast) goes
 //! through [`momo_outbox::emit_outbox`] like every other.
 //!
-//! Deliberately **still out of scope** (later batches): huddle, attachments, the
-//! pgvector memory plane, and the agent-run half of mention routing
-//! (`MessageRoutes.routeAgentMentions` — an `agent_run` surface, not a
-//! read-state one).
+//! **B5.2** adds exactly one read to this crate and no writes:
+//! [`message::agent_context_window_in_tx`], the same-channel history window a
+//! mention-triggered agent turn is assembled from (MOMO-302). It lives here
+//! because it is a `message` read and this crate owns every `message` statement;
+//! the agent-run half of mention routing stays in `momo-agent`, which owns
+//! `agent_run` and — deliberately — no message SQL at all.
+//!
+//! Deliberately **still out of scope** (later batches): huddle, attachments and
+//! the pgvector memory plane.
 
 pub mod channel;
 pub mod dm;
@@ -61,9 +66,10 @@ pub use identity::{
     WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
 };
 pub use message::{
-    build_broadcast_payload, build_thread_updated_payload, cent_channel, clamp_history_limit,
-    clamp_replies_limit, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
-    list_messages, list_thread_replies, parse_replies_cursor, send_message, send_message_in_tx,
+    agent_context_window_in_tx, build_broadcast_payload, build_thread_updated_payload,
+    cent_channel, clamp_history_limit, clamp_replies_limit, context_message_body,
+    fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page, list_messages,
+    list_thread_replies, parse_replies_cursor, send_message, send_message_in_tx,
     send_message_with_mentions_in_tx, send_signed_message_in_tx, thread_root_state_in_tx,
     validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, MessageSignature,
     MessageType, NewMessage, PagedMessage, RepliesCursorInvalid, SentMessage, StoredMessage,

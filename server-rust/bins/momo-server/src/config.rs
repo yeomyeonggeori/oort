@@ -69,6 +69,9 @@ pub struct Config {
     /// route only. **On by default**, because the route it guards is the one
     /// unauthenticated write on the instance.
     pub rate_limit: RateLimitConfig,
+    /// Mention→run routing knobs (B5.2). Always on; only the history window is
+    /// configurable.
+    pub mentions: MentionSettings,
 }
 
 /// MOMO-300 request rate limiting (Swift `RateLimitConfig`, `Config.swift:283-302`).
@@ -204,6 +207,38 @@ impl AgentGatewaySettings {
             Some("AGENT_GATEWAY_SECRET is required when MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1")
         } else {
             None
+        }
+    }
+}
+
+/// Mention→run routing knobs (B5.2).
+///
+/// One key today, and it lives here rather than being read from the process
+/// environment at request time for the reason every other setting in this file
+/// does: a handler that calls `std::env::var` makes its behaviour untestable and
+/// its configuration invisible at boot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionSettings {
+    /// `AGENT_CONTEXT_MAX_MESSAGES` (default 30, clamped 1…200) — the history
+    /// window projected into the `agent_job` payload (Swift
+    /// `MessageRoutes.agentContextMaxMessages`, :1742-1751).
+    pub context_max_messages: i64,
+}
+
+impl Default for MentionSettings {
+    fn default() -> Self {
+        MentionSettings {
+            context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,
+        }
+    }
+}
+
+impl MentionSettings {
+    pub fn from_env() -> MentionSettings {
+        MentionSettings {
+            context_max_messages: momo_agent::context_window_size(
+                env("AGENT_CONTEXT_MAX_MESSAGES").as_deref(),
+            ),
         }
     }
 }
@@ -615,6 +650,7 @@ impl Config {
             realtime,
             settings,
             rate_limit: RateLimitConfig::from_env(),
+            mentions: MentionSettings::from_env(),
         })
     }
 }
