@@ -837,6 +837,142 @@ pub struct UsageSummaryResponse {
     pub budget: Option<UsageSummaryBudget>,
 }
 
+// ---------------------------------------------------------------------------
+// direct messages (B1.2 — Swift `DMRoutes.swift` + `DTOs.swift:456-503`)
+// ---------------------------------------------------------------------------
+
+/// Swift `ChannelDTO` (:456-469). Optionals are omitted when null, matching the
+/// synthesized `encodeIfPresent`; `muted` is always present because it is a
+/// `Bool`, not an optional, on the Swift side too.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dm_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
+    /// Always `None` on the DM surface: `list` filters archived channels out and
+    /// `open` un-archives before returning (Swift hardcodes `NULL` for the same
+    /// reason).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at_ms: Option<i64>,
+    pub muted: bool,
+}
+
+/// Swift `WorkspaceChannelsResponse` (:471-473) — the `GET …/dms` body.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChannelsResponse {
+    pub channels: Vec<ChannelDto>,
+}
+
+/// `POST …/dms` request (Swift `OpenDirectMessageRequest`, :485-498), which
+/// hand-rolls a decoder accepting either spelling of the key. `alias` is the
+/// same contract.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenDirectMessageRequest {
+    #[serde(alias = "member_id")]
+    pub member_id: Uuid,
+}
+
+/// `POST …/dms` response (Swift `OpenDirectMessageResponse`, :500-503).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenDirectMessageResponse {
+    pub channel: ChannelDto,
+    /// `true` only when this call created the channel — the 201/200 split.
+    pub created: bool,
+}
+
+// ---------------------------------------------------------------------------
+// read state (B1.2 — Swift `ReadStateRoutes.swift` + `DTOs.swift:291-322`)
+// ---------------------------------------------------------------------------
+
+/// `PUT …/channels/{ch}/read-state` request (Swift `UpdateReadStateRequestDTO`).
+///
+/// **snake_case, not camelCase** — this DTO is one of the few places the Swift
+/// server spells its keys with underscores, and the clients already send that.
+/// There is deliberately no actor field: the cursor's owner is the
+/// authenticated principal and nothing else.
+#[derive(Debug, Deserialize)]
+pub struct UpdateReadStateRequestDto {
+    pub last_read_seq: i64,
+}
+
+/// Swift `ReadStateDTO` (:301-315) — snake_case for the same reason.
+#[derive(Debug, Serialize)]
+pub struct ReadStateDto {
+    pub channel_id: String,
+    pub last_read_seq: i64,
+    pub latest_seq: i64,
+    pub unread_count: i64,
+    pub mention_count: i32,
+}
+
+/// Swift `ReadStateListResponseDTO` (:317-322).
+#[derive(Debug, Serialize)]
+pub struct ReadStateListResponseDto {
+    pub read_states: Vec<ReadStateDto>,
+}
+
+// ---------------------------------------------------------------------------
+// message search (B1.2 — Swift `SearchRoutes.swift` + `DTOs.swift:266-281`)
+// ---------------------------------------------------------------------------
+
+/// `GET …/search/messages` query string. Parsed leniently like
+/// [`HistoryQuery`]: a garbage `limit` falls back to the default rather than
+/// 400-ing, matching Swift's `Int($0) ?? 20`. `q` and `cursor` *are* validated,
+/// because an unusable value there changes which rows come back.
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+impl SearchQuery {
+    pub fn limit(&self) -> Option<i64> {
+        self.limit.as_deref().and_then(|raw| raw.parse().ok())
+    }
+}
+
+/// Swift `WorkspaceMessageSearchHitDTO` (:268-276). `createdAtMs` is
+/// milliseconds on the wire even though the cursor keeps microseconds.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMessageSearchHitDto {
+    pub channel_id: String,
+    pub message_id: String,
+    pub seq: i64,
+    pub author_member_id: String,
+    pub created_at_ms: i64,
+    pub snippet: String,
+    /// Zero-based offset of the match inside `snippet`.
+    pub match_offset: i32,
+}
+
+/// Swift `WorkspaceMessageSearchResponse` (:278-281).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMessageSearchResponse {
+    pub hits: Vec<WorkspaceMessageSearchHitDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1081,5 +1217,46 @@ mod tests {
         assert_eq!(query.limit(), Some(25));
         assert_eq!(query.before(), None, "garbage cursor is ignored, not a 400");
         assert_eq!(query.after(), None);
+    }
+
+    /// The B1.2 read-state DTOs are the API's snake_case island. Renaming them
+    /// to the camelCase every neighbouring DTO uses would break every shipped
+    /// client silently — the keys simply would not be found.
+    #[test]
+    fn read_state_dtos_stay_snake_case() {
+        let json = serde_json::to_value(ReadStateListResponseDto {
+            read_states: vec![ReadStateDto {
+                channel_id: "c".into(),
+                last_read_seq: 1,
+                latest_seq: 2,
+                unread_count: 1,
+                mention_count: 0,
+            }],
+        })
+        .expect("serialize");
+        assert!(json.get("read_states").is_some(), "{json}");
+        assert!(json.get("readStates").is_none(), "{json}");
+        assert_eq!(json["read_states"][0]["channel_id"], "c");
+        assert_eq!(json["read_states"][0]["last_read_seq"], 1);
+    }
+
+    #[test]
+    fn search_query_parses_leniently_like_history() {
+        let query = SearchQuery {
+            q: Some("needle".into()),
+            limit: Some("nonsense".into()),
+            cursor: None,
+        };
+        assert_eq!(
+            query.limit(),
+            None,
+            "garbage limit falls back to the default"
+        );
+        let sized = SearchQuery {
+            q: None,
+            limit: Some("7".into()),
+            cursor: None,
+        };
+        assert_eq!(sized.limit(), Some(7));
     }
 }

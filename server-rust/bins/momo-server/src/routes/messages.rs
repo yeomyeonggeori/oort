@@ -7,9 +7,15 @@
 //!
 //! Wiring invariants this module exists to satisfy:
 //!   * **no SQL here.** Every statement comes from `momo-messaging`
-//!     (`is_channel_member`, `send_message_in_tx`, `list_channel_page`); the
-//!     outbox row is emitted inside `send_message_in_tx` through
+//!     (`is_channel_member`, `send_message_with_mentions_in_tx`,
+//!     `list_channel_page`); the outbox row is emitted inside that send through
 //!     `momo_outbox::emit_outbox`, the workspace's only egress (invariant #3).
+//!   * **mentions are the server's decision, in the send transaction** (B1.2,
+//!     Swift `MessageRoutes.swift:184-201`). `mention_member_ids` is stripped
+//!     from client props below and re-derived from the body by the domain crate,
+//!     so a client cannot mint its own badge on someone else — and because the
+//!     parse shares the send's commit boundary, a message and the mention it
+//!     raised can never disagree.
 //!   * **every tenant access goes through `momo_db::with_tenant_tx`** — the sole
 //!     RLS GUC seam (invariant #6). The membership check and the write share one
 //!     transaction, exactly like Swift's `withTenantTransaction` block.
@@ -31,8 +37,8 @@ use momo_auth::Principal;
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
     clamp_history_limit, is_channel_member, list_channel_page, resolve_member_signing_key,
-    send_message_in_tx, send_signed_message_in_tx, HistoryCursor, MessageSignature, MessageType,
-    NewMessage, ProvenanceRejected, StoredMessage,
+    send_message_with_mentions_in_tx, HistoryCursor, MessageSignature, MessageType, NewMessage,
+    ProvenanceRejected, StoredMessage,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -245,25 +251,28 @@ pub async fn send(
             if !is_channel_member(conn, channel_id, principal.member_id).await? {
                 return Ok(None);
             }
-            let Some(signature_b64) = provenance_signature else {
-                let sent = send_message_in_tx(conn, workspace_id, new_message).await?;
-                return Ok(Some(sent));
+            let signature = match provenance_signature {
+                None => None,
+                Some(signature_b64) => {
+                    // The key is the server's to resolve, never the request's to
+                    // assert.
+                    let Some(signer_pubkey_b64) =
+                        resolve_member_signing_key(conn, principal.member_id).await?
+                    else {
+                        return Err(SendFailure::Rejected(no_signing_key()));
+                    };
+                    Some(MessageSignature {
+                        signer_member_id: principal.member_id,
+                        signer_pubkey_b64,
+                        signature_b64,
+                    })
+                }
             };
-            // The key is the server's to resolve, never the request's to assert.
-            let Some(signer_pubkey_b64) =
-                resolve_member_signing_key(conn, principal.member_id).await?
-            else {
-                return Err(SendFailure::Rejected(no_signing_key()));
-            };
-            match send_signed_message_in_tx(
+            match send_message_with_mentions_in_tx(
                 conn,
                 workspace_id,
                 new_message,
-                &MessageSignature {
-                    signer_member_id: principal.member_id,
-                    signer_pubkey_b64,
-                    signature_b64,
-                },
+                signature.as_ref(),
             )
             .await?
             {
