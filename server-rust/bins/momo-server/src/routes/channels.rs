@@ -20,22 +20,35 @@
 //!     sidebar draws it per row; it must never be read as "this channel is
 //!     muted for everyone".
 //!
-//! Deliberately absent: `POST /v1/workspaces/{ws}/channels`. It is a real client
-//! surface (`api.ts createChannel`) and it is recorded as an open gap in
-//! `docs/planning/2026-08-01-b4-contract-diff.md` — creating a channel is not on
-//! the boot → channel → message path this batch had to unblock.
+//! **B4.1** adds the two writes beside the read:
+//!   * `POST /v1/workspaces/{ws}/channels` — the D-7 gap. Until it existed a
+//!     dogfooding workspace could never grow past its seeded channels, which is
+//!     the point at which internal use stops being use.
+//!   * `PUT …/channels/{ch}/notification-pref` — the write half of the `muted`
+//!     flag every row above already reports. A read-only `muted` is a setting
+//!     that can be shown and never changed.
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
-    active_workspace_role, clamp_channel_list_limit, list_workspace_channels, ChannelSummary,
+    active_workspace_role, clamp_channel_list_limit, create_channel_detailed_in_tx,
+    list_workspace_channels, normalize_channel_kind, normalize_channel_name,
+    normalize_channel_topic, set_notification_pref_in_tx, ChannelMembership, ChannelSummary,
+    CreatedChannel, NewChannel,
 };
 use serde::Deserialize;
 
-use crate::dto::{ChannelDto, WorkspaceChannelsResponse};
+use crate::dto::{
+    ChannelDto, ChannelMembershipDto, CreateChannelRequest, CreateChannelResponse,
+    NotificationPrefResponse, UpdateNotificationPrefRequest, WorkspaceChannelsResponse,
+};
 use crate::error::ApiError;
-use crate::routes::shared::{agent_tenant_tx, settle_db, workspace_scope, DbRejectable};
+use crate::routes::shared::{
+    agent_tenant_tx, audit_via_token_id, path_uuid, settle_db, workspace_scope, DbRejectable,
+};
 use crate::AppState;
 
 /// `GET …/channels` query string. Parsed leniently like `HistoryQuery`: a
@@ -127,6 +140,141 @@ pub async fn list(
     }))
 }
 
+fn membership_dto(membership: &ChannelMembership) -> ChannelMembershipDto {
+    ChannelMembershipDto {
+        id: membership.id.to_string(),
+        workspace_id: membership.workspace_id.to_string(),
+        channel_id: membership.channel_id.to_string(),
+        member_id: membership.member_id.to_string(),
+        role: membership.role.clone(),
+        joined_at_ms: membership.joined_at_ms,
+        left_at_ms: membership.left_at_ms,
+    }
+}
+
+/// `POST /v1/workspaces/{ws}/channels` — create a public/private channel
+/// (Swift `ChannelRoutes.create`, :76-166).
+///
+/// Three refusals, in this order, and the order is the contract:
+///   1. **400** on a malformed spec, *before* any DB access. The name rules are
+///      the client's own (`CreateChannelInput` normalises first,
+///      `lib/api.ts:736-742`), so a 400 here means the two disagreed.
+///   2. **403** unless the caller is a workspace owner/admin. Channel creation is
+///      workspace authority (ADR-0128), not channel authority — a member who can
+///      post everywhere still cannot mint a room.
+///   3. **409** when a live non-DM channel already carries the name
+///      case-insensitively. The guard is inside the INSERT's `WHERE NOT EXISTS`,
+///      so two concurrent creates cannot both win.
+pub async fn create(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<CreateChannelRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let spec = NewChannel {
+        kind: normalize_channel_kind(&request.kind)
+            .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?,
+        name: normalize_channel_name(&request.name)
+            .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?,
+        topic: normalize_channel_topic(request.topic.as_deref())
+            .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?,
+        created_by: principal.member_id,
+    };
+
+    // Authorization and the write share one transaction (Swift parity in effect
+    // even though Swift takes two): an admin demoted mid-flight cannot still
+    // create the channel their check passed for.
+    let outcome: DbRejectable<CreatedChannel> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some(role) =
+                    active_workspace_role(conn, workspace_id, principal.member_id).await?
+                else {
+                    return Ok(Err(ApiError::forbidden("not a workspace member")));
+                };
+                if !role.is_admin() {
+                    return Ok(Err(ApiError::forbidden(
+                        "workspace owner or admin role required",
+                    )));
+                }
+                match create_channel_detailed_in_tx(conn, workspace_id, &spec).await? {
+                    Some(created) => Ok(Ok(created)),
+                    None => Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "channel name already exists",
+                    ))),
+                }
+            })
+        })
+        .await;
+
+    let created = settle_db("channels.create", outcome)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateChannelResponse {
+            channel: channel_dto(&created.channel),
+            creator_membership: membership_dto(&created.creator_membership),
+        }),
+    ))
+}
+
+/// `PUT /v1/workspaces/{ws}/channels/{ch}/notification-pref` — mute or unmute
+/// this channel **for the calling member** (Swift `updateNotificationPref`,
+/// :238-316; ADR-0124).
+///
+/// There is deliberately no actor field in the body: the preference's owner is
+/// the authenticated principal and nothing else. A `memberId` parameter here
+/// would let one member silence another.
+pub async fn notification_pref(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Json(request): Json<UpdateNotificationPrefRequest>,
+) -> Result<Json<NotificationPrefResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let muted = request.muted;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<()> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            if !set_notification_pref_in_tx(
+                conn,
+                workspace_id,
+                channel_id,
+                principal.member_id,
+                muted,
+            )
+            .await?
+            {
+                return Ok(Err(ApiError::forbidden(
+                    "active channel membership required",
+                )));
+            }
+            // The audit row shares the preference's transaction, so it can never
+            // record a mute that rolled back (`momo_db::audit` module docs).
+            momo_db::audit::write_audit(
+                conn,
+                &momo_db::audit::AuditEntry::new(workspace_id, "notification_pref.updated")
+                    .by(principal.member_id)
+                    .target("channel", channel_id)
+                    .via_token(via_token_id)
+                    .with_schema(
+                        "momo.notification_pref.updated.v1",
+                        serde_json::json!({ "muted": muted }),
+                    ),
+            )
+            .await?;
+            Ok(Ok(()))
+        })
+    })
+    .await;
+
+    settle_db("channels.notification_pref", outcome)?;
+    Ok(Json(NotificationPrefResponse { muted }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +340,101 @@ mod tests {
         assert!(
             json.get("archivedAtMs").is_none(),
             "the web sidebar filters on `archivedAtMs === undefined`: {json}"
+        );
+    }
+
+    /// A freshly created channel is described exactly like a listed one, plus
+    /// the creator's membership — the client reads `CreatedChannel` as
+    /// `{channel, creatorMembership}` and renders the channel from the first
+    /// half without re-listing.
+    #[test]
+    fn a_created_channel_answers_with_the_creators_membership() {
+        let channel = ChannelSummary {
+            id: Uuid::from_u128(11),
+            workspace_id: Uuid::from_u128(2),
+            kind: ChannelKind::Private,
+            name: Some("dogfood".into()),
+            topic: Some("도그푸딩 1차".into()),
+            dm_key: None,
+            member_ids: vec![],
+            created_by: Some(Uuid::from_u128(7)),
+            archived_at_ms: None,
+            muted: false,
+        };
+        let membership = ChannelMembership {
+            id: Uuid::from_u128(12),
+            workspace_id: Uuid::from_u128(2),
+            channel_id: Uuid::from_u128(11),
+            member_id: Uuid::from_u128(7),
+            role: "owner".into(),
+            joined_at_ms: 1_700_000_000_000,
+            left_at_ms: None,
+        };
+        let json = serde_json::to_value(CreateChannelResponse {
+            channel: channel_dto(&channel),
+            creator_membership: membership_dto(&membership),
+        })
+        .expect("serialize");
+
+        assert_eq!(json["channel"]["kind"], "private");
+        assert_eq!(json["channel"]["name"], "dogfood");
+        assert_eq!(
+            json["channel"]["muted"], false,
+            "nobody can have muted a channel that did not exist"
+        );
+        assert!(
+            json["channel"].get("archivedAtMs").is_none(),
+            "a new channel is not archived: {json}"
+        );
+        assert_eq!(
+            json["creatorMembership"]["role"], "owner",
+            "the creator owns the channel it just made"
+        );
+        assert_eq!(
+            json["creatorMembership"]["memberId"],
+            Uuid::from_u128(7).to_string()
+        );
+        assert!(
+            json["creatorMembership"].get("leftAtMs").is_none(),
+            "{json}"
+        );
+    }
+
+    /// The mute body is closed-world and carries no actor: a `memberId` here
+    /// would let one member silence another.
+    #[test]
+    fn the_mute_request_names_only_the_flag() {
+        let parsed: UpdateNotificationPrefRequest =
+            serde_json::from_value(serde_json::json!({"muted": true})).expect("muted");
+        assert!(parsed.muted);
+        assert!(
+            serde_json::from_value::<UpdateNotificationPrefRequest>(
+                serde_json::json!({"muted": true, "memberId": Uuid::from_u128(9)})
+            )
+            .is_err(),
+            "a caller must not be able to mute someone else"
+        );
+        assert_eq!(
+            serde_json::to_value(NotificationPrefResponse { muted: false }).expect("serialize"),
+            serde_json::json!({"muted": false})
+        );
+    }
+
+    /// The create body is closed-world too: a dropped `kind` would create a
+    /// public channel someone asked to be private.
+    #[test]
+    fn the_create_request_refuses_keys_it_would_have_to_drop() {
+        let parsed: CreateChannelRequest =
+            serde_json::from_value(serde_json::json!({"kind": "public", "name": "general"}))
+                .expect("minimal body");
+        assert_eq!(parsed.kind, "public");
+        assert!(parsed.topic.is_none());
+        assert!(
+            serde_json::from_value::<CreateChannelRequest>(
+                serde_json::json!({"kind": "public", "name": "g", "memberIds": ["x"]})
+            )
+            .is_err(),
+            "an unknown key is a 400, never a silently dropped intent"
         );
     }
 

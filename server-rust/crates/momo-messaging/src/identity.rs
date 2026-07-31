@@ -361,6 +361,333 @@ pub async fn verify_password_login(
     }
 }
 
+// ---------------------------------------------------------------------------
+// the workspace roster (B4.1 — Swift `RosterRoutes.fetchRoster`, :86-191)
+// ---------------------------------------------------------------------------
+
+/// Swift `RosterRoutes.validatedLimit`: default 200, floor 1, ceiling 500.
+pub const ROSTER_LIMIT_DEFAULT: i64 = 200;
+pub const ROSTER_LIMIT_MAX: i64 = 500;
+
+/// Clamp a requested roster page into `1..=500`, defaulting to 200 for anything
+/// absent or unparseable (`min(max(Int($0) ?? 200, 1), 500)`).
+pub fn clamp_roster_limit(requested: Option<i64>) -> i64 {
+    requested
+        .unwrap_or(ROSTER_LIMIT_DEFAULT)
+        .clamp(1, ROSTER_LIMIT_MAX)
+}
+
+/// `?kind=` on the roster — the ONLY two values Swift accepts
+/// (`validatedKindFilter`, :72-80). Anything else is a 400, not a silent
+/// full-roster read: a client that asked to see only agents and got everyone
+/// would render humans as agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RosterKindFilterInvalid;
+
+impl std::fmt::Display for RosterKindFilterInvalid {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("kind must be human or agent")
+    }
+}
+
+/// Parse the `kind`/`member_kind` query value. An absent or blank value means
+/// "no filter" (Swift trims, lowercases, and treats empty as nil).
+pub fn parse_roster_kind_filter(
+    raw: Option<&str>,
+) -> Result<Option<MemberKind>, RosterKindFilterInvalid> {
+    let Some(raw) = raw else { return Ok(None) };
+    let value = raw.trim().to_lowercase();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    MemberKind::from_db_label(&value)
+        .map(Some)
+        .ok_or(RosterKindFilterInvalid)
+}
+
+/// One row of `GET /v1/workspaces/{ws}/roster` (Swift `RosterMemberDTO`,
+/// `DTOs.swift:332-352`).
+///
+/// This is the projection that turns a `author_member_id` uuid into a name. The
+/// timeline, the sidebar and the mention picker all read it, which is why it is
+/// a superset of [`Member`] rather than a second identity concept: humans and
+/// agents are the same table (invariant #5) and the per-kind columns simply
+/// stay `None` for the other kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterMember {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub kind: MemberKind,
+    pub status: String,
+    pub display_name: String,
+    pub handle: String,
+    pub avatar_url: Option<String>,
+    /// Workspace role (`workspace_membership.role`), not a channel role.
+    pub role: Option<WorkspaceRole>,
+    /// How many channels this member is currently in — **as the viewer may see
+    /// it**: a guest counts only the channels it shares with them.
+    pub channel_count: i32,
+    pub channel_ids: Vec<Uuid>,
+    /// Agent capability labels declared in `agent.config->'capabilities'`.
+    pub capabilities: Vec<String>,
+    /// `card` for an agent with a confirmed A2A card registration, `local` for
+    /// any other agent, `None` for a human.
+    pub origin: Option<String>,
+    pub email: Option<String>,
+    pub time_zone: Option<String>,
+    pub agent_model: Option<String>,
+    pub owner_human_id: Option<Uuid>,
+    pub max_concurrent_runs: Option<i32>,
+    pub max_run_steps: Option<i32>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sqlx::Error> {
+    let kind_label: String = row.try_get("kind")?;
+    let kind = MemberKind::from_db_label(&kind_label)
+        .ok_or_else(|| sqlx::Error::Decode(format!("unknown member_kind '{kind_label}'").into()))?;
+    let role_label: Option<String> = row.try_get("role")?;
+    Ok(RosterMember {
+        id: row.try_get("id")?,
+        workspace_id: row.try_get("workspace_id")?,
+        kind,
+        status: row.try_get("status")?,
+        display_name: row.try_get("display_name")?,
+        handle: row.try_get("handle")?,
+        avatar_url: row.try_get("avatar_url")?,
+        role: role_label.as_deref().and_then(WorkspaceRole::from_db_label),
+        channel_count: row.try_get("channel_count")?,
+        channel_ids: row.try_get("channel_ids")?,
+        capabilities: row.try_get("capabilities")?,
+        origin: row.try_get("origin")?,
+        email: row.try_get("email")?,
+        time_zone: row.try_get("time_zone")?,
+        agent_model: row.try_get("agent_model")?,
+        owner_human_id: row.try_get("owner_human_id")?,
+        max_concurrent_runs: row.try_get("max_concurrent_runs")?,
+        max_run_steps: row.try_get("max_run_steps")?,
+        created_at_ms: row.try_get("created_at_ms")?,
+        updated_at_ms: row.try_get("updated_at_ms")?,
+    })
+}
+
+/// The workspace's active members, humans and agents alike (Swift
+/// `RosterRoutes.fetchRoster`).
+///
+/// Three properties this statement carries, each of which is the whole point of
+/// the query rather than a detail:
+///
+/// 1. **A guest sees only what it shares.** `viewer_is_guest` narrows three
+///    different things — which members appear, how many channels each is
+///    reported to be in, and which channel ids are listed. Narrowing the row set
+///    but not the counts would still disclose the shape of the workspace to
+///    someone invited into one channel.
+/// 2. **`workspace_membership` is the join, not a filter.** A `member` row with
+///    no workspace membership is not on the roster at all, which is what makes
+///    the projection agree with every other workspace-scoped read (ADR-0128).
+/// 3. **Ordering is `kind` then `handle`** — Swift's `json_agg(… ORDER BY
+///    row_json->>'kind', row_json->>'handle')`. Applied here in SQL *before*
+///    `LIMIT` rather than after, so a truncated page is the first N of a stable
+///    order instead of an arbitrary N that is then sorted.
+pub async fn list_workspace_roster(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    viewer_is_guest: bool,
+    kind_filter: Option<MemberKind>,
+    limit: i64,
+) -> Result<Vec<RosterMember>, DbError> {
+    let rows = sqlx::query(
+        "SELECT m.id, \
+                m.workspace_id, \
+                m.kind::text AS kind, \
+                m.status::text AS status, \
+                m.display_name, \
+                m.handle, \
+                m.avatar_url, \
+                wm.role::text AS role, \
+                COALESCE(cc.channel_count, 0) AS channel_count, \
+                COALESCE(ch.channel_ids, '{}'::uuid[]) AS channel_ids, \
+                COALESCE(( \
+                  SELECT array_agg(capability.value #>> '{}' ORDER BY capability.ordinality) \
+                    FROM jsonb_array_elements( \
+                           CASE WHEN jsonb_typeof(a.config->'capabilities') = 'array' \
+                                THEN a.config->'capabilities' \
+                                ELSE '[]'::jsonb \
+                           END \
+                         ) WITH ORDINALITY AS capability(value, ordinality) \
+                   WHERE jsonb_typeof(capability.value) = 'string' \
+                ), '{}'::text[]) AS capabilities, \
+                CASE \
+                  WHEN m.kind = 'agent' AND EXISTS ( \
+                    SELECT 1 FROM agent_card_registration acr \
+                     WHERE acr.workspace_id = m.workspace_id \
+                       AND acr.agent_member_id = m.id \
+                       AND acr.status = 'confirmed' \
+                  ) THEN 'card' \
+                  WHEN m.kind = 'agent' THEN 'local' \
+                  ELSE NULL \
+                END AS origin, \
+                h.email, \
+                h.tz AS time_zone, \
+                a.model AS agent_model, \
+                a.owner_human_id, \
+                a.max_concurrent_runs, \
+                a.max_run_steps, \
+                floor(extract(epoch from m.created_at) * 1000)::bigint AS created_at_ms, \
+                floor(extract(epoch from m.updated_at) * 1000)::bigint AS updated_at_ms \
+           FROM member m \
+           JOIN workspace_membership wm \
+             ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
+           LEFT JOIN human h ON h.member_id = m.id \
+           LEFT JOIN agent a ON a.member_id = m.id \
+           LEFT JOIN LATERAL ( \
+             SELECT count(*)::int AS channel_count \
+               FROM membership ms \
+              WHERE ms.member_id = m.id \
+                AND ms.left_at IS NULL \
+                AND (NOT $4 OR EXISTS ( \
+                  SELECT 1 FROM membership viewer_ms \
+                   WHERE viewer_ms.channel_id = ms.channel_id \
+                     AND viewer_ms.member_id = $2 \
+                     AND viewer_ms.left_at IS NULL)) \
+           ) cc ON true \
+           LEFT JOIN LATERAL ( \
+             SELECT COALESCE( \
+                      array_agg(ms.channel_id ORDER BY ms.joined_at, ms.channel_id), \
+                      '{}'::uuid[]) AS channel_ids \
+               FROM membership ms \
+              WHERE ms.member_id = m.id \
+                AND ms.left_at IS NULL \
+                AND (NOT $4 OR EXISTS ( \
+                  SELECT 1 FROM membership viewer_ms \
+                   WHERE viewer_ms.channel_id = ms.channel_id \
+                     AND viewer_ms.member_id = $2 \
+                     AND viewer_ms.left_at IS NULL)) \
+           ) ch ON true \
+          WHERE m.workspace_id = $1 \
+            AND m.deleted_at IS NULL \
+            AND m.status = 'active' \
+            AND ($3::text IS NULL OR m.kind::text = $3::text) \
+            AND (NOT $4 OR m.id = $2 OR EXISTS ( \
+              SELECT 1 \
+                FROM membership target_ms \
+                JOIN membership viewer_ms \
+                  ON viewer_ms.channel_id = target_ms.channel_id \
+                 AND viewer_ms.member_id = $2 \
+                 AND viewer_ms.left_at IS NULL \
+               WHERE target_ms.member_id = m.id \
+                 AND target_ms.left_at IS NULL)) \
+          ORDER BY m.kind::text, m.handle, m.id \
+          LIMIT $5",
+    )
+    .bind(workspace_id)
+    .bind(viewer_member_id)
+    .bind(kind_filter.map(MemberKind::as_db_label))
+    .bind(viewer_is_guest)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(decode_roster_member)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)
+}
+
+// ---------------------------------------------------------------------------
+// workspace identity read (B4.1 — Swift `WorkspaceRoutes.get`, :259-286)
+// ---------------------------------------------------------------------------
+
+/// The workspace as the settings panel reads it (Swift `WorkspaceDTO`,
+/// `DTOs.swift:770-775`). `updated_at_ms` is not decoration: the rename endpoint
+/// takes it as an optimistic-concurrency token, so the read must hand out the
+/// exact value a later write will compare against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceIdentity {
+    pub id: Uuid,
+    pub slug: String,
+    pub name: String,
+    pub updated_at_ms: i64,
+}
+
+/// Why a workspace read produced no workspace — the distinction Swift's
+/// `ReadResult` keeps and the reason it costs an extra `EXISTS`.
+///
+/// A non-member must not be able to tell "this workspace does not exist" from
+/// "you are not in it" by *guessing ids*, but a member of workspace A asking for
+/// workspace B already knows B is not theirs. Swift resolves this by answering
+/// **403 when the workspace exists** and **404 when it does not**, which is
+/// exactly enough to distinguish a stale bookmark from a permissions problem in
+/// the UI without turning the endpoint into an existence oracle for outsiders —
+/// the credential's own workspace is checked first by the route layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceRead {
+    /// No such (live) workspace.
+    NotFound,
+    /// It exists, but the caller is not an active member.
+    NotMember,
+    Found(WorkspaceIdentity),
+}
+
+/// Read a workspace's identity for an active member, in one round trip (Swift
+/// `readWorkspaceForActiveMember`, :422-475).
+///
+/// One statement rather than two so existence and membership are answered from
+/// the same snapshot: with two reads, a member removed between them would
+/// produce "exists, and you are a member" for a workspace they had just left.
+pub async fn read_workspace_for_active_member(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<WorkspaceRead, DbError> {
+    let row = sqlx::query(
+        "SELECT EXISTS ( \
+                  SELECT 1 FROM workspace existing \
+                   WHERE existing.id = $1 AND existing.deleted_at IS NULL \
+                ) AS workspace_exists, \
+                w.id AS workspace_id, \
+                w.slug, \
+                w.name, \
+                floor(extract(epoch from w.updated_at) * 1000)::bigint AS updated_at_ms \
+           FROM (SELECT 1) AS anchor \
+           LEFT JOIN workspace w \
+             ON w.id = $1 \
+            AND w.deleted_at IS NULL \
+            AND EXISTS ( \
+              SELECT 1 \
+                FROM workspace_membership wm \
+                JOIN member m \
+                  ON m.id = wm.member_id AND m.workspace_id = wm.workspace_id \
+               WHERE wm.workspace_id = w.id \
+                 AND wm.member_id = $2 \
+                 AND m.status = 'active' \
+                 AND m.deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+
+    let found_id: Option<Uuid> = row.try_get("workspace_id")?;
+    match found_id {
+        Some(id) => Ok(WorkspaceRead::Found(WorkspaceIdentity {
+            id,
+            slug: row.try_get("slug")?,
+            name: row.try_get("name")?,
+            updated_at_ms: row.try_get("updated_at_ms")?,
+        })),
+        None => {
+            let exists: bool = row.try_get("workspace_exists")?;
+            Ok(if exists {
+                WorkspaceRead::NotMember
+            } else {
+                WorkspaceRead::NotFound
+            })
+        }
+    }
+}
+
 /// Resolve the Ed25519 signing key registered for a member (ADR-0146).
 ///
 /// # Measured: no such registry exists in this schema
@@ -424,5 +751,43 @@ mod tests {
         assert!(WorkspaceRole::Admin.is_admin());
         assert!(!WorkspaceRole::Member.is_admin());
         assert!(!WorkspaceRole::Guest.is_admin());
+    }
+
+    #[test]
+    fn the_roster_limit_is_clamped_not_trusted() {
+        assert_eq!(clamp_roster_limit(None), ROSTER_LIMIT_DEFAULT);
+        assert_eq!(clamp_roster_limit(Some(0)), 1, "Swift's floor is 1, not 0");
+        assert_eq!(clamp_roster_limit(Some(-9)), 1);
+        assert_eq!(clamp_roster_limit(Some(37)), 37);
+        assert_eq!(
+            clamp_roster_limit(Some(10_000)),
+            ROSTER_LIMIT_MAX,
+            "a client cannot ask for an unbounded roster"
+        );
+    }
+
+    /// A filter the server does not understand must be a 400. Accepting it as
+    /// "no filter" would answer an agents-only question with the whole roster.
+    #[test]
+    fn an_unknown_roster_kind_is_refused_rather_than_widened() {
+        assert_eq!(parse_roster_kind_filter(None), Ok(None));
+        assert_eq!(parse_roster_kind_filter(Some("   ")), Ok(None));
+        assert_eq!(
+            parse_roster_kind_filter(Some(" Agent ")),
+            Ok(Some(MemberKind::Agent)),
+            "Swift trims and lowercases before comparing"
+        );
+        assert_eq!(
+            parse_roster_kind_filter(Some("human")),
+            Ok(Some(MemberKind::Human))
+        );
+        assert_eq!(
+            parse_roster_kind_filter(Some("bot")),
+            Err(RosterKindFilterInvalid)
+        );
+        assert_eq!(
+            RosterKindFilterInvalid.to_string(),
+            "kind must be human or agent"
+        );
     }
 }

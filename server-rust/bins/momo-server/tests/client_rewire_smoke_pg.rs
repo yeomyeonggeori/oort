@@ -19,6 +19,17 @@
 //! | 7 | `POST …/channels/{ch}/messages` | `lib/api.ts:1170` |
 //! | 8 | `PUT …/channels/{ch}/read-state` | `lib/api.ts:1085` |
 //!
+//! **B4.1** adds a second sequence in the same style — the one the diff matrix
+//! called the dogfooding blockers (D-1, D-7, D-2, D-3):
+//!
+//! | # | call | client |
+//! |---|---|---|
+//! | 1 | `POST /v1/auth/login` | `lib/api.ts:548` |
+//! | 2 | `GET …/roster` | `lib/api.ts:784` (`useDirectory`) |
+//! | 3 | `POST …/channels` | `lib/api.ts:750` (`createChannel`) |
+//! | 4 | `POST …/messages` (root) → `POST …/messages` (`rootId`) → `GET …/replies` | `lib/api.ts:1170,1202,1131` |
+//! | 5 | `GET /v1/workspaces/{ws}` · `PUT …/notification-pref` | `settings/api.ts:399` · mac `MomoServerRESTChatBackend.swift:684` |
+//!
 //! Step 3 is the one that needs saying out loud: the *client* never calls the
 //! subscribe proxy — **Centrifugo does**, forwarding the connection token's
 //! `meta` because `infra/centrifugo.json` sets `include_connection_meta`. So the
@@ -189,6 +200,9 @@ struct Fixture {
     channel: Uuid,
     /// A channel in the SAME workspace the member is NOT a member of.
     foreign_channel: Uuid,
+    /// An agent member of the same workspace (B4.1): agents are members
+    /// (invariant #5), so the roster must project one without a second path.
+    agent: Uuid,
 }
 
 async fn seed_member(su: &PgPool, workspace: Uuid, kind: &str) -> Uuid {
@@ -270,13 +284,68 @@ async fn seed(su: &PgPool, app: &PgPool) -> Fixture {
     .await
     .expect("create foreign channel");
 
+    // An agent member, in the member's channel. Agents are members: the roster
+    // must carry it through the same projection as a human, and the channel it
+    // shares is what a guest-narrowed read would (correctly) still show.
+    let agent = seed_member(su, workspace, "agent").await;
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, config) \
+         VALUES ($1, $2, 'hermes-agent', 'http://127.0.0.1:9/v1', \
+                 '{\"capabilities\": [\"code\", \"search\", 7]}'::jsonb)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("seed agent");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member')",
+    )
+    .bind(workspace)
+    .bind(channel.id)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("seed agent membership");
+
     Fixture {
         workspace,
         member,
         email,
         channel: channel.id,
         foreign_channel: foreign.id,
+        agent,
     }
+}
+
+/// Promote a member to workspace admin — channel creation is workspace
+/// authority (ADR-0128), not channel authority.
+async fn promote_to_admin(su: &PgPool, workspace: Uuid, member: Uuid) {
+    sqlx::query(
+        "UPDATE workspace_membership SET role = 'admin' \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("promote to workspace admin");
+}
+
+async fn login(http: &reqwest::Client, base: &str, fixture: &Fixture) -> Value {
+    http.post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login")
+        .json()
+        .await
+        .expect("login body")
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +677,632 @@ async fn the_web_clients_boot_channel_and_message_sequence_round_trips() {
     let (_, after_logout) =
         subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &channel_name).await;
     assert_denied(&after_logout, "realtime credential is no longer active");
+}
+
+/// **The B4.1 dogfooding sequence**, in the order a person doing internal use
+/// performs it: sign in, see who is here, make a room, hold a threaded
+/// conversation in it, and change a setting.
+///
+/// Each step is one of the blockers `docs/planning/2026-08-01-b4-contract-diff.md`
+/// listed, and each assertion is written against the *client's* reading of the
+/// answer rather than the server's shape — a roster row the client's validator
+/// drops is worse than a 404, because the screen looks fine and every name is a
+/// uuid.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_dogfooding_sequence_round_trips() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    promote_to_admin(&su, fixture.workspace, fixture.member).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // -- 1. login ---------------------------------------------------------
+    let login_body = login(&http, &base, &fixture).await;
+    let access = login_body["accessToken"]
+        .as_str()
+        .expect("accessToken")
+        .to_string();
+
+    // -- 2. roster (D-1) — the projection that turns a uuid into a name -----
+    let roster: Value = http
+        .get(format!("{base}/v1/workspaces/{}/roster", fixture.workspace))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("roster")
+        .json()
+        .await
+        .expect("roster body");
+    let members = roster["members"].as_array().expect("members array");
+    assert_eq!(
+        roster["humanCount"].as_u64().expect("humanCount"),
+        2,
+        "the caller and the stranger who owns the foreign channel: {roster}"
+    );
+    assert_eq!(roster["agentCount"].as_u64().expect("agentCount"), 1);
+    // The order is kind then handle, and 'agent' sorts before 'human'.
+    assert_eq!(members[0]["kind"], json!("agent"), "{roster}");
+
+    let agent_row = members
+        .iter()
+        .find(|row| row["id"] == json!(fixture.agent.to_string()))
+        .expect("the agent is on the roster: agents are members");
+    assert_eq!(agent_row["origin"], json!("local"));
+    assert_eq!(
+        agent_row["capabilities"],
+        json!(["code", "search"]),
+        "a non-string entry in agent.config.capabilities is dropped, not rendered: {agent_row}"
+    );
+    assert_eq!(agent_row["agentModel"], json!("hermes-agent"));
+    // Every key `isRosterMember` (lib/api.ts:91-108) requires must be present,
+    // or the client silently DROPS the row and the member vanishes from the
+    // timeline's name table.
+    for required in [
+        "id",
+        "workspaceId",
+        "kind",
+        "status",
+        "displayName",
+        "handle",
+        "channelCount",
+        "channelIds",
+        "capabilities",
+        "createdAtMs",
+        "updatedAtMs",
+    ] {
+        assert!(
+            agent_row.get(required).is_some(),
+            "`{required}` missing → the client drops this row: {agent_row}"
+        );
+    }
+    let self_row = members
+        .iter()
+        .find(|row| row["id"] == json!(fixture.member.to_string()))
+        .expect("the caller is on their own roster");
+    assert_eq!(self_row["role"], json!("admin"));
+    assert_eq!(
+        self_row["channelCount"],
+        json!(1),
+        "the caller owns one channel: {self_row}"
+    );
+
+    // ?kind= narrows; an unknown kind is refused rather than widened.
+    let agents_only: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/roster?kind=agent",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("roster?kind=agent")
+        .json()
+        .await
+        .expect("body");
+    assert_eq!(agents_only["members"].as_array().expect("array").len(), 1);
+    assert_eq!(agents_only["humanCount"], json!(0));
+    let bad_kind = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/roster?kind=robot",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("roster?kind=robot");
+    assert_eq!(
+        bad_kind.status().as_u16(),
+        400,
+        "an unknown filter must not silently answer with the whole roster"
+    );
+
+    // The `/members` alias is the same handler, byte for byte.
+    let alias: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/members",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("members alias")
+        .json()
+        .await
+        .expect("body");
+    assert_eq!(alias, roster, "the compat alias must not drift");
+
+    // -- 3. channel creation (D-7) ----------------------------------------
+    let channels_url = format!("{base}/v1/workspaces/{}/channels", fixture.workspace);
+    let created = http
+        .post(&channels_url)
+        .bearer_auth(&access)
+        .json(&json!({ "kind": "private", "name": "dogfood", "topic": "도그푸딩 1차" }))
+        .send()
+        .await
+        .expect("createChannel");
+    assert_eq!(created.status().as_u16(), 201);
+    let created: Value = created.json().await.expect("created body");
+    let new_channel = created["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+    assert_eq!(created["channel"]["kind"], json!("private"));
+    assert_eq!(created["channel"]["muted"], json!(false));
+    assert_eq!(
+        created["creatorMembership"]["role"],
+        json!("owner"),
+        "the creator owns the channel it just made: {created}"
+    );
+
+    // The name guard is case-insensitive and answers 409, not 500.
+    let duplicate = http
+        .post(&channels_url)
+        .bearer_auth(&access)
+        .json(&json!({ "kind": "public", "name": "DOGFOOD" }))
+        .send()
+        .await
+        .expect("duplicate");
+    assert_eq!(duplicate.status().as_u16(), 409);
+
+    // A malformed name is refused before any DB access, by name.
+    let bad_name = http
+        .post(&channels_url)
+        .bearer_auth(&access)
+        .json(&json!({ "kind": "public", "name": "-nope-" }))
+        .send()
+        .await
+        .expect("bad name");
+    assert_eq!(bad_name.status().as_u16(), 400);
+
+    // The new channel shows up in the caller's own sidebar read — creation
+    // seeded the membership, so no separate join is needed.
+    let listed: Value = http
+        .get(&channels_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("channels")
+        .json()
+        .await
+        .expect("body");
+    assert!(
+        listed["channels"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .any(|row| row["id"] == json!(new_channel)),
+        "a created channel the creator cannot see is a channel that does not work: {listed}"
+    );
+
+    // -- 4. thread round trip (D-2) ---------------------------------------
+    let messages_url = format!(
+        "{base}/v1/workspaces/{}/channels/{}/messages",
+        fixture.workspace, new_channel
+    );
+
+    // The routing probe runs BEFORE the composer opens its selector, and it
+    // sends an impossible root + an impossible effort at once. This server does
+    // not serve `routing`, so the honest answer is the 404 the probe reads as
+    // `absent` — a 400 naming `routing` would open a selector every send would
+    // then fail. See docs/planning/2026-08-01-b4-contract-diff.md §4.1.
+    let probe = http
+        .post(&messages_url)
+        .bearer_auth(&access)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "rootId": Uuid::new_v4(),
+            "type": "text",
+            "body": "",
+            "routing": { "effort": "__momo-capability-probe__" },
+        }))
+        .send()
+        .await
+        .expect("probeSendRouting");
+    assert_eq!(
+        probe.status().as_u16(),
+        404,
+        "the probe must read `absent`, not `ready`"
+    );
+    let probe_body: Value = probe.json().await.expect("probe body");
+    assert_eq!(
+        probe_body["error"]["message"],
+        json!("thread root not found")
+    );
+
+    let root = http
+        .post(&messages_url)
+        .bearer_auth(&access)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "스레드 루트",
+        }))
+        .send()
+        .await
+        .expect("root send");
+    assert_eq!(root.status().as_u16(), 201);
+    let root: Value = root.json().await.expect("root body");
+    let root_id = root["id"].as_str().expect("root id").to_string();
+    assert!(
+        root.get("thread").is_none(),
+        "a root with no replies carries no rollup: {root}"
+    );
+
+    let reply = http
+        .post(&messages_url)
+        .bearer_auth(&access)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "rootId": root_id,
+            "type": "text",
+            "body": "첫 답글",
+        }))
+        .send()
+        .await
+        .expect("thread reply");
+    assert_eq!(reply.status().as_u16(), 201);
+    let reply: Value = reply.json().await.expect("reply body");
+    assert_eq!(
+        reply["rootId"].as_str().map(str::to_lowercase),
+        Some(root_id.to_lowercase())
+    );
+    assert!(
+        reply.get("thread").is_none(),
+        "a reply reports no rollup of its own: {reply}"
+    );
+
+    // A reply may not hang off a reply — one level, like Slack.
+    let nested = http
+        .post(&messages_url)
+        .bearer_auth(&access)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "rootId": reply["id"],
+            "type": "text",
+            "body": "2단",
+        }))
+        .send()
+        .await
+        .expect("nested reply");
+    assert_eq!(nested.status().as_u16(), 400);
+    let nested: Value = nested.json().await.expect("nested body");
+    assert_eq!(
+        nested["error"]["message"],
+        json!("thread root must be a top-level message")
+    );
+
+    // The replies page reads oldest-first and reports no cursor at the end.
+    let replies: Value = http
+        .get(format!("{messages_url}/{root_id}/replies"))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("replies")
+        .json()
+        .await
+        .expect("replies body");
+    let reply_rows = replies["messages"].as_array().expect("messages array");
+    assert_eq!(reply_rows.len(), 1, "{replies}");
+    assert_eq!(reply_rows[0]["body"], json!("첫 답글"));
+    assert!(
+        replies.get("nextCursor").is_none(),
+        "the client reads `nextCursor === undefined` as the end: {replies}"
+    );
+
+    // A garbage cursor is a 400: silently restarting from 0 would replay the
+    // whole thread as if it were new.
+    let bad_cursor = http
+        .get(format!("{messages_url}/{root_id}/replies?cursor=nope"))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("bad cursor");
+    assert_eq!(bad_cursor.status().as_u16(), 400);
+
+    // The rollup rides the history page — the "2-hop closure" the badge needs.
+    let history: Value = http
+        .get(&messages_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("history")
+        .json()
+        .await
+        .expect("history body");
+    let root_row = history["messages"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|row| row["id"] == json!(root_id))
+        .expect("the root is on the page");
+    assert_eq!(
+        root_row["thread"]["reply_count"],
+        json!(1),
+        "snake_case: threadRollup() reads `reply_count` literally: {root_row}"
+    );
+    assert_eq!(root_row["thread"]["last_reply_seq"], reply["seq"]);
+    assert!(
+        root_row["thread"]["last_reply_at"]
+            .as_i64()
+            .expect("last_reply_at")
+            > 1_700_000_000_000,
+        "the rollup timestamp is milliseconds: {root_row}"
+    );
+
+    // THE JOIN, thread edition: the reply committed TWO broadcast rows — the
+    // message and the additive `thread.updated` beside it — on the same channel
+    // string, and the rollup publication carries no `version` (the reply's own
+    // message.new already claimed that seq as the channel version, and
+    // Centrifugo drops a non-increasing one).
+    let channel_string = cent_channel(
+        fixture.workspace,
+        Uuid::parse_str(&new_channel).expect("channel uuid"),
+    );
+    let thread_update: Value = sqlx::query(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'thread.updated' \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("the reply emitted a thread.updated broadcast")
+    .try_get("payload")
+    .expect("payload");
+    assert_eq!(thread_update["channel"], json!(channel_string));
+    assert_eq!(thread_update["data"]["payload"]["reply_count"], json!(1));
+    assert!(
+        thread_update.get("version").is_none(),
+        "a thread.updated that re-claims the reply's seq would be dropped by the broker: \
+         {thread_update}"
+    );
+
+    // -- 5. settings (D-3, the sequence minimum) ---------------------------
+    let workspace_body: Value = http
+        .get(format!("{base}/v1/workspaces/{}", fixture.workspace))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("workspace")
+        .json()
+        .await
+        .expect("workspace body");
+    assert!(
+        workspace_body.get("workspace").is_some(),
+        "fetchWorkspace throws without the envelope: {workspace_body}"
+    );
+    assert_eq!(
+        workspace_body["workspace"]["id"]
+            .as_str()
+            .map(str::to_lowercase),
+        Some(fixture.workspace.to_string())
+    );
+    assert!(
+        workspace_body["workspace"]["updatedAtMs"]
+            .as_i64()
+            .expect("updatedAtMs")
+            > 1_700_000_000_000,
+        "the rename endpoint compares this token: {workspace_body}"
+    );
+
+    // The mute setting is per-member and it must show up in the very read the
+    // sidebar makes — a `muted` that can be written and not read back is a
+    // setting that appears not to work.
+    let muted: Value = http
+        .put(format!(
+            "{base}/v1/workspaces/{}/channels/{new_channel}/notification-pref",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .json(&json!({ "muted": true }))
+        .send()
+        .await
+        .expect("mute")
+        .json()
+        .await
+        .expect("mute body");
+    assert_eq!(muted["muted"], json!(true));
+
+    let after_mute: Value = http
+        .get(&channels_url)
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("channels")
+        .json()
+        .await
+        .expect("body");
+    let muted_row = after_mute["channels"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|row| row["id"] == json!(new_channel))
+        .expect("the muted channel is still listed");
+    assert_eq!(
+        muted_row["muted"],
+        json!(true),
+        "muted is the CALLER's preference and must survive the round trip: {muted_row}"
+    );
+
+    // Un-muting deletes the row rather than storing `false` — absence is the
+    // default, so the read must agree.
+    let unmuted: Value = http
+        .put(format!(
+            "{base}/v1/workspaces/{}/channels/{new_channel}/notification-pref",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .json(&json!({ "muted": false }))
+        .send()
+        .await
+        .expect("unmute")
+        .json()
+        .await
+        .expect("unmute body");
+    assert_eq!(unmuted["muted"], json!(false));
+
+    // The audit row shares the preference's transaction (ADR-0124 / momo_db::audit).
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'notification_pref.updated'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("audit count");
+    assert_eq!(audited, 2, "both mute writes are recorded");
+
+    // A member of the workspace who is not in the channel cannot set its
+    // preference: the setting belongs to a membership, not to a workspace.
+    let outsider_channel = fixture.foreign_channel;
+    let refused = http
+        .put(format!(
+            "{base}/v1/workspaces/{}/channels/{outsider_channel}/notification-pref",
+            fixture.workspace
+        ))
+        .bearer_auth(&access)
+        .json(&json!({ "muted": true }))
+        .send()
+        .await
+        .expect("foreign mute");
+    assert_eq!(refused.status().as_u16(), 403);
+}
+
+/// **RLS, on the surfaces B4.1 added.** A tenant transaction opened for one
+/// workspace must read **zero rows** of another's roster, channels and thread —
+/// not fewer rows, not filtered rows, zero.
+///
+/// The assertions run through `momo_app` (NOBYPASSRLS), which is the only
+/// faithful way to exercise the policies: the superuser that seeds the fixtures
+/// would pass every one of them.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_foreign_tenants_rows_are_zero_under_the_callers_guc() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let mine = seed(&su, &app_pool).await;
+    let theirs = seed(&su, &app_pool).await;
+
+    // Give the other tenant a real thread to be invisible.
+    let (their_root, their_reply_seq) =
+        momo_db::with_tenant_tx(&app_pool, theirs.workspace, move |conn| {
+            Box::pin(async move {
+                let root = momo_messaging::send_message_with_mentions_in_tx(
+                    conn,
+                    theirs.workspace,
+                    momo_messaging::NewMessage::text(theirs.channel, theirs.member, "그쪽 루트")
+                        .with_client_msg_id(Uuid::new_v4()),
+                    None,
+                )
+                .await?
+                .expect("unsigned send is never rejected");
+                let mut reply =
+                    momo_messaging::NewMessage::text(theirs.channel, theirs.member, "그쪽 답글")
+                        .with_client_msg_id(Uuid::new_v4());
+                reply.root_id = Some(root.message.id);
+                let sent = momo_messaging::send_message_with_mentions_in_tx(
+                    conn,
+                    theirs.workspace,
+                    reply,
+                    None,
+                )
+                .await?
+                .expect("unsigned send is never rejected");
+                Ok::<_, momo_db::DbError>((root.message.id, sent.message.seq))
+            })
+        })
+        .await
+        .expect("seed the other tenant's thread");
+    assert!(their_reply_seq > 0);
+
+    // Now read THEIR ids with MY GUC bound. Every count must be zero.
+    let (roster, channels, replies, rollup, workspace_read) =
+        momo_db::with_tenant_tx(&app_pool, mine.workspace, move |conn| {
+            Box::pin(async move {
+                let roster = momo_messaging::list_workspace_roster(
+                    conn,
+                    theirs.workspace,
+                    theirs.member,
+                    false,
+                    None,
+                    200,
+                )
+                .await?;
+                let channels = momo_messaging::list_workspace_channels(
+                    conn,
+                    theirs.workspace,
+                    theirs.member,
+                    true,
+                    200,
+                )
+                .await?;
+                let replies = momo_messaging::list_thread_replies(
+                    conn,
+                    theirs.channel,
+                    their_root,
+                    None,
+                    200,
+                )
+                .await?;
+                let rollup = momo_messaging::fetch_thread_rollup_in_tx(conn, their_root).await?;
+                let workspace_read = momo_messaging::read_workspace_for_active_member(
+                    conn,
+                    theirs.workspace,
+                    theirs.member,
+                )
+                .await?;
+                Ok::<_, momo_db::DbError>((roster, channels, replies, rollup, workspace_read))
+            })
+        })
+        .await
+        .expect("cross-tenant read runs; it simply must find nothing");
+
+    assert!(
+        roster.is_empty(),
+        "another tenant's roster is not a narrower list, it is no list: {roster:?}"
+    );
+    assert!(channels.is_empty(), "{channels:?}");
+    assert!(
+        replies.messages.is_empty(),
+        "a thread is scoped by the same policy as its channel: {:?}",
+        replies.messages
+    );
+    assert!(replies.next_cursor.is_none());
+    assert!(rollup.is_none(), "the rollup is a row too: {rollup:?}");
+    assert_eq!(
+        workspace_read,
+        momo_messaging::WorkspaceRead::NotFound,
+        "under my GUC their workspace does not exist — 404, and NOT the 403 that \
+         would confirm it does"
+    );
+
+    // …and the same reads under the OWNING tenant's GUC do find rows, so the
+    // zeros above are RLS and not a broken query.
+    let their_roster = momo_db::with_tenant_tx(&app_pool, theirs.workspace, move |conn| {
+        Box::pin(async move {
+            momo_messaging::list_workspace_roster(
+                conn,
+                theirs.workspace,
+                theirs.member,
+                false,
+                None,
+                200,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("their own roster");
+    assert!(
+        !their_roster.is_empty(),
+        "the query itself works; only the tenant boundary made it empty"
+    );
+    assert!(mine.agent != theirs.agent);
 }
 
 /// An instance that never configured the broker must refuse to mint a connection

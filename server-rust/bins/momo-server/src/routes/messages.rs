@@ -36,14 +36,19 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    clamp_history_limit, is_channel_member, list_channel_page, resolve_member_signing_key,
-    send_message_with_mentions_in_tx, HistoryCursor, MessageSignature, MessageType, NewMessage,
-    ProvenanceRejected, StoredMessage,
+    clamp_history_limit, clamp_replies_limit, is_channel_member, list_channel_page,
+    list_thread_replies, parse_replies_cursor, resolve_member_signing_key,
+    send_message_with_mentions_in_tx, validate_replies_root_in_tx, validate_thread_root_in_tx,
+    HistoryCursor, MessageSignature, MessageType, NewMessage, PagedMessage, ProvenanceRejected,
+    StoredMessage, ThreadRollup, ThreadRootInvalid,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::dto::{HistoryQuery, MessageDto, MessagePage, SendMessageRequest};
+use crate::dto::{
+    HistoryQuery, MessageDto, MessagePage, RepliesQuery, SendMessageRequest, ThreadRepliesPage,
+    ThreadRollupDto,
+};
 use crate::error::{db_error, ApiError};
 use crate::AppState;
 
@@ -90,10 +95,19 @@ fn response_props(props: &Value) -> Option<Value> {
     }
 }
 
+fn thread_dto(rollup: &ThreadRollup) -> ThreadRollupDto {
+    ThreadRollupDto {
+        reply_count: rollup.reply_count,
+        last_reply_seq: rollup.last_reply_seq,
+        last_reply_at: rollup.last_reply_at_ms,
+    }
+}
+
 fn message_dto(
     message: &StoredMessage,
     client_msg_id: Option<Uuid>,
     include_state: bool,
+    thread: Option<&ThreadRollup>,
 ) -> MessageDto {
     MessageDto {
         id: message.id.to_string(),
@@ -109,15 +123,21 @@ fn message_dto(
         client_msg_id: client_msg_id.map(|id| id.to_string()),
         created_at_ms: message.created_at.timestamp_millis(),
         state: include_state.then(|| message.state.clone()),
+        thread: thread.map(thread_dto),
     }
 }
 
-/// Reject the request keys this batch does not serve. Visible failure beats a
-/// silently dropped attachment/thread/routing intent (ADR-0134 D1 reasoning).
+fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
+    message_dto(&paged.message, None, include_state, paged.thread.as_ref())
+}
+
+/// Reject the request keys this server does not serve. Visible failure beats a
+/// silently dropped attachment/run intent (ADR-0134 D1 reasoning).
+///
+/// `rootId` left this list in B4.1 — threads are served. `routing` did **not**,
+/// and it is deliberately answered elsewhere; see [`thread_root_then_routing`].
 fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
-    let unsupported = if request.root_id.is_some() {
-        Some("rootId (thread replies)")
-    } else if request.run_id.is_some() {
+    let unsupported = if request.run_id.is_some() {
         Some("runId (agent-run binding)")
     } else if request
         .attachment_ids
@@ -125,8 +145,6 @@ fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
         .is_some_and(|ids| !ids.is_empty())
     {
         Some("attachmentIds")
-    } else if request.routing.is_some() {
-        Some("routing")
     } else {
         None
     };
@@ -136,6 +154,47 @@ fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
         ))),
         None => Ok(()),
     }
+}
+
+/// The order in which a send answers its two remaining refusals: **the thread
+/// root first, `routing` second.**
+///
+/// This ordering is a contract with the web client, and getting it backwards
+/// would make the product lie. `probeSendRouting` (`lib/api.ts:2383`) asks
+/// whether this server supports per-request model/effort routing by sending a
+/// request that must fail: a `rootId` that cannot exist plus an impossible
+/// `routing.effort`. It reads the refusal
+/// (`features/routing/capability.ts:197-224`):
+///
+/// | refusal | verdict | what the composer does |
+/// |---|---|---|
+/// | 400 naming `routing` | `ready` | opens the model/effort selector |
+/// | 404 `thread root not found` | `absent` | no selector, silently |
+/// | anything else | `unknown` | selector locked + 「다시 확인」 |
+///
+/// This server **does not implement `routing`** — it refuses the block. If the
+/// refusal came first, the probe would read `ready`, the selector would open,
+/// and every send made through it would then 400. Answering the impossible root
+/// first yields `absent`, which is the true statement: there is no routing axis
+/// here. When a batch actually implements `routing`, this function is the one
+/// place that has to change, and the change will be deleting it.
+///
+/// Before B4.1 the same honest outcome arrived by accident (`rootId` itself was
+/// refused first, producing `unknown`). Serving threads is what turned it into a
+/// decision that has to be written down.
+fn thread_root_then_routing(
+    root_invalid: Option<ThreadRootInvalid>,
+    has_routing: bool,
+) -> Option<ApiError> {
+    if let Some(invalid) = root_invalid {
+        return Some(match invalid {
+            ThreadRootInvalid::NotFound => ApiError::not_found(invalid.to_string()),
+            ThreadRootInvalid::Deleted | ThreadRootInvalid::NotTopLevel => {
+                ApiError::bad_request(invalid.to_string())
+            }
+        });
+    }
+    has_routing.then(|| ApiError::bad_request("routing is not served by momo-server yet"))
 }
 
 /// Why a send failed *inside* the transaction.
@@ -224,13 +283,15 @@ pub async fn send(
     };
 
     let client_msg_id = request.client_msg_id;
+    let root_id = request.root_id;
+    let has_routing = request.routing.is_some();
     let new_message = NewMessage {
         channel_id,
         author_member_id: principal.member_id,
         message_type,
         body: request.body.clone(),
         props: props_value(request.props.as_ref()),
-        root_id: None,
+        root_id,
         reply_to_id: None,
         client_msg_id: Some(client_msg_id),
         run_id: None,
@@ -250,6 +311,18 @@ pub async fn send(
         Box::pin(async move {
             if !is_channel_member(conn, channel_id, principal.member_id).await? {
                 return Ok(None);
+            }
+            // Resolve the target before negotiating features — see
+            // `thread_root_then_routing`. Both refusals leave through the ERROR
+            // channel so the read-only transaction rolls back with them.
+            let root_invalid = match root_id {
+                Some(root_id) => validate_thread_root_in_tx(conn, channel_id, root_id)
+                    .await?
+                    .err(),
+                None => None,
+            };
+            if let Some(rejection) = thread_root_then_routing(root_invalid, has_routing) {
+                return Err(SendFailure::Rejected(rejection));
             }
             let signature = match provenance_signature {
                 None => None,
@@ -292,8 +365,67 @@ pub async fn send(
     // 201 in both the insert and the idempotent-retry case (openapi sendMessage).
     Ok((
         StatusCode::CREATED,
-        Json(message_dto(&sent.message, Some(client_msg_id), false)),
+        Json(message_dto(
+            &sent.message,
+            Some(client_msg_id),
+            false,
+            sent.thread.as_ref(),
+        )),
     ))
+}
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies` — one
+/// oldest-first page of a thread (Swift `MessageRoutes.replies`, :520-624).
+///
+/// Ascending, unlike history: a thread is read from its start, because its first
+/// reply is what gives the rest their context. The membership gate is the same
+/// one the channel's history uses — a thread is not a second access boundary,
+/// and treating it as one would eventually let the two disagree.
+pub async fn replies(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel, root)): Path<(String, String, String)>,
+    Query(query): Query<RepliesQuery>,
+) -> Result<Json<ThreadRepliesPage>, ApiError> {
+    let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
+    let root_id =
+        Uuid::parse_str(&root).map_err(|_| ApiError::bad_request("invalid thread root id"))?;
+    let limit = clamp_replies_limit(query.limit.as_deref().and_then(|raw| raw.parse().ok()));
+    let cursor = parse_replies_cursor(query.cursor.as_deref())
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+
+    // Guard and read share one transaction, so a caller removed from the
+    // channel mid-flight cannot still receive the page their check passed for.
+    let page = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            if !is_channel_member(conn, channel_id, principal.member_id).await? {
+                return Err(SendFailure::Rejected(ApiError::forbidden(
+                    "not a member of this channel",
+                )));
+            }
+            if let Err(invalid) = validate_replies_root_in_tx(conn, channel_id, root_id).await? {
+                return Err(SendFailure::Rejected(match invalid {
+                    ThreadRootInvalid::NotFound => ApiError::not_found(invalid.to_string()),
+                    other => ApiError::bad_request(other.to_string()),
+                }));
+            }
+            Ok(list_thread_replies(conn, channel_id, root_id, cursor, limit).await?)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.replies", error),
+    })?;
+
+    Ok(Json(ThreadRepliesPage {
+        messages: page
+            .messages
+            .iter()
+            .map(|paged| paged_dto(paged, true))
+            .collect(),
+        next_cursor: page.next_cursor,
+    }))
 }
 
 /// `GET /v1/workspaces/{ws}/channels/{ch}/messages` — seq-cursor history.
@@ -321,12 +453,12 @@ pub async fn history(
 
     let messages = page.ok_or_else(|| ApiError::forbidden("not a member of this channel"))?;
     // nextBefore = the smallest seq on this page (Swift `dtos.map(\.seq).min()`).
-    let next_before = messages.iter().map(|message| message.seq).min();
+    let next_before = messages.iter().map(|paged| paged.message.seq).min();
 
     Ok(Json(MessagePage {
         messages: messages
             .iter()
-            .map(|message| message_dto(message, None, true))
+            .map(|paged| paged_dto(paged, true))
             .collect(),
         next_before,
     }))
@@ -472,16 +604,20 @@ mod tests {
         };
         assert!(reject_unsupported(&base()).is_ok());
 
+        // B4.1: threads are served, so a rootId is no longer refused here.
         let mut threaded = base();
         threaded.root_id = Some(Uuid::nil());
-        assert_eq!(
-            reject_unsupported(&threaded).expect_err("threads").status,
-            StatusCode::BAD_REQUEST
+        assert!(
+            reject_unsupported(&threaded).is_ok(),
+            "rootId is served now; its validation happens against the DB"
         );
 
         let mut with_run = base();
         with_run.run_id = Some(Uuid::nil());
-        assert!(reject_unsupported(&with_run).is_err());
+        assert_eq!(
+            reject_unsupported(&with_run).expect_err("runId").status,
+            StatusCode::BAD_REQUEST
+        );
 
         let mut with_attachments = base();
         with_attachments.attachment_ids = Some(vec![Uuid::nil()]);
@@ -492,8 +628,120 @@ mod tests {
         empty_attachments.attachment_ids = Some(vec![]);
         assert!(reject_unsupported(&empty_attachments).is_ok());
 
+        // routing is still unsupported, but it is answered later — see
+        // `thread_root_then_routing`.
         let mut with_routing = base();
         with_routing.routing = Some(serde_json::json!({"model": "x"}));
-        assert!(reject_unsupported(&with_routing).is_err());
+        assert!(
+            reject_unsupported(&with_routing).is_ok(),
+            "routing's refusal must not pre-empt the root lookup"
+        );
+    }
+
+    /// **The probe contract.** `probeSendRouting` sends an impossible `rootId`
+    /// AND an impossible `routing.effort` at once, and reads which refusal comes
+    /// back to decide whether to open the composer's model/effort selector.
+    ///
+    /// This server does not implement `routing`. If it answered the routing
+    /// refusal first, the probe would read `ready`, the selector would open, and
+    /// every send through it would 400 — the exact lie
+    /// `docs/planning/2026-08-01-b4-contract-diff.md` §4.1 forbids. Answering
+    /// the root first yields `absent`, which is true.
+    #[test]
+    fn the_routing_probe_is_answered_by_the_root_not_by_routing() {
+        let rejection = thread_root_then_routing(Some(ThreadRootInvalid::NotFound), true)
+            .expect("the probe must be refused");
+        assert_eq!(
+            rejection.status,
+            StatusCode::NOT_FOUND,
+            "a 400 here would make the composer open a selector this server cannot serve"
+        );
+        assert_eq!(
+            rejection.message, "thread root not found",
+            "verdictFromSendProbe reads 404 as `absent`; the sentence is Swift's"
+        );
+        assert!(
+            !rejection.message.to_lowercase().contains("routing"),
+            "the 404 must not name routing, or /routing/i would match it: {}",
+            rejection.message
+        );
+    }
+
+    /// With a real root, the routing refusal is the honest answer: this server
+    /// read the block and will not serve it.
+    #[test]
+    fn routing_is_still_refused_by_name_once_the_root_resolves() {
+        assert!(
+            thread_root_then_routing(None, false).is_none(),
+            "an ordinary threaded send is not refused at all"
+        );
+        let rejection =
+            thread_root_then_routing(None, true).expect("routing is not served by this server");
+        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+        assert!(
+            rejection.message.contains("routing"),
+            "{}",
+            rejection.message
+        );
+    }
+
+    #[test]
+    fn a_bad_root_that_is_not_missing_is_a_400_with_its_own_sentence() {
+        for (invalid, expected) in [
+            (ThreadRootInvalid::Deleted, "thread root is deleted"),
+            (
+                ThreadRootInvalid::NotTopLevel,
+                "thread root must be a top-level message",
+            ),
+        ] {
+            let rejection = thread_root_then_routing(Some(invalid), false).expect("refused");
+            assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+            assert_eq!(rejection.message, expected);
+        }
+    }
+
+    /// The rollup crosses the wire in snake_case inside an otherwise camelCase
+    /// body. `threadRollup()` (`lib/api.ts:188-196`) reads `reply_count`
+    /// literally and returns `null` when it is missing — a camelCase rename here
+    /// would silently unrender every thread badge.
+    #[test]
+    fn the_thread_rollup_keeps_its_snake_case_keys() {
+        let message = StoredMessage {
+            id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            channel_id: Uuid::from_u128(3),
+            seq: 4,
+            hlc_ts: 1_700_000_000_000,
+            hlc_count: 0,
+            author_member_id: Uuid::from_u128(5),
+            message_type: MessageType::Text,
+            state: "sent".into(),
+            body: Some("root".into()),
+            props: Value::Object(Map::new()),
+            root_id: None,
+            created_at: chrono::DateTime::from_timestamp_millis(1_700_000_000_000)
+                .expect("timestamp"),
+        };
+        let rollup = ThreadRollup {
+            reply_count: 3,
+            last_reply_seq: 9,
+            last_reply_at_ms: 1_700_000_000_500,
+        };
+        let json = serde_json::to_value(message_dto(&message, None, true, Some(&rollup)))
+            .expect("serialize");
+        assert_eq!(json["thread"]["reply_count"], serde_json::json!(3));
+        assert_eq!(json["thread"]["last_reply_seq"], serde_json::json!(9));
+        assert_eq!(
+            json["thread"]["last_reply_at"],
+            serde_json::json!(1_700_000_000_500_i64),
+            "Swift names the millisecond value `last_reply_at`, not `…AtMs`"
+        );
+        assert!(json.get("rootId").is_none(), "a root has no rootId: {json}");
+
+        // A message with no replies carries no rollup at all — the badge's
+        // absence is what "no thread here" looks like.
+        let bare =
+            serde_json::to_value(message_dto(&message, None, true, None)).expect("serialize");
+        assert!(bare.get("thread").is_none(), "{bare}");
     }
 }

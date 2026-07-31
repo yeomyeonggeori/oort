@@ -41,9 +41,11 @@ pub mod read_state;
 pub mod search;
 
 pub use channel::{
-    clamp_channel_list_limit, create_channel, create_channel_in_tx, list_workspace_channels,
-    Channel, ChannelKind, ChannelSummary, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT,
-    CHANNEL_LIST_LIMIT_MAX,
+    clamp_channel_list_limit, create_channel, create_channel_detailed_in_tx, create_channel_in_tx,
+    list_workspace_channels, normalize_channel_kind, normalize_channel_name,
+    normalize_channel_topic, set_notification_pref_in_tx, Channel, ChannelKind, ChannelMembership,
+    ChannelSpecInvalid, ChannelSummary, CreatedChannel, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT,
+    CHANNEL_LIST_LIMIT_MAX, CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
 };
 pub use dm::{
     canonical_participants, dm_lock_key, dm_participant_key, list_direct_messages,
@@ -52,15 +54,21 @@ pub use dm::{
 };
 pub use error::{MessagingError, ProvenanceRejected};
 pub use identity::{
-    active_workspace_role, can_observe_agent, get_member, get_workspace, is_active_agent,
-    is_channel_member, resolve_member_signing_key, verify_password_login, Member, MemberKind,
-    PasswordLogin, Workspace, WorkspaceRole,
+    active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
+    is_active_agent, is_channel_member, list_workspace_roster, parse_roster_kind_filter,
+    read_workspace_for_active_member, resolve_member_signing_key, verify_password_login, Member,
+    MemberKind, PasswordLogin, RosterKindFilterInvalid, RosterMember, Workspace, WorkspaceIdentity,
+    WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
 };
 pub use message::{
-    build_broadcast_payload, cent_channel, clamp_history_limit, find_client_message_in_tx,
-    list_channel_page, list_messages, send_message, send_message_in_tx,
-    send_message_with_mentions_in_tx, send_signed_message_in_tx, HistoryCursor, MessageSignature,
-    MessageType, NewMessage, SentMessage, StoredMessage, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
+    build_broadcast_payload, build_thread_updated_payload, cent_channel, clamp_history_limit,
+    clamp_replies_limit, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
+    list_messages, list_thread_replies, parse_replies_cursor, send_message, send_message_in_tx,
+    send_message_with_mentions_in_tx, send_signed_message_in_tx, thread_root_state_in_tx,
+    validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, MessageSignature,
+    MessageType, NewMessage, PagedMessage, RepliesCursorInvalid, SentMessage, StoredMessage,
+    ThreadReplyPage, ThreadRollup, ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT,
+    HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
 };
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,

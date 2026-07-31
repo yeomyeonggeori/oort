@@ -108,10 +108,10 @@ pub struct MemberDto {
 /// `POST …/messages` request (Swift `SendMessageRequest`).
 ///
 /// Closed-world like the Swift decoder (ADR-0134 D1): an unknown key is a 400,
-/// never a silently dropped field. The keys this batch does not serve
-/// (`rootId`, `runId`, `attachmentIds`, `routing`) are decoded so the handler can
-/// reject them **visibly** instead of accepting the request and dropping the
-/// intent on the floor.
+/// never a silently dropped field. The keys this server still does not serve
+/// (`runId`, `attachmentIds`, `routing`) are decoded so the handler can reject
+/// them **visibly** instead of accepting the request and dropping the intent on
+/// the floor. `rootId` left that list in B4.1 — it is served now.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SendMessageRequest {
@@ -142,6 +142,24 @@ pub struct SendMessageRequest {
     pub signature: Option<String>,
 }
 
+/// The reply rollup embedded in a message (Swift `ThreadRollupDTO`,
+/// `DTOs.swift:186-197`).
+///
+/// **snake_case inside a camelCase body.** That is not an oversight on either
+/// side: Swift spells this DTO's `CodingKeys` with underscores, and the web
+/// client reads `message.thread.reply_count` literally
+/// (`clients/web/src/lib/api.ts:165-171`, `threadRollup()`). Renaming it to
+/// camelCase here would leave every thread badge silently unrendered, because
+/// the client's normaliser returns `null` when `reply_count` is missing.
+#[derive(Debug, Serialize)]
+pub struct ThreadRollupDto {
+    pub reply_count: i32,
+    pub last_reply_seq: i64,
+    /// Epoch milliseconds. Swift names this key `last_reply_at` (not `…AtMs`)
+    /// even though the value is milliseconds; the client reads that spelling.
+    pub last_reply_at: i64,
+}
+
 /// A message on the wire (Swift `MessageDTO` / openapi `Message`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +183,33 @@ pub struct MessageDto {
     pub created_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// Present only on a root message that has replies (B4.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ThreadRollupDto>,
+}
+
+/// `GET …/channels/{ch}/messages/{root}/replies` response (Swift
+/// `ThreadRepliesPage`, `DTOs.swift:261-264`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRepliesPage {
+    pub messages: Vec<MessageDto>,
+    /// Omitted at the end of a thread, matching Swift's `Int64?` encoding — the
+    /// client reads `nextCursor === undefined` as "no more".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<i64>,
+}
+
+/// Query string of the replies page. `limit` is lenient (a bad page size has a
+/// safe default), `cursor` is strict (a bad cursor does not) — Swift's own
+/// asymmetry, kept because silently restarting a replay from 0 re-delivers a
+/// whole thread as if it were new.
+#[derive(Debug, Default, Deserialize)]
+pub struct RepliesQuery {
+    #[serde(default)]
+    pub limit: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 /// `GET …/messages` response (Swift `MessagePage`).
@@ -877,6 +922,161 @@ pub struct WorkspaceChannelsResponse {
 }
 
 // ---------------------------------------------------------------------------
+// channel writes (B4.1 — Swift `ChannelRoutes.create` + `updateNotificationPref`)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/channels` request (Swift `CreateChannelRequest`,
+/// `DTOs.swift:506-516`; client `CreateChannelInput`, `lib/api.ts:736-742`).
+///
+/// Closed-world: Swift's synthesized decoder has exactly these three keys, and a
+/// client that sent a fourth (a member list, an archive flag) would otherwise
+/// have it silently dropped.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateChannelRequest {
+    pub kind: String,
+    pub name: String,
+    #[serde(default)]
+    pub topic: Option<String>,
+}
+
+/// Swift `ChannelMembershipDTO` (`DTOs.swift:543-556`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelMembershipDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub channel_id: String,
+    pub member_id: String,
+    pub role: String,
+    pub joined_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_at_ms: Option<i64>,
+}
+
+/// Swift `CreateChannelResponse` (`DTOs.swift:518-521`).
+///
+/// The creator's membership travels with the channel so the client knows it is
+/// already inside — `CreatedChannel` in `lib/api.ts:723-731` reads exactly this
+/// pair, and a client that had to re-list to discover its own membership would
+/// briefly render a channel it appears not to belong to.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateChannelResponse {
+    pub channel: ChannelDto,
+    pub creator_membership: ChannelMembershipDto,
+}
+
+/// `PUT …/channels/{ch}/notification-pref` request (Swift
+/// `UpdateNotificationPrefRequest`, `DTOs.swift:476-478`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateNotificationPrefRequest {
+    pub muted: bool,
+}
+
+/// Swift `NotificationPrefResponse` (`DTOs.swift:480-482`) — the server's
+/// answer, not an echo: the caller re-reads its own state from this.
+#[derive(Debug, Serialize)]
+pub struct NotificationPrefResponse {
+    pub muted: bool,
+}
+
+// ---------------------------------------------------------------------------
+// roster (B4.1 — Swift `RosterRoutes.swift` + `DTOs.swift:332-406`)
+// ---------------------------------------------------------------------------
+
+/// Swift `RosterMemberDTO` (`DTOs.swift:332-352`).
+///
+/// The web client validates a subset of these keys before accepting a row
+/// (`isRosterMember`, `lib/api.ts:91-108`) and **drops** any row that fails —
+/// so `channelIds`, `capabilities`, `channelCount`, `createdAtMs` and
+/// `updatedAtMs` are emitted unconditionally rather than skipped when empty. A
+/// skipped `capabilities: []` would silently delete that member from the
+/// timeline's name table.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RosterMemberDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub kind: String,
+    pub status: String,
+    pub display_name: String,
+    pub handle: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    pub channel_count: i32,
+    pub channel_ids: Vec<String>,
+    pub capabilities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_human_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_runs: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_run_steps: Option<i32>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// Swift `WorkspaceRosterResponse` (`DTOs.swift:402-406`). The two counts are
+/// computed over the returned page, exactly as Swift computes them — they
+/// describe what was sent, not what exists.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRosterResponse {
+    pub members: Vec<RosterMemberDto>,
+    pub human_count: usize,
+    pub agent_count: usize,
+}
+
+/// `GET …/roster` query string. Swift reads `kind` and falls back to
+/// `member_kind` (`RosterRoutes.swift:27-28`), and parses `limit` leniently.
+#[derive(Debug, Default, Deserialize)]
+pub struct RosterQuery {
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub member_kind: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// workspace identity (B4.1 — Swift `WorkspaceRoutes.get` + `DTOs.swift:770-779`)
+// ---------------------------------------------------------------------------
+
+/// Swift `WorkspaceDTO` (`DTOs.swift:770-775`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDto {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    /// The rename endpoint's optimistic-concurrency token, so the read hands out
+    /// the exact value a later write compares against.
+    pub updated_at_ms: i64,
+}
+
+/// Swift `WorkspaceResponse` (`DTOs.swift:777-779`). The client unwraps
+/// `res.workspace` and errors if it is absent (`settings/api.ts:399-408`), so
+/// the envelope is part of the contract, not decoration.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceResponse {
+    pub workspace: WorkspaceDto,
+}
+
+// ---------------------------------------------------------------------------
 // realtime (B4 — Swift `AuthRoutes.realtimeToken` + `CentrifugoRoutes.swift`)
 // ---------------------------------------------------------------------------
 
@@ -1186,6 +1386,7 @@ mod tests {
             client_msg_id: None,
             created_at_ms: 99,
             state: None,
+            thread: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
         assert_eq!(json["seq"], 3);
@@ -1197,6 +1398,7 @@ mod tests {
         assert!(json.get("rootId").is_none(), "nil optionals are omitted");
         assert!(json.get("props").is_none());
         assert!(json.get("state").is_none());
+        assert!(json.get("thread").is_none());
     }
 
     #[test]
