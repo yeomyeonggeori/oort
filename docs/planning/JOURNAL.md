@@ -1461,6 +1461,10 @@
 - 한 일: **B4.2(설정 표면 완결 D-3) 랜딩**(PR #941) — 18쌍 마감(provider link/chain·work-host-engine·effort-table·quota·tier-policy·invites·workspace 생성). 미구현 46→28(A 화면부재 22·B 실행경로 대기 5·C /v1/join 경계 1). 게이트 46/46 green + **docker build 게이트 첫 편입 통과**. 워커 판단 수용: link/test 라이브 프로브는 불변식 #2 사안이라 probe_not_run 어휘로(거짓말 배제), effort-table 서빙의 capability 뒤집힘은 실측상 무해. 신규 운영 env: PROVIDER_LINK_MASTER_KEY(JWT_HMAC과 같으면 부팅 거부).
 - 열린 것: **도메인 대기(성재 — A 레코드→101.79.11.189)** → caddy+TLS+SPA 서빙 배선. half-open: 초대 발급만·/v1/join 미구현(도그푸딩 팀 초대에 필요할 수 있음 — 도메인 붙일 때 판단). 후속: 에이전트 허브(D-4/D-5)·routing. #925·#926·#893.
 
+## 2026-08-02 (오후) · Fable · 오케스트레이션
+- 한 일: **https://app.oor7.com 라이브** — 도그푸딩 1차 공개 URL 개통. 체인: A 레코드(성재)→전파 확인→웹 SPA 빌드(vite, same-origin)→서버 배포(/opt/momo/web)→Caddy 오버레이(경로 분기: /v1→api·/connection→centrifugo·나머지→SPA)→ACME 실패(방화벽)→**NCP ACG 80/443 인바운드 API로 개방**(ACG 377539/vpc 144489)→TLS 발급→외부 healthz·SPA 200. env 전환: MOMO_PUBLIC_BASE_URL=https://app.oor7.com·WSS=wss://app.oor7.com/connection/websocket. **리브랜딩 공지 기억**: momo→oort, oor7.com 최종(메모리 저장).
+- 열린 것: **B4.3(/v1/join) 워커 진행 중** → 랜딩 시 초대 링크로 팀 온보딩 → 도그푸딩 본격 개시. 서버 상시 가동(도그푸딩 기간). 후속: 에이전트 허브 D-4/D-5·routing.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
