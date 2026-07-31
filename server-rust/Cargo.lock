@@ -1141,6 +1141,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-agent-worker"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "momo-agent",
+ "momo-db",
+ "momo-messaging",
+ "momo-outbox",
+ "momo-settings",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "momo-auth"
 version = "0.0.0"
 dependencies = [

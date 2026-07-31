@@ -1,0 +1,54 @@
+[package]
+name = "momo-agent-worker"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The turn loop is a library so conformance tests can run exactly one iteration
+# against an injected provider; `src/main.rs` is the env→run shell (same split
+# as momo-relay / momo-notifier).
+[lib]
+name = "momo_agent_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-agent-worker"
+path = "src/main.rs"
+
+[dependencies]
+# Every statement this binary causes belongs to a domain crate:
+#   momo-outbox    claim + settle the agent_job row (invariant #3)
+#   momo-messaging the agent's reply — the SAME send path a human uses
+#   momo-agent     agent_run transitions + the usage_ledger row
+#   momo-settings  provider_link read/decrypt + the cascade classifier
+#   momo-db        the RLS GUC seam (invariant #6)
+# This crate owns no SQL of its own; see the module docs in `src/lib.rs`.
+momo-agent = { path = "../../crates/momo-agent" }
+momo-db = { path = "../../crates/momo-db" }
+momo-messaging = { path = "../../crates/momo-messaging" }
+momo-outbox = { path = "../../crates/momo-outbox" }
+momo-settings = { path = "../../crates/momo-settings" }
+
+# The provider call is outbound HTTP by nature (the Swift AgentWorker does the
+# same). It targets the LLM gateway only: this binary never calls momo-server,
+# and never publishes to Centrifugo — the reply reaches clients through the
+# message write path → outbox → relay, like every other message.
+reqwest.workspace = true
+
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal", "time", "sync"] }
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+# Conformance harness (tests/agent_worker_conformance_pg.rs, all #[ignore]): the
+# real migrations + bootstrap roles, with the deterministic in-process provider
+# so a turn and a provider outage are both staged without a network. `sqlx` is a
+# dev-dep only — the shipped crate reaches the driver through `momo_db::sqlx`
+# and owns no query of its own.
+sqlx.workspace = true

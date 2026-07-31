@@ -20,6 +20,12 @@ case "$command" in
   relay)
     exec /usr/local/bin/momo-relay "$@"
     ;;
+  agent-worker)
+    # The agent turn loop (B5.1). Its outbound HTTP to the LLM provider is the
+    # binary's purpose; it still calls no momo-server and publishes to no
+    # Centrifugo — the reply travels the message write path like any other.
+    exec /usr/local/bin/momo-agent-worker "$@"
+    ;;
   migrate)
     # Sub-commands (`migrate set-owner`) are the binary's own; this script does
     # not interpret them.
@@ -34,7 +40,7 @@ case "$command" in
     ;;
   *)
     echo "[momo] unknown command: $command" >&2
-    echo "usage: momo-rust-entrypoint {api|relay|migrate}" >&2
+    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|migrate}" >&2
     exit 2
     ;;
 esac

@@ -20,10 +20,20 @@
 //! are disjoint from [`relay`]'s by `kind`, so the two consumers cannot drain
 //! each other's feed.
 
+//! B5.1 adds [`agent_job`], the **worker** half of that story: the
+//! `method='publish'` claim `momo-agent-worker` drains, with per-agent
+//! serialization (`partition_key`) enforced in the SQL rather than in the
+//! caller's loop. Its `WHERE` clause is disjoint from [`relay`]'s by `kind` and
+//! from [`gateway`]'s by `method`, so all three consumers keep their own feed.
+
+pub mod agent_job;
 pub mod emit;
 pub mod gateway;
 pub mod relay;
 
+pub use agent_job::{
+    claim_agent_job_batch, ClaimedAgentJob, DEFAULT_WORKER_LEASE_SECONDS, WORKER_JOB_METHOD,
+};
 pub use emit::{emit_outbox, OutboxKind};
 pub use gateway::{
     claim_gateway_jobs_in_tx, clamp_claim_limit, gateway_lease_authorized,
