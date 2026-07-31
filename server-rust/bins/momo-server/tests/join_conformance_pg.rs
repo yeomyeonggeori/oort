@@ -637,7 +637,11 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
     // -- expired: 410, because the link is gone rather than merely refused --
     let (expired_code, expired_id) =
         issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
-    sqlx::query("UPDATE invite_code SET expires_at = now() - interval '1 hour' WHERE id = $1")
+    sqlx::query(
+        // invite_code_expires_ck(만료>생성)를 존중해 생성 시각도 함께 과거로 옮긴다.
+        "UPDATE invite_code SET created_at = now() - interval '2 hours', \
+         expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
         .bind(Uuid::parse_str(&expired_id).expect("invite id"))
         .execute(&su)
         .await
@@ -806,7 +810,10 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
         .execute(&su)
         .await
         .expect("suspend");
-    let suspended = post_join(&http, &base, join_payload(&live_code, &existing_email)).await;
+    // 새 코드로 간다: dedup(이미 상환)은 Swift에서도 eligibility보다 먼저라
+    // (JoinRoutes :45 vs :78) 같은 코드로는 409가 정답이 되어 403 검증에 닿지 못한다.
+    let (fresh_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let suspended = post_join(&http, &base, join_payload(&fresh_code, &existing_email)).await;
     expect(
         &suspended,
         403,
@@ -1009,6 +1016,9 @@ async fn only_the_api_role_may_execute_the_locked_invite_lookup() {
             rendered.contains("permission denied") || rendered.contains("does not exist"),
             "{role} was refused for the wrong reason: {rendered}"
         );
+        // sqlx Pool::close()는 대출 중 커넥션의 반납을 기다린다 — conn을 든 채
+        // 부르면 자기 자신을 기다리는 데드락(게이트 44분 행 실측). 먼저 반납한다.
+        drop(conn);
         pool.close().await;
     }
 }
