@@ -642,10 +642,10 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
         "UPDATE invite_code SET created_at = now() - interval '2 hours', \
          expires_at = now() - interval '1 hour' WHERE id = $1",
     )
-        .bind(Uuid::parse_str(&expired_id).expect("invite id"))
-        .execute(&su)
-        .await
-        .expect("expire the invite");
+    .bind(Uuid::parse_str(&expired_id).expect("invite id"))
+    .execute(&su)
+    .await
+    .expect("expire the invite");
     let expired = post_join(
         &http,
         &base,
