@@ -1465,6 +1465,10 @@
 - 한 일: **https://app.oor7.com 라이브** — 도그푸딩 1차 공개 URL 개통. 체인: A 레코드(성재)→전파 확인→웹 SPA 빌드(vite, same-origin)→서버 배포(/opt/momo/web)→Caddy 오버레이(경로 분기: /v1→api·/connection→centrifugo·나머지→SPA)→ACME 실패(방화벽)→**NCP ACG 80/443 인바운드 API로 개방**(ACG 377539/vpc 144489)→TLS 발급→외부 healthz·SPA 200. env 전환: MOMO_PUBLIC_BASE_URL=https://app.oor7.com·WSS=wss://app.oor7.com/connection/websocket. **리브랜딩 공지 기억**: momo→oort, oor7.com 최종(메모리 저장).
 - 열린 것: **B4.3(/v1/join) 워커 진행 중** → 랜딩 시 초대 링크로 팀 온보딩 → 도그푸딩 본격 개시. 서버 상시 가동(도그푸딩 기간). 후속: 에이전트 허브 D-4/D-5·routing.
 
+## 2026-08-02 (밤) · Fable · 오케스트레이션 — **도그푸딩 1차 개시**
+- 한 일: B4.3(join #942)·B4.4(UI+oort 브랜딩 #943) 랜딩 → 최종 이미지+SPA 배포 → **join 실왕복 검증(발급→가입→신규 로그인) green** → 팀 초대 코드 발급(maxUses 20). https://app.oor7.com 라이브(title=oort·favicon 정상). B4.3 게이트에서 실측 결함 3건 직접 해결(pool.close 데드락=44분 행 진범·만료 픽스처 제약·suspended 도달 경로 — 전부 테스트 계층, 제품 무결). B4.4는 design-review Blocker(SVG 주석 이중하이픈) 해소 후 통과.
+- 열린 것: 팀 온보딩(성재가 초대 코드 배포)·도그푸딩 피드백 수렴 루프·후속 배치(에이전트 허브 D-4/D-5·routing·oort:// 스킴 티켓). 서버 도그푸딩 기간 상시 가동.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
