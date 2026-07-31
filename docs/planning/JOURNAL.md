@@ -1436,6 +1436,10 @@
 - 한 일: **B2.5(provenance, ADR-0146 이행) 랜딩**(PR #936) — 마이그레이션 060 action_signature(재작성 후 첫 신규·RLS FORCE·append-only+retention 진입점)·record_provenance 실구현(사이드카 SQL 단독 소유)·workd 서명 2지점(heartbeat·validate) 배선·에이전트 메시지는 검증 경로 완성+키 등록 부재로 501 이름 붙은 거부(제출 공개키 불신 — 위조 가능 provenance는 없느니만 못함). 게이트 전 스위트 31/31 green. 워커 판단 2건 수용: 서명 미도착 지점(등록·revoke) 미배선, heartbeat 볼륨 대비 retention 해치.
 - 열린 것: fast-follow 티켓(에이전트 키 등록 표면·retention 잡·사람 device 키). **다음 배치 = B2.6 AgentGateway**(마지막 큰 T3 표면). #925·#926·#893.
 
+## 2026-08-01 (오전) · Fable · 오케스트레이션
+- 한 일: **B2.6(AgentGateway 과금 척추) 랜딩**(PR #937) — momo-agent crate(run 수명주기·usage_ledger 계상·usage/summary 완성)·agent bearer 인증·legacy secret 하드닝(Swift의 1자 시크릿 새니타이저 결함 실측→최소 16자). 게이트가 잡은 것 2건: b26_3 하니스가 배치 클레임 시맨틱 오해(격리 갭 아님 판정 — 워커가 근거와 함께 스윕 금지 문서화), b26_4 effort 단언 위양성(FK로도 실패 → 제약명 단언+양성 대조군). 재게이트 전 스위트 35/35 green.
+- 열린 것: **T3 큰 표면 완주.** 남은 굵직: B1.2(메신저 breadth)·B4(클라 재배선)·B5(workd Rust)·fast-follow(에이전트 키 등록·retention·device 키). #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
