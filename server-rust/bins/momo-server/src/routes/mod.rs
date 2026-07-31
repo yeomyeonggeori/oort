@@ -9,6 +9,7 @@ pub mod credits;
 pub mod dms;
 pub mod health;
 pub mod invites;
+pub mod join;
 pub mod messages;
 pub mod provider_link;
 pub mod provider_settings;

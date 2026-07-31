@@ -246,6 +246,42 @@ where
     momo_db::with_tenant_tx(pool, workspace_id, body).await
 }
 
+/// A tenant transaction whose closure speaks [`momo_settings::JoinError`] (B4.3).
+///
+/// It exists instead of reusing [`agent_tenant_tx`] because the join path breaks
+/// the assumption the `Ok(Err(_))` rejection channel rests on: *every rejection
+/// is returned before the first write*. A join can only discover some refusals
+/// **after** writing — the redemption row is what proves a concurrent join lost
+/// the race, and the guarded `used_count` update is what proves the code was
+/// exhausted. A rejection channel that committed would leave a member row and a
+/// channel membership behind for a request that answered 409.
+///
+/// So every join refusal is an `Err`, and `Err` rolls back. Routed through
+/// `momo_db::with_tenant_tx_prelude` with empty preludes rather than opening a
+/// transaction here, so `bind_workspace_guc` stays the one and only wiring point
+/// for `app.workspace_id` (invariant #6).
+pub(crate) async fn join_tenant_tx<T, F>(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    body: F,
+) -> Result<T, momo_settings::JoinError>
+where
+    T: Send,
+    F: for<'c> FnOnce(
+            &'c mut PgConnection,
+        ) -> futures_box::BoxFuture<'c, Result<T, momo_settings::JoinError>>
+        + Send,
+{
+    momo_db::with_tenant_tx_prelude(
+        pool,
+        workspace_id,
+        |_conn| Box::pin(async move { Ok(()) }),
+        |_conn| Box::pin(async move { Ok(()) }),
+        body,
+    )
+    .await
+}
+
 /// Collapse a [`DbRejectable`] into the handler's own result.
 pub(crate) fn settle_db<T>(context: &str, outcome: DbRejectable<T>) -> Result<T, ApiError> {
     match outcome {

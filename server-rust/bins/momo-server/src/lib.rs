@@ -21,6 +21,7 @@ pub mod auth;
 pub mod config;
 pub mod dto;
 pub mod error;
+pub mod rate_limit;
 pub mod routes;
 pub mod work_host_auth;
 
@@ -30,7 +31,19 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use momo_db::PgPool;
 
-use crate::config::{AgentGatewaySettings, RealtimeSettings, SettingsConfig, T3Settings};
+use crate::config::{
+    AgentGatewaySettings, RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings,
+};
+use crate::rate_limit::SlidingWindowRateLimiter;
+
+/// The MOMO-300 limiter and the knobs it reads, held together because neither is
+/// useful alone. Shared across handler clones by `Arc` so the window is
+/// process-wide rather than per-request.
+#[derive(Debug, Default)]
+pub struct RateLimitState {
+    pub config: RateLimitConfig,
+    pub limiter: SlidingWindowRateLimiter,
+}
 
 /// Shared handler state. Cheap to clone (pool handle + `Arc`'d strings).
 #[derive(Clone)]
@@ -60,6 +73,11 @@ pub struct AppState {
     /// than guessing at a key, and an empty `PLATFORM_ADMIN_EMAILS` grants the
     /// listed-instance-operator path to nobody.
     pub settings: Arc<SettingsConfig>,
+    /// MOMO-300 per-IP limiter state (B4.3). Unlike every other field here the
+    /// default is **on**, not fail-closed-off: the surface it guards
+    /// (`POST /v1/join`) is the one unauthenticated write on the instance, so
+    /// "the operator configured nothing" has to mean *limited*, not *open*.
+    pub rate_limit: Arc<RateLimitState>,
 }
 
 impl AppState {
@@ -72,6 +90,7 @@ impl AppState {
             agent_gateway: Arc::new(AgentGatewaySettings::default()),
             realtime: Arc::new(RealtimeSettings::default()),
             settings: Arc::new(SettingsConfig::default()),
+            rate_limit: Arc::new(RateLimitState::default()),
         }
     }
 
@@ -102,6 +121,17 @@ impl AppState {
     /// that opens stored ciphertext with a guessed key.
     pub fn with_settings(mut self, settings: SettingsConfig) -> Self {
         self.settings = Arc::new(settings);
+        self
+    }
+
+    /// Attach the operator's MOMO-300 knobs (B4.3), and with them a **fresh**
+    /// limiter — the window is per-process state, so replacing the config
+    /// replaces the counters it was measured against.
+    pub fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limit = Arc::new(RateLimitState {
+            config,
+            limiter: SlidingWindowRateLimiter::new(),
+        });
         self
     }
 }
@@ -369,6 +399,25 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/centrifugo/subscribe",
             post(routes::realtime::subscribe),
+        )
+        // B4.3 adds the fifth, and it is the one that is public by
+        // *construction* rather than by credential shape: the caller holds an
+        // invite code and nothing else, so there is no bearer it could present
+        // and no workspace it could be scoped to before the code is resolved
+        // (Swift mounts it outside AuthMiddleware for the same reason,
+        // `JoinRoutes.swift:6-12`).
+        //
+        // It is therefore the only unauthenticated WRITE on this server, and the
+        // only route carrying a rate limiter: `route_layer` runs the per-IP gate
+        // ahead of the handler and — unlike `layer` — leaves every other route
+        // untouched, so this stays a decision about the join surface rather than
+        // an accidental global one.
+        .route(
+            "/v1/join",
+            post(routes::join::join).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit::per_ip,
+            )),
         )
         .merge(protected)
         .with_state(state)

@@ -227,6 +227,29 @@ pub async fn create_invite(
     })
 }
 
+/// Read one invite by id (Swift `JoinRoutes.loadInviteDTO` :685-720).
+///
+/// Added for B4.3: the join response carries the invite it just spent, and the
+/// read has to happen **after** the usage increment so `usedCount` is the value
+/// that join produced. It shares [`PROJECTION`] with [`list_invites`] rather than
+/// spelling the columns again — the response the settings panel decodes and the
+/// one the join answers with are the same object, and one projection is what
+/// keeps them that way.
+pub async fn read_invite(
+    conn: &mut PgConnection,
+    invite_id: Uuid,
+) -> Result<Option<InviteCode>, DbError> {
+    let row: Option<InviteRow> = sqlx::query_as(&format!(
+        "{PROJECTION} \
+           FROM invite_code i \
+          WHERE i.id = $1"
+    ))
+    .bind(invite_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(invite_from_row))
+}
+
 /// List invites newest-first (Swift :128-155).
 ///
 /// The workspace is not in the `WHERE` clause and does not need to be: the RLS

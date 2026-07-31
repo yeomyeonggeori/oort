@@ -65,6 +65,51 @@ pub struct Config {
     /// 설정 표면 settings (B4.2) — provider master key, the env provider tier,
     /// and the instance-operator allow-list. Fail-closed by default.
     pub settings: SettingsConfig,
+    /// MOMO-300 rate-limit knobs (B4.3) — currently consumed by the public join
+    /// route only. **On by default**, because the route it guards is the one
+    /// unauthenticated write on the instance.
+    pub rate_limit: RateLimitConfig,
+}
+
+/// MOMO-300 request rate limiting (Swift `RateLimitConfig`, `Config.swift:283-302`).
+///
+/// Same environment keys and same defaults as the Swift server, so one env block
+/// configures either implementation. A limit of 0 disables the axis.
+///
+/// Only the per-IP axis is read today (B4.3 mounts it on `/v1/join`); the
+/// per-member axis is not ported yet and the field is deliberately absent rather
+/// than present-and-ignored — a knob that does nothing is worse documentation
+/// than no knob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimitConfig {
+    /// `RATE_LIMIT_WINDOW_SECONDS`, floor 1 (default 60).
+    pub window_seconds: u64,
+    /// `RATE_LIMIT_PER_IP` (default 1200). 0 disables.
+    pub per_ip_limit: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        RateLimitConfig {
+            window_seconds: 60,
+            per_ip_limit: 1200,
+        }
+    }
+}
+
+impl RateLimitConfig {
+    pub fn from_env() -> RateLimitConfig {
+        let defaults = RateLimitConfig::default();
+        RateLimitConfig {
+            window_seconds: env("RATE_LIMIT_WINDOW_SECONDS")
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .unwrap_or(defaults.window_seconds)
+                .max(1),
+            per_ip_limit: env("RATE_LIMIT_PER_IP")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.per_ip_limit),
+        }
+    }
 }
 
 /// MOMO-325 native gateway mode (Swift `AgentGatewayMode`, `Config.swift:150-155`).
@@ -569,6 +614,7 @@ impl Config {
             agent_gateway,
             realtime,
             settings,
+            rate_limit: RateLimitConfig::from_env(),
         })
     }
 }
@@ -818,6 +864,21 @@ mod tests {
             clamp_connection_token_ttl(momo_auth::CONNECTION_TOKEN_TTL_SECONDS),
             momo_auth::CONNECTION_TOKEN_TTL_SECONDS,
             "the default must survive its own clamp"
+        );
+    }
+
+    // -- B4.3 rate limit ---------------------------------------------------
+
+    /// The defaults are Swift's, and the axis is ON by default: the route it
+    /// guards takes an unauthenticated bearer string.
+    #[test]
+    fn the_rate_limit_defaults_match_swift_and_are_not_off() {
+        let defaults = RateLimitConfig::default();
+        assert_eq!(defaults.window_seconds, 60);
+        assert_eq!(defaults.per_ip_limit, 1200);
+        assert!(
+            defaults.per_ip_limit > 0,
+            "a default of 0 would ship the public join route unguarded"
         );
     }
 
