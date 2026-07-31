@@ -431,7 +431,7 @@ describe("openDmErrorMessage", () => {
       "권한이 없습니다"
     );
     expect(openDmErrorMessage(new ApiError(429, "slow"), "곽성재")).toContain(
-      "잠시 뒤 다시 시도"
+      "잠시 뒤에 다시 시도"
     );
     expect(openDmErrorMessage(new ApiError(400, "self"), "곽성재")).toContain(
       "자기 자신과는"

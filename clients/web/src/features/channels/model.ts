@@ -156,7 +156,7 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
     if (error.status === 429) {
       return {
         field: null,
-        message: "요청이 너무 잦습니다. 잠시 뒤 다시 시도하세요.",
+        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
       };
     }
   }
@@ -168,6 +168,6 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
   }
   return {
     field: null,
-    message: "채널을 만들지 못했습니다. 잠시 뒤 다시 시도하세요.",
+    message: "채널을 만들지 못했습니다. 잠시 뒤에 다시 시도하세요.",
   };
 }

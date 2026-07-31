@@ -54,7 +54,7 @@ export function App() {
         <Route
           element={
             <RenderErrorBoundary
-              title="momo를 열지 못했습니다"
+              title="oort를 열지 못했습니다"
               // 이 행동은 화면 이동이 아니라 로그아웃이다(서버 refresh token
               // 폐기 + 캐시 비우기). 그렇게 말하지 않으면 사용자는 돌아왔을 때
               // 왜 다시 로그인해야 하는지 모른다.

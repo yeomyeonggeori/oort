@@ -163,7 +163,7 @@ export function huddleErrorCopy(kind: HuddleErrorKind): string {
     case "connection":
       return "허들 오디오 연결이 끊겼습니다. 네트워크를 확인한 뒤 다시 참가하세요.";
     case "unknown":
-      return "허들에 연결하지 못했습니다. 잠시 후 다시 시도하세요.";
+      return "허들에 연결하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
   }
 }
 

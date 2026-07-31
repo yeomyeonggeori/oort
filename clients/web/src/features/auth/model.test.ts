@@ -319,6 +319,6 @@ describe("identity derived from an email (mac client parity)", () => {
   });
 
   it("never produces an empty handle", () => {
-    expect(handleFromEmail("...@example.com")).toBe("momo-user");
+    expect(handleFromEmail("...@example.com")).toBe("oort-user");
   });
 });

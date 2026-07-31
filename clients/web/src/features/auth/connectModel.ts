@@ -133,7 +133,7 @@ export function joinFailureCopy(cause: unknown): ConnectFailure {
       };
     case 429:
       return {
-        message: "요청이 너무 잦습니다. 잠시 후 다시 시도하세요.",
+        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
         suggestSignIn: false,
         retryable: false,
       };

@@ -270,7 +270,7 @@ describe("auto target eligibility (mirrors requireAllowedTarget)", () => {
   });
 
   it("names the stored target, and says so when it left the registry", () => {
-    expect(autoTargetLabel("cloud", [workspaceHost])).toBe("momo Cloud");
+    expect(autoTargetLabel("cloud", [workspaceHost])).toBe("oort Cloud");
     expect(autoTargetLabel(workspaceHost.id.toUpperCase(), [workspaceHost])).toBe(
       "dawn-build-01"
     );
@@ -342,7 +342,7 @@ describe("work host row (WorkHostRoutes projection)", () => {
     expect(["app", "workd", "cloud"].map(workHostTypeLabel)).toEqual([
       "데스크톱 앱",
       "workd 데몬",
-      "momo Cloud",
+      "oort Cloud",
     ]);
     expect(["member", "workspace"].map(workHostScopeLabel)).toEqual([
       "개인",
