@@ -1440,6 +1440,10 @@
 - 한 일: **B2.6(AgentGateway 과금 척추) 랜딩**(PR #937) — momo-agent crate(run 수명주기·usage_ledger 계상·usage/summary 완성)·agent bearer 인증·legacy secret 하드닝(Swift의 1자 시크릿 새니타이저 결함 실측→최소 16자). 게이트가 잡은 것 2건: b26_3 하니스가 배치 클레임 시맨틱 오해(격리 갭 아님 판정 — 워커가 근거와 함께 스윕 금지 문서화), b26_4 effort 단언 위양성(FK로도 실패 → 제약명 단언+양성 대조군). 재게이트 전 스위트 35/35 green.
 - 열린 것: **T3 큰 표면 완주.** 남은 굵직: B1.2(메신저 breadth)·B4(클라 재배선)·B5(workd Rust)·fast-follow(에이전트 키 등록·retention·device 키). #925·#926·#893.
 
+## 2026-08-01 (오후) · Fable · 오케스트레이션
+- 한 일: **B1.2(메신저 breadth) 랜딩**(PR #938) — DM(3중 멱등)·read-state(seq 커서·unread 산술·mention 원장)·search(pg_trgm 파리티·튜플 커서). 게이트 전 스위트 40/40 green. 백미: **교차서버 UUID 대소문자 계약 실측**(Foundation 대문자 vs Rust 소문자 — 3곳 명시 정렬, 안 맞추면 Swift가 쓴 멘션을 Rust가 못 셈) + B1 트리거 교훈을 kind별 단언으로 박제. 이탈 4건 수용(search 리미터=미들웨어 후속·agent mention 라우팅=agent_run 표면·호출부 2곳 후속·base64 의존).
+- 열린 것: **다음 = B4(클라 재배선)** — 랜딩 시 내부 팀 테스트 1차(메신저 도그푸딩) 트리거. 후속 소품(리미터 미들웨어·mention 호출부 2·huddle/attachment). #925·#926·#893.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
