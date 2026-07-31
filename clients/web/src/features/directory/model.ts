@@ -301,7 +301,7 @@ export function openDmErrorMessage(error: unknown, name: string): string {
       return "자기 자신과는 다이렉트 메시지를 열 수 없습니다.";
     }
     if (error.status === 429) {
-      return "요청이 너무 잦습니다. 잠시 뒤 다시 시도하세요.";
+      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
     }
   }
   if (error instanceof NetworkError) {
