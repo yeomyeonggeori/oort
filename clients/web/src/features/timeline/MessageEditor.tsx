@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
+import { useAutoGrow } from "./useAutoGrow";
 
 // =============================================================================
 // Editing a sent message in place (B11).
@@ -31,6 +32,11 @@ export function MessageEditor({
   const [draft, setDraft] = useState(initialBody);
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
+  // 고치려는 글이 이미 세 줄이면 세 줄이 보여야 한다. R1은 `rows={2}` 고정이라
+  // 수정이 두 줄짜리 창구를 스크롤하는 일이 됐다 (R2 M4). 여덟 줄에서 멈추는
+  // 것은 편집기가 타임라인을 밀어내지 않게 하기 위해서다.
+  useAutoGrow(ref, draft, { minRows: 2, maxRows: 8 });
+
   // Focus with the caret at the end rather than selecting everything: an edit is
   // almost always an addition or a fix at the end, and a full selection means
   // the first keystroke destroys the message.
@@ -59,7 +65,6 @@ export function MessageEditor({
     <div className="mt-1 flex flex-col gap-2" data-testid="message-editor">
       <textarea
         ref={ref}
-        rows={2}
         value={draft}
         disabled={pending}
         aria-label="메시지 고치기"
@@ -76,7 +81,7 @@ export function MessageEditor({
             submit();
           }
         }}
-        className="w-full resize-y rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+        className="w-full resize-none rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
       />
       {error && (
         <InlineBanner
@@ -85,9 +90,13 @@ export function MessageEditor({
           testId="message-editor-error"
         />
       )}
-      <div className="flex items-center gap-2">
+      {/* 폰에서 이 두 버튼은 시트의 「고치기」가 착지하는 자리다. R1은 28px
+          짜리였다 (R2 H3): 손가락으로 열린 흐름이 손가락으로 누를 수 없는
+          컨트롤에서 끝났다. `tap-target`은 폰에서만 44px로 자란다. */}
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
+          className="tap-target"
           disabled={pending || empty}
           data-testid="message-editor-save"
           onClick={submit}
@@ -97,13 +106,14 @@ export function MessageEditor({
         <Button
           size="sm"
           variant="ghost"
+          className="tap-target"
           disabled={pending}
           data-testid="message-editor-cancel"
           onClick={onCancel}
         >
           취소
         </Button>
-        <span className="text-timestamp text-ink-muted">
+        <span className="wide-only text-timestamp text-ink-muted">
           Enter 저장 · Shift+Enter 줄바꿈 · Esc 취소
         </span>
       </div>

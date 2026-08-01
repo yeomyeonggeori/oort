@@ -3,6 +3,7 @@ import { SendHorizontal } from "lucide-react";
 import { sendThreadReply } from "@/lib/api";
 import { InlineBanner } from "@/features/common/States";
 import { replyFailureMessage } from "./actionCopy";
+import { useAutoGrow } from "./useAutoGrow";
 
 // =============================================================================
 // Writing a reply, from inside the thread (B11).
@@ -39,6 +40,11 @@ export function ThreadComposer({
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
+  // 답글도 한 줄로 끝나지 않는다. 메인 컴포저가 1행에서 6행까지 자라는 것과 같은
+  // 규칙이다 (R2 M4) — 다른 것은 이 창이 320px 패널 안에 있어서 접히는 줄이 더
+  // 빨리 생긴다는 점뿐이다.
+  useAutoGrow(ref, draft, { minRows: 1, maxRows: 6 });
+
   const submit = () => {
     const body = draft.trim();
     if (!body || sending) return;
@@ -69,7 +75,6 @@ export function ThreadComposer({
       <div className="flex items-end gap-2">
         <textarea
           ref={ref}
-          rows={1}
           value={draft}
           disabled={sending}
           placeholder="답글 쓰기"
@@ -82,7 +87,7 @@ export function ThreadComposer({
               submit();
             }
           }}
-          className="tap-target min-h-control w-full resize-y rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+          className="tap-target min-h-control w-full resize-none rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
         />
         <button
           type="button"

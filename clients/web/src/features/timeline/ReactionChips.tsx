@@ -39,6 +39,9 @@ export function ReactionChips({
           type="button"
           disabled={disabled}
           data-testid="reaction-chip"
+          // 이 행의 로빙 그룹 구성원 (rowFocus.ts). 반응이 다섯 개 달린 메시지가
+          // 키보드로 지나가는 데 다섯 번의 Tab을 요구하지 않게 하는 표시다.
+          data-row-action=""
           data-emoji={chip.emoji}
           data-mine={chip.mine ? "true" : "false"}
           aria-pressed={chip.mine}
@@ -73,6 +76,7 @@ export function ReactionChips({
           type="button"
           disabled={disabled}
           data-testid="reaction-add"
+          data-row-action=""
           aria-label="다른 반응 고르기"
           title="다른 반응 고르기"
           onClick={onOpenPicker}
