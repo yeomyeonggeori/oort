@@ -648,7 +648,7 @@ function AgentProfileSection({
           separator={false}
           message={
             editing.support === "absent"
-              ? `${editing.reason ?? ""} 아래 내용은 읽을 수 있고, 바꾸는 것은 서버를 올린 뒤에 할 수 있습니다.`.trim()
+              ? `${editing.reason ?? ""} 프로필 편집과 일시정지는 서버를 올린 뒤에 할 수 있습니다. 채널 배치는 지금도 됩니다.`.trim()
               : (editing.reason ?? "이 서버가 프로필 편집을 받는지 확인하지 못했습니다.")
           }
           {...(editing.support === "unknown"

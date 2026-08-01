@@ -85,6 +85,8 @@ export interface FeedItem {
   detail?: string;
   /** "→ {outcome}" label, or null while the ledger has decided nothing. */
   outcome: string | null;
+  /** M2(design-review): 확정 문장이 비가역성을 재진술할 수 있도록 원자료를 싣는다. */
+  reversible?: boolean;
   outcomeTone: OutcomeTone;
   /** Extra safety note rendered beside the outcome (irreversible actions). */
   note?: string;
@@ -239,6 +241,7 @@ export function approvalItem(
     outcome: outcome.label,
     outcomeTone: outcome.tone,
     note: approval.isReversible === false ? "되돌릴 수 없음" : undefined,
+    reversible: approval.isReversible !== false,
     channelId: approval.channelId,
     channelLabel,
     timeLabel,

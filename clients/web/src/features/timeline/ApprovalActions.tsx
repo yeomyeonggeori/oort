@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -37,6 +37,7 @@ export function ApprovalActions({
   lead = "이 작업은 승인이 필요합니다.",
   className,
   testIdPrefix = "approval",
+  reversible = true,
 }: {
   approvalId: string;
   armed: Armed;
@@ -50,6 +51,8 @@ export function ApprovalActions({
    * on screen at once without two elements answering to one hook.
    */
   testIdPrefix?: string;
+  /** M2(design-review): 비가역 승인이면 확정 문장이 그 사실을 재진술한다. */
+  reversible?: boolean;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -85,6 +88,13 @@ export function ApprovalActions({
     }
   }
 
+  // H2(design-review): 무장 시 승인/거부 버튼이 언마운트되며 초점이 body로
+  // 떨어진다 — 키보드 사용자가 처음부터 Tab하지 않도록 확정 버튼으로 옮긴다.
+  const commitRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (armed !== null) commitRef.current?.focus();
+  }, [armed]);
+
   return (
     <div className={cn("px-3 py-2", className)}>
       {armed === null ? (
@@ -115,7 +125,9 @@ export function ApprovalActions({
         >
           <span className="text-meta text-ink">
             {armed === "approve"
-              ? "승인하면 에이전트가 바로 실행합니다."
+              ? reversible
+                ? "승인하면 에이전트가 바로 실행합니다."
+                : "승인하면 에이전트가 바로 실행합니다. 되돌릴 수 없습니다."
               : "거부하면 이 실행은 취소됩니다."}
           </span>
           <span className="flex shrink-0 items-center gap-2">
@@ -132,6 +144,7 @@ export function ApprovalActions({
               variant={armed === "approve" ? "default" : "destructive"}
               size="sm"
               disabled={busy}
+              ref={commitRef}
               data-testid={`${testIdPrefix}-commit`}
               onClick={() => void commit(armed === "approve")}
             >

@@ -6,6 +6,7 @@ import {
   InlineBanner,
   SkeletonRows,
 } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { FeedList } from "./FeedRow";
@@ -71,9 +72,11 @@ const EMPTY_COPY: Record<InboxFilter, { headline: string; detail: string }> = {
 function InboxApprovalActions({
   approvalId,
   onSettled,
+  reversible,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
+  reversible?: boolean;
 }) {
   const [armed, setArmed] = useState<Armed>(null);
   return (
@@ -85,6 +88,7 @@ function InboxApprovalActions({
       lead="실행 전에 회원님의 허가가 필요합니다."
       className="px-4 pb-2"
       testIdPrefix="inbox-approval"
+      reversible={reversible}
     />
   );
 }
@@ -134,7 +138,7 @@ function FeedPanel({
 }
 
 export function InboxRoute() {
-  const { session, connStatus } = useSession();
+  const { session } = useSession();
   const [params, setParams] = useSearchParams();
   const filter = parseFilter(params.get("filter"));
 
@@ -153,7 +157,9 @@ export function InboxRoute() {
   const unreadChannels = useUnreadMentionChannels();
   const invalidateApprovals = useInvalidateApprovals();
   // 위에서 선언한다: 아래 결정 컨트롤이 이 값을 읽는다.
-  const offline = connStatus === "disconnected";
+  // useOffline: connStatus==="disconnected"는 실절단에도 connecting에 머물러
+  // false가 된다(useOffline.ts 주석) — 파괴적 결정의 게이트는 허브와 같은 판정 하나로.
+  const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [decisionNote, setDecisionNote] = useState<string | null>(null);
 
@@ -212,6 +218,7 @@ export function InboxRoute() {
         <InboxApprovalActions
           approvalId={item.approvalId}
           onSettled={onDecided}
+          reversible={item.reversible}
         />
       );
     },
