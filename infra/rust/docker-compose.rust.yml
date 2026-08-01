@@ -226,6 +226,29 @@ services:
     networks:
       - private
 
+  # B5.1/B5.4 — the tikitaka worker: drains agent_job, calls the LLM provider
+  # (the ONLY outbound-HTTP service besides the relay's Centrifugo hop), writes
+  # the reply through the message spine as the agent member.
+  agent-worker:
+    image: *rust-image
+    command: ["agent-worker"]
+    mem_limit: ${MOMO_AGENT_WORKER_MEM_LIMIT:-512m}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      MOMO_ENV: ${MOMO_ENV:-staging}
+      # momo_worker — BYPASSRLS drain across tenants (bootstrap_roles.sql).
+      WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+      PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+
 networks:
   private:
     labels: *momo-janitor-labels
