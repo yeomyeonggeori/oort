@@ -292,21 +292,20 @@ export function parseMarkdown(source: string): Block[] {
     if (fence) {
       const marker = fence[1][0];
       const body: string[] = [];
-      let closed = false;
       i += 1;
+      // Runs to the closing fence, or to the end of the message. An unclosed
+      // fence still renders as code: the author asked for a block, and the rest
+      // of what they wrote is what they put in it. Nothing needs to remember
+      // WHICH of the two happened, so nothing does.
       while (i < lines.length) {
         const candidate = FENCE.exec(lines[i]);
         if (candidate && candidate[1][0] === marker && candidate[2] === "") {
-          closed = true;
           i += 1;
           break;
         }
         body.push(lines[i]);
         i += 1;
       }
-      // An unclosed fence still renders as code: the author asked for a block
-      // and the rest of the message is what they put in it.
-      void closed;
       blocks.push({
         kind: "code",
         text: body.join("\n"),
