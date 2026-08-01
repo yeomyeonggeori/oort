@@ -1508,7 +1508,7 @@ async function assertListAndHistory(browser) {
   // "A -> 에이전트 -> C" 원장에서 가운데 칸의 책임 주체. 토큰 색만으로는 그
   // 에이전트를 누구에게 물어야 하는지가 화면에 없다(skill §9).
   const agentOwner = await text(agentRow.getByTestId("workstream-run-owner"));
-  if (agentOwner !== "managed by 곽성재") {
+  if (agentOwner !== "곽성재 님이 관리") {
     throw new Error(
       `에이전트 소유자 병기: 에이전트 실행이 책임 주체를 말하지 않는다 (${agentOwner || "없음"})`
     );

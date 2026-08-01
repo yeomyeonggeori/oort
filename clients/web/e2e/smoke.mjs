@@ -57,7 +57,13 @@ try {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.fill('[data-testid="login-email"]', email);
   await page.fill('[data-testid="login-password"]', password);
-  if (workspace) await page.fill('[data-testid="login-workspace"]', workspace);
+  // goal B13 R2 High 1: the workspace box is collapsed by default now (its right
+  // answer is "blank" for almost everyone), so naming one means opening the
+  // disclosure first.
+  if (workspace) {
+    await page.click('[data-testid="login-workspace-toggle"]');
+    await page.fill('[data-testid="login-workspace"]', workspace);
+  }
   await page.click('[data-testid="login-submit"]');
   // Race the signed-in shell against the login error, so bad credentials report
   // what the server said instead of a bare selector timeout.

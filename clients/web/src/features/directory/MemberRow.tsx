@@ -17,7 +17,7 @@ import {
 // Identity follows the timeline exactly: the shared Avatar carries --agent for
 // an agent and nothing else does, the name sits in the same slot for both
 // kinds, and an agent is attributed to the human accountable for it with the
-// same "managed by {owner}" line the message row and the inbox already use.
+// same "{owner} 님이 관리" line the message row and the inbox already use.
 //
 // The row IS the action (parity G-4): the whole thing is one button that opens
 // the DM, because opening a conversation with someone is the only thing this
@@ -81,7 +81,7 @@ export function MemberRow({
       </span>
       {owner && (
         <span className="text-meta text-ink-muted">
-          managed by {owner.displayName}
+          {owner.displayName} 님이 관리
         </span>
       )}
     </span>

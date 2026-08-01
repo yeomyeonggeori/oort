@@ -38,24 +38,24 @@ import {
 // the real routes (ProviderLinkRoutes / WorkHostEngineRoutes / WorkspaceRoutes /
 // InviteRoutes), so a server-side rule change breaks a test rather than a user.
 
-describe("momo://join deep link (docs/onboarding-deeplink.md)", () => {
+describe("oort://join deep link (docs/onboarding-deeplink.md)", () => {
   const CODE = "vBca_VjT8-uPMgUV52QOQmKBvGBIFRAc"; // base64url, as issued
 
   it("percent-encodes the server base URL and keeps the code verbatim", () => {
     expect(buildJoinLink("https://api.example.com", CODE)).toBe(
-      `momo://join?server=https%3A%2F%2Fapi.example.com&code=${CODE}`
+      `oort://join?server=https%3A%2F%2Fapi.example.com&code=${CODE}`
     );
   });
 
   it("encodes the port separator too", () => {
     expect(buildJoinLink("http://127.0.0.1:28000", "abc")).toBe(
-      "momo://join?server=http%3A%2F%2F127.0.0.1%3A28000&code=abc"
+      "oort://join?server=http%3A%2F%2F127.0.0.1%3A28000&code=abc"
     );
   });
 
   it("emits only the two contract parameters, server first", () => {
     const url = new URL(buildJoinLink("https://api.example.com", CODE));
-    expect(url.protocol).toBe("momo:");
+    expect(url.protocol).toBe("oort:");
     expect([...url.searchParams.keys()]).toEqual(["server", "code"]);
     expect(url.searchParams.get("server")).toBe("https://api.example.com");
     expect(url.searchParams.get("code")).toBe(CODE);

@@ -22,10 +22,10 @@ Rust.
 | keychain service | `app.momo.desktop`, account `refresh-token` |
 | updater manifest | `https://dawn-kim-official.github.io/momo-alpha/update-next.json` |
 
-`momo://` is registered by this bundle **and** by the SwiftUI client. macOS
+`oort://` is registered by this bundle **and** by the SwiftUI client. macOS
 LaunchServices picks one handler for the scheme, so on a machine with both
 installed an invite link may open either. Test deep links against a specific
-build with `open -a <path> "momo://join?..."` (below) rather than trusting the
+build with `open -a <path> "oort://join?..."` (below) rather than trusting the
 default handler.
 
 ## Layout
@@ -38,7 +38,7 @@ src-tauri/
   Info.plist          # macOS keys the bundler does NOT generate (mDNS, ATS)
   src/main.rs         # thin entry → lib.rs run()
   src/lib.rs          # plugin registration, command table, deep-link wiring
-  src/deeplink.rs     # momo://join parsing + pre-webview buffer
+  src/deeplink.rs     # oort://join parsing + pre-webview buffer
   src/discovery.rs    # _momo._tcp browse
   src/notification.rs # permission + show
   src/opener.rs       # hand one https URL to the OS browser
@@ -61,7 +61,7 @@ All payloads are camelCase. Commands are invoked by the exact names below.
 
 | Event | Payload | When |
 | --- | --- | --- |
-| `momo:deep-link` | `{ url: string, server: string, code: string }` | A `momo://join` link arrived while the app was running. |
+| `momo:deep-link` | `{ url: string, server: string, code: string }` | A `oort://join` link arrived while the app was running. |
 | `momo:discovery` | `{ servers: DiscoveredServer[], scanning: boolean }` | The known server set changed, and once more when a scan ends (`scanning: false`). |
 | `momo:update-progress` | `{ downloaded: number, total: number \| null }` | Bytes moved while `updater_install` runs. `total` is null when the server sent no Content-Length. |
 
@@ -102,13 +102,19 @@ interface AvailableUpdate {
 }
 ```
 
-## Deep link (`momo://join`)
+## Deep link (`oort://join`)
+
+> goal B13 (momo → oort 리브랜딩): 링크는 `oort://`로만 **발급**하고, `oort://`와
+> `momo://` 둘 다 **수용**한다. 이미 보낸 초대 링크는 며칠씩 살아 있고 보낼 때는
+> 올바른 링크였으므로, 구 스킴은 무시가 아니라 흡수한다. OS 등록(`tauri.conf.json`
+> `schemes`)도 두 개를 유지한다. 리포·크레이트·바이너리 이름은 계속 `momo`다.
+
 
 Format is owned by [`docs/onboarding-deeplink.md`](../../docs/onboarding-deeplink.md);
 this is a port of the macOS parser (`clients/macOS/Sources/MomoMac/MomoDeepLink.swift`)
 so both shells prefill identically from the same link.
 
-- `momo://join?server=<percent-encoded base URL>&code=<invite code>`
+- `oort://join?server=<percent-encoded base URL>&code=<invite code>`
 - Order-independent, unknown parameters ignored, names case-insensitive, first
   occurrence of a name wins.
 - RFC 3986 percent-decoding — **not** form-urlencoded, so a literal `+` stays a
@@ -352,15 +358,15 @@ open src-tauri/target/release/bundle/macos/momo-spike.app
 ```
 
 Deep links can be driven at a specific build without touching the system's
-default `momo://` handler (which the macOS client also registers):
+default `oort://` handler (which the macOS client also registers):
 
 ```sh
 open -a src-tauri/target/release/bundle/macos/momo-spike.app \
-  "momo://join?server=http%3A%2F%2FMacBook-Pro-2.local%3A28000&code=<code>"
+  "oort://join?server=http%3A%2F%2FMacBook-Pro-2.local%3A28000&code=<code>"
 ```
 
 `cargo tauri dev` produces a bare binary, not a bundle, so on macOS it has no
-`CFBundleURLTypes` and cannot receive `momo://` at all — deep links must be
+`CFBundleURLTypes` and cannot receive `oort://` at all — deep links must be
 tested against the **release bundle**.
 
 ## Measured
@@ -378,10 +384,10 @@ tested against the **release bundle**.
 
 All four verified against the real `momo-spike.app`, not a unit-test double:
 
-- **Deep link, cold start**: app not running, `open -a … "momo://join?server=…&code=COLDSTART-1"`
+- **Deep link, cold start**: app not running, `open -a … "oort://join?server=…&code=COLDSTART-1"`
   → launched, parsed, buffered (`ready=false`) for the webview to drain.
-- **Deep link, running app**: `momo://join?code=WARM-2&server=…&utm=mail` → parsed
-  with the parameters reversed and the unknown one ignored. `momo://not-join?…`
+- **Deep link, running app**: `oort://join?code=WARM-2&server=…&utm=mail` → parsed
+  with the parameters reversed and the unknown one ignored. `oort://not-join?…`
   dropped silently.
 - **Discovery**: found the live stack — `{"baseUrl":"http://MacBook-Pro-2.local:28000",
   "displayHost":"MacBook-Pro-2.local:28000","instanceName":"momo"}`, one
@@ -418,8 +424,8 @@ the **release-page zip** installed into `/Applications`, not a local build:
   branch's base** (`track/uxui` P2), so the `0.1.0-next.*` builds published so far
   install and self-update cleanly but cannot yet sign in against momowebqa. Taking
   `main` into the track closes it; nothing in the updater depends on it.
-- `momo://` is registered by this bundle and by the SwiftUI client, and macOS
-  picks one handler. Drive a specific build with `open -a <path> "momo://…"`.
+- `oort://` is registered by this bundle and by the SwiftUI client, and macOS
+  picks one handler. Drive a specific build with `open -a <path> "oort://…"`.
 - Unsigned or differently-signed builds: macOS ties keychain ACLs to the binary's
   signature, so an item left by one identity makes another put up a login-keychain
   password dialog. The shell no longer touches the credential store when there is

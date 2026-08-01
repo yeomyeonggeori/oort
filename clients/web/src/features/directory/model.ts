@@ -176,9 +176,9 @@ export function memberRowLabel(
   if (member.kind === "agent") {
     // On screen "agent" is the --agent token on the avatar and the name. Colour
     // reaches no screen reader, so here it is a word, followed by the same
-    // "managed by {owner}" attribution the row prints (WCAG 2.5.3: the visible
+    // "{owner} 님이 관리" attribution the row prints (WCAG 2.5.3: the visible
     // text is inside the accessible name).
-    parts.push(ownerName ? `에이전트, managed by ${ownerName}` : "에이전트");
+    parts.push(ownerName ? `에이전트, ${ownerName} 님이 관리` : "에이전트");
   }
   const status = statusLabel(member);
   if (status) parts.push(status);

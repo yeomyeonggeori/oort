@@ -41,6 +41,31 @@
 //!   — "the message the user just chose a bad model for is not silently delivered
 //!   with a different one".
 //!
+//! ## B13 — the 1:1 DM rule (QA H7)
+//!
+//! A human alone in a DM with one agent no longer has to type `@handle`: in that
+//! room there is nobody else the utterance could be for. The rule itself is
+//! `momo_agent::dm`'s; this module composes it, and it composes it as a **union
+//! with the explicit mentions** — see [`addressed_agents`], which is where the
+//! "an `@mention` typed inside that DM is still one run" property lives.
+//!
+//! **Nothing about the safety posture moves.** A DM-addressed agent reaches
+//! every gate below on exactly the path a named one takes; the two differ only
+//! in *how the agent got onto the list*:
+//!
+//! | property | why the DM path cannot get around it |
+//! |---|---|
+//! | a paused agent stays silent | the `agent.paused` branch sits before the run and the DM rule does not touch it — same system line, still no run |
+//! | G1/G2/G3, `a2a_depth`, the chain budget | those guard **agent-authored** delegation inside `momo-agent-worker`, and the DM rule refuses a non-human author outright (`DmAddressing::AuthorIsNotHuman`). What it produces is a human-triggered `depth = 0` run — the same thing an `@mention` has always produced |
+//! | idempotency | the run key is still `mention:<message>:<agent>`, and the send's own `SentMessage::deduped` guard is upstream of this function |
+//! | single write path, RLS FORCE, agent = member | untouched; this module still owns no SQL |
+//!
+//! The author gate is the load-bearing one, and it is deliberately doubled
+//! (credential **and** roster). Two agents auto-answering each other in a DM
+//! would be an unbounded loop in the one room where no A2A gate is watching —
+//! the same danger that makes this module refuse agent-authored mentions with
+//! `a2a_source_run_unavailable` below.
+//!
 //! ## What is deliberately not ported (see the PR body)
 //!
 //! * **The Context Packet** (`context_packet_id` / `memory_refs` / `tool_grants`)
@@ -53,10 +78,12 @@
 //!   **skipped and audited**. Fail closed.
 
 use momo_agent::{
-    create_agent_run_in_tx, load_mention_candidates_in_tx, mention_diagnostic_detail,
-    mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
-    paused_mention_props, resolve_mention_routing, MentionCandidate, MentionTrigger, NewAgentRun,
-    RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER,
+    create_agent_run_in_tx, load_dm_audience_in_tx, load_mention_candidates_in_tx,
+    mention_diagnostic_detail, mention_job_broadcast_payload, mention_job_payload,
+    mention_run_input, paused_mention_body, paused_mention_props, resolve_dm_addressing,
+    resolve_mention_routing, stamp_addressing, Addressing, DmAddressing, MentionCandidate,
+    MentionTrigger, NewAgentRun, RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY,
+    MENTION_JOB_METHOD_WORKER,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -126,18 +153,30 @@ pub(crate) async fn route_agent_mentions_in_tx(
 ) -> Result<Result<Vec<QueuedMention>, ApiError>, DbError> {
     let candidates =
         load_mention_candidates_in_tx(&mut *conn, send.workspace_id, send.channel_id).await?;
-    let mentioned: Vec<MentionCandidate> = candidates
-        .into_iter()
-        .filter(|candidate| {
-            contains_mention(
-                send.body,
-                &candidate.handle,
-                &candidate.display_name,
-                candidate.member_id,
-            )
-        })
-        .collect();
-    if mentioned.is_empty() {
+    // A workspace with no agents has nothing either path could address, so it
+    // does not pay for the channel read below.
+    if candidates.is_empty() {
+        return Ok(Ok(Vec::new()));
+    }
+
+    // B13 / QA H7 — the 1:1 DM rule. Skipped entirely for an agent-authored
+    // send: `resolve_dm_addressing` would answer `AuthorIsNotHuman` anyway, and
+    // not asking is one fewer query on the A2A path.
+    let dm_target = if send.author_is_agent {
+        None
+    } else {
+        let audience = load_dm_audience_in_tx(&mut *conn, send.channel_id).await?;
+        match resolve_dm_addressing(&audience, send.author_member_id, send.author_is_agent) {
+            DmAddressing::Addressed(agent_member_id) => Some(agent_member_id),
+            // Every other verdict is an ordinary "no": a group channel, a human↔
+            // human DM and an agent-authored send are all just messages that
+            // mention whoever they mention.
+            _ => None,
+        }
+    };
+
+    let addressed = addressed_agents(&candidates, send.body, dm_target);
+    if addressed.is_empty() {
         return Ok(Ok(Vec::new()));
     }
 
@@ -159,7 +198,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
     let mut context_window: Option<Vec<Value>> = None;
     let mut queued = Vec::new();
 
-    for agent in &mentioned {
+    for (agent, addressing) in &addressed {
         if send.author_is_agent {
             // See the module docs: without the source run there is no depth to
             // inherit, and a depth-0 A2A run would make the cap unenforceable.
@@ -168,6 +207,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 &send,
                 &trigger,
                 agent,
+                *addressing,
                 "a2a_source_run_unavailable",
             )
             .await?;
@@ -179,13 +219,14 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 &send,
                 &trigger,
                 agent,
+                *addressing,
                 "agent_not_channel_member",
             )
             .await?;
             continue;
         }
         if agent.paused {
-            paused(&mut *conn, &send, &trigger, agent).await?;
+            paused(&mut *conn, &send, &trigger, agent, *addressing).await?;
             continue;
         }
 
@@ -201,6 +242,18 @@ pub(crate) async fn route_agent_mentions_in_tx(
             agent_member_id: agent.member_id,
         };
         let idempotency_key = run_trigger.idempotency_key();
+        // The run key is the same on both paths — `mention:<message>:<agent>` —
+        // so an @mention and the DM rule pointing at the same agent collapse
+        // into one run at the SoT even if the union above ever let both through.
+        let mut input = mention_run_input(
+            &trigger,
+            agent.member_id,
+            &idempotency_key,
+            None,
+            0,
+            send.routing,
+        );
+        stamp_addressing(&mut input, *addressing);
         let created = create_agent_run_in_tx(
             &mut *conn,
             send.workspace_id,
@@ -210,14 +263,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 parent_run_id: None,
                 max_steps: agent.max_run_steps,
                 depth: 0,
-                input: mention_run_input(
-                    &trigger,
-                    agent.member_id,
-                    &idempotency_key,
-                    None,
-                    0,
-                    send.routing,
-                ),
+                input,
             },
         )
         .await?;
@@ -309,6 +355,16 @@ pub(crate) async fn route_agent_mentions_in_tx(
             .await?;
         }
 
+        let mut queued_detail = mention_diagnostic_detail(
+            &trigger,
+            agent,
+            "queued",
+            Some(created.id),
+            Some(&idempotency_key),
+            Some(&routing),
+            send.routing,
+        );
+        stamp_addressing(&mut queued_detail, *addressing);
         write_audit(
             &mut *conn,
             &AuditEntry::new(send.workspace_id, MENTION_QUEUED_ACTION)
@@ -317,18 +373,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 .target("message", send.message_id)
                 .via_token(send.via_token_id)
                 .run(created.id)
-                .with_schema(
-                    MENTION_DIAGNOSTIC_SCHEMA,
-                    mention_diagnostic_detail(
-                        &trigger,
-                        agent,
-                        "queued",
-                        Some(created.id),
-                        Some(&idempotency_key),
-                        Some(&routing),
-                        send.routing,
-                    ),
-                ),
+                .with_schema(MENTION_DIAGNOSTIC_SCHEMA, queued_detail),
         )
         .await?;
 
@@ -342,6 +387,62 @@ pub(crate) async fn route_agent_mentions_in_tx(
     Ok(Ok(queued))
 }
 
+/// **Where the two ways of addressing an agent meet — and the only place they
+/// are allowed to.**
+///
+/// A message can reach an agent two ways now: it named the agent (`@handle`, the
+/// display name, or the id — `momo_messaging::contains_mention`), or it was said
+/// in a 1:1 DM with that agent (`momo_agent::dm`). This is a **union keyed on
+/// `member_id`**, never a concatenation:
+///
+/// * `@hermes 안녕` typed *inside the DM with hermes* satisfies both rules and
+///   must still produce exactly **one** run. The `mention:<message>:<agent>` run
+///   key would also collapse it at the INSERT, but only after a second
+///   context-window read and a second audit row had already been spent — and
+///   "the SoT will catch it" is not a reason to hand it a duplicate.
+/// * the explicit mention **wins the label**: when a human typed the handle,
+///   `addressing = "mention"` is the true record of what happened, and the DM
+///   rule did not need to do anything.
+/// * `dm_target` that is not a live agent candidate (suspended, deleted, or
+///   simply not an agent) addresses nobody. Fail closed.
+///
+/// Pure so the composition can be pinned without a database — the docker gate is
+/// not part of `cargo test`.
+fn addressed_agents(
+    candidates: &[MentionCandidate],
+    body: &str,
+    dm_target: Option<Uuid>,
+) -> Vec<(MentionCandidate, Addressing)> {
+    let mut addressed: Vec<(MentionCandidate, Addressing)> = candidates
+        .iter()
+        .filter(|candidate| {
+            contains_mention(
+                body,
+                &candidate.handle,
+                &candidate.display_name,
+                candidate.member_id,
+            )
+        })
+        .cloned()
+        .map(|candidate| (candidate, Addressing::Mention))
+        .collect();
+
+    if let Some(target) = dm_target {
+        let already_named = addressed
+            .iter()
+            .any(|(candidate, _)| candidate.member_id == target);
+        if !already_named {
+            if let Some(counterpart) = candidates
+                .iter()
+                .find(|candidate| candidate.member_id == target)
+            {
+                addressed.push((counterpart.clone(), Addressing::DirectMessage));
+            }
+        }
+    }
+    addressed
+}
+
 /// An audited no-op — Swift `insertMentionDiagnostic` (:2195-2228).
 ///
 /// The audit row is the whole point: "the agent ignored me" and "the agent is
@@ -352,8 +453,15 @@ async fn skip(
     send: &MentionSend<'_>,
     trigger: &MentionTrigger<'_>,
     agent: &MentionCandidate,
+    addressing: Addressing,
     reason: &str,
 ) -> Result<(), DbError> {
+    // The requested routing is deliberately absent here (Swift
+    // `insertMentionDiagnostic` :2205-2216 passes nil): a skipped agent never
+    // reached the resolver, so recording a request it was not judged against
+    // would read as though it had been.
+    let mut detail = mention_diagnostic_detail(trigger, agent, reason, None, None, None, None);
+    stamp_addressing(&mut detail, addressing);
     write_audit(
         conn,
         &AuditEntry::new(send.workspace_id, MENTION_SKIPPED_ACTION)
@@ -361,14 +469,7 @@ async fn skip(
             .about(agent.member_id)
             .target("message", send.message_id)
             .via_token(send.via_token_id)
-            .with_schema(
-                MENTION_DIAGNOSTIC_SCHEMA,
-                // The requested routing is deliberately absent here (Swift
-                // `insertMentionDiagnostic` :2205-2216 passes nil): a skipped
-                // agent never reached the resolver, so recording a request it
-                // was not judged against would read as though it had been.
-                mention_diagnostic_detail(trigger, agent, reason, None, None, None, None),
-            ),
+            .with_schema(MENTION_DIAGNOSTIC_SCHEMA, detail),
     )
     .await?;
     Ok(())
@@ -388,6 +489,7 @@ async fn paused(
     send: &MentionSend<'_>,
     trigger: &MentionTrigger<'_>,
     agent: &MentionCandidate,
+    addressing: Addressing,
 ) -> Result<(), DbError> {
     let sent = send_message_in_tx(
         &mut *conn,
@@ -412,6 +514,7 @@ async fn paused(
 
     let mut detail =
         mention_diagnostic_detail(trigger, agent, "agent_paused", None, None, None, None);
+    stamp_addressing(&mut detail, addressing);
     if let Some(object) = detail.as_object_mut() {
         object.insert(
             "system_message_id".into(),
@@ -434,6 +537,107 @@ async fn paused(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn candidate(member_id: Uuid, handle: &str) -> MentionCandidate {
+        MentionCandidate {
+            member_id,
+            handle: handle.into(),
+            display_name: handle.into(),
+            base_model: "hermes-agent".into(),
+            model_pref: None,
+            effort_pref: None,
+            system_prompt: None,
+            tool_schema: serde_json::json!([]),
+            config: serde_json::json!({}),
+            max_run_steps: 50,
+            workspace_settings: serde_json::json!({}),
+            paused: false,
+            is_channel_member: true,
+        }
+    }
+
+    fn labelled(addressed: &[(MentionCandidate, Addressing)]) -> Vec<(Uuid, &'static str)> {
+        addressed
+            .iter()
+            .map(|(agent, addressing)| (agent.member_id, addressing.as_label()))
+            .collect()
+    }
+
+    /// **(d) A mention *and* the DM rule pointing at the same agent is ONE run.**
+    ///
+    /// The whole reason [`addressed_agents`] is a union: `@hermes 안녕` typed
+    /// inside the DM with hermes satisfies both rules at once. A concatenation
+    /// would enqueue two jobs, read the context window twice and write two audit
+    /// rows before `mention:<message>:<agent>` collapsed them at the INSERT.
+    ///
+    /// The label is the mention's, because that is what actually happened: the
+    /// human named the agent, and the DM rule had nothing left to do.
+    #[test]
+    fn a_mention_inside_the_dm_stays_one_run_and_keeps_the_mention_label() {
+        let hermes = Uuid::from_u128(2);
+        let candidates = vec![candidate(hermes, "hermes")];
+        let addressed = addressed_agents(&candidates, "@hermes 안녕", Some(hermes));
+        assert_eq!(
+            labelled(&addressed),
+            vec![(hermes, "mention")],
+            "one entry, labelled by the thing the human actually did"
+        );
+    }
+
+    /// (a) The batch's reason to exist: no handle, one run — and it is recorded
+    /// as the DM rule's doing, not as a mention nobody typed.
+    #[test]
+    fn a_bare_utterance_in_a_dm_addresses_the_counterpart() {
+        let hermes = Uuid::from_u128(2);
+        let candidates = vec![candidate(hermes, "hermes")];
+        let addressed = addressed_agents(&candidates, "이거 좀 봐줘", Some(hermes));
+        assert_eq!(labelled(&addressed), vec![(hermes, "dm_implicit")]);
+    }
+
+    /// (b)/(e) collapsed into the one input that expresses both: **no DM target,
+    /// no mention, no run.** `dm_target = None` is what an agent author
+    /// (`AuthorIsNotHuman`) and a group channel (`NotDirectMessage`) both reduce
+    /// to by the time they reach here, so this pins the group-channel regression
+    /// and the agent↔agent refusal at the composition layer at once.
+    #[test]
+    fn without_a_dm_target_a_bare_utterance_addresses_nobody() {
+        let hermes = Uuid::from_u128(2);
+        let candidates = vec![candidate(hermes, "hermes")];
+        assert!(addressed_agents(&candidates, "이거 좀 봐줘", None).is_empty());
+        // …and the mention path is completely unaffected by the new rule.
+        assert_eq!(
+            labelled(&addressed_agents(&candidates, "@hermes 봐줘", None)),
+            vec![(hermes, "mention")]
+        );
+    }
+
+    /// A DM target that is not a live agent candidate addresses nobody: the
+    /// candidate query is what says "active, undeleted, `kind='agent'`", and a
+    /// target missing from it has been suspended or removed since the roster was
+    /// read. Fail closed rather than enqueue a run for a member who is gone.
+    #[test]
+    fn a_dm_target_that_is_not_a_live_candidate_addresses_nobody() {
+        let hermes = Uuid::from_u128(2);
+        let vanished = Uuid::from_u128(9);
+        let candidates = vec![candidate(hermes, "hermes")];
+        assert!(addressed_agents(&candidates, "안녕", Some(vanished)).is_empty());
+    }
+
+    /// A mention of one agent inside a DM with another still reaches both — the
+    /// DM rule adds an addressee, it never replaces the one that was named. (The
+    /// mentioned outsider is then refused downstream as
+    /// `agent_not_channel_member`, which is the existing fail-closed answer.)
+    #[test]
+    fn the_dm_rule_adds_an_addressee_rather_than_replacing_the_named_one() {
+        let hermes = Uuid::from_u128(2);
+        let atlas = Uuid::from_u128(3);
+        let candidates = vec![candidate(hermes, "hermes"), candidate(atlas, "atlas")];
+        let addressed = addressed_agents(&candidates, "@atlas 이것 좀", Some(hermes));
+        assert_eq!(
+            labelled(&addressed),
+            vec![(atlas, "mention"), (hermes, "dm_implicit")]
+        );
+    }
 
     /// The two `outbox.method` values are a contract with two different
     /// consumers, and picking the wrong one makes every mention stall silently:

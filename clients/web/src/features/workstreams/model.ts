@@ -179,7 +179,7 @@ export function runClockLabel(atMs: number, nowMs: number): RunClock {
  * `ownerName`은 skill §9가 요구하는 병기다. agent actor에 `--agent` 토큰만
  * 얹으면 "A -> 에이전트 -> C" 원장에서 그 에이전트를 **누가 책임지는지**가
  * 빠지고, 이 표면은 정확히 그 원장을 읽으라고 존재한다(PR 918 R1 M6). 문장은
- * 멤버 디렉터리·타임라인이 이미 쓰는 `managed by {owner}` 그대로다 — 같은
+ * 멤버 디렉터리·타임라인이 이미 쓰는 `{owner} 님이 관리` 그대로다 — 같은
  * 사실을 두 표면이 다른 말로 부르면 읽는 사람이 둘을 다른 사실로 읽는다.
  *
  * 오너를 로스터에서 찾지 못하면 비운다. MemberRow가 하는 것과 같고, 없는 이름을

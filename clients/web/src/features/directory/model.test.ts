@@ -232,10 +232,10 @@ describe("memberRowLabel", () => {
   });
 
   it("says an agent is an agent and who it is attributed to", () => {
-    // Colour (--agent) reaches no screen reader, and "managed by 데모 사용자" is
+    // Colour (--agent) reaches no screen reader, and "데모 사용자 님이 관리" is
     // on screen, so both are in the name (WCAG 2.5.3).
     expect(memberRowLabel(INTERN_AGENT, DEMO.displayName)).toBe(
-      "김인턴 @kim-intern, 에이전트, managed by 데모 사용자, 다이렉트 메시지 열기"
+      "김인턴 @kim-intern, 에이전트, 데모 사용자 님이 관리, 다이렉트 메시지 열기"
     );
   });
 
