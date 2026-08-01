@@ -228,13 +228,11 @@ pub fn build_request_body(request: &ChatRequest) -> Value {
     if !instructions.is_empty() {
         object.insert("instructions".into(), json!(instructions.join("\n\n")));
     }
-    // Omitted rather than sent as `null`: the Responses API reads an explicit
-    // null as "no ceiling", which is true but is not the same statement as "the
-    // caller has no opinion", and only the second one is what an absent budget
-    // means here.
-    if let Some(max_output_tokens) = request.max_tokens {
-        object.insert("max_output_tokens".into(), json!(max_output_tokens));
-    }
+    // `max_output_tokens`는 보내지 않는다 — ChatGPT 백엔드(이 와이어의 실소비자)가
+    // "Unsupported parameter"로 400을 답한다(2026-08-02 실 smoke 실측). 출력 예산은
+    // usage ledger 계상으로 사후 관측한다. api.openai.com 표준 Responses에 이 필드를
+    // 조건부로 되살리는 것은 후속(와이어별 capability 분기).
+    let _ = request.max_tokens;
     body
 }
 
@@ -655,7 +653,10 @@ mod tests {
              \"Stream must be set to true\""
         );
         assert_eq!(body["store"], json!(false));
-        assert_eq!(body["max_output_tokens"], json!(512));
+        assert!(
+            body.get("max_output_tokens").is_none(),
+            "ChatGPT 백엔드 미지원 — 보내지 않는다"
+        );
         assert_eq!(body["instructions"], json!("you are hermes"));
 
         // The chat wire's field names must NOT appear: a body carrying both is a
