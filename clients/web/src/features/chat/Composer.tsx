@@ -336,7 +336,10 @@ export function Composer({
   }
 
   return (
-    <div className="border-t border-line">
+    // `safe-area-bottom` (goal B6): 폰에서 컴포저는 셸의 마지막 줄이고, 그 아래는
+    // iOS 홈 인디케이터다. 안전 영역만큼 물러나지 않으면 전송 버튼의 아랫부분이
+    // 시스템 제스처 영역에 들어가 눌리지 않는다.
+    <div className="safe-area-bottom border-t border-line">
       {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
@@ -414,11 +417,12 @@ export function Composer({
           onKeyDown={onKeyDown}
           placeholder={`${channelLabel}에 메시지 보내기`}
           data-testid="composer-input"
-          className="min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         />
         <Button
           type="submit"
           size="icon"
+          className="tap-target"
           disabled={text.trim().length === 0}
           aria-label="메시지 보내기"
           title="메시지 보내기 (⌘↵)"

@@ -125,6 +125,8 @@ export function HuddleHeaderControl({
     );
   }
 
+  // 이 서버에 허들이 없다: 컨트롤도 배너도 없다 (goal B6). 아래 배너 쪽에 같은
+  // 판단의 나머지 절반이 적혀 있다.
   if (huddle.status === "unconfigured") return null;
 
   if (huddle.status === "error") {
@@ -223,15 +225,20 @@ export function HuddleHeaderBanner({
       />
     );
   }
-  if (huddle.status === "unconfigured") {
-    return (
-      <InlineBanner
-        tone="neutral"
-        message="허들 미구성: 이 서버에서는 음성 허들을 사용하지 않습니다."
-        testId="huddle-unconfigured"
-      />
-    );
-  }
+  // 없는 기능은 말하지 않는다 (goal B6, SKILL §5 / capability 게이트).
+  //
+  // 이 자리에는 "허들 미구성: 이 서버에서는 음성 허들을 사용하지 않습니다."라는
+  // 중립 배너가 있었다. 한 번 읽으면 새로울 것이 없는 문장인데 **모든 채널의
+  // 헤더 아래에 영구히** 서 있었고, 폰에서는 그 한 줄이 타임라인 높이의 6%를
+  // 가져갔다. 그리고 실서버에서는 이 상태가 아니라 `error`로 판정되어 빨간
+  // 배너였다 — 없는 기능을 장애라고 말한 것이다(huddleModel.isHuddleUnsupportedStatus).
+  //
+  // 지원하지 않는 표면은 접는다. 사람이 여기서 할 수 있는 일이 없고, 할 수 있는
+  // 일이 생기는 조건(운영자가 LiveKit을 구성)은 이 채널 헤더가 아니라 운영
+  // 문서에 있다. 시작/참가를 눌렀는데 서버가 503을 답하는 경우는 여전히 문장을
+  // 받는다(huddleErrorCopy("unconfigured")): 그때는 사람이 방금 무언가를 했고,
+  // 답이 없으면 눌린 것인지조차 알 수 없다.
+  if (huddle.status === "unconfigured") return null;
   if (huddle.status === "error") {
     return (
       <InlineBanner

@@ -25,6 +25,7 @@ import {
   huddleErrorCopy,
   huddleErrorKind,
   initialHuddleProjection,
+  isHuddleUnsupportedStatus,
   reduceHuddleProjection,
   type HuddleErrorKind,
 } from "./huddleModel";
@@ -86,7 +87,10 @@ export function useHuddle(
       })
       .catch((error: unknown) => {
         if (!mountedRef.current) return;
-        if (error instanceof ApiError && error.status === 503) {
+        if (
+          error instanceof ApiError &&
+          isHuddleUnsupportedStatus(error.status)
+        ) {
           dispatch({ type: "load-unconfigured", requestId });
         } else {
           dispatch({ type: "load-failed", requestId });
@@ -218,7 +222,8 @@ export function useHuddle(
         if (!mountedRef.current) return;
         dispatch({
           type:
-            error instanceof ApiError && error.status === 503
+            error instanceof ApiError &&
+            isHuddleUnsupportedStatus(error.status)
               ? "load-unconfigured"
               : "load-failed",
           requestId,

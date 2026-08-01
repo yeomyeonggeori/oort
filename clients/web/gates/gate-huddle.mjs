@@ -4,7 +4,13 @@
 // No backend, credentials, microphone, or real audio. LiveKit media and the
 // Tauri WKWebView permission prompt remain orchestrator-owned manual checks.
 // This gate locks the browser states the ticket can prove with fixtures:
-//   1. HTTP 503 "허들 미구성" is an operator state, not a generic failure;
+//   1. a server WITHOUT huddles shows nothing at all: no control, no banner, no
+//      error. Two shapes answer that way and both are checked (goal B6): 503
+//      (operator configured LiveKit off) and 404 (the route is not built yet,
+//      which is what momowebqa answers today). The 404 used to fall through to
+//      the generic failure branch, so every channel header carried a red
+//      "허들 상태를 불러오지 못했습니다" line about a feature the server never
+//      claimed to have;
 //   2. active Live badge and participant display names come from REST;
 //   3. huddle_ended removes the badge even when an older active GET resolves
 //      afterwards (the intentionally inverted response timing);
@@ -222,6 +228,11 @@ async function installRoutes(context, state) {
       if (state.mode === "unconfigured") {
         return json(route, { error: { message: "허들 미구성" } }, 503);
       }
+      // 허들 라우트가 아직 없는 세대의 서버 (goal B6). momowebqa가 지금 답하는
+      // 형태이고, 이 티켓을 연 실캡처의 빨간 배너가 여기서 나왔다.
+      if (state.mode === "unimplemented") {
+        return json(route, { error: { message: "not found" } }, 404);
+      }
       if (state.mode === "error") {
         return json(route, { error: { message: "fixture failure" } }, 500);
       }
@@ -288,7 +299,7 @@ async function main() {
     await waitForServer();
     const browser = await chromium.launch();
     try {
-      for (const mode of ["unconfigured", "idle", "error"]) {
+      for (const mode of ["unconfigured", "unimplemented", "idle", "error"]) {
         const context = await browser.newContext({
           viewport: { width: 1280, height: 800 },
           reducedMotion: "reduce",
@@ -297,18 +308,48 @@ async function main() {
         const state = { mode, delayActiveMs: 0 };
         await installRoutes(context, state);
         const page = await openSignedIn(context);
-        const target =
-          mode === "unconfigured"
-            ? "huddle-unconfigured"
-            : mode === "idle"
-              ? "huddle-start"
-              : "huddle-error";
-        await page.getByTestId(target).waitFor();
-        if (
-          mode === "unconfigured" &&
-          process.env.HUDDLE_GATE_PROVE_RED_503 === "1"
-        ) {
-          await page.getByTestId("huddle-error").waitFor({ timeout: 500 });
+        const absent = mode === "unconfigured" || mode === "unimplemented";
+        if (absent) {
+          // 없는 기능은 아무 자리도 차지하지 않는다 (goal B6). 기다릴 것이
+          // 없으므로 대신 **채널이 다 섰다는 사실**을 기다린 뒤, 허들이 남긴
+          // 것이 정말 하나도 없는지 센다. 컴포저는 채널 표면의 마지막 줄이라,
+          // 그것이 서 있으면 헤더도 배너 자리도 이미 확정이다.
+          await page.getByTestId("composer-input").waitFor();
+          const leftovers = {};
+          for (const testId of [
+            "huddle-surface",
+            "huddle-start",
+            "huddle-join",
+            "huddle-live",
+            "huddle-loading",
+            "huddle-unconfigured",
+            "huddle-error",
+            "huddle-error-retry",
+            "huddle-notice",
+          ]) {
+            leftovers[testId] = await page.getByTestId(testId).count();
+          }
+          const total = Object.values(leftovers).reduce((a, b) => a + b, 0);
+          // 붉은 증명: isHuddleUnsupportedStatus에서 404(또는 503)를 빼면 이
+          // 판정이 error로 떨어지고 huddle-error가 하나 남는다.
+          const expected =
+            process.env.HUDDLE_GATE_PROVE_RED_503 === "1" ? 1 : 0;
+          if (total !== expected) {
+            throw new Error(
+              `${mode}: 허들 표면이 ${total}개 남았다 (기대 ${expected}) ${JSON.stringify(leftovers)}`
+            );
+          }
+          // 채널 자체는 멀쩡해야 한다: 허들을 접는 것이 헤더를 지우는 것으로
+          // 번지면 고친 것보다 더 큰 것을 부순 것이다.
+          const title = await page.locator("h1").first().textContent();
+          if (!title?.includes("제품-웹")) {
+            throw new Error(`${mode}: 채널 제목이 사라졌다 (${title})`);
+          }
+          console.log(`ok  ${mode}: 허들 표면 0개, 채널 제목 "${title}" 유지`);
+        } else {
+          await page
+            .getByTestId(mode === "idle" ? "huddle-start" : "huddle-error")
+            .waitFor();
         }
         await page.screenshot({
           path: resolve(outDir, `${mode}.png`),

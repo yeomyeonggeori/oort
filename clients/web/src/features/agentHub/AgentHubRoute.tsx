@@ -13,6 +13,7 @@ import {
 import { Link } from "react-router-dom";
 import { Bot, Loader2, Search } from "lucide-react";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -303,7 +304,10 @@ export function AgentHubRoute() {
       <header className="border-b border-line px-4 py-2">
         <div className="flex w-full max-w-pane-lg flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-body font-semibold text-ink">에이전트</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <SidebarDrawerToggle />
+              <h1 className="text-body font-semibold text-ink">에이전트</h1>
+            </div>
             <p className="text-meta text-ink-muted">
               워크스페이스 에이전트를 만들고, 상태와 기억, 작업 이력을 한 곳에서
               봅니다.

@@ -1,4 +1,5 @@
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   EmptyInvite,
   InlineBanner,
@@ -27,7 +28,10 @@ export function ActivityRoute() {
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="activity-route">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-body font-semibold">활동</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <SidebarDrawerToggle />
+          <h1 className="text-body font-semibold">활동</h1>
+        </div>
         <span className="text-meta text-ink-muted">
           에이전트가 요청한 것과 그 결과
         </span>

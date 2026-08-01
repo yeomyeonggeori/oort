@@ -35,10 +35,13 @@ export function ThreadPanel({
   const replies = query.data?.messages ?? [];
 
   return (
+    // `thread-pane` (goal B6): 넓은 창에서는 그대로 320px 열이고, 폰에서는 채널
+    // 표면 전체를 덮는 서랍이 된다 (tokens.css). 320px 패널이 390px 화면에서
+    // 채널에 70px만 남기던 자리다.
     <aside
       aria-label="스레드"
       data-testid="thread-panel"
-      className="flex h-full w-pane shrink-0 flex-col border-l border-line bg-surface"
+      className="thread-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
     >
       <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="text-body font-semibold">스레드</h2>
@@ -47,7 +50,7 @@ export function ThreadPanel({
           onClick={onClose}
           aria-label="스레드 닫기"
           data-testid="thread-close"
-          className="flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="tap-target flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <X className="size-4" />
         </button>

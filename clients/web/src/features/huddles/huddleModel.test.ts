@@ -10,6 +10,7 @@ import {
   huddleErrorKind,
   huddleParticipantSummary,
   initialHuddleProjection,
+  isHuddleUnsupportedStatus,
   reduceHuddleProjection,
 } from "./huddleModel";
 
@@ -130,6 +131,28 @@ describe("huddle user states", () => {
       "unconfigured"
     );
     expect(huddleErrorCopy("unconfigured")).toContain("운영자가 LiveKit을 구성");
+  });
+
+  // goal B6. 실서버는 허들 라우트를 아직 싣지 않아 404를 답했고, 그 404가
+  // `error`로 판정되어 모든 채널 헤더 아래에 빨간 배너가 섰다. 없는 기능은
+  // 장애가 아니다. 판정 집합은 이 클라이언트의 다른 capability 게이트와 같다
+  // (routing/capability.ts: 404/405/501), 여기에 이미 쓰던 503이 더해진다.
+  it("reads a missing huddle route as absent capability, never as an outage", () => {
+    for (const status of [404, 405, 501, 503]) {
+      expect(isHuddleUnsupportedStatus(status)).toBe(true);
+      expect(huddleErrorKind(new ApiError(status, "not here"))).toBe(
+        "unconfigured"
+      );
+    }
+    // 지원 서버가 실제로 넘어진 경우는 그대로 장애다: 그것까지 조용히 접으면
+    // 사람은 허들이 없는 서버와 고장난 서버를 구별할 길이 없다.
+    for (const status of [500, 502, 504]) {
+      expect(isHuddleUnsupportedStatus(status)).toBe(false);
+      expect(huddleErrorKind(new ApiError(status, "boom"))).toBe("unknown");
+    }
+    // 403은 권한이다. 이 워크스페이스에는 허들이 있고, 이 사람에게 없을 뿐이다.
+    expect(isHuddleUnsupportedStatus(403)).toBe(false);
+    expect(huddleErrorKind(new ApiError(403, "forbidden"))).toBe("membership");
   });
 
   it("names microphone denial and expiry without hiding the next action", () => {

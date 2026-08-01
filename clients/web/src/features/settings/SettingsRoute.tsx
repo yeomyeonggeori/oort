@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { queryClient } from "@/app/queryClient";
 import { resetSettingsQueries } from "@/app/retryScope";
 import { Button } from "@/design/ui/button";
@@ -126,7 +127,10 @@ export function SettingsRoute() {
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-body font-semibold">설정</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <SidebarDrawerToggle />
+          <h1 className="text-body font-semibold">설정</h1>
+        </div>
         <Button variant="ghost" size="sm" onClick={close}>
           닫기
         </Button>
@@ -140,11 +144,14 @@ export function SettingsRoute() {
         />
       )}
 
-      <div className="flex min-h-0 flex-1">
+      {/* 폰에서는 두 열이 되지 못한다 (goal B6): 192px 섹션 목록이 390px 화면의
+          본문에 198px만 남긴다. 그 폭에서는 목록이 본문 **위로** 올라가고, 본문이
+          남은 높이를 전부 받는다 (tokens.css settings-layout / settings-nav). */}
+      <div className="settings-layout">
         <nav
           aria-label="설정 섹션"
           onKeyDown={onNavKeyDown}
-          className="w-pane-sm shrink-0 overflow-y-auto border-r border-line p-2"
+          className="settings-nav p-2"
         >
           {GROUPS.map((group) => (
             <div key={group} className="flex flex-col gap-1 pb-3">
@@ -160,7 +167,7 @@ export function SettingsRoute() {
                       onClick={() => setSection(item.id)}
                       aria-current={section === item.id ? "page" : undefined}
                       className={cn(
-                        "w-full rounded-sm px-2 py-1 text-left text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                        "tap-target w-full rounded-sm px-2 py-1 text-left text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
                         section === item.id
                           ? "bg-accent-soft text-ink"
                           : "hover:bg-surface-hover"
