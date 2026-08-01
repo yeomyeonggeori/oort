@@ -1199,10 +1199,9 @@ async fn b54b_4_the_responses_request_carries_the_measured_wire_fields() {
         json!(false),
         "momo's history lives in Postgres (invariant #1); it is not left on a provider"
     );
-    assert_eq!(
-        body["max_output_tokens"],
-        json!(512),
-        "the payload's budget, under the Responses name for it"
+    assert!(
+        body.get("max_output_tokens").is_none(),
+        "max_output_tokens는 보내지 않는다 — ChatGPT 백엔드가 Unsupported parameter로 400 (2026-08-02 실측)"
     );
     assert_eq!(
         body["instructions"],

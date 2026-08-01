@@ -579,6 +579,16 @@ pub struct MockChatProvider {
 enum MockOutcome {
     Echo,
     Fail(ProviderError),
+    /// Ordered `(needle, answer)` rules matched against the **last `user` turn**
+    /// of the assembled transcript; the first hit wins, and no hit falls back to
+    /// [`MockOutcome::Echo`].
+    ///
+    /// Keyed on what the agent was *told* rather than on call order, because an
+    /// A2A chain is several agents answering each other: a positional script
+    /// would still pass if the wrong agent had been woken, or if two turns ran
+    /// in the other order — which is exactly the bug a delegation test exists to
+    /// catch.
+    Scripted(Vec<(String, String)>),
 }
 
 /// What the mock was asked, recorded so a test can assert on it — including
@@ -604,6 +614,28 @@ impl MockChatProvider {
         }
     }
 
+    /// Answers by script: the first rule whose needle appears in the last `user`
+    /// turn wins, otherwise [`MockChatProvider::echo`]'s answer.
+    ///
+    /// This is how a whole agent→agent conversation is staged without a network:
+    /// one provider serves every agent in the chain, and each answer is a
+    /// function of what that agent was actually shown.
+    pub fn scripted<K, V>(rules: impl IntoIterator<Item = (K, V)>) -> MockChatProvider
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        MockChatProvider {
+            outcome: MockOutcome::Scripted(
+                rules
+                    .into_iter()
+                    .map(|(needle, answer)| (needle.into(), answer.into()))
+                    .collect(),
+            ),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
     /// Always fails with `error`.
     pub fn failing(error: ProviderError) -> MockChatProvider {
         MockChatProvider {
@@ -619,14 +651,19 @@ impl MockChatProvider {
     /// The deterministic answer for a given request — exposed so a test can
     /// assert on the exact body it expects to find in the channel.
     pub fn echo_text(request: &ChatRequest) -> String {
-        let last_user = request
+        format!("mock: {}", MockChatProvider::last_user_content(request))
+    }
+
+    /// The last thing the agent was told — the transcript turn every mock
+    /// outcome keys on.
+    fn last_user_content(request: &ChatRequest) -> &str {
+        request
             .messages
             .iter()
             .rev()
             .find(|message| message.role == "user")
             .map(|message| message.content.as_str())
-            .unwrap_or("");
-        format!("mock: {last_user}")
+            .unwrap_or("")
     }
 }
 
@@ -648,18 +685,27 @@ impl ChatProvider for MockChatProvider {
                 account_id: endpoint.account_id.clone(),
                 wire: endpoint.wire,
             });
-        match &self.outcome {
-            MockOutcome::Fail(error) => Err(error.clone()),
-            MockOutcome::Echo => Ok(ChatCompletion {
-                text: MockChatProvider::echo_text(request),
-                usage: Some(ChatUsage {
-                    prompt_tokens: 11,
-                    completion_tokens: 7,
-                    cached_tokens: 3,
-                    reasoning_tokens: 2,
-                }),
+        let text = match &self.outcome {
+            MockOutcome::Fail(error) => return Err(error.clone()),
+            MockOutcome::Echo => MockChatProvider::echo_text(request),
+            MockOutcome::Scripted(rules) => {
+                let prompt = MockChatProvider::last_user_content(request);
+                rules
+                    .iter()
+                    .find(|(needle, _)| prompt.contains(needle.as_str()))
+                    .map(|(_, answer)| answer.clone())
+                    .unwrap_or_else(|| MockChatProvider::echo_text(request))
+            }
+        };
+        Ok(ChatCompletion {
+            text,
+            usage: Some(ChatUsage {
+                prompt_tokens: 11,
+                completion_tokens: 7,
+                cached_tokens: 3,
+                reasoning_tokens: 2,
             }),
-        }
+        })
     }
 }
 
