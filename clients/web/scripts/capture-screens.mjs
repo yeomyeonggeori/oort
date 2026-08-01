@@ -52,8 +52,9 @@ const MOBILE_TAP_TARGETS = [
   ["composer-send", "메시지 보내기"],
   ["composer-input", "컴포저 입력"],
   // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
-  ["inbox-approval-approve", "인박스 승인"],
-  ["inbox-approval-reject", "인박스 거부"],
+  // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
+  ["inbox-approval-approve", "인박스 승인", "optional"],
+  ["inbox-approval-reject", "인박스 거부", "optional"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -956,8 +957,14 @@ async function assertTapTargets(page, where) {
       };
     }))()`
   );
+  const optional = new Set(
+    MOBILE_TAP_TARGETS.filter((t) => t[2] === "optional").map((t) => t[0])
+  );
   for (const row of measured) {
-    if (row.missing) throw new Error(`손가락 타깃 ${where}: ${row.testId} 없음`);
+    if (row.missing) {
+      if (optional.has(row.testId)) continue;
+      throw new Error(`손가락 타깃 ${where}: ${row.testId} 없음`);
+    }
     if (row.height < 44) {
       throw new Error(
         `손가락 타깃 ${where}: ${row.label}(${row.testId})가 ${row.width}x${row.height}px다 (최소 44px)`
