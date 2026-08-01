@@ -253,6 +253,8 @@ pub enum ChannelSpecInvalid {
     NameCharset,
     #[error("channel topic must be 280 characters or fewer")]
     TopicLength,
+    #[error("membership role must be admin, member, or guest")]
+    MembershipRole,
 }
 
 /// `public` | `private`, trimmed and lowercased. **`dm` is not creatable here**:
@@ -308,6 +310,152 @@ pub fn normalize_channel_topic(raw: Option<&str>) -> Result<Option<String>, Chan
         return Err(ChannelSpecInvalid::TopicLength);
     }
     Ok(Some(value.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// channel membership writes (B5.3a — Swift `ChannelRoutes.addMember` :168-236
+// and `removeMember` :318-373)
+//
+// This is the pair B5.2 left as a gap, and it is the hinge of agent onboarding
+// rather than a CRUD convenience: creating an agent stops at the workspace
+// identity boundary, so an agent is not *mentionable* until it holds a
+// `membership` row in some channel — which is exactly what
+// `mention::MentionCandidate::is_channel_member` reports on, and what decides
+// between a queued run and an `agent_not_channel_member` no-op.
+//
+// There is deliberately no agent branch in either statement (invariant #5): a
+// human and an agent join a channel through the same row.
+// ---------------------------------------------------------------------------
+
+/// Swift `ChannelRoutes.normalizedMembershipRole` (:426-434). Absent = `member`.
+///
+/// `owner` is **not** accepted even though the enum has it: ownership is minted
+/// by channel creation, and letting an admin hand it out through the member
+/// route would make "who created this channel" a mutable claim.
+pub fn normalize_membership_role(raw: Option<&str>) -> Result<&'static str, ChannelSpecInvalid> {
+    match raw.unwrap_or("member").trim().to_lowercase().as_str() {
+        "admin" => Ok("admin"),
+        "member" => Ok("member"),
+        "guest" => Ok("guest"),
+        _ => Err(ChannelSpecInvalid::MembershipRole),
+    }
+}
+
+/// Add (or re-add) a member to a public/private channel — Swift `addMember`.
+///
+/// `Ok(None)` is the 404, and the reasons it can be `None` are all inside the
+/// statement rather than in a pre-read: the channel must be live and non-DM (a
+/// DM's roster is its identity — adding a third party would silently redefine
+/// the pair), and the target must be an **active, non-deleted member of this
+/// workspace** who already holds a `workspace_membership`. A pre-read would let
+/// a member deactivated between the check and the insert still be added.
+///
+/// `ON CONFLICT … DO UPDATE SET role, left_at = NULL` makes re-adding someone who
+/// left a normal, idempotent act rather than a `membership_uniq` violation — and
+/// it is why re-inviting a paused-then-removed agent works on the first try.
+pub async fn add_channel_member_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+    role: &str,
+) -> Result<Option<ChannelMembership>, DbError> {
+    let row = sqlx::query(
+        "WITH target AS ( \
+           SELECT c.id AS channel_id, c.workspace_id, m.id AS member_id \
+             FROM channel c \
+             JOIN member m \
+               ON m.workspace_id = c.workspace_id \
+              AND m.id = $3 \
+              AND m.status = 'active' \
+              AND m.deleted_at IS NULL \
+             JOIN workspace_membership wm \
+               ON wm.workspace_id = m.workspace_id \
+              AND wm.member_id = m.id \
+            WHERE c.id = $2 \
+              AND c.workspace_id = $1 \
+              AND c.kind IN ('public', 'private') \
+              AND c.archived_at IS NULL \
+         ), \
+         upserted AS ( \
+           INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+           SELECT workspace_id, channel_id, member_id, $4::membership_role FROM target \
+           ON CONFLICT (channel_id, member_id) \
+           DO UPDATE SET role = EXCLUDED.role, left_at = NULL \
+           RETURNING id, workspace_id, channel_id, member_id, role, joined_at, left_at \
+         ) \
+         SELECT ms.id AS membership_id, \
+                ms.workspace_id, \
+                ms.channel_id AS id, \
+                ms.member_id, \
+                ms.role::text AS membership_role, \
+                floor(extract(epoch from ms.joined_at) * 1000)::bigint AS joined_at_ms, \
+                CASE WHEN ms.left_at IS NULL THEN NULL \
+                     ELSE floor(extract(epoch from ms.left_at) * 1000)::bigint \
+                END AS left_at_ms \
+           FROM upserted ms",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member_id)
+    .bind(role)
+    .fetch_optional(&mut *conn)
+    .await?;
+    row.as_ref()
+        .map(decode_channel_membership)
+        .transpose()
+        .map_err(DbError::from)
+}
+
+/// Remove a member from a channel — Swift `removeMember`.
+///
+/// A **soft** leave (`left_at = now()`), not a delete, because every read that
+/// decides access already spells `left_at IS NULL` and the row is the evidence
+/// that the member was once there. `COALESCE(ms.left_at, now())` keeps a repeat
+/// removal from rewriting the original departure time; the `left_at IS NULL`
+/// predicate means the second call answers 404 instead, which is what tells a
+/// caller the removal it just asked for was not the one that happened.
+pub async fn remove_channel_member_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+) -> Result<Option<ChannelMembership>, DbError> {
+    let row = sqlx::query(
+        "WITH updated AS ( \
+           UPDATE membership ms \
+              SET left_at = COALESCE(ms.left_at, now()) \
+             FROM channel c \
+            WHERE c.id = $2 \
+              AND c.workspace_id = $1 \
+              AND c.kind IN ('public', 'private') \
+              AND c.archived_at IS NULL \
+              AND ms.channel_id = c.id \
+              AND ms.member_id = $3 \
+              AND ms.left_at IS NULL \
+           RETURNING ms.id, ms.workspace_id, ms.channel_id, ms.member_id, \
+                     ms.role, ms.joined_at, ms.left_at \
+         ) \
+         SELECT ms.id AS membership_id, \
+                ms.workspace_id, \
+                ms.channel_id AS id, \
+                ms.member_id, \
+                ms.role::text AS membership_role, \
+                floor(extract(epoch from ms.joined_at) * 1000)::bigint AS joined_at_ms, \
+                CASE WHEN ms.left_at IS NULL THEN NULL \
+                     ELSE floor(extract(epoch from ms.left_at) * 1000)::bigint \
+                END AS left_at_ms \
+           FROM updated ms",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    row.as_ref()
+        .map(decode_channel_membership)
+        .transpose()
+        .map_err(DbError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +776,27 @@ mod tests {
             Err(ChannelSpecInvalid::NameLength)
         );
         assert!(normalize_channel_name(&"a".repeat(CHANNEL_NAME_MAX_CHARS)).is_ok());
+    }
+
+    /// `owner` is minted by creation and nowhere else, so the member route
+    /// cannot hand it out — and an unknown role is refused by name rather than
+    /// silently downgraded to `member`.
+    #[test]
+    fn a_membership_role_defaults_to_member_and_never_grants_ownership() {
+        assert_eq!(normalize_membership_role(None), Ok("member"));
+        assert_eq!(normalize_membership_role(Some("  Admin ")), Ok("admin"));
+        assert_eq!(normalize_membership_role(Some("guest")), Ok("guest"));
+        assert_eq!(
+            normalize_membership_role(Some("owner")),
+            Err(ChannelSpecInvalid::MembershipRole),
+            "ownership is not transferable through the member route"
+        );
+        assert_eq!(
+            normalize_membership_role(Some("superuser"))
+                .unwrap_err()
+                .to_string(),
+            "membership role must be admin, member, or guest"
+        );
     }
 
     #[test]

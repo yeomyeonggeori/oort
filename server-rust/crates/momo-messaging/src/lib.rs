@@ -46,11 +46,13 @@ pub mod read_state;
 pub mod search;
 
 pub use channel::{
-    clamp_channel_list_limit, create_channel, create_channel_detailed_in_tx, create_channel_in_tx,
-    list_workspace_channels, normalize_channel_kind, normalize_channel_name,
-    normalize_channel_topic, set_notification_pref_in_tx, Channel, ChannelKind, ChannelMembership,
-    ChannelSpecInvalid, ChannelSummary, CreatedChannel, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT,
-    CHANNEL_LIST_LIMIT_MAX, CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
+    add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
+    create_channel_detailed_in_tx, create_channel_in_tx, list_workspace_channels,
+    normalize_channel_kind, normalize_channel_name, normalize_channel_topic,
+    normalize_membership_role, remove_channel_member_in_tx, set_notification_pref_in_tx, Channel,
+    ChannelKind, ChannelMembership, ChannelSpecInvalid, ChannelSummary, CreatedChannel, NewChannel,
+    CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX, CHANNEL_NAME_MAX_CHARS,
+    CHANNEL_TOPIC_MAX_CHARS,
 };
 pub use dm::{
     canonical_participants, dm_lock_key, dm_participant_key, list_direct_messages,

@@ -562,6 +562,62 @@ pub async fn upsert_agent_profile_in_tx(
         .map_err(DbError::from)
 }
 
+/// Flip `agent_profile.paused` — Swift `AgentProfileRoutes.setPaused` (:270-325),
+/// minus its audit row (the caller's).
+///
+/// Three properties the statement's shape carries, none of them incidental:
+///
+/// 1. **An agent nobody configured can still be paused.** The `INSERT` half
+///    creates the profile row at its column defaults, so pausing does not require
+///    an operator to first write instructions they do not have. Swift does the
+///    same, and `load_mention_candidates_in_tx` reads `COALESCE(ap.paused, false)`
+///    precisely because the row may not have existed a moment ago.
+/// 2. **A no-op write does not bump `version`.** The `CASE … IS DISTINCT FROM`
+///    arms leave `version`/`updated_by`/`updated_at` alone when the flag already
+///    held that value, so a hub UI polling pause state cannot inflate the edit
+///    count of a profile nobody edited.
+/// 3. **`Ok(None)` is a 404, never a silent cross-tenant write.** The
+///    `WHERE agent_profile.workspace_id = EXCLUDED.workspace_id` guard on the
+///    conflict arm means a row belonging to another workspace updates nothing and
+///    returns nothing — RLS refuses it first, and this is the second lock.
+pub async fn set_agent_paused_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    actor_member_id: Uuid,
+    paused: bool,
+) -> Result<Option<AgentProfile>, DbError> {
+    let sql = format!(
+        "INSERT INTO agent_profile \
+           (agent_member_id, workspace_id, paused, version, updated_by, updated_at) \
+         VALUES ($1, $2, $3, 1, $4, now()) \
+         ON CONFLICT (agent_member_id) DO UPDATE \
+            SET paused = EXCLUDED.paused, \
+                version = CASE \
+                  WHEN agent_profile.paused IS DISTINCT FROM EXCLUDED.paused \
+                  THEN agent_profile.version + 1 ELSE agent_profile.version END, \
+                updated_by = CASE \
+                  WHEN agent_profile.paused IS DISTINCT FROM EXCLUDED.paused \
+                  THEN EXCLUDED.updated_by ELSE agent_profile.updated_by END, \
+                updated_at = CASE \
+                  WHEN agent_profile.paused IS DISTINCT FROM EXCLUDED.paused \
+                  THEN now() ELSE agent_profile.updated_at END \
+            WHERE agent_profile.workspace_id = EXCLUDED.workspace_id \
+         RETURNING {PROFILE_COLS}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(agent_member_id)
+        .bind(workspace_id)
+        .bind(paused)
+        .bind(actor_member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(|row| decode_profile(row, workspace_id, agent_member_id))
+        .transpose()
+        .map_err(DbError::from)
+}
+
 /// Read one agent's profile — Swift `AgentProfileRoutes.load` (:327-346).
 pub async fn load_agent_profile_in_tx(
     conn: &mut PgConnection,

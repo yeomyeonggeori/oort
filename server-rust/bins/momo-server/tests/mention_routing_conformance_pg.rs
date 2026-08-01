@@ -783,8 +783,12 @@ async fn b52_3_mentioning_a_human_starts_no_run() {
 ///
 /// The channel membership is seeded rather than posted because creation
 /// deliberately stops at the workspace identity boundary — Swift's create adds no
-/// channels either, and this server serves no channel-membership route yet
-/// (recorded in the PR body's deviation list).
+/// channels either. B5.2 additionally had no route to post it with; B5.3a serves
+/// `POST …/channels/{ch}/members`, and
+/// `agent_ops_conformance_pg::b53a_1_a_channel_invite_is_what_makes_an_agent_answer`
+/// drives that route instead. This test keeps the seed on purpose, so it stays a
+/// proof about **creation → roster → mentionable** and does not start failing for
+/// a membership reason.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn b52_4_a_created_agent_joins_the_roster_and_becomes_mentionable() {

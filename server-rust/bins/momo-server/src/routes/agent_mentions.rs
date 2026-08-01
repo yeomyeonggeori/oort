@@ -25,10 +25,24 @@
 //!   same one. Together with the `mention:<message>:<agent>` run key that is two
 //!   independent reasons one utterance produces at most one run.
 //!
+//! ## B5.3a — the request tier
+//!
+//! `routes::messages` now **serves** `routing { model?, effort? }`, so the
+//! resolution here is the full ADR-0134 D3 chain rather than the agent tier
+//! alone. Two consequences show up in this file's shape:
+//!
+//! * routing is resolved **after** eligibility (channel membership → paused),
+//!   which is Swift's order (:1976-1986). A paused agent answers with its system
+//!   line even when the same send carried an impossible model: the operator's
+//!   pause is the more informative fact, and it is not the sender's fault.
+//! * a violated request tier is a **rejection, not a failure**: it leaves through
+//!   the caller's error channel so the send transaction rolls back, message and
+//!   all. Swift gets that by throwing inside the transaction closure and says why
+//!   — "the message the user just chose a bad model for is not silently delivered
+//!   with a different one".
+//!
 //! ## What is deliberately not ported (see the PR body)
 //!
-//! * **The per-request `routing` tier (B5.3).** `routes::messages` still refuses
-//!   a `routing` block outright, so only the agent tier is resolved here.
 //! * **The Context Packet** (`context_packet_id` / `memory_refs` / `tool_grants`)
 //!   — the memory plane is not on this server, and the B5.1 worker consumes none
 //!   of the three.
@@ -42,7 +56,7 @@ use momo_agent::{
     create_agent_run_in_tx, load_mention_candidates_in_tx, mention_diagnostic_detail,
     mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
     paused_mention_props, resolve_mention_routing, MentionCandidate, MentionTrigger, NewAgentRun,
-    RunTrigger, MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER,
+    RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY, MENTION_JOB_METHOD_WORKER,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -51,6 +65,8 @@ use momo_messaging::{
 };
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::error::ApiError;
 
 /// `audit_log.detail.schema` shared by all three mention outcomes (Swift
 /// `mentionDiagnosticDetail` :2767).
@@ -77,6 +93,10 @@ pub(crate) struct MentionSend<'a> {
     /// realtime wake-up accompanies the job.
     pub gateway_enabled: bool,
     pub context_max_messages: i64,
+    /// ADR-0134 D1's per-request tier, already shape-validated by the route
+    /// before the transaction opened. `None` = the caller chose nothing and the
+    /// agent's own preferences decide.
+    pub routing: Option<&'a RequestedRouting>,
 }
 
 /// One agent that got a run out of this message.
@@ -89,14 +109,21 @@ pub(crate) struct QueuedMention {
 
 /// Route every agent mentioned in `send.body`, returning what was queued.
 ///
-/// Never fails a send: an agent that is not in the channel, is paused, or was
-/// mentioned by another agent produces an audited no-op, not an error. That is
-/// Swift's shape and it is the right one — a human's message must not be
-/// rejected because of an agent's configuration.
+/// **An agent's configuration never fails a send** — not in the channel, paused,
+/// or mentioned by another agent each produce an audited no-op. That is Swift's
+/// shape and it is the right one: a human's message must not be rejected because
+/// of how someone else set an agent up.
+///
+/// **The caller's own `routing` block can.** `Ok(Err(_))` is that one rejection
+/// (ADR-0134 D1): a model outside the workspace allow-list, or an effort the
+/// resolved model cannot honour, is something the sender just chose, so it
+/// surfaces as a 400 and the send rolls back with it. Delivering the message
+/// under a different model would be a silent substitution of the one decision
+/// the caller made explicitly.
 pub(crate) async fn route_agent_mentions_in_tx(
     conn: &mut PgConnection,
     send: MentionSend<'_>,
-) -> Result<Vec<QueuedMention>, DbError> {
+) -> Result<Result<Vec<QueuedMention>, ApiError>, DbError> {
     let candidates =
         load_mention_candidates_in_tx(&mut *conn, send.workspace_id, send.channel_id).await?;
     let mentioned: Vec<MentionCandidate> = candidates
@@ -111,7 +138,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
         })
         .collect();
     if mentioned.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Ok(Vec::new()));
     }
 
     let trigger = MentionTrigger {
@@ -162,7 +189,13 @@ pub(crate) async fn route_agent_mentions_in_tx(
             continue;
         }
 
-        let routing = resolve_mention_routing(agent);
+        // Eligibility first, routing second (Swift :1976-1986). Reversing the two
+        // would answer "your model is not allowed" for a mention of an agent that
+        // was never going to run — a true sentence about the wrong problem.
+        let routing = match resolve_mention_routing(agent, send.routing) {
+            Ok(routing) => routing,
+            Err(invalid) => return Ok(Err(ApiError::bad_request(invalid.to_string()))),
+        };
         let run_trigger = RunTrigger::Mention {
             message_id: send.message_id,
             agent_member_id: agent.member_id,
@@ -177,7 +210,14 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 parent_run_id: None,
                 max_steps: agent.max_run_steps,
                 depth: 0,
-                input: mention_run_input(&trigger, agent.member_id, &idempotency_key, None, 0),
+                input: mention_run_input(
+                    &trigger,
+                    agent.member_id,
+                    &idempotency_key,
+                    None,
+                    0,
+                    send.routing,
+                ),
             },
         )
         .await?;
@@ -286,6 +326,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
                         Some(created.id),
                         Some(&idempotency_key),
                         Some(&routing),
+                        send.routing,
                     ),
                 ),
         )
@@ -298,7 +339,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
         });
     }
 
-    Ok(queued)
+    Ok(Ok(queued))
 }
 
 /// An audited no-op — Swift `insertMentionDiagnostic` (:2195-2228).
@@ -322,7 +363,11 @@ async fn skip(
             .via_token(send.via_token_id)
             .with_schema(
                 MENTION_DIAGNOSTIC_SCHEMA,
-                mention_diagnostic_detail(trigger, agent, reason, None, None, None),
+                // The requested routing is deliberately absent here (Swift
+                // `insertMentionDiagnostic` :2205-2216 passes nil): a skipped
+                // agent never reached the resolver, so recording a request it
+                // was not judged against would read as though it had been.
+                mention_diagnostic_detail(trigger, agent, reason, None, None, None, None),
             ),
     )
     .await?;
@@ -365,7 +410,8 @@ async fn paused(
     )
     .await?;
 
-    let mut detail = mention_diagnostic_detail(trigger, agent, "agent_paused", None, None, None);
+    let mut detail =
+        mention_diagnostic_detail(trigger, agent, "agent_paused", None, None, None, None);
     if let Some(object) = detail.as_object_mut() {
         object.insert(
             "system_message_id".into(),

@@ -34,6 +34,7 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::effort::{known_level, supports};
+use crate::routing::{RequestedRouting, RoutingInvalid};
 
 /// `agent_run.input.schema` for a mention-triggered run (Swift :2244).
 pub const MENTION_RUN_INPUT_SCHEMA: &str = "momo.agent_run.input.v0";
@@ -248,13 +249,13 @@ pub fn allowed_agent_models(base_model: &str, workspace_settings: &Value) -> Vec
 }
 
 /// The resolved inheritance chain for one mention — Swift
-/// `RunRoutingResolution.resolve` with `requested = nil`
-/// (`RunRouting.swift:112-176`).
+/// `RunRoutingResolution.resolve` (`RunRouting.swift:112-176`).
 ///
-/// The request tier (`routing { model?, effort? }`) is **not** part of this
-/// batch: `routes::messages` still refuses a `routing` block outright, so a
-/// mention resolves the agent tier only. When B5.3 implements the selector it
-/// grows a `requested` parameter here rather than a second resolver.
+/// B5.2 resolved the agent tier only, because `routes::messages` refused a
+/// `routing` block outright. B5.3a serves it, and — as that comment promised —
+/// [`resolve_mention_routing`] grew a `requested` parameter rather than gaining a
+/// second resolver beside it: two implementations of the chain is how the mention
+/// surface and the work surface come to disagree about the same three words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MentionRouting {
     pub model: String,
@@ -267,42 +268,84 @@ pub struct MentionRouting {
     pub ignored_effort_pref: Option<String>,
 }
 
-/// Resolve `agent.model` + `agent_profile.{model_pref,effort_pref}` against the
-/// workspace allow-list.
-pub fn resolve_mention_routing(candidate: &MentionCandidate) -> MentionRouting {
+/// Resolve `agent.model` + `agent_profile.{model_pref,effort_pref}` + the request
+/// tier against the workspace allow-list.
+///
+/// The two tiers are gated **differently on purpose** (ADR-0134 D1), and that
+/// asymmetry is the whole reason this returns a `Result`:
+///
+/// | tier | unusable value | why |
+/// |---|---|---|
+/// | request (`requested`) | `Err(RoutingInvalid)` → 400, and the send rolls back | the caller chose it in this request; delivering the message under a different model would be a silent substitution |
+/// | agent profile | ignored + audited | the allow-list may have narrowed under a profile nobody re-saved, so failing the send would punish an act nobody just performed |
+///
+/// The request tier is consulted first for both axes, so an explicit choice is
+/// never overridden by an inherited one.
+pub fn resolve_mention_routing(
+    candidate: &MentionCandidate,
+    requested: Option<&RequestedRouting>,
+) -> Result<MentionRouting, RoutingInvalid> {
     let allowed = allowed_agent_models(&candidate.base_model, &candidate.workspace_settings);
-    let preference = candidate
-        .model_pref
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let (model, ignored_model_pref) = match preference {
-        Some(preference) if allowed.iter().any(|entry| entry == preference) => {
-            (preference.to_string(), None)
+
+    let (model, ignored_model_pref) = match requested.and_then(|routing| routing.model.as_deref()) {
+        Some(explicit) => {
+            // Same allow-list as the inherited path below, read from the same
+            // helper, so the two tiers cannot drift into permitting different
+            // sets of the same workspace's models.
+            if !allowed.iter().any(|entry| entry == explicit) {
+                return Err(RoutingInvalid::ModelNotAllowed);
+            }
+            (explicit.to_string(), None)
         }
-        Some(preference) => (candidate.base_model.clone(), Some(preference.to_string())),
-        None => (candidate.base_model.clone(), None),
+        None => {
+            let preference = candidate
+                .model_pref
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            match preference {
+                Some(preference) if allowed.iter().any(|entry| entry == preference) => {
+                    (preference.to_string(), None)
+                }
+                Some(preference) => (candidate.base_model.clone(), Some(preference.to_string())),
+                None => (candidate.base_model.clone(), None),
+            }
+        }
     };
 
-    let effort_preference = candidate
-        .effort_pref
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let (effort, ignored_effort_pref) = match effort_preference {
-        Some(raw) => match known_level(Some(raw)).filter(|level| supports(&model, level)) {
-            Some(level) => (Some(level.to_string()), None),
-            None => (None, Some(raw.to_string())),
-        },
-        None => (None, None),
+    let (effort, ignored_effort_pref) = match requested
+        .and_then(|routing| routing.effort.as_deref())
+    {
+        Some(explicit) => {
+            // The model resolved above, not the agent's configured one: asking
+            // for `hermes-fast` + `max` in one block must be refused as a pair.
+            if !supports(&model, explicit) {
+                return Err(RoutingInvalid::EffortUnsupported(model));
+            }
+            (Some(explicit.to_string()), None)
+        }
+        None => {
+            let effort_preference = candidate
+                .effort_pref
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            match effort_preference {
+                Some(raw) => match known_level(Some(raw)).filter(|level| supports(&model, level)) {
+                    Some(level) => (Some(level.to_string()), None),
+                    None => (None, Some(raw.to_string())),
+                },
+                None => (None, None),
+            }
+        }
     };
 
-    MentionRouting {
+    Ok(MentionRouting {
         model,
         effort,
         ignored_model_pref,
         ignored_effort_pref,
-    }
+    })
 }
 
 /// `agent.config.max_output_tokens` (or the camelCase alias), else
@@ -373,6 +416,7 @@ pub fn mention_run_input(
     idempotency_key: &str,
     parent_run_id: Option<Uuid>,
     depth: i32,
+    requested: Option<&RequestedRouting>,
 ) -> Value {
     let mut input = Map::new();
     input.insert("schema".into(), json!(MENTION_RUN_INPUT_SCHEMA));
@@ -394,6 +438,14 @@ pub fn mention_run_input(
     input.insert("source".into(), message_source(trigger));
     if let Some(parent_run_id) = parent_run_id {
         input.insert("parent_run_id".into(), json!(upper(parent_run_id)));
+    }
+    // Swift :2270-2272 — the same echo convention `WorkRunInput.jsonValue` uses.
+    // The key is omitted entirely when nothing was requested, so an *inherited*
+    // preference is never replayed as though the caller had chosen it. This is
+    // also where `usage_ledger.effort` reads the request tier back from
+    // (`agent_run.input->'routing'->>'effort'`).
+    if let Some(routing) = requested.and_then(RequestedRouting::json_value) {
+        input.insert("routing".into(), routing);
     }
     Value::Object(input)
 }
@@ -504,6 +556,7 @@ pub fn mention_job_broadcast_payload(
 /// One schema for queued, skipped and paused so a single audit query answers
 /// "what happened to this @mention", instead of three shapes a reader has to
 /// union.
+#[allow(clippy::too_many_arguments)]
 pub fn mention_diagnostic_detail(
     trigger: &MentionTrigger<'_>,
     candidate: &MentionCandidate,
@@ -511,6 +564,7 @@ pub fn mention_diagnostic_detail(
     run_id: Option<Uuid>,
     idempotency_key: Option<&str>,
     routing: Option<&MentionRouting>,
+    requested: Option<&RequestedRouting>,
 ) -> Value {
     let mut detail = Map::new();
     detail.insert("reason".into(), json!(reason));
@@ -554,6 +608,12 @@ pub fn mention_diagnostic_detail(
         if let Some(ignored) = routing.ignored_effort_pref.as_deref() {
             detail.insert("ignored_effort_pref".into(), json!(ignored));
         }
+    }
+    // Swift :2802-2803 — what was ASKED for, beside what was resolved. Both are
+    // needed to answer "why did this turn run on that model": `resolved_model`
+    // alone cannot tell an explicit request from an inherited preference.
+    if let Some(asked) = requested.and_then(RequestedRouting::json_value) {
+        detail.insert("routing".into(), asked);
     }
     Value::Object(detail)
 }
@@ -611,6 +671,14 @@ mod tests {
         }
     }
 
+    /// The agent-tier-only resolution — the shape every pre-B5.3a caller had.
+    /// It cannot fail, because every refusal in the chain belongs to the request
+    /// tier; `expect` here is the assertion that this stays true.
+    fn inherited(candidate: &MentionCandidate) -> MentionRouting {
+        resolve_mention_routing(candidate, None)
+            .expect("an inherited preference is ignored, never an error")
+    }
+
     fn trigger() -> MentionTrigger<'static> {
         MentionTrigger {
             workspace_id: Uuid::from_u128(1),
@@ -658,12 +726,12 @@ mod tests {
     fn a_disallowed_model_pref_is_ignored_not_honoured() {
         let mut agent = candidate();
         agent.model_pref = Some("gpt-4o".into());
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         assert_eq!(routing.model, "hermes-agent");
         assert_eq!(routing.ignored_model_pref.as_deref(), Some("gpt-4o"));
 
         agent.workspace_settings = json!({"allowed_agent_models": ["gpt-4o"]});
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         assert_eq!(routing.model, "gpt-4o");
         assert!(routing.ignored_model_pref.is_none());
     }
@@ -675,18 +743,80 @@ mod tests {
     fn an_effort_the_resolved_model_cannot_honour_is_dropped() {
         let mut agent = candidate();
         agent.effort_pref = Some("ludicrous".into());
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         assert_eq!(routing.effort, None);
         assert_eq!(routing.ignored_effort_pref.as_deref(), Some("ludicrous"));
 
         agent.effort_pref = Some("  HIGH ".into());
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         assert_eq!(
             routing.effort.as_deref(),
             Some("high"),
             "a known level is normalized, not passed through verbatim"
         );
         assert!(routing.ignored_effort_pref.is_none());
+    }
+
+    /// **The request tier wins over the profile, and its violations are visible.**
+    ///
+    /// This is the ADR-0134 D1 asymmetry in one test: the identical unusable
+    /// value is an ignored no-op when *inherited* and a hard error when
+    /// *requested*. Collapsing the two would either fail sends for stale profiles
+    /// or silently run a model the caller did not choose.
+    #[test]
+    fn an_explicit_request_overrides_the_profile_and_fails_loudly() {
+        let mut agent = candidate();
+        agent.model_pref = Some("hermes-agent".into());
+        agent.effort_pref = Some("max".into());
+        agent.workspace_settings = json!({"allowed_agent_models": ["hermes-fast"]});
+
+        let routing = resolve_mention_routing(
+            &agent,
+            Some(&RequestedRouting {
+                model: Some("hermes-fast".into()),
+                effort: Some("low".into()),
+            }),
+        )
+        .expect("an allowed model with a supported effort");
+        assert_eq!(routing.model, "hermes-fast", "the request tier wins");
+        assert_eq!(routing.effort.as_deref(), Some("low"));
+        assert!(
+            routing.ignored_model_pref.is_none() && routing.ignored_effort_pref.is_none(),
+            "an overridden preference was not ignored — it was never consulted: {routing:?}"
+        );
+
+        assert_eq!(
+            resolve_mention_routing(
+                &agent,
+                Some(&RequestedRouting {
+                    model: Some("gpt-4o".into()),
+                    effort: None,
+                })
+            ),
+            Err(RoutingInvalid::ModelNotAllowed),
+            "an explicit model outside the allow-list is a 400, not a silent fallback"
+        );
+
+        // The effort is judged against the model the SAME block resolved, not
+        // against the agent's configured one.
+        assert_eq!(
+            resolve_mention_routing(
+                &agent,
+                Some(&RequestedRouting {
+                    model: Some("hermes-fast".into()),
+                    effort: Some("max".into()),
+                })
+            ),
+            Err(RoutingInvalid::EffortUnsupported("hermes-fast".into()))
+        );
+
+        // …while the identical `max` sitting in the profile is merely ignored.
+        let mut fast = candidate();
+        fast.base_model = "hermes-fast".into();
+        fast.effort_pref = Some("max".into());
+        let routing = inherited(&fast);
+        assert_eq!(routing.effort, None);
+        assert_eq!(routing.ignored_effort_pref.as_deref(), Some("max"));
     }
 
     /// The policy preamble comes first and the profile section is explicitly
@@ -726,7 +856,7 @@ mod tests {
     #[test]
     fn the_job_payload_is_the_shape_the_worker_decodes() {
         let agent = candidate();
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         let run_id = Uuid::from_u128(9);
         let payload = mention_job_payload(&trigger(), &agent, &routing, run_id, &[], 0, "worker");
 
@@ -789,7 +919,7 @@ mod tests {
     /// matching rows the Swift server wrote.
     #[test]
     fn every_wire_id_is_uppercase_like_foundation() {
-        let input = mention_run_input(&trigger(), Uuid::from_u128(2), "mention:x:y", None, 0);
+        let input = mention_run_input(&trigger(), Uuid::from_u128(2), "mention:x:y", None, 0, None);
         let message_id = input["trigger_message_id"].as_str().expect("id");
         assert_eq!(message_id, message_id.to_uppercase());
         assert_eq!(input["schema"], json!(MENTION_RUN_INPUT_SCHEMA));
@@ -802,9 +932,44 @@ mod tests {
             "mention:x:y",
             Some(Uuid::from_u128(7)),
             1,
+            None,
         );
         assert_eq!(with_parent["depth"], json!(1));
         assert!(with_parent.get("parent_run_id").is_some());
+    }
+
+    /// **The stored input echoes the request, not the resolution.**
+    ///
+    /// `usage_ledger` reads the request tier back from
+    /// `agent_run.input->'routing'->>'effort'`, so writing the *resolved* effort
+    /// here would let an inherited preference be billed as though the caller had
+    /// asked for it — and would break the work path's idempotency comparison,
+    /// which is a pure function of the request body.
+    #[test]
+    fn the_stored_input_echoes_what_was_requested_and_nothing_else() {
+        let requested = RequestedRouting {
+            model: Some("hermes-fast".into()),
+            effort: Some("low".into()),
+        };
+        let input = mention_run_input(
+            &trigger(),
+            Uuid::from_u128(2),
+            "mention:x:y",
+            None,
+            0,
+            Some(&requested),
+        );
+        assert_eq!(
+            input["routing"],
+            json!({"model": "hermes-fast", "effort": "low"})
+        );
+
+        let inherited_only =
+            mention_run_input(&trigger(), Uuid::from_u128(2), "mention:x:y", None, 0, None);
+        assert!(
+            inherited_only.get("routing").is_none(),
+            "no request, no key — an inherited preference is not a client choice: {inherited_only}"
+        );
     }
 
     /// The paused line's two props keys are lowercase on purpose (Swift writes
@@ -832,7 +997,7 @@ mod tests {
     #[test]
     fn the_gateway_wake_up_carries_the_outbox_id_and_flips_delivery() {
         let agent = candidate();
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         let run_id = Uuid::from_u128(9);
         let job = mention_job_payload(&trigger(), &agent, &routing, run_id, &[], 0, "worker");
         let wake = mention_job_broadcast_payload(
@@ -868,12 +1033,13 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(detail["policy"], json!("no_op_fail_closed"));
         assert!(detail.get("run_id").is_none());
 
         let agent = candidate();
-        let routing = resolve_mention_routing(&agent);
+        let routing = inherited(&agent);
         let queued = mention_diagnostic_detail(
             &trigger(),
             &agent,
@@ -881,9 +1047,43 @@ mod tests {
             Some(Uuid::from_u128(9)),
             Some("mention:x:y"),
             Some(&routing),
+            None,
         );
         assert_eq!(queued["policy"], json!("queued"));
         assert_eq!(queued["resolved_model"], json!("hermes-agent"));
         assert_eq!(queued["idempotency_key"], json!("mention:x:y"));
+        assert!(
+            queued.get("routing").is_none(),
+            "nothing was requested, so nothing is recorded as requested: {queued}"
+        );
+    }
+
+    /// An audited turn must distinguish "the caller chose this model" from "the
+    /// agent was configured with it" — `resolved_model` alone cannot.
+    #[test]
+    fn the_diagnostic_records_the_request_beside_the_resolution() {
+        let mut agent = candidate();
+        agent.workspace_settings = json!({"allowed_agent_models": ["hermes-fast"]});
+        let requested = RequestedRouting {
+            model: Some("hermes-fast".into()),
+            effort: Some("low".into()),
+        };
+        let routing =
+            resolve_mention_routing(&agent, Some(&requested)).expect("an allowed explicit model");
+        let detail = mention_diagnostic_detail(
+            &trigger(),
+            &agent,
+            "queued",
+            Some(Uuid::from_u128(9)),
+            Some("mention:x:y"),
+            Some(&routing),
+            Some(&requested),
+        );
+        assert_eq!(detail["resolved_model"], json!("hermes-fast"));
+        assert_eq!(detail["resolved_effort"], json!("low"));
+        assert_eq!(
+            detail["routing"],
+            json!({"model": "hermes-fast", "effort": "low"})
+        );
     }
 }

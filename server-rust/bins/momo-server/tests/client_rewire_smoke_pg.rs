@@ -884,10 +884,15 @@ async fn the_dogfooding_sequence_round_trips() {
     );
 
     // The routing probe runs BEFORE the composer opens its selector, and it
-    // sends an impossible root + an impossible effort at once. This server does
-    // not serve `routing`, so the honest answer is the 404 the probe reads as
-    // `absent` — a 400 naming `routing` would open a selector every send would
-    // then fail. See docs/planning/2026-08-01-b4-contract-diff.md §4.1.
+    // sends an impossible root + an impossible effort at once.
+    //
+    // B4.1 asserted 404 here, because this server refused `routing` outright and
+    // `absent` was the true answer. **B5.3a serves routing**, so the true answer
+    // flipped: the shape check runs before the transaction the root lookup lives
+    // in, the probe gets a 400 naming `routing.effort`, and
+    // `verdictFromSendProbe` reads `ready`. The selector it opens now works —
+    // which is the only reason the verdict was allowed to change.
+    // See docs/planning/2026-08-01-b4-contract-diff.md §4.1.
     let probe = http
         .post(&messages_url)
         .bearer_auth(&access)
@@ -903,13 +908,18 @@ async fn the_dogfooding_sequence_round_trips() {
         .expect("probeSendRouting");
     assert_eq!(
         probe.status().as_u16(),
-        404,
-        "the probe must read `absent`, not `ready`"
+        400,
+        "the probe must read `ready` now that routing is served"
     );
     let probe_body: Value = probe.json().await.expect("probe body");
-    assert_eq!(
-        probe_body["error"]["message"],
-        json!("thread root not found")
+    let probe_message = probe_body["error"]["message"]
+        .as_str()
+        .expect("an error sentence")
+        .to_string();
+    assert!(
+        probe_message.to_lowercase().contains("routing"),
+        "`verdictFromSendProbe` matches /routing/i to reach `ready`; without the \
+         word the composer locks the selector and shows 「다시 확인」: {probe_message}"
     );
 
     let root = http

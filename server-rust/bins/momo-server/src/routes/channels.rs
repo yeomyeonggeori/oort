@@ -27,6 +27,15 @@
 //!   * `PUT …/channels/{ch}/notification-pref` — the write half of the `muted`
 //!     flag every row above already reports. A read-only `muted` is a setting
 //!     that can be shown and never changed.
+//!
+//! **B5.3a** adds the membership pair, and it is the hinge of agent onboarding
+//! rather than a CRUD convenience:
+//!   * `POST …/channels/{ch}/members` — an agent created by `POST …/agents` is a
+//!     workspace member with no room to speak in; this is what makes an
+//!     `@handle` resolve to a run instead of an audited
+//!     `agent_not_channel_member` no-op.
+//!   * `DELETE …/channels/{ch}/members/{member}` — the local, silent counterpart
+//!     to the workspace-wide `pause` switch.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -34,16 +43,18 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
-    active_workspace_role, clamp_channel_list_limit, create_channel_detailed_in_tx,
-    list_workspace_channels, normalize_channel_kind, normalize_channel_name,
-    normalize_channel_topic, set_notification_pref_in_tx, ChannelMembership, ChannelSummary,
+    active_workspace_role, add_channel_member_in_tx, clamp_channel_list_limit,
+    create_channel_detailed_in_tx, list_workspace_channels, normalize_channel_kind,
+    normalize_channel_name, normalize_channel_topic, normalize_membership_role,
+    remove_channel_member_in_tx, set_notification_pref_in_tx, ChannelMembership, ChannelSummary,
     CreatedChannel, NewChannel,
 };
 use serde::Deserialize;
 
 use crate::dto::{
-    ChannelDto, ChannelMembershipDto, CreateChannelRequest, CreateChannelResponse,
-    NotificationPrefResponse, UpdateNotificationPrefRequest, WorkspaceChannelsResponse,
+    AddChannelMemberRequest, ChannelDto, ChannelMembershipDto, ChannelMembershipResponse,
+    CreateChannelRequest, CreateChannelResponse, NotificationPrefResponse,
+    UpdateNotificationPrefRequest, WorkspaceChannelsResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -275,6 +286,117 @@ pub async fn notification_pref(
     Ok(Json(NotificationPrefResponse { muted }))
 }
 
+/// `POST /v1/workspaces/{ws}/channels/{ch}/members` — put a member (human **or**
+/// agent) into a channel (Swift `ChannelRoutes.addMember`, :168-236).
+///
+/// **This is the endpoint that makes an agent mentionable.** `POST …/agents`
+/// stops at the workspace identity boundary on purpose, so until a `membership`
+/// row exists an `@handle` resolves to an audited `agent_not_channel_member`
+/// no-op rather than a run (`momo_agent::mention`). B5.2 had to seed that row by
+/// hand in its own conformance test and recorded the gap; this closes it.
+///
+/// There is **no agent branch here** (invariant #5): the statement joins `member`
+/// without looking at `kind`, so a human and an agent are added by the same row
+/// through the same authority. Any branch would be the first crack in "an agent
+/// is a member".
+///
+/// Authorization is workspace owner/admin — the same authority that creates
+/// channels (ADR-0128), because adding a member changes who can read a room's
+/// history, which is not a per-message decision.
+pub async fn add_member(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Json(request): Json<AddChannelMemberRequest>,
+) -> Result<Json<ChannelMembershipResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    // Shape before connection (MOMO-362): a bad role costs no transaction.
+    let role = normalize_membership_role(request.role.as_deref())
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+    let member_id = request.member_id;
+
+    let outcome: DbRejectable<ChannelMembership> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                // Authorization and the write share one transaction, so an admin
+                // demoted mid-flight cannot still add the member their check
+                // passed for.
+                let Some(role_of_actor) =
+                    active_workspace_role(conn, workspace_id, principal.member_id).await?
+                else {
+                    return Ok(Err(ApiError::forbidden("not a workspace member")));
+                };
+                if !role_of_actor.is_admin() {
+                    return Ok(Err(ApiError::forbidden(
+                        "workspace owner or admin role required",
+                    )));
+                }
+                match add_channel_member_in_tx(conn, workspace_id, channel_id, member_id, role)
+                    .await?
+                {
+                    Some(membership) => Ok(Ok(membership)),
+                    None => Ok(Err(ApiError::not_found("channel or member not found"))),
+                }
+            })
+        })
+        .await;
+
+    let membership = settle_db("channels.add_member", outcome)?;
+    Ok(Json(ChannelMembershipResponse {
+        membership: membership_dto(&membership),
+    }))
+}
+
+/// `DELETE /v1/workspaces/{ws}/channels/{ch}/members/{member}` — the other half
+/// (Swift `ChannelRoutes.removeMember`, :318-373).
+///
+/// Removing an agent is how an operator says "not in this room" without pausing
+/// it everywhere: `pause` is workspace-wide and answers every mention with a
+/// visible system line, while leaving a channel is silent and local. Both exist
+/// because they are different statements to the team.
+///
+/// 404 — not 204 — when there is no live membership: "already gone" and "you
+/// named the wrong channel" must not look identical to the caller.
+pub async fn remove_member(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel, member)): Path<(String, String, String)>,
+) -> Result<Json<ChannelMembershipResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let member_id = path_uuid(&member, "invalid member id")?;
+
+    let outcome: DbRejectable<ChannelMembership> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some(role_of_actor) =
+                    active_workspace_role(conn, workspace_id, principal.member_id).await?
+                else {
+                    return Ok(Err(ApiError::forbidden("not a workspace member")));
+                };
+                if !role_of_actor.is_admin() {
+                    return Ok(Err(ApiError::forbidden(
+                        "workspace owner or admin role required",
+                    )));
+                }
+                match remove_channel_member_in_tx(conn, workspace_id, channel_id, member_id).await?
+                {
+                    Some(membership) => Ok(Ok(membership)),
+                    None => Ok(Err(ApiError::not_found(
+                        "active channel membership not found",
+                    ))),
+                }
+            })
+        })
+        .await;
+
+    let membership = settle_db("channels.remove_member", outcome)?;
+    Ok(Json(ChannelMembershipResponse {
+        membership: membership_dto(&membership),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,6 +558,72 @@ mod tests {
             .is_err(),
             "an unknown key is a 400, never a silently dropped intent"
         );
+    }
+
+    /// Swift's decoder accepts both spellings of the id and defaults the role,
+    /// and the body stays closed-world otherwise.
+    #[test]
+    fn the_add_member_request_takes_either_spelling_of_the_id() {
+        let member = Uuid::from_u128(42);
+        let camel: AddChannelMemberRequest =
+            serde_json::from_value(serde_json::json!({"memberId": member})).expect("camelCase");
+        assert_eq!(camel.member_id, member);
+        assert!(camel.role.is_none(), "an absent role means `member`");
+        assert_eq!(
+            normalize_membership_role(camel.role.as_deref()),
+            Ok("member")
+        );
+
+        let snake: AddChannelMemberRequest =
+            serde_json::from_value(serde_json::json!({"member_id": member, "role": "guest"}))
+                .expect("Swift decodes member_id too");
+        assert_eq!(snake.member_id, member);
+        assert_eq!(
+            normalize_membership_role(snake.role.as_deref()),
+            Ok("guest")
+        );
+
+        assert!(
+            serde_json::from_value::<AddChannelMemberRequest>(
+                serde_json::json!({"memberId": member, "notify": false})
+            )
+            .is_err(),
+            "an unknown key is a 400, never a silently dropped intent"
+        );
+        assert!(
+            serde_json::from_value::<AddChannelMemberRequest>(serde_json::json!({"role": "admin"}))
+                .is_err(),
+            "there is no default member to add"
+        );
+    }
+
+    /// The removal answers with the closed row, so a client can render the
+    /// departure without a re-read — and `leftAtMs` is what distinguishes it
+    /// from an add.
+    #[test]
+    fn a_removed_membership_answers_with_its_departure_stamp() {
+        let membership = ChannelMembership {
+            id: Uuid::from_u128(21),
+            workspace_id: Uuid::from_u128(2),
+            channel_id: Uuid::from_u128(11),
+            member_id: Uuid::from_u128(7),
+            role: "member".into(),
+            joined_at_ms: 1_700_000_000_000,
+            left_at_ms: Some(1_700_000_100_000),
+        };
+        let json = serde_json::to_value(ChannelMembershipResponse {
+            membership: membership_dto(&membership),
+        })
+        .expect("serialize");
+        assert_eq!(
+            json["membership"]["memberId"],
+            Uuid::from_u128(7).to_string()
+        );
+        assert_eq!(
+            json["membership"]["leftAtMs"],
+            serde_json::json!(1_700_000_100_000_i64)
+        );
+        assert_eq!(json["membership"]["role"], "member");
     }
 
     #[test]

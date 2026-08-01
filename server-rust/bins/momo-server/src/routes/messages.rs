@@ -136,8 +136,9 @@ fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
 /// Reject the request keys this server does not serve. Visible failure beats a
 /// silently dropped attachment/run intent (ADR-0134 D1 reasoning).
 ///
-/// `rootId` left this list in B4.1 — threads are served. `routing` did **not**,
-/// and it is deliberately answered elsewhere; see [`thread_root_then_routing`].
+/// The list keeps shrinking, and each departure is a batch: `rootId` left in
+/// B4.1 (threads are served), `routing` left in B5.3a (the model/effort tier is
+/// served — see [`thread_root_rejection`] for what that did to the probe).
 fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
     let unsupported = if request.run_id.is_some() {
         Some("runId (agent-run binding)")
@@ -158,15 +159,21 @@ fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
     }
 }
 
-/// The order in which a send answers its two remaining refusals: **the thread
-/// root first, `routing` second.**
+/// A bad thread root → its refusal. **`routing` is no longer part of this
+/// decision, and that is the point.**
 ///
-/// This ordering is a contract with the web client, and getting it backwards
-/// would make the product lie. `probeSendRouting` (`lib/api.ts:2383`) asks
-/// whether this server supports per-request model/effort routing by sending a
-/// request that must fail: a `rootId` that cannot exist plus an impossible
-/// `routing.effort`. It reads the refusal
-/// (`features/routing/capability.ts:197-224`):
+/// B4.1 wrote a `thread_root_then_routing` ordering function here and explained
+/// that when a batch actually implemented `routing`, "this function is the one
+/// place that has to change, and the change will be deleting it". B5.3a is that
+/// batch, and this is that deletion.
+///
+/// ## What the ordering was protecting
+///
+/// `probeSendRouting` (`clients/web/src/lib/api.ts:2383`) asks whether this
+/// server supports per-request model/effort routing by sending a request that
+/// **must** fail: a `rootId` that cannot exist *plus* an impossible
+/// `routing.effort`. It reads which refusal comes back
+/// (`features/routing/capability.ts`, `verdictFromSendProbe`):
 ///
 /// | refusal | verdict | what the composer does |
 /// |---|---|---|
@@ -174,29 +181,27 @@ fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
 /// | 404 `thread root not found` | `absent` | no selector, silently |
 /// | anything else | `unknown` | selector locked + 「다시 확인」 |
 ///
-/// This server **does not implement `routing`** — it refuses the block. If the
-/// refusal came first, the probe would read `ready`, the selector would open,
-/// and every send made through it would then 400. Answering the impossible root
-/// first yields `absent`, which is the true statement: there is no routing axis
-/// here. When a batch actually implements `routing`, this function is the one
-/// place that has to change, and the change will be deleting it.
+/// While this server refused `routing` outright, answering the root first was
+/// the only honest ordering: a 400 naming `routing` would have opened a selector
+/// whose every send then 400-ed.
 ///
-/// Before B4.1 the same honest outcome arrived by accident (`rootId` itself was
-/// refused first, producing `unknown`). Serving threads is what turned it into a
-/// decision that has to be written down.
-fn thread_root_then_routing(
-    root_invalid: Option<ThreadRootInvalid>,
-    has_routing: bool,
-) -> Option<ApiError> {
-    if let Some(invalid) = root_invalid {
-        return Some(match invalid {
-            ThreadRootInvalid::NotFound => ApiError::not_found(invalid.to_string()),
-            ThreadRootInvalid::Deleted | ThreadRootInvalid::NotTopLevel => {
-                ApiError::bad_request(invalid.to_string())
-            }
-        });
+/// ## Why the answer is now `ready`, without anyone choosing it
+///
+/// Routing is validated where every shape error belongs — **before the
+/// transaction opens** (MOMO-362, and Swift `MessageRoutes.send:42-46` does the
+/// same). So the probe's impossible effort token is refused by
+/// [`momo_agent::validate_request_routing`] with a sentence naming
+/// `routing.effort`, and the root lookup below never runs. The probe reads
+/// `ready`, the selector opens, and a send made through it works — which is why
+/// there is no ordering left to encode here: the verdict is now a consequence of
+/// where validation runs, not of a hand-written sequence.
+fn thread_root_rejection(invalid: ThreadRootInvalid) -> ApiError {
+    match invalid {
+        ThreadRootInvalid::NotFound => ApiError::not_found(invalid.to_string()),
+        ThreadRootInvalid::Deleted | ThreadRootInvalid::NotTopLevel => {
+            ApiError::bad_request(invalid.to_string())
+        }
     }
-    has_routing.then(|| ApiError::bad_request("routing is not served by momo-server yet"))
 }
 
 /// Why a send failed *inside* the transaction.
@@ -286,7 +291,14 @@ pub async fn send(
 
     let client_msg_id = request.client_msg_id;
     let root_id = request.root_id;
-    let has_routing = request.routing.is_some();
+    // B5.3a / ADR-0134 D1 — shape only, and deliberately here: a malformed
+    // `routing` block becomes a 4xx before any connection is taken (MOMO-362),
+    // which is also what makes the web capability probe read `ready` (see
+    // `thread_root_rejection`). The gates that need tenant rows — the workspace
+    // allow-list and the model×effort table — run per mentioned agent inside the
+    // transaction, because only there is it known which agent is being routed.
+    let requested_routing = momo_agent::validate_request_routing(request.routing.as_ref())
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     // B5.2 — the mention routing's inputs, resolved before the closure takes
     // ownership of the request. `body` is cloned rather than borrowed because
     // `new_message` consumes the original and the routing needs the same text.
@@ -322,17 +334,13 @@ pub async fn send(
             if !is_channel_member(conn, channel_id, principal.member_id).await? {
                 return Ok(None);
             }
-            // Resolve the target before negotiating features — see
-            // `thread_root_then_routing`. Both refusals leave through the ERROR
-            // channel so the read-only transaction rolls back with them.
-            let root_invalid = match root_id {
-                Some(root_id) => validate_thread_root_in_tx(conn, channel_id, root_id)
-                    .await?
-                    .err(),
-                None => None,
-            };
-            if let Some(rejection) = thread_root_then_routing(root_invalid, has_routing) {
-                return Err(SendFailure::Rejected(rejection));
+            // The reply target has to exist before the message can be written
+            // against it. The refusal leaves through the ERROR channel so the
+            // read-only transaction rolls back with it.
+            if let Some(root_id) = root_id {
+                if let Err(invalid) = validate_thread_root_in_tx(conn, channel_id, root_id).await? {
+                    return Err(SendFailure::Rejected(thread_root_rejection(invalid)));
+                }
             }
             let signature = match provenance_signature {
                 None => None,
@@ -372,7 +380,11 @@ pub async fn send(
             // broadcast so `props.mention_member_ids` — the human-facing half of
             // the same decision — is already on the row it describes.
             if !sent.deduped && message_type == MessageType::Text && !mention_body.is_empty() {
-                route_agent_mentions_in_tx(
+                // A refused `routing` block rolls the send back with it (Swift
+                // :1976-1981): the caller chose a model this workspace does not
+                // permit, and delivering the message under a different one would
+                // substitute the single decision they made explicitly.
+                if let Err(rejection) = route_agent_mentions_in_tx(
                     conn,
                     MentionSend {
                         workspace_id,
@@ -386,9 +398,13 @@ pub async fn send(
                         via_token_id,
                         gateway_enabled,
                         context_max_messages,
+                        routing: requested_routing.as_ref(),
                     },
                 )
-                .await?;
+                .await?
+                {
+                    return Err(SendFailure::Rejected(rejection));
+                }
             }
             Ok(Some(sent))
         })
@@ -667,60 +683,68 @@ mod tests {
         empty_attachments.attachment_ids = Some(vec![]);
         assert!(reject_unsupported(&empty_attachments).is_ok());
 
-        // routing is still unsupported, but it is answered later — see
-        // `thread_root_then_routing`.
+        // B5.3a: routing is served, so it is not on this list either. Its
+        // validation is the shape check below, not a refusal.
         let mut with_routing = base();
         with_routing.routing = Some(serde_json::json!({"model": "x"}));
-        assert!(
-            reject_unsupported(&with_routing).is_ok(),
-            "routing's refusal must not pre-empt the root lookup"
-        );
+        assert!(reject_unsupported(&with_routing).is_ok());
     }
 
-    /// **The probe contract.** `probeSendRouting` sends an impossible `rootId`
-    /// AND an impossible `routing.effort` at once, and reads which refusal comes
-    /// back to decide whether to open the composer's model/effort selector.
+    /// **The probe contract, now answered the other way — truthfully.**
     ///
-    /// This server does not implement `routing`. If it answered the routing
-    /// refusal first, the probe would read `ready`, the selector would open, and
-    /// every send through it would 400 — the exact lie
-    /// `docs/planning/2026-08-01-b4-contract-diff.md` §4.1 forbids. Answering
-    /// the root first yields `absent`, which is true.
+    /// `probeSendRouting` sends an impossible `rootId` AND an impossible
+    /// `routing.effort` at once and reads which refusal comes back. While
+    /// `routing` was unserved, B4.1 had to answer the root first so the probe
+    /// read `absent`; a 400 naming `routing` would have opened a selector whose
+    /// every send then failed.
+    ///
+    /// B5.3a serves routing, so the honest verdict is `ready` — and it arrives
+    /// without an ordering rule, because the shape check runs before the
+    /// transaction the root lookup lives in. This test pins the two halves that
+    /// make that true: the routing refusal is a 400 that **names** routing, and
+    /// the root refusal is a 404 that does **not**.
     #[test]
-    fn the_routing_probe_is_answered_by_the_root_not_by_routing() {
-        let rejection = thread_root_then_routing(Some(ThreadRootInvalid::NotFound), true)
-            .expect("the probe must be refused");
+    fn the_probe_now_reads_ready_because_routing_is_validated_first() {
+        let probe = momo_agent::validate_request_routing(Some(&serde_json::json!({
+            "effort": "__momo-capability-probe__"
+        })))
+        .expect_err("the probe token is not a level this server accepts");
+        let rejection = ApiError::bad_request(probe.to_string());
         assert_eq!(
             rejection.status,
-            StatusCode::NOT_FOUND,
-            "a 400 here would make the composer open a selector this server cannot serve"
-        );
-        assert_eq!(
-            rejection.message, "thread root not found",
-            "verdictFromSendProbe reads 404 as `absent`; the sentence is Swift's"
+            StatusCode::BAD_REQUEST,
+            "verdictFromSendProbe reads 400 + /routing/i as `ready`"
         );
         assert!(
-            !rejection.message.to_lowercase().contains("routing"),
-            "the 404 must not name routing, or /routing/i would match it: {}",
+            rejection.message.to_lowercase().contains("routing"),
+            "a 400 that stopped naming routing would read as `unknown` and lock \
+             the selector: {}",
             rejection.message
         );
+
+        // …and the root's own refusal still must not match /routing/i, or a
+        // genuinely absent thread root would be read as a routing verdict.
+        let root = thread_root_rejection(ThreadRootInvalid::NotFound);
+        assert_eq!(root.status, StatusCode::NOT_FOUND);
+        assert_eq!(root.message, "thread root not found");
+        assert!(!root.message.to_lowercase().contains("routing"));
     }
 
-    /// With a real root, the routing refusal is the honest answer: this server
-    /// read the block and will not serve it.
+    /// A well-shaped routing block is not refused at all — the composer's normal
+    /// send has to survive the same path the probe exercises.
     #[test]
-    fn routing_is_still_refused_by_name_once_the_root_resolves() {
-        assert!(
-            thread_root_then_routing(None, false).is_none(),
-            "an ordinary threaded send is not refused at all"
-        );
-        let rejection =
-            thread_root_then_routing(None, true).expect("routing is not served by this server");
-        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
-        assert!(
-            rejection.message.contains("routing"),
-            "{}",
-            rejection.message
+    fn a_well_shaped_routing_block_passes_the_pre_transaction_gate() {
+        let requested = momo_agent::validate_request_routing(Some(&serde_json::json!({
+            "model": "hermes-fast", "effort": "low"
+        })))
+        .expect("a valid block")
+        .expect("present");
+        assert_eq!(requested.model.as_deref(), Some("hermes-fast"));
+        assert_eq!(requested.effort.as_deref(), Some("low"));
+        assert_eq!(
+            momo_agent::validate_request_routing(None).expect("absent"),
+            None,
+            "an ordinary send carries no routing and is unaffected"
         );
     }
 
@@ -733,7 +757,7 @@ mod tests {
                 "thread root must be a top-level message",
             ),
         ] {
-            let rejection = thread_root_then_routing(Some(invalid), false).expect("refused");
+            let rejection = thread_root_rejection(invalid);
             assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
             assert_eq!(rejection.message, expected);
         }
