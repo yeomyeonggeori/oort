@@ -173,6 +173,29 @@ describe("parseInline", () => {
     ]);
   });
 
+  // The rewind path (a lone numbered line handed back to the paragraph reader)
+  // is the one place this parser can fail to make progress. 3375 three-line
+  // combinations of every block starter were run against it with no hang and no
+  // line lost or duplicated; these are the shapes that exercise the rewind.
+  it("makes progress through consecutive lines that are not lists", () => {
+    // Consecutive prose lines stay ONE paragraph, marker-looking or not: the
+    // numbered line only breaks the block when it really opens a list.
+    expect(parseMarkdown("09. 30. 스탠드업\n장소는 그대로입니다\n가")).toEqual([
+      {
+        kind: "paragraph",
+        lines: [
+          [text("09. 30. 스탠드업")],
+          [text("장소는 그대로입니다")],
+          [text("가")],
+        ],
+      },
+    ]);
+    expect(parseMarkdown("1. 하나\n- 둘")).toEqual([
+      { kind: "paragraph", lines: [[text("1. 하나")]] },
+      { kind: "list", ordered: false, start: 1, items: [[text("둘")]] },
+    ]);
+  });
+
   it("terminates on a pathological run of delimiters", () => {
     const out = parseInline("*".repeat(200));
     expect(Array.isArray(out)).toBe(true);

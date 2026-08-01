@@ -256,14 +256,18 @@ const BULLET = /^\s{0,3}[-*+]\s+(.*)$/;
 // different place. The author's start now rides through to the `<ol>`.
 //
 // What neither bound catches is `12. 25. 크리스마스 휴무`, so there is a second
-// rule below: an ordered list needs at least TWO items. A lone numbered line is
-// far more often a date or a version than a list of one, and treating it as
-// prose costs only the marker's indentation while rendering exactly what the
-// author typed.
+// rule (`opensOrderedList`): a numbered line only starts a list when another
+// numbered line follows it. A lone numbered line is far more often a date or a
+// version than a list of one, and treating it as prose costs only the marker's
+// indentation while rendering exactly what the author typed. Deciding this by
+// LOOKAHEAD rather than by consuming and rewinding also means the block loop
+// always advances, so there is no shape of input it can spin on.
 const ORDERED = /^\s{0,3}([1-9]\d{0,2})[.)]\s+(.*)$/;
 
-/** An ordered list of one is more often a date than a list. */
-const MIN_ORDERED_ITEMS = 2;
+/** A numbered line only opens a list when another numbered line follows it. */
+function opensOrderedList(lines: string[], at: number): boolean {
+  return ORDERED.test(lines[at] ?? "") && ORDERED.test(lines[at + 1] ?? "");
+}
 
 /**
  * Block structure. Consecutive non-blank lines are one paragraph and keep their
@@ -313,10 +317,9 @@ export function parseMarkdown(source: string): Block[] {
 
     const bulletMatch = BULLET.exec(line);
     const orderedMatch = bulletMatch ? null : ORDERED.exec(line);
-    if (bulletMatch || orderedMatch) {
-      const ordered = orderedMatch !== null;
-      const start = orderedMatch ? Number(orderedMatch[1]) : 1;
-      const first = i;
+    const ordered = orderedMatch !== null && opensOrderedList(lines, i);
+    if (bulletMatch || ordered) {
+      const start = ordered && orderedMatch ? Number(orderedMatch[1]) : 1;
       const items: Inline[][] = [];
       while (i < lines.length) {
         const current = lines[i];
@@ -325,29 +328,27 @@ export function parseMarkdown(source: string): Block[] {
         items.push(parseInline(ordered ? match[2] : match[1]));
         i += 1;
       }
-      if (ordered && items.length < MIN_ORDERED_ITEMS) {
-        // Not a list after all. Rewind and let the paragraph reader take the
-        // line verbatim, marker and all.
-        i = first;
-      } else {
-        blocks.push({ kind: "list", ordered, start, items });
-        continue;
-      }
+      blocks.push({ kind: "list", ordered, start, items });
+      continue;
     }
 
     const paragraph: Inline[][] = [];
     while (i < lines.length) {
       const current = lines[i];
-      // The FIRST line is always taken, even when it looks like a block starter.
-      // It reaches here only because the reader above declined it (a lone
-      // numbered line that is really a date), and breaking on it instead would
-      // leave `i` where it was and spin this loop forever.
+      // The FIRST line is always taken. It reaches here only because the reader
+      // above declined it (a lone numbered line that is really a date), and
+      // breaking on it would leave `i` where it was.
+      //
+      // A later numbered line breaks the paragraph only when it actually opens
+      // a list. Otherwise `09. 30. 스탠드업` followed by ordinary prose would
+      // split into two blocks with a gap between them, which is not what an
+      // author who typed two consecutive lines asked for.
       if (
         paragraph.length > 0 &&
         (current.trim() === "" ||
           FENCE.test(current) ||
           BULLET.test(current) ||
-          ORDERED.test(current))
+          opensOrderedList(lines, i))
       ) {
         break;
       }
