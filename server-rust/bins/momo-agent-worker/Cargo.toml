@@ -52,3 +52,10 @@ uuid.workspace = true
 # dev-dep only — the shipped crate reaches the driver through `momo_db::sqlx`
 # and owns no query of its own.
 sqlx.workspace = true
+
+# The B5.4 OAuth suite (tests/oauth_provider_conformance_pg.rs) stands up a real
+# loopback HTTP server as both the token endpoint and the chat endpoint, so the
+# shipped `HttpTokenRefresher` / `OpenAiCompatProvider` wires are exercised
+# rather than stubbed. `net` + `io-util` are the only additions and no new crate
+# enters the dependency graph, so the Dockerfile crate list is unchanged.
+tokio = { workspace = true, features = ["net", "io-util"] }

@@ -1337,20 +1337,94 @@ pub struct ProviderLinkResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by: Option<String>,
     pub diagnostics: Vec<String>,
+    /// `bearer` | `oauth-openai` — what the vault holds (ADR-0147 결정 1).
+    /// Absent when the env fallback is in force, because env has no vault.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential_kind: Option<String>,
+    /// ADR-0147 제약: the non-secret metadata that says whose subscription this
+    /// link spends, and that the path is internal-only. Absent for a bearer link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential_meta: Option<ProviderLinkCredentialMeta>,
+}
+
+/// The "개인 계정 귀속·내부용" label ADR-0147 requires on every surface that shows
+/// a subscription OAuth link. Carried as data — none of it is secret, and none of
+/// it is a token.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLinkCredentialMeta {
+    /// `personal-subscription`.
+    pub attribution: String,
+    /// `internal-only`.
+    pub usage_scope: String,
+    /// The operator's own words for whose account this is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_label: Option<String>,
+    /// The sentence to render next to the link, so every surface says the same
+    /// thing without re-typing it.
+    pub notice: &'static str,
+    /// Whether a live access token is currently held. `false` is normal for a
+    /// freshly registered link — the worker mints one on the next turn.
+    pub access_token_present: bool,
+    /// Deadline of the held access token, when the provider reported one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token_expires_at_ms: Option<i64>,
 }
 
 /// Closed-world `PUT /v1/provider/link` body (Swift `PutProviderLinkRequest`
 /// :494-520). `deny_unknown_fields` is the ADR-0004 Rules #1-#2 enforcement
-/// point: no `codex_oauth_*` / `openai_*` / raw-provider-key field can ever be
-/// introduced through this API by a client that simply sends one.
+/// point: no raw-provider-key field can be introduced through this API by a
+/// client that simply sends one.
+///
+/// **ADR-0147 (Accepted) adds exactly one field to that closed world**:
+/// [`oauth`](PutProviderLinkRequest::oauth). It is not a loophole in Rule #1 —
+/// that rule forbids OAuth *columns*, and this body still lands in the same
+/// AES-GCM sealed `bytea` the bearer already used, with no schema change. What it
+/// buys is that an operator registers a grant through a typed field instead of
+/// pasting a JSON document into a text box labelled "bearer".
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PutProviderLinkRequest {
     pub base_url: String,
-    /// Write-only. Never read back by any surface.
-    pub bearer: String,
+    /// Write-only. Never read back by any surface. Required unless `oauth` is
+    /// supplied — a link carries exactly one credential.
+    #[serde(default)]
+    pub bearer: Option<String>,
     #[serde(default)]
     pub mode: Option<String>,
+    /// ADR-0147: a ChatGPT subscription OAuth grant, produced by the operator's
+    /// own local login (결정 3 — momo relays no browser flow).
+    #[serde(default)]
+    pub oauth: Option<PutProviderOAuthRequest>,
+}
+
+/// The OAuth half of a `PUT /v1/provider/link`.
+///
+/// Field names mirror the Codex CLI's `auth.json` `tokens` object so an operator
+/// copies across without translating: `refreshToken`, `accessToken`,
+/// `accountId`. `id_token` is deliberately **not** accepted — it is a login-flow
+/// identity assertion, not a call credential, and storing it would widen the
+/// secret surface for nothing.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutProviderOAuthRequest {
+    /// The grant. Write-only, and the only required field.
+    pub refresh_token: String,
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub expires_at_ms: Option<i64>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    /// Whose subscription this is, for the ADR-0147 attribution label.
+    #[serde(default)]
+    pub account_label: Option<String>,
+    /// The OAuth client the operator's local login used.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Token endpoint override; OpenAI's is the default.
+    #[serde(default)]
+    pub token_endpoint: Option<String>,
 }
 
 /// One hop of the cascade as projected to the operator (Swift

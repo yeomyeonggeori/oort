@@ -57,13 +57,15 @@ use momo_settings::{
     delete_all_chain_entries, delete_link, masked_tail, read_chain, read_link,
     redacted_endpoint_label, replace_chain, requires_strict_external_provider, resolve_link,
     seal_bearer, upsert_link, validated_base_url, CascadeHop, CascadeSource, ChainEntryInput,
-    DecryptedChainEntry, DecryptedProviderLink, ProviderMode, ProviderSource, ResolvedProvider,
-    StoredChainEntry, StoredProviderLink, MAX_CHAIN_ENTRIES,
+    DecryptedChainEntry, DecryptedProviderLink, LinkCredential, OpenAiOAuthCredential,
+    ProviderMode, ProviderSource, ResolvedProvider, StoredChainEntry, StoredProviderLink,
+    ATTRIBUTION_NOTICE_KO, MAX_CHAIN_ENTRIES,
 };
 
 use crate::dto::{
-    ProviderChainEntryDto, ProviderChainProbeDto, ProviderChainResponse, ProviderLinkResponse,
-    ProviderLinkTestResponse, PutProviderChainRequest, PutProviderLinkRequest,
+    ProviderChainEntryDto, ProviderChainProbeDto, ProviderChainResponse,
+    ProviderLinkCredentialMeta, ProviderLinkResponse, ProviderLinkTestResponse,
+    PutProviderChainRequest, PutProviderLinkRequest, PutProviderOAuthRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{audit_via_token_id, require_instance_operator};
@@ -123,6 +125,27 @@ fn link_response(
     let config = &resolved.config;
     let strict = requires_strict_external_provider(&state.settings.environment);
     let from_database = resolved.source == ProviderSource::Database;
+    let credential = from_database
+        .then(|| decrypted.map(|link| &link.credential))
+        .flatten();
+    let oauth = credential.and_then(LinkCredential::as_openai_oauth);
+
+    // An OAuth link's *credential* is what makes it configured, not the access
+    // token it happens to be holding: a freshly registered grant has no token
+    // until the worker's next turn, and reporting that as "no bearer" would tell
+    // the operator their save had not worked.
+    let credential_configured = match credential {
+        Some(credential) => credential.is_present(),
+        None => config.key_configured(),
+    };
+    // Same reasoning for the diagnostics: `HERMES_API_KEY is missing` is a true
+    // statement about an env trio and a false one about a grant.
+    let mut diagnostics =
+        config.validation_errors(strict || config.mode == ProviderMode::ExternalHermes, None);
+    if oauth.is_some() {
+        diagnostics.retain(|message| !message.starts_with("HERMES_API_KEY"));
+    }
+
     ProviderLinkResponse {
         schema: LINK_SCHEMA,
         configured: from_database,
@@ -130,14 +153,18 @@ fn link_response(
         mode: config.mode.as_str().to_string(),
         base_url: config.base_url.clone(),
         endpoint_label: config.endpoint_label(),
-        bearer_configured: config.key_configured(),
+        bearer_configured: credential_configured,
         bearer_last4: if from_database {
             decrypted.and_then(|link| masked_tail(&link.bearer))
         } else {
             None
         },
-        availability: config.availability().to_string(),
-        key_configured: config.key_configured(),
+        availability: if oauth.is_some() && diagnostics.is_empty() {
+            "available".to_string()
+        } else {
+            config.availability().to_string()
+        },
+        key_configured: credential_configured,
         updated_at_ms: from_database
             .then(|| stored.map(|row| row.updated_at_ms))
             .flatten(),
@@ -146,9 +173,65 @@ fn link_response(
                 stored.and_then(|row| row.updated_by_member_id.map(|member| member.to_string()))
             })
             .flatten(),
-        diagnostics: config
-            .validation_errors(strict || config.mode == ProviderMode::ExternalHermes, None),
+        diagnostics,
+        credential_kind: credential.map(|credential| credential.kind_label().to_string()),
+        credential_meta: oauth.map(|oauth| ProviderLinkCredentialMeta {
+            attribution: oauth.attribution.clone(),
+            usage_scope: oauth.usage_scope.clone(),
+            account_label: oauth.account_label.clone(),
+            notice: ATTRIBUTION_NOTICE_KO,
+            access_token_present: oauth.presentable_access_token().is_some(),
+            access_token_expires_at_ms: oauth.expires_at_ms,
+        }),
     }
+}
+
+/// The credential a `PUT` body describes: exactly one of a bearer or a grant.
+///
+/// Requiring exactly one is not pedantry — a body carrying both leaves the
+/// operator's intent genuinely ambiguous, and picking a winner silently would
+/// store the credential they did not mean to store.
+fn requested_credential(request: &PutProviderLinkRequest) -> Result<LinkCredential, ApiError> {
+    let bearer = request
+        .bearer
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match (bearer, request.oauth.as_ref()) {
+        (Some(_), Some(_)) => Err(ApiError::bad_request(
+            "send either bearer or oauth, not both — a link carries one credential",
+        )),
+        (None, None) => Err(ApiError::bad_request(
+            "bearer must not be empty (or send an oauth grant instead)",
+        )),
+        (Some(bearer), None) => Ok(LinkCredential::Bearer(bearer.to_string())),
+        (None, Some(oauth)) => Ok(oauth_credential(oauth)?),
+    }
+}
+
+/// Build the sealed OAuth credential from a request body.
+fn oauth_credential(request: &PutProviderOAuthRequest) -> Result<LinkCredential, ApiError> {
+    let refresh_token = request.refresh_token.trim();
+    if refresh_token.is_empty() {
+        return Err(ApiError::bad_request(
+            "oauth.refreshToken must not be empty",
+        ));
+    }
+    let optional = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let mut credential = OpenAiOAuthCredential::from_refresh_token(refresh_token);
+    credential.access_token = optional(&request.access_token);
+    credential.expires_at_ms = request.expires_at_ms;
+    credential.account_id = optional(&request.account_id);
+    credential.account_label = optional(&request.account_label);
+    credential.client_id = optional(&request.client_id);
+    credential.token_endpoint = optional(&request.token_endpoint);
+    Ok(LinkCredential::OpenAiOAuth(Box::new(credential)))
 }
 
 /// Everything the chain surfaces need, resolved once so a projection is
@@ -306,11 +389,10 @@ pub async fn put(
         state.settings.env_provider.allow_local_loopback,
     )
     .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    if request.bearer.trim().is_empty() {
-        return Err(ApiError::bad_request("bearer must not be empty"));
-    }
+    let credential = requested_credential(&request)?;
     let mode = resolved_mode(request.mode.as_deref())?;
-    let ciphertext = seal_bearer(&request.bearer, &key)
+    let credential_kind = credential.kind_label();
+    let ciphertext = seal_bearer(&credential.to_sealed_plaintext(), &key)
         .map_err(|error| ApiError::internal("provider_link.seal", error))?;
 
     // provider_link is instance-global (no `:ws` segment); the audit row is
@@ -337,6 +419,10 @@ pub async fn put(
                             // userinfo, and never the bearer (ADR-0004 evidence rule).
                             "endpoint_label": endpoint_label,
                             "bearer_configured": true,
+                            // Which KIND of credential was stored. Non-secret, and
+                            // the fact an auditor needs to see that an instance
+                            // moved onto the ADR-0147 subscription path.
+                            "credential_kind": credential_kind,
                         }),
                     ),
             )

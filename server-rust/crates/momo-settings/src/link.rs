@@ -18,6 +18,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::crypto::{open_bearer, CryptoError};
+use crate::oauth::LinkCredential;
 use crate::provider::{ProviderConfig, ProviderMode};
 
 /// The stored singleton, bearer still sealed.
@@ -35,7 +36,15 @@ pub struct StoredProviderLink {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecryptedProviderLink {
     pub base_url: String,
+    /// The `Authorization: Bearer` value to present **right now**. For a legacy
+    /// link that is the stored secret itself; for an ADR-0147 OAuth link it is
+    /// the current access token, and it is empty until the worker mints one.
+    /// Read [`DecryptedProviderLink::credential`] to know which.
     pub bearer: String,
+    /// What the vault actually holds (ADR-0147 결정 1). A legacy row parses as
+    /// [`LinkCredential::Bearer`], so this field is additive for every existing
+    /// deployment.
+    pub credential: LinkCredential,
     pub mode: ProviderMode,
     pub updated_by_member_id: Option<Uuid>,
     pub updated_at_ms: i64,
@@ -45,8 +54,13 @@ impl DecryptedProviderLink {
     /// Swift `isUsable` (`ProviderLinkResolver.swift:12-16`): a half-written row
     /// falls back to env rather than losing the provider entirely — fail safe,
     /// not fail blank.
+    ///
+    /// ADR-0147 widens "has a secret" to "has a secret **or** a grant it can
+    /// exchange for one". A freshly registered OAuth link has no access token
+    /// until its first turn; calling that half-written would silently send the
+    /// instance back to the env bearer the operator had just replaced.
     pub fn is_usable(&self) -> bool {
-        !self.base_url.trim().is_empty() && !self.bearer.trim().is_empty()
+        !self.base_url.trim().is_empty() && self.credential.is_present()
     }
 }
 
@@ -110,9 +124,11 @@ pub fn decrypt_link(
     stored: &StoredProviderLink,
     master_key: &str,
 ) -> Result<DecryptedProviderLink, CryptoError> {
+    let credential = LinkCredential::parse(&open_bearer(&stored.bearer_ciphertext, master_key)?);
     Ok(DecryptedProviderLink {
         base_url: stored.base_url.clone(),
-        bearer: open_bearer(&stored.bearer_ciphertext, master_key)?,
+        bearer: credential.presentable_bearer().to_string(),
+        credential,
         mode: ProviderMode::from_label(&stored.mode).unwrap_or(ProviderMode::LocalMock),
         updated_by_member_id: stored.updated_by_member_id,
         updated_at_ms: stored.updated_at_ms,
@@ -197,6 +213,59 @@ pub async fn upsert_link(
     })
 }
 
+/// Replace **only** the sealed credential of the singleton — the worker's
+/// refresh write-back (ADR-0147 결정 2, "갱신된 토큰은 금고에 재봉인").
+///
+/// Three properties make this a different statement from [`upsert_link`] rather
+/// than a call into it:
+///
+/// * **It writes no operator fields.** `base_url`, `mode` and `updated_by` are
+///   the operator's; a background refresh must not restate them, and it has no
+///   member identity to put in `updated_by` in the first place.
+/// * **It is guarded on `expected_updated_at_ms`.** A worker seals the
+///   credential it read some milliseconds ago. If the operator replaced the link
+///   in between, that read is stale, and writing it would resurrect a credential
+///   they just revoked. The guard makes that a no-op (`Ok(None)`) instead, and
+///   the worker simply re-reads on its next job.
+/// * **It never inserts.** A link deleted mid-turn stays deleted.
+///
+/// `updated_at` advances monotonically, like the upsert, so the readers that
+/// poll on it (the GUI, and the worker's own decrypt cache) see the rotation.
+pub async fn reseal_link_credential(
+    conn: &mut PgConnection,
+    bearer_ciphertext: &[u8],
+    expected_updated_at_ms: i64,
+) -> Result<Option<StoredProviderLink>, DbError> {
+    let row: Option<ProviderLinkRow> = sqlx::query_as(
+        "UPDATE provider_link \
+            SET bearer_ciphertext = $1, \
+                updated_at = greatest( \
+                  clock_timestamp(), \
+                  provider_link.updated_at + interval '1 millisecond' \
+                ) \
+          WHERE id = true \
+            AND floor(extract(epoch from updated_at) * 1000)::bigint = $2 \
+      RETURNING base_url, \
+                bearer_ciphertext, \
+                mode, \
+                updated_by, \
+                floor(extract(epoch from updated_at) * 1000)::bigint",
+    )
+    .bind(bearer_ciphertext)
+    .bind(expected_updated_at_ms)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(
+        |(base_url, bearer_ciphertext, mode, updated_by, updated_at_ms)| StoredProviderLink {
+            base_url,
+            bearer_ciphertext,
+            mode,
+            updated_by_member_id: updated_by,
+            updated_at_ms,
+        },
+    ))
+}
+
 /// Delete the singleton (revert to the env fallback). `true` when a row existed,
 /// which is what decides whether an audit row is written — a DELETE that removed
 /// nothing changed nothing.
@@ -222,9 +291,11 @@ mod tests {
     }
 
     fn link(base_url: &str, bearer: &str) -> DecryptedProviderLink {
+        let credential = LinkCredential::Bearer(bearer.into());
         DecryptedProviderLink {
             base_url: base_url.into(),
-            bearer: bearer.into(),
+            bearer: credential.presentable_bearer().to_string(),
+            credential,
             mode: ProviderMode::ExternalHermes,
             updated_by_member_id: Some(Uuid::from_u128(7)),
             updated_at_ms: 1_700_000_000_000,
@@ -261,6 +332,39 @@ mod tests {
         assert_eq!(
             resolve_link(&env_config(), None).source,
             ProviderSource::Environment
+        );
+    }
+
+    /// ADR-0147 결정 1 end to end at the storage layer: an OAuth grant seals into
+    /// the *existing* box, opens as an OAuth credential, and — crucially — is
+    /// usable before it has ever produced an access token.
+    #[test]
+    fn an_oauth_grant_seals_into_the_existing_vault_and_resolves_as_a_db_link() {
+        let credential = LinkCredential::OpenAiOAuth(Box::new(
+            crate::oauth::OpenAiOAuthCredential::from_refresh_token("rt-operator"),
+        ));
+        let sealed =
+            crate::crypto::seal_bearer(&credential.to_sealed_plaintext(), "master").expect("seal");
+        let stored = StoredProviderLink {
+            base_url: "https://chatgpt.com/backend-api/codex".into(),
+            bearer_ciphertext: sealed,
+            // The row stays on one of migration 039's three CHECK labels: the
+            // kind lives in the payload precisely so no DDL has to change.
+            mode: "external-hermes".into(),
+            updated_by_member_id: None,
+            updated_at_ms: 42,
+        };
+
+        let decrypted = decrypt_link(&stored, "master").expect("open");
+        assert_eq!(decrypted.credential, credential);
+        assert_eq!(decrypted.bearer, "", "no access token has been minted yet");
+        assert!(
+            decrypted.is_usable(),
+            "a grant-only link must not fall back to env — the worker mints the token"
+        );
+        assert_eq!(
+            resolve_link(&env_config(), Some(&decrypted)).source,
+            ProviderSource::Database
         );
     }
 
