@@ -37,7 +37,13 @@ export type Inline =
 export type Block =
   | { kind: "paragraph"; lines: Inline[][] }
   | { kind: "code"; text: string; lang: string | null }
-  | { kind: "list"; ordered: boolean; items: Inline[][] };
+  | {
+      kind: "list";
+      ordered: boolean;
+      /** The number the author started at. 1 for a bullet list. */
+      start: number;
+      items: Inline[][];
+    };
 
 /**
  * Control characters and whitespace anywhere in a URL, which is how a scheme
@@ -107,7 +113,14 @@ function closingIndex(text: string, start: number, delim: string): number {
   }
 }
 
-const BARE_URL = /^https?:\/\/[^\s<>()[\]{}"']+/i;
+// ASCII URL characters only (RFC 3986 unreserved + sub-delims + a few), NOT
+// "everything up to whitespace". Korean glues its particles straight onto a
+// URL with no space (`.../run/9f2에 로그가`), so a whitespace-delimited scan
+// swallowed 에 into the href and produced a live link to a 404 — and in the
+// Tauri shell handed that address to the OS. Hangul and CJK are outside this
+// set, so the link now ends where the URL ends. `()[]{}<>"'` stay out because
+// they are markdown's own punctuation around a link.
+const BARE_URL = /^https?:\/\/[A-Za-z0-9\-._~:/?#@!$&*+,;=%]+/i;
 
 /**
  * Inline nodes for one line. `depth` bounds nesting so a pathological body
@@ -211,7 +224,19 @@ export function parseInline(source: string, depth = 0): Inline[] {
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+-]*)\s*$/;
 const BULLET = /^\s{0,3}[-*+]\s+(.*)$/;
-const ORDERED = /^\s{0,3}\d{1,9}[.)]\s+(.*)$/;
+// At most THREE digits, and the number is captured.
+//
+// `\d{1,9}` matched `2026. 07. 30. 배포 예정`, which is the ordinary Korean way
+// to write a date. The line became a one item ordered list, the year was eaten
+// as the marker, and the reader saw "1." in front of a date they never
+// numbered. Nothing on screen said a transform had happened. A list marker in a
+// chat message is a small number; a four digit run at the start of a line is
+// very likely a year.
+//
+// The captured number matters just as much: an agent quoting steps 3 and 4 of a
+// runbook used to be renumbered to 1 and 2, which is the same class of harm in
+// a different place. The author's start now rides through to the `<ol>`.
+const ORDERED = /^\s{0,3}(\d{1,3})[.)]\s+(.*)$/;
 
 /**
  * Block structure. Consecutive non-blank lines are one paragraph and keep their
@@ -263,15 +288,16 @@ export function parseMarkdown(source: string): Block[] {
     const orderedMatch = bulletMatch ? null : ORDERED.exec(line);
     if (bulletMatch || orderedMatch) {
       const ordered = orderedMatch !== null;
+      const start = orderedMatch ? Number(orderedMatch[1]) : 1;
       const items: Inline[][] = [];
       while (i < lines.length) {
         const current = lines[i];
         const match = ordered ? ORDERED.exec(current) : BULLET.exec(current);
         if (!match) break;
-        items.push(parseInline(match[1]));
+        items.push(parseInline(ordered ? match[2] : match[1]));
         i += 1;
       }
-      blocks.push({ kind: "list", ordered, items });
+      blocks.push({ kind: "list", ordered, start, items });
       continue;
     }
 
@@ -301,5 +327,5 @@ export function parseMarkdown(source: string): Block[] {
  * sentence must not start paying for a tree walk, and must not change shape.
  */
 export function isPlainText(source: string): boolean {
-  return !/[`*_[\]]|^\s{0,3}(\d{1,9}[.)]|[-*+])\s|https?:\/\//m.test(source);
+  return !/[`*_[\]]|^\s{0,3}(\d{1,3}[.)]|[-*+])\s|https?:\/\//m.test(source);
 }

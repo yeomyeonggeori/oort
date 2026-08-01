@@ -385,7 +385,7 @@ describe("provider failure notice (goal B8 H2)", () => {
     expect(card?.kind).toBe("turn");
     if (card?.kind !== "turn") return;
     expect(card.status).toBe("error");
-    expect(card.failure?.label).toContain("제공자");
+    expect(card.failure?.label).toContain("AI 제공자");
     // The body is the server's own Korean sentence and stays above the card.
     expect(cardKeepsBody(card)).toBe(true);
   });
@@ -404,6 +404,8 @@ describe("provider failure notice (goal B8 H2)", () => {
     const generic = failureGuidance("provider_failed");
     expect(auth?.label).not.toBe(generic?.label);
     expect(auth?.detail).toContain("AI 연결");
+    // The fold must not repeat the sentence the body already said 40px above.
+    expect(generic?.detail).not.toContain("다시 멘션");
   });
 
   it("still says something for a code this build has never seen", () => {

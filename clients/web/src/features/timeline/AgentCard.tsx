@@ -307,7 +307,10 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
       // turn in the channel.
       note={
         card.failure && (
-          <details data-testid="turn-failure-detail">
+          // Ruled like the disclosure below it (`PayloadDisclosure`): two
+          // sibling folds where only one carries a separator read as one
+          // control and one stray line.
+          <details className="border-t border-line" data-testid="turn-failure-detail">
             <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
               자세히
             </summary>

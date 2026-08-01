@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { PlugZap } from "lucide-react";
 import { useSession } from "@/app/session";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import {
   connectionAlert,
+  HEALED_MS,
+  RETRY_WINDOW_MS,
   SUSTAINED_DOWN_MS,
 } from "@/features/common/connectionAlert";
 
@@ -19,17 +22,39 @@ import {
 // every two-second blip would push the content down and pull it back up.
 // =============================================================================
 
-/** True once the rail has been not-connected for the whole dwell. */
+/**
+ * True once the rail has been down for the whole dwell.
+ *
+ * The clock does NOT restart on every reconnect, which a naive
+ * `useEffect([down])` does: a rail that comes up for two seconds and drops for
+ * twelve, over and over, would reset the timer on each cycle and never reach
+ * the threshold, while losing messages the entire time. That flapping session
+ * is the same session the banner exists for.
+ *
+ * So a reconnect only counts as recovery once it HOLDS for `HEALED_MS`. Until
+ * then the down-clock keeps its start, and the next drop reaches the threshold
+ * immediately. Nothing is shown during that grace period regardless, because
+ * `connectionAlert` answers null while the status is `connected`.
+ */
 function useSustainedDown(down: boolean): boolean {
   const [sustained, setSustained] = useState(false);
+  const downSinceRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!down) {
-      setSustained(false);
-      return;
+    if (down) {
+      if (downSinceRef.current === null) downSinceRef.current = Date.now();
+      const elapsed = Date.now() - downSinceRef.current;
+      const remaining = Math.max(0, SUSTAINED_DOWN_MS - elapsed);
+      const timer = setTimeout(() => setSustained(true), remaining);
+      return () => clearTimeout(timer);
     }
-    const timer = setTimeout(() => setSustained(true), SUSTAINED_DOWN_MS);
+    const timer = setTimeout(() => {
+      downSinceRef.current = null;
+      setSustained(false);
+    }, HEALED_MS);
     return () => clearTimeout(timer);
   }, [down]);
+
   return sustained;
 }
 
@@ -40,29 +65,44 @@ export function ConnectionBanner() {
   // it is changes the sentence, not whether the clock runs.
   const sustained = useSustainedDown(connStatus !== "connected");
   const alert = connectionAlert({ browserOffline, connStatus, sustained });
-  const [retrying, setRetrying] = useState(false);
+  const [retry, setRetry] = useState<"idle" | "running" | "failed">("idle");
 
   // A retry that lands puts the rail back to `connected` and unmounts this
-  // whole banner, so the only state to clear is the one where it did not.
+  // whole banner, so this timer only ever fires for one that did not, and the
+  // banner then says so rather than silently returning to its first sentence.
   useEffect(() => {
-    if (!retrying) return;
-    const timer = setTimeout(() => setRetrying(false), 4_000);
+    if (retry !== "running") return;
+    const timer = setTimeout(() => setRetry("failed"), RETRY_WINDOW_MS);
     return () => clearTimeout(timer);
-  }, [retrying]);
+  }, [retry]);
 
   if (alert === null) return null;
 
   const canRetry = alert.canRetry && realtime !== null;
+  const message =
+    retry === "failed"
+      ? "다시 연결하지 못했습니다. 네트워크와 서버 상태를 확인한 뒤 다시 시도하세요."
+      : alert.message;
+
   return (
     <InlineBanner
       tone="neutral"
-      message={alert.message}
+      // Neutral keeps the banner from reading as an alarm, and the warn-toned
+      // icon keeps it from reading as chrome. Without it this line sat directly
+      // above the channel header at the same value, with nothing to catch an
+      // eye that was looking somewhere else when the socket died.
+      icon={<PlugZap className="size-4 text-warn" />}
+      message={message}
       testId="connection-banner"
       {...(canRetry
         ? {
-            actionLabel: retrying ? "연결하는 중" : "다시 연결",
+            actionLabel: retry === "running" ? "연결하는 중" : "다시 연결",
+            actionBusy: retry === "running",
             onAction: () => {
-              setRetrying(true);
+              // A second press during a dial in flight would tear down the
+              // handshake it is waiting on and restart the backoff from zero.
+              if (retry === "running") return;
+              setRetry("running");
               realtime?.reconnect();
             },
           }

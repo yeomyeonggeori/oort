@@ -504,7 +504,10 @@ export function Composer({
           ⌘도 없으므로 좁은 폭에서는 접는다. */}
       <p
         id="composer-hint"
-        className="wide-only px-4 pb-2 text-meta text-ink-muted"
+        // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
+        // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
+        // 맞지 않아 4px 어긋난 줄로 보였다.
+        className="wide-only px-6 pb-2 text-meta text-ink-muted"
         data-testid="composer-hint"
       >
         Enter로 보내기, Shift+Enter로 줄바꿈

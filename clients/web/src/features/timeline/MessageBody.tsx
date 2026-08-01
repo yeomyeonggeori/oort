@@ -61,8 +61,10 @@ function InlineNode({ node }: { node: Inline }) {
     );
   }
   if (node.kind === "em") {
+    // `em-latin-only`, not `italic`: see tokens.css. A synthesized oblique on
+    // Korean draws a stroke the author never typed.
     return (
-      <em className="italic">
+      <em className="em-latin-only">
         <InlineNodes nodes={node.children} />
       </em>
     );
@@ -98,7 +100,17 @@ function BlockNode({ block }: { block: Block }) {
       // A code block scrolls itself rather than widening the timeline: a 200
       // column log line must not push the channel into a horizontal scroll.
       <pre
-        className={cn(CODE_CLASS, "mt-1 overflow-x-auto border border-line p-3")}
+        // Focusable because it SCROLLS. A 200 column log line is the payload
+        // this block exists for, and an `overflow-x-auto` element that is not
+        // in the tab order cannot be scrolled by keyboard at all, so everything
+        // past its width was unreachable without a mouse (WCAG 2.1.1). The cost
+        // is one tab stop per code block, which is the smaller of the two.
+        tabIndex={0}
+        className={cn(
+          CODE_CLASS,
+          "mt-1 overflow-x-auto border border-line p-3",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        )}
         data-testid="message-code-block"
         {...(block.lang ? { "data-lang": block.lang } : {})}
       >
@@ -117,7 +129,11 @@ function BlockNode({ block }: { block: Block }) {
     // rather than under the marker, and a real ul/ol because a typed bullet is
     // not a list to anything reading the tree (design-taste-web §6).
     return block.ordered ? (
+      // `start` is the author's own number. Without it an agent quoting steps 3
+      // and 4 of a runbook rendered as steps 1 and 2, which is the timeline
+      // saying something nobody wrote.
       <ol
+        start={block.start}
         className={cn(BODY_CLASS, "mt-1 list-outside list-decimal ps-4")}
         data-testid="message-list"
       >
@@ -134,10 +150,14 @@ function BlockNode({ block }: { block: Block }) {
   }
 
   return (
-    <p className={BODY_CLASS}>
+    // `whitespace-pre-wrap` and a real newline rather than `<br/>`: the plain
+    // path preserves runs of spaces (an aligned list typed by hand, an indented
+    // second line) and this one collapsed them, so the same body rendered two
+    // ways depending on whether it happened to contain a markdown character.
+    <p className={cn("whitespace-pre-wrap", BODY_CLASS)}>
       {block.lines.map((line, index) => (
         <Fragment key={index}>
-          {index > 0 && <br />}
+          {index > 0 && "\n"}
           <InlineNodes nodes={line} />
         </Fragment>
       ))}

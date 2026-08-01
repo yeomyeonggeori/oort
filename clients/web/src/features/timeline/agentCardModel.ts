@@ -425,15 +425,20 @@ const FAILURE_GUIDANCE: ReadonlyMap<string, FailureGuidance> = new Map([
   [
     "provider_failed",
     {
-      label: "제공자가 응답하지 못했습니다.",
-      detail: `잠시 뒤에 다시 멘션해 보고, 계속 같으면 설정 > AI 연결에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
+      // "AI 제공자", the term the rest of the product uses on purpose
+      // (settings/quotaModel.ts). A bare 제공자 on a timeline has no antecedent.
+      label: "AI 제공자가 응답하지 못했습니다.",
+      // Does NOT repeat the body's "잠시 뒤에 다시 멘션해 주세요." The reader who
+      // opened this fold already read that sentence 40px above; what they came
+      // here for is the step after it.
+      detail: `같은 실패가 이어지면 설정의 AI 연결에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
     },
   ],
   [
     "provider_auth_failed",
     {
       label: "연결된 계정 인증이 만료되었습니다.",
-      detail: `설정 > AI 연결에서 계정을 다시 등록하면 이어서 실행할 수 있습니다. ${WHERE_THE_ORIGINAL_IS}`,
+      detail: `설정의 AI 연결에서 계정을 다시 등록하면 이어서 실행할 수 있습니다. ${WHERE_THE_ORIGINAL_IS}`,
     },
   ],
 ]);
@@ -450,7 +455,7 @@ export function failureGuidance(code: unknown): FailureGuidance | null {
   return (
     FAILURE_GUIDANCE.get(code) ?? {
       label: "실행을 끝내지 못했습니다.",
-      detail: `잠시 뒤에 다시 멘션해 주세요. ${WHERE_THE_ORIGINAL_IS}`,
+      detail: `같은 실패가 이어지면 설정의 AI 연결에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
     }
   );
 }

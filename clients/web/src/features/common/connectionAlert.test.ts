@@ -47,6 +47,15 @@ describe("connectionAlert", () => {
     expect(alert?.message).not.toBe(never?.message);
   });
 
+  // A banner that only states a fact leaves the reader with nothing to do.
+  it("gives both rail sentences a way out, not just the consequence", () => {
+    for (const status of ["connecting", "disconnected"] as const) {
+      const alert = connectionAlert(input({ connStatus: status, sustained: true }));
+      expect(alert?.message).toContain("채널을 다시 열어야");
+      expect(alert?.canRetry).toBe(true);
+    }
+  });
+
   it("reports the browser's own offline immediately and offers no retry", () => {
     const alert = connectionAlert(input({ browserOffline: true }));
     expect(alert?.kind).toBe("browser-offline");

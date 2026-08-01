@@ -36,6 +36,24 @@ export interface ConnectionAlert {
 /** How long a rail has to stay down before the banner is worth the space. */
 export const SUSTAINED_DOWN_MS = 15_000;
 
+/**
+ * How long a reconnect has to HOLD before the down-clock is forgiven.
+ *
+ * Without it a flapping rail (up two seconds, down twelve, repeat) resets the
+ * dwell on every cycle and never reaches the threshold, which is the one
+ * session that most needs the banner. Five seconds is long enough that a real
+ * recovery clears it on the first try and short enough that a genuine second
+ * outage minutes later still starts from zero.
+ */
+export const HEALED_MS = 5_000;
+
+/**
+ * How long the banner waits for a hand-pressed reconnect before saying it did
+ * not work. A dial that lands unmounts the banner, so this timer only ever
+ * fires for one that did not.
+ */
+export const RETRY_WINDOW_MS = 6_000;
+
 export interface ConnectionAlertInput {
   /** `navigator.onLine === false`. */
   browserOffline: boolean;
@@ -67,10 +85,13 @@ export function connectionAlert(
       canRetry: true,
     };
   }
+  // Same contract as the never-connected sentence above: state the consequence,
+  // then the way out. A banner that only reports a fact leaves the reader with
+  // nothing to do but stare at it.
   return {
     kind: "dropped",
     message:
-      "실시간 연결이 끊겼습니다. 새 메시지가 도착해도 자동으로 표시되지 않습니다.",
+      "실시간 연결이 끊겼습니다. 새 메시지는 채널을 다시 열어야 도착합니다.",
     canRetry: true,
   };
 }

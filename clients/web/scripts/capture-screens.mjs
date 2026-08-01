@@ -1685,6 +1685,23 @@ async function captureScheme(browser, scheme) {
   await b8.screenshot({ path: bannerShot });
   shots.push(bannerShot);
 
+  // The 900 band the review rubric asks for (web SKILL §11 phase 2), which this
+  // capture had no frame of: the sidebar is still a column, so the channel is
+  // down to ~360px while every new string here is at full length. The banner
+  // sentence plus its button and the composer hint are the two most likely to
+  // wrap badly, and both are on screen in this one shot.
+  await b8.setViewportSize({ width: 900, height: 800 });
+  await b8.waitForTimeout(300);
+  const narrowShot = `${OUT_DIR}/b8-narrow-900-${scheme}.png`;
+  await b8.screenshot({ path: narrowShot });
+  shots.push(narrowShot);
+  const overflow900 = await b8.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  if (overflow900 > 0) {
+    throw new Error(`900px 가로 오버플로 ${overflow900}px (${scheme})`);
+  }
+
   await context.close();
   return shots;
 }
