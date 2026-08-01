@@ -1477,6 +1477,10 @@
 - 한 일: **B5.2(멘션 라우팅+에이전트 초대) 랜딩**(PR #945) — @멘션→run+job(멱등·insert/finish 합성 정합)·에이전트 생성/프로필(자격증명 필드 fail-closed)·컨텍스트 윈도 리더. **게이트에서 티키타카 e2e 첫 green**(HTTP send→run→실워커 iteration→에이전트 응답 seq·ledger). 전 스위트 59케이스. 워커 판단 수용: A2A는 depth 캡 강제 불가라 fail-closed(감사만)·paused 라인은 단일 쓰기경로 경유(Swift의 직접 INSERT 대신).
 - 열린 것: **B5.3**(허브 UI D-4/D-5·routing 실구현·프로필 편집/pause 토글·**채널 초대 REST** — 에이전트를 채널에 넣는 표면, B5.2 발견 갭) → 티키타카 smoke(실 provider) → 도그푸딩. A2A 티키타카는 후속 설계.
 
+## 2026-08-01 (밤) · Fable · 오케스트레이션
+- 한 일: **B5.3a(에이전트 운영 서버 표면) 랜딩**(PR #946) — 채널 멤버십 REST(사람/에이전트 무분기=불변식 #5, 티키타카 온보딩 접합점)·프로필 PUT/pause·routing 실구현(ADR-0134 D1 비대칭: 명시 위반=400 롤백/상속 위반=무시+audit, thread_root_then_routing은 예고대로 삭제=검증 위치가 진실). 게이트 전 스위트 63케이스+docker build green. conformance: 초대→멘션→응답→제거→침묵 / pause→run 0 / routing 반영. B5.3b(허브 UI) 병렬 진행 중.
+- 열린 것: B5.3b 랜딩+design-review → **티키타카 smoke(실 provider·NCP)** → 도그푸딩 조건 판정. 후속 티켓: 채널 멤버십 audit(Swift 파리티로 미기록)·FOR UPDATE 편집 락.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
