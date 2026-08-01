@@ -63,14 +63,15 @@
 //! adapter stays one wire a reviewer can read end to end and a test can point a
 //! mock at either arm.
 //!
-//! **Not ported in B5.1 (deliberate):** SSE streaming and the non-stream
-//! fallback pair. The packet scopes streaming out, so this issues the
-//! `stream=false` request directly — which is exactly Swift's
+//! **The chat wire stays non-streamed (B5.1, still true after B5.4c).** This
+//! adapter issues the `stream=false` request directly — which is exactly Swift's
 //! `nonStreamCompletion` (:232-284), the path that already exists for gateways
-//! that mangle streamed tool calls. Tool calls themselves are also out of scope
-//! (approvals/work-controls are later batches); a turn that returns only tool
-//! calls therefore produces no text, which the worker reports as a failed turn
-//! rather than an empty reply.
+//! that mangle streamed tool calls. B5.4c makes the *Responses* wire streamed,
+//! because the ChatGPT backend refuses anything else ([`crate::responses`]); a
+//! legacy bearer link is untouched by that and keeps sending `stream=false`.
+//! Tool calls are also out of scope (approvals/work-controls are later batches);
+//! a turn that returns only tool calls therefore produces no text, which the
+//! worker reports as a failed turn rather than an empty reply.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -330,7 +331,7 @@ impl ChatProvider for OpenAiCompatProvider {
 }
 
 /// The one outbound call both wires make: `POST endpoint.url()` with the
-/// resolved Bearer, returning the 200 body.
+/// resolved Bearer, returning the whole 200 body.
 ///
 /// It is shared rather than duplicated because the two rules in it are the ones
 /// a second copy would quietly get wrong: the `chatgpt-account-id` header (sent
@@ -342,6 +343,35 @@ pub(crate) async fn post_json(
     endpoint: &ProviderEndpoint,
     body: &serde_json::Value,
 ) -> Result<String, ProviderError> {
+    let response = post(client, endpoint, body, None).await?;
+    response
+        .text()
+        .await
+        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+}
+
+/// The same POST, handed back **before** the body is read (B5.4c).
+///
+/// The Responses wire cannot use [`post_json`]: a `text/event-stream` answer is
+/// only complete when the provider closes it, so buffering it into a `String`
+/// first would make every streamed turn wait for the whole stream *and* discard
+/// the event boundaries the adapter has to read. The status/header rules stay in
+/// one place — the caller only owns the body.
+pub(crate) async fn post_event_stream(
+    client: &reqwest::Client,
+    endpoint: &ProviderEndpoint,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response, ProviderError> {
+    post(client, endpoint, body, Some("text/event-stream")).await
+}
+
+/// Send the request and settle the status question; the body is the caller's.
+async fn post(
+    client: &reqwest::Client,
+    endpoint: &ProviderEndpoint,
+    body: &serde_json::Value,
+    accept: Option<&str>,
+) -> Result<reqwest::Response, ProviderError> {
     let mut request_builder = client.post(endpoint.url()).bearer_auth(&endpoint.bearer);
     if let Some(account_id) = endpoint
         .account_id
@@ -350,6 +380,9 @@ pub(crate) async fn post_json(
         .filter(|value| !value.is_empty())
     {
         request_builder = request_builder.header("chatgpt-account-id", account_id);
+    }
+    if let Some(accept) = accept {
+        request_builder = request_builder.header("accept", accept);
     }
 
     let response = request_builder
@@ -364,14 +397,14 @@ pub(crate) async fn post_json(
     if status != 200 {
         // Diagnosis needs the provider's own error sentence. The body is the
         // provider's response, never our request — no bearer can ride here.
+        // Measured worth: NCP's live smoke reduced the ChatGPT backend's refusal
+        // to this one sentence — "Stream must be set to true" — which is the
+        // fact B5.4c is built on.
         let body = response.text().await.unwrap_or_default();
         let snippet: String = body.chars().take(300).collect();
         return Err(ProviderError::HttpStatus(status, snippet));
     }
-    response
-        .text()
-        .await
-        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+    Ok(response)
 }
 
 // ---------------------------------------------------------------------------
@@ -702,15 +735,35 @@ mod tests {
     /// times, at cost, and hide the real cause.
     #[test]
     fn only_no_response_and_5xx_429_are_worth_retrying() {
+        let status = |code| ProviderError::HttpStatus(code, String::new());
         assert!(ProviderError::Unreachable("connect refused".into()).is_retryable());
-        assert!(ProviderError::HttpStatus(429).is_retryable());
-        assert!(ProviderError::HttpStatus(500).is_retryable());
-        assert!(ProviderError::HttpStatus(503).is_retryable());
-        assert!(!ProviderError::HttpStatus(400).is_retryable());
-        assert!(!ProviderError::HttpStatus(401).is_retryable());
-        assert!(!ProviderError::HttpStatus(404).is_retryable());
+        assert!(status(429).is_retryable());
+        assert!(status(500).is_retryable());
+        assert!(status(503).is_retryable());
+        assert!(!status(400).is_retryable());
+        assert!(!status(401).is_retryable());
+        assert!(!status(404).is_retryable());
         assert!(!ProviderError::InvalidResponse("x".into()).is_retryable());
         assert!(!ProviderError::ErrorEnvelope("x".into()).is_retryable());
+
+        // The diagnostic snippet is evidence for an operator, never an input to
+        // the decision: a 400 that *reads* like an outage is still a 400.
+        assert!(
+            !ProviderError::HttpStatus(400, "Stream must be set to true".to_string())
+                .is_retryable(),
+            "the measured ChatGPT refusal is a client bug to fix, not a retry to spend"
+        );
+    }
+
+    /// The snippet is the whole point of carrying a body on the error: an
+    /// operator reading a log must see the provider's own sentence.
+    #[test]
+    fn an_http_failure_carries_the_providers_own_sentence() {
+        let error = ProviderError::HttpStatus(400, "Stream must be set to true".to_string());
+        assert_eq!(
+            error.to_string(),
+            "provider answered with HTTP 400: Stream must be set to true"
+        );
     }
 
     /// The bearer must not be reachable through the ordinary debug path, because

@@ -606,7 +606,10 @@ async fn b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_w
     let mut retrying = base_config();
     retrying.max_attempts = 8;
     let worker = build_worker(
-        Arc::new(MockChatProvider::failing(ProviderError::HttpStatus(500))),
+        Arc::new(MockChatProvider::failing(ProviderError::HttpStatus(
+            500,
+            "upstream model is unavailable".to_string(),
+        ))),
         retrying,
     )
     .await;
@@ -642,7 +645,10 @@ async fn b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_w
     let mut terminal = base_config();
     terminal.max_attempts = 1; // the claim's own increment exhausts the budget
     let worker = build_worker(
-        Arc::new(MockChatProvider::failing(ProviderError::HttpStatus(500))),
+        Arc::new(MockChatProvider::failing(ProviderError::HttpStatus(
+            500,
+            "upstream model is unavailable".to_string(),
+        ))),
         terminal,
     )
     .await;
@@ -671,7 +677,10 @@ async fn b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_w
     let mut generous = base_config();
     generous.max_attempts = 8;
     let worker = build_worker(
-        Arc::new(MockChatProvider::failing(ProviderError::HttpStatus(401))),
+        Arc::new(MockChatProvider::failing(ProviderError::HttpStatus(
+            401,
+            "invalid api key".to_string(),
+        ))),
         generous,
     )
     .await;

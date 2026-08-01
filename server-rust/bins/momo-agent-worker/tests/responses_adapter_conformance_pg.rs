@@ -1,5 +1,5 @@
 //! DB-backed conformance for the OpenAI **Responses** adapter (B5.4b / ADR-0147
-//! 이행 완결).
+//! 이행 완결) and its **SSE** wire (B5.4c).
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
@@ -10,14 +10,21 @@
 //! Same harness contract as `oauth_provider_conformance_pg.rs` (superuser
 //! `DATABASE_URL` applies the migrations + `bootstrap_roles.sql`; the worker runs
 //! as the BYPASSRLS `momo_worker` role), with the mock provider re-shaped for the
-//! Responses wire. Three properties of that mock are load-bearing:
+//! Responses wire. Five properties of that mock are load-bearing:
 //!
 //! * **It serves `/v1/responses` and answers a Responses body** — `output[]` of
 //!   `message` items whose `content[]` carries `output_text`, and the
 //!   `input_tokens`/`output_tokens` usage vocabulary. A mock that answered the
 //!   chat shape would let a half-ported parser pass.
-//! * **It records the request body**, so `b54b_4` can assert the exact object
-//!   that went on the socket rather than the object the adapter meant to build.
+//! * **It answers `text/event-stream`, not JSON** (B5.4c): `response.created`,
+//!   one `response.output_text.delta` per fragment, then `response.completed`
+//!   carrying the whole `Response`. The body has no `Content-Length`, so EOF ends
+//!   it — which is how a dropped stream is staged at all.
+//! * **It writes that stream 7 bytes at a time.** Korean characters are 3 bytes,
+//!   so every reply is cut mid-character several times; an adapter that decoded
+//!   each chunk on arrival puts `U+FFFD` in a user's channel and fails `b54c_1`.
+//! * **It refuses a request without `stream: true`** with the live backend's own
+//!   sentence, `"Stream must be set to true"`, and counts it (`b54c_4`).
 //! * **`/v1/chat/completions` answers 404 and is counted.** A routing regression
 //!   that sent a subscription token to the legacy wire then fails loudly in every
 //!   test here instead of quietly answering from the wrong path.
@@ -33,6 +40,10 @@
 //! | `b54b_2_responses_usage_lands_on_every_ledger_axis` | read `prompt_tokens`/`completion_tokens` (the chat names) out of a Responses body, or drop the `input_tokens_details`/`output_tokens_details` mapping, or stop reporting `was_estimated` for a usage-less turn |
 //! | `b54b_3_an_expired_token_refreshes_reseals_and_the_next_responses_turn_reuses_it` | drop `reseal_link` from `refresh_and_reseal`, or keep the refreshed credential in the in-memory cache instead of invalidating it |
 //! | `b54b_4_the_responses_request_carries_the_measured_wire_fields` | send the chat body (`messages`/`max_tokens`) to `/responses`, drop `store: false`, or flatten the typed `input` items into bare strings |
+//! | `b54c_1_the_streamed_deltas_are_exactly_the_committed_body` | ignore `response.output_text.delta` and read only the terminal payload, concatenate BOTH (the answer doubles), join the deltas with a separator, or decode each TCP chunk with `from_utf8_lossy` |
+//! | `b54c_2_the_terminal_events_usage_lands_on_every_ledger_axis` | stop reading `response.completed` once the last delta arrived — every subscription turn then bills as free |
+//! | `b54c_3_a_stream_that_dies_mid_answer_is_retried_not_half_published` | commit the accumulated deltas when the stream ends without a terminal event, or classify the cut stream as non-retryable |
+//! | `b54c_4_no_non_streamed_request_is_ever_sent` | send `stream: false` (B5.4b's body), or try non-stream first and fall back to SSE |
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -465,6 +476,9 @@ struct ObservedResponsesCall {
     authorization: String,
     account_id: Option<String>,
     body: Value,
+    /// `Accept`, so `b54c_4` can show the request asked for a stream at the HTTP
+    /// layer as well as in the body.
+    accept: Option<String>,
 }
 
 struct MockState {
@@ -476,17 +490,29 @@ struct MockState {
     refuse_refresh: bool,
     access_token_ttl_secs: i64,
     rotations: u32,
-    /// The assistant text the mock answers with.
-    reply_text: String,
+    /// The assistant text the mock answers with, one entry per
+    /// `response.output_text.delta`. Concatenated, they are the whole answer —
+    /// which is the property `b54c_1` asserts against what lands in the channel.
+    reply_deltas: Vec<String>,
     /// The `usage` object to answer with. `Value::Null` ⇒ the key is omitted,
     /// which is how a provider reports "not measured".
     usage: Value,
+    /// Stop the stream after this many deltas and hang up, with no terminal
+    /// event — the dropped connection `b54c_3` is about.
+    truncate_after_deltas: Option<usize>,
+    /// Whether `response.completed` repeats the whole answer in its `output[]`.
+    /// Turning it off leaves the accumulated deltas as the ONLY source of the
+    /// answer, which is how `b54c_1` proves they are what gets committed.
+    terminal_repeats_the_answer: bool,
     token_calls: Vec<(String, Option<String>)>,
     responses_calls: Vec<ObservedResponsesCall>,
     /// Requests that reached the LEGACY chat wire. Must stay 0: a subscription
     /// OAuth link that lands there is the routing regression this suite exists
     /// to catch.
     chat_completions_calls: usize,
+    /// Requests refused with the live backend's own sentence, "Stream must be
+    /// set to true". Must stay 0 (`b54c_4`): the FIRST request already streams.
+    non_stream_rejections: usize,
 }
 
 impl MockState {
@@ -497,7 +523,7 @@ impl MockState {
             refuse_refresh: false,
             access_token_ttl_secs: 3_600,
             rotations: 0,
-            reply_text: "Responses 와이어로 답합니다".to_string(),
+            reply_deltas: vec!["Responses 와이어로 ".to_string(), "답합니다".to_string()],
             usage: json!({
                 "input_tokens": 41,
                 "output_tokens": 17,
@@ -505,11 +531,27 @@ impl MockState {
                 "output_tokens_details": {"reasoning_tokens": 11},
                 "total_tokens": 58,
             }),
+            truncate_after_deltas: None,
+            terminal_repeats_the_answer: true,
             token_calls: Vec::new(),
             responses_calls: Vec::new(),
             chat_completions_calls: 0,
+            non_stream_rejections: 0,
         }
     }
+
+    /// The whole answer the deltas spell.
+    fn reply_text(&self) -> String {
+        self.reply_deltas.concat()
+    }
+}
+
+/// What the mock writes back. The Responses wire needs the second arm: an SSE
+/// answer is a sequence of events terminated by EOF, not a JSON body with a
+/// `Content-Length`.
+enum MockAnswer {
+    Json(u16, Value),
+    EventStream(String),
 }
 
 struct MockProvider {
@@ -577,8 +619,9 @@ async fn handle_connection(mut socket: TcpStream, state: Arc<Mutex<MockState>>) 
         .to_string();
     let headers = parse_headers(&head);
 
-    let (status, payload) = if target.starts_with("/oauth/token") {
-        token_response(&state, &body)
+    let answer = if target.starts_with("/oauth/token") {
+        let (status, payload) = token_response(&state, &body);
+        MockAnswer::Json(status, payload)
     } else if target.starts_with("/v1/responses") {
         responses_response(&state, &target, &headers, &body)
     } else if target.starts_with("/v1/chat/completions") {
@@ -586,22 +629,45 @@ async fn handle_connection(mut socket: TcpStream, state: Arc<Mutex<MockState>>) 
         // here would otherwise be invisible — the legacy wire would happily
         // answer and every assertion about the reply would still pass.
         state.lock().expect("mock state").chat_completions_calls += 1;
-        (
+        MockAnswer::Json(
             404,
             json!({"error": {"message": "this link speaks the responses wire"}}),
         )
     } else {
-        (404, json!({"error": {"message": "no such route"}}))
+        MockAnswer::Json(404, json!({"error": {"message": "no such route"}}))
     };
 
-    let body = payload.to_string();
-    let response = format!(
-        "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = socket.write_all(response.as_bytes()).await;
-    let _ = socket.flush().await;
+    match answer {
+        MockAnswer::Json(status, payload) => {
+            let body = payload.to_string();
+            let response = format!(
+                "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.flush().await;
+        }
+        MockAnswer::EventStream(events) => {
+            let _ = socket.set_nodelay(true);
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                        Cache-Control: no-store\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(head.as_bytes()).await;
+            // Written in small slices on purpose: 7 bytes cuts through the
+            // middle of the 3-byte Korean characters in the reply, so an adapter
+            // that decoded each chunk on arrival would put `U+FFFD` in the
+            // channel. The body has no `Content-Length`, so EOF ends it —
+            // including when the mock hangs up early (`truncate_after_deltas`).
+            for slice in events.as_bytes().chunks(7) {
+                if socket.write_all(slice).await.is_err() {
+                    return;
+                }
+                let _ = socket.flush().await;
+                tokio::task::yield_now().await;
+            }
+            let _ = socket.shutdown().await;
+        }
+    }
 }
 
 fn token_response(state: &Arc<Mutex<MockState>>, body: &str) -> (u16, Value) {
@@ -648,50 +714,111 @@ fn token_response(state: &Arc<Mutex<MockState>>, body: &str) -> (u16, Value) {
     )
 }
 
-/// The Responses answer, in the measured shape: `output[]` of `message` items
-/// whose `content[]` carries `output_text`.
+/// The Responses answer, in the measured shape — and, since B5.4c, on the
+/// measured wire: a `text/event-stream` of `response.output_text.delta` events
+/// closed by `response.completed`, whose `response` is the whole object the
+/// non-streamed body used to be.
+///
+/// The `stream` check is the live backend's own behaviour, reduced from NCP's
+/// smoke to one sentence: a Responses request that does not set `stream: true`
+/// is refused with 400 "Stream must be set to true".
 fn responses_response(
     state: &Arc<Mutex<MockState>>,
     target: &str,
     headers: &HashMap<String, String>,
     body: &str,
-) -> (u16, Value) {
+) -> MockAnswer {
     let authorization = headers.get("authorization").cloned().unwrap_or_default();
     let account_id = headers.get("chatgpt-account-id").cloned();
+    let request: Value = serde_json::from_str(body).unwrap_or(Value::Null);
     let mut state = state.lock().expect("mock state");
     state.responses_calls.push(ObservedResponsesCall {
         path: target.to_string(),
         authorization: authorization.clone(),
         account_id,
-        body: serde_json::from_str(body).unwrap_or(Value::Null),
+        body: request.clone(),
+        accept: headers.get("accept").cloned(),
     });
 
     if authorization != format!("Bearer {}", state.live_access_token) {
-        return (401, json!({"error": {"message": "invalid access token"}}));
+        return MockAnswer::Json(401, json!({"error": {"message": "invalid access token"}}));
+    }
+    if request.get("stream") != Some(&Value::Bool(true)) {
+        state.non_stream_rejections += 1;
+        return MockAnswer::Json(
+            400,
+            json!({"error": {"message": "Stream must be set to true"}}),
+        );
     }
 
-    let mut answer = json!({
-        "id": "resp_b54b",
-        "object": "response",
-        "status": "completed",
-        "error": null,
-        "incomplete_details": null,
-        "model": "gpt-5.4-codex",
-        "output": [
+    let deltas = match state.truncate_after_deltas {
+        Some(limit) => &state.reply_deltas[..limit.min(state.reply_deltas.len())],
+        None => &state.reply_deltas[..],
+    };
+    let mut events = sse_event(
+        "response.created",
+        json!({"type": "response.created", "sequence_number": 0}),
+    );
+    for (index, delta) in deltas.iter().enumerate() {
+        events.push_str(&sse_event(
+            "response.output_text.delta",
+            json!({
+                "type": "response.output_text.delta",
+                "sequence_number": index + 1,
+                "item_id": "msg_1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": delta,
+                "logprobs": [],
+            }),
+        ));
+    }
+    if state.truncate_after_deltas.is_some() {
+        // No terminal event: the connection simply ends.
+        return MockAnswer::EventStream(events);
+    }
+
+    let output = if state.terminal_repeats_the_answer {
+        json!([
             {"type": "reasoning", "id": "rs_1", "summary": []},
             {
                 "type": "message",
                 "id": "msg_1",
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": state.reply_text, "annotations": []}],
+                "content": [{"type": "output_text", "text": state.reply_text(), "annotations": []}],
             }
-        ],
+        ])
+    } else {
+        json!([{"type": "reasoning", "id": "rs_1", "summary": []}])
+    };
+    let mut response = json!({
+        "id": "resp_b54b",
+        "object": "response",
+        "status": "completed",
+        "error": null,
+        "incomplete_details": null,
+        "model": "gpt-5.4-codex",
+        "output": output,
     });
     if !state.usage.is_null() {
-        answer["usage"] = state.usage.clone();
+        response["usage"] = state.usage.clone();
     }
-    (200, answer)
+    events.push_str(&sse_event(
+        "response.completed",
+        json!({
+            "type": "response.completed",
+            "sequence_number": deltas.len() + 1,
+            "response": response,
+        }),
+    ));
+    MockAnswer::EventStream(events)
+}
+
+/// One SSE frame: the `event:` name, the `data:` payload, and the blank line
+/// that dispatches them.
+fn sse_event(name: &str, payload: Value) -> String {
+    format!("event: {name}\ndata: {payload}\n\n")
 }
 
 /// Read one HTTP/1.1 request: headers to the blank line, then `Content-Length`
@@ -1063,8 +1190,9 @@ async fn b54b_4_the_responses_request_carries_the_measured_wire_fields() {
     );
     assert_eq!(
         body["stream"],
-        json!(false),
-        "B5.4b ships the non-streamed request; streaming is a later batch"
+        json!(true),
+        "B5.4c: measured — the ChatGPT backend refuses anything else with \
+         \"Stream must be set to true\""
     );
     assert_eq!(
         body["store"],
@@ -1111,4 +1239,344 @@ async fn b54b_4_the_responses_request_carries_the_measured_wire_fields() {
 
     // --- and the header the subscription needs, on this wire too ---
     assert_eq!(call.account_id.as_deref(), Some("acct-seongjae"));
+}
+
+// ---------------------------------------------------------------------------
+// B5.4c — the SSE stream (packet 2026-08-02-B5.4c)
+// ---------------------------------------------------------------------------
+
+/// `outbox.status`, `attempts` and the recorded reason for one job.
+async fn job_row(su: &PgPool, job_id: i64) -> (String, i32, Option<String>) {
+    let row = sqlx::query(
+        "SELECT status::text AS status, attempts, last_error FROM outbox WHERE id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(su)
+    .await
+    .expect("read outbox job");
+    (
+        row.get::<String, _>("status"),
+        row.get::<i32, _>("attempts"),
+        row.get::<Option<String>, _>("last_error"),
+    )
+}
+
+/// Bring a requeued job's backoff forward so the retry is observable now.
+/// The backoff itself is B5.1's and is asserted there; what this suite is about
+/// is what the retry *does*.
+async fn release_backoff(su: &PgPool, job_id: i64) {
+    sqlx::query("UPDATE outbox SET available_at = now() WHERE id = $1")
+        .bind(job_id)
+        .execute(su)
+        .await
+        .expect("release the backoff");
+}
+
+async fn ledger_rows(su: &PgPool, run_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE run_id = $1")
+        .bind(run_id)
+        .fetch_one(su)
+        .await
+        .expect("count ledger rows")
+}
+
+/// **The batch's headline claim.** What the `response.output_text.delta` events
+/// spelled is byte-for-byte what the channel receives — no separator, no
+/// duplication, and no `U+FFFD` where a TCP chunk cut a Korean character in half
+/// (the mock writes the stream 7 bytes at a time for exactly that reason).
+///
+/// The second half removes the safety net: the terminal event stops repeating
+/// the answer in its `output[]`, so an adapter that quietly ignored the deltas
+/// and read the completed payload instead has nothing left to read and fails
+/// here rather than passing on a coincidence.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn b54c_1_the_streamed_deltas_are_exactly_the_committed_body() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker_pool = momo_worker_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    clear_provider_link(&worker_pool).await;
+    let tenant = seed_tenant(&su).await;
+
+    let mut state = MockState::new("rt-seeded", "at-live");
+    // Split so that a naive "join with a space" or "join with a newline" is
+    // visible, and so the answer spans several events.
+    state.reply_deltas = vec![
+        "성재님".to_string(),
+        ", 스트리밍".to_string(),
+        "으로 답합니다".to_string(),
+        " 🌊".to_string(),
+    ];
+    let expected = state.reply_deltas.concat();
+    let provider = MockProvider::start(state).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
+    let worker = build_worker(worker_config()).await;
+
+    let (run_id, _) = enqueue_mention_turn(&su, &tenant, "@hermes 스트리밍 확인").await;
+    assert_eq!(worker.drain_once().await.expect("drain").answered, 1);
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+
+    let messages = agent_messages(&su, &tenant).await;
+    assert_eq!(messages.len(), 1, "one final message, not one per delta");
+    let (body, seq, props) = &messages[0];
+    assert_eq!(
+        body, &expected,
+        "the committed body is the concatenation of the deltas — nothing joined, \
+         nothing repeated, nothing mangled at a chunk boundary"
+    );
+    assert!(*seq > 0, "the answer took a channel_seq like any member's");
+    assert_eq!(props["source"], json!("agent_worker.final_text.v0"));
+
+    {
+        let state = provider.state();
+        assert_eq!(state.chat_completions_calls, 0);
+        assert_eq!(state.non_stream_rejections, 0);
+        assert_eq!(state.responses_calls.len(), 1, "one turn, one round trip");
+    }
+
+    // --- the deltas alone, with the terminal event carrying no output ---
+    settle_residual_worker_jobs(&su).await;
+    {
+        let mut state = provider.state();
+        state.terminal_repeats_the_answer = false;
+        state.reply_deltas = vec!["델타만".to_string(), " 있는 답".to_string()];
+    }
+    let (delta_only_run, _) = enqueue_mention_turn(&su, &tenant, "@hermes 델타만").await;
+    assert_eq!(worker.drain_once().await.expect("drain").answered, 1);
+    assert_eq!(run_status(&su, delta_only_run).await, "succeeded");
+    let messages = agent_messages(&su, &tenant).await;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages[1].0, "델타만 있는 답",
+        "the accumulated deltas ARE the answer; the terminal payload is the auditor"
+    );
+}
+
+/// `usage` exists nowhere in the stream except `response.completed`, so a turn
+/// is billed from the terminal event or not at all. An adapter that stopped
+/// reading at the last delta would bill every subscription turn as free.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn b54c_2_the_terminal_events_usage_lands_on_every_ledger_axis() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker_pool = momo_worker_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    clear_provider_link(&worker_pool).await;
+    let tenant = seed_tenant(&su).await;
+
+    let provider = MockProvider::start(MockState::new("rt-seeded", "at-live")).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
+    let worker = build_worker(worker_config()).await;
+
+    let (measured_run, _) = enqueue_mention_turn(&su, &tenant, "@hermes 토큰 계산").await;
+    assert_eq!(worker.drain_once().await.expect("drain").answered, 1);
+    assert_eq!(
+        ledger_row(&su, measured_run).await,
+        LedgerRow {
+            model: AGENT_MODEL.to_string(),
+            prompt_tokens: 41,
+            completion_tokens: 17,
+            cached_tokens: 29,
+            reasoning_tokens: 11,
+            was_estimated: false,
+        },
+        "the counts on `response.completed` are the counts on the ledger row"
+    );
+    assert!(
+        provider.state().responses_calls.len() == 1,
+        "one call, and it was streamed"
+    );
+
+    // A terminal event with no `usage` is an unmeasured turn, not a free one.
+    settle_residual_worker_jobs(&su).await;
+    provider.state().usage = Value::Null;
+    let (unmeasured_run, _) = enqueue_mention_turn(&su, &tenant, "@hermes 사용량 없이").await;
+    assert_eq!(worker.drain_once().await.expect("drain").answered, 1);
+    let row = ledger_row(&su, unmeasured_run).await;
+    assert!(
+        row.was_estimated,
+        "a stream nobody measured is not a free run"
+    );
+    assert_eq!(row.prompt_tokens, 0);
+    assert_eq!(row.completion_tokens, 0);
+}
+
+/// A stream that stops before `response.completed` — the provider hung up
+/// mid-answer — must be retried, not published.
+///
+/// ## Why half an answer is worse than no answer
+///
+/// The deltas already received spell a real sentence that simply stops. Writing
+/// it is indistinguishable, in the channel, from the agent choosing to say that
+/// much: there is no seq gap, no marker, nothing an operator or a reader could
+/// use to tell. So the turn is settled the same way every other availability
+/// failure is — requeued with a backoff, no message, no ledger row — and the
+/// retry re-asks the question.
+///
+/// The shipped Codex CLI names the same condition in its own SSE module:
+/// "stream closed before response.completed".
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn b54c_3_a_stream_that_dies_mid_answer_is_retried_not_half_published() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker_pool = momo_worker_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    clear_provider_link(&worker_pool).await;
+    let tenant = seed_tenant(&su).await;
+
+    let mut state = MockState::new("rt-seeded", "at-live");
+    state.reply_deltas = vec!["답이 중간에".to_string(), " 끊깁니다".to_string()];
+    state.truncate_after_deltas = Some(1); // one delta, then the socket closes
+    let provider = MockProvider::start(state).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
+
+    let mut config = worker_config();
+    config.max_attempts = 8; // budget left, so the failure is a requeue
+    let worker = build_worker(config).await;
+
+    let (run_id, job_id) = enqueue_mention_turn(&su, &tenant, "@hermes 중간에 끊겨").await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 0);
+    assert_eq!(
+        stats.requeued, 1,
+        "a dropped stream is an availability failure, like a timeout"
+    );
+
+    let (status, attempts, last_error) = job_row(&su, job_id).await;
+    assert_eq!(status, "pending", "the turn goes back to the queue");
+    assert_eq!(attempts, 1);
+    let reason = last_error.unwrap_or_default();
+    assert!(
+        reason.contains("response.completed"),
+        "the operator is told the stream ended early, in the provider's own vocabulary: {reason}"
+    );
+    assert!(
+        !reason.contains("답이 중간에"),
+        "the half answer is not smuggled into the log either: {reason}"
+    );
+    assert!(
+        agent_messages(&su, &tenant).await.is_empty(),
+        "NOTHING is published: half a sentence would read as the agent's final word"
+    );
+    assert_eq!(
+        ledger_rows(&su, run_id).await,
+        0,
+        "an unfinished turn bills nothing"
+    );
+    assert_eq!(
+        run_status(&su, run_id).await,
+        "failed",
+        "a run between attempts is `failed`, not `running` (B5.1, Swift :555)"
+    );
+
+    // --- the retry: the same job, answered once the provider stops dying ---
+    provider.state().truncate_after_deltas = None;
+    release_backoff(&su, job_id).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(
+        stats.answered, 1,
+        "the requeue was a real retry, not a drop"
+    );
+    assert_eq!(job_row(&su, job_id).await.0, "done");
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+
+    let messages = agent_messages(&su, &tenant).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "exactly one message — the retry must not double-post"
+    );
+    assert_eq!(
+        messages[0].0, "답이 중간에 끊깁니다",
+        "the user gets the WHOLE answer, from the attempt that completed"
+    );
+    assert_eq!(provider.state().responses_calls.len(), 2);
+}
+
+/// The first request already streams.
+///
+/// NCP's live smoke reduced the ChatGPT backend's refusal to one sentence —
+/// `"Stream must be set to true"` — so a non-streamed Responses request is not a
+/// degraded mode, it is a 400. The mock answers exactly that sentence to any
+/// request whose body does not carry `stream: true`, and counts it.
+///
+/// The counter staying at 0 is the whole assertion: it fails both for an adapter
+/// that sends `stream: false` (B5.4b's body) and for one that "helpfully" tries
+/// non-stream first and falls back to SSE — which would spend a round trip, and
+/// a rate-limit slot, to be told the same thing every single turn.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn b54c_4_no_non_streamed_request_is_ever_sent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker_pool = momo_worker_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    clear_provider_link(&worker_pool).await;
+    let tenant = seed_tenant(&su).await;
+
+    let provider = MockProvider::start(MockState::new("rt-seeded", "at-live")).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
+    let worker = build_worker(worker_config()).await;
+
+    let (run_id, _) = enqueue_mention_turn(&su, &tenant, "@hermes 스트림 필수").await;
+    let stats = worker.drain_once().await.expect("drain");
+
+    // Not vacuous: the turn below is one the provider accepted and answered.
+    assert_eq!(stats.answered, 1);
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+
+    let state = provider.state();
+    assert_eq!(
+        state.non_stream_rejections, 0,
+        "not one request was refused with \"Stream must be set to true\""
+    );
+    assert_eq!(
+        state.responses_calls.len(),
+        1,
+        "one attempt — an SSE retry after a non-stream 400 would be two"
+    );
+    let call = &state.responses_calls[0];
+    assert_eq!(call.path, "/v1/responses");
+    assert_eq!(
+        call.body["stream"],
+        json!(true),
+        "the body asks for the stream: {}",
+        call.body
+    );
+    assert_eq!(
+        call.accept.as_deref(),
+        Some("text/event-stream"),
+        "and so does the HTTP layer, so a proxy cannot buffer the answer into one blob"
+    );
+    // The rest of the measured body is unchanged by B5.4c — B5.4b's `b54b_4`
+    // owns those assertions; this one only adds the two facts above.
+    assert_eq!(call.body["store"], json!(false));
+    assert_eq!(state.chat_completions_calls, 0);
 }
