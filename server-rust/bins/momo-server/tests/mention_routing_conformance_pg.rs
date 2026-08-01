@@ -341,10 +341,33 @@ async fn send_message(
     client_msg_id: Uuid,
     body: &str,
 ) -> Value {
+    send_in_channel(
+        http,
+        base,
+        token,
+        tenant,
+        tenant.channel,
+        client_msg_id,
+        body,
+    )
+    .await
+}
+
+/// The same send against an explicit channel — B13 needs it because the DM the
+/// rule is about is not `tenant.channel`.
+async fn send_in_channel(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    channel: Uuid,
+    client_msg_id: Uuid,
+    body: &str,
+) -> Value {
     let response = http
         .post(format!(
-            "{base}/v1/workspaces/{}/channels/{}/messages",
-            tenant.workspace, tenant.channel
+            "{base}/v1/workspaces/{}/channels/{channel}/messages",
+            tenant.workspace
         ))
         .bearer_auth(token)
         .json(&json!({"clientMsgId": client_msg_id, "body": body}))
@@ -410,13 +433,22 @@ async fn agent_jobs_for(
 }
 
 async fn messages_by(su: &PgPool, tenant: &Tenant, author: Uuid) -> Vec<(i64, String, Value)> {
+    messages_by_in(su, tenant, tenant.channel, author).await
+}
+
+async fn messages_by_in(
+    su: &PgPool,
+    tenant: &Tenant,
+    channel: Uuid,
+    author: Uuid,
+) -> Vec<(i64, String, Value)> {
     sqlx::query(
         "SELECT seq, COALESCE(body, '') AS body, props FROM message \
           WHERE workspace_id = $1 AND channel_id = $2 AND author_member_id = $3 \
           ORDER BY seq",
     )
     .bind(tenant.workspace)
-    .bind(tenant.channel)
+    .bind(channel)
     .bind(author)
     .fetch_all(su)
     .await
@@ -940,4 +972,446 @@ async fn b52_4_a_created_agent_joins_the_roster_and_becomes_mentionable() {
             "{expected} must be auditable: {actions:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// B13 — implicit addressing in a 1:1 DM (QA H7)
+// ---------------------------------------------------------------------------
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `b13_1_a_dm_answers_without_a_mention` | drop the DM rule from `route_agent_mentions_in_tx`, or stop stamping `addressing` |
+// | `b13_2_an_agent_never_auto_answers_another_agent_in_a_dm` | relax either half of the author gate (credential or roster) — the agent↔agent loop |
+// | `b13_3_a_paused_agent_stays_silent_in_a_dm` | move the DM rule past the `agent.paused` branch |
+// | `b13_4_a_mention_inside_the_dm_starts_exactly_one_run` | concatenate the two addressing paths instead of unioning them |
+// | `b13_5_a_group_channel_without_a_mention_starts_nothing` | widen the rule past `channel.kind = 'dm'` |
+
+/// Open the caller's DM with `target` through the surface a client uses.
+async fn open_dm(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    target: Uuid,
+) -> Uuid {
+    let response = http
+        .post(format!("{base}/v1/workspaces/{}/dms", tenant.workspace))
+        .bearer_auth(token)
+        .json(&json!({"memberId": target}))
+        .send()
+        .await
+        .expect("open dm");
+    assert!(
+        response.status() == 200 || response.status() == 201,
+        "opening a DM answers 200/201, got {}",
+        response.status()
+    );
+    let body: Value = response.json().await.expect("dm body");
+    assert_eq!(body["channel"]["kind"], json!("dm"), "{body}");
+    Uuid::parse_str(body["channel"]["id"].as_str().expect("channel id")).expect("channel uuid")
+}
+
+/// A DM seeded directly, for the pair `POST /dms` will not open: it needs a
+/// human on one end, and the agent↔agent room is the one this batch must prove
+/// stays quiet.
+async fn seed_dm(su: &PgPool, tenant: &Tenant, first: Uuid, second: Uuid) -> Uuid {
+    let channel = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, topic, dm_key, created_by) \
+         VALUES ($1, $2, 'dm', NULL, NULL, $3, $4)",
+    )
+    .bind(channel)
+    .bind(tenant.workspace)
+    .bind(channel.to_string())
+    .bind(first)
+    .execute(su)
+    .await
+    .expect("seed dm channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel)
+        .bind(tenant.workspace)
+        .execute(su)
+        .await
+        .expect("seed dm channel_seq");
+    for member in [first, second] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(tenant.workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("seed dm membership");
+    }
+    channel
+}
+
+/// Mint an agent bearer for `agent` — the credential an external/BYOA runtime
+/// posts with, and the one the author gate has to refuse in a DM.
+async fn agent_bearer(su: &PgPool, tenant: &Tenant, agent: Uuid) -> String {
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = format!("momo_agent_v1.{}.{secret}", tenant.workspace);
+    sqlx::query(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['messages:write'], 'b13-conformance')",
+    )
+    .bind(tenant.workspace)
+    .bind(agent)
+    .bind(&token)
+    .execute(su)
+    .await
+    .expect("seed agent bearer");
+    token
+}
+
+async fn pause_agent(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    agent: Uuid,
+) {
+    let response = http
+        .put(format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/pause",
+            tenant.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({"paused": true}))
+        .send()
+        .await
+        .expect("pause agent");
+    assert_eq!(response.status(), 200, "the owner may pause its agent");
+}
+
+/// **(a) A human alone with one agent does not have to type a handle.**
+///
+/// The whole reason for the batch, driven end to end: the DM is opened through
+/// `POST /dms`, the message carries no `@`, and one real worker iteration turns
+/// the run into an answer in that DM. Goes red if the DM rule leaves
+/// `route_agent_mentions_in_tx`.
+///
+/// It also pins the provenance: `input.addressing = "dm_implicit"` is how an
+/// operator tells "nobody typed a mention" from "somebody did", and
+/// `input.surface` stays `mention` because the run *is* a mention-shaped run —
+/// the worker decodes one payload, not two.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b13_1_a_dm_answers_without_a_mention() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", false).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    let dm = open_dm(&http, &base, &token, &tenant, agent).await;
+
+    send_in_channel(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        dm,
+        Uuid::new_v4(),
+        "배포 상태 알려줘",
+    )
+    .await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(
+        runs.len(),
+        1,
+        "a bare utterance in the 1:1 DM addresses the agent: {runs:?}"
+    );
+    let (run_id, run_agent, status, input, _) = runs[0].clone();
+    assert_eq!(run_agent, agent);
+    assert_eq!(status, "queued");
+    assert_eq!(
+        input["addressing"],
+        json!("dm_implicit"),
+        "the provenance says nobody typed a mention: {input}"
+    );
+    assert_eq!(
+        input["surface"],
+        json!("mention"),
+        "one run shape, one payload the worker decodes: {input}"
+    );
+    assert_eq!(input["depth"], json!(0), "a human trigger is depth 0");
+    assert!(
+        input.get("parent_run_id").is_none(),
+        "no parent: this is not a delegation: {input}"
+    );
+
+    let worker = worker(Arc::new(MockChatProvider::echo())).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.answered), (1, 1), "{stats:?}");
+
+    let replies = messages_by_in(&su, &tenant, dm, agent).await;
+    assert_eq!(
+        replies.len(),
+        1,
+        "the agent answered in the DM: {replies:?}"
+    );
+    assert_eq!(
+        replies[0].2["run_id"],
+        json!(run_id.to_string()),
+        "the answer carries its run"
+    );
+
+    let actions = audit_actions(&su, tenant.workspace).await;
+    assert!(
+        actions
+            .iter()
+            .any(|action| action == "agent.mention.queued"),
+        "the DM enqueue is auditable under the one mention schema: {actions:?}"
+    );
+}
+
+/// **(b) An agent never auto-answers another agent in a DM.**
+///
+/// Two agents alone in a room, each auto-replying to the other, is a loop with
+/// no human in it and no end: the A2A gates (G1/G2/G3, `a2a_depth`, the chain
+/// budget) guard the *worker's* delegation path, and an HTTP send on an agent
+/// bearer never reaches them. This test posts as a real agent bearer into a real
+/// agent↔agent DM and asserts **zero** runs — twice:
+///
+/// * with no mention, which is the DM rule's own refusal (`AuthorIsNotHuman`);
+/// * with an explicit `@atlas`, which is the older `a2a_source_run_unavailable`
+///   refusal that must survive this batch untouched.
+///
+/// Goes red the moment either half of the author gate is relaxed.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b13_2_an_agent_never_auto_answers_another_agent_in_a_dm() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let hermes = seed_agent(&su, &tenant, "hermes", false).await;
+    let atlas = seed_agent(&su, &tenant, "atlas", false).await;
+    let dm = seed_dm(&su, &tenant, hermes, atlas).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let bearer = agent_bearer(&su, &tenant, hermes).await;
+
+    // 1. no mention — the DM rule must not fire for an agent author.
+    send_in_channel(
+        &http,
+        &base,
+        &bearer,
+        &tenant,
+        dm,
+        Uuid::new_v4(),
+        "네 알겠습니다",
+    )
+    .await;
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert!(
+        runs.is_empty(),
+        "an agent's utterance in an agent↔agent DM starts NOTHING — this is the \
+         infinite-loop gate: {runs:?}"
+    );
+
+    // 2. an explicit mention — the pre-existing fail-closed refusal still holds.
+    send_in_channel(
+        &http,
+        &base,
+        &bearer,
+        &tenant,
+        dm,
+        Uuid::new_v4(),
+        "@atlas 이어서 해줘",
+    )
+    .await;
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert!(
+        runs.is_empty(),
+        "an agent-authored mention has no source run to inherit depth from, so it \
+         is still skipped: {runs:?}"
+    );
+    let jobs = agent_jobs_for(&su, tenant.workspace).await;
+    assert!(jobs.is_empty(), "no run, no job: {jobs:?}");
+
+    let actions = audit_actions(&su, tenant.workspace).await;
+    assert!(
+        actions
+            .iter()
+            .any(|action| action == "agent.mention.skipped"),
+        "the refusal is audited rather than silent: {actions:?}"
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|action| action == "agent.mention.queued"),
+        "nothing was queued: {actions:?}"
+    );
+}
+
+/// **(c) A paused agent stays silent in a DM too.**
+///
+/// The DM rule adds an addressee; it does not move the `agent.paused` branch it
+/// then walks into. Goes red if the rule is applied after eligibility instead of
+/// before it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b13_3_a_paused_agent_stays_silent_in_a_dm() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", false).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    let dm = open_dm(&http, &base, &token, &tenant, agent).await;
+    pause_agent(&http, &base, &token, &tenant, agent).await;
+
+    send_in_channel(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        dm,
+        Uuid::new_v4(),
+        "지금 되나요",
+    )
+    .await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert!(runs.is_empty(), "a paused agent takes no run: {runs:?}");
+    let jobs = agent_jobs_for(&su, tenant.workspace).await;
+    assert!(jobs.is_empty(), "…and no job: {jobs:?}");
+
+    // The existing paused path is kept whole: the person still learns why.
+    let lines = messages_by_in(&su, &tenant, dm, agent).await;
+    assert_eq!(lines.len(), 1, "the pause is explained once: {lines:?}");
+    assert_eq!(lines[0].2["kind"], json!("agent_paused"), "{:?}", lines[0]);
+
+    let actions = audit_actions(&su, tenant.workspace).await;
+    assert!(
+        actions
+            .iter()
+            .any(|action| action == "agent.mention.paused"),
+        "{actions:?}"
+    );
+}
+
+/// **(d) A mention *inside* the DM is still exactly one run.**
+///
+/// Both addressing rules match the same agent at once; a concatenation would
+/// enqueue two jobs before `mention:<message>:<agent>` collapsed them at the
+/// INSERT — having already spent a second context-window read and a second audit
+/// row. The label is the mention's, because that is what the human did.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b13_4_a_mention_inside_the_dm_starts_exactly_one_run() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", false).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    let dm = open_dm(&http, &base, &token, &tenant, agent).await;
+
+    send_in_channel(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        dm,
+        Uuid::new_v4(),
+        "@hermes 배포 상태 알려줘",
+    )
+    .await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(
+        runs.len(),
+        1,
+        "the mention path and the DM path are a UNION, not a sum: {runs:?}"
+    );
+    assert_eq!(
+        runs[0].3["addressing"],
+        json!("mention"),
+        "the human typed the handle, so that is what is recorded: {:?}",
+        runs[0].3
+    );
+    let jobs = agent_jobs_for(&su, tenant.workspace).await;
+    assert_eq!(jobs.len(), 1, "one run, one job: {jobs:?}");
+
+    let queued = audit_actions(&su, tenant.workspace)
+        .await
+        .into_iter()
+        .filter(|action| action == "agent.mention.queued")
+        .count();
+    assert_eq!(queued, 1, "one utterance, one queued audit row");
+}
+
+/// **(e) The group-channel regression.**
+///
+/// Without a mention, a message in a channel an agent merely belongs to must
+/// still start nothing — otherwise every message in every shared channel becomes
+/// a provider call. Goes red if the rule is widened past `channel.kind = 'dm'`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b13_5_a_group_channel_without_a_mention_starts_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", true).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "오늘 배포 언제 하죠",
+    )
+    .await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert!(
+        runs.is_empty(),
+        "a public channel still requires an explicit mention: {runs:?}"
+    );
+    let jobs = agent_jobs_for(&su, tenant.workspace).await;
+    assert!(jobs.is_empty(), "{jobs:?}");
+
+    // …and the same agent in the same workspace still answers when it IS named,
+    // so the assertion above is about the rule and not about a broken fixture.
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@hermes 오늘 배포 언제 하죠",
+    )
+    .await;
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(runs.len(), 1, "the mention path is untouched: {runs:?}");
+    assert_eq!(runs[0].1, agent);
+    assert_eq!(runs[0].3["addressing"], json!("mention"));
 }
