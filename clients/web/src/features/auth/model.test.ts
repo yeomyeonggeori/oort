@@ -332,6 +332,25 @@ describe("failure copy", () => {
     );
   });
 
+  // goal B13 R2 High 1: the server refuses a workspace it cannot parse rather
+  // than silently signing the person into the demo workspace. The refusal has to
+  // arrive in the language of the form, and it has to say what to do instead.
+  it("translates the workspace refusal and says how to get past it", () => {
+    const copy = signInFailureCopy(
+      new ApiError(
+        400,
+        "workspace must be a workspace id (uuid), or omitted to use the default workspace"
+      )
+    );
+    expect(copy.message).toContain("비워 두면");
+    expect(copy.retryable).toBe(false);
+    expect(/[a-z]{4,}/.test(copy.message)).toBe(false);
+    // A 400 that is NOT about the workspace must not borrow that sentence.
+    expect(
+      signInFailureCopy(new ApiError(400, "body shape rejected")).message
+    ).not.toContain("비워 두면");
+  });
+
   // goal B13 (QA M/L): the login form used to print the server's own English
   // sentence for any status the mapping did not claim — this test asserted
   // exactly that ("boom"). The raw string belongs in the network tab, not under

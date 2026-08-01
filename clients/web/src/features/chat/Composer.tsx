@@ -539,7 +539,7 @@ export function Composer({
             답합니다
           </span>
         )}
-        <span className="wide-only">
+        <span className="wide-only" data-testid="composer-keys-hint">
           {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
         </span>
       </p>

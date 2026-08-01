@@ -5,6 +5,7 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import { joinWithInvite, login, type LoginResponse } from "@/lib/api";
 import { API_BASE_DEFAULT, CONFIGURED_WORKSPACE, DEV_EMAIL, DEV_PASSWORD } from "@/lib/env";
@@ -69,6 +70,46 @@ function readOnline(): boolean {
   return typeof navigator === "undefined" ? true : navigator.onLine;
 }
 
+/**
+ * The shape a workspace id has, shown as a placeholder rather than prefilled as
+ * a value (goal B13 R2 High 1).
+ *
+ * The nil uuid on purpose: it reads as a *shape* and not as a workspace anyone
+ * could be signed into, which is exactly what the demo id it replaced failed at.
+ */
+const WORKSPACE_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * A field's label plus whether it is required — goal B13 R2 High 2.
+ *
+ * The form used to state this backwards: the two OPTIONAL fields (server
+ * address, workspace) each carried a hint explaining themselves, and the two
+ * REQUIRED ones stood bare. The only signal that email and password were
+ * mandatory was the *absence* of a hint, and `required` alone does not speak
+ * until after the person has already pressed 로그인.
+ *
+ * So every field now says which it is, in the same place, in one word. The
+ * marker is `text-meta` against the label's `text-body` — both are `ink-muted`,
+ * and the size step is what keeps a one-word annotation from reading as a second
+ * label.
+ */
+function FieldLabel({
+  children,
+  optional = false,
+}: {
+  children: ReactNode;
+  optional?: boolean;
+}) {
+  return (
+    <span className="flex items-baseline gap-2">
+      <span className="text-ink-muted">{children}</span>
+      <span className="text-meta text-ink-muted">
+        {optional ? "선택" : "필수"}
+      </span>
+    </span>
+  );
+}
+
 export function ConnectPage({
   onLoggedIn,
 }: {
@@ -81,6 +122,9 @@ export function ConnectPage({
   const [email, setEmail] = useState(DEV_EMAIL);
   const [password, setPassword] = useState(DEV_PASSWORD);
   const [workspace, setWorkspace] = useState(CONFIGURED_WORKSPACE);
+  // Open only when this build named a workspace: a value that exists must not be
+  // hidden behind a disclosure nobody knows to open.
+  const [workspaceOpen, setWorkspaceOpen] = useState(CONFIGURED_WORKSPACE !== "");
   const [inviteCode, setInviteCode] = useState("");
   const [mode, setMode] = useState<ConnectMode>("signIn");
   const [busy, setBusy] = useState(false);
@@ -263,11 +307,8 @@ export function ConnectPage({
               12px라 어디까지가 한 덩어리인지 눈으로 끊기지 않았다. */}
           <form onSubmit={onSubmit} className="flex flex-col gap-6">
             <div className="flex flex-col gap-1">
-              <label
-                htmlFor="connect-server"
-                className="text-body text-ink-muted"
-              >
-                서버 주소
+              <label htmlFor="connect-server" className="text-body">
+                <FieldLabel optional>서버 주소</FieldLabel>
               </label>
               {/* Deliberately NOT type="url": the browser's own url validity
                   check rejects a bare host outright, which would block the
@@ -315,7 +356,7 @@ export function ConnectPage({
             <div className="flex flex-col gap-3">
               {mode === "join" && (
                 <label className="flex flex-col gap-1 text-body">
-                  <span className="text-ink-muted">초대 코드</span>
+                  <FieldLabel>초대 코드</FieldLabel>
                   <Input
                     ref={codeRef}
                     value={inviteCode}
@@ -328,8 +369,10 @@ export function ConnectPage({
                 </label>
               )}
 
+              {/* 성재가 이 화면에서 물은 것이 정확히 "이메일 비밀번호 같은건
+                  뭘로 채워야해?"였다. 답은 한 줄이면 되고, 한 줄이어야 한다. */}
               <label className="flex flex-col gap-1 text-body">
-                <span className="text-ink-muted">이메일</span>
+                <FieldLabel>이메일</FieldLabel>
                 <Input
                   ref={emailRef}
                   type="email"
@@ -337,12 +380,20 @@ export function ConnectPage({
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="username"
                   required
+                  aria-describedby="connect-email-hint"
                   data-testid="login-email"
                 />
+                <span
+                  id="connect-email-hint"
+                  className="text-meta text-ink-muted"
+                  data-testid="login-email-hint"
+                >
+                  워크스페이스에 초대받은 주소
+                </span>
               </label>
 
               <label className="flex flex-col gap-1 text-body">
-                <span className="text-ink-muted">비밀번호</span>
+                <FieldLabel>비밀번호</FieldLabel>
                 <Input
                   ref={passwordRef}
                   type="password"
@@ -352,39 +403,77 @@ export function ConnectPage({
                     mode === "join" ? "new-password" : "current-password"
                   }
                   required
+                  aria-describedby="connect-password-hint"
                   data-testid="login-password"
                 />
+                {/* 참여는 비밀번호를 만드는 자리고 로그인은 이미 만든 것을 대는
+                    자리다. 한 문장이 두 경우에 다 맞을 수는 없다. */}
+                <span
+                  id="connect-password-hint"
+                  className="text-meta text-ink-muted"
+                  data-testid="login-password-hint"
+                >
+                  {mode === "join"
+                    ? "이 워크스페이스에서 쓸 비밀번호를 새로 정합니다"
+                    : "가입할 때 정한 비밀번호"}
+                </span>
               </label>
 
-              {/* 이 칸은 서버가 여러 워크스페이스를 담을 때만 쓰인다. 그전에는
-                  데모 워크스페이스의 uuid가 미리 채워져 있었고, 라벨도 힌트도
-                  id도 없어서 — 폼에서 유일하게 셋 다 없는 칸이었다 — 처음 만나는
-                  화면에 내부 식별자가 "당신이 관리해야 하는 값"처럼 놓여 있었다.
-                  비워 두는 것이 기본이고, 서버가 하는 일도 정확히 같다. */}
+              {/* 접어 두는 이유 (goal B13 R2 High 1).
+                  이 칸의 정답은 거의 모든 사람에게 "빈 칸"이다. 서버는 **UUID만**
+                  받는데 워크스페이스 UUID는 제품 어디에도 표시되지 않고, 다른
+                  화면은 전부 workspace를 slug와 이름으로 부른다. 그래서 첫 화면
+                  최상위에 열린 채로 두면, 채울 수 없는 값을 요구하는 칸이 필수
+                  칸들과 같은 무게로 서 있게 된다 — 정확히 "이메일 비밀번호 같은건
+                  뭘로 채워야해?"가 나온 배치다.
+                  대신 열었을 때는 형식을 보여준다: 라벨이 "워크스페이스 ID"이고
+                  placeholder가 UUID 모양이다. 채우는 법을 지우지 않으면서
+                  비우는 것이 기본임을 말하는 방법이다. */}
               {mode === "signIn" && (
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="connect-workspace"
-                    className="text-body text-ink-muted"
+                // gap-2: 토글과 펼쳐진 칸 사이 8px. gap-1(4px)이면 토글이
+                // "워크스페이스 ID" 라벨에 붙어 라벨의 윗줄처럼 읽혔다.
+                <div className="flex flex-col gap-2">
+                  {/* Collapsible 프리미티브가 이 레포에 아직 없다(design/ui에
+                      button·card·dialog·input·select뿐). 이 컨트롤이 필요로 하는
+                      건 aria-expanded/aria-controls 두 개뿐이라, 그 둘을 위해
+                      Radix 패키지를 들이는 편이 컨트롤보다 무겁다. */}
+                  <button
+                    type="button"
+                    onClick={() => setWorkspaceOpen((open) => !open)}
+                    aria-expanded={workspaceOpen}
+                    aria-controls="connect-workspace-field"
+                    className="self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    data-testid="login-workspace-toggle"
                   >
-                    워크스페이스
-                  </label>
-                  <Input
-                    id="connect-workspace"
-                    value={workspace}
-                    onChange={(e) => setWorkspace(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-describedby="connect-workspace-hint"
-                    data-testid="login-workspace"
-                  />
-                  <p
-                    id="connect-workspace-hint"
-                    className="text-meta text-ink-muted"
-                    data-testid="login-workspace-hint"
-                  >
-                    비워 두면 기본 워크스페이스로 연결합니다.
-                  </p>
+                    다른 워크스페이스로 로그인
+                  </button>
+                  {workspaceOpen && (
+                    <div
+                      id="connect-workspace-field"
+                      className="flex flex-col gap-1"
+                    >
+                      <label htmlFor="connect-workspace" className="text-body">
+                        <FieldLabel optional>워크스페이스 ID</FieldLabel>
+                      </label>
+                      <Input
+                        id="connect-workspace"
+                        value={workspace}
+                        onChange={(e) => setWorkspace(e.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder={WORKSPACE_ID_PLACEHOLDER}
+                        aria-describedby="connect-workspace-hint"
+                        data-testid="login-workspace"
+                      />
+                      <p
+                        id="connect-workspace-hint"
+                        className="text-meta text-ink-muted"
+                        data-testid="login-workspace-hint"
+                      >
+                        비워 두면 기본 워크스페이스로 연결합니다.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

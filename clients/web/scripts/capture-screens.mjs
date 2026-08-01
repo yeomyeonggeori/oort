@@ -1440,6 +1440,60 @@ async function captureMobile(browser, scheme) {
   await page.keyboard.press("Escape");
   await page.getByTestId("sidebar-scrim").waitFor({ state: "detached" });
 
+  // 3b. 에이전트와의 1:1 DM (goal B13 R2 Medium).
+  //     이 배치가 좁은 폭에 **새로** 만든 것이 여기 있다: 컴포저 힌트 줄은
+  //     원래 통째로 wide-only여서 600px 아래에서는 아예 없었는데, DM일 때는
+  //     "멘션 없이 바로 말하면 …가 답합니다"가 남는다. 즉 폰에서 컴포저 아래
+  //     텍스트 노드가 하나 생기는 유일한 경우다. 채널 캡처는 그 부재만
+  //     증명하므로 존재하는 쪽을 따로 찍는다 — 특히 이름이 긴 에이전트에서
+  //     이 줄이 가로로 새지 않는지가 요점이다.
+  await page.evaluate('location.hash = "/directory"');
+  await page
+    .locator('[data-testid="directory-row"][data-member-kind="agent"]')
+    .first()
+    .click();
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("composer-dm-hint").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  const dmHint = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="composer-dm-hint"]');
+    const line = document.querySelector('[data-testid="composer-hint"]');
+    const keys = document.querySelector('[data-testid="composer-keys-hint"]');
+    return {
+      // innerText는 렌더된 것만 준다. textContent는 display:none도 포함하므로
+      // "접혔는지"를 그것으로 물으면 영원히 안 접힌 것처럼 보인다.
+      text: el?.innerText?.trim() ?? null,
+      lineText: line?.innerText?.trim() ?? null,
+      keysDisplay: keys ? getComputedStyle(keys).display : null,
+      overflow: line ? line.scrollWidth - line.clientWidth : null,
+    };
+  })()`);
+  if (!dmHint.text) {
+    throw new Error(`DM 컴포저 힌트가 폰에서 사라졌다 ${scheme}`);
+  }
+  // 폰에는 ⌘도 물리 키보드 안내도 필요 없다: 그 조각만 wide-only로 접히고
+  // DM 문장은 남는다.
+  if (dmHint.keysDisplay !== "none") {
+    throw new Error(
+      `폰에서 Enter 안내가 접히지 않았다 (wide-only가 풀렸다) ${scheme}: display=${dmHint.keysDisplay}`
+    );
+  }
+  if (dmHint.lineText.includes("Enter로 보내기")) {
+    throw new Error(
+      `폰에서 Enter 안내가 여전히 렌더된다 ${scheme}: ${dmHint.lineText}`
+    );
+  }
+  if (dmHint.overflow > 0) {
+    throw new Error(
+      `DM 힌트가 가로로 샌다 ${scheme}: +${dmHint.overflow}px (${dmHint.lineText})`
+    );
+  }
+  console.log(`  dm hint ${scheme}: "${dmHint.lineText}" (넘침 0)`);
+  await assertNoHorizontalOverflow(page, `dm ${scheme}`);
+  await shoot(page, "dm");
+  await page.evaluate('location.hash = "/"');
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+
   // 4. 에이전트 허브. 900px 아래에서 명부와 상세가 한 열로 쌓이는 표면이라,
   //    폰에서 그 형태가 실제로 서는지 보는 자리다.
   await page.evaluate('location.hash = "/agents"');
@@ -1491,6 +1545,24 @@ async function captureScheme(browser, scheme) {
   const loginShot = `${OUT_DIR}/login-${scheme}.png`;
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
+
+  // 1a-2. 워크스페이스 칸을 펼친 상태 (goal B13 R2 High 1). 접어 둔 것이 "채우는
+  //       법을 지운 것"이 아님을 보이는 프레임이다: 열면 라벨이 "워크스페이스 ID"
+  //       이고 placeholder가 UUID 모양이라, 무엇을 넣는 칸인지 화면에서 읽힌다.
+  await login.getByTestId("login-workspace-toggle").click();
+  await login.getByTestId("login-workspace").waitFor({ state: "visible" });
+  const workspacePlaceholder = await login
+    .getByTestId("login-workspace")
+    .getAttribute("placeholder");
+  if (!/^[0-9a-f-]{36}$/.test(workspacePlaceholder ?? "")) {
+    throw new Error(
+      `워크스페이스 칸이 형식을 보여주지 않는다 ${scheme}: ${workspacePlaceholder}`
+    );
+  }
+  const workspaceShot = `${OUT_DIR}/login-workspace-${scheme}.png`;
+  await login.screenshot({ path: workspaceShot });
+  shots.push(workspaceShot);
+  await login.getByTestId("login-workspace-toggle").click();
 
   // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
   //     oort://join link fills server and code, so only email/password remain.

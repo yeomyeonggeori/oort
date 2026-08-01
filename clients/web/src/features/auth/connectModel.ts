@@ -180,6 +180,23 @@ export function signInFailureCopy(cause: unknown): ConnectFailure {
       retryable: false,
     };
   }
+  // goal B13 R2 High 1. The server now refuses a `workspace` that was supplied
+  // and is not a workspace id, instead of parsing it, discarding it and signing
+  // the person into the demo workspace without a word. Keyed on the server's
+  // stable English wording — the same technique `joinFailureCopy` uses for 410 —
+  // rather than on the bare 400, because a body-shape rejection is also a 400
+  // and does not deserve this sentence.
+  if (
+    failure.status === 400 &&
+    failure.message.toLowerCase().includes("workspace")
+  ) {
+    return {
+      message:
+        "워크스페이스 ID 형식이 아닙니다. 비워 두면 기본 워크스페이스로 연결합니다.",
+      suggestSignIn: false,
+      retryable: false,
+    };
+  }
   if (failure.status === 403) {
     // `PasswordLogin::Suspended` — the credential is right and the account is
     // not usable, which is a different sentence and a different next step from

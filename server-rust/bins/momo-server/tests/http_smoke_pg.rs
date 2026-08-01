@@ -864,3 +864,119 @@ async fn http_smoke_logout_and_refresh_rotation() {
         "no refresh token was presented, so none was revoked"
     );
 }
+
+// ---------------------------------------------------------------------------
+// goal B13 R2 High 1 — the login workspace is honoured or refused, never swapped
+// ---------------------------------------------------------------------------
+
+/// **A workspace that was typed and cannot be an id fails visibly; a workspace
+/// nobody named still falls back to the demo one.**
+///
+/// Before this batch `login` did
+/// `.and_then(|raw| Uuid::parse_str(raw).ok()).unwrap_or(DEMO_WORKSPACE_ID)`, so
+/// `workspace: "dawn-team"` signed the caller into the *demo* workspace without
+/// a word. Every screen after that looked like a working session in the wrong
+/// tenant — and the trap is real rather than theoretical, because the workspace
+/// id is never displayed anywhere in the product, so a person filling a box
+/// labelled 워크스페이스 reaches for the slug or the name they actually know.
+///
+/// The test asserts both halves, because fixing one by breaking the other is the
+/// obvious wrong turn:
+///   * a **supplied, unusable** value → 400, and **no session is issued**;
+///   * an **absent or blank** value → 200 into the demo workspace, unchanged.
+///
+/// Goes red if the fallback is widened back over parse failures, or if the
+/// blank path is dragged into the refusal with them.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b13_login_refuses_a_workspace_it_cannot_parse_and_keeps_the_blank_fallback() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // ---- 1. a value the caller typed that is not a workspace id ----------
+    for typed in ["dawn-team", "우리 팀", "not-a-uuid", "00000000"] {
+        let response = http
+            .post(format!("{base}/v1/auth/login"))
+            .json(&json!({
+                "email": fixture.email,
+                "password": TEST_PASSWORD,
+                "workspace": typed,
+            }))
+            .send()
+            .await
+            .expect("login with an unusable workspace");
+        assert_eq!(
+            response.status(),
+            400,
+            "{typed:?} must be refused rather than silently swapped for the demo workspace"
+        );
+        let body: Value = response.json().await.expect("error body");
+        let message = body["error"]["message"]
+            .as_str()
+            .expect("an error message")
+            .to_lowercase();
+        assert!(
+            message.contains("workspace"),
+            "the web client translates this refusal by matching on the word: {message}"
+        );
+        assert!(
+            body.get("accessToken").is_none() && body.get("member").is_none(),
+            "a refused login issues no session: {body}"
+        );
+    }
+
+    // ---- 2. the blank path is untouched ----------------------------------
+    // The connect form ships this box EMPTY, so this is the request almost every
+    // real sign-in makes.
+    for omitted in [
+        json!({"email": fixture.email, "password": TEST_PASSWORD}),
+        json!({"email": fixture.email, "password": TEST_PASSWORD, "workspace": ""}),
+        json!({"email": fixture.email, "password": TEST_PASSWORD, "workspace": "   "}),
+    ] {
+        let response = http
+            .post(format!("{base}/v1/auth/login"))
+            .json(&omitted)
+            .send()
+            .await
+            .expect("login without a workspace");
+        // The seeded member lives in its own workspace, not the demo one, so the
+        // demo fallback cannot find it: 401 is the RIGHT answer here and it is
+        // the proof the request reached the credential check instead of being
+        // refused at the workspace gate.
+        assert_eq!(
+            response.status(),
+            401,
+            "a blank workspace still resolves (to the demo workspace) and is judged \
+             on credentials, never rejected as malformed: {omitted}"
+        );
+        let body: Value = response.json().await.expect("error body");
+        assert_eq!(
+            body["error"]["message"],
+            json!("invalid credentials"),
+            "…and it fails as a credential mismatch, not as a bad workspace: {body}"
+        );
+    }
+
+    // ---- 3. the member's own workspace, named properly, still works -------
+    let response = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login with a real workspace id");
+    assert_eq!(response.status(), 200, "a real workspace id is honoured");
+    let body: Value = response.json().await.expect("login body");
+    assert_eq!(
+        body["member"]["workspaceId"],
+        json!(fixture.workspace.to_string()),
+        "the session is scoped to the workspace that was asked for: {body}"
+    );
+}
