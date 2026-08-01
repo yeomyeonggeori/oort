@@ -3,10 +3,11 @@
 //! The process connects as the BYPASSRLS `momo_worker` role and runs until
 //! SIGTERM/SIGINT.
 //!
-//! The provider is always the real HTTP one. `MockChatProvider` exists in the
-//! library for conformance tests and is deliberately unreachable from here: a
-//! binary that could answer with canned text because an env var was mistyped
-//! would be a far worse failure than refusing to boot.
+//! The provider is always the real HTTP pair — both wires, routed on the sealed
+//! envelope kind (B5.4b, `provider::WireRoutedProvider`). `MockChatProvider`
+//! exists in the library for conformance tests and is deliberately unreachable
+//! from here: a binary that could answer with canned text because an env var was
+//! mistyped would be a far worse failure than refusing to boot.
 
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 
