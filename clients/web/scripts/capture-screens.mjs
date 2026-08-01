@@ -357,6 +357,10 @@ const BODIES = [
       "3. 이전 태그로 되돌리기\n" +
       "4. 헬스 체크 통과 확인",
   ],
+  // design-review 3R Blocker, in a picture: two Korean date lines in a row used
+  // to become an ordered list and the browser renumbered the second one, so the
+  // reader saw a date nobody typed (12. 31. -> 13. 31.).
+  [ME, "12. 25. 크리스마스 휴무\n12. 31. 종무식 후 배포 동결"],
   [ME, "@hermes 어제 실패한 배포 로그도 같이 봐줄래요?"],
   // goal B8 H2. The worker's failure notice: one Korean sentence in the body,
   // a machine code in props, and NOTHING of the provider's own text anywhere.

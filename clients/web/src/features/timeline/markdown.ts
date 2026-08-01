@@ -219,8 +219,17 @@ export function parseInline(source: string, depth = 0): Inline[] {
         const close = closingIndex(source, i + run, delim);
         if (close > 0) {
           const after = source[close + delim.length];
-          if (char === "*" || !isWordChar(after)) {
-            const inner = source.slice(i + run, close);
+          const inner = source.slice(i + run, close);
+          // Italic on a run with no Latin in it is measurably NOTHING: the
+          // system Korean face has no italic and `em-latin-only` (tokens.css)
+          // stops the browser from faking one, so the two renderings are
+          // pixel-identical. Consuming the asterisks would then delete the
+          // author's emphasis outright rather than restyle it. Leaving them
+          // literal is this file's failure mode everywhere else, and it is what
+          // the channel did before markdown existed. Bold is exempt: weight is
+          // real on every face, so `**중요**` still renders as emphasis.
+          const renderable = run === 2 || /[A-Za-z0-9]/.test(inner);
+          if (renderable && (char === "*" || !isWordChar(after))) {
             flush();
             out.push({
               kind: run === 2 ? "strong" : "em",
@@ -255,18 +264,41 @@ const BULLET = /^\s{0,3}[-*+]\s+(.*)$/;
 // runbook used to be renumbered to 1 and 2, which is the same harm in a
 // different place. The author's start now rides through to the `<ol>`.
 //
-// What neither bound catches is `12. 25. 크리스마스 휴무`, so there is a second
-// rule (`opensOrderedList`): a numbered line only starts a list when another
-// numbered line follows it. A lone numbered line is far more often a date or a
+// What neither bound catches is `12. 25. 크리스마스 휴무`, so there are two more
+// rules: a numbered line only starts a list when another one follows it
+// (`opensOrderedList`), and a line whose own remainder starts with a second
+// number is a date rather than an item (`DATE_TAIL`). A lone numbered line is far more often a date or a
 // version than a list of one, and treating it as prose costs only the marker's
 // indentation while rendering exactly what the author typed. Deciding this by
 // LOOKAHEAD rather than by consuming and rewinding also means the block loop
 // always advances, so there is no shape of input it can spin on.
 const ORDERED = /^\s{0,3}([1-9]\d{0,2})[.)]\s+(.*)$/;
 
-/** A numbered line only opens a list when another numbered line follows it. */
+/**
+ * `25. 크리스마스 휴무` after a marker: the line's own remainder starts with a
+ * second number, which is a DATE (`12. 25.`, `8. 1.`), not a list item.
+ *
+ * This is the shape the neighbour test cannot see. Two date lines in a row
+ * satisfied "a numbered line follows a numbered line", became an `<ol start=12>`
+ * and let the browser renumber the second one: the author wrote
+ * `12. 31. 종무식` and the reader saw `13. 31. 종무식`. With `list-outside` the
+ * marker lands on the paragraph's own left edge, so nothing on screen says it is
+ * a list at all, and the line is indistinguishable from the author having typed
+ * the wrong date. A schedule is the ordinary reason to write two date lines in a
+ * row, and inventing a date is the same harm as the renumbered runbook this
+ * file's marker rules already exist to prevent.
+ */
+const DATE_TAIL = /^\d{1,2}[.)]\s/;
+
+/** A numbered line that is really a list item, not the head of a date. */
+function isOrderedItem(line: string | undefined): boolean {
+  const match = ORDERED.exec(line ?? "");
+  return match !== null && !DATE_TAIL.test(match[2]);
+}
+
+/** A numbered line only opens a list when another one follows it. */
 function opensOrderedList(lines: string[], at: number): boolean {
-  return ORDERED.test(lines[at] ?? "") && ORDERED.test(lines[at + 1] ?? "");
+  return isOrderedItem(lines[at]) && isOrderedItem(lines[at + 1]);
 }
 
 /**
@@ -322,6 +354,9 @@ export function parseMarkdown(source: string): Block[] {
       const items: Inline[][] = [];
       while (i < lines.length) {
         const current = lines[i];
+        // The SAME predicate that opened the list, so a date line cannot be
+        // absorbed into the middle of one and renumbered there instead.
+        if (ordered && !isOrderedItem(current)) break;
         const match = ordered ? ORDERED.exec(current) : BULLET.exec(current);
         if (!match) break;
         items.push(parseInline(ordered ? match[2] : match[1]));

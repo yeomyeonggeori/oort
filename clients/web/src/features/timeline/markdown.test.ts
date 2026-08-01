@@ -48,12 +48,29 @@ describe("safeHref", () => {
 
 describe("parseInline", () => {
   it("reads bold, italic and code", () => {
-    expect(parseInline("**굵게** 그리고 *기울임* 그리고 `코드`")).toEqual([
+    expect(parseInline("**굵게** 그리고 *soon* 그리고 `코드`")).toEqual([
       { kind: "strong", children: [text("굵게")] },
       text(" 그리고 "),
-      { kind: "em", children: [text("기울임")] },
+      { kind: "em", children: [text("soon")] },
       text(" 그리고 "),
       { kind: "code", text: "코드" },
+    ]);
+  });
+
+  // Italic on a run with no Latin renders pixel-identically to plain text (the
+  // system Korean face has no italic and we do not let the browser fake one), so
+  // consuming the asterisks would DELETE the author's emphasis instead of
+  // restyling it. Bold is exempt: weight is real on every face.
+  it("leaves italic markers literal when the run has no Latin to slant", () => {
+    expect(parseInline("실패하면 *즉시* 되돌립니다")).toEqual([
+      text("실패하면 *즉시* 되돌립니다"),
+    ]);
+    expect(parseInline("*v2 배포*")).toEqual([
+      { kind: "em", children: [text("v2 배포")] },
+    ]);
+    expect(parseInline("**즉시** 되돌립니다")).toEqual([
+      { kind: "strong", children: [text("즉시")] },
+      text(" 되돌립니다"),
     ]);
   });
 
@@ -256,8 +273,9 @@ describe("parseMarkdown", () => {
   });
 
   // `2026. 07. 30.` is how a Korean date is written, and it used to become a
-  // one item ordered list whose marker ate the year. Three guards hold this
-  // down: the digit bound, the no-leading-zero rule, and the two item minimum.
+  // one item ordered list whose marker ate the year. Four guards hold this
+  // down: the digit bound, the no-leading-zero rule, the "another numbered line
+  // must follow" rule, and the date-tail rule.
   it("does not read a Korean date as an ordered list", () => {
     for (const body of [
       "2026. 07. 30. 배포 예정",
@@ -275,6 +293,31 @@ describe("parseMarkdown", () => {
     // the parser, which is the thing that actually knows.
     expect(isPlainText("2026. 07. 30. 배포 예정")).toBe(true);
     expect(isPlainText("09. 30. 스탠드업")).toBe(true);
+  });
+
+  // Two date lines in a row satisfied "a numbered line follows a numbered line",
+  // became an <ol start=12>, and the browser renumbered the second one: the
+  // author wrote `12. 31. 종무식` and the reader saw `13. 31. 종무식`. Inventing a
+  // date is the same harm as renumbering a runbook.
+  it("does not read consecutive dates as an ordered list", () => {
+    expect(parseMarkdown("12. 25. 크리스마스 휴무\n12. 31. 종무식")).toEqual([
+      {
+        kind: "paragraph",
+        lines: [[text("12. 25. 크리스마스 휴무")], [text("12. 31. 종무식")]],
+      },
+    ]);
+    expect(parseMarkdown("8. 1. 회의\n8. 5. 데모")).toEqual([
+      { kind: "paragraph", lines: [[text("8. 1. 회의")], [text("8. 5. 데모")]] },
+    ]);
+  });
+
+  // …and a date sitting on top of a real list must not be absorbed into it and
+  // renumbered there, which would also renumber the genuine items below it.
+  it("does not absorb a date line into the list beneath it", () => {
+    expect(parseMarkdown("12. 25. 크리스마스 휴무\n1. 백업\n2. 배포")).toEqual([
+      { kind: "paragraph", lines: [[text("12. 25. 크리스마스 휴무")]] },
+      { kind: "list", ordered: true, start: 1, items: [[text("백업")], [text("배포")]] },
+    ]);
   });
 
   it("separates a list from the prose around it", () => {

@@ -455,11 +455,14 @@ export function failureGuidance(code: unknown): FailureGuidance | null {
   return (
     FAILURE_GUIDANCE.get(code) ?? {
       label: "실행을 끝내지 못했습니다.",
-      // No next step, on purpose. This branch is for codes this build has never
-      // seen (a work host, a policy, a tool), and sending all of them to the AI
-      // 연결 panel would be a confident wrong instruction. Where the evidence is
-      // remains true whatever the code turns out to mean.
-      detail: WHERE_THE_ORIGINAL_IS,
+      // No next step AND no source, on purpose. This branch is for codes this
+      // build has never seen (a work host, a policy, a tool). Sending all of
+      // them to the AI 연결 panel would be a confident wrong instruction, and
+      // naming the AI 제공자 as the author of the evidence is a confident wrong
+      // attribution: a reader who goes looking for provider output after a
+      // work-host failure finds nothing. Only the location survives, because
+      // only the location is true whatever the code turns out to mean.
+      detail: "원문은 이 실행 기록에만 남습니다.",
     }
   );
 }
