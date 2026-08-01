@@ -415,7 +415,7 @@ export interface FailureGuidance {
 // `outbox.last_error`; it writes no audit_log row on this path, so the copy
 // must not promise one. A sentence that over-claims where evidence lives is
 // worse than no sentence: somebody goes looking and finds nothing.
-const WHERE_THE_ORIGINAL_IS = "제공자가 보낸 원문은 이 실행 기록에만 남습니다.";
+const WHERE_THE_ORIGINAL_IS = "AI 제공자가 보낸 원문은 이 실행 기록에만 남습니다.";
 
 // A Map, not an object literal: the key comes off the wire, and an object
 // lookup answers for `constructor` and `__proto__` too. That would have handed
@@ -455,7 +455,11 @@ export function failureGuidance(code: unknown): FailureGuidance | null {
   return (
     FAILURE_GUIDANCE.get(code) ?? {
       label: "실행을 끝내지 못했습니다.",
-      detail: `같은 실패가 이어지면 설정의 AI 연결에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
+      // No next step, on purpose. This branch is for codes this build has never
+      // seen (a work host, a policy, a tool), and sending all of them to the AI
+      // 연결 panel would be a confident wrong instruction. Where the evidence is
+      // remains true whatever the code turns out to mean.
+      detail: WHERE_THE_ORIGINAL_IS,
     }
   );
 }

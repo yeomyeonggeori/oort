@@ -41,6 +41,19 @@ const BODY_CLASS = "break-words text-body leading-relaxed";
  */
 const CODE_CLASS = "rounded-sm bg-surface-hover font-mono text-meta";
 
+/**
+ * Could this block overflow the narrowest pane a message renders in?
+ *
+ * The floor, not a measurement: the thread panel at 390px leaves roughly 300px
+ * of content, and the 12px mono face runs about 7.2px per column, so ~41
+ * columns fit. Twenty-four is comfortably under that, so anything this returns
+ * false for cannot scroll anywhere, and everything ambiguous keeps its keyboard
+ * path.
+ */
+function canScroll(text: string): boolean {
+  return text.split("\n").some((line) => line.length > 24);
+}
+
 function InlineNodes({ nodes }: { nodes: Inline[] }) {
   return (
     <>
@@ -96,19 +109,31 @@ function InlineNode({ node }: { node: Inline }) {
 
 function BlockNode({ block }: { block: Block }) {
   if (block.kind === "code") {
+    const scrollable = canScroll(block.text);
     return (
       // A code block scrolls itself rather than widening the timeline: a 200
       // column log line must not push the channel into a horizontal scroll.
       <pre
-        // Focusable because it SCROLLS. A 200 column log line is the payload
-        // this block exists for, and an `overflow-x-auto` element that is not
-        // in the tab order cannot be scrolled by keyboard at all, so everything
-        // past its width was unreachable without a mouse (WCAG 2.1.1). The cost
-        // is one tab stop per code block, which is the smaller of the two.
-        tabIndex={0}
+        // Focusable ONLY when it can actually scroll. An `overflow-x-auto`
+        // element outside the tab order cannot be scrolled by keyboard at all,
+        // so everything past its width is unreachable without a mouse (WCAG
+        // 2.1.1) — but a two word ```sh``` block scrolls nothing, and a tab stop
+        // per code block in a dense agent channel is a real cost. `canScroll` is
+        // a floor, not a measurement, so it errs toward giving the stop.
+        //
+        // A focusable region also has to say what it is, or the reader lands on
+        // a stop that announces nothing. `group` rather than `region`, because
+        // twenty landmarks in one channel is its own kind of noise.
+        {...(scrollable
+          ? {
+              tabIndex: 0,
+              role: "group",
+              "aria-label": block.lang ? `${block.lang} 코드` : "코드",
+            }
+          : {})}
         className={cn(
           CODE_CLASS,
-          "mt-1 overflow-x-auto border border-line p-3",
+          "overflow-x-auto border border-line p-3",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         )}
         data-testid="message-code-block"
@@ -134,14 +159,14 @@ function BlockNode({ block }: { block: Block }) {
       // saying something nobody wrote.
       <ol
         start={block.start}
-        className={cn(BODY_CLASS, "mt-1 list-outside list-decimal ps-4")}
+        className={cn(BODY_CLASS, "list-outside list-decimal ps-4")}
         data-testid="message-list"
       >
         {items}
       </ol>
     ) : (
       <ul
-        className={cn(BODY_CLASS, "mt-1 list-outside list-disc ps-4")}
+        className={cn(BODY_CLASS, "list-outside list-disc ps-4")}
         data-testid="message-list"
       >
         {items}

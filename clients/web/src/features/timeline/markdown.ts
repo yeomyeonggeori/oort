@@ -114,13 +114,32 @@ function closingIndex(text: string, start: number, delim: string): number {
 }
 
 // ASCII URL characters only (RFC 3986 unreserved + sub-delims + a few), NOT
-// "everything up to whitespace". Korean glues its particles straight onto a
-// URL with no space (`.../run/9f2에 로그가`), so a whitespace-delimited scan
-// swallowed 에 into the href and produced a live link to a 404 — and in the
-// Tauri shell handed that address to the OS. Hangul and CJK are outside this
-// set, so the link now ends where the URL ends. `()[]{}<>"'` stay out because
-// they are markdown's own punctuation around a link.
+// "everything up to whitespace": Korean glues its particles straight onto a URL
+// with no space (`.../run/9f2에 로그가`), and a whitespace-delimited scan
+// swallowed 에 into the href.
+//
+// But stopping at the first non-ASCII character is not enough on its own,
+// because the prefix is ALSO a valid URL. `https://ko.wikipedia.org/wiki/모모`
+// would have linkified as `https://ko.wikipedia.org/wiki/` — a working control
+// that goes to the wrong page, which is worse than the bug it replaced. So the
+// scan's result is only used when what FOLLOWS it cannot be part of the URL
+// (see `AMBIGUOUS_URL_TAIL`); a URL that runs into a letter of any script is
+// left as literal text, complete and selectable, which is this file's stated
+// failure mode everywhere else. A fully non-ASCII host (`https://동아리.한국/`)
+// already behaved that way, so the two neighbouring cases now agree.
 const BARE_URL = /^https?:\/\/[A-Za-z0-9\-._~:/?#@!$&*+,;=%]+/i;
+
+/**
+ * True when the character after a bare-URL match could still belong to the URL,
+ * which makes the match a truncation rather than the whole address.
+ *
+ * Letters and digits of any script: `모` in a wiki path, `문` in a filename.
+ * Punctuation, whitespace and end-of-line are not ambiguous, so a URL followed
+ * by `를`, `)` or nothing links normally.
+ */
+function isAmbiguousUrlTail(char: string | undefined): boolean {
+  return char !== undefined && /[\p{L}\p{N}]/u.test(char);
+}
 
 /**
  * Inline nodes for one line. `depth` bounds nesting so a pathological body
@@ -177,7 +196,7 @@ export function parseInline(source: string, depth = 0): Inline[] {
 
     if ((char === "h" || char === "H") && !isWordChar(source[i - 1])) {
       const match = BARE_URL.exec(source.slice(i));
-      if (match) {
+      if (match && !isAmbiguousUrlTail(source[i + match[0].length])) {
         // Trailing sentence punctuation belongs to the sentence, not the URL.
         const raw = match[0].replace(/[.,;:!?]+$/, "");
         const href = safeHref(raw);
@@ -224,19 +243,27 @@ export function parseInline(source: string, depth = 0): Inline[] {
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+-]*)\s*$/;
 const BULLET = /^\s{0,3}[-*+]\s+(.*)$/;
-// At most THREE digits, and the number is captured.
+// Three digits at most, no leading zero, and the number is captured.
 //
-// `\d{1,9}` matched `2026. 07. 30. 배포 예정`, which is the ordinary Korean way
-// to write a date. The line became a one item ordered list, the year was eaten
-// as the marker, and the reader saw "1." in front of a date they never
-// numbered. Nothing on screen said a transform had happened. A list marker in a
-// chat message is a small number; a four digit run at the start of a line is
-// very likely a year.
+// `\d{1,9}` matched `2026. 07. 30. 배포 예정`, the ordinary Korean way to write
+// a date: the line became a one item ordered list, the year was eaten as the
+// marker, and the reader saw "1." in front of a date they never numbered. The
+// digit bound removes the year; `[1-9]` removes the zero padded month, because
+// `09.` is a date and a list marker is never written with a leading zero.
 //
 // The captured number matters just as much: an agent quoting steps 3 and 4 of a
-// runbook used to be renumbered to 1 and 2, which is the same class of harm in
-// a different place. The author's start now rides through to the `<ol>`.
-const ORDERED = /^\s{0,3}(\d{1,3})[.)]\s+(.*)$/;
+// runbook used to be renumbered to 1 and 2, which is the same harm in a
+// different place. The author's start now rides through to the `<ol>`.
+//
+// What neither bound catches is `12. 25. 크리스마스 휴무`, so there is a second
+// rule below: an ordered list needs at least TWO items. A lone numbered line is
+// far more often a date or a version than a list of one, and treating it as
+// prose costs only the marker's indentation while rendering exactly what the
+// author typed.
+const ORDERED = /^\s{0,3}([1-9]\d{0,2})[.)]\s+(.*)$/;
+
+/** An ordered list of one is more often a date than a list. */
+const MIN_ORDERED_ITEMS = 2;
 
 /**
  * Block structure. Consecutive non-blank lines are one paragraph and keep their
@@ -289,6 +316,7 @@ export function parseMarkdown(source: string): Block[] {
     if (bulletMatch || orderedMatch) {
       const ordered = orderedMatch !== null;
       const start = orderedMatch ? Number(orderedMatch[1]) : 1;
+      const first = i;
       const items: Inline[][] = [];
       while (i < lines.length) {
         const current = lines[i];
@@ -297,18 +325,29 @@ export function parseMarkdown(source: string): Block[] {
         items.push(parseInline(ordered ? match[2] : match[1]));
         i += 1;
       }
-      blocks.push({ kind: "list", ordered, start, items });
-      continue;
+      if (ordered && items.length < MIN_ORDERED_ITEMS) {
+        // Not a list after all. Rewind and let the paragraph reader take the
+        // line verbatim, marker and all.
+        i = first;
+      } else {
+        blocks.push({ kind: "list", ordered, start, items });
+        continue;
+      }
     }
 
     const paragraph: Inline[][] = [];
     while (i < lines.length) {
       const current = lines[i];
+      // The FIRST line is always taken, even when it looks like a block starter.
+      // It reaches here only because the reader above declined it (a lone
+      // numbered line that is really a date), and breaking on it instead would
+      // leave `i` where it was and spin this loop forever.
       if (
-        current.trim() === "" ||
-        FENCE.test(current) ||
-        BULLET.test(current) ||
-        ORDERED.test(current)
+        paragraph.length > 0 &&
+        (current.trim() === "" ||
+          FENCE.test(current) ||
+          BULLET.test(current) ||
+          ORDERED.test(current))
       ) {
         break;
       }
@@ -327,5 +366,5 @@ export function parseMarkdown(source: string): Block[] {
  * sentence must not start paying for a tree walk, and must not change shape.
  */
 export function isPlainText(source: string): boolean {
-  return !/[`*_[\]]|^\s{0,3}(\d{1,3}[.)]|[-*+])\s|https?:\/\//m.test(source);
+  return !/[`*_[\]]|^\s{0,3}([1-9]\d{0,2}[.)]|[-*+])\s|https?:\/\//m.test(source);
 }

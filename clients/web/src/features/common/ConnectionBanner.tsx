@@ -67,9 +67,16 @@ export function ConnectionBanner() {
   const alert = connectionAlert({ browserOffline, connStatus, sustained });
   const [retry, setRetry] = useState<"idle" | "running" | "failed">("idle");
 
-  // A retry that lands puts the rail back to `connected` and unmounts this
-  // whole banner, so this timer only ever fires for one that did not, and the
-  // banner then says so rather than silently returning to its first sentence.
+  // The retry state belongs to ONE incident, and this component never unmounts:
+  // it is mounted unconditionally by the shell and returns null from render,
+  // which is not the same thing. Without this reset a press whose dial actually
+  // SUCCEEDED left `failed` latched, and the next unrelated outage minutes later
+  // opened with "다시 연결하지 못했습니다" about a failure that never happened.
+  // The alert's kind is the incident's identity: it goes null the moment the
+  // rail recovers, and changes when the reason changes.
+  const alertKind = alert?.kind ?? null;
+  useEffect(() => setRetry("idle"), [alertKind]);
+
   useEffect(() => {
     if (retry !== "running") return;
     const timer = setTimeout(() => setRetry("failed"), RETRY_WINDOW_MS);
@@ -79,8 +86,12 @@ export function ConnectionBanner() {
   if (alert === null) return null;
 
   const canRetry = alert.canRetry && realtime !== null;
+  // Only where there is a button to press again. The browser-offline branch
+  // offers no retry, so telling that reader to "다시 시도하세요" would point at
+  // nothing, and it would cost them the sentence that is actually load-bearing
+  // there: the cached content they are looking at is the last confirmed state.
   const message =
-    retry === "failed"
+    retry === "failed" && canRetry
       ? "다시 연결하지 못했습니다. 네트워크와 서버 상태를 확인한 뒤 다시 시도하세요."
       : alert.message;
 

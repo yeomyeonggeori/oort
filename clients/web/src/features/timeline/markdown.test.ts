@@ -114,16 +114,41 @@ describe("parseInline", () => {
   });
 
   // Korean glues its particles onto the preceding word with no space, so a
-  // whitespace-delimited URL scan puts 에/에서/를 inside the href and produces a
-  // live link to a 404.
-  it("stops a bare url before a Korean particle", () => {
-    expect(parseInline("https://momo.example/run/9f2에 로그가 있습니다")).toEqual([
+  // whitespace-delimited URL scan puts 에/에서/를 inside the href.
+  //
+  // The fix cannot be "stop at the first non-ASCII character" on its own: the
+  // prefix is also a valid URL, so a Korean PATH would have linkified to a
+  // working control that opens a different page. Both shapes end as literal
+  // text, which is the whole file's failure mode.
+  it("leaves a url that runs into Korean as literal text", () => {
+    for (const body of [
+      "https://momo.example/run/9f2에 로그가 있습니다",
+      "https://ko.wikipedia.org/wiki/모모",
+      "https://momo.notion.site/배포-체크리스트-abc123",
+      "https://github.com/momo/repo/blob/main/문서.md",
+      "https://동아리.한국/공지",
+    ]) {
+      expect(parseInline(body), body).toEqual([text(body)]);
+    }
+  });
+
+  it("still links a url that ends where the sentence resumes", () => {
+    expect(parseInline("https://momo.example/run/9f2 에 로그가")).toEqual([
       {
         kind: "link",
         href: "https://momo.example/run/9f2",
         children: [text("https://momo.example/run/9f2")],
       },
-      text("에 로그가 있습니다"),
+      text(" 에 로그가"),
+    ]);
+    expect(parseInline("(https://momo.example/a)")).toEqual([
+      text("("),
+      {
+        kind: "link",
+        href: "https://momo.example/a",
+        children: [text("https://momo.example/a")],
+      },
+      text(")"),
     ]);
   });
 
@@ -180,6 +205,11 @@ describe("parseMarkdown", () => {
   });
 
   it("reads bullet and ordered lists", () => {
+    // A bullet list of one is still a list: `-` at the start of a line has no
+    // second life as a date the way a number does.
+    expect(parseMarkdown("- 하나")).toEqual([
+      { kind: "list", ordered: false, start: 1, items: [[text("하나")]] },
+    ]);
     expect(parseMarkdown("- 하나\n- 둘")).toEqual([
       { kind: "list", ordered: false, start: 1, items: [[text("하나")], [text("둘")]] },
     ]);
@@ -203,12 +233,25 @@ describe("parseMarkdown", () => {
   });
 
   // `2026. 07. 30.` is how a Korean date is written, and it used to become a
-  // one item ordered list whose marker ate the year.
+  // one item ordered list whose marker ate the year. Three guards hold this
+  // down: the digit bound, the no-leading-zero rule, and the two item minimum.
   it("does not read a Korean date as an ordered list", () => {
-    expect(parseMarkdown("2026. 07. 30. 배포 예정")).toEqual([
-      { kind: "paragraph", lines: [[text("2026. 07. 30. 배포 예정")]] },
-    ]);
+    for (const body of [
+      "2026. 07. 30. 배포 예정",
+      "09. 30. 스탠드업",
+      "12. 25. 크리스마스 휴무",
+      "1. 혼자 있는 번호는 목록이 아니다",
+    ]) {
+      expect(parseMarkdown(body), body).toEqual([
+        { kind: "paragraph", lines: [[text(body)]] },
+      ]);
+    }
+    // `isPlainText` is the fast path, not a verdict: it only decides whether the
+    // parser runs at all, and both routes render the same paragraph. It answers
+    // true where the marker itself cannot match, and hands the ambiguous ones to
+    // the parser, which is the thing that actually knows.
     expect(isPlainText("2026. 07. 30. 배포 예정")).toBe(true);
+    expect(isPlainText("09. 30. 스탠드업")).toBe(true);
   });
 
   it("separates a list from the prose around it", () => {
