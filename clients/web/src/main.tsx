@@ -4,7 +4,13 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/app/queryClient";
 import { App } from "@/app/App";
 import { initSessionStore } from "@/lib/session";
+import { trackViewportHeight } from "@/app/viewportHeight";
 import "@/design/tokens.css";
+
+// 셸 높이의 근거 (goal B9). 첫 렌더보다 먼저 켠다: 로그인 화면도 셸 밖의 표면이라
+// 같은 높이를 쓰고, 컴포저가 있는 첫 프레임이 이미 맞아 있어야 한다. 해제 함수는
+// 쓰지 않는다 — 이 구독은 문서와 수명이 같다.
+trackViewportHeight();
 
 // StrictMode is intentionally OFF: its dev-only double-invocation would
 // double-subscribe the Centrifugo rail and make the realtime/resume demo
