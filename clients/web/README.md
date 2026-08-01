@@ -75,16 +75,56 @@ What changes below 600px:
 | 설정 | 192px nav + body | nav on top, body below |
 | touch targets | 28~32px controls | 44px minimum (`tap-target`) |
 | composer | last row of the column | same, plus `env(safe-area-inset-bottom)` |
+| shell height | `100%` | `--app-viewport-height` (goal B9, below) |
+| shell top | `0` | `env(safe-area-inset-top)` |
 | form controls | `--text-body` (14px) | `--text-title` (16px), or iOS zooms in |
 
 `npm run capture:design` shoots both: 1280x800 first (the frames that must not
-change), then 390x844 (`mobile-*.png`) in light and dark. The phone pass is also
+change), then 390x844 (`mobile-*.png`) in light and dark, at
+`deviceScaleFactor: 3` under an iPhone user agent. `CAPTURE_PROFILE=mobile`
+(or `desktop`) runs one of the two while working on it. The phone pass is also
 a check, so a broken board fails the run instead of shipping as a screenshot:
 
-- no horizontal document overflow on any of the five phone screens,
+- no horizontal overflow on any phone screen — of the **document** and of
+  **every scroll container on it**,
 - the drawer sits at x=0, leaves a visible strip of the surface behind it, puts
   the caret inside itself, and marks the covered surface `inert`,
-- 채널 목록 열기 / 컴포저 / 전송 measure at least 44px tall.
+- 채널 목록 열기 / 컴포저 / 전송 measure at least 44px tall,
+- the header row is at least 44px and `.app-shell` declares
+  `env(safe-area-inset-top)`,
+- the composer stays inside the visible viewport, including with the iOS bottom
+  toolbar emulated,
+- a 74-character unbroken token appended to every server-written string in the
+  channel surface still does not make anything drag sideways.
+
+### The phone is not a small desktop (goal B9)
+
+Three things a 390px Chromium window does NOT reproduce, each measured against
+성재's iPhone captures (2026-08-02) and each now carried by the capture:
+
+- **The visible viewport is not the layout viewport.** iOS Safari's bottom
+  toolbar covers ~100px without shrinking the layout viewport, so `height: 100%`
+  and `100dvh` both answer 844px on an 844px screen while 744px is what the
+  reader can see; the composer sat 88px behind the toolbar (measured). Resizing
+  a desktop window shrinks both together and can never show this. The shell now
+  takes its height from `--app-viewport-height`, written by
+  `src/app/viewportHeight.ts` from `visualViewport`, and the capture reproduces
+  the mismatch by making `VisualViewport.prototype.height` answer 100px short —
+  the platform's behaviour, not ours, so an implementation that ignores
+  `visualViewport` fails the assertion.
+- **The document cannot overflow, so measuring the document proves nothing.**
+  `.app-shell` is `overflow: clip`, so a leak inside the shell never reaches
+  `document.scrollWidth`; it turns the timeline scroller into something you can
+  drag sideways instead (measured at +781px with long tokens, while the document
+  read 0). The assertion now covers every box whose computed `overflow-x` is
+  `auto`/`scroll`, and names the widest descendant that pushed it.
+- **Short fixture sentences do not exercise line breaking.** `overflow-wrap:
+  break-word` does not lower a flex item's automatic minimum size, so a token
+  with no break opportunity — a gateway URL, a digest, a path — sizes its box to
+  itself. `tokens.css` now sets `overflow-wrap: anywhere` on the text elements
+  (`:where(...)`, zero specificity, so `truncate` still truncates), and the
+  capture ends with a stress frame that appends such a token to every
+  server-written string in the timeline and the channel list.
 
 ## Connect surface + dynamic API base (MOMO-604, P2)
 

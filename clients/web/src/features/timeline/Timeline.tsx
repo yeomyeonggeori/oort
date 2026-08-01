@@ -204,7 +204,13 @@ export function Timeline({
     <Virtuoso
       key={epoch}
       ref={ref}
-      className="h-full"
+      // `overscroll-contain` (goal B9): 목록 끝에 닿은 뒤 한 번 더 미는 손가락이
+      // 브라우저에게 넘어가지 않는다. 넘어가면 안드로이드 크롬은 pull-to-refresh로
+      // 페이지를 다시 읽고 iOS는 화면 전체를 고무줄처럼 끌어당긴다 — 타임라인 맨
+      // 위에서 더 당기는 몸짓의 뜻은 언제나 "더 옛날 것"이지 "앱을 다시 열기"가
+      // 아니다. `none`이 아닌 이유는 고무줄 자체는 남겨야 화면이 살아 있게
+      // 느껴지기 때문이다.
+      className="overscroll-contain h-full"
       data={items}
       data-testid="timeline-virtuoso"
       alignToBottom

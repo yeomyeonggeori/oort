@@ -40,6 +40,13 @@ const VIEWPORT = { width: 1280, height: 800 };
 // 타깃과 가로 오버플로는 포인터 컨텍스트에서는 측정되지 않는다.
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
 
+// 실기기 근사 (goal B9). 렌더 엔진은 여전히 Chromium이지만, UA로 갈리는 코드 경로는
+// 이 문자열을 본다. 성재의 캡처가 이 기기·이 브라우저에서 나왔으므로 프로파일도 그것을
+// 말한다. 엔진 자체를 바꾸는 것(WebKit 프로파일)은 이 배치의 범위 밖이고, 이 배치가
+// 고치는 결함 셋은 전부 기하이지 엔진 차이가 아니다.
+const IPHONE_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
 // goal B8 B2: the shell's connection banner waits out a 15s dwell before it
 // claims the rail is down (features/common/connectionAlert.ts SUSTAINED_DOWN_MS).
 // Kept a second over it so the capture is not racing the threshold it is meant
@@ -379,9 +386,30 @@ const BODIES = [
   ],
 ];
 
+// 긴 무공백 토큰 (goal B9 §0.1이 지목한 모양). 위 열 줄에서 가장 긴 낱말은
+// `agentworker.resume_approval.v0`(30자)이고, 390px 폰에서 그 정도는 아무것도 밀어내지
+// 못한다. 실제 팀 채널에 흐르는 것은 이런 것들이다: 게이트웨이가 뱉은 URL 한 줄,
+// 다이제스트, 그리고 사람이 띄어쓰기 없이 이어 쓴 한 덩어리. 셋을 한 줄에 몰아 넣은
+// 것은 억지가 아니라 재현이다 — 502를 붙여 보내는 사람은 요청 URL과 페이로드 해시를
+// 같이 붙인다.
+//
+// **이 줄은 지금 통과한다**(Chromium/WebKit 양쪽 390px에서 접힌다, 실측). 본문에는
+// `min-w-0 flex-1` 조상이 있어 상자 폭이 정해지고, 그러면 `break-words`만으로도 낱말이
+// 쪼개지기 때문이다. 그래도 남기는 이유는 §0.1이 이 모양을 원인 후보로 지목했기
+// 때문이다: 통과하는 픽스처는 주장이 아니라 **울타리**다. 실제로 붉었던 자리와 그것을
+// 재는 방법은 아래 `applyLongTokenStress`에 있다.
+const LONG_URL =
+  "https://gateway.dawn.internal:8443/v1/workspaces/00000000-0000-7000-8000-000000000001/channels/00000000-0000-7000-8000-000000000201/messages?before=1400&limit=200&include=props";
+const LONG_DIGEST =
+  "sha256:9f2b7c14e0a83d5b6f1c2ea47d90b83c5417ae62d0f39b8c74a15e2306bd9fc1";
+// 띄어쓰기 없이 이어 쓴 한글 한 덩어리 (§0.1의 `@oort ...답변이` 모양). 한글은 음절
+// 사이에서 끊을 수 있어 이것만으로는 넘치지 않고, 라틴 토큰과 이어 붙어야 한 낱말이
+// 된다 — 그래서 붙여 쓴다.
+const LONG_HANGUL = "재시작루프가또났는데원인은outbox_drain_worker_restart_loop_2026_08_02";
+
 function makeMessages(count) {
   const base = Date.now() - count * 60_000;
-  return Array.from({ length: count }, (_, i) => {
+  const rows = Array.from({ length: count }, (_, i) => {
     const [author, body, type, props] = BODIES[i % BODIES.length];
     return {
       id: `capture-${i + 1}`,
@@ -397,6 +425,22 @@ function makeMessages(count) {
       createdAtMs: base + i * 60_000,
     };
   });
+  // 언제나 **가장 최근 줄**이다. 타임라인은 아래에 붙어 열리고(alignToBottom) 가상
+  // 목록이라, 중간에 끼워 넣은 행은 캡처가 서는 자리에서 렌더되지 않을 수 있다.
+  // 게이트가 재지 못하는 픽스처는 픽스처가 아니다.
+  rows.push({
+    id: `capture-${count + 1}`,
+    channelId: GENERAL_ID,
+    seq: 1400 + count,
+    hlcTs: base + count * 60_000,
+    hlcCount: 0,
+    authorMemberId: ME,
+    type: "text",
+    body: `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`,
+    state: "sent",
+    createdAtMs: base + count * 60_000,
+  });
+  return rows;
 }
 
 // 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
@@ -965,18 +1009,64 @@ async function signIn(page) {
 }
 
 /**
- * 가로로 새는 것이 있는가 (goal B6). 폰에서 가로 스크롤이 생기면 읽는 사람은
- * 글자를 따라 좌우로 끌어야 하고, 그 순간 화면 폭은 더 이상 390px이 아니다.
- * 셸은 `overflow: clip`으로 잘라내지만(tokens.css `app-shell`) 로그인 화면처럼
- * 셸 밖의 표면도 있으므로 문서 자체를 잰다.
+ * 가로로 새는 것이 있는가 (goal B6, goal B9에서 확대).
+ *
+ * B6은 **문서 하나만** 쟀고, 그 단언은 이 셸에서 구조적으로 아무것도 잡을 수 없다:
+ * `app-shell`이 `overflow: clip`이라 셸 안의 어떤 것도 문서 폭을 넓히지 못하므로
+ * `document.scrollWidth`는 언제나 화면 폭이다. 넘친 것이 있어도 그것은 **셸 안의
+ * 스크롤 상자** 안에서 넘친다 — react-virtuoso의 스크롤러는 `overflow-y: auto`이고,
+ * 한 축만 지정된 상자는 나머지 축이 `auto`로 계산되므로(CSS Overflow §3) 넘친 한
+ * 줄이 타임라인을 좌우로 끌 수 있게 만든다. 실측: 긴 무공백 토큰 아래에서 타임라인
+ * 스크롤러가 +781px일 때에도 문서는 0을 답했다. 화면에서 그것은 왼쪽 아바타와 여백이
+ * 밀려 나간 모습으로 보이고, 성재 실캡처가 보여준 것이 그 모양이다.
+ *
+ * 그래서 이제 재는 것은 문서 + **모든 가로 스크롤 상자**다. 대상은 계산된
+ * `overflow-x`가 `auto`/`scroll`인 상자 전부이고, 판정은 하나다: 가로로 끌 수 있으면
+ * 실패. 세로로만 스크롤할 표면이 가로로도 끌린다는 것은 언제나 새는 것이 있다는 뜻이다.
+ *
+ * `hidden`/`clip` 상자는 세지 않는다. 그 상자들은 자르는 것이 일이고(닫힌 서랍이
+ * `translateX(-100%)`로 밖에 서 있는 것이 그 예다), 잘린 것은 사람이 끌어서 볼 수도
+ * 없으므로 이 단언이 말하는 결함과 성질이 다르다.
  */
 async function assertNoHorizontalOverflow(page, where) {
   const measure = await page.evaluate(`(() => {
     const doc = document.scrollingElement || document.documentElement;
+    const describe = (el) => {
+      const id = el.getAttribute("data-testid");
+      if (id) return '[data-testid=' + id + ']';
+      const cls = (el.getAttribute("class") || "").trim().split(/\\s+/).filter(Boolean);
+      return el.tagName.toLowerCase() + (cls.length ? "." + cls.slice(0, 3).join(".") : "");
+    };
+    const leaks = [];
+    for (const el of document.querySelectorAll("*")) {
+      const overflowX = getComputedStyle(el).overflowX;
+      if (overflowX !== "auto" && overflowX !== "scroll") continue;
+      const over = el.scrollWidth - el.clientWidth;
+      if (over <= 0) continue;
+      // 상자 이름만으로는 고칠 자리를 못 찾는다: 타임라인이 끌린다는 것은
+      // 타임라인의 결함이 아니라 그 안의 어떤 상자가 접히지 않았다는 뜻이다.
+      // 실패 메시지가 그 상자를 지목해야 게이트가 진단이 된다.
+      const edge = el.getBoundingClientRect().left + el.clientWidth;
+      let worst = null;
+      for (const child of el.querySelectorAll("*")) {
+        const past = Math.round(child.getBoundingClientRect().right - edge);
+        if (past > 0 && (worst === null || past > worst.past)) {
+          worst = { past, where: describe(child) };
+        }
+      }
+      leaks.push({
+        where: describe(el),
+        over,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        worst,
+      });
+    }
     return {
       overflowX: doc.scrollWidth - doc.clientWidth,
       scrollWidth: doc.scrollWidth,
       clientWidth: doc.clientWidth,
+      leaks,
     };
   })()`);
   if (measure.overflowX > 0) {
@@ -984,8 +1074,233 @@ async function assertNoHorizontalOverflow(page, where) {
       `가로 오버플로 ${where}: 문서가 ${measure.scrollWidth}px인데 화면은 ${measure.clientWidth}px다`
     );
   }
+  if (measure.leaks.length > 0) {
+    const lines = measure.leaks
+      .map(
+        (l) =>
+          `    ${l.where}: ${l.scrollWidth}px 내용 / ${l.clientWidth}px 상자 (+${l.over})` +
+          (l.worst ? `\n      밀어낸 것: ${l.worst.where} (+${l.worst.past}px)` : "")
+      )
+      .join("\n");
+    throw new Error(
+      `가로 오버플로 ${where}: 세로 스크롤 상자 ${measure.leaks.length}개가 가로로도 끌린다\n${lines}`
+    );
+  }
   console.log(
-    `  overflow-x ${where}: 0 (${measure.clientWidth}px 문서 = ${measure.scrollWidth}px)`
+    `  overflow-x ${where}: 0 (문서 ${measure.clientWidth}px = ${measure.scrollWidth}px, 스크롤 상자 누수 0)`
+  );
+}
+
+// 긴 무공백 토큰 스트레스 (goal B9).
+//
+// 픽스처에 긴 토큰을 심는 것만으로는 부족하다는 것이 이 배치의 실측에서 드러났다:
+// 메시지 본문·채널 이름·에이전트 핸들·승인 카드 값에 각각 실제 길이의 무공백 토큰을
+// 넣어 재보니 전부 통과했다(본문은 `min-w-0` + `break-words`가 잡고, 이름 계열은
+// `truncate`가 잡는다). 그런데도 실기기에서는 가로로 밀렸다. 픽스처가 짧은 것이 아니라
+// **어느 자리가 약한지 우리가 모른다**는 것이 문제다.
+//
+// 그래서 이 단계는 자리를 고르지 않는다: 서버가 쓴 글이 닿는 영역(타임라인 행과 채널
+// 목록) 안의 **모든 텍스트 노드**에 한 덩어리를 붙이고, 그 뒤 어떤 세로 스크롤 상자도
+// 가로로 끌리지 않아야 한다고 요구한다.
+//
+// 경계는 **누가 그 문자열을 썼는가**다. 이 클라이언트가 쓴 글은 제외한다: 컨트롤
+// 라벨(button/summary/탭), 설명 목록의 **라벨 쪽**(`dt` — 값 쪽인 `dd`는 서버의
+// 것이라 남는다, agentCardModel.ts의 라벨은 고정 목록이다), 시계(`time`), 상태 칩
+// (`*-chip`). 이 넷은 닫힌 문자열 집합이고 길어질 수 없으며, 셋 다 `shrink-0`으로
+// 서 있는 것이 옳다 — 긴 제목 옆에서 상태 칩이 찌그러지면 상태를 읽을 수 없다.
+// 여기에 74자를 붙이는 것은 일어날 수 없는 조건을 만들어 놓고 고치라고 하는 것이다.
+// 나머지 — 본문, 이름, 핸들, 소유자, 채널 이름, 카드의 값 — 는 전부 사람이나 서버가
+// 쓰고, 그래서 전부 스트레스를 받는다.
+const LONG_TOKEN_STRESS =
+  "outbox_drain_worker_restart_loop_2026_08_02_9f2b7c14e0a83d5b6f1c2ea47d90b83c";
+
+/** 이 클라이언트가 쓴 문자열이 사는 자리. 위 주석이 그 경계를 설명한다. */
+const LONG_TOKEN_STRESS_SKIP =
+  'button, summary, [role="button"], [role="tab"], dt, time, [data-testid$="-chip"]';
+
+async function applyLongTokenStress(page) {
+  const touched = await page.evaluate(`(() => {
+    const TOKEN = ${JSON.stringify(LONG_TOKEN_STRESS)};
+    const roots = document.querySelectorAll(
+      '[data-testid="timeline-message"], [data-testid="channel-list"]'
+    );
+    const nodes = [];
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (!node.nodeValue || node.nodeValue.trim().length < 2) continue;
+        const owner = node.parentElement;
+        if (!owner) continue;
+        if (owner.closest(${JSON.stringify(LONG_TOKEN_STRESS_SKIP)})) continue;
+        nodes.push(node);
+      }
+    }
+    for (const node of nodes) node.nodeValue = node.nodeValue + " " + TOKEN;
+    return nodes.length;
+  })()`);
+  if (touched === 0) throw new Error("긴 토큰 스트레스: 붙일 글이 하나도 없다");
+  return touched;
+}
+
+// iOS 사파리 하단 바가 가리는 높이 (goal B9). 성재 실캡처(2026-08-02 22:54)에서
+// 컴포저가 그 뒤로 들어갔다. 100px는 사파리 하단 툴바(주소 줄 + 탭/공유 줄)의
+// 실측치에 맞춘 값이고, 정확한 숫자보다 중요한 것은 **레이아웃 뷰포트와 보이는
+// 뷰포트가 어긋난 상태**를 만든다는 것이다.
+const BOTTOM_CHROME_PX = 100;
+
+/**
+ * 하단 브라우저 크롬을 켠다 (goal B9).
+ *
+ * Chromium은 이 어긋남을 스스로 만들지 못한다: 창을 줄이면 레이아웃 뷰포트와 시각
+ * 뷰포트가 **함께** 줄어들어 `100dvh`로도 답이 맞아버리고, 그래서 이 결함은 뷰포트를
+ * 줄이는 방식으로는 절대 재현되지 않는다. iOS 사파리가 하는 일은 다르다: 레이아웃
+ * 뷰포트는 그대로 두고(그래서 `height: 100%`도 `100dvh`도 844px을 가리킨다) 시각
+ * 뷰포트만 744px로 줄인 뒤, 남은 100px을 자기 툴바로 덮는다.
+ *
+ * 그 어긋남을 그대로 만든다: `VisualViewport.prototype.height`가 100px 작은 값을
+ * 답하게 하고 `resize`를 울린다. 플랫폼 API를 흉내내는 것이지 우리 코드를 흉내내는
+ * 것이 아니다 — 단언은 "앱이 visualViewport를 읽었는가"가 아니라 "**그려진** 컴포저의
+ * 아랫변이 보이는 높이 안에 있는가"이므로, 읽지 않는 구현은 여기서 반드시 붉어진다.
+ */
+async function emulateBottomChrome(page) {
+  await page.evaluate(`(async () => {
+    const vv = window.visualViewport;
+    const proto = Object.getPrototypeOf(vv);
+    if (!window.__momoBottomChrome) {
+      window.__momoBottomChrome = Object.getOwnPropertyDescriptor(proto, "height");
+    }
+    const original = window.__momoBottomChrome;
+    Object.defineProperty(proto, "height", {
+      configurable: true,
+      get() {
+        return original.get.call(this) - ${BOTTOM_CHROME_PX};
+      },
+    });
+    vv.dispatchEvent(new Event("resize"));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  })()`);
+}
+
+/** 크롬을 걷는다. 다음 프레임들은 다시 온전한 화면에서 찍힌다. */
+async function releaseBottomChrome(page) {
+  await page.evaluate(`(async () => {
+    const vv = window.visualViewport;
+    const proto = Object.getPrototypeOf(vv);
+    if (window.__momoBottomChrome) {
+      Object.defineProperty(proto, "height", window.__momoBottomChrome);
+      delete window.__momoBottomChrome;
+    }
+    vv.dispatchEvent(new Event("resize"));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  })()`);
+}
+
+/**
+ * 컴포저가 보이는 뷰포트 안에 있는가 (goal B9). 재는 것은 그려진 기하다: 입력창과
+ * 전송 버튼의 아랫변이 둘 다 `visualViewport.height` 안이어야 한다. 한 픽셀의
+ * 반올림은 봐주고 그 이상은 봐주지 않는다 — 성재 캡처에서 가려진 것은 100px였다.
+ */
+async function assertComposerVisible(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const visible = Math.round(window.visualViewport.height);
+    const rect = (id) => {
+      const el = document.querySelector('[data-testid="' + id + '"]');
+      return el ? Math.round(el.getBoundingClientRect().bottom) : null;
+    };
+    const shell = document.querySelector(".app-shell");
+    return {
+      visible,
+      layout: window.innerHeight,
+      input: rect("composer-input"),
+      send: rect("composer-send"),
+      shell: shell ? Math.round(shell.getBoundingClientRect().height) : null,
+    };
+  })()`);
+  for (const [label, bottom] of [
+    ["입력창", measure.input],
+    ["전송 버튼", measure.send],
+  ]) {
+    if (bottom === null) {
+      throw new Error(`컴포저 가시성 ${where}: ${label}이 없다`);
+    }
+    if (bottom > measure.visible + 1) {
+      throw new Error(
+        `컴포저 가시성 ${where}: ${label} 아랫변이 ${bottom}px인데 보이는 높이는 ` +
+          `${measure.visible}px다 (레이아웃 ${measure.layout}px, 셸 ${measure.shell}px) ` +
+          `— 브라우저 하단 바 뒤로 ${bottom - measure.visible}px 들어갔다`
+      );
+    }
+  }
+  console.log(
+    `  composer ${where}: 입력창 ${measure.input}px · 전송 ${measure.send}px <= 보이는 ${measure.visible}px (레이아웃 ${measure.layout}px, 셸 ${measure.shell}px)`
+  );
+}
+
+/**
+ * 위쪽이 답답한가 (goal B9 §0.3). 성재 실캡처 1번의 지적은 "헤더 아래 콘텐츠가 상단에
+ * 붙어 답답"이었고, 그 인상은 두 숫자로 갈린다: 헤더 줄 자체가 손가락 줄만큼 높은가,
+ * 그리고 셸이 위쪽 안전 영역을 인정하는가.
+ *
+ * 안전 영역은 값이 아니라 **선언**을 잰다. 사파리 탭에서 `safe-area-inset-top`은 0이다
+ * (브라우저 크롬이 이미 그 자리를 갖고 있다). 그러니 인셋이 0이라는 사실은 결함이
+ * 아니고, 인셋이 47px인 곳(홈 화면에 추가한 standalone)에서 셸이 그만큼 물러날
+ * 준비가 되어 있는지가 결함이다. 헤드리스 크로미움에는 노치가 없으므로 이 게이트가
+ * 관찰할 수 있는 것은 `.app-shell`이 `env(safe-area-inset-top)`을 실제로 걸어 두었다는
+ * 사실뿐이고, 그것을 컴퓨티드 스타일이 아니라 **선언된 규칙**에서 읽는다.
+ */
+async function assertTopBreathing(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const header = document.querySelector("main header");
+    const shell = document.querySelector(".app-shell");
+    const declared = [];
+    for (const sheet of document.styleSheets) {
+      let rules;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue;
+      }
+      const walk = (list) => {
+        for (const rule of list) {
+          if (rule.cssRules) walk(rule.cssRules);
+          if (
+            rule.selectorText &&
+            rule.selectorText.includes("app-shell") &&
+            rule.style &&
+            rule.style.getPropertyValue("padding-block-start").includes("safe-area-inset-top")
+          ) {
+            declared.push(rule.selectorText);
+          }
+        }
+      };
+      walk(rules);
+    }
+    return {
+      headerHeight: header ? Math.round(header.getBoundingClientRect().height) : null,
+      shellTop: shell ? Math.round(shell.getBoundingClientRect().top) : null,
+      safeAreaTopDeclared: declared.length > 0,
+    };
+  })()`);
+  if (measure.headerHeight === null) {
+    throw new Error(`위쪽 여백 ${where}: 헤더가 없다`);
+  }
+  // 44px는 이 파일이 손가락 타깃에 쓰는 것과 같은 수다(WCAG 2.5.5 / HIG). 헤더는
+  // 한 줄이지만 그 줄에 서 있는 것은 전부 눌러야 하는 것들이라(햄버거, 허들, 패널)
+  // 줄 자체가 그 높이를 가져야 한다.
+  if (measure.headerHeight < 44) {
+    throw new Error(
+      `위쪽 여백 ${where}: 헤더가 ${measure.headerHeight}px다 (최소 44px)`
+    );
+  }
+  if (!measure.safeAreaTopDeclared) {
+    throw new Error(
+      `위쪽 여백 ${where}: .app-shell이 env(safe-area-inset-top)을 걸지 않았다 — ` +
+        `viewport-fit=cover로 노치 아래까지 그리면서 위로 물러나지 않으면 헤더가 상태바에 들어간다`
+    );
+  }
+  console.log(
+    `  top ${where}: 헤더 ${measure.headerHeight}px, 셸 상단 ${measure.shellTop}px, safe-area-top 선언됨`
   );
 }
 
@@ -1039,6 +1354,7 @@ async function captureMobile(browser, scheme) {
     deviceScaleFactor: 3,
     isMobile: true,
     hasTouch: true,
+    userAgent: IPHONE_UA,
     colorScheme: scheme,
     reducedMotion: "reduce",
   });
@@ -1067,7 +1383,18 @@ async function captureMobile(browser, scheme) {
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `chat ${scheme}`);
   await assertTapTargets(page, `chat ${scheme}`);
+  await assertTopBreathing(page, `chat ${scheme}`);
+  await assertComposerVisible(page, `chat ${scheme}`);
   await shoot(page, "chat");
+
+  // 2b. 하단 브라우저 크롬이 100px을 가져간 상태 (goal B9). 성재 실캡처의 조건이고,
+  //     이 프레임의 요점은 컴포저가 그 선 **위에** 있다는 것이다. 아래 100px이 비어
+  //     보이는 것이 맞다: 실기기에서 거기 있는 것은 사파리의 주소 줄이다.
+  await emulateBottomChrome(page);
+  await assertComposerVisible(page, `chat + 하단 크롬 ${scheme}`);
+  await assertNoHorizontalOverflow(page, `chat + 하단 크롬 ${scheme}`);
+  await shoot(page, "chat-bottom-chrome");
+  await releaseBottomChrome(page);
 
   // 3. 서랍이 열린 상태. 뒤 표면이 110px 남는 것이 이 프레임의 요점이다: 덮은
   //    것이 화면 전체가 아니라 서랍이어야 바깥을 눌러 닫을 자리가 보인다.
@@ -1130,6 +1457,19 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `inbox ${scheme}`);
   await shoot(page, "inbox");
 
+  // 6. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
+  //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 다섯 프레임은 손대지 않은 표면에서
+  //    찍히고, 이 한 장만 스트레스가 걸린 채로 남는다.
+  await page.evaluate('location.hash = "/"');
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  const touched = await applyLongTokenStress(page);
+  await page.waitForTimeout(200);
+  console.log(`  long token ${scheme}: 서버가 쓴 글 ${touched}곳에 74자 무공백 토큰`);
+  await assertNoHorizontalOverflow(page, `long token ${scheme}`);
+  await shoot(page, "long-token");
+
   await context.close();
   return shots;
 }
@@ -1171,6 +1511,10 @@ async function captureScheme(browser, scheme) {
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);
   await login.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  // 넓은 창도 같은 자로 잰다 (goal B9). 긴 무공백 토큰은 폰에서만 나는 결함이
+  // 아니다: 1280px 창에서도 타임라인 스크롤러는 세로 전용이어야 하고, 그 상자가
+  // 가로로 끌린다면 새는 것이 있다는 뜻이다. 폭만 다른 같은 주장이다.
+  await assertNoHorizontalOverflow(login, `desktop chat ${scheme}`);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
@@ -1738,13 +2082,21 @@ async function main() {
     const browser = await chromium.launch();
     try {
       const all = [];
-      for (const scheme of ["light", "dark"]) {
-        all.push(...(await captureScheme(browser, scheme)));
+      // 한 프로파일만 돌리는 문 (goal B9). 폰 기하를 고치는 동안 1280 프레임 60여
+      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. 기본값은 여전히 둘 다이므로
+      // 게이트가 보는 것은 달라지지 않는다.
+      const profile = process.env.CAPTURE_PROFILE || "all";
+      if (profile !== "mobile") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureScheme(browser, scheme)));
+        }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      for (const scheme of ["light", "dark"]) {
-        all.push(...(await captureMobile(browser, scheme)));
+      if (profile !== "desktop") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureMobile(browser, scheme)));
+        }
       }
       for (const path of all) console.log(path);
     } finally {

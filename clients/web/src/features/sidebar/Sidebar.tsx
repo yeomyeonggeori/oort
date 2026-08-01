@@ -336,7 +336,10 @@ export function Sidebar({
             if (!asDrawer || !drawerOpen) return;
             if ((event.target as Element).closest("a")) closeDrawer();
           }}
-          className="min-h-0 flex-1 overflow-y-auto"
+          // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
+          // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
+          // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
+          className="overscroll-contain min-h-0 flex-1 overflow-y-auto"
           data-testid="channel-list"
         >
           <nav aria-label="워크스페이스 탐색">
