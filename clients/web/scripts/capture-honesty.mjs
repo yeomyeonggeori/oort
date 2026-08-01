@@ -126,6 +126,39 @@ const HITS = [
   },
 ];
 
+/**
+ * 승인 요청 메시지 한 건. 모양은 `AgentGatewayRoutes.approvalRequestProps`이고
+ * (agentCardModel.test.ts의 픽스처와 같은 형태), `arguments`/`tool_grant`처럼
+ * 불투명하게 남아야 할 필드도 함께 실어 그것들이 화면에 새지 않는 것까지 본다.
+ */
+const APPROVAL_MESSAGE = {
+  id: "0199aa00-0000-7000-8000-00000000abcd",
+  channelId,
+  seq: 813,
+  hlcTs: 1_753_400_000_000,
+  hlcCount: 0,
+  authorMemberId: agentId,
+  type: "approval_request",
+  body: "승인 필요: 빌드 캐시 정리",
+  state: "sent",
+  createdAtMs: Date.now() - 3 * 60_000,
+  props: {
+    approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+    run_id: "0199aa11-2222-7000-8000-0000000000b2",
+    channel_id: channelId,
+    action_type: "shell",
+    tier: "workspace_write",
+    call_id: "call_9f31",
+    tool_name: "shell",
+    title: "빌드 캐시 정리",
+    summary: "빌드 산출물 디렉터리를 지웁니다.",
+    arguments: { command: "rm -rf build/", cwd: "/Users/seongjae/projects/momo" },
+    tool_grant: { grant_id: "g-31", scopes: ["shell:write"] },
+    status: "pending",
+    source: "hermes_gateway",
+  },
+};
+
 function json(route, body, status = 200) {
   return route.fulfill({
     status,
@@ -143,7 +176,17 @@ function absent(route) {
   return route.fulfill({ status: 404, contentType: "text/plain", body: "" });
 }
 
-async function installRoutes(context) {
+/**
+ * 검색 응답의 변주. 구현은 됐는데 한 장도 안 찍힌 상태들이 있었고
+ * (goal B12 R1 증거 공백), 안 찍힌 상태는 없는 것과 구분되지 않는다.
+ *
+ *   ok         정상 결과
+ *   slow       느린 응답 -> 스켈레톤
+ *   error      500 -> 오류 배너(재시도 있음)
+ *   absent     404 -> 미제공으로 접힘(이중 방어 (b), 오류 아님)
+ *   paged      nextCursor 실림 -> "더 보기"
+ */
+async function installRoutes(context, searchMode = "ok") {
   await context.route("**/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -169,6 +212,14 @@ async function installRoutes(context) {
     // ---- 이 서버에 **있는** 경로 ----
     if (path.endsWith("/search/messages")) {
       const q = url.searchParams.get("q") ?? "";
+      if (searchMode === "absent") return absent(route);
+      if (searchMode === "error") {
+        return json(route, { error: { message: "internal error" } }, 500);
+      }
+      if (searchMode === "slow") {
+        // 스켈레톤이 화면에 머무르는 동안 찍는다. 영원히 매달지는 않는다.
+        await new Promise((r) => setTimeout(r, 4_000));
+      }
       // 서버 계약 그대로: 2자 미만은 400, 없는 말은 빈 hits, 마지막 페이지는
       // nextCursor 키 자체를 뺀다.
       if ([...q.trim()].length < 2) {
@@ -179,6 +230,11 @@ async function installRoutes(context) {
         );
       }
       const hits = HITS.filter((hit) => hit.snippet.includes(q.trim()));
+      // 마지막 페이지는 nextCursor 키 자체를 뺀다(서버 계약). paged 변주만
+      // 다음 커서를 실어 "더 보기"를 세운다.
+      if (searchMode === "paged" && hits.length > 0) {
+        return json(route, { hits, nextCursor: "Y2Fwc3R1cmU" });
+      }
       return json(route, { hits });
     }
     if (path.endsWith("/roster") || path.endsWith("/members")) {
@@ -186,7 +242,14 @@ async function installRoutes(context) {
     }
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
-    if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.includes("/messages")) {
+      // 승인 요청이 하나 있는 채널. 카드는 남고 결정 컨트롤만 걷히는 것을
+      // 보여주려면 카드가 실제로 그려져야 한다.
+      if (path.includes(channelId)) {
+        return json(route, { messages: [APPROVAL_MESSAGE] });
+      }
+      return json(route, { messages: [] });
+    }
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith("/effort-table")) return json(route, { providers: [] });
@@ -238,7 +301,27 @@ async function login(page) {
 
 const shots = [];
 
+/**
+ * 가로 스크롤은 **표면마다** 잰다 (goal B12 R1).
+ *
+ * 예전에는 런이 끝날 때 한 번만 재서, "가로 스크롤 0"이 마지막으로 열린 화면
+ * 하나에 대해서만 증명됐다. 폰 폭에서 넘치는 표면이 있어도 그 표면이 마지막이
+ * 아니면 통과한다. 그래서 찍는 순간마다 함께 잰다: 캡처와 측정이 같은 화면을
+ * 보는 것이 이 증거의 전부다.
+ */
+async function assertNoHorizontalOverflow(page, name) {
+  const overflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth
+  );
+  if (overflow > 0) {
+    throw new Error(`${name}: 문서가 가로로 ${overflow}px 넘친다`);
+  }
+}
+
 async function shoot(page, name) {
+  await assertNoHorizontalOverflow(page, name);
   const file = resolve(outDir, `${name}.png`);
   await page.screenshot({ path: file, fullPage: false });
   shots.push(file);
@@ -307,15 +390,135 @@ async function captureScheme(browser, scheme, viewport, suffix) {
   await page.getByTestId("search-empty").waitFor({ timeout: 15_000 });
   await shoot(page, `search-empty-${suffix}`);
 
-  // 가로 스크롤 0 (모바일 폭에서 특히).
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
-  );
-  if (overflow > 0) {
-    throw new Error(`${suffix}: 문서가 가로로 ${overflow}px 넘친다`);
+  await context.close();
+}
+
+/**
+ * 구현은 됐지만 한 장도 안 찍혀 있던 상태들 (goal B12 R1 증거 공백).
+ *
+ * 안 찍힌 상태는 없는 것과 구분되지 않는다. 여기서는 각 상태를 만들기 위해
+ * 서버 응답을 갈아 끼우므로 컨텍스트를 상태마다 새로 연다.
+ */
+async function captureRemainingStates(browser, scheme, viewport, suffix) {
+  // 검색 중 (느린 응답 위의 스켈레톤)
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context, "slow");
+    await login(page);
+    await page.goto(`${origin}/#/search`);
+    await page.getByTestId("search-input").fill("배포");
+    await page.getByTestId("skeleton-row").first().waitFor({ timeout: 15_000 });
+    await shoot(page, `search-searching-${suffix}`);
+    await context.close();
   }
 
-  await context.close();
+  // 검색 오류 (5xx는 미제공이 아니라 장애다: 재시도가 함께 선다)
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context, "error");
+    await login(page);
+    await page.goto(`${origin}/#/search`);
+    await page.getByTestId("search-input").fill("배포");
+    await page.getByTestId("search-error").waitFor({ timeout: 15_000 });
+    await shoot(page, `search-error-${suffix}`);
+    await context.close();
+  }
+
+  // 검색 미제공 (404는 오류가 아니라 접힘 — 재시도를 권하지 않는다)
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context, "absent");
+    await login(page);
+    await page.goto(`${origin}/#/search`);
+    await page.getByTestId("search-input").fill("배포");
+    await page.getByTestId("search-unavailable").waitFor({ timeout: 15_000 });
+    if ((await page.getByTestId("search-error").count()) !== 0) {
+      throw new Error("미제공인데 오류 배너가 함께 섰다");
+    }
+    await shoot(page, `search-unavailable-${suffix}`);
+    await context.close();
+  }
+
+  // 더 보기 (nextCursor가 실린 페이지)
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context, "paged");
+    await login(page);
+    await page.goto(`${origin}/#/search`);
+    await page.getByTestId("search-input").fill("배포");
+    await page.getByTestId("search-load-more").waitFor({ timeout: 15_000 });
+    await shoot(page, `search-load-more-${suffix}`);
+    await context.close();
+  }
+
+  // 승인 카드: 카드는 남고 결정 컨트롤만 걷힌다
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context);
+    await login(page);
+    await page.goto(`${origin}/#/c/${channelId}`);
+    await page.getByTestId("approval-unsupported").waitFor({ timeout: 15_000 });
+    // 결정 버튼이 남아 있으면 이 배치의 요점이 무너진다.
+    if ((await page.getByTestId("approval-approve").count()) !== 0) {
+      throw new Error("승인 버튼이 아직 서 있다");
+    }
+    await shoot(page, `approval-unsupported-${suffix}`);
+    await context.close();
+  }
+
+  // 검색 결과 -> 원문 점프가 로드된 창 밖일 때 (goal B12 R1 High-3).
+  // 예전에는 여기서 아무 자국도 남지 않았다: 사용자는 방금 읽은 문장을 눌렀는데
+  // 전혀 다른 메시지가 있는 채널 바닥에 도착했다.
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context);
+    await login(page);
+    // 이 채널이 로드하는 메시지는 seq 813 하나뿐이다. seq 640은 그보다
+    // 위쪽이므로 화면은 "더 위쪽에 있어 아직 불러오지 않았다"고 말할 수 있다.
+    await page.goto(
+      `${origin}/#/c/${channelId}?msg=00000000-0000-7000-8000-000000000903&seq=640`
+    );
+    const banner = page.getByTestId("chat-anchor-missed");
+    await banner.waitFor({ timeout: 20_000 });
+    const text = (await banner.innerText()).trim();
+    if (!text.includes("위쪽")) {
+      throw new Error(`앵커 배너가 이유를 말하지 않는다: ${text}`);
+    }
+    await shoot(page, `anchor-missed-${suffix}`);
+    await context.close();
+  }
+
+  // 에이전트 허브: 죽은 탭(메모리·이력)이 사라진 탭 행
+  {
+    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context);
+    await login(page);
+    await page.goto(`${origin}/#/agents`);
+    await page.getByTestId("agent-hub-route").waitFor({ timeout: 15_000 });
+    await page.getByTestId("agent-hub-agent-row").first().click();
+    await page.getByTestId("agent-hub-tab-profile").waitFor({ timeout: 15_000 });
+    for (const dead of ["agent-hub-tab-memory", "agent-hub-tab-history"]) {
+      if ((await page.getByTestId(dead).count()) !== 0) {
+        throw new Error(`죽은 탭이 아직 서 있다: ${dead}`);
+      }
+    }
+    await shoot(page, `agent-hub-tabs-${suffix}`);
+    await context.close();
+  }
 }
 
 async function main() {
@@ -336,8 +539,12 @@ async function main() {
       console.log("데스크탑 1280x800");
       await captureScheme(browser, "light", { width: 1280, height: 800 }, "light");
       await captureScheme(browser, "dark", { width: 1280, height: 800 }, "dark");
+      console.log("나머지 상태 (라이트/다크)");
+      await captureRemainingStates(browser, "light", { width: 1280, height: 800 }, "light");
+      await captureRemainingStates(browser, "dark", { width: 1280, height: 800 }, "dark");
       console.log("폰 390x844");
       await captureScheme(browser, "light", { width: 390, height: 844 }, "phone");
+      await captureScheme(browser, "dark", { width: 390, height: 844 }, "phone-dark");
     } finally {
       await browser.close();
     }

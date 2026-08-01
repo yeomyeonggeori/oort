@@ -10,6 +10,8 @@
 //   server-rust/crates/momo-messaging/src/search.rs
 // =============================================================================
 
+import { attachParticle } from "@/lib/koreanParticle";
+
 /** 서버가 400으로 거절하는 문턱(`q must contain at least 2 characters`). */
 export const SEARCH_MIN_CHARS = 2;
 
@@ -49,7 +51,30 @@ export const SHORT_QUERY_HINT = `${SEARCH_MIN_CHARS}자 이상 입력하면 찾�
  * 읽고 검색을 그만두는데, 실제로는 자기가 속하지 않은 채널에 있을 수 있다.
  */
 export function noResultsCopy(query: string): string {
-  return `'${query}'가 들어간 메시지를 찾지 못했습니다.`;
+  // 조사는 골라 붙인다. `'…말'가 들어간`은 기계가 독자 앞에서 결정을 거부한
+  // 것이고, 그 결정은 마지막으로 **발음되는** 음절만으로 완전히 판정된다.
+  // 규칙은 이 레포에 이미 있다(lib/koreanParticle, mac에서 이식·호출처 7곳):
+  // 뒤따옴표 같은 문장부호를 발음에서 빼므로 `'배포'가`와 `'로그인'이`가 그대로
+  // 나온다. 여기서 두 번째 규칙을 세우면 같은 판정이 두 벌로 갈라진다.
+  const quoted = `'${clampQueryForCopy(query)}'`;
+  return `${attachParticle(quoted, "subject")} 들어간 메시지를 찾지 못했습니다.`;
+}
+
+/**
+ * 문구에 실을 질의의 최대 길이.
+ *
+ * 검색창에는 문단도 붙여넣을 수 있고, 그것이 그대로 헤드라인이 되면 빈 상태가
+ * 화면을 덮는다. 사람이 "내가 방금 무엇을 찾았지"를 알아보는 데 필요한 만큼만
+ * 남긴다.
+ */
+export const QUERY_COPY_MAX_CHARS = 32;
+
+export function clampQueryForCopy(query: string): string {
+  // 코드포인트로 센다. 이 파일의 나머지가 그러는 것과 같은 이유이고, `slice`로
+  // 자르면 이모지가 반 토막 난 채 문구에 실린다.
+  const chars = Array.from(query);
+  if (chars.length <= QUERY_COPY_MAX_CHARS) return query;
+  return `${chars.slice(0, QUERY_COPY_MAX_CHARS).join("")}…`;
 }
 
 export const NO_RESULTS_SCOPE_NOTE =
@@ -98,30 +123,61 @@ export function snippetSegments(
   };
 }
 
-/**
- * 서버가 스니펫 앞을 잘라냈는가. 잘렸으면 말줄임을 붙여야 조각이 문장 전체인
- * 척하지 않는다.
- *
- * 규칙은 서버 산술에서 그대로 나온다(momo-messaging/src/search.rs):
- *
- *   창 시작    greatest(strpos - 80, 1)
- *   matchOffset = strpos - 창 시작
- *
- * 그래서 일치가 본문 앞쪽 81자 안에 있으면 창은 **1에서 시작하고**(자르지 않았고)
- * `matchOffset`은 `strpos - 1`, 즉 80보다 작다. 일치가 그보다 뒤면 창이 정확히
- * 80자 앞에서 열리므로 `matchOffset`은 **정확히 80**이 된다. 요컨대 80이 곧
- * "앞을 잘랐다"는 신호이고, 그보다 작은 값은 자르지 않았다는 뜻이다.
- *
- * 처음에는 `matchOffset > 0`으로 뒀는데, 그것은 **오늘 틀린 규칙**이었다.
- * "금요일 배포는…"처럼 본문 첫머리에서 일치한 스니펫에도 말줄임이 붙어, 앞에
- * 더 있는 말을 잘라낸 것처럼 보였다. 서버가 창 크기를 바꾸는 날 이 상수도 함께
- * 바꿔야 하지만, 나중에 틀릴까 봐 지금 틀린 답을 고르는 것은 거래가 되지 않는다.
- * 크기를 이름으로 세워 두면 바꿀 자리가 한 곳이라 그 날의 수정도 한 줄이다.
- */
-export const SEARCH_SNIPPET_LEAD_CHARS = 80;
+// ---- 스니펫이 잘린 쪽 --------------------------------------------------------
+//
+// 서버는 일치 지점 둘레로 창을 하나 떠 온다(momo-messaging/src/search.rs):
+//
+//   창 시작  greatest(strpos - 80, 1)
+//   창 길이  char_length(q) + 160
+//
+// 그래서 **양끝이 다 잘릴 수 있다**. 잘린 쪽에는 말줄임을 붙여야 조각이 문장
+// 전체인 척하지 않고, 잘리지 않은 쪽에는 붙이면 안 된다. 없는 말을 있다고 하는
+// 것도 이 배치가 없애려는 거짓말이다.
 
+/** 창이 일치 지점 앞으로 몇 자를 담는가. */
+export const SEARCH_SNIPPET_LEAD_CHARS = 80;
+/** 창이 일치 지점 뒤로 몇 자를 더 담는가(`char_length(q) + 160`의 160). */
+export const SEARCH_SNIPPET_TRAIL_CHARS = 160;
+
+/**
+ * 앞이 잘렸는가.
+ *
+ * 산술을 그대로 풀면 이렇다.
+ *
+ *   strpos <= 81  창 시작 = 1        matchOffset = strpos - 1  (0..80)
+ *   strpos >= 82  창 시작 = strpos-80 matchOffset = 80
+ *
+ * 즉 **80은 두 갈래가 겹치는 유일한 값이다**: `strpos`가 정확히 81이면 창은
+ * 1에서 열려 아무것도 자르지 않았는데도 offset이 80이고, 82 이상이면 잘랐는데도
+ * 80이다. 와이어에는 `strpos`가 없으므로 이 둘은 **구분할 수 없다**.
+ *
+ * 그래서 규칙은 "80 이상"이고, 그 선택의 대가를 알고 고른다: 틀리는 경우는
+ * `strpos == 81` 하나뿐이며 그때 감춰진 글자 수는 **정확히 0**이다. 반대로 이
+ * 경계를 제외하면(`> 80`) `strpos >= 82`인 모든 스니펫이 잘린 사실을 숨긴다.
+ * 한쪽은 0자를 과장하고 다른 쪽은 임의로 긴 앞부분을 은폐하므로, 고를 것은
+ * 분명하다.
+ *
+ * 처음 판본은 `matchOffset > 0`이었고 그것은 **오늘 틀린 규칙**이었다. "금요일
+ * 배포는…"처럼 본문 첫머리에서 일치한 스니펫에도 말줄임이 붙어 앞에 더 있는
+ * 말을 잘라낸 것처럼 보였다. 나중에 틀릴까 봐 지금 틀린 답을 고르는 것은 거래가
+ * 되지 않는다. 창 크기를 이름으로 세워 뒀으니 서버가 그것을 바꾸는 날의 수정도
+ * 한 줄이다.
+ */
 export function leadsWithEllipsis(matchOffset: number): boolean {
   return matchOffset >= SEARCH_SNIPPET_LEAD_CHARS;
+}
+
+/**
+ * 뒤가 잘렸는가.
+ *
+ * 창 길이가 `q + 160`으로 묶여 있으므로, 돌아온 스니펫이 그 상한을 꽉 채웠다면
+ * 본문이 창 끝까지 이어졌다는 뜻이다. 앞쪽과 같은 종류의 경계 모호함이 하나
+ * 있다(본문이 하필 창 끝에서 정확히 끝난 경우), 그리고 같은 이유로 같은 쪽을
+ * 고른다: 틀릴 때 과장되는 양이 0자다.
+ */
+export function trailsWithEllipsis(snippet: string, query: string): boolean {
+  const cap = Array.from(query).length + SEARCH_SNIPPET_TRAIL_CHARS;
+  return Array.from(snippet).length >= cap;
 }
 
 /**

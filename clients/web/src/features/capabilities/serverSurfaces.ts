@@ -132,10 +132,19 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     id: "agentRunHistory",
     label: "에이전트 작업 기록",
     provided: false,
-    absentReason: "이 서버는 아직 에이전트가 한 일의 기록을 남기지 않습니다.",
-    fallback: "에이전트가 채널에 남긴 메시지가 지금 남아 있는 유일한 기록입니다.",
+    // 없는 것은 **읽는 경로뿐이다**. 기록 자체는 지금도 쌓인다:
+    // `POST …/channels/{ch}/agent-runs`가 `agent_run` 행을 쓰고(agent_runs.rs의
+    // `create_agent_run_in_tx`), 게이트웨이의 events/complete가 그 행을 이어서
+    // 갱신한다. 그러니 "기록을 남기지 않습니다"는 틀린 문장이었다. 저장되고
+    // 있는 것을 저장 안 된다고 말하는 것은 이 배치가 없애려던 오류를 반대
+    // 방향으로 저지르는 일이다. 사람에게 참인 문장은 "아직 볼 수 없다"이다.
+    absentReason: "이 서버는 에이전트가 한 일의 기록을 아직 보여주지 못합니다.",
+    fallback:
+      "기록은 쌓이고 있습니다. 지금 확인할 수 있는 것은 에이전트가 채널에 남긴 메시지입니다.",
     measured:
-      "GET …/channels/{ch}/agent-runs는 경로가 POST 전용이라 **405**. " +
+      "쓰기는 있다: POST …/channels/{ch}/agent-runs(agent_run 행 생성), " +
+      "게이트웨이 events/complete. 없는 것은 읽기다: " +
+      "GET …/channels/{ch}/agent-runs는 경로가 POST 전용이라 405, " +
       "GET …/agents/{id}/runs와 GET …/agent-runs/{id}는 라우터에 없음(404).",
   },
   plugins: {

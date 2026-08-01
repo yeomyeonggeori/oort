@@ -63,15 +63,23 @@ export function SurfaceUnavailableRoute({ surface }: { surface: SurfaceId }) {
 export function SurfaceUnavailableSection({
   surface,
   testId,
+  flush = false,
 }: {
   surface: SurfaceId;
   testId?: string;
+  /**
+   * 이미 자기 여백을 가진 상자 안에 들어갈 때. `SectionShell`의 제목은 그 상자
+   * 왼쪽 끝에 붙으므로, 기본 여백을 그대로 두면 빈 상태만 제목보다 16px 안으로
+   * 들어가 앉는다.
+   */
+  flush?: boolean;
 }) {
   const { absentReason, fallback } = serverSurface(surface);
   return (
     <EmptyInvite
       headline={absentReason}
       detail={fallback}
+      className={flush ? "px-0" : undefined}
       testId={testId ?? "surface-unavailable"}
       dataAttrs={{ "data-surface": surface }}
     />

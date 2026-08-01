@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -10,7 +10,7 @@ import {
   InlineBanner,
   SkeletonRows,
 } from "@/features/common/States";
-import { messageAnchorPath } from "@/features/inbox/anchor";
+import { searchHitPath } from "@/features/inbox/anchor";
 import { relativeLabel } from "@/features/inbox/model";
 import {
   channelLabel,
@@ -24,6 +24,7 @@ import { serverSaysAbsent } from "@/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   leadsWithEllipsis,
+  trailsWithEllipsis,
   noResultsCopy,
   NO_RESULTS_SCOPE_NOTE,
   SHORT_QUERY_HINT,
@@ -64,7 +65,9 @@ function HitRow({
   return (
     <li>
       <Link
-        to={messageAnchorPath(hit.channelId, hit.messageId)}
+        // msg와 seq를 함께 싣는다: 앞은 찾는 데, 뒤는 **못 찾았을 때 이유를
+        // 말하는 데** 쓰인다 (ChatShell의 anchorMissed).
+        to={searchHitPath(hit.channelId, hit.messageId, hit.seq)}
         // `tap-target`은 폰에서만 이 행을 44px로 세운다. 사이드바 행이 같은
         // 유틸리티를 같은 이유로 쓴다.
         className="tap-target flex flex-col gap-1 break-keep border-b border-line px-4 py-3 text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
@@ -104,6 +107,11 @@ function HitRow({
             </mark>
           )}
           {segments.after}
+          {trailsWithEllipsis(hit.snippet, query) && (
+            <span className="text-ink-muted" aria-hidden="true">
+              …
+            </span>
+          )}
         </span>
       </Link>
     </li>
@@ -112,7 +120,10 @@ function HitRow({
 
 export function SearchRoute() {
   const { session, workspaceId } = useSession();
-  const search = useMessageSearch();
+  // ⌘K 팔레트가 이름으로 못 찾았을 때 친 말을 그대로 들고 넘어온다. 넘겨받고도
+  // 빈 상자를 보여주면 그 인계는 인계가 아니라 초기화다.
+  const [params] = useSearchParams();
+  const search = useMessageSearch(params.get("q") ?? "");
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const inputRef = useRef<HTMLInputElement>(null);

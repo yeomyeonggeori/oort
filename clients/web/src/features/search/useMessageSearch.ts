@@ -54,10 +54,14 @@ export interface MessageSearch {
   error: unknown;
 }
 
-export function useMessageSearch(): MessageSearch {
+export function useMessageSearch(initialQuery = ""): MessageSearch {
   const { workspaceId } = useSession();
-  const [raw, setRaw] = useState("");
-  const debounced = useDebounced(raw, DEBOUNCE_MS);
+  // 초기값은 첫 렌더에서만 읽는다. 이후 주소가 바뀌어도 사람이 치고 있는 값을
+  // 덮지 않는다.
+  const [raw, setRaw] = useState(initialQuery);
+  // 넘겨받은 질의는 기다릴 이유가 없다: 사람은 이미 팔레트에서 다 쳤고,
+  // 디바운스는 타자 중인 손을 위한 것이다.
+  const debounced = useDebounced(raw, raw === initialQuery ? 0 : DEBOUNCE_MS);
   const query = normalizeQuery(debounced);
   const enabled = isSearchable(debounced);
 
