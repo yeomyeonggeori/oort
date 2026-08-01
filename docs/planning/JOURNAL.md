@@ -1485,6 +1485,10 @@
 - 한 일: **B5.3b(에이전트 허브 UI) 랜딩**(PR #947) — 허브(만들기·프로필·pause·채널 배치)·승인 D-5(인박스 결정)·capability 4축(allowed-models 프로브 — GET 200을 PUT 존재로 오독하던 '거짓 ready' 실측 수정). design-review PASS(Blocker 0·High 2) → High 2(승인 오프라인 게이트 일원화·무장 시 초점 이동)+Medium 2(배너 범위·비가역 재진술)를 오케스트레이터가 직접 수정 후 머지. 전 대비 AA. **B5 아크 완성** — 남은 것: 티키타카 smoke(실 provider·NCP)로 도그푸딩 조건 판정.
 - 열린 것: 티키타카 smoke 실행(성재 provider link 설정 필요할 수 있음 — anthropic 키). 후속 티켓: capture:routing base 실패·M3/M4·채널 멤버십 audit.
 
+## 2026-08-02 (오전) · Fable · 오케스트레이션
+- 한 일: **GPT OAuth 완결** — ADR-0147 Accepted(구독 OAuth·내부 한정·봉인 계약 재사용), B5.4(PR #948: oauth-openai envelope·refresh→재봉인 DB 복호화 red·마이그레이션 0)·B5.4b(PR #949: Responses 어댑터·kind→와이어 매핑·codex 바이너리+openai-python 이중 실측) 랜딩. 게이트 71케이스+docker build green. 정직 한계 기록: Codex 신원 헤더 비위조 — ChatGPT 구독 백엔드 수용 여부는 실 smoke가 판정(거절 시 대안: API 키 경로 or ADR-0144 샌드박스 codex).
+- 열린 것: **실 티키타카 smoke** — NCP 배포(agent-worker compose 편입 필요)→성재 codex 토큰 등록→@멘션→실응답 → 도그푸딩 조건 판정.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
