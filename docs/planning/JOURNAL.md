@@ -1494,6 +1494,10 @@
 - **판정: 성재의 도그푸딩 조건("에이전트 초대+buzz 수준 티키타카") 1차 충족.** 남은 다듬기: 에이전트 생성 시 모델 카탈로그↔실 provider 모델 매핑 정리(smoke는 SQL 직갱신으로 우회)·max_output_tokens 와이어별 분기·자연스러운 대화 품질(스레드 응답 등 후속 티켓들).
 - 열린 것: 성재 실사용 확인(웹에서 직접 @oort) → 팀 도그푸딩 개시 판단. NCP 가동 중.
 
+## 2026-08-02 (저녁) · Fable · 오케스트레이션 — **🎉 A2A 실연 성공**
+- 한 일: **B7.2(A2A) 랜딩·실연**(PR #952, `7e3bf6eb`) — 실서버에서 사람 과제→@oort가 @luna에 위임(depth1·부모 결속)→luna 의견→oort 종합 결론. 안전장치 실측 이식(G1 동시 run·G2 연속 자동발화·G3 step 소비·a2a_depth 캡=스키마 007 CHECK에 clamp·체인 과금 상한=ledger 재귀 CTE, 배치 위치=ledger 뒤). 게이트 79케이스 green(신규 SQL 3 첫 실행 포함). 성재 질문 3종 답변 기록: 채팅 provider(GPT만, Claude=B7.1)·작업 실행(workd=B7.4)·봇=플러그인 경계(ADR-0113, 미이식)·A2A는 이제 개방.
+- 열린 것: **B7.1(Claude 네이티브 provider — GPT×Claude 협업) / B7.3(tool call·Context Packet) / B7.4(workd Rust)**. 도그푸딩 개시 판단(티키타카+A2A 실증 완료 — 성재 체감 확인 대기). 서버 가동 중.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
