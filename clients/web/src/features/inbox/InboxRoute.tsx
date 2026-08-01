@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
 import {
@@ -6,9 +6,15 @@ import {
   InlineBanner,
   SkeletonRows,
 } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { FeedList } from "./FeedRow";
+import {
+  ApprovalActions,
+  type Armed,
+} from "@/features/timeline/ApprovalActions";
+import type { DecisionOutcome } from "@/features/timeline/approvalDecision";
 import {
   INBOX_FILTER_TABS,
   panelId,
@@ -20,6 +26,7 @@ import {
 } from "./model";
 import {
   useAgentFeed,
+  useInvalidateApprovals,
   useMarkRead,
   useMentionCount,
   useMentions,
@@ -54,14 +61,48 @@ const EMPTY_COPY: Record<InboxFilter, { headline: string; detail: string }> = {
   },
 };
 
+/**
+ * 결정 대기 한 행의 승인/거부 (goal B5.3b D-5).
+ *
+ * 이 목록은 `GET …/approvals?status=pending`을 이미 읽고 있었지만, 결정하려면
+ * 채널로 들어가 타임라인의 카드를 찾아야 했다. 결정에 필요한 사실(누가, 무엇을,
+ * 언제까지, 되돌릴 수 있는지)은 전부 이 행에 이미 있으므로, 결정도 여기서 한다.
+ * 컨트롤은 카드와 같은 것을 쓴다 — 두 번째 구현이 아니라 두 번째 호출자다.
+ */
+function InboxApprovalActions({
+  approvalId,
+  onSettled,
+  reversible,
+}: {
+  approvalId: string;
+  onSettled: (outcome: DecisionOutcome) => void;
+  reversible?: boolean;
+}) {
+  const [armed, setArmed] = useState<Armed>(null);
+  return (
+    <ApprovalActions
+      approvalId={approvalId}
+      armed={armed}
+      setArmed={setArmed}
+      onSettled={onSettled}
+      lead="실행 전에 회원님의 허가가 필요합니다."
+      className="px-4 pb-2"
+      testIdPrefix="inbox-approval"
+      reversible={reversible}
+    />
+  );
+}
+
 function FeedPanel({
   filter,
   feed,
   onMarkRead,
+  renderActions,
 }: {
   filter: InboxFilter;
   feed: Feed;
   onMarkRead?: (item: FeedItem) => void;
+  renderActions?: (item: FeedItem) => ReactNode;
 }) {
   if (feed.isLoading && feed.items.length === 0) {
     return <SkeletonRows rows={3} className="p-4" />;
@@ -87,12 +128,17 @@ function FeedPanel({
     );
   }
   return (
-    <FeedList items={feed.items} onMarkRead={onMarkRead} testId="inbox-list" />
+    <FeedList
+      items={feed.items}
+      onMarkRead={onMarkRead}
+      renderActions={renderActions}
+      testId="inbox-list"
+    />
   );
 }
 
 export function InboxRoute() {
-  const { session, connStatus } = useSession();
+  const { session } = useSession();
   const [params, setParams] = useSearchParams();
   const filter = parseFilter(params.get("filter"));
 
@@ -109,7 +155,13 @@ export function InboxRoute() {
 
   const markRead = useMarkRead();
   const unreadChannels = useUnreadMentionChannels();
+  const invalidateApprovals = useInvalidateApprovals();
+  // 위에서 선언한다: 아래 결정 컨트롤이 이 값을 읽는다.
+  // useOffline: connStatus==="disconnected"는 실절단에도 connecting에 머물러
+  // false가 된다(useOffline.ts 주석) — 파괴적 결정의 게이트는 허브와 같은 판정 하나로.
+  const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
+  const [decisionNote, setDecisionNote] = useState<string | null>(null);
 
   const feed =
     filter === "needs-action"
@@ -126,14 +178,59 @@ export function InboxRoute() {
     [markRead]
   );
 
+  // 결정이 기록되면 그 행은 대기 목록에서 사라진다. 사라지는 것만으로는 무엇이
+  // 됐는지 알 수 없으므로, 원장이 답한 그대로 한 줄을 남기고 목록을 다시 읽는다.
+  const onDecided = useCallback(
+    (outcome: DecisionOutcome) => {
+      if (outcome.kind === "superseded") {
+        setDecisionNote(outcome.note ?? "이 요청은 이미 결정되어 있었습니다.");
+      } else if (outcome.status === "approved") {
+        setDecisionNote("승인했습니다. 에이전트가 이어서 실행합니다.");
+      } else if (outcome.status === "rejected") {
+        setDecisionNote("거부했습니다. 이 실행은 취소되었습니다.");
+      } else {
+        // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지
+        // 우리가 모르므로, 안다고 말하지 않는다.
+        setDecisionNote("결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.");
+      }
+      invalidateApprovals();
+    },
+    [invalidateApprovals]
+  );
+
+  const renderApprovalActions = useCallback(
+    (item: FeedItem) => {
+      if (item.approvalId === undefined) return null;
+      // 끊긴 채로 버튼을 그대로 두면 15초 뒤 실패로 반박당하고, 말없이 치우면
+      // 무엇이 사라졌는지 알 수 없다. 자리는 지키고 이유를 말한다.
+      if (offline) {
+        return (
+          <p
+            className="px-4 pb-2 text-meta text-ink-muted"
+            data-testid="inbox-approval-offline"
+          >
+            연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나
+            거부할 수 있습니다.
+          </p>
+        );
+      }
+      return (
+        <InboxApprovalActions
+          approvalId={item.approvalId}
+          onSettled={onDecided}
+          reversible={item.reversible}
+        />
+      );
+    },
+    [offline, onDecided]
+  );
+
   const markAllRead = useCallback(() => {
     setConfirmingAll(false);
     for (const channel of unreadChannels) {
       void markRead(channel.channelId, channel.seq);
     }
   }, [unreadChannels, markRead]);
-
-  const offline = connStatus === "disconnected";
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="inbox-route">
@@ -149,6 +246,16 @@ export function InboxRoute() {
           }}
         />
       </header>
+
+      {decisionNote && (
+        <InlineBanner
+          tone="neutral"
+          message={decisionNote}
+          actionLabel="닫기"
+          onAction={() => setDecisionNote(null)}
+          testId="inbox-decision-note"
+        />
+      )}
 
       {offline && (
         <InlineBanner
@@ -175,6 +282,11 @@ export function InboxRoute() {
           filter={filter}
           feed={feed}
           onMarkRead={filter === "mentions" ? onMarkRead : undefined}
+          // 결정 컨트롤은 결정 대기 탭에만. 에이전트 탭의 승인 행은 이미 끝난
+          // 결정의 기록이고, 멘션 행은 승인이 아니다.
+          renderActions={
+            filter === "needs-action" ? renderApprovalActions : undefined
+          }
         />
       </div>
 

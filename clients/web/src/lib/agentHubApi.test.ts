@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   agentRunSummaryPageFromWire,
+  channelMembershipFromWire,
+  createdAgentFromWire,
   memoryGrantPageFromWire,
   memoryPageFromWire,
   memorySearchFromWire,
@@ -79,6 +81,60 @@ describe("agent hub REST decoders", () => {
     expect(() =>
       memoryGrantPageFromWire({
         grants: [{ ...grants[0], granteeKind: "workspace" }],
+      })
+    ).toThrow(WireShapeError);
+  });
+});
+
+describe("에이전트 만들기 · 채널 배치 REST decoders", () => {
+  it("만들기 응답의 id를 접고, 사람이 정한 이름은 건드리지 않는다", () => {
+    const created = createdAgentFromWire({
+      agent: {
+        id: "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAAA10",
+        handle: "kim-intern",
+        displayName: "김인턴",
+      },
+    });
+    // uuid는 서버마다 대소문자가 다르게 온다. 라우팅 키로 쓰이므로 여기서 접는다.
+    expect(created.id).toBe("aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaa10");
+    expect(created.displayName).toBe("김인턴");
+  });
+
+  it("만들기 응답에서 한 필드라도 빠지면 형태 오류다", () => {
+    expect(() => createdAgentFromWire({})).toThrow(WireShapeError);
+    expect(() =>
+      createdAgentFromWire({ agent: { id: "x", handle: "y" } })
+    ).toThrow(WireShapeError);
+  });
+
+  it("멤버십 응답은 역할을 열거값으로만 받고, leftAtMs는 있을 때만 싣는다", () => {
+    const membership = channelMembershipFromWire({
+      membership: {
+        id: "BBBBBBBB-BBBB-7BBB-8BBB-BBBBBBBBBB10",
+        workspaceId: "CCCCCCCC-CCCC-7CCC-8CCC-CCCCCCCCCC10",
+        channelId: "DDDDDDDD-DDDD-7DDD-8DDD-DDDDDDDDDD10",
+        memberId: "EEEEEEEE-EEEE-7EEE-8EEE-EEEEEEEEEE10",
+        role: "member",
+        joinedAtMs: 1,
+        leftAtMs: null,
+      },
+    });
+    expect(membership.channelId).toBe("dddddddd-dddd-7ddd-8ddd-dddddddddd10");
+    expect(membership.role).toBe("member");
+    // 서버는 아직 나가지 않은 멤버십에 null을 싣는다. null을 0으로 접으면
+    // "1970년에 나갔다"가 된다.
+    expect("leftAtMs" in membership).toBe(false);
+
+    expect(() =>
+      channelMembershipFromWire({
+        membership: {
+          id: "B",
+          workspaceId: "C",
+          channelId: "D",
+          memberId: "E",
+          role: "observer",
+          joinedAtMs: 1,
+        },
       })
     ).toThrow(WireShapeError);
   });

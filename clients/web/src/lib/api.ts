@@ -788,6 +788,149 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
   return (arrayField(res, "members") ?? []).filter(isRosterMember);
 }
 
+// ---- 에이전트 만들기 · 채널 배치 -------------------------------------------
+// POST   /v1/workspaces/{ws}/agents                        (AgentRoutes.create)
+// POST   /v1/workspaces/{ws}/channels/{ch}/members         (ChannelRoutes.addMember)
+// DELETE /v1/workspaces/{ws}/channels/{ch}/members/{member} (ChannelRoutes.removeMember)
+//
+// There is no bot to install (ADR-0004, invariant #5): creating an agent creates
+// a `member` with `kind='agent'`, which is why the answer below is a roster row
+// and not an installation receipt. Creation stops at the identity boundary on
+// purpose, so the agent is mentionable only once it is added to a channel; that
+// second half is the membership pair, and it is why the two live together here.
+//
+// No credential crosses this surface in either direction. The create body is
+// closed-world server side and every key whose normalized spelling looks like a
+// credential is refused at any depth, so a client that tries to be helpful by
+// forwarding a key gets a 400 rather than a stored secret.
+
+/** `POST …/agents` body (server `CreateAgentRequest`, camelCase on the wire). */
+export interface CreateAgentInput {
+  displayName: string;
+  handle: string;
+  model: string;
+  baseUrl: string;
+  /** Blank means absent: the server stores `null`, never an empty section. */
+  systemPrompt?: string;
+  /** The human accountable for this agent. Defaults to the caller. */
+  ownerHumanId?: string;
+  /** Optional initial profile. `instructions` is the only field this form sets. */
+  profile?: { instructions: string };
+}
+
+/** What `POST …/agents` answers with (server `AgentMemberDTO`). */
+export interface CreatedAgent {
+  id: string;
+  handle: string;
+  displayName: string;
+}
+
+export function createdAgentFromWire(value: unknown): CreatedAgent {
+  const source = responseRecord(value);
+  const agent = record(source.agent);
+  const id = agent === null ? undefined : str(agent, "id");
+  const handle = agent === null ? undefined : str(agent, "handle");
+  const displayName = agent === null ? undefined : str(agent, "displayName");
+  if (id === undefined || handle === undefined || displayName === undefined) {
+    throw new WireShapeError();
+  }
+  return { id: id.toLowerCase(), handle, displayName };
+}
+
+/**
+ * Create an agent member. Requires a HUMAN workspace owner/admin: minting an
+ * identity that can post into channels is not a member-level act, so the server
+ * answers 403 for anyone else and 409 when the handle is taken.
+ */
+export async function createAgent(
+  workspaceId: string,
+  input: CreateAgentInput
+): Promise<CreatedAgent> {
+  return createdAgentFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  );
+}
+
+export function channelMembershipFromWire(value: unknown): ChannelMembership {
+  const source = responseRecord(value);
+  const membership = record(source.membership);
+  if (membership === null) throw new WireShapeError();
+  const id = str(membership, "id");
+  const workspaceId = str(membership, "workspaceId");
+  const channelId = str(membership, "channelId");
+  const memberId = str(membership, "memberId");
+  const role = str(membership, "role");
+  const joinedAtMs = num(membership, "joinedAtMs");
+  const leftAtMs = num(membership, "leftAtMs");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    channelId === undefined ||
+    memberId === undefined ||
+    joinedAtMs === undefined ||
+    (role !== "owner" && role !== "admin" && role !== "member" && role !== "guest")
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id: id.toLowerCase(),
+    workspaceId: workspaceId.toLowerCase(),
+    channelId: channelId.toLowerCase(),
+    memberId: memberId.toLowerCase(),
+    role,
+    joinedAtMs,
+    ...(leftAtMs === undefined ? {} : { leftAtMs }),
+  };
+}
+
+/**
+ * Put a member (person or agent) into a channel. Upsert by `(channel, member)`:
+ * re-adding someone who left clears `left_at` rather than creating a second row,
+ * so the button is safe to press twice. Requires workspace owner/admin, and the
+ * target channel must be a public/private channel that is not archived, which is
+ * why a DM answers 404 rather than silently succeeding.
+ */
+export async function addChannelMember(
+  workspaceId: string,
+  channelId: string,
+  memberId: string,
+  role: MembershipRole = "member"
+): Promise<ChannelMembership> {
+  return channelMembershipFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/channels/${encodeURIComponent(channelId)}/members`,
+      { method: "POST", body: JSON.stringify({ memberId, role }) }
+    )
+  );
+}
+
+/**
+ * Take a member out of a channel. The row is marked `left_at`, not deleted, so
+ * the history that member wrote keeps its author. 404 means there was no active
+ * membership to end.
+ */
+export async function removeChannelMember(
+  workspaceId: string,
+  channelId: string,
+  memberId: string
+): Promise<ChannelMembership> {
+  return channelMembershipFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(
+        memberId
+      )}`,
+      { method: "DELETE" }
+    )
+  );
+}
+
 // ---- Plugin registry: catalog, manifest and caller-owned grants ------------
 //
 // `PluginRoutes` deliberately separates these projections. The catalog carries

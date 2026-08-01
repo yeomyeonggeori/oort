@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AtSign, Bot, ShieldAlert } from "lucide-react";
 import { cn } from "@/design/lib/cn";
@@ -38,7 +38,22 @@ function KindIcon({ kind, tone }: { kind: FeedItem["kind"]; tone: FeedTone }) {
   return <Bot className={className} />;
 }
 
-export function FeedRow({ item }: { item: FeedItem }) {
+/**
+ * `actions` is rendered as a SIBLING of the link, never inside it.
+ *
+ * The whole row is an anchor, and a button inside an anchor is not a button: the
+ * browser gives the click to the link, so 승인 would navigate to the channel
+ * instead of deciding anything, and the keyboard path collapses to one stop.
+ * Keeping the two apart inside one `li` is what lets the row stay openable and
+ * decidable at the same time (goal B5.3b D-5).
+ */
+export function FeedRow({
+  item,
+  actions,
+}: {
+  item: FeedItem;
+  actions?: ReactNode;
+}) {
   const seqAttrs = item.seq === undefined ? {} : { "data-seq": String(item.seq) };
   const hasFooter =
     item.outcome !== null ||
@@ -46,7 +61,7 @@ export function FeedRow({ item }: { item: FeedItem }) {
     item.managedBy !== undefined;
 
   return (
-    <li>
+    <li className={actions ? "border-b border-line" : undefined}>
       <Link
         to={channelPath(item.channelId, item.seq)}
         onClick={() => {
@@ -58,7 +73,10 @@ export function FeedRow({ item }: { item: FeedItem }) {
         data-kind={item.kind}
         data-channel-id={item.channelId}
         {...seqAttrs}
-        className="flex gap-3 border-b border-line px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className={cn(
+          "flex gap-3 px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          !actions && "border-b border-line"
+        )}
       >
         <span className="shrink-0 pt-1" aria-hidden="true">
           <KindIcon kind={item.kind} tone={item.tone} />
@@ -112,6 +130,7 @@ export function FeedRow({ item }: { item: FeedItem }) {
           )}
         </span>
       </Link>
+      {actions}
     </li>
   );
 }
@@ -124,11 +143,14 @@ export function FeedRow({ item }: { item: FeedItem }) {
 export function FeedList({
   items,
   onMarkRead,
+  renderActions,
   testId,
 }: {
   items: FeedItem[];
   /** Only offered for rows that carry a seq to read up to. */
   onMarkRead?: (item: FeedItem) => void;
+  /** Per-row controls, rendered beside the link. Return null for plain rows. */
+  renderActions?: (item: FeedItem) => ReactNode;
   testId: string;
 }) {
   const listRef = useRef<HTMLUListElement>(null);
@@ -165,7 +187,7 @@ export function FeedList({
       className="flex flex-col"
     >
       {items.map((item) => (
-        <FeedRow key={item.key} item={item} />
+        <FeedRow key={item.key} item={item} actions={renderActions?.(item)} />
       ))}
     </ul>
   );

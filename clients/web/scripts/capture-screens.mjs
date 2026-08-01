@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -33,6 +33,12 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+// ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
+// 쓰는 그 파일이고, 여기서도 같은 것을 읽어 세 표면이 한 표를 본다.
+const ROUTING_FIXTURES = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/routing/routingFixtures.json"), "utf8")
+);
 
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
@@ -626,6 +632,58 @@ function makeDmMessages() {
   }));
 }
 
+// ---- 에이전트 허브 (goal B5.3b) ---------------------------------------------
+// 세 표면이 여기서 처음 화면에 오른다: 프로필 카드(모델·추론 강도·상태), 채널
+// 배치, 그리고 만들기 폼. allowed-models가 200이라는 것은 이 서버에 프로필 쓰기와
+// 일시정지가 있다는 뜻이고(capability.ts ④), 그래서 편집 컨트롤이 열린 프레임과
+// 404로 잠긴 프레임을 둘 다 찍는다.
+
+const AGENT_PROFILE = {
+  agentMemberId: HERMES,
+  workspaceId: WORKSPACE_ID,
+  instructions:
+    "배포 전에는 롤백 절차부터 확인하고, 근거가 없는 추정은 추정이라고 먼저 말합니다.",
+  modelPref: "hermes-agent",
+  enabledTools: ["shell", "git"],
+  triggers: { mention: true },
+  paused: false,
+  version: 3,
+  updatedBy: ME,
+  updatedAtMs: Date.now() - 6 * 3_600_000,
+};
+
+const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
+
+/** The id POST /agents answers with: the hub selects it right after. */
+const CREATED_AGENT_ID = "019f9b10-0000-7000-8000-0000000004a1";
+
+/** 결정 대기 (D-5). snake_case on the wire, the way the ledger projects it. */
+const APPROVALS = [
+  {
+    id: "019f9b10-0000-7000-8000-0000000005a1",
+    workspace_id: WORKSPACE_ID,
+    run_id: "019f9b10-0000-7000-8000-0000000005b1",
+    channel_id: GENERAL_ID,
+    requested_by: HERMES,
+    on_behalf_of: ME,
+    action_type: "work.spawn",
+    status: "pending",
+    is_reversible: false,
+    expires_at_ms: Date.now() + 26 * 60_000,
+  },
+  {
+    id: "019f9b10-0000-7000-8000-0000000005a2",
+    workspace_id: WORKSPACE_ID,
+    run_id: "019f9b10-0000-7000-8000-0000000005b2",
+    channel_id: "00000000-0000-7000-8000-000000000202",
+    requested_by: HERMES,
+    action_type: "shell.exec",
+    status: "pending",
+    is_reversible: true,
+    expires_at_ms: Date.now() + 3 * 3_600_000,
+  },
+];
+
 function json(route, body) {
   return route.fulfill({
     status: 200,
@@ -694,6 +752,71 @@ async function installMocks(context) {
       ? json(route, { channel: DM_CHANNEL, created: false })
       : json(route, { channels: [DM_CHANNEL] })
   );
+  // 추론 강도 표 (ADR-0134 D2). 목이 없으면 이 요청은 프록시로 나가고, 살아
+  // 있는 서버가 401을 답하는 순간 캡처 세션이 로그아웃된다. 축이 있는 서버를
+  // 찍는 이유는 프로필 카드의 "추론 강도" 줄이 그 판정을 그대로 읽기 때문이다.
+  await context.route("**/v1/provider/effort-table", (route) =>
+    json(route, ROUTING_FIXTURES.effortTable)
+  );
+  // 에이전트 허브 (goal B5.3b). 더 긴 경로를 먼저 건다: `**/…/agents`가
+  // `/agents/{id}/profile`을 삼키지 않도록 하는 것과 같은 규칙이다.
+  await context.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
+    json(route, { allowedAgentModels: ALLOWED_AGENT_MODELS })
+  );
+  await context.route("**/v1/workspaces/*/agents/*/profile", (route) =>
+    json(route, { profile: AGENT_PROFILE })
+  );
+  await context.route("**/v1/workspaces/*/agents/*/runs*", (route) =>
+    json(route, { runs: [] })
+  );
+  // 만들기는 서버가 답하는 대로: 이미 있는 핸들이면 409(그 거절은 핸들 상자
+  // 밑에 서야 한다), 아니면 201 + 만들어진 멤버.
+  await context.route("**/v1/workspaces/*/agents", (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    if (ROSTER.some((member) => member.handle === body.handle)) {
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { message: "agent handle already exists" },
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent: {
+          id: CREATED_AGENT_ID,
+          handle: body.handle,
+          displayName: body.displayName,
+        },
+      }),
+    });
+  });
+  // 채널 배치 (B5.3a가 여는 표면). 넣기는 upsert, 빼기는 left_at 표시라 둘 다
+  // 멤버십 한 행을 돌려준다.
+  await context.route("**/v1/workspaces/*/channels/*/members**", (route) =>
+    json(route, {
+      membership: {
+        id: "019f9b10-0000-7000-8000-0000000006a1",
+        workspaceId: WORKSPACE_ID,
+        channelId: GENERAL_ID,
+        memberId: HERMES,
+        role: "member",
+        joinedAtMs: Date.now(),
+      },
+    })
+  );
+  // 결정 대기 (D-5): pending만 행이 있고, 나머지 상태 페이지는 비어 있다.
+  await context.route("**/v1/workspaces/*/approvals*", (route) => {
+    const url = new URL(route.request().url());
+    return json(route, {
+      approvals:
+        url.searchParams.get("status") === "pending" ? APPROVALS : [],
+    });
+  });
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, { members: ROSTER })
   );
@@ -955,6 +1078,101 @@ async function captureScheme(browser, scheme) {
   const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);
+
+  // 3f. 에이전트 허브 (goal B5.3b, D-4): 명부 왼쪽, 프로필 카드와 채널 배치
+  //     오른쪽. 이 한 판이 "이 에이전트가 무슨 모델로 어디에서 돌고 있나"에
+  //     답해야 하는 화면이라, 카드와 채널 목록이 같은 프레임에 들어와야 한다.
+  const agentHub = await context.newPage();
+  await agentHub.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(agentHub);
+  await agentHub.evaluate('location.hash = "/agents"');
+  await agentHub.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
+  await agentHub.getByTestId("agent-hub-channels").waitFor({ state: "visible" });
+  const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
+  await agentHub.screenshot({ path: agentHubShot });
+  shots.push(agentHubShot);
+
+  // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
+  //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).
+  await agentHub.getByTestId("agent-hub-create").click();
+  await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "visible" });
+  await agentHub.getByTestId("create-agent-display-name").fill("배포당번");
+  await agentHub.getByTestId("create-agent-handle").fill("release-duty");
+  await agentHub.getByTestId("create-agent-model").fill("hermes-agent");
+  await agentHub
+    .getByTestId("create-agent-base-url")
+    .fill("https://gateway.dawn.internal/v1");
+  await agentHub
+    .getByTestId("create-agent-instructions")
+    .fill("배포 전 롤백 절차를 먼저 확인하고, 확인되지 않은 것은 확인되지 않았다고 적습니다.");
+  // 포커스 링은 transition-colors(150ms)를 타므로, 방금 포커스한 프레임을 찍으면
+  // 제품이 한 번도 머무르지 않는 중간 색을 리뷰하게 된다.
+  await agentHub.waitForTimeout(300);
+  const agentCreateShot = `${OUT_DIR}/agent-create-${scheme}.png`;
+  await agentHub.screenshot({ path: agentCreateShot });
+  shots.push(agentCreateShot);
+
+  // 3f-3. 서버 거절은 필드 옆에: 이미 있는 핸들을 보내면 409가 핸들 상자 밑에
+  //       붙고, 입력한 값은 그대로 남는다. 토스트 아님.
+  await agentHub.getByTestId("create-agent-handle").fill("hermes");
+  await agentHub.getByTestId("create-agent-submit").click();
+  await agentHub
+    .getByTestId("create-agent-handle-error")
+    .waitFor({ state: "visible" });
+  await agentHub.waitForTimeout(300);
+  const agentCreateErrorShot = `${OUT_DIR}/agent-create-error-${scheme}.png`;
+  await agentHub.screenshot({ path: agentCreateErrorShot });
+  shots.push(agentCreateErrorShot);
+  await agentHub.getByTestId("create-agent-cancel").click();
+  await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "detached" });
+
+  // 3f-4. 편집 표면이 없는 서버 (diff matrix D-4의 현재 형상): allowed-models가
+  //       404면 프로필 쓰기와 일시정지도 없다. 화면은 읽기는 그대로 두고 저장을
+  //       잠근 채 왜 잠겼는지 말해야 한다. 이 프레임이 없으면 "저장하면
+  //       만들어집니다"라고 약속하고 404를 돌려주던 상태로 되돌아가기 쉽다.
+  const readOnlyHub = await context.newPage();
+  await readOnlyHub.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "not found" } }),
+    })
+  );
+  await readOnlyHub.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(readOnlyHub);
+  await readOnlyHub.evaluate('location.hash = "/agents"');
+  await readOnlyHub
+    .getByTestId("agent-hub-edit-unsupported")
+    .waitFor({ state: "visible" });
+  const agentHubReadOnlyShot = `${OUT_DIR}/agent-hub-readonly-${scheme}.png`;
+  await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
+  shots.push(agentHubReadOnlyShot);
+
+  // 3g. 결정 대기에서 바로 결정 (goal B5.3b, D-5). 이 목록은 승인 원장을 이미
+  //     읽고 있었지만 결정하려면 채널로 들어가야 했다. 판단에 필요한 사실이 이미
+  //     행에 있으므로 결정도 여기서 한다.
+  const approvals = await context.newPage();
+  await approvals.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(approvals);
+  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await approvals.getByTestId("feed-row").first().waitFor({ state: "visible" });
+  await approvals.getByTestId("inbox-approval-approve").first().waitFor({
+    state: "visible",
+  });
+  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
+  await approvals.screenshot({ path: approvalsShot });
+  shots.push(approvalsShot);
+
+  // 3g-2. 확인 단계 (SKILL §6): 한 번의 무방비 클릭으로는 아무것도 결정되지
+  //       않는다. 승인/거부는 무장이고, 확정이 결정이다.
+  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await approvals.getByTestId("inbox-approval-confirm").first().waitFor({
+    state: "visible",
+  });
+  await approvals.waitForTimeout(200);
+  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
+  await approvals.screenshot({ path: approvalsConfirmShot });
+  shots.push(approvalsConfirmShot);
 
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail

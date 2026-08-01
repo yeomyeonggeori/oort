@@ -1,4 +1,5 @@
 import type {
+  AgentProfile,
   AgentRunStatus,
   AgentRunSummary,
   MemoryScope,
@@ -86,6 +87,56 @@ const MEMORY_KIND_LABELS: Record<string, string> = {
 
 export function memoryKindLabel(kind: string): string {
   return MEMORY_KIND_LABELS[kind] ?? kind;
+}
+
+// ---- 프로필 카드: 모델 · 추론 강도 · 상태 ------------------------------------
+//
+// Three facts a person checks before they mention an agent, and each of them can
+// be UNKNOWN rather than absent. The distinction is the whole point of these
+// three functions: "기본값 사용"과 "확인하지 못함"은 다른 말이고, 후자를 전자로
+// 적으면 화면이 서버가 한 적 없는 말을 하게 된다.
+
+/** What this agent is running now. `null` profile = 아직 읽지 못한 상태. */
+export function effectiveModelLabel(
+  profile: AgentProfile | null,
+  agent: RosterMember
+): string {
+  const inherited = agent.agentModel?.trim() ?? "";
+  const preferred = profile?.modelPref?.trim() ?? "";
+  if (preferred !== "") return preferred;
+  if (inherited !== "") return `${inherited} (에이전트 기본)`;
+  return "지정된 모델 없음";
+}
+
+/**
+ * 추론 강도. `effortPref`가 없는 것은 두 가지 뜻일 수 있다 — 고르지 않았거나,
+ * 이 서버가 그 축을 모르거나. 후자를 아는 것은 capability 판정뿐이라, 이 함수는
+ * 그 판정을 인자로 받는다.
+ */
+export function effectiveEffortLabel(
+  profile: AgentProfile | null,
+  effortAxisReady: boolean
+): string {
+  const effort = profile?.effortPref?.trim() ?? "";
+  if (effort !== "") return effort;
+  if (!effortAxisReady) return "이 서버에는 추론 강도 축이 없음";
+  return "모델 기본값";
+}
+
+/**
+ * 상태 한 단어. 순서가 곧 정확도다: 멤버십 정지가 프로필의 일시정지를 이기고,
+ * 프로필을 읽지 못한 상태는 "활성"이라고 말하지 않는다.
+ */
+export function lifecycleLabel(
+  agent: RosterMember,
+  profile: AgentProfile | null,
+  profilePending: boolean,
+  profileFailed: boolean
+): string {
+  if (agent.status !== "active") return "사용 중지";
+  if (profilePending) return "상태 확인 중";
+  if (profileFailed) return "상태 확인 실패";
+  return profile?.paused ? "일시정지" : "활성";
 }
 
 export function canInvalidateMemory(

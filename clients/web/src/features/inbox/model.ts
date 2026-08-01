@@ -85,6 +85,8 @@ export interface FeedItem {
   detail?: string;
   /** "→ {outcome}" label, or null while the ledger has decided nothing. */
   outcome: string | null;
+  /** M2(design-review): 확정 문장이 비가역성을 재진술할 수 있도록 원자료를 싣는다. */
+  reversible?: boolean;
   outcomeTone: OutcomeTone;
   /** Extra safety note rendered beside the outcome (irreversible actions). */
   note?: string;
@@ -101,6 +103,16 @@ export interface FeedItem {
   reason: string;
   /** Agent rows: the human accountable for the agent (ADR-0131). */
   managedBy?: string;
+  /**
+   * 승인 원장의 행 id. 결정할 수 있는 행에만 있다 (goal B5.3b D-5).
+   *
+   * `key`에서 잘라 쓰지 않고 따로 싣는 이유: `key`는 이 목록 안에서만 유일하면
+   * 되는 렌더 키이고, 이것은 `POST …/approvals/{id}/decision`의 경로 조각이다.
+   * 두 역할이 한 문자열에 묶여 있으면 키의 형태를 바꾸는 순간 결정이 다른 행으로
+   * 날아간다. 대기 중인 승인 행에만 존재하므로, 그 밖의 행에는 결정 컨트롤이
+   * 붙을 자리가 아예 없다.
+   */
+  approvalId?: string;
 }
 
 // ---- time --------------------------------------------------------------
@@ -220,6 +232,7 @@ export function approvalItem(
   return {
     key: `approval:${approval.id}`,
     kind: "approval",
+    ...(pending ? { approvalId: approval.id } : {}),
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
@@ -228,6 +241,7 @@ export function approvalItem(
     outcome: outcome.label,
     outcomeTone: outcome.tone,
     note: approval.isReversible === false ? "되돌릴 수 없음" : undefined,
+    reversible: approval.isReversible !== false,
     channelId: approval.channelId,
     channelLabel,
     timeLabel,
