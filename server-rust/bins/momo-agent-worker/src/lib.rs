@@ -1295,7 +1295,7 @@ fn now_ms() -> i64 {
 /// problem. Both are non-retryable in the ordinary cascade, which is exactly why
 /// the OAuth path has to intercept them *before* that classification runs.
 fn is_auth_rejection<T>(result: &Result<T, ProviderError>) -> bool {
-    matches!(result, Err(ProviderError::HttpStatus(401 | 403)))
+    matches!(result, Err(ProviderError::HttpStatus(401 | 403, _)))
 }
 
 /// Turn a cached link into a transport, or fall back to env.
@@ -1488,16 +1488,20 @@ mod tests {
         let ok: Result<(), ProviderError> = Ok(());
         assert!(!is_auth_rejection(&ok));
         assert!(is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
-            401
+            401,
+            String::new()
         ))));
         assert!(is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
-            403
+            403,
+            String::new()
         ))));
         assert!(!is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
-            400
+            400,
+            String::new()
         ))));
         assert!(!is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
-            429
+            429,
+            String::new()
         ))));
         assert!(!is_auth_rejection::<()>(&Err(ProviderError::Unreachable(
             "x".into()

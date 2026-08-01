@@ -240,8 +240,8 @@ impl ProviderEndpoint {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProviderError {
-    #[error("provider answered with HTTP {0}")]
-    HttpStatus(u16),
+    #[error("provider answered with HTTP {0}: {1}")]
+    HttpStatus(u16, String),
     /// No answer at all: connect refused, DNS, TLS, timeout.
     #[error("provider did not answer: {0}")]
     Unreachable(String),
@@ -264,7 +264,7 @@ impl ProviderError {
     pub fn is_retryable(&self) -> bool {
         match self {
             ProviderError::Unreachable(_) => true,
-            ProviderError::HttpStatus(status) => {
+            ProviderError::HttpStatus(status, _) => {
                 matches!(classify_status(Some(*status)), CascadeDecision::FallOver(_))
             }
             ProviderError::InvalidResponse(_) | ProviderError::ErrorEnvelope(_) => false,
@@ -362,7 +362,11 @@ pub(crate) async fn post_json(
 
     let status = response.status().as_u16();
     if status != 200 {
-        return Err(ProviderError::HttpStatus(status));
+        // Diagnosis needs the provider's own error sentence. The body is the
+        // provider's response, never our request — no bearer can ride here.
+        let body = response.text().await.unwrap_or_default();
+        let snippet: String = body.chars().take(300).collect();
+        return Err(ProviderError::HttpStatus(status, snippet));
     }
     response
         .text()
