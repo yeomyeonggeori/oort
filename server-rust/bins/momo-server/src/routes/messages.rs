@@ -34,20 +34,23 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::Principal;
+use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    clamp_history_limit, clamp_replies_limit, is_channel_member, list_channel_page,
-    list_thread_replies, parse_replies_cursor, resolve_member_signing_key,
-    send_message_with_mentions_in_tx, validate_replies_root_in_tx, validate_thread_root_in_tx,
-    HistoryCursor, MessageSignature, MessageType, NewMessage, PagedMessage, ProvenanceRejected,
-    StoredMessage, ThreadRollup, ThreadRootInvalid,
+    channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit, delete_message_in_tx,
+    edit_message_in_tx, is_channel_member, list_channel_page, list_thread_replies,
+    parse_replies_cursor, resolve_member_signing_key, send_message_with_mentions_in_tx,
+    set_reaction_in_tx, validate_reaction_emoji, validate_replies_root_in_tx,
+    validate_thread_root_in_tx, HistoryCursor, InteractionRefused, MessageSignature, MessageType,
+    NewMessage, PagedMessage, ProvenanceRejected, ReactionAction, ReactionSnapshot, StoredMessage,
+    ThreadRollup, ThreadRootInvalid,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    HistoryQuery, MessageDto, MessagePage, RepliesQuery, SendMessageRequest, ThreadRepliesPage,
-    ThreadRollupDto,
+    EditMessageRequest, HistoryQuery, MessageDto, MessagePage, ReactionDeltaDto, RepliesQuery,
+    SendMessageRequest, ThreadRepliesPage, ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
@@ -125,6 +128,12 @@ fn message_dto(
         client_msg_id: client_msg_id.map(|id| id.to_string()),
         created_at_ms: message.created_at.timestamp_millis(),
         state: include_state.then(|| message.state.clone()),
+        // B11 — always projected, on send and history alike. Swift carries both
+        // on every row it returns (`MessageRoutes.swift:391-393`), and a client
+        // that only learns about an edit from the realtime event has no way to
+        // draw "수정됨" after a reload.
+        edited_at_ms: message.edited_at.map(|at| at.timestamp_millis()),
+        deleted_at_ms: message.deleted_at.map(|at| at.timestamp_millis()),
         thread: thread.map(thread_dto),
     }
 }
@@ -519,6 +528,319 @@ pub async fn history(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// B11 — message interactions (edit / delete / react), Swift `MessageRoutes`
+// :626-936. The SQL and the guard order live in `momo_messaging::interaction`;
+// what is left here is exactly three things: parameter parsing, the
+// refusal → status-code mapping, and the audit row.
+// ---------------------------------------------------------------------------
+
+/// Resolve `{ws}`/`{id}` for a message-scoped route (Swift `messageScopeIDs`,
+/// :1277-1293). Same credential-over-path rule as [`scope_ids`]: the workspace in
+/// the URL is only ever a cross-check against the token's.
+fn message_scope_ids(
+    workspace: &str,
+    message: &str,
+    principal: &Principal,
+) -> Result<(Uuid, Uuid), ApiError> {
+    let workspace_id =
+        Uuid::parse_str(workspace).map_err(|_| ApiError::bad_request("invalid workspace id"))?;
+    if workspace_id != principal.workspace_id {
+        return Err(ApiError::forbidden("workspace scope mismatch"));
+    }
+    let message_id =
+        Uuid::parse_str(message).map_err(|_| ApiError::bad_request("invalid message id"))?;
+    Ok((workspace_id, message_id))
+}
+
+/// A domain refusal → its HTTP answer, with Swift's status for each.
+///
+/// **404 outranks 403 only for a message that does not exist**; every other
+/// refusal is 403/400/409 in Swift's own order. Note the two authorship
+/// refusals are 403 and not 404: the caller can already read the message (the
+/// membership gate passed), so hiding its existence would protect nothing while
+/// making "you may not edit this" indistinguishable from a typo'd id.
+fn interaction_refusal(refused: InteractionRefused) -> ApiError {
+    let status = match refused {
+        InteractionRefused::NotFound => StatusCode::NOT_FOUND,
+        InteractionRefused::NotAMember
+        | InteractionRefused::NotAuthorForEdit
+        | InteractionRefused::NotAuthorForDelete => StatusCode::FORBIDDEN,
+        InteractionRefused::EditDeleted
+        | InteractionRefused::ReactDeleted
+        | InteractionRefused::EmptyBody => StatusCode::BAD_REQUEST,
+        InteractionRefused::ReactionLimit => StatusCode::CONFLICT,
+    };
+    ApiError::new(status, refused.to_string())
+}
+
+/// The audit row every *effective* interaction writes, in the interaction's own
+/// transaction (Swift `recordInteraction`, :1241-1275).
+///
+/// `by(...).about_optional(None)` because Swift sets `actor_member_id` and
+/// leaves `subject_member_id` NULL: the subject of "I edited my message" is the
+/// message, already named by `target`, not a second member.
+async fn record_interaction_audit(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    message_id: Uuid,
+    actor_member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    action: &str,
+) -> Result<(), DbError> {
+    let entry = AuditEntry::new(workspace_id, action)
+        .by(actor_member_id)
+        .about_optional(None)
+        .target("message", message_id)
+        .via_token(via_token_id)
+        .with_schema(
+            "momo.message_interaction.v1",
+            serde_json::json!({
+                "channel_id": channel_id,
+                "event_type": action,
+            }),
+        );
+    write_audit(conn, &entry).await?;
+    Ok(())
+}
+
+/// `PATCH /v1/workspaces/{ws}/messages/{id}` — rewrite one's own message.
+///
+/// 200 with the updated message (Swift returns the `MessageDTO` through
+/// `response(from:context:)`, whose default status is `.ok` — unlike `send`,
+/// which is a 201 because it creates).
+pub async fn edit(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, message)): Path<(String, String)>,
+    Json(request): Json<EditMessageRequest>,
+) -> Result<Json<MessageDto>, ApiError> {
+    let (workspace_id, message_id) = message_scope_ids(&workspace, &message, &principal)?;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let edited = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let projection = match edit_message_in_tx(
+                conn,
+                workspace_id,
+                message_id,
+                principal.member_id,
+                &request.body,
+            )
+            .await?
+            {
+                Ok(projection) => projection,
+                // A refusal has to leave through the ERROR channel or the
+                // transaction commits: `with_tenant_tx` commits on `Ok`, and an
+                // edit refused as a value would still have taken its locks.
+                Err(refused) => return Err(SendFailure::Rejected(interaction_refusal(refused))),
+            };
+            record_interaction_audit(
+                conn,
+                workspace_id,
+                projection.message.channel_id,
+                message_id,
+                principal.member_id,
+                via_token_id,
+                "message.edited",
+            )
+            .await?;
+            Ok(projection)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.edit", error),
+    })?;
+
+    Ok(Json(message_dto(
+        &edited.message,
+        edited.client_msg_id,
+        true,
+        None,
+    )))
+}
+
+/// `DELETE /v1/workspaces/{ws}/messages/{id}` — soft delete one's own message.
+///
+/// 200 with the **tombstone**, not 204: the client needs the row back so it can
+/// replace the message in place rather than remove it and leave what looks like
+/// a gap in `seq`.
+pub async fn delete_message(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, message)): Path<(String, String)>,
+) -> Result<Json<MessageDto>, ApiError> {
+    let (workspace_id, message_id) = message_scope_ids(&workspace, &message, &principal)?;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let deleted = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let deleted =
+                match delete_message_in_tx(conn, workspace_id, message_id, principal.member_id)
+                    .await?
+                {
+                    Ok(deleted) => deleted,
+                    Err(refused) => {
+                        return Err(SendFailure::Rejected(interaction_refusal(refused)))
+                    }
+                };
+            // Deleting an already-deleted message is a success that records
+            // nothing (Swift :730-734): a second audit row would claim a
+            // deletion that did not happen, and a second broadcast would tell
+            // every client something it already applied.
+            if !deleted.already_deleted {
+                record_interaction_audit(
+                    conn,
+                    workspace_id,
+                    deleted.message.message.channel_id,
+                    message_id,
+                    principal.member_id,
+                    via_token_id,
+                    "message.deleted",
+                )
+                .await?;
+            }
+            Ok(deleted)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.delete", error),
+    })?;
+
+    Ok(Json(message_dto(
+        &deleted.message.message,
+        deleted.message.client_msg_id,
+        true,
+        None,
+    )))
+}
+
+/// `PUT …/messages/{id}/reactions/{emoji}`.
+pub async fn add_reaction(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String, String)>,
+) -> Result<Json<ReactionDeltaDto>, ApiError> {
+    mutate_reaction(state, principal, path, ReactionAction::Added).await
+}
+
+/// `DELETE …/messages/{id}/reactions/{emoji}`.
+pub async fn remove_reaction(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String, String)>,
+) -> Result<Json<ReactionDeltaDto>, ApiError> {
+    mutate_reaction(state, principal, path, ReactionAction::Removed).await
+}
+
+/// The body both reaction verbs share (Swift `mutateReaction`, :800-899).
+///
+/// One function because the two differ in a single boolean, and splitting them
+/// would double the guard order — the thing most worth keeping identical.
+async fn mutate_reaction(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, message, emoji)): Path<(String, String, String)>,
+    action: ReactionAction,
+) -> Result<Json<ReactionDeltaDto>, ApiError> {
+    let (workspace_id, message_id) = message_scope_ids(&workspace, &message, &principal)?;
+    // Axum has already percent-decoded the segment, which is Swift's
+    // `removingPercentEncoding`. Validation is the domain's so the bound and the
+    // wording cannot drift between here and a future non-HTTP caller.
+    let emoji = validate_reaction_emoji(&emoji)
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?
+        .to_string();
+    let via_token_id = audit_via_token_id(&principal);
+
+    let delta = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let delta = match set_reaction_in_tx(
+                conn,
+                workspace_id,
+                message_id,
+                principal.member_id,
+                &emoji,
+                action,
+            )
+            .await?
+            {
+                Ok(delta) => delta,
+                Err(refused) => return Err(SendFailure::Rejected(interaction_refusal(refused))),
+            };
+            // A no-op toggle answers 200 and writes nothing — the reaction is
+            // already in the state the caller asked for, so there is nothing to
+            // record and nothing to publish. That is what makes a
+            // double-tapped emoji harmless instead of a 500.
+            if delta.changed {
+                record_interaction_audit(
+                    conn,
+                    workspace_id,
+                    delta.channel_id,
+                    message_id,
+                    principal.member_id,
+                    via_token_id,
+                    &format!("reaction.{}", delta.action.as_wire_label()),
+                )
+                .await?;
+            }
+            Ok(delta)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.reaction", error),
+    })?;
+
+    Ok(Json(ReactionDeltaDto {
+        action: delta.action.as_wire_label().to_string(),
+        message_id: delta.message_id_wire(),
+        member_id: delta.member_id_wire(),
+        emoji: delta.emoji,
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/reactions` — the channel's whole
+/// reaction map, for a cold load.
+///
+/// Encoded as the mapping **itself**, with no wrapper key, because that is what
+/// Swift's `ReactionSnapshotDTO` does (`DTOs.swift:243-250`, a
+/// `singleValueContainer`). Wrapping it here would break the shipped macOS
+/// client's decode.
+pub async fn reaction_snapshot(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+) -> Result<Json<ReactionSnapshot>, ApiError> {
+    let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
+
+    let snapshot = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            // Guard and read in one transaction, like every other channel read
+            // here: a caller removed mid-flight must not still receive the page
+            // their check passed for.
+            if !is_channel_member(conn, channel_id, principal.member_id).await? {
+                return Err(SendFailure::Rejected(ApiError::forbidden(
+                    "not a member of this channel",
+                )));
+            }
+            Ok(channel_reaction_snapshot(conn, channel_id).await?)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.reactions", error),
+    })?;
+
+    Ok(Json(snapshot))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,6 +1106,8 @@ mod tests {
             root_id: None,
             created_at: chrono::DateTime::from_timestamp_millis(1_700_000_000_000)
                 .expect("timestamp"),
+            edited_at: None,
+            deleted_at: None,
         };
         let rollup = ThreadRollup {
             reply_count: 3,
