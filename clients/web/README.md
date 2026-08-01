@@ -506,3 +506,55 @@ The liveness claim, and the two things a terminal costs:
   nothing left to do, so the notice names the window instead of pointing at a
   button that is not there (R2 M2: measured at 880px, 79 columns against the
   host's 80, with both 넓게 보기 controls correctly absent).
+
+## 홈 화면 앱 (goal B10, RN 앞의 임시 다리)
+
+**이것은 ADR-0137(RN 채택)을 대체하지 않는다.** 네이티브 클라이언트가 나오기
+전까지 폰에서 쓰는 사람의 체감을 메우는 다리다. 발단은 구체적이다: 사파리
+주소창이 컴포저를 가려서, 메시지를 쓰는 동안 자기가 친 글자가 보이지 않았다.
+
+네 조각이고, 각각 다른 파일이 갖고 있다.
+
+| 조각 | 어디 | 요점 |
+|---|---|---|
+| 매니페스트 | `public/manifest.json` | `display: standalone`, 아이콘 192/512/maskable |
+| iOS 메타 | `index.html` | `apple-mobile-web-app-capable`, 상태바 `default` |
+| 서비스 워커 | `src/features/pwa/sw.js` + `vite.config.ts` | 셸만 캐시, 데이터는 캐시하지 않음 |
+| 안내 한 줄 | `src/features/pwa/*` + `src/main.tsx` | 설치 안내(기기당 1회), 새 버전 알림 |
+
+**오프라인 정직성이 이 배치의 계약이다.** 워커는 `/v1`과 `/health`를 손대지
+않고 그대로 통과시킨다. 그래서 네트워크가 없을 때 뜨는 것은 캐시된 셸 + 각
+표면의 오프라인 상태이지, 어제 받아 둔 메시지가 아니다. 낡은 목록을 최신인 척
+보여주면 그 화면에서 사람이 내리는 판단("아무도 답을 안 했네")이 틀리게 되고,
+그 판단은 되돌릴 수 없다. 오프라인 동기화는 RN이 세션·읽음 상태와 함께 설계할
+몫이다. 푸시 알림도 같은 이유로 없다(ADR-0120의 경로는 NSE).
+
+캐시 세대는 빌드 하나다. `vite.config.ts`의 `momoServiceWorker` 플러그인이
+번들 파일 이름(내용 해시 포함)에서 빌드 아이디를 뽑아 `sw.js`에 새겨 넣으므로,
+배포하면 워커의 바이트가 바뀌고 브라우저가 업데이트를 알아본다. `public/`에 정적
+파일로 두면 바이트가 영원히 같아서 그 일이 일어나지 않는다. 새 워커는 즉시
+활성화되지만(낡은 셸 고착 금지) 화면을 몰래 바꾸지는 않는다: 앱이 "새 버전이
+준비됐습니다" 한 줄을 띄우고, 새로고침을 누르는 것은 사람이다.
+
+**워커는 https에서만 등록된다**(`store.ts serviceWorkerEligible`). Tauri 셸은
+패키징 CSP가 `worker-src 'none'`이고 자기 업데이터를 갖고 있으며, dev/캡처/게이트
+빌드는 모의한 `/v1` 위에 워커가 끼어들면 실패 원인이 두 겹이 된다. 로컬 preview
+에서 같은 경로를 걸으려면 `?pwa`를 붙인다(`?stress`, `?agentwork`과 같은 종류의
+seam). iOS의 홈 화면 추가 자체는 워커와 무관하므로 http에서도 전체 화면으로 뜬다.
+
+```bash
+npm run icons:pwa           # favicon.svg -> public/icon-*.png (마크를 고쳤을 때만)
+npm run capture:standalone  # 실측 + artifacts/pwa/*.png
+```
+
+`capture:standalone`은 스크린샷 전에 먼저 잰다: 매니페스트가 JSON MIME으로 오고
+크로미움 파서를 통과하는가, 아이콘이 선언한 크기 그대로인가, 워커가 셸을 미리
+받아 두는가, **캐시에 `/v1` 응답이 하나도 없는가**, 끊었을 때 셸이 뜨는가,
+그리고 홈 화면 모드에서 `#root`가 상단 안전 영역만큼 물러나고도 문서가 창보다
+커지지 않는가. 하나라도 어긋나면 캡처 전에 실패한다.
+
+한계 하나는 적어 둔다: 크로미움은 `display-mode`를 흉내 내지 못한다(CDP
+`Emulation.setEmulatedMedia`가 아는 미디어 기능 목록에 없다). 그래서 그 규칙은
+두 조각으로 나눠 잰다 — 배포되는 스타일시트 안에 `@media (display-mode:
+standalone)` 규칙이 있는가, 그리고 그 선언이 기기가 준 안전 영역 값으로 풀리는가
+(`Emulation.setSafeAreaInsetsOverride`는 실측 가능하다).

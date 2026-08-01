@@ -35,6 +35,30 @@
     -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f6f3" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17161a" />
+    <!--
+      홈 화면 설치 (goal B10). 매니페스트 자체는 public/manifest.json이고, 그
+      선택들(standalone, 다크 타일과 같은 배경색, 192/512/maskable 아이콘)의
+      근거는 src/features/pwa/store.ts 머리말에 적혀 있다.
+
+      확장자가 .webmanifest가 아니라 .json인 이유: 매니페스트는 JSON MIME으로
+      와야 브라우저가 읽는데, 배포 Caddy 이미지에는 .webmanifest 매핑이 없어
+      text/plain으로 나갈 수 있다. .json은 어디서나 application/json이다.
+
+      apple- 접두사 두 줄은 iOS 몫이다. iOS 16.4부터는 매니페스트의 display도
+      읽지만, 그 아래 버전에서 홈 화면 아이콘을 전체 화면으로 여는 스위치는
+      apple-mobile-web-app-capable 하나뿐이다. mobile-web-app-capable은 같은
+      뜻의 표준 이름이고 크롬이 이쪽을 본다.
+
+      상태바 스타일은 black-translucent가 아니라 default다. translucent는 글자를
+      흰색으로 고정하는데, 이 앱은 라이트 스킴에서 밝은 종이(#f7f6f3)를 깔기
+      때문에 흰 글자 시계가 배경에 지워진다. default는 위의 theme-color 두 줄을
+      따라가므로 스킴이 바뀌어도 시계가 읽힌다.
+    -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="oort" />
   </head>
   <body>
     <div id="root"></div>
