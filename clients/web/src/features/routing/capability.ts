@@ -61,23 +61,115 @@ import { parseEffortTable, type EffortTable } from "./routingModel";
 
 export type RoutingSupport = "checking" | "ready" | "absent" | "unknown";
 
-/**
- * An agent-specific allow-list is additive capability data: a missing old
- * endpoint, malformed 200 body, or transient failure all mean "not received",
- * not an empty model policy. Callers keep the broad, explained fallback then.
- */
-export function useAllowedAgentModels(agentMemberId: string | null): readonly string[] | null {
+/** One request serves both readers below; TanStack dedupes on this key. */
+function useAllowedModelsQuery(agentMemberId: string | null) {
   const { workspaceId } = useSession();
   const key = agentMemberId?.toLowerCase() ?? null;
-  const query = useQuery({
+  return useQuery({
     queryKey: ["routing", "allowed-models", workspaceId.toLowerCase(), key],
     queryFn: ({ signal }) =>
       fetchAgentAllowedModels(workspaceId, agentMemberId as string, signal),
     enabled: agentMemberId !== null,
     retry: false,
     staleTime: 30_000,
+    retryOnMount: false,
+    refetchOnWindowFocus: false,
   });
-  return query.data ?? null;
+}
+
+/**
+ * An agent-specific allow-list is additive capability data: a missing old
+ * endpoint, malformed 200 body, or transient failure all mean "not received",
+ * not an empty model policy. Callers keep the broad, explained fallback then.
+ */
+export function useAllowedAgentModels(agentMemberId: string | null): readonly string[] | null {
+  return useAllowedModelsQuery(agentMemberId).data ?? null;
+}
+
+// ---- ④ 에이전트 편집 축 (프로필 쓰기 · 일시정지) -------------------------------
+//
+// 네 번째 사실이고, 앞의 셋과 같은 이유로 따로 판정한다. ①의 모델 편집과 ②의
+// effort 표는 **읽기**에 대한 사실이지만, 허브의 [프로필 변경 저장]과 [에이전트
+// 일시정지]는 `PUT …/agents/{a}/profile`과 `PUT …/agents/{a}/pause`를 부른다.
+// 그 둘이 없는 서버가 지금 실재한다: B5.2가 `POST …/agents`와 `GET …/profile`만
+// 올렸고(diff matrix D-4), 편집 표면은 B5.3a의 것이다.
+//
+// 그 서버에서 허브는 이렇게 거짓말을 했다. `GET profile`이 404를 답하면 훅은
+// 그것을 "아직 프로필이 없다"로 읽고(useAgentProfile: 같은 경로의 PUT이 upsert
+// 이므로 옳은 독법이다) 폼을 빈 초안으로 연다. ②의 effort 표는 B4.2 이후 200이라
+// 강도 선택기까지 열린다(B4 diff §10.4가 이 뒤집힘을 예고해 뒀다). 그래서 화면은
+// "변경을 저장하면 프로필이 만들어집니다"라고 약속하고, 누르면 404를 받는다.
+// 프로브 하나가 없어서가 아니라, **쓰기 표면에 대해 아무도 묻지 않아서** 생긴
+// 거짓말이다.
+//
+// 물음은 `GET …/agents/{a}/allowed-models`다. 이 경로를 고른 이유는 취향이 아니라
+// 실측이다: Swift는 세 라우트를 한 `AgentProfileRoutes.add(to:)`에 함께 걸고
+// (`get allowed-models` · `put profile` · `put pause`), B5.3a 패킷도 그 셋을 한
+// 항목으로 연다. 즉 이 읽기가 있다는 것은 그 쓰기들이 있다는 것과 같은 사실이고,
+// 읽기라서 부작용이 없다. 프로필 GET은 이 물음에 쓸 수 없다 — B5.2 서버에도
+// 있으므로 두 세대를 가르지 못한다.
+//
+// 판정 규칙은 이 파일의 나머지와 같다: 404/405/501만 "없다"로 읽고, 그 밖은
+// "확인하지 못했다"로 남기며, 확정되지 않으면 쓰기 컨트롤은 잠긴다.
+
+/** 편집 표면이 없는 서버의 표준 문장. */
+export const AGENT_EDIT_UNSUPPORTED_REASON =
+  "이 서버는 아직 에이전트 프로필 편집과 일시정지를 지원하지 않습니다.";
+
+const AGENT_EDIT_UNKNOWN_REASON =
+  "이 서버가 에이전트 프로필 편집을 받는지 확인하지 못했습니다.";
+
+const AGENT_EDIT_FORBIDDEN_REASON =
+  "이 계정으로는 이 에이전트의 설정을 읽을 수 없어 편집 가능 여부를 확인하지 못했습니다.";
+
+export interface AgentEditingCapability {
+  support: RoutingSupport;
+  /** 잠긴 이유. ready면 null. */
+  reason: string | null;
+  /** 서버를 새로 올렸을 때 새로고침 없이 회복하는 경로. */
+  recheck: () => void;
+}
+
+/** 프로브의 답을 판정으로. 순수 함수라 단위 테스트가 계약을 고정한다. */
+export function verdictFromAgentEditProbe(error: unknown): CapabilityVerdict {
+  if (error instanceof ApiError) {
+    if (error.status === 404 || error.status === 405 || error.status === 501) {
+      return { support: "absent", reason: AGENT_EDIT_UNSUPPORTED_REASON };
+    }
+    if (error.status === 401 || error.status === 403) {
+      return { support: "unknown", reason: AGENT_EDIT_FORBIDDEN_REASON };
+    }
+    return {
+      support: "unknown",
+      reason: `${AGENT_EDIT_UNKNOWN_REASON} ${unsettledAnswerClause(error.status)}`,
+    };
+  }
+  if (error instanceof NetworkError) {
+    return { support: "unknown", reason: error.message };
+  }
+  return { support: "unknown", reason: AGENT_EDIT_UNKNOWN_REASON };
+}
+
+export function useAgentEditingCapability(
+  agentMemberId: string | null
+): AgentEditingCapability {
+  const query = useAllowedModelsQuery(agentMemberId);
+  const recheck = useCallback(() => {
+    void query.refetch();
+  }, [query]);
+
+  if (agentMemberId === null) {
+    return { support: "unknown", reason: AGENT_EDIT_UNKNOWN_REASON, recheck };
+  }
+  if (query.isPending) return { support: "checking", reason: null, recheck };
+  if (query.error) {
+    const verdict = verdictFromAgentEditProbe(query.error);
+    return { support: verdict.support, reason: verdict.reason, recheck };
+  }
+  // A 200 whose body this client cannot use is still a 200: the route is
+  // mounted, so the writes beside it are too. The unusable list is the allow-list
+  // reader's problem (it falls back to the broad picker), not this verdict's.
+  return { support: "ready", reason: null, recheck };
 }
 
 export interface CapabilityVerdict {

@@ -1,7 +1,5 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ShieldQuestion, Terminal, Zap } from "lucide-react";
-import { Button } from "@/design/ui/button";
-import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import {
   formatCount,
@@ -15,11 +13,7 @@ import {
   type PayloadDetail,
 } from "./agentCardModel";
 import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
-import {
-  decideApproval,
-  newDecisionId,
-  type DecisionOutcome,
-} from "./approvalDecision";
+import { ApprovalActions, type Armed } from "./ApprovalActions";
 
 // =============================================================================
 // Agent card (R-1 §4). Structured, calm, dense: a title row (icon, name, status
@@ -144,134 +138,6 @@ function ledgerHandle(approvalId: string): string {
   return approvalId.replace(/-/g, "").slice(0, 4).toLowerCase();
 }
 
-type Armed = "approve" | "reject" | null;
-
-/**
- * Approve / reject, straight onto the landed decision endpoint. The card owns
- * one idempotency key per direction: retrying the same decision reuses it, and
- * only an idempotency conflict drops it so the retry mints a fresh one.
- */
-function ApprovalActions({
-  approvalId,
-  armed,
-  setArmed,
-  onSettled,
-}: {
-  approvalId: string;
-  armed: Armed;
-  setArmed: (armed: Armed) => void;
-  onSettled: (outcome: DecisionOutcome) => void;
-}) {
-  // workspaceId comes from session context rather than a prop chain: the card
-  // sits four components below the shell, and threading one id through
-  // Timeline and MessageRow would widen the blast radius of this change for
-  // nothing.
-  const { workspaceId } = useSession();
-  const [busy, setBusy] = useState(false);
-  const [errorCopy, setErrorCopy] = useState<string | null>(null);
-  const keysRef = useRef<{ approve?: string; reject?: string }>({});
-
-  async function commit(approve: boolean) {
-    if (busy) return;
-    const slot = approve ? "approve" : "reject";
-    keysRef.current[slot] ??= newDecisionId();
-    setBusy(true);
-    setErrorCopy(null);
-    try {
-      const outcome = await decideApproval(
-        workspaceId,
-        approvalId,
-        approve,
-        keysRef.current[slot]
-      );
-      if (outcome.kind === "error") {
-        if (outcome.errorCode === "idempotency_conflict") {
-          delete keysRef.current[slot];
-        }
-        setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");
-        return;
-      }
-      setArmed(null);
-      onSettled(outcome);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="border-t border-line px-3 py-2">
-      {armed === null ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-meta text-ink-muted">
-            이 작업은 승인이 필요합니다.
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="approval-reject"
-              onClick={() => setArmed("reject")}
-            >
-              거부
-            </Button>
-            <Button
-              size="sm"
-              data-testid="approval-approve"
-              onClick={() => setArmed("approve")}
-            >
-              승인
-            </Button>
-          </span>
-        </div>
-      ) : (
-        <div
-          className="flex flex-wrap items-center justify-between gap-2"
-          data-testid="approval-confirm"
-        >
-          <span className="text-meta text-ink">
-            {armed === "approve"
-              ? "승인하면 에이전트가 바로 실행합니다."
-              : "거부하면 이 실행은 취소됩니다."}
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              data-testid="approval-cancel"
-              onClick={() => setArmed(null)}
-            >
-              취소
-            </Button>
-            <Button
-              variant={armed === "approve" ? "default" : "destructive"}
-              size="sm"
-              disabled={busy}
-              data-testid="approval-commit"
-              onClick={() => void commit(armed === "approve")}
-            >
-              {busy
-                ? "보내는 중…"
-                : armed === "approve"
-                  ? "승인 확정"
-                  : "거부 확정"}
-            </Button>
-          </span>
-        </div>
-      )}
-      {errorCopy !== null && (
-        <p
-          role="alert"
-          data-testid="approval-error"
-          className="pt-2 text-meta text-danger"
-        >
-          {errorCopy}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function ApprovalBody({
   card,
   directory,
@@ -328,6 +194,7 @@ function ApprovalBody({
         ) : !settled && card.approvalId !== null ? (
           <ApprovalActions
             approvalId={card.approvalId}
+            className="border-t border-line"
             armed={armed}
             setArmed={setArmed}
             onSettled={(outcome) => {

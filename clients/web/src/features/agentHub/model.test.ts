@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRunSummary, RosterMember } from "@/lib/api";
+import type { AgentProfile, AgentRunSummary, RosterMember } from "@/lib/api";
 import type { AgentWorkingSignal } from "@/features/agents/agentWorkingSignal";
 import {
   agentMembers,
   canInvalidateMemory,
+  effectiveEffortLabel,
+  effectiveModelLabel,
+  lifecycleLabel,
   memoryKindLabel,
   mergeRunPages,
   signalsForAgent,
@@ -50,6 +53,56 @@ function run(id: string): AgentRunSummary {
     updatedAtMs: 1,
   };
 }
+
+function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
+  return {
+    agentMemberId: "AGENT",
+    workspaceId: "WS",
+    instructions: "",
+    enabledTools: [],
+    triggers: { mention: true },
+    paused: false,
+    version: 1,
+    updatedBy: "ME",
+    updatedAtMs: 1,
+    ...overrides,
+  };
+}
+
+describe("프로필 카드", () => {
+  it("모델은 프로필 선택 > 에이전트 기본 > 없음 순으로 읽고, 상속을 상속이라 말한다", () => {
+    const agent = { ...member("A", "agent", "김인턴"), agentModel: "hermes-agent" };
+    expect(effectiveModelLabel(profile({ modelPref: "gpt-5.6" }), agent)).toBe(
+      "gpt-5.6"
+    );
+    expect(effectiveModelLabel(profile(), agent)).toBe("hermes-agent (에이전트 기본)");
+    expect(effectiveModelLabel(null, member("A", "agent", "김인턴"))).toBe(
+      "지정된 모델 없음"
+    );
+  });
+
+  it("추론 강도의 빈칸은 '고르지 않음'과 '축이 없음'을 구분한다", () => {
+    expect(effectiveEffortLabel(profile({ effortPref: "high" }), true)).toBe("high");
+    expect(effectiveEffortLabel(profile(), true)).toBe("모델 기본값");
+    expect(effectiveEffortLabel(profile(), false)).toBe(
+      "이 서버에는 추론 강도 축이 없음"
+    );
+  });
+
+  it("상태는 멤버십 정지가 먼저이고, 못 읽은 것을 활성이라 하지 않는다", () => {
+    const active = member("A", "agent", "김인턴");
+    const suspended: RosterMember = { ...active, status: "suspended" };
+    expect(lifecycleLabel(suspended, profile({ paused: true }), false, false)).toBe(
+      "사용 중지"
+    );
+    expect(lifecycleLabel(active, null, true, false)).toBe("상태 확인 중");
+    expect(lifecycleLabel(active, null, false, true)).toBe("상태 확인 실패");
+    expect(lifecycleLabel(active, profile({ paused: true }), false, false)).toBe(
+      "일시정지"
+    );
+    expect(lifecycleLabel(active, profile(), false, false)).toBe("활성");
+  });
+});
 
 describe("agent hub model", () => {
   it("keeps only agents and sorts the stable roster projection", () => {

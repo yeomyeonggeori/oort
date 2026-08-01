@@ -135,6 +135,22 @@ function useApprovalPage(status: ApprovalStatus, enabled: boolean) {
   });
 }
 
+/**
+ * Re-read the ledger after a decision was recorded (goal B5.3b D-5).
+ *
+ * Every status page, not just `pending`: a decision moves the row from one page
+ * to another, so refreshing only the page it left would leave the 에이전트 feed
+ * showing a stale absence. Where it went is the server's answer, and this client
+ * does not move the row itself.
+ */
+export function useInvalidateApprovals(): () => void {
+  const { workspaceId } = useSession();
+  const client = useQueryClient();
+  return useCallback(() => {
+    void client.invalidateQueries({ queryKey: ["approvals", workspaceId] });
+  }, [client, workspaceId]);
+}
+
 export function useNeedsAction(enabled: boolean): Feed {
   const context = useFeedContext();
   const query = useApprovalPage("pending", enabled);
