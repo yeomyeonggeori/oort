@@ -68,10 +68,10 @@ pub use identity::{
     WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
 };
 pub use message::{
-    agent_context_window_in_tx, build_broadcast_payload, build_thread_updated_payload,
-    cent_channel, clamp_history_limit, clamp_replies_limit, context_message_body,
-    fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page, list_messages,
-    list_thread_replies, parse_replies_cursor, send_message, send_message_in_tx,
+    agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,
+    build_thread_updated_payload, cent_channel, clamp_history_limit, clamp_replies_limit,
+    context_message_body, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
+    list_messages, list_thread_replies, parse_replies_cursor, send_message, send_message_in_tx,
     send_message_with_mentions_in_tx, send_signed_message_in_tx, thread_root_state_in_tx,
     validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, MessageSignature,
     MessageType, NewMessage, PagedMessage, RepliesCursorInvalid, SentMessage, StoredMessage,

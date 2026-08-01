@@ -51,9 +51,23 @@
 //! run, and a per-surface copy is how the same three words come to mean two
 //! things.
 //!
+//! **B7.2 adds the A2A delegation policy** ([`a2a`]): the §3.4 hop-depth cap,
+//! the §3.3 loop gates G1/G2/G3 measured off Swift `LoopGuards.swift`, and a
+//! per-root-trigger spend ceiling summed over a whole delegation tree
+//! ([`usage::chain_usage_in_tx`]). It is a module of its own, and — like
+//! [`mention`] — it owns **no `INSERT`**: it reads counters, returns a verdict
+//! and builds the strings, and `momo-agent-worker` composes that with the
+//! message spine, the outbox and `audit_log` inside the turn's transaction.
+//!
+//! The one counter it does not read is G2's, because that one counts `message`
+//! rows: `momo_messaging::agent_auto_reply_streak_in_tx` owns it and the caller
+//! passes the number in. That is the same boundary this crate has kept since
+//! B2.6, held under pressure again.
+//!
 //! Streaming/partial relay, the `tool_call` work-control branch, approvals,
-//! memory-delivery receipts (`context_packet`) and the ACP adapter are **not**
-//! ported here — see the PR body's deviation list.
+//! memory-delivery receipts (`context_packet`), G4's SimHash semantic-loop
+//! detector (a stub in Swift too) and the ACP adapter are **not** ported here —
+//! see the PR body's deviation list.
 //!
 //! ## Verification
 //!
@@ -62,6 +76,7 @@
 //! `infra/e2e/bootstrap_roles.sql` applied. Each is named after the invariant it
 //! breaks when reverted.
 
+pub mod a2a;
 pub mod effort;
 pub mod error;
 pub mod mention;
@@ -70,6 +85,12 @@ pub mod routing;
 pub mod run;
 pub mod usage;
 
+pub use a2a::{
+    evaluate_a2a_spawn, inherited_depth, load_a2a_gate_snapshot_in_tx, A2aBlock, A2aGateSnapshot,
+    A2aLimits, DEFAULT_A2A_MAX_DEPTH, DEFAULT_G1_STALE_RUNNING_SECONDS,
+    DEFAULT_MAX_CHAIN_COST_MICRO_USD, DEFAULT_MAX_CHAIN_TOKENS, DEFAULT_MAX_CONSECUTIVE_AUTO,
+    DEFAULT_MAX_STEPS, SCHEMA_DEPTH_CEILING,
+};
 pub use effort::{
     known_level, ledger_effort, supported_efforts, supports, EFFORT_LEVELS, FALLBACK_EFFORTS,
     MAX_EFFORT_LENGTH,
@@ -96,15 +117,16 @@ pub use routing::{
     ROUTING_KEYS,
 };
 pub use run::{
-    completion_status, create_agent_run_in_tx, find_agent_run_by_trigger_in_tx, finish_run_in_tx,
-    is_active_agent_in_tx, is_active_human_channel_member_in_tx, live_run_count_in_tx,
-    load_agent_run_in_tx, load_eligible_agent_in_tx, lock_gateway_run_in_tx,
-    mark_run_started_in_tx, AgentRunRow, CompletionStatusError, CreatedRun, EligibleAgent,
-    GatewayRunSnapshot, NewAgentRun, RunStatus, RunTrigger,
+    completion_status, consume_run_step_in_tx, create_agent_run_in_tx,
+    find_agent_run_by_trigger_in_tx, finish_run_in_tx, is_active_agent_in_tx,
+    is_active_human_channel_member_in_tx, live_run_count_in_tx, load_agent_run_in_tx,
+    load_eligible_agent_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx, AgentRunRow,
+    CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus,
+    RunTrigger,
 };
 pub use usage::{
-    budget_state, record_run_usage_in_tx, usage_summary_in_tx, validated_window, ResolvedUsage,
-    RunUsageReport, UsageAgentRow, UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow,
-    UsageSummary, UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS,
-    MAX_RANGE_DAYS,
+    budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,
+    ChainUsage, ResolvedUsage, RunUsageReport, UsageAgentRow, UsageBucket, UsageBucketRow,
+    UsageBudget, UsageModelRow, UsageSummary, UsageTotals, UsageWindow, UsageWindowError,
+    DEFAULT_LOOKBACK_DAYS, MAX_RANGE_DAYS,
 };

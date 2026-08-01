@@ -510,6 +510,102 @@ pub fn budget_state(
     }
 }
 
+// ---------------------------------------------------------------------------
+// the A2A delegation chain's spend (B7.2)
+// ---------------------------------------------------------------------------
+
+/// What one delegation tree has cost so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChainUsage {
+    /// `prompt + completion + reasoning` summed over every run in the tree.
+    ///
+    /// `cached_tokens` is deliberately **not** added: every provider this server
+    /// speaks to reports it as a *subset* of `prompt_tokens` (the part served
+    /// from cache), so adding it would bill the same tokens twice and trip the
+    /// ceiling early on exactly the workloads caching was supposed to make
+    /// cheaper.
+    pub total_tokens: i64,
+    pub cost_micro_usd: i64,
+    /// How many runs the tree holds, including the one asked about.
+    pub run_count: i64,
+}
+
+/// How far up and down `parent_run_id` the chain walk will go.
+///
+/// `agent_run_depth_a2a_cap_ck` bounds a legitimate chain at depth 4, so 32 is
+/// slack rather than a limit. It exists because a recursive CTE over a
+/// self-referencing FK has no other structural guarantee of termination, and a
+/// hung query inside the turn transaction would hold the run's row lock.
+const CHAIN_WALK_LIMIT: i32 = 32;
+
+/// Sum the ledger over the **whole delegation tree** `run_id` belongs to — its
+/// root, and every run descended from that root.
+///
+/// Not "this run plus its children": the ceiling B7.2 enforces is per *root
+/// trigger*, so a chain that has already fanned out sideways must be visible
+/// from any run in it. The walk is therefore up to the root first
+/// (`parent_run_id IS NULL`) and then down again. When the walk hits
+/// [`CHAIN_WALK_LIMIT`] before finding a parentless run, the deepest ancestor it
+/// did reach stands in for the root — an under-count, never an over-count, so a
+/// bounded walk can only let a chain run longer, never stop one on a number it
+/// did not measure.
+///
+/// Runs with no ledger row (queued, running, or a turn whose provider reported
+/// no usage) contribute 0 through the `LEFT JOIN` rather than dropping out of
+/// `run_count` — "how big is this chain" and "what has it spent" are different
+/// questions and the caller may want both.
+pub async fn chain_usage_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<ChainUsage, DbError> {
+    let row = sqlx::query(
+        "WITH RECURSIVE up AS ( \
+             SELECT r.id, r.parent_run_id, 0 AS lvl \
+               FROM agent_run r \
+              WHERE r.id = $2 AND r.workspace_id = $1 \
+             UNION ALL \
+             SELECT r.id, r.parent_run_id, up.lvl + 1 \
+               FROM agent_run r \
+               JOIN up ON r.id = up.parent_run_id \
+              WHERE r.workspace_id = $1 AND up.lvl < $3 \
+         ), \
+         root AS ( \
+             SELECT id FROM up \
+              ORDER BY (parent_run_id IS NULL) DESC, lvl DESC \
+              LIMIT 1 \
+         ), \
+         down AS ( \
+             SELECT id, 0 AS lvl FROM root \
+             UNION ALL \
+             SELECT r.id, down.lvl + 1 \
+               FROM agent_run r \
+               JOIN down ON r.parent_run_id = down.id \
+              WHERE r.workspace_id = $1 AND down.lvl < $3 \
+         ) \
+         SELECT COALESCE(sum(u.prompt_tokens + u.completion_tokens \
+                             + u.reasoning_tokens), 0)::bigint AS total_tokens, \
+                COALESCE(sum(u.cost_micro_usd), 0)::bigint AS cost_micro_usd, \
+                count(DISTINCT d.id)::bigint AS run_count \
+           FROM down d \
+           LEFT JOIN usage_ledger u ON u.run_id = d.id AND u.workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(CHAIN_WALK_LIMIT)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(ChainUsage::default());
+    };
+    Ok(ChainUsage {
+        total_tokens: row.try_get("total_tokens").map_err(DbError::from)?,
+        cost_micro_usd: row.try_get("cost_micro_usd").map_err(DbError::from)?,
+        run_count: row.try_get("run_count").map_err(DbError::from)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

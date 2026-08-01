@@ -1434,6 +1434,59 @@ pub async fn agent_context_window_in_tx(
     Ok(ordered.into_iter().map(|(_, value)| value).collect())
 }
 
+/// The G2 counter: how many auto replies this agent has made since a human last
+/// spoke in the channel (B7.2).
+///
+/// Swift `LoopGuards.loadSnapshot` (:202-222), ported query-for-query. It lives
+/// here for the same reason [`agent_context_window_in_tx`] does — it is a
+/// `message` read, and `momo-agent` owns none — and the caller
+/// (`momo_agent::evaluate_a2a_spawn`) takes the number as an argument.
+///
+/// Four semantics are encoded in the predicate rather than in the caller, and
+/// each one is a decision:
+///
+/// * **a human utterance resets the counter — structurally.** There is no
+///   stored counter to reset: the count is bounded to `seq > last_human_seq`,
+///   so "사람 개입 리셋" (§3.4) cannot be missed by a writer that forgot to
+///   zero a column;
+/// * **one count per run**, not per message (`DISTINCT run_id`), so an agent
+///   that answers in three parts has taken one turn, not three. A message
+///   without a `run_id` falls back to its own id, which counts it once;
+/// * **only `type='text'` counts.** `tool_call`/`tool_result` are turn plumbing,
+///   and `system` is excluded deliberately: the guard-trip notice this very gate
+///   writes is a system line, and counting it would let a trip amplify itself;
+/// * **other agents neither count nor reset.** In an A→B→A→B chain each agent
+///   trips at its own cap, which is what makes the gate hold for a round-robin
+///   the way it holds for a single runaway.
+pub async fn agent_auto_reply_streak_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<i32, DbError> {
+    let streak: i32 = sqlx::query_scalar(
+        "WITH last_human AS ( \
+             SELECT COALESCE(max(m.seq), 0) AS seq \
+               FROM message m \
+               JOIN member mem ON mem.id = m.author_member_id \
+              WHERE m.channel_id = $1 \
+                AND m.deleted_at IS NULL \
+                AND mem.kind = 'human' \
+         ) \
+         SELECT count(DISTINCT COALESCE(m.run_id::text, m.id::text))::int \
+           FROM message m, last_human h \
+          WHERE m.channel_id = $1 \
+            AND m.deleted_at IS NULL \
+            AND m.author_member_id = $2 \
+            AND m.type = 'text' \
+            AND m.seq > h.seq",
+    )
+    .bind(channel_id)
+    .bind(agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(streak)
+}
+
 /// Render a display body for the window — Swift `recentMessageBody` (:1898-1934).
 ///
 /// Structured types carry their payload in `props` with `body = NULL`, so they

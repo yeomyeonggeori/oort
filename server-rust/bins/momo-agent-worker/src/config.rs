@@ -26,6 +26,7 @@
 
 use std::time::Duration;
 
+use momo_agent::{context_window_size, A2aLimits};
 use momo_outbox::DEFAULT_WORKER_LEASE_SECONDS;
 use momo_settings::ProviderConfig;
 
@@ -63,6 +64,18 @@ pub struct WorkerConfig {
     pub default_model: String,
     pub max_output_tokens: i32,
     pub max_context_chars: usize,
+    /// B7.2 — the A2A ceilings, already [`A2aLimits::clamped`].
+    pub a2a: A2aLimits,
+    /// `AGENT_GATEWAY_MODE=gateway` — decides the `outbox.method` a delegated
+    /// job is written under and whether a realtime wake-up rides beside it.
+    /// Read from the **same** env key `momo-server`'s `AgentGatewaySettings`
+    /// reads, so a delegated job lands in the same feed as a human-triggered
+    /// one; picking the wrong one makes every delegation stall silently.
+    pub gateway_enabled: bool,
+    /// `AGENT_CONTEXT_MAX_MESSAGES`, clamped by
+    /// [`momo_agent::context_window_size`] — the history window a delegated run
+    /// is given, resolved from the same key and the same clamp the server uses.
+    pub context_max_messages: i64,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -106,6 +119,9 @@ impl WorkerConfig {
             default_model: env("AGENT_MODEL").unwrap_or_else(|| "hermes-agent".to_string()),
             max_output_tokens: env_number("AGENT_MAX_OUTPUT_TOKENS", 1024i32)?.max(1),
             max_context_chars: env_number("AGENT_CONTEXT_MAX_CHARS", 24_000usize)?.max(1),
+            a2a: a2a_limits_from_env()?,
+            gateway_enabled: gateway_enabled(env("AGENT_GATEWAY_MODE").as_deref()),
+            context_max_messages: context_window_size(env("AGENT_CONTEXT_MAX_MESSAGES").as_deref()),
         })
     }
 
@@ -124,8 +140,59 @@ impl WorkerConfig {
             default_model: "hermes-agent".to_string(),
             max_output_tokens: 1024,
             max_context_chars: 24_000,
+            a2a: A2aLimits::default().clamped(),
+            gateway_enabled: false,
+            context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,
         }
     }
+}
+
+/// The B7.2 ceilings, from the environment.
+///
+/// `A2A_MAX_DEPTH` is the ticket's key; `MAX_DEPTH` / `MAX_CONSECUTIVE_AUTO` /
+/// `MAX_STEPS` / `G1_STALE_RUNNING_SECONDS` are the **Swift AgentWorker's**
+/// (`Config.swift:137-141`), read as the fallback so one env block still drives
+/// either implementation — the stated goal of this module.
+///
+/// Everything is [`A2aLimits::clamped`] before it leaves: an operator's typo
+/// must become a policy refusal, never a `CHECK` violation inside a turn
+/// transaction. See [`momo_agent::a2a::SCHEMA_DEPTH_CEILING`].
+fn a2a_limits_from_env() -> Result<A2aLimits, ConfigError> {
+    let default = A2aLimits::default();
+    let max_depth = match env("A2A_MAX_DEPTH") {
+        Some(raw) => raw
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| ConfigError::NotANumber("A2A_MAX_DEPTH"))?,
+        None => env_number("MAX_DEPTH", default.max_depth)?,
+    };
+    Ok(A2aLimits {
+        max_depth,
+        max_consecutive_auto: env_number("MAX_CONSECUTIVE_AUTO", default.max_consecutive_auto)?,
+        max_steps: env_number("MAX_STEPS", default.max_steps)?,
+        g1_stale_running_seconds: env_number(
+            "G1_STALE_RUNNING_SECONDS",
+            default.g1_stale_running_seconds,
+        )?,
+        max_chain_tokens: env_number("A2A_MAX_CHAIN_TOKENS", default.max_chain_tokens)?,
+        max_chain_cost_micro_usd: env_number(
+            "A2A_MAX_CHAIN_COST_MICRO_USD",
+            default.max_chain_cost_micro_usd,
+        )?,
+    }
+    .clamped())
+}
+
+/// `AGENT_GATEWAY_MODE` — momo-server's `AgentGatewayMode::parse` (Swift
+/// `:150-155`), including the rule that matters: **anything unrecognised falls
+/// back to `worker`**, so a typo cannot silently route every delegated job into
+/// a feed no consumer is claiming.
+fn gateway_enabled(raw: Option<&str>) -> bool {
+    matches!(
+        raw.map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("gateway")
+    )
 }
 
 /// The tracing filter directive: `RUST_LOG` wins, else the prod compose's
@@ -162,5 +229,31 @@ mod tests {
         assert!(config.provider_link_master_key.is_none());
         assert!(!config.database_url.is_empty());
         assert!(!config.provider.bearer.is_empty(), "env default bearer");
+    }
+
+    /// A typo in `AGENT_GATEWAY_MODE` must not move delegated jobs onto a feed
+    /// nobody claims — Swift's parse falls back to `worker` for exactly this.
+    #[test]
+    fn only_the_literal_gateway_mode_turns_the_gateway_feed_on() {
+        assert!(gateway_enabled(Some("gateway")));
+        assert!(gateway_enabled(Some("  GATEWAY  ")));
+        assert!(!gateway_enabled(Some("gatewey")));
+        assert!(!gateway_enabled(Some("worker")));
+        assert!(!gateway_enabled(None));
+    }
+
+    /// The shipped default is the ticket's cap, already clamped to the schema's
+    /// (007 `depth <= 4`), so the worker cannot be booted into a configuration
+    /// whose successful path aborts a turn transaction.
+    #[test]
+    fn the_default_a2a_depth_is_the_tickets_cap_and_fits_the_schema() {
+        let config = WorkerConfig::for_target("postgres://x/y");
+        assert_eq!(config.a2a.max_depth, momo_agent::DEFAULT_A2A_MAX_DEPTH);
+        assert!(config.a2a.max_depth <= momo_agent::SCHEMA_DEPTH_CEILING);
+        assert_eq!(
+            config.a2a.max_consecutive_auto,
+            momo_agent::DEFAULT_MAX_CONSECUTIVE_AUTO
+        );
+        assert_eq!(config.a2a.max_steps, momo_agent::DEFAULT_MAX_STEPS);
     }
 }

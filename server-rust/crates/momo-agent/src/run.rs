@@ -1,8 +1,13 @@
 //! The `agent_run` state machine — creation, the trigger-bound idempotency key,
 //! the gateway's row lock, and the two terminal transitions.
 //!
-//! **This module owns every `agent_run` statement in the workspace**, the same
-//! way `momo-outbox` owns `outbox` and `momo-auth` owns `token`.
+//! **This module owns every `agent_run` write in the workspace**, the same way
+//! `momo-outbox` owns `outbox` and `momo-auth` owns `token`. Two B7.2 companions
+//! *read* the table beside it and are named here so the ownership claim stays
+//! literally true: [`crate::a2a::load_a2a_gate_snapshot_in_tx`] (the delegation
+//! counters) and [`crate::usage::chain_usage_in_tx`] (the `parent_run_id` walk a
+//! chain's spend is summed over). Both are `SELECT`-only, both live in this same
+//! crate, and neither has a second copy of a statement that appears here.
 //!
 //! Measured against `001_init.sql:267-297` (the table), Swift
 //! `AgentRunRoutes.create` (:29-250, the work trigger) and
@@ -583,6 +588,43 @@ pub async fn mark_run_started_in_tx(
             AND status IN ('queued','running')",
     )
     .bind(run_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// Spend one of the run's steps, atomically, or report that it has none left
+/// (B7.2 — the G3 half that has to be a write).
+///
+/// Swift's gate "consumes one step (`step_count + 1` in the proceed UPDATE), so
+/// the cap is actually enforced at runtime" (`LoopGuards.swift:29-32`). Read
+/// then write would be a race with the run's other consumers; the predicate is
+/// therefore *in* the UPDATE, and its `rows_affected() > 0` **is** the verdict.
+///
+/// `LEAST(max_steps, $2)` is the same tightening Swift applies
+/// (`min(runMaxSteps, MAX_STEPS)`), and it is also what makes this write safe
+/// against `agent_run_step_cap_ck` (`001_init.sql:289`, `step_count <=
+/// max_steps`): the guard admits only `step_count < max_steps`, so the increment
+/// can never produce the row the CHECK would reject — which matters here more
+/// than usual, because a CHECK violation inside the agent worker's turn
+/// transaction would roll back the reply and the ledger row with it.
+///
+/// Returns `false` for a run that does not exist, which is the same refusal a
+/// spent budget gets: no run, no step.
+pub async fn consume_run_step_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    max_steps_ceiling: i32,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET step_count = step_count + 1, \
+                updated_at = now() \
+          WHERE id = $1 \
+            AND step_count < LEAST(max_steps, $2)",
+    )
+    .bind(run_id)
+    .bind(max_steps_ceiling)
     .execute(&mut *conn)
     .await?;
     Ok(updated.rows_affected() > 0)

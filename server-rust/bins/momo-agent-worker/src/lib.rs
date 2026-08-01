@@ -48,14 +48,31 @@
 //!   momo-server, and it never publishes to Centrifugo.
 //! * **No credential in a log, a row, or a message.** See [`redact_secrets`].
 //!
-//! ## Deliberately not in B5.1
+//! ## B7.2 — the turn can now delegate
 //!
-//! Mention→run routing (B5.2 — nothing in the Rust server enqueues a
-//! `method='publish'` job yet), streaming/`agent.partial`, tool calls and the
-//! approval gate, the §3.3 loop-safety gates (G1/G2/G3, a2a depth), the §8.5
-//! budget reserve/trip, the memory plane, and ACP/coding agents. Each is named
-//! in the PR body's deviation list with what it costs.
+//! Step 4 grew a fifth statement in the same transaction: if the answer the
+//! agent just wrote **mentions another agent**, [`a2a`] creates that agent's run
+//! with `parent_run_id` = this run and `depth` = this run's + 1, and enqueues
+//! its job. That is the piece B5.2 could not have — the HTTP send path has no
+//! source run, so it refuses an agent-authored mention outright
+//! (`a2a_source_run_unavailable`) rather than create a depth-0 child the hop cap
+//! could not bound.
+//!
+//! Everything that makes it safe is in [`momo_agent::a2a`] and is evaluated
+//! *before* the child exists: the §3.3 gates G1/G2/G3, the §3.4 `a2a_depth` hop
+//! cap, and a per-root-trigger spend ceiling summed over the whole delegation
+//! tree. A refusal is a system line in the channel plus an audit row — never a
+//! failed turn, because the answer is already written and the person who asked
+//! for it is not the one who misconfigured a third agent.
+//!
+//! ## Deliberately not in B5.1/B7.2
+//!
+//! Streaming/`agent.partial`, tool calls and the approval gate, G4's SimHash
+//! semantic-loop detector (a stub in Swift too), the §8.5 budget reserve/trip,
+//! the memory plane, and ACP/coding agents. Each is named in the PR body's
+//! deviation list with what it costs.
 
+pub mod a2a;
 pub mod config;
 pub mod context;
 pub mod oauth;
@@ -67,6 +84,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use a2a::{route_a2a_mentions_in_tx, A2aSend};
 use momo_agent::{
     finish_run_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx, record_run_usage_in_tx,
     GatewayRunSnapshot, RunStatus, RunUsageReport,
@@ -119,6 +137,13 @@ pub struct DrainStats {
     /// Jobs settled `done` without an answer: no run, a cancelled run, or an
     /// agent that is no longer eligible in the channel.
     pub skipped: usize,
+    /// B7.2: child runs this drain created because an answer mentioned another
+    /// agent. Counted separately from `answered` because one turn can delegate
+    /// to several agents, or to none.
+    pub delegated: usize,
+    /// B7.2: delegations a cap refused — the number that must stop growing when
+    /// a loop is running.
+    pub a2a_blocked: usize,
 }
 
 /// The message a user sees when the provider could not answer. Swift
@@ -342,7 +367,11 @@ impl AgentWorker {
         };
         for job in claimed {
             match self.process(job).await {
-                Settlement::Answered => stats.answered += 1,
+                Settlement::Answered { delegated, blocked } => {
+                    stats.answered += 1;
+                    stats.delegated += delegated;
+                    stats.a2a_blocked += blocked;
+                }
                 Settlement::Requeued => stats.requeued += 1,
                 Settlement::Failed => stats.failed += 1,
                 Settlement::Skipped => stats.skipped += 1,
@@ -363,6 +392,8 @@ impl AgentWorker {
                     total.requeued += stats.requeued;
                     total.failed += stats.failed;
                     total.skipped += stats.skipped;
+                    total.delegated += stats.delegated;
+                    total.a2a_blocked += stats.a2a_blocked;
                     if (stats.claimed as i64) < self.config.claim_batch_size {
                         return total;
                     }
@@ -558,10 +589,16 @@ impl AgentWorker {
             )
             .await;
         match outcome {
-            Ok(TurnCommit::Committed) => {
-                tracing::info!(outbox_id = job.id, run_id = %run_id, "agent turn committed");
+            Ok(TurnCommit::Committed { delegated, blocked }) => {
+                tracing::info!(
+                    outbox_id = job.id,
+                    run_id = %run_id,
+                    delegated,
+                    a2a_blocked = blocked,
+                    "agent turn committed"
+                );
                 self.settle_done(job.id, None).await;
-                Settlement::Answered
+                Settlement::Answered { delegated, blocked }
             }
             Ok(TurnCommit::Suppressed(reason)) => {
                 tracing::info!(outbox_id = job.id, run_id = %run_id, reason, "agent turn suppressed");
@@ -597,6 +634,14 @@ impl AgentWorker {
         let channel_id = payload.channel_id;
         let effort = payload.effort.clone();
         let fallback_model = payload.model_or(&self.config.default_model).to_string();
+        // B7.2: the same text the channel gets is the text the mention parser
+        // reads. Cloned rather than re-derived, so "what the agent said" and
+        // "who the agent addressed" can never be two different strings.
+        let mention_body = body.clone();
+        let delegates = outcome.succeeded();
+        let a2a_limits = self.config.a2a;
+        let gateway_enabled = self.config.gateway_enabled;
+        let context_max_messages = self.config.context_max_messages;
 
         with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -697,7 +742,38 @@ impl AgentWorker {
                 )
                 .await?;
 
-                Ok(TurnCommit::Committed)
+                // B7.2 — A2A. Last in the transaction, and that position is the
+                // argument: the ledger row above is part of this chain's spend,
+                // so a ceiling evaluated before it would always be one turn
+                // stale and could be overshot by the very hop it is meant to
+                // stop. `deduped` is the other guard — a re-claimed job returns
+                // the message already in the channel, and re-running the routing
+                // on it would spend a second step and write a second audit row
+                // for a delegation that already happened.
+                let (delegated, blocked) = if delegates && !sent.deduped {
+                    let routed = route_a2a_mentions_in_tx(
+                        conn,
+                        A2aSend {
+                            workspace_id,
+                            channel_id: snapshot.channel_id,
+                            message_id: sent.message.id,
+                            message_seq: sent.message.seq,
+                            author_agent_member_id: snapshot.agent_member_id,
+                            source_run_id: run_id,
+                            body: &mention_body,
+                            hlc_ts: sent.message.hlc_ts,
+                            gateway_enabled,
+                            context_max_messages,
+                            limits: a2a_limits,
+                        },
+                    )
+                    .await?;
+                    (routed.delegated.len(), routed.blocked.len())
+                } else {
+                    (0, 0)
+                };
+
+                Ok(TurnCommit::Committed { delegated, blocked })
             })
         })
         .await
@@ -1239,7 +1315,7 @@ impl AgentWorker {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Settlement {
-    Answered,
+    Answered { delegated: usize, blocked: usize },
     Requeued,
     Failed,
     Skipped,
@@ -1247,7 +1323,7 @@ enum Settlement {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TurnCommit {
-    Committed,
+    Committed { delegated: usize, blocked: usize },
     Suppressed(&'static str),
 }
 
