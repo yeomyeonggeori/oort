@@ -32,25 +32,36 @@
 //!
 //! ADR-0147 lets the vault hold a ChatGPT subscription OAuth grant instead of a
 //! gateway API key. That changes **which credential** this module presents and
-//! **who refreshes it** ([`crate::oauth`]) — it does not change the wire. The
-//! request is still the OpenAI-compatible `POST {base_url}/chat/completions`
-//! above, with the OAuth access token as the Bearer, plus one measured header:
+//! **who refreshes it** ([`crate::oauth`]), plus one measured header:
 //! `chatgpt-account-id`, which is how the ChatGPT backend picks the paying
 //! account when a token is entitled to several.
 //!
-//! **A measured caveat that belongs in the open** (PR body deviation #1): the
-//! shipped Codex CLI (`@openai/codex` 0.144.1) does not send a ChatGPT OAuth
-//! token to `/chat/completions` at all. Its strings show the pair
-//! `https://chatgpt.com/backend-api/codex` + `/responses` — i.e. the **Responses
-//! API**, and `https://api.openai.com/v1` only for the API-key path. So an OAuth
-//! link pointed straight at `chatgpt.com` will not answer on this wire.
+//! B5.4 also measured the caveat that made a second wire unavoidable: the shipped
+//! Codex CLI (`@openai/codex` 0.144.1) does not send a ChatGPT OAuth token to
+//! `/chat/completions` at all. Its strings show the pair
+//! `https://chatgpt.com/backend-api/codex` + `/responses` — the **Responses
+//! API** — and `https://api.openai.com/v1/responses` for the API-key path.
 //!
-//! Implementing a Responses adapter here would be a **second wire format**, which
-//! is precisely what the section above argues nobody should introduce without a
-//! decision — and ADR-0147 authorises the credential change, not a new protocol.
-//! So B5.4 ships the credential machinery on the one contract this repo speaks,
-//! and the live-smoke options (a Responses adapter as its own batch, or a local
-//! translating gateway as `base_url`) stay an explicit, un-guessed choice.
+//! ## B5.4b: two wires, and the one thing that chooses between them
+//!
+//! ADR-0147's 이행 note resolves the "no second contract without a decision" rule
+//! above explicitly: the Responses adapter is "결정 2의 필수 수단, 별도 방향 변경
+//! 아님". So this crate now speaks two wires, and exactly one fact selects
+//! between them — the **sealed envelope kind** ([`ProviderWire::for_credential`]):
+//!
+//! | vault contents | wire | path |
+//! |---|---|---|
+//! | [`LinkCredential::Bearer`] (every row that exists today, and the env fallback) | chat/completions | `POST {base_url}/chat/completions` |
+//! | [`LinkCredential::OpenAiOAuth`] (ADR-0147) | Responses | `POST {base_url}/responses` |
+//!
+//! The mapping is on the credential rather than on the base URL because the base
+//! URL is free text an operator types, and guessing a protocol from a hostname is
+//! how a working link silently starts speaking the wrong one. The kind is the
+//! thing momo actually knows.
+//!
+//! Routing lives in [`WireRoutedProvider`], not inside either adapter, so each
+//! adapter stays one wire a reviewer can read end to end and a test can point a
+//! mock at either arm.
 //!
 //! **Not ported in B5.1 (deliberate):** SSE streaming and the non-stream
 //! fallback pair. The packet scopes streaming out, so this issues the
@@ -61,14 +72,16 @@
 //! calls therefore produces no text, which the worker reports as a failed turn
 //! rather than an empty reply.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use momo_settings::chain::classify_status;
-use momo_settings::CascadeDecision;
+use momo_settings::{CascadeDecision, LinkCredential};
 use serde::Deserialize;
 use serde_json::json;
+
+use crate::responses::OpenAiResponsesProvider;
 
 /// One OpenAI-compatible chat message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +131,52 @@ pub struct ChatCompletion {
     pub usage: Option<ChatUsage>,
 }
 
+/// Which request/response format an endpoint speaks (B5.4b).
+///
+/// This is deliberately a two-valued enum rather than a free string: the only
+/// two wires momo implements are the two below, and an unknown third value would
+/// have to be handled at every call site with a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProviderWire {
+    /// `POST {base_url}/chat/completions` — the contract every existing
+    /// `provider_link` row and the env fallback speak (Swift `HermesTransport`).
+    #[default]
+    ChatCompletions,
+    /// `POST {base_url}/responses` — the OpenAI Responses API, which is what a
+    /// ChatGPT subscription OAuth token is entitled to call (ADR-0147 이행).
+    Responses,
+}
+
+impl ProviderWire {
+    /// The **only** thing that decides the wire: what the vault holds.
+    ///
+    /// A legacy bearer keeps chat/completions byte for byte — including the
+    /// env-resolved transport, which has no envelope at all — so B5.4b cannot
+    /// change what a deployment that never registered an OAuth link sends.
+    pub fn for_credential(credential: &LinkCredential) -> ProviderWire {
+        match credential {
+            LinkCredential::Bearer(_) => ProviderWire::ChatCompletions,
+            LinkCredential::OpenAiOAuth(_) => ProviderWire::Responses,
+        }
+    }
+
+    /// The path appended to `base_url`.
+    pub fn path(self) -> &'static str {
+        match self {
+            ProviderWire::ChatCompletions => "/chat/completions",
+            ProviderWire::Responses => "/responses",
+        }
+    }
+
+    /// A non-secret label for logs and `Debug`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderWire::ChatCompletions => "chat_completions",
+            ProviderWire::Responses => "responses",
+        }
+    }
+}
+
 /// Where this turn's request goes and what it presents.
 ///
 /// `Debug` is implemented by hand: the bearer is a live provider credential, and
@@ -130,6 +189,10 @@ pub struct ProviderEndpoint {
     /// `"database"` when the operator's `provider_link` supplied it, else
     /// `"environment"` — the only provenance fact that may be logged.
     pub source: &'static str,
+    /// Which wire this endpoint speaks (B5.4b). Defaults to the legacy
+    /// chat/completions contract, so anything that builds an endpoint without
+    /// thinking about wires keeps the behaviour that shipped before B5.4b.
+    pub wire: ProviderWire,
     /// `chatgpt-account-id` for an ADR-0147 subscription OAuth link.
     ///
     /// A ChatGPT OAuth token can be entitled to more than one account, and the
@@ -150,6 +213,7 @@ impl std::fmt::Debug for ProviderEndpoint {
             )
             .field("bearer", &"<redacted>")
             .field("source", &self.source)
+            .field("wire", &self.wire.as_str())
             .field("account_id", &self.account_id.as_ref().map(|_| "<present>"))
             .finish()
     }
@@ -160,6 +224,17 @@ impl ProviderEndpoint {
     /// stripped, Swift `redactedEndpointLabel`).
     pub fn label(&self) -> String {
         momo_settings::redacted_endpoint_label(&self.base_url)
+    }
+
+    /// The absolute URL this turn posts to: the operator's base URL plus the
+    /// wire's path. One function, so the two adapters cannot drift on how a
+    /// trailing slash is handled.
+    pub fn url(&self) -> String {
+        format!(
+            "{}{}",
+            self.base_url.trim_end_matches('/'),
+            self.wire.path()
+        )
     }
 }
 
@@ -218,11 +293,17 @@ pub struct OpenAiCompatProvider {
 
 impl OpenAiCompatProvider {
     pub fn new(request_timeout: Duration) -> Result<OpenAiCompatProvider, reqwest::Error> {
-        Ok(OpenAiCompatProvider {
-            client: reqwest::Client::builder()
+        Ok(OpenAiCompatProvider::from_client(
+            reqwest::Client::builder()
                 .timeout(request_timeout)
                 .build()?,
-        })
+        ))
+    }
+
+    /// Build on an existing client, so the two wires of a
+    /// [`WireRoutedProvider`] share one connection pool instead of holding two.
+    pub fn from_client(client: reqwest::Client) -> OpenAiCompatProvider {
+        OpenAiCompatProvider { client }
     }
 }
 
@@ -233,10 +314,6 @@ impl ChatProvider for OpenAiCompatProvider {
         endpoint: &ProviderEndpoint,
         request: &ChatRequest,
     ) -> Result<ChatCompletion, ProviderError> {
-        let url = format!(
-            "{}/chat/completions",
-            endpoint.base_url.trim_end_matches('/')
-        );
         let body = json!({
             "model": request.model,
             "messages": request
@@ -247,35 +324,112 @@ impl ChatProvider for OpenAiCompatProvider {
             "stream": false,
             "max_tokens": request.max_tokens,
         });
-
-        let mut request_builder = self.client.post(url).bearer_auth(&endpoint.bearer);
-        if let Some(account_id) = endpoint
-            .account_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            request_builder = request_builder.header("chatgpt-account-id", account_id);
-        }
-
-        let response = request_builder
-            .json(&body)
-            .send()
-            .await
-            // The error is stringified through reqwest's Display, which never
-            // includes the request headers — the bearer cannot ride out here.
-            .map_err(|error| ProviderError::Unreachable(error.to_string()))?;
-
-        let status = response.status().as_u16();
-        if status != 200 {
-            return Err(ProviderError::HttpStatus(status));
-        }
-        let text = response
-            .text()
-            .await
-            .map_err(|error| ProviderError::Unreachable(error.to_string()))?;
+        let text = post_json(&self.client, endpoint, &body).await?;
         parse_completion(&text)
     }
+}
+
+/// The one outbound call both wires make: `POST endpoint.url()` with the
+/// resolved Bearer, returning the 200 body.
+///
+/// It is shared rather than duplicated because the two rules in it are the ones
+/// a second copy would quietly get wrong: the `chatgpt-account-id` header (sent
+/// on both wires — a subscription token needs it wherever it goes) and the
+/// "non-200 is a status, not a body" split that keeps
+/// [`ProviderError::is_retryable`] the only place retry policy lives.
+pub(crate) async fn post_json(
+    client: &reqwest::Client,
+    endpoint: &ProviderEndpoint,
+    body: &serde_json::Value,
+) -> Result<String, ProviderError> {
+    let mut request_builder = client.post(endpoint.url()).bearer_auth(&endpoint.bearer);
+    if let Some(account_id) = endpoint
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        request_builder = request_builder.header("chatgpt-account-id", account_id);
+    }
+
+    let response = request_builder
+        .json(body)
+        .send()
+        .await
+        // The error is stringified through reqwest's Display, which never
+        // includes the request headers — the bearer cannot ride out here.
+        .map_err(|error| ProviderError::Unreachable(error.to_string()))?;
+
+    let status = response.status().as_u16();
+    if status != 200 {
+        return Err(ProviderError::HttpStatus(status));
+    }
+    response
+        .text()
+        .await
+        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// the mapping: envelope kind → adapter
+// ---------------------------------------------------------------------------
+
+/// Sends each turn to the adapter its endpoint's [`ProviderWire`] names.
+///
+/// This is the whole of B5.4b's "second wire" risk surface, and it is kept to
+/// one `match` on purpose. Neither adapter knows the other exists, so a bug in
+/// the Responses path cannot change a byte of what a legacy bearer link sends —
+/// which is the property that lets an existing deployment take this upgrade
+/// without re-testing its gateway.
+pub struct WireRoutedProvider {
+    chat_completions: Arc<dyn ChatProvider>,
+    responses: Arc<dyn ChatProvider>,
+}
+
+impl WireRoutedProvider {
+    pub fn new(
+        chat_completions: Arc<dyn ChatProvider>,
+        responses: Arc<dyn ChatProvider>,
+    ) -> WireRoutedProvider {
+        WireRoutedProvider {
+            chat_completions,
+            responses,
+        }
+    }
+
+    /// The shipped pair, on one shared HTTP client.
+    pub fn http(request_timeout: Duration) -> Result<WireRoutedProvider, reqwest::Error> {
+        let client = reqwest::Client::builder()
+            .timeout(request_timeout)
+            .build()?;
+        Ok(WireRoutedProvider::new(
+            Arc::new(OpenAiCompatProvider::from_client(client.clone())),
+            Arc::new(OpenAiResponsesProvider::from_client(client)),
+        ))
+    }
+}
+
+#[async_trait]
+impl ChatProvider for WireRoutedProvider {
+    async fn complete(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+    ) -> Result<ChatCompletion, ProviderError> {
+        match endpoint.wire {
+            ProviderWire::ChatCompletions => {
+                self.chat_completions.complete(endpoint, request).await
+            }
+            ProviderWire::Responses => self.responses.complete(endpoint, request).await,
+        }
+    }
+}
+
+/// The provider `main.rs` runs and the conformance suites inject, so a test and
+/// production route identically. A test that built only one adapter would prove
+/// nothing about which one a real turn picks.
+pub fn http_provider(request_timeout: Duration) -> Result<Arc<dyn ChatProvider>, reqwest::Error> {
+    Ok(Arc::new(WireRoutedProvider::http(request_timeout)?))
 }
 
 /// Decode one non-streamed completion body. Split out from the HTTP call so the
@@ -399,6 +553,9 @@ pub struct ObservedCall {
     pub bearer: String,
     pub base_url: String,
     pub account_id: Option<String>,
+    /// Which wire the worker resolved for this turn — the fact a routing test
+    /// asserts on without needing a socket.
+    pub wire: ProviderWire,
 }
 
 impl MockChatProvider {
@@ -452,6 +609,7 @@ impl ChatProvider for MockChatProvider {
                 bearer: endpoint.bearer.clone(),
                 base_url: endpoint.base_url.clone(),
                 account_id: endpoint.account_id.clone(),
+                wire: endpoint.wire,
             });
         match &self.outcome {
             MockOutcome::Fail(error) => Err(error.clone()),
@@ -559,6 +717,7 @@ mod tests {
             base_url: "https://gateway.example/v1".to_string(),
             bearer: "sk-live-supersecret".to_string(),
             source: "database",
+            wire: ProviderWire::Responses,
             account_id: Some("acct-whose-subscription".to_string()),
         };
         let rendered = format!("{endpoint:?}");
@@ -578,6 +737,7 @@ mod tests {
             base_url: "http://mock/v1".to_string(),
             bearer: "sk-test".to_string(),
             source: "environment",
+            wire: ProviderWire::ChatCompletions,
             account_id: None,
         };
         let request = ChatRequest {
@@ -589,5 +749,94 @@ mod tests {
         assert_eq!(completion.text, "mock: 질문");
         assert_eq!(provider.calls().len(), 1);
         assert_eq!(provider.calls()[0].bearer, "sk-test");
+    }
+
+    // -----------------------------------------------------------------------
+    // B5.4b: the envelope kind → adapter mapping
+    // -----------------------------------------------------------------------
+
+    /// The mapping, stated once. Flipping either arm would send a subscription
+    /// OAuth token to a wire it is not entitled to call (and answer every turn
+    /// with a 404), or move every existing gateway link onto a wire its gateway
+    /// has never been asked to speak.
+    #[test]
+    fn the_sealed_envelope_kind_is_what_picks_the_wire() {
+        assert_eq!(
+            ProviderWire::for_credential(&LinkCredential::Bearer("sk-live".into())),
+            ProviderWire::ChatCompletions,
+            "every provider_link row that exists today is a bearer; it must not move"
+        );
+        assert_eq!(
+            ProviderWire::for_credential(&LinkCredential::OpenAiOAuth(Box::new(
+                momo_settings::OpenAiOAuthCredential::from_refresh_token("rt")
+            ))),
+            ProviderWire::Responses
+        );
+        // The default is the legacy wire, so an endpoint built without thinking
+        // about wires keeps pre-B5.4b behaviour.
+        assert_eq!(ProviderWire::default(), ProviderWire::ChatCompletions);
+    }
+
+    /// One URL builder for both wires, so a trailing slash cannot mean two
+    /// different things depending on which adapter runs.
+    #[test]
+    fn the_url_is_the_base_plus_the_wires_path_with_one_slash() {
+        let endpoint = |base: &str, wire| ProviderEndpoint {
+            base_url: base.to_string(),
+            wire,
+            ..ProviderEndpoint::default()
+        };
+        assert_eq!(
+            endpoint("https://gw.example/v1", ProviderWire::ChatCompletions).url(),
+            "https://gw.example/v1/chat/completions"
+        );
+        assert_eq!(
+            endpoint("https://gw.example/v1/", ProviderWire::Responses).url(),
+            "https://gw.example/v1/responses"
+        );
+        assert_eq!(
+            endpoint(
+                "https://chatgpt.com/backend-api/codex",
+                ProviderWire::Responses
+            )
+            .url(),
+            "https://chatgpt.com/backend-api/codex/responses",
+            "the measured Codex CLI pair (base + /responses)"
+        );
+    }
+
+    /// The router sends each turn to exactly one adapter and never to both.
+    /// Without this, a "helpful" fallback that retried the other wire on a 404
+    /// would present a subscription token to a second endpoint on every failure.
+    #[tokio::test]
+    async fn the_router_sends_each_wire_to_its_own_adapter_and_only_that_one() {
+        let chat = Arc::new(MockChatProvider::echo());
+        let responses = Arc::new(MockChatProvider::echo());
+        let router = WireRoutedProvider::new(chat.clone(), responses.clone());
+        let request = ChatRequest {
+            model: "m".to_string(),
+            messages: vec![ChatMessage::user("질문")],
+            max_tokens: Some(64),
+        };
+
+        let oauth = ProviderEndpoint {
+            base_url: "http://mock".to_string(),
+            wire: ProviderWire::Responses,
+            ..ProviderEndpoint::default()
+        };
+        router.complete(&oauth, &request).await.expect("routed");
+        assert_eq!(responses.calls().len(), 1);
+        assert!(chat.calls().is_empty(), "the legacy adapter was not called");
+
+        let legacy = ProviderEndpoint {
+            base_url: "http://mock".to_string(),
+            wire: ProviderWire::ChatCompletions,
+            ..ProviderEndpoint::default()
+        };
+        router.complete(&legacy, &request).await.expect("routed");
+        assert_eq!(chat.calls().len(), 1);
+        assert_eq!(responses.calls().len(), 1, "still one; no double dispatch");
+        assert_eq!(chat.calls()[0].wire, ProviderWire::ChatCompletions);
+        assert_eq!(responses.calls()[0].wire, ProviderWire::Responses);
     }
 }

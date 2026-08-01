@@ -53,9 +53,11 @@ uuid.workspace = true
 # and owns no query of its own.
 sqlx.workspace = true
 
-# The B5.4 OAuth suite (tests/oauth_provider_conformance_pg.rs) stands up a real
-# loopback HTTP server as both the token endpoint and the chat endpoint, so the
-# shipped `HttpTokenRefresher` / `OpenAiCompatProvider` wires are exercised
-# rather than stubbed. `net` + `io-util` are the only additions and no new crate
-# enters the dependency graph, so the Dockerfile crate list is unchanged.
+# The B5.4 OAuth suite (tests/oauth_provider_conformance_pg.rs) and the B5.4b
+# Responses suite (tests/responses_adapter_conformance_pg.rs) stand up a real
+# loopback HTTP server as the token endpoint AND the provider, so the shipped
+# `HttpTokenRefresher` / `OpenAiCompatProvider` / `OpenAiResponsesProvider` wires
+# are exercised rather than stubbed. `net` + `io-util` are the only additions and
+# no new crate enters the dependency graph, so the Dockerfile crate list is
+# unchanged.
 tokio = { workspace = true, features = ["net", "io-util"] }

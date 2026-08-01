@@ -13,8 +13,10 @@
 //!    present, decryptable and usable, else the env transport (ADR-0004 증보 1
 //!    P-1b, Swift `ProviderLinkResolution`). The bearer exists in memory only
 //!    between the decrypt and the request.
-//! 3. **call** — one OpenAI-compatible `POST /chat/completions` (see
-//!    [`provider`]).
+//! 3. **call** — one POST to the wire the resolved credential names: the
+//!    OpenAI-compatible `/chat/completions` for a bearer link (and for the env
+//!    fallback), the OpenAI `/responses` wire for an ADR-0147 subscription OAuth
+//!    link (see [`provider::ProviderWire`], [`responses`]).
 //! 4. **write the answer through the message spine** —
 //!    [`momo_messaging::send_message_in_tx`], authored by the agent's own
 //!    `member.id`. There is no agent branch in that path: an agent is a member
@@ -59,6 +61,7 @@ pub mod context;
 pub mod oauth;
 pub mod payload;
 pub mod provider;
+pub mod responses;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -88,7 +91,8 @@ use context::assemble;
 use oauth::{relogin_message, HttpTokenRefresher, RefreshError, TokenRefresher, EXPIRY_SKEW_MS};
 use payload::AgentJobPayload;
 use provider::{
-    ChatProvider, ChatRequest, ChatUsage, OpenAiCompatProvider, ProviderEndpoint, ProviderError,
+    http_provider, ChatProvider, ChatRequest, ChatUsage, ProviderEndpoint, ProviderError,
+    ProviderWire,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -245,6 +249,12 @@ impl ResolvedTransport {
         self.oauth().is_some()
     }
 
+    /// Which wire this turn will speak (B5.4b) — the endpoint's, so there is one
+    /// answer rather than a second derivation that could disagree with it.
+    pub fn wire(&self) -> ProviderWire {
+        self.endpoint.wire
+    }
+
     /// Is the access token missing or (nearly) dead? Always `false` for a legacy
     /// bearer, which has no lifetime to reason about.
     pub fn needs_refresh(&self, now_ms: i64) -> bool {
@@ -272,7 +282,10 @@ impl AgentWorker {
             .max_connections(config.max_connections)
             .connect(&config.database_url)
             .await?;
-        let provider = Arc::new(OpenAiCompatProvider::new(config.request_timeout)?);
+        // Both wires, routed by the sealed envelope kind (B5.4b). A binary that
+        // built only one adapter would answer every OAuth turn with a 404 from
+        // the wrong path, which reads as "the model is missing".
+        let provider = http_provider(config.request_timeout)?;
         let refresher = Arc::new(HttpTokenRefresher::new(config.request_timeout));
         Ok(AgentWorker::with_refresher(
             pool, provider, refresher, config,
@@ -909,6 +922,9 @@ impl AgentWorker {
                 base_url: self.config.provider.base_url.clone(),
                 bearer: self.config.provider.bearer.clone(),
                 source: ProviderSource::Environment.as_str(),
+                // The env transport is `HERMES_API_KEY` against a gateway; it has
+                // no envelope, so it keeps the wire it has always spoken.
+                wire: ProviderWire::ChatCompletions,
                 account_id: None,
             },
             credential: LinkCredential::Bearer(self.config.provider.bearer.clone()),
@@ -1002,6 +1018,11 @@ impl AgentWorker {
                     // does before it calls anything.
                     bearer: resolved.config.bearer,
                     source: ProviderSource::Database.as_str(),
+                    // B5.4b: the sealed envelope kind is what selects the wire.
+                    // It is read from the SAME decrypted credential that supplies
+                    // the bearer, so the token and the protocol it is entitled to
+                    // can never come from two different rows.
+                    wire: ProviderWire::for_credential(&credential),
                     account_id: credential.account_id().map(str::to_string),
                 },
                 credential,
@@ -1494,6 +1515,31 @@ mod tests {
         };
         assert!(!transport.is_oauth());
         assert!(!transport.needs_refresh(i64::MAX));
+    }
+
+    /// B5.4b: the transport reports one wire, and it is the endpoint's. A second
+    /// derivation (say, "is_oauth() ⇒ Responses") could disagree with the
+    /// endpoint the request is actually built from, and the request would then
+    /// be assembled for one wire and posted to the other's path.
+    #[test]
+    fn the_transport_reports_the_wire_its_endpoint_will_actually_post_to() {
+        let transport = |wire| ResolvedTransport {
+            endpoint: ProviderEndpoint {
+                base_url: "https://gw.example/v1".into(),
+                wire,
+                ..ProviderEndpoint::default()
+            },
+            credential: LinkCredential::Bearer("sk".into()),
+            link_updated_at_ms: None,
+        };
+        assert_eq!(
+            transport(ProviderWire::ChatCompletions).wire(),
+            ProviderWire::ChatCompletions
+        );
+        assert_eq!(
+            transport(ProviderWire::Responses).endpoint.url(),
+            "https://gw.example/v1/responses"
+        );
     }
 
     /// The env fallback carries no `link_updated_at_ms`, and that absence is what

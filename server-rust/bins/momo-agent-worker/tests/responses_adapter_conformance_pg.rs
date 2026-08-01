@@ -1,45 +1,38 @@
-//! DB-backed conformance for the subscription OAuth provider (B5.4 / ADR-0147).
+//! DB-backed conformance for the OpenAI **Responses** adapter (B5.4b / ADR-0147
+//! 이행 완결).
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
-//!   cargo test -p momo-agent-worker --test oauth_provider_conformance_pg \
+//!   cargo test -p momo-agent-worker --test responses_adapter_conformance_pg \
 //!     -- --ignored --test-threads=1 --nocapture
 //! ```
 //!
-//! Same harness contract as `agent_worker_conformance_pg.rs` (superuser
+//! Same harness contract as `oauth_provider_conformance_pg.rs` (superuser
 //! `DATABASE_URL` applies the migrations + `bootstrap_roles.sql`; the worker runs
-//! as the BYPASSRLS `momo_worker` role), with one addition that is the point of
-//! this suite: **a real loopback HTTP server plays the provider**, serving
-//! `POST /oauth/token` plus **both** provider wires.
+//! as the BYPASSRLS `momo_worker` role), with the mock provider re-shaped for the
+//! Responses wire. Three properties of that mock are load-bearing:
 //!
-//! That server is not decoration. Substituting a `MockTokenRefresher` would leave
-//! the shipped `HttpTokenRefresher` — the code that actually builds the RFC 6749
-//! §6 body and decodes `invalid_grant` — untested, and every assertion below
-//! would be about a fake. So both outbound seams are the real ones, and the only
-//! thing replaced is *where they point*, through the per-link `token_endpoint`
-//! ADR-0147 already made operator data.
+//! * **It serves `/v1/responses` and answers a Responses body** — `output[]` of
+//!   `message` items whose `content[]` carries `output_text`, and the
+//!   `input_tokens`/`output_tokens` usage vocabulary. A mock that answered the
+//!   chat shape would let a half-ported parser pass.
+//! * **It records the request body**, so `b54b_4` can assert the exact object
+//!   that went on the socket rather than the object the adapter meant to build.
+//! * **`/v1/chat/completions` answers 404 and is counted.** A routing regression
+//!   that sent a subscription token to the legacy wire then fails loudly in every
+//!   test here instead of quietly answering from the wrong path.
 //!
-//! **B5.4b note.** The worker here is now built with the production provider
-//! (`http_provider`), which routes on the sealed envelope kind — so an
-//! `oauth-openai` link reaches `/v1/responses`, not `/v1/chat/completions`.
-//! Injecting one adapter by hand, as this suite originally did, would have left
-//! these four tests asserting a credential/wire pairing production no longer
-//! builds. The mock therefore answers **either** path with that path's own body
-//! shape, which keeps every assertion below about the credential machinery
-//! (refresh, rotation, re-seal, redaction) and independent of the routing
-//! decision — that decision has its own red tests in
-//! `responses_adapter_conformance_pg.rs`.
-//!
-//! The mock **rotates refresh tokens and refuses a spent one**, which is the
-//! behaviour ADR-0147 names ("refresh token 회전 시 이전 토큰 무효화는 provider
-//! 동작을 따름") and the property that makes `b54_2`'s red test sharp.
+//! The worker under test is built with the **production** provider
+//! ([`momo_agent_worker::provider::http_provider`]), not a hand-picked adapter:
+//! the thing this batch adds is the mapping, and a test that chose the adapter
+//! itself would prove nothing about which one a real turn picks.
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `b54_1_a_live_access_token_answers_without_touching_the_token_endpoint` | refresh unconditionally instead of on expiry, or stop sending `chatgpt-account-id` |
-//! | `b54_2_an_expired_token_refreshes_reseals_and_the_next_turn_reuses_it` | drop `reseal_link` from `refresh_and_reseal`, or keep the refreshed credential in the in-memory cache instead of invalidating it |
-//! | `b54_3_a_refused_grant_fails_the_run_with_a_relogin_message` | treat a refused grant as retryable, or reuse `degraded_provider_message` instead of `relogin_message` |
-//! | `b54_4_no_vault_plaintext_reaches_a_row_a_message_or_an_error` | remove `redact_secrets` from the refresh path, or start logging/persisting the grant |
+//! | `b54b_1_a_mention_is_answered_through_the_responses_wire` | map the `oauth-openai` envelope back to chat/completions, or drop the `chatgpt-account-id` header on the Responses path |
+//! | `b54b_2_responses_usage_lands_on_every_ledger_axis` | read `prompt_tokens`/`completion_tokens` (the chat names) out of a Responses body, or drop the `input_tokens_details`/`output_tokens_details` mapping, or stop reporting `was_estimated` for a usage-less turn |
+//! | `b54b_3_an_expired_token_refreshes_reseals_and_the_next_responses_turn_reuses_it` | drop `reseal_link` from `refresh_and_reseal`, or keep the refreshed credential in the in-memory cache instead of invalidating it |
+//! | `b54b_4_the_responses_request_carries_the_measured_wire_fields` | send the chat body (`messages`/`max_tokens`) to `/responses`, drop `store: false`, or flatten the typed `input` items into bare strings |
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -65,7 +58,7 @@ use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
-// harness (same contract as agent_worker_conformance_pg.rs)
+// harness (same contract as oauth_provider_conformance_pg.rs)
 // ---------------------------------------------------------------------------
 
 fn database_url() -> String {
@@ -149,8 +142,7 @@ fn ensure_schema_and_roles() {
 }
 
 /// The agent-job claim is global (no workspace predicate), so a leftover row
-/// from another suite would land in this one's batch. See the sibling suite's
-/// module docs.
+/// from another suite would land in this one's batch.
 async fn settle_residual_worker_jobs(su: &PgPool) {
     sqlx::query(
         "UPDATE outbox SET status = 'done', processed_at = now() \
@@ -163,8 +155,7 @@ async fn settle_residual_worker_jobs(su: &PgPool) {
 }
 
 /// `provider_link` is an instance-global singleton, so one suite's link is every
-/// suite's link. Clearing it up front stops a leftover row from deciding this
-/// test's provider.
+/// suite's link.
 async fn clear_provider_link(worker_pool: &PgPool) {
     sqlx::query("DELETE FROM provider_link WHERE id = true")
         .execute(worker_pool)
@@ -176,9 +167,10 @@ async fn clear_provider_link(worker_pool: &PgPool) {
 // fixtures
 // ---------------------------------------------------------------------------
 
-const AGENT_MODEL: &str = "hermes-agent";
+const AGENT_MODEL: &str = "gpt-5.4-codex";
 const HUMAN_DISPLAY: &str = "성재";
-const MASTER_KEY: &str = "b54-conformance-master-key";
+const SYSTEM_PROMPT: &str = "너는 hermes다";
+const MASTER_KEY: &str = "b54b-conformance-master-key";
 
 struct Tenant {
     workspace_id: Uuid,
@@ -232,7 +224,7 @@ async fn seed_tenant(su: &PgPool) -> Tenant {
     sqlx::query("INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', $3)")
         .bind(channel_id)
         .bind(workspace_id)
-        .bind(format!("b54-{}", &channel_id.simple().to_string()[..8]))
+        .bind(format!("b54b-{}", &channel_id.simple().to_string()[..8]))
         .execute(su)
         .await
         .expect("seed channel");
@@ -262,6 +254,8 @@ async fn seed_tenant(su: &PgPool) -> Tenant {
     }
 }
 
+/// The exact object `MessageRoutes.mentionJobPayload` writes, including the
+/// `system_prompt` that becomes the Responses request's `instructions`.
 async fn enqueue_mention_turn(pool: &PgPool, tenant: &Tenant, body: &str) -> (Uuid, i64) {
     let workspace_id = tenant.workspace_id;
     let channel_id = tenant.channel_id;
@@ -307,6 +301,7 @@ async fn enqueue_mention_turn(pool: &PgPool, tenant: &Tenant, body: &str) -> (Uu
                 "trigger_message_seq": trigger.message.seq,
                 "model": AGENT_MODEL,
                 "prompt": body,
+                "system_prompt": SYSTEM_PROMPT,
                 "recent_messages": [{
                     "message_id": trigger.message.id,
                     "channel_id": channel_id,
@@ -338,9 +333,8 @@ async fn enqueue_mention_turn(pool: &PgPool, tenant: &Tenant, body: &str) -> (Uu
     .expect("enqueue a mention turn")
 }
 
-/// Seal an OAuth credential into the singleton, exactly as the operator's
-/// `PUT /v1/provider/link` does — through `seal_bearer` + `upsert_link`, with no
-/// test-only storage path.
+/// Seal an OAuth credential into the singleton through the operator's own path
+/// (`seal_bearer` + `upsert_link`) — no test-only storage.
 async fn seed_oauth_link(
     worker_pool: &PgPool,
     tenant: &Tenant,
@@ -364,7 +358,6 @@ async fn seed_oauth_link(
     .expect("seed provider_link");
 }
 
-/// Re-open the stored singleton — the assertion that proves a re-seal happened.
 async fn stored_credential(worker_pool: &PgPool) -> LinkCredential {
     let mut conn = worker_pool.acquire().await.expect("acquire");
     let stored = read_link(&mut conn)
@@ -382,9 +375,9 @@ fn worker_config() -> WorkerConfig {
     config
 }
 
-/// A worker with **both** real outbound seams: the shipped provider pair (routed
-/// on the envelope kind, exactly as `main.rs` builds it) and the shipped HTTP
-/// token-endpoint client.
+/// A worker wired exactly as `main.rs` wires one: the real token-endpoint client
+/// and the real **routed** provider, so the envelope-kind mapping is part of what
+/// is under test rather than something the harness decided.
 async fn build_worker(config: WorkerConfig) -> AgentWorker {
     let provider = http_provider(config.request_timeout).expect("build the shipped provider pair");
     AgentWorker::new(momo_worker_pool().await, provider, config)
@@ -401,9 +394,9 @@ fn now_ms() -> i64 {
 // readers
 // ---------------------------------------------------------------------------
 
-async fn agent_messages(su: &PgPool, tenant: &Tenant) -> Vec<(String, Value)> {
+async fn agent_messages(su: &PgPool, tenant: &Tenant) -> Vec<(String, i64, Value)> {
     sqlx::query(
-        "SELECT COALESCE(body, '') AS body, props FROM message \
+        "SELECT COALESCE(body, '') AS body, seq, props FROM message \
           WHERE workspace_id = $1 AND channel_id = $2 AND author_member_id = $3 \
           ORDER BY seq",
     )
@@ -414,7 +407,13 @@ async fn agent_messages(su: &PgPool, tenant: &Tenant) -> Vec<(String, Value)> {
     .await
     .expect("read agent messages")
     .into_iter()
-    .map(|row| (row.get::<String, _>("body"), row.get::<Value, _>("props")))
+    .map(|row| {
+        (
+            row.get::<String, _>("body"),
+            row.get::<i64, _>("seq"),
+            row.get::<Value, _>("props"),
+        )
+    })
     .collect()
 }
 
@@ -426,83 +425,68 @@ async fn run_status(su: &PgPool, run_id: Uuid) -> String {
         .expect("read run status")
 }
 
-async fn run_error(su: &PgPool, run_id: Uuid) -> Value {
-    sqlx::query_scalar::<_, Option<Value>>("SELECT error FROM agent_run WHERE id = $1")
-        .bind(run_id)
-        .fetch_one(su)
-        .await
-        .expect("read run error")
-        .unwrap_or(Value::Null)
+#[derive(Debug, PartialEq, Eq)]
+struct LedgerRow {
+    model: String,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    cached_tokens: i32,
+    reasoning_tokens: i32,
+    was_estimated: bool,
 }
 
-async fn job_row(su: &PgPool, job_id: i64) -> (String, Option<String>) {
-    let row = sqlx::query("SELECT status::text AS status, last_error FROM outbox WHERE id = $1")
-        .bind(job_id)
-        .fetch_one(su)
-        .await
-        .expect("read outbox job");
-    (
-        row.get::<String, _>("status"),
-        row.get::<Option<String>, _>("last_error"),
+async fn ledger_row(su: &PgPool, run_id: Uuid) -> LedgerRow {
+    let row = sqlx::query(
+        "SELECT model, prompt_tokens, completion_tokens, cached_tokens, \
+                reasoning_tokens, was_estimated FROM usage_ledger WHERE run_id = $1",
     )
-}
-
-/// Every string this workspace persisted anywhere a secret could hide, plus the
-/// instance-global surfaces a credential could reach.
-async fn all_persisted_text(su: &PgPool, tenant: &Tenant) -> String {
-    let mut buffer = String::new();
-    for sql in [
-        "SELECT COALESCE(body, '') || ' ' || props::text FROM message WHERE workspace_id = $1",
-        "SELECT payload::text || ' ' || COALESCE(last_error, '') FROM outbox WHERE workspace_id = $1",
-        "SELECT COALESCE(input::text, '') || ' ' || COALESCE(output::text, '') || ' ' \
-              || COALESCE(error::text, '') FROM agent_run WHERE workspace_id = $1",
-        "SELECT model || ' ' || COALESCE(effort, '') FROM usage_ledger WHERE workspace_id = $1",
-        "SELECT action || ' ' || COALESCE(detail::text, '') FROM audit_log WHERE workspace_id = $1",
-    ] {
-        let rows: Vec<String> = sqlx::query_scalar(sql)
-            .bind(tenant.workspace_id)
-            .fetch_all(su)
-            .await
-            .expect("read persisted text");
-        for row in rows {
-            buffer.push_str(&row);
-            buffer.push('\n');
-        }
+    .bind(run_id)
+    .fetch_one(su)
+    .await
+    .expect("read the ledger row");
+    LedgerRow {
+        model: row.get("model"),
+        prompt_tokens: row.get("prompt_tokens"),
+        completion_tokens: row.get("completion_tokens"),
+        cached_tokens: row.get("cached_tokens"),
+        reasoning_tokens: row.get("reasoning_tokens"),
+        was_estimated: row.get("was_estimated"),
     }
-    // `provider_link` carries no workspace_id. Its base_url and mode are the only
-    // plaintext columns it has, and both belong in this scan: an implementation
-    // that "helpfully" stored the account label or a token beside the ciphertext
-    // would be caught here and nowhere else.
-    let link: Vec<String> = sqlx::query_scalar("SELECT base_url || ' ' || mode FROM provider_link")
-        .fetch_all(su)
-        .await
-        .expect("read provider_link plaintext columns");
-    for row in link {
-        buffer.push_str(&row);
-        buffer.push('\n');
-    }
-    buffer
 }
 
 // ---------------------------------------------------------------------------
-// the mock provider: OAuth token endpoint + OpenAI-compatible chat
+// the mock provider: OAuth token endpoint + the Responses wire
 // ---------------------------------------------------------------------------
+
+/// One captured `/v1/responses` request.
+#[derive(Debug, Clone)]
+struct ObservedResponsesCall {
+    path: String,
+    authorization: String,
+    account_id: Option<String>,
+    body: Value,
+}
 
 struct MockState {
-    /// The only grant the endpoint will accept. Rotated on every refresh, so a
-    /// replayed (spent) grant is refused — ADR-0147's "이전 토큰 무효화".
+    /// The only grant the endpoint accepts. Rotated on every refresh, so a spent
+    /// grant is refused (ADR-0147 "이전 토큰 무효화").
     live_refresh_token: String,
-    /// The only Bearer the chat endpoint will accept.
+    /// The only Bearer `/v1/responses` accepts.
     live_access_token: String,
-    /// Refuse every refresh with `invalid_grant` (the dead-grant test).
     refuse_refresh: bool,
-    /// `expires_in` handed out on each refresh.
     access_token_ttl_secs: i64,
     rotations: u32,
-    /// `(refresh_token, client_id)` per accepted or refused call.
+    /// The assistant text the mock answers with.
+    reply_text: String,
+    /// The `usage` object to answer with. `Value::Null` ⇒ the key is omitted,
+    /// which is how a provider reports "not measured".
+    usage: Value,
     token_calls: Vec<(String, Option<String>)>,
-    /// `(authorization_header, chatgpt_account_id_header)` per chat call.
-    chat_calls: Vec<(String, Option<String>)>,
+    responses_calls: Vec<ObservedResponsesCall>,
+    /// Requests that reached the LEGACY chat wire. Must stay 0: a subscription
+    /// OAuth link that lands there is the routing regression this suite exists
+    /// to catch.
+    chat_completions_calls: usize,
 }
 
 impl MockState {
@@ -513,8 +497,17 @@ impl MockState {
             refuse_refresh: false,
             access_token_ttl_secs: 3_600,
             rotations: 0,
+            reply_text: "Responses 와이어로 답합니다".to_string(),
+            usage: json!({
+                "input_tokens": 41,
+                "output_tokens": 17,
+                "input_tokens_details": {"cached_tokens": 29},
+                "output_tokens_details": {"reasoning_tokens": 11},
+                "total_tokens": 58,
+            }),
             token_calls: Vec::new(),
-            chat_calls: Vec::new(),
+            responses_calls: Vec::new(),
+            chat_completions_calls: 0,
         }
     }
 }
@@ -551,7 +544,9 @@ impl MockProvider {
         }
     }
 
-    fn chat_base_url(&self) -> String {
+    /// The operator's `provider_link.base_url`. The adapter appends the wire's
+    /// own path, which is exactly the fact `b54b_4` asserts.
+    fn base_url(&self) -> String {
         format!("http://{}/v1", self.addr)
     }
 
@@ -570,9 +565,6 @@ impl Drop for MockProvider {
     }
 }
 
-/// One request, one response, then close. `Connection: close` keeps this a
-/// request-per-connection server, which is all the suite needs and removes any
-/// keep-alive framing subtlety from the assertions.
 async fn handle_connection(mut socket: TcpStream, state: Arc<Mutex<MockState>>) {
     let Some((head, body)) = read_request(&mut socket).await else {
         return;
@@ -587,10 +579,17 @@ async fn handle_connection(mut socket: TcpStream, state: Arc<Mutex<MockState>>) 
 
     let (status, payload) = if target.starts_with("/oauth/token") {
         token_response(&state, &body)
-    } else if target.starts_with("/v1/chat/completions") {
-        chat_response(&state, &headers, Wire::ChatCompletions)
     } else if target.starts_with("/v1/responses") {
-        chat_response(&state, &headers, Wire::Responses)
+        responses_response(&state, &target, &headers, &body)
+    } else if target.starts_with("/v1/chat/completions") {
+        // Counted and refused. A regression that routed a subscription token
+        // here would otherwise be invisible — the legacy wire would happily
+        // answer and every assertion about the reply would still pass.
+        state.lock().expect("mock state").chat_completions_calls += 1;
+        (
+            404,
+            json!({"error": {"message": "this link speaks the responses wire"}}),
+        )
     } else {
         (404, json!({"error": {"message": "no such route"}}))
     };
@@ -615,9 +614,6 @@ fn token_response(state: &Arc<Mutex<MockState>>, body: &str) -> (u16, Value) {
         .token_calls
         .push((refresh_token.clone(), client_id.clone()));
 
-    // The grant type is part of the contract this suite is measuring: a body
-    // that forgot it would still "work" against a lenient mock and then fail
-    // against the real endpoint.
     if request["grant_type"].as_str() != Some("refresh_token") {
         return (
             400,
@@ -631,7 +627,6 @@ fn token_response(state: &Arc<Mutex<MockState>>, body: &str) -> (u16, Value) {
         );
     }
     if refresh_token != state.live_refresh_token {
-        // A spent grant. This is what makes b54_2's red test bite.
         return (
             400,
             json!({"error": "invalid_grant", "error_description": "refresh token already rotated"}),
@@ -653,55 +648,50 @@ fn token_response(state: &Arc<Mutex<MockState>>, body: &str) -> (u16, Value) {
     )
 }
 
-/// Which of the two wires a request arrived on. The suite's assertions are about
-/// the credential, so both are accepted and answered in their own shape — see the
-/// B5.4b note in the module docs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Wire {
-    ChatCompletions,
-    Responses,
-}
-
-const MOCK_REPLY: &str = "구독 OAuth로 답합니다";
-
-fn chat_response(
+/// The Responses answer, in the measured shape: `output[]` of `message` items
+/// whose `content[]` carries `output_text`.
+fn responses_response(
     state: &Arc<Mutex<MockState>>,
+    target: &str,
     headers: &HashMap<String, String>,
-    wire: Wire,
+    body: &str,
 ) -> (u16, Value) {
     let authorization = headers.get("authorization").cloned().unwrap_or_default();
     let account_id = headers.get("chatgpt-account-id").cloned();
     let mut state = state.lock().expect("mock state");
-    state
-        .chat_calls
-        .push((authorization.clone(), account_id.clone()));
+    state.responses_calls.push(ObservedResponsesCall {
+        path: target.to_string(),
+        authorization: authorization.clone(),
+        account_id,
+        body: serde_json::from_str(body).unwrap_or(Value::Null),
+    });
 
     if authorization != format!("Bearer {}", state.live_access_token) {
         return (401, json!({"error": {"message": "invalid access token"}}));
     }
-    match wire {
-        Wire::ChatCompletions => (
-            200,
-            json!({
-                "choices": [{"message": {"content": MOCK_REPLY}}],
-                "usage": {"prompt_tokens": 12, "completion_tokens": 5},
-            }),
-        ),
-        Wire::Responses => (
-            200,
-            json!({
-                "id": "resp_b54",
-                "object": "response",
+
+    let mut answer = json!({
+        "id": "resp_b54b",
+        "object": "response",
+        "status": "completed",
+        "error": null,
+        "incomplete_details": null,
+        "model": "gpt-5.4-codex",
+        "output": [
+            {"type": "reasoning", "id": "rs_1", "summary": []},
+            {
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
                 "status": "completed",
-                "output": [{
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": MOCK_REPLY}],
-                }],
-                "usage": {"input_tokens": 12, "output_tokens": 5},
-            }),
-        ),
+                "content": [{"type": "output_text", "text": state.reply_text, "annotations": []}],
+            }
+        ],
+    });
+    if !state.usage.is_null() {
+        answer["usage"] = state.usage.clone();
     }
+    (200, answer)
 }
 
 /// Read one HTTP/1.1 request: headers to the blank line, then `Content-Length`
@@ -757,20 +747,34 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+/// A live OAuth link: an access token that is not near its deadline, so the turn
+/// exercises the wire rather than the refresh.
+fn live_credential(provider: &MockProvider, access_token: &str) -> OpenAiOAuthCredential {
+    let mut credential = OpenAiOAuthCredential::from_refresh_token("rt-seeded");
+    credential.access_token = Some(access_token.to_string());
+    credential.expires_at_ms = Some(now_ms() + 3_600_000);
+    credential.account_id = Some("acct-seongjae".to_string());
+    credential.account_label = Some("성재 개인 ChatGPT 구독".to_string());
+    credential.token_endpoint = Some(provider.token_endpoint());
+    credential
+}
+
 // ---------------------------------------------------------------------------
-// b54_1 — the ordinary turn
+// b54b_1 — the round trip: a mention becomes a reply over the Responses wire
 // ---------------------------------------------------------------------------
 
-/// A link holding a live access token answers with it, sends the account header,
-/// and does **not** call the token endpoint.
+/// The batch's headline claim: an `oauth-openai` link answers a mention through
+/// `POST {base_url}/responses`, and the answer reaches the channel on the
+/// ordinary message spine.
 ///
-/// The "no token call" assertion is the one that matters. Refreshing on every
-/// turn would still produce a correct answer, so a test that only checked the
-/// reply would pass — while every turn burned a rotation and the provider's
-/// rate limit, on a personal subscription (ADR-0147 제약).
+/// The wire assertions are what make this more than a "the worker still works"
+/// test. Before B5.4b the same fixture would have posted to
+/// `/v1/chat/completions` — which the mock now counts and refuses — so a revert
+/// of the envelope→adapter mapping fails here on three separate assertions
+/// rather than one.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
-async fn b54_1_a_live_access_token_answers_without_touching_the_token_endpoint() {
+async fn b54b_1_a_mention_is_answered_through_the_responses_wire() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let worker_pool = momo_worker_pool().await;
@@ -779,14 +783,13 @@ async fn b54_1_a_live_access_token_answers_without_touching_the_token_endpoint()
     let tenant = seed_tenant(&su).await;
 
     let provider = MockProvider::start(MockState::new("rt-seeded", "at-live")).await;
-
-    let mut credential = OpenAiOAuthCredential::from_refresh_token("rt-seeded");
-    credential.access_token = Some("at-live".to_string());
-    credential.expires_at_ms = Some(now_ms() + 3_600_000);
-    credential.account_id = Some("acct-seongjae".to_string());
-    credential.account_label = Some("성재 개인 ChatGPT 구독".to_string());
-    credential.token_endpoint = Some(provider.token_endpoint());
-    seed_oauth_link(&worker_pool, &tenant, &provider.chat_base_url(), credential).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
 
     let (run_id, _) = enqueue_mention_turn(&su, &tenant, "@hermes 구독으로 답해줘").await;
     let worker = build_worker(worker_config()).await;
@@ -798,64 +801,134 @@ async fn b54_1_a_live_access_token_answers_without_touching_the_token_endpoint()
 
     {
         let state = provider.state();
+        assert_eq!(
+            state.chat_completions_calls, 0,
+            "an oauth-openai envelope must never reach the legacy chat wire"
+        );
+        assert_eq!(state.responses_calls.len(), 1, "exactly one provider call");
+        let call = &state.responses_calls[0];
+        assert_eq!(
+            call.path, "/v1/responses",
+            "the adapter appends the Responses path to the operator's base_url"
+        );
+        assert_eq!(call.authorization, "Bearer at-live");
+        assert_eq!(
+            call.account_id.as_deref(),
+            Some("acct-seongjae"),
+            "chatgpt-account-id names which subscription pays — it rides BOTH wires"
+        );
         assert!(
             state.token_calls.is_empty(),
-            "a live token must not be refreshed: {} call(s) made",
-            state.token_calls.len()
-        );
-        assert_eq!(state.chat_calls.len(), 1);
-        assert_eq!(
-            state.chat_calls[0].0, "Bearer at-live",
-            "the sealed access token is what authenticated the call"
-        );
-        assert_eq!(
-            state.chat_calls[0].1.as_deref(),
-            Some("acct-seongjae"),
-            "chatgpt-account-id names which subscription pays for the turn"
+            "a live token must not be refreshed just because the wire changed"
         );
     }
 
+    // The reply is an ordinary member message: it has a channel seq, so relay
+    // broadcasts it like a human's (invariant #5). Nothing here is agent-special.
     let messages = agent_messages(&su, &tenant).await;
     assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].0, "구독 OAuth로 답합니다");
-
-    let ledger: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM usage_ledger WHERE workspace_id = $1 AND run_id = $2",
-    )
-    .bind(tenant.workspace_id)
-    .bind(run_id)
-    .fetch_one(&su)
-    .await
-    .expect("read ledger");
-    assert_eq!(ledger, 1, "the turn is billed exactly once");
+    let (body, seq, props) = &messages[0];
+    assert_eq!(body, "Responses 와이어로 답합니다");
+    assert!(*seq > 0, "the answer took a channel_seq");
+    assert_eq!(props["source"], json!("agent_worker.final_text.v0"));
+    assert_eq!(props["run_id"], json!(run_id));
 }
 
 // ---------------------------------------------------------------------------
-// b54_2 — expiry → refresh → RE-SEAL → the next turn reuses it
+// b54b_2 — the Responses usage vocabulary reaches the ledger
 // ---------------------------------------------------------------------------
 
-/// The batch's central claim (ADR-0147 결정 2): an expired token is refreshed,
-/// **the rotated grant goes back into the vault**, and the next turn works from
-/// what the vault now holds.
+/// Responses reports `input_tokens`/`output_tokens` (+ `*_tokens_details`) where
+/// chat/completions reports `prompt_tokens`/`completion_tokens` (+
+/// `*_tokens_details`). An adapter that copied the chat parser would find none of
+/// its field names, decode zeros, and bill every subscription turn as free.
 ///
-/// ## Why this goes red without the re-seal
+/// The second half is the other direction: a provider that reports **no** usage
+/// must produce `was_estimated = true`, because a run nobody measured is not a
+/// run that cost nothing.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn b54b_2_responses_usage_lands_on_every_ledger_axis() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker_pool = momo_worker_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    clear_provider_link(&worker_pool).await;
+    let tenant = seed_tenant(&su).await;
+
+    let provider = MockProvider::start(MockState::new("rt-seeded", "at-live")).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
+    let worker = build_worker(worker_config()).await;
+
+    // --- measured turn: all four axes come off the Responses usage object ---
+    let (measured_run, _) = enqueue_mention_turn(&su, &tenant, "@hermes 토큰 계산").await;
+    assert_eq!(worker.drain_once().await.expect("drain").answered, 1);
+    assert_eq!(
+        ledger_row(&su, measured_run).await,
+        LedgerRow {
+            model: AGENT_MODEL.to_string(),
+            prompt_tokens: 41,
+            completion_tokens: 17,
+            cached_tokens: 29,
+            reasoning_tokens: 11,
+            was_estimated: false,
+        },
+        "input_tokens→prompt, output_tokens→completion, and both details survive"
+    );
+
+    // --- unmeasured turn: the provider omits `usage` entirely ---
+    provider.state().usage = Value::Null;
+    settle_residual_worker_jobs(&su).await;
+    let (unmeasured_run, _) = enqueue_mention_turn(&su, &tenant, "@hermes 사용량 없이").await;
+    assert_eq!(worker.drain_once().await.expect("drain").answered, 1);
+    let row = ledger_row(&su, unmeasured_run).await;
+    assert!(
+        row.was_estimated,
+        "a turn the provider did not measure must not read as a measured zero"
+    );
+    assert_eq!(row.prompt_tokens, 0);
+    assert_eq!(row.completion_tokens, 0);
+
+    // Exactly one ledger row per run — the turn transaction bills once.
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE workspace_id = $1")
+        .bind(tenant.workspace_id)
+        .fetch_one(&su)
+        .await
+        .expect("count ledger rows");
+    assert_eq!(rows, 2);
+}
+
+// ---------------------------------------------------------------------------
+// b54b_3 — expiry → refresh → RE-SEAL, over the Responses wire
+// ---------------------------------------------------------------------------
+
+/// B5.4's central red test, re-run against the wire an OAuth link now actually
+/// speaks (packet ③: "B5.4 mock을 Responses 형태로").
+///
+/// ## Why it goes red without the re-seal
 ///
 /// The mock rotates the grant and refuses a spent one, exactly as ADR-0147 says a
 /// real provider may. So:
 ///
 /// * with the re-seal, turn 2 reads `rt-rotated-1` + a live access token from the
 ///   DB and answers with **no** second refresh;
-/// * without it, the DB still holds `rt-seeded` and an expired access token.
-///   Turn 2 refreshes with the spent grant, the endpoint answers
-///   `invalid_grant`, and the run fails.
+/// * without it, the DB still holds `rt-seeded` and an expired access token. Turn
+///   2 refreshes with the spent grant, the endpoint answers `invalid_grant`, and
+///   the run fails.
 ///
 /// The same revert is caught a second way: keeping the refreshed credential in
 /// the in-memory cache instead of invalidating it would let turn 2 pass on RAM
-/// alone, which is why the stored-ciphertext assertion below reads the DB
-/// directly rather than trusting the worker's answer.
+/// alone, which is why the assertion below decrypts the stored ciphertext rather
+/// than trusting the worker's answer.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
-async fn b54_2_an_expired_token_refreshes_reseals_and_the_next_turn_reuses_it() {
+async fn b54b_3_an_expired_token_refreshes_reseals_and_the_next_responses_turn_reuses_it() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let worker_pool = momo_worker_pool().await;
@@ -870,14 +943,17 @@ async fn b54_2_an_expired_token_refreshes_reseals_and_the_next_turn_reuses_it() 
     credential.expires_at_ms = Some(now_ms() - 1_000);
     credential.client_id = Some("client-local-cli".to_string());
     credential.token_endpoint = Some(provider.token_endpoint());
-    seed_oauth_link(&worker_pool, &tenant, &provider.chat_base_url(), credential).await;
+    seed_oauth_link(&worker_pool, &tenant, &provider.base_url(), credential).await;
 
     let worker = build_worker(worker_config()).await;
 
-    // --- turn 1: expired → refresh → re-seal → answer ---
+    // --- turn 1: expired → refresh → re-seal → answer on the Responses wire ---
     let (run_a, _) = enqueue_mention_turn(&su, &tenant, "@hermes 첫 턴").await;
-    let stats = worker.drain_once().await.expect("drain");
-    assert_eq!(stats.answered, 1, "the refreshed token answered the turn");
+    assert_eq!(
+        worker.drain_once().await.expect("drain").answered,
+        1,
+        "the refreshed token answered the turn"
+    );
     assert_eq!(run_status(&su, run_a).await, "succeeded");
 
     {
@@ -889,11 +965,12 @@ async fn b54_2_an_expired_token_refreshes_reseals_and_the_next_turn_reuses_it() 
             Some("client-local-cli"),
             "the operator's own OAuth client is what the refresh presents"
         );
-        assert_eq!(state.chat_calls.len(), 1);
+        assert_eq!(state.responses_calls.len(), 1);
         assert_eq!(
-            state.chat_calls[0].0, "Bearer at-minted-1",
+            state.responses_calls[0].authorization, "Bearer at-minted-1",
             "the call used the freshly minted token, never the expired one"
         );
+        assert_eq!(state.chat_completions_calls, 0);
     }
 
     // The re-seal itself, read straight out of the vault.
@@ -914,9 +991,9 @@ async fn b54_2_an_expired_token_refreshes_reseals_and_the_next_turn_reuses_it() 
     // --- turn 2: the vault's own credential answers, with no second refresh ---
     settle_residual_worker_jobs(&su).await;
     let (run_b, _) = enqueue_mention_turn(&su, &tenant, "@hermes 둘째 턴").await;
-    let stats = worker.drain_once().await.expect("drain");
     assert_eq!(
-        stats.answered, 1,
+        worker.drain_once().await.expect("drain").answered,
+        1,
         "turn 2 answered from the re-sealed credential"
     );
     assert_eq!(run_status(&su, run_b).await, "succeeded");
@@ -927,25 +1004,25 @@ async fn b54_2_an_expired_token_refreshes_reseals_and_the_next_turn_reuses_it() 
         1,
         "turn 2 must not refresh: the re-sealed token is still live"
     );
-    assert_eq!(state.chat_calls.len(), 2);
-    assert_eq!(state.chat_calls[1].0, "Bearer at-minted-1");
+    assert_eq!(state.responses_calls.len(), 2);
+    assert_eq!(state.responses_calls[1].authorization, "Bearer at-minted-1");
 }
 
 // ---------------------------------------------------------------------------
-// b54_3 — the grant is dead
+// b54b_4 — the request body, field by field
 // ---------------------------------------------------------------------------
 
-/// ADR-0147 결정 2's other half: "갱신 실패 = run 실패 + 사용자 가시 오류(재로그인
-/// 안내)".
+/// The wire assertion. Every name checked here was measured twice — from the
+/// shipped `@openai/codex` 0.144.1 binary and from the public SDK types (see
+/// `src/responses.rs` module docs) — and each one is a field whose absence turns
+/// into a 400 that reads like a model problem rather than a client bug.
 ///
-/// Two things are asserted that a looser implementation would get wrong. The job
-/// settles **failed rather than requeued** — a refused grant repeats identically,
-/// and eight backoffs would leave the person waiting minutes for the same
-/// outcome. And the channel message names the repair, because "provider error"
-/// sends them to look at a provider that is working fine.
+/// It asserts the **captured** body, not the builder's return value: a unit test
+/// can pass while the adapter posts something else, and the thing this batch
+/// changes is precisely what goes on the socket.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
-async fn b54_3_a_refused_grant_fails_the_run_with_a_relogin_message() {
+async fn b54b_4_the_responses_request_carries_the_measured_wire_fields() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let worker_pool = momo_worker_pool().await;
@@ -953,143 +1030,85 @@ async fn b54_3_a_refused_grant_fails_the_run_with_a_relogin_message() {
     clear_provider_link(&worker_pool).await;
     let tenant = seed_tenant(&su).await;
 
-    let mut state = MockState::new("rt-seeded", "at-live");
-    state.refuse_refresh = true;
-    let provider = MockProvider::start(state).await;
+    let provider = MockProvider::start(MockState::new("rt-seeded", "at-live")).await;
+    seed_oauth_link(
+        &worker_pool,
+        &tenant,
+        &provider.base_url(),
+        live_credential(&provider, "at-live"),
+    )
+    .await;
 
-    let mut credential = OpenAiOAuthCredential::from_refresh_token("rt-seeded");
-    credential.access_token = Some("at-expired".to_string());
-    credential.expires_at_ms = Some(now_ms() - 1_000);
-    credential.token_endpoint = Some(provider.token_endpoint());
-    seed_oauth_link(&worker_pool, &tenant, &provider.chat_base_url(), credential).await;
-
-    let (run_id, job_id) = enqueue_mention_turn(&su, &tenant, "@hermes 만료된 계정").await;
+    let (run_id, _) = enqueue_mention_turn(&su, &tenant, "@hermes 와이어 확인").await;
     let worker = build_worker(worker_config()).await;
     let stats = worker.drain_once().await.expect("drain");
 
-    assert_eq!(
-        stats.failed, 1,
-        "a refused grant is terminal, not a retry candidate"
-    );
-    assert_eq!(stats.requeued, 0);
-    assert_eq!(run_status(&su, run_id).await, "failed");
-    assert_eq!(
-        run_error(&su, run_id).await["code"],
-        json!("provider_auth_failed"),
-        "ADR-0004 §Rotation's reason, distinct from a generic provider failure"
-    );
-
-    let (status, _) = job_row(&su, job_id).await;
-    assert_eq!(status, "failed", "the job did not go back to pending");
-
-    let messages = agent_messages(&su, &tenant).await;
-    assert_eq!(messages.len(), 1, "the user is told, not left in silence");
-    let (body, props) = &messages[0];
-    assert!(
-        body.contains("다시 로그인"),
-        "the message names the repair: {body}"
-    );
-    assert!(body.contains("AI 연결"), "…and where to do it: {body}");
-    assert!(
-        body.contains("invalid_grant"),
-        "…and what the provider actually said: {body}"
-    );
-    assert_eq!(
-        props["source"],
-        json!("agent_worker.provider_auth_failure.v0"),
-        "a client can branch on this without matching Korean prose"
-    );
-    assert_eq!(props["error_code"], json!("provider_auth_failed"));
-
-    // The chat endpoint was never dialled: there was no credential to dial it
-    // with, and calling it anyway would have spent a request to learn that.
-    assert!(provider.state().chat_calls.is_empty());
-}
-
-// ---------------------------------------------------------------------------
-// b54_4 — nothing from the vault reaches anything durable
-// ---------------------------------------------------------------------------
-
-/// ADR-0004 Rules #2/#5 under the widened ADR-0147 contents: the grant, the
-/// rotated grant, and both access tokens exist on the request boundary and in the
-/// sealed box, and nowhere else.
-///
-/// The test proves it is not vacuous first — the worker really resolved the
-/// vault, really refreshed, and really re-sealed — and only then scans. A worker
-/// that quietly fell back to the env bearer would pass a naive "the secret is
-/// absent" scan while doing nothing this ADR describes.
-#[tokio::test]
-#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
-async fn b54_4_no_vault_plaintext_reaches_a_row_a_message_or_an_error() {
-    ensure_schema_and_roles();
-    let su = superuser_pool().await;
-    let worker_pool = momo_worker_pool().await;
-    settle_residual_worker_jobs(&su).await;
-    clear_provider_link(&worker_pool).await;
-    let tenant = seed_tenant(&su).await;
-
-    const SEEDED_GRANT: &str = "rt-b54-vault-only-grant";
-    const SEEDED_ACCESS: &str = "at-b54-vault-only-access";
-
-    let provider = MockProvider::start(MockState::new(SEEDED_GRANT, "at-unused")).await;
-
-    let mut credential = OpenAiOAuthCredential::from_refresh_token(SEEDED_GRANT);
-    credential.access_token = Some(SEEDED_ACCESS.to_string());
-    // Expired, so this turn exercises the refresh path too — the one that
-    // handles the most secret material in the shortest window.
-    credential.expires_at_ms = Some(now_ms() - 1_000);
-    credential.account_id = Some("acct-b54".to_string());
-    credential.token_endpoint = Some(provider.token_endpoint());
-    seed_oauth_link(&worker_pool, &tenant, &provider.chat_base_url(), credential).await;
-
-    let (run_id, _) = enqueue_mention_turn(&su, &tenant, "@hermes 금고 확인").await;
-    let worker = build_worker(worker_config()).await;
-    let stats = worker.drain_once().await.expect("drain");
-
-    // --- not vacuous: the vault was opened, refreshed, and written back ---
+    // Not vacuous: the request below is one the provider actually accepted and
+    // answered, not one that failed on its way out.
     assert_eq!(stats.answered, 1);
     assert_eq!(run_status(&su, run_id).await, "succeeded");
-    {
-        let state = provider.state();
-        assert_eq!(
-            state.token_calls[0].0, SEEDED_GRANT,
-            "the sealed grant is what the refresh presented — otherwise this test proves nothing"
-        );
-        assert_eq!(state.chat_calls[0].0, "Bearer at-minted-1");
-    }
-    let stored = stored_credential(&worker_pool).await;
+
+    let state = provider.state();
+    assert_eq!(state.chat_completions_calls, 0);
+    assert_eq!(state.responses_calls.len(), 1);
+    let call = &state.responses_calls[0];
+    assert_eq!(call.path, "/v1/responses");
+    let body = &call.body;
+
+    // --- the four scalars ---
     assert_eq!(
-        stored
-            .as_openai_oauth()
-            .expect("oauth credential")
-            .refresh_token,
-        "rt-rotated-1"
+        body["model"],
+        json!(AGENT_MODEL),
+        "ADR-0134 D4: the RESOLVED model is always on the payload"
+    );
+    assert_eq!(
+        body["stream"],
+        json!(false),
+        "B5.4b ships the non-streamed request; streaming is a later batch"
+    );
+    assert_eq!(
+        body["store"],
+        json!(false),
+        "momo's history lives in Postgres (invariant #1); it is not left on a provider"
+    );
+    assert_eq!(
+        body["max_output_tokens"],
+        json!(512),
+        "the payload's budget, under the Responses name for it"
+    );
+    assert_eq!(
+        body["instructions"],
+        json!(SYSTEM_PROMPT),
+        "the agent's system prompt is top-level `instructions`, as Codex sends it"
     );
 
-    // --- the scan ---
-    let persisted = all_persisted_text(&su, &tenant).await;
-    for secret in [
-        SEEDED_GRANT,
-        SEEDED_ACCESS,
-        "rt-rotated-1",
-        "at-minted-1",
-        MASTER_KEY,
-    ] {
-        assert!(
-            !persisted.contains(secret),
-            "vault material `{secret}` reached a durable row"
-        );
-    }
-
-    // The ciphertext is the ONLY place any of it may live. Assert it is still
-    // there, so the scan cannot pass by the link having been wiped.
-    let sealed_len: i32 =
-        sqlx::query_scalar("SELECT octet_length(bearer_ciphertext) FROM provider_link WHERE id")
-            .fetch_one(&su)
-            .await
-            .expect("read the sealed credential");
+    // --- the chat wire's vocabulary must be absent ---
     assert!(
-        sealed_len > 28,
-        "the sealed credential is still stored (version + nonce + tag is 29 bytes of framing)"
+        body.get("messages").is_none(),
+        "a body carrying BOTH vocabularies was assembled by guessing: {body}"
     );
+    assert!(body.get("max_tokens").is_none(), "{body}");
+
+    // --- the typed input array ---
+    let input = body["input"].as_array().expect("input is an array");
+    assert_eq!(input.len(), 1, "one history turn, and no system item");
+    assert_eq!(input[0]["type"], json!("message"));
+    assert_eq!(input[0]["role"], json!("user"));
+    let content = input[0]["content"]
+        .as_array()
+        .expect("content is an array of typed parts, not a bare string");
+    assert_eq!(content.len(), 1);
+    assert_eq!(
+        content[0]["type"],
+        json!("input_text"),
+        "the measured ContentItem tag for a user turn"
+    );
+    assert_eq!(
+        content[0]["text"],
+        json!(format!("[{HUMAN_DISPLAY}] @hermes 와이어 확인")),
+        "the speaker prefix L4 §6.1 requires survives the wire change"
+    );
+
+    // --- and the header the subscription needs, on this wire too ---
+    assert_eq!(call.account_id.as_deref(), Some("acct-seongjae"));
 }
