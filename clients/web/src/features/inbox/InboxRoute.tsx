@@ -294,7 +294,9 @@ export function InboxRoute() {
         />
       </div>
 
-      <footer className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-2">
+      {/* 컴포저와 같은 이유의 안전 영역 (goal B6): 이것도 셸의 마지막 줄이고,
+          폰에서는 그 아래가 홈 인디케이터다. */}
+      <footer className="safe-area-bottom flex flex-wrap items-center gap-3 border-t border-line px-4 py-2">
         {confirmingAll ? (
           <>
             <span className="text-meta text-ink">

@@ -97,15 +97,27 @@ export function AppShell({
     if (!isMobile) setDrawerOpen(false);
   }, [isMobile]);
 
+  // Esc로 닫는다. **캡처 단계**에서 듣고 전파를 멈추는 것이 이 핸들러의 요점이다:
+  // 설정 라우트도 window에서 Esc를 듣고 뒤로 가는데(SettingsRoute), 그 리스너는
+  // 마운트 시점이 더 빨라 버블 단계에서 먼저 실행된다. 그대로 두면 서랍을 닫으려
+  // 누른 Esc 한 번이 설정에서 빠져나가는 것까지 함께 해버린다. 캡처 리스너는
+  // 대상에 닿기 전에 돌므로, 덮고 있는 층이 먼저 자기 것을 가져간다.
+  //
+  // 다이얼로그가 열려 있으면 비켜준다: 그때 가장 위에 있는 층은 서랍이 아니라
+  // 그 다이얼로그이고(⌘K 팔레트, 채널 만들기, 에이전트 프로필 모두 Radix라
+  // `[role=dialog][data-state=open]`으로 한 번에 알 수 있다), Esc는 언제나 가장
+  // 위 층의 것이다.
   useEffect(() => {
     if (!drawerOpen) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+      event.stopPropagation();
       event.preventDefault();
       closeDrawer();
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [drawerOpen, closeDrawer]);
 
   useEffect(() => {
