@@ -76,6 +76,21 @@ pub struct WorkerConfig {
     /// [`momo_agent::context_window_size`] — the history window a delegated run
     /// is given, resolved from the same key and the same clamp the server uses.
     pub context_max_messages: i64,
+    /// `AGENT_CONTEXT_UTC_OFFSET_MINUTES` — the wall clock the agent is told it
+    /// is living in (goal B8 L7).
+    ///
+    /// A workspace asking 오늘 means today where the workspace is, and the
+    /// server's own `TZ` is a deployment detail rather than an answer: the QA
+    /// stack runs in UTC while its readers are in Seoul. 540 (UTC+09:00) is the
+    /// default because every user-facing string in this product is Korean; a
+    /// deployment elsewhere sets the key. Clamped to a real offset range so a
+    /// fat-fingered value cannot move the agent's calendar by weeks.
+    pub utc_offset_minutes: i32,
+}
+
+/// Real UTC offsets run from -12:00 to +14:00.
+fn clamp_utc_offset(minutes: i32) -> i32 {
+    minutes.clamp(-12 * 60, 14 * 60)
 }
 
 fn env(key: &str) -> Option<String> {
@@ -122,6 +137,10 @@ impl WorkerConfig {
             a2a: a2a_limits_from_env()?,
             gateway_enabled: gateway_enabled(env("AGENT_GATEWAY_MODE").as_deref()),
             context_max_messages: context_window_size(env("AGENT_CONTEXT_MAX_MESSAGES").as_deref()),
+            utc_offset_minutes: clamp_utc_offset(env_number(
+                "AGENT_CONTEXT_UTC_OFFSET_MINUTES",
+                540i32,
+            )?),
         })
     }
 
@@ -143,6 +162,7 @@ impl WorkerConfig {
             a2a: A2aLimits::default().clamped(),
             gateway_enabled: false,
             context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,
+            utc_offset_minutes: 540,
         }
     }
 }

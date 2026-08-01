@@ -4,6 +4,7 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
+import { MessageBody } from "./MessageBody";
 import { CascadeNotice } from "./CascadeNotice";
 import { turnRecordRunId } from "./cascadeModel";
 import { rowPresentation } from "./rowModel";
@@ -155,16 +156,18 @@ export function MessageRow({
             </time>
           </div>
         )}
-        {keepsBody && idleNotice === null && (
-          <p
-            className={cn(
-              "whitespace-pre-wrap break-words text-body leading-relaxed",
-              deleted && "text-ink-muted"
-            )}
-          >
-            {deleted ? "삭제된 메시지" : message.body}
-          </p>
-        )}
+        {keepsBody &&
+          idleNotice === null &&
+          // A tombstone is our sentence, not the author's, so it never goes
+          // through the markdown path: "**삭제된 메시지**" is not a thing a
+          // deleted row can say.
+          (deleted ? (
+            <p className="whitespace-pre-wrap break-words text-body leading-relaxed text-ink-muted">
+              삭제된 메시지
+            </p>
+          ) : (
+            <MessageBody body={message.body ?? ""} />
+          ))}
         {idleNotice && (
           <WorkSessionIdleCard
             notice={idleNotice}

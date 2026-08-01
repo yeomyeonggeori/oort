@@ -300,6 +300,23 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
       status={card.status}
       kind="turn"
       detail={card.detail}
+      // goal B8 H2: the message body is one Korean sentence for the reader
+      // scrolling past, and this is the second layer for the one who stopped.
+      // Folded, because "what do I do about it" is a question only some readers
+      // are asking, and open by default it would be a paragraph on every failed
+      // turn in the channel.
+      note={
+        card.failure && (
+          <details data-testid="turn-failure-detail">
+            <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              자세히
+            </summary>
+            <p className="break-keep px-3 pb-2 text-meta text-ink-muted">
+              {card.failure.detail}
+            </p>
+          </details>
+        )
+      }
     >
       {live && (
         <LabeledRow label="진행">
@@ -310,6 +327,13 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
       {card.status === "stalled" && (
         <LabeledRow label="상태" testId="turn-stalled">
           아직 응답이 없습니다. 실패로 확정되지 않았습니다.
+        </LabeledRow>
+      )}
+      {card.failure && card.status !== "stalled" && (
+        // Our sentence, from the server's machine code. It replaces what used
+        // to be the provider's own English error text under an 오류 label.
+        <LabeledRow label="상태" testId="turn-failure">
+          <span className="text-danger">{card.failure.label}</span>
         </LabeledRow>
       )}
       {card.errorNote &&

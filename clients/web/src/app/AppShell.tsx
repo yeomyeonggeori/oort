@@ -17,6 +17,7 @@ import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
+import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
@@ -192,20 +193,26 @@ export function AppShell({
                 data-testid="sidebar-scrim"
               />
             )}
-            <main ref={mainRef} className="flex min-h-0 min-w-0">
+            <main ref={mainRef} className="flex min-h-0 min-w-0 flex-col">
+              {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
+               * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
+               * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}
+              <ConnectionBanner />
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
                * 소유한 표면 안에 머문다. */}
-              <RenderErrorBoundary
-                resetKey={routePath}
-                title="이 화면을 열지 못했습니다"
-                message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
-                retryLabel="다시 시도"
-                onRetry={() => resetRouteQueries(queryClient)}
-              >
-                <Outlet />
-              </RenderErrorBoundary>
+              <div className="flex min-h-0 min-w-0 flex-1">
+                <RenderErrorBoundary
+                  resetKey={routePath}
+                  title="이 화면을 열지 못했습니다"
+                  message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
+                  retryLabel="다시 시도"
+                  onRetry={() => resetRouteQueries(queryClient)}
+                >
+                  <Outlet />
+                </RenderErrorBoundary>
+              </div>
             </main>
           </div>
           {/* Global keyboard paths that must work from any route (R-1 §2). */}

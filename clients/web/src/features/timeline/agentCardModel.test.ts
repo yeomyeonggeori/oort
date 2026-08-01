@@ -4,6 +4,7 @@ import {
   agentCardModel,
   agentCost,
   cardKeepsBody,
+  failureGuidance,
   formatCount,
   formatMicroUsd,
   frameSentence,
@@ -363,6 +364,82 @@ describe("turn record and cost", () => {
     expect(agentCost(undefined)).toBeNull();
     expect(agentCost({ usage: {} })).toBeNull();
     expect(agentCost({ usage: "nope" })).toBeNull();
+  });
+});
+
+// goal B8 H2. The worker's failure notice used to arrive as
+// `props.error = "provider answered with HTTP 401 {\"error\":...}"` and the card
+// printed it verbatim under an 오류 label. It now arrives as a machine code and
+// the copy is ours.
+describe("provider failure notice (goal B8 H2)", () => {
+  const failureProps = {
+    run_id: "0199aa11-2222-7000-8000-0000000000b2",
+    source: "agent_worker.provider_failure.v0",
+    error_code: "provider_failed",
+  };
+
+  it("still earns a card, with a failed status", () => {
+    const card = agentCardModel(
+      msg({ body: "지금은 답변을 만들지 못했습니다.", props: failureProps })
+    );
+    expect(card?.kind).toBe("turn");
+    if (card?.kind !== "turn") return;
+    expect(card.status).toBe("error");
+    expect(card.failure?.label).toContain("제공자");
+    // The body is the server's own Korean sentence and stays above the card.
+    expect(cardKeepsBody(card)).toBe(true);
+  });
+
+  it("says where the provider's own words went, rather than pretending", () => {
+    const detail = failureGuidance("provider_failed")?.detail ?? "";
+    expect(detail).toContain("실행 기록");
+    expect(detail).toContain("감사");
+  });
+
+  it("tells a dead credential apart from a dead provider", () => {
+    const auth = failureGuidance("provider_auth_failed");
+    const generic = failureGuidance("provider_failed");
+    expect(auth?.label).not.toBe(generic?.label);
+    expect(auth?.detail).toContain("AI 연결");
+  });
+
+  it("still says something for a code this build has never seen", () => {
+    const unknown = failureGuidance("some_future_code");
+    expect(unknown?.label).toBeTruthy();
+    expect(unknown?.detail).toContain("실행 기록");
+    // The key is server data, so the lookup must not answer for Object's own
+    // members: an object-literal map would return a function here and the card
+    // would render `undefined` where its label goes.
+    expect(failureGuidance("constructor")?.label).toBe(unknown?.label);
+    expect(failureGuidance("__proto__")?.label).toBe(unknown?.label);
+  });
+
+  it("is nothing at all when the server sent no code", () => {
+    expect(failureGuidance(undefined)).toBeNull();
+    expect(failureGuidance("")).toBeNull();
+    expect(failureGuidance(42)).toBeNull();
+  });
+
+  // The code is a branch key, never copy: an English identifier on a Korean
+  // timeline is exactly the internal vocabulary this ticket removed.
+  it("never renders the code itself, not even behind the disclosure", () => {
+    const card = agentCardModel(msg({ props: failureProps }));
+    if (card?.kind !== "turn") throw new Error("expected a turn card");
+    expect(card.failure?.label).not.toContain("provider_failed");
+    expect(card.failure?.detail).not.toContain("provider_failed");
+    const rendered = card.detail.rows.map((row) => row.value).join(" ");
+    expect(rendered).not.toContain("provider_failed");
+  });
+
+  it("keeps reading a legacy emitter's `error` string", () => {
+    // The Swift worker and the gateway still write `error`; dropping that read
+    // would blank their failure rows on this client.
+    const card = agentCardModel(
+      msg({ props: { run_id: "0199aa11-2222-7000-8000-0000000000b2", error: "rate limited" } })
+    );
+    if (card?.kind !== "turn") throw new Error("expected a turn card");
+    expect(card.status).toBe("error");
+    expect(card.errorNote).toBe("rate limited");
   });
 });
 

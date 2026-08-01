@@ -17,6 +17,19 @@ import { useSession } from "@/app/session";
  */
 export function useOffline(): boolean {
   const { connStatus } = useSession();
+  return useBrowserOffline() || connStatus === "disconnected";
+}
+
+/**
+ * Only the browser's half of the answer (`navigator.onLine`).
+ *
+ * Split out for the shell's connection banner (goal B8 B2), which needs the two
+ * signals apart rather than or-ed: the browser's offline is immediate and
+ * certain, while a rail that is merely not up yet has to be given time before
+ * it is worth a line on screen. Everything that only needs "can I write right
+ * now" keeps calling `useOffline` and sees no change.
+ */
+export function useBrowserOffline(): boolean {
   const [browserOffline, setBrowserOffline] = useState(
     () => typeof navigator !== "undefined" && navigator.onLine === false
   );
@@ -30,5 +43,5 @@ export function useOffline(): boolean {
       window.removeEventListener("offline", offline);
     };
   }, []);
-  return browserOffline || connStatus === "disconnected";
+  return browserOffline;
 }

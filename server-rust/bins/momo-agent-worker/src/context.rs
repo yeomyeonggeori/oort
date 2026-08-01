@@ -20,6 +20,79 @@ use uuid::Uuid;
 use crate::payload::RecentMessage;
 use crate::provider::ChatMessage;
 
+// ---- the current date (goal B8 L7) -----------------------------------------
+//
+// A model's sense of "now" is its training cutoff, so an agent asked 오늘 며칠
+// 이야 answered with a date in 2025 and, worse, reasoned about "최근" and
+// "이번 주" from there without saying so. Nothing in the assembled context ever
+// told it otherwise: the window carries message bodies, not timestamps.
+//
+// One system line fixes it, and it has to be a line the model cannot mistake
+// for the user's words, which is why it is `system` and not a prefix on the
+// trigger turn.
+//
+// The clock arrives as a parameter (epoch millis + a fixed offset), never read
+// inside this module: the assembler is pure and its tests must not depend on
+// the day they run. Civil date arithmetic is done here rather than through
+// `chrono` because this crate's dependency list is deliberately short (see its
+// Cargo.toml) and the conversion below is a closed-form 20 lines.
+
+const WEEKDAYS_KO: [&str; 7] = ["일", "월", "화", "수", "목", "금", "토"];
+
+/// (year, month, day) from days since 1970-01-01. Howard Hinnant's
+/// `civil_from_days`, which is exact for the whole proleptic Gregorian range.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Floor division: `-1 / 86_400_000` must be the day BEFORE the epoch, not 0.
+fn div_floor(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if a % b != 0 && ((a < 0) != (b < 0)) {
+        q - 1
+    } else {
+        q
+    }
+}
+
+/// The `system` line that tells the model what day it is.
+///
+/// `utc_offset_minutes` is the workspace's wall clock, not the server's: a
+/// Korean team asking 오늘 means 오늘 in Seoul. The offset is printed beside the
+/// time so the model can convert rather than assume, and the second sentence
+/// names the failure mode explicitly, because a model that merely SEES a date
+/// still tends to answer from its cutoff unless told which one is current.
+pub fn now_context_block(now_ms: i64, utc_offset_minutes: i32) -> String {
+    let local_ms = now_ms + i64::from(utc_offset_minutes) * 60_000;
+    let days = div_floor(local_ms, 86_400_000);
+    let ms_of_day = local_ms - days * 86_400_000;
+    let (year, month, day) = civil_from_days(days);
+    // 1970-01-01 was a Thursday, so the epoch day sits at index 4 of a
+    // Sunday-first week.
+    let weekday = WEEKDAYS_KO[((days % 7 + 7 + 4) % 7) as usize];
+    let hour = ms_of_day / 3_600_000;
+    let minute = (ms_of_day % 3_600_000) / 60_000;
+    let sign = if utc_offset_minutes < 0 { '-' } else { '+' };
+    let offset = utc_offset_minutes.abs();
+    format!(
+        "현재 시각: {year:04}-{month:02}-{day:02} ({weekday}) {hour:02}:{minute:02} \
+         (UTC{sign}{oh:02}:{om:02})\n\
+         오늘, 어제, 이번 주, 최근 같은 표현은 이 시각을 기준으로 해석하세요. \
+         학습 데이터의 마지막 시점이 아니라 이 시각이 현재입니다.",
+        oh = offset / 60,
+        om = offset % 60,
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssembledContext {
     pub messages: Vec<ChatMessage>,
@@ -45,11 +118,23 @@ pub fn assemble(
     trigger_message_id: Option<Uuid>,
     fallback_prompt: &str,
     system_prompt: Option<&str>,
+    // The current-date block (goal B8 L7), or `None` to send none. Passed in
+    // rather than read from the clock so this function stays deterministic.
+    now_context: Option<&str>,
     max_chars: usize,
 ) -> AssembledContext {
     let mut head: Vec<ChatMessage> = Vec::new();
     if let Some(prompt) = system_prompt.map(str::trim).filter(|p| !p.is_empty()) {
         head.push(ChatMessage::system(prompt));
+    }
+    // After the operator's instructions and before the conversation: it is a
+    // fact about the world, not a rule about behaviour, and it must not be the
+    // last thing an operator's prompt can be overridden by. It is also outside
+    // the budget trim below, deliberately: two lines cannot be what pushes a
+    // window over, and a turn that dropped them would silently go back to
+    // answering from the training cutoff.
+    if let Some(now) = now_context.map(str::trim).filter(|n| !n.is_empty()) {
+        head.push(ChatMessage::system(now));
     }
 
     let mut turns: Vec<Turn> = if recent_messages.is_empty() {
@@ -148,6 +233,110 @@ mod tests {
 
     const AGENT: u128 = 99;
 
+    // ---- the current date (goal B8 L7) -------------------------------------
+
+    /// The reported bug, inverted into an assertion: an agent asked what day it
+    /// is answered 2025 because nothing in its context said otherwise.
+    #[test]
+    fn the_now_block_states_the_local_date_time_and_offset() {
+        // 2026-08-01T00:00:00Z, which is 09:00 on the same day in Seoul.
+        let block = now_context_block(1_785_542_400_000, 540);
+        assert!(
+            block.starts_with("현재 시각: 2026-08-01 (토) 09:00 (UTC+09:00)"),
+            "{block}"
+        );
+        assert!(block.contains("이 시각이 현재입니다"), "{block}");
+    }
+
+    /// The offset is the workspace's, not the server's, and it can roll the
+    /// date across a day boundary in either direction. Getting the sign wrong
+    /// would be worse than saying nothing: a confidently wrong date.
+    #[test]
+    fn the_offset_rolls_the_date_in_both_directions() {
+        // 2026-08-01T00:00:00Z is still 2026-07-31 in UTC-05:00.
+        let west = now_context_block(1_785_542_400_000, -300);
+        assert!(
+            west.starts_with("현재 시각: 2026-07-31 (금) 19:00 (UTC-05:00)"),
+            "{west}"
+        );
+        // 2026-07-31T23:00:00Z is already 2026-08-01 in Seoul.
+        let east = now_context_block(1_785_538_800_000, 540);
+        assert!(
+            east.starts_with("현재 시각: 2026-08-01 (토) 08:00 (UTC+09:00)"),
+            "{east}"
+        );
+    }
+
+    /// The epoch itself, and the day before it: the floor-division branch that a
+    /// plain `/` gets wrong.
+    #[test]
+    fn dates_before_the_epoch_do_not_wrap_forward() {
+        assert!(now_context_block(0, 0).starts_with("현재 시각: 1970-01-01 (목) 00:00 (UTC+00:00)"));
+        assert!(
+            now_context_block(-1, 0).starts_with("현재 시각: 1969-12-31 (수) 23:59 (UTC+00:00)")
+        );
+    }
+
+    /// A leap day, because February is where a hand-written calendar breaks.
+    #[test]
+    fn a_leap_day_is_a_real_day() {
+        // 2028-02-29T12:00:00Z
+        let block = now_context_block(1_835_438_400_000, 0);
+        assert!(
+            block.starts_with("현재 시각: 2028-02-29 (화) 12:00"),
+            "{block}"
+        );
+    }
+
+    /// It is a `system` turn, it sits after the operator's prompt, and it is
+    /// never confused with something the user said.
+    #[test]
+    fn the_now_block_rides_as_its_own_system_turn_after_the_prompt() {
+        let window = vec![message(1, Some(5), Some("성재"), "오늘 며칠이야?")];
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(1)),
+            "unused",
+            Some("you are hermes"),
+            Some("현재 시각: 2026-08-01"),
+            10_000,
+        );
+        assert_eq!(
+            out.messages,
+            vec![
+                ChatMessage::system("you are hermes"),
+                ChatMessage::system("현재 시각: 2026-08-01"),
+                ChatMessage::user("[성재] 오늘 며칠이야?"),
+            ]
+        );
+    }
+
+    /// The budget can trim history; it must never trim the clock. A turn that
+    /// silently dropped this block would go back to answering from the cutoff,
+    /// and nothing on screen would say why.
+    #[test]
+    fn the_budget_never_drops_the_now_block() {
+        let window = vec![
+            message(1, Some(5), None, &"가".repeat(200)),
+            message(2, Some(5), None, "지금 몇 시야?"),
+        ];
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(2)),
+            "unused",
+            None,
+            Some("현재 시각: 2026-08-01"),
+            20,
+        );
+        assert_eq!(
+            out.messages[0],
+            ChatMessage::system("현재 시각: 2026-08-01")
+        );
+        assert_eq!(out.dropped_count, 1);
+    }
+
     /// The agent's own past turns must come back as `assistant`; everyone else
     /// is a `user` line tagged with its speaker. Reverse either and the model
     /// reads its own answers as the user's words.
@@ -164,6 +353,7 @@ mod tests {
             Some(Uuid::from_u128(3)),
             "unused",
             Some("you are hermes"),
+            None,
             10_000,
         );
         assert_eq!(
@@ -191,6 +381,7 @@ mod tests {
             None,
             "직접 물어봄",
             None,
+            None,
             10_000,
         );
         assert_eq!(out.messages, vec![ChatMessage::user("직접 물어봄")]);
@@ -211,6 +402,7 @@ mod tests {
             Some(Uuid::from_u128(3)),
             "unused",
             None,
+            None,
             120,
         );
         assert_eq!(out.dropped_count, 2);
@@ -224,6 +416,7 @@ mod tests {
             Uuid::from_u128(AGENT),
             Some(Uuid::from_u128(3)),
             "unused",
+            None,
             None,
             10,
         );
@@ -239,7 +432,15 @@ mod tests {
             message(1, Some(5), None, &"가".repeat(100)),
             message(2, Some(5), None, "최신"),
         ];
-        let out = assemble(&window, Uuid::from_u128(AGENT), None, "unused", None, 20);
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            None,
+            "unused",
+            None,
+            None,
+            20,
+        );
         assert_eq!(out.messages.len(), 1);
         assert_eq!(out.messages[0].content, "최신");
     }
@@ -265,6 +466,7 @@ mod tests {
             Uuid::from_u128(AGENT),
             Some(Uuid::from_u128(3)),
             "unused",
+            None,
             None,
             10_000,
         );

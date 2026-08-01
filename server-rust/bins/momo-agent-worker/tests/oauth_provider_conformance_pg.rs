@@ -990,9 +990,23 @@ async fn b54_3_a_refused_grant_fails_the_run_with_a_relogin_message() {
         "the message names the repair: {body}"
     );
     assert!(body.contains("AI 연결"), "…and where to do it: {body}");
+    // goal B8 H2 moved the provider's own words off the timeline. A refused
+    // grant answers with a body that can quote the token it refused, so this
+    // assertion is inverted on purpose: the channel must NOT carry it.
     assert!(
-        body.contains("invalid_grant"),
-        "…and what the provider actually said: {body}"
+        !body.contains("invalid_grant"),
+        "the provider's raw refusal stays off the channel: {body}"
+    );
+    assert!(
+        run_error(&su, run_id).await["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("invalid_grant"),
+        "…and is kept on the run record instead"
+    );
+    assert!(
+        props.get("error").is_none(),
+        "…and not in the props the relay broadcasts: {props}"
     );
     assert_eq!(
         props["source"],
