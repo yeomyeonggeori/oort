@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import {
@@ -9,6 +9,7 @@ import {
   Lock,
   MessageSquare,
   Plus,
+  Search,
   Settings,
   User,
   Users,
@@ -33,6 +34,7 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { InlineBanner } from "@/features/common/States";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -188,6 +190,10 @@ export function QuickSwitcher({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onOpenChange, navigate, formDialogOpen]);
 
+  const searchProvided = isSurfaceProvided("messageSearch");
+  // 팔레트에 친 말. 메시지 검색으로 넘길 때 그대로 들고 간다.
+  const [typed, setTyped] = useState("");
+
   function go(path: string) {
     onOpenChange(false);
     navigate(path);
@@ -208,6 +214,8 @@ export function QuickSwitcher({
       data-testid="quick-switcher"
     >
       <Command.Input
+        value={typed}
+        onValueChange={setTyped}
         placeholder="채널, 사람, 설정으로 이동"
         data-testid="quick-switcher-input"
         className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent placeholder:text-ink-muted"
@@ -222,11 +230,45 @@ export function QuickSwitcher({
       <Command.List
         className={`max-h-pane overflow-y-auto p-2 ${groupHeadingClass}`}
       >
+        {/* 이 팔레트는 **이름**만 거른다(채널·사람·설정). 그래서 빈 상태에서
+            "다른 이름으로 검색하세요"로 끝내면, 사이드바에 검색이 둘 있는데
+            둘 중 어느 것도 메시지 본문을 찾아 주지 않는 것처럼 읽힌다. 여기가
+            두 검색이 만나는 자연스러운 접합점이라, 막다른 길 대신 넘길 곳을
+            말한다 (goal B12 R1). */}
         <Command.Empty className="px-2 py-3 text-body text-ink-muted">
-          일치하는 채널이나 사람이 없습니다. 다른 이름으로 검색하세요.
+          {searchProvided
+            ? "이름이 일치하는 채널이나 사람이 없습니다. 메시지 본문은 아래 메시지 검색에서 찾을 수 있습니다."
+            : "일치하는 채널이나 사람이 없습니다. 다른 이름으로 검색하세요."}
         </Command.Empty>
 
         <Command.Group heading="이동">
+          {/* 메시지 검색은 팔레트 안에서 실행되지 않고 자기 표면으로 데려간다
+              (goal B12 H5). 이 리스트는 이미 받아 둔 목록을 cmdk가 동기로 걸러
+              내는 자리라, 서버에 묻고 기다리는 검색을 여기 끼워 넣으면 로딩·
+              오류·빈 결과가 갈 곳이 없다. 편승은 진입점까지다. */}
+          {searchProvided && (
+            <Command.Item
+              className={itemClass}
+              value="메시지 검색 찾기 search messages"
+              data-testid="switcher-message-search"
+              // 이 줄만 `forceMount`다. 나머지 항목은 이름이 안 맞으면 사라지는
+              // 것이 맞지만, 이것은 **이름으로 못 찾았을 때 쓰라고 있는** 항목이라
+              // 걸러져 사라지면 정확히 필요한 순간에 없다.
+              forceMount
+              onSelect={() =>
+                go(
+                  typed.trim() === ""
+                    ? "/search"
+                    : `/search?q=${encodeURIComponent(typed.trim())}`
+                )
+              }
+            >
+              <Search className="size-4 opacity-70" />
+              {typed.trim() === ""
+                ? "메시지 검색"
+                : `'${typed.trim()}' 메시지 검색`}
+            </Command.Item>
+          )}
           <Command.Item className={itemClass} onSelect={() => go("/inbox")}>
             <Inbox className="size-4 opacity-70" />
             인박스
