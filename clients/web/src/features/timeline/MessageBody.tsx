@@ -31,8 +31,15 @@ import {
 
 const BODY_CLASS = "break-words text-body leading-relaxed";
 
-/** Inline code and code blocks share one look: quoted text, not a card. */
-const CODE_CLASS = "rounded-sm bg-surface-hover font-mono text-meta text-ink";
+/**
+ * Inline code and code blocks share one look: quoted text, not a card.
+ *
+ * No color token of its own, deliberately: it INHERITS, so the pending echo's
+ * `text-ink-muted` reaches the code in it too. Pinning `text-ink` here made a
+ * sending row's prose muted and its code not, which is a row that says two
+ * different things about its own state.
+ */
+const CODE_CLASS = "rounded-sm bg-surface-hover font-mono text-meta";
 
 function InlineNodes({ nodes }: { nodes: Inline[] }) {
   return (

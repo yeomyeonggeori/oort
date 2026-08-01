@@ -410,8 +410,12 @@ export interface FailureGuidance {
   detail: string;
 }
 
-const WHERE_THE_ORIGINAL_IS =
-  "제공자가 보낸 원문은 이 실행 기록과 감사 로그에만 남습니다.";
+// Names ONLY what the server actually keeps. The Rust worker writes the
+// redacted provider text to `agent_run.error.reason` (the run record) and to
+// `outbox.last_error`; it writes no audit_log row on this path, so the copy
+// must not promise one. A sentence that over-claims where evidence lives is
+// worse than no sentence: somebody goes looking and finds nothing.
+const WHERE_THE_ORIGINAL_IS = "제공자가 보낸 원문은 이 실행 기록에만 남습니다.";
 
 // A Map, not an object literal: the key comes off the wire, and an object
 // lookup answers for `constructor` and `__proto__` too. That would have handed

@@ -393,7 +393,10 @@ describe("provider failure notice (goal B8 H2)", () => {
   it("says where the provider's own words went, rather than pretending", () => {
     const detail = failureGuidance("provider_failed")?.detail ?? "";
     expect(detail).toContain("실행 기록");
-    expect(detail).toContain("감사");
+    // …and names only what the server keeps. The worker writes no audit_log row
+    // on this path, so promising one would send a reader looking for evidence
+    // that is not there.
+    expect(detail).not.toContain("감사");
   });
 
   it("tells a dead credential apart from a dead provider", () => {
