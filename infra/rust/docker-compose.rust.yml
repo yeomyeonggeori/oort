@@ -68,6 +68,10 @@ services:
       CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
       CENTRIFUGO_LOG_LEVEL: ${CENTRIFUGO_LOG_LEVEL:-info}
+      # 배포 도메인의 WSS Origin. v6 env는 **공백 구분** 목록이다 — JSON 배열
+      # 문자열을 주면 통째로 원소 하나가 되어 전부 403이 된다(2026-08-01 실측,
+      # QA Blocker B1). 마운트된 config보다 env가 우선한다.
+      CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: ${CENTRIFUGO_ALLOWED_ORIGINS:-https://app.localhost http://localhost:5173 tauri://localhost http://tauri.localhost}
       # The mounted config ships a `dev-insecure-...` placeholder for this
       # header. Overriding it here means no committed placeholder secret can
       # ever reach a deployed stack. **B4: this is now load bearing** — the Rust
