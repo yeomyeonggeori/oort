@@ -348,6 +348,15 @@ const BODIES = [
       "자세한 절차는 [배포 문서](https://momo.example/docs/deploy)에 있습니다.\n" +
       "```sh\nmake deploy TAG=v0.4.2\n```",
   ],
+  // design-review 1R B1. Two things a picture has to show, not just a unit test:
+  // a Korean date at the start of a line stays a date (it used to become "1."
+  // with the year eaten), and a quotation that starts at step 3 still says 3.
+  [
+    HERMES,
+    "2026. 07. 30. 배포는 롤백으로 끝났습니다. 런북 기준으로 3단계부터 다시 합니다.\n" +
+      "3. 이전 태그로 되돌리기\n" +
+      "4. 헬스 체크 통과 확인",
+  ],
   [ME, "@hermes 어제 실패한 배포 로그도 같이 봐줄래요?"],
   // goal B8 H2. The worker's failure notice: one Korean sentence in the body,
   // a machine code in props, and NOTHING of the provider's own text anywhere.
