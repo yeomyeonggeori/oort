@@ -1203,10 +1203,12 @@ async fn b54b_4_the_responses_request_carries_the_measured_wire_fields() {
         body.get("max_output_tokens").is_none(),
         "max_output_tokens는 보내지 않는다 — ChatGPT 백엔드가 Unsupported parameter로 400 (2026-08-02 실측)"
     );
-    assert_eq!(
-        body["instructions"],
-        json!(SYSTEM_PROMPT),
-        "the agent's system prompt is top-level `instructions`, as Codex sends it"
+    assert!(
+        body["instructions"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("너는 hermes다")
+                && value.contains("현재 시각:")),
+        "시스템 프롬프트는 top-level instructions로 가고, B8의 현재 시각 라인이 뒤에 붙는다"
     );
 
     // --- the chat wire's vocabulary must be absent ---
