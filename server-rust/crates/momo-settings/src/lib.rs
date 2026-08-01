@@ -16,11 +16,19 @@
 //! * **It owns no outbox SQL and emits nothing.** Nothing in a settings write is
 //!   a timeline event; the one broadcast-shaped settings surface that exists
 //!   (`notification-pref`) already lives in `momo-messaging`.
-//! * **ADR-0004 holds at the type level.** The provider bearer exists in memory
-//!   only on the seal/open boundary ([`crypto`]); every type that can leave the
-//!   process carries a masked 4-character tail instead
-//!   ([`crypto::masked_tail`]), and no struct here has a field that could hold a
-//!   provider OAuth token or a raw API key.
+//! * **ADR-0004 holds at the type level.** The provider credential exists in
+//!   memory only on the seal/open boundary ([`crypto`]); every type that can
+//!   leave the process carries a masked 4-character tail instead
+//!   ([`crypto::masked_tail`]), and no `Serialize` type here has a field that
+//!   could carry token material.
+//!
+//!   **ADR-0147 (Accepted) moved one line of that boundary**, and only one: the
+//!   sealed vault may now hold an OpenAI subscription **OAuth grant** as well as
+//!   an opaque gateway bearer ([`oauth`]). ADR-0004 Rule #1 still holds as
+//!   written — there is no `codex_oauth_*` / `openai_oauth_*` column, no schema
+//!   change, and no new plaintext surface: the grant lives inside the same
+//!   AES-GCM box the bearer already lived in. What changed is the *contents* of
+//!   that box, which is exactly the extension ADR-0147 결정 1 authorises.
 //!
 //! ## Module map (Swift source of truth for each)
 //!
@@ -29,6 +37,7 @@
 //! | [`provider`] | provider mode/URL vocabulary, endpoint redaction, base-URL validation | `Config.swift:502-700`, `AgentRoutes.validatedBaseURL` |
 //! | [`crypto`] | AES-GCM sealed bearer + masked tail | `Provider/ProviderLinkCrypto.swift` |
 //! | [`link`] | `provider_link` singleton store + DB-over-env resolution | `Provider/ProviderLinkStore.swift`, `ProviderLinkResolver.swift` |
+//! | [`oauth`] | the `oauth-openai` sealed-payload kind (ADR-0147) | no Swift source — Rust-only |
 //! | [`chain`] | `provider_link_chain` store + the cascade plan/classifier | `Provider/ProviderLinkChainStore.swift`, `ProviderCascade.swift` |
 //! | [`engine`] | `work_host_engine` per-workspace selection | `Provider/WorkHostEngineStore.swift` |
 //! | [`tier`] | `work_tier_policy` workspace default + member override | `Routes/WorkTierPolicyRoutes.swift` |
@@ -50,6 +59,7 @@ pub mod engine;
 pub mod invite;
 pub mod join;
 pub mod link;
+pub mod oauth;
 pub mod provider;
 pub mod quota;
 pub mod tier;
@@ -78,8 +88,12 @@ pub use join::{
     JoinSpecInvalid, JoinedMember, JoinedMembership,
 };
 pub use link::{
-    decrypt_link, delete_link, read_link, resolve_link, upsert_link, DecryptedProviderLink,
-    ProviderSource, ResolvedProvider, StoredProviderLink,
+    decrypt_link, delete_link, read_link, reseal_link_credential, resolve_link, upsert_link,
+    DecryptedProviderLink, ProviderSource, ResolvedProvider, StoredProviderLink,
+};
+pub use oauth::{
+    LinkCredential, OpenAiOAuthCredential, ATTRIBUTION_NOTICE_KO, ATTRIBUTION_PERSONAL,
+    DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND, USAGE_SCOPE_INTERNAL_ONLY,
 };
 pub use provider::{
     is_unsafe_secret, redacted_endpoint_label, requires_strict_external_provider,

@@ -56,12 +56,13 @@
 
 pub mod config;
 pub mod context;
+pub mod oauth;
 pub mod payload;
 pub mod provider;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use momo_agent::{
     finish_run_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx, record_run_usage_in_tx,
@@ -74,15 +75,21 @@ use momo_outbox::{
     backoff_seconds, claim_agent_job_batch, mark_done, mark_failed, requeue, ClaimedAgentJob,
     NOTIFY_CHANNEL,
 };
-use momo_settings::{decrypt_link, read_link, resolve_link, ProviderSource};
+use momo_settings::{
+    decrypt_link, read_link, reseal_link_credential, resolve_link, seal_bearer, LinkCredential,
+    OpenAiOAuthCredential, ProviderSource,
+};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub use config::WorkerConfig;
 use context::assemble;
+use oauth::{relogin_message, HttpTokenRefresher, RefreshError, TokenRefresher, EXPIRY_SKEW_MS};
 use payload::AgentJobPayload;
-use provider::{ChatProvider, ChatRequest, ChatUsage, OpenAiCompatProvider, ProviderEndpoint};
+use provider::{
+    ChatProvider, ChatRequest, ChatUsage, OpenAiCompatProvider, ProviderEndpoint, ProviderError,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -201,14 +208,57 @@ struct ProviderLinkCache {
 
 struct CachedLink {
     /// `None` ⇒ absent / unusable / undecryptable ⇒ use env.
-    endpoint: Option<ProviderEndpoint>,
+    resolved: Option<ResolvedLink>,
     updated_at_ms: Option<i64>,
     fetched_at: Instant,
+}
+
+/// The operator's link as this process resolved it: where to call, and what the
+/// vault actually holds.
+#[derive(Clone)]
+struct ResolvedLink {
+    endpoint: ProviderEndpoint,
+    credential: LinkCredential,
+}
+
+/// Everything one turn needs to authenticate itself — and, for an ADR-0147 OAuth
+/// link, to re-authenticate itself mid-turn.
+///
+/// The env fallback produces one of these too (a [`LinkCredential::Bearer`] with
+/// no `link_updated_at_ms`), so the turn loop has exactly one shape to handle and
+/// the OAuth path is not a second code path bolted alongside it.
+pub struct ResolvedTransport {
+    pub endpoint: ProviderEndpoint,
+    credential: LinkCredential,
+    /// The `provider_link.updated_at` this credential was read at — the guard a
+    /// re-seal writes against. `None` when the credential came from env, which
+    /// is also what makes "env links are never written back" structural.
+    link_updated_at_ms: Option<i64>,
+}
+
+impl ResolvedTransport {
+    fn oauth(&self) -> Option<&OpenAiOAuthCredential> {
+        self.credential.as_openai_oauth()
+    }
+
+    pub fn is_oauth(&self) -> bool {
+        self.oauth().is_some()
+    }
+
+    /// Is the access token missing or (nearly) dead? Always `false` for a legacy
+    /// bearer, which has no lifetime to reason about.
+    pub fn needs_refresh(&self, now_ms: i64) -> bool {
+        self.oauth()
+            .is_some_and(|credential| credential.needs_refresh(now_ms, EXPIRY_SKEW_MS))
+    }
 }
 
 pub struct AgentWorker {
     pool: PgPool,
     provider: Arc<dyn ChatProvider>,
+    /// The OAuth token endpoint client (ADR-0147 결정 2). A seam, so the
+    /// conformance suite can point it at its own server rather than the internet.
+    refresher: Arc<dyn TokenRefresher>,
     config: WorkerConfig,
     link_cache: ProviderLinkCache,
 }
@@ -223,15 +273,32 @@ impl AgentWorker {
             .connect(&config.database_url)
             .await?;
         let provider = Arc::new(OpenAiCompatProvider::new(config.request_timeout)?);
-        Ok(AgentWorker::new(pool, provider, config))
+        let refresher = Arc::new(HttpTokenRefresher::new(config.request_timeout));
+        Ok(AgentWorker::with_refresher(
+            pool, provider, refresher, config,
+        ))
     }
 
-    /// Build from an existing pool + provider (conformance tests).
+    /// Build from an existing pool + provider (conformance tests), with the real
+    /// token endpoint client.
     pub fn new(pool: PgPool, provider: Arc<dyn ChatProvider>, config: WorkerConfig) -> AgentWorker {
+        let refresher = Arc::new(HttpTokenRefresher::new(config.request_timeout));
+        AgentWorker::with_refresher(pool, provider, refresher, config)
+    }
+
+    /// Build with both outbound seams supplied — the shape the OAuth conformance
+    /// suite uses to point the refresh at its own in-test token endpoint.
+    pub fn with_refresher(
+        pool: PgPool,
+        provider: Arc<dyn ChatProvider>,
+        refresher: Arc<dyn TokenRefresher>,
+        config: WorkerConfig,
+    ) -> AgentWorker {
         let ttl = Duration::from_millis(2_000);
         AgentWorker {
             pool,
             provider,
+            refresher,
             config,
             link_cache: ProviderLinkCache {
                 entry: Mutex::new(None),
@@ -333,7 +400,7 @@ impl AgentWorker {
             return Settlement::Skipped;
         };
 
-        let endpoint = self.resolve_endpoint().await;
+        let mut transport = self.resolve_transport().await;
 
         // queued → running. `false` is not an error: a run being retried after a
         // transient failure is still `failed` at this point, and its terminal
@@ -348,7 +415,11 @@ impl AgentWorker {
             Err(error) => {
                 // A DB error here is transient by nature: do not run the turn.
                 return self
-                    .settle_retryable(&job, &format!("run start failed: {error}"), &endpoint)
+                    .settle_retryable(
+                        &job,
+                        &format!("run start failed: {error}"),
+                        &transport.endpoint,
+                    )
                     .await;
             }
         }
@@ -382,7 +453,46 @@ impl AgentWorker {
             ),
         };
 
-        let completion = match self.provider.complete(&endpoint, &request).await {
+        // ADR-0147 결정 2: a subscription OAuth link presents an access token
+        // that dies on a timer. Minting it *before* the call — rather than
+        // waiting for the 401 — is what keeps a turn that starts after the
+        // deadline from costing the user a wasted round trip.
+        let mut refreshed_this_turn = false;
+        if transport.needs_refresh(now_ms()) {
+            if let Err(error) = self.refresh_and_reseal(&mut transport).await {
+                return self
+                    .settle_refresh_failure(&job, &payload, run_id, &error, &transport)
+                    .await;
+            }
+            refreshed_this_turn = true;
+        }
+
+        let mut attempt = self.provider.complete(&transport.endpoint, &request).await;
+
+        // A rejection on a token whose deadline still looked fine means the
+        // provider retired it early — revoked, rotated elsewhere, or our clock
+        // disagreed. Refresh and replay **at most once per turn**, and never
+        // after the pre-flight refresh already ran: a token minted seconds ago
+        // and rejected anyway is not an expiry problem, so spending a second
+        // rotation on it would burn the subscription's budget to arrive at the
+        // same 401. The rejection is reported instead, which is the honest answer.
+        if transport.is_oauth() && !refreshed_this_turn && is_auth_rejection(&attempt) {
+            tracing::info!(
+                outbox_id = job.id,
+                run_id = %run_id,
+                "provider rejected the oauth access token; refreshing once and replaying"
+            );
+            match self.refresh_and_reseal(&mut transport).await {
+                Ok(()) => attempt = self.provider.complete(&transport.endpoint, &request).await,
+                Err(error) => {
+                    return self
+                        .settle_refresh_failure(&job, &payload, run_id, &error, &transport)
+                        .await
+                }
+            }
+        }
+
+        let completion = match attempt {
             Ok(completion) if completion.text.trim().is_empty() => {
                 // A 200 with no text is not an answer. Treating it as one would
                 // commit an empty message and a `succeeded` run, which reads as
@@ -390,25 +500,27 @@ impl AgentWorker {
                 let reason = "provider returned no text";
                 tracing::warn!(outbox_id = job.id, run_id = %run_id, reason, "empty completion");
                 return self
-                    .settle_terminal_failure(&job, &payload, run_id, reason, &endpoint)
+                    .settle_terminal_failure(&job, &payload, run_id, reason, &transport.endpoint)
                     .await;
             }
             Ok(completion) => completion,
             Err(error) => {
-                let reason = redact_secrets(&error.to_string(), &endpoint.bearer);
+                let reason = redact_secrets(&error.to_string(), &transport.endpoint.bearer);
                 tracing::warn!(
                     outbox_id = job.id,
                     run_id = %run_id,
-                    endpoint = %endpoint.label(),
+                    endpoint = %transport.endpoint.label(),
                     retryable = error.is_retryable(),
                     reason,
                     "provider call failed"
                 );
                 if error.is_retryable() {
-                    return self.settle_retryable(&job, &reason, &endpoint).await;
+                    return self
+                        .settle_retryable(&job, &reason, &transport.endpoint)
+                        .await;
                 }
                 return self
-                    .settle_terminal_failure(&job, &payload, run_id, &reason, &endpoint)
+                    .settle_terminal_failure(&job, &payload, run_id, &reason, &transport.endpoint)
                     .await;
             }
         };
@@ -422,7 +534,15 @@ impl AgentWorker {
         // the user can see, and a ledger row without a run would be an unbilled
         // charge.
         let outcome = self
-            .commit_turn(&job, &payload, run_id, body, props, usage, true)
+            .commit_turn(
+                &job,
+                &payload,
+                run_id,
+                body,
+                props,
+                usage,
+                TurnOutcome::Succeeded,
+            )
             .await;
         match outcome {
             Ok(TurnCommit::Committed) => {
@@ -440,7 +560,8 @@ impl AgentWorker {
                 // transient, so retry rather than losing the turn.
                 let reason = format!("turn commit failed: {error}");
                 tracing::error!(outbox_id = job.id, run_id = %run_id, reason, "turn commit failed");
-                self.settle_retryable(&job, &reason, &endpoint).await
+                self.settle_retryable(&job, &reason, &transport.endpoint)
+                    .await
             }
         }
     }
@@ -456,7 +577,7 @@ impl AgentWorker {
         body: String,
         props: Value,
         usage: Option<ChatUsage>,
-        succeeded: bool,
+        outcome: TurnOutcome,
     ) -> Result<TurnCommit, DbError> {
         let workspace_id = job.workspace_id;
         let agent_member_id = payload.agent_member_id;
@@ -518,13 +639,18 @@ impl AgentWorker {
                     "message_id": sent.message.id,
                     "seq": sent.message.seq,
                 });
-                let error = (!succeeded).then(|| {
+                // ADR-0004 §Rotation: a 401/403 leaves the reason
+                // `provider_auth_failed`, distinct from a generic provider
+                // failure, so an operator reading the run can tell "the token is
+                // dead" from "the provider is down" without correlating logs.
+                let error = outcome.failure_code().map(|code| {
                     json!({
-                        "code": "provider_failed",
+                        "code": code,
                         "reason": sent.message.body.clone().unwrap_or_default(),
                     })
                 });
-                finish_run_in_tx(conn, run_id, succeeded, &output, error.as_ref()).await?;
+                finish_run_in_tx(conn, run_id, outcome.succeeded(), &output, error.as_ref())
+                    .await?;
 
                 let report = RunUsageReport {
                     model: Some(snapshot.model.clone()),
@@ -601,7 +727,8 @@ impl AgentWorker {
             );
             if let Ok(payload) = serde_json::from_str::<AgentJobPayload>(&job.payload) {
                 if let Some(run_id) = payload.run_id {
-                    self.write_failure_turn(job, &payload, run_id, &reason)
+                    let body = degraded_provider_message(&reason);
+                    self.write_failure_turn(job, &payload, run_id, &reason, body, PROVIDER_FAILED)
                         .await;
                 }
             }
@@ -634,8 +761,50 @@ impl AgentWorker {
         endpoint: &ProviderEndpoint,
     ) -> Settlement {
         let reason = redact_secrets(reason, &endpoint.bearer);
-        self.write_failure_turn(job, payload, run_id, &reason).await;
+        let body = degraded_provider_message(&reason);
+        self.write_failure_turn(job, payload, run_id, &reason, body, PROVIDER_FAILED)
+            .await;
         self.settle_failed(job.id, &reason).await;
+        Settlement::Failed
+    }
+
+    /// A refresh that did not produce a token (ADR-0147 결정 2: "갱신 실패 = run
+    /// 실패 + 사용자 가시 오류(재로그인 안내)").
+    ///
+    /// A transient shape (no answer, 5xx) still goes through the ordinary retry
+    /// budget — the grant is probably fine and the endpoint is having a moment.
+    /// Everything else is terminal, and the message says the one thing that
+    /// repairs it, because nobody can re-authorise an OAuth grant from inside a
+    /// chat channel.
+    async fn settle_refresh_failure(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        error: &RefreshError,
+        transport: &ResolvedTransport,
+    ) -> Settlement {
+        // Redacted against the grant as well as the presented bearer: an OAuth
+        // error body can quote the token it refused.
+        let reason = redact_secrets(&error.to_string(), &transport.endpoint.bearer);
+        let reason = match transport.oauth() {
+            Some(credential) => redact_secrets(&reason, &credential.refresh_token),
+            None => reason,
+        };
+        if error.is_retryable() {
+            return self
+                .settle_retryable(
+                    job,
+                    &format!("token refresh failed: {reason}"),
+                    &transport.endpoint,
+                )
+                .await;
+        }
+        let body = relogin_message(&reason);
+        self.write_failure_turn(job, payload, run_id, &reason, body, PROVIDER_AUTH_FAILED)
+            .await;
+        self.settle_failed(job.id, &format!("token refresh failed: {reason}"))
+            .await;
         Settlement::Failed
     }
 
@@ -649,11 +818,20 @@ impl AgentWorker {
         payload: &AgentJobPayload,
         run_id: Uuid,
         reason: &str,
+        body: String,
+        code: &'static str,
     ) {
-        let body = degraded_provider_message(reason);
-        let props = failure_props(payload, run_id, reason);
+        let props = failure_props(payload, run_id, reason, code);
         if let Err(error) = self
-            .commit_turn(job, payload, run_id, body, props, None, false)
+            .commit_turn(
+                job,
+                payload,
+                run_id,
+                body,
+                props,
+                None,
+                TurnOutcome::Failed(code),
+            )
             .await
         {
             tracing::error!(
@@ -681,7 +859,7 @@ impl AgentWorker {
                 if snapshot.status == RunStatus::Cancelled {
                     return Ok(());
                 }
-                let error = json!({"code": "provider_failed", "reason": reason});
+                let error = json!({"code": PROVIDER_FAILED, "reason": reason});
                 finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
                 Ok(())
             })
@@ -720,23 +898,41 @@ impl AgentWorker {
     /// migration 039 §RLS explicitly anticipates "a future worker-side resolver
     /// reads+decrypts the row locally". No RLS change is required.
     pub async fn resolve_endpoint(&self) -> ProviderEndpoint {
-        let env_endpoint = || ProviderEndpoint {
-            base_url: self.config.provider.base_url.clone(),
-            bearer: self.config.provider.bearer.clone(),
-            source: ProviderSource::Environment.as_str(),
+        self.resolve_transport().await.endpoint
+    }
+
+    /// [`resolve_endpoint`](AgentWorker::resolve_endpoint) plus the credential
+    /// behind it, which is what an OAuth turn needs in order to refresh itself.
+    pub async fn resolve_transport(&self) -> ResolvedTransport {
+        let env_transport = || ResolvedTransport {
+            endpoint: ProviderEndpoint {
+                base_url: self.config.provider.base_url.clone(),
+                bearer: self.config.provider.bearer.clone(),
+                source: ProviderSource::Environment.as_str(),
+                account_id: None,
+            },
+            credential: LinkCredential::Bearer(self.config.provider.bearer.clone()),
+            // Env credentials are never written back: there is nothing to write
+            // them to, and the absent guard makes that structural rather than a
+            // rule someone has to remember.
+            link_updated_at_ms: None,
         };
 
         let Some(master_key) = self.config.provider_link_master_key.as_deref() else {
             // No master key ⇒ nothing to open. Backward compatible with
             // deployments that predate the provider_link GUI.
-            return env_endpoint();
+            return env_transport();
         };
 
         {
             let entry = self.link_cache.entry.lock().expect("provider link cache");
             if let Some(cached) = entry.as_ref() {
                 if cached.fetched_at.elapsed() < self.link_cache.ttl {
-                    return cached.endpoint.clone().unwrap_or_else(env_endpoint);
+                    return transport_or_env(
+                        cached.resolved.clone(),
+                        cached.updated_at_ms,
+                        env_transport,
+                    );
                 }
             }
         }
@@ -746,7 +942,7 @@ impl AgentWorker {
                 Ok(conn) => conn,
                 Err(error) => {
                     tracing::warn!(error = %error, "provider_link read failed; retaining last-known/env");
-                    return self.cached_or_env(env_endpoint);
+                    return self.cached_or_env(env_transport);
                 }
             };
             match read_link(&mut conn).await {
@@ -755,14 +951,14 @@ impl AgentWorker {
                     // Fail safe, not fail blank: a struggling DB must not silently
                     // move every turn onto a different provider.
                     tracing::warn!(error = %error, "provider_link read failed; retaining last-known/env");
-                    return self.cached_or_env(env_endpoint);
+                    return self.cached_or_env(env_transport);
                 }
             }
         };
 
         let Some(stored) = stored else {
             self.store_cache(None, None);
-            return env_endpoint();
+            return env_transport();
         };
 
         // Unchanged since the last decrypt ⇒ reuse without paying SHA-256 +
@@ -772,10 +968,10 @@ impl AgentWorker {
             let entry = self.link_cache.entry.lock().expect("provider link cache");
             if let Some(cached) = entry.as_ref() {
                 if cached.updated_at_ms == Some(stored.updated_at_ms) {
-                    let endpoint = cached.endpoint.clone();
+                    let resolved = cached.resolved.clone();
                     drop(entry);
                     self.touch_cache();
-                    return endpoint.unwrap_or_else(env_endpoint);
+                    return transport_or_env(resolved, Some(stored.updated_at_ms), env_transport);
                 }
             }
         }
@@ -792,38 +988,181 @@ impl AgentWorker {
                 None
             }
         };
+        let credential = decrypted
+            .as_ref()
+            .filter(|link| link.is_usable())
+            .map(|link| link.credential.clone());
         let resolved = resolve_link(&self.config.provider, decrypted.as_ref());
-        let endpoint = match resolved.source {
-            ProviderSource::Database => Some(ProviderEndpoint {
-                base_url: resolved.config.base_url,
-                bearer: resolved.config.bearer,
-                source: ProviderSource::Database.as_str(),
+        let link = match (resolved.source, credential) {
+            (ProviderSource::Database, Some(credential)) => Some(ResolvedLink {
+                endpoint: ProviderEndpoint {
+                    base_url: resolved.config.base_url,
+                    // For an OAuth link this is the access token, and it is empty
+                    // until the first refresh mints one — which the turn loop
+                    // does before it calls anything.
+                    bearer: resolved.config.bearer,
+                    source: ProviderSource::Database.as_str(),
+                    account_id: credential.account_id().map(str::to_string),
+                },
+                credential,
             }),
-            ProviderSource::Environment => None,
+            _ => None,
         };
-        self.store_cache(endpoint.clone(), Some(stored.updated_at_ms));
-        endpoint.unwrap_or_else(env_endpoint)
+        self.store_cache(link.clone(), Some(stored.updated_at_ms));
+        transport_or_env(link, Some(stored.updated_at_ms), env_transport)
     }
 
-    fn cached_or_env(&self, env_endpoint: impl Fn() -> ProviderEndpoint) -> ProviderEndpoint {
+    fn cached_or_env(&self, env_transport: impl Fn() -> ResolvedTransport) -> ResolvedTransport {
         let mut entry = self.link_cache.entry.lock().expect("provider link cache");
         match entry.as_mut() {
             Some(cached) => {
                 // Throttle the retry to the TTL cadence so a struggling DB is
                 // not hammered once per job.
                 cached.fetched_at = Instant::now();
-                cached.endpoint.clone().unwrap_or_else(env_endpoint)
+                transport_or_env(cached.resolved.clone(), cached.updated_at_ms, env_transport)
             }
-            None => env_endpoint(),
+            None => env_transport(),
         }
     }
 
-    fn store_cache(&self, endpoint: Option<ProviderEndpoint>, updated_at_ms: Option<i64>) {
+    fn store_cache(&self, resolved: Option<ResolvedLink>, updated_at_ms: Option<i64>) {
         *self.link_cache.entry.lock().expect("provider link cache") = Some(CachedLink {
-            endpoint,
+            resolved,
             updated_at_ms,
             fetched_at: Instant::now(),
         });
+    }
+
+    /// Drop the cached link entirely, so the **next** job re-reads the vault.
+    ///
+    /// Called after every refresh attempt. That is deliberate and load-bearing:
+    /// the durable record of a rotated grant is the `provider_link` row, not this
+    /// process's memory. Keeping a refreshed credential in RAM would paper over a
+    /// failed re-seal — the instance would keep working until it restarted, and
+    /// then present a grant the provider had already retired.
+    fn invalidate_cache(&self) {
+        *self.link_cache.entry.lock().expect("provider link cache") = None;
+    }
+
+    // -----------------------------------------------------------------------
+    // OAuth refresh + re-seal (ADR-0147 결정 2)
+    // -----------------------------------------------------------------------
+
+    /// Exchange the stored grant for a fresh access token, put the result back
+    /// in the vault, and point `transport` at the new token.
+    ///
+    /// The order matters. The token endpoint is called first, because a refresh
+    /// that fails must leave the stored credential exactly as it was — a
+    /// write-then-call order would blank a working link on a network blip. The
+    /// re-seal then happens *before* the provider call, so a turn that crashes
+    /// mid-flight has already durably recorded the rotation; a rotated grant that
+    /// existed only in memory is a grant the next process cannot use.
+    async fn refresh_and_reseal(
+        &self,
+        transport: &mut ResolvedTransport,
+    ) -> Result<(), RefreshError> {
+        let Some(credential) = transport.oauth() else {
+            return Err(RefreshError::MissingGrant);
+        };
+        let token_endpoint = credential.token_endpoint_or_default().to_string();
+        let client_id = credential.client_id.clone();
+        let refresh_token = credential.refresh_token.clone();
+        let account_label = credential.account_label.clone();
+
+        let outcome = self
+            .refresher
+            .refresh(&token_endpoint, client_id.as_deref(), &refresh_token)
+            .await;
+
+        // Whatever happened, this process's cached copy is now suspect: either
+        // the grant rotated (so the cache is stale) or it was refused (so the
+        // cache holds something dead). Re-read on the next job either way.
+        self.invalidate_cache();
+
+        let tokens = match outcome {
+            Ok(tokens) => tokens,
+            Err(error) => {
+                tracing::warn!(
+                    // The endpoint LABEL only, and never the grant (ADR-0004 §Redaction).
+                    token_endpoint = %momo_settings::redacted_endpoint_label(&token_endpoint),
+                    account_label = ?account_label,
+                    retryable = error.is_retryable(),
+                    // An OAuth `error_description` is provider-authored text and
+                    // is free to quote the token it just refused, so the grant is
+                    // stripped before this reaches a log sink.
+                    error = %redact_secrets(&error.to_string(), &refresh_token),
+                    "oauth token refresh failed"
+                );
+                return Err(error);
+            }
+        };
+
+        let expires_at_ms = tokens.expires_at_ms(now_ms());
+        let rotated = tokens.refresh_token.clone();
+        if let Some(credential) = transport.credential.as_openai_oauth_mut() {
+            credential.apply_refresh(tokens.access_token, rotated.clone(), expires_at_ms);
+        }
+        transport.endpoint.bearer = transport.credential.presentable_bearer().to_string();
+        tracing::info!(
+            token_endpoint = %momo_settings::redacted_endpoint_label(&token_endpoint),
+            rotated_grant = rotated.is_some(),
+            expires_at_ms = ?expires_at_ms,
+            "oauth access token refreshed"
+        );
+
+        self.reseal_link(transport).await;
+        Ok(())
+    }
+
+    /// Write the refreshed credential back into `provider_link`.
+    ///
+    /// Best effort **by design**, and the failure is loud rather than fatal: the
+    /// token in hand is valid, so failing the turn here would deny the user an
+    /// answer the provider already agreed to give. The cost of the failure is
+    /// bounded by [`invalidate_cache`](AgentWorker::invalidate_cache) — the next
+    /// job re-reads the vault, finds the pre-rotation grant, and either refreshes
+    /// again (provider does not rotate) or fails with the re-login message
+    /// (provider rotates). Both are honest; silently keeping an unrecorded token
+    /// is not.
+    async fn reseal_link(&self, transport: &ResolvedTransport) {
+        let (Some(master_key), Some(expected_updated_at_ms)) = (
+            self.config.provider_link_master_key.as_deref(),
+            transport.link_updated_at_ms,
+        ) else {
+            return;
+        };
+        let sealed = match seal_bearer(&transport.credential.to_sealed_plaintext(), master_key) {
+            Ok(sealed) => sealed,
+            Err(error) => {
+                tracing::error!(error = %error, "refreshed credential could not be sealed");
+                return;
+            }
+        };
+
+        let mut conn = match self.pool.acquire().await {
+            Ok(conn) => conn,
+            Err(error) => {
+                tracing::error!(error = %error, "provider_link re-seal could not acquire a connection");
+                return;
+            }
+        };
+        match reseal_link_credential(&mut conn, &sealed, expected_updated_at_ms).await {
+            Ok(Some(stored)) => tracing::info!(
+                updated_at_ms = stored.updated_at_ms,
+                "refreshed oauth credential re-sealed into provider_link"
+            ),
+            // The guard did not match: the operator replaced the link while this
+            // turn was in flight. Their write is the newer truth, so this one is
+            // correctly dropped.
+            Ok(None) => tracing::info!(
+                expected_updated_at_ms,
+                "provider_link changed during the turn; refreshed credential not written"
+            ),
+            Err(error) => tracing::error!(
+                error = %error,
+                "provider_link re-seal failed; the rotated grant is not durable"
+            ),
+        }
     }
 
     fn touch_cache(&self) {
@@ -891,6 +1230,69 @@ enum TurnCommit {
     Suppressed(&'static str),
 }
 
+/// `agent_run.error.code` for a provider that answered badly.
+const PROVIDER_FAILED: &str = "provider_failed";
+/// `agent_run.error.code` for a credential the provider would not accept —
+/// ADR-0004 §Rotation names this reason explicitly for 401/403.
+const PROVIDER_AUTH_FAILED: &str = "provider_auth_failed";
+
+/// How a turn ended, and — when it failed — under which name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TurnOutcome {
+    Succeeded,
+    Failed(&'static str),
+}
+
+impl TurnOutcome {
+    fn succeeded(self) -> bool {
+        matches!(self, TurnOutcome::Succeeded)
+    }
+
+    fn failure_code(self) -> Option<&'static str> {
+        match self {
+            TurnOutcome::Succeeded => None,
+            TurnOutcome::Failed(code) => Some(code),
+        }
+    }
+}
+
+/// Wall clock in epoch milliseconds — the unit `provider_link` and the OAuth
+/// deadline both speak. A clock before the epoch is not a time this process can
+/// reason about, so it reads as 0 rather than as a negative deadline that would
+/// make every token look expired.
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Did the provider refuse the credential, as opposed to the request?
+///
+/// 401 is the literal answer; 403 is included because gateways in front of the
+/// model routinely return it for an expired token rather than a permission
+/// problem. Both are non-retryable in the ordinary cascade, which is exactly why
+/// the OAuth path has to intercept them *before* that classification runs.
+fn is_auth_rejection<T>(result: &Result<T, ProviderError>) -> bool {
+    matches!(result, Err(ProviderError::HttpStatus(401 | 403)))
+}
+
+/// Turn a cached link into a transport, or fall back to env.
+fn transport_or_env(
+    resolved: Option<ResolvedLink>,
+    updated_at_ms: Option<i64>,
+    env_transport: impl Fn() -> ResolvedTransport,
+) -> ResolvedTransport {
+    match resolved {
+        Some(link) => ResolvedTransport {
+            endpoint: link.endpoint,
+            credential: link.credential,
+            link_updated_at_ms: updated_at_ms,
+        },
+        None => env_transport(),
+    }
+}
+
 /// `props` on a successful reply — Swift `finalMessageProps` (:2336-2354).
 fn success_props(payload: &AgentJobPayload, run_id: Uuid) -> Value {
     let mut props = json!({
@@ -916,11 +1318,21 @@ fn success_props(payload: &AgentJobPayload, run_id: Uuid) -> Value {
 /// `props` on the user-visible failure notice. Same shape, different `source`,
 /// plus the (already redacted) reason so support can read one row instead of
 /// correlating logs.
-fn failure_props(payload: &AgentJobPayload, run_id: Uuid, reason: &str) -> Value {
+///
+/// A credential failure gets its own `source`, not just its own text: a client
+/// that wants to surface "reconnect your account" needs to branch on something
+/// stable, and matching on a Korean sentence is not that.
+fn failure_props(payload: &AgentJobPayload, run_id: Uuid, reason: &str, code: &str) -> Value {
     let mut props = success_props(payload, run_id);
     let object = props.as_object_mut().expect("json object");
-    object.insert("source".into(), json!("agent_worker.provider_failure.v0"));
+    let source = if code == PROVIDER_AUTH_FAILED {
+        "agent_worker.provider_auth_failure.v0"
+    } else {
+        "agent_worker.provider_failure.v0"
+    };
+    object.insert("source".into(), json!(source));
     object.insert("error".into(), json!(reason));
+    object.insert("error_code".into(), json!(code));
     props
 }
 
@@ -1030,9 +1442,86 @@ mod tests {
         assert_eq!(props["trigger_message_seq"], json!(42));
         assert_eq!(props["author_member_id"], json!(Uuid::from_u128(5)));
 
-        let failure = failure_props(&payload, run_id, "HTTP 401");
+        let failure = failure_props(&payload, run_id, "HTTP 500", PROVIDER_FAILED);
         assert_eq!(failure["source"], json!("agent_worker.provider_failure.v0"));
-        assert_eq!(failure["error"], json!("HTTP 401"));
+        assert_eq!(failure["error"], json!("HTTP 500"));
+        assert_eq!(failure["error_code"], json!(PROVIDER_FAILED));
         assert_eq!(failure["trigger_message_seq"], json!(42));
+
+        // A dead credential is a different thing from a broken provider, and a
+        // client that wants to say "reconnect your account" has to be able to
+        // branch on something stable rather than on a Korean sentence.
+        let auth = failure_props(&payload, run_id, "invalid_grant", PROVIDER_AUTH_FAILED);
+        assert_eq!(
+            auth["source"],
+            json!("agent_worker.provider_auth_failure.v0")
+        );
+        assert_eq!(auth["error_code"], json!(PROVIDER_AUTH_FAILED));
+    }
+
+    /// The 401/403 interception. Widening it to every 4xx would make a malformed
+    /// request burn a refresh; narrowing it to 401 alone would miss the gateways
+    /// that answer 403 for an expired token.
+    #[test]
+    fn only_a_credential_rejection_triggers_the_oauth_replay() {
+        let ok: Result<(), ProviderError> = Ok(());
+        assert!(!is_auth_rejection(&ok));
+        assert!(is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
+            401
+        ))));
+        assert!(is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
+            403
+        ))));
+        assert!(!is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
+            400
+        ))));
+        assert!(!is_auth_rejection::<()>(&Err(ProviderError::HttpStatus(
+            429
+        ))));
+        assert!(!is_auth_rejection::<()>(&Err(ProviderError::Unreachable(
+            "x".into()
+        ))));
+    }
+
+    /// A legacy bearer link must never enter the OAuth path: it has no grant, and
+    /// asking it to refresh would fail every turn on a link that works fine.
+    #[test]
+    fn a_bearer_transport_never_asks_for_a_refresh() {
+        let transport = ResolvedTransport {
+            endpoint: ProviderEndpoint::default(),
+            credential: LinkCredential::Bearer("sk-live-abcdefgh".into()),
+            link_updated_at_ms: Some(1),
+        };
+        assert!(!transport.is_oauth());
+        assert!(!transport.needs_refresh(i64::MAX));
+    }
+
+    /// The env fallback carries no `link_updated_at_ms`, and that absence is what
+    /// makes "a refresh never writes to a link that did not supply it"
+    /// structural rather than a rule someone has to remember.
+    #[test]
+    fn an_oauth_transport_refreshes_on_a_missing_token_and_near_its_deadline() {
+        let mut credential = OpenAiOAuthCredential::from_refresh_token("rt");
+        let transport = |credential: &OpenAiOAuthCredential, updated_at| ResolvedTransport {
+            endpoint: ProviderEndpoint::default(),
+            credential: LinkCredential::OpenAiOAuth(Box::new(credential.clone())),
+            link_updated_at_ms: updated_at,
+        };
+
+        let fresh_link = transport(&credential, Some(7));
+        assert!(fresh_link.is_oauth());
+        assert!(
+            fresh_link.needs_refresh(0),
+            "a grant with no access token must mint one before the first call"
+        );
+
+        credential.access_token = Some("at".into());
+        credential.expires_at_ms = Some(10_000_000);
+        assert!(!transport(&credential, Some(7)).needs_refresh(9_000_000));
+        assert!(
+            transport(&credential, Some(7)).needs_refresh(10_000_000 - EXPIRY_SKEW_MS),
+            "the skew window counts as expired"
+        );
+        assert_eq!(transport(&credential, None).link_updated_at_ms, None);
     }
 }

@@ -27,6 +27,31 @@
 //!   already exists in Rust as [`momo_settings::chain::classify_status`], so
 //!   this module reuses it rather than writing a third copy.
 //!
+//! ## B5.4 / ADR-0147: what a subscription OAuth token changes here — and what
+//! it does not
+//!
+//! ADR-0147 lets the vault hold a ChatGPT subscription OAuth grant instead of a
+//! gateway API key. That changes **which credential** this module presents and
+//! **who refreshes it** ([`crate::oauth`]) — it does not change the wire. The
+//! request is still the OpenAI-compatible `POST {base_url}/chat/completions`
+//! above, with the OAuth access token as the Bearer, plus one measured header:
+//! `chatgpt-account-id`, which is how the ChatGPT backend picks the paying
+//! account when a token is entitled to several.
+//!
+//! **A measured caveat that belongs in the open** (PR body deviation #1): the
+//! shipped Codex CLI (`@openai/codex` 0.144.1) does not send a ChatGPT OAuth
+//! token to `/chat/completions` at all. Its strings show the pair
+//! `https://chatgpt.com/backend-api/codex` + `/responses` — i.e. the **Responses
+//! API**, and `https://api.openai.com/v1` only for the API-key path. So an OAuth
+//! link pointed straight at `chatgpt.com` will not answer on this wire.
+//!
+//! Implementing a Responses adapter here would be a **second wire format**, which
+//! is precisely what the section above argues nobody should introduce without a
+//! decision — and ADR-0147 authorises the credential change, not a new protocol.
+//! So B5.4 ships the credential machinery on the one contract this repo speaks,
+//! and the live-smoke options (a Responses adapter as its own batch, or a local
+//! translating gateway as `base_url`) stay an explicit, un-guessed choice.
+//!
 //! **Not ported in B5.1 (deliberate):** SSE streaming and the non-stream
 //! fallback pair. The packet scopes streaming out, so this issues the
 //! `stream=false` request directly — which is exactly Swift's
@@ -98,13 +123,22 @@ pub struct ChatCompletion {
 /// `Debug` is implemented by hand: the bearer is a live provider credential, and
 /// a `#[derive(Debug)]` on this struct would put it in the first
 /// `tracing::error!(?endpoint, …)` anyone adds (ADR-0004 Rules #2/#5).
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct ProviderEndpoint {
     pub base_url: String,
     pub bearer: String,
     /// `"database"` when the operator's `provider_link` supplied it, else
     /// `"environment"` — the only provenance fact that may be logged.
     pub source: &'static str,
+    /// `chatgpt-account-id` for an ADR-0147 subscription OAuth link.
+    ///
+    /// A ChatGPT OAuth token can be entitled to more than one account, and the
+    /// backend picks which one pays from this header — the Codex CLI carries
+    /// `tokens.account_id` from its `auth.json` for exactly that reason. It is an
+    /// account *identifier*, not a credential, but it is still only sent, never
+    /// logged: pairing it with a redacted endpoint label in a log line would
+    /// deanonymise whose subscription a run spent.
+    pub account_id: Option<String>,
 }
 
 impl std::fmt::Debug for ProviderEndpoint {
@@ -116,6 +150,7 @@ impl std::fmt::Debug for ProviderEndpoint {
             )
             .field("bearer", &"<redacted>")
             .field("source", &self.source)
+            .field("account_id", &self.account_id.as_ref().map(|_| "<present>"))
             .finish()
     }
 }
@@ -213,10 +248,17 @@ impl ChatProvider for OpenAiCompatProvider {
             "max_tokens": request.max_tokens,
         });
 
-        let response = self
-            .client
-            .post(url)
-            .bearer_auth(&endpoint.bearer)
+        let mut request_builder = self.client.post(url).bearer_auth(&endpoint.bearer);
+        if let Some(account_id) = endpoint
+            .account_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            request_builder = request_builder.header("chatgpt-account-id", account_id);
+        }
+
+        let response = request_builder
             .json(&body)
             .send()
             .await
@@ -356,6 +398,7 @@ pub struct ObservedCall {
     pub messages: Vec<ChatMessage>,
     pub bearer: String,
     pub base_url: String,
+    pub account_id: Option<String>,
 }
 
 impl MockChatProvider {
@@ -408,6 +451,7 @@ impl ChatProvider for MockChatProvider {
                 messages: request.messages.clone(),
                 bearer: endpoint.bearer.clone(),
                 base_url: endpoint.base_url.clone(),
+                account_id: endpoint.account_id.clone(),
             });
         match &self.outcome {
             MockOutcome::Fail(error) => Err(error.clone()),
@@ -515,11 +559,16 @@ mod tests {
             base_url: "https://gateway.example/v1".to_string(),
             bearer: "sk-live-supersecret".to_string(),
             source: "database",
+            account_id: Some("acct-whose-subscription".to_string()),
         };
         let rendered = format!("{endpoint:?}");
         assert!(!rendered.contains("sk-live-supersecret"), "{rendered}");
         assert!(rendered.contains("<redacted>"), "{rendered}");
         assert!(rendered.contains("gateway.example"), "{rendered}");
+        assert!(
+            !rendered.contains("acct-whose-subscription"),
+            "the paying account must not be identifiable from a log line: {rendered}"
+        );
     }
 
     #[tokio::test]
@@ -529,6 +578,7 @@ mod tests {
             base_url: "http://mock/v1".to_string(),
             bearer: "sk-test".to_string(),
             source: "environment",
+            account_id: None,
         };
         let request = ChatRequest {
             model: "m".to_string(),
