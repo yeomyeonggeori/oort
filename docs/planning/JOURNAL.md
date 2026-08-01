@@ -1489,6 +1489,11 @@
 - 한 일: **GPT OAuth 완결** — ADR-0147 Accepted(구독 OAuth·내부 한정·봉인 계약 재사용), B5.4(PR #948: oauth-openai envelope·refresh→재봉인 DB 복호화 red·마이그레이션 0)·B5.4b(PR #949: Responses 어댑터·kind→와이어 매핑·codex 바이너리+openai-python 이중 실측) 랜딩. 게이트 71케이스+docker build green. 정직 한계 기록: Codex 신원 헤더 비위조 — ChatGPT 구독 백엔드 수용 여부는 실 smoke가 판정(거절 시 대안: API 키 경로 or ADR-0144 샌드박스 codex).
 - 열린 것: **실 티키타카 smoke** — NCP 배포(agent-worker compose 편입 필요)→성재 codex 토큰 등록→@멘션→실응답 → 도그푸딩 조건 판정.
 
+## 2026-08-02 (오후) · Fable · 오케스트레이션 — **🎉 실 티키타카 성공**
+- 한 일: B5.4c(SSE) 랜딩(PR #950, 게이트 75케이스) 후 실 smoke 완주 — **@oort 멘션에 GPT-5.6이 실서버에서 실답변**("오르트 구름은…혜성의 주요 기원"). 경로: 성재 ChatGPT 구독 OAuth(봉인 등록)→run→agent-worker→Responses SSE→척추로 채널 기록. 양파 4겹을 실측으로 벗김: 모델명(gpt-5.6-sol)→SSE 필수→max_output_tokens 미지원(각각 진단 패치의 오류 본문 가시화가 결정적). 신원 헤더 위조 없이 백엔드 수용 확인.
+- **판정: 성재의 도그푸딩 조건("에이전트 초대+buzz 수준 티키타카") 1차 충족.** 남은 다듬기: 에이전트 생성 시 모델 카탈로그↔실 provider 모델 매핑 정리(smoke는 SQL 직갱신으로 우회)·max_output_tokens 와이어별 분기·자연스러운 대화 품질(스레드 응답 등 후속 티켓들).
+- 열린 것: 성재 실사용 확인(웹에서 직접 @oort) → 팀 도그푸딩 개시 판단. NCP 가동 중.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
