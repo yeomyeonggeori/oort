@@ -1,12 +1,12 @@
-// momo:// deep link intake (ADR-0133 P2, MOMO-603).
+// oort:// deep link intake (ADR-0133 P2, MOMO-603; scheme renamed in goal B13).
 //
 // Contract source of truth: `docs/onboarding-deeplink.md`.
-//   momo://join?server=<percent-encoded base URL>&code=<invite code>
+//   oort://join?server=<percent-encoded base URL>&code=<invite code>
 // Two parameters, order-independent, unknown parameters ignored. This is a
 // straight port of the macOS parser (`clients/macOS/Sources/MomoMac/MomoDeepLink.swift`)
 // so the two shells prefill identically from the same link — including the parts
 // that look like details but are contract: the action may be the authority
-// (`momo://join`) or the first path segment (`momo:join`), parameter names are
+// (`oort://join`) or the first path segment (`oort:join`), parameter names are
 // matched case-insensitively, the FIRST occurrence of a name wins, and a link
 // carrying only one of the two values is still worth surfacing because it still
 // saves the person typing.
@@ -28,13 +28,24 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use url::Url;
 
-/// Emitted to the webview for every accepted `momo://join` link.
+/// Emitted to the webview for every accepted join link.
+///
+/// This is a Tauri IPC channel name, not a URL scheme, and it is NOT part of the
+/// momo -> oort rebrand: renaming it would only have to be renamed in lockstep
+/// in `lib/tauri.ts` for no one's benefit. Nobody outside the shell sees it.
 pub const DEEP_LINK_EVENT: &str = "momo:deep-link";
 
-const SCHEME: &str = "momo";
+/// The scheme links are minted with (goal B13, momo -> oort).
+const JOIN_SCHEME: &str = "oort";
+
+/// Every scheme a link is accepted under. The old name is absorbed rather than
+/// dropped: an invite link lives in someone's inbox for days after it is sent,
+/// and it was correct when it was sent. `tauri.conf.json` registers both with
+/// the OS so both actually reach this parser.
+const ACCEPTED_SCHEMES: [&str; 2] = [JOIN_SCHEME, "momo"];
 const JOIN_ACTION: &str = "join";
 
-/// A `momo://join` link the webview can prefill from.
+/// A join link the webview can prefill from.
 ///
 /// `server` and `code` are percent-decoded and trimmed; either may be empty, but
 /// never both (a link with nothing usable is dropped rather than delivered).
@@ -48,9 +59,9 @@ pub struct JoinLink {
     pub code: String,
 }
 
-/// Parses a `momo://join` link, or returns `None` for anything else.
+/// Parses a join link under any accepted scheme, or `None` for anything else.
 pub fn parse_join(url: &Url) -> Option<JoinLink> {
-    if url.scheme() != SCHEME {
+    if !ACCEPTED_SCHEMES.contains(&url.scheme()) {
         return None;
     }
     if resolved_action(url)? != JOIN_ACTION {
@@ -79,8 +90,8 @@ pub fn parse_join(url: &Url) -> Option<JoinLink> {
     })
 }
 
-/// The action is the authority (`momo://join`) or, when the link omits the
-/// authority (`momo:join`), the first non-empty path segment. Case-insensitive.
+/// The action is the authority (`oort://join`) or, when the link omits the
+/// authority (`oort:join`), the first non-empty path segment. Case-insensitive.
 fn resolved_action(url: &Url) -> Option<String> {
     if let Some(host) = url.host_str() {
         if !host.is_empty() {
@@ -129,7 +140,7 @@ pub struct DeepLinkState {
 
 impl DeepLinkState {
     /// Route one incoming link: emit it if the webview is listening, buffer it
-    /// otherwise. Links that are not `momo://join` are dropped silently.
+    /// otherwise. Links that are not a join link are dropped silently.
     pub fn deliver<R: Runtime>(&self, app: &AppHandle<R>, url: &Url) {
         let Some(link) = parse_join(url) else {
             return;
@@ -165,7 +176,7 @@ mod tests {
 
     #[test]
     fn parses_the_canonical_link() {
-        let link = parse("momo://join?server=http%3A%2F%2FMacBook.local%3A28000&code=abc-123")
+        let link = parse("oort://join?server=http%3A%2F%2FMacBook.local%3A28000&code=abc-123")
             .expect("canonical link is accepted");
         assert_eq!(link.server, "http://MacBook.local:28000");
         assert_eq!(link.code, "abc-123");
@@ -173,7 +184,7 @@ mod tests {
 
     #[test]
     fn parameter_order_does_not_matter() {
-        let reversed = parse("momo://join?code=abc-123&server=https%3A%2F%2Fapi.example.com")
+        let reversed = parse("oort://join?code=abc-123&server=https%3A%2F%2Fapi.example.com")
             .expect("reversed order is accepted");
         assert_eq!(reversed.server, "https://api.example.com");
         assert_eq!(reversed.code, "abc-123");
@@ -181,7 +192,7 @@ mod tests {
 
     #[test]
     fn unknown_parameters_are_ignored() {
-        let link = parse("momo://join?utm=mail&code=abc&server=https%3A%2F%2Fa.example&x=1")
+        let link = parse("oort://join?utm=mail&code=abc&server=https%3A%2F%2Fa.example&x=1")
             .expect("extra parameters do not invalidate the link");
         assert_eq!(link.server, "https://a.example");
         assert_eq!(link.code, "abc");
@@ -189,27 +200,44 @@ mod tests {
 
     #[test]
     fn accepts_the_authority_free_form() {
-        assert!(parse("momo:join?code=abc").is_some());
+        assert!(parse("oort:join?code=abc").is_some());
     }
 
     #[test]
     fn rejects_other_schemes_and_actions() {
         assert!(parse("https://join?code=abc").is_none());
-        assert!(parse("momo://invite?code=abc").is_none());
+        assert!(parse("oort://invite?code=abc").is_none());
+        assert!(parse("slack://join?code=abc").is_none());
+    }
+
+    /// **The old scheme still opens.**
+    ///
+    /// goal B13 renamed the minted scheme `momo://` -> `oort://`, and dropping
+    /// the old one would have broken every invite already sitting in somebody's
+    /// inbox — links that were correct when they were sent. Both are registered
+    /// with the OS (`tauri.conf.json`) so both actually arrive here, and this
+    /// test is what stops the second entry from being "tidied up" later.
+    #[test]
+    fn still_opens_a_link_minted_under_the_old_scheme() {
+        let link = parse("momo://join?server=https%3A%2F%2Fa.example&code=abc")
+            .expect("a momo:// invite from before the rename");
+        assert_eq!(link.server, "https://a.example");
+        assert_eq!(link.code, "abc");
+        assert!(parse("momo:join?code=abc").is_some());
     }
 
     #[test]
     fn rejects_a_link_with_nothing_to_prefill() {
-        assert!(parse("momo://join").is_none());
-        assert!(parse("momo://join?server=&code=").is_none());
-        assert!(parse("momo://join?utm=mail").is_none());
+        assert!(parse("oort://join").is_none());
+        assert!(parse("oort://join?server=&code=").is_none());
+        assert!(parse("oort://join?utm=mail").is_none());
     }
 
     #[test]
     fn keeps_a_partial_link_because_it_still_saves_typing() {
-        let server_only = parse("momo://join?server=https%3A%2F%2Fa.example").expect("server only");
+        let server_only = parse("oort://join?server=https%3A%2F%2Fa.example").expect("server only");
         assert_eq!(server_only.code, "");
-        let code_only = parse("momo://join?code=abc").expect("code only");
+        let code_only = parse("oort://join?code=abc").expect("code only");
         assert_eq!(code_only.server, "");
     }
 
@@ -217,14 +245,15 @@ mod tests {
     fn a_plus_in_a_value_is_not_a_space() {
         // base64url codes never contain '+', but form-urlencoded decoding would
         // silently corrupt one that did; RFC 3986 is the contract.
-        let link = parse("momo://join?code=a%2Bb").expect("link parses");
+        let link = parse("oort://join?code=a%2Bb").expect("link parses");
         assert_eq!(link.code, "a+b");
     }
 
     #[test]
     fn parameter_names_are_case_insensitive_and_first_wins() {
-        let link = parse("momo://join?SERVER=https%3A%2F%2Fa.example&server=https%3A%2F%2Fb.example")
-            .expect("link parses");
+        let link =
+            parse("oort://join?SERVER=https%3A%2F%2Fa.example&server=https%3A%2F%2Fb.example")
+                .expect("link parses");
         assert_eq!(link.server, "https://a.example");
     }
 }

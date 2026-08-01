@@ -3764,12 +3764,12 @@ final class MomoMacTests: XCTestCase {
             language: .korean,
             serverURLString: "https://api.momo.test",
             inviteCode: "momo_raw_once",
-            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once",
+            deepLink: "oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once",
             downloadPageURL: nil
         )
 
         XCTAssertEqual(content.subject, "momo 워크스페이스 초대")
-        XCTAssertTrue(content.body.contains("momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
+        XCTAssertTrue(content.body.contains("oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
         XCTAssertTrue(content.body.contains("서버 주소: https://api.momo.test"))
         XCTAssertTrue(content.body.contains("초대 코드: momo_raw_once"))
         XCTAssertTrue(content.body.contains("Join with invite"))
@@ -3781,7 +3781,7 @@ final class MomoMacTests: XCTestCase {
             language: .english,
             serverURLString: "https://api.momo.test",
             inviteCode: "C1",
-            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=C1",
+            deepLink: "oort://join?server=https%3A%2F%2Fapi.momo.test&code=C1",
             downloadPageURL: URL(string: "https://downloads.momo.example/alpha")!
         )
 
@@ -3796,7 +3796,7 @@ final class MomoMacTests: XCTestCase {
             language: .english,
             serverURLString: "https://api.momo.test",
             inviteCode: "C1",
-            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=C1",
+            deepLink: "oort://join?server=https%3A%2F%2Fapi.momo.test&code=C1",
             downloadPageURL: nil
         )
         let url = try XCTUnwrap(content.mailtoURL)
@@ -3818,7 +3818,7 @@ final class MomoMacTests: XCTestCase {
             language: .korean,
             serverURLString: "https://api.momo.test",
             inviteCode: "momo_raw_once",
-            deepLink: "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once",
+            deepLink: "oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once",
             downloadPageURL: nil
         )
         let url = try XCTUnwrap(content.mailtoURL)
@@ -3851,10 +3851,10 @@ final class MomoMacTests: XCTestCase {
         model.createdCode = "momo_raw_once"
         XCTAssertEqual(
             model.createdDeepLink,
-            "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"
+            "oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"
         )
         model.copyCreatedDeepLink()
-        XCTAssertEqual(copiedLink, "momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once")
+        XCTAssertEqual(copiedLink, "oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once")
         XCTAssertNil(model.errorMessage)
         XCTAssertEqual(
             model.notice,
@@ -3886,7 +3886,7 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(url.scheme, "mailto")
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         let body = try XCTUnwrap(components.queryItems?.first { $0.name == "body" }?.value)
-        XCTAssertTrue(body.contains("momo://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
+        XCTAssertTrue(body.contains("oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
         XCTAssertTrue(body.contains("초대 코드: momo_raw_once"))
         XCTAssertEqual(model.notice, "메일 초안을 열었습니다. 받는 사람을 확인한 뒤 보내세요.")
         XCTAssertNil(model.errorMessage)

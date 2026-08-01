@@ -17,8 +17,12 @@
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>app.momo.ios.push</string>
+			<!-- goal B13(momo→oort): 새 스킴을 등록하되 구 스킴도 유지한다.
+			     푸시 딥링크(momo://push/...)는 서버가 이미 보낸 알림 안에 살아
+			     있으므로, 등록을 빼면 그 알림들이 앱을 열지 못한다. -->
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>oort</string>
 				<string>momo</string>
 			</array>
 		</dict>

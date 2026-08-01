@@ -176,6 +176,39 @@ export function dmPeer(
   return memberFor(directory, other);
 }
 
+/**
+ * The agent this channel answers **without an @mention**, or null.
+ *
+ * The server rule (goal B13 / QA H7, `momo_agent::dm::resolve_dm_addressing`) is
+ * "a DM, a human author, exactly one agent counterpart", and this predicate is
+ * written clause for clause against it so the composer never promises something
+ * the send path will not do.
+ *
+ * Two deliberate differences from [`dmPeer`], both of which are the rule rather
+ * than a refinement of it:
+ *   * `length !== 1` instead of "the first other id" — a group DM is back to
+ *     "who did you mean", and `dmPeer` answering with one of three would put the
+ *     hint on a channel that ignores it;
+ *   * `kind === "agent"` — a human counterpart does not run.
+ *
+ * The server stays the authority. This is what the client can see of the same
+ * decision, which is why the result is a hint and never a control.
+ */
+export function dmAutoReplyAgent(
+  channel: Channel,
+  directory: Directory,
+  selfMemberId: string
+): RosterMember | null {
+  if (channel.kind !== "dm") return null;
+  const others = (channel.memberIds ?? []).filter(
+    (id) => keyOf(id) !== keyOf(selfMemberId)
+  );
+  if (others.length !== 1) return null;
+  const peer = memberFor(directory, others[0]);
+  if (!peer || peer.kind !== "agent" || peer.status !== "active") return null;
+  return peer;
+}
+
 export interface ChannelLabelParts {
   /** The name to render. */
   text: string;

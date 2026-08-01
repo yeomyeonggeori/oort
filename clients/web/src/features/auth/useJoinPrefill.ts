@@ -11,7 +11,7 @@ import {
 /**
  * The invite prefill this launch carries, from either entrance:
  *
- *   desktop  the shell reports the opened `momo://join` URL. A cold start has
+ *   desktop  the shell reports the opened `oort://join` URL. A cold start has
  *            no event to report (the app was launched BY the link, and macOS
  *            delivers the URL long before React mounts), so the shell buffers
  *            those and hands them over on the drain call below.

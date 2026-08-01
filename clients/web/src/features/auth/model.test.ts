@@ -66,11 +66,11 @@ describe("server URL validation", () => {
   });
 });
 
-describe("momo://join deep link", () => {
+describe("oort://join deep link", () => {
   it("parses the canonical link, percent-decoding the server", () => {
     expect(
       parseJoinDeepLink(
-        "momo://join?server=https%3A%2F%2Fapi.example.com&code=Ab3-_x"
+        "oort://join?server=https%3A%2F%2Fapi.example.com&code=Ab3-_x"
       )
     ).toEqual({ serverUrl: "https://api.example.com", inviteCode: "Ab3-_x" });
   });
@@ -78,7 +78,7 @@ describe("momo://join deep link", () => {
   it("does not care about parameter order and ignores unknown parameters", () => {
     expect(
       parseJoinDeepLink(
-        "momo://join?code=abc&utm=mail&server=http%3A%2F%2Fmacbook.local%3A28180"
+        "oort://join?code=abc&utm=mail&server=http%3A%2F%2Fmacbook.local%3A28180"
       )
     ).toEqual({
       serverUrl: "http://macbook.local:28180",
@@ -87,23 +87,40 @@ describe("momo://join deep link", () => {
   });
 
   it("accepts the authority-less form the mac parser also accepts", () => {
-    expect(parseJoinDeepLink("momo:join?code=abc")).toEqual({
+    expect(parseJoinDeepLink("oort:join?code=abc")).toEqual({
       serverUrl: "",
       inviteCode: "abc",
     });
   });
 
   it("keeps the code when the link's server is unusable", () => {
-    expect(parseJoinDeepLink("momo://join?server=not%20a%20url&code=abc")).toEqual(
+    expect(parseJoinDeepLink("oort://join?server=not%20a%20url&code=abc")).toEqual(
       { serverUrl: "", inviteCode: "abc" }
     );
   });
 
   it("ignores another scheme, another action, and an empty link", () => {
     expect(parseJoinDeepLink("https://join?code=abc")).toBeNull();
-    expect(parseJoinDeepLink("momo://open?code=abc")).toBeNull();
-    expect(parseJoinDeepLink("momo://join")).toBeNull();
+    expect(parseJoinDeepLink("oort://open?code=abc")).toBeNull();
+    expect(parseJoinDeepLink("oort://join")).toBeNull();
     expect(parseJoinDeepLink("not a url")).toBeNull();
+  });
+
+  // goal B13: the scheme moved momo -> oort, and the OLD one is still accepted
+  // on purpose. An invite is handed over out of band and stays valid for days;
+  // a link that was correct when it was sent must not stop opening because the
+  // product was renamed in between. Deleting either half of this test is what
+  // that regression looks like.
+  it("still opens a link minted under the old momo:// scheme", () => {
+    expect(
+      parseJoinDeepLink(
+        "momo://join?server=https%3A%2F%2Fapi.example.com&code=Ab3-_x"
+      )
+    ).toEqual({ serverUrl: "https://api.example.com", inviteCode: "Ab3-_x" });
+    expect(parseJoinDeepLink("momo:join?code=abc")).toEqual({
+      serverUrl: "",
+      inviteCode: "abc",
+    });
   });
 });
 
@@ -116,10 +133,10 @@ describe("browser deep-link fallback", () => {
     ).toEqual({ serverUrl: "https://api.example.com", inviteCode: "abc" });
   });
 
-  it("unwraps a whole momo:// link passed as ?join=", () => {
+  it("unwraps a whole oort:// link passed as ?join=", () => {
     expect(
       parseJoinFromPageUrl(
-        "https://momo.example.com/?join=momo%3A%2F%2Fjoin%3Fserver%3Dhttps%253A%252F%252Fapi.example.com%26code%3Dabc"
+        "https://momo.example.com/?join=oort%3A%2F%2Fjoin%3Fserver%3Dhttps%253A%252F%252Fapi.example.com%26code%3Dabc"
       )
     ).toEqual({ serverUrl: "https://api.example.com", inviteCode: "abc" });
   });
@@ -304,11 +321,34 @@ describe("failure copy", () => {
     );
   });
 
-  it("rewords the one sign-in status that has a human meaning", () => {
+  it("rewords every sign-in status, including the ones nothing claims", () => {
     expect(signInFailureCopy(new ApiError(401, "invalid credentials")).message).toBe(
       "이메일 또는 비밀번호가 맞지 않습니다."
     );
-    expect(signInFailureCopy(new ApiError(500, "boom")).message).toBe("boom");
+    // A suspended account is not a wrong password, and the next move is a
+    // person rather than the keyboard.
+    expect(signInFailureCopy(new ApiError(403, "member is suspended")).message).toContain(
+      "관리자"
+    );
+  });
+
+  // goal B13 (QA M/L): the login form used to print the server's own English
+  // sentence for any status the mapping did not claim — this test asserted
+  // exactly that ("boom"). The raw string belongs in the network tab, not under
+  // the password field of the first screen anyone sees.
+  it("never puts a raw server string in front of the person signing in", () => {
+    for (const failure of [
+      new ApiError(500, "boom"),
+      new ApiError(418, "server is a teapot"),
+      new ApiError(400, "invalid workspace"),
+    ]) {
+      const message = signInFailureCopy(failure).message;
+      expect(message).not.toContain(failure.message);
+      expect(/[a-z]{4,}/.test(message)).toBe(false);
+    }
+    // …and the same on the invite side, whose doc comment already promised it.
+    const join = joinFailureCopy(new ApiError(500, "boom")).message;
+    expect(join).not.toContain("boom");
   });
 });
 

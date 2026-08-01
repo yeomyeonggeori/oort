@@ -29,8 +29,13 @@ grep -Fq 'run_prod_preflight' "$OPS" || fail "operator wrapper lost production p
 grep -Fq 'migrate member-list' "$OPS" || fail "member list is not routed through migrate image"
 grep -Fq 'migrate invite-create' "$OPS" || fail "invite creation is not routed through migrate image"
 # MOMO-584: the operator deep link contract shared verbatim with the macOS client (585).
-grep -Fq 'momo://join?server=' "$OPS" ||
-  fail "invite-create no longer emits the momo://join deep link"
+# goal B13: minted as oort:// since the rebrand. The old scheme is still ACCEPTED
+# by every client, but nothing may still MINT it — that is what this asserts.
+grep -Fq 'oort://join?server=' "$OPS" ||
+  fail "invite-create no longer emits the oort://join deep link"
+if grep -Fq 'deeplink="momo://join' "$OPS"; then
+  fail "invite-create still mints the pre-rebrand momo://join deep link"
+fi
 grep -Fq 'migrate workspace-create' "$OPS" || fail "workspace creation is not routed through migrate image"
 grep -Fq '\getenv invite_code MOMO_OPS_INVITE_CODE' infra/prod/create_invite.sql ||
   fail "invite SQL does not use env-only bearer input"
@@ -157,14 +162,14 @@ grep -Fq 'migrate invite-create' "$TRACE" || fail "invite create did not use mig
 if grep -Fq "$INVITE_CODE" "$TRACE"; then
   fail "raw invite code leaked into container argv trace"
 fi
-# MOMO-584: invite-create emits a momo://join deep link on stdout for operator
+# MOMO-584: invite-create emits an oort://join deep link on stdout for operator
 # delivery. server is the percent-encoded PUBLIC_BASE_URL; code is the invite code.
-grep -Eq '^momo://join\?server=https%3A%2F%2Fapi\.momo-ops\.test&code=' "$TMP_ROOT/invite.out" ||
-  fail "invite-create did not emit the momo://join deep link with a percent-encoded server URL"
-grep -Fq "momo://join?server=https%3A%2F%2Fapi.momo-ops.test&code=$INVITE_CODE" "$TMP_ROOT/invite.out" ||
+grep -Eq '^oort://join\?server=https%3A%2F%2Fapi\.momo-ops\.test&code=' "$TMP_ROOT/invite.out" ||
+  fail "invite-create did not emit the oort://join deep link with a percent-encoded server URL"
+grep -Fq "oort://join?server=https%3A%2F%2Fapi.momo-ops.test&code=$INVITE_CODE" "$TMP_ROOT/invite.out" ||
   fail "invite deep link did not carry the exact invite code"
 # The code may appear on stdout only inside that deep link, never as a bare value.
-if grep -F "$INVITE_CODE" "$TMP_ROOT/invite.out" | grep -vq '^momo://join'; then
+if grep -F "$INVITE_CODE" "$TMP_ROOT/invite.out" | grep -vq '^oort://join'; then
   fail "invite code appeared on stdout outside the deep link"
 fi
 if run_ops invite-create --env-file "$VALID_ENV" \
@@ -182,7 +187,7 @@ run_ops invite-create --env-file "$VALID_ENV" \
   --server-url 'http://192.0.2.10:28180' --output "$INVITE_FILE2" \
   > "$TMP_ROOT/invite2.out" 2>&1 ||
   fail "invite-create with --server-url failed"
-grep -Fq 'momo://join?server=http%3A%2F%2F192.0.2.10%3A28180&code=' "$TMP_ROOT/invite2.out" ||
+grep -Fq 'oort://join?server=http%3A%2F%2F192.0.2.10%3A28180&code=' "$TMP_ROOT/invite2.out" ||
   fail "--server-url was not percent-encoded into the deep link"
 pass "--server-url overrides PUBLIC_BASE_URL and is percent-encoded in the deep link"
 

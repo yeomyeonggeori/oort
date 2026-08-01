@@ -7,7 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import { joinWithInvite, login, type LoginResponse } from "@/lib/api";
-import { API_BASE_DEFAULT, DEFAULT_WORKSPACE, DEV_EMAIL, DEV_PASSWORD } from "@/lib/env";
+import { API_BASE_DEFAULT, CONFIGURED_WORKSPACE, DEV_EMAIL, DEV_PASSWORD } from "@/lib/env";
 import {
   SERVER_URL_PLACEHOLDER,
   getServerBase,
@@ -80,7 +80,7 @@ export function ConnectPage({
   );
   const [email, setEmail] = useState(DEV_EMAIL);
   const [password, setPassword] = useState(DEV_PASSWORD);
-  const [workspace, setWorkspace] = useState(DEFAULT_WORKSPACE);
+  const [workspace, setWorkspace] = useState(CONFIGURED_WORKSPACE);
   const [inviteCode, setInviteCode] = useState("");
   const [mode, setMode] = useState<ConnectMode>("signIn");
   const [busy, setBusy] = useState(false);
@@ -356,15 +356,36 @@ export function ConnectPage({
                 />
               </label>
 
+              {/* 이 칸은 서버가 여러 워크스페이스를 담을 때만 쓰인다. 그전에는
+                  데모 워크스페이스의 uuid가 미리 채워져 있었고, 라벨도 힌트도
+                  id도 없어서 — 폼에서 유일하게 셋 다 없는 칸이었다 — 처음 만나는
+                  화면에 내부 식별자가 "당신이 관리해야 하는 값"처럼 놓여 있었다.
+                  비워 두는 것이 기본이고, 서버가 하는 일도 정확히 같다. */}
               {mode === "signIn" && (
-                <label className="flex flex-col gap-1 text-body">
-                  <span className="text-ink-muted">워크스페이스</span>
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="connect-workspace"
+                    className="text-body text-ink-muted"
+                  >
+                    워크스페이스
+                  </label>
                   <Input
+                    id="connect-workspace"
                     value={workspace}
                     onChange={(e) => setWorkspace(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-describedby="connect-workspace-hint"
                     data-testid="login-workspace"
                   />
-                </label>
+                  <p
+                    id="connect-workspace-hint"
+                    className="text-meta text-ink-muted"
+                    data-testid="login-workspace-hint"
+                  >
+                    비워 두면 기본 워크스페이스로 연결합니다.
+                  </p>
+                </div>
               )}
             </div>
 

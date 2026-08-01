@@ -138,15 +138,37 @@ export function joinFailureCopy(cause: unknown): ConnectFailure {
         retryable: false,
       };
     default:
+      // goal B13 (QA M/L): this branch used to return `failure.message`, which
+      // is the server's own English sentence ("invalid credentials", "member is
+      // suspended"). The doc comment above already promised it never did, and
+      // the promise is now true: an unmapped status says what happened in the
+      // language of the form, and the raw string stays where it is useful — the
+      // network tab.
       return {
-        message: failure.message,
+        message: unmappedMessage(failure.status, ASK_ADMIN),
         suggestSignIn: false,
         retryable: failure.status >= 500,
       };
   }
 }
 
-/** Sign-in failures. 401 is the only one worth rewording. */
+/** The admin to ask when a sign-in, rather than an invite, is the thing stuck. */
+const ASK_ADMIN_SIGN_IN = "워크스페이스 관리자에게 문의하세요.";
+
+/**
+ * Copy for a status nothing above claimed.
+ *
+ * Split into its own function because both surfaces need it and because the one
+ * distinction worth keeping from the raw string is the one a person can act on:
+ * a 5xx is worth retrying and a 4xx is not.
+ */
+function unmappedMessage(status: number, askAdmin: string): string {
+  return status >= 500
+    ? "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
+    : `요청을 처리하지 못했습니다. ${askAdmin}`;
+}
+
+/** Sign-in failures. 401 and 403 carry the two answers a person can act on. */
 export function signInFailureCopy(cause: unknown): ConnectFailure {
   const transport = transportFailure(cause);
   if (transport) return transport;
@@ -158,8 +180,18 @@ export function signInFailureCopy(cause: unknown): ConnectFailure {
       retryable: false,
     };
   }
+  if (failure.status === 403) {
+    // `PasswordLogin::Suspended` — the credential is right and the account is
+    // not usable, which is a different sentence and a different next step from
+    // "the password is wrong".
+    return {
+      message: `이 계정은 지금 로그인할 수 없습니다. ${ASK_ADMIN_SIGN_IN}`,
+      suggestSignIn: false,
+      retryable: false,
+    };
+  }
   return {
-    message: failure.message,
+    message: unmappedMessage(failure.status, ASK_ADMIN_SIGN_IN),
     suggestSignIn: false,
     retryable: failure.status >= 500,
   };

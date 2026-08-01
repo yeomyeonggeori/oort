@@ -26,6 +26,7 @@ import {
   activityLines,
   activitySuffix,
   activityText,
+  agentLabelAsSubject,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
@@ -211,12 +212,19 @@ export function Composer({
   channelId,
   directory,
   channelLabel,
+  dmAgent,
   onSend,
 }: {
   /** Scopes the agent working signal to this channel; sending goes via onSend. */
   channelId: string;
   directory: Directory;
   channelLabel: string;
+  /**
+   * The agent this channel answers without an @mention
+   * (`dmAutoReplyAgent`), or null. Present only to decide one sentence of
+   * hint copy: the routing decision is the server's and is never taken here.
+   */
+  dmAgent: RosterMember | null;
   /**
    * useTimeline's send: inserts the local echo, then reconciles by seq.
    * `routing` is ADR-0134 D1's per-request override and is undefined for every
@@ -501,16 +509,39 @@ export function Composer({
       {/* Enter가 보내기가 된 이상, 줄바꿈이 어디로 갔는지 이 자리에서 말해야
           한다. 한 줄이고, 입력창 바로 아래이며, 조용하다: 이 힌트는 알림이
           아니라 키 배치의 설명이다. 폰에는 화면 키보드의 줄바꿈 키가 따로 있고
-          ⌘도 없으므로 좁은 폭에서는 접는다. */}
+          ⌘도 없으므로 좁은 폭에서는 접는다.
+
+          goal B13(QA H7): 에이전트와의 1:1 DM에서는 멘션 없이도 답한다는 사실이
+          한 조각 더 붙는다. 새 줄이 아니라 같은 줄인 이유 — 둘 다 "이 입력창이
+          어떻게 동작하는가"이고, 설명이 두 줄이 되는 순간 안내가 아니라 배너다.
+          이쪽은 wide-only가 아니다: ⌘ 없는 기기에도 이 규칙은 그대로 있고,
+          폰에서 멘션을 타이핑하는 수고는 오히려 더 크다. */}
       <p
         id="composer-hint"
         // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
         // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
         // 맞지 않아 4px 어긋난 줄로 보였다.
-        className="wide-only px-6 pb-2 text-meta text-ink-muted"
+        //
+        // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
+        // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
+        className={cn(
+          "px-6 pb-2 text-meta text-ink-muted",
+          !dmAgent && "wide-only"
+        )}
         data-testid="composer-hint"
       >
-        Enter로 보내기, Shift+Enter로 줄바꿈
+        {dmAgent && (
+          <span data-testid="composer-dm-hint">
+            멘션 없이 바로 말하면{" "}
+            {agentLabelAsSubject(
+              memberNameParts(directory, dmAgent.id, dmAgent.displayName)
+            )}{" "}
+            답합니다
+          </span>
+        )}
+        <span className="wide-only">
+          {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
+        </span>
       </p>
 
       <AgentActivityBar

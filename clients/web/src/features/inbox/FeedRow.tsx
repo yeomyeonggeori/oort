@@ -123,7 +123,7 @@ export function FeedRow({
               {item.note && <span className="text-warn">{item.note}</span>}
               {item.managedBy && (
                 <span className="text-ink-muted">
-                  managed by {item.managedBy}
+                  {item.managedBy} 님이 관리
                 </span>
               )}
             </span>

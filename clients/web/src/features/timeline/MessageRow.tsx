@@ -14,7 +14,7 @@ import { workSessionIdleNotice } from "@/features/work/workSessionModel";
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
 // typography: agent identity is carried only by the --agent token (predawn
-// slate-blue) on the avatar and handle, plus the "managed by {owner}"
+// slate-blue) on the avatar and handle, plus the "{owner} 님이 관리"
 // attribution. No bubble shape, no row background tint (design-taste-web §9).
 //
 // --agent is a measured token (MOMO-597): >= 90 degrees of OKLab hue away from
@@ -144,7 +144,7 @@ export function MessageRow({
             </span>
             {owner && (
               <span className="text-meta text-ink-muted">
-                managed by {owner.displayName}
+                {owner.displayName} 님이 관리
               </span>
             )}
             <time

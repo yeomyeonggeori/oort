@@ -14,6 +14,7 @@ import { useIsMobileShell } from "@/app/shellNav";
 import {
   channelLabel,
   channelLabelParts,
+  dmAutoReplyAgent,
   dmPeer,
   makeDirectory,
   memberFor,
@@ -123,6 +124,12 @@ export function ChatShell() {
     ? channelLabel(channel, directory, session.member.id)
     : "채널";
   const peer = channel ? dmPeer(channel, directory, session.member.id) : null;
+  // goal B13 (QA H7): 이 채널이 멘션 없이도 답하는 방인가. `peer`와 따로 묻는다
+  // — `peer`는 "상대가 누구냐"이고 이쪽은 "서버가 자동으로 부르느냐"라서, 그룹
+  // DM이나 사람끼리의 DM에서 둘의 답이 갈린다.
+  const dmAgent = channel
+    ? dmAutoReplyAgent(channel, directory, session.member.id)
+    : null;
 
   const timeline = useTimeline(
     realtime,
@@ -636,6 +643,7 @@ export function ChatShell() {
             channelId={channelId}
             directory={directory}
             channelLabel={label}
+            dmAgent={dmAgent}
             onSend={timeline.send}
           />
         )}

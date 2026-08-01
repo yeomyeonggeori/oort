@@ -22,8 +22,11 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<!-- 초대 딥링크(W-O1, MOMO-585): momo://join?server=<percent-encoded base URL>&code=<invite code>.
-	     onOpenURL이 chooser의 join 경로에 서버 URL·초대 코드를 프리필한다. -->
+	<!-- 초대 딥링크(W-O1, MOMO-585): oort://join?server=<percent-encoded base URL>&code=<invite code>.
+	     onOpenURL이 chooser의 join 경로에 서버 URL·초대 코드를 프리필한다.
+	     goal B13(momo→oort 리브랜딩): 발급은 oort:// 하나지만 등록은 둘 다다.
+	     이미 보낸 초대 링크는 며칠씩 살아 있고, 제품 이름이 바뀌었다는 이유로
+	     안 열리면 안 된다. 구 스킴은 흡수한다(MomoDeepLinkParser.acceptedSchemes). -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -33,6 +36,7 @@
 			<string>app.momo.join</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>oort</string>
 				<string>momo</string>
 			</array>
 		</dict>

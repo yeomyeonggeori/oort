@@ -18,8 +18,23 @@ export const API_BASE_DEFAULT = (env.VITE_MOMO_API_BASE ?? "").replace(
   ""
 );
 
-export const DEFAULT_WORKSPACE =
-  env.VITE_MOMO_WORKSPACE ?? "00000000-0000-7000-8000-000000000001";
+/**
+ * The workspace this build connects to, or "" — never a hardcoded id.
+ *
+ * goal B13 (QA M/L): this used to fall back to the demo workspace's literal
+ * uuid, and `ConnectPage` seeded the sign-in form's 워크스페이스 box with it. The
+ * first thing a person met was therefore
+ * `00000000-0000-7000-8000-000000000001` in an editable field with no label
+ * hint: an internal identifier presented as something they were expected to
+ * understand and maintain.
+ *
+ * Blank is not a behaviour change. `login()` omits the key when this is empty,
+ * and the server's own fallback for an absent/unparsable `workspace` is that
+ * exact demo id (`routes/auth_routes.rs`, `DEMO_WORKSPACE_ID`) — so the two
+ * spellings were always the same request. The difference is only that the id
+ * no longer has to be on screen for it to be the default.
+ */
+export const CONFIGURED_WORKSPACE = env.VITE_MOMO_WORKSPACE ?? "";
 
 /** Dev-only login prefill. Blank in shared/committed envs. */
 export const DEV_EMAIL = env.VITE_MOMO_DEV_EMAIL ?? "";

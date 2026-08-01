@@ -1493,11 +1493,11 @@ async function captureScheme(browser, scheme) {
   shots.push(loginShot);
 
   // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
-  //     momo://join link fills server and code, so only email/password remain.
+  //     oort://join link fills server and code, so only email/password remain.
   //     The LAN discovery card has no web equivalent (no mDNS in a page), so it
   //     is reviewed in the desktop shell, not here.
   const invite = await context.newPage();
-  const deepLink = `momo://join?server=${encodeURIComponent(
+  const deepLink = `oort://join?server=${encodeURIComponent(
     ORIGIN
   )}&code=momo-alpha-2026`;
   await invite.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
