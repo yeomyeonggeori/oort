@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import type { LoginResponse } from "@/lib/api";
 import {
@@ -8,6 +8,12 @@ import {
   type RealtimeStatus,
 } from "@/lib/realtime";
 import { SessionProvider } from "@/app/session";
+import {
+  ShellNavProvider,
+  useInertWhile,
+  useIsMobileShell,
+} from "@/app/shellNav";
+import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
@@ -54,6 +60,65 @@ export function AppShell({
   // it exists the sidebar prints a warn line naming the mode, because unlike
   // ?stress=N these fixtures are indistinguishable from the real thing on sight.
   const turnFixture = agentTurnFixtureMode();
+
+  // ── 사이드바 서랍 (goal B6) ────────────────────────────────────────────────
+  //
+  // 폰 폭에서 사이드바는 열이 아니라 채널 표면을 덮는 서랍이다(tokens.css
+  // `sidebar-drawer`). 상태는 여기 한 벌만 있고, 여는 컨트롤은 각 표면의 헤더가
+  // `SidebarDrawerToggle`로 그린다.
+  const isMobile = useIsMobileShell();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerOpenerRef = useRef<HTMLElement | null>(null);
+  // 덮인 본문은 탭 순서에서 함께 빠진다. 이것이 초점 트랩이다 (shellNav.tsx).
+  const mainRef = useInertWhile(isMobile && drawerOpen);
+
+  const openDrawer = useCallback((opener?: HTMLElement | null) => {
+    drawerOpenerRef.current = opener ?? null;
+    setDrawerOpen(true);
+  }, []);
+
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    const opener = drawerOpenerRef.current;
+    drawerOpenerRef.current = null;
+    // 캐럿은 서랍을 연 컨트롤로 돌아간다. 그 컨트롤은 방금까지 `inert`였던 본문
+    // 안에 있고 React는 이 커밋이 끝나야 속성을 걷으므로, 여기서 먼저 걷는다
+    // (WorkPanel.onClose가 같은 순서를 지키는 이유와 같다). 아래 효과가 다시
+    // 맞추면서 할 일이 없다는 것을 확인한다.
+    mainRef.current?.removeAttribute("inert");
+    restoreDialogOpenerFocus(opener);
+  }, [mainRef]);
+
+  // 표면을 옮기면 서랍은 할 일을 마쳤다. 채널을 고르는 것이 이 서랍의 유일한
+  // 목적이므로, 고른 뒤에도 덮여 있으면 방금 연 채널을 가린 채 남는다.
+  useEffect(() => setDrawerOpen(false), [routePath]);
+  // 창이 넓어져 사이드바가 다시 열로 서면 서랍이라는 상태 자체가 사라진다.
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+  }, [isMobile]);
+
+  // Esc로 닫는다. **캡처 단계**에서 듣고 전파를 멈추는 것이 이 핸들러의 요점이다:
+  // 설정 라우트도 window에서 Esc를 듣고 뒤로 가는데(SettingsRoute), 그 리스너는
+  // 마운트 시점이 더 빨라 버블 단계에서 먼저 실행된다. 그대로 두면 서랍을 닫으려
+  // 누른 Esc 한 번이 설정에서 빠져나가는 것까지 함께 해버린다. 캡처 리스너는
+  // 대상에 닿기 전에 돌므로, 덮고 있는 층이 먼저 자기 것을 가져간다.
+  //
+  // 다이얼로그가 열려 있으면 비켜준다: 그때 가장 위에 있는 층은 서랍이 아니라
+  // 그 다이얼로그이고(⌘K 팔레트, 채널 만들기, 에이전트 프로필 모두 Radix라
+  // `[role=dialog][data-state=open]`으로 한 번에 알 수 있다), Esc는 언제나 가장
+  // 위 층의 것이다.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+      event.stopPropagation();
+      event.preventDefault();
+      closeDrawer();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [drawerOpen, closeDrawer]);
 
   useEffect(() => {
     if (stress) return;
@@ -108,11 +173,26 @@ export function AppShell({
       {/* 에이전트 프로필도 같은 규칙이다(MOMO-626): 디렉터리 행, 타임라인의
        * 에이전트 이름, 컴포저의 멘션 줄 셋이 하나의 다이얼로그를 연다. 진입점
        * 마다 다이얼로그를 두면 폼 상태가 세 벌이 되고 그중 하나는 낡는다. */}
+      <ShellNavProvider value={{ isMobile, drawerOpen, openDrawer, closeDrawer }}>
       <CreateChannelProvider>
         <AgentProfileProvider>
           <div className="app-shell">
             <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
-            <main className="flex min-h-0 min-w-0">
+            {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
+             * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그
+             * 순환이다. 아이콘도 글자도 없는 표면이지만 진짜 버튼인 이유는
+             * 바깥을 눌러 닫는 것이 이 앱에서 유일하게 마우스로만 가능한 행동이
+             * 되면 안 되기 때문이다. */}
+            {isMobile && drawerOpen && (
+              <button
+                type="button"
+                className="sidebar-scrim"
+                onClick={closeDrawer}
+                aria-label="채널 목록 닫기"
+                data-testid="sidebar-scrim"
+              />
+            )}
+            <main ref={mainRef} className="flex min-h-0 min-w-0">
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
@@ -142,6 +222,7 @@ export function AppShell({
           <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
         </AgentProfileProvider>
       </CreateChannelProvider>
+      </ShellNavProvider>
     </SessionProvider>
   );
 }

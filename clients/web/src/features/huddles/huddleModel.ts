@@ -3,8 +3,35 @@ import { ApiError, type Huddle, uuidEq } from "@/lib/api";
 export type HuddleLoadStatus =
   | "loading"
   | "ready"
+  /**
+   * 이 서버에는 허들이 **없다**. 운영자가 LiveKit을 끄고 올린 인스턴스(503)와
+   * 허들 라우트 자체가 없는 세대의 서버(404/405/501)가 같은 상태다: 어느 쪽이든
+   * 사람이 여기서 할 수 있는 일이 없으므로 표면을 접는다.
+   */
   | "unconfigured"
   | "error";
+
+/**
+ * 지원 여부를 답으로 읽는 상태 코드 (goal B6).
+ *
+ * 이 집합은 이 파일이 발명한 것이 아니라 클라이언트의 기존 capability 판정과
+ * 같은 규칙이다(features/routing/capability.ts: "404/405/501만 없다로 읽고, 그
+ * 밖은 확인하지 못했다로 남긴다"). 여기에 503이 하나 더 붙는데, 서버가 허들을
+ * 끄고 올라왔다는 뜻으로 이미 쓰고 있던 코드이기 때문이다.
+ *
+ * 왜 문제가 되었는가: 실서버는 허들 라우트를 아직 싣지 않아 `GET
+ * …/huddles/active`에 404를 답한다. 404는 여기서 걸러지지 않아 `error`가 됐고,
+ * 그래서 **모든 채널 헤더 아래에 빨간 배너**가 한 줄 서 있었다(성재 iPhone
+ * 실캡처). 없는 기능을 장애라고 말한 것이라, 고칠 것은 배너의 문구가 아니라
+ * 판정이다.
+ *
+ * 404가 "이 채널이 없다"일 가능성은 남는다. 그때는 채널 표면 자체가 이미 서지
+ * 못하고, 그 사실은 타임라인이 말한다. 없는 채널의 허들 컨트롤을 조용히 접는
+ * 것은 그 화면에서도 옳은 답이다.
+ */
+export function isHuddleUnsupportedStatus(status: number): boolean {
+  return status === 404 || status === 405 || status === 501 || status === 503;
+}
 
 export interface HuddleProjectionState {
   channelId: string;
@@ -111,7 +138,7 @@ export function huddleErrorKind(
   phase: "unknown" | "microphone" = "unknown"
 ): HuddleErrorKind {
   if (error instanceof ApiError) {
-    if (error.status === 503) return "unconfigured";
+    if (isHuddleUnsupportedStatus(error.status)) return "unconfigured";
     if (error.status === 403) return "membership";
   }
   if (error instanceof Error && error.name === "HuddleCspBlockedError") {

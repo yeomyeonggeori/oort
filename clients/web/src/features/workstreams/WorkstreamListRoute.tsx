@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
@@ -208,7 +209,10 @@ export function WorkstreamListRoute() {
               같은 `break` 그룹이라 한 엘리먼트에 쓰면 하나가 조용히 사라진다
               (common/States.tsx가 세운 형태). */}
           <div className="min-w-0 break-keep">
-            <h1 className="text-body font-semibold text-ink">작업 흐름</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <SidebarDrawerToggle />
+              <h1 className="text-body font-semibold text-ink">작업 흐름</h1>
+            </div>
             <p className="break-words text-meta text-ink-muted">
               목표 하나와 그 목표를 실행한 사람들. 멈춘 목표는 같은 채널 멤버가
               이어받습니다.

@@ -9,6 +9,8 @@ import {
   type WorkSession,
 } from "@/lib/api";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
+import { useIsMobileShell } from "@/app/shellNav";
 import {
   channelLabel,
   channelLabelParts,
@@ -348,7 +350,13 @@ export function ChatShell() {
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
-  const covered = workOpen && !thread && stressCount === 0 && drawerWidth;
+  // 폰에서는 스레드 패널도 같은 성질이 된다 (goal B6): 320px 열이 390px 화면에서
+  // 채널에 70px만 남기므로, 그 폭에서는 스레드가 채널 표면 전체를 받는다
+  // (tokens.css `thread-pane`). 덮은 표면은 위와 같은 이유로 탭 순서에서 빠진다.
+  const isMobile = useIsMobileShell();
+  const covered =
+    (workOpen && !thread && stressCount === 0 && drawerWidth) ||
+    (thread !== null && channelId !== null && isMobile);
   useEffect(() => {
     const node = coveredRef.current;
     if (!node) return;
@@ -428,6 +436,9 @@ export function ChatShell() {
     <>
       <header className="flex min-h-control-lg items-center justify-between gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
+              서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
+          <SidebarDrawerToggle />
           <span aria-hidden="true" className="shrink-0 text-ink-muted">
             {channel?.kind === "dm" ? (
               <MessageSquare className="size-4" />
@@ -456,7 +467,10 @@ export function ChatShell() {
             </span>
           )}
           {memberSummary && (
-            <span className="min-w-0 truncate text-meta text-ink-muted">
+            /* 폰에서는 접는다 (goal B6): 390px 헤더에서 이 요약이 제목보다 먼저
+               폭을 가져가 채널 이름이 두 글자로 줄었다. 같은 사실은 멤버 목록에
+               온전히 있다. */
+            <span className="wide-only min-w-0 truncate text-meta text-ink-muted">
               {memberSummary}
             </span>
           )}

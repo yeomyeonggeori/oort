@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   EmptyInvite,
   InlineBanner,
@@ -235,7 +236,10 @@ export function InboxRoute() {
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="inbox-route">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <h1 className="text-body font-semibold">인박스</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <SidebarDrawerToggle />
+          <h1 className="text-body font-semibold">인박스</h1>
+        </div>
         <FilterTabs
           spec={INBOX_FILTER_TABS}
           value={filter}
@@ -290,7 +294,9 @@ export function InboxRoute() {
         />
       </div>
 
-      <footer className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-2">
+      {/* 컴포저와 같은 이유의 안전 영역 (goal B6): 이것도 셸의 마지막 줄이고,
+          폰에서는 그 아래가 홈 인디케이터다. */}
+      <footer className="safe-area-bottom flex flex-wrap items-center gap-3 border-t border-line px-4 py-2">
         {confirmingAll ? (
           <>
             <span className="text-meta text-ink">

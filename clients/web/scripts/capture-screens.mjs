@@ -34,6 +34,29 @@ const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
 
+// 폰 프로파일 (goal B6). 390x844는 iPhone 14/15의 CSS 뷰포트이고, 이 티켓을 연
+// 실캡처를 찍은 그 기기다. deviceScaleFactor 3 · hasTouch · isMobile까지 켜는
+// 이유는 이 프로파일이 재는 것이 색이 아니라 **기하**이기 때문이다: 터치
+// 타깃과 가로 오버플로는 포인터 컨텍스트에서는 측정되지 않는다.
+const MOBILE_VIEWPORT = { width: 390, height: 844 };
+
+/**
+ * 폰에서 손가락으로 눌러야 하는 컨트롤과 그 최소 크기(px). 44px는 WCAG 2.5.5 /
+ * Apple HIG의 값이고, tokens.css의 `tap-target`이 같은 수를 판다.
+ *
+ * 이 목록이 캡처 안에 있는 이유: 스크린샷은 버튼이 **작다**는 것을 보여주지
+ * 않는다. 리뷰어가 픽셀을 재지 않으면 28px 버튼과 44px 버튼은 같은 그림이다.
+ */
+const MOBILE_TAP_TARGETS = [
+  ["open-sidebar-drawer", "채널 목록 열기"],
+  ["composer-send", "메시지 보내기"],
+  ["composer-input", "컴포저 입력"],
+  // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
+  // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
+  ["inbox-approval-approve", "인박스 승인", "optional"],
+  ["inbox-approval-reject", "인박스 거부", "optional"],
+];
+
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
 // 쓰는 그 파일이고, 여기서도 같은 것을 읽어 세 표면이 한 표를 본다.
 const ROUTING_FIXTURES = JSON.parse(
@@ -894,6 +917,176 @@ async function signIn(page) {
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
 }
 
+/**
+ * 가로로 새는 것이 있는가 (goal B6). 폰에서 가로 스크롤이 생기면 읽는 사람은
+ * 글자를 따라 좌우로 끌어야 하고, 그 순간 화면 폭은 더 이상 390px이 아니다.
+ * 셸은 `overflow: clip`으로 잘라내지만(tokens.css `app-shell`) 로그인 화면처럼
+ * 셸 밖의 표면도 있으므로 문서 자체를 잰다.
+ */
+async function assertNoHorizontalOverflow(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const doc = document.scrollingElement || document.documentElement;
+    return {
+      overflowX: doc.scrollWidth - doc.clientWidth,
+      scrollWidth: doc.scrollWidth,
+      clientWidth: doc.clientWidth,
+    };
+  })()`);
+  if (measure.overflowX > 0) {
+    throw new Error(
+      `가로 오버플로 ${where}: 문서가 ${measure.scrollWidth}px인데 화면은 ${measure.clientWidth}px다`
+    );
+  }
+  console.log(
+    `  overflow-x ${where}: 0 (${measure.clientWidth}px 문서 = ${measure.scrollWidth}px)`
+  );
+}
+
+/** 손가락 타깃 실측. 값을 함께 찍어 리뷰가 숫자를 볼 수 있게 한다. */
+async function assertTapTargets(page, where) {
+  const measured = await page.evaluate(
+    `(() => ${JSON.stringify(MOBILE_TAP_TARGETS)}.map(([testId, label]) => {
+      const el = document.querySelector('[data-testid="' + testId + '"]');
+      if (!el) return { testId, label, missing: true };
+      const r = el.getBoundingClientRect();
+      return {
+        testId,
+        label,
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+      };
+    }))()`
+  );
+  const optional = new Set(
+    MOBILE_TAP_TARGETS.filter((t) => t[2] === "optional").map((t) => t[0])
+  );
+  for (const row of measured) {
+    if (row.missing) {
+      if (optional.has(row.testId)) continue;
+      throw new Error(`손가락 타깃 ${where}: ${row.testId} 없음`);
+    }
+    if (row.height < 44) {
+      throw new Error(
+        `손가락 타깃 ${where}: ${row.label}(${row.testId})가 ${row.width}x${row.height}px다 (최소 44px)`
+      );
+    }
+  }
+  console.log(
+    `  tap targets ${where}: ` +
+      measured.map((r) => `${r.testId} ${r.width}x${r.height}`).join(", ")
+  );
+}
+
+/**
+ * 폰 (goal B6). 데스크탑 프로파일과 같은 목이고 같은 컴포넌트이며, 다른 것은
+ * 뷰포트뿐이다: 이 셸이 폭에 따라 형태를 바꾼다는 주장을 같은 픽스처로 두 번
+ * 찍어야 리뷰가 두 형태를 나란히 볼 수 있다.
+ *
+ * 다섯 화면인 이유는 그 다섯이 폰에서 형태가 **바뀐** 화면 전부이기 때문이다:
+ * 연결(셸 밖), 채널(단일 pane + 도크된 컴포저), 서랍이 열린 상태, 에이전트 허브
+ * (두 열이 한 열이 되는 표면), 인박스(전역 표면의 헤더에 햄버거가 서는 자리).
+ */
+async function captureMobile(browser, scheme) {
+  const context = await browser.newContext({
+    viewport: MOBILE_VIEWPORT,
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const shots = [];
+  const shoot = async (page, name) => {
+    const path = `${OUT_DIR}/mobile-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+  };
+
+  // 1. 연결 화면. 셸 밖의 유일한 표면이고, 폰에서 문서가 스크롤해도 되는 자리다.
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `login ${scheme}`);
+  await shoot(page, "login");
+
+  // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
+  //    받고, 컴포저는 안전 영역 위에 도크된다.
+  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+  await page.getByTestId("login-submit").click();
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `chat ${scheme}`);
+  await assertTapTargets(page, `chat ${scheme}`);
+  await shoot(page, "chat");
+
+  // 3. 서랍이 열린 상태. 뒤 표면이 110px 남는 것이 이 프레임의 요점이다: 덮은
+  //    것이 화면 전체가 아니라 서랍이어야 바깥을 눌러 닫을 자리가 보인다.
+  await page.getByTestId("open-sidebar-drawer").click();
+  await page.getByTestId("sidebar-scrim").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  const drawer = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="sidebar"]');
+    const r = el.getBoundingClientRect();
+    const row = document.querySelector("[data-sidebar-row]");
+    const rowRect = row?.getBoundingClientRect();
+    return {
+      left: Math.round(r.left),
+      width: Math.round(r.width),
+      peek: Math.round(window.innerWidth - r.right),
+      rowHeight: rowRect ? Math.round(rowRect.height) : null,
+      mainInert: document
+        .querySelector("main")
+        ?.hasAttribute("inert"),
+      focusInsideDrawer: el.contains(document.activeElement),
+    };
+  })()`);
+  if (drawer.left !== 0 || drawer.peek <= 0) {
+    throw new Error(`서랍 기하 ${scheme}: ${JSON.stringify(drawer)}`);
+  }
+  if (drawer.mainInert !== true) {
+    throw new Error(`서랍이 열렸는데 본문이 inert가 아니다 ${scheme}`);
+  }
+  if (drawer.focusInsideDrawer !== true) {
+    throw new Error(`서랍이 열렸는데 캐럿이 밖에 있다 ${scheme}`);
+  }
+  if (drawer.rowHeight !== null && drawer.rowHeight < 44) {
+    throw new Error(`채널 행이 ${drawer.rowHeight}px다 (최소 44px) ${scheme}`);
+  }
+  console.log(
+    `  drawer ${scheme}: ${drawer.width}px 서랍 + ${drawer.peek}px 잔여, 행 ${drawer.rowHeight}px, 본문 inert=${drawer.mainInert}`
+  );
+  await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
+  await shoot(page, "sidebar-drawer");
+
+  // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
+  // 여기서 실제로 걷는다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("sidebar-scrim").waitFor({ state: "detached" });
+
+  // 4. 에이전트 허브. 900px 아래에서 명부와 상세가 한 열로 쌓이는 표면이라,
+  //    폰에서 그 형태가 실제로 서는지 보는 자리다.
+  await page.evaluate('location.hash = "/agents"');
+  await page.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
+  await shoot(page, "agent-hub");
+
+  // 5. 인박스(결정 대기). 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는
+  //    것이 이 프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다.
+  await page.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await page.getByTestId("feed-row").first().waitFor({ state: "visible" });
+  await page.getByTestId("open-sidebar-drawer").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `inbox ${scheme}`);
+  await shoot(page, "inbox");
+
+  await context.close();
+  return shots;
+}
+
 async function captureScheme(browser, scheme) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -1436,6 +1629,11 @@ async function main() {
       const all = [];
       for (const scheme of ["light", "dark"]) {
         all.push(...(await captureScheme(browser, scheme)));
+      }
+      // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
+      // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
+      for (const scheme of ["light", "dark"]) {
+        all.push(...(await captureMobile(browser, scheme)));
       }
       for (const path of all) console.log(path);
     } finally {

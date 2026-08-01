@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
@@ -486,7 +487,10 @@ export function WorkstreamDetailRoute() {
       className="flex min-w-0 flex-1 flex-col"
       data-testid="workstream-detail-route"
     >
-      <header className="border-b border-line px-4 py-2">{back}</header>
+      <header className="flex items-center gap-2 border-b border-line px-4 py-2">
+        <SidebarDrawerToggle />
+        {back}
+      </header>
 
       {/* Dates the page and nothing else: what the disconnection means for the
           takeover is said once, in the block that owns that control. */}

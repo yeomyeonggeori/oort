@@ -13,9 +13,11 @@ import {
   Settings,
   SquarePen,
   Users,
+  X,
 } from "lucide-react";
 import type { Channel } from "@/lib/api";
 import { useSession } from "@/app/session";
+import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
   agentTurnsInChannel,
   useAgentWorkingSignals,
@@ -105,6 +107,21 @@ export function Sidebar({
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   const navRef = useRef<HTMLDivElement>(null);
+
+  // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
+  // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
+  // 접근성 트리에서는 `inert`로 빠져야 한다. 보이지 않는 것을 읽을 수 있게 두면
+  // 스크린리더 사용자는 열지도 않은 서랍 안을 걷는다.
+  const { isMobile, drawerOpen, closeDrawer } = useShellNav();
+  const asDrawer = isMobile;
+  const drawerRef = useInertWhile<HTMLDivElement>(asDrawer && !drawerOpen);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // 열리면 캐럿이 서랍 안으로 들어간다. 첫 정거장은 닫기 버튼이다: 잘못 열었을
+  // 때 되돌리는 길이 첫 번째여야 하고, 그 다음이 검색과 채널 목록이다.
+  useEffect(() => {
+    if (asDrawer && drawerOpen) closeRef.current?.focus();
+  }, [asDrawer, drawerOpen]);
 
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
@@ -232,15 +249,21 @@ export function Sidebar({
   }
 
   return (
-    <div className="flex h-full">
+    <div
+      ref={drawerRef}
+      id="sidebar-drawer"
+      className="sidebar-drawer flex h-full"
+      data-open={asDrawer && drawerOpen ? "" : undefined}
+      data-testid="sidebar"
+    >
       <WorkspaceRail workspaceName={selfName} connStatus={connStatus} />
 
       <div className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar">
-        <div className="border-b border-line p-2">
+        <div className="flex items-center gap-2 border-b border-line p-2">
           <Button
             variant="outline"
             size="sm"
-            className="w-full justify-between"
+            className="tap-target min-w-0 flex-1 justify-between"
             onClick={onOpenQuickSwitcher}
             data-testid="open-quick-switcher"
           >
@@ -248,8 +271,23 @@ export function Sidebar({
               <Search className="size-4" />
               검색과 이동
             </span>
-            <span className="text-meta text-ink-muted">⌘K</span>
+            {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
+                적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다. */}
+            <span className="wide-only text-meta text-ink-muted">⌘K</span>
           </Button>
+          {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
+              아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={closeDrawer}
+            aria-label="채널 목록 닫기"
+            title="채널 목록 닫기"
+            data-testid="close-sidebar-drawer"
+            className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
         </div>
 
         {fixtureMode !== null && (
@@ -266,6 +304,14 @@ export function Sidebar({
         <div
           ref={navRef}
           onKeyDown={onNavKeyDown}
+          // 목록에서 무언가를 골랐으면 서랍은 할 일을 마쳤다. 라우트가 바뀌는
+          // 경우는 셸이 이미 닫지만(AppShell의 routePath 효과), **이미 열려 있는
+          // 채널**을 다시 고르면 주소가 그대로라 그 효과는 돌지 않는다. 그때도
+          // 사람이 한 일은 "이 채널을 보겠다"이므로 서랍은 비켜야 한다.
+          onClick={(event) => {
+            if (!asDrawer || !drawerOpen) return;
+            if ((event.target as Element).closest("a")) closeDrawer();
+          }}
           className="min-h-0 flex-1 overflow-y-auto"
           data-testid="channel-list"
         >
@@ -298,7 +344,7 @@ export function Sidebar({
                     aria-label="새 채널 만들기"
                     title="새 채널 만들기"
                     data-testid="new-channel"
-                    className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <Plus className="size-4" />
                   </button>
@@ -360,7 +406,7 @@ export function Sidebar({
                     aria-label="새 다이렉트 메시지 시작"
                     title="새 다이렉트 메시지 (⌘⇧K)"
                     data-testid="new-dm"
-                    className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <SquarePen className="size-4" />
                   </Link>
@@ -396,7 +442,7 @@ export function Sidebar({
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
 
-        <div className="flex items-center gap-2 border-t border-line p-2">
+        <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
           <span
             className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
             aria-hidden="true"
@@ -411,7 +457,7 @@ export function Sidebar({
             aria-label="설정 열기"
             title="설정 (⌘,)"
             data-testid="nav-settings"
-            className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             <Settings className="size-4" />
           </Link>

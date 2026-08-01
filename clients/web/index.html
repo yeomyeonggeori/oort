@@ -2,7 +2,24 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      viewport-fit=cover는 노치와 홈 인디케이터 영역까지 그리게 한다. 그 대가로
+      셸의 마지막 줄(컴포저, 사이드바 발치)이 안전 영역만큼 스스로 물러나야
+      하고, 그 규칙은 src/design/tokens.css의 safe-area-bottom이 갖고 있다.
+
+      interactive-widget=resizes-content는 가상 키보드가 올라올 때 레이아웃
+      뷰포트 자체를 줄인다. 기본값(resizes-visual)에서는 셸 높이가 그대로라
+      컴포저가 키보드 뒤에 남고, 쓰는 사람은 자기가 친 글자를 못 본다. 이 값을
+      모르는 브라우저는 무시하므로 잃는 것이 없다.
+
+      user-scalable=no와 maximum-scale은 쓰지 않는다: 확대를 막는 것은 접근성을
+      끄는 것이다. iOS가 입력창에서 자동 확대하는 문제는 폼 컨트롤 글자를 16px로
+      두는 것으로 푼다(tokens.css @layer base).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>oort</title>
     <!--
       탭 아이콘은 SVG 한 장이다. 브라우저가 어떤 배율로 그리든 같은 path를 다시

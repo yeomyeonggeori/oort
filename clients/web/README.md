@@ -50,6 +50,42 @@ npm run dev                          # http://localhost:5173 (proxies /v1 → mo
 - Credentials come from the login form (or `VITE_MOMO_DEV_*` in `.env.local`),
   never from source.
 
+## Viewports: one shell, two shapes (goal B6)
+
+The shell is a two-pane grid down to 600px, and a single pane with an overlay
+drawer below it. **600px is one number living in two places** and they must not
+drift: the `@media (width < 600px)` blocks in `src/design/tokens.css` and
+`MOBILE_SHELL_QUERY` in `src/app/shellNav.tsx`. The stylesheet decides the
+shape; the script decides what is focusable and what each header draws, and a
+mismatch means a hamburger beside a sidebar that is already standing.
+
+Why 600 and not 640/768: the narrowest board the existing gates measure as a
+desktop starts at 600 (`gate:workstream` reads its picker inside a 600x800
+window whose detail column is `600 - 240`), and every phone this targets is
+390~430 wide in portrait. A phone in landscape (844) keeps the two-pane shell,
+which is right there: a 240px column still leaves 604px of channel.
+
+What changes below 600px:
+
+| surface | wide | phone |
+|---|---|---|
+| sidebar | 240px column | 280px overlay drawer, `inert` while closed |
+| 스레드 패널 | 320px column | covers the channel surface |
+| 작업 세션 패널 | 320px column (already full-surface below 900) | covers it |
+| 설정 | 192px nav + body | nav on top, body below |
+| touch targets | 28~32px controls | 44px minimum (`tap-target`) |
+| composer | last row of the column | same, plus `env(safe-area-inset-bottom)` |
+| form controls | `--text-body` (14px) | `--text-title` (16px), or iOS zooms in |
+
+`npm run capture:design` shoots both: 1280x800 first (the frames that must not
+change), then 390x844 (`mobile-*.png`) in light and dark. The phone pass is also
+a check, so a broken board fails the run instead of shipping as a screenshot:
+
+- no horizontal document overflow on any of the five phone screens,
+- the drawer sits at x=0, leaves a visible strip of the surface behind it, puts
+  the caret inside itself, and marks the covered surface `inert`,
+- 채널 목록 열기 / 컴포저 / 전송 measure at least 44px tall.
+
 ## Connect surface + dynamic API base (MOMO-604, P2)
 
 `src/features/auth/ConnectPage.tsx` replaced the same-origin login form. Three
@@ -187,10 +223,10 @@ CSP_GATE_PROVE_RED_STYLE=1 npm run gate:csp   # red proof: MUST fail (xterm need
 The huddle browser gate uses REST and Centrifugo protocol fixtures, without a
 backend, credentials, microphone, or LiveKit server. Its `huddle-gate` build
 mode replaces only the audio connector while preserving the production lazy
-import in normal builds. It locks the fail-closed 503 state, active
-badge/participant names, the `huddle_ended` transition, the joined 760x480
-header width contract, and joined exit controls across an injected projection
-500:
+import in normal builds. It locks the two absent-capability shapes (503
+configured-off and 404 not-built-yet, goal B6), active badge/participant names,
+the `huddle_ended` transition, the joined 760x480 header width contract, and
+joined exit controls across an injected projection 500:
 
 ```sh
 npm run build && npm run gate:huddle
@@ -198,16 +234,26 @@ HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle     # MUST fail
 HUDDLE_GATE_PROVE_RED_ENDED=1 npm run gate:huddle   # MUST fail
 ```
 
-Width red proof: temporarily remove `max-w-pane` from
-`HuddleHeaderControl.tsx`; the 760px title/toggle geometry assertion must fail
-with a long participant fixture. Projection-isolation red proof: restore the
-old `status === "error"` early return above the joined branch; the joined
-microphone/leave assertions after the injected 500 must fail.
+`HUDDLE_GATE_PROVE_RED_503=1` inverts the absent-capability count: it expects
+one leftover huddle node, which is what appears the moment 404/503 stops being
+read as "this server has no huddles"
+(`huddleModel.isHuddleUnsupportedStatus`). Width red proof: temporarily remove
+`max-w-pane` from `HuddleHeaderControl.tsx`; the 760px title/toggle geometry
+assertion must fail with a long participant fixture. Projection-isolation red
+proof: restore the old `status === "error"` early return above the joined
+branch; the joined microphone/leave assertions after the injected 500 must fail.
 
-The gate writes the four fixture captures to `artifacts/huddle/`:
-`unconfigured.png`, `idle.png`, `active.png`, and `error.png`. A joined capture
-requires a real LiveKit room and browser microphone grant; the orchestrator
-records it as `artifacts/huddle/joined.png`.
+A server without huddles renders **nothing**: no control, no banner, no error.
+The 미구성 banner that used to sit under every channel header said one
+unchanging sentence forever, and on the servers that answer 404 the same state
+was drawn in `--danger` as an outage. Both are gone; a 503 answered to a
+start/join the reader actually pressed still gets a sentence, because there the
+person did something and silence would not say whether it landed.
+
+The gate writes the five fixture captures to `artifacts/huddle/`:
+`unconfigured.png`, `unimplemented.png`, `idle.png`, `active.png`, and
+`error.png`. A joined capture requires a real LiveKit room and browser
+microphone grant; the orchestrator records it as `artifacts/huddle/joined.png`.
 
 The my-session continuity gate also needs no backend or credentials. Its long
 DM fixture locks `전체` and `내 세션` at full width while only the channel chip
