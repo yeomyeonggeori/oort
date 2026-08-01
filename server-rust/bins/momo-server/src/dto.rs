@@ -982,6 +982,35 @@ pub struct NotificationPrefResponse {
     pub muted: bool,
 }
 
+/// `POST …/channels/{ch}/members` request (Swift `AddChannelMemberRequest`,
+/// `DTOs.swift:523-538`).
+///
+/// Swift's hand-written decoder accepts **both** `memberId` and `member_id`
+/// (`decodeIfPresent(.memberId) ?? decode(.memberIdSnake)`), so the alias here is
+/// parity rather than generosity: a script that spells it the snake way must not
+/// get "unknown field" for a body the Swift server accepts.
+///
+/// `role` is optional and defaults to `member`. Closed-world otherwise: a caller
+/// that invented `notify: false` learns it was ignored instead of assuming the
+/// person it just added will not be pinged.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddChannelMemberRequest {
+    #[serde(alias = "member_id")]
+    pub member_id: Uuid,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+/// Swift `ChannelMembershipResponse` (`DTOs.swift:553-555`) — the body of both
+/// membership writes. The removal answers with the row it just closed (carrying
+/// `leftAtMs`) rather than an empty 204, so a client can render "removed at …"
+/// without a re-read.
+#[derive(Debug, Serialize)]
+pub struct ChannelMembershipResponse {
+    pub membership: ChannelMembershipDto,
+}
+
 // ---------------------------------------------------------------------------
 // roster (B4.1 — Swift `RosterRoutes.swift` + `DTOs.swift:332-406`)
 // ---------------------------------------------------------------------------
@@ -1776,6 +1805,31 @@ pub struct AgentProfileDto {
 #[derive(Debug, Serialize)]
 pub struct AgentProfileResponse {
     pub profile: AgentProfileDto,
+}
+
+/// `PUT …/agents/{agent}/pause` request (Swift `AgentPauseInput` :457-476).
+///
+/// One key, and closed-world for a reason that is not symmetry: pause is the
+/// switch that stops an agent from acting, so a body that also carried
+/// `instructions` must not half-apply. A caller that wants both sends both
+/// requests and learns which one failed.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentPauseInput {
+    pub paused: bool,
+}
+
+/// Swift `AllowedAgentModelsResponse` (:583-585) — the credential-free, agent-
+/// specific projection of the effective model policy.
+///
+/// It deliberately does **not** carry `workspace.settings`: that JSON is an
+/// extensible bag which may later hold keys not every member may read, while the
+/// model list is exactly what a picker needs. The array is sorted so the wire
+/// result is deterministic without changing the set semantics the gates enforce.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AllowedAgentModelsResponse {
+    pub allowed_agent_models: Vec<String>,
 }
 
 #[cfg(test)]

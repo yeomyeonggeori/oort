@@ -30,7 +30,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::{
     create_agent_run_in_tx, is_active_human_channel_member_in_tx, load_agent_run_in_tx,
-    load_eligible_agent_in_tx, NewAgentRun, RunTrigger,
+    load_eligible_agent_in_tx, NewAgentRun, RequestedRouting, RunTrigger,
 };
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
@@ -51,8 +51,6 @@ use crate::AppState;
 /// an unknown key is a 400, so a client that invents `priority` learns it was
 /// ignored instead of assuming it was honoured.
 const WORK_INPUT_KEYS: [&str; 6] = ["type", "title", "brief", "repo", "branch", "routing"];
-/// `routing` is itself closed-world (ADR-0134 D1).
-const ROUTING_KEYS: [&str; 2] = ["model", "effort"];
 
 const TITLE_LIMIT: usize = 200;
 const BRIEF_LIMIT: usize = 16_384;
@@ -270,16 +268,20 @@ fn validated_work_input(request: &CreateAgentRunRequest) -> Result<Value, ApiErr
     let repo = optional_string(object.get("repo"), "repo", REPO_LIMIT)?;
     let branch = optional_string(object.get("branch"), "branch", BRANCH_LIMIT)?;
 
-    // Both spellings of the routing block are accepted, but they must AGREE —
-    // a disagreement is a 400 rather than a silent winner (Swift :1169-1174).
-    let inline_routing = object.get("routing");
-    let routing = match (inline_routing, request.routing.as_ref()) {
+    // Both spellings of the routing block are accepted, but they must AGREE — a
+    // disagreement is a 400 rather than a silent winner (Swift :1169-1174). The
+    // comparison is between the *validated* blocks, like Swift's
+    // `existing != requestRouting`, so `HIGH` and `high` are one intent rather
+    // than a conflict a client cannot see.
+    let inline_routing = validated_routing(object.get("routing"))?;
+    let top_routing = validated_routing(request.routing.as_ref())?;
+    let routing = match (inline_routing, top_routing) {
         (Some(inline), Some(top)) if inline != top => {
             return Err(ApiError::bad_request(
                 "routing conflicts with input.routing",
             ))
         }
-        (Some(value), _) | (None, Some(value)) => Some(validated_routing(value)?),
+        (Some(value), _) | (None, Some(value)) => value.json_value(),
         (None, None) => None,
     };
 
@@ -299,47 +301,25 @@ fn validated_work_input(request: &CreateAgentRunRequest) -> Result<Value, ApiErr
     Ok(Value::Object(normalized))
 }
 
-/// Shape-only routing validation (ADR-0134 D1's closed world + the known-level
-/// check).
+/// Shape-only routing validation, delegated to the **shared** validator
+/// (`momo_agent::routing`).
 ///
-/// **Not ported (deviation):** `RunRoutingResolution` — the workspace
-/// allowed-models gate and the profile inheritance chain. Without it an explicit
-/// `model` is recorded but not *resolved*, so the job payload carries the agent's
-/// configured model. What is kept is the half the ledger reads: a normalized
-/// `effort`, which `momo_agent::ledger_effort` later accepts only if the model
-/// that actually ran supports it.
-fn validated_routing(value: &Value) -> Result<Value, ApiError> {
-    let Some(object) = value.as_object() else {
-        return Err(ApiError::bad_request("routing must be an object"));
-    };
-    if object
-        .keys()
-        .any(|key| !ROUTING_KEYS.contains(&key.as_str()))
-    {
-        return Err(ApiError::bad_request("routing contains unknown fields"));
-    }
-    let mut normalized = Map::new();
-    if let Some(model) = object.get("model") {
-        let model = model
-            .as_str()
-            .map(str::trim)
-            .filter(|value| !value.is_empty() && value.len() <= 256)
-            .ok_or_else(|| ApiError::bad_request("routing model is empty or too large"))?;
-        normalized.insert("model".to_string(), json!(model));
-    }
-    if let Some(effort) = object.get("effort") {
-        let raw = effort
-            .as_str()
-            .ok_or_else(|| ApiError::bad_request("routing effort must be a string"))?;
-        let level = momo_agent::known_level(Some(raw)).ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "routing effort must be one of {}",
-                momo_agent::EFFORT_LEVELS.join(", ")
-            ))
-        })?;
-        normalized.insert("effort".to_string(), json!(level));
-    }
-    Ok(Value::Object(normalized))
+/// B5.3a moved this out of the file: Swift runs one `RunRoutingInput.validate`
+/// over both surfaces that can start a run (`WorkRunInput.validateIfWork`
+/// :1191 and `MessageRoutes.send` :46), and a per-route copy is precisely how the
+/// work path and the mention path come to disagree about whether `HIGH` is a
+/// level or a typo.
+///
+/// **Still not ported here (deviation):** `RunRoutingResolution` — the workspace
+/// allowed-models gate and the profile inheritance chain. The mention path runs
+/// the full chain (`momo_agent::resolve_mention_routing`); this one records an
+/// explicit `model` without resolving it, so the job payload still carries the
+/// agent's configured model. What is kept is the half the ledger reads: a
+/// normalized `effort`, which `momo_agent::ledger_effort` later accepts only if
+/// the model that actually ran supports it.
+fn validated_routing(value: Option<&Value>) -> Result<Option<RequestedRouting>, ApiError> {
+    momo_agent::validate_request_routing(value)
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))
 }
 
 fn required_string(value: Option<&Value>, field: &str, limit: usize) -> Result<String, ApiError> {

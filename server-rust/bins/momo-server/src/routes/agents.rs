@@ -24,13 +24,30 @@
 //!    single owner of `workspace_ban`; asking it here is what stops a banned
 //!    handle from re-entering the workspace as an agent.
 //!
-//! ## Deliberately not served (see the PR body)
+//! ## B5.3a — the operating surface beside the creating one
 //!
-//! `PUT …/profile`, `PUT …/pause` and `GET …/allowed-models` — B5.2 needs the
-//! *creation* surface and the read a hub UI consumes; the editing surface is
-//! B5.3's, and shipping a half of it now would mean shipping a model-picker
-//! endpoint with no picker. No credential is issued either (Swift's create
-//! deliberately stops at the identity boundary too).
+//! ```text
+//! PUT  /v1/workspaces/{ws}/agents/{agent}/profile         (AgentProfileRoutes.put)
+//! PUT  /v1/workspaces/{ws}/agents/{agent}/pause           (AgentProfileRoutes.putPause)
+//! GET  /v1/workspaces/{ws}/agents/{agent}/allowed-models  (AgentProfileRoutes.allowedModels)
+//! ```
+//!
+//! B5.2 shipped creation and the profile *read*, and deliberately stopped there
+//! ("shipping a model-picker endpoint with no picker"). What it left behind was
+//! an agent whose behaviour could be set exactly once, at birth: `paused` was
+//! read and respected by the mention path with nothing able to write it, and the
+//! instructions an operator got wrong on the create form were permanent.
+//!
+//! The three endpoints carry **two different authorities**, and the split is
+//! Swift's (:369-406 vs :40-60):
+//!
+//! | endpoint | who | why |
+//! |---|---|---|
+//! | `PUT …/profile`, `PUT …/pause` | the agent's owner **or** a workspace admin | a profile carries the instructions an operator wrote; pause stops the agent acting for everyone |
+//! | `GET …/allowed-models` | any active workspace member | it is the picker's vocabulary, and refusing it would leave a teammate guessing which models a `routing` block may name |
+//!
+//! No credential is issued anywhere here (Swift's create stops at the identity
+//! boundary too, ADR-0004).
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -38,21 +55,24 @@ use axum::{Extension, Json};
 use momo_agent::{
     agent_owner_in_tx, allowed_agent_models, create_agent_identity_in_tx,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
-    normalized_system_prompt, upsert_agent_profile_in_tx, validate_agent_profile, validated_config,
-    AgentCreation, AgentProfile, AgentProfileSpec, AgentSpecInvalid, NewAgentMember,
+    normalized_system_prompt, set_agent_paused_in_tx, upsert_agent_profile_in_tx,
+    validate_agent_profile, validated_config, AgentCreation, AgentProfile, AgentProfileSpec,
+    AgentSpecInvalid, NewAgentMember,
 };
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
+use momo_db::PgConnection;
 use momo_messaging::active_workspace_role;
 use momo_settings::{
     is_handle_banned_in_tx, normalized_join_display_name, normalized_requested_handle,
     validated_base_url,
 };
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::dto::{
-    AgentMemberDto, AgentProfileDto, AgentProfileInput, AgentProfileResponse, CreateAgentRequest,
-    CreateAgentResponse,
+    AgentMemberDto, AgentPauseInput, AgentProfileDto, AgentProfileInput, AgentProfileResponse,
+    AllowedAgentModelsResponse, CreateAgentRequest, CreateAgentResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -257,12 +277,43 @@ pub async fn create(
     ))
 }
 
-/// `GET /v1/workspaces/{ws}/agents/{agent}/profile`.
+/// Swift `AgentProfileRoutes.requireEditor` (:369-406) — a human that is the
+/// agent's **owner** or a workspace owner/admin.
 ///
-/// Authorization is Swift's `requireEditor` (:369-406): a human that is the
-/// agent's owner **or** a workspace owner/admin. Not every member — a profile
-/// carries the instructions an operator wrote, and the roster already serves the
-/// parts a teammate needs (name, handle, model).
+/// Not every member, and not the agent itself. A profile carries the
+/// instructions an operator wrote (and, since B5.3a, the switch that stops the
+/// agent acting), while the roster already serves the parts a teammate needs —
+/// name, handle, model. An agent that could edit its own profile could also
+/// unpause itself, which is the one thing pause exists to prevent.
+///
+/// The order of the two refusals is Swift's and it matters: a caller who is not
+/// in the workspace at all is told so (403) before any agent id is resolved, so
+/// this endpoint cannot be used to probe which agent ids exist in a workspace
+/// the caller has no part in.
+///
+/// Runs inside the caller's transaction so the authorization and the write it
+/// guards share one commit boundary.
+async fn require_profile_editor_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    actor_member_id: Uuid,
+) -> Result<Result<(), ApiError>, momo_db::DbError> {
+    let Some(role) = active_workspace_role(conn, workspace_id, actor_member_id).await? else {
+        return Ok(Err(ApiError::forbidden("not an active workspace member")));
+    };
+    let Some(owner) = agent_owner_in_tx(conn, workspace_id, agent_member_id).await? else {
+        return Ok(Err(ApiError::not_found("active agent not found")));
+    };
+    if !role.is_admin() && owner != Some(actor_member_id) {
+        return Ok(Err(ApiError::forbidden(
+            "agent owner or workspace admin required",
+        )));
+    }
+    Ok(Ok(()))
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent}/profile`.
 pub async fn get_profile(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -277,18 +328,15 @@ pub async fn get_profile(
         "agents.get_profile",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                let Some(role) = active_workspace_role(conn, workspace_id, actor_member_id).await?
-                else {
-                    return Ok(Err(ApiError::forbidden("not an active workspace member")));
-                };
-                let Some(owner) = agent_owner_in_tx(conn, workspace_id, agent_member_id).await?
-                else {
-                    return Ok(Err(ApiError::not_found("active agent not found")));
-                };
-                if !role.is_admin() && owner != Some(actor_member_id) {
-                    return Ok(Err(ApiError::forbidden(
-                        "agent owner or workspace admin required",
-                    )));
+                if let Err(rejection) = require_profile_editor_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor_member_id,
+                )
+                .await?
+                {
+                    return Ok(Err(rejection));
                 }
                 Ok(Ok(load_agent_profile_in_tx(
                     conn,
@@ -304,6 +352,250 @@ pub async fn get_profile(
     let profile = profile.ok_or_else(|| ApiError::not_found("agent profile not found"))?;
     Ok(Json(AgentProfileResponse {
         profile: profile_dto(&profile),
+    }))
+}
+
+/// `PUT /v1/workspaces/{ws}/agents/{agent}/profile` — Swift
+/// `AgentProfileRoutes.put` (:75-94).
+///
+/// Ordering, and every step of it earns its place:
+///
+/// 1. **Body validation before the transaction** (MOMO-362). All of it is pure —
+///    lengths, the tool list, the closed-world `triggers` — so a malformed body
+///    costs no connection.
+/// 2. **Editor check, then the allow-list, then the write**, in one transaction.
+/// 3. **`model_pref` is gated at write time** (ADR-0131 D2), and the sentence is
+///    the create path's, from the same `allowed_agent_models` helper the run
+///    gates use. Writing a preference is an explicit act, so a violation is a
+///    visible 400 — while the *same* stored value later becoming unusable is
+///    silently ignored at run time. That asymmetry is the decision (ADR-0134 D3),
+///    not an inconsistency.
+///
+/// The upsert bumps `version`, which is what a hub UI reads as "edited N times"
+/// and what `load_mention_candidates_in_tx` uses to tell "no profile" from "a
+/// profile with empty instructions".
+pub async fn put_profile(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+    Json(request): Json<AgentProfileInput>,
+) -> Result<Json<AgentProfileResponse>, ApiError> {
+    require_human(&principal, "human agent owner or workspace admin required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let agent_member_id = path_uuid(&agent, "invalid agent id")?;
+    let spec = validated_profile(&request)?;
+    let actor_member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let profile = settle_db(
+        "agents.put_profile",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_profile_editor_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor_member_id,
+                )
+                .await?
+                {
+                    return Ok(Err(rejection));
+                }
+                if let Some(model_pref) = spec.model_pref.as_deref() {
+                    let Some((base, settings)) =
+                        load_agent_model_policy_in_tx(conn, workspace_id, agent_member_id).await?
+                    else {
+                        return Ok(Err(ApiError::not_found("agent profile target not found")));
+                    };
+                    if !allowed_agent_models(&base, &settings)
+                        .iter()
+                        .any(|entry| entry == model_pref)
+                    {
+                        return Ok(Err(spec_error(AgentSpecInvalid::ModelPrefNotAllowed)));
+                    }
+                }
+                let Some(stored) = upsert_agent_profile_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor_member_id,
+                    &spec,
+                )
+                .await?
+                else {
+                    return Ok(Err(ApiError::not_found("agent profile target not found")));
+                };
+                // Swift :247 — the action is derived from the version the write
+                // returned, so an operator reading the audit log can tell the
+                // first configuration from the tenth edit.
+                let action = if stored.version == 1 {
+                    "agent.profile.created"
+                } else {
+                    "agent.profile.updated"
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, action)
+                        .by(actor_member_id)
+                        .about(agent_member_id)
+                        .target("agent_profile", agent_member_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.agent_profile.updated.v1",
+                            json!({
+                                "version": stored.version,
+                                "enabled_tool_count": stored.enabled_tools.len(),
+                                "has_model_pref": stored.model_pref.is_some(),
+                                "has_effort_pref": stored.effort_pref.is_some(),
+                                "mention_enabled": true,
+                            }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(stored))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentProfileResponse {
+        profile: profile_dto(&profile),
+    }))
+}
+
+/// `PUT /v1/workspaces/{ws}/agents/{agent}/pause` — Swift
+/// `AgentProfileRoutes.putPause` (:96-113).
+///
+/// **This is the write half of the flag B5.2 could only read.** The mention path
+/// has respected `agent_profile.paused` since B5.2 — a mention of a paused agent
+/// starts no run and answers with a visible Korean system line — but nothing
+/// could set it, so the only way to stop an agent was to remove it from every
+/// channel it was in.
+///
+/// Pause is workspace-wide and **visible**: silence would be indistinguishable
+/// from a broken agent, which is why the mention path posts a line rather than
+/// swallowing the turn. Removing the agent from a channel
+/// (`DELETE …/channels/{ch}/members/{member}`) is the local, silent alternative;
+/// the two exist because they say different things to the team.
+pub async fn put_pause(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+    Json(request): Json<AgentPauseInput>,
+) -> Result<Json<AgentProfileResponse>, ApiError> {
+    require_human(&principal, "human agent owner or workspace admin required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let agent_member_id = path_uuid(&agent, "invalid agent id")?;
+    let paused = request.paused;
+    let actor_member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let profile = settle_db(
+        "agents.put_pause",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_profile_editor_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor_member_id,
+                )
+                .await?
+                {
+                    return Ok(Err(rejection));
+                }
+                let Some(stored) = set_agent_paused_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor_member_id,
+                    paused,
+                )
+                .await?
+                else {
+                    return Ok(Err(ApiError::not_found("agent profile target not found")));
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(
+                        workspace_id,
+                        if paused {
+                            "agent.profile.paused"
+                        } else {
+                            "agent.profile.resumed"
+                        },
+                    )
+                    .by(actor_member_id)
+                    .about(agent_member_id)
+                    .target("agent_profile", agent_member_id)
+                    .via_token(via_token_id)
+                    .with_schema(
+                        "momo.agent_profile.pause.v1",
+                        json!({ "paused": paused, "version": stored.version }),
+                    ),
+                )
+                .await?;
+                Ok(Ok(stored))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentProfileResponse {
+        profile: profile_dto(&profile),
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent}/allowed-models` — Swift
+/// `AgentProfileRoutes.allowedModels` (:40-73).
+///
+/// The **only** read on the agent surface that any active workspace member may
+/// make, and the widening is deliberate: this is the vocabulary of the composer's
+/// model picker and of every `routing.model` a teammate may name. Gating it to
+/// owners would leave everyone else guessing which values the send path accepts,
+/// and a guess that is wrong is a 400 on a message someone meant to send.
+///
+/// What it must NOT become is a `workspace.settings` read. That JSON is an
+/// extensible bag and may later hold keys not every member should see; this
+/// answer is derived from it by the same `allowed_agent_models` helper the two
+/// enforcement paths use, so the picker and the gate cannot disagree about a
+/// model string.
+pub async fn allowed_models(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+) -> Result<Json<AllowedAgentModelsResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let agent_member_id = path_uuid(&agent, "invalid agent id")?;
+    let actor_member_id = principal.member_id;
+
+    let models = settle_db(
+        "agents.allowed_models",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if active_workspace_role(conn, workspace_id, actor_member_id)
+                    .await?
+                    .is_none()
+                {
+                    return Ok(Err(ApiError::forbidden("not an active workspace member")));
+                }
+                let Some((base, settings)) =
+                    load_agent_model_policy_in_tx(conn, workspace_id, agent_member_id).await?
+                else {
+                    return Ok(Err(ApiError::not_found("agent profile target not found")));
+                };
+                Ok(Ok(allowed_agent_models(&base, &settings)))
+            })
+        })
+        .await,
+    )?;
+
+    // Sorted so the wire result is deterministic; the gates compare membership,
+    // not order, so this changes nothing they enforce (Swift :65-73).
+    let mut allowed_agent_models = models;
+    allowed_agent_models.sort();
+    Ok(Json(AllowedAgentModelsResponse {
+        allowed_agent_models,
     }))
 }
 
@@ -370,6 +662,61 @@ mod tests {
         assert!(
             matches!(error, AgentSpecInvalid::CredentialShaped(_)),
             "{error}"
+        );
+    }
+
+    /// The pause body is one key and closed-world: a request that also carried
+    /// `instructions` must not half-apply, and `{"paused": "true"}` is a typo
+    /// worth a 400 rather than a truthy string.
+    #[test]
+    fn the_pause_request_is_one_boolean_and_nothing_else() {
+        let parsed: AgentPauseInput =
+            serde_json::from_value(json!({"paused": true})).expect("paused");
+        assert!(parsed.paused);
+        for bad in [
+            json!({}),
+            json!({"paused": "true"}),
+            json!({"paused": true, "instructions": "…"}),
+        ] {
+            assert!(
+                serde_json::from_value::<AgentPauseInput>(bad.clone()).is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
+    /// The picker's answer carries the model list and **nothing else** — no
+    /// workspace settings, no agent metadata — under the camelCase key the Swift
+    /// client reads.
+    #[test]
+    fn the_allowed_models_answer_is_a_bare_sorted_list() {
+        let json = serde_json::to_value(AllowedAgentModelsResponse {
+            allowed_agent_models: vec!["hermes-agent".into(), "hermes-fast".into()],
+        })
+        .expect("serialize");
+        assert_eq!(
+            json,
+            json!({"allowedAgentModels": ["hermes-agent", "hermes-fast"]}),
+            "one key, camelCase, and no settings bag: {json}"
+        );
+    }
+
+    /// A profile edit is judged by the same validator the create form uses, so
+    /// the two cannot drift into accepting different profiles.
+    #[test]
+    fn a_profile_edit_is_validated_exactly_like_a_created_one() {
+        let unusable = AgentProfileInput {
+            instructions: "be terse".into(),
+            model_pref: Some("hermes-fast".into()),
+            effort_pref: Some("max".into()),
+            enabled_tools: vec![],
+            triggers: None,
+        };
+        let error = validated_profile(&unusable).expect_err("hermes-fast cannot do max");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message,
+            "effortPref 'max' is not supported by modelPref 'hermes-fast'"
         );
     }
 

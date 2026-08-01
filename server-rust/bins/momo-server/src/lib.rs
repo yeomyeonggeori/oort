@@ -213,6 +213,19 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/notification-pref",
             put(routes::channels::notification_pref),
         )
+        // B5.3a — channel membership. This is what makes an invited agent
+        // *mentionable*: `POST …/agents` mints the identity, this puts it in a
+        // room, and only then does an `@handle` become a run instead of an
+        // audited `agent_not_channel_member` no-op. No agent branch either side
+        // (invariant #5) — a human joins through the same route.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/members",
+            post(routes::channels::add_member),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/members/{member}",
+            delete(routes::channels::remove_member),
+        )
         // B4.1 — the roster. Not a feature: without it every message, mention
         // and sidebar row is labelled with a uuid prefix (diff matrix D-1).
         // Swift serves the same handler at both paths (`RosterRoutes.swift:18-19`).
@@ -357,9 +370,22 @@ pub fn build_app(state: AppState) -> Router {
         // beside the humans and makes it mentionable as soon as it is added to a
         // channel. The profile read is the minimum a hub UI consumes.
         .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
+        // B5.3a completes the pair: B5.2 could read a profile and respect
+        // `paused`, but nothing could write either — an agent's behaviour was
+        // fixed at birth and the only way to stop one was to remove it from
+        // every channel. `allowed-models` is the picker's vocabulary and the
+        // only agent read a plain member may make.
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/profile",
-            get(routes::agents::get_profile),
+            get(routes::agents::get_profile).put(routes::agents::put_profile),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/pause",
+            put(routes::agents::put_pause),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/allowed-models",
+            get(routes::agents::allowed_models),
         )
         // agent gateway (MOMO-325 / migration 008)
         .route(
