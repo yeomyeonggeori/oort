@@ -30,11 +30,48 @@ export function filterLabel(filter: InboxFilter): string {
   return "에이전트";
 }
 
-/** Parse a `?filter=` value, falling back to the action-first default tab. */
-export function parseFilter(raw: string | null): InboxFilter {
-  return INBOX_FILTERS.includes(raw as InboxFilter)
-    ? (raw as InboxFilter)
-    : "needs-action";
+/**
+ * 이 서버에서 실제로 답이 오는 탭만 (goal B12).
+ *
+ * 세 탭 중 둘은 승인 원장 위에 서 있다: 결정 대기는 `GET …/approvals`가 전부이고,
+ * 에이전트는 그 원장에 작업 실행 기록을 얹는다. 둘 다 이 서버에 없으므로 그
+ * 탭들은 **언제나 빈 목록**이 된다. 빈 목록은 "결정할 것이 없다"로 읽히는데
+ * 그것은 우리가 모르는 사실이다. 그래서 탭 자체를 세우지 않는다.
+ *
+ * 멘션은 남는다. 그 탭은 read-state 투영과 메시지 읽기 위에 서 있고 둘 다 이
+ * 서버에 있다.
+ *
+ * 판정을 인자로 받는 이유: 이 클라이언트의 테스트는 DOM 없이 돌고, 어떤 탭이
+ * 남는가는 계약이라 못으로 박을 수 있어야 한다.
+ */
+export function availableInboxFilters(
+  provides: (surface: "approvals" | "agentRunHistory") => boolean
+): InboxFilter[] {
+  return INBOX_FILTERS.filter((filter) => {
+    if (filter === "needs-action") return provides("approvals");
+    if (filter === "agents") {
+      return provides("approvals") || provides("agentRunHistory");
+    }
+    return true;
+  });
+}
+
+/**
+ * Parse a `?filter=` value, falling back to the first tab this server can serve.
+ *
+ * 기본값이 상수가 아니라 **남은 탭의 첫 번째**인 것이 goal B12의 수정이다. 예전
+ * 기본값은 `needs-action`이었고, 그 탭이 죽은 서버에서 인박스는 열자마자 영영
+ * 비어 있는 목록에 착지했다. 앱에서 가장 자주 열리는 표면이 가장 먼저 거짓말을
+ * 하고 있었다는 뜻이다.
+ */
+export function parseFilter(
+  raw: string | null,
+  available: InboxFilter[] = INBOX_FILTERS
+): InboxFilter {
+  const fallback = available[0] ?? "mentions";
+  if (!INBOX_FILTERS.includes(raw as InboxFilter)) return fallback;
+  const parsed = raw as InboxFilter;
+  return available.includes(parsed) ? parsed : fallback;
 }
 
 /** Stable element ids so tab and panel can point at each other (ARIA tabs). */

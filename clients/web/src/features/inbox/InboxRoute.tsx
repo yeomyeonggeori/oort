@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -16,7 +16,9 @@ import {
   type Armed,
 } from "@/features/timeline/ApprovalActions";
 import type { DecisionOutcome } from "@/features/timeline/approvalDecision";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
 import {
+  availableInboxFilters,
   INBOX_FILTER_TABS,
   panelId,
   parseFilter,
@@ -141,13 +143,24 @@ function FeedPanel({
 export function InboxRoute() {
   const { session } = useSession();
   const [params, setParams] = useSearchParams();
-  const filter = parseFilter(params.get("filter"));
+  // 이 서버가 답할 수 있는 탭만 (goal B12). 승인 원장이 없는 서버에서는 결정
+  // 대기와 에이전트가 사라지고 멘션 하나만 남는다.
+  const availableFilters = useMemo(
+    () => availableInboxFilters((surface) => isSurfaceProvided(surface)),
+    []
+  );
+  const filter = parseFilter(params.get("filter"), availableFilters);
+  const approvalsProvided = isSurfaceProvided("approvals");
 
   // 결정 대기 stays loaded on every tab: it is the count that decides whether a
   // person needs to come here at all. The mention count is free (read-state is
   // already in cache for the sidebar), and 에이전트 has no cheap count, so it
   // shows none rather than a guess.
-  const needsAction = useNeedsAction(true);
+  //
+  // 승인 원장이 없는 서버에서는 이 요청을 아예 만들지 않는다. 404를 받아 놓고
+  // 0으로 세는 것은 "결정할 것이 없다"를 지어내는 일이고, 그 숫자가 탭 배지에
+  // 올라간다 (goal B12).
+  const needsAction = useNeedsAction(approvalsProvided);
   const mentions = useMentions(filter === "mentions");
   const agents = useAgentFeed(filter === "agents", {
     ownedBy: session.member.id,
@@ -240,15 +253,20 @@ export function InboxRoute() {
           <SidebarDrawerToggle />
           <h1 className="text-body font-semibold">인박스</h1>
         </div>
-        <FilterTabs
-          spec={INBOX_FILTER_TABS}
-          value={filter}
-          onChange={(next) => setParams({ filter: next }, { replace: true })}
-          counts={{
-            "needs-action": needsAction.items.length,
-            mentions: mentionCount,
-          }}
-        />
+        {/* 탭이 하나뿐이면 탭 줄을 세우지 않는다 (goal B12). 고를 것이 없는
+            고르개는 컨트롤이 아니라 장식이고, 남은 하나에 이미 있는 이름을
+            한 번 더 적을 뿐이다. */}
+        {availableFilters.length > 1 && (
+          <FilterTabs
+            spec={{ ...INBOX_FILTER_TABS, values: availableFilters }}
+            value={filter}
+            onChange={(next) => setParams({ filter: next }, { replace: true })}
+            counts={{
+              "needs-action": needsAction.items.length,
+              mentions: mentionCount,
+            }}
+          />
+        )}
       </header>
 
       {decisionNote && (
@@ -276,10 +294,17 @@ export function InboxRoute() {
         />
       )}
 
+      {/* 탭 줄이 없으면 이 상자는 tabpanel이 아니다. 역할만 남겨 두면
+          `aria-labelledby`가 존재하지 않는 탭을 가리키고, 보조기술은 이름 없는
+          패널을 읽는다. 탭이 하나뿐일 때 이 표면은 그냥 목록이다. */}
       <div
-        role="tabpanel"
-        id={panelId(filter)}
-        aria-labelledby={tabId(filter)}
+        {...(availableFilters.length > 1
+          ? {
+              role: "tabpanel",
+              id: panelId(filter),
+              "aria-labelledby": tabId(filter),
+            }
+          : {})}
         className="min-h-0 flex-1 overflow-y-auto"
       >
         <FeedPanel

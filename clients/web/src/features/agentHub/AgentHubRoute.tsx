@@ -94,12 +94,28 @@ import {
   type AgentDraft,
 } from "./createModel";
 import { CreateAgentDialog } from "./CreateAgentDialog";
+import {
+  isSurfaceProvided,
+  type SurfaceId,
+} from "@/features/capabilities/serverSurfaces";
 
-const SECTIONS: { id: AgentHubSection; label: string }[] = [
+/**
+ * 허브의 탭 셋과 각 탭이 서 있는 서버 표면 (goal B12).
+ *
+ * 프로필은 표면을 적지 않는다: 그 탭의 읽기/쓰기는 이 서버에 있고, 편집 가능
+ * 여부는 이미 자기 프로브가 판정한다(features/routing/capability.ts ④).
+ * 메모리와 이력은 이 서버에 경로가 없어서 열면 언제나 오류였다.
+ */
+const SECTIONS: { id: AgentHubSection; label: string; surface?: SurfaceId }[] = [
   { id: "profile", label: "프로필" },
-  { id: "memory", label: "메모리" },
-  { id: "history", label: "이력" },
+  { id: "memory", label: "메모리", surface: "agentMemory" },
+  { id: "history", label: "이력", surface: "agentRunHistory" },
 ];
+
+/** 이 서버에서 실제로 답이 오는 탭만. */
+const VISIBLE_SECTIONS = SECTIONS.filter(
+  (item) => item.surface === undefined || isSurfaceProvided(item.surface)
+);
 
 const DATE_TIME = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -421,7 +437,7 @@ export function AgentHubRoute() {
                     aria-label={`${selected.displayName} 상세`}
                   >
                     <ul className="flex gap-1 whitespace-nowrap">
-                      {SECTIONS.map((item) => (
+                      {VISIBLE_SECTIONS.map((item) => (
                         <li key={item.id} className="shrink-0">
                           <button
                             type="button"
@@ -932,6 +948,11 @@ function PermissionsSection({
           </dd>
         </div>
       </dl>
+      {/* 앱 표면은 진입점을 감추지 않고 **서버의 답으로** 접는다 (goal B12,
+          이중 방어 (b)). 이 링크가 데려가는 패널은 앱 목록을 못 받으면 그
+          자리에서 이유를 말하므로, 여기서 미리 판정할 필요가 없다. 정적 판정은
+          사이드바의 작업 흐름처럼 **일급 목적지**에만 쓴다: 설정의 한 줄과
+          달리 그것은 셸의 상시 네비게이션이고, 죽은 채로 서 있는 값이 다르다. */}
       <Button variant="outline" size="sm" className="self-start" asChild>
         <Link to="/settings?section=plugins">설정의 앱에서 권한 보기</Link>
       </Button>

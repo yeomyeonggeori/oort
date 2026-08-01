@@ -7,6 +7,7 @@ import {
   mentionMemberIds,
   mentionsMember,
   orderFeed,
+  availableInboxFilters,
   parseFilter,
   relativeLabel,
   runItem,
@@ -279,5 +280,51 @@ describe("filter parsing", () => {
     expect(parseFilter("nope")).toBe("needs-action");
     expect(parseFilter("mentions")).toBe("mentions");
     expect(parseFilter("agents")).toBe("agents");
+  });
+});
+
+// goal B12: 승인 원장이 없는 서버에서 인박스가 무엇을 보여야 하는가.
+describe("이 서버가 답할 수 있는 탭만", () => {
+  const nothing = () => false;
+  const everything = () => true;
+
+  it("승인도 실행 기록도 없으면 멘션만 남는다", () => {
+    expect(availableInboxFilters(nothing)).toEqual(["mentions"]);
+  });
+
+  it("둘 다 있으면 세 탭 그대로다", () => {
+    expect(availableInboxFilters(everything)).toEqual([
+      "needs-action",
+      "mentions",
+      "agents",
+    ]);
+  });
+
+  it("에이전트 탭은 두 원천 중 하나만 있어도 선다", () => {
+    // 그 탭은 승인 원장 위에 작업 실행 기록을 얹은 것이라, 한쪽만 있어도
+    // 보여줄 행이 존재한다.
+    expect(availableInboxFilters((s) => s === "agentRunHistory")).toEqual([
+      "mentions",
+      "agents",
+    ]);
+    expect(availableInboxFilters((s) => s === "approvals")).toEqual([
+      "needs-action",
+      "mentions",
+      "agents",
+    ]);
+  });
+
+  it("기본 탭은 남은 탭의 첫 번째다: 죽은 탭에 착지하지 않는다", () => {
+    // 이것이 goal B12가 고친 것이다: 예전 기본값은 상수 needs-action이었고,
+    // 그 탭이 죽은 서버에서 인박스는 열자마자 영영 비어 있는 목록에 앉았다.
+    const onlyMentions = availableInboxFilters(nothing);
+    expect(parseFilter(null, onlyMentions)).toBe("mentions");
+    expect(parseFilter("needs-action", onlyMentions)).toBe("mentions");
+    expect(parseFilter("agents", onlyMentions)).toBe("mentions");
+  });
+
+  it("주소로 온 값이 살아 있는 탭이면 그대로 존중한다", () => {
+    const all = availableInboxFilters(everything);
+    expect(parseFilter("agents", all)).toBe("agents");
   });
 });

@@ -9,6 +9,7 @@ import {
   Lock,
   MessageSquare,
   Plus,
+  Search,
   Settings,
   User,
   Users,
@@ -33,6 +34,7 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { InlineBanner } from "@/features/common/States";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -188,6 +190,8 @@ export function QuickSwitcher({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onOpenChange, navigate, formDialogOpen]);
 
+  const searchProvided = isSurfaceProvided("messageSearch");
+
   function go(path: string) {
     onOpenChange(false);
     navigate(path);
@@ -227,6 +231,21 @@ export function QuickSwitcher({
         </Command.Empty>
 
         <Command.Group heading="이동">
+          {/* 메시지 검색은 팔레트 안에서 실행되지 않고 자기 표면으로 데려간다
+              (goal B12 H5). 이 리스트는 이미 받아 둔 목록을 cmdk가 동기로 걸러
+              내는 자리라, 서버에 묻고 기다리는 검색을 여기 끼워 넣으면 로딩·
+              오류·빈 결과가 갈 곳이 없다. 편승은 진입점까지다. */}
+          {searchProvided && (
+            <Command.Item
+              className={itemClass}
+              value="메시지 검색 찾기 search messages"
+              data-testid="switcher-message-search"
+              onSelect={() => go("/search")}
+            >
+              <Search className="size-4 opacity-70" />
+              메시지 검색
+            </Command.Item>
+          )}
           <Command.Item className={itemClass} onSelect={() => go("/inbox")}>
             <Inbox className="size-4 opacity-70" />
             인박스

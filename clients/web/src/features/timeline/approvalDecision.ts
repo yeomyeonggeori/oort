@@ -1,6 +1,10 @@
 import { NetworkError, fetchWithDeadline, type HttpResponse } from "@/lib/http";
 import { apiBase } from "@/lib/serverBase";
 import { getAccessToken } from "@/lib/session";
+import {
+  ABSENT_STATUSES,
+  serverSurface,
+} from "@/features/capabilities/serverSurfaces";
 import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
 
 // =============================================================================
@@ -117,12 +121,37 @@ export async function decideApproval(
   try {
     receipt = response.json<ApprovalDecisionReceipt>();
   } catch {
-    return {
-      kind: "error",
-      errorCopy: "서버 응답을 읽지 못했습니다. 다시 시도하세요.",
-    };
+    return unreadableAnswerOutcome(response.status, response.text);
   }
   return interpretReceipt(response.status, receipt);
+}
+
+/**
+ * 영수증이 아닌 답을 받았을 때 할 말. 갈래가 둘이고, 뭉치면 화면이 거짓말을 한다
+ * (goal B12).
+ *
+ * 승인 원장을 **가진** 서버의 404는 "그런 승인은 없다"는 뜻이고 영수증 스키마를
+ * 싣고 온다. 그래서 404가 `receiptStatuses`에 들어 있다. 그런데 이 라우트를 아예
+ * 싣지 않은 서버도 404를 답하고, 그 404는 라우터의 기본 응답이라 **본문이 없다**.
+ * 두 404가 같은 칸에 있었던 탓에 이 함수는 빈 본문에서 JSON 파싱에 걸려
+ * "서버 응답을 읽지 못했습니다. 다시 시도하세요"를 돌려주고 있었다. 결코 성공할
+ * 수 없는 재시도를 시키는 문장이고, 사용자 자리에서는 앱이 고장난 것으로 읽힌다.
+ *
+ * 그래서 본문 없는 미제공 상태 코드는 재시도를 권하지 않고 못 한다고 말한다.
+ * 판정은 `serverSaysAbsent`와 같은 집합을 쓴다: 규칙이 두 벌로 갈라지면 한쪽만
+ * 고쳐지는 날이 온다.
+ */
+export function unreadableAnswerOutcome(
+  status: number,
+  body: string
+): DecisionOutcome {
+  if (ABSENT_STATUSES.includes(status) && body.trim() === "") {
+    return { kind: "error", errorCopy: serverSurface("approvals").absentReason };
+  }
+  return {
+    kind: "error",
+    errorCopy: "서버 응답을 읽지 못했습니다. 다시 시도하세요.",
+  };
 }
 
 /**

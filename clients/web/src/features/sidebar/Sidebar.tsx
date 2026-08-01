@@ -42,6 +42,7 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { canCreateChannelNow } from "@/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -348,14 +349,26 @@ export function Sidebar({
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+              {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
+                  가는 곳이지 구독하는 것이 아니다. */}
+              {isSurfaceProvided("messageSearch") && (
+                <SidebarRow to="/search" icon={<Search className="size-4" />} label="검색" testId="nav-search" />
+              )}
               {/* 작업 흐름 sits with the global destinations for the reason
                   에이전트 does (MOMO-652): it is a place you GO, not a thing you
                   are subscribed to. It is also the one work surface that cannot
                   live in the channel drawer beside it — 작업 세션 is scoped to
                   the channel you are already in and, in its most used range, to
                   your own sessions, while someone looking for work to pick up is
-                  by definition looking for work that is not theirs (ADR-0143). */}
-              <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
+                  by definition looking for work that is not theirs (ADR-0143).
+
+                  이 서버가 작업 흐름을 싣지 않으면 줄 자체를 세우지 않는다
+                  (goal B12). 비활성으로 남겨 두는 선택지도 있었지만, 흐릿한 줄은
+                  "권한이 없다"로 읽히고 그것은 사실이 아니다: 없는 것은 권한이
+                  아니라 기능이다. 주소를 직접 열면 라우트가 이유를 말한다. */}
+              {isSurfaceProvided("workstreams") && (
+                <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
+              )}
             </ul>
 
             <SidebarSection

@@ -15,6 +15,9 @@ import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { AgentHubRoute } from "@/features/agentHub/AgentHubRoute";
 import { WorkstreamListRoute } from "@/features/workstreams/WorkstreamListRoute";
 import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRoute";
+import { SearchRoute } from "@/features/search/SearchRoute";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavailable";
 import { forgetQuota } from "@/features/settings/quotaModel";
 import { forgetUsage } from "@/features/settings/usageModel";
 
@@ -91,14 +94,45 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
+          {/* 메시지 검색 (goal B12 H5). 서버가 이미 싣고 있는 경로 위에 선다. */}
+          <Route
+            path="search"
+            element={
+              isSurfaceProvided("messageSearch") ? (
+                <SearchRoute />
+              ) : (
+                <SurfaceUnavailableRoute surface="messageSearch" />
+              )
+            }
+          />
           {/* 작업 흐름 (MOMO-677). Two routes, not a pane inside one channel:
               the detail has to be linkable on its own, because handing a
               stopped goal to someone else is the entire point of the surface
-              and "여기 좀 이어받아 줘" travels as a URL. */}
-          <Route path="workstreams" element={<WorkstreamListRoute />} />
+              and "여기 좀 이어받아 줘" travels as a URL.
+
+              라우트는 **남긴다**(goal B12). 이 서버가 작업 흐름을 싣지 않아도
+              그 주소를 북마크했거나 링크로 받은 사람은 존재하고, 그 사람을 `/`로
+              튕겨내면 화면은 아무 말도 하지 않은 채 다른 곳에 데려다 놓는다.
+              주소는 그대로 열리고, 열린 자리에서 못 하는 이유를 말한다. */}
+          <Route
+            path="workstreams"
+            element={
+              isSurfaceProvided("workstreams") ? (
+                <WorkstreamListRoute />
+              ) : (
+                <SurfaceUnavailableRoute surface="workstreams" />
+              )
+            }
+          />
           <Route
             path="workstreams/:workstreamId"
-            element={<WorkstreamDetailRoute />}
+            element={
+              isSurfaceProvided("workstreams") ? (
+                <WorkstreamDetailRoute />
+              ) : (
+                <SurfaceUnavailableRoute surface="workstreams" />
+              )
+            }
           />
           <Route path="settings" element={<SettingsRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
