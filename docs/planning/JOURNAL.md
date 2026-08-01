@@ -1481,6 +1481,10 @@
 - 한 일: **B5.3a(에이전트 운영 서버 표면) 랜딩**(PR #946) — 채널 멤버십 REST(사람/에이전트 무분기=불변식 #5, 티키타카 온보딩 접합점)·프로필 PUT/pause·routing 실구현(ADR-0134 D1 비대칭: 명시 위반=400 롤백/상속 위반=무시+audit, thread_root_then_routing은 예고대로 삭제=검증 위치가 진실). 게이트 전 스위트 63케이스+docker build green. conformance: 초대→멘션→응답→제거→침묵 / pause→run 0 / routing 반영. B5.3b(허브 UI) 병렬 진행 중.
 - 열린 것: B5.3b 랜딩+design-review → **티키타카 smoke(실 provider·NCP)** → 도그푸딩 조건 판정. 후속 티켓: 채널 멤버십 audit(Swift 파리티로 미기록)·FOR UPDATE 편집 락.
 
+## 2026-08-02 (새벽) · Fable · 오케스트레이션
+- 한 일: **B5.3b(에이전트 허브 UI) 랜딩**(PR #947) — 허브(만들기·프로필·pause·채널 배치)·승인 D-5(인박스 결정)·capability 4축(allowed-models 프로브 — GET 200을 PUT 존재로 오독하던 '거짓 ready' 실측 수정). design-review PASS(Blocker 0·High 2) → High 2(승인 오프라인 게이트 일원화·무장 시 초점 이동)+Medium 2(배너 범위·비가역 재진술)를 오케스트레이터가 직접 수정 후 머지. 전 대비 AA. **B5 아크 완성** — 남은 것: 티키타카 smoke(실 provider·NCP)로 도그푸딩 조건 판정.
+- 열린 것: 티키타카 smoke 실행(성재 provider link 설정 필요할 수 있음 — anthropic 키). 후속 티켓: capture:routing base 실패·M3/M4·채널 멤버십 audit.
+
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
 - 열린 것: 없음 (전부 오후 세션으로 인계됨).
