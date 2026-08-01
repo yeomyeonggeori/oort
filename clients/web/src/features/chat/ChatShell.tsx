@@ -14,6 +14,7 @@ import { useIsMobileShell } from "@/app/shellNav";
 import {
   channelLabel,
   channelLabelParts,
+  dmAutoReplyAgent,
   dmPeer,
   makeDirectory,
   memberFor,
@@ -124,6 +125,12 @@ export function ChatShell() {
     ? channelLabel(channel, directory, session.member.id)
     : "채널";
   const peer = channel ? dmPeer(channel, directory, session.member.id) : null;
+  // goal B13 (QA H7): 이 채널이 멘션 없이도 답하는 방인가. `peer`와 따로 묻는다
+  // — `peer`는 "상대가 누구냐"이고 이쪽은 "서버가 자동으로 부르느냐"라서, 그룹
+  // DM이나 사람끼리의 DM에서 둘의 답이 갈린다.
+  const dmAgent = channel
+    ? dmAutoReplyAgent(channel, directory, session.member.id)
+    : null;
 
   const timeline = useTimeline(
     realtime,
@@ -329,14 +336,52 @@ export function ChatShell() {
   // 워처는 행이 실제로 마운트된 뒤에만 찾을 것이 있다. 가상 목록이라 첫 페이지가
   // 도착하기 전에는 DOM에 행이 하나도 없고, 워처의 3초 창은 그 사이에 지나간다.
   const anchorReady = messages.length > 0;
+
+  // 앵커를 끝내 못 찾았다 (goal B12 R1 High-3).
+  //
+  // 예전에는 이 실패가 아무 자국도 남기지 않았다. 인박스에서는 대개 맞는
+  // 절충이었지만 검색에서는 가정이 뒤집힌다: 검색은 정의상 로드된 머리에 없는
+  // 것을 찾아 주는 표면이라, 사용자는 방금 화면에서 읽은 문장을 누르고 전혀
+  // 다른 메시지가 있는 채널 바닥에 도착한다. 표식도, 문장도, 재시도도 없이.
+  //
+  // 백필까지 가지 않고 **신호**로 갚는다. 다만 신호는 참이어야 하므로, 무슨 일이
+  // 일어났는지 아는 만큼만 말한다.
+  const [anchorMissed, setAnchorMissed] = useState<"older" | "unknown" | null>(null);
+
+  // 주소가 가리키는 자리가 바뀌면 앞선 실패는 이 화면의 사실이 아니다.
+  useEffect(() => {
+    setAnchorMissed(null);
+  }, [anchorMsg, anchorSeq, channelId]);
+
   useEffect(() => {
     if (!anchorReady) return undefined;
-    if (anchorMsg !== null) return watchForMessageId(anchorMsg);
+
+    /**
+     * 목표가 지금 로드된 창보다 **위쪽**인가. seq는 채널의 순서값이므로, 목표가
+     * 가장 오래된 로드분보다 작으면 그것은 추측이 아니라 사실이다. seq를 모르면
+     * (`?seq=` 없이 온 링크) 모른다고 답하고, 화면도 모르는 채로 말한다.
+     */
+    const missKind = (): "older" | "unknown" => {
+      const target = anchorSeq === null ? Number.NaN : Number(anchorSeq);
+      if (!Number.isFinite(target)) return "unknown";
+      const oldestLoaded = messages.reduce(
+        (min, message) => Math.min(min, message.seq),
+        Number.POSITIVE_INFINITY
+      );
+      return target < oldestLoaded ? "older" : "unknown";
+    };
+    const onExpire = () => setAnchorMissed(missKind());
+
+    if (anchorMsg !== null) return watchForMessageId(anchorMsg, { onExpire });
     if (anchorSeq !== null) {
       const seq = Number(anchorSeq);
-      if (Number.isFinite(seq)) return watchForMessage(seq);
+      if (Number.isFinite(seq)) return watchForMessage(seq, { onExpire });
     }
     return undefined;
+    // `messages`는 의도적으로 빼 둔다: 새 메시지가 도착할 때마다 워처를 다시
+    // 돌리면 3초 창이 영원히 갱신된다. 만료 시점의 창은 `missKind`가 클로저로
+    // 잡은 그 목록이면 충분하다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorReady, anchorMsg, anchorSeq, channelId]);
 
   // Under 900px the 작업 세션 pane stops being a column beside the channel and
@@ -576,6 +621,24 @@ export function ChatShell() {
             모른 채 조용한 화면을 읽게 된다. `offline`은 여전히 여기 남는다 —
             허들 컨트롤처럼 지금 쓸 수 있는지를 물어야 하는 것들이 읽는다. */}
 
+        {/* 가리켜진 메시지를 끝내 못 찾았다 (goal B12 R1 High-3).
+            tone="neutral": 고장이 아니라 아직 안 불러온 것이라 --danger도
+            role="alert"도 맞지 않는다. 닫기가 있는 이유는 이 줄이 사람의 다음
+            행동을 막지 않아야 하기 때문이다. */}
+        {anchorMissed !== null && (
+          <InlineBanner
+            tone="neutral"
+            message={
+              anchorMissed === "older"
+                ? "찾던 메시지는 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요."
+                : "찾던 메시지를 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요."
+            }
+            actionLabel="닫기"
+            onAction={() => setAnchorMissed(null)}
+            testId="chat-anchor-missed"
+          />
+        )}
+
         <div className="min-h-0 flex-1">
           {hasChannel ? (
             <Timeline
@@ -654,6 +717,7 @@ export function ChatShell() {
             channelId={channelId}
             directory={directory}
             channelLabel={label}
+            dmAgent={dmAgent}
             onSend={timeline.send}
           />
         )}

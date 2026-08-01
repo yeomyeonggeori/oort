@@ -35,6 +35,23 @@ export function channelPath(channelId: string, seq?: number): string {
 }
 
 /**
+ * Route for a search hit (goal B12 H5).
+ *
+ * 두 열쇠를 **함께** 싣는다. `msg`는 정확한 신원이라 찾는 데 쓰이고, `seq`는
+ * 채널의 순서값이라 **못 찾았을 때 이유를 말하는 데** 쓰인다: 목표 seq가 지금
+ * 로드된 가장 오래된 seq보다 작으면 "더 위쪽에 있어 아직 불러오지 않았다"가
+ * 추측이 아니라 사실이 된다. 검색 결과는 이미 둘 다 들고 있다
+ * (`MessageSearchHit.messageId` / `.seq`).
+ */
+export function searchHitPath(
+  channelId: string,
+  messageId: string,
+  seq: number
+): string {
+  return `${messageAnchorPath(channelId, messageId)}&seq=${seq}`;
+}
+
+/**
  * Route for a channel anchored at a message ID rather than a seq (MOMO-677).
  *
  * The goal layer knows its anchor thread by `rootMessageId` and never sees a
@@ -100,13 +117,29 @@ export interface WatchOptions {
   schedule?: (fn: () => void, ms: number) => number;
   cancel?: (handle: number) => void;
   watchMs?: number;
+  /**
+   * 행을 끝내 찾지 못하고 시한이 지났다. 호출자가 그 사실을 말할 수 있게 알린다
+   * (goal B12 R1 High-3).
+   *
+   * 취소된 감시자는 부르지 않는다: 채널을 옮겨서 그만둔 것은 실패가 아니다.
+   */
+  onExpire?: () => void;
 }
 
 /**
  * Scroll the row matching this selector into view once it mounts. Returns a
- * cancel function. If the row never appears (it is older than the loaded head),
- * the watcher expires silently: the channel is open, which is the outcome that
- * matters, and a message that says "not found" would be worse than nothing.
+ * cancel function.
+ *
+ * 행이 끝내 나타나지 않으면(로드된 머리보다 오래된 메시지) 감시자는 조용히
+ * 만료된다. 원래 그 침묵은 인박스·활동을 위한 판단이었다. 그 표면들의 행은
+ * 대개 최근이라 거의 언제나 찾아지고, 드물게 못 찾아도 "채널은 열렸다"가 쓸 만한
+ * 결과이기 때문이다.
+ *
+ * **검색에서는 그 가정이 뒤집힌다**: 검색은 정의상 머리에 없는 것을 찾는
+ * 표면이라 만료가 예외가 아니라 흔한 경로다. 사용자는 화면에서 읽은 그 문장을
+ * 눌렀는데 전혀 다른 메시지가 있는 채널 바닥에 도착하고, 표식도 문장도 재시도도
+ * 없다. 그래서 침묵은 **기본값으로 남기되** 만료를 알릴 통로를 연다. 무엇을 할지는
+ * 표면이 정한다.
  */
 function watchForRow(selector: string, options: WatchOptions = {}): () => void {
   const doc = options.doc ?? document;
@@ -127,7 +160,10 @@ function watchForRow(selector: string, options: WatchOptions = {}): () => void {
       schedule(() => row.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
       return;
     }
-    if (now() >= deadline) return;
+    if (now() >= deadline) {
+      options.onExpire?.();
+      return;
+    }
     handle = schedule(tick, POLL_MS);
   };
 

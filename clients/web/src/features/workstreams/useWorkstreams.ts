@@ -6,6 +6,7 @@ import {
   type Workstream,
   type WorkstreamStatus,
 } from "@/lib/api";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
 import { isWorkstreamMissing } from "./model";
 
 // =============================================================================
@@ -17,6 +18,19 @@ import { isWorkstreamMissing } from "./model";
 /** Lower-cased keys, because the same id arrives upper-cased from Swift. */
 function key(value: string): string {
   return value.toLowerCase();
+}
+
+/**
+ * 이 서버가 작업 흐름을 싣고 있는가 (goal B12).
+ *
+ * 라우트는 이미 판정표를 보고 갈리지만, 판정은 **훅에도** 있어야 한다. 아래
+ * `useSessionWorkstream`은 작업 흐름 라우트가 아니라 채널 안의 작업 세션 패널이
+ * 부르기 때문이다: 작업 흐름 근처에도 가지 않은 사람이 채널을 열기만 해도 없는
+ * 경로로 요청이 나갔고, 그 404는 아무 화면도 받지 않았다. 진입점만 감추고 요청을
+ * 남겨 두면 표면은 조용해지지만 네트워크 탭은 여전히 거짓말을 하고 있다.
+ */
+function workstreamsProvided(): boolean {
+  return isSurfaceProvided("workstreams");
 }
 
 export function useWorkstreams(
@@ -38,6 +52,7 @@ export function useWorkstreams(
     // 인박스·멤버·에이전트 would have quietly succeeded on the retry
     // (PR 918 R1 Low).
     refetchInterval: 60_000,
+    enabled: workstreamsProvided(),
   });
 }
 
@@ -49,6 +64,7 @@ export function useWorkstream(workspaceId: string, workstreamId: string) {
     // workstream anchored outside the reader's channels, and retrying it three
     // times only delays the sentence that states it.
     retry: (failureCount, error) => !isWorkstreamMissing(error) && failureCount < 2,
+    enabled: workstreamsProvided(),
   });
 }
 
@@ -57,6 +73,7 @@ export function useWorkstreamRuns(workspaceId: string, workstreamId: string) {
     queryKey: ["workstream-runs", key(workspaceId), key(workstreamId)],
     queryFn: () => fetchWorkstreamRuns(workspaceId, workstreamId),
     retry: (failureCount, error) => !isWorkstreamMissing(error) && failureCount < 2,
+    enabled: workstreamsProvided(),
   });
 }
 
@@ -81,5 +98,6 @@ export function useSessionWorkstream(workspaceId: string, sessionId: string) {
       return rows[0] ?? null;
     },
     staleTime: 60_000,
+    enabled: workstreamsProvided(),
   });
 }

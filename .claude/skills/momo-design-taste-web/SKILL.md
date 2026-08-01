@@ -110,7 +110,7 @@ Every surface ships **empty / loading / error / offline**:
 
 ## 9. Agent-native surfaces (momo-specific)
 
-- Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent` on avatar/badge, plus "managed by {owner}" attribution. Never a different bubble shape or full-row background tint. The token test asserts a >= 90 degree hue gap from `--accent`, so human and agent identity cannot converge by a well-meant tweak.
+- Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent` on avatar/badge, plus "{owner} 님이 관리" attribution (the term the mac client already ships, `MomoAgentOwnerLabel.swift`). Never a different bubble shape or full-row background tint. The token test asserts a >= 90 degree hue gap from `--accent`, so human and agent identity cannot converge by a well-meant tweak.
 - Tool-call / approval / diff / cost cards are **structured, calm, dense**: title row (icon + name + status chip) then typed fields then a disclosure for raw payload. Status lifecycle chips (`queued / thinking / streaming / awaiting-approval / done / error`) use token status colors, text-first, no pulsing. Approval status maps to the real model (`pending / approved / rejected / expired / cancelled`).
 - Render only server-provided public fields; tool arguments, paths, credentials, and cost internals stay opaque even behind disclosure (matches `approvalCardModel` basic-mode contract).
 - Agent activity reads as "the agent did {verb} to {object} → {outcome}". Frame absence (timeout, silence, cache miss) as `stalled`, never promote it to `error` or a false story (agent-interaction-safety, ADR-0132).

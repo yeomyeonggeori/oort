@@ -19,7 +19,7 @@ serde_json = "1"
 
 # P2 native integrations (MOMO-603). Licences are all MIT/Apache-2.0 — the
 # permissive-stack rule applies to the client shell too, not just the backbone.
-tauri-plugin-deep-link = "2"   # momo:// scheme registration + OS URL delivery
+tauri-plugin-deep-link = "2"   # oort:// (+ legacy momo://) scheme registration + OS URL delivery
 tauri-plugin-notification = "2"
 mdns-sd = "0.20"               # pure-Rust _momo._tcp browse, no async runtime
 url = "2"

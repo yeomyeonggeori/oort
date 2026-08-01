@@ -204,7 +204,7 @@ sops exec-env /secure/momo/prod.sops.env \
    --role member --max-uses 1 --expires-days 7 \
    --output /run/momo/invite-code'
 # stdout 마지막 줄에 신규 멤버 전달용 딥링크가 출력된다:
-#   momo://join?server=https%3A%2F%2Fapi.example.com&code=<code>
+#   oort://join?server=https%3A%2F%2Fapi.example.com&code=<code>
 ```
 
 `member list`와 `invite-create`는 서버 REST 토큰을 우회하는 임의 SQL이 아니라 pinned
@@ -213,7 +213,7 @@ argv나 출력으로 노출되지 않는다. 초대 bearer code 원문도 SQL/�
 노출하지 않으며, 이미 존재하는 파일을 덮어쓰지 않고 요청한 host 경로에 mode 0600으로
 한 번만 기록한다. 전달 후 즉시 해당 파일을 안전하게 제거한다.
 
-`invite-create`는 초대 생성 후 완성된 딥링크(`momo://join?server=…&code=…`)를 stdout에
+`invite-create`는 초대 생성 후 완성된 딥링크(`oort://join?server=…&code=…`)를 stdout에
 출력한다. 이 링크가 운영자→신규 멤버 전달 산출물이며, 링크를 연 클라이언트는 서버
 URL과 초대코드를 프리필한다(멤버는 이름/비밀번호만 입력). server 값은 기본적으로 env의
 `PUBLIC_BASE_URL`(공개 HTTPS origin)을 percent-encoding한 것이고, `--server-url URL`로

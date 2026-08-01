@@ -1266,6 +1266,109 @@ export async function fetchMessages(
   return { ...page, messages: (messages ?? []).filter(isMessage) };
 }
 
+// ---- 메시지 검색 (goal B12 H5) ----------------------------------------------
+// GET /v1/workspaces/{ws}/search/messages?q=&limit=&cursor=
+//
+// 서버가 **이미** 싣고 있는 경로다(routes::search::messages, 도메인
+// crates/momo-messaging/src/search.rs). 아래 모양은 그 두 파일에서 읽은 것이고
+// 추측이 없다:
+//
+//   q       공백을 걷어낸 뒤 2자 미만이면 서버가 400. 그래서 이 클라이언트도
+//           2자 미만은 아예 보내지 않는다(features/search/searchModel.ts).
+//   limit   기본 20, 서버가 1..50으로 clamp한다.
+//   cursor  불투명 문자열. 깨진 커서는 400이지 1페이지로 조용히 되감기지 않는다.
+//
+// 응답은 `{ hits: [...], nextCursor?: string }`이고 **마지막 페이지는
+// `nextCursor` 키 자체가 없다**(null이 아니다). 서버 테스트가 그 사실을 못으로
+// 박아 두었다(`a_last_page_omits_the_cursor_key`), 그래서 여기서도 `undefined`로
+// 읽는다.
+//
+// 범위는 워크스페이스 전체지만 **호출자가 떠나지 않은 채널로 JOIN이 한정**된다.
+// 즉 검색은 비공개 채널을 여는 구멍이 될 수 없다. 결과 없음 문구는 그 사실을
+// 말해야 한다: 사용자는 "그런 말이 없었다"와 "내가 속하지 않은 채널의 말은 안
+// 보인다"를 구분할 수 있어야 한다.
+//
+// 매칭은 pg_trgm ILIKE 부분일치라 단어 안쪽과 한국어에도 걸리고, `%`/`_`는
+// 와일드카드가 아니라 **글자 그대로** 찾는다(서버가 이스케이프한다).
+
+/** 서버 기본 페이지 크기. 서버가 1..50으로 clamp한다. */
+export const SEARCH_LIMIT_DEFAULT = 20;
+
+/** 결과 한 건 (서버 `WorkspaceMessageSearchHitDto`). */
+export interface MessageSearchHit {
+  channelId: string;
+  messageId: string;
+  seq: number;
+  authorMemberId: string;
+  /** 에포크 밀리초. 커서는 마이크로초를 들지만 와이어는 늘 ms다. */
+  createdAtMs: number;
+  /** 첫 일치 주변으로 서버가 잘라 준 본문 조각. */
+  snippet: string;
+  /** `snippet` 안에서 일치가 시작하는 0-기준 위치. */
+  matchOffset: number;
+}
+
+export interface MessageSearchPage {
+  hits: MessageSearchHit[];
+  /** 다음 페이지가 없으면 서버가 이 키를 아예 빼고 보낸다. */
+  nextCursor?: string;
+}
+
+function searchHitFromWire(value: unknown): MessageSearchHit | null {
+  const channelId = str(value, "channelId");
+  const messageId = str(value, "messageId");
+  const authorMemberId = str(value, "authorMemberId");
+  const seq = num(value, "seq");
+  const createdAtMs = num(value, "createdAtMs");
+  const snippet = str(value, "snippet");
+  const matchOffset = num(value, "matchOffset");
+  if (
+    channelId === undefined ||
+    messageId === undefined ||
+    authorMemberId === undefined ||
+    seq === undefined ||
+    createdAtMs === undefined ||
+    snippet === undefined
+  ) {
+    return null;
+  }
+  return {
+    channelId: channelId.toLowerCase(),
+    messageId: messageId.toLowerCase(),
+    authorMemberId: authorMemberId.toLowerCase(),
+    seq,
+    createdAtMs,
+    snippet,
+    // 위치를 못 읽으면 강조만 포기한다. 결과 한 건을 통째로 버릴 이유는 아니다.
+    matchOffset: matchOffset ?? 0,
+  };
+}
+
+export async function searchMessages(
+  workspaceId: string,
+  query: string,
+  options: { limit?: number; cursor?: string; signal?: AbortSignal } = {}
+): Promise<MessageSearchPage> {
+  const params = new URLSearchParams({ q: query });
+  params.set("limit", String(options.limit ?? SEARCH_LIMIT_DEFAULT));
+  if (options.cursor !== undefined) params.set("cursor", options.cursor);
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/search/messages?${params.toString()}`,
+    options.signal === undefined ? {} : { signal: options.signal }
+  );
+  const source = responseRecord(res);
+  const hits = arrayField<unknown>(source, "hits") ?? [];
+  const nextCursor = str(source, "nextCursor");
+  return {
+    hits: hits
+      .map(searchHitFromWire)
+      .filter((hit): hit is MessageSearchHit => hit !== null),
+    ...(nextCursor === undefined ? {} : { nextCursor }),
+  };
+}
+
 /**
  * One oldest-first page of thread replies (ascending channel seq). `limit` is
  * clamped to 1...200 by the server; the work session panel asks for the ceiling

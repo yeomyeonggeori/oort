@@ -8,6 +8,8 @@ import {
 import { FeedList } from "@/features/inbox/FeedRow";
 import { relativeLabel } from "@/features/inbox/model";
 import { useAgentFeed } from "@/features/inbox/useInbox";
+import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 
 // =============================================================================
 // 활동 (R-1 §1, the second global surface). One line per thing an agent did:
@@ -22,7 +24,13 @@ import { useAgentFeed } from "@/features/inbox/useInbox";
 
 export function ActivityRoute() {
   const { connStatus } = useSession();
-  const feed = useAgentFeed(true);
+  // 이 표면의 두 원천이 **둘 다** 이 서버에 없다 (goal B12): 승인 원장(404)과
+  // 작업 실행 기록(경로가 POST 전용이라 GET은 405). 요청을 보내 놓고 빈 목록을
+  // 그리면 "에이전트가 한 일이 없다"고 말하는 셈인데, 그것은 우리가 모르는
+  // 사실이다. 그래서 묻지 않고, 못 한다고 말한다.
+  const provided =
+    isSurfaceProvided("approvals") || isSurfaceProvided("agentRunHistory");
+  const feed = useAgentFeed(provided);
   const offline = connStatus === "disconnected";
 
   return (
@@ -37,7 +45,10 @@ export function ActivityRoute() {
         </span>
       </header>
 
-      {offline && (
+      {/* 제공되지 않는 표면에서는 오프라인 줄도 세우지 않는다: "아직 이 목록을
+          한 번도 받지 못했습니다"는 연결 탓처럼 들리는데, 연결이 돌아와도 이
+          목록은 오지 않는다. 두 문장이 겹치면 사용자는 기다리면 된다고 읽는다. */}
+      {provided && offline && (
         <InlineBanner
           tone="neutral"
           message={
@@ -53,7 +64,12 @@ export function ActivityRoute() {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {feed.isLoading && feed.items.length === 0 ? (
+        {!provided ? (
+          <SurfaceUnavailableSection
+            surface="agentRunHistory"
+            testId="activity-unavailable"
+          />
+        ) : feed.isLoading && feed.items.length === 0 ? (
           <SkeletonRows rows={4} className="p-4" />
         ) : feed.error && feed.items.length === 0 ? (
           <InlineBanner

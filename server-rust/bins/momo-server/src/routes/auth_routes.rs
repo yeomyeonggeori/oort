@@ -176,15 +176,54 @@ pub(crate) async fn issue_and_record_session(
     Ok((access, refresh))
 }
 
+/// The refusal for a `workspace` that was supplied and is not a workspace id.
+///
+/// It **names the field and both accepted shapes**, because the client maps
+/// this 400 back to a Korean sentence by matching on the word `workspace`
+/// (`connectModel.signInFailureCopy`). Renaming it silently degrades that
+/// sentence to the generic one.
+const WORKSPACE_NOT_AN_ID: &str =
+    "workspace must be a workspace id (uuid), or omitted to use the default workspace";
+
+/// Which workspace a login lands in.
+///
+/// | `workspace` | result |
+/// |---|---|
+/// | absent, empty, or whitespace | [`DEMO_WORKSPACE_ID`] |
+/// | a parseable uuid | that workspace |
+/// | anything else | **400** |
+///
+/// ## Why the last row is not a fallback (goal B13 R2 High 1)
+///
+/// This used to be `.and_then(|raw| Uuid::parse_str(raw).ok()).unwrap_or(DEMO)`,
+/// so a `workspace` the caller actually typed — a slug, a workspace *name*, a
+/// typo'd id — was parsed, dropped on the floor, and the person was signed in
+/// somewhere else without being told. That is the failure mode the honesty
+/// principle exists for: the user asked for A and the server quietly gave them
+/// B, and every screen afterwards looked like a working session in the wrong
+/// tenant.
+///
+/// It is a real trap rather than a theoretical one, because **the workspace id
+/// is never shown anywhere in the product** — every other surface identifies a
+/// workspace by slug and name — so a person filling a box labelled
+/// "워크스페이스" has no id to type and will reach for the name they know.
+///
+/// The blank path is deliberately untouched: the connect form's empty box, the
+/// smoke harness and every existing client depend on it, and "I named nothing"
+/// is not a mistake to report. Only a value that was *supplied and unusable*
+/// fails, and it fails visibly.
+fn resolve_login_workspace(raw: Option<&str>) -> Result<Uuid, ApiError> {
+    let Some(named) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(DEMO_WORKSPACE_ID);
+    };
+    Uuid::parse_str(named).map_err(|_| ApiError::bad_request(WORKSPACE_NOT_AN_ID))
+}
+
 pub async fn login(
     State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let workspace_id = request
-        .workspace
-        .as_deref()
-        .and_then(|raw| Uuid::parse_str(raw).ok())
-        .unwrap_or(DEMO_WORKSPACE_ID);
+    let workspace_id = resolve_login_workspace(request.workspace.as_deref())?;
 
     // The tenant transaction is the sole RLS GUC seam; the lookup is therefore
     // scoped to the workspace being logged into (invariant #6).
@@ -511,5 +550,71 @@ mod tests {
         let ordinary = base_scopes();
         assert!(!carries_privileged_scope(&ordinary));
         assert_eq!(without_privileged_scopes(&ordinary), ordinary);
+    }
+
+    /// **The blank path still lands on the demo workspace — the regression
+    /// guard for goal B13 R2 High 1.**
+    ///
+    /// The connect form ships with this box EMPTY (`CONFIGURED_WORKSPACE`), the
+    /// smoke harness omits it unless `MOMO_WORKSPACE` is set, and every client
+    /// written before this batch sends nothing. Making an unusable value fail
+    /// must not make "I named nothing" fail with it: that would lock everyone
+    /// out of the default workspace at once.
+    #[test]
+    fn a_login_that_names_no_workspace_still_gets_the_default() {
+        for absent in [None, Some(""), Some("   "), Some("\t\n")] {
+            assert_eq!(
+                resolve_login_workspace(absent).expect("blank is not an error"),
+                DEMO_WORKSPACE_ID,
+                "{absent:?} names nothing, which is not a mistake to report"
+            );
+        }
+    }
+
+    /// A named workspace is honoured, whatever case it arrives in.
+    #[test]
+    fn a_named_workspace_id_is_the_one_the_session_is_scoped_to() {
+        let target = Uuid::from_u128(0x0199_aa11_2222_7000_8000_0000_0000_00d1);
+        assert_eq!(
+            resolve_login_workspace(Some(&target.to_string())).expect("a uuid"),
+            target
+        );
+        assert_eq!(
+            resolve_login_workspace(Some(&target.to_string().to_uppercase())).expect("a uuid"),
+            target
+        );
+        // Surrounding whitespace is a paste artifact, not a different workspace.
+        assert_eq!(
+            resolve_login_workspace(Some(&format!("  {target}  "))).expect("a uuid"),
+            target
+        );
+    }
+
+    /// **A supplied-but-unusable workspace fails loudly instead of signing the
+    /// person into a different tenant.**
+    ///
+    /// The old code parsed, discarded and fell back, so `workspace: "dawn-team"`
+    /// logged you into the demo workspace and said nothing. The values below are
+    /// exactly what a person reaches for when the box says "워크스페이스" and the
+    /// product has never once shown them an id: the slug and the display name.
+    ///
+    /// The sentence must keep naming `workspace`, because the web client keys
+    /// its Korean copy off that word.
+    #[test]
+    fn a_workspace_that_is_not_an_id_is_a_visible_400() {
+        for typed in ["dawn-team", "우리 팀", "not-a-uuid", "00000000", "0"] {
+            let rejection = resolve_login_workspace(Some(typed))
+                .expect_err("a supplied value that cannot be a workspace id");
+            assert_eq!(
+                rejection.status,
+                axum::http::StatusCode::BAD_REQUEST,
+                "{typed:?} must be refused, never silently swapped for the default"
+            );
+            assert!(
+                rejection.message.to_lowercase().contains("workspace"),
+                "the client matches on this word to translate the refusal: {}",
+                rejection.message
+            );
+        }
     }
 }

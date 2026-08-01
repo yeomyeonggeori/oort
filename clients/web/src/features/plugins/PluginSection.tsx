@@ -28,6 +28,8 @@ import {
   type PluginPolicyTool,
 } from "@/lib/api";
 import { SectionShell, StatusChip } from "@/features/settings/SettingsFields";
+import { serverSaysAbsent } from "@/features/capabilities/serverSurfaces";
+import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   actionErrorForPlugin,
   activePluginScopes,
@@ -265,6 +267,42 @@ export function PluginSection({ offline }: { offline: boolean }) {
     "워크스페이스에 설치할 앱과 내 사용 권한을 관리합니다.",
     "앱이 연결할 외부 도메인과 현재 내게 허용된 도구 정책을 함께 확인할 수 있습니다.",
   ];
+
+  // 미제공일 때의 머리말. 위 두 줄을 그대로 쓰면 구획이 스스로를 반박한다:
+  // "관리합니다 / 확인할 수 있습니다"라고 현재형으로 약속해 놓고 바로 아래에서
+  // "설치를 받지 않습니다"라고 부정하는 화면이 된다. 정직화 배치가 남길 수 있는
+  // 가장 민망한 자국이라, 접을 때는 설명 줄도 함께 접는다.
+  //
+  // 다른 세 표면(작업 흐름·활동·에이전트 허브)에는 이 문제가 없다. 그쪽 머리말은
+  // 라벨 한 단어뿐이라 부정할 본문을 갖고 있지 않다.
+  const unavailableLines = [
+    "이 서버에서는 앱을 설치하거나 권한을 관리할 수 없습니다.",
+  ];
+
+  // 이 서버가 앱 표면을 싣지 않았다 (goal B12). 판정은 정적 표가 아니라 **서버가
+  // 방금 준 답**으로 한다: 이 패널은 게이트가 실제로 답하는 서버 앞에서도 서고
+  // (gate-shell-layout이 여기서 권한 동의 다이얼로그를 잰다), 그 서버에서는
+  // 목록이 정상으로 그려져야 하기 때문이다. 즉 여기는 이중 방어의 (b)다.
+  //
+  // 접는 것은 배너 한 줄이 아니라 **구획 전체**다. 검색 상자와 보기 필터를 남겨
+  // 두면 없는 목록을 거르는 컨트롤이 되고, 그것이 패킷이 금지한 빈 껍데기다.
+  //
+  // 고치는 문장: "앱 목록을 읽지 못했습니다. 서버 연결을 확인한 뒤 다시
+  // 시도하세요." 연결은 멀쩡했고 확인할 것도 다시 시도할 것도 없었다.
+  if (serverSaysAbsent(catalogQuery.error)) {
+    return (
+      <SectionShell title="앱" lines={unavailableLines} wide>
+        <SurfaceUnavailableSection
+          surface="plugins"
+          testId="plugins-unavailable"
+          // SectionShell의 헤더는 자기 상자의 왼쪽 끝에 붙는데 EmptyInvite는
+          // 스스로 px-4를 갖는다. 그대로 두면 빈 상태만 제목보다 16px 안으로
+          // 들어가 앉는다(design-review M).
+          flush
+        />
+      </SectionShell>
+    );
+  }
 
   return (
     <SectionShell title="앱" lines={lines} wide>

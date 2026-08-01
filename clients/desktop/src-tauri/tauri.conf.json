@@ -27,7 +27,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["momo"]
+        "schemes": ["oort", "momo"]
       }
     },
     "updater": {

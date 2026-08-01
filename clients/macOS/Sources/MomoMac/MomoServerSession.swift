@@ -3360,7 +3360,7 @@ final class MomoInviteAdminViewModel: ObservableObject {
         errorMessage = nil
     }
 
-    /// `momo://join` deep link for the current one-time code. The server is the
+    /// `oort://join` deep link for the current one-time code. The server is the
     /// live session base URL, so the recipient lands on the same workspace the
     /// operator is in. Present whenever a code exists (unlike the short link,
     /// which needs a configured public domain).

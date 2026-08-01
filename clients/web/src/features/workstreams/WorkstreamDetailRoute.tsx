@@ -173,7 +173,7 @@ function RunRow({
                 className="min-w-0 truncate text-meta text-ink-muted"
                 data-testid="workstream-run-owner"
               >
-                managed by {actor.ownerName}
+                {actor.ownerName} 님이 관리
               </span>
             )}
           </span>

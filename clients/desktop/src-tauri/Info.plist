@@ -6,7 +6,7 @@
 
   Deliberately absent: CFBundleURLTypes. The bundler writes it from
   `tauri.conf.json > plugins > deep-link > desktop > schemes`, and a second copy
-  here would register momo:// twice. The generated plist is the place to check
+  here would register the join schemes twice. The generated plist is the place to check
   that it landed:
     plutil -p src-tauri/target/release/bundle/macos/momo-spike.app/Contents/Info.plist
 -->

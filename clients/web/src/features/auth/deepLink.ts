@@ -1,11 +1,16 @@
 import { normalizeServerUrl } from "@/lib/serverBase";
 
 // =============================================================================
-// Invite deep link (`momo://join`) — the web consumer of the contract in
+// Invite deep link (`oort://join`) — the web consumer of the contract in
 // docs/onboarding-deeplink.md, which the ops CLI (MOMO-584) and the mac client
 // (MomoDeepLinkParser, MOMO-585) already implement byte for byte:
 //
-//     momo://join?server=<percent-encoded base URL>&code=<invite code>
+//     oort://join?server=<percent-encoded base URL>&code=<invite code>
+//
+// goal B13: the scheme was `momo://` through MOMO-584/585. The product is oort
+// now, so links are MINTED as `oort://` and still ACCEPTED as either — see
+// ACCEPTED_SCHEMES. The repo, the crates and the binaries keep the momo
+// codename; only the surface a person sees moved.
 //
 //   - exactly two meaningful parameters, order-independent;
 //   - unknown parameters ignored (forward compatibility);
@@ -16,7 +21,7 @@ import { normalizeServerUrl } from "@/lib/serverBase";
 //   desktop  the shell hands over the URL (`momo:deep-link`, lib/tauri.ts);
 //   browser  there is no custom scheme, so the same parameters ride the page
 //            URL instead: `?server=...&code=...`, `?code=...` alone, or
-//            `?join=<percent-encoded momo:// link>` when a whole link was
+//            `?join=<percent-encoded oort:// link>` when a whole link was
 //            pasted. The HashRouter's own query (`#/path?code=...`) is read too,
 //            since that is where a link lands once the router owns the URL.
 //
@@ -32,7 +37,23 @@ export interface JoinPrefill {
   inviteCode: string;
 }
 
-const SCHEME = "momo";
+/**
+ * The scheme links are MINTED with (goal B13, momo -> oort rebrand).
+ * `buildJoinLink` and the ops CLI both emit this one.
+ */
+export const JOIN_SCHEME = "oort";
+
+/**
+ * Every scheme a link is ACCEPTED under.
+ *
+ * The old name is absorbed rather than ignored, and that is a decision about
+ * links that already exist: an invite is handed over out of band — email, Slack,
+ * a message — and it stays valid for days. Dropping `momo://` would break links
+ * that were correct when they were sent, to no one's benefit, so the OS keeps
+ * both registrations (`tauri.conf.json`, both `Info.plist`s) and every consumer
+ * keeps both here.
+ */
+const ACCEPTED_SCHEMES = [JOIN_SCHEME, "momo"] as const;
 const JOIN_ACTION = "join";
 
 function firstParam(params: URLSearchParams, name: string): string {
@@ -57,11 +78,12 @@ function prefillFrom(params: URLSearchParams): JoinPrefill | null {
 }
 
 /**
- * Parse a `momo://join` link. Returns null when the URL is not a join link or
+ * Parse a join link under any accepted scheme. Returns null when the URL is not
+ * a join link or
  * carries nothing usable, so a stray link is ignored rather than half-applied.
  *
- * The action is the authority (`momo://join`) or, when the link omits it
- * (`momo:join`), the first path segment. Same rule as the mac parser.
+ * The action is the authority (`oort://join`) or, when the link omits it
+ * (`oort:join`), the first path segment. Same rule as the mac parser.
  */
 export function parseJoinDeepLink(raw: string): JoinPrefill | null {
   let url: URL;
@@ -70,7 +92,8 @@ export function parseJoinDeepLink(raw: string): JoinPrefill | null {
   } catch {
     return null;
   }
-  if (url.protocol.toLowerCase() !== `${SCHEME}:`) return null;
+  const protocol = url.protocol.toLowerCase();
+  if (!ACCEPTED_SCHEMES.some((scheme) => protocol === `${scheme}:`)) return null;
   const action =
     url.hostname !== ""
       ? url.hostname.toLowerCase()
@@ -82,7 +105,7 @@ export function parseJoinDeepLink(raw: string): JoinPrefill | null {
 /**
  * Browser fallback: the same two parameters off the page URL. Reads the real
  * query first, then the hash query the HashRouter leaves behind, and unwraps a
- * whole `momo://join` link passed as `?join=`.
+ * whole `oort://join` link passed as `?join=`.
  */
 export function parseJoinFromPageUrl(href: string): JoinPrefill | null {
   let url: URL;

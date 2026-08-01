@@ -1,7 +1,7 @@
 // =============================================================================
 // Pure logic behind the settings shell (R-1 §5 / MOMO-601): catalogs, input
 // validation mirrored from the server, machine-reason to user-copy mapping,
-// and the momo://join deep link assembly.
+// and the oort://join deep link assembly (goal B13: was momo://).
 //
 // Nothing here touches React or the network, so model.test.ts can hold the
 // contract without a DOM: the slug rule has to match WorkspaceRoutes exactly
@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { ApiError } from "@/lib/api";
+import { JOIN_SCHEME } from "@/features/auth/deepLink";
 
 // --- catalogs ---------------------------------------------------------------
 
@@ -330,7 +331,7 @@ export function workspaceNameError(raw: string): string | null {
   return null;
 }
 
-// --- momo://join deep link (docs/onboarding-deeplink.md is the contract) -----
+// --- oort://join deep link (docs/onboarding-deeplink.md is the contract) -----
 
 /**
  * RFC 3986 percent-encoding: unreserved is `A-Z a-z 0-9 - . _ ~`.
@@ -344,9 +345,15 @@ export function percentEncode(value: string): string {
   );
 }
 
-/** `momo://join?server=<percent-encoded base URL>&code=<invite code>`. */
+/**
+ * `oort://join?server=<percent-encoded base URL>&code=<invite code>`.
+ *
+ * goal B13: minted as `oort://` since the rebrand. Links already in someone's
+ * inbox under the old `momo://` scheme still open — every consumer accepts both
+ * (`deepLink.ts` ACCEPTED_SCHEMES) and the OS keeps both registrations.
+ */
 export function buildJoinLink(serverBaseUrl: string, code: string): string {
-  return `momo://join?server=${percentEncode(serverBaseUrl)}&code=${percentEncode(code)}`;
+  return `${JOIN_SCHEME}://join?server=${percentEncode(serverBaseUrl)}&code=${percentEncode(code)}`;
 }
 
 /** Local calendar day as `YYYY-MM-DD`: unambiguous in a pasted invite. */

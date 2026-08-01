@@ -14,6 +14,10 @@ import {
 } from "./agentCardModel";
 import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
+import {
+  isSurfaceProvided,
+  serverSurface,
+} from "@/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // Agent card (R-1 §4). Structured, calm, dense: a title row (icon, name, status
@@ -152,6 +156,7 @@ function ApprovalBody({
     note?: string;
   } | null>(null);
   const [armed, setArmed] = useState<Armed>(null);
+  const approvalsProvided = isSurfaceProvided("approvals");
 
   const status = resolveApprovalStatus(local?.status ?? null, card.status);
   const settled = status !== "pending";
@@ -191,7 +196,7 @@ function ApprovalBody({
             커밋하지 않은 변경은 옮겨지지 않습니다. 작업 세션 패널의 내
             세션에서 온라인 호스트를 선택하세요.
           </p>
-        ) : !settled && card.approvalId !== null ? (
+        ) : !settled && card.approvalId !== null && approvalsProvided ? (
           <ApprovalActions
             approvalId={card.approvalId}
             className="border-t border-line"
@@ -214,6 +219,19 @@ function ApprovalBody({
               setLocal(next);
             }}
           />
+        ) : !settled && card.approvalId !== null ? (
+          /* 승인 원장이 없는 서버 (goal B12). 버튼을 그대로 두면 누르는 순간
+             결코 성공할 수 없는 요청이 나가고, 화면은 그 404를 원장의 답인 양
+             읽는다. 카드 자체는 남긴다: 에이전트가 허가를 기다리며 멈춰 섰다는
+             것은 참이고, 그 사실을 지우면 사람은 왜 아무 일도 일어나지 않는지
+             알 길이 없다. 지우는 것은 결정 컨트롤뿐이다. */
+          <p
+            className="border-t border-line px-3 py-2 text-meta text-ink-muted"
+            data-testid="approval-unsupported"
+          >
+            {serverSurface("approvals").absentReason}{" "}
+            {serverSurface("approvals").fallback}
+          </p>
         ) : null
       }
     >

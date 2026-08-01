@@ -57,7 +57,7 @@ invite-create options:
   --max-uses N                   Redemption limit, 1..10000 (default: 1)
   --expires-days N               Expiry, 1..365 days (default: 7)
   --output FILE                  New mode-0600 file for the one-time raw code
-  --server-url URL               API base URL embedded in the momo://join deep
+  --server-url URL               API base URL embedded in the oort://join deep
                                  link (default: PUBLIC_BASE_URL from the env)
 
 workspace-create environment (via --env-file or --from-env only):
@@ -237,7 +237,9 @@ run_invite_create() {
 
   # Build the operator delivery deep link while the code is still in scope, then
   # scrub the code from the environment. Contract (shared verbatim with the macOS
-  # client, MOMO-585): momo://join?server=<percent-encoded base URL>&code=<code>.
+  # client, MOMO-585): oort://join?server=<percent-encoded base URL>&code=<code>.
+  # goal B13: minted as oort:// since the rebrand; every client still accepts a
+  # momo:// link so invites already sent keep working.
   # Unlike the bare code — which stays file-only and never reaches argv, stdout,
   # or the container — this link is what the operator hands to the new member so
   # the client prefills the server URL and code (the member types only
@@ -245,7 +247,7 @@ run_invite_create() {
   # the code is intentionally present inside the link. It never touches the DB
   # path argv (the code travels to the container only via -e MOMO_OPS_INVITE_CODE).
   local deeplink
-  deeplink="momo://join?server=$(percent_encode "$server_url")&code=$(percent_encode "$invite_code")"
+  deeplink="oort://join?server=$(percent_encode "$server_url")&code=$(percent_encode "$invite_code")"
 
   unset MOMO_OPS_INVITE_CODE
   invite_code=""

@@ -3,6 +3,7 @@ import type { Channel, RosterMember } from "@/lib/api";
 import {
   channelLabel,
   channelLabelParts,
+  dmAutoReplyAgent,
   dmPeer,
   isAmbiguousName,
   makeDirectory,
@@ -108,6 +109,54 @@ describe("dmPeer", () => {
       muted: false,
     };
     expect(dmPeer(channel, DIRECTORY, DEMO.id)).toBeNull();
+  });
+});
+
+describe("dmAutoReplyAgent", () => {
+  // goal B13 / QA H7. The composer promises "멘션 없이 바로 말하면 답합니다" on the
+  // strength of this predicate, so every clause it gets wrong is a promise the
+  // send path then breaks. It mirrors the server's
+  // `momo_agent::dm::resolve_dm_addressing` clause for clause.
+  it("names the single agent counterpart of a 1:1 DM", () => {
+    expect(
+      dmAutoReplyAgent(dm(INTERN_AGENT.id.toUpperCase()), DIRECTORY, DEMO.id)
+        ?.handle
+    ).toBe("kim-intern");
+  });
+
+  it("is null when the counterpart is a human, who does not run", () => {
+    expect(dmAutoReplyAgent(dm(SEONGJAE.id), DIRECTORY, DEMO.id)).toBeNull();
+  });
+
+  it("is null for a group DM, which is back to \"who did you mean\"", () => {
+    const group: Channel = {
+      ...dm(INTERN_AGENT.id),
+      memberIds: [DEMO.id, INTERN_AGENT.id, SEONGJAE.id],
+    };
+    expect(dmAutoReplyAgent(group, DIRECTORY, DEMO.id)).toBeNull();
+    // …while `dmPeer` still answers with one of the two, which is exactly why
+    // the hint may not be built on it.
+    expect(dmPeer(group, DIRECTORY, DEMO.id)).not.toBeNull();
+  });
+
+  it("is null for a group channel however few members it has", () => {
+    const channel: Channel = {
+      id: "019f8000-0000-7000-8000-000000000002",
+      workspaceId: WS,
+      kind: "public",
+      name: "general",
+      memberIds: [DEMO.id, INTERN_AGENT.id],
+      muted: false,
+    };
+    expect(dmAutoReplyAgent(channel, DIRECTORY, DEMO.id)).toBeNull();
+  });
+
+  it("is null for an agent that is no longer active", () => {
+    const directory = makeDirectory([
+      DEMO,
+      { ...INTERN_AGENT, status: "suspended" },
+    ]);
+    expect(dmAutoReplyAgent(dm(INTERN_AGENT.id), directory, DEMO.id)).toBeNull();
   });
 });
 

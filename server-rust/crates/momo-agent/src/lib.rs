@@ -64,6 +64,12 @@
 //! passes the number in. That is the same boundary this crate has kept since
 //! B2.6, held under pressure again.
 //!
+//! **B13 adds implicit addressing in a 1:1 DM** ([`dm`]): a human alone with one
+//! agent does not have to type `@handle`. It is a *routing* rule and not a new
+//! `agent_profile.triggers` key on purpose — see that module's header — and its
+//! author gate is what keeps two agents from auto-answering each other forever
+//! in a room no A2A gate is watching.
+//!
 //! Streaming/partial relay, the `tool_call` work-control branch, approvals,
 //! memory-delivery receipts (`context_packet`), G4's SimHash semantic-loop
 //! detector (a stub in Swift too) and the ACP adapter are **not** ported here —
@@ -77,6 +83,7 @@
 //! breaks when reverted.
 
 pub mod a2a;
+pub mod dm;
 pub mod effort;
 pub mod error;
 pub mod mention;
@@ -90,6 +97,10 @@ pub use a2a::{
     A2aLimits, DEFAULT_A2A_MAX_DEPTH, DEFAULT_G1_STALE_RUNNING_SECONDS,
     DEFAULT_MAX_CHAIN_COST_MICRO_USD, DEFAULT_MAX_CHAIN_TOKENS, DEFAULT_MAX_CONSECUTIVE_AUTO,
     DEFAULT_MAX_STEPS, SCHEMA_DEPTH_CEILING,
+};
+pub use dm::{
+    load_dm_audience_in_tx, resolve_dm_addressing, stamp_addressing, Addressing,
+    ChannelParticipant, DmAddressing, DmAudience,
 };
 pub use effort::{
     known_level, ledger_effort, supported_efforts, supports, EFFORT_LEVELS, FALLBACK_EFFORTS,

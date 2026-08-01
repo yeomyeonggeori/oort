@@ -26,6 +26,7 @@
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",
+    "capture:honesty": "npm run build && node scripts/capture-honesty.mjs",
     "capture:routing": "npm run build && node scripts/capture-routing.mjs",
     "capture:standalone": "npm run build && node scripts/capture-standalone.mjs",
     "icons:pwa": "node scripts/render-pwa-icons.mjs"

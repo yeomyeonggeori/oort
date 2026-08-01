@@ -4,6 +4,7 @@ import {
   messageAnchorPath,
   messageIdSelector,
   messageSelector,
+  searchHitPath,
   watchForMessage,
   watchForMessageId,
   workSessionPath,
@@ -26,6 +27,19 @@ describe("channelPath", () => {
     expect(messageSelector(147)).toBe(
       '[data-testid="timeline-message"][data-seq="147"]'
     );
+  });
+});
+
+describe("searchHitPath", () => {
+  it("찾을 열쇠와 못 찾았을 때 설명할 열쇠를 함께 싣는다", () => {
+    const path = searchHitPath(
+      "019F94E3-0E04-79CD-9DEE-208F47EDD9A8",
+      "019F94E3-0E04-79CD-9DEE-208F47EDD9A9",
+      812
+    );
+    expect(path).toContain("msg=019f94e3-0e04-79cd-9dee-208f47edd9a9");
+    expect(path).toContain("seq=812");
+    expect(path.startsWith("/c/019F94E3-0E04-79CD-9DEE-208F47EDD9A8?")).toBe(true);
   });
 });
 
@@ -167,6 +181,65 @@ describe("watchForMessage", () => {
     clock = 1_000;
     queued[0]();
     expect(queued).toHaveLength(1);
+  });
+
+  // goal B12 R1 High-3: 만료가 조용한 것은 인박스의 기본값으로 남기되, 검색처럼
+  // 만료가 흔한 표면이 그 사실을 말할 수 있어야 한다.
+  it("만료를 호출자에게 알린다", () => {
+    const { queued, schedule } = fakeSchedule();
+    const onExpire = vi.fn();
+    let clock = 0;
+    watchForMessage(147, {
+      doc: { querySelector: () => null } as unknown as Document,
+      now: () => clock,
+      schedule,
+      cancel: () => {},
+      watchMs: 100,
+      onExpire,
+    });
+    expect(onExpire).not.toHaveBeenCalled();
+    clock = 1_000;
+    queued[0]();
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it("행을 찾으면 만료를 알리지 않는다", () => {
+    const row = {
+      scrollIntoView: vi.fn(),
+      classList: { add: vi.fn(), remove: vi.fn() },
+    };
+    const onExpire = vi.fn();
+    watchForMessage(147, {
+      doc: { querySelector: () => row } as unknown as Document,
+      now: () => 0,
+      schedule: (fn: () => void) => {
+        void fn;
+        return 1;
+      },
+      cancel: () => {},
+      onExpire,
+    });
+    expect(onExpire).not.toHaveBeenCalled();
+  });
+
+  it("취소된 감시자는 만료를 알리지 않는다", () => {
+    // 채널을 옮겨서 그만둔 것은 실패가 아니다. 그것을 만료로 셈하면 사용자가
+    // 떠난 화면에 대해 배너가 뜬다.
+    const { queued, schedule } = fakeSchedule();
+    const onExpire = vi.fn();
+    let clock = 0;
+    const stop = watchForMessage(147, {
+      doc: { querySelector: () => null } as unknown as Document,
+      now: () => clock,
+      schedule,
+      cancel: () => {},
+      watchMs: 100,
+      onExpire,
+    });
+    stop();
+    clock = 1_000;
+    queued[0]();
+    expect(onExpire).not.toHaveBeenCalled();
   });
 
   it("stops polling when the caller cancels", () => {
