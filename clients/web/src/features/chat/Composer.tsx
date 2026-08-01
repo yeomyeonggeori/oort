@@ -11,7 +11,9 @@ import type { RequestRouting, RosterMember } from "@/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
+import { composerKeyIntent, isComposingEvent } from "@/features/chat/composerKeys";
 import {
   agentTurnsInChannel,
   elapsedLabel,
@@ -37,8 +39,15 @@ import { mentionRoutingTarget } from "@/features/routing/mentionTargets";
 import { routingPayload } from "@/features/routing/routingModel";
 
 // =============================================================================
-// Composer (R-1 §3). Send plus the @mention skeleton. ⌘↵ sends, ↵ is a line
-// break, Esc dismisses the mention list.
+// Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
+// break, ⌘↵ still sends, Esc dismisses the mention list.
+//
+// ↵ was the line break until goal B8: every messenger a reader has used sends
+// on it, so "왜 안 보내지" was the single most repeated moment of the QA sweep.
+// The exception that makes the swap safe is the IME one, and it is big enough
+// to live in its own tested file (composerKeys.ts): a 한글 sentence is composed
+// before it is committed, and the Enter that commits it is the IME's keystroke,
+// not a send.
 //
 // The mention list is hand-rolled rather than cmdk/Command: a Command popover
 // owns its own input and would pull focus out of the textarea mid-sentence.
@@ -220,6 +229,12 @@ export function Composer({
   const [highlight, setHighlight] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Raised by `compositionend`, lowered by the next `keyup` (composerKeys.ts).
+  // In WebKit, which is the Tauri shell's engine, `compositionend` is dispatched
+  // BEFORE the keydown of the Enter that committed the composition, so by the
+  // time we see that keydown `isComposing` is already false. This ref is the
+  // only thing standing between a 한글 sentence and being posted half-written.
+  const justComposedRef = useRef(false);
 
   // The clock is mounted for THIS channel's turns, not the workspace's: the
   // store is workspace-wide, and gating on its size alone re-rendered the
@@ -235,6 +250,10 @@ export function Composer({
   // 90s TTL could never fire on this surface at all. Now every render, from
   // whatever cause, re-reads the wall clock and drops what has gone quiet.
   const { connStatus } = useSession();
+  // 폰에서는 Enter가 계속 줄바꿈이다 (goal B8 H4). 소프트 키보드에는 Shift+Enter가
+  // 없어서, Enter를 전송으로 바꾸면 여러 줄 쓰기를 통째로 없애게 된다. 힌트 줄도
+  // 같은 중단점에서 접히므로 화면과 키가 어긋나지 않는다.
+  const isMobile = useIsMobileShell();
   const railLive = connStatus === "connected";
   const signals = useAgentWorkingSignals();
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
@@ -306,32 +325,60 @@ export function Composer({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (showMentions) {
-      if (event.key === "ArrowDown") {
+    // Self-healing: only Enter and Tab can be the key that commits a
+    // composition, so any other key proves we are past one. Without this a
+    // composition ended by something other than a keystroke (clicking send
+    // mid-syllable) could leave the guard raised, and the next deliberate Enter
+    // would be swallowed. `justComposed` is not read for these keys, so
+    // clearing it before the decision changes nothing about this keystroke.
+    if (event.key !== "Enter" && event.key !== "Tab") {
+      justComposedRef.current = false;
+    }
+    const intent = composerKeyIntent(
+      {
+        key: event.key,
+        shiftKey: event.shiftKey,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        composing: isComposingEvent(event.nativeEvent),
+      },
+      {
+        mentionsOpen: showMentions,
+        justComposed: justComposedRef.current,
+        enterSends: !isMobile,
+      }
+    );
+
+    switch (intent) {
+      case "send": {
         event.preventDefault();
-        setHighlight((h) => (h + 1) % candidates.length);
+        const body = text.trim();
+        if (body) submit(body);
         return;
       }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setHighlight((h) => (h - 1 + candidates.length) % candidates.length);
-        return;
-      }
-      if (event.key === "Enter" || event.key === "Tab") {
+      case "mention-accept":
         event.preventDefault();
         applyMention(candidates[Math.min(highlight, candidates.length - 1)]);
         return;
-      }
-      if (event.key === "Escape") {
+      case "mention-next":
+        event.preventDefault();
+        setHighlight((h) => (h + 1) % candidates.length);
+        return;
+      case "mention-prev":
+        event.preventDefault();
+        setHighlight((h) => (h - 1 + candidates.length) % candidates.length);
+        return;
+      case "mention-close":
         event.preventDefault();
         setMentionOpen(false);
         return;
-      }
-    }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      const body = text.trim();
-      if (body) submit(body);
+      // "newline" and "pass" are both the textarea's own behaviour, and that is
+      // the point: an IME keystroke is never intercepted, not even to be
+      // re-dispatched.
+      case "newline":
+      case "pass":
+        return;
     }
   }
 
@@ -415,7 +462,26 @@ export function Composer({
             setCaret((event.target as HTMLTextAreaElement).selectionStart ?? 0)
           }
           onKeyDown={onKeyDown}
+          // The composition window, in three lines. `compositionstart` closes
+          // the guard (a new session cannot be a stale commit), `compositionend`
+          // opens it, and any key release closes it again, which bounds the
+          // guard to the single keystroke that can sit between those two events.
+          onCompositionStart={() => {
+            justComposedRef.current = false;
+          }}
+          onCompositionEnd={() => {
+            justComposedRef.current = true;
+          }}
+          onKeyUp={() => {
+            justComposedRef.current = false;
+          }}
+          // A composition abandoned by clicking away leaves the guard raised;
+          // it must not still be raised when the caret comes back.
+          onBlur={() => {
+            justComposedRef.current = false;
+          }}
           placeholder={`${channelLabel}에 메시지 보내기`}
+          aria-describedby="composer-hint"
           data-testid="composer-input"
           className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         />
@@ -425,12 +491,27 @@ export function Composer({
           className="tap-target"
           disabled={text.trim().length === 0}
           aria-label="메시지 보내기"
-          title="메시지 보내기 (⌘↵)"
+          title={isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"}
           data-testid="composer-send"
         >
           <SendHorizontal />
         </Button>
       </form>
+
+      {/* Enter가 보내기가 된 이상, 줄바꿈이 어디로 갔는지 이 자리에서 말해야
+          한다. 한 줄이고, 입력창 바로 아래이며, 조용하다: 이 힌트는 알림이
+          아니라 키 배치의 설명이다. 폰에는 화면 키보드의 줄바꿈 키가 따로 있고
+          ⌘도 없으므로 좁은 폭에서는 접는다. */}
+      <p
+        id="composer-hint"
+        // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
+        // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
+        // 맞지 않아 4px 어긋난 줄로 보였다.
+        className="wide-only px-6 pb-2 text-meta text-ink-muted"
+        data-testid="composer-hint"
+      >
+        Enter로 보내기, Shift+Enter로 줄바꿈
+      </p>
 
       <AgentActivityBar
         turns={turns}

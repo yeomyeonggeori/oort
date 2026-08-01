@@ -186,6 +186,12 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "is_error",
   "usage",
   "error",
+  // goal B8 H2. The worker stopped putting the provider's raw reason in
+  // `error` and now sends a stable machine code instead, which is the thing a
+  // client can branch on without matching prose. The code is READ, never
+  // rendered: it reaches the card as Korean copy (failureGuidance) and nothing
+  // else.
+  "error_code",
   // Ids the model reads for provenance but never renders as copy: run and
   // channel identifiers are internal vocabulary (design-taste-web §7).
   "run_id",
@@ -383,7 +389,82 @@ export interface AgentTurnCard {
   cost: AgentCost | null;
   /** Server-sanitised failure text. Says what happened, never apologises. */
   errorNote?: string;
+  /** Our own copy for a typed failure code (goal B8 H2). */
+  failure?: FailureGuidance;
   detail: PayloadDetail;
+}
+
+/**
+ * What a failed turn says on the card, per `props.error_code`.
+ *
+ * The message body already carries one Korean sentence for the reader who is
+ * only scrolling past. This is the second layer, folded away behind 자세히: what
+ * kind of failure it was, what repairs it, and where the provider's own words
+ * went. Naming that last part matters, because "우리가 숨겼다" and "그건 실행
+ * 기록에 있다" are different promises and only one of them is true.
+ */
+export interface FailureGuidance {
+  /** Short label for the 상태 row. Never a code, never English. */
+  label: string;
+  /** The 자세히 body. What to do, then where the original text is. */
+  detail: string;
+}
+
+// Names ONLY what the server actually keeps. The Rust worker writes the
+// redacted provider text to `agent_run.error.reason` (the run record) and to
+// `outbox.last_error`; it writes no audit_log row on this path, so the copy
+// must not promise one. A sentence that over-claims where evidence lives is
+// worse than no sentence: somebody goes looking and finds nothing.
+const WHERE_THE_ORIGINAL_IS = "AI 제공자가 보낸 원문은 이 실행 기록에만 남습니다.";
+
+// A Map, not an object literal: the key comes off the wire, and an object
+// lookup answers for `constructor` and `__proto__` too. That would have handed
+// back Object.prototype's member instead of falling through to the unknown-code
+// copy, and the card would render a label of `undefined`.
+const FAILURE_GUIDANCE: ReadonlyMap<string, FailureGuidance> = new Map([
+  [
+    "provider_failed",
+    {
+      // "AI 제공자", the term the rest of the product uses on purpose
+      // (settings/quotaModel.ts). A bare 제공자 on a timeline has no antecedent.
+      label: "AI 제공자가 응답하지 못했습니다.",
+      // Does NOT repeat the body's "잠시 뒤에 다시 멘션해 주세요." The reader who
+      // opened this fold already read that sentence 40px above; what they came
+      // here for is the step after it.
+      detail: `같은 실패가 이어지면 설정의 AI 연결에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
+    },
+  ],
+  [
+    "provider_auth_failed",
+    {
+      label: "연결된 계정 인증이 만료되었습니다.",
+      detail: `설정의 AI 연결에서 계정을 다시 등록하면 이어서 실행할 수 있습니다. ${WHERE_THE_ORIGINAL_IS}`,
+    },
+  ],
+]);
+
+/**
+ * Copy for a failure code, or null when the server sent none.
+ *
+ * An UNKNOWN code still produces copy rather than falling through to silence: a
+ * future worker code this build has never seen must not turn a failed turn into
+ * a card that says nothing at all.
+ */
+export function failureGuidance(code: unknown): FailureGuidance | null {
+  if (typeof code !== "string" || code === "") return null;
+  return (
+    FAILURE_GUIDANCE.get(code) ?? {
+      label: "실행을 끝내지 못했습니다.",
+      // No next step AND no source, on purpose. This branch is for codes this
+      // build has never seen (a work host, a policy, a tool). Sending all of
+      // them to the AI 연결 panel would be a confident wrong instruction, and
+      // naming the AI 제공자 as the author of the evidence is a confident wrong
+      // attribution: a reader who goes looking for provider output after a
+      // work-host failure finds nothing. Only the location survives, because
+      // only the location is true whatever the code turns out to mean.
+      detail: "원문은 이 실행 기록에만 남습니다.",
+    }
+  );
 }
 
 export type AgentCardModel =
@@ -465,20 +546,27 @@ function turnCard(props: Props): AgentTurnCard | null {
   if (!props) return null;
   const cost = agentCost(props);
   const errorNote = readString(props, "error");
+  // goal B8 H2: the worker's failure notice now carries a code instead of the
+  // provider's raw reason. Without this read that notice would have arrived as
+  // an ordinary sentence with no card, no status chip and no 자세히, which is a
+  // failed turn that does not look like one.
+  const failure = failureGuidance(props["error_code"]);
   const status = turnStatusFor(props["status"]);
   // A plain agent sentence is a plain message: only a turn that carries a
   // settled cost, a failure, or a non-terminal status earns a card.
-  if (cost === null && errorNote === undefined) {
+  if (cost === null && errorNote === undefined && failure === null) {
     if (status === null || status === "done") return null;
   }
   const card: AgentTurnCard = {
     kind: "turn",
     title: "에이전트 실행 결과",
-    status: status ?? (errorNote !== undefined ? "error" : "done"),
+    status:
+      status ?? (errorNote !== undefined || failure !== null ? "error" : "done"),
     cost,
     detail: payloadDetail(props),
   };
   if (errorNote !== undefined) card.errorNote = errorNote;
+  if (failure !== null) card.failure = failure;
   return card;
 }
 

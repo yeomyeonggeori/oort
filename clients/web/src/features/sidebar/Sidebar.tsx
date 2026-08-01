@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   Bot,
@@ -15,7 +15,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import type { Channel } from "@/lib/api";
+import { uuidEq, type Channel } from "@/lib/api";
 import { useSession } from "@/app/session";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
@@ -45,6 +45,7 @@ import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
+import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { Button } from "@/design/ui/button";
 
@@ -164,10 +165,33 @@ export function Sidebar({
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
   const ordered = useMemo(() => [...channels, ...dms], [channels, dms]);
+
+  // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
+  // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
+  // "새 메시지 1"을 붙인다. 읽고 있는 것은 읽은 것이다. 나머지 행은 그대로
+  // 서버가 세고(P7), 이 규칙은 오직 열려 있는 한 행에만 적용된다.
+  const routePath = useLocation().pathname;
+  const openId = openChannelId(
+    routePath,
+    channels[0]?.id ?? dms[0]?.id ?? null
+  );
+  const unreadCountFor = useCallback(
+    (channel: Channel) => {
+      if (openId !== null && uuidEq(channel.id, openId)) {
+        return { unreadCount: 0, mentionCount: 0 };
+      }
+      const read = unreadFor(readStates.byChannel, channel.id);
+      return {
+        unreadCount: read?.unreadCount ?? 0,
+        mentionCount: read?.mentionCount ?? 0,
+      };
+    },
+    [openId, readStates.byChannel]
+  );
+
   const unreadChannels = useMemo(
-    () =>
-      ordered.filter((c) => (unreadFor(readStates.byChannel, c.id)?.unreadCount ?? 0) > 0),
-    [ordered, readStates.byChannel]
+    () => ordered.filter((c) => unreadCountFor(c).unreadCount > 0),
+    [ordered, unreadCountFor]
   );
 
   useEffect(() => {
@@ -208,7 +232,7 @@ export function Sidebar({
   }, []);
 
   function rowFor(channel: Channel) {
-    const read = unreadFor(readStates.byChannel, channel.id);
+    const counts = unreadCountFor(channel);
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
     // not decide which one it is (channelLabelParts).
@@ -233,8 +257,8 @@ export function Sidebar({
         label={label.text}
         handle={label.handle}
         agent={label.isAgent}
-        unreadCount={read?.unreadCount ?? 0}
-        mentionCount={read?.mentionCount ?? 0}
+        unreadCount={counts.unreadCount}
+        mentionCount={counts.mentionCount}
         trailing={
           <AgentTurnBadge
             turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}

@@ -105,7 +105,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub use config::WorkerConfig;
-use context::assemble;
+use context::{assemble, now_context_block};
 use oauth::{relogin_message, HttpTokenRefresher, RefreshError, TokenRefresher, EXPIRY_SKEW_MS};
 use payload::AgentJobPayload;
 use provider::{
@@ -146,20 +146,25 @@ pub struct DrainStats {
     pub a2a_blocked: usize,
 }
 
-/// The message a user sees when the provider could not answer. Swift
-/// `WorkerService.degradedProviderMessage` (:2748-2752), kept verbatim: a turn
-/// that fails silently is indistinguishable from an agent that ignored you.
-pub fn degraded_provider_message(reason: &str) -> String {
-    let trimmed = reason.trim();
-    let detail = if trimmed.is_empty() {
-        "provider did not return a usable response"
-    } else {
-        trimmed
-    };
-    format!(
-        "Hermes could not complete this request yet. Check the local provider \
-         endpoint/token and try again. Details: {detail}"
-    )
+/// The message a user sees when the provider could not answer.
+///
+/// Swift `WorkerService.degradedProviderMessage` (:2748-2752) was ported
+/// verbatim in B5.1, and the QA sweep found what it actually reads like inside
+/// a channel: an English sentence naming an internal codename ("Hermes"), an
+/// operator instruction handed to someone who does not run the server, and the
+/// provider's raw error pasted onto the end. On a 401 that tail was
+/// `provider answered with HTTP 401 {"error":{"message":...}}`: raw JSON, in a
+/// chat, addressed to nobody who could act on it.
+///
+/// The sentence is now one Korean line. The provider's own words are not
+/// deleted, they are MOVED: the redacted reason goes to `agent_run.error.reason`
+/// (the run record) and to `outbox.last_error`, which is where support reads it.
+/// Keeping it out of the channel is the whole of goal B8 H2.
+///
+/// A turn that fails silently is still worse than one that says so, so this is
+/// written on the timeline exactly where the answer would have been.
+pub fn degraded_provider_message() -> &'static str {
+    "지금은 답변을 만들지 못했습니다. 잠시 뒤에 다시 멘션해 주세요."
 }
 
 /// Strip anything credential-shaped out of a string that is about to be
@@ -468,12 +473,18 @@ impl AgentWorker {
             }
         }
 
+        // goal B8 L7: the model is told what day it is, every turn, from this
+        // process's clock plus the workspace offset. Computed here rather than
+        // inside `assemble` so the assembler stays a pure function of its
+        // arguments and its tests stay date-independent.
+        let now_context = now_context_block(now_ms(), self.config.utc_offset_minutes);
         let assembled = assemble(
             &payload.recent_messages,
             payload.agent_member_id,
             payload.trigger_message_id,
             &payload.prompt,
             payload.system_prompt.as_deref(),
+            Some(now_context.as_str()),
             self.config.max_context_chars,
         );
         if assembled.dropped_count > 0 {
@@ -586,6 +597,7 @@ impl AgentWorker {
                 props,
                 usage,
                 TurnOutcome::Succeeded,
+                None,
             )
             .await;
         match outcome {
@@ -628,7 +640,14 @@ impl AgentWorker {
         props: Value,
         usage: Option<ChatUsage>,
         outcome: TurnOutcome,
+        // The redacted provider text for `agent_run.error.reason`. `None` on a
+        // success. It is a separate argument rather than the message body
+        // because those two stopped being the same string in goal B8 H2: the
+        // channel gets one Korean sentence, the run record gets what the
+        // provider actually said.
+        failure_reason: Option<&str>,
     ) -> Result<TurnCommit, DbError> {
+        let failure_reason = failure_reason.map(str::to_string);
         let workspace_id = job.workspace_id;
         let agent_member_id = payload.agent_member_id;
         let channel_id = payload.channel_id;
@@ -701,10 +720,18 @@ impl AgentWorker {
                 // `provider_auth_failed`, distinct from a generic provider
                 // failure, so an operator reading the run can tell "the token is
                 // dead" from "the provider is down" without correlating logs.
+                //
+                // `reason` is the provider's redacted text, NOT the message
+                // body: since goal B8 H2 the body is a fixed Korean sentence, so
+                // reading it back here would have made every failed run record
+                // say the same thing and lost the only copy of what went wrong.
                 let error = outcome.failure_code().map(|code| {
                     json!({
                         "code": code,
-                        "reason": sent.message.body.clone().unwrap_or_default(),
+                        "reason": failure_reason
+                            .clone()
+                            .or_else(|| sent.message.body.clone())
+                            .unwrap_or_default(),
                     })
                 });
                 finish_run_in_tx(conn, run_id, outcome.succeeded(), &output, error.as_ref())
@@ -816,9 +843,15 @@ impl AgentWorker {
             );
             if let Ok(payload) = serde_json::from_str::<AgentJobPayload>(&job.payload) {
                 if let Some(run_id) = payload.run_id {
-                    let body = degraded_provider_message(&reason);
-                    self.write_failure_turn(job, &payload, run_id, &reason, body, PROVIDER_FAILED)
-                        .await;
+                    self.write_failure_turn(
+                        job,
+                        &payload,
+                        run_id,
+                        &reason,
+                        degraded_provider_message(),
+                        PROVIDER_FAILED,
+                    )
+                    .await;
                 }
             }
             self.settle_failed(job.id, &format!("max attempts: {reason}"))
@@ -850,9 +883,15 @@ impl AgentWorker {
         endpoint: &ProviderEndpoint,
     ) -> Settlement {
         let reason = redact_secrets(reason, &endpoint.bearer);
-        let body = degraded_provider_message(&reason);
-        self.write_failure_turn(job, payload, run_id, &reason, body, PROVIDER_FAILED)
-            .await;
+        self.write_failure_turn(
+            job,
+            payload,
+            run_id,
+            &reason,
+            degraded_provider_message(),
+            PROVIDER_FAILED,
+        )
+        .await;
         self.settle_failed(job.id, &reason).await;
         Settlement::Failed
     }
@@ -889,9 +928,15 @@ impl AgentWorker {
                 )
                 .await;
         }
-        let body = relogin_message(&reason);
-        self.write_failure_turn(job, payload, run_id, &reason, body, PROVIDER_AUTH_FAILED)
-            .await;
+        self.write_failure_turn(
+            job,
+            payload,
+            run_id,
+            &reason,
+            relogin_message(),
+            PROVIDER_AUTH_FAILED,
+        )
+        .await;
         self.settle_failed(job.id, &format!("token refresh failed: {reason}"))
             .await;
         Settlement::Failed
@@ -907,19 +952,22 @@ impl AgentWorker {
         payload: &AgentJobPayload,
         run_id: Uuid,
         reason: &str,
-        body: String,
+        body: &'static str,
         code: &'static str,
     ) {
-        let props = failure_props(payload, run_id, reason, code);
+        let props = failure_props(payload, run_id, code);
         if let Err(error) = self
             .commit_turn(
                 job,
                 payload,
                 run_id,
-                body,
+                body.to_string(),
                 props,
                 None,
                 TurnOutcome::Failed(code),
+                // The provider's own words, redacted, going to the run record
+                // rather than to the channel (goal B8 H2).
+                Some(reason),
             )
             .await
         {
@@ -1413,13 +1461,19 @@ fn success_props(payload: &AgentJobPayload, run_id: Uuid) -> Value {
 }
 
 /// `props` on the user-visible failure notice. Same shape, different `source`,
-/// plus the (already redacted) reason so support can read one row instead of
-/// correlating logs.
+/// plus the machine code for the failure.
 ///
-/// A credential failure gets its own `source`, not just its own text: a client
-/// that wants to surface "reconnect your account" needs to branch on something
-/// stable, and matching on a Korean sentence is not that.
-fn failure_props(payload: &AgentJobPayload, run_id: Uuid, reason: &str, code: &str) -> Value {
+/// A credential failure gets its own `source` and its own `error_code`, not
+/// just its own text: a client that wants to surface "reconnect your account"
+/// needs to branch on something stable, and matching on a Korean sentence is not
+/// that.
+///
+/// It no longer carries `error` (goal B8 H2). That key held the provider's raw
+/// reason, and `props` travels to every client over the relay, where the web
+/// timeline rendered it verbatim under an 오류 label. The reason now lives in
+/// `agent_run.error.reason` and `outbox.last_error` only. Support reads a row;
+/// the channel reads a sentence.
+fn failure_props(payload: &AgentJobPayload, run_id: Uuid, code: &str) -> Value {
     let mut props = success_props(payload, run_id);
     let object = props.as_object_mut().expect("json object");
     let source = if code == PROVIDER_AUTH_FAILED {
@@ -1428,7 +1482,6 @@ fn failure_props(payload: &AgentJobPayload, run_id: Uuid, reason: &str, code: &s
         "agent_worker.provider_failure.v0"
     };
     object.insert("source".into(), json!(source));
-    object.insert("error".into(), json!(reason));
     object.insert("error_code".into(), json!(code));
     props
 }
@@ -1475,17 +1528,35 @@ async fn listen_loop(database_url: String, wake: mpsc::Sender<()>) {
 mod tests {
     use super::*;
 
-    /// Swift's text, verbatim. A user who gets nothing cannot tell an outage
-    /// from an agent that ignored them, so this string is the contract.
+    /// goal B8 H2. A user who gets nothing cannot tell an outage from an agent
+    /// that ignored them, so the notice still has to exist; what it must NOT do
+    /// is hand them the provider's own words. These assertions are the ones that
+    /// fail if somebody re-appends a `Details:` tail "just for debugging".
     #[test]
-    fn the_degraded_message_names_the_thing_to_check() {
-        let message = degraded_provider_message("provider answered with HTTP 401");
-        assert!(message.contains("Check the local provider endpoint/token"));
-        assert!(message.ends_with("Details: provider answered with HTTP 401"));
+    fn the_degraded_message_is_one_korean_sentence_with_no_provider_text() {
+        let message = degraded_provider_message();
+        assert!(message.contains("다시 멘션"), "{message}");
+        assert!(!message.contains("Details"), "{message}");
+        assert!(!message.contains("Hermes"), "{message}");
         assert!(
-            degraded_provider_message("   ").ends_with("provider did not return a usable response"),
-            "a blank reason still says something actionable"
+            !message.chars().any(|c| c.is_ascii_alphabetic()),
+            "no English internal vocabulary reaches the channel: {message}"
         );
+    }
+
+    /// The provider's words are moved, not deleted. `props` rides the relay to
+    /// every client, so the reason must not be in it; the run record keeps it.
+    #[test]
+    fn the_failure_notice_props_carry_a_code_and_never_the_reason() {
+        let run_id = Uuid::from_u128(3);
+        let payload: AgentJobPayload = serde_json::from_value(json!({
+            "agent_member_id": Uuid::from_u128(1),
+            "channel_id": Uuid::from_u128(2),
+        }))
+        .expect("decode");
+        let props = failure_props(&payload, run_id, PROVIDER_FAILED);
+        assert!(props.get("error").is_none(), "{props}");
+        assert_eq!(props["error_code"], json!(PROVIDER_FAILED));
     }
 
     /// The last line of defence before a provider's own error text reaches a
@@ -1539,16 +1610,15 @@ mod tests {
         assert_eq!(props["trigger_message_seq"], json!(42));
         assert_eq!(props["author_member_id"], json!(Uuid::from_u128(5)));
 
-        let failure = failure_props(&payload, run_id, "HTTP 500", PROVIDER_FAILED);
+        let failure = failure_props(&payload, run_id, PROVIDER_FAILED);
         assert_eq!(failure["source"], json!("agent_worker.provider_failure.v0"));
-        assert_eq!(failure["error"], json!("HTTP 500"));
         assert_eq!(failure["error_code"], json!(PROVIDER_FAILED));
         assert_eq!(failure["trigger_message_seq"], json!(42));
 
         // A dead credential is a different thing from a broken provider, and a
         // client that wants to say "reconnect your account" has to be able to
         // branch on something stable rather than on a Korean sentence.
-        let auth = failure_props(&payload, run_id, "invalid_grant", PROVIDER_AUTH_FAILED);
+        let auth = failure_props(&payload, run_id, PROVIDER_AUTH_FAILED);
         assert_eq!(
             auth["source"],
             json!("agent_worker.provider_auth_failure.v0")

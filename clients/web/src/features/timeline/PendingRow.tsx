@@ -2,6 +2,7 @@ import { useState } from "react";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { Avatar } from "./MessageRow";
+import { MessageBody } from "./MessageBody";
 import type { PendingMessage } from "./model";
 
 // =============================================================================
@@ -57,9 +58,10 @@ export function PendingRow({
                 ordering the timeline does not have. */}
           </div>
         )}
-        <p className="whitespace-pre-wrap break-words text-body leading-relaxed text-ink-muted">
-          {pending.body}
-        </p>
+        {/* Same body renderer as the confirmed row (goal B8 H6): an echo that
+            showed raw asterisks and then re-flowed into bold the moment its seq
+            landed would move the text under the reader's eye. */}
+        <MessageBody body={pending.body} muted />
         {failed ? (
           <span
             className="flex flex-wrap items-center gap-2 text-meta text-danger"

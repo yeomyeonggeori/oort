@@ -434,6 +434,17 @@ async fn run_status(su: &PgPool, run_id: Uuid) -> String {
         .expect("read run status")
 }
 
+/// `agent_run.error`, which is where the provider's own words live now that the
+/// channel notice is a fixed Korean sentence (goal B8 H2).
+async fn run_error(su: &PgPool, run_id: Uuid) -> Value {
+    sqlx::query_scalar::<_, Option<Value>>("SELECT error FROM agent_run WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(su)
+        .await
+        .expect("read run error")
+        .unwrap_or(Value::Null)
+}
+
 async fn job_row(su: &PgPool, job_id: i64) -> (String, i32, Option<String>) {
     let row = sqlx::query(
         "SELECT status::text AS status, attempts, last_error FROM outbox WHERE id = $1",
@@ -662,12 +673,33 @@ async fn b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_w
         seq > 0,
         "the notice is a real message, recoverable by cursor"
     );
+    // goal B8 H2: the notice is one Korean sentence and the provider's own text
+    // is NOT in it. Both halves are asserted, because dropping either one is a
+    // silent regression: a notice that leaks the raw reason is the bug, and a
+    // run record that lost it is a support case with no evidence.
     assert!(
-        body.contains("Check the local provider endpoint/token"),
-        "the notice names what an operator can act on: {body}"
+        body.contains("다시 멘션"),
+        "the notice says what the reader can do: {body}"
+    );
+    assert!(
+        !body.contains("upstream model is unavailable") && !body.contains("HTTP 500"),
+        "the provider's own words never reach the channel: {body}"
+    );
+    assert!(
+        props.get("error").is_none(),
+        "…nor the message props: {props}"
     );
     assert_eq!(props["source"], json!("agent_worker.provider_failure.v0"));
     assert_eq!(run_status(&su, run_b).await, "failed");
+    let recorded = run_error(&su, run_b).await;
+    assert_eq!(recorded["code"], json!("provider_failed"));
+    assert!(
+        recorded["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("upstream model is unavailable"),
+        "…but the run record keeps them for support: {recorded}"
+    );
     assert_eq!(job_row(&su, job_b).await.0, "failed");
 
     // --- half 3: a 4xx is terminal on the FIRST attempt, budget or not ---

@@ -157,6 +157,14 @@ export function ChatShell() {
 
   // Advance the server read cursor once history is on screen (P7: the server
   // owns unread, so the client reports a position instead of counting).
+  //
+  // goal B8 H10: the failure branch used to keep `markedRef` pointing at the
+  // seq whose PUT had just failed, so this effect refused to try that seq
+  // again. One dropped request and the channel you are reading kept its unread
+  // badge until a LATER message happened to arrive. Clearing the mark on
+  // failure is what makes the retry the comment already promised real: the next
+  // run of this effect (a new message, a remount, a channel round trip) sends
+  // it again.
   const newestSeq = timeline.state.newestSeq;
   useEffect(() => {
     if (stressCount > 0 || newestSeq === null || channelId === null) return;
@@ -166,7 +174,7 @@ export function ChatShell() {
     updateReadState(workspaceId, channelId, newestSeq)
       .then(() => invalidateReadStates())
       .catch(() => {
-        /* the cursor is advisory; the next open retries it */
+        if (markedRef.current === key) markedRef.current = null;
       });
   }, [workspaceId, channelId, newestSeq, stressCount, invalidateReadStates]);
 
@@ -562,13 +570,10 @@ export function ChatShell() {
           renderChannelHeader(null)
         )}
 
-        {offline && (
-          <InlineBanner
-            tone="neutral"
-            message="연결 끊김, 재연결 중입니다. 지금 보이는 내용은 마지막으로 확인된 상태입니다."
-            testId="offline-banner"
-          />
-        )}
+        {/* 연결 배너는 셸로 올라갔다 (goal B8 B2, AppShell.ConnectionBanner):
+            같은 사실을 채널에서만 말하면 인박스·활동·설정에서는 갱신이 멈춘 줄
+            모른 채 조용한 화면을 읽게 된다. `offline`은 여전히 여기 남는다 —
+            허들 컨트롤처럼 지금 쓸 수 있는지를 물어야 하는 것들이 읽는다. */}
 
         <div className="min-h-0 flex-1">
           {hasChannel ? (

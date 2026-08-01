@@ -116,21 +116,16 @@ impl RefreshError {
 /// The user-visible sentence for a dead grant (ADR-0147 결정 2: "갱신 실패 = run
 /// 실패 + 사용자 가시 오류(재로그인 안내)").
 ///
-/// It names the actual repair — re-run the local login and re-register the
-/// result — because the person reading it in a channel cannot fix an OAuth grant
+/// It names the actual repair (re-run the local login and re-register the
+/// result) because the person reading it in a channel cannot fix an OAuth grant
 /// any other way, and "provider error" would send them to the wrong place.
-pub fn relogin_message(reason: &str) -> String {
-    let trimmed = reason.trim();
-    let detail = if trimmed.is_empty() {
-        "refresh grant was refused"
-    } else {
-        trimmed
-    };
-    format!(
-        "연결된 ChatGPT 계정의 로그인이 만료되어 갱신하지 못했습니다. \
-         로컬에서 다시 로그인한 뒤 설정 > AI 연결에서 토큰을 다시 등록해 주세요. \
-         Details: {detail}"
-    )
+///
+/// goal B8 H2 removed the `Details: {reason}` tail. A refused grant answers with
+/// the provider's own body, which is JSON at best and quoted the token it
+/// refused at worst; that text belongs in `agent_run.error.reason`, which is
+/// where it now goes, and not on a channel timeline.
+pub fn relogin_message() -> &'static str {
+    "연결된 계정의 로그인이 만료되었습니다. 로컬에서 다시 로그인한 뒤 설정 > AI 연결에서 다시 등록해 주세요."
 }
 
 /// The seam the worker calls and the conformance harness points at its own
@@ -406,11 +401,13 @@ mod tests {
     /// nobody can fix a revoked OAuth grant from inside the chat.
     #[test]
     fn the_relogin_message_names_the_repair_not_just_the_symptom() {
-        let message = relogin_message("invalid_grant: token expired");
+        let message = relogin_message();
         assert!(message.contains("다시 로그인"));
         assert!(message.contains("AI 연결"));
-        assert!(message.ends_with("Details: invalid_grant: token expired"));
-        assert!(relogin_message("  ").contains("refresh grant was refused"));
+        // goal B8 H2: a refused grant answers with the provider's own body,
+        // which quotes the token it refused often enough that it can never ride
+        // a channel message. It goes to `agent_run.error.reason` instead.
+        assert!(!message.contains("Details"), "{message}");
     }
 
     /// The debug path a future `tracing::error!(?tokens)` would take.
