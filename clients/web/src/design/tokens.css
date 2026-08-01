@@ -339,6 +339,12 @@
   inset: 0;
   z-index: 20;
   background: var(--scrim);
+  /* 진짜 <button>인 탭 정거장 — 보이는 포커스 없는 정거장은 키보드 사용자를
+   * 잃게 만든다(design-review B6 M2). 안쪽 링으로 서랍 경계를 침범하지 않는다. */
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -4px;
+  }
 }
 
 /* 폰에서만 서는 컨트롤 (B6). 햄버거와 서랍 닫기 버튼이 그것인데, 둘 다 넓은 창
@@ -804,5 +810,19 @@
   /* Numbers never jitter: counters, seq, cost. */
   :where([data-numeric]) {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* 폰에서 1급 액션의 오터치 방어 (B6 design-review H1). 데스크탑 밀도는 그대로
+ * 두고, 오터치 비용이 가장 큰 컨트롤(승인·거부·확정류와 route 헤더 액션·필터
+ * 탭)만 좁은 폭에서 44px 최소 높이를 받는다. 대상 선택은 testid 관례를 탄다. */
+@media (width < 600px) {
+  [data-testid$="-approve"],
+  [data-testid$="-reject"],
+  [data-testid$="-commit"],
+  [data-testid$="-cancel"],
+  [role="tablist"] [role="tab"],
+  [data-mobile-tap="primary"] {
+    min-height: var(--tap-target);
   }
 }

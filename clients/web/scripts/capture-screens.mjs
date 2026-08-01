@@ -51,6 +51,9 @@ const MOBILE_TAP_TARGETS = [
   ["open-sidebar-drawer", "채널 목록 열기"],
   ["composer-send", "메시지 보내기"],
   ["composer-input", "컴포저 입력"],
+  // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
+  ["inbox-approval-approve", "인박스 승인"],
+  ["inbox-approval-reject", "인박스 거부"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
