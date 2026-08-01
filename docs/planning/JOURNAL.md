@@ -1501,7 +1501,8 @@
 ## 2026-08-02 · Fable · 오케스트레이션
 - 한 일: **QA 스윕→수정 사이클 완주.** 실사용 QA(브라우저 46샷)가 Blocker 1(WSS 403)+High 10 발견 → **B1 인프라 즉시 해소**(Centrifugo allowed_origins: 마운트 config보다 env 우선 + v6 env는 **공백 구분**이라 JSON 배열은 원소 1개로 파싱 — 실측 2건, 레포 반영). **B8**(#953: Enter/IME·마크다운 무의존 렌더·오류 은닉·연결 배너·unread 커서 재시도·날짜 컨텍스트, 3라운드 자체 design-review) + **B9**(#954: iOS 하단 툴바가 레이아웃 뷰포트를 안 줄임→visualViewport 추적, 셸 overflow:clip 때문에 문서 단언이 구조적으로 무력했음→스크롤 컨테이너 단언 확대) 랜딩·배포. 충돌 1건 수동 병합. **데스크탑 앱 dev 빌드**(~/Desktop/oort.app, app.oor7.com 지향, 서명 없음).
 - 정정 기록: 내가 "모바일 계획 공백"이라 답한 건 오류 — **ADR-0137(Accepted, bare RN+Expo 낱개)이 정본**이고 Tauri 모바일은 이미 기각(푸시·NSE). buzz 모바일 실측 = **Flutter(Dart 248파일, TS 0)** — ADR-0137이 인용한 그대로.
-- 열린 것: **B10(PWA) 진행 중** → 랜딩 시 홈화면 설치. 그 다음 **#837 RN 실기기 스파이크**(한글 IME 게이트, 성재 iPhone 필요). QA 잔여: H1 API 404군·H3 메시지 액션·H5 검색·H7 DM 무멘션·M/L군.
+- **B10(PWA) 랜딩·배포 완료**(#955, track/engine `47094c60`): manifest(standalone·아이콘 3종)·최소 SW(앱셸만 캐시·**API 응답 캐시 0**을 게이트가 강제)·설치 안내 1회·standalone safe-area. 홈 화면 추가 시 주소창/툴바 소멸 → 컴포저 가림 근본 해소.
+- 열린 것: 그 다음 **#837 RN 실기기 스파이크**(한글 IME 게이트, 성재 iPhone 필요). QA 잔여: H1 API 404군·H3 메시지 액션·H5 검색·H7 DM 무멘션·M/L군.
 
 ## 2026-07-10 (오전) · Fable · 기획
 - 한 일: ADR-0100(거버넌스)·0101(에이전트 신원, Option A) 성재 승인 → Accepted. ux-bible/architecture 정본 신설. MOMO-337~339 수용기준 발급(BUILD_TICKETS).
