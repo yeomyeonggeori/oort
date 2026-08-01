@@ -41,6 +41,7 @@ pub mod channel;
 pub mod dm;
 pub mod error;
 pub mod identity;
+pub mod interaction;
 pub mod message;
 pub mod read_state;
 pub mod search;
@@ -66,6 +67,13 @@ pub use identity::{
     read_workspace_for_active_member, resolve_member_signing_key, verify_password_login, Member,
     MemberKind, PasswordLogin, RosterKindFilterInvalid, RosterMember, Workspace, WorkspaceIdentity,
     WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
+};
+pub use interaction::{
+    build_message_deleted_payload, build_message_edited_payload, build_reaction_payload,
+    channel_reaction_snapshot, delete_message_in_tx, edit_message_in_tx, lock_message_in_tx,
+    set_reaction_in_tx, validate_reaction_emoji, DeletedMessage, InteractionMessage,
+    InteractionRefused, LockedMessage, ReactionAction, ReactionDelta, ReactionEmojiInvalid,
+    ReactionSnapshot, MESSAGE_REACTION_LIMIT, REACTION_EMOJI_MAX_CHARS,
 };
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,

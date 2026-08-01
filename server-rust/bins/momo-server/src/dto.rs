@@ -183,9 +183,51 @@ pub struct MessageDto {
     pub created_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// B11 — when the author last rewrote this body, in epoch milliseconds.
+    ///
+    /// Omitted when never edited, matching Swift: a `Codable` optional encodes
+    /// through `encodeIfPresent`, so `nil` leaves the key out rather than
+    /// sending `null`. The web client reads `state`/`editedAtMs` to draw
+    /// "수정됨"; without these keys on the *history* projection an edit would
+    /// silently look like the original text after any reload, and only
+    /// connected clients would ever know it happened.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_at_ms: Option<i64>,
+    /// B11 — the soft-delete stamp. Present on a tombstone, whose `body` is
+    /// absent and whose `state` is `"deleted"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at_ms: Option<i64>,
     /// Present only on a root message that has replies (B4.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<ThreadRollupDto>,
+}
+
+/// `PATCH /v1/workspaces/{ws}/messages/{id}` request body (Swift
+/// `EditMessageRequest`, `DTOs.swift:180-182`).
+///
+/// One field, deliberately: the author is the credential's, never the body's.
+/// An `authorMemberId` here would be a field the server must ignore, and a field
+/// the server ignores is one a client can believe in.
+#[derive(Debug, Deserialize)]
+pub struct EditMessageRequest {
+    pub body: String,
+}
+
+/// `PUT`/`DELETE …/messages/{id}/reactions/{emoji}` response (Swift
+/// `ReactionDeltaDTO`, `DTOs.swift:233-238`).
+///
+/// **The ids are uppercase.** Swift builds them from `UUID.uuidString` rather
+/// than a Postgres `::text` cast, unlike every other message id in this API.
+/// Reproduced rather than corrected — see
+/// `momo_messaging::ReactionDelta::message_id_wire`; the web client already
+/// compares ids with `uuidEq()` precisely because the two casings coexist.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionDeltaDto {
+    pub action: String,
+    pub message_id: String,
+    pub member_id: String,
+    pub emoji: String,
 }
 
 /// `GET …/channels/{ch}/messages/{root}/replies` response (Swift
@@ -2023,6 +2065,8 @@ mod tests {
             client_msg_id: None,
             created_at_ms: 99,
             state: None,
+            edited_at_ms: None,
+            deleted_at_ms: None,
             thread: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
@@ -2036,6 +2080,40 @@ mod tests {
         assert!(json.get("props").is_none());
         assert!(json.get("state").is_none());
         assert!(json.get("thread").is_none());
+        // B11 — a message nobody edited carries no `editedAtMs` at all. An
+        // explicit `null` would be indistinguishable from "edited at an unknown
+        // time" to a client that only checks for the key's presence.
+        assert!(json.get("editedAtMs").is_none());
+        assert!(json.get("deletedAtMs").is_none());
+    }
+
+    /// The two B11 keys, once they exist, are camelCase millisecond integers —
+    /// the spelling `clients/web`'s `Message` type already declares
+    /// (`api.ts:144-198`, `editedAtMs?: number`).
+    #[test]
+    fn an_edited_message_reports_its_stamp_in_camel_case_milliseconds() {
+        let json = serde_json::to_value(MessageDto {
+            id: "m".into(),
+            channel_id: "c".into(),
+            root_id: None,
+            seq: 3,
+            hlc_ts: 12,
+            hlc_count: 0,
+            author_member_id: "a".into(),
+            message_type: "text".into(),
+            body: Some("hi".into()),
+            props: None,
+            client_msg_id: None,
+            created_at_ms: 99,
+            state: Some("edited".into()),
+            edited_at_ms: Some(1_700_000_000_123),
+            deleted_at_ms: None,
+            thread: None,
+        })
+        .expect("serialize");
+        assert_eq!(json["state"], "edited");
+        assert_eq!(json["editedAtMs"], 1_700_000_000_123_i64);
+        assert!(json.get("deletedAtMs").is_none());
     }
 
     #[test]

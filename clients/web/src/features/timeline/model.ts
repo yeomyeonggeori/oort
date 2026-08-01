@@ -131,6 +131,121 @@ export function reconcileMessages(
 /** Live-append alias of {@link reconcileMessages} (R-1 §공통계약 vocabulary). */
 export const mergeMessages = reconcileMessages;
 
+/**
+ * Mark one message as deleted **in place** (B11).
+ *
+ * Keyed by id, not by seq, because the id is all a `message.deleted` frame
+ * carries — and it carries only that on purpose: a tombstone that re-broadcast
+ * its body would put the erased text back on every connected client.
+ *
+ * The row stays in the array and keeps its seq. Removing it is the tempting
+ * shortcut and the wrong one: `seq` is both the ordering authority and the
+ * recovery cursor, so a message that vanishes leaves a gap indistinguishable
+ * from one this client failed to receive, and the next reconnect would set out
+ * to heal it.
+ *
+ * Returns the same state when nothing matched, so a tombstone for a message this
+ * client never loaded costs no render.
+ */
+export function applyTombstone(
+  state: TimelineState,
+  messageId: string,
+  deletedAtMs?: number
+): TimelineState {
+  const idx = state.messages.findIndex((msg) => uuidEq(msg.id, messageId));
+  if (idx === -1) return state;
+  const existing = state.messages[idx];
+  if (existing.state === "deleted") return state;
+  const next = state.messages.slice();
+  next[idx] = {
+    ...existing,
+    state: "deleted",
+    body: undefined,
+    deletedAtMs: deletedAtMs ?? existing.deletedAtMs ?? Date.now(),
+  };
+  return { ...state, messages: next };
+}
+
+// ---- message action affordances (B11) --------------------------------------
+//
+// The server is the authority: it answers 403 to anyone but the author and 400
+// on a tombstone. These predicates decide only what to *show*, and they are
+// deliberately separate from the requests — an action that is visible but always
+// fails teaches people to distrust the UI, and one that is hidden where the
+// server would have allowed it is a feature nobody finds.
+
+/**
+ * A deleted or failed message is nobody's to act on, its author's included.
+ * `failed` is a client-side state for a send that never landed, so there is no
+ * server row behind it to edit.
+ */
+function isActionable(message: Message): boolean {
+  return message.state !== "deleted" && message.state !== "failed";
+}
+
+/**
+ * Only the author, and only while the message is live. Mirrors the server's
+ * "only the message author may edit": an admin cannot rewrite what someone else
+ * said, because a permission model that allowed it would make every quoted
+ * message deniable.
+ */
+export function canEditMessage(
+  message: Message,
+  myMemberId: string | undefined
+): boolean {
+  if (!isActionable(message)) return false;
+  // Only plain text has an editable body. A tool result or an artifact card is
+  // a projection of something else, so "editing" it would edit nothing.
+  if (message.type !== "text") return false;
+  return uuidEq(message.authorMemberId, myMemberId);
+}
+
+/** The same authority as {@link canEditMessage}, without the text-only rule. */
+export function canDeleteMessage(
+  message: Message,
+  myMemberId: string | undefined
+): boolean {
+  if (!isActionable(message)) return false;
+  return uuidEq(message.authorMemberId, myMemberId);
+}
+
+/**
+ * Anyone in the channel may react to a live message — no authorship gate, and no
+ * agent branch: an agent member is reacted to exactly like a person.
+ */
+export function canReactToMessage(message: Message): boolean {
+  return isActionable(message);
+}
+
+/**
+ * Replies hang off a **root**, and momo threads are one level deep (Slack's
+ * model): the server refuses a `rootId` that is itself a reply with "thread root
+ * must be a top-level message". Offering 답글 on a reply would be an action that
+ * always fails.
+ */
+export function canReplyToMessage(message: Message): boolean {
+  return isActionable(message) && !message.rootId;
+}
+
+/** What a row may offer, all four answers together. */
+export interface MessageActionAvailability {
+  reply: boolean;
+  react: boolean;
+  edit: boolean;
+  delete: boolean;
+}
+
+/**
+ * True when at least one action is on offer. A row with none gets no hover bar
+ * and no long-press at all — an empty sheet is worse than no sheet, because it
+ * costs the gesture and answers nothing.
+ */
+export function hasAnyAction(available: MessageActionAvailability): boolean {
+  return (
+    available.reply || available.react || available.edit || available.delete
+  );
+}
+
 /** True iff messages are strictly ascending by seq with no duplicates. */
 export function isStrictlyOrdered(messages: Message[]): boolean {
   for (let i = 1; i < messages.length; i++) {

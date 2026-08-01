@@ -16,8 +16,10 @@ import {
   MessageRow,
   RecoveryDivider,
   UnreadDivider,
+  type MessageRowActions,
 } from "./MessageRow";
 import { PendingRow } from "./PendingRow";
+import { chipsFor, type ReactionMap } from "./reactions";
 
 // =============================================================================
 // Timeline (R-1 §3). Virtualised by react-virtuoso, ordered by seq only, with
@@ -75,6 +77,8 @@ export function Timeline({
   unreadCount,
   recoveryMarkers,
   pending,
+  actions,
+  reactions,
   onStartReached,
   onRetry,
   onOpenThread,
@@ -96,6 +100,16 @@ export function Timeline({
   recoveryMarkers?: RecoveryMarker[];
   /** Local echoes awaiting their seq; folded in at the tail (M10). */
   pending?: PendingMessage[];
+  /**
+   * B11 — what a row may do to its message. Omitted where the surface is a
+   * transcript rather than a conversation (the work session event log), and the
+   * rows there then render exactly as before.
+   *
+   * `chips` is filled per row from `reactions` below, so the caller hands over
+   * the map once instead of deriving a list for every message in the channel.
+   */
+  actions?: Omit<MessageRowActions, "chips">;
+  reactions?: ReactionMap;
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
@@ -245,6 +259,16 @@ export function Timeline({
             message={item.message}
             startsGroup={item.startsGroup}
             directory={directory}
+            actions={
+              actions && {
+                ...actions,
+                chips: chipsFor(
+                  reactions ?? {},
+                  item.message.id,
+                  actions.myMemberId
+                ),
+              }
+            }
             onOpenThread={onOpenThread}
             onOpenWorkSession={onOpenWorkSession}
             onResend={onResend}

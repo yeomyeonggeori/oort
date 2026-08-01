@@ -1463,6 +1463,107 @@ export function sendThreadReply(
   );
 }
 
+// ---- Message actions (B11): edit, delete, react ----------------------------
+// PATCH  /v1/workspaces/{ws}/messages/{id}
+// DELETE /v1/workspaces/{ws}/messages/{id}
+// PUT    /v1/workspaces/{ws}/messages/{id}/reactions/{emoji}
+// DELETE /v1/workspaces/{ws}/messages/{id}/reactions/{emoji}
+// GET    /v1/workspaces/{ws}/channels/{ch}/reactions
+//
+// Note the shape of the first four: **message-scoped, not channel-scoped**. A
+// message id is already unique inside a tenant and its channel is a fact about
+// the row, not something the caller asserts — so none of these takes a channel,
+// and no client can move a message by naming the wrong one.
+
+/**
+ * Rewrite one's own message. The server is the authority on who may — it answers
+ * 403 for anyone but the author — and the action bar's visibility rule is only
+ * an affordance layered on top of that.
+ *
+ * Answers with the updated message so the caller replaces the row with what was
+ * actually stored, rather than with what it hoped the edit did.
+ */
+export function editMessage(
+  workspaceId: string,
+  messageId: string,
+  bodyText: string
+): Promise<Message> {
+  return request<Message>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: "PATCH", body: JSON.stringify({ body: bodyText }) }
+  );
+}
+
+/**
+ * Soft-delete one's own message. Answers with the **tombstone** (`state:
+ * "deleted"`, no body), not 204: the timeline replaces the row instead of
+ * dropping it, because a message that silently vanishes leaves what reads as a
+ * hole in `seq`.
+ */
+export function deleteMessage(
+  workspaceId: string,
+  messageId: string
+): Promise<Message> {
+  return request<Message>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: "DELETE" }
+  );
+}
+
+/** One member's reaction moving one way (server `ReactionDeltaDto`). */
+export interface ReactionDelta {
+  action: "added" | "removed";
+  messageId: string;
+  memberId: string;
+  emoji: string;
+}
+
+/**
+ * Toggle one reaction. Idempotent server-side: a duplicate add and a removal of
+ * something that was never there both answer 200 having changed nothing, so a
+ * double-tap is harmless rather than an error the UI has to explain away.
+ *
+ * The emoji is a path segment, percent-encoded here — `encodeURIComponent`
+ * covers both unicode emoji and the `:shortcode:` form the schema allows.
+ */
+export function setReaction(
+  workspaceId: string,
+  messageId: string,
+  emoji: string,
+  action: "added" | "removed"
+): Promise<ReactionDelta> {
+  return request<ReactionDelta>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/messages/${encodeURIComponent(
+      messageId
+    )}/reactions/${encodeURIComponent(emoji)}`,
+    { method: action === "added" ? "PUT" : "DELETE" }
+  );
+}
+
+/**
+ * The cold-load reaction map for a channel: `message id -> emoji -> member ids`.
+ *
+ * Encoded as the mapping itself with no wrapper key (the server's
+ * `ReactionSnapshotDTO` uses a single-value container), which is why this is the
+ * record and not `{ snapshot: … }`.
+ *
+ * **Ids arrive UPPERCASE here** and lowercase from the message projections — the
+ * same mixed-case wire `uuidEq` exists for. `normalizeReactionSnapshot`
+ * (`features/timeline/reactions.ts`) is the one place that case is folded.
+ */
+export type ReactionSnapshotWire = Record<string, Record<string, string[]>>;
+
+export function fetchReactionSnapshot(
+  workspaceId: string,
+  channelId: string
+): Promise<ReactionSnapshotWire> {
+  return request<ReactionSnapshotWire>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+      channelId
+    )}/reactions`
+  );
+}
+
 // ---- Work sessions: the ADR-0114 session ledger (AX-3 / MOMO-618) ----------
 // GET   /v1/workspaces/{ws}/work-sessions[?active=1]   (WorkSessionRoutes.list)
 // PATCH /v1/workspaces/{ws}/work-sessions/{session}     (owner ends it)

@@ -152,6 +152,17 @@ pub struct StoredMessage {
     pub props: Value,
     pub root_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
+    /// When the author last rewrote the body (`NULL` = never edited).
+    ///
+    /// B11: projected because Swift's history projects `m.edited_at` /
+    /// `m.deleted_at` on every row (`MessageRoutes.swift:391-393`) and a client
+    /// that cannot see them has no way to draw "(수정됨)" or a tombstone after a
+    /// reload — the edit would look like the original text, and the deletion
+    /// would look like a hole in `seq`.
+    pub edited_at: Option<DateTime<Utc>>,
+    /// Soft-delete stamp. The row stays, `body` is NULL'd; see
+    /// [`crate::interaction::delete_message_in_tx`].
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 /// The reply rollup a client draws as "3 replies" under a root message
@@ -209,7 +220,15 @@ pub struct SentMessage {
 /// single [`decode_stored`] reads every row shape.
 const STORED_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, created_at";
+     root_id, created_at, edited_at, deleted_at";
+
+/// [`decode_stored`] for the sibling modules that project the same columns with
+/// extras beside them (`interaction::INTERACTION_COLS`). Crate-private: the
+/// column list and the decoder are one contract, and a caller outside this crate
+/// has no way to honour it.
+pub(crate) fn decode_stored_row(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Error> {
+    decode_stored(row)
+}
 
 fn decode_stored(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Error> {
     let type_label: String = row.try_get("message_type")?;
@@ -230,6 +249,8 @@ fn decode_stored(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Err
         props: row.try_get("props")?,
         root_id: row.try_get("root_id")?,
         created_at: row.try_get("created_at")?,
+        edited_at: row.try_get("edited_at")?,
+        deleted_at: row.try_get("deleted_at")?,
     })
 }
 
@@ -913,7 +934,7 @@ pub struct PagedMessage {
 /// are unqualified in the result set, so [`decode_stored`] reads it unchanged.
 const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m.hlc_count, \
      m.author_member_id, m.type::text AS message_type, m.state::text AS state, m.body, m.props, \
-     m.root_id, m.created_at, t.reply_count, t.last_reply_seq, \
+     m.root_id, m.created_at, m.edited_at, m.deleted_at, t.reply_count, t.last_reply_seq, \
      CASE WHEN t.last_reply_at IS NULL THEN NULL \
           ELSE floor(extract(epoch from t.last_reply_at) * 1000)::bigint \
      END AS last_reply_at_ms";

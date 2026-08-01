@@ -102,6 +102,11 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         client_msg_id: None,
         created_at_ms: event.created_at_ms,
         state: Some(event.state),
+        // A session event card is written by a host, not said by a member, so
+        // there is no author who could edit or delete it. Both keys stay absent
+        // rather than being reported as `null`.
+        edited_at_ms: None,
+        deleted_at_ms: None,
         // A replayed row is a reply inside the session thread, and a reply
         // carries no rollup of its own — momo threads are one level deep.
         thread: None,

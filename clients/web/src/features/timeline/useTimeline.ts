@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  deleteMessage as deleteMessageRequest,
+  editMessage as editMessageRequest,
   fetchMessages,
+  fetchReactionSnapshot,
   sendMessage,
+  setReaction,
   type Message,
   type RequestRouting,
 } from "@/lib/api";
 import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
 import {
   addPending,
+  applyTombstone,
   emptyTimeline,
   failPending,
   reconcileMessages,
@@ -18,6 +23,14 @@ import {
   type RecoveryMarker,
   type TimelineState,
 } from "./model";
+import {
+  applyReactionDelta,
+  clearMessageReactions,
+  emptyReactions,
+  normalizeReactionSnapshot,
+  toggleDirection,
+  type ReactionMap,
+} from "./reactions";
 
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
@@ -51,6 +64,17 @@ export interface UseTimelineResult {
   reload: () => void;
   loadingOlder: boolean;
   reachedStart: boolean;
+  /** B11 — `message id -> emoji -> member ids`, case-folded on ingest. */
+  reactions: ReactionMap;
+  /**
+   * Toggle my reaction on one message. Optimistic, and reverted on failure —
+   * the caller surfaces the refusal as a sentence.
+   */
+  toggleReaction: (message: Message, emoji: string) => Promise<void>;
+  /** Rewrite my own message. The server's row replaces the local one. */
+  editMessage: (message: Message, body: string) => Promise<void>;
+  /** Soft-delete my own message. The tombstone replaces the local row. */
+  deleteMessage: (message: Message) => Promise<void>;
 }
 
 /**
@@ -80,6 +104,22 @@ export function useTimeline(
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
+  // B11. Kept beside the messages rather than inside them: a reaction changes
+  // far more often than the message it annotates, and folding it into the row
+  // would make every 👍 replace a `Message` object the virtualiser then has to
+  // re-render in full.
+  const [reactions, setReactions] = useState<ReactionMap>(emptyReactions);
+  // Read by the optimistic toggle, which must know the current direction
+  // without depending on the state it is about to change (that dependency would
+  // rebuild every row's click handler on every reaction in the channel).
+  const reactionsRef = useRef<ReactionMap>(reactions);
+  const applyReaction = useCallback(
+    (change: Parameters<typeof applyReactionDelta>[1]) => {
+      reactionsRef.current = applyReactionDelta(reactionsRef.current, change);
+      setReactions(reactionsRef.current);
+    },
+    []
+  );
 
   // Authoritative newest-seq cursor, updated at merge time rather than at
   // render time, so a resubscribe firing between renders still reads truth.
@@ -232,6 +272,8 @@ export function useTimeline(
     setReachedStart(false);
     setRecoveryMarkers([]);
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
+    reactionsRef.current = emptyReactions();
+    setReactions(reactionsRef.current);
 
     // 1) REST head (descending page; merge is order-agnostic).
     fetchMessages(workspaceId, channelId, { limit: HEAD_LIMIT })
@@ -243,6 +285,24 @@ export function useTimeline(
       })
       .catch(() => {
         if (!cancelled) setStatus("error");
+      });
+
+    // 1b) The channel's reaction map, in parallel and deliberately not fatal.
+    // A channel whose messages loaded but whose chips did not is a channel you
+    // can still read and still send in; turning that into the error state would
+    // trade the whole surface for an annotation.
+    fetchReactionSnapshot(workspaceId, channelId)
+      .then((wire) => {
+        if (cancelled) return;
+        // Merge rather than replace: a reaction that arrived on the realtime
+        // rail while this request was in flight would otherwise be erased by an
+        // older snapshot.
+        const cold = normalizeReactionSnapshot(wire);
+        reactionsRef.current = { ...cold, ...reactionsRef.current };
+        setReactions(reactionsRef.current);
+      })
+      .catch(() => {
+        /* chips stay empty; the channel is still fully usable */
       });
 
     // 2) Realtime rail with resume healing.
@@ -276,6 +336,32 @@ export function useTimeline(
         if (cancelled) return;
         applyBatch([payloadToMessage(event.payload)]);
       },
+      // B11 — a tombstone marks the row it names in place. It cannot go through
+      // `applyBatch`: the frame carries only an id (by design, so a delete
+      // never re-broadcasts the body it erased), and the row must keep its seq.
+      onMessageDeleted: (event) => {
+        if (cancelled) return;
+        const messageId = event.payload.message_id;
+        setState((s) => applyTombstone(s, messageId, event.ts));
+        // The server deleted the rows with the message; drop the chips so they
+        // do not report counts for a body nobody can read.
+        reactionsRef.current = clearMessageReactions(
+          reactionsRef.current,
+          messageId
+        );
+        setReactions(reactionsRef.current);
+      },
+      onReaction: (event) => {
+        if (cancelled) return;
+        // Idempotent both ways, which is what lets the echo of my own optimistic
+        // click land harmlessly on top of it.
+        applyReaction({
+          messageId: event.payload.message_id,
+          memberId: event.payload.member_id,
+          emoji: event.payload.emoji,
+          action: event.payload.action,
+        });
+      },
     });
 
     return () => {
@@ -288,6 +374,7 @@ export function useTimeline(
     channelId,
     backfillAfter,
     applyBatch,
+    applyReaction,
     addMarker,
     updatePending,
     reloadNonce,
@@ -312,6 +399,78 @@ export function useTimeline(
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
+  // ---- message actions (B11) ------------------------------------------------
+
+  /**
+   * Toggle my reaction, optimistically.
+   *
+   * The direction is *derived* from the current map rather than passed in, so
+   * the local update and the request can never disagree about which way the
+   * toggle was going — a mismatch there is how a chip ends up showing the
+   * opposite of what the server stored.
+   *
+   * On failure the optimistic change is reverted with its own inverse, which is
+   * safe because `applyReactionDelta` is idempotent: if the realtime echo of a
+   * *successful* twin already landed, the revert is a no-op rather than a second
+   * wrong write.
+   */
+  const toggleReaction = useCallback(
+    async (message: Message, emoji: string) => {
+      const action = toggleDirection(
+        reactionsRef.current,
+        message.id,
+        authorMemberId,
+        emoji
+      );
+      const change = {
+        messageId: message.id,
+        memberId: authorMemberId,
+        emoji,
+        action,
+      };
+      applyReaction(change);
+      try {
+        await setReaction(workspaceId, message.id, emoji, action);
+      } catch (error) {
+        applyReaction({
+          ...change,
+          action: action === "added" ? "removed" : "added",
+        });
+        throw error;
+      }
+    },
+    [workspaceId, authorMemberId, applyReaction]
+  );
+
+  /**
+   * Rewrite my own message. **Not optimistic**, unlike a reaction: the server
+   * stamps `edited_at` and decides the resulting `state`, and showing the new
+   * text before it is stored would leave the row claiming an edit that a 403
+   * then took back. The round trip here is one request, and the editor says
+   * "저장 중…" while it runs.
+   */
+  const editMessage = useCallback(
+    async (message: Message, body: string) => {
+      const updated = await editMessageRequest(workspaceId, message.id, body);
+      applyBatch([updated]);
+    },
+    [workspaceId, applyBatch]
+  );
+
+  /** Soft-delete my own message; the returned tombstone replaces the row. */
+  const deleteMessage = useCallback(
+    async (message: Message) => {
+      const tombstone = await deleteMessageRequest(workspaceId, message.id);
+      applyBatch([tombstone]);
+      reactionsRef.current = clearMessageReactions(
+        reactionsRef.current,
+        message.id
+      );
+      setReactions(reactionsRef.current);
+    },
+    [workspaceId, applyBatch]
+  );
+
   return {
     state,
     status,
@@ -324,5 +483,9 @@ export function useTimeline(
     reload,
     loadingOlder,
     reachedStart,
+    reactions,
+    toggleReaction,
+    editMessage,
+    deleteMessage,
   };
 }

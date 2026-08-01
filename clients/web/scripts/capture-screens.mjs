@@ -68,6 +68,17 @@ const MOBILE_TAP_TARGETS = [
   // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
   ["inbox-approval-approve", "인박스 승인", "optional"],
   ["inbox-approval-reject", "인박스 거부", "optional"],
+  // B11 R2 H3 — 폰의 액션 흐름이 **착지하는** 컨트롤들. 시트 자체는 44px이었지만
+  // 시트가 여는 곳은 아무도 재지 않았고, 셋 중 둘이 44px 아래였다. 전부
+  // optional인 것은 각자 자기 화면에만 존재하기 때문이고, 그 화면을 찍는 프레임이
+  // `assertTapTargets`를 다시 부른다.
+  ["message-editor-save", "수정 저장", "optional"],
+  ["message-editor-cancel", "수정 취소", "optional"],
+  ["delete-message-commit", "삭제 확인", "optional"],
+  ["delete-message-cancel", "삭제 취소", "optional"],
+  ["thread-composer-input", "답글 입력", "optional"],
+  ["thread-composer-send", "답글 보내기", "optional"],
+  ["long-press-hint-dismiss", "안내 닫기", "optional"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -425,6 +436,46 @@ function makeMessages(count) {
       createdAtMs: base + i * 60_000,
     };
   });
+  // 메시지 액션이 남기는 자국 세 가지 (goal B11). 새 행을 끼워 넣지 않고 **이미
+  // 있는 행의 상태만 바꾼다**: seq도 개수도 그대로라 기존 프레임과 게이트가 재던
+  // 것이 흔들리지 않는다. 자리는 아래에서 넷째~둘째 — 타임라인이 아래에 붙어
+  // 열리므로 캡처가 서는 자리에서 반드시 렌더된다.
+  //
+  // 삭제된 행이 픽스처에 있다는 것 자체가 요점이다: 지워진 메시지는 목록에서
+  // 조용히 사라지지 않고 자리에 「삭제된 메시지」로 남아야 하며, 그래야 seq에
+  // 구멍이 뚫린 것처럼 보이지 않는다.
+  // 고르는 규칙: **평범한 한 줄짜리 텍스트 행만** 고른다. B8의 실패 카드나 마크다운
+  // 행처럼 구조가 있는 행을 건드리면 그 프레임의 픽스처가 조용히 사라진다 — 처음
+  // 쓴 판이 `rows[count-2]`를 지웠고, 그것이 하필 턴 실패 카드여서 B8 프레임이
+  // `turn-failure`를 못 찾고 죽었다. 실패는 여기서 났는데 증상은 200줄 뒤에서
+  // 났다.
+  const plainText = (row) =>
+    row && row.type === "text" && typeof row.body === "string" && !row.props;
+  const pick = (offset) => {
+    const row = rows[count - offset];
+    return plainText(row) ? row : null;
+  };
+
+  const threaded = pick(4);
+  if (threaded) {
+    threaded.thread = {
+      reply_count: 3,
+      last_reply_seq: 1400 + count - 1,
+      last_reply_at: base + (count - 1) * 60_000,
+    };
+  }
+  const edited = pick(3);
+  if (edited) {
+    edited.state = "edited";
+    edited.editedAtMs = base + count * 60_000;
+  }
+  const removed = pick(1);
+  if (removed) {
+    removed.state = "deleted";
+    removed.body = undefined;
+    removed.deletedAtMs = base + count * 60_000;
+  }
+
   // 언제나 **가장 최근 줄**이다. 타임라인은 아래에 붙어 열리고(alignToBottom) 가상
   // 목록이라, 중간에 끼워 넣은 행은 캡처가 서는 자리에서 렌더되지 않을 수 있다.
   // 게이트가 재지 못하는 픽스처는 픽스처가 아니다.
@@ -441,6 +492,37 @@ function makeMessages(count) {
     createdAtMs: base + count * 60_000,
   });
   return rows;
+}
+
+/**
+ * 한 스레드의 답글 (goal B11). 루트는 `capture-13`(makeMessages가 rollup을 다는
+ * 행)이고, 답글은 그 아래 seq를 잇는다.
+ *
+ * 셋을 사람과 에이전트가 번갈아 쓴다: 스레드는 대화이지 전사(transcript)가
+ * 아니라는 것이 이 패널이 답글 컴포저를 갖는 이유이고, 프레임은 그 대화를 보여야
+ * 한다. 답글에는 `rootId`가 있으므로 행의 액션에서 「답글 달기」가 빠진다 —
+ * momo 스레드는 한 단계이고, 답글에 답글을 걸면 서버가 거절한다.
+ */
+function makeThreadReplies() {
+  const base = Date.now() - 6 * 60_000;
+  const rows = [
+    [HERMES, "런북 3단계부터 다시 도는 게 맞습니다. 헬스 체크는 제가 확인할게요."],
+    [ME, "네, 그 사이 배포는 잠급니다."],
+    [HERMES, "헬스 체크 통과했습니다. 다음 배포부터는 태그를 먼저 고정하죠."],
+  ];
+  return rows.map(([author, body], i) => ({
+    id: `capture-reply-${i + 1}`,
+    channelId: GENERAL_ID,
+    rootId: "capture-13",
+    seq: 1500 + i,
+    hlcTs: base + i * 60_000,
+    hlcCount: 0,
+    authorMemberId: author,
+    type: "text",
+    body,
+    state: "sent",
+    createdAtMs: base + i * 60_000,
+  }));
 }
 
 // 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
@@ -974,6 +1056,37 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
     json(route, { workTierPolicy: MEMBER_TIER_POLICY })
   );
+  // 반응 스냅샷 (goal B11). 서버는 이 맵을 **대문자 id**로 준다(Swift
+  // `uuidString`) — 메시지 투영은 소문자다. 픽스처가 그 두 자리를 그대로
+  // 재현해야 캡처가 접기(case fold)를 실제로 검증한다. `capture-15`가 아니라
+  // `CAPTURE-15`로 쓰는 이유가 그것이다.
+  //
+  // 세 종류를 담는다: 내가 누른 것(강조 칩), 남만 누른 것, 그리고 여러 개가
+  // 한 줄에 놓인 것. 리뷰가 봐야 하는 것은 그 셋의 대비다.
+  await context.route("**/v1/workspaces/*/channels/*/reactions", (route) =>
+    json(route, {
+      // 반드시 **살아 있는** 행에만 단다. 삭제된 메시지의 반응은 서버가 함께
+      // 지우고 스냅샷도 tombstone을 빼고 주므로, 지워진 행에 칩이 달린 픽스처는
+      // 서버가 낼 수 없는 화면을 그린다 — 픽스처가 거짓말을 하면 리뷰가 못 미더운
+      // 것을 승인하게 된다. capture-15는 아래에서 deleted로 표시되는 행이다.
+      "CAPTURE-14": { "👍": [ME.toUpperCase(), HERMES.toUpperCase()] },
+      "CAPTURE-17": {
+        "👍": [HERMES.toUpperCase()],
+        "🎉": [HERMES.toUpperCase(), ME.toUpperCase()],
+        "👀": [HERMES.toUpperCase()],
+      },
+    })
+  );
+  // 스레드 답글 (goal B11). **이 캡처에서 스레드를 연 프레임이 처음이라 이 라우트가
+  // 없었다.** 없으면 요청이 프리뷰 서버로 새고, 프리뷰 서버는 모르는 `/v1/*`에
+  // 401을 답한다 — 클라는 그 401에 토큰 회전을 시도하고, 회전도 401이면 세션을
+  // 끝낸다. 화면에는 스레드 대신 로그인 폼이 뜨고, 원인은 스레드와 아무 상관이
+  // 없어 보인다. `messages*`의 `*`는 `/`를 건너지 않으므로 이 경로는 위 라우트에
+  // 걸리지 않는다(그래서 별도 라우트다).
+  await context.route(
+    "**/v1/workspaces/*/channels/*/messages/*/replies*",
+    (route) => json(route, { messages: makeThreadReplies() })
+  );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());
     // Older-history and backfill pages are empty: the head page is the shot.
@@ -1027,6 +1140,21 @@ async function signIn(page) {
  * `hidden`/`clip` 상자는 세지 않는다. 그 상자들은 자르는 것이 일이고(닫힌 서랍이
  * `translateX(-100%)`로 밖에 서 있는 것이 그 예다), 잘린 것은 사람이 끌어서 볼 수도
  * 없으므로 이 단언이 말하는 결함과 성질이 다르다.
+ *
+ * **`data-scroll-x` 상자도 세지 않는다 (goal B11).** 이 단언이 잡으려는 것은
+ * "세로로만 스크롤할 표면"이 가로로 끌리는 것이다. 그런데 어떤 상자는 가로로
+ * 끌리는 것이 **일**이다 — 코드 블록이 그것이고, 넓은 내용은 자기 `overflow-x:
+ * auto` 상자 안에서 스크롤해야 한다는 것이 이 앱의 규칙이다. 코드를 접으면 정렬이
+ * 깨지므로 대안도 없다.
+ *
+ * B11 전까지 이 false positive가 나지 않은 것은 코드 블록이 든 행이 폰 프레임의
+ * 렌더 창 밖에 있었기 때문이다 — 규칙이 맞아서가 아니라 운이었고, 반응 칩이
+ * 레이아웃을 한 행 밀자 바로 드러났다. 실사용에서는 코드 블록이 화면에 있는 매
+ * 순간 걸렸을 것이다.
+ *
+ * 면제는 게이트가 아니라 **컴포넌트가 선언**한다: 가로 스크롤이 자기 일인 상자만
+ * `data-scroll-x`를 달고, 그 속성이 코드 리뷰에서 보인다. 게이트에 이름을 박아
+ * 두면 다음 상자는 조용히 새거나 조용히 면제된다.
  */
 async function assertNoHorizontalOverflow(page, where) {
   const measure = await page.evaluate(`(() => {
@@ -1041,6 +1169,8 @@ async function assertNoHorizontalOverflow(page, where) {
     for (const el of document.querySelectorAll("*")) {
       const overflowX = getComputedStyle(el).overflowX;
       if (overflowX !== "auto" && overflowX !== "scroll") continue;
+      // 가로로 끌리는 것이 이 상자의 일이다 (goal B11) — 위 주석 참조.
+      if (el.hasAttribute("data-scroll-x")) continue;
       const over = el.scrollWidth - el.clientWidth;
       if (over <= 0) continue;
       // 상자 이름만으로는 고칠 자리를 못 찾는다: 타임라인이 끌린다는 것은
@@ -1340,6 +1470,270 @@ async function assertTapTargets(page, where) {
 }
 
 /**
+ * 액션 진입점이 자기 행의 본문을 덮지 않는가 (goal B11 R2 Blocker).
+ *
+ * 1라운드는 액션 바를 행 위에 음수 오프셋(`-top-3`)으로 띄웠는데, 바 높이가
+ * 32px이라 20px이 언제나 행 안에 남았다 — 연속 행의 첫 줄 오른쪽 끝이 그만큼
+ * 가려졌고, 한국어 문단의 첫 줄은 거의 언제나 오른쪽 끝까지 간다. 스크린샷은
+ * 그것을 보여주지만 **증명하지는** 않는다: 리뷰어가 두 상자를 재야 한다.
+ *
+ * 그래서 여기서 잰다. 본문 상자(`data-row-body`)의 오른쪽 끝보다 진입점이
+ * 왼쪽에서 시작하면 그것이 겹침이고, 몇 px인지까지 말한다. 지금 구조에서는
+ * 진입점이 본문 **밖**의 예약된 열에 있으므로 이 값은 음수여야 한다.
+ */
+async function assertActionGutterClearsBody(page, where) {
+  const rows = await page.evaluate(`(() => {
+    return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
+      .map((row) => {
+        const body = row.querySelector('[data-row-body]');
+        const trigger = row.querySelector('[data-testid="message-actions-trigger"]');
+        if (!body || !trigger) return null;
+        const b = body.getBoundingClientRect();
+        const t = trigger.getBoundingClientRect();
+        return {
+          seq: row.getAttribute('data-seq'),
+          overlap: Math.round(b.right - t.left),
+          gap: Math.round(t.left - b.right),
+        };
+      })
+      .filter(Boolean);
+  })()`);
+  if (rows.length === 0) {
+    throw new Error(`[액션 열 ${where}] 잴 행이 하나도 없다`);
+  }
+  const worst = rows.reduce((a, b) => (b.overlap > a.overlap ? b : a));
+  if (worst.overlap > 0) {
+    throw new Error(
+      `[액션 열 ${where}] seq ${worst.seq}: 액션 진입점이 본문 상자를 ${worst.overlap}px 덮는다`
+    );
+  }
+  console.log(
+    `  액션 열 ${where}: ${rows.length}행, 본문과의 최소 간격 ${-worst.overlap}px`
+  );
+}
+
+/**
+ * 행 하나가 키보드에 청구하는 값 (goal B11 R2 H1).
+ *
+ * B11이 행에 심은 컨트롤(진입점·반응 칩·반응 추가·스레드 앵커)만 센다. 카드
+ * 안의 버튼(패치 열기 같은)은 이 배치가 만든 것이 아니고 행 액션도 아니므로
+ * 세지 않는다 — 대신 아래 `countTabStopsToComposer`가 그것까지 포함한 실제
+ * 비용을 잰다.
+ *
+ * 기준은 **행당 1개 이하**다. `opacity-0`으로만 숨긴 버튼은 눈에서만 사라지고
+ * 탭 순서에는 그대로 남는다는 것이 1라운드의 결함이었으므로, 여기서는 보이는지
+ * 가 아니라 `tabIndex`를 본다.
+ */
+async function assertRowTabStops(page, where, limit = 1) {
+  const rows = await page.evaluate(`(() => {
+    const OWNED = [
+      '[data-testid="message-actions-trigger"]',
+      '[data-testid="reaction-chip"]',
+      '[data-testid="reaction-add"]',
+      '[data-testid="thread-anchor"]',
+      '[data-testid="message-resend"]',
+    ].join(',');
+    return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
+      .map((row) => {
+        const stops = Array.from(row.querySelectorAll(OWNED)).filter((el) => {
+          if (el.hasAttribute('disabled')) return false;
+          // display:none 은 폭도 높이도 0이다. opacity-0 은 여전히 탭 스톱이고,
+          // 그것이 정확히 이 게이트가 잡아야 하는 상태다.
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) return false;
+          return el.tabIndex >= 0;
+        });
+        return {
+          seq: row.getAttribute('data-seq'),
+          stops: stops.length,
+          controls: row.querySelectorAll(OWNED).length,
+        };
+      });
+  })()`);
+  const worst = rows.reduce(
+    (a, b) => (b.stops > a.stops ? b : a),
+    { seq: null, stops: 0, controls: 0 }
+  );
+  if (worst.stops > limit) {
+    throw new Error(
+      `[탭 스톱 ${where}] seq ${worst.seq}: 컨트롤 ${worst.controls}개 중 ${worst.stops}개가 탭 순서에 있다 (행당 ${limit}개 이하)`
+    );
+  }
+  const controls = rows.reduce((sum, r) => sum + r.controls, 0);
+  const stops = rows.reduce((sum, r) => sum + r.stops, 0);
+  console.log(
+    `  탭 스톱 ${where}: ${rows.length}행에 행 컨트롤 ${controls}개, 탭 스톱 ${stops}개 (행당 최대 ${worst.stops})`
+  );
+}
+
+/**
+ * 타임라인 첫 컨트롤에서 컴포저까지, **진짜 Tab을 눌러서** 센다.
+ *
+ * 리뷰가 쓴 숫자(가상 목록 15~25행이면 60~150 스톱)와 같은 자다. 정적 계산이
+ * 아니라 실제 키 입력이므로, 탭 순서에 대한 어떤 가정도 끼어들지 못한다.
+ */
+async function countTabStopsToComposer(page, where, ceiling) {
+  const started = await page.evaluate(`(() => {
+    const first = document.querySelector(
+      '[data-testid="timeline-message"] [data-row-action][tabindex="0"]'
+    );
+    if (!first) return false;
+    first.focus();
+    return document.activeElement === first;
+  })()`);
+  if (!started) {
+    throw new Error(`[탭 경로 ${where}] 타임라인에 시작점이 없다`);
+  }
+  const max = ceiling * 4;
+  for (let presses = 1; presses <= max; presses++) {
+    await page.keyboard.press("Tab");
+    const id = await page.evaluate(
+      `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+    );
+    if (id === "composer-input") {
+      if (presses > ceiling) {
+        throw new Error(
+          `[탭 경로 ${where}] 타임라인에서 컴포저까지 Tab ${presses}번 (상한 ${ceiling}번)`
+        );
+      }
+      console.log(`  탭 경로 ${where}: 타임라인 → 컴포저 Tab ${presses}번`);
+      return presses;
+    }
+  }
+  throw new Error(
+    `[탭 경로 ${where}] Tab을 ${max}번 눌러도 컴포저에 닿지 못했다`
+  );
+}
+
+/**
+ * 가상 목록 안의 행을 화면에 올린다.
+ *
+ * `locator.scrollIntoViewIfNeeded()`를 쓰지 않는 이유가 있다: react-virtuoso는
+ * 스크롤이 부른 재렌더에서 행의 DOM 노드를 **교체**하고, Playwright가 "요소가
+ * 안정될 때까지" 기다리는 사이 그 노드가 떨어져 나가면 액션이 그대로 죽는다
+ * (`Element is not attached to the DOM`). 노드의 정체성은 이 프레임이 증명하려는
+ * 것과 아무 상관이 없고 필요한 것은 "그 행이 보이는가" 하나뿐이므로, 페이지
+ * 안에서 스크롤하고 결과를 다시 묻는다.
+ *
+ * R2에서 꼬리 한 줄이 줄고 tombstone이 작아지면서 행 높이가 바뀌었고, 그만큼
+ * 가상 목록의 창이 밀려 B8 프레임이 이 경계 위에 앉았다. 픽스처가 흔들린 것이
+ * 아니라 재는 방법이 흔들리는 방법이었다.
+ */
+async function scrollTimelineRowIntoView(page, testId, tries = 6) {
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    const found = await page.evaluate(`(() => {
+      const el = document.querySelector('[data-testid="${testId}"]');
+      if (!el) return false;
+      el.scrollIntoView({ block: "center" });
+      return true;
+    })()`);
+    await page.waitForTimeout(250);
+    if (found) {
+      const visible = await page
+        .getByTestId(testId)
+        .first()
+        .isVisible()
+        .catch(() => false);
+      if (visible) return;
+    }
+  }
+  throw new Error(`[스크롤] ${testId}를 ${tries}번 시도해도 화면에 올리지 못했다`);
+}
+
+/**
+ * 진짜 손가락 제스처 (goal B11 R2 H2).
+ *
+ * 1라운드의 이 자리는 합성 `pointerdown` 하나였다 — move도 up도 없었으므로,
+ * "스크롤은 누르기가 아니다" 규칙은 캡처에서 **한 번도 실행되지 않았다**. 훅
+ * 안에서 그 규칙이 죽어 있었던 것도 그래서 아무도 몰랐다.
+ *
+ * 여기서는 CDP로 실제 터치 시퀀스를 낸다: touchStart → 여러 걸음의 touchMove →
+ * 홀드 → touchEnd. 걸음을 나누는 것이 요점이다. 걸음마다 몇 px씩이면 "직전
+ * 위치" 기준의 게이트는 절대 걸리지 않고, 시작점 기준의 게이트만 걸린다.
+ *
+ * 가로로 미는 이유: 타임라인은 세로로만 스크롤하므로 가로 드래그에는 브라우저가
+ * 개입하지 않는다(`pointercancel`이 오지 않는다). 남은 방어는 훅의 거리 게이트
+ * 하나뿐이고, 정확히 그것을 재려는 것이다.
+ */
+async function longPressGesture(page, target, { dx = 0, dy = 0, holdMs = 700 } = {}) {
+  const box = await target.boundingBox();
+  if (!box) throw new Error("길게 누르기 대상의 상자를 잴 수 없다");
+  const x0 = box.x + Math.min(24, box.width / 2);
+  const y0 = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  const at = (fx, fy) => ({
+    x: x0 + dx * fx,
+    y: y0 + dy * fy,
+    radiusX: 12,
+    radiusY: 12,
+    force: 1,
+  });
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [at(0, 0)],
+    });
+    const steps = 5;
+    for (let i = 1; i <= steps; i++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [at(i / steps, i / steps)],
+      });
+      await page.waitForTimeout(40);
+    }
+    await page.waitForTimeout(holdMs);
+    const opened = await page
+      .getByTestId("message-action-sheet")
+      .isVisible()
+      .catch(() => false);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    return opened;
+  } finally {
+    await cdp.detach();
+  }
+}
+
+/**
+ * 이 컨트롤들이 **보이는** 뷰포트 안에 있는가.
+ *
+ * `assertComposerVisible`과 같은 자인데 대상만 받는다. 스레드 컴포저에 쓰려고
+ * 뽑았다: B9가 답한 질문("키보드가 올라오면 컴포저가 가려지는가")은 채널
+ * 컴포저에만 답한 것이었고, B11이 새 입력창을 하나 더 놓았다.
+ */
+async function assertControlsAboveFold(page, where, ids) {
+  const measure = await page.evaluate(`(() => {
+    const visible = Math.round(window.visualViewport.height);
+    return {
+      visible,
+      layout: window.innerHeight,
+      rows: ${JSON.stringify(ids)}.map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        return { id, bottom: el ? Math.round(el.getBoundingClientRect().bottom) : null };
+      }),
+    };
+  })()`);
+  for (const row of measure.rows) {
+    if (row.bottom === null) {
+      throw new Error(`가시성 ${where}: ${row.id}가 없다`);
+    }
+    if (row.bottom > measure.visible + 1) {
+      throw new Error(
+        `가시성 ${where}: ${row.id} 아랫변이 ${row.bottom}px인데 보이는 높이는 ` +
+          `${measure.visible}px다 — 하단 크롬 뒤로 ${row.bottom - measure.visible}px 들어갔다`
+      );
+    }
+  }
+  console.log(
+    `  가시성 ${where}: ` +
+      measure.rows.map((r) => `${r.id} ${r.bottom}px`).join(" · ") +
+      ` <= 보이는 ${measure.visible}px`
+  );
+}
+
+/**
  * 폰 (goal B6). 데스크탑 프로파일과 같은 목이고 같은 컴포넌트이며, 다른 것은
  * 뷰포트뿐이다: 이 셸이 폭에 따라 형태를 바꾼다는 주장을 같은 픽스처로 두 번
  * 찍어야 리뷰가 두 형태를 나란히 볼 수 있다.
@@ -1386,6 +1780,144 @@ async function captureMobile(browser, scheme) {
   await assertTopBreathing(page, `chat ${scheme}`);
   await assertComposerVisible(page, `chat ${scheme}`);
   await shoot(page, "chat");
+
+  // 2a-1. 폰에 액션이 있다는 것을 말하는 한 줄 (goal B11 R2 H4). 폰의 진입점은
+  //       보이지 않는 제스처 하나뿐이었고, 그래서 이 표면에는 "여기서 무언가 할
+  //       수 있다"고 말하는 것이 하나도 없었다. 손가락 기기에서만, 한 번만.
+  await page.getByTestId("long-press-hint").waitFor({ state: "visible" });
+  // 같은 축의 반대편: hover가 없는 기기에는 액션 열이 아예 없어야 한다. 있으면
+  // 본문이 쓸 수 있었던 폭을, 어떤 제스처로도 열리지 않는 컨트롤에 준 것이다.
+  const gutterOnTouch = await page.evaluate(`(() => {
+    const columns = Array.from(
+      document.querySelectorAll('[data-testid="message-action-column"]')
+    );
+    const shown = columns.filter((el) => el.getBoundingClientRect().width > 0);
+    return { total: columns.length, shown: shown.length };
+  })()`);
+  if (gutterOnTouch.shown > 0) {
+    throw new Error(
+      `[폰 ${scheme}] hover가 없는 기기에 액션 열이 ${gutterOnTouch.shown}개 그려졌다`
+    );
+  }
+  console.log(
+    `  폰 ${scheme}: 액션 열 ${gutterOnTouch.total}개 모두 접힘, 길게 누르기 안내 보임`
+  );
+
+  // 2a-2. 스크롤은 누르기가 아니다 (goal B11 R2 H2). **먼저 열리지 않아야 하는
+  //       제스처부터 잰다.** 1라운드의 이 방어는 죽은 코드였다: `origin`을 채운
+  //       직후 `clear()`가 그것을 지워서 거리 게이트가 한 번도 돌지 않았고,
+  //       그래서 임계 아래에서 천천히 끌다 멈추는 손가락이 시트를 열었다.
+  //
+  //       40px을 다섯 걸음에 나눠 가로로 민다. 걸음마다 8px이므로 "직전 위치"
+  //       기준이라면 다섯 번 다 통과하고, 가로이므로 브라우저가 스크롤로
+  //       가져가지도 않는다(`pointercancel`이 오지 않는다). 남은 방어는 훅의
+  //       시작점 기준 거리 게이트 하나뿐이다.
+  const sheetTarget = page.getByTestId("timeline-message").last();
+  const draggedOpen = await longPressGesture(page, sheetTarget, { dx: 40 });
+  if (draggedOpen) {
+    throw new Error(
+      `[길게 누르기 ${scheme}] 40px 끌린 손가락이 시트를 열었다 — 스크롤은 누르기가 아니다`
+    );
+  }
+  console.log(`  길게 누르기 ${scheme}: 40px 끌기는 시트를 열지 않는다`);
+  await page.waitForTimeout(200);
+
+  // 2a-3. 그리고 진짜 길게 누르기는 연다. 손가락은 가만히 있지 않으므로 4px의
+  //       떨림을 함께 낸다 — 허용 범위 안의 흔들림까지 취소하는 게이트는 열리지
+  //       않는 시트와 같다.
+  const pressedOpen = await longPressGesture(page, sheetTarget, { dx: 4 });
+  if (!pressedOpen) {
+    throw new Error(
+      `[길게 누르기 ${scheme}] 4px 떨림이 있는 길게 누르기가 시트를 열지 못했다`
+    );
+  }
+  await page.getByTestId("message-action-sheet").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `action sheet ${scheme}`);
+  // 시트의 모든 행은 44px 손가락 타깃이어야 한다 — 시트를 여는 이유가 그것이다.
+  const sheetTaps = await page.evaluate(`(() => {
+    const ids = ["sheet-reply", "sheet-edit", "sheet-delete"];
+    return ids
+      .map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { id, h: Math.round(r.height), w: Math.round(r.width) };
+      })
+      .filter(Boolean);
+  })()`);
+  for (const tap of sheetTaps) {
+    if (tap.h < 44) {
+      throw new Error(
+        `[action sheet ${scheme}] ${tap.id} 높이 ${tap.h}px < 44px 손가락 타깃`
+      );
+    }
+  }
+  await shoot(page, "b11-action-sheet");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("message-action-sheet").waitFor({ state: "hidden" });
+
+  // 2a-4. 시트가 여는 세 목적지 (goal B11 R2 H3). 1라운드는 폰 흐름을 **시트까지**
+  //       만 증명했고, 시트가 여는 곳은 아무도 폰에서 보지 않았다. 그 중 둘은
+  //       44px 아래 컨트롤에 착지했다(수정 저장·취소 28px, 삭제 확인 32px):
+  //       손가락으로 시작한 흐름이 손가락으로 누를 수 없는 곳에서 끝났다.
+  const openSheet = async () => {
+    const opened = await longPressGesture(page, sheetTarget, { dx: 4 });
+    if (!opened) {
+      throw new Error(`[폰 ${scheme}] 액션 시트를 다시 열지 못했다`);
+    }
+    await page.getByTestId("message-action-sheet").waitFor({ state: "visible" });
+  };
+
+  // (1) 제자리 편집기.
+  await openSheet();
+  await page.getByTestId("sheet-edit").click();
+  await page.getByTestId("message-editor-input").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `inline editor ${scheme}`);
+  await assertTapTargets(page, `inline editor ${scheme}`);
+  await shoot(page, "b11-edit");
+  await page.getByTestId("message-editor-cancel").click();
+  await page
+    .getByTestId("message-editor-input")
+    .waitFor({ state: "detached" });
+
+  // (2) 삭제 확인.
+  await openSheet();
+  await page.getByTestId("sheet-delete").click();
+  await page.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `delete dialog ${scheme}`);
+  await assertTapTargets(page, `delete dialog ${scheme}`);
+  await shoot(page, "b11-delete");
+  await page.getByTestId("delete-message-cancel").click();
+  await page
+    .getByTestId("delete-message-dialog")
+    .waitFor({ state: "hidden" });
+
+  // (3) 스레드 패널과 그 컴포저. 폰에서 이 패널은 열이 아니라 채널을 덮는
+  //     서랍이고, 그 안에 B11이 입력창을 하나 더 놓았다.
+  await page.getByTestId("thread-anchor").first().click();
+  await page.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await page.getByTestId("thread-composer-input").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `thread ${scheme}`);
+  await assertTapTargets(page, `thread ${scheme}`);
+  await shoot(page, "b11-thread");
+
+  //     그리고 B9의 질문을 이 입력창에도 던진다: 하단 크롬이 100px을 가져가면
+  //     답글 컴포저가 그 뒤로 들어가는가. 코드상으로는 `--app-viewport-height`를
+  //     물려받아 안전해 보이지만, 재지 않은 것은 재지 않은 것이다.
+  await emulateBottomChrome(page);
+  await page.waitForTimeout(300);
+  await assertControlsAboveFold(page, `thread + 하단 크롬 ${scheme}`, [
+    "thread-composer-input",
+    "thread-composer-send",
+  ]);
+  await shoot(page, "b11-thread-bottom-chrome");
+  await releaseBottomChrome(page);
+  await page.getByTestId("thread-close").click();
+  await page.getByTestId("thread-panel").waitFor({ state: "detached" });
 
   // 2b. 하단 브라우저 크롬이 100px을 가져간 상태 (goal B9). 성재 실캡처의 조건이고,
   //     이 프레임의 요점은 컴포저가 그 선 **위에** 있다는 것이다. 아래 100px이 비어
@@ -1590,6 +2122,197 @@ async function captureScheme(browser, scheme) {
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
+
+  // 2c. 메시지 액션 (goal B11). 한 프레임이 네 가지를 한꺼번에 증명한다: 내
+  //     메시지 위에 뜬 액션 바, 위 행들의 반응 칩(내가 누른 것은 강조), 「수정됨」
+  //     표식, 그리고 조용히 사라지지 않고 자리에 남은 「삭제된 메시지」.
+  //
+  //     hover로 띄운다 — 데스크탑의 진입점이 hover이기 때문이다. 폰에는 hover가
+  //     없고, 그쪽은 captureMobile의 길게 누르기 프레임이 맡는다.
+  const actionRow = login.getByTestId("timeline-message").last();
+  await actionRow.hover();
+  await login
+    .getByTestId("message-actions-trigger")
+    .last()
+    .waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  // Blocker 회귀 (R2). 진입점은 본문 상자 밖의 예약된 열에 있어야 한다.
+  await assertActionGutterClearsBody(login, `hover ${scheme}`);
+  // H1 회귀 (R2). 행마다 최대 여섯 개였던 탭 스톱이 하나가 되었는가.
+  await assertRowTabStops(login, `hover ${scheme}`);
+  const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
+  await login.screenshot({ path: actionsShot });
+  shots.push(actionsShot);
+
+  // 2d. 키보드 경로 (goal B11 R2 H1). **진짜 Tab으로 만든 프레임이다.**
+  //
+  //     1라운드의 이 프레임은 `locator.focus()`로 찍혔고, 그래서 hover 프레임과
+  //     md5까지 같았다: 프로그래매틱 포커스는 Chromium에서 `:focus-visible`을
+  //     켜지 않으므로 링이 그려지지 않았고, 아무것도 재지 못한 채 "키보드로
+  //     닿는다"고 주장했다. 여기서는 바로 앞 행의 진입점에 포커스를 두고 Tab을
+  //     **눌러서** 다음 진입점에 착지한 뒤, 그 순간의 상태를 직접 확인한다.
+  const landed = await login.evaluate(`(() => {
+    const triggers = Array.from(
+      document.querySelectorAll('[data-testid="message-actions-trigger"]')
+    );
+    if (triggers.length < 2) return false;
+    triggers[triggers.length - 2].focus();
+    return true;
+  })()`);
+  if (!landed) {
+    throw new Error(`[키보드 ${scheme}] 액션 진입점이 두 개 미만이다`);
+  }
+  // 본문 안의 링크도 정당한 탭 스톱이므로(마지막 행에는 긴 URL이 있다) 진입점이
+  // 나올 때까지 Tab을 **누른다**. 중요한 것은 몇 번째냐가 아니라, 실제 키 입력으로
+  // 거기에 닿았고 그 순간 브라우저가 `:focus-visible`을 켰다는 것이다.
+  let landedOn = "";
+  for (let press = 0; press < 8 && landedOn !== "message-actions-trigger"; press++) {
+    await login.keyboard.press("Tab");
+    landedOn = await login.evaluate(
+      `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+    );
+  }
+  const focusProof = await login.evaluate(`(() => {
+    const el = document.activeElement;
+    if (!el) return { testId: "", focusVisible: false, opacity: 0 };
+    return {
+      testId: el.getAttribute("data-testid") || "",
+      focusVisible: el.matches(":focus-visible"),
+      opacity: Number(getComputedStyle(el).opacity),
+    };
+  })()`);
+  if (focusProof.testId !== "message-actions-trigger") {
+    throw new Error(
+      `[키보드 ${scheme}] Tab이 액션 진입점이 아니라 ${focusProof.testId || "(없음)"}에 닿았다`
+    );
+  }
+  if (!focusProof.focusVisible) {
+    throw new Error(
+      `[키보드 ${scheme}] 진입점이 :focus-visible이 아니다 — 링 없는 프레임은 아무것도 증명하지 않는다`
+    );
+  }
+  if (focusProof.opacity < 1) {
+    throw new Error(
+      `[키보드 ${scheme}] 포커스를 받은 진입점의 opacity가 ${focusProof.opacity}다 (보이지 않는 컨트롤에 포커스가 있다)`
+    );
+  }
+  console.log(`  키보드 ${scheme}: Tab → 진입점, :focus-visible 켜짐`);
+  await login.waitForTimeout(300);
+  const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
+  await login.screenshot({ path: actionsFocusShot });
+  shots.push(actionsFocusShot);
+
+  // 2e. 그 진입점이 여는 것 (goal B11 R2 H1). 키보드 사용자는 행당 하나의
+  //     진입점으로 같은 액션 **전부**에 닿아야 한다. Enter로 열고, 방향키가
+  //     실제로 항목 사이를 도는지 확인하고, Esc가 포커스를 진입점에 돌려주는지
+  //     까지 같은 시퀀스에서 잰다.
+  await login.keyboard.press("Enter");
+  await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
+  await login.screenshot({ path: menuShot });
+  shots.push(menuShot);
+  const firstItem = await login.evaluate(
+    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+  );
+  await login.keyboard.press("ArrowDown");
+  const secondItem = await login.evaluate(
+    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+  );
+  if (!firstItem || firstItem === secondItem) {
+    throw new Error(
+      `[메뉴 ${scheme}] 방향키가 항목 사이를 돌지 않는다 (${firstItem} → ${secondItem})`
+    );
+  }
+  const menuItems = await login.evaluate(
+    `document.querySelectorAll('[data-testid="message-action-menu"] [role="menuitem"]').length`
+  );
+  console.log(
+    `  메뉴 ${scheme}: 항목 ${menuItems}개, ↓로 ${firstItem} → ${secondItem}`
+  );
+  await login.keyboard.press("Escape");
+  await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
+  await login.waitForTimeout(200);
+  const returned = await login.evaluate(`(() => {
+    const el = document.activeElement;
+    if (!el) return "(없음)";
+    return el.getAttribute("data-testid") || el.tagName.toLowerCase();
+  })()`);
+  if (returned !== "message-actions-trigger") {
+    throw new Error(
+      `[메뉴 ${scheme}] Esc 뒤 포커스가 ${returned}에 남았다 — 진입점으로 돌아가야 한다`
+    );
+  }
+
+  // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
+  //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("menu-edit").click();
+  await login.getByTestId("message-editor-input").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  // R2 M3 회귀: 편집 중인 행에는 hover 진입점이 없어야 한다. 1라운드에서는 바가
+  // 편집기 테두리에 겹친 채 살아 있었고, 그 상태로 「지우기」가 눌렸다.
+  const triggerWhileEditing = await login.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="message-editor"]')?.closest(
+      '[data-testid="timeline-message"]'
+    );
+    if (!row) return -1;
+    return row.querySelectorAll('[data-testid="message-actions-trigger"]').length;
+  })()`);
+  if (triggerWhileEditing !== 0) {
+    throw new Error(
+      `[편집 ${scheme}] 편집 중인 행에 액션 진입점이 ${triggerWhileEditing}개 남아 있다`
+    );
+  }
+  const editShot = `${OUT_DIR}/b11-message-edit-${scheme}.png`;
+  await login.screenshot({ path: editShot });
+  shots.push(editShot);
+  await login.getByTestId("message-editor-cancel").click();
+
+  // 2g. 지우기 확인 (goal B11). 되돌리기가 아니라 확인이다 — 서버의 삭제는 본문을
+  //     지우는 tombstone이라 되돌릴 것이 남지 않는다.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("menu-delete").click();
+  await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
+  await login.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await login.getByTestId("delete-message-cancel").click();
+
+  // 2h. 반응 고르기 (goal B11). 이모지 피커 의존성 없이 손으로 짠 격자다: 피커
+  //     라이브러리는 폰트나 스프라이트를 싣는데 이 앱은 외부 호스트가 막힌 CSP와
+  //     오프라인 셸(B10)을 갖고 있다.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("menu-react-more").click();
+  await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
+  await login.screenshot({ path: pickerShot });
+  shots.push(pickerShot);
+  await login.keyboard.press("Escape");
+
+  // 2h. 스레드, 이제 답글을 쓸 수 있는 (goal B11). 이 패널은 답글을 **읽기만**
+  //     했었고, 그래서 「답글 N개」는 액션이 아니라 전사(transcript) 링크였다.
+  //     컴포저가 그 나머지 반쪽이다.
+  await login.getByTestId("thread-anchor").first().click();
+  await login.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await login.getByTestId("thread-composer-input").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
+  const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
+  await login.screenshot({ path: threadShot });
+  shots.push(threadShot);
+  await login.getByTestId("thread-close").click();
+
+  // 2j. 그래서 이 타임라인을 키보드로 지나가는 데 얼마가 드는가 (goal B11 R2 H1).
+  //     리뷰가 센 것과 같은 자다. 실측 16번(그려진 11행 + 본문 링크 + 카드 안
+  //     컨트롤)이고 상한은 24번이다: 행마다 컨트롤이 하나 더 늘면 11이 더해져
+  //     바로 넘는다. 1라운드의 액션 바(행당 6개)는 근처에도 오지 못한다.
+  await countTabStopsToComposer(login, `desktop ${scheme}`, 24);
 
   // 3. focus ring on the composer (focus indication is a hard rule)
   await login.getByTestId("composer-input").focus();
@@ -2077,7 +2800,7 @@ async function captureScheme(browser, scheme) {
   // B8 H6: a markdown body rendered as markdown. The fixture row carries bold,
   // inline code, a bullet list, a link and a fenced block, so this one frame is
   // where a reviewer sees whether the timeline stayed dense.
-  await b8.getByTestId("message-markdown").first().scrollIntoViewIfNeeded();
+  await scrollTimelineRowIntoView(b8, "message-markdown");
   await b8.getByTestId("message-code-block").first().waitFor({ state: "visible" });
   await b8.waitForTimeout(200);
   const markdownShot = `${OUT_DIR}/b8-message-markdown-${scheme}.png`;
@@ -2086,7 +2809,7 @@ async function captureScheme(browser, scheme) {
 
   // B8 H2: the failure notice, with 자세히 open. Two things are on trial here
   // and both are negatives: no English, and no provider text.
-  await b8.getByTestId("turn-failure").first().scrollIntoViewIfNeeded();
+  await scrollTimelineRowIntoView(b8, "turn-failure");
   await b8.getByTestId("turn-failure-detail").first().click();
   await b8.waitForTimeout(200);
   const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;

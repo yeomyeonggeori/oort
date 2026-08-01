@@ -40,7 +40,83 @@ export interface MessageNewEvent {
      * carries the same facts the REST page does.
      */
     props?: Record<string, unknown>;
+    /**
+     * B11 — present on `message.edited`, which carries the whole row. `state`
+     * alone says *that* it was edited; without the stamp a live edit and a
+     * reloaded one would disagree about when, and the row's "수정됨" label is
+     * hung off exactly this value.
+     */
+    edited_at_ms?: number | null;
+    deleted_at_ms?: number | null;
   };
+}
+
+/**
+ * B11 — the tombstone frame. Deliberately carries **only** the id: a delete that
+ * re-broadcast its body would put the erased text back on every connected
+ * client's wire, which is the one thing the delete existed to prevent.
+ *
+ * The receiver therefore cannot build a `Message` out of this frame; it must
+ * mark the row it already holds. That is why this is a separate handler rather
+ * than another `payloadToMessage` shape — see `applyTombstone`.
+ */
+export interface MessageDeletedEvent {
+  type: "message.deleted";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: { message_id: string };
+}
+
+/**
+ * B11 — one member's reaction moving one way.
+ *
+ * `seq` is the **target message's**, reused rather than minted: a reaction is
+ * not a message and must not advance any cursor. Ids arrive UPPERCASE (the
+ * server builds them from Swift's `uuidString`, unlike the lowercase ids in a
+ * message payload), so every consumer folds case.
+ */
+export interface ReactionEvent {
+  type: "reaction.added" | "reaction.removed";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: {
+    action: "added" | "removed";
+    message_id: string;
+    member_id: string;
+    emoji: string;
+  };
+}
+
+/** Narrow a publication to the tombstone frame, or `null`. */
+export function asMessageDeletedFrame(
+  data: unknown
+): MessageDeletedEvent | null {
+  const frame = data as MessageDeletedEvent | undefined;
+  if (!frame || frame.type !== "message.deleted") return null;
+  if (typeof frame.payload?.message_id !== "string") return null;
+  return frame;
+}
+
+/** Narrow a publication to a reaction frame, or `null`. */
+export function asReactionFrame(data: unknown): ReactionEvent | null {
+  const frame = data as ReactionEvent | undefined;
+  if (!frame) return null;
+  if (frame.type !== "reaction.added" && frame.type !== "reaction.removed") {
+    return null;
+  }
+  const payload = frame.payload;
+  if (
+    !payload ||
+    typeof payload.message_id !== "string" ||
+    typeof payload.member_id !== "string" ||
+    typeof payload.emoji !== "string" ||
+    (payload.action !== "added" && payload.action !== "removed")
+  ) {
+    return null;
+  }
+  return frame;
 }
 
 /**
@@ -67,6 +143,8 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
   };
   if (typeof p.root_id === "string") message.rootId = p.root_id;
   if (p.props && typeof p.props === "object") message.props = p.props;
+  if (typeof p.edited_at_ms === "number") message.editedAtMs = p.edited_at_ms;
+  if (typeof p.deleted_at_ms === "number") message.deletedAtMs = p.deleted_at_ms;
   return message;
 }
 
@@ -594,6 +672,13 @@ export interface RealtimeHandle {
     handlers: {
       onSubscribed: (recovered: boolean) => void;
       onMessage: (event: MessageNewEvent) => void;
+      /**
+       * B11 — optional so the notification rail, which has nothing to say about
+       * a message being withdrawn, is not forced to declare that it ignores it.
+       * The timeline supplies both.
+       */
+      onMessageDeleted?: (event: MessageDeletedEvent) => void;
+      onReaction?: (event: ReactionEvent) => void;
     }
   ) => () => void;
   /**
@@ -746,6 +831,8 @@ export function createRealtime(
     handlers: {
       onSubscribed: (recovered: boolean) => void;
       onMessage: (event: MessageNewEvent) => void;
+      onMessageDeleted?: (event: MessageDeletedEvent) => void;
+      onReaction?: (event: ReactionEvent) => void;
     }
   ): () => void {
     return attach(
@@ -762,7 +849,18 @@ export function createRealtime(
             event.payload
           ) {
             handlers.onMessage(event);
+            return;
           }
+          // B11 — the two interaction frames. They ride the same channel as the
+          // message they annotate and reuse its `seq`, so they arrive here in
+          // order behind it rather than on a rail of their own.
+          const tombstone = asMessageDeletedFrame(ctx.data);
+          if (tombstone) {
+            handlers.onMessageDeleted?.(tombstone);
+            return;
+          }
+          const reaction = asReactionFrame(ctx.data);
+          if (reaction) handlers.onReaction?.(reaction);
         };
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);

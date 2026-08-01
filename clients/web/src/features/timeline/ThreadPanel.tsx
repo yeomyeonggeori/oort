@@ -4,7 +4,9 @@ import { fetchThreadReplies, type Message } from "@/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { startsAuthorGroup } from "./model";
-import { MessageRow } from "./MessageRow";
+import { MessageRow, type MessageRowActions } from "./MessageRow";
+import { ThreadComposer } from "./ThreadComposer";
+import { chipsFor, type ReactionMap } from "./reactions";
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -17,6 +19,8 @@ export function ThreadPanel({
   channelId,
   root,
   directory,
+  actions,
+  reactions,
   onOpenWorkSession,
   onClose,
 }: {
@@ -24,6 +28,13 @@ export function ThreadPanel({
   channelId: string;
   root: Message;
   directory: Directory;
+  /**
+   * B11 — the same actions the channel row offers, so a reply is edited,
+   * deleted and reacted to exactly where it is read. Omitted by the work
+   * session panel, whose rows are an event log.
+   */
+  actions?: Omit<MessageRowActions, "chips">;
+  reactions?: ReactionMap;
   onOpenWorkSession?: (sessionId: string) => void;
   onClose: () => void;
 }) {
@@ -33,6 +44,13 @@ export function ThreadPanel({
   });
 
   const replies = query.data?.messages ?? [];
+
+  /** Per-row actions, with this row's chips folded in. */
+  const rowActions = (message: Message): MessageRowActions | undefined =>
+    actions && {
+      ...actions,
+      chips: chipsFor(reactions ?? {}, message.id, actions.myMemberId),
+    };
 
   return (
     // `thread-pane` (goal B6): 넓은 창에서는 그대로 320px 열이고, 폰에서는 채널
@@ -61,6 +79,7 @@ export function ThreadPanel({
           message={root}
           startsGroup
           directory={directory}
+          actions={rowActions(root)}
           onOpenWorkSession={onOpenWorkSession}
         />
         <div className="mx-4 my-2 h-px bg-line" />
@@ -86,10 +105,24 @@ export function ThreadPanel({
             message={reply}
             startsGroup={startsAuthorGroup(replies[index - 1], reply)}
             directory={directory}
+            actions={rowActions(reply)}
             onOpenWorkSession={onOpenWorkSession}
           />
         ))}
       </div>
+
+      {/* B11 — the half that was missing. Reading a thread and not being able
+          to answer in it made 답글 a link to a transcript. Offered only where
+          the surface is a conversation: the work session panel passes no
+          `actions`, and its event log stays read-only. */}
+      {actions && (
+        <ThreadComposer
+          workspaceId={workspaceId}
+          channelId={channelId}
+          rootId={root.id}
+          onSent={() => void query.refetch()}
+        />
+      )}
     </aside>
   );
 }

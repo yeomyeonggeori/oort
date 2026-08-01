@@ -201,6 +201,29 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies",
             get(routes::messages::replies),
         )
+        // B11 — the things you can do to a message that is already sent.
+        // Message-scoped, not channel-scoped: Swift mounts these under
+        // `/workspaces/{ws}/messages/{id}` (`MessageRoutes.swift:28-31`) because
+        // a message id is already unique inside a tenant, and its channel is a
+        // fact about the row rather than an argument the caller gets to assert.
+        // None of them consumes a `seq` — see `momo_messaging::interaction`.
+        .route(
+            "/v1/workspaces/{ws}/messages/{id}",
+            patch(routes::messages::edit).delete(routes::messages::delete_message),
+        )
+        .route(
+            "/v1/workspaces/{ws}/messages/{id}/reactions/{emoji}",
+            put(routes::messages::add_reaction).delete(routes::messages::remove_reaction),
+        )
+        // The cold-load counterpart of history: that returns messages, this
+        // returns the reactions on them. Two calls rather than one join, exactly
+        // like Swift — a reaction changes far more often than the message it
+        // annotates, and folding it into the history projection would make every
+        // page re-read the whole reaction table.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/reactions",
+            get(routes::messages::reaction_snapshot),
+        )
         // B4 — the client's first authenticated read after login. Without it the
         // sidebar has nothing and there is no way into a conversation.
         // B4.1 adds the write beside it (D-7): a dogfooding workspace that
