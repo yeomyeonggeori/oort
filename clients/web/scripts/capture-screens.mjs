@@ -425,6 +425,46 @@ function makeMessages(count) {
       createdAtMs: base + i * 60_000,
     };
   });
+  // 메시지 액션이 남기는 자국 세 가지 (goal B11). 새 행을 끼워 넣지 않고 **이미
+  // 있는 행의 상태만 바꾼다**: seq도 개수도 그대로라 기존 프레임과 게이트가 재던
+  // 것이 흔들리지 않는다. 자리는 아래에서 넷째~둘째 — 타임라인이 아래에 붙어
+  // 열리므로 캡처가 서는 자리에서 반드시 렌더된다.
+  //
+  // 삭제된 행이 픽스처에 있다는 것 자체가 요점이다: 지워진 메시지는 목록에서
+  // 조용히 사라지지 않고 자리에 「삭제된 메시지」로 남아야 하며, 그래야 seq에
+  // 구멍이 뚫린 것처럼 보이지 않는다.
+  // 고르는 규칙: **평범한 한 줄짜리 텍스트 행만** 고른다. B8의 실패 카드나 마크다운
+  // 행처럼 구조가 있는 행을 건드리면 그 프레임의 픽스처가 조용히 사라진다 — 처음
+  // 쓴 판이 `rows[count-2]`를 지웠고, 그것이 하필 턴 실패 카드여서 B8 프레임이
+  // `turn-failure`를 못 찾고 죽었다. 실패는 여기서 났는데 증상은 200줄 뒤에서
+  // 났다.
+  const plainText = (row) =>
+    row && row.type === "text" && typeof row.body === "string" && !row.props;
+  const pick = (offset) => {
+    const row = rows[count - offset];
+    return plainText(row) ? row : null;
+  };
+
+  const threaded = pick(4);
+  if (threaded) {
+    threaded.thread = {
+      reply_count: 3,
+      last_reply_seq: 1400 + count - 1,
+      last_reply_at: base + (count - 1) * 60_000,
+    };
+  }
+  const edited = pick(3);
+  if (edited) {
+    edited.state = "edited";
+    edited.editedAtMs = base + count * 60_000;
+  }
+  const removed = pick(1);
+  if (removed) {
+    removed.state = "deleted";
+    removed.body = undefined;
+    removed.deletedAtMs = base + count * 60_000;
+  }
+
   // 언제나 **가장 최근 줄**이다. 타임라인은 아래에 붙어 열리고(alignToBottom) 가상
   // 목록이라, 중간에 끼워 넣은 행은 캡처가 서는 자리에서 렌더되지 않을 수 있다.
   // 게이트가 재지 못하는 픽스처는 픽스처가 아니다.
@@ -441,6 +481,37 @@ function makeMessages(count) {
     createdAtMs: base + count * 60_000,
   });
   return rows;
+}
+
+/**
+ * 한 스레드의 답글 (goal B11). 루트는 `capture-13`(makeMessages가 rollup을 다는
+ * 행)이고, 답글은 그 아래 seq를 잇는다.
+ *
+ * 셋을 사람과 에이전트가 번갈아 쓴다: 스레드는 대화이지 전사(transcript)가
+ * 아니라는 것이 이 패널이 답글 컴포저를 갖는 이유이고, 프레임은 그 대화를 보여야
+ * 한다. 답글에는 `rootId`가 있으므로 행의 액션에서 「답글 달기」가 빠진다 —
+ * momo 스레드는 한 단계이고, 답글에 답글을 걸면 서버가 거절한다.
+ */
+function makeThreadReplies() {
+  const base = Date.now() - 6 * 60_000;
+  const rows = [
+    [HERMES, "런북 3단계부터 다시 도는 게 맞습니다. 헬스 체크는 제가 확인할게요."],
+    [ME, "네, 그 사이 배포는 잠급니다."],
+    [HERMES, "헬스 체크 통과했습니다. 다음 배포부터는 태그를 먼저 고정하죠."],
+  ];
+  return rows.map(([author, body], i) => ({
+    id: `capture-reply-${i + 1}`,
+    channelId: GENERAL_ID,
+    rootId: "capture-13",
+    seq: 1500 + i,
+    hlcTs: base + i * 60_000,
+    hlcCount: 0,
+    authorMemberId: author,
+    type: "text",
+    body,
+    state: "sent",
+    createdAtMs: base + i * 60_000,
+  }));
 }
 
 // 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
@@ -974,6 +1045,37 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
     json(route, { workTierPolicy: MEMBER_TIER_POLICY })
   );
+  // 반응 스냅샷 (goal B11). 서버는 이 맵을 **대문자 id**로 준다(Swift
+  // `uuidString`) — 메시지 투영은 소문자다. 픽스처가 그 두 자리를 그대로
+  // 재현해야 캡처가 접기(case fold)를 실제로 검증한다. `capture-15`가 아니라
+  // `CAPTURE-15`로 쓰는 이유가 그것이다.
+  //
+  // 세 종류를 담는다: 내가 누른 것(강조 칩), 남만 누른 것, 그리고 여러 개가
+  // 한 줄에 놓인 것. 리뷰가 봐야 하는 것은 그 셋의 대비다.
+  await context.route("**/v1/workspaces/*/channels/*/reactions", (route) =>
+    json(route, {
+      // 반드시 **살아 있는** 행에만 단다. 삭제된 메시지의 반응은 서버가 함께
+      // 지우고 스냅샷도 tombstone을 빼고 주므로, 지워진 행에 칩이 달린 픽스처는
+      // 서버가 낼 수 없는 화면을 그린다 — 픽스처가 거짓말을 하면 리뷰가 못 미더운
+      // 것을 승인하게 된다. capture-15는 아래에서 deleted로 표시되는 행이다.
+      "CAPTURE-14": { "👍": [ME.toUpperCase(), HERMES.toUpperCase()] },
+      "CAPTURE-17": {
+        "👍": [HERMES.toUpperCase()],
+        "🎉": [HERMES.toUpperCase(), ME.toUpperCase()],
+        "👀": [HERMES.toUpperCase()],
+      },
+    })
+  );
+  // 스레드 답글 (goal B11). **이 캡처에서 스레드를 연 프레임이 처음이라 이 라우트가
+  // 없었다.** 없으면 요청이 프리뷰 서버로 새고, 프리뷰 서버는 모르는 `/v1/*`에
+  // 401을 답한다 — 클라는 그 401에 토큰 회전을 시도하고, 회전도 401이면 세션을
+  // 끝낸다. 화면에는 스레드 대신 로그인 폼이 뜨고, 원인은 스레드와 아무 상관이
+  // 없어 보인다. `messages*`의 `*`는 `/`를 건너지 않으므로 이 경로는 위 라우트에
+  // 걸리지 않는다(그래서 별도 라우트다).
+  await context.route(
+    "**/v1/workspaces/*/channels/*/messages/*/replies*",
+    (route) => json(route, { messages: makeThreadReplies() })
+  );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());
     // Older-history and backfill pages are empty: the head page is the shot.
@@ -1027,6 +1129,21 @@ async function signIn(page) {
  * `hidden`/`clip` 상자는 세지 않는다. 그 상자들은 자르는 것이 일이고(닫힌 서랍이
  * `translateX(-100%)`로 밖에 서 있는 것이 그 예다), 잘린 것은 사람이 끌어서 볼 수도
  * 없으므로 이 단언이 말하는 결함과 성질이 다르다.
+ *
+ * **`data-scroll-x` 상자도 세지 않는다 (goal B11).** 이 단언이 잡으려는 것은
+ * "세로로만 스크롤할 표면"이 가로로 끌리는 것이다. 그런데 어떤 상자는 가로로
+ * 끌리는 것이 **일**이다 — 코드 블록이 그것이고, 넓은 내용은 자기 `overflow-x:
+ * auto` 상자 안에서 스크롤해야 한다는 것이 이 앱의 규칙이다. 코드를 접으면 정렬이
+ * 깨지므로 대안도 없다.
+ *
+ * B11 전까지 이 false positive가 나지 않은 것은 코드 블록이 든 행이 폰 프레임의
+ * 렌더 창 밖에 있었기 때문이다 — 규칙이 맞아서가 아니라 운이었고, 반응 칩이
+ * 레이아웃을 한 행 밀자 바로 드러났다. 실사용에서는 코드 블록이 화면에 있는 매
+ * 순간 걸렸을 것이다.
+ *
+ * 면제는 게이트가 아니라 **컴포넌트가 선언**한다: 가로 스크롤이 자기 일인 상자만
+ * `data-scroll-x`를 달고, 그 속성이 코드 리뷰에서 보인다. 게이트에 이름을 박아
+ * 두면 다음 상자는 조용히 새거나 조용히 면제된다.
  */
 async function assertNoHorizontalOverflow(page, where) {
   const measure = await page.evaluate(`(() => {
@@ -1041,6 +1158,8 @@ async function assertNoHorizontalOverflow(page, where) {
     for (const el of document.querySelectorAll("*")) {
       const overflowX = getComputedStyle(el).overflowX;
       if (overflowX !== "auto" && overflowX !== "scroll") continue;
+      // 가로로 끌리는 것이 이 상자의 일이다 (goal B11) — 위 주석 참조.
+      if (el.hasAttribute("data-scroll-x")) continue;
       const over = el.scrollWidth - el.clientWidth;
       if (over <= 0) continue;
       // 상자 이름만으로는 고칠 자리를 못 찾는다: 타임라인이 끌린다는 것은
@@ -1387,6 +1506,51 @@ async function captureMobile(browser, scheme) {
   await assertComposerVisible(page, `chat ${scheme}`);
   await shoot(page, "chat");
 
+  // 2a-2. 길게 눌러 여는 액션 시트 (goal B11). **폰에는 hover가 없다** — 데스크탑의
+  //       액션 바를 그대로 옮겨오면 폰에서는 어떤 제스처로도 열리지 않는 컨트롤이
+  //       된다. 그래서 폰은 자기 진입점을 갖는다.
+  //
+  //       실제 포인터 이벤트로 연다(마우스 클릭이 아니라): 훅은 `pointerType`이
+  //       "touch"일 때만 무장하고, 그 조건이야말로 이 프레임이 증명해야 하는 것이다.
+  //       `hasTouch: true`인 이 컨텍스트에서 `page.touchscreen`은 진짜 터치
+  //       시퀀스를 낸다.
+  const sheetTarget = page.getByTestId("timeline-message").last();
+  const box = await sheetTarget.boundingBox();
+  if (box) {
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  await sheetTarget.dispatchEvent("pointerdown", {
+    pointerType: "touch",
+    clientX: (box?.x ?? 0) + 20,
+    clientY: (box?.y ?? 0) + 10,
+  });
+  await page.waitForTimeout(700); // LONG_PRESS_MS(450) + 여유
+  await page.getByTestId("message-action-sheet").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `action sheet ${scheme}`);
+  // 시트의 모든 행은 44px 손가락 타깃이어야 한다 — 시트를 여는 이유가 그것이다.
+  const sheetTaps = await page.evaluate(`(() => {
+    const ids = ["sheet-reply", "sheet-edit", "sheet-delete"];
+    return ids
+      .map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { id, h: Math.round(r.height), w: Math.round(r.width) };
+      })
+      .filter(Boolean);
+  })()`);
+  for (const tap of sheetTaps) {
+    if (tap.h < 44) {
+      throw new Error(
+        `[action sheet ${scheme}] ${tap.id} 높이 ${tap.h}px < 44px 손가락 타깃`
+      );
+    }
+  }
+  await shoot(page, "b11-action-sheet");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("message-action-sheet").waitFor({ state: "hidden" });
+
   // 2b. 하단 브라우저 크롬이 100px을 가져간 상태 (goal B9). 성재 실캡처의 조건이고,
   //     이 프레임의 요점은 컴포저가 그 선 **위에** 있다는 것이다. 아래 100px이 비어
   //     보이는 것이 맞다: 실기기에서 거기 있는 것은 사파리의 주소 줄이다.
@@ -1518,6 +1682,77 @@ async function captureScheme(browser, scheme) {
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
+
+  // 2c. 메시지 액션 (goal B11). 한 프레임이 네 가지를 한꺼번에 증명한다: 내
+  //     메시지 위에 뜬 액션 바, 위 행들의 반응 칩(내가 누른 것은 강조), 「수정됨」
+  //     표식, 그리고 조용히 사라지지 않고 자리에 남은 「삭제된 메시지」.
+  //
+  //     hover로 띄운다 — 데스크탑의 진입점이 hover이기 때문이다. 폰에는 hover가
+  //     없고, 그쪽은 captureMobile의 길게 누르기 프레임이 맡는다.
+  const actionRow = login.getByTestId("timeline-message").last();
+  await actionRow.hover();
+  await login.getByTestId("message-actions").last().waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
+  await login.screenshot({ path: actionsShot });
+  shots.push(actionsShot);
+
+  // 2d. 액션 바의 키보드 경로 (goal B11). 바는 `opacity-0`이지 `hidden`이 아니다
+  //     — 숨긴 버튼은 포커스를 받지 못하고, 그러면 키보드로는 어떤 메시지 액션에도
+  //     닿을 수 없다. 이 프레임은 포커스가 바를 띄운다는 것을 보인다
+  //     (`group-focus-within`).
+  await login.getByTestId("message-reply").last().focus();
+  await login.waitForTimeout(300);
+  const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
+  await login.screenshot({ path: actionsFocusShot });
+  shots.push(actionsFocusShot);
+
+  // 2e. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
+  //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
+  await actionRow.hover();
+  await login.getByTestId("message-edit").last().click();
+  await login.getByTestId("message-editor-input").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const editShot = `${OUT_DIR}/b11-message-edit-${scheme}.png`;
+  await login.screenshot({ path: editShot });
+  shots.push(editShot);
+  await login.getByTestId("message-editor-cancel").click();
+
+  // 2f. 지우기 확인 (goal B11). 되돌리기가 아니라 확인이다 — 서버의 삭제는 본문을
+  //     지우는 tombstone이라 되돌릴 것이 남지 않는다.
+  await actionRow.hover();
+  await login.getByTestId("message-delete").last().click();
+  await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
+  await login.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await login.getByTestId("delete-message-cancel").click();
+
+  // 2g. 반응 고르기 (goal B11). 이모지 피커 의존성 없이 손으로 짠 격자다: 피커
+  //     라이브러리는 폰트나 스프라이트를 싣는데 이 앱은 외부 호스트가 막힌 CSP와
+  //     오프라인 셸(B10)을 갖고 있다.
+  await actionRow.hover();
+  await login.getByTestId("message-react-more").last().click();
+  await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
+  await login.screenshot({ path: pickerShot });
+  shots.push(pickerShot);
+  await login.keyboard.press("Escape");
+
+  // 2h. 스레드, 이제 답글을 쓸 수 있는 (goal B11). 이 패널은 답글을 **읽기만**
+  //     했었고, 그래서 「답글 N개」는 액션이 아니라 전사(transcript) 링크였다.
+  //     컴포저가 그 나머지 반쪽이다.
+  await login.getByTestId("thread-anchor").first().click();
+  await login.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await login.getByTestId("thread-composer-input").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
+  const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
+  await login.screenshot({ path: threadShot });
+  shots.push(threadShot);
+  await login.getByTestId("thread-close").click();
 
   // 3. focus ring on the composer (focus indication is a hard rule)
   await login.getByTestId("composer-input").focus();

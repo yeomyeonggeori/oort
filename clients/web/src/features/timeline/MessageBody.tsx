@@ -137,6 +137,12 @@ function BlockNode({ block }: { block: Block }) {
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         )}
         data-testid="message-code-block"
+        // 가로로 끌리는 것이 이 상자의 일이다 (goal B11). 폰 캡처의 가로 오버플로
+        // 단언은 "세로로만 스크롤할 표면"을 재는데, 코드 블록은 그 부류가 아니다 —
+        // 넓은 코드는 자기 상자 안에서 스크롤해야 하고, 접으면 정렬이 깨진다.
+        // 면제를 게이트가 아니라 여기서 선언하는 이유는 그래야 리뷰에서 보이기
+        // 때문이다(capture-screens.mjs `assertNoHorizontalOverflow` 주석).
+        data-scroll-x="code"
         {...(block.lang ? { "data-lang": block.lang } : {})}
       >
         <code>{block.text}</code>

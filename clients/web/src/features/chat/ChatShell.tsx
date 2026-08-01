@@ -585,6 +585,20 @@ export function ChatShell() {
               unreadCount={openedWith?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={stressCount > 0 ? undefined : timeline.pending}
+              // B11 — the stress fixture renders synthetic rows with no server
+              // row behind them, so the actions are withheld there rather than
+              // offered and then failing on every click.
+              reactions={stressCount > 0 ? undefined : timeline.reactions}
+              actions={
+                stressCount > 0
+                  ? undefined
+                  : {
+                      myMemberId: session.member.id,
+                      onToggleReaction: timeline.toggleReaction,
+                      onEditMessage: timeline.editMessage,
+                      onDeleteMessage: timeline.deleteMessage,
+                    }
+              }
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
               onRetry={timeline.reload}
               onOpenThread={(message) => {
@@ -647,6 +661,13 @@ export function ChatShell() {
           channelId={channelId}
           root={thread}
           directory={directory}
+          reactions={timeline.reactions}
+          actions={{
+            myMemberId: session.member.id,
+            onToggleReaction: timeline.toggleReaction,
+            onEditMessage: timeline.editMessage,
+            onDeleteMessage: timeline.deleteMessage,
+          }}
           onOpenWorkSession={openWorkSession}
           onClose={() => setThread(null)}
         />
