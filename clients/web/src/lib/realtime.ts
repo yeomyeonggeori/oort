@@ -647,6 +647,21 @@ export interface RealtimeHandle {
       onResync: () => void;
     }
   ) => () => void;
+  /**
+   * Re-dial now, on a person's request (goal B8 B2).
+   *
+   * centrifuge already reconnects on its own with a backoff that reaches 20s,
+   * so this is not "reconnect for me" (it is already trying) but "try again
+   * NOW": someone who has just fixed their VPN, their wifi or the server should
+   * not sit through the remainder of a 20s sleep to find out. `disconnect()`
+   * first because `connect()` on a client that is already in its reconnect loop
+   * is a no-op; the pair is what actually restarts the backoff at zero.
+   *
+   * Subscriptions survive it. They are the client's own objects and re-subscribe
+   * on the next connect, so the timeline heals through the same recovered /
+   * backfill path a spontaneous reconnect takes.
+   */
+  reconnect: () => void;
   dispose: () => void;
 }
 
@@ -926,6 +941,10 @@ export function createRealtime(
     subscribeWorkSession,
     subscribeCascade,
     subscribeHuddle,
+    reconnect: () => {
+      client.disconnect();
+      client.connect();
+    },
     dispose: () => {
       shared.clear();
       client.disconnect();

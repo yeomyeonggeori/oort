@@ -47,6 +47,12 @@ const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const IPHONE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 
+// goal B8 B2: the shell's connection banner waits out a 15s dwell before it
+// claims the rail is down (features/common/connectionAlert.ts SUSTAINED_DOWN_MS).
+// Kept a second over it so the capture is not racing the threshold it is meant
+// to photograph.
+const SUSTAINED_DOWN_WAIT_MS = 16_000;
+
 /**
  * 폰에서 손가락으로 눌러야 하는 컨트롤과 그 최소 크기(px). 44px는 WCAG 2.5.5 /
  * Apple HIG의 값이고, tokens.css의 `tap-target`이 같은 수를 판다.
@@ -335,6 +341,47 @@ const BODIES = [
         permission_snapshot: "actor:channel_member agent:channel_member",
         excerpt: "@hermes 남은 세 파일도 같은 기준으로 봐주세요.",
       },
+    },
+  ],
+  // goal B8 H6. Agents answer in markdown whether or not anyone asked, and
+  // before this batch the channel printed the asterisks. One row carries every
+  // construct the parser reads, so a review can see bold, code, a list and a
+  // link at the density they actually ship at.
+  [
+    HERMES,
+    "배포 전 확인할 것은 **롤백 경로**입니다.\n" +
+      "- `make deploy` 는 이전 태그를 남깁니다\n" +
+      "- 실패하면 *즉시* 이전 태그로 되돌립니다\n" +
+      "자세한 절차는 [배포 문서](https://momo.example/docs/deploy)에 있습니다.\n" +
+      "```sh\nmake deploy TAG=v0.4.2\n```",
+  ],
+  // design-review 1R B1. Two things a picture has to show, not just a unit test:
+  // a Korean date at the start of a line stays a date (it used to become "1."
+  // with the year eaten), and a quotation that starts at step 3 still says 3.
+  [
+    HERMES,
+    "2026. 07. 30. 배포는 롤백으로 끝났습니다. 런북 기준으로 3단계부터 다시 합니다.\n" +
+      "3. 이전 태그로 되돌리기\n" +
+      "4. 헬스 체크 통과 확인",
+  ],
+  // design-review 3R Blocker, in a picture: two Korean date lines in a row used
+  // to become an ordered list and the browser renumbered the second one, so the
+  // reader saw a date nobody typed (12. 31. -> 13. 31.).
+  [ME, "12. 25. 크리스마스 휴무\n12. 31. 종무식 후 배포 동결"],
+  [ME, "@hermes 어제 실패한 배포 로그도 같이 봐줄래요?"],
+  // goal B8 H2. The worker's failure notice: one Korean sentence in the body,
+  // a machine code in props, and NOTHING of the provider's own text anywhere.
+  // The card's 자세히 carries the repair.
+  [
+    HERMES,
+    "지금은 답변을 만들지 못했습니다. 잠시 뒤에 다시 멘션해 주세요.",
+    "text",
+    {
+      run_id: "0199aa11-2222-7000-8000-0000000000c9",
+      source: "agent_worker.provider_failure.v0",
+      error_code: "provider_failed",
+      trigger_message_id: "0199aa11-2222-7000-8000-0000000000d2",
+      author_member_id: ME,
     },
   ],
 ];
@@ -1947,6 +1994,70 @@ async function captureScheme(browser, scheme) {
   const stressShot = `${OUT_DIR}/timeline-dense-${scheme}.png`;
   await stress.screenshot({ path: stressShot });
   shots.push(stressShot);
+
+  // ── goal B8 ───────────────────────────────────────────────────────────────
+
+  const b8 = await context.newPage();
+  await b8.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(b8);
+  await b8.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+
+  // B8 H6: a markdown body rendered as markdown. The fixture row carries bold,
+  // inline code, a bullet list, a link and a fenced block, so this one frame is
+  // where a reviewer sees whether the timeline stayed dense.
+  await b8.getByTestId("message-markdown").first().scrollIntoViewIfNeeded();
+  await b8.getByTestId("message-code-block").first().waitFor({ state: "visible" });
+  await b8.waitForTimeout(200);
+  const markdownShot = `${OUT_DIR}/b8-message-markdown-${scheme}.png`;
+  await b8.screenshot({ path: markdownShot });
+  shots.push(markdownShot);
+
+  // B8 H2: the failure notice, with 자세히 open. Two things are on trial here
+  // and both are negatives: no English, and no provider text.
+  await b8.getByTestId("turn-failure").first().scrollIntoViewIfNeeded();
+  await b8.getByTestId("turn-failure-detail").first().click();
+  await b8.waitForTimeout(200);
+  const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
+  await b8.screenshot({ path: failureShot });
+  shots.push(failureShot);
+
+  // B8 H4: the composer with its Enter hint. Focused, because the hint sits
+  // under the box a person is typing in and that is where it is read.
+  await b8.getByTestId("composer-input").fill("배포 로그 확인 부탁해요");
+  await b8.getByTestId("composer-input").focus();
+  await b8.getByTestId("composer-hint").waitFor({ state: "visible" });
+  await b8.waitForTimeout(300);
+  const hintShot = `${OUT_DIR}/b8-composer-hint-${scheme}.png`;
+  await b8.screenshot({ path: hintShot });
+  shots.push(hintShot);
+
+  // B8 B2: the connection banner. The capture's realtime URL is deliberately
+  // unreachable, which is EXACTLY the QA case (a socket that never came up), so
+  // this frame needs no mock: it needs the dwell. The wait is longer than the
+  // 15s threshold on purpose, because a banner that appears at 14.9s in a test
+  // and 15.1s in the product is a banner nobody can review.
+  await b8.waitForTimeout(SUSTAINED_DOWN_WAIT_MS);
+  await b8.getByTestId("connection-banner").waitFor({ state: "visible" });
+  const bannerShot = `${OUT_DIR}/b8-connection-banner-${scheme}.png`;
+  await b8.screenshot({ path: bannerShot });
+  shots.push(bannerShot);
+
+  // The 900 band the review rubric asks for (web SKILL §11 phase 2), which this
+  // capture had no frame of: the sidebar is still a column, so the channel is
+  // down to ~360px while every new string here is at full length. The banner
+  // sentence plus its button and the composer hint are the two most likely to
+  // wrap badly, and both are on screen in this one shot.
+  await b8.setViewportSize({ width: 900, height: 800 });
+  await b8.waitForTimeout(300);
+  const narrowShot = `${OUT_DIR}/b8-narrow-900-${scheme}.png`;
+  await b8.screenshot({ path: narrowShot });
+  shots.push(narrowShot);
+  const overflow900 = await b8.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  if (overflow900 > 0) {
+    throw new Error(`900px 가로 오버플로 ${overflow900}px (${scheme})`);
+  }
 
   await context.close();
   return shots;
