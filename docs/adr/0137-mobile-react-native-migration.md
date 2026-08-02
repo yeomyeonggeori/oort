@@ -67,6 +67,14 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 - **푸시 JS 라이브러리 후보는 2개**: `expo-notifications` 또는 `@react-native-firebase/messaging`. **Notifee 계열은 제외** — `invertase/notifee`가 GitHub **archived 상태**(오케스트레이터 확인)이고 README가 `expo-notifications` 이관을 권고한다. 우리는 iOS NSE를 Swift로 이미 가져 JS 역할이 "토큰 등록 + 알림 액션 수신"으로 좁으므로 스파이크 4에서 실측 결정한다.
 - **저장소 분리 규율**: 세션 토큰·자격증명은 `react-native-keychain`(iOS 키체인/Android Keystore). **MMKV는 시크릿 저장소가 아니다** — 옵션 암호화의 `encryptionKey`를 다시 어딘가 안전히 둬야 하는 순환 문제가 생긴다. MMKV는 `serverBase.ts` 같은 **비시크릿 로컬 캐시 한정**.
 - 상태관리는 Mattermost를 따라가지 않는다 — WatermelonDB+RxJS는 오프라인 우선·멀티서버 SQLite 전제에서 성립한다. **react-query 유지가 싸다.**
+- **[정오 2026-08-02 — #837 게이트 4 감사(`docs/planning/2026-08-02-rn-push-inheritance-audit.md`), 오케스트레이터 실측 재확인. 결정은 불변, 서술의 사실 정정과 범위 축소다.]**
+  1. **"배포 레인은 살린다"는 현재 파일 기준 미성립.** `fastlane/{Matchfile,Appfile,Fastfile}`이 프로비저닝하는 app identifier는 **`com.dawnkim.momo` 하나**이고 Matchfile·Appfile에 `# ⚠️ 실제 Bundle ID로 교체` 주석이 그대로 남아 있다 — Xcode의 `app.momo.ios`와도, NSE의 `app.momo.ios.NotificationService`와도 불일치하며 **확장 프로파일이 아예 없다**. `CODE_SIGN_STYLE = Automatic`이라 **로컬에선 안 드러나고 CI에서만 터진다**(Tauri #15663과 같은 계열). **RN 전환과 무관하게 지금 필요한 수선**이고, 레인이 "유효"하다는 서술은 실측으로 뒷받침되지 않았다.
+  2. **승계 자산의 App Group은 NSE 경로에서 load-bearing이 아니다.** NSE 읽기 경로는 **Keychain access group**(`kSecAttrAccessGroup`, `$(AppIdentifierPrefix)app.momo.ios.shared`)을 쓴다(`MomoiOSPushKit/PushNotification.swift:73`). App Group(`group.app.momo.ios`)은 앱 타깃 쪽 `SessionStore`·`IOSNotificationPreferences`가 쓴다. 혼동하면 **NSE가 크래시 없이 조용히 fail-open**해 placeholder 알림만 계속 띄운다 — 가장 탐지하기 어려운 실패 형태다.
+  3. **391줄은 게이트가 요구한 한 바퀴 중 앞 3/4만 덮는다.** 네 번째 걸음(**알림 액션에서 승인**)은 앱 타깃에 있고 상당 부분이 그대로 생존하지 않는다. "그대로 생존한다"의 범위는 **id-only fetch → 표시**까지다.
+  4. 이식성의 진짜 근거는 import 개수가 아니라 **`MomoiOSPushKit`이 의존성 0으로 선언된 SPM 리프 타깃**이라는 구조다(옆 타깃 `MomoiOSKit`은 MomoCore·Centrifuge·LiveKit에 의존).
+  5. **푸시 JS 라이브러리 = `expo-notifications`로 판정.** `@react-native-firebase/messaging`은 설정으로 우회 불가한 두 축에서 실격 — 커스텀 액션 식별자를 JS로 전달하지 않아 **승인 흐름이 닫히지 않고**, iOS 발송에 APNs 키의 Firebase 업로드를 요구하는데 우리 PushRelay는 **ES256 JWT를 직접 서명해 APNs로 쏜다**. 남은 검증 1건: `NotificationCenterManager.addDelegate(_:)`가 `public`이지만 산문 문서가 없어 부착 스파이크의 최우선 항목이다.
+  6. **서버 공백**: id-only 발송 체인이 전부 Swift(NotifierWorker → PushRelay → APNs)다. **Rust 서버엔 APNs 코드 0줄, devices 라우트 없음.** 의도된 미완이지만, 이 승계 결론의 유효기간은 Swift 서버 수명과 같다.
+  7. **`expo prebuild`는 반드시 `--platform android`로.** 플래그 없는 실행 한 번이면 `ios/`가 재생성돼 **NSE가 사라진다** — Tauri가 죽은 것과 문자 그대로 같은 사고다. CI 가드가 필요하다.
 
 ### D8. 기존 iOS SwiftUI 킷 = **동결 후 교체**, ADR-0123 대체
 - **ADR-0123을 본 ADR이 대체**한다(iOS 수신부 결정을 RN으로 이관). 0133이 남긴 "iOS 경로 미결" 공백도 여기서 닫는다.
