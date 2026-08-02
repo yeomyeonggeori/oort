@@ -1218,11 +1218,20 @@ dependencies = [
 name = "momo-notifier"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
  "chrono",
+ "ed25519-dalek",
  "futures",
  "momo-db",
+ "momo-outbox",
  "momo-provider",
+ "momo-push",
  "momo-t3",
+ "momo-wire",
+ "reqwest",
+ "serde_json",
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
@@ -1249,6 +1258,22 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "momo-push"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "momo-db",
+ "momo-messaging",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
  "uuid",
 ]
 
@@ -1287,6 +1312,7 @@ dependencies = [
  "momo-db",
  "momo-messaging",
  "momo-outbox",
+ "momo-push",
  "momo-settings",
  "momo-t3",
  "momo-wire",

@@ -26,6 +26,13 @@ case "$command" in
     # Centrifugo — the reply travels the message write path like any other.
     exec /usr/local/bin/momo-agent-worker "$@"
     ;;
+  notifier)
+    # The durability + notification worker (B2.3 + P2). Both of its opt-in loops
+    # are default-off: T3 needs MOMO_T3_ENABLED=1, the ADR-0120 push drain needs
+    # MOMO_PUSH_NOTIFIER_ENABLED=1 plus a relay signing key. It holds no APNs
+    # credential — dispatches go to the push relay, never to Apple.
+    exec /usr/local/bin/momo-notifier "$@"
+    ;;
   migrate)
     # Sub-commands (`migrate set-owner`) are the binary's own; this script does
     # not interpret them.
@@ -40,7 +47,7 @@ case "$command" in
     ;;
   *)
     echo "[momo] unknown command: $command" >&2
-    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|migrate}" >&2
+    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|notifier|migrate}" >&2
     exit 2
     ;;
 esac

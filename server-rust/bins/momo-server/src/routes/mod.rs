@@ -8,6 +8,7 @@ pub mod auth_routes;
 pub mod channels;
 pub mod cloud_hosts;
 pub mod credits;
+pub mod devices;
 pub mod dms;
 pub mod health;
 pub mod invites;

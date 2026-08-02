@@ -1,7 +1,9 @@
-//! `momo-notifier` — the T3 durability worker (ADR-0145 B안, batch B2.3).
+//! `momo-notifier` — the durability + notification worker (ADR-0145 B안,
+//! batches B2.3 and P2).
 //!
-//! Two of the Swift `NotifierWorker`'s three loops, the two that decide money
-//! and session state when a host or a process dies:
+//! All three of the Swift `NotifierWorker`'s loops. The first two decide money
+//! and session state when a host or a process dies; the third decides who hears
+//! about a message:
 //!
 //! 1. **cloud lifecycle reconciliation** (ADR-0140 D4) — claim a durable intent,
 //!    ask the provider, converge. One iteration is
@@ -9,9 +11,13 @@
 //! 2. **tier fallback sweep** (ADR-0125 D11 / MOMO-656) — a session whose host
 //!    stopped answering settles and stops claiming to be running. One iteration
 //!    is [`Notifier::sweep_once`].
+//! 3. **push-candidate drain** (ADR-0120, batch P2) — a committed message wakes
+//!    the devices that should hear about it, carrying ids only. One iteration is
+//!    [`push::PushDrain::drain_once`].
 //!
-//! The third loop, the push-candidate drain (ADR-0120), is **not** here: the push
-//! relay contract is its own batch.
+//! The drain holds **no APNs key and contains no APNs code**: a self-hosted
+//! server cannot have one, so it hands an id-only dispatch to the relay that
+//! does the Apple leg ([`push_relay`]).
 //!
 //! ## What this binary is not allowed to be
 //!
@@ -37,11 +43,15 @@
 
 pub mod config;
 pub mod provider;
+pub mod push;
+pub mod push_relay;
 
 use std::future::Future;
 use std::sync::Arc;
 
+use momo_db::sqlx::postgres::PgListener;
 use momo_db::PgPool;
+use momo_outbox::NOTIFY_CHANNEL;
 use momo_provider::CloudInstancePresence;
 use momo_t3::convergence::{
     after_deadline, after_provider_call, provider_denies_its_own_absence,
@@ -54,10 +64,12 @@ use momo_t3::reconcile::{
 use momo_t3::sweep::{converge_stale_session, stale_session_candidates};
 use momo_t3::T3Error;
 
-pub use config::NotifierConfig;
+pub use config::{NotifierConfig, PushConfig, SigningPosture};
 pub use provider::{
     AdapterError, FixedAdapterResolver, ProviderAdapterResolver, RegistryAdapterResolver,
 };
+pub use push::{DrainStats, PushDrain};
+pub use push_relay::RelayHttpDispatcher;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NotifierError {
@@ -65,6 +77,10 @@ pub enum NotifierError {
     Db(#[from] momo_db::sqlx::Error),
     #[error(transparent)]
     T3(#[from] T3Error),
+    /// The push drain was asked for but cannot be built — a boot refusal, so a
+    /// misconfigured notifier never runs half-deaf.
+    #[error("push configuration error: {0}")]
+    PushConfig(String),
 }
 
 /// What one reconciliation iteration did — the unit the conformance tests assert
@@ -106,6 +122,9 @@ pub struct Notifier {
     pool: PgPool,
     config: NotifierConfig,
     resolver: Arc<dyn ProviderAdapterResolver>,
+    /// The ADR-0120 push drain. `None` means the drain is switched off — an
+    /// explicit state announced at boot, not a loop that quietly finds nothing.
+    push: Option<Arc<PushDrain>>,
 }
 
 impl Notifier {
@@ -117,11 +136,12 @@ impl Notifier {
             .max_connections(config.max_connections)
             .connect(&config.database_url)
             .await?;
-        Ok(Notifier::new(
-            pool,
-            config,
-            Arc::new(RegistryAdapterResolver),
-        ))
+        let drain = build_push_drain(&pool, &config.push)?;
+        let notifier = Notifier::new(pool, config, Arc::new(RegistryAdapterResolver));
+        Ok(match drain {
+            Some(drain) => notifier.with_push(drain),
+            None => notifier,
+        })
     }
 
     /// Build from an existing pool + resolver (conformance tests).
@@ -134,7 +154,18 @@ impl Notifier {
             pool,
             config,
             resolver,
+            push: None,
         }
+    }
+
+    /// Attach the push drain.
+    ///
+    /// A builder rather than a `new` parameter so every existing call site keeps
+    /// compiling *and* keeps the fail-closed default: a notifier that was never
+    /// given a drain does not push.
+    pub fn with_push(mut self, drain: Arc<PushDrain>) -> Notifier {
+        self.push = Some(drain);
+        self
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -453,10 +484,134 @@ impl Notifier {
             }
         });
 
+        // ---- loop 3: ADR-0120 push-candidate drain -------------------------
+        let (push_task, push_listener) = match self.push.clone() {
+            None => {
+                // Say so out loud. A disabled drain that logged nothing would be
+                // indistinguishable from a drain that is running and delivering.
+                tracing::info!(
+                    "push drain disabled (set MOMO_PUSH_NOTIFIER_ENABLED=1 to enable);                      push candidates will accumulate unclaimed"
+                );
+                (None, None)
+            }
+            Some(drain) => {
+                let batch = self.config.claim_batch_size;
+                let interval = self.config.push.drain_interval;
+                let (wake_tx, mut wake_rx) = tokio::sync::mpsc::channel::<()>(1);
+                let listener =
+                    tokio::spawn(push_listen_loop(self.config.database_url.clone(), wake_tx));
+                let task = tokio::spawn(async move {
+                    // At-least-once recovery before the first claim.
+                    drain.reclaim_stuck().await;
+                    let mut ticker = tokio::time::interval(interval);
+                    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    loop {
+                        tokio::select! {
+                            _ = ticker.tick() => {}
+                            wake = wake_rx.recv() => {
+                                // A closed channel means the listener died; the
+                                // ticker alone still drains, just less promptly.
+                                if wake.is_none() {
+                                    tracing::debug!("push wake channel closed; poll only");
+                                }
+                            }
+                        }
+                        drain.drain_to_empty(batch).await;
+                    }
+                });
+                (Some(task), Some(listener))
+            }
+        };
+
         shutdown.await;
         reconcile_task.abort();
         sweep_task.abort();
+        if let Some(task) = push_task {
+            task.abort();
+        }
+        if let Some(listener) = push_listener {
+            listener.abort();
+        }
         tracing::info!("momo notifier stopped");
+    }
+}
+
+/// Build the push drain for this configuration, or `None` when it is off.
+///
+/// The signing posture is resolved here, once, at boot — a missing credential
+/// is a startup failure rather than a per-notification surprise.
+fn build_push_drain(
+    pool: &PgPool,
+    config: &PushConfig,
+) -> Result<Option<Arc<PushDrain>>, NotifierError> {
+    let posture = config::resolve_signing_posture(
+        config.enabled,
+        config.signing_key_path.as_deref(),
+        config.allow_unsigned,
+    )
+    .map_err(|error| NotifierError::PushConfig(error.to_string()))?;
+
+    let seed = match posture {
+        SigningPosture::Disabled => return Ok(None),
+        SigningPosture::Signed(path) => {
+            Some(push_relay::load_signing_seed(&path).map_err(|error| {
+                // The path may be operator-supplied; the *key bytes* never
+                // appear in this message.
+                NotifierError::PushConfig(error.to_string())
+            })?)
+        }
+        SigningPosture::UnsignedByOptIn => {
+            tracing::warn!(
+                "push dispatches will be sent UNSIGNED by explicit opt-in                  (MOMO_PUSH_RELAY_ALLOW_UNSIGNED=1); only a local mock relay accepts these"
+            );
+            None
+        }
+    };
+
+    let dispatcher = RelayHttpDispatcher::new(&config.relay_url, &config.server_id, seed)
+        .map_err(|error| NotifierError::PushConfig(error.to_string()))?;
+    Ok(Some(Arc::new(PushDrain::new(
+        pool.clone(),
+        config.clone(),
+        Arc::new(dispatcher),
+    ))))
+}
+
+/// Hold a dedicated `LISTEN outbox` connection and nudge the push drain.
+///
+/// A dropped connection degrades to poll-only (Swift parity): latency suffers,
+/// delivery does not.
+async fn push_listen_loop(database_url: String, wake: tokio::sync::mpsc::Sender<()>) {
+    loop {
+        match PgListener::connect(&database_url).await {
+            Ok(mut listener) => match listener.listen(NOTIFY_CHANNEL).await {
+                Ok(()) => loop {
+                    match listener.recv().await {
+                        Ok(notification) => {
+                            // The outbox trigger publishes the row's kind; only
+                            // push candidates concern this loop.
+                            if notification.payload() == "push_candidate" {
+                                let _ = wake.try_send(());
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "push LISTEN connection lost; poll fallback");
+                            break;
+                        }
+                    }
+                },
+                Err(error) => {
+                    tracing::warn!(error = %error, "push LISTEN registration failed; poll fallback");
+                }
+            },
+            Err(error) => {
+                tracing::warn!(error = %error, "push LISTEN connect failed; poll fallback");
+            }
+        }
+        if wake.is_closed() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 }
 
