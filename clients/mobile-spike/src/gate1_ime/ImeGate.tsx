@@ -184,9 +184,14 @@ function ImeCase({
         spellCheck={false}
         {...(spec.mode === 'uncontrolled' ? {} : {value})}
         onChangeText={onChangeText}
-        onKeyPress={e =>
-          setKeyLog(k => [...k.slice(-9), e.nativeEvent.key ?? '?'])
-        }
+        onKeyPress={e => {
+          // 이벤트는 **동기적으로** 읽는다. setState 업데이터는 나중에 렌더 중에
+          // 불리는데, 그때 RN 은 이미 합성 이벤트를 회수해 `nativeEvent` 가 null 이다
+          // (실측: 기기에서 "Cannot read property 'key' of null" 로 앱이 죽었다).
+          // 조합 단계가 많은 입력기일수록 업데이터가 더 늦게 불려 더 잘 터진다.
+          const pressed = e?.nativeEvent?.key ?? '?';
+          setKeyLog(k => [...k.slice(-9), pressed]);
+        }}
       />
 
       {spec.mode === 'rerender' ? (
@@ -253,7 +258,11 @@ function ImeCase({
   );
 }
 
-const KEYBOARDS = ['2벌식', '천지인', 'iOS 기본 한글'] as const;
+// iOS 의 한국어 키보드는 **하나**이고 그 안에 레이아웃이 둘이다(설정 → 일반 →
+// 키보드 → 키보드 → 「한국어」 탭 → 표준 / 10키). 즉 옛 라벨의 '2벌식'과
+// 'iOS 기본 한글'은 같은 것이었다. '천지인'은 Apple 이 쓰는 이름이 아니라 「10키」다.
+// 10키가 진짜 스트레스 테스트다 — 한 글자에 키를 여러 번 눌러 조합 단계가 몇 배다.
+const KEYBOARDS = ['표준(쿼티)', '10키(천지인)', '서드파티'] as const;
 
 export default function ImeGate() {
   const [keyboard, setKeyboard] = useState<string>(KEYBOARDS[0]);
@@ -270,6 +279,14 @@ export default function ImeGate() {
     );
   }, []);
 
+  // 키보드를 바꾸면 **모든 케이스를 새로 시작한다**. 라벨만 바꾸면 앞 키보드의
+  // 타수·위반이 그대로 남아 두 번째 판정이 오염된다(실측으로 드러난 설계 구멍).
+  // `ImeCase` 는 아래에서 keyboard 를 key 에 넣어 통째로 remount 된다.
+  const switchKeyboard = useCallback((k: string) => {
+    setKeyboard(k);
+    setReports({});
+  }, []);
+
   const rows = CASES.map(c => reports[c.id]).filter(Boolean) as CaseReport[];
   const anyFail = rows.some(r => r.verdict === 'FAIL');
   const allRun = rows.length === CASES.length && rows.every(r => r.verdict !== 'PENDING');
@@ -284,19 +301,42 @@ export default function ImeGate() {
       : 'FAIL'
     : 'PENDING';
 
+  // 결과를 **콘솔로 흘린다**. 오케스트레이터가 `npx react-native log-ios` 로 받으므로
+  // 사람이 스크린샷을 찍어 보낼 필요가 없다(스크린샷은 밑줄 육안 근거로만 남기면 된다).
+  // 한 줄이 한 판정이고, 마지막 줄이 그 키보드의 결론이다.
+  React.useEffect(() => {
+    const line = CASES.map(c => {
+      const r = reports[c.id];
+      if (!r) {
+        return `${c.id}:미실행`;
+      }
+      const u =
+        r.underline === 'unset' ? '밑줄미답' : r.underline === 'yes' ? '밑줄O' : '밑줄X';
+      return `${c.id}:${r.verdict}/${r.result.keystrokeCount}타/위반${r.result.suspiciousCount}/${u}`;
+    }).join(' | ');
+    console.log(`[GATE1] ${keyboard} :: ${overall} :: ${line}`);
+    if (overall !== 'PENDING' && allRun && underlineAnswered === CASES.length) {
+      console.log(
+        `[GATE1-DONE] ${keyboard} => ${overall} (밑줄 안 보임 ${underlineMissing}건)`,
+      );
+    }
+  }, [keyboard, reports, overall, allRun, underlineAnswered, underlineMissing]);
+
   return (
     <ScrollView style={s.screen} keyboardShouldPersistTaps="handled">
       <Card title={`게이트 1 — 한글 IME · 키보드: ${keyboard}`} verdict={overall}>
         <Text style={s.cardSub}>
-          키보드를 바꿔 가며 A~E 를 각각 수행하고, 매번 이 화면을 스크린샷으로 남겨라.
-          한 스크린샷이 한 키보드의 판정이다.
+          키보드를 바꿔 가며 A~E 를 수행한다. **키보드 버튼을 누르면 모든 케이스가
+          새로 시작된다** — 앞 키보드의 타수·위반이 섞이지 않게 하려는 것이니
+          한 키보드를 끝내고 나서 바꿔라. 결과는 콘솔로도 흘러가므로 스크린샷은
+          선택이다(밑줄 육안 근거를 남기고 싶을 때만).
         </Text>
         <Row>
           {KEYBOARDS.map(k => (
             <Btn
               key={k}
               label={keyboard === k ? `● ${k}` : `○ ${k}`}
-              onPress={() => setKeyboard(k)}
+              onPress={() => switchKeyboard(k)}
               tone={keyboard === k ? 'accent' : 'normal'}
             />
           ))}
@@ -325,7 +365,7 @@ export default function ImeGate() {
       </Card>
 
       {CASES.map(c => (
-        <ImeCase key={c.id} spec={c} onReport={onReport} />
+        <ImeCase key={`${keyboard}-${c.id}`} spec={c} onReport={onReport} />
       ))}
       <View style={{height: 60}} />
     </ScrollView>
