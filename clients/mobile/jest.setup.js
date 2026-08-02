@@ -59,6 +59,31 @@ jest.mock('react-native-keychain', () => {
   };
 });
 
+// ---- react-native-safe-area-context ------------------------------------------
+// The real module reads insets from a native view, so under Jest every screen
+// that calls `useSafeAreaInsets` throws "No safe area value available".
+//
+// Written here rather than pulled from the package's own `jest/mock` because
+// that file is untranspiled TSX and this one states the values a test is
+// asserting against. **Zeros on purpose**: a test that passes only because the
+// harness invented a 44pt top inset is not testing this app's layout. The
+// device build is where insets are real, and the simulator captures are where
+// they are checked.
+jest.mock('react-native-safe-area-context', () => {
+  const React = require('react');
+  const insets = {top: 0, right: 0, bottom: 0, left: 0};
+  const frame = {x: 0, y: 0, width: 390, height: 844};
+  return {
+    SafeAreaProvider: ({children}) => React.createElement(React.Fragment, null, children),
+    SafeAreaConsumer: ({children}) => children(insets),
+    SafeAreaView: ({children}) => React.createElement(React.Fragment, null, children),
+    SafeAreaInsetsContext: React.createContext(insets),
+    useSafeAreaInsets: () => insets,
+    useSafeAreaFrame: () => frame,
+    initialWindowMetrics: {insets, frame},
+  };
+});
+
 // ---- @react-native-community/netinfo ----------------------------------------
 jest.mock('@react-native-community/netinfo', () => {
   const listeners = new Set();

@@ -1,5 +1,6 @@
 import {fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
+import {Linking} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -9,18 +10,22 @@ import {__resetSessionStore, keychainSettled} from '../src/storage/secureSession
 import {__resetServerBaseCache} from '../src/storage/serverBase';
 
 // =============================================================================
-// The screen that proves the app is attached to the core, exercised as a person
-// would use it. Two separate things are checked here and they are easy to
-// conflate:
+// The screen a signed-out person meets, exercised as they would use it.
+//
+// Four things are checked here and they are easy to conflate:
 //
 //   1. the screen RENDERS the core's answer — the hint under the address field
 //      is `normalizeServerUrl`'s `base`, not a second opinion computed locally;
-//   2. the screen's input state is SYNCHRONOUS — spike #837 gate 1 case D
+//   2. the screen SPEAKS the core's copy — every failure sentence comes from
+//      `signInFailureCopy` / `joinFailureCopy`, so this client and the web client
+//      cannot tell one person two different stories about the same 409;
+//   3. the screen's input state is SYNCHRONOUS — spike #837 gate 1 case D
 //      measured that a single `setTimeout(…, 0)` between a keystroke and the
 //      rendered value is enough to sever the iOS IME and stop Korean jamo
-//      combining altogether.
+//      combining altogether;
+//   4. an invite link lands in the invite form, not next to it.
 //
-// (2) cannot be measured in Jest — there is no IME here. What CAN be measured is
+// (3) cannot be measured in Jest — there is no IME here. What CAN be measured is
 // the property the IME needs: the value is readable immediately after the
 // keystroke, with nothing awaited. A rewrite that routed input through a store,
 // a query or the network would fail these assertions long before it reached a
@@ -69,6 +74,11 @@ beforeEach(() => {
   __resetServerBaseCache();
   fetchMock = jest.fn();
   globalThis.fetch = fetchMock as unknown as typeof fetch;
+  jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('the address field renders the core’s answer', () => {
@@ -130,6 +140,16 @@ describe('input state is synchronous (spike #837 gate 1, case D)', () => {
       expect(email.props.value).toBe(step);
     }
   });
+
+  it('holds the invite code synchronously too', () => {
+    // The composer is the next batch's, but a code pasted from a Korean IME
+    // keyboard travels the same path and deserves the same rule.
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('mode-toggle'));
+    const code = screen.getByTestId('invite-code-input');
+    fireEvent.changeText(code, '초대-CODE-1');
+    expect(code.props.value).toBe('초대-CODE-1');
+  });
 });
 
 describe('the login round trip, mocked', () => {
@@ -142,25 +162,28 @@ describe('the login round trip, mocked', () => {
     fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
   }
 
-  it('signs in and reports the member the server returned', async () => {
+  it('signs in and stores the refresh token in the keychain', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
     render(<ConnectScreen />);
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
-    await waitFor(() => expect(screen.getByTestId('success')).toBeTruthy());
-    expect(screen.getByTestId('success')).toHaveTextContent(/Seongjae Kwak/);
-    expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/v1/auth/login');
-
+    await waitFor(() =>
+      expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/v1/auth/login'),
+    );
     await keychainSettled();
     expect(keychainItems.get('app.momo.ios.rn.session')?.password).toBe(
       'refresh-token-1',
     );
+    // The screen does not announce success or navigate: the session store
+    // notified and the gate above swaps the tree. A second source of truth for
+    // "am I signed in" is how the two start disagreeing.
+    expect(screen.queryByTestId('failure')).toBeNull();
   });
 
-  it('distinguishes a rejected password from an unreachable server', async () => {
+  it('speaks the core’s sentence for a rejected password', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(401, {error: {message: '이메일 또는 비밀번호가 올바르지 않습니다.'}}),
+      jsonResponse(401, {error: {message: 'invalid credentials'}}),
     );
     render(<ConnectScreen />);
     fillForm();
@@ -168,17 +191,24 @@ describe('the login round trip, mocked', () => {
 
     await waitFor(() => expect(screen.getByTestId('failure')).toBeTruthy());
     expect(screen.getByTestId('failure')).toHaveTextContent(
-      /로그인 정보가 맞지 않습니다/,
+      '이메일 또는 비밀번호가 맞지 않습니다.',
     );
-    // …and specifically NOT as a network problem. Telling someone to check
-    // their connection when the server already answered sends them to fix the
-    // wrong thing.
-    expect(screen.getByTestId('failure')).not.toHaveTextContent(
-      /서버에 닿지 못했습니다/,
-    );
+    // …and specifically not the server's English, and not a network story.
+    expect(screen.getByTestId('failure')).not.toHaveTextContent(/invalid credentials/);
+    expect(screen.getByTestId('failure')).not.toHaveTextContent(/서버에 닿지 못했습니다/);
   });
 
-  it('says nothing answered when nothing answered', async () => {
+  it('offers no retry for a wrong password, because pressing again cannot help', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, {error: {message: 'nope'}}));
+    render(<ConnectScreen />);
+    fillForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    await waitFor(() => expect(screen.getByTestId('failure')).toBeTruthy());
+    expect(screen.queryByTestId('failure-retry')).toBeNull();
+  });
+
+  it('says nothing answered when nothing answered, and offers a retry', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
     render(<ConnectScreen />);
     fillForm();
@@ -189,6 +219,21 @@ describe('the login round trip, mocked', () => {
     expect(screen.getByTestId('failure')).toHaveTextContent(
       /주소와 네트워크를 확인하고 다시 시도하세요\./,
     );
+    expect(screen.getByTestId('failure-retry')).toBeTruthy();
+  });
+
+  it('does not name a suspended account as a wrong password', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(403, {error: {message: 'member is suspended'}}),
+    );
+    render(<ConnectScreen />);
+    fillForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    await waitFor(() => expect(screen.getByTestId('failure')).toBeTruthy());
+    expect(screen.getByTestId('failure')).toHaveTextContent(
+      '이 계정은 지금 로그인할 수 없습니다. 워크스페이스 관리자에게 문의하세요.',
+    );
   });
 
   it('will not submit without a usable address', () => {
@@ -197,5 +242,121 @@ describe('the login round trip, mocked', () => {
     fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
     fireEvent.press(screen.getByTestId('submit-button'));
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('joining with an invite code', () => {
+  function fillJoinForm() {
+    fireEvent.press(screen.getByTestId('mode-toggle'));
+    fireEvent.changeText(
+      screen.getByTestId('server-url-input'),
+      'https://api.example.com',
+    );
+    fireEvent.changeText(screen.getByTestId('invite-code-input'), 'INVITE-1');
+    fireEvent.changeText(screen.getByTestId('email-input'), 'new.person@example.com');
+    fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
+  }
+
+  it('redeems the code through the core’s public join route', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
+    render(<ConnectScreen />);
+    fillJoinForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/v1/join'),
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.code).toBe('INVITE-1');
+    // Identity is derived by the core, so someone joining from the phone and
+    // from the mac chooser gets the same handle.
+    expect(body.handle).toBe('new-person');
+    expect(body.displayName).toBe('New Person');
+  });
+
+  it('will not submit without a code', () => {
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('mode-toggle'));
+    fireEvent.changeText(
+      screen.getByTestId('server-url-input'),
+      'https://api.example.com',
+    );
+    fireEvent.changeText(screen.getByTestId('email-input'), 'a@example.com');
+    fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
+    fireEvent.press(screen.getByTestId('submit-button'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('follows the core’s instruction to sign in when the invite was already used', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, {error: {message: 'invite already redeemed'}}),
+    );
+    render(<ConnectScreen />);
+    fillJoinForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    await waitFor(() => expect(screen.getByTestId('failure')).toBeTruthy());
+    expect(screen.getByTestId('failure')).toHaveTextContent(
+      '이미 이 초대로 가입한 계정입니다. 로그인하세요.',
+    );
+    // `suggestSignIn` is an instruction, so the form follows it rather than
+    // leaving the person to find the toggle themselves.
+    expect(screen.queryByTestId('invite-code-input')).toBeNull();
+  });
+
+  it('distinguishes an expired invite from a revoked one', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(410, {error: {message: 'invite expired'}}),
+    );
+    render(<ConnectScreen />);
+    fillJoinForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    await waitFor(() => expect(screen.getByTestId('failure')).toBeTruthy());
+    expect(screen.getByTestId('failure')).toHaveTextContent(
+      '만료된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요.',
+    );
+  });
+});
+
+describe('an invite deep link', () => {
+  it('fills the server and the code, and opens the invite form', async () => {
+    jest
+      .spyOn(Linking, 'getInitialURL')
+      .mockResolvedValue(
+        'oort://join?server=https%3A%2F%2Fapi.example.com&code=INVITE-9',
+      );
+    render(<ConnectScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('invite-code-input')).toBeTruthy());
+    expect(screen.getByTestId('invite-code-input').props.value).toBe('INVITE-9');
+    expect(screen.getByTestId('server-url-input').props.value).toBe(
+      'https://api.example.com',
+    );
+    expect(screen.getByTestId('server-url-hint')).toHaveTextContent(
+      '요청 주소: https://api.example.com/v1/…',
+    );
+  });
+
+  it('is ignored when it is not a join link', async () => {
+    jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('oort://settings?x=1');
+    render(<ConnectScreen />);
+    await waitFor(() => expect(screen.getByTestId('submit-button')).toBeTruthy());
+    // Still the sign-in form: a stray link must not switch the screen's job.
+    expect(screen.queryByTestId('invite-code-input')).toBeNull();
+  });
+});
+
+describe('a session that ended', () => {
+  it('says why the person is back here', () => {
+    render(<ConnectScreen sessionExpired />);
+    expect(screen.getByTestId('session-expired')).toHaveTextContent(
+      '로그인이 만료되었습니다. 다시 연결해 주세요.',
+    );
+  });
+
+  it('says nothing when this is simply a first launch', () => {
+    render(<ConnectScreen />);
+    expect(screen.queryByTestId('session-expired')).toBeNull();
   });
 });

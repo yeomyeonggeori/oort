@@ -1,9 +1,17 @@
-import {ApiError, login, type LoginResponse} from '@momo/core/lib/api';
-import {NetworkError} from '@momo/core/lib/http';
-import {normalizeServerUrl, SERVER_URL_PLACEHOLDER} from '@momo/core/lib/serverUrl';
-import React, {useCallback, useState} from 'react';
+import {joinWithInvite, login} from '@momo/core/lib/api';
 import {
-  ActivityIndicator,
+  joinFailureCopy,
+  prefillFocus,
+  signInFailureCopy,
+  type ConnectFailure,
+  type ConnectField,
+  type ConnectMode,
+} from '@momo/core/features/auth/connectModel';
+import NetInfo from '@react-native-community/netinfo';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,284 +19,384 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {FailureBanner, NoticeBlock, PrimaryButton, Screen} from '../design/atoms';
+import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
 import {useJoinPrefill} from '../deeplink/joinLink';
-import {setServerBase} from '../storage/serverBase';
+import {isOnlineFromNetInfo} from '../query/queryClient';
+import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
+import {
+  normalizeServerUrl,
+  SERVER_URL_PLACEHOLDER,
+  setServerBase,
+  getServerBase,
+  requiresServerUrl,
+} from '../storage/serverBase';
 
 // =============================================================================
-// The connect screen — and this batch's proof that the app is ATTACHED to the
-// core, not merely booting beside it.
+// The one screen a signed-out person sees. Two jobs behind one form: signing in,
+// and redeeming an invite (`oort://join?server=…&code=…`).
 //
-// Four core entry points are exercised here, each doing real work:
+// ## Everything that decides is in the core
 //
-//   normalizeServerUrl   on every keystroke, and its answer is what the screen
-//                        renders. The line under the field is not a re-derived
-//                        opinion; it is the core's `base` string.
-//   login                the REST round trip, through the core's own transport
-//                        (`fetchWithDeadline`), its wire decoder, and its
-//                        `SessionPort` — so a successful sign-in here also
-//                        writes the refresh token to the keychain.
-//   ApiError             "the server answered and said no" (401, 400).
-//   NetworkError         "nothing answered" (deadline blown, unreachable).
+// This file has no opinion about what went wrong. `signInFailureCopy` and
+// `joinFailureCopy` (`@momo/core/features/auth/connectModel`) turn a status into
+// a Korean sentence, whether it is retryable, and whether the answer is "you
+// already joined — sign in instead"; `normalizeServerUrl` decides what a usable
+// address is and writes the rejection; `prefillFocus` decides where the cursor
+// lands after a link fills what it could. The web client calls exactly these
+// four, and the two screens therefore cannot drift into telling one person two
+// different stories about the same 409.
 //
-// The last two are shown as DIFFERENT things on purpose. The core's http.ts is
-// explicit that they must never be conflated: a wrong password and an
-// unreachable server call for different actions from the person, and a client
-// that renders both as "로그인 실패" makes the second one unsolvable.
+// The previous version of this file wrote its own titles ("로그인 정보가 맞지
+// 않습니다"). That was correct for a wiring proof and wrong now: two clients,
+// two vocabularies, one server.
 //
-// UI completeness is not this batch's job (이행 순서 4 brings the v0 surfaces).
-// What this screen owes is evidence that the wiring carries.
+// ## Spike constraint 1 (#837 gate 1 case D) — every field is synchronous
 //
-// ## Spike constraint 1 is honoured here, not deferred
+// Each `value` below is plain local `useState`, updated inside `onChangeText`.
+// Nothing routes an input value through a store, a query or the network and back.
+// One `setTimeout(…, 0)` in that path was enough on a physical iPhone to sever
+// the iOS IME's composition state so that jamo stopped combining entirely
+// (표준 produced `ㅇㅏㄴㄴㅕㅇㅎㅏㅅㅔㅇㅛ` for 안녕하세요). The invite code and
+// the server address are held to the same rule as the composer will be.
 //
-// Every text field's `value` is plain local `useState`, updated SYNCHRONOUSLY in
-// `onChangeText`. Spike #837 gate 1 case D measured that routing an input value
-// through even a single `setTimeout(…, 0)` severs the iOS IME's composition
-// state and Korean jamo stop combining entirely — 표준 produced
-// `ㅇㅏㄴㄴㅕㅇㅎㅏㅅㅔㅇㅛ` where `안녕하세요` was typed. Nothing on this screen
-// routes an input value through a store, a query or the network and back.
-// `__tests__/composerSync.test.tsx` fails if that changes.
+// ## What this screen does NOT do when it succeeds
+//
+// It does not navigate. `login()` and `joinWithInvite()` both end in
+// `coreSession().applyLogin(...)`, the session store notifies, and the gate above
+// swaps the tree. A screen that also pushed a route would be a second source of
+// truth for "am I signed in", and the two would disagree the first time a token
+// rotation failed.
 // =============================================================================
 
-type Phase =
-  | {kind: 'idle'}
-  | {kind: 'busy'}
-  | {kind: 'failed'; title: string; detail: string}
-  | {kind: 'connected'; response: LoginResponse};
+interface Phase {
+  busy: boolean;
+  failure: ConnectFailure | null;
+}
 
-export default function ConnectScreen(): React.JSX.Element {
+const IDLE: Phase = {busy: false, failure: null};
+
+export default function ConnectScreen({
+  sessionExpired = false,
+}: {
+  sessionExpired?: boolean;
+}): React.JSX.Element {
   const prefill = useJoinPrefill();
 
+  const [mode, setMode] = useState<ConnectMode>('signIn');
   // Synchronous local state. See the note above before changing any of these.
-  const [serverUrl, setServerUrl] = useState('');
+  // The address is seeded from the device's stored choice: someone who signed
+  // out an hour ago should not have to retype the server they self-host.
+  const [serverUrl, setServerUrl] = useState(() => getServerBase() ?? '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phase, setPhase] = useState<Phase>({kind: 'idle'});
+  const [inviteCode, setInviteCode] = useState('');
+  const [phase, setPhase] = useState<Phase>(IDLE);
+  const [online, setOnline] = useState(true);
 
-  // A deep link fills the field once, and only while the person has not typed
+  const fields = useRef<Partial<Record<ConnectField, TextInput | null>>>({});
+
+  useEffect(() => {
+    // The radio, not the server. Knowing there is no network turns a 15-second
+    // deadline into an immediate, true sentence.
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setOnline(isOnlineFromNetInfo(state));
+    });
+    return unsubscribe;
+  }, []);
+
+  // A link fills the form once, and only where the person has not already typed
   // their own value — a link arriving mid-edit must not overwrite what they are
   // in the middle of writing.
   const [prefillApplied, setPrefillApplied] = useState(false);
-  if (prefill && !prefillApplied) {
+  useEffect(() => {
+    if (!prefill || prefillApplied) return;
     setPrefillApplied(true);
-    if (prefill.serverUrl !== '' && serverUrl === '') {
-      setServerUrl(prefill.serverUrl);
+    const nextServer =
+      prefill.serverUrl !== '' && serverUrl === '' ? prefill.serverUrl : serverUrl;
+    if (nextServer !== serverUrl) setServerUrl(nextServer);
+    if (prefill.inviteCode !== '') {
+      setInviteCode(prefill.inviteCode);
+      // An invite link is an instruction about which form this is.
+      setMode('join');
     }
-  }
+    setPhase(IDLE);
+    // Where the cursor goes is the core's decision, not this screen's: land on
+    // the first thing still missing rather than at the top of a half-filled form.
+    const target = prefillFocus({
+      serverUrl: nextServer,
+      email,
+      password,
+      requiresServer: requiresServerUrl(),
+    });
+    fields.current[target]?.focus();
+  }, [prefill, prefillApplied, serverUrl, email, password]);
 
-  // Derived during render from the core, not stored. There is no second copy of
-  // this answer to fall out of step with the field.
+  // Derived during render from the core, never stored. There is no second copy
+  // of this answer to fall out of step with the field.
   const check = serverUrl.trim() === '' ? null : normalizeServerUrl(serverUrl);
+  const joining = mode === 'join';
 
   const canSubmit =
     check?.ok === true &&
     email.trim() !== '' &&
     password !== '' &&
-    phase.kind !== 'busy';
+    (!joining || inviteCode.trim() !== '') &&
+    !phase.busy &&
+    online;
 
   const onSubmit = useCallback(async () => {
     const checked = normalizeServerUrl(serverUrl);
     if (!checked.ok) {
-      setPhase({kind: 'failed', title: '주소를 확인하세요', detail: checked.message});
+      // The core wrote this sentence; it is shown rather than paraphrased.
+      setPhase({busy: false, failure: {message: checked.message, suggestSignIn: false, retryable: false}});
+      fields.current.server?.focus();
       return;
     }
-    setPhase({kind: 'busy'});
-    // Stored BEFORE the request, because the core reads the base through the
-    // host port when it builds the URL — `login()` has no server argument by
-    // design.
+    setPhase({busy: true, failure: null});
+    // Stored BEFORE the request: the core reads the base through the host port
+    // when it builds the URL — `login()` has no server argument, by design.
     setServerBase(checked.base);
     try {
-      const response = await login(email.trim(), password);
-      setPhase({kind: 'connected', response});
+      if (joining) {
+        await joinWithInvite(inviteCode.trim(), email.trim(), password);
+      } else {
+        await login(email.trim(), password);
+      }
+      // Success is not handled here on purpose — see the header note. The
+      // session store has already notified and this tree is on its way out, so
+      // the busy state is simply left standing rather than cleared into a screen
+      // that is about to unmount.
     } catch (error) {
-      if (error instanceof NetworkError) {
-        // Nothing answered. The core already wrote the Korean copy, including
-        // the deadline in seconds, so it is shown rather than paraphrased.
-        setPhase({kind: 'failed', title: '서버에 닿지 못했습니다', detail: error.message});
-        return;
-      }
-      if (error instanceof ApiError) {
-        setPhase({
-          kind: 'failed',
-          title: error.status === 401 ? '로그인 정보가 맞지 않습니다' : `서버가 거절했습니다 (${error.status})`,
-          detail: error.message,
-        });
-        return;
-      }
-      setPhase({
-        kind: 'failed',
-        title: '예상치 못한 오류',
-        detail: error instanceof Error ? error.message : String(error),
-      });
+      const failure = joining ? joinFailureCopy(error) : signInFailureCopy(error);
+      setPhase({busy: false, failure});
+      // "이미 이 초대로 가입한 계정입니다. 로그인하세요." is an instruction, so
+      // the form follows it instead of leaving the person to find the toggle.
+      if (failure.suggestSignIn) setMode('signIn');
     }
-  }, [email, password, serverUrl]);
+  }, [email, inviteCode, joining, password, serverUrl]);
+
+  const toggleMode = useCallback(() => {
+    setMode(current => (current === 'join' ? 'signIn' : 'join'));
+    setPhase(IDLE);
+  }, []);
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>서버에 연결</Text>
-      <Text style={styles.subtitle}>
-        oort는 셀프호스팅입니다. 연결할 서버 주소를 입력하세요.
-      </Text>
-
-      <Field label="서버 주소">
-        <TextInput
-          style={styles.input}
-          value={serverUrl}
-          onChangeText={setServerUrl}
-          placeholder={SERVER_URL_PLACEHOLDER}
-          placeholderTextColor="#8a8f98"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          testID="server-url-input"
-        />
-      </Field>
-
-      {/* The core's answer, rendered verbatim. This line is the visible
-          evidence that @momo/core is running inside this app. */}
-      {check !== null && (
-        <Text
-          style={check.ok ? styles.hintOk : styles.hintBad}
-          testID="server-url-hint">
-          {check.ok ? `요청 주소: ${check.base}/v1/…` : check.message}
-        </Text>
-      )}
-
-      <Field label="이메일">
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-          testID="email-input"
-        />
-      </Field>
-
-      <Field label="비밀번호">
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          testID="password-input"
-        />
-      </Field>
-
-      {prefill?.inviteCode ? (
-        <Text style={styles.hintOk} testID="invite-hint">
-          초대 링크를 읽었습니다. 초대 코드로 가입하는 화면은 다음 배치입니다.
-        </Text>
-      ) : null}
-
-      <Pressable
-        accessibilityRole="button"
-        disabled={!canSubmit}
-        onPress={onSubmit}
-        style={({pressed}) => [
-          styles.button,
-          !canSubmit && styles.buttonDisabled,
-          pressed && canSubmit && styles.buttonPressed,
-        ]}
-        testID="submit-button">
-        {phase.kind === 'busy' ? (
-          <ActivityIndicator color="#ffffff" />
-        ) : (
-          <Text style={styles.buttonLabel}>연결</Text>
-        )}
-      </Pressable>
-
-      {phase.kind === 'failed' && (
-        <View style={styles.failure} testID="failure">
-          <Text style={styles.failureTitle}>{phase.title}</Text>
-          <Text style={styles.failureDetail}>{phase.detail}</Text>
-        </View>
-      )}
-
-      {phase.kind === 'connected' && (
-        <View style={styles.success} testID="success">
-          <Text style={styles.successTitle}>연결됨</Text>
-          <Text style={styles.successDetail}>
-            {phase.response.member.displayName} (@{phase.response.member.handle})
+    <Screen>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag">
+          <Text style={styles.title}>
+            {joining ? '워크스페이스에 참여' : 'oort에 연결'}
           </Text>
-          <Text style={styles.successDetail}>
-            워크스페이스 {phase.response.member.workspaceId}
+          <Text style={styles.subtitle}>
+            {joining
+              ? '초대 코드로 워크스페이스에 참여합니다.'
+              : 'oort는 셀프호스팅입니다. 연결할 서버 주소를 입력하세요.'}
           </Text>
-          <Text style={styles.successMuted}>
-            리프레시 토큰은 iOS 키체인에 저장했습니다.
-          </Text>
-        </View>
-      )}
-    </ScrollView>
+
+          {sessionExpired ? (
+            <NoticeBlock headline={SESSION_EXPIRED_NOTICE} testID="session-expired" />
+          ) : null}
+
+          {!online ? (
+            <NoticeBlock
+              headline="오프라인입니다."
+              detail="네트워크가 연결되면 다시 시도하세요."
+              testID="connect-offline"
+            />
+          ) : null}
+
+          <Field label="서버 주소" hint="워크스페이스에 초대받은 주소">
+            <TextInput
+              ref={node => {
+                fields.current.server = node;
+              }}
+              style={styles.input}
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              placeholder={SERVER_URL_PLACEHOLDER}
+              placeholderTextColor={color.textFaint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              returnKeyType="next"
+              // The keyboard's 다음 key moves to the next field, as it does in
+              // every other iOS form. Without this it dismisses the keyboard and
+              // the person has to reach back up and tap.
+              onSubmitEditing={() =>
+                (joining ? fields.current.code : fields.current.email)?.focus()
+              }
+              testID="server-url-input"
+            />
+          </Field>
+
+          {/* The core's answer, rendered verbatim. */}
+          {check !== null ? (
+            <Text
+              style={check.ok ? styles.hintOk : styles.hintBad}
+              testID="server-url-hint">
+              {check.ok ? `요청 주소: ${check.base}/v1/…` : check.message}
+            </Text>
+          ) : null}
+
+          {joining ? (
+            <Field label="초대 코드">
+              <TextInput
+                ref={node => {
+                  fields.current.code = node;
+                }}
+                style={styles.input}
+                value={inviteCode}
+                onChangeText={setInviteCode}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="off"
+                returnKeyType="next"
+                onSubmitEditing={() => fields.current.email?.focus()}
+                testID="invite-code-input"
+              />
+            </Field>
+          ) : null}
+
+          <Field label="이메일">
+            <TextInput
+              ref={node => {
+                fields.current.email = node;
+              }}
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              returnKeyType="next"
+              onSubmitEditing={() => fields.current.password?.focus()}
+              testID="email-input"
+            />
+          </Field>
+
+          <Field
+            label="비밀번호"
+            hint={
+              joining
+                ? '이 워크스페이스에서 쓸 비밀번호를 새로 정합니다'
+                : undefined
+            }>
+            <TextInput
+              ref={node => {
+                fields.current.password = node;
+              }}
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              returnKeyType="go"
+              onSubmitEditing={() => {
+                if (canSubmit) void onSubmit();
+              }}
+              testID="password-input"
+            />
+          </Field>
+
+          <PrimaryButton
+            label={joining ? '초대 코드로 참여' : '로그인'}
+            busyLabel={joining ? '참여하는 중…' : '로그인 중…'}
+            busy={phase.busy}
+            disabled={!canSubmit}
+            onPress={() => void onSubmit()}
+            testID="submit-button"
+          />
+
+          {phase.failure ? (
+            <FailureBanner
+              message={phase.failure.message}
+              // A retry is offered only where pressing again with the same input
+              // could work — nothing answered, or the server faulted. A wrong
+              // password or a spent invite needs the input to change first, and
+              // a retry button there is an invitation to press it forever.
+              onRetry={
+                phase.failure.retryable && canSubmit
+                  ? () => void onSubmit()
+                  : undefined
+              }
+              testID="failure"
+            />
+          ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={toggleMode}
+            style={({pressed}) => [styles.toggle, pressed && styles.togglePressed]}
+            testID="mode-toggle">
+            <Text style={styles.toggleLabel}>
+              {joining ? '로그인으로 전환' : '초대 코드로 참여'}
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 function Field({
   label,
+  hint,
   children,
 }: {
   label: string;
+  hint?: string;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       {children}
+      {hint ? <Text style={styles.fieldHint}>{hint}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {flex: 1, backgroundColor: '#0f1115'},
-  content: {padding: 24, paddingTop: 64, gap: 16},
-  title: {fontSize: 26, fontWeight: '600', color: '#f2f3f5'},
-  subtitle: {fontSize: 14, color: '#9aa0a8', marginBottom: 8},
-  field: {gap: 6},
-  label: {fontSize: 13, color: '#9aa0a8'},
+  flex: {flex: 1},
+  content: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingTop: space.xl,
+    paddingBottom: space.xl * 2,
+    gap: space.lg,
+  },
+  title: {fontSize: font.title, fontWeight: '600', color: color.text},
+  subtitle: {fontSize: font.label, color: color.textMuted, lineHeight: 20},
+  field: {gap: space.xs + 2},
+  label: {fontSize: font.label, color: color.textMuted},
+  fieldHint: {fontSize: font.meta, color: color.textFaint},
   input: {
+    minHeight: TOUCH_TARGET,
     borderWidth: 1,
-    borderColor: '#2a2f38',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#f2f3f5',
-    backgroundColor: '#171a20',
+    borderColor: color.border,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
+    // 16 or larger, so iOS does not zoom the page when the field takes focus.
+    fontSize: font.body,
+    color: color.text,
+    backgroundColor: color.surface,
   },
-  hintOk: {fontSize: 12, color: '#6fa8dc'},
-  hintBad: {fontSize: 12, color: '#e0777d'},
-  button: {
-    marginTop: 8,
-    borderRadius: 8,
-    paddingVertical: 14,
+  hintOk: {fontSize: font.meta, color: color.accentText},
+  hintBad: {fontSize: font.meta, color: color.danger},
+  toggle: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#3b6fd4',
+    borderRadius: radius.md,
   },
-  buttonDisabled: {backgroundColor: '#2a2f38'},
-  buttonPressed: {backgroundColor: '#325ab3'},
-  buttonLabel: {color: '#ffffff', fontSize: 16, fontWeight: '600'},
-  failure: {
-    borderRadius: 8,
-    padding: 14,
-    backgroundColor: '#2a1c1f',
-    borderWidth: 1,
-    borderColor: '#5a2f35',
-    gap: 4,
-  },
-  failureTitle: {color: '#f0b4b8', fontSize: 14, fontWeight: '600'},
-  failureDetail: {color: '#c9989c', fontSize: 13},
-  success: {
-    borderRadius: 8,
-    padding: 14,
-    backgroundColor: '#16241c',
-    borderWidth: 1,
-    borderColor: '#2c4a38',
-    gap: 4,
-  },
-  successTitle: {color: '#93d3a8', fontSize: 14, fontWeight: '600'},
-  successDetail: {color: '#c2d8c9', fontSize: 13},
-  successMuted: {color: '#7f9488', fontSize: 12, marginTop: 4},
+  togglePressed: {backgroundColor: color.surfacePressed},
+  toggleLabel: {color: color.accentText, fontSize: font.label, fontWeight: '600'},
 });

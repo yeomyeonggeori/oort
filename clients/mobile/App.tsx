@@ -1,9 +1,12 @@
 import {QueryClientProvider} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
-import {ActivityIndicator, StatusBar, StyleSheet, View} from 'react-native';
+import {ActivityIndicator, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {color, font, space} from './src/design/tokens';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
+import {useAuthGate} from './src/session/useSession';
+import AppShell from './src/shell/AppShell';
 import {initSessionStore} from './src/storage/secureSession';
 
 // =============================================================================
@@ -22,6 +25,16 @@ import {initSessionStore} from './src/storage/secureSession';
 //
 // `index.js` has already installed the URL polyfill and the core host by the
 // time this module is evaluated; see the comment there.
+//
+// ## Two gates, not one (goal RN-C3)
+//
+// `initSessionStore()` answers "what was on this device". `useAuthGate()` answers
+// "can this device talk to the server right now" — which is a second question,
+// because the access token is memory-only by design and a resumed session has to
+// spend one refresh rotation to get one. Collapsing the two would either show a
+// sign-in form to someone who is signed in, or a shell whose every request 401s.
+// The decision itself is a pure function in `src/session/authGate.ts`, tested
+// there; this file only renders its three answers.
 // =============================================================================
 
 export default function App(): React.JSX.Element {
@@ -44,17 +57,37 @@ export default function App(): React.JSX.Element {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#0f1115" />
+      <StatusBar barStyle="light-content" backgroundColor={color.bg} />
       <QueryClientProvider client={queryClient}>
-        {booted ? (
-          <ConnectScreen />
-        ) : (
-          <View style={styles.booting} testID="booting">
-            <ActivityIndicator color="#6fa8dc" />
-          </View>
-        )}
+        {booted ? <Gate /> : <Booting testID="booting" />}
       </QueryClientProvider>
     </SafeAreaProvider>
+  );
+}
+
+function Gate(): React.JSX.Element {
+  const gate = useAuthGate();
+  if (gate.kind === 'restoring') {
+    return <Booting label="로그인 상태를 확인하는 중입니다." testID="session-restoring" />;
+  }
+  if (gate.kind === 'signedOut') {
+    return <ConnectScreen sessionExpired={gate.expired} />;
+  }
+  return <AppShell member={gate.member} />;
+}
+
+function Booting({
+  label,
+  testID,
+}: {
+  label?: string;
+  testID?: string;
+}): React.JSX.Element {
+  return (
+    <View style={styles.booting} testID={testID}>
+      <ActivityIndicator color={color.accentText} />
+      {label ? <Text style={styles.bootingLabel}>{label}</Text> : null}
+    </View>
   );
 }
 
@@ -63,6 +96,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0f1115',
+    gap: space.md,
+    backgroundColor: color.bg,
   },
+  bootingLabel: {fontSize: font.label, color: color.textMuted},
 });
