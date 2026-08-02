@@ -1837,7 +1837,7 @@ async function countTabStopsToComposer(page, where, ceiling) {
 }
 
 /**
- * 가상 목록 안의 행을 화면에 올린다.
+ * 가상 목록 안의 행을 화면에 올린다 — **못 올렸으면 여기서, 이유를 말하고** 죽는다.
  *
  * `locator.scrollIntoViewIfNeeded()`를 쓰지 않는 이유가 있다: react-virtuoso는
  * 스크롤이 부른 재렌더에서 행의 DOM 노드를 **교체**하고, Playwright가 "요소가
@@ -1846,29 +1846,322 @@ async function countTabStopsToComposer(page, where, ceiling) {
  * 것과 아무 상관이 없고 필요한 것은 "그 행이 보이는가" 하나뿐이므로, 페이지
  * 안에서 스크롤하고 결과를 다시 묻는다.
  *
- * R2에서 꼬리 한 줄이 줄고 tombstone이 작아지면서 행 높이가 바뀌었고, 그만큼
- * 가상 목록의 창이 밀려 B8 프레임이 이 경계 위에 앉았다. 픽스처가 흔들린 것이
- * 아니라 재는 방법이 흔들리는 방법이었다.
+ * ── goal QA-flake: 이 함수가 `capture:design` 플레이크 1종이었다 ─────────────
+ *
+ * 실측(base `03fbdb81`, 8회): 3 PASS / 5 FAIL, 그 중 4회가
+ * `[스크롤] turn-failure를 6번 시도해도 화면에 올리지 못했다`.
+ *
+ * 원인은 재시도가 모자라서가 **아니었다. 재시도가 아무 일도 하지 않았기
+ * 때문이다.** 이전 판의 루프는 이것이었다:
+ *
+ *     for (6번) { const el = querySelector(testId);
+ *                 if (!el) …아무것도 하지 않는다;
+ *                 await waitForTimeout(250); }
+ *
+ * 행이 렌더 창 밖에 있으면 `querySelector`는 null을 답하고, 그 뒤 이 루프가 한
+ * 일은 250ms를 기다린 것뿐이다. **가상 목록은 시간이 지난다고 행을 마운트하지
+ * 않는다 — 스크롤러가 움직여야 마운트한다.** 그러니 이 루프는 1.5초를 태우고
+ * 같은 null을 여섯 번 본 뒤 죽는, 원리적으로 성공할 수 없는 루프였다. 통과한
+ * 회차는 루프가 고친 회차가 아니라 **행이 아직 창 안에 남아 있던** 회차다.
+ * (그래서 `tries`를 늘리는 것은 고치는 것이 아니라 같은 null을 더 오래 보는
+ * 것이다.)
+ *
+ * 그러면 행은 왜 사라져 있었나. 이전 판이 `turn-failure`를 묻는 바로 그 순간부터
+ * 4초를 50ms 간격으로 80번 표본해 봤다:
+ *
+ *   실패한 회차: `turn-failure` **없음(80/80)** · 마운트된 항목 index
+ *                1000000~1000012 (목록의 **머리**) · scrollTop **0**
+ *   통과한 회차: `turn-failure` 있음(80/80) · index 1000004~1000018 (꼬리)
+ *                · scrollTop 813
+ *
+ * 즉 실패한 회차의 타임라인은 **맨 위에 앉아 있었다**. 바로 앞 단계가
+ * `message-markdown`을 가운데로 올렸는데 그 스크롤이 남아 있지 않은 것이다
+ * (`Timeline`은 `initialItemCount={min(items.length,24)}`로 열려 첫 페인트에는
+ * 전 행이 DOM에 있고, 그 뒤 측정 보정과 `startReached`가 스크롤 위치를 다시
+ * 잡는다). `turn-failure`는 꼬리 행이므로 머리에 앉은 창의 밖이고, 아무도
+ * 스크롤러를 건드리지 않는 한 **영원히** 밖이다 — 80번을 봐도 없었다는 것이 그
+ * 뜻이고, 여섯 번 더 본다고 달라질 것이 아니었다.
+ *
+ * 그런데 바로 앞 단계는 왜 통과했나. 이전 판의 성공 조건이 `isVisible()`이었기
+ * 때문이다. Playwright의 `isVisible()`은 "상자가 있고 `visibility:hidden`이
+ * 아니다"이지 **"화면 안에 있다"가 아니다** — 창 밖으로 스크롤된 마운트된 노드도
+ * 참을 답한다. 그래서 앞 단계는 "행이 마운트돼 있다"를 "행이 내가 둔 자리에
+ * 있다"로 잘못 읽고 돌아왔고, 목록이 그 뒤 머리로 돌아가는 것을 보지 못했다.
+ *
+ * 고치는 자리도 그래서 둘이다: 성공 조건을 **자리(rect)가 멎는 것**으로 바꾸고,
+ * 행이 없을 때는 **스크롤러를 실제로 움직인다**.
+ *
+ * 확인해 둔다: 이 프레임의 **피사체는 이 빌드에 그대로 있다**. `BODIES`의 마지막
+ * 줄이 `agent_worker.provider_failure.v0`이고, `makeMessages(16)`에서 그 줄은
+ * `rows[14]`이며, B11 픽스처 편집기(`pick(4)/pick(3)/pick(1)` = `rows[12]`
+ * `rows[13]` `rows[15]`)는 `plainText` 가드 때문에 그 행을 건드리지 못한다.
+ * P3의 인박스 프레임과 달리 여기서 없어진 것은 피사체가 아니라 **기다림**이었고,
+ * 그래서 프레임은 그대로 두고 재는 방법만 고쳤다.
+ *
+ * 그래서 이제:
+ *  1. 첫 페인트의 정리가 끝나도록 한 프레임 양보한 뒤 본다 — "지금 있다"가 곧
+ *     거짓이 되는 순간에 판단하지 않기 위해서다.
+ *  2. 없으면 스크롤러를 **아래에서 위로 반 화면씩 실제로 훑는다**. 마운트되지
+ *     않은 행에 닿는 방법은 스크롤 범위를 지나가는 것뿐이고, 걸음 수는
+ *     scrollHeight/step으로 유한하다. 아래에서 시작하는 것은 이 하네스가 찾는
+ *     행이 전부 최근 꼬리에 있고 타임라인이 바닥에 붙어 열리기 때문이다.
+ *  3. 찾으면 가운데로 올린 뒤 **자리가 멎을 때까지** 기다린다. virtuoso는 스크롤
+ *     뒤 재측정으로 위치를 보정하므로, 고정 250ms는 보정 중인 화면을 찍는다.
+ *  4. 그래도 못 찾으면 **여기서** 죽되, 세 가지를 갈라 말한다:
+ *     ① 전 범위를 훑었는데 없었다 → 그 행은 이 빌드에 없다(= 프레임을 제품
+ *        사실에 맞출 차례지, 더 기다릴 일이 아니다).
+ *     ② 걸음 상한에 걸렸다 → 훑기가 끝나지 않았다.
+ *     ③ 찾았는데 자리가 멎지 않았다 → 목록이 계속 움직인다.
+ *     어느 쪽이든 그때 화면에 무엇이 있었는지(마운트된 항목 범위·행 수·스크롤러
+ *     기하)를 함께 적는다. 이전 메시지는 그 셋을 구분하지 못했고, 그래서 원인
+ *     지점과 증상 지점이 200줄 떨어져 있었다.
  */
-async function scrollTimelineRowIntoView(page, testId, tries = 6) {
-  for (let attempt = 1; attempt <= tries; attempt++) {
-    const found = await page.evaluate(`(() => {
-      const el = document.querySelector('[data-testid="${testId}"]');
-      if (!el) return false;
+async function scrollTimelineRowIntoView(page, testId, where = "") {
+  const label = where ? `${testId} · ${where}` : testId;
+  const seen = await page.evaluate(
+    async ({ testId, maxSteps }) => {
+      // 한 프레임 양보. rAF는 보이지 않는 탭에서 멈출 수 있으므로 상한을 함께
+      // 건다 — 대기로 때우는 값이 아니라 rAF가 오지 않을 때의 안전망이다.
+      const frame = () =>
+        new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (!done) {
+              done = true;
+              resolve();
+            }
+          };
+          requestAnimationFrame(() => setTimeout(finish, 0));
+          setTimeout(finish, 50);
+        });
+
+      const find = () => document.querySelector(`[data-testid="${testId}"]`);
+      const scrollers = () =>
+        Array.from(
+          new Set([
+            ...document.querySelectorAll("[data-virtuoso-scroller]"),
+            ...document.querySelectorAll('[data-testid="timeline-virtuoso"]'),
+          ])
+        ).filter((el) => el.clientHeight > 0);
+
+      const report = (extra) => {
+        const mounted = Array.from(
+          document.querySelectorAll("[data-item-index]")
+        ).map((el) => Number(el.getAttribute("data-item-index")));
+        return {
+          scrollers: scrollers().map((el) => ({
+            top: Math.round(el.scrollTop),
+            height: Math.round(el.scrollHeight),
+            client: Math.round(el.clientHeight),
+          })),
+          mountedFrom: mounted.length ? Math.min(...mounted) : null,
+          mountedTo: mounted.length ? Math.max(...mounted) : null,
+          mountedCount: mounted.length,
+          rows: document.querySelectorAll('[data-testid="timeline-message"]')
+            .length,
+          ...extra,
+        };
+      };
+
+      await frame();
+
+      let steps = 0;
+      let ceiling = false;
+      let scanned = false;
+      if (!find()) {
+        scanned = true;
+        for (const scroller of scrollers()) {
+          scroller.scrollTop = scroller.scrollHeight;
+          await frame();
+          for (;;) {
+            if (find()) break;
+            if (scroller.scrollTop <= 0) break;
+            if (steps >= maxSteps) {
+              ceiling = true;
+              break;
+            }
+            const step = Math.max(120, Math.round(scroller.clientHeight * 0.6));
+            scroller.scrollTop = Math.max(0, scroller.scrollTop - step);
+            steps++;
+            await frame();
+          }
+          if (find() || ceiling) break;
+        }
+      }
+
+      const el = find();
+      if (!el) return report({ ok: false, steps, ceiling, scanned });
+
+      // 가운데로 올리고, 같은 자리에 세 프레임 연속으로 앉을 때까지 기다린다.
       el.scrollIntoView({ block: "center" });
-      return true;
-    })()`);
-    await page.waitForTimeout(250);
-    if (found) {
-      const visible = await page
-        .getByTestId(testId)
-        .first()
-        .isVisible()
-        .catch(() => false);
-      if (visible) return;
-    }
+      let key = null;
+      let stable = 0;
+      for (let i = 0; i < 60 && stable < 3; i++) {
+        await frame();
+        const now = find();
+        if (!now) {
+          key = null;
+          stable = 0;
+          continue;
+        }
+        const rect = now.getBoundingClientRect();
+        if (rect.height <= 0) {
+          stable = 0;
+          continue;
+        }
+        const next = `${Math.round(rect.top)}:${Math.round(rect.height)}`;
+        if (next === key) stable++;
+        else {
+          key = next;
+          stable = 0;
+        }
+      }
+      if (stable < 3) {
+        return report({ ok: false, steps, ceiling, scanned, unsettled: true });
+      }
+      return report({ ok: true, steps, ceiling, scanned });
+    },
+    { testId, maxSteps: 400 }
+  );
+
+  const scene =
+    `마운트된 항목 ${seen.mountedCount}개` +
+    (seen.mountedFrom === null
+      ? ""
+      : ` (index ${seen.mountedFrom}~${seen.mountedTo})`) +
+    ` · timeline-message ${seen.rows}행 · 스크롤러 ${JSON.stringify(seen.scrollers)}`;
+
+  if (seen.ok) {
+    const how = seen.scanned
+      ? `창 밖에 있어 스크롤러를 ${seen.steps}걸음 훑어 올림`
+      : "이미 창 안";
+    console.log(`  스크롤 ${label}: ${how} · ${scene}`);
+    return;
   }
-  throw new Error(`[스크롤] ${testId}를 ${tries}번 시도해도 화면에 올리지 못했다`);
+  if (seen.unsettled) {
+    throw new Error(
+      `[스크롤] ${label}: 행을 찾아 가운데로 올렸는데 자리가 멎지 않았다 — ${scene}`
+    );
+  }
+  if (seen.ceiling) {
+    throw new Error(
+      `[스크롤] ${label}: 스크롤러를 ${seen.steps}걸음 훑고도 끝에 닿지 못했다 — ${scene}`
+    );
+  }
+  throw new Error(
+    `[스크롤] ${label}: 스크롤러 전 범위를 ${seen.steps}걸음으로 훑었는데 ` +
+      `\`[data-testid="${testId}"]\`가 한 번도 마운트되지 않았다. ` +
+      `기다림이 모자란 것이 아니라 **이 빌드에 그 행이 없다** — 픽스처가 그 행을 ` +
+      `내보내는지, 제품이 아직 그 행을 그리는지부터 확인해라 (P3 인박스 프레임과 같은 종류). ` +
+      `— ${scene}`
+  );
+}
+
+/**
+ * 포커스가 **멎은 뒤에** 읽는다 (goal QA-flake — `capture:design` 플레이크 2종 중 둘째).
+ *
+ * 실측(base `03fbdb81`, 8회 중 1회):
+ *   `[메뉴 dark] 방향키가 항목 사이를 돌지 않는다 (menu-react-👍 → menu-react-👍)`
+ * 방향키를 눌렀는데 포커스가 그대로였다는 고발이다. 그런데 **제품은 돌고 있었다.**
+ *
+ * 원인은 Radix에 있다. `@radix-ui/react-roving-focus`의 항목 keydown 핸들러는
+ * 후보를 고른 뒤 마지막 줄이 이것이다:
+ *
+ *     setTimeout(() => focusFirst(candidateNodes));
+ *
+ * **포커스 이동은 다음 매크로태스크에서 일어난다.** 그런데
+ * `keyboard.press("ArrowDown")`은 키 이벤트를 보낸 시점에 끝나고, 바로 뒤따르는
+ * `evaluate`는 그 타이머와 경주한다. 대개 타이머가 이기지만 메인 스레드가 렌더로
+ * 붐비면 CDP 평가가 먼저 들어와 **옮기기 전의 포커스**를 읽는다. 그래서 이 단언은
+ * 멀쩡한 메뉴를 두고 회차마다 붉었다 — 이것이 두 번째 비결정 실패였다.
+ *
+ * 고치는 방향은 대기를 늘리는 쪽이 아니라 **표본을 조건으로 바꾸는** 쪽이다.
+ * 여기서는 "포커스가 이 메뉴의 항목에 앉았고 `not`이 아니다"가 참이 될 때까지
+ * 기다렸다가 그 값을 읽는다. 고정 대기가 없으므로 통과하는 회차는 느려지지
+ * 않고, 정말로 돌지 않으면 그때는 진짜 결함이며 — 아래 메시지가 그 순간 무엇이
+ * 포커스를 쥐고 있었는지, 메뉴가 열려 있기는 했는지, 항목이 몇 개였는지 말한다.
+ */
+async function focusedMenuItem(
+  page,
+  where,
+  { not = null, menu = "message-action-menu" } = {}
+) {
+  try {
+    const handle = await page.waitForFunction(
+      ({ not, menu }) => {
+        const content = document.querySelector(`[data-testid="${menu}"]`);
+        const el = document.activeElement;
+        if (!content || !el || !content.contains(el)) return null;
+        if (el.getAttribute("role") !== "menuitem") return null;
+        const testId =
+          el.getAttribute("data-testid") || el.tagName.toLowerCase();
+        if (not !== null && testId === not) return null;
+        return {
+          testId,
+          items: content.querySelectorAll('[role="menuitem"]').length,
+        };
+      },
+      { not, menu },
+      { timeout: 5_000, polling: 50 }
+    );
+    return await handle.jsonValue();
+  } catch {
+    const scene = await page.evaluate(
+      ({ menu }) => {
+        const content = document.querySelector(`[data-testid="${menu}"]`);
+        const el = document.activeElement;
+        return {
+          open: Boolean(content),
+          focus: el
+            ? el.getAttribute("data-testid") || el.tagName.toLowerCase()
+            : "(없음)",
+          role: el ? el.getAttribute("role") : null,
+          inMenu: Boolean(content) && Boolean(el) && content.contains(el),
+          items: content
+            ? Array.from(content.querySelectorAll('[role="menuitem"]')).map(
+                (item) => item.getAttribute("data-testid")
+              )
+            : [],
+        };
+      },
+      { menu }
+    );
+    throw new Error(
+      `[${where}] ` +
+        (not === null
+          ? "메뉴가 열렸는데 5초 동안 포커스가 항목에 앉지 않았다"
+          : `방향키를 눌렀는데 5초 동안 포커스가 ${not}에서 움직이지 않았다`) +
+        ` — 메뉴 ${scene.open ? "열림" : "닫힘"}, 포커스=${scene.focus}` +
+        `(role=${scene.role ?? "없음"}, 메뉴 안=${scene.inMenu}), ` +
+        `항목 ${scene.items.length}개 [${scene.items.join(", ")}]`
+    );
+  }
+}
+
+/**
+ * 포커스가 그 컨트롤에 **돌아올 때까지** 기다린다.
+ *
+ * `focusedMenuItem`과 같은 이유다: Radix는 닫힐 때 `onCloseAutoFocus`로 진입점에
+ * 포커스를 되돌리는데 그 복원도 즉시가 아니다. 200ms를 재고 한 번 표본을 뜨면
+ * 같은 종류의 거짓 실패가 언제든 다시 난다.
+ */
+async function waitForFocus(page, testId, where, note) {
+  try {
+    await page.waitForFunction(
+      (id) => document.activeElement?.getAttribute("data-testid") === id,
+      testId,
+      { timeout: 5_000, polling: 50 }
+    );
+  } catch {
+    const returned = await page.evaluate(`(() => {
+      const el = document.activeElement;
+      if (!el) return "(없음)";
+      return el.getAttribute("data-testid") || el.tagName.toLowerCase();
+    })()`);
+    throw new Error(
+      `[${where}] ${note} — 5초를 기다려도 포커스가 ${returned}에 남았다 (기대 ${testId})`
+    );
+  }
 }
 
 /**
@@ -2457,37 +2750,28 @@ async function captureScheme(browser, scheme) {
   const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
   await login.screenshot({ path: menuShot });
   shots.push(menuShot);
-  const firstItem = await login.evaluate(
-    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
-  );
+  //     포커스는 **표본이 아니라 조건**으로 읽는다 (goal QA-flake). 사연은
+  //     `focusedMenuItem` 주석에 있다: Radix의 roving focus가 포커스를
+  //     `setTimeout`으로 옮기므로, 키를 누른 직후의 한 번 읽기는 옮기기 전
+  //     상태를 볼 수 있고 그것이 두 번째 플레이크였다.
+  const firstItem = await focusedMenuItem(login, `메뉴 ${scheme}`);
   await login.keyboard.press("ArrowDown");
-  const secondItem = await login.evaluate(
-    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
-  );
-  if (!firstItem || firstItem === secondItem) {
-    throw new Error(
-      `[메뉴 ${scheme}] 방향키가 항목 사이를 돌지 않는다 (${firstItem} → ${secondItem})`
-    );
-  }
-  const menuItems = await login.evaluate(
-    `document.querySelectorAll('[data-testid="message-action-menu"] [role="menuitem"]').length`
-  );
+  //     그리고 포커스가 그 항목을 **떠날 때까지**. 끝내 떠나지 않으면 그때가
+  //     진짜 결함이고, 그 자리에서 무엇이 포커스를 쥐고 있었는지까지 말한다.
+  const secondItem = await focusedMenuItem(login, `메뉴 ${scheme}`, {
+    not: firstItem.testId,
+  });
   console.log(
-    `  메뉴 ${scheme}: 항목 ${menuItems}개, ↓로 ${firstItem} → ${secondItem}`
+    `  메뉴 ${scheme}: 항목 ${firstItem.items}개, ↓로 ${firstItem.testId} → ${secondItem.testId}`
   );
   await login.keyboard.press("Escape");
   await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
-  await login.waitForTimeout(200);
-  const returned = await login.evaluate(`(() => {
-    const el = document.activeElement;
-    if (!el) return "(없음)";
-    return el.getAttribute("data-testid") || el.tagName.toLowerCase();
-  })()`);
-  if (returned !== "message-actions-trigger") {
-    throw new Error(
-      `[메뉴 ${scheme}] Esc 뒤 포커스가 ${returned}에 남았다 — 진입점으로 돌아가야 한다`
-    );
-  }
+  await waitForFocus(
+    login,
+    "message-actions-trigger",
+    `메뉴 ${scheme}`,
+    "Esc 뒤 포커스는 진입점으로 돌아가야 한다"
+  );
 
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
@@ -3046,7 +3330,7 @@ async function captureScheme(browser, scheme) {
   // B8 H6: a markdown body rendered as markdown. The fixture row carries bold,
   // inline code, a bullet list, a link and a fenced block, so this one frame is
   // where a reviewer sees whether the timeline stayed dense.
-  await scrollTimelineRowIntoView(b8, "message-markdown");
+  await scrollTimelineRowIntoView(b8, "message-markdown", `B8 ${scheme}`);
   await b8.getByTestId("message-code-block").first().waitFor({ state: "visible" });
   await b8.waitForTimeout(200);
   const markdownShot = `${OUT_DIR}/b8-message-markdown-${scheme}.png`;
@@ -3055,7 +3339,7 @@ async function captureScheme(browser, scheme) {
 
   // B8 H2: the failure notice, with 자세히 open. Two things are on trial here
   // and both are negatives: no English, and no provider text.
-  await scrollTimelineRowIntoView(b8, "turn-failure");
+  await scrollTimelineRowIntoView(b8, "turn-failure", `B8 ${scheme}`);
   await b8.getByTestId("turn-failure-detail").first().click();
   await b8.waitForTimeout(200);
   const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
