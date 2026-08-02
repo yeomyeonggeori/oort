@@ -35,6 +35,53 @@ pub enum ConfigError {
     MissingDatabaseUrl,
     #[error("{0} must be a number")]
     NotANumber(&'static str),
+    #[error(
+        "push drain is enabled but no relay signing key is configured: set \
+         MOMO_PUSH_RELAY_PRIVATE_KEY_PATH to an Ed25519 key, or set \
+         MOMO_PUSH_RELAY_ALLOW_UNSIGNED=1 to accept unsigned dispatches (only a \
+         local mock relay accepts those — the Dawn relay answers 403)"
+    )]
+    PushRelaySigningKeyMissing,
+}
+
+/// Push-candidate drain configuration (ADR-0120, batch P2).
+///
+/// ## Credential posture
+///
+/// This process holds **no APNs key**. It cannot: a self-hosted momo server has
+/// no Apple Developer account, which is the whole reason the relay hop exists
+/// (ADR-0120 D1-A — "Dawn만 APNs .p8을 보유·배포한다"). The only credential here
+/// is the **Ed25519 key that identifies this server to the relay**.
+///
+/// Two rules keep a missing credential from becoming a silent non-delivery:
+///
+/// * **Default off.** The drain runs only when `MOMO_PUSH_NOTIFIER_ENABLED=1`,
+///   and boot logs say plainly when it is disabled. That is an explicit
+///   deactivation, not a loop that quietly finds nothing to do.
+/// * **Enabled without a key is a boot refusal.** The Swift notifier falls back
+///   to sending unsigned (`Config.swift:25-27`), which against the real relay
+///   means 403 → permanent failure → a notification that is dropped and never
+///   retried. Inheriting that would be exactly the "quietly pretend it worked"
+///   failure this batch must not ship, so an operator who wants unsigned has to
+///   say so with `MOMO_PUSH_RELAY_ALLOW_UNSIGNED=1`.
+#[derive(Debug, Clone)]
+pub struct PushConfig {
+    /// `MOMO_PUSH_NOTIFIER_ENABLED=1`. Default off.
+    pub enabled: bool,
+    /// `PUSH_RELAY_URL` — the relay's `/v1/push` endpoint.
+    pub relay_url: String,
+    /// `PUSH_RELAY_SERVER_ID` — this server's opaque identity at the relay.
+    /// Carries no conversation content and no tenant identity.
+    pub server_id: String,
+    /// `MOMO_PUSH_RELAY_PRIVATE_KEY_PATH` — Ed25519 PKCS#8 PEM or raw 32-byte
+    /// seed. Read once at boot; never logged.
+    pub signing_key_path: Option<String>,
+    /// `MOMO_PUSH_RELAY_ALLOW_UNSIGNED=1` — the deliberate mock-relay escape.
+    pub allow_unsigned: bool,
+    /// Drain cadence; the LISTEN wakeup covers the gaps.
+    pub drain_interval: Duration,
+    /// Attempts before a candidate is parked as `failed`.
+    pub max_attempts: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +102,8 @@ pub struct NotifierConfig {
     /// `MOMO_T3_ENABLED=1`. The sweep runs regardless — host loss is a T1/T2
     /// concern too — but the reconciler is T3-only and stays dark until opt-in.
     pub t3_enabled: bool,
+    /// ADR-0120 push-candidate drain.
+    pub push: PushConfig,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -93,6 +142,7 @@ impl NotifierConfig {
                 .max(0),
             host_offline_grace_seconds: env_number("MOMO_HOST_OFFLINE_GRACE_S", 90i64)?.max(1),
             t3_enabled: env("MOMO_T3_ENABLED").as_deref() == Some("1"),
+            push: PushConfig::from_env(poll_ms)?,
         })
     }
 
@@ -107,6 +157,79 @@ impl NotifierConfig {
             lifecycle_claim_delay_seconds: 5,
             host_offline_grace_seconds: 90,
             t3_enabled: true,
+            push: PushConfig::for_target(),
+        }
+    }
+}
+
+/// What the drain will do about signing, decided once at boot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SigningPosture {
+    /// The drain is off. Nothing is claimed and nothing is sent.
+    Disabled,
+    /// Dispatches are signed with the key at this path.
+    Signed(String),
+    /// Dispatches go out unsigned because an operator explicitly allowed it.
+    /// Only a local mock relay accepts these.
+    UnsignedByOptIn,
+}
+
+/// Decide the signing posture from the three env inputs.
+///
+/// Pure so the rule can be tested without touching process environment. The
+/// rule itself is the point: there is no combination that sends unsigned
+/// *without someone having asked for it*, and no combination that starts a
+/// drain it cannot deliver from.
+pub fn resolve_signing_posture(
+    enabled: bool,
+    signing_key_path: Option<&str>,
+    allow_unsigned: bool,
+) -> Result<SigningPosture, ConfigError> {
+    if !enabled {
+        return Ok(SigningPosture::Disabled);
+    }
+    match (signing_key_path, allow_unsigned) {
+        (Some(path), _) => Ok(SigningPosture::Signed(path.to_string())),
+        (None, true) => Ok(SigningPosture::UnsignedByOptIn),
+        // Enabled, no key, no opt-in: refuse to boot. Starting here would mean
+        // claiming candidates, posting them, being refused 403 by the relay,
+        // settling them as permanently failed, and reporting healthy.
+        (None, false) => Err(ConfigError::PushRelaySigningKeyMissing),
+    }
+}
+
+impl PushConfig {
+    fn from_env(poll_ms: u64) -> Result<PushConfig, ConfigError> {
+        let enabled = env("MOMO_PUSH_NOTIFIER_ENABLED").as_deref() == Some("1");
+        let signing_key_path = env("MOMO_PUSH_RELAY_PRIVATE_KEY_PATH");
+        let allow_unsigned = env("MOMO_PUSH_RELAY_ALLOW_UNSIGNED").as_deref() == Some("1");
+
+        // Fail closed, and fail at boot rather than per-notification.
+        resolve_signing_posture(enabled, signing_key_path.as_deref(), allow_unsigned)?;
+
+        let drain_ms: u64 = env_number("MOMO_PUSH_NOTIFIER_DRAIN_INTERVAL_MS", poll_ms)?;
+        Ok(PushConfig {
+            enabled,
+            relay_url: env("PUSH_RELAY_URL")
+                .unwrap_or_else(|| "http://localhost:8090/v1/push".to_string()),
+            server_id: env("PUSH_RELAY_SERVER_ID").unwrap_or_else(|| "momo-local".to_string()),
+            signing_key_path,
+            allow_unsigned,
+            drain_interval: Duration::from_millis(drain_ms.max(1)),
+            max_attempts: env_number("NOTIFIER_MAX_ATTEMPTS", 8i32)?.max(1),
+        })
+    }
+
+    /// Test/embedding default: enabled, unsigned (the repo-local mock relay).
+    pub fn for_target() -> PushConfig {
+        PushConfig {
+            enabled: true,
+            relay_url: "http://localhost:8090/v1/push".to_string(),
+            server_id: "momo-local".to_string(),
+            signing_key_path: None,
+            allow_unsigned: true,
+            drain_interval: Duration::from_millis(300),
+            max_attempts: 8,
         }
     }
 }
@@ -134,6 +257,58 @@ mod tests {
         assert_eq!(choose_log_filter(None, None), "info");
         assert_eq!(choose_log_filter(None, Some("debug")), "debug");
         assert_eq!(choose_log_filter(Some("warn"), Some("debug")), "warn");
+    }
+
+    /// The red test the packet asks for: a missing credential must never
+    /// resolve into "run anyway and hope".
+    ///
+    /// The Swift notifier falls back to unsigned when no key is configured
+    /// (`Config.swift:25-27`). Against the real relay that is a 403 → a
+    /// permanent failure → a notification silently dropped and never retried.
+    /// Delete the `(None, false) => Err(...)` arm and this goes red.
+    #[test]
+    fn an_enabled_drain_without_a_signing_key_refuses_to_boot() {
+        let error = resolve_signing_posture(true, None, false)
+            .expect_err("an enabled drain with no key and no opt-in must not boot");
+        assert!(matches!(error, ConfigError::PushRelaySigningKeyMissing));
+
+        // And the message has to tell the operator what to do about it.
+        let rendered = error.to_string();
+        assert!(rendered.contains("MOMO_PUSH_RELAY_PRIVATE_KEY_PATH"));
+        assert!(rendered.contains("MOMO_PUSH_RELAY_ALLOW_UNSIGNED"));
+    }
+
+    #[test]
+    fn unsigned_dispatch_requires_an_explicit_opt_in() {
+        assert_eq!(
+            resolve_signing_posture(true, None, true).unwrap(),
+            SigningPosture::UnsignedByOptIn,
+            "unsigned is reachable, but only by asking for it"
+        );
+        assert_eq!(
+            resolve_signing_posture(true, Some("/run/keys/push.pem"), false).unwrap(),
+            SigningPosture::Signed("/run/keys/push.pem".to_string())
+        );
+        assert_eq!(
+            resolve_signing_posture(true, Some("/run/keys/push.pem"), true).unwrap(),
+            SigningPosture::Signed("/run/keys/push.pem".to_string()),
+            "a real key wins over the unsigned escape hatch"
+        );
+    }
+
+    /// Default-off is an *explicit* disable, not a silent one: nothing is
+    /// claimed, so nothing can be reported as delivered.
+    #[test]
+    fn the_drain_is_off_until_asked_for_and_then_needs_no_key_to_stay_off() {
+        assert_eq!(
+            resolve_signing_posture(false, None, false).unwrap(),
+            SigningPosture::Disabled
+        );
+        assert_eq!(
+            resolve_signing_posture(false, None, true).unwrap(),
+            SigningPosture::Disabled,
+            "a disabled drain never needs a credential"
+        );
     }
 
     #[test]
