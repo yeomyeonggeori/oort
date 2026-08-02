@@ -56,10 +56,15 @@ beforeEach(async () => {
   await keychainSettled();
 });
 
-it('the core destroys a stored session when NOTHING answered — the hazard', async () => {
-  // `refreshSession()` catches the transport failure and returns false, saying
-  // in its own comment that the session is deliberately not declared dead.
-  // `restoreSession()` then clears it anyway. One subway ride costs a password.
+it('the core KEEPS a stored session when nothing answered — hazard fixed', async () => {
+  // 이 테스트는 원래 **버그를 못박아 둔 것**이었다: `refreshSession()` 이 전송
+  // 실패를 삼키고 `false` 를 내면 — 스스로의 주석이 "세션을 죽었다고 선언하지
+  // 않는다"고 적어둔 그 경우 — `restoreSession()` 이 그래도 지워 버렸다.
+  // 지하철 한 번에 비밀번호를 다시 쳐야 했다.
+  //
+  // 코어가 `RefreshOutcome`("rotated"/"rejected"/"unreachable")으로 거절과 침묵을
+  // 가르면서 그 위험은 사라졌고, 이 파일은 예고대로 **고쳐진 동작을 지키는 쪽**으로
+  // 뒤집는다. 되돌리면 여기가 다시 빨개진다.
   globalThis.fetch = jest.fn(async () => {
     throw new TypeError('Network request failed');
   }) as unknown as typeof fetch;
@@ -67,12 +72,12 @@ it('the core destroys a stored session when NOTHING answered — the hazard', as
   expect(hasPersistedSession()).toBe(true);
   const resumed = await restoreSession();
 
+  // 여전히 세션을 재개하지는 못한다(토큰을 갱신하지 못했으므로).
   expect(resumed).toBeNull();
-  // This is the bug, asserted so the day the core stops doing it this test
-  // fails loudly and the host guard below can be removed.
-  expect(getPersistedSession()).toBeNull();
+  // 그러나 자격증명은 살아 있어야 한다 — 네트워크가 돌아오면 다음 시도가 성공한다.
+  expect(getPersistedSession()).not.toBeNull();
   await keychainSettled();
-  expect(keychainItems.get('app.momo.ios.rn.session')).toBeUndefined();
+  expect(keychainItems.get('app.momo.ios.rn.session')).toBeDefined();
 });
 
 it('the host guard keeps the session by not attempting the rotation at all', () => {

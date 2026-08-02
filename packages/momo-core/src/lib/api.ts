@@ -450,13 +450,29 @@ function parseError(res: HttpResponse): ApiError {
 // already-revoked token and end the session. Cross-TAB races stay possible
 // while the token lives in localStorage; see ./session.ts.
 
-let refreshInFlight: Promise<boolean> | null = null;
+/**
+ * Why a rotation attempt ended. The distinction is load-bearing: **only
+ * `rejected` means the session is actually over.**
+ *
+ * Before this type existed, `refreshSession()` collapsed `rejected` and
+ * `unreachable` into one `false`, and `restoreSession()` read that `false` as
+ * "session dead" and wiped the refresh token — so **one launch with no network
+ * signed the user out for good**, on web and on mobile alike. The comment in the
+ * catch branch below already said the session must not be declared dead there;
+ * the caller simply had no way to honour it.
+ */
+export type RefreshOutcome = "rotated" | "rejected" | "unreachable";
 
-export function refreshSession(): Promise<boolean> {
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+/** The detailed rotation. Use this wherever the *reason* changes what you do. */
+export function refreshSessionOutcome(): Promise<RefreshOutcome> {
   refreshInFlight ??= (async () => {
     try {
       const refreshToken = coreSession().getRefreshToken();
-      if (!refreshToken) return false;
+      // Having no token to present is not a network problem: there is nothing
+      // to rotate and nothing to keep waiting for.
+      if (!refreshToken) return "rejected";
       const res = await rawRequest(
         "/v1/auth/refresh",
         { method: "POST", body: JSON.stringify({ refreshToken }) },
@@ -464,21 +480,26 @@ export function refreshSession(): Promise<boolean> {
       );
       if (!res.ok) {
         coreSession().markAuthExpired();
-        return false;
+        return "rejected";
       }
       const pair = refreshResponseFromWire(res.json<unknown>());
       coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-      return true;
+      return "rotated";
     } catch {
       // Offline, unreachable server, or a blown deadline: the caller keeps
       // rendering cached content (P15) and the session is not declared dead,
       // because nothing answered to say it is.
-      return false;
+      return "unreachable";
     } finally {
       refreshInFlight = null;
     }
   })();
   return refreshInFlight;
+}
+
+/** Boolean view, for callers that only need "did I end up with a usable token". */
+export function refreshSession(): Promise<boolean> {
+  return refreshSessionOutcome().then((outcome) => outcome === "rotated");
 }
 
 /**
@@ -632,10 +653,14 @@ export async function joinWithInvite(
  */
 export async function restoreSession(): Promise<LoginResponse | null> {
   if (!coreSession().getPersistedSession()) return null;
-  const rotated = await refreshSession();
+  const outcome = await refreshSessionOutcome();
+  // **Nothing answered ⇒ nothing is proven.** Keep the credentials and let the
+  // caller render cached content (P15); the next launch with a network can still
+  // rotate. Wiping here is what signed people out after one offline start.
+  if (outcome === "unreachable") return null;
   const persisted = coreSession().getPersistedSession();
   const token = coreSession().getAccessToken();
-  if (!rotated || !persisted || !token) {
+  if (outcome !== "rotated" || !persisted || !token) {
     coreSession().clearSession();
     return null;
   }
