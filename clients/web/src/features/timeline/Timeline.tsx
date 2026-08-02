@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import type { Channel, Message, RosterMember } from "@/lib/api";
+import type { Channel, Message, RosterMember } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
@@ -10,7 +10,7 @@ import {
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
-} from "./model";
+} from "@momo/core/features/timeline/model";
 import {
   DayDivider,
   MessageRow,
@@ -19,7 +19,7 @@ import {
   type MessageRowActions,
 } from "./MessageRow";
 import { PendingRow } from "./PendingRow";
-import { chipsFor, type ReactionMap } from "./reactions";
+import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 
 // =============================================================================
 // Timeline (R-1 §3). Virtualised by react-virtuoso, ordered by seq only, with

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createAgent, type CreateAgentInput, type CreatedAgent } from "@/lib/api";
+import { createAgent, type CreateAgentInput, type CreatedAgent } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { createAgentFailure, type CreateAgentFailure } from "./createModel";
 

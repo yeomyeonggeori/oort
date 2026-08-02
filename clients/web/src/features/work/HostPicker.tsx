@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Loader2, Monitor } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Select } from "@/design/ui/select";
-import { uuidEq, type WorkHost } from "@/lib/api";
+import { uuidEq, type WorkHost } from "@momo/core/lib/api";
 
 // =============================================================================
 // 어느 호스트에서 다시 시작할지 고르는 폼 (ADR-0125 D11 / ADR-0143).

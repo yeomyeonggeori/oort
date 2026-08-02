@@ -1,5 +1,5 @@
-import { ApiError, type MembershipRole } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+import { ApiError, type MembershipRole } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 
 // =============================================================================
 // 에이전트 만들기 model (goal B5.3b, D-4). Everything the form decides without

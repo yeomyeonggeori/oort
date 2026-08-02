@@ -1,4 +1,4 @@
-import type { Channel, RosterMember } from "@/lib/api";
+import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type {
   AgentPartialEvent,
   AgentProgressEvent,

@@ -7,7 +7,7 @@ import {
   uuidEq,
   type Message,
   type WorkSession,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { useIsMobileShell } from "@/app/shellNav";
@@ -30,14 +30,14 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
-import type { WorkScope } from "@/features/work/workSessionModel";
+import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import {
   makeStressRoster,
   makeSyntheticMessages,
-} from "@/features/timeline/stress";
+} from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
-import { canCreateChannelNow } from "@/features/channels/model";
+import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import {
   HuddleHeaderBanner,

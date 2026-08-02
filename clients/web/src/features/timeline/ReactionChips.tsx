@@ -1,6 +1,6 @@
 import { Smile } from "lucide-react";
 import { cn } from "@/design/lib/cn";
-import type { ReactionChip } from "./reactions";
+import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 
 // =============================================================================
 // Reaction chips (B11) — the row of 👍 3 under a message.

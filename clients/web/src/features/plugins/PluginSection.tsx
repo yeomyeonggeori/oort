@@ -26,9 +26,9 @@ import {
   type PluginManifestTool,
   type PluginMutation,
   type PluginPolicyTool,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { SectionShell, StatusChip } from "@/features/settings/SettingsFields";
-import { serverSaysAbsent } from "@/features/capabilities/serverSurfaces";
+import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   actionErrorForPlugin,

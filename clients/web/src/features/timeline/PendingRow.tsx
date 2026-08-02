@@ -3,7 +3,7 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { Avatar } from "./MessageRow";
 import { MessageBody } from "./MessageBody";
-import type { PendingMessage } from "./model";
+import type { PendingMessage } from "@momo/core/features/timeline/model";
 
 // =============================================================================
 // Optimistic echo row (M10, R-1 §3 "내 메시지는 seq 미확정이어도 로컬 echo").

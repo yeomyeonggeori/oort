@@ -5,7 +5,7 @@ import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 // The one cost formatter in this client. A second rounding rule would mean two
 // different answers to "how much did this cost" on two surfaces.
-import { formatCount, formatMicroUsd } from "@/features/timeline/agentCardModel";
+import { formatCount, formatMicroUsd } from "@momo/core/features/timeline/agentCardModel";
 // The roster is what turns a member id into a name, and a name into an
 // unambiguous one. It is already fetched for the sidebar and the directory, so
 // this is a cache read, not a second request.
@@ -15,9 +15,9 @@ import {
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { ApiError } from "@/lib/api";
-import { fetchUsageSummary } from "./api";
-import { errorMessage } from "./model";
+import { ApiError } from "@momo/core/lib/api";
+import { fetchUsageSummary } from "@momo/core/features/settings/api";
+import { errorMessage } from "@momo/core/features/settings/model";
 import { ProviderQuotaBlock } from "./ProviderQuotaBlock";
 import { SectionShell, StatusChip } from "./SettingsFields";
 import {
@@ -45,7 +45,7 @@ import {
   type UsagePeriodId,
   type UsageScope,
   type UsageSummary,
-} from "./usageModel";
+} from "@momo/core/features/settings/usageModel";
 
 // =============================================================================
 // 설정 > 사용량 (AX-7 1층, MOMO-616).

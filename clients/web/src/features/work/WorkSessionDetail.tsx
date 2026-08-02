@@ -9,7 +9,7 @@ import {
   uuidEq,
   type WorkHost,
   type WorkSession,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
@@ -31,13 +31,13 @@ import {
   workSessionContinuityStatus,
   type WorkEventRow,
   type WorkSessionEvent,
-} from "./workSessionModel";
+} from "@momo/core/features/work/workSessionModel";
 import {
   clockLabel,
   ROW_STATE_CLASS,
   SESSION_STATUS_CLASS,
   silenceLabel,
-} from "./workSessionFormat";
+} from "@momo/core/features/work/workSessionFormat";
 
 // =============================================================================
 // 세션 상세 (AX-3 / MOMO-618): what one work session did, in the order it did

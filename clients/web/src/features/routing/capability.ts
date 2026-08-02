@@ -53,11 +53,11 @@ import {
   fetchAgentAllowedModels,
   fetchEffortTable,
   probeSendRouting,
-} from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+} from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { apiBase } from "@/lib/serverBase";
 import { useSession } from "@/app/session";
-import { parseEffortTable, type EffortTable } from "./routingModel";
+import { parseEffortTable, type EffortTable } from "@momo/core/features/routing/routingModel";
 
 export type RoutingSupport = "checking" | "ready" | "absent" | "unknown";
 

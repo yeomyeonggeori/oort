@@ -18,7 +18,7 @@ import {
   type WorkTierPolicy,
   type WorkTierPolicyInput,
   type WorkTierScope,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   autoTargetLabel,
   CLOUD_TARGET,
@@ -36,7 +36,7 @@ import {
   workHostStatus,
   workHostTypeLabel,
   workTierPolicySaveMessage,
-} from "./model";
+} from "@momo/core/features/settings/model";
 import {
   ChoiceRadios,
   CopyButton,

@@ -4,7 +4,7 @@ import {
   type Message,
   type RosterMember,
   type ThreadRollup,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
@@ -12,15 +12,15 @@ import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
 import { MessageBody } from "./MessageBody";
 import { CascadeNotice } from "./CascadeNotice";
-import { turnRecordRunId } from "./cascadeModel";
-import { rowPresentation } from "./rowModel";
+import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
+import { rowPresentation } from "@momo/core/features/timeline/rowModel";
 import {
   canDeleteMessage,
   canEditMessage,
   canReactToMessage,
   canReplyToMessage,
   hasAnyAction,
-} from "./model";
+} from "@momo/core/features/timeline/model";
 import {
   DeleteMessageDialog,
   MessageActionColumn,
@@ -31,16 +31,16 @@ import {
 import { useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
 import { ReactionChips } from "./ReactionChips";
-import type { ReactionChip } from "./reactions";
+import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import {
   deleteFailureMessage,
   editFailureMessage,
   reactionFailureMessage,
-} from "./actionCopy";
+} from "@momo/core/features/timeline/actionCopy";
 import { useLongPress } from "./useLongPress";
 import { rememberLongPressLearned } from "./LongPressHint";
 import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
-import { workSessionIdleNotice } from "@/features/work/workSessionModel";
+import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same

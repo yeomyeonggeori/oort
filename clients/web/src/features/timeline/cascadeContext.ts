@@ -4,7 +4,7 @@ import {
   EMPTY_CASCADE,
   type CascadeByRun,
   type CascadeFallback,
-} from "./cascadeModel";
+} from "@momo/core/features/timeline/cascadeModel";
 
 // =============================================================================
 // The context half of the cascade rail (ADR-0135 D1 / MOMO-627), split from the

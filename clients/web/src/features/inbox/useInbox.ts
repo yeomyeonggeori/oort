@@ -8,7 +8,7 @@ import {
   uuidEq,
   type ApprovalStatus,
   type Message,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
@@ -27,7 +27,7 @@ import {
   runItem,
   type ActorNames,
   type FeedItem,
-} from "./model";
+} from "@momo/core/features/inbox/model";
 
 // =============================================================================
 // Inbox / activity reads. EXISTING REST only, no server change (MOMO-599):

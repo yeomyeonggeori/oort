@@ -6,7 +6,7 @@ import {
   putAgentProfile,
   type AgentProfile,
   type AgentProfileInput,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import {
   isUnknownFieldRejection,
@@ -17,7 +17,7 @@ import {
   routingRejectionField,
   type RoutingDraft,
   type RoutingRejectionField,
-} from "./routingModel";
+} from "@momo/core/features/routing/routingModel";
 
 // =============================================================================
 // 에이전트 프로필의 라우팅 필드 읽기·저장 (ADR-0134 D3 2층, MOMO-626/537).

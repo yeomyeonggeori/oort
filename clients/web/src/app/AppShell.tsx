@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import type { LoginResponse } from "@/lib/api";
+import type { LoginResponse } from "@momo/core/lib/api";
 import {
   createRealtime,
   resolveSpikeRealtimeUrl,

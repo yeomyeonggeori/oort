@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { InlineBanner, SkeletonRows } from "@/features/common/States";
-import { createWorkspace, fetchWorkspace, type CreatedWorkspace } from "./api";
+import { createWorkspace, fetchWorkspace, type CreatedWorkspace } from "@momo/core/features/settings/api";
 import {
   errorMessage,
   isOperatorDenied,
@@ -11,7 +11,7 @@ import {
   normalizeSlug,
   slugError,
   workspaceNameError,
-} from "./model";
+} from "@momo/core/features/settings/model";
 import {
   Field,
   KeyValueRows,

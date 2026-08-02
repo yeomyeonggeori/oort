@@ -6,7 +6,7 @@ import {
   parseMarkdown,
   type Block,
   type Inline,
-} from "./markdown";
+} from "@momo/core/features/timeline/markdown";
 
 // =============================================================================
 // The body of one message (goal B8 H6).

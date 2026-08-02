@@ -16,10 +16,10 @@ import { AgentHubRoute } from "@/features/agentHub/AgentHubRoute";
 import { WorkstreamListRoute } from "@/features/workstreams/WorkstreamListRoute";
 import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRoute";
 import { SearchRoute } from "@/features/search/SearchRoute";
-import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavailable";
-import { forgetQuota } from "@/features/settings/quotaModel";
-import { forgetUsage } from "@/features/settings/usageModel";
+import { forgetQuota } from "@momo/core/features/settings/quotaModel";
+import { forgetUsage } from "@momo/core/features/settings/usageModel";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes

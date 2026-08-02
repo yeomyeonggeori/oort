@@ -1,3 +1,7 @@
+// FIRST, and before anything that can issue a request: this side-effect import
+// gives @momo/core its platform answers (server base, session tokens). See
+// src/lib/coreHost.ts.
+import "@/lib/coreHost";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";

@@ -14,7 +14,7 @@ import {
   startHuddle,
   uuidEq,
   type Huddle,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import type {
   HuddleLifecycleFrame,
   RealtimeHandle,
@@ -28,7 +28,7 @@ import {
   isHuddleUnsupportedStatus,
   reduceHuddleProjection,
   type HuddleErrorKind,
-} from "./huddleModel";
+} from "@momo/core/features/huddles/huddleModel";
 
 export type HuddleBusyAction = "start-or-join" | "leave" | "microphone" | null;
 

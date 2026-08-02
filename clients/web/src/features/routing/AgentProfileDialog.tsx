@@ -36,7 +36,7 @@ import {
   resolveInheritance,
   type RoutingDraft,
   type RoutingInheritance,
-} from "./routingModel";
+} from "@momo/core/features/routing/routingModel";
 import {
   AgentProfileOpenContext,
   OpenAgentProfileContext,

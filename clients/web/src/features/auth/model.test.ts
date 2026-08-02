@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, displayNameFromEmail, handleFromEmail } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+import { ApiError, displayNameFromEmail, handleFromEmail } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { normalizeServerUrl } from "@/lib/serverBase";
 import { resolveSpikeRealtimeUrl } from "@/lib/realtime";
 import {
   parseJoinDeepLink,
   parseJoinFromPageUrl,
   urlWithoutJoinParams,
-} from "./deepLink";
+} from "@momo/core/features/auth/deepLink";
 import { discoveredServers } from "./discovery";
-import { joinFailureCopy, prefillFocus, signInFailureCopy } from "./connectModel";
+import { joinFailureCopy, prefillFocus, signInFailureCopy } from "@momo/core/features/auth/connectModel";
 
 // The connect surface is mostly decisions about untrusted text: a URL someone
 // typed, a link someone forwarded, a service record a shell reported. Those are

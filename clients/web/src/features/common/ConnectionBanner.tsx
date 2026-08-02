@@ -8,7 +8,7 @@ import {
   HEALED_MS,
   RETRY_WINDOW_MS,
   SUSTAINED_DOWN_MS,
-} from "@/features/common/connectionAlert";
+} from "@momo/core/features/common/connectionAlert";
 
 // =============================================================================
 // The one line the shell shows when realtime is not working (goal B8 B2).

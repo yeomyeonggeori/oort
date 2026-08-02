@@ -5,7 +5,7 @@ import {
   pressStep,
   type PressInput,
   type PressState,
-} from "./longPressModel";
+} from "@momo/core/features/timeline/longPressModel";
 
 // =============================================================================
 // 길게 누르기 (B11), hover의 터치 쪽 짝.

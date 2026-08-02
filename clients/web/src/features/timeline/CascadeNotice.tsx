@@ -1,6 +1,6 @@
 import { Shuffle } from "lucide-react";
 import { useCascadeFallbacks } from "./cascadeContext";
-import { cascadeNoticeText, cascadeRouteText } from "./cascadeModel";
+import { cascadeNoticeText, cascadeRouteText } from "@momo/core/features/timeline/cascadeModel";
 
 // =============================================================================
 // "2차 프로바이더로 처리됨" (ADR-0135 D1). The user-facing half of the audit rule

@@ -20,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Button } from "@/design/ui/button";
-import { QUICK_REACTIONS } from "./reactions";
+import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 
 // =============================================================================
 // The message action surfaces (B11).
@@ -52,7 +52,7 @@ import { QUICK_REACTIONS } from "./reactions";
 // so these are affordances, not access control.
 // =============================================================================
 
-import { hasAnyAction, type MessageActionAvailability } from "./model";
+import { hasAnyAction, type MessageActionAvailability } from "@momo/core/features/timeline/model";
 
 export interface MessageActionCallbacks {
   onReply: () => void;

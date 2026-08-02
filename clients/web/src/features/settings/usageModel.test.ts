@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatMicroUsd } from "@/features/timeline/agentCardModel";
+import { formatMicroUsd } from "@momo/core/features/timeline/agentCardModel";
 import fixtures from "./usageFixtures.json";
 import {
   USAGE_BUCKETS,
@@ -29,7 +29,7 @@ import {
   usageView,
   type UsageScope,
   type UsageSummary,
-} from "./usageModel";
+} from "@momo/core/features/settings/usageModel";
 
 // The three fixtures are the contract shapes the engine ticket (MOMO-615) is
 // implementing in parallel: a populated range, an empty range (200 with zeros,

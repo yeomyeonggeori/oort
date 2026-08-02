@@ -11,7 +11,7 @@ import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
-import type { CreatedAgent } from "@/lib/api";
+import type { CreatedAgent } from "@momo/core/lib/api";
 import {
   EMPTY_AGENT_DRAFT,
   INSTRUCTIONS_MAX_BYTES,

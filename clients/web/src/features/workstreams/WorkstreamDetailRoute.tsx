@@ -14,23 +14,23 @@ import {
   watchForMessageId,
   workSessionPath,
 } from "@/features/inbox/anchor";
-import { relativeLabel } from "@/features/inbox/model";
+import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { HostPicker } from "@/features/work/HostPicker";
 import { useWorkHosts } from "@/features/work/useWorkSessions";
 import {
   workHostName,
   workSessionStatus,
-} from "@/features/work/workSessionModel";
-import { SESSION_STATUS_CLASS } from "@/features/work/workSessionFormat";
-import { particleFor } from "@/lib/koreanParticle";
+} from "@momo/core/features/work/workSessionModel";
+import { SESSION_STATUS_CLASS } from "@momo/core/features/work/workSessionFormat";
+import { particleFor } from "@momo/core/lib/koreanParticle";
 import {
   ApiError,
   resumeWorkSession,
   type WorkHost,
   type WorkstreamRun,
   type WorkstreamStatus,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import {
   WORKSTREAM_STATUS_CLASS,
   WORKSTREAM_STATUS_LABEL,
@@ -43,7 +43,7 @@ import {
   runClockLabel,
   workstreamActor,
   type WorkstreamActor,
-} from "./model";
+} from "@momo/core/features/workstreams/model";
 import { useWorkstream, useWorkstreamRuns } from "./useWorkstreams";
 
 // =============================================================================

@@ -8,7 +8,7 @@ import {
   setReaction,
   type Message,
   type RequestRouting,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
 import {
   addPending,
@@ -22,7 +22,7 @@ import {
   type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
-} from "./model";
+} from "@momo/core/features/timeline/model";
 import {
   applyReactionDelta,
   clearMessageReactions,
@@ -30,7 +30,7 @@ import {
   normalizeReactionSnapshot,
   toggleDirection,
   type ReactionMap,
-} from "./reactions";
+} from "@momo/core/features/timeline/reactions";
 
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
