@@ -87,11 +87,51 @@ export default function ListGate() {
   const [busy, setBusy] = useState<string>('');
   /** FlatList 의 maintainVisibleContentPosition 을 켜고 끌 수 있게 — 차이 자체가 데이터다 */
   const [mvcp, setMvcp] = useState(true);
+  /**
+   * **[2026-08-02 실기기 1차 측정 후 추가]**
+   *
+   * 1차는 `inverted: true` 만 쟀고 3자 모두 새 메시지에서 46~91px 튀었다(프리펜드는
+   * 3자 모두 0px). 그런데 **momo 웹 타임라인은 인버티드가 아니다** —
+   * `clients/web/src/features/timeline/Timeline.tsx` 는 정방향 흐름 + 명시적 앵커
+   * 보존(react-virtuoso `firstItemIndex` 를 삽입 개수만큼 감소)으로 돌아간다.
+   * 인버티드는 Mattermost 전제를 티켓이 승계한 것이지 우리 설계가 아니었다.
+   *
+   * 정방향에서는 새 메시지가 아래에 붙으므로 **위쪽 내용이 구조적으로 안 움직인다**.
+   * 그래서 같은 세 구현을 정방향으로도 재서, RN 코어 패치가 정말 필요한 결정인지
+   * 아니면 전제만 바꾸면 되는 문제인지 가른다.
+   *
+   * 데이터 조작은 두 모드가 **동일**하다(배열 머리 = 최신). 다른 것은 렌더 방향과
+   * 앵커의 렌더 인덱스뿐이다.
+   */
+  const [invertedMode, setInvertedMode] = useState(true);
 
   const listRef = useRef<any>(null);
   const anchorRef = useRef<View | null>(null);
+  // 비동기 측정 루프는 setState 직후의 `impl` 을 클로저로 못 본다(스테일).
+  // 자동 매트릭스 실행이 어느 구현의 값을 기록하는지 확실히 하려고 ref 로 미러링한다.
+  const implRef = useRef<Impl>('flatlist');
+  implRef.current = impl;
 
-  const anchorId = data[ANCHOR_INDEX]?.id;
+  /** 정방향이면 최신이 끝에 오도록 뒤집어 렌더한다. */
+  const renderData = useMemo(
+    () => (invertedMode ? data : [...data].reverse()),
+    [data, invertedMode],
+  );
+
+  /**
+   * 앵커는 **렌더 배열 기준 index 40** 이다. 두 모드 모두 초기 창에서 가까워
+   * `scrollToIndex` 가 확실히 도달한다.
+   *
+   * (앞선 판은 앵커를 `data` 기준으로 잡아 정방향에서 index 959 가 됐고, 가상화 창이
+   * 못 따라와 앵커가 렌더되지 않아 측정이 통째로 실패했다.)
+   *
+   * 의미도 두 모드에서 자연스럽다:
+   *  - 인버티드: 최신에서 40번째 = 위로 조금 올려 읽는 중. 새 메시지는 **아래**에 꽂힌다.
+   *  - 정방향: 오래된 것에서 40번째 = 과거를 읽는 중. 새 메시지는 **훨씬 아래**에 붙고,
+   *    과거 프리펜드는 앵커 **위**로 들어온다 — 정확히 재려던 두 상황이다.
+   */
+  const anchorRenderIndex = ANCHOR_INDEX;
+  const anchorId = renderData[ANCHOR_INDEX]?.id;
 
   const renderItem = useCallback(
     ({item}: {item: Msg}) =>
@@ -123,25 +163,50 @@ export default function ListGate() {
     listRef.current?.scrollToOffset?.({offset: y, animated});
   };
 
-  /** 앵커 행을 화면 중앙에 놓는다. 세 라이브러리 모두 scrollToIndex 를 지원한다. */
+  /**
+   * 앵커 행을 화면 중앙에 놓는다. 세 라이브러리 모두 scrollToIndex 를 지원한다.
+   *
+   * **[정방향 모드에서 실패해서 고쳤다]** 인버티드에서는 앵커가 index 40 이라 초기
+   * 창에 가까웠지만, 정방향에서는 index 959(=1000-1-40) 라 한 번의 scrollToIndex 로는
+   * 가상화 창이 못 따라와 앵커가 렌더되지 않았다 → `measureInWindow` 가 null →
+   * 측정이 조용히 건너뛰어져 `?px` 가 찍혔다. 실패한 것을 실패로 남기지 않고
+   * 지나간 것이 진짜 문제라, 이제 **도달할 때까지 재시도하고 그래도 안 되면 기록한다**.
+   * 옛 폴백(고정 오프셋 1200)은 인버티드 전용 수치였어서 정방향에선 엉뚱한 곳이었다.
+   */
   const centerAnchor = async () => {
-    try {
-      listRef.current?.scrollToIndex?.({
-        index: ANCHOR_INDEX,
-        animated: false,
-        viewPosition: 0.5,
-      });
-    } catch {
-      scrollToOffset(1200, false);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        listRef.current?.scrollToIndex?.({
+          index: anchorRenderIndex,
+          animated: false,
+          viewPosition: 0.5,
+        });
+      } catch {
+        // 행 높이가 균일하지 않아도 대략은 맞는다. 반복하면서 좁혀 간다.
+        scrollToOffset(anchorRenderIndex * 92, false);
+      }
+      await wait(attempt === 0 ? 900 : 350);
+      if ((await measureAnchor()) !== null) {
+        return true;
+      }
     }
-    await wait(700);
+    return false;
   };
 
   const runShiftTest = async (kind: 'incoming' | 'prepend') => {
     setBusy(kind === 'incoming' ? '새 메시지 삽입 측정 중…' : '과거 프리펜드 측정 중…');
-    await centerAnchor();
-    const before = await measureAnchor();
+    const reached = await centerAnchor();
+    const before = reached ? await measureAnchor() : null;
     if (before === null) {
+      // **조용히 건너뛰지 않는다.** 이전 판에서는 여기서 그냥 return 해 결과가
+      // `?px` 로 남았고, 그것이 "측정 안 됨"인지 "0px"인지 표에서 구분되지 않았다.
+      setMeasured(m => ({
+        ...m,
+        [implRef.current]: {
+          ...m[implRef.current],
+          [kind === 'incoming' ? 'incomingShiftPx' : 'prependShiftPx']: -1,
+        },
+      }));
       setBusy('앵커 행이 화면에 없다 — 측정 실패');
       return;
     }
@@ -158,8 +223,8 @@ export default function ListGate() {
       setBusy('삽입 후 앵커가 사라졌다 — 위치 보존 실패로 기록');
       setMeasured(m => ({
         ...m,
-        [impl]: {
-          ...m[impl],
+        [implRef.current]: {
+          ...m[implRef.current],
           [kind === 'incoming' ? 'incomingShiftPx' : 'prependShiftPx']: -1,
         },
       }));
@@ -168,8 +233,8 @@ export default function ListGate() {
     const shift = Math.round(Math.abs(after - before) * 10) / 10;
     setMeasured(m => ({
       ...m,
-      [impl]: {
-        ...m[impl],
+      [implRef.current]: {
+        ...m[implRef.current],
         [kind === 'incoming' ? 'incomingShiftPx' : 'prependShiftPx']: shift,
       },
     }));
@@ -193,8 +258,8 @@ export default function ListGate() {
     const r = monitor.stopAndGetData();
     setMeasured(m => ({
       ...m,
-      [impl]: {
-        ...m[impl],
+      [implRef.current]: {
+        ...m[implRef.current],
         fps: {
           min: Math.round(r.minFPS * 10) / 10,
           max: Math.round(r.maxFPS * 10) / 10,
@@ -210,6 +275,65 @@ export default function ListGate() {
     setBusy('데이터 초기화');
   };
 
+  /**
+   * **자동 매트릭스** — 사람이 버튼을 누르지 않아도 세 구현을 한 모드에서 전부 잰다.
+   *
+   * 왜 필요했나: 모드 전환을 사람 조작에 맡겼더니 **실제로 잘못된 모드의 수치가 표에
+   * 남는 일이 생겼다**. 조작을 없애는 것이 결과를 믿을 수 있게 만드는 유일한 길이다.
+   * 끝나면 결과를 콘솔로도 흘린다(시뮬레이터에서는 Metro 가 받는다).
+   */
+  const runMatrix = useCallback(async (inverted: boolean) => {
+    setInvertedMode(inverted);
+    setData(makeMessages(N));
+    setMeasured({flatlist: {}, flashlist: {}, legend: {}});
+    await wait(1200);
+    for (const k of ['flatlist', 'flashlist', 'legend'] as Impl[]) {
+      setImpl(k);
+      implRef.current = k;
+      await wait(1200);
+      await runFps();
+      await wait(300);
+      await runShiftTest('incoming');
+      await wait(300);
+      await runShiftTest('prepend');
+      await wait(300);
+    }
+    setBusy(`자동 매트릭스 완료 — ${inverted ? '인버티드' : '정방향'}`);
+    setTimeout(() => {
+      setMeasured(m => {
+        const line = (['flatlist', 'flashlist', 'legend'] as Impl[])
+          .map(k => {
+            const v = m[k];
+            return `${IMPL_LABEL[k]} 새메시지=${v.incomingShiftPx ?? '?'}px 프리펜드=${
+              v.prependShiftPx ?? '?'
+            }px fps=${v.fps?.avg ?? '?'}`;
+          })
+          .join(' | ');
+        console.log(`[GATE5] ${inverted ? 'INVERTED' : 'FORWARD'} :: ${line}`);
+        // 화면에 의존하지 않는 결과 경로. 시뮬레이터의 시스템 알림이 결과 카드를
+        // 덮어 스크린샷 판독이 막힌 적이 있어, 오케스트레이터의 로컬 수집기로 직접 쏜다.
+        // (수집기가 없으면 조용히 실패할 뿐 측정에는 영향이 없다.)
+        fetch(
+          `http://127.0.0.1:18099/GATE5?mode=${
+            inverted ? 'INVERTED' : 'FORWARD'
+          }&r=${encodeURIComponent(line)}`,
+        ).catch(() => {});
+        return m;
+      });
+    }, 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 앱이 뜨면 **정방향**을 자동으로 잰다 — 이 판정에 남은 유일한 미측정 항목이다. */
+  const autoRan = useRef(false);
+  React.useEffect(() => {
+    if (autoRan.current) {
+      return;
+    }
+    autoRan.current = true;
+    void runMatrix(false);
+  }, [runMatrix]);
+
   /** 현재 구현에 대해 ①②③ 을 순서대로. 기기에서 탭 3번을 1번으로 줄인다. */
   const runAll = async () => {
     await runFps();
@@ -222,10 +346,10 @@ export default function ListGate() {
 
   const common = {
     ref: listRef,
-    data,
+    data: renderData,
     renderItem,
     keyExtractor,
-    inverted: true,
+    inverted: invertedMode,
     style: {flex: 1, backgroundColor: C.bg},
   } as any;
 
@@ -240,6 +364,30 @@ export default function ListGate() {
           windowSize={11}
           initialNumToRender={20}
           removeClippedSubviews
+          // `getItemLayout` 이 없으면 FlatList 의 scrollToIndex 는 렌더되지 않은
+          // 인덱스에서 실패한다. RN 문서가 지정한 처방이 이 콜백이다 — 대략 위치로
+          // 밀고 다음 프레임에 다시 시도한다. 없으면 앵커를 못 잡아 측정이 통째로
+          // 실패했다(실측: 정방향에서 -1px 로 남았다).
+          onScrollToIndexFailed={(info: {
+            index: number;
+            averageItemLength: number;
+          }) => {
+            scrollToOffset(
+              info.index * (info.averageItemLength || 92),
+              false,
+            );
+            setTimeout(() => {
+              try {
+                listRef.current?.scrollToIndex?.({
+                  index: info.index,
+                  animated: false,
+                  viewPosition: 0.5,
+                });
+              } catch {
+                /* 다음 재시도가 받는다 */
+              }
+            }, 120);
+          }}
         />
       );
     }
@@ -255,7 +403,11 @@ export default function ListGate() {
 
   return (
     <View style={s.screen}>
-      <Card title={`게이트 5 — 타임라인 3자 · ${IMPL_LABEL[impl]}`}>
+      <Card
+        title={`게이트 5 — ${
+          invertedMode ? '인버티드' : '정방향'
+        } · ${IMPL_LABEL[impl]}`}
+      >
         <Row>
           {(Object.keys(IMPL_LABEL) as Impl[]).map(k => (
             <Btn
@@ -265,6 +417,30 @@ export default function ListGate() {
               tone={impl === k ? 'accent' : 'normal'}
             />
           ))}
+        </Row>
+        <Row>
+          {/* 모드를 바꾸면 측정값을 **비운다**. 한 표에 두 모드가 섞이면 어느 쪽 수치인지
+              사라진다 — 게이트 1에서 키보드 전환이 같은 구멍을 냈다. */}
+          <Btn
+            label={invertedMode ? '● 인버티드 (Mattermost 전제)' : '○ 인버티드'}
+            tone={invertedMode ? 'accent' : 'normal'}
+            onPress={() => {
+              setInvertedMode(true);
+              setData(makeMessages(N));
+              setMeasured({flatlist: {}, flashlist: {}, legend: {}});
+              setBusy('인버티드 모드 — 측정값을 비웠다');
+            }}
+          />
+          <Btn
+            label={!invertedMode ? '● 정방향 (momo 웹과 동일)' : '○ 정방향'}
+            tone={!invertedMode ? 'accent' : 'normal'}
+            onPress={() => {
+              setInvertedMode(false);
+              setData(makeMessages(N));
+              setMeasured({flatlist: {}, flashlist: {}, legend: {}});
+              setBusy('정방향 모드 — 측정값을 비웠다');
+            }}
+          />
         </Row>
         <Row>
           <Btn label="▶ 전체 자동 측정" onPress={runAll} tone="accent" />
@@ -282,7 +458,8 @@ export default function ListGate() {
         {busy ? <Text style={[s.dim, {marginTop: 6}]}>{busy}</Text> : null}
 
         <Text style={[s.dim, {marginTop: 10}]}>
-          결과 ({N}행 · 앵커 index {ANCHOR_INDEX} · 판정 기준 앵커 이동 ≤ 2px)
+          결과 · <Text style={{color: C.accent}}>{invertedMode ? '인버티드' : '정방향'}</Text>
+          {'  '}({N}행 · 앵커 index {ANCHOR_INDEX} · 판정 기준 앵커 이동 ≤ 2px)
         </Text>
         {(Object.keys(IMPL_LABEL) as Impl[]).map(k => {
           const m = measured[k];
