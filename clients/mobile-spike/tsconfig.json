@@ -1,0 +1,24 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "types": ["jest"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../web/src/*"]
+    },
+    // 이 하네스는 `clients/web/src` 의 실제 파일을 컴파일 그래프에 끌어들인다
+    // (게이트 2가 "무수정 통과"를 증명하는 방식이다). 그 파일들은 DOM 전역을
+    // 직접 만지므로 — `serverBase.ts` 의 localStorage/window, `env.ts` 의
+    // import.meta.env — RN 기본 lib 만으로는 타입이 서지 않는다.
+    //
+    // **그 사실 자체가 실측 결과다**: `deepLink.ts` 는 순수 로직이지만
+    // `serverBase.ts` 는 순수 로직이 아니다. ADR-0137 D3 이 serverBase 를
+    // A군(그대로 이식)이 아니라 B군(얇은 어댑터)에 넣은 것이 맞았다는 확인이다.
+    //
+    // 여기서 DOM 을 켜는 것은 스파이크 한정 편의이며, 실제 앱 tsconfig 에
+    // 이 줄을 옮기지 마라 — RN 에 없는 API 를 타입이 통과시켜 버린다.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/Pods"]
+}
