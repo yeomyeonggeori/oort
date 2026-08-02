@@ -249,6 +249,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
   const {workspaceId} = useSession();
   const context = useFeedContext();
   const channelsQuery = useChannels(workspaceId);
+  const client = useQueryClient();
 
   const runChannelIds = useMemo(
     () =>
@@ -330,13 +331,23 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
     return orderFeed(rows);
   }, [approvalQueries.approvals, runQueries.runs, context, ownedBy]);
 
+  // Invalidation rather than a list of `refetch()` calls: this feed fans out
+  // over four approval status pages and up to twelve channels, and the fan-out
+  // changes shape as the channel list does. Invalidating the two key prefixes
+  // catches every query that is actually mounted, including ones added since
+  // this callback was created.
+  const refetch = useCallback(() => {
+    void client.invalidateQueries({queryKey: ['approvals', workspaceId]});
+    void client.invalidateQueries({queryKey: ['agent-runs', workspaceId]});
+  }, [client, workspaceId]);
+
   return {
     items,
     isLoading:
       context.isLoading || approvalQueries.isLoading || runQueries.isLoading,
     error: approvalQueries.allFailed && runQueries.allFailed,
     updatedAtMs: Math.max(approvalQueries.updatedAtMs, runQueries.updatedAtMs),
-    refetch: () => {},
+    refetch,
   };
 }
 
