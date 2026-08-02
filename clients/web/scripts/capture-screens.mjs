@@ -1077,6 +1077,19 @@ async function installMocks(context) {
     })
   );
   // 결정 대기 (D-5): pending만 행이 있고, 나머지 상태 페이지는 비어 있다.
+  //
+  // **지금 이 목은 한 번도 불리지 않는다** (goal P3 후속에서 확인). B12 이후
+  // 인박스는 `isSurfaceProvided("approvals")`를 먼저 보고, `serverSurfaces.ts`가
+  // 그것을 정적으로 false라 답하므로 `useNeedsAction(false)`가 요청 자체를 만들지
+  // 않는다. 정적 판정이 네트워크보다 앞서기 때문에, 이 목을 무엇으로 채우든 승인
+  // 행은 생기지 않는다 — `capture:design`을 30초 타임아웃으로 죽여 놓았던 착시가
+  // 정확히 이것이었다("목이 있으니 데이터도 있겠지").
+  //
+  // 그래도 지우지 않는다. `serverSurfaces.ts`가 스스로 "PR 947은 클라이언트 22개
+  // 파일만 바꿨고 서버 라우트는 올리지 않았다"고 적어 둔 대로 이것은 "없다"가
+  // 아니라 "아직"이고, `provided`가 true로 바뀌는 순간 되살아나야 할 자리다.
+  // 그때 이 목과 위의 APPROVALS 픽스처가 그대로 먹고, 뺀 두 프레임(3g)을 복원하면
+  // 된다. 지웠다가 다시 쓰는 것보다 죽은 이유를 적어 두는 편이 싸다.
   await context.route("**/v1/workspaces/*/approvals*", (route) => {
     const url = new URL(route.request().url());
     return json(route, {
@@ -1543,6 +1556,44 @@ async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
     `  tap targets ${where}: ` +
       measured.map((r) => `${r.testId} ${r.width}x${r.height}`).join(", ")
   );
+}
+
+/**
+ * 인박스가 **자리를 잡을 때까지** 기다린다 (goal P3 후속, B12 회귀 복구).
+ *
+ * 이 프레임은 `feed-row`가 보이기를 기다리고 있었다. B12가 `isSurfaceProvided`를
+ * 인박스에 들이고 `serverSurfaces.ts`가 `approvals`를 정적으로 "라우터에 없음
+ * (404)"이라 선언한 뒤로, 인박스는 결정 대기 탭을 지우고 승인 행을 **그리지
+ * 않는다**. 그 동작은 옳다 — 없는 원장을 0으로 세어 "결정할 것이 없다"를 지어내지
+ * 않는 것이 B12의 요점이다. 틀린 것은 사라진 행을 계속 기다린 이 하네스이고,
+ * 그래서 `capture:design`이 30초 타임아웃으로 죽어 있었다. design-review의 증거
+ * 파이프라인 전체가 그 한 줄에 걸려 있었다.
+ *
+ * 그래서 이제 **정착한 결과**를 기다린다: 목록이든 빈 상태든, 스켈레톤이 물러난
+ * 자리면 화면은 준비된 것이다. `waitForTimeout`으로 때우지 않는 이유가 정확히 이
+ * 사고다 — 고정 대기는 표면이 무엇을 그리든 통과하므로, 다음에 인박스가 또 조용히
+ * 바뀌면 이번처럼 **소리 내어 실패하는 대신** 빈 화면을 찍어 보낸다.
+ *
+ * 오류로 정착하면 실패로 친다. 불러오지 못한 인박스를 찍어 두면 리뷰어는 그것을
+ * 제품의 모습으로 읽는다.
+ */
+async function waitForInboxSettled(page, where) {
+  await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+  await page.waitForSelector(
+    '[data-testid="inbox-list"], [data-testid="inbox-empty"], [data-testid="inbox-error"]',
+    { state: "visible" }
+  );
+  const settled = await page.evaluate(`(() => {
+    for (const id of ["inbox-list", "inbox-empty", "inbox-error"]) {
+      if (document.querySelector('[data-testid="' + id + '"]')) return id;
+    }
+    return null;
+  })()`);
+  if (settled === "inbox-error") {
+    throw new Error(`[${where}] 인박스가 오류로 정착했다 — 이 화면은 찍지 않는다`);
+  }
+  console.log(`  inbox ${where}: ${settled}로 정착`);
+  return settled;
 }
 
 /**
@@ -2218,13 +2269,23 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
   await shoot(page, "agent-hub");
 
-  // 5. 인박스(결정 대기). 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는
-  //    것이 이 프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다.
+  // 5. 인박스. 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는 것이 이
+  //    프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다. 그 요점은 이
+  //    서버가 승인 원장을 갖든 말든 그대로이므로 프레임도 그대로 선다 —
+  //    바뀐 것은 무엇을 기다리느냐뿐이다(`waitForInboxSettled` 주석).
+  //
+  //    `?filter=needs-action`은 일부러 남겨 둔다. 이 서버에 없는 탭을 가리키는
+  //    링크이고, `parseFilter`가 그것을 남은 탭으로 접어 주는지가 여기서 함께
+  //    걸린다 — 죽은 탭을 가리키는 옛 딥링크는 실제로 돌아다닌다.
   await page.evaluate('location.hash = "/inbox?filter=needs-action"');
-  await page.getByTestId("feed-row").first().waitFor({ state: "visible" });
+  await waitForInboxSettled(page, `mobile ${scheme}`);
   await page.getByTestId("open-sidebar-drawer").waitFor({ state: "visible" });
-  await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `inbox ${scheme}`);
+  // 서랍이 폰에서 실제로 **눌리는** 크기인지까지 재고 넘어간다. 전역 표면에서
+  // 채널로 돌아가는 유일한 길이라, 여기서 작으면 갇히는 것과 같다.
+  await assertTapTargets(page, `inbox ${scheme}`, [
+    ["open-sidebar-drawer", "채널 목록 열기"],
+  ]);
   await shoot(page, "inbox");
 
   // 6. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
@@ -2714,31 +2775,29 @@ async function captureScheme(browser, scheme) {
   await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
   shots.push(agentHubReadOnlyShot);
 
-  // 3g. 결정 대기에서 바로 결정 (goal B5.3b, D-5). 이 목록은 승인 원장을 이미
-  //     읽고 있었지만 결정하려면 채널로 들어가야 했다. 판단에 필요한 사실이 이미
-  //     행에 있으므로 결정도 여기서 한다.
-  const approvals = await context.newPage();
-  await approvals.goto(ORIGIN, { waitUntil: "networkidle" });
-  await signIn(approvals);
-  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
-  await approvals.getByTestId("feed-row").first().waitFor({ state: "visible" });
-  await approvals.getByTestId("inbox-approval-approve").first().waitFor({
-    state: "visible",
-  });
-  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
-  await approvals.screenshot({ path: approvalsShot });
-  shots.push(approvalsShot);
-
-  // 3g-2. 확인 단계 (SKILL §6): 한 번의 무방비 클릭으로는 아무것도 결정되지
-  //       않는다. 승인/거부는 무장이고, 확정이 결정이다.
-  await approvals.getByTestId("inbox-approval-approve").first().click();
-  await approvals.getByTestId("inbox-approval-confirm").first().waitFor({
-    state: "visible",
-  });
-  await approvals.waitForTimeout(200);
-  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
-  await approvals.screenshot({ path: approvalsConfirmShot });
-  shots.push(approvalsConfirmShot);
+  // 3g. 결정 대기 두 프레임(`approvals-*`, `approvals-confirm-*`)은 **뺐다**
+  //     (goal P3 후속).
+  //
+  //     이 서버에는 승인 원장이 없다. `serverSurfaces.ts`가 `approvals`를 정적으로
+  //     "라우터에 없음(404)"이라 선언하고(PR 947은 클라이언트 22개 파일만 바꿨고
+  //     서버 라우트는 올리지 않았다), B12부터 인박스는 그 판정을 읽어 결정 대기
+  //     탭과 승인 행을 아예 그리지 않는다. 그러니 두 프레임이 기다리던
+  //     `feed-row`와 `inbox-approval-approve`는 **어떤 목을 채워도 나타나지
+  //     않는다** — 목이 아니라 정적 판정이 앞선다.
+  //
+  //     기다림만 고쳐서 살릴 수 있는 프레임이 아니다. 사진의 피사체(결정 대기
+  //     목록과 승인 확인 단계)가 이 빌드에 존재하지 않는다. 접힌 인박스 자체는
+  //     `capture:honesty`가 `honest-inbox-*`로 이미 찍고 결정 대기 탭이 사라졌다는
+  //     것까지 세므로, 같은 상태를 여기서 한 번 더 찍는 것은 중복이다. 그래서 이
+  //     자리는 비우고, 폰 프레임이 이 표면에서 증명할 것(전역 화면에서도 서랍으로
+  //     채널에 돌아갈 수 있는가)에 집중한다.
+  //
+  //     되살리는 조건: `serverSurfaces.ts`의 `approvals.provided`가 true가 되면
+  //     (= 서버가 `GET …/approvals`와 `POST …/approvals/{id}/decision`을 올리면)
+  //     아래 목(:1080)이 그대로 다시 먹으므로, 두 프레임을 이 자리에 복원하면
+  //     된다. 찍던 것은 ① 판단 사실이 행에 있어 채널로 들어가지 않고 결정하는
+  //     목록과 ② 한 번의 무방비 클릭으로는 아무것도 결정되지 않는 확인 단계
+  //     (SKILL §6: 승인/거부는 무장이고 확정이 결정이다) 둘이었다.
 
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail
