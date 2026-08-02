@@ -19,6 +19,10 @@
 # 정본은 Xcode 프로젝트다. 이 게이트가 실패하면 고쳐야 할 쪽은 원칙적으로
 # fastlane이다(프로젝트 번들 ID를 바꾸면 등록된 App ID·푸시 인증서·App Group·
 # keychain access group이 전부 흔들린다).
+#
+# 검사 단위는 **프로비저닝 호출 지점 하나하나**다(레인 합집합이 아니다). 이유는
+# fastfile_match_sites() 주석 참조 — 합집합으로 보면 이 게이트가 막으려는 실패
+# 형태가 그대로 통과한다.
 # =============================================================================
 set -euo pipefail
 umask 077
@@ -87,7 +91,8 @@ pbx_provisioned_ids() {
   ' "$1" | sort -u
 }
 
-# Ruby 설정 파일에서 app_identifier 로 넘어가는 문자열을 뽑는다.
+# Ruby 설정 파일에서 app_identifier 로 넘어가는 문자열을 뽑는다(단일 지점 파일용:
+# Matchfile / Appfile). Fastfile은 호출 지점이 여럿이라 아래 전용 파서를 쓴다.
 # 주석(#)은 먼저 제거한다 — 주석 안의 예시 번들 ID가 실제 프로비저닝 대상으로
 # 오인되면 안 된다. (이 파일들에는 문자열 리터럴 안에 '#'가 없다.)
 # 배열이 여러 줄에 걸쳐도 ']' 가 닫힐 때까지 이어 읽는다.
@@ -111,14 +116,68 @@ ruby_app_identifiers() {
   ' | sort -u
 }
 
-# Fastfile을 platform 블록으로 잘라낸다(col 0의 `platform :x do` ~ col 0의 `end`).
-fastfile_platform_section() {
-  awk -v want="$1" '
-    /^platform :ios do/ { p = "ios"; next }
-    /^platform :mac do/ { p = "mac"; next }
-    /^end[[:space:]]*$/ { p = ""; next }
-    p == want { print }
-  ' "$FASTFILE"
+# Fastfile 안의 **모든 match(...) 호출**을 지점별 레코드로 뽑는다.
+#   출력 1줄 = 프로비저닝 지점 1개: `platform|lane|줄번호|id1 id2 ...`
+#
+# 왜 레인 합집합이 아니라 호출 지점별인가 (중요):
+#   프로비저닝은 레인마다 따로 일어난다. beta 레인에서만 확장 식별자가 빠져도
+#   release 레인에 남아 있으면 "iOS 블록 전체의 합집합"은 정본과 여전히 동치라
+#   게이트가 통과한다. 그런데 beta는 TestFlight 레인 — 가장 자주 도는 레인이고,
+#   로컬에서는 CODE_SIGNING_ALLOWED=NO 라 안 보이며, CI의 확장 서명 단계에서만
+#   터진다. 합집합 검사는 이 게이트가 존재하는 이유인 실패 형태를 그대로
+#   통과시킨다. 그래서 호출 지점마다 개별 판정한다.
+#
+# 검사 대상을 넓히려면:
+#   프로파일을 고르는 호출이 match 말고 더 생기면(예: gym 의
+#   `export_options.provisioningProfiles` 매핑 — CODE_SIGN_STYLE 을 Manual 로
+#   돌리면 필요해진다. docs/cicd/10-ios-signing-identity-runbook.md §6)
+#   ① 아래 START 정규식에 호출명을 추가하고(`(match|gym)\(`)
+#   ② site_ids() 에 그 옵션의 키 목록(provisioningProfiles 의 해시 키) 추출을 더하면
+#   같은 지점별 판정이 그대로 적용된다. 지금 Fastfile 의 gym 호출에는 그 옵션이 없다.
+fastfile_match_sites() {
+  sed 's/#.*$//' "$FASTFILE" | awk -v want="$1" '
+    # buf 안에서 app_identifier 에 넘어가는 번들 ID들을 공백으로 이어 반환.
+    function site_ids(buf,   part, tok, out) {
+      out = "";
+      if (match(buf, /app_identifier:[[:space:]]*\[[^]]*\]/)) {
+        part = substr(buf, RSTART, RLENGTH);
+      } else if (match(buf, /app_identifier:[[:space:]]*"[^"]*"/)) {
+        part = substr(buf, RSTART, RLENGTH);
+      } else {
+        return "";     # app_identifier 자체가 없는 호출 → 빈 집합으로 불일치 처리
+      }
+      while (match(part, /"[^"]+"/)) {
+        tok = substr(part, RSTART + 1, RLENGTH - 2);
+        if (tok ~ /^[A-Za-z0-9][A-Za-z0-9._-]*$/ && index(tok, ".") > 0)
+          out = out (out == "" ? "" : " ") tok;
+        part = substr(part, RSTART + RLENGTH);
+      }
+      return out;
+    }
+    function emit() {
+      if (plat == want) print plat "|" (lane == "" ? "(레인밖)" : lane) "|" startline "|" site_ids(buf);
+    }
+    /^platform :ios do/ { plat = "ios"; lane = ""; next }
+    /^platform :mac do/ { plat = "mac"; lane = ""; next }
+    /^end[[:space:]]*$/ { plat = ""; lane = ""; next }
+    {
+      line = $0;
+      if (line ~ /^[[:space:]]+lane[[:space:]]+:/) {
+        l = line; sub(/.*lane[[:space:]]+:/, "", l); sub(/[^A-Za-z0-9_].*/, "", l); lane = l;
+      }
+      if (capturing == 0 && line ~ /(^|[^A-Za-z0-9_])match\(/) {
+        capturing = 1; buf = line; startline = NR;
+        tmp = line; depth = gsub(/\(/, "(", tmp) - gsub(/\)/, ")", tmp);
+        if (depth <= 0) { emit(); capturing = 0 }
+        next;
+      }
+      if (capturing == 1) {
+        buf = buf " " line;
+        tmp = line; depth += gsub(/\(/, "(", tmp) - gsub(/\)/, ")", tmp);
+        if (depth <= 0) { emit(); capturing = 0 }
+      }
+    }
+  '
 }
 
 # Appfile의 for_platform :mac 블록 안/밖을 나눈다.
@@ -131,6 +190,7 @@ appfile_section() {
 }
 
 set_str() { tr '\n' ' ' | sed 's/[[:space:]]*$//'; }
+norm_set() { printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u; }
 
 # -----------------------------------------------------------------------------
 # 0. Fastfile 구조 확인 — 플랫폼 블록을 못 찾으면 아래 검사가 조용히 무의미해진다.
@@ -163,54 +223,73 @@ MAC_EXPECTED="$(pbx_provisioned_ids "$MAC_PBXPROJ")"
 log "Xcode 정본 — iOS: $(printf '%s' "$IOS_EXPECTED" | set_str)"
 log "Xcode 정본 — macOS: $(printf '%s' "$MAC_EXPECTED" | set_str)"
 
-# -----------------------------------------------------------------------------
-# 3. iOS: Matchfile 기본값 == 정본, Fastfile iOS 레인 == 정본
-# -----------------------------------------------------------------------------
-MATCH_IDS="$(ruby_app_identifiers <"$MATCHFILE")"
-FAST_IOS_IDS="$(fastfile_platform_section ios | ruby_app_identifiers)"
-FAST_MAC_IDS="$(fastfile_platform_section mac | ruby_app_identifiers)"
-APP_DEFAULT_IDS="$(appfile_section default | ruby_app_identifiers)"
-APP_MAC_IDS="$(appfile_section mac | ruby_app_identifiers)"
-
-compare_set() {
-  local label="$1" expected="$2" actual="$3" hint="$4"
-  if [ "$expected" != "$actual" ]; then
-    fail "$label 불일치
-        정본(Xcode): $(printf '%s' "$expected" | set_str)
-        실제(fastlane): $(printf '%s' "$actual" | set_str)
-        → $hint"
-  fi
-}
-
-compare_set "Matchfile 기본 app_identifier" "$IOS_EXPECTED" "$MATCH_IDS" \
-  "fastlane/Matchfile 의 app_identifier 목록을 iOS 정본에 맞춰라"
-compare_set "Fastfile iOS 레인 app_identifier" "$IOS_EXPECTED" "$FAST_IOS_IDS" \
-  "fastlane/Fastfile 의 platform :ios 레인(match 호출)을 iOS 정본에 맞춰라"
-compare_set "Fastfile mac 레인 app_identifier" "$MAC_EXPECTED" "$FAST_MAC_IDS" \
-  "fastlane/Fastfile 의 platform :mac 레인(match 호출)을 macOS 정본에 맞춰라"
-
-# -----------------------------------------------------------------------------
-# 4. NSE(알림 확장)가 프로비저닝 대상에 있는가 — 이름을 붙여 따로 본다.
-#    3번의 집합 동치에 이미 포함되지만, 이게 이 배치의 발단이라 실패 메시지를 분리한다.
-#    확장이 빠지면 앱만 서명되고 확장은 서명되지 않아 CI 아카이브에서만 터진다.
-# -----------------------------------------------------------------------------
 NSE_ID="$(printf '%s\n' "$IOS_EXPECTED" | grep -E 'NotificationService$' || true)"
 if [ -z "$NSE_ID" ]; then
   fail "$IOS_PBXPROJ 에서 NotificationService 확장 번들 ID를 못 찾았다(확장이 사라졌거나 이름이 바뀌었다)"
-else
-  for where in "Matchfile:$MATCH_IDS" "Fastfile(ios):$FAST_IOS_IDS"; do
-    label="${where%%:*}"
-    ids="${where#*:}"
-    printf '%s\n' "$ids" | grep -qxF "$NSE_ID" \
-      || fail "$label 의 프로비저닝 대상에 NSE 식별자($NSE_ID)가 없다 — 확장은 앱과 별도 프로파일이 필요하다"
-  done
 fi
+
+# -----------------------------------------------------------------------------
+# 3. Matchfile 기본값 == iOS 정본
+#    (Matchfile은 프로비저닝 지점이 하나뿐이다. 성재가 `fastlane match appstore`를
+#     맨손으로 돌릴 때 실제로 쓰이는 값이라 Fastfile과 별개로 본다.)
+# -----------------------------------------------------------------------------
+MATCH_IDS="$(ruby_app_identifiers <"$MATCHFILE")"
+if [ "$IOS_EXPECTED" != "$MATCH_IDS" ]; then
+  fail "Matchfile 기본 app_identifier 불일치
+        정본(Xcode): $(printf '%s' "$IOS_EXPECTED" | set_str)
+        실제(fastlane): $(printf '%s' "$MATCH_IDS" | set_str)
+        → fastlane/Matchfile 의 app_identifier 목록을 iOS 정본에 맞춰라"
+fi
+if [ -n "$NSE_ID" ] && ! printf '%s\n' "$MATCH_IDS" | grep -qxF "$NSE_ID"; then
+  fail "Matchfile 의 프로비저닝 대상에 NSE 식별자($NSE_ID)가 없다 — 확장은 앱과 별도 프로파일이 필요하다"
+fi
+
+# -----------------------------------------------------------------------------
+# 4. Fastfile — match 호출 **지점마다** 개별 판정.
+#    한 레인만 확장을 잃어도 잡아야 한다(합집합 검사로는 못 잡는다).
+#
+#    macOS도 동일하게 지점별로 본다. mac은 최초 생성 시 CLI에서
+#    `--app_identifier com.dawnkim.momo`를 명시하는 규약이지만, Fastfile의
+#    match 호출은 CI가 실제로 실행하는 프로비저닝 지점이므로 성질이 같다.
+#    다른 점은 "기대 집합이 macOS 정본"이라는 것뿐이라 같은 로직에 기대값만 바꿔 쓴다.
+# -----------------------------------------------------------------------------
+check_match_sites() {
+  local platform="$1" expected="$2" sites="$3" require_nse="$4"
+  local count=0 plat lane lineno ids actual
+
+  while IFS='|' read -r plat lane lineno ids; do
+    [ -n "$plat" ] || continue
+    count=$((count + 1))
+    actual="$(norm_set "$ids")"
+    if [ "$expected" != "$actual" ]; then
+      fail "Fastfile:$lineno ($platform 플랫폼, lane :$lane) 의 match 호출 app_identifier 불일치
+        정본(Xcode): $(printf '%s' "$expected" | set_str)
+        실제(이 호출): $(printf '%s' "$actual" | set_str)
+        → 이 호출 지점 하나만 어긋나도 해당 레인의 서명이 CI에서 깨진다"
+    fi
+    if [ "$require_nse" = 'yes' ] && [ -n "$NSE_ID" ] && ! printf '%s\n' "$actual" | grep -qxF "$NSE_ID"; then
+      fail "Fastfile:$lineno (lane :$lane) 의 프로비저닝 대상에 NSE 식별자($NSE_ID)가 없다 — 확장은 앱과 별도 프로파일이 필요하다"
+    fi
+  done <<<"$sites"
+
+  if [ "$count" -eq 0 ]; then
+    fail "$FASTFILE: $platform 플랫폼 블록에서 match 호출을 하나도 찾지 못했다(파서 전제 붕괴 또는 프로비저닝 누락)"
+  else
+    log "$platform: match 호출 지점 ${count}개 개별 검사"
+  fi
+}
+
+check_match_sites 'ios' "$IOS_EXPECTED" "$(fastfile_match_sites ios)" 'yes'
+check_match_sites 'mac' "$MAC_EXPECTED" "$(fastfile_match_sites mac)" 'no'
 
 # -----------------------------------------------------------------------------
 # 5. Appfile — pilot/deliver가 찾는 ASC 앱 레코드 식별자.
 #    확장은 ASC 레코드가 없으므로 Appfile에는 "앱"만 있어야 한다.
 # -----------------------------------------------------------------------------
+APP_DEFAULT_IDS="$(appfile_section default | ruby_app_identifiers)"
+APP_MAC_IDS="$(appfile_section mac | ruby_app_identifiers)"
 IOS_APP_ID="$(printf '%s\n' "$IOS_EXPECTED" | grep -vE 'NotificationService$' | head -n 1)"
+
 if [ "$APP_DEFAULT_IDS" != "$IOS_APP_ID" ]; then
   fail "Appfile 기본 app_identifier 불일치
         기대(iOS 앱): $IOS_APP_ID
@@ -274,4 +353,4 @@ if [ "$FAILURES" -ne 0 ]; then
   exit 1
 fi
 
-log 'PASS: fastlane 프로비저닝 대상 == Xcode 정본(앱+확장), 자리표시자 없음, 공유 entitlement 일치'
+log 'PASS: 모든 프로비저닝 호출 지점 == Xcode 정본(앱+확장), 자리표시자 없음, 공유 entitlement 일치'
