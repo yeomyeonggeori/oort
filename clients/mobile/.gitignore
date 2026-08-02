@@ -1,0 +1,45 @@
+# OSX
+.DS_Store
+
+# Xcode
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+**/.xcode.env.local
+
+# CocoaPods — the lockfile IS committed (below); the installed pods are not.
+ios/Pods/
+ios/*.xcworkspace
+
+# node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Metro
+.metro-health-check*
+*.jsbundle
+
+# testing
+coverage/
+
+# Ruby / fastlane
+vendor/bundle/
+
+# NOTE: no Android section, because there is no Android directory. Android is on
+# hold (ADR-0137 성재 결정 6) and `expo prebuild` must never run here — one run
+# without `--platform android` regenerates ios/ and deletes the NSE target that
+# 이행 순서 5 attaches. `__tests__/projectShape.test.ts` fails if that changes.
