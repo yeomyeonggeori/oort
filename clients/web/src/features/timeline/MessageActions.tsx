@@ -422,10 +422,13 @@ export function DeleteMessageDialog({
           지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」가 남고,
           달려 있던 반응도 함께 지워집니다.
         </DialogDescription>
+        {/* 두 버튼의 `tap-target`은 이제 Button의 `default` 크기가 준다
+            (goal P3 1-4). 같은 유틸리티를 여기서 한 번 더 적는 것은 중복이고,
+            44px는 캡처 게이트가 `delete-message-commit`/`-cancel`을 직접 재서
+            지킨다. */}
         <div className="flex justify-end gap-2 pt-1">
           <Button
             variant="secondary"
-            className="tap-target"
             data-testid="delete-message-cancel"
             onClick={() => onOpenChange(false)}
           >
@@ -433,7 +436,6 @@ export function DeleteMessageDialog({
           </Button>
           <Button
             variant="destructive"
-            className="tap-target"
             data-testid="delete-message-commit"
             disabled={pending}
             onClick={onConfirm}

@@ -5,15 +5,47 @@ import type { ReactionSnapshotWire } from "@/lib/api";
 //
 // One rule shapes everything here: **ids arrive in two different casings.** The
 // reaction snapshot and the reaction realtime frames carry UPPERCASE ids (the
-// server builds them from Swift's `uuidString`), while every message projection
-// carries lowercase ones (Postgres `id::text`). Keying a map by the raw string
-// would mean a message's own reactions could not be found under the message's
-// own id — the chips would silently never render.
+// server builds them from Swift's `uuidString`), and some message projections
+// carry lowercase ones (the ones Postgres builds with `id::text`). Keying a map
+// by the raw string would mean a message's own reactions could not be found
+// under the message's own id — the chips would silently never render.
 //
 // So this module owns exactly one decision: **everything is keyed lowercase**,
 // folded at the single ingest point. Nothing downstream compares raw reaction
 // ids, and `uuidEq` is not needed in the render path because the fold already
 // happened.
+//
+// ---- 왜 서버를 고쳐서 없애지 않는가 (goal P3 1-3에서 실측하고 내린 판단) -------
+//
+// 이 접기를 없애려면 서버가 소문자로 통일하면 된다. 재보고 **하지 않기로** 했다.
+//
+// 1. 전제가 틀렸다. 이 주석의 옛 판본은 "반응만 대문자이고 다른 메시지 투영은
+//    전부 소문자"라고 적고 있었다(Rust의 `interaction.rs`·`dto.rs` 주석도 같은
+//    말을 한다). 실측은 반대다: Swift 서버에서 대문자가 **기본값**이다 — 응답
+//    DTO에 id를 채우는 자리가 114곳, 33개 route 파일에 흩어져 있고
+//    (`MessageRoutes.swift:336`·`:491`·`:2935`의 send·history·`message.new`가 전부
+//    `uuidString`이다), 소문자는 Postgres가 JSON을 만든 자리와 손으로 적은
+//    `.lowercased()` 64곳뿐이다. 그러니 반응 DTO만 소문자로 내리면 불일치가
+//    사라지는 게 아니라 **하나 더 생긴다**: 반응만 소문자이고 나머지는 대문자인
+//    와이어는 지금보다 예측하기 어렵다.
+// 2. 그 혼재는 이미 **비준된 계약**이다. `docs/api/openapi.yaml:29-31`이
+//    "UUID casing is mixed by design … Clients must compare UUIDs
+//    case-insensitively"라고 못 박는다. 여기서 서버를 바꾸면 QA 후속 한 건이
+//    스펙 문구를 무효로 만든다 — 그건 ADR이 결정할 경계 변경이지 이 배치의 몫이
+//    아니다.
+// 3. 대문자가 **실제로 지고 있는 짐**이 있다. `crates/momo-auth/src/realtime.rs:100`
+//    은 realtime 토큰의 info 클레임을 대문자로 만드는데, 릴레이가 그 대소문자를
+//    채널 이름에 그대로 굽기 때문이다. 소문자 통일은 반응 DTO 한 줄이 아니라
+//    전송 계층의 채널 문자열까지 따라가는 작업이다.
+// 4. 클라이언트 위험은 낮다(그래서 "못 한다"가 아니라 "지금 할 일이 아니다"이다):
+//    macOS/iOS는 모든 id를 `Identifier<Tag>`의 `UUID`로 파싱하므로 대소문자에
+//    면역이고(`clients/Core/.../Identifiers.swift:10-39`), 저장된 id 캐시도 없다.
+//    웹은 이 fold가 **양쪽**(수신과 조회)에서 돌기 때문에 서버가 소문자로 바뀌면
+//    `fold`는 그냥 항등함수가 된다.
+//
+// 그래서 이 접기는 남는다. 서버가 언젠가 통일하더라도 이 코드는 바뀔 필요가 없고,
+// 픽스처가 대문자를 재현하는 것도 그대로 둔다 — 옛 서버와 지금 서버가 같은 화면을
+// 그리는지는 계속 증명되어야 한다.
 //
 // Ordering is insertion order, and that is deliberate rather than incidental:
 // the snapshot arrives emoji-sorted from the server's BTreeMap, so a cold load

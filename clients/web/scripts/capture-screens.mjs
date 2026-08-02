@@ -81,6 +81,23 @@ const MOBILE_TAP_TARGETS = [
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
 ];
 
+// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
+//
+// 위 목록과 나누는 이유: 그쪽은 채팅 표면에만 있는 컨트롤을 **필수**로 재고, 이 넷은
+// 로그인 화면에만 있다. 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어
+// 전부 optional로 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지
+// 않는다. 각자 자기 화면에서 필수로 재는 편이 더 센 자다.
+//
+// 왜 이 넷인가: `--spacing-control`이 32px이라 로그인 폼 전체가 32px이었다. WCAG
+// 2.5.8 AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 로그인은 폰에서
+// 가장 먼저 만나는 화면이라 여기서 잘못 눌린 칸이 이 제품의 첫인상이 된다.
+const LOGIN_TAP_TARGETS = [
+  ["login-server", "서버 주소 입력"],
+  ["login-email", "이메일 입력"],
+  ["login-password", "비밀번호 입력"],
+  ["login-submit", "로그인 버튼"],
+];
+
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
 // 쓰는 그 파일이고, 여기서도 같은 것을 읽어 세 표면이 한 표를 본다.
 const ROUTING_FIXTURES = JSON.parse(
@@ -807,10 +824,23 @@ const MEMBER_TIER_POLICY = {
   updatedAtMs: Date.now() - 40 * 60_000,
 };
 
-/** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
+/**
+ * The DM the directory opens onto: a short 1:1 with the agent, not a channel.
+ *
+ * 꼬리 세 쌍은 goal P3 1-2가 고치는 그 모양이다. 1:1 DM에서는 사람이 쓰는 **모든**
+ * 메시지가 상대 에이전트를 부르므로, 그 에이전트가 멈춰 있으면 서버는 부를 때마다
+ * 시스템 한 줄을 남긴다 — 세 번 말하면 똑같은 문장이 세 줄이다. 픽스처가 세 줄을
+ * 그대로 보내고 화면이 한 줄로 접는 것이, 접기가 서버가 아니라 클라이언트에서
+ * 일어난다는 증거다.
+ *
+ * 대소문자도 실물 그대로다: 알림 행의 `authorMemberId`는 Swift의 `uuidString`이라
+ * 대문자이고, `props`의 두 키는 서버가 손으로 소문자를 적는 자리다
+ * (MessageRoutes.swift:1605-1607). 한 행 안에서 갈리는 값이므로, 접기가 `uuidEq`로
+ * 비교하지 않으면 이 프레임에서 바로 드러난다.
+ */
 function makeDmMessages() {
-  const base = Date.now() - 3 * 60_000;
-  return [
+  const base = Date.now() - 12 * 60_000;
+  const spoken = [
     [ME, "어제 올린 relay 패치, DM으로 짧게만 확인할게요. 롤백 절차는 그대로죠?"],
     [HERMES, "그대로입니다. outbox 재처리 스크립트만 먼저 돌리면 됩니다."],
     [ME, "좋아요. 배포 끝나면 여기로 결과만 남겨주세요."],
@@ -826,6 +856,47 @@ function makeDmMessages() {
     state: "sent",
     createdAtMs: base + i * 60_000,
   }));
+
+  // 그 뒤로 hermes가 멈췄고, 성재는 그것을 모른 채 세 번 더 말한다.
+  const unanswered = [
+    "배포 결과 나왔나요?",
+    "outbox 쪽 지표만 먼저 알려주세요.",
+    "확인되면 알려주세요. 급하진 않습니다.",
+  ];
+  const tail = [];
+  unanswered.forEach((body, i) => {
+    const seq = 4 + i * 2;
+    const at = base + (3 + i * 2) * 60_000;
+    tail.push({
+      id: `capture-dm-${seq}`,
+      channelId: DM_ID,
+      seq,
+      hlcTs: at,
+      hlcCount: 0,
+      authorMemberId: ME,
+      type: "text",
+      body,
+      state: "sent",
+      createdAtMs: at,
+    });
+    tail.push({
+      id: `capture-dm-${seq + 1}`,
+      channelId: DM_ID,
+      seq: seq + 1,
+      hlcTs: at + 1_000,
+      hlcCount: 0,
+      authorMemberId: HERMES.toUpperCase(),
+      type: "system",
+      body: "hermes은(는) 현재 일시정지되어 있습니다.",
+      props: {
+        kind: "agent_paused",
+        agent_member_id: HERMES,
+        source_message_id: `capture-dm-${seq}`,
+      },
+      createdAtMs: at + 1_000,
+    });
+  });
+  return [...spoken, ...tail];
 }
 
 // ---- 에이전트 허브 (goal B5.3b) ---------------------------------------------
@@ -1006,6 +1077,19 @@ async function installMocks(context) {
     })
   );
   // 결정 대기 (D-5): pending만 행이 있고, 나머지 상태 페이지는 비어 있다.
+  //
+  // **지금 이 목은 한 번도 불리지 않는다** (goal P3 후속에서 확인). B12 이후
+  // 인박스는 `isSurfaceProvided("approvals")`를 먼저 보고, `serverSurfaces.ts`가
+  // 그것을 정적으로 false라 답하므로 `useNeedsAction(false)`가 요청 자체를 만들지
+  // 않는다. 정적 판정이 네트워크보다 앞서기 때문에, 이 목을 무엇으로 채우든 승인
+  // 행은 생기지 않는다 — `capture:design`을 30초 타임아웃으로 죽여 놓았던 착시가
+  // 정확히 이것이었다("목이 있으니 데이터도 있겠지").
+  //
+  // 그래도 지우지 않는다. `serverSurfaces.ts`가 스스로 "PR 947은 클라이언트 22개
+  // 파일만 바꿨고 서버 라우트는 올리지 않았다"고 적어 둔 대로 이것은 "없다"가
+  // 아니라 "아직"이고, `provided`가 true로 바뀌는 순간 되살아나야 할 자리다.
+  // 그때 이 목과 위의 APPROVALS 픽스처가 그대로 먹고, 뺀 두 프레임(3g)을 복원하면
+  // 된다. 지웠다가 다시 쓰는 것보다 죽은 이유를 적어 두는 편이 싸다.
   await context.route("**/v1/workspaces/*/approvals*", (route) => {
     const url = new URL(route.request().url());
     return json(route, {
@@ -1434,10 +1518,15 @@ async function assertTopBreathing(page, where) {
   );
 }
 
-/** 손가락 타깃 실측. 값을 함께 찍어 리뷰가 숫자를 볼 수 있게 한다. */
-async function assertTapTargets(page, where) {
+/**
+ * 손가락 타깃 실측. 값을 함께 찍어 리뷰가 숫자를 볼 수 있게 한다.
+ *
+ * `targets`로 목록을 갈아끼울 수 있다: 화면마다 재야 할 컨트롤이 다르고, 그 화면에
+ * 없는 것을 필수로 재면 목록 전체가 optional로 물러나기 때문이다 (goal P3 1-4).
+ */
+async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
   const measured = await page.evaluate(
-    `(() => ${JSON.stringify(MOBILE_TAP_TARGETS)}.map(([testId, label]) => {
+    `(() => ${JSON.stringify(targets)}.map(([testId, label]) => {
       const el = document.querySelector('[data-testid="' + testId + '"]');
       if (!el) return { testId, label, missing: true };
       const r = el.getBoundingClientRect();
@@ -1450,7 +1539,7 @@ async function assertTapTargets(page, where) {
     }))()`
   );
   const optional = new Set(
-    MOBILE_TAP_TARGETS.filter((t) => t[2] === "optional").map((t) => t[0])
+    targets.filter((t) => t[2] === "optional").map((t) => t[0])
   );
   for (const row of measured) {
     if (row.missing) {
@@ -1466,6 +1555,148 @@ async function assertTapTargets(page, where) {
   console.log(
     `  tap targets ${where}: ` +
       measured.map((r) => `${r.testId} ${r.width}x${r.height}`).join(", ")
+  );
+}
+
+/**
+ * 인박스가 **자리를 잡을 때까지** 기다린다 (goal P3 후속, B12 회귀 복구).
+ *
+ * 이 프레임은 `feed-row`가 보이기를 기다리고 있었다. B12가 `isSurfaceProvided`를
+ * 인박스에 들이고 `serverSurfaces.ts`가 `approvals`를 정적으로 "라우터에 없음
+ * (404)"이라 선언한 뒤로, 인박스는 결정 대기 탭을 지우고 승인 행을 **그리지
+ * 않는다**. 그 동작은 옳다 — 없는 원장을 0으로 세어 "결정할 것이 없다"를 지어내지
+ * 않는 것이 B12의 요점이다. 틀린 것은 사라진 행을 계속 기다린 이 하네스이고,
+ * 그래서 `capture:design`이 30초 타임아웃으로 죽어 있었다. design-review의 증거
+ * 파이프라인 전체가 그 한 줄에 걸려 있었다.
+ *
+ * 그래서 이제 **정착한 결과**를 기다린다: 목록이든 빈 상태든, 스켈레톤이 물러난
+ * 자리면 화면은 준비된 것이다. `waitForTimeout`으로 때우지 않는 이유가 정확히 이
+ * 사고다 — 고정 대기는 표면이 무엇을 그리든 통과하므로, 다음에 인박스가 또 조용히
+ * 바뀌면 이번처럼 **소리 내어 실패하는 대신** 빈 화면을 찍어 보낸다.
+ *
+ * 오류로 정착하면 실패로 친다. 불러오지 못한 인박스를 찍어 두면 리뷰어는 그것을
+ * 제품의 모습으로 읽는다.
+ */
+async function waitForInboxSettled(page, where) {
+  await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+  await page.waitForSelector(
+    '[data-testid="inbox-list"], [data-testid="inbox-empty"], [data-testid="inbox-error"]',
+    { state: "visible" }
+  );
+  const settled = await page.evaluate(`(() => {
+    for (const id of ["inbox-list", "inbox-empty", "inbox-error"]) {
+      if (document.querySelector('[data-testid="' + id + '"]')) return id;
+    }
+    return null;
+  })()`);
+  if (settled === "inbox-error") {
+    throw new Error(`[${where}] 인박스가 오류로 정착했다 — 이 화면은 찍지 않는다`);
+  }
+  console.log(`  inbox ${where}: ${settled}로 정착`);
+  return settled;
+}
+
+/**
+ * 반복된 「일시정지」 알림이 한 줄로 접혔는가 (goal P3 1-2).
+ *
+ * 스크린샷은 이것을 증명하지 못한다. 리뷰어가 픽스처를 열어 서버가 **세 줄을
+ * 보냈다**는 것을 확인하지 않으면, 한 줄만 있는 화면은 그냥 "원래 한 줄이었나
+ * 보다"로 읽힌다. 그래서 여기서 센다: 보낸 것은 셋, 그려진 것은 하나, 그리고 그
+ * 하나가 셋이었다고 말하고 있어야 한다.
+ *
+ * 정보를 없애지 않았다는 쪽도 같이 잰다. 알림 문장 자체는 화면에 그대로 있어야
+ * 하고(사람은 여전히 "왜 답이 없는지"를 알 수 있어야 한다), 사람이 쓴 세 줄은
+ * 하나도 접히면 안 된다 — 접는 것은 반복이지 대화가 아니다.
+ */
+async function assertPausedNoticeFolded(page, where) {
+  const seen = await page.evaluate(`(() => {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"]')
+    );
+    const notices = rows.filter((row) =>
+      (row.textContent || "").includes("현재 일시정지되어 있습니다")
+    );
+    const repeat = document.querySelector(
+      '[data-testid="paused-notice-repeat"]'
+    );
+    return {
+      rows: rows.length,
+      notices: notices.length,
+      repeatText: repeat ? (repeat.textContent || "").trim() : null,
+      bodies: rows.map((row) => (row.textContent || "").trim().slice(0, 40)),
+    };
+  })()`);
+
+  if (seen.notices !== 1) {
+    throw new Error(
+      `[${where}] 서버는 「일시정지」 알림 3줄을 보냈는데 화면에 ${seen.notices}줄이 그려졌다 (1줄이어야 한다)`
+    );
+  }
+  if (seen.repeatText !== "응답하지 못한 메시지 3개") {
+    throw new Error(
+      `[${where}] 접힌 개수를 말하지 않는다: ${JSON.stringify(seen.repeatText)}`
+    );
+  }
+  // 사람이 쓴 6줄(초반 3 + 답 없이 보낸 3)은 전부 남아야 한다. 알림 1줄과 합쳐 7.
+  if (seen.rows !== 7) {
+    throw new Error(
+      `[${where}] 접기가 대화를 먹었다: 행 ${seen.rows}개 (기대 7) — ${JSON.stringify(seen.bodies)}`
+    );
+  }
+  console.log(`  paused notice ${where}: 3줄 → 1줄 + "${seen.repeatText}"`);
+}
+
+/**
+ * 스레드 패널의 「답글 N개」가 죽은 버튼이 아닌가 (goal P3 1-1).
+ *
+ * 결함은 눈에 보이지 않는 종류였다: 패널이 `onOpenThread`를 넘기지 않는데 행은
+ * `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에 반응하면서 눌러도
+ * 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 스크린샷에서 버튼과 글은
+ * 같은 그림이므로 여기서 태그를 직접 본다.
+ *
+ * 같은 자로 반대쪽도 잰다: 채널 타임라인에서는 그 자리가 **여전히 버튼**이어야
+ * 한다. 죽은 컨트롤을 없앤다면서 살아 있는 진입점까지 글로 만들어 버리면 스레드로
+ * 들어가는 길이 사라진다.
+ */
+async function assertThreadRollupNotDead(page, where) {
+  const seen = await page.evaluate(`(() => {
+    const panel = document.querySelector('[data-testid="thread-panel"]');
+    const inPanel = panel
+      ? Array.from(panel.querySelectorAll('[data-testid="thread-anchor"]'))
+      : [];
+    const outside = Array.from(
+      document.querySelectorAll('[data-testid="thread-anchor"]')
+    ).filter((el) => !panel || !panel.contains(el));
+    const shape = (el) => ({ tag: el.tagName, text: (el.textContent || "").trim() });
+    return {
+      hasPanel: Boolean(panel),
+      inPanel: inPanel.map(shape),
+      outside: outside.map(shape),
+    };
+  })()`);
+
+  if (!seen.hasPanel) throw new Error(`[${where}] 스레드 패널이 열리지 않았다`);
+  if (seen.inPanel.length === 0) {
+    throw new Error(`[${where}] 패널 루트에 「답글 N개」가 없다`);
+  }
+  for (const anchor of seen.inPanel) {
+    if (anchor.tag === "BUTTON") {
+      throw new Error(
+        `[${where}] 스레드 패널의 「${anchor.text}」가 아직 <button>이다 — 눌러도 아무 일이 없는 컨트롤이다`
+      );
+    }
+    if (!anchor.text.startsWith("답글 ")) {
+      throw new Error(`[${where}] 답글 수를 읽을 수 없다: ${anchor.text}`);
+    }
+  }
+  const live = seen.outside.filter((a) => a.tag === "BUTTON");
+  if (seen.outside.length > 0 && live.length === 0) {
+    throw new Error(
+      `[${where}] 채널 타임라인의 「답글 N개」까지 글이 됐다 — 스레드로 들어가는 길이 없다`
+    );
+  }
+  console.log(
+    `  thread rollup ${where}: 패널 ${seen.inPanel.map((a) => a.tag).join(",")} · 타임라인 ${live.length}개 버튼`
   );
 }
 
@@ -1765,6 +1996,10 @@ async function captureMobile(browser, scheme) {
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await page.getByTestId("login-submit").waitFor({ state: "visible" });
   await assertNoHorizontalOverflow(page, `login ${scheme}`);
+  // goal P3 1-4: 폼의 1급 컨트롤은 이 폭에서 44px다. 데스크탑 프레임은 같은
+  // 컨트롤을 32px로 찍으므로, 두 프레임이 함께 "토큰이 아니라 폭이 결정한다"를
+  // 말한다.
+  await assertTapTargets(page, `login ${scheme}`, LOGIN_TAP_TARGETS);
   await shoot(page, "login");
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
@@ -2034,13 +2269,23 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
   await shoot(page, "agent-hub");
 
-  // 5. 인박스(결정 대기). 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는
-  //    것이 이 프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다.
+  // 5. 인박스. 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는 것이 이
+  //    프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다. 그 요점은 이
+  //    서버가 승인 원장을 갖든 말든 그대로이므로 프레임도 그대로 선다 —
+  //    바뀐 것은 무엇을 기다리느냐뿐이다(`waitForInboxSettled` 주석).
+  //
+  //    `?filter=needs-action`은 일부러 남겨 둔다. 이 서버에 없는 탭을 가리키는
+  //    링크이고, `parseFilter`가 그것을 남은 탭으로 접어 주는지가 여기서 함께
+  //    걸린다 — 죽은 탭을 가리키는 옛 딥링크는 실제로 돌아다닌다.
   await page.evaluate('location.hash = "/inbox?filter=needs-action"');
-  await page.getByTestId("feed-row").first().waitFor({ state: "visible" });
+  await waitForInboxSettled(page, `mobile ${scheme}`);
   await page.getByTestId("open-sidebar-drawer").waitFor({ state: "visible" });
-  await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `inbox ${scheme}`);
+  // 서랍이 폰에서 실제로 **눌리는** 크기인지까지 재고 넘어간다. 전역 표면에서
+  // 채널로 돌아가는 유일한 길이라, 여기서 작으면 갇히는 것과 같다.
+  await assertTapTargets(page, `inbox ${scheme}`, [
+    ["open-sidebar-drawer", "채널 목록 열기"],
+  ]);
   await shoot(page, "inbox");
 
   // 6. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
@@ -2303,6 +2548,8 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("thread-composer-input").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
+  // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
+  await assertThreadRollupNotDead(login, `thread panel ${scheme}`);
   const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
@@ -2454,6 +2701,7 @@ async function captureScheme(browser, scheme) {
     .click();
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await assertPausedNoticeFolded(directory, `dm ${scheme}`);
   const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);
@@ -2527,31 +2775,29 @@ async function captureScheme(browser, scheme) {
   await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
   shots.push(agentHubReadOnlyShot);
 
-  // 3g. 결정 대기에서 바로 결정 (goal B5.3b, D-5). 이 목록은 승인 원장을 이미
-  //     읽고 있었지만 결정하려면 채널로 들어가야 했다. 판단에 필요한 사실이 이미
-  //     행에 있으므로 결정도 여기서 한다.
-  const approvals = await context.newPage();
-  await approvals.goto(ORIGIN, { waitUntil: "networkidle" });
-  await signIn(approvals);
-  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
-  await approvals.getByTestId("feed-row").first().waitFor({ state: "visible" });
-  await approvals.getByTestId("inbox-approval-approve").first().waitFor({
-    state: "visible",
-  });
-  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
-  await approvals.screenshot({ path: approvalsShot });
-  shots.push(approvalsShot);
-
-  // 3g-2. 확인 단계 (SKILL §6): 한 번의 무방비 클릭으로는 아무것도 결정되지
-  //       않는다. 승인/거부는 무장이고, 확정이 결정이다.
-  await approvals.getByTestId("inbox-approval-approve").first().click();
-  await approvals.getByTestId("inbox-approval-confirm").first().waitFor({
-    state: "visible",
-  });
-  await approvals.waitForTimeout(200);
-  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
-  await approvals.screenshot({ path: approvalsConfirmShot });
-  shots.push(approvalsConfirmShot);
+  // 3g. 결정 대기 두 프레임(`approvals-*`, `approvals-confirm-*`)은 **뺐다**
+  //     (goal P3 후속).
+  //
+  //     이 서버에는 승인 원장이 없다. `serverSurfaces.ts`가 `approvals`를 정적으로
+  //     "라우터에 없음(404)"이라 선언하고(PR 947은 클라이언트 22개 파일만 바꿨고
+  //     서버 라우트는 올리지 않았다), B12부터 인박스는 그 판정을 읽어 결정 대기
+  //     탭과 승인 행을 아예 그리지 않는다. 그러니 두 프레임이 기다리던
+  //     `feed-row`와 `inbox-approval-approve`는 **어떤 목을 채워도 나타나지
+  //     않는다** — 목이 아니라 정적 판정이 앞선다.
+  //
+  //     기다림만 고쳐서 살릴 수 있는 프레임이 아니다. 사진의 피사체(결정 대기
+  //     목록과 승인 확인 단계)가 이 빌드에 존재하지 않는다. 접힌 인박스 자체는
+  //     `capture:honesty`가 `honest-inbox-*`로 이미 찍고 결정 대기 탭이 사라졌다는
+  //     것까지 세므로, 같은 상태를 여기서 한 번 더 찍는 것은 중복이다. 그래서 이
+  //     자리는 비우고, 폰 프레임이 이 표면에서 증명할 것(전역 화면에서도 서랍으로
+  //     채널에 돌아갈 수 있는가)에 집중한다.
+  //
+  //     되살리는 조건: `serverSurfaces.ts`의 `approvals.provided`가 true가 되면
+  //     (= 서버가 `GET …/approvals`와 `POST …/approvals/{id}/decision`을 올리면)
+  //     아래 목(:1080)이 그대로 다시 먹으므로, 두 프레임을 이 자리에 복원하면
+  //     된다. 찍던 것은 ① 판단 사실이 행에 있어 채널로 들어가지 않고 결정하는
+  //     목록과 ② 한 번의 무방비 클릭으로는 아무것도 결정되지 않는 확인 단계
+  //     (SKILL §6: 승인/거부는 무장이고 확정이 결정이다) 둘이었다.
 
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail

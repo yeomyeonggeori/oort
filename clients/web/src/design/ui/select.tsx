@@ -30,7 +30,11 @@ export const Select = React.forwardRef<
   <select
     ref={ref}
     className={cn(
-      "h-control w-full min-w-0 rounded-sm border border-line-strong bg-transparent px-3 text-body text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
+      // `tap-target` (goal P3 1-4): 입력 칸과 같은 자로 잰다. 한 폼 안에서
+      // 44px 입력 옆에 32px 선택이 서면 두 칸이 같은 줄에서 높이가 어긋나고,
+      // 손가락은 둘 중 하나만 맞힌다 — 위 주석이 말하는 "둘 다 같은 방식으로
+      // 앉는다"는 색만의 이야기가 아니다.
+      "tap-target h-control w-full min-w-0 rounded-sm border border-line-strong bg-transparent px-3 text-body text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
       className
     )}
     {...props}

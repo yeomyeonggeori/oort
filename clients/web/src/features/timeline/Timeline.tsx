@@ -269,6 +269,7 @@ export function Timeline({
                 ),
               }
             }
+            pausedRepeat={item.pausedRepeat}
             onOpenThread={onOpenThread}
             onOpenWorkSession={onOpenWorkSession}
             onResend={onResend}

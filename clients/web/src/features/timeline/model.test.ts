@@ -5,6 +5,7 @@ import {
   addPending,
   buildTimelineItems,
   confirmsPending,
+  foldPausedNotices,
   emptyChannelCopy,
   emptyTimeline,
   failPending,
@@ -497,5 +498,233 @@ describe("empty surface copy", () => {
     for (const copy of copies) {
       expect(`${copy.headline}${copy.detail}`).not.toMatch(/[—–]/);
     }
+  });
+});
+
+// =============================================================================
+// 멈춘 에이전트 알림 접기 (goal P3 1-2)
+//
+// 1:1 DM에서는 사람이 쓰는 모든 메시지가 상대 에이전트를 부른다. 그 에이전트가
+// 멈춰 있으면 서버는 부를 때마다 시스템 한 줄을 남기므로, 다섯 번 말하면 똑같은
+// 문장이 다섯 줄 쌓인다. 접는 것은 반복이지 정보가 아니라는 것을 이 블록이 잰다:
+// 마지막 줄은 언제나 남고, 몇 번이었는지도 남는다.
+// =============================================================================
+
+const HUMAN = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
+const OTHER_HUMAN = "019f94e3-7a10-79cd-9dee-208f47edd9b9";
+const AGENT = "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90";
+const PAUSED_BODY = "김인턴은(는) 현재 일시정지되어 있습니다.";
+
+/** 사람이 쓴 한 줄. 이것이 곧 멘션이고, 알림을 부른 원인이다. */
+function said(seq: number, atMs: number, author = HUMAN): Message {
+  return {
+    id: `msg-${seq}`,
+    channelId: "c",
+    seq,
+    hlcTs: seq,
+    hlcCount: 0,
+    authorMemberId: author,
+    type: "text",
+    body: `m${seq}`,
+    state: "sent",
+    createdAtMs: atMs,
+  };
+}
+
+/** 서버가 남기는 「일시정지」 시스템 줄 (MessageRoutes.swift / mention.rs). */
+function pausedNotice(
+  seq: number,
+  atMs: number,
+  source: Message | null,
+  agent = AGENT
+): Message {
+  return {
+    id: `notice-${seq}`,
+    channelId: "c",
+    seq,
+    hlcTs: seq,
+    hlcCount: 0,
+    authorMemberId: agent,
+    type: "system",
+    body: PAUSED_BODY,
+    props: {
+      kind: "agent_paused",
+      agent_member_id: agent,
+      ...(source ? { source_message_id: source.id } : {}),
+    },
+    createdAtMs: atMs,
+  };
+}
+
+/** 사람이 n번 말하고 그때마다 알림이 붙는, 정확히 신고된 그 모양. */
+function pausedDm(count: number, startMs = DAY): Message[] {
+  const out: Message[] = [];
+  for (let i = 0; i < count; i++) {
+    const at = startMs + i * 60_000;
+    const spoke = said(i * 2 + 1, at);
+    out.push(spoke, pausedNotice(i * 2 + 2, at + 1_000, spoke));
+  }
+  return out;
+}
+
+function renderedMessages(items: TimelineItem[]): Message[] {
+  return items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
+}
+
+describe("paused agent notice folding", () => {
+  it("접힌 알림은 마지막 하나만 남고, 그 하나가 개수를 진다", () => {
+    const messages = pausedDm(3);
+    const fold = foldPausedNotices(messages);
+
+    // 앞의 두 알림(seq 2, 4)은 접히고 마지막(seq 6)만 남는다.
+    expect([...fold.suppressed].sort((a, b) => a - b)).toEqual([2, 4]);
+    expect(fold.repeats.get(6)).toBe(3);
+    expect(fold.repeats.size).toBe(1);
+  });
+
+  it("사람이 쓴 메시지는 하나도 접지 않는다", () => {
+    const messages = pausedDm(3);
+    const items = buildTimelineItems(messages);
+    const rendered = renderedMessages(items);
+
+    // 사람이 세 번 말했으면 세 줄 다 그려진다. 접는 것은 알림뿐이다.
+    expect(rendered.filter((m) => m.authorMemberId === HUMAN).map((m) => m.seq))
+      .toEqual([1, 3, 5]);
+    // 알림은 한 줄로 접히고, 그 줄이 개수를 진다.
+    const notices = rendered.filter((m) => m.type === "system");
+    expect(notices.map((m) => m.seq)).toEqual([6]);
+    const surviving = items.find(
+      (item) => item.kind === "message" && item.message.seq === 6
+    );
+    expect(surviving?.kind === "message" && surviving.pausedRepeat).toBe(3);
+  });
+
+  it("접힌 줄이 마지막 메시지 밑에 앉는다: 답은 가장 최근 질문 옆에 있다", () => {
+    const rendered = renderedMessages(buildTimelineItems(pausedDm(5)));
+    const last = rendered[rendered.length - 1];
+    expect(last.type).toBe("system");
+    expect(last.body).toBe(PAUSED_BODY);
+    // 바로 위는 사람이 마지막으로 쓴 줄이다.
+    expect(rendered[rendered.length - 2].authorMemberId).toBe(HUMAN);
+  });
+
+  it("한 번뿐인 알림은 그대로 두고 개수도 붙이지 않는다", () => {
+    const messages = pausedDm(1);
+    const fold = foldPausedNotices(messages);
+    expect(fold.suppressed.size).toBe(0);
+    expect(fold.repeats.size).toBe(0);
+
+    const item = buildTimelineItems(messages).find(
+      (i) => i.kind === "message" && i.message.type === "system"
+    );
+    expect(item?.kind === "message" && item.pausedRepeat).toBeUndefined();
+  });
+
+  it("사이에 에이전트가 답했으면 접지 않는다: 정지가 풀렸던 것이다", () => {
+    const first = said(1, DAY);
+    const second = said(4, DAY + 120_000);
+    const messages: Message[] = [
+      first,
+      pausedNotice(2, DAY + 1_000, first),
+      // 정지가 풀리고 진짜 답이 왔다.
+      { ...said(3, DAY + 60_000, AGENT), body: "다시 왔습니다." },
+      second,
+      pausedNotice(5, DAY + 121_000, second),
+    ];
+    const fold = foldPausedNotices(messages);
+    expect(fold.suppressed.size).toBe(0);
+    expect(fold.repeats.size).toBe(0);
+  });
+
+  it("다른 사람이 부른 알림은 각자 자기 멘션 옆에 남는다", () => {
+    const mine = said(1, DAY);
+    const theirs = said(3, DAY + 60_000, OTHER_HUMAN);
+    const messages = [
+      mine,
+      pausedNotice(2, DAY + 1_000, mine),
+      theirs,
+      pausedNotice(4, DAY + 61_000, theirs),
+    ];
+    const fold = foldPausedNotices(messages);
+    // 접었다면 A의 알림이 B의 멘션 밑으로 끌려간다. 그건 오독이다.
+    expect(fold.suppressed.size).toBe(0);
+  });
+
+  it("날이 바뀌면 접지 않는다: 날짜 구분선을 넘어갈 수 없다", () => {
+    const today = said(1, DAY);
+    const tomorrow = said(3, DAY + 24 * 3_600_000);
+    const messages = [
+      today,
+      pausedNotice(2, DAY + 1_000, today),
+      tomorrow,
+      pausedNotice(4, DAY + 24 * 3_600_000 + 1_000, tomorrow),
+    ];
+    expect(foldPausedNotices(messages).suppressed.size).toBe(0);
+  });
+
+  it("대소문자가 갈린 id도 같은 에이전트로 본다", () => {
+    // Swift는 UUID를 대문자로 내고 이 두 props 키만 소문자로 쓴다. 한 응답 안에서
+    // 갈리는 값이므로 비교는 언제나 uuidEq다 (goal P3 1-3에서 실측한 그 계약).
+    const spoke1 = said(1, DAY);
+    const spoke2 = said(3, DAY + 60_000);
+    const messages = [
+      spoke1,
+      { ...pausedNotice(2, DAY + 1_000, spoke1), authorMemberId: AGENT.toUpperCase() },
+      spoke2,
+      pausedNotice(4, DAY + 61_000, spoke2),
+    ];
+    const fold = foldPausedNotices(messages);
+    expect([...fold.suppressed]).toEqual([2]);
+    expect(fold.repeats.get(4)).toBe(2);
+  });
+
+  it("source_message_id가 없으면 바로 윗줄을 원인으로 본다", () => {
+    // 옛 서버(그 키를 쓰기 전)나 페이지 경계에서 원인 메시지가 아직 안 실린 경우.
+    const messages = [
+      said(1, DAY),
+      pausedNotice(2, DAY + 1_000, null),
+      said(3, DAY + 60_000),
+      pausedNotice(4, DAY + 61_000, null),
+    ];
+    const fold = foldPausedNotices(messages);
+    expect([...fold.suppressed]).toEqual([2]);
+    expect(fold.repeats.get(4)).toBe(2);
+  });
+
+  it("일시정지 알림이 아닌 시스템 줄은 건드리지 않는다", () => {
+    const other: Message = {
+      ...pausedNotice(2, DAY + 1_000, null),
+      body: "채널 이름이 바뀌었습니다.",
+      props: { kind: "channel_renamed" },
+    };
+    const messages = [said(1, DAY), other, said(3, DAY + 60_000), { ...other, id: "notice-4", seq: 4 }];
+    expect(foldPausedNotices(messages).suppressed.size).toBe(0);
+  });
+
+  it("접기는 렌더에서만 일어난다: seq 배열도 커서도 그대로다", () => {
+    const messages = pausedDm(3);
+    const before = messages.map((m) => m.seq);
+    const state = reconcileMessages(emptyTimeline(), messages);
+
+    buildTimelineItems(messages);
+    foldPausedNotices(messages);
+
+    // 배열은 손대지 않는다: seq에 구멍이 나면 재연결이 그것을 메우러 나선다.
+    expect(messages.map((m) => m.seq)).toEqual(before);
+    expect(state.messages).toHaveLength(6);
+    expect(state.oldestSeq).toBe(1);
+    expect(state.newestSeq).toBe(6);
+    expect(isStrictlyOrdered(state.messages)).toBe(true);
+  });
+
+  it("접힌 자리에 빈 날짜 구분선이나 떠 있는 헤더를 남기지 않는다", () => {
+    const items = buildTimelineItems(pausedDm(3));
+    // 하루짜리 대화이므로 날짜 구분선은 정확히 하나다.
+    expect(items.filter((i) => i.kind === "day")).toHaveLength(1);
+    expect(items[0].kind).toBe("day");
+    // 첫 줄은 사람이 쓴 것이고 자기 헤더를 갖는다.
+    const first = items[1];
+    expect(first.kind === "message" && first.message.seq).toBe(1);
+    expect(first.kind === "message" && first.startsGroup).toBe(true);
   });
 });
