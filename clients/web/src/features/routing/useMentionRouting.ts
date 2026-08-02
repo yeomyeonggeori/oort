@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { MentionRoutingTarget } from "./mentionTargets";
-import { INHERIT_DRAFT, type RoutingDraft } from "./routingModel";
+import type { MentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
+import { INHERIT_DRAFT, type RoutingDraft } from "@momo/core/features/routing/routingModel";
 
 export interface MentionRouting {
   draft: RoutingDraft;

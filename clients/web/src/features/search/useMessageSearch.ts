@@ -5,9 +5,9 @@ import {
   searchMessages,
   type MessageSearchHit,
   type MessageSearchPage,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
-import { isSearchable, normalizeQuery, searchPhase, type SearchPhase } from "./searchModel";
+import { isSearchable, normalizeQuery, searchPhase, type SearchPhase } from "@momo/core/features/search/searchModel";
 
 // =============================================================================
 // 검색 질의 하나의 수명 (goal B12 H5).

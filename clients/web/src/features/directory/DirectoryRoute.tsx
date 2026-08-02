@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import type { RosterMember } from "@/lib/api";
+import type { RosterMember } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { Input } from "@/design/ui/input";
@@ -8,7 +8,7 @@ import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
-import { countLabel, groupDirectory, hasOtherMembers } from "./model";
+import { countLabel, groupDirectory, hasOtherMembers } from "@momo/core/features/directory/model";
 import { useOpenDm } from "./useOpenDm";
 import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 

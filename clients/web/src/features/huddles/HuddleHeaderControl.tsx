@@ -10,7 +10,7 @@ import {
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import type { RealtimeHandle } from "@/lib/realtime";
-import { huddleParticipantSummary } from "./huddleModel";
+import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
 import { useHuddle, type HuddleController } from "./useHuddle";
 
 export function HuddleHeaderState({

@@ -18,7 +18,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@momo/core/*": ["../../packages/momo-core/src/*"]
     }
   },
   "include": ["src"]

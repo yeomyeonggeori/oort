@@ -11,13 +11,13 @@ import {
   type AgentTurnCard,
   type ApprovalStatus,
   type PayloadDetail,
-} from "./agentCardModel";
+} from "@momo/core/features/timeline/agentCardModel";
 import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
 import {
   isSurfaceProvided,
   serverSurface,
-} from "@/features/capabilities/serverSurfaces";
+} from "@momo/core/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // Agent card (R-1 §4). Structured, calm, dense: a title row (icon, name, status

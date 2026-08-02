@@ -24,7 +24,7 @@ import {
   channelTopicIssueMessage,
   normalizeChannelName,
   normalizeChannelTopic,
-} from "./model";
+} from "@momo/core/features/channels/model";
 import {
   CreateChannelOpenContext,
   CreateChannelOpenStateContext,

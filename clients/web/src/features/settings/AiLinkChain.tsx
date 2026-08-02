@@ -10,7 +10,7 @@ import {
   putProviderChain,
   type ProviderChain,
   type ProviderChainProbe,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   addDraftRow,
   bearerHint,
@@ -36,8 +36,8 @@ import {
   removeDraftRow,
   type ChainDraftRow,
   type DraftRowError,
-} from "./chainModel";
-import { choiceLabel, errorMessage, isOperatorDenied, PROVIDER_MODES } from "./model";
+} from "@momo/core/features/settings/chainModel";
+import { choiceLabel, errorMessage, isOperatorDenied, PROVIDER_MODES } from "@momo/core/features/settings/model";
 import {
   ConfirmButton,
   Field,

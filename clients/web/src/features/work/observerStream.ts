@@ -1,5 +1,5 @@
-import { ApiError, uuidEq, type WorkSession } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+import { ApiError, uuidEq, type WorkSession } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 
 // =============================================================================
 // Read-only terminal observation (AX-3 / MOMO-619, ADR-0126 D1).

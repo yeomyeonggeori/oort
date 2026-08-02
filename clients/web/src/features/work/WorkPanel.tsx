@@ -8,7 +8,7 @@ import {
   type Channel,
   type WorkHost,
   type WorkSession,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
@@ -46,14 +46,14 @@ import {
   workSessionResumeTargets,
   type WorkScope,
   type WorkSessionEvent,
-} from "./workSessionModel";
+} from "@momo/core/features/work/workSessionModel";
 import {
   clockLabel,
   freshnessLabel,
   ROW_STATE_CLASS,
   SESSION_STATUS_CLASS,
   silenceLabel,
-} from "./workSessionFormat";
+} from "@momo/core/features/work/workSessionFormat";
 import { HostPicker } from "./HostPicker";
 import { WorkSessionDetail } from "./WorkSessionDetail";
 

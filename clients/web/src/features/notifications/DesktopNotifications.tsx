@@ -3,20 +3,20 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
 import { isDesktop, showNotification } from "@/lib/tauri";
 import type { MessageNewEvent } from "@/lib/realtime";
-import { uuidEq } from "@/lib/api";
+import { uuidEq } from "@momo/core/lib/api";
 import {
   useChannels,
   useDirectory,
   memberFor,
 } from "@/features/workspace/useWorkspace";
-import { actorToken } from "@/features/inbox/model";
+import { actorToken } from "@momo/core/features/inbox/model";
 import {
   armOpen,
   notifyDecision,
   openTarget,
   rememberAnnounced,
   type ArmedOpen,
-} from "./model";
+} from "@momo/core/features/notifications/model";
 
 // =============================================================================
 // Desktop notification rail (MOMO-607, ADR-0133 P2) — the trigger MOMO-603 left

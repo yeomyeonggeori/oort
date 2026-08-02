@@ -11,16 +11,16 @@ import {
   SkeletonRows,
 } from "@/features/common/States";
 import { searchHitPath } from "@/features/inbox/anchor";
-import { relativeLabel } from "@/features/inbox/model";
+import { relativeLabel } from "@momo/core/features/inbox/model";
 import {
   channelLabel,
   memberFor,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
-import { uuidEq, type MessageSearchHit } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
-import { serverSaysAbsent } from "@/features/capabilities/serverSurfaces";
+import { uuidEq, type MessageSearchHit } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
+import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   leadsWithEllipsis,
@@ -29,7 +29,7 @@ import {
   NO_RESULTS_SCOPE_NOTE,
   SHORT_QUERY_HINT,
   snippetSegments,
-} from "./searchModel";
+} from "@momo/core/features/search/searchModel";
 import { useMessageSearch } from "./useMessageSearch";
 
 // =============================================================================

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { ApiError, type WorkSession } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+import { ApiError, type WorkSession } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import {
   attachSocketUrl,
   canChangeObservation,

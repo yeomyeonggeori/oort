@@ -11,7 +11,7 @@ import {
   removeChannelMember,
   uuidEq,
   type RosterMember,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import {
   channelPlacement,
   placementFailure,

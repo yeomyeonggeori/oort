@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { fetchThreadReplies, type Message } from "@/lib/api";
+import { fetchThreadReplies, type Message } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
-import { startsAuthorGroup } from "./model";
+import { startsAuthorGroup } from "@momo/core/features/timeline/model";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { ThreadComposer } from "./ThreadComposer";
-import { chipsFor, type ReactionMap } from "./reactions";
+import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel

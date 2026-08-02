@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Channel, RosterMember } from "@/lib/api";
+import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { AgentPartialEvent, AgentStatusEvent } from "@/lib/realtime";
 import { centrifugoAgentChannelName, createReplayGate } from "@/lib/realtime";
 import {

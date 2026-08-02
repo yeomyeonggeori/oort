@@ -9,7 +9,7 @@ import {
   supportsEffort,
   type EffortTable,
   type RoutingDraft,
-} from "./routingModel";
+} from "@momo/core/features/routing/routingModel";
 
 // =============================================================================
 // 모델 + 추론 강도, 한 쌍 (ADR-0134 D2·D3).

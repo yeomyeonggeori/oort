@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import githubManifest from "../../../../server/Fixtures/plugin-manifests/github.json";
-import { pluginCatalogFromWire, pluginDetailFromWire } from "./api";
-import { WireShapeError } from "./wire";
+import { pluginCatalogFromWire, pluginDetailFromWire } from "@momo/core/lib/api";
+import { WireShapeError } from "@momo/core/lib/wire";
 
 // These responses are assembled from the registry manifest the server seeds,
 // then shaped exactly as PluginCatalogResponse / PluginDetailResponse declare.

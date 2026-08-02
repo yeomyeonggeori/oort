@@ -15,7 +15,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { uuidEq, type Channel } from "@/lib/api";
+import { uuidEq, type Channel } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
@@ -40,9 +40,9 @@ import {
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { canCreateChannelNow } from "@/features/channels/model";
+import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
-import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";

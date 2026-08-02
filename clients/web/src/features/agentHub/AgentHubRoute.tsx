@@ -52,7 +52,7 @@ import {
   knownAgentModels,
   modelOptions,
   type RoutingDraft,
-} from "@/features/routing/routingModel";
+} from "@momo/core/features/routing/routingModel";
 import {
   isAgentProfileMissing,
   useAgentProfile,
@@ -72,7 +72,7 @@ import {
   type AgentRunSummary,
   type MemoryItem,
   type RosterMember,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import {
   agentMembers,
   canInvalidateMemory,
@@ -97,7 +97,7 @@ import { CreateAgentDialog } from "./CreateAgentDialog";
 import {
   isSurfaceProvided,
   type SurfaceId,
-} from "@/features/capabilities/serverSurfaces";
+} from "@momo/core/features/capabilities/serverSurfaces";
 
 /**
  * 허브의 탭 셋과 각 탭이 서 있는 서버 표면 (goal B12).

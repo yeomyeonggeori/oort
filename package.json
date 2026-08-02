@@ -1,0 +1,15 @@
+{
+  "name": "momo-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "npm workspaces root (ADR-0137 D3). Holds packages/* only — no task runner, by decision: Nx/Turborepo are oversized for one shared package.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace @momo/core && npm --prefix clients/web run test",
+    "lint": "npm run lint --workspace @momo/core && npm --prefix clients/web run lint",
+    "typecheck": "npm run typecheck --workspace @momo/core && npm --prefix clients/web run typecheck",
+    "gate:purity": "npm run gate:purity --workspace @momo/core"
+  }
+}

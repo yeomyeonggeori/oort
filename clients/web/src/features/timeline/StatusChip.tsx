@@ -5,7 +5,7 @@ import {
   TURN_STATUS_LABEL,
   type AgentTurnStatus,
   type ApprovalStatus,
-} from "./agentCardModel";
+} from "@momo/core/features/timeline/agentCardModel";
 
 // =============================================================================
 // The one status chip vocabulary for agent surfaces (R-1 §4).

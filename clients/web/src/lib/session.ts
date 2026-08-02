@@ -1,5 +1,21 @@
-import type { LoginResponse, Member } from "./api";
+import type { LoginResponse } from "@momo/core/lib/api";
+import {
+  parsePersistedMetadata,
+  parsePersistedSession,
+  sessionMetadataOf,
+  type PersistedSession,
+  type SessionStorageMode,
+} from "@momo/core/lib/sessionModel";
 import { desktopKeychain, isDesktop } from "./tauri";
+
+export {
+  parsePersistedMetadata,
+  parsePersistedSession,
+  restoredLoginResponse,
+  type PersistedMetadata,
+  type PersistedSession,
+  type SessionStorageMode,
+} from "@momo/core/lib/sessionModel";
 
 // =============================================================================
 // Session persistence (M9). Split by secrecy, not by convenience:
@@ -60,83 +76,6 @@ const STORAGE_KEY = "momo.web.session.v1";
 /** Desktop metadata record. Separate key, because it never holds the token. */
 const DESKTOP_METADATA_KEY = "momo.desktop.session.v1";
 
-/** Everything that survives a reload. The access token deliberately does not. */
-export interface PersistedSession {
-  refreshToken: string;
-  realtimeWebSocketUrl: string;
-  member: Member;
-}
-
-/** The non-secret half of a persisted session: everything but the token. */
-export type PersistedMetadata = Omit<PersistedSession, "refreshToken">;
-
-/**
- * Validate a stored blob before trusting it. A half-written or older-shaped
- * record is treated as "no session" instead of crashing the boot: the worst
- * case is one extra login, and there is no state worth salvaging.
- */
-export function parsePersistedSession(raw: string | null): PersistedSession | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
-    if (
-      typeof parsed.refreshToken !== "string" ||
-      parsed.refreshToken === "" ||
-      typeof parsed.realtimeWebSocketUrl !== "string" ||
-      typeof parsed.member?.id !== "string" ||
-      typeof parsed.member?.workspaceId !== "string"
-    ) {
-      return null;
-    }
-    return parsed as PersistedSession;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The same guard for the desktop metadata record. Its ABSENT refresh token is
- * the point, so it gets its own validator rather than a loosened version of the
- * one above — a token-less blob must never be mistaken for a full session.
- */
-export function parsePersistedMetadata(raw: string | null): PersistedMetadata | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
-    if (
-      typeof parsed.realtimeWebSocketUrl !== "string" ||
-      typeof parsed.member?.id !== "string" ||
-      typeof parsed.member?.workspaceId !== "string"
-    ) {
-      return null;
-    }
-    return { realtimeWebSocketUrl: parsed.realtimeWebSocketUrl, member: parsed.member };
-  } catch {
-    return null;
-  }
-}
-
-function metadataOf({ realtimeWebSocketUrl, member }: PersistedSession): PersistedMetadata {
-  return { realtimeWebSocketUrl, member };
-}
-
-/**
- * Rebuild the login-shaped value the app tree runs on from what survived the
- * reload plus a freshly rotated access token. The websocket address comes from
- * the stored login response, never from the page origin (ADR-0110).
- */
-export function restoredLoginResponse(
-  persisted: PersistedSession,
-  accessToken: string
-): LoginResponse {
-  return {
-    accessToken,
-    refreshToken: persisted.refreshToken,
-    member: persisted.member,
-    realtimeWebSocketUrl: persisted.realtimeWebSocketUrl,
-  };
-}
-
 function readRaw(key: string): string | null {
   try {
     if (typeof localStorage === "undefined") return null;
@@ -156,9 +95,6 @@ function writeRaw(key: string, value: string | null): void {
     // session simply will not survive a reload. In-memory state keeps working.
   }
 }
-
-/** Which of the two storage paths is in force. See the header. */
-export type SessionStorageMode = "web" | "keychain";
 
 let storageMode: SessionStorageMode = "web";
 
@@ -187,7 +123,7 @@ function readStorage(): PersistedSession | null {
 
 function writeStorage(value: PersistedSession | null): void {
   if (storageMode === "keychain") {
-    writeRaw(DESKTOP_METADATA_KEY, value ? JSON.stringify(metadataOf(value)) : null);
+    writeRaw(DESKTOP_METADATA_KEY, value ? JSON.stringify(sessionMetadataOf(value)) : null);
     queueKeychain(async () => {
       if (!value) return desktopKeychain.clear();
       if (await desktopKeychain.store(value.refreshToken)) return true;
@@ -269,7 +205,7 @@ async function hydrate(): Promise<void> {
   if (legacy) {
     if (!(await desktopKeychain.store(legacy.refreshToken))) return;
     storageMode = "keychain";
-    writeRaw(DESKTOP_METADATA_KEY, JSON.stringify(metadataOf(legacy)));
+    writeRaw(DESKTOP_METADATA_KEY, JSON.stringify(sessionMetadataOf(legacy)));
     writeRaw(STORAGE_KEY, null);
     return;
   }

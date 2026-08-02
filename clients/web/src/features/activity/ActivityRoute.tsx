@@ -6,9 +6,9 @@ import {
   SkeletonRows,
 } from "@/features/common/States";
 import { FeedList } from "@/features/inbox/FeedRow";
-import { relativeLabel } from "@/features/inbox/model";
+import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useAgentFeed } from "@/features/inbox/useInbox";
-import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 
 // =============================================================================

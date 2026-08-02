@@ -1,6 +1,6 @@
-import { ApiError, type Channel, type RosterMember } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
-import { attachParticle } from "@/lib/koreanParticle";
+import { ApiError, type Channel, type RosterMember } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
+import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { normalizedId } from "./model";
 
 // =============================================================================

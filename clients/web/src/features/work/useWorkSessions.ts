@@ -6,7 +6,7 @@ import {
   fetchWorkSessions,
   uuidEq,
   type WorkSession,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import {
   eventFromFrame,
@@ -14,7 +14,7 @@ import {
   parseWorkSessionEvent,
   workChannelsToWatch,
   type WorkSessionEvent,
-} from "./workSessionModel";
+} from "@momo/core/features/work/workSessionModel";
 
 // =============================================================================
 // Reads behind the 작업 세션 panel (AX-3 / MOMO-618).

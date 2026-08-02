@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { logout, restoreSession, type LoginResponse } from "@/lib/api";
+import { logout, restoreSession, type LoginResponse } from "@momo/core/lib/api";
 import {
   clearSession,
   getAuthExpired,

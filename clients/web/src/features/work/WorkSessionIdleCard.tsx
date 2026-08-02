@@ -1,5 +1,5 @@
 import { SquareTerminal } from "lucide-react";
-import type { WorkSessionIdleNotice } from "./workSessionModel";
+import type { WorkSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 
 /**
  * A durable idle reply uses event-tense copy: the current ledger may since have

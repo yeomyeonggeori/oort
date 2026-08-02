@@ -89,7 +89,16 @@ function momoServiceWorker(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwind(), momoServiceWorker()],
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    // `@momo/core` is the shared, platform-free domain layer (ADR-0137 D3). It
+    // is an npm workspace at packages/momo-core, but the web client resolves it
+    // by path rather than through node_modules on purpose: an alias cannot drift
+    // with a lockfile, and this client's dependency graph — the thing every
+    // bundle-size and behaviour comparison in goal RN-C1 is measured against —
+    // stays byte-identical to what it was before the extraction.
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      "@momo/core": path.resolve(__dirname, "../../packages/momo-core/src"),
+    },
   },
   clearScreen: false,
   server: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type Channel, type RosterMember } from "@/lib/api";
+import { ApiError, type Channel, type RosterMember } from "@momo/core/lib/api";
 import {
   channelPlacement,
   placementFailure,

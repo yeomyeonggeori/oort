@@ -22,9 +22,9 @@ import {
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
-import { switcherPeople } from "@/features/directory/model";
+import { switcherPeople } from "@momo/core/features/directory/model";
 import { useOpenDm } from "@/features/directory/useOpenDm";
-import { canCreateChannelNow } from "@/features/channels/model";
+import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import {
   useCreateChannelOpen,
   useOpenCreateChannel,
@@ -34,7 +34,7 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { InlineBanner } from "@/features/common/States";
-import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people

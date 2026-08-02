@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { RosterMember } from "@/lib/api";
-import { attachParticle } from "@/lib/koreanParticle";
+import type { RosterMember } from "@momo/core/lib/api";
+import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { cn } from "@/design/lib/cn";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
@@ -14,7 +14,7 @@ import {
   useRoutingCapability,
   useSendRoutingCapability,
 } from "./capability";
-import type { MentionRoutingTarget } from "./mentionTargets";
+import type { MentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import {
   INHERIT_DRAFT,
   clearedEffortNotice,
@@ -28,7 +28,7 @@ import {
   modelOptions,
   resolveInheritance,
   type RoutingDraft,
-} from "./routingModel";
+} from "@momo/core/features/routing/routingModel";
 
 // =============================================================================
 // 컴포저 1회 오버라이드 (ADR-0134 D1·D3 / MOMO-626).

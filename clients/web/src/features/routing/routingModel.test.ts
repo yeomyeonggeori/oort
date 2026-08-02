@@ -28,9 +28,9 @@ import {
   type EffortTable,
   type RoutingDraft,
   type RoutingProfile,
-} from "./routingModel";
-import { mentionRoutingTarget, mentionedHandles } from "./mentionTargets";
-import type { RosterMember } from "@/lib/api";
+} from "@momo/core/features/routing/routingModel";
+import { mentionRoutingTarget, mentionedHandles } from "@momo/core/features/routing/mentionTargets";
+import type { RosterMember } from "@momo/core/lib/api";
 
 // =============================================================================
 // ADR-0134 계약 픽스처로 고정하는 세 경로: 상속 / 오버라이드 / 무효 클리어.

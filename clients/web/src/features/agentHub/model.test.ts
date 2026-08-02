@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentProfile, AgentRunSummary, RosterMember } from "@/lib/api";
+import type { AgentProfile, AgentRunSummary, RosterMember } from "@momo/core/lib/api";
 import type { AgentWorkingSignal } from "@/features/agents/agentWorkingSignal";
 import {
   agentMembers,

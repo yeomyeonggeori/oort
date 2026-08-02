@@ -1,6 +1,6 @@
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { EmptyInvite } from "@/features/common/States";
-import { serverSurface, type SurfaceId } from "./serverSurfaces";
+import { serverSurface, type SurfaceId } from "@momo/core/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // "이 서버는 아직 그걸 못 합니다"를 말하는 한 벌 (goal B12 / QA H1).

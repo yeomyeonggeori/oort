@@ -15,8 +15,8 @@ import {
   ApprovalActions,
   type Armed,
 } from "@/features/timeline/ApprovalActions";
-import type { DecisionOutcome } from "@/features/timeline/approvalDecision";
-import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
+import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import {
   availableInboxFilters,
   INBOX_FILTER_TABS,
@@ -26,7 +26,7 @@ import {
   tabId,
   type FeedItem,
   type InboxFilter,
-} from "./model";
+} from "@momo/core/features/inbox/model";
 import {
   useAgentFeed,
   useInvalidateApprovals,

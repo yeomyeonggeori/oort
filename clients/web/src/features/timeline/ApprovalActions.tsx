@@ -6,7 +6,7 @@ import {
   decideApproval,
   newDecisionId,
   type DecisionOutcome,
-} from "./approvalDecision";
+} from "@momo/core/features/timeline/approvalDecision";
 
 // =============================================================================
 // 승인 결정 컨트롤 (R-1 §4, goal B5.3b D-5).

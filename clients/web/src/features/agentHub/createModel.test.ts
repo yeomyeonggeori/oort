@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+import { ApiError } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import {
   agentBaseUrlIssue,
   agentDisplayNameIssue,

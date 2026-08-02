@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "@/lib/api";
+import type { Message } from "@momo/core/lib/api";
 import {
   AUTHOR_GROUP_WINDOW_MS,
   addPending,
@@ -18,9 +18,9 @@ import {
   unsettledPending,
   type PendingMessage,
   type TimelineItem,
-} from "./model";
+} from "@momo/core/features/timeline/model";
 import { matchMembers, mentionQueryAt } from "@/features/chat/Composer";
-import type { RosterMember } from "@/lib/api";
+import type { RosterMember } from "@momo/core/lib/api";
 
 const DAY = new Date(2026, 6, 25, 14, 0, 0).getTime();
 

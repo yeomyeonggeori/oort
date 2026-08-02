@@ -21,7 +21,7 @@ import {
   windowLabel,
   type QuotaSnapshot,
   type QuotaSnapshots,
-} from "./quotaModel";
+} from "@momo/core/features/settings/quotaModel";
 
 // The four fixtures are the contract shapes ADR-0135 D2 landed on track/engine
 // (ProviderQuotaSnapshotRoutes.swift): a healthy pair of gauges on two

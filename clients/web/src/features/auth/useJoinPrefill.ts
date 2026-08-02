@@ -6,7 +6,7 @@ import {
   parseJoinFromPageUrl,
   urlWithoutJoinParams,
   type JoinPrefill,
-} from "./deepLink";
+} from "@momo/core/features/auth/deepLink";
 
 /**
  * The invite prefill this launch carries, from either entrance:

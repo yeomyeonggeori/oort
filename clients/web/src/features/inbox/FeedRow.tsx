@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { AtSign, Bot, ShieldAlert } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { channelPath, watchForMessage } from "./anchor";
-import type { FeedItem, FeedTone, OutcomeTone } from "./model";
+import type { FeedItem, FeedTone, OutcomeTone } from "@momo/core/features/inbox/model";
 
 // =============================================================================
 // One feed row, shared by the inbox and the activity route (R-1 §2). Flat rows

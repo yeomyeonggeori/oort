@@ -4,7 +4,7 @@ import type {
   AgentRunSummary,
   MemoryScope,
   RosterMember,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import {
   isStaleSignal,
   type AgentWorkingSignal,

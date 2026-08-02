@@ -5,9 +5,9 @@ import {
   fetchWorkstreams,
   type Workstream,
   type WorkstreamStatus,
-} from "@/lib/api";
-import { isSurfaceProvided } from "@/features/capabilities/serverSurfaces";
-import { isWorkstreamMissing } from "./model";
+} from "@momo/core/lib/api";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { isWorkstreamMissing } from "@momo/core/features/workstreams/model";
 
 // =============================================================================
 // Reads behind 작업 흐름 (ADR-0143). Three server projections, no local state

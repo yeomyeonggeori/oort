@@ -8,7 +8,7 @@ import {
   parseCascadeFallback,
   type CascadeByRun,
   type CascadeFallback,
-} from "./cascadeModel";
+} from "@momo/core/features/timeline/cascadeModel";
 
 // =============================================================================
 // The provider cascade rail (ADR-0135 D1 / MOMO-627): one subscription per open

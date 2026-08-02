@@ -1,5 +1,5 @@
 import { MessageSquare } from "lucide-react";
-import type { RosterMember } from "@/lib/api";
+import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
@@ -8,7 +8,7 @@ import {
   memberRowLabel,
   roleLabel,
   statusLabel,
-} from "./model";
+} from "@momo/core/features/directory/model";
 
 // =============================================================================
 // One directory row (parity G-3). Flat row, separator, hover background: a

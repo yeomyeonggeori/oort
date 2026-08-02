@@ -10,7 +10,7 @@ import {
   testProviderLink,
   type ProviderLink,
   type ProviderLinkTest,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   choiceLabel,
   errorMessage,
@@ -19,7 +19,7 @@ import {
   PROVIDER_MODES,
   providerSourceLabel,
   providerTestMessage,
-} from "./model";
+} from "@momo/core/features/settings/model";
 import {
   ChoiceRadios,
   ConfirmButton,
@@ -30,8 +30,8 @@ import {
   StatusChip,
 } from "./SettingsFields";
 import { AiLinkChain, ChainProbeResult } from "./AiLinkChain";
-import { parseProbeEntries } from "./chainModel";
-import { arrayField } from "@/lib/wire";
+import { parseProbeEntries } from "@momo/core/features/settings/chainModel";
+import { arrayField } from "@momo/core/lib/wire";
 
 // =============================================================================
 // AI 연결 (R-1 §5): the instance-global provider link, GET/PUT/DELETE plus the

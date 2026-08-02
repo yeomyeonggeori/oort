@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { createChannel, type Channel, type CreateChannelInput } from "@/lib/api";
+import { createChannel, type Channel, type CreateChannelInput } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
-import { upsertChannel } from "@/features/directory/model";
-import { createChannelFailure, type CreateChannelFailure } from "./model";
+import { upsertChannel } from "@momo/core/features/directory/model";
+import { createChannelFailure, type CreateChannelFailure } from "@momo/core/features/channels/model";
 
 // =============================================================================
 // 채널 만들기 (AX-1a / MOMO-614): one place creates a channel, so the sidebar

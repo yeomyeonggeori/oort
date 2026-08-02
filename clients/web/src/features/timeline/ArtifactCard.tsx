@@ -10,9 +10,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
-import { formatCount } from "./agentCardModel";
+import { formatCount } from "@momo/core/features/timeline/agentCardModel";
 import { StreamCaret, TurnChip } from "./StatusChip";
-import { artifactNote, isProvisional, type ArtifactState } from "./rowModel";
+import { artifactNote, isProvisional, type ArtifactState } from "@momo/core/features/timeline/rowModel";
 import {
   isTruncated,
   omittedFileCount,
@@ -22,7 +22,7 @@ import {
   type ArtifactPresentation,
   type LinkArtifact,
   type OversizedArtifact,
-} from "./artifacts";
+} from "@momo/core/features/timeline/artifacts";
 
 // =============================================================================
 // Artifact card (ADR-0126 D2 / MOMO-620, the web half of mac MOMO-518).

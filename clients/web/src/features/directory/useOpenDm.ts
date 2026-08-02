@@ -1,9 +1,9 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { openDirectMessage, type Channel, type RosterMember } from "@/lib/api";
+import { openDirectMessage, type Channel, type RosterMember } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
-import { openDmErrorMessage, upsertChannel } from "./model";
+import { openDmErrorMessage, upsertChannel } from "@momo/core/features/directory/model";
 
 // =============================================================================
 // DM 시작 (parity G-4). One place opens a DM, so the directory row and the ⌘K

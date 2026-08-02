@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { joinWithInvite, login, type LoginResponse } from "@/lib/api";
+import { joinWithInvite, login, type LoginResponse } from "@momo/core/lib/api";
 import { API_BASE_DEFAULT, CONFIGURED_WORKSPACE, DEV_EMAIL, DEV_PASSWORD } from "@/lib/env";
 import {
   SERVER_URL_PLACEHOLDER,
@@ -38,7 +38,7 @@ import {
   type ConnectFailure,
   type ConnectField,
   type ConnectMode,
-} from "./connectModel";
+} from "@momo/core/features/auth/connectModel";
 
 // =============================================================================
 // The connect surface (MOMO-604 / ADR-0133 P2), successor to the same-origin

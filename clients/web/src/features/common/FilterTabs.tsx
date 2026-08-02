@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { cn } from "@/design/lib/cn";
+import type { FilterTabsSpec } from "@momo/core/features/common/filterTabs";
 
 // =============================================================================
 // N개의 값 중 하나를 고르는 세그먼트 컨트롤 (R-1 §2).
@@ -21,21 +22,7 @@ import { cn } from "@/design/lib/cn";
 // 여기를 고쳐야 한다. 그래서 inbox/ 가 아니라 common/ 에 산다.
 // =============================================================================
 
-/**
- * 한 표면의 필터 어휘. 그 표면의 model 옆에 두어, 절반만 설정된 탭 묶음(이름은
- * 정했는데 패널 id는 없는 식)이 나올 수 없게 한다.
- */
-export interface FilterTabsSpec<T extends string> {
-  /** tablist의 접근성 이름. 느슨한 버튼 N개가 아니라 한 질문임을 말한다. */
-  label: string;
-  values: readonly T[];
-  labelFor: (value: T) => string;
-  /** 탭 엘리먼트의 id. 라우트가 패널의 `aria-labelledby`로 되짚는다. */
-  tabId: (value: T) => string;
-  /** 이 탭이 지배하는 패널의 id. 라우트가 자기 패널에 붙인다. */
-  panelId: (value: T) => string;
-  testId: (value: T) => string;
-}
+export type { FilterTabsSpec } from "@momo/core/features/common/filterTabs";
 
 const BASE =
   "inline-flex h-control-sm items-center gap-2 rounded-sm px-3 text-body transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";

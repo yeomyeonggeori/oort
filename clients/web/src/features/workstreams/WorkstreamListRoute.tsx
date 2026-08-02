@@ -8,13 +8,13 @@ import { CHIP_CLASS } from "@/features/common/chip";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { relativeLabel } from "@/features/inbox/model";
+import { relativeLabel } from "@momo/core/features/inbox/model";
 import {
   useChannels,
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { type Workstream } from "@/lib/api";
+import { type Workstream } from "@momo/core/lib/api";
 import {
   WORKSTREAM_FILTER_TABS,
   WORKSTREAM_STATUS_CLASS,
@@ -24,7 +24,7 @@ import {
   workstreamActor,
   workstreamFilterOf,
   workstreamStatusOf,
-} from "./model";
+} from "@momo/core/features/workstreams/model";
 import { useWorkstreams } from "./useWorkstreams";
 
 // =============================================================================

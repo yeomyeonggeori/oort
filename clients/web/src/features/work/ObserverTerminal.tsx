@@ -9,7 +9,7 @@ import {
   setWorkSessionObservation,
   uuidEq,
   type WorkSession,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { InlineBanner } from "@/features/common/States";
 import {
   attachSocketUrl,

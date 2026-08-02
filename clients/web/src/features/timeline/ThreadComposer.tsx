@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { SendHorizontal } from "lucide-react";
-import { sendThreadReply } from "@/lib/api";
+import { sendThreadReply } from "@momo/core/lib/api";
 import { InlineBanner } from "@/features/common/States";
-import { replyFailureMessage } from "./actionCopy";
+import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { useAutoGrow } from "./useAutoGrow";
 
 // =============================================================================

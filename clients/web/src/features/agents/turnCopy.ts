@@ -1,4 +1,4 @@
-import { particleFor } from "@/lib/koreanParticle";
+import { particleFor } from "@momo/core/lib/koreanParticle";
 import type { AgentTurnState, AgentWorkingSignal } from "./agentWorkingSignal";
 
 // =============================================================================

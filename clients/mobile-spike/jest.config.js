@@ -3,7 +3,8 @@ const path = require('path');
 /**
  * 스파이크 하네스의 jest 설정.
  *
- * 게이트 2는 **웹의 진짜 소스 파일**(clients/web/src)을 import 해서 돌린다.
+ * 게이트 2는 **웹의 진짜 소스 파일**(clients/web/src + packages/momo-core/src)을
+ * import 해서 돌린다.
  * 복사본을 만들면 "무수정 통과"를 증명하지 못하므로 경로만 이어준다.
  *   - `@/…`      → clients/web/src/…
  *   - `./env`    → RN 상수 stub (웹 env.ts 는 Vite 전용 `import.meta.env` 를 읽는다)
@@ -12,11 +13,16 @@ const path = require('path');
  * 광범위해 보여도 실제로 가로채는 대상은 하나다.
  */
 const WEB_SRC = path.resolve(__dirname, '../web/src');
+const CORE_SRC = path.resolve(__dirname, '../../packages/momo-core/src');
 
 module.exports = {
   preset: '@react-native/jest-preset',
   moduleNameMapper: {
-    '^@/(.*)$': `${WEB_SRC}/$1`,
+    // goal RN-C1: 순수 로직이 packages/momo-core 로 빠졌다. 스파이크 소스는
+    // 손대지 않으므로(버려질 코드다) `@/…` 를 웹 → 코어 순서로 두 트리에서
+    // 찾는다. jest 는 배열을 순서대로 시도한다.
+    '^@momo/core/(.*)$': `${CORE_SRC}/$1`,
+    '^@/(.*)$': [`${WEB_SRC}/$1`, `${CORE_SRC}/$1`],
     '^\\./env$': path.resolve(__dirname, 'src/gate2_url/webEnvStub.ts'),
     // 웹 소스는 clients/web 밖에서 트랜스파일되므로 babel 런타임 헬퍼를
     // 스파이크 쪽 사본으로 고정한다(웹 트리에는 @babel/runtime 이 없다).

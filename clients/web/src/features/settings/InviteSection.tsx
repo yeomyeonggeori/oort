@@ -9,7 +9,7 @@ import {
   listInvites,
   resolveServerBaseUrl,
   type CreatedInvite,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   buildInviteMailto,
   buildJoinLink,
@@ -22,7 +22,7 @@ import {
   inviteStatus,
   isOperatorDenied,
   type InviteCardInput,
-} from "./model";
+} from "@momo/core/features/settings/model";
 import {
   ChoiceRadios,
   CopyButton,

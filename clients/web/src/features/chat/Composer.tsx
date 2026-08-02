@@ -7,13 +7,13 @@ import {
   type KeyboardEvent,
 } from "react";
 import { SendHorizontal } from "lucide-react";
-import type { RequestRouting, RosterMember } from "@/lib/api";
+import type { RequestRouting, RosterMember } from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
-import { composerKeyIntent, isComposingEvent } from "@/features/chat/composerKeys";
+import { composerKeyIntent, isComposingEvent } from "@momo/core/features/chat/composerKeys";
 import {
   agentTurnsInChannel,
   elapsedLabel,
@@ -36,8 +36,8 @@ import {
   MentionRoutingBar,
 } from "@/features/routing/MentionRoutingBar";
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
-import { mentionRoutingTarget } from "@/features/routing/mentionTargets";
-import { routingPayload } from "@/features/routing/routingModel";
+import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
+import { routingPayload } from "@momo/core/features/routing/routingModel";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
