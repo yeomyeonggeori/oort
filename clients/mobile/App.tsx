@@ -2,9 +2,11 @@ import {QueryClientProvider} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
 import {ActivityIndicator, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
-import {color, font, space} from './src/design/tokens';
+import {PrimaryButton} from './src/design/atoms';
+import {color, font, SAFE_GUTTER, space} from './src/design/tokens';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
+import {RESTORE_UNREACHABLE_NOTICE} from './src/session/authGate';
 import {useAuthGate} from './src/session/useSession';
 import AppShell from './src/shell/AppShell';
 import {initSessionStore} from './src/storage/secureSession';
@@ -66,9 +68,21 @@ export default function App(): React.JSX.Element {
 }
 
 function Gate(): React.JSX.Element {
-  const gate = useAuthGate();
+  const {gate, retry} = useAuthGate();
   if (gate.kind === 'restoring') {
-    return <Booting label="로그인 상태를 확인하는 중입니다." testID="session-restoring" />;
+    // A stored session whose rotation could not reach the server is still a
+    // session. Saying so — and offering the retry — is the honest screen; a
+    // sign-in form here would be this client throwing away a session because a
+    // train went into a tunnel.
+    return gate.unreachable ? (
+      <Booting
+        label={RESTORE_UNREACHABLE_NOTICE}
+        onRetry={retry}
+        testID="session-unreachable"
+      />
+    ) : (
+      <Booting label="로그인 상태를 확인하는 중입니다." testID="session-restoring" />
+    );
   }
   if (gate.kind === 'signedOut') {
     return <ConnectScreen sessionExpired={gate.expired} />;
@@ -78,15 +92,22 @@ function Gate(): React.JSX.Element {
 
 function Booting({
   label,
+  onRetry,
   testID,
 }: {
   label?: string;
+  onRetry?: () => void;
   testID?: string;
 }): React.JSX.Element {
   return (
     <View style={styles.booting} testID={testID}>
-      <ActivityIndicator color={color.accentText} />
+      {onRetry ? null : <ActivityIndicator color={color.accentText} />}
       {label ? <Text style={styles.bootingLabel}>{label}</Text> : null}
+      {onRetry ? (
+        <View style={styles.bootingAction}>
+          <PrimaryButton label="다시 시도" onPress={onRetry} testID="restore-retry" />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -99,5 +120,12 @@ const styles = StyleSheet.create({
     gap: space.md,
     backgroundColor: color.bg,
   },
-  bootingLabel: {fontSize: font.label, color: color.textMuted},
+  bootingLabel: {
+    fontSize: font.label,
+    color: color.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: SAFE_GUTTER,
+    lineHeight: 20,
+  },
+  bootingAction: {alignSelf: 'stretch', paddingHorizontal: SAFE_GUTTER},
 });

@@ -265,6 +265,38 @@ describe('search', () => {
     expect(rowCount(buildSidebarSections(input({query: 'ener'})))).toBe(1);
   });
 
+  it('finds an agent by the handle people address it with, even when it is not shown', () => {
+    // 헤르메스 is the only member with that name, so the row renders no handle —
+    // but `@hermes` is what someone types to find it. A search over the visible
+    // text alone would return nothing for a row that is right there.
+    const sections = buildSidebarSections(input({query: 'hermes'}));
+    expect(rowCount(sections)).toBe(1);
+    expect(sections[0]?.data[0]?.title).toBe('헤르메스');
+  });
+
+  it('finds a channel typed the way it is spoken, with the hash', () => {
+    // The `#` is rendered beside the name rather than inside it.
+    expect(rowCount(buildSidebarSections(input({query: '#general'})))).toBe(1);
+  });
+
+  it('finds a DM by the peer handle even when the label omits it', () => {
+    const solo = makeDirectory([SELF, HERMES]);
+    const dm = channel({
+      id: 'ch-dm-hermes',
+      kind: 'dm',
+      memberIds: [SELF_ID, HERMES.id],
+    });
+    const sections = buildSidebarSections(
+      input({
+        directory: solo,
+        agents: [],
+        groups: {channels: [], dms: [dm]},
+        query: '@hermes',
+      }),
+    );
+    expect(rowCount(sections)).toBe(1);
+  });
+
   it('shows everything for an empty query', () => {
     expect(rowCount(buildSidebarSections(input()))).toBe(5);
   });

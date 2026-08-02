@@ -20,12 +20,14 @@ import {
 } from '@momo/core/features/workspace/directory';
 import {useQueries, useQuery, useQueryClient} from '@tanstack/react-query';
 import {useCallback, useMemo} from 'react';
+import {useNow} from '../../lib/useNow';
 import {useSession} from '../../session/useSession';
 import {
   useChannels,
   useDirectory,
   useInvalidateReadStates,
   useReadStates,
+  workspaceKeys,
 } from '../workspace/queries';
 import {fetchMentionsAfter} from './mentions';
 
@@ -144,8 +146,8 @@ export function useNeedsAction(enabled: boolean): Feed {
     staleTime: FEED_STALE_MS,
   });
 
+  const nowMs = useNow();
   const items = useMemo(() => {
-    const nowMs = Date.now();
     return orderFeed(
       (query.data ?? []).map(approval =>
         approvalItem(
@@ -156,7 +158,7 @@ export function useNeedsAction(enabled: boolean): Feed {
         ),
       ),
     );
-  }, [query.data, context]);
+  }, [query.data, context, nowMs]);
 
   return {
     items,
@@ -215,8 +217,8 @@ export function useMentions(enabled: boolean): Feed {
     }),
   });
 
+  const nowMs = useNow();
   const items = useMemo(() => {
-    const nowMs = Date.now();
     return orderFeed(
       results.messages.map(message =>
         mentionItem(
@@ -227,12 +229,16 @@ export function useMentions(enabled: boolean): Feed {
         ),
       ),
     );
-  }, [results.messages, context]);
+  }, [results.messages, context, nowMs]);
 
+  // Depends on the query CLIENT, not on the `readStates` object — that object is
+  // `{...query, byChannel}`, a fresh identity every render, which would make this
+  // callback unstable and quietly break the first `useEffect` that lists it as a
+  // dependency (the next batch's timeline will).
   const refetch = useCallback(() => {
-    void readStates.refetch();
+    void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
     void client.invalidateQueries({queryKey: ['inbox-mentions', workspaceId]});
-  }, [readStates, client, workspaceId]);
+  }, [client, workspaceId]);
 
   return {
     items,
@@ -297,8 +303,8 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
     }),
   });
 
+  const nowMs = useNow();
   const items = useMemo(() => {
-    const nowMs = Date.now();
     // ADR-0131: an agent has a human who is accountable for it, and this tab is
     // "what did MY agents do" — not "what did every agent in the workspace do".
     const mine = (memberId: string): boolean => {
@@ -329,7 +335,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       );
     }
     return orderFeed(rows);
-  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy]);
+  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, nowMs]);
 
   // Invalidation rather than a list of `refetch()` calls: this feed fans out
   // over four approval status pages and up to twelve channels, and the fan-out

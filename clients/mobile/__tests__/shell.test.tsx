@@ -308,6 +308,27 @@ describe('the four states of the 대화 list', () => {
     expect(screen.queryByText(/boom/)).toBeNull();
   });
 
+  it('treats a roster failure as a list failure, not a silent degrade', async () => {
+    // Without the roster every DM falls back to the handle-less "다이렉트
+    // 메시지", the 에이전트 section disappears and the two 김인턴 collapse into
+    // one label. Rendering that as a normal list is the exact failure this
+    // screen exists to prevent, shown as if nothing were wrong.
+    installFetch({roster: () => jsonResponse(500, {error: {message: 'boom'}})});
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
+    expect(screen.queryByTestId('sidebar-list')).toBeNull();
+  });
+
+  it('says the unread counts are missing rather than implying everything is read', async () => {
+    installFetch({readState: () => jsonResponse(500, {error: {message: 'boom'}})});
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    // The list still works — only the projection behind the badges failed.
+    expect(screen.getByTestId('read-state-error')).toHaveTextContent(
+      /안 읽음 표시를 불러오지 못했습니다\./,
+    );
+  });
+
   it('shows the core’s transport copy when nothing answered', async () => {
     globalThis.fetch = jest.fn(async () => {
       throw new TypeError('Network request failed');

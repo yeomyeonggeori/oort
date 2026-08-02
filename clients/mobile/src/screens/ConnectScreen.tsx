@@ -88,6 +88,10 @@ export default function ConnectScreen({
   // The address is seeded from the device's stored choice: someone who signed
   // out an hour ago should not have to retype the server they self-host.
   const [serverUrl, setServerUrl] = useState(() => getServerBase() ?? '');
+  // Whether the value above is the PERSON's or the device's. An invite link may
+  // overwrite a stored address but never something being typed, and the two are
+  // indistinguishable by looking at the string.
+  const [serverTyped, setServerTyped] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
@@ -112,8 +116,12 @@ export default function ConnectScreen({
   useEffect(() => {
     if (!prefill || prefillApplied) return;
     setPrefillApplied(true);
+    // The link wins over a SEEDED address, and loses to a typed one. Keeping a
+    // stored server here is how an invite to workspace B gets redeemed against
+    // workspace A and comes back as "유효하지 않은 초대 코드입니다" — copy that
+    // blames the code for a server mismatch the person cannot see.
     const nextServer =
-      prefill.serverUrl !== '' && serverUrl === '' ? prefill.serverUrl : serverUrl;
+      prefill.serverUrl !== '' && !serverTyped ? prefill.serverUrl : serverUrl;
     if (nextServer !== serverUrl) setServerUrl(nextServer);
     if (prefill.inviteCode !== '') {
       setInviteCode(prefill.inviteCode);
@@ -130,7 +138,7 @@ export default function ConnectScreen({
       requiresServer: requiresServerUrl(),
     });
     fields.current[target]?.focus();
-  }, [prefill, prefillApplied, serverUrl, email, password]);
+  }, [prefill, prefillApplied, serverTyped, serverUrl, email, password]);
 
   // Derived during render from the core, never stored. There is no second copy
   // of this answer to fall out of step with the field.
@@ -219,12 +227,16 @@ export default function ConnectScreen({
               }}
               style={styles.input}
               value={serverUrl}
-              onChangeText={setServerUrl}
+              onChangeText={next => {
+                setServerTyped(true);
+                setServerUrl(next);
+              }}
               placeholder={SERVER_URL_PLACEHOLDER}
               placeholderTextColor={color.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
+              accessibilityLabel="서버 주소"
               returnKeyType="next"
               // The keyboard's 다음 key moves to the next field, as it does in
               // every other iOS form. Without this it dismisses the keyboard and
@@ -257,6 +269,7 @@ export default function ConnectScreen({
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="off"
+                accessibilityLabel="초대 코드"
                 returnKeyType="next"
                 onSubmitEditing={() => fields.current.email?.focus()}
                 testID="invite-code-input"
@@ -276,6 +289,7 @@ export default function ConnectScreen({
               autoCorrect={false}
               keyboardType="email-address"
               textContentType="emailAddress"
+              accessibilityLabel="이메일"
               returnKeyType="next"
               onSubmitEditing={() => fields.current.password?.focus()}
               testID="email-input"
@@ -298,6 +312,7 @@ export default function ConnectScreen({
               onChangeText={setPassword}
               secureTextEntry
               autoCapitalize="none"
+              accessibilityLabel="비밀번호"
               returnKeyType="go"
               onSubmitEditing={() => {
                 if (canSubmit) void onSubmit();

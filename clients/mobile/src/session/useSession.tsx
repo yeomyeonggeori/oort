@@ -1,5 +1,5 @@
 import {logout, restoreSession, type Member} from '@momo/core/lib/api';
-import {useQueryClient} from '@tanstack/react-query';
+import {onlineManager, useQueryClient} from '@tanstack/react-query';
 import React, {
   createContext,
   useCallback,
@@ -54,7 +54,13 @@ function readHasAccessToken(): boolean {
   return getAccessToken() !== null;
 }
 
-export function useAuthGate(): AuthGate {
+export interface AuthGateState {
+  gate: AuthGate;
+  /** Ask for the boot rotation again. Wired to the retry a person can press. */
+  retry: () => void;
+}
+
+export function useAuthGate(): AuthGateState {
   const member = useSyncExternalStore(subscribe, readMember);
   const hasAccessToken = useSyncExternalStore(subscribe, readHasAccessToken);
   const authExpired = useSyncExternalStore(subscribe, getAuthExpired);
@@ -64,17 +70,51 @@ export function useAuthGate(): AuthGate {
   // client can neither show a shell (every query would 401) nor a sign-in form
   // (the person is signed in). `restoreSettled` is what buys the third state.
   const [restoreSettled, setRestoreSettled] = useState(() => !hasPersistedSession());
+  const [restoreUnreachable, setRestoreUnreachable] = useState(false);
+  // Bumped to re-arm the effect. A launch with no signal must not cost the
+  // session for the life of the process.
+  const [attempt, setAttempt] = useState(0);
+
+  const retryRestore = useCallback(() => {
+    setRestoreUnreachable(false);
+    setRestoreSettled(false);
+    setAttempt(current => current + 1);
+  }, []);
 
   useEffect(() => {
     if (restoreSettled) return;
+    // ## Why this refuses to even ATTEMPT while offline
+    //
+    // `restoreSession()` (core) runs one rotation and then does
+    // `if (!rotated) { clearSession(); return null; }`. `refreshSession()`
+    // returns false for BOTH "the server refused this token" and "nothing
+    // answered" — it catches the transport failure with a comment that says the
+    // session is deliberately *not* declared dead — but `restoreSession()` then
+    // declares it dead anyway and deletes the refresh token from the keychain.
+    //
+    // So on this path a single launch with no signal costs the person their
+    // session and their password. That is a core bug and it is reported rather
+    // than patched here (the core is frozen for this batch and the web client
+    // has the same call). What the host CAN do is not hand it the chance: with
+    // no network there is nothing to gain from trying and a session to lose.
+    if (!onlineManager.isOnline()) {
+      setRestoreUnreachable(true);
+      setRestoreSettled(true);
+      return;
+    }
     let cancelled = false;
     restoreSession()
+      .then(() => {
+        // Settled: either a live session, or the core decided the stored token
+        // was dead and wiped local state. The gate reads the store to tell them
+        // apart.
+        if (!cancelled) setRestoreUnreachable(false);
+      })
       .catch(() => {
-        // `restoreSession` already wipes local state when the stored token is
-        // dead. A transport failure lands here instead, and the honest reading
-        // of it is the same one the gate makes for any unusable session: ask for
-        // a sign-in. The person still has the server address, so it is one tap.
-        return null;
+        // The core resolves rather than throws today, so this is belt-and-braces
+        // — but a throw here means the request never got a verdict, and that is
+        // never a reason to show a sign-in form.
+        if (!cancelled) setRestoreUnreachable(true);
       })
       .finally(() => {
         if (!cancelled) setRestoreSettled(true);
@@ -82,12 +122,32 @@ export function useAuthGate(): AuthGate {
     return () => {
       cancelled = true;
     };
-  }, [restoreSettled]);
+  }, [restoreSettled, attempt]);
 
-  return useMemo(
-    () => authGate({member, hasAccessToken, authExpired, restoreSettled}),
-    [member, hasAccessToken, authExpired, restoreSettled],
+  // Try again the moment the radio comes back. `onlineManager` is already fed by
+  // NetInfo through `installReactQueryBridges`, so this costs no second
+  // subscription to the platform and cannot disagree with what react-query
+  // thinks about connectivity.
+  useEffect(() => {
+    if (!restoreUnreachable) return;
+    return onlineManager.subscribe(online => {
+      if (online) retryRestore();
+    });
+  }, [restoreUnreachable, retryRestore]);
+
+  const gate = useMemo(
+    () =>
+      authGate({
+        member,
+        hasAccessToken,
+        authExpired,
+        restoreSettled,
+        restoreUnreachable,
+      }),
+    [member, hasAccessToken, authExpired, restoreSettled, restoreUnreachable],
   );
+
+  return useMemo(() => ({gate, retry: retryRestore}), [gate, retryRestore]);
 }
 
 export interface SignedInSession {

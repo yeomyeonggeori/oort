@@ -338,6 +338,48 @@ describe('an invite deep link', () => {
     );
   });
 
+  it('overrides a server address this device merely REMEMBERED', async () => {
+    // The seeded value comes from MMKV, not from the person. Keeping it is how
+    // an invite to workspace B gets redeemed against workspace A and comes back
+    // as "유효하지 않은 초대 코드입니다" — copy that blames the code for a
+    // server mismatch nobody can see.
+    mmkvStore.set('momo.mobile.server.v1', 'https://old.example.com');
+    __resetServerBaseCache();
+    jest
+      .spyOn(Linking, 'getInitialURL')
+      .mockResolvedValue(
+        'oort://join?server=https%3A%2F%2Fnew.example.com&code=INVITE-9',
+      );
+    render(<ConnectScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('server-url-input').props.value).toBe(
+        'https://new.example.com',
+      ),
+    );
+  });
+
+  it('does not overwrite an address the person is in the middle of typing', async () => {
+    let resolveLink: (url: string) => void = () => {};
+    jest.spyOn(Linking, 'getInitialURL').mockReturnValue(
+      new Promise<string>(resolve => {
+        resolveLink = resolve;
+      }) as Promise<string | null>,
+    );
+    render(<ConnectScreen />);
+
+    fireEvent.changeText(
+      screen.getByTestId('server-url-input'),
+      'https://mine.example.com',
+    );
+    resolveLink('oort://join?server=https%3A%2F%2Flink.example.com&code=INVITE-9');
+
+    await waitFor(() => expect(screen.getByTestId('invite-code-input')).toBeTruthy());
+    expect(screen.getByTestId('server-url-input').props.value).toBe(
+      'https://mine.example.com',
+    );
+  });
+
   it('is ignored when it is not a join link', async () => {
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('oort://settings?x=1');
     render(<ConnectScreen />);

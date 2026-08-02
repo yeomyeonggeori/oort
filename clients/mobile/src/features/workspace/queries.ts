@@ -10,7 +10,7 @@ import {
   type Directory,
 } from '@momo/core/features/workspace/directory';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
-import {useMemo} from 'react';
+import {useCallback, useMemo} from 'react';
 
 // =============================================================================
 // The three reads every signed-in surface in this batch shares.
@@ -95,10 +95,17 @@ export function useReadStates(workspaceId: string) {
   return {...query, byChannel};
 }
 
-/** Re-read the read-state projection after advancing a cursor. */
+/**
+ * Re-read the read-state projection after advancing a cursor.
+ *
+ * Memoised, and that is not a micro-optimisation: an unstable identity here
+ * propagates into every `useCallback` that lists it as a dependency, and the
+ * first time one of those is put in a `useEffect` dep array it becomes an
+ * infinite loop rather than a wasted allocation.
+ */
 export function useInvalidateReadStates(workspaceId: string): () => void {
   const client = useQueryClient();
-  return () => {
+  return useCallback(() => {
     void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
-  };
+  }, [client, workspaceId]);
 }

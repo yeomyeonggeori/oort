@@ -23,6 +23,7 @@ function facts(overrides: Partial<SessionFacts> = {}): SessionFacts {
     hasAccessToken: false,
     authExpired: false,
     restoreSettled: true,
+    restoreUnreachable: false,
     ...overrides,
   };
 }
@@ -30,6 +31,15 @@ function facts(overrides: Partial<SessionFacts> = {}): SessionFacts {
 describe('a first-time launch', () => {
   it('asks for a sign-in, without claiming anything expired', () => {
     expect(authGate(facts())).toEqual({kind: 'signedOut', expired: false});
+  });
+
+  it('is signed out, not stalled, when there is no session to be unreachable about', () => {
+    // No stored member: "nothing answered" is not a reason to hold someone on a
+    // spinner, because there is nothing to resume even if it had answered.
+    expect(authGate(facts({restoreUnreachable: true}))).toEqual({
+      kind: 'signedOut',
+      expired: false,
+    });
   });
 
   it('does not flash a restoring state when there is nothing to restore', () => {
@@ -48,7 +58,7 @@ describe('a relaunch with a stored session', () => {
     // a shell whose every request 401s.
     expect(
       authGate(facts({member: MEMBER, hasAccessToken: false, restoreSettled: false})),
-    ).toEqual({kind: 'restoring'});
+    ).toEqual({kind: 'restoring', unreachable: false});
   });
 
   it('lands in the shell once the rotation minted a token', () => {
@@ -63,6 +73,39 @@ describe('a relaunch with a stored session', () => {
     expect(
       authGate(facts({member: null, hasAccessToken: false, restoreSettled: true})),
     ).toEqual({kind: 'signedOut', expired: false});
+  });
+});
+
+describe('a launch with no signal (train, plane, lift)', () => {
+  it('keeps the person inside their session instead of signing them out', () => {
+    // `restoreSession()` resolves null for a token the server REFUSED and throws
+    // when nothing answered. Only the second lands here, and the session is
+    // intact — it is the radio that is not.
+    expect(
+      authGate(
+        facts({member: MEMBER, hasAccessToken: false, restoreUnreachable: true}),
+      ),
+    ).toEqual({kind: 'restoring', unreachable: true});
+  });
+
+  it('lets an expired session outrank an unreachable one', () => {
+    expect(
+      authGate(
+        facts({
+          member: MEMBER,
+          authExpired: true,
+          restoreUnreachable: true,
+        }),
+      ),
+    ).toEqual({kind: 'signedOut', expired: true});
+  });
+
+  it('lands in the shell once a retry finally reaches the server', () => {
+    expect(
+      authGate(
+        facts({member: MEMBER, hasAccessToken: true, restoreUnreachable: false}),
+      ),
+    ).toEqual({kind: 'signedIn', member: MEMBER});
   });
 });
 

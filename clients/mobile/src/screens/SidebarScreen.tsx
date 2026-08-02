@@ -1,4 +1,4 @@
-import {ApiError, openDirectMessage} from '@momo/core/lib/api';
+import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
@@ -17,6 +17,7 @@ import {
   ErrorState,
   FailureBanner,
   LoadingState,
+  NoticeBlock,
   Screen,
   ScreenHeader,
   SectionLabel,
@@ -123,6 +124,13 @@ export default function SidebarScreen({
   const total = rowCount(sections);
   const searching = query.trim() !== '';
   const loading = channelsQuery.isLoading || directoryQuery.isLoading;
+  // The ROSTER counts as a list failure, not a detail that degrades quietly.
+  // Without it every DM falls back to the handle-less "다이렉트 메시지", the
+  // 에이전트 section disappears, and the two 김인턴 collapse into one label —
+  // which is the exact failure this screen is built around, rendered as if
+  // nothing had gone wrong.
+  const listFailed = channelsQuery.isError || directoryQuery.isError;
+  const listError = channelsQuery.error ?? directoryQuery.error;
 
   return (
     <Screen>
@@ -144,6 +152,17 @@ export default function SidebarScreen({
         />
       </View>
 
+      {/* Unread is server truth, so when the projection fails the badges simply
+          are not there. Saying so is cheaper than letting someone conclude they
+          have read everything. */}
+      {readStates.isError && !listFailed ? (
+        <NoticeBlock
+          headline="안 읽음 표시를 불러오지 못했습니다."
+          detail="목록은 그대로이고, 안 읽은 개수만 지금 알 수 없습니다."
+          testID="read-state-error"
+        />
+      ) : null}
+
       {openDm.isError ? (
         <View style={styles.bannerWrap}>
           <FailureBanner
@@ -156,17 +175,20 @@ export default function SidebarScreen({
 
       {loading ? (
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
-      ) : channelsQuery.isError ? (
+      ) : listFailed ? (
         <ErrorState
           headline="채널을 불러오지 못했습니다."
-          detail={queryFailureDetail(channelsQuery.error)}
-          onRetry={() => void channelsQuery.refetch()}
+          detail={queryFailureDetail(listError)}
+          onRetry={() => {
+            void channelsQuery.refetch();
+            void directoryQuery.refetch();
+          }}
           testID="channels-error"
         />
       ) : total === 0 ? (
         searching ? (
           <EmptyState
-            headline={`'${query.trim()}'와(과) 맞는 대화가 없습니다.`}
+            headline={`'${query.trim()}' 검색 결과가 없습니다.`}
             detail="이름의 일부만 입력해도 찾을 수 있습니다."
             testID="channels-no-match"
           />
@@ -185,7 +207,11 @@ export default function SidebarScreen({
           renderItem={({item}) => (
             <Row
               row={item}
-              selected={item.targetId === openChannelId}
+              // `uuidEq`, not `===`: ids cross the wire in mixed case, and the
+              // unread suppression one file over already compares them this way.
+              // Two different answers about the same row is how a highlighted
+              // row keeps its badge.
+              selected={uuidEq(item.targetId, openChannelId ?? undefined)}
               busy={openDm.isPending && openDm.variables === item.targetId}
               onPress={() => onRowPress(item)}
             />

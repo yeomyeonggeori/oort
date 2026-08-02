@@ -67,6 +67,17 @@ export interface SidebarRow {
   mentionCount: number;
   /** The whole row as one sentence, for VoiceOver. */
   accessibilityLabel: string;
+  /**
+   * What the search field matches against — **not** what is rendered.
+   *
+   * The two differ on purpose. `handle` is null unless the workspace holds two
+   * members under one name, so matching only the visible text would mean an
+   * agent could not be found by the handle people actually address it with
+   * (`@hermes`), and `#general` would miss because the `#` is drawn separately
+   * from the name. Both are cases where a row exists, the person types its real
+   * name, and nothing comes back.
+   */
+  searchText: string;
 }
 
 /**
@@ -106,12 +117,11 @@ export interface SidebarInput {
  */
 function matches(row: SidebarRow, needle: string): boolean {
   if (needle === '') return true;
-  const haystack = `${row.title} ${row.handle ?? ''}`.toLowerCase();
-  return haystack.includes(needle);
+  return row.searchText.includes(needle);
 }
 
 function accessibilityLabelFor(
-  row: Omit<SidebarRow, 'accessibilityLabel'>,
+  row: Omit<SidebarRow, 'accessibilityLabel' | 'searchText'>,
 ): string {
   const parts: string[] = [];
   if (row.kind === 'channel') parts.push(`채널 ${row.title}`);
@@ -127,8 +137,19 @@ function accessibilityLabelFor(
   return parts.join(', ');
 }
 
-function withLabel(row: Omit<SidebarRow, 'accessibilityLabel'>): SidebarRow {
-  return {...row, accessibilityLabel: accessibilityLabelFor(row)};
+function withLabel(
+  row: Omit<SidebarRow, 'accessibilityLabel' | 'searchText'>,
+  extraSearchTerms: readonly string[] = [],
+): SidebarRow {
+  const searchText = [
+    row.title,
+    row.handle ?? '',
+    row.kind === 'channel' ? `#${row.title}` : '',
+    ...extraSearchTerms,
+  ]
+    .join(' ')
+    .toLowerCase();
+  return {...row, accessibilityLabel: accessibilityLabelFor(row), searchText};
 }
 
 function channelRow(
@@ -137,6 +158,9 @@ function channelRow(
   kind: 'channel' | 'dm',
 ): SidebarRow {
   const label = channelLabelParts(channel, input.directory, input.selfMemberId);
+  // A DM's peer handle is searchable even when the label does not show it.
+  const peer =
+    kind === 'dm' ? dmPeer(channel, input.directory, input.selfMemberId) : null;
   // The channel being read has nothing unread in it, whatever the projection
   // still says. The server catches up on the next read-state poll; until then a
   // badge on the row you are looking at is just wrong.
@@ -154,7 +178,7 @@ function channelRow(
     muted: channel.muted,
     unreadCount: read?.unreadCount ?? 0,
     mentionCount: read?.mentionCount ?? 0,
-  });
+  }, peer ? [`@${peer.handle}`] : []);
 }
 
 function agentRow(member: RosterMember, directory: Directory): SidebarRow {
@@ -172,7 +196,7 @@ function agentRow(member: RosterMember, directory: Directory): SidebarRow {
     muted: false,
     unreadCount: 0,
     mentionCount: 0,
-  });
+  }, [`@${member.handle}`]);
 }
 
 /**
