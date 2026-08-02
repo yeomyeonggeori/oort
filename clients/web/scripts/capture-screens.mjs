@@ -79,15 +79,23 @@ const MOBILE_TAP_TARGETS = [
   ["thread-composer-input", "답글 입력", "optional"],
   ["thread-composer-send", "답글 보내기", "optional"],
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
-  // goal P3 1-4 — 폰에서 **가장 먼저** 만나는 화면의 컨트롤들. `--spacing-control`
-  // 이 32px이라 로그인 폼 전체가 32px이었고, WCAG 2.5.8 AA(24×24)는 통과하지만
-  // Apple HIG의 44pt는 통과하지 못했다. 여기서 잘못 눌린 칸이 이 제품의 첫인상이
-  // 된다. 전부 optional인 것은 이 넷이 연결 화면에만 있기 때문이고, 그 화면을 찍는
-  // 프레임이 `assertTapTargets`를 부른다.
-  ["login-server", "서버 주소 입력", "optional"],
-  ["login-email", "이메일 입력", "optional"],
-  ["login-password", "비밀번호 입력", "optional"],
-  ["login-submit", "로그인 버튼", "optional"],
+];
+
+// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
+//
+// 위 목록과 나누는 이유: 그쪽은 채팅 표면에만 있는 컨트롤을 **필수**로 재고, 이 넷은
+// 로그인 화면에만 있다. 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어
+// 전부 optional로 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지
+// 않는다. 각자 자기 화면에서 필수로 재는 편이 더 센 자다.
+//
+// 왜 이 넷인가: `--spacing-control`이 32px이라 로그인 폼 전체가 32px이었다. WCAG
+// 2.5.8 AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 로그인은 폰에서
+// 가장 먼저 만나는 화면이라 여기서 잘못 눌린 칸이 이 제품의 첫인상이 된다.
+const LOGIN_TAP_TARGETS = [
+  ["login-server", "서버 주소 입력"],
+  ["login-email", "이메일 입력"],
+  ["login-password", "비밀번호 입력"],
+  ["login-submit", "로그인 버튼"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -1497,10 +1505,15 @@ async function assertTopBreathing(page, where) {
   );
 }
 
-/** 손가락 타깃 실측. 값을 함께 찍어 리뷰가 숫자를 볼 수 있게 한다. */
-async function assertTapTargets(page, where) {
+/**
+ * 손가락 타깃 실측. 값을 함께 찍어 리뷰가 숫자를 볼 수 있게 한다.
+ *
+ * `targets`로 목록을 갈아끼울 수 있다: 화면마다 재야 할 컨트롤이 다르고, 그 화면에
+ * 없는 것을 필수로 재면 목록 전체가 optional로 물러나기 때문이다 (goal P3 1-4).
+ */
+async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
   const measured = await page.evaluate(
-    `(() => ${JSON.stringify(MOBILE_TAP_TARGETS)}.map(([testId, label]) => {
+    `(() => ${JSON.stringify(targets)}.map(([testId, label]) => {
       const el = document.querySelector('[data-testid="' + testId + '"]');
       if (!el) return { testId, label, missing: true };
       const r = el.getBoundingClientRect();
@@ -1513,7 +1526,7 @@ async function assertTapTargets(page, where) {
     }))()`
   );
   const optional = new Set(
-    MOBILE_TAP_TARGETS.filter((t) => t[2] === "optional").map((t) => t[0])
+    targets.filter((t) => t[2] === "optional").map((t) => t[0])
   );
   for (const row of measured) {
     if (row.missing) {
@@ -1935,7 +1948,7 @@ async function captureMobile(browser, scheme) {
   // goal P3 1-4: 폼의 1급 컨트롤은 이 폭에서 44px다. 데스크탑 프레임은 같은
   // 컨트롤을 32px로 찍으므로, 두 프레임이 함께 "토큰이 아니라 폭이 결정한다"를
   // 말한다.
-  await assertTapTargets(page, `login ${scheme}`);
+  await assertTapTargets(page, `login ${scheme}`, LOGIN_TAP_TARGETS);
   await shoot(page, "login");
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
