@@ -79,6 +79,15 @@ const MOBILE_TAP_TARGETS = [
   ["thread-composer-input", "답글 입력", "optional"],
   ["thread-composer-send", "답글 보내기", "optional"],
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
+  // goal P3 1-4 — 폰에서 **가장 먼저** 만나는 화면의 컨트롤들. `--spacing-control`
+  // 이 32px이라 로그인 폼 전체가 32px이었고, WCAG 2.5.8 AA(24×24)는 통과하지만
+  // Apple HIG의 44pt는 통과하지 못했다. 여기서 잘못 눌린 칸이 이 제품의 첫인상이
+  // 된다. 전부 optional인 것은 이 넷이 연결 화면에만 있기 때문이고, 그 화면을 찍는
+  // 프레임이 `assertTapTargets`를 부른다.
+  ["login-server", "서버 주소 입력", "optional"],
+  ["login-email", "이메일 입력", "optional"],
+  ["login-password", "비밀번호 입력", "optional"],
+  ["login-submit", "로그인 버튼", "optional"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -807,10 +816,23 @@ const MEMBER_TIER_POLICY = {
   updatedAtMs: Date.now() - 40 * 60_000,
 };
 
-/** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
+/**
+ * The DM the directory opens onto: a short 1:1 with the agent, not a channel.
+ *
+ * 꼬리 세 쌍은 goal P3 1-2가 고치는 그 모양이다. 1:1 DM에서는 사람이 쓰는 **모든**
+ * 메시지가 상대 에이전트를 부르므로, 그 에이전트가 멈춰 있으면 서버는 부를 때마다
+ * 시스템 한 줄을 남긴다 — 세 번 말하면 똑같은 문장이 세 줄이다. 픽스처가 세 줄을
+ * 그대로 보내고 화면이 한 줄로 접는 것이, 접기가 서버가 아니라 클라이언트에서
+ * 일어난다는 증거다.
+ *
+ * 대소문자도 실물 그대로다: 알림 행의 `authorMemberId`는 Swift의 `uuidString`이라
+ * 대문자이고, `props`의 두 키는 서버가 손으로 소문자를 적는 자리다
+ * (MessageRoutes.swift:1605-1607). 한 행 안에서 갈리는 값이므로, 접기가 `uuidEq`로
+ * 비교하지 않으면 이 프레임에서 바로 드러난다.
+ */
 function makeDmMessages() {
-  const base = Date.now() - 3 * 60_000;
-  return [
+  const base = Date.now() - 12 * 60_000;
+  const spoken = [
     [ME, "어제 올린 relay 패치, DM으로 짧게만 확인할게요. 롤백 절차는 그대로죠?"],
     [HERMES, "그대로입니다. outbox 재처리 스크립트만 먼저 돌리면 됩니다."],
     [ME, "좋아요. 배포 끝나면 여기로 결과만 남겨주세요."],
@@ -826,6 +848,47 @@ function makeDmMessages() {
     state: "sent",
     createdAtMs: base + i * 60_000,
   }));
+
+  // 그 뒤로 hermes가 멈췄고, 성재는 그것을 모른 채 세 번 더 말한다.
+  const unanswered = [
+    "배포 결과 나왔나요?",
+    "outbox 쪽 지표만 먼저 알려주세요.",
+    "확인되면 알려주세요. 급하진 않습니다.",
+  ];
+  const tail = [];
+  unanswered.forEach((body, i) => {
+    const seq = 4 + i * 2;
+    const at = base + (3 + i * 2) * 60_000;
+    tail.push({
+      id: `capture-dm-${seq}`,
+      channelId: DM_ID,
+      seq,
+      hlcTs: at,
+      hlcCount: 0,
+      authorMemberId: ME,
+      type: "text",
+      body,
+      state: "sent",
+      createdAtMs: at,
+    });
+    tail.push({
+      id: `capture-dm-${seq + 1}`,
+      channelId: DM_ID,
+      seq: seq + 1,
+      hlcTs: at + 1_000,
+      hlcCount: 0,
+      authorMemberId: HERMES.toUpperCase(),
+      type: "system",
+      body: "hermes은(는) 현재 일시정지되어 있습니다.",
+      props: {
+        kind: "agent_paused",
+        agent_member_id: HERMES,
+        source_message_id: `capture-dm-${seq}`,
+      },
+      createdAtMs: at + 1_000,
+    });
+  });
+  return [...spoken, ...tail];
 }
 
 // ---- 에이전트 허브 (goal B5.3b) ---------------------------------------------
@@ -1470,6 +1533,110 @@ async function assertTapTargets(page, where) {
 }
 
 /**
+ * 반복된 「일시정지」 알림이 한 줄로 접혔는가 (goal P3 1-2).
+ *
+ * 스크린샷은 이것을 증명하지 못한다. 리뷰어가 픽스처를 열어 서버가 **세 줄을
+ * 보냈다**는 것을 확인하지 않으면, 한 줄만 있는 화면은 그냥 "원래 한 줄이었나
+ * 보다"로 읽힌다. 그래서 여기서 센다: 보낸 것은 셋, 그려진 것은 하나, 그리고 그
+ * 하나가 셋이었다고 말하고 있어야 한다.
+ *
+ * 정보를 없애지 않았다는 쪽도 같이 잰다. 알림 문장 자체는 화면에 그대로 있어야
+ * 하고(사람은 여전히 "왜 답이 없는지"를 알 수 있어야 한다), 사람이 쓴 세 줄은
+ * 하나도 접히면 안 된다 — 접는 것은 반복이지 대화가 아니다.
+ */
+async function assertPausedNoticeFolded(page, where) {
+  const seen = await page.evaluate(`(() => {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"]')
+    );
+    const notices = rows.filter((row) =>
+      (row.textContent || "").includes("현재 일시정지되어 있습니다")
+    );
+    const repeat = document.querySelector(
+      '[data-testid="paused-notice-repeat"]'
+    );
+    return {
+      rows: rows.length,
+      notices: notices.length,
+      repeatText: repeat ? (repeat.textContent || "").trim() : null,
+      bodies: rows.map((row) => (row.textContent || "").trim().slice(0, 40)),
+    };
+  })()`);
+
+  if (seen.notices !== 1) {
+    throw new Error(
+      `[${where}] 서버는 「일시정지」 알림 3줄을 보냈는데 화면에 ${seen.notices}줄이 그려졌다 (1줄이어야 한다)`
+    );
+  }
+  if (seen.repeatText !== "응답하지 못한 메시지 3개") {
+    throw new Error(
+      `[${where}] 접힌 개수를 말하지 않는다: ${JSON.stringify(seen.repeatText)}`
+    );
+  }
+  // 사람이 쓴 6줄(초반 3 + 답 없이 보낸 3)은 전부 남아야 한다. 알림 1줄과 합쳐 7.
+  if (seen.rows !== 7) {
+    throw new Error(
+      `[${where}] 접기가 대화를 먹었다: 행 ${seen.rows}개 (기대 7) — ${JSON.stringify(seen.bodies)}`
+    );
+  }
+  console.log(`  paused notice ${where}: 3줄 → 1줄 + "${seen.repeatText}"`);
+}
+
+/**
+ * 스레드 패널의 「답글 N개」가 죽은 버튼이 아닌가 (goal P3 1-1).
+ *
+ * 결함은 눈에 보이지 않는 종류였다: 패널이 `onOpenThread`를 넘기지 않는데 행은
+ * `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에 반응하면서 눌러도
+ * 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 스크린샷에서 버튼과 글은
+ * 같은 그림이므로 여기서 태그를 직접 본다.
+ *
+ * 같은 자로 반대쪽도 잰다: 채널 타임라인에서는 그 자리가 **여전히 버튼**이어야
+ * 한다. 죽은 컨트롤을 없앤다면서 살아 있는 진입점까지 글로 만들어 버리면 스레드로
+ * 들어가는 길이 사라진다.
+ */
+async function assertThreadRollupNotDead(page, where) {
+  const seen = await page.evaluate(`(() => {
+    const panel = document.querySelector('[data-testid="thread-panel"]');
+    const inPanel = panel
+      ? Array.from(panel.querySelectorAll('[data-testid="thread-anchor"]'))
+      : [];
+    const outside = Array.from(
+      document.querySelectorAll('[data-testid="thread-anchor"]')
+    ).filter((el) => !panel || !panel.contains(el));
+    const shape = (el) => ({ tag: el.tagName, text: (el.textContent || "").trim() });
+    return {
+      hasPanel: Boolean(panel),
+      inPanel: inPanel.map(shape),
+      outside: outside.map(shape),
+    };
+  })()`);
+
+  if (!seen.hasPanel) throw new Error(`[${where}] 스레드 패널이 열리지 않았다`);
+  if (seen.inPanel.length === 0) {
+    throw new Error(`[${where}] 패널 루트에 「답글 N개」가 없다`);
+  }
+  for (const anchor of seen.inPanel) {
+    if (anchor.tag === "BUTTON") {
+      throw new Error(
+        `[${where}] 스레드 패널의 「${anchor.text}」가 아직 <button>이다 — 눌러도 아무 일이 없는 컨트롤이다`
+      );
+    }
+    if (!anchor.text.startsWith("답글 ")) {
+      throw new Error(`[${where}] 답글 수를 읽을 수 없다: ${anchor.text}`);
+    }
+  }
+  const live = seen.outside.filter((a) => a.tag === "BUTTON");
+  if (seen.outside.length > 0 && live.length === 0) {
+    throw new Error(
+      `[${where}] 채널 타임라인의 「답글 N개」까지 글이 됐다 — 스레드로 들어가는 길이 없다`
+    );
+  }
+  console.log(
+    `  thread rollup ${where}: 패널 ${seen.inPanel.map((a) => a.tag).join(",")} · 타임라인 ${live.length}개 버튼`
+  );
+}
+
+/**
  * 액션 진입점이 자기 행의 본문을 덮지 않는가 (goal B11 R2 Blocker).
  *
  * 1라운드는 액션 바를 행 위에 음수 오프셋(`-top-3`)으로 띄웠는데, 바 높이가
@@ -1765,6 +1932,10 @@ async function captureMobile(browser, scheme) {
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await page.getByTestId("login-submit").waitFor({ state: "visible" });
   await assertNoHorizontalOverflow(page, `login ${scheme}`);
+  // goal P3 1-4: 폼의 1급 컨트롤은 이 폭에서 44px다. 데스크탑 프레임은 같은
+  // 컨트롤을 32px로 찍으므로, 두 프레임이 함께 "토큰이 아니라 폭이 결정한다"를
+  // 말한다.
+  await assertTapTargets(page, `login ${scheme}`);
   await shoot(page, "login");
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
@@ -2303,6 +2474,8 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("thread-composer-input").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
+  // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
+  await assertThreadRollupNotDead(login, `thread panel ${scheme}`);
   const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
@@ -2454,6 +2627,7 @@ async function captureScheme(browser, scheme) {
     .click();
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await assertPausedNoticeFolded(directory, `dm ${scheme}`);
   const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);

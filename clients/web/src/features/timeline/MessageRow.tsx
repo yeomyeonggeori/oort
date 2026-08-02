@@ -1,5 +1,10 @@
 import { useMemo, useRef, useState } from "react";
-import { threadRollup, type Message, type RosterMember } from "@/lib/api";
+import {
+  threadRollup,
+  type Message,
+  type RosterMember,
+  type ThreadRollup,
+} from "@/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
@@ -65,6 +70,18 @@ function relativeLabel(atMs: number, nowMs: number): string {
   return `${Math.round(hours / 24)}일 전`;
 }
 
+/**
+ * 「답글 3개 · 마지막 5분 전」. 버튼으로도 글로도 그려지므로 문구는 한 곳에서
+ * 나온다 (goal P3 1-1): 스레드를 열 수 있는 자리와 이미 열어 둔 자리가 같은 값을
+ * 읽어야 두 표면이 서로 다른 말을 하지 않는다.
+ */
+function rollupLabel(rollup: ThreadRollup): string {
+  return `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
+    rollup.lastReplyAtMs,
+    Date.now()
+  )}`;
+}
+
 /** Shared with the pending row so an optimistic echo sits on the same grid. */
 export function Avatar({
   member,
@@ -108,6 +125,7 @@ export function MessageRow({
   startsGroup,
   directory,
   actions,
+  pausedRepeat,
   onOpenThread,
   onOpenWorkSession,
   onResend,
@@ -116,6 +134,12 @@ export function MessageRow({
   startsGroup: boolean;
   directory: Directory;
   actions?: MessageRowActions;
+  /**
+   * 이 「일시정지」 알림이 대신하는 알림 수 (goal P3 1-2, model.ts
+   * `foldPausedNotices`). 앞선 반복은 그려지지 않고 이 줄 하나만 남으므로, 몇 번이
+   * 응답 없이 지나갔는지는 이 줄이 말해야 한다.
+   */
+  pausedRepeat?: number;
   onOpenThread?: (message: Message) => void;
   onOpenWorkSession?: (sessionId: string) => void;
   /** Re-send a row the server marked `failed` (the composer's send path). */
@@ -144,6 +168,12 @@ export function MessageRow({
   const failed = message.state === "failed";
   const rollup = threadRollup(message);
   const showsEditedMark = message.state === "edited" && !editing;
+  // 하나로 접힌 반복 (goal P3 1-2). 한 번뿐이면 셀 것이 없으므로 아무 말도 하지
+  // 않는다 — "1개"는 개수가 아니라 잡음이다.
+  const repeatLabel =
+    pausedRepeat !== undefined && pausedRepeat > 1
+      ? `응답하지 못한 메시지 ${pausedRepeat}개`
+      : null;
   // Agent events render their structured body as a card in the SAME row (R-1
   // §4): tool runs, approvals, settled turn cost, and the ADR-0126 D2 code
   // artifacts. Which of those takes the slot, and what the winner has to carry
@@ -380,24 +410,42 @@ export function MessageRow({
             자기 띠에 올려서, 한 줄짜리 메시지 아래에 그 메시지보다 높은 세 겹의
             꼬리가 쌓였다 — 본문이 자기 부속물에 지는 그림이다. 칩은 누르는
             것이라 자기 줄을 갖고, 읽기만 하는 두 조각은 한 줄에 함께 앉는다. */}
-        {(showsEditedMark || rollup) && (
+        {(showsEditedMark || rollup || repeatLabel) && (
           <div
             className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted"
             data-testid="message-meta"
           >
             {showsEditedMark && <span>수정됨</span>}
-            {rollup && (
-              <button
-                type="button"
-                onClick={() => onOpenThread?.(message)}
-                data-testid="thread-anchor"
-                data-row-action=""
-                className="rounded-sm hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                답글 {rollup.replyCount}개 · 마지막{" "}
-                {relativeLabel(rollup.lastReplyAtMs, Date.now())}
-              </button>
+            {/* 접힌 반복의 개수 (goal P3 1-2). 알림 문장은 서버가 쓴 그대로 본문에
+                남고, 이 조각은 그 문장이 몇 번 반복될 뻔했는지만 덧붙인다 —
+                사라진 것은 같은 문장이지 사실이 아니다. */}
+            {repeatLabel && (
+              <span data-testid="paused-notice-repeat">{repeatLabel}</span>
             )}
+            {rollup &&
+              // 죽은 컨트롤을 만들지 않는다 (goal P3 1-1). 스레드 패널은
+              // `onOpenThread`를 넘기지 않는데 — 이미 그 스레드를 열어 둔 자리라
+              // "여는" 동작 자체가 없다 — R1은 그래도 <button>을 그렸다. 포커스가
+              // 잡히고 hover에 반응하면서 눌러도 아무 일이 없는 버튼이었다.
+              //
+              // 행이 이미 쓰고 있는 규칙을 그대로 따른다: 위의 `available.reply`는
+              // 핸들러가 없으면 답글 액션을 아예 내놓지 않는다("갈 곳 없는 답글은
+              // 막다른 길이다"). 같은 이유로 여기서도 갈 곳이 있을 때만 버튼이고,
+              // 없으면 읽는 글이다. 「답글 3개 · 마지막 5분 전」은 그 자체로 읽을
+              // 값이므로 정보는 그대로 남고 없어지는 것은 가짜 어포던스뿐이다.
+              (onOpenThread ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenThread(message)}
+                  data-testid="thread-anchor"
+                  data-row-action=""
+                  className="rounded-sm hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  {rollupLabel(rollup)}
+                </button>
+              ) : (
+                <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
+              ))}
           </div>
         )}
       </div>

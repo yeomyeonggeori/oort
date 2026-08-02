@@ -23,10 +23,22 @@ const buttonVariants = cva(
         outline:
           "border border-line-strong bg-transparent text-ink hover:bg-surface-hover",
       },
+      // 폰에서 44px가 되는 것은 **폼의 1급 버튼**뿐이다 (goal P3 1-4).
+      //
+      // `default`와 `lg`는 폼이 착지하는 자리다 — 로그인의 [로그인], 다이얼로그의
+      // [지우기]. 거기서 32px는 Apple HIG의 44pt에 못 미치고, 오터치의 대가가 가장
+      // 큰 버튼이 가장 작다는 뜻이 된다. `tap-target`은 600px 미만에서만 자라므로
+      // (tokens.css) 데스크탑의 32px 밀도는 그대로다.
+      //
+      // `sm`과 `icon`은 일부러 두고 간다. 그 둘은 툴바·행 안의 조밀한 보조
+      // 컨트롤이고, 폰에서 44px가 필요한 자리는 이미 각자 `tap-target`을 자기
+      // className에 달고 있다(사이드바의 아이콘 버튼들). 여기서 일괄로 키우면
+      // 그 판단이 필요한 자리와 아닌 자리가 구분되지 않고, 폰의 행 높이만
+      // 전부 올라간다 — 이번 범위는 폼이지 전 앱이 아니다.
       size: {
-        default: "h-control px-4 py-2",
+        default: "tap-target h-control px-4 py-2",
         sm: "h-control-sm px-3 text-meta",
-        lg: "h-control-lg px-6",
+        lg: "tap-target h-control-lg px-6",
         icon: "size-control",
       },
     },

@@ -285,6 +285,157 @@ export function startsAuthorGroup(
   return dayKey(previous.createdAtMs) !== dayKey(current.createdAtMs);
 }
 
+// ---- 멈춘 에이전트 알림 접기 (goal P3 1-2) -----------------------------------
+//
+// 서버는 멈춘 에이전트를 부를 때마다 시스템 한 줄을 남긴다: `type: "system"`,
+// `props.kind = "agent_paused"`, 그리고 그 줄을 부른 메시지의 id
+// (MessageRoutes.swift `insertPausedMentionSystemLine` / mention.rs
+// `paused_mention_props`). 1:1 DM에서는 사람이 쓰는 **모든** 메시지가 상대
+// 에이전트를 부르므로, 다섯 번 말하면 똑같은 문장이 다섯 줄 쌓인다.
+//
+// 접는 것은 여기, 렌더 파생에서만 한다. 서버의 paused 경로도, `messages` 배열도
+// 건드리지 않는다 — 배열에서 지우면 seq에 구멍이 생기고 그 구멍은 이 클라이언트가
+// 받지 못한 것과 구별되지 않아 다음 재연결이 그것을 메우러 나선다(applyTombstone
+// 주석과 같은 이유다).
+//
+// 없애는 것은 반복이지 정보가 아니다. 살아남는 줄은 **마지막** 것이라 사람이 방금
+// 보낸 메시지 바로 밑에 앉고, 그래서 "왜 답이 없지"의 답은 언제나 가장 최근 질문
+// 옆에 있다. 접힌 개수는 그 줄이 자기 옆에 적으므로 몇 번이 응답 없이 지나갔는지도
+// 화면에 남는다.
+//
+// 접기를 멈추는 세 자리가 있고, 셋 다 "그 둘은 같은 말이 아니다"라는 한 가지
+// 이유에서 나온다:
+//   1. 사이에 그 에이전트가 **말했다** — 정지가 풀렸다가 다시 걸린 것이므로 뒤의
+//      알림은 반복이 아니라 새 소식이다.
+//   2. 두 알림을 부른 사람이 **다르다** — 채널에서 A와 B가 각각 멘션한 모양이다.
+//      각 알림은 자기를 부른 멘션 옆에 남아야지, 남의 멘션 밑으로 끌려가면 안 된다.
+//   3. 사이에 **날이 바뀌었다** — 접으면 알림이 다른 날짜 구분선 아래로 옮겨
+//      앉는다. 타임라인이 이미 선을 그은 자리를 렌더 파생이 넘을 수는 없다.
+
+/** 서버가 이 시스템 줄에 붙이는 표식 (Swift :1602 / mention.rs). */
+export const PAUSED_NOTICE_KIND = "agent_paused";
+
+function propString(
+  props: Record<string, unknown> | undefined,
+  key: string
+): string | undefined {
+  const value = props?.[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * 이 행이 「에이전트 일시정지」 알림이면 그 에이전트의 member id, 아니면 null.
+ *
+ * `props.agent_member_id`가 정본이고 작성자는 대비책이다. 서버는 이 줄을 그
+ * 에이전트 자신의 이름으로 쓰므로 둘은 같은 값이지만, 비교는 언제나 `uuidEq`가
+ * 한다 — Swift는 UUID를 대문자로 내고 이 두 키만 소문자로 쓰기 때문에, 한 응답
+ * 안에서도 대소문자가 갈린다.
+ */
+export function pausedNoticeAgentId(message: Message): string | null {
+  if (message.type !== "system") return null;
+  if (propString(message.props, "kind") !== PAUSED_NOTICE_KIND) return null;
+  return propString(message.props, "agent_member_id") ?? message.authorMemberId;
+}
+
+/** 어떤 알림이 접혔고, 살아남은 알림이 몇 개를 대신하는가. */
+export interface PausedNoticeFold {
+  /** 접혀서 그려지지 않는 알림의 seq. */
+  suppressed: Set<number>;
+  /** 살아남은 알림의 seq → 그것이 대신하는 알림 수. 2 이상일 때만 들어 있다. */
+  repeats: Map<number, number>;
+}
+
+export function emptyPausedNoticeFold(): PausedNoticeFold {
+  return { suppressed: new Set(), repeats: new Map() };
+}
+
+/**
+ * 알림을 부른 메시지의 작성자. 서버가 알림에 적어 둔 `source_message_id`가
+ * 정본이고, 그 메시지가 아직 안 실린 페이지에 있으면 바로 윗행으로 물러선다
+ * (서버는 멘션 바로 다음 seq에 알림을 쓴다).
+ *
+ * 못 찾으면 null이고, null은 "다른 사람"으로 친다 — 모르면 접지 않는 쪽이 안전한
+ * 방향이다. 접기는 되돌릴 수 있지만 남의 멘션 밑으로 끌려간 알림은 오독이다.
+ */
+function noticeTriggerAuthor(
+  notice: Message,
+  previousRow: Message | undefined,
+  bySourceId: Map<string, Message>
+): string | null {
+  const sourceId = propString(notice.props, "source_message_id");
+  const source = sourceId ? bySourceId.get(sourceId.toLowerCase()) : undefined;
+  if (source) return source.authorMemberId;
+  return previousRow?.authorMemberId ?? null;
+}
+
+/**
+ * 연속된 「일시정지」 알림을 마지막 하나로 접는다. 순수 함수이고, 입력 배열은
+ * 그대로 둔다 — 접기는 {@link buildTimelineItems}가 그리는 순간에만 일어난다.
+ */
+export function foldPausedNotices(messages: Message[]): PausedNoticeFold {
+  const fold = emptyPausedNoticeFold();
+  if (messages.length === 0) return fold;
+
+  const bySourceId = new Map<string, Message>();
+  for (const message of messages) bySourceId.set(message.id.toLowerCase(), message);
+
+  // 묶음을 먼저 **모으고**, 접는 것은 그다음이다. 세면서 접으면 "지금까지 몇
+  // 개"가 진행 중인 묶음 안에 들어가야 하는데, 그 값이 다음 판단의 입력이 되는
+  // 순간 읽기와 쓰기가 한 변수에서 만난다. 두 단계로 나누면 각 단계는 한 방향만
+  // 본다: 위는 어디서 끊기는지만, 아래는 모인 것을 어떻게 그릴지만.
+  const runs: Message[][] = [];
+  let current: Message[] = [];
+  /** 열린 묶음이 말하고 있는 에이전트와, 그를 부른 사람. */
+  let runAgent: string | null = null;
+  let runTrigger: string | null = null;
+  let previousRow: Message | undefined;
+
+  for (const message of messages) {
+    const agentId = pausedNoticeAgentId(message);
+    if (agentId === null) {
+      // 그 에이전트가 말했다 → 정지가 풀렸던 것이므로 묶음을 끊는다 (①).
+      if (runAgent !== null && uuidEq(message.authorMemberId, runAgent)) {
+        runs.push(current);
+        current = [];
+        runAgent = null;
+        runTrigger = null;
+      }
+      previousRow = message;
+      continue;
+    }
+
+    const trigger = noticeTriggerAuthor(message, previousRow, bySourceId);
+    const last = current[current.length - 1];
+    const continues =
+      last !== undefined &&
+      runAgent !== null &&
+      uuidEq(runAgent, agentId) &&
+      runTrigger !== null &&
+      trigger !== null &&
+      uuidEq(runTrigger, trigger) && // ②
+      dayKey(last.createdAtMs) === dayKey(message.createdAtMs); // ③
+
+    if (!continues) {
+      if (current.length > 0) runs.push(current);
+      current = [];
+      runAgent = agentId;
+      runTrigger = trigger;
+    }
+    current.push(message);
+    previousRow = message;
+  }
+  if (current.length > 0) runs.push(current);
+
+  // 한 묶음에서 살아남는 것은 마지막 하나뿐이고, 그 하나가 묶음의 크기를 진다.
+  // 혼자인 묶음은 접을 것이 없으므로 아무 표시도 남기지 않는다.
+  for (const run of runs) {
+    if (run.length < 2) continue;
+    for (const notice of run.slice(0, -1)) fold.suppressed.add(notice.seq);
+    fold.repeats.set(run[run.length - 1].seq, run.length);
+  }
+  return fold;
+}
+
 /**
  * A reconnect that healed a gap. `seq` is the newest seq confirmed present
  * after the heal, which is exactly what the marker states to the user: no
@@ -420,7 +571,17 @@ export type TimelineItem =
   | { kind: "day"; key: string; atMs: number }
   | { kind: "unread"; key: string; count: number }
   | { kind: "recovery"; key: string; seq: number; source: "replay" | "backfill" }
-  | { kind: "message"; key: string; message: Message; startsGroup: boolean }
+  | {
+      kind: "message";
+      key: string;
+      message: Message;
+      startsGroup: boolean;
+      /**
+       * 이 행이 「일시정지」 알림이고 앞선 같은 알림들을 대신하고 있을 때, 자기를
+       * 포함해 몇 개를 대신하는지 (2 이상). 그 외의 행에는 없다.
+       */
+      pausedRepeat?: number;
+    }
   | { kind: "pending"; key: string; pending: PendingMessage; startsGroup: boolean };
 
 export interface BuildItemsOptions {
@@ -474,7 +635,14 @@ export function buildTimelineItems(
     else markersBySeq.set(anchor, [marker]);
   }
 
+  // 반복된 「일시정지」 알림은 마지막 하나만 그린다. 배열이 아니라 이 스트림에서만
+  // 빠지므로 seq도, 커서도, 재연결 복구도 접기를 모른다.
+  const pausedFold = foldPausedNotices(messages);
+
   for (const message of messages) {
+    // 그리지 않을 행은 날짜 구분선도 저자 묶음도 만들지 않는다: `previous`는
+    // 언제나 **화면에 남은** 직전 행이어야 접힌 자리에 빈 헤더가 생기지 않는다.
+    if (pausedFold.suppressed.has(message.seq)) continue;
     if (
       !previous ||
       dayKey(previous.createdAtMs) !== dayKey(message.createdAtMs)
@@ -504,6 +672,7 @@ export function buildTimelineItems(
       key: `m-${message.seq}`,
       message,
       startsGroup: dividerAbove || startsAuthorGroup(previous, message),
+      pausedRepeat: pausedFold.repeats.get(message.seq),
     });
     dividerAbove = false;
     for (const marker of markersBySeq.get(message.seq) ?? []) {
