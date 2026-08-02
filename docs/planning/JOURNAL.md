@@ -1505,3 +1505,24 @@
 ## 2026-07-09 · Fable · 진단
 - 한 일: 6방향 코드베이스 감사 + Slack UX 딥리서치(36소스) → 진단 아티팩트(https://claude.ai/code/artifact/1e7d94cf-094c-4b66-b2b9-dbef028bee06). 판정: 골격 견고 / 신원·체감 레이어가 봇 수준 / 전면 리라이트 비추천. ADR 결정 큐 0100~0109 수립.
 - 열린 것: 결정 큐 0102~0109 (0100·0101은 다음 날 처리됨).
+
+## 2026-08-02 (밤) · Fable · 오케스트레이션 — RN 스파이크 #837 완주 + momo-core 추출
+- **게이트 1(한글 IME) = PASS.** 성재 iPhone 17/iOS 26.5.1, 표준 쿼티 + 10키(천지인) 양쪽. A·B·C·E 최종값 `안녕하세요` 정확 일치, **D(비동기 setState)만 진짜 FAIL**(자모가 아예 안 합쳐짐).
+  - **1차 FAIL 대부분은 하네스 오탐이었다** — 불변식이 한글 **받침 이동**을 몰랐다(`안녕핫`+ㅔ→`안녕하세`는 정상인데 `added>=2`를 위반으로 셈). 10키는 조합 꼬리가 `ㅅ·`처럼 2글자로 벌어졌다 접혀 `dropped>=2`도 정상. → `suspicious = dropped > 2`로 정정, **주 판정은 `finalMatches`**(D가 위반 0건이면서 완전히 깨진 것이 그 근거). 실측 전이 회귀 테스트 12케이스.
+  - **「조합 밑줄」 항목 폐기** — 성재 메모 앱 확인 결과 iOS 한국어는 네이티브에서도 밑줄이 없다(밑줄은 일본어·중국어 marked text 관례, RN #55257 제목도 `[Japanese Market Blocker]`). 한국어엔 판정력 0.
+  - **소득 = 설계 제약**: **컴포저 `value`를 비동기로 반영하면 한글이 깨진다.**
+  - 기기가 아니었으면 못 본 하네스 결함 2건: `onKeyPress`가 setState 업데이터 안에서 `nativeEvent`를 읽어 크래시(합성 이벤트 회수 후 null), 키보드 전환이 케이스를 초기화하지 않아 판정이 섞이던 구멍.
+- **게이트 5(리스트) = PASS, 단 전제가 바뀐다.** 실기기 **인버티드**: 새 메시지 46~91px 튐(프리펜드는 3자 모두 0px, UI 64/JS 63로 프레임률은 무관). **정방향**: FlashList v2·Legend 둘 다 **0px**.
+  - **문제는 RN이 아니라 `inverted` 전제였다.** 그리고 인버티드는 우리 설계가 아니었다 — 티켓이 Mattermost 전제를 승계했을 뿐이고 `clients/web/.../Timeline.tsx`는 이미 **정방향 + 명시적 앵커 보존**(`firstItemIndex` 감소)이다. → **Mattermost식 RN 코어(Fabric ObjC++) 패치 불필요.** 유지보수 부담 큰 결정을 피했다.
+  - 시뮬레이터를 판정에 쓴 근거: 인버티드를 양쪽에서 재면 FlashList **67.3=67.3**, Legend **92.3≈91.3**. 이 항목만큼은 시뮬레이터가 안 거짓말한다(1차의 "못 믿는다" 분류가 과했다).
+  - 한계: 정방향 FlatList는 `getItemLayout` 부재로 앵커 미도달(측정 실패). 독립 두 구현이 0px을 냈으므로 결론 불변.
+  - **오케스트레이터 반성**: 측정 하나로 성재를 6번 붙잡았고 그중 2번은 내가 개발 서버를 죽여 세션을 날렸다. 실기기가 꼭 필요한 건 IME 하나뿐이었다. → 하네스에 **자동 매트릭스**(조작 제거)·**측정 실패를 -1로 명시 기록**·**결과를 로컬 수집기로 흘리는 경로**(시뮬레이터 시스템 알림이 화면 판독을 막은 실측 대응) 추가.
+- **#837 전항 통과** → ADR-0137 이행 순서 2번 착수·랜딩: **RN-C1 `packages/momo-core` 추출(PR #964)**.
+  - **테스트 1,190 → 1,192, 유실 0**(core 617/28파일 + web 575/28파일). 번들 +0.06%(엔트리 +1.19kB) — 원인 둘뿐: 호스트 포트 간접화, `serverSurfaces.ts`의 빌드 모드가 Vite 리터럴에서 함수로 바뀌며 상수 접기가 풀린 것.
+  - `git mv` 64파일(소스 36+테스트 28), 순수/플랫폼이 섞인 6파일은 **분리 후 웹에 재export 파사드**를 남겨 **호출 지점 0개 변경**.
+  - **코어 순수성을 기계 둘로 강제**: `scripts/purity.mjs`(TS 컴파일러 AST — React/RN/react-query/Tauri/centrifuge/xterm/Tailwind·`@/` 별칭·패키지 밖 상대경로·플랫폼 전역 26종·`import.meta`·`.tsx/.css`·런타임 의존성 차단) + scope-aware eslint. **grep 대신 AST를 쓴 이유가 실측**이다 — 후보 12파일의 플랫폼 API 히트가 전부 산문 주석이었다. 오케스트레이터가 위반 파일을 심어 exit 1 확인, 제거 후 70파일 0 escape 복귀.
+  - **`.gitignore` 함정 발견**: Swift SPM용 `Packages/` 규칙이 **대소문자 무시 파일시스템(macOS 기본)에서 npm `packages/`까지 삼켜** 새 파일 전부가 `git status`에서 사라졌다. 못 봤으면 `git mv` 된 64파일만 담긴 반쪽 PR이 나갔다.
+  - 실 위반 1건 정직 수정: `serverSurfaces.ts`가 `import.meta.env.MODE`를 읽었는데 Metro/Hermes엔 없다 → 값·판단 불변, 읽는 경로만 호스트 포트로.
+  - `clients/web`은 workspace 멤버로 넣지 않고 Vite alias+tsconfig paths로 소비(락파일 재해석 → 의존성 드리프트가 "회귀 0" 판정의 근거인 번들 대조를 오염시킨다). `package-lock.json` 바이트 불변. Nx/Turborepo 미도입.
+  - 게이트: web typecheck/lint/build/test · core typecheck/lint/test/purity · gate:shell·wire·csp·huddle·my-sessions·agent-hub·workstream 전부 PASS. mobile-spike jest 16/16(경로 매핑만).
+- 열린 것: **`capture:design` 플레이크가 base 이전부터 존재**(워커 실측 base 4회 중 1 PASS, 서로 다른 비결정 실패 2종). 리팩터 중 고치면 회귀 신호가 죽으므로 손대지 않음 — **별도 티켓**. 그 외 후속: RN v0 UI 배치(auth/sidebar/timeline/chat/inbox ≈4,600줄) · `work_session_idle` 푸시 어휘 · Swift/Rust 메시지 id 대소문자.
