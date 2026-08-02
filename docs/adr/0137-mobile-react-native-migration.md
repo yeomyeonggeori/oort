@@ -1,5 +1,7 @@
 # ADR-0137: 모바일 클라이언트 — React Native 채택 (iOS 재작성 + Android 신설)
 
+> **범위 갱신 2026-08-02(성재 결정 6)**: **Android 보류 · App Store 전용 배포.** 취소가 아니라 순서 변경이다 — 상세는 §성재 결정(6).
+
 - Status: **Accepted** (2026-07-27, 성재 승인 — "ADR-0137 Accept 진행해줘". 스택 방향은 2026-07-26 결정 "RN쪽으로 가자", 세부 결정 5건은 아래 §성재 결정에 기록)
 - 관련: **ADR-0123(iOS 클라이언트 v0 — 본 ADR이 대체)**, ADR-0133(UI 스택 Tauri/React — iOS 경로를 P4a 스파이크로 미뤄둔 공백을 본 ADR이 해소), ADR-0120(푸시 id-only→NSE fetch — **승계**), ADR-0125(work host 등급), 리서치 정본 `docs/planning/2026-07-26-rn-adoption-plan.md`·`2026-07-26-mobile-stack-research.md`
 
@@ -113,11 +115,26 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 하나라도 실패하면 성재에게 재보고하고 계획을 고친다. 특히 **한글 IME는 1번 게이트**이며, 실패 시
 스택 선택 자체를 재검토한다(Flutter도 한글 이슈 계보가 있어 어느 스택이든 실기기 검증은 필요하다).
 
-## 이행 순서 (Accepted 시점 기준)
+## 성재 결정 (6) — 2026-08-02 · **Android 보류, App Store 전용 배포**
 
-1. **스파이크 1장** — D6의 6항목, 5~7일, 실기기. 한글 IME 최우선.
+> "안드쪽은 일단 미뤄두자. 앱스토어에만 배포하려해"
+
+**취소가 아니라 순서 변경이다.** v0의 출하 대상은 **iOS/App Store 하나**로 좁힌다. 구체적 영향:
+
+| 조항 | 변경 |
+|---|---|
+| D6 게이트 6(Android 동일 루프) | **보류.** #837 수용기준은 **게이트 1~5**로 축소. Android SDK 설치 불요 |
+| D1 "Android는 `expo prebuild --platform android`로 골격 부트스트랩" | **보류.** 지금은 `expo prebuild`를 **아예 실행하지 않는다** → D7 정오 7항의 "NSE 소멸" 위험이 당분간 발생하지 않는다(Android 착수 시 CI 가드부터) |
+| D6-3 / 성재 결정 5번 Android cleartext | **보류.** 단 **문제 자체는 사라지지 않고 iOS ATS로 옮겨간다** — 다만 iOS는 **이미 해결돼 있다**: `NSAllowsLocalNetworking=true`가 `XcodeHost/Info.plist:41`과 스파이크 `MobileSpike/Info.plist:33`에 있고, 이것이 `.local`·로컬망 평문에 대한 Apple 공인 예외라 심사에서 다투지 않는다. `NSAllowsArbitraryLoads`는 **false 유지**(그쪽이 심사에서 정당화를 요구하는 스위치다) |
+| 이행 순서 6번(Android 레인 + cleartext) | **보류** |
+| D3 `packages/momo-core` | **불변.** 이 결정의 근거는 웹↔iOS 로직 공유(A군 7,516줄 + B군 2,108줄)이지 플랫폼 수가 아니다 |
+| D2 전량 재작성 | **유지, 단 근거 하나가 약해짐을 기록한다.** D2 ①("Android가 0 → brownfield는 iOS에만 걸려 비대칭")은 Android가 뒤로 밀리면 **당장은 힘을 잃는다**. ②(14,119줄로 유계) ③(오너 1인+에이전트는 Fabric interop 크래시를 판별 못 함)는 그대로 성립하고, SwiftUI 존치는 웹과의 공유가 **0**이라 D3의 이득 전체를 포기한다. 결론은 안 바뀌지만 **iOS 단독일 때 RN의 우위 폭은 얇아진다** — 게이트 1(한글 IME)·5(스크롤 보존)가 FAIL이면 이 얇아진 폭 때문에 "SwiftUI 존치"가 다시 실질 후보가 된다 |
+
+## 이행 순서 (2026-08-02 갱신 — Android 보류 반영)
+
+1. **스파이크** — D6의 **게이트 1~5**, 실기기. 한글 IME 최우선. (게이트 2·3은 2026-08-02 PASS, 1·4·5 기기대기)
 2. `packages/momo-core` 추출 — **웹이 먼저 소비해 회귀 0을 증명한 뒤** 모바일이 붙는다(D3).
 3. RN 스캐폴드 + URL 폴리필 + react-query 배선.
 4. v0 UI 배치(auth/sidebar/timeline/chat/inbox ≈4,600 LOC).
-5. NSE 이식 + TestFlight.
-6. Android 레인 + cleartext 정책 티켓.
+5. NSE 이식 + **fastlane 번들 ID/확장 프로파일 수선**(D7 정오 1항 — RN 무관하게 선행 필요) + TestFlight → App Store.
+6. ~~Android 레인 + cleartext 정책 티켓~~ → **보류**(2026-08-02 성재 결정 6).
