@@ -110,9 +110,9 @@ api_key = app_store_connect_api_key(
 ```bash
 # signing repo 초기화 + 인증서/프로파일 생성·업로드 (대화형 OK, 1회)
 bundle exec fastlane match init           # Matchfile 생성
-bundle exec fastlane match appstore       # iOS App Store
-bundle exec fastlane match developer_id   # macOS 직접배포(공증)용
-# (macOS App Store도 낼 거면) bundle exec fastlane match appstore --platform macos
+bundle exec fastlane match appstore       # iOS App Store (Matchfile 기본값 = 앱 + 알림 확장)
+# macOS는 번들 ID·타입이 다르므로 명시 필수(안 하면 iOS 기본값이 잘못 쓰인다)
+bundle exec fastlane match developer_id --platform macos --app_identifier com.dawnkim.momo
 ```
 
 ### 2.3 CI에서 (읽기전용)
@@ -122,7 +122,9 @@ match(
   type: "appstore",
   readonly: true,                 # CI 필수 (검증됨)
   api_key: api_key,               # API Key로 프로파일 갱신 인가
-  app_identifier: ["com.dawnkim.momo"],
+  # 앱과 확장은 각각 프로파일이 필요하다. 정본은 Xcode 프로젝트의
+  # PRODUCT_BUNDLE_IDENTIFIER — docs/cicd/10-ios-signing-identity-runbook.md §0.
+  app_identifier: ["app.momo.ios", "app.momo.ios.NotificationService"],
   git_url: ENV["MATCH_GIT_URL"],
   git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV['MATCH_GIT_TOKEN']}")
 )

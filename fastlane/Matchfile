@@ -1,6 +1,6 @@
 # momo — Matchfile
 # 인증서/프로파일은 별도 private git repo(Dawn-kim-official/momo-signing)에 암호화 저장.
-# CI는 readonly. 최초 생성은 개발자 머신에서 1회(docs/cicd/01-setup-runbook.md).
+# CI는 readonly. 최초 생성은 개발자 머신에서 1회(docs/cicd/10-ios-signing-identity-runbook.md).
 
 git_url(ENV["MATCH_GIT_URL"] || "https://github.com/Dawn-kim-official/momo-signing.git")
 storage_mode("git")
@@ -8,7 +8,26 @@ storage_mode("git")
 # type 은 레인별로 Fastfile에서 지정(appstore / developer_id). 기본값:
 type("appstore")
 
-app_identifier(["com.dawnkim.momo"])   # ⚠️ 실제 Bundle ID로 교체
+# 이 파일의 기본값은 iOS 레인용이다(Fastfile의 default_platform(:ios)와 일치).
+platform("ios")
+
+# 정본 = clients/iOS/MomoiOS.xcodeproj/project.pbxproj 의 PRODUCT_BUNDLE_IDENTIFIER.
+# fastlane을 프로젝트에 맞추는 것이지 그 반대가 아니다.
+#
+# 앱과 알림 확장(NSE)은 **각각** App ID와 프로파일이 필요하다. 하나로 뭉뚱그리면
+# 확장이 서명되지 않아 CI 아카이브에서만 터진다(로컬은 CODE_SIGNING_ALLOWED=NO라 안 드러남).
+# 테스트 번들 app.momo.ios.tests 는 CODE_SIGNING_ALLOWED=NO + TEST_HOST 라 서명 대상이
+# 아니고 배포물에도 포함되지 않으므로 프로비저닝하지 않는다.
+#
+# 이 목록이 pbxproj와 갈라지면 scripts/verify_ios_signing.sh 가 실패한다.
+app_identifier([
+  "app.momo.ios",
+  "app.momo.ios.NotificationService"
+])
+
+# macOS(MomoMac)는 번들 ID도 타입도 다르다. 위 기본값을 쓰지 말고 명시해서 호출한다:
+#   bundle exec fastlane match developer_id --platform macos --app_identifier com.dawnkim.momo
+# (Fastfile의 mac 레인은 이미 명시적으로 넘긴다.)
 
 # CI에서 readonly 는 Fastfile에서 readonly:true 로 강제(여기선 기본 false 유지).
 # 암호화 패스프레이즈: ENV["MATCH_PASSWORD"]
