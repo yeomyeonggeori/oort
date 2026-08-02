@@ -137,4 +137,10 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 3. RN 스캐폴드 + URL 폴리필 + react-query 배선.
 4. v0 UI 배치(auth/sidebar/timeline/chat/inbox ≈4,600 LOC).
 5. NSE 이식 + **fastlane 번들 ID/확장 프로파일 수선**(D7 정오 1항 — RN 무관하게 선행 필요) + TestFlight → App Store.
-6. ~~Android 레인 + cleartext 정책 티켓~~ → **보류**(2026-08-02 성재 결정 6).
+6. **Android 레인 + cleartext 정책 티켓** → **보류, 재개 시점 = iOS v0가 TestFlight에 오른 직후**(2026-08-02 성재 결정 6·6-b).
+
+**6-b. Android 재개 시점을 왜 "iOS v0 TestFlight 직후"로 박는가** (성재 "리소스 대비 추천이면 안드도 해도 돼"에 대한 권고, 2026-08-02)
+- **싼 쪽은 UI다** — RN이라 iOS와 같은 코드이고, 지킬 기존 자산이 0이라 `expo prebuild --platform android` 골격으로 시작한다.
+- **비싼 쪽은 푸시다.** iOS는 Swift 329줄 + 기존 PushRelay의 APNs 경로를 **승계**하지만 Android는 그 승계가 **0**이다. FCM 발송 경로를 서버에 새로 지어야 하는데 **그 체인이 지금 전부 Swift이고 Rust 미이식**이다(D7 정오 6항). 지금 Android를 열면 FCM을 **Swift에 한 번, Rust에 또 한 번** 짓거나 Rust 이식이 끝날 때까지 막힌다.
+- **기다려서 잃는 것이 없다.** `expo prebuild`·Android 기기 루프·Play 레인은 나중에 해도 비용이 동일하고, **FCM만 나중이 더 싸다**(Rust 이식 후 한 번만 짓는다). 반대로 지금 열면 **iOS 판정(게이트 1·5)이 나오기 전에 스파이크 표면이 두 배**가 된다.
+- **지금 지킬 규율 하나**: 스캐폴드에 **iOS 전용 가정을 넣지 않는다**(RN이라 대체로 공짜다). 그 외 Android 작업은 하지 않는다.
