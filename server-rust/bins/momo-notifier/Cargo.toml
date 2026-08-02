@@ -22,17 +22,34 @@ path = "src/main.rs"
 momo-db = { path = "../../crates/momo-db" }
 momo-provider = { path = "../../crates/momo-provider" }
 momo-t3 = { path = "../../crates/momo-t3" }
+# P2 (ADR-0120 push drain). `momo-outbox` owns the push_candidate claim (it is
+# outbox SQL); `momo-push` owns judgment, the dispatch-log idempotency claim and
+# the id-only payload. This crate still owns no SQL.
+momo-outbox = { path = "../../crates/momo-outbox" }
+momo-push = { path = "../../crates/momo-push" }
+# `sign_base64` — the Ed25519 the relay authenticates this server by. Reused
+# rather than re-implemented so there is one signing primitive in the workspace.
+momo-wire = { path = "../../crates/momo-wire" }
 
 tokio = { workspace = true, features = ["signal", "time", "sync"] }
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# The relay hop. This is the notifier's ONLY outbound HTTP, and it terminates at
+# the push relay — never at Apple: this process holds no APNs key.
+reqwest.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-# Conformance harness (tests/notifier_conformance_pg.rs, all #[ignore]): the
-# real migrations + bootstrap roles, with the in-process mock substrate as the
-# provider so a death can be staged honestly.
+# Conformance harness (tests/*_pg.rs, all #[ignore]): the real migrations +
+# bootstrap roles, with the in-process mock substrate as the provider so a death
+# can be staged honestly. `axum` plays the push relay on a loopback port so the
+# signed request the notifier really sends can be inspected.
+axum.workspace = true
 chrono.workspace = true
+ed25519-dalek.workspace = true
 futures.workspace = true
 sqlx.workspace = true
-uuid.workspace = true

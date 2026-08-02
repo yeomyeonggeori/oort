@@ -336,6 +336,18 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/search/messages",
             get(routes::search::messages),
         )
+        // APNs devices (ADR-0120 D4, P2). Workspace-scoped like every other
+        // tenant-data surface: `device`/`push_token` carry a NOT NULL
+        // workspace_id under FORCE RLS, so registration keeps the same guard
+        // and RLS path as the rest of the router.
+        .route(
+            "/v1/workspaces/{ws}/devices",
+            post(routes::devices::register).get(routes::devices::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/devices/{device}",
+            delete(routes::devices::revoke),
+        )
         // work hosts (ADR-0125 registry)
         .route(
             "/v1/workspaces/{ws}/work-hosts",

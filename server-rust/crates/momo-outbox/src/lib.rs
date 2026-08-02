@@ -26,9 +26,15 @@
 //! caller's loop. Its `WHERE` clause is disjoint from [`relay`]'s by `kind` and
 //! from [`gateway`]'s by `method`, so all three consumers keep their own feed.
 
+//! P2 adds [`push`], the `push_candidate` half (migration 011): the notifier's
+//! claim and its boot-time reclaim of rows a crashed run left `processing`. Its
+//! `WHERE` clause is disjoint from all three by `kind`, so the fourth consumer
+//! keeps its own feed too.
+
 pub mod agent_job;
 pub mod emit;
 pub mod gateway;
+pub mod push;
 pub mod relay;
 
 pub use agent_job::{
@@ -41,6 +47,7 @@ pub use gateway::{
     settle_gateway_job_in_tx, ClaimedGatewayJob, GatewayJobStatus, GatewayLeaseBinding,
     GatewayLeaseSnapshot, CLAIM_LIMIT_DEFAULT, CLAIM_LIMIT_MAX, GATEWAY_LEASE_SECONDS,
 };
+pub use push::{claim_push_candidate_batch, reclaim_stuck_push_candidates, ClaimedPushCandidate};
 pub use relay::{
     backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,
     ClaimedRow, NOTIFY_CHANNEL,

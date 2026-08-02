@@ -1948,6 +1948,125 @@ pub struct AllowedAgentModelsResponse {
     pub allowed_agent_models: Vec<String>,
 }
 
+// ---- APNs devices (ADR-0120 D4, batch P2) ----
+//
+// Parity: `server/Sources/MomoServer/Routes/DTOs.swift:930-1026`.
+
+/// `POST /v1/workspaces/{ws}/devices` body.
+///
+/// **Deliberately lenient about unknown keys**, unlike most request DTOs in this
+/// file. Swift's hand-written `init(from:)` (`DTOs.swift:960-985`) reads only the
+/// keys it knows and ignores the rest, so a client that sends an extra field
+/// succeeds today; adding `deny_unknown_fields` here would turn that into a 400.
+/// The three dual-spelled fields keep their snake_case aliases for the same
+/// reason — Swift accepted both spellings.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeviceRequest {
+    /// Client-generated stable device identity. Re-sending the same id is the
+    /// idempotent re-registration / token-rotation path.
+    #[serde(alias = "device_id")]
+    pub device_id: String,
+    pub platform: String,
+    #[serde(default, alias = "app_build")]
+    pub app_build: Option<String>,
+    /// Hex APNs device token. Stored, never echoed back.
+    #[serde(alias = "apns_token")]
+    pub apns_token: String,
+    pub env: String,
+    pub topic: String,
+}
+
+/// A push token as returned to its owner.
+///
+/// The raw `apns_token` is intentionally absent — `apnsTokenSuffix` (trailing 8
+/// hex characters) is the entire registration receipt. There is no field here
+/// that could carry the token, and the domain record feeding it has none either.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushTokenDto {
+    pub id: String,
+    pub device_id: String,
+    pub env: String,
+    pub topic: String,
+    pub apns_token_suffix: String,
+    /// `null` (not omitted) while the token is live — Swift declares this
+    /// `Int64?` and encodes it with `encodeIfPresent`, but the client reads the
+    /// key's presence as "revoked or not", so it is always emitted.
+    pub invalidated_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub platform: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_build: Option<String>,
+    pub last_seen_at_ms: i64,
+    pub created_at_ms: i64,
+    pub push_tokens: Vec<PushTokenDto>,
+}
+
+impl From<momo_push::DeviceRecord> for DeviceDto {
+    fn from(record: momo_push::DeviceRecord) -> Self {
+        DeviceDto {
+            id: record.id.to_string(),
+            workspace_id: record.workspace_id.to_string(),
+            member_id: record.member_id.to_string(),
+            platform: record.platform,
+            app_build: record.app_build,
+            last_seen_at_ms: record.last_seen_at.timestamp_millis(),
+            created_at_ms: record.created_at.timestamp_millis(),
+            push_tokens: record
+                .push_tokens
+                .into_iter()
+                .map(PushTokenDto::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<momo_push::PushTokenRecord> for PushTokenDto {
+    fn from(record: momo_push::PushTokenRecord) -> Self {
+        PushTokenDto {
+            id: record.id.to_string(),
+            device_id: record.device_id.to_string(),
+            env: record.env,
+            topic: record.topic,
+            apns_token_suffix: record.apns_token_suffix,
+            invalidated_at_ms: record.invalidated_at.map(|at| at.timestamp_millis()),
+            created_at_ms: record.created_at.timestamp_millis(),
+            updated_at_ms: record.updated_at.timestamp_millis(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeviceResponse {
+    pub device: DeviceDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceListResponse {
+    pub devices: Vec<DeviceDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeDeviceResponse {
+    pub device: DeviceDto,
+    /// Tokens flipped to invalidated by **this** call — `0` on an idempotent
+    /// repeat. Rows are never deleted.
+    pub invalidated_count: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -39,6 +39,11 @@ momo-agent = { path = "../../crates/momo-agent" }
 # route layer still owns no SQL of its own and the plaintext bearer exists only
 # between the PUT body that carried it and the seal call.
 momo-settings = { path = "../../crates/momo-settings" }
+# P2 (푸시 등록 표면). `momo-push` owns every `device` / `push_token` statement the
+# devices route mounts. It carries no HTTP client of its own, so mounting the
+# registration surface here does not give momo-server an outbound HTTP
+# dependency (invariant #2) — the relay transport lives in momo-notifier.
+momo-push = { path = "../../crates/momo-push" }
 # B2.4: the signed work-host REQUEST authenticator hashes the raw body with the
 # shared `momo-wire` helper, so the server's digest and the daemon's signer are
 # one implementation — the exact drift Swift had between two copies of the
