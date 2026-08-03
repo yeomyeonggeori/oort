@@ -57,6 +57,30 @@ export function availableInboxFilters(
 }
 
 /**
+ * 「에이전트」 탭은 **두 원장 위에** 서 있고, 지금은 그 중 하나만 답한다
+ * (goal W-AP1 2R H1 → M-AP1 3R N-B에서 core로 승격).
+ *
+ * 승인 원장과 작업 실행 기록 둘이다. 이 서버는 앞의 것만 답하고 뒤의 것은 읽는
+ * 경로가 없다(경로가 POST 전용이라 GET은 405). 그런데 화면은 승인 기록만 담긴
+ * 목록을 그려 놓고, 비어 있으면 "조용한 게 정상입니다"라고 말했다. 절반이 보이지
+ * 않는다는 사실을 삼킨 문장이라 사용자는 에이전트가 아무 일도 하지 않았다고
+ * 읽는다 — 우리가 모르는 사실이다.
+ *
+ * 그래서 반쪽인 동안에는 그 사실을 먼저 말한다. 목록은 그대로 남긴다: 있는
+ * 절반을 감추는 것은 반대 방향의 같은 거짓말이다.
+ *
+ * **판정이 여기 사는 이유**는 두 클라이언트가 같은 답을 해야 하기 때문이다. 웹이
+ * 먼저 자기 파일(`features/inbox/approvalsPanel.ts`)에서 닫았고, 모바일이 같은
+ * 자리를 열면서 두 벌이 될 뻔했다. 두 벌이 되는 순간 한쪽만 고쳐지는 날이 온다 —
+ * `availableInboxFilters`가 바로 위에서 같은 이유로 같은 모양을 하고 있다.
+ */
+export function agentsFeedPartial(
+  provides: (surface: "agentRunHistory") => boolean
+): boolean {
+  return !provides("agentRunHistory");
+}
+
+/**
  * Parse a `?filter=` value, falling back to the first tab this server can serve.
  *
  * 기본값이 상수가 아니라 **남은 탭의 첫 번째**인 것이 goal B12의 수정이다. 예전

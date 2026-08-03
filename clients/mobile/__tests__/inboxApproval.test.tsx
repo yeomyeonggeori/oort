@@ -442,9 +442,12 @@ describe('결정의 세 갈래', () => {
     await waitFor(() =>
       expect(screen.getByTestId(`inbox-approval-${PENDING}-error`)).toBeTruthy(),
     );
+    // W-2R M5 이후 상태 코드는 문구에 없다. 사람에게 503은 할 말이 아니고,
+    // 할 말은 "무엇이 일어났고 다음에 뭘 하면 되는가"다.
     expect(screen.getByTestId(`inbox-approval-${PENDING}-error`)).toHaveTextContent(
-      /503/,
+      /서버가 오류로 답했습니다/,
     );
+    expect(screen.queryByText(/503/)).toBeNull();
     // 실패했으므로 결정된 척하지 않는다: 확정 버튼도 행도 그대로 있다.
     expect(screen.queryByTestId('inbox-decision-note')).toBeNull();
     expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
@@ -950,6 +953,96 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     await waitFor(() => expect(screen.getByTestId('approvals-absent')).toBeTruthy());
     expect(screen.queryByLabelText(/^승인/)).toBeNull();
     expect(screen.queryByLabelText(/^거부/)).toBeNull();
+  });
+});
+
+describe('아직 배포되지 않은 서버 (3R N-A)', () => {
+  /** 라우트를 싣지 않은 서버의 404 — 라우터 기본 응답이라 **본문이 없다**. */
+  function routeMissing(): Response {
+    return {status: 404, ok: false, text: async () => ''} as unknown as Response;
+  }
+
+  it('미제공을 장애로 그리지 않는다 — 재시도 버튼도 주지 않는다', async () => {
+    // 정적 판정은 W-AP1이 `provided: true`로 뒤집었다(라우트가 코드에 올라갔다).
+    // 그러니 아직 배포하지 않은 서버에서는 이 목록이 404를 받는다. 그것을 오류로
+    // 세면 화면은 "다시 시도"를 그리고, 다시 시도해도 영영 같은 답이 온다.
+    const fixture = installFetch({approvals: () => routeMissing()});
+    await openInbox();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('inbox-unavailable')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('inbox-unavailable')).toHaveTextContent(
+      /아직 승인 결정을 기록하지 않습니다/,
+    );
+    // 오류 상태가 아니다: 붉은 문구도, 재시도도 없다.
+    expect(screen.queryByTestId('inbox-error')).toBeNull();
+    expect(screen.queryByTestId('inbox-unavailable-retry')).toBeNull();
+    // 그리고 없는 경로에 두 번 묻지 않는다 — 폰에서 그 왕복은 라디오를 켠다.
+    const asked = fixture.fetch.mock.calls.filter(([url]) =>
+      String(url).includes('/approvals?status=pending'),
+    );
+    expect(asked).toHaveLength(1);
+  });
+
+  it('그래도 5xx는 장애다 — 미제공으로 접지 않는다', async () => {
+    // 반대 방향의 거짓말: 잠깐 아픈 서버를 영영 없는 기능이라고 말하는 것.
+    installFetch({approvals: () => jsonResponse(500, {error: {message: 'boom'}})});
+    await openInbox();
+    await waitFor(() => expect(screen.getByTestId('inbox-error')).toBeTruthy());
+    expect(screen.queryByTestId('inbox-unavailable')).toBeNull();
+    expect(screen.getByTestId('inbox-error-retry')).toBeTruthy();
+  });
+
+  it('이미 받아 둔 행이 있으면 그것을 지우지 않는다', async () => {
+    // 캐시된 절반을 감추는 것도 거짓말이다. 첫 응답은 행을 주고, 재조회가 404를
+    // 받는 경우 — 목록은 남고 미제공 문구가 목록을 대신하지 않는다.
+    let page = 0;
+    installFetch({
+      approvals: status => {
+        if (status !== 'pending') return jsonResponse(200, {approvals: []});
+        page += 1;
+        return page === 1
+          ? jsonResponse(200, {approvals: [wireApproval()]})
+          : routeMissing();
+      },
+    });
+    await openPendingRow();
+    // 목록이 낡을 만큼 시간을 흘린 뒤 탭을 돌아오면 재조회가 일어난다.
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
+    elapse(60_000);
+    fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    await waitFor(() => expect(page).toBeGreaterThan(1));
+    expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
+  });
+});
+
+describe('반쪽 원장인 「에이전트」 탭 (3R N-B)', () => {
+  it('작업 기록을 아직 못 본다는 사실을 먼저 말하고, 목록은 남긴다', async () => {
+    // 이 탭은 승인 원장과 작업 실행 기록 **두** 원장 위에 서 있는데 이 서버는
+    // 뒤의 것을 읽는 경로가 없다(POST 전용 경로라 GET은 405). 그 사실을 삼키면
+    // 승인 기록만 담긴 목록을 놓고 "조용한 게 정상"이라 말하게 된다.
+    installFetch();
+    await openPendingRow();
+    fireEvent.press(screen.getByTestId('inbox-tab-agents'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('inbox-agents-partial')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('inbox-agents-partial')).toHaveTextContent(
+      /한 일의 기록을 아직 보여주지 못합니다/,
+    );
+    expect(screen.getByTestId('inbox-agents-partial')).toHaveTextContent(
+      /아래 목록은 승인 기록만 담고 있습니다/,
+    );
+    // 있는 절반은 그대로 보인다.
+    expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
+  });
+
+  it('결정 대기 탭에는 그 고지가 없다 — 그 탭은 반쪽이 아니다', async () => {
+    installFetch();
+    await openPendingRow();
+    expect(screen.queryByTestId('inbox-agents-partial')).toBeNull();
   });
 });
 

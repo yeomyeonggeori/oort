@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRun, Approval, Message } from "../../lib/api";
 import {
+  agentsFeedPartial,
   approvalActionLabel,
   approvalItem,
   deadlineLabel,
@@ -108,6 +109,23 @@ describe("clock labels", () => {
     expect(deadlineLabel(NOW + 3 * 60_000, NOW)).toBe("3분 후 만료");
     expect(deadlineLabel(NOW + 2 * 3_600_000, NOW)).toBe("2시간 후 만료");
     expect(deadlineLabel(NOW - 60_000, NOW)).toBe("기한 지남");
+  });
+});
+
+describe("agents tab half-ledger judgement", () => {
+  it("is partial exactly while the run history cannot be read", () => {
+    // 두 클라이언트가 같은 답을 해야 해서 core에 산다(M-AP1 3R N-B): 웹은
+    // `features/inbox/approvalsPanel.ts`에서 이것을 다시 내보내고, 모바일
+    // 인박스는 직접 부른다. 두 벌이 되면 한쪽만 고쳐지는 날이 온다.
+    expect(agentsFeedPartial(() => false)).toBe(true);
+    expect(agentsFeedPartial(() => true)).toBe(false);
+    // 묻는 표면은 작업 실행 기록 하나다 — 승인 원장의 유무는 이 판정에 없다.
+    const asked: string[] = [];
+    agentsFeedPartial((surface) => {
+      asked.push(surface);
+      return false;
+    });
+    expect(asked).toEqual(["agentRunHistory"]);
   });
 });
 

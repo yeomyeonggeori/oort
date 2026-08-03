@@ -1,8 +1,10 @@
 import {
   isSurfaceProvided,
   serverSurface,
+  type SurfaceId,
 } from '@momo/core/features/capabilities/serverSurfaces';
 import {
+  agentsFeedPartial,
   availableInboxFilters,
   filterLabel,
   parseFilter,
@@ -94,6 +96,20 @@ import {useSession} from '../session/useSession';
 // 말없이 치우면 무엇이 사라졌는지 알 수 없다 — 자리는 지키고 이유를 말한다.
 // =============================================================================
 
+/**
+ * 각 탭이 서 있는 표면. 미제공을 말하려면 **무엇이** 미제공인지 이름을 댈 수 있어야
+ * 한다 (3R N-A, 웹 `InboxRoute`의 같은 표와 같은 값).
+ *
+ * 멘션이 `null`인 것은 빠뜨린 것이 아니다: 그 탭은 read-state 투영과 메시지 읽기
+ * 위에 서 있고 둘 다 어느 서버에나 있다. 이름 댈 표면이 없는 탭은 미제공이 될 수
+ * 없으므로 접을 곳도 없다.
+ */
+const PANEL_SURFACE: Record<InboxFilter, SurfaceId | null> = {
+  'needs-action': 'approvals',
+  mentions: null,
+  agents: 'agentRunHistory',
+};
+
 const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
   'needs-action': {
     headline: '지금 결정할 일이 없습니다. 조용한 게 정상입니다.',
@@ -125,6 +141,11 @@ export default function InboxScreen({
   );
   const approvals = serverSurface('approvals');
   const approvalsProvided = isSurfaceProvided('approvals');
+  // 반쪽 원장 고지 (3R N-B). 판정은 core의 한 벌이고 웹이 같은 것을 쓴다.
+  const runHistoryMissing = agentsFeedPartial(surface =>
+    isSurfaceProvided(surface),
+  );
+  const runHistory = serverSurface('agentRunHistory');
 
   const [online, setOnline] = useState(true);
   useEffect(() => {
@@ -143,6 +164,7 @@ export default function InboxScreen({
 
   const feed: Feed =
     filter === 'needs-action' ? needsAction : filter === 'agents' ? agentFeed : mentions;
+  const panelSurface = PANEL_SURFACE[filter];
 
   const markRead = useMarkRead();
   const marking = useMutation({
@@ -312,8 +334,27 @@ export default function InboxScreen({
         />
       ) : null}
 
+      {/* 반쪽인 채로 조용한 것과 조용한 것은 다르다 (3R N-B). 목록은 그대로 둔다 —
+          있는 절반을 감추는 것은 반대 방향의 같은 거짓말이다. */}
+      {filter === 'agents' && runHistoryMissing ? (
+        <NoticeBlock
+          headline={runHistory.absentReason}
+          detail="아래 목록은 승인 기록만 담고 있습니다."
+          testID="inbox-agents-partial"
+        />
+      ) : null}
+
       {feed.isLoading && feed.items.length === 0 ? (
         <LoadingState label="인박스를 불러오는 중입니다." testID="inbox-loading" />
+      ) : panelSurface !== null && feed.absent && feed.items.length === 0 ? (
+        // 서버가 "그런 경로 없다"고 **직접 답한** 경우다 (3R N-A). 오류가 아니므로
+        // 붉게 그리지 않고, 다시 시도할 것이 없으므로 재시도를 주지 않는다 —
+        // 그 버튼은 영영 같은 답을 받는다.
+        <NoticeBlock
+          headline={serverSurface(panelSurface).absentReason}
+          detail={serverSurface(panelSurface).fallback}
+          testID="inbox-unavailable"
+        />
       ) : feed.error && feed.items.length === 0 ? (
         <ErrorState
           headline="인박스를 불러오지 못했습니다."
