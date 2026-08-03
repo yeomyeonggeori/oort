@@ -5,6 +5,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CountBadge} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
 import {useMentionCount} from '../features/inbox/useInbox';
+import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
 import {INITIAL_NAV, navReducer, tabLabel, TABS, type Tab} from '../nav/state';
 import PushProvider from '../push/PushProvider';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
@@ -102,24 +103,34 @@ function Shell(): React.JSX.Element {
           it: coming back from a result must land on the results, with the typed
           query still there. */}
       {nav.search ? (
-        <View style={styles.overlay}>
+        <EdgeSwipeBack style={styles.overlay} onBack={onBack}>
           <SearchScreen
             initialQuery={nav.search.initialQuery}
             onOpenResult={onOpenConversation}
             onBack={onBack}
           />
-        </View>
+        </EdgeSwipeBack>
       ) : null}
 
+      {/* ## 좌측 엣지에서 밀면 닫힌다 (goal RN-U2)
+          성재: "화면 좌측을 슥 넘기면 뒤로가게 해주면 안돼?"
+
+          래퍼가 여기 있는 것은 **움직여야 하는 것이 오버레이 자신**이기 때문이다.
+          이 뷰가 셸을 덮는 불투명한 판이므로, 이것이 오른쪽으로 밀려나야 밑에
+          있던 탭 화면이 드러난다. 안쪽(예: `Screen`)을 움직이면 이 판의 배경색이
+          제자리에 남아 아무것도 드러나지 않는다.
+
+          탭 전환에는 걸지 않는다 — 탭은 push 가 아니라 나란한 두 곳이고, 그
+          사이를 스와이프로 잇는 것은 이 피드백이 요청한 것이 아니다. */}
       {nav.conversation ? (
-        <View style={styles.overlay}>
+        <EdgeSwipeBack style={styles.overlay} onBack={onBack}>
           <ConversationScreen
             channelId={nav.conversation.channelId}
             title={nav.conversation.title}
             anchor={nav.conversation.anchor}
             onBack={onBack}
           />
-        </View>
+        </EdgeSwipeBack>
       ) : null}
     </View>
   );
