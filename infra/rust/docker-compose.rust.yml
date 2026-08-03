@@ -181,6 +181,12 @@ services:
       # token the broker cannot verify, or a subscribe callback the api 401s.
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
+      # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
+      # mounted at all, which is exactly the web deployment's same-origin case.
+      # A value is required only for non-browser origins — the Tauri desktop
+      # webview is `tauri://localhost`, and without this it cannot reach the API
+      # at all. Explicit allowlist; `*` is refused at boot.
+      MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       # Loopback only (no Caddy in this stack). The NCP smoke drives it over an
