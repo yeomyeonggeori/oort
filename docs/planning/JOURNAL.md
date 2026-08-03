@@ -1598,3 +1598,10 @@
 - 산출: `docs/planning/2026-08-04-handover-verification-and-roadmap-adjustment.md`(검증 판정표·축별 4층 판정·배치 0~5 제안·성재 결정 A~F·ADR-0150 후보 지목) + CURRENT_STATE 스냅샷 10.
 - 다음: 성재 결정 **A**(compose up -d 한 줄)·**F**(정정 2건 후 12파일 커밋)부터. 폰 검수 분기 = 배치 1 완료 시점.
 - **(같은 날 오후 추가)** 성재 지시 접수: *"구현은 Opus 5로, Fable은 기획·검수·로드맵의 오케스트레이터로."* → 결정 **C·E·F 확정 집행**(어휘=재우기/깨우기 · 인앱 승인 배치1 개방 · 정정 4건: ROADMAP/README 라우트 수 65/137 단위 명기·overview 137·JOURNAL "배포=main 머지" 오류 정정) + 정본 일괄 커밋. **배치 1 가동**: Opus 5 워커 3기 병렬 — W-AP1(웹 승인함)·M-AP1(모바일 인앱 결정)·H-FIX1(hermes 재현→수리). 패킷 3장 `handoffs/2026-08-04-*`. 충돌 경계: momo-core는 W-AP1만(serverSurfaces approvals 항목), M-AP1은 mobile/src만, H-FIX1은 mobile/ios만. 머지 순서 H 독립·W→M.
+
+## 2026-08-04 (오후2) · Fable · 오케스트레이션 — 승인 축 라이브 배포(대행) + Apple 자산 실태 확정 + 결정 A~F 종결
+- **결정 A 집행(배포 대행, 성재 ssh 위임)**: NCP에서 `MOMO_RUST_IMAGE` amd64→`dae3a387` 갱신 후 up -d. **함정 실증 1건**: 07-30 런북의 2파일 compose 명령은 낡음 — 실스택은 **5파일+env 2개**(rust·push·t3·caddy·cent-origin), 빼먹으면 notifier가 구 이미지로 남고 centrifugo가 origin 허용목록 없이 재생성된다. 재발 방지 정본 신설 = `docs/runbooks/ncp-rust-deploy.md`. 검증: approvals **404→401** · typing 서빙 · migrate 60/60 멱등 · 전 서비스 healthy·신 태그 · 디스크 82%(momo-rust:deploy 256MB 회수). 롤백 = env 태그 복원(백업 `.bak-20260804`).
+- **Apple 자산 실태 실측(성재: "swift 때 다 줬다" — 맞았다)**: 키체인 Distribution/Developer ID 유효 · **App Store 프로파일이 앱+NSE 둘 다 존재**(=App ID 2개 등록 완료, 신경로 `~/Library/Developer/Xcode/UserData/`) · APNs `.p8`은 NCP push-relay에서 실작동. **빈 곳은 CI 레인뿐**(momo-signing repo 미생성·GH Secrets 0건) — **첫 TestFlight는 로컬 Xcode Organizer로 지금 가능.** 상태 정본 = engine `docs/cicd/10-*.md` 상단 블록(track/engine `cf25c1c6` push됨) + Fable 메모리. **다시 성재에게 묻지 않는다.**
+- **hermes 물증 확보**: engine 워크트리 비커밋 lock diff가 정확히 한 줄 — hermes-engine **SPEC CHECKSUM 드리프트**(1f9904ef→3ccaa647, 버전 동일). H-FIX1 워커에 전달(독립 재현 지시 유지).
+- 결정 B 집행: **ADR-0145 증보 1**(parity=제품 채택 라우트 집합, 이식/보류/폐기 초기 분류표). D는 ADR-0150 기안 시 확정. 성재 5번 승인으로 main push(이전 세션 12커밋 포함). main 동기화는 성재 위임("트랙별로 메인에 머지 잘하쇼") — 랜딩 단위·게이트 그린 전제로 수행.
+- 배치 1 워커 3기(Opus 5) 진행 중: W-AP1(#983)·M-AP1(#984)·H-FIX1(#985). 완료 시 검수→track/engine 순차 머지→성재 폰 검수 분기.

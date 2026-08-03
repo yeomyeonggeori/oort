@@ -60,3 +60,17 @@ buzz 코드 실측(github.com/block/buzz `18eef63`, ~180k LOC Rust, 24 마이그
 - crate 레이아웃(buzz의 서브시스템 격리 교훈 채택 범위), sqlx vs sea-orm.
 - provenance 서명 대상 행동 범위·저장 위치·검증 경로(ADR-0146).
 - workd 동시 이관 여부(서버와 도메인 crate 공유 이득 vs 범위 팽창).
+
+## 증보 1 — "parity"의 정의 (2026-08-04, 성재 승인)
+
+삭제 게이트인 **라우트 parity는 Swift 137 유니크 경로 전체가 아니라 "제품이 쓰기로 결정한 라우트 집합"으로 정의한다.** 전 경로 parity는 삭제를 무기한 미루고, 이식 원본이 오래 살수록 "계약의 정답이 두 곳"인 기간이 길어진다(근거: `docs/planning/2026-08-04-handover-verification-and-roadmap-adjustment.md` §2.3).
+
+초기 분류(각 패밀리의 최종 판정은 해당 배치/ADR에서 갱신해 이 절에 반영):
+
+| 판정 | 패밀리 |
+|---|---|
+| **이식 대상(v0)** | attachments 3경로(ADR-0150 선행) · agent-run cancel · agentRunHistory 읽기 경로 |
+| **판정 보류(v1 결정 대기)** | plugins · webhooks · mcp · memories(+policy·consent) · huddles · workstreams · work-controls · work-auto-approvals · event-subscriptions · work-tool-profiles · bans · members 잔여 · platform |
+| **폐기 후보(이식 없이 삭제 인정)** | `__momo_stub` · context-packets v0 형태 |
+
+**삭제 실행 조건**: "이식 대상 + 보류에서 이식으로 승격된 것"이 전부 Rust에 서고, 보류·폐기 판정이 전 패밀리에 대해 내려졌을 때. 그 시점의 판정표가 이 절이다.
