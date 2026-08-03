@@ -439,6 +439,24 @@ pub struct RosterMember {
     pub owner_human_id: Option<Uuid>,
     pub max_concurrent_runs: Option<i32>,
     pub max_run_steps: Option<i32>,
+    /// `agent_profile.paused` — is this agent asleep? `None` for a human, and
+    /// `Some(false)` for an agent nobody has configured (no profile row is not a
+    /// paused agent).
+    ///
+    /// **goal SRV-R2, and the one field here Swift's roster does not have.** It
+    /// is added because without it an agent list cannot draw pause state at all:
+    /// the only other reader is `GET …/agents/{agent}/profile`, which is an
+    /// owner/agent-owner gate, so a plain member asking "is 김인턴 재워져 있나"
+    /// got a 403 — and a list would have needed one such request per agent
+    /// anyway.
+    ///
+    /// It discloses nothing new. `paused` is *already* visible to every channel
+    /// member: mentioning a sleeping agent posts a **public system line** saying
+    /// so (`momo_agent::paused_mention_body`). Putting it on the roster is the
+    /// same fact in list form, not a new exposure. The rest of the profile —
+    /// `instructions`, `enabled_tools`, `triggers` — stays behind its gate, which
+    /// is why this is one boolean rather than an embedded profile.
+    pub paused: Option<bool>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -467,6 +485,7 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         owner_human_id: row.try_get("owner_human_id")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         max_run_steps: row.try_get("max_run_steps")?,
+        paused: row.try_get("paused")?,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
     })
@@ -490,6 +509,14 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
 ///    row_json->>'kind', row_json->>'handle')`. Applied here in SQL *before*
 ///    `LIMIT` rather than after, so a truncated page is the first N of a stable
 ///    order instead of an arbitrary N that is then sorted.
+///
+/// goal SRV-R2 adds the `agent_profile` join for [`RosterMember::paused`]. It is
+/// a `LEFT JOIN` and the projection is `CASE WHEN m.kind = 'agent' THEN
+/// COALESCE(ap.paused, false) END`, which encodes two separate facts rather than
+/// one: a **human** has no pause state at all (NULL → the field is omitted from
+/// the wire), and an **agent without a profile row** is not paused (false). One
+/// `COALESCE` over both would have told the client every human is awake, which
+/// is not a thing a human can be.
 pub async fn list_workspace_roster(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -535,6 +562,7 @@ pub async fn list_workspace_roster(
                 a.owner_human_id, \
                 a.max_concurrent_runs, \
                 a.max_run_steps, \
+                CASE WHEN m.kind = 'agent' THEN COALESCE(ap.paused, false) END AS paused, \
                 floor(extract(epoch from m.created_at) * 1000)::bigint AS created_at_ms, \
                 floor(extract(epoch from m.updated_at) * 1000)::bigint AS updated_at_ms \
            FROM member m \
@@ -542,6 +570,8 @@ pub async fn list_workspace_roster(
              ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
            LEFT JOIN human h ON h.member_id = m.id \
            LEFT JOIN agent a ON a.member_id = m.id \
+           LEFT JOIN agent_profile ap \
+             ON ap.workspace_id = m.workspace_id AND ap.agent_member_id = m.id \
            LEFT JOIN LATERAL ( \
              SELECT count(*)::int AS channel_count \
                FROM membership ms \

@@ -5670,8 +5670,8 @@ components:
       type: object
       description: >
         Roster entry. Human-only fields (email/timeZone) and agent-only
-        fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps) are
-        present only for the matching kind; agent secrets and execution
+        fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps/paused)
+        are present only for the matching kind; agent secrets and execution
         config are never exposed.
       required:
         - id
@@ -5735,6 +5735,16 @@ components:
           type: integer
         maxRunSteps:
           type: integer
+        paused:
+          type: boolean
+          description: >
+            Present for agents only, and always present for them including when
+            false, so a list can tell "awake" apart from "not reported".
+            `agent_profile.paused`; an agent with no profile row reports false.
+            This is not a new disclosure: mentioning a paused agent already posts
+            a public system line in the channel saying so, and the rest of the
+            profile (instructions, enabled tools, triggers) stays behind the
+            owner-gated profile read.
         createdAtMs:
           type: integer
           format: int64

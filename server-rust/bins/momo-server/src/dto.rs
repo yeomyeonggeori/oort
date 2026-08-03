@@ -1173,6 +1173,16 @@ pub struct RosterMemberDto {
     pub max_concurrent_runs: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_run_steps: Option<i32>,
+    /// `agent_profile.paused` — goal SRV-R2, the one key here Swift's DTO does
+    /// not have.
+    ///
+    /// Skipped for a human like every other agent-only field, so a human row's
+    /// shape is unchanged and no client has to learn that `paused: false` on a
+    /// person means nothing. For an agent it is always present, including
+    /// `false`, because "not paused" and "this server is too old to say" must
+    /// not look identical to a list that draws a sleep badge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }

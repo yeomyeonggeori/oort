@@ -19,6 +19,21 @@
 //!   * **No BYPASSRLS, ever.** Cross-tenant inspection is a platform-admin
 //!     surface; this one reads through the ordinary tenant transaction, which is
 //!     also why the workspace-role check runs inside it.
+//!
+//! ## goal SRV-R2 — `paused` on the row
+//!
+//! An agent list could not draw pause state. The only reader of
+//! `agent_profile.paused` was `GET …/agents/{agent}/profile`, which is an
+//! owner/agent-owner gate — so a plain member's agent tab got a 403 per agent,
+//! and even an owner's tab needed **one request per agent** to render a column.
+//! The roster is the list that already exists, so the field goes on the row.
+//!
+//! It is not a new disclosure, which is why it needs no ADR: mentioning a
+//! sleeping agent already posts a **public system line** in the channel saying it
+//! is paused (`momo_agent::paused_mention_body`), so every channel member can
+//! learn this today by typing an `@`. What stays behind the profile gate is the
+//! rest — `instructions`, `enabled_tools`, `triggers` — which is why exactly one
+//! boolean crossed the line and not an embedded profile object.
 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -68,6 +83,7 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         owner_human_id: member.owner_human_id.map(|id| id.to_string()),
         max_concurrent_runs: member.max_concurrent_runs,
         max_run_steps: member.max_run_steps,
+        paused: member.paused,
         created_at_ms: member.created_at_ms,
         updated_at_ms: member.updated_at_ms,
     }
@@ -182,6 +198,10 @@ mod tests {
             owner_human_id: None,
             max_concurrent_runs: None,
             max_run_steps: None,
+            // The query projects NULL for a human and a boolean for an agent
+            // (`CASE WHEN m.kind = 'agent' …`), so the fixture mirrors that
+            // rather than defaulting both kinds to the same thing.
+            paused: (kind == MemberKind::Agent).then_some(false),
             created_at_ms: 1_700_000_000_000,
             updated_at_ms: 1_700_000_000_001,
         }
@@ -232,5 +252,36 @@ mod tests {
         assert_eq!(json["kind"], "human");
         assert!(json.get("origin").is_none(), "{json}");
         assert_eq!(json["role"], "member");
+    }
+
+    /// goal SRV-R2: an agent row always carries `paused`, **including when it is
+    /// `false`**, and a human row never does.
+    ///
+    /// The `false` case is the load-bearing one. A list that draws a sleep badge
+    /// has to tell "this agent is awake" apart from "this server does not report
+    /// pause state", and `skip_serializing_if` on a plain `bool` would have
+    /// collapsed the two — leaving a paused agent looking awake on any row whose
+    /// profile happened to be default.
+    #[test]
+    fn only_an_agent_row_reports_paused_and_it_reports_false_too() {
+        let awake =
+            serde_json::to_value(roster_dto(&member(MemberKind::Agent))).expect("serialize");
+        assert_eq!(
+            awake["paused"],
+            serde_json::json!(false),
+            "an awake agent says so explicitly, rather than omitting the key: {awake}"
+        );
+
+        let mut asleep = member(MemberKind::Agent);
+        asleep.paused = Some(true);
+        let asleep = serde_json::to_value(roster_dto(&asleep)).expect("serialize");
+        assert_eq!(asleep["paused"], serde_json::json!(true));
+
+        let human =
+            serde_json::to_value(roster_dto(&member(MemberKind::Human))).expect("serialize");
+        assert!(
+            human.get("paused").is_none(),
+            "a person is not a thing that can be paused: {human}"
+        );
     }
 }
