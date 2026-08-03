@@ -14,7 +14,14 @@ import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecisio
 import NetInfo from '@react-native-community/netinfo';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  AccessibilityInfo,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {
   EmptyState,
   ErrorState,
@@ -152,24 +159,43 @@ export default function InboxScreen({
 
   // 결정이 기록되면 그 행은 대기 목록에서 사라진다. 사라지는 것만으로는 무엇이
   // 됐는지 알 수 없으므로, 원장이 답한 그대로 한 줄을 남기고 목록을 다시 읽는다.
+  //
+  // ## 영수증은 결정한 그 행 자리에 (2R H3/M6)
+  //
+  // 1R은 화면 맨 위 한 칸에 적었다. 두 가지가 틀렸다: 목록을 내려 결정한 사람의
+  // 눈은 그 행에 있는데 답은 화면 위쪽에 뜨고, 두 번째 결정이 첫 번째 영수증을
+  // 덮어써서 무엇이 어떻게 됐는지 하나가 사라졌다. 그래서 영수증은 **승인 id로
+  // 키를 잡아** 그 행 자리에 그린다. 그 행이 원장 재조회로 목록에서 빠지면
+  // 영수증만 남으므로, 갈 곳 없는 영수증은 위쪽 알림으로 올려 보낸다 — 사라지는
+  // 것과 답을 못 본 것은 다르다.
   const invalidateApprovals = useInvalidateApprovals();
-  const [decisionNote, setDecisionNote] = useState<string | null>(null);
+  const [receipts, setReceipts] = useState<{id: string; note: string}[]>([]);
   const onDecided = useCallback(
-    (outcome: DecisionOutcome) => {
-      if (outcome.kind === 'superseded') {
-        setDecisionNote(outcome.note ?? '이 요청은 이미 결정되어 있었습니다.');
-      } else if (outcome.status === 'approved') {
-        setDecisionNote('승인했습니다. 에이전트가 이어서 실행합니다.');
-      } else if (outcome.status === 'rejected') {
-        setDecisionNote('거부했습니다. 이 실행은 취소되었습니다.');
-      } else {
-        // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지
-        // 우리가 모르므로, 안다고 말하지 않는다.
-        setDecisionNote('결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.');
-      }
+    (approvalId: string, outcome: DecisionOutcome) => {
+      const note = decisionReceiptCopy(outcome);
+      setReceipts(previous => [
+        ...previous.filter(entry => entry.id !== approvalId),
+        {id: approvalId, note},
+      ]);
+      // 결과도 말해 준다 (2R H3). 무장은 알리고 결과는 알리지 않으면, 화면을 보지
+      // 않는 사람에게는 되돌릴 수 없는 행동이 소리 없이 끝난 것이 된다.
+      AccessibilityInfo.announceForAccessibility(note);
       invalidateApprovals();
     },
     [invalidateApprovals],
+  );
+  const dismissReceipt = useCallback((approvalId: string) => {
+    setReceipts(previous => previous.filter(entry => entry.id !== approvalId));
+  }, []);
+
+  // 목록에 아직 남아 있는 행의 영수증은 그 행이 그린다. 여기 남는 것은 행이
+  // 사라진 뒤의 영수증뿐이다.
+  const visibleApprovalIds = useMemo(
+    () => new Set(feed.items.map(item => item.approvalId).filter(Boolean)),
+    [feed.items],
+  );
+  const orphanReceipts = receipts.filter(
+    entry => !visibleApprovalIds.has(entry.id),
   );
 
   // 한 행에 결정 컨트롤을 붙일지, 대신 무슨 말을 할지. 판정이 행 안이 아니라
@@ -197,6 +223,16 @@ export default function InboxScreen({
           </Text>
         );
       }
+      // 이 행에서 방금 결정했다면 컨트롤 자리에 그 답을 둔다. 같은 행에 컨트롤과
+      // 영수증이 함께 있으면 이미 끝난 결정을 다시 누를 수 있다는 뜻이 된다.
+      const receipt = receipts.find(entry => entry.id === item.approvalId);
+      if (receipt) {
+        return (
+          <Text style={styles.receipt} testID={`decision-receipt-${item.key}`}>
+            {receipt.note}
+          </Text>
+        );
+      }
       if (!online) {
         return (
           <Text style={styles.managed} testID={`decision-offline-${item.key}`}>
@@ -209,12 +245,13 @@ export default function InboxScreen({
         <ApprovalDecision
           approvalId={item.approvalId}
           reversible={item.reversible}
-          onSettled={onDecided}
+          deadlinePassed={item.deadlinePassed}
+          onSettled={outcome => onDecided(item.approvalId as string, outcome)}
           testIDPrefix={`inbox-approval-${item.approvalId}`}
         />
       );
     },
-    [approvalsProvided, filter, onDecided, online],
+    [approvalsProvided, filter, onDecided, online, receipts],
   );
 
   return (
@@ -255,13 +292,14 @@ export default function InboxScreen({
         />
       ) : null}
 
-      {decisionNote !== null ? (
+      {orphanReceipts.map(entry => (
         <NoticeBlock
-          headline={decisionNote}
-          onDismiss={() => setDecisionNote(null)}
+          key={entry.id}
+          headline={entry.note}
+          onDismiss={() => dismissReceipt(entry.id)}
           testID="inbox-decision-note"
         />
-      ) : null}
+      ))}
 
       {!online ? (
         <NoticeBlock
@@ -407,6 +445,38 @@ function FeedRow({
   );
 }
 
+/**
+ * 원장이 답한 것을 한 문장으로 (2R H4/M3).
+ *
+ * 두 가지가 1R과 다르다. 첫째, **약속하지 않는다**: "에이전트가 이어서 실행합니다"는
+ * 서버가 보장하지 않는 후속(`approve_run`은 run이 hold를 떠났으면 job 없이 200)이라
+ * 영수증은 원장에 무엇이 적혔는지까지만 말한다. 둘째, superseded일 때 **실제로
+ * 기록된 방향**을 말한다 — 내가 승인을 눌렀는데 원장에 거부가 적혀 있을 수 있고,
+ * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
+ */
+export function decisionReceiptCopy(outcome: DecisionOutcome): string {
+  if (outcome.kind === 'superseded') {
+    if (outcome.status === 'approved') {
+      return '이미 승인으로 기록되어 있었습니다.';
+    }
+    if (outcome.status === 'rejected') {
+      return '이미 거부로 기록되어 있었습니다.';
+    }
+    if (outcome.status === 'expired') {
+      return '결정 전에 만료되어 만료로 기록되었습니다.';
+    }
+    if (outcome.status === 'cancelled') {
+      return '이 요청은 취소되어 있었습니다.';
+    }
+    return outcome.note ?? '이 요청은 이미 결정되어 있었습니다.';
+  }
+  if (outcome.status === 'approved') return '승인을 기록했습니다.';
+  if (outcome.status === 'rejected') return '거부를 기록했습니다.';
+  // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지 우리가
+  // 모르므로, 안다고 말하지 않는다.
+  return '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.';
+}
+
 function outcomeStyle(tone: FeedItem['outcomeTone']) {
   if (tone === 'ok') return styles.outcomeOk;
   if (tone === 'danger') return styles.outcomeDanger;
@@ -469,6 +539,7 @@ const styles = StyleSheet.create({
   outcomeMuted: {color: color.textFaint},
   note: {fontSize: font.meta, color: color.warn},
   managed: {fontSize: font.meta, color: color.textFaint},
+  receipt: {fontSize: font.meta, color: color.text, paddingBottom: space.md},
   markRead: {
     minWidth: TOUCH_TARGET,
     minHeight: TOUCH_TARGET,

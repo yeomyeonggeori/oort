@@ -76,7 +76,25 @@ export async function fetchApnsToken(): Promise<string | null> {
 
 export type PushActionResult =
   | {kind: 'opened'; envelope: PushEnvelope | null}
-  | {kind: 'decided'; approved: boolean}
+  | {
+      kind: 'decided';
+      /** 이 사람이 **누른** 방향. 원장에 그대로 적혔다는 뜻은 아니다. */
+      approved: boolean;
+      /**
+       * 원장에 **실제로 적힌** 결과 (goal M-AP1 2R H5).
+       *
+       * `pressed`면 이 탭이 그 결정을 기록했다. `settled`면 원장은 이미 다른 답을
+       * 들고 있었고(다른 기기의 결정, 또는 기한 만료), `recordedApproved`가 그
+       * 답이다 — `undefined`면 만료·취소처럼 승인도 거부도 아닌 상태다.
+       *
+       * 이 칸이 없던 동안 잠금화면의 거부 탭은 원장이 승인을 들고 있어도
+       * "거부됨"으로 보고됐다. 되돌릴 수 없는 축에서 사용자에게 **반대 사실**을
+       * 말하는 것이라, 두 갈래를 한 값에 접어 두면 안 된다.
+       */
+      record: 'pressed' | 'settled';
+      /** `record: 'settled'`일 때 원장이 답한 방향. */
+      recordedApproved?: boolean;
+    }
   | {kind: 'replied'}
   | {kind: 'ignored'; reason: string}
   | {kind: 'failed'; reason: string};
@@ -142,7 +160,23 @@ export async function handlePushResponse(
       // `superseded` counts as decided: the approval was already settled
       // elsewhere (another device, or it expired). Reporting that as a failure
       // would invite a retry against something that can no longer change.
-      return {kind: 'decided', approved};
+      //
+      // But it is NOT the same event as "this tap recorded the decision", and
+      // collapsing the two was a lie in the dangerous direction (2R H5): a
+      // rejection tapped from the lock screen was reported as a rejection even
+      // when the ledger held an APPROVAL. So the two are reported apart, and a
+      // settled one carries the direction the ledger actually holds.
+      if (outcome.kind === 'superseded') {
+        const settled: PushActionResult = {
+          kind: 'decided',
+          approved,
+          record: 'settled',
+        };
+        if (outcome.status === 'approved') settled.recordedApproved = true;
+        if (outcome.status === 'rejected') settled.recordedApproved = false;
+        return settled;
+      }
+      return {kind: 'decided', approved, record: 'pressed'};
     }
 
     case PUSH_ACTION.quickReply: {

@@ -58,13 +58,28 @@ export const CONFIRM_GUARD_MS = 400;
 
 export function ApprovalDecision({
   approvalId,
-  reversible = true,
+  reversible = false,
+  deadlinePassed = false,
   onSettled,
   testIDPrefix = 'inbox-approval',
 }: {
   approvalId: string;
-  /** 서버가 되돌릴 수 없다고 표시한 요청이면 확정 문장이 그 사실을 재진술한다. */
+  /**
+   * 서버가 **명시적으로** 되돌릴 수 있다고 말했는가 (2R B1).
+   *
+   * 기본값이 `false`인 것이 이 prop의 전부다: 아무도 말해 주지 않았으면 되돌릴 수
+   * 없는 것으로 다룬다. 예전 기본값은 `true`였고, 그래서 값을 넘기지 않는 호출자
+   * 하나가 생기는 순간 비가역 승인이 조용히 "되돌릴 수 있음"이 됐다. 모르는 것을
+   * 위험한 쪽으로 읽는 기본값은 되돌릴 수 없는 행동 앞에서 특히 나쁘다.
+   */
   reversible?: boolean;
+  /**
+   * 기한이 이미 지난 대기 행인가 (2R M4).
+   *
+   * 이때 결정을 보내면 서버는 승인/거부가 아니라 **만료로 확정**한다
+   * (`routes/approvals.rs:584`). 확정 문장이 그 사실을 말해야 한다.
+   */
+  deadlinePassed?: boolean;
   onSettled: (outcome: DecisionOutcome) => void;
   /**
    * 한 목록에 여러 행이 동시에 떠 있으므로 test id는 행마다 달라야 한다. 접두사
@@ -77,6 +92,8 @@ export function ApprovalDecision({
   const [armed, setArmed] = useState<Armed>(null);
   const [busy, setBusy] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
+  /** 가드 창 안에서 확정 탭이 실제로 있었는가 (2R M1). 죽은 버튼처럼 보이지 않게. */
+  const [tooFast, setTooFast] = useState(false);
   // (행, 방향)당 하나. 같은 결정을 다시 누르면 서버가 원래 영수증을 그대로
   // 재생하고, 두 번째 결정이 기록되지 않는다. 멱등 충돌일 때만 버린다 — 그
   // 키는 이미 다른 결정에 묶여 있어서 재시도해도 같은 충돌만 반복한다.
@@ -88,6 +105,7 @@ export function ApprovalDecision({
     setArmed(next);
     armedAtMs.current = Date.now();
     setErrorCopy(null);
+    setTooFast(false);
     // 엄지 밑의 버튼이 방금 의미를 바꿨다. 화면을 보지 않는 사람에게 그 변화는
     // 소리로만 전달된다 — RN에는 포커스를 옮길 웹의 `focus()`가 없다.
     AccessibilityInfo.announceForAccessibility(
@@ -104,7 +122,15 @@ export function ApprovalDecision({
     if (armed === null || busy) return;
     // 방금 무장한 그 탭의 꼬리다. 확정 버튼이 앞선 버튼 자리에 떴으므로, 이 창
     // 안의 탭은 확인이 아니라 같은 한 번의 동작으로 본다.
-    if (Date.now() - armedAtMs.current < CONFIRM_GUARD_MS) return;
+    //
+    // 조용히 무시하지는 않는다(2R M1): 아무 일도 일어나지 않는 버튼은 고장난
+    // 버튼과 구별되지 않고, 그 자리에서 사람이 하는 다음 행동은 더 세게 두 번
+    // 누르는 것이다. 무엇이 일어났는지 한 줄로 말한다.
+    if (Date.now() - armedAtMs.current < CONFIRM_GUARD_MS) {
+      setTooFast(true);
+      return;
+    }
+    setTooFast(false);
     const slot = armed;
     const approve = slot === 'approve';
     keys.current[slot] ??= newDecisionId();
@@ -141,7 +167,10 @@ export function ApprovalDecision({
         <View style={styles.buttons}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="거부"
+            // 이 탭은 거부하지 않는다 — 거부할지 묻는다. 라벨이 행동을 약속하면
+            // 화면을 보지 않는 사람은 이미 결정한 줄 알고 손을 뗀다 (2R M2).
+            accessibilityLabel="거부, 확인 필요"
+            accessibilityHint="누르면 거부 확정 여부를 묻습니다."
             onPress={() => arm('reject')}
             style={({pressed}) => [
               styles.button,
@@ -153,7 +182,8 @@ export function ApprovalDecision({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="승인"
+            accessibilityLabel="승인, 확인 필요"
+            accessibilityHint="누르면 승인 확정 여부를 묻습니다."
             onPress={() => arm('approve')}
             style={({pressed}) => [
               styles.button,
@@ -173,12 +203,7 @@ export function ApprovalDecision({
     );
   }
 
-  const consequence =
-    armed === 'approve'
-      ? reversible
-        ? '승인하면 에이전트가 바로 실행합니다.'
-        : '승인하면 에이전트가 바로 실행합니다. 되돌릴 수 없습니다.'
-      : '거부하면 이 실행은 취소됩니다.';
+  const consequence = confirmCopy(armed, reversible, deadlinePassed);
 
   return (
     <View style={styles.bar} testID={`${testIDPrefix}-confirm`}>
@@ -217,6 +242,12 @@ export function ApprovalDecision({
           </Text>
         </Pressable>
       </View>
+      {tooFast ? (
+        <Text style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
+          방금 누른 탭과 이어진 동작이라 보내지 않았습니다. 문장을 확인하고 다시
+          누르세요.
+        </Text>
+      ) : null}
       {errorCopy !== null ? (
         <Text style={styles.error} testID={`${testIDPrefix}-error`}>
           {errorCopy}
@@ -224,6 +255,38 @@ export function ApprovalDecision({
       ) : null}
     </View>
   );
+}
+
+/**
+ * 확정 버튼 위에 놓일 한 문장 — **서버가 실제로 하는 일만** (2R H4/M4).
+ *
+ * 예전 문장은 "승인하면 에이전트가 바로 실행합니다"였다. 이 서버는 그것을 약속할
+ * 수 없다: 승인은 run이 hold를 떠났으면 resume job 없이 200을 답하고
+ * (`routes/approvals.rs`의 `approve_run` — `requeue_run_from_approval_in_tx`가
+ * false면 아무 job도 넣지 않는다), 정상 경로에서도 실행은 outbox를 거치는 비동기다.
+ * "바로"는 우리가 지킬 수 없는 말이고, 승인 화면은 지킬 수 없는 말을 하기에 가장
+ * 나쁜 자리다.
+ *
+ * 거부는 반대로 **같은 트랜잭션**에서 일어난다(`reject_run` → `end_parked_run_in_tx`).
+ * 다만 이미 hold를 떠난 run은 취소할 것이 없으므로 문장을 「대기 중인 실행」으로
+ * 한정한다.
+ */
+export function confirmCopy(
+  armed: Exclude<Armed, null>,
+  reversible: boolean,
+  deadlinePassed: boolean,
+): string {
+  if (deadlinePassed) {
+    // 기한이 지난 요청에 보내는 결정은 승인도 거부도 아니다 — 서버가 만료로
+    // 확정한다. 승인 문장을 그대로 두면 일어나지 않을 일을 약속하게 된다.
+    return '기한이 지난 요청입니다. 지금 보내면 승인도 거부도 아닌 만료로 기록됩니다.';
+  }
+  if (armed === 'approve') {
+    return reversible
+      ? '승인하면 에이전트가 이어서 진행합니다.'
+      : '승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.';
+  }
+  return '거부하면 대기 중인 실행이 취소됩니다.';
 }
 
 const styles = StyleSheet.create({
@@ -246,5 +309,6 @@ const styles = StyleSheet.create({
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
   buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: '#ffffff'},
   error: {fontSize: font.meta, color: color.danger, lineHeight: 18},
+  hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},
 });

@@ -121,7 +121,7 @@ describe('notification actions', () => {
     const result = await handlePushResponse(response(PUSH_ACTION.approve), {
       signedInWorkspaceId: WS,
     });
-    expect(result).toEqual({kind: 'decided', approved: true});
+    expect(result).toEqual({kind: 'decided', approved: true, record: 'pressed'});
     expect(mockDecideApproval).toHaveBeenCalledWith(WS, APPROVAL, true, 'decision-1');
   });
 
@@ -129,7 +129,7 @@ describe('notification actions', () => {
     const result = await handlePushResponse(response(PUSH_ACTION.reject), {
       signedInWorkspaceId: WS,
     });
-    expect(result).toEqual({kind: 'decided', approved: false});
+    expect(result).toEqual({kind: 'decided', approved: false, record: 'pressed'});
     expect(mockDecideApproval).toHaveBeenCalledWith(WS, APPROVAL, false, 'decision-1');
   });
 
@@ -232,7 +232,39 @@ describe('notification actions', () => {
     const result = await handlePushResponse(response(PUSH_ACTION.approve), {
       signedInWorkspaceId: WS,
     });
-    expect(result).toEqual({kind: 'decided', approved: true});
+    expect(result).toEqual({kind: 'decided', approved: true, record: 'settled'});
+  });
+
+  it('does NOT report the tapped direction when the ledger holds the other one', async () => {
+    // goal M-AP1 2R H5. 잠금화면에서 거부를 눌렀는데 원장에는 이미 승인이 적혀
+    // 있는 경우다. 예전 코드는 두 갈래를 한 값에 접어 `{approved: false}` —
+    // 사용자가 누른 방향 — 만 남겼고, 그래서 되돌릴 수 없는 축에서 화면이 **반대
+    // 사실**을 말할 수 있었다. 누른 것과 기록된 것은 다른 사실이므로 따로 싣는다.
+    mockDecideApproval.mockResolvedValue({
+      kind: 'superseded',
+      status: 'approved',
+    });
+    const result = await handlePushResponse(response(PUSH_ACTION.reject), {
+      signedInWorkspaceId: WS,
+    });
+    expect(result).toEqual({
+      kind: 'decided',
+      approved: false,
+      record: 'settled',
+      recordedApproved: true,
+    });
+  });
+
+  it('claims no direction at all when the ledger says it expired', async () => {
+    mockDecideApproval.mockResolvedValue({
+      kind: 'superseded',
+      status: 'expired',
+    });
+    const result = await handlePushResponse(response(PUSH_ACTION.approve), {
+      signedInWorkspaceId: WS,
+    });
+    expect(result).toEqual({kind: 'decided', approved: true, record: 'settled'});
+    expect(result).not.toHaveProperty('recordedApproved');
   });
 
   it('ignores an action identifier it does not know', async () => {

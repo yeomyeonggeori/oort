@@ -122,7 +122,19 @@ export interface FeedItem {
   detail?: string;
   /** "→ {outcome}" label, or null while the ledger has decided nothing. */
   outcome: string | null;
-  /** M2(design-review): 확정 문장이 비가역성을 재진술할 수 있도록 원자료를 싣는다. */
+  /**
+   * 이 행동을 되돌릴 수 있다고 **서버가 명시적으로 말했는가** (goal M-AP1 2R B1).
+   *
+   * 판정은 fail-closed다: `true`는 서버가 `isReversible: true`를 실었을 때만이고,
+   * 필드가 없거나 `false`면 `false`다. 예전 규칙은 `!== false`였고, 그래서 이
+   * 서버의 모든 승인이 "되돌릴 수 있음"으로 그려졌다 — 서버는 이 필드를 아예
+   * 보내지 않는데(`dto.rs:2210-2212`: absent = unknown, never reversible), v0의
+   * 유일한 툴 `work.session.end`는 **비가역인 것이 선정 사유**다
+   * (`crates/momo-agent/src/tools.rs:33-38`: T3 정산이 봉인되고 호스트 상태가
+   * 사라진다). 모르는 것을 안전한 쪽으로 읽는 규칙이 아니라 위험한 쪽으로 읽는
+   * 규칙이었던 셈이고, 그 방향의 오답은 사람이 되돌릴 수 없는 것을 되돌릴 수
+   * 있다고 믿고 누르는 것이다.
+   */
   reversible?: boolean;
   outcomeTone: OutcomeTone;
   /** Extra safety note rendered beside the outcome (irreversible actions). */
@@ -136,6 +148,14 @@ export interface FeedItem {
   /** Sort key. Pending rows sort ahead of settled ones regardless. */
   sortAtMs: number;
   pending: boolean;
+  /**
+   * 대기 중인데 **기한이 이미 지난** 행 (goal M-AP1 2R M4).
+   *
+   * 이 상태에서 결정을 보내면 서버는 그것을 승인/거부가 아니라 **만료로 확정**한다
+   * (`routes/approvals.rs:584` `settle_expired` — 409 + status `expired`). 그래서
+   * 확정 문장이 "승인하면 …"이라고 말하면 그것은 일어나지 않을 일이다.
+   */
+  deadlinePassed?: boolean;
   /** "왜 이게 여기 왔는지" (P10), rendered as the row tooltip. */
   reason: string;
   /** Agent rows: the human accountable for the agent (ADR-0131). */
@@ -266,6 +286,12 @@ export function approvalItem(
     : approval.decidedAtMs === undefined
       ? ""
       : relativeLabel(approval.decidedAtMs, nowMs);
+  // fail-closed: 서버가 명시적으로 가역이라고 말한 것만 가역이다 (2R B1).
+  const reversible = approval.isReversible === true;
+  const deadlinePassed =
+    pending &&
+    approval.expiresAtMs !== undefined &&
+    approval.expiresAtMs <= nowMs;
   return {
     key: `approval:${approval.id}`,
     kind: "approval",
@@ -273,12 +299,16 @@ export function approvalItem(
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
-    predicate: `${actionTypeLabel(approval.actionType)} 허가를 요청했습니다`,
+    predicate: `${approvalActionLabel(
+      approval.actionType,
+      approval.toolName
+    )} 허가를 요청했습니다`,
     detail: approval.decisionReason ?? undefined,
     outcome: outcome.label,
     outcomeTone: outcome.tone,
-    note: approval.isReversible === false ? "되돌릴 수 없음" : undefined,
-    reversible: approval.isReversible !== false,
+    note: reversible ? undefined : "되돌릴 수 없음",
+    reversible,
+    ...(deadlinePassed ? { deadlinePassed: true } : {}),
     channelId: approval.channelId,
     channelLabel,
     timeLabel,
@@ -389,4 +419,43 @@ export function actionTypeLabel(actionType: string): string {
     "message.send": "메시지 전송",
   };
   return known[actionType] ?? actionType;
+}
+
+/**
+ * `action_type` = `tool_call`인 승인의 갈래 이름. 사람에게 할 말이 아니다.
+ *
+ * 이 서버가 승인 원장에 쓰는 action_type은 **언제나 이것**이고
+ * (`crates/momo-agent/src/tools.rs:82`), 무엇을 허가하는지는 payload의 툴 이름에만
+ * 있다. 그래서 이 문자열이 화면에 닿으면 그것은 언제나 결함이다.
+ */
+const TOOL_CALL_ACTION = "tool_call";
+
+/** 이 서버가 실행할 수 있는 툴의 사람 이름 (`tools.rs`의 CATALOG와 1:1). */
+const TOOL_LABELS: Record<string, string> = {
+  "work.session.end": "작업 세션 종료",
+};
+
+/**
+ * 행 제목이 될 한 마디 (goal M-AP1 2R B2).
+ *
+ * 규칙은 셋이고 순서가 곧 정직성의 순서다:
+ *
+ *   1. 아는 툴이면 그 툴이 **하는 일**을 우리말로. (`work.session.end` →
+ *      「작업 세션 종료」)
+ *   2. 모르는 툴이면 **툴 이름 원문**. 지어낸 설명보다 낫다 — 사람은 최소한
+ *      무엇을 검색해야 하는지 알게 된다.
+ *   3. 툴 이름조차 없으면 갈래만 남으므로 갈래를 **우리말로** 말한다. 어떤
+ *      경우에도 `tool_call`이라는 원장 내부 식별자는 화면에 내보내지 않는다.
+ */
+export function approvalActionLabel(
+  actionType: string,
+  toolName?: string
+): string {
+  if (actionType === TOOL_CALL_ACTION) {
+    if (toolName === undefined) return "에이전트 도구 실행";
+    return TOOL_LABELS[toolName] ?? toolName;
+  }
+  // 툴 이름이 실려 있으면 그것이 더 구체적인 진실이다.
+  if (toolName !== undefined) return TOOL_LABELS[toolName] ?? toolName;
+  return actionTypeLabel(actionType);
 }

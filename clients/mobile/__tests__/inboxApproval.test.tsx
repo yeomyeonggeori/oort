@@ -450,11 +450,14 @@ describe('결정의 세 갈래', () => {
     expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
 
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
+    // 행이 아직 목록에 있으므로 답은 그 행 자리에 남는다 (2R H3).
     await waitFor(() =>
-      expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
-        /거부를 기록했습니다\./,
-      ),
+      expect(
+        screen.getByTestId(`decision-receipt-approval:${PENDING}`),
+      ).toHaveTextContent(/거부를 기록했습니다\./),
     );
+    // 답이 있는 자리에는 컨트롤이 없다 — 끝난 결정을 다시 누를 자리를 남기지 않는다.
+    expect(screen.queryByTestId(`inbox-approval-${PENDING}-commit`)).toBeNull();
     // 재시도는 **같은 멱등키**로 나갔다. 새 키였다면 서버 쪽에서 두 번째 결정이
     // 되고, 첫 요청이 실은 도착해 있었을 때 같은 승인이 두 번 기록된다.
     const sent = fixture.decisions();
@@ -475,10 +478,13 @@ describe('결정의 세 갈래', () => {
     expect(within(row).getByTestId(`inbox-approval-${PENDING}-approve`)).toBeTruthy();
     armAndCommit(PENDING, 'approve');
 
+    // M3: **원장에 실제로 적힌 방향**을 말한다. 내가 승인을 눌렀어도 원장이
+    // 거부를 답할 수 있고, 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른
+    // 대로 됐다고 읽는다.
     await waitFor(() =>
-      expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
-        /다른 곳에서 이미 결정되었습니다\./,
-      ),
+      expect(
+        screen.getByTestId(`decision-receipt-approval:${PENDING}`),
+      ).toHaveTextContent(/이미 승인으로 기록되어 있었습니다\./),
     );
     // 실패로 그리지 않는다 — 더는 바뀔 수 없는 것에 재시도를 권하지 않기 위해.
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-error`)).toBeNull();
@@ -669,6 +675,11 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     expect(fixture.decisions()).toHaveLength(0);
     // 컨트롤은 죽지 않았다 — 잠깐 뒤의 같은 탭은 결정한다.
     expect(screen.getByTestId(`inbox-approval-${PENDING}-confirm`)).toBeTruthy();
+    // 그리고 조용히 삼키지 않는다 (2R M1): 아무 일도 없는 버튼은 고장난 버튼과
+    // 구별되지 않고, 그 다음에 사람이 하는 일은 더 세게 두 번 누르는 것이다.
+    expect(
+      screen.getByTestId(`inbox-approval-${PENDING}-too-fast`),
+    ).toHaveTextContent(/보내지 않았습니다/);
 
     elapse(200);
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
@@ -731,7 +742,11 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     expect(fixture.decisions()).toHaveLength(1);
 
     release!();
-    await waitFor(() => expect(screen.getByTestId('inbox-decision-note')).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`decision-receipt-approval:${PENDING}`),
+      ).toBeTruthy(),
+    );
     expect(fixture.decisions()).toHaveLength(1);
   });
 
@@ -747,6 +762,121 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
 
     fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
     expect(announce).toHaveBeenCalledWith('승인을 확정할지 묻습니다.');
+  });
+});
+
+describe('기한이 지난 요청 (2R M4)', () => {
+  it('확정 문장이 승인도 거부도 아닌 만료를 말한다', async () => {
+    // 서버는 기한 뒤에 도착한 클릭을 **만료로 확정**한다(approvals.rs:584
+    // `settle_expired` — 409 + status expired). "승인하면 …"은 일어나지 않을 일이다.
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals:
+            status === 'pending'
+              ? [wireApproval({expiresAtMs: nowMs - 60_000})]
+              : [],
+        }),
+    });
+    const row = await openPendingRow();
+    expect(row).toHaveTextContent(/기한 지남/);
+
+    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
+    const confirm = screen.getByTestId(`inbox-approval-${PENDING}-confirm`);
+    expect(confirm).toHaveTextContent(
+      /기한이 지난 요청입니다\. 지금 보내면 승인도 거부도 아닌 만료로 기록됩니다\./,
+    );
+    expect(confirm).not.toHaveTextContent(/이어서 진행/);
+  });
+
+  it('만료로 확정된 영수증은 만료라고 말한다', async () => {
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals:
+            status === 'pending'
+              ? [wireApproval({expiresAtMs: nowMs - 60_000})]
+              : [],
+        }),
+      decision: approvalId => jsonResponse(409, receipt(approvalId, 'expired')),
+    });
+    await openPendingRow();
+    armAndCommit(PENDING, 'approve');
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`decision-receipt-approval:${PENDING}`),
+      ).toHaveTextContent(/결정 전에 만료되어 만료로 기록되었습니다\./),
+    );
+  });
+});
+
+describe('영수증 (2R H3/M6)', () => {
+  it('두 번째 결정이 첫 번째 답을 덮어쓰지 않는다', async () => {
+    const SECOND = 'dddddddd-1111-4111-8111-dddddddddddd';
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals:
+            status === 'pending'
+              ? [wireApproval(), wireApproval({id: SECOND})]
+              : [],
+        }),
+      decision: (approvalId, body) =>
+        jsonResponse(200, receipt(approvalId, body.approve ? 'approved' : 'rejected')),
+    });
+    await openPendingRow();
+
+    armAndCommit(PENDING, 'approve');
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`decision-receipt-approval:${PENDING}`),
+      ).toHaveTextContent(/승인을 기록했습니다\./),
+    );
+    armAndCommit(SECOND, 'reject');
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`decision-receipt-approval:${SECOND}`),
+      ).toHaveTextContent(/거부를 기록했습니다\./),
+    );
+    // 첫 번째 답은 그대로 있다. 1R은 한 칸을 덮어써서 하나를 잃었다.
+    expect(
+      screen.getByTestId(`decision-receipt-approval:${PENDING}`),
+    ).toHaveTextContent(/승인을 기록했습니다\./);
+  });
+
+  it('행이 목록에서 빠지면 그 답을 위쪽 알림으로 올린다', async () => {
+    let page = 0;
+    installFetch({
+      approvals: status => {
+        if (status !== 'pending') return jsonResponse(200, {approvals: []});
+        page += 1;
+        return jsonResponse(200, {approvals: page === 1 ? [wireApproval()] : []});
+      },
+    });
+    await openPendingRow();
+    armAndCommit(PENDING, 'approve');
+    await waitFor(() =>
+      expect(screen.queryByTestId(`feed-row-approval:${PENDING}`)).toBeNull(),
+    );
+    // 사라진 것과 답을 못 본 것은 다르다.
+    expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
+      /승인을 기록했습니다\./,
+    );
+    fireEvent.press(screen.getByTestId('inbox-decision-note-dismiss'));
+    expect(screen.queryByTestId('inbox-decision-note')).toBeNull();
+  });
+
+  it('결과를 화면을 보지 않는 사람에게도 말한다', async () => {
+    // 무장은 알리고 결과는 알리지 않으면, 되돌릴 수 없는 행동이 소리 없이 끝난다.
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    installFetch();
+    await openPendingRow();
+    armAndCommit(PENDING, 'approve');
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith('승인을 기록했습니다.'),
+    );
   });
 });
 
@@ -781,13 +911,13 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     // 사라져 컨트롤이 id 없이 그려지면 id로 묻는 단언은 그것을 못 보고 초록으로
     // 남는다 (이 파일을 쓰면서 실제로 그 구멍에 한 번 빠졌다). 사람이 보는 것은
     // 라벨이고, 이 행에 「승인」이라고 적힌 버튼이 있으면 그것이 결함이다.
-    expect(within(settled).queryByLabelText('승인')).toBeNull();
-    expect(within(settled).queryByLabelText('거부')).toBeNull();
+    expect(within(settled).queryByLabelText(/^승인/)).toBeNull();
+    expect(within(settled).queryByLabelText(/^거부/)).toBeNull();
     expect(within(settled).queryAllByRole('button')).toHaveLength(1); // 행 본문뿐
     // 그리고 대기 행에는 여전히 있다 — 이 단언이 없으면 위의 부재는 "아무 컨트롤도
     // 안 그렸다"로도 참이 된다.
-    expect(within(pending).getByLabelText('승인')).toBeTruthy();
-    expect(within(pending).getByLabelText('거부')).toBeTruthy();
+    expect(within(pending).getByLabelText('승인, 확인 필요')).toBeTruthy();
+    expect(within(pending).getByLabelText('거부, 확인 필요')).toBeTruthy();
   });
 
   it('에이전트 탭에서는 결정하지 않고, 어디서 하는지만 말한다', async () => {
@@ -806,8 +936,8 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
       ).toHaveTextContent(/결정 대기 탭에서 승인하거나 거부할 수 있습니다\./),
     );
     const row = screen.getByTestId(`feed-row-approval:${PENDING}`);
-    expect(within(row).queryByLabelText('승인')).toBeNull();
-    expect(within(row).queryByLabelText('거부')).toBeNull();
+    expect(within(row).queryByLabelText(/^승인/)).toBeNull();
+    expect(within(row).queryByLabelText(/^거부/)).toBeNull();
   });
 
   it('서버가 승인을 싣지 않는 빌드에서는 데스크톱을 가리킨다', async () => {
@@ -818,8 +948,8 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     installFetch();
     await openInbox();
     await waitFor(() => expect(screen.getByTestId('approvals-absent')).toBeTruthy());
-    expect(screen.queryByLabelText('승인')).toBeNull();
-    expect(screen.queryByLabelText('거부')).toBeNull();
+    expect(screen.queryByLabelText(/^승인/)).toBeNull();
+    expect(screen.queryByLabelText(/^거부/)).toBeNull();
   });
 });
 

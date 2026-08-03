@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRun, Approval, Message } from "../../lib/api";
 import {
+  approvalActionLabel,
   approvalItem,
   deadlineLabel,
   mentionItem,
@@ -160,7 +161,96 @@ describe("approval rows", () => {
       NOW
     );
     expect(item.note).toBe("되돌릴 수 없음");
-    expect(approvalItem(approval(), agent, "엔진", NOW).note).toBeUndefined();
+    expect(item.reversible).toBe(false);
+  });
+
+  it("treats an ABSENT reversibility flag as irreversible, not as reversible", () => {
+    // goal M-AP1 2R B1. 서버가 못박은 계약이다(`dto.rs:2210-2212`): 없음은
+    // "모른다"이지 "되돌릴 수 있다"가 아니다. 이 프로젝션은 그 필드를 아예 싣지
+    // 않으므로, 예전 규칙(`!== false`)에서는 **모든** 승인이 가역으로 그려졌다 —
+    // 그런데 이 서버가 실행하는 유일한 툴은 비가역인 것이 선정 사유였다.
+    const item = approvalItem(approval(), agent, "엔진", NOW);
+    expect(item.reversible).toBe(false);
+    expect(item.note).toBe("되돌릴 수 없음");
+  });
+
+  it("calls it reversible only when the server said so in so many words", () => {
+    const item = approvalItem(
+      approval({ isReversible: true }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(item.reversible).toBe(true);
+    expect(item.note).toBeUndefined();
+  });
+
+  it("marks a pending row whose deadline has already passed", () => {
+    // 이 행에 결정을 보내면 서버는 승인이 아니라 **만료**로 확정한다
+    // (`routes/approvals.rs:584` settle_expired). 화면이 "승인하면 …"이라고
+    // 말하면 그것은 일어나지 않을 일이다.
+    expect(
+      approvalItem(approval({ expiresAtMs: NOW - 60_000 }), agent, "엔진", NOW)
+        .deadlinePassed
+    ).toBe(true);
+    expect(
+      approvalItem(approval({ expiresAtMs: NOW + 60_000 }), agent, "엔진", NOW)
+        .deadlinePassed
+    ).toBeUndefined();
+    // 이미 끝난 결정에는 기한 이야기가 없다.
+    expect(
+      approvalItem(
+        approval({ status: "approved", expiresAtMs: NOW - 60_000 }),
+        agent,
+        "엔진",
+        NOW
+      ).deadlinePassed
+    ).toBeUndefined();
+  });
+
+  it("never puts the ledger's own class name in front of a person", () => {
+    // goal M-AP1 2R B2. 이 서버가 쓰는 action_type은 언제나 `tool_call`이고
+    // (`tools.rs:82`), 무엇을 허가하는지는 payload의 툴 이름에만 있다.
+    const known = approvalItem(
+      approval({ actionType: "tool_call", toolName: "work.session.end" }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(known.predicate).toBe("작업 세션 종료 허가를 요청했습니다");
+
+    // 모르는 툴: 지어내지 않고 원문 이름을 쓴다.
+    expect(
+      approvalItem(
+        approval({ actionType: "tool_call", toolName: "repo.branch.delete" }),
+        agent,
+        "엔진",
+        NOW
+      ).predicate
+    ).toBe("repo.branch.delete 허가를 요청했습니다");
+
+    // 이름조차 없으면 갈래를 우리말로. 어느 경우에도 `tool_call`은 안 나온다.
+    const nameless = approvalItem(
+      approval({ actionType: "tool_call" }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(nameless.predicate).toBe("에이전트 도구 실행 허가를 요청했습니다");
+    for (const item of [known, nameless]) {
+      expect(item.predicate).not.toContain("tool_call");
+    }
+  });
+
+  it("keeps the legacy Swift action vocabulary working", () => {
+    expect(approvalActionLabel("work.spawn")).toBe("작업 실행");
+    expect(approvalActionLabel("message.send")).toBe("메시지 전송");
+    // 툴 이름이 실려 있으면 그것이 더 구체적인 진실이다.
+    expect(approvalActionLabel("work.spawn", "work.session.end")).toBe(
+      "작업 세션 종료"
+    );
+    // 아무것도 모르면 원문 유지(정직 폴백).
+    expect(approvalActionLabel("deploy")).toBe("deploy");
   });
 
   it("has no timeline seq: the projection exposes a message id, not a seq", () => {
