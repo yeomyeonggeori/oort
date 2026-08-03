@@ -32,16 +32,21 @@ import {AppRegistry} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
 import {measureMode} from './measure/root';
+import {sessionGateLaunch} from './gate/root';
 
 /**
  * Normally `App`. With the launch argument `-momoMeasure YES`, and only in a dev
- * build, the measurement harness takes the root instead (see `measure/`).
+ * build, the measurement harness takes the root instead (see `measure/`). With
+ * `-momoSessionGate <step>` the session-restore gate takes it (see `gate/`),
+ * which is how `npm run gate:session` reaches the real keychain — the one path
+ * no unit test can travel.
  *
  * The swap lives here rather than inside `App` so a normal launch never even
- * evaluates the harness: the only thing imported above is the one function that
- * reads the argument, and `require` below runs only when it answers yes.
+ * evaluates a harness: the only things imported above are the two functions that
+ * read the arguments, and `require` below runs only when one answers yes.
  */
 AppRegistry.registerComponent(appName, () => {
+  if (sessionGateLaunch() !== null) return require('./gate/harness').default;
   const mode = measureMode();
   if (mode === null) return App;
   if (mode.kind === 'measure') return require('./measure/harness').default;

@@ -56,8 +56,13 @@ import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 // =============================================================================
 
 /** Keychain service name. Distinct from the Swift kit's so the two can coexist
- *  during the RN transition rather than fighting over one item. */
-const KEYCHAIN_SERVICE = 'app.momo.ios.rn.session';
+ *  during the RN transition rather than fighting over one item.
+ *
+ *  Exported for `gate/harness.tsx` (goal RN-G1), which has to read and clear the
+ *  stored item DIRECTLY: every function in this module catches keychain failures
+ *  on purpose, so asking it whether the write worked can only ever get an answer
+ *  laundered through the same catch that hid the failure. */
+export const KEYCHAIN_SERVICE = 'app.momo.ios.rn.session';
 
 /**
  * The access group the Swift NSE reads from. **Not yet applied** — see the note
