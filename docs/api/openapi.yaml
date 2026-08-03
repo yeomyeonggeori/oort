@@ -847,12 +847,15 @@ paths:
       operationId: cancelAgentRun
       summary: Cancel one agent run as a human channel member.
       description: >
-        ADR-0132 D1. Any active human member of the run's channel may cancel.
+        ADR-0132 D1. Any active human member of the run's channel may cancel —
+        channel membership, not workspace ownership, is the authorization.
         Agent and work-host bearers are rejected. The server atomically marks
         the run cancelled, retires pending agent jobs, cancels pending
         approvals, writes an audit event and a channel system line, and returns
         linked work-session IDs. Linked work sessions are not terminated;
         callers must use the existing work.control kill path separately.
+        Cancelling an already-cancelled run answers 200 with the same body and
+        writes nothing: no second system line and no second audit row.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -866,6 +869,7 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AgentRunCancelResponse"}
+        "400": {description: Malformed workspace or run identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Agent run not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}

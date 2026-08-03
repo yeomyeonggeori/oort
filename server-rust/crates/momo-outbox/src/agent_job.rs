@@ -141,8 +141,15 @@
 //! are still `processing`.
 
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
+
+/// `outbox.last_error` a human stop writes onto the jobs it retires
+/// (`AgentRunRoutes.swift:509`).
+///
+/// It is a *reason*, not a failure: the row is settled `done`, and this string
+/// is what tells an operator reading the outbox why a job was never run.
+pub const RUN_CANCELLED_JOB_LAST_ERROR: &str = "human cancelled agent run";
 
 /// `outbox.method` for a first-turn job (Swift `MessageRoutes.swift:2091`).
 pub const WORKER_JOB_METHOD: &str = "publish";
@@ -304,6 +311,69 @@ pub async fn claim_agent_job_batch(
             },
         )
         .collect())
+}
+
+/// Retire every **unclaimed** `agent_job` belonging to a run a human just
+/// stopped — Swift's cancel `UPDATE outbox` (`AgentRunRoutes.swift:504-511`).
+///
+/// This is the half of a cancel that actually stops work: the `agent_run` row
+/// says `cancelled`, but a queued job is an instruction that a worker would
+/// otherwise claim and run to completion, answering in the channel minutes after
+/// a person asked it to stop. Retiring it as `done` is what makes 중지 mean
+/// stopped rather than merely marked.
+///
+/// It lives here because `momo-outbox` owns every `outbox` statement in the
+/// workspace (invariant #3) — the route composes it inside the cancel's
+/// transaction, so a rolled-back cancel takes the retirement with it.
+///
+/// **Only `pending` rows**, exactly as Swift: a `processing` row is a turn that
+/// is already running inside a worker holding a lease, and flipping its status
+/// under it would race the worker's own settle rather than stop it. That turn is
+/// stopped by the run status instead — the gateway/worker paths re-read the run
+/// and refuse a terminal one — and `agent_gateway`'s cancellation
+/// acknowledgement is the event it may still report.
+///
+/// The predicate is `payload->>'run_id'`, not a column: `outbox` has no
+/// `run_id`, the job payload carries it as a string, and every producer
+/// (`work_job_payload`, `mention_job_payload`, `resume_job_payload`) writes it.
+///
+/// ## Why the comparison is case-folded, where Swift's is not
+///
+/// Swift compares the raw text (`payload->>'run_id' = \(runID.uuidString)`) and
+/// is safe doing so, because *every* Swift producer writes `uuidString` — one
+/// casing, workspace-wide. **This server's producers disagree**: measured,
+/// `momo_agent::mention::mention_job_payload` writes the id UPPERCASE (Swift
+/// parity for the payload a gateway reads) while `work_job_payload` and
+/// `resume_job_payload` write it lowercase. A literal port of Swift's predicate
+/// would therefore retire a work run's job and silently miss a **mention** run's
+/// — the most common kind — leaving the exact instruction a person asked to stop
+/// sitting `pending` for the next worker to claim.
+///
+/// `lower(...)` on both sides is the narrowest fix that cannot be wrong for
+/// either producer. A `::uuid` cast would also work and is rejected: it raises
+/// on any row whose payload happens to hold a non-uuid `run_id`, which would
+/// turn one malformed job anywhere in the tenant into a failed cancel.
+///
+/// Returns how many rows were retired.
+pub async fn retire_pending_agent_jobs_for_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE outbox \
+            SET status = 'done', processed_at = now(), last_error = $3 \
+          WHERE workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND status = 'pending' \
+            AND lower(payload->>'run_id') = $2",
+    )
+    .bind(workspace_id)
+    .bind(run_id.to_string().to_lowercase())
+    .bind(RUN_CANCELLED_JOB_LAST_ERROR)
+    .execute(&mut *conn)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 #[cfg(test)]
