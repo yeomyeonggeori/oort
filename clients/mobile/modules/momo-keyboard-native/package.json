@@ -1,0 +1,6 @@
+{
+  "name": "momo-keyboard-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module (goal RN-P3). Owns the conversation pane's keyboard lift ENTIRELY in native code: a UIKit notification observer starts a UIView animation on the main thread, so no part of the travel — including its start — waits on the JS thread. Also exposes the native timing record, because the JS-side instrument could only ever report an upper bound. No JS entry point on purpose — callers use requireNativeViewManager/requireOptionalNativeModule from src/lib/keyboardPane.tsx."
+}

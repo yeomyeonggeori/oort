@@ -71,11 +71,21 @@ jest.mock('react-native-keychain', () => {
 // `requireOptionalNativeModule` returns null on purpose — that is precisely what
 // it does in a build where the native module is absent, and it is the branch
 // `src/push/native.ts` must handle without throwing.
+//
+// `requireNativeViewManager` answers with a plain `View`, and that is a narrow
+// claim on purpose. What is worth holding under Jest is the SHAPE of the tree
+// the keyboard pane sits in — that the padding is a constant, that no
+// `transform` style is set from JS, that the list and the composer are both
+// inside the moving pane. The lift itself is native
+// (`modules/momo-keyboard-native`) and no double of it here could say anything
+// true about its timing; that number is measured natively, on a simulator, by
+// `measure/`, and nowhere else.
 jest.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: jest.fn(() => null),
   requireNativeModule: jest.fn(() => {
     throw new Error('native module unavailable under Jest');
   }),
+  requireNativeViewManager: jest.fn(() => require('react-native').View),
 }));
 
 jest.mock('expo-notifications', () => ({
