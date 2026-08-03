@@ -47,3 +47,11 @@ M1 400ms 가드 내 탭 무피드백 → 가드 중 시각적 inert 또는 한 �
 - core 수정은 웹 579+/모바일 468 테스트 전체 무회귀가 게이트다. 픽스처 교체 후 **수리 전 상태에서 빨간불 → 수리 후 초록**을 커밋 로그나 PR 본문으로 증명하라.
 - 검증: web/mobile/core 테스트 전체 + typecheck + `gate:approvals`(W-AP1 신설) + 기존 게이트 무회귀. red proof: B1(명시 true 아닌 픽스처에서 경고 부재 시 이름 있는 실패) · B2(`tool_call` 문자열이 사용자 문자열에 등장하면 실패).
 - PR: 기존 #987 브랜치에 추가 커밋(리베이스 포함) → 재리뷰(Blocker 0) 후 머지.
+
+## 6. 리베이스 단계 추가 작업 (2026-08-04 W-2R 재검증 파생 — N-A·N-B)
+
+W-AP1 머지 후 리베이스 시점에 함께 닫는다(그 시점엔 W-2R 전속 제한이 해제된다):
+
+- **N-A (High)**: 모바일 인박스에 미제공 폴딩이 없다 — `clients/mobile/src/features/inbox/useInbox.ts:354`가 `allFailed`만 보고 `serverSaysAbsent`/`retryUnlessAbsent`를 안 쓴다. 승인 라우트 없는 서버에서 결정 대기 탭이 "인박스를 불러오지 못했습니다"+영원한 재시도가 된다(웹 B2와 동일 클래스). 웹 `useInbox.ts`의 폴딩(absent 계산·재시도 억제·미제공 문구)과 같은 것을 입혀라.
+- **N-B (High)**: 「에이전트」 탭 반쪽 정직성(작업 기록 405인 채 "조용한 게 정상") — 웹은 `agentsFeedPartial`(`clients/web/src/features/inbox/approvalsPanel.ts:220`)로 닫았다. **그 판정을 `packages/momo-core`로 승격**하고 웹은 import 교체(한 줄), 모바일은 같은 판정으로 반쪽 고지를 세워라 — 두 클라이언트가 한 벌을 쓰는 것이 목적이다.
+- 리베이스 후 필수: `gate:approvals`(W가 신설) 실행 + mobile/web/core 전체 스위트.
