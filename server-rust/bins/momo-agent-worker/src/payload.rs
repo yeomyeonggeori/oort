@@ -60,6 +60,55 @@ pub struct AgentJobPayload {
     /// Echoed onto the reply's `props` so a client can attribute the answer.
     #[serde(default)]
     pub source_attribution: Option<serde_json::Value>,
+
+    // -- goal SRV-T1: the tool channel and the approval resume --------------
+    /// `agent.tool_schema`, shipped by `mention_job_payload` since B5.2 and
+    /// discarded by this worker until now.
+    ///
+    /// Typed as a bare `Value`, not `Vec<Value>`: the column defaults to `[]`
+    /// but an operator may have written an object, and this payload's whole
+    /// contract is that a shape it does not expect must not poison the job.
+    /// [`AgentJobPayload::tool_schema`] is what normalises it.
+    #[serde(default)]
+    pub tools: Option<serde_json::Value>,
+    /// The Context Packet's tool-grant projection — G6's authoritative input.
+    ///
+    /// `None` (absent) and `Some([])` mean different things and both fail
+    /// closed: absent = no projection, empty = a projection naming no grant for
+    /// this tool. `momo_agent::tools::approval_reason` treats each as
+    /// approval-required.
+    #[serde(default)]
+    pub tool_grants: Option<serde_json::Value>,
+    /// Set only on a `method='resume_approval'` job: the approval a human just
+    /// approved. Its presence is what tells the worker this is a resume rather
+    /// than a first turn.
+    #[serde(default)]
+    pub resume_from_approval_id: Option<Uuid>,
+    /// The tool call that approval authorised.
+    #[serde(default)]
+    pub approved_tool_call: Option<ApprovedToolCall>,
+    /// The human who approved. The tool executes with **their** authority — see
+    /// `crate::tool_exec`.
+    #[serde(default)]
+    pub approved_by: Option<Uuid>,
+    /// The source run's step budget, carried across the pause so an approved
+    /// tool call resumes inside the same G3 cap it paused under.
+    #[serde(default)]
+    pub step_count: Option<i32>,
+    #[serde(default)]
+    pub max_steps: Option<i32>,
+}
+
+/// The tool call a human approved (`approval.payload.tool_call`, projected by
+/// `momo_agent::approval::resume_job_payload`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApprovedToolCall {
+    #[serde(default)]
+    pub call_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub arguments: serde_json::Value,
 }
 
 impl AgentJobPayload {
@@ -72,6 +121,33 @@ impl AgentJobPayload {
         } else {
             trimmed
         }
+    }
+
+    /// The declared tools as the provider wants them: an array, or empty.
+    ///
+    /// Anything that is not an array becomes empty rather than an error. An
+    /// operator who wrote an object into `agent.tool_schema` has a
+    /// misconfigured agent, and the honest consequence is an agent with no
+    /// tools — not a job the worker fails forever.
+    pub fn tool_schema(&self) -> Vec<serde_json::Value> {
+        self.tools
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The G6 grant projection, or `None` when the payload carries none.
+    pub fn grants(&self) -> Option<Vec<momo_agent::ToolGrant>> {
+        self.tool_grants
+            .as_ref()
+            .filter(|value| value.is_array())
+            .map(momo_agent::ToolGrant::from_json_array)
+    }
+
+    /// Is this job the resume of an approved tool call?
+    pub fn is_resume(&self) -> bool {
+        self.resume_from_approval_id.is_some()
     }
 }
 

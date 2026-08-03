@@ -23,12 +23,20 @@ path = "src/main.rs"
 #   momo-agent     agent_run transitions + the usage_ledger row
 #   momo-settings  provider_link read/decrypt + the cascade classifier
 #   momo-db        the RLS GUC seam (invariant #6)
+#   momo-t3        the work-session lifecycle the one executable tool drives
 # This crate owns no SQL of its own; see the module docs in `src/lib.rs`.
 momo-agent = { path = "../../crates/momo-agent" }
 momo-db = { path = "../../crates/momo-db" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 momo-outbox = { path = "../../crates/momo-outbox" }
 momo-settings = { path = "../../crates/momo-settings" }
+# goal SRV-T1: the one tool this worker executes is `work.session.end`, and its
+# executor calls the SAME domain functions `routes::work_sessions::end` calls —
+# `end_work_session_in_tx` + `terminate_in_tx` under the ADR-0140 lock ladder.
+# The dependency is what keeps the tool a second *caller* rather than a second
+# implementation; without it the worker would need a settlement statement of its
+# own, which migration 053's guard refuses at runtime anyway.
+momo-t3 = { path = "../../crates/momo-t3" }
 
 # The provider call is outbound HTTP by nature (the Swift AgentWorker does the
 # same). It targets the LLM gateway only: this binary never calls momo-server,
@@ -37,6 +45,7 @@ momo-settings = { path = "../../crates/momo-settings" }
 reqwest.workspace = true
 
 async-trait.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["signal", "time", "sync"] }

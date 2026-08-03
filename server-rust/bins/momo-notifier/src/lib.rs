@@ -41,6 +41,7 @@
 //! given row per due window; and `t3_terminate` (058:116) is idempotent on
 //! `settled_at`, so even a duplicated convergence bills once.
 
+pub mod approval_sweep;
 pub mod config;
 pub mod provider;
 pub mod push;
@@ -484,6 +485,29 @@ impl Notifier {
             }
         });
 
+        // ---- loop 2b: the approval expiry sweep (goal SRV-T1) --------------
+        //
+        // Its own task, and NOT folded into the tier sweep above, for the
+        // reason that split exists: a T3 provider timing out must not stop an
+        // approval deadline from releasing an agent's only concurrency slot.
+        // It runs regardless of `t3_enabled` — approvals are not a T3 feature.
+        let approvals = self.clone();
+        let approval_sweep_task = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(approvals.config.sweep_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = approval_sweep::sweep_expired_approvals(
+                    &approvals.pool,
+                    approvals.config.claim_batch_size,
+                )
+                .await
+                {
+                    tracing::error!(error = %error, "approval expiry sweep iteration failed");
+                }
+            }
+        });
+
         // ---- loop 3: ADR-0120 push-candidate drain -------------------------
         let (push_task, push_listener) = match self.push.clone() {
             None => {
@@ -526,6 +550,7 @@ impl Notifier {
         shutdown.await;
         reconcile_task.abort();
         sweep_task.abort();
+        approval_sweep_task.abort();
         if let Some(task) = push_task {
             task.abort();
         }

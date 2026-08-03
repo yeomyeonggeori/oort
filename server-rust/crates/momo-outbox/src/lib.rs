@@ -38,7 +38,8 @@ pub mod push;
 pub mod relay;
 
 pub use agent_job::{
-    claim_agent_job_batch, ClaimedAgentJob, DEFAULT_WORKER_LEASE_SECONDS, WORKER_JOB_METHOD,
+    claim_agent_job_batch, ClaimedAgentJob, DEFAULT_WORKER_LEASE_SECONDS,
+    RESUME_APPROVAL_JOB_METHOD, WORKER_JOB_METHOD, WORKER_JOB_METHODS,
 };
 pub use emit::{emit_outbox, OutboxKind};
 pub use gateway::{

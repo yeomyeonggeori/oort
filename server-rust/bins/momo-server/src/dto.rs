@@ -2067,6 +2067,96 @@ pub struct RevokeDeviceResponse {
     pub invalidated_count: i64,
 }
 
+// ---------------------------------------------------------------------------
+// approvals (goal SRV-T1) — Swift `ApprovalDecisionRoutes.swift`
+// ---------------------------------------------------------------------------
+
+/// Swift `ApprovalProjectionDTO`, as `GET …/approvals` returns it.
+///
+/// `estimatedMicroUsd` and `isReversible` are lifted out of `payload` by Swift's
+/// projection SQL (:526-559) so a client can rank an inbox without parsing the
+/// payload. This batch's producer writes neither — the one tool it executes has
+/// no price table to quote and is, by the argument that chose it, *not*
+/// reversible — so both are omitted rather than guessed. A client must treat an
+/// absent `isReversible` as "unknown", never as "reversible".
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub run_id: String,
+    pub channel_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_message_id: Option<String>,
+    pub requested_by: String,
+    pub action_type: String,
+    pub payload: serde_json::Value,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decided_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+}
+
+/// Swift `ApprovalProjectionPageDTO` (:52).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalListResponse {
+    pub approvals: Vec<ApprovalDto>,
+}
+
+/// Swift `ApprovalDecisionRequestDTO`.
+///
+/// `client_decision_id` is **required**, and that is the contract, not an
+/// oversight: it is the key `approval_decision` is unique on, so a request
+/// without one could not be replayed safely. A phone that retries a tap on a
+/// flaky network is the normal case, not the exceptional one.
+#[derive(Debug, Deserialize)]
+pub struct ApprovalDecisionRequest {
+    #[serde(rename = "approval_id", alias = "approvalId")]
+    pub approval_id: Uuid,
+    pub approve: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(rename = "client_decision_id", alias = "clientDecisionId")]
+    pub client_decision_id: Uuid,
+}
+
+/// Swift `ApprovalDecisionReceiptDTO` — the body every decision outcome returns,
+/// including the refusals (which carry a non-2xx status alongside it).
+///
+/// `Deserialize` as well as `Serialize`, because this receipt genuinely
+/// round-trips: it is stored verbatim in `approval_decision.receipt` (jsonb) and
+/// **replayed** to a client that retries the same `client_decision_id`, so the
+/// stored copy must decode back into exactly the shape the first call returned.
+/// Deriving both is what makes that a compile-time guarantee instead of a
+/// convention two code paths could drift on.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalDecisionReceipt {
+    pub approval_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
+    pub decided_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_reason: Option<String>,
+}
+
+/// `GET …/approvals?status=&limit=`.
+#[derive(Debug, Default, Deserialize)]
+pub struct ApprovalListQuery {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

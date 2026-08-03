@@ -18,14 +18,22 @@
 //! |---|---|---|
 //! | [`crate::relay::claim_broadcast_batch`] | `broadcast` | any |
 //! | [`crate::gateway::claim_gateway_jobs_in_tx`] | `agent_job` | `= 'gateway'` |
-//! | [`claim_agent_job_batch`] | `agent_job` | `= 'publish'` |
+//! | [`claim_agent_job_batch`] | `agent_job` | `= ANY(['publish','resume_approval'])` |
 //!
-//! The worker predicate is `method = 'publish'` rather than Swift's
-//! `method <> 'gateway'` — deliberately *narrower*. Swift's own `<>` form also
-//! swallows `method='resume_approval'` rows, which it then routes to its
-//! approval-resume path; that path is not ported in B5.1, so an equality
-//! predicate leaves those rows untouched for their future consumer instead of
-//! claiming work this binary would have to fail.
+//! The worker predicate is an explicit **allow-list** ([`WORKER_JOB_METHODS`]),
+//! not Swift's `method <> 'gateway'`. B5.1 set it to `= 'publish'` alone and
+//! wrote down why: the approval-resume path did not exist, so an equality
+//! predicate left `method='resume_approval'` rows untouched for their future
+//! consumer instead of claiming work this binary would have to fail.
+//!
+//! **goal SRV-T1 is that consumer**, so the allow-list now admits the second
+//! method. The shape stays an allow-list rather than becoming Swift's `<>`
+//! because the two are not equivalent under growth: `<>` claims every method
+//! anyone ever adds, including one written for a consumer that does not exist
+//! yet, and the failure mode is silent — the row is claimed, found
+//! un-runnable, and retried until its attempt budget is spent. An allow-list
+//! leaves an unknown method alone, which is the same courtesy B5.1 extended to
+//! this batch.
 //!
 //! ## Why per-agent serialization is in the SQL, not in the loop
 //!
@@ -94,9 +102,30 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// `outbox.method` for the jobs this worker consumes (Swift
-/// `MessageRoutes.swift:2091`).
+/// `outbox.method` for a first-turn job (Swift `MessageRoutes.swift:2091`).
 pub const WORKER_JOB_METHOD: &str = "publish";
+
+/// `outbox.method` for the job an approved approval decision enqueues (Swift
+/// `ApprovalDecisionRoutes.enqueueResume` :721).
+///
+/// Reserved out of the claim predicate by B5.1 and **consumed for the first time
+/// by goal SRV-T1**. Until then the decision route did not exist, so no row
+/// could carry this method; now that it does, a row left unclaimed would be a
+/// person who tapped 승인 and watched nothing happen — with no error anywhere,
+/// because an unclaimed row is not a failed row.
+pub const RESUME_APPROVAL_JOB_METHOD: &str = "resume_approval";
+
+/// Every `method` this worker claims.
+///
+/// Kept as one array bound with `= ANY($2)` rather than as two claim functions:
+/// the per-agent serialization guarantee below is a property of the **whole**
+/// claim (`NOT EXISTS … IS NOT DISTINCT FROM o.partition_key` plus
+/// `row_number() … = 1`), and two separate claims would each hold it for their
+/// own method while breaking it across the pair — a first-turn job and a resume
+/// job for the same agent could then run at once and interleave two answers into
+/// one conversation, which is the exact failure this module was built to make
+/// impossible.
+pub const WORKER_JOB_METHODS: [&str; 2] = [WORKER_JOB_METHOD, RESUME_APPROVAL_JOB_METHOD];
 
 /// How long a claimed turn holds its agent's partition before another worker may
 /// take it over. Comfortably longer than the Swift transport's 120 s request
@@ -159,7 +188,7 @@ pub async fn claim_agent_job_batch(
                     ) AS rank_in_partition \
                FROM outbox o \
               WHERE o.kind = 'agent_job' \
-                AND o.method = $2 \
+                AND o.method = ANY($2) \
                 AND o.available_at <= now() \
                 AND ( \
                       o.status = 'pending' \
@@ -202,7 +231,7 @@ pub async fn claim_agent_job_batch(
                    o.lease_expires_at, o.created_at",
     )
     .bind(batch_size)
-    .bind(WORKER_JOB_METHOD)
+    .bind(WORKER_JOB_METHODS.map(str::to_string).to_vec())
     .bind(lease_seconds as f64)
     .fetch_all(pool)
     .await?;

@@ -660,6 +660,122 @@ pub async fn finish_run_in_tx(
     Ok(updated.rows_affected() > 0)
 }
 
+// ---------------------------------------------------------------------------
+// the approval hold (goal SRV-T1)
+//
+// Before this batch, `agent_run.status` had exactly three writers — the INSERT
+// (`queued`), `mark_run_started_in_tx` (`running`) and `finish_run_in_tx`
+// (`succeeded`/`failed`). `awaiting_approval`, `paused`, `cancelled` and
+// `timed_out` were reachable in the enum and unreachable in the database. The
+// three statements below are the missing transitions, and they are separate
+// statements rather than parameters on the existing ones for one reason:
+// `mark_run_started_in_tx`'s `WHERE status IN ('queued','running')` guard is
+// what stops a late progress event from dragging a run back OUT of an approval
+// hold, and widening it to serve a resume would have destroyed that guard.
+// ---------------------------------------------------------------------------
+
+/// `running` → `awaiting_approval`, with the deadline that bounds the hold.
+///
+/// The guard is `status = 'running'`: only the turn that is executing may park
+/// itself. A job re-claimed after a lease takeover finds the run already parked
+/// and gets `false`, which is what keeps a retried turn from raising a second
+/// approval for the same tool call.
+///
+/// `deadline_at` is written here and nowhere else. `001_init.sql:284` declared
+/// the column "for timed_out" and nothing had ever written it; an approval hold
+/// is precisely the state that needs one, because
+/// [`live_run_count_in_tx`] counts `awaiting_approval` against
+/// `agent.max_concurrent_runs` — which **defaults to 1**. Without a deadline the
+/// first unanswered approval silences the agent permanently.
+pub async fn park_run_for_approval_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    deadline_at: DateTime<Utc>,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'awaiting_approval'::run_status, \
+                deadline_at = $2, \
+                updated_at = now() \
+          WHERE id = $1 \
+            AND status = 'running'",
+    )
+    .bind(run_id)
+    .bind(deadline_at)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// `awaiting_approval` → `queued` (Swift `enqueueResume` :704-714).
+///
+/// Swift clears `error` and `finished_at`; this also clears `deadline_at`,
+/// because the hold that deadline bounded is over and leaving it set would make
+/// the run look overdue to any future reader of that column.
+///
+/// The `status = 'awaiting_approval'` guard is what makes a replayed decision
+/// safe: the second one finds the run already requeued (or already finished) and
+/// changes nothing, so an approval cannot resurrect a run that has since been
+/// rejected, expired or cancelled.
+pub async fn requeue_run_from_approval_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'queued'::run_status, \
+                error = NULL, \
+                finished_at = NULL, \
+                deadline_at = NULL, \
+                updated_at = now() \
+          WHERE id = $1 \
+            AND status = 'awaiting_approval'",
+    )
+    .bind(run_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// End a parked run without a completion — a rejection (`cancelled`, Swift
+/// `cancelRunAndAppendToolResult` :822-836) or an expiry (`timed_out`, Swift
+/// `recordExpiredClick` :930-943).
+///
+/// This is the statement that **releases the concurrency gate**: the run leaves
+/// `RunStatus::LIVE`, so `live_run_count_in_tx` stops counting it and the agent
+/// can take work again. Guarded on `awaiting_approval` so it can only ever end a
+/// run that is actually parked.
+///
+/// `finish_run_in_tx` cannot serve this: it writes only `succeeded`/`failed` and
+/// carries no status guard at all.
+pub async fn end_parked_run_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    status: RunStatus,
+    error: &Value,
+) -> Result<bool, DbError> {
+    debug_assert!(
+        matches!(status, RunStatus::Cancelled | RunStatus::TimedOut),
+        "an approval hold ends as cancelled (rejected) or timed_out (expired)"
+    );
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = $2::run_status, \
+                error = $3, \
+                deadline_at = NULL, \
+                updated_at = now(), \
+                finished_at = now() \
+          WHERE id = $1 \
+            AND status = 'awaiting_approval'",
+    )
+    .bind(run_id)
+    .bind(status.as_db_label())
+    .bind(error)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
 /// Why a gateway completion was refused, or the status it resolved to — Swift
 /// `normalizedCompletionStatus` (:1476-1495).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

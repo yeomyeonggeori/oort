@@ -70,10 +70,32 @@
 //! author gate is what keeps two agents from auto-answering each other forever
 //! in a room no A2A gate is watching.
 //!
-//! Streaming/partial relay, the `tool_call` work-control branch, approvals,
-//! memory-delivery receipts (`context_packet`), G4's SimHash semantic-loop
-//! detector (a stub in Swift too) and the ACP adapter are **not** ported here —
-//! see the PR body's deviation list.
+//! **goal SRV-T1 adds the approval axis** ([`approval`], [`tools`]) and with it
+//! the crate's third and fourth tables, `approval` and `approval_decision`. It
+//! is the batch that gave `RunStatus::AwaitingApproval` a writer: before it, the
+//! enum variant, the two gateway refusals that read it, the `approval` table and
+//! the push notifier's approval join all existed, and no row could ever reach
+//! any of them because nothing transitioned a run into that status.
+//!
+//! [`tools`] holds the catalog and the §3.3 G6 policy (both pure); [`approval`]
+//! holds the SQL. Neither owns a message or an outbox row — the same split this
+//! crate has kept since B2.6 — so the producer composes
+//! `approval` + `send_message_in_tx` + `emit_outbox` + `write_audit` inside one
+//! `with_tenant_tx`, and a parked run without its approval, or an approval
+//! without its card, is unrepresentable.
+//!
+//! The three run transitions that batch needed ([`run::park_run_for_approval_in_tx`],
+//! [`run::requeue_run_from_approval_in_tx`], [`run::end_parked_run_in_tx`]) are
+//! separate statements rather than parameters on the existing writers; see the
+//! comment above them for why widening `mark_run_started_in_tx` would have
+//! removed the guard that keeps a late progress event from ending an approval
+//! hold.
+//!
+//! Streaming/partial relay, the `tool_call` **work-control** branch (Swift routes
+//! `work.spawn` through `work_control`, which is not ported — see
+//! [`tools`]), memory-delivery receipts (`context_packet`), G4's SimHash
+//! semantic-loop detector (a stub in Swift too) and the ACP adapter are **not**
+//! ported here — see the PR body's deviation list.
 //!
 //! ## Verification
 //!
@@ -83,6 +105,7 @@
 //! breaks when reverted.
 
 pub mod a2a;
+pub mod approval;
 pub mod dm;
 pub mod effort;
 pub mod error;
@@ -90,7 +113,25 @@ pub mod mention;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
+pub mod tools;
 pub mod usage;
+
+pub use approval::{
+    approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
+    create_pending_approval_in_tx, decided_props_patch, decision_broadcast_payload,
+    decision_event_payload, decision_receipt, default_expires_at, existing_decision_in_tx,
+    is_active_channel_member_in_tx, is_active_human_member_in_tx, list_approvals_in_tx,
+    lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
+    normalized_reason, overdue_approvals_in_tx, record_decision_in_tx, resume_job_payload,
+    tool_grants_from_payload, validated_limit, validated_status, workspaces_with_overdue_approvals,
+    ApprovalListRow, ExistingDecision, LockedApproval, NewApproval, OverdueApproval,
+    DEFAULT_TTL_SECONDS, LISTABLE_STATUSES, RESUME_MODEL,
+};
+pub use tools::{
+    approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,
+    ToolResult, ACTION_TYPE_TOOL_CALL, AUDIT_APPROVAL_REQUESTED, AUDIT_TOOL_EXECUTED,
+    AUDIT_TOOL_FAILED, CATALOG, DECLARED_NOT_EXECUTABLE, TOOL_AUDIT_SCHEMA, WORK_SESSION_END,
+};
 
 pub use a2a::{
     evaluate_a2a_spawn, inherited_depth, load_a2a_gate_snapshot_in_tx, A2aBlock, A2aGateSnapshot,
@@ -128,10 +169,11 @@ pub use routing::{
     ROUTING_KEYS,
 };
 pub use run::{
-    completion_status, consume_run_step_in_tx, create_agent_run_in_tx,
+    completion_status, consume_run_step_in_tx, create_agent_run_in_tx, end_parked_run_in_tx,
     find_agent_run_by_trigger_in_tx, finish_run_in_tx, is_active_agent_in_tx,
     is_active_human_channel_member_in_tx, live_run_count_in_tx, load_agent_run_in_tx,
-    load_eligible_agent_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx, AgentRunRow,
+    load_eligible_agent_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx,
+    park_run_for_approval_in_tx, requeue_run_from_approval_in_tx, AgentRunRow,
     CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus,
     RunTrigger,
 };
