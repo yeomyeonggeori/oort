@@ -125,6 +125,8 @@ export function ApprovalActions({
   const [busy, setBusy] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
   const [errorTone, setErrorTone] = useState<"error" | "unavailable">("error");
+  /** 가드에 걸린 누름을 말하는 줄 (2R N-C). 무장할 때마다 지워진다. */
+  const [tooFast, setTooFast] = useState(false);
   const keysRef = useRef<{ approve?: string; reject?: string }>({});
   /** 무장한 시각. 확정이 그 뒤 `CONFIRM_GUARD_MS`를 기다렸는지 재는 기준. */
   const armedAtRef = useRef<number>(0);
@@ -132,7 +134,16 @@ export function ApprovalActions({
   async function commit(approve: boolean) {
     if (busy) return;
     // (a) 무장 직후의 확정은 두 번째 의도가 아니다.
-    if (Date.now() - armedAtRef.current < CONFIRM_GUARD_MS) return;
+    //
+    // 조용히 삼키지 않는다(2R N-C). 아무 일도 일어나지 않는 버튼은 고장난 버튼과
+    // 구별되지 않고, 그 자리에서 사람이 하는 다음 행동은 더 세게 다시 누르는
+    // 것이다. 무엇이 일어났는지 한 줄로 말한다 — 모바일이 같은 가드에 대해 하는
+    // 것과 같은 말이다(`ApprovalDecision.tsx`의 `too-fast`).
+    if (Date.now() - armedAtRef.current < CONFIRM_GUARD_MS) {
+      setTooFast(true);
+      return;
+    }
+    setTooFast(false);
     const slot = approve ? "approve" : "reject";
     keysRef.current[slot] ??= newDecisionId();
     setBusy(true);
@@ -194,12 +205,15 @@ export function ApprovalActions({
   function arm(next: Exclude<Armed, null>) {
     armedAtRef.current = Date.now();
     focusAfterArmChange.current = "commit";
+    setTooFast(false);
+    setErrorCopy(null);
     setArmed(next);
   }
 
   /** 무장 해제. 왔던 버튼으로 캐럿을 돌려준다 (다이얼로그와 같은 계약). */
   function disarm() {
     focusAfterArmChange.current = armed === "approve" ? "approve" : "reject";
+    setTooFast(false);
     setArmed(null);
   }
 
@@ -284,6 +298,20 @@ export function ApprovalActions({
             </Button>
           </span>
         </div>
+      )}
+      {/* 2R N-C: 모바일과 같은 문장. 「탭」만 바꿨다 — 이 표면에서 가드에 걸리는
+          것은 빠른 더블클릭이기도 하고 눌린 채 반복된 Enter이기도 해서, 한 입력
+          장치의 이름을 쓰면 나머지 경우에 틀린 말이 된다. role="status"인 것도
+          같은 이유다: 이것은 사고가 아니라 안내다. */}
+      {tooFast && (
+        <p
+          role="status"
+          data-testid={`${testIdPrefix}-too-fast`}
+          className="pt-2 text-meta text-ink-muted"
+        >
+          방금 누른 것과 이어진 동작이라 보내지 않았습니다. 문장을 확인하고 다시
+          누르세요.
+        </p>
       )}
       {errorCopy !== null && (
         <p

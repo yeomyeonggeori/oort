@@ -145,6 +145,7 @@ export function FeedList({
   onMarkRead,
   renderActions,
   testId,
+  listRef: externalRef,
 }: {
   items: FeedItem[];
   /** Only offered for rows that carry a seq to read up to. */
@@ -152,8 +153,17 @@ export function FeedList({
   /** Per-row controls, rendered beside the link. Return null for plain rows. */
   renderActions?: (item: FeedItem) => ReactNode;
   testId: string;
+  /**
+   * 목록 자체로 캐럿을 돌려보내야 하는 호출자를 위해 (goal W-AP1 2R N-D).
+   *
+   * ↑/↓ 핸들러는 아래 `ul`에 걸려 있다. 결정한 행이 사라진 뒤 초점을 바깥 상자로
+   * 보내면 "다음 행으로 이어진다"는 약속이 성립하지 않는다 — 키가 이 핸들러에
+   * 닿지 않기 때문이다. 착지점은 핸들러를 가진 엘리먼트여야 한다.
+   */
+  listRef?: React.RefObject<HTMLUListElement>;
 }) {
-  const listRef = useRef<HTMLUListElement>(null);
+  const ownRef = useRef<HTMLUListElement>(null);
+  const listRef = externalRef ?? ownRef;
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -184,7 +194,10 @@ export function FeedList({
       ref={listRef}
       onKeyDown={onKeyDown}
       data-testid={testId}
-      className="flex flex-col"
+      // 캐럿이 여기 착지할 수 있어야 ↑/↓가 바로 이어진다. -1이라 Tab 순서에는
+      // 끼어들지 않는다: 이 목록의 정상적인 Tab 경로는 행 링크들이다.
+      tabIndex={-1}
+      className="flex flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       {items.map((item) => (
         <FeedRow key={item.key} item={item} actions={renderActions?.(item)} />

@@ -135,39 +135,52 @@ export interface DecisionNote {
 const SUPERSEDED_FALLBACK = "이 요청은 이미 결정되어 있었습니다.";
 
 /**
- * 승인/거부 영수증의 정본 문장 (2R 오케스트레이터 결정 + 서버 실측).
+ * 승인/거부 영수증의 정본 문장 — **모바일과 같은 한 벌** (2R M2 + N1).
  *
- * **약속하지 않는 것이 이 두 문장의 설계다.**
+ * 이 문장들은 모바일 `decisionReceiptCopy`(`InboxScreen.tsx`, goal M-AP1)와 글자까지
+ * 같다. 같은 원장이 답한 같은 사실을 두 클라이언트가 다르게 말하면 둘 중 하나는
+ * 반드시 낡는다.
  *
- * 승인: "승인을 기록했습니다." — 그 뒤에 무엇이 일어나는지는 말하지 않는다.
- * `routes/approvals.rs:475-500`의 `approve_run`은 `requeue_run_from_approval_in_tx`가
- * false를 돌려주면(락과 여기 사이에 실행이 hold를 떠났으면) **resume job 없이**
- * 200으로 끝난다. 정상 경로에서도 재개는 outbox를 거치는 비동기다. 그러므로
- * "바로 실행합니다"는 계약이 지킬 수 없는 약속이었다.
+ * **약속하지 않는 것이 이 한 벌의 설계다.** 영수증은 *원장에 무엇이 적혔는지*까지만
+ * 말하고 그 뒤에 무엇이 일어나는지는 말하지 않는다. `approve_run`
+ * (`routes/approvals.rs:475-500`)은 락과 여기 사이에 실행이 hold를 떠났으면
+ * **resume job 없이** 200으로 끝나고, 정상 경로에서도 재개는 outbox를 거치는
+ * 비동기다. 그래서 "바로 실행합니다"는 계약이 지킬 수 없는 약속이었다.
  *
- * 거부: "거부를 기록했습니다. 이 실행은 이어지지 않습니다."
- * 실측(`routes/approvals.rs:447-449`, `:513-575`, `crates/momo-agent/src/run.rs:764-790`):
- * 거부는 같은 트랜잭션에서 `end_parked_run_in_tx(..., RunStatus::Cancelled)`까지
- * 함께 커밋한다 — 여기까지는 참이다. 그런데 그 UPDATE는
- * `WHERE status = 'awaiting_approval'`로 가드돼 있고, 걸리지 않으면
- * `if !ended { return Ok(()); }`로 조용히 빠진다. 즉 **"실행이 취소되었습니다"는
- * 좁은 경합에서 거짓이 된다**(실행이 그 사이 다른 이유로 끝나 있던 경우).
- * 반면 "이어지지 않는다"는 무조건 참이다: 거부 경로는 어떤 경우에도 resume job을
- * 넣지 않는다. 그래서 승인 쪽과 같은 기준으로 후자를 쓴다.
- *
- * 확정 문장(`ApprovalActions.REJECT_CONFIRM`)은 모바일과 맞춰 「거부하면 대기 중인
- * 실행이 취소됩니다」로 한정어를 단다. 영수증과 문장이 다른 것은 **시제가 다르기
- * 때문**이다: 확정은 누르기 전의 규칙이라 조건을 한정어로 그릴 수 있고, 영수증은
- * 이미 일어난 일에 대한 진술인데 그 영수증에는 실행이 대기 중이었는지가 실려 오지
- * 않는다(`ApprovalDecisionReceipt`가 나르는 것은 승인의 상태뿐이다). 모르는 것을
- * 아는 척하지 않으려면 영수증에는 무조건 참인 절만 붙일 수 있다.
+ * 거부 영수증에서 「이 실행은 이어지지 않습니다」를 **뗀 것이 2R M2의 정정이다**.
+ * 참인 절이긴 했지만 앞을 내다보는 절이고, 영수증이 말할 수 있는 것은 원장에 적힌
+ * 것뿐이라는 이 한 벌의 규칙을 스스로 어기고 있었다. 그 사실은 확정 문장
+ * (`ApprovalActions.REJECT_CONFIRM` = "거부하면 대기 중인 실행이 취소됩니다.")이
+ * 말한다 — 누르기 전의 규칙이라 한정어로 조건을 그릴 수 있는 자리다.
  */
 export const APPROVED_RECEIPT = "승인을 기록했습니다.";
-export const REJECTED_RECEIPT = "거부를 기록했습니다. 이 실행은 이어지지 않습니다.";
+export const REJECTED_RECEIPT = "거부를 기록했습니다.";
+
+/**
+ * 이미 결정돼 있던 요청에는 **원장에 적힌 방향**을 말한다 (2R M2).
+ *
+ * 앞 판은 `outcome.status`를 버리고 "다른 곳에서 이미 결정되었습니다." 한 문장으로
+ * 접었다. 그 문장은 사람이 자기가 누른 대로 됐다고 읽게 만든다 — 그런데 내가 승인을
+ * 눌렀는데 원장에 **거부**가 적혀 있을 수 있다(폰에서 먼저 거부했거나, 다른 사람이
+ * 결정했거나). 되돌릴 수 없는 액션 계열에서 방향을 삼키는 것은 결정을 삼키는 것과
+ * 같은 크기의 거짓말이다.
+ *
+ * 네 갈래는 원장의 어휘 그대로이고, 모르는 상태는 지어내지 않고 서버가 준 note를
+ * 먼저 쓴다.
+ */
+function supersededCopy(outcome: DecisionOutcome): string {
+  if (outcome.status === "approved") return "이미 승인으로 기록되어 있었습니다.";
+  if (outcome.status === "rejected") return "이미 거부로 기록되어 있었습니다.";
+  if (outcome.status === "expired") {
+    return "결정 전에 만료되어 만료로 기록되었습니다.";
+  }
+  if (outcome.status === "cancelled") return "이 요청은 취소되어 있었습니다.";
+  return outcome.note ?? SUPERSEDED_FALLBACK;
+}
 
 export function decisionNote(outcome: DecisionOutcome): DecisionNote {
   if (outcome.kind === "superseded") {
-    return { tone: "neutral", text: outcome.note ?? SUPERSEDED_FALLBACK };
+    return { tone: "neutral", text: supersededCopy(outcome) };
   }
   if (outcome.kind === "error") {
     // 2R M1: 같은 404를 목록은 조용히 접고 이 줄만 빨갛게 그리면, 한 화면이

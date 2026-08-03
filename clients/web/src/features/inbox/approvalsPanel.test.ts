@@ -227,16 +227,47 @@ describe("decisionNote", () => {
     for (const status of ["approved", "rejected", "cancelled"]) {
       const outcome = supersededOutcome(status);
       expect(outcome.kind).toBe("superseded");
-      const note = decisionNote(outcome);
-      expect(note.tone).toBe("neutral");
-      expect(note.text).toBe("다른 곳에서 이미 결정되었습니다.");
+      expect(decisionNote(outcome).tone).toBe("neutral");
     }
   });
 
-  it("결정 전에 만료된 것도 오류가 아니라 상태 전이다 (ADR-0132: 부재≠실패)", () => {
-    const note = decisionNote(supersededOutcome("expired"));
+  // 2R M2. 내가 승인을 눌렀는데 원장에 **거부**가 적혀 있을 수 있다(폰에서 먼저
+  // 거부했거나, 다른 사람이 결정했거나). 방향을 삼키고 "이미 결정되었습니다"만
+  // 말하면 사람은 자기가 누른 대로 됐다고 읽는다 — 되돌릴 수 없는 액션 계열에서
+  // 방향을 삼키는 것은 결정을 삼키는 것과 같은 크기의 거짓말이다.
+  it("이미 결정된 요청은 원장에 적힌 방향을 말한다", () => {
+    expect(decisionNote(supersededOutcome("approved")).text).toBe(
+      "이미 승인으로 기록되어 있었습니다."
+    );
+    expect(decisionNote(supersededOutcome("rejected")).text).toBe(
+      "이미 거부로 기록되어 있었습니다."
+    );
+    expect(decisionNote(supersededOutcome("expired")).text).toBe(
+      "결정 전에 만료되어 만료로 기록되었습니다."
+    );
+    expect(decisionNote(supersededOutcome("cancelled")).text).toBe(
+      "이 요청은 취소되어 있었습니다."
+    );
+  });
+
+  it("네 갈래가 서로 다른 문장이다: 방향이 문장에서 사라지지 않는다", () => {
+    const texts = ["approved", "rejected", "expired", "cancelled"].map(
+      (status) => decisionNote(supersededOutcome(status)).text
+    );
+    expect(new Set(texts).size).toBe(4);
+  });
+
+  it("모르는 상태는 지어내지 않고 서버가 준 note를 쓴다", () => {
+    const note = decisionNote({
+      kind: "superseded",
+      note: "다른 곳에서 이미 결정되었습니다.",
+    });
     expect(note.tone).toBe("neutral");
-    expect(note.text).toBe("결정 전에 만료되었습니다.");
+    expect(note.text).toBe("다른 곳에서 이미 결정되었습니다.");
+  });
+
+  it("결정 전에 만료된 것도 오류가 아니라 상태 전이다 (ADR-0132: 부재≠실패)", () => {
+    expect(decisionNote(supersededOutcome("expired")).tone).toBe("neutral");
   });
 
   it("note 없는 superseded도 오류 색을 받지 않는다", () => {
@@ -263,10 +294,9 @@ describe("decisionNote", () => {
     // 참이 아니다.
     expect(APPROVED_RECEIPT).not.toMatch(/바로|즉시|실행합니다/);
     // 거부는 같은 트랜잭션에서 실행을 취소하지만, 그 UPDATE는
-    // `WHERE status='awaiting_approval'` 가드에 걸리면 조용히 빠진다. 무조건
-    // 참인 것은 "재개되지 않는다"뿐이다.
+    // `WHERE status='awaiting_approval'` 가드에 걸리면 조용히 빠진다. 그래서
+    // 영수증은 취소를 주장하지 않는다(무슨 말을 대신 하는지는 아래 M2 단언).
     expect(REJECTED_RECEIPT).not.toMatch(/취소되었습니다/);
-    expect(REJECTED_RECEIPT).toMatch(/이어지지 않습니다/);
   });
 
   it("미제공 결정은 사고가 아니다: 목록과 같은 색을 받는다 (2R M1)", () => {
@@ -411,11 +441,14 @@ describe("확정 문장", () => {
     expect(REJECT_CONFIRM).toMatch(/대기 중인/);
   });
 
-  it("영수증은 한정할 근거가 없으므로 무조건 참인 절만 붙인다", () => {
-    // 확정 문장은 누르기 전의 규칙이라 조건을 한정어로 그릴 수 있다. 영수증은
-    // 이미 일어난 일에 대한 진술인데, 그 영수증에는 실행이 대기 중이었는지가
-    // 실려 오지 않는다 — 그래서 「취소되었습니다」라고 쓸 수 없다.
-    expect(REJECTED_RECEIPT).toMatch(/이어지지 않습니다/);
-    expect(REJECTED_RECEIPT).not.toMatch(/취소되었습니다/);
+  it("영수증은 원장에 적힌 것까지만 말한다 (2R M2)", () => {
+    // 앞 판의 거부 영수증은 "…이 실행은 이어지지 않습니다."였다. 참이긴 하지만
+    // **앞을 내다보는 절**이고, 영수증이 말할 수 있는 것은 원장에 적힌 것뿐이라는
+    // 이 한 벌의 규칙을 스스로 어기고 있었다. 그 사실은 확정 문장이 말한다.
+    expect(REJECTED_RECEIPT).toBe("거부를 기록했습니다.");
+    expect(APPROVED_RECEIPT).toBe("승인을 기록했습니다.");
+    for (const copy of [APPROVED_RECEIPT, REJECTED_RECEIPT]) {
+      expect(copy).not.toMatch(/이어지지|취소되었습니다|실행합니다/);
+    }
   });
 });

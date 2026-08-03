@@ -537,6 +537,22 @@ async function exerciseList(browser, delayMs) {
       `arm guard window: 무장 직후의 Enter가 결정을 ${state.decisions.length}건 보냈다`
     );
   }
+  // 2R N-C: 삼킨 채로 두면 아무 일도 안 하는 버튼이 되고, 그 자리에서 사람이 하는
+  // 다음 행동은 더 세게 다시 누르는 것이다. 무엇이 일어났는지 말해야 한다.
+  const tooFast = page.getByTestId("inbox-approval-too-fast").first();
+  if ((await tooFast.count()) === 0) {
+    throw new Error(
+      "guard notice: 가드가 누름을 삼켰는데 화면이 아무 말도 하지 않았다"
+    );
+  }
+  const tooFastText = (await tooFast.textContent()) ?? "";
+  if (!tooFastText.includes("보내지 않았습니다")) {
+    throw new Error(`guard notice: 고지 문구가 정본이 아니다 (${tooFastText})`);
+  }
+  // 사고가 아니라 안내다. alert으로 끼어들면 이 줄이 오류처럼 읽힌다.
+  if ((await tooFast.getAttribute("role")) !== "status") {
+    throw new Error("guard notice: 안내가 alert으로 그려졌다");
+  }
 
   // (b) 반복 가드. (a)만 두면 **400ms를 넘긴 긴 누름**이 여전히 관통한다:
   //     첫 keydown이 승인을 무장시키고 초점이 확정 버튼으로 옮겨 간 뒤, 손가락이
@@ -596,14 +612,26 @@ async function exerciseList(browser, delayMs) {
 
   // 2R M6: 확정에 성공하면 그 행이 사라진다. 초점이 body로 떨어지면 키보드
   // 사용자는 방금 일한 자리를 잃고 문서 맨 위에서 다시 Tab을 시작한다.
-  const afterCommitFocus = await page.evaluate(() => {
-    const active = document.activeElement;
-    if (active === null || active === document.body) return "body";
-    return active.getAttribute("role") ?? active.tagName.toLowerCase();
-  });
-  if (afterCommitFocus === "body") {
+  //
+  // 2R N-D: `!== body`로는 부족하다. 착지점은 **↑/↓ 핸들러를 가진 엘리먼트**여야
+  // 하고(그 핸들러는 `ul`에 있다), 바깥 상자에 앉으면 캐럿이 목록 근처에 있다는
+  // 사실만 남고 키는 아무데도 닿지 않는다. 그래서 착지한 엘리먼트를 이름으로
+  // 확인하고, 실제로 ↓가 행으로 이어지는지까지 눌러 본다.
+  const afterCommitFocus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "body"
+  );
+  if (afterCommitFocus !== "inbox-list") {
     throw new Error(
-      "commit focus: 확정 뒤 캐럿이 body로 떨어졌다 (무장 때 고친 것과 같은 결함)"
+      `commit focus: 확정 뒤 캐럿이 목록이 아니라 ${afterCommitFocus}에 있다`
+    );
+  }
+  await page.keyboard.press("ArrowDown");
+  const afterArrow = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "body"
+  );
+  if (afterArrow !== "feed-row") {
+    throw new Error(
+      `commit focus: 착지 뒤 ↓가 다음 행으로 이어지지 않았다 (${afterArrow})`
     );
   }
 
@@ -728,9 +756,9 @@ async function exerciseSuperseded(browser, delayMs) {
   const note = page.getByTestId("inbox-decision-note");
   const role = await note.getAttribute("role");
   const text = (await note.textContent()) ?? "";
-  if (role !== "status" || !text.includes("이미 결정되었습니다")) {
+  if (role !== "status" || !text.includes("이미 승인으로 기록되어 있었습니다")) {
     throw new Error(
-      `superseded stays a note: expected role="status" + 이미 결정 문구, got role=${role} text=${text}`
+      `superseded stays a note: expected role="status" + 원장 방향 문구, got role=${role} text=${text}`
     );
   }
   await context.close();

@@ -148,11 +148,13 @@ function FeedPanel({
   feed,
   onMarkRead,
   renderActions,
+  listRef,
 }: {
   filter: InboxFilter;
   feed: Feed;
   onMarkRead?: (item: FeedItem) => void;
   renderActions?: (item: FeedItem) => ReactNode;
+  listRef?: React.RefObject<HTMLUListElement>;
 }) {
   const surface = PANEL_SURFACE[filter];
   const state = approvalsPanelState({
@@ -200,6 +202,7 @@ function FeedPanel({
       onMarkRead={onMarkRead}
       renderActions={renderActions}
       testId="inbox-list"
+      listRef={listRef}
     />
   );
 }
@@ -246,8 +249,19 @@ export function InboxRoute() {
   const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [note, setNote] = useState<DecisionNote | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const restoreListFocus = useRef(false);
+  // 2R N-D: 착지점은 **핸들러를 가진 엘리먼트**여야 한다. 앞 판은 바깥 상자
+  // (tabpanel div)로 보냈는데, ↑/↓는 그 안의 `ul`에 걸려 있어서(FeedRow.tsx)
+  // 주석이 약속한 "바로 다음 행으로"가 성립하지 않았다. 키가 핸들러에 닿지
+  // 않으면 캐럿이 목록 근처에 있다는 사실만 남고 아무것도 이어지지 않는다.
+  const listRef = useRef<HTMLUListElement>(null);
+  /**
+   * 결정이 하나 닫힐 때마다 오른다. 초점을 옮기는 신호가 **이것**이지
+   * `feed.items`가 아닌 이유는 순서 때문이다: 원장 재조회는 왕복 하나 뒤에
+   * 도착하고, 그 사이에 결정된 행은 이미 언마운트돼 초점이 body로 떨어져 있다.
+   * 그때 옮기면 이미 잃은 캐럿을 나중에 줍는 셈이라, 그 사이의 키 입력은 갈 곳이
+   * 없다. 결정이 닫힌 바로 다음 렌더에서 옮긴다.
+   */
+  const [decisionTick, setDecisionTick] = useState(0);
 
   const feed =
     filter === "needs-action"
@@ -263,13 +277,13 @@ export function InboxRoute() {
     setNote(null);
   }, [filter]);
 
-  // 2R M6의 착지점. 목록이 다시 그려진 뒤에 옮겨야 방금 사라진 행이 아니라
-  // 새 목록을 잡는다.
+  // 2R M6/N-D의 착지점. `ul`은 행이 사라져도 남아 있으므로 캐럿이 여기 앉으면
+  // 재조회를 건너서 유지되고, ↑/↓가 곧바로 다음 행으로 이어진다. 마지막 행을
+  // 결정해 목록이 통째로 비면 착지할 곳이 없다 — 그때는 조용히 흘려보낸다.
   useEffect(() => {
-    if (!restoreListFocus.current) return;
-    restoreListFocus.current = false;
-    panelRef.current?.focus();
-  }, [feed.items]);
+    if (decisionTick === 0) return;
+    listRef.current?.focus();
+  }, [decisionTick]);
 
   const onMarkRead = useCallback(
     (item: FeedItem) => {
@@ -291,8 +305,8 @@ export function InboxRoute() {
       // 2R M6: 결정한 행은 원장을 다시 읽는 순간 사라진다. 그 행 안에 있던
       // 초점도 함께 사라져 body로 떨어지므로, 키보드 사용자는 방금 일한 자리를
       // 잃고 문서 맨 위에서 다시 Tab을 시작한다. 캐럿을 목록 자체에 돌려주면
-      // ↑/↓가 바로 다음 행으로 이어진다.
-      restoreListFocus.current = true;
+      // ↑/↓가 바로 다음 행으로 이어진다(2R N-D: 그 핸들러를 가진 것이 `ul`이다).
+      setDecisionTick((tick) => tick + 1);
     },
     [invalidateApprovals]
   );
@@ -416,10 +430,6 @@ export function InboxRoute() {
               "aria-labelledby": tabId(filter),
             }
           : {})}
-        ref={panelRef}
-        // 2R M6의 착지점. 결정한 행이 사라진 뒤 캐럿이 여기로 오면 ↑/↓가 바로
-        // 다음 행으로 이어진다. -1이라 Tab 순서에는 끼어들지 않는다.
-        tabIndex={-1}
         className="min-h-0 flex-1 overflow-y-auto"
       >
         <FeedPanel
@@ -431,6 +441,7 @@ export function InboxRoute() {
           renderActions={
             filter === "needs-action" ? renderApprovalActions : undefined
           }
+          listRef={listRef}
         />
       </div>
 
