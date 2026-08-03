@@ -92,6 +92,26 @@ impl RunStatus {
         RunStatus::AwaitingApproval,
         RunStatus::Paused,
     ];
+
+    /// Swift `isCancellableRunStatus` (`AgentRunRoutes.swift:609-611`): the set a
+    /// human "멈춰라" may still act on.
+    ///
+    /// It is the same four statuses as [`Self::LIVE`] and it is written as its
+    /// own predicate anyway, because the two answer different questions. `LIVE`
+    /// asks "does this run occupy a concurrency slot"; this asks "is there still
+    /// something to stop". They coincide today and a future status (a run parked
+    /// on something that is not an approval, say) could easily belong to one and
+    /// not the other — at which point a single shared constant would silently
+    /// pick a side.
+    pub fn is_cancellable(self) -> bool {
+        matches!(
+            self,
+            RunStatus::Queued
+                | RunStatus::Running
+                | RunStatus::AwaitingApproval
+                | RunStatus::Paused
+        )
+    }
 }
 
 /// How a run was triggered, and therefore what makes a re-trigger the *same*
@@ -789,6 +809,163 @@ pub async fn end_parked_run_in_tx(
     Ok(updated.rows_affected() > 0)
 }
 
+// ---------------------------------------------------------------------------
+// the human stop (goal SRV-C2 — ADR-0132 휴먼 정지권)
+//
+// The transitions above all belong to the machine: a gateway reports, an
+// approval resolves, a deadline passes. This one belongs to a person, and that
+// is why its authorization is different from every other write in this module —
+// **any active member of the run's channel** may stop it, not the agent's owner
+// and not a workspace admin. Being in the room is the right to stop what is
+// happening in the room.
+//
+// `cancel_run_in_tx` is a separate statement from `end_parked_run_in_tx` for the
+// same reason that one is separate from `finish_run_in_tx`: the guard is the
+// contract. `end_parked_run_in_tx` may only end a run that is parked on an
+// approval; a human stop must reach a run that is `queued`, `running`, parked,
+// or `paused`, and widening the approval statement to serve it would have
+// removed the guard that keeps a rejection from ending a run nobody parked.
+// ---------------------------------------------------------------------------
+
+/// The locked run row a cancel decides on — Swift's `SELECT … FOR UPDATE`
+/// (`AgentRunRoutes.swift:441-464`).
+#[derive(Debug, Clone)]
+pub struct CancellableRun {
+    pub channel_id: Uuid,
+    pub agent_member_id: Uuid,
+    pub status: RunStatus,
+    /// Swift's `can_cancel`: is the caller an active member of the run's
+    /// channel (`membership … left_at IS NULL`)?
+    ///
+    /// Read in the **same statement** as the row lock rather than as a
+    /// follow-up, so a membership that ends between the two cannot be the
+    /// difference between a refusal and a cancellation. `member.kind` is not
+    /// checked here and Swift does not check it either: the route already
+    /// requires a human principal, and repeating the test in SQL would suggest
+    /// this predicate is the human gate when it is the *room* gate.
+    pub caller_is_channel_member: bool,
+}
+
+/// Lock the run for a cancel and read the two facts the decision needs.
+///
+/// `FOR UPDATE` on `agent_run` is what serializes two people tapping 중지 at
+/// once: the second waits, then reads `status = 'cancelled'` and takes the
+/// idempotent path instead of writing a second system line.
+///
+/// `None` is "no such run **in this tenant**" — the workspace predicate is in
+/// the statement beside RLS, so another tenant's run id is a 404 rather than a
+/// 403 that would confirm it exists.
+pub async fn lock_run_for_cancel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    member_id: Uuid,
+) -> Result<Option<CancellableRun>, DbError> {
+    let row = sqlx::query(
+        "SELECT r.channel_id, r.agent_member_id, r.status::text AS status_label, \
+                EXISTS ( \
+                  SELECT 1 FROM membership ms \
+                   WHERE ms.workspace_id = $1 \
+                     AND ms.channel_id = r.channel_id \
+                     AND ms.member_id = $3 \
+                     AND ms.left_at IS NULL \
+                ) AS can_cancel \
+           FROM agent_run r \
+          WHERE r.workspace_id = $1 AND r.id = $2 \
+          FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else { return Ok(None) };
+    let label: String = row.try_get("status_label")?;
+    let status = RunStatus::from_db_label(&label)
+        .ok_or_else(|| sqlx::Error::Decode(format!("unknown run_status '{label}'").into()))?;
+    Ok(Some(CancellableRun {
+        channel_id: row.try_get("channel_id")?,
+        agent_member_id: row.try_get("agent_member_id")?,
+        status,
+        caller_is_channel_member: row.try_get("can_cancel")?,
+    }))
+}
+
+/// `queued|running|awaiting_approval|paused` → `cancelled` (Swift :489-503).
+///
+/// The status guard is in the `WHERE` even though the caller has already read it
+/// under the row lock: the lock makes the read authoritative, and the predicate
+/// makes the *statement* safe to call from anywhere. `deadline_at` is cleared
+/// like [`end_parked_run_in_tx`] does — a cancelled run is not overdue, it is
+/// over — which is one column more than Swift writes and cannot change any
+/// answer, since nothing reads `deadline_at` on a terminal run.
+///
+/// Returns `false` when the run had already left the cancellable set, which the
+/// caller must treat as "somebody else ended it", never as a failure.
+pub async fn cancel_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    error: &Value,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'cancelled'::run_status, \
+                error = $3, \
+                deadline_at = NULL, \
+                updated_at = now(), \
+                finished_at = now() \
+          WHERE workspace_id = $1 \
+            AND id = $2 \
+            AND status IN ('queued','running','awaiting_approval','paused')",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(error)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// The `work_session` ids this run's `work_control` records touched — Swift's
+/// `audit_log ⋈ work_control` join (:468-486).
+///
+/// It reads two tables this crate does not own, for the same reason the
+/// eligibility predicates above read `member`/`membership`: the alternative is
+/// raw SQL in a route handler, which this server allows nowhere. Nothing here
+/// writes, and neither table has a second copy of this statement.
+///
+/// **What the answer means today (runtime-unverified):** `work_control` is not
+/// ported to this server — no Rust path writes a row — so the list is empty in
+/// practice and the response's `workSessionsTerminated: false` is the literal
+/// truth rather than a promise deferred. The query is ported verbatim anyway so
+/// that the field starts telling the truth the moment the work-control dispatch
+/// lands, instead of being a stub someone has to remember to fill in.
+pub async fn linked_work_session_ids_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+) -> Result<Vec<Uuid>, DbError> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT wc.session_id \
+           FROM audit_log al \
+           JOIN work_control wc \
+             ON wc.workspace_id = al.workspace_id \
+            AND wc.id = al.target_id \
+            AND al.target_type = 'work_control' \
+          WHERE al.workspace_id = $1 \
+            AND al.run_id = $2 \
+            AND wc.session_id IS NOT NULL \
+          ORDER BY wc.session_id",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(ids)
+}
+
 /// Why a gateway completion was refused, or the status it resolved to — Swift
 /// `normalizedCompletionStatus` (:1476-1495).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -876,6 +1053,44 @@ mod tests {
             RunStatus::LIVE.map(RunStatus::as_db_label),
             ["queued", "running", "awaiting_approval", "paused"]
         );
+    }
+
+    /// Swift's `isCancellableRunStatus` set, and its complement: every terminal
+    /// status must be **un**-cancellable, or the route's 409 arm becomes
+    /// unreachable and a run that already succeeded would answer "stopped".
+    #[test]
+    fn only_a_live_run_can_be_stopped() {
+        for status in [
+            RunStatus::Queued,
+            RunStatus::Running,
+            RunStatus::AwaitingApproval,
+            RunStatus::Paused,
+        ] {
+            assert!(status.is_cancellable(), "{status:?} is stoppable");
+        }
+        for status in [
+            RunStatus::Succeeded,
+            RunStatus::Failed,
+            RunStatus::Cancelled,
+            RunStatus::TimedOut,
+        ] {
+            assert!(
+                !status.is_cancellable(),
+                "{status:?} is terminal — there is nothing left to stop"
+            );
+            assert!(status.is_terminal());
+        }
+        // Today the cancellable set and the live set coincide; the assertion is
+        // written so that a future divergence is a decision someone made on
+        // purpose rather than a silent one.
+        assert_eq!(
+            RunStatus::LIVE.map(RunStatus::as_db_label),
+            ["queued", "running", "awaiting_approval", "paused"]
+        );
+        assert!(RunStatus::LIVE
+            .iter()
+            .copied()
+            .all(RunStatus::is_cancellable));
     }
 
     /// The whole idempotency contract in one assertion: same trigger → same key

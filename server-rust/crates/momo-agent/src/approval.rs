@@ -450,6 +450,48 @@ pub async fn mark_approval_expired_in_tx(
     Ok(result.rows_affected() > 0)
 }
 
+/// The reason a human stop writes onto the approvals it retires
+/// (`AgentRunRoutes.swift:517`).
+pub const RUN_CANCELLED_DECISION_REASON: &str = "agent run cancelled by human";
+
+/// Retire every approval still waiting on a run a human just stopped — Swift's
+/// cancel `UPDATE approval` (`AgentRunRoutes.swift:513-519`).
+///
+/// Without it a stopped run leaves its approval card `pending`, so the inbox
+/// keeps asking a person to decide something that can no longer happen — and an
+/// 승인 tap would then try to resume a cancelled run. (That path's
+/// `status = 'awaiting_approval'` guard in
+/// [`crate::run::requeue_run_from_approval_in_tx`] already refuses, so this is
+/// the *second* lock rather than the only one: the first makes the inbox honest,
+/// the second makes it safe.)
+///
+/// `decided_by` stays NULL for the same reason it does on an expiry: nobody
+/// decided this approval, the run it belonged to went away. `approval_decided_ck`
+/// permits a decider only for `approved`/`rejected`, so naming one here would be
+/// refused by the database anyway.
+///
+/// Returns how many approvals were retired, which the caller records rather than
+/// asserts on: zero is the ordinary case, because most runs raise no approval.
+pub async fn cancel_pending_approvals_for_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    decided_at: DateTime<Utc>,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE approval \
+            SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
+          WHERE workspace_id = $1 AND run_id = $2 AND status = 'pending'",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(decided_at)
+    .bind(RUN_CANCELLED_DECISION_REASON)
+    .execute(&mut *conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// The idempotency ledger row (Swift :277-288).
 ///
 /// `UNIQUE (workspace_id, client_decision_id)` (`004_approval_decision.sql:23`)

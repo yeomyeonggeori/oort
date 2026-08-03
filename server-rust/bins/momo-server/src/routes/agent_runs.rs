@@ -1,8 +1,16 @@
-//! Agent-run creation — Swift `AgentRunRoutes.create` (:29-250) parity.
+//! Agent-run creation and the human stop — Swift `AgentRunRoutes.create`
+//! (:29-250) and `AgentRunRoutes.cancel` (:437-607) parity.
 //!
 //! ```text
 //! POST /v1/workspaces/{ws}/channels/{ch}/agent-runs
+//! POST /v1/workspaces/{ws}/agent-runs/{run}/cancel
 //! ```
+//!
+//! The two are a pair: one is the only way to start a run on purpose, the other
+//! is the only way to stop one. Until goal SRV-C2 this file held just the first
+//! half, and the product said so out loud — the phone's stop copy read "이미 실행
+//! 중인 작업은 그대로 끝까지 갑니다", which was an accurate description of a server
+//! with no cancel route.
 //!
 //! This is the **writer** half of the B2.6 spine: it creates the authoritative
 //! `agent_run` row and enqueues the `agent_job` a gateway will claim. Everything
@@ -29,21 +37,25 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::{
-    create_agent_run_in_tx, is_active_human_channel_member_in_tx, load_agent_run_in_tx,
-    load_eligible_agent_in_tx, NewAgentRun, RequestedRouting, RunTrigger,
+    cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx, create_agent_run_in_tx,
+    is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx, load_agent_run_in_tx,
+    load_eligible_agent_in_tx, lock_run_for_cancel_in_tx, NewAgentRun, RequestedRouting, RunStatus,
+    RunTrigger,
 };
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx;
-use momo_outbox::{emit_outbox, OutboxKind};
+use momo_db::PgConnection;
+use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
+use momo_outbox::{emit_outbox, retire_pending_agent_jobs_for_run_in_tx, OutboxKind};
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::dto::{AgentRunResponse, CreateAgentRunRequest};
+use crate::dto::{AgentRunCancelResponse, AgentRunResponse, CreateAgentRunRequest};
 use crate::error::ApiError;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, epoch_ms, path_uuid, require_human, run_response,
-    settle_db, workspace_scope,
+    settle_db, workspace_scope, DbRejectable,
 };
 use crate::AppState;
 
@@ -237,6 +249,236 @@ pub async fn create(
         StatusCode::OK
     };
     Ok((status, Json(run_response(&run))))
+}
+
+// ---------------------------------------------------------------------------
+// cancel (goal SRV-C2 — ADR-0132 D1)
+// ---------------------------------------------------------------------------
+
+/// The line the channel sees when a person stops a run (Swift :545).
+///
+/// A `system` message rather than a reply from the agent, because the agent did
+/// not say this — and it is written at all because a run that simply goes quiet
+/// is indistinguishable from a run that is thinking. The stop has to be visible
+/// to the room, not just to the person who tapped it.
+const CANCEL_SYSTEM_LINE: &str = "실행이 사람에 의해 중지되었습니다.";
+
+/// `message.props.kind` (Swift :532) — what a client switches on to render the
+/// line as a stop rather than as generic system chatter.
+const CANCEL_PROPS_KIND: &str = "agent_run_cancelled";
+
+const CANCEL_AUDIT_ACTION: &str = "agent.run.cancelled";
+const CANCEL_AUDIT_SCHEMA: &str = "momo.agent_run.cancelled.v1";
+
+/// `agent_run.error.code` (Swift :492). The run ended, and this is *why* — an
+/// error object that names a person's decision rather than a failure, which is
+/// what keeps a cancelled run out of any "what broke" reading of the column.
+const CANCEL_ERROR_CODE: &str = "human_cancelled";
+
+/// `POST /v1/workspaces/{ws}/agent-runs/{run}/cancel` (Swift `cancel`, :437-607).
+///
+/// ## Who may stop a run
+///
+/// A **human principal** who is an **active member of the run's channel** — not
+/// the agent's owner, not a workspace admin. That is ADR-0132's 휴먼 정지권 as
+/// Swift implements it (:453-459), and the reason it is the room rather than the
+/// hierarchy is that the room is who is being interrupted: an agent looping in a
+/// channel is everyone-in-that-channel's problem, and making them find an owner
+/// first is how a runaway keeps running.
+///
+/// The human half is `require_human`; the room half is read in the same
+/// statement as the row lock (`lock_run_for_cancel_in_tx`).
+///
+/// ## Idempotent, and what that costs
+///
+/// A run that is **already `cancelled`** answers 200 with the same body — the
+/// caller asked for a stopped run and is holding one. Crucially the idempotent
+/// path performs **no writes**, so a double-tap does not append a second system
+/// line, a second audit row, or re-retire jobs. Any other terminal status is a
+/// 409 carrying the status it actually has, because "already succeeded" is not
+/// "stopped" and answering 200 would tell a person their stop worked when what
+/// really happened is that the agent finished first.
+///
+/// ## What the transaction settles
+///
+/// The run row, the queued jobs, the pending approvals, the channel line, its
+/// broadcast and the audit row commit **together**. That ordering is the whole
+/// point: a cancelled run whose job survived is an instruction that will still
+/// be executed, and a retired job whose run survived is an agent that can never
+/// answer. Neither state is reachable from here.
+pub async fn cancel(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, run)): Path<(String, String)>,
+) -> Result<Json<AgentRunCancelResponse>, ApiError> {
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let run_id = path_uuid(&run, "invalid run id")?;
+    let member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let linked_session_ids = settle_db(
+        "agent_runs.cancel",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                cancel_in_tx(
+                    conn,
+                    CancelInput {
+                        workspace_id,
+                        run_id,
+                        member_id,
+                        via_token_id,
+                    },
+                )
+                .await
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentRunCancelResponse {
+        run_id: run_id.to_string(),
+        status: RunStatus::Cancelled.as_db_label().to_string(),
+        linked_work_session_ids: linked_session_ids
+            .iter()
+            .map(Uuid::to_string)
+            .collect::<Vec<_>>(),
+        // Never `true`: momo does not kill a work session on a run cancel, and
+        // Swift does not either (:604). The `work.control` kill path is a
+        // separate, separately-authorized act.
+        work_sessions_terminated: false,
+    }))
+}
+
+struct CancelInput {
+    workspace_id: Uuid,
+    run_id: Uuid,
+    member_id: Uuid,
+    via_token_id: Option<Uuid>,
+}
+
+/// The cancel's whole transaction, rejection-before-write like every handler in
+/// this file. Returns the linked work-session ids the response reports.
+async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectable<Vec<Uuid>> {
+    let CancelInput {
+        workspace_id,
+        run_id,
+        member_id,
+        via_token_id,
+    } = input;
+
+    // ---- rejections, all before the first write ----------------------------
+    let Some(run) = lock_run_for_cancel_in_tx(conn, workspace_id, run_id, member_id).await? else {
+        return Ok(Err(ApiError::not_found("agent run not found")));
+    };
+    if !run.caller_is_channel_member {
+        return Ok(Err(ApiError::forbidden(
+            "active human channel member required",
+        )));
+    }
+    let already_cancelled = run.status == RunStatus::Cancelled;
+    if !already_cancelled && !run.status.is_cancellable() {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!("agent run is already {}", run.status.as_db_label()),
+        )));
+    }
+
+    // Read before the idempotent early-return, exactly as Swift does (:466-489):
+    // a repeat call reports the same linked sessions the first one did, rather
+    // than an empty list that would read as "there were none".
+    let linked = linked_work_session_ids_in_tx(conn, workspace_id, run_id).await?;
+    if already_cancelled {
+        return Ok(Ok(linked));
+    }
+
+    // ---- writes ------------------------------------------------------------
+    let linked_json: Vec<String> = linked.iter().map(Uuid::to_string).collect();
+
+    let cancelled = cancel_run_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        &json!({
+            "code": CANCEL_ERROR_CODE,
+            "cancelled_by": member_id.to_string(),
+            "linked_work_session_ids": linked_json,
+            "work_sessions_terminated": false,
+        }),
+    )
+    .await?;
+    if !cancelled {
+        // The row was locked and read as cancellable a few statements ago, so a
+        // no-op here means the guard and the read disagree — a bug in one of
+        // them, not a client outcome. Surfacing it as a 500 beats reporting a
+        // cancellation that never happened.
+        return Err(momo_db::DbError::from(sqlx::Error::RowNotFound));
+    }
+
+    retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
+    cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, chrono::Utc::now()).await?;
+
+    // The system line goes through the message spine, so it takes a real
+    // `channel_seq` bump and its broadcast is emitted by the same
+    // `emit_outbox` every other message uses. Swift hand-rolls the INSERT and
+    // the publish here (:527-571); doing that in Rust would put a second
+    // `INSERT INTO message` in the workspace and break invariant #3's single
+    // egress for a line that is in every other respect an ordinary message.
+    let props = json!({
+        "kind": CANCEL_PROPS_KIND,
+        "run_id": run_id.to_string(),
+        "agent_member_id": run.agent_member_id.to_string(),
+        "cancelled_by": member_id.to_string(),
+        "linked_work_session_ids": linked_json,
+        "work_sessions_terminated": false,
+    });
+    let sent = send_message_in_tx(
+        conn,
+        workspace_id,
+        NewMessage {
+            channel_id: run.channel_id,
+            // Authored by the person who stopped it. The agent did not say this,
+            // and attributing it to the agent would make the timeline read as
+            // though it had chosen to stop.
+            author_member_id: member_id,
+            message_type: MessageType::System,
+            body: Some(CANCEL_SYSTEM_LINE.to_string()),
+            props,
+            root_id: None,
+            reply_to_id: None,
+            // No `client_msg_id`: Swift sets none, and the idempotency that
+            // matters here is the `already_cancelled` early-return above, which
+            // is stronger — it skips the audit row and the job retirement too,
+            // not just the message.
+            client_msg_id: None,
+            run_id: Some(run_id),
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, CANCEL_AUDIT_ACTION)
+            .by(member_id)
+            .about(run.agent_member_id)
+            .target("agent_run", run_id)
+            .via_token(via_token_id)
+            .run(run_id)
+            .with_schema(
+                CANCEL_AUDIT_SCHEMA,
+                json!({
+                    "previous_status": run.status.as_db_label(),
+                    "linked_work_session_ids": linked_json,
+                    "work_sessions_terminated": false,
+                    "system_message_id": sent.message.id.to_string(),
+                }),
+            ),
+    )
+    .await?;
+
+    Ok(Ok(linked))
 }
 
 /// Validate + normalize the work input (Swift `WorkRunInput.require` :1197-1205

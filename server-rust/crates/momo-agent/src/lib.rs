@@ -91,6 +91,23 @@
 //! removed the guard that keeps a late progress event from ending an approval
 //! hold.
 //!
+//! **goal SRV-C2 adds the human stop** ([`run::lock_run_for_cancel_in_tx`],
+//! [`run::cancel_run_in_tx`], [`approval::cancel_pending_approvals_for_run_in_tx`]).
+//! Every transition this crate had until now belonged to the machine — a gateway
+//! reports, an approval resolves, a deadline passes. This one belongs to a
+//! person, and it is the first write here authorized by **being in the room**
+//! (an active member of the run's channel) rather than by owning the agent or
+//! the workspace: ADR-0132's 휴먼 정지권. `RunStatus::Cancelled` was reachable
+//! before it only as the *outcome of a rejected approval*, never as something
+//! anyone could ask for.
+//!
+//! It also adds the crate's one read outside its own tables that is neither an
+//! eligibility predicate nor a counter — [`run::linked_work_session_ids_in_tx`],
+//! the `audit_log ⋈ work_control` join whose result the cancel response reports.
+//! Both tables belong elsewhere and neither is written here; see that function
+//! for why it lives in this crate anyway, and for what its (currently always
+//! empty) answer means while `work_control` has no writer on this server.
+//!
 //! Streaming/partial relay, the `tool_call` **work-control** branch (Swift routes
 //! `work.spawn` through `work_control`, which is not ported — see
 //! [`tools`]), memory-delivery receipts (`context_packet`), G4's SimHash
@@ -118,14 +135,15 @@ pub mod usage;
 
 pub use approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
-    create_pending_approval_in_tx, decided_props_patch, decision_broadcast_payload,
-    decision_event_payload, decision_receipt, default_expires_at, existing_decision_in_tx,
-    is_active_channel_member_in_tx, is_active_human_member_in_tx, list_approvals_in_tx,
-    lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
-    normalized_reason, overdue_approvals_in_tx, record_decision_in_tx, resume_job_payload,
-    tool_grants_from_payload, validated_limit, validated_status, workspaces_with_overdue_approvals,
-    ApprovalListRow, ExistingDecision, LockedApproval, NewApproval, OverdueApproval,
-    DEFAULT_TTL_SECONDS, LISTABLE_STATUSES, RESUME_MODEL,
+    cancel_pending_approvals_for_run_in_tx, create_pending_approval_in_tx, decided_props_patch,
+    decision_broadcast_payload, decision_event_payload, decision_receipt, default_expires_at,
+    existing_decision_in_tx, is_active_channel_member_in_tx, is_active_human_member_in_tx,
+    list_approvals_in_tx, lock_approval_in_tx, mark_approval_decided_in_tx,
+    mark_approval_expired_in_tx, normalized_reason, overdue_approvals_in_tx, record_decision_in_tx,
+    resume_job_payload, tool_grants_from_payload, validated_limit, validated_status,
+    workspaces_with_overdue_approvals, ApprovalListRow, ExistingDecision, LockedApproval,
+    NewApproval, OverdueApproval, DEFAULT_TTL_SECONDS, LISTABLE_STATUSES, RESUME_MODEL,
+    RUN_CANCELLED_DECISION_REASON,
 };
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,
@@ -169,13 +187,13 @@ pub use routing::{
     ROUTING_KEYS,
 };
 pub use run::{
-    completion_status, consume_run_step_in_tx, create_agent_run_in_tx, end_parked_run_in_tx,
-    find_agent_run_by_trigger_in_tx, finish_run_in_tx, is_active_agent_in_tx,
-    is_active_human_channel_member_in_tx, live_run_count_in_tx, load_agent_run_in_tx,
-    load_eligible_agent_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx,
-    park_run_for_approval_in_tx, requeue_run_from_approval_in_tx, AgentRunRow,
-    CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus,
-    RunTrigger,
+    cancel_run_in_tx, completion_status, consume_run_step_in_tx, create_agent_run_in_tx,
+    end_parked_run_in_tx, find_agent_run_by_trigger_in_tx, finish_run_in_tx, is_active_agent_in_tx,
+    is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx, live_run_count_in_tx,
+    load_agent_run_in_tx, load_eligible_agent_in_tx, lock_gateway_run_in_tx,
+    lock_run_for_cancel_in_tx, mark_run_started_in_tx, park_run_for_approval_in_tx,
+    requeue_run_from_approval_in_tx, AgentRunRow, CancellableRun, CompletionStatusError,
+    CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus, RunTrigger,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

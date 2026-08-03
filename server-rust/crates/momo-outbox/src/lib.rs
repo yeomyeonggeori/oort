@@ -38,8 +38,9 @@ pub mod push;
 pub mod relay;
 
 pub use agent_job::{
-    claim_agent_job_batch, ClaimedAgentJob, DEFAULT_WORKER_LEASE_SECONDS,
-    RESUME_APPROVAL_JOB_METHOD, WORKER_JOB_METHOD, WORKER_JOB_METHODS,
+    claim_agent_job_batch, retire_pending_agent_jobs_for_run_in_tx, ClaimedAgentJob,
+    DEFAULT_WORKER_LEASE_SECONDS, RESUME_APPROVAL_JOB_METHOD, RUN_CANCELLED_JOB_LAST_ERROR,
+    WORKER_JOB_METHOD, WORKER_JOB_METHODS,
 };
 pub use emit::{emit_outbox, OutboxKind};
 pub use gateway::{

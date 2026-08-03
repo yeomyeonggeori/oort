@@ -500,6 +500,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/agent-runs",
             post(routes::agent_runs::create),
         )
+        // goal SRV-C2 — the other end of that life, and the one that was
+        // missing: a person's "멈춰라". Human-only like creation, but authorized
+        // by **channel membership** rather than ownership (ADR-0132 D1), because
+        // an agent looping in a room is the room's problem to end.
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}/cancel",
+            post(routes::agent_runs::cancel),
+        )
         // B5.2 — "에이전트 초대". There is no bot to install: an agent is a
         // `member` with `kind='agent'`, so creating one puts it in the roster
         // beside the humans and makes it mentionable as soon as it is added to a

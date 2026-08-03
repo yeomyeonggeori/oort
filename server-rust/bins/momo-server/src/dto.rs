@@ -763,6 +763,25 @@ pub struct AgentRunResponse {
     pub updated_at_ms: i64,
 }
 
+/// Swift `AgentRunCancelResponse` (`AgentRunRoutes.swift:1316-1321`).
+///
+/// Four fields and every one of them load-bearing, which is why none is
+/// optional: `status` is always the literal `cancelled` (a refusal never
+/// reaches this shape — it is an `ErrorResponse`), and the pair
+/// `linkedWorkSessionIds` + `workSessionsTerminated: false` is the response
+/// telling the truth about what it did **not** do. A cancel stops the run and
+/// retires its queued jobs; it does not kill the work sessions that run touched.
+/// Reporting the ids while admitting `false` is what lets a client say "이 세션은
+/// 계속 돕니다" instead of implying everything stopped.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunCancelResponse {
+    pub run_id: String,
+    pub status: String,
+    pub linked_work_session_ids: Vec<String>,
+    pub work_sessions_terminated: bool,
+}
+
 /// `?limit=` on the pending-jobs claim.
 #[derive(Debug, Deserialize)]
 pub struct PendingJobsQuery {
