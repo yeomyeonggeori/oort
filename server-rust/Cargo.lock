@@ -1193,6 +1193,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-ephemeral"
+version = "0.0.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "momo-messaging"
 version = "0.0.0"
 dependencies = [
@@ -1315,6 +1327,7 @@ dependencies = [
  "momo-agent-worker",
  "momo-auth",
  "momo-db",
+ "momo-ephemeral",
  "momo-messaging",
  "momo-outbox",
  "momo-push",
