@@ -1,5 +1,6 @@
 import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
+import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useMemo, useState} from 'react';
@@ -55,9 +56,21 @@ import {useSession} from '../session/useSession';
 export default function SidebarScreen({
   openChannelId,
   onOpenConversation,
+  onOpenSearch,
 }: {
   openChannelId: string | null;
   onOpenConversation: (channelId: string, title: string) => void;
+  /**
+   * Open 메시지 검색, optionally carrying what was already typed here.
+   *
+   * The field on this screen filters channels and people by NAME. When that
+   * finds nothing the words are usually something someone SAID, and the two
+   * searches are one step apart — so the empty state hands the query over
+   * rather than making the person type it again. Web reached the same answer
+   * from the other direction (B12 R2: ⌘K falls through to message search
+   * carrying `?q=`).
+   */
+  onOpenSearch: (initialQuery?: string) => void;
 }): React.JSX.Element {
   const {member, workspaceId, signOut} = useSession();
   const channelsQuery = useChannels(workspaceId);
@@ -134,7 +147,19 @@ export default function SidebarScreen({
 
   return (
     <Screen>
-      <ScreenHeader title="대화" />
+      <ScreenHeader
+        title="대화"
+        right={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="메시지 검색"
+            onPress={() => onOpenSearch()}
+            style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
+            testID="open-message-search">
+            <Text style={styles.headerActionLabel}>메시지 찾기</Text>
+          </Pressable>
+        }
+      />
 
       <View style={styles.searchWrap}>
         <TextInput
@@ -187,11 +212,25 @@ export default function SidebarScreen({
         />
       ) : total === 0 ? (
         searching ? (
-          <EmptyState
-            headline={`'${query.trim()}' 검색 결과가 없습니다.`}
-            detail="이름의 일부만 입력해도 찾을 수 있습니다."
-            testID="channels-no-match"
-          />
+          <View>
+            <EmptyState
+              headline={`'${query.trim()}' 검색 결과가 없습니다.`}
+              detail="이름의 일부만 입력해도 찾을 수 있습니다. 이름이 아니라 오간 말을 찾는 중이라면:"
+              testID="channels-no-match"
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`'${query.trim()}'로 메시지 검색`}
+              onPress={() => onOpenSearch(query)}
+              style={({pressed}) => [styles.fallthrough, pressed && styles.pressed]}
+              testID="search-messages-instead">
+              <Text style={styles.fallthroughLabel}>
+                {/* 조사는 골라 붙인다. 레포에 이미 있는 규칙을 쓰고 여기서
+                    두 번째 규칙을 세우지 않는다 (B12 R2 High-2). */}
+                {`${attachParticle(`'${query.trim()}'`, 'subject')} 오간 메시지 찾기`}
+              </Text>
+            </Pressable>
+          </View>
         ) : (
           <EmptyState
             headline="아직 참여한 채널이 없습니다."
@@ -451,4 +490,23 @@ const styles = StyleSheet.create({
   footerButtonLabel: {fontSize: font.label, color: color.textMuted},
   footerButtonDangerLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
   pressed: {backgroundColor: color.surfacePressed},
+  headerAction: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    marginRight: -space.sm,
+    borderRadius: radius.sm,
+  },
+  headerActionLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
+  fallthrough: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    marginHorizontal: SAFE_GUTTER,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    alignSelf: 'flex-start',
+  },
+  fallthroughLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
 });

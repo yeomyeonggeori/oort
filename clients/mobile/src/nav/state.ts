@@ -52,19 +52,43 @@ export interface OpenConversation {
   channelId: string;
   /** Already disambiguated by `@momo/core/features/workspace/directory`. */
   title: string;
+  /**
+   * The message this conversation was opened to show, when it was reached from
+   * a search result. Both halves travel: the id finds the row, and the seq is
+   * what lets a miss be *explained* instead of swallowed (B12 R2 High-3).
+   */
+  anchor?: {messageId: string; seq: number};
 }
 
 export interface NavState {
   tab: Tab;
   /** Pushed over the whole shell, or null when the tabs are visible. */
   conversation: OpenConversation | null;
+  /**
+   * 메시지 검색, over the tabs and UNDER a conversation.
+   *
+   * Not a third tab: D5 named two destinations, and search is a way of reaching
+   * one of them rather than a place to be. It stays open behind the conversation
+   * it opened, so 뒤로 from a result lands back on the result list — going all
+   * the way out to the channel list would throw away the query they typed.
+   *
+   * `initialQuery` carries what was already typed. The sidebar's filter searches
+   * channels and people by NAME; when that finds nothing, the words are usually
+   * a thing someone SAID. Handing them over means the person types once.
+   */
+  search: {initialQuery: string} | null;
 }
 
-export const INITIAL_NAV: NavState = {tab: 'channels', conversation: null};
+export const INITIAL_NAV: NavState = {
+  tab: 'channels',
+  conversation: null,
+  search: null,
+};
 
 export type NavAction =
   | {type: 'selectTab'; tab: Tab}
   | {type: 'openConversation'; conversation: OpenConversation}
+  | {type: 'openSearch'; initialQuery?: string}
   | {type: 'back'}
   | {type: 'reset'};
 
@@ -74,17 +98,28 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // Re-tapping the current tab is not a state change. Returning `state`
       // itself (rather than an equal object) keeps React from re-rendering the
       // whole shell on every stray tap.
-      if (state.tab === action.tab && state.conversation === null) return state;
+      if (
+        state.tab === action.tab &&
+        state.conversation === null &&
+        state.search === null
+      ) {
+        return state;
+      }
       // A tab tap also closes a conversation. It cannot normally be reached
       // while one is open (the tab bar is behind it), but a deep link or a
       // notification will be able to, and landing on a tab with a conversation
       // still stacked over it would look like the tap did nothing.
-      return {tab: action.tab, conversation: null};
+      return {tab: action.tab, conversation: null, search: null};
     case 'openConversation':
       return {...state, conversation: action.conversation};
+    case 'openSearch':
+      return {...state, search: {initialQuery: action.initialQuery ?? ''}};
     case 'back':
-      if (state.conversation === null) return state;
-      return {...state, conversation: null};
+      // One step at a time, innermost first: a conversation opened FROM a search
+      // result goes back to the results, not past them.
+      if (state.conversation !== null) return {...state, conversation: null};
+      if (state.search !== null) return {...state, search: null};
+      return state;
     case 'reset':
       // Sign-out. The next person to sign in must not land in the previous
       // person's channel.

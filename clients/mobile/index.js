@@ -27,6 +27,7 @@
 import './src/boot/polyfills';
 import './src/boot/coreHost';
 
+import React from 'react';
 import {AppRegistry} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
@@ -42,7 +43,15 @@ import {measureMode} from './measure/root';
  */
 AppRegistry.registerComponent(appName, () => {
   const mode = measureMode();
-  if (mode === 'measure') return require('./measure/harness').default;
-  if (mode === 'states') return require('./measure/states').default;
-  return App;
+  if (mode === null) return App;
+  if (mode.kind === 'measure') return require('./measure/harness').default;
+  if (mode.kind === 'states') return require('./measure/states').default;
+  // A named surface (goal RN-C5): the action sheet, the editor, the delete
+  // confirmation, or one of search's four states. `measure/surfaces.tsx` hands
+  // the SHIPPING component that state directly, because none of them can be
+  // reached by a script on a simulator.
+  const Surfaces = require('./measure/surfaces').default;
+  return function SurfaceRoot() {
+    return React.createElement(Surfaces, {name: mode.name});
+  };
 });

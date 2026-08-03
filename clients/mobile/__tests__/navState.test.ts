@@ -16,7 +16,11 @@ const OPEN = {channelId: 'CH-1', title: '#general'};
 
 describe('the two tabs', () => {
   it('starts on 대화 with nothing pushed over it', () => {
-    expect(INITIAL_NAV).toEqual({tab: 'channels', conversation: null});
+    expect(INITIAL_NAV).toEqual({
+      tab: 'channels',
+      conversation: null,
+      search: null,
+    });
   });
 
   it('names both tabs', () => {
@@ -38,18 +42,19 @@ describe('the two tabs', () => {
 
 describe('a conversation covers the shell', () => {
   it('opens over whichever tab was current', () => {
-    const onInbox: NavState = {tab: 'inbox', conversation: null};
+    const onInbox: NavState = {tab: 'inbox', conversation: null, search: null};
     const next = navReducer(onInbox, {type: 'openConversation', conversation: OPEN});
-    expect(next).toEqual({tab: 'inbox', conversation: OPEN});
+    expect(next).toEqual({tab: 'inbox', conversation: OPEN, search: null});
   });
 
   it('goes back to the tab it was opened from, not to a default', () => {
     // The bug this prevents: opening a channel from 인박스 and landing on 대화
     // when you press back, having lost the list you were reading.
-    const fromInbox: NavState = {tab: 'inbox', conversation: OPEN};
+    const fromInbox: NavState = {tab: 'inbox', conversation: OPEN, search: null};
     expect(navReducer(fromInbox, {type: 'back'})).toEqual({
       tab: 'inbox',
       conversation: null,
+      search: null,
     });
   });
 
@@ -59,7 +64,7 @@ describe('a conversation covers the shell', () => {
   });
 
   it('replaces one conversation with another rather than stacking', () => {
-    const first: NavState = {tab: 'channels', conversation: OPEN};
+    const first: NavState = {tab: 'channels', conversation: OPEN, search: null};
     const second = {channelId: 'CH-2', title: '김인턴'};
     const next = navReducer(first, {type: 'openConversation', conversation: second});
     expect(next.conversation).toEqual(second);
@@ -71,15 +76,16 @@ describe('a conversation covers the shell', () => {
     // Not normally reachable — the tab bar is behind the conversation — but a
     // deep link or a notification will be able to, and landing on a tab with a
     // conversation still stacked over it looks like the tap did nothing.
-    const covered: NavState = {tab: 'channels', conversation: OPEN};
+    const covered: NavState = {tab: 'channels', conversation: OPEN, search: null};
     expect(navReducer(covered, {type: 'selectTab', tab: 'inbox'})).toEqual({
       tab: 'inbox',
       conversation: null,
+      search: null,
     });
   });
 
   it('closes the conversation even when the SAME tab is re-selected', () => {
-    const covered: NavState = {tab: 'channels', conversation: OPEN};
+    const covered: NavState = {tab: 'channels', conversation: OPEN, search: null};
     expect(navReducer(covered, {type: 'selectTab', tab: 'channels'})).toEqual(
       INITIAL_NAV,
     );
@@ -88,7 +94,7 @@ describe('a conversation covers the shell', () => {
 
 describe('sign-out', () => {
   it('forgets where the previous person was', () => {
-    const deep: NavState = {tab: 'inbox', conversation: OPEN};
+    const deep: NavState = {tab: 'inbox', conversation: OPEN, search: null};
     expect(navReducer(deep, {type: 'reset'})).toEqual(INITIAL_NAV);
   });
 });

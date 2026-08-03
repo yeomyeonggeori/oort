@@ -9,6 +9,7 @@ import {INITIAL_NAV, navReducer, tabLabel, TABS, type Tab} from '../nav/state';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import ConversationScreen from '../screens/ConversationScreen';
 import InboxScreen from '../screens/InboxScreen';
+import SearchScreen from '../screens/SearchScreen';
 import SidebarScreen from '../screens/SidebarScreen';
 import {SessionProvider} from '../session/useSession';
 
@@ -50,11 +51,27 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
 function Shell(): React.JSX.Element {
   const [nav, dispatch] = useReducer(navReducer, INITIAL_NAV);
 
-  const onOpenConversation = useCallback((channelId: string, title: string) => {
-    dispatch({type: 'openConversation', conversation: {channelId, title}});
-  }, []);
+  const onOpenConversation = useCallback(
+    (
+      channelId: string,
+      title: string,
+      anchor?: {messageId: string; seq: number},
+    ) => {
+      dispatch({
+        type: 'openConversation',
+        conversation: anchor
+          ? {channelId, title, anchor}
+          : {channelId, title},
+      });
+    },
+    [],
+  );
 
   const onBack = useCallback(() => dispatch({type: 'back'}), []);
+  const onOpenSearch = useCallback(
+    (initialQuery?: string) => dispatch({type: 'openSearch', initialQuery}),
+    [],
+  );
 
   return (
     <View style={styles.root}>
@@ -63,6 +80,7 @@ function Shell(): React.JSX.Element {
           <SidebarScreen
             openChannelId={nav.conversation?.channelId ?? null}
             onOpenConversation={onOpenConversation}
+            onOpenSearch={onOpenSearch}
           />
         </View>
         <View style={nav.tab === 'inbox' ? styles.visible : styles.hidden}>
@@ -72,11 +90,25 @@ function Shell(): React.JSX.Element {
 
       <TabBar current={nav.tab} onSelect={tab => dispatch({type: 'selectTab', tab})} />
 
+      {/* Search sits UNDER the conversation it opens, and stays mounted behind
+          it: coming back from a result must land on the results, with the typed
+          query still there. */}
+      {nav.search ? (
+        <View style={styles.overlay}>
+          <SearchScreen
+            initialQuery={nav.search.initialQuery}
+            onOpenResult={onOpenConversation}
+            onBack={onBack}
+          />
+        </View>
+      ) : null}
+
       {nav.conversation ? (
         <View style={styles.overlay}>
           <ConversationScreen
             channelId={nav.conversation.channelId}
             title={nav.conversation.title}
+            anchor={nav.conversation.anchor}
             onBack={onBack}
           />
         </View>

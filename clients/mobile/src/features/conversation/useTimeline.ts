@@ -1,7 +1,12 @@
 import {
+  deleteMessage as deleteMessageRequest,
+  editMessage as editMessageRequest,
   fetchMessages,
   fetchReactionSnapshot,
+  fetchThreadReplies,
   sendMessage,
+  sendThreadReply,
+  setReaction,
   type Message,
 } from '@momo/core/lib/api';
 import {
@@ -26,9 +31,11 @@ import {
   clearMessageReactions,
   emptyReactions,
   normalizeReactionSnapshot,
+  toggleDirection,
+  type ReactionChange,
   type ReactionMap,
 } from '@momo/core/features/timeline/reactions';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {ChannelRail} from '../../realtime/channelRail';
 
 // =============================================================================
@@ -51,17 +58,47 @@ import type {ChannelRail} from '../../realtime/channelRail';
 // cache callback where no test can reach it. The web client made the same split
 // for the same reason.
 //
-// ## What is NOT here, and why
+// ## The write side (goal RN-C5), and the one asymmetry inside it
 //
-// No reaction toggle, no edit, no delete, no thread replies. This batch is
-// 읽기·받기·보내기; the action surface is the next one. But note the asymmetry
-// that is deliberate rather than an oversight: a tombstone that ARRIVES is
-// handled (`onMessageDeleted`), because receiving a delete someone else made is
-// reading, not acting. A row that vanishes for the sender and stays for the
-// reader would be the same message telling two stories.
+// RN-C4 left this file read-only on purpose and said so here. The actions are
+// now wired, and they keep the split the web client measured its way to:
 //
-// Reactions are read-only for the same reason: `chipsFor` renders what the
-// server says, the rail keeps it current, and nothing here writes one.
+//   반응    **낙관적**. The direction is DERIVED from the map rather than passed
+//           in (`toggleDirection`), so the local update and the request cannot
+//           disagree about which way the toggle was going. On failure the change
+//           is undone with its own inverse — safe because `applyReactionDelta`
+//           is idempotent, so if the realtime echo of a SUCCESSFUL twin already
+//           landed, the revert is a no-op rather than a second wrong write.
+//
+//   고치기·지우기  **낙관적이 아니다.** The server stamps `edited_at` and decides
+//           the resulting `state`; showing the new text first would leave the row
+//           claiming an edit that a 403 then took back. One request, and the
+//           editor says 저장 중… while it runs.
+//
+// Every one of these THROWS on failure rather than swallowing. The sentence a
+// person reads is chosen at the row (`actionCopy`), because that is where the
+// failure belongs — B8's rule that the server's wire sentence never reaches the
+// screen, and B11's that the reason sits on the row rather than in a toast.
+//
+// The read-side asymmetry RN-C4 noted still holds and is still deliberate: a
+// tombstone that ARRIVES is handled (`onMessageDeleted`), because receiving a
+// delete someone else made is reading, not acting.
+//
+// ## Replies are channel messages, and that is why there is no second hook
+//
+// A reply is a message in this channel with `rootId` set — the same write path
+// (`sendThreadReply` posts to the same endpoint), the same `seq`, and the server
+// does NOT filter replies out of channel history (`list_channel_page` has no
+// `root_id IS NULL` predicate). So a thread is a VIEW over this state, not a
+// second store: `loadReplies` merges through the same `applyBatch`, the rail
+// delivers replies to the same `onMessage`, and the thread surface filters by
+// `rootId`. A separate hook would have meant a second copy of the seq fold, the
+// settle rule and the reaction map — three things that must not be able to
+// disagree with what the channel is showing one screen away.
+//
+// Echoes carry their root in a side map (`pendingRootRef`) rather than in
+// `PendingMessage`, so the core's pending model is untouched and one settle
+// effect still covers both surfaces.
 // =============================================================================
 
 const HEAD_LIMIT = 50;
@@ -80,12 +117,27 @@ export interface UseTimelineResult {
   status: 'loading' | 'ready' | 'error';
   resume: ResumeInfo;
   recoveryMarkers: RecoveryMarker[];
-  /** Local echoes awaiting their server seq. Never inside `state`. */
+  /** Channel-level echoes awaiting their server seq. Never inside `state`. */
   pending: PendingMessage[];
   /** The one send path: optimistic echo now, server seq when it lands. */
   send: (body: string) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
+  /**
+   * Toggle my reaction, optimistically. **Throws** on failure, after having put
+   * the chip back where it was — the caller turns the error into the sentence.
+   */
+  toggleReaction: (message: Message, emoji: string) => Promise<void>;
+  /** Rewrite my own message. Not optimistic; throws on failure. */
+  editBody: (message: Message, body: string) => Promise<void>;
+  /** Soft-delete my own message; the returned tombstone replaces the row. */
+  removeMessage: (message: Message) => Promise<void>;
+  /** One page of a root's replies, merged into the same seq-ordered state. */
+  loadReplies: (rootId: string) => Promise<void>;
+  /** Reply into a thread. Same echo machinery as `send`, tagged with its root. */
+  sendReply: (rootId: string, body: string) => Promise<void>;
+  /** The echoes belonging to one thread (never shown in the channel list). */
+  repliesPending: (rootId: string) => PendingMessage[];
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
@@ -163,15 +215,24 @@ export function useTimeline(
   // person moved on. Without it a POST for channel A merges into channel B.
   const channelRef = useRef<string | null>(null);
 
+  // Which echoes are thread replies: `clientMsgId -> rootId`. A side map rather
+  // than a field on `PendingMessage`, so the core's pending model stays as it
+  // is and both surfaces keep sharing one array and one settle effect.
+  const pendingRootRef = useRef<Record<string, string>>({});
+
   const post = useCallback(
     async (row: PendingMessage) => {
       try {
-        const confirmed = await sendMessage(
-          workspaceId,
-          row.channelId,
-          row.clientMsgId,
-          row.body,
-        );
+        const rootId = pendingRootRef.current[row.clientMsgId];
+        const confirmed = await (rootId === undefined
+          ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body)
+          : sendThreadReply(
+              workspaceId,
+              row.channelId,
+              rootId,
+              row.clientMsgId,
+              row.body,
+            ));
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
         // realtime frame gets, and whichever arrives second dedupes by seq.
@@ -225,6 +286,128 @@ export function useTimeline(
     [post, updatePending],
   );
 
+  // ---- message actions (goal RN-C5) -----------------------------------------
+
+  const applyReaction = useCallback((change: ReactionChange) => {
+    reactionsRef.current = applyReactionDelta(reactionsRef.current, change);
+    setReactions(reactionsRef.current);
+  }, []);
+
+  const toggleReaction = useCallback(
+    async (message: Message, emoji: string) => {
+      // Derived, never remembered: the optimistic write and the request read the
+      // same map at the same instant, so they cannot disagree about direction.
+      const action = toggleDirection(
+        reactionsRef.current,
+        message.id,
+        authorMemberId,
+        emoji,
+      );
+      const change: ReactionChange = {
+        messageId: message.id,
+        memberId: authorMemberId,
+        emoji,
+        action,
+      };
+      applyReaction(change);
+      try {
+        await setReaction(workspaceId, message.id, emoji, action);
+      } catch (error) {
+        // Put it back, and say so on the row. The inverse is safe even if the
+        // realtime echo of a successful twin already landed: the delta is
+        // idempotent, so an unnecessary revert is a no-op rather than a second
+        // wrong write.
+        applyReaction({
+          ...change,
+          action: action === 'added' ? 'removed' : 'added',
+        });
+        throw error;
+      }
+    },
+    [workspaceId, authorMemberId, applyReaction],
+  );
+
+  const editBody = useCallback(
+    async (message: Message, body: string) => {
+      const updated = await editMessageRequest(workspaceId, message.id, body);
+      applyBatch([updated]);
+    },
+    [workspaceId, applyBatch],
+  );
+
+  const removeMessage = useCallback(
+    async (message: Message) => {
+      const tombstone = await deleteMessageRequest(workspaceId, message.id);
+      applyBatch([tombstone]);
+      // The server deletes the reaction rows with the message, so chips for a
+      // tombstone would be counts for rows that no longer exist.
+      reactionsRef.current = clearMessageReactions(
+        reactionsRef.current,
+        message.id,
+      );
+      setReactions(reactionsRef.current);
+    },
+    [workspaceId, applyBatch],
+  );
+
+  const loadReplies = useCallback(
+    async (rootId: string) => {
+      const channel = channelRef.current;
+      if (channel === null) return;
+      let cursor: number | undefined;
+      // Ascending pages until the server stops offering one. Replies are ordinary
+      // channel messages, so every page lands in the same seq-ordered state the
+      // channel is drawn from — loading a thread also heals the channel.
+      for (;;) {
+        const page = await fetchThreadReplies(
+          workspaceId,
+          channel,
+          rootId,
+          cursor,
+        );
+        applyBatch(page.messages);
+        if (page.nextCursor === undefined) break;
+        cursor = page.nextCursor;
+      }
+    },
+    [workspaceId, applyBatch],
+  );
+
+  const sendReply = useCallback(
+    async (rootId: string, body: string) => {
+      const channel = channelId;
+      if (channel === null || body === '') return;
+      const clientMsgId = crypto.randomUUID();
+      pendingRootRef.current = {...pendingRootRef.current, [clientMsgId]: rootId};
+      const row: PendingMessage = {
+        clientMsgId,
+        channelId: channel,
+        authorMemberId,
+        body,
+        createdAtMs: Date.now(),
+        sinceSeq: newestSeqRef.current,
+        status: 'sending',
+      };
+      updatePending(list => addPending(list, row));
+      await post(row);
+    },
+    [channelId, authorMemberId, post, updatePending],
+  );
+
+  const repliesPending = useCallback(
+    (rootId: string) =>
+      pending.filter(row => pendingRootRef.current[row.clientMsgId] === rootId),
+    [pending],
+  );
+
+  // The channel list must not show a reply's echo: the reply belongs to the
+  // thread that is open over it, and a row appearing in both places is the same
+  // message told twice.
+  const channelPending = useMemo(
+    () => pending.filter(row => pendingRootRef.current[row.clientMsgId] === undefined),
+    [pending],
+  );
+
   const backfillAfter = useCallback(
     async (channel: string) => {
       let after = newestSeqRef.current ?? 0;
@@ -268,6 +451,7 @@ export function useTimeline(
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
+    pendingRootRef.current = {};
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus('loading');
@@ -412,9 +596,15 @@ export function useTimeline(
     status,
     resume,
     recoveryMarkers,
-    pending,
+    pending: channelPending,
     send,
     resend,
+    toggleReaction,
+    editBody,
+    removeMessage,
+    loadReplies,
+    sendReply,
+    repliesPending,
     loadOlder,
     reload,
     loadingOlder,
