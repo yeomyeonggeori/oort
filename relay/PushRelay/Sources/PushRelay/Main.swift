@@ -10,7 +10,17 @@ struct PushRelayMain {
         var logger = Logger(label: "PushRelay")
         logger.logLevel = ProcessInfo.processInfo.environment["LOG_LEVEL"]
             .flatMap(Logger.Level.init(rawValue:)) ?? .info
-        let config = try RelayConfig.load()
+        // A configuration refusal is an operator message, not a crash trace.
+        // The relay restart-loops under compose when it cannot boot, so the one
+        // line that explains why has to survive `docker logs` legibly — a Swift
+        // top-level `fatalError` backtrace does not. 78 is EX_CONFIG.
+        let config: RelayConfig
+        do {
+            config = try RelayConfig.load()
+        } catch let error as ConfigError {
+            FileHandle.standardError.write(Data("PushRelay refused to start — \(error)\n".utf8))
+            exit(78)
+        }
         let metrics = await MetricsRegistry.pushRelay()
 
         let httpClient: HTTPClient?

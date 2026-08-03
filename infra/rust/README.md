@@ -17,6 +17,13 @@
 | `docker-compose.rust.yml` | prod compose 미러(최소셋): postgres · centrifugo · runtime-roles · migrate · api · relay |
 | `docker-compose.rust.build.yml` | 로컬 빌드 오버라이드(`build:` 주입). 배포 스택은 항상 이미지 pull |
 | `rust-smoke.env.example` | env 템플릿. 복사본은 반드시 `*.secrets.env`(레포 전역 gitignore) |
+| `docker-compose.push.yml` | **기본 비활성** ADR-0120 푸시 경로 오버레이 — `push-relay` + `notifier`. `-f`로 명시할 때만 존재한다 |
+| `docker-compose.push.build.yml` | 위 오버레이의 로컬 빌드(`relay/PushRelay/Dockerfile`) |
+| `push-relay.env.example` | 푸시 경로 env 템플릿. `rust-smoke.secrets.env` **위에** 겹쳐 쓴다 |
+
+푸시 오버레이는 `docker-compose.rust.yml`을 **한 줄도 바꾸지 않는다** — 평소의
+`momorust up -d`는 relay를 띄우지도, 새 변수에서 깨지지도 않는다. 절차는
+`docs/cicd/12-push-relay-deploy-runbook.md`.
 
 이미지 안에 들어가는 것: 바이너리 3종, `server/Migrations/*.sql`(그대로 복사),
 `infra/e2e/bootstrap_roles.sql`, `infra/prod/bootstrap_runtime_roles.sql`,

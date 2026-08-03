@@ -5,17 +5,114 @@ import XCTest
 
 final class PushRelayTests: XCTestCase {
     func testRegistryParsesRawEd25519PublicKey() throws {
-        let key = Curve25519.Signing.PrivateKey()
-        let registry = try JSONSerialization.data(withJSONObject: [
-            "server-a": key.publicKey.rawRepresentation.base64EncodedString(),
-        ])
-        let config = try RelayConfig.load(environment: [
-            "MOMO_RELAY_SERVERS": String(decoding: registry, as: UTF8.self),
-            "MOMO_APNS_SENDER": "stub",
-        ])
+        let config = try RelayConfig.load(environment: Self.stubEnvironment())
         XCTAssertEqual(config.servers.count, 1)
         XCTAssertEqual(config.rateLimitPerMinute, 60)
         XCTAssertEqual(config.port, 28195)
+        XCTAssertEqual(config.host, "127.0.0.1")
+    }
+
+    /// The relay's worst failure is not a crash — it is a process that boots,
+    /// answers 200, and sends nothing. The stub sender is exactly that shape:
+    /// it fabricates an apns-id, the notifier settles the candidate as
+    /// delivered, and no device ever rings. Reaching it must take an explicit
+    /// second variable, the same way the notifier gates unsigned dispatch
+    /// behind MOMO_PUSH_RELAY_ALLOW_UNSIGNED.
+    ///
+    /// Delete the MOMO_APNS_ALLOW_STUB guard in Config.swift and this goes red.
+    func testStubSenderWithoutExplicitOptInRefusesToBoot() throws {
+        var environment = Self.stubEnvironment()
+        environment["MOMO_APNS_ALLOW_STUB"] = nil
+        XCTAssertThrowsError(try RelayConfig.load(environment: environment)) { error in
+            guard case ConfigError.stubSenderNotAllowed = error else {
+                return XCTFail("expected a stub-sender refusal, got \(error)")
+            }
+            // The message has to tell the operator which variable to set.
+            XCTAssertTrue(String(describing: error).contains("MOMO_APNS_ALLOW_STUB"))
+        }
+
+        // "0", "true", and "" are not the opt-in. Only "1" is.
+        for rejected in ["0", "true", "yes", ""] {
+            environment["MOMO_APNS_ALLOW_STUB"] = rejected
+            XCTAssertThrowsError(
+                try RelayConfig.load(environment: environment),
+                "MOMO_APNS_ALLOW_STUB=\(rejected) must not enable the stub")
+        }
+    }
+
+    /// Live mode is the default, and it demands the whole credential set. A
+    /// relay that cannot reach Apple must never be the thing that starts.
+    func testLiveModeRefusesToBootWithoutTheFullAPNsCredential() throws {
+        var environment = Self.stubEnvironment()
+        environment["MOMO_APNS_SENDER"] = nil
+        environment["MOMO_APNS_ALLOW_STUB"] = nil
+
+        // No MOMO_APNS_ENV at all.
+        XCTAssertThrowsError(try RelayConfig.load(environment: environment, isReadableFile: { _ in true }))
+
+        environment["MOMO_APNS_ENV"] = "sandbox"
+        for omitted in ["MOMO_APNS_KEY_PATH", "MOMO_APNS_KEY_ID", "MOMO_APNS_TEAM_ID"] {
+            var incomplete = environment
+            incomplete["MOMO_APNS_KEY_PATH"] = "/run/secrets/apns.p8"
+            incomplete["MOMO_APNS_KEY_ID"] = "ABCD123456"
+            incomplete["MOMO_APNS_TEAM_ID"] = "TEAM123456"
+            incomplete[omitted] = nil
+            XCTAssertThrowsError(
+                try RelayConfig.load(environment: incomplete, isReadableFile: { _ in true }),
+                "live mode must not boot without \(omitted)")
+        }
+    }
+
+    /// A `.p8` the process cannot open is the same non-delivery as no `.p8`,
+    /// and it is the likeliest deployment mistake: a wrong mount path, or a key
+    /// the non-root container user cannot read.
+    func testLiveModeRefusesToBootWhenTheAPNsKeyIsUnreadable() throws {
+        var environment = Self.stubEnvironment()
+        environment["MOMO_APNS_SENDER"] = "live"
+        environment["MOMO_APNS_ALLOW_STUB"] = nil
+        environment["MOMO_APNS_ENV"] = "sandbox"
+        environment["MOMO_APNS_KEY_PATH"] = "/run/secrets/apns.p8"
+        environment["MOMO_APNS_KEY_ID"] = "ABCD123456"
+        environment["MOMO_APNS_TEAM_ID"] = "TEAM123456"
+
+        XCTAssertThrowsError(
+            try RelayConfig.load(environment: environment, isReadableFile: { _ in false })
+        ) { error in
+            guard case ConfigError.unreadableAPNSKey(let path) = error else {
+                return XCTFail("expected an unreadable-key refusal, got \(error)")
+            }
+            XCTAssertEqual(path, "/run/secrets/apns.p8")
+            XCTAssertTrue(String(describing: error).contains("MOMO_APNS_KEY_PATH"))
+        }
+
+        let config = try RelayConfig.load(environment: environment, isReadableFile: { _ in true })
+        XCTAssertEqual(config.senderMode, .live)
+        XCTAssertEqual(config.apnsEnvironment, .sandbox)
+        XCTAssertEqual(config.apnsKeyPath, "/run/secrets/apns.p8")
+    }
+
+    /// The stub opt-in is not a bypass of anything else: an empty or malformed
+    /// server registry is still a refusal.
+    func testAnEmptyServerRegistryRefusesToBoot() throws {
+        var environment = Self.stubEnvironment()
+        environment["MOMO_RELAY_SERVERS"] = nil
+        XCTAssertThrowsError(try RelayConfig.load(environment: environment))
+
+        environment["MOMO_RELAY_SERVERS"] = "{}"
+        XCTAssertThrowsError(try RelayConfig.load(environment: environment))
+
+        environment["MOMO_RELAY_SERVERS"] = #"{"server-a":"not-base64"}"#
+        XCTAssertThrowsError(try RelayConfig.load(environment: environment))
+    }
+
+    private static func stubEnvironment() -> [String: String] {
+        let key = Curve25519.Signing.PrivateKey()
+        let registry = #"{"server-a":"\#(key.publicKey.rawRepresentation.base64EncodedString())"}"#
+        return [
+            "MOMO_RELAY_SERVERS": registry,
+            "MOMO_APNS_SENDER": "stub",
+            "MOMO_APNS_ALLOW_STUB": "1",
+        ]
     }
 
     func testClosedDispatchAndAPNSPayloadUseOnlyStaticPlaceholderContent() throws {

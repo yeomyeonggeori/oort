@@ -41,7 +41,12 @@ services:
         --scratch-path /tmp/momo-swiftpm/push-relay PushRelay
     environment:
       MOMO_RELAY_SERVERS: '{"metrics-verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+      # The stub sender contacts nobody and fabricates a 200, so PushRelay
+      # refuses to start on `stub` alone — reaching it takes this second,
+      # deliberate variable (goal PUSH-1). This overlay is a verifier, which is
+      # exactly the case the opt-in exists for.
       MOMO_APNS_SENDER: stub
+      MOMO_APNS_ALLOW_STUB: "1"
       MOMO_PUSH_RELAY_HOST: 0.0.0.0
       MOMO_PUSH_RELAY_PORT: 8090
       MOMO_METRICS_HOST: 0.0.0.0
