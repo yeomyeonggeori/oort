@@ -27,6 +27,7 @@ import {
   activitySuffix,
   activityText,
   agentLabelAsSubject,
+  TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
@@ -176,7 +177,7 @@ function AgentActivityBar({
       )}
       {!live && (
         <li className="text-meta text-warn" data-testid="composer-working-stale">
-          연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.
+          {TURN_STALE_SENTENCE}
         </li>
       )}
     </ul>

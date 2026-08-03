@@ -13,6 +13,7 @@ import {color, font, radius, space} from '../design/tokens';
 import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
 import {
   agentTurnBadgeCopy,
+  TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
 } from '@momo/core/features/agents/turnCopy';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
@@ -24,7 +25,7 @@ import {
 import {useAgentProfiles, useWorkSessions} from '../features/agents/queries';
 import {
   AgentTurnBadge,
-  TURN_STALE_SENTENCE,
+  AgentTurnStaleNotice,
 } from '../features/agents/turnSurfaces';
 import {
   agentTurnsForMember,
@@ -143,6 +144,11 @@ export default function AgentsScreen({
         subtitle="이 워크스페이스에서 일하는 에이전트"
         titleTestID="agents-title"
       />
+
+      {/* 끊긴 것을 화면에서 말한다 (2R H2). 배지가 회색으로 내려앉는 것만으로는
+          부족하다 — 무색은 「열린 턴이 없음」의 모양이기도 해서, 끊긴 화면과
+          조용한 화면이 구별되지 않았다. */}
+      {railLive ? null : <AgentTurnStaleNotice testID="agents-offline" />}
 
       {sessionsQuery.isError && !failed ? (
         <NoticeBlock

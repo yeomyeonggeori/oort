@@ -1,4 +1,5 @@
 import type {Centrifuge, Subscription} from 'centrifuge';
+import {isTerminalProgressFrame} from '@momo/core/features/agents/agentRail';
 import {
   asMessageDeletedFrame,
   asReactionFrame,
@@ -59,10 +60,16 @@ import {
 // A progress frame carries no `seq` and nothing folds it onto anything. It is a
 // claim that an agent is working RIGHT NOW, so a replayed one is a claim about
 // a turn that ended during the gap. `infra/centrifugo.json` gives the `agent`
-// namespace `force_recovery: true` with 24h of history, which means asking for
-// `recoverable: false` is a request the server declines — the flags below are
-// documentation and `createReplayGate` is the actual defence. Measured on web
-// 2026-07-25: a 25s cut replayed all 8 frames of a finished turn on resubscribe.
+// namespace `force_recovery: true` with `history_size: 100` and `history_ttl:
+// 24h`, which means asking for `recoverable: false` is a request the server
+// declines — the flags below are documentation and `createReplayGate` is the
+// actual defence. Measured on web 2026-07-25: a 25s cut replayed all 8 frames of
+// a finished turn on resubscribe.
+//
+// The gate has ONE hole in it, cut on purpose: a terminal `agent.status` is let
+// through even while replaying. That same 24h history is where the frame saying
+// the turn is OVER lives, and dropping it is how a phone came back from the app
+// switcher to a badge that had nothing behind it. See `isTerminalProgressFrame`.
 // =============================================================================
 
 export type ChannelHandlers = Parameters<
@@ -190,16 +197,27 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
           const onSubscribed = (ctx: SubscribedRecoveryContext) =>
             gate.onSubscribed(ctx);
           const onPublication = (ctx: {data?: unknown}) => {
-            if (gate.isReplaying()) return;
             const event = ctx.data as AgentProgressEvent | undefined;
             if (
-              event &&
-              (event.type === 'agent.status' ||
-                event.type === 'agent.partial') &&
-              event.payload
+              !event ||
+              (event.type !== 'agent.status' &&
+                event.type !== 'agent.partial') ||
+              !event.payload
             ) {
-              handlers.onEvent(event);
+              return;
             }
+            // The replay batch is dropped EXCEPT for the frames that can only
+            // END a turn. `isTerminalProgressFrame` records why that is safe by
+            // construction; what makes it necessary is this platform. The
+            // background policy parks this socket 15 seconds after the person
+            // looks at something else, so a turn that finishes while they are
+            // away sends its terminal frame into a gap — and the resubscribe's
+            // replay is the only place that frame is ever offered again.
+            // Dropping it left the badge lit until the 90s TTL swept it: a phone
+            // coming back to 「작업 중」 for an agent that had already stopped
+            // (2R H1).
+            if (gate.isReplaying() && !isTerminalProgressFrame(event)) return;
+            handlers.onEvent(event);
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);

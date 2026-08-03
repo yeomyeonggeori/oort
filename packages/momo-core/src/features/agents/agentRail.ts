@@ -172,6 +172,35 @@ export function isRunOver(runStatus: string, phase: string): boolean {
 }
 
 /**
+ * Is this frame one that can only ever END a turn?
+ *
+ * It exists for the replay gate. A recovering subscription replays the whole
+ * gap, and folding those frames in would put a finished turn back on screen with
+ * a running clock — so every client drops the batch. But that batch is also
+ * where the TERMINAL frame of a turn that ended DURING the gap lives, and
+ * dropping that one leaves the badge lit until the 90s TTL expires it. A phone
+ * makes that window routine rather than exotic: the background policy parks the
+ * socket 15s after the person looks at something else, so everything that
+ * happened while they were away arrives as a replay (goal RN-T2 2R H1).
+ *
+ * Letting exactly these frames through is safe BY CONSTRUCTION, not by promise.
+ * `applyStatus`'s terminal branch only ever deletes from the run table, and
+ * returns the same map instance when there is nothing to delete — so a replayed
+ * terminal frame cannot create a turn, cannot refresh one, and cannot move a
+ * clock. It is the same asymmetry `tooOldToProveLiveness` already records:
+ * ending a turn late is still ending it, and a delete is never a false claim.
+ *
+ * `agent.partial` never qualifies. It carries no `run_status` and decides no
+ * state, so a replayed one has nothing true left to say.
+ */
+export function isTerminalProgressFrame(event: AgentProgressEvent): boolean {
+  return (
+    event.type === "agent.status" &&
+    isRunOver(event.payload.run_status, event.payload.phase)
+  );
+}
+
+/**
  * Working, or stopped and waiting for a person?
  *
  * Measured against momowebqa: every @kim-intern turn ends on

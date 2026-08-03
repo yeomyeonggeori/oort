@@ -3,6 +3,7 @@ import {
   IDLE_CUTOFF_MS,
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
+import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {centrifugoAgentChannelName} from '@momo/core/lib/realtimeEvents';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -28,6 +29,7 @@ import {
   sweepAgentWorking,
   ZOMBIE_CLEAR_MS,
 } from '../src/features/agents/workingSignal';
+import {color} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -104,6 +106,17 @@ function signal(over: Partial<AgentWorkingSignal> = {}): AgentWorkingSignal {
 }
 
 const NOW = 10_000_000;
+
+/** RN style props arrive as a value or an (possibly nested) array. */
+function flatStyle(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) {
+    return style.reduce<Record<string, unknown>>(
+      (acc, entry) => ({...acc, ...flatStyle(entry)}),
+      {},
+    );
+  }
+  return (style as Record<string, unknown> | null | undefined) ?? {};
+}
 
 describe('신호 스토어 — 규칙은 core의 것이고 시계만 여기 있다', () => {
   afterEach(() => resetAgentWorking());
@@ -240,6 +253,7 @@ interface FakeSubscription {
 
 interface FakeClient {
   getSubscription: (name: string) => FakeSubscription | null;
+  __emit: (event: string, ctx: unknown) => void;
 }
 
 const centrifugeMock = jest.requireMock('centrifuge') as {
@@ -296,6 +310,34 @@ async function deliver(data: unknown, delayMs: number): Promise<void> {
   await act(async () => {
     await new Promise(resolve => setTimeout(resolve, delayMs));
     agentSub()?.__emit('publication', {data});
+  });
+}
+
+/**
+ * The subscription comes back RECOVERED and flushes a batch, exactly as
+ * centrifuge-js does: the `subscribed` event, then every recovered publication
+ * synchronously behind it. Arrives on its own tick like everything else here.
+ */
+async function replay(publications: unknown[], delayMs: number): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    agentSub()?.__subscribed({recovered: true, publications});
+  });
+}
+
+/**
+ * Cut the socket the way a real drop does.
+ *
+ * `RealtimeProvider` has already seen `connected` by now, so its own rule ("once
+ * we have been connected, not being connected is being disconnected") turns this
+ * into `disconnected`. The background POLICY is untouched — the app is still in
+ * front and still wants a socket — so the agent rail stays subscribed and the
+ * store keeps what it was told. That separation is the point of the two flags.
+ */
+async function cutSocket(): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 15));
+    client().__emit('disconnected', {});
   });
 }
 
@@ -362,19 +404,63 @@ describe('와이어 — 두 클라이언트가 같은 프레임을 읽는다', (
     expect(row()).not.toHaveTextContent(/작업 중/);
 
     // 잠들었다 깬 폰이 만나는 것: `subscribed`가 recovered로 돌아오고, 이미
-    // 끝난 턴의 프레임 8개가 그 뒤로 동기적으로 쏟아진다. 하나라도 접히면
+    // 끝난 턴의 프레임들이 그 뒤로 동기적으로 쏟아진다. 하나라도 접히면
     // 화면에 죽은 턴이 시계를 달고 되살아난다.
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 30));
-      agentSub()?.__subscribed({
-        recovered: true,
-        publications: [
-          statusFrame({phase: 'streaming', run_status: 'running'}),
-          partialFrame({text: '빌드 확인 중'}),
-        ],
-      });
-    });
+    await replay(
+      [
+        statusFrame({phase: 'streaming', run_status: 'running'}),
+        partialFrame({text: '빌드 확인 중'}),
+      ],
+      30,
+    );
     expect(row()).not.toHaveTextContent(/작업 중/);
+  });
+
+  it('회복 배치의 종료 프레임은 통과한다 — 그렇지 않으면 90초 동안 거짓 「작업 중」', async () => {
+    // 2R H1. 백그라운드 유예가 끝나면 소켓이 내려가므로, 그 사이에 끝난 턴의
+    // 종료 프레임은 **회복 배치에만** 존재한다. 그것마저 버리면 복귀한 폰이
+    // 이미 멈춘 에이전트를 두고 최대 90초(TTL) 동안 「작업 중」이라고 말한다.
+    //
+    // 서버가 그 프레임을 싣는다는 것은 코드에서 확인했다:
+    // `workers/AgentWorker/.../WorkerService.swift:578`이 `.done`을 이 채널에
+    // publish하고 `clientRunStatus`가 `succeeded`로, `agentPhase`가 `done`으로
+    // 투영한다(:2584-2604). `infra/centrifugo.json`의 `agent` 네임스페이스는
+    // `history_size: 100 · history_ttl: 24h · force_recovery: true`라 그 프레임은
+    // 회복 배치에 남아 있다.
+    await openAgentsTab();
+    const row = () => screen.getByTestId(`agent-row-${KIM_AGENT}`);
+
+    await deliver(statusFrame(), 20);
+    await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 45);
+    await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+
+    // 자리를 비운 사이에 턴이 끝났다. 복귀하면 회복 배치가 그 사실을 들고 온다 —
+    // 살아 있음을 주장하는 프레임들과 함께. 앞의 것들은 여전히 버려지고 마지막
+    // 종료 프레임만 통과한다.
+    await replay(
+      [
+        partialFrame({text: '마지막 줄'}),
+        statusFrame({phase: 'streaming', run_status: 'running'}),
+        statusFrame({phase: 'done', run_status: 'succeeded'}),
+      ],
+      30,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByTestId(`agent-turn-${KIM_AGENT}`)).toBeNull(),
+    );
+    expect(row()).not.toHaveTextContent(/작업 중/);
+  });
+
+  it('회복 배치의 종료 프레임은 없던 턴을 만들지 못한다', async () => {
+    // 통과시킨 구멍이 켜는 쪽으로는 절대 열리지 않는다는 것. `applyStatus`의
+    // 종료 분기는 delete만 하고, 없으면 같은 map을 그대로 돌려준다.
+    await openAgentsTab();
+    await replay([statusFrame({phase: 'done', run_status: 'succeeded'})], 25);
+    expect(screen.queryByTestId(`agent-turn-${KIM_AGENT}`)).toBeNull();
+    expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).not.toHaveTextContent(
+      /작업 중|승인 대기/,
+    );
   });
 });
 
@@ -483,6 +569,100 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
       25,
     );
     expect(screen.queryByTestId(`agent-turn-${KIM_AGENT}`)).toBeNull();
+  });
+
+  it('한 행에 두 사실이 나란히 서고, 좁아지면 이름이 먼저 줄어든다', async () => {
+    // 2R M5. 실제 텍스트 폭은 Jest에서 잴 수 없다(레이아웃 엔진이 없다). 잴 수
+    // 있는 것은 **무엇이 먼저 양보하도록 만들어져 있는가**이고, 그것이 이 행의
+    // 실제 설계 결정이다: 두 배지는 `flexShrink`를 갖지 않고, 이름/핸들만 갖는다.
+    // 즉 좁아졌을 때 사라지는 것은 상태 낱말이 아니라 이름의 꼬리다.
+    installFetch();
+    await openAgentsTab();
+    await deliver(statusFrame(), 20);
+    await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 45);
+
+    const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
+    await waitFor(() => expect(row).toHaveTextContent(/작업 중/));
+    // 이름·핸들·상태 낱말이 모두 같은 행에 있다.
+    expect(row).toHaveTextContent(/김인턴/);
+    expect(row).toHaveTextContent(/@kim-intern/);
+
+    const title = screen.getByText('김인턴');
+    expect(title.props.numberOfLines).toBe(1);
+    expect(title.props.ellipsizeMode).toBe('tail');
+    const badge = screen.getByTestId(`agent-turn-${KIM_AGENT}`);
+    // 배지는 줄어들지 않는다 — 줄어들 수 있으면 「작업 중」이 「작…」이 된다.
+    expect(badge.props.style?.flexShrink).toBeUndefined();
+  });
+});
+
+describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () => {
+  it('에이전트 탭은 고지를 띄우고, 배지는 색을 잃고, 라벨이 이유를 말한다', async () => {
+    await openAgentsTab();
+    expect(screen.queryByTestId('agents-offline')).toBeNull();
+
+    await deliver(statusFrame(), 20);
+    await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 45);
+    const row = () => screen.getByTestId(`agent-row-${KIM_AGENT}`);
+    await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+
+    await cutSocket();
+
+    // ① 화면에 한 줄. 배지가 회색이 되는 것만으로는 부족하다 — 무색은 「열린 턴이
+    //    없음」의 모양이기도 하다.
+    await waitFor(() => expect(screen.getByTestId('agents-offline')).toBeTruthy());
+    expect(screen.getByTestId('agents-offline')).toHaveTextContent(
+      TURN_STALE_SENTENCE,
+    );
+
+    // ② 배지는 남는다(마지막으로 확인된 상태는 여전히 읽을 값이다) — 다만 색을
+    //    잃는다. 살아 있는 주장과 기억된 주장이 같아 보이면 안 된다.
+    const badge = screen.getByTestId(`agent-turn-${KIM_AGENT}`);
+    expect(badge).toHaveTextContent(/작업 중/);
+    expect(flatStyle(badge.props.style).borderColor).not.toBe(color.agent);
+
+    // ③ 그리고 스크린리더가 듣는 문장에도 이유가 붙는다.
+    expect(row().props.accessibilityLabel).toContain(TURN_STALE_SENTENCE);
+  });
+
+  it('대화 화면은 스테일 줄을 붙이고 시계를 멈추고 헤더 부제를 고친다', async () => {
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    await waitFor(() => expect(agentSub()).toBeTruthy());
+    fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-title')).toBeTruthy(),
+    );
+
+    await deliver(statusFrame(), 20);
+    await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 45);
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-working')).toBeTruthy(),
+    );
+    // 살아 있는 동안에는 경과 시계가 있다. `queued` 프레임이 시작 시각을 줬다.
+    expect(screen.getByTestId('composer-working')).toHaveTextContent(/\d+s/);
+    expect(screen.queryByTestId('composer-working-stale')).toBeNull();
+
+    await cutSocket();
+
+    // ① 그 자리에서 이유를 말하는 한 줄.
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-working-stale')).toBeTruthy(),
+    );
+    // ② 시계는 멈추는 게 아니라 사라진다 — 죽은 소켓 위에서 세는 숫자는 우리의
+    //    낙관을 재는 것이지 에이전트의 턴을 재는 것이 아니다.
+    expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/\d+s/);
+    // ②' 그리고 스크린리더도 같은 것을 듣는다. RN View는 기본이 비접근 요소라
+    //     `accessible` 없이는 이 라벨을 아무도 읽지 않는다 (M1).
+    const bar = screen.getByTestId('composer-working');
+    expect(bar.props.accessible).toBe(true);
+    expect(bar.props.accessibilityLabel).toContain('김인턴');
+    expect(bar.props.accessibilityLabel).toContain(TURN_STALE_SENTENCE);
+    // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
+    //    문장이 서로를 부정한다 (M3).
+    expect(screen.getByTestId('conversation-title').parent).toBeTruthy();
+    expect(screen.getByText('연결이 끊겼습니다')).toBeTruthy();
+    expect(screen.queryByText('연결 중…')).toBeNull();
   });
 });
 

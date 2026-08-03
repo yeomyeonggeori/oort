@@ -7,6 +7,7 @@ import {
   activityLines,
   activitySuffix,
   activityText,
+  TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
 } from '@momo/core/features/agents/turnCopy';
@@ -14,7 +15,7 @@ import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, space} from '../../design/tokens';
+import {color, font, radius, SAFE_GUTTER, space} from '../../design/tokens';
 
 // =============================================================================
 // The two 「작업 중」 surfaces on the phone (goal RN-T2).
@@ -106,7 +107,7 @@ export function AgentActivityBar({
   live: boolean;
   testID?: string;
 }): React.JSX.Element | null {
-  const {lines, overflowCount, summary} = useMemo(
+  const {lines, overflowCount} = useMemo(
     () =>
       activityLines(turns, memberId =>
         memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
@@ -117,8 +118,21 @@ export function AgentActivityBar({
   if (lines.length === 0) return null;
 
   return (
+    // `accessible` is REQUIRED here, not decoration (2R M1). A React Native
+    // `View` is not an accessibility element by default, so an
+    // `accessibilityLabel` on a bare one is read by nobody — the web sibling gets
+    // away with `aria-label` on a `<ul>` because the browser announces the list
+    // and then its items; RN announces neither until something claims to be an
+    // element.
+    //
+    // Claiming it merges the subtree into ONE element, so the label has to carry
+    // everything that is on screen rather than a summary of it: the lines, the
+    // overflow count, and the offline sentence. That is also the better read for
+    // a 1-3 line strip above a keyboard — one swipe stop with the whole story
+    // beats four stops with a quarter each, and nothing can be swiped past.
     <View
-      accessibilityLabel={summary}
+      accessible
+      accessibilityLabel={barLabel(lines, overflowCount, live)}
       style={styles.activityBar}
       testID={testID}>
       {lines.map(line => (
@@ -137,13 +151,48 @@ export function AgentActivityBar({
 }
 
 /**
- * 연결이 끊긴 동안의 한 문장. One constant, because the badge says it into a
- * screen reader, the activity bar prints it on screen, and the 에이전트 목록 row
- * folds it into its own label — a reader who hears one and sees another has been
- * told about two different situations.
+ * Everything the bar shows, as one sentence, in the order it is drawn.
+ *
+ * `turnSummary` is deliberately NOT used: it is the web list's accessible NAME,
+ * which sits above items the browser reads separately. Here there are no
+ * separate items, so a summary would replace the content instead of introducing
+ * it — the reader would lose the headline the agent actually wrote.
  */
-export const TURN_STALE_SENTENCE =
-  '연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.';
+function barLabel(
+  lines: readonly AgentActivityLine[],
+  overflowCount: number,
+  live: boolean,
+): string {
+  const parts = lines.map(activityText);
+  if (overflowCount > 0) parts.push(`외 ${overflowCount}명`);
+  if (!live) parts.push(TURN_STALE_SENTENCE);
+  return parts.join(', ');
+}
+
+/**
+ * 연결이 끊긴 동안 이 탭이 말하는 한 줄 (2R H2).
+ *
+ * 에이전트 탭에는 이 고지가 없었다. 배지가 회색으로 내려앉는 것이 유일한 신호였는데
+ * **무색이 곧 「열린 턴이 없음」의 모양**이라, 끊긴 화면과 조용한 화면이 픽셀 단위로
+ * 같았다. 그것은 웹의 첫 컴포저 시안이 저지른 실수 그대로다 — 상태를 인코딩만 하고
+ * 화면에 말하지 않은 것. `AgentActivityBar`가 스스로 세운 규칙("한 줄이 그 자리에서
+ * 이유를 말한다")을 이 탭도 지킨다.
+ *
+ * 열린 턴이 하나도 없을 때도 뜬다. 이 화면이 끊긴 동안 못 말하는 것은 배지만이
+ * 아니라 **「지금 일하는 에이전트가 없다」는 문장 자체**이고, 그 침묵이야말로
+ * 고지가 필요한 자리다.
+ */
+export function AgentTurnStaleNotice({
+  testID,
+}: {
+  testID?: string;
+}): React.JSX.Element {
+  return (
+    <View style={styles.staleNotice} testID={testID}>
+      <Text style={styles.staleText}>{TURN_STALE_SENTENCE}</Text>
+    </View>
+  );
+}
 
 /**
  * The line itself. The clock sits right after the text it belongs to rather than
@@ -225,4 +274,8 @@ const styles = StyleSheet.create({
   activityName: {color: color.agent},
   activityClock: {fontSize: font.meta, color: color.textFaint},
   staleText: {fontSize: font.meta, color: color.warn},
+  staleNotice: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.sm,
+  },
 });

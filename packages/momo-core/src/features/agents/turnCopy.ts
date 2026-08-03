@@ -38,6 +38,23 @@ export type AgentNameLookup = (memberId: string) => AgentNameParts;
 /** The roster has not loaded yet: say so, do not invent a name. */
 export const UNKNOWN_AGENT_NAME = "에이전트";
 
+/**
+ * What every turn surface says while the realtime rail is down.
+ *
+ * One constant across both clients and all five surfaces that use it — the web
+ * badge's accessible name, the web composer's warn line, the phone's badge, the
+ * phone's activity bar, and the phone's 에이전트 tab. It was a literal in three
+ * of those until goal RN-T2 2R, which is the shape of drift this module exists
+ * to prevent: a reader who HEARS one wording and SEES another has been told
+ * about two different situations, and only one of them is real.
+ *
+ * It states both halves on purpose. "갱신이 멈췄습니다" is why the number stopped
+ * moving; "마지막으로 확인된 상태입니다" is why what is still on screen is worth
+ * reading rather than wrong.
+ */
+export const TURN_STALE_SENTENCE =
+  "연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.";
+
 /** Composer lines shown at once before the rest become a count. */
 export const MAX_ACTIVITY_LINES = 3;
 

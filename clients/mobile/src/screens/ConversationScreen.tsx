@@ -1,4 +1,5 @@
 import {uuidEq, type Message} from '@momo/core/lib/api';
+import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {
   dmAutoReplyAgent,
   dmPeer,
@@ -66,6 +67,23 @@ import {useSession} from '../session/useSession';
 // reports the composer's bottom edge against the keyboard's top edge, and the
 // travel between the two.
 // =============================================================================
+
+/**
+ * 헤더 부제 — 소켓이 무슨 상태인지 (2R M3).
+ *
+ * 「연결 중…」 하나로 두 상태를 덮고 있었다. `RealtimeProvider`는 이미 "한 번
+ * 연결된 뒤의 connecting은 disconnected다"라고 판정해서 내려보내는데(웹에서
+ * 실측한 40초 단절이 아무 오프라인 표시도 못 냈던 그 결함의 수리) 이 부제만
+ * 그 판정을 버리고 둘을 같은 낙관으로 말했다. 그러면 같은 화면 안에서 헤더는
+ * 「연결 중…」이라 하고 바로 아래 활동 줄은 「연결이 끊겨 갱신이 멈췄습니다」라고
+ * 하는, 서로 모순되는 두 문장이 동시에 서 있게 된다.
+ *
+ * 연결됐을 때는 아무 말도 하지 않는다 — 정상은 문장을 쓰지 않는다.
+ */
+function railSubtitle(status: RealtimeStatus): string | undefined {
+  if (status === 'connected') return undefined;
+  return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
+}
 
 export default function ConversationScreen({
   channelId,
@@ -221,7 +239,7 @@ export default function ConversationScreen({
     <Screen>
       <ScreenHeader
         title={title}
-        subtitle={railStatus === 'connected' ? undefined : '연결 중…'}
+        subtitle={railSubtitle(railStatus)}
         onBack={onBack}
         titleTestID="conversation-title"
       />
