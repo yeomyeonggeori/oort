@@ -165,9 +165,17 @@ bundle exec fastlane ios beta
 **후속**: §3 실행 → 프로파일 이름 확정 → Release만 Manual 전환 + gym 매핑 →
 `verify_ios_signing.sh`에 "specifier ↔ 식별자 대응" 검사 추가.
 
-## 7. 별건 관측 (이 배치에서 안 고침)
+## 7. 별건 관측 — `DEVELOPMENT_TEAM` (goal HYG-1에서 해소)
 
-`clients/macOS/MomoMac.xcodeproj/project.pbxproj`의 `DEVELOPMENT_TEAM`이 **빈 문자열**이다.
-iOS 프로젝트에는 채워져 있다. 자동 서명 상태로 mac 릴리스 레인을 돌리면 팀을 못 고른다.
-`verify_ios_signing.sh`가 **비치명 WARN**으로 계속 알려 준다. macOS 배포를 실제로 켜는 시점에
-Developer ID 인증서와 함께 한 세트로 처리할 것.
+`clients/macOS/MomoMac.xcodeproj/project.pbxproj`의 `DEVELOPMENT_TEAM`이 **빈 문자열**이었다.
+자동 서명 상태로 mac 릴리스 레인을 돌리면 팀을 못 골라, `verify_ios_signing.sh`가 매 실행
+**비치명 WARN**을 냈다.
+
+**goal HYG-1에서 채웠다** — Debug/Release 두 XCBuildConfiguration 모두 `YWQQFQM38J`.
+iOS(`clients/iOS`)·RN(`clients/mobile/ios`) 프로젝트와 **같은 팀**이고, mac 번들 ID
+`com.dawnkim.momo`도 같은 팀 소속이라 §0 표와 어긋나지 않는다. 이후 `verify_ios_signing.sh`는
+**WARN 0**으로 PASS 한다.
+
+주의: 이건 **팀 선택만** 푼 것이다. macOS 배포를 실제로 켜려면 Developer ID 인증서와
+`match developer_id`(§3)가 별도로 서야 하고, 그건 Apple 계정이 있는 머신에서 1회 실행한다.
+`CODE_SIGN_STYLE`은 여전히 `Automatic`이다(§6의 판단 유지).
