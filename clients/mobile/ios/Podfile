@@ -75,6 +75,28 @@ module MomoDeterministicHermesChecksum
 end
 Pod::Sandbox.prepend(MomoDeterministicHermesChecksum)
 
+# 위 훅은 CocoaPods 가 외부 소스를 **다시 fetch 할 때만** 돈다. 이미 절대경로가 박힌
+# `Pods/Local Podspecs/hermes-engine.podspec.json` 이 남아 있으면 CocoaPods 는 그 파일을
+# 그대로 재사용하고(analyzer.rb:1011,1037 — `:podspec` 소스는 저장본이 있으면 fetch 생략)
+# 훅이 돌지 않아 옛 체크섬이 그대로 lock 에 실린다. 이 fix 이전에 만든 Pods/ 를 가진
+# 체크아웃이 정확히 그 상태다(H-FIX1 실측).
+#
+# 그래서 저장본이 절대경로를 담고 있으면 버린다. 파일이 없으면 CocoaPods 가 반드시
+# 다시 fetch 하고, 그때 위 훅이 정규화한다. 직접 고쳐 쓰지 않고 버리는 이유는
+# to_pretty_json 의 바이트 포맷을 손으로 재현하면 신규 설치와 1바이트라도 어긋나는 순간
+# 체크섬이 갈라지기 때문이다 — 생성은 CocoaPods 한 곳에만 맡긴다.
+def momo_evict_stale_hermes_podspec!
+  stored = Pod::Config.instance.sandbox_root + 'Local Podspecs' + 'hermes-engine.podspec.json'
+  return unless stored.file?
+  return unless stored.read =~ /"HERMES_CLI_PATH"\s*:\s*"\//
+
+  stored.delete
+  Pod::UI.puts '[momo] 절대경로가 박힌 hermes-engine podspec 캐시를 버린다 (재fetch 시 정규화)'
+rescue StandardError => e
+  Pod::UI.warn "[momo] hermes-engine podspec 캐시 정리 실패: #{e.message}"
+end
+momo_evict_stale_hermes_podspec!
+
 # NOT `min_ios_version_supported` (React Native 0.86 answers 15.1 —
 # node_modules/react-native/scripts/cocoapods/helpers.rb:84). Expo SDK 57 declares
 # `:ios => '16.4'` (node_modules/expo/Expo.podspec:39) and CocoaPods refuses to
