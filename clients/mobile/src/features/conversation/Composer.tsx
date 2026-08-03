@@ -67,10 +67,16 @@ export function Composer({
   dmAgent,
   disabled,
   onSend,
+  placeholder,
+  sendLabel = '보내기',
   inputRef: externalInputRef,
 }: {
   channelLabel: string;
   directory: Directory;
+  /** Overrides the derived "…에 메시지 보내기". A thread is not a channel. */
+  placeholder?: string;
+  /** Overrides 보내기. A reply says what it is. */
+  sendLabel?: string;
   /** The agent a DM answers without an @mention, if this is that kind of DM. */
   dmAgent?: RosterMember | null;
   /** The rail is down: the composer says so rather than failing silently. */
@@ -217,9 +223,9 @@ export function Composer({
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
-          placeholder={`${channelLabel}에 메시지 보내기`}
+          placeholder={placeholder ?? `${channelLabel}에 메시지 보내기`}
           placeholderTextColor={color.textFaint}
-          accessibilityLabel={`${channelLabel}에 보낼 메시지`}
+          accessibilityLabel={placeholder ?? `${channelLabel}에 보낼 메시지`}
           multiline
           // Enter inserts a newline (see the header). `blurOnSubmit` false keeps
           // the keyboard up, because on a phone the return key is the only line
@@ -230,7 +236,7 @@ export function Composer({
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="메시지 보내기"
+          accessibilityLabel={sendLabel}
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
           onPress={submit}
@@ -241,7 +247,7 @@ export function Composer({
           ]}
           testID="composer-send">
           <Text style={[styles.sendLabel, !canSend && styles.sendLabelDisabled]}>
-            보내기
+            {sendLabel}
           </Text>
         </Pressable>
       </View>

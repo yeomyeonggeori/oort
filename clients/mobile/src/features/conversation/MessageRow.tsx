@@ -20,11 +20,27 @@ import {
 } from '@momo/core/features/timeline/rowModel';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
-import type {PendingMessage} from '@momo/core/features/timeline/model';
+import {
+  canDeleteMessage,
+  canEditMessage,
+  canReactToMessage,
+  canReplyToMessage,
+  hasAnyAction,
+  type MessageActionAvailability,
+  type PendingMessage,
+} from '@momo/core/features/timeline/model';
+import {
+  deleteFailureMessage,
+  editFailureMessage,
+  reactionFailureMessage,
+} from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
-import React, {useMemo} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {MessageActionSheet} from './MessageActionSheet';
+import {MessageEditorSheet} from './MessageEditorSheet';
+import {useLongPress} from './useLongPress';
 
 // =============================================================================
 // One row of the conversation.
@@ -170,20 +186,51 @@ function Author({
   );
 }
 
-function Chips({chips}: {chips: ReactionChip[]}): React.JSX.Element | null {
+/**
+ * The reaction chips.
+ *
+ * Pressable now (RN-C4 drew them as labels and said why: a chip that looks like
+ * a button and does nothing is worse than one that looks like a label). They are
+ * also the row's one ALWAYS-VISIBLE action affordance, which matters on a phone
+ * where the other entry point is an invisible gesture.
+ *
+ * `hitSlop` rather than padding for the 44px target: a 44px-tall chip would push
+ * the tail of every reacted message a line further down, and density is one of
+ * the things this product has. The slop is 6 top and bottom over a 32px chip,
+ * which is 44 to a thumb and 32 to the layout.
+ */
+function Chips({
+  chips,
+  onToggle,
+}: {
+  chips: ReactionChip[];
+  onToggle?: (emoji: string) => void;
+}): React.JSX.Element | null {
   if (chips.length === 0) return null;
   return (
     <View style={styles.chipRow} testID="reaction-chips">
       {chips.map(chip => (
-        <View
+        <Pressable
           key={chip.emoji}
-          style={[styles.chip, chip.mine && styles.chipMine]}
-          accessibilityLabel={`${chip.emoji} ${chip.count}개${chip.mine ? ', 내가 남김' : ''}`}>
+          accessibilityRole="button"
+          accessibilityState={{selected: chip.mine}}
+          accessibilityLabel={`${chip.emoji} 반응 ${chip.count}개, ${
+            chip.mine ? '내 반응 취소' : '나도 반응하기'
+          }`}
+          disabled={onToggle === undefined}
+          hitSlop={{top: 6, bottom: 6, left: 2, right: 2}}
+          onPress={() => onToggle?.(chip.emoji)}
+          style={({pressed}) => [
+            styles.chip,
+            chip.mine && styles.chipMine,
+            pressed && styles.chipPressed,
+          ]}
+          testID={`reaction-chip-${chip.emoji}`}>
           <Text style={styles.chipEmoji}>{chip.emoji}</Text>
           <Text style={[styles.chipCount, chip.mine && styles.chipCountMine]}>
             {chip.count}
           </Text>
-        </View>
+        </Pressable>
       ))}
     </View>
   );
@@ -396,6 +443,23 @@ function ArtifactCard({
 
 // ---- the message row --------------------------------------------------------
 
+/** What a row can do, supplied by the surface that owns the state. */
+export interface MessageRowActions {
+  myMemberId: string;
+  /** Optimistic in the hook; rejects with the error the row turns into a line. */
+  onToggleReaction: (message: Message, emoji: string) => Promise<void>;
+  onEdit: (message: Message, body: string) => Promise<void>;
+  onDelete: (message: Message) => Promise<void>;
+  /**
+   * Open this message's thread. Absent when there is nowhere to open — inside a
+   * thread already, or on a surface with no thread panel. A rollup with no
+   * handler renders as a LABEL rather than a dead button (QA P3 1-1).
+   */
+  onOpenThread?: (message: Message) => void;
+  /** The gesture was used at least once, so the hint can retire itself. */
+  onLongPressUsed?: () => void;
+}
+
 export function MessageRow({
   message,
   startsGroup,
@@ -404,6 +468,7 @@ export function MessageRow({
   pausedRepeat,
   nowMs,
   onResend,
+  actions,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -414,100 +479,365 @@ export function MessageRow({
   nowMs: number;
   /** A server-stored `failed` row offers a fresh send, not a replay. */
   onResend?: (message: Message) => void;
+  /** Absent on read-only surfaces (the measurement harness, search previews). */
+  actions?: MessageRowActions;
 }): React.JSX.Element {
   const presentation = useMemo(() => rowPresentation(message), [message]);
   const deleted = message.state === 'deleted';
   const rollup = threadRollup(message);
   const body = message.body ?? '';
 
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editPending, setEditPending] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  // One slot for the failures with nowhere else to sit (a reaction, a delete).
+  // A Korean sentence, never the wire string, and never a toast — the reason
+  // belongs beside the message it is about (B8 + B11).
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  // The four answers come from the core, which is also where the server's rules
+  // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
+  // and a reply is never offered a reply of its own (momo threads are one level).
+  const available = useMemo<MessageActionAvailability>(
+    () => ({
+      reply:
+        actions?.onOpenThread !== undefined && canReplyToMessage(message),
+      react: actions !== undefined && canReactToMessage(message),
+      edit: actions !== undefined && canEditMessage(message, actions.myMemberId),
+      delete:
+        actions !== undefined && canDeleteMessage(message, actions.myMemberId),
+    }),
+    [actions, message],
+  );
+  const actionable = actions !== undefined && hasAnyAction(available);
+
+  const openSheet = useCallback(() => {
+    setRowError(null);
+    setSheetOpen(true);
+    actions?.onLongPressUsed?.();
+  }, [actions]);
+
+  const longPress = useLongPress({enabled: actionable, onFire: openSheet});
+
+  const toggleReaction = useCallback(
+    (emoji: string) => {
+      if (!actions) return;
+      setRowError(null);
+      void actions.onToggleReaction(message, emoji).catch((error: unknown) => {
+        setRowError(reactionFailureMessage(error));
+      });
+    },
+    [actions, message],
+  );
+
+  const onChipPress = useCallback(
+    (emoji: string) => {
+      // The tap that follows a long press belongs to the gesture that opened the
+      // sheet, not to the chip underneath the finger.
+      if (longPress.consumeTap()) return;
+      toggleReaction(emoji);
+    },
+    [longPress, toggleReaction],
+  );
+
+  const onAccessibilityAction = useCallback(
+    (event: {nativeEvent: {actionName: string}}) => {
+      switch (event.nativeEvent.actionName) {
+        case 'activate':
+        case 'momoActions':
+          if (actionable) openSheet();
+          return;
+        case 'momoThread':
+          if (rollup && actions?.onOpenThread) actions.onOpenThread(message);
+          return;
+        default:
+      }
+    },
+    [actionable, openSheet, rollup, actions, message],
+  );
+
+  // VoiceOver reaches the actions through the rotor rather than through a row
+  // full of buttons — the iOS answer to "one tab stop per row" (web R2 H1).
+  const accessibilityActions = useMemo(() => {
+    const list: {name: string; label: string}[] = [];
+    if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
+    if (rollup && actions?.onOpenThread) {
+      list.push({name: 'momoThread', label: '스레드 열기'});
+    }
+    return list.length > 0 ? list : undefined;
+  }, [actionable, rollup, actions]);
+
+  const authorLabel = memberNameParts(
+    directory,
+    message.authorMemberId,
+    UNKNOWN_MEMBER,
+  ).name;
+
+  const tail = [
+    !deleted && message.state === 'edited' ? '수정됨' : null,
+    rollup
+      ? `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
+          rollup.lastReplyAtMs,
+          nowMs,
+        )}`
+      : null,
+  ].filter((part): part is string => part !== null);
+
   return (
     <View
+      // ONE accessibility element per row. Grouping is what keeps the chips, the
+      // thread anchor and the resend button from each becoming their own stop —
+      // the same count the web client cut from 6 to 1. Touch is unaffected:
+      // grouping changes the accessibility tree, not the responder tree.
+      accessible
+      accessibilityLabel={rowAccessibilityLabel({
+        message,
+        authorLabel,
+        chips,
+        tail,
+        deleted,
+      })}
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={onAccessibilityAction}
       style={[styles.row, startsGroup && styles.rowStartsGroup]}
-      testID="message-row">
-      {startsGroup ? (
-        <Author
-          directory={directory}
-          memberId={message.authorMemberId}
-          atMs={message.createdAtMs}
+      testID="message-row"
+      {...longPress.handlers}>
+      <Pressable
+        // No `onPress`: a tap on a message does nothing yet, and inventing a
+        // destination for it would be a second gesture competing with this one.
+        onLongPress={longPress.onLongPress}
+        delayLongPress={longPress.delayLongPress}
+        disabled={!actionable}
+        style={({pressed}) => [styles.rowInner, pressed && actionable && styles.rowPressed]}
+        testID="message-press">
+        {startsGroup ? (
+          <Author
+            directory={directory}
+            memberId={message.authorMemberId}
+            atMs={message.createdAtMs}
+          />
+        ) : null}
+
+        {deleted ? (
+          // Meta size, not body size, and never through a body renderer: a
+          // tombstone is a statement ABOUT a message, not a message. Web R2 M5
+          // set this in body size and leading, and at a glance it read as
+          // content — it keeps its place and gives up its weight.
+          <Text style={styles.tombstone} testID="tombstone">
+            삭제된 메시지
+          </Text>
+        ) : (
+          <>
+            {presentation.keepsBody && body !== '' ? (
+              body.includes('```') ? (
+                <CodeBlock text={body} />
+              ) : (
+                <Text
+                  style={styles.body}
+                  // Selectable ONLY where no gesture wants the same press. iOS
+                  // text selection is itself a long press, so on an actionable
+                  // row the two fight and the loser is whichever the OS decides
+                  // — a magnifier appearing over the action sheet. Where there
+                  // is no sheet to open there is nothing to fight, so those rows
+                  // keep their copy. (A 복사 action needs a clipboard native
+                  // module; RN's own is deprecated and warns on every access.)
+                  selectable={!actionable}>
+                  {body}
+                </Text>
+              )
+            ) : null}
+
+            {presentation.artifact ? (
+              <ArtifactCard
+                artifact={presentation.artifact}
+                state={presentation.artifactState}
+              />
+            ) : presentation.card ? (
+              <AgentCard card={presentation.card} />
+            ) : null}
+
+            {presentation.keepsBody &&
+            body === '' &&
+            !presentation.card &&
+            !presentation.artifact ? (
+              <Text style={styles.tombstone}>내용 없는 메시지</Text>
+            ) : null}
+          </>
+        )}
+
+        {pausedRepeat !== undefined && pausedRepeat > 1 ? (
+          <Text style={styles.cardMeta}>
+            {`응답하지 못한 메시지 ${pausedRepeat}개`}
+          </Text>
+        ) : null}
+
+        {/* The tail is ONE line (web R2 M6). R1 gave 「수정됨」 and 「답글 N개」 a
+            band each, so a one-line message wore a taller tail than itself. The
+            chips keep their own line because they are pressed; these two are
+            read, so they sit together. */}
+        {tail.length > 0 ? (
+          <View style={styles.tailRow}>
+            {!deleted && message.state === 'edited' ? (
+              <Text style={styles.edited} testID="edited-mark">
+                수정됨
+              </Text>
+            ) : null}
+            {rollup ? (
+              actions?.onOpenThread ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="스레드 열기"
+                  hitSlop={{top: 6, bottom: 6, left: 4, right: 4}}
+                  onPress={() => {
+                    if (longPress.consumeTap()) return;
+                    actions.onOpenThread?.(message);
+                  }}
+                  style={({pressed}) => [pressed && styles.pressed]}
+                  testID="thread-rollup">
+                  <Text style={styles.rollupLink}>
+                    {`답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
+                      rollup.lastReplyAtMs,
+                      nowMs,
+                    )}`}
+                  </Text>
+                </Pressable>
+              ) : (
+                // A label, not a button: a door to a room that does not exist is
+                // worse than a sentence saying the room is there.
+                <Text style={styles.rollup} testID="thread-rollup">
+                  {`답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
+                    rollup.lastReplyAtMs,
+                    nowMs,
+                  )}`}
+                </Text>
+              )
+            ) : null}
+          </View>
+        ) : null}
+
+        {message.state === 'failed' ? (
+          <View style={styles.failedRow}>
+            <Text style={styles.failedText}>전송 실패</Text>
+            {onResend ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="다시 보내기"
+                onPress={() => onResend(message)}
+                style={({pressed}) => [styles.resend, pressed && styles.pressed]}
+                testID="message-resend">
+                <Text style={styles.resendLabel}>다시 보내기</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Chips chips={chips} onToggle={actions ? onChipPress : undefined} />
+
+        {rowError ? (
+          // The optimistic change has already gone back to where it was; this is
+          // the reason, on the row it belongs to.
+          <View style={styles.rowFailure} testID="message-action-error">
+            <Text style={styles.rowFailureText}>{rowError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="오류 닫기"
+              hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+              onPress={() => setRowError(null)}
+              testID="message-action-error-dismiss">
+              <Text style={styles.rowFailureDismiss}>닫기</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </Pressable>
+
+      {sheetOpen && actions ? (
+        <MessageActionSheet
+          message={message}
+          chips={chips}
+          availability={available}
+          authorLabel={authorLabel}
+          deletePending={deletePending}
+          onClose={() => setSheetOpen(false)}
+          onToggleReaction={emoji => {
+            setSheetOpen(false);
+            toggleReaction(emoji);
+          }}
+          onReply={() => {
+            setSheetOpen(false);
+            actions.onOpenThread?.(message);
+          }}
+          onEdit={() => {
+            setSheetOpen(false);
+            setEditError(null);
+            setEditing(true);
+          }}
+          onDelete={() => {
+            setDeletePending(true);
+            setRowError(null);
+            void actions
+              .onDelete(message)
+              .then(() => setSheetOpen(false))
+              .catch((error: unknown) => {
+                setRowError(deleteFailureMessage(error));
+                setSheetOpen(false);
+              })
+              .finally(() => setDeletePending(false));
+          }}
         />
       ) : null}
 
-      {deleted ? (
-        // Meta size, not body size, and never through a body renderer: a
-        // tombstone is a statement ABOUT a message, not a message.
-        <Text style={styles.tombstone} testID="tombstone">
-          삭제된 메시지
-        </Text>
-      ) : (
-        <>
-          {presentation.keepsBody && body !== '' ? (
-            body.includes('```') ? (
-              <CodeBlock text={body} />
-            ) : (
-              <Text style={styles.body} selectable>
-                {body}
-              </Text>
-            )
-          ) : null}
-
-          {presentation.artifact ? (
-            <ArtifactCard
-              artifact={presentation.artifact}
-              state={presentation.artifactState}
-            />
-          ) : presentation.card ? (
-            <AgentCard card={presentation.card} />
-          ) : null}
-
-          {presentation.keepsBody && body === '' && !presentation.card && !presentation.artifact ? (
-            <Text style={styles.tombstone}>내용 없는 메시지</Text>
-          ) : null}
-        </>
-      )}
-
-      {pausedRepeat !== undefined && pausedRepeat > 1 ? (
-        <Text style={styles.cardMeta}>
-          {`응답하지 못한 메시지 ${pausedRepeat}개`}
-        </Text>
+      {editing && actions ? (
+        <MessageEditorSheet
+          initialBody={body}
+          pending={editPending}
+          error={editError}
+          onCancel={() => setEditing(false)}
+          onSave={next => {
+            setEditPending(true);
+            setEditError(null);
+            void actions
+              .onEdit(message, next)
+              .then(() => setEditing(false))
+              .catch((error: unknown) => setEditError(editFailureMessage(error)))
+              .finally(() => setEditPending(false));
+          }}
+        />
       ) : null}
-
-      {rollup ? (
-        // A label, not a button: the thread panel is the next batch, and a row
-        // that offers a door to a room that does not exist is worse than one
-        // that states the room is there.
-        <Text style={styles.rollup} testID="thread-rollup">
-          {`답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-            rollup.lastReplyAtMs,
-            nowMs,
-          )}`}
-        </Text>
-      ) : null}
-
-      {!deleted && message.state === 'edited' ? (
-        <Text style={styles.edited} testID="edited-mark">
-          수정됨
-        </Text>
-      ) : null}
-
-      {message.state === 'failed' ? (
-        <View style={styles.failedRow}>
-          <Text style={styles.failedText}>전송 실패</Text>
-          {onResend ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="다시 보내기"
-              onPress={() => onResend(message)}
-              style={({pressed}) => [styles.resend, pressed && styles.pressed]}
-              testID="message-resend">
-              <Text style={styles.resendLabel}>다시 보내기</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
-      <Chips chips={chips} />
     </View>
   );
+}
+
+/**
+ * The whole row as one sentence, because the row is one accessibility element.
+ *
+ * Exported for the test that counts what VoiceOver would say — a label assembled
+ * inline is a label nobody checks.
+ */
+export function rowAccessibilityLabel({
+  message,
+  authorLabel,
+  chips,
+  tail,
+  deleted,
+}: {
+  message: Message;
+  authorLabel: string;
+  chips: ReactionChip[];
+  tail: string[];
+  deleted: boolean;
+}): string {
+  const parts = [
+    authorLabel,
+    timeLabel(message.createdAtMs),
+    deleted ? '삭제된 메시지' : (message.body ?? '').trim(),
+    ...tail,
+    ...chips.map(
+      chip => `${chip.emoji} 반응 ${chip.count}개${chip.mine ? ', 내 반응' : ''}`,
+    ),
+  ];
+  return parts.filter(part => part !== '').join(', ');
 }
 
 /** A local echo: on screen the instant it is sent, with no seq and no clock. */
@@ -563,7 +893,13 @@ export function PendingRow({
 }
 
 const styles = StyleSheet.create({
-  row: {paddingHorizontal: SAFE_GUTTER, paddingVertical: 3, gap: 2},
+  // The padding lives on the inner pressable so the press highlight covers the
+  // whole row rather than a box floating inside it.
+  row: {},
+  rowInner: {paddingHorizontal: SAFE_GUTTER, paddingVertical: 3, gap: 2},
+  // Feedback that the row is interactive at all. On a phone this is one of the
+  // few honest signals that a gesture exists, and it costs no vertical space.
+  rowPressed: {backgroundColor: color.surface},
   rowStartsGroup: {paddingTop: space.md},
   authorRow: {
     flexDirection: 'row',
@@ -587,7 +923,29 @@ const styles = StyleSheet.create({
   bodyPending: {color: color.textMuted},
   tombstone: {fontSize: font.label, color: color.textFaint, fontStyle: 'italic'},
   edited: {fontSize: font.meta, color: color.textFaint},
-  rollup: {fontSize: font.meta, color: color.accentText, paddingTop: 2},
+  tailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    flexWrap: 'wrap',
+    paddingTop: 2,
+  },
+  rollup: {fontSize: font.meta, color: color.textFaint},
+  rollupLink: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
+  rowFailure: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginTop: space.xs,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: color.dangerBorder,
+    backgroundColor: color.dangerSurface,
+  },
+  rowFailureText: {flex: 1, fontSize: font.meta, color: '#f0b4b8', lineHeight: 17},
+  rowFailureDismiss: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
   sending: {fontSize: font.meta, color: color.textFaint},
   failedRow: {
     flexDirection: 'row',
@@ -624,6 +982,9 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    // 32 in layout, 44 to a thumb via `hitSlop`. See the note on `Chips`.
+    minHeight: 32,
     gap: 4,
     paddingHorizontal: space.sm,
     paddingVertical: 3,
@@ -633,6 +994,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface,
   },
   chipMine: {borderColor: color.accent, backgroundColor: '#1a2740'},
+  chipPressed: {backgroundColor: color.surfacePressed},
   chipEmoji: {fontSize: font.label},
   chipCount: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
   chipCountMine: {color: color.accentText},

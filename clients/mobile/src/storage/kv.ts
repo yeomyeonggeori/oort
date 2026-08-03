@@ -49,6 +49,12 @@ export const NON_SECRET_KEYS = {
    * session has to read them from somewhere that survives a restart.
    */
   sessionMetadata: 'momo.mobile.session.meta.v1',
+  /**
+   * Has this person used the long press at least once? The timeline's one-line
+   * hint retires itself once they have. Not a secret and not worth a round trip
+   * — the worst case if it is lost is being told once more.
+   */
+  longPressLearned: 'momo.mobile.timeline.long-press-learned.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

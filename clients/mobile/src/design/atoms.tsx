@@ -62,12 +62,19 @@ export function ScreenHeader({
   title,
   subtitle,
   onBack,
+  backLabel = '뒤로',
   right,
   titleTestID = 'header-title',
 }: {
   title: string;
   subtitle?: string;
   onBack?: () => void;
+  /**
+   * What the back control is called. Defaults to 뒤로, but a surface that covers
+   * another one says what it is closing — "스레드 닫기" tells a screen-reader user
+   * which of the two stacked things is about to go away, and 뒤로 does not.
+   */
+  backLabel?: string;
   right?: React.ReactNode;
   /**
    * Overridable because more than one header is mounted at a time: the tab
@@ -81,7 +88,7 @@ export function ScreenHeader({
       {onBack ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="뒤로"
+          accessibilityLabel={backLabel}
           onPress={onBack}
           hitSlop={8}
           style={({pressed}) => [styles.backButton, pressed && styles.pressed]}

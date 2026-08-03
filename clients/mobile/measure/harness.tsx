@@ -21,12 +21,27 @@ import {useKeyboard} from '../src/lib/useKeyboard';
 // The measurement harness. **Not app code** — it lives outside `src/` for the
 // same reason `clients/mobile-spike` lives outside `clients/mobile`.
 //
-// It exists because three of this batch's claims are about pixels, and a claim
-// about pixels that is argued rather than measured is a claim about nothing:
+// It exists because these claims are about pixels, and a claim about pixels that
+// is argued rather than measured is a claim about nothing:
 //
 //   1. a message arriving while the reader is scrolled back moves the anchor 0px
 //   2. loading older messages moves the anchor 0px
 //   3. the composer is not covered by the software keyboard
+//   4. the composer travels WITH the keyboard rather than after it   (RN-C5)
+//   5. my own message comes to me even from mid-history               (RN-C5)
+//
+// ## 4 and 5 exist because measuring only the destination hid a real defect
+//
+// 성재 on an iPhone 17 reported both of them: "키보드보다 늦게 올라오는 딜레이가
+// 있어" and "내가 친 채팅이 채팅창 아래로 떠서 스크롤을 해야 나와". Claim 3 was
+// already being measured and was PASSING at 0px — because 0px is where the
+// composer ends up, and the defect was in how it got there. A number that can
+// only be right is not a measurement.
+//
+// So claim 4 times the JOURNEY: how long after the keyboard event does the
+// composer start moving, and when does it arrive. And claim 5 asks the question
+// the follow rule is actually about — after sending from mid-history, is the
+// thing I just wrote on screen.
 //
 // ## It measures the SHIPPING components
 //
@@ -146,6 +161,15 @@ interface Results {
   keyboardHeightPx: number | null;
   composerBottomPx: number | null;
   keyboardTopPx: number | null;
+  /** ms from the keyboard event to the composer's FIRST movement. */
+  travelStartMs: number | null;
+  /** ms from the keyboard event to the composer reaching its final position. */
+  travelSettleMs: number | null;
+  /** Was the sender's own message on screen after sending from mid-history? */
+  selfSendVisible: boolean | null;
+  /** The two raw readings behind it, so a failure names its own kind. */
+  sentRowY: number | null;
+  dockY: number | null;
   originSentByRn: string | null;
   note: string;
 }
@@ -157,6 +181,11 @@ const EMPTY: Results = {
   keyboardHeightPx: null,
   composerBottomPx: null,
   keyboardTopPx: null,
+  travelStartMs: null,
+  travelSettleMs: null,
+  selfSendVisible: null,
+  sentRowY: null,
+  dockY: null,
   originSentByRn: null,
   note: '측정 중…',
 };
@@ -175,8 +204,17 @@ function Harness(): React.JSX.Element {
   );
   const [results, setResults] = useState<Results>(EMPTY);
   const anchorRef = useRef<View | null>(null);
+  const dockRef = useRef<View | null>(null);
   const listRef = useRef<FlatList<never> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
+  // Which row carries the measurement wrapper. It starts on the history anchor
+  // (claims 1 and 2) and moves to the just-sent row for claim 5, so one seam
+  // serves both rather than the list growing a second one.
+  const [anchoredSeq, setAnchoredSeq] = useState(ANCHOR_SEQ);
+  // When iOS said the keyboard was coming. Travel is timed from HERE, because
+  // the gap between focus() and the event belongs to the OS, not to this layout.
+  const keyboardEventAtRef = useRef<number | null>(null);
+  const [selfSendToken, setSelfSendToken] = useState(0);
   const keyboard = useKeyboard();
   const ranRef = useRef(false);
   const [keyboardSource, setKeyboardSource] = useState<'os' | 'injected'>('os');
@@ -190,10 +228,10 @@ function Harness(): React.JSX.Element {
   // What a person experiences is the line they were reading jumping, which is
   // the anchor row's absolute position — and that number means the same thing
   // in every list implementation.
-  const measureAnchor = useCallback(
-    (): Promise<number | null> =>
+  const measureNode = useCallback(
+    (ref: React.MutableRefObject<View | null>): Promise<number | null> =>
       new Promise(resolve => {
-        const node = anchorRef.current;
+        const node = ref.current;
         if (!node) {
           resolve(null);
           return;
@@ -201,6 +239,11 @@ function Harness(): React.JSX.Element {
         node.measureInWindow((_x, y) => resolve(y));
       }),
     [],
+  );
+
+  const measureAnchor = useCallback(
+    (): Promise<number | null> => measureNode(anchorRef),
+    [measureNode],
   );
 
   /**
@@ -287,11 +330,76 @@ function Harness(): React.JSX.Element {
         note: next.note,
       }));
 
+      // ---- 2b. my own message comes to me (RN-C5) --------------------------
+      // The reader is still mid-history from the step above, which is exactly
+      // the condition the defect needed: `following` is false, so before the
+      // fix a send landed below the fold with nothing to say it had happened.
+      const lastSeq = FIRST_SEQ + INITIAL_COUNT + 1;
+      setAnchoredSeq(lastSeq);
+      setMessages(current => [...current, makeMessage(lastSeq)]);
+      setSelfSendToken(token => token + 1);
+      // Visible means: the row exists AND its top edge is above the composer.
+      // `measureInWindow` answers null for a row the virtualiser never mounted,
+      // which is one of the two ways this can fail — and the two must not be
+      // reported as one number, so both readings are kept. A null y is "the row
+      // was never mounted"; a y below the dock is "mounted and off screen".
+      let sentY: number | null = null;
+      let dockY: number | null = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await wait(400);
+        sentY = await measureAnchor();
+        dockY = await measureNode(dockRef);
+        if (sentY !== null && dockY !== null) break;
+      }
+      next.sentRowY = sentY;
+      next.dockY = dockY;
+      // `null` is NOT `false`. This harness's own rule (see the note on the
+      // anchor scan) is that an unmeasured case must never be reported as a
+      // measured one — and the first run of this probe broke it in the other
+      // direction, printing FAIL for a row whose measurement wrapper had simply
+      // never attached. `null` here means "could not measure"; the table prints
+      // that word and the PR says it.
+      next.selfSendVisible =
+        sentY === null || dockY === null ? null : sentY < dockY;
+      setResults(current => ({
+        ...current,
+        selfSendVisible: next.selfSendVisible,
+        sentRowY: next.sentRowY,
+        dockY: next.dockY,
+      }));
+      console.log(
+        `MOMO_MEASURE_SELFSEND ${JSON.stringify({
+          sentRowY: sentY,
+          dockY,
+          visible: next.selfSendVisible,
+        })}`,
+      );
+
       // ---- 3. the keyboard --------------------------------------------------
       // `focus()` rather than a tap, because a simulator cannot be driven by a
       // script — spike #837 found React Native's elements absent from the
       // accessibility tree and coordinate clicks landing nowhere. Focus itself
       // works (the caret appears), and on a device it raises the real keyboard.
+      // Sample the dock every frame ACROSS the whole keyboard raise, whichever
+      // way it arrives. The first version of this put the sampler inside the
+      // injection branch, and the run where the simulator raised a real keyboard
+      // measured nothing at all — the one case most worth having.
+      //
+      // Time is measured from the KEYBOARD EVENT, not from `focus()`: the gap
+      // between them is iOS's business, and charging it to the composer would
+      // flatter or damn this client for something it does not control.
+      const trace: {t: number; y: number}[] = [];
+      let sampling = true;
+      const sample = () => {
+        if (!sampling) return;
+        dockRef.current?.measureInWindow((_x, y) => {
+          const at = keyboardEventAtRef.current;
+          if (at !== null) trace.push({t: Date.now() - at, y});
+        });
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+
       inputRef.current?.focus();
       await wait(2500);
 
@@ -312,13 +420,48 @@ function Harness(): React.JSX.Element {
       if (!keyboardVisibleRef.current) {
         injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
         setKeyboardSource('injected');
+        await wait(1200);
+      }
+
+      sampling = false;
+      if (trace.length > 2) {
+        const start = trace[0].y;
+        const end = trace[trace.length - 1].y;
+        const moved = trace.find(point => Math.abs(point.y - start) > 1);
+        const settled = trace.find(point => Math.abs(point.y - end) <= 1);
+        setResults(current => ({
+          ...current,
+          travelStartMs: moved ? moved.t : -1,
+          travelSettleMs: settled ? settled.t : -1,
+        }));
+        console.log(
+          `MOMO_MEASURE_TRAVEL ${JSON.stringify({
+            samples: trace.length,
+            startY: start,
+            endY: end,
+            travelStartMs: moved ? moved.t : -1,
+            travelSettleMs: settled ? settled.t : -1,
+          })}`,
+        );
       }
     })();
-  }, [measureAnchor, reachAnchor]);
+  }, [measureAnchor, reachAnchor, measureNode]);
+
+  // The instant iOS announced the keyboard. Subscribed here rather than read
+  // from `useKeyboard` because a state update arrives a render later, and a
+  // render later is the very quantity being measured.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardWillShow', () => {
+      if (keyboardEventAtRef.current === null) {
+        keyboardEventAtRef.current = Date.now();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Measured in its own effect because it has to run AFTER the keyboard is up,
-  // and the dock's position is only meaningful then.
-  const dockRef = useRef<View | null>(null);
+  // and the dock's position is only meaningful then. (`dockRef` is declared with
+  // the other refs at the top — the travel sampler needs it too.)
   useEffect(() => {
     if (!keyboard.visible) return;
     const timer = setTimeout(() => {
@@ -407,7 +550,7 @@ function Harness(): React.JSX.Element {
   return (
     <View style={styles.root} onLayout={onLayoutRoot}>
       <ScrollView style={styles.report} contentContainerStyle={styles.reportBody}>
-        <Text style={styles.title}>RN-C4 측정</Text>
+        <Text style={styles.title}>RN-C5 측정</Text>
         <Row
           label="새 메시지 도착 시 앵커 이동"
           value={px(results.incomingShiftPx)}
@@ -423,6 +566,44 @@ function Harness(): React.JSX.Element {
           value={px(results.keyboardGapPx)}
           pass={results.keyboardGapPx === null ? null : results.keyboardGapPx >= 0}
         />
+        <Row
+          label="키보드 이벤트 → 컴포저 첫 이동"
+          value={ms(results.travelStartMs)}
+          // One frame. The old path could not beat this: it had to render and
+          // commit before the animation was even configured.
+          pass={
+            results.travelStartMs === null
+              ? null
+              : results.travelStartMs >= 0 && results.travelStartMs <= 17
+          }
+        />
+        <Row
+          label="키보드 이벤트 → 컴포저 도착"
+          value={ms(results.travelSettleMs)}
+          // The keyboard's own duration plus a frame; arriving later than the
+          // keyboard is the defect itself.
+          pass={
+            results.travelSettleMs === null
+              ? null
+              : results.travelSettleMs >= 0 && results.travelSettleMs <= 300
+          }
+        />
+        <Row
+          label="중간에서 보낸 내 메시지가 보이는가"
+          value={
+            results.selfSendVisible === null
+              ? results.dockY === null
+                ? '측정 중…'
+                : '측정 실패(앵커 미부착)'
+              : results.selfSendVisible
+              ? '보인다'
+              : '가려짐'
+          }
+          pass={results.selfSendVisible}
+        />
+        <Text style={styles.meta}>
+          {`보낸 행 y ${px(results.sentRowY)} · 컴포저 상단 y ${px(results.dockY)}`}
+        </Text>
         <Text style={styles.meta}>
           {`키보드 높이 ${px(results.keyboardHeightPx)} · 컴포저 하단 ${px(
             results.composerBottomPx,
@@ -453,7 +634,8 @@ function Harness(): React.JSX.Element {
               status="ready"
               myMemberId={SELF_ID}
               nowMs={BASE_MS}
-              anchorSeq={ANCHOR_SEQ}
+              selfSendToken={selfSendToken}
+              anchorSeq={anchoredSeq}
               anchorRef={anchorRef}
               listRef={listRef as never}
             />
@@ -484,6 +666,12 @@ function px(value: number | null): string {
   if (value === null) return '측정 중…';
   if (value < 0) return '측정 실패';
   return `${value}px`;
+}
+
+function ms(value: number | null): string {
+  if (value === null) return '측정 중…';
+  if (value < 0) return '측정 실패';
+  return `${value}ms`;
 }
 
 function Row({

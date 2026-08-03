@@ -1,5 +1,5 @@
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Animated, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {color} from '../../design/tokens';
 import {useKeyboard} from '../../lib/useKeyboard';
@@ -55,16 +55,39 @@ export function ConversationLayout({
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboard();
+
+  // `max(keyboardHeight, bottomInset)`, as one animated expression.
+  //
+  // Branching on `visible` instead looks simpler and is wrong in a way that only
+  // shows up while hiding: `visible` flips the instant the event arrives, so the
+  // inset would be added back at the START of the hide — a 34-point jump, then a
+  // smooth slide. Written as a max, the inset reappears exactly as the keyboard
+  // passes under it, and neither direction has a step in it.
+  //
+  // `interpolate` needs a strictly increasing input range, which a device with
+  // no home indicator (inset 0) would not give, so that case is the bare value.
+  const paddingBottom =
+    insets.bottom > 0
+      ? keyboard.offset.interpolate({
+          inputRange: [0, insets.bottom, insets.bottom + 1],
+          outputRange: [insets.bottom, insets.bottom, insets.bottom + 1],
+          // Default 'extend': beyond the last stop it continues with slope 1, so
+          // the expression is the keyboard's own height from there on.
+        })
+      : keyboard.offset;
+
   return (
-    <View
-      style={[
-        styles.root,
-        {paddingBottom: keyboard.visible ? keyboard.height : insets.bottom},
-      ]}
+    // `Animated.View`, and the padding is the animated value rather than a
+    // number this component re-renders with. That is the fix for 성재's "키보드
+    // 보다 늦게 올라온다": an animated style updates the node directly, so the
+    // travel does not queue behind a React render and a Fabric commit. See
+    // `useKeyboard` for what was measured and what was ruled out.
+    <Animated.View
+      style={[styles.root, {paddingBottom}]}
       testID="conversation-layout">
       <View style={styles.list}>{list}</View>
       <View testID="composer-dock">{composer}</View>
-    </View>
+    </Animated.View>
   );
 }
 
