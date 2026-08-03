@@ -136,6 +136,22 @@ function useFeedContext(): FeedContext {
 
 // ---- 결정 대기 -------------------------------------------------------------
 
+/**
+ * 결정이 기록된 뒤 원장을 다시 읽는다 (goal M-AP1, web의 같은 이름과 같은 규칙).
+ *
+ * `pending` 페이지만이 아니라 **모든 status 페이지**를 무효화한다: 결정은 행을 한
+ * 페이지에서 다른 페이지로 옮기므로, 떠난 쪽만 새로 읽으면 에이전트 피드가 이미
+ * 끝난 결정을 계속 대기 중으로 그린다. 행이 어디로 갔는지는 서버의 답이고, 이
+ * 클라이언트는 행을 스스로 옮기지 않는다.
+ */
+export function useInvalidateApprovals(): () => void {
+  const {workspaceId} = useSession();
+  const client = useQueryClient();
+  return useCallback(() => {
+    void client.invalidateQueries({queryKey: ['approvals', workspaceId]});
+  }, [client, workspaceId]);
+}
+
 export function useNeedsAction(enabled: boolean): Feed {
   const {workspaceId} = useSession();
   const context = useFeedContext();
