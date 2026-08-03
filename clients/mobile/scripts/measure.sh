@@ -94,7 +94,13 @@ echo "==> waiting for the harness to finish (it runs itself)"
 # self-send probe (three screens back, the ordinary distance) which costs ~6s
 # more, and a screenshot taken before the harness finishes prints 측정 중… for
 # rows that were about to answer.
-sleep 60
+#
+# goal RN-U1 adds two more claims at the end: a keyboard raise+dismiss on the
+# channel stage (~3s), then a stage swap to a SHORT thread, another raise, and a
+# reply probe with its own retry loop (~8s). The stage swap is the reason this is
+# a wall clock rather than a poll — the second `ConversationLayout` has to mount
+# and lay out before anything about it is true.
+sleep 95
 
 echo "==> capturing"
 xcrun simctl io booted screenshot "$OUT_DIR/measure.png"

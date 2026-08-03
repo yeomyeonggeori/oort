@@ -36,7 +36,7 @@ import {
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useMemo, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
@@ -608,6 +608,62 @@ export function MessageRow({
 
   const longPress = useLongPress({enabled: actionable, onFire: openSheet});
 
+  // ===========================================================================
+  // 탭 = 이 행이 이미 열어 주는 문 (goal RN-U1 결함 2)
+  //
+  // 성재: "채팅을 일단 클릭하면 스레드처럼 거기서 바로 답글을 달 수 있게 해주고."
+  //
+  // 스레드로 가는 길은 롤업 버튼 하나뿐이었고, **답글이 없는 메시지에는 그 버튼이
+  // 없다** — 즉 새 스레드를 시작하는 길이 길게 누르기 하나뿐이었다. 그것은 눈에
+  // 보이지 않는 제스처이므로, 실제로는 길이 없었던 것에 가깝다.
+  //
+  // 목적지는 새로 만들지 않는다. 이 행이 **이미 그리고 있는 문**과 같은 곳으로
+  // 간다: 루트는 자기 스레드로, 답글은 자기가 달린 스레드로(↳ 표식이 가는 곳과
+  // 같다). 그래서 한 단계 규칙은 그대로다 — 답글을 탭해도 답글의 스레드가 생기지
+  // 않고, 코어의 `canReplyToMessage` 가 거절하는 것을 화면이 제안하는 일도 없다.
+  // 문이 없는 행(묘비, 루트를 못 불러온 답글)은 탭해도 아무 데도 가지 않는다.
+  // ===========================================================================
+  const threadTarget = useMemo<Message | null>(() => {
+    if (!actions?.onOpenThread) return null;
+    if (isMarkedReply) return deleted ? null : replyParent ?? null;
+    // 롤업만 있고 답글을 새로 달 수 없는 루트(묘비)도 문은 문이다 — 그 행은
+    // 「답글 N개」를 이미 눌리는 것으로 그리고 있다.
+    return available.reply || rollup !== null ? message : null;
+  }, [actions, isMarkedReply, deleted, replyParent, available.reply, rollup, message]);
+
+  // ===========================================================================
+  // 그리고 그 탭은 키보드와 다툰다 (결함 1 × 결함 2)
+  //
+  // 결함 1은 "메시지 영역을 탭하면 키보드가 내려가야 한다"고 하고, 결함 2는 같은
+  // 탭에 스레드를 준다. 애매하게 두면 둘 다 안 된다: 닫으려고 누른 탭이 화면을
+  // 하나 열어 버리면, 그것은 어포던스가 없는 것보다 나쁘다 — 실수의 대가가
+  // 「아무 일도 안 일어남」에서 「길을 잃음」으로 커진다.
+  //
+  // **규칙: 키보드가 올라와 있으면 첫 탭은 닫기이고, 그 이상 아무것도 아니다.**
+  // 내려가 있으면 탭은 스레드를 연다. 모드를 고르는 것은 숨은 상태가 아니라 화면의
+  // 절반을 차지하고 있는 키보드 자체이므로, 사람은 자기가 어느 규칙 안에 있는지
+  // 보면서 누른다. iOS 전체가 쓰는 관습이기도 하다.
+  //
+  // 시트의 「답글 달기」에는 이 판정이 없다. 메뉴에서 고른 것은 탭이 아니라 선택이고,
+  // 고른 것을 "키보드를 닫으라는 뜻이었겠지"로 다시 해석하는 화면은 거짓말을 한다.
+  //
+  // `Keyboard.isVisible()` 은 `keyboardDidShow`/`DidHide` 로 유지되는 값이라
+  // (RN `Keyboard.js`: `!!this._currentlyShowing`), 올라오는 250ms 동안에는 아직
+  // false 다. 그 창에 들어온 탭은 스레드를 연다. 그것을 좁히려면 `willShow` 를
+  // 따로 듣고 상태를 하나 더 들고 있어야 하는데, 그 상태는 모든 행이 지게 된다 —
+  // 컴포저를 누른 손가락이 250ms 안에 메시지로 옮겨 가는 경우를 위해 타임라인
+  // 전체의 렌더 비용을 올리는 것은 잘못된 거래다. 재현되면 그때 값을 치른다.
+  // ===========================================================================
+  const onRowPress = useCallback(() => {
+    // 길게 눌러 시트를 연 손가락을 떼면 따라 울리는 탭. 그것은 이 제스처의 것이다.
+    if (longPress.consumeTap()) return;
+    if (Keyboard.isVisible()) {
+      Keyboard.dismiss();
+      return;
+    }
+    if (threadTarget) actions?.onOpenThread?.(threadTarget);
+  }, [longPress, threadTarget, actions]);
+
   const toggleReaction = useCallback(
     (emoji: string) => {
       if (!actions) return;
@@ -633,16 +689,21 @@ export function MessageRow({
     (event: {nativeEvent: {actionName: string}}) => {
       switch (event.nativeEvent.actionName) {
         case 'activate':
+          // VoiceOver 의 두 번 탭은 손가락의 탭과 같은 뜻이어야 한다. 문이 있으면
+          // 그리로 가고, 없으면 예전처럼 시트를 연다.
+          if (threadTarget) actions?.onOpenThread?.(threadTarget);
+          else if (actionable) openSheet();
+          return;
         case 'momoActions':
           if (actionable) openSheet();
           return;
         case 'momoThread':
-          if (rollup && actions?.onOpenThread) actions.onOpenThread(message);
+          if (threadTarget) actions?.onOpenThread?.(threadTarget);
           return;
         default:
       }
     },
-    [actionable, openSheet, rollup, actions, message],
+    [actionable, openSheet, threadTarget, actions],
   );
 
   // VoiceOver reaches the actions through the rotor rather than through a row
@@ -650,11 +711,9 @@ export function MessageRow({
   const accessibilityActions = useMemo(() => {
     const list: {name: string; label: string}[] = [];
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
-    if (rollup && actions?.onOpenThread) {
-      list.push({name: 'momoThread', label: '스레드 열기'});
-    }
+    if (threadTarget) list.push({name: 'momoThread', label: '스레드 열기'});
     return list.length > 0 ? list : undefined;
-  }, [actionable, rollup, actions]);
+  }, [actionable, threadTarget]);
 
   const authorLabel = memberNameParts(
     directory,
@@ -704,12 +763,18 @@ export function MessageRow({
       testID="message-row"
       {...longPress.handlers}>
       <Pressable
-        // No `onPress`: a tap on a message does nothing yet, and inventing a
-        // destination for it would be a second gesture competing with this one.
+        // The tap rule is above. The row stays pressable even when it has no
+        // door and no actions (a tombstone), because with the keyboard up every
+        // tap on the conversation means the same thing — put it away — and a row
+        // that opted out of that would be a dead patch in the middle of it.
+        onPress={actions ? onRowPress : undefined}
         onLongPress={longPress.onLongPress}
         delayLongPress={longPress.delayLongPress}
-        disabled={!actionable}
-        style={({pressed}) => [styles.rowInner, pressed && actionable && styles.rowPressed]}
+        disabled={actions === undefined}
+        style={({pressed}) => [
+          styles.rowInner,
+          pressed && actions !== undefined && styles.rowPressed,
+        ]}
         testID="message-press">
         {startsGroup ? (
           <Author

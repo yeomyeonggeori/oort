@@ -109,6 +109,45 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
     expect(seqs).toEqual([1, 2, 3]);
   });
 
+  // ===========================================================================
+  // goal RN-U1. 아래 둘은 실기기에서 잰 숫자가 성립하기 위한 **전제**다. 지우면
+  // 측정 결과가 설명하는 리스트가 더 이상 존재하지 않는다.
+  // ===========================================================================
+
+  it('화면보다 짧은 대화는 바닥에 붙는다 — 키보드가 들어 올려도 위로 잘리지 않게', () => {
+    // 결함 4의 원인 그 자체. 위로 정렬된 짧은 대화는 `ConversationLayout` 의
+    // 리프트(아이폰 17에서 302pt)에 통째로 헤더 위로 밀려 나가고, 그것이 "위에
+    // 숨겨져 있어서 채팅 닫아야 보이더라" 였다. 내용이 화면보다 길면 `flexGrow` 가
+    // 나눠 줄 여백이 없으므로 이 값은 아무것도 바꾸지 않는다 — 그래서 RN-P3 의
+    // 수치를 다시 얻지 않고도 두 화면에 함께 켤 수 있다.
+    renderTimeline();
+    expect(
+      screen.getByTestId('timeline-list').props.contentContainerStyle,
+    ).toEqual({flexGrow: 1, justifyContent: 'flex-end'});
+  });
+
+  it('끌면 키보드가 내려간다 — 그리고 탭은 행이 판정한다', () => {
+    // `interactive` 였다. 그 모드는 드래그가 **키보드에 닿아야** 내리는데, 리프트
+    // 이후로 리스트의 아래끝은 컴포저에서 멈추고 컴포저는 키보드 위에서 멈춘다 —
+    // 손가락이 그 모드가 말하는 곳에 영영 도착하지 못한다.
+    //
+    // `never` 가 아니라 `handled` 인 것도 고른 것이다. `never` 는 캡처 단계에서
+    // 스크롤뷰가 터치를 가져가므로(RN `ScrollView._handleStartShouldSetResponderCapture`),
+    // 키보드가 올라와 있는 동안 길게 누르기도 반응 칩도 죽는다. `handled` 는 행의
+    // 제스처를 살려 두고, 탭 규칙은 `MessageRow` 가 적는다.
+    renderTimeline();
+    const list = screen.getByTestId('timeline-list');
+    expect(list.props.keyboardDismissMode).toBe('on-drag');
+    expect(list.props.keyboardShouldPersistTaps).toBe('handled');
+    // 그리고 **끌 수 있어야** 그 모드가 존재한다. `on-drag` 는 UIScrollView 의
+    // `scrollViewWillBeginDragging` 에 걸리는데, 짧은 대화는 스크롤할 것이 없다 —
+    // 바운스가 꺼져 있으면 드래그 자체가 시작되지 않아 이 배치의 수정이 가장
+    // 필요한 화면에서만 조용히 죽는다. RN 은 세로 리스트에 이 값을 켜서 주고
+    // (`ScrollView.js`: `alwaysBounceVertical = !horizontal`), 이 줄은 누군가
+    // 그것을 끄면 알아채기 위한 것이다.
+    expect(list.props.alwaysBounceVertical).not.toBe(false);
+  });
+
   it('대화의 시작에 닿으면 더 요청하지 않는다', () => {
     renderTimeline({reachedStart: true, onStartReached: () => {}});
     expect(screen.getByTestId('timeline-list').props.onStartReached).toBeUndefined();

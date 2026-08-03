@@ -19,6 +19,7 @@ import {
   Timeline,
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
+import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
 import {keyboardNative} from '../src/lib/keyboardPane';
 import {useKeyboard} from '../src/lib/useKeyboard';
 
@@ -123,6 +124,41 @@ const INITIAL_COUNT = 200;
  * tail-follow at the bottom) could flatter the result.
  */
 const ANCHOR_SEQ = FIRST_SEQ + 45;
+
+// ---- goal RN-U1: the SHORT conversation ------------------------------------
+//
+// 성재: "스레드에서도 뭔가 채팅을 하면 위에 숨겨져 있어서 채팅 닫아야 보이더라."
+//
+// Everything above this line measures a channel carrying 200 rows, and that is
+// the wrong fixture for this claim: with 200 rows the content is always taller
+// than the viewport, which is exactly the case in which this defect cannot
+// happen. What reproduces it is a conversation SHORTER than the screen — the
+// list then draws its content at the top with nothing to scroll, and
+// `ConversationLayout`'s keyboard lift carries that content up under the header
+// where an `overflow: 'hidden'` clip removes it. A thread is where a person meets
+// it first only because a thread is nearly always short.
+//
+// One line each, and no more: the fixture has to stay well under one viewport
+// for the measurement to be about anything.
+const THREAD_ROOT_SEQ = FIRST_SEQ + INITIAL_COUNT + 100;
+
+function makeShortMessage(seq: number, rootId?: string): Message {
+  return {
+    id: `measure-thread-${seq}`,
+    channelId: CHANNEL,
+    seq,
+    hlcTs: seq,
+    hlcCount: 0,
+    authorMemberId: AUTHORS[seq % AUTHORS.length].id,
+    type: 'text',
+    body: `${seq}번째 줄. 스레드 답글 가시성 측정용 짧은 문장.`,
+    state: 'sent',
+    createdAtMs: BASE_MS + seq * 60_000,
+    ...(rootId === undefined ? {} : {rootId}),
+  };
+}
+
+const THREAD_ROOT = makeShortMessage(THREAD_ROOT_SEQ);
 
 const wait = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
 
@@ -409,6 +445,50 @@ interface Results {
    * and something moved it back.
    */
   selfSendTrace: string | null;
+
+  // ---- goal RN-U1 ----------------------------------------------------------
+  /**
+   * 결함 1. How far the list's scroll offset moved across a keyboard DISMISS.
+   *
+   * The requirement is that putting the keyboard away costs the reader nothing:
+   * the pane slides back down and the conversation is where it was. Since RN-P2
+   * the list's height never changes, so this ought to be structurally zero —
+   * which is worth measuring rather than asserting, because "ought to be zero"
+   * is what the padding model also said before it was measured.
+   */
+  dismissOffsetShiftPx: number | null;
+  /** The same event read from the other end: the anchor row's window position. */
+  dismissAnchorShiftPx: number | null;
+  /** Constant across the raise, or the slide has turned back into a resize. */
+  dismissViewportPx: string | null;
+  /**
+   * 결함 4. Where the just-sent reply's TOP edge sits relative to the top of the
+   * visible conversation, in points, with the keyboard up.
+   *
+   * Negative is the defect, and it is not a near miss: it means the row is above
+   * the clip that `ConversationLayout` draws under the header, so the row is not
+   * merely off-screen but cut out of the screen. Positive means it is inside the
+   * band a person can see. `nativeLiftPx()` is added because `measureInWindow`
+   * reads the shadow tree, which never learns about the pane's UIKit transform.
+   */
+  threadSentAbovePx: number | null;
+  /** The same row against the composer, so both edges of the band are stated. */
+  threadSentBelowDockPx: number | null;
+  /**
+   * The SPLIT (goal RN-U1, 리서치 배치 요청). The same short thread and the same
+   * send, with the keyboard DOWN. Visible here and hidden with the keyboard up
+   * means the scroll correction is fine and the lift is the cause; hidden in
+   * both means the correction is the cause after all.
+   */
+  threadDownAbovePx: number | null;
+  /**
+   * buzz's counterexample, answered with a number: the gap between a
+   * root-only thread's last pixel and the composer above which it sits.
+   */
+  threadRootGapPx: number | null;
+  /** Raw readings behind the two above, so the verdict can be re-derived. */
+  threadTrace: string | null;
+
   originSentByRn: string | null;
   note: string;
 }
@@ -436,6 +516,14 @@ const EMPTY: Results = {
   nearSendGapPx: null,
   nearSendVisible: null,
   nearSendFromPx: null,
+  dismissOffsetShiftPx: null,
+  dismissAnchorShiftPx: null,
+  dismissViewportPx: null,
+  threadSentAbovePx: null,
+  threadSentBelowDockPx: null,
+  threadDownAbovePx: null,
+  threadRootGapPx: null,
+  threadTrace: null,
   originSentByRn: null,
   note: '측정 중…',
 };
@@ -467,6 +555,33 @@ function Harness(): React.JSX.Element {
   // the gap between focus() and the event belongs to the OS, not to this layout.
   const keyboardEventAtRef = useRef<number | null>(null);
   const [selfSendToken, setSelfSendToken] = useState(0);
+
+  // ---- goal RN-U1: the thread stage ----------------------------------------
+  // A SECOND set of seams rather than a reused one. Both compositions cannot be
+  // mounted at once — each carries its own `KeyboardPane`, and two panes
+  // listening to one UIKit notification is a fixture that measures itself — so
+  // the stage swaps, and while it does the refs must not be shared: a ref that
+  // survives the swap answers about a view that has been unmounted.
+  const [stage, setStage] = useState<'channel' | 'thread'>('channel');
+  const [threadReplies, setThreadReplies] = useState<Message[]>([]);
+  const [threadAnchoredSeq, setThreadAnchoredSeq] = useState(THREAD_ROOT_SEQ);
+  const [threadSelfSendToken, setThreadSelfSendToken] = useState(0);
+  const threadAnchorRef = useRef<View | null>(null);
+  const threadTailRef = useRef<View | null>(null);
+  const threadMetricsRef = useRef<TimelineGeometry | null>(null);
+  const threadDockRef = useRef<View | null>(null);
+  const threadListRef = useRef<FlatList<never> | null>(null);
+  /**
+   * The stage itself — the top edge of the visible conversation.
+   *
+   * This is the line the defect is measured against, and it has to be measured
+   * rather than assumed: in the app it is the header's underside, here it is the
+   * report panel's, and the number that matters ("is the row above it") is the
+   * same question in both. Assuming a constant would make this harness's answer
+   * true only of this harness.
+   */
+  const stageRef = useRef<View | null>(null);
+
   const keyboard = useKeyboard();
   const ranRef = useRef(false);
   const [keyboardSource, setKeyboardSource] = useState<'os' | 'posted' | 'injected'>('os');
@@ -942,8 +1057,209 @@ function Harness(): React.JSX.Element {
       console.log(
         `MOMO_MEASURE_TRAVEL_V2 ${JSON.stringify({idle, loaded, blocked})}`,
       );
+
+      // ---- 5. putting the keyboard away costs the reader nothing (RN-U1 1) --
+      // 성재: "채팅창은 여는 건 성공했는데, 그냥 다시 닫을 때는 어떻게 해야 해?"
+      //
+      // The fix for that is a dismiss GESTURE (`keyboardDismissMode="on-drag"`
+      // and the tap rule in `MessageRow`), and neither can be driven here — a
+      // simulator cannot be dragged or tapped by a script. What CAN be measured
+      // is the thing the gesture must not cost, and it is the half a person
+      // actually notices: after the keyboard goes down, is the conversation
+      // still where they left it.
+      //
+      // It should be structurally free — since RN-P2 the pane slides rather than
+      // resizes, so no layout pass reaches the list and nothing asks it to
+      // scroll. "Should be structurally free" is also what the padding model
+      // said about itself before anyone measured it, which is why this is a
+      // reading and not a claim.
+      const anchorBeforeRaise = await measureAnchor();
+      if (!postKeyboardFrame(KEYBOARD_HEIGHT_PT, KEYBOARD_DURATION_MS)) {
+        injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
+      }
+      await wait(1500);
+      const raised = metricsRef.current ? {...metricsRef.current} : null;
+      Keyboard.dismiss();
+      if (!postKeyboardFrame(0, KEYBOARD_DURATION_MS)) injectKeyboardHide();
+      await wait(1500);
+      const lowered = metricsRef.current ? {...metricsRef.current} : null;
+      const anchorAfterLower = await measureAnchor();
+
+      const dismissOffsetShiftPx =
+        raised === null || lowered === null
+          ? null
+          : Math.round(Math.abs(lowered.offsetY - raised.offsetY) * 10) / 10;
+      const dismissAnchorShiftPx =
+        anchorBeforeRaise === null || anchorAfterLower === null
+          ? -1 // 잴 수 없었다. 0 이 아니다 — 그 둘을 같은 칸에 적으면 거짓말이다.
+          : Math.round(Math.abs(anchorAfterLower - anchorBeforeRaise) * 10) / 10;
+      const dismissViewportPx =
+        raised === null || lowered === null
+          ? null
+          : `뷰포트 ${Math.round(raised.viewportHeight)}→${Math.round(
+              lowered.viewportHeight,
+            )} · 오프셋 ${Math.round(raised.offsetY)}→${Math.round(
+              lowered.offsetY,
+            )}`;
+      setResults(current => ({
+        ...current,
+        dismissOffsetShiftPx,
+        dismissAnchorShiftPx,
+        dismissViewportPx,
+      }));
+      console.log(
+        `MOMO_MEASURE_DISMISS ${JSON.stringify({
+          dismissOffsetShiftPx,
+          dismissAnchorShiftPx,
+          anchorBeforeRaise,
+          anchorAfterLower,
+          raised,
+          lowered,
+        })}`,
+      );
+
+      // ---- 6. a short thread, with the keyboard up (RN-U1 결함 4) -----------
+      // 성재: "스레드에서도 뭔가 채팅을 하면 위에 숨겨져 있어서 채팅 닫아야
+      // 보이더라."
+      //
+      // Every case above ran against 200 rows, and 200 rows is the one fixture in
+      // which this cannot reproduce: taller than the viewport means the list
+      // scrolls, and a list that scrolls puts its tail at the bottom where the
+      // lift cannot reach it. So the stage swaps to what `ThreadPanel` actually
+      // renders — the same `ConversationLayout`, the same `Timeline` with a
+      // thread's props, the same `Composer` — holding a root and one reply.
+      //
+      // The reading is the row's top edge against the top of the visible
+      // conversation. Negative does not mean "a bit high": it means the row is
+      // above the clip, i.e. cut out of the screen rather than merely scrolled
+      // past, which is why closing the keyboard was the only thing that brought
+      // it back.
+      setStage('thread');
+      setThreadReplies([]);
+      setThreadAnchoredSeq(THREAD_ROOT_SEQ);
+      await wait(1500);
+
+      // 6a. The counterexample the research batch brought back: buzz tried
+      // bottom-packing a thread and reverted it, because the ROOT ended up jammed
+      // against the composer (`thread_detail_page.dart:253-256`). That is a claim
+      // about a gap, so it is answered with the gap rather than with an opinion —
+      // and a thread holding nothing but its root is the worst case for it.
+      const rootBottom = await measureNodeBottom(threadAnchorRef);
+      const rootDockTop = await measureNode(threadDockRef);
+      const threadRootGapPx =
+        rootBottom === null || rootDockTop === null
+          ? null
+          : Math.round((rootDockTop - rootBottom) * 10) / 10;
+
+      // 6b. **The split**, and it is the reading that decides whose hypothesis is
+      // right. Same short thread, same send, keyboard DOWN.
+      //
+      // If a reply sent with the keyboard down is ALSO hidden, the cause is the
+      // scroll correction — the ticket's guess, RN-P3's family. If it is visible
+      // with the keyboard down and hidden with it up, the correction is doing its
+      // job and the cause is the lift meeting a top-aligned short list. One
+      // measurement separates them, so neither has to be argued.
+      const downSeq = THREAD_ROOT_SEQ + 1;
+      setThreadAnchoredSeq(downSeq);
+      setThreadReplies([makeShortMessage(downSeq, THREAD_ROOT.id)]);
+      setThreadSelfSendToken(token => token + 1);
+      let downY: number | null = null;
+      let downStageY: number | null = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await wait(350);
+        downY = await measureNode(threadAnchorRef);
+        downStageY = await measureNode(stageRef);
+        if (downY !== null && downStageY !== null) break;
+      }
+      const threadDownAbovePx =
+        downY === null || downStageY === null
+          ? null
+          : Math.round((downY + nativeLiftPx() - downStageY) * 10) / 10;
+      setResults(current => ({...current, threadRootGapPx, threadDownAbovePx}));
+      console.log(
+        `MOMO_MEASURE_THREADDOWN ${JSON.stringify({
+          threadRootGapPx,
+          threadDownAbovePx,
+          downY,
+          downStageY,
+          liftWhileDown: nativeLiftPx(),
+        })}`,
+      );
+
+      if (!postKeyboardFrame(KEYBOARD_HEIGHT_PT, KEYBOARD_DURATION_MS)) {
+        injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
+      }
+      await wait(1500);
+
+      // The reply, exactly as `ThreadPanel.onSend` issues it: the echo row and
+      // the token in the same commit, before any round trip.
+      const replySeq = THREAD_ROOT_SEQ + 2;
+      setThreadAnchoredSeq(replySeq);
+      setThreadReplies(current => [
+        ...current,
+        makeShortMessage(replySeq, THREAD_ROOT.id),
+      ]);
+      setThreadSelfSendToken(token => token + 1);
+
+      let replyY: number | null = null;
+      let stageY: number | null = null;
+      let threadDockY: number | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        await wait(400);
+        replyY = await measureNode(threadAnchorRef);
+        stageY = await measureNode(stageRef);
+        threadDockY = await measureNode(threadDockRef);
+        if (replyY !== null && stageY !== null) break;
+      }
+      // `measureInWindow` reads the shadow tree, and since RN-P3 the lift is a
+      // UIKit transform the shadow tree never hears about. Without this term the
+      // harness would report the position the row WOULD have had if the keyboard
+      // were down — which is the one number that cannot answer this question.
+      const threadLift = nativeLiftPx();
+      const threadSentAbovePx =
+        replyY === null || stageY === null
+          ? null
+          : Math.round((replyY + threadLift - stageY) * 10) / 10;
+      const threadSentBelowDockPx =
+        replyY === null || threadDockY === null
+          ? null
+          : Math.round((threadDockY - replyY) * 10) / 10;
+      const threadGeometry = threadMetricsRef.current;
+      const threadTrace = `행 ${
+        replyY === null ? '미마운트' : Math.round(replyY)
+      } · 스테이지 윗변 ${
+        stageY === null ? '?' : Math.round(stageY)
+      } · 컴포저 윗변 ${
+        threadDockY === null ? '?' : Math.round(threadDockY)
+      } · 팬 리프트 ${Math.round(threadLift)} · 콘텐츠 ${
+        threadGeometry === null ? '?' : Math.round(threadGeometry.contentHeight)
+      }/뷰포트 ${
+        threadGeometry === null ? '?' : Math.round(threadGeometry.viewportHeight)
+      }`;
+      setResults(current => ({
+        ...current,
+        threadSentAbovePx,
+        threadSentBelowDockPx,
+        threadTrace,
+      }));
+      console.log(
+        `MOMO_MEASURE_THREADSEND ${JSON.stringify({
+          replyY,
+          stageY,
+          threadDockY,
+          threadLift,
+          threadSentAbovePx,
+          threadSentBelowDockPx,
+          contentHeight: threadGeometry?.contentHeight ?? null,
+          viewportHeight: threadGeometry?.viewportHeight ?? null,
+        })}`,
+      );
     })();
-  }, [measureAnchor, reachAnchor, measureNode, runTravel]);
+    // `measureNodeBottom` joins the list because goal RN-U1 reads it too; every
+    // one of these is a `useCallback` with an empty dependency array, so the
+    // effect's own `ranRef` guard remains the only thing that decides it runs
+    // once.
+  }, [measureAnchor, reachAnchor, measureNode, measureNodeBottom, runTravel]);
 
   // The instant iOS announced the keyboard. Subscribed here rather than read
   // from `useKeyboard` because a state update arrives a render later, and a
@@ -1065,7 +1381,66 @@ function Harness(): React.JSX.Element {
   return (
     <View style={styles.root} onLayout={onLayoutRoot}>
       <ScrollView style={styles.report} contentContainerStyle={styles.reportBody}>
-        <Text style={styles.title}>RN-P3 측정</Text>
+        <Text style={styles.title}>RN-U1 / RN-P3 측정</Text>
+        {/* ---- goal RN-U1 ---------------------------------------------- */}
+        <Row
+          label="키보드를 닫은 뒤 리스트 위치"
+          value={
+            results.dismissAnchorShiftPx === null
+              ? '측정 중…'
+              : `${px(results.dismissAnchorShiftPx)} · 오프셋 ${px(
+                  results.dismissOffsetShiftPx,
+                )}`
+          }
+          pass={passes(results.dismissAnchorShiftPx)}
+        />
+        <Row
+          label="짧은 스레드에서 보낸 내 답글이 보이는가"
+          value={
+            results.threadSentAbovePx === null
+              ? '측정 중…'
+              : results.threadSentAbovePx < 0
+              ? `잘림(대화 윗변보다 ${signedPx(
+                  -results.threadSentAbovePx,
+                )} 위)`
+              : `보인다 (윗변에서 ${signedPx(
+                  results.threadSentAbovePx,
+                )} 아래 · 컴포저까지 ${signedPx(results.threadSentBelowDockPx)})`
+          }
+          pass={
+            results.threadSentAbovePx === null
+              ? null
+              : results.threadSentAbovePx >= 0 &&
+                (results.threadSentBelowDockPx ?? -1) > 0
+          }
+        />
+        <Text style={styles.meta}>
+          {`키보드 닫힘: ${results.dismissViewportPx ?? '측정 중…'}`}
+        </Text>
+        <Text style={styles.meta}>
+          {`짧은 스레드: ${results.threadTrace ?? '측정 중…'}`}
+        </Text>
+        <Row
+          label="같은 전송을 키보드 내린 채로 (원인 가르기)"
+          value={
+            results.threadDownAbovePx === null
+              ? '측정 중…'
+              : results.threadDownAbovePx >= 0
+              ? `보인다 (윗변에서 ${signedPx(results.threadDownAbovePx)} 아래) — 원인은 리프트지 스크롤이 아니다`
+              : `잘림 ${signedPx(results.threadDownAbovePx)} — 원인이 스크롤 쪽이다`
+          }
+          pass={
+            results.threadDownAbovePx === null
+              ? null
+              : results.threadDownAbovePx >= 0
+          }
+        />
+        <Text style={styles.meta}>
+          {`루트만 있는 스레드에서 루트와 컴포저 사이 (buzz 반례): ${
+            results.threadRootGapPx === null ? '측정 중…' : `${results.threadRootGapPx}px`
+          }`}
+        </Text>
+
         <Row
           label="새 메시지 도착 시 앵커 이동"
           value={px(results.incomingShiftPx)}
@@ -1187,15 +1562,67 @@ function Harness(): React.JSX.Element {
         <Text style={styles.meta}>
           {`RN 이 보낸 Origin: ${results.originSentByRn ?? '측정 중…'}`}
         </Text>
+
         <Text style={styles.meta}>{`판정 기준: 앵커 이동 ≤ 2px`}</Text>
       </ScrollView>
 
-      <View style={styles.stage}>
+      <View ref={stageRef} collapsable={false} style={styles.stage}>
         {/* The SHIPPING composition, not a lookalike. An earlier revision of
             this harness put `Timeline` and `Composer` side by side in a plain
             View and measured the composer 335px behind the keyboard — a true
             statement about a tree the app never renders. That is why the
-            keyboard handling is a named component now. */}
+            keyboard handling is a named component now.
+
+            goal RN-U1 adds a second one beside it, and for the same reason: the
+            channel composition cannot reproduce a defect that needs a
+            conversation shorter than the screen. What is below is `ThreadPanel`'s
+            own tree, prop for prop — `markReplies={false}`, `reachedStart`,
+            `status="ready"` (a thread always has its root, so it is never
+            empty), and the composer's own 답글 labels. Only the data is a
+            fixture, which is what a measurement wants; faking the 18-member
+            `useTimeline` instead would have measured the fake. */}
+        {stage === 'thread' ? (
+          <ConversationLayout
+            list={
+              <Timeline
+                messages={[THREAD_ROOT, ...threadReplies]}
+                directory={DIRECTORY}
+                status="ready"
+                myMemberId={SELF_ID}
+                nowMs={BASE_MS}
+                reachedStart
+                markReplies={false}
+                selfSendToken={threadSelfSendToken}
+                anchorSeq={threadAnchoredSeq}
+                anchorRef={threadAnchorRef}
+                tailRef={threadTailRef}
+                metricsRef={threadMetricsRef}
+                listRef={threadListRef as never}
+              />
+            }
+            composer={
+              <View ref={threadDockRef} collapsable={false}>
+                {/* `ThreadPanel.tsx` puts this line in the composer slot while a
+                    thread has no replies, and it is load-bearing for the one
+                    number buzz's counterexample is about: it is what stands
+                    between a bottom-packed root and the input. A harness that
+                    dropped it would report that gap smaller than the app's. */}
+                {threadReplies.length === 0 ? (
+                  <Text style={styles.threadInvite}>
+                    첫 답글을 남겨 이 대화를 이어가세요.
+                  </Text>
+                ) : null}
+                <Composer
+                  channelLabel="스레드"
+                  directory={DIRECTORY}
+                  placeholder="답글 쓰기"
+                  sendLabel="답글 보내기"
+                  onSend={() => {}}
+                />
+              </View>
+            }
+          />
+        ) : (
         <ConversationLayout
           list={
             <Timeline
@@ -1223,6 +1650,7 @@ function Harness(): React.JSX.Element {
             </View>
           }
         />
+        )}
       </View>
     </View>
   );
@@ -1350,6 +1778,14 @@ const styles = StyleSheet.create({
   pass: {color: '#93d3a8'},
   fail: {color: '#e0777d'},
   meta: {color: '#6b7280', fontSize: 10},
+  // `ThreadPanel` 의 `styles.invite` 와 같은 값. 이 줄의 높이가 buzz 반례의
+  // 숫자에 그대로 들어가므로, 비슷한 것이 아니라 같은 것이어야 한다.
+  threadInvite: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingTop: space.sm,
+    fontSize: font.meta,
+    color: color.textFaint,
+  },
   travelRow: {gap: 1},
   travelValues: {flexDirection: 'row', alignItems: 'center', gap: 8},
   stage: {flex: 1},
