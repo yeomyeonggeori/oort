@@ -961,6 +961,20 @@ function json(route, body) {
 
 async function installMocks(context) {
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  // `/v1/auth/refresh` MUST be stubbed even though nothing in these frames asks
+  // for a rotation on purpose. Anything this table does not name escapes to
+  // `vite preview`, which proxies /v1 to a real backend; a 401 there makes
+  // `restoreSession()` clear the session and drop the run back on the login
+  // card, 200-lines away from any assertion that could explain it.
+  //
+  // The body shape is load-bearing: `refreshResponseFromWire` throws unless BOTH
+  // fields are strings, and a throw reads as "unreachable" -> still signed out.
+  await context.route("**/v1/auth/refresh", (route) =>
+    json(route, {
+      accessToken: SESSION.accessToken,
+      refreshToken: SESSION.refreshToken,
+    })
+  );
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
       token: "capture-only-not-a-credential",
@@ -1199,10 +1213,28 @@ async function waitForServer(url, timeoutMs = 30_000) {
 }
 
 async function signIn(page) {
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  // Pages in this run share one browser context, so they share localStorage:
+  // once ANY page signs in, every page opened afterwards resumes that session
+  // and never shows the login card.
+  //
+  // This used to be invisible because a bug hid it. The harness stubbed
+  // `/v1/auth/login` but not `/v1/auth/refresh`, and a fresh sign-in triggered a
+  // rotation (see clients/web/src/app/session.tsx) that escaped to a real
+  // backend, came back 401, and CLEARED the session — handing the next page a
+  // login card again. Fixing the rotation made the harness's own assumption
+  // false. Wait for whichever of the two states this page actually lands in.
+  const card = page.getByTestId("login-email");
+  const shell = page.getByTestId("channel-list");
+  await Promise.race([
+    card.waitFor({ state: "visible" }),
+    shell.waitFor({ state: "visible" }),
+  ]);
+  if (await shell.isVisible()) return; // already signed in by an earlier page
+
+  await card.fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  await shell.waitFor({ state: "visible" });
 }
 
 /**
