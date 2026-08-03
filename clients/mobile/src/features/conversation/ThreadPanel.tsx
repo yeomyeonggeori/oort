@@ -4,6 +4,7 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {ErrorState, Screen, ScreenHeader} from '../../design/atoms';
 import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
+import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {Composer} from './Composer';
 import {ConversationLayout} from './ConversationLayout';
 import {Timeline} from './Timeline';
@@ -134,7 +135,7 @@ export function ThreadPanel({
 
   if (status === 'error') {
     return (
-      <View style={styles.overlay}>
+      <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
         <Screen>
           <ScreenHeader
             title="스레드"
@@ -149,18 +150,29 @@ export function ThreadPanel({
             testID="thread-error"
           />
         </Screen>
-      </View>
+      </EdgeSwipeBack>
     );
   }
 
   return (
-    <View style={styles.overlay}>
+    // 이 패널은 대화 **안에** 그려지므로 대화의 엣지 스와이프 래퍼와 부모-자식으로
+    // 겹친다. 안쪽이 이긴다는 판정은 `EdgeSwipeBack` 이 컨텍스트로 스스로 한다 —
+    // 스레드를 열어 둔 채 엣지를 밀면 닫히는 것은 스레드 하나이고, 대화는 그대로
+    // 남는다. 뒤로가기가 한 번에 한 겹씩만 벗겨진다는 것은 헤더의 「‹」 버튼이
+    // 이미 지키던 규칙이고, 제스처가 그것을 다르게 해석하면 안 된다.
+    <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
       <Screen>
+        {/* ## 부제에 「답글 N개」를 적지 않는다 (goal RN-U2)
+            성재: "답글에서 개수 업데이트는 굳이 왜 해? 목록에 나오면 몇 개의
+            reply가 있는지는 자연스러운데, 답글에서 '답글 1개' 이런 식으로 보이는
+            건 자연스럽지 않은 거 같아."
+
+            루트 행의 롤업과 **같은 결함이고, 더 눈에 띄는 쪽이다** — 답글을 하나
+            달 때마다 화면 맨 위의 숫자가 오른다. 이미 이 스레드 안에 있는 사람에게
+            그 숫자는 정보가 0이다. 세는 일이 필요한 곳은 "여기 스레드가 있다"를
+            알려야 하는 채널 목록이지 스레드 안이 아니다. */}
         <ScreenHeader
           title="스레드"
-          subtitle={
-            replies.length > 0 ? `답글 ${replies.length}개` : undefined
-          }
           onBack={onClose}
           backLabel="스레드 닫기"
           titleTestID="thread-title"
@@ -186,6 +198,12 @@ export function ThreadPanel({
               // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
               // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
               markReplies={false}
+              // 그리고 루트 행의 「답글 N개 · 마지막 …」도 그리지 않는다. 롤업은
+              // **채널에서 "여기 스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를
+              // 열어 둔 사람에게는 자기가 서 있는 곳의 이름을 다시 읽어 주는 것에
+              // 불과하다. 핸들러가 없으니 글로 그려지긴 했지만, 문제는 눌리느냐가
+              // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
+              showRollup={false}
               onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
             />
           }
@@ -207,7 +225,7 @@ export function ThreadPanel({
           }
         />
       </Screen>
-    </View>
+    </EdgeSwipeBack>
   );
 }
 

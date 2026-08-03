@@ -129,6 +129,7 @@ export function MessageRow({
   onOpenThread,
   onOpenWorkSession,
   onResend,
+  showRollup = true,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -144,6 +145,24 @@ export function MessageRow({
   onOpenWorkSession?: (sessionId: string) => void;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
+  /**
+   * 이 행이 「답글 N개 · 마지막 …」을 그리는가 (goal RN-U2).
+   *
+   * 채널 타임라인에서는 참이다. 그 줄은 목록을 훑는 사람에게 **"여기 스레드가
+   * 있다"** 를 알리는 유일한 장치이고, 없으면 답글이 달렸다는 사실이 목록 어디에도
+   * 남지 않는다.
+   *
+   * 스레드 패널에서는 거짓이다 — 성재(iOS 실기기, 같은 제품 판단이므로 웹도 함께
+   * 고친다): "답글에서 개수 업데이트는 굳이 왜 해? 목록에 나오면 몇 개의 reply가
+   * 있는지는 자연스러운데, 답글에서 '답글 1개' 이런 식으로 보이는 건 자연스럽지 않은
+   * 거 같아." 이미 그 스레드를 열어 둔 사람에게 그 줄이 나르는 정보는 0이다.
+   *
+   * **`onOpenThread` 와는 다른 축이다.** goal P3 1-1 이 그 핸들러가 없을 때 이 줄을
+   * 버튼에서 글로 내린 것은 옳았지만(죽은 컨트롤을 없앴다), 그리는 조건 자체는
+   * `rollup` 하나였으므로 글이 되어서도 계속 그려졌다. 문제는 눌리느냐가 아니라
+   * **그 줄이 여기서 할 말이 없다**는 것이었고, 여기서 끊는 것이 그 조건이다.
+   */
+  showRollup?: boolean;
 }) {
   const [resending, setResending] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -166,7 +185,7 @@ export function MessageRow({
   const owner = isAgent ? memberFor(directory, author?.ownerHumanId) : null;
   const deleted = message.state === "deleted";
   const failed = message.state === "failed";
-  const rollup = threadRollup(message);
+  const rollup = showRollup ? threadRollup(message) : null;
   const showsEditedMark = message.state === "edited" && !editing;
   // 하나로 접힌 반복 (goal P3 1-2). 한 번뿐이면 셀 것이 없으므로 아무 말도 하지
   // 않는다 — "1개"는 개수가 아니라 잡음이다.
@@ -427,6 +446,12 @@ export function MessageRow({
               // `onOpenThread`를 넘기지 않는데 — 이미 그 스레드를 열어 둔 자리라
               // "여는" 동작 자체가 없다 — R1은 그래도 <button>을 그렸다. 포커스가
               // 잡히고 hover에 반응하면서 눌러도 아무 일이 없는 버튼이었다.
+              //
+              // **그리고 스레드 패널은 이제 이 줄을 아예 그리지 않는다**
+              // (goal RN-U2, `showRollup`). 위 `rollup` 이 그 자리에서 `null` 이므로
+              // 여기까지 오지 않는다. 아래 <span> 갈래는 여전히 남는데, 롤업은
+              // 있으나 열 곳이 없는 다른 표면(읽기 전용 마운트)이 그것이다 — 거기서
+              // 「답글 3개 · 마지막 5분 전」은 읽을 값이 있는 문장이다.
               //
               // 행이 이미 쓰고 있는 규칙을 그대로 따른다: 위의 `available.reply`는
               // 핸들러가 없으면 답글 액션을 아예 내놓지 않는다("갈 곳 없는 답글은

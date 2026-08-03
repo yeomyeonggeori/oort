@@ -336,6 +336,7 @@ export function Timeline({
   emptyOverride,
   selfSendToken,
   markReplies = true,
+  showRollup = true,
   anchorSeq,
   anchorRef,
   tailRef,
@@ -383,6 +384,22 @@ export function Timeline({
    * where it is already true of every row on screen.
    */
   markReplies?: boolean;
+  /**
+   * 루트 행이 「답글 N개 · 마지막 …」을 그리는가 (goal RN-U2).
+   *
+   * 채널에서는 참이다. 그 줄은 **"여기 스레드가 있다"를 알리는 유일한 장치**이고,
+   * 그것이 없으면 답글이 달렸다는 사실이 목록 어디에도 남지 않는다.
+   *
+   * 스레드 패널에서는 거짓이다 — 성재: "답글에서 개수 업데이트는 굳이 왜 해? 목록에
+   * 나오면 몇 개의 reply가 있는지는 자연스러운데, 답글에서 '답글 1개' 이런 식으로
+   * 보이는 건 자연스럽지 않은 거 같아." 이미 그 스레드 안에 있는 사람에게 그 줄이
+   * 나르는 정보는 0이고, 답글을 달 때마다 숫자가 오르는 것은 산만하다.
+   *
+   * **핸들러 유무와는 다른 축이다.** 패널은 `onOpenThread` 를 주지 않으므로 롤업이
+   * 이미 버튼이 아니라 글로 그려지고 있었지만, 글이어도 그려지기는 했다 — 조건이
+   * `rollup` 하나였기 때문이다. 여기서 끊는 것은 그 조건이다.
+   */
+  showRollup?: boolean;
   /**
    * Measurement seam (`measure/ScrollMeasure.tsx`), inert in the app.
    *
@@ -702,7 +719,9 @@ export function Timeline({
           nowMs={nowMs}
           onResend={onResend}
           actions={actions}
-          rollup={rollupFor(item.message, threads)}
+          // `null` 은 "이 표면에는 롤업이 없다"이고 `undefined` 였다면 행이 서버의
+          // 롤업으로 되돌아간다 — 끄려는 자리에서 정확히 반대가 된다.
+          rollup={showRollup ? rollupFor(item.message, threads) : null}
           // `undefined` turns the marker off for the whole surface. A thread
           // panel passes `markReplies={false}`: every row in there is a reply,
           // and a 답글 line on each would be noise wearing the shape of
@@ -750,6 +769,7 @@ export function Timeline({
       anchorRef,
       threads,
       markReplies,
+      showRollup,
     ],
   );
 

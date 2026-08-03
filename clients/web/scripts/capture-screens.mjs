@@ -961,14 +961,26 @@ function json(route, body) {
 
 async function installMocks(context) {
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
-  // `/v1/auth/refresh` MUST be stubbed even though nothing in these frames asks
-  // for a rotation on purpose. Anything this table does not name escapes to
-  // `vite preview`, which proxies /v1 to a real backend; a 401 there makes
-  // `restoreSession()` clear the session and drop the run back on the login
-  // card, 200-lines away from any assertion that could explain it.
+  // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
   //
-  // The body shape is load-bearing: `refreshResponseFromWire` throws unless BOTH
-  // fields are strings, and a throw reads as "unreachable" -> still signed out.
+  // 이 스텁이 없어서 **하네스 전체가 로그인 화면에서 멈춰 있었다.** 증상은 `signIn`
+  // 이 `channel-list` 를 30초 기다리다 죽는 것이고, 원인은 화면이 아니라 여기다:
+  //
+  //   DESK-1(`2ce728e2`)이 `hasPersistedSession` 을 일회성 읽기에서
+  //   `useSyncExternalStore` 로 바꾸면서, 로그인이 세션을 저장하는 순간 `resumable`
+  //   이 true 로 뒤집혀 **갓 발급된 토큰을 한 번 회전**시킨다. 그 POST 는 라우트
+  //   표에 없으므로 Playwright 를 빠져나가 vite 프록시로 나가고, 무엇이 응답하든
+  //   2xx 가 아니면 코어(`api.ts` `refreshSessionOutcome`)가 `markAuthExpired()` 로
+  //   세션을 지운다 — 앱은 로그인하고, 셸을 잠깐 그린 뒤, 스스로 로그아웃한다.
+  //
+  // 이 스텁은 **어느 리비전에도 없었다**(`git log -S "auth/refresh"` 가 비어 있다).
+  // DESK-1 전에는 회전 자체가 일어나지 않아 가려져 있었을 뿐이다. 다른 게이트들
+  // (`gate-csp`·`gate-wire`·`gate-agent-hub`·`gate-workstream`)은 `**/v1/**` 포괄
+  // 스텁을 갖고 있어 이 구멍이 없다 — 이 파일만 예외였다.
+  //
+  // 응답 **모양**이 load-bearing 이다: `refreshResponseFromWire` 는 두 필드가 모두
+  // 문자열이 아니면 throw 하고, 그 throw 는 `"unreachable"` 로 번역되어 결국 같은
+  // 로그인 화면으로 되돌아간다. 200 이기만 하면 되는 것이 아니다.
   await context.route("**/v1/auth/refresh", (route) =>
     json(route, {
       accessToken: SESSION.accessToken,
@@ -1213,28 +1225,17 @@ async function waitForServer(url, timeoutMs = 30_000) {
 }
 
 async function signIn(page) {
-  // Pages in this run share one browser context, so they share localStorage:
-  // once ANY page signs in, every page opened afterwards resumes that session
-  // and never shows the login card.
-  //
-  // This used to be invisible because a bug hid it. The harness stubbed
-  // `/v1/auth/login` but not `/v1/auth/refresh`, and a fresh sign-in triggered a
-  // rotation (see clients/web/src/app/session.tsx) that escaped to a real
-  // backend, came back 401, and CLEARED the session — handing the next page a
-  // login card again. Fixing the rotation made the harness's own assumption
-  // false. Wait for whichever of the two states this page actually lands in.
-  const card = page.getByTestId("login-email");
-  const shell = page.getByTestId("channel-list");
-  await Promise.race([
-    card.waitFor({ state: "visible" }),
-    shell.waitFor({ state: "visible" }),
-  ]);
-  if (await shell.isVisible()) return; // already signed in by an earlier page
-
-  await card.fill("seongjae@dawn.example");
+  // 위의 refresh 스텁이 세션을 **살려 두게** 되면서 되살아난 전제 하나: 이 컨텍스트의
+  // 페이지 14장이 localStorage 를 공유하므로, 두 번째 페이지부터는 이미 로그인된
+  // 셸로 자동 복귀해 로그인 카드가 아예 없다. 지금까지는 회전이 실패해 매번
+  // 로그아웃되는 덕에 우연히 로그인 화면이 나왔던 것이다 — 그 우연에 기대던 자리를
+  // 명시적인 초기화로 바꾼다.
+  await page.evaluate("try { localStorage.clear(); } catch (e) {}");
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
-  await shell.waitFor({ state: "visible" });
+  await page.getByTestId("channel-list").waitFor({ state: "visible" });
 }
 
 /**
@@ -1679,18 +1680,29 @@ async function assertPausedNoticeFolded(page, where) {
 }
 
 /**
- * 스레드 패널의 「답글 N개」가 죽은 버튼이 아닌가 (goal P3 1-1).
+ * 「답글 N개」가 **있어야 할 곳에만** 있는가 (goal P3 1-1 → goal RN-U2).
  *
- * 결함은 눈에 보이지 않는 종류였다: 패널이 `onOpenThread`를 넘기지 않는데 행은
- * `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에 반응하면서 눌러도
- * 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 스크린샷에서 버튼과 글은
- * 같은 그림이므로 여기서 태그를 직접 본다.
+ * 이 게이트는 두 번 움직였고, 두 번 다 같은 줄에 대한 것이었다.
  *
- * 같은 자로 반대쪽도 잰다: 채널 타임라인에서는 그 자리가 **여전히 버튼**이어야
- * 한다. 죽은 컨트롤을 없앤다면서 살아 있는 진입점까지 글로 만들어 버리면 스레드로
- * 들어가는 길이 사라진다.
+ * P3 1-1 은 그 줄이 **죽은 버튼**인 것을 잡았다: 패널이 `onOpenThread`를 넘기지
+ * 않는데 행은 `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에
+ * 반응하면서 눌러도 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 그 수정은
+ * 버튼을 글로 내렸다.
+ *
+ * RN-U2 는 그 글마저 여기서는 할 말이 없다고 판정한다 — 성재(iOS 실기기): "답글에서
+ * 개수 업데이트는 굳이 왜 해? 목록에 나오면 몇 개의 reply가 있는지는 자연스러운데,
+ * 답글에서 '답글 1개' 이런 식으로 보이는 건 자연스럽지 않은 거 같아." 롤업은 목록의
+ * 장치이고, 이미 그 스레드 안에 있는 사람에게는 정보가 0이다.
+ *
+ * 그래서 패널 쪽 판정이 **뒤집힌다**: 있으면 안 된다. 태그를 보던 자리는 텍스트를
+ * 보는 자리가 되는데, 그것이 더 강하다 — <span>을 지웠는데 다른 조각이 같은 숫자를
+ * 다시 그리는 회귀까지 잡는다.
+ *
+ * 반대쪽은 그대로다. 채널 타임라인에서는 그 자리가 **여전히 살아 있는 버튼**이어야
+ * 한다. 스레드에서 지운다면서 목록의 진입점까지 지우면 스레드로 들어가는 길이
+ * 사라지고, 그것이 이 배치가 만들 수 있는 가장 나쁜 회귀다.
  */
-async function assertThreadRollupNotDead(page, where) {
+async function assertThreadRollupPlacement(page, where) {
   const seen = await page.evaluate(`(() => {
     const panel = document.querySelector('[data-testid="thread-panel"]');
     const inPanel = panel
@@ -1704,31 +1716,38 @@ async function assertThreadRollupNotDead(page, where) {
       hasPanel: Boolean(panel),
       inPanel: inPanel.map(shape),
       outside: outside.map(shape),
+      // 패널 어디에도 개수 문장이 남아 있지 않은가. 앵커를 지우고 다른 자리에
+      // 같은 숫자를 그리는 회귀를 잡는 것은 이쪽이다.
+      panelCount: panel
+        ? (panel.textContent || "").match(/답글\\s*\\d+\\s*개/)
+        : null,
     };
   })()`);
 
   if (!seen.hasPanel) throw new Error(`[${where}] 스레드 패널이 열리지 않았다`);
-  if (seen.inPanel.length === 0) {
-    throw new Error(`[${where}] 패널 루트에 「답글 N개」가 없다`);
+  if (seen.inPanel.length > 0) {
+    throw new Error(
+      `[${where}] 스레드 패널에 아직 「${seen.inPanel[0].text}」가 있다 — 롤업은 목록의 장치이고 스레드 안에서는 정보가 0이다`
+    );
   }
-  for (const anchor of seen.inPanel) {
-    if (anchor.tag === "BUTTON") {
-      throw new Error(
-        `[${where}] 스레드 패널의 「${anchor.text}」가 아직 <button>이다 — 눌러도 아무 일이 없는 컨트롤이다`
-      );
-    }
-    if (!anchor.text.startsWith("답글 ")) {
-      throw new Error(`[${where}] 답글 수를 읽을 수 없다: ${anchor.text}`);
-    }
+  if (seen.panelCount) {
+    throw new Error(
+      `[${where}] 스레드 패널이 여전히 답글 수를 말한다: 「${seen.panelCount[0]}」`
+    );
+  }
+  if (seen.outside.length === 0) {
+    throw new Error(
+      `[${where}] 채널 타임라인에 「답글 N개」가 하나도 없다 — 이 게이트가 아무것도 재지 못했다`
+    );
   }
   const live = seen.outside.filter((a) => a.tag === "BUTTON");
-  if (seen.outside.length > 0 && live.length === 0) {
+  if (live.length === 0) {
     throw new Error(
-      `[${where}] 채널 타임라인의 「답글 N개」까지 글이 됐다 — 스레드로 들어가는 길이 없다`
+      `[${where}] 채널 타임라인의 「답글 N개」까지 사라졌다 — 스레드로 들어가는 길이 없다`
     );
   }
   console.log(
-    `  thread rollup ${where}: 패널 ${seen.inPanel.map((a) => a.tag).join(",")} · 타임라인 ${live.length}개 버튼`
+    `  thread rollup ${where}: 패널 0개 · 타임라인 ${live.length}개 버튼`
   );
 }
 
@@ -2865,7 +2884,7 @@ async function captureScheme(browser, scheme) {
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
   // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
-  await assertThreadRollupNotDead(login, `thread panel ${scheme}`);
+  await assertThreadRollupPlacement(login, `thread panel ${scheme}`);
   const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
