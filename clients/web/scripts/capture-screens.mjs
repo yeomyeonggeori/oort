@@ -961,6 +961,32 @@ function json(route, body) {
 
 async function installMocks(context) {
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
+  //
+  // 이 스텁이 없어서 **하네스 전체가 로그인 화면에서 멈춰 있었다.** 증상은 `signIn`
+  // 이 `channel-list` 를 30초 기다리다 죽는 것이고, 원인은 화면이 아니라 여기다:
+  //
+  //   DESK-1(`2ce728e2`)이 `hasPersistedSession` 을 일회성 읽기에서
+  //   `useSyncExternalStore` 로 바꾸면서, 로그인이 세션을 저장하는 순간 `resumable`
+  //   이 true 로 뒤집혀 **갓 발급된 토큰을 한 번 회전**시킨다. 그 POST 는 라우트
+  //   표에 없으므로 Playwright 를 빠져나가 vite 프록시로 나가고, 무엇이 응답하든
+  //   2xx 가 아니면 코어(`api.ts` `refreshSessionOutcome`)가 `markAuthExpired()` 로
+  //   세션을 지운다 — 앱은 로그인하고, 셸을 잠깐 그린 뒤, 스스로 로그아웃한다.
+  //
+  // 이 스텁은 **어느 리비전에도 없었다**(`git log -S "auth/refresh"` 가 비어 있다).
+  // DESK-1 전에는 회전 자체가 일어나지 않아 가려져 있었을 뿐이다. 다른 게이트들
+  // (`gate-csp`·`gate-wire`·`gate-agent-hub`·`gate-workstream`)은 `**/v1/**` 포괄
+  // 스텁을 갖고 있어 이 구멍이 없다 — 이 파일만 예외였다.
+  //
+  // 응답 **모양**이 load-bearing 이다: `refreshResponseFromWire` 는 두 필드가 모두
+  // 문자열이 아니면 throw 하고, 그 throw 는 `"unreachable"` 로 번역되어 결국 같은
+  // 로그인 화면으로 되돌아간다. 200 이기만 하면 되는 것이 아니다.
+  await context.route("**/v1/auth/refresh", (route) =>
+    json(route, {
+      accessToken: SESSION.accessToken,
+      refreshToken: SESSION.refreshToken,
+    })
+  );
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
       token: "capture-only-not-a-credential",
@@ -1199,6 +1225,13 @@ async function waitForServer(url, timeoutMs = 30_000) {
 }
 
 async function signIn(page) {
+  // 위의 refresh 스텁이 세션을 **살려 두게** 되면서 되살아난 전제 하나: 이 컨텍스트의
+  // 페이지 14장이 localStorage 를 공유하므로, 두 번째 페이지부터는 이미 로그인된
+  // 셸로 자동 복귀해 로그인 카드가 아예 없다. 지금까지는 회전이 실패해 매번
+  // 로그아웃되는 덕에 우연히 로그인 화면이 나왔던 것이다 — 그 우연에 기대던 자리를
+  // 명시적인 초기화로 바꾼다.
+  await page.evaluate("try { localStorage.clear(); } catch (e) {}");
+  await page.reload({ waitUntil: "networkidle" });
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
