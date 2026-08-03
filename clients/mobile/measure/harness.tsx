@@ -15,7 +15,10 @@ import {
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
-import {Timeline} from '../src/features/conversation/Timeline';
+import {
+  Timeline,
+  type TimelineGeometry,
+} from '../src/features/conversation/Timeline';
 import {useKeyboard} from '../src/lib/useKeyboard';
 
 // =============================================================================
@@ -276,9 +279,30 @@ interface Results {
   travelBlocked: Travel | null;
   /** Was the sender's own message on screen after sending from mid-history? */
   selfSendVisible: boolean | null;
-  /** The two raw readings behind it, so a failure names its own kind. */
+  /** The raw readings behind it, so a failure names its own kind. */
   sentRowY: number | null;
   dockY: number | null;
+  /**
+   * The list footer's last pixel, in window coordinates — i.e. where the content
+   * ENDS. Unlike `sentRowY` this is never null (`ListFooterComponent` is outside
+   * the render mask), which is the whole reason it was added: see `tailGapPx`.
+   */
+  tailBottomY: number | null;
+  /**
+   * `tailBottomY - dockY`. Zero or less means the end of the conversation is at
+   * or above the composer, so the message just sent is on screen; positive is
+   * exactly how many points below the fold it was left.
+   *
+   * This is the instrument the last batch did not have. It reported 「미측정」
+   * because the only seam was a wrapper on the sent ROW, and a row the
+   * virtualiser never mounted answers `null` — the same reading a broken seam
+   * gives. One number that always exists separates "could not measure" from
+   * "measured, and it failed", which is the distinction goal RN-P3 was told to
+   * stop losing.
+   */
+  tailGapPx: number | null;
+  /** The list's own arithmetic for the same question, from its scroll metrics. */
+  selfSendDistancePx: number | null;
   originSentByRn: string | null;
   note: string;
 }
@@ -298,6 +322,9 @@ const EMPTY: Results = {
   selfSendVisible: null,
   sentRowY: null,
   dockY: null,
+  tailBottomY: null,
+  tailGapPx: null,
+  selfSendDistancePx: null,
   originSentByRn: null,
   note: '측정 중…',
 };
@@ -316,6 +343,8 @@ function Harness(): React.JSX.Element {
   );
   const [results, setResults] = useState<Results>(EMPTY);
   const anchorRef = useRef<View | null>(null);
+  const tailRef = useRef<View | null>(null);
+  const metricsRef = useRef<TimelineGeometry | null>(null);
   const dockRef = useRef<View | null>(null);
   const listRef = useRef<FlatList<never> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -356,6 +385,20 @@ function Harness(): React.JSX.Element {
   const measureAnchor = useCallback(
     (): Promise<number | null> => measureNode(anchorRef),
     [measureNode],
+  );
+
+  /** Same reading, plus the height — the tail's question is about its LAST pixel. */
+  const measureNodeBottom = useCallback(
+    (ref: React.MutableRefObject<View | null>): Promise<number | null> =>
+      new Promise(resolve => {
+        const node = ref.current;
+        if (!node) {
+          resolve(null);
+          return;
+        }
+        node.measureInWindow((_x, y, _w, height) => resolve(y + height));
+      }),
+    [],
   );
 
   /**
@@ -523,38 +566,77 @@ function Harness(): React.JSX.Element {
       setMessages(current => [...current, makeMessage(lastSeq)]);
       setSelfSendToken(token => token + 1);
       // Visible means: the row exists AND its top edge is above the composer.
-      // `measureInWindow` answers null for a row the virtualiser never mounted,
-      // which is one of the two ways this can fail — and the two must not be
-      // reported as one number, so both readings are kept. A null y is "the row
-      // was never mounted"; a y below the dock is "mounted and off screen".
+      //
+      // **Two seams, because one of them can only fail silently.** The row
+      // wrapper answers `null` for a row the virtualiser never mounted — which
+      // is precisely the failure being hunted, so the instrument goes blind at
+      // the exact moment it matters and the last batch had to write 「미측정」.
+      // The footer wrapper (`tailRef`) is outside the render mask and therefore
+      // ALWAYS mounted, so `tailBottomY` exists at every scroll position and
+      // says, in points, where the conversation ends.
+      //
+      // Together they close the gap the ticket named:
+      //   row measurable            → the direct answer, and the verdict
+      //   row null, tail below dock → the end of the list is itself below the
+      //                               fold, so the row cannot be on screen. A
+      //                               real FAIL, provable without the row.
+      //   row null, tail above dock → the list IS at the end and the wrapper
+      //                               still did not attach. Only THIS is 미측정.
       let sentY: number | null = null;
       let dockY: number | null = null;
-      for (let attempt = 0; attempt < 6; attempt++) {
+      let tailBottom: number | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
         await wait(400);
         sentY = await measureAnchor();
         dockY = await measureNode(dockRef);
+        tailBottom = await measureNodeBottom(tailRef);
+        // The correction is bounded (`SELF_SEND_PIN_MS`), so keep looking until
+        // the row is there rather than reading one frame into a travel that is
+        // still running and calling the mid-point the answer.
         if (sentY !== null && dockY !== null) break;
       }
       next.sentRowY = sentY;
       next.dockY = dockY;
-      // `null` is NOT `false`. This harness's own rule (see the note on the
-      // anchor scan) is that an unmeasured case must never be reported as a
-      // measured one — and the first run of this probe broke it in the other
-      // direction, printing FAIL for a row whose measurement wrapper had simply
-      // never attached. `null` here means "could not measure"; the table prints
-      // that word and the PR says it.
+      next.tailBottomY = tailBottom;
+      next.tailGapPx =
+        tailBottom === null || dockY === null
+          ? null
+          : Math.round((tailBottom - dockY) * 10) / 10;
+      const geometry = metricsRef.current;
+      next.selfSendDistancePx =
+        geometry === null || geometry.contentHeight <= 0
+          ? null
+          : Math.round(
+              (geometry.contentHeight -
+                (geometry.offsetY + geometry.viewportHeight)) *
+                10,
+            ) / 10;
+      // `null` is NOT `false`, and `false` is NOT `null`. The rule is the one
+      // the anchor scan states: an unmeasured case must never be reported as a
+      // measured one — and the converse, which the last batch paid for, is that
+      // a case the instrument CAN see must not be filed as unmeasured.
       next.selfSendVisible =
-        sentY === null || dockY === null ? null : sentY < dockY;
+        sentY !== null && dockY !== null
+          ? sentY < dockY
+          : next.tailGapPx !== null && next.tailGapPx > 1
+          ? false
+          : null;
       setResults(current => ({
         ...current,
         selfSendVisible: next.selfSendVisible,
         sentRowY: next.sentRowY,
         dockY: next.dockY,
+        tailBottomY: next.tailBottomY,
+        tailGapPx: next.tailGapPx,
+        selfSendDistancePx: next.selfSendDistancePx,
       }));
       console.log(
         `MOMO_MEASURE_SELFSEND ${JSON.stringify({
           sentRowY: sentY,
           dockY,
+          tailBottomY: tailBottom,
+          tailGapPx: next.tailGapPx,
+          distanceFromEndPx: next.selfSendDistancePx,
           visible: next.selfSendVisible,
         })}`,
       );
@@ -808,15 +890,22 @@ function Harness(): React.JSX.Element {
             results.selfSendVisible === null
               ? results.dockY === null
                 ? '측정 중…'
-                : '측정 실패(앵커 미부착)'
+                : '측정 실패(끝은 화면 안인데 행 앵커 미부착)'
               : results.selfSendVisible
               ? '보인다'
+              : results.sentRowY === null
+              ? `가려짐(대화의 끝이 ${results.tailGapPx}px 아래)`
               : '가려짐'
           }
           pass={results.selfSendVisible}
         />
         <Text style={styles.meta}>
           {`보낸 행 y ${px(results.sentRowY)} · 컴포저 상단 y ${px(results.dockY)}`}
+        </Text>
+        <Text style={styles.meta}>
+          {`대화 끝 y ${px(results.tailBottomY)} · 컴포저까지 ${signedPx(
+            results.tailGapPx,
+          )} · 리스트가 보는 끝까지 거리 ${signedPx(results.selfSendDistancePx)}`}
         </Text>
         <Text style={styles.meta}>
           {`키보드 높이 ${px(results.keyboardHeightPx)} · 컴포저 하단 ${px(
@@ -851,6 +940,8 @@ function Harness(): React.JSX.Element {
               selfSendToken={selfSendToken}
               anchorSeq={anchoredSeq}
               anchorRef={anchorRef}
+              tailRef={tailRef}
+              metricsRef={metricsRef}
               listRef={listRef as never}
             />
           }
@@ -879,6 +970,18 @@ function passes(value: number | null): boolean | null {
 function px(value: number | null): string {
   if (value === null) return '측정 중…';
   if (value < 0) return '측정 실패';
+  return `${value}px`;
+}
+
+/**
+ * The same, for numbers whose sign is the answer rather than an error code.
+ *
+ * `px()` reads any negative as "could not measure", which is right for a
+ * distance that cannot be negative and wrong for a GAP: a tail sitting above the
+ * composer is the passing case and it reads -12.4.
+ */
+function signedPx(value: number | null): string {
+  if (value === null) return '측정 중…';
   return `${value}px`;
 }
 

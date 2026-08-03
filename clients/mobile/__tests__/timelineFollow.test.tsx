@@ -152,14 +152,17 @@ describe('내가 보내면 따라간다', () => {
   });
 
   it('연달아 두 번 보내면 두 번 다 따라간다', async () => {
-    // 불리언이었다면 두 번째 전송은 아무 일도 일으키지 않는다.
+    // 불리언이었다면 두 번째 전송은 아무 일도 일으키지 않는다. 그래서 재는 것은
+    // 「총 몇 번」이 아니라 「매 토큰마다 한 번이라도」다 — 한 번의 전송이 몇 번의
+    // 보정을 낳는지는 리스트가 얼마나 멀리 있었느냐에 달렸고(RN-P3), 그 숫자를
+    // 못 박으면 보정을 고칠 때마다 이 테스트가 애먼 곳에서 깨진다.
     const {view, listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
     settleInitialLayout();
     scrollAwayFromBottom();
-    spy.mockClear();
 
     for (const token of [1, 2]) {
+      spy.mockClear();
       act(() => {
         view.rerender(
           <Timeline
@@ -174,9 +177,111 @@ describe('내가 보내면 따라간다', () => {
         );
       });
       await flushFrame();
+      expect(spy).toHaveBeenCalled();
+    }
+  });
+
+  // ===========================================================================
+  // 성재가 계속 본 그 결함. 꼬리 근처에서는 성립하고 **중간에서만** 깨진다는 것이
+  // 단서였고, 원인은 이 컴포넌트가 아니라 `VirtualizedList` 에 있다:
+  //
+  //   * `scrollToEnd` 는 마지막 행의 위치를 `getCellMetricsApprox` 로 **추정**한다.
+  //     방금 보낸 행은 한 번도 레이아웃된 적이 없으므로 평균 셀 높이로 계산된다.
+  //   * 그보다 큰 것 — 리스트는 `getItemLayout` 이 없으면 tail spacer 를
+  //     `_highestMeasuredFrameIndex` 까지로 **일부러 자른다**. 즉 콘텐츠의 끝이
+  //     데이터의 끝보다 위에 있고, 네이티브 스크롤뷰는 거기서 clamp 한다.
+  //
+  // 리스트는 두 번째 기회를 주면 스스로 푼다(착지 → 셀 측정 → spacer 신장 →
+  // contentSizeChange). 그 두 번째 기회를 죽이고 있던 것이 `onScroll` 이었다:
+  // **끝으로 가는 여행의 중간 지점은 전부 끝에서 멀다.** 그래서 이 컴포넌트가
+  // 스스로 낸 이동을 「읽던 자리로 간 사람」으로 읽고 `following` 을 껐다.
+  // ===========================================================================
+  describe('한 번에 닿지 못하는 거리에서', () => {
+    /** 전송 = 토큰 + 낙관적 삽입. 두 테스트가 같은 시작점을 쓴다. */
+    async function sendFromMidHistory(
+      view: ReturnType<typeof mount>['view'],
+      listRef: ReturnType<typeof mount>['listRef'],
+    ) {
+      act(() => {
+        view.rerender(
+          <Timeline
+            messages={[...HISTORY, message(13, {authorMemberId: SELF})]}
+            directory={DIRECTORY}
+            status="ready"
+            myMemberId={SELF}
+            nowMs={BASE_MS}
+            selfSendToken={1}
+            listRef={listRef}
+          />,
+        );
+      });
+      await flushFrame();
     }
 
-    expect(spy).toHaveBeenCalledTimes(2);
+    /** 리스트가 스스로 만든 여행의 중간 지점. 끝에서 멀지만 남의 스크롤이 아니다. */
+    function passThroughTheMiddle() {
+      fireEvent.scroll(screen.getByTestId('timeline-list'), {
+        nativeEvent: {
+          contentOffset: {y: 1500},
+          contentSize: {height: 4000, width: 390},
+          layoutMeasurement: {height: 800, width: 390},
+        },
+      });
+    }
+
+    /** 착지한 자리에서 셀이 측정되며 잘려 있던 진짜 끝이 드러난다. */
+    function tailSpacerGrows() {
+      fireEvent(
+        screen.getByTestId('timeline-list'),
+        'contentSizeChange',
+        390,
+        4600,
+      );
+    }
+
+    it('끝이 뒤늦게 드러나면 한 번 더 데려간다', async () => {
+      const {view, listRef} = mount(0);
+      const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+      settleInitialLayout();
+      scrollAwayFromBottom();
+      spy.mockClear();
+
+      await sendFromMidHistory(view, listRef);
+      expect(spy).toHaveBeenCalled(); // 첫 hop
+      spy.mockClear();
+
+      passThroughTheMiddle();
+      tailSpacerGrows();
+
+      // 이 한 줄이 결함 그 자체다. 이것이 없으면 리스트는 잘린 끝에 멈춰 서고,
+      // 방금 쓴 문장은 접힌 아래에 남는다.
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('손가락이 리스트를 잡으면 전송은 자리를 내준다', async () => {
+      // 마감시각은 의도에 대한 추측이지만 이것은 아니다. 끄는 사람은 자기가 어디
+      // 있고 싶은지 말하고 있고, 1초 전의 전송에게 반박권은 없다.
+      const {view, listRef} = mount(0);
+      const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+      settleInitialLayout();
+      scrollAwayFromBottom();
+      spy.mockClear();
+
+      await sendFromMidHistory(view, listRef);
+      spy.mockClear();
+
+      fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag', {
+        nativeEvent: {
+          contentOffset: {y: 1500},
+          contentSize: {height: 4000, width: 390},
+          layoutMeasurement: {height: 800, width: 390},
+        },
+      });
+      passThroughTheMiddle();
+      tailSpacerGrows();
+
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   it('채널을 여는 것만으로는 따라가지 않는다', () => {

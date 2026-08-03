@@ -15,6 +15,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -118,9 +119,92 @@ import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 // shorter (the keyboard rising), a reader who WAS at the bottom must stay there.
 // `onContentSizeChange` cannot see that — the content did not change, the
 // viewport did — so the layout pass carries it.
+//
+// ## …and one `scrollToEnd` is not enough to honour it (goal RN-P3)
+//
+// 성재 kept seeing the defect from MID-history while it behaved near the tail.
+// That split is the clue, and the reason is in `VirtualizedList` rather than
+// here. Two facts, read out of `@react-native/virtualized-lists@0.86.2`:
+//
+//   `VirtualizedList.js:135` — `scrollToEnd` asks
+//   `ListMetricsAggregator.getCellMetricsApprox(veryLast)` where the end IS, and
+//   the row just sent has never been laid out. `ListMetricsAggregator.js:164`
+//   answers such an index with `offset = highestMeasuredFrame.offset + length +
+//   averageCellLength * gap` and `length = averageCellLength`. A GUESS, and the
+//   further back the reader is, the wider the gap it is multiplied over.
+//
+//   `VirtualizedList.js:1010` — "Without getItemLayout, we limit our tail spacer
+//   to the _highestMeasuredFrameIndex to prevent the user for hyperscrolling
+//   into un-measured area". So the content is not merely mis-measured, it is
+//   deliberately SHORTER than the data: the native scroll view clamps the jump
+//   to a content end that does not include the message just sent. That is the
+//   "접힌 아래" exactly — the row is below a floor the list is holding down.
+//
+// The list resolves this by itself given a second chance: landing there mounts
+// the cells, measuring them extends the spacer, and the resulting content-size
+// change is the signal to scroll again. `onContentSizeChange` above is already
+// that second chance — and `onScroll` was destroying it. **Every intermediate
+// position of a scroll TO the end is far FROM the end**, so the handler read
+// this component's own travel as "the reader chose to read history" and cleared
+// `following` before the correction could run.
+//
+// So a send takes the wheel for a bounded window (`SELF_SEND_PIN_MS`): while it
+// holds, `onScroll` records geometry but does not revoke `following`. The reader
+// takes it back the only way that means anything — `onScrollBeginDrag`, a finger
+// on the glass. Neither a timer nor a finger is a guess about intent.
+//
+// A far send additionally corrects INSTANTLY rather than gliding, and that is
+// arithmetic, not taste: each round trip through the clamp advances by about one
+// viewport, so an animated round costs UIScrollView's fixed ~300ms and a hundred
+// rows would take five seconds of smear. Instant rounds cost a frame each. Near
+// the tail there is no clamp to climb, so the glide that shipped stays.
+//
+// ## What this is NOT (checked, because the ticket suspected it)
+//
+// The keyboard shrinking the list. It no longer can: RN-P2 moved
+// `ConversationLayout` from an animated `paddingBottom` to a `translateY`, so a
+// raised keyboard SLIDES this list at constant height. `__tests__/timelineFollow`
+// pins that the resize path still behaves, but it is not the road to this
+// defect — the defect reproduces with the keyboard down, from mid-history, and
+// the reproduction is `__tests__/timelineFollow`'s 「따라가다 만다」 case.
 
 /** How near the bottom still counts as "following", in points. */
 const FOLLOW_THRESHOLD_PX = 120;
+
+/**
+ * How long a send owns the scroll position, in ms.
+ *
+ * Long enough for several correction rounds (each is one frame), short enough
+ * that a send can never be an argument the reader is still having a second
+ * later. It is an upper bound, not a duration: arriving ends it early, and so
+ * does a finger.
+ */
+const SELF_SEND_PIN_MS = 1200;
+
+/** Close enough to the end that another correction would move nothing. */
+const ARRIVED_PX = 1;
+
+/**
+ * What the list last said about itself. Kept because the two questions a send
+ * has to answer — "how far am I from the end" and "have I arrived" — are
+ * answerable only from the scroll view, and asking React for them re-renders a
+ * list in the middle of scrolling it.
+ */
+export interface TimelineGeometry {
+  offsetY: number;
+  contentHeight: number;
+  viewportHeight: number;
+}
+
+/**
+ * `null` when the list has not reported both halves yet, which is NOT the same
+ * as zero — a zero distance reads as "already at the end" and would skip the
+ * correction the caller asked for.
+ */
+function distanceToEnd(geometry: TimelineGeometry): number | null {
+  if (geometry.contentHeight <= 0 || geometry.viewportHeight <= 0) return null;
+  return geometry.contentHeight - (geometry.offsetY + geometry.viewportHeight);
+}
 
 export function Timeline({
   messages,
@@ -147,6 +231,8 @@ export function Timeline({
   markReplies = true,
   anchorSeq,
   anchorRef,
+  tailRef,
+  metricsRef,
   listRef: externalListRef,
 }: {
   messages: Message[];
@@ -201,6 +287,28 @@ export function Timeline({
    */
   anchorSeq?: number;
   anchorRef?: React.MutableRefObject<View | null>;
+  /**
+   * The seam that had to exist before this batch could measure anything, and the
+   * reason the last one reported 「미측정」 instead of a number.
+   *
+   * `anchorRef` above can only answer about a row the virtualiser decided to
+   * mount, so the exact failure being hunted — the just-sent row is BELOW the
+   * fold — is also the case in which it answers `null`. "Could not measure" and
+   * "measured, and it was hidden" then arrive as the same reading, and a harness
+   * that cannot tell them apart cannot fail.
+   *
+   * The list footer can. `VirtualizedList` renders `ListFooterComponent`
+   * outside the render mask, so it is mounted at every scroll position, and its
+   * window position IS the end of the content. So this always answers, and the
+   * answer is a distance in points rather than a word.
+   */
+  tailRef?: React.MutableRefObject<View | null>;
+  /**
+   * Same seam, for the geometry: the list's own last scroll report, written
+   * without a re-render. What a harness wants to know after a send is how far
+   * from the end it ended up, and that number exists nowhere else.
+   */
+  metricsRef?: React.MutableRefObject<TimelineGeometry | null>;
   /** Same seam: lets the harness put the reader mid-history before measuring. */
   listRef?: React.MutableRefObject<FlatList<TimelineItem> | null>;
 }): React.JSX.Element {
@@ -209,6 +317,28 @@ export function Timeline({
   /** Is the reader at the bottom? Decides whether new content is followed. */
   const followingRef = useRef(true);
   const didInitialScrollRef = useRef(false);
+  /**
+   * Until when a send owns the scroll position. `0` means nobody does.
+   *
+   * Read by `onScroll`, which must not mistake this component's own travel for
+   * the reader choosing to read history — see the header note.
+   */
+  const selfSendPinUntilRef = useRef(0);
+  /** Is that pin being served by instant corrections rather than one glide? */
+  const convergingRef = useRef(false);
+  const geometryRef = useRef<TimelineGeometry>({
+    offsetY: 0,
+    contentHeight: 0,
+    viewportHeight: 0,
+  });
+
+  const noteGeometry = useCallback(
+    (next: Partial<TimelineGeometry>) => {
+      geometryRef.current = {...geometryRef.current, ...next};
+      if (metricsRef) metricsRef.current = geometryRef.current;
+    },
+    [metricsRef],
+  );
 
   const items = useMemo(
     () =>
@@ -231,30 +361,65 @@ export function Timeline({
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
+      noteGeometry({
+        offsetY: contentOffset.y,
+        contentHeight: contentSize.height,
+        viewportHeight: layoutMeasurement.height,
+      });
+      // A scroll this component STARTED is not the reader going anywhere. Every
+      // intermediate position of a travel to the end is far from the end, so
+      // answering them would revoke `following` mid-flight and cancel the very
+      // correction that gets the sender to their own message. See the header.
+      if (Date.now() < selfSendPinUntilRef.current) return;
       const distanceFromEnd =
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
       followingRef.current = distanceFromEnd <= FOLLOW_THRESHOLD_PX;
     },
-    [],
+    [noteGeometry],
   );
+
+  /**
+   * A finger on the glass ends the send's claim immediately.
+   *
+   * The pin has a deadline so that a stuck correction cannot hold the list
+   * forever, but a deadline is a guess about intent and this is not: someone
+   * dragging the list is telling us where they want to be, and a send from a
+   * second ago does not get to argue.
+   */
+  const onScrollBeginDrag = useCallback(() => {
+    selfSendPinUntilRef.current = 0;
+    convergingRef.current = false;
+  }, []);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
   // the same lost-place complaint the reversed list caused, arriving by a
   // different route.
-  const onContentSizeChange = useCallback(() => {
-    if (!didInitialScrollRef.current) {
-      if (items.length === 0) return;
-      didInitialScrollRef.current = true;
-      listRef.current?.scrollToEnd({animated: false});
-      return;
-    }
-    if (followingRef.current) listRef.current?.scrollToEnd({animated: true});
-    // `listRef` is listed because it can be the caller's ref object rather than
-    // this component's own — a prop, so the linter is right that it is not
-    // guaranteed stable. Ref objects are compared by identity and the harness
-    // passes one fixed object, so this costs nothing at runtime.
-  }, [items.length, listRef]);
+  const onContentSizeChange = useCallback(
+    (_width: number, height: number) => {
+      // The one place the true content length is announced, and therefore the
+      // signal that the tail spacer has grown past the clamp described in the
+      // header. A send in flight is waiting for exactly this.
+      noteGeometry({contentHeight: height});
+      if (!didInitialScrollRef.current) {
+        if (items.length === 0) return;
+        didInitialScrollRef.current = true;
+        listRef.current?.scrollToEnd({animated: false});
+        return;
+      }
+      if (followingRef.current) {
+        // Instant while a far send is climbing the clamp — a glide there is a
+        // 300ms round trip per viewport, and there are as many rounds as there
+        // are viewports between the reader and the end.
+        listRef.current?.scrollToEnd({animated: !convergingRef.current});
+      }
+      // `listRef` is listed because it can be the caller's ref object rather than
+      // this component's own — a prop, so the linter is right that it is not
+      // guaranteed stable. Ref objects are compared by identity and the harness
+      // passes one fixed object, so this costs nothing at runtime.
+    },
+    [items.length, listRef, noteGeometry],
+  );
 
   // My own send: always, and from wherever they were. Skipped on the first
   // render so that merely opening a channel does not count as a send.
@@ -269,6 +434,14 @@ export function Timeline({
   //
   // So: raise the flag first (any content-size change from here on follows), and
   // scroll on the next frame, once the inserted row has a height.
+  //
+  // **And one call does not arrive**, which is goal RN-P3 and the header note
+  // above `SELF_SEND_PIN_MS`. From mid-history the offset `scrollToEnd` computes
+  // is a guess over unmeasured rows AND the scroll view is holding a content
+  // floor short of the real end, so the single call lands somewhere above the
+  // message that was just written. The correction is to keep asking until the
+  // list agrees it has arrived, for a bounded window, with the reader able to
+  // end it by touching the list.
   const didMountRef = useRef(false);
   useEffect(() => {
     if (!didMountRef.current) {
@@ -279,10 +452,41 @@ export function Timeline({
     // Following again, because they are now at the bottom on purpose — the next
     // arrival from anyone else should keep them there.
     followingRef.current = true;
-    const frame = requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({animated: true});
+    selfSendPinUntilRef.current = Date.now() + SELF_SEND_PIN_MS;
+
+    // Near the tail there is no clamp to climb and the glide that shipped is
+    // right. `null` — a list that has never scrolled or been laid out — counts
+    // as near: it has no history to be lost in.
+    const distance = distanceToEnd(geometryRef.current);
+    const near =
+      distance === null || distance <= geometryRef.current.viewportHeight;
+    convergingRef.current = !near;
+
+    // The first hop still waits a frame: the token and the echo row arrive in
+    // the same commit, and an offset computed before that row has a height is
+    // computed against the list as it was.
+    let frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({animated: near});
+      if (near) return;
+      const converge = () => {
+        if (Date.now() >= selfSendPinUntilRef.current) {
+          convergingRef.current = false;
+          return;
+        }
+        const left = distanceToEnd(geometryRef.current);
+        if (left !== null && left <= ARRIVED_PX) {
+          convergingRef.current = false;
+          return;
+        }
+        listRef.current?.scrollToEnd({animated: false});
+        frame = requestAnimationFrame(converge);
+      };
+      frame = requestAnimationFrame(converge);
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      convergingRef.current = false;
+    };
   }, [selfSendToken, listRef]);
 
   // The viewport changed size rather than the content growing. A reader who was
@@ -295,9 +499,13 @@ export function Timeline({
   // keeps its distance to the composer with nothing to correct. What is left
   // here is the case that still resizes a list — rotation, and a banner
   // appearing above it — which is why it stays.
-  const onLayout = useCallback(() => {
-    if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
-  }, [listRef]);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      noteGeometry({viewportHeight: event.nativeEvent.layout.height});
+      if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
+    },
+    [listRef, noteGeometry],
+  );
 
   const renderItem = useCallback(
     ({item}: {item: TimelineItem}) => {
@@ -339,8 +547,21 @@ export function Timeline({
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
         return (
           <View
+            // The cleanup form, and it is the difference between a seam and a
+            // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
+            // and unmounts the old one, and React does not promise which order
+            // those land in; the plain `ref={node => ref.current = node}` form
+            // is therefore free to attach the new node and THEN null it out on
+            // the old one's behalf. That is a measurement that reports 「미측정」
+            // for a row which is on screen — the exact reading the last batch
+            // was left holding. Returning a cleanup makes the detach name the
+            // node it is detaching, so it can only clear its own.
             ref={node => {
-              if (anchorRef) anchorRef.current = node;
+              if (!anchorRef) return undefined;
+              anchorRef.current = node;
+              return () => {
+                if (anchorRef.current === node) anchorRef.current = null;
+              };
             }}
             collapsable={false}>
             {row}
@@ -413,6 +634,7 @@ export function Timeline({
       // stream's extra dividers cost nothing.
       maintainVisibleContentPosition={{minIndexForVisible: 0}}
       onScroll={onScroll}
+      onScrollBeginDrag={onScrollBeginDrag}
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}
@@ -427,7 +649,23 @@ export function Timeline({
           ) : null}
         </View>
       }
-      ListFooterComponent={<View style={styles.footer} />}
+      // The always-answerable seam. `collapsable={false}` unconditionally, and
+      // the harness measures the SAME node the app renders: a footer that only
+      // becomes measurable when someone is measuring is a footer whose position
+      // was never the app's.
+      ListFooterComponent={
+        <View
+          ref={node => {
+            if (!tailRef) return undefined;
+            tailRef.current = node;
+            return () => {
+              if (tailRef.current === node) tailRef.current = null;
+            };
+          }}
+          collapsable={false}
+          style={styles.footer}
+        />
+      }
       keyboardDismissMode="interactive"
       keyboardShouldPersistTaps="handled"
       // The list is the only thing that scrolls, and only up and down: a row
