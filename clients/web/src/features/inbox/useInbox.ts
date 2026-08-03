@@ -28,6 +28,7 @@ import {
   type ActorNames,
   type FeedItem,
 } from "@momo/core/features/inbox/model";
+import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // Inbox / activity reads. EXISTING REST only, no server change (MOMO-599):
@@ -59,6 +60,18 @@ export interface Feed {
   isLoading: boolean;
   /** True only when every source failed; a partial result still renders. */
   error: boolean;
+  /**
+   * 서버가 이 목록의 경로를 **모른다고 직접 답했다**(404/405/501).
+   *
+   * `error`와 따로 있는 이유는 goal W-AP1의 전부다. 승인 표면의 정적 판정은
+   * 이제 `provided: true`이고(serverSurfaces.ts: 라우트가 코드에 올라갔다),
+   * 그러니 아직 그 라우트를 배포하지 않은 서버에 붙으면 이 목록은 404를 받는다.
+   * 그 404를 `error`로만 세면 화면은 "인박스를 불러오지 못했습니다 / 다시 시도"를
+   * 그리고, 다시 시도해도 영영 같은 답이 온다. 아직 없는 기능은 장애가 아니다.
+   *
+   * 판정은 발명하지 않고 `serverSaysAbsent` 한 벌을 그대로 쓴다.
+   */
+  absent: boolean;
   /** Newest successful fetch across the sources, for the offline banner. */
   updatedAtMs: number;
   refetch: () => void;
@@ -125,6 +138,18 @@ function useFeedContext(): FeedContext {
 
 // ---- 결정 대기 ---------------------------------------------------------
 
+/**
+ * 없는 경로는 다시 물어보지 않는다.
+ *
+ * 전역 기본값은 `retry: 1`인데, 404/405/501은 두 번 물어도 같은 답이 온다. 그
+ * 한 번의 재시도는 미제공 판정을 왕복 하나만큼 늦추면서 아무것도 바꾸지 못한다.
+ * 그 밖의 실패(네트워크 블립, 5xx)는 기본값 그대로 한 번 더 물어본다.
+ */
+function retryUnlessAbsent(failureCount: number, error: unknown): boolean {
+  if (serverSaysAbsent(error)) return false;
+  return failureCount < 1;
+}
+
 function useApprovalPage(status: ApprovalStatus, enabled: boolean) {
   const { workspaceId } = useSession();
   return useQuery({
@@ -132,6 +157,7 @@ function useApprovalPage(status: ApprovalStatus, enabled: boolean) {
     queryFn: () => fetchApprovals(workspaceId, status),
     enabled,
     staleTime: FEED_STALE_MS,
+    retry: retryUnlessAbsent,
   });
 }
 
@@ -173,6 +199,7 @@ export function useNeedsAction(enabled: boolean): Feed {
     items,
     isLoading: query.isLoading || context.isLoading,
     error: query.isError,
+    absent: serverSaysAbsent(query.error),
     updatedAtMs: query.dataUpdatedAt,
     refetch: () => void query.refetch(),
   };
@@ -285,6 +312,10 @@ export function useMentions(enabled: boolean): Feed {
     items,
     isLoading: readStates.isLoading || context.isLoading || results.isLoading,
     error: readStates.isError || results.allFailed,
+    // 멘션은 read-state 투영과 메시지 읽기 위에 서 있고 둘 다 어느 세대의
+    // 서버에나 있다(serverSurfaces.ts에 줄이 없는 이유가 그것이다). 이 탭이
+    // 실패했다면 그것은 장애이지 미제공이 아니다.
+    absent: false,
     updatedAtMs: Math.max(results.updatedAtMs, readStates.dataUpdatedAt),
     refetch,
   };
@@ -365,12 +396,14 @@ export function useAgentFeed(
         queryFn: () => fetchApprovals(workspaceId, status),
         enabled,
         staleTime: FEED_STALE_MS,
+        retry: retryUnlessAbsent,
       })
     ),
     combine: (results) => ({
       approvals: results.flatMap((result) => result.data ?? []),
       isLoading: results.some((result) => result.isLoading),
       allFailed: results.every((result) => result.isError),
+      absent: results.every((result) => serverSaysAbsent(result.error)),
       updatedAtMs: results.reduce(
         (max, result) => Math.max(max, result.dataUpdatedAt),
         0
@@ -392,6 +425,7 @@ export function useAgentFeed(
       queryFn: () => fetchAgentRuns(workspaceId, channelId),
       enabled,
       staleTime: FEED_STALE_MS,
+      retry: retryUnlessAbsent,
     })),
     combine: (results) => ({
       runs: results.flatMap((result) => result.data ?? []),
@@ -399,6 +433,9 @@ export function useAgentFeed(
       // Vacuously true for an empty fan-out, so a workspace with no channels
       // lets the approval sources decide whether the feed is broken.
       allFailed: results.every((result) => result.isError),
+      // 같은 공허참 규약. 채널이 0개인 워크스페이스에서는 승인 원장 쪽이 이
+      // 피드의 제공 여부를 혼자 정한다.
+      absent: results.every((result) => serverSaysAbsent(result.error)),
       updatedAtMs: results.reduce(
         (max, result) => Math.max(max, result.dataUpdatedAt),
         0
@@ -452,6 +489,9 @@ export function useAgentFeed(
     isLoading:
       context.isLoading || approvalQueries.isLoading || runQueries.isLoading,
     error: approvalQueries.allFailed && runQueries.allFailed,
+    // 이 피드는 두 원장 위에 서 있다. 한쪽만 없으면 남은 쪽이 답할 수 있으므로
+    // 미제공이 아니다 — 둘 다 "그런 경로 없다"고 답했을 때만 표면이 없는 것이다.
+    absent: approvalQueries.absent && runQueries.absent,
     updatedAtMs: Math.max(
       approvalQueries.updatedAtMs,
       runQueries.updatedAtMs

@@ -112,12 +112,24 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
   approvals: {
     id: "approvals",
     label: "승인 결정",
-    provided: false,
+    // 2026-08-04, 이 표에서 뒤집힌 첫 줄이다. 앞 값(false)은 2026-08-02에 참이었고
+    // 지금은 아니다: goal SRV-T1(#979)이 승인 3라우트를 서버에 올렸다.
+    //
+    // 이 칸이 말하는 것은 **이 코드베이스의 서버가 그 경로를 싣고 있는가**이지,
+    // 지금 이야기하는 서버가 그 경로를 답하는가가 아니다. 아직 배포되지 않은
+    // 서버에 붙으면 404가 오고, 그것은 이 파일 상단이 설명하는 (b) 런타임 폴딩이
+    // `serverSaysAbsent`로 접는다. 그래서 `absentReason`·`fallback`은 지우지 않고
+    // 남겨 둔다 — 이제 그 문구를 쓰는 것은 정적 판정이 아니라 폴딩이다.
+    provided: true,
     absentReason: "이 서버는 아직 승인 결정을 기록하지 않습니다.",
     fallback: "에이전트가 멈춰 서면 채널에서 직접 이야기해 진행 여부를 정하세요.",
     measured:
-      "GET …/approvals, POST …/approvals/{id}/decision: 라우터에 없음(404). " +
-      "PR 947(B5.3b)은 클라이언트 22개 파일만 바꿨고 서버 라우트는 올리지 않았다.",
+      "2026-08-04 실측: server-rust/bins/momo-server/src/lib.rs:555-564에 셋 다 등록됨 — " +
+      "GET …/approvals(routes::approvals::list), " +
+      "POST …/approvals/{approval}/decision(decide_by_approval), " +
+      "POST /v1/agent-runs/{run}/approval-decisions(decide_by_run). " +
+      "직전 줄은 'PR 947(B5.3b)은 클라이언트 22개 파일만 바꿨고 서버 라우트는 " +
+      "올리지 않았다'였고, 그 뒤 goal SRV-T1이 그 라우트를 올렸다.",
   },
   huddles: {
     id: "huddles",

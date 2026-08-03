@@ -16,7 +16,17 @@ import {
   type Armed,
 } from "@/features/timeline/ApprovalActions";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  isSurfaceProvided,
+  type SurfaceId,
+} from "@momo/core/features/capabilities/serverSurfaces";
+import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
+import {
+  approvalRowControl,
+  approvalsPanelState,
+  decisionNote,
+  type DecisionNote,
+} from "./approvalsPanel";
 import {
   availableInboxFilters,
   INBOX_FILTER_TABS,
@@ -47,6 +57,19 @@ import {
 // Every row comes from a server projection that already exists (approval
 // ledger, read-state mention decision, work-run projection). Nothing on this
 // surface is counted or inferred client-side.
+//
+// ## 이 표면이 곧 승인함이다 (goal W-AP1)
+//
+// 승인 결정을 위한 네 번째 라우트를 파지 않았다. 「결정 대기」 탭이 이미
+// `GET …/approvals?status=pending` 하나를 통째로 읽고 있고, 결정 컨트롤은
+// 타임라인 카드와 공유하는 `ApprovalActions` 한 벌이다. 세 번째 표면을 세우면
+// 세 번째 멱등 정책과 세 번째 409 문구가 생기고, 보고 있지 않은 쪽이 흘러간다.
+//
+// 정작 없던 것은 화면이 아니라 **판정**이었다: `approvals.provided`가 false인
+// 동안 `availableInboxFilters`는 이 탭 자체를 세우지 않았으므로, 코드로 존재하는
+// 결정 UI에 도달할 경로가 0이었다. 그 줄이 뒤집힌 지금 이 파일이 할 일은 셋이다 —
+// 목록의 다섯 상태를 한 판정으로 모으고(approvalsPanel.ts), 배포되지 않은 서버의
+// 404를 장애가 아니라 미제공으로 접고, 결정의 답을 색까지 판정으로 말하는 것.
 // =============================================================================
 
 const EMPTY_COPY: Record<InboxFilter, { headline: string; detail: string }> = {
@@ -96,6 +119,20 @@ function InboxApprovalActions({
   );
 }
 
+/**
+ * 이 탭이 미제공일 때 이름을 댈 표면.
+ *
+ * 「결정 대기」는 승인 원장 하나 위에 서 있고, 「에이전트」는 그 원장에 작업 실행
+ * 기록을 얹는다 — 활동 라우트가 이미 그 둘이 함께 없을 때 작업 기록 쪽 문구를
+ * 쓰므로(ActivityRoute), 같은 사실에 같은 이름을 댄다. 멘션은 어느 세대의
+ * 서버에나 있는 경로 위에 있어 미제공이 될 수 없다.
+ */
+const PANEL_SURFACE: Record<InboxFilter, SurfaceId | null> = {
+  "needs-action": "approvals",
+  mentions: null,
+  agents: "agentRunHistory",
+};
+
 function FeedPanel({
   filter,
   feed,
@@ -107,10 +144,27 @@ function FeedPanel({
   onMarkRead?: (item: FeedItem) => void;
   renderActions?: (item: FeedItem) => ReactNode;
 }) {
-  if (feed.isLoading && feed.items.length === 0) {
+  const surface = PANEL_SURFACE[filter];
+  const state = approvalsPanelState({
+    isLoading: feed.isLoading,
+    // 이름 댈 표면이 없는 탭은 미제공이 될 수 없다: 접을 곳이 없으면 접지 않는다.
+    absent: feed.absent && surface !== null,
+    error: feed.error,
+    count: feed.items.length,
+  });
+
+  if (state === "unavailable" && surface !== null) {
+    return (
+      <SurfaceUnavailableSection
+        surface={surface}
+        testId="inbox-unavailable"
+      />
+    );
+  }
+  if (state === "loading") {
     return <SkeletonRows rows={3} className="p-4" />;
   }
-  if (feed.error && feed.items.length === 0) {
+  if (state === "error") {
     return (
       <InlineBanner
         message="인박스를 불러오지 못했습니다."
@@ -120,7 +174,7 @@ function FeedPanel({
       />
     );
   }
-  if (feed.items.length === 0) {
+  if (state === "empty") {
     const copy = EMPTY_COPY[filter];
     return (
       <EmptyInvite
@@ -175,7 +229,7 @@ export function InboxRoute() {
   // false가 된다(useOffline.ts 주석) — 파괴적 결정의 게이트는 허브와 같은 판정 하나로.
   const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
-  const [decisionNote, setDecisionNote] = useState<string | null>(null);
+  const [note, setNote] = useState<DecisionNote | null>(null);
 
   const feed =
     filter === "needs-action"
@@ -194,19 +248,12 @@ export function InboxRoute() {
 
   // 결정이 기록되면 그 행은 대기 목록에서 사라진다. 사라지는 것만으로는 무엇이
   // 됐는지 알 수 없으므로, 원장이 답한 그대로 한 줄을 남기고 목록을 다시 읽는다.
+  // 무슨 말을 어떤 색으로 할지는 `decisionNote`가 정한다: 이미 다른 곳에서
+  // 결정된 요청(superseded)은 정상적인 상태 전이이지 사고가 아니므로, 그 갈래가
+  // 조용히 --danger로 흘러가지 않도록 판정을 컴포넌트 밖에 못 박아 둔다.
   const onDecided = useCallback(
     (outcome: DecisionOutcome) => {
-      if (outcome.kind === "superseded") {
-        setDecisionNote(outcome.note ?? "이 요청은 이미 결정되어 있었습니다.");
-      } else if (outcome.status === "approved") {
-        setDecisionNote("승인했습니다. 에이전트가 이어서 실행합니다.");
-      } else if (outcome.status === "rejected") {
-        setDecisionNote("거부했습니다. 이 실행은 취소되었습니다.");
-      } else {
-        // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지
-        // 우리가 모르므로, 안다고 말하지 않는다.
-        setDecisionNote("결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.");
-      }
+      setNote(decisionNote(outcome));
       invalidateApprovals();
     },
     [invalidateApprovals]
@@ -214,10 +261,11 @@ export function InboxRoute() {
 
   const renderApprovalActions = useCallback(
     (item: FeedItem) => {
-      if (item.approvalId === undefined) return null;
+      const control = approvalRowControl(item, { offline });
+      if (control.kind === "none") return null;
       // 끊긴 채로 버튼을 그대로 두면 15초 뒤 실패로 반박당하고, 말없이 치우면
       // 무엇이 사라졌는지 알 수 없다. 자리는 지키고 이유를 말한다.
-      if (offline) {
+      if (control.kind === "offline") {
         return (
           <p
             className="px-4 pb-2 text-meta text-ink-muted"
@@ -230,7 +278,7 @@ export function InboxRoute() {
       }
       return (
         <InboxApprovalActions
-          approvalId={item.approvalId}
+          approvalId={control.approvalId}
           onSettled={onDecided}
           reversible={item.reversible}
         />
@@ -269,12 +317,15 @@ export function InboxRoute() {
         )}
       </header>
 
-      {decisionNote && (
+      {/* tone이 판정에서 온다. `InlineBanner`는 error면 role="alert"+--danger,
+          neutral이면 role="status"를 그리므로, 게이트는 그 role 하나로
+          "이미 결정됨이 오류로 그려지지 않았다"를 단언할 수 있다. */}
+      {note && (
         <InlineBanner
-          tone="neutral"
-          message={decisionNote}
+          tone={note.tone}
+          message={note.text}
           actionLabel="닫기"
-          onAction={() => setDecisionNote(null)}
+          onAction={() => setNote(null)}
           testId="inbox-decision-note"
         />
       )}
