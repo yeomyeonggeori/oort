@@ -168,6 +168,41 @@ import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 // defect — the defect reproduces with the keyboard down, from mid-history, and
 // the reproduction is `__tests__/timelineFollow`'s 「따라가다 만다」 case.
 
+// ## A conversation shorter than the screen has to sit at the BOTTOM (goal RN-U1)
+//
+// 성재, iPhone 17: "스레드에서도 뭔가 채팅을 하면 위에 숨겨져 있어서 채팅 닫아야
+// 보이더라."
+//
+// The ticket read this as the RN-P3 defect reaching a surface the fix had missed,
+// and that is not what it is — RN-P3's correction is in THIS component, and
+// `ThreadPanel` has passed `selfSendToken` since the day it was written
+// (`__tests__/threadSelfSend.test.tsx` holds that). The arithmetic says something
+// else, and it says it about any short conversation rather than about threads:
+//
+//   A `FlatList` whose content is shorter than its viewport draws that content at
+//   the TOP and has nothing to scroll — `scrollToEnd` is a no-op, correctly.
+//   `ConversationLayout` meanwhile lifts the whole pane by the keyboard's height
+//   under an `overflow: 'hidden'` clip, so the top of the list travels up under
+//   the header and is cut off. On an iPhone 17 that lift is 302pt (336 keyboard −
+//   34 home indicator), the list's top edge sits at ~103pt (safe area + header),
+//   and a thread holding a root and one reply is ~120pt of content. Every one of
+//   those points ends up at a negative window y. The conversation is not below
+//   the fold, it is ABOVE the screen — which is exactly the sentence, and exactly
+//   why closing the keyboard brought it back.
+//
+// A thread is where it bites first because a thread is nearly always short, but
+// nothing here is about threads: a channel with three messages does the same, and
+// that is the one a person meets on their first day.
+//
+// So the content container grows to the viewport and packs to the end. When the
+// content is TALLER than the viewport — every established channel — `flexGrow`
+// has no free space to hand out and this changes nothing at all, which is why it
+// can be turned on for both surfaces without re-earning RN-P3's numbers. When it
+// is shorter, the rows sit on top of the composer where a lift cannot reach them.
+// It is also what every messenger does with a new conversation, for this reason
+// rather than for a stylistic one.
+const CONTENT_ALIGNMENT = {flexGrow: 1, justifyContent: 'flex-end'} as const;
+
 /** How near the bottom still counts as "following", in points. */
 const FOLLOW_THRESHOLD_PX = 120;
 
@@ -757,6 +792,9 @@ export function Timeline({
       data={items}
       renderItem={renderItem}
       keyExtractor={keyExtractor}
+      // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
+      // the bottom, because the keyboard lifts this list's top edge out of sight.
+      contentContainerStyle={CONTENT_ALIGNMENT}
       // `renderItem` closes over these, and a `FlatList` cell will happily keep
       // rendering with a stale closure otherwise. The measurement seam found
       // this the hard way: moving `anchorSeq` to another row left the wrapper on
@@ -801,7 +839,30 @@ export function Timeline({
           style={styles.footer}
         />
       }
-      keyboardDismissMode="interactive"
+      // ## Putting the keyboard away (goal RN-U1 결함 1)
+      //
+      // 성재: "채팅창은 여는 건 성공했는데, 그냥 다시 닫을 때는 어떻게 해야 해?"
+      //
+      // This was `interactive`, and `interactive` cannot work in THIS layout. It
+      // dismisses when a drag reaches the keyboard and drags it down — but since
+      // RN-P2 the pane slides, so the list's bottom edge stops at the composer,
+      // which stops above the keyboard. The finger never arrives at the thing the
+      // mode is about, and the mode therefore does nothing. It was not a weak
+      // affordance; it was an affordance with no surface to act on.
+      //
+      // `on-drag` asks nothing of where the drag ends: moving the conversation at
+      // all puts the keyboard away, which is the gesture people already make when
+      // they want to read instead of type.
+      keyboardDismissMode="on-drag"
+      // The other half of the rule is `handled`, and it is deliberately NOT
+      // `never`. Both dismiss on a tap; they disagree about what else that tap
+      // does, and `never` makes the scroll view swallow it — so while the
+      // keyboard is up a long press would open no action sheet and a reaction
+      // chip would refuse. `handled` leaves the row's own gesture intact and lets
+      // `MessageRow` decide, which is where the tap rule is written down and
+      // where `__tests__/messageTap.test.tsx` can reach it. A tap landing on
+      // nothing (the gap under a short conversation) still dismisses here, which
+      // is the case a row cannot answer for.
       keyboardShouldPersistTaps="handled"
       // The list is the only thing that scrolls, and only up and down: a row
       // that could drag sideways is how a horizontal scroll gets into an app
