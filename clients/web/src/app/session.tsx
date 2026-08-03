@@ -133,6 +133,24 @@ export function useRestoredSession(): SessionLifecycle {
   }, [expired]);
 
   const signIn = useCallback((next: LoginResponse) => {
+    // Claim the one resume attempt BEFORE the store notification lands.
+    //
+    // The guard above stops the effect from firing twice; it does not stop it
+    // from firing the FIRST time on a fresh sign-in. Booting without a session
+    // leaves `resumable` false, so nothing is claimed — and then `login()`
+    // writes the session, the store notifies, `resumable` flips true, and the
+    // effect rotates the refresh token that was issued a millisecond earlier.
+    //
+    // That rotation is not free. Refresh tokens are single-use (api.ts's own
+    // comment: "a second concurrent call would present an already-revoked token
+    // and end the session"), so signing in was opening a window where a second
+    // tab could kill the session it had just created. It also made every login
+    // pay a round trip whose only possible outcome is the state we already had.
+    //
+    // Found by a capture-harness failure: the harness stubs `/v1/auth/login` but
+    // not `/v1/auth/refresh`, so this hidden rotation escaped to a real backend,
+    // came back 401, and bounced the app to the login card mid-run.
+    attempted.current = true;
     setSession(next);
     setStatus("signed-in");
   }, []);

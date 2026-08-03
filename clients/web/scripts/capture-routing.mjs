@@ -228,6 +228,20 @@ function rosterFor(support) {
 async function installMocks(context, support, probes = { count: 0, puts: [] }) {
   const hasEffortAxis = support !== "absent";
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  // `/v1/auth/refresh` MUST be stubbed even though nothing in these frames asks
+  // for a rotation on purpose. Anything this table does not name escapes to
+  // `vite preview`, which proxies /v1 to a real backend; a 401 there makes
+  // `restoreSession()` clear the session and drop the run back on the login
+  // card, 200-lines away from any assertion that could explain it.
+  //
+  // The body shape is load-bearing: `refreshResponseFromWire` throws unless BOTH
+  // fields are strings, and a throw reads as "unreachable" -> still signed out.
+  await context.route("**/v1/auth/refresh", (route) =>
+    json(route, {
+      accessToken: SESSION.accessToken,
+      refreshToken: SESSION.refreshToken,
+    })
+  );
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
       token: "capture-only-not-a-credential",
