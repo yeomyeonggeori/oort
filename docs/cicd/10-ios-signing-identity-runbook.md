@@ -1,5 +1,18 @@
 # momo — iOS 서명 아이덴티티 런북 (사람이 직접, 1회)
 
+> ## ✅ 현재 상태 (2026-08-04 실측 — 성재 재확인: "swift 때 다 줬다")
+> 아래 §2의 "사람이 할 일"은 **대부분 이미 끝나 있다.** 세션마다 성재에게 다시 묻지 말 것.
+>
+> | 자산 | 상태 | 근거 |
+> |---|---|---|
+> | 서명 인증서 | ✅ 키체인에 유효 — Apple Distribution ×2 · Development · Developer ID (팀 `YWQQFQM38J`) | `security find-identity -v -p codesigning` |
+> | App ID 2개 + Store 프로파일 | ✅ 앱(`app.momo.ios`)·NSE(`app.momo.ios.NotificationService`) **둘 다 App Store용 프로파일 존재**(Xcode 관리형) | `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` (**신경로** — 구경로 `~/Library/MobileDevice/`는 비어 있으니 속지 말 것) |
+> | APNs `.p8` | ✅ NCP push-relay에 배포·실작동(BadDeviceToken 수신 = provider token 인증 성공) | ROADMAP §0 푸시 절 |
+> | App Group 연결 | 프로파일 디코드로 확인 미완 — `./scripts/verify_ios_signing.sh`로 검증 | — |
+> | **CI 레인** | ❌ **유일하게 비어 있는 곳** — `momo-signing` repo 미생성 · GH Secrets 0건 | `gh secret list` 0건 (2026-08-04) |
+>
+> **결론: 첫 TestFlight는 로컬 Xcode Organizer 업로드로 지금 가능하다**(Xcode에 계정 로그인됨). match/CI 자동화가 필요해지는 시점에만 성재에게 **ASC API Team Key 발급** 딱 한 가지를 요청한다.
+
 > `docs/cicd/01-setup-runbook.md`(계정·API Key·Secrets 등록)를 먼저 끝낸 뒤 이 문서를 본다.
 > 이 문서는 **어떤 번들 ID에 어떤 프로파일이 필요한가**만 다룬다.
 > 자동 검사: `./scripts/verify_ios_signing.sh` (자격증명·네트워크 없이 돈다).
