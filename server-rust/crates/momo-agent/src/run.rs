@@ -497,6 +497,17 @@ pub struct GatewayRunSnapshot {
     pub agent_member_id: Uuid,
     pub channel_id: Uuid,
     pub status: RunStatus,
+    /// The utterance that started this run — `agent_run.trigger_message_id`,
+    /// `NULL` for a run nobody said anything to raise (a work run, an operator
+    /// start).
+    ///
+    /// Projected since ADR-0148 because it is what an agent's answer **points
+    /// at**: `reply_to_id` on the final message. Read from the locked run row
+    /// rather than from the job payload, so the worker and the gateway quote the
+    /// same message, and so a resumed run still answers the mention it started
+    /// from — `resume_job_payload` carries no trigger, but the run row never
+    /// stopped holding one.
+    pub trigger_message_id: Option<Uuid>,
     /// `agent.model` — the ledger's fallback when the adapter reports none.
     pub model: String,
     /// ADR-0134 D2 ledger fallbacks, read on the already-locked row: what the run
@@ -524,7 +535,8 @@ pub async fn lock_gateway_run_in_tx(
     run_id: Uuid,
 ) -> Result<Option<GatewayRunSnapshot>, DbError> {
     let row = sqlx::query(
-        "SELECT r.agent_member_id, r.channel_id, r.status::text AS status_label, a.model, \
+        "SELECT r.agent_member_id, r.channel_id, r.status::text AS status_label, \
+                r.trigger_message_id, a.model, \
                 r.input->'routing'->>'effort' AS requested_effort, \
                 ap.effort_pref AS profile_effort_pref \
            FROM agent_run r \
@@ -563,6 +575,7 @@ pub async fn lock_gateway_run_in_tx(
         agent_member_id: row.try_get("agent_member_id")?,
         channel_id: row.try_get("channel_id")?,
         status,
+        trigger_message_id: row.try_get("trigger_message_id")?,
         model: row.try_get("model")?,
         requested_effort: row.try_get("requested_effort")?,
         profile_effort_pref: row.try_get("profile_effort_pref")?,

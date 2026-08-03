@@ -439,7 +439,13 @@ pub async fn complete(
                             safe_error.as_deref(),
                         ),
                         root_id: None,
-                        reply_to_id: None,
+                        // ADR-0148 규칙 6 — the same answer the worker gives,
+                        // arriving by a different door, so it points at the same
+                        // message. Both read `agent_run.trigger_message_id` off
+                        // the locked run row rather than off a job payload,
+                        // which is what keeps "an agent quotes what it answers"
+                        // one rule instead of two implementations of it.
+                        reply_to_id: run.trigger_message_id,
                         client_msg_id: Some(run_id),
                         run_id: Some(run_id),
                         hlc_ts: None,

@@ -3366,6 +3366,11 @@ paths:
         Supplying `rootId` creates a one-level thread reply. The root must be an
         undeleted top-level message in the same channel; cross-channel roots are
         reported as not found.
+        Supplying `replyToId` quotes a message (ADR-0148): the send stays in the
+        channel's main flow and points at the target rather than folding the
+        conversation into a thread. The two are independent and may be sent
+        together. A quote target must be undeleted and in the same channel, but
+        — unlike a thread root — it may itself be a reply.
       security:
         - bearerAuth: []
       parameters:
@@ -3385,7 +3390,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Message"
         "400":
-          description: Invalid workspace/channel id, deleted root, or nested reply root.
+          description: >
+            Invalid workspace/channel id, deleted root, nested reply root, or a
+            deleted quote target.
           content:
             application/json:
               schema:
@@ -3399,7 +3406,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Channel/root not found or not provisioned.
+          description: >
+            Channel/root not found or not provisioned, or a quote target that is
+            not in this channel (a target in another channel or workspace is
+            answered identically to one that does not exist).
           content:
             application/json:
               schema:
@@ -7681,6 +7691,15 @@ components:
           type: string
           format: uuid
           description: Undeleted top-level message in this channel used as the thread root.
+        replyToId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0148 quote target — the message this send points at. Independent
+            of `rootId`: a message may carry both, which quotes one particular
+            reply from inside its own thread. The target must be an undeleted
+            message in the same channel (it may itself be a reply); a target in
+            another channel or another workspace is reported as not found.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -7832,6 +7851,22 @@ components:
           type: string
           format: uuid
           description: Thread root for a reply; omitted for top-level messages.
+        replyToId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0148 — the message this one quotes; omitted when it quotes
+            nothing. Present on every projection (send echo, history, replies)
+            and independent of `rootId`.
+        replyTo:
+          allOf:
+            - $ref: "#/components/schemas/QuotedMessage"
+          description: >
+            The quoted message, resolved at read time. Present on history and
+            thread-replies rows whose `replyToId` resolves; omitted from the
+            send response, which echoes the write rather than the conversation
+            around it. Never a stored snapshot — an edit of the original shows
+            through here and a deletion arrives as a tombstone.
         seq:
           type: integer
           format: int64
@@ -7888,6 +7923,49 @@ components:
             are never included; download bytes through the authenticated content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
+
+    QuotedMessage:
+      type: object
+      required: [id, seq, authorMemberId, type, state]
+      description: >
+        The quoted message a client draws above a reply (ADR-0148). A reference
+        resolved on every read, never a copy: editing the original changes what
+        this says, and deleting it leaves a tombstone with no `body` at all. The
+        author is named by id only, like every other row in the response — the
+        client resolves it against the roster it already holds.
+      properties:
+        id:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+        authorMemberId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
+        body:
+          type: string
+          description: Omitted on a tombstone, whose text no longer exists.
+        state:
+          type: string
+          enum: [sent, edited, deleted, failed]
+        editedAtMs:
+          type: integer
+          format: int64
+        deletedAtMs:
+          type: integer
+          format: int64
+          description: Present when the quoted message has been deleted.
+        quotesAnother:
+          type: boolean
+          description: >
+            The quoted message itself quotes something. A marker only — the
+            inner target's id is deliberately absent, because quoting is drawn
+            one layer deep and a second id is all anyone needs to build a
+            staircase. Omitted when false.
 
     MessageAttachment:
       type: object

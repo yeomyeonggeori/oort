@@ -866,6 +866,12 @@ impl AgentWorker {
                         body: Some(call.message_body()),
                         props: call.message_props(),
                         root_id: None,
+                        // ADR-0148 규칙 6, and the answer here is `None` on
+                        // purpose. A `tool_call` card is a trace of the agent's
+                        // own work — it addresses nobody and points at no
+                        // utterance. Filling it with the trigger would stamp the
+                        // same quote block onto every step of a multi-tool turn,
+                        // which is how a device for pointing becomes noise.
                         reply_to_id: None,
                         client_msg_id: Some(tool_exec::call_message_id(run_id, &call.call_id)),
                         run_id: Some(run_id),
@@ -928,6 +934,12 @@ impl AgentWorker {
                             expires_at,
                         ),
                         root_id: None,
+                        // `None`, like the call card above. What this message
+                        // points at is an `approval` row, not a message: the
+                        // decision buttons, the tool name and the arguments are
+                        // all in `props`, and a quote block would re-state the
+                        // adjacent `tool_call` card the reader is already
+                        // looking at.
                         reply_to_id: None,
                         client_msg_id: Some(approval_id),
                         run_id: Some(run_id),
@@ -1114,7 +1126,27 @@ impl AgentWorker {
                         // SQL, so B5.1 answers at channel top level and records
                         // the linkage in props.
                         root_id: None,
-                        reply_to_id: None,
+                        // ADR-0148 규칙 6 — agent = member, no branch. "This
+                        // answers that message" is the one thing an agent turn
+                        // always means, and `reply_to_id` is the column the
+                        // schema kept for it; `props.trigger_message_id` has
+                        // been carrying the same fact in a place only this
+                        // worker and its tests ever read.
+                        //
+                        // Taken from the **locked run row**, not from the job
+                        // payload: the run row is the durable record, it is
+                        // already locked in this transaction, and it is the only
+                        // source that survives a resume (`resume_job_payload`
+                        // writes no trigger, so a payload read would silently
+                        // stop quoting after every approval). `None` when the
+                        // run was raised by nobody — a work run has no utterance
+                        // to point at, and inventing one would be worse than
+                        // pointing at nothing.
+                        //
+                        // Quoting, not threading: the answer stays in the
+                        // channel's main flow with the question attached, which
+                        // is the distinction the ADR exists to draw.
+                        reply_to_id: snapshot.trigger_message_id,
                         client_msg_id: Some(run_id),
                         run_id: Some(run_id),
                         hlc_ts: None,

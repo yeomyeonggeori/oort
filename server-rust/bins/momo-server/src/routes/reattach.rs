@@ -88,6 +88,10 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         id: event.id.to_string(),
         channel_id: channel_id.to_string(),
         root_id: Some(root_message_id.to_string()),
+        // A session event card is a host's log line, not a member pointing at
+        // another member's message — there is nothing here to quote (ADR-0148).
+        reply_to_id: None,
+        reply_to: None,
         seq: event.seq,
         hlc_ts: event.hlc_ts,
         hlc_count: event.hlc_count,

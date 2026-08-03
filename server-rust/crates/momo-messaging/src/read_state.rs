@@ -30,6 +30,12 @@
 //! message. Storing ids (not handles) is what keeps a past mention correct after
 //! someone renames themselves.
 //!
+//! ADR-0148 routes **quotes** through this same pass rather than adding a
+//! notification kind beside it: the quoted message's author is appended to the
+//! same recipient set an `@handle` produces, so every downstream consumer
+//! (badge recount, push judgment) keeps working without being told that
+//! quoting exists. See [`record_mentions_in_tx`].
+//!
 //! **Uppercase is a wire contract, not a style choice.** Swift writes
 //! `UUID.uuidString`, which Foundation renders uppercase, into
 //! `props.mention_member_ids`, and its recount matches with the same uppercase
@@ -348,6 +354,23 @@ pub async fn update_read_cursor_in_tx(
 ///
 /// Candidates are the channel's live members **except the author** — Swift's
 /// `m.id <> author` — so nobody can raise their own badge.
+///
+/// ## Quoting is naming (ADR-0148 규칙 5)
+///
+/// `reply_to_id` widens the recipient set by exactly one member: the quoted
+/// message's author. It does **not** open a second ledger, a second props key
+/// or a second push reason — the quoted author lands in the very same
+/// `mention_member_ids` array, so `momo_push::judge_targets` reports `mention`
+/// and `update_read_cursor_in_tx` clears the badge without either of them
+/// learning that quotes exist. That is the whole point of routing it here: a
+/// notification kind is a thing every consumer must be taught, and this one
+/// needed teaching nowhere.
+///
+/// The quoted author still has to clear the same three bars an `@handle`
+/// recipient does — an active member, still in the channel, and not the author
+/// — because they are read from the same candidate query. Quoting yourself
+/// therefore notifies nobody, exactly like mentioning yourself.
+#[allow(clippy::too_many_arguments)]
 pub async fn record_mentions_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -356,10 +379,33 @@ pub async fn record_mentions_in_tx(
     message_seq: i64,
     author_member_id: Uuid,
     body: Option<&str>,
+    reply_to_id: Option<Uuid>,
 ) -> Result<Vec<Uuid>, DbError> {
-    let Some(body) = body.filter(|text| !text.is_empty()) else {
-        return Ok(Vec::new());
+    let body = body.filter(|text| !text.is_empty());
+
+    // Resolved before the candidate scan so the loop below stays a single pass.
+    // The channel predicate is 규칙 2 restated: a target outside this channel
+    // (or outside this tenant, which RLS already hid) names nobody.
+    let quoted_author: Option<Uuid> = match reply_to_id {
+        Some(reply_to_id) => {
+            sqlx::query_scalar(
+                "SELECT author_member_id FROM message \
+              WHERE id = $1 AND channel_id = $2 \
+              LIMIT 1",
+            )
+            .bind(reply_to_id)
+            .bind(channel_id)
+            .fetch_optional(&mut *conn)
+            .await?
+        }
+        None => None,
     };
+
+    // A quote with an empty body still names someone, so the early exit tests
+    // both inputs rather than the body alone.
+    if body.is_none() && quoted_author.is_none() {
+        return Ok(Vec::new());
+    }
 
     let rows = sqlx::query(
         "SELECT m.id, m.handle, m.display_name \
@@ -385,7 +431,13 @@ pub async fn record_mentions_in_tx(
         let id: Uuid = row.try_get("id").map_err(DbError::from)?;
         let handle: String = row.try_get("handle").map_err(DbError::from)?;
         let display_name: String = row.try_get("display_name").map_err(DbError::from)?;
-        if contains_mention(body, &handle, &display_name, id) {
+        let named_in_body =
+            body.is_some_and(|body| contains_mention(body, &handle, &display_name, id));
+        // `||` rather than a second pass: a message that both quotes someone and
+        // `@`s them names them once. The list feeds a jsonb array the recount
+        // asks membership questions of, and a duplicate id there would let one
+        // utterance raise two badges.
+        if named_in_body || quoted_author == Some(id) {
             recipients.push(id);
         }
     }

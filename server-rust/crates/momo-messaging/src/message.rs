@@ -151,6 +151,14 @@ pub struct StoredMessage {
     pub body: Option<String>,
     pub props: Value,
     pub root_id: Option<Uuid>,
+    /// The message this one **points at** (ADR-0148).
+    ///
+    /// Not a second spelling of [`Self::root_id`]: `root_id` is *belonging*
+    /// ("this message is part of that conversation"), `reply_to_id` is *aim*
+    /// ("this message quotes that one"). A message may carry both — quoting one
+    /// particular reply from inside its own thread is the ordinary case — so
+    /// nothing here treats them as exclusive.
+    pub reply_to_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     /// When the author last rewrote the body (`NULL` = never edited).
     ///
@@ -220,7 +228,7 @@ pub struct SentMessage {
 /// single [`decode_stored`] reads every row shape.
 const STORED_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, created_at, edited_at, deleted_at";
+     root_id, reply_to_id, created_at, edited_at, deleted_at";
 
 /// [`decode_stored`] for the sibling modules that project the same columns with
 /// extras beside them (`interaction::INTERACTION_COLS`). Crate-private: the
@@ -248,6 +256,7 @@ fn decode_stored(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Err
         body: row.try_get("body")?,
         props: row.try_get("props")?,
         root_id: row.try_get("root_id")?,
+        reply_to_id: row.try_get("reply_to_id")?,
         created_at: row.try_get("created_at")?,
         edited_at: row.try_get("edited_at")?,
         deleted_at: row.try_get("deleted_at")?,
@@ -271,6 +280,14 @@ pub fn cent_channel(workspace_id: Uuid, channel_id: Uuid) -> String {
 /// `{channel, data:{type:"message.new", v:1, ts, seq, payload:{…}}, version:seq,
 /// idempotency_key:"<channel>:<seq>"}`. Reuses the shared [`BroadcastPayload`]
 /// DTO so the server and the relay/workd consumers can never drift.
+///
+/// **`reply_to_id` travels as an id and never as a rendered quote** (ADR-0148
+/// 규칙 3). An outbox row is written once and replayed forever; embedding the
+/// quoted body here would mint exactly the snapshot the ADR forbids — a copy
+/// that keeps saying what the original said after it was edited, and keeps
+/// saying anything at all after it was deleted. The resolved quote is a *read*
+/// projection ([`PagedMessage::reply_to`]), rebuilt from the live row on every
+/// fetch.
 #[allow(clippy::too_many_arguments)]
 pub fn build_broadcast_payload(
     workspace_id: Uuid,
@@ -283,6 +300,7 @@ pub fn build_broadcast_payload(
     hlc_ts: i64,
     hlc_count: i32,
     root_id: Option<Uuid>,
+    reply_to_id: Option<Uuid>,
     props: &Value,
 ) -> Value {
     let channel = cent_channel(workspace_id, channel_id);
@@ -297,6 +315,7 @@ pub fn build_broadcast_payload(
     message_payload.insert("hlc_ts".into(), json!(hlc_ts));
     message_payload.insert("hlc_count".into(), json!(hlc_count));
     message_payload.insert("root_id".into(), json!(root_id));
+    message_payload.insert("reply_to_id".into(), json!(reply_to_id));
     // Swift only carries props when non-empty.
     if let Some(obj) = props.as_object() {
         if !obj.is_empty() {
@@ -474,6 +493,11 @@ async fn finish_send_in_tx(
             message.seq,
             message.author_member_id,
             message.body.as_deref(),
+            // ADR-0148 규칙 5 — being quoted is being named. The quoted author
+            // joins the same recipient set an `@handle` produces, so the badge,
+            // the unread arithmetic and the push reason are all the *existing*
+            // mention path rather than a sixth notification kind.
+            message.reply_to_id,
         )
         .await?;
         if !recipients.is_empty() {
@@ -532,6 +556,7 @@ async fn finish_send_in_tx(
         message.hlc_ts,
         message.hlc_count,
         message.root_id,
+        message.reply_to_id,
         &message.props,
     );
     let outbox_id = emit_outbox(
@@ -963,16 +988,53 @@ pub struct PagedMessage {
     pub message: StoredMessage,
     /// Present only for a root message with replies.
     pub thread: Option<ThreadRollup>,
+    /// The quoted message, resolved (ADR-0148 규칙 3). Present whenever
+    /// [`StoredMessage::reply_to_id`] is set — a tombstoned target still
+    /// resolves, as a tombstone.
+    pub reply_to: Option<QuotedMessage>,
+}
+
+/// The quoted message a client draws above a reply (ADR-0148 규칙 3/4).
+///
+/// **A reference, resolved at read time — never a snapshot.** Nothing is copied
+/// into the quoting message's own row, so an edit of the original changes every
+/// quote of it on the next fetch and a deletion turns every quote of it into a
+/// tombstone. Persisting the quoted text would create a copy that outlives the
+/// author's decision to delete, which is precisely what the ADR refuses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuotedMessage {
+    pub id: Uuid,
+    pub seq: i64,
+    pub author_member_id: Uuid,
+    pub message_type: MessageType,
+    /// `NULL` on a tombstone, because [`crate::interaction::delete_message_in_tx`]
+    /// NULLs the column. The quote block therefore has nothing to render but
+    /// "삭제된 메시지" — the deletion is enforced by the absence of the text, not
+    /// by a client agreeing to hide it.
+    pub body: Option<String>,
+    pub state: String,
+    pub edited_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// 규칙 4 — the quoted message *itself* quotes something. A **marker, not a
+    /// second level**: expanding the inner quote would grow one step of a
+    /// staircase per hop, so the id is deliberately not projected here. A client
+    /// draws "↳ 인용" and stops.
+    pub quotes_another: bool,
 }
 
 /// The history/replies column list with the rollup join attached. Column names
 /// are unqualified in the result set, so [`decode_stored`] reads it unchanged.
 const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m.hlc_count, \
      m.author_member_id, m.type::text AS message_type, m.state::text AS state, m.body, m.props, \
-     m.root_id, m.created_at, m.edited_at, m.deleted_at, t.reply_count, t.last_reply_seq, \
+     m.root_id, m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, \
+     t.reply_count, t.last_reply_seq, \
      CASE WHEN t.last_reply_at IS NULL THEN NULL \
           ELSE floor(extract(epoch from t.last_reply_at) * 1000)::bigint \
-     END AS last_reply_at_ms";
+     END AS last_reply_at_ms, \
+     q.id AS quote_id, q.seq AS quote_seq, q.author_member_id AS quote_author_member_id, \
+     q.type::text AS quote_message_type, q.state::text AS quote_state, q.body AS quote_body, \
+     q.edited_at AS quote_edited_at, q.deleted_at AS quote_deleted_at, \
+     (q.reply_to_id IS NOT NULL) AS quote_quotes_another";
 
 /// The join predicate. `m.root_id IS NULL` is not redundant with
 /// `t.root_id = m.id`: a reply's id could in principle key its own `thread` row,
@@ -980,6 +1042,48 @@ const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m
 /// as well as in the write path.
 const PAGED_THREAD_JOIN: &str =
     "LEFT JOIN thread t ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0";
+
+/// The quote join (ADR-0148 §3-2).
+///
+/// **This is the whole N+1 answer.** The alternative — reading `reply_to_id` off
+/// each row and then fetching the targets — costs one round trip per quoted
+/// message, so a 100-row page of an argument would issue 100 extra queries. A
+/// `LEFT JOIN` costs the same one query whether the page contains no quotes or
+/// a hundred, and it reads the target through the *same* snapshot as the page,
+/// so a quote cannot show a version of the original that never coexisted with
+/// the reply.
+///
+/// `q.channel_id = m.channel_id` restates 규칙 2 in the read path. The write
+/// path already refuses a cross-channel target
+/// ([`validate_quote_target_in_tx`]), so this predicate is not what keeps the
+/// rule — it is what keeps a *pre-existing* or hand-written row from projecting
+/// a message the reader may have no right to see.
+const PAGED_QUOTE_JOIN: &str =
+    "LEFT JOIN message q ON q.id = m.reply_to_id AND q.channel_id = m.channel_id";
+
+fn decode_quoted(row: &sqlx::postgres::PgRow) -> Result<Option<QuotedMessage>, sqlx::Error> {
+    // A NULL `quote_id` is the join finding nothing: either the row carries no
+    // `reply_to_id` at all, or it points outside this channel (which the write
+    // path refuses). Both render as "no quote" rather than as a broken one.
+    let Some(id): Option<Uuid> = row.try_get("quote_id")? else {
+        return Ok(None);
+    };
+    let type_label: String = row.try_get("quote_message_type")?;
+    let message_type = MessageType::from_db_label(&type_label).ok_or_else(|| {
+        sqlx::Error::Decode(format!("unknown quoted message_type '{type_label}'").into())
+    })?;
+    Ok(Some(QuotedMessage {
+        id,
+        seq: row.try_get("quote_seq")?,
+        author_member_id: row.try_get("quote_author_member_id")?,
+        message_type,
+        body: row.try_get("quote_body")?,
+        state: row.try_get("quote_state")?,
+        edited_at: row.try_get("quote_edited_at")?,
+        deleted_at: row.try_get("quote_deleted_at")?,
+        quotes_another: row.try_get("quote_quotes_another")?,
+    }))
+}
 
 fn decode_paged(row: &sqlx::postgres::PgRow) -> Result<PagedMessage, sqlx::Error> {
     Ok(PagedMessage {
@@ -989,7 +1093,39 @@ fn decode_paged(row: &sqlx::postgres::PgRow) -> Result<PagedMessage, sqlx::Error
             row.try_get("last_reply_seq")?,
             row.try_get("last_reply_at_ms")?,
         ),
+        reply_to: decode_quoted(row)?,
     })
+}
+
+/// The history page's statement, as a value.
+///
+/// Split out of [`list_channel_page`] so the shape of the read is assertable
+/// without a database — specifically, that both the rollup and the quote are
+/// resolved **inside this one statement**. See
+/// `one_page_is_one_statement_however_many_quotes_it_holds`.
+fn channel_page_sql(cursor: HistoryCursor) -> String {
+    let (predicate, order) = match cursor {
+        HistoryCursor::Newest => ("", "DESC"),
+        HistoryCursor::Before(_) => ("AND m.seq < $3 ", "DESC"),
+        HistoryCursor::After(_) => ("AND m.seq > $3 ", "ASC"),
+    };
+    format!(
+        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} {PAGED_QUOTE_JOIN} \
+          WHERE m.channel_id = $1 {predicate}\
+          ORDER BY m.seq {order} \
+          LIMIT $2"
+    )
+}
+
+/// The thread-replies page's statement, as a value — same reason as
+/// [`channel_page_sql`].
+fn thread_replies_sql() -> String {
+    format!(
+        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} {PAGED_QUOTE_JOIN} \
+          WHERE m.channel_id = $1 AND m.root_id = $2 AND m.seq > $3 \
+          ORDER BY m.seq ASC \
+          LIMIT $4"
+    )
 }
 
 /// Read one page of a channel's history with Swift's ordering and cursor
@@ -1005,17 +1141,7 @@ pub async fn list_channel_page(
     cursor: HistoryCursor,
     limit: i64,
 ) -> Result<Vec<PagedMessage>, DbError> {
-    let (predicate, order) = match cursor {
-        HistoryCursor::Newest => ("", "DESC"),
-        HistoryCursor::Before(_) => ("AND m.seq < $3 ", "DESC"),
-        HistoryCursor::After(_) => ("AND m.seq > $3 ", "ASC"),
-    };
-    let sql = format!(
-        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} \
-          WHERE m.channel_id = $1 {predicate}\
-          ORDER BY m.seq {order} \
-          LIMIT $2"
-    );
+    let sql = channel_page_sql(cursor);
     let mut query = sqlx::query(&sql).bind(channel_id).bind(limit);
     match cursor {
         HistoryCursor::Newest => {}
@@ -1066,6 +1192,66 @@ pub enum ThreadRootState {
     Reply,
     /// A live top-level message.
     Live,
+}
+
+/// Why a `replyToId` was refused (ADR-0148 규칙 2).
+///
+/// Deliberately **not** [`ThreadRootInvalid`] with one arm unused: the two
+/// devices refuse different things, and sharing a type would invite a later
+/// reader to conclude that whatever `root_id` rejects `reply_to_id` rejects too.
+/// The difference that matters is the arm that is *absent* here — a quote target
+/// is allowed to be a reply.
+///
+/// **Each arm carries its own sentence, and the sentence is English** — the
+/// packet asked for Korean, the exemplar it named
+/// (`routes::messages::thread_root_rejection` → "thread root not found") is
+/// English, and so is every one of the 317 `ApiError` sentences this server
+/// serves. A single Korean rejection beside them would be a new shape, not a
+/// neighbour; the deviation is recorded in the PR body for the orchestrator to
+/// settle in one pass over the whole vocabulary rather than one endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum QuoteTargetInvalid {
+    /// No such message **in this channel** — 규칙 2. A target in another channel
+    /// is answered identically to one that does not exist, for the same reason
+    /// [`ThreadRootInvalid::NotFound`] is: distinguishing them would turn the
+    /// send endpoint into a cross-channel existence oracle. Cross-*tenant* never
+    /// reaches this decision at all: the row is invisible under RLS, so it
+    /// resolves as missing.
+    #[error("quoted message not found in this channel")]
+    NotFound,
+    /// The target is a tombstone. Quoting a message whose author already
+    /// retracted it would re-point at what they withdrew — and since the body is
+    /// gone, the quote could only ever render as "삭제된 메시지", which is not a
+    /// quote anyone chose to make.
+    ///
+    /// The read path is deliberately looser (see [`QuotedMessage`]): a quote
+    /// made while the target was alive keeps resolving after the target dies.
+    /// Ending a message stops new quotes of it; it does not rewrite the ones
+    /// already made.
+    #[error("a deleted message cannot be quoted")]
+    Deleted,
+}
+
+/// The **write** side's reading of a quote target (ADR-0148 규칙 2).
+///
+/// Reuses [`thread_root_state_in_tx`] — one read, a third question asked of it —
+/// and answers that question differently in exactly one place:
+/// [`ThreadRootState::Reply`] is **accepted**. 규칙 1 says a message may carry
+/// `root_id` and `reply_to_id` at once, and the ADR's own example is quoting one
+/// particular reply from inside its thread; refusing a reply here would forbid
+/// the case the feature was asked for.
+pub async fn validate_quote_target_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    reply_to_id: Uuid,
+) -> Result<Result<(), QuoteTargetInvalid>, DbError> {
+    Ok(
+        match thread_root_state_in_tx(conn, channel_id, reply_to_id).await? {
+            ThreadRootState::Live | ThreadRootState::Reply => Ok(()),
+            ThreadRootState::Missing => Err(QuoteTargetInvalid::NotFound),
+            ThreadRootState::Deleted => Err(QuoteTargetInvalid::Deleted),
+        },
+    )
 }
 
 /// Resolve a `rootId` inside the caller's transaction. The channel predicate is
@@ -1314,12 +1500,7 @@ pub async fn list_thread_replies(
     // Over-read by one: "is there more" must be a fact, not an inference from a
     // full page (a thread with exactly `limit` replies would otherwise advertise
     // a next page that is empty).
-    let sql = format!(
-        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} \
-          WHERE m.channel_id = $1 AND m.root_id = $2 AND m.seq > $3 \
-          ORDER BY m.seq ASC \
-          LIMIT $4"
-    );
+    let sql = thread_replies_sql();
     let rows = sqlx::query(&sql)
         .bind(channel_id)
         .bind(root_id)
@@ -1720,6 +1901,7 @@ mod tests {
             1234,
             0,
             None,
+            None,
             &json!({}),
         );
 
@@ -1748,8 +1930,70 @@ mod tests {
         assert_eq!(inner["hlc_ts"], json!(1234));
         assert_eq!(inner["hlc_count"], json!(0));
         assert_eq!(inner["root_id"], Value::Null);
+        assert_eq!(inner["reply_to_id"], Value::Null);
         // Empty props are omitted, matching Swift.
         assert!(inner.get("props").is_none());
+    }
+
+    /// **The realtime wire carries the quote's ADDRESS, never its text**
+    /// (ADR-0148 규칙 3).
+    ///
+    /// An outbox row is written once and replayed to every late subscriber, so
+    /// a rendered quote embedded here would be a snapshot: still quoting the
+    /// pre-edit text after an edit, and still quoting a deleted message after
+    /// its author deleted it. Put a body in this payload and this test goes red.
+    #[test]
+    fn the_broadcast_carries_the_quote_id_and_no_copy_of_it() {
+        let quoted = Uuid::from_u128(0xbeef);
+        let payload = build_broadcast_payload(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            9,
+            MessageType::Text,
+            Some("그건 아니지"),
+            Uuid::from_u128(4),
+            1234,
+            0,
+            None,
+            Some(quoted),
+            &json!({}),
+        );
+        let inner = &payload["data"]["payload"];
+        assert_eq!(inner["reply_to_id"], json!(quoted));
+        // Nothing here may describe the quoted message beyond its id.
+        for forbidden in ["reply_to", "quote", "quoted_body", "reply_to_body"] {
+            assert!(
+                inner.get(forbidden).is_none(),
+                "the realtime payload must not snapshot the quoted message: {payload}"
+            );
+        }
+    }
+
+    /// 규칙 1 — the two devices are independent, so a message may carry both.
+    /// A payload that dropped one when the other was present would make
+    /// "quoting a reply inside its own thread" unrepresentable on the wire.
+    #[test]
+    fn a_message_can_broadcast_a_thread_root_and_a_quote_at_once() {
+        let root = Uuid::from_u128(0xaaa);
+        let quoted = Uuid::from_u128(0xbbb);
+        let payload = build_broadcast_payload(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            9,
+            MessageType::Text,
+            Some("이 답글 말이야"),
+            Uuid::from_u128(4),
+            1234,
+            0,
+            Some(root),
+            Some(quoted),
+            &json!({}),
+        );
+        let inner = &payload["data"]["payload"];
+        assert_eq!(inner["root_id"], json!(root));
+        assert_eq!(inner["reply_to_id"], json!(quoted));
     }
 
     #[test]
@@ -1804,6 +2048,84 @@ mod tests {
             ThreadRootInvalid::NotTopLevel.to_string(),
             "thread root must be a top-level message"
         );
+    }
+
+    /// **The N+1 answer, pinned without a database** (ADR-0148 §3-2).
+    ///
+    /// Both read paths resolve the quote inside the page's own statement, so a
+    /// page of 100 quoting messages issues the same one query a page of none
+    /// does. The assertions are deliberately about *structure*: delete the join
+    /// — which is what anyone reaching for a per-row lookup would do first —
+    /// and this goes red before the per-row fetch is even written.
+    #[test]
+    fn one_page_is_one_statement_however_many_quotes_it_holds() {
+        let statements = [
+            channel_page_sql(HistoryCursor::Newest),
+            channel_page_sql(HistoryCursor::Before(5)),
+            channel_page_sql(HistoryCursor::After(5)),
+            thread_replies_sql(),
+        ];
+        for sql in &statements {
+            assert!(
+                sql.contains("LEFT JOIN message q ON q.id = m.reply_to_id"),
+                "the quote must be resolved by the page's own join: {sql}"
+            );
+            assert!(
+                sql.contains("q.channel_id = m.channel_id"),
+                "규칙 2 must hold in the read path too: {sql}"
+            );
+            assert_eq!(
+                sql.matches("SELECT").count(),
+                1,
+                "a page is ONE statement — a second SELECT here is a second round \
+                 trip in disguise: {sql}"
+            );
+            assert!(
+                !sql.contains(';'),
+                "a page must not be a statement batch: {sql}"
+            );
+            // The quoted row's own quote is projected as a boolean and never as
+            // an id — 규칙 4's "marker, not a second layer" begins here.
+            assert!(
+                sql.contains("(q.reply_to_id IS NOT NULL) AS quote_quotes_another"),
+                "the second layer is a marker: {sql}"
+            );
+            assert!(
+                !sql.contains("q.reply_to_id AS"),
+                "projecting the inner target's id invites the staircase 규칙 4 \
+                 forbids: {sql}"
+            );
+        }
+    }
+
+    /// Each refusal keeps its own sentence, and the two say different things —
+    /// "there is no such message here" and "that message is gone" are different
+    /// problems with different fixes.
+    #[test]
+    fn every_quote_target_rejection_keeps_its_own_sentence() {
+        assert_eq!(
+            QuoteTargetInvalid::NotFound.to_string(),
+            "quoted message not found in this channel"
+        );
+        assert_eq!(
+            QuoteTargetInvalid::Deleted.to_string(),
+            "a deleted message cannot be quoted"
+        );
+        assert_ne!(
+            QuoteTargetInvalid::NotFound.to_string(),
+            QuoteTargetInvalid::Deleted.to_string()
+        );
+        // A quote refusal must never read as a thread refusal: the web send
+        // probe reads refusals by shape, and the two devices are separate.
+        for quote in [QuoteTargetInvalid::NotFound, QuoteTargetInvalid::Deleted] {
+            for root in [
+                ThreadRootInvalid::NotFound,
+                ThreadRootInvalid::Deleted,
+                ThreadRootInvalid::NotTopLevel,
+            ] {
+                assert_ne!(quote.to_string(), root.to_string());
+            }
+        }
     }
 
     #[test]
@@ -1862,6 +2184,7 @@ mod tests {
             Uuid::from_u128(4),
             9,
             0,
+            None,
             None,
             &json!({"mention_member_ids": ["x"]}),
         );
