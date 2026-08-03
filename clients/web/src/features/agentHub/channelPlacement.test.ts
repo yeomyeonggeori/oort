@@ -4,7 +4,7 @@ import {
   channelPlacement,
   placementFailure,
   placementReceipt,
-} from "./channelPlacement";
+} from "@momo/core/features/agents/channelPlacement";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 

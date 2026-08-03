@@ -12,7 +12,7 @@ import {
   subscriptionKey,
   type AgentSubscription,
   type RunTracks,
-} from "./agentRail";
+} from "@momo/core/features/agents/agentRail";
 import {
   clearAgentWorking,
   markAgentWorking,

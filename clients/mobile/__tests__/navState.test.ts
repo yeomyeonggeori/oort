@@ -14,17 +14,21 @@ import {
 
 const OPEN = {channelId: 'CH-1', title: '#general'};
 
-describe('the two tabs', () => {
+describe('the three tabs', () => {
   it('starts on 대화 with nothing pushed over it', () => {
     expect(INITIAL_NAV).toEqual({
       tab: 'channels',
       conversation: null,
       search: null,
+      agent: null,
     });
   });
 
-  it('names both tabs', () => {
-    expect(TABS.map(tabLabel)).toEqual(['대화', '인박스']);
+  it('names every tab, in the order the tab bar draws them', () => {
+    // 「에이전트」 is spelled out rather than shortened: it is what the web
+    // client calls the same destination, and two clients that name one place
+    // differently have shipped a defect.
+    expect(TABS.map(tabLabel)).toEqual(['대화', '인박스', '에이전트']);
   });
 
   it('switches tabs', () => {
@@ -42,19 +46,20 @@ describe('the two tabs', () => {
 
 describe('a conversation covers the shell', () => {
   it('opens over whichever tab was current', () => {
-    const onInbox: NavState = {tab: 'inbox', conversation: null, search: null};
+    const onInbox: NavState = {tab: 'inbox', conversation: null, search: null, agent: null};
     const next = navReducer(onInbox, {type: 'openConversation', conversation: OPEN});
-    expect(next).toEqual({tab: 'inbox', conversation: OPEN, search: null});
+    expect(next).toEqual({tab: 'inbox', conversation: OPEN, search: null, agent: null});
   });
 
   it('goes back to the tab it was opened from, not to a default', () => {
     // The bug this prevents: opening a channel from 인박스 and landing on 대화
     // when you press back, having lost the list you were reading.
-    const fromInbox: NavState = {tab: 'inbox', conversation: OPEN, search: null};
+    const fromInbox: NavState = {tab: 'inbox', conversation: OPEN, search: null, agent: null};
     expect(navReducer(fromInbox, {type: 'back'})).toEqual({
       tab: 'inbox',
       conversation: null,
       search: null,
+      agent: null,
     });
   });
 
@@ -64,7 +69,7 @@ describe('a conversation covers the shell', () => {
   });
 
   it('replaces one conversation with another rather than stacking', () => {
-    const first: NavState = {tab: 'channels', conversation: OPEN, search: null};
+    const first: NavState = {tab: 'channels', conversation: OPEN, search: null, agent: null};
     const second = {channelId: 'CH-2', title: '김인턴'};
     const next = navReducer(first, {type: 'openConversation', conversation: second});
     expect(next.conversation).toEqual(second);
@@ -76,25 +81,91 @@ describe('a conversation covers the shell', () => {
     // Not normally reachable — the tab bar is behind the conversation — but a
     // deep link or a notification will be able to, and landing on a tab with a
     // conversation still stacked over it looks like the tap did nothing.
-    const covered: NavState = {tab: 'channels', conversation: OPEN, search: null};
+    const covered: NavState = {tab: 'channels', conversation: OPEN, search: null, agent: null};
     expect(navReducer(covered, {type: 'selectTab', tab: 'inbox'})).toEqual({
       tab: 'inbox',
       conversation: null,
       search: null,
+      agent: null,
     });
   });
 
   it('closes the conversation even when the SAME tab is re-selected', () => {
-    const covered: NavState = {tab: 'channels', conversation: OPEN, search: null};
+    const covered: NavState = {tab: 'channels', conversation: OPEN, search: null, agent: null};
     expect(navReducer(covered, {type: 'selectTab', tab: 'channels'})).toEqual(
       INITIAL_NAV,
     );
   });
 });
 
+describe('one agent, opened from the 에이전트 tab', () => {
+  const AGENT = {
+    memberId: 'cccccccc-1111-4111-8111-cccccccccccc',
+    displayName: '김인턴',
+    handle: 'kim-intern',
+  };
+
+  it('opens over the tab it was reached from', () => {
+    const onAgents: NavState = {
+      tab: 'agents',
+      conversation: null,
+      search: null,
+      agent: null,
+    };
+    expect(navReducer(onAgents, {type: 'openAgent', agent: AGENT})).toEqual({
+      tab: 'agents',
+      conversation: null,
+      search: null,
+      agent: AGENT,
+    });
+  });
+
+  it('sits UNDER a conversation, so the DM comes back to the agent', () => {
+    // The reason this layer exists: 대화 열기 on an agent's own screen must
+    // return HERE, not to the list two steps out.
+    const open: NavState = {
+      tab: 'agents',
+      conversation: null,
+      search: null,
+      agent: AGENT,
+    };
+    const withDm = navReducer(open, {type: 'openConversation', conversation: OPEN});
+    expect(withDm.agent).toEqual(AGENT);
+    const back = navReducer(withDm, {type: 'back'});
+    expect(back.conversation).toBeNull();
+    expect(back.agent).toEqual(AGENT);
+    // A second back leaves the agent, and only then.
+    expect(navReducer(back, {type: 'back'}).agent).toBeNull();
+  });
+
+  it('is closed by a tab tap, like everything else stacked over the tabs', () => {
+    const open: NavState = {
+      tab: 'agents',
+      conversation: null,
+      search: null,
+      agent: AGENT,
+    };
+    expect(navReducer(open, {type: 'selectTab', tab: 'agents'})).toEqual({
+      tab: 'agents',
+      conversation: null,
+      search: null,
+      agent: null,
+    });
+  });
+});
+
 describe('sign-out', () => {
   it('forgets where the previous person was', () => {
-    const deep: NavState = {tab: 'inbox', conversation: OPEN, search: null};
+    const deep: NavState = {
+      tab: 'inbox',
+      conversation: OPEN,
+      search: null,
+      agent: {
+        memberId: 'cccccccc-1111-4111-8111-cccccccccccc',
+        displayName: '김인턴',
+        handle: 'kim-intern',
+      },
+    };
     expect(navReducer(deep, {type: 'reset'})).toEqual(INITIAL_NAV);
   });
 });

@@ -226,6 +226,28 @@ describe('the NSE seam stays aligned with the Swift side', () => {
 });
 
 describe('layering', () => {
+  it('never calls the network itself', () => {
+    // Every request in this app goes through `@momo/core/lib/api`, which owns
+    // the 15s deadline, the single-use refresh rotation, the wire decoding and
+    // the ApiError/NetworkError split that every Korean failure sentence is
+    // written against. A `fetch(` here would be a second, quieter answer to all
+    // four — and the first one to go missing would be the deadline, which is
+    // the difference between a failure and a spinner that never ends.
+    //
+    // `refetch(` is react-query asking a query to run AGAIN through that same
+    // client, so the lookbehind keeps it (and any `.fetch(` method) out.
+    const banned = /(?<![A-Za-z_.])fetch\s*\(/;
+    const offenders = sourceFiles(join(APP_ROOT, 'src'))
+      .concat([join(APP_ROOT, 'App.tsx')])
+      .filter(file => {
+        const source = readFileSync(file, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/^\s*\/\/.*$/gm, '');
+        return banned.test(source);
+      });
+    expect(offenders).toEqual([]);
+  });
+
   it('imports the core, never the web client', () => {
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])

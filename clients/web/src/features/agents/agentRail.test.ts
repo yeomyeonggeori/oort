@@ -14,7 +14,7 @@ import {
   subscriptionKey,
   turnStateOf,
   type RunTracks,
-} from "./agentRail";
+} from "@momo/core/features/agents/agentRail";
 import {
   IDLE_CUTOFF_MS,
   resolveAgentWorkingSignals,

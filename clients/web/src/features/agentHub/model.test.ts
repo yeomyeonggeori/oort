@@ -10,7 +10,7 @@ import {
   memoryKindLabel,
   mergeRunPages,
   signalsForAgent,
-} from "./model";
+} from "@momo/core/features/agents/hubModel";
 
 function member(
   id: string,

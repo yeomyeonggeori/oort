@@ -1,16 +1,16 @@
-import type { Channel, RosterMember } from "@momo/core/lib/api";
+import type { Channel, RosterMember } from "../../lib/api";
 import type {
   AgentPartialEvent,
   AgentProgressEvent,
   AgentStatusEvent,
-} from "@/lib/realtime";
+} from "../../lib/realtimeEvents";
 import {
   headlineFrom,
   IDLE_CUTOFF_MS,
   type AgentTurnState,
   type AgentWorkingSignal,
   type AgentWorkingSource,
-} from "./agentWorkingSignal";
+} from "./workingSignal";
 
 // =============================================================================
 // agentRail: the pure half of the agent progress rail (AX-5 / MOMO-613). Which
@@ -18,6 +18,11 @@ import {
 // frame changes what we believe about a run. AgentWorkingRail.tsx holds the
 // React and realtime plumbing; everything decidable without a socket lives here
 // so it can be pinned by tests.
+//
+// Moved into the core by goal RN-A1 (was clients/web/src/features/agents/). The
+// event types now come from `lib/realtimeEvents` directly — `clients/web`'s
+// `lib/realtime` was already re-exporting them from there, so this is the same
+// contract read one hop earlier.
 // =============================================================================
 
 /**
