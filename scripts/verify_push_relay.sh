@@ -54,6 +54,7 @@ sign_body() {
 
 MOMO_RELAY_SERVERS="{\"verify-server\":\"$PUBLIC_B64\"}" \
 MOMO_APNS_SENDER=stub \
+MOMO_APNS_ALLOW_STUB=1 \
 MOMO_APNS_STUB_STATUS=410 \
 MOMO_APNS_STUB_REASON=Unregistered \
 MOMO_APNS_STUB_CAPTURE_PATH="$CAPTURE" \
@@ -129,7 +130,11 @@ test "$(jq -r '.aps.alert | keys | sort | join(",")' "$TMP_ROOT/captured.json")"
 test "$(jq -r '.aps.alert.title' "$TMP_ROOT/captured.json")" = "momo"
 test "$(jq -r '.aps.alert.body' "$TMP_ROOT/captured.json")" = "새 알림"
 test "$(jq -r '.aps.category' "$TMP_ROOT/captured.json")" = "momo.mention"
-test "$(jq -r '.aps[\"thread-id\"]' "$TMP_ROOT/captured.json")" = "33333333-3333-3333-3333-333333333333"
+# Single-quoted for the shell, so the jq program needs plain double quotes.
+# `.aps[\"thread-id\"]` reached jq verbatim (backslashes and all) and was a jq
+# compile error, which aborted this gate before it could check anything below —
+# so every assertion from here down had never actually run (PUSH-1 실측).
+test "$(jq -r '.aps["thread-id"]' "$TMP_ROOT/captured.json")" = "33333333-3333-3333-3333-333333333333"
 test "$(jq -r '.momo | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "channel_id,collapse_id,message_id,reason,schema,server_id,workspace_id"
 test "$(jq -r '.momo.schema' "$TMP_ROOT/captured.json")" = "momo.push.notification.v2"
 if grep -Eiq 'message_body|display_name|handle|channel_name|apns_token' "$TMP_ROOT/captured.json"; then
@@ -137,4 +142,61 @@ if grep -Eiq 'message_body|display_name|handle|channel_name|apns_token' "$TMP_RO
   exit 1
 fi
 
-echo "PASS: signed v2 dispatch + APNs category/thread-id + 410 passthrough + static placeholder alert, bad signature 403, unregistered 403, rate limit 429, id-only momo envelope"
+# --- fail-closed boot contract (goal PUSH-1) ---------------------------------
+#
+# Push is the failure mode that hides best: a relay that boots, answers 200 and
+# sends nothing looks identical — to the notifier, to the metrics, and to a
+# healthcheck — to one that works. These assertions cost no APNs contact and no
+# credential, and they are the only automated proof that the deployed relay
+# cannot enter that state silently.
+#
+# The binary is already built by the run above, so each of these is a fast
+# start-and-exit. Refusals exit 78 (EX_CONFIG) with one operator-readable line.
+assert_refuses_to_boot() {
+  local description="$1" expected="$2"
+  shift 2
+  local log="$TMP_ROOT/refusal.log"
+  if env "$@" swift run --disable-sandbox \
+      --package-path "$REPO_ROOT/relay/PushRelay" PushRelay >"$log" 2>&1; then
+    echo "PushRelay booted when it should have refused: $description" >&2
+    sed -n '1,40p' "$log" >&2
+    exit 1
+  fi
+  if ! grep -q "$expected" "$log"; then
+    echo "refusal for '$description' did not name $expected" >&2
+    sed -n '1,40p' "$log" >&2
+    exit 1
+  fi
+}
+
+# 1. The stub sender contacts nobody. Reaching it takes a deliberate opt-in;
+#    without it the relay must not start, or a misconfigured production deploy
+#    would report every push delivered while sending none.
+assert_refuses_to_boot "stub sender without MOMO_APNS_ALLOW_STUB" MOMO_APNS_ALLOW_STUB \
+  MOMO_RELAY_SERVERS="{\"verify-server\":\"$PUBLIC_B64\"}" \
+  MOMO_APNS_SENDER=stub \
+  MOMO_PUSH_RELAY_PORT="$PORT"
+
+# 2. Live mode (the default) with no APNs credential at all.
+assert_refuses_to_boot "live sender with no APNs credential" MOMO_APNS_ENV \
+  MOMO_RELAY_SERVERS="{\"verify-server\":\"$PUBLIC_B64\"}" \
+  MOMO_PUSH_RELAY_PORT="$PORT"
+
+# 3. Live mode pointed at a `.p8` that does not exist — the likeliest real
+#    deployment mistake (a wrong mount path, or a key the container user cannot
+#    read). Must be a boot refusal, not a first-push failure.
+assert_refuses_to_boot "live sender with an unreadable .p8" MOMO_APNS_KEY_PATH \
+  MOMO_RELAY_SERVERS="{\"verify-server\":\"$PUBLIC_B64\"}" \
+  MOMO_APNS_ENV=sandbox \
+  MOMO_APNS_KEY_PATH="$TMP_ROOT/definitely-not-a-key.p8" \
+  MOMO_APNS_KEY_ID=ABCD123456 \
+  MOMO_APNS_TEAM_ID=TEAM123456 \
+  MOMO_PUSH_RELAY_PORT="$PORT"
+
+# 4. No server registry: a relay that trusts nobody must say so, not idle.
+assert_refuses_to_boot "empty server registry" MOMO_RELAY_SERVERS \
+  MOMO_APNS_SENDER=stub \
+  MOMO_APNS_ALLOW_STUB=1 \
+  MOMO_PUSH_RELAY_PORT="$PORT"
+
+echo "PASS: signed v2 dispatch + APNs category/thread-id + 410 passthrough + static placeholder alert, bad signature 403, unregistered 403, rate limit 429, id-only momo envelope, fail-closed boot refusals (stub opt-in, missing credential, unreadable .p8, empty registry)"

@@ -19,7 +19,8 @@ unread 수 합계를 서버가 계산한다. 이 메타데이터는 모두 id-on
 | `MOMO_PUSH_RELAY_PORT` | `28195` | listen port |
 | `MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE` | `60` | 서명 검증을 통과한 요청의 서버별 60초 sliding-window 한도 |
 | `MOMO_APNS_SENDER` | `live` | 운영은 `live`; repo verifier만 `stub` |
-| `MOMO_APNS_KEY_PATH` | live 필수 | Apple APNs Auth Key `.p8`의 repo 밖 절대 경로 |
+| `MOMO_APNS_ALLOW_STUB` | `stub`일 때 필수 | `1`이어야 stub이 기동한다. stub은 Apple에 접속하지 않고 모든 dispatch에 200 + 조작된 apns-id를 돌려주므로, 이 변수 없이는 **부팅을 거부한다** — 운영 env의 오타 하나가 "안 보내면서 성공 보고하는 배포"가 되지 않게 한다 |
+| `MOMO_APNS_KEY_PATH` | live 필수 | Apple APNs Auth Key `.p8`의 repo 밖 절대 경로. 경로가 있어도 **읽을 수 없으면 부팅 거부** |
 | `MOMO_APNS_KEY_ID` | live 필수 | Apple key ID |
 | `MOMO_APNS_TEAM_ID` | live 필수 | Apple Developer team ID |
 | `MOMO_APNS_ENV` | live 필수 | `sandbox` 또는 `production`; dispatch의 `apns_env`와 불일치하면 400 |
@@ -79,11 +80,22 @@ Apple 앱과 APNs 자격증명이 있는 셀프호스터는 동일 패키지를 
 `PUSH_RELAY_URL`을 자기 relay로 지정할 수 있다. Dawn 운영 relay 사용은 코드상
 강제가 아니며, Dawn relay에도 대화 내용은 전달되지 않는다.
 
-실행 예:
+실행 예(소스):
 
 ```bash
 (cd relay/PushRelay && swift run PushRelay)
 curl -fsS http://127.0.0.1:28195/health
 ```
+
+컨테이너 배포는 `relay/PushRelay/Dockerfile`이다. 빌드 컨텍스트는 repo 루트다
+(패키지가 `services/MomoMetrics`를 경로 의존):
+
+```bash
+docker build -f relay/PushRelay/Dockerfile -t momo-push-relay:dev .
+```
+
+compose 편입은 `infra/rust/docker-compose.push.yml` 오버레이이며 기본 비활성이다.
+준비물·기동·판정을 포함한 전체 절차는
+[docs/cicd/12-push-relay-deploy-runbook.md](cicd/12-push-relay-deploy-runbook.md).
 
 실 APNs smoke는 운영 자격증명 작업이며 이 repo의 자동 게이트에서는 실행하지 않는다.
