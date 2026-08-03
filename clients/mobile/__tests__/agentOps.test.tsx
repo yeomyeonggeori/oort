@@ -133,7 +133,7 @@ const WORK_SESSIONS = [
     startedAtMs: 1_700_000_000_000,
   },
   {
-    // Same agent, always-on host.
+    // Same agent, always-on host, still going.
     id: 'SESSION-CLOUD',
     workspaceId: WS,
     channelId: 'ch-general',
@@ -142,12 +142,29 @@ const WORK_SESSIONS = [
     rootMessageId: 'm-2',
     tool: 'claude',
     label: '야간 배치',
-    status: 'ended',
+    status: 'running',
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
     startedAtMs: 1_699_000_000_000,
-    endedAtMs: 1_699_000_100_000,
+  },
+  {
+    // Same agent, desktop host, ALREADY OVER. The row that used to warn — in
+    // orange — that turning a computer off would stop work that had finished.
+    id: 'SESSION-DONE',
+    workspaceId: WS,
+    channelId: 'ch-general',
+    memberId: KIM_AGENT,
+    hostId: 'HOST-APP',
+    rootMessageId: 'm-4',
+    tool: 'codex',
+    label: '어제 끝난 작업',
+    status: 'ended',
+    observation: 'open',
+    observerGrantCount: 0,
+    remoteAttachAvailable: false,
+    startedAtMs: 1_698_000_000_000,
+    endedAtMs: 1_698_000_100_000,
   },
   {
     // Someone else's. Must never appear under this agent.
@@ -356,18 +373,34 @@ describe('the 에이전트 tab exists at all', () => {
 });
 
 describe('a row says what state the agent is in', () => {
-  it('names 활성, the channels it is in, and what it is working on', async () => {
+  it('names 활성, the channels it is in, and the ledger it read', async () => {
     installFetch();
     await openAgentsTab();
     await waitFor(() =>
       expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).toHaveTextContent(/활성/),
     );
     const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
-    expect(row).toHaveTextContent(/작업 1개 진행 중/);
+    // Two of this agent's three sessions are running; the finished one is not
+    // counted. And the word is 작업 세션, never the web's 작업 중 — see below.
+    expect(row).toHaveTextContent(/작업 세션 2개 실행 중/);
     expect(row).toHaveTextContent(/#general/);
     // ch-secret is a membership this client cannot name; it is COUNTED, never
     // dropped and never invented (`channelPlacement.unresolved`).
     expect(row).toHaveTextContent(/그 밖에 1곳/);
+  });
+
+  it('does not call the session ledger 「작업 중」 (R1 High-2)', async () => {
+    // Web's 작업 중 means an OPEN TURN on the realtime rail, and it explicitly
+    // excludes a turn parked on an approval. Measured on server-rust: a
+    // work_session stays `running` for the whole duration of an approval hold
+    // (no FK between work_session and agent_run; approvals write neither), so
+    // borrowing the word would claim an agent is working while it waits on a
+    // person — the exact thing the web module forbids.
+    installFetch();
+    await openAgentsTab();
+    const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
+    await waitFor(() => expect(row).toHaveTextContent(/세션 실행 중/));
+    expect(row).not.toHaveTextContent(/작업 중/);
   });
 
   it('says 일시정지 when the profile says so', async () => {
@@ -406,7 +439,7 @@ describe('a row says what state the agent is in', () => {
       expect(screen.getByTestId('agent-sessions-error')).toBeTruthy(),
     );
     expect(screen.getByTestId('agent-sessions-error')).toHaveTextContent(
-      /진행 중인 작업만 지금 알 수 없습니다\./,
+      /실행 중인 세션만 지금 알 수 없습니다\./,
     );
     // The list itself is unharmed.
     expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).toBeTruthy();
@@ -495,6 +528,40 @@ describe('재우기 / 깨우기', () => {
     expect(screen.queryByText(/admin required/)).toBeNull();
   });
 
+  it('「다시 시도」 actually retries, rather than dismissing the banner (R1 High-3)', async () => {
+    // The label used to call `reset()`: the sentence vanished and nothing was
+    // sent. On the one control in this batch that changes workspace state.
+    let attempts = 0;
+    const fetchMock = installFetch({
+      pause: () => {
+        attempts += 1;
+        return attempts === 1
+          ? jsonResponse(503, {error: {message: 'upstream down'}})
+          : jsonResponse(200, {profile: {...PROFILE, paused: true, version: 4}});
+      },
+    });
+    await openKim();
+
+    fireEvent.press(screen.getByTestId('agent-pause-toggle'));
+    await waitFor(() => expect(screen.getByTestId('agent-pause-error')).toBeTruthy());
+    const before = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/pause'),
+    ).length;
+
+    fireEvent.press(screen.getByTestId('agent-pause-error-retry'));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes('/pause')).length,
+      ).toBe(before + 1),
+    );
+    // …and the second attempt is the same act, not its opposite.
+    const last = fetchMock.mock.calls
+      .filter(([url]) => String(url).includes('/pause'))
+      .pop();
+    expect(JSON.parse(last![1].body)).toEqual({paused: true});
+    await waitFor(() => expect(screen.queryByTestId('agent-pause-error')).toBeNull());
+  });
+
   it('offers no switch at all when the state cannot even be read', async () => {
     installFetch();
     await openAgentsTab();
@@ -520,11 +587,12 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     await openKimWork();
     expect(screen.getByTestId('agent-session-SESSION-APP')).toBeTruthy();
     expect(screen.getByTestId('agent-session-SESSION-CLOUD')).toBeTruthy();
+    expect(screen.getByTestId('agent-session-SESSION-DONE')).toBeTruthy();
     // The human's session belongs to the human.
     expect(screen.queryByTestId('agent-session-SESSION-HUMAN')).toBeNull();
   });
 
-  it('answers "지금 이거 꺼도 되나" per row, per ADR-0137 D5', async () => {
+  it('answers "지금 이거 꺼도 되나" per LIVE row, per ADR-0137 D5', async () => {
     installFetch();
     await openKimWork();
     await waitFor(() =>
@@ -534,6 +602,37 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     );
     expect(screen.getByTestId('agent-session-tier-SESSION-CLOUD')).toHaveTextContent(
       /폰을 꺼도 계속됩니다/,
+    );
+  });
+
+  it('does NOT warn about a session that is already over (R1 High-1)', async () => {
+    // This assertion used to say the opposite: the ended cloud session was
+    // asserted to promise "폰을 꺼도 계속됩니다" about work that had
+    // finished, and an ended desktop session warned in orange that turning a
+    // computer off would stop it. The test was locking the defect in.
+    installFetch();
+    await openKimWork();
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-session-tier-SESSION-DONE')).toHaveTextContent(
+        /끝난 작업입니다\. 지금 무엇을 꺼도 이 작업에는 영향이 없습니다\./,
+      ),
+    );
+    const done = screen.getByTestId('agent-session-tier-SESSION-DONE');
+    expect(done).not.toHaveTextContent(/멈춥니다/);
+    expect(done).not.toHaveTextContent(/계속됩니다/);
+  });
+
+  it('speaks the whole row to VoiceOver, which needs `accessible` (R1 Medium-3)', async () => {
+    // A View with a label but no `accessible` is not an accessibility element
+    // on iOS, so the assembled sentence was never announced.
+    installFetch();
+    await openKimWork();
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText(
+          /어제 끝난 작업, 종료됨, 데스크톱 앱\. 끝난 작업입니다\./,
+        ),
+      ).toBeTruthy(),
     );
   });
 

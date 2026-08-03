@@ -8,6 +8,7 @@ import {
 } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { attachParticle } from "../../lib/koreanParticle";
+import { serverSurface } from "../capabilities/serverSurfaces";
 import { lifecycleLabel } from "./hubModel";
 
 // =============================================================================
@@ -209,28 +210,13 @@ export interface HostTier {
   key: HostTierKey;
   /** The tier, in the words a person uses. */
   label: string;
-  /**
-   * The answer to "지금 이거 꺼도 되나", stated about the HOST rather than about
-   * the phone: no session in this product runs on the phone, so the honest
-   * subject is always the machine the session is on.
-   */
-  survival: string;
 }
 
-const TIERS: Record<Exclude<HostTierKey, "unknown">, Omit<HostTier, "key">> = {
-  // ADR-0137 D5, verbatim: `type=app`(맥)은 기기를 끄면 죽는다.
-  app: {
-    label: "데스크톱 앱",
-    survival: "그 컴퓨터를 끄거나 앱을 닫으면 이 작업도 멈춥니다.",
-  },
-  workd: {
-    label: "상시 서버",
-    survival: "이 작업은 서버에서 돕니다. 폰을 꺼도 계속됩니다.",
-  },
-  cloud: {
-    label: "클라우드",
-    survival: "이 작업은 클라우드에서 돕니다. 폰을 꺼도 계속됩니다.",
-  },
+/** ADR-0137 D5's three grades, named. `app`(맥)은 기기를 끄면 죽는다. */
+const TIER_LABELS: Record<Exclude<HostTierKey, "unknown">, string> = {
+  app: "데스크톱 앱",
+  workd: "상시 서버",
+  cloud: "클라우드",
 };
 
 /**
@@ -254,16 +240,118 @@ export function hostTier(
   const host = hosts?.find((candidate) => uuidEq(candidate.id, session.hostId));
   const type = host?.type;
   if (type === "app" || type === "workd" || type === "cloud") {
-    return { key: type, ...TIERS[type] };
+    return { key: type, label: TIER_LABELS[type] };
   }
   // A type the registry grew after this client shipped lands here too, and that
   // is the right side to fail on: a new tier we cannot name is exactly as
   // unanswerable as a host we never found.
+  return { key: "unknown", label: "호스트 확인 안 됨" };
+}
+
+/**
+ * The answer to "지금 이거 꺼도 되나", for ONE session.
+ *
+ * ## Why the tier alone cannot answer it (R1 High-1)
+ *
+ * The first version of this surface printed the tier's sentence on every row,
+ * whatever the ledger said the session was. So a session that had ENDED an hour
+ * ago carried "그 컴퓨터를 끄거나 앱을 닫으면 이 작업도 멈춥니다" in warning
+ * orange, and an ended cloud session promised "폰을 꺼도 계속됩니다" about work
+ * that was already over. One card contradicting itself is how a badge stops
+ * being an answer and becomes a label people learn to ignore — and this badge is
+ * the one D5 made mandatory.
+ *
+ * The tier is a fact about the HOST. Whether anything is at stake is a fact
+ * about the SESSION. Both are needed, so both are read.
+ *
+ * ## The arms, and what each one is grounded in
+ *
+ *   running   the host is executing it. This is the D5 sentence proper.
+ *   idle      the run finished but the host still HOLDS the session and its PTY
+ *             (`WorkSessionStatusWire`: "idle still belongs to the live host and
+ *             keeps its PTY attached. It is not an ended session"). So there is
+ *             still something to lose, but it is the session, not a running job.
+ *   ended     the question does not apply, and saying so IS the answer. Going
+ *             silent here would be its own small dishonesty: the reader came to
+ *             this row with a question and would leave without one.
+ *   orphaned  the host is already gone; the loss has happened. What is useful
+ *             now is where it can be picked up (`resumeWorkSession` needs an
+ *             explicitly chosen host, which this client does not offer).
+ *
+ * A tier we could not resolve refuses to answer for a live session — never the
+ * reassuring branch — but an ENDED session is answerable without the registry,
+ * because nothing is at stake regardless of where it ran.
+ *
+ * `atRisk` is what earns a warning colour, and only the app-tier live arms set
+ * it. Colour is never the only signal: the sentence says it too.
+ */
+export interface SessionSurvival {
+  tier: HostTier;
+  /** One sentence. Always true, always about this session's actual state. */
+  sentence: string;
+  /** Is something lost by turning that machine off right now? */
+  atRisk: boolean;
+}
+
+export function sessionSurvival(
+  session: Pick<WorkSession, "hostId"> & { status: string },
+  hosts: readonly WorkHost[] | undefined
+): SessionSurvival {
+  const tier = hostTier(session, hosts);
+
+  if (session.status === "ended") {
+    return {
+      tier,
+      sentence: "끝난 작업입니다. 지금 무엇을 꺼도 이 작업에는 영향이 없습니다.",
+      atRisk: false,
+    };
+  }
+  if (session.status === "orphaned") {
+    return {
+      tier,
+      sentence:
+        "호스트와 연결이 끊겼습니다. 이어받기는 데스크톱에서 할 수 있습니다.",
+      atRisk: false,
+    };
+  }
+
+  const live = session.status === "running";
+  const held = session.status === "idle";
+  if (!live && !held) {
+    // A fifth state the ledger grew. `workSessionStatus` already answers
+    // "상태 확인 필요" for it, and a survival claim built on a state we cannot
+    // name would be exactly the guess this function exists to refuse.
+    return {
+      tier,
+      sentence: "이 작업의 상태를 확인하지 못해, 무엇을 꺼도 되는지 말할 수 없습니다.",
+      atRisk: false,
+    };
+  }
+
+  if (tier.key === "unknown") {
+    return {
+      tier,
+      sentence:
+        "이 작업이 어디서 도는지 확인하지 못했습니다. 무엇을 꺼도 되는지 말할 수 없습니다.",
+      atRisk: false,
+    };
+  }
+  if (tier.key === "app") {
+    return {
+      tier,
+      sentence: live
+        ? "그 컴퓨터를 끄거나 앱을 닫으면 이 작업도 멈춥니다."
+        : "그 컴퓨터를 끄거나 앱을 닫으면 이 세션도 닫힙니다.",
+      atRisk: true,
+    };
+  }
+  const subject = attachParticle(tier.label, "subject");
   return {
-    key: "unknown",
-    label: "호스트 확인 안 됨",
-    survival:
-      "이 작업이 어디서 도는지 확인하지 못했습니다. 무엇을 꺼도 되는지 말할 수 없습니다.",
+    tier,
+    sentence: live
+      ? `이 작업은 ${tier.label}에서 돕니다. 폰을 꺼도 계속됩니다.`
+      : `이 세션은 ${subject} 들고 있습니다. 폰을 꺼도 남아 있습니다.`,
+    atRisk: false,
   };
 }
 
@@ -288,17 +376,83 @@ export function sessionsForAgent(
 }
 
 /**
+ * How many of an agent's sessions the ledger still calls running.
+ *
+ * Kept beside `sessionsForAgent` rather than counted at each call site, because
+ * the word this number is allowed to carry is the subject of the whole section
+ * below.
+ */
+export function runningSessionCount(
+  sessions: readonly WorkSession[],
+  agentMemberId: string
+): number {
+  return sessionsForAgent(sessions, agentMemberId).filter(
+    (session) => session.status === "running"
+  ).length;
+}
+
+// ---- 「작업 중」은 이 화면의 말이 아니다 (R1 High-2) --------------------------
+//
+// `clients/web` already owns that phrase, and it means something this client
+// cannot see. There, 작업 중 is an OPEN TURN — a live `agent.status` frame on the
+// realtime rail — and the web is explicit that a turn parked on an approval is
+// NOT 작업 중 but 승인 대기 (`features/agents/turnCopy.ts`: an indicator that
+// treats the two alike "tells the reader to wait for the agent while the agent
+// is waiting for the reader").
+//
+// The phone has no agent rail yet. What it has is the work-session ledger, which
+// answers a different question: has this agent got a session a host is executing?
+// The two diverge in both directions — an agent answering a mention right now
+// has an open turn and usually NO work session, and a long-running session can
+// sit there while the agent is parked on a decision.
+//
+// That second direction is not a worry, it is measured. `work_session.status`
+// and `agent_run.status` are independent state machines with NO foreign key
+// between them (`work_session` has no `run_id`, `agent_run` has no
+// `work_session_id`; the only shared coordinate is `channel_id`). Every
+// statement that writes `work_session.status` lives in `crates/momo-t3`
+// (`lifecycle.rs` create/end/resume, `reconcile.rs` cloud pause/resume,
+// `sweep.rs` host-loss) and none of them is reachable from an approval:
+// `park_run_for_approval_in_tx` writes `agent_run` alone, and
+// `routes/approvals.rs` contains no reference to `work_session` at all.
+//
+// So a session stays `running` for the WHOLE duration of an approval hold. Had
+// this surface kept the word, it would have said 작업 중 about an agent that had
+// stopped and was waiting for a person — the exact lie the web module says it
+// exists to prevent.
+//
+// So the phone stops using the word. It names the thing it actually read: 작업
+// 세션. Wiring the realtime rail into RN is a batch of its own (a subscription
+// port, the `agentRail` fold that this PR moved into the core, and a store the
+// core deliberately does not have) and it is recorded in the PR as the follow-up
+// rather than half-done here.
+
+/** The row pill. Says which ledger this came from, not what the agent is doing. */
+export const RUNNING_SESSION_PILL = "세션 실행 중";
+
+/** The same fact with its count, for the row's second line and its spoken name. */
+export function runningSessionMeta(count: number): string {
+  return `작업 세션 ${count}개 실행 중`;
+}
+
+/**
  * The line under an agent that owns no sessions.
  *
  * It has to say two different things, because two different facts produce the
  * same empty list and only one of them is about this agent. This server does not
- * serve the run history at all (`serverSurfaces.agentRunHistory`), so "아무것도
- * 안 하고 있습니다" would be a claim built out of a route that does not exist.
+ * serve the run history at all, so "아무것도 안 하고 있습니다" would be a claim
+ * built out of a route that does not exist.
+ *
+ * The absent-surface words come from `serverSurfaces` rather than being written
+ * again here: that table is where a batch that ports the route goes to flip one
+ * line, and a second copy of the sentence would survive the flip. The caller
+ * passes the verdict (`isSurfaceProvided("agentRunHistory")`) so this stays a
+ * pure function of it.
  */
 export function noSessionsDetail(runHistoryProvided: boolean): string {
-  return runHistoryProvided
-    ? "이 에이전트가 연 작업 세션이 없습니다."
-    : "이 에이전트가 연 작업 세션이 없습니다. 이 서버는 그 밖의 실행 기록을 아직 보여주지 못하므로, 조용한 것인지 안 보이는 것인지는 여기서 알 수 없습니다.";
+  if (runHistoryProvided) return "이 에이전트가 연 작업 세션이 없습니다.";
+  const surface = serverSurface("agentRunHistory");
+  return `이 에이전트가 연 작업 세션이 없습니다. ${surface.absentReason} 조용한 것인지 안 보이는 것인지는 여기서 알 수 없습니다. ${surface.fallback}`;
 }
 
 /**

@@ -5,12 +5,13 @@ import {
 } from '@momo/core/lib/api';
 import {
   allowedModelsSummary,
-  hostTier,
+  noSessionsDetail,
   pauseActionLabel,
   pauseEffectNotice,
   pauseFailureCopy,
   pauseReceipt,
   sessionsForAgent,
+  sessionSurvival,
   TERMINAL_ON_DESKTOP,
   type AgentProfileRead,
 } from '@momo/core/features/agents/agentOps';
@@ -19,11 +20,9 @@ import {
   effectiveModelLabel,
 } from '@momo/core/features/agents/hubModel';
 import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
-import {
-  isSurfaceProvided,
-  serverSurface,
-} from '@momo/core/features/capabilities/serverSurfaces';
+import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import {sortSessions, workSessionStatus} from '@momo/core/features/work/workSessionModel';
+import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useMemo, useState} from 'react';
@@ -149,7 +148,6 @@ export default function AgentDetailScreen({
     },
   });
 
-  const runHistory = serverSurface('agentRunHistory');
   const runHistoryProvided = isSurfaceProvided('agentRunHistory');
 
   return (
@@ -207,7 +205,16 @@ export default function AgentDetailScreen({
               // `pause.variables` is the state that was being moved TO, so the
               // sentence names the act that failed and not its opposite.
               message={pauseFailureCopy(pause.variables === true, pause.error)}
-              onRetry={() => pause.reset()}
+              // 「다시 시도」가 실제로 다시 시도한다. 이전 판은 `reset()`이라
+              // 배너만 사라지고 아무 일도 일어나지 않았다 — 라벨이 하지 않는
+              // 일을 약속하고 있었다 (R1 High-3). 재우기는 재시도가 말이 되는
+              // 자리다: 실패 원인이 네트워크면 다음 번에 성공하고, 권한이면
+              // 같은 문장이 다시 뜬다(그건 정직한 답이다).
+              onRetry={
+                pause.variables === undefined
+                  ? undefined
+                  : () => pause.mutate(pause.variables as boolean)
+              }
               testID="agent-pause-error"
             />
           </View>
@@ -266,7 +273,9 @@ export default function AgentDetailScreen({
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${agent.displayName}과의 대화 열기`}
+          // 「과/와」를 손으로 적으면 "Hermes과의 대화"가 된다. 조사는 항상
+          // 유틸이 고른다 (R1 Medium-2 — 이 배치에서 코어에 쌍을 추가했다).
+          accessibilityLabel={`${attachParticle(agent.displayName, 'with')}의 대화 열기`}
           onPress={() => openDm.mutate()}
           disabled={openDm.isPending}
           style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
@@ -279,7 +288,7 @@ export default function AgentDetailScreen({
           <View style={styles.bannerWrap}>
             <FailureBanner
               message={openDmFailureCopy(openDm.error)}
-              onRetry={() => openDm.reset()}
+              onRetry={() => openDm.mutate()}
               testID="agent-open-dm-error"
             />
           </View>
@@ -326,11 +335,9 @@ export default function AgentDetailScreen({
         ) : sessions.length === 0 ? (
           <EmptyState
             headline="이 에이전트가 연 작업 세션이 없습니다."
-            detail={
-              runHistoryProvided
-                ? undefined
-                : `${runHistory.absentReason} ${runHistory.fallback}`
-            }
+            // 문구 정본은 코어 하나다. 화면이 직접 조립하면 같은 문장의
+            // 정본이 둘이 되고, 라우트가 이식되는 날 한쪽만 바뀐다 (R1 Low-3).
+            detail={noSessionsDetail(runHistoryProvided)}
             testID="agent-work-empty"
           />
         ) : (
@@ -400,23 +407,34 @@ function PauseControl({
 /**
  * One work session, with the D5 host tier on it.
  *
- * The tier line is not decoration and is never omitted: an app that holds both
- * a desktop host and a always-on one has to answer "꺼도 되나" per row, and a
- * row with no tier is a row that quietly answers "아마도".
+ * The tier line is not decoration and is never omitted: an app that holds both a
+ * desktop host and an always-on one has to answer "꺼도 되나" per row, and a row
+ * with no tier is a row that quietly answers "아마도".
+ *
+ * But the tier ALONE cannot answer it, which is what R1 High-1 caught: this row
+ * used to print the tier's running sentence whatever state the ledger reported,
+ * so a session that ended an hour ago warned — in orange — that turning a
+ * computer off would stop it. The sentence now comes from `sessionSurvival`,
+ * which reads the host AND the session's own state, and `atRisk` (not the tier)
+ * decides the colour.
  */
 function SessionRow({
   session,
   hosts,
 }: {
   session: WorkSession;
-  hosts: Parameters<typeof hostTier>[1];
+  hosts: Parameters<typeof sessionSurvival>[1];
 }): React.JSX.Element {
   const status = workSessionStatus(session);
-  const tier = hostTier(session, hosts);
+  const survival = sessionSurvival(session, hosts);
   return (
     <View
       style={styles.sessionRow}
-      accessibilityLabel={`${session.label}, ${status.label}, ${tier.label}. ${tier.survival}`}
+      // `accessible` is what MAKES this an element VoiceOver reads: a View with
+      // a label but without it is not an accessibility element on iOS, so the
+      // assembled sentence below was never spoken (R1 Medium-3).
+      accessible
+      accessibilityLabel={`${session.label}, ${status.label}, ${survival.tier.label}. ${survival.sentence}`}
       testID={`agent-session-${session.id}`}>
       <View style={styles.sessionHead}>
         <Text style={styles.sessionLabel} numberOfLines={1} ellipsizeMode="tail">
@@ -430,11 +448,11 @@ function SessionRow({
           {status.label}
         </Text>
       </View>
-      <Text style={styles.meta}>{`${session.tool} · ${tier.label}`}</Text>
+      <Text style={styles.meta}>{`${session.tool} · ${survival.tier.label}`}</Text>
       <Text
-        style={[styles.meta, tier.key === 'app' && styles.survivalWarn]}
+        style={[styles.meta, survival.atRisk && styles.survivalWarn]}
         testID={`agent-session-tier-${session.id}`}>
-        {tier.survival}
+        {survival.sentence}
       </Text>
     </View>
   );

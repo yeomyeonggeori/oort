@@ -2,6 +2,7 @@ import type {Channel, RosterMember, WorkSession} from '@momo/core/lib/api';
 import {
   agentStateLabel,
   isAgentPaused,
+  runningSessionMeta,
   sessionsForAgent,
   type AgentProfileRead,
 } from '@momo/core/features/agents/agentOps';
@@ -13,12 +14,17 @@ import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
 //
 // Every judgement below is a call into `@momo/core/features/agents/*`. This file
 // exists to COMPOSE them into the three things a row has to say — 깨어 있나,
-// 지금 일하는 중인가, 어느 채널에 있나 — and to keep that composition out of a
+// 무슨 세션을 갖고 있나, 어느 채널에 있나 — and to keep that composition out of a
 // component where it could only be checked by screenshot.
 //
-// The web hub answers the same three questions from the same functions, which is
-// the point: two clients that call the same agent 활성 and 준비됨 have shipped a
+// The web hub answers the same questions from the same functions, which is the
+// point: two clients that call the same agent 활성 and 준비됨 have shipped a
 // defect, not a variation.
+//
+// The third question is deliberately NOT "지금 일하는 중인가" (R1 High-2). That
+// is the web's 작업 중, and it means an open realtime TURN, which this client
+// cannot observe. What a row here reads is the work-session ledger, so it says
+// 작업 세션 — see `runningSessionMeta` in the core for why the words diverge.
 // =============================================================================
 
 export interface AgentRow {
@@ -30,7 +36,10 @@ export interface AgentRow {
   stateLabel: string;
   /** True only when the profile was actually read and says so. */
   paused: boolean | null;
-  /** Sessions this agent owns that the ledger still calls running. */
+  /**
+   * Work sessions this agent owns that the LEDGER still calls running. Not "is
+   * this agent working": see the header note.
+   */
   runningCount: number;
   /** Every session this agent owns, running or finished. */
   sessionCount: number;
@@ -54,7 +63,7 @@ export interface AgentRow {
  */
 function metaParts(row: Omit<AgentRow, 'accessibilityLabel' | 'key'>): string[] {
   const parts = [row.stateLabel];
-  if (row.runningCount > 0) parts.push(`작업 ${row.runningCount}개 진행 중`);
+  if (row.runningCount > 0) parts.push(runningSessionMeta(row.runningCount));
   if (row.channelNames.length > 0) {
     parts.push(row.channelNames.map(name => `#${name}`).join(' '));
   }

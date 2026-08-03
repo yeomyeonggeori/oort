@@ -10,6 +10,7 @@ import {
   TapRow,
 } from '../design/atoms';
 import {color, font, radius, space} from '../design/tokens';
+import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
 import {
   agentRowMeta,
   buildAgentRows,
@@ -95,8 +96,8 @@ export default function AgentsScreen({
 
       {sessionsQuery.isError && !failed ? (
         <NoticeBlock
-          headline="지금 무엇을 하는지는 불러오지 못했습니다."
-          detail="목록과 상태는 그대로입니다. 진행 중인 작업만 지금 알 수 없습니다."
+          headline="작업 세션은 불러오지 못했습니다."
+          detail="목록과 상태는 그대로입니다. 실행 중인 세션만 지금 알 수 없습니다."
           testID="agent-sessions-error"
         />
       ) : null}
@@ -163,9 +164,13 @@ function Row({
           {agentRowMeta(row)}
         </Text>
       </View>
+      {/* NOT 「작업 중」. That is the web's word for an open realtime TURN, and
+          this pill is reading the work-session ledger — a different fact that
+          diverges in both directions (R1 High-2). The core owns the string so
+          the two clients cannot drift back together by accident. */}
       {row.runningCount > 0 ? (
         <View style={styles.workingPill}>
-          <Text style={styles.workingPillText}>작업 중</Text>
+          <Text style={styles.workingPillText}>{RUNNING_SESSION_PILL}</Text>
         </View>
       ) : null}
     </TapRow>

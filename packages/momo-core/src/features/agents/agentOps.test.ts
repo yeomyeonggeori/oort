@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, type AgentProfile, type RosterMember, type WorkHost, type WorkSession } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { serverSurface } from "../capabilities/serverSurfaces";
 import {
   agentProfileRead,
   agentStateLabel,
@@ -14,7 +15,11 @@ import {
   pauseFailureCopy,
   pauseReceipt,
   RESUME_EFFECT_NOTICE,
+  RUNNING_SESSION_PILL,
+  runningSessionCount,
+  runningSessionMeta,
   sessionsForAgent,
+  sessionSurvival,
 } from "./agentOps";
 
 // =============================================================================
@@ -238,20 +243,14 @@ describe("고를 수 있는 모델", () => {
   });
 });
 
-describe("호스트 등급 — 지금 이거 꺼도 되나", () => {
-  it("answers D5's sentence for a desktop-app host", () => {
-    const tier = hostTier(session(), [host({ type: "app" })]);
-    expect(tier.key).toBe("app");
-    expect(tier.label).toBe("데스크톱 앱");
-    expect(tier.survival).toContain("컴퓨터를 끄거나 앱을 닫으면 이 작업도 멈춥니다");
-  });
-
-  it("answers it the other way for workd and cloud", () => {
-    for (const type of ["workd", "cloud"] as const) {
-      const tier = hostTier(session(), [host({ type })]);
-      expect(tier.key).toBe(type);
-      expect(tier.survival).toContain("폰을 꺼도 계속됩니다");
-    }
+describe("호스트 등급", () => {
+  it("names D5's three grades", () => {
+    expect(hostTier(session(), [host({ type: "app" })])).toEqual({
+      key: "app",
+      label: "데스크톱 앱",
+    });
+    expect(hostTier(session(), [host({ type: "workd" })]).label).toBe("상시 서버");
+    expect(hostTier(session(), [host({ type: "cloud" })]).label).toBe("클라우드");
   });
 
   it("folds a mixed-case host id, because ids cross this wire in both cases", () => {
@@ -260,16 +259,111 @@ describe("호스트 등급 — 지금 이거 꺼도 되나", () => {
     );
   });
 
-  it("refuses to guess when the registry was not read, or does not name the host", () => {
+  it("refuses to name a host the registry never gave us", () => {
     for (const hosts of [undefined, [], [host({ id: "OTHER" })]]) {
-      const tier = hostTier(session(), hosts);
-      expect(tier.key).toBe("unknown");
-      expect(tier.survival).toContain("확인하지 못했습니다");
+      expect(hostTier(session(), hosts).key).toBe("unknown");
     }
   });
 
-  it("treats a tier this client has never heard of as unanswerable", () => {
+  it("treats a tier this client has never heard of as unknown", () => {
     expect(hostTier(session(), [host({ type: "quantum" })]).key).toBe("unknown");
+  });
+});
+
+describe("지금 이거 꺼도 되나 — 세션 상태까지 읽고 답한다", () => {
+  const APP = [host({ type: "app" })];
+  const CLOUD = [host({ type: "cloud" })];
+
+  it("gives D5's sentence to a session that is actually running", () => {
+    const app = sessionSurvival(session({ status: "running" }), APP);
+    expect(app.sentence).toBe("그 컴퓨터를 끄거나 앱을 닫으면 이 작업도 멈춥니다.");
+    expect(app.atRisk).toBe(true);
+
+    const cloud = sessionSurvival(session({ status: "running" }), CLOUD);
+    expect(cloud.sentence).toContain("폰을 꺼도 계속됩니다");
+    expect(cloud.atRisk).toBe(false);
+  });
+
+  it("says a FINISHED session is not at stake, whatever it ran on", () => {
+    // R1 High-1: the first version printed the running sentence on every row, so
+    // an ended session on a desktop host warned "이 작업도 멈춥니다" in orange
+    // about work that was already over, and an ended cloud session promised it
+    // would keep going. One card, two contradictory claims.
+    for (const hosts of [APP, CLOUD, undefined]) {
+      const over = sessionSurvival(session({ status: "ended" }), hosts);
+      expect(over.sentence).toBe(
+        "끝난 작업입니다. 지금 무엇을 꺼도 이 작업에는 영향이 없습니다."
+      );
+      expect(over.atRisk).toBe(false);
+      expect(over.sentence).not.toContain("멈춥니다");
+      expect(over.sentence).not.toContain("계속됩니다");
+    }
+  });
+
+  it("talks about the SESSION, not a running job, once the run is idle", () => {
+    // `idle` is not ended: the host still holds the session and its PTY. So
+    // something is still at stake — just not a job in flight.
+    const app = sessionSurvival(session({ status: "idle" }), APP);
+    expect(app.sentence).toBe("그 컴퓨터를 끄거나 앱을 닫으면 이 세션도 닫힙니다.");
+    expect(app.atRisk).toBe(true);
+
+    const cloud = sessionSurvival(session({ status: "idle" }), CLOUD);
+    expect(cloud.sentence).toBe(
+      "이 세션은 클라우드가 들고 있습니다. 폰을 꺼도 남아 있습니다."
+    );
+    expect(cloud.atRisk).toBe(false);
+  });
+
+  it("tells an orphaned session where it can be picked up", () => {
+    const lost = sessionSurvival(session({ status: "orphaned" }), APP);
+    expect(lost.sentence).toContain("호스트와 연결이 끊겼습니다");
+    expect(lost.sentence).toContain("데스크톱에서");
+    expect(lost.atRisk).toBe(false);
+  });
+
+  it("refuses to answer for a LIVE session on a host it could not resolve", () => {
+    for (const status of ["running", "idle"] as const) {
+      const unknown = sessionSurvival(session({ status }), undefined);
+      expect(unknown.tier.key).toBe("unknown");
+      expect(unknown.sentence).toContain("무엇을 꺼도 되는지 말할 수 없습니다");
+      expect(unknown.atRisk).toBe(false);
+    }
+  });
+
+  it("answers an ENDED session even without the registry, because nothing is at stake", () => {
+    expect(sessionSurvival(session({ status: "ended" }), undefined).sentence).toContain(
+      "영향이 없습니다"
+    );
+  });
+
+  it("refuses to answer for a state the ledger grew after this client shipped", () => {
+    // Deliberately outside `WorkSessionStatusWire`: `sessionSurvival` takes a
+    // widened `status: string` precisely so a fifth state cannot make it throw
+    // or, worse, fall through to a reassuring branch.
+    const odd = sessionSurvival({ ...session(), status: "hibernating" }, APP);
+    expect(odd.sentence).toContain("말할 수 없습니다");
+    expect(odd.atRisk).toBe(false);
+  });
+});
+
+describe("「작업 중」은 이 화면의 말이 아니다", () => {
+  it("names the ledger it read, not the state the web word means", () => {
+    // R1 High-2: web's 작업 중 is an OPEN TURN on the realtime rail, and it is
+    // explicitly NOT the word for a turn parked on an approval. The phone has no
+    // rail; it has the session ledger. Same word, different fact = a defect.
+    expect(RUNNING_SESSION_PILL).toBe("세션 실행 중");
+    expect(RUNNING_SESSION_PILL).not.toContain("작업 중");
+    expect(runningSessionMeta(2)).toBe("작업 세션 2개 실행 중");
+    expect(runningSessionMeta(1)).not.toMatch(/작업 중/);
+  });
+
+  it("counts only this agent's running sessions", () => {
+    const rows = [
+      session({ id: "A", status: "running" }),
+      session({ id: "B", status: "ended" }),
+      session({ id: "C", status: "running", memberId: "dddddddd-1111-4111-8111-dddddddddddd" }),
+    ];
+    expect(runningSessionCount(rows, AGENT_ID)).toBe(1);
   });
 });
 
@@ -288,6 +382,16 @@ describe("그 에이전트가 연 작업 세션", () => {
 
   it("will not call an empty list silence while the run history is unreadable", () => {
     expect(noSessionsDetail(false)).toContain("조용한 것인지 안 보이는 것인지는");
+    expect(noSessionsDetail(true)).toBe("이 에이전트가 연 작업 세션이 없습니다.");
     expect(noSessionsDetail(true)).not.toContain("조용한 것인지");
+  });
+
+  it("borrows the absent-surface words instead of writing a second copy", () => {
+    // R1 Low-3: the screen used to assemble this sentence itself, so the same
+    // copy had two definitions. `serverSurfaces` is where a batch that ports the
+    // route flips one line, and a second copy would survive that flip.
+    const surface = serverSurface("agentRunHistory");
+    expect(noSessionsDetail(false)).toContain(surface.absentReason);
+    expect(noSessionsDetail(false)).toContain(surface.fallback);
   });
 });
