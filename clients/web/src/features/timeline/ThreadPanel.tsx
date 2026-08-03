@@ -75,12 +75,27 @@ export function ThreadPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* 루트에 「답글 N개」를 적지 않는다 (goal RN-U2).
+
+            성재(iOS 실기기): "답글에서 개수 업데이트는 굳이 왜 해? 목록에 나오면
+            몇 개의 reply가 있는지는 자연스러운데, 답글에서 '답글 1개' 이런 식으로
+            보이는 건 자연스럽지 않은 거 같아."
+
+            같은 제품 판단이므로 웹도 같이 고친다. 롤업은 **채널 목록에서 "여기
+            스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를 열어 둔 사람에게는
+            자기가 서 있는 곳의 이름을 다시 읽어 주는 것에 불과하다 — 게다가 답글을
+            달 때마다 숫자가 오른다.
+
+            goal P3 1-1 이 이 자리를 <button>에서 <span>으로 내린 것이 절반이었고
+            (죽은 컨트롤을 없앴다), 나머지 절반이 이것이다: 글이어도 여기서는 할 말이
+            없다. */}
         <MessageRow
           message={root}
           startsGroup
           directory={directory}
           actions={rowActions(root)}
           onOpenWorkSession={onOpenWorkSession}
+          showRollup={false}
         />
         <div className="mx-4 my-2 h-px bg-line" />
 
@@ -107,6 +122,11 @@ export function ThreadPanel({
             directory={directory}
             actions={rowActions(reply)}
             onOpenWorkSession={onOpenWorkSession}
+            // 답글은 애초에 롤업을 갖지 않는다(서버 투영이 `root_id IS NULL` 로
+            // 거른다 — 스레드는 한 단계다). 명시해 두는 것은 그 불변식이 깨져
+            // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
+            // 말하지 않게 하기 위해서다.
+            showRollup={false}
           />
         ))}
       </div>

@@ -1647,18 +1647,29 @@ async function assertPausedNoticeFolded(page, where) {
 }
 
 /**
- * 스레드 패널의 「답글 N개」가 죽은 버튼이 아닌가 (goal P3 1-1).
+ * 「답글 N개」가 **있어야 할 곳에만** 있는가 (goal P3 1-1 → goal RN-U2).
  *
- * 결함은 눈에 보이지 않는 종류였다: 패널이 `onOpenThread`를 넘기지 않는데 행은
- * `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에 반응하면서 눌러도
- * 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 스크린샷에서 버튼과 글은
- * 같은 그림이므로 여기서 태그를 직접 본다.
+ * 이 게이트는 두 번 움직였고, 두 번 다 같은 줄에 대한 것이었다.
  *
- * 같은 자로 반대쪽도 잰다: 채널 타임라인에서는 그 자리가 **여전히 버튼**이어야
- * 한다. 죽은 컨트롤을 없앤다면서 살아 있는 진입점까지 글로 만들어 버리면 스레드로
- * 들어가는 길이 사라진다.
+ * P3 1-1 은 그 줄이 **죽은 버튼**인 것을 잡았다: 패널이 `onOpenThread`를 넘기지
+ * 않는데 행은 `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에
+ * 반응하면서 눌러도 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 그 수정은
+ * 버튼을 글로 내렸다.
+ *
+ * RN-U2 는 그 글마저 여기서는 할 말이 없다고 판정한다 — 성재(iOS 실기기): "답글에서
+ * 개수 업데이트는 굳이 왜 해? 목록에 나오면 몇 개의 reply가 있는지는 자연스러운데,
+ * 답글에서 '답글 1개' 이런 식으로 보이는 건 자연스럽지 않은 거 같아." 롤업은 목록의
+ * 장치이고, 이미 그 스레드 안에 있는 사람에게는 정보가 0이다.
+ *
+ * 그래서 패널 쪽 판정이 **뒤집힌다**: 있으면 안 된다. 태그를 보던 자리는 텍스트를
+ * 보는 자리가 되는데, 그것이 더 강하다 — <span>을 지웠는데 다른 조각이 같은 숫자를
+ * 다시 그리는 회귀까지 잡는다.
+ *
+ * 반대쪽은 그대로다. 채널 타임라인에서는 그 자리가 **여전히 살아 있는 버튼**이어야
+ * 한다. 스레드에서 지운다면서 목록의 진입점까지 지우면 스레드로 들어가는 길이
+ * 사라지고, 그것이 이 배치가 만들 수 있는 가장 나쁜 회귀다.
  */
-async function assertThreadRollupNotDead(page, where) {
+async function assertThreadRollupPlacement(page, where) {
   const seen = await page.evaluate(`(() => {
     const panel = document.querySelector('[data-testid="thread-panel"]');
     const inPanel = panel
@@ -1672,31 +1683,38 @@ async function assertThreadRollupNotDead(page, where) {
       hasPanel: Boolean(panel),
       inPanel: inPanel.map(shape),
       outside: outside.map(shape),
+      // 패널 어디에도 개수 문장이 남아 있지 않은가. 앵커를 지우고 다른 자리에
+      // 같은 숫자를 그리는 회귀를 잡는 것은 이쪽이다.
+      panelCount: panel
+        ? (panel.textContent || "").match(/답글\\s*\\d+\\s*개/)
+        : null,
     };
   })()`);
 
   if (!seen.hasPanel) throw new Error(`[${where}] 스레드 패널이 열리지 않았다`);
-  if (seen.inPanel.length === 0) {
-    throw new Error(`[${where}] 패널 루트에 「답글 N개」가 없다`);
+  if (seen.inPanel.length > 0) {
+    throw new Error(
+      `[${where}] 스레드 패널에 아직 「${seen.inPanel[0].text}」가 있다 — 롤업은 목록의 장치이고 스레드 안에서는 정보가 0이다`
+    );
   }
-  for (const anchor of seen.inPanel) {
-    if (anchor.tag === "BUTTON") {
-      throw new Error(
-        `[${where}] 스레드 패널의 「${anchor.text}」가 아직 <button>이다 — 눌러도 아무 일이 없는 컨트롤이다`
-      );
-    }
-    if (!anchor.text.startsWith("답글 ")) {
-      throw new Error(`[${where}] 답글 수를 읽을 수 없다: ${anchor.text}`);
-    }
+  if (seen.panelCount) {
+    throw new Error(
+      `[${where}] 스레드 패널이 여전히 답글 수를 말한다: 「${seen.panelCount[0]}」`
+    );
+  }
+  if (seen.outside.length === 0) {
+    throw new Error(
+      `[${where}] 채널 타임라인에 「답글 N개」가 하나도 없다 — 이 게이트가 아무것도 재지 못했다`
+    );
   }
   const live = seen.outside.filter((a) => a.tag === "BUTTON");
-  if (seen.outside.length > 0 && live.length === 0) {
+  if (live.length === 0) {
     throw new Error(
-      `[${where}] 채널 타임라인의 「답글 N개」까지 글이 됐다 — 스레드로 들어가는 길이 없다`
+      `[${where}] 채널 타임라인의 「답글 N개」까지 사라졌다 — 스레드로 들어가는 길이 없다`
     );
   }
   console.log(
-    `  thread rollup ${where}: 패널 ${seen.inPanel.map((a) => a.tag).join(",")} · 타임라인 ${live.length}개 버튼`
+    `  thread rollup ${where}: 패널 0개 · 타임라인 ${live.length}개 버튼`
   );
 }
 
@@ -2833,7 +2851,7 @@ async function captureScheme(browser, scheme) {
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
   // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
-  await assertThreadRollupNotDead(login, `thread panel ${scheme}`);
+  await assertThreadRollupPlacement(login, `thread panel ${scheme}`);
   const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
