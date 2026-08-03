@@ -10,7 +10,8 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "gate:project-shape": "jest __tests__/projectShape.test.ts",
-    "build:sim": "bash scripts/build-sim.sh"
+    "build:sim": "bash scripts/build-sim.sh",
+    "gate:session": "node gate/run.mjs"
   },
   "dependencies": {
     "@react-native-community/netinfo": "^12.0.1",
