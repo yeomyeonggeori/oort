@@ -70,7 +70,7 @@ const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
 const KIM_AGENT = 'cccccccc-1111-4111-8111-cccccccccccc';
 const PENDING = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
-const IRREVERSIBLE = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
+const REVERSIBLE = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
 const SETTLED = 'eeeeeeee-1111-4111-8111-eeeeeeeeeeee';
 const CHANNEL = 'ch-general';
 const BASE = 'https://api.example.com';
@@ -124,19 +124,83 @@ const CHANNELS = [
   {id: CHANNEL, workspaceId: WS, kind: 'public', name: 'general', muted: false},
 ];
 
-/** `GET …/approvals` 한 행. 와이어는 snake_case다 (core `WireApproval`). */
+/**
+ * `GET …/approvals` 한 행 — **이 서버가 실제로 보내는 모양** (2R H1).
+ *
+ * 1R의 픽스처는 `action_type: 'work.spawn'` + `is_reversible: true`였다. 그 두 값은
+ * 이 서버가 **한 번도 보내지 않는다**. 서버가 실을 수 있는 것은 이것뿐이다:
+ *
+ *   * 키는 camelCase — `bins/momo-server/src/dto.rs:2213`의 `ApprovalDto`가
+ *     `#[serde(rename_all = "camelCase")]`다. (정본 스펙 `docs/api/openapi.yaml`의
+ *     `ApprovalProjection`은 snake_case를 적고 있어 둘이 어긋난다 — PR 이탈 참조.
+ *     그래서 아래에 snake_case 픽스처도 따로 둔다: 클라이언트는 두 서버를 다 만난다.)
+ *   * `actionType`은 언제나 `'tool_call'` (`crates/momo-agent/src/tools.rs:82`).
+ *   * `isReversible`은 **없다**. dto.rs:2210-2212가 명시한다 — 없음은 "모른다"이지
+ *     "되돌릴 수 있다"가 아니다. v0의 유일한 툴 `work.session.end`는 비가역인 것이
+ *     선정 사유다(tools.rs:33-38).
+ *   * 툴 이름은 `payload.tool_call.name`에 있다 (`approval.rs:566-590`의
+ *     `approval_payload` 실측).
+ *
+ * 픽스처가 서버보다 친절하면 화면의 거짓말이 테스트에 잠긴다(#980의 교훈).
+ */
 function wireApproval(over: Record<string, unknown> = {}) {
   return {
     id: PENDING,
-    workspace_id: WS,
-    run_id: 'run-1',
-    channel_id: CHANNEL,
-    requested_by: KIM_AGENT,
-    action_type: 'work.spawn',
+    workspaceId: WS,
+    runId: 'run-1',
+    channelId: CHANNEL,
+    requestedBy: KIM_AGENT,
+    actionType: 'tool_call',
+    payload: {
+      run_id: 'run-1',
+      action_type: 'tool_call',
+      tool_call: {
+        call_id: 'call-1',
+        name: 'work.session.end',
+        arguments: '{"session_id":"SESSION-APP"}',
+        arguments_json: {session_id: 'SESSION-APP'},
+      },
+      approval_reason: 'irreversible tool',
+      resume_model: 'gpt-5.6',
+    },
     status: 'pending',
-    is_reversible: true,
-    expires_at_ms: 1_700_000_600_000,
+    expiresAtMs: 1_700_000_600_000,
+    createdAtMs: 1_699_999_000_000,
     ...over,
+  };
+}
+
+/** 같은 행을 정본 스펙(`openapi.yaml` ApprovalProjection)의 snake_case로. */
+function wireApprovalSnake(over: Record<string, unknown> = {}) {
+  const camel = wireApproval(over);
+  return {
+    id: camel.id,
+    workspace_id: camel.workspaceId,
+    run_id: camel.runId,
+    channel_id: camel.channelId,
+    requested_by: camel.requestedBy,
+    action_type: camel.actionType,
+    payload: camel.payload,
+    status: camel.status,
+    expires_at_ms: camel.expiresAtMs,
+    created_at_ms: camel.createdAtMs,
+    ...over,
+  };
+}
+
+/**
+ * `POST …/approvals/{id}/decision`의 영수증 — 역시 camelCase다
+ * (`dto.rs:2266`의 `ApprovalDecisionReceipt`). core의 영수증 파서는 snake_case를
+ * 읽으므로 `decidedBy`/`decidedAtMs`는 지금 버려진다 — `status`만 두 표기가 같아
+ * 결정 자체는 성립한다. 그 어긋남은 `approvalDecision.ts`(W-2R 전속)의 몫이라
+ * 여기서는 서버가 보내는 그대로 두고 PR 이탈에 적는다.
+ */
+function receipt(approvalId: string, status: string) {
+  return {
+    approvalId,
+    status,
+    decidedBy: SELF_ID,
+    decidedAtMs: 1_700_000_000_000,
   };
 }
 
@@ -178,12 +242,7 @@ function installFetch(overrides: RouteOverrides = {}): Fixture {
       });
       return overrides.decision
         ? overrides.decision(approvalId, body)
-        : jsonResponse(200, {
-            approval_id: approvalId,
-            status: body.approve ? 'approved' : 'rejected',
-            decided_by: SELF_ID,
-            decided_at_ms: 1_700_000_000_000,
-          });
+        : jsonResponse(200, receipt(approvalId, body.approve ? 'approved' : 'rejected'));
     }
     if (target.includes('/approvals')) {
       const status = new URL(target).searchParams.get('status') ?? 'pending';
@@ -353,7 +412,7 @@ describe('결정의 세 갈래', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
-        /승인했습니다\. 에이전트가 이어서 실행합니다\./,
+        /승인을 기록했습니다\./,
       ),
     );
     expect(fixture.decisions()).toEqual([
@@ -373,12 +432,7 @@ describe('결정의 세 갈래', () => {
         attempts += 1;
         return attempts === 1
           ? jsonResponse(503, {error: {message: 'upstream down'}})
-          : jsonResponse(200, {
-              approval_id: approvalId,
-              status: body.approve ? 'approved' : 'rejected',
-              decided_by: SELF_ID,
-              decided_at_ms: 1_700_000_000_000,
-            });
+          : jsonResponse(200, receipt(approvalId, body.approve ? 'approved' : 'rejected'));
       },
     });
     const row = await openPendingRow();
@@ -398,7 +452,7 @@ describe('결정의 세 갈래', () => {
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
     await waitFor(() =>
       expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
-        /거부했습니다\. 이 실행은 취소되었습니다\./,
+        /거부를 기록했습니다\./,
       ),
     );
     // 재시도는 **같은 멱등키**로 나갔다. 새 키였다면 서버 쪽에서 두 번째 결정이
@@ -414,13 +468,7 @@ describe('결정의 세 갈래', () => {
     // 상태를 실어 답하고, 그것은 정상적인 상태 전이다
     // (`src/push/notifications.ts:142`가 같은 답을 같은 뜻으로 읽는다).
     installFetch({
-      decision: approvalId =>
-        jsonResponse(409, {
-          approval_id: approvalId,
-          status: 'approved',
-          decided_by: SELF_ID,
-          decided_at_ms: 1_700_000_000_000,
-        }),
+      decision: approvalId => jsonResponse(409, receipt(approvalId, 'approved')),
     });
     const row = await openPendingRow();
 
@@ -444,13 +492,8 @@ describe('결정의 세 갈래', () => {
       decision: approvalId => {
         attempts += 1;
         return attempts === 1
-          ? jsonResponse(409, {approval_id: approvalId, status: 'pending'})
-          : jsonResponse(200, {
-              approval_id: approvalId,
-              status: 'approved',
-              decided_by: SELF_ID,
-              decided_at_ms: 1_700_000_000_000,
-            });
+          ? jsonResponse(409, receipt(approvalId, 'pending'))
+          : jsonResponse(200, receipt(approvalId, 'approved'));
       },
     });
     const row = await openPendingRow();
@@ -467,6 +510,119 @@ describe('결정의 세 갈래', () => {
     await waitFor(() => expect(fixture.decisions()).toHaveLength(2));
     const sent = fixture.decisions();
     expect(sent[0].key).not.toBe(sent[1].key);
+  });
+});
+
+// ---- 2R red proof: 컨트롤이 하는 「말」이 참인가 ----------------------------
+//
+// 1R 리뷰의 판정: 컨트롤(확인 단계·가드·멱등키)은 견고한데 그것이 하는 말이
+// 무너진다. 아래 두 묶음이 그 말을 못박는다. 둘 다 **서버가 실제로 보내는
+// 픽스처**(위 `wireApproval`) 위에서만 의미가 있다 — 친절한 픽스처는 거짓말을
+// 잠근다.
+
+describe('RED PROOF ③: 서버가 가역이라고 말하지 않았으면 가역이라고 말하지 않는다', () => {
+  it('필드가 없으면 「되돌릴 수 없음」 — absent는 unknown이지 reversible이 아니다', async () => {
+    // 계약: dto.rs:2210-2212 "A client must treat an absent isReversible as
+    // unknown, never as reversible." v0의 유일한 툴은 비가역인 것이 선정 사유다.
+    installFetch();
+    const row = await openPendingRow();
+    expect(row).toHaveTextContent(/되돌릴 수 없음/);
+
+    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
+    // 확정 문장이 그 사실을 다시 말한다. 경고를 행에만 두면 확인 화면에서
+    // 사라지고, 사람이 마지막으로 읽는 문장이 가장 조용해진다.
+    expect(screen.getByTestId(`inbox-approval-${PENDING}-confirm`)).toHaveTextContent(
+      /되돌릴 수 없습니다\./,
+    );
+  });
+
+  it('서버가 명시적으로 true라고 말한 행에서만 그 경고가 없다', async () => {
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals:
+            status === 'pending'
+              ? [wireApproval({id: REVERSIBLE, isReversible: true})]
+              : [],
+        }),
+    });
+    const row = await openPendingRow(REVERSIBLE);
+    expect(row).not.toHaveTextContent(/되돌릴 수 없음/);
+
+    fireEvent.press(within(row).getByTestId(`inbox-approval-${REVERSIBLE}-approve`));
+    expect(
+      screen.getByTestId(`inbox-approval-${REVERSIBLE}-confirm`),
+    ).not.toHaveTextContent(/되돌릴 수 없습니다/);
+  });
+});
+
+describe('RED PROOF ④: 내부 식별자가 사람 문장에 새지 않는다', () => {
+  it('행 제목이 `tool_call`이 아니라 그 툴이 하는 일이다', async () => {
+    // 서버가 보내는 유일한 action_type은 `tool_call`이고(tools.rs:82), 그것은
+    // 승인 원장의 계층 이름이지 사람에게 할 말이 아니다. 무엇을 허가하는지는
+    // `payload.tool_call.name`에 있다.
+    installFetch();
+    const row = await openPendingRow();
+    expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했습니다/);
+    expect(row).not.toHaveTextContent(/tool_call/);
+    // 화면 어디에도 없어야 한다 — 행 밖으로 새는 경로(접근성 라벨 포함)까지.
+    expect(screen.queryByText(/tool_call/)).toBeNull();
+    expect(screen.queryByLabelText(/tool_call/)).toBeNull();
+  });
+
+  it('모르는 툴이면 툴 이름을 그대로 보여준다 — 지어내지도, 계층 이름을 쓰지도 않는다', async () => {
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals:
+            status === 'pending'
+              ? [
+                  wireApproval({
+                    payload: {
+                      run_id: 'run-1',
+                      action_type: 'tool_call',
+                      tool_call: {call_id: 'call-9', name: 'repo.branch.delete'},
+                    },
+                  }),
+                ]
+              : [],
+        }),
+    });
+    const row = await openPendingRow();
+    expect(row).toHaveTextContent(/repo\.branch\.delete/);
+    expect(row).not.toHaveTextContent(/tool_call/);
+  });
+
+  it('툴 이름조차 없으면 그 사실에 맞는 문장을 쓴다', async () => {
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals:
+            status === 'pending' ? [wireApproval({payload: {run_id: 'run-1'}})] : [],
+        }),
+    });
+    const row = await openPendingRow();
+    expect(row).toHaveTextContent(/에이전트 도구 실행 허가를 요청했습니다/);
+    expect(row).not.toHaveTextContent(/tool_call/);
+  });
+});
+
+describe('두 서버의 표기를 모두 읽는다', () => {
+  it('정본 스펙의 snake_case 행도 같은 문장으로 그린다', async () => {
+    // `docs/api/openapi.yaml`의 ApprovalProjection은 snake_case이고 Rust 서버의
+    // ApprovalDto는 camelCase다. 클라이언트 하나가 둘을 다 만나므로, 한쪽만 읽는
+    // 파서는 다른 쪽 서버에서 인박스를 통째로 비워 놓는다 — 그리고 빈 목록은
+    // 「결정할 것이 없다」로 읽힌다.
+    installFetch({
+      approvals: status =>
+        jsonResponse(200, {
+          approvals: status === 'pending' ? [wireApprovalSnake()] : [],
+        }),
+    });
+    const row = await openPendingRow();
+    expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했습니다/);
+    expect(row).toHaveTextContent(/되돌릴 수 없음/);
+    expect(within(row).getByLabelText('승인, 확인 필요')).toBeTruthy();
   });
 });
 
@@ -531,23 +687,26 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     expect(fixture.decisions()).toHaveLength(0);
   });
 
-  it('확인 문장은 무엇이 일어나는지 말하고, 되돌릴 수 없으면 그것도 말한다', async () => {
-    installFetch({
-      approvals: status =>
-        jsonResponse(200, {
-          approvals:
-            status === 'pending'
-              ? [wireApproval({id: IRREVERSIBLE, is_reversible: false})]
-              : [],
-        }),
-    });
-    const row = await openPendingRow(IRREVERSIBLE);
-    // 행은 core가 쓴 대로 이미 되돌릴 수 없음을 이고 있다.
-    expect(row).toHaveTextContent(/되돌릴 수 없음/);
+  it('확인 문장은 무엇이 일어나는지 말한다 — 서버가 약속하지 못하는 것은 빼고', async () => {
+    // 「바로/이어서 실행합니다」는 계약상 못 지키는 약속이었다(2R H4): 승인은
+    // run이 hold를 떠났으면 resume job 없이 200을 답하고(approvals.rs
+    // `approve_run`의 `requeue…` 가드), 정상 경로도 outbox 비동기다. 그래서
+    // 문장은 조건 없이 참인 것만 말한다.
+    installFetch();
+    const row = await openPendingRow();
 
-    fireEvent.press(within(row).getByTestId(`inbox-approval-${IRREVERSIBLE}-approve`));
-    expect(screen.getByTestId(`inbox-approval-${IRREVERSIBLE}-confirm`)).toHaveTextContent(
-      /승인하면 에이전트가 바로 실행합니다\. 되돌릴 수 없습니다\./,
+    fireEvent.press(within(row).getByTestId(`inbox-approval-${PENDING}-approve`));
+    const confirm = screen.getByTestId(`inbox-approval-${PENDING}-confirm`);
+    expect(confirm).toHaveTextContent(/승인하면 에이전트가 이어서 진행합니다\./);
+    expect(confirm).not.toHaveTextContent(/바로 실행/);
+
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-cancel`));
+    fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-reject`));
+    // 거부→취소는 결정과 **같은 트랜잭션**이다(approvals.rs `reject_run` →
+    // `end_parked_run_in_tx`). 다만 이미 hold를 떠난 run은 취소할 것이 없으므로
+    // 문장은 「대기 중인 실행」으로 한정한다.
+    expect(screen.getByTestId(`inbox-approval-${PENDING}-confirm`)).toHaveTextContent(
+      /거부하면 대기 중인 실행이 취소됩니다\./,
     );
   });
 
@@ -556,15 +715,7 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     const fixture = installFetch({
       decision: approvalId =>
         new Promise<Response>(resolve => {
-          release = () =>
-            resolve(
-              jsonResponse(200, {
-                approval_id: approvalId,
-                status: 'approved',
-                decided_by: SELF_ID,
-                decided_at_ms: 1_700_000_000_000,
-              }),
-            );
+          release = () => resolve(jsonResponse(200, receipt(approvalId, 'approved')));
         }),
     });
     await openPendingRow();
@@ -616,8 +767,8 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
                   wireApproval({
                     id: SETTLED,
                     status: 'approved',
-                    decided_by: SELF_ID,
-                    decided_at_ms: 1_700_000_000_000,
+                    decidedBy: SELF_ID,
+                    decidedAtMs: 1_700_000_000_000,
                   }),
                 ]
               : [],
