@@ -30,5 +30,19 @@ import './src/boot/coreHost';
 import {AppRegistry} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
+import {measureMode} from './measure/root';
 
-AppRegistry.registerComponent(appName, () => App);
+/**
+ * Normally `App`. With the launch argument `-momoMeasure YES`, and only in a dev
+ * build, the measurement harness takes the root instead (see `measure/`).
+ *
+ * The swap lives here rather than inside `App` so a normal launch never even
+ * evaluates the harness: the only thing imported above is the one function that
+ * reads the argument, and `require` below runs only when it answers yes.
+ */
+AppRegistry.registerComponent(appName, () => {
+  const mode = measureMode();
+  if (mode === 'measure') return require('./measure/harness').default;
+  if (mode === 'states') return require('./measure/states').default;
+  return App;
+});
