@@ -1,10 +1,11 @@
 # HANDOFF: Agent-platform 계획 독립 레드팀 → Fable 검수
 
-> Status: `ready` — **planner review packet이며 worker 구현 계약이 아니다**
+> Status: `superseded` — **planner review packet이며 worker 구현 계약이 아니다**
 > Planning ID: `PLN-20260728-01` · Planner/Red team: GPT 5.6 (`momo-main`) · Reviewer: Fable · Integrator: `momo-main`
 > 발급: 2026-07-28 · 기준 커밋: `747c9b120762dd60c46d357acb9312f19f81959b`
 > Supersedes: `docs/planning/handoffs/2026-07-28-fable-agent-platform-review.md`
 > GitHub binding: 미발급 · 판정: **조건부 반려**
+> Superseded by: `docs/planning/handoffs/2026-07-28-fable-resource-optimized-canonicalization.md`
 
 이 패킷은 첫 감사 패킷의 실행 권고를 대체한다. 경쟁사·현재 구현 사실은 원 감사 문서에서 재사용하되, builder DAG는 독립 레드팀 검수를 기준으로 다시 줄인다.
 

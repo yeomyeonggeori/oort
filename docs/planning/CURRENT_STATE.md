@@ -1,5 +1,36 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-08-04 스냅샷 10 (Fable · momo-main 통합 — 인계 전수 검증·로드맵 조정).** 전 세션 인계(`2026-08-03-session-state-for-fable.md`)를 전 항목 재실측했다. **정본 = `docs/planning/2026-08-04-handover-verification-and-roadmap-adjustment.md`.**
+>
+> **상태 정정 — 아래 스냅샷 9는 세션 중반에 멈춰 있다**: #979(승인 서버)·#980(폰 에이전트 탭)·#981(인용)·#982(작성 중 신호) **전부 `track/engine` `dae3a387`에 머지 완료**, 워커 전원 STOP. **ADR-0148·0149는 Accepted**(스냅샷 9의 "성재 결정 대기"는 낡음). 라이브(app.oor7.com)는 **구 이미지** — approvals/typing **404 실측**, 남은 것은 `compose up -d` 한 줄(성재 결정 A).
+>
+> **실측 수치 정정**: Rust 라우트 **65 유니크 경로 / 82 메서드 엔드포인트**("63" 아님) · Swift **137 유니크 경로**("156"은 어느 단위로도 재현 불가 — 정본 숫자 정정은 결정 F) · 모바일 6 feature / 웹 23(단 명목치 — `serverSurfaces.ts` 5표면 `provided:false`).
+>
+> **축 현황(서버코드/배포/웹/모바일 4층)**: **대화** = 코어 전층 ✅ · 인용/typing 클라 0 · **첨부는 3층 전무** / **관전** = 폰 최소 절단면까지 ✅ · cancel 라우트 없음 / **승인** = 서버 코드 ✅ · **배포 ❌** · 웹 결정 UI 0건 · **모바일은 목록+푸시 잠금화면 결정 배선 완비(fail-closed 잠김)** — 승인 표면은 모바일이 웹보다 앞서 있다.
+>
+> **배치 승인·가동(2026-08-04 성재 — "구현은 Opus 5로, Fable은 오케스트레이터 역할")**: **배치 1 진행 중** — Opus 5 워커 3기: **W-AP1**(웹 승인함, momo-core `approvals.provided` 플립 포함) · **M-AP1**(모바일 인앱 승인 결정 — core 수정 금지 경계) · **H-FIX1**(hermes 체크섬 — 재현 선행, 추정 수리 금지). 패킷 = `handoffs/2026-08-04-{W-AP1,M-AP1,H-FIX1}-*.md`. 이후: 2 관전 마감(cancel 이식·턴 신호 폰·roster pause) → 3 대화 기준선(인용·typing 클라) → 4 위생(openapi·어휘 집행) → 5 첨부(**ADR-0150 선행**). 결정 **C**(어휘=재우기/깨우기)·**E**(인앱 결정 배치1 개방)·**F**(정정 4건+정본 커밋)는 확정·집행됨. **성재 몫 잔여 = 결정 A**(NCP `compose up -d` — 디스크 회수 선행)·**B**(parity 재정의 — ADR-0145 증보 초안은 Fable 작성 예정)·**D**(첨부 v0 — ADR-0150 후 확정)·폰 검수(배치 1 랜딩 시 일괄). 머지 순서: H-FIX1 독립 · W-AP1 → M-AP1 순(core 접점).
+>
+> 이하 이전 스냅샷:
+
+> **2026-08-03 스냅샷 9 (Fable · momo-main 통합).** 발단은 성재 지시 *"핵심기능을 담는 부분이 미흡하다 — 로드맵 진단부터"*.
+>
+> **진단 정본 = `docs/planning/2026-08-03-roadmap-diagnosis.md`.** 판정: ①`ROADMAP.md`가 한 세대 낡음 ②서버는 에이전트 네이티브 코어를 갖고 있는데 **모바일이 표면화하지 않음**(모바일 5 feature vs 웹 23) → 봇이 있는 채팅으로 퇴행(ADR-0101이 거부한 자리).
+>
+> **성재 승인 3건 반영 완료** — v0 단위를 **M번호 → 축(관전·승인·대화)**으로 · 재작성 중 **클라 병행 유지**(ADR-0145에 사실 정정) · **Swift 서버는 parity 도달 시 일괄 삭제**(`server/README.md` 신설). 반영처: `ROADMAP.md` §0 전면 교체 + §1~§7 "대체됨" 표식, `docs/adr/0145`, `docs/architecture/overview.md` 상단 경고.
+>
+> **축 현황**: 대화 ✅ / 관전 서버✅·웹✅·모바일🚧 / **승인 서버 ✅ 폐곡선**(#979 머지 — `INSERT INTO approval` 0→생산자, 승인 라우트 0→3, `resume_approval` 소비. 오케스트레이터 실DB 게이트 7/7 + 인접 4스위트 회귀 0) · 모바일❌.
+>
+> **진행 중 배치**: **goal RN-A1**(에이전트 운영 표면 — 패킷 `handoffs/2026-08-03-RN-A1-agent-ops-packet.md`). 핵심은 웹에 갇힌 순수 판단 로직(`agentHub/model.ts` 153 · `channelPlacement.ts` 121 · `agents/agentRail.ts` 384)을 **`momo-core`로 꺼내고 모바일은 뷰만 얹는 것**. 작업 관전 최소분(세션 목록·**호스트 등급**) 포함. **세 번째 탭이 여기서 생기므로** `react-navigation` 도입은 금지하고 근거만 PR로 넘기라 지시(ADR-0137 D1 사안).
+>
+> **성재 결정 대기**: **ADR-0148**(인용 답글 — `reply_to_id`가 컬럼·FK·바인딩까지 있는데 전 호출부가 `None`, 마이그레이션 불필요) · **ADR-0149**(휘발 신호/작성 중 — 서버 경유 직접 publish, PG 미접촉). **0149는 Centrifugo publish 주체를 relay 1 → 2로 늘리는 경계 변경이라 Accepted 없이 구현 착수 금지**(ADR-0100).
+>
+> **폰 검수**: 성재 지시 *"조금 분기가 되면 한번에"* — RN-A1이 통째로 설 때까지 요청 없음.
+>
+> 이하 이전 스냅샷:
+
+
+> **2026-07-28 스냅샷 8(Fable 산출물 통합·리소스 최적 정본 후보)**: 새 review-ready 패킷은 `docs/planning/handoffs/2026-07-28-fable-resource-optimized-canonicalization.md`다. #860은 uxui 랜딩, #875는 WorkHost signature v2와 red proof까지 engine 랜딩해 이전 레드팀 WorkHost finding은 해결됨으로 재분류했다. 유일한 active implementation은 clean/pushed `feat/876-t3-lifecycle-settlement`(`13da3fce`+`52245a95`, 23파일 +1300/-171)이며 새 worker를 열지 않는다. 다만 #876+#877+#878 한 PR은 `AGENTS.md`의 1 Issue=1 goal=1 PR과 충돌하므로, 코드 재분할보다 **#876 umbrella+#877/#878 absorbed(권고)** 또는 명시적 1회 예외를 성재가 승인한 뒤 merge한다. active 배치가 새 `CloudLifecycleReconciler`를 만들었으므로 #870은 dedupe 선행, #879도 interval floor/replay bound를 각각 absorbed/residual 판정하고 #869는 그 뒤 남는 WSS 조각만 진행한다. WIP는 code worker 1·planner 1·Docker-heavy host-wide 1, 기존 8종+T3 확장 gate는 한 heavy window, `adversarial-review`는 통합 경계 1회다. terminal privacy는 #857 노출/main sync 전 결정 항목, plugin delegated-subject는 plugin dogfood 전 blocker로 보존한다. **ROADMAP/BUILD_TICKETS/STATUS/Issue/track→main은 미변경 — Fable 원격 상태 재확인·absorbed 표·성재 결정 4건 대기.** 이하 이전:
+
 > **2026-07-28 스냅샷 7(agent-platform 독립 레드팀 — 기존 builder DAG 조건부 반려)**: **PLN-20260728-01**의 원 감사 사실은 유지하되 실행 권고는 `docs/planning/research/2026-07-28-agent-platform-independent-red-team-review.md`와 superseding Fable 패킷 `docs/planning/handoffs/2026-07-28-fable-agent-platform-redteam-review.md`가 대체한다. 정적 검수에서 신뢰 경계 4건을 확인했다: **caller-chosen plugin delegated subject와 terminal `observation=open`+raw output 무기한 로컬 보존은 해당 레인의 현재 blocker**, WorkHost v1 body/query/nonce 미서명+replay는 remote/Windows 확대 전 P1 hardening, same-channel-any-human 승인은 personal credential/write 전 High blocker다. 따라서 plugin v2/skill store·recorder/generic Automation/MCP Apps/motion dependency/PTY 교체 spike를 발급하지 않는다. 최소안은 provider 1개의 host-owned connect+secret-free probe와 단일 runtime bridge를 먼저 닫고, plugin v1 read-only 1개와 `agent.owner_human_id`+`agent_profile.triggers.schedule`+`agent_run.idempotency_key`를 재사용하는 owner-only/read-only one-schedule vertical slice다. 기존 #865/#857~#861/#837은 continuity로 보존하되 #857 main sync는 terminal privacy gate와 함께 검수한다. SkillSpector 격리 pilot은 LOW/SAFE였으나 benign `keychain` HIGH false positive와 96-package 비용으로 advisory only 판정했다. **ROADMAP/BUILD_TICKETS/STATUS/GitHub Issue와 track→main은 변경하지 않았다 — Fable의 finding 중복·runtime 경로 검수와 성재 A~E 승인 대기.** 이하 이전:
 
 > **2026-07-28 스냅샷 6(Tauri/RN 이후 agent-platform 갭 감사 — Fable 검수 대기)**: **PLN-20260728-01**이 `review-ready`다. 정본 리서치=`docs/planning/research/2026-07-28-tauri-rn-agent-platform-gap-audit.md`, Fable 검수 패킷=`docs/planning/handoffs/2026-07-28-fable-agent-platform-review.md`. 결론: 현재 React/Vite+Tauri·bare RN 방향은 유지하고, **#865 → #857 owner-approved main 동기화 → #859/#858 → #861/#860**을 먼저 회수한다. 그 뒤 plugin v2(다중 app/MCP/skill+사용자 연결), versioned skill+semantic recorder, 기존 `agent_run`을 재사용하는 Automation/Loop, sandboxed MCP Apps를 ADR 선행 후보로 검수한다. 터미널은 **xterm.js + Swift POSIX PTY + semantic adapter**가 현재 사실이며, PR #868은 `track/engine` merge 완료, #857의 open+`needs-review`는 main 미동기화 동안 계약상 정상이고 #859는 구현 commit 없이 그 merge base에서 대기 중이다. Herdr/Ghostty 교체는 열지 않고 Windows WorkHost 직전에 current/Rust PTY/Herdr를 좁게 비교한다. #839/#842는 코드와 Issue 상태가 어긋나므로 Fable이 ops drift로 분리 검수한다. **ROADMAP/BUILD_TICKETS/GitHub 신규 Issue와 track→main merge는 아직 변경하지 않았다 — Fable 검수 후 성재 승인 대기.** 이하 이전:
