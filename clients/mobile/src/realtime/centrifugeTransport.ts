@@ -86,6 +86,19 @@ export interface RealtimeTransportOptions {
   url: string;
   onStatus?: (status: RealtimeStatus) => void;
   /**
+   * Called after every policy transition, with the state that resulted (goal
+   * RN-T2).
+   *
+   * The socket's STATUS cannot answer "should a subscription exist right now":
+   * `disconnected` is emitted only when the server closes the session, so a
+   * backgrounded app whose grace elapsed sits in the reconnect loop reporting
+   * `connecting` forever. The agent rail needs the policy's own answer
+   * (`socketWanted`), and this is how it gets it — without a second AppState
+   * listener deciding foreground for itself, because two listeners is two
+   * answers and the app only has one foreground.
+   */
+  onPolicy?: (state: RealtimePolicyState) => void;
+  /**
    * Token source. Defaults to the core's `fetchRealtimeToken`, which is the
    * point — the token is minted by an authenticated REST call that already
    * knows about rotation and 401 handling, and none of that is re-implemented
@@ -101,11 +114,31 @@ type Timer = ReturnType<typeof setTimeout>;
 export function createRealtimeTransport(
   options: RealtimeTransportOptions,
 ): RealtimeTransport {
-  const {url, onStatus, getToken = fetchRealtimeToken} = options;
+  const {url, onStatus, onPolicy, getToken = fetchRealtimeToken} = options;
 
   let client: Centrifuge | null = null;
   let graceTimer: Timer | null = null;
-  let state = initialPolicyState(AppState.currentState === 'active');
+  // Not-background, rather than exactly-active. `policyStep` decides foreground
+  // that way for every transition after this one ("iOS `inactive` is NOT
+  // background" — see backgroundPolicy.ts), and the opening reading has to use
+  // the same rule or the app starts out disagreeing with its own policy: a
+  // launch caught at `inactive` (the state iOS passes through before `active`,
+  // and the one the app switcher leaves behind) would have read as backgrounded
+  // until the first change event arrived. Nothing depended on that until goal
+  // RN-T2 gave `socketWanted` to the agent rail; now it decides whether 32
+  // subscriptions exist, so the wrong opening value is a rail that starts silent.
+  let state = initialPolicyState(AppState.currentState !== 'background');
+
+  /**
+   * Adopt a new policy state and tell whoever is listening. Every assignment to
+   * `state` goes through here: a transition that updated the variable but not
+   * the subscriber would leave the agent rail believing in a socket the policy
+   * had already parked.
+   */
+  function commit(next: RealtimePolicyState): void {
+    state = next;
+    onPolicy?.(next);
+  }
 
   function build(): Centrifuge {
     const next = new Centrifuge(url, {
@@ -165,7 +198,7 @@ export function createRealtimeTransport(
 
   function dispatch(signal: RealtimeSignal): void {
     const step = policyStep(state, signal);
-    state = step.state;
+    commit(step.state);
     apply(step.actions);
   }
 
@@ -190,12 +223,12 @@ export function createRealtimeTransport(
   return {
     start() {
       const step = policyStart(state);
-      state = step.state;
+      commit(step.state);
       apply(step.actions);
     },
     stop() {
       const step = policyStop(state);
-      state = step.state;
+      commit(step.state);
       apply(step.actions);
     },
     client: ensureClient,

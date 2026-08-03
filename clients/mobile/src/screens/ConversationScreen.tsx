@@ -1,4 +1,5 @@
 import {uuidEq, type Message} from '@momo/core/lib/api';
+import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {
   dmAutoReplyAgent,
   dmPeer,
@@ -7,6 +8,13 @@ import {
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {View} from 'react-native';
 import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
+import {AgentActivityBar} from '../features/agents/turnSurfaces';
+import {
+  agentTurnsInChannel,
+  hasChannelTurn,
+  useAgentWorkingSignals,
+  useTickingNow,
+} from '../features/agents/workingSignal';
 import {Composer} from '../features/conversation/Composer';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {
@@ -60,6 +68,23 @@ import {useSession} from '../session/useSession';
 // travel between the two.
 // =============================================================================
 
+/**
+ * 헤더 부제 — 소켓이 무슨 상태인지 (2R M3).
+ *
+ * 「연결 중…」 하나로 두 상태를 덮고 있었다. `RealtimeProvider`는 이미 "한 번
+ * 연결된 뒤의 connecting은 disconnected다"라고 판정해서 내려보내는데(웹에서
+ * 실측한 40초 단절이 아무 오프라인 표시도 못 냈던 그 결함의 수리) 이 부제만
+ * 그 판정을 버리고 둘을 같은 낙관으로 말했다. 그러면 같은 화면 안에서 헤더는
+ * 「연결 중…」이라 하고 바로 아래 활동 줄은 「연결이 끊겨 갱신이 멈췄습니다」라고
+ * 하는, 서로 모순되는 두 문장이 동시에 서 있게 된다.
+ *
+ * 연결됐을 때는 아무 말도 하지 않는다 — 정상은 문장을 쓰지 않는다.
+ */
+function railSubtitle(status: RealtimeStatus): string | undefined {
+  if (status === 'connected') return undefined;
+  return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
+}
+
 export default function ConversationScreen({
   channelId,
   title,
@@ -109,6 +134,23 @@ export default function ConversationScreen({
     () => (channel ? dmAutoReplyAgent(channel, directory, member.id) : null),
     [channel, directory, member.id],
   );
+
+  // ---- 이 채널에서 지금 열려 있는 턴 (goal RN-T2) ---------------------------
+  // The 1Hz clock is mounted for THIS channel's turns, not the workspace's.
+  // `hasChannelTurn` is clock-free precisely so that decision can be made before
+  // there is a clock; gating on the store's size alone would re-render this
+  // screen once a second because an agent is busy in a channel nobody here is
+  // looking at, which on a phone is battery bought with nothing on screen.
+  //
+  // `useTickingNow` returns the RENDER's own clock whatever the argument says.
+  // The argument only buys the 1Hz re-render, and that is what makes the same
+  // `nowMs` safe to hand to the staleness filter below: a frozen now can never
+  // find a signal stale, and a dead rail is exactly when one most needs to
+  // expire.
+  const signals = useAgentWorkingSignals();
+  const railLive = railStatus === 'connected';
+  const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
+  const turns = agentTurnsInChannel(signals, channelId, turnNowMs);
 
   // ---- the frozen unread snapshot ------------------------------------------
   // Captured on the first render that has a read state for this channel, and
@@ -197,7 +239,7 @@ export default function ConversationScreen({
     <Screen>
       <ScreenHeader
         title={title}
-        subtitle={railStatus === 'connected' ? undefined : '연결 중…'}
+        subtitle={railSubtitle(railStatus)}
         onBack={onBack}
         titleTestID="conversation-title"
       />
@@ -235,6 +277,17 @@ export default function ConversationScreen({
         }
         composer={
           <>
+            {/* Directly above the input, which is where the answer matters: this
+                is the line that tells you whether to wait or to type. It sits
+                over the composer rather than in the header for the same reason
+                the web bar does — the header is where the channel's identity
+                lives, and a turn is not an identity. */}
+            <AgentActivityBar
+              turns={turns}
+              directory={directory}
+              nowMs={turnNowMs}
+              live={railLive}
+            />
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
               channelLabel={title}

@@ -1,12 +1,17 @@
 import type {Centrifuge, Subscription} from 'centrifuge';
+import {isTerminalProgressFrame} from '@momo/core/features/agents/agentRail';
 import {
   asMessageDeletedFrame,
   asReactionFrame,
+  centrifugoAgentChannelName,
   centrifugoChannelName,
+  createReplayGate,
+  type AgentProgressEvent,
   type MessageDeletedEvent,
   type MessageNewEvent,
   type ReactionEvent,
   type RealtimeHandle,
+  type SubscribedRecoveryContext,
 } from '@momo/core/lib/realtimeEvents';
 
 // =============================================================================
@@ -17,20 +22,22 @@ import {
 // be writing it against no caller." The timeline is that caller, so the half of
 // the interface it needs is written here — and only that half.
 //
-// ## Why this is `ChannelRail` and not the whole `RealtimeHandle`
+// ## Why this is a SLICE and not the whole `RealtimeHandle`
 //
-// The core's `RealtimeHandle` has six subscribe methods. Five of them serve
-// surfaces this client does not have: agent progress panels, work sessions,
-// provider-cascade notices and huddles. Implementing them now would repeat
-// exactly the mistake the scaffold refused to make, and worse — untested
-// subscription bookkeeping that looks finished is more dangerous than an absent
-// method, because the batch that finally needs it will trust it.
+// The core's `RealtimeHandle` has six subscribe methods. Four of them still
+// serve surfaces this client does not have: work sessions, provider-cascade
+// notices and huddles. Implementing them now would repeat exactly the mistake
+// the scaffold refused to make, and worse — untested subscription bookkeeping
+// that looks finished is more dangerous than an absent method, because the
+// batch that finally needs it will trust it.
 //
 // So the type below is a structural SLICE of the core interface
-// (`Pick<RealtimeHandle, "subscribeChannel">` plus lifecycle). It is not a
-// parallel invention: `subscribeChannel`'s signature is checked against the
-// core's by the `Pick`, so the day the other five arrive they widen this type
-// rather than reconciling with it.
+// (`Pick<RealtimeHandle, "subscribeChannel" | "subscribeAgent">`). It is not a
+// parallel invention: each signature is checked against the core's by the
+// `Pick`, so the day the other four arrive they widen this type rather than
+// reconciling with it. `subscribeAgent` is the first one to arrive that way —
+// goal RN-T2 added it verbatim, which is why the `Pick` grew by one name and
+// nothing else about this file's shape changed.
 //
 // ## The refcount is not premature
 //
@@ -42,28 +49,45 @@ import {
 // channel the other was still reading. Copying the ownership rule costs 20
 // lines; rediscovering it costs a silent dead feed.
 //
-// ## No replay gate here, deliberately
+// ## The replay gate is on the agent rail and NOT on the message rail
 //
 // The web sibling gates replays on the agent, work-session and huddle rails and
-// NOT on the message rail, and this follows it. Message frames are keyed by
-// `seq` and `reconcileMessages` folds a replayed publication onto the row it
+// not on the message one, and this follows it exactly. Message frames are keyed
+// by `seq` and `reconcileMessages` folds a replayed publication onto the row it
 // already holds, so a replay is harmless — and it is not merely harmless, it is
-// the point: the gap is exactly what a recovering subscription is for. The
-// rails that must drop replays are the ones carrying ephemeral state (a running
-// turn, a live session), and none of them exist on this client yet.
+// the point: the gap is exactly what a recovering subscription is for.
+//
+// A progress frame carries no `seq` and nothing folds it onto anything. It is a
+// claim that an agent is working RIGHT NOW, so a replayed one is a claim about
+// a turn that ended during the gap. `infra/centrifugo.json` gives the `agent`
+// namespace `force_recovery: true` with `history_size: 100` and `history_ttl:
+// 24h`, which means asking for `recoverable: false` is a request the server
+// declines — the flags below are documentation and `createReplayGate` is the
+// actual defence. Measured on web 2026-07-25: a 25s cut replayed all 8 frames of
+// a finished turn on resubscribe.
+//
+// The gate has ONE hole in it, cut on purpose: a terminal `agent.status` is let
+// through even while replaying. That same 24h history is where the frame saying
+// the turn is OVER lives, and dropping it is how a phone came back from the app
+// switcher to a badge that had nothing behind it. See `isTerminalProgressFrame`.
 // =============================================================================
 
 export type ChannelHandlers = Parameters<
   RealtimeHandle['subscribeChannel']
 >[2];
 
+export type AgentHandlers = Parameters<RealtimeHandle['subscribeAgent']>[3];
+
 /**
  * The slice of the core's realtime port this client implements.
  *
- * `subscribeChannel` is taken from `RealtimeHandle` by `Pick`, so its signature
- * cannot drift from the core's contract without a type error here.
+ * Both methods are taken from `RealtimeHandle` by `Pick`, so neither signature
+ * can drift from the core's contract without a type error here.
  */
-export type ChannelRail = Pick<RealtimeHandle, 'subscribeChannel'>;
+export type ChannelRail = Pick<
+  RealtimeHandle,
+  'subscribeChannel' | 'subscribeAgent'
+>;
 
 /**
  * Wire the message rail onto an already-built Centrifuge client.
@@ -79,6 +103,7 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
 
   function attach(
     name: string,
+    options: {recoverable: boolean; positioned: boolean},
     wire: (sub: Subscription) => () => void,
   ): () => void {
     const client = getClient();
@@ -88,8 +113,7 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
       // is created for a name it already holds, and it can hold one this map
       // does not know about after a reconnect rebuilt them.
       const sub =
-        client.getSubscription(name) ??
-        client.newSubscription(name, {recoverable: true, positioned: true});
+        client.getSubscription(name) ?? client.newSubscription(name, options);
       entry = {sub, refs: 0};
       shared.set(name, entry);
     }
@@ -118,40 +142,91 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
 
   return {
     subscribeChannel(workspaceId, channelId, handlers: ChannelHandlers) {
-      return attach(centrifugoChannelName(workspaceId, channelId), sub => {
-        const onSubscribed = (ctx: {recovered?: boolean}) => {
-          handlers.onSubscribed(ctx.recovered === true);
-        };
-        const onPublication = (ctx: {data?: unknown}) => {
-          const event = ctx.data as MessageNewEvent | undefined;
-          if (
-            event &&
-            (event.type === 'message.new' || event.type === 'message.edited') &&
-            event.payload
-          ) {
-            handlers.onMessage(event);
-            return;
-          }
-          // The tombstone and reaction frames ride the same channel as the
-          // message they annotate and reuse its `seq`, so they arrive here in
-          // order behind it rather than on a rail of their own.
-          const tombstone: MessageDeletedEvent | null = asMessageDeletedFrame(
-            ctx.data,
-          );
-          if (tombstone) {
-            handlers.onMessageDeleted?.(tombstone);
-            return;
-          }
-          const reaction: ReactionEvent | null = asReactionFrame(ctx.data);
-          if (reaction) handlers.onReaction?.(reaction);
-        };
-        sub.on('subscribed', onSubscribed);
-        sub.on('publication', onPublication);
-        return () => {
-          sub.off('subscribed', onSubscribed);
-          sub.off('publication', onPublication);
-        };
-      });
+      return attach(
+        centrifugoChannelName(workspaceId, channelId),
+        {recoverable: true, positioned: true},
+        sub => {
+          const onSubscribed = (ctx: {recovered?: boolean}) => {
+            handlers.onSubscribed(ctx.recovered === true);
+          };
+          const onPublication = (ctx: {data?: unknown}) => {
+            const event = ctx.data as MessageNewEvent | undefined;
+            if (
+              event &&
+              (event.type === 'message.new' ||
+                event.type === 'message.edited') &&
+              event.payload
+            ) {
+              handlers.onMessage(event);
+              return;
+            }
+            // The tombstone and reaction frames ride the same channel as the
+            // message they annotate and reuse its `seq`, so they arrive here in
+            // order behind it rather than on a rail of their own.
+            const tombstone: MessageDeletedEvent | null = asMessageDeletedFrame(
+              ctx.data,
+            );
+            if (tombstone) {
+              handlers.onMessageDeleted?.(tombstone);
+              return;
+            }
+            const reaction: ReactionEvent | null = asReactionFrame(ctx.data);
+            if (reaction) handlers.onReaction?.(reaction);
+          };
+          sub.on('subscribed', onSubscribed);
+          sub.on('publication', onPublication);
+          return () => {
+            sub.off('subscribed', onSubscribed);
+            sub.off('publication', onPublication);
+          };
+        },
+      );
+    },
+
+    subscribeAgent(workspaceId, channelId, agentMemberId, handlers: AgentHandlers) {
+      // `agent:ws<WS>.<CHANNEL>.<AGENT>` — one subscription per (channel, agent)
+      // pair, because that is the granularity the subscribe proxy authorises:
+      // it grants the channel only when the observer AND the target agent are
+      // both active members of that exact channel (`realtime.rs` ParsedChannel
+      // ::Agent). A per-channel wildcard does not exist to ask for.
+      return attach(
+        centrifugoAgentChannelName(workspaceId, channelId, agentMemberId),
+        {recoverable: false, positioned: false},
+        sub => {
+          const gate = createReplayGate();
+          const onSubscribed = (ctx: SubscribedRecoveryContext) =>
+            gate.onSubscribed(ctx);
+          const onPublication = (ctx: {data?: unknown}) => {
+            const event = ctx.data as AgentProgressEvent | undefined;
+            if (
+              !event ||
+              (event.type !== 'agent.status' &&
+                event.type !== 'agent.partial') ||
+              !event.payload
+            ) {
+              return;
+            }
+            // The replay batch is dropped EXCEPT for the frames that can only
+            // END a turn. `isTerminalProgressFrame` records why that is safe by
+            // construction; what makes it necessary is this platform. The
+            // background policy parks this socket 15 seconds after the person
+            // looks at something else, so a turn that finishes while they are
+            // away sends its terminal frame into a gap — and the resubscribe's
+            // replay is the only place that frame is ever offered again.
+            // Dropping it left the badge lit until the 90s TTL swept it: a phone
+            // coming back to 「작업 중」 for an agent that had already stopped
+            // (2R H1).
+            if (gate.isReplaying() && !isTerminalProgressFrame(event)) return;
+            handlers.onEvent(event);
+          };
+          sub.on('subscribed', onSubscribed);
+          sub.on('publication', onPublication);
+          return () => {
+            sub.off('subscribed', onSubscribed);
+            sub.off('publication', onPublication);
+          };
+        },
+      );
     },
   };
 }
