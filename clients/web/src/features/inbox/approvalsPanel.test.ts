@@ -400,8 +400,22 @@ describe("확정 문장", () => {
       expect(copy).not.toMatch(/바로 실행|즉시/);
       expect(copy).not.toMatch(/[—–]/);
     }
-    // 거부 확정과 거부 영수증이 같은 사실을 같은 말로 한다.
-    expect(REJECT_CONFIRM).toMatch(/이어지지 않습니다/);
+  });
+
+  // 2R N1: 모바일과 같은 한 문장. 같은 제품이 같은 액션 앞에서 두 문장을 말하면
+  // 둘 중 하나는 반드시 낡는다.
+  it("거부 확정은 「대기 중인」으로 한정한다", () => {
+    expect(REJECT_CONFIRM).toBe("거부하면 대기 중인 실행이 취소됩니다.");
+    // 한정어 없는 "이 실행이 취소됩니다"는 hold를 떠난 run 앞에서 거짓이 된다
+    // (`end_parked_run_in_tx`의 `WHERE status='awaiting_approval'`).
+    expect(REJECT_CONFIRM).toMatch(/대기 중인/);
+  });
+
+  it("영수증은 한정할 근거가 없으므로 무조건 참인 절만 붙인다", () => {
+    // 확정 문장은 누르기 전의 규칙이라 조건을 한정어로 그릴 수 있다. 영수증은
+    // 이미 일어난 일에 대한 진술인데, 그 영수증에는 실행이 대기 중이었는지가
+    // 실려 오지 않는다 — 그래서 「취소되었습니다」라고 쓸 수 없다.
     expect(REJECTED_RECEIPT).toMatch(/이어지지 않습니다/);
+    expect(REJECTED_RECEIPT).not.toMatch(/취소되었습니다/);
   });
 });

@@ -25,12 +25,66 @@ import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
 // to mint a fresh key.
 // =============================================================================
 
+/**
+ * 결정 영수증. **두 표기를 모두 읽는다** (goal W-AP1 2R, 지적 N2).
+ *
+ * 이 클라이언트는 Swift 서버의 계약을 보고 자랐고, 그 서버는 이 본문을
+ * snake_case로 냈다(`ApprovalDecisionRoutes.swift`의 `CodingKeys`). Rust 포팅은
+ * 같은 구조체에 `#[serde(rename_all = "camelCase")]`를 달아 `approvalId` ·
+ * `decidedBy` · `decidedAtMs`로 낸다(`dto.rs:2269-2279`, 그리고 손으로 쓴
+ * `crates/momo-agent/src/approval.rs:638-644`도 같은 표기다).
+ *
+ * 그 차이가 조용했던 이유는 `status`가 두 표기에서 같은 글자이기 때문이다. 그래서
+ * 커밋/이미 결정됨/멱등 충돌 **판정은 멀쩡히 살아 있고**, 버려지는 것은 "누가,
+ * 언제 결정했는가"뿐이었다. 그 두 값은 웹 카드의 「승인」 원장 줄
+ * (`AgentCard.tsx:254-259`)이 서는 조건 그 자체라, 결정한 직후 그 줄이 통째로
+ * 사라진다. 아무 오류도 나지 않으므로 화면은 "결정은 됐는데 누가 했는지는 없다"고
+ * 말한다.
+ *
+ * 표기를 하나로 고르지 않고 **둘 다** 읽는 이유: 이 레포에는 지금 두 서버가 산다.
+ * 어느 한쪽을 고르면 다른 쪽 앞에서 같은 결함이 반대 방향으로 재현된다. 서버
+ * 쪽 정정(정본 스펙 `docs/api/openapi.yaml`은 snake_case다)은 별도 goal이고,
+ * 그것이 오더라도 이 파서는 그대로 옳다.
+ */
 export interface ApprovalDecisionReceipt {
-  approval_id: string;
+  /** 이 클라이언트는 읽지 않는다(경로가 이미 어느 승인인지 안다). 계약 기록용. */
+  approval_id?: string;
+  approvalId?: string;
+  /** 두 표기에서 글자가 같은 유일한 필드. 그래서 이 결함이 조용했다. */
   status: string;
   decided_by?: string | null;
+  decidedBy?: string | null;
   decided_at_ms?: number | null;
+  decidedAtMs?: number | null;
   decision_reason?: string | null;
+  decisionReason?: string | null;
+}
+
+/**
+ * 표기 판정은 **필드마다 따로** 한다.
+ *
+ * 한 필드를 보고 표기를 정한 뒤 나머지를 그 표기로 읽으면, 서버가 `None`인 필드를
+ * 아예 빼는 순간(`skip_serializing_if = "Option::is_none"`, Rust 영수증이 정확히
+ * 그렇다) 판정의 근거가 사라져 나머지가 통째로 버려진다. 필드별로 물으면 어떤
+ * 조합이 와도 있는 것만 읽고 없는 것만 없다.
+ *
+ * snake를 먼저 보는 이유는 그것이 정본 스펙이고, 두 표기가 함께 온다면 정본이
+ * 이겨야 하기 때문이다.
+ */
+function receiptString(
+  snake: string | null | undefined,
+  camel: string | null | undefined
+): string | undefined {
+  const value = typeof snake === "string" ? snake : camel;
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function receiptNumber(
+  snake: number | null | undefined,
+  camel: number | null | undefined
+): number | undefined {
+  const value = typeof snake === "number" ? snake : camel;
+  return typeof value === "number" ? value : undefined;
 }
 
 export interface DecisionOutcome {
@@ -206,12 +260,8 @@ export function interpretReceipt(
   receipt: ApprovalDecisionReceipt
 ): DecisionOutcome {
   const status = parseApprovalStatus(receipt.status);
-  const decidedAtMs =
-    typeof receipt.decided_at_ms === "number" ? receipt.decided_at_ms : undefined;
-  const decidedBy =
-    typeof receipt.decided_by === "string" && receipt.decided_by !== ""
-      ? receipt.decided_by
-      : undefined;
+  const decidedAtMs = receiptNumber(receipt.decided_at_ms, receipt.decidedAtMs);
+  const decidedBy = receiptString(receipt.decided_by, receipt.decidedBy);
 
   if (httpStatus === 200) {
     const outcome: DecisionOutcome = { kind: "committed" };

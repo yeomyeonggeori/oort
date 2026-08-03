@@ -72,12 +72,20 @@ export function approveConfirmCopy(reversible: boolean | undefined): string {
 }
 
 /**
- * 거부 확정 문장. 영수증(`approvalsPanel.ts` `REJECTED_RECEIPT`)과 **같은 사실**을
- * 같은 말로 한다: 거부 경로는 어떤 경우에도 재개 job을 넣지 않으므로 "이어지지
- * 않는다"는 무조건 참이고, "취소된다"는 실행이 이미 다른 이유로 끝나 있던 좁은
- * 경합에서 거짓이 된다(`end_parked_run_in_tx`의 `WHERE status='awaiting_approval'`).
+ * 거부 확정 문장 — **모바일과 같은 한 문장** (2R 지적 N1).
+ *
+ * 앞 판의 웹 문장은 "거부하면 이 실행은 이어지지 않습니다."였다. 참이지만 모바일이
+ * 실측해 landing한 문장과 달랐고, 같은 제품이 같은 액션 앞에서 두 문장을 말하면
+ * 둘 중 하나는 반드시 낡는다.
+ *
+ * 모바일의 문장이 더 낫기도 하다. 「대기 중인」이라는 한정어가 이 계약을 정확히
+ * 그린다: 거부는 결정과 **같은 트랜잭션**에서 실행을 취소하지만
+ * (`reject_run` → `end_parked_run_in_tx`), 그 UPDATE는
+ * `WHERE status='awaiting_approval'`로 가드돼 있어 hold를 떠난 run은 취소 대상이
+ * 아니다. 한정어 없는 "이 실행이 취소됩니다"는 그 경우에 거짓이 되고, 한정어가
+ * 붙으면 무조건 참이 되면서 무슨 일이 일어나는지까지 말한다.
  */
-export const REJECT_CONFIRM = "거부하면 이 실행은 이어지지 않습니다.";
+export const REJECT_CONFIRM = "거부하면 대기 중인 실행이 취소됩니다.";
 
 export function ApprovalActions({
   approvalId,

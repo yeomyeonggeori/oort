@@ -15,6 +15,10 @@
 //   error       목록이 500. 이건 진짜 장애라 오류 배너 + [다시 시도]가 서야 한다.
 //   empty       목록이 200 + 빈 배열. 조용한 인박스는 설계가 작동한 모습이다.
 //
+// 결정 영수증은 **두 와이어를 함께 돌린다**(2R N2): 승인 갈래는 snake_case(Swift
+// 서버), 거부 갈래는 camelCase(Rust 서버). 한 표기만 검사하면 다른 표기 앞에서
+// 조용히 무너지는 파서를 초록으로 통과시킨다.
+//
 // 목 응답에는 갈래마다 다른 지연을 넣는다(#839 교훈): 같은 tick에 답하는 목은
 // 로딩/포커스 단정을 헛초록으로 만든다.
 //
@@ -322,10 +326,22 @@ async function installRoutes(context, scenario, delayMs) {
       // 놓고 초록으로 남는 일이 없도록, 원장이 실제로 답하는 것과 같은 상태를
       // 돌려준다. 이 한 줄이 없으면 거부 시나리오는 자기가 무엇을 검사하는지
       // 모르는 채 통과한다.
+      // 2R N2: 거부 갈래만 **camelCase 영수증**으로 답한다. 이 레포에는 서버가
+      // 두 대 살고(Swift=snake, Rust=camel), 한 표기만 검사하면 다른 표기 앞에서
+      // 조용히 무너지는 코드를 초록으로 통과시킨다. 승인 갈래는 snake로 남겨
+      // 두 와이어가 같은 게이트 안에서 함께 돌게 한다.
+      if (!body.approve) {
+        return json(route, {
+          approvalId: body.approval_id,
+          status: "rejected",
+          decidedBy: memberId,
+          decidedAtMs: nowMs,
+        });
+      }
       return json(route, {
         ...decisionReceipt,
         approval_id: body.approval_id,
-        status: body.approve ? "approved" : "rejected",
+        status: "approved",
       });
     }
 
@@ -647,7 +663,7 @@ async function exerciseReject(browser, delayMs) {
   const confirm = page.getByTestId("inbox-approval-confirm").first();
   await confirm.waitFor();
   const confirmText = (await confirm.textContent()) ?? "";
-  if (!confirmText.includes("이어지지 않습니다")) {
+  if (!confirmText.includes("대기 중인 실행이 취소됩니다")) {
     throw new Error(
       `reject confirm copy: 거부 확정 문장이 정본이 아니다 (${confirmText})`
     );

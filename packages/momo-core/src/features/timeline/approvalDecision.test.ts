@@ -93,6 +93,86 @@ describe("영수증이 아닌 답 (2R, 리뷰 M5 이관)", () => {
   });
 });
 
+// 지금 이 레포에는 서버가 두 대 살고, 둘이 이 본문을 다른 표기로 낸다. Swift는
+// snake_case(`ApprovalDecisionRoutes.swift`의 CodingKeys), Rust는 camelCase
+// (`dto.rs:2269-2279` + 손으로 쓴 `approval.rs:638-644`). 그 차이가 조용했던 이유는
+// `status`가 두 표기에서 같은 글자여서 **판정은 살아 있었기** 때문이고, 버려진 것은
+// "누가, 언제"뿐이었다. 그 둘은 웹 카드의 「승인」 원장 줄이 서는 조건 그 자체라,
+// 결정한 직후 그 줄이 통째로 사라진다 — 오류 하나 없이.
+describe("영수증은 두 표기를 모두 읽는다 (2R N2)", () => {
+  const snake = {
+    approval_id: "a",
+    status: "approved",
+    decided_by: "member-1",
+    decided_at_ms: 1_700_000_000_000,
+  };
+  const camel = {
+    approvalId: "a",
+    status: "approved",
+    decidedBy: "member-1",
+    decidedAtMs: 1_700_000_000_000,
+  };
+
+  it("두 표기가 같은 결과를 낸다", () => {
+    expect(interpretReceipt(200, camel)).toEqual(interpretReceipt(200, snake));
+  });
+
+  it("camelCase 영수증에서도 누가·언제가 살아남는다", () => {
+    const outcome = interpretReceipt(200, camel);
+    expect(outcome.kind).toBe("committed");
+    expect(outcome.decidedByMemberId).toBe("member-1");
+    expect(outcome.decidedAtMs).toBe(1_700_000_000_000);
+  });
+
+  it("이미 결정된 요청도 camelCase에서 누가·언제를 싣는다", () => {
+    const outcome = interpretReceipt(409, { ...camel, status: "rejected" });
+    expect(outcome.kind).toBe("superseded");
+    expect(outcome.decidedByMemberId).toBe("member-1");
+    expect(outcome.decidedAtMs).toBe(1_700_000_000_000);
+  });
+
+  it("표기 판정은 필드마다 따로 한다", () => {
+    // Rust는 `None`인 필드를 아예 뺀다(`skip_serializing_if`). 한 필드를 보고
+    // 표기를 정한 뒤 나머지를 그 표기로 읽으면, 빠진 필드 하나가 나머지를 통째로
+    // 버리게 만든다. 섞여 오든 절반만 오든 있는 것만 읽어야 한다.
+    const mixed = interpretReceipt(200, {
+      status: "approved",
+      decided_by: "member-1",
+      decidedAtMs: 1_700_000_000_000,
+    });
+    expect(mixed.decidedByMemberId).toBe("member-1");
+    expect(mixed.decidedAtMs).toBe(1_700_000_000_000);
+
+    const onlyTime = interpretReceipt(200, {
+      status: "approved",
+      decidedAtMs: 1_700_000_000_000,
+    });
+    expect(onlyTime.decidedAtMs).toBe(1_700_000_000_000);
+    expect(onlyTime.decidedByMemberId).toBeUndefined();
+  });
+
+  it("정본 표기가 이긴다: 둘 다 오면 snake_case를 읽는다", () => {
+    const outcome = interpretReceipt(200, {
+      status: "approved",
+      decided_by: "canonical",
+      decidedBy: "ported",
+      decided_at_ms: 1,
+      decidedAtMs: 2,
+    });
+    expect(outcome.decidedByMemberId).toBe("canonical");
+    expect(outcome.decidedAtMs).toBe(1);
+  });
+
+  it("빈 문자열은 값이 아니다: 두 표기 모두에서", () => {
+    for (const receipt of [
+      { status: "approved", decided_by: "" },
+      { status: "approved", decidedBy: "" },
+    ]) {
+      expect(interpretReceipt(200, receipt).decidedByMemberId).toBeUndefined();
+    }
+  });
+});
+
 describe("영수증 해석은 그대로다", () => {
   it("200은 기록된 결정이다", () => {
     const outcome = interpretReceipt(200, {
