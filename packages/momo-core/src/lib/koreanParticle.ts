@@ -9,12 +9,27 @@
 // carries both 김인턴 and Hermes, so both branches are on screen daily.
 // =============================================================================
 
-export type ParticlePair = "subject" | "object" | "topic";
+export type ParticlePair = "subject" | "object" | "topic" | "with";
 
 const PAIRS: Record<ParticlePair, readonly [withFinal: string, withoutFinal: string]> = {
   subject: ["이", "가"],
   object: ["을", "를"],
   topic: ["은", "는"],
+  /**
+   * 과/와 — "WITH this person", "AND that one".
+   *
+   * Added by goal RN-A1 because a screen had already hardcoded it: 「대화 열기」
+   * on an agent read `${displayName}과의 대화` and said "Hermes과의" to anyone
+   * whose agent is not named in Hangul. It is the same decidable rule as the
+   * three above, so it belongs in the same table rather than in the one screen
+   * that happened to need it first.
+   *
+   * Note the inversion against 이/가: here the FINAL-consonant form is 과 and
+   * the open form is 와 ("김인턴과", "Hermes와"). Writing this pair from memory
+   * is how it ends up backwards, which is the second reason it is written down
+   * once.
+   */
+  with: ["과", "와"],
 };
 
 const HANGUL_FIRST = 0xac00;

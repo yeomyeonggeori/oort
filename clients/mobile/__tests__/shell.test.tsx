@@ -400,6 +400,38 @@ describe('opening a conversation', () => {
     );
     expect(screen.queryByText(/forbidden/)).toBeNull();
   });
+
+  it('「다시 시도」 sends the request again instead of hiding the sentence', async () => {
+    // It used to call `reset()`: the banner disappeared and nothing was sent.
+    // Found while fixing the same shape on the agent pause control (goal RN-A1
+    // R1 High-3), which named this the precedent.
+    let attempts = 0;
+    const fetchMock = installFetch({
+      dms: () => {
+        attempts += 1;
+        return jsonResponse(503, {error: {message: 'upstream down'}});
+      },
+    });
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+
+    fireEvent.press(
+      screen.getByTestId('sidebar-row-agent:dddddddd-1111-4111-8111-dddddddddddd'),
+    );
+    await waitFor(() => expect(screen.getByTestId('open-dm-error')).toBeTruthy());
+    expect(attempts).toBe(1);
+
+    fireEvent.press(screen.getByTestId('open-dm-error-retry'));
+    await waitFor(() => expect(attempts).toBe(2));
+    // …and it asked for the same person, not a fresh guess.
+    const dmCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/dms'),
+    );
+    expect(dmCalls).toHaveLength(2);
+    expect(JSON.parse(dmCalls[1][1].body)).toEqual(
+      JSON.parse(dmCalls[0][1].body),
+    );
+  });
 });
 
 describe('the 인박스 tab', () => {

@@ -24,6 +24,16 @@ describe("koreanParticle", () => {
     expect(attachParticle("Hermes", "topic")).toBe("Hermes는");
   });
 
+  it("covers 과/와, whose forms sit the opposite way round from 이/가", () => {
+    // The inversion is the whole reason this pair is in the table: writing it
+    // from memory in one screen is how "Hermes과의 대화" reached a phone.
+    expect(attachParticle("김인턴", "with")).toBe("김인턴과");
+    expect(attachParticle("Hermes", "with")).toBe("Hermes와");
+    expect(attachParticle("헤르메스", "with")).toBe("헤르메스와");
+    expect(particleFor("곽성재", "with")).toBe("와");
+    expect(particleFor("박지훈", "with")).toBe("과");
+  });
+
   it("ignores trailing punctuation and whitespace, as the mac rule does", () => {
     expect(attachParticle("김인턴 ")).toBe("김인턴 이");
     expect(particleFor("(김인턴)")).toBe("이");

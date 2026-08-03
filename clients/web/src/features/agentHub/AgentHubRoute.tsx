@@ -86,7 +86,7 @@ import {
   runStatusLabel,
   signalsForAgent,
   type AgentHubSection,
-} from "./model";
+} from "@momo/core/features/agents/hubModel";
 import { AgentChannelsSection } from "./AgentChannelsSection";
 import {
   EMPTY_AGENT_DRAFT,

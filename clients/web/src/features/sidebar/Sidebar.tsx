@@ -28,7 +28,7 @@ import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
 } from "@/features/agents/turnCopy";
-import { agentCoverage } from "@/features/agents/agentRail";
+import { agentCoverage } from "@momo/core/features/agents/agentRail";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import {
   channelLabelParts,

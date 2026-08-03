@@ -17,8 +17,8 @@ import {
   placementFailure,
   placementReceipt,
   type PlacementAction,
-} from "./channelPlacement";
-import { normalizedId } from "./model";
+} from "@momo/core/features/agents/channelPlacement";
+import { normalizedId } from "@momo/core/features/agents/hubModel";
 
 // =============================================================================
 // 채널 배치 (goal B5.3b, D-4). The half of onboarding that `POST …/agents` does

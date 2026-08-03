@@ -4,11 +4,18 @@ import type {
   AgentRunSummary,
   MemoryScope,
   RosterMember,
-} from "@momo/core/lib/api";
-import {
-  isStaleSignal,
-  type AgentWorkingSignal,
-} from "@/features/agents/agentWorkingSignal";
+} from "../../lib/api";
+import { isStaleSignal, type AgentWorkingSignal } from "./workingSignal";
+
+// =============================================================================
+// 에이전트 허브 model: which roster rows are agents, what one agent is doing,
+// and the labels a person reads before mentioning it.
+//
+// Moved here from `clients/web/src/features/agentHub/model.ts` by goal RN-A1,
+// rule for rule. The phone lists the same agents and must not answer 상태·모델
+// with different words than the desktop does; `clients/web` imports these names
+// from the core now and its own tests still pin them from there.
+// =============================================================================
 
 export type AgentHubSection = "profile" | "memory" | "history";
 

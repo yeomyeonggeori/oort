@@ -1,7 +1,7 @@
-import { ApiError, type Channel, type RosterMember } from "@momo/core/lib/api";
-import { NetworkError } from "@momo/core/lib/http";
-import { attachParticle } from "@momo/core/lib/koreanParticle";
-import { normalizedId } from "./model";
+import { ApiError, type Channel, type RosterMember } from "../../lib/api";
+import { NetworkError } from "../../lib/http";
+import { attachParticle } from "../../lib/koreanParticle";
+import { normalizedId } from "./hubModel";
 
 // =============================================================================
 // 채널 배치 model (goal B5.3b, D-4). Which channels an agent is in, which ones

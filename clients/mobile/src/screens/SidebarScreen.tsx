@@ -192,7 +192,15 @@ export default function SidebarScreen({
         <View style={styles.bannerWrap}>
           <FailureBanner
             message={openDmFailureCopy(openDm.error)}
-            onRetry={() => openDm.reset()}
+            // 「다시 시도」가 실제로 다시 시도한다. 이전 판은 `reset()`이라
+            // 배너만 사라졌고, 라벨이 하지 않는 일을 약속했다 (goal RN-A1
+            // R1 High-3 — 그 리뷰가 이 자리를 선례로 지목했다). `variables`는
+            // 마지막으로 누른 멤버 id다.
+            onRetry={
+              openDm.variables === undefined
+                ? undefined
+                : () => openDm.mutate(openDm.variables as string)
+            }
             testID="open-dm-error"
           />
         </View>
