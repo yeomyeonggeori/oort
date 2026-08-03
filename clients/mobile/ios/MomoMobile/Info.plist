@@ -38,6 +38,20 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Carried over from clients/iOS/XcodeHost/Info.plist:50 (audit 2026-08-02 §7.2 #9).
+	     $(APS_ENVIRONMENT) is set per configuration in project.pbxproj
+	     (Debug=development, Release=production) and is the ONLY thing that tells the
+	     device-registration call whether this build's APNs token is a sandbox or a
+	     production token. Drop this key and the code falls back to `__DEV__`, which
+	     means a Release build registers a production token as sandbox and every push
+	     silently goes nowhere. -->
+	<key>MomoAPNSEnvironment</key>
+	<string>$(APS_ENVIRONMENT)</string>
+	<!-- Read by MomoPushShared/PushNotification.swift:30-32 in BOTH processes to
+	     build kSecAttrAccessGroup. Must match keychain-access-groups in both
+	     entitlement files. -->
+	<key>MomoKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -49,6 +63,14 @@
 	<string>같은 네트워크에 있는 oort 서버에 연결합니다.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<!-- ADR-0120 D2-A sends `content-available: 1` alongside `mutable-content: 1`
+	     (relay/PushRelay/Sources/PushRelay/PushDispatch.swift:112-113). Without this
+	     background mode the content-available half is dropped and the app is never
+	     woken to refresh behind the notification. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

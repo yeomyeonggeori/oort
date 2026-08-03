@@ -42,17 +42,24 @@ import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 // could otherwise land out of order and leave the REVOKED token stored, which
 // costs a sign-in on the next launch.
 //
-// ## Left for the NSE batch (ADR-0137 이행 순서 5) — deliberately not done here
+// ## The NSE seam — settled by 이행 순서 5 (goal RN-N1, 2026-08-03)
 //
-// The Swift NSE reads the token through a keychain ACCESS GROUP
+// The extension reads its session through a keychain ACCESS GROUP
 // (`kSecAttrAccessGroup` = `$(AppIdentifierPrefix)app.momo.ios.shared`,
-// `MomoiOSPushKit/PushNotification.swift:73`). Passing `accessGroup` here today
-// would need a matching `keychain-access-groups` entitlement, and without one
-// `SecItemAdd` fails with errSecMissingEntitlement (-34018) **on device only** —
-// the simulator is permissive, so it would pass every check available in this
-// batch and break on the first real install. The constant below names the group
-// so the NSE batch has one place to change and one test to update; it is not
-// passed to the keychain until the entitlement lands with it.
+// `ios/MomoPushKit/PushNotification.swift:73`). That entitlement now exists on
+// both targets, so the group is finally usable.
+//
+// **The refresh token below still does NOT carry it, on purpose.** Only one
+// value has to cross into the extension — the short-lived fetch session — and
+// `src/push/pushFetchSession.ts` writes exactly that, under its own service and
+// account. Putting the REFRESH token in the shared group would hand the
+// extension a credential it has no use for, in exchange for nothing.
+//
+// One consequence worth knowing: with a `keychain-access-groups` entitlement
+// present, items written WITHOUT an explicit group land in the first group in
+// that list rather than the app-identifier group. The writes below are therefore
+// in the shared group by default on device. Harmless — both binaries are ours —
+// but it is a change in where they live, and it happens on device only.
 // =============================================================================
 
 /** Keychain service name. Distinct from the Swift kit's so the two can coexist
@@ -65,9 +72,15 @@ import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 export const KEYCHAIN_SERVICE = 'app.momo.ios.rn.session';
 
 /**
- * The access group the Swift NSE reads from. **Not yet applied** — see the note
- * above. Exported so the NSE batch changes one constant and so
- * `__tests__/projectShape.test.ts` can assert it still matches the Swift side.
+ * The access group the notification extension reads from, WITHOUT the team
+ * prefix — the prefix is injected at build time and only the native side knows
+ * it (`src/push/native.ts`).
+ *
+ * Consumed by `keychainAccessGroup()`, which refuses to hand out a group that
+ * does not end with this string. That check is the reason the constant is
+ * exported rather than inlined: it is the one place JS states which group it
+ * believes in, so a divergence between the entitlements files and this codebase
+ * fails loudly instead of writing to a group nobody reads.
  */
 export const NSE_KEYCHAIN_ACCESS_GROUP = 'app.momo.ios.shared';
 

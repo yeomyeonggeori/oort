@@ -93,9 +93,29 @@ describe('the push inheritance identifiers match the Portal (ADR-0137 D7)', () =
     expect(configurations?.length).toBe(2);
   });
 
+  it('carries the notification extension under its own App ID', () => {
+    // Added by 이행 순서 5. The extension's bundle id must EXTEND the app's, and
+    // it needs its own App ID and profile — an app that embeds an extension is
+    // signed twice, not once. Both already exist in the Portal.
+    const nse = pbxproj.match(
+      /PRODUCT_BUNDLE_IDENTIFIER = app\.momo\.ios\.NotificationService;/g,
+    );
+    expect(nse?.length).toBe(2);
+    expect(pbxproj).toContain(
+      'productType = "com.apple.product-type.app-extension"',
+    );
+    // Embedded, not merely built. Without this phase the .appex is produced and
+    // then left on the floor, and the app ships with no extension at all — a
+    // build that succeeds and a feature that is absent.
+    expect(pbxproj).toContain('name = "Embed Foundation Extensions"');
+  });
+
   it('is signed by the team that owns those capabilities', () => {
     expect(pbxproj).toContain('DEVELOPMENT_TEAM = YWQQFQM38J;');
-    expect(pbxproj.match(/DEVELOPMENT_TEAM = YWQQFQM38J;/g)?.length).toBe(2);
+    // Four, not two: two targets (app + notification extension) x two
+    // configurations. The count is the point — a target that quietly loses its
+    // team keeps building locally and stops being signable in CI.
+    expect(pbxproj.match(/DEVELOPMENT_TEAM = YWQQFQM38J;/g)?.length).toBe(4);
   });
 
   it('registers both invite URL schemes', () => {
@@ -175,10 +195,33 @@ describe('DOM is in `lib`, so the discipline is enforced by a gate', () => {
 
 describe('the NSE seam stays aligned with the Swift side', () => {
   it('names the access group PushNotification.swift reads', () => {
-    // Not applied yet — applying it needs the matching entitlement, and without
-    // one `SecItemAdd` fails only on a device. Pinned so the NSE batch (이행
-    // 순서 5) finds one constant to change and this test to update.
     expect(NSE_KEYCHAIN_ACCESS_GROUP).toBe('app.momo.ios.shared');
+  });
+
+  it('is applied now that the entitlement exists (이행 순서 5)', () => {
+    // The constant used to be declared and unused, because applying
+    // kSecAttrAccessGroup without a matching entitlement fails -34018 on device
+    // only. The entitlement landed with this batch, so the constant must
+    // actually be consumed — an unused one would pass the assertion above
+    // forever while nothing shared anything.
+    const consumers = sourceFiles(join(APP_ROOT, 'src')).filter(
+      file =>
+        !file.endsWith('secureSession.ts') &&
+        /NSE_KEYCHAIN_ACCESS_GROUP/.test(readFileSync(file, 'utf8')),
+    );
+    expect(consumers).not.toEqual([]);
+  });
+
+  it('writes the fetch session under the account the extension reads', () => {
+    // The full string-by-string comparison against the Swift source lives in
+    // pushContract.test.ts; this is the shape check that belongs with the rest
+    // of the project's structural invariants.
+    const push = readFileSync(
+      join(APP_ROOT, 'src/push/pushFetchSession.ts'),
+      'utf8',
+    );
+    expect(push).toContain('accessGroup');
+    expect(push).toContain('AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY');
   });
 });
 

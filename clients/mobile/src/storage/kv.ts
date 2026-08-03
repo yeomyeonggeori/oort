@@ -55,6 +55,18 @@ export const NON_SECRET_KEYS = {
    * — the worst case if it is lost is being told once more.
    */
   longPressLearned: 'momo.mobile.timeline.long-press-learned.v1',
+  /**
+   * This install's device id for push registration (goal RN-N1). A random UUID
+   * minted once and kept; the server treats it as the identity of the
+   * registration, so a fresh one per launch would pile up dead device rows and
+   * multiply every push.
+   *
+   * Not a secret, and deliberately NOT in the keychain: keychain items survive
+   * app deletion on iOS, so a reinstall would silently reclaim the previous
+   * install's device row and whatever APNs token it still carried. MMKV is wiped
+   * with the app, which is the lifetime this identifier should have.
+   */
+  pushDeviceId: 'momo.mobile.push.device-id.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

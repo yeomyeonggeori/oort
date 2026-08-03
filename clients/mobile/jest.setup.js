@@ -59,6 +59,60 @@ jest.mock('react-native-keychain', () => {
   };
 });
 
+// ---- expo-modules-core / expo-notifications ----------------------------------
+// Mocked rather than transformed. Both packages ship ESM (`expo-notifications`'s
+// entry point opens with `import { isRunningInExpoGo } from 'expo'`) and the
+// `transformIgnorePatterns` above deliberately excludes node_modules, so any
+// suite that transitively imports them would die on `Cannot use import statement
+// outside a module`. Widening the transform to cover the whole Expo dependency
+// tree would slow every run to buy nothing: there is no native side under Jest,
+// so the real modules could not do anything anyway.
+//
+// `requireOptionalNativeModule` returns null on purpose — that is precisely what
+// it does in a build where the native module is absent, and it is the branch
+// `src/push/native.ts` must handle without throwing.
+jest.mock('expo-modules-core', () => ({
+  requireOptionalNativeModule: jest.fn(() => null),
+  requireNativeModule: jest.fn(() => {
+    throw new Error('native module unavailable under Jest');
+  }),
+}));
+
+jest.mock('expo-notifications', () => ({
+  // The real value, copied from
+  // node_modules/expo-notifications/src/NotificationsEmitter.ts:16. A test that
+  // invented its own string would pass while the app compared against a
+  // different one.
+  DEFAULT_ACTION_IDENTIFIER: 'expo.modules.notifications.actions.DEFAULT',
+  setNotificationCategoryAsync: jest.fn(async (identifier, actions) => ({
+    identifier,
+    actions,
+  })),
+  getPermissionsAsync: jest.fn(async () => ({
+    granted: true,
+    canAskAgain: true,
+    status: 'granted',
+  })),
+  requestPermissionsAsync: jest.fn(async () => ({
+    granted: true,
+    canAskAgain: true,
+    status: 'granted',
+  })),
+  getDevicePushTokenAsync: jest.fn(async () => ({type: 'ios', data: 'AABBCC'})),
+  addNotificationResponseReceivedListener: jest.fn(() => ({
+    remove: jest.fn(),
+  })),
+  // Present so that importing it is an error a test can see, rather than
+  // `undefined is not a function` at the call site. Nothing in this client may
+  // call it: it mints an Expo-service token and routes our notifications through
+  // EPNS (ADR-0137 D7 정오 5항).
+  getExpoPushTokenAsync: jest.fn(async () => {
+    throw new Error(
+      'getExpoPushTokenAsync must never be called by this client — use getDevicePushTokenAsync',
+    );
+  }),
+}));
+
 // ---- react-native-safe-area-context ------------------------------------------
 // The real module reads insets from a native view, so under Jest every screen
 // that calls `useSafeAreaInsets` throws "No safe area value available".

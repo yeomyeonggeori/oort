@@ -5,7 +5,33 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+# Expo modules autolinking (ADR-0137 D1: bare RN + Expo modules à la carte, no
+# EAS, no prebuild). This is `use_expo_modules!` only — it links the Expo modules
+# already in package.json and does not introduce the managed workflow. The iOS
+# project stays hand-owned and checked in; nothing here regenerates it.
+require File.join(
+  File.dirname(
+    Pod::Executable.execute_command('node', ['-p',
+      'require.resolve(
+        "expo/package.json",
+        {paths: [process.argv[1]]},
+      )', __dir__]).strip
+  ),
+  'scripts/autolinking'
+)
+
+# NOT `min_ios_version_supported` (React Native 0.86 answers 15.1 —
+# node_modules/react-native/scripts/cocoapods/helpers.rb:84). Expo SDK 57 declares
+# `:ios => '16.4'` (node_modules/expo/Expo.podspec:39) and CocoaPods refuses to
+# link ANY Expo pod below it, so 15.1 makes `use_expo_modules!` silently link
+# nothing and the push wiring never exists.
+#
+# This raises the floor rather than lowering it: the SwiftUI kit this client
+# replaces already required iOS 17 (clients/iOS/MomoiOSKit/Package.swift:6), so
+# no device that could run momo before loses it here. Keep this in step with
+# IPHONEOS_DEPLOYMENT_TARGET in project.pbxproj — CocoaPods and Xcode do not read
+# each other's value.
+platform :ios, '16.4'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
@@ -14,7 +40,13 @@ if linkage != nil
   use_frameworks! :linkage => linkage.to_sym
 end
 
+# The MomoMobileNotificationService target is deliberately absent from this file.
+# A UNNotificationServiceExtension gets ~24MB and a few hundred milliseconds; it
+# must not inherit the React Native pods graph (audit 2026-08-02 §3.1). Its only
+# sources are MomoPushKit/PushNotification.swift + NotificationService/, which
+# depend on nothing but Foundation, Security and UserNotifications.
 target 'MomoMobile' do
+  use_expo_modules!
   config = use_native_modules!
 
   use_react_native!(
