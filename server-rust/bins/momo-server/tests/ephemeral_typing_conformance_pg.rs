@@ -32,6 +32,30 @@
 //! | `srv_t2_1_a_grant_needs_live_channel_membership` | drop `is_channel_member` from the grant route, or weaken it to workspace membership |
 //! | `srv_t2_2_the_typing_channel_subscribes_by_the_message_channels_rule` | give `typing:` its own subscribe rule, or forget to teach `parse_channel` about it (the namespace would then be unsubscribable — and unauthorized if it ever were) |
 //! | `srv_t2_3_typing_writes_nothing_at_all` | route 휘발 신호 through the outbox, or let it take a `message.seq` |
+//!
+//! ## Two things this file learned the hard way
+//!
+//! **1. Name the actor, or the test drifts off its target.** "Someone who
+//! cannot see this channel" is ambiguous between a *workspace* non-member and a
+//! *channel* non-member, and only the second one exercises anything this batch
+//! built: `issue_token` refuses the first a realtime credential outright, so
+//! their subscribe dies at the credential gate having proved nothing about
+//! channels. Every actor here is therefore certified live by the server itself
+//! (`connection_claims` asserts the 200) before any denial is read, and the
+//! sharpest probes hold **one credential** and vary only a `membership` row.
+//!
+//! **2. The proxy has two gates, and a denial only means something once you
+//! know which fired.** [`CHANNEL_RULE_DENIAL`] is the channel rule;
+//! [`CREDENTIAL_GATE_DENIAL`] is credential liveness, which runs first and is
+//! what a **cross-tenant** probe actually hits — the token row lives in another
+//! workspace, so RLS never shows it. That is fail-closed and stronger than "not
+//! a member", but it is a *different property*, so it is asserted separately
+//! instead of being folded into the channel-rule claims.
+//!
+//! The parity claim — 「`typing:`이 `ch:`와 같은 규칙을 탄다」 — is asserted by
+//! comparing the two rails **to each other**, not to a literal. Checking only
+//! `typing:` against a hardcoded sentence would stay green if `ch:` started
+//! answering something else, which is precisely the drift the claim denies.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -202,14 +226,29 @@ async fn start_server(pool: PgPool, cent_api_url: &str) -> String {
 // fixtures (superuser → bypass RLS)
 // ---------------------------------------------------------------------------
 
+/// Two people and two channels, arranged so that **channel membership is the
+/// only variable** in every probe below.
+///
+/// The arrangement matters more than it looks. A test that reaches for "someone
+/// who cannot see this channel" and quietly picks a **workspace** non-member is
+/// not testing what it claims: `issue_token` would refuse that person a realtime
+/// credential in the first place, so the subscribe would die at the credential
+/// gate and never reach the channel rule — the test would go green while proving
+/// nothing about channels. Both people here are active workspace members
+/// (`assert_is_a_live_workspace_member` proves it at runtime, not in prose), and
+/// each is a member of exactly one of the two channels.
 struct Tenant {
     workspace: Uuid,
-    /// In the channel.
+    /// Creator (and therefore sole member) of `channel`.
     member_email: String,
-    /// In the workspace, deliberately NOT in the channel — the whole point of a
-    /// channel-level check rather than a workspace-level one.
+    /// Creator (and sole member) of `other_channel` — so with respect to
+    /// `channel` this is a **workspace member who is not a channel member**,
+    /// which is the actor the channel-level check exists for.
     outsider_email: String,
     channel: Uuid,
+    /// Same workspace, same tenant, `member_email` never joined it. Lets a probe
+    /// hold the credential *identical* and vary only membership.
+    other_channel: Uuid,
 }
 
 async fn seed_member(su: &PgPool, workspace: Uuid, label: &str) -> (Uuid, String) {
@@ -257,10 +296,12 @@ async fn seed_tenant(su: &PgPool, app: &PgPool) -> Tenant {
         .expect("seed workspace");
 
     let (creator, member_email) = seed_member(su, workspace, "member").await;
-    let (_outsider, outsider_email) = seed_member(su, workspace, "outsider").await;
+    let (outsider, outsider_email) = seed_member(su, workspace, "outsider").await;
 
-    // `create_channel` seeds `channel_seq` and the CREATOR's channel membership.
-    // The outsider gets neither, which is exactly the gap under test.
+    // `create_channel` seeds `channel_seq` and **only the creator's** channel
+    // membership. Two channels with two different creators therefore give two
+    // people who are each in the workspace and each in exactly one channel —
+    // no `membership` row is ever written for the other.
     let channel = create_channel(
         app,
         workspace,
@@ -273,12 +314,25 @@ async fn seed_tenant(su: &PgPool, app: &PgPool) -> Tenant {
     )
     .await
     .expect("create channel");
+    let other_channel = create_channel(
+        app,
+        workspace,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: format!("srvt2-other-{}", Uuid::new_v4()),
+            topic: None,
+            created_by: outsider,
+        },
+    )
+    .await
+    .expect("create the second channel");
 
     Tenant {
         workspace,
         member_email,
         outsider_email,
         channel: channel.id,
+        other_channel: other_channel.id,
     }
 }
 
@@ -370,20 +424,34 @@ async fn subscribe_proxy(
     response.json().await.unwrap_or(Value::Null)
 }
 
+/// Mint a connection token and decode it the way Centrifugo would.
+///
+/// **This doubles as the proof that `who` is a live workspace member.**
+/// `issue_token` re-reads the `member` row and refuses anyone who is not
+/// `active` in the workspace, so a 200 here is the server itself saying so —
+/// which is what stops the deny assertions below from silently degrading into
+/// "a workspace non-member cannot subscribe" (true, uninteresting, and not what
+/// this batch claims).
 async fn connection_claims(
     http: &reqwest::Client,
     base: &str,
     token: &str,
+    who: &str,
 ) -> CentrifugoConnectionClaims {
-    let body: Value = http
+    let response = http
         .post(format!("{base}/v1/auth/realtime-token"))
         .bearer_auth(token)
         .send()
         .await
-        .expect("realtime token")
-        .json()
-        .await
-        .expect("realtime token body");
+        .expect("realtime token");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "{who} must be a LIVE WORKSPACE MEMBER for the channel-level probes below \
+         to mean anything — issue_token refuses anyone who is not active in the \
+         workspace, so a non-200 here means this test is aimed at the wrong actor"
+    );
+    let body: Value = response.json().await.expect("realtime token body");
     let raw = body["token"].as_str().expect("token").to_string();
     let claims = jsonwebtoken::decode::<CentrifugoConnectionClaims>(
         &raw,
@@ -396,18 +464,39 @@ async fn connection_claims(
     claims
 }
 
-fn assert_allowed(body: &Value) {
+fn assert_allowed(body: &Value, probe: &str) {
     assert!(
         body.get("result").is_some() && body.get("error").is_none(),
-        "expected an allow envelope, got {body}"
+        "{probe}: expected an allow envelope, got {body}"
     );
 }
 
-fn assert_denied(body: &Value, reason: &str) {
-    assert!(body.get("result").is_none(), "expected a deny, got {body}");
-    assert_eq!(body["error"]["code"], json!(403), "{body}");
-    assert_eq!(body["error"]["message"], json!(reason), "{body}");
+/// The reason a proxy decision refuses, or a panic naming the probe.
+///
+/// Every assertion below goes through this rather than comparing a body inline,
+/// because the original failure in this suite pointed at a shared helper line
+/// and left the *call site* ambiguous — three probes, one line number. A probe
+/// label costs nothing and makes the next failure self-describing.
+fn deny_reason(body: &Value, probe: &str) -> String {
+    assert!(
+        body.get("result").is_none(),
+        "{probe}: expected a deny, got {body}"
+    );
+    assert_eq!(body["error"]["code"], json!(403), "{probe}: {body}");
+    body["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{probe}: deny carries no message: {body}"))
+        .to_string()
 }
+
+/// The gate that refuses a subscribe when the member may not read that channel.
+/// The literal identifies **which of the proxy's two gates fired** — the channel
+/// rule, not the credential-liveness gate that runs before it.
+const CHANNEL_RULE_DENIAL: &str = "not a member of this channel";
+
+/// The gate that refuses when the credential itself is not live *in the tenant
+/// being addressed*.
+const CREDENTIAL_GATE_DENIAL: &str = "realtime credential is no longer active";
 
 // ---------------------------------------------------------------------------
 // 1 — the membership check
@@ -474,8 +563,44 @@ async fn srv_t2_1_a_grant_needs_live_channel_membership() {
     assert_eq!(status, 403, "{body}");
     assert_eq!(
         body["error"]["message"],
-        json!("not a member of this channel"),
+        json!(CHANNEL_RULE_DENIAL),
         "and the refusal says nothing about whether the channel exists"
+    );
+
+    // (b2) the positive control for (b): the very same credential DOES get a
+    // grant for the channel that person is in. Without this, (b) would still
+    // pass if the outsider's login were simply broken — and the test would be
+    // certifying nothing.
+    let (status, body) = post_grant(
+        &http,
+        &base,
+        &outsider_token,
+        tenant.workspace,
+        tenant.other_channel,
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "the same credential must work on the channel they ARE in: {body}"
+    );
+
+    // (b3) and the mirror image, which isolates the variable completely: the
+    // FIRST member's credential — already proven good by (a) — refused on a
+    // channel in the same workspace they never joined. One workspace, one live
+    // credential, only a `membership` row differs.
+    let (status, body) = post_grant(
+        &http,
+        &base,
+        &member_token,
+        tenant.workspace,
+        tenant.other_channel,
+    )
+    .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(
+        body["error"]["message"],
+        json!(CHANNEL_RULE_DENIAL),
+        "membership is the only thing that changed, so it must be the thing refusing"
     );
 
     // (c) another tenant's channel, asked for under this credential's own
@@ -512,6 +637,14 @@ async fn srv_t2_1_a_grant_needs_live_channel_membership() {
 /// `typing:ws….<CH>`, they would learn who is in a channel they cannot read —
 /// which is the leak ADR-0149 names. The rule must be the message channel's,
 /// with no separate implementation to drift.
+///
+/// **Every claim here is asserted as a comparison between the two rails, not
+/// against a hardcoded sentence.** A test that only checks `typing:` against a
+/// literal would still pass if `ch:` started answering something else — and
+/// "the two rails agree" is the entire property this batch is selling. The
+/// literal is then checked *once more* on top, to pin **which gate** fired: the
+/// proxy has two, and a probe that dies at the credential gate proves nothing
+/// about channels.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn srv_t2_2_the_typing_channel_subscribes_by_the_message_channels_rule() {
@@ -524,38 +657,121 @@ async fn srv_t2_2_the_typing_channel_subscribes_by_the_message_channels_rule() {
     let base = start_server(app_pool, &cent_url).await;
     let http = reqwest::Client::new();
 
-    let ephemeral = momo_ephemeral::ephemeral_channel(tenant.workspace, tenant.channel);
-    let durable = momo_messaging::cent_channel(tenant.workspace, tenant.channel);
-
-    // The channel member may watch both rails.
-    let member_token = login(&http, &base, tenant.workspace, &tenant.member_email).await;
-    let member_claims = connection_claims(&http, &base, &member_token).await;
-    assert_allowed(&subscribe_proxy(&http, &base, &member_claims, &durable).await);
-    assert_allowed(&subscribe_proxy(&http, &base, &member_claims, &ephemeral).await);
-
-    // The workspace outsider may watch neither, and the refusal is the same
-    // sentence for both — one rule, one wording.
-    let outsider_token = login(&http, &base, tenant.workspace, &tenant.outsider_email).await;
-    let outsider_claims = connection_claims(&http, &base, &outsider_token).await;
-    assert_denied(
-        &subscribe_proxy(&http, &base, &outsider_claims, &durable).await,
-        "not a member of this channel",
-    );
-    assert_denied(
-        &subscribe_proxy(&http, &base, &outsider_claims, &ephemeral).await,
-        "not a member of this channel",
-    );
-
-    // Another tenant's 휘발 channel: denied for a member of this one.
-    assert_denied(
-        &subscribe_proxy(
-            &http,
-            &base,
-            &member_claims,
-            &momo_ephemeral::ephemeral_channel(other.workspace, other.channel),
+    let rails = |workspace, channel| {
+        (
+            momo_messaging::cent_channel(workspace, channel),
+            momo_ephemeral::ephemeral_channel(workspace, channel),
         )
-        .await,
-        "not a member of this channel",
+    };
+    let (durable, ephemeral) = rails(tenant.workspace, tenant.channel);
+    assert_ne!(durable, ephemeral, "guard 1: two namespaces, one rule");
+
+    // -- (a) the channel member may watch both rails -----------------------
+    let member_token = login(&http, &base, tenant.workspace, &tenant.member_email).await;
+    let member_claims = connection_claims(&http, &base, &member_token, "the channel member").await;
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &member_claims, &durable).await,
+        "member → ch:",
+    );
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &member_claims, &ephemeral).await,
+        "member → typing:",
+    );
+
+    // -- (b) a WORKSPACE member who is not a CHANNEL member ----------------
+    //
+    // The actor this whole batch turns on. `connection_claims` returning at all
+    // is the server certifying they are an active workspace member, so the two
+    // denials below can only be about the channel.
+    let outsider_token = login(&http, &base, tenant.workspace, &tenant.outsider_email).await;
+    let outsider_claims = connection_claims(
+        &http,
+        &base,
+        &outsider_token,
+        "the workspace member who is not in this channel",
+    )
+    .await;
+    let durable_denial = deny_reason(
+        &subscribe_proxy(&http, &base, &outsider_claims, &durable).await,
+        "non-member → ch:",
+    );
+    let ephemeral_denial = deny_reason(
+        &subscribe_proxy(&http, &base, &outsider_claims, &ephemeral).await,
+        "non-member → typing:",
+    );
+    assert_eq!(
+        ephemeral_denial, durable_denial,
+        "the 휘발 rail must refuse for the SAME reason as the message rail — \
+         two wordings would mean two implementations, and two implementations drift"
+    );
+    assert_eq!(
+        durable_denial, CHANNEL_RULE_DENIAL,
+        "and the gate that fired must be the CHANNEL rule; if this probe died at \
+         the credential gate it would prove nothing about channel membership"
+    );
+
+    // …and the same person IS allowed on the channel they do belong to, which is
+    // what proves (b) measured membership rather than a broken credential.
+    let (own_durable, own_ephemeral) = rails(tenant.workspace, tenant.other_channel);
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &outsider_claims, &own_durable).await,
+        "non-member → ch: of their OWN channel",
+    );
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &outsider_claims, &own_ephemeral).await,
+        "non-member → typing: of their OWN channel",
+    );
+
+    // -- (c) the same credential, varying ONLY channel membership ----------
+    //
+    // The cleanest form of the claim: one live connection, one workspace, two
+    // channels. Nothing differs between (a) and this but a `membership` row.
+    let member_durable_denial = deny_reason(
+        &subscribe_proxy(&http, &base, &member_claims, &own_durable).await,
+        "member → ch: of a channel they never joined",
+    );
+    let member_ephemeral_denial = deny_reason(
+        &subscribe_proxy(&http, &base, &member_claims, &own_ephemeral).await,
+        "member → typing: of a channel they never joined",
+    );
+    assert_eq!(
+        member_ephemeral_denial, member_durable_denial,
+        "same credential, same workspace, only membership differs — the two rails \
+         must still answer identically"
+    );
+    assert_eq!(member_durable_denial, CHANNEL_RULE_DENIAL);
+
+    // -- (d) another tenant entirely ---------------------------------------
+    //
+    // A different property, so it gets its own name rather than being folded in
+    // above. The proxy opens the tenant transaction on the workspace **named by
+    // the channel**, so this credential is not even visible there: the
+    // credential-liveness gate fires before the channel rule ever runs. That is
+    // fail-closed and strictly stronger than "not a member" — but it means the
+    // cross-tenant probe is NOT evidence about the channel rule, which is
+    // exactly why it is asserted separately.
+    let (foreign_durable, foreign_ephemeral) = rails(other.workspace, other.channel);
+    let foreign_durable_denial = deny_reason(
+        &subscribe_proxy(&http, &base, &member_claims, &foreign_durable).await,
+        "member → ch: of ANOTHER tenant",
+    );
+    let foreign_ephemeral_denial = deny_reason(
+        &subscribe_proxy(&http, &base, &member_claims, &foreign_ephemeral).await,
+        "member → typing: of ANOTHER tenant",
+    );
+    assert_eq!(
+        foreign_ephemeral_denial, foreign_durable_denial,
+        "cross-tenant refusal must be identical on both rails too"
+    );
+    assert_eq!(
+        foreign_durable_denial, CREDENTIAL_GATE_DENIAL,
+        "cross-tenant dies at the credential gate: the token row lives in another \
+         workspace and RLS does not show it here"
+    );
+    assert_ne!(
+        foreign_durable_denial, CHANNEL_RULE_DENIAL,
+        "and the two gates must stay distinguishable — collapsing their wording \
+         would hide which one is actually protecting the tenant boundary"
     );
 }
 
