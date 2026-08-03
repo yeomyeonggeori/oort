@@ -31,9 +31,15 @@
 //! 2. **Credential liveness.** `meta.token_id` names the credential the
 //!    connection token was minted from; `has_active_realtime_credential`
 //!    re-reads that row. This is what makes a logout cut the rail.
-//! 3. **The channel's own rule.** `ch:`/`dm:` = live channel membership.
-//!    `agent:` = observer and agent are BOTH live members of that exact channel.
-//!    `agentwork:` = only that agent, and only while it is active.
+//! 3. **The channel's own rule.** `ch:`/`dm:`/`typing:` = live channel
+//!    membership. `agent:` = observer and agent are BOTH live members of that
+//!    exact channel. `agentwork:` = only that agent, and only while it is
+//!    active.
+//!
+//! `typing:` (ADR-0149) joins the first group rather than getting a rule of its
+//! own, and that is the point: 「작성 중」 carries no text, but *who is typing in
+//! which channel* is exactly as sensitive as the channel's membership list, so
+//! it is authorized by the same predicate and cannot drift away from it.
 //!
 //! Everything unrecognised fails closed with a deny, never an allow.
 
@@ -150,7 +156,14 @@ pub async fn issue_token(
 /// A parsed Centrifugo channel name (Swift `CentrifugoRoutes.ParsedChannel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParsedChannel {
-    /// `ch:ws<WS>.<CHANNEL>` / `dm:ws<WS>.<CHANNEL>` — the message rail.
+    /// `ch:ws<WS>.<CHANNEL>` / `dm:ws<WS>.<CHANNEL>` — the message rail — and
+    /// `typing:ws<WS>.<CHANNEL>`, the 휘발 신호 rail beside it (ADR-0149).
+    ///
+    /// The three share one variant because they share one **rule**: you may
+    /// watch a channel's 「작성 중」 exactly when you may watch its messages. A
+    /// separate variant would be a second place for that rule to live, and the
+    /// two would eventually disagree — which is the failure where someone can
+    /// see who is typing in a channel they were removed from.
     Channel { workspace: Uuid, channel: Uuid },
     /// `agent:ws<WS>.<CHANNEL>.<AGENT>` — observable progress, per channel.
     Agent {
@@ -198,7 +211,10 @@ pub fn parse_channel(name: &str) -> Option<ParsedChannel> {
     if segments.len() >= 2 {
         if let Ok(workspace) = Uuid::parse_str(segments[0]) {
             return match namespace {
-                "ch" | "dm" if segments.len() == 2 => {
+                // `typing` (ADR-0149) rides this arm on purpose: the ephemeral
+                // rail's subscribe rule IS the message rail's. See
+                // `ParsedChannel::Channel`.
+                "ch" | "dm" | momo_ephemeral::EPHEMERAL_NAMESPACE if segments.len() == 2 => {
                     let channel = Uuid::parse_str(segments[1]).ok()?;
                     Some(ParsedChannel::Channel { workspace, channel })
                 }
@@ -427,6 +443,40 @@ mod tests {
                 agent_member: agent,
             })
         );
+    }
+
+    /// ADR-0149: the 휘발 channel resolves to the SAME authorization decision as
+    /// the message channel it shadows. If these two ever diverge, someone can
+    /// watch 「작성 중」 in a channel they may not read — the leak the ADR calls
+    /// out as "채널의 존재와 그 안에 누가 있는지가 새는 것".
+    #[test]
+    fn the_typing_channel_is_authorized_exactly_like_the_message_channel() {
+        let workspace = Uuid::new_v4();
+        let channel = Uuid::new_v4();
+        let durable = cent_channel(workspace, channel);
+        let ephemeral = momo_ephemeral::ephemeral_channel(workspace, channel);
+        assert_ne!(durable, ephemeral, "guard 1: separate namespaces");
+        assert_eq!(
+            parse_channel(&ephemeral),
+            parse_channel(&durable),
+            "one rule, not two"
+        );
+        assert_eq!(
+            parse_channel(&ephemeral),
+            Some(ParsedChannel::Channel { workspace, channel })
+        );
+        assert_eq!(
+            parse_channel(&ephemeral).expect("parsed").deny_reason(),
+            "not a member of this channel"
+        );
+        // The shape rules still apply: the ephemeral namespace gets no
+        // three-segment form and no legacy `ws.` fallback.
+        let agent = Uuid::new_v4();
+        assert_eq!(
+            parse_channel(&format!("typing:ws{workspace}.{channel}.{agent}")),
+            None
+        );
+        assert_eq!(parse_channel(&format!("typing:ws.{channel}")), None);
     }
 
     #[test]

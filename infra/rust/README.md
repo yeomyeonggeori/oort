@@ -192,7 +192,9 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `JWT_HMAC` | ✅ **정본 이름** | `MOMO_JWT_SECRET`은 하위호환 폴백(둘 다 있으면 `JWT_HMAC` 승) |
 | `MOMO_CENTRIFUGO_WS_URL` | ✅ `realtime_ws_url` | ADR-0110 유일 권위 |
 | `LOG_LEVEL` | ✅ (`RUST_LOG` 우선) | B1.7 전에는 무시되던 값 |
-| `CENT_API_URL`/`CENT_API_KEY`/`CENT_TOKEN_HMAC`/`CENT_PROXY_SECRET` | ❌ 미소비 | momo-server에는 HTTP 클라이언트가 없다(불변식 #2). 그래서 이 compose는 **주입조차 하지 않는다** |
+| `CENT_TOKEN_HMAC` / `CENT_PROXY_SECRET` | ✅ `realtime` (B4) | 브로커의 **인가** 절반: 연결 토큰 서명 + subscribe 프록시 인증. 둘 다 publish 권한은 없다 |
+| `CENT_API_URL` / `CENT_API_KEY` | ✅ `ephemeral` (SRV-T2 / ADR-0149) | 브로커의 **발행** 절반. 이 줄은 "momo-server에는 HTTP 클라이언트가 없다(불변식 #2)"라서 오래 미소비였고, **ADR-0149가 그 문장을 바꾼 결정**이다 — 「작성 중」은 outbox를 못 탄다(타이퍼 1명 5분이면 절대 안 읽힐 100행). 대신 이미지 안에서 Centrifugo에 닿을 수 있는 코드는 `momo-ephemeral` 하나뿐이고 그 crate의 전 API는 봉인된 `EphemeralSignal`만 받는다. **미설정이 지원되는 기본값**: 휘발 라우트 2개만 503, 나머지는 무변경 |
+| `MOMO_EPHEMERAL_PER_CHANNEL`·`MOMO_EPHEMERAL_PER_MEMBER`·`MOMO_EPHEMERAL_GRANT_LIMIT`·`MOMO_EPHEMERAL_WINDOW_SECONDS` | ✅ `ephemeral` (선택) | ADR-0149 가드 5. 기본 30·120·10 / 60s. 0=해당 축 비활성 |
 | `OUTBOUND_WEBHOOK_MASTER_KEY`·`PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
 | `MOMO_CORS_ALLOWED_ORIGINS` | ✅ `cors` (DESK-1) | MOMO-605 계약 그대로 포팅. 빈값·미설정=미들웨어 미장착=완전 무변경. 이 줄이 "미소비"였던 동안 패키징된 데스크톱은 로그인이 아예 안 됐다 |
 

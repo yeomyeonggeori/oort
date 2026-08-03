@@ -52,8 +52,17 @@
 //! same reason the rest does — one is a signing key this crate already owns a
 //! sibling of, and the other is `token` SQL, which no other crate may write.
 
+//! goal SRV-T2 (ADR-0149) adds the fifth credential, and the first one whose
+//! purpose is to make an authorization check **cheap enough to repeat**: the
+//! [`ephemeral_grant`] — a 60-second, member-and-channel-bound proof that
+//! `is_channel_member` already said yes. It lives here rather than in
+//! `momo-ephemeral` because credentials live in this crate, and because
+//! `momo-ephemeral` holds neither crypto nor a database — which is exactly what
+//! makes the 휘발 publish path provably Postgres-free (ADR-0149 guard 3).
+
 pub mod agent_bearer;
 pub mod agent_scope;
+pub mod ephemeral_grant;
 pub mod issue;
 pub mod jwt;
 pub mod realtime;
@@ -71,6 +80,11 @@ pub use agent_bearer::{
 pub use agent_scope::{
     is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,
     SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
+};
+pub use ephemeral_grant::{
+    ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,
+    EphemeralGrantRejection, EphemeralGrantScope, IssuedEphemeralGrant,
+    EPHEMERAL_GRANT_TTL_SECONDS, EPHEMERAL_GRANT_TYP,
 };
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,

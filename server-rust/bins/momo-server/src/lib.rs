@@ -8,11 +8,22 @@
 //! | invariant | enforced by | this crate's part |
 //! |---|---|---|
 //! | #1 PG = SoT | `momo-messaging` writes to PG only | reads/writes nothing else |
-//! | #2 Centrifugo = transport-only | `momo-relay` is the sole publisher | **has no HTTP client** |
+//! | #2 Centrifugo = transport-only | `momo-relay` publishes the durable rail | holds **only** `momo-ephemeral`, whose whole API is `publish(&EphemeralSignal)` |
 //! | #3 single write path | `momo_outbox::emit_outbox` | calls `send_message_in_tx`, never the outbox |
 //! | #4 gapless seq | `channel_seq` row lock + UNIQUE | returns the authoritative `seq` |
 //! | #5 agent = member | one `member` table | no agent branch in any handler |
 //! | #6 RLS FORCE | `momo_db::with_tenant_tx` | opens every tenant access through it, keyed by the credential |
+//!
+//! **Row #2 changed with ADR-0149 (goal SRV-T2) and the change is the whole
+//! cost of that decision.** Until then this crate had no HTTP client at all,
+//! which made "only the relay publishes" a fact about the dependency graph. It
+//! now has exactly one — `momo-ephemeral` — and the property that replaces the
+//! old one is narrower but still mechanical: `reqwest` is *not* a dependency of
+//! this crate, so no handler can build a request of its own, and the single
+//! thing it can reach accepts a sealed [`momo_ephemeral::EphemeralSignal`]
+//! rather than a channel and a JSON blob. Centrifugo is still transport-only;
+//! there are simply two authors of that transport now, and neither of them can
+//! be reached with arbitrary data.
 //!
 //! The router is a library so `tests/http_smoke_pg.rs` can boot the real app on
 //! an ephemeral port; `main.rs` only reads the environment and serves.
@@ -33,8 +44,8 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, CorsConfig, MentionSettings, RateLimitConfig, RealtimeSettings,
-    SettingsConfig, T3Settings,
+    AgentGatewaySettings, CorsConfig, EphemeralSettings, MentionSettings, RateLimitConfig,
+    RealtimeSettings, SettingsConfig, T3Settings,
 };
 use crate::rate_limit::SlidingWindowRateLimiter;
 
@@ -45,6 +56,44 @@ use crate::rate_limit::SlidingWindowRateLimiter;
 pub struct RateLimitState {
     pub config: RateLimitConfig,
     pub limiter: SlidingWindowRateLimiter,
+}
+
+/// 휘발 신호 state (ADR-0149): the operator's knobs plus the one object in this
+/// process that can talk to Centrifugo.
+///
+/// `publisher` is `None` on any instance that was not handed `CENT_API_URL` +
+/// `CENT_API_KEY`, and `None` is what makes the two 휘발 routes answer 503. The
+/// capability and the switch are therefore the same value — there is no way to
+/// have the routes enabled without a publisher, or a publisher with no
+/// credential behind it.
+#[derive(Debug, Default)]
+pub struct EphemeralState {
+    pub settings: EphemeralSettings,
+    pub publisher: Option<momo_ephemeral::EphemeralPublisher>,
+}
+
+impl EphemeralState {
+    /// Build the state for `settings`, constructing the publisher only when the
+    /// transport is fully configured.
+    ///
+    /// A publisher that fails to build (a TLS backend that will not initialise)
+    /// is logged and left `None`: the surface closes, and no other route on the
+    /// instance is affected by a failure in a typing indicator.
+    pub fn new(settings: EphemeralSettings) -> EphemeralState {
+        let publisher = settings.transport().and_then(|(url, key)| {
+            match momo_ephemeral::EphemeralPublisher::new(url, key) {
+                Ok(publisher) => Some(publisher),
+                Err(error) => {
+                    tracing::error!(%error, "ephemeral publisher unavailable; 휘발 신호 stays off");
+                    None
+                }
+            }
+        });
+        EphemeralState {
+            settings,
+            publisher,
+        }
+    }
 }
 
 /// Shared handler state. Cheap to clone (pool handle + `Arc`'d strings).
@@ -88,10 +137,24 @@ pub struct AppState {
     /// rest: an instance that named no origin mounts no CORS middleware at all,
     /// which is byte-for-byte today's behaviour.
     pub cors: Arc<CorsConfig>,
+    /// 휘발 신호 (ADR-0149, goal SRV-T2). Fail-closed like the realtime family:
+    /// no Centrifugo publish credential ⇒ no publisher ⇒ both 휘발 routes answer
+    /// 503, which is what every deployment that has not updated its env block
+    /// gets.
+    pub ephemeral: Arc<EphemeralState>,
+    /// The key `ephemeral_grant`s are signed and verified with, derived once at
+    /// startup from the app JWT secret (`momo_auth::ephemeral_grant_key`).
+    ///
+    /// Derived once rather than per request because it is a hash of a secret:
+    /// recomputing it in a handler would put `jwt_secret` on the hot path for no
+    /// reason. Never logged — [`AppState`]'s hand-written `Debug` covers it by
+    /// listing nothing.
+    pub ephemeral_grant_key: Arc<String>,
 }
 
 impl AppState {
     pub fn new(pool: PgPool, jwt_secret: String, realtime_ws_url: String) -> Self {
+        let ephemeral_grant_key = momo_auth::ephemeral_grant_key(&jwt_secret);
         AppState {
             pool,
             jwt_secret: Arc::new(jwt_secret),
@@ -103,6 +166,8 @@ impl AppState {
             rate_limit: Arc::new(RateLimitState::default()),
             mentions: Arc::new(MentionSettings::default()),
             cors: Arc::new(CorsConfig::default()),
+            ephemeral: Arc::new(EphemeralState::default()),
+            ephemeral_grant_key: Arc::new(ephemeral_grant_key),
         }
     }
 
@@ -158,6 +223,13 @@ impl AppState {
     /// has to name each origin to open one.
     pub fn with_cors(mut self, config: CorsConfig) -> Self {
         self.cors = Arc::new(config);
+        self
+    }
+
+    /// Attach the 휘발 신호 configuration (ADR-0149), and with it the publisher
+    /// — the two are one value because the credential *is* the switch.
+    pub fn with_ephemeral(mut self, settings: EphemeralSettings) -> Self {
+        self.ephemeral = Arc::new(EphemeralState::new(settings));
         self
     }
 }
@@ -330,6 +402,20 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/auth/realtime-token",
             post(routes::realtime::issue_token),
+        )
+        // ADR-0149 (SRV-T2) — 「작성 중」. The first surface on this server whose
+        // handler does not go through Postgres, and the pair is what makes that
+        // safe: the grant route does the ONE membership read (under RLS, with
+        // the same predicate the subscribe proxy uses) and the signal route
+        // verifies its result. Both are protected — 휘발 신호 is not a public
+        // surface, and the credential is what binds a grant to its caller.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/typing/grant",
+            post(routes::ephemeral::issue_grant),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/typing",
+            post(routes::ephemeral::typing),
         )
         // messenger breadth (B1.2) — DM, read state, search. All three sit
         // behind the same credential gate as messages: there is no anonymous

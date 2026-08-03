@@ -148,17 +148,29 @@ services:
 
   # prod :142. Env names are the prod names; the values differ only in that the
   # keys this server does not read are not injected at all:
-  #   * CENT_API_KEY / CENT_API_URL — momo-server has NO HTTP client (invariant
-  #     #2: publishing is the relay's alone), so handing it the Centrifugo
-  #     credential would grant a capability the process must not have;
   #   * HERMES_*/AGENT_*/S3/webhook+provider master keys — no route consumes
   #     them yet, and an unread secret in the environment is pure exposure.
-  # Both come back with the batch that implements the feature.
+  # They come back with the batch that implements the feature.
   #
-  # B4 adds the two Centrifugo keys the api DOES read, and they are the
-  # *authorization* half of the broker, never the publish half: CENT_TOKEN_HMAC
-  # signs connection tokens and CENT_PROXY_SECRET authenticates the subscribe
-  # callback. Neither can publish anything, so invariant #2 is untouched.
+  # B4 adds the two Centrifugo keys the api reads for *authorization*:
+  # CENT_TOKEN_HMAC signs connection tokens and CENT_PROXY_SECRET authenticates
+  # the subscribe callback. Neither can publish anything.
+  #
+  # goal SRV-T2 / ADR-0149 adds CENT_API_URL + CENT_API_KEY, which this block
+  # previously withheld on the grounds that "momo-server has NO HTTP client
+  # (invariant #2: publishing is the relay's alone)". That sentence stops being
+  # true here, and the ADR is the decision that says so: 휘발 신호 (「작성 중」)
+  # cannot ride the outbox — 100 rows per typist per five minutes, none of them
+  # ever read — so the server publishes it directly.
+  #
+  # What replaces the withheld credential as the guard: the only code in the api
+  # image that can reach Centrifugo is `momo-ephemeral`, whose entire API takes
+  # a sealed `EphemeralSignal` (today: 「작성 중」 and nothing else). The durable
+  # rail is untouched — a persisted message still travels outbox → relay →
+  # Centrifugo, and this key cannot make one.
+  #
+  # Leaving both unset is supported and is what an un-updated deployment gets:
+  # the two 휘발 routes answer 503 and nothing else changes.
   api:
     image: *rust-image
     command: ["api"]
@@ -181,6 +193,11 @@ services:
       # token the broker cannot verify, or a subscribe callback the api 401s.
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
+      # ADR-0149 (SRV-T2): the 휘발 신호 publish credential. Same values the relay
+      # gets below — one Centrifugo, one server API key. Unset ⇒ 휘발 신호 off
+      # (503), which is why neither line uses the `:?` required form.
+      CENT_API_URL: http://centrifugo:8000/api
+      CENT_API_KEY: ${CENT_API_KEY:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
       # A value is required only for non-browser origins — the Tauri desktop

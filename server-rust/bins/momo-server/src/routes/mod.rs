@@ -11,6 +11,8 @@ pub mod cloud_hosts;
 pub mod credits;
 pub mod devices;
 pub mod dms;
+/// 휘발 신호 — the one route family with no Swift ancestor (ADR-0149).
+pub mod ephemeral;
 pub mod health;
 pub mod invites;
 pub mod join;

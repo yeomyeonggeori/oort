@@ -1242,6 +1242,77 @@ impl SubscribeProxyResponse {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 휘발 신호 (ADR-0149, goal SRV-T2)
+//
+// The **client contract**, stated here because no client implements it yet and
+// the packet asks for it in writing (`clients/**` is untouched by this batch):
+//
+//   1. subscribe to `channel` (the `typing:ws….<CH>` name the grant returns) —
+//      the subscribe proxy authorizes it with the same membership rule as `ch:`;
+//   2. when the composer goes from empty to non-empty, `POST …/typing/grant`
+//      once, then `POST …/typing` with the grant;
+//   3. while still typing, repeat the publish every `republishIntervalMs`;
+//      re-mint the grant when `expiresAtMs` approaches;
+//   4. on each received `ephemeral.typing`, show that member as typing **until
+//      `payload.expires_at`** and then forget them — no "stopped typing"
+//      message is ever sent, and none is needed;
+//   5. when `aggregateThreshold` or more members are live at once, render the
+//      count ("3명이 작성 중") instead of names;
+//   6. on send, on blur, on an emptied composer: simply stop republishing. The
+//      indicator drains on its own within `signalTtlMs`.
+// ---------------------------------------------------------------------------
+
+/// `POST …/channels/{ch}/typing` request.
+///
+/// The body carries the grant and **nothing else** — no member id, no channel
+/// id, no text, no "started/stopped" flag. Every one of those absences is
+/// deliberate: the member comes from the credential, the channel from the path,
+/// and a body that could name either would be one review slip away from letting
+/// a member signal into someone else's conversation.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypingSignalRequest {
+    pub grant: String,
+}
+
+/// `POST …/channels/{ch}/typing/grant` response.
+///
+/// It answers "may I" and "how should I behave" in one call, so the cadence is
+/// a server decision a client reads rather than a constant every client
+/// re-guesses (the failure mode where iOS and web disagree about when someone
+/// stopped typing).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypingGrantResponse {
+    /// The capability to present to `POST …/typing`. Opaque to the client.
+    pub grant: String,
+    /// The Centrifugo channel the signals appear on — subscribe here, and note
+    /// it is a *different* channel from the message rail (guard 1).
+    pub channel: String,
+    pub expires_at_ms: i64,
+    pub ttl_seconds: i64,
+    /// How long a received signal stays live before the client forgets it.
+    pub signal_ttl_ms: i64,
+    /// How often a still-typing client re-posts.
+    pub republish_interval_ms: i64,
+    /// From how many simultaneous typists to collapse names into a count. The
+    /// server never aggregates (it holds no state); this is the number the
+    /// clients agree on.
+    pub aggregate_threshold: u32,
+}
+
+/// `POST …/channels/{ch}/typing` response (202).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypingSignalResponse {
+    pub channel: String,
+    /// When subscribers will drop this signal. The publisher is told so it can
+    /// render its own state from the same clock everyone else uses.
+    pub expires_at_ms: i64,
+    pub republish_after_ms: i64,
+}
+
 /// `POST …/dms` request (Swift `OpenDirectMessageRequest`, :485-498), which
 /// hand-rolls a decoder accepting either spelling of the key. `alias` is the
 /// same contract.

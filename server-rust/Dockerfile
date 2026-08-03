@@ -52,6 +52,7 @@ COPY server-rust/Cargo.toml server-rust/Cargo.lock ./
 COPY server-rust/crates/momo-agent/Cargo.toml crates/momo-agent/
 COPY server-rust/crates/momo-auth/Cargo.toml crates/momo-auth/
 COPY server-rust/crates/momo-db/Cargo.toml crates/momo-db/
+COPY server-rust/crates/momo-ephemeral/Cargo.toml crates/momo-ephemeral/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
 COPY server-rust/crates/momo-outbox/Cargo.toml crates/momo-outbox/
 COPY server-rust/crates/momo-provider/Cargo.toml crates/momo-provider/

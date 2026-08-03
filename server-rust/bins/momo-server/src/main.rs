@@ -115,7 +115,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_mentions(config.mentions.clone())
     // MOMO-605: no cross-origin surface at all unless the operator named an
     // origin in MOMO_CORS_ALLOWED_ORIGINS.
-    .with_cors(config.cors.clone());
+    .with_cors(config.cors.clone())
+    // ADR-0149 (SRV-T2): 휘발 신호 stays 503 unless the operator handed this
+    // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
+    // No deployment did before this batch, so an un-updated env block keeps the
+    // surface closed rather than half-open.
+    .with_ephemeral(config.ephemeral.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

@@ -72,6 +72,10 @@ pub struct Config {
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
+    /// 휘발 신호 (ADR-0149, goal SRV-T2) — **off unless the operator hands this
+    /// process the Centrifugo publish credential**, which no deployment did
+    /// before this batch.
+    pub ephemeral: EphemeralSettings,
     /// MOMO-605 CORS origin allowlist — **empty unless the operator names an
     /// origin**, and an empty one mounts no middleware at all.
     pub cors: CorsConfig,
@@ -435,6 +439,109 @@ impl MentionSettings {
                 env("AGENT_CONTEXT_MAX_MESSAGES").as_deref(),
             ),
         }
+    }
+}
+
+/// 휘발 신호 configuration (ADR-0149, goal SRV-T2).
+///
+/// **This is the struct that turns momo-server into the second Centrifugo
+/// writer**, so it is fail-closed twice over: absent `CENT_API_URL`/`CENT_API_KEY`
+/// means no publisher is built at all, and no publisher means both 휘발 routes
+/// answer 503. `infra/rust/docker-compose.rust.yml` deliberately withheld those
+/// two keys from the api service until now ("momo-server has NO HTTP client"),
+/// so an un-updated deployment simply keeps the feature off rather than
+/// half-opening it.
+///
+/// The rate limits are ADR-0149 guard 5 — *"클라가 얼마나 자주 보내든 채널당·
+/// 사람당 상한을 서버가 건다"* — and they are sized against the client cadence
+/// rather than guessed:
+///
+/// | axis | default | what it allows |
+/// |---|---|---|
+/// | per member **per channel** | 30 / 60s | a sustained 2s republish, 1.5× the 3s the client actually uses |
+/// | per member, all channels | 120 / 60s | four channels typed in at once, at cadence |
+/// | grant mints, per member per channel | 10 / 60s | 10× the one-per-60s a client needs, and the only axis that bounds Postgres reads |
+///
+/// A limit of 0 disables that axis, the same contract [`RateLimitConfig`] has.
+#[derive(Clone, PartialEq, Eq)]
+pub struct EphemeralSettings {
+    /// `CENT_API_URL`, e.g. `http://centrifugo:8000/api`. `None` ⇒ 휘발 신호 off.
+    pub cent_api_url: Option<String>,
+    /// `CENT_API_KEY`. **Never logged, never echoed** — this is the credential
+    /// that can publish anything to any channel, which is precisely why the
+    /// publisher wrapping it exposes only `publish(&EphemeralSignal)`.
+    pub cent_api_key: Option<String>,
+    /// `MOMO_EPHEMERAL_WINDOW_SECONDS` (default 60, floor 1).
+    pub window_seconds: u64,
+    /// `MOMO_EPHEMERAL_PER_CHANNEL` (default 30). 0 disables.
+    pub per_channel_limit: u32,
+    /// `MOMO_EPHEMERAL_PER_MEMBER` (default 120). 0 disables.
+    pub per_member_limit: u32,
+    /// `MOMO_EPHEMERAL_GRANT_LIMIT` (default 10). 0 disables.
+    pub grant_limit: u32,
+}
+
+impl Default for EphemeralSettings {
+    fn default() -> Self {
+        EphemeralSettings {
+            cent_api_url: None,
+            cent_api_key: None,
+            window_seconds: 60,
+            per_channel_limit: 30,
+            per_member_limit: 120,
+            grant_limit: 10,
+        }
+    }
+}
+
+impl std::fmt::Debug for EphemeralSettings {
+    /// Hand-written for the same reason [`SettingsConfig`]'s is: `cent_api_key`
+    /// is the Centrifugo server-API credential, and a `{:?}` in a log line is
+    /// how it would reach a log aggregator.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EphemeralSettings")
+            .field("cent_api_url", &self.cent_api_url)
+            .field("cent_api_key_configured", &self.cent_api_key.is_some())
+            .field("per_channel_limit", &self.per_channel_limit)
+            .field("per_member_limit", &self.per_member_limit)
+            .field("grant_limit", &self.grant_limit)
+            .finish_non_exhaustive()
+    }
+}
+
+impl EphemeralSettings {
+    pub fn from_env() -> EphemeralSettings {
+        let defaults = EphemeralSettings::default();
+        EphemeralSettings {
+            cent_api_url: env("CENT_API_URL").map(|value| value.trim().to_string()),
+            cent_api_key: env("CENT_API_KEY"),
+            window_seconds: env("MOMO_EPHEMERAL_WINDOW_SECONDS")
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .unwrap_or(defaults.window_seconds)
+                .max(1),
+            per_channel_limit: env("MOMO_EPHEMERAL_PER_CHANNEL")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.per_channel_limit),
+            per_member_limit: env("MOMO_EPHEMERAL_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.per_member_limit),
+            grant_limit: env("MOMO_EPHEMERAL_GRANT_LIMIT")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.grant_limit),
+        }
+    }
+
+    /// The publish credential, present only when BOTH halves are configured. A
+    /// URL without a key would post unauthenticated requests at Centrifugo
+    /// forever; a key without a URL has nowhere to go.
+    pub fn transport(&self) -> Option<(&str, &str)> {
+        let url = self.cent_api_url.as_deref()?;
+        let key = self.cent_api_key.as_deref()?;
+        if url.is_empty() || key.is_empty() {
+            return None;
+        }
+        Some((url, key))
     }
 }
 
@@ -846,6 +953,12 @@ impl Config {
             settings,
             rate_limit: RateLimitConfig::from_env(),
             mentions: MentionSettings::from_env(),
+            // ADR-0149: never fatal. An instance that was not given the
+            // Centrifugo publish credential keeps 휘발 신호 off and answers 503
+            // on the two routes — the same posture as every other subsystem
+            // here, and byte-for-byte today's behaviour for a deployment that
+            // does not update its env block.
+            ephemeral: EphemeralSettings::from_env(),
             // MOMO-605: never fatal. A malformed entry narrows the allowlist and
             // the boot warns; refusing to start over a browser knob would take
             // the whole instance down for a desktop-only concern.
@@ -1235,6 +1348,88 @@ mod tests {
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
+        );
+    }
+
+    // -- ADR-0149 휘발 신호 --------------------------------------------------
+
+    /// The default must be OFF, and off for the right reason: no publish
+    /// credential means no publisher, which means both routes 503. A deployment
+    /// that does not update its env block therefore behaves exactly as it does
+    /// today.
+    #[test]
+    fn ephemeral_signals_are_off_until_the_operator_hands_over_the_publish_credential() {
+        let defaults = EphemeralSettings::default();
+        assert_eq!(defaults.transport(), None);
+        assert_eq!(
+            EphemeralSettings {
+                cent_api_url: Some("http://centrifugo:8000/api".into()),
+                ..EphemeralSettings::default()
+            }
+            .transport(),
+            None,
+            "a URL with no key would post unauthenticated requests forever"
+        );
+        assert_eq!(
+            EphemeralSettings {
+                cent_api_key: Some("k".into()),
+                ..EphemeralSettings::default()
+            }
+            .transport(),
+            None,
+            "a key with no URL has nowhere to go"
+        );
+        assert_eq!(
+            EphemeralSettings {
+                cent_api_url: Some("http://centrifugo:8000/api".into()),
+                cent_api_key: Some("k".into()),
+                ..EphemeralSettings::default()
+            }
+            .transport(),
+            Some(("http://centrifugo:8000/api", "k"))
+        );
+    }
+
+    /// Guard 5's numbers are a pair with the client cadence, not free
+    /// parameters: the per-channel budget has to admit a 3s republish with
+    /// headroom, and the per-member budget has to admit several channels at
+    /// once — otherwise the limiter fires on ordinary use and the feature looks
+    /// broken instead of protected.
+    #[test]
+    fn the_ephemeral_rate_limits_admit_the_shipped_cadence_with_headroom() {
+        let defaults = EphemeralSettings::default();
+        let window = defaults.window_seconds as i64;
+        let publishes_at_cadence = window * 1000 / momo_ephemeral::TYPING_REPUBLISH_INTERVAL_MS;
+        assert!(
+            defaults.per_channel_limit as i64 > publishes_at_cadence,
+            "{} must exceed the {publishes_at_cadence} publishes a 3s cadence makes per window",
+            defaults.per_channel_limit
+        );
+        assert!(
+            defaults.per_member_limit >= defaults.per_channel_limit * 4,
+            "a person typing in four channels at once must not be throttled"
+        );
+        assert!(
+            defaults.grant_limit > 0,
+            "the grant axis is the only thing bounding Postgres reads on this surface"
+        );
+    }
+
+    /// The api key must never be printable, however the struct is logged.
+    #[test]
+    fn the_ephemeral_debug_never_prints_the_publish_credential() {
+        let rendered = format!(
+            "{:?}",
+            EphemeralSettings {
+                cent_api_url: Some("http://centrifugo:8000/api".into()),
+                cent_api_key: Some("super-secret-api-key".into()),
+                ..EphemeralSettings::default()
+            }
+        );
+        assert!(!rendered.contains("super-secret-api-key"), "{rendered}");
+        assert!(
+            rendered.contains("cent_api_key_configured: true"),
+            "{rendered}"
         );
     }
 

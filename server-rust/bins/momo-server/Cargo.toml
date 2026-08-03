@@ -49,6 +49,11 @@ momo-push = { path = "../../crates/momo-push" }
 # one implementation — the exact drift Swift had between two copies of the
 # format string. Promoted from a dev-dependency (it was the T3 smoke's).
 momo-wire = { path = "../../crates/momo-wire" }
+# ADR-0149 (goal SRV-T2): the 휘발 신호 publisher, and the reason it is a crate
+# rather than a module in this binary — see the NOTE below. It owns the HTTP
+# client so this manifest does not, and its whole API takes a sealed
+# `EphemeralSignal`, so no handler can publish anything else anywhere else.
+momo-ephemeral = { path = "../../crates/momo-ephemeral" }
 
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time"] }
@@ -60,13 +65,19 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
-# NOTE (invariant #2): there is deliberately no HTTP client here. momo-server
-# never talks to Centrifugo — publishing belongs to momo-relay alone.
+# NOTE (invariant #2, amended by ADR-0149): there is still deliberately no
+# `reqwest` here. Until goal SRV-T2 that meant "momo-server never talks to
+# Centrifugo"; it now means something narrower but equally mechanical — the only
+# outbound HTTP this process can perform is `momo-ephemeral`'s, whose entire API
+# is `publish(&EphemeralSignal)`. Adding `reqwest` to this manifest would undo
+# the guard, because a handler could then build any request to any host. The
+# durable rail is untouched: `outbox → relay → Centrifugo` remains the only path
+# a persisted message travels.
 
 [dev-dependencies]
-# `reqwest` is the HTTP *client* the smoke test drives the server with — not a
-# server-side dependency. momo-server itself still has no outbound HTTP client
-# (invariant #2: publishing is momo-relay's alone).
+# `reqwest` is the HTTP *client* the smoke tests drive the server with, and
+# (SRV-T2) what the ephemeral tests build a mock Centrifugo receiver against —
+# not a server-side dependency in either case.
 reqwest.workspace = true
 tokio = { workspace = true, features = ["net", "time"] }
 serde_json = { workspace = true }
