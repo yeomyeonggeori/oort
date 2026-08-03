@@ -545,6 +545,23 @@ async fn b51_1_a_turn_answers_in_the_channel_and_bills_the_run() {
     assert_eq!(props["source"], json!("agent_worker.final_text.v0"));
     assert_eq!(props["trigger_message_id"], json!(trigger_message_id));
 
+    // 1b. ADR-0148 규칙 6 — the answer QUOTES the message it answers. Agent =
+    // member, no branch: this is the same `reply_to_id` a human's quote uses,
+    // and it is what puts the question above the answer in the channel's main
+    // flow instead of folding the exchange into a thread. Goes red if the worker
+    // returns to pinning `None` and leaving the linkage in `props`, where only
+    // this worker could read it.
+    let quoted: Option<Uuid> = sqlx::query_scalar("SELECT reply_to_id FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .expect("read reply_to_id");
+    assert_eq!(
+        quoted,
+        Some(trigger_message_id),
+        "an agent's answer points at the utterance that raised it"
+    );
+
     // 2. It went out through the single write path, so the relay can publish it.
     let broadcasts: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM outbox \

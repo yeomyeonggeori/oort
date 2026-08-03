@@ -81,9 +81,10 @@ pub use message::{
     context_message_body, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
     list_messages, list_thread_replies, parse_replies_cursor, patch_message_props_in_tx,
     send_message, send_message_in_tx, send_message_with_mentions_in_tx, send_signed_message_in_tx,
-    thread_root_state_in_tx, validate_replies_root_in_tx, validate_thread_root_in_tx,
-    HistoryCursor, MessageSignature, MessageType, NewMessage, PagedMessage, RepliesCursorInvalid,
-    SentMessage, StoredMessage, ThreadReplyPage, ThreadRollup, ThreadRootInvalid, ThreadRootState,
+    thread_root_state_in_tx, validate_quote_target_in_tx, validate_replies_root_in_tx,
+    validate_thread_root_in_tx, HistoryCursor, MessageSignature, MessageType, NewMessage,
+    PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SentMessage,
+    StoredMessage, ThreadReplyPage, ThreadRollup, ThreadRootInvalid, ThreadRootState,
     HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
 };
 pub use read_state::{

@@ -40,17 +40,18 @@ use momo_messaging::{
     channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit, delete_message_in_tx,
     edit_message_in_tx, is_channel_member, list_channel_page, list_thread_replies,
     parse_replies_cursor, resolve_member_signing_key, send_message_with_mentions_in_tx,
-    set_reaction_in_tx, validate_reaction_emoji, validate_replies_root_in_tx,
-    validate_thread_root_in_tx, HistoryCursor, InteractionRefused, MessageSignature, MessageType,
-    NewMessage, PagedMessage, ProvenanceRejected, ReactionAction, ReactionSnapshot, StoredMessage,
+    set_reaction_in_tx, validate_quote_target_in_tx, validate_reaction_emoji,
+    validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, InteractionRefused,
+    MessageSignature, MessageType, NewMessage, PagedMessage, ProvenanceRejected,
+    QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot, StoredMessage,
     ThreadRollup, ThreadRootInvalid,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    EditMessageRequest, HistoryQuery, MessageDto, MessagePage, ReactionDeltaDto, RepliesQuery,
-    SendMessageRequest, ThreadRepliesPage, ThreadRollupDto,
+    EditMessageRequest, HistoryQuery, MessageDto, MessagePage, QuotedMessageDto, ReactionDeltaDto,
+    RepliesQuery, SendMessageRequest, ThreadRepliesPage, ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
@@ -108,16 +109,37 @@ fn thread_dto(rollup: &ThreadRollup) -> ThreadRollupDto {
     }
 }
 
+fn quoted_dto(quoted: &QuotedMessage) -> QuotedMessageDto {
+    QuotedMessageDto {
+        id: quoted.id.to_string(),
+        seq: quoted.seq,
+        author_member_id: quoted.author_member_id.to_string(),
+        message_type: quoted.message_type.as_db_label().to_string(),
+        // Deliberately no "삭제됨" substitution here: a tombstone's body is
+        // already NULL in the row, and inventing placeholder text server-side
+        // would be a copy of nothing that clients then have to distinguish from
+        // a real message reading "삭제됨".
+        body: quoted.body.clone(),
+        state: quoted.state.clone(),
+        edited_at_ms: quoted.edited_at.map(|at| at.timestamp_millis()),
+        deleted_at_ms: quoted.deleted_at.map(|at| at.timestamp_millis()),
+        quotes_another: quoted.quotes_another,
+    }
+}
+
 fn message_dto(
     message: &StoredMessage,
     client_msg_id: Option<Uuid>,
     include_state: bool,
     thread: Option<&ThreadRollup>,
+    reply_to: Option<&QuotedMessage>,
 ) -> MessageDto {
     MessageDto {
         id: message.id.to_string(),
         channel_id: message.channel_id.to_string(),
         root_id: message.root_id.map(|id| id.to_string()),
+        reply_to_id: message.reply_to_id.map(|id| id.to_string()),
+        reply_to: reply_to.map(quoted_dto),
         seq: message.seq,
         hlc_ts: message.hlc_ts,
         hlc_count: message.hlc_count,
@@ -139,7 +161,13 @@ fn message_dto(
 }
 
 fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
-    message_dto(&paged.message, None, include_state, paged.thread.as_ref())
+    message_dto(
+        &paged.message,
+        None,
+        include_state,
+        paged.thread.as_ref(),
+        paged.reply_to.as_ref(),
+    )
 }
 
 /// Reject the request keys this server does not serve. Visible failure beats a
@@ -210,6 +238,24 @@ fn thread_root_rejection(invalid: ThreadRootInvalid) -> ApiError {
         ThreadRootInvalid::Deleted | ThreadRootInvalid::NotTopLevel => {
             ApiError::bad_request(invalid.to_string())
         }
+    }
+}
+
+/// A bad quote target → its refusal (ADR-0148 규칙 2).
+///
+/// Same status split as [`thread_root_rejection`], for the same two reasons: a
+/// target that is not in this channel is 404 because saying anything else would
+/// answer "does message X exist somewhere in this workspace" to anyone who can
+/// post, and a tombstone is 400 because the caller can see it and just needs to
+/// be told no.
+///
+/// Neither sentence contains the substring `routing`, which is not a
+/// coincidence — see [`thread_root_rejection`] for the send probe that reads
+/// refusals by shape.
+fn quote_target_rejection(invalid: QuoteTargetInvalid) -> ApiError {
+    match invalid {
+        QuoteTargetInvalid::NotFound => ApiError::not_found(invalid.to_string()),
+        QuoteTargetInvalid::Deleted => ApiError::bad_request(invalid.to_string()),
     }
 }
 
@@ -300,6 +346,7 @@ pub async fn send(
 
     let client_msg_id = request.client_msg_id;
     let root_id = request.root_id;
+    let reply_to_id = request.reply_to_id;
     // B5.3a / ADR-0134 D1 — shape only, and deliberately here: a malformed
     // `routing` block becomes a 4xx before any connection is taken (MOMO-362),
     // which is also what makes the web capability probe read `ready` (see
@@ -323,7 +370,7 @@ pub async fn send(
         body: request.body.clone(),
         props: props_value(request.props.as_ref()),
         root_id,
-        reply_to_id: None,
+        reply_to_id,
         client_msg_id: Some(client_msg_id),
         run_id: None,
         hlc_ts: None,
@@ -349,6 +396,21 @@ pub async fn send(
             if let Some(root_id) = root_id {
                 if let Err(invalid) = validate_thread_root_in_tx(conn, channel_id, root_id).await? {
                     return Err(SendFailure::Rejected(thread_root_rejection(invalid)));
+                }
+            }
+            // ADR-0148 규칙 2 — the quote target must live in THIS channel, and
+            // the check runs inside the tenant transaction because that is what
+            // makes it a tenant check too: a target in another workspace is
+            // invisible under RLS here, so it resolves as missing rather than as
+            // a message someone can confirm the existence of. Checked
+            // independently of `root_id` — 규칙 1 lets a message carry both, so
+            // an `else` here would silently skip the check for every threaded
+            // quote.
+            if let Some(reply_to_id) = reply_to_id {
+                if let Err(invalid) =
+                    validate_quote_target_in_tx(conn, channel_id, reply_to_id).await?
+                {
+                    return Err(SendFailure::Rejected(quote_target_rejection(invalid)));
                 }
             }
             let signature = match provenance_signature {
@@ -434,6 +496,9 @@ pub async fn send(
             Some(client_msg_id),
             false,
             sent.thread.as_ref(),
+            // The echo carries `replyToId` and no rendered quote: the sender
+            // picked the target and still has it on screen. See `MessageDto`.
+            None,
         )),
     ))
 }
@@ -660,6 +725,9 @@ pub async fn edit(
         edited.client_msg_id,
         true,
         None,
+        // An edit re-projects the row, not the conversation around it: the
+        // quote id rides along, the rendered quote comes from the next read.
+        None,
     )))
 }
 
@@ -716,6 +784,7 @@ pub async fn delete_message(
         &deleted.message.message,
         deleted.message.client_msg_id,
         true,
+        None,
         None,
     )))
 }
@@ -971,6 +1040,7 @@ mod tests {
         let base = || SendMessageRequest {
             client_msg_id: Uuid::nil(),
             root_id: None,
+            reply_to_id: None,
             message_type: None,
             body: None,
             props: None,
@@ -1091,30 +1161,13 @@ mod tests {
     /// would silently unrender every thread badge.
     #[test]
     fn the_thread_rollup_keeps_its_snake_case_keys() {
-        let message = StoredMessage {
-            id: Uuid::from_u128(1),
-            workspace_id: Uuid::from_u128(2),
-            channel_id: Uuid::from_u128(3),
-            seq: 4,
-            hlc_ts: 1_700_000_000_000,
-            hlc_count: 0,
-            author_member_id: Uuid::from_u128(5),
-            message_type: MessageType::Text,
-            state: "sent".into(),
-            body: Some("root".into()),
-            props: Value::Object(Map::new()),
-            root_id: None,
-            created_at: chrono::DateTime::from_timestamp_millis(1_700_000_000_000)
-                .expect("timestamp"),
-            edited_at: None,
-            deleted_at: None,
-        };
+        let message = stored_message();
         let rollup = ThreadRollup {
             reply_count: 3,
             last_reply_seq: 9,
             last_reply_at_ms: 1_700_000_000_500,
         };
-        let json = serde_json::to_value(message_dto(&message, None, true, Some(&rollup)))
+        let json = serde_json::to_value(message_dto(&message, None, true, Some(&rollup), None))
             .expect("serialize");
         assert_eq!(json["thread"]["reply_count"], serde_json::json!(3));
         assert_eq!(json["thread"]["last_reply_seq"], serde_json::json!(9));
@@ -1128,7 +1181,188 @@ mod tests {
         // A message with no replies carries no rollup at all — the badge's
         // absence is what "no thread here" looks like.
         let bare =
-            serde_json::to_value(message_dto(&message, None, true, None)).expect("serialize");
+            serde_json::to_value(message_dto(&message, None, true, None, None)).expect("serialize");
         assert!(bare.get("thread").is_none(), "{bare}");
+    }
+
+    fn stored_message() -> StoredMessage {
+        StoredMessage {
+            id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            channel_id: Uuid::from_u128(3),
+            seq: 4,
+            hlc_ts: 1_700_000_000_000,
+            hlc_count: 0,
+            author_member_id: Uuid::from_u128(5),
+            message_type: MessageType::Text,
+            state: "sent".into(),
+            body: Some("root".into()),
+            props: Value::Object(Map::new()),
+            root_id: None,
+            reply_to_id: None,
+            created_at: chrono::DateTime::from_timestamp_millis(1_700_000_000_000)
+                .expect("timestamp"),
+            edited_at: None,
+            deleted_at: None,
+        }
+    }
+
+    fn quoted(body: Option<&str>, deleted: bool, quotes_another: bool) -> QuotedMessage {
+        QuotedMessage {
+            id: Uuid::from_u128(0x11),
+            seq: 2,
+            author_member_id: Uuid::from_u128(0x22),
+            message_type: MessageType::Text,
+            body: body.map(str::to_string),
+            state: if deleted { "deleted" } else { "sent" }.into(),
+            edited_at: None,
+            deleted_at: deleted.then(|| {
+                chrono::DateTime::from_timestamp_millis(1_700_000_009_000).expect("timestamp")
+            }),
+            quotes_another,
+        }
+    }
+
+    /// **The two halves of the quote contract, on the wire** (ADR-0148 §3-2).
+    ///
+    /// `replyToId` is the durable reference; `replyTo` is the read-time
+    /// rendering. A client that only reads the id can still resolve the target
+    /// itself, and a client that reads the object needs no second request.
+    #[test]
+    fn a_quote_travels_as_an_id_plus_a_resolved_block() {
+        let mut message = stored_message();
+        message.reply_to_id = Some(Uuid::from_u128(0x11));
+        let quote = quoted(Some("원문"), false, false);
+        let json = serde_json::to_value(message_dto(&message, None, true, None, Some(&quote)))
+            .expect("serialize");
+
+        assert_eq!(json["replyToId"], serde_json::json!(Uuid::from_u128(0x11)));
+        assert_eq!(
+            json["replyTo"]["id"],
+            serde_json::json!(Uuid::from_u128(0x11))
+        );
+        assert_eq!(json["replyTo"]["seq"], serde_json::json!(2));
+        assert_eq!(
+            json["replyTo"]["authorMemberId"],
+            serde_json::json!(Uuid::from_u128(0x22))
+        );
+        assert_eq!(json["replyTo"]["type"], serde_json::json!("text"));
+        assert_eq!(json["replyTo"]["body"], serde_json::json!("원문"));
+        assert_eq!(json["replyTo"]["state"], serde_json::json!("sent"));
+        // 규칙 4 — the marker is absent, not false, when there is no second
+        // layer, so its presence is the whole signal.
+        assert!(json["replyTo"].get("quotesAnother").is_none(), "{json}");
+
+        // A message that quotes nothing carries neither key. Their absence is
+        // what "no quote here" looks like, exactly like the thread rollup's.
+        let bare = serde_json::to_value(message_dto(&stored_message(), None, true, None, None))
+            .expect("serialize");
+        assert!(bare.get("replyToId").is_none(), "{bare}");
+        assert!(bare.get("replyTo").is_none(), "{bare}");
+    }
+
+    /// **규칙 3, at the wire boundary.** A deleted target must reach the client
+    /// as a tombstone with no text — if a body ever survives here, the server
+    /// has minted the copy that outlives the author's deletion.
+    #[test]
+    fn a_deleted_quote_target_carries_a_tombstone_and_no_text() {
+        let mut message = stored_message();
+        message.reply_to_id = Some(Uuid::from_u128(0x11));
+        let json = serde_json::to_value(message_dto(
+            &message,
+            None,
+            true,
+            None,
+            Some(&quoted(None, true, false)),
+        ))
+        .expect("serialize");
+
+        assert!(
+            json["replyTo"].get("body").is_none(),
+            "a tombstone must carry no body: {json}"
+        );
+        assert_eq!(json["replyTo"]["state"], serde_json::json!("deleted"));
+        assert_eq!(
+            json["replyTo"]["deletedAtMs"],
+            serde_json::json!(1_700_000_009_000_i64)
+        );
+        // Still addressable: the reference survives the deletion, so a client
+        // knows *that* something was quoted even though the text is gone.
+        assert_eq!(json["replyToId"], serde_json::json!(Uuid::from_u128(0x11)));
+    }
+
+    /// **규칙 4 — one layer, and the second is a flag.** The inner target's id
+    /// is deliberately absent: give a client the id and someone will render the
+    /// staircase the rule exists to prevent.
+    #[test]
+    fn a_quote_of_a_quote_is_a_marker_and_never_a_second_layer() {
+        let mut message = stored_message();
+        message.reply_to_id = Some(Uuid::from_u128(0x11));
+        let json = serde_json::to_value(message_dto(
+            &message,
+            None,
+            true,
+            None,
+            Some(&quoted(Some("나도 인용함"), false, true)),
+        ))
+        .expect("serialize");
+
+        assert_eq!(json["replyTo"]["quotesAnother"], serde_json::json!(true));
+        for forbidden in ["replyTo", "replyToId"] {
+            assert!(
+                json["replyTo"].get(forbidden).is_none(),
+                "the second layer must be a marker only: {json}"
+            );
+        }
+    }
+
+    /// Both rejections are sentences a client can show, both keep their own
+    /// wording, and neither may match `/routing/i` — see
+    /// [`the_probe_now_reads_ready_because_routing_is_validated_first`].
+    #[test]
+    fn every_quote_target_rejection_keeps_its_own_sentence() {
+        let missing = quote_target_rejection(QuoteTargetInvalid::NotFound);
+        assert_eq!(missing.status, StatusCode::NOT_FOUND);
+        assert_eq!(missing.message, "quoted message not found in this channel");
+
+        let deleted = quote_target_rejection(QuoteTargetInvalid::Deleted);
+        assert_eq!(deleted.status, StatusCode::BAD_REQUEST);
+        assert_eq!(deleted.message, "a deleted message cannot be quoted");
+
+        assert_ne!(missing.message, deleted.message);
+        for rejection in [&missing, &deleted] {
+            assert!(
+                !rejection.message.to_lowercase().contains("routing"),
+                "a quote refusal that named routing would be read as a routing \
+                 capability verdict: {}",
+                rejection.message
+            );
+        }
+    }
+
+    /// 규칙 1 — a send may carry both, and the request decoder must not have
+    /// quietly made them exclusive.
+    #[test]
+    fn a_send_can_ask_for_a_thread_and_a_quote_at_once() {
+        let root = Uuid::from_u128(0xaa);
+        let quote = Uuid::from_u128(0xbb);
+        let request: SendMessageRequest = serde_json::from_value(serde_json::json!({
+            "clientMsgId": Uuid::nil(),
+            "rootId": root,
+            "replyToId": quote,
+            "body": "이 답글 말이야",
+        }))
+        .expect("both keys decode together");
+        assert_eq!(request.root_id, Some(root));
+        assert_eq!(request.reply_to_id, Some(quote));
+
+        // …and a quote alone is the ordinary case: no thread is created.
+        let quote_only: SendMessageRequest = serde_json::from_value(serde_json::json!({
+            "clientMsgId": Uuid::nil(),
+            "replyToId": quote,
+        }))
+        .expect("a quote needs no root");
+        assert_eq!(quote_only.root_id, None);
+        assert_eq!(quote_only.reply_to_id, Some(quote));
     }
 }

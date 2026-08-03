@@ -118,6 +118,15 @@ pub struct SendMessageRequest {
     pub client_msg_id: Uuid,
     #[serde(default)]
     pub root_id: Option<Uuid>,
+    /// ADR-0148 — the message this send **points at**.
+    ///
+    /// Independent of `rootId`, and the independence is the feature: sending
+    /// both quotes one particular reply from inside its own thread, and sending
+    /// only this one puts a quoting message in the channel's main flow without
+    /// folding the conversation away. Nothing below treats the pair as
+    /// exclusive.
+    #[serde(default)]
+    pub reply_to_id: Option<Uuid>,
     #[serde(default, rename = "type")]
     pub message_type: Option<String>,
     #[serde(default)]
@@ -160,6 +169,42 @@ pub struct ThreadRollupDto {
     pub last_reply_at: i64,
 }
 
+/// The quoted message carried beside a reply (ADR-0148 §3-2).
+///
+/// **Resolved on every read, never stored.** The server holds no copy of the
+/// quoted text: this object is built from the live row each time a page is
+/// fetched, so an edit of the original shows through and a deletion arrives as
+/// a tombstone (`body` absent, `state = "deleted"`, `deletedAtMs` set). A
+/// client that caches it is caching a render, not a record.
+///
+/// `authorMemberId` and not a display name, deliberately: every other row in
+/// this response names its author by id and lets the client resolve it against
+/// the roster it already holds. Projecting a name here would be a second
+/// identity path that goes stale on rename, for one line of a quote block.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotedMessageDto {
+    pub id: String,
+    pub seq: i64,
+    pub author_member_id: String,
+    #[serde(rename = "type")]
+    pub message_type: String,
+    /// Absent on a tombstone — the deletion is carried by the missing text, not
+    /// by a flag the client must agree to honour.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at_ms: Option<i64>,
+    /// 규칙 4 — this quoted message quotes something in turn. A **marker**: the
+    /// inner target's id is deliberately absent so no client can build a
+    /// staircase out of it. Omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub quotes_another: bool,
+}
+
 /// A message on the wire (Swift `MessageDTO` / openapi `Message`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,6 +213,20 @@ pub struct MessageDto {
     pub channel_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_id: Option<String>,
+    /// ADR-0148 — the id of the quoted message. Always present when the row has
+    /// one, on every projection including the send echo, because the id is the
+    /// durable fact; [`Self::reply_to`] is the read path's rendering of it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to_id: Option<String>,
+    /// The resolved quote — history and thread-replies only.
+    ///
+    /// Absent from the send response and from `message.new` on purpose: both
+    /// describe the write that just happened, and the sender already has the
+    /// message it chose to quote on screen. Resolving it there would buy one
+    /// redundant render and cost the write path an extra read inside the send
+    /// transaction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<QuotedMessageDto>,
     pub seq: i64,
     pub hlc_ts: i64,
     pub hlc_count: i32,
@@ -2264,6 +2323,8 @@ mod tests {
             id: "m".into(),
             channel_id: "c".into(),
             root_id: None,
+            reply_to_id: None,
+            reply_to: None,
             seq: 3,
             hlc_ts: 12,
             hlc_count: 0,
@@ -2305,6 +2366,8 @@ mod tests {
             id: "m".into(),
             channel_id: "c".into(),
             root_id: None,
+            reply_to_id: None,
+            reply_to: None,
             seq: 3,
             hlc_ts: 12,
             hlc_count: 0,

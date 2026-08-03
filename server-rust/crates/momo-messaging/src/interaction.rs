@@ -193,7 +193,7 @@ pub struct InteractionMessage {
 /// `RETURNING` clauses and the re-read of an already-deleted row.
 const INTERACTION_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, created_at, edited_at, deleted_at, run_id, client_msg_id";
+     root_id, reply_to_id, created_at, edited_at, deleted_at, run_id, client_msg_id";
 
 fn decode_interaction(row: &sqlx::postgres::PgRow) -> Result<InteractionMessage, sqlx::Error> {
     Ok(InteractionMessage {
@@ -270,6 +270,10 @@ pub fn build_message_edited_payload(workspace_id: Uuid, projection: &Interaction
         },
     );
     payload.insert("root_id".into(), json!(message.root_id));
+    // ADR-0148: the id only. An edit re-publishes the whole message, and a
+    // rendered quote inside it would be the snapshot 규칙 3 forbids — frozen at
+    // edit time, on every client, forever.
+    payload.insert("reply_to_id".into(), json!(message.reply_to_id));
     payload.insert("run_id".into(), json!(projection.run_id));
     payload.insert("client_msg_id".into(), json!(projection.client_msg_id));
     payload.insert(
@@ -735,6 +739,7 @@ mod tests {
             body: Some("after".into()),
             props: Value::Object(Map::new()),
             root_id: None,
+            reply_to_id: Some(Uuid::from_u128(9)),
             created_at: DateTime::from_timestamp_millis(1_700_000_000_000).expect("timestamp"),
             edited_at: DateTime::from_timestamp_millis(1_700_000_777_000),
             deleted_at: None,
