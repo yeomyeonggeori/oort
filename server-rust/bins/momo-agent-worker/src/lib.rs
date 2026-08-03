@@ -79,16 +79,24 @@ pub mod oauth;
 pub mod payload;
 pub mod provider;
 pub mod responses;
+pub mod tool_exec;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use a2a::{route_a2a_mentions_in_tx, A2aSend};
-use momo_agent::{
-    finish_run_in_tx, lock_gateway_run_in_tx, mark_run_started_in_tx, record_run_usage_in_tx,
-    GatewayRunSnapshot, RunStatus, RunUsageReport,
+use momo_agent::approval::{
+    approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
+    create_pending_approval_in_tx, default_expires_at, NewApproval,
 };
+use momo_agent::tools::{ApprovalReason, ToolCall, ACTION_TYPE_TOOL_CALL, TOOL_AUDIT_SCHEMA};
+use momo_agent::{
+    approval_reason, consume_run_step_in_tx, finish_run_in_tx, lock_gateway_run_in_tx,
+    mark_run_started_in_tx, park_run_for_approval_in_tx, record_run_usage_in_tx,
+    GatewayRunSnapshot, RunStatus, RunUsageReport, AUDIT_APPROVAL_REQUESTED,
+};
+use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
@@ -110,8 +118,20 @@ use oauth::{relogin_message, HttpTokenRefresher, RefreshError, TokenRefresher, E
 use payload::AgentJobPayload;
 use provider::{
     http_provider, ChatProvider, ChatRequest, ChatUsage, ProviderEndpoint, ProviderError,
-    ProviderWire,
+    ProviderToolCall, ProviderWire,
 };
+use tool_exec::ToolContext;
+
+/// What the producer transaction decided about one tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolDisposition {
+    /// An approval exists and the run is parked on it.
+    Parked { approval_id: Uuid },
+    /// G6 exempted the call; run it now.
+    RunNow,
+    /// G3's budget is spent. The loop stops here.
+    StepExhausted,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -477,6 +497,27 @@ impl AgentWorker {
         // process's clock plus the workspace offset. Computed here rather than
         // inside `assemble` so the assembler stays a pure function of its
         // arguments and its tests stay date-independent.
+        // goal SRV-T1 — the resume half. This job exists because a human tapped
+        // 승인; the tool runs first, its `tool_result` lands in the channel, and
+        // the same turn then continues with that result in front of the model.
+        // Running it here (before the context is assembled) is what lets the
+        // answer be *about* what the tool did.
+        let mut resumed_tool_note: Option<String> = None;
+        if payload.is_resume() {
+            match self.execute_approved_tool(&job, &payload, run_id).await {
+                Ok(note) => resumed_tool_note = Some(note),
+                Err(error) => {
+                    return self
+                        .settle_retryable(
+                            &job,
+                            &format!("approved tool execution failed: {error}"),
+                            &transport.endpoint,
+                        )
+                        .await;
+                }
+            }
+        }
+
         let now_context = now_context_block(now_ms(), self.config.utc_offset_minutes);
         let assembled = assemble(
             &payload.recent_messages,
@@ -497,15 +538,27 @@ impl AgentWorker {
             );
         }
 
+        let mut messages = assembled.messages;
+        if let Some(note) = &resumed_tool_note {
+            // The tool's own words, handed back as the last thing the model saw.
+            // A `user` turn rather than a bespoke `tool` role because this
+            // worker's transcript vocabulary is system/user/assistant, and the
+            // Responses wire maps a `tool` role to nothing at all.
+            messages.push(provider::ChatMessage::user(note.clone()));
+        }
+
         let request = ChatRequest {
             model: payload.model_or(&self.config.default_model).to_string(),
-            messages: assembled.messages,
+            messages,
             max_tokens: Some(
                 payload
                     .max_output_tokens
                     .unwrap_or(self.config.max_output_tokens)
                     .max(1),
             ),
+            // B5.2 has shipped `agent.tool_schema` on the payload since the
+            // mention path was written; this is the batch that finally sends it.
+            tools: payload.tool_schema(),
         };
 
         // ADR-0147 결정 2: a subscription OAuth link presents an access token
@@ -548,7 +601,13 @@ impl AgentWorker {
         }
 
         let completion = match attempt {
-            Ok(completion) if completion.text.trim().is_empty() => {
+            // goal SRV-T1 narrows this arm by one word: no text **and no tool
+            // calls**. A turn that only asks to run something is the normal
+            // shape of a tool call, and before the tool channel existed this
+            // check reported it as a provider outage.
+            Ok(completion)
+                if completion.text.trim().is_empty() && completion.tool_calls.is_empty() =>
+            {
                 // A 200 with no text is not an answer. Treating it as one would
                 // commit an empty message and a `succeeded` run, which reads as
                 // "the agent chose to say nothing".
@@ -579,6 +638,15 @@ impl AgentWorker {
                     .await;
             }
         };
+
+        // goal SRV-T1 — the producer. A turn that asked for a tool does not
+        // write a text answer; it records the call, and either parks on a human
+        // or runs it. This is where `INSERT INTO approval` finally happens.
+        if let Some(call) = completion.tool_calls.first().cloned() {
+            return self
+                .handle_tool_call(&job, &payload, run_id, call, completion.usage, &transport)
+                .await;
+        }
 
         let usage = completion.usage;
         let body = completion.text;
@@ -624,6 +692,351 @@ impl AgentWorker {
                 tracing::error!(outbox_id = job.id, run_id = %run_id, reason, "turn commit failed");
                 self.settle_retryable(&job, &reason, &transport.endpoint)
                     .await
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // goal SRV-T1 — tool calls and the approval gate
+    // -----------------------------------------------------------------------
+
+    /// The model asked to run a tool.
+    ///
+    /// Order matters and is the same in both arms:
+    ///
+    /// 1. **record the call** as a `type='tool_call'` message, through the
+    ///    message spine — so it takes a real `channel_seq` bump, a real
+    ///    `message.seq` and a real broadcast, like every other message
+    ///    (invariants #2/#3/#4). A person watching the channel sees the agent
+    ///    ask *before* anything is decided about it.
+    /// 2. **spend a step** (`consume_run_step_in_tx`). This is G3's write half
+    ///    and it is what bounds the tool loop: a run may make at most
+    ///    `min(max_steps, MAX_STEPS)` tool calls, whatever the model wants,
+    ///    because each resume comes back through here. Without it a model that
+    ///    always answers with a tool call would loop until the lease died.
+    /// 3. **judge it** with G6 ([`momo_agent::approval_reason`]), which fails
+    ///    closed on missing or ambiguous grant metadata.
+    ///
+    /// Then either park the run on a human, or run it now.
+    ///
+    /// Only the **first** tool call of a turn is served. Parallel tool calls are
+    /// a real provider feature and a real ordering problem — two approvals for
+    /// one run, resumed independently, would need a join this batch has no
+    /// design for — so the rest are refused by name in the `tool_result` rather
+    /// than silently dropped.
+    async fn handle_tool_call(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        call: ProviderToolCall,
+        usage: Option<ChatUsage>,
+        transport: &ResolvedTransport,
+    ) -> Settlement {
+        let tool_call = ToolCall {
+            call_id: call.id.clone(),
+            name: call.name.clone(),
+            arguments: call.arguments_json(),
+        };
+        let reason = approval_reason(&call.name, payload.grants().as_deref());
+
+        tracing::info!(
+            outbox_id = job.id,
+            run_id = %run_id,
+            tool = %call.name,
+            call_id = %call.id,
+            approval_reason = reason.as_str(),
+            requires_approval = reason.requires_approval(),
+            "tool call from provider"
+        );
+
+        // (1) + (2) + (3): the record, the step, and — when a human is needed —
+        // the approval, all in ONE transaction. A `tool_call` message with no
+        // approval behind it would be an agent that appears to have asked for
+        // permission nobody can grant.
+        let outcome = self
+            .record_tool_call(job, payload, run_id, &tool_call, &call.arguments, reason)
+            .await;
+
+        match outcome {
+            Ok(ToolDisposition::Parked { approval_id }) => {
+                tracing::info!(
+                    outbox_id = job.id,
+                    run_id = %run_id,
+                    approval_id = %approval_id,
+                    "run parked awaiting human approval"
+                );
+                self.settle_done(job.id, Some("awaiting approval")).await;
+                Settlement::Skipped
+            }
+            Ok(ToolDisposition::StepExhausted) => {
+                // G3 said no. The run ends rather than looping, and the channel
+                // is told by the `tool_result` the same transaction wrote.
+                self.mark_run_failed(job.workspace_id, run_id, "tool step cap reached")
+                    .await;
+                self.settle_done(job.id, Some("tool step cap reached"))
+                    .await;
+                Settlement::Skipped
+            }
+            Ok(ToolDisposition::RunNow) => {
+                let context = ToolContext {
+                    workspace_id: job.workspace_id,
+                    run_id,
+                    channel_id: payload.channel_id,
+                    agent_member_id: payload.agent_member_id,
+                    // An exempt tool has no approver; it runs with the agent's
+                    // own membership, which is the only authority that exists
+                    // when no human was asked. G6 only exempts read-only grants,
+                    // so this arm cannot reach a write.
+                    approved_by: payload.agent_member_id,
+                };
+                match tool_exec::execute(&self.pool, &context, &tool_call).await {
+                    Ok(result) => {
+                        self.finish_tool_turn(job, payload, run_id, &result.output, usage)
+                            .await
+                    }
+                    Err(error) => {
+                        self.settle_retryable(
+                            job,
+                            &format!("tool execution failed: {error}"),
+                            &transport.endpoint,
+                        )
+                        .await
+                    }
+                }
+            }
+            Err(error) => {
+                let reason = format!("tool call record failed: {error}");
+                tracing::error!(outbox_id = job.id, run_id = %run_id, reason, "tool call record failed");
+                self.settle_retryable(job, &reason, &transport.endpoint)
+                    .await
+            }
+        }
+    }
+
+    /// The producer transaction: `tool_call` message → step → (approval +
+    /// `approval_request` message + `awaiting_approval` + audit).
+    ///
+    /// Port of Swift `WorkerService.recordApprovalPause` (:1607-1760), which
+    /// states the protocol this keeps: "tool_call -> approval(status=pending) ->
+    /// approval_request message -> agent_run(status=awaiting_approval) ->
+    /// audit_log, all in one DB tx".
+    async fn record_tool_call(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        call: &ToolCall,
+        raw_arguments: &str,
+        reason: ApprovalReason,
+    ) -> Result<ToolDisposition, DbError> {
+        let workspace_id = job.workspace_id;
+        let channel_id = payload.channel_id;
+        let agent_member_id = payload.agent_member_id;
+        let call = call.clone();
+        let raw_arguments = raw_arguments.to_string();
+        let step_ceiling = self.config.a2a.clamped().max_steps;
+        let ttl = self.config.approval_ttl_seconds;
+        let grant = payload
+            .tool_grants
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .and_then(|grants| {
+                grants.iter().find(|entry| {
+                    entry
+                        .get("tool_name")
+                        .and_then(Value::as_str)
+                        .map(momo_agent::tools::normalize)
+                        == Some(momo_agent::tools::normalize(&call.name))
+                })
+            })
+            .cloned();
+
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                // (1) the call itself, on the spine. `client_msg_id` from the
+                // provider's `call_id` makes a re-claimed turn re-post nothing.
+                send_message_in_tx(
+                    conn,
+                    workspace_id,
+                    NewMessage {
+                        channel_id,
+                        author_member_id: agent_member_id,
+                        message_type: MessageType::ToolCall,
+                        body: Some(call.message_body()),
+                        props: call.message_props(),
+                        root_id: None,
+                        reply_to_id: None,
+                        client_msg_id: Some(tool_exec::call_message_id(run_id, &call.call_id)),
+                        run_id: Some(run_id),
+                        hlc_ts: None,
+                        hlc_count: None,
+                    },
+                )
+                .await?;
+
+                // (2) G3. `rows_affected() > 0` IS the verdict — a read-then-write
+                // would race the run's other consumers.
+                if !consume_run_step_in_tx(conn, run_id, step_ceiling).await? {
+                    return Ok(ToolDisposition::StepExhausted);
+                }
+
+                if !reason.requires_approval() {
+                    return Ok(ToolDisposition::RunNow);
+                }
+
+                // (3) the approval, its card, the hold, and the audit row.
+                let now = chrono::Utc::now();
+                let expires_at = default_expires_at(now, ttl);
+                let approval_payload = approval_payload(
+                    run_id,
+                    ACTION_TYPE_TOOL_CALL,
+                    &call,
+                    &raw_arguments,
+                    grant.as_ref(),
+                    reason.as_str(),
+                );
+                let approval_id = create_pending_approval_in_tx(
+                    conn,
+                    workspace_id,
+                    NewApproval {
+                        run_id,
+                        channel_id,
+                        requested_by: agent_member_id,
+                        action_type: ACTION_TYPE_TOOL_CALL.to_string(),
+                        payload: approval_payload.clone(),
+                        expires_at,
+                    },
+                )
+                .await?;
+
+                let card = send_message_in_tx(
+                    conn,
+                    workspace_id,
+                    NewMessage {
+                        channel_id,
+                        author_member_id: agent_member_id,
+                        message_type: MessageType::ApprovalRequest,
+                        body: Some(approval_request_body(&call.name)),
+                        props: approval_request_props(
+                            approval_id,
+                            run_id,
+                            channel_id,
+                            ACTION_TYPE_TOOL_CALL,
+                            &call,
+                            &raw_arguments,
+                            expires_at,
+                        ),
+                        root_id: None,
+                        reply_to_id: None,
+                        client_msg_id: Some(approval_id),
+                        run_id: Some(run_id),
+                        hlc_ts: None,
+                        hlc_count: None,
+                    },
+                )
+                .await?;
+                attach_request_message_in_tx(conn, workspace_id, approval_id, card.message.id)
+                    .await?;
+
+                // The hold. Guarded on `running`, so a re-claimed turn that
+                // finds the run already parked cannot raise a second approval.
+                if !park_run_for_approval_in_tx(conn, run_id, expires_at).await? {
+                    return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
+                }
+
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, AUDIT_APPROVAL_REQUESTED)
+                        .by(agent_member_id)
+                        .target("approval", approval_id)
+                        .run(run_id)
+                        .with_schema(TOOL_AUDIT_SCHEMA, approval_payload),
+                )
+                .await?;
+
+                Ok(ToolDisposition::Parked { approval_id })
+            })
+        })
+        .await
+    }
+
+    /// Run the tool a human approved, and return its output for the model.
+    async fn execute_approved_tool(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+    ) -> Result<String, DbError> {
+        let Some(approved) = payload.approved_tool_call.as_ref() else {
+            return Ok("Tool result: the approved call was missing from the job.".to_string());
+        };
+        let context = ToolContext {
+            workspace_id: job.workspace_id,
+            run_id,
+            channel_id: payload.channel_id,
+            agent_member_id: payload.agent_member_id,
+            // The tool runs with the approver's authority — see `tool_exec`.
+            // Falling back to the agent would be a privilege *escalation* on a
+            // malformed payload, so a payload with no approver runs as nobody:
+            // `Uuid::nil()` matches no member and the executor refuses.
+            approved_by: payload.approved_by.unwrap_or_else(Uuid::nil),
+        };
+        let call = ToolCall {
+            call_id: approved.call_id.clone(),
+            name: approved.name.clone(),
+            arguments: approved.arguments.clone(),
+        };
+        let result = tool_exec::execute(&self.pool, &context, &call).await?;
+        tracing::info!(
+            outbox_id = job.id,
+            run_id = %run_id,
+            tool = %call.name,
+            is_error = result.is_error,
+            "approved tool executed"
+        );
+        Ok(format!("Tool result ({}): {}", call.name, result.output))
+    }
+
+    /// Close a turn whose answer was a tool result rather than model text.
+    ///
+    /// Uses the same [`commit_turn`](Self::commit_turn) as an ordinary turn, so
+    /// the run transition, the ledger row and the A2A pass are identical — the
+    /// only difference is where the body came from.
+    async fn finish_tool_turn(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        body: &str,
+        usage: Option<ChatUsage>,
+    ) -> Settlement {
+        let props = success_props(payload, run_id);
+        match self
+            .commit_turn(
+                job,
+                payload,
+                run_id,
+                body.to_string(),
+                props,
+                usage,
+                TurnOutcome::Succeeded,
+                None,
+            )
+            .await
+        {
+            Ok(TurnCommit::Committed { delegated, blocked }) => {
+                self.settle_done(job.id, None).await;
+                Settlement::Answered { delegated, blocked }
+            }
+            Ok(TurnCommit::Suppressed(reason)) => {
+                self.settle_done(job.id, Some(reason)).await;
+                Settlement::Skipped
+            }
+            Err(error) => {
+                let reason = format!("tool turn commit failed: {error}");
+                self.settle_failed(job.id, &reason).await;
+                Settlement::Failed
             }
         }
     }

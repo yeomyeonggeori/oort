@@ -69,9 +69,18 @@
 //! that mangle streamed tool calls. B5.4c makes the *Responses* wire streamed,
 //! because the ChatGPT backend refuses anything else ([`crate::responses`]); a
 //! legacy bearer link is untouched by that and keeps sending `stream=false`.
-//! Tool calls are also out of scope (approvals/work-controls are later batches);
-//! a turn that returns only tool calls therefore produces no text, which the
-//! worker reports as a failed turn rather than an empty reply.
+//! **goal SRV-T1 adds the tool channel.** [`ChatRequest::tools`] carries the
+//! agent's declared functions (`agent.tool_schema`, which B5.2 already shipped
+//! on the job payload and this worker discarded), and [`ChatCompletion`] grew
+//! `tool_calls`. Until this batch a turn that returned only tool calls produced
+//! no text and was reported as a *failed* turn — the model asked to do something
+//! and the server called that an outage.
+//!
+//! The parse is deliberately tolerant in one direction only: a tool call whose
+//! `arguments` string is not valid JSON is still returned as a tool call, with
+//! its raw text preserved, because the honest answer to a malformed argument is
+//! a `tool_result` telling the model so — not a dropped call that leaves the run
+//! looking like it produced nothing.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -80,7 +89,7 @@ use async_trait::async_trait;
 use momo_settings::chain::classify_status;
 use momo_settings::{CascadeDecision, LinkCredential};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::responses::OpenAiResponsesProvider;
 
@@ -113,6 +122,42 @@ pub struct ChatRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub max_tokens: Option<i32>,
+    /// The agent's declared functions, verbatim from `agent.tool_schema`
+    /// (`001_init.sql:80`, "OpenAI function defs").
+    ///
+    /// Passed through rather than re-shaped: the column already holds the
+    /// provider's own format, and a translation layer here would be a second
+    /// schema to keep in sync with a vendor's. Empty means the `tools` key is
+    /// omitted entirely — sending `"tools": []` makes some gateways reject the
+    /// request outright.
+    pub tools: Vec<Value>,
+}
+
+/// One tool call the model asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderToolCall {
+    /// The provider's own id for this call. The whole protocol hangs off it:
+    /// it is what a `tool_result` references and what makes the pairing
+    /// idempotent.
+    pub id: String,
+    pub name: String,
+    /// The raw `arguments` string exactly as the provider sent it.
+    ///
+    /// Kept as text, not as a parsed object, because it is what must be shown
+    /// to the model again on resume — re-serialising would reorder keys, and to
+    /// a model a different string is a different input.
+    pub arguments: String,
+}
+
+impl ProviderToolCall {
+    /// The arguments as JSON, or `Null` when the provider sent something that is
+    /// not JSON.
+    ///
+    /// `Null` rather than an error: a malformed argument is a conversation to
+    /// have with the model through a `tool_result`, not a transport failure.
+    pub fn arguments_json(&self) -> Value {
+        serde_json::from_str(&self.arguments).unwrap_or(Value::Null)
+    }
 }
 
 /// The token counts a completion reports, as `usage_ledger` records them.
@@ -126,10 +171,17 @@ pub struct ChatUsage {
 
 /// One turn's answer. `usage == None` is what makes the ledger row
 /// `was_estimated` (Swift `wasEstimated = usage == nil`, WorkerService :523).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChatCompletion {
     pub text: String,
     pub usage: Option<ChatUsage>,
+    /// The tool calls this turn asked for, in the order the provider listed
+    /// them (goal SRV-T1).
+    ///
+    /// A completion may carry text, tool calls, or both. `text.is_empty() &&
+    /// tool_calls.is_empty()` is the only shape the worker still treats as a
+    /// failed turn.
+    pub tool_calls: Vec<ProviderToolCall>,
 }
 
 /// Which request/response format an endpoint speaks (B5.4b).
@@ -315,7 +367,7 @@ impl ChatProvider for OpenAiCompatProvider {
         endpoint: &ProviderEndpoint,
         request: &ChatRequest,
     ) -> Result<ChatCompletion, ProviderError> {
-        let body = json!({
+        let mut body = json!({
             "model": request.model,
             "messages": request
                 .messages
@@ -325,6 +377,14 @@ impl ChatProvider for OpenAiCompatProvider {
             "stream": false,
             "max_tokens": request.max_tokens,
         });
+        // Omitted entirely when the agent declares none: several
+        // OpenAI-compatible gateways 400 on `"tools": []`, and an agent with no
+        // tool schema is the common case.
+        if !request.tools.is_empty() {
+            if let Some(object) = body.as_object_mut() {
+                object.insert("tools".into(), Value::Array(request.tools.clone()));
+            }
+        }
         let text = post_json(&self.client, endpoint, &body).await?;
         parse_completion(&text)
     }
@@ -499,8 +559,38 @@ pub fn parse_completion(body: &str) -> Result<ChatCompletion, ProviderError> {
         .and_then(|message| message.content.clone())
         .unwrap_or_default();
 
+    // goal SRV-T1. An entry missing its `function` block, its name, or its id
+    // is dropped rather than guessed at: a tool call with no id cannot be
+    // answered (a `tool_result` references it), and one with no name cannot be
+    // dispatched. Silently inventing either would produce a call the model
+    // never made.
+    let tool_calls = choice
+        .message
+        .as_ref()
+        .and_then(|message| message.tool_calls.as_ref())
+        .map(|calls| {
+            calls
+                .iter()
+                .filter_map(|call| {
+                    let function = call.function.as_ref()?;
+                    let name = function.name.as_ref()?.trim();
+                    let id = call.id.as_ref()?.trim();
+                    if name.is_empty() || id.is_empty() {
+                        return None;
+                    }
+                    Some(ProviderToolCall {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        arguments: function.arguments.clone().unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     Ok(ChatCompletion {
         text,
+        tool_calls,
         usage: completion.usage.map(|usage| ChatUsage {
             prompt_tokens: usage.prompt_tokens.unwrap_or(0),
             completion_tokens: usage.completion_tokens.unwrap_or(0),
@@ -540,6 +630,19 @@ struct RawChoice {
 #[derive(Deserialize)]
 struct RawMessage {
     content: Option<String>,
+    tool_calls: Option<Vec<RawToolCall>>,
+}
+
+#[derive(Deserialize)]
+struct RawToolCall {
+    id: Option<String>,
+    function: Option<RawToolFunction>,
+}
+
+#[derive(Deserialize)]
+struct RawToolFunction {
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -574,6 +677,14 @@ struct RawCompletionDetails {
 pub struct MockChatProvider {
     outcome: MockOutcome,
     calls: Mutex<Vec<ObservedCall>>,
+    /// One entry per turn: what tool calls that turn returns (goal SRV-T1).
+    ///
+    /// A queue rather than a fixed value because the shape a tool test needs is
+    /// a *sequence* — turn 1 asks to run something, turn 2 (the resume, after a
+    /// human approved) answers in text. A single value could not express the
+    /// second turn, and that second turn is the half of the loop that proves
+    /// `resume_approval` is no longer swallowed.
+    tool_call_script: Mutex<std::collections::VecDeque<Vec<ProviderToolCall>>>,
 }
 
 enum MockOutcome {
@@ -611,6 +722,7 @@ impl MockChatProvider {
         MockChatProvider {
             outcome: MockOutcome::Echo,
             calls: Mutex::new(Vec::new()),
+            tool_call_script: Mutex::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -633,6 +745,7 @@ impl MockChatProvider {
                     .collect(),
             ),
             calls: Mutex::new(Vec::new()),
+            tool_call_script: Mutex::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -641,11 +754,29 @@ impl MockChatProvider {
         MockChatProvider {
             outcome: MockOutcome::Fail(error),
             calls: Mutex::new(Vec::new()),
+            tool_call_script: Mutex::new(std::collections::VecDeque::new()),
         }
     }
 
     pub fn calls(&self) -> Vec<ObservedCall> {
         self.calls.lock().expect("mock provider lock").clone()
+    }
+
+    /// Stage what each successive turn returns in its tool channel (goal
+    /// SRV-T1).
+    ///
+    /// `with_tool_calls([vec![call], vec![]])` is the shape a closed-loop test
+    /// wants: the first turn asks to run something, the second — the resume
+    /// after a human approved — answers in text. Turns past the end of the
+    /// script return no tool calls.
+    pub fn with_tool_calls(
+        self,
+        script: impl IntoIterator<Item = Vec<ProviderToolCall>>,
+    ) -> MockChatProvider {
+        MockChatProvider {
+            tool_call_script: Mutex::new(script.into_iter().collect()),
+            ..self
+        }
     }
 
     /// The deterministic answer for a given request — exposed so a test can
@@ -697,8 +828,17 @@ impl ChatProvider for MockChatProvider {
                     .unwrap_or_else(|| MockChatProvider::echo_text(request))
             }
         };
+        // One turn, one entry. An exhausted script means "no tool calls", which
+        // is what makes the resume turn answer in text.
+        let tool_calls = self
+            .tool_call_script
+            .lock()
+            .ok()
+            .and_then(|mut script| script.pop_front())
+            .unwrap_or_default();
         Ok(ChatCompletion {
             text,
+            tool_calls,
             usage: Some(ChatUsage {
                 prompt_tokens: 11,
                 completion_tokens: 7,
@@ -732,6 +872,7 @@ mod tests {
         assert_eq!(
             parse_completion(body),
             Ok(ChatCompletion {
+                tool_calls: Vec::new(),
                 text: "hi".to_string(),
                 usage: None
             })
@@ -751,6 +892,7 @@ mod tests {
         assert_eq!(
             parse_completion(body),
             Ok(ChatCompletion {
+                tool_calls: Vec::new(),
                 text: "안녕하세요".to_string(),
                 usage: Some(ChatUsage {
                     prompt_tokens: 100,
@@ -844,6 +986,7 @@ mod tests {
             account_id: None,
         };
         let request = ChatRequest {
+            tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![ChatMessage::system("sys"), ChatMessage::user("질문")],
             max_tokens: Some(64),
@@ -917,6 +1060,7 @@ mod tests {
         let responses = Arc::new(MockChatProvider::echo());
         let router = WireRoutedProvider::new(chat.clone(), responses.clone());
         let request = ChatRequest {
+            tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![ChatMessage::user("질문")],
             max_tokens: Some(64),

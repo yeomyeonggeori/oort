@@ -41,3 +41,10 @@ thiserror.workspace = true
 # gateway consumer: it enqueues an agent_job and claims its lease.
 tokio = { workspace = true }
 momo-outbox = { path = "../momo-outbox" }
+# goal SRV-T1's `approval_pg.rs` composes the producer exactly as the worker
+# does — the tool_call/approval_request messages go through the message spine,
+# because a suite that inserted them by hand would prove nothing about the seq
+# and outbox invariants it exists to guard.
+momo-messaging = { path = "../momo-messaging" }
+chrono.workspace = true
+sqlx.workspace = true

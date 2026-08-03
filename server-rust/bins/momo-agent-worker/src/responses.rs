@@ -132,7 +132,7 @@ use serde_json::{json, Value};
 
 use crate::provider::{
     post_event_stream, ChatCompletion, ChatProvider, ChatRequest, ChatUsage, ProviderEndpoint,
-    ProviderError,
+    ProviderError, ProviderToolCall,
 };
 
 /// `POST {base_url}/responses`, `stream=true`, `store=false`.
@@ -228,6 +228,11 @@ pub fn build_request_body(request: &ChatRequest) -> Value {
     if !instructions.is_empty() {
         object.insert("instructions".into(), json!(instructions.join("\n\n")));
     }
+    // goal SRV-T1. Passed through in the agent's own `tool_schema` shape, and
+    // omitted when empty for the same reason the chat wire omits it.
+    if !request.tools.is_empty() {
+        object.insert("tools".into(), Value::Array(request.tools.clone()));
+    }
     // `max_output_tokens`는 보내지 않는다 — ChatGPT 백엔드(이 와이어의 실소비자)가
     // "Unsupported parameter"로 400을 답한다(2026-08-02 실 smoke 실측). 출력 예산은
     // usage ledger 계상으로 사후 관측한다. api.openai.com 표준 Responses에 이 필드를
@@ -287,14 +292,50 @@ fn decode_response(payload: &Value, streamed: &str) -> Result<ChatCompletion, Pr
     } else {
         streamed.to_string()
     };
-    if text.trim().is_empty() {
+    let tool_calls = collect_tool_calls(response.output.as_deref());
+    // goal SRV-T1 relaxes this in exactly one direction: a response carrying
+    // tool calls IS an answer, even with no assistant text. Before the tool
+    // channel existed, "no text" and "nothing usable" were the same thing;
+    // now a turn that only asks to run something is the normal shape of a tool
+    // call, and reporting it as a provider fault would make every tool use look
+    // like an outage.
+    if text.trim().is_empty() && tool_calls.is_empty() {
         // A response with no assistant text is not an answer, and saying *why*
         // is the difference between an operator raising the token budget and an
         // operator restarting a provider that is working fine.
         return Err(ProviderError::InvalidResponse(unusable_reason(&response)));
     }
 
-    Ok(ChatCompletion { text, usage })
+    Ok(ChatCompletion {
+        text,
+        usage,
+        tool_calls,
+    })
+}
+
+/// `output[]` items of `type == "function_call"` (goal SRV-T1).
+///
+/// Same drop rule as the chat wire: an item without both a `call_id` and a
+/// `name` cannot be answered or dispatched, so it is skipped rather than
+/// completed with a guess.
+fn collect_tool_calls(output: Option<&[RawOutputItem]>) -> Vec<ProviderToolCall> {
+    output
+        .unwrap_or(&[])
+        .iter()
+        .filter(|item| item.item_type.as_deref() == Some("function_call"))
+        .filter_map(|item| {
+            let id = item.call_id.as_deref().unwrap_or_default().trim();
+            let name = item.name.as_deref().unwrap_or_default().trim();
+            if id.is_empty() || name.is_empty() {
+                return None;
+            }
+            Some(ProviderToolCall {
+                id: id.to_string(),
+                name: name.to_string(),
+                arguments: item.arguments.clone().unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 /// `payload.error.message`, if it is a message rather than a `null` or a blank.
@@ -586,6 +627,13 @@ struct RawOutputItem {
     #[serde(rename = "type")]
     item_type: Option<String>,
     content: Option<Vec<RawContentPart>>,
+    /// `function_call` items (goal SRV-T1). The Responses wire flattens the
+    /// call onto the output item itself rather than nesting it under a
+    /// `function` object the way chat/completions does, so these three are read
+    /// here and not from [`RawContentPart`].
+    call_id: Option<String>,
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -625,6 +673,7 @@ mod tests {
 
     fn request() -> ChatRequest {
         ChatRequest {
+            tools: Vec::new(),
             model: "gpt-5.4-codex".to_string(),
             messages: vec![
                 ChatMessage::system("you are hermes"),
@@ -686,6 +735,7 @@ mod tests {
     #[test]
     fn an_absent_system_prompt_and_budget_are_absent_keys_not_nulls() {
         let bare = ChatRequest {
+            tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![ChatMessage::user("직접 물어봄")],
             max_tokens: None,
@@ -701,6 +751,7 @@ mod tests {
     #[test]
     fn multiple_system_turns_are_joined_rather_than_dropped() {
         let request = ChatRequest {
+            tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![
                 ChatMessage::system("첫째"),
@@ -740,6 +791,7 @@ mod tests {
         assert_eq!(
             parse_response(body),
             Ok(ChatCompletion {
+                tool_calls: Vec::new(),
                 text: "안녕하세요".to_string(),
                 usage: Some(ChatUsage {
                     prompt_tokens: 100,
@@ -940,6 +992,7 @@ mod tests {
         assert_eq!(
             drive(&[body.as_bytes()]),
             Ok(ChatCompletion {
+                tool_calls: Vec::new(),
                 text: "답".to_string(),
                 usage: Some(ChatUsage {
                     prompt_tokens: 100,
@@ -1295,6 +1348,7 @@ mod tests {
             .complete(
                 &endpoint(&base_url),
                 &ChatRequest {
+                    tools: Vec::new(),
                     model: "gpt-5.6-sol".to_string(),
                     messages: vec![ChatMessage::user("[성재] @hermes 안녕")],
                     max_tokens: Some(512),
@@ -1340,6 +1394,7 @@ mod tests {
             .complete(
                 &endpoint(&base_url),
                 &ChatRequest {
+                    tools: Vec::new(),
                     model: "m".to_string(),
                     messages: vec![ChatMessage::user("질문")],
                     max_tokens: None,
@@ -1367,6 +1422,7 @@ mod tests {
             .complete(
                 &endpoint(&base_url),
                 &ChatRequest {
+                    tools: Vec::new(),
                     model: "m".to_string(),
                     messages: vec![ChatMessage::user("질문")],
                     max_tokens: None,

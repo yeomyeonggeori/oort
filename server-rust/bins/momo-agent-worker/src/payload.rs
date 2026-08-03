@@ -60,6 +60,55 @@ pub struct AgentJobPayload {
     /// Echoed onto the reply's `props` so a client can attribute the answer.
     #[serde(default)]
     pub source_attribution: Option<serde_json::Value>,
+
+    // -- goal SRV-T1: the tool channel and the approval resume --------------
+    /// `agent.tool_schema`, shipped by `mention_job_payload` since B5.2 and
+    /// discarded by this worker until now.
+    ///
+    /// Typed as a bare `Value`, not `Vec<Value>`: the column defaults to `[]`
+    /// but an operator may have written an object, and this payload's whole
+    /// contract is that a shape it does not expect must not poison the job.
+    /// [`AgentJobPayload::tool_schema`] is what normalises it.
+    #[serde(default)]
+    pub tools: Option<serde_json::Value>,
+    /// The Context Packet's tool-grant projection — G6's authoritative input.
+    ///
+    /// `None` (absent) and `Some([])` mean different things and both fail
+    /// closed: absent = no projection, empty = a projection naming no grant for
+    /// this tool. `momo_agent::tools::approval_reason` treats each as
+    /// approval-required.
+    #[serde(default)]
+    pub tool_grants: Option<serde_json::Value>,
+    /// Set only on a `method='resume_approval'` job: the approval a human just
+    /// approved. Its presence is what tells the worker this is a resume rather
+    /// than a first turn.
+    #[serde(default)]
+    pub resume_from_approval_id: Option<Uuid>,
+    /// The tool call that approval authorised.
+    #[serde(default)]
+    pub approved_tool_call: Option<ApprovedToolCall>,
+    /// The human who approved. The tool executes with **their** authority — see
+    /// `crate::tool_exec`.
+    #[serde(default)]
+    pub approved_by: Option<Uuid>,
+    /// The source run's step budget, carried across the pause so an approved
+    /// tool call resumes inside the same G3 cap it paused under.
+    #[serde(default)]
+    pub step_count: Option<i32>,
+    #[serde(default)]
+    pub max_steps: Option<i32>,
+}
+
+/// The tool call a human approved (`approval.payload.tool_call`, projected by
+/// `momo_agent::approval::resume_job_payload`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApprovedToolCall {
+    #[serde(default)]
+    pub call_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub arguments: serde_json::Value,
 }
 
 impl AgentJobPayload {
@@ -72,6 +121,33 @@ impl AgentJobPayload {
         } else {
             trimmed
         }
+    }
+
+    /// The declared tools as the provider wants them: an array, or empty.
+    ///
+    /// Anything that is not an array becomes empty rather than an error. An
+    /// operator who wrote an object into `agent.tool_schema` has a
+    /// misconfigured agent, and the honest consequence is an agent with no
+    /// tools — not a job the worker fails forever.
+    pub fn tool_schema(&self) -> Vec<serde_json::Value> {
+        self.tools
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The G6 grant projection, or `None` when the payload carries none.
+    pub fn grants(&self) -> Option<Vec<momo_agent::ToolGrant>> {
+        self.tool_grants
+            .as_ref()
+            .filter(|value| value.is_array())
+            .map(momo_agent::ToolGrant::from_json_array)
+    }
+
+    /// Is this job the resume of an approved tool call?
+    pub fn is_resume(&self) -> bool {
+        self.resume_from_approval_id.is_some()
     }
 }
 
@@ -158,6 +234,88 @@ mod tests {
         assert!(serde_json::from_value::<AgentJobPayload>(only_agent).is_err());
         let only_channel = json!({"channel_id": Uuid::from_u128(2)});
         assert!(serde_json::from_value::<AgentJobPayload>(only_channel).is_err());
+    }
+
+    /// **Producer ↔ consumer, pinned without a database.**
+    ///
+    /// The resume payload is built in `momo-agent` and decoded here, and the two
+    /// never meet in a DB-free test unless one is written on purpose. goal
+    /// SRV-T1's gate found the cost of that gap the expensive way, so this test
+    /// feeds the real producer's output into the real consumer's decoder.
+    ///
+    /// If `resume_job_payload` ever stops emitting `agent_member_id` or
+    /// `channel_id`, this goes red in the ordinary `cargo test` run rather than
+    /// in a docker gate — and the failure it prevents is not one lost turn:
+    /// a payload the worker cannot decode is retired as poison, and because the
+    /// claim serializes per agent, that dead row blocks every later job for that
+    /// agent.
+    #[test]
+    fn the_resume_payload_the_server_builds_decodes_into_this_worker() {
+        let workspace = Uuid::from_u128(1);
+        let approval = momo_agent::approval::LockedApproval {
+            id: Uuid::from_u128(2),
+            workspace_id: workspace,
+            run_id: Uuid::from_u128(3),
+            channel_id: Uuid::from_u128(4),
+            requested_by: Uuid::from_u128(5),
+            request_message_id: None,
+            action_type: "tool_call".into(),
+            payload: json!({
+                "tool_call": {
+                    "call_id": "call_1",
+                    "name": momo_agent::WORK_SESSION_END,
+                    "arguments": "{\"session_id\":\"s\"}",
+                    "arguments_json": {"session_id": "s"},
+                }
+            }),
+            status: "pending".into(),
+            expires_at: None,
+            agent_model: "gpt-5".into(),
+            run_input: json!({"prompt": "정리해줘"}),
+            step_count: 4,
+            max_steps: 12,
+            depth: 1,
+        };
+        let decider = Uuid::from_u128(9);
+        let raw = momo_agent::approval::resume_job_payload(
+            workspace,
+            &approval,
+            decider,
+            &json!({"status": "approved"}),
+        );
+
+        let payload: AgentJobPayload =
+            serde_json::from_value(raw).expect("the server's resume payload must decode here");
+
+        // The two required fields — the ones whose absence is poison.
+        assert_eq!(payload.agent_member_id, approval.requested_by);
+        assert_eq!(payload.channel_id, approval.channel_id);
+        // The discriminator.
+        assert!(
+            payload.is_resume(),
+            "`resume_from_approval_id` is what tells the worker this is a resume \
+             rather than a first turn"
+        );
+        assert_eq!(payload.approved_by, Some(decider));
+        // The call itself, or the resume executes nothing.
+        let approved = payload
+            .approved_tool_call
+            .as_ref()
+            .expect("approved call present");
+        assert_eq!(approved.name, momo_agent::WORK_SESSION_END);
+        assert_eq!(approved.call_id, "call_1");
+        assert_eq!(approved.arguments, json!({"session_id": "s"}));
+        assert!(!approved.call_id.is_empty());
+        // The G3 budget crosses the pause.
+        assert_eq!(payload.step_count, Some(4));
+        assert_eq!(payload.max_steps, Some(12));
+        assert_eq!(payload.run_id, Some(approval.run_id));
+        assert_eq!(payload.model_or("fallback"), "gpt-5");
+        assert_eq!(payload.prompt, "정리해줘");
+        // A resume ships no transcript on purpose — it is re-read from the
+        // channel, so shipping it would be a staler second copy.
+        assert!(payload.recent_messages.is_empty());
+        assert!(payload.tool_schema().is_empty());
     }
 
     /// Swift decodes `model`/`prompt` as `?? ""`; an absent model must therefore

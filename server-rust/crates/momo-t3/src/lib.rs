@@ -79,13 +79,14 @@ pub use convergence::{
 };
 pub use error::T3Error;
 pub use lifecycle::{
-    bind_cloud_host_in_tx, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
+    bind_cloud_host_in_tx, card_props, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
     create_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
-    is_active_channel_member_in_tx, list_work_session_details_in_tx, load_work_session_in_tx,
-    lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, resolve_cloud_host_id,
-    terminate, terminate_in_tx, transition_cloud_host_in_tx, update_session_card_props_in_tx,
-    with_t3_lifecycle_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx, CloudHostState,
-    NewWorkSession, T3LockLadder, TerminationReason, WorkSession, WorkSessionDetail,
+    is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
+    load_work_session_in_tx, lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx,
+    resolve_cloud_host_id, terminate, terminate_in_tx, transition_cloud_host_in_tx,
+    update_session_card_props_in_tx, with_t3_lifecycle_tx, work_session_scope_in_tx,
+    work_tool_is_enabled_in_tx, CloudHostState, NewWorkSession, T3LockLadder, TerminationReason,
+    WorkSession, WorkSessionDetail,
 };
 pub use provider::{
     ByocProviderAdapter, MockCall, MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,

@@ -64,6 +64,15 @@ pub struct WorkerConfig {
     pub default_model: String,
     pub max_output_tokens: i32,
     pub max_context_chars: usize,
+    /// How long a pending approval may hold the agent's concurrency slot
+    /// (goal SRV-T1, `APPROVAL_TTL_SECONDS`).
+    ///
+    /// `agent.max_concurrent_runs` defaults to **1**, and
+    /// `momo_agent::live_run_count_in_tx` counts `awaiting_approval`, so an
+    /// approval nobody answers would otherwise silence the agent permanently.
+    /// One hour is short on purpose: re-asking costs a round trip, a held gate
+    /// costs every later run.
+    pub approval_ttl_seconds: i64,
     /// B7.2 — the A2A ceilings, already [`A2aLimits::clamped`].
     pub a2a: A2aLimits,
     /// `AGENT_GATEWAY_MODE=gateway` — decides the `outbox.method` a delegated
@@ -134,6 +143,11 @@ impl WorkerConfig {
             default_model: env("AGENT_MODEL").unwrap_or_else(|| "hermes-agent".to_string()),
             max_output_tokens: env_number("AGENT_MAX_OUTPUT_TOKENS", 1024i32)?.max(1),
             max_context_chars: env_number("AGENT_CONTEXT_MAX_CHARS", 24_000usize)?.max(1),
+            approval_ttl_seconds: env_number(
+                "APPROVAL_TTL_SECONDS",
+                momo_agent::approval::DEFAULT_TTL_SECONDS,
+            )?
+            .max(1),
             a2a: a2a_limits_from_env()?,
             gateway_enabled: gateway_enabled(env("AGENT_GATEWAY_MODE").as_deref()),
             context_max_messages: context_window_size(env("AGENT_CONTEXT_MAX_MESSAGES").as_deref()),
@@ -159,6 +173,7 @@ impl WorkerConfig {
             default_model: "hermes-agent".to_string(),
             max_output_tokens: 1024,
             max_context_chars: 24_000,
+            approval_ttl_seconds: momo_agent::approval::DEFAULT_TTL_SECONDS,
             a2a: A2aLimits::default().clamped(),
             gateway_enabled: false,
             context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,

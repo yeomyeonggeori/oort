@@ -992,6 +992,141 @@ pub async fn terminate(
     .await
 }
 
+// ---------------------------------------------------------------------------
+// the two wire shapes a work session renders as
+//
+// These moved here from `momo-server`'s `routes::work_sessions` when goal
+// SRV-T1 gave work-session control a **second** caller (the agent's
+// `work.session.end` tool, executed by momo-agent-worker after a human
+// approval). They are pure and they were private; leaving them private would
+// have meant the worker growing its own copy, and two builders for one card is
+// how a session ends in the database while the timeline still shows it running.
+//
+// They stay in `momo-t3` rather than in a shared route helper because the card
+// and the lifecycle envelope describe a *work session*, and this crate is what a
+// work session is.
+// ---------------------------------------------------------------------------
+
+/// The session card's `message.props` (Swift `WorkSessionRoutes.cardProps`).
+#[allow(clippy::too_many_arguments)]
+pub fn card_props(
+    session_id: Uuid,
+    tool: &str,
+    label: &str,
+    status: &str,
+    ended_at_ms: Option<i64>,
+    exit_code: Option<i32>,
+    end_reason: Option<&str>,
+    resumed_from_session_id: Option<Uuid>,
+) -> serde_json::Value {
+    let mut props = serde_json::Map::new();
+    props.insert("kind".into(), serde_json::json!("work_session"));
+    props.insert(
+        "session_id".into(),
+        serde_json::json!(session_id.to_string()),
+    );
+    props.insert("tool".into(), serde_json::json!(tool));
+    props.insert("label".into(), serde_json::json!(label));
+    props.insert("status".into(), serde_json::json!(status));
+    if let Some(ended_at_ms) = ended_at_ms {
+        props.insert("ended_at".into(), serde_json::json!(ended_at_ms));
+    }
+    if let Some(exit_code) = exit_code {
+        props.insert("exit_code".into(), serde_json::json!(exit_code));
+    }
+    if let Some(end_reason) = end_reason {
+        props.insert("end_reason".into(), serde_json::json!(end_reason));
+    }
+    if let Some(source) = resumed_from_session_id {
+        props.insert(
+            "resumed_from_session_id".into(),
+            serde_json::json!(source.to_string()),
+        );
+    }
+    serde_json::Value::Object(props)
+}
+
+/// The `work.session.started` / `work.session.ended` broadcast envelope
+/// (Swift `lifecyclePayload`, :2115-2156).
+///
+/// Takes the Centrifugo channel as a string so this crate does not have to
+/// depend on `momo-messaging` for `cent_channel` — the caller already knows it.
+///
+/// Deliberately carries **no** `version`: the card's `message.new` owns this seq
+/// and has already advanced the channel version, so a second envelope claiming
+/// the same version would make the relay skip one of them.
+pub fn lifecycle_payload(
+    cent_channel: &str,
+    event_type: &str,
+    session: &WorkSessionDetail,
+    root_message_seq: i64,
+) -> serde_json::Value {
+    let is_ended = event_type == "work.session.ended";
+    let timestamp = if is_ended {
+        session.ended_at_ms.unwrap_or(session.started_at_ms)
+    } else {
+        session.started_at_ms
+    };
+
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "session_id".into(),
+        serde_json::json!(session.id.to_string()),
+    );
+    payload.insert(
+        "channel_id".into(),
+        serde_json::json!(session.channel_id.to_string()),
+    );
+    payload.insert(
+        "root_message_id".into(),
+        serde_json::json!(session.root_message_id.to_string()),
+    );
+    payload.insert(
+        "member_id".into(),
+        serde_json::json!(session.member_id.to_string()),
+    );
+    payload.insert(
+        "host_id".into(),
+        serde_json::json!(session.host_id.to_string()),
+    );
+    payload.insert("tool".into(), serde_json::json!(session.tool));
+    payload.insert("label".into(), serde_json::json!(session.label));
+    if is_ended {
+        if let Some(ended_at_ms) = session.ended_at_ms {
+            payload.insert("ended_at".into(), serde_json::json!(ended_at_ms));
+        }
+        if let Some(exit_code) = session.exit_code {
+            payload.insert("exit_code".into(), serde_json::json!(exit_code));
+        }
+        if let Some(end_reason) = &session.end_reason {
+            payload.insert("end_reason".into(), serde_json::json!(end_reason));
+        }
+    } else {
+        payload.insert(
+            "started_at".into(),
+            serde_json::json!(session.started_at_ms),
+        );
+    }
+    if let Some(source) = session.resumed_from_session_id {
+        payload.insert(
+            "resumed_from_session_id".into(),
+            serde_json::json!(source.to_string()),
+        );
+    }
+
+    serde_json::json!({
+        "channel": cent_channel,
+        "data": {
+            "type": event_type,
+            "v": 1,
+            "ts": timestamp,
+            "seq": root_message_seq,
+            "payload": serde_json::Value::Object(payload),
+        },
+        "idempotency_key": format!("{cent_channel}:{event_type}:{}", session.id),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -854,6 +854,41 @@ pub async fn find_client_message_in_tx(
         .map_err(DbError::from)
 }
 
+/// Shallow-merge a patch into a stored message's `props` (Swift
+/// `ApprovalDecisionRoutes.patchApprovalRequestMessage` :668-693).
+///
+/// Lives here because it is `message` SQL and this crate is where that lives —
+/// `momo-agent` owns the `approval` row and deliberately owns no message
+/// statement, so an approval decision that needs to re-render its card comes
+/// through this door rather than growing a second `UPDATE message` elsewhere.
+///
+/// `||` is a **shallow** merge on purpose: the patch replaces the keys it names
+/// and leaves every other key the producer wrote (`tool_name`, `arguments`,
+/// `call_id`, …) untouched. A whole-object replace would blank the card.
+///
+/// Deliberately emits **no** broadcast. The decided card is announced by the
+/// `approval.decided` envelope on the channel, which already carries every
+/// decision field a client needs; a second realtime event for one fact is how
+/// two envelopes come to claim the same channel version.
+pub async fn patch_message_props_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    patch: &Value,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE message \
+            SET props = COALESCE(props, '{}'::jsonb) || $3 \
+          WHERE id = $2 AND workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .bind(message_id)
+    .bind(patch)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
 /// List a channel's live messages in ascending `seq` order (the authoritative
 /// per-channel order), capped at `limit`.
 pub async fn list_messages(

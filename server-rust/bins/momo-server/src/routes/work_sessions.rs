@@ -57,15 +57,15 @@ use momo_auth::Principal;
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::{
-    acquire_slot_in_tx, allocate_uuid_v7, cloud_host_id_for_host, cloud_host_id_for_host_in_tx,
-    cloud_host_id_for_session_in_tx, create_resumed_work_session_in_tx,
-    create_work_session_with_id_in_tx, end_work_session_in_tx, is_active_channel_member_in_tx,
-    list_work_session_details_in_tx, lock_work_session_detail_in_tx,
-    mark_work_session_resumed_in_tx, resolve_cloud_host_id, start_usage_in_tx, terminate_in_tx,
-    update_session_card_props_in_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
-    NewWorkSession, T3Error, T3LockLadder, TerminationReason, WorkSessionDetail,
+    acquire_slot_in_tx, allocate_uuid_v7, card_props, cloud_host_id_for_host,
+    cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
+    create_resumed_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
+    is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
+    lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, resolve_cloud_host_id,
+    start_usage_in_tx, terminate_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
+    work_tool_is_enabled_in_tx, NewWorkSession, T3Error, T3LockLadder, TerminationReason,
+    WorkSessionDetail,
 };
-use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
@@ -146,104 +146,13 @@ fn session_dto(detail: WorkSessionDetail) -> WorkSessionDto {
     }
 }
 
-/// The session card's `props` (Swift `cardProps`, :2346-2371). The card is the
-/// thread's rendering of the session, so these keys are a client contract.
-///
-/// Positional rather than a struct, matching the Swift signature one-for-one:
-/// there are three call sites and a builder would make it harder to check that
-/// each passes what Swift passes.
-#[allow(clippy::too_many_arguments)]
-fn card_props(
-    session_id: Uuid,
-    tool: &str,
-    label: &str,
-    status: &str,
-    ended_at_ms: Option<i64>,
-    exit_code: Option<i32>,
-    end_reason: Option<&str>,
-    resumed_from_session_id: Option<Uuid>,
-) -> Value {
-    let mut props = Map::new();
-    props.insert("kind".into(), json!("work_session"));
-    props.insert("session_id".into(), json!(session_id.to_string()));
-    props.insert("tool".into(), json!(tool));
-    props.insert("label".into(), json!(label));
-    props.insert("status".into(), json!(status));
-    if let Some(ended_at_ms) = ended_at_ms {
-        props.insert("ended_at".into(), json!(ended_at_ms));
-    }
-    if let Some(exit_code) = exit_code {
-        props.insert("exit_code".into(), json!(exit_code));
-    }
-    if let Some(end_reason) = end_reason {
-        props.insert("end_reason".into(), json!(end_reason));
-    }
-    if let Some(source) = resumed_from_session_id {
-        props.insert("resumed_from_session_id".into(), json!(source.to_string()));
-    }
-    Value::Object(props)
-}
-
-/// The `work.session.started` / `work.session.ended` broadcast envelope
-/// (`lifecyclePayload`, :2115-2156).
-///
-/// Deliberately carries **no** `version`: the card's `message.new` owns this seq
-/// and has already advanced the channel version, so a second envelope claiming
-/// the same version would make the relay skip one of them (the stale-skip
-/// defect JOURNAL records from batch 2).
-fn lifecycle_payload(
-    event_type: &str,
-    session: &WorkSessionDetail,
-    root_message_seq: i64,
-) -> Value {
-    let is_ended = event_type == "work.session.ended";
-    let timestamp = if is_ended {
-        session.ended_at_ms.unwrap_or(session.started_at_ms)
-    } else {
-        session.started_at_ms
-    };
-
-    let mut payload = Map::new();
-    payload.insert("session_id".into(), json!(session.id.to_string()));
-    payload.insert("channel_id".into(), json!(session.channel_id.to_string()));
-    payload.insert(
-        "root_message_id".into(),
-        json!(session.root_message_id.to_string()),
-    );
-    payload.insert("member_id".into(), json!(session.member_id.to_string()));
-    payload.insert("host_id".into(), json!(session.host_id.to_string()));
-    payload.insert("tool".into(), json!(session.tool));
-    payload.insert("label".into(), json!(session.label));
-    if is_ended {
-        if let Some(ended_at_ms) = session.ended_at_ms {
-            payload.insert("ended_at".into(), json!(ended_at_ms));
-        }
-        if let Some(exit_code) = session.exit_code {
-            payload.insert("exit_code".into(), json!(exit_code));
-        }
-        if let Some(end_reason) = &session.end_reason {
-            payload.insert("end_reason".into(), json!(end_reason));
-        }
-    } else {
-        payload.insert("started_at".into(), json!(session.started_at_ms));
-    }
-    if let Some(source) = session.resumed_from_session_id {
-        payload.insert("resumed_from_session_id".into(), json!(source.to_string()));
-    }
-
-    let channel = cent_channel(session.workspace_id, session.channel_id);
-    json!({
-        "channel": channel,
-        "data": {
-            "type": event_type,
-            "v": 1,
-            "ts": timestamp,
-            "seq": root_message_seq,
-            "payload": Value::Object(payload),
-        },
-        "idempotency_key": format!("{channel}:{event_type}:{}", session.id),
-    })
-}
+// `card_props` and `lifecycle_payload` moved to `momo_t3::lifecycle` when goal
+// SRV-T1 gave work-session control a **second** caller: the agent's
+// `work.session.end` tool, executed by momo-agent-worker once a human approves
+// it. Both callers now render one card and one envelope. Keeping them private
+// here would have meant the worker growing its own copy, and two builders for
+// one card is how a session ends in the database while the timeline still shows
+// it running.
 
 /// Reject the request shapes this batch does not serve, by name (ADR-0134 D1).
 fn reject_unsupported_create(request: &CreateWorkSessionRequest) -> Result<(), ApiError> {
@@ -423,7 +332,12 @@ async fn create_in_tx(
         workspace_id,
         OutboxKind::Broadcast,
         "publish",
-        &lifecycle_payload("work.session.started", &detail.0, card.message.seq),
+        &lifecycle_payload(
+            &cent_channel(workspace_id, channel_id),
+            "work.session.started",
+            &detail.0,
+            card.message.seq,
+        ),
         Some(channel_id),
     )
     .await
@@ -615,7 +529,12 @@ async fn end_in_tx(
         workspace_id,
         OutboxKind::Broadcast,
         "publish",
-        &lifecycle_payload("work.session.ended", &ended, root_seq),
+        &lifecycle_payload(
+            &cent_channel(workspace_id, ended.channel_id),
+            "work.session.ended",
+            &ended,
+            root_seq,
+        ),
         Some(ended.channel_id),
     )
     .await
@@ -806,8 +725,18 @@ async fn resume_in_tx(
     .await?;
 
     for payload in [
-        lifecycle_payload("work.session.ended", &ended_source, source_seq),
-        lifecycle_payload("work.session.started", &resumed, source_seq),
+        lifecycle_payload(
+            &cent_channel(workspace_id, source.channel_id),
+            "work.session.ended",
+            &ended_source,
+            source_seq,
+        ),
+        lifecycle_payload(
+            &cent_channel(workspace_id, resumed.channel_id),
+            "work.session.started",
+            &resumed,
+            source_seq,
+        ),
     ] {
         emit_outbox(
             &mut *conn,
@@ -942,7 +871,8 @@ mod tests {
     #[test]
     fn lifecycle_payload_has_no_version_and_a_per_event_idempotency_key() {
         let mut session = detail();
-        let started = lifecycle_payload("work.session.started", &session, 12);
+        let channel = cent_channel(session.workspace_id, session.channel_id);
+        let started = lifecycle_payload(&channel, "work.session.started", &session, 12);
         assert!(
             started.get("version").is_none(),
             "the card's message.new owns this seq; a second version would make \
@@ -964,7 +894,12 @@ mod tests {
         session.status = "ended".into();
         session.ended_at_ms = Some(1_700_000_009_000);
         session.exit_code = Some(0);
-        let ended = lifecycle_payload("work.session.ended", &session, 12);
+        let ended = lifecycle_payload(
+            &cent_channel(session.workspace_id, session.channel_id),
+            "work.session.ended",
+            &session,
+            12,
+        );
         assert_eq!(ended["data"]["ts"], 1_700_000_009_000i64);
         assert_eq!(ended["data"]["payload"]["ended_at"], 1_700_000_009_000i64);
         assert_eq!(ended["data"]["payload"]["exit_code"], 0);

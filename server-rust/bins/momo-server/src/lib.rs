@@ -457,6 +457,26 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agent-runs/{run}/gateway/complete",
             post(routes::agent_gateway::complete),
         )
+        // approvals (goal SRV-T1) — ADR-0137 D5's third v0 axis, and the one
+        // that had no server surface at all: `INSERT INTO approval` was 0, so
+        // porting these routes alone would have served an empty inbox. The
+        // producer is the agent worker's tool-call branch; these are the two
+        // things a person meets — the inbox, and the tap that decides. The
+        // second POST is Swift's compatibility route
+        // (`ApprovalDecisionRoutes.swift:19`); it has no `{ws}` segment and
+        // takes its workspace from the credential, exactly as Swift does.
+        .route(
+            "/v1/workspaces/{ws}/approvals",
+            get(routes::approvals::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/approvals/{approval}/decision",
+            post(routes::approvals::decide_by_approval),
+        )
+        .route(
+            "/v1/agent-runs/{run}/approval-decisions",
+            post(routes::approvals::decide_by_run),
+        )
         // LLM spend (MOMO-615) — the read side of the ledger B2.6 finally writes.
         .route(
             "/v1/workspaces/{ws}/usage/summary",
