@@ -1,6 +1,7 @@
 import type {Message} from '@momo/core/lib/api';
 import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {matchMembers} from '../src/features/conversation/mentionQuery';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   FlatList,
@@ -136,12 +137,18 @@ const KEYBOARD_HEIGHT_PT = 336;
  * unofficial as it looks, which is why it lives in the harness and not in
  * `src/`.
  */
-function injectKeyboardFrame(height: number): void {
-  const emitter = (
+function keyboardEmitter():
+  | {emit: (event: string, payload: unknown) => void}
+  | undefined {
+  return (
     Keyboard as unknown as {
       _emitter?: {emit: (event: string, payload: unknown) => void};
     }
   )._emitter;
+}
+
+function injectKeyboardFrame(height: number): void {
+  const emitter = keyboardEmitter();
   emitter?.emit('keyboardWillShow', {
     endCoordinates: {height, screenX: 0, screenY: 0, width: 0},
     duration: 250,
@@ -152,6 +159,104 @@ function injectKeyboardFrame(height: number): void {
     duration: 250,
     easing: 'keyboard',
   });
+}
+
+/** The reverse, so the three runs each start from a keyboard that is down. */
+function injectKeyboardHide(): void {
+  const emitter = keyboardEmitter();
+  const payload = {
+    endCoordinates: {height: 0, screenX: 0, screenY: 0, width: 0},
+    duration: 250,
+    easing: 'keyboard',
+  };
+  emitter?.emit('keyboardWillHide', payload);
+  emitter?.emit('keyboardDidHide', payload);
+}
+
+/** The keyboard's own duration, and therefore how long a block has to last. */
+const KEYBOARD_DURATION_MS = 250;
+
+/**
+ * Occupy the JS thread with the work this client actually does while a keyboard
+ * is coming up.
+ *
+ * Not a `while (spin) {}` of arithmetic: the requirement is about the composer,
+ * and what the composer is doing at that exact moment is re-filtering the
+ * mention roster on every keystroke. So the load is `matchMembers` over the
+ * stress roster, which is the shipping function on the shipping data — if it
+ * ever gets cheap enough not to matter, this load gets weaker with it, honestly.
+ */
+function burnJs(forMs: number): number {
+  const until = Date.now() + forMs;
+  let rounds = 0;
+  const queries = ['s', 'se', 'seo', '김', '김인', 'da', 'dayeon', 'x'];
+  while (Date.now() < until) {
+    matchMembers(ROSTER, queries[rounds % queries.length]);
+    rounds += 1;
+  }
+  return rounds;
+}
+
+// =============================================================================
+// Measuring an animation that deliberately no longer touches the JS thread
+// (goal RN-P2, 성재 두 번째 보고: "1 여전히 느려")
+//
+// The composer now travels on a native-driven `transform`. That is the fix, and
+// it breaks the instrument that measured the old one — which is worth stating
+// carefully, because "the number went to -1" and "the thing stopped working"
+// look identical in a table.
+//
+// Read out of React Native 0.86.2 rather than assumed:
+//
+//   * `ReactNativeFeatureFlagsDefaults.h` — `cxxNativeAnimatedEnabled()` is
+//     **false**, so animated props go through the Obj-C driver.
+//   * `RCTPropsAnimatedNode.mm` — that driver applies them with
+//     `synchronouslyUpdateViewOnUIThread`, straight onto the mounted `UIView`.
+//     The shadow tree is not told.
+//   * `UIManagerBinding.cpp` → `DOM.cpp` — `measureInWindow` answers from
+//     `currentRevision`, i.e. the **shadow tree** (with `includeTransform:
+//     true`, so a transform that IS committed does count).
+//
+// So `measureInWindow` cannot see this animation while it runs, and CAN see
+// where it ended: `createAnimatedPropsHook.js` calls `scheduleUpdate()` once on
+// completion to put the Fiber and shadow trees back in step. Which gives three
+// instruments instead of one, each answering something the others cannot:
+//
+//   `travelStartMs` / `travelSettleMs`   the OLD sampler, unchanged. It reads
+//       the shadow tree every frame. With the fix in place it should now report
+//       **no movement at all** until the end — that is not a regression, it is
+//       the direct evidence that the travel left the commit path.
+//
+//   `Travel` (below)                     the animated value's own updates,
+//       emitted by the native driver. This is the journey, timed.
+//
+//   `keyboardGapPx`                      unchanged, and still the requirement:
+//       the composer's last pixel against the keyboard's first, read after the
+//       animation has landed and been committed.
+// =============================================================================
+
+/**
+ * One keyboard raise, read off the animation rather than off the layout.
+ *
+ * `samples` and `midFlight` are as load-bearing as the times. A JS-driven
+ * animation produces its frames ON the JS thread, so blocking that thread
+ * produces **zero** intermediate values and then one jump to the destination
+ * (`Animated.timing` computes progress from wall-clock time, so it catches up
+ * in a single frame and the numbers alone would look fine). A native-driven one
+ * keeps producing frames while JS is blocked and delivers them late. `midFlight`
+ * is therefore the one figure that cannot be faked by a snap to the end.
+ */
+interface Travel {
+  /** ms from the keyboard event to the first value that had moved. */
+  startMs: number;
+  /** ms from the keyboard event to the first value at the destination. */
+  settleMs: number;
+  /** How many value updates arrived at all. */
+  samples: number;
+  /** How many of them were strictly between the start and the destination. */
+  midFlight: number;
+  /** The largest value seen, so a run that never got there says so. */
+  peak: number;
 }
 
 interface Results {
@@ -165,6 +270,10 @@ interface Results {
   travelStartMs: number | null;
   /** ms from the keyboard event to the composer reaching its final position. */
   travelSettleMs: number | null;
+  /** The same journey, read off the animation itself. See `Travel`. */
+  travelIdle: Travel | null;
+  travelLoaded: Travel | null;
+  travelBlocked: Travel | null;
   /** Was the sender's own message on screen after sending from mid-history? */
   selfSendVisible: boolean | null;
   /** The two raw readings behind it, so a failure names its own kind. */
@@ -183,6 +292,9 @@ const EMPTY: Results = {
   keyboardTopPx: null,
   travelStartMs: null,
   travelSettleMs: null,
+  travelIdle: null,
+  travelLoaded: null,
+  travelBlocked: null,
   selfSendVisible: null,
   sentRowY: null,
   dockY: null,
@@ -270,6 +382,78 @@ function Harness(): React.JSX.Element {
     }
     return null;
   }, [measureAnchor]);
+
+  // ---- the animation's own trace --------------------------------------------
+  // `addListener` on a native-driven value asks the native driver to report each
+  // frame back to JS. The reporting is JS-scheduled and therefore late whenever
+  // the JS thread is busy — which is exactly the condition under test — so the
+  // TIMES here are upper bounds and are read as such. What is not an upper bound
+  // is the SEQUENCE: values that only the UI thread could have produced arrive
+  // whether or not JS was free to hear them promptly, and that is what separates
+  // "it glided while I was busy" from "it froze and then jumped".
+  //
+  // This watches the harness's own `useKeyboard()` rather than the one inside
+  // `ConversationLayout`. Same hook, same events, same tick — and it keeps the
+  // shipping component free of a measurement seam it would otherwise carry
+  // forever.
+  const offsetTraceRef = useRef<{at: number; v: number}[]>([]);
+  useEffect(() => {
+    const id = keyboard.offset.addListener(({value}) => {
+      offsetTraceRef.current.push({at: Date.now(), v: value});
+    });
+    return () => keyboard.offset.removeListener(id);
+  }, [keyboard.offset]);
+
+  const runTravel = useCallback(
+    async ({
+      load = false,
+      block = false,
+    }: {
+      load?: boolean;
+      block?: boolean;
+    }): Promise<Travel> => {
+      offsetTraceRef.current = [];
+      let loadTimer: ReturnType<typeof setInterval> | null = null;
+      if (load) {
+        // ~12ms of real mention filtering out of every ~16ms. A JS thread that
+        // is busy but not wedged, which is what a person typing "@김" produces.
+        loadTimer = setInterval(() => {
+          burnJs(12);
+        }, 16);
+      }
+      const origin = Date.now();
+      injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
+      // The wedged case: the event has arrived and the JS thread goes away for
+      // longer than the whole keyboard animation.
+      if (block) burnJs(KEYBOARD_DURATION_MS + 50);
+      await wait(1600);
+      if (loadTimer !== null) clearInterval(loadTimer);
+
+      const destination = KEYBOARD_HEIGHT_PT;
+      const samples = offsetTraceRef.current.map(point => ({
+        t: point.at - origin,
+        v: point.v,
+      }));
+      const moved = samples.find(point => point.v > 1);
+      const settled = samples.find(
+        point => Math.abs(point.v - destination) <= 1,
+      );
+      const travel: Travel = {
+        startMs: moved ? moved.t : -1,
+        settleMs: settled ? settled.t : -1,
+        samples: samples.length,
+        midFlight: samples.filter(
+          point => point.v > 1 && point.v < destination - 1,
+        ).length,
+        peak: samples.reduce((max, point) => Math.max(max, point.v), 0),
+      };
+      injectKeyboardHide();
+      await wait(900);
+      offsetTraceRef.current = [];
+      return travel;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (ranRef.current) return;
@@ -444,8 +628,34 @@ function Harness(): React.JSX.Element {
           })}`,
         );
       }
+
+      // ---- 4. the same journey, three ways, read off the animation ----------
+      // See the note above `Travel`. This is the instrument that survives the
+      // move to the native driver, and the third run is the one that answers
+      // the question 성재's second report actually asks: does a busy JS thread
+      // still make the composer late.
+      // Put the keyboard back down FIRST, and wait for iOS to finish doing it.
+      // Step 3 above left it up (that is how it measured the gap), and a "raise"
+      // that starts at 336 travels nowhere: the first run of this section
+      // reported 0 mid-flight samples and start == settle, which reads exactly
+      // like a broken animation and was a broken measurement.
+      Keyboard.dismiss();
+      injectKeyboardHide();
+      await wait(1500);
+      const idle = await runTravel({});
+      const loaded = await runTravel({load: true});
+      const blocked = await runTravel({block: true});
+      setResults(current => ({
+        ...current,
+        travelIdle: idle,
+        travelLoaded: loaded,
+        travelBlocked: blocked,
+      }));
+      console.log(
+        `MOMO_MEASURE_TRAVEL_V2 ${JSON.stringify({idle, loaded, blocked})}`,
+      );
     })();
-  }, [measureAnchor, reachAnchor, measureNode]);
+  }, [measureAnchor, reachAnchor, measureNode, runTravel]);
 
   // The instant iOS announced the keyboard. Subscribed here rather than read
   // from `useKeyboard` because a state update arrives a render later, and a
@@ -464,6 +674,15 @@ function Harness(): React.JSX.Element {
   // the other refs at the top — the travel sampler needs it too.)
   useEffect(() => {
     if (!keyboard.visible) return;
+    // **900ms, and the number is load-bearing.** `measureInWindow` answers from
+    // the shadow tree, and the composer's lift is a native-driven transform that
+    // reaches the shadow tree only when the animation ENDS and
+    // `createAnimatedPropsHook` calls `scheduleUpdate()` to put the two trees
+    // back in step. The old 300ms was a comfortable margin over a 250ms
+    // animation that committed every frame; against one that commits once, it
+    // sampled a dock that had not moved yet and reported the composer 336px
+    // behind the keyboard. Measured on this simulator, that commit lands ~506ms
+    // after the event (the row above reads it), so this waits past it.
     const timer = setTimeout(() => {
       // The dock's bottom edge in WINDOW coordinates. Paired with the screen
       // height and the keyboard height in the fold below, that is the whole
@@ -475,7 +694,7 @@ function Harness(): React.JSX.Element {
           composerBottomPx: Math.round((y + height) * 10) / 10,
         }));
       });
-    }, 300);
+    }, 900);
     return () => clearTimeout(timer);
   }, [keyboard.visible, keyboard.height]);
 
@@ -566,28 +785,23 @@ function Harness(): React.JSX.Element {
           value={px(results.keyboardGapPx)}
           pass={results.keyboardGapPx === null ? null : results.keyboardGapPx >= 0}
         />
+        {/* The shadow-tree sampler. It measured the OLD animation because the
+            old one committed every frame; with the travel on the native driver
+            it should now report -1 (never moved) until the end. That reading is
+            the evidence, not the failure — see the note above `Travel`. */}
         <Row
-          label="키보드 이벤트 → 컴포저 첫 이동"
+          label="[섀도트리] 이벤트 → 첫 이동"
           value={ms(results.travelStartMs)}
-          // One frame. The old path could not beat this: it had to render and
-          // commit before the animation was even configured.
-          pass={
-            results.travelStartMs === null
-              ? null
-              : results.travelStartMs >= 0 && results.travelStartMs <= 17
-          }
+          pass={null}
         />
         <Row
-          label="키보드 이벤트 → 컴포저 도착"
+          label="[섀도트리] 이벤트 → 도착"
           value={ms(results.travelSettleMs)}
-          // The keyboard's own duration plus a frame; arriving later than the
-          // keyboard is the defect itself.
-          pass={
-            results.travelSettleMs === null
-              ? null
-              : results.travelSettleMs >= 0 && results.travelSettleMs <= 300
-          }
+          pass={null}
         />
+        <TravelRow label="애니메이션: 한가한 JS" travel={results.travelIdle} />
+        <TravelRow label="애니메이션: 바쁜 JS (75%)" travel={results.travelLoaded} />
+        <TravelRow label="애니메이션: JS 완전 차단" travel={results.travelBlocked} />
         <Row
           label="중간에서 보낸 내 메시지가 보이는가"
           value={
@@ -672,6 +886,42 @@ function ms(value: number | null): string {
   if (value === null) return '측정 중…';
   if (value < 0) return '측정 실패';
   return `${value}ms`;
+}
+
+/**
+ * One `Travel`, with the two thresholds this batch was given and the sample
+ * counts that say whether the times mean anything.
+ *
+ * The verdict is deliberately BOTH times: a run that starts on time and arrives
+ * late is the stutter, and a run that arrives on time having started late is the
+ * lateness 성재 reported. `midFlight` is printed beside them because a zero
+ * there means the animation never glided at all — it snapped — and no pair of
+ * times can tell you that.
+ */
+function TravelRow({
+  label,
+  travel,
+}: {
+  label: string;
+  travel: Travel | null;
+}): React.JSX.Element {
+  if (travel === null) {
+    return <Row label={label} value="측정 중…" pass={null} />;
+  }
+  const onTime =
+    travel.startMs >= 0 &&
+    travel.startMs <= 17 &&
+    travel.settleMs >= 0 &&
+    travel.settleMs <= 300;
+  return (
+    <Row
+      label={label}
+      value={`${ms(travel.startMs)} → ${ms(travel.settleMs)} · 중간 ${
+        travel.midFlight
+      }/${travel.samples}`}
+      pass={onTime}
+    />
+  );
 }
 
 function Row({

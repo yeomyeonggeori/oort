@@ -1,4 +1,4 @@
-import {logout, restoreSession, type Member} from '@momo/core/lib/api';
+import {logout, refreshSessionOutcome, type Member} from '@momo/core/lib/api';
 import {onlineManager, useQueryClient} from '@tanstack/react-query';
 import React, {
   createContext,
@@ -10,6 +10,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import {
+  clearSession,
   getAccessToken,
   getAuthExpired,
   getPersistedSession,
@@ -83,32 +84,65 @@ export function useAuthGate(): AuthGateState {
 
   useEffect(() => {
     if (restoreSettled) return;
+    if (!hasPersistedSession()) {
+      // Nothing to resume. Settling immediately keeps the sign-in form one
+      // render away instead of behind a rotation that has no token to present.
+      setRestoreSettled(true);
+      return;
+    }
     // ## Why this refuses to even ATTEMPT while offline
     //
-    // `restoreSession()` (core) runs one rotation and then does
-    // `if (!rotated) { clearSession(); return null; }`. `refreshSession()`
-    // returns false for BOTH "the server refused this token" and "nothing
-    // answered" — it catches the transport failure with a comment that says the
-    // session is deliberately *not* declared dead — but `restoreSession()` then
-    // declares it dead anyway and deletes the refresh token from the keychain.
-    //
-    // So on this path a single launch with no signal costs the person their
-    // session and their password. That is a core bug and it is reported rather
-    // than patched here (the core is frozen for this batch and the web client
-    // has the same call). What the host CAN do is not hand it the chance: with
-    // no network there is nothing to gain from trying and a session to lose.
+    // A rotation with no radio can only fail, and a session is what it risks.
+    // `onlineManager` already knows the answer, so the attempt is skipped and
+    // the gate is told which KIND of failure this is.
     if (!onlineManager.isOnline()) {
       setRestoreUnreachable(true);
       setRestoreSettled(true);
       return;
     }
     let cancelled = false;
-    restoreSession()
-      .then(() => {
-        // Settled: either a live session, or the core decided the stored token
-        // was dead and wiped local state. The gate reads the store to tell them
-        // apart.
-        if (!cancelled) setRestoreUnreachable(false);
+    // ## Why the ROTATION and not `restoreSession()` (성재, iPhone 17: 서버에 못
+    // 닿는 시작이 로그인 화면을 띄운다)
+    //
+    // `restoreSession()` answers `LoginResponse | null`, and **null is three
+    // different sentences**: nothing to resume, the stored token was refused,
+    // and nothing answered. The core stopped throwing on the third one when it
+    // learned to keep the credentials (`RefreshOutcome`) — which fixed the
+    // credentials and broke the screen, because the `.catch` that used to raise
+    // `restoreUnreachable` here stopped running and the gate fell through to
+    // `signedOut`. So a launch on a plane kept the session and showed a sign-in
+    // form for it: 자격증명은 살아남는데 화면이 거짓말을 했다.
+    //
+    // `refreshSessionOutcome()` is the same single-flight rotation with the
+    // reason attached, so the host reads the verdict instead of inferring it
+    // from a null. What `restoreSession()` did on top of it — wipe local state
+    // when the token was REFUSED — is done here explicitly, against this
+    // client's own store, which is the store `sessionPort` hands the core
+    // anyway. Its return value was never read on this client: every screen
+    // below reads the store through `useSyncExternalStore`.
+    refreshSessionOutcome()
+      .then(outcome => {
+        if (cancelled) return;
+        if (outcome === 'unreachable') {
+          // **Nothing answered ⇒ nothing is proven.** The session stays, and the
+          // screen says so rather than asking for a password it already has.
+          setRestoreUnreachable(true);
+          return;
+        }
+        setRestoreUnreachable(false);
+        // Refused — or rotated into a state that cannot make a request. Either
+        // way there is nothing here to resume, and a stored token beside a
+        // sign-in form is the one combination that must not survive. (The core
+        // has already called `markAuthExpired()` for a 401, and it notifies
+        // BEFORE this wipe clears the flag, so the gate still gets to say
+        // 로그인이 만료되었습니다 on its way past.)
+        if (
+          outcome !== 'rotated' ||
+          getPersistedSession() === null ||
+          getAccessToken() === null
+        ) {
+          clearSession();
+        }
       })
       .catch(() => {
         // The core resolves rather than throws today, so this is belt-and-braces

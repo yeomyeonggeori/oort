@@ -51,12 +51,13 @@ import {useSession} from '../session/useSession';
 //
 // ## Keyboard
 //
-// `KeyboardAvoidingView` with `behavior="padding"` does the avoiding. What it
-// does not know is that a raised keyboard already covers the home indicator, so
-// the bottom safe-area inset is applied only while the keyboard is down —
-// otherwise a 34-point dead band sits between the input and the keys. Measured
-// rather than asserted: `measure/` reports the composer's bottom edge against
-// the keyboard's top edge.
+// `ConversationLayout` does the avoiding, and it is a named component precisely
+// so that `measure/` can render the tree that ships. `KeyboardAvoidingView` was
+// tried first and measured wrong; the reasons, and why the movement is a
+// native-driven transform rather than an animated padding, are recorded there
+// and in `src/lib/useKeyboard.ts`. Measured rather than asserted: `measure/`
+// reports the composer's bottom edge against the keyboard's top edge, and the
+// travel between the two.
 // =============================================================================
 
 export default function ConversationScreen({
@@ -254,6 +255,7 @@ export default function ConversationScreen({
           myMemberId={member.id}
           nowMs={nowMs}
           onClose={() => setThread(null)}
+          onReplySent={() => setSelfSendToken(token => token + 1)}
         />
       ) : null}
     </Screen>

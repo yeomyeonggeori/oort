@@ -368,13 +368,26 @@ async function afterGate(plan: GatePlan, gate: AuthGate): Promise<Check[]> {
             ? 'the refresh token was deleted by a failed rotation'
             : 'the refresh token is untouched',
         ),
-        // Not asserted: see the PR body. `restoreSession()` now RESOLVES on a
-        // transport failure instead of throwing, so `useAuthGate`'s `.catch`
-        // never runs and `restoreUnreachable` stays false — the credentials
-        // survive but the screen shown is the sign-in form. Fixing that is
-        // product work and this batch is infrastructure, so the gate records it
-        // in every run rather than asserting today's behaviour as correct.
-        check('offline.gateObserved', true, observed, 'note'),
+        // Promoted from a `note` to an assertion (goal RN-P2). RN-G1 could only
+        // RECORD this line, because the defect it named was product work: the
+        // credentials survived an unreachable start and the screen shown was
+        // still the sign-in form. `useAuthGate` now reads
+        // `refreshSessionOutcome()`'s verdict instead of inferring one from a
+        // null, so the right screen is a fact this gate can hold on to.
+        //
+        // **Both halves, deliberately.** `restoring` alone would also pass while
+        // the rotation is merely slow, which is a different state wearing a
+        // different screen; `unreachable` is what makes it 서버에 닿지
+        // 못했습니다 with a retry instead of a silent spinner. And the answer
+        // this must never be again is `signedOut` — a session thrown away
+        // because a train went into a tunnel.
+        check(
+          'offline.gateUnreachable',
+          gate.kind === 'restoring' && gate.unreachable,
+          gate.kind === 'signedOut'
+            ? `${observed} — AN UNREACHABLE START SHOWED THE SIGN-IN SCREEN`
+            : observed,
+        ),
       ];
     }
     case 'restore-rejected': {
