@@ -35,6 +35,48 @@
 //! leaves an unknown method alone, which is the same courtesy B5.1 extended to
 //! this batch.
 //!
+//! ## The two payload shapes this claim carries, and what they share
+//!
+//! The claim itself is payload-blind — it reads `kind`, `method`,
+//! `partition_key`, `status` and the lease columns, and hands `payload` back as
+//! opaque text. That is deliberate, and it is also why the contract below has to
+//! be written down somewhere: **nothing in this statement would notice if a
+//! producer emitted a shape the consumer cannot decode.** The row would be
+//! claimed, fail to decode, and be retired as poison — and because the claim
+//! serializes per agent, a poison row is not one lost turn, it is that agent
+//! blocked until someone reads the logs.
+//!
+//! | key | `publish` | `resume_approval` | required by the consumer |
+//! |---|---|---|---|
+//! | `agent_member_id` | ✅ | ✅ | **yes** — no agent, no turn |
+//! | `channel_id` | ✅ | ✅ | **yes** — nowhere to answer |
+//! | `run_id` | ✅ | ✅ | in practice (a job without one is retired) |
+//! | `model`, `prompt` | ✅ | ✅ | no (defaults) |
+//! | `recent_messages`, `system_prompt`, `tools`, `tool_grants` | ✅ | ❌ | no |
+//! | `resume_from_approval_id` | ❌ | ✅ | no — its **presence is the discriminator** |
+//! | `approved_tool_call`, `approved_by` | ❌ | ✅ | no, but a resume without them runs nothing |
+//! | `step_count`, `max_steps`, `depth` | ❌ | ✅ | no — carries the G3 budget across the pause |
+//!
+//! The two shapes agree on exactly the fields the consumer requires, which is
+//! what lets one claim, one decoder and one per-agent lease serve both. A
+//! `resume_approval` row is deliberately *smaller*: the transcript is re-read
+//! from the channel on resume, so re-shipping it would have made the approval
+//! payload a second, staler copy of the conversation.
+//!
+//! `partition_key` is `agent_member_id` for **both**, and that is not a detail:
+//! it is what stops a first-turn job and a resume job for the same agent from
+//! running at once and interleaving two answers into one conversation.
+//!
+//! ## This claim runs as a BYPASSRLS role
+//!
+//! There is **no workspace predicate here and no tenant GUC is set** — a worker
+//! drains every tenant. So the caller must connect as the BYPASSRLS `momo_worker`
+//! role (`infra/e2e/bootstrap_roles.sql:32`). Under a NOBYPASSRLS role the
+//! `outbox` policy evaluates `current_setting('app.workspace_id', true)::uuid`
+//! against an unset GUC and Postgres answers
+//! `22P02 invalid input syntax for type uuid: ""` — a posture failure that reads
+//! like a payload failure. Same rule as `crate::relay`'s broadcast claim.
+//!
 //! ## Why per-agent serialization is in the SQL, not in the loop
 //!
 //! L4 §3.5 makes `partition_key = agent_member_id` the per-agent serialization

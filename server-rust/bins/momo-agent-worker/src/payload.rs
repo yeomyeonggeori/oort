@@ -236,6 +236,88 @@ mod tests {
         assert!(serde_json::from_value::<AgentJobPayload>(only_channel).is_err());
     }
 
+    /// **Producer ↔ consumer, pinned without a database.**
+    ///
+    /// The resume payload is built in `momo-agent` and decoded here, and the two
+    /// never meet in a DB-free test unless one is written on purpose. goal
+    /// SRV-T1's gate found the cost of that gap the expensive way, so this test
+    /// feeds the real producer's output into the real consumer's decoder.
+    ///
+    /// If `resume_job_payload` ever stops emitting `agent_member_id` or
+    /// `channel_id`, this goes red in the ordinary `cargo test` run rather than
+    /// in a docker gate — and the failure it prevents is not one lost turn:
+    /// a payload the worker cannot decode is retired as poison, and because the
+    /// claim serializes per agent, that dead row blocks every later job for that
+    /// agent.
+    #[test]
+    fn the_resume_payload_the_server_builds_decodes_into_this_worker() {
+        let workspace = Uuid::from_u128(1);
+        let approval = momo_agent::approval::LockedApproval {
+            id: Uuid::from_u128(2),
+            workspace_id: workspace,
+            run_id: Uuid::from_u128(3),
+            channel_id: Uuid::from_u128(4),
+            requested_by: Uuid::from_u128(5),
+            request_message_id: None,
+            action_type: "tool_call".into(),
+            payload: json!({
+                "tool_call": {
+                    "call_id": "call_1",
+                    "name": momo_agent::WORK_SESSION_END,
+                    "arguments": "{\"session_id\":\"s\"}",
+                    "arguments_json": {"session_id": "s"},
+                }
+            }),
+            status: "pending".into(),
+            expires_at: None,
+            agent_model: "gpt-5".into(),
+            run_input: json!({"prompt": "정리해줘"}),
+            step_count: 4,
+            max_steps: 12,
+            depth: 1,
+        };
+        let decider = Uuid::from_u128(9);
+        let raw = momo_agent::approval::resume_job_payload(
+            workspace,
+            &approval,
+            decider,
+            &json!({"status": "approved"}),
+        );
+
+        let payload: AgentJobPayload =
+            serde_json::from_value(raw).expect("the server's resume payload must decode here");
+
+        // The two required fields — the ones whose absence is poison.
+        assert_eq!(payload.agent_member_id, approval.requested_by);
+        assert_eq!(payload.channel_id, approval.channel_id);
+        // The discriminator.
+        assert!(
+            payload.is_resume(),
+            "`resume_from_approval_id` is what tells the worker this is a resume \
+             rather than a first turn"
+        );
+        assert_eq!(payload.approved_by, Some(decider));
+        // The call itself, or the resume executes nothing.
+        let approved = payload
+            .approved_tool_call
+            .as_ref()
+            .expect("approved call present");
+        assert_eq!(approved.name, momo_agent::WORK_SESSION_END);
+        assert_eq!(approved.call_id, "call_1");
+        assert_eq!(approved.arguments, json!({"session_id": "s"}));
+        assert!(!approved.call_id.is_empty());
+        // The G3 budget crosses the pause.
+        assert_eq!(payload.step_count, Some(4));
+        assert_eq!(payload.max_steps, Some(12));
+        assert_eq!(payload.run_id, Some(approval.run_id));
+        assert_eq!(payload.model_or("fallback"), "gpt-5");
+        assert_eq!(payload.prompt, "정리해줘");
+        // A resume ships no transcript on purpose — it is re-read from the
+        // channel, so shipping it would be a staler second copy.
+        assert!(payload.recent_messages.is_empty());
+        assert!(payload.tool_schema().is_empty());
+    }
+
     /// Swift decodes `model`/`prompt` as `?? ""`; an absent model must therefore
     /// resolve to the process default rather than sending an empty model id to
     /// the provider (which every gateway answers with a 400).

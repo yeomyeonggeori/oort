@@ -154,10 +154,16 @@ fn ensure_schema_and_roles() {
 /// pull an unrelated run into this test's batch. See the module docs.
 async fn settle_residual_worker_jobs(su: &PgPool) {
     sqlx::query(
+        // Every method the claim can take, not just 'publish'. goal SRV-T1
+        // widened `claim_agent_job_batch` to `method = ANY(['publish',
+        // 'resume_approval'])`, so a sweep still filtering on 'publish' would
+        // leave exactly the rows the claim now picks up — and this suite's
+        // DrainStats would count another suite's resume job.
         "UPDATE outbox SET status = 'done', processed_at = now() \
-          WHERE kind = 'agent_job' AND method = 'publish' \
+          WHERE kind = 'agent_job' AND method = ANY($1) \
             AND status IN ('pending', 'processing')",
     )
+    .bind(momo_outbox::WORKER_JOB_METHODS.map(str::to_string).to_vec())
     .execute(su)
     .await
     .expect("sweep residual worker agent_jobs");

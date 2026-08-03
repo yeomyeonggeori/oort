@@ -2,13 +2,38 @@
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
-//!   cargo test -p momo-agent --test approval_pg -- --ignored --nocapture
+//!   cargo test -p momo-agent --test approval_pg -- --ignored --test-threads=1 --nocapture
 //! ```
 //!
-//! Same harness contract as `conformance_pg.rs`: `DATABASE_URL` is a superuser
-//! that applies the migrations and seeds fixtures bypassing RLS; every assertion
-//! under test runs as the runtime **`momo_app`** role (`NOBYPASSRLS`), which is
-//! the only faithful way to exercise the policies.
+//! No other env var is required. The three runtime passwords default to the
+//! committed test-only credentials in `infra/e2e/bootstrap_roles.sql` (:10/:16/
+//! :22) and are overridable with `MOMO_APP_PASSWORD`, `MOMO_WORKER_PASSWORD`
+//! and `MOMO_NOTIFIER_PASSWORD`.
+//!
+//! Harness contract (identical to `conformance_pg.rs` and the worker suite's):
+//! `DATABASE_URL` connects as a **superuser** — applies the migrations via
+//! `momo_db::run_migrations` plus `infra/e2e/bootstrap_roles.sql` through psql,
+//! and seeds fixtures bypassing RLS.
+//!
+//! ## Three roles, because the production posture is three roles
+//!
+//! This suite spans a request, a worker claim and a notifier sweep, and those
+//! run as **different roles in production**. Using one role for all three would
+//! not be a simplification — it would test a deployment that does not exist:
+//!
+//! | what | role | why |
+//! |---|---|---|
+//! | every request-path assertion | `momo_app` (**NOBYPASSRLS**) | the only faithful way to exercise the RLS policies |
+//! | `claim_agent_job_batch` | `momo_worker` (**BYPASSRLS**) | the claim has **no workspace predicate and sets no tenant GUC** — a worker drains every tenant |
+//! | `workspaces_with_overdue_approvals` | `momo_notifier` (**BYPASSRLS**) | same shape: a sweep cannot know which tenants need visiting until it looks |
+//!
+//! Getting that wrong is not a cosmetic test bug, and this suite learned it the
+//! hard way: running the claim as `momo_app` makes the `outbox` policy evaluate
+//! `current_setting('app.workspace_id', true)::uuid` with the GUC **unset**, and
+//! Postgres answers `22P02 invalid input syntax for type uuid: ""` — a failure
+//! that looks like a payload defect and is actually a posture defect. The two
+//! BYPASSRLS pools below are what production uses, so the claim and the sweep
+//! are exercised exactly as they ship.
 //!
 //! Each test is named after the thing that makes it red when reverted:
 //!
@@ -20,6 +45,7 @@
 //! | `t1_4_an_expired_approval_releases_the_agents_concurrency_gate` | drop `expires_at` from `NewApproval`, or delete the sweep |
 //! | `t1_5_tool_messages_consume_channel_seq_and_reach_the_outbox` | bypass `send_message_in_tx` for tool rows, or bump `channel_seq` by hand |
 //! | `t1_6_another_tenants_approval_cannot_be_locked_or_decided` | drop the `workspace_id` predicate in `lock_approval_in_tx`, or `FORCE ROW LEVEL SECURITY` on `approval` |
+//! | `t1_7_a_replayed_decision_is_idempotent` | drop `approval_decision_workspace_uniq` |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -44,7 +70,7 @@ use momo_db::{with_tenant_tx, PgPool};
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{claim_agent_job_batch, emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -56,8 +82,38 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a throwaway conformance DB")
 }
 
+/// The committed test-only credentials from `infra/e2e/bootstrap_roles.sql`
+/// (not real secrets). Same defaults every other DB suite in this repo uses —
+/// a suite that invented its own would fail auth on the shared gate.
 fn momo_app_password() -> String {
-    std::env::var("MOMO_APP_PASSWORD").unwrap_or_else(|_| "momo_app".to_string())
+    std::env::var("MOMO_APP_PASSWORD").unwrap_or_else(|_| "momo_app_dev_pw".to_string())
+}
+
+fn momo_worker_password() -> String {
+    std::env::var("MOMO_WORKER_PASSWORD").unwrap_or_else(|_| "momo_worker_dev_pw".to_string())
+}
+
+fn momo_notifier_password() -> String {
+    std::env::var("MOMO_NOTIFIER_PASSWORD").unwrap_or_else(|_| "momo_notifier_dev_pw".to_string())
+}
+
+/// Reconnect `DATABASE_URL` as a named runtime role.
+///
+/// Built from `PgConnectOptions` rather than by rewriting the URL string: a
+/// textual `replacen` silently produces a *valid-looking* URL when the input
+/// does not match the shape it assumed, and the resulting auth failure points
+/// at the credential instead of at the rewrite.
+async fn role_pool(username: &str, password: &str) -> PgPool {
+    let opts: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    PgPoolOptions::new()
+        .max_connections(8)
+        .connect_with(opts.username(username).password(password))
+        .await
+        .unwrap_or_else(|error| {
+            panic!("connect as {username} (run bootstrap_roles.sql first): {error}")
+        })
 }
 
 async fn superuser_pool() -> PgPool {
@@ -68,19 +124,19 @@ async fn superuser_pool() -> PgPool {
         .expect("connect as superuser")
 }
 
+/// The request path: NOBYPASSRLS, so every policy is live.
 async fn momo_app_pool() -> PgPool {
-    let url = database_url();
-    let rewritten = url.replacen("://momo:", "://momo_app:", 1);
-    let url = if rewritten == url {
-        url.replacen("://", &format!("://momo_app:{}@", momo_app_password()), 1)
-    } else {
-        rewritten.replacen(":momo@", &format!(":{}@", momo_app_password()), 1)
-    };
-    PgPoolOptions::new()
-        .max_connections(8)
-        .connect(&url)
-        .await
-        .expect("connect as momo_app")
+    role_pool("momo_app", &momo_app_password()).await
+}
+
+/// The pool the agent worker runs on. BYPASSRLS by design — see the module docs.
+async fn momo_worker_pool() -> PgPool {
+    role_pool("momo_worker", &momo_worker_password()).await
+}
+
+/// The pool momo-notifier runs its sweeps on. BYPASSRLS for the same reason.
+async fn momo_notifier_pool() -> PgPool {
+    role_pool("momo_notifier", &momo_notifier_password()).await
 }
 
 fn resolve_psql() -> PathBuf {
@@ -333,6 +389,26 @@ async fn park_on_approval(app: &PgPool, tenant: &Tenant, run_id: Uuid, ttl_secon
     .expect("park on approval")
 }
 
+/// Settle every leftover pending/processing worker `agent_job` before a claim.
+///
+/// `claim_agent_job_batch` is a **global** consumer claim (`kind='agent_job'`,
+/// no workspace predicate), exactly like `momo-relay`'s broadcast claim, so an
+/// earlier binary's or an earlier suite's row lands in this suite's batch. The
+/// worker suite opens the same way and documents the same reason. Without it
+/// this test would also *steal* another suite's job — taking a 300 s lease on a
+/// row it will never run.
+async fn settle_residual_worker_jobs(su: &PgPool) {
+    sqlx::query(
+        "UPDATE outbox SET status = 'done', processed_at = now() \
+          WHERE kind = 'agent_job' AND method = ANY($1) \
+            AND status IN ('pending', 'processing')",
+    )
+    .bind(momo_outbox::WORKER_JOB_METHODS.map(str::to_string).to_vec())
+    .execute(su)
+    .await
+    .expect("settle residual agent jobs");
+}
+
 // ---------------------------------------------------------------------------
 // the red tests
 // ---------------------------------------------------------------------------
@@ -458,6 +534,7 @@ async fn t1_3_an_approved_run_is_requeued_and_its_resume_job_is_claimable() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
+    settle_residual_worker_jobs(&su).await;
     let tenant = seed_tenant(&su).await;
 
     let run_id = running_run(&app, &tenant).await;
@@ -531,7 +608,14 @@ async fn t1_3_an_approved_run_is_requeued_and_its_resume_job_is_claimable() {
     );
 
     // THE assertion this batch exists for on the consumer side.
-    let claimed = claim_agent_job_batch(&app, 50, 300)
+    //
+    // Claimed on the **`momo_worker`** pool, which is the posture the worker
+    // binary actually runs in: the claim carries no workspace predicate and
+    // sets no tenant GUC, so a NOBYPASSRLS role would make the `outbox` policy
+    // cast an unset `app.workspace_id` and die with
+    // `22P02 … invalid input syntax for type uuid: ""`.
+    let worker = momo_worker_pool().await;
+    let claimed = claim_agent_job_batch(&worker, 50, 300)
         .await
         .expect("claim agent jobs");
     let mine = claimed
@@ -552,6 +636,24 @@ async fn t1_3_an_approved_run_is_requeued_and_its_resume_job_is_claimable() {
         "the G3 budget must survive the pause, or an approved call resumes with \
          a fresh allowance and the step cap stops bounding the loop"
     );
+
+    // The consumer's two REQUIRED keys. `AgentJobPayload` decodes every other
+    // field with `#[serde(default)]`, so a resume payload missing either of
+    // these is poison: the worker fails the row permanently and — because the
+    // claim serializes per agent — that dead row would then block every future
+    // job for this agent. A shape only the producer knows is exactly the defect
+    // class this batch was sent back for.
+    assert!(
+        payload["agent_member_id"].is_string() && payload["channel_id"].is_string(),
+        "the resume payload must carry the two keys AgentJobPayload requires: {payload}"
+    );
+    assert_eq!(payload["agent_member_id"], agent_id.to_string());
+    assert_eq!(
+        payload["approved_tool_call"]["name"],
+        momo_agent::WORK_SESSION_END,
+        "the approved call must survive the pause, or the resume runs nothing"
+    );
+    assert_eq!(payload["approved_tool_call"]["call_id"], "call_t1");
 }
 
 /// **The gate is released without anyone clicking.** `max_concurrent_runs` is 1
@@ -588,7 +690,27 @@ async fn t1_4_an_expired_approval_releases_the_agents_concurrency_gate() {
          (agent.max_concurrent_runs defaults to 1)"
     );
 
-    // The sweep's settlement, through the same domain calls momo-notifier makes.
+    // Step 1 of the sweep, in the posture momo-notifier actually runs it: a
+    // cross-tenant read on the **`momo_notifier`** pool with no tenant GUC. This
+    // is the same shape that broke the claim above, so it is asserted here
+    // rather than assumed — a sweep that cannot find its candidates releases
+    // nothing, and the gate stays held with no error anywhere.
+    let notifier = momo_notifier_pool().await;
+    let mut notifier_conn = notifier
+        .acquire()
+        .await
+        .expect("acquire a momo_notifier connection");
+    let due = momo_agent::approval::workspaces_with_overdue_approvals(&mut notifier_conn, 500)
+        .await
+        .expect("the notifier role must be able to scan for overdue approvals across tenants");
+    drop(notifier_conn);
+    assert!(
+        due.contains(&workspace_id),
+        "the sweep's candidate query must find this workspace; without it the \
+         expiry never runs and one unanswered approval silences the agent forever"
+    );
+
+    // Step 2: the settlement, through the same domain calls momo-notifier makes.
     let expired = with_tenant_tx(&app, workspace_id, move |conn| {
         Box::pin(async move {
             let candidates =
