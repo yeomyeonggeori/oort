@@ -141,10 +141,58 @@ npm run lint                # eslint
 npm run gate:project-shape  # the mechanical guards, alone, for CI
 npm start                   # Metro
 npm run ios                 # run on a simulator
-npm run build:sim           # xcodebuild for the simulator, no signing
+npm run build:sim           # xcodebuild for the simulator, ad-hoc signed
+npm run gate:session        # does a session survive a restart? (below)
 ```
 
 `ios/` requires `pod install` once (`cd ios && pod install`).
+
+---
+
+## The session gate — the one question jest cannot ask
+
+`__tests__/restoreOffline.test.ts` mocks `react-native-keychain`, so it pins the
+DECISION ("a launch with no signal must not cost the session") and can never
+reach the MECHANISM, which is `SecItemAdd`. That gap is not theoretical:
+
+> **A `CODE_SIGNING_ALLOWED=NO` build cannot use the keychain at all.** It gets
+> only the linker's signature — `Sealed Resources=none`, `Info.plist=not bound`,
+> identity `MomoMobile` rather than `app.momo.ios` — and every keychain call
+> comes back `errSecMissingEntitlement (-34018)`. `secureSession.ts` catches that
+> on purpose (a failed keychain write must not take down a sign-in that is
+> succeeding), so the app runs, looks fine, and never remembers anyone.
+
+`build:sim` used to pass exactly that flag. So until goal RN-G1 this project
+could not have caught a session-restore regression by any means it owned: the
+build gate does not run the app, and the test gate does not reach the keychain.
+
+`npm run gate:session` runs the real app on a simulator across **five real
+relaunches**, because "survives a restart" cannot be asserted without restarting:
+
+| step | what it proves |
+|---|---|
+| `login` | `SecItemAdd` is accepted — the raw OSStatus is reported, uncaught — and the refresh token lands in the keychain |
+| `restore-online` | a NEW PROCESS finds the session, resumes it, and stores the rotated token instead of the spent one |
+| `restore-offline` | a NEW PROCESS whose server is unreachable **keeps** the credentials: the regression guard for the defect fixed in `844407fb` |
+| `restore-rejected` | a refused refresh token erases the keychain item, the metadata and the session, and lands on sign-in |
+| `signed-out-sticks` | the erasure survived the restart too |
+
+A mock oort API and a control channel (`gate/server.mjs`, zero dependencies) sit
+on ephemeral ports and `gate/run.mjs` drives `simctl`. About **7 seconds** for
+the five launches, plus 10–40s for the build; `--no-build` reuses `build/sim`.
+
+Two habits it deliberately does not have. It never retries a step — a step that
+has not answered inside its one hard deadline has failed. And it never takes port
+8081 by force: if your Metro is serving another checkout it starts its own and
+points that launch at it with `-RCT_jsLocation`. The first draft of this gate
+"passed" against a different worktree's JavaScript, which is why that check is
+there.
+
+**What an ad-hoc simulator signature still cannot prove.** It is not a device
+signature, so anything needing a real provisioning profile stays invisible here —
+above all the shared keychain ACCESS GROUP the NSE will read
+(`kSecAttrAccessGroup`), which fails with this same `-34018` **on device only**.
+이행 순서 5 has to verify that on hardware.
 
 ### Never run in this directory
 
