@@ -12,12 +12,26 @@ import {
 import {color, font, radius, space} from '../design/tokens';
 import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
 import {
+  agentTurnBadgeCopy,
+  UNKNOWN_AGENT_NAME,
+} from '@momo/core/features/agents/turnCopy';
+import {memberNameParts} from '@momo/core/features/workspace/directory';
+import {
   agentRowMeta,
   buildAgentRows,
   type AgentRow,
 } from '../features/agents/rows';
 import {useAgentProfiles, useWorkSessions} from '../features/agents/queries';
+import {
+  AgentTurnBadge,
+  TURN_STALE_SENTENCE,
+} from '../features/agents/turnSurfaces';
+import {
+  agentTurnsForMember,
+  useAgentWorkingSignals,
+} from '../features/agents/workingSignal';
 import {useChannels, useDirectory} from '../features/workspace/queries';
+import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
 import {queryFailureDetail} from './SidebarScreen';
 
@@ -45,6 +59,21 @@ import {queryFailureDetail} from './SidebarScreen';
 // pretending to know. The list is not blocked on any of it: a name and its
 // channels are already useful, and a screen that waits for a permission it will
 // never get is a screen that never loads.
+//
+// ## 작업 중, at last — and still not the same fact as 세션 실행 중 (goal RN-T2)
+//
+// #980 left this screen able to say 세션 실행 중 and nothing more, with a note
+// saying 작업 중 was the web's word for an open realtime TURN "which this client
+// cannot observe". `AgentWorkingRail` observes it now, so the word arrives — and
+// the two stay side by side rather than merging, because they diverge in both
+// directions: a running work session with no open turn is an idle terminal, and
+// an open turn with no session is an agent answering a message. Merging them
+// would make each one wrong half the time.
+//
+// The badge is 승인 대기 whenever any of this agent's turns is parked on a
+// decision, which is the ONE state on this row a person has to act on. It is
+// never 작업 중: an indicator that treats the two alike tells the reader to wait
+// for the agent while the agent is waiting for the reader.
 // =============================================================================
 
 export default function AgentsScreen({
@@ -86,6 +115,27 @@ export default function AgentsScreen({
   const loading = directoryQuery.isLoading;
   const failed = directoryQuery.isError;
 
+  // ---- the live half (goal RN-T2) ------------------------------------------
+  // No ticking clock here, deliberately — unlike the conversation screen, which
+  // prints an elapsed number and therefore needs one.
+  //
+  // This row prints WORDS only (`agentTurnBadgeCopy` carries no digits; that is
+  // a measurement the web sidebar made about a 240px row and the phone inherits
+  // the shape). What it needs is a render whenever the truth changed, and the
+  // store already causes one on every publish and every clear. The TTL still has
+  // to be applied at render time, which the wall clock read here does for free.
+  //
+  // The one gap a 1Hz tick would close — a signal aging past the TTL while the
+  // store sits quiet — is closed by the rail's own 15s sweep, which deletes the
+  // entry and emits. This tab stays MOUNTED behind the other two once visited,
+  // so a per-second re-render of the whole list would run forever, in the
+  // background of a screen nobody is looking at, to shave a window off a word
+  // that would not change.
+  const signals = useAgentWorkingSignals();
+  const {status: railStatus} = useRealtime();
+  const nowMs = Date.now();
+  const railLive = railStatus === 'connected';
+
   return (
     <Screen>
       <ScreenHeader
@@ -126,7 +176,22 @@ export default function AgentsScreen({
         <FlatList
           data={rows}
           keyExtractor={row => row.key}
-          renderItem={({item}) => <Row row={item} onPress={() => onOpenAgent(item)} />}
+          renderItem={({item}) => (
+            <Row
+              row={item}
+              turn={agentTurnBadgeCopy(
+                agentTurnsForMember(signals, item.memberId, nowMs),
+                memberId =>
+                  memberNameParts(
+                    directoryQuery.directory,
+                    memberId,
+                    UNKNOWN_AGENT_NAME,
+                  ),
+              )}
+              railLive={railLive}
+              onPress={() => onOpenAgent(item)}
+            />
+          )}
           contentContainerStyle={styles.listContent}
           testID="agents-list"
         />
@@ -137,14 +202,29 @@ export default function AgentsScreen({
 
 function Row({
   row,
+  turn,
+  railLive,
   onPress,
 }: {
   row: AgentRow;
+  /** The one open turn this agent has, in words, or null when it has none. */
+  turn: ReturnType<typeof agentTurnBadgeCopy>;
+  railLive: boolean;
   onPress: () => void;
 }): React.JSX.Element {
+  // The turn sentence is folded into the ROW's label, not left on the badge.
+  // `TapRow` is a `Pressable` with its own `accessibilityLabel`, so its subtree
+  // is one accessibility element and nothing inside it is announced separately —
+  // a badge that only labelled itself would be silent. Same reason the ledger's
+  // 작업 세션 count already rides `agentRowMeta` rather than its own pill.
+  const label = turn
+    ? `${row.accessibilityLabel}, ${
+        railLive ? turn.label : `${turn.label} ${TURN_STALE_SENTENCE}`
+      }`
+    : row.accessibilityLabel;
   return (
     <TapRow
-      accessibilityLabel={row.accessibilityLabel}
+      accessibilityLabel={label}
       onPress={onPress}
       testID={`agent-row-${row.memberId}`}>
       {/* The same mark the sidebar uses for an agent: the agent colour, on a
@@ -164,10 +244,23 @@ function Row({
           {agentRowMeta(row)}
         </Text>
       </View>
-      {/* NOT 「작업 중」. That is the web's word for an open realtime TURN, and
-          this pill is reading the work-session ledger — a different fact that
-          diverges in both directions (R1 High-2). The core owns the string so
-          the two clients cannot drift back together by accident. */}
+      {/* Two pills, two facts, side by side and never merged.
+
+          작업 중 / 승인 대기 is the open realtime TURN (this rail). 세션 실행 중
+          is the work-session ledger. They diverge in both directions — an idle
+          terminal is a session with no turn, and an agent answering a message is
+          a turn with no session — so a row that showed only one of them would be
+          wrong half the time. The core owns both strings, which is what stops
+          the phone and the web from drifting into different words for them. */}
+      {turn ? (
+        <AgentTurnBadge
+          state={turn.state}
+          text={turn.text}
+          label={turn.label}
+          live={railLive}
+          testID={`agent-turn-${row.memberId}`}
+        />
+      ) : null}
       {row.runningCount > 0 ? (
         <View style={styles.workingPill}>
           <Text style={styles.workingPillText}>{RUNNING_SESSION_PILL}</Text>

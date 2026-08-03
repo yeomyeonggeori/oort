@@ -77,6 +77,30 @@ export interface PolicyStep {
 }
 
 /**
+ * Is there a socket right now that a subscription could ride?
+ *
+ * True while a session wants one AND the app is either in front or still inside
+ * its grace period — exactly the window between the `connect` action and the
+ * `disconnect` the grace timer eventually issues. Derived rather than stored: it
+ * is a reading of the three flags above, and a fourth flag would be a second
+ * copy of the policy that could disagree with the actions.
+ *
+ * The agent progress rail asks this before subscribing (goal RN-T2). It is up
+ * to 32 subscriptions at the cap against the timeline's one, so leaving them
+ * attached to a client the policy has parked means every reconnect pays a
+ * subscribe storm — and one recovery batch per pair that `createReplayGate`
+ * then throws away. A radio is a cost on a phone.
+ *
+ * The message rail deliberately does NOT ask: coming back to a conversation
+ * with a hole in it is a visible loss, and a 작업 중 badge that takes a moment
+ * to reappear after a return is not — the frames it missed were about a turn
+ * that has since moved on anyway.
+ */
+export function socketWanted(state: RealtimePolicyState): boolean {
+  return state.wantConnected && (state.foreground || state.gracePending);
+}
+
+/**
  * Sign in / sign out are not signals but explicit starts and stops: the socket
  * exists because there is a session, and no amount of app-state churn should
  * create one when there is not.

@@ -4,6 +4,7 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CountBadge} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
 import {useMentionCount} from '../features/inbox/useInbox';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
 import {
@@ -114,6 +115,13 @@ function Shell(): React.JSX.Element {
 
   return (
     <View style={styles.root}>
+      {/* Renders nothing. Mounted in the SHELL rather than in either surface
+          that reads it (goal RN-T2), because the value of a 작업 중 badge is
+          telling you an agent is working somewhere you are NOT looking — a rail
+          that only ran while the 에이전트 tab was open could never light a row
+          you had not already opened. It detaches itself when the background
+          policy parks the socket; see the file's own note on why. */}
+      <AgentWorkingRail />
       <View style={styles.tabBody}>
         <View style={nav.tab === 'channels' ? styles.visible : styles.hidden}>
           <SidebarScreen

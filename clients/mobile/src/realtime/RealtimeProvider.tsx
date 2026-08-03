@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import {getPersistedSession} from '../storage/secureSession';
+import {socketWanted} from './backgroundPolicy';
 import {createChannelRail, type ChannelRail} from './channelRail';
 import {createRealtimeTransport} from './centrifugeTransport';
 
@@ -52,11 +53,26 @@ export interface RealtimeContextValue {
   /** Null until the session yields a websocket address. */
   rail: ChannelRail | null;
   status: RealtimeStatus;
+  /**
+   * Does the background policy want a socket at all right now (goal RN-T2)?
+   *
+   * Distinct from `status`, which says what the socket is DOING. A backgrounded
+   * app past its grace period has no socket BY DESIGN, and centrifuge-js reports
+   * that as `connecting` forever — from the status alone it is indistinguishable
+   * from a network outage the app is fighting to recover from.
+   *
+   * Surfaces that pay per subscription (the agent progress rail: up to 32) read
+   * this instead, so they detach when the policy parks the socket and not when
+   * it merely stumbles. The timeline keeps reading `status`, which is the right
+   * question for it: "may I claim this feed is live".
+   */
+  subscriptionsWanted: boolean;
 }
 
 const RealtimeContext = createContext<RealtimeContextValue>({
   rail: null,
   status: 'connecting',
+  subscriptionsWanted: false,
 });
 
 export function RealtimeProvider({
@@ -67,6 +83,7 @@ export function RealtimeProvider({
   const url = getPersistedSession()?.realtimeWebSocketUrl ?? '';
   const [status, setStatus] = useState<RealtimeStatus>('connecting');
   const [rail, setRail] = useState<ChannelRail | null>(null);
+  const [subscriptionsWanted, setSubscriptionsWanted] = useState(false);
 
   useEffect(() => {
     if (url === '') return;
@@ -87,18 +104,24 @@ export function RealtimeProvider({
           next === 'connecting' && everConnected ? 'disconnected' : next,
         );
       },
+      onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
     setRail(createChannelRail(transport.client));
     transport.start();
     return () => {
       setRail(null);
+      // The socket is going away with the transport, so nothing may keep
+      // subscribing against it. Said here rather than left to `onPolicy`: a
+      // disposed transport has stopped dispatching, so it will never say this
+      // itself.
+      setSubscriptionsWanted(false);
       transport.dispose();
     };
   }, [url]);
 
   const value = useMemo<RealtimeContextValue>(
-    () => ({rail, status}),
-    [rail, status],
+    () => ({rail, status, subscriptionsWanted}),
+    [rail, status, subscriptionsWanted],
   );
 
   return (

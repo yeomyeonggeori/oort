@@ -7,6 +7,13 @@ import {
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {View} from 'react-native';
 import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
+import {AgentActivityBar} from '../features/agents/turnSurfaces';
+import {
+  agentTurnsInChannel,
+  hasChannelTurn,
+  useAgentWorkingSignals,
+  useTickingNow,
+} from '../features/agents/workingSignal';
 import {Composer} from '../features/conversation/Composer';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {
@@ -109,6 +116,23 @@ export default function ConversationScreen({
     () => (channel ? dmAutoReplyAgent(channel, directory, member.id) : null),
     [channel, directory, member.id],
   );
+
+  // ---- 이 채널에서 지금 열려 있는 턴 (goal RN-T2) ---------------------------
+  // The 1Hz clock is mounted for THIS channel's turns, not the workspace's.
+  // `hasChannelTurn` is clock-free precisely so that decision can be made before
+  // there is a clock; gating on the store's size alone would re-render this
+  // screen once a second because an agent is busy in a channel nobody here is
+  // looking at, which on a phone is battery bought with nothing on screen.
+  //
+  // `useTickingNow` returns the RENDER's own clock whatever the argument says.
+  // The argument only buys the 1Hz re-render, and that is what makes the same
+  // `nowMs` safe to hand to the staleness filter below: a frozen now can never
+  // find a signal stale, and a dead rail is exactly when one most needs to
+  // expire.
+  const signals = useAgentWorkingSignals();
+  const railLive = railStatus === 'connected';
+  const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
+  const turns = agentTurnsInChannel(signals, channelId, turnNowMs);
 
   // ---- the frozen unread snapshot ------------------------------------------
   // Captured on the first render that has a read state for this channel, and
@@ -235,6 +259,17 @@ export default function ConversationScreen({
         }
         composer={
           <>
+            {/* Directly above the input, which is where the answer matters: this
+                is the line that tells you whether to wait or to type. It sits
+                over the composer rather than in the header for the same reason
+                the web bar does — the header is where the channel's identity
+                lives, and a turn is not an identity. */}
+            <AgentActivityBar
+              turns={turns}
+              directory={directory}
+              nowMs={turnNowMs}
+              live={railLive}
+            />
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
               channelLabel={title}
