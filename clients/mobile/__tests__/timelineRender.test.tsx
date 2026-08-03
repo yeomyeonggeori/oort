@@ -139,6 +139,13 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
     const list = screen.getByTestId('timeline-list');
     expect(list.props.keyboardDismissMode).toBe('on-drag');
     expect(list.props.keyboardShouldPersistTaps).toBe('handled');
+    // 그리고 **끌 수 있어야** 그 모드가 존재한다. `on-drag` 는 UIScrollView 의
+    // `scrollViewWillBeginDragging` 에 걸리는데, 짧은 대화는 스크롤할 것이 없다 —
+    // 바운스가 꺼져 있으면 드래그 자체가 시작되지 않아 이 배치의 수정이 가장
+    // 필요한 화면에서만 조용히 죽는다. RN 은 세로 리스트에 이 값을 켜서 주고
+    // (`ScrollView.js`: `alwaysBounceVertical = !horizontal`), 이 줄은 누군가
+    // 그것을 끄면 알아채기 위한 것이다.
+    expect(list.props.alwaysBounceVertical).not.toBe(false);
   });
 
   it('대화의 시작에 닿으면 더 요청하지 않는다', () => {
