@@ -78,6 +78,8 @@ PODS:
     - hermes-engine/Pre-built (= 250829098.0.16)
   - hermes-engine/Pre-built (250829098.0.16)
   - MMKVCore (2.4.0)
+  - MomoKeyboardNative (1.0.0):
+    - ExpoModulesCore
   - MomoPushNative (1.0.0):
     - ExpoModulesCore
   - NitroMmkv (4.3.2):
@@ -2101,6 +2103,7 @@ DEPENDENCIES:
   - ExpoNotifications (from `../node_modules/expo-notifications/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
+  - MomoKeyboardNative (from `../modules/momo-keyboard-native/ios`)
   - MomoPushNative (from `../modules/momo-push-native/ios`)
   - NitroMmkv (from `../node_modules/react-native-mmkv`)
   - NitroModules (from `../node_modules/react-native-nitro-modules`)
@@ -2219,6 +2222,8 @@ EXTERNAL SOURCES:
   hermes-engine:
     :podspec: "../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-v250829098.0.16
+  MomoKeyboardNative:
+    :path: "../modules/momo-keyboard-native/ios"
   MomoPushNative:
     :path: "../modules/momo-push-native/ios"
   NitroMmkv:
@@ -2395,8 +2400,9 @@ SPEC CHECKSUMS:
   ExpoModulesWorklets: 6b240031daa3de4df791588fc78236637ff602f6
   ExpoNotifications: 0f253ad90f108c1c4045b541294164865c6aadc8
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
-  hermes-engine: e58c6acea665c2f48d1b9e7018dac136051eb1bd
+  hermes-engine: 1f9904ef158fa5744f25071028fa354426cb07fd
   MMKVCore: 3d16ce9f7d411e135020915fde98a056859a1efa
+  MomoKeyboardNative: d57ac23397a03cd0d9f8484e3f1c38a16ed87663
   MomoPushNative: c9da9159bd25034adfc6cb2496213f5b481afe04
   NitroMmkv: 85a251e15c39d7c95fe58cf40786fa126b8d143c
   NitroModules: 452230d9b63c6c3f59dd97eeaa27ec3449271d4a

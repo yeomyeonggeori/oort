@@ -19,6 +19,7 @@ import {
   Timeline,
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
+import {keyboardNative} from '../src/lib/keyboardPane';
 import {useKeyboard} from '../src/lib/useKeyboard';
 
 // =============================================================================
@@ -139,6 +140,12 @@ const KEYBOARD_HEIGHT_PT = 336;
  * plain `NativeEventEmitter`, which does have it. Reaching for it is exactly as
  * unofficial as it looks, which is why it lives in the harness and not in
  * `src/`.
+ *
+ * **Kept only as the fallback.** It publishes on React Native's JS-side emitter,
+ * which is one layer ABOVE the notification centre — so it can drive
+ * `useKeyboard()` and it cannot drive `modules/momo-keyboard-native`, whose
+ * whole point is that it listens to UIKit instead of to JavaScript. A run that
+ * lands here is measuring the old path, and `keyboardSource` says so.
  */
 function keyboardEmitter():
   | {emit: (event: string, payload: unknown) => void}
@@ -174,6 +181,21 @@ function injectKeyboardHide(): void {
   };
   emitter?.emit('keyboardWillHide', payload);
   emitter?.emit('keyboardDidHide', payload);
+}
+
+/**
+ * The frame, posted where iOS posts it (goal RN-P3).
+ *
+ * `NotificationCenter.default`, from native, with a real keyboard geometry — so
+ * every observer that matters receives it: the pane, AND `RCTKeyboardObserver`,
+ * which keeps `useKeyboard()` in step for free. The JS emitter above cannot
+ * reach the first of those, which is why the measurement had to move down a
+ * layer along with the thing being measured.
+ */
+function postKeyboardFrame(height: number, durationMs: number): boolean {
+  if (!keyboardNative) return false;
+  keyboardNative.simulateKeyboard(height, durationMs);
+  return true;
 }
 
 /** The keyboard's own duration, and therefore how long a block has to last. */
@@ -239,27 +261,79 @@ function burnJs(forMs: number): number {
 // =============================================================================
 
 /**
- * One keyboard raise, read off the animation rather than off the layout.
+ * One keyboard raise, read off the DISPLAY by the native instrument.
  *
- * `samples` and `midFlight` are as load-bearing as the times. A JS-driven
- * animation produces its frames ON the JS thread, so blocking that thread
- * produces **zero** intermediate values and then one jump to the destination
- * (`Animated.timing` computes progress from wall-clock time, so it catches up
- * in a single frame and the numbers alone would look fine). A native-driven one
- * keeps producing frames while JS is blocked and delivers them late. `midFlight`
- * is therefore the one figure that cannot be faked by a snap to the end.
+ * ## Why the instrument itself had to be replaced (goal RN-P3)
+ *
+ * The previous version of this type was filled in from JS, by listening to the
+ * `Animated.Value` the composer rode. goal RN-P2 shipped it and said what was
+ * wrong with it in the same breath: the native driver reports frames back to JS
+ * on a JS-scheduled callback, so every time it produced was an UPPER BOUND
+ * inflated by however busy the JS thread was — under the one condition worth
+ * testing. It could not prove a 17ms ignition and it could not disprove one.
+ *
+ * So the numbers now come from `modules/momo-keyboard-native`, taken on the main
+ * thread off a `CADisplayLink` reading the PRESENTATION layer, and JS collects
+ * them afterwards. Being late to collect costs nothing, because the clock that
+ * mattered stopped natively.
+ *
+ * `frames` and `midFlight` are as load-bearing as the times: a run that snapped
+ * straight to the destination has `midFlight === 0`, and no pair of timestamps
+ * can tell you that.
  */
 interface Travel {
-  /** ms from the keyboard event to the first value that had moved. */
-  startMs: number;
-  /** ms from the keyboard event to the first value at the destination. */
-  settleMs: number;
-  /** How many value updates arrived at all. */
-  samples: number;
-  /** How many of them were strictly between the start and the destination. */
+  /** ms from the keyboard notification to the first MOVED frame on screen. */
+  igniteMs: number;
+  /** ms to the first frame on which Core Animation was RUNNING the travel. */
+  armedMs: number;
+  /** ms to the animation being committed — the ignition latency, unquantised. */
+  commitMs: number;
+  /** ms to the first frame at the destination. */
+  arriveMs: number;
+  /** Frames sampled. */
+  frames: number;
+  /** How many of them were strictly between the two ends — i.e. it glided. */
   midFlight: number;
-  /** The largest value seen, so a run that never got there says so. */
-  peak: number;
+  /** Where it went, in points. Negative is up. */
+  toPx: number;
+  /** What duration went INTO `UIView.animate`, in ms. */
+  durationMs: number;
+  /** False when the native instrument was unavailable and nothing was read. */
+  available: boolean;
+}
+
+const UNAVAILABLE_TRAVEL: Travel = {
+  igniteMs: -1,
+  armedMs: -1,
+  commitMs: -1,
+  arriveMs: -1,
+  frames: 0,
+  midFlight: 0,
+  toPx: 0,
+  durationMs: 0,
+  available: false,
+};
+
+/** Read the native record. `-1` keeps its meaning: could not measure. */
+function readNativeTravel(): Travel {
+  const record = keyboardNative?.lastTravel();
+  if (!record || record.available !== 1) return UNAVAILABLE_TRAVEL;
+  return {
+    igniteMs: Math.round((record.igniteMs ?? -1) * 10) / 10,
+    armedMs: Math.round((record.armedMs ?? -1) * 10) / 10,
+    commitMs: Math.round((record.commitMs ?? -1) * 100) / 100,
+    arriveMs: Math.round((record.arriveMs ?? -1) * 10) / 10,
+    frames: record.frames ?? 0,
+    midFlight: record.midFlight ?? 0,
+    toPx: Math.round((record.toPx ?? 0) * 10) / 10,
+    durationMs: Math.round((record.durationMs ?? 0) * 10) / 10,
+    available: true,
+  };
+}
+
+/** Where the pane is resting, which `measureInWindow` cannot see — see below. */
+function nativeLiftPx(): number {
+  return keyboardNative?.lastTravel().liftPx ?? 0;
 }
 
 interface Results {
@@ -267,6 +341,14 @@ interface Results {
   prependShiftPx: number | null;
   keyboardGapPx: number | null;
   keyboardHeightPx: number | null;
+  /**
+   * How far the native pane is displaced, in points (negative is up).
+   *
+   * A term in `composerBottomPx` rather than a curiosity: `measureInWindow`
+   * reads the shadow tree, which since goal RN-P3 never learns about the lift at
+   * all. See the effect that folds them together.
+   */
+  paneLiftPx: number | null;
   composerBottomPx: number | null;
   keyboardTopPx: number | null;
   /** ms from the keyboard event to the composer's FIRST movement. */
@@ -303,6 +385,30 @@ interface Results {
   tailGapPx: number | null;
   /** The list's own arithmetic for the same question, from its scroll metrics. */
   selfSendDistancePx: number | null;
+  /**
+   * The same question from a distance a person actually reaches.
+   *
+   * The probe above starts where `reachAnchor` left the reader — about twenty
+   * screens back in a 200-message fixture — because it was written to prove the
+   * anchor rules, not this one. That is a real case and it is not the common
+   * one, and a single verdict over both cannot say which of them is fixed. So
+   * this one sends from THREE screens back, which is what scrolling up to
+   * re-read something looks like.
+   */
+  nearSendGapPx: number | null;
+  nearSendVisible: boolean | null;
+  /** How far from the end it started, so the number has a scale. */
+  nearSendFromPx: number | null;
+  /**
+   * What the list's geometry DID during the correction, sampled every 100ms.
+   *
+   * Here because two rounds of guessing at why the correction stalled both cost
+   * a build and both were wrong. A stalled climb has three possible shapes and
+   * they are indistinguishable from the final number alone: the scroll never
+   * moved, the scroll moved but the content grew as fast, or the scroll moved
+   * and something moved it back.
+   */
+  selfSendTrace: string | null;
   originSentByRn: string | null;
   note: string;
 }
@@ -312,6 +418,7 @@ const EMPTY: Results = {
   prependShiftPx: null,
   keyboardGapPx: null,
   keyboardHeightPx: null,
+  paneLiftPx: null,
   composerBottomPx: null,
   keyboardTopPx: null,
   travelStartMs: null,
@@ -325,6 +432,10 @@ const EMPTY: Results = {
   tailBottomY: null,
   tailGapPx: null,
   selfSendDistancePx: null,
+  selfSendTrace: null,
+  nearSendGapPx: null,
+  nearSendVisible: null,
+  nearSendFromPx: null,
   originSentByRn: null,
   note: '측정 중…',
 };
@@ -358,7 +469,7 @@ function Harness(): React.JSX.Element {
   const [selfSendToken, setSelfSendToken] = useState(0);
   const keyboard = useKeyboard();
   const ranRef = useRef(false);
-  const [keyboardSource, setKeyboardSource] = useState<'os' | 'injected'>('os');
+  const [keyboardSource, setKeyboardSource] = useState<'os' | 'posted' | 'injected'>('os');
   // Read from inside the async run, which cannot see a re-rendered `keyboard`.
   const keyboardVisibleRef = useRef(false);
   keyboardVisibleRef.current = keyboard.visible;
@@ -464,33 +575,25 @@ function Harness(): React.JSX.Element {
           burnJs(12);
         }, 16);
       }
-      const origin = Date.now();
-      injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
+      // Posted natively, so the pane's own observer hears it. `simulateKeyboard`
+      // hands the post to the main queue and returns, which is exactly the shape
+      // the `block` case needs: the notification is already on its way when this
+      // thread disappears.
+      const posted = postKeyboardFrame(KEYBOARD_HEIGHT_PT, KEYBOARD_DURATION_MS);
+      if (!posted) injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
       // The wedged case: the event has arrived and the JS thread goes away for
-      // longer than the whole keyboard animation.
+      // longer than the whole keyboard animation. If the ignition were still a
+      // JS callback, nothing could move until this returns.
       if (block) burnJs(KEYBOARD_DURATION_MS + 50);
       await wait(1600);
       if (loadTimer !== null) clearInterval(loadTimer);
 
-      const destination = KEYBOARD_HEIGHT_PT;
-      const samples = offsetTraceRef.current.map(point => ({
-        t: point.at - origin,
-        v: point.v,
-      }));
-      const moved = samples.find(point => point.v > 1);
-      const settled = samples.find(
-        point => Math.abs(point.v - destination) <= 1,
-      );
-      const travel: Travel = {
-        startMs: moved ? moved.t : -1,
-        settleMs: settled ? settled.t : -1,
-        samples: samples.length,
-        midFlight: samples.filter(
-          point => point.v > 1 && point.v < destination - 1,
-        ).length,
-        peak: samples.reduce((max, point) => Math.max(max, point.v), 0),
-      };
-      injectKeyboardHide();
+      const travel = readNativeTravel();
+      if (posted) {
+        postKeyboardFrame(0, KEYBOARD_DURATION_MS);
+      } else {
+        injectKeyboardHide();
+      }
       await wait(900);
       offsetTraceRef.current = [];
       return travel;
@@ -542,8 +645,15 @@ function Harness(): React.JSX.Element {
           ...Array.from({length: 20}, (_, i) => makeMessage(FIRST_SEQ - 20 + i)),
           ...current,
         ]);
-        await wait(1200);
-        after = await measureAnchor();
+        // Retried, for the same reason the self-send probe is: one read at a
+        // fixed delay after a prepend is a bet on how far the virtualiser has
+        // got, and losing it prints 측정 실패 about a list that is behaving.
+        after = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await wait(attempt === 0 ? 1200 : 300);
+          after = await measureAnchor();
+          if (after !== null) break;
+        }
         next.prependShiftPx =
           after === null ? -1 : Math.round(Math.abs(after - before) * 10) / 10;
       }
@@ -582,6 +692,16 @@ function Harness(): React.JSX.Element {
       //                               real FAIL, provable without the row.
       //   row null, tail above dock → the list IS at the end and the wrapper
       //                               still did not attach. Only THIS is 미측정.
+      // Sample the list's geometry THROUGH the correction, not just after it.
+      const offsets: number[] = [];
+      const heights: number[] = [];
+      const sampler = setInterval(() => {
+        const geometry = metricsRef.current;
+        if (geometry === null) return;
+        offsets.push(Math.round(geometry.offsetY));
+        heights.push(Math.round(geometry.contentHeight));
+      }, 100);
+
       let sentY: number | null = null;
       let dockY: number | null = null;
       let tailBottom: number | null = null;
@@ -595,6 +715,15 @@ function Harness(): React.JSX.Element {
         // still running and calling the mid-point the answer.
         if (sentY !== null && dockY !== null) break;
       }
+      clearInterval(sampler);
+      next.selfSendTrace =
+        offsets.length === 0
+          ? '샘플 없음'
+          : `오프셋 ${offsets[0]}→${offsets[offsets.length - 1]}(최대 ${Math.max(
+              ...offsets,
+            )}) · 콘텐츠 ${heights[0]}→${heights[heights.length - 1]}(최대 ${Math.max(
+              ...heights,
+            )}) · n=${offsets.length}`;
       next.sentRowY = sentY;
       next.dockY = dockY;
       next.tailBottomY = tailBottom;
@@ -629,6 +758,7 @@ function Harness(): React.JSX.Element {
         tailBottomY: next.tailBottomY,
         tailGapPx: next.tailGapPx,
         selfSendDistancePx: next.selfSendDistancePx,
+        selfSendTrace: next.selfSendTrace,
       }));
       console.log(
         `MOMO_MEASURE_SELFSEND ${JSON.stringify({
@@ -640,6 +770,78 @@ function Harness(): React.JSX.Element {
           visible: next.selfSendVisible,
         })}`,
       );
+
+      // ---- 2c. …and from a distance a person actually reaches ---------------
+      // Same rule, ordinary conditions. Three screens back is what scrolling up
+      // to re-read something looks like; twenty is what the fixture above
+      // happens to produce. Both are worth knowing and they are not one number.
+      // Get to the ACTUAL tail first. The probe above deliberately leaves the
+      // list wherever its correction ran out, and measuring "three screens back"
+      // from there measures three screens back from a failure — which is not the
+      // ordinary case, it is the extreme case plus three screens. The first
+      // version of this probe did exactly that and reported a number that looked
+      // like a second failure and was the first one wearing a hat.
+      for (let attempt = 0; attempt < 40; attempt++) {
+        listRef.current?.scrollToEnd({animated: false});
+        await wait(150);
+        const at = metricsRef.current;
+        if (
+          at !== null &&
+          at.contentHeight > 0 &&
+          at.contentHeight - (at.offsetY + at.viewportHeight) <= 1
+        ) {
+          break;
+        }
+      }
+      await wait(600);
+      const geometryNow = metricsRef.current;
+      if (geometryNow !== null && geometryNow.viewportHeight > 0) {
+        const backBy = geometryNow.viewportHeight * 3;
+        listRef.current?.scrollToOffset({
+          offset: Math.max(0, geometryNow.offsetY - backBy),
+          animated: false,
+        });
+        await wait(900);
+        const from = metricsRef.current;
+        next.nearSendFromPx =
+          from === null
+            ? null
+            : Math.round(
+                (from.contentHeight - (from.offsetY + from.viewportHeight)) * 10,
+              ) / 10;
+
+        const nearSeq = lastSeq + 1;
+        setAnchoredSeq(nearSeq);
+        setMessages(current => [...current, makeMessage(nearSeq)]);
+        setSelfSendToken(token => token + 1);
+
+        let nearSent: number | null = null;
+        let nearDock: number | null = null;
+        let nearTail: number | null = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          await wait(400);
+          nearSent = await measureAnchor();
+          nearDock = await measureNode(dockRef);
+          nearTail = await measureNodeBottom(tailRef);
+          if (nearSent !== null && nearDock !== null) break;
+        }
+        next.nearSendGapPx =
+          nearTail === null || nearDock === null
+            ? null
+            : Math.round((nearTail - nearDock) * 10) / 10;
+        next.nearSendVisible =
+          nearSent !== null && nearDock !== null
+            ? nearSent < nearDock
+            : next.nearSendGapPx !== null && next.nearSendGapPx > 1
+            ? false
+            : null;
+        setResults(current => ({
+          ...current,
+          nearSendGapPx: next.nearSendGapPx,
+          nearSendVisible: next.nearSendVisible,
+          nearSendFromPx: next.nearSendFromPx,
+        }));
+      }
 
       // ---- 3. the keyboard --------------------------------------------------
       // `focus()` rather than a tap, because a simulator cannot be driven by a
@@ -675,17 +877,21 @@ function Harness(): React.JSX.Element {
       // than leave the requirement unmeasured, the same event channel iOS uses
       // is driven directly with a real keyboard geometry.
       //
-      // Honest about what this proves. It exercises the part that can regress —
-      // `KeyboardAvoidingView`'s response, and the decision to drop the bottom
-      // safe-area inset while the keyboard is up — through `Keyboard._emitter`,
-      // the exact emitter BOTH `KeyboardAvoidingView` and `useKeyboard`
-      // subscribe to, so nothing about the layout path is stubbed. What it does
-      // not prove is that iOS emits the event, which is React Native's contract
-      // and was never in question. `keyboardSource` records which path produced
-      // the number so the PR cannot claim the stronger one by accident.
+      // Honest about what this proves. Since goal RN-P3 the frame is posted on
+      // `NotificationCenter.default` from native, which is the SAME channel
+      // UIKit posts on — so the pane's observer, `RCTKeyboardObserver` and
+      // `useKeyboard` all receive it exactly as they would a real keyboard, and
+      // no part of the path is stubbed. What it still does not prove is that
+      // iOS posts the notification, which is UIKit's contract and was never in
+      // question. `keyboardSource` records which path produced the number so the
+      // PR cannot claim the stronger one by accident.
       if (!keyboardVisibleRef.current) {
-        injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
-        setKeyboardSource('injected');
+        const posted = postKeyboardFrame(
+          KEYBOARD_HEIGHT_PT,
+          KEYBOARD_DURATION_MS,
+        );
+        if (!posted) injectKeyboardFrame(KEYBOARD_HEIGHT_PT);
+        setKeyboardSource(posted ? 'posted' : 'injected');
         await wait(1200);
       }
 
@@ -722,7 +928,7 @@ function Harness(): React.JSX.Element {
       // reported 0 mid-flight samples and start == settle, which reads exactly
       // like a broken animation and was a broken measurement.
       Keyboard.dismiss();
-      injectKeyboardHide();
+      if (!postKeyboardFrame(0, KEYBOARD_DURATION_MS)) injectKeyboardHide();
       await wait(1500);
       const idle = await runTravel({});
       const loaded = await runTravel({load: true});
@@ -756,24 +962,31 @@ function Harness(): React.JSX.Element {
   // the other refs at the top — the travel sampler needs it too.)
   useEffect(() => {
     if (!keyboard.visible) return;
-    // **900ms, and the number is load-bearing.** `measureInWindow` answers from
-    // the shadow tree, and the composer's lift is a native-driven transform that
-    // reaches the shadow tree only when the animation ENDS and
-    // `createAnimatedPropsHook` calls `scheduleUpdate()` to put the two trees
-    // back in step. The old 300ms was a comfortable margin over a 250ms
-    // animation that committed every frame; against one that commits once, it
-    // sampled a dock that had not moved yet and reported the composer 336px
-    // behind the keyboard. Measured on this simulator, that commit lands ~506ms
-    // after the event (the row above reads it), so this waits past it.
+    // **The shadow tree does not know the pane has moved, and after goal RN-P3
+    // it never will.** `measureInWindow` answers from `currentRevision` — the
+    // shadow tree — and the lift is now a UIKit animation on the mounted view's
+    // own transform. There is no `scheduleUpdate()` at the end to put the two
+    // trees back in step, because there is no `Animated` in the loop to call it.
+    //
+    // Which is not a hole in the measurement, it is a term in it: the pane's
+    // displacement is a number the native side can be asked for directly
+    // (`liftPx`), so the composer's true bottom edge is the shadow-tree reading
+    // PLUS that displacement. Both halves are measured; neither is assumed.
+    //
+    // The 900ms is now only "long enough for the 250ms animation to have
+    // landed", so that `liftPx` is the settled destination rather than a value
+    // still being interpolated.
     const timer = setTimeout(() => {
       // The dock's bottom edge in WINDOW coordinates. Paired with the screen
       // height and the keyboard height in the fold below, that is the whole
       // question: is the composer's last pixel above the keyboard's first one.
       dockRef.current?.measureInWindow((_x, y, _w, height) => {
+        const lift = nativeLiftPx(); // negative: the pane is up by this much
         setResults(current => ({
           ...current,
           keyboardHeightPx: keyboard.height,
-          composerBottomPx: Math.round((y + height) * 10) / 10,
+          paneLiftPx: Math.round(lift * 10) / 10,
+          composerBottomPx: Math.round((y + height + lift) * 10) / 10,
         }));
       });
     }, 900);
@@ -813,6 +1026,7 @@ function Harness(): React.JSX.Element {
         keyboardGapPx: gap,
         keyboardHeightPx: results.keyboardHeightPx,
         composerBottomPx: results.composerBottomPx,
+        paneLiftPx: results.paneLiftPx,
         keyboardTopPx: keyboardTop,
         screenHeightPx: rootHeightRef.current,
         keyboardSource,
@@ -851,7 +1065,7 @@ function Harness(): React.JSX.Element {
   return (
     <View style={styles.root} onLayout={onLayoutRoot}>
       <ScrollView style={styles.report} contentContainerStyle={styles.reportBody}>
-        <Text style={styles.title}>RN-C5 측정</Text>
+        <Text style={styles.title}>RN-P3 측정</Text>
         <Row
           label="새 메시지 도착 시 앵커 이동"
           value={px(results.incomingShiftPx)}
@@ -867,23 +1081,33 @@ function Harness(): React.JSX.Element {
           value={px(results.keyboardGapPx)}
           pass={results.keyboardGapPx === null ? null : results.keyboardGapPx >= 0}
         />
-        {/* The shadow-tree sampler. It measured the OLD animation because the
-            old one committed every frame; with the travel on the native driver
-            it should now report -1 (never moved) until the end. That reading is
-            the evidence, not the failure — see the note above `Travel`. */}
+        {/* The shadow-tree sampler, kept as a NEGATIVE control. It measured the
+            original animation because that one committed every frame. Since the
+            lift became a UIKit animation on the mounted view, this can no longer
+            see it at all and should read 측정 실패 in both rows — which is the
+            direct evidence that the travel left React's commit path entirely,
+            not a hole in the measurement. The real numbers are the three below,
+            taken natively. */}
         <Row
-          label="[섀도트리] 이벤트 → 첫 이동"
-          value={ms(results.travelStartMs)}
-          pass={null}
+          label="[섀도트리·음성대조] 커밋 경로에서 본 이동"
+          value={
+            results.travelStartMs === null
+              ? '측정 중…'
+              : results.travelStartMs < 0
+              ? '이동 없음(정상 — 커밋 밖)'
+              : `${ms(results.travelStartMs)} — 커밋 경로로 샜다`
+          }
+          // 여기서 숫자가 나오면 리프트가 다시 React 커밋을 타고 있다는 뜻이다.
+          pass={
+            results.travelStartMs === null ? null : results.travelStartMs < 0
+          }
         />
-        <Row
-          label="[섀도트리] 이벤트 → 도착"
-          value={ms(results.travelSettleMs)}
-          pass={null}
-        />
-        <TravelRow label="애니메이션: 한가한 JS" travel={results.travelIdle} />
-        <TravelRow label="애니메이션: 바쁜 JS (75%)" travel={results.travelLoaded} />
-        <TravelRow label="애니메이션: JS 완전 차단" travel={results.travelBlocked} />
+        {/* 판정: 첫 이동 ≤ 17ms(한 프레임) · 도착 ≤ 300ms. 시각은 네이티브
+            CADisplayLink 의 targetTimestamp — 움직인 픽셀이 화면에 뜨는 시각 —
+            에서 알림 수신 시각을 뺀 값이다. */}
+        <TravelRow label="[네이티브] 한가한 JS" travel={results.travelIdle} />
+        <TravelRow label="[네이티브] 바쁜 JS (75%)" travel={results.travelLoaded} />
+        <TravelRow label="[네이티브] JS 완전 차단" travel={results.travelBlocked} />
         <Row
           label="중간에서 보낸 내 메시지가 보이는가"
           value={
@@ -899,8 +1123,23 @@ function Harness(): React.JSX.Element {
           }
           pass={results.selfSendVisible}
         />
+        <Row
+          label="세 화면 뒤에서 보냈을 때 (일상 거리)"
+          value={
+            results.nearSendVisible === null
+              ? '측정 중…'
+              : `${
+                  results.nearSendVisible ? '보인다' : '가려짐'
+                } (출발 ${signedPx(results.nearSendFromPx)} → 남음 ${signedPx(
+                  results.nearSendGapPx,
+                )})`
+          }
+          pass={results.nearSendVisible}
+        />
         <Text style={styles.meta}>
-          {`보낸 행 y ${px(results.sentRowY)} · 컴포저 상단 y ${px(results.dockY)}`}
+          {`보낸 행 y ${
+            results.dockY === null ? '측정 중…' : px(results.sentRowY) === '측정 중…' ? '행 미마운트' : px(results.sentRowY)
+          } · 컴포저 상단 y ${px(results.dockY)}`}
         </Text>
         <Text style={styles.meta}>
           {`대화 끝 y ${px(results.tailBottomY)} · 컴포저까지 ${signedPx(
@@ -908,14 +1147,42 @@ function Harness(): React.JSX.Element {
           )} · 리스트가 보는 끝까지 거리 ${signedPx(results.selfSendDistancePx)}`}
         </Text>
         <Text style={styles.meta}>
+          {`전송 중 리스트 기하: ${results.selfSendTrace ?? '측정 중…'}`}
+        </Text>
+        <Text style={styles.meta}>
           {`키보드 높이 ${px(results.keyboardHeightPx)} · 컴포저 하단 ${px(
             results.composerBottomPx,
-          )} · 키보드 상단 ${px(results.keyboardTopPx)}`}
+          )} · 키보드 상단 ${px(results.keyboardTopPx)} · 팬 리프트 ${signedPx(
+            results.paneLiftPx,
+          )}`}
         </Text>
         <Text style={styles.meta}>
           {`키보드 프레임 출처: ${
-            keyboardSource === 'os' ? 'iOS 이벤트' : '주입(시뮬레이터가 키보드를 올리지 않음)'
+            keyboardSource === 'os'
+              ? 'iOS 이벤트'
+              : keyboardSource === 'posted'
+              ? '네이티브 알림 주입(iOS 와 같은 NotificationCenter 채널)'
+              : 'JS 이미터 주입(네이티브 모듈 미탑재 — 옛 경로를 잰 것이다)'
           }`}
+        </Text>
+        {/* The raw native record for the last run, so a surprising ms figure can
+            be traced rather than argued about. `요청 지속시간` is what went INTO
+            `UIView.animate`; if 도착 is not close to it, the difference belongs
+            to the environment (a simulator slowing animations) rather than to
+            this layout — and that has to be visible, not inferred. */}
+        <Text style={styles.meta}>
+          {`마지막 이동 원본: 요청 지속시간 ${ms(
+            results.travelBlocked?.durationMs ?? null,
+          )} · 프레임 ${results.travelBlocked?.frames ?? '\u2026'} · 도달 ${signedPx(
+            results.travelBlocked?.toPx ?? null,
+          )} · 시간배율 ${
+            results.travelBlocked && results.travelBlocked.durationMs > 0
+              ? (
+                  results.travelBlocked.arriveMs /
+                  results.travelBlocked.durationMs
+                ).toFixed(2)
+              : '\u2026'
+          }x`}
         </Text>
         <Text style={styles.meta}>
           {`RN 이 보낸 Origin: ${results.originSentByRn ?? '측정 중…'}`}
@@ -1011,19 +1278,31 @@ function TravelRow({
   if (travel === null) {
     return <Row label={label} value="측정 중…" pass={null} />;
   }
+  if (!travel.available) {
+    // Not a failure of the pane — a failure to ask it. Said in those words so
+    // that a build without the native module cannot be read as a slow one.
+    return <Row label={label} value="계측기 없음(네이티브 모듈 미탑재)" pass={null} />;
+  }
   const onTime =
-    travel.startMs >= 0 &&
-    travel.startMs <= 17 &&
-    travel.settleMs >= 0 &&
-    travel.settleMs <= 300;
+    travel.igniteMs >= 0 &&
+    travel.igniteMs <= 17 &&
+    travel.arriveMs >= 0 &&
+    travel.arriveMs <= 300;
   return (
-    <Row
-      label={label}
-      value={`${ms(travel.startMs)} → ${ms(travel.settleMs)} · 중간 ${
-        travel.midFlight
-      }/${travel.samples}`}
-      pass={onTime}
-    />
+    <View style={styles.travelRow}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={styles.travelValues}>
+        <Text
+          style={[styles.rowValue, onTime ? styles.pass : styles.fail]}>
+          {`점화 ${ms(travel.commitMs)} · 표시 ${ms(travel.igniteMs)} → 도착 ${ms(
+            travel.arriveMs,
+          )} · 중간 ${travel.midFlight}/${travel.frames}`}
+        </Text>
+        <Text style={[styles.verdict, onTime ? styles.pass : styles.fail]}>
+          {onTime ? 'PASS' : 'FAIL'}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -1061,8 +1340,8 @@ function Row({
 
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: '#0f1115'},
-  report: {maxHeight: 260, borderBottomWidth: 1, borderBottomColor: '#2a2f38'},
-  reportBody: {padding: 12, paddingTop: 56, gap: 4},
+  report: {maxHeight: 400, borderBottomWidth: 1, borderBottomColor: '#2a2f38'},
+  reportBody: {padding: 12, paddingTop: 48, gap: 2},
   title: {color: '#f2f3f5', fontSize: 18, fontWeight: '700', marginBottom: 4},
   row: {flexDirection: 'row', alignItems: 'center', gap: 8},
   rowLabel: {flex: 1, color: '#9aa0a8', fontSize: 12},
@@ -1070,6 +1349,8 @@ const styles = StyleSheet.create({
   verdict: {fontSize: 12, fontWeight: '700', color: '#6b7280', minWidth: 44},
   pass: {color: '#93d3a8'},
   fail: {color: '#e0777d'},
-  meta: {color: '#6b7280', fontSize: 11},
+  meta: {color: '#6b7280', fontSize: 10},
+  travelRow: {gap: 1},
+  travelValues: {flexDirection: 'row', alignItems: 'center', gap: 8},
   stage: {flex: 1},
 });

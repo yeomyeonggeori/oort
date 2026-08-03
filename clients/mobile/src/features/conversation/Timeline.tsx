@@ -8,7 +8,7 @@ import {
 } from '@momo/core/features/timeline/model';
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -172,17 +172,89 @@ import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 const FOLLOW_THRESHOLD_PX = 120;
 
 /**
- * How long a send owns the scroll position, in ms.
+ * How long a send may keep the scroll position WITHOUT getting closer, in ms.
  *
- * Long enough for several correction rounds (each is one frame), short enough
- * that a send can never be an argument the reader is still having a second
- * later. It is an upper bound, not a duration: arriving ends it early, and so
- * does a finger.
+ * This was a flat 1,200ms deadline until the simulator measured it. From 155
+ * rows back the correction was still climbing when the clock ran out, and
+ * `measure/` read 2,385px of conversation still below the fold — a fix that
+ * worked everywhere except the case it was written for.
+ *
+ * The rounds are not the slow part; each is one frame. The limit is that a round
+ * can only advance as far as the list has MEASURED, and `VirtualizedList`
+ * measures on its own schedule — `maxToRenderPerBatch` 10 rows every
+ * `updateCellsBatchingPeriod` 50ms. 155 rows is therefore a second and a half of
+ * batches no matter how often it is asked to scroll.
+ *
+ * So the bound is behavioural instead of a constant: keep going while the
+ * distance to the end is shrinking, stop when it stops. A send from two rows
+ * back finishes in two frames and never reaches this; a send from the far end
+ * takes as long as the list needs and not a frame longer; a send that is getting
+ * nowhere gives up in 400ms rather than holding the list to a number someone
+ * once guessed.
  */
-const SELF_SEND_PIN_MS = 1200;
+const SELF_SEND_IDLE_MS = 400;
+
+/**
+ * The backstop, in ms. Nothing should reach it — arriving ends the correction
+ * and so does making no progress. It is here because a scroll position that
+ * cannot be got back is a worse defect than the one being fixed, and
+ * `onScrollBeginDrag` (a finger) must not be the only way out.
+ */
+const SELF_SEND_MAX_MS = 4000;
 
 /** Close enough to the end that another correction would move nothing. */
 const ARRIVED_PX = 1;
+
+/** How far the scroll has to advance to count as getting somewhere. */
+const PROGRESS_PX = 1;
+
+/**
+ * The prepend correction, as one stable object so the prop does not churn.
+ *
+ * See the header for why `minIndexForVisible` is 0 and why that 0 is
+ * load-bearing. It is hoisted here because a send now has to be able to take it
+ * OFF — see `KEEPING_POSITION_FIGHTS_A_LONG_SCROLL` below.
+ */
+const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
+
+// ## …and keeping the position fights a long scroll (goal RN-P3, measured)
+//
+// The correction above still could not finish from far back, and two guesses at
+// why were both wrong before the harness was asked. Sampling the list's own
+// geometry every 100ms through a send from 134 rows back gave the answer in one
+// line:
+//
+//     오프셋 13589→15450(최대 15452) · 콘텐츠 13968→19677(최대 19681)
+//
+// The scroll advances. The content it is chasing is real and already reported by
+// the scroll view. And the scroll stops 3,847px short of content that exists —
+// so nothing is missing and nothing is mis-estimated; something is holding the
+// offset back. The only thing that holds a `contentOffset` back in this list is
+// `maintainVisibleContentPosition`, which is doing exactly its job: it pins the
+// first visible subview, and a long programmatic scroll changes what is above
+// the viewport on every round, so every round is met with a compensating
+// adjustment.
+//
+// The two features are both right and they want opposite things. They do not
+// have to want them at the same time: the correction is bounded, runs toward the
+// END, and cannot overlap a prepend (`onStartReached` needs the reader at the
+// TOP). So the pin comes off for the length of the correction and goes straight
+// back on. `__tests__/timelineRender.test.tsx` still holds the resting value,
+// because that is the one every other moment of this list's life uses.
+
+/**
+ * How long to leave between correction rounds, in ms.
+ *
+ * Matched to `VirtualizedList`'s own `updateCellsBatchingPeriod` (50ms), because
+ * that is the rate at which new content can appear: a round can only advance as
+ * far as the list has measured, so asking more often than it measures buys
+ * nothing. It also costs something — every correction emits a scroll event, and
+ * a list kept permanently in motion is a list whose batched render keeps being
+ * rescheduled. One round per batch is the fastest cadence that is not fighting
+ * the thing it is waiting for.
+ */
+const SELF_SEND_ROUND_MS = 50;
+
 
 /**
  * What the list last said about itself. Kept because the two questions a send
@@ -326,6 +398,14 @@ export function Timeline({
   const selfSendPinUntilRef = useRef(0);
   /** Is that pin being served by instant corrections rather than one glide? */
   const convergingRef = useRef(false);
+  /**
+   * Is a correction currently travelling to the end?
+   *
+   * State rather than a ref because it has to reach the scroll view: while it is
+   * true the prepend correction is off, for the reason in the note above
+   * `KEEP_VISIBLE_POSITION`. Exactly two renders per far send.
+   */
+  const [chasingTail, setChasingTail] = useState(false);
   const geometryRef = useRef<TimelineGeometry>({
     offsetY: 0,
     contentHeight: 0,
@@ -389,6 +469,10 @@ export function Timeline({
   const onScrollBeginDrag = useCallback(() => {
     selfSendPinUntilRef.current = 0;
     convergingRef.current = false;
+    // And the prepend correction comes straight back: the reader taking the list
+    // is the likeliest prelude to them scrolling UP into history, which is the
+    // one thing that must never move under them.
+    setChasingTail(false);
   }, []);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
@@ -452,7 +536,25 @@ export function Timeline({
     // Following again, because they are now at the bottom on purpose — the next
     // arrival from anyone else should keep them there.
     followingRef.current = true;
-    selfSendPinUntilRef.current = Date.now() + SELF_SEND_PIN_MS;
+    const startedAt = Date.now();
+    const hardStop = startedAt + SELF_SEND_MAX_MS;
+    /** Extended on every round that gets somewhere; see `SELF_SEND_IDLE_MS`. */
+    let idleStop = startedAt + SELF_SEND_IDLE_MS;
+    /**
+     * The furthest down this send has reached, as a scroll OFFSET.
+     *
+     * Offset, and not distance-to-the-end, and the measurement is what settled
+     * it. Distance was the obvious choice and it reads backwards during exactly
+     * the case that needs it: every round teaches the list about rows it had
+     * only estimated, so `contentHeight` grows FASTER than the scroll advances
+     * and the gap to the end gets bigger while the reader is visibly getting
+     * closer. Judged on that, the correction declared itself stuck almost at
+     * once — `measure/` read 4,007px left below the fold, worse than the flat
+     * deadline it replaced. The offset only ever grows while this loop runs, so
+     * it says what "getting somewhere" means without lying about it.
+     */
+    let furthest = Number.NEGATIVE_INFINITY;
+    selfSendPinUntilRef.current = idleStop;
 
     // Near the tail there is no clamp to climb and the glide that shipped is
     // right. `null` — a list that has never scrolled or been laid out — counts
@@ -461,33 +563,64 @@ export function Timeline({
     const near =
       distance === null || distance <= geometryRef.current.viewportHeight;
     convergingRef.current = !near;
+    // Off for the correction, back on the moment it ends.
+    if (!near) setChasingTail(true);
+
+    const release = () => {
+      convergingRef.current = false;
+      setChasingTail(false);
+      // Hand the scroll back at once rather than at the deadline: the list is
+      // where the send wanted it, so the ordinary rule ("far from the end means
+      // the reader is reading") is true again and should apply again.
+      selfSendPinUntilRef.current = 0;
+    };
 
     // The first hop still waits a frame: the token and the echo row arrive in
     // the same commit, and an offset computed before that row has a height is
     // computed against the list as it was.
-    let frame = requestAnimationFrame(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
       listRef.current?.scrollToEnd({animated: near});
       if (near) return;
       const converge = () => {
-        if (Date.now() >= selfSendPinUntilRef.current) {
-          convergingRef.current = false;
+        const now = Date.now();
+        if (now >= idleStop || now >= hardStop) {
+          // Out of road. `following` is NOT forced here — whatever the next
+          // scroll event says about where the reader ended up is now the truth,
+          // including "still far from the end", which is the honest reading of a
+          // correction that could not finish.
+          release();
           return;
         }
-        const left = distanceToEnd(geometryRef.current);
+        const geometry = geometryRef.current;
+        if (geometry.offsetY > furthest + PROGRESS_PX) {
+          furthest = geometry.offsetY;
+          idleStop = Math.min(now + SELF_SEND_IDLE_MS, hardStop);
+          selfSendPinUntilRef.current = idleStop;
+        }
+        const left = distanceToEnd(geometry);
         if (left !== null && left <= ARRIVED_PX) {
-          convergingRef.current = false;
+          release();
           return;
         }
+        // `scrollToEnd` rather than an offset computed from `geometryRef`: the
+        // list's own metrics are live, ours are one scroll event behind, and a
+        // stale content height would ask the list to scroll BACKWARDS. Its
+        // estimate overshoots the clamped content end (it estimates the DATA
+        // end) and the scroll view clamps — so every round lands exactly as far
+        // as the list will currently go, which is the most a round can do.
         listRef.current?.scrollToEnd({animated: false});
-        frame = requestAnimationFrame(converge);
+        timer = setTimeout(converge, SELF_SEND_ROUND_MS);
       };
-      frame = requestAnimationFrame(converge);
+      converge();
     });
     return () => {
       cancelAnimationFrame(frame);
+      if (timer !== undefined) clearTimeout(timer);
       convergingRef.current = false;
     };
   }, [selfSendToken, listRef]);
+
 
   // The viewport changed size rather than the content growing. A reader who was
   // at the bottom stays at the bottom; one who was reading history is left
@@ -632,7 +765,9 @@ export function Timeline({
       extraData={anchorSeq}
       // The correction. See the header note: key-identity based, so the derived
       // stream's extra dividers cost nothing.
-      maintainVisibleContentPosition={{minIndexForVisible: 0}}
+      maintainVisibleContentPosition={
+        chasingTail ? undefined : KEEP_VISIBLE_POSITION
+      }
       onScroll={onScroll}
       onScrollBeginDrag={onScrollBeginDrag}
       scrollEventThrottle={16}

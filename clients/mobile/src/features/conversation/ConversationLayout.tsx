@@ -1,8 +1,8 @@
 import React from 'react';
-import {Animated, StyleSheet, View} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {color} from '../../design/tokens';
-import {useKeyboard} from '../../lib/useKeyboard';
+import {KeyboardPane} from '../../lib/keyboardPane';
 
 // =============================================================================
 // Timeline above, composer below, and the composer stays visible when the
@@ -71,8 +71,33 @@ import {useKeyboard} from '../../lib/useKeyboard';
 //   `Timeline`'s `onLayout` to scroll back to the tail afterwards; nothing has
 //   to be corrected here, because nothing moved relative to anything else.
 //
-// The composer's distance to the keyboard's top edge is still 0px, and it is
-// still the same one number the OS reports — see the fold below.
+// ## …and now it is not JavaScript that decides WHEN (goal RN-P3)
+//
+// The transform above was still armed from a JS callback. `useKeyboard` said so
+// in as many words — "the travel is free of the JS thread, the starting gun is
+// not" — and named the reason it stopped there: binding the keyboard frame
+// natively needs a native module, and it believed adding one "rewrites the Xcode
+// project this batch is forbidden to touch".
+//
+// For a LOCAL Expo module that turns out to be false. `modules/momo-keyboard-native`
+// is compiled as a pod through `use_expo_modules!`, and
+// `ios/MomoMobile.xcodeproj/project.pbxproj` is not edited at all — which is
+// worth more than convenience here, since that file now also holds the
+// notification-service target goal RN-N1 attached.
+//
+// So the pane is that module's view. It subscribes to
+// `UIKeyboardWillChangeFrameNotification` itself and animates its own transform
+// on the main thread with the keyboard's own duration and its real (private,
+// unnameable in JS) curve. The JS thread is not on the path at all — not for the
+// travel, and no longer for the start.
+//
+// **The two rules that survive from the version above, because breaking either
+// brings the defect back:** what moves is a transform, and what does not move
+// (the padding) is a constant. Both are still true; only the thing that decides
+// the transform has moved. `__tests__/conversationLayout.test.tsx` holds the
+// line on both, and on the third rule that is new here — that no `transform`
+// style is set from JS, because React Native writes `layer.transform` whenever
+// that prop changes and would take the property back from the native side.
 // =============================================================================
 
 export function ConversationLayout({
@@ -83,54 +108,22 @@ export function ConversationLayout({
   composer: React.ReactNode;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const keyboard = useKeyboard();
-
-  // How far up, as `-max(keyboardHeight - bottomInset, 0)`.
-  //
-  // The pane keeps paying the safe-area inset the whole time (a constant), so
-  // the distance it has to travel is only what the keyboard adds ON TOP of the
-  // home-indicator gap it already covers. At rest that is 0 and the layout is
-  // byte-for-byte the one that shipped; with a 336pt keyboard over a 34pt inset
-  // it is 302, which puts the composer's last pixel on the keyboard's first.
-  //
-  // Written as one expression rather than a branch on `visible` for the reason
-  // the padding version already had: `visible` flips the instant the event
-  // arrives, so a branch would step by the inset at the START of the hide and
-  // then slide. As a clamped subtraction, the inset reappears exactly as the
-  // keyboard passes under it and neither direction has a jump in it.
-  //
-  // `interpolate` needs a strictly increasing input range, which a device with
-  // no home indicator (inset 0) would not give, so that case is a bare negation.
-  // Both forms stay native-driver eligible, which is the whole point.
-  const lift =
-    insets.bottom > 0
-      ? keyboard.offset.interpolate({
-          inputRange: [0, insets.bottom, insets.bottom + 1],
-          outputRange: [0, 0, -1],
-          // Default 'extend': past the last stop it continues with slope -1, so
-          // from there on the expression is -(keyboardHeight - inset).
-        })
-      : Animated.multiply(keyboard.offset, -1);
 
   return (
     // The clip. Nothing else lives here: a transformed child draws outside its
     // parent's bounds by default, and the child below is lifted by up to a
     // keyboard's height — straight over the header.
     <View style={styles.clip} testID="conversation-clip">
-      {/* `Animated.View`, and the moving part is a TRANSFORM rather than the
-          padding this used to animate. That is the second half of 성재's "키보드
-          보다 늦게 올라온다": a transform is native-driver eligible, so the
-          travel runs on the UI thread and never queues behind the JS thread's
-          work. See `useKeyboard` for what was read and what was ruled out. */}
-      <Animated.View
-        style={[
-          styles.root,
-          {paddingBottom: insets.bottom, transform: [{translateY: lift}]},
-        ]}
+      {/* The moving part, and it moves without asking JavaScript. `bottomInset`
+          is the only thing this side still decides: how much of the keyboard's
+          height is already paid for as padding. */}
+      <KeyboardPane
+        bottomInset={insets.bottom}
+        style={[styles.root, {paddingBottom: insets.bottom}]}
         testID="conversation-layout">
         <View style={styles.list}>{list}</View>
         <View testID="composer-dock">{composer}</View>
-      </Animated.View>
+      </KeyboardPane>
     </View>
   );
 }

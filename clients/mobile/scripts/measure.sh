@@ -88,10 +88,13 @@ xcrun simctl launch booted "$BUNDLE_ID" --args \
   -momoMeasure YES -RCT_jsLocation "127.0.0.1:$METRO_PORT"
 
 echo "==> waiting for the harness to finish (it runs itself)"
-# The keyboard travel is now measured three times (idle / busy JS / blocked JS),
-# each raise followed by a hide so the next one starts from the floor. That is
-# ~11s of keyboard on top of what the scroll claims need.
-sleep 32
+# The keyboard travel is measured three times (idle / busy JS / blocked JS), each
+# raise followed by a hide so the next one starts from the floor — ~11s of
+# keyboard on top of what the scroll claims need. goal RN-P3 added a SECOND
+# self-send probe (three screens back, the ordinary distance) which costs ~6s
+# more, and a screenshot taken before the harness finishes prints 측정 중… for
+# rows that were about to answer.
+sleep 60
 
 echo "==> capturing"
 xcrun simctl io booted screenshot "$OUT_DIR/measure.png"
