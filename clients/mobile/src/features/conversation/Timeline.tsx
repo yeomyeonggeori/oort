@@ -28,6 +28,7 @@ import {
   UnreadDivider,
   type MessageRowActions,
 } from './MessageRow';
+import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 
 // =============================================================================
 // The message list. **Forward — newest at the bottom.**
@@ -143,6 +144,7 @@ export function Timeline({
   actions,
   emptyOverride,
   selfSendToken,
+  markReplies = true,
   anchorSeq,
   anchorRef,
   listRef: externalListRef,
@@ -181,6 +183,14 @@ export function Timeline({
    */
   selfSendToken?: number;
   /**
+   * Whether a reply row says that it is one.
+   *
+   * True on a channel, where a reply otherwise looks exactly like every other
+   * message and the person who wrote it cannot find it. False inside a thread,
+   * where it is already true of every row on screen.
+   */
+  markReplies?: boolean;
+  /**
    * Measurement seam (`measure/ScrollMeasure.tsx`), inert in the app.
    *
    * When set, the row carrying this seq is wrapped in a non-collapsable View
@@ -210,6 +220,13 @@ export function Timeline({
       }),
     [messages, lastReadSeq, unreadCount, recoveryMarkers, pending],
   );
+
+  // One pass over the array this list is already rendering, so that a row can
+  // answer two questions it cannot answer alone: "what does this reply answer"
+  // and "how many replies are under this root, INCLUDING the ones I have that
+  // the server's rollup predates". See `threadContext.ts` for why the second one
+  // is the difference between replying and replying visibly.
+  const threads = useMemo(() => buildThreadContext(messages), [messages]);
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -268,9 +285,16 @@ export function Timeline({
     return () => cancelAnimationFrame(frame);
   }, [selfSendToken, listRef]);
 
-  // The viewport shrank (the keyboard came up) rather than the content growing.
-  // A reader who was at the bottom stays at the bottom; one who was reading
-  // history is left exactly where they were.
+  // The viewport changed size rather than the content growing. A reader who was
+  // at the bottom stays at the bottom; one who was reading history is left
+  // exactly where they were.
+  //
+  // The keyboard no longer reaches this handler and no longer needs to:
+  // `ConversationLayout` moved from an animated `paddingBottom` to a transform,
+  // so a raised keyboard SLIDES this list instead of shrinking it and the tail
+  // keeps its distance to the composer with nothing to correct. What is left
+  // here is the case that still resizes a list — rotation, and a banner
+  // appearing above it — which is why it stays.
   const onLayout = useCallback(() => {
     if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
   }, [listRef]);
@@ -302,6 +326,14 @@ export function Timeline({
           nowMs={nowMs}
           onResend={onResend}
           actions={actions}
+          rollup={rollupFor(item.message, threads)}
+          // `undefined` turns the marker off for the whole surface. A thread
+          // panel passes `markReplies={false}`: every row in there is a reply,
+          // and a 답글 line on each would be noise wearing the shape of
+          // information.
+          replyParent={
+            markReplies ? parentOf(item.message, threads) : undefined
+          }
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
@@ -327,6 +359,8 @@ export function Timeline({
       actions,
       anchorSeq,
       anchorRef,
+      threads,
+      markReplies,
     ],
   );
 

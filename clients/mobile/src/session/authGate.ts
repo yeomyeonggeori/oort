@@ -43,8 +43,15 @@ export interface SessionFacts {
    * The boot rotation failed because NOTHING ANSWERED — not because the stored
    * token was refused. The two are different sentences and different next steps:
    * a refused token needs a sign-in, an unreachable server needs a network.
-   * `restoreSession()` distinguishes them for us: it wipes local state and
-   * resolves null for a dead token, and throws for a transport failure.
+   *
+   * The core names the difference: `refreshSessionOutcome()` answers
+   * `"rotated" | "rejected" | "unreachable"`, and `useAuthGate` reads that word
+   * rather than inferring from a null. It used to infer, through
+   * `restoreSession()`'s null and a `.catch` — and when the core stopped
+   * throwing on a transport failure (so that the credentials would survive), the
+   * inference silently became "signed out". That is the failure this field
+   * carries, and `npm run gate:session` asserts it on a real relaunch against an
+   * unreachable server rather than trusting this comment.
    */
   restoreUnreachable: boolean;
 }

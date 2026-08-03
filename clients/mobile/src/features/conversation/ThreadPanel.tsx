@@ -47,6 +47,7 @@ export function ThreadPanel({
   myMemberId,
   nowMs,
   onClose,
+  onReplySent,
 }: {
   root: Message;
   timeline: UseTimelineResult;
@@ -54,6 +55,12 @@ export function ThreadPanel({
   myMemberId: string;
   nowMs: number;
   onClose: () => void;
+  /**
+   * A reply was just issued. The channel underneath uses it to follow its own
+   * tail, so that closing this panel lands on the thing that was just written
+   * rather than somewhere above it.
+   */
+  onReplySent?: () => void;
 }): React.JSX.Element {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -115,9 +122,14 @@ export function ThreadPanel({
   const onSend = useCallback(
     (body: string) => {
       setSelfSendToken(token => token + 1);
+      // 채널도 같이 따라가게 한다. 답글은 이 채널의 메시지이고, 이 패널을 닫으면
+      // 그것이 채널의 마지막 줄이다 — 내가 방금 쓴 것을 보려고 스크롤을 해야
+      // 한다면 그것은 "내가 친 채팅이 아래로 떠서 스크롤해야 나온다"와 같은
+      // 결함이 한 화면 건너에서 반복되는 것이다.
+      onReplySent?.();
       void sendReply(root.id, body);
     },
-    [sendReply, root.id],
+    [sendReply, root.id, onReplySent],
   );
 
   if (status === 'error') {
@@ -170,6 +182,10 @@ export function ThreadPanel({
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
+              // 여기서는 루트 하나를 빼면 전부 답글이다. 행마다 「답글」이라고
+              // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
+              // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
+              markReplies={false}
               onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
             />
           }

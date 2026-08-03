@@ -1,4 +1,4 @@
-import {threadRollup, type Message} from '@momo/core/lib/api';
+import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
 import {
   memberFor,
   memberNameParts,
@@ -236,6 +236,73 @@ function Chips({
   );
 }
 
+/**
+ * 「↳ ○○님에게 답글」 — the line that makes a reply readable as one.
+ *
+ * ## Why the row needs it at all
+ *
+ * A reply is a message in this channel with `rootId` set, and the server does
+ * not filter replies out of channel history — so it lands in the timeline as an
+ * ordinary row. Nothing about it said 답글, which is exactly the report: 답글을
+ * 달았는데 답글 모양으로 별도로 보이지 않는다.
+ *
+ * ## Why it is a glyph and a name rather than a quoted parent
+ *
+ * The quote is the tempting version and it is wrong on a phone: it doubles the
+ * height of every reply and re-renders text the reader can already scroll to.
+ * One meta-sized line names the destination and opens it, which is the whole job
+ * — and it keeps the density this product has.
+ *
+ * ## Pressable only when there is a room to enter
+ *
+ * The same rule the thread rollup already follows here: with the root loaded and
+ * a thread surface to open, this is a button onto that thread; with the root
+ * above the oldest page this client has fetched, it is a sentence. A door to a
+ * room that does not exist is worse than a sentence saying the room is there.
+ *
+ * This is not 「답글 달기」 and does not weaken the one-level rule: replying to a
+ * reply is still refused by `canReplyToMessage`, so the action sheet on this row
+ * offers no 답글. Opening the thread it already belongs to is navigation.
+ */
+function ReplyMarker({
+  parent,
+  directory,
+  onOpen,
+}: {
+  parent: Message | null;
+  directory: Directory;
+  onOpen?: () => void;
+}): React.JSX.Element {
+  const label =
+    parent === null
+      ? // 모르면 모른다고 말한다: the root is not loaded, so the row says that it
+        // is a reply and stops short of naming a message it cannot see.
+        '↳ 답글'
+      : `↳ ${
+          memberNameParts(directory, parent.authorMemberId, UNKNOWN_MEMBER).name
+        }님에게 답글`;
+  if (!onOpen) {
+    return (
+      <Text style={styles.replyMark} numberOfLines={1} testID="reply-marker">
+        {label}
+      </Text>
+    );
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="이 답글이 달린 스레드 열기"
+      hitSlop={{top: 6, bottom: 6, left: 4, right: 4}}
+      onPress={onOpen}
+      style={({pressed}) => [pressed && styles.pressed]}
+      testID="reply-marker">
+      <Text style={styles.replyMarkLink} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 /** A fenced code block, scrollable sideways INSIDE itself. */
 function CodeBlock({text}: {text: string}): React.JSX.Element {
   return (
@@ -469,6 +536,8 @@ export function MessageRow({
   nowMs,
   onResend,
   actions,
+  rollup: rollupOverride,
+  replyParent,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -481,11 +550,29 @@ export function MessageRow({
   onResend?: (message: Message) => void;
   /** Absent on read-only surfaces (the measurement harness, search previews). */
   actions?: MessageRowActions;
+  /**
+   * The reply rollup to draw, folded from the server's and this client's own
+   * (`threadContext.rollupFor`). Absent on a surface that has no list around it
+   * — then the server's is all there is, which is what this row used to use
+   * unconditionally and why replying looked like it did nothing.
+   */
+  rollup?: ThreadRollup | null;
+  /**
+   * The message this one answers. `undefined` on a surface that does not mark
+   * replies (inside a thread every row is one, so saying so on each is noise);
+   * `null` when this IS a reply whose root is not loaded — the row then says
+   * 답글 without claiming to know to whom.
+   */
+  replyParent?: Message | null;
 }): React.JSX.Element {
   const presentation = useMemo(() => rowPresentation(message), [message]);
   const deleted = message.state === 'deleted';
-  const rollup = threadRollup(message);
+  const rollup =
+    rollupOverride === undefined ? threadRollup(message) : rollupOverride;
   const body = message.body ?? '';
+  // A reply, on a surface that marks them. The parent may still be unknown.
+  const isMarkedReply =
+    replyParent !== undefined && message.rootId !== undefined;
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -598,6 +685,18 @@ export function MessageRow({
         chips,
         tail,
         deleted,
+        replyTo:
+          isMarkedReply && !deleted
+            ? replyParent === null
+              ? '답글'
+              : `${
+                  memberNameParts(
+                    directory,
+                    replyParent.authorMemberId,
+                    UNKNOWN_MEMBER,
+                  ).name
+                }님에게 답글`
+            : null,
       })}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
@@ -617,6 +716,25 @@ export function MessageRow({
             directory={directory}
             memberId={message.authorMemberId}
             atMs={message.createdAtMs}
+          />
+        ) : null}
+
+        {/* 답글 표식 (성재: "답글 모양 아이콘과 함께 별도로 안 보이는 거 같아").
+            본문 **위**에 온다 — 맥락은 내용보다 먼저 읽혀야 이 줄이 무엇에 대한
+            답인지 알고 본문을 읽는다. 삭제된 행에는 붙이지 않는다: 묘비는
+            메시지에 대한 서술이지 메시지가 아니다. */}
+        {isMarkedReply && !deleted ? (
+          <ReplyMarker
+            parent={replyParent ?? null}
+            directory={directory}
+            onOpen={
+              replyParent && actions?.onOpenThread
+                ? () => {
+                    if (longPress.consumeTap()) return;
+                    actions.onOpenThread?.(replyParent);
+                  }
+                : undefined
+            }
           />
         ) : null}
 
@@ -821,16 +939,24 @@ export function rowAccessibilityLabel({
   chips,
   tail,
   deleted,
+  replyTo,
 }: {
   message: Message;
   authorLabel: string;
   chips: ReactionChip[];
   tail: string[];
   deleted: boolean;
+  /**
+   * What the 답글 marker says, when the row is drawing one. It comes FIRST,
+   * before the body, for the same reason it is drawn above the body: a reader
+   * who hears the answer before the question has to go back for the context.
+   */
+  replyTo?: string | null;
 }): string {
   const parts = [
     authorLabel,
     timeLabel(message.createdAtMs),
+    replyTo ?? '',
     deleted ? '삭제된 메시지' : (message.body ?? '').trim(),
     ...tail,
     ...chips.map(
@@ -932,6 +1058,10 @@ const styles = StyleSheet.create({
   },
   rollup: {fontSize: font.meta, color: color.textFaint},
   rollupLink: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
+  // Meta size, like the tail: this is a statement ABOUT the message, and it must
+  // not compete with the message for the eye.
+  replyMark: {fontSize: font.meta, color: color.textFaint},
+  replyMarkLink: {fontSize: font.meta, color: color.textMuted},
   rowFailure: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -41,6 +41,44 @@ import {Animated, Easing, Keyboard} from 'react-native';
 // The number is still returned as state as well, because the safe-area decision
 // is a boolean about where things ended up and does not need to be frame-exact.
 //
+// ## 성재 said it again: "1 여전히 느려." The above was true and not enough.
+//
+// The first fix moved the START out of the render queue. It left the animation
+// itself on the JS thread, and that is the half a person feels on a real phone,
+// because the keyboard comes up at exactly the moment this client is busiest:
+// the composer is re-filtering mentions while a `FlatList` re-renders. Read in
+// `react-native/src/private/animated/createAnimatedPropsHook.js` rather than
+// assumed — its own comment says it plainly:
+//
+//     NOTE: When using the JS animation driver, this callback is called on
+//     every animation frame. When using the native driver, this callback is
+//     called when the animation completes.
+//
+// and the JS branch it lands in, for a Fabric host, is `instance.setNativeProps`
+// **on every frame** plus a `scheduleUpdate()` (a full React commit) debounced
+// to every 48ms to keep the Fiber and Shadow trees in step. Fifteen frames of
+// keyboard therefore cost fifteen JS callbacks and five commits, every one of
+// which queues behind whatever the JS thread is already doing. A busy thread
+// does not make this animation slower and smoother; it makes it **stutter and
+// arrive late**, which is what "여전히 느려" describes.
+//
+// **The reason it could not use the native driver was the property, not the
+// animation.** `paddingBottom` is a layout prop: it feeds Yoga, so it cannot be
+// driven off the JS thread, and every frame of it also re-lays-out the list
+// above the composer. `transform: translateY` is not a layout prop — the native
+// driver takes it, the whole travel runs on the UI thread, and this callback
+// fires exactly once, at the end. `ConversationLayout` is where that trade is
+// paid for (the pane slides as one and is clipped at the top); the note there
+// explains why the list needs no inset arithmetic to go with it.
+//
+// What this does NOT buy, stated because measuring it is this batch's job: the
+// event that arms the animation is still a JS callback. A JS thread that is busy
+// when `keyboardWillShow` arrives delays `start()` itself. Binding the keyboard
+// frame to a native value with no JS in the loop needs a native module
+// (`react-native-keyboard-controller` is the one that does it), and adding a pod
+// rewrites the Xcode project this batch is forbidden to touch. So: the travel is
+// free of the JS thread, the starting gun is not.
+//
 // ## The `did` pair only speaks when it disagrees
 //
 // It is watched because a hardware keyboard (a simulator, an iPad) can change
@@ -55,11 +93,15 @@ export interface KeyboardState {
   height: number;
   visible: boolean;
   /**
-   * The same height, animated with the keyboard's own duration.
+   * The same height, animated with the keyboard's own duration, **on the native
+   * driver**.
    *
-   * Bind this to a layout prop on an `Animated.View` (`paddingBottom`). Not a
-   * native-driver value: layout props cannot use it, and a transform that could
-   * would move the top of the screen off it.
+   * Bind it to a `transform` and nothing else. Once a value has been animated
+   * with `useNativeDriver: true` it lives on the native side, and React Native
+   * throws on the next attempt to read it from a JS-driven style — so a layout
+   * prop here is not a slower option, it is a crash. Interpolations and
+   * `Animated.multiply` of it stay native-eligible; that is what
+   * `ConversationLayout` uses to turn "keyboard height" into "how far up".
    */
   offset: Animated.Value;
 }
@@ -93,10 +135,11 @@ export function useKeyboard(): KeyboardState {
             ? duration
             : DEFAULT_DURATION_MS,
         easing: KEYBOARD_EASING,
-        // Layout props are not native-driver eligible. What this still buys is
-        // the thing that was actually wrong: the animation starts here, in the
-        // listener, instead of after a render and a commit.
-        useNativeDriver: false,
+        // The whole travel runs on the UI thread. Every frame between here and
+        // the destination is drawn without asking the JS thread for anything,
+        // which is the half the first fix left behind. Only legal because the
+        // consumer binds this to a transform — see the header and `KeyboardState`.
+        useNativeDriver: true,
       }).start();
     };
 
