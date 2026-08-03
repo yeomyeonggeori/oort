@@ -50,8 +50,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // B4.3: what guards the one unauthenticated write (`POST /v1/join`).
         rate_limit_per_ip = config.rate_limit.per_ip_limit,
         rate_limit_window_seconds = config.rate_limit.window_seconds,
+        // MOMO-605: how wide the cross-origin surface is. A count, not the list —
+        // the origins themselves go in the warn below only when one was refused.
+        cors_allowed_origins = config.cors.allowed_origins.len(),
         "momo-server starting"
     );
+    // MOMO-605: a refused entry is silent otherwise, and silence here reads as
+    // "the allowlist worked" while the desktop client still cannot log in.
+    if !config.cors.rejected_entries.is_empty() {
+        tracing::warn!(
+            rejected = ?config.cors.rejected_entries,
+            "MOMO_CORS_ALLOWED_ORIGINS had entries that are not exact origins \
+             (wildcards, `null`, a trailing slash or a path are all refused); they \
+             were DROPPED. A typo can only narrow this allowlist, never widen it — \
+             so the surface is now narrower than the operator intended."
+        );
+    }
     if config.rate_limit.per_ip_limit == 0 {
         tracing::warn!(
             "RATE_LIMIT_PER_IP=0 disables the per-IP limiter; POST /v1/join is the \
@@ -98,7 +112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_rate_limit(config.rate_limit)
     // B5.2: mention→run routing is always on (routing an `@mention` to its agent
     // is the product); the only knob is how much history rides the job.
-    .with_mentions(config.mentions.clone());
+    .with_mentions(config.mentions.clone())
+    // MOMO-605: no cross-origin surface at all unless the operator named an
+    // origin in MOMO_CORS_ALLOWED_ORIGINS.
+    .with_cors(config.cors.clone());
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

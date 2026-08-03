@@ -72,6 +72,9 @@ pub struct Config {
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
+    /// MOMO-605 CORS origin allowlist — **empty unless the operator names an
+    /// origin**, and an empty one mounts no middleware at all.
+    pub cors: CorsConfig,
 }
 
 /// MOMO-300 request rate limiting (Swift `RateLimitConfig`, `Config.swift:283-302`).
@@ -113,6 +116,198 @@ impl RateLimitConfig {
                 .unwrap_or(defaults.per_ip_limit),
         }
     }
+}
+
+/// MOMO-605 / ADR-0133 P2 — browser & webview CORS origin allowlist.
+///
+/// Rust port of the Swift `CORSConfig` (`server/Sources/MomoServer/Config.swift:304-447`).
+/// The Swift server shipped this in #768; the Axum rewrite never carried it over
+/// (`infra/rust/README.md` §7 lists `MOMO_CORS_ALLOWED_ORIGINS` as 미소비), which
+/// is why the packaged desktop build cannot log in: it issues genuinely
+/// cross-origin `/v1/*` calls from `tauri://localhost` and the webview blocks
+/// every one of them, preflight included (`OPTIONS` currently 405s).
+///
+/// Contract (deliberately conservative, identical to the Swift one so one env
+/// block configures either implementation):
+///   * `MOMO_CORS_ALLOWED_ORIGINS` is a comma-separated **exact-match** allowlist.
+///     **Unset or empty is the default and means "no change at all"** — the
+///     middleware is not even mounted, so not a single response header, no
+///     `Vary`, and no `OPTIONS` short-circuit differ from today's server.
+///   * **Wildcards are forbidden.** Any entry containing `*` (a bare `*` or a
+///     subdomain pattern like `https://*.example.com`) is rejected at parse
+///     time, as is the literal `null` origin (sandboxed iframes / `file://`
+///     documents). Rejected entries are dropped and kept so the boot can warn
+///     once; a typo can therefore only ever make the surface *narrower*.
+///   * Credentials stay off. momo authenticates with a bearer token in the
+///     `Authorization` header and issues no cookies (`grep -rn Set-Cookie
+///     server-rust/` = 0), so `Access-Control-Allow-Credentials` is never sent.
+///     Combined with the exact-match echo, the forbidden `Allow-Origin: *` +
+///     `Allow-Credentials: true` pair is unrepresentable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CorsConfig {
+    /// Normalized (lowercased, exact) origins allowed to make cross-origin calls.
+    pub allowed_origins: Vec<String>,
+    /// Entries refused while parsing (wildcard, `null`, or malformed origin).
+    /// Kept so the boot can warn once instead of failing silently.
+    pub rejected_entries: Vec<String>,
+}
+
+impl CorsConfig {
+    /// Environment variable that drives the allowlist. Spelled once, here.
+    pub const ENV_KEY: &'static str = "MOMO_CORS_ALLOWED_ORIGINS";
+
+    pub fn from_env() -> CorsConfig {
+        CorsConfig::parse(env(CorsConfig::ENV_KEY).as_deref())
+    }
+
+    /// Mount the middleware only when at least one origin survived parsing.
+    pub fn is_enabled(&self) -> bool {
+        !self.allowed_origins.is_empty()
+    }
+
+    pub fn parse(raw: Option<&str>) -> CorsConfig {
+        let Some(raw) = raw else {
+            return CorsConfig::default();
+        };
+        let mut allowed: Vec<String> = Vec::new();
+        let mut rejected: Vec<String> = Vec::new();
+        for entry in raw.split(',') {
+            let trimmed = entry.trim();
+            // Blank slots (trailing comma, `MOMO_CORS_ALLOWED_ORIGINS=`) are the
+            // documented "off" spelling — not an operator error.
+            if trimmed.is_empty() {
+                continue;
+            }
+            match normalized_origin(trimmed) {
+                Some(origin) => {
+                    if !allowed.contains(&origin) {
+                        allowed.push(origin);
+                    }
+                }
+                None => rejected.push(trimmed.to_string()),
+            }
+        }
+        CorsConfig {
+            allowed_origins: allowed,
+            rejected_entries: rejected,
+        }
+    }
+
+    /// The single gate decision, split out so it is unit-testable without a live
+    /// socket: returns the normalized origin when the request must receive CORS
+    /// headers, `None` when the middleware has to be a no-op. `None` covers "no
+    /// `Origin` header" (every native momo client, curl, the work host daemon and
+    /// the Centrifugo subscribe proxy) and "origin not on the allowlist" alike.
+    pub fn matched_origin(&self, origin_header: Option<&str>) -> Option<String> {
+        if self.allowed_origins.is_empty() {
+            return None;
+        }
+        let origin = normalized_origin(origin_header?)?;
+        self.allowed_origins.contains(&origin).then_some(origin)
+    }
+}
+
+/// Canonicalize one allowlist entry (or an inbound `Origin` header) to the
+/// serialized form RFC 6454 §6.1 defines: `scheme "://" host [ ":" port ]`,
+/// ASCII-lowercased, with no path, query, fragment, userinfo, or trailing slash.
+/// Returns `None` for anything else — including wildcards and `null`.
+pub fn normalized_origin(raw: &str) -> Option<String> {
+    let candidate = raw.trim().to_ascii_lowercase();
+    if candidate.is_empty() || candidate == "null" {
+        return None;
+    }
+    // Wildcards are banned outright: momo never answers `*`, and a pattern entry
+    // must not silently degrade into an exact-match miss either.
+    if candidate.contains('*') || candidate.chars().any(char::is_whitespace) {
+        return None;
+    }
+
+    let separator = candidate.find("://")?;
+    let scheme = &candidate[..separator];
+    let authority = &candidate[separator + "://".len()..];
+    if !is_valid_scheme(scheme) || authority.is_empty() {
+        return None;
+    }
+    // Anything after the authority (path/query/fragment) or userinfo makes this
+    // not an origin. A trailing slash is the common operator typo.
+    if authority
+        .chars()
+        .any(|character| "/?#@\\".contains(character))
+    {
+        return None;
+    }
+
+    let (host, port) = if authority.starts_with('[') {
+        // IPv6 literal: `[::1]:8080`.
+        let close = authority.find(']')?;
+        let host = &authority[..=close];
+        let rest = &authority[close + 1..];
+        let port = if rest.is_empty() {
+            None
+        } else {
+            Some(rest.strip_prefix(':')?)
+        };
+        if !is_valid_ipv6_literal(host) {
+            return None;
+        }
+        (host, port)
+    } else {
+        let parts: Vec<&str> = authority.split(':').collect();
+        if parts.len() > 2 {
+            return None;
+        }
+        let host = parts[0];
+        if !is_valid_host(host) {
+            return None;
+        }
+        (host, parts.get(1).copied())
+    };
+
+    match port {
+        // ASCII digits only: `"+80"` and non-ASCII digits must not sneak through.
+        Some(port) => {
+            if port.is_empty() || !port.chars().all(|character| character.is_ascii_digit()) {
+                return None;
+            }
+            let number: u32 = port.parse().ok()?;
+            (1..=65535)
+                .contains(&number)
+                .then(|| format!("{scheme}://{host}:{port}"))
+        }
+        None => Some(format!("{scheme}://{host}")),
+    }
+}
+
+/// RFC 3986 scheme: `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
+/// Custom webview schemes such as `tauri` are first-class here.
+fn is_valid_scheme(scheme: &str) -> bool {
+    let mut characters = scheme.chars();
+    if !characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    scheme
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.'))
+}
+
+fn is_valid_host(host: &str) -> bool {
+    if host.is_empty() || host.starts_with('.') || host.ends_with('.') || host.contains("..") {
+        return false;
+    }
+    host.chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-'))
+}
+
+fn is_valid_ipv6_literal(host: &str) -> bool {
+    if !host.starts_with('[') || !host.ends_with(']') || host.len() <= 2 {
+        return false;
+    }
+    host[1..host.len() - 1]
+        .chars()
+        .all(|character| character.is_ascii_hexdigit() || matches!(character, ':' | '.' | '%'))
 }
 
 /// MOMO-325 native gateway mode (Swift `AgentGatewayMode`, `Config.swift:150-155`).
@@ -651,6 +846,10 @@ impl Config {
             settings,
             rate_limit: RateLimitConfig::from_env(),
             mentions: MentionSettings::from_env(),
+            // MOMO-605: never fatal. A malformed entry narrows the allowlist and
+            // the boot warns; refusing to start over a browser knob would take
+            // the whole instance down for a desktop-only concern.
+            cors: CorsConfig::from_env(),
         })
     }
 }
@@ -834,6 +1033,127 @@ mod tests {
         assert_eq!(choose_log_filter(None, Some("debug")), "debug");
         assert_eq!(choose_log_filter(Some("warn"), Some("debug")), "warn");
         assert_eq!(choose_log_filter(None, Some(" info ")), "info");
+    }
+
+    // -- MOMO-605 CORS allowlist -------------------------------------------
+    //
+    // Parity with the Swift `CORSAllowlistTests`: same env key, same wildcard
+    // ban, same normalization. These are the cheap half of the red test; the
+    // over-the-wire half is `tests/cors_allowlist.rs`.
+
+    /// The shipped default. Unset and empty must both mean "mount nothing" —
+    /// the acceptance criterion that protects every existing deployment.
+    #[test]
+    fn the_cors_allowlist_is_empty_unless_the_operator_names_an_origin() {
+        assert!(!CorsConfig::default().is_enabled());
+        assert!(!CorsConfig::parse(None).is_enabled());
+        assert!(!CorsConfig::parse(Some("")).is_enabled());
+        assert!(!CorsConfig::parse(Some("   ")).is_enabled());
+        assert!(!CorsConfig::parse(Some(",,")).is_enabled());
+        // A blank slot is the documented "off" spelling, not an operator error,
+        // so it must not be reported as a rejected entry.
+        assert!(CorsConfig::parse(Some(",,")).rejected_entries.is_empty());
+        assert_eq!(CorsConfig::ENV_KEY, "MOMO_CORS_ALLOWED_ORIGINS");
+    }
+
+    #[test]
+    fn the_desktop_origins_parse_and_match_exactly() {
+        let config = CorsConfig::parse(Some(" tauri://localhost , http://tauri.localhost "));
+        assert_eq!(
+            config.allowed_origins,
+            vec!["tauri://localhost", "http://tauri.localhost"]
+        );
+        assert!(config.is_enabled());
+        assert!(config.rejected_entries.is_empty());
+        // Case-insensitive on the wire (RFC 6454 serialization is lowercased),
+        // exact everywhere else.
+        assert_eq!(
+            config.matched_origin(Some("TAURI://LOCALHOST")).as_deref(),
+            Some("tauri://localhost")
+        );
+        assert_eq!(config.matched_origin(None), None);
+        assert_eq!(config.matched_origin(Some("https://evil.example")), None);
+        // Suffix/prefix attacks on the allowlisted host.
+        assert_eq!(
+            config.matched_origin(Some("tauri://localhost.evil.example")),
+            None
+        );
+        assert_eq!(config.matched_origin(Some("tauri://evil-localhost")), None);
+        // A port the operator never named is a different origin.
+        assert_eq!(config.matched_origin(Some("tauri://localhost:8080")), None);
+    }
+
+    /// A wildcard must be refused at PARSE time, so `Allow-Origin: *` is not
+    /// merely unused but unrepresentable.
+    #[test]
+    fn wildcards_and_null_are_refused_and_never_widen_the_surface() {
+        for value in [
+            "*",
+            "https://*.oor7.com",
+            "null",
+            "NULL",
+            "https://app.oor7.com/", // trailing slash
+            "https://app.oor7.com/path",
+            "https://user:pw@app.oor7.com", // userinfo
+            "app.oor7.com",                 // no scheme
+            "https://",                     // no authority
+            "https://app.oor7.com:0",       // port out of range
+            "https://app.oor7.com:99999",
+            "https://app.oor7.com:+80",
+            "https://app.oor7.com:http",
+            "https://app oor7.com", // whitespace
+            "https://.oor7.com",    // leading dot
+            "https://oor7..com",
+            "1https://app.oor7.com", // scheme must start with a letter
+        ] {
+            let config = CorsConfig::parse(Some(value));
+            assert!(
+                !config.is_enabled(),
+                "{value} must not produce an allowed origin"
+            );
+            assert_eq!(
+                config.rejected_entries,
+                vec![value.trim().to_string()],
+                "{value} must be reported so the boot can warn"
+            );
+            assert_eq!(normalized_origin(value), None, "{value}");
+        }
+    }
+
+    /// A typo beside a good entry narrows the allowlist; it must not disable the
+    /// good entry, and it must not be promoted to a match.
+    #[test]
+    fn a_rejected_entry_does_not_take_the_valid_ones_down_with_it() {
+        let config = CorsConfig::parse(Some("https://*.evil.example,tauri://localhost"));
+        assert_eq!(config.allowed_origins, vec!["tauri://localhost"]);
+        assert_eq!(config.rejected_entries, vec!["https://*.evil.example"]);
+        assert!(config.is_enabled());
+        assert_eq!(config.matched_origin(Some("https://a.evil.example")), None);
+    }
+
+    #[test]
+    fn origins_normalize_the_way_rfc_6454_serializes_them() {
+        assert_eq!(
+            normalized_origin("HTTPS://App.Oor7.Com").as_deref(),
+            Some("https://app.oor7.com")
+        );
+        assert_eq!(
+            normalized_origin("http://localhost:5173").as_deref(),
+            Some("http://localhost:5173")
+        );
+        assert_eq!(
+            normalized_origin("http://[::1]:8080").as_deref(),
+            Some("http://[::1]:8080")
+        );
+        assert_eq!(
+            normalized_origin("tauri://localhost").as_deref(),
+            Some("tauri://localhost")
+        );
+        // Duplicates collapse rather than doubling the list.
+        assert_eq!(
+            CorsConfig::parse(Some("tauri://localhost,TAURI://localhost")).allowed_origins,
+            vec!["tauri://localhost"]
+        );
     }
 
     // -- B4 realtime -------------------------------------------------------

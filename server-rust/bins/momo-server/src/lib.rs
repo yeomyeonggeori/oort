@@ -19,6 +19,7 @@
 
 pub mod auth;
 pub mod config;
+pub mod cors;
 pub mod dto;
 pub mod error;
 pub mod rate_limit;
@@ -32,8 +33,8 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, MentionSettings, RateLimitConfig, RealtimeSettings, SettingsConfig,
-    T3Settings,
+    AgentGatewaySettings, CorsConfig, MentionSettings, RateLimitConfig, RealtimeSettings,
+    SettingsConfig, T3Settings,
 };
 use crate::rate_limit::SlidingWindowRateLimiter;
 
@@ -83,6 +84,10 @@ pub struct AppState {
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
     pub mentions: Arc<MentionSettings>,
+    /// MOMO-605 CORS origin allowlist (ADR-0133 P2). Fail-closed-empty like the
+    /// rest: an instance that named no origin mounts no CORS middleware at all,
+    /// which is byte-for-byte today's behaviour.
+    pub cors: Arc<CorsConfig>,
 }
 
 impl AppState {
@@ -97,6 +102,7 @@ impl AppState {
             settings: Arc::new(SettingsConfig::default()),
             rate_limit: Arc::new(RateLimitState::default()),
             mentions: Arc::new(MentionSettings::default()),
+            cors: Arc::new(CorsConfig::default()),
         }
     }
 
@@ -144,6 +150,14 @@ impl AppState {
     /// Attach the mention-routing knobs (B5.2).
     pub fn with_mentions(mut self, settings: MentionSettings) -> Self {
         self.mentions = Arc::new(settings);
+        self
+    }
+
+    /// Attach the MOMO-605 CORS allowlist. Same rationale as every builder
+    /// above: the default is "no cross-origin surface at all", and an operator
+    /// has to name each origin to open one.
+    pub fn with_cors(mut self, config: CorsConfig) -> Self {
+        self.cors = Arc::new(config);
         self
     }
 }
@@ -453,7 +467,10 @@ pub fn build_app(state: AppState) -> Router {
             auth::require_principal,
         ));
 
-    Router::new()
+    // MOMO-605: taken before `with_state` moves the state below.
+    let cors = state.cors.clone();
+
+    let app = Router::new()
         .route("/healthz", get(routes::health::health))
         // Swift serves `/health`; every verification script polls it. Keep both.
         .route("/health", get(routes::health::health))
@@ -502,7 +519,23 @@ pub fn build_app(state: AppState) -> Router {
             )),
         )
         .merge(protected)
-        .with_state(state)
+        .with_state(state);
+
+    // MOMO-605 / ADR-0133 P2 — the desktop webview's cross-origin gate.
+    //
+    // `layer` (not `route_layer`) on purpose: it wraps the router itself, so an
+    // allowlisted `OPTIONS` is answered by the middleware BEFORE routing turns it
+    // into the 405 that was breaking desktop login, and a 429 from the `/v1/join`
+    // limiter still carries `Access-Control-Allow-Origin`.
+    //
+    // When the operator named no origin the layer is not attached at all — this
+    // branch, not a pass-through middleware, is what makes the default
+    // deployment byte-for-byte identical to the pre-MOMO-605 server.
+    if cors.is_enabled() {
+        app.layer(axum::middleware::from_fn_with_state(cors, cors::allowlist))
+    } else {
+        app
+    }
 }
 
 #[cfg(test)]

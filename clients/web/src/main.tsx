@@ -10,6 +10,7 @@ import { App } from "@/app/App";
 import { PwaBanner } from "@/features/pwa/PwaBanner";
 import { startPwa } from "@/features/pwa/store";
 import { initSessionStore } from "@/lib/session";
+import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
 import "@/design/tokens.css";
 
@@ -53,11 +54,20 @@ function render() {
 // 않으면서, 아주 이른 프레임에 올 수 있는 beforeinstallprompt를 놓치지 않는다.
 startPwa();
 
-// Settle session storage BEFORE the first render (ADR-0133 P2, MOMO-603). In the
-// desktop shell the refresh token comes from the OS keychain, which is async, and
-// the first render decides "restoring vs anonymous" synchronously and for good —
-// rendering first would strand a signed-in person on the login screen. In a
-// browser this resolves on the first microtask, because localStorage was already
-// read at import. `initSessionStore` never rejects; `finally` keeps the app
-// booting even if that ever stops being true.
-void initSessionStore().finally(render);
+// Settle session storage before the first render (ADR-0133 P2, MOMO-603) — but
+// only for as long as that is free. In the desktop shell the refresh token comes
+// from the OS keychain, which is async; in a browser this resolves on the first
+// microtask because localStorage was already read at import.
+//
+// DESK-1: this used to be an UNBOUNDED await, and it is the first of the two
+// gates that made the packaged app sit on a loading state for ~30 seconds. Until
+// it settled the window was blank — not even the skeleton — and macOS answers a
+// keychain item written by a differently-signed build with a password DIALOG
+// rather than an error, so "settles quickly" was never guaranteed.
+//
+// Bounding it no longer costs the resume it was protecting: `hasPersistedSession()`
+// is now SUBSCRIBED in app/session.tsx rather than sampled once, so a keychain
+// that answers after the first paint still resumes the session. The budget only
+// decides who owns the screen while nobody knows the answer yet, and the connect
+// screen is a better answer than a blank window.
+void releaseAfter(initSessionStore(), SESSION_HYDRATE_BUDGET_MS).finally(render);

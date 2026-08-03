@@ -19,6 +19,7 @@
     "gate:shell": "node gates/gate-shell-layout.mjs",
     "gate:wire": "node gates/gate-wire.mjs",
     "gate:csp": "node gates/gate-csp.mjs",
+    "gate:boot": "node gates/gate-boot-budget.mjs",
     "gate:huddle": "vite build --mode huddle-gate && node gates/gate-huddle.mjs",
     "gate:my-sessions": "vite build --mode my-sessions-gate && node gates/gate-my-sessions.mjs",
     "gate:agent-hub": "vite build --mode agent-hub-gate && node gates/gate-agent-hub.mjs",
