@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App target only. The extension does not receive pushes, it only rewrites
+	     the payload of one the app's own APNs registration brought in, so it must
+	     NOT declare aps-environment (see MomoMobileNotificationService.entitlements). -->
+	<key>aps-environment</key>
+	<string>$(APS_ENVIRONMENT)</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.app.momo.ios</string>
+	</array>
+	<!-- LOAD-BEARING. This — not the App Group — is the channel the extension
+	     reads the push-fetch session through (kSecAttrAccessGroup,
+	     MomoPushShared/PushNotification.swift:73). It must be the SAME STRING in
+	     both entitlement files; scripts/verify_ios_signing.sh enforces that.
+	     If it diverges the extension does not crash, it silently fails open and
+	     ships the relay's placeholder alert forever. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
+	</array>
+</dict>
+</plist>

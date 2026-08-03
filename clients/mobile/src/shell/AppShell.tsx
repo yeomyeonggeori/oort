@@ -6,6 +6,7 @@ import {CountBadge} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
 import {useMentionCount} from '../features/inbox/useInbox';
 import {INITIAL_NAV, navReducer, tabLabel, TABS, type Tab} from '../nav/state';
+import PushProvider from '../push/PushProvider';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import ConversationScreen from '../screens/ConversationScreen';
 import InboxScreen from '../screens/InboxScreen';
@@ -40,10 +41,17 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
   // recovery offset that lets a resubscribe replay the gap instead of cold
   // starting (ADR-0137 D4).
   return (
+    // `PushProvider` is inside the session and outside the realtime socket. It
+    // needs the signed-in workspace, and it must not be torn down when the
+    // socket reconnects — losing the notification-response listener mid-session
+    // would drop an approval tapped from the lock screen with nothing to show
+    // for it (goal RN-N1).
     <SessionProvider member={member}>
-      <RealtimeProvider>
-        <Shell />
-      </RealtimeProvider>
+      <PushProvider>
+        <RealtimeProvider>
+          <Shell />
+        </RealtimeProvider>
+      </PushProvider>
     </SessionProvider>
   );
 }

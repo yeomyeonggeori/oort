@@ -41,11 +41,16 @@ need sort
 
 IOS_PBXPROJ='clients/iOS/MomoiOS.xcodeproj/project.pbxproj'
 MAC_PBXPROJ='clients/macOS/MomoMac.xcodeproj/project.pbxproj'
+# RN 클라이언트(ADR-0137). 2026-08-03 goal RN-N1 에서 NSE 타깃이 붙으면서
+# **프로비저닝 대상 iOS 프로젝트가 둘**이 됐다. 둘은 같은 식별자 쌍을 쓴다 —
+# RN 이 킷의 자리를 그대로 물려받는 중이고(D8: 킷은 parity 후 은퇴), fastlane 의
+# app_identifier 목록 하나가 양쪽을 다 덮어야 하기 때문이다.
+RN_PBXPROJ='clients/mobile/ios/MomoMobile.xcodeproj/project.pbxproj'
 FASTFILE='fastlane/Fastfile'
 APPFILE='fastlane/Appfile'
 MATCHFILE='fastlane/Matchfile'
 
-for required in "$IOS_PBXPROJ" "$MAC_PBXPROJ" "$FASTFILE" "$APPFILE" "$MATCHFILE"; do
+for required in "$IOS_PBXPROJ" "$MAC_PBXPROJ" "$RN_PBXPROJ" "$FASTFILE" "$APPFILE" "$MATCHFILE"; do
   [ -f "$required" ] || { log "missing required file: $required"; exit 1; }
 done
 
@@ -229,6 +234,30 @@ if [ -z "$NSE_ID" ]; then
 fi
 
 # -----------------------------------------------------------------------------
+# 2b. RN 프로젝트도 같은 식별자 집합이어야 한다 (goal RN-N1).
+#
+#     fastlane 은 app_identifier 목록을 **하나** 들고 두 프로젝트를 다 서명한다.
+#     RN 쪽이 다른 식별자를 쓰기 시작하면 아래 3~5번 검사는 여전히 통과하는데
+#     (그것들은 킷을 정본으로 본다) 정작 출하되는 앱의 프로파일이 없다.
+#     즉 **이 게이트가 존재하는 이유인 실패가 게이트를 통과해서 지나간다.**
+#     RN 이 킷을 대체하는 중이므로(ADR-0137 D8) 두 집합은 동치여야 한다.
+# -----------------------------------------------------------------------------
+RN_EXPECTED="$(pbx_provisioned_ids "$RN_PBXPROJ")"
+[ -n "$RN_EXPECTED" ] || fail "$RN_PBXPROJ: 프로비저닝 대상 번들 ID를 하나도 못 뽑았다(파서 전제 붕괴)"
+log "Xcode 정본 — RN(iOS): $(printf '%s' "$RN_EXPECTED" | set_str)"
+
+if [ "$IOS_EXPECTED" != "$RN_EXPECTED" ]; then
+  fail "RN 프로젝트와 동결 킷의 프로비저닝 대상이 다르다
+        킷($IOS_PBXPROJ): $(printf '%s' "$IOS_EXPECTED" | set_str)
+        RN($RN_PBXPROJ):  $(printf '%s' "$RN_EXPECTED" | set_str)
+        → 둘은 같은 App ID 쌍을 물려받는 관계다. 한쪽만 바꾸면 fastlane 의
+          app_identifier 목록이 다른 쪽을 서명하지 못한다"
+fi
+if ! printf '%s\n' "$RN_EXPECTED" | grep -qE 'NotificationService$'; then
+  fail "$RN_PBXPROJ 에 NotificationService 확장 타깃이 없다 — 푸시 승계(ADR-0120 D2-A)가 빠진 빌드다"
+fi
+
+# -----------------------------------------------------------------------------
 # 3. Matchfile 기본값 == iOS 정본
 #    (Matchfile은 프로비저닝 지점이 하나뿐이다. 성재가 `fastlane match appstore`를
 #     맨손으로 돌릴 때 실제로 쓰이는 값이라 Fastfile과 별개로 본다.)
@@ -307,11 +336,42 @@ fi
 #    App Group / keychain access group 은 프로파일에 구워지는 값이라 한쪽만 바뀌면
 #    서명은 통과하고 런타임에 공유 저장소만 조용히 갈라진다(푸시 토큰·세션 경로).
 # -----------------------------------------------------------------------------
-APP_ENT='clients/iOS/XcodeHost/MomoiOS.entitlements'
-NSE_ENT='clients/iOS/NotificationService/MomoiOSNotificationService.entitlements'
+# XML 주석을 걷어낸 본문만 낸다.
+#
+# entitlements 파일에는 "여기에 왜 aps-environment 를 두지 않는가" 같은 설명이
+# 주석으로 들어간다. 주석 속의 키 이름을 선언으로 오독하면 이 게이트는 설명이
+# 잘 붙은 파일을 실패시키고, 그 결과 다음 사람은 설명을 지우게 된다 — 게이트가
+# 문서를 깎아 내는 방향으로 압력을 거는 셈이다. 구조만 본다.
+ent_body() {
+  awk '
+    {
+      line = $0
+      while (1) {
+        if (inc) {
+          e = index(line, "-->")
+          if (e == 0) { line = ""; break }
+          line = substr(line, e + 3); inc = 0
+        }
+        s = index(line, "<!--")
+        if (s == 0) break
+        rest = substr(line, s + 4)
+        e = index(rest, "-->")
+        if (e == 0) { line = substr(line, 1, s - 1); inc = 1; break }
+        line = substr(line, 1, s - 1) substr(rest, e + 3)
+      }
+      print line
+    }
+  ' "$1"
+}
+
+# 선언된 <key>NAME</key> 가 있는가 (주석 제외).
+ent_has_key() {
+  ent_body "$1" | grep -q "<key>$2</key>"
+}
+
 ent_values() {
   # <key>NAME</key> 다음 <array> 안의 <string> 값들
-  awk -v key="$2" '
+  ent_body "$1" | awk -v key="$2" '
     $0 ~ "<key>" key "</key>" { grab = 1; next }
     grab && /<\/array>/ { grab = 0 }
     grab && /<string>/ {
@@ -323,22 +383,61 @@ ent_values() {
     }
   ' "$1" | sort -u
 }
-if [ -f "$APP_ENT" ] && [ -f "$NSE_ENT" ]; then
+check_entitlement_pair() {
+  local label="$1" app_ent="$2" nse_ent="$3"
+  local key app_vals nse_vals
+
+  if [ ! -f "$app_ent" ] || [ ! -f "$nse_ent" ]; then
+    fail "[$label] entitlements 파일을 찾지 못했다: $app_ent / $nse_ent"
+    return 0
+  fi
+
   for key in 'com.apple.security.application-groups' 'keychain-access-groups'; do
-    app_vals="$(ent_values "$APP_ENT" "$key")"
-    nse_vals="$(ent_values "$NSE_ENT" "$key")"
+    app_vals="$(ent_values "$app_ent" "$key")"
+    nse_vals="$(ent_values "$nse_ent" "$key")"
     if [ -z "$app_vals" ] || [ -z "$nse_vals" ]; then
-      fail "entitlements: '$key' 가 앱 또는 NSE 한쪽에서 비어 있다(app='$(printf '%s' "$app_vals" | set_str)' nse='$(printf '%s' "$nse_vals" | set_str)')"
+      fail "[$label] entitlements: '$key' 가 앱 또는 NSE 한쪽에서 비어 있다(app='$(printf '%s' "$app_vals" | set_str)' nse='$(printf '%s' "$nse_vals" | set_str)')"
     elif [ "$app_vals" != "$nse_vals" ]; then
-      fail "entitlements '$key' 가 앱과 NSE에서 다르다
-        app: $(printf '%s' "$app_vals" | set_str)
-        nse: $(printf '%s' "$nse_vals" | set_str)
+      fail "[$label] entitlements '$key' 가 앱과 NSE에서 다르다
+        app: $app_vals
+        nse: $nse_vals
         → 공유 저장소가 갈라진다. 두 타깃은 같은 그룹을 선언해야 한다"
     fi
   done
-else
-  fail "entitlements 파일을 찾지 못했다: $APP_ENT / $NSE_ENT"
-fi
+
+  # aps-environment 의 비대칭은 오타가 아니라 설계다. 확장은 APNs 클라이언트가
+  # 아니라 호스트가 받은 알림을 가공할 뿐이라 이 capability 가 필요 없고,
+  # 선언하면 확장 App ID 에 쓰지도 않을 Push Notifications capability 를 요구하게
+  # 된다. 반대로 앱에서 빠지면 등록 자체가 안 된다.
+  if ! ent_has_key "$app_ent" 'aps-environment'; then
+    fail "[$label] 앱 entitlements 에 aps-environment 가 없다 — APNs 등록이 불가능한 빌드다"
+  fi
+  if ent_has_key "$nse_ent" 'aps-environment'; then
+    fail "[$label] NSE entitlements 에 aps-environment 가 선언돼 있다 — 확장은 푸시를 받지 않는다(가공만 한다)"
+  fi
+}
+
+check_entitlement_pair '동결 킷' \
+  'clients/iOS/XcodeHost/MomoiOS.entitlements' \
+  'clients/iOS/NotificationService/MomoiOSNotificationService.entitlements'
+
+check_entitlement_pair 'RN' \
+  'clients/mobile/ios/MomoMobile/MomoMobile.entitlements' \
+  'clients/mobile/ios/NotificationService/MomoMobileNotificationService.entitlements'
+
+# 두 프로젝트가 같은 App ID 쌍을 쓰므로 **공유 그룹 문자열도 같아야** 한다.
+# 다르면 프로파일은 발급되는데 킷과 RN 이 서로 다른 키체인 그룹을 보게 되고,
+# 그 차이는 기기에서만, 그것도 조용히 드러난다.
+for key in 'com.apple.security.application-groups' 'keychain-access-groups'; do
+  kit_vals="$(ent_values 'clients/iOS/XcodeHost/MomoiOS.entitlements' "$key" 2>/dev/null || true)"
+  rn_vals="$(ent_values 'clients/mobile/ios/MomoMobile/MomoMobile.entitlements' "$key" 2>/dev/null || true)"
+  if [ -n "$kit_vals" ] && [ -n "$rn_vals" ] && [ "$kit_vals" != "$rn_vals" ]; then
+    fail "'$key' 가 동결 킷과 RN 에서 다르다
+        kit: $kit_vals
+        rn:  $rn_vals
+        → 같은 App ID 를 쓰는 두 빌드가 서로 다른 공유 그룹을 선언하고 있다"
+  fi
+done
 
 # -----------------------------------------------------------------------------
 # 7. 비치명 경고 — 지금 고치지 않지만 CI에서 물릴 지점.

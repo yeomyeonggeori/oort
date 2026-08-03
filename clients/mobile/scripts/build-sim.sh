@@ -84,3 +84,58 @@ if ! grep -q 'Identifier=app.momo.ios' <<<"$signature"; then
   echo "$signature" >&2
   exit 1
 fi
+
+# ---- the notification service extension (goal RN-N1) ------------------------
+#
+# The app builds and runs perfectly well with the extension missing, so nothing
+# above would notice its absence — and the symptom on a device is not "no
+# notifications" but "notifications that always say 새 알림", which reads as a
+# server problem. Checked here, where a person is already looking at output.
+APPEX="$PRODUCT/PlugIns/MomoMobileNotificationService.appex"
+if [ ! -d "$APPEX" ]; then
+  echo "error: $APPEX is missing — the app did not embed the notification extension." >&2
+  echo "       Check the 'Embed Foundation Extensions' phase and the target dependency." >&2
+  exit 1
+fi
+
+appex_signature="$(codesign -dv "$APPEX" 2>&1)"
+if ! grep -q 'Identifier=app.momo.ios.NotificationService' <<<"$appex_signature"; then
+  echo "error: $APPEX is signed under the wrong identifier:" >&2
+  echo "$appex_signature" >&2
+  exit 1
+fi
+
+# Both processes build kSecAttrAccessGroup by reading this Info.plist key
+# (MomoPushKit/PushNotification.swift:30-32). $(AppIdentifierPrefix) is expanded
+# by Xcode at build time; if it does not expand, the shipped value is the literal
+# "$(AppIdentifierPrefix)..." and the keychain lookup finds nothing — silently,
+# because MomoKeychainValueStore treats a miss as "no session" and fails open.
+#
+# This IS provable on the simulator, and it is worth proving: it is the one part
+# of the access-group story that does not need hardware.
+for target_plist in "$PRODUCT/Info.plist" "$APPEX/Info.plist"; do
+  group="$(plutil -extract MomoKeychainAccessGroup raw -o - "$target_plist" 2>/dev/null || true)"
+  case "$group" in
+    *'$('*|'')
+      echo "error: MomoKeychainAccessGroup did not resolve in $target_plist (got '${group:-<missing>}')." >&2
+      echo "       The extension would fail open and every notification would show the placeholder." >&2
+      exit 1
+      ;;
+  esac
+  echo "ok: MomoKeychainAccessGroup=$group in $(basename "$(dirname "$target_plist")")"
+done
+
+# Same reasoning for the APNs environment: a build that cannot say which APNs
+# host its token belongs to must not register at all (src/push/native.ts).
+aps_env="$(plutil -extract MomoAPNSEnvironment raw -o - "$PRODUCT/Info.plist" 2>/dev/null || true)"
+if [ "$aps_env" != 'development' ]; then
+  echo "error: MomoAPNSEnvironment is '${aps_env:-<missing>}' in this Debug build; expected 'development'." >&2
+  exit 1
+fi
+echo "ok: MomoAPNSEnvironment=$aps_env"
+
+# NOT proved here, on purpose (see the header): that the SIGNED entitlements
+# carry the keychain access group. An ad-hoc simulator signature embeds an empty
+# entitlements dictionary — verified: `codesign -d --entitlements` on this .appex
+# returns `<dict></dict>`. Only a profile-signed device build can show it, which
+# is why docs/cicd/20-ios-push-device-check.md exists.
