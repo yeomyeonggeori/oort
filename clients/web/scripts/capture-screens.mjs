@@ -3110,29 +3110,42 @@ async function captureScheme(browser, scheme) {
   await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
   shots.push(agentHubReadOnlyShot);
 
-  // 3g. 결정 대기 두 프레임(`approvals-*`, `approvals-confirm-*`)은 **뺐다**
-  //     (goal P3 후속).
+  // 3g. 결정 대기 두 프레임 — **복원됨** (goal W-AP1 2R M7).
   //
-  //     이 서버에는 승인 원장이 없다. `serverSurfaces.ts`가 `approvals`를 정적으로
-  //     "라우터에 없음(404)"이라 선언하고(PR 947은 클라이언트 22개 파일만 바꿨고
-  //     서버 라우트는 올리지 않았다), B12부터 인박스는 그 판정을 읽어 결정 대기
-  //     탭과 승인 행을 아예 그리지 않는다. 그러니 두 프레임이 기다리던
-  //     `feed-row`와 `inbox-approval-approve`는 **어떤 목을 채워도 나타나지
-  //     않는다** — 목이 아니라 정적 판정이 앞선다.
+  //     이 자리는 goal P3 후속에서 비워져 있었고, 그때의 주석이 되살릴 조건을 미리
+  //     적어 뒀다: "`serverSurfaces.ts`의 `approvals.provided`가 true가 되면 아래
+  //     목이 그대로 다시 먹으므로 두 프레임을 이 자리에 복원하면 된다." 그 조건이
+  //     충족됐다 — goal SRV-T1이 승인 3라우트를 올렸고 W-AP1이 판정을 뒤집었다.
+  //     예고한 자리를 예고한 대로 되살린다. 위 APPROVALS 픽스처와 그 아래 목을
+  //     한 글자도 바꾸지 않고 그대로 쓴다.
   //
-  //     기다림만 고쳐서 살릴 수 있는 프레임이 아니다. 사진의 피사체(결정 대기
-  //     목록과 승인 확인 단계)가 이 빌드에 존재하지 않는다. 접힌 인박스 자체는
-  //     `capture:honesty`가 `honest-inbox-*`로 이미 찍고 결정 대기 탭이 사라졌다는
-  //     것까지 세므로, 같은 상태를 여기서 한 번 더 찍는 것은 중복이다. 그래서 이
-  //     자리는 비우고, 폰 프레임이 이 표면에서 증명할 것(전역 화면에서도 서랍으로
-  //     채널에 돌아갈 수 있는가)에 집중한다.
-  //
-  //     되살리는 조건: `serverSurfaces.ts`의 `approvals.provided`가 true가 되면
-  //     (= 서버가 `GET …/approvals`와 `POST …/approvals/{id}/decision`을 올리면)
-  //     아래 목(:1080)이 그대로 다시 먹으므로, 두 프레임을 이 자리에 복원하면
-  //     된다. 찍던 것은 ① 판단 사실이 행에 있어 채널로 들어가지 않고 결정하는
-  //     목록과 ② 한 번의 무방비 클릭으로는 아무것도 결정되지 않는 확인 단계
-  //     (SKILL §6: 승인/거부는 무장이고 확정이 결정이다) 둘이었다.
+  //     찍는 것은 둘이고, 각각이 증명하는 것이 다르다:
+  //       ① 목록  판단에 필요한 사실(누가·무엇을·언제까지·되돌릴 수 있는지)이
+  //               행에 이미 있어서, 결정하러 채널로 들어갈 필요가 없다.
+  //       ② 확인  한 번의 무방비 클릭으로는 아무것도 결정되지 않는다
+  //               (SKILL §6: 승인/거부는 무장이고, 확정이 결정이다). 첫 행은
+  //               `is_reversible: false`라 확정 문장이 그 사실을 재진술한다.
+  const approvals = await context.newPage();
+  await approvals.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(approvals);
+  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await approvals.getByTestId("inbox-list").waitFor({ state: "visible" });
+  await approvals
+    .getByTestId("inbox-approval-approve")
+    .first()
+    .waitFor({ state: "visible" });
+  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
+  await approvals.screenshot({ path: approvalsShot });
+  shots.push(approvalsShot);
+
+  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await approvals
+    .getByTestId("inbox-approval-confirm")
+    .first()
+    .waitFor({ state: "visible" });
+  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
+  await approvals.screenshot({ path: approvalsConfirmShot });
+  shots.push(approvalsConfirmShot);
 
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail

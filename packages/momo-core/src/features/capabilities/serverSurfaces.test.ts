@@ -44,11 +44,16 @@ describe("미제공 판정", () => {
 });
 
 describe("표면 판정표", () => {
-  it("2026-08-02 실측: 검색만 제공되고 나머지는 아직 없다", () => {
-    expect(isSurfaceProvided("messageSearch")).toBe(true);
+  it("2026-08-04 실측: 검색과 승인 결정이 제공되고 나머지는 아직 없다", () => {
+    // 승인은 2026-08-02에 false였고, goal SRV-T1(#979)이 서버 라우트 셋을 올린
+    // 뒤 뒤집혔다(lib.rs:555-564). 이 목록은 표의 값을 못으로 박아 두는 자리라,
+    // 뒤집힌 줄을 지우지 않고 위 칸으로 옮긴다: 다음에 어떤 표면이 이식되면
+    // 이 테스트가 이름을 부르며 실패해서 표와 함께 고쳐지게 된다.
+    for (const id of ["messageSearch", "approvals"] as const) {
+      expect(isSurfaceProvided(id)).toBe(true);
+    }
     for (const id of [
       "workstreams",
-      "approvals",
       "huddles",
       "agentRunHistory",
       "plugins",
