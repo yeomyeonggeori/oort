@@ -43,3 +43,7 @@ vendor/bundle/
 # hold (ADR-0137 성재 결정 6) and `expo prebuild` must never run here — one run
 # without `--platform android` regenerates ios/ and deletes the NSE target that
 # 이행 순서 5 attaches. `__tests__/projectShape.test.ts` fails if that changes.
+
+# Output of `scripts/measure.sh`. The committed evidence lives in
+# `measure/captures/`; this directory is scratch and is regenerated per run.
+measure/out/

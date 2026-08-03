@@ -6,6 +6,7 @@ import {CountBadge} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
 import {useMentionCount} from '../features/inbox/useInbox';
 import {INITIAL_NAV, navReducer, tabLabel, TABS, type Tab} from '../nav/state';
+import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import ConversationScreen from '../screens/ConversationScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SidebarScreen from '../screens/SidebarScreen';
@@ -32,9 +33,16 @@ import {SessionProvider} from '../session/useSession';
 // =============================================================================
 
 export default function AppShell({member}: {member: Member}): React.JSX.Element {
+  // `RealtimeProvider` sits INSIDE the session and ABOVE the screens: it needs a
+  // session to know which websocket address login returned, and it must outlive
+  // any one conversation — a socket rebuilt per screen would throw away the
+  // recovery offset that lets a resubscribe replay the gap instead of cold
+  // starting (ADR-0137 D4).
   return (
     <SessionProvider member={member}>
-      <Shell />
+      <RealtimeProvider>
+        <Shell />
+      </RealtimeProvider>
     </SessionProvider>
   );
 }

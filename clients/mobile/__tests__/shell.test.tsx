@@ -128,6 +128,12 @@ interface RouteOverrides {
 
 function installFetch(overrides: RouteOverrides = {}): jest.Mock {
   const mock = jest.fn(async (url: string) => {
+    // Checked BEFORE `/channels`: the reaction snapshot lives at
+    // `/channels/{id}/reactions`, so a looser order answers it with the channel
+    // list and the conversation builds chips out of a channel array.
+    if (url.includes('/reactions')) {
+      return jsonResponse(200, {});
+    }
     if (url.includes('/channels') && !url.includes('/messages')) {
       return overrides.channels
         ? overrides.channels()
@@ -342,17 +348,21 @@ describe('the four states of the 대화 list', () => {
 });
 
 describe('opening a conversation', () => {
-  it('lands on the placeholder the next batch replaces, and comes back', async () => {
+  it('opens the conversation surface, and comes back', async () => {
     installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
 
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
-    expect(screen.getByTestId('conversation-placeholder')).toBeTruthy();
     expect(screen.getByTestId('conversation-title')).toHaveTextContent('general');
+    // The composer is the proof the surface is real: the placeholder this
+    // replaced could show a title too, and could not be written into.
+    expect(screen.getByTestId('composer-input')).toBeTruthy();
+    // An empty channel says what to do about it, in the core's words.
+    await waitFor(() => expect(screen.getByTestId('timeline-empty')).toBeTruthy());
 
     fireEvent.press(screen.getByTestId('header-back'));
-    expect(screen.queryByTestId('conversation-placeholder')).toBeNull();
+    expect(screen.queryByTestId('composer-input')).toBeNull();
   });
 
   it('asks the SERVER which channel an agent DM is, then opens it', async () => {
@@ -365,7 +375,7 @@ describe('opening a conversation', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-placeholder')).toBeTruthy(),
+      expect(screen.getByTestId('composer-input')).toBeTruthy(),
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${BASE}/v1/workspaces/${WS}/dms`,

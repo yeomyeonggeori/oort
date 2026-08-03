@@ -84,6 +84,127 @@ jest.mock('react-native-safe-area-context', () => {
   };
 });
 
+// ---- centrifuge --------------------------------------------------------------
+// The realtime client. Faked rather than stubbed for the same reason as the two
+// stores above: what is worth asserting is BEHAVIOUR over the socket — that a
+// resubscribe reporting `recovered: false` triggers a REST backfill and one
+// reporting `recovered: true` does not, that publications fold in by seq, that
+// the last unsubscribe is what actually tears a channel down. A `jest.fn()` that
+// records `connect()` was called cannot answer any of those.
+//
+// The real module would also try to open a WebSocket, and there is no such
+// global under Jest's node environment — so without this every test that mounts
+// the signed-in shell would fail on a transport error rather than on anything
+// it meant to check.
+//
+// `__clients` exposes the instances so a test can drive them: `__emit` on the
+// client for connection state, `__emit` on a subscription for `subscribed` and
+// `publication`.
+jest.mock('centrifuge', () => {
+  const clients = [];
+
+  class FakeSubscription {
+    constructor(channel, options) {
+      this.channel = channel;
+      this.options = options;
+      this.state = 'unsubscribed';
+      this.handlers = new Map();
+      this.subscribeCount = 0;
+      this.unsubscribeCount = 0;
+    }
+    on(event, fn) {
+      if (!this.handlers.has(event)) this.handlers.set(event, new Set());
+      this.handlers.get(event).add(fn);
+      return this;
+    }
+    off(event, fn) {
+      this.handlers.get(event)?.delete(fn);
+      return this;
+    }
+    subscribe() {
+      this.subscribeCount += 1;
+      this.state = 'subscribed';
+    }
+    unsubscribe() {
+      this.unsubscribeCount += 1;
+      this.state = 'unsubscribed';
+    }
+    /** Drive an event as the server would. */
+    __emit(event, ctx) {
+      for (const fn of [...(this.handlers.get(event) ?? [])]) fn(ctx);
+    }
+    /** Everything a real `subscribed` does: the event, then the replay flush. */
+    __subscribed({recovered = false, publications = []} = {}) {
+      this.state = 'subscribed';
+      this.__emit('subscribed', {
+        recovered,
+        hasRecoveredPublications: recovered && publications.length > 0,
+      });
+      // centrifuge-js flushes recovered publications SYNCHRONOUSLY right after
+      // `subscribed`. The replay gate's whole correctness rests on that, so the
+      // fake does it in the same order rather than on a later tick.
+      for (const data of publications) this.__emit('publication', {data});
+    }
+  }
+
+  class FakeCentrifuge {
+    constructor(url, options) {
+      this.url = url;
+      this.options = options;
+      this.state = 'disconnected';
+      this.subs = new Map();
+      this.handlers = new Map();
+      this.connectCount = 0;
+      this.disconnectCount = 0;
+      clients.push(this);
+    }
+    on(event, fn) {
+      if (!this.handlers.has(event)) this.handlers.set(event, new Set());
+      this.handlers.get(event).add(fn);
+      return this;
+    }
+    off(event, fn) {
+      this.handlers.get(event)?.delete(fn);
+      return this;
+    }
+    __emit(event, ctx) {
+      for (const fn of [...(this.handlers.get(event) ?? [])]) fn(ctx);
+    }
+    connect() {
+      this.connectCount += 1;
+      if (this.state === 'connected') return;
+      this.state = 'connected';
+      this.__emit('connecting', {});
+      this.__emit('connected', {});
+    }
+    disconnect() {
+      this.disconnectCount += 1;
+      this.state = 'disconnected';
+      this.__emit('disconnected', {});
+    }
+    newSubscription(channel, options) {
+      const sub = new FakeSubscription(channel, options);
+      this.subs.set(channel, sub);
+      return sub;
+    }
+    getSubscription(channel) {
+      return this.subs.get(channel) ?? null;
+    }
+    removeSubscription(sub) {
+      this.subs.delete(sub.channel);
+    }
+  }
+
+  return {
+    __esModule: true,
+    Centrifuge: FakeCentrifuge,
+    __clients: clients,
+    __reset: () => {
+      clients.length = 0;
+    },
+  };
+});
+
 // ---- @react-native-community/netinfo ----------------------------------------
 jest.mock('@react-native-community/netinfo', () => {
   const listeners = new Set();
