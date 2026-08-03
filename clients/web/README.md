@@ -126,6 +126,55 @@ Three things a 390px Chromium window does NOT reproduce, each measured against
   capture ends with a stress frame that appends such a token to every
   server-written string in the timeline and the channel list.
 
+## Desktop cross-origin + boot budgets (DESK-1)
+
+Two things made the packaged desktop app unusable while web and phone were fine.
+Both come from the one fact that only the desktop is cross-origin: the shell
+serves the bundle from `tauri://localhost` and the API lives on a real host, so
+every `/v1/*` call is a genuine cross-origin request (`apiBase()` is always
+absolute there — see the connect surface below). Web is same-origin and React
+Native does not implement CORS at all.
+
+- **The server had no CORS.** `OPTIONS /v1/auth/login` answered 405 and no
+  response carried an `Access-Control-*` header, so the webview blocked the login
+  POST before it was sent and the connect screen said "서버에 닿지 못했습니다".
+  Fixed server-side (MOMO-605, `server-rust/bins/momo-server/src/cors.rs`): set
+  `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost` on the api service. Unset is
+  still the default and still mounts nothing.
+- **Boot waited on the network.** `initSessionStore()` blocked the *first paint*
+  (blank window) on desktop keychain IPC, and `restoreSession()` then held the
+  skeleton for one `/v1/auth/refresh` bounded only by `REQUEST_TIMEOUT_MS`
+  (15 000 ms). Both are now budgeted in `src/app/boot.ts` — measured against a
+  server that never answers, the connect screen went from **15 411 ms to
+  2 834 ms** (`npm run gate:boot`, red proof `BOOT_GATE_PROVE_RED=1`). Neither
+  budget cancels its work: a keychain or a rotation that lands late still
+  resumes the session.
+
+mDNS discovery is *not* on this path and never was — `discovery_start` returns
+as soon as it spawns its browse thread and is only called from `ConnectPage`'s
+own effect. Discovered servers appear when they arrive; they never hold the
+screen.
+
+### Build-time env this client reads
+
+Values live in `.env.local` (gitignored); `.env.local.example` carries the names.
+
+| name | default | meaning |
+|---|---|---|
+| `VITE_MOMO_API_BASE` | `""` | build-time API fallback; the connect screen's choice wins |
+| `VITE_MOMO_WORKSPACE` | `""` | workspace prefill; blank omits the key entirely |
+| `VITE_MOMO_DEV_EMAIL` | `""` | **test-period login prefill** — email |
+| `VITE_MOMO_DEV_PASSWORD` | `""` | **test-period login prefill** — password |
+| `VITE_MOMO_HYDRATE_BUDGET_MS` | `1200` | first-paint budget; gate seam, do not set in a deploy |
+| `VITE_MOMO_BOOT_RESTORE_BUDGET_MS` | `2500` | resume budget; gate seam, do not set in a deploy |
+
+The two prefill knobs are **build-time only and blank by default**, so the
+production web `dist` and any desktop build made without them prefill nothing —
+unchanged behaviour. A build that sets either one shows a "테스트 프리필이 켜진
+빌드입니다" banner on the connect screen naming the email (never the password),
+because a filled password nobody typed is exactly the thing that stops being
+noticed right before it ships. No credential is ever committed to this repo.
+
 ## Connect surface + dynamic API base (MOMO-604, P2)
 
 `src/features/auth/ConnectPage.tsx` replaced the same-origin login form. Three

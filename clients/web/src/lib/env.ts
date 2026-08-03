@@ -36,9 +36,27 @@ export const API_BASE_DEFAULT = (env.VITE_MOMO_API_BASE ?? "").replace(
  */
 export const CONFIGURED_WORKSPACE = env.VITE_MOMO_WORKSPACE ?? "";
 
-/** Dev-only login prefill. Blank in shared/committed envs. */
+/**
+ * Test-period login prefill (DESK-1). BUILD-TIME env only, and NEVER a literal
+ * in this repo — the values live in `clients/web/.env.local`, which is
+ * gitignored (see `.env.local.example` for the names).
+ *
+ * Unset is the default and prefills nothing, so the production web `dist` — and
+ * any desktop build made without these — behaves exactly as before.
+ *
+ * A silently pre-filled password becomes an incident the first time one ships,
+ * so a build that turns this on SAYS SO on the connect screen: see
+ * `TEST_PREFILL_ACTIVE` and the banner in `ConnectPage`.
+ */
 export const DEV_EMAIL = env.VITE_MOMO_DEV_EMAIL ?? "";
 export const DEV_PASSWORD = env.VITE_MOMO_DEV_PASSWORD ?? "";
+
+/**
+ * True when this build carries either prefill value. Drives the on-screen
+ * marker; deliberately true for the email-only case too, because a filled
+ * identity is still a build-time fact the reader did not type.
+ */
+export const TEST_PREFILL_ACTIVE = DEV_EMAIL !== "" || DEV_PASSWORD !== "";
 
 /** True when running inside the Tauri WKWebView/WebView2 shell. */
 export const IS_TAURI =

@@ -3,9 +3,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
+import { BOOT_RESTORE_BUDGET_MS } from "@/app/boot";
 import { logout, restoreSession, type LoginResponse } from "@momo/core/lib/api";
 import {
   clearSession,
@@ -68,11 +70,38 @@ export function useRestoredSession(): SessionLifecycle {
     hasPersistedSession() ? "restoring" : "anonymous"
   );
 
+  // DESK-1: whether there is something to resume is a LIVE question, not a
+  // one-shot read. Boot no longer blocks the first paint on the desktop keychain
+  // (main.tsx), so the answer can arrive after this hook has already mounted and
+  // said "anonymous" — `hydrate()` notifies the session store when it does.
+  const resumable = useSyncExternalStore(subscribeSession, hasPersistedSession);
+
+  // One resume attempt per app lifetime. Without this the effect would re-fire
+  // on the store notification that a fresh sign-in emits, and rotate a token
+  // that was issued one millisecond ago.
+  const attempted = useRef(false);
+
   useEffect(() => {
-    if (!hasPersistedSession()) return;
+    if (attempted.current || !resumable) return;
+    attempted.current = true;
     let cancelled = false;
+    let settled = false;
+    setStatus("restoring");
+
+    // DESK-1: the screen is not allowed to wait for this. `restoreSession()` is
+    // one `/v1/auth/refresh` rotation bounded only by REQUEST_TIMEOUT_MS
+    // (15 000 ms), and against an unreachable or unresolvable host it spends
+    // every one of them — which is the second half of the ~30 s the packaged app
+    // was showing. When the budget elapses the connect screen takes over; the
+    // rotation is NOT cancelled, so one that lands late still signs the person
+    // in rather than making them retype a password they never needed to.
+    const release = setTimeout(() => {
+      if (!cancelled && !settled) setStatus("anonymous");
+    }, BOOT_RESTORE_BUDGET_MS);
+
     restoreSession()
       .then((restored) => {
+        settled = true;
         if (cancelled) return;
         setSession(restored);
         setStatus(restored ? "signed-in" : "anonymous");
@@ -81,12 +110,16 @@ export function useRestoredSession(): SessionLifecycle {
         // restoreSession already wiped local state on a dead token; anything
         // left here is a transport failure, and the login form is the honest
         // next step rather than an indefinite placeholder.
+        settled = true;
         if (!cancelled) setStatus("anonymous");
-      });
+      })
+      .finally(() => clearTimeout(release));
+
     return () => {
       cancelled = true;
+      clearTimeout(release);
     };
-  }, []);
+  }, [resumable]);
 
   // A 401 that survived a rotation means the refresh token is gone for good.
   // Returning to the login form is the honest response; leaving the shell up to

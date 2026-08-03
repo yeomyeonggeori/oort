@@ -193,7 +193,8 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `MOMO_CENTRIFUGO_WS_URL` | ✅ `realtime_ws_url` | ADR-0110 유일 권위 |
 | `LOG_LEVEL` | ✅ (`RUST_LOG` 우선) | B1.7 전에는 무시되던 값 |
 | `CENT_API_URL`/`CENT_API_KEY`/`CENT_TOKEN_HMAC`/`CENT_PROXY_SECRET` | ❌ 미소비 | momo-server에는 HTTP 클라이언트가 없다(불변식 #2). 그래서 이 compose는 **주입조차 하지 않는다** |
-| `OUTBOUND_WEBHOOK_MASTER_KEY`·`PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_CORS_ALLOWED_ORIGINS`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
+| `OUTBOUND_WEBHOOK_MASTER_KEY`·`PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
+| `MOMO_CORS_ALLOWED_ORIGINS` | ✅ `cors` (DESK-1) | MOMO-605 계약 그대로 포팅. 빈값·미설정=미들웨어 미장착=완전 무변경. 이 줄이 "미소비"였던 동안 패키징된 데스크톱은 로그인이 아예 안 됐다 |
 
 | prod relay env | Rust momo-relay |
 |---|---|

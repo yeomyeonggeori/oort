@@ -7,8 +7,15 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { FlaskConical } from "lucide-react";
 import { joinWithInvite, login, type LoginResponse } from "@momo/core/lib/api";
-import { API_BASE_DEFAULT, CONFIGURED_WORKSPACE, DEV_EMAIL, DEV_PASSWORD } from "@/lib/env";
+import {
+  API_BASE_DEFAULT,
+  CONFIGURED_WORKSPACE,
+  DEV_EMAIL,
+  DEV_PASSWORD,
+  TEST_PREFILL_ACTIVE,
+} from "@/lib/env";
 import {
   SERVER_URL_PLACEHOLDER,
   getServerBase,
@@ -285,6 +292,26 @@ export function ConnectPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <UpdateNotice />
+
+          {/* DESK-1: a build that pre-fills credentials says so, every time.
+              The values come from build-time env and never from this repo, but
+              the person in front of the screen cannot see a build flag — and a
+              password they did not type, sitting filled in a field they are
+              about to submit, is exactly the thing that stops being noticed
+              right before it ships somewhere it should not. Naming the email
+              (never the password) is what makes it checkable at a glance. */}
+          {TEST_PREFILL_ACTIVE && (
+            <InlineBanner
+              tone="neutral"
+              icon={<FlaskConical className="size-4" aria-hidden />}
+              message={
+                DEV_EMAIL !== ""
+                  ? `테스트 프리필이 켜진 빌드입니다 — ${DEV_EMAIL}로 미리 채웠습니다.`
+                  : "테스트 프리필이 켜진 빌드입니다 — 비밀번호를 미리 채웠습니다."
+              }
+              testId="connect-test-prefill"
+            />
+          )}
 
           {!online && (
             <InlineBanner
