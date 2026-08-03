@@ -1605,3 +1605,9 @@
 - **hermes 물증 확보**: engine 워크트리 비커밋 lock diff가 정확히 한 줄 — hermes-engine **SPEC CHECKSUM 드리프트**(1f9904ef→3ccaa647, 버전 동일). H-FIX1 워커에 전달(독립 재현 지시 유지).
 - 결정 B 집행: **ADR-0145 증보 1**(parity=제품 채택 라우트 집합, 이식/보류/폐기 초기 분류표). D는 ADR-0150 기안 시 확정. 성재 5번 승인으로 main push(이전 세션 12커밋 포함). main 동기화는 성재 위임("트랙별로 메인에 머지 잘하쇼") — 랜딩 단위·게이트 그린 전제로 수행.
 - 배치 1 워커 3기(Opus 5) 진행 중: W-AP1(#983)·M-AP1(#984)·H-FIX1(#985). 완료 시 검수→track/engine 순차 머지→성재 폰 검수 분기.
+
+## 2026-08-04 (저녁) · Fable · 오케스트레이션 — H-FIX1 랜딩(배치 1 첫 장)
+- **#986 머지**(track/engine `9ce32e5d`, Opus 5 워커): hermes 체크섬 결함의 원인을 **기계적으로 확정** — RN 0.86 `hermes-engine.podspec`이 `require.resolve` 절대경로를 xcconfig에 박고, CocoaPods가 직렬화 JSON의 SHA1을 SPEC CHECKSUM으로 쓰므로 **체크섬 = 체크아웃 절대경로의 함수**. 사전 등록 예측 2건 적중(치환 SHA1 선계산 → 설치 결과 일치). 수리 = 직렬화 직전 `${PODS_ROOT}` 상대화 훅 + stale podspec 캐시 축출.
+- **워커의 값진 이탈 보고 2건**: ①내 패킷 게이트("같은 경로 2회 diff 0")는 이 결함을 통과시킨다 — 결정성의 축은 횟수가 아니라 **경로**. 게이트를 "다른 절대경로에서 동일 체크섬"으로 스스로 강화 ②원 보고의 "깨끗한 체크아웃 Release 실패"는 부정확 — 로컬 Release는 통과하고 **`pod install --deployment`(=CI/TestFlight 레인)가 실패**한다. 결함 실체는 그대로, 터지는 지점만 정정.
+- **오케스트레이터 독립 검증 PASS**: fix 이전 `Pods/`를 가진 engine 워크트리(제3의 절대경로)에서 pod install → 축출 훅 발동 실측 → **lock diff 0**. 검증 축이 검증자와 무관하게 성립.
+- 잔여: W-AP1(#983)·M-AP1(#984) 진행 중. 랜딩 시 track/engine 순차 머지(W→M) 후 성재 폰 검수 분기.
