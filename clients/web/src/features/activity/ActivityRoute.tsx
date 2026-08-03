@@ -33,6 +33,17 @@ export function ActivityRoute() {
   const feed = useAgentFeed(provided);
   const offline = connStatus === "disconnected";
 
+  // 2R B2: 위 판정은 **둘 중 하나라도 있으면** 이 표면을 연다. 승인이 제공으로
+  // 뒤집힌 지금 그 조건은 참이 되었고, 그래서 이 라우트는 다시 요청을 보낸다.
+  // 그런데 승인 라우트를 아직 배포하지 않은 서버에서는 승인이 404, 작업 기록이
+  // 405로 돌아와 `allFailed`가 참이 되고, 화면은 "활동을 불러오지 못했습니다 /
+  // 다시 시도"를 그렸다. 다시 눌러도 영영 같은 답이 오는 막다른 길이다.
+  //
+  // 판정을 새로 만들지 않는다: `useAgentFeed`가 두 원장의 미제공을 이미 함께
+  // 계산해 둔다(useInbox.ts). 정적으로 막히든 런타임에 접히든 사람이 보는 문장은
+  // 하나여야 하므로, 두 경우를 같은 갈래로 모은다.
+  const unavailable = !provided || feed.absent;
+
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="activity-route">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
@@ -48,7 +59,7 @@ export function ActivityRoute() {
       {/* 제공되지 않는 표면에서는 오프라인 줄도 세우지 않는다: "아직 이 목록을
           한 번도 받지 못했습니다"는 연결 탓처럼 들리는데, 연결이 돌아와도 이
           목록은 오지 않는다. 두 문장이 겹치면 사용자는 기다리면 된다고 읽는다. */}
-      {provided && offline && (
+      {!unavailable && offline && (
         <InlineBanner
           tone="neutral"
           message={
@@ -64,7 +75,7 @@ export function ActivityRoute() {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {!provided ? (
+        {unavailable ? (
           <SurfaceUnavailableSection
             surface="agentRunHistory"
             testId="activity-unavailable"

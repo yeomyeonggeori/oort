@@ -45,8 +45,26 @@ export interface DecisionOutcome {
   note?: string;
   /** User copy for `error`. States what happened and what to do next. */
   errorCopy?: string;
-  /** Set when the cached idempotency key must be dropped before a retry. */
-  errorCode?: "idempotency_conflict";
+  /**
+   * 왜 `error`인지를 읽는 쪽이 **색으로** 구분할 수 있게 하는 갈래
+   * (goal W-AP1 2R M1).
+   *
+   *   idempotency_conflict  캐시된 멱등 키를 버리고 새 키로 다시 시도해야 한다.
+   *   surface_absent        이 서버에 승인 라우트가 없다. **장애가 아니다.**
+   *
+   * `surface_absent`가 별도의 `kind`가 아니라 여기 있는 이유: 이 결과는
+   * `kind: "error"`로 남아야 한다. 결정은 실제로 기록되지 않았고, 그것을
+   * `committed` 옆의 새 갈래로 빼면 그 갈래를 모르는 호출자가 조용히 "결정됨"
+   * 쪽으로 떨어뜨린다(모바일 푸시 경로 `push/notifications.ts:139-145`가 정확히
+   * 그 모양이다 — `kind === 'error'`만 실패로 세고 나머지는 전부 decided).
+   * 아무 일도 일어나지 않았는데 결정됐다고 보고하는 것이 이 필드가 막는 것이다.
+   *
+   * 그래서 판정은 error로 두되 이유를 함께 실어, 화면이 빨간 alert 대신 미제공
+   * 문구로 그릴 수 있게 한다. 같은 404를 목록 쪽은 이미 미제공으로 접고 있으므로
+   * (features/capabilities/serverSurfaces.ts), 한 화면에서 같은 사실이 두 가지
+   * 색을 갖는 일이 없어야 한다.
+   */
+  errorCode?: "idempotency_conflict" | "surface_absent";
 }
 
 const SETTLED = new Set<ApprovalStatus>([
@@ -71,6 +89,25 @@ export function sendFailureCopy(cause: unknown): string {
     return "서버가 제때 응답하지 않아 결정을 보내지 못했습니다. 다시 시도하세요.";
   }
   return "결정이 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도하세요.";
+}
+
+/**
+ * 서버가 답은 했지만 그 답이 영수증이 아닐 때, 사람에게 할 말 (2R, 리뷰 M5 이관).
+ *
+ * **상태 코드를 화면에 그대로 올리지 않는다.** "서버가 500로 응답했습니다"는
+ * 사람에게 문장이 아니라 로그 조각이고, 읽는 사람이 그 숫자로 할 수 있는 일이
+ * 없다. 대신 그가 실제로 판단할 수 있는 세 갈래로 접는다: 지금 다시 눌러도
+ * 되는가, 조금 기다려야 하는가, 서버 쪽 문제인가. 원문이 필요한 사람은 네트워크
+ * 탭을 본다.
+ *
+ * 이 접는 방식은 이 코드베이스가 이미 쓰던 것이다
+ * (clients/web/src/features/routing/capability.ts `unsettledAnswerClause`).
+ * 규칙이 두 벌로 갈라지면 한쪽만 고쳐지는 날이 온다.
+ */
+export function unsettledAnswerClause(status: number): string {
+  if (status === 429) return "요청이 잦아 서버가 이번 결정을 받지 않았습니다.";
+  if (status >= 500) return "서버가 오류로 답했습니다. 잠시 후 다시 시도하세요.";
+  return "서버가 이 결정을 받지 않았습니다. 다시 시도하세요.";
 }
 
 export async function decideApproval(
@@ -112,7 +149,7 @@ export async function decideApproval(
   if (!receiptStatuses.has(response.status)) {
     return {
       kind: "error",
-      errorCopy: `결정을 처리하지 못했습니다. 서버가 ${response.status}로 응답했습니다.`,
+      errorCopy: `결정을 처리하지 못했습니다. ${unsettledAnswerClause(response.status)}`,
     };
   }
 
@@ -145,7 +182,14 @@ export function unreadableAnswerOutcome(
   body: string
 ): DecisionOutcome {
   if (ABSENT_STATUSES.includes(status) && body.trim() === "") {
-    return { kind: "error", errorCopy: serverSurface("approvals").absentReason };
+    // 2R M1: 문구만으로는 부족했다. 읽는 쪽은 이것을 `kind: "error"`로만 보고
+    // 빨간 alert(role="alert" + --danger)로 그렸고, 그 화면의 목록은 같은 404를
+    // 조용한 미제공으로 접고 있었다. 한 화면이 같은 사실을 두 색으로 말한 것이다.
+    return {
+      kind: "error",
+      errorCode: "surface_absent",
+      errorCopy: serverSurface("approvals").absentReason,
+    };
   }
   return {
     kind: "error",

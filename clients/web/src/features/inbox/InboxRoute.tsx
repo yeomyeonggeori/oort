@@ -1,4 +1,11 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -18,12 +25,15 @@ import {
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import {
   isSurfaceProvided,
+  serverSurface,
   type SurfaceId,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
+  agentsFeedPartial,
   approvalRowControl,
   approvalsPanelState,
+  decidableCount,
   decisionNote,
   type DecisionNote,
 } from "./approvalsPanel";
@@ -205,6 +215,12 @@ export function InboxRoute() {
   );
   const filter = parseFilter(params.get("filter"), availableFilters);
   const approvalsProvided = isSurfaceProvided("approvals");
+  // 2R H1: 「에이전트」 탭의 나머지 절반. 정적 판정으로 묻는다 — 요청을 보내
+  // 405를 받아 보고 알아낼 필요가 없는 사실이다.
+  const runHistoryMissing = agentsFeedPartial((surface) =>
+    isSurfaceProvided(surface)
+  );
+  const runHistorySurface = serverSurface("agentRunHistory");
 
   // 결정 대기 stays loaded on every tab: it is the count that decides whether a
   // person needs to come here at all. The mention count is free (read-state is
@@ -230,6 +246,8 @@ export function InboxRoute() {
   const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [note, setNote] = useState<DecisionNote | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const restoreListFocus = useRef(false);
 
   const feed =
     filter === "needs-action"
@@ -237,6 +255,21 @@ export function InboxRoute() {
       : filter === "mentions"
         ? mentions
         : agents;
+
+  // 2R L1: 결정 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 그 답이 가리키던
+  // 행은 화면에 없는데 줄만 남아, 멘션 목록 위에 "승인을 기록했습니다"가 떠 있는
+  // 상태가 된다. 무엇에 대한 말인지 알 수 없는 문장은 정보가 아니라 잔해다.
+  useEffect(() => {
+    setNote(null);
+  }, [filter]);
+
+  // 2R M6의 착지점. 목록이 다시 그려진 뒤에 옮겨야 방금 사라진 행이 아니라
+  // 새 목록을 잡는다.
+  useEffect(() => {
+    if (!restoreListFocus.current) return;
+    restoreListFocus.current = false;
+    panelRef.current?.focus();
+  }, [feed.items]);
 
   const onMarkRead = useCallback(
     (item: FeedItem) => {
@@ -255,6 +288,11 @@ export function InboxRoute() {
     (outcome: DecisionOutcome) => {
       setNote(decisionNote(outcome));
       invalidateApprovals();
+      // 2R M6: 결정한 행은 원장을 다시 읽는 순간 사라진다. 그 행 안에 있던
+      // 초점도 함께 사라져 body로 떨어지므로, 키보드 사용자는 방금 일한 자리를
+      // 잃고 문서 맨 위에서 다시 Tab을 시작한다. 캐럿을 목록 자체에 돌려주면
+      // ↑/↓가 바로 다음 행으로 이어진다.
+      restoreListFocus.current = true;
     },
     [invalidateApprovals]
   );
@@ -309,8 +347,11 @@ export function InboxRoute() {
             spec={{ ...INBOX_FILTER_TABS, values: availableFilters }}
             value={filter}
             onChange={(next) => setParams({ filter: next }, { replace: true })}
+            // 2R M3: 행 수가 아니라 **결정할 수 있는 행 수**. 배지는 "지금
+            // 당신이 해야 할 일이 몇 개인가"를 말하는 자리이고, 결정할 수 없는
+            // 행이 그 수에 들어가면 사람은 인박스를 열고 셀 것을 찾지 못한다.
             counts={{
-              "needs-action": needsAction.items.length,
+              "needs-action": decidableCount(needsAction.items),
               mentions: mentionCount,
             }}
           />
@@ -319,10 +360,15 @@ export function InboxRoute() {
 
       {/* tone이 판정에서 온다. `InlineBanner`는 error면 role="alert"+--danger,
           neutral이면 role="status"를 그리므로, 게이트는 그 role 하나로
-          "이미 결정됨이 오류로 그려지지 않았다"를 단언할 수 있다. */}
+          "이미 결정됨이 오류로 그려지지 않았다"를 단언할 수 있다.
+
+          `unavailable`은 배너에서 neutral과 같은 모양이다(2R M1). 이 배너가 가진
+          색은 둘뿐이고, 미제공이 속할 곳은 조용한 쪽이다 — 목록이 같은 404를
+          이미 조용히 접고 있으므로. 판정으로는 갈라져 있어서 테스트가 그 사실을
+          못으로 박을 수 있고, 화면에서는 같은 조용함으로 만난다. */}
       {note && (
         <InlineBanner
-          tone={note.tone}
+          tone={note.tone === "error" ? "error" : "neutral"}
           message={note.text}
           actionLabel="닫기"
           onAction={() => setNote(null)}
@@ -348,6 +394,20 @@ export function InboxRoute() {
       {/* 탭 줄이 없으면 이 상자는 tabpanel이 아니다. 역할만 남겨 두면
           `aria-labelledby`가 존재하지 않는 탭을 가리키고, 보조기술은 이름 없는
           패널을 읽는다. 탭이 하나뿐일 때 이 표면은 그냥 목록이다. */}
+      {/* 2R H1: 「에이전트」 탭은 승인 원장과 작업 실행 기록 두 원장 위에 서 있는데,
+          이 서버는 뒤의 것을 읽는 경로를 싣지 않았다(POST 전용 경로라 GET은 405).
+          그 사실을 삼키면 화면은 승인 기록만 담긴 목록을 그려 놓고 "조용한 게
+          정상입니다"라고 말하고, 사용자는 에이전트가 아무 작업도 하지 않았다고
+          읽는다 — 우리가 모르는 사실이다. 목록은 그대로 남긴다: 있는 절반을 감추는
+          것은 반대 방향의 같은 거짓말이다. */}
+      {filter === "agents" && runHistoryMissing && (
+        <InlineBanner
+          tone="neutral"
+          message={`${runHistorySurface.absentReason} 아래 목록은 승인 기록만 담고 있습니다.`}
+          testId="inbox-agents-partial"
+        />
+      )}
+
       <div
         {...(availableFilters.length > 1
           ? {
@@ -356,6 +416,10 @@ export function InboxRoute() {
               "aria-labelledby": tabId(filter),
             }
           : {})}
+        ref={panelRef}
+        // 2R M6의 착지점. 결정한 행이 사라진 뒤 캐럿이 여기로 오면 ↑/↓가 바로
+        // 다음 행으로 이어진다. -1이라 Tab 순서에는 끼어들지 않는다.
+        tabIndex={-1}
         className="min-h-0 flex-1 overflow-y-auto"
       >
         <FeedPanel

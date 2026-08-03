@@ -33,6 +33,19 @@
 //     expected failure: "absent folds to 미제공"
 //     (404 대신 500으로 답한다. 단언이 404와 5xx를 구분함을 증명한다.)
 //
+// `commit control viewport`에는 이음매가 없고, 그 이유를 적어 둔다(2R M4 실측).
+// 창을 240px로 줄여도 이 단언은 붉어지지 않는다 — 무장 시 초점이 확정 버튼으로
+// 옮겨 가고(H2), 브라우저의 `focus()`가 그 요소를 화면 안으로 끌어오기 때문이다.
+// 즉 이 표면에서 "결정하려는 순간 확정 버튼이 화면 밖"은 **초점 이동이 살아 있는
+// 한 일어날 수 없다**. 그래서 이 측정은 그 보장에 걸어 둔 덫이고, 그것을 무너뜨리는
+// red proof는 아래 `arm focus`가 이미 갖고 있다(초점 이동을 지우면 이름을 부르며
+// 실패한다). 초점 이동을 지운 채 창까지 줄이면 `escape disarms`가 먼저 붉어진다 —
+// 초점이 컨테이너 밖으로 나가면 Esc 핸들러에 키가 닿지 않기 때문이다.
+//
+// 제품 소스를 되돌려야 하는 red proof 셋 — Esc 해제(H2), 키 반복 가드(H3),
+// 무장 가드 시간(H3) — 은 각각 이 게이트의 "escape disarms" · "held enter guard" ·
+// "arm guard window"를 이름으로 부르며 실패시킨다. 그 증거는 PR 본문에 있다.
+//
 // 붉은 이음매는 전부 픽스처의 행동만 바꾼다. 제품 소스 줄을 지웠다 되돌리라고
 // 리뷰어에게 요구하지 않으므로 반복 실행할 수 있다. 반대로 **조건 분기를 부수는**
 // 쪽의 red proof는 src/features/inbox/approvalsPanel.test.ts가 갖는다.
@@ -305,7 +318,15 @@ async function installRoutes(context, scenario, delayMs) {
         }
         return json(route, supersededReceipt, 409);
       }
-      return json(route, { ...decisionReceipt, approval_id: body.approval_id });
+      // 2R M5: 픽스처가 `approve`를 **읽는다**. 거부 왕복이 승인 영수증을 받아
+      // 놓고 초록으로 남는 일이 없도록, 원장이 실제로 답하는 것과 같은 상태를
+      // 돌려준다. 이 한 줄이 없으면 거부 시나리오는 자기가 무엇을 검사하는지
+      // 모르는 채 통과한다.
+      return json(route, {
+        ...decisionReceipt,
+        approval_id: body.approval_id,
+        status: body.approve ? "approved" : "rejected",
+      });
     }
 
     if (path.endsWith("/approvals")) {
@@ -402,24 +423,8 @@ async function exerciseList(browser, delayMs) {
     );
   }
 
-  // 컨트롤이 뷰포트 안에 있는가. 좌표로 잰다.
-  const first = approveButtons.first();
-  await first.scrollIntoViewIfNeeded();
-  const box = await first.boundingBox();
-  const viewport = page.viewportSize();
-  if (
-    box === null ||
-    box.x < 0 ||
-    box.y < 0 ||
-    box.x + box.width > viewport.width ||
-    box.y + box.height > viewport.height
-  ) {
-    throw new Error(
-      `decision control viewport: 900x600에서 승인 버튼이 화면 밖이다 (${JSON.stringify(box)})`
-    );
-  }
-
   // 원클릭 즉발 금지. 한 번 눌러서는 아무 요청도 나가면 안 된다.
+  const first = approveButtons.first();
   await first.click();
   await page.getByTestId("inbox-approval-confirm").first().waitFor();
   if (state.decisions.length !== 0) {
@@ -440,10 +445,108 @@ async function exerciseList(browser, delayMs) {
     );
   }
 
+  // 2R M4: 재는 대상은 **확정 버튼**이고, **마지막 행**이며,
+  // `scrollIntoViewIfNeeded()`를 부르지 않는다.
+  //
+  // 앞 판은 첫 행의 무장 버튼을 스크롤로 끌어온 뒤 쟀다. 그 측정은 두 번 헛돈다:
+  // 스크롤을 먼저 걸면 답이 항상 참이고, 첫 행은 목록 맨 위라 어차피 보인다.
+  // 이 레포가 두 번 밟은 전과는 **결정하려는 순간 확정 버튼이 화면 밖에 있는
+  // 것**이고, 그것이 실제로 일어나는 자리는 목록의 끝이다. 그래서 마지막 대기
+  // 행을 무장시키고, 스크롤 없이 확정 버튼의 좌표를 잰다.
+  //
+  // 이 단언이 지키는 것은 밀도 주장이다: 900x600 한 화면에 결정 대기 목록이
+  // 통째로 들어오고, 그 마지막 행까지 스크롤 없이 결정할 수 있다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("inbox-approval-approve").first().waitFor();
+  // `.click()`이 아니라 `dispatchEvent`인 것이 이 측정의 전부다. Playwright의
+  // 액션은 대상이 화면 밖이면 **먼저 스크롤한다** — 그러면 "무장한 뒤 확정 버튼이
+  // 보이는가"라는 질문의 답이 언제나 참이 되고, 단언은 아무것도 지키지 못한다.
+  // dispatch는 스크롤하지 않으므로, 목록이 한 화면에 들어오는지를 실제로 잰다.
+  await approveButtons.last().dispatchEvent("click");
+  const lastConfirm = page.getByTestId("inbox-approval-commit").last();
+  await lastConfirm.waitFor();
+  const box = await lastConfirm.boundingBox();
+  const viewport = page.viewportSize();
+  if (
+    box === null ||
+    box.x < 0 ||
+    box.y < 0 ||
+    box.x + box.width > viewport.width ||
+    box.y + box.height > viewport.height
+  ) {
+    throw new Error(
+      `commit control viewport: ${viewport.width}x${viewport.height}에서 마지막 행의 확정 버튼이 스크롤 없이 화면 안에 없다 (${JSON.stringify(box)})`
+    );
+  }
+  // 다시 첫 행 무장 상태로 돌려 놓고 키보드 검사를 이어간다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("inbox-approval-approve").first().click();
+  await page.getByTestId("inbox-approval-confirm").first().waitFor();
+
+
+  // 2R H2: 무장은 Esc로 풀린다. 되돌릴 수 없는 액션의 확인이 취소 버튼으로만
+  // 풀리면, 다이얼로그를 Esc로 닫는 손은 여기서 갇힌다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("inbox-approval-approve").first().waitFor();
+  if ((await page.getByTestId("inbox-approval-confirm").count()) !== 0) {
+    throw new Error("escape disarms: Esc를 눌러도 확인 단계가 남아 있다");
+  }
+  const afterEscapeFocus = await page.evaluate(() =>
+    document.activeElement?.getAttribute("data-testid")
+  );
+  if (afterEscapeFocus !== "inbox-approval-approve") {
+    throw new Error(
+      `escape disarms: 해제 뒤 캐럿이 왔던 버튼이 아니라 ${afterEscapeFocus}에 있다`
+    );
+  }
+  if (state.decisions.length !== 0) {
+    throw new Error("escape disarms: 해제가 결정을 보냈다");
+  }
+
+  // 2R H3: **실키 이벤트**. `.click()`으로는 영영 잡히지 않는 결함이다.
+  //
+  // 무장하면 초점이 확정 버튼으로 옮겨 간다. 브라우저는 <button> 위의 Enter
+  // keydown마다 click을 합성하므로, 한 번의 길게 누름이 무장과 확정을 관통한다.
+  // 되돌릴 수 없는 액션에서 그것은 2단 확인이 없는 것과 같다. 두 겹을 따로 잰다.
+
+  // (a) 시간 가드. 무장 직후의 두 번째 Enter는 두 번째 의도가 아니다.
+  await page.getByTestId("inbox-approval-approve").first().focus();
+  await page.keyboard.down("Enter"); // repeat=false, 무장
+  await page.keyboard.up("Enter");
+  await page.getByTestId("inbox-approval-confirm").first().waitFor();
+  await page.keyboard.press("Enter"); // 가드 시간 안, 확정되면 안 된다
+  await page.waitForTimeout(delayMs + 200);
+  if (state.decisions.length !== 0) {
+    throw new Error(
+      `arm guard window: 무장 직후의 Enter가 결정을 ${state.decisions.length}건 보냈다`
+    );
+  }
+
+  // (b) 반복 가드. (a)만 두면 **400ms를 넘긴 긴 누름**이 여전히 관통한다:
+  //     첫 keydown이 승인을 무장시키고 초점이 확정 버튼으로 옮겨 간 뒤, 손가락이
+  //     그대로 있는 동안 반복 keydown이 계속 오다가 가드 시간이 지난 순간 확정에
+  //     떨어진다. 그래서 여기서는 무장한 뒤 가드 시간을 **흘려보내고** 반복
+  //     keydown을 보낸다. Playwright는 두 번째 `down()`부터 repeat=true를 싣는데,
+  //     그것이 브라우저의 키 반복과 같은 모양이다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("inbox-approval-approve").first().waitFor();
+  await page.getByTestId("inbox-approval-approve").first().focus();
+  await page.keyboard.down("Enter"); // repeat=false → 무장, 초점이 확정으로
+  await page.getByTestId("inbox-approval-confirm").first().waitFor();
+  await page.waitForTimeout(500); // 손가락은 그대로. CONFIRM_GUARD_MS를 넘긴다
+  await page.keyboard.down("Enter"); // repeat=true → 확정 버튼 위에 떨어진다
+  await page.keyboard.up("Enter");
+  await page.waitForTimeout(delayMs + 300);
+  if (state.decisions.length !== 0) {
+    throw new Error(
+      `held enter guard: 한 번의 긴 누름이 무장과 확정을 관통해 결정을 ${state.decisions.length}건 보냈다`
+    );
+  }
+
+  // 진짜 결정 한 번. 여기까지 왔다는 것은 가드가 사람을 막지는 않았다는 뜻이다.
   const beforeListCalls = state.listCalls;
   await page.getByTestId("inbox-approval-commit").first().click();
   await page.getByTestId("inbox-decision-note").waitFor();
-
   if (state.decisions.length !== 1) {
     throw new Error(
       `decision round-trip: expected exactly 1 POST, got ${state.decisions.length}`
@@ -463,10 +566,28 @@ async function exerciseList(browser, delayMs) {
 
   const note = page.getByTestId("inbox-decision-note");
   const noteRole = await note.getAttribute("role");
-  const noteText = await note.textContent();
-  if (noteRole !== "status" || !noteText?.includes("승인했습니다")) {
+  const noteText = (await note.textContent()) ?? "";
+  if (noteRole !== "status" || !noteText.includes("승인을 기록했습니다")) {
     throw new Error(
       `committed note: expected a neutral status note, got role=${noteRole} text=${noteText}`
+    );
+  }
+  // 2R 카피 정본: 계약이 지킬 수 없는 약속을 하지 않는다. 재개는 outbox를 거치는
+  // 비동기이고, 실행이 hold를 떠났으면 재개 job은 아예 들어가지 않는다.
+  if (/바로 실행|즉시/.test(noteText)) {
+    throw new Error(`committed note: 계약을 넘어서는 약속을 했다 (${noteText})`);
+  }
+
+  // 2R M6: 확정에 성공하면 그 행이 사라진다. 초점이 body로 떨어지면 키보드
+  // 사용자는 방금 일한 자리를 잃고 문서 맨 위에서 다시 Tab을 시작한다.
+  const afterCommitFocus = await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active === null || active === document.body) return "body";
+    return active.getAttribute("role") ?? active.tagName.toLowerCase();
+  });
+  if (afterCommitFocus === "body") {
+    throw new Error(
+      "commit focus: 확정 뒤 캐럿이 body로 떨어졌다 (무장 때 고친 것과 같은 결함)"
     );
   }
 
@@ -511,11 +632,72 @@ async function waitForEither(page, expectedTestId, wrongTestId, label) {
   }
 }
 
+/**
+ * 거부 왕복 (2R M5) + 영수증이 탭을 따라다니지 않는다 (2R L1).
+ *
+ * 앞 판의 게이트는 승인만 눌렀고, 픽스처는 무엇을 눌렀든 승인 영수증을 돌려줬다.
+ * 그래서 거부 경로 전체 — body의 `approve: false`, 거부 영수증의 해석, 거부 확정
+ * 문장 — 가 한 번도 검사되지 않았다. 거부는 승인과 같은 무게의 액션이다.
+ */
+async function exerciseReject(browser, delayMs) {
+  const { context, page, state } = await newPage(browser, "list", delayMs);
+  await page.getByTestId("inbox-list").waitFor();
+
+  await page.getByTestId("inbox-approval-reject").first().click();
+  const confirm = page.getByTestId("inbox-approval-confirm").first();
+  await confirm.waitFor();
+  const confirmText = (await confirm.textContent()) ?? "";
+  if (!confirmText.includes("이어지지 않습니다")) {
+    throw new Error(
+      `reject confirm copy: 거부 확정 문장이 정본이 아니다 (${confirmText})`
+    );
+  }
+
+  // 가드를 넘긴 뒤에 확정한다. 게이트가 가드를 우회하는 것이 아니라, 사람이
+  // 두 번째 의도를 갖기까지의 시간을 실제로 흘려보낸다.
+  await page.waitForTimeout(500);
+  await page.getByTestId("inbox-approval-commit").first().click();
+  await page.getByTestId("inbox-decision-note").waitFor();
+
+  if (state.decisions.length !== 1 || state.decisions[0].approve !== false) {
+    throw new Error(
+      `reject round-trip: expected one POST with approve=false, got ${JSON.stringify(state.decisions)}`
+    );
+  }
+  const note = page.getByTestId("inbox-decision-note");
+  const text = (await note.textContent()) ?? "";
+  if (
+    (await note.getAttribute("role")) !== "status" ||
+    !text.includes("거부를 기록했습니다")
+  ) {
+    throw new Error(`reject receipt: 거부 영수증이 정본이 아니다 (${text})`);
+  }
+  // 계약 실측: 거부는 같은 트랜잭션에서 실행을 취소하지만 그 UPDATE는
+  // `WHERE status='awaiting_approval'` 가드에 걸리면 조용히 빠진다. 무조건 참인
+  // 것은 "재개되지 않는다"뿐이다.
+  if (/취소되었습니다/.test(text)) {
+    throw new Error(`reject receipt: 좁은 경합에서 거짓이 되는 문장이다 (${text})`);
+  }
+
+  // 2R L1: 이 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 가리키던 행은
+  // 화면에 없는데 줄만 남아, 멘션 목록 위에 "거부를 기록했습니다"가 떠 있게 된다.
+  await page.getByTestId("inbox-tab-mentions").click();
+  await page.waitForTimeout(300);
+  if ((await page.getByTestId("inbox-decision-note").count()) !== 0) {
+    throw new Error(
+      "receipt scope: 탭을 옮겼는데 앞 목록의 결정 영수증이 그대로 남아 있다"
+    );
+  }
+  await context.close();
+}
+
 /** 이미 다른 곳에서 결정된 요청. 정상적인 상태 전이이지 사고가 아니다. */
 async function exerciseSuperseded(browser, delayMs) {
   const { context, page } = await newPage(browser, "superseded", delayMs);
   await page.getByTestId("inbox-list").waitFor();
   await page.getByTestId("inbox-approval-approve").first().click();
+  // 무장 가드를 우회하지 않고, 사람이 두 번째 의도를 갖기까지의 시간을 실제로 흘린다.
+  await page.waitForTimeout(500);
   await page.getByTestId("inbox-approval-commit").first().click();
 
   // 인라인 오류(`inbox-approval-error`)가 먼저 그려지면 그것이 곧 회귀다:
@@ -611,6 +793,7 @@ async function main() {
         await exerciseList(browser, delayMs);
       }
       await exerciseLoading(browser);
+      await exerciseReject(browser, 60);
       await exerciseSuperseded(browser, 120);
       await exerciseAbsent(browser, 60);
       await exerciseError(browser, 60);

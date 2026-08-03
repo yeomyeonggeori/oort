@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { serverSurface } from "../capabilities/serverSurfaces";
-import { interpretReceipt, unreadableAnswerOutcome } from "./approvalDecision";
+import {
+  interpretReceipt,
+  unreadableAnswerOutcome,
+  unsettledAnswerClause,
+} from "./approvalDecision";
 
 // goal B12: 승인 라우트가 없는 서버의 404를 원장의 답으로 읽지 않는다.
 //
@@ -17,6 +21,26 @@ describe("읽을 수 없는 답", () => {
     // 예전 문구는 "다시 시도하세요"였다. 결코 성공할 수 없는 재시도를 시키는
     // 문장이었고, 사용자 자리에서는 앱이 고장난 것으로 읽혔다.
     expect(outcome.errorCopy).not.toMatch(/다시 시도/);
+  });
+
+  it("미제공은 이유를 코드로도 싣는다: 화면이 빨간 alert 대신 미제공으로 그릴 수 있게", () => {
+    // 2R M1. `kind`는 여전히 error다 — 결정은 기록되지 않았고, 그것을 새 갈래로
+    // 빼면 그 갈래를 모르는 호출자가 조용히 "결정됨" 쪽으로 떨어뜨린다.
+    // 바뀌는 것은 **색**뿐이고, 그 판정에 필요한 것이 이 코드다.
+    for (const status of [404, 405, 501]) {
+      expect(unreadableAnswerOutcome(status, "").errorCode).toBe(
+        "surface_absent"
+      );
+    }
+  });
+
+  it("진짜 실패에는 미제공 코드가 붙지 않는다", () => {
+    expect(
+      unreadableAnswerOutcome(404, "<html>gateway</html>").errorCode
+    ).toBeUndefined();
+    for (const status of [200, 403, 409, 500]) {
+      expect(unreadableAnswerOutcome(status, "").errorCode).toBeUndefined();
+    }
   });
 
   it("공백뿐인 본문도 같다", () => {
@@ -43,6 +67,28 @@ describe("읽을 수 없는 답", () => {
   it("미제공 코드가 아닌 상태는 기존 문구를 그대로 쓴다", () => {
     for (const status of [200, 403, 409, 500]) {
       expect(unreadableAnswerOutcome(status, "").errorCopy).toMatch(/다시 시도/);
+    }
+  });
+});
+
+describe("영수증이 아닌 답 (2R, 리뷰 M5 이관)", () => {
+  it("상태 코드가 사용자 문장에 새지 않는다", () => {
+    for (const status of [500, 502, 503, 429, 418]) {
+      const clause = unsettledAnswerClause(status);
+      expect(clause).not.toMatch(/\d{3}/);
+      expect(clause).not.toMatch(/[—–]/);
+    }
+  });
+
+  it("사람이 판단할 수 있는 세 갈래로 접는다", () => {
+    expect(unsettledAnswerClause(429)).toMatch(/요청이 잦아/);
+    expect(unsettledAnswerClause(503)).toMatch(/서버가 오류로 답했습니다/);
+    expect(unsettledAnswerClause(418)).toMatch(/받지 않았습니다/);
+  });
+
+  it("모든 갈래가 다음에 할 일을 말한다", () => {
+    for (const status of [429, 500, 418]) {
+      expect(unsettledAnswerClause(status)).toMatch(/다시 시도|받지 않았습니다/);
     }
   });
 });

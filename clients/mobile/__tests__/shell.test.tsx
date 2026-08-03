@@ -124,6 +124,7 @@ interface RouteOverrides {
   readState?: () => Response | Promise<Response>;
   messages?: () => Response | Promise<Response>;
   dms?: () => Response | Promise<Response>;
+  approvals?: () => Response | Promise<Response>;
 }
 
 function installFetch(overrides: RouteOverrides = {}): jest.Mock {
@@ -151,6 +152,17 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
       return overrides.messages
         ? overrides.messages()
         : jsonResponse(200, {messages: []});
+    }
+    // goal W-AP1: 승인 표면이 제공으로 뒤집히면서 인박스가 이 경로를 **실제로**
+    // 부른다. 그 전에는 `isSurfaceProvided('approvals')`가 false라 정적 판정이
+    // 요청 자체를 만들지 않았고, 그래서 이 목에는 이 줄이 없어도 됐다. 라우트가
+    // 없으면 아래 `unrouted request`가 던지고, 그 실패가 결정 대기 탭의 오류
+    // 상태가 되어 이 파일의 인박스 테스트가 한꺼번에 붉어진다. 답하는 것은
+    // 원장이 비어 있다는 사실이고, 그것이 이 픽스처 서버의 진실이다.
+    if (url.includes('/approvals')) {
+      return overrides.approvals
+        ? overrides.approvals()
+        : jsonResponse(200, {approvals: []});
     }
     if (url.includes('/dms')) {
       return overrides.dms
@@ -442,31 +454,42 @@ describe('the 인박스 tab', () => {
     expect(screen.getByLabelText('인박스, 멘션 1개')).toBeTruthy();
   });
 
-  it('folds the approvals surface honestly instead of showing an empty tab', async () => {
+  // goal W-AP1: 이 블록은 **플립 전 세계**를 단정하고 있었다.
+  //
+  // `serverSurfaces.ts`의 `approvals.provided`가 false인 동안 이 서버에는 결정
+  // 대기와 에이전트 탭이 없었고, 남은 탭이 하나뿐이라 탭 줄 자체가 서지 않았으며,
+  // 화면 위에는 `approvals-absent` 안내가 떠 있었다. 그때 인박스를 열면 곧바로
+  // 멘션 목록에 착지했으므로 아래 테스트들이 그 목록을 전제로 쓰였다.
+  //
+  // goal SRV-T1이 서버에 승인 3라우트를 올렸고 판정이 뒤집혔다. 그러므로 이제
+  // 참인 것은 정반대다: 세 탭이 서고, 첫 탭(결정 대기)에 착지하며,
+  // `approvals-absent`는 그릴 이유가 없다. 멘션을 보려면 **탭을 눌러야 한다**.
+  it('offers the three tabs now that this server carries the approvals ledger', async () => {
     installFetch();
     renderShell();
     fireEvent.press(screen.getByTestId('tab-inbox'));
 
-    // `serverSurfaces` measured this server as carrying no approvals routes, so
-    // `availableInboxFilters` leaves one tab — and one tab is not a choice.
-    expect(screen.queryByTestId('inbox-tab-needs-action')).toBeNull();
-    expect(screen.queryByTestId('inbox-tab-mentions')).toBeNull();
-    // …and the reason is stated in the core's own words, without a retry, and
-    // not coloured as a failure.
-    expect(screen.getByTestId('approvals-absent')).toHaveTextContent(
-      /이 서버는 아직 승인 결정을 기록하지 않습니다\./,
-    );
-    // …and it offers a way forward rather than a dead end.
-    expect(screen.getByTestId('approvals-absent')).toHaveTextContent(
-      /채널에서 직접 이야기해 진행 여부를 정하세요\./,
-    );
+    // 승인 원장이 있으므로 그 위에 선 두 탭이 함께 산다
+    // (`availableInboxFilters`: 에이전트 탭도 이 원장 하나로 열린다).
+    expect(screen.getByTestId('inbox-tab-needs-action')).toBeTruthy();
+    expect(screen.getByTestId('inbox-tab-mentions')).toBeTruthy();
+    expect(screen.getByTestId('inbox-tab-agents')).toBeTruthy();
+    // 미제공 안내는 사라진다. 없는 기능을 없다고 말하는 것이 그 안내의 일이었고,
+    // 이제 그 문장은 참이 아니다.
+    expect(screen.queryByTestId('approvals-absent')).toBeNull();
+    // 그리고 착지하는 곳은 첫 탭, 즉 결정 대기다.
     await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
+    expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
+      /지금 결정할 일이 없습니다\. 조용한 게 정상입니다\./,
+    );
   });
 
   it('says a quiet inbox is normal', async () => {
     installFetch();
     renderShell();
     fireEvent.press(screen.getByTestId('tab-inbox'));
+    // 멘션은 이제 첫 탭이 아니다: 승인 원장이 살아나면서 결정 대기가 앞에 선다.
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
     expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
       /읽지 않은 멘션이 없습니다\. 조용한 게 정상입니다\./,
@@ -495,6 +518,8 @@ describe('the 인박스 tab', () => {
     });
     renderShell();
     fireEvent.press(screen.getByTestId('tab-inbox'));
+    // 결정 대기가 첫 탭이 된 뒤로, 멘션 행을 보려면 멘션 탭을 눌러야 한다.
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
 
     await waitFor(() => expect(screen.getByTestId('inbox-list')).toBeTruthy());
     // The sentence is the core's: actor, then predicate, then the quoted body.
@@ -525,6 +550,7 @@ describe('the 인박스 tab', () => {
     });
     renderShell();
     fireEvent.press(screen.getByTestId('tab-inbox'));
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     await waitFor(() => expect(screen.getByTestId('inbox-list')).toBeTruthy());
 
     fireEvent.press(screen.getByTestId('mark-read-mention:m-11'));

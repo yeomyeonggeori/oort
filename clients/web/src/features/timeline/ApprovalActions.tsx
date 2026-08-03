@@ -25,9 +25,59 @@ import {
 //     press commits (design-taste-web §6, confirm in place rather than in a
 //     modal so the question stays next to the evidence);
 //   - a rejection is stated inline, never as a toast.
+//
+// ## 2R: 2단 무장은 키보드에서 1단이었다
+//
+// 무장하면 초점이 확정 버튼으로 옮겨 간다(H2 수정의 잔재). 그 자체는 옳지만, 그
+// 결과로 **Enter를 누르고 있으면** 키 반복이 무장 직후의 확정 버튼에 그대로
+// 떨어졌다: 한 번의 길게 누름이 승인/거부를 관통한다. 되돌릴 수 없는 액션에서
+// 그것은 2단 확인이 없는 것과 같다.
+//
+// 두 겹으로 막는다:
+//   (a) `CONFIRM_GUARD_MS` — 무장 직후 그 시간 동안 확정을 받지 않는다. 사람이
+//       두 번째 의도를 갖기까지 걸리는 시간이고, 모바일이 같은 결함을 같은 값으로
+//       막는다.
+//   (b) `repeat` 거부 — 눌린 채로 반복 발생한 keydown은 두 번째 **의도**가 아니라
+//       하나의 누름이다. (a)만 두면 400ms를 넘긴 긴 누름이 여전히 관통한다.
 // =============================================================================
 
 export type Armed = "approve" | "reject" | null;
+
+/**
+ * 무장 직후 확정을 받지 않는 시간.
+ *
+ * 이 값에 근거가 있어야 한다: 너무 짧으면 키 반복(보통 첫 반복까지 ~500ms,
+ * 이후 ~30ms 간격)을 못 막고, 너무 길면 진짜로 빠르게 결정하려는 사람에게
+ * "버튼이 안 먹는다"가 된다. 400ms는 모바일 승인 경로가 같은 결함에 대해 쓰는
+ * 값이고, 여기서 다른 값을 고르면 같은 제품의 같은 액션이 플랫폼마다 다른
+ * 안전 간격을 갖게 된다.
+ */
+export const CONFIRM_GUARD_MS = 400;
+
+/**
+ * 확정 문장 정본 (2R 오케스트레이터 결정).
+ *
+ * **"바로 실행합니다"를 쓰지 않는다.** 계약이 지킬 수 없는 약속이었기 때문이다:
+ * 승인은 `routes/approvals.rs`의 `approve_run`에서 재개 job을 outbox로 넣고, 그
+ * 재개는 비동기다. 게다가 실행이 락과 그 사이에 hold를 떠났으면 job은 아예 들어가지
+ * 않고 200만 돌아온다. 즉 "바로"도 "실행"도 보장되지 않는다. 승인이 보장하는 것은
+ * **사람이 허가했고 그 허가가 기록됐다**는 것과, 그 뒤 에이전트가 이어서 간다는
+ * 것뿐이다.
+ */
+export function approveConfirmCopy(reversible: boolean | undefined): string {
+  const base = "승인하면 에이전트가 이어서 진행합니다.";
+  // `undefined`는 "모른다"이고, 되돌릴 수 없는 액션 계열에서 모름은 경고 쪽에
+  // 붙는다. 서버가 위험도를 싣지 않았다고 안전하다고 말할 수는 없다.
+  return reversible === true ? base : `${base} 되돌릴 수 없습니다.`;
+}
+
+/**
+ * 거부 확정 문장. 영수증(`approvalsPanel.ts` `REJECTED_RECEIPT`)과 **같은 사실**을
+ * 같은 말로 한다: 거부 경로는 어떤 경우에도 재개 job을 넣지 않으므로 "이어지지
+ * 않는다"는 무조건 참이고, "취소된다"는 실행이 이미 다른 이유로 끝나 있던 좁은
+ * 경합에서 거짓이 된다(`end_parked_run_in_tx`의 `WHERE status='awaiting_approval'`).
+ */
+export const REJECT_CONFIRM = "거부하면 이 실행은 이어지지 않습니다.";
 
 export function ApprovalActions({
   approvalId,
@@ -51,7 +101,14 @@ export function ApprovalActions({
    * on screen at once without two elements answering to one hook.
    */
   testIdPrefix?: string;
-  /** M2(design-review): 비가역 승인이면 확정 문장이 그 사실을 재진술한다. */
+  /**
+   * M2(design-review): 비가역 승인이면 확정 문장이 그 사실을 재진술한다.
+   *
+   * 2R: **`undefined`는 "모른다"이고, 모르면 경고한다.** 서버가 위험도를 싣지
+   * 않은 승인을 되돌릴 수 있다고 가정하는 것은, 되돌릴 수 없는 액션 계열에서
+   * 할 수 있는 가장 나쁜 기본값이다(server-rust `ApprovalDto` 주석도 같은 말을
+   * 한다: "absent `isReversible`를 reversible로 읽지 마라").
+   */
   reversible?: boolean;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
@@ -59,10 +116,15 @@ export function ApprovalActions({
   const { workspaceId } = useSession();
   const [busy, setBusy] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
+  const [errorTone, setErrorTone] = useState<"error" | "unavailable">("error");
   const keysRef = useRef<{ approve?: string; reject?: string }>({});
+  /** 무장한 시각. 확정이 그 뒤 `CONFIRM_GUARD_MS`를 기다렸는지 재는 기준. */
+  const armedAtRef = useRef<number>(0);
 
   async function commit(approve: boolean) {
     if (busy) return;
+    // (a) 무장 직후의 확정은 두 번째 의도가 아니다.
+    if (Date.now() - armedAtRef.current < CONFIRM_GUARD_MS) return;
     const slot = approve ? "approve" : "reject";
     keysRef.current[slot] ??= newDecisionId();
     setBusy(true);
@@ -78,9 +140,18 @@ export function ApprovalActions({
         if (outcome.errorCode === "idempotency_conflict") {
           delete keysRef.current[slot];
         }
+        // 2R M1: 같은 404를 목록은 조용히 접는데 이 줄만 빨갛게 그리면, 한 화면이
+        // 같은 사실을 두 색으로 말한다. tone은 core의 판정에서 받는다.
+        setErrorTone(
+          outcome.errorCode === "surface_absent" ? "unavailable" : "error"
+        );
         setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");
         return;
       }
+      // 2R M6: 확정에 성공하면 확정 버튼이 언마운트된다. 무장 때 고쳤던 것과
+      // **같은 결함**이 반대편에 남아 있었다: 초점이 body로 떨어져, 키보드
+      // 사용자는 방금 결정한 자리를 잃고 문서 맨 위에서 다시 Tab을 시작한다.
+      focusAfterArmChange.current = "root";
       setArmed(null);
       onSettled(outcome);
     } finally {
@@ -88,15 +159,59 @@ export function ApprovalActions({
     }
   }
 
-  // H2(design-review): 무장 시 승인/거부 버튼이 언마운트되며 초점이 body로
-  // 떨어진다 — 키보드 사용자가 처음부터 Tab하지 않도록 확정 버튼으로 옮긴다.
+  // ---- 초점 (H2 · 2R H2/M6) ------------------------------------------------
+  //
+  // 이 표면은 무장할 때도 해제할 때도 확정할 때도 **버튼을 언마운트한다**. 그때마다
+  // 초점은 body로 떨어지고, 키보드 사용자는 매번 문서 맨 위로 돌아간다. 그래서
+  // 세 전이 모두에 목적지가 있어야 한다: 어디로 갈지는 전이를 일으킨 쪽이 적어
+  // 두고(`focusAfterArmChange`), 옮기는 것은 렌더 뒤 한 곳에서 한다.
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const commitRef = useRef<HTMLButtonElement | null>(null);
+  const approveRef = useRef<HTMLButtonElement | null>(null);
+  const rejectRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterArmChange = useRef<
+    "commit" | "approve" | "reject" | "root" | null
+  >(null);
+
   useEffect(() => {
-    if (armed !== null) commitRef.current?.focus();
+    const target = focusAfterArmChange.current;
+    focusAfterArmChange.current = null;
+    if (target === null) return;
+    if (target === "commit") commitRef.current?.focus();
+    else if (target === "approve") approveRef.current?.focus();
+    else if (target === "reject") rejectRef.current?.focus();
+    else rootRef.current?.focus();
   }, [armed]);
 
+  function arm(next: Exclude<Armed, null>) {
+    armedAtRef.current = Date.now();
+    focusAfterArmChange.current = "commit";
+    setArmed(next);
+  }
+
+  /** 무장 해제. 왔던 버튼으로 캐럿을 돌려준다 (다이얼로그와 같은 계약). */
+  function disarm() {
+    focusAfterArmChange.current = armed === "approve" ? "approve" : "reject";
+    setArmed(null);
+  }
+
   return (
-    <div className={cn("px-3 py-2", className)}>
+    <div
+      className={cn("px-3 py-2", className)}
+      ref={rootRef}
+      // 확정 뒤 캐럿이 착지할 자리. 목록에서는 이 행이 곧 사라지므로 호출자가
+      // 다시 옮기지만(InboxRoute), 카드에서는 여기가 종착지다.
+      tabIndex={-1}
+      // H2: 되돌릴 수 없는 액션의 확인은 Esc로 취소할 수 있어야 한다. 이 표면은
+      // AlertDialog가 아니라 제자리 2단 행이라 그 동작을 공짜로 받지 못한다 —
+      // 그래서 직접 단다. 다이얼로그를 Esc로 닫는 손이 여기서만 통하지 않으면,
+      // 사람은 무장을 푸는 법을 모른 채 확정 버튼 앞에 남는다.
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || armed === null || busy) return;
+        event.stopPropagation();
+        disarm();
+      }}
+    >
       {armed === null ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-meta text-ink-muted">{lead}</span>
@@ -104,15 +219,17 @@ export function ApprovalActions({
             <Button
               variant="outline"
               size="sm"
+              ref={rejectRef}
               data-testid={`${testIdPrefix}-reject`}
-              onClick={() => setArmed("reject")}
+              onClick={() => arm("reject")}
             >
               거부
             </Button>
             <Button
               size="sm"
+              ref={approveRef}
               data-testid={`${testIdPrefix}-approve`}
-              onClick={() => setArmed("approve")}
+              onClick={() => arm("approve")}
             >
               승인
             </Button>
@@ -124,11 +241,7 @@ export function ApprovalActions({
           data-testid={`${testIdPrefix}-confirm`}
         >
           <span className="text-meta text-ink">
-            {armed === "approve"
-              ? reversible
-                ? "승인하면 에이전트가 바로 실행합니다."
-                : "승인하면 에이전트가 바로 실행합니다. 되돌릴 수 없습니다."
-              : "거부하면 이 실행은 취소됩니다."}
+            {armed === "approve" ? approveConfirmCopy(reversible) : REJECT_CONFIRM}
           </span>
           <span className="flex shrink-0 items-center gap-2">
             <Button
@@ -136,7 +249,7 @@ export function ApprovalActions({
               size="sm"
               disabled={busy}
               data-testid={`${testIdPrefix}-cancel`}
-              onClick={() => setArmed(null)}
+              onClick={disarm}
             >
               취소
             </Button>
@@ -146,6 +259,13 @@ export function ApprovalActions({
               disabled={busy}
               ref={commitRef}
               data-testid={`${testIdPrefix}-commit`}
+              // (b) 눌린 채로 반복 발생한 keydown은 두 번째 의도가 아니라 하나의
+              // 누름이다. 브라우저는 <button> 위의 Enter keydown마다 click을
+              // 합성하므로, 여기서 막지 않으면 길게 누른 Enter가 무장과 확정을
+              // 한 번에 관통한다. `preventDefault`가 그 합성을 끊는다.
+              onKeyDown={(event) => {
+                if (event.repeat) event.preventDefault();
+              }}
               onClick={() => void commit(armed === "approve")}
             >
               {busy
@@ -159,9 +279,14 @@ export function ApprovalActions({
       )}
       {errorCopy !== null && (
         <p
-          role="alert"
+          // 미제공은 사고가 아니므로 alert으로 끼어들지도, 빨갛지도 않다.
+          role={errorTone === "error" ? "alert" : "status"}
           data-testid={`${testIdPrefix}-error`}
-          className="pt-2 text-meta text-danger"
+          data-tone={errorTone}
+          className={cn(
+            "pt-2 text-meta",
+            errorTone === "error" ? "text-danger" : "text-ink-muted"
+          )}
         >
           {errorCopy}
         </p>

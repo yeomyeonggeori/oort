@@ -7,8 +7,13 @@ import {
 } from "@momo/core/features/inbox/model";
 import {
   interpretReceipt,
+  unreadableAnswerOutcome,
   type DecisionOutcome,
 } from "@momo/core/features/timeline/approvalDecision";
+import {
+  approveConfirmCopy,
+  REJECT_CONFIRM,
+} from "@/features/timeline/ApprovalActions";
 import type {
   AgentRun,
   Approval,
@@ -16,9 +21,13 @@ import type {
   Message,
 } from "@momo/core/lib/api";
 import {
+  agentsFeedPartial,
   approvalRowControl,
   approvalsPanelState,
+  decidableCount,
   decisionNote,
+  APPROVED_RECEIPT,
+  REJECTED_RECEIPT,
 } from "./approvalsPanel";
 
 // =============================================================================
@@ -239,12 +248,37 @@ describe("decisionNote", () => {
   it("기록된 결정은 그 결정이 무엇이었는지 말한다", () => {
     expect(decisionNote({ kind: "committed", status: "approved" })).toEqual({
       tone: "neutral",
-      text: "승인했습니다. 에이전트가 이어서 실행합니다.",
+      text: APPROVED_RECEIPT,
     });
     expect(decisionNote({ kind: "committed", status: "rejected" })).toEqual({
       tone: "neutral",
-      text: "거부했습니다. 이 실행은 취소되었습니다.",
+      text: REJECTED_RECEIPT,
     });
+  });
+
+  // 2R 카피 정본. 이 두 단언은 문구 취향이 아니라 **서버 계약**을 지킨다.
+  it("영수증이 계약을 넘어서는 약속을 하지 않는다", () => {
+    // `approve_run`은 실행이 hold를 떠났으면 재개 job 없이 200으로 끝나고,
+    // 정상 경로에서도 재개는 outbox를 거치는 비동기다. "바로 실행"은 어느 쪽으로도
+    // 참이 아니다.
+    expect(APPROVED_RECEIPT).not.toMatch(/바로|즉시|실행합니다/);
+    // 거부는 같은 트랜잭션에서 실행을 취소하지만, 그 UPDATE는
+    // `WHERE status='awaiting_approval'` 가드에 걸리면 조용히 빠진다. 무조건
+    // 참인 것은 "재개되지 않는다"뿐이다.
+    expect(REJECTED_RECEIPT).not.toMatch(/취소되었습니다/);
+    expect(REJECTED_RECEIPT).toMatch(/이어지지 않습니다/);
+  });
+
+  it("미제공 결정은 사고가 아니다: 목록과 같은 색을 받는다 (2R M1)", () => {
+    // 승인 라우트가 없는 서버에 결정을 보내면 본문 없는 404가 오고, core는 그것을
+    // `surface_absent`로 표시한다. 같은 404를 목록은 조용한 미제공으로 접는데
+    // 이 줄만 빨간 alert이면 한 화면이 같은 사실을 두 색으로 말한다.
+    const outcome = unreadableAnswerOutcome(404, "");
+    expect(outcome.errorCode).toBe("surface_absent");
+    const note = decisionNote(outcome);
+    expect(note.tone).toBe("unavailable");
+    expect(note.tone).not.toBe("error");
+    expect(note.text).not.toMatch(/다시 시도/);
   });
 
   it("200인데 알아볼 수 없는 상태면 안다고 말하지 않는다", () => {
@@ -286,5 +320,88 @@ describe("decisionNote", () => {
       expect(text).not.toMatch(/\/v1\//);
       expect(text).not.toMatch(/\b(200|403|404|409|POST|GET)\b/);
     }
+  });
+});
+
+// ---- ④ 2R M3: 배지는 '해야 할 일'을 센다 ------------------------------------
+
+describe("decidableCount", () => {
+  it("결정할 수 있는 행만 센다", () => {
+    const items = [
+      pendingRow("a"),
+      pendingRow("b"),
+      approvalItem(approval("approved"), AGENT, "배포", NOW_MS),
+      approvalItem(approval("expired"), AGENT, "배포", NOW_MS),
+    ];
+    // 행은 넷, 해야 할 일은 둘.
+    expect(items).toHaveLength(4);
+    expect(decidableCount(items)).toBe(2);
+  });
+
+  it("배지와 목록이 같은 판정을 쓴다", () => {
+    // 같은 입력에 대해 배지의 수와 컨트롤이 붙는 행의 수가 어긋날 수 없다.
+    const items = [
+      pendingRow("a"),
+      approvalItem(approval("cancelled"), AGENT, "배포", NOW_MS),
+      pendingRow("c"),
+    ];
+    const withControls = items.filter(
+      (item) => approvalRowControl(item, { offline: false }).kind === "decide"
+    );
+    expect(decidableCount(items)).toBe(withControls.length);
+  });
+
+  it("끊겼다고 해야 할 일이 사라지지는 않는다", () => {
+    // 오프라인은 "지금 못 누른다"는 사실이지 "할 일이 없다"가 아니다. 배지가
+    // 0이 되면 화면은 오프라인을 처리 완료로 말한다.
+    expect(decidableCount([pendingRow("a"), pendingRow("b")])).toBe(2);
+  });
+
+  it("빈 목록은 0", () => {
+    expect(decidableCount([])).toBe(0);
+  });
+});
+
+// ---- ⑤ 2R H1: 반쪽 원장을 반쪽이라고 말한다 ---------------------------------
+
+describe("agentsFeedPartial", () => {
+  it("작업 기록을 읽을 수 없으면 반쪽이다", () => {
+    expect(agentsFeedPartial(() => false)).toBe(true);
+  });
+
+  it("둘 다 있으면 반쪽이 아니다", () => {
+    expect(agentsFeedPartial(() => true)).toBe(false);
+  });
+});
+
+// ---- ⑥ 2R 확정 문장 정본 ----------------------------------------------------
+
+describe("확정 문장", () => {
+  it("되돌릴 수 있다고 서버가 말한 것만 경고 없이 지나간다", () => {
+    expect(approveConfirmCopy(true)).toBe("승인하면 에이전트가 이어서 진행합니다.");
+  });
+
+  it("비가역은 그 사실을 재진술한다", () => {
+    expect(approveConfirmCopy(false)).toMatch(/되돌릴 수 없습니다\.$/);
+  });
+
+  it("모름은 경고 쪽에 붙는다: 안 물어본 것을 안전하다고 말하지 않는다", () => {
+    // server-rust `ApprovalDto`는 `is_reversible`를 아예 싣지 않는다. 그 침묵을
+    // "되돌릴 수 있음"으로 읽는 것은 되돌릴 수 없는 액션 계열에서 가장 나쁜 기본값이다.
+    expect(approveConfirmCopy(undefined)).toBe(approveConfirmCopy(false));
+  });
+
+  it("확정 문장이 계약을 넘어서는 약속을 하지 않는다", () => {
+    for (const copy of [
+      approveConfirmCopy(true),
+      approveConfirmCopy(false),
+      REJECT_CONFIRM,
+    ]) {
+      expect(copy).not.toMatch(/바로 실행|즉시/);
+      expect(copy).not.toMatch(/[—–]/);
+    }
+    // 거부 확정과 거부 영수증이 같은 사실을 같은 말로 한다.
+    expect(REJECT_CONFIRM).toMatch(/이어지지 않습니다/);
+    expect(REJECTED_RECEIPT).toMatch(/이어지지 않습니다/);
   });
 });

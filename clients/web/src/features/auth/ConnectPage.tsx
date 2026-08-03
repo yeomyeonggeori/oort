@@ -306,8 +306,8 @@ export function ConnectPage({
               icon={<FlaskConical className="size-4" aria-hidden />}
               message={
                 DEV_EMAIL !== ""
-                  ? `테스트 프리필이 켜진 빌드입니다 — ${DEV_EMAIL}로 미리 채웠습니다.`
-                  : "테스트 프리필이 켜진 빌드입니다 — 비밀번호를 미리 채웠습니다."
+                  ? `테스트 프리필이 켜진 빌드입니다. ${DEV_EMAIL}로 미리 채웠습니다.`
+                  : "테스트 프리필이 켜진 빌드입니다. 비밀번호를 미리 채웠습니다."
               }
               testId="connect-test-prefill"
             />
