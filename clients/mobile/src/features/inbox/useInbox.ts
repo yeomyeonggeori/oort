@@ -13,6 +13,7 @@ import {
   type ActorNames,
   type FeedItem,
 } from '@momo/core/features/inbox/model';
+import {serverSaysAbsent} from '@momo/core/features/capabilities/serverSurfaces';
 import {
   channelLabel,
   memberFor,
@@ -70,12 +71,36 @@ export interface Feed {
   isLoading: boolean;
   /** True only when every source failed; a partial result still renders. */
   error: boolean;
+  /**
+   * 서버가 이 목록의 경로를 **모른다고 직접 답했다**(404/405/501) — goal M-AP1 3R N-A.
+   *
+   * `error`와 따로 있어야 하는 이유는 정적 판정이 방금 뒤집혔기 때문이다:
+   * `serverSurfaces`의 승인 줄은 이제 `provided: true`이고(라우트가 코드에 올라갔다),
+   * 그러니 아직 그 라우트를 **배포하지 않은** 서버에 붙으면 이 목록은 404를 받는다.
+   * 그 404를 `error`로만 세면 화면은 "인박스를 불러오지 못했습니다 / 다시 시도"를
+   * 그리고, 다시 시도해도 영영 같은 답이 온다. 아직 없는 기능은 장애가 아니다.
+   *
+   * 판정은 발명하지 않고 웹과 **같은 한 벌**(`serverSaysAbsent`)을 쓴다.
+   */
+  absent: boolean;
   /** Newest successful fetch across the sources. */
   updatedAtMs: number;
   refetch: () => void;
 }
 
 const SETTLED_STATUSES: ApprovalStatus[] = ['approved', 'rejected', 'expired'];
+
+/**
+ * 없는 경로는 다시 물어보지 않는다 (3R N-A).
+ *
+ * 404/405/501은 두 번 물어도 같은 답이 온다. 그 한 번의 재시도는 미제공 판정을
+ * 왕복 하나만큼 늦추면서 아무것도 바꾸지 못하고, 폰에서는 그 왕복이 라디오를 켠다.
+ * 그 밖의 실패(네트워크 블립·5xx)는 기본 정책 그대로 한 번 더 물어본다.
+ */
+function retryUnlessAbsent(failureCount: number, error: unknown): boolean {
+  if (serverSaysAbsent(error)) return false;
+  return failureCount < 1;
+}
 
 // ---- shared resolution ----------------------------------------------------
 
@@ -136,6 +161,22 @@ function useFeedContext(): FeedContext {
 
 // ---- 결정 대기 -------------------------------------------------------------
 
+/**
+ * 결정이 기록된 뒤 원장을 다시 읽는다 (goal M-AP1, web의 같은 이름과 같은 규칙).
+ *
+ * `pending` 페이지만이 아니라 **모든 status 페이지**를 무효화한다: 결정은 행을 한
+ * 페이지에서 다른 페이지로 옮기므로, 떠난 쪽만 새로 읽으면 에이전트 피드가 이미
+ * 끝난 결정을 계속 대기 중으로 그린다. 행이 어디로 갔는지는 서버의 답이고, 이
+ * 클라이언트는 행을 스스로 옮기지 않는다.
+ */
+export function useInvalidateApprovals(): () => void {
+  const {workspaceId} = useSession();
+  const client = useQueryClient();
+  return useCallback(() => {
+    void client.invalidateQueries({queryKey: ['approvals', workspaceId]});
+  }, [client, workspaceId]);
+}
+
 export function useNeedsAction(enabled: boolean): Feed {
   const {workspaceId} = useSession();
   const context = useFeedContext();
@@ -144,6 +185,7 @@ export function useNeedsAction(enabled: boolean): Feed {
     queryFn: () => fetchApprovals(workspaceId, 'pending'),
     enabled,
     staleTime: FEED_STALE_MS,
+    retry: retryUnlessAbsent,
   });
 
   const nowMs = useNow();
@@ -164,6 +206,7 @@ export function useNeedsAction(enabled: boolean): Feed {
     items,
     isLoading: query.isLoading || context.isLoading,
     error: query.isError,
+    absent: serverSaysAbsent(query.error),
     updatedAtMs: query.dataUpdatedAt,
     refetch: () => void query.refetch(),
   };
@@ -244,6 +287,10 @@ export function useMentions(enabled: boolean): Feed {
     items,
     isLoading: readStates.isLoading || context.isLoading || results.isLoading,
     error: readStates.isError || results.allFailed,
+    // 멘션은 read-state 투영과 메시지 읽기 위에 서 있고 둘 다 어느 세대의 서버에나
+    // 있다(`serverSurfaces`에 이 표면의 줄이 없는 이유가 그것이다). 이 탭이
+    // 실패했다면 그것은 장애이지 미제공이 아니다.
+    absent: false,
     updatedAtMs: Math.max(results.updatedAtMs, readStates.dataUpdatedAt),
     refetch,
   };
@@ -271,11 +318,13 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       queryFn: () => fetchApprovals(workspaceId, status),
       enabled,
       staleTime: FEED_STALE_MS,
+      retry: retryUnlessAbsent,
     })),
     combine: queryResults => ({
       approvals: queryResults.flatMap(result => result.data ?? []),
       isLoading: queryResults.some(result => result.isLoading),
       allFailed: queryResults.every(result => result.isError),
+      absent: queryResults.every(result => serverSaysAbsent(result.error)),
       updatedAtMs: queryResults.reduce(
         (max, result) => Math.max(max, result.dataUpdatedAt),
         0,
@@ -289,6 +338,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       queryFn: () => fetchAgentRuns(workspaceId, channelId),
       enabled,
       staleTime: FEED_STALE_MS,
+      retry: retryUnlessAbsent,
     })),
     combine: queryResults => ({
       runs: queryResults.flatMap(result => result.data ?? []),
@@ -296,6 +346,9 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       // Vacuously true for an empty fan-out, so a workspace with no channels
       // lets the approval source decide whether the feed is broken.
       allFailed: queryResults.every(result => result.isError),
+      // 같은 공허참 규약. 채널이 0개인 워크스페이스에서는 승인 원장 쪽이 이 피드의
+      // 제공 여부를 혼자 정한다.
+      absent: queryResults.every(result => serverSaysAbsent(result.error)),
       updatedAtMs: queryResults.reduce(
         (max, result) => Math.max(max, result.dataUpdatedAt),
         0,
@@ -352,6 +405,9 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
     isLoading:
       context.isLoading || approvalQueries.isLoading || runQueries.isLoading,
     error: approvalQueries.allFailed && runQueries.allFailed,
+    // 이 피드는 두 원장 위에 서 있다. 한쪽만 없으면 남은 쪽이 답할 수 있으므로
+    // 미제공이 아니다 — 둘 다 "그런 경로 없다"고 답했을 때만 표면이 없는 것이다.
+    absent: approvalQueries.absent && runQueries.absent,
     updatedAtMs: Math.max(approvalQueries.updatedAtMs, runQueries.updatedAtMs),
     refetch,
   };

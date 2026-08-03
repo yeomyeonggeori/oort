@@ -1,8 +1,10 @@
 import {
   isSurfaceProvided,
   serverSurface,
+  type SurfaceId,
 } from '@momo/core/features/capabilities/serverSurfaces';
 import {
+  agentsFeedPartial,
   availableInboxFilters,
   filterLabel,
   parseFilter,
@@ -10,10 +12,18 @@ import {
   type FeedItem,
   type InboxFilter,
 } from '@momo/core/features/inbox/model';
+import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import NetInfo from '@react-native-community/netinfo';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  AccessibilityInfo,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {
   EmptyState,
   ErrorState,
@@ -23,8 +33,10 @@ import {
   ScreenHeader,
 } from '../design/atoms';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {ApprovalDecision} from '../features/inbox/ApprovalDecision';
 import {
   useAgentFeed,
+  useInvalidateApprovals,
   useMarkRead,
   useMentions,
   useNeedsAction,
@@ -39,15 +51,14 @@ import {useSession} from '../session/useSession';
 // ## The honest shape of this screen on THIS server
 //
 // ADR-0137 D5 names 승인 as one of v0's two axes, and this screen is where it
-// lands. It does not land today, and pretending otherwise was not an option:
-// `@momo/core/features/capabilities/serverSurfaces` records, from a route-by-route
-// measurement on 2026-08-02, that the Rust server carries neither
-// `GET …/approvals` nor `POST …/approvals/{id}/decision` (404) nor
-// `GET …/channels/{ch}/agent-runs` (405 — the path is registered POST-only).
+// lands. Whether it lands TODAY is not this file's opinion:
+// `@momo/core/features/capabilities/serverSurfaces` is the one place that judges
+// which surfaces this server carries, and everything below is gated on
+// `isSurfaceProvided('approvals')`.
 //
-// So `availableInboxFilters` removes those two tabs, exactly as it does on web,
-// and what remains is 멘션. Two consequences are stated on the screen rather than
-// hidden:
+// While that judgement is false, `availableInboxFilters` removes two of the
+// three tabs and what remains is 멘션. Two consequences are stated on the screen
+// rather than hidden:
 //
 //   * with one filter left there is no tab bar. One tab is not a choice, and
 //     drawing it would suggest the other two are somewhere nearby.
@@ -60,16 +71,44 @@ import {useSession} from '../session/useSession';
 // change is one `provided: false` in the core's table and this screen grows its
 // tabs back with no edit here. That is what that table is for.
 //
-// ## What this screen does not do yet
+// ## 결정은 여기서 한다 (goal M-AP1)
 //
-// It lists approvals; it does not decide them. `decideApproval` exists in the
-// core, but the endpoint it posts to does not exist on this server, so the
-// control could not be exercised even once before shipping — and an approval is
-// the one action in this product that can be irreversible (`FeedItem.note`
-// carries 되돌릴 수 없음 for exactly that reason). An untestable irreversible
-// control is the wrong thing to ship; the row says where the decision can be made
-// instead. This is called out in the PR as the next batch's first item.
+// 이 화면은 승인을 **목록으로 보여주기만 하고 결정은 못 하는** 상태로 출하됐다.
+// 이유는 취향이 아니라 검증 불가였다: 결정 엔드포인트가 이 서버에 없어서 되돌릴
+// 수 없는 컨트롤을 한 번도 눌러보지 못한 채 내보내야 했다. 서버가 그 경로를
+// 실었으므로(#979) 그 보류를 푼다.
+//
+// 결정에 필요한 사실 — 누가, 무엇을, 언제까지, 되돌릴 수 있는지 — 은 이미 이 행에
+// 전부 있다. 그래서 결정도 여기서 한다. 컨트롤은 `ApprovalDecision`이고, 그것은
+// 잠금화면 알림이 이미 쓰는 core의 `decideApproval`을 그대로 부른다 — 두 번째
+// 구현이 아니라 두 번째 호출자다(`src/push/notifications.ts:133`).
+//
+// 세 갈래로만 붙는다:
+//
+//   * `결정 대기` 탭의 **대기 중** 승인 행 → 컨트롤. `approvalId`는 core가 대기
+//     행에만 싣는다(`features/inbox/model.ts:152`), 그래서 이미 끝난 결정에는
+//     컨트롤이 붙을 자리 자체가 없다.
+//   * 같은 행이 `에이전트` 탭에 있을 때 → 컨트롤 없이 어디서 결정하는지 한 줄.
+//     그 탭은 "내 에이전트가 무엇을 했는가"의 기록이지 결정하는 자리가 아니다.
+//   * 서버가 승인을 아직 안 실었을 때 → 예전 그대로, 데스크톱에서 하라고 말한다.
+//
+// 오프라인이면 버튼을 그대로 두지 않는다. 15초 뒤 실패로 반박당할 컨트롤이고,
+// 말없이 치우면 무엇이 사라졌는지 알 수 없다 — 자리는 지키고 이유를 말한다.
 // =============================================================================
+
+/**
+ * 각 탭이 서 있는 표면. 미제공을 말하려면 **무엇이** 미제공인지 이름을 댈 수 있어야
+ * 한다 (3R N-A, 웹 `InboxRoute`의 같은 표와 같은 값).
+ *
+ * 멘션이 `null`인 것은 빠뜨린 것이 아니다: 그 탭은 read-state 투영과 메시지 읽기
+ * 위에 서 있고 둘 다 어느 서버에나 있다. 이름 댈 표면이 없는 탭은 미제공이 될 수
+ * 없으므로 접을 곳도 없다.
+ */
+const PANEL_SURFACE: Record<InboxFilter, SurfaceId | null> = {
+  'needs-action': 'approvals',
+  mentions: null,
+  agents: 'agentRunHistory',
+};
 
 const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
   'needs-action': {
@@ -102,6 +141,11 @@ export default function InboxScreen({
   );
   const approvals = serverSurface('approvals');
   const approvalsProvided = isSurfaceProvided('approvals');
+  // 반쪽 원장 고지 (3R N-B). 판정은 core의 한 벌이고 웹이 같은 것을 쓴다.
+  const runHistoryMissing = agentsFeedPartial(surface =>
+    isSurfaceProvided(surface),
+  );
+  const runHistory = serverSurface('agentRunHistory');
 
   const [online, setOnline] = useState(true);
   useEffect(() => {
@@ -120,6 +164,7 @@ export default function InboxScreen({
 
   const feed: Feed =
     filter === 'needs-action' ? needsAction : filter === 'agents' ? agentFeed : mentions;
+  const panelSurface = PANEL_SURFACE[filter];
 
   const markRead = useMarkRead();
   const marking = useMutation({
@@ -132,6 +177,103 @@ export default function InboxScreen({
       onOpenConversation(item.channelId, item.channelLabel);
     },
     [onOpenConversation],
+  );
+
+  // 결정이 기록되면 그 행은 대기 목록에서 사라진다. 사라지는 것만으로는 무엇이
+  // 됐는지 알 수 없으므로, 원장이 답한 그대로 한 줄을 남기고 목록을 다시 읽는다.
+  //
+  // ## 영수증은 결정한 그 행 자리에 (2R H3/M6)
+  //
+  // 1R은 화면 맨 위 한 칸에 적었다. 두 가지가 틀렸다: 목록을 내려 결정한 사람의
+  // 눈은 그 행에 있는데 답은 화면 위쪽에 뜨고, 두 번째 결정이 첫 번째 영수증을
+  // 덮어써서 무엇이 어떻게 됐는지 하나가 사라졌다. 그래서 영수증은 **승인 id로
+  // 키를 잡아** 그 행 자리에 그린다. 그 행이 원장 재조회로 목록에서 빠지면
+  // 영수증만 남으므로, 갈 곳 없는 영수증은 위쪽 알림으로 올려 보낸다 — 사라지는
+  // 것과 답을 못 본 것은 다르다.
+  const invalidateApprovals = useInvalidateApprovals();
+  const [receipts, setReceipts] = useState<{id: string; note: string}[]>([]);
+  const onDecided = useCallback(
+    (approvalId: string, outcome: DecisionOutcome) => {
+      const note = decisionReceiptCopy(outcome);
+      setReceipts(previous => [
+        ...previous.filter(entry => entry.id !== approvalId),
+        {id: approvalId, note},
+      ]);
+      // 결과도 말해 준다 (2R H3). 무장은 알리고 결과는 알리지 않으면, 화면을 보지
+      // 않는 사람에게는 되돌릴 수 없는 행동이 소리 없이 끝난 것이 된다.
+      AccessibilityInfo.announceForAccessibility(note);
+      invalidateApprovals();
+    },
+    [invalidateApprovals],
+  );
+  const dismissReceipt = useCallback((approvalId: string) => {
+    setReceipts(previous => previous.filter(entry => entry.id !== approvalId));
+  }, []);
+
+  // 목록에 아직 남아 있는 행의 영수증은 그 행이 그린다. 여기 남는 것은 행이
+  // 사라진 뒤의 영수증뿐이다.
+  const visibleApprovalIds = useMemo(
+    () => new Set(feed.items.map(item => item.approvalId).filter(Boolean)),
+    [feed.items],
+  );
+  const orphanReceipts = receipts.filter(
+    entry => !visibleApprovalIds.has(entry.id),
+  );
+
+  // 한 행에 결정 컨트롤을 붙일지, 대신 무슨 말을 할지. 판정이 행 안이 아니라
+  // 여기 있는 이유: 어느 탭인지·서버가 승인을 싣는지·지금 연결돼 있는지는 전부
+  // 화면이 아는 사실이고, 행은 자기 항목만 안다.
+  const renderDecision = useCallback(
+    (item: FeedItem): React.ReactNode => {
+      if (item.kind !== 'approval' || !item.pending) return null;
+      // 서버가 승인 결정을 아직 기록하지 않는다면 예전 문장 그대로. 없는 경로에
+      // 컨트롤을 세우는 것이 이 화면이 원래 거절했던 바로 그 일이다.
+      if (!approvalsProvided) {
+        return (
+          <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
+            결정은 데스크톱 앱에서 할 수 있습니다.
+          </Text>
+        );
+      }
+      // `approvalId`는 core가 대기 행에만 싣는다. 없으면 결정할 대상이 없다는
+      // 뜻이므로 컨트롤도 없다.
+      if (item.approvalId === undefined) return null;
+      if (filter !== 'needs-action') {
+        return (
+          <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
+            결정 대기 탭에서 승인하거나 거부할 수 있습니다.
+          </Text>
+        );
+      }
+      // 이 행에서 방금 결정했다면 컨트롤 자리에 그 답을 둔다. 같은 행에 컨트롤과
+      // 영수증이 함께 있으면 이미 끝난 결정을 다시 누를 수 있다는 뜻이 된다.
+      const receipt = receipts.find(entry => entry.id === item.approvalId);
+      if (receipt) {
+        return (
+          <Text style={styles.receipt} testID={`decision-receipt-${item.key}`}>
+            {receipt.note}
+          </Text>
+        );
+      }
+      if (!online) {
+        return (
+          <Text style={styles.managed} testID={`decision-offline-${item.key}`}>
+            연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나
+            거부할 수 있습니다.
+          </Text>
+        );
+      }
+      return (
+        <ApprovalDecision
+          approvalId={item.approvalId}
+          reversible={item.reversible}
+          deadlinePassed={item.deadlinePassed}
+          onSettled={outcome => onDecided(item.approvalId as string, outcome)}
+          testIDPrefix={`inbox-approval-${item.approvalId}`}
+        />
+      );
+    },
+    [approvalsProvided, filter, onDecided, online, receipts],
   );
 
   return (
@@ -172,6 +314,15 @@ export default function InboxScreen({
         />
       ) : null}
 
+      {orphanReceipts.map(entry => (
+        <NoticeBlock
+          key={entry.id}
+          headline={entry.note}
+          onDismiss={() => dismissReceipt(entry.id)}
+          testID="inbox-decision-note"
+        />
+      ))}
+
       {!online ? (
         <NoticeBlock
           headline={
@@ -183,8 +334,27 @@ export default function InboxScreen({
         />
       ) : null}
 
+      {/* 반쪽인 채로 조용한 것과 조용한 것은 다르다 (3R N-B). 목록은 그대로 둔다 —
+          있는 절반을 감추는 것은 반대 방향의 같은 거짓말이다. */}
+      {filter === 'agents' && runHistoryMissing ? (
+        <NoticeBlock
+          headline={runHistory.absentReason}
+          detail="아래 목록은 승인 기록만 담고 있습니다."
+          testID="inbox-agents-partial"
+        />
+      ) : null}
+
       {feed.isLoading && feed.items.length === 0 ? (
         <LoadingState label="인박스를 불러오는 중입니다." testID="inbox-loading" />
+      ) : panelSurface !== null && feed.absent && feed.items.length === 0 ? (
+        // 서버가 "그런 경로 없다"고 **직접 답한** 경우다 (3R N-A). 오류가 아니므로
+        // 붉게 그리지 않고, 다시 시도할 것이 없으므로 재시도를 주지 않는다 —
+        // 그 버튼은 영영 같은 답을 받는다.
+        <NoticeBlock
+          headline={serverSurface(panelSurface).absentReason}
+          detail={serverSurface(panelSurface).fallback}
+          testID="inbox-unavailable"
+        />
       ) : feed.error && feed.items.length === 0 ? (
         <ErrorState
           headline="인박스를 불러오지 못했습니다."
@@ -216,6 +386,7 @@ export default function InboxScreen({
                       marking.mutate({channelId: item.channelId, seq: item.seq as number})
                   : undefined
               }
+              decision={renderDecision(item)}
             />
           )}
           contentContainerStyle={styles.listContent}
@@ -239,73 +410,112 @@ function FeedRow({
   busy,
   onPress,
   onMarkRead,
+  decision,
 }: {
   item: FeedItem;
   busy: boolean;
   onPress: () => void;
   onMarkRead?: () => void;
+  /**
+   * 결정 컨트롤(또는 그 자리에 놓일 한 문장). 행이 짓지 않고 받아 온다 — 무엇을
+   * 붙일지는 탭·서버 제공 여부·연결 상태가 정하고, 그 셋 다 행이 모르는 것이다.
+   *
+   * 행 본문 **바깥**에 놓인다. Pressable 안의 Pressable은 iOS에서 바깥쪽이 탭을
+   * 삼키기도 하고, 무엇보다 이 컨트롤을 누르는 것은 대화를 여는 것과 다른 일이다.
+   */
+  decision?: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <View style={styles.row} testID={`feed-row-${item.key}`}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${item.actor} ${item.predicate}. ${item.channelLabel}. ${item.reason}`}
-        onPress={onPress}
-        style={({pressed}) => [styles.rowBody, pressed && styles.pressed]}>
-        <View style={styles.rowHead}>
-          <Text style={styles.sentence} numberOfLines={2}>
-            <Text style={item.actorIsAgent ? styles.actorAgent : styles.actor}>
-              {item.actor}
-            </Text>
-            <Text style={styles.predicate}> {item.predicate}</Text>
-          </Text>
-          {item.timeLabel !== '' ? (
-            <Text style={styles.time}>{item.timeLabel}</Text>
-          ) : null}
-        </View>
-
-        {item.detail ? (
-          <Text style={styles.detail} numberOfLines={3} ellipsizeMode="tail">
-            {item.detail}
-          </Text>
-        ) : null}
-
-        <View style={styles.metaLine}>
-          <Text style={styles.channel} numberOfLines={1}>
-            {item.channelLabel}
-          </Text>
-          {item.outcome ? (
-            <Text style={[styles.outcome, outcomeStyle(item.outcomeTone)]}>
-              → {item.outcome}
-            </Text>
-          ) : null}
-          {item.note ? <Text style={styles.note}>{item.note}</Text> : null}
-        </View>
-
-        {item.managedBy ? (
-          <Text style={styles.managed}>{item.managedBy} 님이 관리</Text>
-        ) : null}
-
-        {item.kind === 'approval' && item.pending ? (
-          // Stated, not offered: the decision endpoint is not on this server, so
-          // there is no control here to press. See the header note.
-          <Text style={styles.managed}>결정은 데스크톱 앱에서 할 수 있습니다.</Text>
-        ) : null}
-      </Pressable>
-
-      {onMarkRead ? (
+    <View style={styles.rowShell} testID={`feed-row-${item.key}`}>
+      <View style={styles.row}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${item.channelLabel}의 멘션을 읽음으로 표시`}
-          disabled={busy}
-          onPress={onMarkRead}
-          style={({pressed}) => [styles.markRead, pressed && styles.pressed]}
-          testID={`mark-read-${item.key}`}>
-          <Text style={styles.markReadLabel}>{busy ? '…' : '읽음'}</Text>
+          accessibilityLabel={`${item.actor} ${item.predicate}. ${item.channelLabel}. ${item.reason}`}
+          onPress={onPress}
+          style={({pressed}) => [styles.rowBody, pressed && styles.pressed]}>
+          <View style={styles.rowHead}>
+            <Text style={styles.sentence} numberOfLines={2}>
+              <Text style={item.actorIsAgent ? styles.actorAgent : styles.actor}>
+                {item.actor}
+              </Text>
+              <Text style={styles.predicate}> {item.predicate}</Text>
+            </Text>
+            {item.timeLabel !== '' ? (
+              <Text style={styles.time}>{item.timeLabel}</Text>
+            ) : null}
+          </View>
+
+          {item.detail ? (
+            <Text style={styles.detail} numberOfLines={3} ellipsizeMode="tail">
+              {item.detail}
+            </Text>
+          ) : null}
+
+          <View style={styles.metaLine}>
+            <Text style={styles.channel} numberOfLines={1}>
+              {item.channelLabel}
+            </Text>
+            {item.outcome ? (
+              <Text style={[styles.outcome, outcomeStyle(item.outcomeTone)]}>
+                → {item.outcome}
+              </Text>
+            ) : null}
+            {item.note ? <Text style={styles.note}>{item.note}</Text> : null}
+          </View>
+
+          {item.managedBy ? (
+            <Text style={styles.managed}>{item.managedBy} 님이 관리</Text>
+          ) : null}
         </Pressable>
-      ) : null}
+
+        {onMarkRead ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${item.channelLabel}의 멘션을 읽음으로 표시`}
+            disabled={busy}
+            onPress={onMarkRead}
+            style={({pressed}) => [styles.markRead, pressed && styles.pressed]}
+            testID={`mark-read-${item.key}`}>
+            <Text style={styles.markReadLabel}>{busy ? '…' : '읽음'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      {decision ? <View style={styles.decision}>{decision}</View> : null}
     </View>
   );
+}
+
+/**
+ * 원장이 답한 것을 한 문장으로 (2R H4/M3).
+ *
+ * 두 가지가 1R과 다르다. 첫째, **약속하지 않는다**: "에이전트가 이어서 실행합니다"는
+ * 서버가 보장하지 않는 후속(`approve_run`은 run이 hold를 떠났으면 job 없이 200)이라
+ * 영수증은 원장에 무엇이 적혔는지까지만 말한다. 둘째, superseded일 때 **실제로
+ * 기록된 방향**을 말한다 — 내가 승인을 눌렀는데 원장에 거부가 적혀 있을 수 있고,
+ * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
+ */
+export function decisionReceiptCopy(outcome: DecisionOutcome): string {
+  if (outcome.kind === 'superseded') {
+    if (outcome.status === 'approved') {
+      return '이미 승인으로 기록되어 있었습니다.';
+    }
+    if (outcome.status === 'rejected') {
+      return '이미 거부로 기록되어 있었습니다.';
+    }
+    if (outcome.status === 'expired') {
+      return '결정 전에 만료되어 만료로 기록되었습니다.';
+    }
+    if (outcome.status === 'cancelled') {
+      return '이 요청은 취소되어 있었습니다.';
+    }
+    return outcome.note ?? '이 요청은 이미 결정되어 있었습니다.';
+  }
+  if (outcome.status === 'approved') return '승인을 기록했습니다.';
+  if (outcome.status === 'rejected') return '거부를 기록했습니다.';
+  // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지 우리가
+  // 모르므로, 안다고 말하지 않는다.
+  return '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.';
 }
 
 function outcomeStyle(tone: FeedItem['outcomeTone']) {
@@ -334,12 +544,12 @@ const styles = StyleSheet.create({
   tabLabel: {fontSize: font.label, color: color.textMuted},
   tabLabelActive: {color: color.text, fontWeight: '600'},
   listContent: {paddingBottom: space.lg},
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  rowShell: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.border,
   },
+  row: {flexDirection: 'row', alignItems: 'flex-start'},
+  decision: {paddingHorizontal: SAFE_GUTTER},
   rowBody: {
     flex: 1,
     minHeight: TOUCH_TARGET,
@@ -370,6 +580,7 @@ const styles = StyleSheet.create({
   outcomeMuted: {color: color.textFaint},
   note: {fontSize: font.meta, color: color.warn},
   managed: {fontSize: font.meta, color: color.textFaint},
+  receipt: {fontSize: font.meta, color: color.text, paddingBottom: space.md},
   markRead: {
     minWidth: TOUCH_TARGET,
     minHeight: TOUCH_TARGET,

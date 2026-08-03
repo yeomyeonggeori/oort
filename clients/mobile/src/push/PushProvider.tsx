@@ -159,11 +159,15 @@ export default function PushProvider({
   useEffect(() => {
     const subscription = addNotificationResponseReceivedListener(response => {
       void handlePushResponse(response, {signedInWorkspaceId: workspaceId})
-        .then(result =>
-          console.log(
-            `${LOG} action ${response.actionIdentifier} -> ${result.kind}`,
-          ),
-        )
+        .then(result => {
+          // 원장이 이미 다른 답을 들고 있었으면 그 사실까지 남긴다 (2R H5).
+          // 사용자 고지는 아직 없다 — 이 콜백에는 화면이 없다(이탈 보고 참조).
+          const detail =
+            result.kind === 'decided' && result.record === 'settled'
+              ? `settled(recordedApproved=${String(result.recordedApproved)})`
+              : result.kind;
+          console.log(`${LOG} action ${response.actionIdentifier} -> ${detail}`);
+        })
         .catch(cause => console.error(`${LOG} action failed`, cause));
     });
     return () => subscription.remove();

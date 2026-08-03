@@ -282,16 +282,37 @@ export function ErrorState({
 export function NoticeBlock({
   headline,
   detail,
+  onDismiss,
   testID,
 }: {
   headline: string;
   detail?: string;
+  /**
+   * Only for a notice that is a RECEIPT — something the person just did, which
+   * they have read once and do not need under the list forever. A statement of
+   * what this server cannot do is not dismissible: it stays true after a tap.
+   */
+  onDismiss?: () => void;
   testID?: string;
 }): React.JSX.Element {
   return (
     <View style={styles.notice} testID={testID}>
-      <Text style={styles.noticeHeadline}>{headline}</Text>
-      {detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
+      <View style={styles.noticeHead}>
+        <View style={styles.noticeText}>
+          <Text style={styles.noticeHeadline}>{headline}</Text>
+          {detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
+        </View>
+        {onDismiss ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+            onPress={onDismiss}
+            style={({pressed}) => [styles.noticeDismiss, pressed && styles.pressed]}
+            testID={testID ? `${testID}-dismiss` : undefined}>
+            <Text style={styles.retryLabel}>닫기</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -411,6 +432,15 @@ const styles = StyleSheet.create({
     borderColor: color.border,
     backgroundColor: color.surface,
     gap: space.xs,
+  },
+  noticeHead: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm},
+  noticeText: {flex: 1, gap: space.xs},
+  noticeDismiss: {
+    ...hitStyle,
+    minWidth: TOUCH_TARGET,
+    alignItems: 'center',
+    marginVertical: -space.md,
+    borderRadius: radius.sm,
   },
   noticeHeadline: {fontSize: font.label, color: color.text, fontWeight: '600'},
   noticeDetail: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},

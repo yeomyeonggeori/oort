@@ -1997,13 +1997,34 @@ export async function fetchWorkstreamRuns(
 
 // ---- Approvals: read projection over the decision ledger --------------------
 // GET /v1/workspaces/{ws}/approvals?status=&limit= (ApprovalDecisionRoutes).
-// Rows are scoped by channel membership server-side, snake_case on the wire,
-// and ordered `expires_at NULLS LAST, created_at DESC`.
+// Rows are scoped by channel membership server-side and ordered
+// `expires_at NULLS LAST, created_at DESC`.
 //
-// Two things the projection deliberately does NOT give a client, and this
-// module does not invent: there is no `created_at`, so a pending row has no
-// "how long ago" (only `expires_at`), and `payload` is left out of the type
-// because tool arguments/paths stay opaque in product UI.
+// ## 두 표기를 다 읽는다 (goal M-AP1 2R)
+//
+// 이 클라이언트가 만나는 서버는 둘이고 **키 표기가 다르다**:
+//
+//   * 정본 스펙 `docs/api/openapi.yaml`의 `ApprovalProjection` = snake_case
+//     (Swift 서버가 그렇게 보냈고, 이 파서는 원래 그것만 읽었다).
+//   * 이식된 Rust 서버의 `ApprovalDto`(`bins/momo-server/src/dto.rs:2213`) =
+//     `#[serde(rename_all = "camelCase")]`.
+//
+// 한쪽만 읽는 파서는 다른 쪽 서버에서 **모든 행을 조용히 버린다** — `filter`가
+// 형상 검사를 통과하지 못한 행을 떨어뜨리므로 오류 하나 없이 빈 목록이 되고,
+// 빈 목록은 사람 자리에서 「결정할 것이 없다」로 읽힌다. 그 문장은 승인이 실제로
+// 기다리고 있을 때 거짓이다. 그래서 필드마다 두 표기를 모두 본다.
+//
+// 어느 쪽이 옳은지는 이 파일이 정할 일이 아니다(서버/스펙 소유자의 결정이고 PR
+// 이탈로 올렸다). 클라이언트가 할 수 있는 정직한 일은 **둘 다 읽는 것**이다.
+//
+// ## `payload`는 이제 타입에 있다 — 필요한 한 조각만
+//
+// 예전 주석은 "tool 인자/경로는 제품 UI에서 불투명하게 둔다"며 payload를 통째로
+// 제외했다. 그 결과 화면에는 `action_type`만 남았는데, 이 서버가 보내는
+// action_type은 언제나 `tool_call`이라 행 제목이 내부 식별자가 됐다.
+// 무엇을 허가하는지는 `payload.tool_call.name`에만 있다
+// (`crates/momo-agent/src/approval.rs:566-590` 실측). 그래서 **이름 하나만**
+// 꺼낸다 — 인자는 여전히 꺼내지 않는다(경로·프롬프트는 제품 UI의 몫이 아니다).
 
 export type ApprovalStatus =
   | "pending"
@@ -2023,10 +2044,23 @@ export interface Approval {
   requestedBy: string;
   /** The human the agent acted for, when the run recorded one. */
   onBehalfOf?: string;
-  /** Tool or control name, e.g. `work.spawn`. */
+  /** Approval class as the ledger stores it, e.g. `tool_call` / `work.spawn`. */
   actionType: string;
+  /**
+   * 이 승인이 실행하려는 툴의 이름 (`payload.tool_call.name`), 있을 때만.
+   *
+   * `actionType`과 다른 층위다: `tool_call`은 "툴 호출 승인"이라는 갈래 이름이고
+   * 사람이 알아야 하는 것은 **어떤 툴인가**이다. 없을 수도 있으므로 옵셔널이고,
+   * 없으면 화면은 지어내지 않는다.
+   */
+  toolName?: string;
   status: ApprovalStatus;
-  /** Server risk flag; false means the action cannot be undone. */
+  /**
+   * 서버가 **명시적으로** 실은 가역성 플래그.
+   *
+   * 부재는 "모른다"이지 "되돌릴 수 있다"가 아니다 — 서버가 그렇게 못박았다
+   * (`dto.rs:2210-2212`). 판정은 `features/inbox/model.ts`가 fail-closed로 한다.
+   */
   isReversible?: boolean;
   decidedBy?: string;
   decidedAtMs?: number;
@@ -2034,55 +2068,77 @@ export interface Approval {
   expiresAtMs?: number;
 }
 
-interface WireApproval {
-  id: string;
-  workspace_id: string;
-  run_id: string;
-  channel_id: string;
-  request_message_id?: string | null;
-  requested_by: string;
-  on_behalf_of?: string | null;
-  action_type: string;
-  status: string;
-  is_reversible?: boolean | null;
-  decided_by?: string | null;
-  decided_at_ms?: number | null;
-  decision_reason?: string | null;
-  expires_at_ms?: number | null;
+/**
+ * 한 필드를 두 표기로 찾는다: snake_case(정본 스펙) 먼저, 없으면 camelCase(Rust).
+ *
+ * 순서에 의미는 없다 — 한 행이 두 표기를 섞어 보낼 일은 없고, 섞여 오더라도 먼저
+ * 발견된 값을 쓰는 것이 "둘 다 못 읽어 행을 버리는 것"보다 낫다.
+ */
+function wireStr(source: unknown, snake: string, camel: string): string | undefined {
+  return str(source, snake) ?? str(source, camel);
 }
 
-function optional<T>(value: T | null | undefined): T | undefined {
-  return value === null || value === undefined ? undefined : value;
+function wireNum(source: unknown, snake: string, camel: string): number | undefined {
+  return num(source, snake) ?? num(source, camel);
 }
 
-function toApproval(wire: WireApproval): Approval {
-  return {
-    id: wire.id,
-    workspaceId: wire.workspace_id,
-    runId: wire.run_id,
-    channelId: wire.channel_id,
-    requestMessageId: optional(wire.request_message_id),
-    requestedBy: wire.requested_by,
-    onBehalfOf: optional(wire.on_behalf_of),
-    actionType: wire.action_type,
-    status: wire.status as ApprovalStatus,
-    isReversible: optional(wire.is_reversible),
-    decidedBy: optional(wire.decided_by),
-    decidedAtMs: optional(wire.decided_at_ms),
-    decisionReason: optional(wire.decision_reason),
-    expiresAtMs: optional(wire.expires_at_ms),
+function wireBool(source: unknown, snake: string, camel: string): boolean | undefined {
+  return bool(source, snake) ?? bool(source, camel);
+}
+
+/**
+ * 승인이 실행하려는 툴의 이름.
+ *
+ * 서버가 쓰는 payload는 `{run_id, action_type, tool_call: {call_id, name,
+ * arguments, arguments_json, tool_grant?}, approval_reason, resume_model}`이다
+ * (`crates/momo-agent/src/approval.rs:566-590`). 여기서 **이름 한 조각만** 꺼낸다:
+ * arguments에는 세션 id·경로·프롬프트가 들어 있고 그것은 인박스 행이 할 말이 아니다.
+ */
+function toolNameFromPayload(payload: unknown): string | undefined {
+  const call = record(payload)?.["tool_call"];
+  const name = str(call, "name")?.trim();
+  return name !== undefined && name !== "" ? name : undefined;
+}
+
+function toApproval(value: unknown): Approval {
+  const approval: Approval = {
+    id: wireStr(value, "id", "id") as string,
+    workspaceId: wireStr(value, "workspace_id", "workspaceId") as string,
+    runId: wireStr(value, "run_id", "runId") as string,
+    channelId: wireStr(value, "channel_id", "channelId") as string,
+    requestedBy: wireStr(value, "requested_by", "requestedBy") as string,
+    actionType: wireStr(value, "action_type", "actionType") as string,
+    status: wireStr(value, "status", "status") as ApprovalStatus,
   };
+  const requestMessageId = wireStr(value, "request_message_id", "requestMessageId");
+  if (requestMessageId !== undefined) approval.requestMessageId = requestMessageId;
+  const onBehalfOf = wireStr(value, "on_behalf_of", "onBehalfOf");
+  if (onBehalfOf !== undefined) approval.onBehalfOf = onBehalfOf;
+  const toolName = toolNameFromPayload(record(value)?.["payload"]);
+  if (toolName !== undefined) approval.toolName = toolName;
+  const isReversible = wireBool(value, "is_reversible", "isReversible");
+  if (isReversible !== undefined) approval.isReversible = isReversible;
+  const decidedBy = wireStr(value, "decided_by", "decidedBy");
+  if (decidedBy !== undefined) approval.decidedBy = decidedBy;
+  const decidedAtMs = wireNum(value, "decided_at_ms", "decidedAtMs");
+  if (decidedAtMs !== undefined) approval.decidedAtMs = decidedAtMs;
+  const decisionReason = wireStr(value, "decision_reason", "decisionReason");
+  if (decisionReason !== undefined) approval.decisionReason = decisionReason;
+  const expiresAtMs = wireNum(value, "expires_at_ms", "expiresAtMs");
+  if (expiresAtMs !== undefined) approval.expiresAtMs = expiresAtMs;
+  return approval;
 }
 
-function isWireApproval(value: unknown): value is WireApproval {
+/** 필수 칸이 두 표기 중 하나로라도 다 있는 행만 쓴다. */
+export function isWireApproval(value: unknown): boolean {
   return (
-    str(value, "id") !== undefined &&
-    str(value, "workspace_id") !== undefined &&
-    str(value, "run_id") !== undefined &&
-    str(value, "channel_id") !== undefined &&
-    str(value, "requested_by") !== undefined &&
-    str(value, "action_type") !== undefined &&
-    str(value, "status") !== undefined
+    wireStr(value, "id", "id") !== undefined &&
+    wireStr(value, "workspace_id", "workspaceId") !== undefined &&
+    wireStr(value, "run_id", "runId") !== undefined &&
+    wireStr(value, "channel_id", "channelId") !== undefined &&
+    wireStr(value, "requested_by", "requestedBy") !== undefined &&
+    wireStr(value, "action_type", "actionType") !== undefined &&
+    wireStr(value, "status", "status") !== undefined
   );
 }
 
@@ -2092,12 +2148,24 @@ export async function fetchApprovals(
   status: ApprovalStatus = "pending",
   limit = 50
 ): Promise<Approval[]> {
-  const res = await request<{ approvals: WireApproval[] }>(
+  const res = await request<{ approvals: unknown[] }>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/approvals?status=${status}&limit=${limit}`
   );
-  const approvals = arrayField(res, "approvals");
+  return approvalsFromWire(res);
+}
+
+/**
+ * `{approvals: [...]}` 한 페이지를 행 목록으로. 형상이 아닌 행은 조용히 버린다 —
+ * 한 행이 이상하다고 나머지를 못 보여줄 이유는 없다.
+ *
+ * 내보내는 이유는 이 파일의 다른 디코더들과 같다: 네트워크 없이 **와이어 형상
+ * 자체**를 테스트할 수 있어야 하고, 이 프로젝션은 표기가 둘이라 그 테스트가 특히
+ * 필요하다.
+ */
+export function approvalsFromWire(value: unknown): Approval[] {
+  const approvals = arrayField(value, "approvals");
   return approvals === null ? [] : approvals.filter(isWireApproval).map(toApproval);
 }
 
