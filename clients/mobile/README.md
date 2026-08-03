@@ -147,6 +147,31 @@ npm run gate:session        # does a session survive a restart? (below)
 
 `ios/` requires `pod install` once (`cd ios && pod install`).
 
+### `Podfile.lock` 이 경로에 안 흔들리는 이유 (건드리기 전에 읽을 것)
+
+`ios/Podfile` 맨 위에는 hermes-engine 체크섬을 정규화하는 짧은 CocoaPods 훅이 있다.
+장식이 아니다 — 그게 없으면 **체크아웃 절대경로마다 `Podfile.lock` 이 달라진다.**
+
+RN 0.86 의 `hermes-engine.podspec` 은 hermesc 를 `require.resolve` 로 찾아 그 절대경로를
+`HERMES_CLI_PATH` 로 박고(podspec:91-97), CocoaPods 는 직렬화한 podspec JSON 의 SHA1 을
+lock 의 SPEC CHECKSUM 으로 쓴다(cocoapods-core/specification.rb:685). 그래서 체크섬이
+작업 디렉터리의 함수가 되고, 워크트리·머신·CI 러너가 바뀔 때마다 lock 이 다시 쓰인다.
+락을 강제 검증하는 `pod install --deployment` 는 그 자리에서 실패한다.
+
+함정은 **같은 경로에서 두 번 돌리면 값이 안정적**이라는 것이다. "`pod install` 2회 연속
+diff 0" 으로는 절대 안 잡힌다. 결정성을 확인하려면 축을 경로로 잡아라:
+
+```bash
+# 다른 경로에 체크아웃해서 같은 체크섬이 나오는지 본다 — 이게 진짜 게이트다
+git worktree add --detach /tmp/lockcheck HEAD
+cd /tmp/lockcheck/clients/mobile && npm ci && cd ios && pod install
+git diff --stat Podfile.lock      # 비어 있어야 한다
+pod install --deployment          # exit 0 이어야 한다
+```
+
+`Podfile.lock` 의 hermes 줄이 이유 없이 흔들리기 시작하면 훅이 죽었는지부터 확인하고,
+`Pods/Local Podspecs/*.json` 에 `/Users/` 가 새로 생겼는지 본다(정상이면 96개 전부 0건).
+
 ---
 
 ## The session gate — the one question jest cannot ask
