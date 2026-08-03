@@ -55,3 +55,146 @@ D1-A + D2-A + D3-A + D4 + D5-A. macOS 알림(APNs macOS topic)도 같은 파이�
 - (−) Dawn이 상시 운영 인프라(relay)와 Apple Developer 계정·키 커스터디를 짊어진다 — momo의 첫 "제품 부속 SaaS".
 - (−) id-only는 알림 표시에 fetch 왕복 지연을 더한다 — 셀프호스터 서버가 느리면 알림도 느리다(문서에 명시).
 - 보류: E2E 봉투(v2), FCM/Android, 채널별 알림 설정·DND(후속 — P8 알림 예산과 함께), 웹 브라우저 알림(ADR-0119 v1 합류).
+
+---
+
+# 부록 A — `work_session_idle` 푸시가 조용히 폐기된다 (**미결 · Accept 대기**)
+
+> **상태: 제안(미결). 성재 승인 전까지 코드 변경 없음.** goal HYG-1(2026-08-03)에서 실측·기안.
+> 위 본문의 Accepted 결정을 바꾸지 않는다 — 이 절은 그 결정이 만든 어휘 경계에서
+> 발견된 결함과 선택지를 기록할 뿐이다.
+> 발단: ADR-0139 D1이 약속한 "완료 감지 푸시"(`0139:20`)가 실제로는 배달되지 않는다.
+
+## A-1. 증상 — 판정은 5개를 내고, 배달 경로는 4개만 안다
+
+`reason` 어휘가 체인 중간에서 갈라진다. 아래는 전부 실측(파일:줄)이다.
+
+| 지점 | 파일 | 어휘 | `work_session_idle` |
+|---|---|---|---|
+| 판정 SQL | `server-rust/crates/momo-push/src/judgment.rs:84-86` | 5 | **낸다** |
+| 판정 SQL(Swift 원본) | `workers/NotifierWorker/Sources/NotifierWorker/NotifierService.swift:367-369` | 5 | **낸다** |
+| Rust `PushReason` | `server-rust/crates/momo-push/src/dispatch.rs:45`·`:55` | 5 | **낸다** |
+| **relay 검증기** | `relay/PushRelay/Sources/PushRelay/PushDispatch.swift:71-73` | **4** | **거부** |
+| iOS NSE | `clients/iOS/MomoiOSKit/Sources/MomoiOSPushKit/PushNotification.swift:188` | 4 | 거부 |
+| RN iOS kit | `clients/mobile/ios/MomoPushKit/PushNotification.swift:218` | 4 | 거부 |
+| RN JS 미러 | `clients/mobile/src/push/contract.ts:62-68` | 4 | 거부 |
+| e2e 게이트 단정 | `scripts/verify_push_notifier.sh:601` | **3** | 거부 |
+
+`category` 는 **네 곳 모두 4종으로 일치**한다(`momo.message`·`momo.mention`·`momo.approval`·`momo.work`).
+`work_session_idle` 은 `momo.work` 로 분류되므로(`dispatch.rs:122-124`) **category 관문은 통과하고
+reason 관문에서만 죽는다** — 고칠 대상이 reason 어휘 하나로 좁혀진다는 뜻이다.
+
+## A-2. 죽는 경로 — 400이 "영구 실패"로 정산되어 폐기된다
+
+1. Swift API 가 idle 전이 시 `props.kind="work_session_idle"` 메시지를 넣는다
+   (`server/Sources/MomoServer/Routes/WorkSessionRoutes.swift:913-918`, 본문 `:933`).
+   호출자는 **work-host 서명 주체**(T2 데몬)다.
+2. 판정이 그 메시지를 **세션 소유자 한 명에게만** `work_session_idle` 로 라벨한다
+   (`judgment.rs:84-86` — `owner_member_id` 일치가 조건, `:106-109` 는 작성자 제외 규칙의 예외).
+3. notifier 가 서명해 relay 로 POST 한다(`momo-notifier/src/push_relay.rs:175`·`:204`).
+4. relay 가 reason 관문에서 던지고, 핸들러가 **어느 필드가 틀렸는지 알려주지 않는 맨 400** 으로 뭉갠다
+   (`relay/PushRelay/Sources/PushRelay/App.swift:67-71`).
+5. notifier 가 400 을 **영구 실패**로 분류한다(`push_relay.rs:137-143` — 429/5xx만 transient).
+6. 그대로 `settle` 되고 `Ok(true)` 를 돌려준다(`momo-notifier/src/push.rs:266-288`).
+   outbox 행은 done, `push_dispatch_log` 는 `apns_status=400`,
+   `apns_reason="relay_http: HTTP 400"`. **재시도 없음, 배달 없음, 사용자 신호 없음.**
+
+즉 매 idle 전이마다 서명된 요청이 한 번 오가고 조용히 묻힌다.
+
+## A-3. 왜 아무도 못 잡았나 — 목 relay 가 어휘를 검증하지 않는다
+
+`scripts/mock_push_relay.py` 의 검증 전부는 ⓐ 경로가 `/v1/push` 인가 ⓑ JSON 인가
+ⓒ 객체인가 셋뿐이고(`:53-65`), **무조건 200 + `apns_status:200`** 을 돌려준다(`:76-83`, `:87`).
+reason·category·schema·서명·필드집합 어느 것도 보지 않는다.
+
+그래서 `scripts/verify_work_session_idle.sh:388-405` 는 `apns_status=200` 인 행 3개를 기다렸다가
+`:406-421` 에서 "relay 가 `reason=work_session_idle`·`category=momo.work` 로 받았다"고 단정하며 **PASS 한다.**
+게이트가 초록인 이유는 동작이 옳아서가 아니라 **목이 아무것도 안 보기 때문**이다.
+
+## A-4. 영향 범위 — 배포 조합상 **잠재가 아니라 실동 결함**이다
+
+현재 배포는 **Swift API + Rust notifier + Swift PushRelay** 다:
+`infra/prod/docker/momo.Dockerfile:25-26`(prod 이미지가 굽는 API 는 Swift `MomoServer`),
+`infra/rust/docker-compose.push.yml:115-117`(notifier = Rust `momo-notifier`),
+`:62-63`(push-relay = Swift PushRelay).
+
+이 조합에서 A-2 가 그대로 성립한다. 반대로 **Rust API** 를 세우면 idle 전이 자체가
+work-host 서명 미포팅으로 400 거부라(`server-rust/bins/momo-server/src/routes/work_sessions.rs:466-472`,
+사유는 `:37-42`) 결함이 드러나지 않는다 — 즉 **API 를 Rust 로 옮기면 증상이 사라져 더 찾기 어려워진다.**
+
+잃는 것: **T2/T3 작업 세션의 "완료 — idle 대기" 알림이 통째로 안 간다.** ADR-0139 D1(`:20`)이
+약속한 바로 그 신호이고, 사용자 입장의 시나리오("폰 닫고 나갔다가 끝나면 알림 받고 돌아온다")의
+마지막 한 칸이다. 세션 자체·재부착·스크롤백은 정상이며 **알림만** 없다.
+호스트 사망 경로(`resume_offer`)는 어휘에 있으므로 정상 배달된다.
+
+## A-5. 선택지와 대가
+
+### 선택지 1 — **어휘를 5종으로 넓힌다** (relay + 클라 검증기)
+- 바꿀 곳: `PushDispatch.swift:71` · iOS `PushNotification.swift:188` · RN kit `:218` ·
+  RN JS `contract.ts:62-68` · 게이트 `verify_push_notifier.sh:601` · 목 relay.
+- 대가: **와이어 계약 변경**이라 ADR-0120 개정이 필요하다. 클라 검증기는 **앱 바이너리에 박혀
+  배포**되므로 이미 나간 빌드는 새 reason 을 모른다. RN 사본은
+  `scripts/verify_push_kit_inheritance.sh` 가 iOS 원본과 대조하므로 둘이 같이 움직여야 한다.
+- **완화(중요):** 구버전 앱은 **죽지 않고 fail-open** 한다 — NSE 가 파싱 실패 시 relay 의 정적
+  자리표시자를 그대로 보여준다(`clients/iOS/NotificationService/NotificationService.swift`
+  의 `// Fail open` 분기; 자리표시자는 `PushDispatch.swift:104-105` 의 `"momo"` / `"새 알림"`).
+  category 는 이미 `momo.work` 라 탭하면 작업 세션으로 정상 진입한다
+  (`PushRegistration.swift:136` `opensWorkSession`). 즉 **구버전에서는 문구만 일반형으로
+  퇴화하고 알림 자체는 도착한다.** 따라서 relay 를 먼저 넓히고 클라가 따라가는
+  **순차 배포가 가능**하며, 원자적 동시 랜딩이 필요 없다.
+- 남는 비용: 어휘가 하나 늘어 네 표면이 영구히 동기화 대상이 된다.
+
+### 선택지 2 — **판정에서 제거한다**
+- 바꿀 곳: `judgment.rs:84-86`·`:106-109` · Swift `NotifierService.swift:367-369`·`:391` ·
+  `PushReason::WorkSessionIdle` · `dispatch.rs:122-124`.
+- 대가: **ADR-0139 D1 이 약속한 기능의 철회**다. 사용자는 작업이 끝난 걸 알 방법이 없어
+  직접 들어와 확인해야 한다. Accepted ADR 을 코드 정리로 되돌리는 모양이라 어차피 성재 결정이 필요하다.
+- 이점: 와이어 무변경, 최소 diff, 낭비 왕복과 오해를 부르는 400 로그가 사라지고
+  게이트가 즉시 정직해진다.
+
+### 선택지 3 — **`resume_offer` 로 접는다**
+- 바꿀 곳: `judgment.rs:84-86` 이 `resume_offer` 를 내도록. category 는 어차피 양쪽 다
+  `momo.work`(`dispatch.rs:122-124`)라 **와이어·클라 변경 0**.
+- 왜 통하나: 어느 클라이언트도 `reason` 으로 분기하지 않는다 — 검증만 하고 버린다.
+  화면 동작은 전부 `category`(`IOSPushActionExecutor.swift:38`·`:63`,
+  `PushRegistration.swift:136`)와, id-only 봉투로 **다시 fetch 한 메시지의 `props.kind`** 가 정한다.
+  그래서 사용자에게는 오늘 당장 올바른 카드가 뜬다.
+- 대가: **`reason` 이 거짓말이 된다.** ADR-0139 D3 가 명시적으로 갈라 둔 두 경로
+  — 재부착(호스트 생존·idle) vs 계보 재개(호스트 사망·orphaned) — 이 `push_dispatch_log`
+  와 관측에서 한 값으로 뭉개진다. D3 는 "같은 버튼에 섞지 않는다"고까지 적었다(`0139:29`).
+  나중에 `reason == "resume_offer"` 를 근거로 뭔가를 만드는 사람이 idle 세션까지 함께 받는다.
+
+## A-6. 권고 — **선택지 1(어휘 확장), 단 검수 이후 · relay 우선 순차 배포**
+
+근거:
+1. `reason` 의 역할은 **서버 판정을 사실대로 나르는 것**이다. 선택지 3 은 그 필드를 거짓으로
+   만들어 ADR-0139 D3 가 비싸게 갈라 둔 구분을 관측에서 지우고, 선택지 2 는 Accepted ADR 이
+   약속한 기능을 조용히 철회한다. 둘 다 "검증기를 우회하려고 의미를 굽히는" 형태다.
+2. 선택지 1 의 최대 비용으로 지목되던 **클라 동시 배포 제약이 실제로는 없다** — A-5 의
+   fail-open 실측 때문이다. 구버전 앱도 알림을 받고 탭하면 올바른 화면으로 간다
+   (문구만 `"momo" / "새 알림"`). 그래서 **relay 를 먼저 넓히고 클라를 뒤따르게** 할 수 있다.
+3. 비용은 1회성·경계 확정적이다(어휘 1개, 표면 4개). 선택지 3 의 비용은 영구적이고
+   미래의 오독으로 갚는다.
+
+**순서 제안**
+1. 성재 Accept → ADR-0120 본문 어휘를 5종으로 개정(이 부록을 결정으로 승격).
+2. `mock_push_relay.py` 에 reason·category 검증을 넣는다. **이걸 먼저 해야** 게이트가
+   비로소 이 층을 본다(지금은 무엇을 바꾸든 초록이다).
+3. relay 확장 + `verify_push_notifier.sh:601` 을 5종으로.
+4. 클라 검증기 4종(iOS·RN kit·RN JS)과 `verify_push_kit_inheritance.sh` 를 한 세트로.
+5. **`clients/*` 는 성재 실기기 검수가 끝난 뒤에 건드린다** — 지금은 안정화 구간이다.
+
+## A-7. 이 배치가 남긴 못(현행 고정)
+
+코드 동작은 **하나도 바꾸지 않았다.** 대신 현행을 세 곳에서 못박아, 누가 어휘를 넓히면
+반드시 빨개지고 이 부록을 다시 읽게 했다.
+
+- `server-rust/crates/momo-push/src/dispatch.rs:71-88`(`accepted_by_relay`) + 그 테스트
+  `dispatch.rs:482-505` — **기존**. 다만 이 술어는 **문서·테스트 전용**이고 발송 경로에서
+  호출되지 않는다(호출부 0). 그래서 낭비 왕복은 그대로 일어난다.
+- `relay/PushRelay/Tests/PushRelayTests/PushRelayTests.swift`
+  `testWorkSessionIdleIsRejectedEvenThoughItsCategoryIsAllowed` — **신규**. relay 자기 스위트에
+  거부를 고정하고, category 는 통과하고 reason 에서만 죽는다는 사실까지 단정한다.
+- `scripts/tests/test_push_relay_vocabulary_contract.py` — **신규**. 다섯 표면의 어휘를 정적으로
+  대조하고, **목 relay 가 `work_session_idle` 을 200 으로 받는 것을 루프백 소켓으로 실증**한다
+  (docker·DB·외부망 없음). `local_gate.sh` "python syntax" 단계에 등록.

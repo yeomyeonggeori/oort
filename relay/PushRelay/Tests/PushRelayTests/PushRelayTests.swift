@@ -172,6 +172,38 @@ final class PushRelayTests: XCTestCase {
         XCTAssertNoThrow(try PushDispatch.decodeClosed(Data(json.utf8)))
     }
 
+    /// Pins the divergence recorded in **ADR-0120 부록 A (미결)**.
+    ///
+    /// Judgment can label a dispatch `work_session_idle`
+    /// (`server-rust/crates/momo-push/src/judgment.rs`, and the Swift
+    /// `NotifierService.swift` arm it was ported from), but this validator takes
+    /// only the other four reasons. Such a dispatch is answered a bare 400
+    /// (`App.swift`), classified as a **permanent** failure
+    /// (`momo-notifier/src/push_relay.rs`), settled into `push_dispatch_log`
+    /// and never retried — the notification is silently lost.
+    ///
+    /// The category here is `momo.work`, which this validator **does** accept,
+    /// so the rejection is attributable to the reason guard alone. That matters:
+    /// the change under consideration is about the reason vocabulary only.
+    ///
+    /// This asserts today's behaviour, not the desired one. Widening the
+    /// vocabulary is an ADR-0120 wire change and must turn this red together
+    /// with `momo-push`'s
+    /// `dispatch::tests::work_session_idle_is_not_deliverable_through_the_relay`
+    /// and `scripts/tests/test_push_relay_vocabulary_contract.py`.
+    func testWorkSessionIdleIsRejectedEvenThoughItsCategoryIsAllowed() throws {
+        let json = Self.dispatchJSON
+            .replacingOccurrences(
+                of: "\"reason\":\"mention\"", with: "\"reason\":\"work_session_idle\"")
+            .replacingOccurrences(of: "\"category\":\"momo.mention\"", with: "\"category\":\"momo.work\"")
+        XCTAssertThrowsError(try PushDispatch.decodeClosed(Data(json.utf8))) { error in
+            guard case DispatchValidationError.reason = error else {
+                XCTFail("expected DispatchValidationError.reason, got \(error)")
+                return
+            }
+        }
+    }
+
     func testSlidingWindowIsPerServer() async {
         let limiter = ServerRateLimiter(limit: 2)
         let now = Date(timeIntervalSince1970: 1_000)

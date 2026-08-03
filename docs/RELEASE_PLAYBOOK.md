@@ -10,6 +10,8 @@
 > - 마일스톤 backbone/의존: `ROADMAP.md` (M0~M8 정본).
 > - 현재 빌드 상태: `STATUS.md`.
 > - CI/CD 상세 스펙: `docs/cicd/00-apple-cicd-pipeline.md` (인증/match/notary/비용 근거).
+> - **번들 ID·App Group·keychain group·팀 ID 정본표: `docs/cicd/10-ios-signing-identity-runbook.md` §0.** 이 PLAYBOOK 본문의 식별자는 전부 그 표를 따른다(충돌 시 10번이 우선). 기계 검사는 `scripts/verify_ios_signing.sh`.
+> - 실기기 푸시 확인 절차: `docs/cicd/11-ios-push-device-check.md` · PushRelay 배포/검증: `docs/cicd/12-push-relay-deploy-runbook.md`.
 > - 검수 게이트 객관기준: `docs/cicd/05-qa-release-gate.md` (정본) + `03-store-readiness-gate.md` (체크리스트).
 > - 법무/행정: `docs/legal/00-prelaunch-admin-legal-checklist.md`, `legal/*`.
 > - 이 PLAYBOOK은 위를 **순서대로 묶은 단일 실행 경로 + 비용/기간 표 + gotcha 집약**이다. 충돌 시 위 정본 문서가 우선.
@@ -24,7 +26,7 @@
 PASS 기록(03 상단 PASS 블록: 날짜+커밋해시+빌드#+증거) 없는 release 트리거 = 규칙 위반.
 ```
 
-현재 상태(`STATUS.md`): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨(seq/outbox/RLS/AgentWorker 비용 회계). `clients/macOS`는 SwiftPM dev app 가능 단계이나 릴리스용 Xcode `.app`은 아직 없음. `clients/iOS`는 **미존재**. → 본 PLAYBOOK의 남은 선결은 staging/WebSocket/APNs, STAGE B(Xcode 프로젝트), QA gate 실측이다.
+현재 상태(`STATUS.md`): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨(seq/outbox/RLS/AgentWorker 비용 회계). **STAGE B(Xcode 프로젝트)는 그 뒤로 진행됐다** — `clients/macOS`는 SwiftPM 패키지 + `MomoMac.xcodeproj`(XcodeHost), `clients/iOS`는 `MomoiOS.xcodeproj`(앱 + 알림 확장), RN 클라이언트는 `clients/mobile/ios/MomoMobile.xcodeproj`로 **셋 다 존재**하고 서명 식별자는 `scripts/verify_ios_signing.sh`가 검사한다. → 남은 선결은 staging/WebSocket/APNs 실경로와 QA gate 실측, 그리고 CI에서의 아카이브 활성화(`ci-build.yml`의 `xcode-apps` 잡은 아직 주석)다.
 
 **전체 경로(요약):**
 ```
@@ -210,12 +212,19 @@ xcrun stapler validate build/MomoMac.dmg
 - [ ] $99/년 결제 → Team ID 확보 → ASC 접근 확인.
 
 ### 6.2 Identifiers / 인증서 / 프로비저닝 / APNs `[manual]`
-- [ ] **explicit App ID** `com.dawnkim.momo`(Push엔 explicit 필수, 와일드카드 불가). iOS/macOS 공유 또는 분리 정책 확정 후 `PRODUCT_BUNDLE_IDENTIFIER`와 단일 진실원천.
+- [ ] **explicit App ID**(Push엔 explicit 필수, 와일드카드 불가). **iOS/macOS 분리로 이미 확정됐다** — 정본표는 `docs/cicd/10-ios-signing-identity-runbook.md` §0이고, 정본은 **Xcode 프로젝트**다(fastlane을 프로젝트에 맞춘다. 반대로 하면 등록된 App ID·푸시 인증서·App Group·keychain group이 전부 흔들린다).
+  - 앱 `app.momo.ios` — capability **Push Notifications** + **App Groups**
+  - 알림 확장(NSE) `app.momo.ios.NotificationService` — capability **App Groups**. 확장도 **별도 App ID가 필요**하다(앱 ID로 덮이지 않는다).
+  - App Group `group.app.momo.ios` — **Developer Portal에 먼저 만든 뒤** 앱/확장 App ID 양쪽에 연결.
+  - keychain access group `$(AppIdentifierPrefix)app.momo.ios.shared` — 팀 prefix 안이라 포털 토글은 없고 entitlement로만 선언.
+  - macOS 앱은 `com.dawnkim.momo`(같은 팀, Developer ID 트랙 — STAGE D). **iOS와 값이 다른 것이 의도다**(자리표시자 아님).
+  - 팀 ID `YWQQFQM38J` — iOS·macOS·RN(iOS) 프로젝트의 `DEVELOPMENT_TEAM` 공통.
+  - 정합은 `scripts/verify_ios_signing.sh`가 기계로 검사한다(모든 match 호출 지점 == Xcode 정본, 자리표시자 없음, 공유 entitlement 일치).
 - [ ] 서명: **Xcode 자동서명(cloud signing) 권장**, CI는 **fastlane match(readonly)**.
 - [ ] **APNs Auth Key .p8(ES256)** 생성(Keys) — 1회 다운로드·재발급 불가·만료 없음·다수 앱/dev·prod 공용.
 
 ### 6.3 ASC 앱 레코드 + 빌드 업로드
-- [ ] ASC → Apps → `+` New App: 이름(중복불가·30자)·기본 언어·**Bundle ID 정확 일치**·SKU·사용자 액세스.
+- [ ] ASC → Apps → `+` New App: 이름(중복불가·30자)·기본 언어·**Bundle ID 정확 일치**(`app.momo.ios`)·SKU·사용자 액세스. **알림 확장(`app.momo.ios.NotificationService`)은 앱에 임베드되므로 ASC 레코드를 만들지 않는다** — App ID만 있으면 된다(`docs/cicd/10-ios-signing-identity-runbook.md` §2).
 - [ ] 빌드 업로드: Xcode Archive→Organizer→Distribute, 또는 CI `fastlane gym(export_method: app-store)` → `pilot`. **빌드번호 증가 + ITSAppUsesNonExemptEncryption 응답** 필수.
 
 ### 6.4 TestFlight
@@ -280,14 +289,14 @@ xcrun stapler validate build/MomoMac.dmg
 ## 9. GOTCHAS (배포 전 반드시 확인)
 
 1. **🔒 게이트 선행 절대 준수**: external TestFlight·스토어 제출·공증 공개 다운로드는 M7 PASS + 03 PASS 블록 기록 후에만. 기록 없는 release = 규칙 위반.
-2. **현재 산출물 부재**: iOS `.ipa`/`.app` 자체가 없음(`clients/macOS`=SwiftPM 라이브러리, `clients/iOS`=미존재) + 런타임 미검증 → STAGE A·B가 최대 선행. release 워크플로우는 C1/C2 전까지 실동작 불가(`xcode-apps` 잡 주석 유지).
+2. **CI 아카이브 미활성**: Xcode 프로젝트는 셋 다 생겼지만(`clients/macOS`·`clients/iOS`·`clients/mobile/ios`) `ci-build.yml`의 **`xcode-apps` 잡은 여전히 주석**이라 CI가 `.ipa`/`.app`을 만들지 않는다. release 워크플로우(`release-ios.yml`/`release-macos.yml`)는 그 잡과 서명 자격이 서기 전까지 실동작 불가. 이 gotcha는 산출물이 CI에서 나오기 시작하면 갱신할 것.
 3. **iOS 26 SDK + Xcode 26 게이트**: 2026-04-28부터 이 SDK/툴체인으로 빌드해야 ASC 업로드 가능(집행 04-29). C2 타깃 deployment/SDK 확인. (검증됨)
 4. **UGC = 1순위 리젝(1.2)**: 모더레이션 4종 누락 시 강제 리젝. 에이전트(1급 멤버) 생성 콘텐츠 모더레이션 정책도 별도 명시. 익명/랜덤 채팅 요소 있으면 1.2 자동 적용.
 5. **'24시간' 신고 처리는 가이드라인 원문 명문 아님**: 원문은 'timely responses'(적시 대응). 24h는 운영 권장치로만 취급.
 6. **계정 삭제(5.1.1(v))**: '비활성화'가 아니라 '삭제'여야 함. 누락 시 리젝.
 7. **암호화 export(ITSAppUsesNonExemptEncryption)**: 표준 TLS/APNs ES256만이면 면제(NO), 자체 암호화 있으면 YES + 수출 문서. 의존성 전수 확인 후 결정. 키 누락 시 매 빌드 수동 응답 요구.
 8. **privacy manifest ↔ App Privacy 라벨 일관**: 본체 + 포함 SDK(APNSwift/Sentry)의 `NSPrivacyAccessedAPITypes`(required reason) 정확 선언. 불일치 시 제출 문제.
-9. **Bundle ID explicit + 단일 진실원천**: Push엔 explicit 필수(와일드카드 불가). ASC 앱 레코드와 정확 일치, 재사용·삭제 제약. `com.dawnkim.momo` 확정 후 `PRODUCT_BUNDLE_IDENTIFIER`와 동기.
+9. **Bundle ID explicit + 단일 진실원천**: Push엔 explicit 필수(와일드카드 불가). ASC 앱 레코드와 정확 일치, 재사용·삭제 제약. **현재 정본**은 iOS 앱 `app.momo.ios` · NSE `app.momo.ios.NotificationService`(확장도 **별도 App ID**, ASC 레코드는 앱만) · macOS `com.dawnkim.momo` · App Group `group.app.momo.ios` · keychain group `$(AppIdentifierPrefix)app.momo.ios.shared` · 팀 `YWQQFQM38J` — 표는 `docs/cicd/10-ios-signing-identity-runbook.md` §0. **Xcode의 `PRODUCT_BUNDLE_IDENTIFIER`가 정본이고 fastlane이 따라간다**(반대 아님). `scripts/verify_ios_signing.sh`가 매 실행 검사하므로 이 검사를 깨는 변경은 머지 금지.
 10. **심사용 데모 SLA(2.1)**: 멀티팀/초대코드 흐름을 심사자가 끝까지 체험 가능해야 → 데모 워크스페이스 + 유효 초대코드 + 심사 기간 내내 server/Centrifugo/hermes 가동(꺼지면 빈화면 리젝).
 11. **공증 ≠ App Store**: Developer ID 공증(notarytool, 직접배포)과 App Store 인증서/프로비저닝은 별개 트랙. 두 산출물·문서를 섞지 말 것.
 12. **Sparkle 각 릴리스 공증·staple 필수**: 미공증 업데이트는 Gatekeeper 차단. appcast의 모든 .app/.dmg를 공증.
