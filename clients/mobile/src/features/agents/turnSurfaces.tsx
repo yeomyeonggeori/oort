@@ -112,7 +112,14 @@ export function AgentActivityBar({
    * 화면의 일이고, 이 파일은 문구와 배치만 안다. `runId`를 모르는 턴(레일이
    * 진행 중에 붙은 경우)에는 호출되지 않는다: 이름을 모르는 것을 멈출 수는 없다.
    */
-  renderStop?: (turn: {runId: string; memberId: string}) => React.ReactNode;
+  renderStop?: (turn: {
+    runId: string;
+    memberId: string;
+    /** 표시명, 영수증이 부를 이름 (2R M2). */
+    name: string;
+    /** 이 줄로 합쳐진 동시 실행의 수 (2R M3). */
+    runCount?: number;
+  }) => React.ReactNode;
   testID?: string;
 }): React.JSX.Element | null {
   const {lines, overflowCount} = useMemo(
@@ -122,11 +129,19 @@ export function AgentActivityBar({
       ),
     [turns, directory],
   );
-  /** 줄에서 다시 찾을 수 있게, memberId → runId. 병합 뒤에도 1:1이다. */
-  const runIds = useMemo(() => {
-    const out = new Map<string, string>();
+  /**
+   * 줄에서 다시 찾을 수 있게, memberId → (runId, 합쳐진 실행 수). 병합 뒤에도
+   * 에이전트당 한 줄이므로 1:1이다. `runCount`는 그 줄이 몇 개의 동시 실행을
+   * 접었는지이고, `runId`는 그중 가장 먼저 시작한 하나다 (2R M3).
+   */
+  const stops = useMemo(() => {
+    const out = new Map<string, {runId: string; runCount?: number}>();
     for (const turn of turns) {
-      if (turn.runId !== undefined) out.set(turn.memberId, turn.runId);
+      if (turn.runId === undefined) continue;
+      out.set(turn.memberId, {
+        runId: turn.runId,
+        ...(turn.runCount === undefined ? {} : {runCount: turn.runCount}),
+      });
     }
     return out;
   }, [turns]);
@@ -155,18 +170,25 @@ export function AgentActivityBar({
     // reading order, next to the control that acts on it.
     <View style={styles.activityBar} testID={testID}>
       {lines.map(line => {
-        const runId = runIds.get(line.memberId);
+        const stop = stops.get(line.memberId);
         return (
           <ActivityRow
             key={line.key}
             line={line}
             nowMs={nowMs}
             live={live}
+            testID={`${testID}-row-${line.memberId}`}
             stop={
               // 끊긴 레일에서는 중단을 권하지 않는다. 마지막으로 확인된 상태를
               // 보고 있는 것이고, 그 실행은 이미 끝났을 수 있다.
-              live && runId !== undefined && renderStop
-                ? renderStop({runId, memberId: line.memberId})
+              live && stop !== undefined && renderStop
+                ? renderStop({
+                    ...stop,
+                    memberId: line.memberId,
+                    // 화면에 이미 있는 그 이름을 그대로 넘긴다. 영수증이 다른
+                    // 경로로 이름을 구하면 같은 줄이 두 이름을 갖게 된다.
+                    name: line.name.name,
+                  })
                 : null
             }
           />
@@ -228,17 +250,20 @@ function ActivityRow({
   nowMs,
   live,
   stop,
+  testID,
 }: {
   line: AgentActivityLine;
   nowMs: number;
   live: boolean;
   /** 이 줄의 실행을 멈추는 컨트롤, 또는 null. 화면이 만들어 준다. */
   stop?: React.ReactNode;
+  /** 이 행이 확정 패널을 감쌀 수 있는 모양인지 테스트가 확인할 수 있게 (2R H1). */
+  testID?: string;
 }): React.JSX.Element {
   const showClock =
     live && line.state === 'working' && line.startedAtMs !== undefined;
   return (
-    <View style={styles.activityRow}>
+    <View style={styles.activityRow} testID={testID}>
       <Text
         accessibilityLabel={activityText(line)}
         numberOfLines={1}
@@ -290,6 +315,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: space.sm,
+    // `flexWrap` is REQUIRED, not tidying (2R H1). The stop control's confirm
+    // panel asks for the full width (`flexBasis: '100%'`), and in React Native a
+    // row does NOT wrap by default — `nowrap` is the flexbox default and RN does
+    // not override it. Without this, arming the control squeezes a full-width
+    // child into whatever is left of one line: the consequence sentence collapses
+    // toward zero width and the 중단 확정 button is pushed past the edge, which on
+    // the one control whose entire job is a deliberate second tap is the worst
+    // possible place for it. Every other wrapping row in this app states the same
+    // property explicitly (`MessageRow.tsx` reaction bar, and four more).
+    flexWrap: 'wrap',
   },
   activityText: {fontSize: font.meta, color: color.textMuted},
   activityTextFlex: {flexShrink: 1},

@@ -31,6 +31,26 @@ import { NetworkError } from "../../lib/http";
 export const CANCEL_CONFIRM_SENTENCE =
   "중단하면 이 실행이 여기서 끝납니다. 다시 시킬 수 있습니다.";
 
+/**
+ * The confirm sentence, plus what it does NOT reach when the agent has more than
+ * one run open in this channel (2R M3).
+ *
+ * `mergeAgentWorkingSignals` folds concurrent runs into one line and keeps the
+ * EARLIEST run's id, which is the id this button carries. So with two runs open
+ * the stop lands on one of them and the 작업 중 badge stays lit afterwards. The
+ * first cut said nothing about that, and a stop whose visible effect is nothing
+ * reads as a broken button — the reader's next move is to press it again, on a
+ * run that is already cancelled.
+ *
+ * Naming the number is the whole fix. It is not a warning and it does not ask
+ * for a second decision: it is the sentence that makes the badge's survival
+ * legible in advance, so the person can decide whether one is what they meant.
+ */
+export function cancelConfirmSentence(runCount: number | undefined): string {
+  if (runCount === undefined || runCount <= 1) return CANCEL_CONFIRM_SENTENCE;
+  return `${CANCEL_CONFIRM_SENTENCE} 이 에이전트는 이 대화에서 실행 ${runCount}개를 열어 두고 있고, 그중 가장 먼저 시작한 하나만 멈춥니다.`;
+}
+
 /** The first tap, which asks rather than acts. */
 export const CANCEL_ACTION_LABEL = "중단";
 
@@ -55,7 +75,13 @@ export type CancelOutcome =
   | { kind: "error"; sentence: string };
 
 /**
- * The receipt. It states what stopped AND what did not.
+ * The receipt. It names WHO, states what stopped, and states what did not.
+ *
+ * The name is not decoration (2R M2). This sentence lands under a list that can
+ * hold three agents' turns at once, so an unattributed 「중단했습니다」 sits
+ * directly beneath whichever line happens to be there and reads as a statement
+ * about that one. The reader would be told that the agent still working has
+ * stopped.
  *
  * `workSessionsTerminated` is `false` on this server and the linked ids are
  * listed precisely so a client can say the second half out loud. A receipt that
@@ -63,18 +89,27 @@ export type CancelOutcome =
  * of lie as a pause notice that claimed to kill a running job — which is the
  * sentence this very goal is here to correct.
  */
-export function cancelReceipt(result: AgentRunCancelResult): string {
+export function cancelReceipt(
+  result: AgentRunCancelResult,
+  agentName: string
+): string {
+  // 「의」는 받침에 따라 갈리지 않는 유일한 조사라 표를 거치지 않는다 —
+  // `attachParticle`에 없는 것이 누락이 아니라, 고를 것이 없기 때문이다.
+  const subject = `${agentName}의`;
   const linked = result.linkedWorkSessionIds.length;
   if (result.workSessionsTerminated) {
-    return "이 실행을 중단했습니다. 연결된 작업 세션도 함께 끝났습니다.";
+    return `${subject} 실행을 중단했습니다. 연결된 작업 세션도 함께 끝났습니다.`;
   }
-  if (linked === 0) return "이 실행을 중단했습니다.";
-  return `이 실행을 중단했습니다. 이 실행에 연결된 작업 세션 ${linked}개는 계속 돕니다. 그것을 멈추는 것은 데스크톱에서 할 수 있습니다.`;
+  if (linked === 0) return `${subject} 실행을 중단했습니다.`;
+  return `${subject} 실행을 중단했습니다. 이 실행에 연결된 작업 세션 ${linked}개는 계속 돕니다. 그것을 멈추는 것은 데스크톱에서 할 수 있습니다.`;
 }
 
 /** 200 → the receipt, as an outcome. */
-export function cancelSucceeded(result: AgentRunCancelResult): CancelOutcome {
-  return { kind: "cancelled", sentence: cancelReceipt(result) };
+export function cancelSucceeded(
+  result: AgentRunCancelResult,
+  agentName: string
+): CancelOutcome {
+  return { kind: "cancelled", sentence: cancelReceipt(result, agentName) };
 }
 
 /**

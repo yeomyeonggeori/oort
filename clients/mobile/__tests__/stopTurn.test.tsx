@@ -52,6 +52,7 @@ const SELF_ID = '11111111-1111-4111-8111-111111111111';
 const KIM_AGENT = 'cccccccc-1111-4111-8111-cccccccccccc';
 const GENERAL = 'ch-general';
 const RUN = 'A1111111-1111-4111-8111-A11111111111';
+const RUN_B = 'B2222222-2222-4222-8222-B22222222222';
 const BASE = 'https://api.example.com';
 
 const SELF: Member = {
@@ -213,6 +214,17 @@ function renderShell() {
   );
 }
 
+/** RN style props arrive as a value or a (possibly nested) array. */
+function flatStyle(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) {
+    return style.reduce<Record<string, unknown>>(
+      (acc, entry) => ({...acc, ...flatStyle(entry)}),
+      {},
+    );
+  }
+  return (style as Record<string, unknown> | null | undefined) ?? {};
+}
+
 const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
@@ -347,7 +359,9 @@ describe('세 가지 답', () => {
       expect(screen.getByTestId('turn-stop-outcome-cancelled')).toBeTruthy(),
     );
     const receipt = screen.getByTestId('turn-stop-outcome-cancelled');
-    expect(receipt).toHaveTextContent(/이 실행을 중단했습니다/);
+    // 이름을 부른다 (2R M2). 이 문장은 여러 에이전트의 줄 아래 서므로, 이름이
+    // 없으면 바로 위 줄에 대한 말로 읽힌다 — 아직 일하는 쪽이 멈췄다고.
+    expect(receipt).toHaveTextContent(/김인턴의 실행을 중단했습니다/);
     expect(receipt).toHaveTextContent(/작업 세션 2개는 계속 돕니다/);
   });
 
@@ -399,6 +413,56 @@ describe('세 가지 답', () => {
     expect(banner).toHaveTextContent(/실행은 그대로입니다/);
     // 다시 시도할 수 있게 확인 단계는 그대로 서 있다.
     expect(screen.getByTestId(COMMIT)).toBeTruthy();
+  });
+});
+
+describe('한 줄이 여러 실행을 접고 있을 때 (2R M3)', () => {
+  it('무엇을 멈추지 않는지 확인 문장이 먼저 말한다', async () => {
+    installFetch();
+    await openTurn();
+    // 같은 에이전트, 같은 채널, 두 번째 실행. `mergeAgentWorkingSignals`가 둘을
+    // 한 줄로 접고 **가장 먼저 시작한** 실행의 id를 남기므로, 버튼이 멈추는 것은
+    // 하나뿐이고 배지는 그대로 남는다.
+    await deliver(
+      statusFrame({run_id: RUN_B, phase: 'streaming', run_status: 'running'}),
+      35,
+    );
+
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() =>
+      expect(screen.getByTestId(`turn-stop-${KIM_AGENT}-confirm`)).toBeTruthy(),
+    );
+    const confirm = screen.getByTestId(`turn-stop-${KIM_AGENT}-confirm`);
+    // 아무 말도 없으면, 눌러도 배지가 남는 것이 고장난 버튼으로 읽힌다. 그때
+    // 사람이 하는 다음 행동은 이미 취소된 실행에 대고 다시 누르는 것이다.
+    expect(confirm).toHaveTextContent(/실행 2개를 열어 두고 있고/);
+    expect(confirm).toHaveTextContent(/가장 먼저 시작한 하나만 멈춥니다/);
+  });
+
+  it('하나뿐이면 그 문장은 붙지 않는다', async () => {
+    installFetch();
+    await openTurn();
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() =>
+      expect(screen.getByTestId(`turn-stop-${KIM_AGENT}-confirm`)).toBeTruthy(),
+    );
+    // 하나를 멈추는데 "그중 하나만"이라고 말하면 없는 복잡함을 만든다.
+    expect(
+      screen.getByTestId(`turn-stop-${KIM_AGENT}-confirm`),
+    ).not.toHaveTextContent(/열어 두고 있고/);
+  });
+});
+
+describe('확정 패널이 들어앉을 자리 (2R H1)', () => {
+  it('활동 줄의 행은 감쌀 수 있는 행이다', async () => {
+    // 픽셀은 Jest에서 잴 수 없다. 잴 수 있는 것은 **구조**이고, 그것이 실제
+    // 결정이다: 확정 패널은 `flexBasis: '100%'`로 한 줄 전체를 요구하는데 RN의
+    // 행은 기본이 `nowrap`이라, 부모가 감싸지 않으면 문장이 0폭으로 눌리고
+    // 「중단 확정」이 화면 밖으로 밀린다.
+    installFetch();
+    await openTurn();
+    const row = screen.getByTestId(`composer-working-row-${KIM_AGENT}`);
+    expect(flatStyle(row.props.style).flexWrap).toBe('wrap');
   });
 });
 

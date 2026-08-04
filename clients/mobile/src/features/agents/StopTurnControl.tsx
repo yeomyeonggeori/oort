@@ -3,7 +3,7 @@ import {
   CANCEL_ACTION_LABEL,
   CANCEL_BUSY_LABEL,
   CANCEL_COMMIT_LABEL,
-  CANCEL_CONFIRM_SENTENCE,
+  cancelConfirmSentence,
   cancelFailureOutcome,
   cancelSucceeded,
   type CancelOutcome,
@@ -45,10 +45,22 @@ import {useSession} from '../../session/useSession';
 
 export function StopTurnControl({
   runId,
+  agentName,
+  runCount,
   onOutcome,
   testIDPrefix = 'turn-stop',
 }: {
   runId: string;
+  /**
+   * 영수증이 부를 이름 (2R M2). 문장이 여러 에이전트의 줄 아래 서므로, 이름이
+   * 없으면 바로 위 줄에 대한 말로 읽힌다.
+   */
+  agentName: string;
+  /**
+   * 이 줄로 합쳐진 동시 실행의 수 (2R M3). `runId`는 그중 **가장 먼저 시작한**
+   * 하나이므로, 둘 이상이면 확인 문장이 그 사실을 미리 말한다.
+   */
+  runCount?: number;
   /**
    * 결과를 화면에 알린다. 영수증·이미 끝남·실패를 **부르는 쪽이** 그리는 이유는,
    * 이 컨트롤이 한 줄 안에 들어앉은 작은 버튼이고 문장은 그 줄보다 길기 때문이다.
@@ -63,6 +75,8 @@ export function StopTurnControl({
   const [tooFast, setTooFast] = useState(false);
   const armedAtMs = useRef(0);
 
+  const consequence = cancelConfirmSentence(runCount);
+
   const arm = useCallback(() => {
     setArmed(true);
     setTooFast(false);
@@ -70,9 +84,9 @@ export function StopTurnControl({
     // 엄지 밑의 버튼이 방금 의미를 바꿨다. 화면을 보지 않는 사람에게 그 변화는
     // 소리로만 전달된다 — RN에는 포커스를 옮길 웹의 `focus()`가 없다.
     AccessibilityInfo.announceForAccessibility(
-      `${CANCEL_CONFIRM_SENTENCE} 중단할지 묻습니다.`,
+      `${consequence} 중단할지 묻습니다.`,
     );
-  }, []);
+  }, [consequence]);
 
   const commit = useCallback(async () => {
     // 무장하지 않은 중단은 전송되지 않는다. `armed`가 false면 확정 버튼이
@@ -90,7 +104,7 @@ export function StopTurnControl({
     try {
       const result = await cancelAgentRun(workspaceId, runId);
       setArmed(false);
-      onOutcome(cancelSucceeded(result));
+      onOutcome(cancelSucceeded(result, agentName));
     } catch (error) {
       const outcome = cancelFailureOutcome(error);
       // 이미 끝난 실행은 더 물어볼 것이 없다. 확인 단계를 접는다 — 남겨 두면
@@ -100,7 +114,7 @@ export function StopTurnControl({
     } finally {
       setBusy(false);
     }
-  }, [armed, busy, onOutcome, runId, workspaceId]);
+  }, [agentName, armed, busy, onOutcome, runId, workspaceId]);
 
   if (!armed) {
     return (
@@ -121,7 +135,7 @@ export function StopTurnControl({
 
   return (
     <View style={styles.confirm} testID={`${testIDPrefix}-confirm`}>
-      <Text style={styles.consequence}>{CANCEL_CONFIRM_SENTENCE}</Text>
+      <Text style={styles.consequence}>{consequence}</Text>
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"

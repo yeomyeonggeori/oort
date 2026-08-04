@@ -94,18 +94,36 @@ export interface RosterMember {
   updatedAtMs: number;
 }
 
+/**
+ * Drop a `paused` that is not a boolean, and keep the row.
+ *
+ * The field is one optional column on a row that also carries the member's
+ * identity, their channels and their role. Refusing the whole row over it — the
+ * first cut of goal RN-C1 did exactly that — trades a small lie for a much
+ * bigger one: the agent vanishes from the roster, the 에이전트 목록 says
+ * 「아직 에이전트가 없습니다」, and the sidebar loses a member who is right there.
+ * "Cannot read one column" and "does not exist" are not the same statement.
+ *
+ * Dropping it lands the row in the arm that already exists for exactly this
+ * situation: `paused === undefined` means the list did not carry the fact, and
+ * the row reads 상태를 볼 수 없음. What must never happen is `"false"` (a string)
+ * surviving as a truthy value on the one screen whose job is to say whether an
+ * agent is asleep.
+ */
+function sanitizeRosterMember(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const row = value as Record<string, unknown>;
+  if (!("paused" in row) || typeof row.paused === "boolean") return value;
+  const { paused: _unreadable, ...rest } = row;
+  return rest;
+}
+
 function isRosterMember(value: unknown): value is RosterMember {
   const kind = str(value, "kind");
   const status = str(value, "status");
   const channelIds = arrayField(value, "channelIds");
   const capabilities = arrayField(value, "capabilities");
-  // `paused` is optional, but a non-boolean under that key is a row we cannot
-  // read: dropping it is better than letting `"false"` (a string) pass and be
-  // truthy on the one screen whose whole job is to say whether an agent is
-  // asleep. Absent stays absent — that arm is a fact, not a failure.
-  const paused = (value as Record<string, unknown> | null)?.paused;
   return (
-    (paused === undefined || typeof paused === "boolean") &&
     str(value, "id") !== undefined &&
     str(value, "workspaceId") !== undefined &&
     (kind === "human" || kind === "agent") &&
@@ -822,7 +840,9 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
   const res = await request<{ members: RosterMember[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
   );
-  return (arrayField(res, "members") ?? []).filter(isRosterMember);
+  return (arrayField(res, "members") ?? [])
+    .map(sanitizeRosterMember)
+    .filter(isRosterMember);
 }
 
 // ---- 에이전트 만들기 · 채널 배치 -------------------------------------------

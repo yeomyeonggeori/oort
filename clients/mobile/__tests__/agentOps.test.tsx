@@ -466,6 +466,33 @@ describe('a row says what state the agent is in', () => {
     ).toHaveLength(0);
   });
 
+  it('읽을 수 없는 paused 는 필드만 버리고 행은 남긴다 (2R M4)', async () => {
+    // 이 goal의 첫 판은 불리언이 아닌 `paused`를 만나면 **행 전체를 버렸다**.
+    // 컬럼 하나를 못 읽는 것과 그 멤버가 없는 것은 같은 진술이 아니고, 후자는
+    // 훨씬 큰 거짓말이다 — 목록은 「아직 에이전트가 없습니다」라고 말하게 되고,
+    // 바로 거기 있는 에이전트가 화면에서 사라진다.
+    //
+    // 필드만 버리면 이미 있는 갈래로 착지한다: 명부가 그 사실을 싣지 않은 것과
+    // 같은 자리, 즉 「상태를 볼 수 없음」이다. 절대 일어나면 안 되는 것은 문자열
+    // `"false"`가 truthy로 살아남는 것뿐이다.
+    installFetch({
+      roster: () =>
+        jsonResponse(200, {
+          members: ROSTER.map(member =>
+            member.id === KIM_AGENT ? {...member, paused: 'false'} : member,
+          ),
+        }),
+    });
+    await openAgentsTab();
+    const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
+    expect(row).toBeTruthy();
+    expect(row).toHaveTextContent(/상태를 볼 수 없음/);
+    // 그리고 「활성」도 「일시정지」도 아니다 — 읽지 못한 것을 어느 쪽으로도 접지
+    // 않는다.
+    expect(row).not.toHaveTextContent(/활성/);
+    expect(row).not.toHaveTextContent(/일시정지/);
+  });
+
   it('says 상태를 볼 수 없음 when the roster does not carry the fact', async () => {
     // 예전에는 이 문장이 **403 때문에** 나왔다(에이전트당 한 번의 거절). 이제
     // 그 문장이 나오는 자리는 명부가 `paused`를 싣지 않는 서버 하나뿐이고,
