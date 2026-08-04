@@ -7,7 +7,13 @@ import {
 } from '@momo/core/features/workspace/directory';
 import type {CancelOutcome} from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {
+  AppState,
+  StyleSheet,
+  Text,
+  View,
+  type AppStateStatus,
+} from 'react-native';
 import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space} from '../design/tokens';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
@@ -352,6 +358,38 @@ export default function ConversationScreen({
   }, [channelId, newestSeq, flushReadCursor]);
 
   useEffect(() => () => flushReadCursor(), [channelId, flushReadCursor]);
+
+  // ## 세 번째 갈래: **앱이 앞에서 사라진다** (goal RN-B4e / #1011)
+  //
+  // #997(PR #1003)의 알려진 잔여다. 위의 두 갈래는 **React 가 도는 동안**에만
+  // 성립한다 — 밀려남도 떠남도 커밋과 cleanup 이 있어야 일어나는 일이고, 홈 버튼을
+  // 누르거나 앱 스위처로 넘어가는 것은 이 트리에 아무 커밋도 일으키지 않는다.
+  // 예약된 `setTimeout` 은 iOS 가 앱을 재우는 순간 함께 멈추고, 마지막 600ms 창의
+  // 커서는 그대로 남는다. 사람은 읽었는데 배지는 남아 있다.
+  //
+  // 방향의 안전성은 위 문단이 이미 증명해 두었다: 서버가 클램프하고 뒤로 가지
+  // 않으므로 **일찍 보내는 것은 언제나 안전**하고, 위험한 것은 안 보내는 쪽뿐이다.
+  //
+  // `active` 가 아닌 **모든** 전이에서 보낸다 — `background` 뿐 아니라 `inactive`
+  // 도. iOS 는 알림 센터를 내리거나 전화가 오는 것 같은 짧은 방해에서 `inactive`
+  // 만 주고 곧 `active` 로 돌아오지만, 앱을 정말 재울 때도 `inactive` 를 먼저
+  // 주고 그 다음에야 `background` 를 준다. 둘을 구별하려 들면 「어느 쪽인지 알게
+  // 되는 시점」이 이미 늦은 뒤다. 잘못 보낸 쪽의 대가는 왕복 하나이고, 안 보낸
+  // 쪽의 대가는 잘못된 배지다.
+  //
+  // 그리고 대부분의 전이에서는 **아무 일도 일어나지 않는다**: `flushReadCursor` 는
+  // 보류 중인 값이 없으면 즉시 돌아오고, 보류는 마지막 메시지로부터 600ms 안에만
+  // 존재한다. 이 구독이 요청을 만드는 것은 정확히 그 창 안에서 앱이 사라질 때뿐이다.
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      (next: AppStateStatus) => {
+        if (next === 'active') return;
+        flushReadCursor();
+      },
+    );
+    return () => subscription.remove();
+  }, [flushReadCursor]);
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);

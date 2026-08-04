@@ -10,6 +10,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
+import {AppState} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -289,7 +290,37 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   resetAgentWorking();
+  // `captureAppState` 아래의 스파이를 되돌린다. 테스트가 중간에 던져도 다음
+  // 테스트가 남의 stub 위에서 도는 일이 없어야 한다.
+  jest.restoreAllMocks();
 });
+
+/**
+ * `AppState` 전이를 손으로 낸다 (goal RN-B4e / #1011).
+ *
+ * RN 0.86 의 jest mock 은 `AppState.emit` 을 노출하지 않으므로, 구독 자체를 가로채
+ * 핸들러를 모았다가 부른다 — 트리가 마운트되기 **전에** 걸어야 하므로 렌더보다 먼저
+ * 부른다. 진짜 전이와 같은 것을 재현한다: 화면은 그대로 마운트돼 있고 어떤 cleanup
+ * 도 돌지 않는데 앱만 앞에서 사라진다.
+ */
+function captureAppState(): (status: string) => void {
+  const handlers: ((status: string) => void)[] = [];
+  jest.spyOn(AppState, 'addEventListener').mockImplementation(((
+    _event: string,
+    fn: (status: string) => void,
+  ) => {
+    handlers.push(fn);
+    return {
+      remove: () => {
+        const at = handlers.indexOf(fn);
+        if (at >= 0) handlers.splice(at, 1);
+      },
+    };
+  }) as never);
+  return status => {
+    for (const fn of [...handlers]) fn(status);
+  };
+}
 
 /** 열린 턴 하나. `over` 로 상태나 헤드라인만 바꾼다. */
 function turn(over: Record<string, unknown> = {}) {
@@ -546,5 +577,74 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
 
     // 타이머가 울릴 시간은 없었다. 그래도 보고돼야 한다.
     expect(cursorPuts()).toBe(before + 1);
+  });
+
+  // ===========================================================================
+  // 그리고 **앱이 앞에서 사라질 때도** (goal RN-B4e / #1011)
+  //
+  // #997 의 알려진 잔여. 위 테스트가 지키는 「떠남」은 cleanup 이고, cleanup 은
+  // React 가 돌아야 돈다 — 홈 버튼도 앱 스위처도 이 트리에 커밋을 일으키지 않는다.
+  // 예약된 타이머는 iOS 가 앱을 재우는 순간 함께 멈추고, 마지막 600ms 창의 커서는
+  // 남는다. 자기치유이긴 하다(다음에 열면 다시 보고한다) — 그러나 그 사이 배지는
+  // 읽은 대화에 대해 거짓을 말한다.
+  // ===========================================================================
+  it('앱이 백그라운드로 가도 커서는 보고된다 — 600ms 창의 잔여 (#1011)', async () => {
+    const emitAppState = captureAppState();
+    await openConversation();
+    const fetchMock = globalThis.fetch as unknown as jest.Mock;
+    const cursorPuts = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.includes('/read-state') &&
+          (init as {method?: string} | undefined)?.method === 'PUT',
+      ).length;
+    await settle(700);
+    const before = cursorPuts();
+
+    await act(async () => {
+      channelSub()?.__emit('publication', {
+        data: {
+          type: 'message.new',
+          v: 1,
+          ts: BASE_MS + 400_000,
+          seq: 400,
+          payload: framePayload(400),
+        },
+      });
+    });
+
+    // 600ms 가 지나기 전에 앱이 앞에서 사라진다. 화면은 그대로 마운트돼 있고,
+    // 어떤 cleanup 도 돌지 않는다 — 그것이 이 갈래가 필요한 이유 전부다.
+    await act(async () => {
+      emitAppState('background');
+    });
+    await settle(50);
+
+    expect(cursorPuts()).toBe(before + 1);
+  });
+
+  it('앱이 돌아오는 것은 보고할 일이 아니다', async () => {
+    // `active` 로 오는 전이에서까지 보내면, 앱을 열 때마다 왕복 하나와 무효화 한
+    // 벌이 따라붙는다 — 화면이 다시 그려지며 어차피 예약될 값을 위해서.
+    const emitAppState = captureAppState();
+    await openConversation();
+    const fetchMock = globalThis.fetch as unknown as jest.Mock;
+    const cursorPuts = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.includes('/read-state') &&
+          (init as {method?: string} | undefined)?.method === 'PUT',
+      ).length;
+    await settle(700);
+    const before = cursorPuts();
+
+    await act(async () => {
+      emitAppState('active');
+    });
+    await settle(50);
+
+    expect(cursorPuts()).toBe(before);
   });
 });
