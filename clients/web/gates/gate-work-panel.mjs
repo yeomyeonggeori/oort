@@ -28,6 +28,8 @@
 //     expected failure: "a closed panel kept (or backfilled) history"
 //   WORK_PANEL_GATE_PROVE_RED_COOPEN=1 npm run gate:work-panel
 //     expected failure: "the thread pane stayed beside the work panel"
+//   WORK_PANEL_GATE_PROVE_RED_LIVE=1 npm run gate:work-panel
+//     expected failure: "the 1Hz elapsed clock sits inside a live region"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
 // ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
@@ -55,6 +57,7 @@ const proveRedArgs = process.env.WORK_PANEL_GATE_PROVE_RED_ARGS === "1";
 const proveRedFold = process.env.WORK_PANEL_GATE_PROVE_RED_FOLD === "1";
 const proveRedVolatile = process.env.WORK_PANEL_GATE_PROVE_RED_VOLATILE === "1";
 const proveRedCoOpen = process.env.WORK_PANEL_GATE_PROVE_RED_COOPEN === "1";
+const proveRedLive = process.env.WORK_PANEL_GATE_PROVE_RED_LIVE === "1";
 
 const DELTAS = ["배포 로그를 ", "먼저 ", "읽었습니다."];
 const DELTA_SENTENCE = DELTAS.join("");
@@ -469,6 +472,42 @@ async function exerciseScenario(browser, scenario) {
   if (!streamed.includes(DELTA_SENTENCE)) {
     throw new Error(
       `${label}: delta order — expected "${DELTA_SENTENCE}", panel read "${streamed}"`
+    );
+  }
+
+  // ---- 1b. 읽어 주는 것과 읽어 주지 않는 것 ----------------------------------
+  // 상태 칩은 live 영역이고, 1Hz 경과 시계는 그 **바깥**이다. live 영역을 헤더
+  // 줄 전체로 잡으면 보조기술이 초당 한 번 숫자를 낭독한다 — 컴포저 진입점
+  // 버튼에서 접근성 이름을 명시해 피한 함정의 live 판본이라, 같은 실수를 다른
+  // 문법으로 되풀이하지 않도록 DOM으로 잠근다.
+  if (proveRedLive) {
+    // red seam: 드라이버가 DOM에서 live 영역을 헤더 줄로 끌어올린다(고치기 전
+    // 모양). 아래 단언이 DOM을 읽고 있다면 반드시 깨진다. 제품 소스는 그대로다.
+    await page.evaluate(() => {
+      const chip = document.querySelector('[data-testid="agent-work-panel-state"]');
+      chip?.removeAttribute("aria-live");
+      chip?.parentElement?.setAttribute("aria-live", "polite");
+    });
+  }
+  const liveRegions = await page.evaluate(() => {
+    const closestLive = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return "missing";
+      return node.closest("[aria-live]") === null ? "outside" : "inside";
+    };
+    return {
+      state: closestLive('[data-testid="agent-work-panel-state"]'),
+      elapsed: closestLive('[data-testid="agent-work-panel-elapsed"]'),
+    };
+  });
+  if (liveRegions.state !== "inside") {
+    throw new Error(
+      `${label}: the state chip must be a live region (it is the fact a reader is waiting on), got "${liveRegions.state}"`
+    );
+  }
+  if (liveRegions.elapsed === "inside") {
+    throw new Error(
+      `${label}: the 1Hz elapsed clock sits inside a live region, so assistive tech reads a number once a second`
     );
   }
 
