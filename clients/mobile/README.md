@@ -261,6 +261,16 @@ takes that away and the flow must go RED at the 「작업 중」 assertion — t
 proof the assertion is load-bearing, and it is worth re-running if you ever
 change the mock.
 
+**The server under this lane is Swift, not the live one.**
+`infra/docker-compose.e2e.yml` builds `server/` (the port's original) for
+api/relay/worker; `server-rust` never enters this stack. So a green table is
+evidence about **the app's UI mechanics** — login, the working signal, the stop
+and approval controls, the agents tab — and not evidence that the two servers
+emit the same wire: frame patterns and card props can differ. When Swift is
+deleted at parity, this lane has to be moved onto a `server-rust` e2e stack.
+The runner prints this next to the 실기기 block every run so a green table is
+never read as "same as live".
+
 **What a green table here does NOT cover.** The simulator has no APNs, so the
 lock-screen approval path — the one where a person decides without opening the
 app — is not exercised at all. The runner prints that as an explicit 실기기
