@@ -21,6 +21,7 @@ import {
   sweepAgentWorking,
   ZOMBIE_CLEAR_MS,
 } from "./agentWorkingSignal";
+import { recordAgentProgress, resetWorkLogs } from "./workLogStore";
 
 // =============================================================================
 // AgentWorkingRail (AX-5 / MOMO-613): renders nothing, and is the only thing
@@ -85,6 +86,12 @@ export function AgentWorkingRail() {
   const onEvent = useCallback(
     (pair: AgentSubscription, event: AgentProgressEvent) => {
       const nowMs = Date.now();
+      // 작업 패널(goal WEB-WP1)은 이 레일에서 **분기**한다. 새 구독을 만들지
+      // 않는 이유는 구독이 (채널 x 에이전트) 곱이고 이미 상한이 걸려 있어서,
+      // 패널이 자기 것을 하나 더 여는 순간 그 상한이 뜻하는 바가 달라지기
+      // 때문이다. 스토어는 **보고 있는 run만** 받아 적으므로(workLogStore),
+      // 아무도 패널을 안 열었으면 이 호출은 즉시 돌아온다.
+      recordAgentProgress(event);
       const next = applyAgentEvent(tracksRef.current, event, pair, nowMs);
       if (next === tracksRef.current) return;
       tracksRef.current = next;
@@ -126,6 +133,7 @@ export function AgentWorkingRail() {
       tracksRef.current = new Map();
       ownedRef.current = new Set();
       resetAgentWorking();
+      resetWorkLogs();
     };
   }, [workspaceId]);
 

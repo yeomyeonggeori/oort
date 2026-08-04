@@ -25,6 +25,8 @@ import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
+import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
+import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentTurnFixture } from "@/features/agents/AgentTurnFixture";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 
@@ -72,6 +74,23 @@ export function AppShell({
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
   // 덮인 본문은 탭 순서에서 함께 빠진다. 이것이 초점 트랩이다 (shellNav.tsx).
   const mainRef = useInertWhile(isMobile && drawerOpen);
+  // 작업 패널도 좁은 창에서는 라우트를 덮으므로 같은 규칙을 받는다. 문턱은
+  // 사이드바 문턱(600px)이 아니라 tokens.css `work-panel-pane`의 900px이다:
+  // 이 패널은 사이드바 옆 라우트 상자에 붙어서, 601px 창이면 라우트에 41px밖에
+  // 남지 않는다. ChatShell이 작업 세션 패널에 같은 쿼리를 같은 이유로 쓴다.
+  const workPanelOpen = useWorkPanelTarget() !== null;
+  const [paneDrawerWidth, setPaneDrawerWidth] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(width < 900px)");
+    const sync = () => setPaneDrawerWidth(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  const routeRef = useInertWhile<HTMLDivElement>(
+    paneDrawerWidth && workPanelOpen
+  );
 
   const openDrawer = useCallback((opener?: HTMLElement | null) => {
     drawerOpenerRef.current = opener ?? null;
@@ -202,16 +221,26 @@ export function AppShell({
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
                * 소유한 표면 안에 머문다. */}
-              <div className="flex min-h-0 min-w-0 flex-1">
-                <RenderErrorBoundary
-                  resetKey={routePath}
-                  title="이 화면을 열지 못했습니다"
-                  message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
-                  retryLabel="다시 시도"
-                  onRetry={() => resetRouteQueries(queryClient)}
-                >
-                  <Outlet />
-                </RenderErrorBoundary>
+              {/* `relative`는 폰 폭에서 작업 패널이 라우트를 덮을 때 필요한
+               * 앵커다(tokens.css `work-panel-pane`). 채팅 표면은 자기 안에 같은
+               * 앵커를 이미 갖고 있으므로 스레드·작업 세션 패널의 자리는 그대로다. */}
+              <div className="relative flex min-h-0 min-w-0 flex-1">
+                <div ref={routeRef} className="flex min-h-0 min-w-0 flex-1">
+                  <RenderErrorBoundary
+                    resetKey={routePath}
+                    title="이 화면을 열지 못했습니다"
+                    message="서버에서 받은 내용을 읽지 못했습니다. 다른 화면은 그대로 쓸 수 있습니다."
+                    retryLabel="다시 시도"
+                    onRetry={() => resetRouteQueries(queryClient)}
+                  >
+                    <Outlet />
+                  </RenderErrorBoundary>
+                </div>
+                {/* 작업 패널(goal WEB-WP1)은 라우트 옆에 한 벌만 있다. 진입점이
+                 * 대화 활동 줄과 에이전트 허브 둘이라 어느 한 라우트 안에 두면
+                 * 다른 쪽에서 열 수 없고, 두 벌을 두면 같은 run에 대해 두 로그가
+                 * 생긴다. */}
+                {!stress && <AgentWorkPanel />}
               </div>
             </main>
           </div>

@@ -30,6 +30,7 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import {
@@ -408,9 +409,21 @@ export function ChatShell() {
   // 채널에 70px만 남기므로, 그 폭에서는 스레드가 채널 표면 전체를 받는다
   // (tokens.css `thread-pane`). 덮은 표면은 위와 같은 이유로 탭 순서에서 빠진다.
   const isMobile = useIsMobileShell();
+  // 「작업 패널」(goal WEB-WP1)은 이 표면 **바깥**, 셸의 라우트 상자 옆에 산다.
+  // 그래서 이 파일이 이미 지키던 "부차 표면은 한 번에 하나" 규칙의 사각지대에
+  // 있었다: 사이드바 240 + 스레드 320 + 작업 패널 320 = 880이라, 900px 창에서
+  // 채팅에 20px가 남는다. 산술이 아니라 실렌더로 쟀고 컴포저가 26px였다
+  // (gate-work-panel의 co-open-900 시나리오).
+  //
+  // 그래서 규칙을 그대로 한 칸 넓힌다. 스레드가 작업 세션 패널을 가리고 있다가
+  // 닫히면 되돌아오는 것과 **같은 방식으로**(닫는 것이 아니라 가리는 것이다),
+  // 작업 패널이 열려 있는 동안은 이 표면의 부차 패널이 물러난다. 상태는 그대로
+  // 남아 있으므로 작업 패널을 닫으면 읽던 스레드가 그 자리에 돌아온다.
+  const workPanelOpen = useWorkPanelTarget() !== null;
   const covered =
-    (workOpen && !thread && stressCount === 0 && drawerWidth) ||
-    (thread !== null && channelId !== null && isMobile);
+    !workPanelOpen &&
+    ((workOpen && !thread && stressCount === 0 && drawerWidth) ||
+      (thread !== null && channelId !== null && isMobile));
   useEffect(() => {
     const node = coveredRef.current;
     if (!node) return;
@@ -723,7 +736,7 @@ export function ChatShell() {
         )}
       </div>
 
-      {thread && channelId !== null && (
+      {thread && channelId !== null && !workPanelOpen && (
         <ThreadPanel
           workspaceId={workspaceId}
           channelId={channelId}
@@ -741,7 +754,7 @@ export function ChatShell() {
         />
       )}
 
-      {workOpen && !thread && stressCount === 0 && (
+      {workOpen && !thread && stressCount === 0 && !workPanelOpen && (
         <WorkPanel
           channelId={channelId}
           scope={workScope}

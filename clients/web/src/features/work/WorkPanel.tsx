@@ -1,3 +1,7 @@
+// 이 파일은 「작업 세션」 패널이다 — ACP 작업 세션 목록과 관전 터미널(`ch:` 레일의
+// work.* 프레임, 세션 단위). 「작업 패널」을 찾아왔다면 그것은 다른 표면이다:
+// `features/agents/AgentWorkPanel.tsx` — agent run 하나의 진행 스트림(`agent:`
+// 레일, 휘발, run 단위, goal WEB-WP1). 이름만 닮았고 데이터도 수명도 다르다.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";

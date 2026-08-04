@@ -32,6 +32,7 @@ import {
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
 import { memberNameParts } from "@/features/workspace/useWorkspace";
+import { openWorkPanel } from "@/features/agents/workLogStore";
 import {
   MENTION_ROUTING_ROW_CLASS,
   MentionRoutingBar,
@@ -157,19 +158,60 @@ function AgentActivityBar({
       data-testid="composer-working"
       data-live={live ? "" : undefined}
     >
-      {lines.map((line) => (
-        <li
-          key={line.key}
-          className="flex items-baseline gap-2 text-meta text-ink-muted"
-        >
-          <ActivityText line={line} live={live} />
-          {live && line.state === "working" && line.startedAtMs !== undefined && (
-            <span className="shrink-0 text-timestamp" data-numeric>
-              {elapsedLabel(line.startedAtMs, nowMs)}
-            </span>
-          )}
-        </li>
-      ))}
+      {lines.map((line) => {
+        const turn = turns.find((t) => t.memberId === line.memberId);
+        const runId = turn?.runId;
+        const body = (
+          <>
+            <ActivityText line={line} live={live} />
+            {live && line.state === "working" && line.startedAtMs !== undefined && (
+              <span className="shrink-0 text-timestamp" data-numeric>
+                {elapsedLabel(line.startedAtMs, nowMs)}
+              </span>
+            )}
+          </>
+        );
+        return (
+          <li key={line.key} className="flex text-meta text-ink-muted">
+            {/* 작업 패널 진입점 ① (goal WEB-WP1). 이 줄은 이미 "지금 무슨 일이
+                일어나고 있는가"이고, 그 과정을 펼쳐 보는 자리도 여기다.
+                run을 특정하지 못한 턴은 버튼이 되지 않는다: 눌러도 아무 일이
+                없는 컨트롤은 고장 난 버튼으로 읽힌다. */}
+            {turn === undefined || runId === undefined ? (
+              <span className="flex min-w-0 items-baseline gap-2">{body}</span>
+            ) : (
+              <button
+                type="button"
+                onClick={(event) =>
+                  openWorkPanel(
+                    {
+                      runId,
+                      memberId: turn.memberId,
+                      channelId: turn.channelId,
+                      origin: "activity",
+                      // 이 줄이 이미 그리고 있는 시계와 같은 값이다. 패널이 자기
+                      // 힘으로는 얻을 수 없는 유일한 값이라 여기서 넘겨준다.
+                      ...(turn.startedAtMs !== undefined
+                        ? { startedAtMs: turn.startedAtMs }
+                        : {}),
+                    },
+                    // 닫을 때 캐럿이 돌아올 자리. WebKit은 클릭으로 버튼에
+                    // 포커스를 주지 않으므로 추정에 맡기지 않는다.
+                    event.currentTarget
+                  )
+                }
+                // 이름을 명시한다. 자식에 맡기면 접근성 이름에 1초마다 바뀌는
+                // 시계가 들어가고, 보조기술이 그 줄을 초당 한 번 다시 읽는다.
+                aria-label={`${activityText(line)}. 진행 과정 열기`}
+                data-testid="composer-working-open"
+                className="flex min-w-0 items-baseline gap-2 rounded-sm text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                {body}
+              </button>
+            )}
+          </li>
+        );
+      })}
       {overflowCount > 0 && (
         <li className="text-meta text-ink-muted">
           외 <span data-numeric>{overflowCount}</span>명

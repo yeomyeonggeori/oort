@@ -30,6 +30,8 @@ import {
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
+import { openWorkPanel } from "@/features/agents/workLogStore";
+import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
 import {
   memberFor,
   useDirectory,
@@ -738,16 +740,9 @@ function AgentProfileSection({
               data-testid="agent-hub-work-summary"
             >
               {currentWork ? (
-                <AgentTurnBadge
-                  state={currentWork.state}
-                  text={
-                    currentWork.state === "working" ? "작업 중" : "승인 대기"
-                  }
-                  label={
-                    currentWork.state === "working"
-                      ? `${agent.displayName} 에이전트가 작업 중입니다.`
-                      : `${agent.displayName} 에이전트가 승인을 기다립니다.`
-                  }
+                <CurrentWorkValue
+                  agentName={agent.displayName}
+                  work={currentWork}
                   live={live}
                 />
               ) : (
@@ -900,6 +895,67 @@ function AgentProfileSection({
         </p>
       </section>
     </div>
+  );
+}
+
+/**
+ * 「현재 작업」 값 한 칸, 그리고 작업 패널 진입점 ② (goal WEB-WP1).
+ *
+ * run을 특정하지 못한 신호는 배지 그대로 둔다: 열 run이 없는데 버튼을 내주면
+ * 눌러도 아무 일이 없고, 그런 컨트롤은 고장 난 버튼으로 읽힌다.
+ */
+function CurrentWorkValue({
+  agentName,
+  work,
+  live,
+}: {
+  agentName: string;
+  work: AgentWorkingSignal;
+  live: boolean;
+}) {
+  const badge = (
+    <AgentTurnBadge
+      state={work.state}
+      text={work.state === "working" ? "작업 중" : "승인 대기"}
+      label={
+        work.state === "working"
+          ? `${agentName} 에이전트가 작업 중입니다.`
+          : `${agentName} 에이전트가 승인을 기다립니다.`
+      }
+      live={live}
+    />
+  );
+  const runId = work.runId;
+  if (runId === undefined) return badge;
+  return (
+    <button
+      type="button"
+      onClick={(event) =>
+        openWorkPanel(
+          {
+            runId,
+            memberId: work.memberId,
+            channelId: work.channelId,
+            origin: "hub",
+            // 패널이 자기 힘으로는 얻을 수 없는 값(여는 프레임은 run id가 알려지기
+            // 전에 지나간다). 레일이 봤다면 여기서 넘겨준다.
+            ...(work.startedAtMs !== undefined
+              ? { startedAtMs: work.startedAtMs }
+              : {}),
+          },
+          // 닫을 때 캐럿이 돌아올 자리(WebKit은 클릭으로 포커스를 주지 않는다).
+          event.currentTarget
+        )
+      }
+      // 배지의 접근성 문장이 통째로 이름이 되면 오프라인일 때 두 문장으로 늘어난다.
+      // 이 컨트롤의 이름은 이 컨트롤이 하는 일이다.
+      aria-label={`${agentName} 에이전트의 진행 과정 열기`}
+      data-testid="agent-hub-work-open"
+      className="flex items-center gap-1 rounded-sm text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {badge}
+      <span className="text-timestamp text-ink-muted">진행 과정 보기</span>
+    </button>
   );
 }
 

@@ -26,6 +26,7 @@ import {
   type WorkSessionObserverFrame,
   type WorkSessionToolTransitionFrame,
 } from "@momo/core/lib/realtimeEvents";
+import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
 import { apiBase } from "./serverBase";
 
 // =============================================================================
@@ -252,15 +253,34 @@ export function createRealtime(
         const onSubscribed = (ctx: SubscribedRecoveryContext) =>
           gate.onSubscribed(ctx);
         const onPublication = (ctx: { data?: unknown }) => {
-          if (gate.isReplaying()) return;
           const event = ctx.data as AgentProgressEvent | undefined;
           if (
-            event &&
-            (event.type === "agent.status" || event.type === "agent.partial") &&
-            event.payload
+            !event ||
+            (event.type !== "agent.status" && event.type !== "agent.partial") ||
+            !event.payload
           ) {
-            handlers.onEvent(event);
+            return;
           }
+          // The replay batch is dropped EXCEPT for the frames that can only END
+          // a turn — the same hole RN punched in this gate (channelRail.ts,
+          // issue 994 2R H1), adopted here from the same core predicate so the two
+          // clients cannot answer "is this turn over" differently.
+          //
+          // `isTerminalProgressFrame` records why letting them through is safe
+          // BY CONSTRUCTION: `applyStatus`'s terminal branch only ever deletes
+          // from the run table, so a replayed terminal frame cannot create a
+          // turn, cannot refresh one, and cannot move a clock.
+          //
+          // What makes it necessary on the web is the laptop. A lid closed for
+          // a minute is a socket gap, and a turn that ends inside that gap sends
+          // its terminal frame into it; the resubscribe's replay is the only
+          // place that frame is ever offered again. Dropping it left the sidebar
+          // badge and the composer line claiming 「작업 중」 until the 90s TTL
+          // swept them. 작업 패널(goal WEB-WP1) makes that worse rather than
+          // equal: the panel is a surface someone is READING, and a run whose
+          // ending we discarded sits there with a live-looking state chip.
+          if (gate.isReplaying() && !isTerminalProgressFrame(event)) return;
+          handlers.onEvent(event);
         };
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);

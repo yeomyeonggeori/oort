@@ -25,6 +25,7 @@
     "gate:agent-hub": "vite build --mode agent-hub-gate && node gates/gate-agent-hub.mjs",
     "gate:workstream": "vite build --mode workstream-gate && node gates/gate-workstream.mjs",
     "gate:approvals": "npm run build && node gates/gate-approvals.mjs",
+    "gate:work-panel": "npm run build && node gates/gate-work-panel.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",

@@ -222,9 +222,17 @@ export function turnStateOf(runStatus: string): AgentTurnState {
  * A run's opening frame: the only frame that proves when a turn began.
  * momowebqa publishes it as `phase=queued, run_status=queued` ahead of
  * everything else (measured), so a rail that was already listening gets a real
- * start time and a rail that attached mid-turn honestly gets none.
+ * start time and a rail that attached mid-turn honestly gets none. The server
+ * side quotes this exact predicate in its own conformance test (goal SRV-B3d),
+ * so it is a contract rather than a local convenience.
+ *
+ * Exported for `workLog` (goal WEB-WP1), which asks the same question for a
+ * different reason: the rail wants a clock, the panel wants to know whether it
+ * has the head of the run at all. Two copies of "what does an opening frame
+ * look like" is how one surface ends up claiming a complete history that the
+ * other calls truncated.
  */
-function isRunOpening(event: AgentStatusEvent): boolean {
+export function isRunOpening(event: AgentStatusEvent): boolean {
   return event.payload.phase === "queued" || event.payload.run_status === "queued";
 }
 
