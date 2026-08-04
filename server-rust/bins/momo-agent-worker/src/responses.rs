@@ -248,7 +248,9 @@ pub fn build_request_body(request: &ChatRequest) -> Value {
     tools.extend(request.momo_tools.iter().map(|definition| {
         json!({
             "type": "function",
-            "name": definition.name,
+            // goal SRV-HOT1 — see `wire_tool_name`. Same translation as the chat
+            // wire; only the surrounding shape differs.
+            "name": momo_agent::tools::wire_tool_name(definition.name),
             "description": definition.description,
             "parameters": definition.parameters,
         })
@@ -354,7 +356,10 @@ fn collect_tool_calls(output: Option<&[RawOutputItem]>) -> Vec<ProviderToolCall>
             }
             Some(ProviderToolCall {
                 id: id.to_string(),
-                name: name.to_string(),
+                // Mapped back at the boundary, so a `work_session_end` call
+                // becomes the `work.session.end` the executor and the approval
+                // ledger know.
+                name: momo_agent::tools::momo_tool_name(name),
                 arguments: item.arguments.clone().unwrap_or_default(),
             })
         })
@@ -711,6 +716,77 @@ struct RawOutputTokensDetails {
 mod tests {
     use super::*;
 
+    /// **The live 400, locked as a fixture** (goal SRV-HOT1).
+    ///
+    /// This is the failure #1018 shipped, reproduced from the backend's own
+    /// refusal: a dotted tool name makes the provider reject the **entire**
+    /// request, so every turn of every agent with a tool enabled dies — the
+    /// answer too, not just the tool.
+    ///
+    /// The test pins two things at once: that momo now sends a name the pattern
+    /// accepts, and that if it ever stops doing so, the shape of what comes back
+    /// is this — a terminal `ErrorEnvelope`, not an outage, not a retry loop.
+    const TOOL_NAME_REFUSAL: &str = concat!(
+        "{\"error\":{\"message\":\"Invalid 'tools[0].name': string does not match ",
+        "pattern '^[a-zA-Z0-9_-]+$'.\",\"type\":\"invalid_request_error\",",
+        "\"param\":\"tools[0].name\",\"code\":\"invalid_value\"}}",
+    );
+
+    #[test]
+    fn the_measured_tool_name_refusal_is_terminal_and_names_the_field() {
+        let error = parse_response(TOOL_NAME_REFUSAL).expect_err("a refusal is not an answer");
+        let sentence = error.to_string();
+        assert!(sentence.contains("tools[0].name"), "{sentence}");
+        assert!(
+            !error.is_retryable(),
+            "a name the pattern refuses is refused every time; retrying burns the \
+             subscription to arrive at the same 400: {sentence}"
+        );
+
+        // …and the name momo actually sends satisfies the pattern the refusal
+        // quotes, so this body is a museum piece rather than today's behaviour.
+        let sent = build_request_body(&ChatRequest {
+            model: "gpt-5.6-sol".to_string(),
+            messages: vec![ChatMessage::user("q")],
+            max_tokens: None,
+            tools: Vec::new(),
+            momo_tools: momo_agent::tools::catalog_definitions(),
+        });
+        let name = sent["tools"][0]["name"].as_str().expect("named");
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "{name:?} would reproduce {TOOL_NAME_REFUSAL}"
+        );
+    }
+
+    /// The other half of the boundary: a call that comes back under the wire
+    /// name is handed up under momo's name, or nothing downstream can dispatch
+    /// or authorise it.
+    #[test]
+    fn a_tool_call_returns_under_momos_own_name() {
+        let body = json!({
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_abc",
+                "name": "work_session_end",
+                "arguments": "{\"session_id\":\"019f-…\"}"
+            }]
+        })
+        .to_string();
+        let completion = parse_response(&body).expect("a tool call is an answer");
+        assert_eq!(completion.tool_calls.len(), 1);
+        assert_eq!(
+            completion.tool_calls[0].name, "work.session.end",
+            "the approval row, the audit detail and every client surface read \
+             momo's name — the wire's spelling stops here"
+        );
+        assert!(momo_agent::tools::is_executable(
+            &completion.tool_calls[0].name
+        ));
+    }
+
     /// The Responses shape: a function's fields sit **on** the tool. The chat
     /// wire nests the same fields under `function`, and `provider.rs` has the
     /// mirror of this test (goal SRV-B3f).
@@ -729,8 +805,10 @@ mod tests {
         assert_eq!(tool["type"], json!("function"));
         assert_eq!(
             tool["name"],
-            json!("work.session.end"),
-            "flat, not nested: {tool}"
+            json!("work_session_end"),
+            "flat, not nested — AND the WIRE name. The backend refuses anything \
+             outside `^[a-zA-Z0-9_-]+$` with a 400 that fails the WHOLE request, \
+             so momo's dots stop at this boundary (goal SRV-HOT1): {tool}"
         );
         assert!(
             tool.get("function").is_none(),
@@ -743,7 +821,9 @@ mod tests {
     /// operator who declared a function by hand does not have it reordered.
     #[test]
     fn the_agents_own_tool_json_is_still_passed_through_verbatim() {
-        let declared = json!({"type": "function", "name": "operator.thing"});
+        // A wire-legal operator name. momo does NOT rewrite these — see the
+        // assertion at the end of this test for why, and what it costs.
+        let declared = json!({"type": "function", "name": "operator_thing"});
         let body = build_request_body(&ChatRequest {
             model: "m".to_string(),
             messages: vec![ChatMessage::user("q")],
@@ -754,7 +834,28 @@ mod tests {
         let tools = body["tools"].as_array().expect("tools");
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0], declared, "passthrough, untouched and first");
-        assert_eq!(tools[1]["name"], json!("work.session.end"));
+        assert_eq!(tools[1]["name"], json!("work_session_end"));
+
+        // Every name momo *renders* satisfies the pattern. The operator's own
+        // entry is deliberately NOT checked here, and that boundary is the
+        // point: `tool_schema` is passed through verbatim because the column
+        // "already holds the provider's own format", and rewriting a name momo
+        // does not own would (a) break that contract and (b) make the reverse
+        // map ambiguous — `momo_tool_name` is a catalog lookup precisely so an
+        // operator's `search_issues` is never renamed to `search.issues`.
+        //
+        // The honest consequence, worth stating rather than hiding: an operator
+        // who writes a dotted name into `tool_schema` gets the same 400 this
+        // goal fixed for momo's own tools. That is theirs to fix, and there is
+        // no surface to write `tool_schema` on this server yet anyway (#1001).
+        let momo_rendered = tools.last().expect("momo's tool is appended last");
+        let name = momo_rendered["name"].as_str().expect("named");
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "{name:?} violates {}",
+            momo_agent::tools::WIRE_TOOL_NAME_PATTERN
+        );
     }
 
     /// Neither source present ⇒ the key is omitted entirely. Sending

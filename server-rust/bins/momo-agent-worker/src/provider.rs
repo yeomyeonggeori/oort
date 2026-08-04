@@ -153,7 +153,10 @@ fn chat_tool_json(definitions: &[momo_agent::tools::ToolDefinition]) -> Vec<Valu
             serde_json::json!({
                 "type": "function",
                 "function": {
-                    "name": definition.name,
+                    // goal SRV-HOT1: the wire-safe name. momo's own dots stay in
+                    // momo; the backend refuses them with `400 Invalid
+                    // 'tools[0].name'` and kills the whole request.
+                    "name": momo_agent::tools::wire_tool_name(definition.name),
                     "description": definition.description,
                     "parameters": definition.parameters,
                 }
@@ -684,7 +687,10 @@ pub fn parse_completion(body: &str) -> Result<ChatCompletion, ProviderError> {
                     }
                     Some(ProviderToolCall {
                         id: id.to_string(),
-                        name: name.to_string(),
+                        // …and back, so everything above this boundary — the
+                        // approval row, the audit detail, the tool_result props,
+                        // every client surface — reads momo's own name.
+                        name: momo_agent::tools::momo_tool_name(name),
                         arguments: function.arguments.clone().unwrap_or_default(),
                     })
                 })
@@ -979,8 +985,11 @@ mod tests {
         assert_eq!(tool["type"], serde_json::json!("function"));
         assert_eq!(
             tool["function"]["name"],
-            serde_json::json!("work.session.end"),
-            "nested under `function`, not flat: {tool}"
+            serde_json::json!("work_session_end"),
+            "nested under `function`, not flat — AND the WIRE name, not momo's. \
+             This assertion said `work.session.end` when #1018 shipped, which is \
+             precisely why the dot reached the backend and 400'd every turn \
+             (goal SRV-HOT1): {tool}"
         );
         assert!(
             tool.get("name").is_none(),

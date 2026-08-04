@@ -703,6 +703,123 @@ async fn enable_tools(su: &PgPool, tenant: &Tenant, agent: Uuid, tools: &[&str])
     .expect("write the profile's enabled_tools");
 }
 
+/// A provider that asks for a tool **under the wire name**, the way the real
+/// backend does (goal SRV-HOT1).
+struct ToolCallingMockProvider;
+
+#[async_trait::async_trait]
+impl ChatProvider for ToolCallingMockProvider {
+    async fn complete(
+        &self,
+        _endpoint: &momo_agent_worker::provider::ProviderEndpoint,
+        _request: &momo_agent_worker::provider::ChatRequest,
+    ) -> Result<
+        momo_agent_worker::provider::ChatCompletion,
+        momo_agent_worker::provider::ProviderError,
+    > {
+        Ok(momo_agent_worker::provider::ChatCompletion {
+            text: String::new(),
+            usage: None,
+            tool_calls: vec![momo_agent_worker::provider::ProviderToolCall {
+                id: "call_hot1".to_string(),
+                // What the adapter hands up after mapping the wire's
+                // `work_session_end` back. Spelled as momo's name here because
+                // this mock stands in for the ADAPTER's output, and the mapping
+                // itself is pinned by `responses.rs`'s own unit tests.
+                name: "work.session.end".to_string(),
+                arguments: r#"{"session_id":"019f0000-0000-7000-8000-000000000001"}"#.to_string(),
+            }],
+        })
+    }
+}
+
+/// **A turn with a tool enabled completes, and its tool call lands in the
+/// approval ledger under momo's own name** (goal SRV-HOT1).
+///
+/// #1018 shipped `work.session.end` verbatim onto the wire; the backend answers
+/// a name outside `^[a-zA-Z0-9_-]+$` with a 400 that fails the WHOLE request, so
+/// every turn of every agent with a tool switched on died — the answer along
+/// with it. This test is the live shape: tool enabled, turn completes, approval
+/// exists, and the name a human will be asked to authorise is momo's.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn hot1_a_tool_enabled_turn_completes_and_banks_the_momo_name() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", true).await;
+    enable_tools(&su, &tenant, agent, &["work.session.end"]).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@hermes 세션 정리해줘",
+    )
+    .await;
+
+    // ---- the name that goes OUT is wire-safe --------------------------------
+    let probe = Arc::new(MockChatProvider::echo());
+    let probe_worker = worker(probe.clone()).await;
+    assert_eq!(
+        probe_worker.drain_once().await.expect("drain").answered,
+        1,
+        "the turn completes rather than dying on a 400"
+    );
+    let offered = &probe.calls()[0].momo_tools;
+    assert_eq!(offered, &vec!["work.session.end".to_string()]);
+    for name in offered {
+        let wire = momo_agent::tools::wire_tool_name(name);
+        assert!(
+            wire.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "{name} renders as {wire:?}, which the backend refuses with \
+             `400 Invalid 'tools[0].name'` and takes the whole turn down with it"
+        );
+    }
+
+    // ---- and a call that comes BACK banks momo's name -----------------------
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@hermes 그럼 정리 실행해줘",
+    )
+    .await;
+    let calling_worker = worker(Arc::new(ToolCallingMockProvider)).await;
+    calling_worker.drain_once().await.expect("drain");
+
+    let banked: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT action_type, payload FROM approval WHERE workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(tenant.workspace)
+    .fetch_all(&su)
+    .await
+    .expect("read approvals");
+    assert_eq!(
+        banked.len(),
+        1,
+        "the tool call parked on a human: {banked:?}"
+    );
+    assert_eq!(banked[0].0, "tool_call");
+    assert_eq!(
+        banked[0].1["tool_call"]["name"],
+        json!("work.session.end"),
+        "the ledger — and the sentence a person is shown before authorising an \
+         irreversible action — reads momo's name, never the wire's: {:?}",
+        banked[0].1
+    );
+}
+
 /// **A tool the profile turned on reaches the provider — and one it did not,
 /// does not** (goal SRV-B3f).
 ///
