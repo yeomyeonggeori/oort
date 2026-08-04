@@ -347,7 +347,8 @@ export interface paths {
         };
         /**
          * Read one agent's effective workspace model allow-list.
-         * @description Any active workspace member may read this credential-free projection. The response is exactly the agent's own model plus workspace.settings.allowed_agent_models; it deliberately does not expose the workspace settings object or agent profile fields.
+         * @description Any active workspace member may read this credential-free projection. The response is the agent's own model plus workspace.settings.allowed_agent_models; it deliberately does not expose the workspace settings object or agent profile fields.
+         *     When workspace.settings carries no allowed_agent_models key at all AND the agent's own model is one of the measured provider-catalog ids also served by GET /v1/provider/effort-table under provider `openai-codex`, the answer additionally contains that catalog (SRV-B3). An unconfigured workspace is the absence of a configuration surface — nothing on this API writes workspace.settings — rather than a narrowing anyone chose, and the agent's own model is the evidence of which upstream this instance reaches. A workspace that HAS configured the key, including an explicit empty list, gets exactly agent.model plus what it configured; a gateway-handle model (hermes-*) is never widened.
          */
         get: operations["getAgentAllowedModels"];
         put?: never;
@@ -433,7 +434,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel one agent run as a human channel member.
-         * @description ADR-0132 D1. Any active human member of the run's channel may cancel. Agent and work-host bearers are rejected. The server atomically marks the run cancelled, retires pending agent jobs, cancels pending approvals, writes an audit event and a channel system line, and returns linked work-session IDs. Linked work sessions are not terminated; callers must use the existing work.control kill path separately.
+         * @description ADR-0132 D1. Any active human member of the run's channel may cancel — channel membership, not workspace ownership, is the authorization. Agent and work-host bearers are rejected. The server atomically marks the run cancelled, retires pending agent jobs, cancels pending approvals, writes an audit event and a channel system line, and returns linked work-session IDs. Linked work sessions are not terminated; callers must use the existing work.control kill path separately. Cancelling an already-cancelled run answers 200 with the same body and writes nothing: no second system line and no second audit row.
          */
         post: operations["cancelAgentRun"];
         delete?: never;
@@ -1443,7 +1444,7 @@ export interface paths {
         put?: never;
         /**
          * Send a message (idempotent via clientMsgId).
-         * @description The single write path (L4 §3.1): one transaction bumps the gapless per-channel `seq`, inserts the message, and enqueues the realtime broadcast through the transactional outbox. Retrying with the same `clientMsgId` returns the original message (exactly-once effect) — the response status is 201 in both cases. Supplying `rootId` creates a one-level thread reply. The root must be an undeleted top-level message in the same channel; cross-channel roots are reported as not found.
+         * @description The single write path (L4 §3.1): one transaction bumps the gapless per-channel `seq`, inserts the message, and enqueues the realtime broadcast through the transactional outbox. Retrying with the same `clientMsgId` returns the original message (exactly-once effect) — the response status is 201 in both cases. Supplying `rootId` creates a one-level thread reply. The root must be an undeleted top-level message in the same channel; cross-channel roots are reported as not found. Supplying `replyToId` quotes a message (ADR-0148): the send stays in the channel's main flow and points at the target rather than folding the conversation into a thread. The two are independent and may be sent together. A quote target must be undeleted and in the same channel, but — unlike a thread root — it may itself be a reply.
          */
         post: operations["sendMessage"];
         delete?: never;
@@ -2005,6 +2006,7 @@ export interface paths {
         /**
          * Read the provider and model effort capabilities used by routing.
          * @description Any authenticated principal — human access token or agent gateway bearer, both sent as `Authorization: Bearer`. The table carries no tenant row and no provider credential (ADR-0134 D2), and a model absent from it resolves to the conservative low/medium/high fallback rather than silently accepting a level the provider would reject.
+         *     Two provider groups are served. `hermes` holds momo's own provider-agnostic gateway handles (ADR-0130). `openai-codex` holds model ids the upstream publishes in its own catalog, measured 2026-08-04 from GET https://chatgpt.com/backend-api/codex/models — the base URL an ADR-0147 OAuth link stores. The upstream lists a sixth level, `ultra`, on some of those models; momo deliberately does not serve it, so `levels` stays low/medium/high/xhigh/max and an `ultra` request is a 400.
          */
         get: operations["getProviderEffortTable"];
         put?: never;
@@ -2328,7 +2330,7 @@ export interface components {
             /** @description True when a new member row was created (response status 201). */
             createdMember: boolean;
         };
-        /** @description Roster entry. Human-only fields (email/timeZone) and agent-only fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps) are present only for the matching kind; agent secrets and execution config are never exposed. */
+        /** @description Roster entry. Human-only fields (email/timeZone) and agent-only fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps/paused) are present only for the matching kind; agent secrets and execution config are never exposed. */
         RosterMember: {
             /** Format: uuid */
             id: string;
@@ -2358,6 +2360,8 @@ export interface components {
             ownerHumanId?: string;
             maxConcurrentRuns?: number;
             maxRunSteps?: number;
+            /** @description Present for agents only, and always present for them including when false, so a list can tell "awake" apart from "not reported". `agent_profile.paused`; an agent with no profile row reports false. This is not a new disclosure: mentioning a paused agent already posts a public system line in the channel saying so, and the rest of the profile (instructions, enabled tools, triggers) stays behind the owner-gated profile read. */
+            paused?: boolean;
             /** Format: int64 */
             createdAtMs: number;
             /** Format: int64 */
@@ -3489,6 +3493,11 @@ export interface components {
              */
             rootId?: string;
             /**
+             * Format: uuid
+             * @description ADR-0148 quote target — the message this send points at. Independent of `rootId`: a message may carry both, which quotes one particular reply from inside its own thread. The target must be an undeleted message in the same channel (it may itself be a reply); a target in another channel or another workspace is reported as not found.
+             */
+            replyToId?: string;
+            /**
              * @default text
              * @enum {string}
              */
@@ -3576,6 +3585,13 @@ export interface components {
              */
             rootId?: string;
             /**
+             * Format: uuid
+             * @description ADR-0148 — the message this one quotes; omitted when it quotes nothing. Present on every projection (send echo, history, replies) and independent of `rootId`.
+             */
+            replyToId?: string;
+            /** @description The quoted message, resolved at read time. Present on history and thread-replies rows whose `replyToId` resolves; omitted from the send response, which echoes the write rather than the conversation around it. Never a stored snapshot — an edit of the original shows through here and a deletion arrives as a tombstone. */
+            replyTo?: components["schemas"]["QuotedMessage"];
+            /**
              * Format: int64
              * @description Gapless per-channel sequence; the ordering authority.
              */
@@ -3616,6 +3632,30 @@ export interface components {
             /** @description Completed attachments bound to this message, ordered by creation time. Omitted when empty. Upload capability URLs and archive provider identifiers are never included; download bytes through the authenticated content proxy. */
             attachments?: components["schemas"]["MessageAttachment"][];
             thread?: components["schemas"]["ThreadRollup"];
+        };
+        /** @description The quoted message a client draws above a reply (ADR-0148). A reference resolved on every read, never a copy: editing the original changes what this says, and deleting it leaves a tombstone with no `body` at all. The author is named by id only, like every other row in the response — the client resolves it against the roster it already holds. */
+        QuotedMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int64 */
+            seq: number;
+            /** Format: uuid */
+            authorMemberId: string;
+            /** @enum {string} */
+            type: "text" | "tool_call" | "tool_result" | "diff" | "artifact" | "approval_request" | "system";
+            /** @description Omitted on a tombstone, whose text no longer exists. */
+            body?: string;
+            /** @enum {string} */
+            state: "sent" | "edited" | "deleted" | "failed";
+            /** Format: int64 */
+            editedAtMs?: number;
+            /**
+             * Format: int64
+             * @description Present when the quoted message has been deleted.
+             */
+            deletedAtMs?: number;
+            /** @description The quoted message itself quotes something. A marker only — the inner target's id is deliberately absent, because quoting is drawn one layer deep and a second id is all anyone needs to build a staircase. Omitted when false. */
+            quotesAnother?: boolean;
         };
         MessageAttachment: {
             /** Format: uuid */
@@ -3707,45 +3747,58 @@ export interface components {
             /** @description True when the DM channel was created by this call (status 201). */
             created: boolean;
         };
+        /**
+         * @description One row of the approval inbox, as `GET .../approvals` returns it.
+         *
+         *     NOTATION (SRV-B5c): the keys below are camelCase because that is what the Rust server — the deployed one — emits (`#[serde(rename_all = "camelCase")]` on `ApprovalDto`). The Swift server, which is still in the tree, maps the same fields to snake_case through explicit `CodingKeys` (`DTOs.swift:650`), so while both exist ONE of them does not match this schema. The spec follows the deployed server.
+         *
+         *     Consequence a reader should know: `scripts/verify_openapi_contract.sh` boots the **Swift** e2e stack, so its samples are the snake_case ones. Its strict closed-object check therefore validates the shape this schema no longer describes. Repointing that gate at `server-rust` is tracked as harness hygiene, not fixed here.
+         */
         ApprovalProjection: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            workspace_id: string;
+            workspaceId: string;
             /** Format: uuid */
-            run_id: string;
+            runId: string;
             /** Format: uuid */
-            channel_id: string;
+            channelId: string;
             /**
              * Format: uuid
              * @description The approval_request message, when one exists.
              */
-            request_message_id?: string;
+            requestMessageId?: string;
             /**
              * Format: uuid
              * @description The requesting agent member.
              */
-            requested_by: string;
-            /** @description Delegation subject, projected from `payload.on_behalf_of`. */
-            on_behalf_of?: string;
+            requestedBy: string;
+            /** @description Delegation subject, projected from `payload.on_behalf_of`. The Rust server does not currently emit this field at all. */
+            onBehalfOf?: string;
             /** @description e.g. `tool_call`, `deploy`, `spend`. */
-            action_type: string;
+            actionType: string;
             payload: unknown;
             /** @enum {string} */
             status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
             /**
              * Format: int64
-             * @description Projected from payload when present as a number or numeric string.
+             * @description Projected from payload when present as a number or numeric string. Not emitted by the Rust server: its one executable tool has no price table to quote.
              */
-            estimated_micro_usd?: number;
-            is_reversible?: boolean;
+            estimatedMicroUsd?: number;
+            /** @description Not emitted by the Rust server. An ABSENT value means "unknown" and must never be read as "reversible". */
+            isReversible?: boolean;
             /** Format: uuid */
-            decided_by?: string;
+            decidedBy?: string;
             /** Format: int64 */
-            decided_at_ms?: number;
-            decision_reason?: string;
+            decidedAtMs?: number;
+            decisionReason?: string;
             /** Format: int64 */
-            expires_at_ms?: number;
+            expiresAtMs?: number;
+            /**
+             * Format: int64
+             * @description Always present on the Rust server. Neither the Swift DTO nor this schema carried it before SRV-B5c, which under the gate's closed-object rule made every Rust approval row undeclared drift.
+             */
+            createdAtMs: number;
         };
         InstallPluginRequest: {
             enabled?: boolean;
@@ -3961,19 +4014,26 @@ export interface components {
              */
             client_decision_id: string;
         };
-        /** @description Decision acknowledgement. Committed decisions carry status approved/rejected; expected failures reuse this shape with a diagnostic status (e.g. idempotency_conflict, forbidden, not_found, bad_request, expired, or the approval's current status on a 409). */
+        /**
+         * @description Decision acknowledgement. Committed decisions carry status approved/rejected; expected failures reuse this shape with a diagnostic status (e.g. idempotency_conflict, forbidden, not_found, bad_request, expired, or the approval's current status on a 409).
+         *
+         *     NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See `ApprovalProjection` for the Swift dual-notation caveat — and note this receipt is additionally stored verbatim in `approval_decision.receipt` and replayed on retry, so a notation change here rewrites what an idempotent retry returns.
+         */
         ApprovalDecisionReceipt: {
             /** Format: uuid */
-            approval_id: string;
+            approvalId: string;
             status: string;
             /**
              * Format: uuid
              * @description Absent for system-side outcomes such as expiry.
              */
-            decided_by?: string;
-            /** Format: int64 */
-            decided_at_ms?: number;
-            decision_reason?: string;
+            decidedBy?: string;
+            /**
+             * Format: int64
+             * @description Always present on the Rust server (the field is not optional on `ApprovalDecisionReceipt`), including on the refusal shapes.
+             */
+            decidedAtMs: number;
+            decisionReason?: string;
         };
     };
     responses: {
@@ -5153,6 +5213,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRunCancelResponse"];
+                };
+            };
+            /** @description Malformed workspace or run identifier */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -8223,7 +8292,7 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description Invalid workspace/channel id, deleted root, or nested reply root. */
+            /** @description Invalid workspace/channel id, deleted root, nested reply root, or a deleted quote target. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8242,7 +8311,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Channel/root not found or not provisioned. */
+            /** @description Channel/root not found or not provisioned, or a quote target that is not in this channel (a target in another channel or workspace is answered identically to one that does not exist). */
             404: {
                 headers: {
                     [name: string]: unknown;
