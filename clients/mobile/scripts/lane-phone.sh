@@ -144,11 +144,67 @@ CENT_ALLOWED_ORIGINS="http://127.0.0.1:$CENT_PORT http://127.0.0.1:$API_PORT htt
 METRO_PID=""
 LOCK_HELD=0
 LOCK_DIR=""
+# The currently-running flow and its watchdog, so a Ctrl-C or a kill takes them
+# with it. Both are backgrounded jobs, so without this they are re-parented to
+# init and outlive the run: the Maestro CLI keeps an XCTest driver and an
+# `xcodebuild test-without-building` alive on the simulator (the next run then
+# fights it for the device), and the watchdog sits in its `sleep` until the
+# timeout and fires `kill -TERM` at a PID number that by then belongs to
+# somebody else. Both were observed as leftovers from the interrupted run.
+FLOW_PID=""
+WATCHDOG_PID=""
+
+# One run at a time — TAKEN BEFORE THE TEARDOWN TRAP IS INSTALLED, and that
+# order is the whole point.
+#
+# Two lanes against the same compose project do not collide loudly: the second
+# one's startup reclaim below deletes the FIRST one's stack out from under it,
+# and the first then sits in a wait loop polling a database that no longer
+# exists until its timeout. `mkdir` is the lock because it is atomic on every
+# filesystem this runs on; the PID inside is what makes a stale lock diagnosable
+# rather than just an obstacle.
+#
+# The lock alone did not fix it, though, and the way it failed is worth keeping
+# written down. With `trap cleanup EXIT` installed FIRST, a second run that
+# refused the lock correctly — printed "another lane run already owns this" and
+# exited 1 — still ran cleanup on the way out, and cleanup's `compose down -v`
+# is not scoped to runs that own anything. So the polite refusal destroyed the
+# stack it had just declined to touch, and the holder was left polling a dead
+# database with no error anywhere: the exact hang this lock exists to prevent,
+# now triggered BY the lock. Measured here on 2026-08-04.
+#
+# Hence: acquire first, then arm the trap. `LOCK_HELD` is also checked inside
+# cleanup, so the invariant survives someone moving these blocks back.
+LOCK_DIR="${TMPDIR:-/tmp}/momo-lane-phone-$PROJECT.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo unknown)"
+  if [ "$holder" != "unknown" ] && kill -0 "$holder" 2>/dev/null; then
+    echo "[lane] another lane run (pid $holder) already owns compose project '$PROJECT'." >&2
+    echo "[lane] Wait for it, or run this one with LANE_PHONE_PROJECT set to something else." >&2
+    exit 1
+  fi
+  echo "[lane] clearing a stale lock from pid $holder (no such process)" >&2
+  rm -rf "$LOCK_DIR"
+  mkdir "$LOCK_DIR" || { echo "[lane] could not take $LOCK_DIR" >&2; exit 1; }
+fi
+printf '%s' "$$" >"$LOCK_DIR/pid"
+LOCK_HELD=1
 
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
-  [ "$LOCK_HELD" = "1" ] && [ -n "$LOCK_DIR" ] && rm -rf "$LOCK_DIR"
+  if [ "$LOCK_HELD" != "1" ]; then
+    # Not this run's stack to reclaim — see the lock note above.
+    exit "$rc"
+  fi
+  [ -n "$LOCK_DIR" ] && rm -rf "$LOCK_DIR"
+  [ -n "$WATCHDOG_PID" ] && kill -KILL "$WATCHDOG_PID" 2>/dev/null || true
+  if [ -n "$FLOW_PID" ] && kill -0 "$FLOW_PID" 2>/dev/null; then
+    kill -TERM "$FLOW_PID" 2>/dev/null || true
+    # Maestro's JVM leaves its iOS driver behind if it is only asked politely,
+    # and that driver holds the simulator against the next run.
+    pkill -f 'maestro-driver-iosUITests-Runner' 2>/dev/null || true
+  fi
   if [ -n "$METRO_PID" ]; then
     kill -TERM "-$METRO_PID" 2>/dev/null || kill -TERM "$METRO_PID" 2>/dev/null || true
   fi
@@ -164,30 +220,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-
-# One run at a time, enforced before anything is torn down.
-#
-# Two lanes started against the same compose project do not collide loudly —
-# the second one's startup reclaim below deletes the FIRST one's stack out from
-# under it, and the first then sits in a wait loop polling a database that no
-# longer exists until its timeout. Observed here, and it cost an hour of
-# reading the wrong logs. `mkdir` is the lock because it is atomic on every
-# filesystem this runs on; the PID inside is what makes a stale lock diagnosable
-# rather than just an obstacle.
-LOCK_DIR="${TMPDIR:-/tmp}/momo-lane-phone-$PROJECT.lock"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo unknown)"
-  if [ "$holder" != "unknown" ] && kill -0 "$holder" 2>/dev/null; then
-    echo "[lane] another lane run (pid $holder) already owns compose project '$PROJECT'." >&2
-    echo "[lane] Wait for it, or run this one with LANE_PHONE_PROJECT set to something else." >&2
-    exit 1
-  fi
-  echo "[lane] clearing a stale lock from pid $holder (no such process)" >&2
-  rm -rf "$LOCK_DIR"
-  mkdir "$LOCK_DIR" || { echo "[lane] could not take $LOCK_DIR" >&2; exit 1; }
-fi
-printf '%s' "$$" >"$LOCK_DIR/pid"
-LOCK_HELD=1
 
 # Re-entry reclaim. A previous run that was killed before its trap fired leaves
 # its containers AND its volumes behind; the next run would then boot against a
@@ -469,13 +501,15 @@ for flow in "${FLOWS[@]}"; do
       -e AGENT_MEMBER_ID="$AGENT_MEMBER_ID" \
       -e AGENT_HANDLE="$AGENT_HANDLE" \
       >"$OUT_DIR/$flow.log" 2>&1 &
-  flow_pid=$!
-  ( sleep "$FLOW_TIMEOUT"; kill -TERM "$flow_pid" 2>/dev/null ) &
-  watchdog_pid=$!
+  FLOW_PID=$!
+  ( sleep "$FLOW_TIMEOUT"; kill -TERM "$FLOW_PID" 2>/dev/null ) &
+  WATCHDOG_PID=$!
   flow_rc=0
-  wait "$flow_pid" || flow_rc=$?
-  kill "$watchdog_pid" 2>/dev/null || true
-  wait "$watchdog_pid" 2>/dev/null || true
+  wait "$FLOW_PID" || flow_rc=$?
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+  wait "$WATCHDOG_PID" 2>/dev/null || true
+  FLOW_PID=""
+  WATCHDOG_PID=""
 
   if [ "$flow_rc" = "0" ]; then
     RESULTS+=("$flow|PASS|$(( $(date -u +%s) - started ))|")

@@ -143,6 +143,8 @@ npm start                   # Metro
 npm run ios                 # run on a simulator
 npm run build:sim           # xcodebuild for the simulator, ad-hoc signed
 npm run gate:session        # does a session survive a restart? (below)
+npm run install:maestro     # Maestro CLI into ~/.maestro (once)
+npm run lane:phone          # the whole phone check, unattended (below)
 ```
 
 `ios/` requires `pod install` once (`cd ios && pod install`).
@@ -229,6 +231,50 @@ above all the shared keychain ACCESS GROUP the NSE will read
   not cancelled; it resumes after iOS v0 reaches TestFlight, because the
   expensive half is FCM and that chain is still Swift-only.
 - **EAS.** momo already owns fastlane + match + `momo-signing` (D1).
+
+## The phone lane — `npm run lane:phone` (MAESTRO-1)
+
+One command, no person driving it: an isolated stack on its own ports with the
+**mock** provider, a disposable fixture member, the app installed on a simulator,
+five Maestro flows against the real UI, a PASS/FAIL table, and the stack torn
+down with its volumes. `npm run install:maestro` once first (`~/.maestro`; the
+lane puts it on PATH itself, so nothing is added to your shell profile).
+
+| flow | what it proves about the SCREEN, not the API |
+|---|---|
+| `00-login` | 서버 주소 입력 → 로그인 → 채널 목록 + 탭 바, from cleared state |
+| `10-mention-working` | a turn in flight is **visible as one** — 「작업 중」 is on screen WHILE it runs (#839), then the reply lands |
+| `20-stop` | 중단 is two-tap and the confirm step says what it costs; the receipt AND the channel's system line both appear |
+| `30-approval` | 결정 대기 → 무장 → "되돌릴 수 없습니다" → 승인 → 영수증, and the approved call actually resumes and finishes |
+| `40-agents-tab` | 재우기 warns before it acts, and a mention to a sleeping agent gets a system line instead of silence |
+
+Measured here, all five green: 90 + 46 + 37 + 49 + 42 seconds of flow time.
+
+**「작업 중」 is only observable because the mock is asked to be slow.** A default
+mock turn is about two tenths of a second end to end, so the indicator would be
+gone before Maestro could look and the flow would assert nothing while passing.
+The lane steers `scripts/mock_hermes.py` **per request**, through markers in the
+message body (`MAESTRO SLOW`, `MAESTRO TEXT`) rather than process-wide env vars,
+because one run needs a slow text turn and a tool-call turn in the same stack.
+`LANE_PHONE_SLOW_SECONDS=0.05 npm run lane:phone -- --flow 10-mention-working`
+takes that away and the flow must go RED at the 「작업 중」 assertion — that is the
+proof the assertion is load-bearing, and it is worth re-running if you ever
+change the mock.
+
+**What a green table here does NOT cover.** The simulator has no APNs, so the
+lock-screen approval path — the one where a person decides without opening the
+app — is not exercised at all. The runner prints that as an explicit 실기기
+파이널 체크 block rather than letting five PASSes imply it. Same for the shared
+keychain access group (device signature only).
+
+**Isolation.** One dedicated compose project (`momo_maestro1`) on loopback ports
+nothing else uses, `down -v --remove-orphans` in a trap so teardown runs on
+failure and Ctrl-C too, and the same teardown at startup because the way stacks
+accumulate is a run that died before its own trap ([[momo-docker-resource-accumulation]]).
+A `mkdir` lock keeps two lanes off the same project — and the lock is taken
+**before** the trap is armed, because with that order reversed a second run that
+correctly refused the lock still ran cleanup on its way out and deleted the
+holder's stack.
 
 ## iOS identity
 
