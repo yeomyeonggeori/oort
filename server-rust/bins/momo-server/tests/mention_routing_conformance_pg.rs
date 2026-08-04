@@ -682,6 +682,108 @@ async fn rail_frames(su: &PgPool, workspace: Uuid) -> Vec<Value> {
     .expect("read rail frames")
 }
 
+/// Turn tools on for an agent, the way `PUT …/agents/{a}/profile` does
+/// (goal SRV-B3f).
+async fn enable_tools(su: &PgPool, tenant: &Tenant, agent: Uuid, tools: &[&str]) {
+    sqlx::query(
+        "INSERT INTO agent_profile \
+           (agent_member_id, workspace_id, instructions, enabled_tools, version, \
+            updated_by, updated_at) \
+         VALUES ($1, $2, '', $3, 1, $4, now()) \
+         ON CONFLICT (agent_member_id) DO UPDATE \
+            SET enabled_tools = EXCLUDED.enabled_tools, \
+                version = agent_profile.version + 1",
+    )
+    .bind(agent)
+    .bind(tenant.workspace)
+    .bind(json!(tools))
+    .bind(tenant.human)
+    .execute(su)
+    .await
+    .expect("write the profile's enabled_tools");
+}
+
+/// **A tool the profile turned on reaches the provider — and one it did not,
+/// does not** (goal SRV-B3f).
+///
+/// `agent_profile.enabled_tools` was written and validated since B5.3a and read
+/// by **nothing**: no query selected it, no payload carried it, no request was
+/// shaped by it. So an operator could switch `work.session.end` on and the only
+/// observable effect was a version bump — which is why the approval axis had no
+/// real producer and the inbox stayed empty by construction.
+///
+/// | revert | how it goes red |
+/// |---|---|---|
+/// | drop `enabled_tools` from the candidate query or the payload | the offered list is empty |
+/// | resolve names in the payload instead of the worker | unchanged here, but a stale build would offer what it cannot run |
+/// | drop the `∩ CATALOG` filter | `web.search` below would be offered |
+/// | offer the catalog regardless of the profile | the second agent's turn would carry a tool |
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn b3f_only_an_enabled_and_executable_tool_reaches_the_provider() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let armed = seed_agent(&su, &tenant, "hermes", true).await;
+
+    // One real tool, and one the roadmap names but this build cannot run.
+    enable_tools(&su, &tenant, armed, &["work.session.end", "web.search"]).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@hermes 세션 정리해줘",
+    )
+    .await;
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let armed_worker = worker(provider.clone()).await;
+    assert_eq!(armed_worker.drain_once().await.expect("drain").answered, 1);
+
+    let calls = provider.calls();
+    assert_eq!(calls.len(), 1, "one turn, one provider call");
+    assert_eq!(
+        calls[0].momo_tools,
+        vec!["work.session.end".to_string()],
+        "the enabled+executable tool is offered, and `web.search` — enabled but \
+         NOT in this build's catalog — is dropped rather than advertised: {:?}",
+        calls[0].momo_tools
+    );
+
+    // ---- and an agent whose profile enables nothing is offered nothing ------
+    let bare = seed_agent(&su, &tenant, "second", true).await;
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@second 너도 정리해줘",
+    )
+    .await;
+    let provider2 = Arc::new(MockChatProvider::echo());
+    let bare_worker = worker(provider2.clone()).await;
+    assert_eq!(bare_worker.drain_once().await.expect("drain").answered, 1);
+    let calls2 = provider2.calls();
+    assert_eq!(calls2.len(), 1);
+    assert!(
+        calls2[0].momo_tools.is_empty(),
+        "CATALOG is what this server CAN run; the profile is what this agent MAY \
+         ask for. Handing out the catalog by default would make every agent a \
+         work-session terminator: {:?}",
+        calls2[0].momo_tools
+    );
+    let _ = bare;
+}
+
 // ---------------------------------------------------------------------------
 // 1 — the 티키타카
 // ---------------------------------------------------------------------------

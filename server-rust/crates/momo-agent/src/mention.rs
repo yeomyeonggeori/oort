@@ -100,6 +100,12 @@ pub struct MentionCandidate {
     pub tool_schema: Value,
     pub config: Value,
     pub max_run_steps: i32,
+    /// `agent_profile.enabled_tools` — the names this agent's profile turned on
+    /// (goal SRV-B3f). Raw, because the intersection with what this build can
+    /// actually run belongs to `momo_agent::tools`, and resolving it here would
+    /// freeze a build's catalog into a job payload that may be claimed by a
+    /// newer one.
+    pub enabled_tools: Vec<String>,
     /// `workspace.settings`, needed raw for the ADR-0131 D2 allow-list.
     pub workspace_settings: Value,
     pub paused: bool,
@@ -126,7 +132,7 @@ pub async fn load_mention_candidates_in_tx(
         "SELECT m.id, m.handle, m.display_name, \
                 a.model, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
                 w.settings AS workspace_settings, \
-                ap.instructions, ap.model_pref, ap.effort_pref, \
+                ap.instructions, ap.model_pref, ap.effort_pref, ap.enabled_tools, \
                 ap.version AS profile_version, \
                 COALESCE(ap.paused, false) AS paused, \
                 EXISTS ( \
@@ -161,6 +167,21 @@ pub async fn load_mention_candidates_in_tx(
     for row in &rows {
         let profile_version: Option<i32> = row.try_get("profile_version").map_err(DbError::from)?;
         let instructions: Option<String> = row.try_get("instructions").map_err(DbError::from)?;
+        // `enabled_tools` is `jsonb` and NULL when the agent has no profile row.
+        // A malformed value reads as "none enabled", which is the fail-closed
+        // direction: the alternative is offering a tool because a bad row could
+        // not be parsed.
+        let enabled_tools: Option<Value> = row.try_get("enabled_tools").map_err(DbError::from)?;
+        let enabled_tools: Vec<String> = enabled_tools
+            .as_ref()
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
         let base_system_prompt: Option<String> =
             row.try_get("system_prompt").map_err(DbError::from)?;
         let is_external_runtime: bool =
@@ -184,6 +205,7 @@ pub async fn load_mention_candidates_in_tx(
             tool_schema: row.try_get("tool_schema").map_err(DbError::from)?,
             config: row.try_get("config").map_err(DbError::from)?,
             max_run_steps: row.try_get("max_run_steps").map_err(DbError::from)?,
+            enabled_tools,
             workspace_settings: row.try_get("workspace_settings").map_err(DbError::from)?,
             paused: row.try_get("paused").map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
@@ -535,6 +557,17 @@ pub fn mention_job_payload(
     payload.insert("prompt".into(), json!(trigger.body));
     payload.insert("recent_messages".into(), json!(recent_messages));
     payload.insert("tools".into(), candidate.tool_schema.clone());
+    // goal SRV-B3f: the NAMES the profile turned on, not the resolved
+    // definitions. The worker intersects them with ITS catalog, so a job frozen
+    // by one build and claimed by another offers whatever the *executing* build
+    // can actually run — a payload carrying definitions would advertise a tool
+    // the claimer might no longer have.
+    if !candidate.enabled_tools.is_empty() {
+        payload.insert(
+            "enabled_tools".into(),
+            json!(candidate.enabled_tools.clone()),
+        );
+    }
     payload.insert("source_attribution".into(), message_source(trigger));
     payload.insert(
         "max_output_tokens".into(),
@@ -710,6 +743,7 @@ mod tests {
             effort_pref: None,
             system_prompt: Some("prompt".into()),
             tool_schema: json!([]),
+            enabled_tools: Vec::new(),
             config: json!({}),
             max_run_steps: 50,
             workspace_settings: json!({}),

@@ -131,6 +131,35 @@ pub struct ChatRequest {
     /// omitted entirely — sending `"tools": []` makes some gateways reject the
     /// request outright.
     pub tools: Vec<Value>,
+    /// Tools **momo itself** implements, offered because this agent's profile
+    /// turned them on (goal SRV-B3f).
+    ///
+    /// Kept apart from [`tools`](Self::tools) rather than merged into it,
+    /// because the two have opposite provenance and opposite handling.
+    /// `tools` is operator-authored JSON in the provider's own format and is
+    /// passed through untouched; these are momo's, and each wire renders them
+    /// in ITS shape — `/chat/completions` nests the fields under a `function`
+    /// object, the Responses API flattens them onto the tool. Pre-rendering
+    /// them into `tools` would be correct on one wire and silently wrong on the
+    /// other.
+    pub momo_tools: Vec<momo_agent::tools::ToolDefinition>,
+}
+
+/// Render momo's own tool definitions in the `/chat/completions` shape.
+fn chat_tool_json(definitions: &[momo_agent::tools::ToolDefinition]) -> Vec<Value> {
+    definitions
+        .iter()
+        .map(|definition| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": definition.name,
+                    "description": definition.description,
+                    "parameters": definition.parameters,
+                }
+            })
+        })
+        .collect()
 }
 
 /// One tool call the model asked for.
@@ -427,9 +456,13 @@ impl ChatProvider for OpenAiCompatProvider {
         // Omitted entirely when the agent declares none: several
         // OpenAI-compatible gateways 400 on `"tools": []`, and an agent with no
         // tool schema is the common case.
-        if !request.tools.is_empty() {
+        // The agent's own JSON first, then momo's — an operator who declared a
+        // function by hand keeps the position they gave it.
+        let mut tools = request.tools.clone();
+        tools.extend(chat_tool_json(&request.momo_tools));
+        if !tools.is_empty() {
             if let Some(object) = body.as_object_mut() {
-                object.insert("tools".into(), Value::Array(request.tools.clone()));
+                object.insert("tools".into(), Value::Array(tools));
             }
         }
         let text = post_json(&self.client, endpoint, &body).await?;
@@ -785,6 +818,11 @@ pub struct ObservedCall {
     /// Which wire the worker resolved for this turn — the fact a routing test
     /// asserts on without needing a socket.
     pub wire: ProviderWire,
+    /// Names of the momo-implemented tools this turn offered (goal SRV-B3f).
+    /// Names rather than rendered JSON: the *shape* is pinned by the two wires'
+    /// own body tests, and what a wiring test needs to know is whether the
+    /// profile's switch reached the request at all.
+    pub momo_tools: Vec<String>,
 }
 
 impl MockChatProvider {
@@ -886,6 +924,11 @@ impl ChatProvider for MockChatProvider {
                 base_url: endpoint.base_url.clone(),
                 account_id: endpoint.account_id.clone(),
                 wire: endpoint.wire,
+                momo_tools: request
+                    .momo_tools
+                    .iter()
+                    .map(|definition| definition.name.to_string())
+                    .collect(),
             });
         let text = match &self.outcome {
             MockOutcome::Fail(error) => return Err(error.clone()),
@@ -923,6 +966,37 @@ impl ChatProvider for MockChatProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `/chat/completions` shape: a function's fields live **under** a
+    /// `function` object. The Responses wire flattens the same fields, and
+    /// `responses.rs` has the mirror of this test — together they are what stops
+    /// one rendering from being used on both wires (goal SRV-B3f).
+    #[test]
+    fn momo_tools_render_nested_on_the_chat_wire() {
+        let rendered = chat_tool_json(&momo_agent::tools::catalog_definitions());
+        assert_eq!(rendered.len(), 1);
+        let tool = &rendered[0];
+        assert_eq!(tool["type"], serde_json::json!("function"));
+        assert_eq!(
+            tool["function"]["name"],
+            serde_json::json!("work.session.end"),
+            "nested under `function`, not flat: {tool}"
+        );
+        assert!(
+            tool.get("name").is_none(),
+            "a flat `name` here is the Responses shape on the wrong wire: {tool}"
+        );
+        assert_eq!(
+            tool["function"]["parameters"]["type"],
+            serde_json::json!("object")
+        );
+        assert!(
+            tool["function"]["description"]
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty()),
+            "the model needs to know when to use it: {tool}"
+        );
+    }
 
     /// A 200 with an error object must not decode as an empty successful turn —
     /// that is how a user's question disappears without a trace.
@@ -1058,6 +1132,7 @@ mod tests {
         };
         let request = ChatRequest {
             tools: Vec::new(),
+            momo_tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![ChatMessage::system("sys"), ChatMessage::user("질문")],
             max_tokens: Some(64),
@@ -1132,6 +1207,7 @@ mod tests {
         let router = WireRoutedProvider::new(chat.clone(), responses.clone());
         let request = ChatRequest {
             tools: Vec::new(),
+            momo_tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![ChatMessage::user("질문")],
             max_tokens: Some(64),

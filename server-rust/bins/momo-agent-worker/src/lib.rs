@@ -589,6 +589,11 @@ impl AgentWorker {
             // B5.2 has shipped `agent.tool_schema` on the payload since the
             // mention path was written; this is the batch that finally sends it.
             tools: payload.tool_schema(),
+            // goal SRV-B3f: and the tools the profile turned on, resolved
+            // against THIS build's catalog. Until this line `enabled_tools` was
+            // a column nothing read — an operator could switch a tool on and the
+            // only effect was a profile version bump.
+            momo_tools: payload.enabled_tools(),
         };
 
         // ADR-0147 결정 2: a subscription OAuth link presents an access token
