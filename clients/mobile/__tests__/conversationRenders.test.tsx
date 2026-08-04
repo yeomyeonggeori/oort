@@ -15,6 +15,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {
+  clearAgentWorking,
   markAgentWorking,
   resetAgentWorking,
 } from '../src/features/agents/workingSignal';
@@ -290,59 +291,100 @@ afterEach(() => {
   resetAgentWorking();
 });
 
-describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값', () => {
-  it('턴 신호가 갱신돼도 메시지 행은 한 번도 다시 그려지지 않는다', async () => {
-    await openConversation();
-    const rows = mountedRows();
-    expect(rows).toBeGreaterThan(0);
+/** 열린 턴 하나. `over` 로 상태나 헤드라인만 바꾼다. */
+function turn(over: Record<string, unknown> = {}) {
+  return {
+    memberId: KIM_AGENT,
+    channelId: GENERAL,
+    state: 'working' as const,
+    source: 'run' as const,
+    runId: 'A1111111-1111-4111-8111-A11111111111',
+    startedAtMs: Date.now() - 3_000,
+    headlines: [] as string[],
+    lastActivityAtMs: Date.now(),
+    ...over,
+  };
+}
 
+describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값', () => {
+  it('턴이 열리면 답이 나타날 칸 하나만 선다 — 기존 메시지 행은 0회', async () => {
+    await openConversation();
     resetMessageRowRenderCount();
     resetTimelineRenderItemCount();
 
-    // 에이전트가 답을 흘리는 동안 스토어에 들어오는 것과 **같은 갱신**이다:
-    // 헤드라인 한 줄, 그리고 그것이 곧 화면 하나의 리렌더다. 실기기에서는 이것이
-    // 스트리밍 청크마다, 그리고 그 위에 1Hz 시계로 한 번 더 일어난다.
-    //
-    // 이 화면이 다시 그려지는 것 자체는 옳다 — 활동 줄의 경과 숫자가 그것을
-    // 필요로 한다. 옳지 않았던 것은 그 렌더가 **메시지 목록까지 번지는** 것이다.
     await act(async () => {
-      markAgentWorking({
-        memberId: KIM_AGENT,
-        channelId: GENERAL,
-        state: 'working',
-        source: 'run',
-        runId: 'A1111111-1111-4111-8111-A11111111111',
-        startedAtMs: Date.now() - 3_000,
-        headlines: ['빌드 확인 중'],
-        lastActivityAtMs: Date.now(),
-      });
+      markAgentWorking(turn());
     });
     await settle();
 
-    // 활동 줄은 실제로 섰다 — 즉 화면은 정말로 다시 그려졌고, 0은 "아무 일도
-    // 일어나지 않았다"가 아니라 "번지지 않았다"이다.
+    // 자리표시가 실제로 섰다 (#999).
+    expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    // 데이터가 진짜로 자랐으므로 셀 층은 다시 돈다 — 그것이 이 사건의 정직한 값이다.
+    expect(timelineRenderItemCount()).toBeGreaterThan(0);
+    // 그러나 **이미 있던 메시지 행**은 한 줄도 다시 그려지지 않는다.
+    expect(messageRowRenderCount()).toBe(0);
+  });
+
+  it('스트리밍이 흘러도 목록은 한 번도 다시 그려지지 않는다', async () => {
+    await openConversation();
+    await act(async () => {
+      markAgentWorking(turn({headlines: ['빌드 확인 중']}));
+    });
+    await settle();
+
+    // 여기서부터가 계측 구간이다: 턴은 이미 열려 있고, 이제 바뀌는 것은 헤드라인뿐 —
+    // 실기기에서 초당 여러 번 일어나는 바로 그 갱신이다.
+    resetMessageRowRenderCount();
+    resetTimelineRenderItemCount();
+
+    for (const headline of ['테스트 실행 중', '패치 작성 중', '커밋 중']) {
+      await act(async () => {
+        markAgentWorking(turn({headlines: [headline]}));
+      });
+    }
+    await settle();
+
+    // 활동 줄은 살아 있다 = 화면은 정말로 다시 그려졌다. 0은 "아무 일도 없었다"가
+    // 아니라 "목록에 닿지 않았다"이다.
     expect(screen.getByTestId('composer-working')).toBeTruthy();
-    // 두 층 모두 0이다. 아래(행 본문)만 0이면 memo 가 비용을 **가린** 것이고,
-    // 위(셀)까지 0이어야 그 렌더가 목록에 아예 닿지 않은 것이다.
+    // 두 층 모두 0. 자리표시가 헤드라인이나 시계를 실었다면 여기가 즉시 깨진다 —
+    // #999 가 #997 을 되돌리지 못하게 막는 자리가 이 줄이다.
     expect(timelineRenderItemCount()).toBe(0);
     expect(messageRowRenderCount()).toBe(0);
+  });
 
-    // 두 번째 갱신(헤드라인이 바뀌는 것 = 스트리밍의 실제 모양)도 마찬가지다.
+  it('턴이 끝나면 그 칸은 사라진다', async () => {
+    await openConversation();
     await act(async () => {
-      markAgentWorking({
-        memberId: KIM_AGENT,
-        channelId: GENERAL,
-        state: 'working',
-        source: 'run',
-        runId: 'A1111111-1111-4111-8111-A11111111111',
-        startedAtMs: Date.now() - 4_000,
-        headlines: ['테스트 실행 중'],
-        lastActivityAtMs: Date.now(),
-      });
+      markAgentWorking(turn());
     });
     await settle();
-    expect(timelineRenderItemCount()).toBe(0);
-    expect(messageRowRenderCount()).toBe(0);
+    expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+
+    await act(async () => {
+      clearAgentWorking(GENERAL, KIM_AGENT);
+    });
+    await settle();
+
+    // 자리표시가 사라지는 것 자체가 「답이 왔다」의 신호다. 남아 있으면 그것은
+    // 끝난 턴을 진행 중이라고 말하는 것이 된다.
+    expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
+  });
+
+  it('승인 대기는 그 칸을 얻지 못한다 — 화면 어디에도 「작업 중」이 없다', async () => {
+    await openConversation();
+    await act(async () => {
+      markAgentWorking(turn({state: 'awaiting_approval', headlines: []}));
+    });
+    await settle();
+
+    // 멈춰 서서 사람의 결정을 기다리는 턴이다. 답이 나타날 자리를 내주면 화면이
+    // "곧 답이 온다"고 말하는 동안 에이전트는 바로 그 사람을 기다리게 된다.
+    expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
+    // 그리고 그 낱말 자체가 화면에 없어야 한다 — 활동 줄은 「승인을 기다립니다」로
+    // 말한다. mock 된 문자열이 아니라 코어의 문구를 향한 단정이다.
+    expect(screen.queryByText(/작업 중/)).toBeNull();
+    expect(screen.getByText(/승인을 기다립니다/)).toBeTruthy();
   });
 
   it('메시지가 하나 도착하면 그 한 행만 그려진다 — 나머지는 0', async () => {
@@ -376,20 +418,17 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
 
   it('리스트가 들고 있는 renderItem 은 화면이 다시 그려져도 같은 함수다', async () => {
     await openConversation();
+    // 턴을 먼저 연다: 칸이 하나 서는 것은 데이터 변화이고, 그때 리스트가 다시
+    // 그려지는 것은 옳다. 재려는 것은 그 **다음**부터다.
+    await act(async () => {
+      markAgentWorking(turn());
+    });
+    await settle();
     const first = listRenderItem();
     expect(typeof first).toBe('function');
 
     await act(async () => {
-      markAgentWorking({
-        memberId: KIM_AGENT,
-        channelId: GENERAL,
-        state: 'working',
-        source: 'run',
-        runId: 'B1111111-1111-4111-8111-B11111111111',
-        startedAtMs: Date.now(),
-        headlines: [],
-        lastActivityAtMs: Date.now(),
-      });
+      markAgentWorking(turn({headlines: ['패치 작성 중']}));
     });
     await settle();
 

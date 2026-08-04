@@ -1172,6 +1172,78 @@ export function rowAccessibilityLabel({
   return parts.filter(part => part !== '').join(', ');
 }
 
+// =============================================================================
+// 답이 나타날 자리 (#999)
+//
+// 성재, 1차 검수: *"에이전트가 일하고 있는 상태인지도 잘 파악이 안 돼."*
+//
+// 배선은 #994 에 이미 있었다. 없던 것은 인지다 — 짧은 턴은 수 초 만에 끝나고,
+// 활동 줄도 배지도 시선 밖이다. 멘션을 막 친 사람의 눈이 가 있는 곳은 대화의
+// 맨 아래, 자기가 쓴 줄 다음 칸이다. 그래서 「작업 중」을 거기서 말한다.
+//
+// ## 메시지처럼 생겼지만 메시지가 아니다
+//
+// 이름줄은 진짜 행과 같은 모양이다(에이전트 색, 에이전트 태그, 책임자) — 그것이
+// 이 칸이 **누구의 답을 기다리는 자리**인지 말하는 방법이기 때문이다. 대신 본문
+// 자리는 비어 있고, 그 비어 있음을 한 낱말로 적는다. 시각도, 반응도, 길게 누르기도
+// 없다: 아직 아무것도 일어나지 않았으므로 할 수 있는 일도 없다.
+//
+// ## 시계도 헤드라인도 없다 — 그리고 그것은 절약이 아니라 계약이다
+//
+// 둘 다 초 단위로 바뀐다. 이 행에 실으면 그 박자로 `items` 가 새로 만들어지고
+// 목록 전체가 다시 그려진다 — goal RN-P2a(#997)가 방금 산 것이 정확히 그것이다.
+// 둘은 컴포저 바로 위 활동 줄에 이미 있고, 거기가 그 둘이 있어야 할 자리다.
+// `__tests__/conversationRenders.test.tsx` 가 이 계약을 숫자로 지킨다.
+// =============================================================================
+
+export function WorkingRow({
+  memberId,
+  directory,
+}: {
+  memberId: string;
+  directory: Directory;
+}): React.JSX.Element {
+  const parts = memberNameParts(directory, memberId, UNKNOWN_MEMBER);
+  const member = memberFor(directory, memberId);
+  const owner = member?.ownerHumanId
+    ? memberFor(directory, member.ownerHumanId)
+    : null;
+  return (
+    <View
+      // 한 행 = 한 접근성 원소, 메시지 행과 같은 규칙. 문장 하나로 읽힌다.
+      accessible
+      accessibilityLabel={`${parts.name} 작업 중, 답을 기다리는 중입니다`}
+      style={[styles.row, styles.rowStartsGroup]}
+      testID={`working-row-${memberId}`}>
+      <View style={styles.rowInner}>
+        <View style={styles.authorRow}>
+          <Text
+            style={[styles.authorName, styles.authorNameAgent]}
+            numberOfLines={1}>
+            {parts.name}
+          </Text>
+          {parts.handle ? (
+            <Text style={styles.authorHandle} numberOfLines={1}>
+              {parts.handle}
+            </Text>
+          ) : null}
+          <View style={styles.agentTag}>
+            <Text style={styles.agentTagText}>에이전트</Text>
+          </View>
+          {owner ? (
+            <Text style={styles.authorMeta} numberOfLines={1}>
+              {`${owner.displayName}님이 관리`}
+            </Text>
+          ) : null}
+        </View>
+        {/* 코어의 낱말 그대로다. 「작업 중」은 열린 턴 하나를 뜻하고, 승인 대기는
+            애초에 이 행을 얻지 못한다(`turnPlaceholderKey`). */}
+        <Text style={styles.workingBody}>작업 중…</Text>
+      </View>
+    </View>
+  );
+}
+
 /** A local echo: on screen the instant it is sent, with no seq and no clock. */
 export function PendingRow({
   pending,
@@ -1283,6 +1355,14 @@ const styles = StyleSheet.create({
   rowFailureText: {flex: 1, fontSize: font.meta, color: '#f0b4b8', lineHeight: 17},
   rowFailureDismiss: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
   sending: {fontSize: font.meta, color: color.textFaint},
+  // 본문 크기의 자리를 차지하되 본문의 무게는 갖지 않는다 — 이것은 메시지에
+  // **대한** 서술이지 메시지가 아니다(묘비와 같은 규칙).
+  workingBody: {
+    fontSize: font.body,
+    lineHeight: 22,
+    color: color.textFaint,
+    fontStyle: 'italic',
+  },
   failedRow: {
     flexDirection: 'row',
     alignItems: 'center',

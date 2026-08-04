@@ -3,7 +3,7 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import type {FlatList} from 'react-native';
-import type {TimelineItem} from '@momo/core/features/timeline/model';
+import type {TimelineStreamItem} from '@momo/core/features/timeline/model';
 
 import {Timeline} from '../src/features/conversation/Timeline';
 
@@ -72,8 +72,8 @@ function message(seq: number, over: Partial<Message> = {}): Message {
 const HISTORY = Array.from({length: 12}, (_, i) => message(i + 1));
 
 function mount(selfSendToken = 0, messages: Message[] = HISTORY) {
-  const listRef = React.createRef<FlatList<TimelineItem>>() as React.MutableRefObject<
-    FlatList<TimelineItem> | null
+  const listRef = React.createRef<FlatList<TimelineStreamItem>>() as React.MutableRefObject<
+    FlatList<TimelineStreamItem> | null
   >;
   const view = render(
     <Timeline

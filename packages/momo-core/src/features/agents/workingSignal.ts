@@ -95,6 +95,62 @@ export interface AgentWorkingSignal {
   runCount?: number;
 }
 
+// =============================================================================
+// 타임라인 자리표시 — 「작업 중」을 사람이 **보고 있는 자리**에서 말하기 (#999)
+//
+// 성재, 1차 검수: *"경과시계나 중단 버튼 탭 같은 게 있는지 잘 모르겠어… 에이전트가
+// 일하고 있는 상태인지도 잘 파악이 안 돼."*
+//
+// 배선은 이미 있었다(#994). 없던 것은 **인지**다. 짧은 턴은 수 초 만에 끝나고,
+// 활동 줄과 배지는 둘 다 시선 밖에 있다 — 사람이 방금 멘션을 쳤을 때 눈이 가 있는
+// 곳은 대화의 맨 아래, 자기가 쓴 줄 바로 다음 칸이다. 답이 나타날 그 칸.
+//
+// 그래서 이 함수가 정하는 것은 하나다: **어느 턴이 그 칸을 얻는가.** 그리고 그
+// 답은 규칙 하나로 끝난다 — `working` 인 턴만이다. `awaiting_approval` 은 멈춰
+// 서서 사람의 결정을 기다리는 상태이고, 그 칸에 자리표시를 놓으면 화면이 "곧
+// 답이 온다"고 말하는 동안 에이전트는 바로 그 사람을 기다리고 있게 된다. 이
+// 모듈의 헤더가 처음부터 금지한 거짓말이 정확히 그것이다.
+//
+// ## 왜 문자열(키)인가
+//
+// 자리표시는 **존재**만 나른다 — 이름도 시계도 헤드라인도 아니다(그 셋은 컴포저
+// 바로 위 활동 줄의 몫이다). 존재만 나르면 스트리밍 청크마다 값이 바뀌지 않고,
+// 그래서 소비하는 쪽이 이 키로 memo 를 걸 수 있다. 그것이 중요한 이유는 goal
+// RN-P2a 가 방금 산 것이 바로 그것이기 때문이다: 신호가 갱신될 때 메시지 목록이
+// 다시 그려지지 않는 것. 헤드라인을 이 자리에 실으면 그 수리가 그대로 풀린다.
+//
+// 손실 없는 인코딩이라 `parseTurnPlaceholderKey` 가 되돌린다 — `agentRail` 의
+// `subscriptionKey`/`parseSubscriptionKey` 와 같은 이유로 같은 모양이다.
+// =============================================================================
+
+/** 자리표시 한 칸이 아는 전부. */
+export interface TurnPlaceholder {
+  memberId: string;
+}
+
+/**
+ * 타임라인에 자리표시를 얻는 에이전트들을, 값이 같으면 문자열도 같은 키로.
+ *
+ * 입력은 이미 채널로 걸러지고 오래된 순으로 정렬된 턴 배열이다(`agentTurnsInChannel`).
+ * 여기서 더 하는 일은 어휘 경계 하나뿐이다: **`working` 만.**
+ */
+export function turnPlaceholderKey(
+  turns: readonly AgentWorkingSignal[]
+): string {
+  const out: string[] = [];
+  for (const turn of turns) {
+    if (turn.state !== "working") continue;
+    out.push(turn.memberId.toLowerCase());
+  }
+  return out.join("|");
+}
+
+/** `turnPlaceholderKey` 의 역함수. 빈 키는 빈 배열이다. */
+export function parseTurnPlaceholderKey(key: string): TurnPlaceholder[] {
+  if (key === "") return [];
+  return key.split("|").map((memberId) => ({ memberId }));
+}
+
 /**
  * Idle cutoff: past this, a signal self-expires even though no terminal event
  * ever arrived, and every surface stops rendering it on the next tick.
