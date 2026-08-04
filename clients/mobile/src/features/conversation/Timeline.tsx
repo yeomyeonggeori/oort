@@ -555,6 +555,7 @@ function TimelineInner({
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
+      const previous = geometryRef.current;
       noteGeometry({
         offsetY: contentOffset.y,
         contentHeight: contentSize.height,
@@ -565,8 +566,34 @@ function TimelineInner({
       // answering them would revoke `following` mid-flight and cancel the very
       // correction that gets the sender to their own message. See the header.
       if (Date.now() < selfSendPinUntilRef.current) return;
+      // ## 창이 좁아진 것도 사람이 움직인 것이 아니다 (goal RN-P2b / #998)
+      //
+      // 성재, iPhone 17: *"채팅치면 채팅바에 내 최근 채팅이 가려진다."*
+      //
+      // 컴포저는 고정 높이가 아니다 — 두 줄째로 넘어가는 글자, `@` 가 여는 멘션
+      // 목록(최대 180pt), 턴이 열리며 서는 활동 줄. 전부 아래에서 위로 자라고,
+      // 리스트는 `flex: 1` 이라 그만큼 짧아진다.
+      //
+      // 그때 `contentOffset` 은 그대로인데 `layoutMeasurement.height` 만 ΔH 작아지고,
+      // 아래 식은 ΔH 만큼 커진다. 그 값을 실은 스크롤 이벤트가 `onLayout` 보다 먼저
+      // 도착하면 이 줄은 그것을 「읽던 사람이 위로 올라갔다」로 읽어 버린다 — 멘션
+      // 목록 하나면 임계값 120pt 를 이미 넘는다. 그러고 나면 뒤따라온 `onLayout` 은
+      // `following` 이 거짓이라 아무것도 하지 않고, 방금 쓴 메시지는 컴포저 뒤에
+      // 남는다. 손가락은 유리에 닿은 적이 없다.
+      //
+      // 그래서 **줄어든 만큼은 거리에서 뺀다.** 창의 변화는 창의 것이지 사람의 것이
+      // 아니다. 보정은 전환이 실린 그 한 이벤트에만 걸린다(다음 이벤트부터는
+      // `previous.viewportHeight` 가 이미 새 값이라 `shrankBy` 가 0이다), 그리고
+      // 진짜로 과거를 읽고 있던 사람은 그대로 남는다 — 500pt 떨어져 있었으면 보정
+      // 뒤에도 500pt 이고, 임계값을 넘는다.
+      const shrankBy = Math.max(
+        0,
+        previous.viewportHeight - layoutMeasurement.height,
+      );
       const distanceFromEnd =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+        contentSize.height -
+        (contentOffset.y + layoutMeasurement.height) -
+        shrankBy;
       followingRef.current = distanceFromEnd <= FOLLOW_THRESHOLD_PX;
     },
     [noteGeometry],
