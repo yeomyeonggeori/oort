@@ -78,6 +78,38 @@ export function cancelSucceeded(result: AgentRunCancelResult): CancelOutcome {
 }
 
 /**
+ * Which terminal state a 409 is reporting, if it said.
+ *
+ * The server does not answer a bare conflict — it answers `agent run is already
+ * {status}` with the db label, and its own comment says why in as many words:
+ * *"already succeeded" is not "stopped"*, and answering as if it were would tell
+ * a person their stop worked when what really happened is that the agent
+ * finished first (`routes/agent_runs.rs` cancel, :298-300 / :380-385).
+ *
+ * `cancelled` is deliberately absent from this table. A run already cancelled
+ * never reaches a 409 at all — that is the idempotent 200 path, which answers
+ * with the same body and writes nothing.
+ *
+ * Matching on the message is a soft read, so it fails soft: an unrecognised or
+ * reworded message falls through to the plain sentence rather than to a guess.
+ * The fact worth having is WHICH ending, and the fact we must never invent is
+ * the same one.
+ */
+const TERMINAL_ENDINGS: ReadonlyArray<[string, string]> = [
+  ["succeeded", "에이전트가 먼저 마쳤습니다."],
+  ["timed_out", "시간이 초과돼 끝나 있었습니다."],
+  ["failed", "실패로 끝나 있었습니다."],
+];
+
+export function alreadyOverSentence(message: string): string {
+  const lowered = message.toLowerCase();
+  for (const [label, ending] of TERMINAL_ENDINGS) {
+    if (lowered.includes(label)) return `이 실행은 이미 끝났습니다. ${ending}`;
+  }
+  return "이 실행은 이미 끝났습니다.";
+}
+
+/**
  * Why the stop did not land, as a sentence the reader can act on.
  *
  * Same grammar as `pauseFailureCopy` one file over — name the act that failed,
@@ -87,7 +119,8 @@ export function cancelSucceeded(result: AgentRunCancelResult): CancelOutcome {
  * The two arms worth reading twice:
  *
  *   409  The run is already terminal in some state other than cancelled. That is
- *        not a failure of anything; it is the answer. Hence `alreadyOver`.
+ *        not a failure of anything; it is the answer — and WHICH terminal state
+ *        it is matters, so the sentence names it (`alreadyOverSentence`).
  *   404  Two different servers answer 404 here and this client cannot tell them
  *        apart from the status alone: one has the route and does not have that
  *        run, the other does not have the route at all. So the sentence states
@@ -99,7 +132,7 @@ export function cancelFailureOutcome(error: unknown): CancelOutcome {
     if (error.status === 409) {
       return {
         kind: "alreadyOver",
-        sentence: "이 실행은 이미 끝났습니다.",
+        sentence: alreadyOverSentence(error.message),
       };
     }
     if (error.status === 401 || error.status === 403) {

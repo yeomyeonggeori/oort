@@ -351,9 +351,16 @@ describe('세 가지 답', () => {
     expect(receipt).toHaveTextContent(/작업 세션 2개는 계속 돕니다/);
   });
 
-  it('이미 터미널 — 409는 오류가 아니라 「이미 끝났습니다」다', async () => {
+  it('이미 터미널 — 409는 오류가 아니고, 어떤 끝이었는지까지 말한다', async () => {
+    // 서버는 맨 conflict를 답하지 않는다: `agent run is already succeeded`처럼
+    // **실제 status를 싣는다**(`routes/agent_runs.rs` cancel, :380-385). 그 이유를
+    // 서버 주석이 직접 적어 뒀다 — "already succeeded"는 "stopped"가 아니고,
+    // 같은 것으로 답하면 사람은 자기 중단이 먹혔다고 읽는다. 실제로 일어난 일은
+    // 에이전트가 먼저 마친 것이다.
     installFetch(() =>
-      jsonResponse(409, {error: {message: 'run already terminal'}}),
+      jsonResponse(409, {
+        error: {message: 'agent run is already succeeded'},
+      }),
     );
     await openTurn();
 
@@ -364,9 +371,9 @@ describe('세 가지 답', () => {
     await waitFor(() =>
       expect(screen.getByTestId('turn-stop-outcome-alreadyOver')).toBeTruthy(),
     );
-    expect(screen.getByTestId('turn-stop-outcome-alreadyOver')).toHaveTextContent(
-      /이 실행은 이미 끝났습니다\./,
-    );
+    const settled = screen.getByTestId('turn-stop-outcome-alreadyOver');
+    expect(settled).toHaveTextContent(/이 실행은 이미 끝났습니다\./);
+    expect(settled).toHaveTextContent(/에이전트가 먼저 마쳤습니다\./);
     // 실패로 그리지 않는다 — 사람이 원한 것(이 실행이 돌지 않는 것)은 참이 됐다.
     expect(screen.queryByTestId('turn-stop-outcome-error')).toBeNull();
     // 확인 단계도 접힌다. 남겨 두면 존재하지 않는 실행을 다시 멈추라고 권하는
