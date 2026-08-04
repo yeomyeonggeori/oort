@@ -1080,6 +1080,36 @@ function sameRollup(
   );
 }
 
+/**
+ * 비교자가 **본** prop 의 전수 목록 — 컴파일 타임 망라성 가드 (1R M2).
+ *
+ * 아래 비교자는 필드를 손으로 열거한다. 빠르고 읽히지만, 그 형태에는 조용한
+ * 결함이 하나 붙어 있다: `MessageRowProps` 에 열한 번째 prop 이 생겨도 비교자는
+ * **컴파일된다.** 그리고 그 순간 이 행은 그 prop 이 바뀌어도 다시 그려지지 않는
+ * 행이 된다 — 성능 결함이 아니라 **정확성 결함**이고, 화면에는 옛 값이 남는다.
+ * memo 의 무서운 점이 그것이다. 틀려도 조용하다.
+ *
+ * 그래서 목록을 따로 적는다. `Record<keyof MessageRowProps, true>` 는 prop 이
+ * 하나 늘면 "속성이 없습니다"로 **빌드를 멈춘다.** 그때 이 파일을 열게 되고,
+ * 이 주석이 다음 질문을 준다: 그 prop 은 동일성으로 충분한가, 아니면 `chips`·
+ * `rollup` 처럼 값으로 봐야 하는가.
+ *
+ * 그리고 목록만으로는 "인지했다"까지밖에 못 잠근다. 비교자가 실제로 그 prop 을
+ * **보는지**는 `__tests__/messageRowMemo.test.tsx` 가 이 목록을 순회하며 묻는다.
+ */
+export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
+  message: true,
+  startsGroup: true,
+  directory: true,
+  chips: true,
+  pausedRepeat: true,
+  nowMs: true,
+  onResend: true,
+  actions: true,
+  rollup: true,
+  replyParent: true,
+};
+
 export function sameMessageRowProps(
   a: MessageRowProps,
   b: MessageRowProps,

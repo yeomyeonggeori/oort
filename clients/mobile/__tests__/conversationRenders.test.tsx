@@ -436,4 +436,47 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
     expect(writes).toBeGreaterThan(0);
     expect(writes).toBeLessThanOrEqual(2);
   });
+
+  it('창이 닫히기 전에 화면을 떠나도 커서는 보고된다 — 버리지 않는다 (1R M1)', async () => {
+    // 코얼레싱의 대가로 **잃어도 되는 것은 없다.** 600ms 창 안에 채널을 떠나면
+    // (빠른 A→B 전환, 뒤로가기) 첫 판은 예약을 통째로 버렸고, 그것은 사람이 이미
+    // 읽은 대화에 안 읽음 배지를 남기는 P7 위반이다.
+    //
+    // 방향의 안전성은 코얼레싱 자체의 논거가 이미 증명한다: 서버가 클램프하고
+    // 뒤로 가지 않으므로 **일찍 보내는 것은 언제나 안전**하다. 위험한 것은 안
+    // 보내는 쪽뿐이다.
+    await openConversation();
+    const fetchMock = globalThis.fetch as unknown as jest.Mock;
+    const cursorPuts = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.includes('/read-state') &&
+          (init as {method?: string} | undefined)?.method === 'PUT',
+      ).length;
+    await settle(700);
+    const before = cursorPuts();
+
+    // 메시지가 하나 도착한다 — 커서가 예약된다.
+    await act(async () => {
+      channelSub()?.__emit('publication', {
+        data: {
+          type: 'message.new',
+          v: 1,
+          ts: BASE_MS + 300_000,
+          seq: 300,
+          payload: framePayload(300),
+        },
+      });
+    });
+
+    // 그리고 600ms 가 지나기 **전에** 떠난다. 이것이 결함이 살던 창이다.
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('header-back'));
+    });
+    await settle(50);
+
+    // 타이머가 울릴 시간은 없었다. 그래도 보고돼야 한다.
+    expect(cursorPuts()).toBe(before + 1);
+  });
 });

@@ -270,19 +270,61 @@ export default function ConversationScreen({
   // 그것이 밀어넣기 애니메이션과 정확히 겹친다.
   //
   // 커서는 **위치 보고**이지 사건이 아니므로 몰아서 보내도 뜻이 상하지 않는다:
-  // 서버가 클램프하고 뒤로 가지 않으므로 마지막 값 하나면 충분하다. 채널이 바뀌면
-  // 예약을 버리고(다른 채널의 커서를 그 채널에 쓰는 것은 그냥 틀린 일이다) 언마운트
-  // 시에도 버린다 — 그때는 다음 열기가 다시 시도한다.
+  // 서버가 클램프하고 뒤로 가지 않으므로 마지막 값 하나면 충분하다.
+  //
+  // ## 떠날 때는 버리지 않고 **지금 보낸다** (1R M1)
+  //
+  // 첫 판은 예약을 `clearTimeout` 으로 버렸고, 그것이 P7 위반이었다. 600ms 창
+  // 안에 채널을 떠나면(빠른 A→B 전환, 뒤로가기) 그 채널의 커서가 통째로 사라져
+  // 안 읽음 배지가 남는다 — 사람은 이미 읽었는데.
+  //
+  // 방향의 안전성은 위 문단이 이미 증명한다: 서버가 클램프하고 뒤로 가지 않으므로
+  // **일찍 보내는 것은 언제나 안전**하다. 위험한 것은 안 보내는 쪽뿐이다.
+  //
+  // 그런데 "cleanup 에서 무조건 발사"는 코얼레싱을 통째로 되돌린다 — 이 효과는
+  // `newestSeq` 가 오를 때마다 다시 도므로, 그 cleanup 도 메시지마다 돈다. 그래서
+  // 두 경우를 갈라야 한다:
+  //
+  //   **밀려남**(같은 채널에서 더 큰 seq 가 왔다) → 버린다. 곧 도착할 더 큰 값이
+  //     이 값을 포함하므로 잃는 것이 없다. 코얼레싱은 여기서 산다.
+  //   **떠남**(채널이 바뀌었다 / 화면이 사라졌다) → 지금 보낸다. 다음 기회가
+  //     없을지도 모르는 유일한 경우다.
+  //
+  // 그 구분은 **의존성 배열**로 표현된다: 예약 효과는 `newestSeq` 에도 매이고,
+  // 비우는 효과는 `channelId` 에만 매인다. React 는 한 커밋에서 모든 cleanup 을
+  // 먼저 돌리므로, 채널이 바뀌는 순간 ref 에는 아직 **떠나는 채널**의 값이 있다.
+  const cursorRef = useRef<{channelId: string; seq: number} | null>(null);
+  const markReadRef = useRef(markRead);
+  useEffect(() => {
+    markReadRef.current = markRead;
+  }, [markRead]);
+
+  const flushReadCursor = useCallback(() => {
+    const pending = cursorRef.current;
+    if (pending === null) return;
+    // 먼저 비운다: 이 값은 한 번만 보내면 되고, 떠나기와 타이머가 같은 값을 두 번
+    // 보내는 것은 무효화 폭풍을 그만큼 두 번 부르는 일이다.
+    cursorRef.current = null;
+    void markReadRef.current(pending.channelId, pending.seq).catch(() => {
+      /* the cursor stays put; the next open tries again */
+    });
+  }, []);
+
   const newestSeq = timeline.state.newestSeq;
   useEffect(() => {
-    if (newestSeq === null) return;
-    const timer = setTimeout(() => {
-      void markRead(channelId, newestSeq).catch(() => {
-        /* the cursor stays put; the next open tries again */
-      });
-    }, READ_CURSOR_COALESCE_MS);
+    if (newestSeq === null) {
+      // 채널이 막 바뀌어 타임라인이 아직 비었다. 떠나는 효과가 이미 옛 채널의
+      // 값을 보냈으므로, 여기 남은 것이 있다면 그것은 **새 채널 id 에 옛 seq** 를
+      // 붙인 한 프레임짜리 유령이다.
+      cursorRef.current = null;
+      return;
+    }
+    cursorRef.current = {channelId, seq: newestSeq};
+    const timer = setTimeout(flushReadCursor, READ_CURSOR_COALESCE_MS);
     return () => clearTimeout(timer);
-  }, [channelId, newestSeq, markRead]);
+  }, [channelId, newestSeq, flushReadCursor]);
+
+  useEffect(() => () => flushReadCursor(), [channelId, flushReadCursor]);
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);

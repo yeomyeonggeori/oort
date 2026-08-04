@@ -1,0 +1,148 @@
+import type {Message, RosterMember} from '@momo/core/lib/api';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
+
+import {
+  MESSAGE_ROW_COMPARED_PROPS,
+  sameMessageRowProps,
+  type MessageRowProps,
+} from '../src/features/conversation/MessageRow';
+
+// =============================================================================
+// memo 비교자가 **모든 prop 을 본다** (1R M2)
+//
+// `MessageRow` 는 `React.memo` 로 감싸여 있고, 그 비교자는 필드를 손으로 열거한다
+// (`sameMessageRowProps`). 빠르고 읽히지만 그 형태에는 조용한 결함이 붙는다:
+// prop 이 하나 늘어도 비교자는 컴파일되고, 그 순간 이 행은 그 값이 바뀌어도 다시
+// 그려지지 않는 행이 된다. **성능 결함이 아니라 정확성 결함**이고, 화면에는 옛
+// 값이 남는다.
+//
+// `MESSAGE_ROW_COMPARED_PROPS` 가 그 절반을 잠근다 — prop 이 늘면 빌드가 멈추므로
+// 아무도 모르게 지나갈 수 없다. 나머지 절반이 이 파일이다: 목록에 적힌 모든 키에
+// 대해 **그 값만 바꾼 두 props 를 비교자가 다르다고 말하는가**를 묻는다.
+//
+// 그래서 열한 번째 prop 을 추가하면 두 번 걸린다. 먼저 타입이(목록에 적어라),
+// 그 다음 이 테스트가(비교자에 넣어라). 목록에만 적고 비교자를 잊는 것이 정확히
+// 이 파일이 막는 실패다.
+//
+// 순회는 `Object.keys` 가 아니라 **키마다 손으로 쓴 변형**으로 한다: 무엇을
+// "바뀐 값"으로 볼지는 타입이 답해 줄 수 없고, 그 판단이야말로 새 prop 을 넣는
+// 사람이 해야 하는 일이기 때문이다. `Record<keyof MessageRowProps, …>` 이므로
+// 여기서도 하나라도 빠지면 컴파일되지 않는다.
+// =============================================================================
+
+const SELF = '11111111-1111-4111-8111-111111111111';
+const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
+const BASE_MS = 1_700_000_000_000;
+
+function member(over: Partial<RosterMember> & {id: string}): RosterMember {
+  return {
+    workspaceId: 'ws',
+    kind: 'human',
+    status: 'active',
+    displayName: '이름',
+    handle: 'handle',
+    channelCount: 0,
+    channelIds: [],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+    ...over,
+  } as RosterMember;
+}
+
+const DIRECTORY = makeDirectory([member({id: SELF}), member({id: OTHER})]);
+/** 값은 같고 **동일성만 다른** 디렉터리. 이 prop 은 동일성으로 본다. */
+const OTHER_DIRECTORY = makeDirectory([member({id: SELF}), member({id: OTHER})]);
+
+function message(seq: number, over: Partial<Message> = {}): Message {
+  return {
+    id: `msg-${seq}`,
+    channelId: 'ch',
+    seq,
+    hlcTs: seq,
+    hlcCount: 0,
+    authorMemberId: OTHER,
+    type: 'text',
+    body: `메시지 ${seq}`,
+    state: 'sent',
+    createdAtMs: BASE_MS + seq * 1000,
+    ...over,
+  };
+}
+
+const BASE: MessageRowProps = {
+  message: message(1),
+  startsGroup: true,
+  directory: DIRECTORY,
+  chips: [{emoji: '👍', count: 1, mine: false}],
+  pausedRepeat: undefined,
+  nowMs: BASE_MS,
+  onResend: () => {},
+  actions: undefined,
+  rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
+  replyParent: undefined,
+};
+
+/**
+ * 키마다 "이것이 바뀌면 행이 달라 보인다"의 한 예.
+ *
+ * `chips` 와 `rollup` 은 **값**만 바꾼다(새 배열/새 객체이되 내용이 같으면 같아야
+ * 하므로, 내용을 바꾸지 않으면 이 테스트는 아무것도 묻지 못한다). 나머지는 동일성만
+ * 바꾸어도 충분하다 — 그것이 그 prop 들의 계약이다.
+ */
+const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
+  message: {message: message(2)},
+  startsGroup: {startsGroup: false},
+  directory: {directory: OTHER_DIRECTORY},
+  chips: {chips: [{emoji: '👍', count: 2, mine: false}]},
+  pausedRepeat: {pausedRepeat: 3},
+  nowMs: {nowMs: BASE_MS + 60_000},
+  onResend: {onResend: () => {}},
+  actions: {
+    actions: {
+      myMemberId: SELF,
+      onToggleReaction: async () => {},
+      onEdit: async () => {},
+      onDelete: async () => {},
+    },
+  },
+  rollup: {rollup: {replyCount: 2, lastReplySeq: 10, lastReplyAtMs: BASE_MS}},
+  replyParent: {replyParent: message(1)},
+};
+
+describe('memo 비교자는 모든 prop 을 본다', () => {
+  it('아무것도 바뀌지 않으면 같다 — 그래야 이 memo 가 값을 한다', () => {
+    expect(sameMessageRowProps(BASE, {...BASE})).toBe(true);
+  });
+
+  it('값이 같은 새 chips / rollup 은 같다 — 얕은 비교였다면 여기서 실패한다', () => {
+    // `chipsFor` 는 새 배열을, `rollupFor` 는 새 객체를 렌더마다 돌려준다. 이
+    // 단정이 memo 가 실제로 무언가를 사는 유일한 이유다.
+    expect(
+      sameMessageRowProps(BASE, {
+        ...BASE,
+        chips: [{emoji: '👍', count: 1, mine: false}],
+        rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
+      }),
+    ).toBe(true);
+  });
+
+  it.each(
+    (Object.keys(MESSAGE_ROW_COMPARED_PROPS) as (keyof MessageRowProps)[]).map(
+      key => [key] as const,
+    ),
+  )('%s 가 바뀌면 다르다고 말한다', key => {
+    expect(sameMessageRowProps(BASE, {...BASE, ...CHANGED[key]})).toBe(false);
+  });
+
+  it('null 과 undefined 인 rollup 은 서로 다르다', () => {
+    // `null` 은 "이 표면에는 롤업이 없다"이고 `undefined` 는 "서버의 것을 쓰라"다.
+    // 둘을 같다고 하면 행이 서버 롤업으로 되돌아가는 것을 memo 가 가려 버린다.
+    expect(
+      sameMessageRowProps(
+        {...BASE, rollup: null},
+        {...BASE, rollup: undefined},
+      ),
+    ).toBe(false);
+  });
+});
