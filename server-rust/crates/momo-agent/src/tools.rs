@@ -66,7 +66,7 @@
 //! point: the failure mode of a permissive default is an agent taking an
 //! irreversible action nobody authorised, and there is no undo for it.
 
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 /// `work.session.end` — the one tool this server executes in v0.
 ///
@@ -118,6 +118,88 @@ pub const DECLARED_NOT_EXECUTABLE: &[&str] = &[
     "agent.pause",
     "message.post",
 ];
+
+/// One tool this server can execute, described the way a model needs to see it
+/// (goal SRV-B3f).
+///
+/// **Wire-agnostic on purpose.** The two provider wires disagree about where a
+/// function's fields live — `/chat/completions` nests them under a `function`
+/// object and the Responses API flattens them onto the tool itself (the same
+/// split `responses.rs` already documents on the *parse* side, for
+/// `function_call` items). So this type carries the three facts and each adapter
+/// renders them in its own shape; a single pre-rendered JSON blob here would be
+/// correct for exactly one of the two wires and silently wrong on the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDefinition {
+    pub name: &'static str,
+    pub description: &'static str,
+    /// JSON Schema for the arguments object.
+    pub parameters: Value,
+}
+
+/// The definition of every tool in [`CATALOG`], in catalog order.
+///
+/// Built rather than `const` because the schema is a `serde_json::Value`. The
+/// list is asserted against `CATALOG` by a test, so a tool that gains an
+/// executor without gaining a description cannot ship: the model would be told a
+/// name with no idea when to use it.
+pub fn catalog_definitions() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: WORK_SESSION_END,
+        // Written for the model, not for a changelog: it has to convey the one
+        // property that makes this tool worth an approval — it cannot be undone.
+        description: "End a running work session. This terminates the session's \
+             host and seals its billing ledger; it cannot be undone. Requires \
+             human approval before it runs.",
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "UUID of the work session to end."
+                }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+        }),
+    }]
+}
+
+/// The definitions for the names an agent profile turned on — the **consumer**
+/// `agent_profile.enabled_tools` never had (goal SRV-B3f).
+///
+/// Until this function existed the column was written, validated (`≤128`
+/// entries, unique, non-empty) and read by nothing: no query selected it, no
+/// payload carried it, and no provider request was shaped by it. An operator
+/// could turn a tool on and the only observable effect was a row version bump.
+///
+/// ## The intersection is the security property
+///
+/// The answer is `enabled_tools ∩ CATALOG`, and the direction of that
+/// intersection is deliberate:
+///
+/// * a name the catalog does not implement is **dropped**, not advertised. The
+///   alternative — telling the model about a tool this build cannot run — spends
+///   a whole turn to arrive at the `tool_result` that names the gap.
+/// * a name the catalog *does* implement is offered **only if the profile turned
+///   it on**. `CATALOG` is what this server *can* run; `enabled_tools` is what
+///   this agent *may* ask for. Handing out the catalog to an agent whose profile
+///   is empty would make every agent a work-session terminator by default.
+///
+/// Matching folds case and dashes ([`normalize`]), the same rule the executor
+/// uses, so an operator who wrote `Work-Session-End` gets the tool they meant
+/// rather than silence. Order follows `CATALOG`, not the profile, so two
+/// profiles listing the same tools produce byte-identical requests.
+pub fn enabled_tool_definitions(enabled: &[String]) -> Vec<ToolDefinition> {
+    let wanted: Vec<String> = enabled.iter().map(|name| normalize(name)).collect();
+    catalog_definitions()
+        .into_iter()
+        .filter(|definition| {
+            let known = normalize(definition.name);
+            wanted.contains(&known)
+        })
+        .collect()
+}
 
 /// Is this a tool this build knows how to run?
 pub fn is_executable(tool_name: &str) -> bool {
@@ -382,6 +464,112 @@ pub fn requires_approval(tool_name: &str, grants: Option<&[ToolGrant]>) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every executable tool has a definition, and every definition names an
+    /// executable tool. A tool that gained an executor without a description
+    /// would be a name the model is told about with no idea when to use it.
+    #[test]
+    fn the_catalog_and_its_definitions_are_the_same_set() {
+        let defined: Vec<&str> = catalog_definitions().iter().map(|d| d.name).collect();
+        assert_eq!(defined, CATALOG.to_vec());
+        for definition in catalog_definitions() {
+            assert!(is_executable(definition.name), "{}", definition.name);
+            assert!(
+                !definition.description.trim().is_empty(),
+                "{} has no description",
+                definition.name
+            );
+            assert_eq!(definition.parameters["type"], json!("object"));
+        }
+    }
+
+    /// `enabled_tools ∩ CATALOG`, in both directions.
+    #[test]
+    fn only_a_tool_that_is_both_enabled_and_executable_is_offered() {
+        // Enabled + executable → offered.
+        let offered = enabled_tool_definitions(&[WORK_SESSION_END.to_string()]);
+        assert_eq!(offered.len(), 1);
+        assert_eq!(offered[0].name, WORK_SESSION_END);
+
+        // Enabled but NOT executable → dropped, not advertised. Telling the
+        // model about it would spend a turn to reach "this server cannot".
+        for unknown in ["web.search", "work.session.spawn", "message.post"] {
+            assert!(
+                enabled_tool_definitions(&[unknown.to_string()]).is_empty(),
+                "{unknown} is not in this build's catalog"
+            );
+        }
+        // …including every name the roadmap has reserved but not built.
+        for declared in DECLARED_NOT_EXECUTABLE {
+            assert!(enabled_tool_definitions(&[declared.to_string()]).is_empty());
+        }
+
+        // Executable but NOT enabled → withheld. This is what stops an empty
+        // profile from making every agent a work-session terminator.
+        assert!(enabled_tool_definitions(&[]).is_empty());
+        assert!(enabled_tool_definitions(&["something.else".to_string()]).is_empty());
+    }
+
+    /// The declaration matches by **exactly** the executor's rule, whatever that
+    /// rule is — which is the property that matters, not the rule itself.
+    ///
+    /// `normalize` folds case and dashes and deliberately **not** dots
+    /// (`matching_folds_case_and_dashes_but_not_dots` pins that). So the two
+    /// halves are asserted against each other rather than against a list I wrote
+    /// by hand: any spelling the executor would run must be a spelling the
+    /// declaration offers, and vice versa. A drift either way is a real bug —
+    /// offering a tool that will not run, or running one never offered.
+    #[test]
+    fn enabling_matches_by_exactly_the_executors_rule() {
+        for spelling in [
+            "work.session.end",
+            "Work.Session.End",
+            "  WORK.SESSION.END  ",
+            // Not the same tool: dots are not dashes to `normalize`.
+            "work-session-end",
+            "work_session_end",
+            "work.session.ended",
+            "",
+        ] {
+            let offered = !enabled_tool_definitions(&[spelling.to_string()]).is_empty();
+            assert_eq!(
+                offered,
+                is_executable(spelling),
+                "declaration and execution disagree about {spelling:?}: \
+                 offered={offered}, executable={}",
+                is_executable(spelling)
+            );
+        }
+        // …and the three that DO match are the case/whitespace family.
+        for spelling in [
+            "work.session.end",
+            "Work.Session.End",
+            "  WORK.SESSION.END  ",
+        ] {
+            assert_eq!(enabled_tool_definitions(&[spelling.to_string()]).len(), 1);
+        }
+    }
+
+    /// Order comes from the catalog, so two profiles listing the same tools in
+    /// different orders produce byte-identical provider requests — and a
+    /// duplicate entry cannot make a provider reject the request for declaring
+    /// one function twice.
+    #[test]
+    fn the_offer_is_deduplicated_and_ordered_by_the_catalog() {
+        let noisy = enabled_tool_definitions(&[
+            WORK_SESSION_END.to_string(),
+            "work-session-end".to_string(),
+            WORK_SESSION_END.to_string(),
+        ]);
+        assert_eq!(noisy.len(), 1, "a name repeated is still one function");
+        assert_eq!(
+            noisy.iter().map(|d| d.name).collect::<Vec<_>>(),
+            enabled_tool_definitions(&[WORK_SESSION_END.to_string()])
+                .iter()
+                .map(|d| d.name)
+                .collect::<Vec<_>>()
+        );
+    }
     use serde_json::json;
 
     fn grant(policy: &str, grant_kind: &str, risk: &str) -> ToolGrant {

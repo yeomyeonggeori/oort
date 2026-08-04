@@ -656,6 +656,7 @@ mod tests {
             effort_pref: None,
             system_prompt: None,
             tool_schema: serde_json::json!([]),
+            enabled_tools: Vec::new(),
             config: serde_json::json!({}),
             max_run_steps: 50,
             workspace_settings: serde_json::json!({}),

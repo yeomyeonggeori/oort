@@ -71,6 +71,11 @@ pub struct AgentJobPayload {
     /// [`AgentJobPayload::tool_schema`] is what normalises it.
     #[serde(default)]
     pub tools: Option<serde_json::Value>,
+    /// `agent_profile.enabled_tools` as the mention path froze it (goal
+    /// SRV-B3f) — **names**, resolved against this build's catalog by
+    /// [`AgentJobPayload::enabled_tools`].
+    #[serde(default)]
+    pub enabled_tools: Option<serde_json::Value>,
     /// The Context Packet's tool-grant projection — G6's authoritative input.
     ///
     /// `None` (absent) and `Some([])` mean different things and both fail
@@ -135,6 +140,31 @@ impl AgentJobPayload {
             .and_then(serde_json::Value::as_array)
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// The tool definitions this build can offer for the names the profile
+    /// turned on (goal SRV-B3f).
+    ///
+    /// Resolved **here**, against the running build's catalog, rather than read
+    /// out of the payload: a job frozen by one deployment can be claimed by a
+    /// newer one, and the tools a turn advertises must be the ones the process
+    /// answering it can actually execute.
+    ///
+    /// A non-array value reads as none — the same fail-closed direction
+    /// [`AgentJobPayload::tool_schema`] takes for a misconfigured column.
+    pub fn enabled_tools(&self) -> Vec<momo_agent::tools::ToolDefinition> {
+        let names: Vec<String> = self
+            .enabled_tools
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        momo_agent::tools::enabled_tool_definitions(&names)
     }
 
     /// The G6 grant projection, or `None` when the payload carries none.

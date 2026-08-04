@@ -139,8 +139,36 @@ async fn momo_notifier_pool() -> PgPool {
     role_pool("momo_notifier", &momo_notifier_password()).await
 }
 
+/// Same resolver as this crate's `conformance_pg.rs` (goal SRV-B3f).
+///
+/// It used to be a bare `"psql"`, which meant this suite — the ONLY DB coverage
+/// of the approval axis — silently required psql on `PATH`. On a machine where
+/// it lives only in Homebrew's keg-only libpq (the usual macOS shape) all seven
+/// cases failed at `apply_bootstrap_roles` with `NotFound`, before a single
+/// assertion ran. `PSQL_BIN` still wins so an operator can point at a specific
+/// client.
 fn resolve_psql() -> PathBuf {
-    PathBuf::from(std::env::var("PSQL_BIN").unwrap_or_else(|_| "psql".to_string()))
+    if let Ok(explicit) = std::env::var("PSQL_BIN") {
+        return PathBuf::from(explicit);
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join("psql");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    for candidate in [
+        "/opt/homebrew/opt/libpq/bin/psql",
+        "/usr/local/opt/libpq/bin/psql",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return path;
+        }
+    }
+    panic!("psql client not found on PATH or Homebrew libpq locations");
 }
 
 fn bootstrap_roles_path() -> PathBuf {

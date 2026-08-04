@@ -240,8 +240,21 @@ pub fn build_request_body(request: &ChatRequest) -> Value {
     }
     // goal SRV-T1. Passed through in the agent's own `tool_schema` shape, and
     // omitted when empty for the same reason the chat wire omits it.
-    if !request.tools.is_empty() {
-        object.insert("tools".into(), Value::Array(request.tools.clone()));
+    // goal SRV-B3f: the agent's own passthrough JSON, then momo's own tools
+    // rendered **flat** — the Responses wire puts a function's fields on the
+    // tool itself rather than under a `function` object, the same asymmetry this
+    // adapter already documents on the parse side for `function_call` items.
+    let mut tools = request.tools.clone();
+    tools.extend(request.momo_tools.iter().map(|definition| {
+        json!({
+            "type": "function",
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": definition.parameters,
+        })
+    }));
+    if !tools.is_empty() {
+        object.insert("tools".into(), Value::Array(tools));
     }
     // `max_output_tokens`는 보내지 않는다 — ChatGPT 백엔드(이 와이어의 실소비자)가
     // "Unsupported parameter"로 400을 답한다(2026-08-02 실 smoke 실측). 출력 예산은
@@ -697,11 +710,72 @@ struct RawOutputTokensDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Responses shape: a function's fields sit **on** the tool. The chat
+    /// wire nests the same fields under `function`, and `provider.rs` has the
+    /// mirror of this test (goal SRV-B3f).
+    #[test]
+    fn momo_tools_render_flat_on_the_responses_wire() {
+        let body = build_request_body(&ChatRequest {
+            model: "gpt-5.6-sol".to_string(),
+            messages: vec![ChatMessage::user("세션 정리해줘")],
+            max_tokens: None,
+            tools: Vec::new(),
+            momo_tools: momo_agent::tools::catalog_definitions(),
+        });
+        let tools = body["tools"].as_array().expect("tools");
+        assert_eq!(tools.len(), 1);
+        let tool = &tools[0];
+        assert_eq!(tool["type"], json!("function"));
+        assert_eq!(
+            tool["name"],
+            json!("work.session.end"),
+            "flat, not nested: {tool}"
+        );
+        assert!(
+            tool.get("function").is_none(),
+            "a nested `function` here is the chat shape on the wrong wire: {tool}"
+        );
+        assert_eq!(tool["parameters"]["required"], json!(["session_id"]));
+    }
+
+    /// The agent's own JSON keeps its place, and momo's is appended — an
+    /// operator who declared a function by hand does not have it reordered.
+    #[test]
+    fn the_agents_own_tool_json_is_still_passed_through_verbatim() {
+        let declared = json!({"type": "function", "name": "operator.thing"});
+        let body = build_request_body(&ChatRequest {
+            model: "m".to_string(),
+            messages: vec![ChatMessage::user("q")],
+            max_tokens: None,
+            tools: vec![declared.clone()],
+            momo_tools: momo_agent::tools::catalog_definitions(),
+        });
+        let tools = body["tools"].as_array().expect("tools");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0], declared, "passthrough, untouched and first");
+        assert_eq!(tools[1]["name"], json!("work.session.end"));
+    }
+
+    /// Neither source present ⇒ the key is omitted entirely. Sending
+    /// `"tools": []` makes some gateways refuse the request outright.
+    #[test]
+    fn no_tools_at_all_omits_the_key() {
+        let body = build_request_body(&ChatRequest {
+            model: "m".to_string(),
+            messages: vec![ChatMessage::user("q")],
+            max_tokens: None,
+            tools: Vec::new(),
+            momo_tools: Vec::new(),
+        });
+        assert!(body.get("tools").is_none(), "{body}");
+    }
     use crate::provider::ChatMessage;
 
     fn request() -> ChatRequest {
         ChatRequest {
             tools: Vec::new(),
+            momo_tools: Vec::new(),
             model: "gpt-5.4-codex".to_string(),
             messages: vec![
                 ChatMessage::system("you are hermes"),
@@ -764,6 +838,7 @@ mod tests {
     fn an_absent_system_prompt_and_budget_are_absent_keys_not_nulls() {
         let bare = ChatRequest {
             tools: Vec::new(),
+            momo_tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![ChatMessage::user("직접 물어봄")],
             max_tokens: None,
@@ -780,6 +855,7 @@ mod tests {
     fn multiple_system_turns_are_joined_rather_than_dropped() {
         let request = ChatRequest {
             tools: Vec::new(),
+            momo_tools: Vec::new(),
             model: "m".to_string(),
             messages: vec![
                 ChatMessage::system("첫째"),
@@ -1377,6 +1453,7 @@ mod tests {
                 &endpoint(&base_url),
                 &ChatRequest {
                     tools: Vec::new(),
+                    momo_tools: Vec::new(),
                     model: "gpt-5.6-sol".to_string(),
                     messages: vec![ChatMessage::user("[성재] @hermes 안녕")],
                     max_tokens: Some(512),
@@ -1423,6 +1500,7 @@ mod tests {
                 &endpoint(&base_url),
                 &ChatRequest {
                     tools: Vec::new(),
+                    momo_tools: Vec::new(),
                     model: "m".to_string(),
                     messages: vec![ChatMessage::user("질문")],
                     max_tokens: None,
@@ -1451,6 +1529,7 @@ mod tests {
                 &endpoint(&base_url),
                 &ChatRequest {
                     tools: Vec::new(),
+                    momo_tools: Vec::new(),
                     model: "m".to_string(),
                     messages: vec![ChatMessage::user("질문")],
                     max_tokens: None,
