@@ -4,7 +4,7 @@
 - 근거 정본: `docs/planning/research/2026-08-05-chat-ui-audit.md` — **정독 필수**. 결함 37건 중 Blocker 3건 전부 폰(BL-1 마크다운 미렌더 · BL-2 복사 불가 · BL-3 링크 안 눌림). U4-a/U4-b 배치 정의(§4)가 이 패킷의 원문.
 - 순서 유연성: **B3 M1(인용)이 core 대기로 막혀 있으면 M3를 먼저 당겨도 된다** — M3(본문 렌더)가 MessageRow 본문 경로를 재구성하므로 M1(인용 블록)보다 먼저 하는 편이 이중 작업을 줄인다. M4는 언제든 가능.
 
-## Goal M3 (U4-a · #1048) — 폰 본문 렌더 동등화 (BL-1·BL-3·M-13 일부·L-6)
+## Goal M3 (U4-a · #1048) — 폰 본문 렌더 동등화 (BL-1·BL-3·L-6 — M-13은 감사 후속 b26cd72e에서 U4-i로 이관, 범위 밖)
 
 - 현재: `clients/mobile/src/features/conversation/MessageRow.tsx:846-862` 본문이 평문 `<Text>` — 마크다운 미해석·링크 비활성.
 - 작업: 코어 파서 `packages/momo-core/src/features/timeline/markdown.ts` 위에 **RN 렌더러 한 겹** 신설(웹 `clients/web/src/features/timeline/MessageBody.tsx`의 RN 판). 링크는 `Linking.openURL`(http/https만 — 스킴 화이트리스트), 코드블록 분기+언어 라벨, 인라인 코드·볼드·리스트 웹 동등.
