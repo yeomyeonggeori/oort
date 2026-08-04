@@ -31,7 +31,7 @@ import {
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
 } from "@/features/agents/turnCopy";
-import { memberNameParts } from "@/features/workspace/useWorkspace";
+import { memberFor, memberNameParts } from "@/features/workspace/useWorkspace";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import {
   MENTION_ROUTING_ROW_CLASS,
@@ -42,6 +42,9 @@ import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets
 import { routingPayload } from "@momo/core/features/routing/routingModel";
 import type { QuoteDraft } from "@momo/core/features/timeline/quote";
 import { QuoteChip } from "@/features/timeline/QuoteBlock";
+import { TypingLine } from "@/features/chat/TypingLine";
+import { useTypingSend } from "@/features/chat/useTyping";
+import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -254,6 +257,7 @@ function ActivityText({
 }
 
 export function Composer({
+  workspaceId,
   channelId,
   directory,
   channelLabel,
@@ -262,6 +266,8 @@ export function Composer({
   onCancelQuote,
   onSend,
 }: {
+  /** ADR-0149 - 「작성 중」 발행은 워크스페이스로 스코프된 라우트다. */
+  workspaceId: string;
   /** Scopes the agent working signal to this channel; sending goes via onSend. */
   channelId: string;
   directory: Directory;
@@ -315,13 +321,29 @@ export function Composer({
   // moment the socket died, `isStaleSignal` compared two fixed numbers, and the
   // 90s TTL could never fire on this surface at all. Now every render, from
   // whatever cause, re-reads the wall clock and drops what has gone quiet.
-  const { connStatus } = useSession();
+  const { session, connStatus } = useSession();
   // 폰에서는 Enter가 계속 줄바꿈이다 (goal B8 H4). 소프트 키보드에는 Shift+Enter가
   // 없어서, Enter를 전송으로 바꾸면 여러 줄 쓰기를 통째로 없애게 된다. 힌트 줄도
   // 같은 중단점에서 접히므로 화면과 키가 어긋나지 않는다.
   const isMobile = useIsMobileShell();
   const railLive = connStatus === "connected";
   const signals = useAgentWorkingSignals();
+
+  // ── 「작성 중」 (ADR-0149) ────────────────────────────────────────────────
+  //
+  // 송신은 레일이 살아 있을 때만 한다. 소켓이 죽어 있으면 발행은 REST로 나가지만
+  // 아무도 그것을 구독하고 있지 않으므로, 그 요청은 서버 rate limit만 먹는다.
+  const me = session.member.id;
+  const typing = useTypingSend(workspaceId, channelId, { enabled: railLive });
+  const typists = useTypists({
+    channelId,
+    myMemberId: me,
+    // 에이전트를 화면에서 떨군다. 서버가 403으로 막지만 이것은 화면의 방어다:
+    // 그려지는 순간 「사람은 작성 중, 에이전트는 작업 중」이 화면에서 깨진다.
+    // 명부에 없는 id도 떨군다 - 이름 없는 「누군가 작성 중」은 정보가 0이다.
+    isEligible: (memberId) => memberFor(directory, memberId)?.kind === "human",
+  });
+  const typingThreshold = useTypingThreshold();
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
   const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
@@ -548,6 +570,10 @@ export function Composer({
             setCaret(event.target.selectionStart ?? 0);
             setMentionOpen(true);
             setHighlight(0);
+            // 「작성 중」은 **키에서만** 나간다 (ADR-0149). 타이머가 없으므로 입력이
+            // 멈추면 송신도 멈추고, 흐림·탭 전환·언마운트에 끌 것이 없다. 소멸은
+            // TTL이 하고 「정지」 신호는 계약에 없다.
+            typing.onInput();
           }}
           onSelect={(event) =>
             setCaret((event.target as HTMLTextAreaElement).selectionStart ?? 0)
@@ -626,6 +652,14 @@ export function Composer({
           {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
         </span>
       </p>
+
+      {/* 사람이 위, 에이전트가 아래. 같은 구역에 나란히 두는 것이 「작성 중」과
+          「작업 중」을 사람이 배우는 유일한 자리다 (TypingLine의 머리 주석). */}
+      <TypingLine
+        memberIds={typists}
+        threshold={typingThreshold}
+        directory={directory}
+      />
 
       <AgentActivityBar
         turns={turns}

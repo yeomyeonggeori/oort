@@ -168,6 +168,67 @@ export function centrifugoChannelName(
   return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
 }
 
+// ---- 휘발 신호 레일 (ADR-0149 / goal B3 W2) ---------------------------------
+// `typing:ws<workspace>.<channel>` 는 **영속 채널과 이름만으로 구별되는** 별도
+// 네임스페이스다(가드 1). 그 분리에 얹힌 사실 셋:
+//
+//   - `history_size: 0` (infra/centrifugo.json). 재접속이 어제의 작성 중을 되살리면
+//     유령이 되므로, 재생할 것이 아예 없다. 그래서 이 레일에는 replay gate가 필요
+//     없고 `recoverable`/`positioned`를 요구할 이유도 없다.
+//   - **seq가 없다.** 휘발 신호는 `message.seq`를 소비하지 않는다(불변식 4). 키가
+//     빠져 있고 null이 아닌 이유도 그것이다 — seq로 정렬하는 소비자가 이것을 구멍으로
+//     오해할 수 없다.
+//   - 구독 인가는 `ch:`와 **같은 술어**다(`routes::realtime::parse_channel`이
+//     `EPHEMERAL_NAMESPACE`를 `ch`/`dm`와 같은 arm에 둔다). 그래서 이 채널을 볼 수
+//     있는 사람은 그 채널의 메시지를 볼 수 있는 사람과 정확히 같은 집합이다.
+
+/** 「작성 중」 한 건. 서버가 `momo_ephemeral::EphemeralSignal::data`로 만든 그 형상. */
+export interface TypingFrame {
+  type: "ephemeral.typing";
+  v: number;
+  ts: number;
+  payload: {
+    workspace_id: string;
+    channel_id: string;
+    /** **사람**의 member id. 에이전트는 이 레일을 타지 않는다(ADR-0149 범위). */
+    member_id: string;
+    /** 밀리초. 구독자가 이 시각에 스스로 잊는다 — 가드 4의 클라 계약 전부다. */
+    expires_at: number;
+  };
+}
+
+/**
+ * 발행을 「작성 중」으로 좁힌다. v0가 여는 신호는 하나뿐이고(ADR-0149 범위), 그래서
+ * 이 좁힘도 하나만 통과시킨다: 새 휘발 신호가 생기면 서버의 enum과 이 함수가 **함께**
+ * 늘어야 하고, 그 둘이 리뷰에 걸리는 것이 가드 2의 클라 쪽 절반이다.
+ */
+export function asTypingFrame(data: unknown): TypingFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<TypingFrame>;
+  if (frame.type !== "ephemeral.typing") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (
+    !payload ||
+    typeof payload.workspace_id !== "string" ||
+    typeof payload.channel_id !== "string" ||
+    typeof payload.member_id !== "string" ||
+    typeof payload.expires_at !== "number"
+  ) {
+    return null;
+  }
+  // 이미 만료된 신호를 통과시키지 않는다. 값이 과거인 신호는 그릴 수 없는 신호이고,
+  // 그것을 명부에 넣으면 다음 sweep까지 한 번 깜박인다.
+  if (typeof frame.ts !== "number") return null;
+  return frame as TypingFrame;
+}
+
+export function centrifugoTypingChannelName(
+  workspaceId: string,
+  channelId: string
+): string {
+  return `typing:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
+}
+
 // ---- agent progress rail (AX-5 / MOMO-613) ---------------------------------
 // `agent:ws<workspace>.<channel>.<agentMember>` is the exact-channel observable
 // progress namespace (research/11-agent-runtime/14, verified by
@@ -659,6 +720,23 @@ export interface RealtimeHandle {
       /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
       onResync: () => void;
     }
+  ) => () => void;
+  /**
+   * 「작성 중」을 본다 (ADR-0149).
+   *
+   * **새 소켓이 아니다.** 기존 클라이언트의 같은 refcount를 타고 채널 하나를 더
+   * 구독할 뿐이다. 구독은 **보이는 채널만** 걸어야 한다: 휘발 신호는 채널마다
+   * 사람마다 3초에 한 번씩 오므로, 사이드바의 모든 채널을 구독하면 읽지도 않을
+   * 프레임이 방 수 x 타이피스트 수만큼 들어온다.
+   *
+   * `onResync`가 없는 것이 이 레일의 성질이다: 되살릴 과거가 없다
+   * (`history_size: 0`). 끊긴 동안의 작성 중은 이미 만료됐으므로 복구할 것이 없고,
+   * 재구독 뒤 첫 신호가 곧 현재 상태다.
+   */
+  subscribeTyping: (
+    workspaceId: string,
+    channelId: string,
+    handlers: { onTyping: (frame: TypingFrame) => void }
   ) => () => void;
   /**
    * Watch provider cascade transitions in one channel (ADR-0135 D1). Shares the

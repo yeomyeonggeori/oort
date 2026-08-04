@@ -27,6 +27,7 @@
     "gate:approvals": "npm run build && node gates/gate-approvals.mjs",
     "gate:work-panel": "npm run build && node gates/gate-work-panel.mjs",
     "gate:quote": "npm run build && node gates/gate-quote.mjs",
+    "gate:typing": "npm run build && node gates/gate-typing.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",

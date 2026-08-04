@@ -1579,6 +1579,76 @@ export function sendThreadReply(
   );
 }
 
+// ---- 휘발 신호: 「작성 중」 (ADR-0149) ---------------------------------------
+// POST /v1/workspaces/{ws}/channels/{ch}/typing/grant   ← 멤버십 읽기 1회
+// POST /v1/workspaces/{ws}/channels/{ch}/typing         ← 발행, **PG 미접촉**
+//
+// 두 라우트인 이유는 서버 쪽 문서(`routes/ephemeral.rs`)가 길게 적어 뒀고, 클라가
+// 알아야 할 결론은 하나다: **grant를 재사용해라.** 3초 주기로 grant를 다시 받으면
+// 분당 20번의 멤버십 SELECT가 되고, 그것이 두 라우트로 나눈 이유를 정확히 되돌린다.
+// 만료 판단과 재사용은 `features/chat/typing.ts`의 순수 기계가 한다.
+
+/** `POST …/typing/grant` 응답의 와이어 형상 (server `TypingGrantResponse`). */
+export interface TypingGrantResponse {
+  grant: string;
+  /** 구독할 Centrifugo 채널. 메시지 레일과 **다른** 이름이다(가드 1). */
+  channel: string;
+  expiresAtMs: number;
+  ttlSeconds: number;
+  /** 받은 신호가 살아 있는 시간. 클라가 스스로 잊는 근거. */
+  signalTtlMs: number;
+  /** 아직 치고 있는 클라가 다시 보내는 간격. */
+  republishIntervalMs: number;
+  /** 몇 명부터 이름을 개수로 뭉치나. 서버는 뭉치지 않는다(상태가 없다). */
+  aggregateThreshold: number;
+}
+
+/**
+ * 60초짜리 발행 자격을 받는다. **이 채널의 멤버인지**를 서버가 여기서 한 번 읽고,
+ * 발행 라우트는 그 증명을 HMAC으로만 확인한다.
+ *
+ * 읽기만 하는 사람은 이것을 부르지 않는다: grant는 「봐도 되나」가 아니라 「보내도
+ * 되나」이고, 구독 인가는 realtime 토큰 발급과 subscribe 프록시가 이미 한다.
+ */
+export function requestTypingGrant(
+  workspaceId: string,
+  channelId: string
+): Promise<TypingGrantResponse> {
+  return request<TypingGrantResponse>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/typing/grant`,
+    { method: "POST" }
+  );
+}
+
+/** `POST …/typing` 응답 (202). */
+export interface TypingSignalAck {
+  channel: string;
+  expiresAtMs: number;
+  republishAfterMs: number;
+}
+
+/**
+ * 「작성 중」 한 건을 발행한다. 바디는 grant **하나뿐**이다.
+ *
+ * 멤버 id도 채널 id도 「시작/정지」 플래그도 싣지 않는다 — 서버 dto가 그 부재를
+ * 하나하나 의도로 적어 뒀고, 그중 클라가 지켜야 할 것은 **정지 신호를 만들지 않는
+ * 것**이다. 입력이 멈추면 이 함수를 그냥 안 부르고, 소멸은 TTL이 한다.
+ */
+export function publishTyping(
+  workspaceId: string,
+  channelId: string,
+  grant: string
+): Promise<TypingSignalAck> {
+  return request<TypingSignalAck>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/typing`,
+    { method: "POST", body: JSON.stringify({ grant }) }
+  );
+}
+
 // ---- Message actions (B11): edit, delete, react ----------------------------
 // PATCH  /v1/workspaces/{ws}/messages/{id}
 // DELETE /v1/workspaces/{ws}/messages/{id}
