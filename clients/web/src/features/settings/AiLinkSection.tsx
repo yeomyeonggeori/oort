@@ -321,7 +321,21 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     // The stored `bearerLast4` of an OAuth link is the tail of the SHORT-LIVED
     // access token, not of a saved key, so "저장된 키" would name the wrong
     // thing. The token's own row says what is actually true about it.
-    statusRows.push({ key: "액세스 토큰", value: accessTokenStatus(meta, Date.now()).text });
+    //
+    // Colour reinforces the sentence and never replaces it: the row already
+    // reads "만료됨. 다음 턴에 서버가 갱신합니다" in words, and --warn is applied
+    // only to the one state an operator might want to look twice at. A live
+    // token stays ink, because painting the normal case green is decoration.
+    const token = accessTokenStatus(meta, Date.now());
+    statusRows.push({
+      key: "액세스 토큰",
+      value:
+        token.tone === "warn" ? (
+          <span className="text-warn">{token.text}</span>
+        ) : (
+          token.text
+        ),
+    });
   } else {
     statusRows.push({
       key: "저장된 키",
