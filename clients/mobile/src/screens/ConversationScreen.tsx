@@ -42,7 +42,12 @@ import {
 } from '@momo/core/features/agents/workingSignal';
 import {Composer} from '../features/conversation/Composer';
 import {TypingBar} from '../features/conversation/TypingBar';
-import {markTyping, sweepTyping, useTypists} from '../features/conversation/typingSignals';
+import {
+  markTyping,
+  resetTyping,
+  sweepTyping,
+  useTypists,
+} from '../features/conversation/typingSignals';
 import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {
@@ -412,12 +417,23 @@ export default function ConversationScreen({
   // 방을 구독하면 읽지도 않을 프레임이 방 수 × 타이피스트 수만큼 들어오고, 그것은
   // 폰에서 배터리다. 이 화면이 살아 있는 동안만, 이 채널만.
   //
-  // 레일이 끊겨 있으면 구독하지 않는다. 그리고 그 순간 명부를 비운다 — 끊긴 동안
-  // 화면에 남은 「작성 중」은 6초 뒤에 어차피 만료되지만, 그 6초가 **거짓말**이다
-  // (그 사람이 지금 치고 있는지 우리는 모른다).
+  // 레일이 끊기거나 채널을 옮기면 **명부를 비운다.** 남은 신호는 6초 뒤에 어차피
+  // 만료되지만 그 6초가 거짓말이다 — 끊긴 동안 그 사람이 아직 치고 있는지 우리는
+  // 모르고, 다른 방의 「작성 중」은 이 방에 대해 아무 말도 아니다. 이 화면이
+  // 명부의 유일한 공급자이므로(구독은 보이는 채널 하나뿐) 통째로 비우는 것이 곧
+  // 이 채널을 비우는 것이다.
   useEffect(() => {
-    if (!rail || !railLive) return undefined;
-    return rail.subscribeTyping(workspaceId, channelId, {onTyping: markTyping});
+    if (!rail || !railLive) {
+      resetTyping();
+      return undefined;
+    }
+    const detach = rail.subscribeTyping(workspaceId, channelId, {
+      onTyping: markTyping,
+    });
+    return () => {
+      detach();
+      resetTyping();
+    };
   }, [rail, railLive, workspaceId, channelId]);
 
   // 만료는 1Hz 시계가 훑는다. 두 번째 인터벌을 세우지 않는 이유는

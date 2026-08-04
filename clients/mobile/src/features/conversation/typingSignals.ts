@@ -95,7 +95,14 @@ export function sweepTyping(nowMs: number): void {
   emit(pruneTypingSignals(signals, nowMs));
 }
 
-/** 테스트 격리. 모듈 수준 상태를 든 파일이 반드시 내놓아야 하는 문. */
+/**
+ * 명부를 비운다.
+ *
+ * 테스트 격리가 첫 용도지만 앱에서도 쓰인다: 레일이 끊기거나 채널을 옮기면 남은
+ * 신호가 거짓말이 된다 — 끊긴 동안 그 사람이 아직 치고 있는지 우리는 모르고,
+ * 다른 방의 「작성 중」은 이 방에 대해 아무 말도 아니다. 통째로 비워도 되는 이유는
+ * 구독이 **보이는 채널 하나뿐**이라 이 명부의 공급자가 하나이기 때문이다.
+ */
 export function resetTyping(): void {
   signals = [];
   for (const listener of listeners) listener();
