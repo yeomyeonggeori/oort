@@ -1661,3 +1661,11 @@
 - U1 진단 중 로컬 디스크 100% 사건 → 2단 정리: ①Docker 표적(빌드캐시 12GB+스테일 스택 2·구태그 8) ②**워크트리 일괄**(머지완료+추적변경 0 조건, 활성·미병합 보존) — momo-worktrees **199GB→11GB**, 디스크 99%→**79%(가용 192GB)**. 정체는 7월 이후 머지된 워크트리들의 .build/node_modules/Pods 누적.
 - 보존 8개: SRV-B6(활성)·RN-B4-defects(tracked 1)·WEB-WP1-panel·684(미병합)·구레포 3·827(브랜치불명). momowebqa·momo_main 스택은 용도 불확실로 보류(성재 확인 목록).
 - 성재 지시 반영: 워커 복귀 시 로드맵 점검→미구현 중심 구현 재개 — 최대 갭 = **배치 3(대화 기준선: 인용·typing 클라 표면)**, U1 산출로 U4(채팅 UI 수리) 편성.
+
+## 2026-08-05 (아침) · Fable · U1 랜딩 + 4워커 체제 편성 (B3W·B3M·U3·SRVB7)
+- **U1 감사 랜딩**: `research/2026-08-05-chat-ui-audit.md` 커밋(015cb601) — 결함 37건(BL 3 전부 폰: 마크다운 미렌더·복사 불가·링크 안눌림), U4-a~j 수리 배치 편성 포함. 성재의 "구리다"가 열거 가능한 목록이 됐다.
+- **U4 1차(폰 Blocker) → B3M 체인 연장**: 패킷 `2026-08-05-U4-phone-blockers-packet.md`, #1048(U4-a 본문 렌더 동등화)·#1049(U4-b 복사). B3M이 core 대기로 막히면 M3(렌더)를 M1(인용)보다 먼저 — MessageRow 본문 경로 재구성이 선행되는 게 이중 작업을 줄인다.
+- **U3(AI 연결 OAuth 폼) 착수**: 패킷 `2026-08-05-U3-ai-link-oauth-packet.md`, #1047, worker-U3 스폰(전속=web settings — B3W와 경계 조정 통지 완료). 콘솔 스니펫 우회의 제품화.
+- **SRV-B7(#1042 openapi rust 이중 샘플) 착수**: 패킷 `2026-08-05-SRV-B7-openapi-rust-sampling-packet.md`, worker-SRVB7 스폰. 함정 명시: repo에 rust 로컬 컴포즈 부재(실측) — 부팅 패턴 선택은 worker 실측+근거 기록.
+- **#1022(레인→rust)는 배치 4로 보류**: 레인 파일이 clients/mobile/** + 기기·컴포즈 자원이 B3M 검증과 경합 — B3 랜딩 후.
+- 다음: 첨부 v0 ADR(0151) 기안(성재 사전 승인 방향) · B3W core 표면 커밋 대기 → B3M 중계 · PR 도착 순 검수·머지.
