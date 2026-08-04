@@ -2320,6 +2320,99 @@ pub struct ApprovalListQuery {
 mod tests {
     use super::*;
 
+    /// **The approval wire's exact key set, pinned** (goal SRV-B5c).
+    ///
+    /// `docs/api/openapi.yaml` described these two schemas in snake_case for a
+    /// year and was *correct* — for the Swift server, which maps them through
+    /// explicit `CodingKeys`. This server renames to camelCase, so the spec
+    /// described a shape production had stopped emitting.
+    ///
+    /// The gate that should have caught it (`verify_openapi_contract.sh`) does
+    /// check response bodies strictly, including undeclared keys — but it boots
+    /// the **Swift** e2e stack, so it validates the notation this schema no
+    /// longer describes. Until that gate is repointed at `server-rust`, THIS
+    /// test is what keeps the spec honest: it runs in every `cargo test` and
+    /// fails the moment the wire and the spec disagree again.
+    ///
+    /// Asserting the whole key SET rather than a few keys is deliberate — the
+    /// gate's rule is closed-object, so a key this server adds without adding it
+    /// to the spec is drift just as much as a renamed one. `createdAtMs` is
+    /// exactly that: emitted here, absent from both Swift and the old spec.
+    #[test]
+    fn the_approval_wire_is_camel_case_and_the_spec_says_so() {
+        let projection = serde_json::to_value(ApprovalDto {
+            id: "a".into(),
+            workspace_id: "w".into(),
+            run_id: "r".into(),
+            channel_id: "c".into(),
+            request_message_id: Some("m".into()),
+            requested_by: "b".into(),
+            action_type: "tool_call".into(),
+            payload: serde_json::json!({}),
+            status: "pending".into(),
+            decided_by: None,
+            decided_at_ms: None,
+            decision_reason: None,
+            expires_at_ms: None,
+            created_at_ms: 7,
+        })
+        .expect("serialize");
+        let mut keys: Vec<&str> = projection
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "actionType",
+                "channelId",
+                "createdAtMs",
+                "id",
+                "payload",
+                "requestMessageId",
+                "requestedBy",
+                "runId",
+                "status",
+                "workspaceId",
+            ],
+            "every key must appear in ApprovalProjection's properties, spelled \
+             the same way — the gate's object check is CLOSED"
+        );
+        assert!(
+            !keys.iter().any(|key| key.contains('_')),
+            "snake_case here is the Swift shape, and this is not Swift: {keys:?}"
+        );
+
+        let receipt = serde_json::to_value(ApprovalDecisionReceipt {
+            approval_id: "a".into(),
+            status: "approved".into(),
+            decided_by: Some("h".into()),
+            decided_at_ms: 9,
+            decision_reason: None,
+        })
+        .expect("serialize");
+        let mut receipt_keys: Vec<&str> = receipt
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        receipt_keys.sort_unstable();
+        assert_eq!(
+            receipt_keys,
+            vec!["approvalId", "decidedAtMs", "decidedBy", "status"],
+            "…and the receipt is the same story. It is also stored verbatim in \
+             `approval_decision.receipt` and replayed on an idempotent retry, so \
+             its notation is a persistence contract, not only a wire one"
+        );
+        // `decidedAtMs` is NOT optional on this struct, so the spec listing it as
+        // optional was a second, quieter lie.
+        assert!(receipt_keys.contains(&"decidedAtMs"));
+    }
+
     #[test]
     fn work_host_dto_omits_null_timestamps_like_swift() {
         let dto = WorkHostDto {

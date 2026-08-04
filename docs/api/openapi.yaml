@@ -8167,64 +8167,97 @@ components:
 
     # ---- Approvals (snake_case wire contract) ---------------------------------------
     ApprovalProjection:
+      description: >
+        One row of the approval inbox, as `GET .../approvals` returns it.
+
+
+        NOTATION (SRV-B5c): the keys below are camelCase because that is what
+        the Rust server — the deployed one — emits (`#[serde(rename_all =
+        "camelCase")]` on `ApprovalDto`). The Swift server, which is still in
+        the tree, maps the same fields to snake_case through explicit
+        `CodingKeys` (`DTOs.swift:650`), so while both exist ONE of them does
+        not match this schema. The spec follows the deployed server.
+
+
+        Consequence a reader should know: `scripts/verify_openapi_contract.sh`
+        boots the **Swift** e2e stack, so its samples are the snake_case ones.
+        Its strict closed-object check therefore validates the shape this
+        schema no longer describes. Repointing that gate at `server-rust` is
+        tracked as harness hygiene, not fixed here.
       type: object
       required:
         - id
-        - workspace_id
-        - run_id
-        - channel_id
-        - requested_by
-        - action_type
+        - workspaceId
+        - runId
+        - channelId
+        - requestedBy
+        - actionType
         - payload
         - status
+        - createdAtMs
       properties:
         id:
           type: string
           format: uuid
-        workspace_id:
+        workspaceId:
           type: string
           format: uuid
-        run_id:
+        runId:
           type: string
           format: uuid
-        channel_id:
+        channelId:
           type: string
           format: uuid
-        request_message_id:
+        requestMessageId:
           type: string
           format: uuid
           description: The approval_request message, when one exists.
-        requested_by:
+        requestedBy:
           type: string
           format: uuid
           description: The requesting agent member.
-        on_behalf_of:
+        onBehalfOf:
           type: string
-          description: Delegation subject, projected from `payload.on_behalf_of`.
-        action_type:
+          description: >
+            Delegation subject, projected from `payload.on_behalf_of`. The Rust
+            server does not currently emit this field at all.
+        actionType:
           type: string
           description: e.g. `tool_call`, `deploy`, `spend`.
         payload: {}
         status:
           type: string
           enum: [pending, approved, rejected, expired, cancelled]
-        estimated_micro_usd:
+        estimatedMicroUsd:
           type: integer
           format: int64
-          description: Projected from payload when present as a number or numeric string.
-        is_reversible:
+          description: >
+            Projected from payload when present as a number or numeric string.
+            Not emitted by the Rust server: its one executable tool has no price
+            table to quote.
+        isReversible:
           type: boolean
-        decided_by:
+          description: >
+            Not emitted by the Rust server. An ABSENT value means "unknown" and
+            must never be read as "reversible".
+        decidedBy:
           type: string
           format: uuid
-        decided_at_ms:
+        decidedAtMs:
           type: integer
           format: int64
-        decision_reason:
+        decisionReason:
           type: string
-        expires_at_ms:
+        expiresAtMs:
           type: integer
           format: int64
+        createdAtMs:
+          type: integer
+          format: int64
+          description: >
+            Always present on the Rust server. Neither the Swift DTO nor this
+            schema carried it before SRV-B5c, which under the gate's
+            closed-object rule made every Rust approval row undeclared drift.
 
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
@@ -8627,19 +8660,29 @@ components:
         approved/rejected; expected failures reuse this shape with a
         diagnostic status (e.g. idempotency_conflict, forbidden, not_found,
         bad_request, expired, or the approval's current status on a 409).
-      required: [approval_id, status]
+
+
+        NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See
+        `ApprovalProjection` for the Swift dual-notation caveat — and note this
+        receipt is additionally stored verbatim in `approval_decision.receipt`
+        and replayed on retry, so a notation change here rewrites what an
+        idempotent retry returns.
+      required: [approvalId, status, decidedAtMs]
       properties:
-        approval_id:
+        approvalId:
           type: string
           format: uuid
         status:
           type: string
-        decided_by:
+        decidedBy:
           type: string
           format: uuid
           description: Absent for system-side outcomes such as expiry.
-        decided_at_ms:
+        decidedAtMs:
           type: integer
           format: int64
-        decision_reason:
+          description: >
+            Always present on the Rust server (the field is not optional on
+            `ApprovalDecisionReceipt`), including on the refusal shapes.
+        decisionReason:
           type: string
