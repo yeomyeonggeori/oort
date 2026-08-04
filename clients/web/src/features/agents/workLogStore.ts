@@ -140,6 +140,16 @@ export interface WorkPanelTarget extends WorkLogTarget {
    * 닫을 때 캐럿을 어디로 돌려줄지는 연 쪽이 안다.
    */
   origin: "activity" | "hub";
+  /**
+   * 턴이 시작된 서버 시각, **연 쪽이 알고 있을 때만**.
+   *
+   * 패널 자신은 이 값을 얻을 수 없다. 여는 프레임(`phase=queued`)은 run id가
+   * 알려지기 전에 지나가므로, 패널이 붙는 시점에는 이미 과거다. 레일은 그 프레임을
+   * 봤을 수 있고(처음부터 듣고 있었다면), 활동 줄의 시계가 바로 그 값이다. 없으면
+   * 없는 채로 둔다: "관전을 시작한 순간"을 시계로 내놓는 것은 에이전트가 언제
+   * 시작했는지를 아는 척하는 것이다(workingSignal의 같은 규칙).
+   */
+  startedAtMs?: number;
 }
 
 let panelTarget: WorkPanelTarget | null = null;

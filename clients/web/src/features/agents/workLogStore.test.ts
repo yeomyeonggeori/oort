@@ -47,7 +47,7 @@ beforeEach(() => {
   closeWorkPanel();
 });
 
-describe("workLogStore — 보는 동안만 쌓는다", () => {
+describe("workLogStore: 보는 동안만 쌓는다", () => {
   it("아무도 안 보는 run의 프레임은 기록되지 않는다", () => {
     recordAgentProgress(delta("아무도 안 봄"));
     expect(workLogSnapshot().size).toBe(0);
@@ -87,7 +87,7 @@ describe("workLogStore — 보는 동안만 쌓는다", () => {
   });
 });
 
-describe("workLogStore — 구독 참조 수", () => {
+describe("workLogStore: 구독 참조 수", () => {
   it("두 구독자 중 하나가 놓아도 로그는 남는다", () => {
     const a = watchWorkLog(target(), T0);
     const b = watchWorkLog(target(), T0);
@@ -128,7 +128,7 @@ describe("workLogStore — 구독 참조 수", () => {
   });
 });
 
-describe("workLogStore — 세션 경계", () => {
+describe("workLogStore: 세션 경계", () => {
   it("리셋은 로그와 구독 수를 함께 비운다", () => {
     watchWorkLog(target(), T0);
     recordAgentProgress(delta("이전 워크스페이스"));
@@ -141,7 +141,7 @@ describe("workLogStore — 세션 경계", () => {
   });
 });
 
-describe("workLogStore — 무엇을 열어 두었는가", () => {
+describe("workLogStore: 무엇을 열어 두었는가", () => {
   it("같은 run을 같은 자리에서 다시 열면 같은 인스턴스를 유지한다", () => {
     // 같은 값으로 다시 emit하면 useSyncExternalStore가 리렌더를 한 번 더 돈다.
     openWorkPanel({ ...target(), origin: "activity" });

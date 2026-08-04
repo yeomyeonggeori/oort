@@ -107,6 +107,10 @@ export function AgentWorkPanel() {
       <PanelHeader
         name={name}
         log={log}
+        // 시계는 **연 쪽이 알고 있던 시작 시각**으로 그린다. 패널이 붙는 시점에
+        // 여는 프레임은 이미 지나갔으므로(그것이 잘림 고지의 근거다) 로그 자신은
+        // 이 값을 가질 수 없다. 둘 다 없으면 시계를 그리지 않는다.
+        startedAtMs={log?.startedAtMs ?? target.startedAtMs}
         nowMs={nowMs}
         railLive={railLive}
         onClose={close}
@@ -119,12 +123,14 @@ export function AgentWorkPanel() {
 function PanelHeader({
   name,
   log,
+  startedAtMs,
   nowMs,
   railLive,
   onClose,
 }: {
   name: string;
   log: WorkLog | null;
+  startedAtMs?: number;
   nowMs: number;
   railLive: boolean;
   onClose: () => void;
@@ -170,9 +176,13 @@ function PanelHeader({
             {workLogStateLabel(log, liveness)}
           </span>
         )}
-        {log?.startedAtMs !== undefined && liveness === "live" && railLive && (
-          <span className="shrink-0 text-timestamp" data-numeric>
-            {elapsedLabel(log.startedAtMs, nowMs)}
+        {startedAtMs !== undefined && liveness === "live" && railLive && (
+          <span
+            className="shrink-0 text-timestamp"
+            data-numeric
+            data-testid="agent-work-panel-elapsed"
+          >
+            {elapsedLabel(startedAtMs, nowMs)}
           </span>
         )}
         {log?.spentMicroUsd !== undefined && (

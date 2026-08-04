@@ -188,6 +188,11 @@ function AgentActivityBar({
                     memberId: turn.memberId,
                     channelId: turn.channelId,
                     origin: "activity",
+                    // 이 줄이 이미 그리고 있는 시계와 같은 값이다. 패널이 자기
+                    // 힘으로는 얻을 수 없는 유일한 값이라 여기서 넘겨준다.
+                    ...(turn.startedAtMs !== undefined
+                      ? { startedAtMs: turn.startedAtMs }
+                      : {}),
                   })
                 }
                 data-testid="composer-working-open"

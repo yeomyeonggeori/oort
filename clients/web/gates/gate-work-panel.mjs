@@ -354,8 +354,11 @@ async function exerciseScenario(browser, scenario) {
 
   const label = scenario.name;
 
-  // run은 이미 흐르고 있다. 패널은 그 다음에 붙는다 — v0에서 이것이 유일한
-  // 진입 경로이고, 그래서 잘림 고지가 예외가 아니라 기본값이다.
+  // 레일은 run이 열리는 것을 처음부터 보고 있다: 여는 프레임이 활동 줄의 시계를
+  // 만들고, 그 시계가 패널로 넘어간다(패널 자신은 얻을 수 없는 값이다).
+  await publish(page, statusFrame("queued", "queued"));
+  // 그 다음 패널이 붙는다. v0에서 이것이 유일한 진입 경로이고, 그래서 잘림 고지가
+  // 예외가 아니라 기본값이다.
   await publish(page, statusFrame("streaming", "running", { spent_micro_usd: 1_200 }));
 
   if (scenario.toolBeforeOpen) {
@@ -455,6 +458,14 @@ async function exerciseScenario(browser, scenario) {
   const cost = await page.getByTestId("agent-work-panel-cost").textContent();
   if (!cost || !cost.includes("$")) {
     throw new Error(`${label}: cost snapshot missing, read "${cost}"`);
+  }
+  // 시계는 관전을 시작한 순간이 아니라 턴이 시작된 순간에서 센다. 패널이 붙은
+  // 시점보다 앞선 값이어야 하고, 못 봤으면 아예 없어야 한다.
+  const elapsed = await page.getByTestId("agent-work-panel-elapsed").count();
+  if (elapsed !== 1) {
+    throw new Error(
+      `${label}: the turn clock the activity line already had did not reach the panel`
+    );
   }
 
   // ---- 4. phase 전이, 승인 대기 ≠ 작업 중 -----------------------------------

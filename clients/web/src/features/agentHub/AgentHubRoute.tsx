@@ -936,6 +936,11 @@ function CurrentWorkValue({
           memberId: work.memberId,
           channelId: work.channelId,
           origin: "hub",
+          // 패널이 자기 힘으로는 얻을 수 없는 값(여는 프레임은 run id가 알려지기
+          // 전에 지나간다). 레일이 봤다면 여기서 넘겨준다.
+          ...(work.startedAtMs !== undefined
+            ? { startedAtMs: work.startedAtMs }
+            : {}),
         })
       }
       data-testid="agent-hub-work-open"
