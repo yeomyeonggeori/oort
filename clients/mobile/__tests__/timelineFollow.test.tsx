@@ -365,6 +365,84 @@ describe('키보드가 올라와 리스트가 짧아질 때', () => {
     expect(spy).toHaveBeenCalled();
   });
 
+  // ===========================================================================
+  // 그리고 그 줄어듦이 **스크롤로 먼저 도착하면** 위 규칙이 죽는다 (goal RN-P2b)
+  //
+  // 성재, iPhone 17: *"채팅치면 채팅바에 내 최근 채팅이 가려진다."*
+  //
+  // 컴포저는 고정 높이가 아니다. 두 줄째로 넘어가는 한글 한 글자, `@` 하나가 여는
+  // 멘션 목록(최대 180pt), 턴이 열리며 서는 활동 줄 — 전부 **아래에서 위로** 자라고,
+  // 리스트는 `flex: 1` 이라 그만큼 짧아진다. 짧아지는 것 자체는 위 테스트가 이미
+  // 지키고 있다.
+  //
+  // 지켜지지 않던 것은 **그 사건이 도착하는 순서**다. 뷰포트가 ΔH 만큼 줄면
+  // `distanceFromEnd = contentHeight − (offsetY + viewportHeight)` 가 ΔH 만큼
+  // 커지고, 그 값을 실은 스크롤 이벤트가 `layout` 보다 먼저 오면 `onScroll` 은
+  // 그것을 **읽던 사람이 위로 올라갔다**로 읽는다. 임계값은 120pt 이므로 멘션
+  // 목록 하나로 이미 넘는다. 그 뒤에 도착한 `layout` 은 `following` 이 거짓이라
+  // 아무것도 하지 않고, 마지막 메시지는 컴포저 뒤에 남는다.
+  //
+  // 손가락은 유리에 닿은 적이 없다. 움직인 것은 사람이 아니라 창이다.
+  // ===========================================================================
+  it('창이 좁아진 것을 사람이 올라간 것으로 읽지 않는다 — 멘션 목록이 열려도', () => {
+    const {listRef} = mount(0);
+    const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+    settleInitialLayout();
+
+    // 바닥에 있다: 4000 − (3200 + 800) = 0.
+    fireEvent.scroll(screen.getByTestId('timeline-list'), {
+      nativeEvent: {
+        contentOffset: {y: 3200},
+        contentSize: {height: 4000, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+    spy.mockClear();
+
+    // `@` 를 쳤다. 멘션 목록이 180pt 를 가져가고, 그 사실이 **스크롤 이벤트로 먼저**
+    // 도착한다 — 오프셋은 그대로인데 뷰포트만 620 이다. 여기서 계산되는
+    // 「끝까지의 거리」 180 은 임계값 120 을 넘는다.
+    fireEvent.scroll(screen.getByTestId('timeline-list'), {
+      nativeEvent: {
+        contentOffset: {y: 3200},
+        contentSize: {height: 4000, width: 390},
+        layoutMeasurement: {height: 620, width: 390},
+      },
+    });
+    // 그 다음에 레이아웃이 온다.
+    fireEvent(screen.getByTestId('timeline-list'), 'layout', {
+      nativeEvent: {layout: {width: 390, height: 620}},
+    });
+
+    // 끝에 있던 사람은 끝에 남아야 한다. 이 단정이 깨지면 방금 쓴 메시지가
+    // 컴포저 뒤로 180pt 내려앉는다.
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('그래도 진짜로 올라가 읽던 사람은 컴포저가 자라도 끌려가지 않는다', () => {
+    // 위 수정이 "줄어들면 무조건 따라간다"가 되면 이 배치가 고치려는 것과 정반대의
+    // 결함이 생긴다 — 과거를 읽는 중에 입력창을 건드렸다는 이유로 바닥으로 끌려가는
+    // 것. 창이 좁아지기 **전에** 이미 끝에서 멀었다면 아무 일도 일어나지 않는다.
+    const {listRef} = mount(0);
+    const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+    settleInitialLayout();
+    scrollAwayFromBottom();
+    spy.mockClear();
+
+    fireEvent.scroll(screen.getByTestId('timeline-list'), {
+      nativeEvent: {
+        contentOffset: {y: 0},
+        contentSize: {height: 4000, width: 390},
+        layoutMeasurement: {height: 620, width: 390},
+      },
+    });
+    fireEvent(screen.getByTestId('timeline-list'), 'layout', {
+      nativeEvent: {layout: {width: 390, height: 620}},
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('history 를 읽던 사람은 키보드가 올라와도 끌려가지 않는다', () => {
     const {listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
