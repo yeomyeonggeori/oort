@@ -547,6 +547,13 @@ cat <<'NOTE'
     · 알림 권한 프롬프트 이후의 실제 배달 (이 레인은 항상 "허용 안 함"을 누른다)
     · 공유 키체인 access group — 기기 서명에서만 검증됨
       (clients/mobile/scripts/build-sim.sh 헤더 · docs/cicd/20-ios-push-device-check.md)
+
+  이 표가 초록이어도 "라이브와 같다"는 뜻은 아니다 — 서버가 다르다:
+    · 이 레인의 서버는 Swift(server/, 이식 원본)다. infra/docker-compose.e2e.yml
+      의 api·relay·worker가 그것이고, server-rust는 이 스택에 들어오지 않는다.
+    · 그래서 라이브(Rust)와 프레임 패턴·카드 props가 다를 수 있다. 여기서 초록인
+      것은 앱의 UI 역학이지, 두 서버가 같은 와이어를 낸다는 사실이 아니다.
+    · Swift 삭제(parity 도달) 시 이 레인은 server-rust e2e 스택으로 교체해야 한다.
 NOTE
 
 printf '\n  artifacts: %s\n\n' "$OUT_DIR"
