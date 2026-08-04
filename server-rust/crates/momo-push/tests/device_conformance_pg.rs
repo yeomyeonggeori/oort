@@ -174,8 +174,32 @@ async fn seed_tenant(su: &PgPool) -> Tenant {
     }
 }
 
+/// A 64-hex APNs token that is unique to `seed` **and to this process**
+/// (goal SRV-B6).
+///
+/// It used to be `format!("{seed:02x}").repeat(32)` — a pure function of a
+/// hardcoded byte. `push_token` is `UNIQUE (apns_token, env)` **globally**
+/// (`001_init.sql:528`), not per workspace, so although `seed_tenant` makes a
+/// fresh workspace every run, the token did not change: the second run against
+/// a database that still held the first run's rows failed every case with
+/// `RegistrationConflict` before a single assertion executed.
+///
+/// That made this suite pass exactly once per database — which is how it came
+/// to be red in every `cargo test --workspace` while passing when run alone
+/// against a freshly created volume.
+///
+/// The nonce goes at the FRONT because the receipt is the trailing 8 characters
+/// (`device.rs:190`, `right(t.apns_token, 8)`): keeping the seed in the tail
+/// leaves each token's suffix distinct *within* a run, which is what the
+/// suffix assertions actually rest on.
 fn hex_token(seed: u8) -> String {
-    format!("{seed:02x}").repeat(32)
+    format!("{}{}", run_nonce(), format!("{seed:02x}").repeat(24))
+}
+
+/// 16 hex characters, drawn once per test process.
+fn run_nonce() -> &'static str {
+    static NONCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NONCE.get_or_init(|| Uuid::new_v4().simple().to_string()[..16].to_string())
 }
 
 fn registration(device_id: Uuid, token: &str) -> DeviceRegistration {
