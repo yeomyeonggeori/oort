@@ -781,6 +781,14 @@ async fn b53a_2_pausing_stops_the_run_and_says_so() {
         line_body.contains("일시정지"),
         "the line says why in the reader's language: {line_body}"
     );
+    // goal SRV-B5b: this agent's display name is Latin, so the particle stays
+    // hedged — the honest answer for a name with no single Korean reading. The
+    // Hangul half is `b5b_…` below, and the pair of them is what pins the rule
+    // rather than one example of it.
+    assert!(
+        line_body.starts_with("hermes은(는) "),
+        "a non-Hangul name keeps the hedge: {line_body}"
+    );
     assert_eq!(line_props["kind"], json!("agent_paused"));
     assert_eq!(
         line_props["agent_member_id"],
@@ -1375,5 +1383,66 @@ async fn b53a_4_the_operating_surface_refuses_the_unauthorized() {
             .iter()
             .any(|action| action == "agent.profile.paused"),
         "a refused pause leaves no trace of having happened: {actions:?}"
+    );
+}
+
+/// **A Hangul-named agent's paused line reads like Korean** (goal SRV-B5b).
+///
+/// `paused_mention_body` wrote `루나은(는) 현재 일시정지되어 있습니다.` into the
+/// channel — a durable `message.body`, not a label — where the particle was
+/// fully decidable from 나. Every agent 성재 actually runs is named in Hangul,
+/// so the hedge was on screen every time an agent was paused.
+///
+/// | revert | how it goes red |
+/// |---|---|---|
+/// | drop `attach_particle` from `paused_mention_body` | the body reads `루나은(는)` |
+/// | invert the jongseong test | 루나 takes 은 and 김인턴 takes 는 |
+/// | decide a non-Hangul ending as open | `b53a_2`'s `hermes은(는)` assertion fails |
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b5b_a_hangul_named_agent_is_paused_in_korean() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    // The handle stays ASCII (it is what `@…` matches); the DISPLAY name is what
+    // the sentence uses, and that is the half a Korean reader sees.
+    let agent = seed_agent(&su, &tenant, "luna", AGENT_MODEL).await;
+    sqlx::query("UPDATE member SET display_name = $2 WHERE id = $1")
+        .bind(agent)
+        .bind("루나")
+        .execute(&su)
+        .await
+        .expect("name the agent in Hangul");
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+    assert_eq!(
+        add_member(&http, &base, &token, &tenant, agent)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        set_paused(&http, &base, &token, &tenant, agent, true)
+            .await
+            .status(),
+        200
+    );
+
+    send(&http, &base, &token, &tenant, "@luna 지금 돼?", None).await;
+
+    let lines = messages_by(&su, &tenant, agent).await;
+    assert_eq!(lines.len(), 1, "one paused notice: {lines:?}");
+    assert_eq!(
+        lines[0].1, "루나는 현재 일시정지되어 있습니다.",
+        "나 is an open syllable, so the particle is 는 — decided, not hedged"
+    );
+    assert!(
+        !lines[0].1.contains("은(는)"),
+        "the hedge is what this goal removed: {}",
+        lines[0].1
     );
 }

@@ -252,8 +252,14 @@ impl A2aBlock {
             } => format!(
                 "{head}. 위임 깊이 한도에 도달했습니다(현재 {source_depth}단계, 최대 {max_depth}단계)."
             ),
+            // goal SRV-B5b — the subject particle, decided when the name is
+            // Hangul. `head` needs none: 「…에게」 is invariant.
             A2aBlock::Concurrency { active, max } => format!(
-                "{head}. {target_display_name}이(가) 동시 실행 한도에 도달했습니다(실행 중 {active}건, 최대 {max}건)."
+                "{head}. {} 동시 실행 한도에 도달했습니다(실행 중 {active}건, 최대 {max}건).",
+                crate::korean::attach_particle(
+                    target_display_name,
+                    crate::korean::ParticlePair::Subject
+                )
             ),
             A2aBlock::ConsecutiveAuto { streak, max } => format!(
                 "{head}. 사람의 마지막 메시지 이후 연속 자동 응답 한도에 도달했습니다({streak}회, 최대 {max}회)."
