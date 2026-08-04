@@ -584,6 +584,22 @@
   }
 }
 
+/* 작업 패널 기하 (goal WEB-WP1). thread-pane과 같은 규칙이고 자리만 다르다:
+ * 이 패널은 채팅 표면이 아니라 셸의 라우트 상자 옆에 붙으므로(진입점이 대화와
+ * 에이전트 허브 둘이다) 앵커도 그 상자다. 600px 아래에서는 라우트를 통째로
+ * 덮는다 — 390px 폰에서 320px 열은 라우트에 70px를 남기고, 거기에는 아무것도
+ * 들어가지 않는다. 덮인 표면은 AppShell이 `inert`로 탭 순서에서 함께 빼낸다. */
+@utility work-panel-pane {
+  inline-size: var(--spacing-pane);
+
+  @media (width < 600px) {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
+}
+
 /* Agent Hub keeps its roster and detail side by side while both have useful
  * reading width. In a narrow shell they become one column, so neither is asked
  * to survive in the remainder left after two fixed rails. The roster keeps one
