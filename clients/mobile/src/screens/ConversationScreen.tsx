@@ -18,6 +18,10 @@ import {
   useAgentWorkingSignals,
   useTickingNow,
 } from '../features/agents/workingSignal';
+import {
+  parseTurnPlaceholderKey,
+  turnPlaceholderKey,
+} from '@momo/core/features/agents/workingSignal';
 import {Composer} from '../features/conversation/Composer';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {
@@ -192,6 +196,29 @@ export default function ConversationScreen({
         staleBucket * TURN_STALENESS_GRID_MS,
       ),
     [signals, channelId, staleBucket],
+  );
+
+  // ---- 답이 나타날 자리 (#999) ---------------------------------------------
+  //
+  // 성재는 요청을 보낸 뒤 「작업 중」 UI 를 **한 번도 인지하지 못했다**. 배선이
+  // 없어서가 아니라(#994 가 이미 놓았다) 그것이 시선 밖에 있어서다: 짧은 턴은 수
+  // 초 만에 끝나고, 그 몇 초 동안 활동 줄은 컴포저 위 한 줄, 배지는 다른 탭에 있다.
+  // 멘션을 막 친 사람의 눈은 대화의 맨 아래, 자기가 쓴 줄 다음 칸에 가 있다.
+  //
+  // 그래서 그 칸에 말한다. 도착하면 그 자리가 답으로 바뀌므로, **자리표시가
+  // 사라지는 것 자체가 답이 왔다는 신호**가 된다 — 짧은 턴에서 특히 그렇다.
+  //
+  // 낙관하지 않는다: 멘션을 보냈다는 사실만으로는 아무 칸도 서지 않는다. 턴은
+  // 관측으로만 증명되고(ADR-0126), 여기서 소비하는 것은 레일이 실제로 본 신호다.
+  // 레일이 끊겨 있으면 자리표시도 서지 않는다 — 그때 화면에 남아 있어야 할 것은
+  // 「곧 답이 온다」가 아니라 활동 줄이 이미 말하고 있는 「갱신이 멈췄습니다」다.
+  //
+  // 키로 memo 하는 이유는 `Timeline` 의 `working` prop 주석에 있다: 스트리밍
+  // 청크마다 새 배열을 만들면 goal RN-P2a(#997)의 수리가 그대로 풀린다.
+  const workingKey = railLive ? turnPlaceholderKey(turns) : '';
+  const working = useMemo(
+    () => parseTurnPlaceholderKey(workingKey),
+    [workingKey],
   );
 
   // ---- 중단의 결과 한 문장 (goal RN-C1, 2R M2) -----------------------------
@@ -449,6 +476,7 @@ export default function ConversationScreen({
               unreadCount={frozen?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={timeline.pending}
+              working={working}
               reactions={timeline.reactions}
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}

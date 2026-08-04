@@ -2,9 +2,10 @@ import type {Channel, Message, RosterMember} from '@momo/core/lib/api';
 import {
   buildTimelineItems,
   emptyChannelCopy,
+  withTurnPlaceholders,
   type PendingMessage,
   type RecoveryMarker,
-  type TimelineItem,
+  type TimelineStreamItem,
 } from '@momo/core/features/timeline/model';
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import type {Directory} from '@momo/core/features/workspace/directory';
@@ -27,6 +28,7 @@ import {
   PendingRow,
   RecoveryDivider,
   UnreadDivider,
+  WorkingRow,
   type MessageRowActions,
 } from './MessageRow';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
@@ -385,6 +387,7 @@ function TimelineInner({
   unreadCount,
   recoveryMarkers,
   pending,
+  working,
   reactions,
   myMemberId,
   loadingOlder,
@@ -414,6 +417,16 @@ function TimelineInner({
   unreadCount?: number;
   recoveryMarkers?: RecoveryMarker[];
   pending?: PendingMessage[];
+  /**
+   * 지금 이 채널에서 열린 턴을 가진 에이전트들 (#999). 스트림의 맨 끝에 「작업 중」
+   * 한 칸씩을 얻는다 — 답이 나타날 바로 그 자리다.
+   *
+   * 이미 `turnPlaceholderKey` 가 `working` 만 남긴 뒤의 목록이고(승인 대기는 여기
+   * 들어오지 않는다), 값이 같으면 **동일성도 같아야 한다**: 이 배열이 렌더마다
+   * 새로 만들어지면 `items` 가 그때마다 다시 빌드되고, goal RN-P2a 가 막아 둔
+   * 전파가 그대로 돌아온다. 그래서 호출자는 키로 memo 한다.
+   */
+  working?: readonly {memberId: string}[];
   reactions?: ReactionMap;
   myMemberId: string;
   loadingOlder?: boolean;
@@ -496,9 +509,9 @@ function TimelineInner({
    */
   metricsRef?: React.MutableRefObject<TimelineGeometry | null>;
   /** Same seam: lets the harness put the reader mid-history before measuring. */
-  listRef?: React.MutableRefObject<FlatList<TimelineItem> | null>;
+  listRef?: React.MutableRefObject<FlatList<TimelineStreamItem> | null>;
 }): React.JSX.Element {
-  const ownListRef = useRef<FlatList<TimelineItem> | null>(null);
+  const ownListRef = useRef<FlatList<TimelineStreamItem> | null>(null);
   const listRef = externalListRef ?? ownListRef;
   /** Is the reader at the bottom? Decides whether new content is followed. */
   const followingRef = useRef(true);
@@ -536,13 +549,16 @@ function TimelineInner({
 
   const items = useMemo(
     () =>
-      buildTimelineItems(messages, {
-        lastReadSeq,
-        unreadCount,
-        recoveryMarkers,
-        pending,
-      }),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending],
+      withTurnPlaceholders(
+        buildTimelineItems(messages, {
+          lastReadSeq,
+          unreadCount,
+          recoveryMarkers,
+          pending,
+        }),
+        working,
+      ),
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, working],
   );
 
   // One pass over the array this list is already rendering, so that a row can
@@ -782,12 +798,15 @@ function TimelineInner({
   );
 
   const renderItem = useCallback(
-    ({item}: {item: TimelineItem}) => {
+    ({item}: {item: TimelineStreamItem}) => {
       renderItemCalls += 1;
       if (item.kind === 'day') return <DayDivider atMs={item.atMs} />;
       if (item.kind === 'unread') return <UnreadDivider count={item.count} />;
       if (item.kind === 'recovery') {
         return <RecoveryDivider seq={item.seq} source={item.source} />;
+      }
+      if (item.kind === 'working') {
+        return <WorkingRow memberId={item.memberId} directory={directory} />;
       }
       if (item.kind === 'pending') {
         return (
@@ -863,7 +882,7 @@ function TimelineInner({
     ],
   );
 
-  const keyExtractor = useCallback((item: TimelineItem) => item.key, []);
+  const keyExtractor = useCallback((item: TimelineStreamItem) => item.key, []);
 
   // ---- 목록의 머리와 꼬리는 **엘리먼트**이므로 동일성이 값이다 ----------------
   //

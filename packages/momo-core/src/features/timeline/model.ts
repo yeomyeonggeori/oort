@@ -715,5 +715,62 @@ export function buildTimelineItems(
     dividerAbove = false;
     previousRow = row;
   }
+
   return items;
+}
+
+// =============================================================================
+// 답이 나타날 자리 (#999) — 그리고 왜 `TimelineItem` 이 **아닌가**
+//
+// 성재, 1차 검수: *"에이전트가 일하고 있는 상태인지도 잘 파악이 안 돼."*
+//
+// 이 칸은 위 스트림에 얹히지만 `TimelineItem` 유니온에는 들어가지 않는다. 이유는
+// 취향이 아니라 기존 소비자다: 웹 클라이언트의 목록은 네 종류를 `if` 로 걷어낸
+// 뒤 **남은 것을 메시지로 단정**해서 `item.message` 를 읽는다
+// (`clients/web/src/features/timeline/Timeline.tsx:242-256`). 유니온을 넓히면
+// 그 마지막 줄이 타입 오류가 되고, 그 파일은 이 goal 이 건드려서는 안 되는
+// 표면이다. 유니온을 넓히지 않으면 웹은 이 변경을 **알지도 못한 채** 그대로다.
+//
+// 그래서 확장은 유니온이 아니라 한 겹 위에서 일어난다: 스트림을 그리는 표면이
+// `TimelineStreamItem` 을 쓰고, 쓰지 않는 표면은 `TimelineItem` 을 그대로 쓴다.
+// =============================================================================
+
+/** 열린 턴 하나가 답을 놓을 자리. 메시지가 아니다 — seq 도 저자 묶음도 없다. */
+export interface TurnPlaceholderItem {
+  kind: "working";
+  key: string;
+  memberId: string;
+}
+
+/** 자리표시까지 포함한 렌더 스트림. */
+export type TimelineStreamItem = TimelineItem | TurnPlaceholderItem;
+
+/**
+ * 자리표시를 스트림의 **맨 끝**에 붙인다 — 대기행보다도 뒤.
+ *
+ * 순서가 곧 이야기이기 때문이다: 「내가 물었다」 다음 칸이 「그가 작업 중」이고,
+ * 답이 도착하면 그 칸이 답으로 바뀐다. 반대로 두면 자리표시가 자기가 기다리는
+ * 메시지보다 위에 선다.
+ *
+ * 저자 묶음에는 끼지 않는다. 이 행은 메시지가 아니고, 뒤이어 도착할 진짜 메시지가
+ * 자기 이름줄을 온전히 얻어야 한다 — 자리표시가 저자를 "이미 소개했다"고 주장하면
+ * 그것이 사라지는 순간 이름 없는 행 하나가 남는다.
+ *
+ * 붙일 것이 없으면 **받은 배열을 그대로** 돌려준다. 동일성을 지키는 것이 곧
+ * 호출자의 memo 를 지키는 것이다(#997).
+ */
+export function withTurnPlaceholders(
+  items: TimelineItem[],
+  working: readonly { memberId: string }[] = []
+): TimelineStreamItem[] {
+  if (working.length === 0) return items;
+  const out: TimelineStreamItem[] = items.slice();
+  for (const turn of working) {
+    out.push({
+      kind: "working",
+      key: `w-${turn.memberId.toLowerCase()}`,
+      memberId: turn.memberId,
+    });
+  }
+  return out;
 }
