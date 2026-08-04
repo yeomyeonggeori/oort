@@ -1,6 +1,12 @@
+import type {Message, RosterMember} from '@momo/core/lib/api';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
 
+import {
+  MessageRow,
+  type MessageRowActions,
+} from '../src/features/conversation/MessageRow';
 import {
   QuoteBlock,
   QuoteDraftBar,
@@ -134,5 +140,249 @@ describe('컴포저의 인용 초안', () => {
     expect(screen.getByTestId('quote-draft-body').props.children).toBe(
       '삭제된 메시지',
     );
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 행 위에서 — 스레드와 **함께 서도** 구별되는가
+// -----------------------------------------------------------------------------
+
+const SELF = '11111111-1111-4111-8111-111111111111';
+const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
+const BASE_MS = 1_700_000_000_000;
+
+function member(over: Partial<RosterMember> & {id: string}): RosterMember {
+  return {
+    workspaceId: 'ws',
+    kind: 'human',
+    status: 'active',
+    displayName: '이름',
+    handle: 'handle',
+    channelCount: 0,
+    channelIds: [],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+    ...over,
+  } as RosterMember;
+}
+
+const DIRECTORY = makeDirectory([
+  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
+]);
+
+function message(over: Partial<Message> = {}): Message {
+  return {
+    id: 'msg-1',
+    channelId: 'ch',
+    seq: 10,
+    hlcTs: 10,
+    hlcCount: 0,
+    authorMemberId: OTHER,
+    type: 'text',
+    body: '그건 배포 뒤에 봅시다',
+    state: 'sent',
+    createdAtMs: BASE_MS,
+    ...over,
+  };
+}
+
+function actions(over: Partial<MessageRowActions> = {}): MessageRowActions {
+  return {
+    myMemberId: SELF,
+    onToggleReaction: async () => {},
+    onEdit: async () => {},
+    onDelete: async () => {},
+    ...over,
+  };
+}
+
+describe('행 위의 인용', () => {
+  it('본문 위에 그려지고, 아무것도 조회하지 않는다', () => {
+    // 재조회 금지가 이 배치의 하드 규칙이다: 서버가 페이지에 원문을 동봉하므로
+    // (message.rs LEFT JOIN) 행이 따로 물어볼 이유가 없고, 물어보기 시작하면
+    // 스크롤 한 번이 요청 폭풍이 된다. 이 클라이언트에서 그것을 셀 수 있는 자리는
+    // 전역 `fetch` 하나뿐이다 — `src/` 안에서 fetch 를 직접 부르는 것은
+    // `projectShape.test.ts` 가 이미 금지하고 있으므로, 여기서 0 이면 코어를
+    // 경유한 조회도 없다.
+    const fetchSpy = jest.spyOn(global, 'fetch' as never);
+    render(
+      <MessageRow
+        message={message()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        quote={quote()}
+      />,
+    );
+    expect(screen.getByTestId('quote-block')).toBeTruthy();
+    expect(screen.getByTestId('quote-body').props.children).toBe(
+      '배포 로그 확인했습니다',
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('스레드 표식과 함께 서도 서로 다른 것으로 읽힌다', () => {
+    // ADR-0148 규칙 1: 한 메시지가 둘 다 가질 수 있다. 그때가 가장 위험한
+    // 순간이므로, 둘이 같은 행에 있을 때를 못박는다.
+    render(
+      <MessageRow
+        message={message({rootId: 'root-1'})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        replyParent={message({id: 'root-1', seq: 1, body: '루트'})}
+        quote={quote()}
+      />,
+    );
+    const marker = screen.getByTestId('reply-marker');
+    const block = screen.getByTestId('quote-block');
+    expect(marker).toBeTruthy();
+    expect(block).toBeTruthy();
+    // 표식은 「답글」이라 하고 블록은 그러지 않는다. 둘이 같은 낱말을 쓰기
+    // 시작하면 화면에는 두 장치가 있지만 사람에게는 하나만 있다.
+    expect(screen.getByText(/답글$/)).toBeTruthy();
+    expect(screen.queryByText(/인용.*답글|답글.*인용/)).toBeNull();
+  });
+
+  it('묘비에는 인용을 붙이지 않는다', () => {
+    render(
+      <MessageRow
+        message={message({state: 'deleted', body: undefined})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        quote={quote()}
+      />,
+    );
+    expect(screen.getByTestId('tombstone')).toBeTruthy();
+    expect(screen.queryByTestId('quote-block')).toBeNull();
+  });
+
+  it('원본이 로드된 범위 안에 있을 때만 눌린다', () => {
+    const onJumpToQuoted = jest.fn();
+    render(
+      <MessageRow
+        message={message()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        quote={quote()}
+        quoteReachable={false}
+        actions={actions({onJumpToQuoted})}
+      />,
+    );
+    fireEvent.press(screen.getByTestId('quote-block'));
+    expect(onJumpToQuoted).not.toHaveBeenCalled();
+  });
+
+  it('로드돼 있으면 그 행을 들고 원본으로 보낸다', () => {
+    const onJumpToQuoted = jest.fn();
+    const row = message();
+    render(
+      <MessageRow
+        message={row}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        quote={quote()}
+        quoteReachable
+        actions={actions({onJumpToQuoted})}
+      />,
+    );
+    fireEvent.press(screen.getByTestId('quote-block'));
+    // 행은 자기 자신을 돌려준다 — 무엇이 로드돼 있는지는 페이지를 든 쪽만 안다.
+    expect(onJumpToQuoted).toHaveBeenCalledWith(row);
+  });
+
+  it('VoiceOver 는 인용을 본문보다 **먼저** 듣는다', () => {
+    render(
+      <MessageRow
+        message={message()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        quote={quote()}
+      />,
+    );
+    const label: string = screen.getByTestId('message-row').props
+      .accessibilityLabel;
+    expect(label).toContain('김인턴 인용, 배포 로그 확인했습니다');
+    expect(label.indexOf('인용')).toBeLessThan(label.indexOf('그건 배포 뒤에'));
+  });
+});
+
+describe('인용 진입 — 액션 시트', () => {
+  /** 폰이 실제로 보내는 제스처. `messageActions.test.tsx` 와 같은 모양이다. */
+  function openSheet(over: Partial<MessageRowActions> = {}, msg = message()) {
+    render(
+      <MessageRow
+        message={msg}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions(over)}
+      />,
+    );
+    const point = {
+      nativeEvent: {pageX: 100, pageY: 200, locationX: 100, locationY: 200},
+    };
+    fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
+    fireEvent(screen.getByTestId('message-press'), 'longPress');
+    // 시트가 실제로 열렸다는 것부터 확인한다 — 안 열린 화면에서
+    // 「항목이 없다」는 아무것도 증명하지 못하는 초록이다.
+    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
+  }
+
+  it('핸들러가 오면 「인용해서 답하기」가 서고, 답글과 나란히 있다', () => {
+    const onQuote = jest.fn();
+    const onOpenThread = jest.fn();
+    openSheet({onQuote, onOpenThread});
+    expect(screen.getByTestId('sheet-reply')).toBeTruthy();
+    const quoteRow = screen.getByTestId('sheet-quote');
+    // 두 낱말이 **어디로 가는지**까지 말해야 폰에서 구별된다.
+    expect(quoteRow.props.accessibilityLabel).toBe('인용해서 답하기');
+    fireEvent.press(quoteRow);
+    expect(onQuote).toHaveBeenCalledTimes(1);
+    // 인용은 스레드를 열지 않는다. 여기서 새면 두 장치가 하나가 된다.
+    expect(onOpenThread).not.toHaveBeenCalled();
+  });
+
+  it('핸들러가 없으면 항목이 아예 없다', () => {
+    openSheet({onOpenThread: () => {}});
+    expect(screen.queryByTestId('sheet-quote')).toBeNull();
+  });
+
+  it('묘비는 인용 진입을 제안하지 않는다 — 시트 자체가 열리지 않는다', () => {
+    // 인용만 걸어 두면 묘비도 길게 눌러 열리는 행이 되어 버린다. `canQuote` 가
+    // 묘비를 빼기 때문에 그 행에는 할 수 있는 일이 하나도 남지 않고, 그러면
+    // 시트는 아예 뜨지 않는다 — 눌러도 아무 일이 없는 제스처보다 제스처가 없는
+    // 편이 낫다는, 이 파일 계열이 이미 고른 규칙이다.
+    render(
+      <MessageRow
+        message={message({state: 'deleted', body: undefined})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions({onQuote: jest.fn()})}
+      />,
+    );
+    const point = {
+      nativeEvent: {pageX: 100, pageY: 200, locationX: 100, locationY: 200},
+    };
+    fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
+    fireEvent(screen.getByTestId('message-press'), 'longPress');
+    expect(screen.queryByTestId('message-action-sheet')).toBeNull();
+    expect(screen.queryByTestId('sheet-quote')).toBeNull();
   });
 });

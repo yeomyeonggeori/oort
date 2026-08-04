@@ -59,6 +59,7 @@ export function MessageActionSheet({
   onClose,
   onToggleReaction,
   onReply,
+  onQuote,
   onEdit,
   onDelete,
 }: {
@@ -81,6 +82,13 @@ export function MessageActionSheet({
   onClose: () => void;
   onToggleReaction: (emoji: string) => void;
   onReply: () => void;
+  /**
+   * 인용해서 답하기 (ADR-0148). **핸들러가 오면 항목이 서고, 안 오면 안 선다** —
+   * `availability` 에 안 얹는 이유는 그 타입이 코어의 것이고 인용 가능 여부의
+   * 정본을 코어가 들기 때문이다. 여기서 플래그를 하나 늘리면 그 판정이 두 벌이
+   * 된다.
+   */
+  onQuote?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
@@ -191,8 +199,20 @@ export function MessageActionSheet({
                 </View>
               ) : null}
 
+              {/* 두 항목이 나란히 선다. 낱말이 **어디로 가는지**까지 말해야
+                  구별된다: 「답글 달기」는 이 대화를 옆으로 치우고(다른 화면이
+                  열린다), 「인용해서 답하기」는 여기 남아서 저 줄을 가리킨다.
+                  「인용」 한 낱말이면 짧지만, 그것만으로는 눌렀을 때 화면이
+                  바뀌는지 아닌지를 알 수 없다 — 폰에서 그 차이는 크다. */}
               {availability.reply ? (
                 <SheetRow label="답글 달기" onPress={onReply} testID="sheet-reply" />
+              ) : null}
+              {onQuote ? (
+                <SheetRow
+                  label="인용해서 답하기"
+                  onPress={onQuote}
+                  testID="sheet-quote"
+                />
               ) : null}
               {availability.edit ? (
                 <SheetRow label="고치기" onPress={onEdit} testID="sheet-edit" />
