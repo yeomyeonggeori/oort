@@ -75,6 +75,21 @@ export interface RosterMember {
   /** Agents only: the human accountable for this agent (ADR-0131). */
   ownerHumanId?: string;
   agentModel?: string;
+  /**
+   * Agents only: is this agent asleep (goal SRV-R2)?
+   *
+   * ABSENT is a real answer here, not a default waiting to be filled in. The
+   * server carries the column only for `kind === "agent"` — `CASE WHEN m.kind =
+   * 'agent' THEN COALESCE(ap.paused, false) END` — so a human has no such fact
+   * at all, and a server that predates that projection sends it for nobody.
+   *
+   * Reading a missing field as `false` is exactly how every agent on an older
+   * server would be reported awake, which is the lie the server side went out of
+   * its way to avoid (its own red proof was a stray `COALESCE` leaking
+   * `paused: false` onto humans). Optional here for the same reason, and every
+   * consumer goes through `rosterPaused` rather than touching it directly.
+   */
+  paused?: boolean;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -84,7 +99,13 @@ function isRosterMember(value: unknown): value is RosterMember {
   const status = str(value, "status");
   const channelIds = arrayField(value, "channelIds");
   const capabilities = arrayField(value, "capabilities");
+  // `paused` is optional, but a non-boolean under that key is a row we cannot
+  // read: dropping it is better than letting `"false"` (a string) pass and be
+  // truthy on the one screen whose whole job is to say whether an agent is
+  // asleep. Absent stays absent — that arm is a fact, not a failure.
+  const paused = (value as Record<string, unknown> | null)?.paused;
   return (
+    (paused === undefined || typeof paused === "boolean") &&
     str(value, "id") !== undefined &&
     str(value, "workspaceId") !== undefined &&
     (kind === "human" || kind === "agent") &&
@@ -2298,6 +2319,62 @@ export function agentRunSummaryPageFromWire(value: unknown): AgentRunSummaryPage
   return {
     runs: runs.map(agentRunSummaryFromWire),
     ...(nextCursor === undefined ? {} : { nextCursor: nextCursor.toLowerCase() }),
+  };
+}
+
+/**
+ * What `POST …/agent-runs/{run}/cancel` answers (openapi
+ * `AgentRunCancelResponse`, server-rust `dto.rs`).
+ *
+ * Four fields and every one load-bearing, which is why none is optional.
+ * `status` is always the literal `"cancelled"` — a refusal never reaches this
+ * shape, it is an `ErrorResponse` — and the pair `linkedWorkSessionIds` +
+ * `workSessionsTerminated: false` is the response telling the truth about what
+ * it did NOT do. Cancelling stops the run and retires its queued jobs; it does
+ * not kill the work sessions that run touched. A client that reports "중단했습니다"
+ * without reading these two is telling someone their terminal stopped when it
+ * did not.
+ */
+export interface AgentRunCancelResult {
+  runId: string;
+  status: "cancelled";
+  linkedWorkSessionIds: string[];
+  workSessionsTerminated: boolean;
+}
+
+/**
+ * Stop one agent run, as a human channel member (ADR-0132 D1).
+ *
+ * Authorization is CHANNEL MEMBERSHIP, not workspace ownership — this is the
+ * human stop right, and gating it on ownership would mean the person watching an
+ * agent do the wrong thing has to go find someone else. Agent and work-host
+ * bearers are rejected server side.
+ *
+ * Idempotent: cancelling an already-cancelled run answers 200 with the same body
+ * and writes nothing. Every other refusal throws `ApiError` and is read by
+ * `features/agents/runCancel`, which is where the sentences live.
+ */
+export async function cancelAgentRun(
+  workspaceId: string,
+  runId: string
+): Promise<AgentRunCancelResult> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agent-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" }
+  );
+  return {
+    runId: str(res, "runId") ?? runId,
+    status: "cancelled",
+    linkedWorkSessionIds: (arrayField(res, "linkedWorkSessionIds") ?? []).filter(
+      (id): id is string => typeof id === "string"
+    ),
+    // Read, never assumed. The schema pins it to `false` today; a server that
+    // one day terminates sessions must be able to say so without this client
+    // continuing to promise the opposite.
+    workSessionsTerminated:
+      (res as Record<string, unknown> | null)?.workSessionsTerminated === true,
   };
 }
 

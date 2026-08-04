@@ -1,10 +1,10 @@
 import type {Channel, RosterMember, WorkSession} from '@momo/core/lib/api';
 import {
   agentStateLabel,
-  isAgentPaused,
+  PROFILE_UNREAD,
+  rosterPaused,
   runningSessionMeta,
   sessionsForAgent,
-  type AgentProfileRead,
 } from '@momo/core/features/agents/agentOps';
 import {agentMembers} from '@momo/core/features/agents/hubModel';
 import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
@@ -21,10 +21,19 @@ import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
 // point: two clients that call the same agent 활성 and 준비됨 have shipped a
 // defect, not a variation.
 //
-// The third question is deliberately NOT "지금 일하는 중인가" (R1 High-2). That
-// is the web's 작업 중, and it means an open realtime TURN, which this client
-// cannot observe. What a row here reads is the work-session ledger, so it says
-// 작업 세션 — see `runningSessionMeta` in the core for why the words diverge.
+// 작업 세션과 「작업 중」은 여전히 다른 사실이다. 후자는 열린 실시간 턴이고
+// `AgentWorkingRail`이 스토어에 넣는다(goal RN-T2); 이 파일이 세는 것은 원장의
+// 세션이다. 화면은 둘을 나란히 그리되 섞지 않는다.
+//
+// ## 상태 한 줄은 이제 명부에서 온다 (goal RN-C1)
+//
+// 이 목록은 에이전트마다 `GET …/agents/{id}/profile`을 한 번씩 불러 pause 상태를
+// 알아냈다. 그 요청은 owner/agent-owner 게이트라 **일반 멤버에게는 행마다 403**이
+// 돌아왔고, 소유자에게조차 컬럼 하나를 그리려고 N번의 왕복이었다. goal SRV-R2가
+// 같은 컬럼을 roster 프로젝션에 올렸으므로 목록은 아무것도 더 묻지 않는다 —
+// `PROFILE_UNREAD`가 "이 표면은 애초에 묻지 않았다"는 뜻이고, 명부가 그 필드를
+// 싣지 않는 구 서버에서만 상태를 볼 수 없음으로 떨어진다. 프로필 GET은 이제
+// **편집 화면에 들어갈 때만** 일어난다.
 // =============================================================================
 
 export interface AgentRow {
@@ -81,13 +90,11 @@ export function buildAgentRows({
   members,
   channels,
   dms,
-  profiles,
   sessions,
 }: {
   members: readonly RosterMember[];
   channels: readonly Channel[];
   dms: readonly Channel[];
-  profiles: ReadonlyMap<string, AgentProfileRead>;
   /**
    * The workspace ledger, or undefined when it has not been read. Undefined is
    * NOT an empty ledger: a row must not claim an agent has done nothing because
@@ -99,17 +106,18 @@ export function buildAgentRows({
   // then localeCompare in ko). Rewriting it here is how two lists start
   // disagreeing about which rows exist.
   return agentMembers(members).map(member => {
-    const read: AgentProfileRead = profiles.get(member.id.toLowerCase()) ?? {
-      kind: 'pending',
-    };
     const placement = channelPlacement(member, channels, dms);
     const owned = sessions === undefined ? [] : sessionsForAgent(sessions, member.id);
     const partial = {
       memberId: member.id,
       displayName: member.displayName,
       handle: member.handle,
-      stateLabel: agentStateLabel(member, read),
-      paused: isAgentPaused(read),
+      // 명부 한 벌이 두 답을 다 준다 (goal SRV-R2). 이 표면은 프로필을 읽지
+      // 않으므로 `PROFILE_UNREAD`를 넘기고, 명부가 `paused`를 싣지 않는 구
+      // 서버에서만 상태를 볼 수 없음으로 떨어진다 — 모르는 것을 "활성"으로
+      // 채우지 않는다.
+      stateLabel: agentStateLabel(member, PROFILE_UNREAD),
+      paused: rosterPaused(member),
       runningCount: owned.filter(session => session.status === 'running').length,
       sessionCount: owned.length,
       channelNames: placement.present

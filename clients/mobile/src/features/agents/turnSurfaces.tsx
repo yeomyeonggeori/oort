@@ -98,6 +98,7 @@ export function AgentActivityBar({
   directory,
   nowMs,
   live,
+  renderStop,
   testID = 'composer-working',
 }: {
   turns: readonly AgentWorkingSignal[];
@@ -105,6 +106,13 @@ export function AgentActivityBar({
   nowMs: number;
   /** The realtime rail is connected, so a clock is measuring something. */
   live: boolean;
+  /**
+   * 이 턴을 멈추는 컨트롤 (goal RN-C1). 줄마다 하나이고, 이 컴포넌트는 그것을
+   * **만들지 않고 자리만 내준다** — cancel은 워크스페이스와 react-query를 아는
+   * 화면의 일이고, 이 파일은 문구와 배치만 안다. `runId`를 모르는 턴(레일이
+   * 진행 중에 붙은 경우)에는 호출되지 않는다: 이름을 모르는 것을 멈출 수는 없다.
+   */
+  renderStop?: (turn: {runId: string; memberId: string}) => React.ReactNode;
   testID?: string;
 }): React.JSX.Element | null {
   const {lines, overflowCount} = useMemo(
@@ -114,59 +122,69 @@ export function AgentActivityBar({
       ),
     [turns, directory],
   );
+  /** 줄에서 다시 찾을 수 있게, memberId → runId. 병합 뒤에도 1:1이다. */
+  const runIds = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const turn of turns) {
+      if (turn.runId !== undefined) out.set(turn.memberId, turn.runId);
+    }
+    return out;
+  }, [turns]);
 
   if (lines.length === 0) return null;
 
   return (
-    // `accessible` is REQUIRED here, not decoration (2R M1). A React Native
-    // `View` is not an accessibility element by default, so an
-    // `accessibilityLabel` on a bare one is read by nobody — the web sibling gets
-    // away with `aria-label` on a `<ul>` because the browser announces the list
-    // and then its items; RN announces neither until something claims to be an
-    // element.
+    // The container is NOT `accessible`, and that is a change of REASON rather
+    // than a walk-back of 2R M1.
     //
-    // Claiming it merges the subtree into ONE element, so the label has to carry
-    // everything that is on screen rather than a summary of it: the lines, the
-    // overflow count, and the offline sentence. That is also the better read for
-    // a 1-3 line strip above a keyboard — one swipe stop with the whole story
-    // beats four stops with a quarter each, and nothing can be swiped past.
-    <View
-      accessible
-      accessibilityLabel={barLabel(lines, overflowCount, live)}
-      style={styles.activityBar}
-      testID={testID}>
-      {lines.map(line => (
-        <ActivityRow key={line.key} line={line} nowMs={nowMs} live={live} />
-      ))}
+    // M1's defect was a label nobody read: an `accessibilityLabel` on a bare
+    // React Native `View`, which is not an accessibility element. The fix was to
+    // claim the element and carry the whole story in one label — correct while
+    // the bar was text only.
+    //
+    // It stopped being correct the moment a 중단 button landed inside it (goal
+    // RN-C1). `accessible` MERGES the subtree, and a merged subtree has no
+    // focusable button in it: VoiceOver would read the sentence and offer no way
+    // to act on it, which on the one surface whose whole point is "stop this" is
+    // worse than the original silence.
+    //
+    // So the label moves down instead of disappearing: every line is a `Text`
+    // (an accessibility element by default) carrying its own full sentence, the
+    // overflow count and the offline line are their own elements, and each stop
+    // control is its own button. Nothing is unannounced — it is announced in
+    // reading order, next to the control that acts on it.
+    <View style={styles.activityBar} testID={testID}>
+      {lines.map(line => {
+        const runId = runIds.get(line.memberId);
+        return (
+          <ActivityRow
+            key={line.key}
+            line={line}
+            nowMs={nowMs}
+            live={live}
+            stop={
+              // 끊긴 레일에서는 중단을 권하지 않는다. 마지막으로 확인된 상태를
+              // 보고 있는 것이고, 그 실행은 이미 끝났을 수 있다.
+              live && runId !== undefined && renderStop
+                ? renderStop({runId, memberId: line.memberId})
+                : null
+            }
+          />
+        );
+      })}
       {overflowCount > 0 ? (
         <Text style={styles.activityText}>외 {overflowCount}명</Text>
       ) : null}
       {live ? null : (
-        <Text style={styles.staleText} testID={`${testID}-stale`}>
+        <Text
+          accessibilityLabel={TURN_STALE_SENTENCE}
+          style={styles.staleText}
+          testID={`${testID}-stale`}>
           {TURN_STALE_SENTENCE}
         </Text>
       )}
     </View>
   );
-}
-
-/**
- * Everything the bar shows, as one sentence, in the order it is drawn.
- *
- * `turnSummary` is deliberately NOT used: it is the web list's accessible NAME,
- * which sits above items the browser reads separately. Here there are no
- * separate items, so a summary would replace the content instead of introducing
- * it — the reader would lose the headline the agent actually wrote.
- */
-function barLabel(
-  lines: readonly AgentActivityLine[],
-  overflowCount: number,
-  live: boolean,
-): string {
-  const parts = lines.map(activityText);
-  if (overflowCount > 0) parts.push(`외 ${overflowCount}명`);
-  if (!live) parts.push(TURN_STALE_SENTENCE);
-  return parts.join(', ');
 }
 
 /**
@@ -209,10 +227,13 @@ function ActivityRow({
   line,
   nowMs,
   live,
+  stop,
 }: {
   line: AgentActivityLine;
   nowMs: number;
   live: boolean;
+  /** 이 줄의 실행을 멈추는 컨트롤, 또는 null. 화면이 만들어 준다. */
+  stop?: React.ReactNode;
 }): React.JSX.Element {
   const showClock =
     live && line.state === 'working' && line.startedAtMs !== undefined;
@@ -239,6 +260,7 @@ function ActivityRow({
           {elapsedLabel(line.startedAtMs as number, nowMs)}
         </Text>
       ) : null}
+      {stop ?? null}
     </View>
   );
 }

@@ -5,9 +5,12 @@ import {
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
+import type {CancelOutcome} from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {View} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
+import {color, font, SAFE_GUTTER, space} from '../design/tokens';
+import {StopTurnControl} from '../features/agents/StopTurnControl';
 import {AgentActivityBar} from '../features/agents/turnSurfaces';
 import {
   agentTurnsInChannel,
@@ -152,6 +155,18 @@ export default function ConversationScreen({
   const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
   const turns = agentTurnsInChannel(signals, channelId, turnNowMs);
 
+  // 중단의 결과 한 문장 (goal RN-C1). 채널이 바뀌면 사라진다 — 다른 대화에 남은
+  // 영수증은 그 대화에 대한 진술로 읽힌다.
+  const [stopOutcome, setStopOutcome] = useState<CancelOutcome | null>(null);
+  useEffect(() => setStopOutcome(null), [channelId]);
+  // 그 실행이 실제로 끝나면 영수증도 물러난다. 배지가 사라진 자리에 「중단했습니다」만
+  // 남아 있으면, 다음에 그 에이전트가 새 턴을 열 때 그 문장이 새 턴에 대한 말처럼
+  // 읽힌다.
+  const turnCount = turns.length;
+  useEffect(() => {
+    if (turnCount === 0) setStopOutcome(null);
+  }, [turnCount]);
+
   // ---- the frozen unread snapshot ------------------------------------------
   // Captured on the first render that has a read state for this channel, and
   // never updated. `null` until then, which renders no divider rather than a
@@ -287,7 +302,27 @@ export default function ConversationScreen({
               directory={directory}
               nowMs={turnNowMs}
               live={railLive}
+              renderStop={turn => (
+                <StopTurnControl
+                  runId={turn.runId}
+                  onOutcome={setStopOutcome}
+                  testIDPrefix={`turn-stop-${turn.memberId}`}
+                />
+              )}
             />
+            {/* 결과는 컨트롤 밖에서, 줄보다 넓은 자리에 말한다. 「이미 끝났습니다」는
+                실패가 아니라 답이므로 배너가 아니라 영수증과 같은 자리에 선다 —
+                빨간 글씨와 재시도는 이미 이긴 경주를 다시 뛰라는 뜻이 된다. */}
+            {stopOutcome ? (
+              <Text
+                style={[
+                  styles.stopOutcome,
+                  stopOutcome.kind === 'error' && styles.stopOutcomeError,
+                ]}
+                testID={`turn-stop-outcome-${stopOutcome.kind}`}>
+                {stopOutcome.sentence}
+              </Text>
+            ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
               channelLabel={title}
@@ -314,3 +349,19 @@ export default function ConversationScreen({
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  /**
+   * 중단의 결과 한 줄. 활동 줄과 입력창 사이, 방금 누른 버튼 바로 아래다 —
+   * 토스트가 아니라 제자리 문장인 이유는 그것이 판단의 근거 옆이기 때문이다.
+   */
+  stopOutcome: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingBottom: space.xs,
+    fontSize: font.meta,
+    color: color.textMuted,
+    lineHeight: 18,
+  },
+  // 「이미 끝났습니다」는 이 색을 쓰지 않는다. 실패가 아니라 답이다.
+  stopOutcomeError: {color: color.danger},
+});

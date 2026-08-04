@@ -67,9 +67,16 @@ import type {OpenAgent} from '../nav/state';
 // lives in `@momo/core/features/agents/agentOps` beside the line numbers that
 // prove it. The short version: pause writes ONE column, and only the three
 // paths that CREATE a run consult it. A job the gateway has already claimed
-// runs to completion, and there is no cancel route on this server at all. So
-// this screen says "이미 실행 중인 작업은 그대로 끝까지 갑니다" — which is the
-// opposite of the reassuring guess, and is the true thing.
+// runs to completion.
+//
+// That sentence used to end "…그대로 끝까지 갑니다", and it was true twice over:
+// pause did not reach a running job, AND nothing else could. goal SRV-C2 landed
+// `POST …/agent-runs/{run}/cancel`, so only the second half is still true. The
+// notice now says what pause does not do and where the person can actually stop
+// the run — repackaging pause as a cancel would be the same lie facing the other
+// way. 중단 자체는 이 화면이 아니라 **대화**에 있다: 취소되는 것은 실행(run)이고,
+// 이 화면이 나열하는 것은 작업 세션이며, 서버는 그 둘이 함께 끝나지 **않는다**고
+// 응답으로 명시한다(`workSessionsTerminated: false`).
 //
 // ## 호스트 등급 (ADR-0137 D5)
 //
