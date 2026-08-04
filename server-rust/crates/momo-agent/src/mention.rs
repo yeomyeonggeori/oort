@@ -230,20 +230,67 @@ pub fn effective_system_prompt(
 ///
 /// Both spellings are read because Swift reads both — a workspace configured
 /// through the camelCase client must not silently lose its allow-list.
+///
+/// ## The unconfigured case (SRV-B3, 2026-08-04)
+///
+/// 성재's review: *"루나 모델 피커에 luna가 없다(sol만)"*. Traced to this
+/// function and to nothing else. The web picker intersects its candidate list
+/// with this answer (`modelOptions`, `packages/momo-core/.../routingModel.ts`),
+/// and the send path gates on the same answer
+/// ([`resolve_mention_routing`] → [`RoutingInvalid::ModelNotAllowed`]), so a
+/// workspace whose `settings` has no `allowed_agent_models` key could offer —
+/// and could run — exactly one model: whatever `agent.model` already said.
+///
+/// That was not an operator's decision. There is **no route on this server that
+/// writes `workspace.settings`** (grep `/v1/workspaces` in
+/// `bins/momo-server/src/lib.rs`), so the empty allow-list is the absence of a
+/// configuration surface, not a narrowing anyone chose. Treating it as a
+/// deliberate `[]` is what made a paid subscription's other models unreachable.
+///
+/// So: **when — and only when — the key is absent entirely**, the answer is
+/// widened to the measured provider catalog
+/// ([`crate::effort::provider_catalog_models`]), and even then only if the
+/// agent's own model is itself one of those measured ids. That last condition is
+/// the fail-closed half:
+///
+/// | `agent.model` | settings key | answer |
+/// |---|---|---|
+/// | `gpt-5.6-sol` | absent | sol + its measured siblings (luna, terra, …) |
+/// | `hermes-agent` | absent | `["hermes-agent"]`, exactly as before |
+/// | anything | present | `agent.model ∪ configured`, exactly as before |
+///
+/// The agent's own model is the *evidence* of which upstream this instance
+/// reaches: a mock/hermes deployment never names a `gpt-5.6-*` id, so it is
+/// never offered one. And a workspace that genuinely wants one model back sets
+/// `allowed_agent_models: []` — present, so the widening does not apply.
 pub fn allowed_agent_models(base_model: &str, workspace_settings: &Value) -> Vec<String> {
     let mut allowed = vec![base_model.to_string()];
+    let mut push = |model: &str| {
+        if !allowed.iter().any(|existing| existing == model) {
+            allowed.push(model.to_string());
+        }
+    };
+
+    // `get`, not `as_array`: a present-but-malformed value is still an operator
+    // statement about this workspace, and must not be read as "unconfigured".
     let configured = workspace_settings
         .get("allowed_agent_models")
-        .or_else(|| workspace_settings.get("allowedAgentModels"))
-        .and_then(Value::as_array);
-    if let Some(entries) = configured {
-        for entry in entries {
-            if let Some(model) = entry.as_str() {
-                if !allowed.iter().any(|existing| existing == model) {
-                    allowed.push(model.to_string());
+        .or_else(|| workspace_settings.get("allowedAgentModels"));
+
+    match configured {
+        Some(value) => {
+            for entry in value.as_array().map(Vec::as_slice).unwrap_or_default() {
+                if let Some(model) = entry.as_str() {
+                    push(model);
                 }
             }
         }
+        None if crate::effort::is_provider_catalog_model(base_model) => {
+            for model in crate::effort::provider_catalog_models() {
+                push(model);
+            }
+        }
+        None => {}
     }
     allowed
 }
@@ -717,6 +764,105 @@ mod tests {
             &json!({"allowedAgentModels": ["hermes-fast"]}),
         );
         assert!(camel.contains(&"hermes-fast".to_string()));
+    }
+
+    /// SRV-B3: an unconfigured workspace whose agent already runs a measured
+    /// provider model reaches that model's siblings — this is the whole fix for
+    /// "루나 모델 피커에 luna가 없다(sol만)".
+    #[test]
+    fn an_unconfigured_workspace_reaches_the_measured_siblings_of_its_own_model() {
+        let allowed = allowed_agent_models("gpt-5.6-sol", &json!({}));
+        assert_eq!(
+            allowed.first().map(String::as_str),
+            Some("gpt-5.6-sol"),
+            "the agent's own model still leads the list"
+        );
+        assert!(
+            allowed.contains(&"gpt-5.6-luna".to_string()),
+            "the model 성재 could not pick: {allowed:?}"
+        );
+        assert!(allowed.contains(&"gpt-5.6-terra".to_string()));
+        assert_eq!(
+            allowed.iter().filter(|m| *m == "gpt-5.6-sol").count(),
+            1,
+            "the base model is not duplicated by the catalog pass: {allowed:?}"
+        );
+        assert!(
+            !allowed.iter().any(|m| m.starts_with("hermes-")),
+            "a gateway handle is not a model of this provider: {allowed:?}"
+        );
+    }
+
+    /// The fail-closed half. Three ways the widening must NOT happen.
+    #[test]
+    fn the_catalog_widening_never_overrides_an_operator_and_never_guesses() {
+        // 1. A hermes/mock deployment names no measured id, so it is offered
+        //    none — the answer is byte-for-byte what it was before SRV-B3.
+        assert_eq!(
+            allowed_agent_models("hermes-agent", &json!({})),
+            vec!["hermes-agent".to_string()]
+        );
+
+        // 2. A present key is an operator statement, including the empty list:
+        //    that is how a workspace pins itself back to one model.
+        assert_eq!(
+            allowed_agent_models("gpt-5.6-sol", &json!({"allowed_agent_models": []})),
+            vec!["gpt-5.6-sol".to_string()],
+            "an explicit [] must not be re-widened by the catalog"
+        );
+        assert_eq!(
+            allowed_agent_models(
+                "gpt-5.6-sol",
+                &json!({"allowed_agent_models": ["gpt-5.6-luna"]})
+            ),
+            vec!["gpt-5.6-sol".to_string(), "gpt-5.6-luna".to_string()],
+            "a configured list stays exactly the configured list"
+        );
+        // …and a present-but-malformed value is still 'configured'. Reading it
+        // as 'unconfigured' would let a typo silently widen the allow-list.
+        assert_eq!(
+            allowed_agent_models("gpt-5.6-sol", &json!({"allowed_agent_models": "luna"})),
+            vec!["gpt-5.6-sol".to_string()]
+        );
+
+        // 3. A name that merely *looks* like a provider id is not one.
+        assert_eq!(
+            allowed_agent_models("gpt-5.7-vega", &json!({})),
+            vec!["gpt-5.7-vega".to_string()],
+            "an unmeasured id must not bootstrap the whole catalog"
+        );
+    }
+
+    /// The widening is only useful if the send path agrees with it — the picker
+    /// and the gate read the same helper, so this is the end-to-end proof that
+    /// `routing: {model: luna}` now resolves instead of 400ing.
+    #[test]
+    fn the_widened_model_is_accepted_by_the_request_tier_gate() {
+        let mut agent = candidate();
+        agent.base_model = "gpt-5.6-sol".into();
+        agent.workspace_settings = json!({});
+
+        let requested = RequestedRouting {
+            model: Some("gpt-5.6-luna".into()),
+            effort: Some("max".into()),
+        };
+        let routing = resolve_mention_routing(&agent, Some(&requested)).expect("luna is allowed");
+        assert_eq!(routing.model, "gpt-5.6-luna");
+        assert_eq!(
+            routing.effort.as_deref(),
+            Some("max"),
+            "'최대' is a measured level on luna"
+        );
+
+        // The gate is still a gate: a name outside the catalog is still a 400.
+        let stranger = RequestedRouting {
+            model: Some("claude-opus-5".into()),
+            effort: None,
+        };
+        assert_eq!(
+            resolve_mention_routing(&agent, Some(&stranger)),
+            Err(RoutingInvalid::ModelNotAllowed)
+        );
     }
 
     /// ADR-0131 D2: an inherited preference outside the allow-list is IGNORED

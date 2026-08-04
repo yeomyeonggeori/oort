@@ -664,9 +664,20 @@ paths:
       summary: Read one agent's effective workspace model allow-list.
       description: >
         Any active workspace member may read this credential-free projection.
-        The response is exactly the agent's own model plus
+        The response is the agent's own model plus
         workspace.settings.allowed_agent_models; it deliberately does not
         expose the workspace settings object or agent profile fields.
+
+        When workspace.settings carries no allowed_agent_models key at all AND
+        the agent's own model is one of the measured provider-catalog ids also
+        served by GET /v1/provider/effort-table under provider `openai-codex`,
+        the answer additionally contains that catalog (SRV-B3). An unconfigured
+        workspace is the absence of a configuration surface — nothing on this
+        API writes workspace.settings — rather than a narrowing anyone chose,
+        and the agent's own model is the evidence of which upstream this
+        instance reaches. A workspace that HAS configured the key, including an
+        explicit empty list, gets exactly agent.model plus what it configured;
+        a gateway-handle model (hermes-*) is never widened.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -4875,6 +4886,15 @@ paths:
         tenant row and no provider credential (ADR-0134 D2), and a model absent
         from it resolves to the conservative low/medium/high fallback rather
         than silently accepting a level the provider would reject.
+
+        Two provider groups are served. `hermes` holds momo's own
+        provider-agnostic gateway handles (ADR-0130). `openai-codex` holds model
+        ids the upstream publishes in its own catalog, measured 2026-08-04 from
+        GET https://chatgpt.com/backend-api/codex/models — the base URL an
+        ADR-0147 OAuth link stores. The upstream lists a sixth level, `ultra`,
+        on some of those models; momo deliberately does not serve it, so
+        `levels` stays low/medium/high/xhigh/max and an `ultra` request is a
+        400.
       security: [{bearerAuth: []}]
       responses:
         "200":

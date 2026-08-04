@@ -560,6 +560,11 @@ pub async fn put_pause(
 /// answer is derived from it by the same `allowed_agent_models` helper the two
 /// enforcement paths use, so the picker and the gate cannot disagree about a
 /// model string.
+///
+/// SRV-B3 widened what that helper answers for a workspace that never
+/// configured an allow-list — see its doc comment for the rule and why it is
+/// fail-closed. The route is unchanged: it still asks the one helper, and still
+/// carries nothing but the list.
 pub async fn allowed_models(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,

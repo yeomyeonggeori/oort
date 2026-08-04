@@ -314,4 +314,48 @@ mod tests {
             "a model that tops out at medium must not default to medium's parent"
         );
     }
+
+    /// SRV-B3: the measured upstream catalog reaches the wire as its own
+    /// provider group, and the two levels 성재 could not select are on it.
+    ///
+    /// This asserts the *serialized* shape rather than the constant, because the
+    /// composer's 강도 상자 is built from this JSON: a projection that dropped
+    /// `xhigh`/`max` would leave the picker at 낮음/보통/높음 no matter what the
+    /// table said.
+    #[test]
+    fn the_measured_catalog_reaches_the_wire_with_xhigh_and_max() {
+        let table = serde_json::to_value(effort_table_response()).expect("serialize");
+        let codex = table["providers"]
+            .as_array()
+            .expect("providers")
+            .iter()
+            .find(|group| group["provider"] == "openai-codex")
+            .expect("the measured catalog is served");
+        let luna = codex["models"]
+            .as_array()
+            .expect("models")
+            .iter()
+            .find(|model| model["model"] == "gpt-5.6-luna")
+            .expect("gpt-5.6-luna is on the wire");
+        assert_eq!(
+            luna["efforts"],
+            serde_json::json!(["low", "medium", "high", "xhigh", "max"])
+        );
+        assert_eq!(luna["defaultEffort"], "medium");
+
+        let sol = codex["models"]
+            .as_array()
+            .expect("models")
+            .iter()
+            .find(|model| model["model"] == "gpt-5.6-sol")
+            .expect("gpt-5.6-sol");
+        assert!(
+            sol["efforts"]
+                .as_array()
+                .expect("efforts")
+                .iter()
+                .all(|level| level != "ultra"),
+            "momo does not serve the upstream's sixth level: {sol}"
+        );
+    }
 }
