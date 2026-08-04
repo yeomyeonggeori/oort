@@ -27,6 +27,7 @@
 //! | `b53a_1_a_channel_invite_is_what_makes_an_agent_answer` | drop `POST …/channels/{ch}/members`, add the row without clearing `left_at`, or stop `DELETE …` from closing the membership |
 //! | `b53a_2_pausing_stops_the_run_and_says_so` | drop `PUT …/pause`, write `paused` without the mention path reading it, or make the paused branch silent |
 //! | `b53a_3_a_routing_block_reaches_the_run_and_its_job` | drop the `routing` echo from `agent_run.input`, resolve the job payload from `agent.model` instead of the request, or let a disallowed model through as a silent fallback |
+//! | `b3_an_unconfigured_workspace_reaches_its_providers_catalog` | drop the measured-catalog branch from `allowed_agent_models`, let it fire on a configured workspace, extend it to gateway handles, or drop `xhigh`/`max` from the measured effort rows |
 //! | `b53a_4_the_operating_surface_refuses_the_unauthorized` | widen any of the three write gates to plain members, or narrow `allowed-models` away from them |
 
 use std::net::SocketAddr;
@@ -1020,6 +1021,154 @@ async fn b53a_3_a_routing_block_reaches_the_run_and_its_job() {
     let stats = drain_once().await;
     assert_eq!(stats.answered, 1, "{stats:?}");
     assert_eq!(messages_by(&su, &tenant, agent).await.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// 3b — SRV-B3: the unconfigured workspace
+// ---------------------------------------------------------------------------
+
+/// **A workspace that never configured an allow-list reaches its provider's
+/// other models — and the send path agrees.**
+///
+/// 성재's review said the picker offered only `sol`. This is that report as a
+/// test. The setup is deliberately the *live* shape: an agent whose
+/// `agent.model` is a measured provider id, and a `workspace.settings` with no
+/// `allowed_agent_models` key at all — which is every workspace on this server,
+/// because nothing writes that key (there is no route that can).
+///
+/// | revert | how it goes red |
+/// |---|---|
+/// | drop the catalog branch from `allowed_agent_models` | `allowed-models` answers `["gpt-5.6-sol"]` and the luna send 400s |
+/// | fire the branch on a *configured* workspace too | `b53a_3`'s exact-list assertion re-widens and fails |
+/// | widen it to gateway handles | `b53a_4`'s `["hermes-agent"]` picker assertion fails |
+/// | drop `xhigh`/`max` from the measured rows | the `max` send 400s on `routing.effort` |
+///
+/// The last third of the test is the part that matters most: the widening must
+/// not turn the gate off. An unmeasured name is still a 400, and a level the
+/// *resolved* model does not list is still a 400.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b3_an_unconfigured_workspace_reaches_its_providers_catalog() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    // The live shape: the agent runs a model the provider itself publishes…
+    let agent = seed_agent(&su, &tenant, "hermes", "gpt-5.6-sol").await;
+    // …and NOTHING writes the allow-list. The missing `allow_models` call here
+    // is the point of the test, not an omission.
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+    assert_eq!(
+        add_member(&http, &base, &token, &tenant, agent)
+            .await
+            .status(),
+        200
+    );
+
+    let allowed: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/allowed-models",
+            tenant.workspace
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("allowed models")
+        .json()
+        .await
+        .expect("allowed models body");
+    let names = allowed["allowedAgentModels"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|value| value.as_str().expect("a string").to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        names.contains(&"gpt-5.6-luna".to_string()),
+        "the model the picker was missing: {names:?}"
+    );
+    assert!(
+        names.contains(&"gpt-5.6-sol".to_string()) && names.contains(&"gpt-5.6-terra".to_string()),
+        "{names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name.starts_with("hermes-")),
+        "a gateway handle is not a model of this provider: {names:?}"
+    );
+
+    // ---- and the send path accepts what the picker offered ------------------
+    send(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        "@hermes 최대 강도로 부탁해",
+        Some(json!({"model": "gpt-5.6-luna", "effort": "max"})),
+    )
+    .await;
+
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(runs.len(), 1, "the widened model started its run: {runs:?}");
+    assert_eq!(
+        runs[0].2["routing"],
+        json!({"model": "gpt-5.6-luna", "effort": "max"}),
+        "'매우 높음/최대' reaches the stored input, not just the picker: {:?}",
+        runs[0].2
+    );
+    let jobs = agent_job_payloads(&su, tenant.workspace).await;
+    assert_eq!(jobs[0]["model"], json!("gpt-5.6-luna"));
+    assert_eq!(
+        jobs[0]["effort"],
+        json!("max"),
+        "the worker is told the level the user chose: {}",
+        jobs[0]
+    );
+
+    // ---- the gate is still a gate ------------------------------------------
+    let before = channel_message_count(&su, &tenant).await;
+    let (status, message) = send_refused(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        "@hermes 남의 모델",
+        json!({"model": "claude-opus-5"}),
+    )
+    .await;
+    assert_eq!(
+        status, 400,
+        "an unmeasured name is still refused: {message}"
+    );
+    assert!(
+        message.contains("allowed_agent_models"),
+        "the sentence still names the allow-list: {message}"
+    );
+    assert_eq!(
+        channel_message_count(&su, &tenant).await,
+        before,
+        "and the send still rolled back"
+    );
+
+    // A level this model does not list is refused even though a sibling has it —
+    // `gpt-5.4-mini` tops out at `xhigh`, so `max` is a pair-level refusal.
+    let (status, message) = send_refused(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        "@hermes 미니로 최대",
+        json!({"model": "gpt-5.4-mini", "effort": "max"}),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert!(
+        message.contains("routing.effort") && message.contains("gpt-5.4-mini"),
+        "the refusal names both halves of the pair: {message}"
+    );
 }
 
 // ---------------------------------------------------------------------------
