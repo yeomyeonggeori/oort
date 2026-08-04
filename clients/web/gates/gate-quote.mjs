@@ -620,11 +620,20 @@ async function exercise(browser) {
   const railColors = await page.evaluate((paintAccent) => {
     // 토큰의 실제 계산값을 얻는 방법: 그 유틸리티를 입은 프로브를 한 번 만든다.
     // 하드코딩한 hex와 비교하면 팔레트가 재조정될 때 이 단언만 조용히 낡는다.
-    const probe = document.createElement("div");
-    probe.className = "border-accent border-l-2";
-    document.body.append(probe);
-    const accent = getComputedStyle(probe).borderLeftColor;
-    probe.remove();
+    const probeWith = (className, read) => {
+      const probe = document.createElement("div");
+      probe.className = className;
+      document.body.append(probe);
+      const value = read(getComputedStyle(probe));
+      probe.remove();
+      return value;
+    };
+    const accent = probeWith("border-accent border-l-2", (s) => s.borderLeftColor);
+    // 앰버가 이 표면에서 이미 맡고 있는 세 뜻. 로그에 함께 남겨, 「인용이 저것들과
+    // 같은 색인가」를 사람이 눈이 아니라 숫자로 확인할 수 있게 한다.
+    const mention = probeWith("text-accent", (s) => s.color);
+    const unreadRule = probeWith("bg-accent", (s) => s.backgroundColor);
+    const anchorTint = probeWith("bg-accent-soft", (s) => s.backgroundColor);
 
     const blocks = document.querySelectorAll('[data-testid="quote-block"]');
     if (paintAccent) {
@@ -639,9 +648,18 @@ async function exercise(browser) {
     const block = blocks[0];
     return {
       accent,
+      mention,
+      unreadRule,
+      anchorTint,
       rail: block === undefined ? null : getComputedStyle(block).borderLeftColor,
+      railBackground:
+        block === undefined ? null : getComputedStyle(block).backgroundColor,
     };
   }, proveRedAccent);
+  console.log(
+    `[color] 인용 레일 ${railColors.rail} / accent ${railColors.accent} ` +
+      `(멘션 ${railColors.mention} · 미읽 규칙 ${railColors.unreadRule} · 앵커 틴트 ${railColors.anchorTint})`
+  );
   if (railColors.rail === null) {
     throw new Error("측정할 인용 블록이 없다");
   }
@@ -656,12 +674,25 @@ async function exercise(browser) {
     const block = document.querySelector('[data-testid="quote-block"]');
     return block === null ? null : getComputedStyle(block).borderLeftColor;
   });
+  console.log(`[color] hover 레일 ${hoverRail}`);
   if (hoverRail === railColors.accent) {
     throw new Error(
       `the quote rail is wearing the accent on hover (${hoverRail}); 정지 상태만 중성인 ` +
         "것으로는 부족하다 - 마우스를 얹은 순간 인용이 멘션의 색이 된다"
     );
   }
+  // 앵커 착지 틴트(`--accent-soft`)와도 겹치지 않는다. 그것은 「방금 여기로 왔다」는
+  // 일시적 피드백이고, 인용이 상시로 그 색을 입으면 모든 인용이 방금 점프해 온 자리로
+  // 보인다.
+  if (
+    railColors.railBackground !== null &&
+    railColors.railBackground === railColors.anchorTint
+  ) {
+    throw new Error(
+      `the quote block wears the anchor landing tint as its resting background (${railColors.railBackground})`
+    );
+  }
+
   // 포커스 링은 예외이고, 그 예외가 의도임을 여기서 못박는다: accent 링은 「포커스가
   // 여기 있다」를 말하는 하우스 패턴이고(SKILL §6) 이 앱의 모든 컨트롤이 같은 링을
   // 쓴다. 인용만 다른 링을 쓰면 그게 새로운 오독이다.

@@ -103,9 +103,10 @@ function QuoteContent({
         className={cn(
           "min-w-0 flex-1",
           // 「무엇을 인용했는지 모른다」가 「안다」와 같은 무게로 그려지면 화면이
-          // 고장 난 것으로 읽힌다 (design-review H-1). 두 줄을 쓸 이유도 없으므로
-          // 한 줄로 잠그고 글자도 한 단 내린다. 이 팔레트에는 잉크 3단이 없어서
-          // (`--ink` / `--ink-muted`가 전부다) 위계는 **크기**로 낸다.
+          // 고장 난 것으로 읽힌다 (design-review H-1 — 이쪽은 내 코드에서 실재했다:
+          // 1차의 unresolved는 ready와 **글자 하나 다르지 않은** 스타일이었다).
+          // 두 줄을 쓸 이유도 없으므로 한 줄로 잠그고 글자를 한 단 내린다. 이 팔레트에는
+          // 잉크 3단이 없어서(`--ink`/`--ink-muted`가 전부) 위계는 **크기**로 낸다.
           block.kind === "unresolved"
             ? "truncate text-timestamp"
             : "line-clamp-2"
@@ -148,25 +149,30 @@ function QuoteContent({
 /**
  * 인용의 모양. **accent가 여기 닿지 않는다** (design-review B-1).
  *
- * 이 화면에서 앰버(`--accent`)는 이미 두 뜻을 갖고 있다: **멘션**(나를 불렀다)과
- * **미읽 경계**(여기부터 안 읽었다). 인용은 그 둘과 아무 관계가 없는 「참조」이고,
- * 같은 색을 쓰면 「저 글을 가리킨다」가 「나를 불렀다」로 읽힌다 — 같은 기호는 한
- * 뜻이어야 한다.
+ * 이 화면에서 앰버(`--accent`)는 이미 세 뜻을 갖고 있다: **멘션**(`text-accent`,
+ * 나를 불렀다) · **미읽 경계**(`bg-accent` 1px 규칙) · **앵커 착지**
+ * (`bg-accent-soft`, 방금 여기로 왔다). 인용은 그 셋과 관계없는 「참조」이므로 같은
+ * 색을 쓰면 「저 글을 가리킨다」가 「나를 불렀다」로 읽힌다.
  *
- * 1차에서는 정지 상태는 이미 중성(`--line-strong`)이었지만 **hover가
- * `border-accent`로 넘어갔다.** 지적된 오독은 정지 상태가 아니라 그 hover에서
- * 실제로 일어난다: 마우스를 얹은 순간 인용이 멘션의 색이 된다. 지금은 hover도
- * 중성 위계 안에서만 움직인다(레일 `--line-strong` → `--ink`, 배경 한 단).
+ * **실측(2026-08-05): 정지 상태는 처음부터 중성이었다.** `f9bc5ecd`의 레일은
+ * `border-line-strong`(중성 회색)이고 앰버가 아니다 — 값은 `gate-quote`가 매 런마다
+ * `[color]`로 찍는다(여기 적으면 팔레트 재조정에 낡는다). 위반은 **hover 하나**였다:
+ * `hover:border-accent`가 마우스를 얹은 순간 인용을 멘션의 색으로 바꿨다.
+ * 그래서 고친 것도 그 하나다: hover가 중성 위계 안에서만 움직인다
+ * (레일 `--line-strong` → `--ink`, 배경은 하우스 hover 패턴 `--surface-hover`).
+ *
+ * **배경 한 단(`--surface-raised`)은 넣었다가 되돌렸다.** 그것은 「정지 레일이
+ * 앰버다」라는 전제 위의 처방이었고 그 전제가 실측에서 거짓이었다. 게다가 이 파일이
+ * 지키려는 것과 반대로 작동한다: 코어가 2줄로 자르는 이유가 「인용 블록이 자기를
+ * 인용한 메시지보다 높으면 원본을 다시 올린 것으로 읽힌다」인데, 폭을 꽉 채운 고도
+ * 있는 띠는 인용의 무게를 **올린다**. 실재하지 않은 결함을 고치는 것도 오염이다.
  *
  * `focus-visible`의 accent 링은 **남는다.** 그것은 색으로 뜻을 말하는 것이 아니라
  * 「포커스가 여기 있다」를 말하는 하우스 패턴이고(SKILL §6), 이 앱의 모든 컨트롤이
  * 같은 링을 쓴다 — 인용만 다른 링을 쓰면 그게 새로운 오독이다.
- *
- * 배경 한 단(`--surface-raised`)은 레일과 함께 「이건 블록이다」를 말한다. 행 배경
- * 틴트가 아니다(§9가 신원에 예약한 장치) — 중성 표면의 고도 한 칸이다.
  */
 const RAIL =
-  "flex gap-1 rounded-sm border-l-2 border-line-strong bg-surface-raised pl-2 pr-2 py-1 text-left text-meta text-ink-muted";
+  "flex gap-1 border-l-2 border-line-strong pl-2 text-left text-meta text-ink-muted";
 
 /**
  * 본류의 인용 블록. 누르면 원본으로 점프한다.
@@ -191,13 +197,9 @@ export function QuoteBlock({
     "data-kind": block.kind,
     "data-target-id": block.targetId.toLowerCase(),
   };
-  // H-1 — 「이 화면에 없다」는 정보가 아니라 정보의 부재다. 고도를 가져가지 않는다:
-  // 배경이 있으면 옆의 「내용을 아는」 블록과 같은 층에 서고, 그러면 부재가 내용처럼
-  // 보인다.
-  const tone = block.kind === "unresolved" ? "bg-transparent" : "";
   if (!onJump) {
     return (
-      <div {...shared} className={cn(RAIL, tone, "mb-1")}>
+      <div {...shared} className={cn(RAIL, "mb-1")}>
         <QuoteContent block={block} directory={directory} />
       </div>
     );
@@ -214,10 +216,9 @@ export function QuoteBlock({
       onClick={() => onJump(block.targetId, block.targetSeq)}
       className={cn(
         RAIL,
-        tone,
         // hover도 중성이다 (B-1). `hover:bg-surface-hover`는 이 앱의 하우스 hover
         // 패턴이고, 레일은 앰버로 가는 대신 잉크 쪽으로 한 단 올라간다.
-        "mb-1 w-full hover:border-ink hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        "mb-1 w-full rounded-sm hover:border-ink hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       )}
     >
       <QuoteContent block={block} directory={directory} />
