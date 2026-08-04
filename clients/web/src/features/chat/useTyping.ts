@@ -15,7 +15,11 @@ import {
   type TypingSendState,
 } from "@momo/core/features/chat/typing";
 import type { RealtimeHandle } from "@momo/core/lib/realtimeEvents";
-import { recordTyping, rememberTypingThreshold } from "./typingStore";
+import {
+  recordTyping,
+  rememberTypingThreshold,
+  resetTyping,
+} from "./typingStore";
 
 // =============================================================================
 // 「작성 중」 송·수신 배선 (ADR-0149 · goal B3 W2).
@@ -47,6 +51,18 @@ export function useTypingReceive(
       onTyping: (frame) => recordTyping(frame),
     });
   }, [realtime, workspaceId, channelId]);
+
+  // 다른 워크스페이스(로그아웃·전환)는 아무것도 물려받지 않는다. 명부는 모듈 상태이고
+  // 앞 워크스페이스의 채널 id로 들어온 신호가 새 워크스페이스의 채널 id와 맞아떨어질
+  // 이유는 없지만, **배선되지 않은 teardown은 teardown이 아니다**
+  // (design-review PR 1059 N-3). `AgentWorkingRail`이 `resetAgentWorking`을 같은
+  // 모양으로 부르는 그 자리와 대칭이다.
+  //
+  // 6초 만료가 어차피 쓸어 가므로 영향은 작다 — 그래서 이것은 정확성 수리가 아니라
+  // 「독스트링이 약속한 것을 코드가 지키게」 하는 수리다.
+  useEffect(() => {
+    return () => resetTyping();
+  }, [workspaceId]);
 }
 
 export interface TypingSender {

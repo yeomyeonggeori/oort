@@ -156,7 +156,12 @@ function AgentActivityBar({
 
   return (
     <ul
-      className="flex flex-col gap-1 px-4 pb-2"
+      // `px-6`은 위 두 줄(힌트·작성 중)과 같은 값이다. 이 줄은 원래 `px-4`였고 그때는
+      // 「두 줄 사이의 우연한 4px」이었는데, 「작성 중」이 그 사이에 끼면서 스택이
+      // 왼쪽 모서리를 두 개 갖게 됐다 — 입력창 아래 12px 회색 3행이 서로 다른
+      // 세로선에 서는 모양이다 (design-review PR 1059 H-3). 정답은 이 파일이 힌트
+      // 줄에 이미 적어 뒀다: 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px.
+      className="flex flex-col gap-1 px-6 pb-2"
       // The offline sentence is a real list item below, so it is announced in
       // reading order rather than glued onto the list's name and read twice.
       aria-label={summary}

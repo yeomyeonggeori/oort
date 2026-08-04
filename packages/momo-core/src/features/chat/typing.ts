@@ -229,10 +229,32 @@ export function typingGrantFrom(wire: {
 // 수신 — 스스로 잊는 명부
 // ---------------------------------------------------------------------------
 
-/** 한 사람이 한 채널에서 `expiresAtMs`까지 작성 중이다. */
+/**
+ * 한 사람이 한 채널에서 `expiresAtMs`까지 작성 중이다.
+ *
+ * **시각이 두 개인 것이 H-1의 수리다.** 처음에는 `sentAtMs` 하나로 「언제부터 치고
+ * 있나」와 「가장 최근 발행이 언제인가」를 겸하려 했는데, 그 둘은 재발행이 일어나는
+ * 순간 갈라진다: 재발행마다 `sentAtMs`가 갱신되므로 그 값으로 정렬하면 순서가
+ * **가장 최근에 발행한 사람 순**이 된다. 두 사람이 3초 케이던스로 위상차를 두고
+ * 치면 이름 순서가 1.5초마다 뒤집힌다 (design-review PR 1059 H-1, 코어 시뮬레이션으로
+ * 재현 확인).
+ *
+ * 그 줄은 사라질 때가 아니라 **살아 있는 동안** 흔들리고, 12px 회색 한 줄이 1.5초마다
+ * 자기 텍스트를 다시 쓰면 「새 사람이 들어왔나」로 읽혀 눈이 되돌아온다 — 주변시로
+ * 흘려보내야 할 신호가 정반대로 작동한다.
+ */
 export interface TypingSignal {
   channelId: string;
   memberId: string;
+  /**
+   * 이 사람이 **이번 버스트에서 처음** 치기 시작한 시각. 재발행이 갱신하지 않는다.
+   * 이름 순서의 유일한 근거다.
+   *
+   * 만료로 명부에서 빠진 뒤 다시 치면 새 엔트리이므로 새 시작 시각을 받는다 — 「잠깐
+   * 멈췄다 다시 시작」은 실제로 새 버스트이므로 그게 맞다.
+   */
+  startedAtMs: number;
+  /** 가장 최근 발행 시각. 진단용이며 **정렬에 쓰지 않는다**. */
   sentAtMs: number;
   expiresAtMs: number;
 }
@@ -255,9 +277,13 @@ export function mergeTypingSignal(
 ): TypingSignal[] {
   const index = list.findIndex((entry) => sameTypist(entry, signal));
   if (index < 0) return [...list, signal];
-  if (list[index].expiresAtMs >= signal.expiresAtMs) return list;
+  const existing = list[index];
+  if (existing.expiresAtMs >= signal.expiresAtMs) return list;
   const next = [...list];
-  next[index] = signal;
+  // **시작 시각은 살아남는다** (H-1). 엔트리를 통째로 갈아 끼우면 재발행이 시작
+  // 시각을 덮어쓰고, 그 값으로 정렬하는 이름 순서가 1.5초마다 뒤집힌다. 갱신되는
+  // 것은 만료와 최근 발행 시각뿐이다.
+  next[index] = { ...signal, startedAtMs: existing.startedAtMs };
   return next;
 }
 
@@ -304,7 +330,13 @@ export function liveTypists(
         !uuidEq(signal.memberId, options.myMemberId) &&
         options.isEligible(signal.memberId)
     )
-    .sort((a, b) => a.sentAtMs - b.sentAtMs)
+    // 시작 시각으로 정렬한다 — 재발행이 갱신하지 않는 유일한 시각이다(H-1).
+    // 동시에 시작한 두 사람은 member id로 갈라, 프레임 도착 순서에 따라 순서가
+    // 달라지지 않게 한다(같은 tick에 두 신호가 오면 배열 순서는 우연이다).
+    .sort(
+      (a, b) =>
+        a.startedAtMs - b.startedAtMs || (a.memberId < b.memberId ? -1 : 1)
+    )
     .map((signal) => signal.memberId);
 }
 
@@ -318,8 +350,13 @@ function nameLimit(threshold: number): number {
 }
 
 /**
- * 컴포저 위 한 줄. 아무도 치고 있지 않으면 null이고, 그때 화면에는 아무 줄도 없다
- * (자리를 비워 두지 않는다 — 「아무도 작성 중이 아님」은 문장이 아니다).
+ * 컴포저 하단의 한 줄 (입력창 **아래**, 작업 중 줄 바로 위). 1차 독스트링은 이것을
+ * 「컴포저 위」라고 적었는데 렌더는 아래였다 — 문서와 화면이 다른 배치를 말하고
+ * 있었다 (design-review PR 1059 M-4).
+ *
+ * 아무도 치고 있지 않으면 null이다. 다만 **자리는 화면이 예약한다**: 문장이 없다는
+ * 것과 그 자리가 없다는 것은 다르고, 후자는 남의 키 입력이 내 캐럿을 밀어 올리는
+ * 것을 뜻한다 (H-2, `TypingLine.tsx`).
  *
  * 뭉치는 규칙은 서버가 정한 임계를 그대로 탄다. 서버는 절대 뭉치지 않는다(상태가
  * 없으므로 몇 명인지 모른다). 사람마다 신호 하나를 발행하고, 세는 것은 여기다.
@@ -332,6 +369,41 @@ export function typingSentence(
   const limit = nameLimit(threshold);
   if (names.length > limit) return `${names.length}명이 작성 중…`;
   return `${names.slice(0, limit).join(", ")}님이 작성 중…`;
+}
+
+/**
+ * 문장을 **조각**으로. 이름과 나머지를 화면에서 다르게 칠할 수 있게 한다
+ * (design-review PR 1059 M-1).
+ *
+ * 1차에서는 문장 전체가 한 문자열이었고, 그래서 「이름 색」이라는 대조축을 문서로만
+ * 주장하고 마크업에는 두지 않았다. 그 축이 없으면 **작업 중 줄이 없을 때** — 즉
+ * 에이전트 턴이 없는 대부분의 시각 — 사람 줄이 가진 단서는 「작성」과 「작업」을 가르는
+ * 한 음절과 「님」뿐이 된다. 나란히 두는 배치만으로는 학습이 일어나지 않는다.
+ *
+ * 집계 문구(「3명이 작성 중…」)에는 이름이 없으므로 조각도 없다 — 그 문장은 통째로
+ * 부수적 정보이고, 강조할 이름이 애초에 없다.
+ */
+export type TypingSegment =
+  | { kind: "name"; text: string }
+  | { kind: "plain"; text: string };
+
+export function typingSegments(
+  names: string[],
+  threshold: number = TYPING_AGGREGATE_THRESHOLD_FALLBACK
+): TypingSegment[] {
+  if (names.length === 0) return [];
+  const limit = nameLimit(threshold);
+  if (names.length > limit) {
+    return [{ kind: "plain", text: `${names.length}명이 작성 중…` }];
+  }
+  const kept = names.slice(0, limit);
+  const segments: TypingSegment[] = [];
+  kept.forEach((name, index) => {
+    if (index > 0) segments.push({ kind: "plain", text: ", " });
+    segments.push({ kind: "name", text: name });
+  });
+  segments.push({ kind: "plain", text: "님이 작성 중…" });
+  return segments;
 }
 
 /**

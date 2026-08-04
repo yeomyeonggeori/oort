@@ -55,6 +55,10 @@ export function recordTyping(frame: TypingFrame, nowMs = Date.now()): void {
   const next = mergeTypingSignal(signals as TypingSignal[], {
     channelId: frame.payload.channel_id,
     memberId: frame.payload.member_id,
+    // 새 엔트리일 때만 시작 시각으로 쓰인다 — 이미 있는 사람이면 `mergeTypingSignal`이
+    // 기존 시작 시각을 지킨다(H-1). 프레임에는 「언제부터」가 없고 「언제 발행했나」만
+    // 있으므로(`frame.ts`), 첫 프레임의 발행 시각이 우리가 아는 가장 이른 시각이다.
+    startedAtMs: frame.ts,
     sentAtMs: frame.ts,
     expiresAtMs: frame.payload.expires_at,
   });

@@ -15,6 +15,7 @@ import {
   renewMargin,
   typingGrantFrom,
   typingLabel,
+  typingSegments,
   typingSentence,
   withTypingGrant,
   withTypingPublished,
@@ -53,13 +54,30 @@ function grant(over: Partial<ReturnType<typeof typingGrantFrom>> = {}) {
 }
 
 function signal(over: Partial<TypingSignal> = {}): TypingSignal {
+  const startedAtMs = over.startedAtMs ?? over.sentAtMs ?? NOW;
   return {
     channelId: CH,
     memberId: DOHYUN,
-    sentAtMs: NOW,
+    startedAtMs,
+    sentAtMs: startedAtMs,
     expiresAtMs: NOW + TTL,
     ...over,
   };
+}
+
+/** 재발행 한 건. 서버가 3초마다 새 만료로 같은 신호를 다시 실어 보내는 그 모양. */
+function republish(
+  list: TypingSignal[],
+  memberId: string,
+  atMs: number
+): TypingSignal[] {
+  return mergeTypingSignal(list, {
+    channelId: CH,
+    memberId,
+    startedAtMs: atMs,
+    sentAtMs: atMs,
+    expiresAtMs: atMs + TTL,
+  });
 }
 
 const humansOnly = (memberId: string) => memberId.toLowerCase() !== AGENT;
@@ -312,12 +330,86 @@ describe("liveTypists", () => {
 
   it("orders by when each person started, not by arrival", () => {
     const list = [
-      signal({ memberId: MINSEO, sentAtMs: NOW + 500 }),
-      signal({ memberId: DOHYUN, sentAtMs: NOW }),
+      signal({ memberId: MINSEO, startedAtMs: NOW + 500 }),
+      signal({ memberId: DOHYUN, startedAtMs: NOW }),
     ];
     expect(
       liveTypists(list, { channelId: CH, nowMs: NOW + 600, isEligible: humansOnly })
     ).toEqual([DOHYUN, MINSEO]);
+  });
+
+  /**
+   * **design-review #1059 H-1 회귀.** 위 테스트는 이 불변식에 이름을 붙여 놓고
+   * 사람당 발행 1회만 다뤘고, 그래서 **재발행 경로가 비어 있었다** — 코드가 자기
+   * 테스트가 이름 붙인 불변식을 깨는데 테스트는 그것을 못 봤다.
+   *
+   * 재발행은 3초마다 온다. 정렬 키가 갱신되면 순서는 「가장 최근에 발행한 사람 순」이
+   * 되고, 두 사람이 위상차를 두고 치면 이름이 1.5초마다 뒤집힌다. 리뷰어가 코어를
+   * 그대로 돌려 재현했고, 이 테스트가 그 시뮬레이션을 그대로 옮긴 것이다.
+   */
+  it("holds the name order across republishes (H-1)", () => {
+    let list: TypingSignal[] = [];
+    const order: string[] = [];
+    // 이도현은 t=0,3,6…  김민서는 t=1.5,4.5,7.5… (위상차 1.5초)
+    for (const t of [0, 1_500, 3_000, 4_500, 6_000, 7_500]) {
+      const who = t % 3_000 === 0 ? DOHYUN : MINSEO;
+      list = republish(list, who, NOW + t);
+      const live = liveTypists(list, {
+        channelId: CH,
+        nowMs: NOW + t,
+        isEligible: humansOnly,
+      });
+      if (live.length === 2) order.push(live.join(">"));
+    }
+    // 둘 다 살아 있는 매 시점에서 순서가 **같아야** 한다. 1차에서는 이 배열이
+    // ["도현>민서", "민서>도현", "도현>민서", …] 로 번갈아 나왔다.
+    expect(order.length).toBeGreaterThan(2);
+    expect(new Set(order).size).toBe(1);
+    expect(order[0]).toBe(`${DOHYUN}>${MINSEO}`);
+  });
+
+  it("keeps the first start time and moves only the expiry", () => {
+    let list = republish([], DOHYUN, NOW);
+    list = republish(list, DOHYUN, NOW + 3_000);
+    expect(list).toHaveLength(1);
+    expect(list[0].startedAtMs).toBe(NOW);
+    expect(list[0].sentAtMs).toBe(NOW + 3_000);
+    expect(list[0].expiresAtMs).toBe(NOW + 3_000 + TTL);
+  });
+
+  /**
+   * 멈췄다 다시 시작하는 것은 **실제로 새 버스트**다. 만료로 명부에서 빠진 뒤의
+   * 재등장은 새 엔트리이므로 새 시작 시각을 받아야 하고, 그러면 먼저 치고 있던
+   * 사람 뒤에 선다.
+   */
+  it("gives a fresh start time to someone who stopped and came back", () => {
+    let list = republish([], DOHYUN, NOW);
+    list = republish(list, MINSEO, NOW + 1_000);
+    // 이도현이 멈춘다 -> 만료 -> 청소
+    list = pruneTypingSignals(list, NOW + TTL + 1);
+    expect(list.map((s) => s.memberId)).toEqual([MINSEO]);
+    // 다시 치기 시작한다: 이제 김민서 뒤다.
+    list = republish(list, DOHYUN, NOW + TTL + 2);
+    expect(
+      liveTypists(list, {
+        channelId: CH,
+        nowMs: NOW + TTL + 2,
+        isEligible: humansOnly,
+      })
+    ).toEqual([MINSEO, DOHYUN]);
+  });
+
+  it("breaks a start-time tie deterministically, not by arrival order", () => {
+    // 같은 tick에 두 신호가 오면 배열 순서는 우연이다. 그 우연이 화면에 나오면
+    // 같은 상태가 리로드마다 다르게 읽힌다.
+    const a = [
+      signal({ memberId: MINSEO, startedAtMs: NOW }),
+      signal({ memberId: DOHYUN, startedAtMs: NOW }),
+    ];
+    const b = [a[1], a[0]];
+    const read = (list: TypingSignal[]) =>
+      liveTypists(list, { channelId: CH, nowMs: NOW, isEligible: humansOnly });
+    expect(read(a)).toEqual(read(b));
   });
 
   it("folds the mixed case the wire sends", () => {
@@ -391,6 +483,39 @@ describe("typingSentence", () => {
 
   it("mirrors the server's threshold, and says so where it can drift", () => {
     expect(TYPING_AGGREGATE_THRESHOLD_FALLBACK).toBe(3);
+  });
+
+  it("hands the names out as their own segments (M-1)", () => {
+    expect(typingSegments(["이도현"])).toEqual([
+      { kind: "name", text: "이도현" },
+      { kind: "plain", text: "님이 작성 중…" },
+    ]);
+    expect(typingSegments(["이도현", "김민서"])).toEqual([
+      { kind: "name", text: "이도현" },
+      { kind: "plain", text: ", " },
+      { kind: "name", text: "김민서" },
+      { kind: "plain", text: "님이 작성 중…" },
+    ]);
+  });
+
+  it("has no name segment in the collapsed form, because it names nobody", () => {
+    expect(typingSegments(["a", "b", "c"])).toEqual([
+      { kind: "plain", text: "3명이 작성 중…" },
+    ]);
+    expect(typingSegments([])).toEqual([]);
+  });
+
+  /** 조각을 이어 붙이면 문장과 **정확히** 같아야 한다. 두 경로가 갈리면 화면과
+   *  보조기술이 다른 문장을 말한다. */
+  it("concatenates back into exactly the sentence", () => {
+    for (const names of [["이도현"], ["이도현", "김민서"], ["a", "b", "c"], []]) {
+      for (const threshold of [2, 3, 4]) {
+        const joined = typingSegments(names, threshold)
+          .map((segment) => segment.text)
+          .join("");
+        expect(joined).toBe(typingSentence(names, threshold) ?? "");
+      }
+    }
   });
 
   it("strips the ellipsis for assistive tech", () => {

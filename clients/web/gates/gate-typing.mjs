@@ -20,6 +20,14 @@
 //                      사라진다.
 //   6. 자기 자신 금지  내 발행이 레일로 돌아와도 내 화면에는 뜨지 않는다.
 //   7. 뭉치기          임계는 **grant 응답 값**이다. 3명이면 「3명이 작성 중」.
+//   8. 자리 예약       줄이 뜨고 사라져도 **캐럿과 전송 버튼이 움직이지 않는다.**
+//                      1차는 자리를 비워 두지 않았고(의도라고 적어 뒀다), 리뷰가
+//                      26px 이동을 실측해 반송했다 — 남의 키 입력이 내 입력창을 밀면
+//                      안 되고, 폰에서는 엄지 아래의 전송 버튼이 움직인다.
+//                      지금은 문장이 없어도 같은 높이의 빈 자리가 남고, 이 게이트는
+//                      그 변위를 **픽셀로** 잰다.
+//   9. 이름 표지       사람 이름은 `--ink`, 나머지는 muted. 에이전트 줄의 `--agent`와
+//                      대조되는 축이 문서가 아니라 마크업에 있다.
 //
 // **목은 같은 tick에 답하지 않는다** (#839 교훈). grant는 180ms, 발행은 60ms 늦게
 // 답한다: 같은 tick에 답하는 목은 「기다렸다」를 아무것도 증명하지 못한다.
@@ -37,11 +45,14 @@
 //     expected failure: "the grant was re-fetched"
 //   TYPING_GATE_PROVE_RED_LIVE=1 npm run gate:typing
 //     expected failure: "the 작성 중 line sits inside a live region"
+//   TYPING_GATE_PROVE_RED_SHIFT=1 npm run gate:typing
+//     expected failure: "the composer moved when the 작성 중 line appeared"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. AGENT는 명부에서 에이전트를 사람으로
 // 바꾸고, SELF는 내 id 대신 남의 id로 발행하고, TTL은 기다리는 동안 계속 재발행하고,
-// STOP은 멈춰야 할 구간에도 계속 타이핑하고, GRANT는 grant TTL을 1초로 줄이고, LIVE는
-// DOM에서 그 줄을 live 영역 안으로 넣는다. 제품 소스 줄을 지우거나 단언을 빼라고
+// STOP은 멈춰야 할 구간에도 계속 타이핑하고, GRANT는 grant TTL을 12초로 줄이고, LIVE는
+// DOM에서 그 줄을 live 영역 안으로 넣고, SHIFT는 예약 자리를 DOM에서 없앤다(1차의
+// 모양으로 되돌린다). 제품 소스 줄을 지우거나 단언을 빼라고
 // 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
@@ -70,6 +81,7 @@ const proveRedTtl = process.env.TYPING_GATE_PROVE_RED_TTL === "1";
 const proveRedStop = process.env.TYPING_GATE_PROVE_RED_STOP === "1";
 const proveRedGrant = process.env.TYPING_GATE_PROVE_RED_GRANT === "1";
 const proveRedLive = process.env.TYPING_GATE_PROVE_RED_LIVE === "1";
+const proveRedShift = process.env.TYPING_GATE_PROVE_RED_SHIFT === "1";
 
 // 목의 응답 지연 (#839 교훈). 같은 tick에 답하는 목은 아무것도 증명하지 않는다.
 const GRANT_DELAY_MS = 180;
@@ -474,6 +486,116 @@ async function exercise(browser) {
     );
   }
 
+  // ---- 8. 자리 예약: 남의 키가 내 캐럿을 밀지 않는다 (리뷰 H-2) --------------
+  //
+  // 「입력창과 전송 버튼이 그 자리에 있는가」는 의견이 아니라 좌표다. 아무도 치고
+  // 있지 않은 상태의 좌표를 재고, 두 명이 치기 시작한 뒤 다시 재고, 만료로 사라진 뒤
+  // 또 잰다. 세 값이 같아야 한다.
+  const composerBox = async () => {
+    const input = await page.getByTestId("composer-input").boundingBox();
+    const send = await page.getByTestId("composer-send").boundingBox();
+    return { inputY: Math.round(input?.y ?? -1), sendY: Math.round(send?.y ?? -1) };
+  };
+  if (proveRedShift) {
+    // red seam: 예약 자리의 높이를 0으로 만든다 = 1차의 모양(자리를 비워 두지 않음).
+    //
+    // **노드를 지우지 않는다.** 첫 시도가 `node.remove()` + MutationObserver였는데,
+    // 그것은 red가 아니라 앱을 깼다: 그 `<p>`는 React가 들고 있는 노드라, 밖에서
+    // 없애면 예약↔실문장 전환 커밋이 자기 노드를 못 찾고 그 뒤로 줄이 아예 나타나지
+    // 않았다. 단언을 증명하는 대신 다른 것을 부순 셈이다.
+    //
+    // CSS 규칙은 React가 건드리지 않고, `-reserved` 속성만 겨냥하므로 같은 노드가
+    // 실문장으로 바뀌는 순간 규칙이 저절로 멈춘다 — 1차의 동작을 정확히 재현한다.
+    await page.addStyleTag({
+      content: '[data-testid="composer-typing-reserved"]{display:none!important}',
+    });
+  }
+  const beforeTyping = await composerBox();
+  if (beforeTyping.inputY < 0 || beforeTyping.sendY < 0) {
+    throw new Error("컴포저를 측정할 수 없다");
+  }
+  // 예약 자리가 실제로 있는지도 확인한다: 좌표가 같은데 자리가 없으면 그건 우연이다.
+  if (
+    !proveRedShift &&
+    (await page.getByTestId("composer-typing-reserved").count()) !== 1
+  ) {
+    throw new Error(
+      "빈 자리가 예약돼 있지 않다: 문장이 없을 때도 그 줄의 높이는 남아야 한다 (리뷰 H-2)"
+    );
+  }
+  await publishTyping(page, { memberId: dohyunId, ttlMs: 2_500 });
+  await publishTyping(page, { memberId: minseoId, ttlMs: 2_500 });
+  await typingLine(page).waitFor({ timeout: 5_000 });
+  const duringTyping = await composerBox();
+  console.log(
+    `[shift] 입력창 y ${beforeTyping.inputY} -> ${duringTyping.inputY} · ` +
+      `전송 y ${beforeTyping.sendY} -> ${duringTyping.sendY}`
+  );
+  if (
+    duringTyping.inputY !== beforeTyping.inputY ||
+    duringTyping.sendY !== beforeTyping.sendY
+  ) {
+    throw new Error(
+      `the composer moved when the 작성 중 line appeared: 입력창 ${beforeTyping.inputY}->${duringTyping.inputY}, ` +
+        `전송 ${beforeTyping.sendY}->${duringTyping.sendY}. 남의 키 입력이 내 캐럿과 ` +
+        "엄지 아래의 전송 버튼을 밀어서는 안 된다 (리뷰 H-2)"
+    );
+  }
+  // 사라질 때도 같다. TTL로 스스로 사라지므로 여기서 기다리는 것이 곧 그 경로다.
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="composer-typing"]') === null,
+    undefined,
+    { timeout: 8_000 }
+  );
+  const afterTyping = await composerBox();
+  if (
+    afterTyping.inputY !== beforeTyping.inputY ||
+    afterTyping.sendY !== beforeTyping.sendY
+  ) {
+    throw new Error(
+      `the composer moved when the 작성 중 line expired: 입력창 ${beforeTyping.inputY}->${afterTyping.inputY}`
+    );
+  }
+
+  // ---- 9. 이름에 자기 표지가 있다 (리뷰 M-1) ---------------------------------
+  // 짧은 TTL을 쓰고 끝에서 비워 둔다: 다음 절이 「에이전트는 안 그려진다」를 재므로,
+  // 사람 신호가 남아 있으면 그 단언이 남의 신호를 보고 실패한다.
+  await publishTyping(page, { memberId: dohyunId, ttlMs: GATE_TTL_MS });
+  await typingLine(page).waitFor({ timeout: 5_000 });
+  const nameTone = await page.evaluate(() => {
+    const line = document.querySelector('[data-testid="composer-typing"]');
+    if (line === null) return null;
+    const spans = Array.from(line.querySelectorAll("span"));
+    const withText = (needle) =>
+      spans.find((node) => (node.textContent ?? "").includes(needle));
+    const name = withText("이도현");
+    const tail = withText("작성 중");
+    if (!name || !tail) return null;
+    return {
+      name: getComputedStyle(name).color,
+      tail: getComputedStyle(tail).color,
+    };
+  });
+  if (nameTone === null) {
+    throw new Error(
+      "이름과 나머지가 각자의 span에 있지 않다: 「이름 색」 축이 문서에만 있으면 " +
+        "작업 중 줄이 없을 때 사람 줄에는 표지가 남지 않는다 (리뷰 M-1)"
+    );
+  }
+  console.log(`[tone] 이름 ${nameTone.name} · 나머지 ${nameTone.tail}`);
+  if (nameTone.name === nameTone.tail) {
+    throw new Error(
+      `이름과 나머지가 같은 색이다 (${nameTone.name}); 표가 주장하는 「이름 색」 축이 ` +
+        "마크업에 없다 (리뷰 M-1)"
+    );
+  }
+  // 다음 절로 깨끗한 화면을 넘긴다.
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="composer-typing"]') === null,
+    undefined,
+    { timeout: 8_000 }
+  );
+
   // ---- 1. 에이전트는 작성 중이 아니다 ---------------------------------------
   await publishTyping(page, { memberId: agentId, ttlMs: 4_000 });
   await wait(300);
@@ -522,6 +644,41 @@ async function exercise(browser) {
   if (order.join(",") !== "composer-typing,composer-working") {
     throw new Error(
       `사람 위, 에이전트 아래여야 한다: read ${JSON.stringify(order)}`
+    );
+  }
+
+  // ---- 1d. 메타 3행은 왼쪽 모서리를 하나만 갖는다 (리뷰 H-3) -----------------
+  //
+  // 힌트·작성 중·작업 중은 입력창 아래 12px 회색 3행이다. 세 줄이 서로 다른 세로선에
+  // 서면 그것이 곧 「스택이 아니라 우연히 쌓인 줄들」로 읽힌다. 정답(폼 `p-3` +
+  // 텍스트에어리어 `px-3` = 24px)은 이 컴포저가 힌트 줄에 이미 적어 뒀다.
+  const edges = await page.evaluate(() => {
+    const read = (testid) => {
+      const node = document.querySelector(`[data-testid="${testid}"]`);
+      if (node === null) return null;
+      const box = node.getBoundingClientRect();
+      return Math.round(box.left + parseFloat(getComputedStyle(node).paddingLeft));
+    };
+    return {
+      hint: read("composer-hint"),
+      typing: read("composer-typing"),
+      working: read("composer-working"),
+    };
+  });
+  console.log(
+    `[edge] 힌트 ${edges.hint} · 작성 중 ${edges.typing} · 작업 중 ${edges.working}`
+  );
+  const present = Object.entries(edges).filter(([, x]) => x !== null);
+  if (present.length < 3) {
+    throw new Error(
+      `메타 3행을 모두 측정하지 못했다: ${JSON.stringify(edges)}`
+    );
+  }
+  const distinct = new Set(present.map(([, x]) => x));
+  if (distinct.size !== 1) {
+    throw new Error(
+      `메타 스택의 왼쪽 모서리가 ${distinct.size}개다 (${JSON.stringify(edges)}); ` +
+        "입력창 아래 3행은 한 세로선에 서야 한다 (리뷰 H-3)"
     );
   }
 
