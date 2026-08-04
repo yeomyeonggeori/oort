@@ -197,9 +197,10 @@ pub use run::{
     CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus, RunTrigger,
 };
 pub use status::{
-    agent_partial_payload, agent_status_channel, opening_agent_status_payload,
-    progress_agent_status_payload, terminal_agent_status_payload, terminal_phase, AgentPhase,
-    AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE, AGENT_STATUS_EVENT_VERSION,
+    agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
+    opening_agent_status_payload, progress_agent_status_payload, terminal_agent_status_payload,
+    terminal_phase, AgentPhase, AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE,
+    AGENT_STATUS_EVENT_VERSION,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

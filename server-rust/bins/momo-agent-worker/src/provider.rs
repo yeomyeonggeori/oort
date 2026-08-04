@@ -325,6 +325,31 @@ impl ProviderError {
     }
 }
 
+/// Where a streamed answer's slices go **while the turn is still running**
+/// (goal SRV-B3e).
+///
+/// Deliberately **synchronous and infallible**. The implementations that call it
+/// are inside a byte-fed SSE loop, and anything that could block or fail there
+/// would put the provider read at the mercy of the database: a slow `INSERT`
+/// would stall the socket, and a failed one would have to decide whether to
+/// abandon an answer that is arriving fine. So the sink's whole job is to hand
+/// the slice off — `momo-agent-worker`'s implementation pushes it onto an
+/// unbounded channel and returns — and every question about batching, ordering
+/// and failure belongs to whoever drains that channel.
+pub trait DeltaSink: Send + Sync {
+    /// One slice of assistant text, exactly as the provider emitted it. Never
+    /// the accumulated answer.
+    fn text_delta(&self, delta: &str);
+}
+
+/// The sink for every path that does not publish progress — non-streaming
+/// wires, retries whose partials were already sent, and every unit test.
+pub struct DiscardDeltas;
+
+impl DeltaSink for DiscardDeltas {
+    fn text_delta(&self, _delta: &str) {}
+}
+
 /// The seam the worker calls and the conformance tests replace.
 #[async_trait]
 pub trait ChatProvider: Send + Sync {
@@ -333,6 +358,28 @@ pub trait ChatProvider: Send + Sync {
         endpoint: &ProviderEndpoint,
         request: &ChatRequest,
     ) -> Result<ChatCompletion, ProviderError>;
+
+    /// The same turn, with somewhere to put the slices as they arrive.
+    ///
+    /// The default **ignores the sink and calls [`complete`](Self::complete)**,
+    /// which is the honest answer for a wire that does not stream: those
+    /// providers have no slices to report, and a default that pretended
+    /// otherwise (say, by emitting the whole answer as one delta at the end)
+    /// would put a "streaming" frame on the rail for a turn that never streamed.
+    ///
+    /// It is a defaulted method rather than a parameter on `complete` so that
+    /// adding progress could not churn every implementation and every test
+    /// harness in the workspace — only the one provider that actually has a
+    /// stream to report overrides it.
+    async fn complete_streaming(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
+        let _ = sink;
+        self.complete(endpoint, request).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,6 +565,30 @@ impl ChatProvider for WireRoutedProvider {
                 self.chat_completions.complete(endpoint, request).await
             }
             ProviderWire::Responses => self.responses.complete(endpoint, request).await,
+        }
+    }
+
+    /// Forwarded, not defaulted: the whole point of this router is that a real
+    /// turn and a test take the same branch, and a router that silently dropped
+    /// the sink would make the Responses wire look non-streaming in production
+    /// while its own suite streamed fine.
+    async fn complete_streaming(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
+        match endpoint.wire {
+            // `/chat/completions` is sent with `stream=false` here, so there is
+            // nothing to report slice by slice.
+            ProviderWire::ChatCompletions => {
+                self.chat_completions.complete(endpoint, request).await
+            }
+            ProviderWire::Responses => {
+                self.responses
+                    .complete_streaming(endpoint, request, sink)
+                    .await
+            }
         }
     }
 }
