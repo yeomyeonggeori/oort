@@ -371,6 +371,35 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
     expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
   });
 
+  it('작업 중이던 턴이 승인 대기로 바뀌면 그 칸을 내놓는다 (1R M4)', async () => {
+    // 처음부터 승인 대기인 턴은 앞 테스트가 잠근다. 이것은 **전이**다 — 그리고
+    // 실기에서 훨씬 흔한 쪽이다: 에이전트는 일하다가 멈춰 서서 사람을 부른다
+    // (momowebqa 의 에이전트는 매 턴을 `run_status=awaiting_approval` 로 끝낸다).
+    //
+    // 전이가 위험한 이유는 자리표시가 **이미 서 있기** 때문이다. 갱신을 놓치면
+    // 화면은 계속 "곧 답이 온다"고 말하는데 에이전트는 바로 그 사람을 기다린다 —
+    // 기다림의 방향이 뒤집힌 채 둘 다 멈춰 선다. 상태 판정을 렌더마다 다시 하지
+    // 않고 어딘가에 캐시하는 순간 생기는 결함이라, 코드가 아니라 전이로 잠근다.
+    await openConversation();
+    await act(async () => {
+      markAgentWorking(turn({headlines: ['빌드 확인 중']}));
+    });
+    await settle();
+    expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+
+    await act(async () => {
+      markAgentWorking(turn({state: 'awaiting_approval', headlines: []}));
+    });
+    await settle();
+
+    // 칸을 내놓는다.
+    expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
+    // 그리고 같은 화면이 **동시에** 옳은 말을 한다 — 사라지기만 하면 턴이 끝난
+    // 것처럼 읽힌다. 활동 줄이 무슨 일이 일어났는지 이어서 말해야 한다.
+    expect(screen.getByText(/승인을 기다립니다/)).toBeTruthy();
+    expect(screen.queryByText(/작업 중/)).toBeNull();
+  });
+
   it('승인 대기는 그 칸을 얻지 못한다 — 화면 어디에도 「작업 중」이 없다', async () => {
     await openConversation();
     await act(async () => {
