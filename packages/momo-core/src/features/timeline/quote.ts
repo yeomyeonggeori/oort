@@ -48,8 +48,16 @@ export const QUOTE_DELETED_TEXT = "삭제된 메시지";
  */
 export const QUOTE_NESTED_MARK = "인용 포함";
 
-/** 컴포저 칩과 행 액션이 쓰는 어휘. 스레드의 「답글」과 절대 겹치지 않는다. */
-export const QUOTE_ACTION_LABEL = "인용하기";
+/**
+ * 컴포저 칩과 행 액션이 쓰는 어휘. 스레드의 「답글」과 절대 겹치지 않는다.
+ *
+ * **「인용하기」가 아니라 「인용해서 답하기」다** (2026-08-05 양 클라 정본). 이 낱말은
+ * 메뉴에서 「답글 달기」 **바로 옆**에 서므로, 무엇을 하는지만 말하면 두 항목이 「답을
+ * 단다」로 똑같이 읽힌다. 갈리는 지점은 *답이 어디로 가는가*다 — 답글은 대화를
+ * 스레드로 치우고, 인용은 본류에 남기면서 맥락만 끌어온다(ADR-0148의 핵심 문장).
+ * 「해서 답하기」가 그 「본류에 남는다」를 낱말 안에 넣는다.
+ */
+export const QUOTE_ACTION_LABEL = "인용해서 답하기";
 export const QUOTE_CANCEL_LABEL = "인용 취소";
 export const QUOTE_JUMP_HINT = "원본으로 이동";
 

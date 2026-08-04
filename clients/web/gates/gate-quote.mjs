@@ -30,21 +30,47 @@
 //     expected failure: "the send carried no replyToId"
 //   QUOTE_GATE_PROVE_RED_PLACE=1 npm run gate:quote
 //     expected failure: "the quote block did not sit above the body"
+//   QUOTE_GATE_PROVE_RED_ACCENT=1 npm run gate:quote
+//     expected failure: "the quote rail is wearing the accent"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. REFETCH는 페이지에서 인용 대상 하나를
 // 직접 fetch하고(카운터 단언이 네트워크를 실제로 보고 있음을 증명), DELETED는 목이
 // tombstone에 본문을 실어 `state`를 살아 있는 값으로 보내고("원문은 화면에 없다"가
 // DOM을 읽고 있음을 증명), LIVE는 프레임에서 `reply_to_id`를 빼고, BINDING은 보내기
-// 전에 인용을 취소하고, PLACE는 DOM에서 블록을 본문 아래로 옮긴다. 제품 소스 줄을
+// 전에 인용을 취소하고, PLACE는 DOM에서 블록을 본문 아래로 옮기고, ACCENT는 레일을
+// 앰버로 칠한다. 제품 소스 줄을
 // 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 인용 액션의 낱말. **코어 소스에서 읽는다** — 게이트가 문자열을 다시 적으면 정본이
+ * 바뀌었을 때 게이트만 혼자 초록으로 남는다(「인용하기」 → 「인용해서 답하기」 교체가
+ * 정확히 그 사고를 만들 수 있었다).
+ *
+ * `import`가 아니라 정규식인 이유: 이 게이트는 node가 직접 도는 `.mjs`이고, 코어의
+ * `.ts`를 import하면 그 파일이 다시 import하는 확장자 없는 경로들을 node가 풀지
+ * 못한다. 상수 한 줄을 읽는 데 TS 로더를 끌어오는 것은 값에 비해 비싸다.
+ */
+function canonicalActionLabel(root) {
+  const source = readFileSync(
+    resolve(root, "../../packages/momo-core/src/features/timeline/quote.ts"),
+    "utf8"
+  );
+  const match = /export const QUOTE_ACTION_LABEL = "([^"]+)"/.exec(source);
+  if (!match) {
+    throw new Error(
+      "QUOTE_ACTION_LABEL을 코어에서 찾지 못했다: 게이트가 검사할 낱말의 정본이 사라졌다"
+    );
+  }
+  return match[1];
+}
 const port = Number(process.env.QUOTE_GATE_PORT || 5191);
 const origin = `http://127.0.0.1:${port}`;
 
@@ -54,11 +80,14 @@ const peerId = "00000000-0000-7000-8000-000000000102";
 const agentId = "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAA613";
 const channelId = "00000000-0000-7000-8000-000000000201";
 
+const QUOTE_ACTION_LABEL = canonicalActionLabel(webRoot);
+
 const proveRedRefetch = process.env.QUOTE_GATE_PROVE_RED_REFETCH === "1";
 const proveRedDeleted = process.env.QUOTE_GATE_PROVE_RED_DELETED === "1";
 const proveRedLive = process.env.QUOTE_GATE_PROVE_RED_LIVE === "1";
 const proveRedBinding = process.env.QUOTE_GATE_PROVE_RED_BINDING === "1";
 const proveRedPlace = process.env.QUOTE_GATE_PROVE_RED_PLACE === "1";
+const proveRedAccent = process.env.QUOTE_GATE_PROVE_RED_ACCENT === "1";
 
 // 인용 대상들. id는 소문자다 — 행이 `data-message-id`를 소문자로 내놓는다.
 const ORIGIN_MSG = "0199aaaa-0000-7000-8000-0000000000a1";
@@ -582,6 +611,72 @@ async function exercise(browser) {
     throw new Error("a quote of a quote must carry the 인용 포함 marker");
   }
 
+  // ---- 2b. 색이 뜻을 겹쳐 쓰지 않는다 (design-review B-1) --------------------
+  //
+  // 이 화면에서 앰버(`--accent`)는 이미 **멘션**(나를 불렀다)과 **미읽 경계**(여기부터
+  // 안 읽었다)를 뜻한다. 인용은 그 둘과 관계없는 「참조」이므로 같은 색을 쓰면
+  // 「가리킨다」가 「나를 불렀다」로 읽힌다. 정지 상태와 **hover 상태 둘 다** 잰다 —
+  // 1차의 실제 위반은 hover(`border-accent`)였고 정지 상태만 보면 그것을 못 잡는다.
+  const railColors = await page.evaluate((paintAccent) => {
+    // 토큰의 실제 계산값을 얻는 방법: 그 유틸리티를 입은 프로브를 한 번 만든다.
+    // 하드코딩한 hex와 비교하면 팔레트가 재조정될 때 이 단언만 조용히 낡는다.
+    const probe = document.createElement("div");
+    probe.className = "border-accent border-l-2";
+    document.body.append(probe);
+    const accent = getComputedStyle(probe).borderLeftColor;
+    probe.remove();
+
+    const blocks = document.querySelectorAll('[data-testid="quote-block"]');
+    if (paintAccent) {
+      // red seam: 드라이버가 레일을 앰버로 칠한다. 계산된 색을 **직접** 넣는 이유는
+      // `classList.add("border-accent")`가 확실하지 않기 때문이다 — 두 색 유틸리티는
+      // 특정도가 같아서 컴파일된 스타일시트의 순서가 승자를 정하고, 그 순서는 게이트가
+      // 통제하지 못한다. 첫 시도가 그래서 red가 되지 않았다.
+      for (const node of blocks) {
+        if (node instanceof HTMLElement) node.style.borderLeftColor = accent;
+      }
+    }
+    const block = blocks[0];
+    return {
+      accent,
+      rail: block === undefined ? null : getComputedStyle(block).borderLeftColor,
+    };
+  }, proveRedAccent);
+  if (railColors.rail === null) {
+    throw new Error("측정할 인용 블록이 없다");
+  }
+  if (railColors.rail === railColors.accent) {
+    throw new Error(
+      `the quote rail is wearing the accent (${railColors.rail}); 앰버는 이 화면에서 ` +
+        "멘션과 미읽 경계의 색이고, 인용은 참조라 같은 기호를 쓸 수 없다 (taste §4)"
+    );
+  }
+  await quoting.hover();
+  const hoverRail = await page.evaluate(() => {
+    const block = document.querySelector('[data-testid="quote-block"]');
+    return block === null ? null : getComputedStyle(block).borderLeftColor;
+  });
+  if (hoverRail === railColors.accent) {
+    throw new Error(
+      `the quote rail is wearing the accent on hover (${hoverRail}); 정지 상태만 중성인 ` +
+        "것으로는 부족하다 - 마우스를 얹은 순간 인용이 멘션의 색이 된다"
+    );
+  }
+  // 포커스 링은 예외이고, 그 예외가 의도임을 여기서 못박는다: accent 링은 「포커스가
+  // 여기 있다」를 말하는 하우스 패턴이고(SKILL §6) 이 앱의 모든 컨트롤이 같은 링을
+  // 쓴다. 인용만 다른 링을 쓰면 그게 새로운 오독이다.
+  const focusRing = await page.evaluate(() => {
+    const block = document.querySelector('[data-testid="quote-block"]');
+    if (!(block instanceof HTMLElement)) return null;
+    block.focus();
+    return getComputedStyle(block).outlineColor;
+  });
+  if (focusRing !== null && focusRing === railColors.rail) {
+    throw new Error(
+      "포커스 링이 레일과 같은 색이면 포커스가 어디 있는지 보이지 않는다"
+    );
+  }
+
   // ---- 3. 삭제 정직 ----------------------------------------------------------
   const quotesDeleted = rowLocator(page, QUOTES_DELETED_MSG);
   const deletedBlock = quotesDeleted.getByTestId("quote-block");
@@ -730,13 +825,22 @@ async function exercise(browser) {
   await openRowMenu(page, ORIGIN_MSG);
   const menu = page.getByTestId("message-action-menu");
   const menuText = (await menu.textContent()) ?? "";
-  if (!menuText.includes("답글 달기") || !menuText.includes("인용하기")) {
+  if (
+    !menuText.includes("답글 달기") ||
+    !menuText.includes(QUOTE_ACTION_LABEL)
+  ) {
     throw new Error(
       `the menu must offer both devices with different words, read "${menuText}"`
     );
   }
+  // 두 항목은 서로 다른 낱말이어야 하고, 그 다름이 *어디로 가는지*를 말해야 한다.
+  // 「인용하기」였을 때는 둘 다 「~하기/달기」로 끝나 메뉴에서 「답을 단다」로 똑같이
+  // 읽혔다. 지금은 인용 쪽만 「답하기」를 품고 있고, 답글 쪽은 「달기」다.
+  if (QUOTE_ACTION_LABEL === "답글 달기") {
+    throw new Error("the two devices must not share one label");
+  }
   if ((await menu.getByTestId("menu-quote").count()) !== 1) {
-    throw new Error("인용하기 is not its own menu item");
+    throw new Error(`${QUOTE_ACTION_LABEL} is not its own menu item`);
   }
   // 이미 답글인 행에서도 인용은 열려 있다 (규칙 1). 스레드 답글이 없는 이 채널에서는
   // `rootId`가 붙은 행을 목으로 만들 수 없으므로, 코어 단정(quote.test.ts)이 그
