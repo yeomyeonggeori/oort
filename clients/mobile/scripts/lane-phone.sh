@@ -202,8 +202,11 @@ cleanup() {
   if [ -n "$FLOW_PID" ] && kill -0 "$FLOW_PID" 2>/dev/null; then
     kill -TERM "$FLOW_PID" 2>/dev/null || true
     # Maestro's JVM leaves its iOS driver behind if it is only asked politely,
-    # and that driver holds the simulator against the next run.
-    pkill -f 'maestro-driver-iosUITests-Runner' 2>/dev/null || true
+    # and that driver holds the simulator against the next run. Matched on THIS
+    # lane's device id, which is in the runner's own path — an unscoped pattern
+    # would also kill a lane running on a different simulator, and this file's
+    # whole isolation story is that two lanes can coexist.
+    [ -n "${UDID:-}" ] && pkill -f "Devices/$UDID/.*maestro-driver-iosUITests-Runner" 2>/dev/null || true
   fi
   if [ -n "$METRO_PID" ]; then
     kill -TERM "-$METRO_PID" 2>/dev/null || kill -TERM "$METRO_PID" 2>/dev/null || true

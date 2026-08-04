@@ -21,9 +21,26 @@ name: ensure-signed-in
     commands:
       - tapOn:
           id: "server-url-input"
+      # `eraseText` here and NOT in 00-login.yaml, and the asymmetry is the
+      # point: 00-login launches with `clearState: true`, so its address field is
+      # empty by construction. This subflow is reached with storage INTACT — a
+      # session that expired, or a flow run on its own against a stack whose
+      # database was replaced under it — and the connect screen prefills the
+      # address it already knows. Typing then APPENDS.
+      #
+      # Measured, and it does not fail where you would look: the field held
+      # `http://127.0.0.1:24330http://127.0.0.1:24330`, the screen said
+      # "주소를 확인하세요", the submit tap did nothing because the form was invalid,
+      # and the flow died 60 seconds later on `sidebar-list` — an assertion about
+      # the channel list, three steps away from the field that was actually wrong.
+      - eraseText
       - inputText: ${SERVER_URL}
+      # The hint is the screen's own echo of the URL it will call, so asserting
+      # the RESOLVED address (not just "a hint exists") is what catches the
+      # doubling above at the step that caused it.
       - assertVisible:
           id: "server-url-hint"
+      - assertVisible: "요청 주소: ${SERVER_URL}/v1/…"
       - tapOn:
           id: "email-input"
       - inputText: ${EMAIL}
