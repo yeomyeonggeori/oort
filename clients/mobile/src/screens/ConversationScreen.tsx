@@ -470,17 +470,24 @@ export default function ConversationScreen({
   // optimistic echo is already on screen and that is when it has to be visible.
   const [selfSendToken, setSelfSendToken] = useState(0);
   const {send} = timeline;
+  // 거울. `onSend` 가 `quote` 를 **의존성으로** 들면 인용을 걸고 무를 때마다 이
+  // 핸들러의 동일성이 바뀌고, 그것은 `Timeline` 의 `renderItem` 을 타고 내려가
+  // 「붙어 있는 모든 행을 다시 그려라」가 된다(goal RN-P2a 가 산 것). 사람의
+  // 동작이라 초당 한 번은 아니지만, 값을 읽기만 하면 되는 자리에서 목록 전체를
+  // 지불할 이유가 없다 — 이 화면이 `markReadRef` 에서 이미 고른 모양이다.
+  const quoteRef = useRef<QuoteDraft | null>(null);
+  quoteRef.current = quote;
   const onSend = useCallback(
     (body: string) => {
       setSelfSendToken(token => token + 1);
       // 인용은 **보낸 순간** 떨어진다. 남겨 두면 다음 줄까지 같은 원본을 가리키게
       // 되는데, 그것을 원한 사람은 거의 없고 알아채는 사람은 더 적다. 컴포저가
       // 자기 글을 먼저 비우는 것과 같은 규율이다.
-      const replyToId = quote?.targetId;
+      const replyToId = quoteRef.current?.targetId;
       setQuote(null);
       void send(body, replyToId);
     },
-    [send, quote],
+    [send],
   );
 
   // ---- 리스트에 내려가는 핸들러는 전부 고정된 동일성이어야 한다 (goal RN-P2a) --
