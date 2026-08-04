@@ -38,8 +38,9 @@ import {
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useMemo, useState} from 'react';
-import {Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {MessageBody, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
@@ -58,6 +59,27 @@ import {useLongPress} from './useLongPress';
 // thread under it (`threadRollup`). This file decides only how those answers
 // look on a phone.
 //
+// ## 본문은 이 파일의 것이 아니다 (goal U4-a / #1048)
+//
+// 본문 렌더는 `MessageBody.tsx` 로 나갔다. 그 전까지 이 자리에는 이런 분기가
+// 있었다:
+//
+//   body.includes('```') ? <CodeBlock text={body} /> : <Text>{body}</Text>
+//
+// 그리고 이 머리말에는 그것을 정당화하는 문단이 있었다 — *"전체 트리를 RN 에서
+// 걷는 것은 이 배치가 함께 측정할 수 없고, 반쯤 걷다 모르는 부분을 버리는 트리는
+// 메시지 내용을 조용히 지운다. 완전한 텍스트가 부분적인 마크업을 이긴다."*
+//
+// **그 판단이 실측으로 틀렸다.** U1 감사가 실기기에서 찍은 것(`md-01`)은
+// 「마크업이 좀 덜 예쁘다」가 아니었다: 기술 답변에는 코드 펜스가 거의 항상 있고
+// 분기 조건이 `includes('```')` 였으므로, **에이전트의 답 전체가 하나의 모노스페이스
+// 상자**로 들어갔다 — 한국어 산문이 12px Menlo 로 조판되고, 셸 명령은 가로로
+// 잘리고, `#` 와 별표와 펜스 마커가 글자로 남았다. 즉 옛 분기가 지키려던 바로 그
+// 것(내용을 잃지 않는 것)을 옛 분기가 깨고 있었다.
+//
+// 부분적으로 걷는다는 걱정도 근거가 없었다: 코어 파서의 `Block`·`Inline` 은 닫힌
+// 합집합이라 렌더러가 **모든** 갈래를 다루는지 컴파일러가 센다.
+//
 // ## Reactions are shown, not offered
 //
 // The chips render counts and whether I am in them, and they are NOT pressable
@@ -65,18 +87,6 @@ import {useLongPress} from './useLongPress';
 // and does nothing is worse than a chip that looks like a label, so they are
 // drawn as labels — no press feedback, no button role, nothing for a thumb to
 // aim at and be refused by.
-//
-// ## Why the body is not a markdown renderer yet
-//
-// `@momo/core/features/timeline/markdown` parses a body into blocks, and the
-// web row walks that tree into elements. Here the body renders as text, with
-// `isPlainText` deciding nothing more than whether a fenced block gets its own
-// monospace box. Rendering the full tree (links, emphasis, nested lists) on RN
-// means a `Text`-composition pass that this batch cannot also measure, and a
-// half-walked tree that drops the parts it does not know how to draw would
-// silently delete content from a message. Text that is complete beats markup
-// that is partial. The parser is in the core and unchanged, so the batch that
-// draws it starts from the same tree the web client already uses.
 // =============================================================================
 
 const UNKNOWN_MEMBER = '알 수 없는 멤버';
@@ -317,21 +327,6 @@ function ReplyMarker({
   );
 }
 
-/** A fenced code block, scrollable sideways INSIDE itself. */
-function CodeBlock({text}: {text: string}): React.JSX.Element {
-  return (
-    // The horizontal scroll lives here rather than on the screen: a long patch
-    // line must not be able to drag the whole conversation sideways.
-    <ScrollView
-      horizontal
-      style={styles.codeScroll}
-      contentContainerStyle={styles.codeContent}
-      showsHorizontalScrollIndicator>
-      <Text style={styles.code}>{text}</Text>
-    </ScrollView>
-  );
-}
-
 // ---- agent + artifact cards -------------------------------------------------
 
 function StatusChip({label, tone}: {label: string; tone: 'ok' | 'warn' | 'danger' | 'muted'}) {
@@ -505,9 +500,19 @@ function ArtifactCard({
             <Text style={styles.cardMeta}>{artifact.branch}</Text>
           ) : null}
           {artifact.url ? (
-            <Text style={styles.cardLink} numberOfLines={1}>
-              {artifact.url}
-            </Text>
+            // BL-3 의 나머지 절반. 이 줄은 강조색만 링크이고 **동작이 없었다** —
+            // 링크처럼 생긴 것이 링크가 아닌 것은 아무것도 없는 것보다 나쁘다.
+            // 본문 링크와 같은 문을 쓴다(`openLink` — 코어 `safeHref` 재확인).
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={`${artifact.url} 열기`}
+              hitSlop={{top: 6, bottom: 6, left: 4, right: 4}}
+              onPress={() => openLink(artifact.url as string)}
+              testID="artifact-link">
+              <Text style={styles.cardLink} numberOfLines={1}>
+                {artifact.url}
+              </Text>
+            </Pressable>
           ) : null}
           {artifact.urlRejected ? (
             <Text style={[styles.cardNote, styles.cardNoteDanger]}>
@@ -927,22 +932,17 @@ function MessageRowInner({
         ) : (
           <>
             {presentation.keepsBody && body !== '' ? (
-              body.includes('```') ? (
-                <CodeBlock text={body} />
-              ) : (
-                <Text
-                  style={styles.body}
-                  // Selectable ONLY where no gesture wants the same press. iOS
-                  // text selection is itself a long press, so on an actionable
-                  // row the two fight and the loser is whichever the OS decides
-                  // — a magnifier appearing over the action sheet. Where there
-                  // is no sheet to open there is nothing to fight, so those rows
-                  // keep their copy. (A 복사 action needs a clipboard native
-                  // module; RN's own is deprecated and warns on every access.)
-                  selectable={!actionable}>
-                  {body}
-                </Text>
-              )
+              <MessageBody
+                body={body}
+                // Selectable ONLY where no gesture wants the same press. iOS
+                // text selection is itself a long press, so on an actionable
+                // row the two fight and the loser is whichever the OS decides
+                // — a magnifier appearing over the action sheet. Where there
+                // is no sheet to open there is nothing to fight, so those rows
+                // keep their copy. (goal U4-b 가 「메시지 복사」를 시트에 놓으면
+                // 이 자리의 거래가 다시 열린다.)
+                selectable={!actionable}
+              />
             ) : null}
 
             {presentation.artifact ? (
@@ -1414,11 +1414,11 @@ export function PendingRow({
         />
       ) : null}
       {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
-      {/* Same body style as a confirmed row, dimmed: the text must not re-flow
-          when the server's copy replaces this one. */}
-      <Text style={[styles.body, styles.bodyPending]} selectable>
-        {pending.body}
-      </Text>
+      {/* Same anatomy as a confirmed row, dimmed: the text must not re-flow when
+          the server's copy replaces this one — which is exactly why the echo
+          goes through the SAME renderer. Before this, a pending row printed
+          markdown raw and then rearranged itself the instant its seq landed. */}
+      <MessageBody body={pending.body} muted selectable />
       {failed ? (
         <View style={styles.failedRow}>
           <Text style={styles.failedText}>전송 실패</Text>
@@ -1469,8 +1469,6 @@ const styles = StyleSheet.create({
   },
   agentTagText: {fontSize: 10, color: color.agent, fontWeight: '600'},
   time: {fontSize: font.meta, color: color.textFaint},
-  body: {fontSize: font.body, color: color.text, lineHeight: 22},
-  bodyPending: {color: color.textMuted},
   tombstone: {fontSize: font.label, color: color.textFaint, fontStyle: 'italic'},
   edited: {fontSize: font.meta, color: color.textFaint},
   tailRow: {
@@ -1606,18 +1604,4 @@ const styles = StyleSheet.create({
   statusChipText_danger: {color: color.danger},
   statusChipText_muted: {color: color.textMuted},
 
-  codeScroll: {
-    marginTop: space.xs,
-    borderRadius: radius.sm,
-    backgroundColor: '#0b0d11',
-    borderWidth: 1,
-    borderColor: color.border,
-  },
-  codeContent: {padding: space.sm},
-  code: {
-    fontFamily: 'Menlo',
-    fontSize: font.meta,
-    color: color.textMuted,
-    lineHeight: 17,
-  },
 });
