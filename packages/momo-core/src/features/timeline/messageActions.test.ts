@@ -11,6 +11,7 @@ import {
   isStrictlyOrdered,
   reconcileMessages,
 } from "./model";
+import { canQuoteMessage } from "./quote";
 
 const ME = "11111111-2222-3333-4444-555555555555";
 const OTHER = "99999999-8888-7777-6666-555555555555";
@@ -107,9 +108,11 @@ describe("action affordances", () => {
     expect(canDeleteMessage(gone, ME)).toBe(false);
     expect(canReactToMessage(gone)).toBe(false);
     expect(canReplyToMessage(gone)).toBe(false);
+    expect(canQuoteMessage(gone)).toBe(false);
     expect(
       hasAnyAction({
         reply: canReplyToMessage(gone),
+        quote: canQuoteMessage(gone),
         react: canReactToMessage(gone),
         edit: canEditMessage(gone, ME),
         delete: canDeleteMessage(gone, ME),
@@ -138,6 +141,17 @@ describe("action affordances", () => {
   });
 
   /**
+   * ADR-0148 규칙 1 — 인용은 답글과 **다른 축**이다. 스레드가 한 겹인 것은
+   * `root_id`의 제약이고 `reply_to_id`에는 그 제약이 없다. 그래서 답글이 막힌 행에서
+   * 인용은 열려 있어야 하고, 이 단정이 그 둘을 한 예측으로 접는 리팩터를 막는다.
+   */
+  it("offers 인용 on a reply, where 답글 is refused", () => {
+    const reply = msg(1, { rootId: "0000000a-0000-4000-8000-000000000000" });
+    expect(canReplyToMessage(reply)).toBe(false);
+    expect(canQuoteMessage(reply)).toBe(true);
+  });
+
+  /**
    * Only text has an editable body. A tool result or an artifact card is a
    * projection of something else, so "editing" it would edit nothing — but its
    * author may still withdraw it.
@@ -150,10 +164,22 @@ describe("action affordances", () => {
 
   it("hasAnyAction is true as soon as one action survives", () => {
     expect(
-      hasAnyAction({ reply: false, react: true, edit: false, delete: false })
+      hasAnyAction({
+        reply: false,
+        quote: false,
+        react: true,
+        edit: false,
+        delete: false,
+      })
     ).toBe(true);
     expect(
-      hasAnyAction({ reply: false, react: false, edit: false, delete: false })
+      hasAnyAction({
+        reply: false,
+        quote: false,
+        react: false,
+        edit: false,
+        delete: false,
+      })
     ).toBe(false);
   });
 });

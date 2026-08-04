@@ -171,10 +171,51 @@ export interface ThreadRollup {
   lastReplyAtMs: number;
 }
 
+/**
+ * 인용된 메시지, 서버가 **읽을 때마다** 다시 만들어 페이지에 동봉한 것
+ * (ADR-0148 규칙 3, openapi `QuotedMessage`).
+ *
+ * 사본이 아니라 참조라서 두 성질이 따라온다: 원본이 수정되면 다음 페이지에서 이
+ * 값이 따라 바뀌고, 삭제되면 `body` 없이 `state: "deleted"`로 온다. 그래서 클라가
+ * 이것을 저장하면 기록이 아니라 **렌더를 캐시**하는 것이다.
+ *
+ * 저자는 id로만 온다. 다른 모든 행과 같은 규칙이고(이름은 클라가 이미 들고 있는
+ * 명부에서 푼다), 인용 한 줄 때문에 rename에 상하는 두 번째 신원 경로를 만들지
+ * 않기 위한 것이다.
+ */
+export interface QuotedMessage {
+  id: string;
+  seq: number;
+  authorMemberId: string;
+  type: Message["type"];
+  /** tombstone에는 없다. 삭제는 빠진 본문이 나르고, 플래그가 나르지 않는다. */
+  body?: string;
+  state: "sent" | "edited" | "deleted" | "failed";
+  editedAtMs?: number;
+  deletedAtMs?: number;
+  /** 규칙 4 — 이 원본이 또 무언가를 인용했다. **표시뿐**이고 대상 id는 없다. */
+  quotesAnother?: boolean;
+}
+
 export interface Message {
   id: string;
   channelId: string;
   rootId?: string;
+  /**
+   * ADR-0148 — 이 메시지가 **가리키는** 메시지의 id. `rootId`(소속)와 독립이고,
+   * 한 메시지가 둘 다 가질 수 있다(규칙 1).
+   *
+   * 모든 투영에 실린다: 전송 응답, 히스토리, 답글, 그리고 실시간 프레임까지.
+   * 아래 `replyTo`와 달리 이쪽이 **영속하는 사실**이다.
+   */
+  replyToId?: string;
+  /**
+   * 풀린 인용. 히스토리·답글 페이지에만 있고 전송 응답과 `message.new`에는 없다
+   * (서버가 그 둘에서 일부러 뺀다 — 쓰기 경로 안에서 읽기를 한 번 더 하지 않기
+   * 위해서다). 그래서 실시간으로 온 인용 답글은 이 값이 없고, 클라가 화면에 이미
+   * 들고 있는 행에서 푼다 (`features/timeline/quote.ts` resolveQuote).
+   */
+  replyTo?: QuotedMessage;
   seq: number;
   hlcTs: number;
   hlcCount: number;
@@ -1470,12 +1511,29 @@ export interface RequestRouting {
   effort?: string;
 }
 
+/**
+ * 한 번의 전송에 실을 수 있는 선택들.
+ *
+ * 위치 인자를 늘리는 대신 객체인 이유: `routing`(ADR-0134)과 `replyToId`(ADR-0148)는
+ * 서로 아무 관계가 없고 둘 다 없을 때가 대부분이라, `send(ws, ch, id, body,
+ * undefined, quoteId)`처럼 빈 자리를 세는 호출부가 생기면 그 자리를 하나 밀어
+ * 쓰는 실수가 조용히 컴파일된다.
+ */
+export interface SendMessageOptions {
+  routing?: RequestRouting;
+  /**
+   * ADR-0148 — 이 전송이 가리키는 메시지. 같은 채널이어야 하고(규칙 2), 서버가
+   * 트랜잭션 안에서 확인한 뒤 아니면 거절한다. `rootId`와 독립이다.
+   */
+  replyToId?: string;
+}
+
 export function sendMessage(
   workspaceId: string,
   channelId: string,
   clientMsgId: string,
   bodyText: string,
-  routing?: RequestRouting
+  options?: SendMessageOptions
 ): Promise<Message> {
   // The key is absent, not null, when there is no override: the server's send
   // path is closed-world, so a key it does not know is a 400 whether its value
@@ -1485,7 +1543,8 @@ export function sendMessage(
     type: "text",
     body: bodyText,
   };
-  if (routing) body.routing = routing;
+  if (options?.routing) body.routing = options.routing;
+  if (options?.replyToId !== undefined) body.replyToId = options.replyToId;
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId

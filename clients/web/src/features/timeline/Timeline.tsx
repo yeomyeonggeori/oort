@@ -82,6 +82,8 @@ export function Timeline({
   onStartReached,
   onRetry,
   onOpenThread,
+  onQuoteMessage,
+  onJumpToMessage,
   onOpenWorkSession,
   onResend,
   onResendPending,
@@ -113,6 +115,10 @@ export function Timeline({
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
+  /** ADR-0148 - pin a row to the composer as a quote. */
+  onQuoteMessage?: (message: Message) => void;
+  /** Jump to a quoted original (the channel surface's existing anchor watcher). */
+  onJumpToMessage?: (messageId: string, seq: number | null) => void;
   onOpenWorkSession?: (sessionId: string) => void;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
@@ -121,6 +127,22 @@ export function Timeline({
   onStartWriting?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
+
+  // ADR-0148 - 라이브로 도착한 인용 답글의 원본을 화면에 이미 있는 행에서 푼다.
+  //
+  // Map을 한 번 만들고 행들이 공유한다: 행마다 `messages.find`를 돌면 화면에 50개
+  // 행이 있을 때 조회가 2500번이 되고, 그 값은 스크롤마다 다시 계산된다. 키는
+  // 소문자 id다 - 와이어가 대소문자를 섞어 보낸다(Swift `uuidString`은 대문자,
+  // 페이지 행은 소문자).
+  const byId = useMemo(() => {
+    const index = new Map<string, Message>();
+    for (const message of messages) index.set(message.id.toLowerCase(), message);
+    return index;
+  }, [messages]);
+  const quoteLookup = useMemo(
+    () => (messageId: string) => byId.get(messageId.toLowerCase()),
+    [byId]
+  );
 
   const items = useMemo(
     () =>
@@ -250,6 +272,7 @@ export function Timeline({
               pending={item.pending}
               startsGroup={item.startsGroup}
               directory={directory}
+              quoteLookup={quoteLookup}
               onResend={onResendPending}
             />
           );
@@ -271,6 +294,9 @@ export function Timeline({
             }
             pausedRepeat={item.pausedRepeat}
             onOpenThread={onOpenThread}
+            onQuoteMessage={onQuoteMessage}
+            onJumpToMessage={onJumpToMessage}
+            quoteLookup={quoteLookup}
             onOpenWorkSession={onOpenWorkSession}
             onResend={onResend}
           />

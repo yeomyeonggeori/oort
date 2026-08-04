@@ -3,7 +3,10 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { Avatar } from "./MessageRow";
 import { MessageBody } from "./MessageBody";
+import { QuoteBlock } from "./QuoteBlock";
 import type { PendingMessage } from "@momo/core/features/timeline/model";
+import { resolveQuote } from "@momo/core/features/timeline/quote";
+import type { Message } from "@momo/core/lib/api";
 
 // =============================================================================
 // Optimistic echo row (M10, R-1 §3 "내 메시지는 seq 미확정이어도 로컬 echo").
@@ -24,17 +27,29 @@ export function PendingRow({
   pending,
   startsGroup,
   directory,
+  quoteLookup,
   onResend,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
   directory: Directory;
+  /** 이 echo가 인용한 원본을 화면에 있는 행에서 찾는다 (ADR-0148). */
+  quoteLookup?: (messageId: string) => Message | undefined;
   onResend?: (clientMsgId: string) => Promise<void> | void;
 }) {
   const [resending, setResending] = useState(false);
   const author = memberFor(directory, pending.authorMemberId);
   const name = author?.displayName ?? "나";
   const failed = pending.status === "failed";
+  // 확정된 행과 **같은 것**을 그린다 (ADR-0148). echo가 인용을 안 그렸다가 seq가
+  // 도착하는 순간 하나 자라면, 읽는 사람 눈 아래에서 본문이 아래로 밀린다 - 이
+  // 파일이 마크다운을 echo에도 그리기로 한 것과 같은 이유다(goal B8 H6).
+  // 점프는 주지 않는다: 아직 보내지지도 않은 글에서 원본으로 떠나는 길은, 돌아왔을
+  // 때 그 글이 어디 있는지 아무도 보장하지 못한다.
+  const quote =
+    pending.replyToId === undefined
+      ? null
+      : resolveQuote({ replyToId: pending.replyToId }, quoteLookup);
 
   return (
     <article
@@ -58,6 +73,7 @@ export function PendingRow({
                 ordering the timeline does not have. */}
           </div>
         )}
+        {quote && <QuoteBlock block={quote} directory={directory} />}
         {/* Same body renderer as the confirmed row (goal B8 H6): an echo that
             showed raw asterisks and then re-flowed into bold the moment its seq
             landed would move the text under the reader's eye. */}

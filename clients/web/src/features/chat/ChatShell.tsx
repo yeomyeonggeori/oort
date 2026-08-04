@@ -25,6 +25,11 @@ import {
   useReadStates,
 } from "@/features/workspace/useWorkspace";
 import { watchForMessage, watchForMessageId } from "@/features/inbox/anchor";
+import {
+  quoteDraftFor,
+  quoteDraftStillValid,
+  type QuoteDraft,
+} from "@momo/core/features/timeline/quote";
 import { Timeline } from "@/features/timeline/Timeline";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
@@ -190,6 +195,15 @@ export function ChatShell() {
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
 
+  // ── 걸어 둔 인용 (ADR-0148) ────────────────────────────────────────────────
+  //
+  // `thread`와 같은 자리에 산다. 둘 다 「이 표면이 지금 무엇을 가리키고 있나」이고,
+  // 둘 다 채널을 옮기면 뜻을 잃는다. 컴포저 안에 두지 않는 이유는 컴포저가
+  // 마운트/언마운트되기 때문이다 — 스레드를 열었다 닫는 사이에 걸어 둔 인용이
+  // 사라지면, 사람은 자기가 무엇을 눌렀는지 의심하게 된다.
+  const [quote, setQuote] = useState<QuoteDraft | null>(null);
+  useEffect(() => setQuote(null), [channelId]);
+
   // 작업 세션 패널 (AX-3 / MOMO-618). One secondary pane at a time: a thread and
   // a work session are both "the thing you stepped aside to read", and stacking
   // two 320px panes on a 1280px window leaves the channel narrower than either.
@@ -302,6 +316,24 @@ export function ChatShell() {
     setWorkOpen(false);
   }, [channelId, pendingWorkThread]);
 
+  // 걸어 둔 원본이 지워졌다. 인용은 서버가 받아 주지만(같은 채널이면 tombstone도
+  // 유효한 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다.
+  // 조용히 떼는 것이 맞다: 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
+  useEffect(() => {
+    if (quote === null) return;
+    const lookup = (messageId: string) =>
+      messages.find((message) => uuidEq(message.id, messageId));
+    if (!quoteDraftStillValid(quote, lookup)) setQuote(null);
+  }, [quote, messages]);
+
+  const onQuoteMessage = useCallback((message: Message) => {
+    setQuote(quoteDraftFor(message));
+    // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 칩이
+    // 떴는데 손은 아직 타임라인에 있다.
+    const input = document.getElementById("composer-input");
+    if (input instanceof HTMLTextAreaElement) input.focus();
+  }, []);
+
   // ── URL이 데리고 온 자리 (MOMO-679) ────────────────────────────────────────
   //
   // 세 파라미터가 같은 성질이다: 다른 표면이 이 채널 안의 한 지점을 가리키며
@@ -353,6 +385,44 @@ export function ChatShell() {
   useEffect(() => {
     setAnchorMissed(null);
   }, [anchorMsg, anchorSeq, channelId]);
+
+  /**
+   * 인용 블록을 눌렀다 → 원본으로 점프 (ADR-0148 · goal B3 W1).
+   *
+   * **기존 앵커 기계 그대로**다. 새 메커니즘을 만들지 않는 이유는 이 자리가 이미
+   * 인박스·활동·검색·작업흐름이 쓰는 그 자리이기 때문이고, 못 찾았을 때 할 말도
+   * 이미 위에 있다(`anchorMissed`). 라우트를 건드리지 않는 이유는 인용 대상이 같은
+   * 채널 안에 있어야 하기 때문이다(규칙 2) — `?msg=`로 우회하면 주소가 「여기를
+   * 보고 있다」고 계속 말하는데 사람은 이미 다른 곳을 읽고 있게 된다.
+   *
+   * `seq`를 함께 받는 이유: 못 찾았을 때 「더 위쪽에 있어 아직 안 불러왔다」를
+   * 추측이 아니라 사실로 말할 수 있다. 서버가 인용에 원본의 seq를 실어 준다
+   * (`replyTo.seq`), 라이브 프레임으로 온 인용은 실어 주지 않으므로 null이 온다.
+   */
+  const quoteJumpRef = useRef<(() => void) | null>(null);
+  const onJumpToMessage = useCallback(
+    (messageId: string, seq: number | null) => {
+      // 앞선 점프가 아직 행을 기다리고 있으면 접는다. 두 워처가 동시에 돌면 나중에
+      // 만료되는 쪽이 이미 도착한 점프에 대해 「못 찾았다」를 띄운다.
+      quoteJumpRef.current?.();
+      setAnchorMissed(null);
+      quoteJumpRef.current = watchForMessageId(messageId, {
+        onExpire: () => {
+          if (seq === null) {
+            setAnchorMissed("unknown");
+            return;
+          }
+          const oldestLoaded = messages.reduce(
+            (min, message) => Math.min(min, message.seq),
+            Number.POSITIVE_INFINITY
+          );
+          setAnchorMissed(seq < oldestLoaded ? "older" : "unknown");
+        },
+      });
+    },
+    [messages]
+  );
+  useEffect(() => () => quoteJumpRef.current?.(), []);
 
   useEffect(() => {
     if (!anchorReady) return undefined;
@@ -682,6 +752,8 @@ export function ChatShell() {
                 setWorkOpen(false);
                 setThread(message);
               }}
+              onQuoteMessage={stressCount > 0 ? undefined : onQuoteMessage}
+              onJumpToMessage={onJumpToMessage}
               onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
@@ -731,6 +803,8 @@ export function ChatShell() {
             directory={directory}
             channelLabel={label}
             dmAgent={dmAgent}
+            quote={quote}
+            onCancelQuote={() => setQuote(null)}
             onSend={timeline.send}
           />
         )}

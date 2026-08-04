@@ -51,6 +51,15 @@ export type ComposerKeyIntent =
   | "mention-next"
   | "mention-prev"
   | "mention-close"
+  /**
+   * ADR-0148 - 컴포저에 걸린 인용을 뗀다.
+   *
+   * Esc 하나에 두 뜻을 겹치지 않는다: 멘션 목록이 열려 있으면 Esc는 그 목록을
+   * 닫고(`mention-close`), 닫혀 있을 때만 인용으로 내려온다. 「지금 열려 있는
+   * 가장 위의 것을 닫는다」는 Esc의 보편 규칙이고, 순서를 뒤집으면 후보를 고르다
+   * Esc를 눌렀을 때 목록은 그대로인데 인용이 사라진다.
+   */
+  | "quote-cancel"
   /** Not ours: let the textarea (or the IME) have it. */
   | "pass";
 
@@ -82,6 +91,15 @@ export interface ComposerKeyState {
    * cannot disagree.
    */
   enterSends: boolean;
+  /**
+   * ADR-0148 - 이 컴포저에 인용이 걸려 있다. Esc가 뗄 것이 있는지를 여기서만
+   * 묻는다: 걸려 있지 않으면 Esc는 `pass`로 남아 textarea(와 그 위 다이얼로그)의
+   * 것이 된다.
+   *
+   * 옵셔널이다. 인용을 아직 모르는 표면(스레드 컴포저)이 이 키를 적어 넣지 않아도
+   * 동작이 이전과 한 글자도 다르지 않아야 한다.
+   */
+  quoteOpen?: boolean;
 }
 
 /** True when the keystroke belongs to an in-flight IME composition. */
@@ -130,8 +148,10 @@ export function composerKeyIntent(
   }
 
   if (event.key === "Escape") {
-    if (event.composing || !state.mentionsOpen) return "pass";
-    return "mention-close";
+    if (event.composing) return "pass";
+    if (state.mentionsOpen) return "mention-close";
+    if (state.quoteOpen === true) return "quote-cancel";
+    return "pass";
   }
 
   return "pass";

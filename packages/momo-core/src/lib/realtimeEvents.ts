@@ -33,6 +33,17 @@ export interface MessageNewEvent {
     state?: string;
     root_id?: string | null;
     /**
+     * ADR-0148 — the quote target's id, and **only** the id.
+     *
+     * `momo_messaging::build_broadcast_payload` refuses to put the quoted body
+     * here and says why: an outbox row is written once and replayed forever, so
+     * embedding the text would mint exactly the snapshot 규칙 3 forbids. The
+     * resolved quote is a read projection (`Message.replyTo`), which is why a
+     * live-arriving quote is resolved against the rows the client already holds
+     * (`features/timeline/quote.ts` `resolveQuote`) rather than by a fetch.
+     */
+    reply_to_id?: string | null;
+    /**
      * Server-decided message properties, forwarded verbatim by the relay
      * (server `MessageRoutes.broadcastPayload`, omitted when empty). This is
      * where `mention_member_ids` and the approval fields live, so a live frame
@@ -141,6 +152,9 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
     createdAtMs: p.created_at_ms ?? Date.now(),
   };
   if (typeof p.root_id === "string") message.rootId = p.root_id;
+  // ADR-0148. `replyTo` is deliberately NOT set here — the frame has no quoted
+  // body to set it from, and inventing one would be the snapshot the ADR bans.
+  if (typeof p.reply_to_id === "string") message.replyToId = p.reply_to_id;
   if (p.props && typeof p.props === "object") message.props = p.props;
   if (typeof p.edited_at_ms === "number") message.editedAtMs = p.edited_at_ms;
   if (typeof p.deleted_at_ms === "number") message.deletedAtMs = p.deleted_at_ms;

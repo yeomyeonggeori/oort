@@ -2,7 +2,7 @@
   "name": "momo-web",
   "private": true,
   "version": "0.0.0",
-  "description": "momo canonical UI (ADR-0133 §1): TS + React 18 + Vite. The same bundle runs in the browser and inside the Tauri shell (clients/desktop). The ADR-0119 alpha it replaced lives at clients/web-legacy.",
+  "description": "momo canonical UI (ADR-0133 \u00a71): TS + React 18 + Vite. The same bundle runs in the browser and inside the Tauri shell (clients/desktop). The ADR-0119 alpha it replaced lives at clients/web-legacy.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,6 +26,7 @@
     "gate:workstream": "vite build --mode workstream-gate && node gates/gate-workstream.mjs",
     "gate:approvals": "npm run build && node gates/gate-approvals.mjs",
     "gate:work-panel": "npm run build && node gates/gate-work-panel.mjs",
+    "gate:quote": "npm run build && node gates/gate-quote.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",
