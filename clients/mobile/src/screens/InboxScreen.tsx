@@ -32,6 +32,7 @@ import {
   Screen,
   ScreenHeader,
 } from '../design/atoms';
+import {useRefreshControl} from '../design/refresh';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
 import {ApprovalDecision} from '../features/inbox/ApprovalDecision';
 import {
@@ -165,6 +166,11 @@ export default function InboxScreen({
   const feed: Feed =
     filter === 'needs-action' ? needsAction : filter === 'agents' ? agentFeed : mentions;
   const panelSurface = PANEL_SURFACE[filter];
+
+  // 당겨서 새로고침 (goal RN-B4b / #1026). 각 탭은 이미 자기를 다시 읽는 법을
+  // 알고 있으므로(`feed.refetch` = 무효화), 당김은 그것을 부르는 새 입구일 뿐이다 —
+  // 탭을 바꾸면 대상도 함께 바뀐다.
+  const refreshControl = useRefreshControl(feed.refetch, 'inbox-refresh');
 
   const markRead = useMarkRead();
   const marking = useMutation({
@@ -365,6 +371,7 @@ export default function InboxScreen({
         <EmptyState
           headline={EMPTY_COPY[filter].headline}
           detail={EMPTY_COPY[filter].detail}
+          refreshControl={refreshControl}
           testID="inbox-empty"
         />
       ) : (
@@ -390,6 +397,7 @@ export default function InboxScreen({
             />
           )}
           contentContainerStyle={styles.listContent}
+          refreshControl={refreshControl}
           testID="inbox-list"
         />
       )}

@@ -85,7 +85,12 @@ export interface Feed {
   absent: boolean;
   /** Newest successful fetch across the sources. */
   updatedAtMs: number;
-  refetch: () => void;
+  /**
+   * 이 피드를 다시 읽는다. **끝날 때 이행되는** 프로미스를 돌려준다 — 당겨서
+   * 새로고침(goal RN-B4b / #1026)의 스피너가 그것을 기다린다. `void` 였다면
+   * 스피너는 요청이 아니라 시계를 기다리게 되고, 그것은 진행률의 모양을 한 거짓말이다.
+   */
+  refetch: () => Promise<unknown>;
 }
 
 const SETTLED_STATUSES: ApprovalStatus[] = ['approved', 'rejected', 'expired'];
@@ -208,7 +213,7 @@ export function useNeedsAction(enabled: boolean): Feed {
     error: query.isError,
     absent: serverSaysAbsent(query.error),
     updatedAtMs: query.dataUpdatedAt,
-    refetch: () => void query.refetch(),
+    refetch: () => query.refetch(),
   };
 }
 
@@ -279,8 +284,10 @@ export function useMentions(enabled: boolean): Feed {
   // callback unstable and quietly break the first `useEffect` that lists it as a
   // dependency (the next batch's timeline will).
   const refetch = useCallback(() => {
-    void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
-    void client.invalidateQueries({queryKey: ['inbox-mentions', workspaceId]});
+    return Promise.all([
+      client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)}),
+      client.invalidateQueries({queryKey: ['inbox-mentions', workspaceId]}),
+    ]);
   }, [client, workspaceId]);
 
   return {
@@ -395,10 +402,14 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
   // changes shape as the channel list does. Invalidating the two key prefixes
   // catches every query that is actually mounted, including ones added since
   // this callback was created.
-  const refetch = useCallback(() => {
-    void client.invalidateQueries({queryKey: ['approvals', workspaceId]});
-    void client.invalidateQueries({queryKey: ['agent-runs', workspaceId]});
-  }, [client, workspaceId]);
+  const refetch = useCallback(
+    () =>
+      Promise.all([
+        client.invalidateQueries({queryKey: ['approvals', workspaceId]}),
+        client.invalidateQueries({queryKey: ['agent-runs', workspaceId]}),
+      ]),
+    [client, workspaceId],
+  );
 
   return {
     items,

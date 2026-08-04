@@ -2,9 +2,11 @@ import React from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
+  type RefreshControlProps,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -230,17 +232,46 @@ export function LoadingState({
 export function EmptyState({
   headline,
   detail,
+  refreshControl,
   testID,
 }: {
   headline: string;
   detail?: string;
+  /**
+   * 당겨서 새로고침 (goal RN-B4b / #1026).
+   *
+   * 빈 목록은 당김이 **가장 필요한** 자리다. 「지금 결정할 일이 없습니다」를 읽은
+   * 사람이 그 말을 의심하는 방법은 당기는 것 하나뿐이고, 당길 목록이 없다는 것은
+   * 구현의 사정이지 사람의 사정이 아니다. 그래서 이 블록은 컨트롤을 받으면
+   * 스크롤할 수 있는 몸을 얻는다 — 하는 말은 그대로다.
+   */
+  refreshControl?: React.ReactElement<RefreshControlProps>;
   testID?: string;
 }): React.JSX.Element {
-  return (
-    <View style={styles.stateBlock} testID={testID}>
+  const body = (
+    <>
       <Text style={styles.stateHeadline}>{headline}</Text>
       {detail ? <Text style={styles.stateDetail}>{detail}</Text> : null}
-    </View>
+    </>
+  );
+  if (refreshControl === undefined) {
+    return (
+      <View style={styles.stateBlock} testID={testID}>
+        {body}
+      </View>
+    );
+  }
+  return (
+    <ScrollView
+      // 내용이 화면보다 짧아도 당길 수 있어야 한다. 스크롤할 것이 없는 iOS
+      // 스크롤뷰는 제스처를 시작조차 하지 않으므로, 이 한 줄이 없으면 컨트롤은
+      // 붙어 있는데 아무 일도 일어나지 않는다 — 고치려는 결함과 같은 모양이다.
+      alwaysBounceVertical
+      contentContainerStyle={styles.stateBlock}
+      refreshControl={refreshControl}
+      testID={testID}>
+      {body}
+    </ScrollView>
   );
 }
 
