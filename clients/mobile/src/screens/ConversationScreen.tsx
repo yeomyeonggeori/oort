@@ -88,6 +88,24 @@ function railSubtitle(status: RealtimeStatus): string | undefined {
   return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
 }
 
+/**
+ * 만료(90초 TTL) 판정에 쓰는 시계의 격자, ms (goal RN-P2a).
+ *
+ * 화면의 경과 숫자는 1초마다 바뀌어야 하지만 **어떤 턴이 살아 있는가**는 그렇지
+ * 않다. 그 판정에 1Hz 시계를 그대로 먹이면 파생되는 배열이 매초 새 동일성을 얻고,
+ * 그 아래의 모든 `useMemo` 가 무효가 된다. 5초는 90초 TTL 대비 5.5% 의 지연이고,
+ * 스토어의 zombie sweep 이 15초마다 도는 것보다 여전히 촘촘하다.
+ */
+const TURN_STALENESS_GRID_MS = 5_000;
+
+/**
+ * 읽음 커서를 몰아 보내는 지연, ms (goal RN-P2a).
+ *
+ * 사람이 알아채지 못할 만큼 짧고(채널을 열고 배지가 사라지기까지), 한 턴 동안
+ * 쏟아지는 프레임을 한 번의 PUT + 한 번의 무효화로 접을 만큼은 길다.
+ */
+const READ_CURSOR_COALESCE_MS = 600;
+
 export default function ConversationScreen({
   channelId,
   title,
@@ -153,7 +171,28 @@ export default function ConversationScreen({
   const signals = useAgentWorkingSignals();
   const railLive = railStatus === 'connected';
   const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
-  const turns = agentTurnsInChannel(signals, channelId, turnNowMs);
+  // 초 단위로 흔들리는 `turnNowMs` 를 그대로 넣으면 이 배열은 매초 새 배열이 되고,
+  // `AgentActivityBar` 안의 두 `useMemo`(`[turns, directory]`·`[turns]`)는 영영
+  // 적중하지 못한다 — 초당 한 번 줄 문구를 처음부터 다시 만든다는 뜻이다.
+  //
+  // 그래서 만료 판정에만 필요한 만큼으로 시계를 **양자화**한다. TTL 은 90초이므로
+  // 5초 격자면 만료가 최대 5초 늦을 뿐이고(그 사이 스토어의 15초 sweep 이 이미
+  // 돌고 있다), 배열 동일성은 5초에 한 번만 바뀐다. 경과 숫자는 이 값을 쓰지
+  // 않는다 — 그것은 아래로 그대로 내려가는 `turnNowMs` 의 몫이다.
+  // 내림이 아니라 **올림**이다. 내림은 격자만큼 과거의 시각을 먹이므로 만료가
+  // 그만큼 늦어지고, 늦은 만료는 「작업 중」을 사실보다 오래 말하는 쪽이다. 올림은
+  // 반대로 최대 5초 일찍 거두는데, 그것은 이 제품이 늘 고르는 방향이다 — 모르면
+  // 모른다고 말하지, 아는 척 붙들고 있지 않는다.
+  const staleBucket = Math.ceil(turnNowMs / TURN_STALENESS_GRID_MS);
+  const turns = useMemo(
+    () =>
+      agentTurnsInChannel(
+        signals,
+        channelId,
+        staleBucket * TURN_STALENESS_GRID_MS,
+      ),
+    [signals, channelId, staleBucket],
+  );
 
   // ---- 중단의 결과 한 문장 (goal RN-C1, 2R M2) -----------------------------
   // 영수증은 **어느 실행에 대한 말인지**를 들고 다닌다. 문장 자체도 에이전트를
@@ -220,13 +259,72 @@ export default function ConversationScreen({
   // means it stays where it was — which is the safe direction. The server
   // clamps and never regresses, so a stale request landing late cannot pull
   // the cursor backwards.
-  const newestSeq = timeline.state.newestSeq;
+  //
+  // ## …but not once per message (goal RN-P2a / #997, 후보 ③)
+  //
+  // 이 효과는 `newestSeq` 가 바뀔 때마다 돈다 — 즉 **메시지가 도착할 때마다**.
+  // 그리고 `markRead` 는 PUT 하나로 끝나지 않는다: `read-state` 와 워크스페이스의
+  // 모든 `inbox-mentions` 질의를 무효화한다(`useInbox.ts`). 그 무효화는 언제나
+  // 마운트돼 있는 사이드바·인박스·탭바까지 닿으므로, 에이전트가 답을 흘리는 동안
+  // 프레임마다 요청 한 벌과 목록 재조정 한 벌이 따라붙는다. 화면을 여는 순간에는
+  // 그것이 밀어넣기 애니메이션과 정확히 겹친다.
+  //
+  // 커서는 **위치 보고**이지 사건이 아니므로 몰아서 보내도 뜻이 상하지 않는다:
+  // 서버가 클램프하고 뒤로 가지 않으므로 마지막 값 하나면 충분하다.
+  //
+  // ## 떠날 때는 버리지 않고 **지금 보낸다** (1R M1)
+  //
+  // 첫 판은 예약을 `clearTimeout` 으로 버렸고, 그것이 P7 위반이었다. 600ms 창
+  // 안에 채널을 떠나면(빠른 A→B 전환, 뒤로가기) 그 채널의 커서가 통째로 사라져
+  // 안 읽음 배지가 남는다 — 사람은 이미 읽었는데.
+  //
+  // 방향의 안전성은 위 문단이 이미 증명한다: 서버가 클램프하고 뒤로 가지 않으므로
+  // **일찍 보내는 것은 언제나 안전**하다. 위험한 것은 안 보내는 쪽뿐이다.
+  //
+  // 그런데 "cleanup 에서 무조건 발사"는 코얼레싱을 통째로 되돌린다 — 이 효과는
+  // `newestSeq` 가 오를 때마다 다시 도므로, 그 cleanup 도 메시지마다 돈다. 그래서
+  // 두 경우를 갈라야 한다:
+  //
+  //   **밀려남**(같은 채널에서 더 큰 seq 가 왔다) → 버린다. 곧 도착할 더 큰 값이
+  //     이 값을 포함하므로 잃는 것이 없다. 코얼레싱은 여기서 산다.
+  //   **떠남**(채널이 바뀌었다 / 화면이 사라졌다) → 지금 보낸다. 다음 기회가
+  //     없을지도 모르는 유일한 경우다.
+  //
+  // 그 구분은 **의존성 배열**로 표현된다: 예약 효과는 `newestSeq` 에도 매이고,
+  // 비우는 효과는 `channelId` 에만 매인다. React 는 한 커밋에서 모든 cleanup 을
+  // 먼저 돌리므로, 채널이 바뀌는 순간 ref 에는 아직 **떠나는 채널**의 값이 있다.
+  const cursorRef = useRef<{channelId: string; seq: number} | null>(null);
+  const markReadRef = useRef(markRead);
   useEffect(() => {
-    if (newestSeq === null) return;
-    void markRead(channelId, newestSeq).catch(() => {
+    markReadRef.current = markRead;
+  }, [markRead]);
+
+  const flushReadCursor = useCallback(() => {
+    const pending = cursorRef.current;
+    if (pending === null) return;
+    // 먼저 비운다: 이 값은 한 번만 보내면 되고, 떠나기와 타이머가 같은 값을 두 번
+    // 보내는 것은 무효화 폭풍을 그만큼 두 번 부르는 일이다.
+    cursorRef.current = null;
+    void markReadRef.current(pending.channelId, pending.seq).catch(() => {
       /* the cursor stays put; the next open tries again */
     });
-  }, [channelId, newestSeq, markRead]);
+  }, []);
+
+  const newestSeq = timeline.state.newestSeq;
+  useEffect(() => {
+    if (newestSeq === null) {
+      // 채널이 막 바뀌어 타임라인이 아직 비었다. 떠나는 효과가 이미 옛 채널의
+      // 값을 보냈으므로, 여기 남은 것이 있다면 그것은 **새 채널 id 에 옛 seq** 를
+      // 붙인 한 프레임짜리 유령이다.
+      cursorRef.current = null;
+      return;
+    }
+    cursorRef.current = {channelId, seq: newestSeq};
+    const timer = setTimeout(flushReadCursor, READ_CURSOR_COALESCE_MS);
+    return () => clearTimeout(timer);
+  }, [channelId, newestSeq, flushReadCursor]);
+
+  useEffect(() => () => flushReadCursor(), [channelId, flushReadCursor]);
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
@@ -244,8 +342,59 @@ export default function ConversationScreen({
     [send],
   );
 
-  const {toggleReaction, editBody, removeMessage} = timeline;
+  // ---- 리스트에 내려가는 핸들러는 전부 고정된 동일성이어야 한다 (goal RN-P2a) --
+  //
+  // 이 넷은 JSX 안의 인라인 화살표였다. 그 자리에서 그것은 스타일이 아니라 **성능
+  // 계약의 파기**다: `Timeline` 의 `renderItem` 이 `onResend`/`onResendPending` 을
+  // 의존성으로 들고 있으므로, 인라인 화살표 하나가 이 화면의 모든 렌더를
+  // "붙어 있는 모든 메시지 행을 다시 그려라"로 번역한다
+  // (`CellRenderer` 는 `PureComponent` 이고, 비교하는 것이 바로 그 함수다).
+  //
+  // 턴이 열려 있으면 이 화면은 초당 한 번 다시 그려지므로, 그 번역은 초당 한 번
+  // 일어나고 있었다.
+  const {toggleReaction, editBody, removeMessage, loadOlder, resend, reload} =
+    timeline;
   const openThread = useCallback((message: Message) => setThread(message), []);
+  const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
+  const onResend = useCallback(
+    (message: Message) => onSend(message.body ?? ''),
+    [onSend],
+  );
+  const onResendPending = useCallback(
+    (clientMsgId: string) => void resend(clientMsgId),
+    [resend],
+  );
+  const closeThread = useCallback(() => setThread(null), []);
+  // 같은 이유로 고정된다. 이 화면은 턴이 열려 있는 동안 초당 한 번 다시 그려지고,
+  // 인라인이면 그때마다 `StopTurnControl`(자체 상태 셋을 든 컴포넌트)이 새 엘리먼트가
+  // 된다 — 사람이 「중단」을 겨누고 있는 바로 그 컨트롤을.
+  const renderStop = useCallback(
+    (turn: {
+      runId: string;
+      memberId: string;
+      name: string;
+      runCount?: number;
+    }) => (
+      <StopTurnControl
+        runId={turn.runId}
+        agentName={turn.name}
+        runCount={turn.runCount}
+        onOutcome={outcome =>
+          setStopOutcome({
+            runId: turn.runId,
+            memberId: turn.memberId,
+            outcome,
+          })
+        }
+        testIDPrefix={`turn-stop-${turn.memberId}`}
+      />
+    ),
+    [],
+  );
+  const bumpSelfSend = useCallback(
+    () => setSelfSendToken(token => token + 1),
+    [],
+  );
   const actions = useMemo<MessageRowActions>(
     () => ({
       myMemberId: member.id,
@@ -307,10 +456,10 @@ export default function ConversationScreen({
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
-              onStartReached={() => void timeline.loadOlder()}
-              onRetry={timeline.reload}
-              onResend={message => onSend(message.body ?? '')}
-              onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
+              onStartReached={onStartReached}
+              onRetry={reload}
+              onResend={onResend}
+              onResendPending={onResendPending}
             />
           </>
         }
@@ -326,21 +475,7 @@ export default function ConversationScreen({
               directory={directory}
               nowMs={turnNowMs}
               live={railLive}
-              renderStop={turn => (
-                <StopTurnControl
-                  runId={turn.runId}
-                  agentName={turn.name}
-                  runCount={turn.runCount}
-                  onOutcome={outcome =>
-                    setStopOutcome({
-                      runId: turn.runId,
-                      memberId: turn.memberId,
-                      outcome,
-                    })
-                  }
-                  testIDPrefix={`turn-stop-${turn.memberId}`}
-                />
-              )}
+              renderStop={renderStop}
             />
             {/* 결과는 컨트롤 밖에서, 줄보다 넓은 자리에 말한다. 「이미 끝났습니다」는
                 실패가 아니라 답이므로 배너가 아니라 영수증과 같은 자리에 선다 —
@@ -374,8 +509,8 @@ export default function ConversationScreen({
           directory={directory}
           myMemberId={member.id}
           nowMs={nowMs}
-          onClose={() => setThread(null)}
-          onReplySent={() => setSelfSendToken(token => token + 1)}
+          onClose={closeThread}
+          onReplySent={bumpSelfSend}
         />
       ) : null}
     </Screen>

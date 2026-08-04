@@ -252,6 +252,37 @@ const PROGRESS_PX = 1;
  */
 const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
 
+/**
+ * 반응이 하나도 없는 표면이 매번 새로 만들던 빈 맵.
+ *
+ * `reactions ?? {}` 를 `renderItem` 안에서 쓰면 호출마다 새 객체가 생기고, 그
+ * 객체는 `chipsFor` 를 거쳐 새 배열이 된다. 상수 하나면 그 사슬이 끊긴다.
+ */
+const NO_REACTIONS: ReactionMap = {};
+
+// =============================================================================
+// 셀 계측 seam (goal RN-P2a / #997)
+//
+// `MessageRow` 의 계수기가 재는 것은 **행 본문**이고, 그것은 memo 아래층이다. 이
+// 계수기는 그 위층을 잰다: `renderItem` 이 몇 번 불렸는가 = 몇 개의 셀이 bail-out 을
+// 잃었는가. 둘이 따로 있어야 수리가 **어느 층**을 산 것인지 말할 수 있다 — 행 memo
+// 하나만 있어도 행 렌더 수는 0으로 떨어지지만, 그 위에서는 여전히 셀마다 엘리먼트가
+// 만들어지고 비교가 돈다.
+// =============================================================================
+
+let renderItemCalls = 0;
+
+/** `renderItem` 이 불린 총 횟수 = 다시 그려진 셀의 수. */
+export function timelineRenderItemCount(): number {
+  return renderItemCalls;
+}
+
+/** 계측 구간의 시작점. */
+export function resetTimelineRenderItemCount(): void {
+  renderItemCalls = 0;
+}
+
+
 // ## …and keeping the position fights a long scroll (goal RN-P3, measured)
 //
 // The correction above still could not finish from far back, and two guesses at
@@ -313,7 +344,38 @@ function distanceToEnd(geometry: TimelineGeometry): number | null {
   return geometry.contentHeight - (geometry.offsetY + geometry.viewportHeight);
 }
 
-export function Timeline({
+// =============================================================================
+// ## 이 목록이 다시 그려지는 값 (goal RN-P2a / #997)
+//
+// 성재, iPhone 17 릴리스 빌드: "스크롤 버벅임". 원인은 스크롤 자체가 아니라 **그
+// 옆에서 도는 렌더**였고, RN 0.86.2 의 목록 3층이 전부 `PureComponent` 인데도
+// 그 셋이 모두 무력화돼 있었다:
+//
+//   `FlatList`(`FlatList.js:307`) · `VirtualizedList`(`VirtualizedList.js:128`,
+//   StateSafePureComponent) · `CellRenderer`
+//   (`VirtualizedListCellRenderer.js:63`)
+//
+// 무력화된 자리는 셋이다.
+//
+//   1. `ConversationScreen` 이 `onResend`/`onResendPending` 을 **JSX 안의 인라인
+//      화살표**로 넘기고 있었다. 그 둘은 아래 `renderItem` 의 의존성이므로,
+//      화면이 무슨 이유로든 다시 그려지면 `renderItem` 이 새 함수가 되고
+//      `CellRenderer` 의 얕은 비교가 거기서 실패한다 → **붙어 있는 모든 셀**이
+//      `renderItem` 을 다시 부른다. 계측: 신호 갱신 2회 = 행 렌더 **16회**
+//      (마운트된 행 8 × 2). 턴이 열려 있으면 여기에 1Hz 시계가 더 얹힌다.
+//   2. `ListHeaderComponent`/`ListFooterComponent` 를 매 렌더 **새 엘리먼트**로
+//      넘기고 있었다. 둘 다 평범한 prop 이므로 `FlatList` 의 얕은 비교가 언제나
+//      실패하고, 이 목록은 "아무것도 바뀌지 않았다"를 말할 방법이 없었다.
+//   3. `MessageRow` 에 memo 가 없었다. 1·2를 고쳐도 **데이터가 진짜 바뀔 때**는
+//      갈리지 않는다: `buildTimelineItems` 가 항목 객체를 전부 새로 만들므로
+//      메시지 하나가 도착하면 모든 셀이 다시 그려진다. 계측: 도착 1건에 행 렌더
+//      **9회**(있어야 할 값은 1).
+//
+// 셋을 다 고쳐야 사슬이 끊긴다. `__tests__/conversationRenders.test.tsx` 가 그
+// 사슬을 행 렌더 **수**로 잠근다 — 위 두 숫자가 그 파일에서 나온 것이다.
+// =============================================================================
+
+function TimelineInner({
   messages,
   directory,
   status,
@@ -694,6 +756,7 @@ export function Timeline({
 
   const renderItem = useCallback(
     ({item}: {item: TimelineItem}) => {
+      renderItemCalls += 1;
       if (item.kind === 'day') return <DayDivider atMs={item.atMs} />;
       if (item.kind === 'unread') return <UnreadDivider count={item.count} />;
       if (item.kind === 'recovery') {
@@ -714,7 +777,7 @@ export function Timeline({
           message={item.message}
           startsGroup={item.startsGroup}
           directory={directory}
-          chips={chipsFor(reactions ?? {}, item.message.id, myMemberId)}
+          chips={chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)}
           pausedRepeat={item.pausedRepeat}
           nowMs={nowMs}
           onResend={onResend}
@@ -775,6 +838,49 @@ export function Timeline({
 
   const keyExtractor = useCallback((item: TimelineItem) => item.key, []);
 
+  // ---- 목록의 머리와 꼬리는 **엘리먼트**이므로 동일성이 값이다 ----------------
+  //
+  // 이 둘을 JSX 안에 인라인으로 두면 `Timeline` 이 다시 그려질 때마다 새 엘리먼트가
+  // 되고, `FlatList` 의 `PureComponent` 비교는 거기서 언제나 실패한다. 즉 이 목록은
+  // "무엇 하나 바뀌지 않았다"를 말할 방법이 없었다. 머리는 자기가 그리는 세 값에만,
+  // 꼬리는 아무것에도 매이지 않는다.
+  const listHeader = useMemo(
+    () => (
+      <View style={styles.header}>
+        {loadingOlder ? (
+          <ActivityIndicator color={color.accentText} />
+        ) : reachedStart && items.length > 0 ? (
+          <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
+        ) : null}
+      </View>
+    ),
+    [loadingOlder, reachedStart, items.length],
+  );
+
+  // 정리(cleanup) 형식의 ref — `renderItem` 안의 앵커 래퍼와 같은 이유다: 떼어내는
+  // 쪽이 자기가 붙인 노드를 이름으로 지목해야 남의 것을 지우지 않는다.
+  const tailNodeRef = useCallback(
+    (node: View | null) => {
+      if (!tailRef) return undefined;
+      tailRef.current = node;
+      return () => {
+        if (tailRef.current === node) tailRef.current = null;
+      };
+    },
+    [tailRef],
+  );
+
+  const listFooter = useMemo(
+    () => (
+      // The always-answerable seam. `collapsable={false}` unconditionally, and
+      // the harness measures the SAME node the app renders: a footer that only
+      // becomes measurable when someone is measuring is a footer whose position
+      // was never the app's.
+      <View ref={tailNodeRef} collapsable={false} style={styles.footer} />
+    ),
+    [tailNodeRef],
+  );
+
   if (status === 'error') {
     return (
       <ErrorState
@@ -833,32 +939,8 @@ export function Timeline({
       onLayout={onLayout}
       onStartReached={reachedStart ? undefined : onStartReached}
       onStartReachedThreshold={0.5}
-      ListHeaderComponent={
-        <View style={styles.header}>
-          {loadingOlder ? (
-            <ActivityIndicator color={color.accentText} />
-          ) : reachedStart && items.length > 0 ? (
-            <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
-          ) : null}
-        </View>
-      }
-      // The always-answerable seam. `collapsable={false}` unconditionally, and
-      // the harness measures the SAME node the app renders: a footer that only
-      // becomes measurable when someone is measuring is a footer whose position
-      // was never the app's.
-      ListFooterComponent={
-        <View
-          ref={node => {
-            if (!tailRef) return undefined;
-            tailRef.current = node;
-            return () => {
-              if (tailRef.current === node) tailRef.current = null;
-            };
-          }}
-          collapsable={false}
-          style={styles.footer}
-        />
-      }
+      ListHeaderComponent={listHeader}
+      ListFooterComponent={listFooter}
       // ## Putting the keyboard away (goal RN-U1 결함 1)
       //
       // 성재: "채팅창은 여는 건 성공했는데, 그냥 다시 닫을 때는 어떻게 해야 해?"
@@ -892,6 +974,21 @@ export function Timeline({
     />
   );
 }
+
+/**
+ * 얕은 비교 하나로 충분한 이유.
+ *
+ * 이 컴포넌트의 prop 은 전부 **호출자가 이미 안정화해 들고 있는 값**이다 — 메시지
+ * 배열과 반응 맵은 상태, 디렉터리·피어·대기행은 `useMemo`, 핸들러 넷은
+ * `useCallback`. 그래서 값 비교를 따로 쓸 자리가 없고, 대신 이 memo 는 **턴이 열려
+ * 있는 동안 초당 한 번 도는 `ConversationScreen` 의 렌더가 목록에 닿지 않게** 한다.
+ * 그 시계는 활동 줄의 경과 숫자를 위한 것이고, 목록은 그 숫자와 아무 관계가 없다.
+ *
+ * 호출자가 인라인 화살표를 다시 넣으면 이 memo 는 조용히 아무것도 하지 않게 되므로,
+ * 그것을 잠그는 것은 이 파일이 아니라 `__tests__/conversationRenders.test.tsx` 다.
+ */
+export const Timeline = React.memo(TimelineInner);
+Timeline.displayName = 'Timeline';
 
 const styles = StyleSheet.create({
   header: {

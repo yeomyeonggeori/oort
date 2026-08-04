@@ -510,6 +510,33 @@ function ArtifactCard({
 
 // ---- the message row --------------------------------------------------------
 
+// =============================================================================
+// 리렌더 계측 seam (goal RN-P2a / #997)
+//
+// 성능 주장은 **셀 수 있어야** 주장이다. 이 배치가 고치는 결함은 "화면이 다시
+// 그려질 때마다 붙어 있는 모든 메시지 행이 통째로 다시 그려진다"이고, 그 수리를
+// 잠그는 단정은 「신호가 한 번 갱신되면 메시지 행 리렌더 0회」다. 그 0을 밖에서
+// 셀 방법은 없다 — `React.memo` 의 bail-out 은 정의상 부모에게 보이지 않고,
+// 컴포넌트를 감싸서 세면 감싼 자리가 memo 바깥이라 언제나 호출된다.
+//
+// 그래서 계측은 안에 있다. 정수 하나 증가이므로 릴리스에서 잰 값은 0에 가깝고,
+// 이 파일이 이미 들고 있는 다른 seam들(`anchorRef`·`metricsRef`·
+// `agentWorkingSnapshot`)과 같은 종류의 것이다: 앱이 실제로 그리는 그 나무를
+// 재는 자리.
+// =============================================================================
+
+let rowRenders = 0;
+
+/** 이 프로세스가 시작된 뒤 그려진 `MessageRow` 본문의 수. */
+export function messageRowRenderCount(): number {
+  return rowRenders;
+}
+
+/** 계측 구간의 시작점. 테스트가 델타를 재기 위해 부른다. */
+export function resetMessageRowRenderCount(): void {
+  rowRenders = 0;
+}
+
 /** What a row can do, supplied by the surface that owns the state. */
 export interface MessageRowActions {
   myMemberId: string;
@@ -527,18 +554,7 @@ export interface MessageRowActions {
   onLongPressUsed?: () => void;
 }
 
-export function MessageRow({
-  message,
-  startsGroup,
-  directory,
-  chips,
-  pausedRepeat,
-  nowMs,
-  onResend,
-  actions,
-  rollup: rollupOverride,
-  replyParent,
-}: {
+export interface MessageRowProps {
   message: Message;
   startsGroup: boolean;
   directory: Directory;
@@ -564,7 +580,21 @@ export function MessageRow({
    * 답글 without claiming to know to whom.
    */
   replyParent?: Message | null;
-}): React.JSX.Element {
+}
+
+function MessageRowInner({
+  message,
+  startsGroup,
+  directory,
+  chips,
+  pausedRepeat,
+  nowMs,
+  onResend,
+  actions,
+  rollup: rollupOverride,
+  replyParent,
+}: MessageRowProps): React.JSX.Element {
+  rowRenders += 1;
   const presentation = useMemo(() => rowPresentation(message), [message]);
   const deleted = message.state === 'deleted';
   const rollup =
@@ -991,6 +1021,117 @@ export function MessageRow({
     </View>
   );
 }
+
+// =============================================================================
+// 왜 이 행은 memo 되어야 하는가 (goal RN-P2a / #997, 측정으로 좁힌 결함)
+//
+// `FlatList` 은 이미 셀 단위로 bail-out 을 한다 — `CellRenderer` 는
+// `React.PureComponent` 다(`@react-native/virtualized-lists/Lists/
+// VirtualizedListCellRenderer.js:63`). 그런데 그 bail-out 은 `renderItem` 의
+// **동일성**에 걸려 있고, 이 앱에서 그것이 매 렌더 바뀌고 있었다. 그래서 화면이
+// 어떤 이유로든 다시 그려지면 붙어 있는 모든 셀이 `renderItem` 을 다시 부르고,
+// memo 가 없는 이 함수는 본문 전체를 다시 실행했다. 턴이 열려 있는 동안에는 그
+// 일이 **초당 한 번** 일어났다.
+//
+// `Timeline`/`ConversationScreen` 쪽에서 `renderItem` 동일성을 되찾는 것이 첫
+// 수리이고, 이 memo 는 두 번째다. 둘 다 필요한 이유는 데이터가 진짜로 바뀔 때
+// 갈리기 때문이다: 메시지가 하나 도착하면 `buildTimelineItems` 가 **모든** 항목
+// 객체를 새로 만들므로 셀은 전부 다시 그려진다. 그때 실제로 달라진 행은 하나뿐인데,
+// 이 비교가 없으면 화면에 있는 행 전부가 자기 하위 트리를 다시 조정한다.
+//
+// ## 비교가 얕지 않은 두 자리
+//
+// `chips` 와 `rollup` 은 렌더할 때마다 **새로 만들어지는** 값이다
+// (`chipsFor` 는 새 배열을, `rollupFor` 는 새 객체를 돌려준다). 얕은 비교는 그
+// 둘에서 언제나 실패하므로 `React.memo` 를 그냥 씌우면 아무것도 막지 못한다.
+// 그래서 그 둘만 값으로 본다 — 필드 수가 고정이고(3개·3개) 개수가 한 자리라서,
+// 이 비교는 행 하나를 다시 그리는 것보다 압도적으로 싸다.
+//
+// 나머지는 전부 동일성 비교다. 그것이 성립하려면 호출자가 핸들러를 안정적으로
+// 넘겨야 하고(`actions`·`onResend`), 그것이 첫 수리의 내용이다.
+// =============================================================================
+
+function sameChips(a: ReactionChip[], b: ReactionChip[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (
+      a[i].emoji !== b[i].emoji ||
+      a[i].count !== b[i].count ||
+      a[i].mine !== b[i].mine
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameRollup(
+  a: ThreadRollup | null | undefined,
+  b: ThreadRollup | null | undefined,
+): boolean {
+  if (a === b) return true;
+  // `null`(이 표면에는 롤업이 없다)과 `undefined`(서버의 것을 쓰라)는 다른 뜻이다.
+  if (a == null || b == null) return a === b;
+  return (
+    a.replyCount === b.replyCount &&
+    a.lastReplySeq === b.lastReplySeq &&
+    a.lastReplyAtMs === b.lastReplyAtMs
+  );
+}
+
+/**
+ * 비교자가 **본** prop 의 전수 목록 — 컴파일 타임 망라성 가드 (1R M2).
+ *
+ * 아래 비교자는 필드를 손으로 열거한다. 빠르고 읽히지만, 그 형태에는 조용한
+ * 결함이 하나 붙어 있다: `MessageRowProps` 에 열한 번째 prop 이 생겨도 비교자는
+ * **컴파일된다.** 그리고 그 순간 이 행은 그 prop 이 바뀌어도 다시 그려지지 않는
+ * 행이 된다 — 성능 결함이 아니라 **정확성 결함**이고, 화면에는 옛 값이 남는다.
+ * memo 의 무서운 점이 그것이다. 틀려도 조용하다.
+ *
+ * 그래서 목록을 따로 적는다. `Record<keyof MessageRowProps, true>` 는 prop 이
+ * 하나 늘면 "속성이 없습니다"로 **빌드를 멈춘다.** 그때 이 파일을 열게 되고,
+ * 이 주석이 다음 질문을 준다: 그 prop 은 동일성으로 충분한가, 아니면 `chips`·
+ * `rollup` 처럼 값으로 봐야 하는가.
+ *
+ * 그리고 목록만으로는 "인지했다"까지밖에 못 잠근다. 비교자가 실제로 그 prop 을
+ * **보는지**는 `__tests__/messageRowMemo.test.tsx` 가 이 목록을 순회하며 묻는다.
+ */
+export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
+  message: true,
+  startsGroup: true,
+  directory: true,
+  chips: true,
+  pausedRepeat: true,
+  nowMs: true,
+  onResend: true,
+  actions: true,
+  rollup: true,
+  replyParent: true,
+};
+
+export function sameMessageRowProps(
+  a: MessageRowProps,
+  b: MessageRowProps,
+): boolean {
+  return (
+    a.message === b.message &&
+    a.startsGroup === b.startsGroup &&
+    a.directory === b.directory &&
+    a.pausedRepeat === b.pausedRepeat &&
+    a.nowMs === b.nowMs &&
+    a.onResend === b.onResend &&
+    a.actions === b.actions &&
+    a.replyParent === b.replyParent &&
+    sameChips(a.chips, b.chips) &&
+    sameRollup(a.rollup, b.rollup)
+  );
+}
+
+export const MessageRow = React.memo(MessageRowInner, sameMessageRowProps);
+// `React.memo` 는 이름을 지우므로 다시 붙인다 — 리액트 개발자 도구와 테스트
+// 실패 메시지가 「Memo」 대신 이 이름을 말하게 하려고.
+MessageRow.displayName = 'MessageRow';
 
 /**
  * The whole row as one sentence, because the row is one accessibility element.
