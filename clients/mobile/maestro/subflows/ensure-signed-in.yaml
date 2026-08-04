@@ -1,0 +1,60 @@
+appId: app.momo.ios
+name: ensure-signed-in
+---
+# Every flow after 00-login must be runnable ALONE — `maestro test 20-stop.yaml`
+# on a fresh checkout has to work, or the first thing anyone does while debugging
+# one failing flow is re-run the whole lane to get back into a signed-in state.
+#
+# So this does not assume 00-login just ran. It waits for the app to finish its
+# restore (`booting` / `session-restoring` are both real launch states, and the
+# keychain read is async), then signs in only if the connect screen is what
+# came up.
+- runFlow: dismiss-system-alerts.yaml
+- extendedWaitUntil:
+    visible:
+      id: "server-url-input|sidebar-list"
+    timeout: 180000
+- runFlow:
+    when:
+      visible:
+        id: "server-url-input"
+    commands:
+      - tapOn:
+          id: "server-url-input"
+      - inputText: ${SERVER_URL}
+      - assertVisible:
+          id: "server-url-hint"
+      - tapOn:
+          id: "email-input"
+      - inputText: ${EMAIL}
+      # `eraseText` first — see the note in 00-login.yaml; without it the
+      # secure field hands the server a mangled password.
+      - tapOn:
+          id: "password-input"
+      - eraseText
+      - inputText: ${PASSWORD}
+      - hideKeyboard
+      - tapOn:
+          id: "submit-button"
+      # A successful sign-in raises the keychain prompt and then the push
+      # permission prompt, seconds apart, and either one blocks the hierarchy
+      # underneath it — the assertion below then fails against a screen that
+      # rendered correctly. Same loop, same reason, as 00-login.yaml.
+      #
+      # It has to be HERE and not only in 00-login: a lane run reaches this
+      # branch whenever a flow is run on its own (`--flow 20-stop` on a
+      # signed-out simulator), which is exactly when nothing else has dealt with
+      # the prompts. Measured: without it the sign-in succeeds and the flow dies
+      # on `sidebar-list` with the channel list fully drawn behind a dialog.
+      - repeat:
+          times: 6
+          commands:
+            - runFlow: dismiss-system-alerts.yaml
+            - waitForAnimationToEnd:
+                timeout: 2000
+      - extendedWaitUntil:
+          visible:
+            id: "sidebar-list"
+          timeout: 60000
+- assertVisible:
+    id: "sidebar-list"

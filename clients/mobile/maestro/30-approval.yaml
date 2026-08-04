@@ -1,0 +1,163 @@
+appId: app.momo.ios
+name: 30-approval
+# No `env:` block — see the note at the top of 00-login.yaml.
+---
+# 30-approval — 툴콜 유도 → 결정 대기 탭 → 무장 → 확정 문장 → 승인 → 영수증.
+#
+# `MOMO-352` in the message body is the tool-call trigger, and the specific one
+# matters. scripts/mock_hermes.py `_tool_fixture` maps that marker to
+# `momo.mock.echo`, which is on ToolResumeExecutor's allowlist — so an APPROVED
+# call actually executes and the run finishes. The mock's default fixture
+# (`github.search_issues`) also pauses for approval and would satisfy every
+# assertion up to the receipt, then fail to resume with `unsupportedTool`,
+# leaving a half-verified flow that looks green until someone reads the run row.
+#
+# No `MAESTRO TEXT` here, obviously — the tool call IS the subject. No
+# `MAESTRO SLOW` either: an approval pause is a durable state, not a window, so
+# nothing has to be held open for the assertions to land.
+#
+# WHAT THIS FLOW CANNOT SEE: the simulator has no APNs, so the lock-screen
+# approval path is not exercised here. The runner prints that as an explicit
+# 실기기 파이널 체크 item rather than letting a green table imply it was covered.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+- tapOn:
+    id: "composer-input"
+- inputText: "@kim"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- tapOn:
+    id: "mention-option"
+    index: 0
+- inputText: "MOMO-352 phone lane approval check"
+- tapOn:
+    id: "composer-send"
+
+# The pause is visible in the channel first — the agent posts an approval_request
+# message. Asserting it here is what ties the inbox card below to a turn this
+# flow actually caused.
+- extendedWaitUntil:
+    visible: ".*Approve momo.mock.echo.*"
+    timeout: 120000
+
+# RELAUNCH before opening the inbox — and this is a workaround for a real
+# defect, not a stylistic choice, so it is worth reading before deleting.
+#
+# The inbox does not pick up an approval that arrives while the app is open. Its
+# feeds are react-query with `FEED_STALE_MS = 15_000` (useInbox.ts), and the tab
+# screens are hidden with `display:'none'` rather than unmounted (AppShell), so
+# switching to the inbox is not a mount and nothing triggers a refetch. Measured
+# here: the approval sat `pending` in the database and rendered live in the
+# CHANNEL, while the inbox showed "지금 결정할 일이 없습니다. 조용한 게 정상입니다." for
+# the full 60s wait. Realtime is fine — the channel proved that; the approvals
+# query is simply never invalidated by it.
+#
+# Relaunching is also the honest shape of the path this flow stands in for: the
+# lock-screen push wakes the app, and the person decides on a fresh launch. When
+# the invalidation lands, this can go back to a plain tab tap.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+# The relaunch brings the LogBox banner back, and it covers the TAB BAR as well
+# as the composer — a tab tap made under it reports COMPLETED and does nothing.
+# It can only be dismissed from a conversation (the dismissal is a coordinate;
+# on the sidebar that coordinate is inside a tab). Same detour, same reason, as
+# the one at the top of 40-agents-tab.yaml.
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "header-back"
+
+# Decisions live on the inbox tab, not in the timeline (ApprovalDecision is only
+# mounted by InboxScreen).
+- extendedWaitUntil:
+    visible:
+      id: "tab-inbox"
+    timeout: 30000
+- tapOn:
+    id: "tab-inbox"
+- extendedWaitUntil:
+    visible:
+      id: "inbox-list"
+    timeout: 60000
+
+# 결정 대기 — the needs-action filter. The strip only renders when more than one
+# filter is available, so this is guarded rather than assumed.
+- runFlow:
+    when:
+      visible:
+        id: "inbox-tab-needs-action"
+    commands:
+      - tapOn:
+          id: "inbox-tab-needs-action"
+
+# Regex on the id: the testID carries the approval's runtime UUID
+# (`inbox-approval-{approvalId}-…`), which cannot be known when the flow is
+# written and is not worth threading through the runner just to name a button.
+- extendedWaitUntil:
+    visible:
+      id: "inbox-approval-.*-approve"
+    timeout: 60000
+- tapOn:
+    id: "inbox-approval-.*-approve"
+
+# Same two-tap contract as the stop control, and the same reason for asserting
+# the sentence rather than the button: `reversible` defaults false, so the copy
+# a person is asked to accept has to include that it cannot be undone.
+- assertVisible:
+    id: "inbox-approval-.*-confirm"
+- assertVisible: ".*승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.*"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: "inbox-approval-.*-commit"
+- assertNotVisible:
+    id: "inbox-approval-.*-too-fast"
+
+# The receipt is `inbox-decision-note`, NOT `decision-receipt-{key}`. The two are
+# easy to swap and mean opposite things: `decision-receipt-*` is what the screen
+# shows when a decision was made SOMEWHERE ELSE and this client is catching up,
+# so asserting it here would pass on a run where this phone's own approve did
+# nothing and another client happened to decide it.
+- extendedWaitUntil:
+    visible:
+      id: "inbox-decision-note"
+    timeout: 60000
+- assertVisible: ".*승인을 기록했습니다.*"
+
+# An approved call that never executes is not an approval. `momo.mock.echo` is
+# on the resume allowlist precisely so this last step is real: the run has to
+# leave awaiting_approval and finish.
+- tapOn:
+    id: "tab-channels"
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-working"
+    timeout: 120000

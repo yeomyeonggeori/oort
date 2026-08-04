@@ -38,6 +38,36 @@ MOCK_TOOL_ARGS = {
 EQUIVALENCE_TOOL_ARGS = {"message": "MOMO-352 approved hello"}
 UUID_PATTERN = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
+# ---- MAESTRO-1 lane directives ----------------------------------------------
+#
+# The phone lane (clients/mobile/scripts/lane-phone.sh) needs two shapes of turn
+# that the existing knobs can only produce PROCESS-WIDE, which is useless here:
+# `MOCK_HERMES_TOOL_CALLS` and `MOCK_HERMES_EVENT_DELAY_SECONDS` are read once at
+# import (lines 31-32), so a lane that wants a text-only turn in one flow and an
+# approval-pausing turn in the next would have to restart the container between
+# them — inside a run whose whole point is to be one command.
+#
+# So the lane steers per-request, through the channel the fixture already uses
+# for tool selection: a marker in the message the person sends. `_tool_fixture`
+# has read the prompt since MOMO-352; these two read the same string.
+#
+#   "MAESTRO TEXT"  -> this turn emits text deltas and NO tool_call, so it ends
+#                      in a durable channel message instead of an approval pause
+#                      (flows 10-mention-working and 20-stop).
+#   "MAESTRO SLOW"  -> this turn sleeps MAESTRO_SLOW_SECONDS between events
+#                      instead of EVENT_DELAY_SECONDS, so 「작업 중」 is on screen
+#                      long enough to be asserted, and 20-stop has a live turn to
+#                      interrupt. Without it, a default turn is ~0.2s end to end
+#                      and the indicator is gone before Maestro can look.
+#
+# Both are inert when the marker is absent: a request that carries neither takes
+# byte-identical paths to before. Every existing verifier sends neither.
+MAESTRO_TEXT_MARKER = "MAESTRO TEXT"
+MAESTRO_SLOW_MARKER = "MAESTRO SLOW"
+MAESTRO_SLOW_SECONDS = float(
+    os.environ.get("MOCK_HERMES_MAESTRO_SLOW_SECONDS", "2.0")
+)
+
 
 class MockHermesHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -98,23 +128,37 @@ class MockHermesHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         _, tool_name, _ = self._tool_fixture(request)
+        # MAESTRO-1: per-request overrides, all absent from every other caller.
+        text_only, delay, slow = self._maestro_directives(request)
         chunks = [] if tool_name.startswith("work_") else [
             "김인턴 mock reply: ",
             "MOMO-004 SSE ",
             "path verified.",
         ]
+        # A lead-in pause BEFORE the first token, only under `MAESTRO SLOW`.
+        #
+        # This is what makes the literal 「작업 중」 observable, and it took a
+        # hierarchy dump to find out why it wasn't. The client's activity line
+        # (packages/momo-core/.../turnCopy.ts activityText) reads "김인턴이 작업 중"
+        # only while the turn has NO headline yet; the moment the first delta
+        # lands it becomes "김인턴: <streamed text>". Streaming immediately meant
+        # the phrase the lane is supposed to assert never rendered at all — the
+        # bar was up the whole time saying something else.
+        if slow:
+            time.sleep(delay)
         for chunk in chunks:
             self._write_event(self._stream_chunk(request, content=chunk))
-            time.sleep(EVENT_DELAY_SECONDS)
+            time.sleep(delay)
 
         # MOMO-565 리허설 검출: 528 fail-closed 이후 grant가 시드되지 않은 스택에서
         # tool_call은 승인 대기로 멈춘다. 순수 텍스트 왕복만 검증하는 스모크는
         # MOCK_HERMES_TOOL_CALLS=0으로 툴콜 방출을 끈다(기본 1 = 기존 동작).
-        if os.environ.get("MOCK_HERMES_TOOL_CALLS", "1") != "0":
+        # MAESTRO-1: `MAESTRO TEXT` does the same thing for ONE request.
+        if os.environ.get("MOCK_HERMES_TOOL_CALLS", "1") != "0" and not text_only:
             self._write_event(self._tool_call_chunk(request, arguments_prefix=True))
-            time.sleep(EVENT_DELAY_SECONDS)
+            time.sleep(delay)
             self._write_event(self._tool_call_chunk(request, arguments_prefix=False))
-            time.sleep(EVENT_DELAY_SECONDS)
+            time.sleep(delay)
         self._write_event(self._usage_chunk(request))
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
@@ -188,15 +232,56 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             ],
         }
 
-    def _tool_fixture(
-        self, request: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any]]:
+    @staticmethod
+    def _combined_prompt(request: dict[str, Any]) -> str:
         messages = request.get("messages") or []
-        combined = "\n".join(
+        return "\n".join(
             str(message.get("content") or "")
             for message in messages
             if isinstance(message, dict)
         )
+
+    @staticmethod
+    def _latest_user_content(request: dict[str, Any]) -> str:
+        """The content of the last `user` message, or the last message at all.
+
+        MAESTRO-1 markers are read from HERE and not from the concatenated
+        prompt `_tool_fixture` uses, because the server sends recent channel
+        history with every turn (MessageRoutes `recent_messages`). Scanning the
+        whole prompt means one `MAESTRO TEXT` message poisons every later turn
+        in that channel: the marker is still in the context window, so a turn
+        that was supposed to make a tool call silently keeps returning plain
+        text. That cost a green-looking 30-approval that never produced an
+        approval at all.
+        """
+        messages = request.get("messages") or []
+        for message in reversed(messages):
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") == "user":
+                return str(message.get("content") or "")
+        for message in reversed(messages):
+            if isinstance(message, dict):
+                return str(message.get("content") or "")
+        return ""
+
+    def _maestro_directives(self, request: dict[str, Any]) -> tuple[bool, float, bool]:
+        """MAESTRO-1 per-request overrides.
+
+        Returns (suppress tool_call, event delay, slow) — the process defaults
+        unless the marker is in THIS turn's prompt, so a request from any other
+        caller is unaffected.
+        """
+        latest = self._latest_user_content(request)
+        text_only = MAESTRO_TEXT_MARKER in latest
+        slow = MAESTRO_SLOW_MARKER in latest
+        delay = MAESTRO_SLOW_SECONDS if slow else EVENT_DELAY_SECONDS
+        return text_only, delay, slow
+
+    def _tool_fixture(
+        self, request: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any]]:
+        combined = self._combined_prompt(request)
         channel_match = re.search(
             rf"current channel UUID is ({UUID_PATTERN})", combined, re.IGNORECASE
         )
