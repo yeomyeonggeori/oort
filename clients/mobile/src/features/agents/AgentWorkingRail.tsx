@@ -12,6 +12,7 @@ import {
 import {resolveAgentWorkingSignals} from '@momo/core/features/agents/workingSignal';
 import type {AgentProgressEvent} from '@momo/core/lib/realtimeEvents';
 import {useCallback, useEffect, useMemo, useRef} from 'react';
+import {useInvalidateInboxLedgers} from '../inbox/useInbox';
 import {useRealtime} from '../../realtime/RealtimeProvider';
 import {useSession} from '../../session/useSession';
 import {useChannels, useDirectory} from '../workspace/queries';
@@ -117,15 +118,56 @@ export function AgentWorkingRail(): null {
     ownedRef.current = owned;
   }, []);
 
+  // ===========================================================================
+  // ## 승인이 도착하면 인박스가 그것을 안다 (goal RN-B4d / #1020)
+  //
+  // MAESTRO 30-approval 이 실측한 결함: 승인이 DB 에서 `pending` 이고 채널에는
+  // 실시간으로 떠 있는 동안, 인박스는 60초 내내 「지금 결정할 일이 없습니다」였다.
+  // 원인은 리얼타임이 아니다 — 채널이 그것을 증명했다. 원인은 **아무것도 인박스
+  // 쿼리를 무효화하지 않는다**는 것이었다: 피드는 `FEED_STALE_MS` 15초를 쥐고
+  // 있고, 탭은 언마운트가 아니라 `display:'none'` 이라 탭 전환이 마운트가 아니다.
+  //
+  // 그 신호가 **이미 이 레일을 지나가고 있었다.** 승인 대기는
+  // `agent.status` 의 `run_status: "awaiting_approval"` 이고, 이 레일은 워크스페이스
+  // 전체의 에이전트 채널을 이미 듣고 있다(그것이 이 파일이 셸에 사는 이유다). 인박스
+  // 자신이 소켓을 하나 더 열 이유가 없다.
+  //
+  // 흔드는 조건은 **run_status 가 바뀐 프레임**뿐이다. 「승인 대기일 때」가 아니라
+  // 「바뀌었을 때」인 이유는 두 방향이 다 필요하기 때문이다: 들어갈 때 행이 생기고,
+  // 나갈 때(다른 클라이언트가 결정했거나 만료됐거나 실행이 끝났거나) 행이 사라진다.
+  // 한 턴이 내는 상태 변화는 손에 꼽고, 스트리밍 프레임(`agent.partial`)은 여기
+  // 닿지 않는다 — 그것이 없었다면 이 줄은 토큰마다 원장을 다시 읽는 폭풍이 된다.
+  // ===========================================================================
+  const invalidateInboxLedgers = useInvalidateInboxLedgers();
+  /**
+   * run id → 마지막으로 본 `run_status`. 같은 상태의 반복 프레임은 조용하다.
+   *
+   * 키는 **소문자로 접은 run id** 다. id 는 이 선을 대소문자가 섞인 채로 건너오고
+   * (core `agentRail.keyOf` 의 이유와 같다), 트랙 맵도 같은 규칙으로 접혀 있다 —
+   * 아래 청소가 두 맵을 같은 키로 비교하려면 여기서도 접어야 한다.
+   */
+  const runStatusRef = useRef<Map<string, string>>(new Map());
+
   const onEvent = useCallback(
     (pair: AgentSubscription, event: AgentProgressEvent) => {
       const nowMs = Date.now();
+      if (event.type === 'agent.status') {
+        const runId = (event.payload.run_id ?? '').toLowerCase();
+        const runStatus = event.payload.run_status;
+        if (runId !== '' && runStatusRef.current.get(runId) !== runStatus) {
+          runStatusRef.current.set(runId, runStatus);
+          invalidateInboxLedgers();
+        }
+      }
       const next = applyAgentEvent(tracksRef.current, event, pair, nowMs);
+      // 트랙이 그대로여도 위의 무효화는 이미 일어났고, 그래야 한다. 끝난 런은
+      // `applyAgentEvent` 가 트랙에서 **지우고** 같은 맵을 돌려줄 수 있는데,
+      // 인박스에게 그 프레임은 「행 하나가 사라졌다」는 소식이다.
       if (next === tracksRef.current) return;
       tracksRef.current = next;
       publish(nowMs);
     },
-    [publish],
+    [invalidateInboxLedgers, publish],
   );
 
   useEffect(() => {
@@ -155,6 +197,12 @@ export function AgentWorkingRail(): null {
     const id = setInterval(() => {
       const nowMs = Date.now();
       tracksRef.current = pruneTracks(tracksRef.current, nowMs, ZOMBIE_CLEAR_MS);
+      // 상태 기억도 같은 청소를 받는다. 이 맵은 렌더에 닿지 않으므로 새는 것은
+      // 화면이 아니라 메모리뿐이지만, 하루 종일 열려 있는 앱에서 「본 적 있는 런」은
+      // 끝없이 늘어난다. 트랙에서 사라진 런은 여기서도 사라진다.
+      for (const runId of runStatusRef.current.keys()) {
+        if (!tracksRef.current.has(runId)) runStatusRef.current.delete(runId);
+      }
       sweepAgentWorking(nowMs);
       publish(nowMs);
     }, SWEEP_INTERVAL_MS);
@@ -168,6 +216,7 @@ export function AgentWorkingRail(): null {
     return () => {
       tracksRef.current = new Map();
       ownedRef.current = new Set();
+      runStatusRef.current = new Map();
       resetAgentWorking();
     };
   }, [workspaceId]);

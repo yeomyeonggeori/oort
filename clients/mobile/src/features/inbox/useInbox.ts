@@ -182,6 +182,27 @@ export function useInvalidateApprovals(): () => void {
   }, [client, workspaceId]);
 }
 
+/**
+ * 인박스가 서 있는 두 원장을 다시 읽는다 (goal RN-B4d / #1020).
+ *
+ * `useInvalidateApprovals` 와 나란히 있지만 하는 말이 다르다. 그쪽은 **내가 방금
+ * 결정했다** — 승인 원장 하나면 충분하다. 이쪽은 **저쪽에서 무언가 움직였다** 이고,
+ * 그러면 결정 대기 목록과 에이전트 실행 목록이 둘 다 낡는다. 인박스의 세 탭 중
+ * 둘이 이 두 키 위에 서 있다.
+ *
+ * 키 접두사로 무효화하는 것도 `useAgentFeed.refetch` 와 같은 이유다: 이 피드는 승인
+ * 4개 상태 페이지와 채널 12개로 부챗살처럼 퍼지고, 그 모양은 채널 목록이 바뀔 때마다
+ * 바뀐다. 접두사는 지금 마운트된 것을 전부 잡는다.
+ */
+export function useInvalidateInboxLedgers(): () => void {
+  const {workspaceId} = useSession();
+  const client = useQueryClient();
+  return useCallback(() => {
+    void client.invalidateQueries({queryKey: ['approvals', workspaceId]});
+    void client.invalidateQueries({queryKey: ['agent-runs', workspaceId]});
+  }, [client, workspaceId]);
+}
+
 export function useNeedsAction(enabled: boolean): Feed {
   const {workspaceId} = useSession();
   const context = useFeedContext();

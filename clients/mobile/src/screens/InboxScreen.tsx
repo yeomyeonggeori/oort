@@ -15,7 +15,7 @@ import {
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import NetInfo from '@react-native-community/netinfo';
 import {useMutation} from '@tanstack/react-query';
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   FlatList,
@@ -38,6 +38,7 @@ import {ApprovalDecision} from '../features/inbox/ApprovalDecision';
 import {
   useAgentFeed,
   useInvalidateApprovals,
+  useInvalidateInboxLedgers,
   useMarkRead,
   useMentions,
   useNeedsAction,
@@ -127,8 +128,26 @@ const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
 };
 
 export default function InboxScreen({
+  active = true,
   onOpenConversation,
 }: {
+  /**
+   * 지금 이 탭이 보이는가 (goal RN-B4d / #1020).
+   *
+   * 이 화면은 언마운트되지 않는다 — `AppShell` 이 탭을 `display:'none'` 으로 숨기고
+   * 마운트는 유지한다(그래야 탭 전환이 즉시다). 그 대가로 **탭을 여는 것이 마운트가
+   * 아니고**, react-query 가 재조회를 걸 계기가 사라진다. 그래서 「보이게 되었다」를
+   * prop 으로 받아 그 순간에 원장을 다시 읽는다.
+   *
+   * 리얼타임 무효화(`AgentWorkingRail`)가 이미 대부분을 덮지만 이것이 남아야 하는
+   * 이유가 있다: 백그라운드 정책이 소켓을 세워 둔 동안 도착한 것, 그리고 이 화면이
+   * 처음 마운트되기 전에 일어난 것. 그 둘은 레일이 볼 수 없고, 사람이 탭을 여는 그
+   * 순간이 「지금 결정할 일이 없습니다」가 참인지 물어보기 가장 좋은 때다.
+   *
+   * 기본값 `true`: 이 화면을 단독으로 마운트하는 테스트·표면에서 「보이지 않는다」가
+   * 조용한 기본값이 되면, 재조회가 사라진 것을 아무도 알아채지 못한다.
+   */
+  active?: boolean;
   onOpenConversation: (channelId: string, title: string) => void;
 }): React.JSX.Element {
   const {member} = useSession();
@@ -171,6 +190,32 @@ export default function InboxScreen({
   // 알고 있으므로(`feed.refetch` = 무효화), 당김은 그것을 부르는 새 입구일 뿐이다 —
   // 탭을 바꾸면 대상도 함께 바뀐다.
   const refreshControl = useRefreshControl(feed.refetch, 'inbox-refresh');
+
+  // 탭이 열리는 순간 원장을 다시 읽는다 (#1020). `active` 가 거짓→참으로 바뀔 때만
+  // 돈다: 참인 채로 다시 그려지는 것(필터 전환, 결정 한 번)은 여는 것이 아니다.
+  //
+  // 두 경우에는 묻지 않는다. 둘 다 「다시 묻는 것이 답을 바꾸지 못한다」이다:
+  //
+  //   * **이미 묻고 있는 중**(`isLoading`) — 첫 조회가 날아가고 있다면 낡은 것은
+  //     아무것도 없다. 여기서 무효화하면 같은 답을 두 번 받으러 가는 왕복이 하나
+  //     늘 뿐이고, 폰에서 그 왕복은 라디오를 켠다.
+  //   * **서버가 그 경로를 모른다고 답했다**(`absent`) — 404/405/501 은 두 번 물어도
+  //     같은 답이 온다. `retryUnlessAbsent` 가 그래서 재시도를 끄는 것이고, 탭을
+  //     열 때마다 그 판정을 뒤집으면 그 결정이 무의미해진다.
+  const invalidateLedgers = useInvalidateInboxLedgers();
+  const feedStateRef = useRef({isLoading: feed.isLoading, absent: feed.absent});
+  feedStateRef.current = {isLoading: feed.isLoading, absent: feed.absent};
+  const wasActiveRef = useRef(false);
+  useEffect(() => {
+    if (!active) {
+      wasActiveRef.current = false;
+      return;
+    }
+    if (wasActiveRef.current) return;
+    wasActiveRef.current = true;
+    if (feedStateRef.current.isLoading || feedStateRef.current.absent) return;
+    invalidateLedgers();
+  }, [active, invalidateLedgers]);
 
   const markRead = useMarkRead();
   const marking = useMutation({
