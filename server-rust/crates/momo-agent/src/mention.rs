@@ -698,9 +698,17 @@ pub fn mention_diagnostic_detail(
     Value::Object(detail)
 }
 
-/// The paused-agent system line's body — Swift :1601, verbatim Korean.
+/// The paused-agent system line's body — Swift :1601.
+///
+/// goal SRV-B5b: the particle is now decided when it can be decided, so 루나
+/// reads `루나는` rather than `루나은(는)`. Swift still writes the hedge
+/// unconditionally and is deliberately not edited (port discipline — see
+/// [`crate::korean`]); a non-Hangul name still hedges here too.
 pub fn paused_mention_body(display_name: &str) -> String {
-    format!("{display_name}은(는) 현재 일시정지되어 있습니다.")
+    format!(
+        "{} 현재 일시정지되어 있습니다.",
+        crate::korean::attach_particle(display_name, crate::korean::ParticlePair::Topic)
+    )
 }
 
 /// …and its `props` (Swift :1602-1606). The ids are **lowercase** here, unlike

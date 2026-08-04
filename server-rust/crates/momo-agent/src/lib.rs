@@ -126,6 +126,7 @@ pub mod approval;
 pub mod dm;
 pub mod effort;
 pub mod error;
+pub mod korean;
 pub mod mention;
 pub mod provisioning;
 pub mod routing;
@@ -167,6 +168,7 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
+pub use korean::{attach_particle, has_final_consonant, particle_for, ParticlePair};
 pub use mention::{
     allowed_agent_models, context_window_size, effective_system_prompt,
     load_mention_candidates_in_tx, max_output_tokens, mention_diagnostic_detail,
