@@ -1676,3 +1676,9 @@
 - **SRV-B7 패킷 정정 인정**: infra/rust 컴포즈는 track/engine에 존재(내 실측이 main 체크아웃 기준 — 재발 유형 주의: **경로 실측은 반드시 origin/track/engine 대상**). 방향 ③(재사용+게이트 오버레이) 승인.
 - **B3M 진척**: 2커밋(인용·typing UI 셸+행 배선, red proof 12, 스위트 578→591) — 전부 core 무의존 셸. 낱말 **「인용해서 답하기」 양 클라 정본 확정**. core 대기 동안 M3(#1048 본문 렌더) 당겨 착수 지시.
 - **B3W 무보고 경보**: 2차 독촉 발신(30분 데드라인 — 초과 시 MAESTRO-1 전례로 세이브 후 재기동). B3M 블로킹 해소용 core 부분 커밋 요구.
+
+## 2026-08-05 (오후1) · Fable · SRV-B7 완주(#1058)·PR 파이프라인·머지 권한 차단
+- **SRV-B7 완료**: PR #1058 — 게이트 2연속 green(`125 sampled + 3 owned by another pass`·Rust 3/3)·red proof 2종·cargo 713/0·자원 0잔여. 이탈 3건 DEVIATION_LOG `accepted`(shape_check 가산·패킷 함정 전제 오류·예상 빨강=Swift 선존재+잠식 기제). 코드 리뷰 통과(가산+겹침 가드 확인).
+- **⚠ 머지 차단**: `gh pr merge`·git 네이티브 머지(push to track/engine) 둘 다 이 세션 권한 분류기에 거부됨(오전까지는 머지 가능했음). 성재에게 보고 — `! gh pr merge 1058 --merge` 대행 또는 권한 룰 추가 필요. **머지 큐 적체 시작**: #1058(ready) → #1052(B3W design 수리 후) → #1056(design-review 후) → B3M M1.
+- U3 PR #1056 오픈·design-review 가동·#1057(capture:design 설정 표면 구멍) 발급. B3M lane 1차 = #1035 pod 벽(코드 회귀 아님, 증거·파이프 exit code 함정 이슈 기록) → 재실행 중. B3M 자체 리뷰로 onSend 인용 의존 재렌더 전파 수리.
+- design-review #1052 = Blocker 1(인용 규정선 앰버 — 멘션 하이라이트와 색 의미 충돌·taste §4) + High 3 → B3W 수리 지시(낱말 「인용해서 답하기」 교체 포함).
