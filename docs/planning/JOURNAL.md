@@ -1669,3 +1669,10 @@
 - **SRV-B7(#1042 openapi rust 이중 샘플) 착수**: 패킷 `2026-08-05-SRV-B7-openapi-rust-sampling-packet.md`, worker-SRVB7 스폰. 함정 명시: repo에 rust 로컬 컴포즈 부재(실측) — 부팅 패턴 선택은 worker 실측+근거 기록.
 - **#1022(레인→rust)는 배치 4로 보류**: 레인 파일이 clients/mobile/** + 기기·컴포즈 자원이 B3M 검증과 경합 — B3 랜딩 후.
 - 다음: 첨부 v0 ADR(0151) 기안(성재 사전 승인 방향) · B3W core 표면 커밋 대기 → B3M 중계 · PR 도착 순 검수·머지.
+
+## 2026-08-05 (오전) · Fable · 워커 보고 4건 처리 — U1 종결·이탈 판정·B3W 무보고 경보
+- **U1 최종 종결**: 증거 공백 2건 닫힘 커밋 — BL-1은 시각 확증으로 심각도 근거 강화(지배 실패 모드="답변 전체가 코드 상자" — `body.includes('```')` 분기, 웹 대조군 정상. 대표 캡처 `md-01`) · M-10 근인 확정(momowebqa centrifugo `allowed_origins`에 RN origin 부재 → 거절이 '연결 중…'으로 위장 — UI 결함으로 재분류, U3 축 이관). 파생 이슈: **#1050**(openapi에 provider/link 4경로 부재) · **#1051**(QA·레인이 폰 실시간 미검증). U1 워커 해제.
+- **U3 이탈 판정**: ①스펙 갭 → 이 PR 불작성, #1050 후속 ②`momo-core/features/settings/api.ts` 가산 수정 예외 승인(조건: 가산만·호출자 무영향·이탈 절 명기). 서버 실측 소득: GET이 credentialKind/credentialMeta(계정 라벨·만료·한국어 notice)까지 이미 줌 — Goal 2 서버 갭 소멸.
+- **SRV-B7 패킷 정정 인정**: infra/rust 컴포즈는 track/engine에 존재(내 실측이 main 체크아웃 기준 — 재발 유형 주의: **경로 실측은 반드시 origin/track/engine 대상**). 방향 ③(재사용+게이트 오버레이) 승인.
+- **B3M 진척**: 2커밋(인용·typing UI 셸+행 배선, red proof 12, 스위트 578→591) — 전부 core 무의존 셸. 낱말 **「인용해서 답하기」 양 클라 정본 확정**. core 대기 동안 M3(#1048 본문 렌더) 당겨 착수 지시.
+- **B3W 무보고 경보**: 2차 독촉 발신(30분 데드라인 — 초과 시 MAESTRO-1 전례로 세이브 후 재기동). B3M 블로킹 해소용 core 부분 커밋 요구.
