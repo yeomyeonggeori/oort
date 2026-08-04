@@ -54,8 +54,8 @@ use uuid::Uuid;
 use crate::dto::{AgentRunCancelResponse, AgentRunResponse, CreateAgentRunRequest};
 use crate::error::ApiError;
 use crate::routes::shared::{
-    agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms, path_uuid,
-    require_human, run_response, settle_db, workspace_scope, DbRejectable,
+    agent_tenant_tx, audit_via_token_id, emit_rail_frame, emit_terminal_agent_status, epoch_ms,
+    path_uuid, require_human, run_response, settle_db, workspace_scope, DbRejectable,
 };
 use crate::AppState;
 
@@ -211,6 +211,26 @@ pub async fn create(
                     "publish",
                     &wake,
                     Some(agent_member_id),
+                )
+                .await?;
+
+                // The opening frame (goal SRV-B3d) — the work surface's twin of
+                // the mention path's. A work run is started by a person tapping
+                // a button rather than by an utterance, but the rail cannot tell
+                // the two apart and must not have to.
+                emit_rail_frame(
+                    &mut *conn,
+                    workspace_id,
+                    channel_id,
+                    &momo_agent::opening_agent_status_payload(
+                        momo_agent::AgentRunAddress {
+                            workspace_id,
+                            channel_id,
+                            agent_member_id,
+                            run_id: run.id,
+                        },
+                        epoch_ms(chrono::Utc::now()),
+                    ),
                 )
                 .await?;
 

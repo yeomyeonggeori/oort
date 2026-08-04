@@ -332,6 +332,30 @@ pub(crate) async fn route_agent_mentions_in_tx(
             .await?;
         }
 
+        // The opening frame (goal SRV-B3d). The run row exists and is queued;
+        // this is what tells the rail WHEN the turn began, and it is the only
+        // frame that can — `isRunOpening` reads nothing else, so a rail that
+        // never sees one renders the badge with no elapsed clock.
+        //
+        // Emitted after the job so the FIFO on this channel reads the way the
+        // turn happened, and inside the send transaction so a rolled-back
+        // mention cannot leave a turn that never started showing as queued.
+        crate::routes::shared::emit_rail_frame(
+            &mut *conn,
+            send.workspace_id,
+            send.channel_id,
+            &momo_agent::opening_agent_status_payload(
+                momo_agent::AgentRunAddress {
+                    workspace_id: send.workspace_id,
+                    channel_id: send.channel_id,
+                    agent_member_id: agent.member_id,
+                    run_id: created.id,
+                },
+                send.hlc_ts,
+            ),
+        )
+        .await?;
+
         if let Some(ignored) = routing.ignored_model_pref.as_deref() {
             // ADR-0131 D2: an ignored inherited preference is only ever visible
             // as audit — never as a client error, and never silently.

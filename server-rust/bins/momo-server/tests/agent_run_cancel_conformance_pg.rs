@@ -643,8 +643,29 @@ async fn srv_c2_1_a_stop_ends_the_run_retires_its_job_and_says_so_in_the_room() 
     // it — a stop that the room could read about while the indicator went on
     // insisting the agent was working.
     let rail = agent_status_frames(&su, tenant.workspace).await;
-    assert_eq!(rail.len(), 1, "one stop, one terminal frame: {rail:?}");
-    let frame = &rail[0];
+    // goal SRV-B3d added the opening frame, so a stopped turn reads
+    // 여는 → 종료: the run was queued, then a person ended it. There is no
+    // `thinking` between them precisely because the job never ran — which is
+    // the property this whole test exists to prove.
+    let phases: Vec<(&str, &str)> = rail
+        .iter()
+        .map(|frame| {
+            (
+                frame["data"]["payload"]["phase"]
+                    .as_str()
+                    .unwrap_or_default(),
+                frame["data"]["payload"]["run_status"]
+                    .as_str()
+                    .unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        phases,
+        vec![("queued", "queued"), ("error", "cancelled")],
+        "the rail saw the turn open and then be stopped, and never saw it work: {rail:?}"
+    );
+    let frame = rail.last().expect("the terminal frame");
     assert_eq!(
         frame["channel"],
         json!(format!(
@@ -759,7 +780,11 @@ async fn srv_c2_2_a_repeat_stop_writes_nothing() {
     assert_eq!(
         agent_status_frames(&su, tenant.workspace).await.len(),
         1,
-        "nor publish a second terminal frame — one run ends exactly once"
+        "nor publish a second terminal frame — one run ends exactly once. \
+         (One frame, not two: this run was seeded directly rather than created \
+         through the mention path, so it never had an opening frame — which is \
+         itself the proof that the opening frame comes from run CREATION and \
+         not from the cancel.)"
     );
     assert_eq!(
         audit_details(&su, tenant.workspace, "agent.run.cancelled")
