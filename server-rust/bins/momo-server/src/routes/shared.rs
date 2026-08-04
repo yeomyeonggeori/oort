@@ -452,6 +452,56 @@ pub(crate) fn run_response(run: &momo_agent::AgentRunRow) -> crate::dto::AgentRu
     }
 }
 
+/// Publish the terminal `agent.status` frame for a run that just reached a
+/// terminal row, on the caller's connection and inside the caller's transaction
+/// (goal SRV-B3c).
+///
+/// Every place in this binary that ends a run calls this, and they all call
+/// *this* rather than building a frame of their own, for the reason the effort
+/// table gives for living in one module: two producers of the same frame is how
+/// a rail comes to say the turn ended in one code path and stay silent in
+/// another. The shape itself is [`momo_agent::terminal_agent_status_payload`] —
+/// this function is only the egress.
+///
+/// **A non-terminal status is a no-op, not an error.** The builder refuses it
+/// (an `awaiting_approval` run is genuinely still open), and a caller that hands
+/// one over has a bug in its own transition rather than in its broadcast; the
+/// frame is the safe half to drop.
+///
+/// The partition key is the **channel**, matching `send_message_in_tx`, so the
+/// frame is ordered behind the final message of the same turn rather than racing
+/// it. A rail that learned the turn was over before the answer arrived would
+/// blank the badge and then show the reply with nothing running.
+pub(crate) async fn emit_terminal_agent_status(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    agent_member_id: Uuid,
+    run_id: Uuid,
+    status: momo_agent::RunStatus,
+) -> Result<(), DbError> {
+    let Some(frame) = momo_agent::terminal_agent_status_payload(
+        workspace_id,
+        channel_id,
+        agent_member_id,
+        run_id,
+        status,
+        epoch_ms(chrono::Utc::now()),
+    ) else {
+        return Ok(());
+    };
+    momo_outbox::emit_outbox(
+        conn,
+        workspace_id,
+        momo_outbox::OutboxKind::Broadcast,
+        "publish",
+        &frame,
+        Some(channel_id),
+    )
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

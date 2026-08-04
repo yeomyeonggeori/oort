@@ -98,7 +98,7 @@ use momo_agent::{
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
-use momo_db::{with_tenant_tx, DbError, PgPool};
+use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{
     backoff_seconds, claim_agent_job_batch, mark_done, mark_failed, requeue, ClaimedAgentJob,
@@ -1182,6 +1182,25 @@ impl AgentWorker {
                 finish_run_in_tx(conn, run_id, outcome.succeeded(), &output, error.as_ref())
                     .await?;
 
+                // The progress rail is told the turn is over (goal SRV-B3c).
+                // THIS is the path a default deployment takes — `AGENT_GATEWAY_MODE`
+                // is `worker` unless an operator chose otherwise — so a fix that
+                // only covered the gateway callback would have left every real
+                // run ending in silence.
+                emit_terminal_agent_status(
+                    conn,
+                    workspace_id,
+                    snapshot.channel_id,
+                    snapshot.agent_member_id,
+                    run_id,
+                    if outcome.succeeded() {
+                        RunStatus::Succeeded
+                    } else {
+                        RunStatus::Failed
+                    },
+                )
+                .await?;
+
                 let report = RunUsageReport {
                     model: Some(snapshot.model.clone()),
                     effort: effort.clone(),
@@ -1443,6 +1462,19 @@ impl AgentWorker {
                 }
                 let error = json!({"code": PROVIDER_FAILED, "reason": reason});
                 finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
+                // A turn that died before it could answer still ended, and the
+                // badge has to learn that from somewhere (goal SRV-B3c). This is
+                // the path where it matters most: there is no message in the
+                // channel to imply it either.
+                emit_terminal_agent_status(
+                    conn,
+                    workspace_id,
+                    snapshot.channel_id,
+                    snapshot.agent_member_id,
+                    run_id,
+                    RunStatus::Failed,
+                )
+                .await?;
                 Ok(())
             })
         })
@@ -1967,6 +1999,45 @@ async fn listen_loop(database_url: String, wake: mpsc::Sender<()>) {
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
+}
+
+/// Publish the terminal `agent.status` frame for a run this worker just ended
+/// (goal SRV-B3c) — the worker-side twin of `momo-server`'s
+/// `routes::shared::emit_terminal_agent_status`, and deliberately the same six
+/// lines around the same builder.
+///
+/// Two copies exist because `momo-agent` is a payload crate with no `momo-outbox`
+/// dependency (invariant #3 keeps the single outbox INSERT in one place, and the
+/// frame's *shape* in another). What must not be duplicated is the shape, and it
+/// is not: both callers ask `momo_agent::terminal_agent_status_payload`.
+async fn emit_terminal_agent_status(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    agent_member_id: Uuid,
+    run_id: Uuid,
+    status: RunStatus,
+) -> Result<(), DbError> {
+    let Some(frame) = momo_agent::terminal_agent_status_payload(
+        workspace_id,
+        channel_id,
+        agent_member_id,
+        run_id,
+        status,
+        now_ms(),
+    ) else {
+        return Ok(());
+    };
+    momo_outbox::emit_outbox(
+        conn,
+        workspace_id,
+        momo_outbox::OutboxKind::Broadcast,
+        "publish",
+        &frame,
+        Some(channel_id),
+    )
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
