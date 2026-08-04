@@ -1,5 +1,21 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-08-05 스냅샷 11 (Fable · momo-main — 검수 주도 고속 사이클 마감 국면).** 컴팩트 복원용 전체 상태. 상세 시간순은 JOURNAL 2026-08-04~05 항목.
+>
+> **라이브**: 서버 `momo-rust:da6a646b`(NCP 101.79.11.189 — 배포 정본 `docs/runbooks/ncp-rust-deploy.md`, 5파일 compose+env 2개, 웹은 §웹 절·bind-mount 함정 주의) · 웹 app.oor7.com(작업 패널 포함) · 폰 `MomoMobile-rnb4.xcarchive` 설치됨(세션 스크래치패드) · 데스크탑 momo.app 재번들(engine 워크트리 target/release/bundle). provider=ADR-0147 OAuth 등록됨(자동 refresh 생존).
+>
+> **2026-08-04 하루 랜딩 요약(23 PR)**: 배치1(승인 3층: #986·#988·#987)+배치2(관전 마감: #993·#995·#994·#996)+검수 후속(RN-P2 #1003/1007/1009 · SRV-B3 6-goal #1004/1008/1010/1013/1016/1018 — **관전 레일 프로듀서 0→완전체**·luna 모델·enabled_tools 소비자)+작업 패널(#1015, 성재 승인 D1~D3)+MAESTRO 레인(#1021/1023 — `npm run lane:phone` 5플로우, 레인 서버=Swift 한계 명시)+핫픽스(#1028 툴명 400)+RN-B4 5-goal(#1029~1034: 진입 앵커·당김 새로고침·조사·인박스 리얼타임·AppState flush)+SRV-B5 3-goal(#1037/1039/1040: 작업런 툴·서버 조사 korean.rs·openapi 승인 표기 정합).
+>
+> **진행 중**: **SRV-B6**(#1038 하네스 위생 묶음 — 게이트웨이 모드 하네스·push 픽스처 격리·openapi 게이트 Rust 재조준, 워커=worker-SRV-B3, 패킷 `handoffs/2026-08-05-SRV-B6-harness-hygiene-packet.md`). 워커 운영 규율: 턴 20분·마일스톤 SendMessage 보고(MAESTRO-1 행 사건의 교훈 — 마라톤 턴 금지).
+>
+> **성재 대기(본인이 나중에 하겠다고 함 — 재촉 금지)**: ①폰 단건 검수(진입 앵커→luna 멘션→잠금화면 승인 순) ②마스코트 방향 선택(docs/brand/concepts/ 4종) ③UXUI 배치 순서 승인(`2026-08-05-uxui-elevation-points.md` U1~U5 — 권고 U1 진단→U3 연동→U2 모드) ④작업 패널 도구 인자 값 렌더 여부(taste §9 완화 — 현 상태가 정본 준수).
+>
+> **다음 자율 작업 큐(성재 무대기)**: U1 채팅 UI 정밀 진단(전 화면 캡처+design-review — 착수 예정) · ADR 기안 2건(0131 D2 증보=allow-list 확장 성문화 · 신규=external egress 방향, 웹검색 T-a 선행) · 웹 배치 후보(core 조사 잔여 2·routingModel 낡은 예시·web replay는 기랜딩) · #1022(레인 서버 Rust 교체 — Swift 삭제 전) · #1035(워크트리 pod install).
+>
+> **운영 키(컴팩트 후 필요)**: NCP ssh=sshpass+비번파일(2f5adb6c… 스크래치패드 `.ncp-root-pw`) · 기기 UDID CDAA1DBF-B0CC-543E-9E4C-ED3EEB524C7A · 루나 툴 켜기/끄기 스크립트=세션 스크래치패드 `enable/disable_luna_tool.sh` · Apple 자산=전부 확보([[apple-signing-assets]] 메모리·재질문 금지) · main 동기화=성재 위임(랜딩 단위) · 구현 워커=Opus 5 Agent tool·Fable=오케스트레이터 전임.
+>
+> 이하 이전 스냅샷:
+
 > **2026-08-04 스냅샷 10 (Fable · momo-main 통합 — 인계 전수 검증·로드맵 조정).** 전 세션 인계(`2026-08-03-session-state-for-fable.md`)를 전 항목 재실측했다. **정본 = `docs/planning/2026-08-04-handover-verification-and-roadmap-adjustment.md`.**
 >
 > **상태 정정 — 아래 스냅샷 9는 세션 중반에 멈춰 있다**: #979(승인 서버)·#980(폰 에이전트 탭)·#981(인용)·#982(작성 중 신호) **전부 `track/engine` `dae3a387`에 머지 완료**, 워커 전원 STOP. **ADR-0148·0149는 Accepted**(스냅샷 9의 "성재 결정 대기"는 낡음). 라이브(app.oor7.com)는 **구 이미지** — approvals/typing **404 실측**, 남은 것은 `compose up -d` 한 줄(성재 결정 A).
@@ -7,6 +23,8 @@
 > **실측 수치 정정**: Rust 라우트 **65 유니크 경로 / 82 메서드 엔드포인트**("63" 아님) · Swift **137 유니크 경로**("156"은 어느 단위로도 재현 불가 — 정본 숫자 정정은 결정 F) · 모바일 6 feature / 웹 23(단 명목치 — `serverSurfaces.ts` 5표면 `provided:false`).
 >
 > **축 현황(서버코드/배포/웹/모바일 4층)**: **대화** = 코어 전층 ✅ · 인용/typing 클라 0 · **첨부는 3층 전무** / **관전** = 폰 최소 절단면까지 ✅ · cancel 라우트 없음 / **승인** = 서버 코드 ✅ · **배포 ❌** · 웹 결정 UI 0건 · **모바일은 목록+푸시 잠금화면 결정 배선 완비(fail-closed 잠김)** — 승인 표면은 모바일이 웹보다 앞서 있다.
+>
+> **배치 2 완주(2026-08-04 새벽)**: 관전 축 마감 — track/engine `d5cc8559`. #993 cancel 이식(휴먼 정지권, mention job 유실 선제 차단) · #995 roster paused · #994 폰 「작업 중」(2R: 회복배치 종료프레임·오프라인 고지) · #996 중단 컨트롤+paused 소비(409 구분 보존·N+1 제거). 통합 검증 green(core 678·web 619·mobile 516). red proof 누적 12종. **다음 = 검수 빌드 준비(폰 Release 재빌드+웹 배포) → 성재 폰 검수(배치 1+2 합산) → 배치 3(대화 기준선).** 후속 큐: producer run_id 대소문자·게이트웨이 종료 프레임·웹 replay 갭·행 폭·선존재 2건.
 >
 > **배치 1 완주(2026-08-04 밤)**: 승인 축 3층 랜딩 — track/engine `a604eb2f`. #986(hermes — 체크섬=체크아웃 경로 함수 결함 수리) · #988(웹 승인함 — 플립+도달경로+gate:approvals 신설) · #987(모바일 인앱 승인 — core 뿌리 수리 포함). **원점 통합 검증 green**(core 678·web 619·mobile 486·typecheck 0·gate PASS). 디자인 리뷰 2기가 Blocker 4 적발 → 2R/3R 수리, 워커가 리뷰 밖 Blocker급(와이어 표기 — Rust 서버 상대 승인 목록 상시 공백) 추가 발견·수리. **다음: 검수 빌드 준비(폰 Release 재빌드+웹 배포) → 성재 폰 검수 분기 → 배치 2**(관전 마감: cancel 이식·턴 신호 폰·roster pause) → 3 대화 기준선(인용·typing 클라) → 4 위생(openapi 승인 스키마 표기 정정 포함) → 5 첨부(**ADR-0150 선행**). 후속 적립: 승인 카드 표면(서버 props 영어·tool_call 카드 노출)·푸시 결정 사용자 고지. 결정 **A~F 전부 종결**(2026-08-04): **A 배포 완료(Fable 대행)** — 라이브 approvals **404→401**, `momo-rust:dae3a387` 전 서비스 전환, 배포 정본 = `docs/runbooks/ncp-rust-deploy.md`(**5파일 compose — 07-30 런북의 2파일 명령은 함정**) · **B** ADR-0145 증보 1(parity=제품 채택 집합) · C 어휘=재우기/깨우기 · **D 첨부 v0 포함**(상세는 ADR-0150 기안 시) · E 인앱 승인 배치1 · F 커밋. **성재 몫 잔여 = 폰 검수뿐**(배치 1 랜딩 시 일괄). **Apple 서명 자산은 전부 확보돼 있음**(Store 프로파일 앱+NSE·APNs 실작동, 빈 곳은 CI 레인뿐 — 정본 engine `docs/cicd/10-*.md` 상단, **성재에게 재질문 금지**). main 동기화는 성재 위임("트랙별로 메인에 머지 잘하쇼") — 랜딩 단위·게이트 그린 전제. 머지 순서: H-FIX1 독립 · W-AP1 → M-AP1 순(core 접점). hermes 물증 = SPEC CHECKSUM 한 줄 드리프트(1f9904ef→3ccaa647).
 >
