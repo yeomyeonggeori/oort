@@ -186,6 +186,8 @@ pub async fn create(
                     model: &agent.model,
                     input: &input,
                     idempotency_key: &trigger.idempotency_key(),
+                    tool_schema: &agent.tool_schema,
+                    enabled_tools: &agent.enabled_tools,
                 });
                 let job_id = emit_outbox(
                     &mut *conn,
@@ -645,6 +647,10 @@ struct WorkJob<'a> {
     model: &'a str,
     input: &'a Value,
     idempotency_key: &'a str,
+    /// goal SRV-B5a — the two tool sources, carried under the SAME payload keys
+    /// the mention path uses so the worker needs no second reader.
+    tool_schema: &'a Value,
+    enabled_tools: &'a [String],
 }
 
 /// The `agent_job` payload (Swift `workJobPayload` :877-910).
@@ -669,6 +675,22 @@ fn work_job_payload(job: &WorkJob<'_>) -> Value {
         "created_from": "server.agent_work.v0",
         "created_at_ms": epoch_ms(chrono::Utc::now()),
     });
+    // goal SRV-B5a. Same keys, same meaning, same worker-side readers as the
+    // mention path (`mention_job_payload`): `tools` is the operator's verbatim
+    // provider JSON, `enabled_tools` is momo's names for the worker to resolve
+    // against its own catalog. Omitted when empty rather than written as `[]`,
+    // matching how the mention payload treats an agent with nothing switched on.
+    if !job.tool_schema.is_null()
+        && job
+            .tool_schema
+            .as_array()
+            .map_or(true, |entries| !entries.is_empty())
+    {
+        payload["tools"] = job.tool_schema.clone();
+    }
+    if !job.enabled_tools.is_empty() {
+        payload["enabled_tools"] = json!(job.enabled_tools);
+    }
     // `effort` is OMITTED rather than null when nothing was chosen (Swift :908).
     if let Some(effort) = job
         .input
@@ -849,6 +871,37 @@ mod tests {
         .is_ok());
     }
 
+    /// **The work payload carries the same two tool sources the mention payload
+    /// does, under the same keys** (goal SRV-B5a).
+    ///
+    /// Same keys is the whole requirement: the worker has exactly one reader for
+    /// each (`payload.tool_schema()` and `payload.enabled_tools()`), so a work
+    /// job that spelled them differently would be a second vocabulary for the
+    /// same two facts — and would silently offer no tools.
+    #[test]
+    fn the_work_payload_carries_both_tool_sources_under_the_mention_paths_keys() {
+        let input = json!({"type": "work", "title": "t", "brief": "b"});
+        let declared = json!([{"type": "function", "name": "operator_thing"}]);
+        let enabled = ["work.session.end".to_string()];
+        let payload = work_job_payload(&WorkJob {
+            workspace_id: Uuid::from_u128(1),
+            channel_id: Uuid::from_u128(2),
+            actor_member_id: Uuid::from_u128(3),
+            agent_member_id: Uuid::from_u128(4),
+            run_id: Uuid::from_u128(5),
+            model: "hermes-agent",
+            input: &input,
+            idempotency_key: "work:key",
+            tool_schema: &declared,
+            enabled_tools: &enabled,
+        });
+        assert_eq!(
+            payload["tools"], declared,
+            "verbatim, like the mention path"
+        );
+        assert_eq!(payload["enabled_tools"], json!(["work.session.end"]));
+    }
+
     /// `effort` is omitted rather than null when nothing was chosen, so an
     /// adapter reading `payload.effort` sees "absent", not "explicitly nothing".
     #[test]
@@ -863,8 +916,15 @@ mod tests {
             model: "hermes-agent",
             input: &input,
             idempotency_key: "work:key",
+            tool_schema: &Value::Null,
+            enabled_tools: &[],
         });
         assert!(payload.get("effort").is_none());
+        // goal SRV-B5a: no tools configured ⇒ neither key is written. `[]` would
+        // make some gateways refuse the request, and the mention payload omits
+        // them for the same reason.
+        assert!(payload.get("tools").is_none(), "{payload}");
+        assert!(payload.get("enabled_tools").is_none(), "{payload}");
         assert_eq!(payload["delivery"], json!("gateway"));
         assert_eq!(payload["prompt"], json!("b"));
 
@@ -879,6 +939,8 @@ mod tests {
             model: "hermes-agent",
             input: &with_effort,
             idempotency_key: "work:key",
+            tool_schema: &Value::Null,
+            enabled_tools: &[],
         });
         assert_eq!(payload["effort"], json!("high"));
     }

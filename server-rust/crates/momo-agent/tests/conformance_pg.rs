@@ -53,9 +53,9 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use momo_agent::{
-    create_agent_run_in_tx, find_agent_run_by_trigger_in_tx, lock_gateway_run_in_tx,
-    record_run_usage_in_tx, usage_summary_in_tx, validated_window, NewAgentRun, RunStatus,
-    RunTrigger, RunUsageReport, MAX_EFFORT_LENGTH,
+    create_agent_run_in_tx, find_agent_run_by_trigger_in_tx, load_eligible_agent_in_tx,
+    lock_gateway_run_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,
+    NewAgentRun, RunStatus, RunTrigger, RunUsageReport, MAX_EFFORT_LENGTH,
 };
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
@@ -888,4 +888,102 @@ async fn b26_4_the_shared_schema_still_carries_this_batchs_columns() {
             "{table} must be FORCE ROW LEVEL SECURITY (invariant #6)"
         );
     }
+}
+
+/// **The work surface's agent read carries the profile's tools** (goal SRV-B5a).
+///
+/// `load_eligible_agent_in_tx` is the only agent read the work-run create path
+/// makes, and until this goal it selected `paused` off `agent_profile` and
+/// nothing else — so `work_job_payload` had no `tools` key at all and an agent
+/// that could use a tool when mentioned silently could not when started from the
+/// work surface (#1018 이탈 1).
+///
+/// This asserts the LOADER because that is where the gap was. The payload half
+/// is pure and pinned by `agent_runs.rs`'s own unit tests; the HTTP half has no
+/// harness on this server at all (see the PR body — `POST …/agent-runs` requires
+/// gateway mode and no suite configures it).
+///
+/// | revert | how it goes red |
+/// |---|---|---|
+/// | drop `ap.enabled_tools` from the query | the enabled list comes back empty |
+/// | drop `a.tool_schema` | the operator's own JSON is lost |
+/// | read the profile without the LEFT JOIN | the no-profile case 404s instead of returning an agent with no tools |
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn b5a_the_work_surface_reads_the_profiles_tools() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+
+    // ---- no profile row at all: an agent, with no tools --------------------
+    let bare = with_tenant_tx(&app, tenant.workspace_id, move |conn| {
+        Box::pin(async move {
+            load_eligible_agent_in_tx(
+                conn,
+                tenant.workspace_id,
+                tenant.channel_id,
+                tenant.agent_id,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the read succeeds")
+    .expect("an active channel agent is eligible");
+    assert!(
+        bare.enabled_tools.is_empty(),
+        "an agent nobody configured has nothing switched on: {:?}",
+        bare.enabled_tools
+    );
+    assert!(!bare.paused, "…and is not paused either");
+
+    // ---- with a profile: exactly what the operator turned on ---------------
+    sqlx::query(
+        "INSERT INTO agent_profile \
+           (agent_member_id, workspace_id, instructions, enabled_tools, version, \
+            updated_by, updated_at) \
+         VALUES ($1, $2, '', $3, 1, $4, now())",
+    )
+    .bind(tenant.agent_id)
+    .bind(tenant.workspace_id)
+    .bind(serde_json::json!(["work.session.end", "web.search"]))
+    .bind(tenant.human_id)
+    .execute(&su)
+    .await
+    .expect("seed the profile");
+
+    sqlx::query("UPDATE agent SET tool_schema = $2 WHERE member_id = $1")
+        .bind(tenant.agent_id)
+        .bind(serde_json::json!([{"type": "function", "name": "operator_thing"}]))
+        .execute(&su)
+        .await
+        .expect("seed the operator's own tool json");
+
+    let armed = with_tenant_tx(&app, tenant.workspace_id, move |conn| {
+        Box::pin(async move {
+            load_eligible_agent_in_tx(
+                conn,
+                tenant.workspace_id,
+                tenant.channel_id,
+                tenant.agent_id,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the read succeeds")
+    .expect("still eligible");
+    assert_eq!(
+        armed.enabled_tools,
+        vec!["work.session.end".to_string(), "web.search".to_string()],
+        "the work surface reads the SAME column the mention surface does — raw, \
+         because the intersection with a build's catalog belongs to the worker"
+    );
+    assert_eq!(
+        armed.tool_schema[0]["name"],
+        serde_json::json!("operator_thing"),
+        "and the operator's own provider JSON rides along: {:?}",
+        armed.tool_schema
+    );
 }

@@ -400,6 +400,17 @@ pub struct EligibleAgent {
     /// `agent_profile.paused`, defaulted to `false` when the agent has no
     /// profile row: an agent nobody has configured is not a paused agent.
     pub paused: bool,
+    /// `agent.tool_schema` — the operator's own provider-format function defs
+    /// (goal SRV-B5a). Read here so a **work** run carries the same two tool
+    /// sources a mention does; before this the work payload had no `tools` key
+    /// at all, so an agent that could use a tool when mentioned silently could
+    /// not when started from the work surface.
+    pub tool_schema: Value,
+    /// `agent_profile.enabled_tools` — the names the profile turned on. Raw, for
+    /// the same reason the mention path keeps them raw: the intersection with
+    /// what a build can run belongs to `momo_agent::tools`, resolved by whichever
+    /// worker claims the job.
+    pub enabled_tools: Vec<String>,
 }
 
 /// Load the agent's run-eligibility facts, or `None` when it may not take a run
@@ -417,6 +428,7 @@ pub async fn load_eligible_agent_in_tx(
 ) -> Result<Option<EligibleAgent>, DbError> {
     let row = sqlx::query(
         "SELECT a.model, a.max_run_steps, a.max_concurrent_runs, \
+                a.tool_schema, ap.enabled_tools, \
                 COALESCE(ap.paused, false) AS paused \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
@@ -442,11 +454,28 @@ pub async fn load_eligible_agent_in_tx(
     .await?;
 
     let Some(row) = row else { return Ok(None) };
+    // Both tool columns fail **closed** on anything unexpected: a NULL profile,
+    // a non-array value, a non-string entry. The alternative to "no tools" here
+    // is "some tool nobody verified", on the surface whose one executable tool
+    // is irreversible.
+    let enabled_tools: Option<Value> = row.try_get("enabled_tools")?;
+    let enabled_tools: Vec<String> = enabled_tools
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(Some(EligibleAgent {
         model: row.try_get("model")?,
         max_run_steps: row.try_get("max_run_steps")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         paused: row.try_get("paused")?,
+        tool_schema: row.try_get("tool_schema")?,
+        enabled_tools,
     }))
 }
 
