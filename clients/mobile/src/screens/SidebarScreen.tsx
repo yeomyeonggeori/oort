@@ -24,6 +24,7 @@ import {
   SectionLabel,
   TapRow,
 } from '../design/atoms';
+import {useRefreshControl} from '../design/refresh';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
 import {buildSidebarSections, rowCount, type SidebarRow} from '../features/sidebar/rows';
 import {useChannels, useDirectory, useReadStates} from '../features/workspace/queries';
@@ -108,6 +109,28 @@ export default function SidebarScreen({
       openChannelId,
       query,
     ],
+  );
+
+  // 당겨서 새로고침 (goal RN-B4b / #1026). 채널·명부·읽음 상태 — 이 목록이 그리는
+  // 세 가지 전부다. 안 읽음 배지만 30초 폴링을 갖고 있는데(`useReadStates`), 당긴
+  // 사람이 기다리는 것은 그 30초가 아니라 지금이다.
+  //
+  // 재조회 함수만 따로 집는 이유는 `useInbox` 의 같은 주석과 같다: 이 훅들이
+  // 돌려주는 객체는 `{...query, …}` 라 렌더마다 새 신원이고, `refetch` 는 아니다.
+  const refetchChannels = channelsQuery.refetch;
+  const refetchDirectory = directoryQuery.refetch;
+  const refetchReadStates = readStates.refetch;
+  const refreshControl = useRefreshControl(
+    useCallback(
+      () =>
+        Promise.all([
+          refetchChannels(),
+          refetchDirectory(),
+          refetchReadStates(),
+        ]),
+      [refetchChannels, refetchDirectory, refetchReadStates],
+    ),
+    'sidebar-refresh',
   );
 
   const openDm = useMutation({
@@ -243,6 +266,7 @@ export default function SidebarScreen({
           <EmptyState
             headline="아직 참여한 채널이 없습니다."
             detail="채널 만들기와 초대는 데스크톱에서 할 수 있습니다."
+            refreshControl={refreshControl}
             testID="channels-empty"
           />
         )
@@ -267,6 +291,7 @@ export default function SidebarScreen({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           contentContainerStyle={styles.listContent}
+          refreshControl={refreshControl}
           testID="sidebar-list"
         />
       )}

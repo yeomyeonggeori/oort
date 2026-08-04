@@ -1,4 +1,4 @@
-import React, {useMemo} from 'react';
+import React, {useCallback, useMemo} from 'react';
 import {FlatList, StyleSheet, Text, View} from 'react-native';
 import {
   EmptyState,
@@ -9,6 +9,7 @@ import {
   ScreenHeader,
   TapRow,
 } from '../design/atoms';
+import {useRefreshControl} from '../design/refresh';
 import {color, font, radius, space} from '../design/tokens';
 import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
 import {
@@ -137,6 +138,27 @@ export default function AgentsScreen({
   // that would not change.
   const signals = useAgentWorkingSignals();
   const {status: railStatus} = useRealtime();
+
+  // 당겨서 새로고침 (goal RN-B4b / #1026). 이 화면이 서 있는 세 조회를 그대로
+  // 다시 부른다 — 새 경로가 아니라 이미 있는 것들의 새 입구다. 명부가 이 목록의
+  // 존재 자체이고, 채널은 각 행의 「어디서 만나나」이고, 작업 세션은 「지금 무엇을
+  // 하고 있나」다. 셋 중 하나만 새로고침하면 화면의 절반이 낡은 채로 남는다.
+  //
+  // 재조회 함수만 따로 집는다. `useDirectory`/`useChannels` 는 `{...query, …}` 를
+  // 돌려주므로 객체 자체는 렌더마다 새 신원이고, 그것을 의존성으로 두면 이 콜백이
+  // 매 렌더 새로 만들어진다 — 이 파일 옆에서 `useInbox` 가 같은 이유로 같은 주석을
+  // 달고 있다. `refetch` 는 react-query 가 안정적으로 유지한다.
+  const refetchDirectory = directoryQuery.refetch;
+  const refetchChannels = channelsQuery.refetch;
+  const refetchSessions = sessionsQuery.refetch;
+  const refreshControl = useRefreshControl(
+    useCallback(
+      () =>
+        Promise.all([refetchDirectory(), refetchChannels(), refetchSessions()]),
+      [refetchDirectory, refetchChannels, refetchSessions],
+    ),
+    'agents-refresh',
+  );
   const nowMs = Date.now();
   const railLive = railStatus === 'connected';
 
@@ -179,6 +201,7 @@ export default function AgentsScreen({
         <EmptyState
           headline="아직 에이전트가 없습니다."
           detail="에이전트를 만드는 것은 데스크톱에서 할 수 있습니다."
+          refreshControl={refreshControl}
           testID="agents-empty"
         />
       ) : (
@@ -202,6 +225,7 @@ export default function AgentsScreen({
             />
           )}
           contentContainerStyle={styles.listContent}
+          refreshControl={refreshControl}
           testID="agents-list"
         />
       )}
