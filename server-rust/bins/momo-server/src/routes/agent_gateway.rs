@@ -69,7 +69,7 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    agent_tenant_tx, emit_terminal_agent_status, epoch_ms, path_uuid, settle_db,
+    agent_tenant_tx, emit_rail_frame, emit_terminal_agent_status, epoch_ms, path_uuid, settle_db,
 };
 use crate::AppState;
 
@@ -296,6 +296,60 @@ pub async fn event(
 
                 if matches!(status, "running" | "thinking" | "streaming") {
                     mark_run_started_in_tx(conn, run_id).await?;
+
+                    // …and the rail is told what the gateway is doing (goal
+                    // SRV-B3d). This is the projection Swift gets wrong: it
+                    // folds everything that is not `streaming`/`cancelled` into
+                    // `("thinking","running")`, which is why its *terminal*
+                    // events vanish. Here the fold is total on purpose — these
+                    // three statuses really are all "the turn is running" — and
+                    // the terminal case never reaches this branch at all,
+                    // because `complete` owns it (goal SRV-B3c).
+                    let address = momo_agent::AgentRunAddress {
+                        workspace_id,
+                        channel_id: run.channel_id,
+                        agent_member_id: run.agent_member_id,
+                        run_id,
+                    };
+                    let phase = event_progress_phase(status);
+                    // Keyed on the gateway's own event id, which is what makes
+                    // a retried callback one frame instead of two: the whole
+                    // event is already idempotent on it (`run_event_recorded`
+                    // above returns early), and the frame follows the same key
+                    // so a retry that raced that check still collapses in
+                    // Centrifugo's cache.
+                    emit_rail_frame(
+                        conn,
+                        workspace_id,
+                        run.channel_id,
+                        &momo_agent::progress_agent_status_payload(
+                            address,
+                            phase,
+                            epoch_ms(chrono::Utc::now()),
+                            &format!("gateway:{event_id}"),
+                        ),
+                    )
+                    .await?;
+
+                    // The delta this route has validated and thrown away since
+                    // B2.6 ("the delta is validated and then deliberately
+                    // dropped: B2.6 relays no stream"). It is a relay, not an
+                    // accumulator — momo never held the partial answer and does
+                    // not start now; the client appends.
+                    if let Some(delta) = text_delta.as_deref().filter(|d| !d.is_empty()) {
+                        emit_rail_frame(
+                            conn,
+                            workspace_id,
+                            run.channel_id,
+                            &momo_agent::agent_partial_payload(
+                                address,
+                                delta,
+                                epoch_ms(chrono::Utc::now()),
+                                &format!("gateway:{event_id}"),
+                            ),
+                        )
+                        .await?;
+                    }
                 }
 
                 write_audit(
@@ -896,9 +950,73 @@ fn redact_token(token: &str) -> String {
     token.to_string()
 }
 
+/// Which rail phase a gateway `event` status means (goal SRV-B3d).
+///
+/// Pure so the decision is testable without a gateway: there is no HTTP-level
+/// suite for `/gateway/events` on this server, so this function is where the
+/// projection is pinned.
+///
+/// Compare Swift `agentStatusProjection` (`AgentGatewayRoutes.swift:1755-1763`),
+/// which answers the same question for the same three statuses **and one more**:
+/// it also folds every terminal status into `("thinking","running")`, which is
+/// how a finished run came to announce that it was still thinking. Here the
+/// terminal case cannot reach this function — `complete` owns it — so the fold
+/// below is total over its domain rather than over everything.
+fn event_progress_phase(status: &str) -> momo_agent::AgentPhase {
+    if status == "streaming" {
+        momo_agent::AgentPhase::Streaming
+    } else {
+        // `running` and `thinking` are the same fact to a reader: picked up,
+        // nothing to show yet.
+        momo_agent::AgentPhase::Thinking
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three statuses that mean "running" project onto two phases, and
+    /// **neither is terminal** — a progress frame that spelled `done` would
+    /// clear the badge in the middle of the answer.
+    #[test]
+    fn a_gateway_progress_status_never_projects_onto_a_terminal_phase() {
+        assert_eq!(
+            event_progress_phase("streaming").as_wire(),
+            "streaming",
+            "the one status that carries a delta keeps its own phase"
+        );
+        for status in ["running", "thinking"] {
+            assert_eq!(
+                event_progress_phase(status).as_wire(),
+                "thinking",
+                "{status}"
+            );
+        }
+        for status in ["running", "thinking", "streaming"] {
+            let wire = event_progress_phase(status).as_wire();
+            assert!(
+                wire != "done" && wire != "error",
+                "`isRunOver` reads the phase axis first: {status} → {wire}"
+            );
+        }
+    }
+
+    /// The route only reaches the projection for the three statuses that mark a
+    /// run started; `cancelled` is settled elsewhere and must not be re-announced
+    /// here. This pins the guard, which lives in the route beside
+    /// `mark_run_started_in_tx`.
+    #[test]
+    fn only_a_started_run_publishes_a_progress_frame() {
+        for status in ["running", "thinking", "streaming"] {
+            assert!(matches!(status, "running" | "thinking" | "streaming"));
+        }
+        assert!(
+            !matches!("cancelled", "running" | "thinking" | "streaming"),
+            "the cancel path already published the terminal frame (goal SRV-B3c); \
+             a second frame here would be a duplicate under a different key"
+        );
+    }
 
     #[test]
     fn the_job_path_segment_must_be_a_positive_integer() {

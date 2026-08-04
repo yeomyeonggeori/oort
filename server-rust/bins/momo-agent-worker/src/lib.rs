@@ -475,8 +475,37 @@ impl AgentWorker {
         // transient failure is still `failed` at this point, and its terminal
         // write below is what moves it. (Swift's claim UPDATE also admits
         // `failed`; the difference is only which status the row shows mid-turn.)
+        let job_workspace_id = job.workspace_id;
+        let started_address = momo_agent::AgentRunAddress {
+            workspace_id: job.workspace_id,
+            channel_id: payload.channel_id,
+            agent_member_id: payload.agent_member_id,
+            run_id,
+        };
         let started = with_tenant_tx(&self.pool, job.workspace_id, move |conn| {
-            Box::pin(async move { mark_run_started_in_tx(conn, run_id).await })
+            Box::pin(async move {
+                let started = mark_run_started_in_tx(conn, run_id).await?;
+                // The rail learns the turn was picked up (goal SRV-B3d). Only
+                // when the transition actually happened: a job re-claimed after
+                // its lease expired finds the run already `running`, and
+                // publishing a second `thinking` for it would reset the client's
+                // liveness clock for work that has been going for minutes.
+                if started {
+                    emit_rail_frame(
+                        conn,
+                        job_workspace_id,
+                        started_address.channel_id,
+                        &momo_agent::progress_agent_status_payload(
+                            started_address,
+                            momo_agent::AgentPhase::Thinking,
+                            now_ms(),
+                            "thinking",
+                        ),
+                    )
+                    .await?;
+                }
+                Ok(started)
+            })
         })
         .await;
         match started {
@@ -2028,12 +2057,24 @@ async fn emit_terminal_agent_status(
     ) else {
         return Ok(());
     };
+    emit_rail_frame(conn, workspace_id, channel_id, &frame).await
+}
+
+/// Put one already-shaped rail frame on the outbox — the worker's twin of
+/// `momo-server`'s `routes::shared::emit_rail_frame`, partitioned on the channel
+/// so every frame of a turn shares one FIFO with that turn's messages.
+async fn emit_rail_frame(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    frame: &Value,
+) -> Result<(), DbError> {
     momo_outbox::emit_outbox(
         conn,
         workspace_id,
         momo_outbox::OutboxKind::Broadcast,
         "publish",
-        &frame,
+        frame,
         Some(channel_id),
     )
     .await?;

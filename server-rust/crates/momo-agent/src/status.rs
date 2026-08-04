@@ -66,6 +66,9 @@ use crate::run::RunStatus;
 /// `data.type` of a progress-rail status frame.
 pub const AGENT_STATUS_EVENT_TYPE: &str = "agent.status";
 
+/// `data.type` of a streamed answer slice.
+pub const AGENT_PARTIAL_EVENT_TYPE: &str = "agent.partial";
+
 /// `data.v`. macOS decodes this as a **required** `Int`
 /// (`clients/Core/.../RealtimeEnvelope.swift`), so it is never omitted.
 pub const AGENT_STATUS_EVENT_VERSION: i64 = 1;
@@ -80,6 +83,14 @@ pub const AGENT_STATUS_EVENT_VERSION: i64 = 1;
 /// the whole frame rather than one field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentPhase {
+    /// The run row exists and nothing has claimed it yet. **The only frame that
+    /// proves when a turn began** — `isRunOpening` (`agentRail.ts:227-229`) reads
+    /// it, and a rail that never sees one renders the badge with no clock.
+    Queued,
+    /// Claimed and working, with nothing to show yet.
+    Thinking,
+    /// Text is arriving.
+    Streaming,
     Done,
     Error,
 }
@@ -87,6 +98,9 @@ pub enum AgentPhase {
 impl AgentPhase {
     pub fn as_wire(self) -> &'static str {
         match self {
+            AgentPhase::Queued => "queued",
+            AgentPhase::Thinking => "thinking",
+            AgentPhase::Streaming => "streaming",
             AgentPhase::Done => "done",
             AgentPhase::Error => "error",
         }
@@ -164,8 +178,132 @@ pub fn terminal_agent_status_payload(
     hlc_ts: i64,
 ) -> Option<Value> {
     let phase = terminal_phase(status)?;
-    let channel = agent_status_channel(workspace_id, channel_id, agent_member_id);
-    Some(json!({
+    Some(agent_status_payload(
+        AgentRunAddress {
+            workspace_id,
+            channel_id,
+            agent_member_id,
+            run_id,
+        },
+        phase,
+        status.as_db_label(),
+        hlc_ts,
+        "terminal",
+    ))
+}
+
+/// The four ids every rail frame is addressed by.
+///
+/// A struct rather than four positional `Uuid`s because that is exactly the
+/// shape a transposition bug hides in: `(workspace, channel, agent, run)` would
+/// compile with any two of them swapped and publish a turn onto a channel nobody
+/// is watching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentRunAddress {
+    pub workspace_id: Uuid,
+    pub channel_id: Uuid,
+    pub agent_member_id: Uuid,
+    pub run_id: Uuid,
+}
+
+/// The opening frame — `(queued, queued)`, published when the run row is created
+/// (goal SRV-B3d).
+///
+/// This is the frame that carries **when the turn began**. Without it a client
+/// that attaches mid-turn honestly has no start time and renders the badge with
+/// no clock (`agentRail.ts:145-149`: "when we first noticed" is not "when the
+/// agent started", so it is left unknown rather than guessed).
+///
+/// It is safe to publish before any consumer exists because the run genuinely IS
+/// queued at that moment: if nothing ever claims the job, the badge is telling
+/// the truth until the client's own 90s idle cutoff retires it. That fallback is
+/// what makes an opening frame safe to send without a guarantee that a terminal
+/// one follows — and it is why the terminal producers landed first (goal
+/// SRV-B3c) rather than after this.
+pub fn opening_agent_status_payload(address: AgentRunAddress, hlc_ts: i64) -> Value {
+    agent_status_payload(
+        address,
+        AgentPhase::Queued,
+        RunStatus::Queued.as_db_label(),
+        hlc_ts,
+        "queued",
+    )
+}
+
+/// A mid-turn frame — `(thinking | streaming, running)`.
+///
+/// `key` distinguishes one progress frame from the next. Unlike the terminal and
+/// opening frames there is no "exactly one per run" property to lean on, so the
+/// caller supplies whatever makes ITS frame unique (a gateway event id, or the
+/// phase name when the producer fires once per run). Getting this wrong is not a
+/// crash but a silence: Centrifugo's 5-minute idempotency cache would swallow
+/// the second frame under the same key.
+pub fn progress_agent_status_payload(
+    address: AgentRunAddress,
+    phase: AgentPhase,
+    hlc_ts: i64,
+    key: &str,
+) -> Value {
+    agent_status_payload(address, phase, "running", hlc_ts, key)
+}
+
+/// One `agent.partial` — a slice of the answer as it is produced.
+///
+/// `text_delta` only, never `text`: the cumulative field is a worker convenience
+/// the clients prefer for the headline (`applyPartial` reads `text` first), and
+/// a relay that does not hold the accumulated answer must not pretend to. The
+/// client's `headlineFrom(text_delta)` fallback is the documented path for
+/// exactly this producer.
+///
+/// A partial **creates** a client-side track entry when none exists
+/// (`agentRail.ts:325-338`), unlike a terminal frame — which is correct, because
+/// a delta is proof the agent is working right now, but it means a partial must
+/// never be published for a run that is not actually streaming.
+pub fn agent_partial_payload(
+    address: AgentRunAddress,
+    text_delta: &str,
+    hlc_ts: i64,
+    key: &str,
+) -> Value {
+    let channel = agent_status_channel(
+        address.workspace_id,
+        address.channel_id,
+        address.agent_member_id,
+    );
+    json!({
+        "channel": channel,
+        "data": {
+            "type": AGENT_PARTIAL_EVENT_TYPE,
+            "v": AGENT_STATUS_EVENT_VERSION,
+            "ts": hlc_ts,
+            "payload": {
+                "run_id": upper(address.run_id),
+                "agent_member_id": upper(address.agent_member_id),
+                "channel_id": upper(address.channel_id),
+                "text_delta": text_delta,
+            },
+        },
+        "idempotency_key": format!(
+            "{channel}:agent_partial:{}:{key}",
+            upper(address.run_id)
+        ),
+    })
+}
+
+/// The one place a rail frame is shaped.
+fn agent_status_payload(
+    address: AgentRunAddress,
+    phase: AgentPhase,
+    run_status: &str,
+    hlc_ts: i64,
+    key: &str,
+) -> Value {
+    let channel = agent_status_channel(
+        address.workspace_id,
+        address.channel_id,
+        address.agent_member_id,
+    );
+    json!({
         "channel": channel,
         "data": {
             "type": AGENT_STATUS_EVENT_TYPE,
@@ -176,15 +314,18 @@ pub fn terminal_agent_status_payload(
                 // clients' fixtures carry. `keyOf` case-folds on the web side,
                 // but macOS compares the decoded UUID, so either casing works —
                 // matching Swift keeps one wire shape instead of two.
-                "run_id": upper(run_id),
-                "agent_member_id": upper(agent_member_id),
-                "channel_id": upper(channel_id),
+                "run_id": upper(address.run_id),
+                "agent_member_id": upper(address.agent_member_id),
+                "channel_id": upper(address.channel_id),
                 "phase": phase.as_wire(),
-                "run_status": status.as_db_label(),
+                "run_status": run_status,
             },
         },
-        "idempotency_key": format!("{channel}:agent_status:{}:terminal", upper(run_id)),
-    }))
+        "idempotency_key": format!(
+            "{channel}:agent_status:{}:{key}",
+            upper(address.run_id)
+        ),
+    })
 }
 
 fn upper(id: Uuid) -> String {
@@ -366,5 +507,92 @@ mod tests {
             .expect("key")
             .to_string();
         assert_ne!(key(1), other_run, "two runs are two frames");
+    }
+    /// The opening frame is the ONLY one that proves when a turn began, so it
+    /// must satisfy `isRunOpening` — which reads *either* axis.
+    #[test]
+    fn the_opening_frame_is_what_starts_the_clients_clock() {
+        let frame = opening_agent_status_payload(address(), 1_784_983_000_000);
+        let body = &frame["data"]["payload"];
+        assert_eq!(body["phase"], json!("queued"));
+        assert_eq!(body["run_status"], json!("queued"));
+        // agentRail.ts:227-229 — `phase === "queued" || run_status === "queued"`.
+        assert!(
+            body["phase"] == json!("queued") || body["run_status"] == json!("queued"),
+            "without this the badge renders with no elapsed clock: {frame}"
+        );
+        // …and it is NOT read as the end of the turn.
+        assert_ne!(body["phase"], json!("done"));
+        assert_ne!(body["phase"], json!("error"));
+    }
+
+    /// A mid-turn frame says the run is running and nothing else. In particular
+    /// it must never spell a terminal phase, or the badge clears mid-answer.
+    #[test]
+    fn a_progress_frame_is_never_read_as_the_end_of_a_turn() {
+        for (phase, wire) in [
+            (AgentPhase::Thinking, "thinking"),
+            (AgentPhase::Streaming, "streaming"),
+        ] {
+            let frame = progress_agent_status_payload(address(), phase, 7, "k");
+            let body = &frame["data"]["payload"];
+            assert_eq!(body["phase"], json!(wire));
+            assert_eq!(body["run_status"], json!("running"));
+            // `isRunOver` would clear the badge on either axis.
+            assert!(
+                body["phase"] != json!("done") && body["phase"] != json!("error"),
+                "{wire}"
+            );
+            assert!(
+                !["succeeded", "failed", "cancelled", "timed_out"]
+                    .contains(&body["run_status"].as_str().expect("label")),
+                "{wire}"
+            );
+        }
+    }
+
+    /// Progress frames are distinguished by the caller's key — two frames under
+    /// one key is a frame Centrifugo's cache silently eats.
+    #[test]
+    fn progress_frames_are_told_apart_by_their_key() {
+        let a = progress_agent_status_payload(address(), AgentPhase::Thinking, 7, "one");
+        let b = progress_agent_status_payload(address(), AgentPhase::Streaming, 8, "two");
+        assert_ne!(a["idempotency_key"], b["idempotency_key"]);
+        // …and the opening frame cannot collide with a progress frame either.
+        let opening = opening_agent_status_payload(address(), 6);
+        assert_ne!(opening["idempotency_key"], a["idempotency_key"]);
+    }
+
+    /// The partial carries the slice and NOT a cumulative `text` field: this
+    /// producer does not hold the accumulated answer, and inventing one would
+    /// make the client's headline lie by a few tokens every frame.
+    #[test]
+    fn a_partial_carries_the_slice_and_never_a_cumulative_text() {
+        let frame = agent_partial_payload(address(), "오르트 구름은", 7, "e1");
+        assert_eq!(frame["data"]["type"], json!("agent.partial"));
+        assert_eq!(frame["data"]["v"], json!(1));
+        let body = &frame["data"]["payload"];
+        assert_eq!(body["text_delta"], json!("오르트 구름은"));
+        assert!(
+            body.get("text").is_none(),
+            "the relay does not hold the whole answer: {frame}"
+        );
+        // A partial decides no state, so it must carry no run_status at all —
+        // `applyPartial` would otherwise have two sources for one fact.
+        assert!(body.get("run_status").is_none(), "{frame}");
+        assert!(body.get("phase").is_none(), "{frame}");
+        assert!(frame["idempotency_key"]
+            .as_str()
+            .expect("key")
+            .contains(":agent_partial:"));
+    }
+
+    fn address() -> AgentRunAddress {
+        AgentRunAddress {
+            workspace_id: Uuid::from_u128(1),
+            channel_id: Uuid::from_u128(2),
+            agent_member_id: Uuid::from_u128(3),
+            run_id: Uuid::from_u128(4),
+        }
     }
 }

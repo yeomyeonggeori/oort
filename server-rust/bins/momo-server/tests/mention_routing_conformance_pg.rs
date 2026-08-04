@@ -633,12 +633,49 @@ async fn b52_1_a_mention_starts_a_run_the_worker_answers() {
     .fetch_all(&su)
     .await
     .expect("read agent.status broadcasts");
+    // goal SRV-B3d: the whole turn, in order. Before B3c/B3d this list was
+    // EMPTY — `agent:` had a subscriber and no producer — so a badge could only
+    // ever be cleared by a client-side timeout and could never show a clock.
+    let phases: Vec<(String, String)> = rail
+        .iter()
+        .map(|frame| {
+            (
+                frame["data"]["payload"]["phase"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                frame["data"]["payload"]["run_status"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .collect();
     assert_eq!(
-        rail.len(),
-        1,
-        "one finished turn, one terminal frame: {rail:?}"
+        phases,
+        vec![
+            ("queued".to_string(), "queued".to_string()),
+            ("thinking".to_string(), "running".to_string()),
+            ("done".to_string(), "succeeded".to_string()),
+        ],
+        "여는 → 진행 → 종료, in the order the turn happened. The FIFO is the \
+         channel partition key, shared with this turn's messages: {rail:?}"
     );
-    let frame = &rail[0];
+    // The opening frame is the only one that can start the client's clock
+    // (`isRunOpening` reads `phase === "queued" || run_status === "queued"`).
+    assert!(
+        rail.iter()
+            .any(|frame| frame["data"]["payload"]["phase"] == json!("queued")),
+        "without an opening frame the badge renders with no elapsed time: {rail:?}"
+    );
+    // …and every frame is addressed to the same rail.
+    let channels: std::collections::BTreeSet<&str> = rail
+        .iter()
+        .map(|frame| frame["channel"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(channels.len(), 1, "one turn, one channel: {channels:?}");
+
+    let frame = rail.last().expect("the terminal frame");
     assert_eq!(
         frame["channel"],
         json!(format!(

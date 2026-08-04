@@ -490,12 +490,28 @@ pub(crate) async fn emit_terminal_agent_status(
     ) else {
         return Ok(());
     };
+    emit_rail_frame(conn, workspace_id, channel_id, &frame).await
+}
+
+/// Put one already-shaped progress-rail frame on the outbox (goal SRV-B3d).
+///
+/// The partition key is the **channel**, the same one `send_message_in_tx` uses,
+/// and that is the whole ordering story for this rail: opening → thinking →
+/// streaming → partial → terminal all take one FIFO with the turn's messages, so
+/// a client can never be told the turn ended before it is shown what the turn
+/// said, and two frames of the same turn can never swap.
+pub(crate) async fn emit_rail_frame(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    frame: &serde_json::Value,
+) -> Result<(), DbError> {
     momo_outbox::emit_outbox(
         conn,
         workspace_id,
         momo_outbox::OutboxKind::Broadcast,
         "publish",
-        &frame,
+        frame,
         Some(channel_id),
     )
     .await?;
