@@ -69,17 +69,24 @@ export interface ProviderOAuthLinkBody {
   oauth: ProviderOAuthGrant;
 }
 
-/** Which control the message belongs under. Errors live at the field, not on top. */
-export type OAuthFormField = "paste" | "accountLabel" | "baseUrl";
+/**
+ * Which control the message belongs under. Errors live AT the field, never in a
+ * pile at the bottom of the form: `Field` binds the message to its control with
+ * `aria-describedby`/`aria-invalid`, so a person who tabs back into the box ten
+ * seconds later still hears what is wrong with it. Both registration methods
+ * draw from this one set, because the same sentence about the same address must
+ * not move to a different place on screen when a radio changes (H5).
+ */
+export type LinkFormField = "paste" | "accountLabel" | "baseUrl" | "bearer";
 
-export interface OAuthFormError {
-  field: OAuthFormField;
+export interface LinkFormError {
+  field: LinkFormField;
   message: string;
 }
 
 export type OAuthParseResult =
   | { ok: true; grant: ProviderOAuthGrant }
-  | { ok: false; error: OAuthFormError };
+  | { ok: false; error: LinkFormError };
 
 /**
  * The base URL an ADR-0147 OAuth link stores, measured rather than chosen:
@@ -201,7 +208,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   return { ok: true, grant };
 }
 
-function fail(field: OAuthFormField, message: string): OAuthParseResult {
+function fail(field: LinkFormField, message: string): OAuthParseResult {
   return { ok: false, error: { field, message } };
 }
 
@@ -214,24 +221,33 @@ function fail(field: OAuthFormField, message: string): OAuthParseResult {
  * account and every surface says so; an unlabelled one produces exactly the
  * screen the constraint exists to prevent — "개인 계정 귀속" next to a blank.
  */
+/**
+ * The address rule, owned in ONE place so the two registration methods cannot
+ * drift into two rules (or, as they had, two screen positions for the identical
+ * sentence). Returns null when the address is usable.
+ */
+export function validateBaseUrl(raw: string): LinkFormError | null {
+  const baseUrl = raw.trim();
+  if (!baseUrl) {
+    return { field: "baseUrl", message: "provider 주소를 입력하세요." };
+  }
+  if (!/^https?:\/\/.+/.test(baseUrl)) {
+    return {
+      field: "baseUrl",
+      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+    };
+  }
+  return null;
+}
+
 export function buildOAuthLinkBody(input: {
   baseUrl: string;
   accountLabel: string;
   grant: ProviderOAuthGrant;
-}): { ok: true; body: ProviderOAuthLinkBody } | { ok: false; error: OAuthFormError } {
+}): { ok: true; body: ProviderOAuthLinkBody } | { ok: false; error: LinkFormError } {
+  const addressError = validateBaseUrl(input.baseUrl);
+  if (addressError) return { ok: false, error: addressError };
   const baseUrl = input.baseUrl.trim();
-  if (!baseUrl) {
-    return { ok: false, error: { field: "baseUrl", message: "provider 주소를 입력하세요." } };
-  }
-  if (!/^https?:\/\/.+/.test(baseUrl)) {
-    return {
-      ok: false,
-      error: {
-        field: "baseUrl",
-        message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
-      },
-    };
-  }
 
   const accountLabel = input.accountLabel.trim();
   if (!accountLabel) {

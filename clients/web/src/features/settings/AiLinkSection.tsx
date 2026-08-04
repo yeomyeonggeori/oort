@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -45,7 +45,9 @@ import {
   grantPreviewRows,
   OAUTH_CREDENTIAL_KIND,
   parseAuthJson,
-  type OAuthFormField,
+  type LinkFormField,
+  type ProviderOAuthGrant,
+  validateBaseUrl,
 } from "./oauthGrant";
 
 // =============================================================================
@@ -125,10 +127,13 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   // and the one place it is allowed to exist is the control the operator is
   // looking at. Never logged, never echoed, never written anywhere else.
   const [paste, setPaste] = useState("");
+  // The parsed grant, kept while the raw document is NOT. Both hold the same
+  // secret in memory and there is no avoiding that (it has to be sent), but
+  // only one of them has to be legible on screen, and that one is neither.
+  const [grant, setGrant] = useState<ProviderOAuthGrant | null>(null);
   const [accountLabel, setAccountLabel] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<
-    Partial<Record<OAuthFormField, string>>
+    Partial<Record<LinkFormField, string>>
   >({});
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
   // The chain block below owns its own draft, and the probe table above it is
@@ -136,14 +141,35 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   // rather than letting one screen carry two meanings of "3차".
   const [chainPending, setChainPending] = useState(false);
 
-  // Parsed on every change so a good paste confirms itself immediately, but the
-  // FAILURE is not shown here: a half-typed document is not a mistake, it is a
-  // paste in progress, and red text on every keystroke would train the operator
-  // to ignore it. Errors appear on submit, where they are answerable.
-  const parsedGrant = useMemo(() => {
-    const result = parseAuthJson(paste);
-    return result.ok ? result.grant : null;
-  }, [paste]);
+  /**
+   * A successful paste is read and then TAKEN OFF THE SCREEN.
+   *
+   * The key box next door has been `type="password"` all along, and a refresh
+   * token outlives an API key by a wide margin — so leaving the longer-lived
+   * secret legible was the wrong half of that pair to leave uncovered. It was
+   * legible for the whole form session, too: after pasting, the operator still
+   * has to fill the account label and reach the save button, so screen-share
+   * and shoulder exposure lasted until submit.
+   *
+   * Clearing costs nothing because the raw text was only ever answering one
+   * question — "is this the right file" — and the preview below answers it
+   * better, by naming what was found instead of showing it.
+   *
+   * A FAILED parse keeps the text: the person has to see the document to fix
+   * it. The error itself still waits for submit, because a half-finished paste
+   * is not a mistake and red text on every keystroke trains people to ignore it.
+   */
+  function readPaste(next: string) {
+    const result = parseAuthJson(next);
+    if (result.ok) {
+      setGrant(result.grant);
+      setPaste("");
+      setFieldError((prev) => ({ ...prev, paste: undefined }));
+      return;
+    }
+    setGrant(null);
+    setPaste(next);
+  }
 
   const invalidate = () =>
     client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
@@ -176,8 +202,8 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     setEditing(false);
     setBearer("");
     setPaste("");
+    setGrant(null);
     setAccountLabel("");
-    setFormError(null);
     setFieldError({});
   }
 
@@ -198,7 +224,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     setAccountLabel(credentialMeta(link)?.accountLabel ?? "");
     setBearer("");
     setPaste("");
-    setFormError(null);
+    setGrant(null);
     setFieldError({});
     setEditing(true);
   }
@@ -206,44 +232,59 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   function switchMethod(next: string) {
     const chosen: LinkMethod = next === "oauth" ? "oauth" : "key";
     setMethod(chosen);
-    setFormError(null);
     setFieldError({});
     // Never carry a credential across methods: the two boxes hold different
     // kinds of secret and the server accepts exactly one of them.
     setBearer("");
     setPaste("");
-    if (chosen === "oauth" && !baseUrl.trim()) setBaseUrl(CHATGPT_OAUTH_BASE_URL);
+    setGrant(null);
+    // The address belongs to the CREDENTIAL, not to the form. It used to be
+    // filled only when empty, which meant switching a saved key link to OAuth
+    // left `https://api.openai.com/v1` sitting under a hint calling it "ChatGPT
+    // 구독 연결이 실제로 닿는 주소" — the hint lying about the value directly
+    // beneath it, and the mismatch invisible until the first turn failed in the
+    // worker (validation only checks the scheme).
+    //
+    // So the address moves with the method, in both directions. A different
+    // tenant is one edit away, which is the case the hint actually describes.
+    if (chosen === "oauth") setBaseUrl(CHATGPT_OAUTH_BASE_URL);
+    else if (baseUrl.trim() === CHATGPT_OAUTH_BASE_URL) setBaseUrl("");
   }
 
+  // Both methods report AT the field. They did not: the key path piled the same
+  // address sentence at the bottom of the form, ~355px below the box it was
+  // about and under three unrelated radios, so flipping one radio made the
+  // identical sentence move house — and only one of the two positions bound the
+  // message to its input for a screen reader. One form, one rule.
   function submitKey() {
-    const url = baseUrl.trim();
-    if (!url) {
-      setFormError("provider 주소를 입력하세요.");
-      return;
-    }
-    if (!/^https?:\/\/.+/.test(url)) {
-      setFormError("주소는 http:// 또는 https:// 로 시작해야 합니다.");
+    const addressError = validateBaseUrl(baseUrl);
+    if (addressError) {
+      setFieldError({ [addressError.field]: addressError.message });
       return;
     }
     if (!bearer.trim()) {
-      setFormError("키를 입력하세요. 저장된 키는 다시 내려오지 않으므로 매번 새로 입력합니다.");
+      setFieldError({
+        bearer: "키를 입력하세요. 저장된 키는 다시 내려오지 않으므로 매번 새로 입력합니다.",
+      });
       return;
     }
-    setFormError(null);
-    save.mutate({ baseUrl: url, bearer, mode });
+    setFieldError({});
+    save.mutate({ baseUrl: baseUrl.trim(), bearer, mode });
   }
 
   function submitOAuth() {
-    const parsedResult = parseAuthJson(paste);
-    if (!parsedResult.ok) {
-      setFieldError({ [parsedResult.error.field]: parsedResult.error.message });
-      return;
+    // The grant normally arrives from `readPaste`; re-parsing here is the path
+    // for a box that never parsed, and it exists to produce the field error.
+    let resolved = grant;
+    if (!resolved) {
+      const parsedResult = parseAuthJson(paste);
+      if (!parsedResult.ok) {
+        setFieldError({ [parsedResult.error.field]: parsedResult.error.message });
+        return;
+      }
+      resolved = parsedResult.grant;
     }
-    const built = buildOAuthLinkBody({
-      baseUrl,
-      accountLabel,
-      grant: parsedResult.grant,
-    });
+    const built = buildOAuthLinkBody({ baseUrl, accountLabel, grant: resolved });
     if (!built.ok) {
       setFieldError({ [built.error.field]: built.error.message });
       return;
@@ -322,6 +363,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     statusRows.push({
       key: "계정",
       value: meta.accountLabel ?? "라벨 없음. 연결 수정에서 적어 두세요",
+      prose: true,
     });
     // The stored `bearerLast4` of an OAuth link is the tail of the SHORT-LIVED
     // access token, not of a saved key, so "저장된 키" would name the wrong
@@ -331,12 +373,20 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     // reads "만료됨. 다음 턴에 서버가 갱신합니다" in words, and --warn is applied
     // only to the one state an operator might want to look twice at. A live
     // token stays ink, because painting the normal case green is decoration.
+    //
+    // All three tones now reach the screen. `muted` used to be computed and
+    // dropped, so "없음. 다음 턴에 서버가 발급합니다" stood at full --ink weight,
+    // as loud as a real value; a tone that is calculated and discarded is a
+    // tone the next reader will assume is honoured.
     const token = accessTokenStatus(meta, Date.now());
     statusRows.push({
       key: "액세스 토큰",
+      prose: true,
       value:
         token.tone === "warn" ? (
           <span className="text-warn">{token.text}</span>
+        ) : token.tone === "muted" ? (
+          <span className="text-ink-muted">{token.text}</span>
         ) : (
           token.text
         ),
@@ -350,11 +400,11 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   }
   statusRows.push({ key: "가용성", value: availabilityLabel(link.availability) });
   if (link.updatedAtMs) {
-    statusRows.push({
-      key: "마지막 저장",
-      value: formatMoment(link.updatedAtMs),
-      numeric: true,
-    });
+    // Not `numeric`: these two rows come out of the SAME `formatMoment`, and
+    // marking one of them tabular set "2026. 7. 26. 오전 2:20:00" in mono beside
+    // its proportional twin. tabular-nums earns its keep in a column of figures,
+    // not in a localized date sentence.
+    statusRows.push({ key: "마지막 저장", value: formatMoment(link.updatedAtMs) });
   }
   if (probe) {
     // Client-session only, and labelled as such: the server keeps no record of
@@ -363,7 +413,6 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     statusRows.push({
       key: "이 화면에서 마지막 확인",
       value: formatMoment(probe.checkedAtMs),
-      numeric: true,
     });
   }
 
@@ -390,13 +439,31 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
           className="flex flex-col gap-3 rounded-md border border-line bg-surface-raised p-4"
           data-testid="ai-link-card"
         >
+          {/* While the form is open this card describes the PAST, and it has to
+              say so. Without this line the panel showed "등록 방식 / 키" in the
+              card and "등록 방식 / ChatGPT 계정" in the form legend directly
+              below it: the same label twice, two different values, and no
+              sentence anywhere saying which one is in force. It also never said
+              that saving REPLACES what the card describes. */}
+          {editing && (
+            <p
+              className="break-keep text-meta text-ink-muted"
+              data-testid="ai-link-card-tense"
+            >
+              지금 저장되어 있는 연결입니다. 아래 폼을 저장하면 이 연결을 대체합니다.
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-body font-medium text-ink">
               {link.endpointLabel}
             </h3>
             {statusChip(link)}
             <StatusChip tone="muted">{providerSourceLabel(link.source)}</StatusChip>
-            {isOAuthLink && <StatusChip tone="warn">개인 계정 · 내부용</StatusChip>}
+            {/* Muted, not warn. This is a CLASSIFICATION of the link, true for
+                as long as the link exists; --warn is for what is happening now
+                and might want an action. */}
+            {isOAuthLink && <StatusChip tone="muted">개인 계정 · 내부용</StatusChip>}
           </div>
 
           <KeyValueRows rows={statusRows} />
@@ -404,8 +471,17 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
           {/* The server's own sentence, rendered verbatim so the settings panel,
               the agent surfaces and the docs cannot drift into three different
               descriptions of the same constraint (ADR-0147 라벨 요구). */}
+          {/* Set off by a rule as a QUOTATION, not painted as a warning. It used
+              to be --warn, pixel-identical to the diagnostics list right under
+              it — so a standing policy sentence and a 429 that happened ten
+              seconds ago were the same colour, the same size, in the same place,
+              and the card carried four ambers meaning four different things.
+              Amber now means one thing: live, and possibly yours to act on. */}
           {isOAuthLink && meta?.notice && (
-            <p className="break-keep text-meta text-warn" data-testid="ai-link-oauth-notice">
+            <p
+              className="border-l-2 border-line pl-3 break-keep text-meta text-ink-muted"
+              data-testid="ai-link-oauth-notice"
+            >
               {meta.notice}
             </p>
           )}
@@ -430,7 +506,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
         >
           <ChoiceRadios
             name="provider-method"
-            legend="등록 방식"
+            legend={link.configured ? "바꿀 등록 방식" : "등록 방식"}
             choices={LINK_METHODS}
             value={method}
             onChange={switchMethod}
@@ -462,6 +538,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                 label="키"
                 htmlFor="provider-bearer"
                 hint="입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다."
+                error={fieldError.bearer}
               >
                 <Input
                   id="provider-bearer"
@@ -483,44 +560,62 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             </>
           ) : (
             <>
-              <Field
-                label="auth.json"
-                htmlFor="provider-oauth-paste"
-                hint="로컬에서 codex 로그인을 마친 뒤 ~/.codex/auth.json 내용을 그대로 붙여넣으세요. 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다."
-                error={fieldError.paste}
-              >
-                {/* 이 번들에는 textarea 프리미티브가 없다. Input과 같은 토큰
-                    클래스를 쓰되 높이만 다르다. */}
-                <textarea
-                  id="provider-oauth-paste"
-                  name="oauthPaste"
-                  value={paste}
-                  rows={6}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(e) => setPaste(e.target.value)}
-                  data-testid="ai-link-oauth-paste"
-                  className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 font-mono text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </Field>
-
-              {/* Presence, never values: the operator needs to know they pasted
-                  the right FILE, and that question is answerable without this
-                  surface putting a credential back on screen (ADR-0004 #2/#5). */}
-              {parsedGrant && (
+              {/* Two states of ONE control. Before a successful parse it is a
+                  box to paste into; after one it is a read-back of what was
+                  found, and the document itself is gone from the screen.
+                  Presence, never values (ADR-0004 #2/#5). */}
+              {grant ? (
                 <div
                   className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4"
                   data-testid="ai-link-oauth-preview"
                 >
-                  <p className="text-meta text-ink-muted">읽은 내용</p>
-                  <KeyValueRows rows={grantPreviewRows(parsedGrant)} />
+                  <p className="break-keep text-meta text-ink-muted">
+                    auth.json 을 읽었습니다. 붙여넣은 원문은 화면에서 지웠습니다.
+                  </p>
+                  <KeyValueRows rows={grantPreviewRows(grant)} />
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setGrant(null);
+                        setFieldError((prev) => ({ ...prev, paste: undefined }));
+                      }}
+                      data-testid="ai-link-oauth-repaste"
+                    >
+                      다시 붙여넣기
+                    </Button>
+                  </div>
                 </div>
+              ) : (
+                <Field
+                  label="auth.json"
+                  htmlFor="provider-oauth-paste"
+                  hint="로컬에서 codex 로그인을 마친 뒤 ~/.codex/auth.json 내용을 그대로 붙여넣으세요. 읽고 나면 원문은 화면에서 지웁니다."
+                  error={fieldError.paste}
+                >
+                  {/* 이 번들에는 textarea 프리미티브가 없다. Input과 같은 토큰
+                      계열을 쓰되 높이(rows)와 세로 패딩(py-2)이 다르고,
+                      transition-colors/tap-target은 붙이지 않는다. */}
+                  <textarea
+                    id="provider-oauth-paste"
+                    name="oauthPaste"
+                    value={paste}
+                    rows={6}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => readPaste(e.target.value)}
+                    data-testid="ai-link-oauth-paste"
+                    className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 font-mono text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </Field>
               )}
 
               <Field
                 label="누구의 구독인가"
                 htmlFor="provider-oauth-account"
-                hint="이 연결이 쓰는 사용량은 그 사람의 ChatGPT 구독 한도에서 나갑니다. 나중에 이 판에서 이 문장이 그대로 보입니다."
+                hint="이 연결이 쓰는 사용량은 그 사람의 ChatGPT 구독 한도에서 나갑니다. 저장하면 위 연결 카드의 「계정」 줄에 그대로 표시됩니다."
                 error={fieldError.accountLabel}
               >
                 <Input
@@ -532,14 +627,16 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                   data-testid="ai-link-oauth-label"
                 />
               </Field>
+
+              {/* The mode radios are absent from this branch, and a control that
+                  vanishes should say what took its place. */}
+              <p className="break-keep text-meta text-ink-muted">
+                모드는 외부 provider로 고정됩니다. ChatGPT 구독 연결이 곧 외부
+                provider 경계이므로 고를 것이 없습니다.
+              </p>
             </>
           )}
 
-          {formError && (
-            <p className="text-meta text-danger" role="alert">
-              {formError}
-            </p>
-          )}
           {save.isError && (
             <p className="text-meta text-danger" role="alert">
               {errorMessage(save.error)}
@@ -548,7 +645,11 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
 
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" size="sm" disabled={offline || busy}>
-              {save.isPending ? "저장 중" : "연결 저장"}
+              {save.isPending
+                ? "저장 중"
+                : link.configured
+                  ? "연결 교체 저장"
+                  : "연결 저장"}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={closeForm}>
               취소

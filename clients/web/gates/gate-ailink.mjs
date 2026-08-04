@@ -10,12 +10,18 @@
 //      `#[serde(deny_unknown_fields)]`, so a stray key is a 400 and not a
 //      tolerated extra — which makes "what exactly went on the wire" the thing
 //      worth measuring, rather than "did the call happen".
-//   ② No credential from the pasted document is anywhere in the DOM after the
-//      save: not in text, not in an input value, not in an attribute. ADR-0004
-//      Rules #2/#5 held by construction while the bearer was the only
-//      credential and this panel had no box that ever contained one; a paste
-//      box holds an entire auth.json in component state, so the rule now needs
-//      a measurement instead of an argument.
+//   ② No credential from the pasted document is anywhere in the DOM — not in
+//      text, not in an input value, not in an attribute — across the WHOLE form
+//      session: the moment after the paste is read, while the account label is
+//      being typed, at submit, and after the save. ADR-0004 Rules #2/#5 held by
+//      construction while the bearer was the only credential and this panel had
+//      no box that ever contained one; a paste box holds an entire auth.json in
+//      component state, so the rule now needs a measurement instead of an
+//      argument.
+//
+//      The pre-save half of that window is the half a design review found
+//      unmeasured (H1): the gate used to look only after the save had landed,
+//      which is precisely the window in which the raw document was legible.
 //
 // The server is stubbed at the route layer, so this touches no live instance
 // and needs no local stack. That is deliberate: the assertions are about the
@@ -350,6 +356,27 @@ async function main() {
         }
       }
 
+      // ---- ② pre-save window ------------------------------------------------
+      // The raw document must be off the screen the instant it has been read.
+      // Everything after this point (typing the label, reaching the button) is
+      // exposure time the operator did not choose.
+      if ((await page.getByTestId("ai-link-oauth-paste").count()) !== 0) {
+        fail(
+          "the auth.json textarea is still on screen after a successful parse, so " +
+            "the refresh token stays legible for the rest of the form session"
+        );
+      }
+      await assertNoCredentialOnScreen(page, "right after the paste was read");
+
+      // The read-back is not a dead end: a wrong file has to be replaceable.
+      await page.getByTestId("ai-link-oauth-repaste").click();
+      await page.waitForSelector('[data-testid="ai-link-oauth-paste"]');
+      if ((await page.getByTestId("ai-link-oauth-paste").inputValue()) !== "") {
+        fail("다시 붙여넣기 restored the previous document into the box");
+      }
+      await page.getByTestId("ai-link-oauth-paste").fill(AUTH_JSON);
+      await page.waitForSelector('[data-testid="ai-link-oauth-preview"]');
+
       // The attribution label is required by this form even though the wire
       // allows its absence: ADR-0147 asks every surface to say whose
       // subscription a link spends, and a blank makes that sentence a lie.
@@ -362,6 +389,8 @@ async function main() {
       }
 
       await page.getByTestId("ai-link-oauth-label").fill(ACCOUNT_LABEL);
+      // Still clean with the form fully populated and one click from submit.
+      await assertNoCredentialOnScreen(page, "with the form ready to submit");
       await page.getByRole("button", { name: "연결 저장", exact: true }).click();
       await page.waitForSelector('[data-testid="ai-link-card"]');
 
@@ -386,6 +415,19 @@ async function main() {
         fail("the 개인 계정 귀속 notice the server sends is not rendered");
       }
 
+      // --- H4: amber must mean exactly one thing on this card ---------------
+      // The attribution notice is a standing policy sentence, not an event. It
+      // was drawn identically to the live diagnostics list directly beneath it.
+      const noticeWarn = await page
+        .getByTestId("ai-link-oauth-notice")
+        .evaluate((el) => el.className.includes("text-warn"));
+      if (noticeWarn) {
+        fail(
+          "the standing attribution notice is painted --warn, so it is " +
+            "indistinguishable from a diagnostic that just happened"
+        );
+      }
+
       // Reopening the form must not repopulate the paste box from anywhere: the
       // document was dropped on save and there is nothing to restore it from.
       await page.getByRole("button", { name: "연결 수정", exact: true }).click();
@@ -396,6 +438,38 @@ async function main() {
       }
       await assertNoCredentialOnScreen(page, "after reopening the form");
 
+      // --- H2: the card must not present the past in the present tense ------
+      if ((await page.getByTestId("ai-link-card-tense").count()) === 0) {
+        fail(
+          "the status card stays on screen while the form is open without saying " +
+            "that it describes the SAVED link and that saving replaces it"
+        );
+      }
+      const replaceLabel = await page
+        .getByRole("button", { name: "연결 교체 저장", exact: true })
+        .count();
+      if (replaceLabel === 0) {
+        fail("editing an existing link offers a save button that never says it replaces one");
+      }
+
+      // --- H3: the address belongs to the credential, not to the form -------
+      await page.locator("#provider-method-key").check();
+      const afterKey = await page.locator("#provider-base-url").inputValue();
+      if (afterKey === BASE_URL) {
+        fail(
+          "switching to the key method kept the ChatGPT grant endpoint, which " +
+            "cannot take an API key, as the starting value"
+        );
+      }
+      await page.locator("#provider-method-oauth").check();
+      const afterOAuth = await page.locator("#provider-base-url").inputValue();
+      if (afterOAuth !== BASE_URL) {
+        fail(
+          `switching back to OAuth left ${JSON.stringify(afterOAuth)} under a hint ` +
+            `that calls the field the address a ChatGPT grant actually reaches`
+        );
+      }
+
       await context.close();
     } finally {
       await browser.close();
@@ -404,7 +478,9 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log("GATE PASS: the OAuth method sends a deny_unknown_fields-clean `oauth` body");
-  console.log("           with no bearer key, and no pasted credential reaches the DOM.");
+  console.log("           with no bearer key; no pasted credential reaches the DOM at any");
+  console.log("           point in the form session; the card states its tense; amber is");
+  console.log("           reserved for live state; the address follows the method.");
 }
 
 main().catch((error) => {

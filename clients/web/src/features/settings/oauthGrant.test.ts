@@ -9,6 +9,7 @@ import {
   grantPreviewRows,
   OAUTH_LINK_MODE,
   parseAuthJson,
+  validateBaseUrl,
   type ProviderOAuthGrant,
 } from "./oauthGrant";
 
@@ -237,6 +238,26 @@ describe("buildOAuthLinkBody", () => {
     if (built.ok) return;
     expect(built.error.field).toBe("accountLabel");
     expect(built.error.message).toContain("누구의 구독인지");
+  });
+
+  // H5: one address rule for both registration methods. When the key form kept
+  // its own copy, the identical sentence appeared in two different places on
+  // screen depending on which radio was selected, and only one of the two was
+  // bound to its input for a screen reader.
+  it.each([
+    ["빈 주소", "", "provider 주소를 입력하세요."],
+    ["스킴 없음", "chatgpt.com/backend-api/codex", "주소는 http:// 또는 https:// 로 시작해야 합니다."],
+    ["공백뿐", "   ", "provider 주소를 입력하세요."],
+  ])("validateBaseUrl 이 두 방식의 유일한 주소 규칙이다: %s", (_name, baseUrl, message) => {
+    const error = validateBaseUrl(baseUrl);
+    expect(error).not.toBeNull();
+    expect(error?.field).toBe("baseUrl");
+    expect(error?.message).toBe(message);
+  });
+
+  it("사용 가능한 주소에는 아무 말도 하지 않는다", () => {
+    expect(validateBaseUrl(CHATGPT_OAUTH_BASE_URL)).toBeNull();
+    expect(validateBaseUrl("  https://api.example.test/v1  ")).toBeNull();
   });
 
   it.each([
