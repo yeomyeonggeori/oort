@@ -69,7 +69,7 @@ buzz 코드 실측(github.com/block/buzz `18eef63`, ~180k LOC Rust, 24 마이그
 
 | 판정 | 패밀리 |
 |---|---|
-| **이식 대상(v0)** | attachments 3경로(ADR-0150 선행) · agent-run cancel · agentRunHistory 읽기 경로 |
+| **이식 대상(v0)** | attachments 3경로(ADR-0151 선행 — 번호 정정: 0150은 egress ADR이 선점) · agent-run cancel · agentRunHistory 읽기 경로 |
 | **판정 보류(v1 결정 대기)** | plugins · webhooks · mcp · memories(+policy·consent) · huddles · workstreams · work-controls · work-auto-approvals · event-subscriptions · work-tool-profiles · bans · members 잔여 · platform |
 | **폐기 후보(이식 없이 삭제 인정)** | `__momo_stub` · context-packets v0 형태 |
 
