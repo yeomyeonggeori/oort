@@ -268,6 +268,7 @@ describe("workLog — 도구 단계", () => {
     expect(entry.name).toBe("work.session.end");
     expect(entry.argsTruncated).toBe(true);
     expect(entry.argFields).toEqual(["session", "path"]);
+    expect(entry.argFieldsHidden).toBe(0);
     expect(entry.argWithheld).toBe(2);
     // 값은 직렬화해도 어디에도 없다. 이것이 이 타입의 요점이다.
     expect(JSON.stringify(entry)).not.toContain("/Users/seongjae/secret");
@@ -303,6 +304,42 @@ describe("workLog — 도구 단계", () => {
     expect(entry.argWithheld).toBe(0);
   });
 
+  it("키 자체가 경로/URL이면 이름도 접는다 (map형 인자, fail-closed)", () => {
+    let l = log();
+    l = appendProgress(
+      l,
+      partial(T0, {
+        tool_call_id: "call-1",
+        tool_call_name: "fs.patch",
+        // map형 인자에서는 키가 스키마가 아니라 사람의 데이터다.
+        tool_call_args: {
+          "/Users/seongjae/projects/momo/secret-plan.md": "…",
+          "https://internal.example/deploy?token=abc": "…",
+          "C:\\Users\\seongjae\\notes.txt": "…",
+          "~/.ssh/config": "…",
+          "배포 되돌리기 절차": "…",
+          dryRun: true,
+        },
+      }),
+      T0
+    );
+    const entry = l.entries[0] as WorkToolEntry;
+    // 안전한 식별자 하나만 남는다.
+    expect(entry.argFields).toEqual(["dryRun"]);
+    expect(entry.argFieldsHidden).toBe(5);
+    expect(entry.argWithheld).toBe(6);
+    const serialized = JSON.stringify(entry);
+    for (const secret of [
+      "secret-plan",
+      "internal.example",
+      "notes.txt",
+      ".ssh",
+      "되돌리기",
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
   it("이름 목록 상한을 넘어도 개수는 전부 센다", () => {
     const args: Record<string, string> = {};
     for (let i = 0; i < WORK_LOG_MAX_ARG_FIELDS + 5; i += 1) args[`k${i}`] = "v";
@@ -318,6 +355,7 @@ describe("workLog — 도구 단계", () => {
     );
     const entry = l.entries[0] as WorkToolEntry;
     expect(entry.argFields).toHaveLength(WORK_LOG_MAX_ARG_FIELDS);
+    expect(entry.argFieldsHidden).toBe(5);
     expect(entry.argWithheld).toBe(WORK_LOG_MAX_ARG_FIELDS + 5);
   });
 

@@ -5,7 +5,12 @@ import type {
   AgentRunStatusWire,
   AgentStatusEvent,
 } from "../../lib/realtimeEvents";
-import { eventTimeMs, isRunOver, turnStateOf } from "./agentRail";
+import {
+  eventTimeMs,
+  isRunOpening,
+  isRunOver,
+  turnStateOf,
+} from "./agentRail";
 import { IDLE_CUTOFF_MS, type AgentTurnState } from "./workingSignal";
 
 // =============================================================================
@@ -93,12 +98,21 @@ export interface WorkToolEntry {
    * 스크린샷 한 장에 실려 나가고 나면 접어 둔 적이 있다는 사실은 아무 소용이
    * 없다. 그래서 v0는 엄격한 쪽을 쓰고, 경계는 성재가 정한다(PR 계획 이탈).
    *
-   * 이름은 도구의 **스키마**이고 값은 사람의 데이터다. 이름까지 지우면 "도구를
-   * 무엇에 대해 불렀는가"가 통째로 사라져서 이 패널의 목적이 없어지므로, 이름은
-   * 남기고 값은 세어서 밝힌다 — `agentCardModel`의 `withheld`와 같은 모양이다.
+   * 이름은 보통 도구의 **스키마**이고 값은 사람의 데이터다. 이름까지 지우면
+   * "도구를 무엇에 대해 불렀는가"가 통째로 사라져서 이 패널의 목적이 없어지므로,
+   * 이름은 남기고 값은 세어서 밝힌다 — `agentCardModel`의 `withheld`와 같은
+   * 모양이다.
+   *
+   * "보통"이 아닌 경우가 map형 인자다: 키 자체가 경로이거나 URL이면 이름도
+   * 사람의 데이터이므로 함께 접는다(`looksLikeHumanData`, fail-closed).
    */
   argFields: readonly string[];
-  /** 값을 표시하지 않은 인자의 개수. 0이면 인자가 없었다는 뜻이다. */
+  /**
+   * 이름조차 적지 않은 인자의 개수 — 사람 데이터로 보여 접었거나 개수 상한에
+   * 밀렸거나. 조용히 자르지 않기 위한 값이다.
+   */
+  argFieldsHidden: number;
+  /** 값을 표시하지 않은 인자의 총 개수. 0이면 인자가 없었다는 뜻이다. */
   argWithheld: number;
   /** 서버가 args를 잘라서 보냈다. */
   argsTruncated: boolean;
@@ -174,17 +188,6 @@ export function openWorkLog(target: WorkLogTarget, nowMs: number): WorkLog {
     lastActivityAtMs: nowMs,
     nextSeq: 1,
   };
-}
-
-/**
- * run의 여는 프레임인가. agentRail의 같은 판정을 여기서 다시 쓴다: 그 파일은 이
- * 배치에서 소비 전용이라 export를 늘리지 않는다(핸드오프 패킷 §병렬 경계).
- * momowebqa 실측 — 여는 프레임은 `phase=queued, run_status=queued`로 온다.
- */
-function isRunOpening(event: AgentStatusEvent): boolean {
-  return (
-    event.payload.phase === "queued" || event.payload.run_status === "queued"
-  );
 }
 
 /**
@@ -306,29 +309,60 @@ function lastPhaseEntry(log: WorkLog): WorkPhaseEntry | undefined {
 }
 
 /**
+ * 인자 이름이 **스키마가 아니라 사람 데이터**로 보이는가.
+ *
+ * 이름을 남기기로 한 근거는 "이름은 도구의 스키마이고 값은 사람의 데이터"였다.
+ * 그 전제가 깨지는 실제 모양이 하나 있다: map형 인자
+ * (`{"/Users/seongjae/secret.md": "…", "https://…": "…"}`)에서는 **키 자체가
+ * 경로이고 URL이다**. 그때는 이름도 값과 같은 것이므로 함께 접는다.
+ *
+ * 판정은 fail-closed다. 경로처럼 보이는지 애매하면 접는 쪽으로 기운다: 잘못
+ * 접으면 이름 한 줄이 아쉬운 것이고, 잘못 내보내면 스크린샷 한 장으로 끝난다.
+ */
+function looksLikeHumanData(key: string): boolean {
+  return (
+    key.includes("/") ||
+    key.includes("\\") ||
+    key.includes("://") ||
+    // 공백이 든 키는 식별자가 아니라 문장이거나 경로다.
+    /\s/.test(key) ||
+    key.startsWith("~") ||
+    key.startsWith(".")
+  );
+}
+
+/**
  * 인자 페이로드에서 **이름과 개수만** 뽑는다. 값은 어떤 형태로도 밖으로 나가지
  * 않는다: 반환 타입에 값을 담을 자리가 없다는 것이 이 함수의 요점이다.
  *
- * 이름 목록에도 상한을 둔다. 도구가 수십 개의 키를 보내면 320px 열에 이름만으로
- * 화면이 덮이고, 잘린 사실은 `withheld`가 이미 세고 있으므로 조용한 절단이 아니다.
+ * 이름에도 두 겹의 상한이 있다. 사람 데이터로 보이는 키는 아예 빼고
+ * (`looksLikeHumanData`), 남은 것도 개수 상한에서 자른다 — 도구가 수십 개의
+ * 키를 보내면 320px 열이 이름만으로 덮인다. 어느 쪽으로 빠졌든 몇 개가 빠졌는지
+ * `fieldsHidden`이 세므로 조용한 절단이 아니다.
  */
 function describeArgs(args: unknown): {
   fields: readonly string[];
+  fieldsHidden: number;
   withheld: number;
 } {
-  if (args === undefined || args === null) return { fields: [], withheld: 0 };
+  if (args === undefined || args === null) {
+    return { fields: [], fieldsHidden: 0, withheld: 0 };
+  }
   if (typeof args !== "object" || Array.isArray(args)) {
     // 객체가 아니면(문자열 프롬프트, 배열) 이름이랄 것이 없다. 하나로 센다.
-    return { fields: [], withheld: 1 };
+    return { fields: [], fieldsHidden: 0, withheld: 1 };
   }
   const keys = Object.keys(args as Record<string, unknown>);
+  const safe = keys.filter((key) => !looksLikeHumanData(key));
+  const fields = safe.slice(0, WORK_LOG_MAX_ARG_FIELDS);
   return {
-    fields: keys.slice(0, WORK_LOG_MAX_ARG_FIELDS),
+    fields,
+    fieldsHidden: keys.length - fields.length,
     withheld: keys.length,
   };
 }
 
-/** 이름을 적어 주는 인자 필드 수의 상한. 나머지는 `argWithheld`가 센다. */
+/** 이름을 적어 주는 인자 필드 수의 상한. 나머지는 `argFieldsHidden`이 센다. */
 export const WORK_LOG_MAX_ARG_FIELDS = 12;
 
 function clipText(text: string): { text: string; clipped: boolean } {
@@ -368,6 +402,7 @@ function appendPartial(
       callId,
       name: toolName,
       argFields: args.fields,
+      argFieldsHidden: args.fieldsHidden,
       argWithheld: args.withheld,
       argsTruncated: payload.tool_call_args_truncated === true,
     };
@@ -520,12 +555,18 @@ export const WORK_LOG_VOLATILE_SENTENCE =
 export const WORK_LOG_ARGS_FOLDED_LABEL = "호출 인자 보기";
 
 /**
- * 값을 왜 안 보여 주는가. `AgentCard`의 같은 자리와 같은 말을 쓴다(design-taste
- * §9, ADR-0112 basic mode): 두 표면이 같은 정책에 대해 다른 문장을 쓰면 정책이
- * 두 개인 것처럼 읽힌다.
+ * 값을 왜 안 보여 주는가. 약속의 범위를 **값**으로 정확히 한정한다.
+ *
+ * 앞선 문안은 "도구 인자 값, 실행 경로, 자격증명은 표시하지 않습니다"였는데,
+ * map형 인자에서는 키 자체가 경로일 수 있어서 그 문장이 지키지 못할 약속이 될
+ * 수 있었다. 이제 코드가 그런 키를 접고(`looksLikeHumanData`), 문장은 코드가
+ * 실제로 보장하는 것만 말한다. 접힌 이름이 있으면 아래 문장이 뒤따른다.
  */
-export const WORK_LOG_ARGS_OPAQUE_SENTENCE =
-  "도구 인자 값, 실행 경로, 자격증명은 표시하지 않습니다.";
+export const WORK_LOG_ARGS_OPAQUE_SENTENCE = "인자 값은 표시하지 않습니다.";
+
+/** 이름조차 접은 것이 있을 때만 뒤따르는 문장. */
+export const WORK_LOG_ARGS_NAMES_HIDDEN_SENTENCE =
+  "사람의 데이터로 보이는 이름은 함께 접었습니다.";
 
 /** 서버가 인자를 잘라 보냈다. */
 export const WORK_LOG_ARGS_TRUNCATED_SENTENCE = "서버가 인자를 잘라 보냈습니다.";

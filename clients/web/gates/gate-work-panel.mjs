@@ -26,6 +26,8 @@
 //     expected failure: "tool args folded by default"
 //   WORK_PANEL_GATE_PROVE_RED_VOLATILE=1 npm run gate:work-panel
 //     expected failure: "a closed panel kept (or backfilled) history"
+//   WORK_PANEL_GATE_PROVE_RED_COOPEN=1 npm run gate:work-panel
+//     expected failure: "the thread pane stayed beside the work panel"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
 // ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
@@ -52,6 +54,7 @@ const proveRedOrder = process.env.WORK_PANEL_GATE_PROVE_RED_ORDER === "1";
 const proveRedArgs = process.env.WORK_PANEL_GATE_PROVE_RED_ARGS === "1";
 const proveRedFold = process.env.WORK_PANEL_GATE_PROVE_RED_FOLD === "1";
 const proveRedVolatile = process.env.WORK_PANEL_GATE_PROVE_RED_VOLATILE === "1";
+const proveRedCoOpen = process.env.WORK_PANEL_GATE_PROVE_RED_COOPEN === "1";
 
 const DELTAS = ["배포 로그를 ", "먼저 ", "읽었습니다."];
 const DELTA_SENTENCE = DELTAS.join("");
@@ -60,6 +63,18 @@ const MISSED_DELTA = "닫혀 있는 동안 흘러간 줄입니다.";
 const TOOL_NAME = "work.session.end";
 const TOOL_ARG_MARKER = "/Users/seongjae/projects/momo/secret-plan.md";
 const TOOL_ARG_VALUE = "되돌리기-절차-초안";
+const ROOT_MESSAGE = "0199aaaa-0000-7000-8000-0000000000M1";
+const REPLY_MESSAGE = "0199aaaa-0000-7000-8000-0000000000M2";
+
+/**
+ * 채팅 표면이 아직 쓸 수 있는 폭인가.
+ *
+ * 숫자의 출처는 이 레포의 기존 실측이다. tokens.css `work-pane`이 문턱을 900px로
+ * 올린 이유가 "760px 창이면 채팅에 200px가 남고, 컴포저가 136px로 접히면서
+ * placeholder가 두 줄로 감기고 세로로 잘린다"였다. 그러니 부차 표면 둘이 동시에
+ * 열렸을 때도 컴포저는 그 실패 폭 위에 있어야 한다.
+ */
+const MIN_COMPOSER_WIDTH = 240;
 
 const session = {
   accessToken: "gate-only-not-a-credential",
@@ -117,11 +132,53 @@ const channels = [
   },
 ];
 
+const root = {
+  id: ROOT_MESSAGE,
+  channelId,
+  seq: 41,
+  hlcTs: 1_785_238_400_000,
+  hlcCount: 0,
+  authorMemberId: memberId,
+  type: "text",
+  body: "배포 되돌리기 절차부터 확인해 줘.",
+  state: "sent",
+  createdAtMs: 1_785_238_400_000,
+  thread: { reply_count: 2, last_reply_seq: 43, last_reply_at: 1_785_238_460_000 },
+};
+
+const reply = {
+  id: REPLY_MESSAGE,
+  channelId,
+  rootId: ROOT_MESSAGE,
+  seq: 42,
+  hlcTs: 1_785_238_430_000,
+  hlcCount: 0,
+  authorMemberId: agentId,
+  type: "text",
+  body: "롤백 스크립트와 마지막 정상 배포를 먼저 봤습니다.",
+  state: "sent",
+  createdAtMs: 1_785_238_430_000,
+};
+
 const scenarios = [
   { name: "burst", roster: 20, channels: 20, frameGapMs: 0, toolBeforeOpen: false },
   { name: "slow-roster", roster: 280, channels: 40, frameGapMs: 120, toolBeforeOpen: false },
   { name: "pre-open-tool", roster: 40, channels: 280, frameGapMs: 40, toolBeforeOpen: true },
 ];
+
+/**
+ * 부차 표면 둘이 동시에 열린 900px 창 (리뷰 M-2). 사이드바 240 + 스레드 320 +
+ * 작업 패널 320 = 880이 크롬이므로 산술상 채팅에 20px가 남는다. 산술이 곧 렌더는
+ * 아니므로(둘 다 `shrink-0`이고 채팅 열은 `min-w-0`이다) **실렌더로** 잰다.
+ */
+const CO_OPEN_SCENARIO = {
+  name: "co-open-900",
+  roster: 20,
+  channels: 20,
+  frameGapMs: 0,
+  toolBeforeOpen: false,
+  withThread: true,
+};
 
 function json(route, body, status = 200) {
   return route.fulfill({
@@ -270,7 +327,14 @@ async function installRoutes(context, scenario) {
       return json(route, { channels });
     }
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
-    if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.endsWith("/replies")) {
+      return json(route, { messages: [reply] });
+    }
+    if (path.includes("/messages")) {
+      // 스레드 진입점을 그리려면 답글 롤업이 달린 글이 하나 있어야 한다
+      // (MessageRow의 `thread-anchor`는 롤업이 있을 때만 버튼이 된다).
+      return json(route, { messages: scenario.withThread ? [root] : [] });
+    }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
     return json(route, {});
@@ -616,6 +680,67 @@ async function captureShots(browser) {
   console.log(`[shots] artifacts/work-panel/work-panel-{light,dark}.png`);
 }
 
+/**
+ * 스레드 패널과 작업 패널을 동시에 열고 채팅 표면이 남는 폭을 실렌더로 잰다.
+ *
+ * 셋은 서로 다른 상자에 산다: 사이드바는 셸 그리드, 스레드는 채팅 표면 안쪽,
+ * 작업 패널은 라우트 상자 옆. 그래서 "동시에 열릴 수 없다"는 보장이 어디에도
+ * 없고, 산술로는 900px 창에서 채팅에 20px가 남는다. 그 산술이 실제로 무는지는
+ * 브라우저만 안다.
+ */
+async function exerciseCoOpen(browser) {
+  const scenario = CO_OPEN_SCENARIO;
+  const context = await browser.newContext({
+    viewport: { width: 900, height: 800 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, scenario);
+  await login(page);
+
+  await publish(page, statusFrame("queued", "queued"));
+  await publish(page, statusFrame("streaming", "running"));
+
+  // 스레드를 먼저 연다. 답글 롤업이 달린 글의 「답글 N개」가 그 진입점이다.
+  await page.getByTestId("thread-anchor").first().click();
+  await page.getByTestId("thread-panel").waitFor();
+
+  // red seam: 작업 패널을 열지 않는다. 스레드가 그대로 남으므로 아래 "부차 표면은
+  // 하나" 단언이 살아 있다면 반드시 깨진다.
+  if (!proveRedCoOpen) await openPanelFromComposer(page);
+
+  // 규칙: 부차 표면은 한 번에 하나. 작업 패널이 열려 있는 동안 채팅 표면의
+  // 부차 패널은 **물러난다**(닫히는 것이 아니라 가려진다 — 스레드가 작업 세션
+  // 패널을 가리는 것과 같은 방식이다).
+  if ((await page.getByTestId("thread-panel").count()) !== 0) {
+    throw new Error(
+      `${scenario.name}: the thread pane stayed beside the work panel; two secondary panes at 900px leave the chat surface unusable`
+    );
+  }
+
+  const composer = await page.getByTestId("composer-input").boundingBox();
+  const width = composer?.width ?? 0;
+  console.log(
+    `[co-open] 900px 창, 스레드 열어 둔 채 작업 패널 개방 -> 컴포저 ${Math.round(width)}px`
+  );
+  if (width < MIN_COMPOSER_WIDTH) {
+    throw new Error(
+      `${scenario.name}: the chat surface was squeezed to ${Math.round(
+        width
+      )}px of composer (floor ${MIN_COMPOSER_WIDTH}px). A secondary pane must not push the primary surface out of usable width (tokens.css work-pane).`
+    );
+  }
+
+  // 물러난 것이지 버려진 것이 아니다: 작업 패널을 닫으면 읽던 스레드가 그
+  // 자리에 돌아온다. 이것이 "가린다"와 "닫는다"의 차이이고, 사람이 클릭 한
+  // 번으로 잃을 수 있는 것이 무엇인지가 거기서 갈린다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("agent-work-panel").waitFor({ state: "detached" });
+  await page.getByTestId("thread-panel").waitFor();
+  await context.close();
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
@@ -632,6 +757,7 @@ async function main() {
       for (const scenario of scenarios) {
         await exerciseScenario(browser, scenario);
       }
+      await exerciseCoOpen(browser);
       if (process.env.WORK_PANEL_GATE_SHOTS === "1") {
         await captureShots(browser);
       }
@@ -648,7 +774,10 @@ async function main() {
     "           mid-run truncation notice, folded tool args, and volatile reopen"
   );
   console.log(
-    "           held across three skewed REST/frame timings."
+    "           held across three skewed REST/frame timings, and one secondary"
+  );
+  console.log(
+    "           pane at a time kept the 900px chat surface usable."
   );
 }
 

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   toolEntryState,
   WORK_LOG_ARGS_FOLDED_LABEL,
+  WORK_LOG_ARGS_NAMES_HIDDEN_SENTENCE,
   WORK_LOG_ARGS_OPAQUE_SENTENCE,
   WORK_LOG_ARGS_TRUNCATED_SENTENCE,
   WORK_LOG_EMPTY_DETAIL,
@@ -203,18 +204,18 @@ function PanelHeader({
           <X className="size-4" />
         </button>
       </div>
-      {/* 상태가 작업 중 → 승인 대기 → 신호 소실로 넘어가는 것은 화면에서만
-          일어나는 일이 아니다. 델타 한 줄 한 줄을 읽어 주면 소음이지만, 상태 한
-          칸은 사람이 기다리고 있는 바로 그 사실이다. */}
-      <div
-        className="flex flex-wrap items-baseline gap-2 text-meta text-ink-muted"
-        aria-live="polite"
-      >
+      <div className="flex flex-wrap items-baseline gap-2 text-meta text-ink-muted">
         <span className="min-w-0 truncate text-agent" data-testid="agent-work-panel-agent">
           {name}
         </span>
         {log !== null && liveness !== null && (
+          // 읽어 줄 값은 **상태 칩 하나뿐**이다. live 영역을 이 줄 전체로 잡으면
+          // 옆의 1Hz 경과 시계가 그 안에 들어가고, 보조기술이 초당 한 번 숫자를
+          // 낭독한다 — 컴포저 진입점 버튼에서 이름을 명시해 피한 함정의 live
+          // 판본이다. 작업 중 → 승인 대기 → 신호 소실 전이는 사람이 기다리고 있는
+          // 바로 그 사실이라 읽어 줄 값이 있고, 초 단위 숫자는 그렇지 않다.
           <span
+            aria-live="polite"
             className={cn(
               "shrink-0 rounded-sm px-1 text-timestamp",
               !railLive && "text-ink-muted",
@@ -510,6 +511,15 @@ function ToolRow({
                   값 {entry.argWithheld}개 숨김.{" "}
                 </span>
                 {WORK_LOG_ARGS_OPAQUE_SENTENCE}
+                {entry.argFieldsHidden > 0 && (
+                  <>
+                    {" "}
+                    <span data-testid="agent-work-panel-args-names-hidden">
+                      {WORK_LOG_ARGS_NAMES_HIDDEN_SENTENCE}
+                    </span>{" "}
+                    <span data-numeric>이름 {entry.argFieldsHidden}개.</span>
+                  </>
+                )}
                 {entry.argsTruncated ? ` ${WORK_LOG_ARGS_TRUNCATED_SENTENCE}` : ""}
               </p>
             </div>
