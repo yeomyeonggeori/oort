@@ -44,3 +44,18 @@
 ## 디스크 위생
 
 배포 전 `docker images | grep momo`로 사용 안 하는 옛 태그 제거(`docker image rm`). **직전 태그 하나는 롤백용으로 반드시 남긴다.**
+
+## 웹(정적 SPA) 배포
+
+Caddy가 호스트 `/opt/momo/web`(bind mount → 컨테이너 `/srv/web`)를 서빙한다(`Caddyfile`의 `handle { root * /srv/web }`).
+
+1. (로컬, track/engine 워크트리) `cd clients/web && npm run build` → `dist/`
+2. 업로드 후 **반드시 마운트된 디렉터리 inode 안에서 내용 교체**:
+   ```bash
+   tar czf - -C dist . | ssh root@101.79.11.189 \
+     'mkdir -p /opt/momo/web.new && tar xzf - -C /opt/momo/web.new && \
+      find /opt/momo/web -mindepth 1 -delete && cp -a /opt/momo/web.new/. /opt/momo/web/ && rm -rf /opt/momo/web.new'
+   ```
+3. 검증: `curl -s "https://app.oor7.com/?v=$(date +%s)" | grep -o 'index-[^"]*\.js'` 가 dist의 해시와 일치.
+
+> ⚠️ **함정(2026-08-04 실증): 디렉터리 `mv` 스왑 금지.** docker bind mount는 컨테이너 기동 시점의 **inode**를 잡는다 — `mv web web.bak && mv web.new web`을 하면 컨테이너는 여전히 옛 디렉터리(web.bak이 된 inode)를 서빙한다. 내용 교체는 반드시 기존 디렉터리 **안**에서.
