@@ -140,6 +140,32 @@ SPEC_JSON="$TMP_DIR/openapi.json"
 MANIFEST="$TMP_DIR/manifest.jsonl"
 : >"$MANIFEST"
 
+# ---- 정본이 Rust 로 넘어간 연산 (SRV-B7 / #1042) -----------------------------
+# #1040 이 스펙의 승인 스키마를 **배포된 와이어**(Rust, camelCase)에 맞춘 순간부터,
+# 이 패스가 띄우는 Swift 서버(snake_case)는 그 연산들에서 구조적으로 스펙과 어긋난다.
+# 그건 이 패스가 잡아야 할 드리프트가 아니라 **이 패스가 더 이상 그 연산의 권위가
+# 아니라는 사실**이다. 그래서 sampled-on-rust 에 오른 연산은 여기서 응답을 기록하지
+# 않고(=스펙과 대조하지 않고) 커버리지에서도 면제한다 — 2차 패스가 소유한다.
+#
+# 요청 자체는 그대로 보낸다: 상태코드 단정은 살아 있으므로 Swift 가 그 경로에서
+# 500 을 내기 시작하면 여전히 여기서 빨강이 된다. 넘겨준 것은 '모양의 권위'뿐이다.
+#
+# 2차 패스를 끄면(OPENAPI_GATE_RUST_PASS=0) 이 목록은 비어 있는 것으로 취급한다 —
+# 아무도 샘플하지 않는 연산이 조용히 면제되는 상태를 만들지 않기 위해서다.
+SAMPLED_ON_RUST="$SCRIPT_DIR/openapi_sampled_on_rust.txt"
+RUST_OWNED="$TMP_DIR/rust-owned-ops.txt"
+: >"$RUST_OWNED"
+if [ "${OPENAPI_GATE_RUST_PASS:-1}" = "1" ] && [ -f "$SAMPLED_ON_RUST" ]; then
+  sed -e 's/#.*//' "$SAMPLED_ON_RUST" \
+    | awk 'NF { print tolower($1) " " $2 }' | sort -u >"$RUST_OWNED"
+fi
+
+rust_owned() {
+  # $1 = method, $2 = spec path TEMPLATE
+  [ -s "$RUST_OWNED" ] || return 1
+  grep -qxF "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]') $2" "$RUST_OWNED"
+}
+
 # ---- Failure accumulation (MOMO-654) ----------------------------------------
 # The gate used to abort on the FIRST assertion failure. With a ~40min cold
 # Swift build per run that turns "N drifted operations" into N docker runs, and
@@ -528,6 +554,10 @@ sample() {
     gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS" "$RESPONSE_BODY"
     return 0
   fi
+  if rust_owned "$method" "$template"; then
+    echo "[openapi] RUST-OWNED $name -> $expected (모양 검증은 2차 패스가 소유)"
+    return 0
+  fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   local file
   file="$(printf '%s/sample-%02d-%s.json' "$TMP_DIR" "$SAMPLE_INDEX" "$name")"
@@ -545,6 +575,10 @@ record_sample() {
     gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS" "$RESPONSE_BODY"
     return 0
   fi
+  if rust_owned "$method" "$template"; then
+    echo "[openapi] RUST-OWNED $name -> $expected (모양 검증은 2차 패스가 소유)"
+    return 0
+  fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   local file
   file="$(printf '%s/sample-%02d-%s.json' "$TMP_DIR" "$SAMPLE_INDEX" "$name")"
@@ -560,6 +594,10 @@ record_binary_sample() {
   local name="$1" method="$2" template="$3" expected="$4" body_file="$5" media_type="$6"
   if [ "$RESPONSE_STATUS" != "$expected" ]; then
     gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS"
+    return 0
+  fi
+  if rust_owned "$method" "$template"; then
+    echo "[openapi] RUST-OWNED $name -> $expected (모양 검증은 2차 패스가 소유)"
     return 0
   fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
@@ -1574,7 +1612,8 @@ SHAPE_RC=0
   --manifest "$TMP_DIR/manifest.json" \
   --server-route-manifest "$TMP_DIR/server-routes.json" \
   --require-operation-coverage \
-  --known-unsampled "$SCRIPT_DIR/openapi_known_unsampled.txt" || SHAPE_RC=$?
+  --known-unsampled "$SCRIPT_DIR/openapi_known_unsampled.txt" \
+  --sampled-elsewhere "$RUST_OWNED" || SHAPE_RC=$?
 
 # ---- 6) 2차 샘플 패스: 스펙 ↔ Rust (SRV-B7 / #1042) --------------------------
 # 위의 1차 패스는 e2e 컴포즈의 swift:6.2 서버를 샘플한다. 그런데 스펙이 서술하는
