@@ -131,7 +131,14 @@ function Shell(): React.JSX.Element {
           />
         </View>
         <View style={nav.tab === 'inbox' ? styles.visible : styles.hidden}>
-          <InboxScreen onOpenConversation={onOpenConversation} />
+          {/* 숨김은 언마운트가 아니다 (goal RN-B4d / #1020). 탭을 여는 것이 마운트가
+              아니므로 react-query 에는 재조회를 걸 계기가 없고, 그래서 승인이
+              도착해도 인박스는 「지금 결정할 일이 없습니다」를 유지했다. 보이게 된
+              그 순간을 화면에 말해 준다. */}
+          <InboxScreen
+            active={nav.tab === 'inbox'}
+            onOpenConversation={onOpenConversation}
+          />
         </View>
         {visited.current.has('agents') ? (
           <View style={nav.tab === 'agents' ? styles.visible : styles.hidden}>

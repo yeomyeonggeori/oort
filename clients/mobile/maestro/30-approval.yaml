@@ -59,42 +59,27 @@ name: 30-approval
     visible: ".*Approve momo.mock.echo.*"
     timeout: 120000
 
-# RELAUNCH before opening the inbox — and this is a workaround for a real
-# defect, not a stylistic choice, so it is worth reading before deleting.
+# NO RELAUNCH. There used to be one here, and it was a workaround for #1020 —
+# the inbox did not pick up an approval that arrived while the app was open, so
+# this flow restarted the app to force a fresh mount. Measured then: the approval
+# sat `pending` in the database and rendered live in the CHANNEL while the inbox
+# showed "지금 결정할 일이 없습니다. 조용한 게 정상입니다." for the full 60s wait.
 #
-# The inbox does not pick up an approval that arrives while the app is open. Its
-# feeds are react-query with `FEED_STALE_MS = 15_000` (useInbox.ts), and the tab
-# screens are hidden with `display:'none'` rather than unmounted (AppShell), so
-# switching to the inbox is not a mount and nothing triggers a refetch. Measured
-# here: the approval sat `pending` in the database and rendered live in the
-# CHANNEL, while the inbox showed "지금 결정할 일이 없습니다. 조용한 게 정상입니다." for
-# the full 60s wait. Realtime is fine — the channel proved that; the approvals
-# query is simply never invalidated by it.
+# goal RN-B4d landed the invalidation (`AgentWorkingRail` folds
+# `agent.status`'s `run_status` change into the inbox ledgers, and opening the
+# tab re-reads them), so the workaround is gone and this is a plain tab tap
+# again. That is the point of removing it rather than leaving it as insurance: a
+# detour that outlives the defect it routed around stops anyone from noticing
+# when the defect comes back.
 #
-# Relaunching is also the honest shape of the path this flow stands in for: the
-# lock-screen push wakes the app, and the person decides on a fresh launch. When
-# the invalidation lands, this can go back to a plain tab tap.
-- launchApp:
-    appId: app.momo.ios
-- runFlow: subflows/ensure-signed-in.yaml
+# WHAT THIS STILL CANNOT SEE: the lock-screen push path. The simulator has no
+# APNs, and the relaunch used to stand in for it by accident. It never proved it
+# — the runner already prints that as an explicit 실기기 파이널 체크 item.
 
-# The relaunch brings the LogBox banner back, and it covers the TAB BAR as well
-# as the composer — a tab tap made under it reports COMPLETED and does nothing.
-# It can only be dismissed from a conversation (the dismissal is a coordinate;
-# on the sidebar that coordinate is inside a tab). Same detour, same reason, as
-# the one at the top of 40-agents-tab.yaml.
-- tapOn:
-    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
-- extendedWaitUntil:
-    visible:
-      id: "composer-input"
-    timeout: 60000
-- runFlow: subflows/dismiss-dev-logbox.yaml
+# Back out of the conversation. Decisions live on the inbox tab, not in the
+# timeline (ApprovalDecision is only mounted by InboxScreen).
 - tapOn:
     id: "header-back"
-
-# Decisions live on the inbox tab, not in the timeline (ApprovalDecision is only
-# mounted by InboxScreen).
 - extendedWaitUntil:
     visible:
       id: "tab-inbox"

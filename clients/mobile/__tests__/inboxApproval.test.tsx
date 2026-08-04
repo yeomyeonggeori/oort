@@ -396,13 +396,26 @@ describe('결정 대기 목록의 네 가지 상태', () => {
 describe('결정의 세 갈래', () => {
   it('승인이 기록되면 원장이 답한 그대로 말하고 목록을 다시 읽는다', async () => {
     let page = 0;
+    let decided = false;
     const fixture = installFetch({
       approvals: status => {
         if (status !== 'pending') return jsonResponse(200, {approvals: []});
         page += 1;
         // 결정 뒤의 재조회는 서버가 답한 새 상태다. 행이 사라지는 것도 서버의
         // 답이지 이 클라이언트가 숨긴 것이 아니다.
-        return jsonResponse(200, {approvals: page === 1 ? [wireApproval()] : []});
+        //
+        // 「첫 조회에만 있다」가 아니라 「**결정되기 전까지** 있다」로 쓴다 (#1020).
+        // 대기 중인 승인은 누가 몇 번을 읽든 대기 중이고, 그것이 서버의 진실이다.
+        // 인박스가 탭을 열 때 원장을 다시 읽게 되면서 조회 횟수가 하나 늘었는데,
+        // 앞의 픽스처는 그 한 번을 「결정됐다」로 답해 버렸다 — 서버라면 하지 않을 답이다.
+        return jsonResponse(200, {approvals: decided ? [] : [wireApproval()]});
+      },
+      decision: (approvalId, body) => {
+        decided = true;
+        return jsonResponse(
+          200,
+          receipt(approvalId, body.approve ? 'approved' : 'rejected'),
+        );
       },
     });
     const row = await openPendingRow();
@@ -848,12 +861,20 @@ describe('영수증 (2R H3/M6)', () => {
   });
 
   it('행이 목록에서 빠지면 그 답을 위쪽 알림으로 올린다', async () => {
-    let page = 0;
+    // 위와 같은 이유로 「결정되기 전까지 대기 중」이다 (#1020): 탭을 열 때 원장을
+    // 다시 읽으므로, 「첫 조회에만 있다」는 서버가 하지 않을 답이 된다.
+    let decided = false;
     installFetch({
       approvals: status => {
         if (status !== 'pending') return jsonResponse(200, {approvals: []});
-        page += 1;
-        return jsonResponse(200, {approvals: page === 1 ? [wireApproval()] : []});
+        return jsonResponse(200, {approvals: decided ? [] : [wireApproval()]});
+      },
+      decision: (approvalId, body) => {
+        decided = true;
+        return jsonResponse(
+          200,
+          receipt(approvalId, body.approve ? 'approved' : 'rejected'),
+        );
       },
     });
     await openPendingRow();
