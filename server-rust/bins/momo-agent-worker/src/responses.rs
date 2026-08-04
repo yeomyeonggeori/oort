@@ -131,8 +131,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::provider::{
-    post_event_stream, ChatCompletion, ChatProvider, ChatRequest, ChatUsage, ProviderEndpoint,
-    ProviderError, ProviderToolCall,
+    post_event_stream, ChatCompletion, ChatProvider, ChatRequest, ChatUsage, DeltaSink,
+    DiscardDeltas, ProviderEndpoint, ProviderError, ProviderToolCall,
 };
 
 /// `POST {base_url}/responses`, `stream=true`, `store=false`.
@@ -162,13 +162,23 @@ impl ChatProvider for OpenAiResponsesProvider {
         endpoint: &ProviderEndpoint,
         request: &ChatRequest,
     ) -> Result<ChatCompletion, ProviderError> {
+        self.complete_streaming(endpoint, request, &DiscardDeltas)
+            .await
+    }
+
+    async fn complete_streaming(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
         let body = build_request_body(request);
         let mut response = post_event_stream(&self.client, endpoint, &body).await?;
         let mut stream = ResponseStream::new();
         loop {
             match response.chunk().await {
                 Ok(Some(chunk)) => {
-                    stream.push(&chunk);
+                    stream.push_to(&chunk, sink);
                     // Stop at the terminal event rather than reading to EOF: the
                     // answer is already complete, and a gateway that holds the
                     // socket open after it would otherwise cost this turn the
@@ -444,8 +454,15 @@ impl ResponseStream {
         }
     }
 
-    /// Feed one chunk off the socket.
-    pub fn push(&mut self, chunk: &[u8]) {
+    /// Feed one chunk off the socket, reporting each text delta as it is
+    /// decoded (goal SRV-B3e).
+    ///
+    /// The sink is called from **inside** the byte loop rather than from a pass
+    /// over the accumulated text afterwards, because the whole value of a
+    /// partial is that it is early: a slice reported after `finish()` would
+    /// arrive with the final message and prove nothing a reader could not
+    /// already see.
+    pub fn push_to(&mut self, chunk: &[u8], sink: &dyn DeltaSink) {
         if let Some(raw) = self.non_sse.as_mut() {
             if raw.len() + chunk.len() > NON_SSE_FALLBACK_LIMIT {
                 self.non_sse = None;
@@ -459,8 +476,14 @@ impl ResponseStream {
             let line: Vec<u8> = self.buffer.drain(..=index).collect();
             let line = line.strip_suffix(b"\n").unwrap_or(&line);
             let line = line.strip_suffix(b"\r").unwrap_or(line);
-            self.line(&String::from_utf8_lossy(line));
+            self.line(&String::from_utf8_lossy(line), sink);
         }
+    }
+
+    /// Feed one chunk with nowhere to report slices — the shape every unit test
+    /// and every non-progress caller wants.
+    pub fn push(&mut self, chunk: &[u8]) {
+        self.push_to(chunk, &DiscardDeltas);
     }
 
     /// Has a terminal event already settled this turn?
@@ -474,7 +497,7 @@ impl ResponseStream {
         // closed by a blank line, but a server that writes the terminal event and
         // closes immediately is common enough that discarding it would throw away
         // a complete answer over a missing newline.
-        self.flush();
+        self.flush(&DiscardDeltas);
         if let Some(outcome) = self.outcome {
             return outcome;
         }
@@ -506,9 +529,9 @@ impl ResponseStream {
         )))
     }
 
-    fn line(&mut self, line: &str) {
+    fn line(&mut self, line: &str, sink: &dyn DeltaSink) {
         if line.is_empty() {
-            self.flush();
+            self.flush(sink);
         } else if line.starts_with(':') {
             // A comment — the keep-alive an idle stream sends.
         } else if let Some(value) = field(line, "data") {
@@ -523,7 +546,7 @@ impl ResponseStream {
     }
 
     /// Dispatch the event the blank line (or EOF) just closed.
-    fn flush(&mut self) {
+    fn flush(&mut self, sink: &dyn DeltaSink) {
         let data = std::mem::take(&mut self.data);
         let event_name = self.event_name.take();
         if data.is_empty() {
@@ -559,6 +582,11 @@ impl ResponseStream {
                 if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                     self.text.push_str(delta);
                     self.deltas += 1;
+                    // Reported even though it is also accumulated: the
+                    // accumulation is what the final message is built from, the
+                    // report is what the rail shows while it is still arriving.
+                    // Neither can be derived from the other after the fact.
+                    sink.text_delta(delta);
                 }
             }
             // Both carry a whole `Response`. `incomplete` is a truncated turn,

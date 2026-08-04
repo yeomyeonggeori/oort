@@ -471,6 +471,217 @@ async fn worker(provider: Arc<dyn ChatProvider>) -> AgentWorker {
     AgentWorker::new(pool, provider, WorkerConfig::for_target(database_url()))
 }
 
+/// A provider that actually streams, so the coalescing window has something to
+/// coalesce (goal SRV-B3e).
+///
+/// `burst` slices go out back to back — that is a real provider's token cadence
+/// — and then it sleeps past one window before emitting `tail`. So the shape of
+/// the answer is deliberately "many slices, two windows", and the number of
+/// frames the pump publishes is a statement about the WINDOW rather than about
+/// the slice count. That is the whole property under test.
+struct StreamingMockProvider {
+    burst: Vec<String>,
+    tail: String,
+    gap: std::time::Duration,
+}
+
+#[async_trait::async_trait]
+impl ChatProvider for StreamingMockProvider {
+    async fn complete(
+        &self,
+        _endpoint: &momo_agent_worker::provider::ProviderEndpoint,
+        _request: &momo_agent_worker::provider::ChatRequest,
+    ) -> Result<
+        momo_agent_worker::provider::ChatCompletion,
+        momo_agent_worker::provider::ProviderError,
+    > {
+        unreachable!("this suite always drives the streaming seam")
+    }
+
+    async fn complete_streaming(
+        &self,
+        _endpoint: &momo_agent_worker::provider::ProviderEndpoint,
+        _request: &momo_agent_worker::provider::ChatRequest,
+        sink: &dyn momo_agent_worker::provider::DeltaSink,
+    ) -> Result<
+        momo_agent_worker::provider::ChatCompletion,
+        momo_agent_worker::provider::ProviderError,
+    > {
+        for slice in &self.burst {
+            sink.text_delta(slice);
+        }
+        tokio::time::sleep(self.gap).await;
+        // The tail is emitted and the provider returns IMMEDIATELY — no beat for
+        // the ticker. So the only thing that can publish it is the pump's final
+        // flush, which is exactly what this suite has to be able to catch when
+        // it is missing.
+        sink.text_delta(&self.tail);
+        let mut text = self.burst.concat();
+        text.push_str(&self.tail);
+        Ok(momo_agent_worker::provider::ChatCompletion {
+            text,
+            usage: None,
+            tool_calls: Vec::new(),
+        })
+    }
+}
+
+/// **A streaming turn reports itself while it is happening — and does so a
+/// bounded number of times** (goal SRV-B3e).
+///
+/// The provider emits 12 slices back to back and then, after a gap longer than
+/// the window, one more. The turn therefore contains 13 deltas and **two**
+/// windows, and the assertion is that the rail carries two partials — not
+/// thirteen.
+///
+/// | revert | how it goes red |
+/// |---|---|---|
+/// | drop the sink from `complete_streaming` | no `agent.partial` at all |
+/// | flush per delta instead of per window | 13 partials; the bound below names it |
+/// | drop the final flush | the tail never arrives, count is 1 |
+/// | emit the `streaming` phase without a partial (or vice versa) | the ordering assertion fails |
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn b3e_a_streaming_turn_publishes_coalesced_partials() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_agent(&su, &tenant, "hermes", true).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@hermes 스트리밍 부탁해",
+    )
+    .await;
+
+    let burst: Vec<String> = (0..12).map(|i| format!("조각{i} ")).collect();
+    let window = momo_agent_worker::partial::PARTIAL_WINDOW;
+    let provider = Arc::new(StreamingMockProvider {
+        burst: burst.clone(),
+        tail: "마지막 문장".to_string(),
+        gap: window + std::time::Duration::from_millis(250),
+    });
+    let worker = worker(provider).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "{stats:?}");
+
+    let rail = rail_frames(&su, tenant.workspace).await;
+    let kinds: Vec<(String, String)> = rail
+        .iter()
+        .map(|frame| {
+            let data = &frame["data"];
+            (
+                data["type"].as_str().unwrap_or_default().to_string(),
+                data["payload"]["phase"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .collect();
+
+    // ---- the sequence -------------------------------------------------------
+    assert_eq!(
+        kinds.first().map(|k| (k.0.as_str(), k.1.as_str())),
+        Some(("agent.status", "queued")),
+        "the turn opens: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.get(1).map(|k| (k.0.as_str(), k.1.as_str())),
+        Some(("agent.status", "thinking")),
+        "…then the worker picks it up: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.get(2).map(|k| (k.0.as_str(), k.1.as_str())),
+        Some(("agent.status", "streaming")),
+        "…and the phase turns to streaming in the SAME transaction as the first \
+         slice, so the rail is never shown text while it believes the agent is \
+         still thinking: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.get(3).map(|k| k.0.as_str()),
+        Some("agent.partial"),
+        "…which is immediately followed by that first slice: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.last().map(|k| (k.0.as_str(), k.1.as_str())),
+        Some(("agent.status", "done")),
+        "…and the turn ends by saying so: {kinds:?}"
+    );
+
+    // ---- the coalescing, which is the point ---------------------------------
+    let partials: Vec<&Value> = rail
+        .iter()
+        .filter(|frame| frame["data"]["type"] == json!("agent.partial"))
+        .collect();
+    assert_eq!(
+        partials.len(),
+        2,
+        "13 deltas across 2 windows must be 2 frames. One frame per DELTA is the \
+         regression this bound exists to catch — it would put {} rows on the \
+         outbox for one turn: {partials:?}",
+        burst.len() + 1
+    );
+
+    // The text is sliced, never cumulative: frame 1 carries the burst, frame 2
+    // carries only what came after it.
+    let first = partials[0]["data"]["payload"]["text_delta"]
+        .as_str()
+        .expect("text_delta");
+    let second = partials[1]["data"]["payload"]["text_delta"]
+        .as_str()
+        .expect("text_delta");
+    assert_eq!(
+        first,
+        burst.concat(),
+        "one window's slices, joined: {first}"
+    );
+    assert_eq!(second, "마지막 문장");
+    assert!(
+        !second.contains("조각0"),
+        "a partial carries the NEW slice, never the answer so far — the client \
+         appends: {second}"
+    );
+    // …and every frame names the same run on the same rail.
+    let channels: std::collections::BTreeSet<&str> = rail
+        .iter()
+        .map(|frame| frame["channel"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(channels.len(), 1, "{channels:?}");
+
+    // ---- the durable answer is still whole ----------------------------------
+    let replies = messages_by(&su, &tenant, agent).await;
+    assert_eq!(replies.len(), 1);
+    assert!(
+        replies[0].1.contains("조각0") && replies[0].1.contains("마지막 문장"),
+        "the partials are a hint; the message is the record: {}",
+        replies[0].1
+    );
+}
+
+/// Every frame this turn put on the `agent:` rail, in outbox order.
+async fn rail_frames(su: &PgPool, workspace: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' IN ('agent.status', 'agent.partial') \
+          ORDER BY id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("read rail frames")
+}
+
 // ---------------------------------------------------------------------------
 // 1 — the 티키타카
 // ---------------------------------------------------------------------------

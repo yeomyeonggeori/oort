@@ -290,6 +290,54 @@ pub fn agent_partial_payload(
     })
 }
 
+/// One `agent.partial` announcing a tool the model asked to run (goal SRV-B3e).
+///
+/// Carries the call's **id and name and nothing else**. `tool_call_args` exists
+/// on the client type and is deliberately left empty: arguments are model-authored
+/// free text that routinely quote the conversation, and this frame goes to the
+/// `agent:` namespace which has 24h of Centrifugo history — so putting them here
+/// would persist message content in the broker for a day to render a label the
+/// clients call "internal vocabulary, never rendered". The name alone is what a
+/// reader can use.
+///
+/// Note this frame is honest about *when* it can exist: the Responses wire
+/// reports `function_call` items in the terminal payload, so a tool-call partial
+/// is published when the turn's ask becomes known — not while it is being
+/// composed. It still lands before the approval message and before the terminal
+/// frame, which is the window it exists to fill.
+pub fn agent_partial_tool_call_payload(
+    address: AgentRunAddress,
+    tool_call_id: &str,
+    tool_call_name: &str,
+    hlc_ts: i64,
+    key: &str,
+) -> Value {
+    let channel = agent_status_channel(
+        address.workspace_id,
+        address.channel_id,
+        address.agent_member_id,
+    );
+    json!({
+        "channel": channel,
+        "data": {
+            "type": AGENT_PARTIAL_EVENT_TYPE,
+            "v": AGENT_STATUS_EVENT_VERSION,
+            "ts": hlc_ts,
+            "payload": {
+                "run_id": upper(address.run_id),
+                "agent_member_id": upper(address.agent_member_id),
+                "channel_id": upper(address.channel_id),
+                "tool_call_id": tool_call_id,
+                "tool_call_name": tool_call_name,
+            },
+        },
+        "idempotency_key": format!(
+            "{channel}:agent_partial:{}:{key}",
+            upper(address.run_id)
+        ),
+    })
+}
+
 /// The one place a rail frame is shaped.
 fn agent_status_payload(
     address: AgentRunAddress,
@@ -585,6 +633,31 @@ mod tests {
             .as_str()
             .expect("key")
             .contains(":agent_partial:"));
+    }
+
+    /// A tool-call partial names the call and carries no arguments — the frame
+    /// lands in a namespace with 24h of history, and arguments quote the
+    /// conversation.
+    #[test]
+    fn a_tool_call_partial_names_the_call_and_carries_no_arguments() {
+        let frame =
+            agent_partial_tool_call_payload(address(), "call_1", "work.session.end", 7, "t0");
+        let body = &frame["data"]["payload"];
+        assert_eq!(frame["data"]["type"], json!("agent.partial"));
+        assert_eq!(body["tool_call_id"], json!("call_1"));
+        assert_eq!(body["tool_call_name"], json!("work.session.end"));
+        for forbidden in [
+            "tool_call_args",
+            "text",
+            "text_delta",
+            "run_status",
+            "phase",
+        ] {
+            assert!(
+                body.get(forbidden).is_none(),
+                "{forbidden} must not ride this frame: {frame}"
+            );
+        }
     }
 
     fn address() -> AgentRunAddress {

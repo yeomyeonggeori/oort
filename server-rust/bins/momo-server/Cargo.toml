@@ -75,6 +75,9 @@ tracing-subscriber.workspace = true
 # a persisted message travels.
 
 [dev-dependencies]
+# goal SRV-B3e: the conformance suite implements `ChatProvider` to drive the
+# streaming seam, and that trait is `#[async_trait]`.
+async-trait = { workspace = true }
 # `reqwest` is the HTTP *client* the smoke tests drive the server with, and
 # (SRV-T2) what the ephemeral tests build a mock Centrifugo receiver against —
 # not a server-side dependency in either case.

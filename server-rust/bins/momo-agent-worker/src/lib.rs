@@ -76,6 +76,7 @@ pub mod a2a;
 pub mod config;
 pub mod context;
 pub mod oauth;
+pub mod partial;
 pub mod payload;
 pub mod provider;
 pub mod responses;
@@ -604,7 +605,21 @@ impl AgentWorker {
             refreshed_this_turn = true;
         }
 
-        let mut attempt = self.provider.complete(&transport.endpoint, &request).await;
+        // goal SRV-B3e: the turn streams into a pump that publishes one
+        // coalesced `agent.partial` per window. The sink is handed to the
+        // provider; everything about batching, transactions and failure belongs
+        // to the pump (see `partial`'s module header).
+        let (sink, deltas) = partial::delta_channel();
+        let pump = tokio::spawn(partial::run_partial_pump(
+            self.pool.clone(),
+            started_address,
+            deltas,
+            partial::PARTIAL_WINDOW,
+        ));
+        let mut attempt = self
+            .provider
+            .complete_streaming(&transport.endpoint, &request, &sink)
+            .await;
 
         // A rejection on a token whose deadline still looked fine means the
         // provider retired it early — revoked, rotated elsewhere, or our clock
@@ -620,6 +635,10 @@ impl AgentWorker {
                 "provider rejected the oauth access token; refreshing once and replaying"
             );
             match self.refresh_and_reseal(&mut transport).await {
+                // Replayed WITHOUT the sink. The first attempt's slices are
+                // already on the rail, and streaming the same answer twice
+                // would make a reader watch it be typed out, erased and typed
+                // again. The retry's text still becomes the durable message.
                 Ok(()) => attempt = self.provider.complete(&transport.endpoint, &request).await,
                 Err(error) => {
                     return self
@@ -627,6 +646,14 @@ impl AgentWorker {
                         .await
                 }
             }
+        }
+
+        // The sink is dropped BEFORE the pump is awaited: closing the channel
+        // is what tells the pump the stream is over and to flush its tail.
+        drop(sink);
+        let streamed_frames = pump.await.unwrap_or(0);
+        if streamed_frames > 0 {
+            tracing::debug!(run_id = %run_id, streamed_frames, "published agent.partial frames");
         }
 
         let completion = match attempt {
@@ -672,6 +699,31 @@ impl AgentWorker {
         // write a text answer; it records the call, and either parks on a human
         // or runs it. This is where `INSERT INTO approval` finally happens.
         if let Some(call) = completion.tool_calls.first().cloned() {
+            // goal SRV-B3e: name the tool on the rail before the approval lands.
+            // A turn that asks for a tool writes no text, so without this the
+            // badge would sit on 작업 중 with no headline through the whole
+            // approval round trip — the reader can see *that* something is
+            // happening and not *what*.
+            let frame = momo_agent::agent_partial_tool_call_payload(
+                started_address,
+                &call.id,
+                &call.name,
+                now_ms(),
+                "toolcall",
+            );
+            let workspace_id = job.workspace_id;
+            let channel_id = started_address.channel_id;
+            if let Err(error) = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+                Box::pin(
+                    async move { emit_rail_frame(conn, workspace_id, channel_id, &frame).await },
+                )
+            })
+            .await
+            {
+                // Same policy as every other partial: a lost hint is nothing,
+                // and the approval this turn is about must not fail for it.
+                tracing::debug!(run_id = %run_id, error = %error, "tool-call partial failed");
+            }
             return self
                 .handle_tool_call(&job, &payload, run_id, call, completion.usage, &transport)
                 .await;
@@ -1911,7 +1963,7 @@ impl TurnOutcome {
 /// deadline both speak. A clock before the epoch is not a time this process can
 /// reason about, so it reads as 0 rather than as a negative deadline that would
 /// make every token look expired.
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)

@@ -1318,6 +1318,7 @@ dependencies = [
 name = "momo-server"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "axum",
  "base64",
  "chrono",
