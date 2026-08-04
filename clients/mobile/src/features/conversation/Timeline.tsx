@@ -150,7 +150,7 @@ import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 // this component's own travel as "the reader chose to read history" and cleared
 // `following` before the correction could run.
 //
-// So a send takes the wheel for a bounded window (`SELF_SEND_PIN_MS`): while it
+// So a send takes the wheel for a bounded window (`CONVERGE_IDLE_MS`): while it
 // holds, `onScroll` records geometry but does not revoke `following`. The reader
 // takes it back the only way that means anything — `onScrollBeginDrag`, a finger
 // on the glass. Neither a timer nor a finger is a guess about intent.
@@ -229,7 +229,7 @@ const FOLLOW_THRESHOLD_PX = 120;
  * nowhere gives up in 400ms rather than holding the list to a number someone
  * once guessed.
  */
-const SELF_SEND_IDLE_MS = 400;
+const CONVERGE_IDLE_MS = 400;
 
 /**
  * The backstop, in ms. Nothing should reach it — arriving ends the correction
@@ -237,7 +237,7 @@ const SELF_SEND_IDLE_MS = 400;
  * cannot be got back is a worse defect than the one being fixed, and
  * `onScrollBeginDrag` (a finger) must not be the only way out.
  */
-const SELF_SEND_MAX_MS = 4000;
+const CONVERGE_MAX_MS = 4000;
 
 /** Close enough to the end that another correction would move nothing. */
 const ARRIVED_PX = 1;
@@ -321,7 +321,7 @@ export function resetTimelineRenderItemCount(): void {
  * rescheduled. One round per batch is the fastest cadence that is not fighting
  * the thing it is waiting for.
  */
-const SELF_SEND_ROUND_MS = 50;
+const CONVERGE_ROUND_MS = 50;
 
 
 /**
@@ -522,7 +522,7 @@ function TimelineInner({
    * Read by `onScroll`, which must not mistake this component's own travel for
    * the reader choosing to read history — see the header note.
    */
-  const selfSendPinUntilRef = useRef(0);
+  const scrollPinUntilRef = useRef(0);
   /** Is that pin being served by instant corrections rather than one glide? */
   const convergingRef = useRef(false);
   /**
@@ -581,7 +581,7 @@ function TimelineInner({
       // intermediate position of a travel to the end is far from the end, so
       // answering them would revoke `following` mid-flight and cancel the very
       // correction that gets the sender to their own message. See the header.
-      if (Date.now() < selfSendPinUntilRef.current) return;
+      if (Date.now() < scrollPinUntilRef.current) return;
       // ## 창이 좁아진 것도 사람이 움직인 것이 아니다 (goal RN-P2b / #998)
       //
       // 성재, iPhone 17: *"채팅치면 채팅바에 내 최근 채팅이 가려진다."*
@@ -615,22 +615,168 @@ function TimelineInner({
     [noteGeometry],
   );
 
+  // ===========================================================================
+  // 끝까지 데려가는 일 하나 (goal RN-P3 · RN-B4a/#1025)
+  //
+  // 아래 루프는 원래 **전송**만을 위한 것이었다. #1025 가 밝힌 것은 **진입**이 같은
+  // 물리에 걸려 있다는 사실이다 — 성재: *"채널에 진입을 하면 제일 하단으로 이동해야
+  // 하는데, 왜 자꾸 상단 어중간한 부분에서 진입되는 거야?"*
+  //
+  // 진입 시점의 리스트는 첫 배치(기본 10행)만 측정돼 있고, 헤더에 적어 둔 대로
+  // `VirtualizedList` 는 tail spacer 를 측정된 데까지로 **자른다**. 그래서 최초
+  // `scrollToEnd` 는 「지금까지 측정된 끝」에 착지하고, 그 자리는 긴 대화의 위쪽
+  // 어딘가다 — 어중간한 그 자리. 리스트는 착지한 자리에서 다음 배치를 재고 콘텐츠가
+  // 자란다. 그 `onContentSizeChange` 가 두 번째 기회이고, 두 가지가 그것을 죽이고
+  // 있었다:
+  //
+  //   1. 두 번째 호출은 `animated: !converging` = **활강**이었다. 활강의 중간 지점은
+  //      새 끝에서 한 배치(≈600pt)만큼 떨어져 있고 임계값은 120pt 다. 그 스크롤
+  //      이벤트 하나가 `following` 을 끄고, 그 뒤로는 아무도 데려가지 않는다.
+  //   2. 자란 콘텐츠를 실은 스크롤 이벤트도 똑같이 읽힌다 — 오프셋은 그대로인데
+  //      `contentSize` 만 커졌으니 「끝에서 멀어졌다」가 되고, 사람은 손도 대지 않았다.
+  //
+  // 전송이 이미 답을 갖고 있었다: 보정이 도는 동안 스크롤에 **핀**을 걸고, 즉시
+  // (비애니메이션) 라운드를 도착할 때까지 돌리고, 그동안만
+  // `maintainVisibleContentPosition` 을 뗀다. 그래서 그 기계를 이름 있는 함수로 꺼내
+  // 진입도 같이 쓴다. 진입은 언제나 `near=false` 로 들어간다 — 진입 시점의
+  // 「가깝다」는 잘린 콘텐츠 높이가 하는 거짓말이고(뷰포트를 아직 못 재었으면 거리는
+  // 아예 `null` 이라 「가깝다」로 접힌다), 그 거짓말을 믿은 것이 결함 그 자체였다.
+  //
+  // **읽던 위치 복원 정책은 이 코드에 없다**(#1025 진단 결과): `lastReadSeq` 는 안 읽은
+  // 구분선을 그리는 데만 쓰이고, 진입 앵커는 처음부터 「최신(하단)」 하나였다. 그러니
+  // 이 수리는 정책 충돌이 아니라 **원래의 의도가 물리에 져 있던 것**의 복구다.
+  // ===========================================================================
+  const convergeFrameRef = useRef<number | undefined>(undefined);
+  const convergeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+
+  const cancelConvergence = useCallback(() => {
+    if (convergeFrameRef.current !== undefined) {
+      cancelAnimationFrame(convergeFrameRef.current);
+      convergeFrameRef.current = undefined;
+    }
+    if (convergeTimerRef.current !== undefined) {
+      clearTimeout(convergeTimerRef.current);
+      convergeTimerRef.current = undefined;
+    }
+    convergingRef.current = false;
+  }, []);
+
+  const convergeToEnd = useCallback(
+    (mode: 'entry' | 'send') => {
+      cancelConvergence();
+      // Following again, because they are now at the bottom on purpose — the next
+      // arrival from anyone else should keep them there.
+      followingRef.current = true;
+      const startedAt = Date.now();
+      const hardStop = startedAt + CONVERGE_MAX_MS;
+      /** Extended on every round that gets somewhere; see `CONVERGE_IDLE_MS`. */
+      let idleStop = startedAt + CONVERGE_IDLE_MS;
+      /**
+       * The furthest down this correction has reached, as a scroll OFFSET.
+       *
+       * Offset, and not distance-to-the-end, and the measurement is what settled
+       * it. Distance was the obvious choice and it reads backwards during exactly
+       * the case that needs it: every round teaches the list about rows it had
+       * only estimated, so `contentHeight` grows FASTER than the scroll advances
+       * and the gap to the end gets bigger while the reader is visibly getting
+       * closer. Judged on that, the correction declared itself stuck almost at
+       * once — `measure/` read 4,007px left below the fold, worse than the flat
+       * deadline it replaced. The offset only ever grows while this loop runs, so
+       * it says what "getting somewhere" means without lying about it.
+       */
+      let furthest = Number.NEGATIVE_INFINITY;
+      scrollPinUntilRef.current = idleStop;
+
+      // Near the tail there is no clamp to climb and the glide that shipped is
+      // right. `null` — a list that has never scrolled or been laid out — counts
+      // as near: it has no history to be lost in. **Entry is never near**, for the
+      // reason in the note above.
+      const distance = distanceToEnd(geometryRef.current);
+      const near =
+        mode === 'send' &&
+        (distance === null || distance <= geometryRef.current.viewportHeight);
+      convergingRef.current = !near;
+      // Off for the correction, back on the moment it ends.
+      if (!near) setChasingTail(true);
+
+      const release = () => {
+        convergingRef.current = false;
+        setChasingTail(false);
+        // Hand the scroll back at once rather than at the deadline: the list is
+        // where the correction wanted it, so the ordinary rule ("far from the end
+        // means the reader is reading") is true again and should apply again.
+        scrollPinUntilRef.current = 0;
+      };
+
+      const converge = () => {
+        const now = Date.now();
+        if (now >= idleStop || now >= hardStop) {
+          // Out of road. `following` is NOT forced here — whatever the next
+          // scroll event says about where the reader ended up is now the truth,
+          // including "still far from the end", which is the honest reading of a
+          // correction that could not finish.
+          release();
+          return;
+        }
+        const geometry = geometryRef.current;
+        if (geometry.offsetY > furthest + PROGRESS_PX) {
+          furthest = geometry.offsetY;
+          idleStop = Math.min(now + CONVERGE_IDLE_MS, hardStop);
+          scrollPinUntilRef.current = idleStop;
+        }
+        const left = distanceToEnd(geometry);
+        if (left !== null && left <= ARRIVED_PX) {
+          release();
+          return;
+        }
+        // `scrollToEnd` rather than an offset computed from `geometryRef`: the
+        // list's own metrics are live, ours are one scroll event behind, and a
+        // stale content height would ask the list to scroll BACKWARDS. Its
+        // estimate overshoots the clamped content end (it estimates the DATA
+        // end) and the scroll view clamps — so every round lands exactly as far
+        // as the list will currently go, which is the most a round can do.
+        listRef.current?.scrollToEnd({animated: false});
+        convergeTimerRef.current = setTimeout(converge, CONVERGE_ROUND_MS);
+      };
+
+      // The first hop still waits a frame. For a send: the token and the echo row
+      // arrive in the same commit, and an offset computed before that row has a
+      // height is computed against the list as it was. For entry: the caller has
+      // already asked once, synchronously — a channel must never be seen
+      // travelling to its own bottom — and this is the round after that one.
+      convergeFrameRef.current = requestAnimationFrame(() => {
+        convergeFrameRef.current = undefined;
+        listRef.current?.scrollToEnd({animated: near});
+        if (near) return;
+        converge();
+      });
+    },
+    [cancelConvergence, listRef],
+  );
+
+  // A correction still running when this list goes away is a timer holding a ref
+  // to a scroll view that no longer exists.
+  useEffect(() => cancelConvergence, [cancelConvergence]);
+
   /**
-   * A finger on the glass ends the send's claim immediately.
+   * A finger on the glass ends the correction's claim immediately.
    *
    * The pin has a deadline so that a stuck correction cannot hold the list
    * forever, but a deadline is a guess about intent and this is not: someone
-   * dragging the list is telling us where they want to be, and a send from a
-   * second ago does not get to argue.
+   * dragging the list is telling us where they want to be, and neither a send
+   * from a second ago nor a channel opened a moment ago gets to argue.
    */
   const onScrollBeginDrag = useCallback(() => {
-    selfSendPinUntilRef.current = 0;
+    cancelConvergence();
+    scrollPinUntilRef.current = 0;
     convergingRef.current = false;
     // And the prepend correction comes straight back: the reader taking the list
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-  }, []);
+  }, [cancelConvergence]);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
@@ -645,7 +791,13 @@ function TimelineInner({
       if (!didInitialScrollRef.current) {
         if (items.length === 0) return;
         didInitialScrollRef.current = true;
+        // Instant and now, so the channel is simply AT its newest message rather
+        // than seen arriving there…
         listRef.current?.scrollToEnd({animated: false});
+        // …and then kept asking, because this one call lands on a content end the
+        // list is holding short of the data. See the note above `convergeToEnd`:
+        // this is the whole of #1025.
+        convergeToEnd('entry');
         return;
       }
       if (followingRef.current) {
@@ -659,7 +811,7 @@ function TimelineInner({
       // guaranteed stable. Ref objects are compared by identity and the harness
       // passes one fixed object, so this costs nothing at runtime.
     },
-    [items.length, listRef, noteGeometry],
+    [convergeToEnd, items.length, listRef, noteGeometry],
   );
 
   // My own send: always, and from wherever they were. Skipped on the first
@@ -677,7 +829,7 @@ function TimelineInner({
   // scroll on the next frame, once the inserted row has a height.
   //
   // **And one call does not arrive**, which is goal RN-P3 and the header note
-  // above `SELF_SEND_PIN_MS`. From mid-history the offset `scrollToEnd` computes
+  // above `CONVERGE_IDLE_MS`. From mid-history the offset `scrollToEnd` computes
   // is a guess over unmeasured rows AND the scroll view is holding a content
   // floor short of the real end, so the single call lands somewhere above the
   // message that was just written. The correction is to keep asking until the
@@ -690,93 +842,8 @@ function TimelineInner({
       return;
     }
     if (selfSendToken === undefined) return;
-    // Following again, because they are now at the bottom on purpose — the next
-    // arrival from anyone else should keep them there.
-    followingRef.current = true;
-    const startedAt = Date.now();
-    const hardStop = startedAt + SELF_SEND_MAX_MS;
-    /** Extended on every round that gets somewhere; see `SELF_SEND_IDLE_MS`. */
-    let idleStop = startedAt + SELF_SEND_IDLE_MS;
-    /**
-     * The furthest down this send has reached, as a scroll OFFSET.
-     *
-     * Offset, and not distance-to-the-end, and the measurement is what settled
-     * it. Distance was the obvious choice and it reads backwards during exactly
-     * the case that needs it: every round teaches the list about rows it had
-     * only estimated, so `contentHeight` grows FASTER than the scroll advances
-     * and the gap to the end gets bigger while the reader is visibly getting
-     * closer. Judged on that, the correction declared itself stuck almost at
-     * once — `measure/` read 4,007px left below the fold, worse than the flat
-     * deadline it replaced. The offset only ever grows while this loop runs, so
-     * it says what "getting somewhere" means without lying about it.
-     */
-    let furthest = Number.NEGATIVE_INFINITY;
-    selfSendPinUntilRef.current = idleStop;
-
-    // Near the tail there is no clamp to climb and the glide that shipped is
-    // right. `null` — a list that has never scrolled or been laid out — counts
-    // as near: it has no history to be lost in.
-    const distance = distanceToEnd(geometryRef.current);
-    const near =
-      distance === null || distance <= geometryRef.current.viewportHeight;
-    convergingRef.current = !near;
-    // Off for the correction, back on the moment it ends.
-    if (!near) setChasingTail(true);
-
-    const release = () => {
-      convergingRef.current = false;
-      setChasingTail(false);
-      // Hand the scroll back at once rather than at the deadline: the list is
-      // where the send wanted it, so the ordinary rule ("far from the end means
-      // the reader is reading") is true again and should apply again.
-      selfSendPinUntilRef.current = 0;
-    };
-
-    // The first hop still waits a frame: the token and the echo row arrive in
-    // the same commit, and an offset computed before that row has a height is
-    // computed against the list as it was.
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const frame = requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({animated: near});
-      if (near) return;
-      const converge = () => {
-        const now = Date.now();
-        if (now >= idleStop || now >= hardStop) {
-          // Out of road. `following` is NOT forced here — whatever the next
-          // scroll event says about where the reader ended up is now the truth,
-          // including "still far from the end", which is the honest reading of a
-          // correction that could not finish.
-          release();
-          return;
-        }
-        const geometry = geometryRef.current;
-        if (geometry.offsetY > furthest + PROGRESS_PX) {
-          furthest = geometry.offsetY;
-          idleStop = Math.min(now + SELF_SEND_IDLE_MS, hardStop);
-          selfSendPinUntilRef.current = idleStop;
-        }
-        const left = distanceToEnd(geometry);
-        if (left !== null && left <= ARRIVED_PX) {
-          release();
-          return;
-        }
-        // `scrollToEnd` rather than an offset computed from `geometryRef`: the
-        // list's own metrics are live, ours are one scroll event behind, and a
-        // stale content height would ask the list to scroll BACKWARDS. Its
-        // estimate overshoots the clamped content end (it estimates the DATA
-        // end) and the scroll view clamps — so every round lands exactly as far
-        // as the list will currently go, which is the most a round can do.
-        listRef.current?.scrollToEnd({animated: false});
-        timer = setTimeout(converge, SELF_SEND_ROUND_MS);
-      };
-      converge();
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      if (timer !== undefined) clearTimeout(timer);
-      convergingRef.current = false;
-    };
-  }, [selfSendToken, listRef]);
+    convergeToEnd('send');
+  }, [selfSendToken, convergeToEnd]);
 
 
   // The viewport changed size rather than the content growing. A reader who was

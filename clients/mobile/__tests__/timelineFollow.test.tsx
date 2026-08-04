@@ -94,9 +94,27 @@ function mount(selfSendToken = 0, messages: Message[] = HISTORY) {
  * channel at its newest message. Every test below does this first, because
  * without it the initial positioning scroll is still pending and would be
  * mistaken for a follow.
+ *
+ * It **settles** rather than merely fires, and that is #1025: the entry anchor
+ * is no longer one `scrollToEnd` but a bounded correction that keeps asking
+ * until the list agrees it arrived (`__tests__/timelineEntryAnchor.test.tsx`
+ * measures the correction itself). While it runs it holds the scroll, so a test
+ * that fired a scroll event straight after this one would be firing into a
+ * closed door — and would pass without measuring anything. So the list reports
+ * that it landed at the bottom, and a frame is let through for the correction to
+ * see that and hand the scroll back. Everything after this line is the ordinary
+ * life of an open channel, which is what these tests are about.
  */
-function settleInitialLayout() {
+async function settleInitialLayout() {
   fireEvent(screen.getByTestId('timeline-list'), 'contentSizeChange', 390, 4000);
+  fireEvent.scroll(screen.getByTestId('timeline-list'), {
+    nativeEvent: {
+      contentOffset: {y: 3200},
+      contentSize: {height: 4000, width: 390},
+      layoutMeasurement: {height: 800, width: 390},
+    },
+  });
+  await flushFrame();
 }
 
 /** Put the reader up in the history: far from the end, so `following` is false. */
@@ -128,7 +146,7 @@ describe('내가 보내면 따라간다', () => {
     const {view, listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
 
-    settleInitialLayout();
+    await settleInitialLayout();
     scrollAwayFromBottom();
     spy.mockClear();
 
@@ -158,7 +176,7 @@ describe('내가 보내면 따라간다', () => {
     // 못 박으면 보정을 고칠 때마다 이 테스트가 애먼 곳에서 깨진다.
     const {view, listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
-    settleInitialLayout();
+    await settleInitialLayout();
     scrollAwayFromBottom();
 
     for (const token of [1, 2]) {
@@ -242,7 +260,7 @@ describe('내가 보내면 따라간다', () => {
     it('끝이 뒤늦게 드러나면 한 번 더 데려간다', async () => {
       const {view, listRef} = mount(0);
       const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
-      settleInitialLayout();
+      await settleInitialLayout();
       scrollAwayFromBottom();
       spy.mockClear();
 
@@ -263,7 +281,7 @@ describe('내가 보내면 따라간다', () => {
       // 있고 싶은지 말하고 있고, 1초 전의 전송에게 반박권은 없다.
       const {view, listRef} = mount(0);
       const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
-      settleInitialLayout();
+      await settleInitialLayout();
       scrollAwayFromBottom();
       spy.mockClear();
 
@@ -294,11 +312,11 @@ describe('내가 보내면 따라간다', () => {
 });
 
 describe('남이 보내면 읽던 자리를 지킨다', () => {
-  it('끝에서 떨어져 있으면 새 메시지가 와도 데려가지 않는다', () => {
+  it('끝에서 떨어져 있으면 새 메시지가 와도 데려가지 않는다', async () => {
     const {view, listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
 
-    settleInitialLayout();
+    await settleInitialLayout();
     scrollAwayFromBottom();
     spy.mockClear();
 
@@ -321,11 +339,11 @@ describe('남이 보내면 읽던 자리를 지킨다', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('끝에 있을 때는 새 메시지를 따라간다', () => {
+  it('끝에 있을 때는 새 메시지를 따라간다', async () => {
     const {listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
 
-    settleInitialLayout();
+    await settleInitialLayout();
     // 바닥 근처: distanceFromEnd 0.
     fireEvent.scroll(screen.getByTestId('timeline-list'), {
       nativeEvent: {
@@ -342,13 +360,13 @@ describe('남이 보내면 읽던 자리를 지킨다', () => {
 });
 
 describe('키보드가 올라와 리스트가 짧아질 때', () => {
-  it('바닥에 있던 사람은 바닥에 남는다', () => {
+  it('바닥에 있던 사람은 바닥에 남는다', async () => {
     // 내용이 바뀐 게 아니라 뷰포트가 바뀐 경우다. `onContentSizeChange` 는 이
     // 사건을 볼 수 없어서, 이것이 없으면 키보드가 올라오는 순간 마지막 메시지가
     // 접힌 아래로 사라진다 — 성재가 본 증상의 나머지 절반.
     const {listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
-    settleInitialLayout();
+    await settleInitialLayout();
 
     fireEvent.scroll(screen.getByTestId('timeline-list'), {
       nativeEvent: {
@@ -384,10 +402,10 @@ describe('키보드가 올라와 리스트가 짧아질 때', () => {
   //
   // 손가락은 유리에 닿은 적이 없다. 움직인 것은 사람이 아니라 창이다.
   // ===========================================================================
-  it('창이 좁아진 것을 사람이 올라간 것으로 읽지 않는다 — 멘션 목록이 열려도', () => {
+  it('창이 좁아진 것을 사람이 올라간 것으로 읽지 않는다 — 멘션 목록이 열려도', async () => {
     const {listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
-    settleInitialLayout();
+    await settleInitialLayout();
 
     // 바닥에 있다: 4000 − (3200 + 800) = 0.
     fireEvent.scroll(screen.getByTestId('timeline-list'), {
@@ -419,13 +437,13 @@ describe('키보드가 올라와 리스트가 짧아질 때', () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it('그래도 진짜로 올라가 읽던 사람은 컴포저가 자라도 끌려가지 않는다', () => {
+  it('그래도 진짜로 올라가 읽던 사람은 컴포저가 자라도 끌려가지 않는다', async () => {
     // 위 수정이 "줄어들면 무조건 따라간다"가 되면 이 배치가 고치려는 것과 정반대의
     // 결함이 생긴다 — 과거를 읽는 중에 입력창을 건드렸다는 이유로 바닥으로 끌려가는
     // 것. 창이 좁아지기 **전에** 이미 끝에서 멀었다면 아무 일도 일어나지 않는다.
     const {listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
-    settleInitialLayout();
+    await settleInitialLayout();
     scrollAwayFromBottom();
     spy.mockClear();
 
@@ -443,11 +461,11 @@ describe('키보드가 올라와 리스트가 짧아질 때', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('history 를 읽던 사람은 키보드가 올라와도 끌려가지 않는다', () => {
+  it('history 를 읽던 사람은 키보드가 올라와도 끌려가지 않는다', async () => {
     const {listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
 
-    settleInitialLayout();
+    await settleInitialLayout();
     scrollAwayFromBottom();
     spy.mockClear();
 
