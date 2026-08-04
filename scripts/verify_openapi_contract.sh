@@ -14,6 +14,19 @@
 # non-default host ports, and tears it down afterwards. It never touches
 # containers from other compose projects.
 #
+# ---- 이 게이트는 두 개의 샘플 패스다 (SRV-B7 / #1042) ------------------------
+#   1차 — 스펙 ↔ Swift : 아래 본문. e2e 컴포즈(swift:6.2)에서 스펙 **전 연산**을
+#          샘플한다. known-unsampled(scripts/openapi_known_unsampled.txt)는 이
+#          패스만의 부채 장부다.
+#   2차 — 스펙 ↔ Rust  : scripts/verify_openapi_contract_rust.sh (스테이지 6).
+#          infra/rust 부분집합 스택(postgres·centrifugo·api)에서
+#          scripts/openapi_sampled_on_rust.txt 에 등재된 연산을 왕복시킨다.
+#
+# 왜 둘인가: 스펙이 서술하는 대상은 이제 Rust 배포본이다(#1040). 정본이 Rust 로
+# 넘어간 경로에서 1차 패스의 초록은 "스펙대로 배포된다"가 아니라 "Swift 가 스펙을
+# 지킨다"만 증명한다. sampled-on-rust 매니페스트는 **늘어날 수만 있는** 목록이라,
+# 이식이 진행될수록 2차 패스가 1차를 잠식하고 끝내 대체한다.
+#
 # Environment:
 #   BASE_URL                       Verify an already-running server instead of
 #                                  booting compose. Requires
@@ -55,6 +68,10 @@
 #                                  them (default: run to the end).
 #   OPENAPI_GATE_MAX_FAILURES      Abort after this many failures to bound
 #                                  cascade noise (default: 30).
+#   OPENAPI_GATE_RUST_PASS=0       Skip stage 6 (스펙 ↔ Rust 2차 샘플 패스).
+#                                  기본 1. 그 패스 자신의 환경변수는
+#                                  scripts/verify_openapi_contract_rust.sh 헤더
+#                                  참조(OPENAPI_RUST_GATE_*, MOMO_RUST_IMAGE).
 # =============================================================================
 set -euo pipefail
 
@@ -1559,9 +1576,33 @@ SHAPE_RC=0
   --require-operation-coverage \
   --known-unsampled "$SCRIPT_DIR/openapi_known_unsampled.txt" || SHAPE_RC=$?
 
-if [ "$FAILURE_COUNT" -gt 0 ] || [ "$SHAPE_RC" -ne 0 ]; then
-  echo "[openapi] FAIL OpenAPI contract drift gate — $FAILURE_COUNT assertion failure(s), shape check rc=$SHAPE_RC (evidence: $TMP_DIR)" >&2
+# ---- 6) 2차 샘플 패스: 스펙 ↔ Rust (SRV-B7 / #1042) --------------------------
+# 위의 1차 패스는 e2e 컴포즈의 swift:6.2 서버를 샘플한다. 그런데 스펙이 서술하는
+# 대상은 이제 Rust 배포본이므로(#1040), 정본이 Rust 로 넘어간 경로에서는 1차 패스의
+# 초록이 "스펙대로 배포된다"를 증명하지 않는다 — Swift 가 스펙을 지킨다만 증명한다.
+# 2차 패스는 scripts/openapi_sampled_on_rust.txt 에 등재된 연산을 infra/rust 부분집합
+# 스택(postgres·centrifugo·api)에서 실제로 왕복시켜 그 간극을 닫는다. 매니페스트는
+# 성장형이라, 이식이 진행될수록 이 패스가 1차 패스를 잠식하고 끝내 대체한다.
+# known-unsampled 계약은 건드리지 않는다 — 그 목록은 1차 패스만의 부채 장부다.
+#
+# 1차 스택을 먼저 내린다: 두 스택을 동시에 띄우면 Docker VM 자원이 누적된다
+# (compose 자원 회수는 이 레포의 하드 룰).
+RUST_PASS_RC=0
+if [ "${OPENAPI_GATE_RUST_PASS:-1}" = "1" ]; then
+  if [ "$MANAGED_STACK" -eq 1 ] && [ "${OPENAPI_GATE_KEEP:-0}" != "1" ]; then
+    echo "[openapi] releasing the swift pass stack before the spec-Rust pass"
+    compose down -v --remove-orphans >/dev/null 2>&1 || true
+    MANAGED_STACK=0
+  fi
+  echo "[openapi] ===== 2차 샘플 패스: 스펙 - Rust (#1042) ====="
+  "$SCRIPT_DIR/verify_openapi_contract_rust.sh" || RUST_PASS_RC=$?
+else
+  echo "[openapi] OPENAPI_GATE_RUST_PASS=0 — skipping the spec-Rust sample pass"
+fi
+
+if [ "$FAILURE_COUNT" -gt 0 ] || [ "$SHAPE_RC" -ne 0 ] || [ "$RUST_PASS_RC" -ne 0 ]; then
+  echo "[openapi] FAIL OpenAPI contract drift gate — $FAILURE_COUNT assertion failure(s), shape check rc=$SHAPE_RC, spec-Rust pass rc=$RUST_PASS_RC (evidence: $TMP_DIR)" >&2
   exit 1
 fi
 
-echo "[openapi] PASS OpenAPI contract drift gate (evidence: $TMP_DIR)"
+echo "[openapi] PASS OpenAPI contract drift gate (swift pass + spec-Rust pass; evidence: $TMP_DIR)"

@@ -1,0 +1,40 @@
+# openapi_sampled_on_rust.txt — 스펙-Rust 이중 샘플 매니페스트 (SRV-B7 / #1042).
+#
+# 한 줄 = "METHOD /spec/path/{template}" — docs/api/openapi.yaml 이 쓰는 그 경로
+# 템플릿 그대로. 여기 실린 연산은 scripts/verify_openapi_contract_rust.sh 가
+# **Rust 배포본**(server-rust/Dockerfile 이미지 + infra/rust 컴포즈 부분집합)에
+# 실제로 왕복시켜 응답 모양을 스펙과 대조한다.
+#
+# ── 왜 두 번째 매니페스트인가 ────────────────────────────────────────────────
+# openapi 계약 게이트의 1차 패스는 e2e 컴포즈(swift:6.2)를 띄워 스펙 전 연산을
+# 샘플한다. 그런데 스펙은 이제 Rust 배포본을 서술한다(#1040) — 즉 "스펙대로다"를
+# Swift 로만 증명하면, 정본이 Rust 로 넘어간 경로에서는 게이트가 실제로는 아무것도
+# 증명하지 않는다. 이 파일은 그 간극을 이름 붙여 닫는다: **여기 실린 경로는
+# Rust 에서 실측됐다**가 게이트의 주장이 된다.
+#
+# ── 성장형 목록 (single direction: 늘어난다) ────────────────────────────────
+# known-unsampled(scripts/openapi_known_unsampled.txt)가 "줄어들 수만 있는 부채
+# 목록"인 것과 정확히 반대다. 이 목록은 **늘어날 수만 있다**. 이식이 진행돼 어떤
+# 경로의 정본이 Rust 로 넘어가면 그때 여기에 한 줄을 추가하고, 그 줄은 다시
+# 빠지지 않는다. 목록이 스펙 전 연산을 덮는 날 1차(Swift) 패스는 증명할 것이
+# 남지 않고 — 그것이 이 파일이 Swift 패스를 잠식·최종 대체하는 방식이다.
+#
+# ── 등재 기준 ────────────────────────────────────────────────────────────────
+# ① server-rust 가 그 연산을 실제로 라우팅한다(bins/momo-server/src/lib.rs).
+# ② infra/rust 컴포즈 부분집합(postgres+centrifugo+api)만으로 왕복이 성립한다 —
+#    relay/agent-worker/외부 목이 있어야 성립하는 경로는 그 서비스가 부분집합에
+#    합류할 때 함께 등재한다.
+# ③ 등재와 동시에 verify_openapi_contract_rust.sh 에 실샘플이 있다. 목록과 샘플은
+#    **양방향**으로 강제된다(등재됐는데 미샘플 = 실패, 샘플인데 미등재 = 실패).
+#    "나중에 채우겠다"는 줄은 존재할 수 없다.
+
+# ── auth: 아래 승인 계열이 쓰는 자격증명의 출처 ──────────────────────────────
+# 승인 인박스와 결재는 사람 자격증명 없이는 왕복 자체가 성립하지 않는다. 이
+# 로그인은 편의가 아니라 승인 계열 샘플의 전제라서 함께 등재한다.
+POST /v1/auth/login
+
+# ── 승인 계열 (#1042 최초 등재분) ───────────────────────────────────────────
+# 사람이 만나는 두 지점: 인박스와, 결정하는 탭.
+# (routes/approvals.rs — Swift ApprovalDecisionRoutes.swift 의 포팅본)
+GET /v1/workspaces/{workspaceId}/approvals
+POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision
