@@ -8,7 +8,6 @@ import {
 } from '@momo/core/lib/api';
 import {
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -85,38 +84,19 @@ export function useAgentProfile(workspaceId: string, agentMemberId: string) {
   return {...query, read};
 }
 
-/** The same read for a whole list, keyed by the lower-cased member id. */
-export function useAgentProfiles(
-  workspaceId: string,
-  agentMemberIds: readonly string[],
-): ReadonlyMap<string, AgentProfileRead> {
-  const results = useQueries({
-    queries: agentMemberIds.map(id => ({
-      queryKey: agentKeys.profile(workspaceId, id),
-      queryFn: () => fetchAgentProfile(workspaceId, id),
-      retry: false,
-    })),
-  });
-  // `results` is a fresh array on every render, so the memo is keyed on the ids
-  // and on the tuple of settled states rather than on the array identity — the
-  // map is read by a `FlatList` renderer and an unstable identity there is a
-  // re-render of every row on every tick of anything else.
-  const fingerprint = results
-    .map(r => `${r.status}:${r.data?.paused ?? ''}:${r.data?.version ?? ''}`)
-    .join('|');
-  return useMemo(() => {
-    const out = new Map<string, AgentProfileRead>();
-    agentMemberIds.forEach((id, index) => {
-      const result = results[index];
-      out.set(
-        id.toLowerCase(),
-        agentProfileRead(result?.data, result?.isPending ?? true, result?.error),
-      );
-    });
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentMemberIds.join('|'), fingerprint]);
-}
+/**
+ * 목록용 프로필 일괄 읽기는 **없어졌다** (goal RN-C1).
+ *
+ * `useAgentProfiles`는 에이전트마다 `GET …/agents/{id}/profile`을 한 번씩 쏴서
+ * pause 상태 하나를 얻어 왔다. 그 라우트는 owner/agent-owner 게이트라 일반
+ * 멤버에게는 **행마다 403**이었고, 소유자에게도 컬럼 하나를 그리려는 N번의
+ * 왕복이었다. goal SRV-R2가 같은 컬럼을 roster 프로젝션에 올렸으므로 목록은
+ * 이미 손에 있는 명부로 답한다(`rosterPaused`).
+ *
+ * 되살리지 말 것. 프로필 GET이 정당한 자리는 **편집에 들어갈 때** 하나이고,
+ * 그것이 바로 위의 `useAgentProfile`(단수)이다 — 그 화면은 instructions·모델·
+ * 도구까지 필요하고, 그것들은 지금도 게이트 뒤에 있다.
+ */
 
 /**
  * The models this agent may be given. `null` is a real answer (the server sent

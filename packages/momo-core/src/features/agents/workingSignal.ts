@@ -80,6 +80,19 @@ export interface AgentWorkingSignal {
   headlines: string[];
   /** Last moment fresh activity was observed. Drives the TTL and the sweep. */
   lastActivityAtMs: number;
+  /**
+   * How many concurrent runs were folded into this one signal. Absent means one
+   * — nothing was folded — which is every ordinary turn.
+   *
+   * It exists because `runId` above names only the ANCHOR (the run that owns the
+   * earliest clock), and goal RN-C1 gave a person a button that acts on exactly
+   * that one id. Stopping it while two runs are open leaves the badge lit, and a
+   * stop that visibly does nothing reads as a broken button rather than as the
+   * partial success it is. A surface offering that button has to be able to say
+   * how many runs it is NOT stopping, and the merge is the only place that
+   * number still exists.
+   */
+  runCount?: number;
 }
 
 /**
@@ -168,6 +181,10 @@ export function mergeAgentWorkingSignals(
     source,
     headlines: headlines.slice(0, MAX_HEADLINES),
     lastActivityAtMs: Math.max(...candidates.map((c) => c.lastActivityAtMs)),
+    // ALL candidates, not just the `shown` ones. A run parked on an approval is
+    // still a run a stop would leave behind, so counting only the working ones
+    // would understate exactly what the reader needs to know.
+    runCount: candidates.length,
   };
   if (anchor.runId !== undefined) merged.runId = anchor.runId;
   if (earliest !== undefined) merged.startedAtMs = earliest;

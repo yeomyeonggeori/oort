@@ -75,8 +75,47 @@ export interface RosterMember {
   /** Agents only: the human accountable for this agent (ADR-0131). */
   ownerHumanId?: string;
   agentModel?: string;
+  /**
+   * Agents only: is this agent asleep (goal SRV-R2)?
+   *
+   * ABSENT is a real answer here, not a default waiting to be filled in. The
+   * server carries the column only for `kind === "agent"` — `CASE WHEN m.kind =
+   * 'agent' THEN COALESCE(ap.paused, false) END` — so a human has no such fact
+   * at all, and a server that predates that projection sends it for nobody.
+   *
+   * Reading a missing field as `false` is exactly how every agent on an older
+   * server would be reported awake, which is the lie the server side went out of
+   * its way to avoid (its own red proof was a stray `COALESCE` leaking
+   * `paused: false` onto humans). Optional here for the same reason, and every
+   * consumer goes through `rosterPaused` rather than touching it directly.
+   */
+  paused?: boolean;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+/**
+ * Drop a `paused` that is not a boolean, and keep the row.
+ *
+ * The field is one optional column on a row that also carries the member's
+ * identity, their channels and their role. Refusing the whole row over it — the
+ * first cut of goal RN-C1 did exactly that — trades a small lie for a much
+ * bigger one: the agent vanishes from the roster, the 에이전트 목록 says
+ * 「아직 에이전트가 없습니다」, and the sidebar loses a member who is right there.
+ * "Cannot read one column" and "does not exist" are not the same statement.
+ *
+ * Dropping it lands the row in the arm that already exists for exactly this
+ * situation: `paused === undefined` means the list did not carry the fact, and
+ * the row reads 상태를 볼 수 없음. What must never happen is `"false"` (a string)
+ * surviving as a truthy value on the one screen whose job is to say whether an
+ * agent is asleep.
+ */
+function sanitizeRosterMember(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const row = value as Record<string, unknown>;
+  if (!("paused" in row) || typeof row.paused === "boolean") return value;
+  const { paused: _unreadable, ...rest } = row;
+  return rest;
 }
 
 function isRosterMember(value: unknown): value is RosterMember {
@@ -801,7 +840,9 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
   const res = await request<{ members: RosterMember[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
   );
-  return (arrayField(res, "members") ?? []).filter(isRosterMember);
+  return (arrayField(res, "members") ?? [])
+    .map(sanitizeRosterMember)
+    .filter(isRosterMember);
 }
 
 // ---- 에이전트 만들기 · 채널 배치 -------------------------------------------
@@ -2298,6 +2339,62 @@ export function agentRunSummaryPageFromWire(value: unknown): AgentRunSummaryPage
   return {
     runs: runs.map(agentRunSummaryFromWire),
     ...(nextCursor === undefined ? {} : { nextCursor: nextCursor.toLowerCase() }),
+  };
+}
+
+/**
+ * What `POST …/agent-runs/{run}/cancel` answers (openapi
+ * `AgentRunCancelResponse`, server-rust `dto.rs`).
+ *
+ * Four fields and every one load-bearing, which is why none is optional.
+ * `status` is always the literal `"cancelled"` — a refusal never reaches this
+ * shape, it is an `ErrorResponse` — and the pair `linkedWorkSessionIds` +
+ * `workSessionsTerminated: false` is the response telling the truth about what
+ * it did NOT do. Cancelling stops the run and retires its queued jobs; it does
+ * not kill the work sessions that run touched. A client that reports "중단했습니다"
+ * without reading these two is telling someone their terminal stopped when it
+ * did not.
+ */
+export interface AgentRunCancelResult {
+  runId: string;
+  status: "cancelled";
+  linkedWorkSessionIds: string[];
+  workSessionsTerminated: boolean;
+}
+
+/**
+ * Stop one agent run, as a human channel member (ADR-0132 D1).
+ *
+ * Authorization is CHANNEL MEMBERSHIP, not workspace ownership — this is the
+ * human stop right, and gating it on ownership would mean the person watching an
+ * agent do the wrong thing has to go find someone else. Agent and work-host
+ * bearers are rejected server side.
+ *
+ * Idempotent: cancelling an already-cancelled run answers 200 with the same body
+ * and writes nothing. Every other refusal throws `ApiError` and is read by
+ * `features/agents/runCancel`, which is where the sentences live.
+ */
+export async function cancelAgentRun(
+  workspaceId: string,
+  runId: string
+): Promise<AgentRunCancelResult> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/agent-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" }
+  );
+  return {
+    runId: str(res, "runId") ?? runId,
+    status: "cancelled",
+    linkedWorkSessionIds: (arrayField(res, "linkedWorkSessionIds") ?? []).filter(
+      (id): id is string => typeof id === "string"
+    ),
+    // Read, never assumed. The schema pins it to `false` today; a server that
+    // one day terminates sessions must be able to say so without this client
+    // continuing to promise the opposite.
+    workSessionsTerminated:
+      (res as Record<string, unknown> | null)?.workSessionsTerminated === true,
   };
 }
 

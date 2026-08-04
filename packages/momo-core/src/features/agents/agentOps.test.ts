@@ -171,9 +171,25 @@ describe("재우기 / 깨우기", () => {
     // CREATION paths. The gateway routes never read it, so a claimed job runs
     // to completion — which is why the third sentence is here.
     expect(PAUSE_EFFECT_NOTICE).toContain("새 실행이 시작되지 않습니다");
-    expect(PAUSE_EFFECT_NOTICE).toContain("이미 실행 중인 작업은 그대로 끝까지 갑니다");
+    // 이 단정은 goal RN-C1에서 **고쳐졌지, 지워지지 않았다.**
+    //
+    // 예전 문장은 "이미 실행 중인 작업은 그대로 끝까지 갑니다"였고 두 가지를
+    // 한꺼번에 뜻했다: ① 재우기는 도는 실행에 손대지 않는다 ② 멈출 방법이 아예
+    // 없다. `POST …/agent-runs/{run}/cancel`이 이식되면서 ②만 거짓이 됐으므로
+    // 잠가 둘 것은 ①이다 — 재우기가 무엇을 **하지 않는지**.
+    expect(PAUSE_EFFECT_NOTICE).toContain("재우기로 멈추지 않습니다");
+    // 그리고 이제는 사람이 무엇을 할 수 있는지도 말해야 한다. 생긴 길을 말하지
+    // 않는 것은 없는 길을 있다고 말하는 것과 같은 크기의 거짓말이다.
+    expect(PAUSE_EFFECT_NOTICE).toContain("중단할 수 있습니다");
+    // 그렇다고 재우기를 취소로 재포장하지도 않는다. 이 세 줄이 그 경계다.
+    //
+    // `취소` 금지는 **원래 있던 잠금이고, 복원한 것이다.** RN-C1 첫 판이 그것을
+    // 지웠는데 지울 이유가 없었다: 새 문장이 쓰는 낱말은 「중단」이고, 재우기를
+    // 취소라고 부르는 것은 그때나 지금이나 같은 거짓말이다. cancel 라우트가 생겼다는
+    // 사실은 **재우기가 무엇인지**를 하나도 바꾸지 않는다.
     expect(PAUSE_EFFECT_NOTICE).not.toContain("중지");
     expect(PAUSE_EFFECT_NOTICE).not.toContain("취소");
+    expect(PAUSE_EFFECT_NOTICE).not.toContain("재우면 실행이 중단");
     expect(pauseEffectNotice(false)).toBe(PAUSE_EFFECT_NOTICE);
     expect(pauseEffectNotice(true)).toBe(RESUME_EFFECT_NOTICE);
   });

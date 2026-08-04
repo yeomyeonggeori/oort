@@ -5,9 +5,12 @@ import {
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
+import type {CancelOutcome} from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {View} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
+import {color, font, SAFE_GUTTER, space} from '../design/tokens';
+import {StopTurnControl} from '../features/agents/StopTurnControl';
 import {AgentActivityBar} from '../features/agents/turnSurfaces';
 import {
   agentTurnsInChannel,
@@ -152,6 +155,42 @@ export default function ConversationScreen({
   const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
   const turns = agentTurnsInChannel(signals, channelId, turnNowMs);
 
+  // ---- 중단의 결과 한 문장 (goal RN-C1, 2R M2) -----------------------------
+  // 영수증은 **어느 실행에 대한 말인지**를 들고 다닌다. 문장 자체도 에이전트를
+  // 부르지만(`cancelReceipt`), 물러나는 조건도 그 실행에 묶여 있어야 한다.
+  //
+  // 처음 판은 `turns.length === 0`에서만 물러났다. 두 에이전트가 동시에 일하는
+  // 대화에서 그것은 A에 대한 영수증이 B의 살아 있는 줄 아래 계속 앉아 있는다는
+  // 뜻이고, 붙어 있는 곳이 곧 무엇에 대한 말인지가 된다.
+  const [stopOutcome, setStopOutcome] = useState<{
+    runId: string;
+    memberId: string;
+    outcome: CancelOutcome;
+  } | null>(null);
+  useEffect(() => setStopOutcome(null), [channelId]);
+
+  // 물러나는 조건: **그 에이전트에게 다른 실행의 턴이 열렸을 때**.
+  //
+  // "그 run의 턴이 사라지면"이 아니다 — 성공한 중단에서는 그 소멸이 바로 성공의
+  // 증거이고, 서버가 종료 프레임을 즉시 밀어 주므로 영수증은 읽히기도 전에
+  // 깜빡이고 사라진다. 사람이 방금 요청한 확인을 지우는 것은 이 줄이 존재하는
+  // 이유를 지우는 것이다.
+  //
+  // 오독의 원인은 소멸이 아니라 **다른 턴에 붙어 보이는 것**이므로, 그것을 정확히
+  // 겨냥한다: 같은 에이전트에게 다른 실행이 열리면 이 문장은 그 새 실행에 대한
+  // 말로 읽히기 시작하고, 그때 물러난다.
+  const supersededByNewRun =
+    stopOutcome !== null &&
+    turns.some(
+      turn =>
+        uuidEq(turn.memberId, stopOutcome.memberId) &&
+        turn.runId !== undefined &&
+        !uuidEq(turn.runId, stopOutcome.runId),
+    );
+  useEffect(() => {
+    if (supersededByNewRun) setStopOutcome(null);
+  }, [supersededByNewRun]);
+
   // ---- the frozen unread snapshot ------------------------------------------
   // Captured on the first render that has a read state for this channel, and
   // never updated. `null` until then, which renders no divider rather than a
@@ -287,7 +326,35 @@ export default function ConversationScreen({
               directory={directory}
               nowMs={turnNowMs}
               live={railLive}
+              renderStop={turn => (
+                <StopTurnControl
+                  runId={turn.runId}
+                  agentName={turn.name}
+                  runCount={turn.runCount}
+                  onOutcome={outcome =>
+                    setStopOutcome({
+                      runId: turn.runId,
+                      memberId: turn.memberId,
+                      outcome,
+                    })
+                  }
+                  testIDPrefix={`turn-stop-${turn.memberId}`}
+                />
+              )}
             />
+            {/* 결과는 컨트롤 밖에서, 줄보다 넓은 자리에 말한다. 「이미 끝났습니다」는
+                실패가 아니라 답이므로 배너가 아니라 영수증과 같은 자리에 선다 —
+                빨간 글씨와 재시도는 이미 이긴 경주를 다시 뛰라는 뜻이 된다. */}
+            {stopOutcome ? (
+              <Text
+                style={[
+                  styles.stopOutcome,
+                  stopOutcome.outcome.kind === 'error' && styles.stopOutcomeError,
+                ]}
+                testID={`turn-stop-outcome-${stopOutcome.outcome.kind}`}>
+                {stopOutcome.outcome.sentence}
+              </Text>
+            ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
               channelLabel={title}
@@ -314,3 +381,19 @@ export default function ConversationScreen({
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  /**
+   * 중단의 결과 한 줄. 활동 줄과 입력창 사이, 방금 누른 버튼 바로 아래다 —
+   * 토스트가 아니라 제자리 문장인 이유는 그것이 판단의 근거 옆이기 때문이다.
+   */
+  stopOutcome: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingBottom: space.xs,
+    fontSize: font.meta,
+    color: color.textMuted,
+    lineHeight: 18,
+  },
+  // 「이미 끝났습니다」는 이 색을 쓰지 않는다. 실패가 아니라 답이다.
+  stopOutcomeError: {color: color.danger},
+});

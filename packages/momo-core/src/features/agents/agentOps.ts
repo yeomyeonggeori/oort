@@ -45,7 +45,38 @@ export type AgentProfileRead =
   | { kind: "pending" }
   | { kind: "ready"; profile: AgentProfile }
   | { kind: "forbidden" }
-  | { kind: "failed" };
+  | { kind: "failed" }
+  /**
+   * This surface never asked (goal RN-C1).
+   *
+   * The 에이전트 목록 stopped reading one profile per agent the day the roster
+   * started carrying `paused` (goal SRV-R2): a request per row, gated so that an
+   * ordinary member collected one 403 per agent, to draw one column that was
+   * already in a list we had.
+   *
+   * It is NOT `pending`: nothing is in flight and nothing will arrive, so
+   * "상태 확인 중" would be a spinner for a request nobody made. Against a server
+   * whose roster carries `paused` this arm is never consulted — `lifecycleLabel`
+   * answers from the roster first. Against an older one it is what makes a row
+   * say 상태를 볼 수 없음 instead of quietly reporting every agent awake.
+   */
+  | { kind: "unread" };
+
+/** What a list surface passes: it read the roster and asked for nothing else. */
+export const PROFILE_UNREAD: AgentProfileRead = { kind: "unread" };
+
+/**
+ * Is this agent asleep, according to the ROSTER (goal SRV-R2)?
+ *
+ * Three answers, not two. `null` means the list did not carry the fact — a human
+ * (who has no such state) or a server that predates the projection — and reading
+ * it as `false` is exactly the leak the server side wrote a red proof against.
+ */
+export function rosterPaused(agent: RosterMember): boolean | null {
+  return agent.kind === "agent" && agent.paused !== undefined
+    ? agent.paused
+    : null;
+}
 
 /** Classify a profile read failure into the arms above. */
 export function agentProfileRead(
@@ -71,13 +102,21 @@ export function agentProfileRead(
  *
  * The one word it adds is the one `lifecycleLabel` has no arm for, because the
  * desktop hub is only ever opened by someone who may read the profile.
+ *
+ * `unread` lands in that same arm and for the same reason: a surface that never
+ * asked knows exactly as much as a surface that was refused. Both are only
+ * reached when the roster itself is silent — when it carries `paused`,
+ * `lifecycleLabel` answers before either one is consulted.
  */
 export function agentStateLabel(
   agent: RosterMember,
   read: AgentProfileRead
 ): string {
   if (agent.status !== "active") return lifecycleLabel(agent, null, false, false);
-  if (read.kind === "forbidden") return "상태를 볼 수 없음";
+  if (agent.paused !== undefined) return lifecycleLabel(agent, null, false, false);
+  if (read.kind === "forbidden" || read.kind === "unread") {
+    return "상태를 볼 수 없음";
+  }
   return lifecycleLabel(
     agent,
     read.kind === "ready" ? read.profile : null,
@@ -113,17 +152,30 @@ export function isAgentPaused(read: AgentProfileRead): boolean | null {
  *     already claimed keeps running to completion.
  *   - `routes/work_sessions.rs` never reads it either: a work session is not
  *     touched by pausing its agent.
- *   - The Rust server has NO run-cancel route at all (the Swift server's
- *     `POST …/agent-runs/{run}/cancel` was not ported), so there is not even a
- *     second call this screen could offer to stop the work.
  *
  * That is why the second sentence exists. A person who reads "일시정지" and
  * assumes the running job dies has been misled by us, not by the server, and
  * "되돌릴 수 없는 인상을 주지 마라" cuts both ways: this is reversible, and it
  * is also weaker than it sounds.
+ *
+ * ## 세 번째 문장이 바뀐 이유 (goal RN-C1)
+ *
+ * 이 상수는 「이미 실행 중인 작업은 그대로 끝까지 갑니다」로 끝나고 있었다. 그때는
+ * 참이었다 — 이 서버에는 실행을 멈출 라우트 자체가 없었고, 그래서 그 문장은 "재우기가
+ * 약한 도구"라는 뜻이자 동시에 **"멈출 방법이 없다"**는 뜻이었다.
+ *
+ * goal SRV-C2가 `POST …/agent-runs/{run}/cancel`을 이식하면서 두 번째 뜻이 거짓이
+ * 됐다. 첫 번째 뜻은 여전히 참이다: 재우기는 지금도 컬럼 하나만 쓰고 도는 실행에
+ * 손대지 않는다. 그래서 문장을 지우지 않고 **정확히 그 절반만** 고친다 — 재우기가
+ * 무엇을 하지 않는지는 그대로 말하고, 그 다음에 무엇을 할 수 있는지를 덧붙인다.
+ * 재우기를 취소로 재포장하는 것은 반대 방향의 같은 거짓말이다.
+ *
+ * 두 사실은 마침표로 나뉜다. 처음에는 줄표(em-dash)로 이었는데, 그것은 두 절을 하나의
+ * 대립쌍으로 묶어 읽히게 만든다 — 여기서 필요한 것은 대립이 아니라 **순서**다: 재우기가
+ * 닿지 않는다는 사실이 먼저 있고, 그 다음에 닿는 방법이 있다.
  */
 export const PAUSE_EFFECT_NOTICE =
-  "재우면 새 실행이 시작되지 않습니다. 멘션해도 답하지 않고 그 사실을 채널에 알립니다. 이미 실행 중인 작업은 그대로 끝까지 갑니다.";
+  "재우면 새 실행이 시작되지 않습니다. 멘션해도 답하지 않고 그 사실을 채널에 알립니다. 이미 실행 중인 작업은 재우기로 멈추지 않습니다. 그 실행은 대화에서 따로 중단할 수 있습니다.";
 
 /** 깨우면 무엇이 돌아오는가. The exact inverse of the three gates above. */
 export const RESUME_EFFECT_NOTICE =

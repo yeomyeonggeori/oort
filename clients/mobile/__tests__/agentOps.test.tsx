@@ -27,8 +27,9 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // is faked is one thing — what the server answered — and the shapes it answers
 // with are `server-rust`'s own, measured 2026-08-03:
 //
-//   * a roster row carries NO pause state, so 상태 is a second request per agent
-//     and it can be REFUSED for an agent this person does not own;
+//   * a roster row CARRIES pause state (goal SRV-R2), so 상태 costs no request at
+//     all — and against a server whose roster predates that field the list says
+//     상태를 볼 수 없음 rather than guessing (`ROSTER_WITHOUT_PAUSED`);
 //   * a work session carries `hostId` and nothing else about the machine, so the
 //     ADR-0137 D5 host tier is a join against `GET …/work-hosts`;
 //   * `PUT …/agents/{id}/pause` answers with the whole stored profile.
@@ -57,7 +58,7 @@ const LOGIN_BODY = {
   member: SELF,
 };
 
-function rosterMember(over: Record<string, unknown>) {
+function rosterMember(over: Record<string, unknown>): Record<string, unknown> {
   return {
     workspaceId: WS,
     kind: 'human',
@@ -73,6 +74,11 @@ function rosterMember(over: Record<string, unknown>) {
   };
 }
 
+/**
+ * 명부가 답하는 모양 (goal SRV-R2). `paused`는 **에이전트 행에만** 실린다 —
+ * 사람에게는 그런 상태가 없고, 서버는 `CASE WHEN m.kind = 'agent'`로 그것을
+ * 인코딩한다. 사람 행에 이 키를 넣지 않는 것이 이 픽스처의 요점 중 하나다.
+ */
 const ROSTER = [
   rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
   rosterMember({
@@ -88,14 +94,31 @@ const ROSTER = [
     channelCount: 2,
     channelIds: ['ch-general', 'ch-secret'],
     agentModel: 'gpt-5.6',
+    paused: false,
   }),
   rosterMember({
     id: HERMES,
     kind: 'agent',
     displayName: '헤르메스',
     handle: 'hermes',
+    paused: false,
   }),
 ];
+
+/**
+ * 같은 명부에서 `paused`만 빠진 것 — `paused` 프로젝션 이전의 서버.
+ *
+ * 이 배열이 있는 이유는 goal RN-C1이 목록의 프로필 N+1을 걷어냈기 때문이다. 그
+ * 전에는 에이전트당 403이 「상태를 볼 수 없음」을 만들었는데, 이제 그 문장이 나오는
+ * 자리는 **명부가 그 사실을 싣지 않는 서버**뿐이다. 그 갈래가 사라지지 않았음을
+ * 이것으로 잠근다 — 모르는 것을 「활성」으로 채우는 순간이 이 화면이 조용히
+ * 거짓말을 시작하는 순간이다.
+ */
+const ROSTER_WITHOUT_PAUSED = ROSTER.map(member => {
+  const copy: Record<string, unknown> = {...member};
+  delete copy.paused;
+  return copy;
+});
 
 const CHANNELS = [
   {id: 'ch-general', workspaceId: WS, kind: 'public', name: 'general', muted: false},
@@ -220,6 +243,8 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 interface RouteOverrides {
+  /** 이 서버의 명부. 기본은 `paused`를 싣는 현행 서버다. */
+  roster?: () => Response | Promise<Response>;
   profile?: (agentId: string) => Response | Promise<Response>;
   pause?: (body: unknown) => Response | Promise<Response>;
   allowedModels?: () => Response | Promise<Response>;
@@ -277,7 +302,11 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
     }
-    if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
+    if (url.includes('/roster')) {
+      return overrides.roster
+        ? overrides.roster()
+        : jsonResponse(200, {members: ROSTER});
+    }
     if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
     if (url.includes('/messages')) return jsonResponse(200, {messages: []});
     if (url.includes('/dms')) {
@@ -374,15 +403,26 @@ describe('the 에이전트 tab exists at all', () => {
 
 describe('a row says what state the agent is in', () => {
   it('names 활성, the channels it is in, and the ledger it read', async () => {
-    installFetch();
+    const fetchMock = installFetch();
     await openAgentsTab();
+    // 명부가 상태를 실어 주므로 목록은 프로필을 **한 번도** 읽지 않는다
+    // (goal RN-C1). 예전에는 에이전트당 한 번이었고, 일반 멤버에게는 그 한 번이
+    // 전부 403이었다.
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/profile')),
+    ).toHaveLength(0);
+    // 상태는 명부와 함께 **이미** 와 있다 — 기다릴 것은 원장(ledger)뿐이다.
+    // 예전에는 프로필 왕복이 그 대기를 대신 만들어 줬고, 그것이 사라지면서
+    // 이 `waitFor`의 대상도 실제로 늦게 오는 것으로 바뀌었다.
+    expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).toHaveTextContent(/활성/);
     await waitFor(() =>
-      expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).toHaveTextContent(/활성/),
+      expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).toHaveTextContent(
+        /작업 세션 2개 실행 중/,
+      ),
     );
     const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
     // Two of this agent's three sessions are running; the finished one is not
     // counted. And the word is 작업 세션, never the web's 작업 중 — see below.
-    expect(row).toHaveTextContent(/작업 세션 2개 실행 중/);
     expect(row).toHaveTextContent(/#general/);
     // ch-secret is a membership this client cannot name; it is COUNTED, never
     // dropped and never invented (`channelPlacement.unresolved`).
@@ -403,12 +443,17 @@ describe('a row says what state the agent is in', () => {
     expect(row).not.toHaveTextContent(/작업 중/);
   });
 
-  it('says 일시정지 when the profile says so', async () => {
-    installFetch({
-      profile: agentId =>
-        agentId === KIM_AGENT
-          ? jsonResponse(200, {profile: {...PROFILE, paused: true}})
-          : jsonResponse(403, {error: {message: 'nope'}}),
+  it('says 일시정지 when the ROSTER says so, without asking anything else', async () => {
+    // 이 단정은 goal RN-C1에서 **고쳐졌지, 지워지지 않았다.** 예전에는 같은
+    // 사실을 `GET …/agents/{id}/profile`에서 읽었다. 컬럼도 값도 그대로이고,
+    // 바뀐 것은 그것이 이미 손에 있는 목록에 실려 온다는 것뿐이다.
+    const fetchMock = installFetch({
+      roster: () =>
+        jsonResponse(200, {
+          members: ROSTER.map(member =>
+            member.id === KIM_AGENT ? {...member, paused: true} : member,
+          ),
+        }),
     });
     await openAgentsTab();
     await waitFor(() =>
@@ -416,13 +461,50 @@ describe('a row says what state the agent is in', () => {
         /일시정지/,
       ),
     );
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/profile')),
+    ).toHaveLength(0);
   });
 
-  it('calls a refused read a refusal, not a failure', async () => {
-    // 헤르메스 answers 403 because this person does not own it. "상태 확인 실패"
-    // would tell them something is broken and invite a retry that cannot work.
-    installFetch();
+  it('읽을 수 없는 paused 는 필드만 버리고 행은 남긴다 (2R M4)', async () => {
+    // 이 goal의 첫 판은 불리언이 아닌 `paused`를 만나면 **행 전체를 버렸다**.
+    // 컬럼 하나를 못 읽는 것과 그 멤버가 없는 것은 같은 진술이 아니고, 후자는
+    // 훨씬 큰 거짓말이다 — 목록은 「아직 에이전트가 없습니다」라고 말하게 되고,
+    // 바로 거기 있는 에이전트가 화면에서 사라진다.
+    //
+    // 필드만 버리면 이미 있는 갈래로 착지한다: 명부가 그 사실을 싣지 않은 것과
+    // 같은 자리, 즉 「상태를 볼 수 없음」이다. 절대 일어나면 안 되는 것은 문자열
+    // `"false"`가 truthy로 살아남는 것뿐이다.
+    installFetch({
+      roster: () =>
+        jsonResponse(200, {
+          members: ROSTER.map(member =>
+            member.id === KIM_AGENT ? {...member, paused: 'false'} : member,
+          ),
+        }),
+    });
     await openAgentsTab();
+    const row = screen.getByTestId(`agent-row-${KIM_AGENT}`);
+    expect(row).toBeTruthy();
+    expect(row).toHaveTextContent(/상태를 볼 수 없음/);
+    // 그리고 「활성」도 「일시정지」도 아니다 — 읽지 못한 것을 어느 쪽으로도 접지
+    // 않는다.
+    expect(row).not.toHaveTextContent(/활성/);
+    expect(row).not.toHaveTextContent(/일시정지/);
+  });
+
+  it('says 상태를 볼 수 없음 when the roster does not carry the fact', async () => {
+    // 예전에는 이 문장이 **403 때문에** 나왔다(에이전트당 한 번의 거절). 이제
+    // 그 문장이 나오는 자리는 명부가 `paused`를 싣지 않는 서버 하나뿐이고,
+    // 여기서 지키는 것은 같은 성질이다: 모르는 것을 「활성」으로 채우지 않는다.
+    // 그리고 모른다고 말하기 위해 요청을 더 쏘지도 않는다.
+    const fetchMock = installFetch({
+      roster: () => jsonResponse(200, {members: ROSTER_WITHOUT_PAUSED}),
+    });
+    await openAgentsTab();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/profile')),
+    ).toHaveLength(0);
     await waitFor(() =>
       expect(screen.getByTestId(`agent-row-${HERMES}`)).toHaveTextContent(
         /상태를 볼 수 없음/,
@@ -459,10 +541,16 @@ describe('재우기 / 깨우기', () => {
     await openKim();
     const effect = screen.getByTestId('agent-pause-effect');
     // Measured on server-rust: pause blocks the three run-CREATION paths and
-    // nothing else. A job the gateway already claimed runs to completion, and
-    // this server has no cancel route at all.
+    // nothing else. A job the gateway already claimed runs to completion —
+    // pausing does not reach it, and the way to stop it is the separate cancel
+    // route (goal SRV-C2), which is a different act on a different object.
     expect(effect).toHaveTextContent(/새 실행이 시작되지 않습니다/);
-    expect(effect).toHaveTextContent(/이미 실행 중인 작업은 그대로 끝까지 갑니다/);
+    // goal RN-C1에서 고쳐진 단정. 예전 문장은 "이미 실행 중인 작업은 그대로
+    // 끝까지 갑니다"였고 두 가지를 뜻했다 — 재우기가 도는 실행에 손대지 않는다는
+    // 것과, 멈출 방법이 아예 없다는 것. cancel 라우트가 이식되며 후자만 거짓이
+    // 됐으므로 전자를 잠근다.
+    expect(effect).toHaveTextContent(/재우기로 멈추지 않습니다/);
+    expect(effect).toHaveTextContent(/중단할 수 있습니다/);
     expect(screen.getByTestId('agent-state')).toHaveTextContent('깨어 있습니다');
   });
 

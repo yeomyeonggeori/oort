@@ -652,12 +652,24 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     // ② 시계는 멈추는 게 아니라 사라진다 — 죽은 소켓 위에서 세는 숫자는 우리의
     //    낙관을 재는 것이지 에이전트의 턴을 재는 것이 아니다.
     expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/\d+s/);
-    // ②' 그리고 스크린리더도 같은 것을 듣는다. RN View는 기본이 비접근 요소라
-    //     `accessible` 없이는 이 라벨을 아무도 읽지 않는다 (M1).
+    // ②' 그리고 스크린리더도 같은 것을 듣는다.
+    //
+    // 이 단정은 goal RN-C1에서 **고쳐졌지, 지워지지 않았다.** 2R M1이 잡은 결함은
+    // "아무도 읽지 않는 라벨"이었고, 그때의 수리는 컨테이너를 `accessible`로 만들어
+    // 한 요소가 전부를 말하게 하는 것이었다 — 막대가 텍스트뿐이던 동안에는 옳았다.
+    //
+    // 막대 안에 「중단」 버튼이 들어오면서 그 수리가 틀린 것이 됐다: `accessible`은
+    // 하위 트리를 하나로 **병합**하고, 병합된 트리 안에는 포커스 가능한 버튼이
+    // 없다. 문장은 읽어 주면서 그 문장에 대해 할 수 있는 유일한 행동은 가려 버리는
+    // 것이라, 원래의 침묵보다 나쁘다.
+    //
+    // 그래서 라벨은 사라진 것이 아니라 **줄로 내려갔다**: 각 줄의 `Text`가 자기
+    // 문장을 지고(Text는 기본이 접근 요소다), 스테일 줄도 자기 라벨을 지며, 중단
+    // 버튼은 자기 요소다. 읽히지 않는 것은 없다.
     const bar = screen.getByTestId('composer-working');
-    expect(bar.props.accessible).toBe(true);
-    expect(bar.props.accessibilityLabel).toContain('김인턴');
-    expect(bar.props.accessibilityLabel).toContain(TURN_STALE_SENTENCE);
+    expect(bar.props.accessible).not.toBe(true);
+    expect(screen.getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*작업 중/)).toBeTruthy();
+    expect(screen.getByLabelText(TURN_STALE_SENTENCE)).toBeTruthy();
     // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
     //    문장이 서로를 부정한다 (M3).
     expect(screen.getByTestId('conversation-title').parent).toBeTruthy();

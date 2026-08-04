@@ -133,6 +133,11 @@ export function effectiveEffortLabel(
 /**
  * 상태 한 단어. 순서가 곧 정확도다: 멤버십 정지가 프로필의 일시정지를 이기고,
  * 프로필을 읽지 못한 상태는 "활성"이라고 말하지 않는다.
+ *
+ * 명부가 `paused`를 실어 주면(goal SRV-R2) 그것이 프로필 읽기보다 앞선다 —
+ * 같은 `agent_profile.paused` 컬럼인데 게이트가 없고 이미 손에 있어서, 기다릴
+ * 것도 실패할 것도 없기 때문이다. 그 필드가 없는 서버에서만 아래 세 갈래로
+ * 떨어진다.
  */
 export function lifecycleLabel(
   agent: RosterMember,
@@ -141,6 +146,7 @@ export function lifecycleLabel(
   profileFailed: boolean
 ): string {
   if (agent.status !== "active") return "사용 중지";
+  if (agent.paused !== undefined) return agent.paused ? "일시정지" : "활성";
   if (profilePending) return "상태 확인 중";
   if (profileFailed) return "상태 확인 실패";
   return profile?.paused ? "일시정지" : "활성";

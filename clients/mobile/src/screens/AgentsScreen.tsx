@@ -22,7 +22,7 @@ import {
   buildAgentRows,
   type AgentRow,
 } from '../features/agents/rows';
-import {useAgentProfiles, useWorkSessions} from '../features/agents/queries';
+import {useWorkSessions} from '../features/agents/queries';
 import {
   AgentTurnBadge,
   AgentTurnStaleNotice,
@@ -52,14 +52,18 @@ import {queryFailureDetail} from './SidebarScreen';
 // hub's own filter — decides which roster rows land here, so the two clients
 // cannot disagree about who exists.
 //
-// ## What a row can and cannot say
+// ## What a row can and cannot say — and what it stopped asking (goal RN-C1)
 //
-// 상태 needs a SECOND request per agent, because the roster carries no pause
-// state (measured on `server-rust`). That request is authorised per agent, so
-// for an ordinary member some rows honestly read 상태를 볼 수 없음 rather than
-// pretending to know. The list is not blocked on any of it: a name and its
-// channels are already useful, and a screen that waits for a permission it will
-// never get is a screen that never loads.
+// 상태 used to need a SECOND request per agent, because the roster carried no
+// pause state. That request is authorised per agent, so an ordinary member
+// collected one 403 per row and the list honestly read 상태를 볼 수 없음 —
+// having spent N round trips to learn it could not answer.
+//
+// goal SRV-R2 put the same `agent_profile.paused` column on the roster
+// projection, so this screen asks nothing extra at all: three requests, none of
+// them proportional to the number of agents. The 상태를 볼 수 없음 arm is still
+// here and still reachable — against a server whose roster does not carry the
+// field — which is the point. What went away is the cost, not the honesty.
 //
 // ## 작업 중, at last — and still not the same fact as 세션 실행 중 (goal RN-T2)
 //
@@ -92,22 +96,21 @@ export default function AgentsScreen({
   const sessionsQuery = useWorkSessions(workspaceId);
 
   const members = directoryQuery.directory.members;
-  const agentIds = useMemo(
-    () => members.filter(member => member.kind === 'agent').map(member => member.id),
-    [members],
-  );
-  const profiles = useAgentProfiles(workspaceId, agentIds);
 
+  // 이 목록이 부르는 요청은 셋이고, **에이전트 수에 비례하는 것은 하나도 없다**
+  // (goal RN-C1). 예전에는 pause 상태 하나를 얻으려고 에이전트마다 프로필을
+  // 읽었고, 그 라우트는 게이트 뒤라 일반 멤버에게는 행마다 403이었다 — 목록이
+  // 자기가 그릴 수 없는 것을 N번 물어본 셈이다. 명부가 그 컬럼을 실어 준 뒤로는
+  // 아무것도 더 묻지 않는다.
   const rows = useMemo(
     () =>
       buildAgentRows({
         members,
         channels: channelsQuery.groups.channels,
         dms: channelsQuery.groups.dms,
-        profiles,
         sessions: sessionsQuery.data,
       }),
-    [members, channelsQuery.groups, profiles, sessionsQuery.data],
+    [members, channelsQuery.groups, sessionsQuery.data],
   );
 
   // The ROSTER is this list. Without it there are no rows at all, so its failure
