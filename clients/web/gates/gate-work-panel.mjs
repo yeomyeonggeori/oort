@@ -9,7 +9,9 @@
 //   3. 잘림 고지       run 도중에 붙었으면 "이 지점부터 관전"을 먼저 적는다.
 //   4. 휘발            닫았다 열면 그 시점부터 다시 쌓인다(D1). 닫힌 동안의
 //                      프레임을 나중에 있었던 척하지 않는다.
-//   5. 인자 접힘       `tool_call_args`는 기본 접힘이고 명시적으로 펼쳐야 보인다.
+//   5. 인자 불투명     `tool_call_args`의 **값**은 접혀 있든 펼쳐져 있든 화면에
+//                      오지 않는다(design-taste-web §9, agentCardModel 계약).
+//                      이름과 개수만 접힘 뒤에 있다.
 //
 // 세 시나리오는 REST 응답 지연과 프레임 간격을 서로 다르게 흔든다(지연 편차 목).
 // 마지막 시나리오는 패널을 열기 **전에** 도구 프레임을 흘려 보내, 패널이 못 본
@@ -19,17 +21,20 @@
 //   WORK_PANEL_GATE_PROVE_RED_ORDER=1 npm run gate:work-panel
 //     expected failure: "delta order"
 //   WORK_PANEL_GATE_PROVE_RED_ARGS=1 npm run gate:work-panel
+//     expected failure: "argument value reached the screen"
+//   WORK_PANEL_GATE_PROVE_RED_FOLD=1 npm run gate:work-panel
 //     expected failure: "tool args folded by default"
 //   WORK_PANEL_GATE_PROVE_RED_VOLATILE=1 npm run gate:work-panel
 //     expected failure: "a closed panel kept (or backfilled) history"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
-// ARGS는 검사 전에 디스클로저를 먼저 펼치고, VOLATILE은 다시 연 패널에 지나간
-// 문장을 되쏜다. 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은
-// 반복 가능하다.
+// ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
+// 화면에 없다" 단언이 DOM을 읽고 있음을 증명하고, FOLD는 검사 전에 디스클로저를
+// 먼저 펼치고, VOLATILE은 다시 연 패널에 지나간 문장을 되쏜다. 제품 소스 줄을
+// 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -45,6 +50,7 @@ const runId = "9F1C8B2A-0000-7000-8000-00000000RUN1";
 
 const proveRedOrder = process.env.WORK_PANEL_GATE_PROVE_RED_ORDER === "1";
 const proveRedArgs = process.env.WORK_PANEL_GATE_PROVE_RED_ARGS === "1";
+const proveRedFold = process.env.WORK_PANEL_GATE_PROVE_RED_FOLD === "1";
 const proveRedVolatile = process.env.WORK_PANEL_GATE_PROVE_RED_VOLATILE === "1";
 
 const DELTAS = ["배포 로그를 ", "먼저 ", "읽었습니다."];
@@ -53,6 +59,7 @@ const REOPEN_DELTA = "다시 열고 나서 온 줄입니다.";
 const MISSED_DELTA = "닫혀 있는 동안 흘러간 줄입니다.";
 const TOOL_NAME = "work.session.end";
 const TOOL_ARG_MARKER = "/Users/seongjae/projects/momo/secret-plan.md";
+const TOOL_ARG_VALUE = "되돌리기-절차-초안";
 
 const session = {
   accessToken: "gate-only-not-a-credential",
@@ -417,42 +424,62 @@ async function exerciseScenario(browser, scenario) {
     }
   }
 
-  // ---- 3. 도구 단계와 인자 접힘 ---------------------------------------------
+  // ---- 3. 도구 단계와 인자 불투명 -------------------------------------------
   await publish(page, statusFrame("streaming", "running"));
   await publish(
     page,
     partialFrame({
       tool_call_id: "call-1",
-      tool_call_name: TOOL_NAME,
-      tool_call_args: { session: "A", path: TOOL_ARG_MARKER },
+      // red seam: 값 마커를 실제로 렌더되는 자리(도구 이름)에 심는다. 아래
+      // "값은 화면 어디에도 없다" 단언이 DOM을 읽고 있다면 반드시 깨진다.
+      tool_call_name: proveRedArgs ? TOOL_ARG_MARKER : TOOL_NAME,
+      tool_call_args: { session: TOOL_ARG_VALUE, path: TOOL_ARG_MARKER },
       tool_call_args_truncated: true,
       spent_micro_usd: 4_800,
     })
   );
   await page.getByTestId("agent-work-panel-args-toggle").waitFor();
-  if (proveRedArgs) {
+  if (proveRedFold) {
     // red seam: 검사 전에 사람이 펼친 척한다. 접힘 단언이 살아 있다면 여기서
     // 반드시 깨진다.
     await page.getByTestId("agent-work-panel-args-toggle").click();
     await page.getByTestId("agent-work-panel-args").waitFor();
   }
-  const foldedBody =
-    (await page.getByTestId("agent-work-panel").textContent()) ?? "";
-  if (foldedBody.includes(TOOL_ARG_MARKER)) {
+  if ((await page.getByTestId("agent-work-panel-args").count()) !== 0) {
     throw new Error(
-      `${label}: tool args folded by default — the argument path was on screen without an explicit expand`
+      `${label}: tool args folded by default — the disclosure body was present without an explicit expand`
     );
   }
-  if (!foldedBody.includes(TOOL_NAME)) {
+  const foldedBody =
+    (await page.getByTestId("agent-work-panel").textContent()) ?? "";
+  if (!proveRedArgs && !foldedBody.includes(TOOL_NAME)) {
     throw new Error(`${label}: tool step must state its name (${TOOL_NAME})`);
   }
-  await page.getByTestId("agent-work-panel-args-toggle").click();
+  if (!proveRedFold) {
+    await page.getByTestId("agent-work-panel-args-toggle").click();
+  }
   await page.getByTestId("agent-work-panel-args").waitFor();
   const expandedBody =
     (await page.getByTestId("agent-work-panel").textContent()) ?? "";
-  if (!expandedBody.includes(TOOL_ARG_MARKER)) {
+  // 펼쳐도 값은 오지 않는다. 이름과 숨김 개수만 온다(design-taste-web §9).
+  for (const secret of [TOOL_ARG_MARKER, TOOL_ARG_VALUE]) {
+    if (expandedBody.includes(secret)) {
+      throw new Error(
+        `${label}: argument value reached the screen ("${secret}"), folded or not`
+      );
+    }
+  }
+  if (!expandedBody.includes("session") || !expandedBody.includes("path")) {
     throw new Error(
-      `${label}: an explicitly expanded disclosure must actually show the args`
+      `${label}: an expanded disclosure must still name the argument fields`
+    );
+  }
+  const withheld = await page
+    .getByTestId("agent-work-panel-args-withheld")
+    .textContent();
+  if (!withheld || !withheld.includes("2")) {
+    throw new Error(
+      `${label}: the count of withheld argument values must be stated, read "${withheld}"`
     );
   }
   const cost = await page.getByTestId("agent-work-panel-cost").textContent();
@@ -544,6 +571,51 @@ async function exerciseScenario(browser, scenario) {
   await context.close();
 }
 
+/**
+ * 리뷰용 스크린샷 (SKILL §11). 두 색 구성표를 브라우저 수준에서 흉내 내서
+ * `light-dark()`가 제품과 같은 경로로 도는 것을 찍는다. 판정은 하지 않는다 —
+ * 게이트가 실패하는 자리가 아니라 사람이 보는 자리다.
+ */
+async function captureShots(browser) {
+  const outDir = resolve(webRoot, "artifacts/work-panel");
+  mkdirSync(outDir, { recursive: true });
+  for (const scheme of ["light", "dark"]) {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      reducedMotion: "reduce",
+      colorScheme: scheme,
+    });
+    const page = await context.newPage();
+    await installRealtimeSocket(page);
+    await installRoutes(context, scenarios[0]);
+    await login(page);
+    await publish(page, statusFrame("queued", "queued"));
+    await publish(
+      page,
+      statusFrame("streaming", "running", { spent_micro_usd: 1_200 })
+    );
+    await openPanelFromComposer(page);
+    await publish(page, statusFrame("thinking", "running"));
+    for (const slice of DELTAS) await publish(page, partialFrame({ text_delta: slice }));
+    await publish(page, statusFrame("streaming", "running"));
+    await publish(
+      page,
+      partialFrame({
+        tool_call_id: "call-1",
+        tool_call_name: TOOL_NAME,
+        tool_call_args: { session: "A", path: TOOL_ARG_MARKER },
+        tool_call_args_truncated: true,
+        spent_micro_usd: 4_800,
+      })
+    );
+    await publish(page, statusFrame("thinking", "awaiting_approval"));
+    await page.getByTestId("agent-work-panel-args-toggle").waitFor();
+    await page.screenshot({ path: resolve(outDir, `work-panel-${scheme}.png`) });
+    await context.close();
+  }
+  console.log(`[shots] artifacts/work-panel/work-panel-{light,dark}.png`);
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
@@ -559,6 +631,9 @@ async function main() {
     try {
       for (const scenario of scenarios) {
         await exerciseScenario(browser, scenario);
+      }
+      if (process.env.WORK_PANEL_GATE_SHOTS === "1") {
+        await captureShots(browser);
       }
     } finally {
       await browser.close();

@@ -930,19 +930,26 @@ function CurrentWorkValue({
   return (
     <button
       type="button"
-      onClick={() =>
-        openWorkPanel({
-          runId,
-          memberId: work.memberId,
-          channelId: work.channelId,
-          origin: "hub",
-          // 패널이 자기 힘으로는 얻을 수 없는 값(여는 프레임은 run id가 알려지기
-          // 전에 지나간다). 레일이 봤다면 여기서 넘겨준다.
-          ...(work.startedAtMs !== undefined
-            ? { startedAtMs: work.startedAtMs }
-            : {}),
-        })
+      onClick={(event) =>
+        openWorkPanel(
+          {
+            runId,
+            memberId: work.memberId,
+            channelId: work.channelId,
+            origin: "hub",
+            // 패널이 자기 힘으로는 얻을 수 없는 값(여는 프레임은 run id가 알려지기
+            // 전에 지나간다). 레일이 봤다면 여기서 넘겨준다.
+            ...(work.startedAtMs !== undefined
+              ? { startedAtMs: work.startedAtMs }
+              : {}),
+          },
+          // 닫을 때 캐럿이 돌아올 자리(WebKit은 클릭으로 포커스를 주지 않는다).
+          event.currentTarget
+        )
       }
+      // 배지의 접근성 문장이 통째로 이름이 되면 오프라인일 때 두 문장으로 늘어난다.
+      // 이 컨트롤의 이름은 이 컨트롤이 하는 일이다.
+      aria-label={`${agentName} 에이전트의 진행 과정 열기`}
       data-testid="agent-hub-work-open"
       className="flex items-center gap-1 rounded-sm text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >

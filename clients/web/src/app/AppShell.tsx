@@ -74,10 +74,23 @@ export function AppShell({
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
   // 덮인 본문은 탭 순서에서 함께 빠진다. 이것이 초점 트랩이다 (shellNav.tsx).
   const mainRef = useInertWhile(isMobile && drawerOpen);
-  // 작업 패널도 폰 폭에서는 라우트를 덮으므로 같은 규칙을 받는다. 두 문턱이
-  // 우연히 같은 것이 아니라 같은 값이다(MOBILE_SHELL_QUERY = work-panel-pane).
+  // 작업 패널도 좁은 창에서는 라우트를 덮으므로 같은 규칙을 받는다. 문턱은
+  // 사이드바 문턱(600px)이 아니라 tokens.css `work-panel-pane`의 900px이다:
+  // 이 패널은 사이드바 옆 라우트 상자에 붙어서, 601px 창이면 라우트에 41px밖에
+  // 남지 않는다. ChatShell이 작업 세션 패널에 같은 쿼리를 같은 이유로 쓴다.
   const workPanelOpen = useWorkPanelTarget() !== null;
-  const routeRef = useInertWhile<HTMLDivElement>(isMobile && workPanelOpen);
+  const [paneDrawerWidth, setPaneDrawerWidth] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(width < 900px)");
+    const sync = () => setPaneDrawerWidth(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  const routeRef = useInertWhile<HTMLDivElement>(
+    paneDrawerWidth && workPanelOpen
+  );
 
   const openDrawer = useCallback((opener?: HTMLElement | null) => {
     drawerOpenerRef.current = opener ?? null;

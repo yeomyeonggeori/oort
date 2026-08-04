@@ -584,15 +584,19 @@
   }
 }
 
-/* 작업 패널 기하 (goal WEB-WP1). thread-pane과 같은 규칙이고 자리만 다르다:
- * 이 패널은 채팅 표면이 아니라 셸의 라우트 상자 옆에 붙으므로(진입점이 대화와
- * 에이전트 허브 둘이다) 앵커도 그 상자다. 600px 아래에서는 라우트를 통째로
- * 덮는다 — 390px 폰에서 320px 열은 라우트에 70px를 남기고, 거기에는 아무것도
- * 들어가지 않는다. 덮인 표면은 AppShell이 `inert`로 탭 순서에서 함께 빼낸다. */
+/* 작업 패널 기하 (goal WEB-WP1). 문턱은 thread-pane의 600px이 아니라 work-pane과
+ * 같은 900px이고, 이유는 이 패널이 붙는 상자가 다르기 때문이다.
+ *
+ * thread-pane은 **채팅 표면 안쪽**에 붙어서 600px이 맞는 숫자다. 이 패널은
+ * 240px 사이드바 옆의 라우트 상자에 붙는데 미디어 쿼리는 뷰포트를 재므로, 601px
+ * 창에서 라우트에 남는 폭은 601 - 240 - 320 = 41px다. work-pane이 같은 실측으로
+ * 이미 900px을 골랐고(760px 창에서 컴포저 placeholder가 두 줄로 접히며 잘렸다),
+ * 부차 표면이 주 표면을 쓸 수 없는 폭으로 밀어내면 안 된다는 규칙은 여기서도
+ * 같다. 덮인 표면은 AppShell이 `inert`로 탭 순서에서 함께 빼낸다. */
 @utility work-panel-pane {
   inline-size: var(--spacing-pane);
 
-  @media (width < 600px) {
+  @media (width < 900px) {
     position: absolute;
     inset: 0;
     inline-size: auto;

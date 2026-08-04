@@ -139,6 +139,17 @@ describe("workLogStore: 세션 경계", () => {
     release();
     expect(workLogSnapshot().size).toBe(0);
   });
+
+  it("리셋은 열려 있던 패널도 닫는다", () => {
+    // 로그만 비우면 패널은 자기 run이 사라진 것을 모른 채 남는다: useWorkLog의
+    // 효과는 run/member/channel에만 의존하고 그 셋은 그대로라 다시 구독하지
+    // 않으므로, 사람에게는 이전 워크스페이스 이름표가 붙은 빈 패널이 남는다.
+    watchWorkLog(target(), T0);
+    openWorkPanel({ ...target(), origin: "activity" });
+    resetWorkLogs();
+    expect(workPanelSnapshot()).toBeNull();
+    expect(workLogSnapshot().size).toBe(0);
+  });
 });
 
 describe("workLogStore: 무엇을 열어 두었는가", () => {

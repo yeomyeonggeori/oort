@@ -94,9 +94,22 @@ export function recordAgentProgress(event: AgentProgressEvent): void {
   emit(map);
 }
 
-/** 세션 종료·워크스페이스 전환: 남은 것을 물려주지 않는다. */
+/**
+ * 세션 종료·워크스페이스 전환: 남은 것을 물려주지 않는다.
+ *
+ * **패널도 함께 닫는다.** 로그만 비우면 열려 있던 패널은 자기 run이 사라진 것을
+ * 모른 채 남는다: `useWorkLog`의 효과는 `[runId, memberId, channelId]`에만
+ * 의존하고 그 셋은 그대로이므로 다시 구독하지 않고, `recordAgentProgress`는
+ * "아무도 안 보는 run"으로 판단해 영원히 되돌아간다. 사람에게 남는 것은 이전
+ * 워크스페이스의 이름표가 붙은 빈 패널 하나다.
+ *
+ * `watchers`를 비우는 것도 같은 이유로 여기서만 한다. 참조 수는 로그와 짝이고,
+ * 패널이 닫히면 `useWorkLog`의 정리가 이미 없는 키를 놓으려 하지만 그 경로는
+ * 아무것도 하지 않는다(`logs.has(key)`가 false).
+ */
 export function resetWorkLogs(): void {
   watchers.clear();
+  closeWorkPanel();
   if (logs.size === 0) return;
   emit(new Map());
 }
@@ -160,16 +173,39 @@ function emitPanel(next: WorkPanelTarget | null): void {
   for (const listener of panelListeners) listener();
 }
 
-export function openWorkPanel(target: WorkPanelTarget): void {
+/**
+ * 닫을 때 캐럿을 돌려줄 엘리먼트. 스토어가 emit하는 값에 넣지 않는 이유는 이것이
+ * 렌더에 쓰이는 상태가 아니기 때문이다 — DOM 노드를 스냅샷에 넣으면 값 비교가
+ * 참조 비교가 되고, 구독자 전원이 이 노드를 들고 다니게 된다.
+ *
+ * `document.activeElement` 추정은 폴백이다: WebKit은 마우스 클릭으로 <button>에
+ * 포커스를 주지 않아 추정값이 <body>가 되고, 데스크톱 셸이 WKWebView다
+ * (design/ui/dialog.tsx의 같은 규칙).
+ */
+let pendingOpener: HTMLElement | null = null;
+
+export function openWorkPanel(
+  target: WorkPanelTarget,
+  opener?: HTMLElement | null
+): void {
   const same =
     panelTarget !== null &&
     keyOf(panelTarget.runId) === keyOf(target.runId) &&
     panelTarget.origin === target.origin;
   if (same) return;
+  pendingOpener = opener ?? null;
   emitPanel(target);
 }
 
+/** 패널이 마운트하면서 한 번 가져간다. 두 번째 호출은 null을 받는다. */
+export function takeWorkPanelOpener(): HTMLElement | null {
+  const opener = pendingOpener;
+  pendingOpener = null;
+  return opener;
+}
+
 export function closeWorkPanel(): void {
+  pendingOpener = null;
   if (panelTarget === null) return;
   emitPanel(null);
 }

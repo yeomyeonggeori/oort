@@ -83,11 +83,23 @@ export interface WorkToolEntry {
   callId: string;
   name: string;
   /**
-   * `tool_call_args`. 기본은 접힘이고 사람이 명시적으로 펼쳐야 보인다: 경로와
-   * 프롬프트가 그대로 들어 있을 수 있다(설계 문서 §4). 값이 왔다는 사실 자체는
-   * 숨기지 않는다.
+   * `tool_call_args`의 **필드 이름만**. 값은 이 타입에 들어오지 않는다.
+   *
+   * 설계 문서 §4는 "args는 접힘+명시 펼침(taste 규율)"이라고 적었지만, 실제
+   * taste 규율(momo-design-taste-web §9)과 이 레포의 기존 계약
+   * (`agentCardModel` 헤더: "tool arguments, execution paths, grants, payload
+   * hashes and raw output stay OPAQUE, disclosure or not")은 더 엄격하다. 두
+   * 문장이 충돌할 때 값을 내보내는 쪽을 고르면 되돌릴 수 없다: 경로와 프롬프트가
+   * 스크린샷 한 장에 실려 나가고 나면 접어 둔 적이 있다는 사실은 아무 소용이
+   * 없다. 그래서 v0는 엄격한 쪽을 쓰고, 경계는 성재가 정한다(PR 계획 이탈).
+   *
+   * 이름은 도구의 **스키마**이고 값은 사람의 데이터다. 이름까지 지우면 "도구를
+   * 무엇에 대해 불렀는가"가 통째로 사라져서 이 패널의 목적이 없어지므로, 이름은
+   * 남기고 값은 세어서 밝힌다 — `agentCardModel`의 `withheld`와 같은 모양이다.
    */
-  args?: unknown;
+  argFields: readonly string[];
+  /** 값을 표시하지 않은 인자의 개수. 0이면 인자가 없었다는 뜻이다. */
+  argWithheld: number;
   /** 서버가 args를 잘라서 보냈다. */
   argsTruncated: boolean;
 }
@@ -233,9 +245,23 @@ function appendStatus(
     last === undefined || last.phase !== phase || last.runStatus !== runStatus;
 
   const spent = event.payload.spent_micro_usd;
-  if (!changed && !terminal) {
+  // 비용은 **온 프레임에만** 비교한다. `spent === log.spentMicroUsd`로 한 번에
+  // 보면 비용을 실어 보내지 않은 프레임이 `undefined !== 1200`으로 언제나 "바뀐
+  // 것"이 되어, 같은 인스턴스를 돌려준다는 계약이 첫 비용 프레임 이후로 죽는다.
+  const costChanged = spent !== undefined && spent !== log.spentMicroUsd;
+
+  // 이미 닫힌 run에 같은 종료 프레임이 다시 오면 "완료" 줄이 두 번 생긴다.
+  // Centrifugo가 이 경로에서 재전달을 하는지는 실측하지 않았으므로, 값이 싼
+  // 방어를 먼저 걸어 둔다.
+  const redundantTerminal =
+    terminal &&
+    log.closed !== undefined &&
+    log.closed.runStatus === runStatus &&
+    log.closed.phase === phase;
+
+  if ((!changed && !terminal) || redundantTerminal) {
     // 갱신할 것이 시각과 비용뿐이면 항목은 그대로 둔다.
-    if (log.lastActivityAtMs === atMs && spent === log.spentMicroUsd) return log;
+    if (log.lastActivityAtMs >= atMs && !costChanged) return log;
     return {
       ...log,
       lastActivityAtMs: Math.max(log.lastActivityAtMs, atMs),
@@ -279,6 +305,32 @@ function lastPhaseEntry(log: WorkLog): WorkPhaseEntry | undefined {
   return undefined;
 }
 
+/**
+ * 인자 페이로드에서 **이름과 개수만** 뽑는다. 값은 어떤 형태로도 밖으로 나가지
+ * 않는다: 반환 타입에 값을 담을 자리가 없다는 것이 이 함수의 요점이다.
+ *
+ * 이름 목록에도 상한을 둔다. 도구가 수십 개의 키를 보내면 320px 열에 이름만으로
+ * 화면이 덮이고, 잘린 사실은 `withheld`가 이미 세고 있으므로 조용한 절단이 아니다.
+ */
+function describeArgs(args: unknown): {
+  fields: readonly string[];
+  withheld: number;
+} {
+  if (args === undefined || args === null) return { fields: [], withheld: 0 };
+  if (typeof args !== "object" || Array.isArray(args)) {
+    // 객체가 아니면(문자열 프롬프트, 배열) 이름이랄 것이 없다. 하나로 센다.
+    return { fields: [], withheld: 1 };
+  }
+  const keys = Object.keys(args as Record<string, unknown>);
+  return {
+    fields: keys.slice(0, WORK_LOG_MAX_ARG_FIELDS),
+    withheld: keys.length,
+  };
+}
+
+/** 이름을 적어 주는 인자 필드 수의 상한. 나머지는 `argWithheld`가 센다. */
+export const WORK_LOG_MAX_ARG_FIELDS = 12;
+
 function clipText(text: string): { text: string; clipped: boolean } {
   if (text.length <= WORK_LOG_MAX_TEXT_CHARS) return { text, clipped: false };
   return { text: text.slice(text.length - WORK_LOG_MAX_TEXT_CHARS), clipped: true };
@@ -305,6 +357,7 @@ function appendPartial(
     const existing = entries.findIndex(
       (entry) => entry.kind === "tool" && entry.callId === callId
     );
+    const args = describeArgs(payload.tool_call_args);
     const tool: WorkToolEntry = {
       kind: "tool",
       // 같은 호출의 후속 프레임(args가 나중에 오는 경우)은 자리를 옮기지 않는다:
@@ -314,9 +367,8 @@ function appendPartial(
       atMs,
       callId,
       name: toolName,
-      ...(payload.tool_call_args !== undefined
-        ? { args: payload.tool_call_args }
-        : {}),
+      argFields: args.fields,
+      argWithheld: args.withheld,
       argsTruncated: payload.tool_call_args_truncated === true,
     };
     if (existing >= 0) {
@@ -378,9 +430,10 @@ function appendPartial(
   }
 
   const spent = payload.spent_micro_usd;
-  if (!touched && log.lastActivityAtMs >= atMs && spent === log.spentMicroUsd) {
-    return log;
-  }
+  // appendStatus와 같은 이유로 "온 값만" 비교한다(그렇지 않으면 비용을 싣지 않은
+  // 모든 partial이 새 인스턴스를 만들어 패널을 매 프레임 리렌더한다).
+  const costChanged = spent !== undefined && spent !== log.spentMicroUsd;
+  if (!touched && log.lastActivityAtMs >= atMs && !costChanged) return log;
 
   return {
     ...log,
@@ -420,27 +473,40 @@ export function workLogLiveness(
 
 /**
  * 도구 단계가 지금 어떤 상태인가. 와이어에는 **도구 결과 프레임이 없다**(v0
- * 실측): 호출이 성공했는지 실패했는지 우리는 모른다. 그래서 말할 수 있는 것은 두
- * 가지뿐이다.
+ * 실측): 호출이 성공했는지 실패했는지 우리는 모른다. 그래서 말할 수 있는 것은 셋
+ * 뿐이다.
  *
- *   - `running` 이게 마지막 항목이고 run이 아직 살아 있다.
- *   - `passed`  뒤에 다른 항목이 왔다. 다음 단계로 넘어갔다는 사실만 참이고,
- *               결과는 관측되지 않았다.
+ *   - `running`  이게 마지막 항목이고 run이 아직 살아 있다.
+ *   - `passed`   뒤에 다른 항목이 왔다. 다음 단계로 넘어갔다는 사실만 참이고,
+ *                결과는 관측되지 않았다.
+ *   - `unknown`  이게 마지막 항목인데 run이 끝났거나 신호가 끊겼다. 뒤에 아무것도
+ *                오지 않았으므로 "다음 단계로 넘어갔다"는 **거짓**이고, 결과도
+ *                모른다. 이 세 번째 상태가 없던 동안 신호가 끊긴 순간 실행 중이던
+ *                호출이 "다음 단계로"로 표시됐다 — 이 모듈 머리말이 막겠다고 한
+ *                거짓말("끝난 것을 못 봤다"와 "끝났다"를 섞는 것)이 한 층 아래에서
+ *                재현된 것이다.
  */
 export function toolEntryState(
   log: WorkLog,
   entry: WorkToolEntry,
   liveness: WorkLogLiveness
-): "running" | "passed" {
+): "running" | "passed" | "unknown" {
   const isLast = log.entries[log.entries.length - 1]?.seq === entry.seq;
-  return isLast && liveness === "live" ? "running" : "passed";
+  if (!isLast) return "passed";
+  return liveness === "live" ? "running" : "unknown";
 }
 
 // ---- 문장 (두 클라가 같은 말을 하도록 여기에 둔다) ------------------------------
 
-/** 앞부분이 없다는 고지. 설계 문서 §4의 "잘린 지점부터"의 실제 문장이다. */
+/**
+ * 앞부분이 없다는 고지. 설계 문서 §4의 "잘린 지점부터"의 실제 문장이다.
+ *
+ * "보관하지 않습니다"라고 쓰지 않는다: 서버는 24h·100프레임을 들고 있고(설계
+ * 문서 §1) 클라이언트가 replay를 버리는 것뿐이라, 그 문장은 이 화면이 증명할 수
+ * 없는 제품 전체에 대한 주장이 된다. 이 화면에 없다는 것만 참이다.
+ */
 export const WORK_LOG_TRUNCATED_HEAD_SENTENCE =
-  "이 지점부터 관전합니다. 앞부분은 보관하지 않습니다.";
+  "이 지점부터 관전합니다. 앞부분은 이 화면에 없습니다.";
 
 /** 종료를 못 본 run. "완료"라고 쓰지 않는 자리다. */
 export const WORK_LOG_SIGNAL_LOST_SENTENCE =
@@ -453,8 +519,21 @@ export const WORK_LOG_VOLATILE_SENTENCE =
 /** 도구 인자는 접혀 있다는 사실. */
 export const WORK_LOG_ARGS_FOLDED_LABEL = "호출 인자 보기";
 
+/**
+ * 값을 왜 안 보여 주는가. `AgentCard`의 같은 자리와 같은 말을 쓴다(design-taste
+ * §9, ADR-0112 basic mode): 두 표면이 같은 정책에 대해 다른 문장을 쓰면 정책이
+ * 두 개인 것처럼 읽힌다.
+ */
+export const WORK_LOG_ARGS_OPAQUE_SENTENCE =
+  "도구 인자 값, 실행 경로, 자격증명은 표시하지 않습니다.";
+
 /** 서버가 인자를 잘라 보냈다. */
 export const WORK_LOG_ARGS_TRUNCATED_SENTENCE = "서버가 인자를 잘라 보냈습니다.";
+
+/** 아직 아무 프레임도 못 받은 패널. `run`은 사람에게 쓰는 말이 아니다(§7). */
+export const WORK_LOG_EMPTY_HEADLINE = "아직 도착한 진행이 없습니다.";
+export const WORK_LOG_EMPTY_DETAIL =
+  "이 턴에서 새 프레임이 오면 여기에 도착한 순서대로 쌓입니다.";
 
 /**
  * 헤더에 적는 한 문장. 상태 어휘는 기존 경계를 그대로 쓴다(작업 중 = 열린 턴,

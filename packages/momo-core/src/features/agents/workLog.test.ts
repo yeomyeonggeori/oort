@@ -10,6 +10,7 @@ import {
   appendProgress,
   openWorkLog,
   toolEntryState,
+  WORK_LOG_MAX_ARG_FIELDS,
   WORK_LOG_MAX_ENTRIES,
   WORK_LOG_MAX_TEXT_CHARS,
   workLogLiveness,
@@ -178,6 +179,16 @@ describe("workLog — phase 전이", () => {
     expect(workLogLiveness(l, T0 + 10_000_000)).toBe("closed");
     expect(workLogStateLabel(l, "closed")).toBe("완료");
   });
+
+  it("같은 종료 프레임이 다시 와도 완료 줄이 두 번 생기지 않는다", () => {
+    let l = log();
+    l = appendProgress(l, status("thinking", "running", T0), T0);
+    l = appendProgress(l, status("done", "succeeded", T0 + 5), T0 + 5);
+    const before = l.entries.length;
+    l = appendProgress(l, status("done", "succeeded", T0 + 6), T0 + 6);
+    expect(l.entries).toHaveLength(before);
+    expect(l.closed?.atMs).toBe(T0 + 5);
+  });
 });
 
 describe("workLog — 정직성", () => {
@@ -241,7 +252,7 @@ describe("workLog — 정직성", () => {
 });
 
 describe("workLog — 도구 단계", () => {
-  it("도구 이름과 인자는 따로 들고, 인자가 왔다는 사실은 숨기지 않는다", () => {
+  it("인자 값은 로그에 들어오지 않는다. 이름과 개수만 남는다", () => {
     let l = log();
     l = appendProgress(
       l,
@@ -256,7 +267,58 @@ describe("workLog — 도구 단계", () => {
     const entry = l.entries[0] as WorkToolEntry;
     expect(entry.name).toBe("work.session.end");
     expect(entry.argsTruncated).toBe(true);
-    expect(entry.args).toBeDefined();
+    expect(entry.argFields).toEqual(["session", "path"]);
+    expect(entry.argWithheld).toBe(2);
+    // 값은 직렬화해도 어디에도 없다. 이것이 이 타입의 요점이다.
+    expect(JSON.stringify(entry)).not.toContain("/Users/seongjae/secret");
+    expect(JSON.stringify(entry)).not.toContain('"A"');
+  });
+
+  it("객체가 아닌 인자(문자열 프롬프트)는 이름 없이 하나로 센다", () => {
+    let l = log();
+    l = appendProgress(
+      l,
+      partial(T0, {
+        tool_call_id: "call-1",
+        tool_call_name: "agent.prompt",
+        tool_call_args: "배포를 되돌려도 되는지 판단해 줘",
+      }),
+      T0
+    );
+    const entry = l.entries[0] as WorkToolEntry;
+    expect(entry.argFields).toEqual([]);
+    expect(entry.argWithheld).toBe(1);
+    expect(JSON.stringify(entry)).not.toContain("되돌려도");
+  });
+
+  it("인자가 없으면 감출 것도 없다", () => {
+    let l = log();
+    l = appendProgress(
+      l,
+      partial(T0, { tool_call_id: "call-1", tool_call_name: "fs.list" }),
+      T0
+    );
+    const entry = l.entries[0] as WorkToolEntry;
+    expect(entry.argFields).toEqual([]);
+    expect(entry.argWithheld).toBe(0);
+  });
+
+  it("이름 목록 상한을 넘어도 개수는 전부 센다", () => {
+    const args: Record<string, string> = {};
+    for (let i = 0; i < WORK_LOG_MAX_ARG_FIELDS + 5; i += 1) args[`k${i}`] = "v";
+    let l = log();
+    l = appendProgress(
+      l,
+      partial(T0, {
+        tool_call_id: "call-1",
+        tool_call_name: "fs.read",
+        tool_call_args: args,
+      }),
+      T0
+    );
+    const entry = l.entries[0] as WorkToolEntry;
+    expect(entry.argFields).toHaveLength(WORK_LOG_MAX_ARG_FIELDS);
+    expect(entry.argWithheld).toBe(WORK_LOG_MAX_ARG_FIELDS + 5);
   });
 
   it("같은 call_id의 후속 프레임은 자리를 옮기지 않는다", () => {
@@ -277,7 +339,7 @@ describe("workLog — 도구 단계", () => {
       T0 + 2
     );
     expect(l.entries.map((e) => e.kind)).toEqual(["tool", "text"]);
-    expect((l.entries[0] as WorkToolEntry).args).toEqual({ path: "a.ts" });
+    expect((l.entries[0] as WorkToolEntry).argFields).toEqual(["path"]);
   });
 
   it("결과 프레임이 없으므로 마지막 단계만 진행 중이라고 말한다", () => {
@@ -295,8 +357,20 @@ describe("workLog — 도구 단계", () => {
     const [first, second] = l.entries as WorkToolEntry[];
     expect(toolEntryState(l, first, "live")).toBe("passed");
     expect(toolEntryState(l, second, "live")).toBe("running");
-    // 신호가 끊긴 run에서는 마지막 단계도 진행 중이라고 주장하지 않는다.
-    expect(toolEntryState(l, second, "signal_lost")).toBe("passed");
+  });
+
+  it("신호가 끊긴 순간 실행 중이던 단계는 다음 단계로 넘어갔다고 하지 않는다", () => {
+    let l = log();
+    l = appendProgress(
+      l,
+      partial(T0, { tool_call_id: "c1", tool_call_name: "fs.read" }),
+      T0
+    );
+    const only = l.entries[0] as WorkToolEntry;
+    // 뒤에 아무것도 오지 않았다. "다음 단계로"는 관측되지 않은 전이를 주장하는
+    // 것이고, 결과도 모른다.
+    expect(toolEntryState(l, only, "signal_lost")).toBe("unknown");
+    expect(toolEntryState(l, only, "closed")).toBe("unknown");
   });
 });
 
@@ -311,6 +385,15 @@ describe("workLog — 비용", () => {
       T0 + 1
     );
     expect(l.spentMicroUsd).toBe(4_800);
+  });
+
+  it("비용을 싣지 않은 프레임이 비용을 지우거나 리렌더를 부르지 않는다", () => {
+    let l = log();
+    l = appendProgress(l, partial(T0 + 5, { spent_micro_usd: 1_200 }), T0 + 5);
+    // 같은 (또는 더 이른) 시각에 비용 없이 온 프레임은 바꿀 것이 없다.
+    const same = appendProgress(l, partial(T0 + 1, {}), T0 + 5);
+    expect(same).toBe(l);
+    expect(same.spentMicroUsd).toBe(1_200);
   });
 });
 
