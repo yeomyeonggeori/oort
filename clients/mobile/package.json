@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "gate:project-shape": "jest __tests__/projectShape.test.ts",
     "build:sim": "bash scripts/build-sim.sh",
-    "gate:session": "node gate/run.mjs"
+    "gate:session": "node gate/run.mjs",
+    "lane:phone": "bash scripts/lane-phone.sh",
+    "install:maestro": "bash scripts/install_maestro.sh"
   },
   "dependencies": {
     "@react-native-community/netinfo": "^12.0.1",

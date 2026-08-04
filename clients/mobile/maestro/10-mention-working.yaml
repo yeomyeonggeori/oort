@@ -1,0 +1,107 @@
+appId: app.momo.ios
+name: 10-mention-working
+# No `env:` block — see the note at the top of 00-login.yaml.
+---
+# 10-mention-working — 멘션 전송 → 「작업 중」 → 응답 도착.
+#
+# The assertion this flow exists for is the MIDDLE one. That a mention
+# eventually produces a reply is already covered by REST-level verifiers; what
+# no server-side test can see is whether the person holding the phone is ever
+# told the agent picked the work up. #839's rule is that a turn in flight has to
+# be visible as one, so the flow asserts the working line WHILE the turn is
+# open, not that it appeared at some point in a log.
+#
+# That is only observable because the mock is asked to be slow: the message
+# body carries `MAESTRO SLOW`, which makes scripts/mock_hermes.py sleep between
+# SSE events for THIS request only. At the default 0.05s the whole turn is over
+# in about two tenths of a second and the indicator is gone before Maestro can
+# look at it — the flow would then be asserting nothing and passing.
+#
+# `MAESTRO TEXT` suppresses the mock's tool call so this turn ends in a durable
+# channel message. Without it the turn stops at an approval pause, which is
+# 30-approval's subject, not this one's.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+
+# The first visit to a channel puts the long-press coach mark directly above the
+# composer, and it eats the tap that should focus the input — the flow then types
+# into nothing, sends nothing, and fails several steps later on a missing mention
+# list, which is not where the problem is.
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# The mention is made with the PICKER rather than by typing the handle out.
+# Typing `@kim-intern` as plain text produces the same `mention_member_ids` on
+# the server, so the cheaper path would prove the same thing about the backend
+# and nothing at all about the composer — and the picker is the part a person
+# actually touches.
+- tapOn:
+    id: "composer-input"
+- inputText: "@kim"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- assertVisible:
+    id: "mention-option"
+    text: ".*${AGENT_HANDLE}.*"
+- tapOn:
+    id: "mention-option"
+    index: 0
+
+- inputText: "MAESTRO TEXT MAESTRO SLOW phone lane working check"
+- tapOn:
+    id: "composer-send"
+
+# 작업 중 — asserted while the turn is open.
+#
+# Assertion ORDER matters here, and it is ordered by how fast each one decays.
+# The visible text goes first because it is the claim, and every assertion
+# Maestro runs costs a second or two of a window the mock is holding open on
+# purpose: the first draft asserted it third and it failed against a turn that
+# had already finished and cleared the bar — a green-looking indicator reported
+# as broken.
+- extendedWaitUntil:
+    visible:
+      id: "composer-working"
+    timeout: 60000
+# Regex, not the bare phrase: Maestro matches a text selector against the WHOLE
+# label, and this line reads "김인턴이 작업 중" plus a live elapsed clock. A bare
+# "작업 중" matches nothing and reads like the indicator is missing.
+- assertVisible: ".*작업 중.*"
+- assertVisible:
+    id: "composer-working-row-${AGENT_MEMBER_ID}"
+
+# …and then the turn actually lands. Asserting the reply text (not just "the
+# working line went away") separates "the agent answered" from "the indicator
+# is buggy and cleared itself".
+# Regex again, and for a different reason than the working line: a timeline row
+# is one accessibility element whose label is the whole row —
+# "김인턴, 16:47, 김인턴 mock reply: MOMO-004 SSE path verified." — so an exact
+# match on the message body alone never matches, no matter how right the body is.
+- extendedWaitUntil:
+    visible: ".*김인턴 mock reply: MOMO-004 SSE path verified.*"
+    timeout: 120000
+# `extendedWaitUntil: notVisible`, not `assertNotVisible`: the bar clears when
+# the run settles, which is a moment or two AFTER the message lands, so the
+# instantaneous form races it and fails on a turn that is finishing correctly.
+# Waiting for it also makes this a real assertion — the indicator has to go
+# away on its own, which a bar that renders unconditionally would never do.
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-working"
+    timeout: 60000

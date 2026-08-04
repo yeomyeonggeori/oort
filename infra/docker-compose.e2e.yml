@@ -66,12 +66,23 @@ services:
     labels: *momo-janitor-labels
     restart: "no"
     command: centrifugo --config=/centrifugo/centrifugo.json
+    # List form (not a mapping) so the last entry can be a bare PASS-THROUGH:
+    # compose omits a bare name entirely when the host has not exported it, and
+    # "omitted" is the only value that leaves infra/centrifugo.json in charge.
+    # `${VAR:-}` would export an EMPTY string, which Centrifugo reads as "the
+    # allow-list is empty" and every existing gate's websocket handshake dies.
     environment:
-      CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
-      CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY:-change-me-cent-api-key}
+      - CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY=${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
+      - CENTRIFUGO_HTTP_API_KEY=${CENT_API_KEY:-change-me-cent-api-key}
       # MOMO-300: subscribe proxy shared-secret header (must match the api
       # service's CENT_PROXY_SECRET below; unauthenticated callbacks are 401).
-      CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS: '{"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:-change-me-cent-proxy-secret}"}'
+      - CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS={"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:-change-me-cent-proxy-secret}"}
+      # MAESTRO-1: the phone lane's app connects to the api over a loopback host
+      # port, so React Native's WebSocket sends `Origin: http://127.0.0.1:<port>`
+      # — a value infra/centrifugo.json cannot contain, because the port is
+      # allocated per run (clients/mobile/README.md documents the rejection).
+      # The lane runner exports this; nothing else does.
+      - CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
     ports:
       - "${CENT_PORT:-8000}:8000"
     volumes:
@@ -93,6 +104,14 @@ services:
     restart: "no"
     working_dir: /workspace
     command: ["python3", "scripts/mock_hermes.py", "--host", "0.0.0.0", "--port", "8088"]
+    # Bare PASS-THROUGH entries: compose omits a name the host has not exported,
+    # so this block is inert for every existing verifier and mock_hermes.py falls
+    # back to its own defaults (scripts/mock_hermes.py:32, 51). MAESTRO-1's
+    # runner exports the first one to widen the 「작업 중」 window it asserts on.
+    environment:
+      - MOCK_HERMES_MAESTRO_SLOW_SECONDS
+      - MOCK_HERMES_EVENT_DELAY_SECONDS
+      - MOCK_HERMES_TOOL_CALLS
     ports:
       - "${HERMES_PORT:-8088}:8088"
     volumes:
