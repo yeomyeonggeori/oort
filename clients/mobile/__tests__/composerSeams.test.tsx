@@ -3,8 +3,9 @@ import {cleanup, fireEvent, render, screen} from '@testing-library/react-native'
 import React from 'react';
 import {Text} from 'react-native';
 
+import {quoteDraftFor, type QuoteDraft} from '@momo/core/features/timeline/quote';
+
 import {Composer} from '../src/features/conversation/Composer';
-import type {QuotePreview} from '../src/features/conversation/Quote';
 
 // =============================================================================
 // 컴포저가 새로 낸 두 개의 이음매 — 그리고 **한글이 아직 조합되는가**.
@@ -24,11 +25,22 @@ import type {QuotePreview} from '../src/features/conversation/Quote';
 
 const EMPTY = makeDirectory([]);
 
-const QUOTE: QuotePreview = {
-  authorLabel: '김인턴',
-  body: '배포 로그 확인했습니다',
-  deleted: false,
-};
+const QUOTE: QuoteDraft = (() => {
+  const draft = quoteDraftFor({
+    id: 'orig-1',
+    channelId: 'ch',
+    seq: 4,
+    hlcTs: 4,
+    hlcCount: 0,
+    authorMemberId: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
+    type: 'text',
+    body: '배포 로그 확인했습니다',
+    state: 'sent',
+    createdAtMs: 1_700_000_000_000,
+  });
+  if (draft === null) throw new Error('fixture must be quotable');
+  return draft;
+})();
 
 /** 부모가 신호를 실제로 받았는지 세는 자리. */
 function TypingTicks({value}: {value: number}): React.JSX.Element {

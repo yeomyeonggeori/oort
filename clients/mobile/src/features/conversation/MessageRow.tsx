@@ -20,6 +20,8 @@ import {
 } from '@momo/core/features/timeline/rowModel';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
+import {canQuoteMessage} from '@momo/core/features/timeline/quote';
+import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
   canDeleteMessage,
   canEditMessage,
@@ -40,11 +42,7 @@ import {Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-nat
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
-import {
-  QuoteBlock,
-  quoteAccessibilityPhrase,
-  type QuotePreview,
-} from './Quote';
+import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
 // =============================================================================
@@ -623,7 +621,7 @@ export interface MessageRowProps {
    * that fetched its own quote would turn one scroll into a request storm,
    * hardest exactly when the conversation is busy.
    */
-  quote?: QuotePreview | null;
+  quote?: QuoteBlockModel | null;
   /**
    * The quoted original is inside the loaded range, so the block may be a door.
    *
@@ -672,13 +670,17 @@ function MessageRowInner({
   // belongs beside the message it is about (B8 + B11).
   const [rowError, setRowError] = useState<string | null>(null);
 
-  // The four answers come from the core, which is also where the server's rules
+  // The five answers come from the core, which is also where the server's rules
   // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
   // and a reply is never offered a reply of its own (momo threads are one level).
   const available = useMemo<MessageActionAvailability>(
     () => ({
       reply:
         actions?.onOpenThread !== undefined && canReplyToMessage(message),
+      // 인용은 답글과 **다른 축**이다(core `model.ts`): 이미 답글인 행은 답글을
+      // 더 달 수 없지만 인용은 할 수 있다. 두 답을 하나로 접으면 ADR-0148 이
+      // 나눈 두 장치가 UI 에서 다시 합쳐진다.
+      quote: actions?.onQuote !== undefined && canQuoteMessage(message),
       react: actions !== undefined && canReactToMessage(message),
       edit: actions !== undefined && canEditMessage(message, actions.myMemberId),
       delete:
@@ -686,17 +688,7 @@ function MessageRowInner({
     }),
     [actions, message],
   );
-  // 인용은 `MessageActionAvailability` 에 없다 — 그 타입은 코어의 것이고, 인용
-  // 가능 여부의 정본은 코어가 든다. 이 행이 보는 것은 **핸들러가 왔는가**뿐이고,
-  // 핸들러를 줄지 말지는 코어의 답을 읽는 화면이 정한다(`available.reply` 도
-  // `onOpenThread` 유무를 함께 보는 것과 같은 모양이다).
-  //
-  // 묘비를 뺀 것은 새 규칙이 아니라 이 파일이 이미 지키는 규칙이다: 묘비는
-  // 메시지에 대한 서술이지 메시지가 아니므로 가리킬 것이 없다. 서버도 같은 답을
-  // 준다(openapi: "A quote target must be undeleted").
-  const canQuote = actions?.onQuote !== undefined && !deleted;
-  const actionable =
-    actions !== undefined && (hasAnyAction(available) || canQuote);
+  const actionable = actions !== undefined && hasAnyAction(available);
 
   const openSheet = useCallback(() => {
     setRowError(null);
@@ -854,7 +846,10 @@ function MessageRowInner({
                   ).name
                 }님에게 답글`
             : null,
-        quoted: quote && !deleted ? quoteAccessibilityPhrase(quote) : null,
+        quoted:
+          quote && !deleted
+            ? quoteAccessibilityPhrase(quote, directory)
+            : null,
       })}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
@@ -909,7 +904,8 @@ function MessageRowInner({
             묘비에 대한 사실이 아니다. */}
         {quote && !deleted ? (
           <QuoteBlock
-            quote={quote}
+            block={quote}
+            directory={directory}
             onJump={
               quoteReachable && actions?.onJumpToQuoted
                 ? () => {
@@ -1070,7 +1066,7 @@ function MessageRowInner({
             actions.onOpenThread?.(message);
           }}
           onQuote={
-            canQuote
+            available.quote
               ? () => {
                   setSheetOpen(false);
                   actions.onQuote?.(message);
@@ -1218,18 +1214,26 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
  * 압도적으로 싸다.
  */
 function sameQuote(
-  a: QuotePreview | null | undefined,
-  b: QuotePreview | null | undefined,
+  a: QuoteBlockModel | null | undefined,
+  b: QuoteBlockModel | null | undefined,
 ): boolean {
   if (a === b) return true;
   // `sameRollup` 과 달리 `null` 과 `undefined` 는 여기서 같은 뜻이다 — 둘 다
   // 「이 행은 아무것도 인용하지 않는다」이고, 구별할 세 번째 상태가 없다.
   if (a == null || b == null) return a == null && b == null;
+  // 갈래가 바뀐 것은 언제나 보여야 하는 변화다: 못 푼 인용이 풀리는 것도,
+  // 원본이 지워지는 것도 여기로 온다.
+  if (a.kind !== b.kind) return false;
+  if (a.targetId !== b.targetId) return false;
+  if (a.kind === 'unresolved' || b.kind === 'unresolved') return true;
+  if (a.authorMemberId !== b.authorMemberId) return false;
+  if (a.kind !== 'ready' || b.kind !== 'ready') return true;
   return (
-    a.authorLabel === b.authorLabel &&
-    a.body === b.body &&
-    a.deleted === b.deleted &&
-    a.quotesAnother === b.quotesAnother
+    a.truncated === b.truncated &&
+    a.quotesAnother === b.quotesAnother &&
+    a.edited === b.edited &&
+    a.lines.length === b.lines.length &&
+    a.lines.every((line, index) => line === b.lines[index])
   );
 }
 
@@ -1383,11 +1387,21 @@ export function PendingRow({
   pending,
   startsGroup,
   directory,
+  quote,
   onResend,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
   directory: Directory;
+  /**
+   * 이 전송이 인용을 걸고 나갔다면 그 블록 (ADR-0148).
+   *
+   * 메아리가 자기 인용을 **먼저** 그려야 한다. 없으면 낙관적 행에는 인용이 없다가
+   * seq 가 도착하는 순간 블록이 자라나고, 읽던 사람 눈 밑에서 본문이 밀린다 —
+   * 이 파일이 `bodyPending` 에서 이미 한 번 고른 규율이다(서버 사본이 이 행을
+   * 대체할 때 글이 다시 흐르면 안 된다).
+   */
+  quote?: QuoteBlockModel | null;
   onResend?: (clientMsgId: string) => void;
 }): React.JSX.Element {
   const failed = pending.status === 'failed';
@@ -1402,6 +1416,7 @@ export function PendingRow({
           atMs={pending.createdAtMs}
         />
       ) : null}
+      {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
       {/* Same body style as a confirmed row, dimmed: the text must not re-flow
           when the server's copy replaces this one. */}
       <Text style={[styles.body, styles.bodyPending]} selectable>

@@ -1,4 +1,11 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
+import {
+  QUOTE_ACTION_LABEL,
+  QUOTE_DELETED_TEXT,
+  QUOTE_NESTED_MARK,
+  quoteDraftFor,
+  type QuoteBlock as QuoteBlockModel,
+} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
@@ -10,9 +17,7 @@ import {
 import {
   QuoteBlock,
   QuoteDraftBar,
-  QUOTE_PREVIEW_LINES,
   quoteAccessibilityPhrase,
-  type QuotePreview,
 } from '../src/features/conversation/Quote';
 
 // =============================================================================
@@ -25,127 +30,16 @@ import {
 // 그래서 이 파일이 묻는 것은 「인용이 그려지는가」가 아니라:
 //
 //   1. 지워진 원본을 **지워졌다고 말하는가** (규칙 3 — 사본으로 우회하지 않는다)
-//   2. 인용의 인용을 **펼치지 않는가** (규칙 4 — 계단을 만들지 않는다)
-//   3. 갈 곳이 없을 때 **문을 그리지 않는가** (없는 방으로 가는 문 금지)
-//   4. 인용을 걸어 놓고 **나올 길이 있는가** (ADR 미결 3 · 성재의 "나오는 길")
+//   2. **아직 못 푼 인용을 삭제로 부르지 않는가** ← 가장 위험한 자리다
+//   3. 인용의 인용을 **펼치지 않는가** (규칙 4 — 계단을 만들지 않는다)
+//   4. 갈 곳이 없을 때 **문을 그리지 않는가**
+//   5. 낱말과 자름을 **폰이 지어내지 않는가** (코어가 정본)
 //
-// 코어 바인딩(`Message.replyTo`)은 B3W 가 랜딩한다. 이 파일은 그 값이 무엇이든
-// **화면이 지킬 약속**을 먼저 못박는다 — 바인딩이 붙을 때 이 단정들이 그대로
-// 서 있어야 한다.
+// 2번은 실시간 경로에서만 나타난다: `message.new` 프레임에는 `reply_to` 가 없고
+// (본문을 실으면 그것이 곧 금지된 스냅샷이다) `reply_to_id` 만 온다. 코어의
+// `resolveQuote` 가 화면에 있는 행에서 못 찾으면 `unresolved` 를 돌려주는데, 그
+// 갈래를 `deleted` 로 접으면 **멀쩡한 메시지를 지워졌다고 말하는 화면**이 된다.
 // =============================================================================
-
-function quote(over: Partial<QuotePreview> = {}): QuotePreview {
-  return {authorLabel: '김인턴', body: '배포 로그 확인했습니다', deleted: false, ...over};
-}
-
-afterEach(cleanup);
-
-describe('인용 블록', () => {
-  it('지워진 원본을 「삭제된 메시지」로 말하고, 본문을 되살리지 않는다', () => {
-    // 규칙 3 의 핵심: 스냅샷으로 굳히면 지운 사람의 의사를 우회하는 사본이 된다.
-    // 그러므로 `deleted` 가 서면 `body` 가 함께 와도 그것을 그리면 안 된다.
-    render(<QuoteBlock quote={quote({deleted: true, body: '지워진 원문'})} />);
-    expect(screen.getByTestId('quote-tombstone')).toBeTruthy();
-    expect(screen.queryByText('지워진 원문')).toBeNull();
-    expect(screen.queryByTestId('quote-body')).toBeNull();
-  });
-
-  it('지워진 원본에는 문을 그리지 않는다 — onJump 가 있어도', () => {
-    const onJump = jest.fn();
-    render(<QuoteBlock quote={quote({deleted: true})} onJump={onJump} />);
-    const block = screen.getByTestId('quote-block');
-    // 묘비로 이동하는 것은 아무 데도 이동하지 않는 것이다. 눌리는 것처럼 보이면
-    // 안 되고(역할 없음), 눌러도 아무 일이 없어야 한다.
-    expect(block.props.accessibilityRole).toBeUndefined();
-    fireEvent.press(block);
-    expect(onJump).not.toHaveBeenCalled();
-  });
-
-  it('원본이 이 화면에 로드돼 있지 않으면 문장이다', () => {
-    // 없는 방으로 가는 문은 방이 저기 있다고 말하는 문장보다 나쁘다.
-    render(<QuoteBlock quote={quote()} />);
-    expect(screen.getByTestId('quote-block').props.accessibilityRole).toBeUndefined();
-  });
-
-  it('원본이 로드돼 있으면 그리로 가는 버튼이다', () => {
-    const onJump = jest.fn();
-    render(<QuoteBlock quote={quote()} onJump={onJump} />);
-    const block = screen.getByTestId('quote-block');
-    expect(block.props.accessibilityRole).toBe('button');
-    fireEvent.press(block);
-    expect(onJump).toHaveBeenCalledTimes(1);
-  });
-
-  it('인용의 인용은 표시만 하고 펼치지 않는다', () => {
-    render(<QuoteBlock quote={quote({quotesAnother: true})} />);
-    expect(screen.getByTestId('quote-nested')).toBeTruthy();
-    // 한 겹뿐이다. 블록 안에 또 다른 블록이 서면 계단이 시작된다.
-    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
-  });
-
-  it('긴 원본은 잘리고, 그 임계는 이 파일이 아는 값이다', () => {
-    render(
-      <QuoteBlock
-        quote={quote({body: '한 줄\n두 줄\n세 줄\n네 줄\n다섯 줄'})}
-      />,
-    );
-    // 자르는 것은 `numberOfLines` 이지 문자열 절단이 아니다 — 문자열을 자르면
-    // 접근성 트리에도 잘린 본문이 남고, 그것은 읽어 주는 쪽에 거짓말이 된다.
-    expect(screen.getByTestId('quote-body').props.numberOfLines).toBe(
-      QUOTE_PREVIEW_LINES,
-    );
-    expect(QUOTE_PREVIEW_LINES).toBeLessThan(5);
-  });
-
-  it('본문이 없는 원본을 빈 칸으로 두지 않는다', () => {
-    render(<QuoteBlock quote={quote({body: '   '})} />);
-    expect(screen.getByTestId('quote-body').props.children).toBe(
-      '내용 없는 메시지',
-    );
-  });
-
-  it('VoiceOver 문장은 「인용」이라고 말하고 본문을 들고 간다', () => {
-    expect(quoteAccessibilityPhrase(quote())).toBe(
-      '김인턴 인용, 배포 로그 확인했습니다',
-    );
-    expect(quoteAccessibilityPhrase(quote({deleted: true}))).toBe(
-      '김인턴 인용, 삭제된 메시지',
-    );
-    // 「답글」이라는 낱말은 여기 오면 안 된다. 그것은 스레드의 것이고, 두 장치를
-    // 같은 말로 부르는 순간 어휘 경계가 무너진다.
-    expect(quoteAccessibilityPhrase(quote())).not.toContain('답글');
-  });
-});
-
-describe('컴포저의 인용 초안', () => {
-  it('나오는 길이 있다 — 44pt 를 깔고 앉은 취소', () => {
-    const onCancel = jest.fn();
-    render(<QuoteDraftBar quote={quote()} onCancel={onCancel} />);
-    const cancel = screen.getByTestId('quote-draft-cancel');
-    const style = Array.isArray(cancel.props.style)
-      ? Object.assign({}, ...cancel.props.style.filter(Boolean))
-      : cancel.props.style;
-    expect(style.minHeight).toBeGreaterThanOrEqual(44);
-    fireEvent.press(cancel);
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('한 줄이다 — 키보드가 올라온 폰에서 입력창을 밀어내지 않는다', () => {
-    render(<QuoteDraftBar quote={quote({body: '한 줄\n두 줄\n세 줄'})} onCancel={() => {}} />);
-    expect(screen.getByTestId('quote-draft-body').props.numberOfLines).toBe(1);
-  });
-
-  it('인용해 둔 원본이 그 사이 지워지면 초안도 그렇게 말한다', () => {
-    render(<QuoteDraftBar quote={quote({deleted: true})} onCancel={() => {}} />);
-    expect(screen.getByTestId('quote-draft-body').props.children).toBe(
-      '삭제된 메시지',
-    );
-  });
-});
-
-// -----------------------------------------------------------------------------
-// 행 위에서 — 스레드와 **함께 서도** 구별되는가
-// -----------------------------------------------------------------------------
 
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
@@ -198,14 +92,192 @@ function actions(over: Partial<MessageRowActions> = {}): MessageRowActions {
   };
 }
 
+/** 코어가 만드는 블록만 쓴다 — 손으로 지은 블록은 코어가 안 만드는 모양일 수 있다. */
+function readyBlock(over: Partial<Message> = {}): QuoteBlockModel {
+  const draft = quoteDraftFor(
+    message({id: 'orig-1', seq: 4, body: '배포 로그 확인했습니다', ...over}),
+  );
+  if (draft === null) throw new Error('fixture must be quotable');
+  return draft.block;
+}
+
+const DELETED_BLOCK: QuoteBlockModel = {
+  kind: 'deleted',
+  targetId: 'orig-1',
+  targetSeq: 4,
+  authorMemberId: OTHER,
+};
+
+const UNRESOLVED_BLOCK: QuoteBlockModel = {
+  kind: 'unresolved',
+  targetId: 'orig-1',
+  targetSeq: null,
+};
+
+afterEach(cleanup);
+
+describe('인용 블록', () => {
+  it('지워진 원본을 「삭제된 메시지」로 말한다 — 코어의 낱말로', () => {
+    render(<QuoteBlock block={DELETED_BLOCK} directory={DIRECTORY} />);
+    expect(screen.getByTestId('quote-tombstone').props.children).toBe(
+      QUOTE_DELETED_TEXT,
+    );
+    expect(screen.queryByTestId('quote-body')).toBeNull();
+  });
+
+  it('아직 못 푼 인용을 삭제라고 부르지 않는다', () => {
+    // 실시간으로 도착한 인용 답글의 자리. 「인용했다」는 참이므로 지우지 않고,
+    // 「무엇을」은 모르므로 말하지 않는다. 이 둘을 접으면 화면이 거짓말한다.
+    render(<QuoteBlock block={UNRESOLVED_BLOCK} directory={DIRECTORY} />);
+    expect(screen.getByTestId('quote-unresolved')).toBeTruthy();
+    expect(screen.queryByTestId('quote-tombstone')).toBeNull();
+    expect(screen.queryByText(QUOTE_DELETED_TEXT)).toBeNull();
+  });
+
+  it('못 푼 인용에는 갈 곳이 없다 — onJump 가 있어도', () => {
+    const onJump = jest.fn();
+    render(
+      <QuoteBlock
+        block={UNRESOLVED_BLOCK}
+        directory={DIRECTORY}
+        onJump={onJump}
+      />,
+    );
+    const block = screen.getByTestId('quote-block');
+    expect(block.props.accessibilityRole).toBeUndefined();
+    fireEvent.press(block);
+    expect(onJump).not.toHaveBeenCalled();
+  });
+
+  it('지워진 원본에는 갈 수 있다 — 묘비는 그 자리에 남아 있다', () => {
+    // 삭제와 미해결의 갈림이 여기서도 갈린다: 지워진 메시지는 **그 자리에**
+    // 묘비로 남으므로 이동할 곳이 있고, 못 푼 것은 어디 있는지조차 모른다.
+    const onJump = jest.fn();
+    render(
+      <QuoteBlock block={DELETED_BLOCK} directory={DIRECTORY} onJump={onJump} />,
+    );
+    fireEvent.press(screen.getByTestId('quote-block'));
+    expect(onJump).toHaveBeenCalledTimes(1);
+  });
+
+  it('원본이 로드돼 있지 않으면 문장이다', () => {
+    render(<QuoteBlock block={readyBlock()} directory={DIRECTORY} />);
+    expect(
+      screen.getByTestId('quote-block').props.accessibilityRole,
+    ).toBeUndefined();
+  });
+
+  it('인용의 인용은 코어의 표시만 남기고 펼치지 않는다', () => {
+    render(
+      <QuoteBlock
+        block={readyBlock({replyToId: 'deeper-1'})}
+        directory={DIRECTORY}
+      />,
+    );
+    expect(screen.getByTestId('quote-nested').props.children).toBe(
+      QUOTE_NESTED_MARK,
+    );
+    expect(screen.getAllByTestId('quote-block')).toHaveLength(1);
+  });
+
+  it('원본이 수정됐으면 그렇게 말한다 — 인용은 참조라 따라 바뀐다', () => {
+    render(
+      <QuoteBlock block={readyBlock({state: 'edited'})} directory={DIRECTORY} />,
+    );
+    expect(screen.getByTestId('quote-edited')).toBeTruthy();
+  });
+
+  it('발췌는 코어가 자른 그대로 그린다 — 두 번째 자름을 만들지 않는다', () => {
+    const block = readyBlock({body: '한 줄\n두 줄\n세 줄\n네 줄'});
+    if (block.kind !== 'ready') throw new Error('ready');
+    render(<QuoteBlock block={block} directory={DIRECTORY} />);
+    expect(screen.getByTestId('quote-body').props.children).toEqual([
+      block.lines.join('\n'),
+      '…',
+    ]);
+    expect(block.truncated).toBe(true);
+    // 여기서 `numberOfLines` 를 또 걸면 잘림이 두 곳에서 결정되고, 화면과
+    // `truncated` 플래그가 어긋나는 순간이 생긴다.
+    expect(screen.getByTestId('quote-body').props.numberOfLines).toBeUndefined();
+  });
+
+  it('에이전트의 긴 출력은 종류 이름으로 대신한다', () => {
+    const block = readyBlock({type: 'tool_call', body: '{"huge":"payload"}'});
+    if (block.kind !== 'ready') throw new Error('ready');
+    render(<QuoteBlock block={block} directory={DIRECTORY} />);
+    expect(screen.getByTestId('quote-body').props.children).toEqual([
+      '도구 실행',
+      '',
+    ]);
+  });
+
+  it('VoiceOver 문장은 「인용」이라고 말하고 「답글」이라 하지 않는다', () => {
+    expect(quoteAccessibilityPhrase(readyBlock(), DIRECTORY)).toBe(
+      '김인턴 인용, 배포 로그 확인했습니다',
+    );
+    expect(quoteAccessibilityPhrase(DELETED_BLOCK, DIRECTORY)).toBe(
+      `김인턴 인용, ${QUOTE_DELETED_TEXT}`,
+    );
+    expect(quoteAccessibilityPhrase(readyBlock(), DIRECTORY)).not.toContain(
+      '답글',
+    );
+  });
+});
+
+describe('컴포저의 인용 초안', () => {
+  it('나오는 길이 있다 — 44pt 를 깔고 앉은 취소', () => {
+    const onCancel = jest.fn();
+    render(
+      <QuoteDraftBar
+        block={readyBlock()}
+        directory={DIRECTORY}
+        onCancel={onCancel}
+      />,
+    );
+    const cancel = screen.getByTestId('quote-draft-cancel');
+    const style = Array.isArray(cancel.props.style)
+      ? Object.assign({}, ...cancel.props.style.filter(Boolean))
+      : cancel.props.style;
+    expect(style.minHeight).toBeGreaterThanOrEqual(44);
+    fireEvent.press(cancel);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('한 줄이다 — 키보드가 올라온 폰에서 입력창을 밀어내지 않는다', () => {
+    render(
+      <QuoteDraftBar
+        block={readyBlock({body: '한 줄\n두 줄\n세 줄'})}
+        directory={DIRECTORY}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('quote-draft-body').props.numberOfLines).toBe(1);
+  });
+
+  it('인용해 둔 원본이 그 사이 지워지면 초안도 그렇게 말한다', () => {
+    render(
+      <QuoteDraftBar
+        block={DELETED_BLOCK}
+        directory={DIRECTORY}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('quote-draft-body').props.children).toBe(
+      QUOTE_DELETED_TEXT,
+    );
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 행 위에서 — 스레드와 **함께 서도** 구별되는가
+// -----------------------------------------------------------------------------
+
 describe('행 위의 인용', () => {
   it('본문 위에 그려지고, 아무것도 조회하지 않는다', () => {
     // 재조회 금지가 이 배치의 하드 규칙이다: 서버가 페이지에 원문을 동봉하므로
     // (message.rs LEFT JOIN) 행이 따로 물어볼 이유가 없고, 물어보기 시작하면
-    // 스크롤 한 번이 요청 폭풍이 된다. 이 클라이언트에서 그것을 셀 수 있는 자리는
-    // 전역 `fetch` 하나뿐이다 — `src/` 안에서 fetch 를 직접 부르는 것은
-    // `projectShape.test.ts` 가 이미 금지하고 있으므로, 여기서 0 이면 코어를
-    // 경유한 조회도 없다.
+    // 스크롤 한 번이 요청 폭풍이 된다. `projectShape.test.ts` 가 `src/` 안의
+    // 직접 fetch 를 이미 금지하므로, 여기서 0 이면 코어를 경유한 조회도 없다.
     const fetchSpy = jest.spyOn(global, 'fetch' as never);
     render(
       <MessageRow
@@ -214,13 +286,14 @@ describe('행 위의 인용', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        quote={quote()}
+        quote={readyBlock()}
       />,
     );
     expect(screen.getByTestId('quote-block')).toBeTruthy();
-    expect(screen.getByTestId('quote-body').props.children).toBe(
+    expect(screen.getByTestId('quote-body').props.children).toEqual([
       '배포 로그 확인했습니다',
-    );
+      '',
+    ]);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -236,13 +309,11 @@ describe('행 위의 인용', () => {
         chips={[]}
         nowMs={BASE_MS}
         replyParent={message({id: 'root-1', seq: 1, body: '루트'})}
-        quote={quote()}
+        quote={readyBlock()}
       />,
     );
-    const marker = screen.getByTestId('reply-marker');
-    const block = screen.getByTestId('quote-block');
-    expect(marker).toBeTruthy();
-    expect(block).toBeTruthy();
+    expect(screen.getByTestId('reply-marker')).toBeTruthy();
+    expect(screen.getByTestId('quote-block')).toBeTruthy();
     // 표식은 「답글」이라 하고 블록은 그러지 않는다. 둘이 같은 낱말을 쓰기
     // 시작하면 화면에는 두 장치가 있지만 사람에게는 하나만 있다.
     expect(screen.getByText(/답글$/)).toBeTruthy();
@@ -257,7 +328,7 @@ describe('행 위의 인용', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        quote={quote()}
+        quote={readyBlock()}
       />,
     );
     expect(screen.getByTestId('tombstone')).toBeTruthy();
@@ -273,7 +344,7 @@ describe('행 위의 인용', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        quote={quote()}
+        quote={readyBlock()}
         quoteReachable={false}
         actions={actions({onJumpToQuoted})}
       />,
@@ -292,7 +363,7 @@ describe('행 위의 인용', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        quote={quote()}
+        quote={readyBlock()}
         quoteReachable
         actions={actions({onJumpToQuoted})}
       />,
@@ -310,7 +381,7 @@ describe('행 위의 인용', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        quote={quote()}
+        quote={readyBlock()}
       />,
     );
     const label: string = screen.getByTestId('message-row').props
@@ -343,18 +414,28 @@ describe('인용 진입 — 액션 시트', () => {
     expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
   }
 
-  it('핸들러가 오면 「인용해서 답하기」가 서고, 답글과 나란히 있다', () => {
+  it('낱말은 코어의 것이고, 답글과 나란히 선다', () => {
     const onQuote = jest.fn();
     const onOpenThread = jest.fn();
     openSheet({onQuote, onOpenThread});
     expect(screen.getByTestId('sheet-reply')).toBeTruthy();
     const quoteRow = screen.getByTestId('sheet-quote');
-    // 두 낱말이 **어디로 가는지**까지 말해야 폰에서 구별된다.
-    expect(quoteRow.props.accessibilityLabel).toBe('인용해서 답하기');
+    expect(quoteRow.props.accessibilityLabel).toBe(QUOTE_ACTION_LABEL);
     fireEvent.press(quoteRow);
     expect(onQuote).toHaveBeenCalledTimes(1);
     // 인용은 스레드를 열지 않는다. 여기서 새면 두 장치가 하나가 된다.
     expect(onOpenThread).not.toHaveBeenCalled();
+  });
+
+  it('이미 답글인 행도 인용할 수 있다 — 두 축은 독립이다', () => {
+    // 코어 `model.ts` 가 이 문장을 적어 두었다. 답글이 불가능한 행에서 인용까지
+    // 사라지면 ADR 이 나눈 두 장치가 UI 에서 다시 합쳐진 것이다.
+    openSheet(
+      {onQuote: jest.fn(), onOpenThread: () => {}},
+      message({rootId: 'root-1'}),
+    );
+    expect(screen.queryByTestId('sheet-reply')).toBeNull();
+    expect(screen.getByTestId('sheet-quote')).toBeTruthy();
   });
 
   it('핸들러가 없으면 항목이 아예 없다', () => {
@@ -363,10 +444,9 @@ describe('인용 진입 — 액션 시트', () => {
   });
 
   it('묘비는 인용 진입을 제안하지 않는다 — 시트 자체가 열리지 않는다', () => {
-    // 인용만 걸어 두면 묘비도 길게 눌러 열리는 행이 되어 버린다. `canQuote` 가
-    // 묘비를 빼기 때문에 그 행에는 할 수 있는 일이 하나도 남지 않고, 그러면
-    // 시트는 아예 뜨지 않는다 — 눌러도 아무 일이 없는 제스처보다 제스처가 없는
-    // 편이 낫다는, 이 파일 계열이 이미 고른 규칙이다.
+    // `canQuoteMessage` 가 묘비를 뺀다(코어). 그 행에는 할 수 있는 일이 하나도
+    // 남지 않으므로 시트는 아예 뜨지 않는다 — 눌러도 아무 일이 없는 제스처보다
+    // 제스처가 없는 편이 낫다는, 이 파일 계열이 이미 고른 규칙이다.
     render(
       <MessageRow
         message={message({state: 'deleted', body: undefined})}

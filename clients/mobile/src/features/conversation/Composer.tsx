@@ -19,7 +19,8 @@ import {
   matchMembers,
   mentionQueryAt,
 } from './mentionQuery';
-import {QuoteDraftBar, type QuotePreview} from './Quote';
+import type {QuoteDraft} from '@momo/core/features/timeline/quote';
+import {QuoteDraftBar} from './Quote';
 
 // =============================================================================
 // The composer.
@@ -111,7 +112,7 @@ export function Composer({
   /**
    * 지금 인용을 걸고 쓰는 중이면 그 원문 (ADR-0148). `null`/`undefined` 면 없다.
    */
-  quote?: QuotePreview | null;
+  quote?: QuoteDraft | null;
   /** 인용을 무른다. 인용이 있는데 이것이 없으면 나가는 길이 없다. */
   onCancelQuote?: () => void;
   /**
@@ -270,7 +271,11 @@ export function Composer({
           쓰는 자리에 붙어 있어야 하고, 취소도 거기 있어야 한다 — 들어가는 길만
           있고 나오는 길이 없으면 안 된다(ADR-0148 미결 3). */}
       {quote && onCancelQuote ? (
-        <QuoteDraftBar quote={quote} onCancel={onCancelQuote} />
+        <QuoteDraftBar
+          block={quote.block}
+          directory={directory}
+          onCancel={onCancelQuote}
+        />
       ) : null}
 
       <View style={styles.bar}>

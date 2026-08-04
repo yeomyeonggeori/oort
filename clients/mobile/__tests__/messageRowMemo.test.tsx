@@ -81,7 +81,16 @@ const BASE: MessageRowProps = {
   actions: undefined,
   rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
   replyParent: undefined,
-  quote: {authorLabel: '김인턴', body: '배포 로그 확인했습니다', deleted: false},
+  quote: {
+    kind: 'ready',
+    targetId: 'orig-1',
+    targetSeq: 4,
+    authorMemberId: OTHER,
+    lines: ['배포 로그 확인했습니다'],
+    truncated: false,
+    quotesAnother: false,
+    edited: false,
+  },
   quoteReachable: false,
 };
 
@@ -113,7 +122,18 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   // 원본이 **수정되면** 인용도 따라 바뀐다(ADR-0148 규칙 3: 참조이지 사본이
   // 아니다). 그 변화는 새 페이지가 실어 오는 새 객체로 도착하므로, 값으로 보지
   // 않으면 행은 옛 본문을 그대로 들고 앉아 있게 된다.
-  quote: {quote: {authorLabel: '김인턴', body: '고쳐 쓴 원문', deleted: false}},
+  quote: {
+    quote: {
+      kind: 'ready',
+      targetId: 'orig-1',
+      targetSeq: 4,
+      authorMemberId: OTHER,
+      lines: ['고쳐 쓴 원문'],
+      truncated: false,
+      quotesAnother: false,
+      edited: true,
+    },
+  },
   quoteReachable: {quoteReachable: true},
 };
 
@@ -132,26 +152,38 @@ describe('memo 비교자는 모든 prop 을 본다', () => {
         chips: [{emoji: '👍', count: 1, mine: false}],
         rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
         quote: {
-          authorLabel: '김인턴',
-          body: '배포 로그 확인했습니다',
-          deleted: false,
+          kind: 'ready',
+          targetId: 'orig-1',
+          targetSeq: 4,
+          authorMemberId: OTHER,
+          lines: ['배포 로그 확인했습니다'],
+          truncated: false,
+          quotesAnother: false,
+          edited: false,
         },
       }),
     ).toBe(true);
   });
 
   it('인용이 지워지면 다르다 — 묘비 전환을 memo 가 가리면 안 된다', () => {
-    // 원본이 삭제되는 것은 화면에 반드시 보여야 하는 변화다. `deleted` 만 바뀌고
-    // 나머지 필드가 그대로일 수 있으므로, 필드를 하나라도 빠뜨린 비교자는 여기서
-    // 걸린다.
+    // 갈래가 바뀌는 것은 화면에 반드시 보여야 하는 변화다. 그리고 그 반대편도
+    // 마찬가지다: 못 푼 인용(`unresolved`)이 풀리는 순간을 memo 가 가리면, 원본이
+    // 스크롤로 로드된 뒤에도 「아직 못 불러왔다」가 남는다.
     expect(
       sameMessageRowProps(BASE, {
         ...BASE,
         quote: {
-          authorLabel: '김인턴',
-          body: '배포 로그 확인했습니다',
-          deleted: true,
+          kind: 'deleted',
+          targetId: 'orig-1',
+          targetSeq: 4,
+          authorMemberId: OTHER,
         },
+      }),
+    ).toBe(false);
+    expect(
+      sameMessageRowProps(BASE, {
+        ...BASE,
+        quote: {kind: 'unresolved', targetId: 'orig-1', targetSeq: null},
       }),
     ).toBe(false);
   });
