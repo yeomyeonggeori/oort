@@ -309,6 +309,11 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   const meta = credentialMeta(link);
   const isOAuthLink = kind === OAUTH_CREDENTIAL_KIND;
 
+  // 연결 헬스는 한 줄씩 붙는 목록이지 고정 슬롯이 아니다. U1 감사가 M-10(폰
+  // "연결 중..." 무한 표시)의 수리를 이 축으로 이관해 두었고, 그 항목은 결국
+  // 이 카드에 "실시간 레일" 한 줄로 들어온다. 그래서 행은 조건부 push로 쌓고
+  // 고정 배열로 쓰지 않는다 - 나중에 한 줄을 받는 데 구조 변경이 필요 없다.
+  // (이슈 1047 범위 아님. 여지만 두고 여기서 구현하지 않는다.)
   const statusRows: KeyValue[] = [
     { key: "등록 방식", value: credentialKindLabel(kind) },
     { key: "모드", value: choiceLabel(PROVIDER_MODES, link.mode) },
