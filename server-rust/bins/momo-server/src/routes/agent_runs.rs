@@ -54,8 +54,8 @@ use uuid::Uuid;
 use crate::dto::{AgentRunCancelResponse, AgentRunResponse, CreateAgentRunRequest};
 use crate::error::ApiError;
 use crate::routes::shared::{
-    agent_tenant_tx, audit_via_token_id, epoch_ms, path_uuid, require_human, run_response,
-    settle_db, workspace_scope, DbRejectable,
+    agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms, path_uuid,
+    require_human, run_response, settle_db, workspace_scope, DbRejectable,
 };
 use crate::AppState;
 
@@ -475,6 +475,21 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
                     "system_message_id": sent.message.id.to_string(),
                 }),
             ),
+    )
+    .await?;
+
+    // The rail hears the stop too (goal SRV-B3c). The system line above tells
+    // the ROOM; this tells the badge. Without it a stopped agent keeps showing
+    // 작업 중 until the client's own 90s idle TTL expires it — which is the exact
+    // shape of failure ADR-0132's 휴먼 정지권 exists to prevent: a person taps
+    // stop, the room is told, and the indicator keeps insisting it is working.
+    emit_terminal_agent_status(
+        conn,
+        workspace_id,
+        run.channel_id,
+        run.agent_member_id,
+        run_id,
+        momo_agent::RunStatus::Cancelled,
     )
     .await?;
 

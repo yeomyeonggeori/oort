@@ -474,6 +474,23 @@ async fn cancel_broadcasts(su: &PgPool, workspace: Uuid) -> Vec<Value> {
     .expect("read cancel broadcasts")
 }
 
+/// Terminal `agent.status` frames on the progress rail (goal SRV-B3c).
+///
+/// Read by `data.type` rather than by channel so the query cannot pass by
+/// accidentally matching some other frame that happens to name the run.
+async fn agent_status_frames(su: &PgPool, workspace: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'agent.status' \
+          ORDER BY id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("read agent.status broadcasts")
+}
+
 async fn audit_details(su: &PgPool, workspace: Uuid, action: &str) -> Vec<Value> {
     sqlx::query_scalar(
         "SELECT detail FROM audit_log \
@@ -618,6 +635,48 @@ async fn srv_c2_1_a_stop_ends_the_run_retires_its_job_and_says_so_in_the_room() 
     );
     assert_eq!(broadcasts[0]["data"]["type"], json!("message.new"));
 
+    // ---- the progress rail is told too (goal SRV-B3c) -----------------------
+    //
+    // The system line above tells the ROOM; this tells the BADGE. Before this
+    // goal nothing in this workspace ever published to `agent:`, so a stopped
+    // agent kept rendering 작업 중 until each client's own 90s idle TTL expired
+    // it — a stop that the room could read about while the indicator went on
+    // insisting the agent was working.
+    let rail = agent_status_frames(&su, tenant.workspace).await;
+    assert_eq!(rail.len(), 1, "one stop, one terminal frame: {rail:?}");
+    let frame = &rail[0];
+    assert_eq!(
+        frame["channel"],
+        json!(format!(
+            "agent:ws{}.{}.{}",
+            tenant.workspace.to_string().to_uppercase(),
+            tenant.channel.to_string().to_uppercase(),
+            agent.to_string().to_uppercase()
+        )),
+        "the three-segment name every client subscribes to, uppercased: {frame}"
+    );
+    assert_eq!(frame["data"]["v"], json!(1));
+    assert!(
+        frame["data"]["ts"].as_i64().is_some_and(|ts| ts > 0),
+        "macOS decodes ts as a required Int64: {frame}"
+    );
+    let body = &frame["data"]["payload"];
+    assert_eq!(body["run_id"], json!(run.to_string().to_uppercase()));
+    assert_eq!(
+        body["agent_member_id"],
+        json!(agent.to_string().to_uppercase())
+    );
+    assert_eq!(
+        body["channel_id"],
+        json!(tenant.channel.to_string().to_uppercase())
+    );
+    assert_eq!(
+        (body["phase"].clone(), body["run_status"].clone()),
+        (json!("error"), json!("cancelled")),
+        "`isRunOver` reads EITHER axis, and the reason must survive on the second \
+         one — a stopped run is not a failed one: {frame}"
+    );
+
     // ---- the audit ----------------------------------------------------------
     let details = audit_details(&su, tenant.workspace, "agent.run.cancelled").await;
     assert_eq!(details.len(), 1, "one stop, one audit row: {details:?}");
@@ -696,6 +755,11 @@ async fn srv_c2_2_a_repeat_stop_writes_nothing() {
         cancel_broadcasts(&su, tenant.workspace).await.len(),
         1,
         "and must not re-publish it either"
+    );
+    assert_eq!(
+        agent_status_frames(&su, tenant.workspace).await.len(),
+        1,
+        "nor publish a second terminal frame — one run ends exactly once"
     );
     assert_eq!(
         audit_details(&su, tenant.workspace, "agent.run.cancelled")

@@ -166,7 +166,7 @@ async fn settle_expired_in_tx(
 
     // THE line this whole module exists for: the run leaves `RunStatus::LIVE`,
     // so `live_run_count_in_tx` stops counting it and the agent can work again.
-    end_parked_run_in_tx(
+    let ended = end_parked_run_in_tx(
         &mut *conn,
         approval.run_id,
         RunStatus::TimedOut,
@@ -176,6 +176,32 @@ async fn settle_expired_in_tx(
         }),
     )
     .await?;
+
+    // …and the progress rail is told, so a badge parked on 승인 대기 clears when
+    // the deadline passes rather than sitting there until the client's own 120s
+    // zombie sweep notices (goal SRV-B3c). This sweep is the one expiry path no
+    // human action drives, which makes it the one where a stale badge could
+    // otherwise outlive the run by the widest margin.
+    if ended {
+        if let Some(frame) = momo_agent::terminal_agent_status_payload(
+            workspace_id,
+            approval.channel_id,
+            approval.requested_by,
+            approval.run_id,
+            RunStatus::TimedOut,
+            now.timestamp_millis(),
+        ) {
+            emit_outbox(
+                &mut *conn,
+                workspace_id,
+                OutboxKind::Broadcast,
+                "publish",
+                &frame,
+                Some(approval.channel_id),
+            )
+            .await?;
+        }
+    }
 
     // Tell the channel, through the message spine like everything else — the
     // person who asked deserves to see that the request lapsed rather than to

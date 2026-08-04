@@ -130,6 +130,7 @@ pub mod mention;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
+pub mod status;
 pub mod tools;
 pub mod usage;
 
@@ -194,6 +195,10 @@ pub use run::{
     lock_run_for_cancel_in_tx, mark_run_started_in_tx, park_run_for_approval_in_tx,
     requeue_run_from_approval_in_tx, AgentRunRow, CancellableRun, CompletionStatusError,
     CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus, RunTrigger,
+};
+pub use status::{
+    agent_status_channel, terminal_agent_status_payload, terminal_phase, AgentPhase,
+    AGENT_STATUS_EVENT_TYPE, AGENT_STATUS_EVENT_VERSION,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

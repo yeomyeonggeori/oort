@@ -88,8 +88,8 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    agent_tenant_tx, audit_via_token_id, epoch_ms, path_uuid, settle_db, workspace_scope,
-    DbRejectable,
+    agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms, path_uuid,
+    settle_db, workspace_scope, DbRejectable,
 };
 use crate::AppState;
 
@@ -535,6 +535,21 @@ async fn reject_run(
         return Ok(());
     }
 
+    // The rail hears it (goal SRV-B3c). A parked run renders as 승인 대기, not
+    // 작업 중 — but it is still an entry in the client's run table, and a
+    // rejection that published nothing would leave it there until the 120s
+    // zombie sweep. `ended` guards this: the frame follows the row, so a
+    // decision that transitioned nothing announces nothing.
+    emit_terminal_agent_status(
+        conn,
+        approval.workspace_id,
+        approval.channel_id,
+        approval.requested_by,
+        approval.run_id,
+        RunStatus::Cancelled,
+    )
+    .await?;
+
     let call_id = approval
         .payload
         .get("tool_call")
@@ -644,11 +659,16 @@ async fn settle_expired(
 }
 
 /// The run half of an expiry, shared with the sweep's semantics.
+///
+/// The terminal frame (goal SRV-B3c) is emitted **here** rather than at the call
+/// site so that "the run ended" and "the rail was told" cannot come apart in one
+/// of the two expiry paths — this is the same reason the transition itself is a
+/// shared function instead of two copies of the same `UPDATE`.
 pub(crate) async fn expire_run(
     conn: &mut PgConnection,
     approval: &LockedApproval,
 ) -> Result<bool, momo_db::DbError> {
-    end_parked_run_in_tx(
+    let ended = end_parked_run_in_tx(
         conn,
         approval.run_id,
         RunStatus::TimedOut,
@@ -657,7 +677,19 @@ pub(crate) async fn expire_run(
             "approval_id": approval.id.to_string(),
         }),
     )
-    .await
+    .await?;
+    if ended {
+        emit_terminal_agent_status(
+            conn,
+            approval.workspace_id,
+            approval.channel_id,
+            approval.requested_by,
+            approval.run_id,
+            RunStatus::TimedOut,
+        )
+        .await?;
+    }
+    Ok(ended)
 }
 
 /// An expected refusal: a receipt shaped like a decision, carrying the HTTP

@@ -68,7 +68,9 @@ use crate::dto::{
     PendingJobsQuery,
 };
 use crate::error::ApiError;
-use crate::routes::shared::{agent_tenant_tx, epoch_ms, path_uuid, settle_db};
+use crate::routes::shared::{
+    agent_tenant_tx, emit_terminal_agent_status, epoch_ms, path_uuid, settle_db,
+};
 use crate::AppState;
 
 /// Swift `AgentGatewayEventRequest.maximumDetailBytes` / `maximumTextDeltaBytes`
@@ -489,6 +491,30 @@ pub async fn complete(
                     })
                 });
                 finish_run_in_tx(conn, run_id, succeeded, &output, error_json.as_ref()).await?;
+
+                // 3b. …and the rail is told the turn is over (goal SRV-B3c).
+                //
+                // Measured gap this closes: `agent:ws<WS>.<CH>.<AGENT>` had a
+                // subscriber (realtime.rs authorizes it, every client folds it)
+                // and NO producer anywhere in this workspace — so a run that
+                // succeeded simply went quiet and each client waited out its own
+                // idle TTL instead of being told. The frame is emitted in THIS
+                // transaction and after the final message's own broadcast, so a
+                // client can never learn the turn ended before it sees what the
+                // turn said.
+                emit_terminal_agent_status(
+                    conn,
+                    workspace_id,
+                    run.channel_id,
+                    run.agent_member_id,
+                    run_id,
+                    if succeeded {
+                        momo_agent::RunStatus::Succeeded
+                    } else {
+                        momo_agent::RunStatus::Failed
+                    },
+                )
+                .await?;
 
                 // 4. the job is done; `last_error` is NULL on success so an
                 //    operator reading the outbox sees why a job stopped.

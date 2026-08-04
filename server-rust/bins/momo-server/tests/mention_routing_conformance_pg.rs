@@ -612,6 +612,61 @@ async fn b52_1_a_mention_starts_a_run_the_worker_answers() {
 
     let runs = runs_for(&su, tenant.workspace).await;
     assert_eq!(runs[0].2, "succeeded", "the run closed on the answer");
+
+    // ---- 4b. …and the progress rail was TOLD it closed (goal SRV-B3c) -------
+    //
+    // The success case, on the path a default deployment actually takes
+    // (`AGENT_GATEWAY_MODE=worker`). Before this goal the run reached
+    // `succeeded` and the `agent:` namespace stayed silent — a subscription
+    // every client is authorized for and nothing in this workspace ever
+    // published to, so 작업 중 could only ever be cleared by a client-side
+    // timeout. That is the frame 「작업 패널」 needs and the one Swift's own
+    // projection folds away (`agentStatusProjection`: everything that is not
+    // `streaming`/`cancelled` becomes `("thinking","running")`).
+    let rail: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'agent.status' \
+          ORDER BY id",
+    )
+    .bind(tenant.workspace)
+    .fetch_all(&su)
+    .await
+    .expect("read agent.status broadcasts");
+    assert_eq!(
+        rail.len(),
+        1,
+        "one finished turn, one terminal frame: {rail:?}"
+    );
+    let frame = &rail[0];
+    assert_eq!(
+        frame["channel"],
+        json!(format!(
+            "agent:ws{}.{}.{}",
+            tenant.workspace.to_string().to_uppercase(),
+            tenant.channel.to_string().to_uppercase(),
+            agent.to_string().to_uppercase()
+        )),
+        "three uppercased segments — the name `centrifugoAgentChannelName` \
+         builds and the namespace regex accepts: {frame}"
+    );
+    assert_eq!(
+        (
+            frame["data"]["payload"]["phase"].clone(),
+            frame["data"]["payload"]["run_status"].clone()
+        ),
+        (json!("done"), json!("succeeded")),
+        "phase done + run_status succeeded — a success that ANNOUNCES it ended: {frame}"
+    );
+    assert_eq!(
+        frame["data"]["payload"]["run_id"],
+        json!(run_id.to_string().to_uppercase()),
+        "the frame names the run whose badge it clears"
+    );
+    assert!(
+        frame.get("version").is_none(),
+        "a status frame claims no place in the channel's seq: {frame}"
+    );
     let ledger: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE run_id = $1")
         .bind(run_id)
         .fetch_one(&su)
