@@ -58,6 +58,21 @@ import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../desig
 
 const UNKNOWN_MEMBER = '알 수 없는 멤버';
 
+/**
+ * 발췌가 비었을 때 할 말.
+ *
+ * 코어의 `normalizeLines` 는 빈 줄을 버리므로, 본문이 공백뿐인 메시지는 줄이
+ * 하나도 없는 `ready` 블록이 된다. 묘비가 **아니므로** 삭제라 말할 수 없고, 빈
+ * 칸으로 두면 블록이 이유 없이 자리만 차지한다. `MessageRow` 가 같은 경우에 이미
+ * 쓰는 낱말이다 — 같은 사실에 두 가지 말을 만들지 않는다.
+ */
+const EMPTY_BODY_TEXT = '내용 없는 메시지';
+
+/** 발췌 줄들을 한 덩이로. 비었으면 빈 칸 대신 그렇다고 말한다. */
+function excerptText(lines: readonly string[], separator: string): string {
+  return lines.length === 0 ? EMPTY_BODY_TEXT : lines.join(separator);
+}
+
 function authorLabel(directory: Directory, memberId: string | null): string {
   if (memberId === null) return UNKNOWN_MEMBER;
   return memberNameParts(directory, memberId, UNKNOWN_MEMBER).name;
@@ -124,8 +139,13 @@ export function QuoteBlock({
               <Text style={styles.quotedBody} testID="quote-body">
                 {/* 줄 수도 글자 수도 코어가 이미 잘라서 준다. 여기서 한 번 더
                     `numberOfLines` 를 걸면 잘림이 두 곳에서 결정되고, 화면과
-                    `truncated` 플래그가 어긋나는 순간이 생긴다. */}
-                {block.lines.join('\n')}
+                    `truncated` 플래그가 어긋나는 순간이 생긴다.
+
+                    줄이 하나도 없는 경우가 있다: 본문이 공백뿐인 메시지다(코어의
+                    `normalizeLines` 가 빈 줄을 버린다). 묘비가 **아니므로** 삭제라
+                    말할 수 없고, 빈 칸으로 두면 블록이 이유 없이 자리만 차지한다.
+                    행이 같은 경우에 이미 쓰는 낱말을 그대로 쓴다. */}
+                {excerptText(block.lines, '\n')}
                 {block.truncated ? '…' : ''}
               </Text>
             )}
@@ -171,7 +191,7 @@ export function quoteAccessibilityPhrase(
   if (block.kind === 'unresolved') return '인용, 원본을 아직 불러오지 않음';
   const who = authorLabel(directory, block.authorMemberId);
   if (block.kind === 'deleted') return `${who} 인용, ${QUOTE_DELETED_TEXT}`;
-  return `${who} 인용, ${block.lines.join(' ')}`;
+  return `${who} 인용, ${excerptText(block.lines, ' ')}`;
 }
 
 // -----------------------------------------------------------------------------
@@ -207,7 +227,7 @@ export function QuoteDraftBar({
       ? QUOTE_DELETED_TEXT
       : block.kind === 'unresolved'
       ? '원본을 아직 불러오지 않음'
-      : block.lines.join(' ');
+      : excerptText(block.lines, ' ');
   return (
     <View style={styles.draft} testID="quote-draft">
       <View style={styles.draftRule} />

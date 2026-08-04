@@ -201,6 +201,24 @@ describe('인용 블록', () => {
     expect(screen.getByTestId('quote-body').props.numberOfLines).toBeUndefined();
   });
 
+  it('본문이 공백뿐인 원본을 빈 칸으로 두지 않는다', () => {
+    // 코어의 `normalizeLines` 가 빈 줄을 버리므로 줄이 하나도 없는 `ready`
+    // 블록이 나온다. 묘비가 **아니므로** 삭제라 말할 수 없고, 빈 칸으로 두면
+    // 블록이 이유 없이 자리만 차지한다.
+    const block = readyBlock({body: '   \n\n  '});
+    if (block.kind !== 'ready') throw new Error('ready');
+    expect(block.lines).toHaveLength(0);
+    render(<QuoteBlock block={block} directory={DIRECTORY} />);
+    expect(screen.getByTestId('quote-body').props.children).toEqual([
+      '내용 없는 메시지',
+      '',
+    ]);
+    expect(screen.queryByTestId('quote-tombstone')).toBeNull();
+    expect(quoteAccessibilityPhrase(block, DIRECTORY)).toBe(
+      '김인턴 인용, 내용 없는 메시지',
+    );
+  });
+
   it('에이전트의 긴 출력은 종류 이름으로 대신한다', () => {
     const block = readyBlock({type: 'tool_call', body: '{"huge":"payload"}'});
     if (block.kind !== 'ready') throw new Error('ready');
