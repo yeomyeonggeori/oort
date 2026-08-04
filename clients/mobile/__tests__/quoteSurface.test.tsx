@@ -353,7 +353,9 @@ describe('행 위의 인용', () => {
     expect(screen.queryByTestId('quote-block')).toBeNull();
   });
 
-  it('원본이 로드된 범위 안에 있을 때만 눌린다', () => {
+  it('목적지를 모르는 인용에는 문이 없다', () => {
+    // `unresolved` 만 그렇다. 「어디 있는지 모른다」와 「아직 거기까지 안
+    // 걸어갔다」는 다른 사실이다.
     const onJumpToQuoted = jest.fn();
     render(
       <MessageRow
@@ -362,8 +364,7 @@ describe('행 위의 인용', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        quote={readyBlock()}
-        quoteReachable={false}
+        quote={UNRESOLVED_BLOCK}
         actions={actions({onJumpToQuoted})}
       />,
     );
@@ -371,7 +372,10 @@ describe('행 위의 인용', () => {
     expect(onJumpToQuoted).not.toHaveBeenCalled();
   });
 
-  it('로드돼 있으면 그 행을 들고 원본으로 보낸다', () => {
+  it('목적지를 알면 로드 여부와 무관하게 그 행을 들고 보낸다', () => {
+    // 로드된 범위 밖이어도 **방은 있다.** 목록이 「더 위쪽에 있어 아직
+    // 불러오지 않았습니다」라고 말할 수 있으므로, 여기서 누름을 삼키면 사람은
+    // 이유를 모른 채 막힌다.
     const onJumpToQuoted = jest.fn();
     const row = message();
     render(
@@ -382,7 +386,6 @@ describe('행 위의 인용', () => {
         chips={[]}
         nowMs={BASE_MS}
         quote={readyBlock()}
-        quoteReachable
         actions={actions({onJumpToQuoted})}
       />,
     );

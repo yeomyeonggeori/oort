@@ -944,11 +944,6 @@ function TimelineInner({
             markReplies ? parentOf(item.message, threads) : undefined
           }
           quote={resolveQuote(item.message, quoteLookup)}
-          // 문을 그릴지는 **목록**이 답한다. 행은 자기 밖을 모른다.
-          quoteReachable={
-            item.message.replyToId !== undefined &&
-            quoteLookup(item.message.replyToId) !== undefined
-          }
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {

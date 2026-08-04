@@ -622,18 +622,6 @@ export interface MessageRowProps {
    * hardest exactly when the conversation is busy.
    */
   quote?: QuoteBlockModel | null;
-  /**
-   * The quoted original is inside the loaded range, so the block may be a door.
-   *
-   * A boolean rather than a handler, because the handler itself belongs to
-   * `MessageRowActions` (`onJumpToQuoted`) where it keeps ONE identity for the
-   * whole list — a per-row closure here would break `React.memo` for every row
-   * on screen, which is the exact defect goal RN-P2a bought back.
-   *
-   * Whether the target is loaded is the LIST's answer, not this row's: only the
-   * surface holding the page knows what it has.
-   */
-  quoteReachable?: boolean;
 }
 
 function MessageRowInner({
@@ -648,7 +636,6 @@ function MessageRowInner({
   rollup: rollupOverride,
   replyParent,
   quote,
-  quoteReachable,
 }: MessageRowProps): React.JSX.Element {
   rowRenders += 1;
   const presentation = useMemo(() => rowPresentation(message), [message]);
@@ -906,8 +893,20 @@ function MessageRowInner({
           <QuoteBlock
             block={quote}
             directory={directory}
+            // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
+            // 범위 안에 있든 없든.
+            //
+            // 처음 판은 로드된 것만 눌리게 했고, 그것이 이 레포의 「없는 방으로
+            // 가는 문은 짓지 않는다」를 잘못 적용한 것이었다. 여기서 **방은
+            // 있다.** 아직 거기까지 안 걸어갔을 뿐이다. 그 경우에 아무 반응도 안
+            // 주면 사람은 이유를 모른 채 막히고, 목록은 「더 위쪽에 있어 아직
+            // 불러오지 않았습니다. 위로 올려 이어서 불러오세요」라고 말할 수
+            // 있었는데 말하지 못한다 — 검색 앵커가 이미 같은 말을 하는 자리다.
+            //
+            // 정말로 목적지를 모르는 경우(`unresolved`)에만 문이 없고, 그 판정은
+            // `QuoteBlock` 이 자기 갈래로 직접 한다.
             onJump={
-              quoteReachable && actions?.onJumpToQuoted
+              actions?.onJumpToQuoted
                 ? () => {
                     if (longPress.consumeTap()) return;
                     actions.onJumpToQuoted?.(message);
@@ -1201,7 +1200,6 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   rollup: true,
   replyParent: true,
   quote: true,
-  quoteReachable: true,
 };
 
 /**
@@ -1250,7 +1248,6 @@ export function sameMessageRowProps(
     a.onResend === b.onResend &&
     a.actions === b.actions &&
     a.replyParent === b.replyParent &&
-    a.quoteReachable === b.quoteReachable &&
     sameChips(a.chips, b.chips) &&
     sameRollup(a.rollup, b.rollup) &&
     sameQuote(a.quote, b.quote)

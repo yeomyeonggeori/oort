@@ -151,9 +151,8 @@ describe('라이브로 온 인용', () => {
     expect(screen.queryByTestId('quote-unresolved')).toBeNull();
   });
 
-  it('문을 그릴지는 목록이 답한다 — 원본이 로드된 범위 안에 있을 때만', () => {
-    // 행은 자기 밖을 모른다. 무엇이 로드돼 있는지는 페이지를 든 목록만 안다.
-    const withOriginal = timeline(
+  it('푼 인용은 문이고, 못 푼 인용은 문이 아니다', () => {
+    const resolved = timeline(
       [
         ORIGINAL,
         message({id: 'msg-2', seq: 5, replyToId: ORIGINAL_ID, body: '확인'}),
@@ -164,16 +163,47 @@ describe('라이브로 온 인용', () => {
     expect(screen.getByTestId('quote-block').props.accessibilityRole).toBe(
       'button',
     );
-    withOriginal.unmount();
+    resolved.unmount();
 
+    // 원본이 목록에 없으면 `unresolved` — 어디로 보낼지조차 모른다.
     timeline(
       [message({id: 'msg-2', seq: 5, replyToId: ORIGINAL_ID, body: '확인'})],
       [],
       ACTIONS,
     );
+    expect(screen.getByTestId('quote-unresolved')).toBeTruthy();
     expect(
       screen.getByTestId('quote-block').props.accessibilityRole,
     ).toBeUndefined();
+  });
+
+  it('서버가 푼 인용은 원본이 로드 밖이어도 문이다 — 목록이 이유를 말한다', () => {
+    // 이 자리가 이 변경의 요점이다. 히스토리 페이지는 원본이 창 위쪽에 있어도
+    // `replyTo` 를 실어 준다. 그때 누름을 삼키면 사람은 막힌 이유를 모르고,
+    // 목록은 「더 위쪽에 있어 아직 불러오지 않았습니다」를 말할 기회를 잃는다.
+    timeline(
+      [
+        message({
+          id: 'msg-2',
+          seq: 5,
+          body: '확인',
+          replyToId: ORIGINAL_ID,
+          replyTo: {
+            id: ORIGINAL_ID,
+            seq: 4,
+            authorMemberId: OTHER,
+            type: 'text',
+            body: '배포 로그 확인했습니다',
+            state: 'sent',
+          },
+        }),
+      ],
+      [],
+      ACTIONS,
+    );
+    expect(screen.getByTestId('quote-block').props.accessibilityRole).toBe(
+      'button',
+    );
   });
 });
 

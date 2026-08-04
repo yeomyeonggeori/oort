@@ -91,7 +91,6 @@ const BASE: MessageRowProps = {
     quotesAnother: false,
     edited: false,
   },
-  quoteReachable: false,
 };
 
 /**
@@ -134,7 +133,6 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
       edited: true,
     },
   },
-  quoteReachable: {quoteReachable: true},
 };
 
 describe('memo 비교자는 모든 prop 을 본다', () => {
