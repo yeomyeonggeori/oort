@@ -201,6 +201,52 @@ pub fn enabled_tool_definitions(enabled: &[String]) -> Vec<ToolDefinition> {
         .collect()
 }
 
+/// The character class the provider requires of a tool name, measured
+/// (goal SRV-HOT1).
+///
+/// The ChatGPT backend answers a name outside `^[a-zA-Z0-9_-]+$` with
+/// `400 Invalid 'tools[0].name'`, and it does so for the **whole request** — so
+/// one badly-named tool kills every turn of every agent that has it switched on,
+/// answer and all. #1018 shipped `work.session.end` verbatim onto the wire and
+/// that dot is the violation.
+///
+/// momo's own names keep their dots: they are the vocabulary the approval
+/// ledger, the audit rows, the tool-result props and every client surface speak,
+/// and renaming them to suit one provider's regex would push a wire detail into
+/// the product. The translation lives at the provider boundary instead, in the
+/// two functions below.
+pub const WIRE_TOOL_NAME_PATTERN: &str = "^[a-zA-Z0-9_-]+$";
+
+/// momo name → the name that goes on the wire (`.` → `_`).
+///
+/// Only the dot is rewritten because it is the only character momo's catalog
+/// uses that the pattern forbids — asserted over the whole catalog by
+/// [`tests::every_catalog_name_survives_the_providers_pattern`], so a future
+/// tool named with a slash or a space fails the build's tests rather than the
+/// user's turn.
+pub fn wire_tool_name(momo_name: &str) -> String {
+    momo_name.replace('.', "_")
+}
+
+/// The name on the wire → momo's name, or the wire name unchanged.
+///
+/// **A catalog lookup, not the inverse string transform**, and that is the whole
+/// correctness argument: `_` → `.` is ambiguous (an operator's own function may
+/// legitimately contain an underscore), so inverting the transform would rename
+/// tools momo does not own. Comparing against the catalog's *rendered* names is
+/// exact.
+///
+/// A name momo does not recognise passes through untouched, because it is an
+/// operator's own `agent.tool_schema` function and its name is theirs.
+pub fn momo_tool_name(wire_name: &str) -> String {
+    let trimmed = wire_name.trim();
+    CATALOG
+        .iter()
+        .find(|known| wire_tool_name(known) == trimmed)
+        .map(|known| (*known).to_string())
+        .unwrap_or_else(|| trimmed.to_string())
+}
+
 /// Is this a tool this build knows how to run?
 pub fn is_executable(tool_name: &str) -> bool {
     let normalized = normalize(tool_name);
@@ -464,6 +510,79 @@ pub fn requires_approval(tool_name: &str, grants: Option<&[ToolGrant]>) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The measured constraint, applied to the whole catalog (goal SRV-HOT1).
+    ///
+    /// This is the test that would have caught #1018 before a user did: it
+    /// checks the name that actually goes on the wire, not the one momo uses
+    /// internally. A future tool called `work/session.end` fails here instead of
+    /// killing every turn of every agent that enabled it.
+    #[test]
+    fn every_catalog_name_survives_the_providers_pattern() {
+        for name in CATALOG {
+            let wire = wire_tool_name(name);
+            assert!(
+                !wire.is_empty()
+                    && wire
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+                "{name} renders as {wire:?}, which the backend refuses with \
+                 `400 Invalid 'tools[0].name'` ({WIRE_TOOL_NAME_PATTERN})"
+            );
+        }
+        // The specific violation #1018 shipped.
+        assert_eq!(wire_tool_name(WORK_SESSION_END), "work_session_end");
+        assert!(WORK_SESSION_END.contains('.'), "momo keeps its own dots");
+    }
+
+    /// Round trip, both directions, for every tool momo owns.
+    #[test]
+    fn the_wire_name_round_trips_back_to_the_momo_name() {
+        for name in CATALOG {
+            assert_eq!(
+                momo_tool_name(&wire_tool_name(name)),
+                *name,
+                "the approval ledger and every client surface read the momo name"
+            );
+        }
+        assert_eq!(momo_tool_name("work_session_end"), WORK_SESSION_END);
+        assert_eq!(momo_tool_name("  work_session_end  "), WORK_SESSION_END);
+    }
+
+    /// A name momo does not own is not momo's to rename.
+    ///
+    /// The reverse map is a catalog lookup rather than `_` → `.` precisely so
+    /// that an operator's own function keeps the name they gave it — inverting
+    /// the transform would turn `search_issues` into `search.issues` and then
+    /// fail to dispatch it.
+    #[test]
+    fn an_operators_own_tool_name_passes_through_untouched() {
+        for foreign in [
+            "search_issues",
+            "github_search",
+            "web_search",
+            "a_b_c",
+            "plain",
+        ] {
+            assert_eq!(momo_tool_name(foreign), foreign);
+            assert!(
+                !is_executable(&momo_tool_name(foreign)),
+                "{foreign} must not be mapped onto a momo tool"
+            );
+        }
+    }
+
+    /// The mapped-back name is what the executor recognises — this is the join
+    /// between the wire and `CATALOG` that makes an approval possible at all.
+    #[test]
+    fn the_mapped_back_name_is_the_one_the_executor_runs() {
+        let from_wire = momo_tool_name("work_session_end");
+        assert!(is_executable(&from_wire));
+        assert!(requires_approval(&from_wire, None), "G6 still fails closed");
+        // …and the raw wire name is NOT executable, which is why the mapping has
+        // to happen before dispatch rather than after.
+        assert!(!is_executable("work_session_end"));
+    }
 
     /// Every executable tool has a definition, and every definition names an
     /// executable tool. A tool that gained an executor without a description
