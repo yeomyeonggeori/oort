@@ -6,7 +6,7 @@ import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
-import {typingSentence} from '@momo/core/features/chat/typing';
+import {typingSegments} from '@momo/core/features/chat/typing';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {MessageBody} from '../src/features/conversation/MessageBody';
@@ -209,14 +209,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'typing-one':
       return (
         <Frame label="작성 중 · 1인 — 컴포저 위 한 줄">
-          <TypingBar sentence={typingSentence(['김민수'])} />
+          <TypingBar segments={typingSegments(['김민수'])} />
         </Frame>
       );
     case 'typing-many':
       return (
         <Frame label="작성 중 · 집계 — 임계를 넘으면 수를 말한다">
           <TypingBar
-            sentence={typingSentence(['김민수', '이하늘', '박도윤'])}
+            segments={typingSegments(['김민수', '이하늘', '박도윤'])}
           />
         </Frame>
       );

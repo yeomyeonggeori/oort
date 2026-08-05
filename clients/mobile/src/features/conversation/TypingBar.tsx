@@ -1,3 +1,4 @@
+import type {TypingSegment} from '@momo/core/features/chat/typing';
 import React from 'react';
 import {StyleSheet, Text} from 'react-native';
 import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
@@ -35,12 +36,26 @@ import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
 // 때 위의 줄이 움직이지 않는다 — 사람이 겨누고 있던 「중단」 버튼이 손가락 밑에서
 // 이동하는 것은 이 화면에서 가장 비싼 흔들림이다.
 //
-// ## 없으면 아무 자리도 차지하지 않는다
+// ## 자리를 **예약한다** (design-review H-3)
 //
-// `null`을 돌려준다. 빈 높이를 예약해 두면 대화 아래에 이유 없는 여백이 상시로
-// 앉아 있게 되고, 폰에서 그 한 줄은 메시지 한 줄과 같은 값이다. 대신 나타나고
-// 사라질 때 목록이 움찔하는데, 그 대가는 `ConversationLayout`이 이미 치르고 있는
-// 종류(활동 줄도 같은 방식으로 나타났다 사라진다)이므로 새 비용이 아니다.
+// 첫 판은 `null`을 돌려주며 이렇게 적었다 — *"빈 높이를 예약해 두면 대화 아래에
+// 이유 없는 여백이 상시로 앉아 있게 되고, 폰에서 그 한 줄은 메시지 한 줄과 같은
+// 값이다."* 그 계산에서 빠진 항이 있다: **여백의 값은 그 줄이 움직이는 것이
+// 무엇을 밀어내는가**로 재야 한다.
+//
+// 이 줄이 나타나고 사라지면 그 아래 **컴포저 전체**가 위아래로 뛴다. 그리고 이
+// 줄은 팀원이 치기 시작할 때마다, 멈추고 6초 뒤마다 — 즉 **남이 결정하는
+// 박자로** 그렇게 한다. 키보드가 올라온 폰에서 그 아래에 있는 것은 **엄지 밑의
+// 전송 버튼**이다.
+//
+// 이 판정을 이미 웹이 내렸고, **그 근거가 하필 폰이었다**
+// (`clients/web/src/features/chat/TypingLine.tsx` "## 자리는 예약한다 (H-2)"):
+// *"폰에서는 키보드가 올라온 상태에서 엄지 아래의 전송 버튼이 움직인다."*
+// 웹 리뷰가 폰을 들어 설득한 결정을 정작 폰이 반대로 구현했었다.
+//
+// 예약 높이는 **1줄 고정**이다(웹과 같은 트레이드오프). 두 줄까지 예약하면 평소에
+// 정말로 빈 띠가 생기고, 이름이 길어 두 줄이 되는 경우는 드물다 — 그때는 이
+// 줄이 한 줄 밀어내는 쪽을 택한다.
 // =============================================================================
 
 /**
@@ -52,11 +67,23 @@ import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
  * 오지 않는다(만료는 신호를 들고 있는 쪽의 일이다).
  */
 export function TypingBar({
-  sentence,
+  segments,
   label,
   testID = 'composer-typing',
 }: {
-  sentence: string | null;
+  /**
+   * 코어가 지은 **조각들**. 이름과 나머지를 화면에서 다르게 칠할 수 있게 한다
+   * (design-review M-4).
+   *
+   * 문장 전체를 한 문자열로 받던 첫 판에서는 「이름 색」이라는 대조축을 마크업에
+   * 둘 수 없었다. 그 축이 없으면 **작업 중 줄이 없을 때** — 에이전트 턴이 없는
+   * 대부분의 시각 — 사람 줄이 가진 단서는 「작성」과 「작업」을 가르는 한 음절과
+   * 「님」뿐이 된다.
+   *
+   * 「문장을 짓지 않는다」는 규율은 그대로다. 조각을 **잇지도 않고** 낱말을
+   * 더하지도 않는다 — 받은 것을 순서대로 그리고 `name` 조각만 다르게 칠한다.
+   */
+  segments: readonly TypingSegment[];
   /**
    * 보조기술이 읽을 이름 (코어의 `typingLabel`). 문장과 같은 값이되 말줄임표가
    * 없다 — 스크린리더는 「…」을 「점점점」으로 읽거나 통째로 삼키고, 둘 다 이 줄이
@@ -65,21 +92,41 @@ export function TypingBar({
   label?: string | null;
   testID?: string;
 }): React.JSX.Element | null {
-  if (sentence === null || sentence.trim() === '') return null;
+  const empty = segments.length === 0;
   return (
     <Text
       // `Text`는 그 자체로 접근성 원소다. `View`에 라벨을 붙였다가 아무도 읽지
       // 않는 라벨을 만든 전례가 이 레포에 있다(`AgentActivityBar` 2R M1).
       accessibilityRole="text"
-      accessibilityLabel={label ?? sentence}
-      // 이 줄은 사람이 초점을 옮기지 않아도 바뀐다. `polite`는 읽던 문장을
-      // 끊지 않고 다음 틈에 말한다 — 「누가 치고 있다」는 절대 남의 말을 자를
-      // 만큼 중요하지 않다.
-      accessibilityLiveRegion="polite"
+      // 비어 있을 때는 접근성 트리에서도 비어 있어야 한다 — 자리는 예약하되
+      // 보조기술에 빈 원소를 하나 세워 두지는 않는다.
+      accessibilityElementsHidden={empty}
+      importantForAccessibility={empty ? 'no-hide-descendants' : 'auto'}
+      {...(empty ? {} : {accessibilityLabel: label ?? undefined})}
+      // ---------------------------------------------------------------
+      // `accessibilityLiveRegion` 을 **뺐다** (design-review N-4).
+      //
+      // 그 prop 은 **안드로이드 전용**이다 — iOS 에서는 아무 일도 하지 않는다.
+      // 즉 첫 판의 주석("읽던 문장을 끊지 않고 다음 틈에 말한다")은 이 플랫폼에서
+      // 참인 적이 없었다. 무동작인 채 주석만 남으면 다음 사람이 그 방어가 서
+      // 있다고 믿는다.
+      //
+      // 그리고 **뺀 것이 웹과도 정합한다**: 웹은 같은 줄을 *일부러* live 영역에서
+      // 뺐다(3초마다 재낭독). 「누가 치고 있다」는 남의 말을 자를 만큼 중요하지
+      // 않다 — 그 판단은 유지되고, 이제 코드가 그것을 정직하게 말한다.
+      // ---------------------------------------------------------------
       numberOfLines={1}
       style={styles.line}
       testID={testID}>
-      {sentence}
+      {segments.map((segment, index) =>
+        segment.kind === 'name' ? (
+          <Text key={index} style={styles.name}>
+            {segment.text}
+          </Text>
+        ) : (
+          segment.text
+        ),
+      )}
     </Text>
   );
 }
@@ -94,7 +141,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: SAFE_GUTTER,
     paddingBottom: space.xs,
     fontSize: font.meta,
-    color: color.textFaint,
+    // `textFaint` 는 배경 대비 **3.909:1** 로 본문 AA(4.5)에 못 미친다
+    // (design-review M-6, 실측 확정). `textMuted` 는 7.170:1 이다.
+    // 토큰 전면 재조정은 U2(라이트 모드)의 소관이고, 여기서는 **용례만** 옮긴다.
+    color: color.textMuted,
+    // 자리 예약의 실체 (H-3): 줄이 비어도 이 높이가 남으므로 아래의 컴포저가
+    // 남의 키보드 박자로 움직이지 않는다. 1줄 고정이다.
     lineHeight: 16,
+    minHeight: 16 + space.xs,
   },
+  // 이름만 한 급 밝다 (M-4). 「작성」과 「작업」을 가르는 한 음절 말고 **눈에
+  // 보이는 축**을 하나 준다 — 에이전트 줄은 이름을 agent 색으로 칠한다.
+  name: {color: color.text, fontWeight: '600'},
 });

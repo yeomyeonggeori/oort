@@ -7,7 +7,7 @@ import {
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {
   typingLabel,
-  typingSentence,
+  typingSegments,
   TYPING_AGGREGATE_THRESHOLD_FALLBACK,
 } from '@momo/core/features/chat/typing';
 import {memberFor, memberNameParts} from '@momo/core/features/workspace/directory';
@@ -458,8 +458,8 @@ export default function ConversationScreen({
     () => typists.map(id => memberNameParts(directory, id, '').name),
     [typists, directory],
   );
-  const typingLine = useMemo(
-    () => typingSentence(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
+  const typingParts = useMemo(
+    () => typingSegments(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
     [typistNames],
   );
   const typingA11y = useMemo(
@@ -780,6 +780,19 @@ export default function ConversationScreen({
               live={railLive}
               renderStop={renderStop}
             />
+            {/* ===================================================
+                「작업 중」 **바로 아래** (design-review M-5).
+
+                둘은 같은 질문에 답하는 두 줄이다 — 「지금 누가 무언가 하고
+                있는가」. 그 사이에 중단 영수증과 롱프레스 힌트가 끼면 나란히
+                두는 것만으로 얻으려던 대조(작성 중 ↔ 작업 중)가 끊긴다.
+
+                첫 판이 이 줄을 맨 아래 둔 이유는 「사라지는 것이 아래에 있어야
+                「중단」 버튼이 손가락 밑에서 안 움직인다」였는데, **H-3 이 자리를
+                예약하면서 그 이유가 사라졌다** — 이제 이 줄은 나타나고 사라지며
+                아무것도 밀어내지 않는다. 수리 하나가 다른 수리를 가능하게 한 자리다.
+                =================================================== */}
+            <TypingBar segments={typingParts} label={typingA11y} />
             {/* 결과는 컨트롤 밖에서, 줄보다 넓은 자리에 말한다. 「이미 끝났습니다」는
                 실패가 아니라 답이므로 배너가 아니라 영수증과 같은 자리에 선다 —
                 빨간 글씨와 재시도는 이미 이긴 경주를 다시 뛰라는 뜻이 된다. */}
@@ -794,10 +807,6 @@ export default function ConversationScreen({
               </Text>
             ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
-            {/* 활동 줄(에이전트 「작업 중」) **아래**, 컴포저 바로 위. 사라지는
-                것이 아래에 있어야 사라질 때 사람이 겨누고 있던 「중단」 버튼이
-                손가락 밑에서 움직이지 않는다. */}
-            <TypingBar sentence={typingLine} label={typingA11y} />
             <Composer
               channelLabel={title}
               directory={directory}
