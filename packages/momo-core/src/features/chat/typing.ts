@@ -371,6 +371,95 @@ function nameLimit(threshold: number): number {
 }
 
 /**
+ * 문장을 **조각**으로. 이름과 나머지를 화면에서 다르게 칠할 수 있게 한다
+ * (design-review PR 1059 M-1).
+ *
+ * 1차에서는 문장 전체가 한 문자열이었고, 그래서 「이름 색」이라는 대조축을 문서로만
+ * 주장하고 마크업에는 두지 않았다. 그 축이 없으면 **작업 중 줄이 없을 때** — 즉
+ * 에이전트 턴이 없는 대부분의 시각 — 사람 줄이 가진 단서는 「작성」과 「작업」을 가르는
+ * 한 음절과 「님」뿐이 된다. 나란히 두는 배치만으로는 학습이 일어나지 않는다.
+ *
+ * ## `count`가 왜 따로인가 (U4-4 N-2)
+ *
+ * 집계 문구의 숫자는 **바뀌는 숫자**다: 2 → 3 → 4명이 되는 동안 비례폭 글꼴에서
+ * 자릿수의 폭이 달라 줄 전체가 미세하게 흔들린다. 이 앱은 이미 그 답을 갖고 있다 —
+ * 웹의 `[data-numeric]`(tabular-nums), 26px 아래 같은 컴포저의 「외 N명」이 그것을
+ * 쓰고 있다. 숫자가 문자열 안에 녹아 있으면 그 표지를 붙일 자리가 없어서, 조각으로
+ * 뺀다. 조각을 이어 붙인 문자열은 이전과 **한 글자도 다르지 않다**.
+ */
+export type TypingSegment =
+  | { kind: "name"; text: string }
+  /** 집계 숫자만. 화면은 여기에 자릿폭 고정을 건다 (N-2). */
+  | { kind: "count"; text: string }
+  | { kind: "plain"; text: string };
+
+/**
+ * 조각의 **마지막 하나 = 꼬리**이고, 꼬리에는 언제나 동사가 있다
+ * (「님이 작성 중…」 / 「명이 작성 중…」).
+ *
+ * 이것이 계약인 이유는 한국어가 동사후치이기 때문이다. 한 줄에 다 못 들어가서 CSS가
+ * 뒤를 자르면 **잘려 나가는 것이 「작성 중」이고**, 남는 것은 이름 나열 + `…` —
+ * 집계 문구도 아니고 아무 말도 아닌 문자열이다 (design-review PR 1059 M-3). 그래서
+ * 화면은 [`typingLead`]만 줄이고 이 꼬리는 줄이지 않는다.
+ *
+ * 부수 효과가 M-3의 나머지 절반을 닫는다: 잘림의 `…`가 **이름 안쪽**에만 생기므로,
+ * 문장이 원래 갖고 있는 끝의 `…`와 자리가 갈린다 — 잘린 줄과 온전한 줄이 처음으로
+ * 구분된다.
+ */
+export function typingTail(
+  segments: readonly TypingSegment[]
+): TypingSegment | null {
+  return segments.length === 0 ? null : segments[segments.length - 1];
+}
+
+/** 꼬리를 뺀 앞부분 — 자리가 모자라면 **여기가** 줄어든다. */
+export function typingLead(
+  segments: readonly TypingSegment[]
+): TypingSegment[] {
+  return segments.length === 0 ? [] : segments.slice(0, -1);
+}
+
+/**
+ * ## 나열 규칙은 하나다 (U4-4 N-1)
+ *
+ * 1차는 `${names.join(", ")}님이` 였고, 그래서 두 사람이 치면 「이도현, 김민서**님이**
+ * 작성 중…」 — 님이 **마지막 이름에만** 붙었다. 한국어로 읽으면 존대가 뒤엣사람에게만
+ * 간 문장이고, 같은 화면 위쪽 채널 헤더는 나열에 님을 아예 쓰지 않아(「곽성재, 이도현,
+ * 김민서 외 2」) 한 화면에 나열 규칙이 둘이었다.
+ *
+ * **님을 떼는 쪽으로는 통일하지 않는다.** 님은 이 줄에서 장식이 아니라 대조축이다 —
+ * 에이전트의 「작업 중」 줄에는 님이 없고, 그것이 사람 줄에만 있는 유일한 낱말 표지다
+ * (`TypingLine.tsx` 머리 주석의 표 넷째 줄). 헤더의 나열은 **명부**를 읽어 주는 일이고
+ * 이 줄은 **사람이 무엇을 하고 있다는 서술**이라, 존대가 붙고 안 붙고가 갈리는 것이
+ * 옳다. 그래서 통일은 「이름마다 님」 쪽이다.
+ */
+export function typingSegments(
+  names: string[],
+  threshold: number = TYPING_AGGREGATE_THRESHOLD_FALLBACK
+): TypingSegment[] {
+  if (names.length === 0) return [];
+  const limit = nameLimit(threshold);
+  if (names.length > limit) {
+    return [
+      { kind: "count", text: `${names.length}` },
+      { kind: "plain", text: "명이 작성 중…" },
+    ];
+  }
+  const kept = names.slice(0, limit);
+  const segments: TypingSegment[] = [];
+  kept.forEach((name, index) => {
+    segments.push({ kind: "name", text: name });
+    // 님은 이름마다 붙고, 마지막 이름의 님이 꼬리를 연다. 조각을 이렇게 끊어야
+    // 「이름(줄어듦) → 님이 작성 중…(안 줄어듦)」 경계가 마지막 조각과 일치한다.
+    segments.push({
+      kind: "plain",
+      text: index < kept.length - 1 ? "님, " : "님이 작성 중…",
+    });
+  });
+  return segments;
+}
+
+/**
  * 컴포저 하단의 한 줄 (입력창 **아래**, 작업 중 줄 바로 위). 1차 독스트링은 이것을
  * 「컴포저 위」라고 적었는데 렌더는 아래였다 — 문서와 화면이 다른 배치를 말하고
  * 있었다 (design-review PR 1059 M-4).
@@ -381,55 +470,29 @@ function nameLimit(threshold: number): number {
  *
  * 뭉치는 규칙은 서버가 정한 임계를 그대로 탄다. 서버는 절대 뭉치지 않는다(상태가
  * 없으므로 몇 명인지 모른다). 사람마다 신호 하나를 발행하고, 세는 것은 여기다.
+ *
+ * **조각이 정본이고 이 문장은 그 합이다.** 두 벌로 짓던 1차에서는 나열 규칙을 한쪽만
+ * 고치면 화면과 보조기술이 다른 문장을 말할 수 있었다 — 그 가능성 자체를 없앤다.
  */
 export function typingSentence(
   names: string[],
   threshold: number = TYPING_AGGREGATE_THRESHOLD_FALLBACK
 ): string | null {
-  if (names.length === 0) return null;
-  const limit = nameLimit(threshold);
-  if (names.length > limit) return `${names.length}명이 작성 중…`;
-  return `${names.slice(0, limit).join(", ")}님이 작성 중…`;
-}
-
-/**
- * 문장을 **조각**으로. 이름과 나머지를 화면에서 다르게 칠할 수 있게 한다
- * (design-review PR 1059 M-1).
- *
- * 1차에서는 문장 전체가 한 문자열이었고, 그래서 「이름 색」이라는 대조축을 문서로만
- * 주장하고 마크업에는 두지 않았다. 그 축이 없으면 **작업 중 줄이 없을 때** — 즉
- * 에이전트 턴이 없는 대부분의 시각 — 사람 줄이 가진 단서는 「작성」과 「작업」을 가르는
- * 한 음절과 「님」뿐이 된다. 나란히 두는 배치만으로는 학습이 일어나지 않는다.
- *
- * 집계 문구(「3명이 작성 중…」)에는 이름이 없으므로 조각도 없다 — 그 문장은 통째로
- * 부수적 정보이고, 강조할 이름이 애초에 없다.
- */
-export type TypingSegment =
-  | { kind: "name"; text: string }
-  | { kind: "plain"; text: string };
-
-export function typingSegments(
-  names: string[],
-  threshold: number = TYPING_AGGREGATE_THRESHOLD_FALLBACK
-): TypingSegment[] {
-  if (names.length === 0) return [];
-  const limit = nameLimit(threshold);
-  if (names.length > limit) {
-    return [{ kind: "plain", text: `${names.length}명이 작성 중…` }];
-  }
-  const kept = names.slice(0, limit);
-  const segments: TypingSegment[] = [];
-  kept.forEach((name, index) => {
-    if (index > 0) segments.push({ kind: "plain", text: ", " });
-    segments.push({ kind: "name", text: name });
-  });
-  segments.push({ kind: "plain", text: "님이 작성 중…" });
-  return segments;
+  const segments = typingSegments(names, threshold);
+  if (segments.length === 0) return null;
+  return segments.map((segment) => segment.text).join("");
 }
 
 /**
  * 보조기술이 읽을 이름. 문장과 같은 값이지만 말줄임표가 없다 — 스크린리더는 「…」을
  * 「점점점」으로 읽거나 통째로 삼키고, 둘 다 이 줄이 하려는 말이 아니다.
+ *
+ * **이 값이 「보이는 텍스트의 대체」로 실제로 쓰이는지는 화면의 몫이다.** 1차 웹은
+ * 이것을 `title`에 실었는데, `title`은 역할 없는 `<p>`의 접근 이름을 **대체하지
+ * 않는다** — 스크린리더는 잘린 채 보이는 텍스트를 그대로 읽고 title은 설명으로 덧붙을
+ * 뿐이라, 의도한 치환이 한 번도 일어나지 않았고 잘린 이름의 복구 경로는 사실상
+ * 마우스 hover 하나였다 (design-review PR 1059 M-2). 웹은 이제 보이는 조각을
+ * `aria-hidden`으로 내리고 이 값을 `sr-only`로 올린다.
  */
 export function typingLabel(
   names: string[],

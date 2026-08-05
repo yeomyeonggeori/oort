@@ -47,13 +47,18 @@
 //     expected failure: "the 작성 중 line sits inside a live region"
 //   TYPING_GATE_PROVE_RED_SHIFT=1 npm run gate:typing
 //     expected failure: "the composer moved when the 작성 중 line appeared"
+//   TYPING_GATE_PROVE_RED_TAIL=1 npm run gate:typing
+//     expected failure: "the verb was truncated away"
+//   TYPING_GATE_PROVE_RED_LABEL=1 npm run gate:typing
+//     expected failure: "assistive tech was left reading the truncated text"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. AGENT는 명부에서 에이전트를 사람으로
 // 바꾸고, SELF는 내 id 대신 남의 id로 발행하고, TTL은 기다리는 동안 계속 재발행하고,
 // STOP은 멈춰야 할 구간에도 계속 타이핑하고, GRANT는 grant TTL을 12초로 줄이고, LIVE는
 // DOM에서 그 줄을 live 영역 안으로 넣고, SHIFT는 예약 자리를 DOM에서 없앤다(1차의
-// 모양으로 되돌린다). 제품 소스 줄을 지우거나 단언을 빼라고
-// 요구하지 않으므로 증명은 반복 가능하다.
+// 모양으로 되돌린다). TAIL은 꼬리를 다시 줄어들게 만들고(=1차의 「줄 전체 truncate」),
+// LABEL은 sr-only 라벨을 접근성 트리에서 뺀다(=1차의 「title뿐」). 제품 소스 줄을
+// 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -70,6 +75,11 @@ const memberId = "00000000-0000-7000-8000-000000000101";
 const dohyunId = "00000000-0000-7000-8000-000000000102";
 const minseoId = "00000000-0000-7000-8000-000000000103";
 const jiwooId = "00000000-0000-7000-8000-000000000104";
+// 긴 표시명 둘. U4-4 W1의 잘림 장면 전용이고, 리뷰가 M-3을 폭 실측 **추정**으로만
+// 남긴 자리("긴 표시명 2명에서 발생 — 런타임 캡처는 확보하지 못했다")를 실제 렌더로
+// 바꾼다.
+const longAId = "00000000-0000-7000-8000-000000000105";
+const longBId = "00000000-0000-7000-8000-000000000106";
 const agentId = "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAA613";
 const channelId = "00000000-0000-7000-8000-000000000201";
 const otherChannelId = "00000000-0000-7000-8000-000000000202";
@@ -82,6 +92,8 @@ const proveRedStop = process.env.TYPING_GATE_PROVE_RED_STOP === "1";
 const proveRedGrant = process.env.TYPING_GATE_PROVE_RED_GRANT === "1";
 const proveRedLive = process.env.TYPING_GATE_PROVE_RED_LIVE === "1";
 const proveRedShift = process.env.TYPING_GATE_PROVE_RED_SHIFT === "1";
+const proveRedTail = process.env.TYPING_GATE_PROVE_RED_TAIL === "1";
+const proveRedLabel = process.env.TYPING_GATE_PROVE_RED_LABEL === "1";
 
 // 목의 응답 지연 (#839 교훈). 같은 tick에 답하는 목은 아무것도 증명하지 않는다.
 const GRANT_DELAY_MS = 180;
@@ -142,6 +154,20 @@ const roster = [
   member({ id: dohyunId, kind: "human", displayName: "이도현", handle: "dohyun" }),
   member({ id: minseoId, kind: "human", displayName: "김민서", handle: "minseo" }),
   member({ id: jiwooId, kind: "human", displayName: "박지우", handle: "jiwoo" }),
+  // 리뷰가 M-3의 발생 조건으로 지목한 모양 그대로다: 「이름 + 직군」을 표시명에 담는
+  // 흔한 관례. 폰 폭(390)에서 둘이 함께 치면 한 줄에 들어가지 않는다.
+  member({
+    id: longAId,
+    kind: "human",
+    displayName: "김민서 프로덕트디자인",
+    handle: "minseo-design",
+  }),
+  member({
+    id: longBId,
+    kind: "human",
+    displayName: "이도현 플랫폼엔지니어링",
+    handle: "dohyun-platform",
+  }),
   member({
     id: agentId,
     // red seam: 명부가 에이전트를 사람이라고 말한다. 「에이전트는 작성 중으로
@@ -475,6 +501,44 @@ function typingLine(page) {
 }
 
 /**
+ * 줄이 **눈에** 말하는 글자 = 조각들(lead + tail)의 합.
+ *
+ * `textContent`를 그냥 읽으면 U4-4 W1이 넣은 `sr-only` 라벨까지 딸려 와 문장이 두 번
+ * 나온다. 보이는 것과 보조기술이 읽는 것이 **일부러 다른 값**이 되었으므로(M-2), 그
+ * 둘을 세는 함수도 갈라 둔다.
+ */
+function visibleTypingText(page) {
+  return page.evaluate(() => {
+    const read = (testid) =>
+      document.querySelector(`[data-testid="${testid}"]`)?.textContent ?? "";
+    return `${read("composer-typing-lead")}${read("composer-typing-tail")}`;
+  });
+}
+
+/**
+ * 보조기술이 **실제로** 읽게 되는 글자.
+ *
+ * `aria-hidden`과 `display:none`을 존중하며 훑는다 — 이 줄의 M-2 수리가 바로 그
+ * 두 축 위에 서 있기 때문이다(보이는 조각은 숨기고, 온전한 문장만 남긴다).
+ * `textContent`로는 이 구분이 보이지 않아 라벨이 트리에서 빠져도 초록이 된다.
+ */
+function accessibleTypingText(page) {
+  return page.evaluate(() => {
+    const line = document.querySelector('[data-testid="composer-typing"]');
+    if (line === null) return null;
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      if (node.getAttribute("aria-hidden") === "true") return "";
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden") return "";
+      return Array.from(node.childNodes).map(walk).join("");
+    };
+    return Array.from(line.childNodes).map(walk).join("");
+  });
+}
+
+/**
  * 사람이 실제로 치는 모양: 한 글자씩, 사람 속도로.
  *
  * `pressSequentially`를 쓰는 이유는 `fill()`이 값 전체를 한 번에 넣어 `onChange`를
@@ -615,14 +679,16 @@ async function exercise(browser) {
   await publishTyping(page, { memberId: dohyunId, ttlMs: GATE_TTL_MS });
   await typingLine(page).waitFor({ timeout: 5_000 });
   const nameTone = await page.evaluate(() => {
-    const line = document.querySelector('[data-testid="composer-typing"]');
-    if (line === null) return null;
-    const spans = Array.from(line.querySelectorAll("span"));
-    const withText = (needle) =>
-      spans.find((node) => (node.textContent ?? "").includes(needle));
-    const name = withText("이도현");
-    const tail = withText("작성 중");
-    if (!name || !tail) return null;
+    const lead = document.querySelector('[data-testid="composer-typing-lead"]');
+    const tail = document.querySelector('[data-testid="composer-typing-tail"]');
+    if (lead === null || tail === null) return null;
+    // `lead` 안에서 이름 조각만 고른다. 라벨(`sr-only`)은 문장 전체를 들고 있어
+    // 「이름을 담은 노드」로도 「동사를 담은 노드」로도 잡히므로, 그것을 피하려면
+    // 조각을 이름으로 찾지 말고 **구조로** 찾아야 한다.
+    const name = Array.from(lead.querySelectorAll("span")).find((node) =>
+      (node.textContent ?? "").includes("이도현")
+    );
+    if (!name) return null;
     return {
       name: getComputedStyle(name).color,
       tail: getComputedStyle(tail).color,
@@ -648,6 +714,185 @@ async function exercise(browser) {
     { timeout: 8_000 }
   );
 
+  // ---- 10. 좁은 폭 + 긴 이름: 이름이 잘려도 말은 안 잘린다 (U4-4 W1) ---------
+  //
+  // 예약 높이를 1줄로 못 박은 이상 잘림 자체는 없앨 수 없다 — 고를 수 있는 것은
+  // **무엇이 잘리는가**뿐이다(`TypingLine.tsx` 머리 주석의 결정). 한국어는 동사가
+  // 끝에 오므로 1차처럼 줄 전체에 말줄임을 걸면 잘려 나가는 것이 하필 「작성 중」이고,
+  // 남는 문자열은 아무 말도 하지 않는다.
+  //
+  // 리뷰(M-3)는 이 조건을 **폭 계산으로 추정**만 하고 런타임 증거를 남기지 못했다
+  // ("긴 표시명 2명, 약 340px+ … 확인 필요"). 이 게이트가 그 자리를 실측으로 바꾸면서
+  // 추정을 하나 **정정한다**: 리뷰가 예로 든 이름 둘("김민서 프로덕트디자인" 급)은
+  // 390폭에서 실제로는 **잘리지 않는다** — 문장 오른끝 334px, 본문 끝 366px로 32px가
+  // 남는다(이 게이트를 390에서 돌려 얻은 값이다). 리뷰의 산술은 맞았고 경계에 걸쳐
+  // 있었을 뿐이다.
+  //
+  // 그래서 장면은 **지원하는 가장 좁은 폭**인 320에서 만든다. 여기서 같은 두 이름이
+  // 60px 넘게 넘치고, 그것이 M-3이 말한 화면이다. 좁은 폭을 고른 것은 궁색해서가
+  // 아니라 그쪽이 이 결함의 실제 서식지이기 때문이다 — 폰에서 시스템 글자 크기를
+  // 키우면 390에서도 같은 일이 벌어지고, 그 경로는 게이트가 재현하기 어렵다.
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.getByTestId("composer-input").fill("");
+  if (proveRedTail) {
+    // red seam: 꼬리를 다시 줄어들게 만든다 = 1차의 「줄 전체 truncate」. 앞부분이
+    // 안 줄어들면 넘치는 자리를 꼬리가 뒤집어쓰고, 그것이 정확히 1차의 화면이다.
+    // CSS만 바꾸므로 React가 들고 있는 노드는 그대로다.
+    await page.addStyleTag({
+      content:
+        '[data-testid="composer-typing-tail"]{flex-shrink:1!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}' +
+        '[data-testid="composer-typing-lead"]{flex-shrink:0!important}',
+    });
+  }
+  if (proveRedLabel) {
+    // red seam: sr-only 라벨을 접근성 트리에서 뺀다 = 1차의 「title 하나뿐」. 보이는
+    // 조각은 `aria-hidden`이므로, 라벨이 빠지면 보조기술이 읽을 것이 남지 않는다.
+    await page.addStyleTag({
+      content: '[data-testid="composer-typing-label"]{display:none!important}',
+    });
+  }
+  const reservedHeight = await page.evaluate(() => {
+    const node = document.querySelector(
+      '[data-testid="composer-typing-reserved"]'
+    );
+    return node === null ? -1 : Math.round(node.getBoundingClientRect().height);
+  });
+  await publishTyping(page, { memberId: longAId, ttlMs: 20_000 });
+  await publishTyping(page, { memberId: longBId, ttlMs: 20_000 });
+  await typingLine(page).waitFor({ timeout: 5_000 });
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector('[data-testid="composer-typing-lead"]')
+          ?.textContent ?? ""
+      ).includes("플랫폼엔지니어링"),
+    undefined,
+    { timeout: 5_000 }
+  );
+
+  const fit = await page.evaluate(() => {
+    const line = document.querySelector('[data-testid="composer-typing"]');
+    const lead = document.querySelector('[data-testid="composer-typing-lead"]');
+    const tail = document.querySelector('[data-testid="composer-typing-tail"]');
+    if (line === null || lead === null || tail === null) return null;
+    const lineBox = line.getBoundingClientRect();
+    const style = getComputedStyle(line);
+    const contentWidth =
+      lineBox.width -
+      parseFloat(style.paddingLeft) -
+      parseFloat(style.paddingRight);
+    return {
+      // 잘리지 않았다면 이만큼을 원했다 — 장면이 실제로 넘치는지는 이 값으로 본다.
+      wanted: Math.round(lead.scrollWidth + tail.scrollWidth),
+      contentWidth: Math.round(contentWidth),
+      leadClipped: Math.round(lead.scrollWidth - lead.clientWidth),
+      tailClipped: Math.round(tail.scrollWidth - tail.clientWidth),
+      tailRight: Math.round(tail.getBoundingClientRect().right),
+      contentRight: Math.round(lineBox.right - parseFloat(style.paddingRight)),
+      height: Math.round(lineBox.height),
+      tailText: tail.textContent ?? "",
+    };
+  });
+  if (fit === null) {
+    throw new Error(
+      "줄이 lead/tail 두 조각으로 서 있지 않다: 무엇이 잘릴지 고를 수 없는 구조다 (리뷰 M-3)"
+    );
+  }
+  console.log(
+    `[fit] 320폭 · 원한 폭 ${fit.wanted}px / 있는 폭 ${fit.contentWidth}px · ` +
+      `lead 넘침 ${fit.leadClipped}px · tail 넘침 ${fit.tailClipped}px · ` +
+      `tail 오른끝 ${fit.tailRight} (본문 끝 ${fit.contentRight}) · 높이 ${fit.height}px`
+  );
+  // 장면이 실제로 넘치지 않으면 아래 단언은 아무것도 증명하지 못한다.
+  //
+  // **어느 조각이 잘렸는지로 묻지 않는다** — 그것이 곧 판정 대상이기 때문이다.
+  // 묻는 것은 「문장이 원한 폭이 있는 폭보다 큰가」이고, 그 답은 어느 쪽이 잘리든
+  // 같다. (여기서 `lead`가 잘렸는지로 물었다가, TAIL red seam이 잘림을 꼬리로
+  // 옮기자 **의도한 단언 대신 이 가드가** 먼저 터졌다. 가드가 red를 가리면 red proof는
+  // 자기가 무엇을 증명했는지 말할 수 없다.)
+  if (fit.wanted <= fit.contentWidth) {
+    throw new Error(
+      `이 장면이 잘림을 만들지 못했다 (원한 폭 ${fit.wanted}px ≤ 있는 폭 ${fit.contentWidth}px): ` +
+        "긴 이름 둘이 320폭에 다 들어갔다면 픽스처가 M-3의 조건을 못 만든 것이다"
+    );
+  }
+  // **본론**: 잘리는 것은 이름이고, 동사는 어떤 폭에서도 살아남는다.
+  if (fit.tailClipped > 1 || fit.tailRight > fit.contentRight + 1) {
+    throw new Error(
+      `the verb was truncated away: 꼬리("${fit.tailText}")가 ${fit.tailClipped}px 잘렸고 ` +
+        `오른끝 ${fit.tailRight}이 본문 끝 ${fit.contentRight}을 넘었다. 한국어는 동사가 ` +
+        "끝에 오므로 줄 전체에 말줄임을 걸면 사라지는 것이 「작성 중」이다 (리뷰 M-3)"
+    );
+  }
+  const narrowVisible = (await visibleTypingText(page)) ?? "";
+  if (!narrowVisible.endsWith("작성 중…")) {
+    throw new Error(
+      `잘린 줄이 문장으로 끝나지 않는다: "${narrowVisible}" (리뷰 M-3)`
+    );
+  }
+  // 잘림의 `…`는 이름 안쪽에만 생긴다 — 그래야 잘린 줄과 온전한 줄이 구분된다.
+  // (문장 자체의 `…`는 맨 끝 하나뿐이므로, 앞쪽 `…`의 존재가 곧 「잘렸다」는 표지다.)
+  if (fit.leadClipped > 0 && !narrowVisible.includes("…")) {
+    throw new Error(`잘림 표지가 없다: "${narrowVisible}"`);
+  }
+  // 1줄 고정을 지켰는가. 예약 자리와 같은 높이여야 한다 (H-2와 같은 축).
+  if (reservedHeight > 0 && fit.height !== reservedHeight) {
+    throw new Error(
+      `잘림 장면에서 줄 높이가 ${reservedHeight} -> ${fit.height}px로 바뀌었다: ` +
+        "예약은 1줄 고정이고, 두 줄이 되는 순간 남의 키가 내 캐럿을 민다 (리뷰 H-2)"
+    );
+  }
+
+  // ---- 10b. 보조기술은 잘린 글자를 읽지 않는다 (리뷰 M-2) --------------------
+  //
+  // 1차는 온전한 문장을 `title`에 실었는데, 역할 없는 `<p>`의 접근 이름은 텍스트
+  // 콘텐츠에서 나오므로 그 치환이 한 번도 일어나지 않았다 — 스크린리더는 잘린 채로
+  // 읽었고, 잘린 이름을 되찾는 길은 사실상 마우스 hover 하나였다.
+  const spoken = await accessibleTypingText(page);
+  console.log(`[a11y] 보조기술이 읽는 글자: "${spoken}"`);
+  if (spoken === null || spoken.trim() === "") {
+    throw new Error(
+      "assistive tech was left reading the truncated text: 이 줄에는 자기 접근 텍스트가 " +
+        "없다. `title`은 역할 없는 `<p>`의 접근 이름을 대체하지 않는다 (리뷰 M-2)"
+    );
+  }
+  for (const full of ["김민서 프로덕트디자인", "이도현 플랫폼엔지니어링"]) {
+    if (!spoken.includes(full)) {
+      throw new Error(
+        `assistive tech was left reading the truncated text: "${spoken}" 에 "${full}" 이 없다. ` +
+          "보이는 글자가 잘려도 보조기술은 온전한 이름을 얻어야 한다 (리뷰 M-2)"
+      );
+    }
+  }
+  if (spoken.includes("…")) {
+    throw new Error(
+      `보조기술이 읽을 문장에 말줄임표가 남아 있다: "${spoken}" — 스크린리더는 그것을 ` +
+        "「점점점」으로 읽거나 통째로 삼킨다"
+    );
+  }
+  // 보이는 글자와 읽히는 글자가 **다르다**는 것 자체가 이 수리의 형태다.
+  if (spoken === narrowVisible) {
+    throw new Error(
+      "보이는 글자와 읽히는 글자가 같다: 잘림이 접근성 트리로 그대로 새어 나갔다 (리뷰 M-2)"
+    );
+  }
+  // ---- 10c. 나열 규칙은 하나다 (리뷰 N-1) -----------------------------------
+  // 「이름마다 님」. 1차는 마지막 이름에만 붙어 존대가 뒤엣사람에게만 갔다.
+  const honorifics = (spoken.match(/님/g) ?? []).length;
+  if (honorifics !== 2) {
+    throw new Error(
+      `두 사람을 부르는데 님이 ${honorifics}개다 ("${spoken}"): 나열 규칙은 ` +
+        "「이름마다 님」 하나여야 한다 (리뷰 N-1)"
+    );
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="composer-typing"]') === null,
+    undefined,
+    { timeout: 25_000 }
+  );
+
   // ---- 1. 에이전트는 작성 중이 아니다 ---------------------------------------
   await publishTyping(page, { memberId: agentId, ttlMs: 4_000 });
   await wait(300);
@@ -669,7 +914,7 @@ async function exercise(browser) {
   await typingLine(page).waitFor({ timeout: 5_000 });
   await page.getByTestId("composer-working").waitFor({ timeout: 5_000 });
 
-  const typingText = (await typingLine(page).textContent()) ?? "";
+  const typingText = (await visibleTypingText(page)) ?? "";
   const workingText =
     (await page.getByTestId("composer-working").textContent()) ?? "";
   if (!typingText.includes("작성 중") || typingText.includes("작업")) {
@@ -775,7 +1020,7 @@ async function exercise(browser) {
     AGGREGATE_THRESHOLD,
     { timeout: 5_000 }
   );
-  const collapsed = (await typingLine(page).textContent()) ?? "";
+  const collapsed = (await visibleTypingText(page)) ?? "";
   if (collapsed !== `${AGGREGATE_THRESHOLD}명이 작성 중…`) {
     throw new Error(
       `at the server's threshold the names collapse to a count, read "${collapsed}"`
@@ -784,6 +1029,32 @@ async function exercise(browser) {
   if (collapsed.includes("이도현") || collapsed.includes("김민서")) {
     throw new Error(`a collapsed line must not still carry names: "${collapsed}"`);
   }
+  // ---- N-2. 집계 숫자는 자릿폭이 고정이다 -----------------------------------
+  // 2 → 3 → 4명으로 바뀌는 숫자다. 26px 아래 같은 컴포저의 「외 N명」이 이미 이
+  // 표지를 쓰고 있어, 안 쓰면 한 화면에서 같은 종류의 숫자가 다르게 움직인다.
+  const countCell = await page.evaluate(() => {
+    const node = document.querySelector(
+      '[data-testid="composer-typing-lead"] [data-numeric]'
+    );
+    if (node === null) return null;
+    return {
+      text: node.textContent ?? "",
+      variant: getComputedStyle(node).fontVariantNumeric,
+    };
+  });
+  if (countCell === null || !/^\d+$/.test(countCell.text)) {
+    throw new Error(
+      `집계 숫자가 자기 원소를 갖고 있지 않다 (${JSON.stringify(countCell)}); ` +
+        "문자열 안에 녹아 있으면 자릿폭 고정을 걸 자리가 없다 (리뷰 N-2)"
+    );
+  }
+  if (!countCell.variant.includes("tabular-nums")) {
+    throw new Error(
+      `집계 숫자에 tabular-nums가 걸리지 않았다 (${countCell.variant}); ` +
+        "2→3→4명에서 줄 폭이 흔들린다 (리뷰 N-2)"
+    );
+  }
+  console.log(`[numeric] 집계 숫자 "${countCell.text}" · ${countCell.variant}`);
 
   // 다른 채널의 신호는 이 채널의 줄에 오지 않는다.
   await publishTyping(page, {
@@ -936,6 +1207,9 @@ async function exercise(browser) {
 /** 리뷰용 스크린샷 (SKILL §11). 판정하지 않는다. */
 async function captureShots(browser, options = {}) {
   const dense = options.dense === true;
+  // 좁은 폭 + 긴 표시명. 이 판이 U4-4 W1이 실제로 바꾼 화면이다 — 이름은 줄고
+  // 「님이 작성 중…」은 그대로 남는다 (M-3).
+  const narrow = options.narrow === true;
   const outDir = resolve(webRoot, "artifacts/typing");
   mkdirSync(outDir, { recursive: true });
   for (const scheme of ["light", "dark"]) {
@@ -949,10 +1223,19 @@ async function captureShots(browser, options = {}) {
     await installRealtimeSocket(page);
     await installRoutes(context, traffic, { dense });
     await login(page);
+    // 좁히는 것은 **로그인 뒤**다. 320폭에서는 연결 화면의 버튼이 뷰포트 밖으로
+    // 밀려 클릭이 타임아웃한다 — 캡처하려는 것은 채팅 표면이지 그 경로가 아니다.
+    if (narrow) await page.setViewportSize({ width: 320, height: 800 });
     await publishAgentTurn(page, "queued", "queued");
     await publishAgentTurn(page, "streaming", "running");
-    await publishTyping(page, { memberId: dohyunId, ttlMs: 30_000 });
-    await publishTyping(page, { memberId: minseoId, ttlMs: 30_000 });
+    await publishTyping(page, {
+      memberId: narrow ? longAId : dohyunId,
+      ttlMs: 30_000,
+    });
+    await publishTyping(page, {
+      memberId: narrow ? longBId : minseoId,
+      ttlMs: 30_000,
+    });
     await page.getByTestId("composer-typing").waitFor();
     await page.getByTestId("composer-input").fill("저도 곧 올립니다.");
     if (dense) {
@@ -964,14 +1247,20 @@ async function captureShots(browser, options = {}) {
         throw new Error(`밀집 캡처가 200행을 담지 못했다: "${count}"`);
       }
     }
-    const name = dense ? `typing-dense-${scheme}` : `typing-${scheme}`;
+    const name = dense
+      ? `typing-dense-${scheme}`
+      : narrow
+        ? `typing-narrow-${scheme}`
+        : `typing-${scheme}`;
     await page.screenshot({ path: resolve(outDir, `${name}.png`) });
     await context.close();
   }
   console.log(
     dense
       ? "[shots] artifacts/typing/typing-dense-{light,dark}.png (200행)"
-      : "[shots] artifacts/typing/typing-{light,dark}.png"
+      : narrow
+        ? "[shots] artifacts/typing/typing-narrow-{light,dark}.png (320폭 · 긴 표시명)"
+        : "[shots] artifacts/typing/typing-{light,dark}.png"
   );
 }
 
@@ -993,6 +1282,8 @@ async function main() {
         await captureShots(browser);
         // N-4: 루브릭 phase 5. 3행 메타 스택이 밀집 타임라인 위에서 어떻게 읽히는가.
         await captureShots(browser, { dense: true });
+        // U4-4 W1: 잘림이 실제로 일어나는 판. 이름은 줄고 말은 안 줄어야 한다 (M-3).
+        await captureShots(browser, { narrow: true });
       }
     } finally {
       await browser.close();
