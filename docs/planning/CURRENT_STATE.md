@@ -1,5 +1,15 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-08-05 스냅샷 12 (Fable · momo-main — 주간 리밋 중단·재개 계획 성재 승인).** 워커 전원 주간 리밋 사망(**리셋 8/6 수 13:00 KST**). 성재가 재개 계획 승인 + 즉시 조치 전부 승인(2026-08-05 새벽).
+>
+> **중단 시점 실측(원격 head 기준)**: ①**#1058**(rust 샘플 @8aacbf22)·**#1052**(웹 인용 @82d90a75) = **전 관문 통과, 머지만 대기**(성재 대행: `gh pr merge 1058 --merge` → `gh pr merge 1052 --merge` — Fable 머지는 세션 분류기 차단) ②**#1059**(웹 작성중 @89693fd7) = High3 수리·검증 승인 완료, stress 캡처 1커밋만 미실행 ③**#1056**(OAuth 폼 @4c67b4a2) = High5+M/N8 수리 완료, **재리뷰 미완**(r3 리밋 사망) ④**#1062**(모바일 인용) = lane 5/5 완결, 검수·머지 대기 ⑤**#1064**(모바일 작성중) = **rebase 필수**(코어 startedAtMs 필수화 — rebase+`startedAtMs: frame.ts` 1줄 전 머지 금지, 하면 track/engine 컴파일 빨강) ⑥**M3**(#1048 폰 마크다운) = 코드 완료·게이트 그린, **salvage push 완료(@1d16d10f, feat/B3-M3-markdown)** — lane 미완·PR 미오픈 ⑦M4(#1049) 착수 0. Docker 잔여 0(레인 회수 정상).
+>
+> **승인된 재개 순서(리셋 후)**: B3W 재개(SendMessage로 기존 워커 재개 — 맥락 보존, 실패 시 패킷 기반 재스폰)→stress 캡처→#1059 확정 / #1062 검수→머지 체인(#1058→#1052→#1062→#1059→#1064) / B3M 재개→M2 rebase→M3 lane→M3 PR→M4 / U3 재리뷰어 재스폰→#1056 판정·머지. **머지 순서 불변, #1064는 rebase 전 머지 금지.**
+>
+> **이 사이클 신규 이슈**: #1050(openapi provider/link 부재)·#1051(QA/레인 폰 실시간 미검증)·#1053(openapi typing 부재)·#1054(스레드 인용)·#1055(thread.updated)·#1057(capture:design 설정 구멍)·#1060(preflight #NNNN hex 오탐 — 2회 적중)·#1061(ApiError 헤더)·#1063(inboxApproval flake 선존재)·#1065(typing 후속 — **M-2·M-3·N-1·N-2는 한 결정 묶음**, 별 goal)·#1066(AI 연결 후속). 리뷰 전문 보존: research/2026-08-05-{typing-line,ailink-oauth}-design-review.md. **리뷰어 운영 표준: 보고=파일(scratchpad)+신호 한 줄**(SendMessage 본문 유실 버그·좀비 전례).
+>
+> 이하 스냅샷 11:
+
 > **2026-08-05 스냅샷 11 (Fable · momo-main — 검수 주도 고속 사이클 마감 국면).** 컴팩트 복원용 전체 상태. 상세 시간순은 JOURNAL 2026-08-04~05 항목.
 >
 > **라이브**: 서버 `momo-rust:da6a646b`(NCP 101.79.11.189 — 배포 정본 `docs/runbooks/ncp-rust-deploy.md`, 5파일 compose+env 2개, 웹은 §웹 절·bind-mount 함정 주의) · 웹 app.oor7.com(작업 패널 포함) · 폰 `MomoMobile-rnb4.xcarchive` 설치됨(세션 스크래치패드) · 데스크탑 momo.app 재번들(engine 워크트리 target/release/bundle). provider=ADR-0147 OAuth 등록됨(자동 refresh 생존).
