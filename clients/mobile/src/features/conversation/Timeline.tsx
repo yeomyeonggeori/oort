@@ -35,6 +35,7 @@ import {resolveQuote} from '@momo/core/features/timeline/quote';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
+import {foldDeletedRuns, type FoldedTimelineItem} from './deletedFold';
 
 // =============================================================================
 // The message list. **Forward — newest at the bottom.**
@@ -572,6 +573,14 @@ function TimelineInner({
    * `KEEP_VISIBLE_POSITION`. Exactly two renders per far send.
    */
   const [chasingTail, setChasingTail] = useState(false);
+  /**
+   * 방금 점프해서 도착한 행의 id (#1076). 없으면 `null`.
+   *
+   * 상태인 이유: 이 값은 **화면에 닿아야** 한다. 한 번에 한 행만 참이어야 하므로
+   * 목록이 들고(행은 자기가 목적지였는지 모른다), 점프 한 번에 정확히 두 번
+   * 바뀐다 — 세울 때와 사람이 화면을 다시 가져갈 때.
+   */
+  const [landedId, setLandedId] = useState<string | null>(null);
   const geometryRef = useRef<TimelineGeometry>({
     offsetY: 0,
     contentHeight: 0,
@@ -586,7 +595,7 @@ function TimelineInner({
     [metricsRef],
   );
 
-  const items = useMemo(
+  const stream = useMemo(
     () =>
       withTurnPlaceholders(
         buildTimelineItems(messages, {
@@ -606,6 +615,25 @@ function TimelineInner({
   // the server's rollup predates". See `threadContext.ts` for why the second one
   // is the difference between replying and replying visibly.
   const threads = useMemo(() => buildThreadContext(messages), [messages]);
+
+  // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 왜 이 접기가 코어가 아니라
+  // 폰에 있는지, 그리고 무엇을 접지 않는지는 `deletedFold.ts` 머리말에 있다.
+  //
+  // `threads`·`reactions` 뒤에 서는 이유가 그 규칙이다: 답글이 달렸거나 반응이
+  // 붙은 묘비는 접지 않으므로, 접기는 그 둘을 **아는 상태에서만** 판정할 수 있다.
+  const items = useMemo(
+    () =>
+      foldDeletedRuns(stream, item => ({
+        // `showRollup` 이 거짓인 표면(스레드 패널)은 롤업을 아예 안 그리므로,
+        // 그 표면에서 롤업은 접기를 막을 이유가 되지 못한다 — 없는 문은 문이
+        // 아니다.
+        hasRollup: showRollup && rollupFor(item.message, threads) !== null,
+        hasReactions:
+          chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)
+            .length > 0,
+      })),
+    [stream, threads, reactions, myMemberId, showRollup],
+  );
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -811,6 +839,11 @@ function TimelineInner({
     cancelConvergence();
     scrollPinUntilRef.current = 0;
     convergingRef.current = false;
+    // 착지 표시도 여기서 물러난다 (#1076). 그것을 세운 것이 사람의 동작(점프)이
+    // 었으므로 거두는 것도 사람의 동작이다 — 타이머가 아니라. 이유는
+    // `MessageRow` 의 `rowLanded` 주석에 있다: 폰의 점프는 애니메이션이고,
+    // 목표 행이 아직 안 측정됐으면 한 번 더 도므로, 시한은 이동과 경주한다.
+    setLandedId(null);
     // And the prepend correction comes straight back: the reader taking the list
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
@@ -921,7 +954,7 @@ function TimelineInner({
   }, [messages]);
 
   const renderItem = useCallback(
-    ({item}: {item: TimelineStreamItem}) => {
+    ({item}: {item: FoldedTimelineItem}) => {
       renderItemCalls += 1;
       if (item.kind === 'day') return <DayDivider atMs={item.atMs} nowMs={nowMs} />;
       if (item.kind === 'unread') return <UnreadDivider count={item.count} />;
@@ -952,6 +985,8 @@ function TimelineInner({
           directory={directory}
           chips={chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)}
           pausedRepeat={item.pausedRepeat}
+          deletedRepeat={item.deletedRepeat}
+          landed={landedId !== null && uuidEq(item.message.id, landedId)}
           nowMs={nowMs}
           onResend={onResend}
           actions={actions}
@@ -1008,6 +1043,7 @@ function TimelineInner({
       actions,
       anchorSeq,
       anchorRef,
+      landedId,
       threads,
       markReplies,
       showRollup,
@@ -1055,6 +1091,15 @@ function TimelineInner({
     followingRef.current = false;
     // 도착했으므로 「못 찾았습니다」 고지는 물러난다 (design-review H-5).
     onJumpLanded?.();
+    // 「방금 여기로 왔다」 (#1076). 가운데로 옮겨 놓는 것만으로는 **어느 줄이
+    // 원본인지**를 사람이 다시 찾아야 한다 — 밀집한 타임라인에서 가운데는
+    // 좌표이지 표시가 아니다. 색과 사라짐 규칙의 근거는 `MessageRow` 의
+    // `rowLanded` 주석에 있다.
+    //
+    // 표시를 **먼저** 세우고 스크롤한다. 반대로 두면 이동이 실패해
+    // (`onScrollToIndexFailed` 회복 경로) 두 프레임 뒤에 앉는 동안 표시가 없는
+    // 창이 생기고, 그 창에서 사람이 보는 것은 표시 없이 움직이는 화면이다.
+    setLandedId(jumpTarget.messageId);
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
     listRef.current?.scrollToIndex({index, viewPosition: 0.5, animated: true});
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1080,7 +1125,21 @@ function TimelineInner({
     [listRef],
   );
 
-  const keyExtractor = useCallback((item: TimelineStreamItem) => item.key, []);
+  const keyExtractor = useCallback((item: FoldedTimelineItem) => item.key, []);
+
+  /**
+   * `renderItem` 이 닫아 잡은 값들 중 **셀이 다시 그려져야 하는 것**.
+   *
+   * `anchorSeq` 하나였을 때의 이유는 아래 `extraData` 주석에 있다. `landedId` 가
+   * 같은 종류로 하나 더 붙는다 — 착지 표시를 세우고 거두는 두 순간에 붙어 있는
+   * 셀들이 새 클로저를 봐야 한다. `useMemo` 로 감싸는 이유는 `VirtualizedList` 가
+   * 이 값을 **동일성**으로 비교하기 때문이다: 인라인 객체는 매 렌더 새것이 되고,
+   * 그러면 이 목록은 「아무것도 안 바뀌었다」를 말할 방법을 잃는다.
+   */
+  const extraData = useMemo(
+    () => ({anchorSeq, landedId}),
+    [anchorSeq, landedId],
+  );
 
   // ---- 목록의 머리와 꼬리는 **엘리먼트**이므로 동일성이 값이다 ----------------
   //
@@ -1171,7 +1230,7 @@ function TimelineInner({
       // this the hard way: moving `anchorSeq` to another row left the wrapper on
       // the old one, so the harness measured nothing and reported it as a
       // failure of the thing it was measuring.
-      extraData={anchorSeq}
+      extraData={extraData}
       // The correction. See the header note: key-identity based, so the derived
       // stream's extra dividers cost nothing.
       maintainVisibleContentPosition={

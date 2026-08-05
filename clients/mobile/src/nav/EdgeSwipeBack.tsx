@@ -24,6 +24,7 @@ import {
   settles,
   type EdgeSwipeState,
 } from './edgeSwipe';
+import {color} from '../design/tokens';
 
 // =============================================================================
 // 셸 위로 push 된 화면을 좌측 엣지에서 밀어 닫는다.
@@ -308,7 +309,7 @@ const styles = StyleSheet.create({
   pane: {
     // 밀려나는 동안 이것이 **위에 얹힌 카드**로 읽히게 하는 그림자. 제자리(x=0)에서는
     // 화면 왼쪽 바깥에 떨어지므로 보이지 않고, 따라서 평소에는 아무것도 바꾸지 않는다.
-    shadowColor: '#000',
+    shadowColor: color.shadow,
     shadowOffset: {width: -3, height: 0},
     shadowOpacity: 0.4,
     shadowRadius: 12,

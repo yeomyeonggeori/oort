@@ -112,6 +112,10 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   directory: {directory: OTHER_DIRECTORY},
   chips: {chips: [{emoji: '👍', count: 2, mine: false}]},
   pausedRepeat: {pausedRepeat: 3},
+  // 접힌 묘비의 수(감사 M-1)와 착지 표시(#1076). 둘 다 스칼라라 값이 곧
+  // 동일성이고, 둘 다 **화면에 보이는 것**을 바꾸므로 비교자가 반드시 봐야 한다.
+  deletedRepeat: {deletedRepeat: 3},
+  landed: {landed: true},
   nowMs: {nowMs: BASE_MS + 60_000},
   onResend: {onResend: () => {}},
   actions: {

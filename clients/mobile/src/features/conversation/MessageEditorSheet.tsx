@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#000000aa',
+    backgroundColor: color.scrim,
   },
   sheet: {
     backgroundColor: color.surface,
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.accent,
   },
   primaryDisabled: {backgroundColor: color.border},
-  primaryLabel: {fontSize: font.label, color: '#ffffff', fontWeight: '700'},
+  primaryLabel: {fontSize: font.label, color: color.onAccent, fontWeight: '700'},
   primaryLabelDisabled: {color: color.textFaint},
   failure: {
     borderRadius: radius.md,
@@ -215,6 +215,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: color.dangerBorder,
   },
-  failureText: {color: '#f0b4b8', fontSize: font.label, lineHeight: 20},
+  failureText: {color: color.dangerText, fontSize: font.label, lineHeight: 20},
   pressed: {opacity: 0.6},
 });

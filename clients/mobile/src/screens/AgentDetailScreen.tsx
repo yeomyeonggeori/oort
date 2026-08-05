@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
   },
   toggleWake: {backgroundColor: color.accent, borderColor: color.accent},
   toggleLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
-  toggleWakeLabel: {color: '#ffffff'},
+  toggleWakeLabel: {color: color.onAccent},
   field: {gap: 2},
   fieldLabel: {fontSize: font.meta, color: color.textFaint},
   fieldValue: {fontSize: font.label, color: color.text, lineHeight: 19},

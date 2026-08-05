@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
   },
   sendDisabled: {backgroundColor: color.border},
   sendPressed: {backgroundColor: color.accentPressed},
-  sendLabel: {color: '#ffffff', fontSize: font.label, fontWeight: '700'},
+  sendLabel: {color: color.onAccent, fontSize: font.label, fontWeight: '700'},
   sendLabelDisabled: {color: color.textFaint},
   mentions: {
     maxHeight: 180,

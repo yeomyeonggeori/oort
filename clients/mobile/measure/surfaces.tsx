@@ -17,6 +17,7 @@ import {MessageEditorSheet} from '../src/features/conversation/MessageEditorShee
 import {
   DayDivider,
   MessageRow,
+  PendingRow,
   RecoveryDivider,
   ROW_PRESSED_BACKGROUND,
   UnreadDivider,
@@ -55,6 +56,16 @@ import {color} from '../src/design/tokens';
 //   QUOTE-READY · QUOTE-DELETED · QUOTE-UNRESOLVED   인용 3상태
 //   TYPING-ONE · TYPING-MANY                          작성 중 (1인·집계)
 //   MARKDOWN                                          코드·리스트·인라인 코드
+//
+// ## U4-5M 이 더한 것 (#1097)
+//
+//   PENDING-GUTTER   낙관적 메아리의 좌우 여백 (감사 M-12) — 확정 행과 **나란히**
+//   DELETED-FOLD     연달아 지워진 메시지의 접기 (감사 M-1) — 접히지 않는 경우 포함
+//   LANDED           인용 점프 착지 틴트 (#1076) — 물든 행과 이웃을 한 장에
+//
+// 셋 다 **비교 대상을 같은 화면에 둔다.** 위생 결함은 혼자 찍으면 안 보이기
+// 때문이다: 「여백이 0 이다」는 여백을 가진 행 옆에서만 보이고, 「접혔다」는 접히지
+// 않은 묘비 옆에서만, 「물들었다」는 안 물든 이웃 옆에서만 보인다.
 //
 // 시트류는 `Modal` 이라 화면을 덮으므로 한 번에 하나씩 띄운다.
 //
@@ -608,6 +619,170 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             chips={[]}
             nowMs={NOW}
           />
+        </Frame>
+      );
+    }
+    // ---- U4-5M (#1097): 폰 위생 · 착지 틴트 · 기준선 ------------------------
+    //
+    // 셋 다 **한 장에 한 논점**이다. 위생 결함은 옆에 비교 대상이 없으면 사진에서
+    // 안 보인다 — 「좌우 여백이 0 이다」는 여백을 가진 행이 같은 화면에 있어야
+    // 보이고, 「접혔다」는 접히기 전이 몇 줄이었는지를 알아야 보인다.
+    case 'pending-gutter': {
+      // 감사 M-12 / #1093 관찰: 낙관적 메아리만 화면 가장자리에 붙어 있었다.
+      // 확정 행 → 메아리 → 실패한 메아리 순으로 세운다. 셋의 본문 왼쪽 끝이
+      // 한 줄에 서는지가 이 사진의 전부다.
+      const echo = (
+        clientMsgId: string,
+        status: 'sending' | 'failed',
+        body: string,
+      ) => ({
+        clientMsgId,
+        channelId: 'ch',
+        authorMemberId: SELF,
+        body,
+        status,
+        createdAtMs: NOW,
+      });
+      return (
+        <Frame label="낙관적 메아리도 같은 여백을 진다 (감사 M-12)">
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'confirmed',
+                seq: 60,
+                thread: undefined,
+                body: '확정된 행 — 이 왼쪽 끝이 기준이다.',
+              } as Message
+            }
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <PendingRow
+            pending={
+              echo('c-1', 'sending', '보내는 중인 메아리 — 예전엔 여기가 튀어나왔다.') as never
+            }
+            startsGroup={false}
+            directory={DIRECTORY}
+          />
+          <PendingRow
+            pending={echo('c-2', 'failed', '실패한 메아리.') as never}
+            startsGroup={false}
+            directory={DIRECTORY}
+            onResend={() => {}}
+          />
+        </Frame>
+      );
+    }
+    case 'deleted-fold': {
+      // 감사 M-1: 캡처 `m-09` 에서 「삭제된 메시지」가 줄마다 쌓였다. 접힌 뒤와
+      // **접히지 않는 경우**를 같은 화면에 둔다 — 규칙이 「전부 접는다」가 아니라
+      // 「잃을 것이 없을 때만 접는다」이므로, 접히지 않은 묘비가 없는 사진은 그
+      // 규칙을 안 보여 준다.
+      const tomb = (id: string, seq: number, over: Partial<Message> = {}) =>
+        ({
+          ...MESSAGE,
+          id,
+          seq,
+          state: 'deleted',
+          body: '',
+          thread: undefined,
+          createdAtMs: NOW - (60 - seq) * 60_000,
+          ...over,
+        }) as unknown as Message;
+      return (
+        <Frame label="연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1)">
+          <MessageRow
+            message={tomb('d-1', 51)}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            deletedRepeat={4}
+            nowMs={NOW}
+          />
+          {/* 답글이 달린 묘비는 접히지 않는다 — 「답글 3개」는 방으로 가는 문이다. */}
+          <MessageRow
+            message={tomb('d-5', 55, {
+              thread: {
+                reply_count: 3,
+                last_reply_seq: 58,
+                last_reply_at: NOW,
+              },
+            } as Partial<Message>)}
+            startsGroup={false}
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={{
+              myMemberId: SELF,
+              onToggleReaction: async () => {},
+              onEdit: async () => {},
+              onDelete: async () => {},
+              onOpenThread: () => {},
+            }}
+          />
+          {/* 반응이 달린 묘비도 접히지 않는다. */}
+          <MessageRow
+            message={tomb('d-6', 56)}
+            startsGroup={false}
+            directory={DIRECTORY}
+            chips={CHIPS}
+            nowMs={NOW}
+          />
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'alive',
+                seq: 57,
+                thread: undefined,
+                body: '살아 있는 행은 그대로다.',
+                createdAtMs: NOW,
+              } as Message
+            }
+            startsGroup={false}
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
+    }
+    case 'landed': {
+      // #1076: 「방금 여기로 왔다」. 물든 행 하나와 물들지 않은 이웃들이 함께
+      // 있어야 이 값이 **띠가 아니라 물듦**이라는 주장이 사진에서 확인된다
+      // (1.13:1 — 계산은 `MessageRow` 의 `rowLanded` 주석과
+      // `__tests__/conversationHygiene.test.tsx` 에 있다).
+      const at = (min: number) => NOW - (14 - min) * 60_000;
+      const rows = [
+        ['앞 줄 — 물들지 않는다.', 0, false],
+        ['인용이 가리킨 원본. 여기로 왔다.', 3, true],
+        ['뒷 줄 — 물들지 않는다.', 6, false],
+      ] as const;
+      return (
+        <Frame label="인용 점프 착지 — 「방금 여기로 왔다」 (#1076)">
+          {rows.map(([body, min, landed], i) => (
+            <MessageRow
+              key={i}
+              message={
+                {
+                  ...MESSAGE,
+                  id: `land-${i}`,
+                  seq: 70 + i,
+                  body,
+                  thread: undefined,
+                  createdAtMs: at(min),
+                } as Message
+              }
+              startsGroup={i === 0}
+              directory={DIRECTORY}
+              chips={[]}
+              landed={landed}
+              nowMs={NOW}
+            />
+          ))}
         </Frame>
       );
     }
