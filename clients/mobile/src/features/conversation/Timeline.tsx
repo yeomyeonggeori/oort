@@ -923,7 +923,7 @@ function TimelineInner({
   const renderItem = useCallback(
     ({item}: {item: TimelineStreamItem}) => {
       renderItemCalls += 1;
-      if (item.kind === 'day') return <DayDivider atMs={item.atMs} />;
+      if (item.kind === 'day') return <DayDivider atMs={item.atMs} nowMs={nowMs} />;
       if (item.kind === 'unread') return <UnreadDivider count={item.count} />;
       if (item.kind === 'recovery') {
         return <RecoveryDivider seq={item.seq} source={item.source} />;

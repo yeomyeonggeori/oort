@@ -1,5 +1,14 @@
 import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
 import {
+  dayDividerLabel,
+  dayDividerSegments,
+  recoveryDividerSegments,
+  unreadDividerSegments,
+  DIVIDER_SPACE,
+  ROW_SPACE,
+  type DividerSegment,
+} from '@momo/core/features/timeline/divider';
+import {
   memberFor,
   memberNameParts,
   type Directory,
@@ -134,13 +143,67 @@ function relativeLabel(atMs: number, nowMs: number): string {
 
 // ---- dividers ---------------------------------------------------------------
 
-export function DayDivider({atMs}: {atMs: number}): React.JSX.Element {
-  const d = new Date(atMs);
-  const label = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+/**
+ * 라벨 조각을 그린다. `figure` 만 자릿폭을 고정한다 (코어의 `DividerSegment`).
+ *
+ * 「3개」의 `3` 은 figure 이고 `개` 는 prose 다 — 조사와 단위는 한글이라, 같은
+ * 표지를 함께 받으면 음절 사이가 벌어진다. 판정은 코어가 하고 여기서는 칠한다.
+ */
+function DividerLabel({
+  segments,
+  tone,
+}: {
+  segments: readonly DividerSegment[];
+  tone?: 'warn';
+}): React.JSX.Element {
   return (
-    <View style={styles.divider} testID="day-divider">
-      <View style={styles.dividerLine} />
-      <Text style={styles.dividerLabel}>{label}</Text>
+    <Text style={[styles.dividerLabel, tone === 'warn' && styles.dividerLabelWarn]}>
+      {segments.map((segment, index) =>
+        segment.kind === 'figure' ? (
+          <Text key={index} style={styles.dividerFigure}>
+            {segment.text}
+          </Text>
+        ) : (
+          segment.text
+        ),
+      )}
+    </Text>
+  );
+}
+
+/**
+ * 하루가 바뀌는 자리.
+ *
+ * ## 문구도 배치도 코어가 정한다 (감사 H-4·M-2)
+ *
+ * 첫 판은 `${y}년 ${m}월 ${d}일` 절대 표기 **고정**이었다. 오늘 대화를 보면서
+ * 「2026년 8월 5일」을 읽고 그게 오늘인지 계산해야 했고, 아픈 것은 상대 표기
+ * 함수가 **같은 파일에 이미 있었다**는 점이다(`relativeLabel` — 스레드 롤업만
+ * 그걸 썼다).
+ *
+ * 그리고 배치가 웹과 달랐다(폰=가운데 라벨+양쪽 rule, 웹=좌측 라벨+우측 rule).
+ * 통일값은 **`leading`** 이고 그 판정은 `divider.ts` 가 든다 — 가운데 라벨은
+ * 글자 수(「오늘」 두 글자 ↔ 「2025년 12월 31일」 열두 글자)에 따라 좌우로
+ * 움직여서, 같은 자리에 반복해 나타나야 할 표지가 매번 다른 x 에 선다.
+ *
+ * 보이는 글자와 **읽히는 글자가 다르다**: 라벨은 언제나 절대 날짜를 함께 말한다
+ * (`dayDividerLabel`). 「오늘」은 눈에는 가장 값싼 낱말이지만 귀에는 어느 날인지
+ * 알려주지 않는다.
+ */
+export function DayDivider({
+  atMs,
+  nowMs,
+}: {
+  atMs: number;
+  nowMs: number;
+}): React.JSX.Element {
+  return (
+    <View
+      accessibilityRole="text"
+      accessibilityLabel={dayDividerLabel(atMs, nowMs)}
+      style={[styles.divider, styles.dividerDay]}
+      testID="day-divider">
+      <DividerLabel segments={dayDividerSegments(atMs, nowMs)} />
       <View style={styles.dividerLine} />
     </View>
   );
@@ -149,10 +212,7 @@ export function DayDivider({atMs}: {atMs: number}): React.JSX.Element {
 export function UnreadDivider({count}: {count: number}): React.JSX.Element {
   return (
     <View style={styles.divider} testID="unread-divider">
-      <View style={[styles.dividerLine, styles.dividerLineWarn]} />
-      <Text style={[styles.dividerLabel, styles.dividerLabelWarn]}>
-        {`새 메시지 ${count}개, 여기까지 읽음`}
-      </Text>
+      <DividerLabel segments={unreadDividerSegments(count)} tone="warn" />
       <View style={[styles.dividerLine, styles.dividerLineWarn]} />
     </View>
   );
@@ -168,10 +228,14 @@ export function RecoveryDivider({
 }): React.JSX.Element {
   return (
     <View style={styles.divider} testID="recovery-divider">
-      <View style={styles.dividerLine} />
-      <Text style={styles.dividerLabel}>
-        {`재연결됨, seq ${seq}까지 복구${source === 'backfill' ? ' (다시 읽음)' : ''}`}
-      </Text>
+      <DividerLabel
+        segments={[
+          ...recoveryDividerSegments(seq),
+          ...(source === 'backfill'
+            ? [{kind: 'prose' as const, text: ' (다시 읽음)'}]
+            : []),
+        ]}
+      />
       <View style={styles.dividerLine} />
     </View>
   );
@@ -1795,12 +1859,14 @@ const styles = StyleSheet.create({
   row: {},
   rowInner: {
     paddingHorizontal: SAFE_GUTTER,
-    // 3pt 였다. 그룹 안에서 메시지 경계가 안 보인다는 지적(감사 H-7)의 폰
-    // 몫이다 — 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다. 시각이
-    // 붙으면서 오른쪽에 표식이 생겼고, 세로도 한 급 벌려 그 둘이 함께 경계를
-    // 만든다. `space.xs`(4)는 「줄 간격보다 크고 그룹 간격(`space.md`)보다
-    // 작다」는 자리다.
-    paddingVertical: space.xs,
+    // 3pt 였다 — 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다(감사
+    // H-7). 값은 **코어가 정한다**: 두 행 사이에 실제로 남는 거리가
+    // `ROW_SPACE.withinGroup` 이 되도록 절반씩 나눠 문다. 웹은 같은 값을
+    // 위아래 패딩의 합으로 만든다.
+    //
+    // 첫 판은 `space.xs`(4 → 사이 8pt)로 잡았는데 코어 랜딩이 그것을 12 로
+    // 정정했다. 「둘의 비를 지키면서 안쪽을 넓힌다」가 그 판정이다.
+    paddingVertical: ROW_SPACE.withinGroup / 2,
     gap: 2,
   },
   /**
@@ -1832,7 +1898,9 @@ const styles = StyleSheet.create({
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
   rowPressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
-  rowStartsGroup: {paddingTop: space.md},
+  // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
+  // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
+  rowStartsGroup: {marginTop: ROW_SPACE.betweenGroups - ROW_SPACE.withinGroup},
   authorRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -1920,16 +1988,30 @@ const styles = StyleSheet.create({
   resendLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
   pressed: {opacity: 0.6},
 
+  // 라벨이 **앞**에 선다(`DIVIDER_LABEL_SIDE`). 여백·두께도 코어 값이다.
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
+    gap: DIVIDER_SPACE.labelGap,
     paddingHorizontal: SAFE_GUTTER,
-    paddingVertical: space.md,
+    paddingTop: DIVIDER_SPACE.marker.blockStart,
+    paddingBottom: DIVIDER_SPACE.marker.blockEnd,
   },
-  dividerLine: {flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.border},
+  // 날짜는 **가장 큰 경계**라 더 연다. 셋이 같은 여백이면 위계가 사라진다.
+  dividerDay: {
+    paddingTop: DIVIDER_SPACE.day.blockStart,
+    paddingBottom: DIVIDER_SPACE.day.blockEnd,
+  },
+  dividerLine: {
+    flex: 1,
+    height: DIVIDER_SPACE.ruleThickness,
+    backgroundColor: color.border,
+  },
   dividerLineWarn: {backgroundColor: color.warn},
-  dividerLabel: {fontSize: font.meta, color: color.textFaint},
+  // `textFaint` 는 배경 대비 3.909:1 로 본문 AA 미달이다(U4-2 M-6 실측).
+  dividerLabel: {fontSize: font.meta, color: color.textMuted},
+  /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
+  dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelWarn: {color: color.warn, fontWeight: '600'},
 
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, paddingTop: space.xs},

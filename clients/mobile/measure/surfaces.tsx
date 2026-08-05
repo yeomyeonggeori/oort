@@ -15,8 +15,11 @@ import {TypingBar} from '../src/features/conversation/TypingBar';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
 import {
+  DayDivider,
   MessageRow,
+  RecoveryDivider,
   ROW_PRESSED_BACKGROUND,
+  UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {NoticeBlock} from '../src/design/atoms';
@@ -468,6 +471,19 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    case 'dividers':
+      return (
+        <Frame label="구분선 — 오늘/어제/절대 · 좌측 라벨 (감사 H-4·M-2)">
+          {/* 넷을 나란히 세우는 이유: 이 goal 의 논점이 「같은 가족으로
+              보이는가」이고, 한 장에 모아야 여백 위계(날짜 > 표지)와 라벨
+              정렬이 한눈에 보인다. */}
+          <DayDivider atMs={NOW} nowMs={NOW} />
+          <DayDivider atMs={NOW - 26 * 3_600_000} nowMs={NOW} />
+          <DayDivider atMs={NOW - 40 * 24 * 3_600_000} nowMs={NOW} />
+          <UnreadDivider count={12} />
+          <RecoveryDivider seq={4821} source="backfill" />
+        </Frame>
+      );
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">

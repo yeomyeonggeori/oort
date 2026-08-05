@@ -10,10 +10,19 @@ import React from 'react';
 import {color, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
+  DayDivider,
   MessageRow,
   PendingRow,
   ROW_PRESSED_BACKGROUND,
+  UnreadDivider,
 } from '../src/features/conversation/MessageRow';
+import {
+  dayDividerSegments,
+  dividerText,
+  DIVIDER_LABEL_SIDE,
+  DIVIDER_SPACE,
+  ROW_SPACE,
+} from '@momo/core/features/timeline/divider';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {
@@ -698,10 +707,105 @@ describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', ()
     );
     const inner = flatten(view.getByTestId('message-press').props.style);
     expect(Number(inner.paddingVertical)).toBeGreaterThan(3);
-    expect(inner.paddingVertical).toBe(space.xs);
+    // 값은 **코어가 정한다**. 두 행 사이에 실제로 남는 거리가 `withinGroup`
+    // 이 되도록 절반씩 나눠 문다 — 웹은 같은 값을 위아래 패딩의 합으로 만든다.
+    expect(Number(inner.paddingVertical) * 2).toBe(ROW_SPACE.withinGroup);
   });
 
   it('그룹 사이 여백이 그룹 안 여백보다 크다 — 아니면 경계가 뒤집힌다', () => {
-    expect(space.md).toBeGreaterThan(space.xs);
+    expect(ROW_SPACE.betweenGroups).toBeGreaterThan(ROW_SPACE.withinGroup);
+    const head = render(
+      <MessageRow
+        message={message()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+    const outer = flatten(head.getByTestId('message-row').props.style);
+    // 안쪽이 절반씩 물고 있으므로 차이만 더한다: 6+6=12(안), 6+6+6=18(사이).
+    expect(
+      Number(outer.marginTop) + ROW_SPACE.withinGroup,
+    ).toBe(ROW_SPACE.betweenGroups);
+  });
+});
+
+describe('#1083 H-4·M-2 — 구분선은 코어 판정을 소비한다', () => {
+  it('오늘/어제를 말한다 — 절대 날짜를 읽고 오늘인지 계산하게 하지 않는다', () => {
+    // **그려진 글자**를 본다. 첫 판은 `dividerText(dayDividerSegments(...))` 를
+    // 단정했는데 그건 코어를 시험하는 것이지 이 화면을 시험하는 것이 아니다 —
+    // 컴포넌트가 코어를 안 쓰도록 되돌려도 초록이었다(red proof 가 잡아냈다).
+    const day = (atMs: number) =>
+      within(
+        render(<DayDivider atMs={atMs} nowMs={BASE_MS} />).getByTestId(
+          'day-divider',
+        ),
+      );
+    expect(day(BASE_MS).getByText('오늘')).toBeTruthy();
+    expect(day(BASE_MS - 26 * 3_600_000).getByText('어제')).toBeTruthy();
+    // 그리고 오래된 것은 절대 날짜로 돌아간다 — 「40일 전」은 날짜가 아니다.
+    const old = day(BASE_MS - 40 * 24 * 3_600_000);
+    expect(old.queryByText('오늘')).toBeNull();
+    expect(old.queryByText('어제')).toBeNull();
+    // 숫자 조각이 자기 `Text` 로 서 있다(자릿폭 고정을 걸어야 하므로).
+    expect(old.getAllByText(/^\d+$/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('보이는 글자와 읽히는 글자가 다르다 — 라벨은 절대 날짜를 함께 말한다', () => {
+    // 「오늘」은 눈에는 가장 값싼 낱말이지만 귀에는 어느 날인지 알려주지 않는다.
+    const view = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
+    const label = String(
+      view.getByTestId('day-divider').props.accessibilityLabel,
+    );
+    expect(label).toContain('오늘');
+    expect(label).toMatch(/\d{4}년 \d{1,2}월 \d{1,2}일/);
+  });
+
+  it('라벨이 앞에 서고 rule 은 하나다 — 가운데 라벨은 글자 수만큼 움직인다', () => {
+    const view = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
+    const kids = view.getByTestId('day-divider').props.children;
+    expect(DIVIDER_LABEL_SIDE).toBe('leading');
+    // 양쪽 rule 은 라벨을 가운데 고정할 때만 뜻이 있다. 소스에 둘이 남아 있으면
+    // 폰만 다시 가운데로 돌아간 것이다.
+    const source = codeOnly(SRC('MessageRow.tsx'));
+    expect(source).not.toMatch(
+      /<View style=\{styles\.dividerLine\} \/>\s*\n\s*<DividerLabel/,
+    );
+    expect(kids).toBeTruthy();
+  });
+
+  it('숫자만 자릿폭을 고정한다 — 조사·단위가 함께 받으면 음절이 벌어진다', () => {
+    const view = render(<UnreadDivider count={12} />);
+    const figures = within(view.getByTestId('unread-divider'))
+      .getAllByText(/^\d+$/)
+      .map(node => flatten(node.props.style));
+    expect(figures.length).toBeGreaterThan(0);
+    for (const style of figures) {
+      expect(style.fontVariant).toEqual(['tabular-nums']);
+    }
+  });
+
+  it('세 구분선이 같은 여백이 아니다 — 날짜가 가장 큰 경계다', () => {
+    const day = flatten(
+      render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />).getByTestId(
+        'day-divider',
+      ).props.style,
+    );
+    const unread = flatten(
+      render(<UnreadDivider count={1} />).getByTestId('unread-divider').props
+        .style,
+    );
+    expect(Number(day.paddingTop)).toBe(DIVIDER_SPACE.day.blockStart);
+    expect(Number(unread.paddingTop)).toBe(DIVIDER_SPACE.marker.blockStart);
+    expect(Number(day.paddingTop)).toBeGreaterThan(Number(unread.paddingTop));
+  });
+
+  it('구분선 글자가 본문 AA 를 지난다', () => {
+    const view = render(<UnreadDivider count={1} />);
+    const label = flatten(view.getByText(/새 메시지/).props.style);
+    expect(contrast(String(label.color ?? color.textMuted), color.bg)).toBeGreaterThanOrEqual(
+      4.5,
+    );
   });
 });
