@@ -174,6 +174,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       onClose={() => {}}
       onToggleReaction={() => {}}
       onReply={() => {}}
+      // 이 둘이 빠져 있었다. `onQuote`/`onCopy` 가 없으면 시트가 그 줄을 아예
+      // 안 그리므로(`availability.quote && onQuote`), 사진 속 시트는 **배송되는
+      // 시트보다 두 줄 짧았다** — 큰 접근성 글자에서 넘침을 보려던 M-7 증거가
+      // 하필 넘치지 않는 시트를 찍고 있었다. AX5 캡처가 이 결함을 드러냈다.
+      onQuote={() => {}}
+      onCopy={() => {}}
       onEdit={() => {}}
       onDelete={() => {}}
     />

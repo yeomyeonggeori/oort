@@ -366,14 +366,31 @@ function BlockNode({
             {/* 마커가 자기 칸을 갖는다(웹의 `list-outside`). 같은 `Text` 안에
                 넣으면 접힌 한글 둘째 줄이 마커 **밑**에서 시작해, 항목 경계가
                 눈으로 사라진다. */}
-            <Text
-              style={[
-                styles.listMarker,
-                block.ordered ? styles.listMarkerOrdered : styles.listMarkerBullet,
-                muted && styles.muted,
-              ]}>
-              {block.ordered ? `${block.start + index}.` : '•'}
-            </Text>
+            {block.ordered ? (
+              <Text style={[styles.listMarker, muted && styles.muted]}>
+                {`${block.start + index}.`}
+              </Text>
+            ) : (
+              // 불릿은 **글자가 아니라 도형**이다 (design-review M-4).
+              //
+              // 칸을 좁히는 것(`minWidth: 18 → 10`)만으로 빈칸은 17.0pt →
+              // 10.0pt 가 됐다(실측). 남은 것은 칸이 아니라 **글리프**였다:
+              // `'•'` 의 잉크는 자기 advance 안에서 2.0~4.7pt 에 앉는다 — 폭도
+              // 위치도 서체가 정하고, 우리는 그것을 못 고른다. 게다가 줄의
+              // 세로 중심이 아니라 **베이스라인**에 선다(22pt 행간에서 눈에
+              // 띈다).
+              //
+              // 도형으로 그리면 셋 다 우리 값이 된다: 점 4pt, 칸 10pt 안의
+              // 정중앙, 세로도 중앙. 사진에서 빈칸 **8.0pt**.
+              //
+              // (첫 판정은 「서체가 전각으로 준다」였는데 **그건 틀렸다** —
+              // 캡처를 2x 로 환산해서 나온 오독이었다. 이 기기는 3x 다.)
+              <View style={styles.listBulletCell} testID="list-bullet">
+                <View
+                  style={[styles.listBulletDot, muted && styles.listBulletDotMuted]}
+                />
+              </View>
+            )}
             <Text
               selectable={selectable}
               style={[styles.listText, muted && styles.muted]}>
@@ -541,8 +558,14 @@ const styles = StyleSheet.create({
     fontSize: font.body,
     lineHeight: 22,
     color: color.textMuted,
+    // 두 자리 + 마침표만큼. **오른쪽 정렬**이라 마침표가 한 줄에 서고, 그래서
+    // 9번과 10번의 본문 시작점도 한 줄에 선다.
+    minWidth: 22,
+    textAlign: 'right',
   },
-  listMarkerBullet: {minWidth: 10},
-  listMarkerOrdered: {minWidth: 22, textAlign: 'right'},
+  // 불릿 칸. 글자가 아니라 도형이므로 폭이 서체와 무관하다.
+  listBulletCell: {width: 10, height: 22, alignItems: 'center', justifyContent: 'center'},
+  listBulletDot: {width: 4, height: 4, borderRadius: 2, backgroundColor: color.textMuted},
+  listBulletDotMuted: {backgroundColor: color.textFaint},
   listText: {flex: 1, fontSize: font.body, color: color.text, lineHeight: 22},
 });

@@ -485,23 +485,30 @@ describe('#1079 N-1 — 같은 동사에 한 이름', () => {
 });
 
 describe('#1079 M-4 — 마커 칸이 불릿과 숫자에 각각 맞는다', () => {
-  function markers(body: string) {
-    const view = render(<MessageBody body={body} />);
-    return within(view.getByTestId('message-list'))
-      .UNSAFE_getAllByType(Text)
-      .map(node => flatten(node.props.style));
+  function list(body: string) {
+    return within(render(<MessageBody body={body} />).getByTestId('message-list'));
   }
 
-  it('불릿 칸과 숫자 칸이 다른 폭이다 — 하나의 값은 둘 다에게 틀렸다', () => {
-    const bullet = markers('- 하나\n- 둘')[0];
-    const ordered = markers('9. 아홉\n10. 열')[0];
-    expect(bullet.minWidth).not.toBe(ordered.minWidth);
-    expect(Number(bullet.minWidth)).toBeLessThan(Number(ordered.minWidth));
+  it('불릿은 글자가 아니라 도형이다 — 점의 크기·위치가 우리 값이어야 한다', () => {
+    // 칸을 좁히면 빈칸은 줄지만(17.0 → 10.0pt), 점 자체의 폭과 자기 advance
+    // 안에서의 위치는 여전히 서체가 정한다(잉크가 2.0~4.7pt 에 앉는다). 도형은
+    // 셋 다 우리 값이다 — 실측 빈칸 8.0pt.
+    expect(list('- 하나').queryByText('•')).toBeNull();
+    const cell = flatten(list('- 하나').getByTestId('list-bullet').props.style);
+    expect(cell.width).toBe(10);
   });
 
-  it('숫자는 오른쪽 정렬이다 — 마침표가 한 줄에 서야 본문도 한 줄에 선다', () => {
-    expect(markers('9. 아홉\n10. 열')[0].textAlign).toBe('right');
-    expect(markers('- 하나')[0].textAlign).toBeUndefined();
+  it('숫자 칸은 두 자리 + 마침표만큼이고 오른쪽 정렬이다', () => {
+    const marker = flatten(list('9. 아홉\n10. 열').getByText('9.').props.style);
+    expect(marker.minWidth).toBe(22);
+    // 마침표가 한 줄에 서야 9번과 10번의 본문 시작점도 한 줄에 선다.
+    expect(marker.textAlign).toBe('right');
+  });
+
+  it('불릿 칸이 숫자 칸보다 좁다 — 하나의 값은 둘 다에게 틀렸다', () => {
+    const cell = flatten(list('- 하나').getByTestId('list-bullet').props.style);
+    const marker = flatten(list('9. 아홉\n10. 열').getByText('9.').props.style);
+    expect(Number(cell.width)).toBeLessThan(Number(marker.minWidth));
   });
 });
 
@@ -546,5 +553,22 @@ describe('#1079 — 사진이 배송되는 화면과 갈라지지 않게', () =>
     expect(contrast(String(wrap.backgroundColor), ROW_PRESSED_BACKGROUND)).toBe(
       1,
     );
+  });
+});
+
+describe('#1079 M-7 — 사진 속 시트가 배송되는 시트와 같은 줄 수여야 한다', () => {
+  const HARNESS = fs.readFileSync(
+    path.resolve(__dirname, '../measure/surfaces.tsx'),
+    'utf8',
+  );
+
+  it('하네스 시트가 모든 액션을 건넨다 — 안 그러면 짧은 시트를 찍는다', () => {
+    // `MessageActionSheet` 은 `availability.quote && onQuote` 로 줄을 그린다.
+    // 콜백이 없으면 그 줄이 사라지고, 큰 글자에서 넘침을 보려던 사진이 하필
+    // 넘치지 않는 시트를 찍게 된다(AX5 캡처가 이것을 드러냈다).
+    const code = codeOnly(HARNESS);
+    for (const prop of ['onQuote=', 'onCopy=', 'onReply=', 'onEdit=', 'onDelete=']) {
+      expect(code).toContain(prop);
+    }
   });
 });
