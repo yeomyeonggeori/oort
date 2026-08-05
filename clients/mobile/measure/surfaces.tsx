@@ -435,6 +435,39 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- U4-4 M2 (#1083): 시간과 경계 ----------------------------------------
+    case 'group': {
+      // 한 사람이 연달아 쓴 그룹. 이 goal 의 논점 둘이 여기서만 보인다:
+      // 연속 행에 시각이 있는가(H-3), 그리고 메시지 사이 경계가 읽히는가(H-7).
+      const at = (min: number, sec = 0) =>
+        NOW - (14 - min) * 60_000 - sec * 1000;
+      const lines = [
+        ['릴레이가 pool exhausted 로 멈췄습니다.', 0],
+        ['재시작하면 seq 는 이어집니다.', 1],
+        ['배포 문서에 롤백 절차도 적어 뒀어요.', 4],
+      ] as const;
+      return (
+        <Frame label="같은 저자 그룹 — 연속 행의 시각과 경계 (감사 H-3·H-7)">
+          {lines.map(([body, min], i) => (
+            <MessageRow
+              key={i}
+              message={{
+                ...MESSAGE,
+                id: `grp-${i}`,
+                seq: 40 + i,
+                body,
+                createdAtMs: at(min as number),
+                thread: undefined,
+              } as unknown as Message}
+              startsGroup={i === 0}
+              directory={DIRECTORY}
+              chips={i === 0 ? CHIPS : []}
+              nowMs={NOW}
+            />
+          ))}
+        </Frame>
+      );
+    }
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">

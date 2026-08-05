@@ -11,6 +11,7 @@ import {color, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
   MessageRow,
+  PendingRow,
   ROW_PRESSED_BACKGROUND,
 } from '../src/features/conversation/MessageRow';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
@@ -569,5 +570,138 @@ describe('#1079 M-7 — 사진 속 시트가 배송되는 시트와 같은 줄 �
     for (const prop of ['onQuote=', 'onCopy=', 'onReply=', 'onEdit=', 'onDelete=']) {
       expect(code).toContain(prop);
     }
+  });
+});
+
+// =============================================================================
+// U4-4 M2 (#1083) — 시간과 경계
+//
+// 감사 H-3: 그룹 창이 **5분**인데(`AUTHOR_GROUP_WINDOW_MS`) 그 안 개별 발화의
+// 시각이 화면 어디에도 없었다. 그런데 **접근성 라벨에는 모든 행의 시각이 있다** —
+// 로터는 아는 것을 눈은 몰랐다. 웹은 hover 로 주지만 폰에는 hover 가 없으므로
+// 선택지는 「항상」 아니면 「전혀」뿐이고, 「전혀」가 고장난 쪽이었다.
+// =============================================================================
+
+describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
+  /** 시각은 접근성에서 숨겨져 있으므로 기본 쿼리가 건너뛴다 — 그것이 설계다. */
+  const HIDDEN = {includeHiddenElements: true} as const;
+
+  function rowAt(startsGroup: boolean) {
+    return render(
+      <MessageRow
+        message={message({body: '재시작하면 seq 는 이어집니다'})}
+        startsGroup={startsGroup}
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+  }
+
+  it('연속 행에도 시각이 있다 — 예전에는 그룹 머리에만 있었다', () => {
+    expect(rowAt(false).getByTestId('row-time', HIDDEN)).toBeTruthy();
+  });
+
+  it('시각이 **한 칸**에 있다 — 머리 행과 연속 행이 같은 자리다', () => {
+    // 두 자리에 있으면 눈이 매 줄 어느 쪽을 볼지 다시 정해야 한다. 한 칸이면
+    // 그 칸을 **안 보기로** 정할 수 있다.
+    const head = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
+    const cont = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
+    expect(head).toEqual(cont);
+    expect(head.position).toBe('absolute');
+    expect(head.textAlign).toBe('right');
+  });
+
+  it('세로를 한 픽셀도 안 쓴다 — 줄을 세우면 5연발에 80pt 가 사라진다', () => {
+    expect(
+      flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style).position,
+    ).toBe('absolute');
+  });
+
+  it('본문이 시각 밑으로 흘러들지 않는다', () => {
+    const source = codeOnly(SRC('MessageRow.tsx'));
+    // 겹침을 막는 것은 여백 하나이고, 그래서 시각의 칸과 **같은 상수**를 쓴다.
+    expect(source).toMatch(/continuationBody:\s*\{paddingRight: TIME_COLUMN/);
+    expect(source).toMatch(/paddingRight: TIME_COLUMN \+ space\.sm,/);
+  });
+
+  it('보조기술이 같은 시각을 두 번 읽지 않는다', () => {
+    const view = rowAt(false);
+    const time = view.getByTestId('row-time', HIDDEN);
+    // 기본 쿼리로는 안 찾힌다 — 그것 자체가 「로터가 안 만난다」의 뜻이다.
+    expect(view.queryByTestId('row-time')).toBeNull();
+    expect(time.props.accessibilityElementsHidden).toBe(true);
+    expect(time.props.importantForAccessibility).toBe('no-hide-descendants');
+    // 그래도 라벨에는 있다 — 눈에서 뺀 것이 아니라 눈에 **더한** 것이다.
+    expect(
+      String(view.getByTestId('message-row').props.accessibilityLabel),
+    ).toMatch(/\d\d:\d\d/);
+  });
+
+  it('시각이 본문 AA 를 지난다 — 뜻을 나르는 글자다', () => {
+    const style = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
+    expect(style.color).toBe(color.textMuted);
+    expect(contrast(String(style.color), color.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('그룹 머리의 시각도 같은 밝기다 — 덜 중요한 쪽이 더 밝지 않게', () => {
+    const source = codeOnly(SRC('MessageRow.tsx'));
+    expect(source).not.toMatch(/time: \{fontSize: font\.meta, color: color\.textFaint\}/);
+  });
+});
+
+describe('#1083 — 아직 서버 시계가 없는 행은 시각을 지어내지 않는다', () => {
+  it('보내는 중인 메아리는 시각 대신 「전송 중」을 든다', () => {
+    // `Author` 가 시각을 들고 있을 때 낙관적 메아리도 **기기 시계**를 그렸다.
+    // 그건 이 행의 머리말이 스스로 적은 규율("no seq and no clock")과 어긋나고,
+    // 서버가 찍을 시각과 다를 수 있다. 시각이 행으로 옮겨가면서 이 행에는
+    // 붙지 않게 됐고, 그 자리는 이미 「전송 중」이 갖고 있다.
+    const view = render(
+      <PendingRow
+        pending={
+          {
+            clientMsgId: 'c1',
+            channelId: 'ch',
+            authorMemberId: OTHER,
+            body: '보내는 중입니다',
+            createdAtMs: BASE_MS,
+            state: 'sending',
+          } as never
+        }
+        startsGroup
+        directory={DIRECTORY}
+      />,
+    );
+    expect(view.getByTestId('pending-sending')).toBeTruthy();
+    expect(
+      view.queryByTestId('row-time', {includeHiddenElements: true}),
+    ).toBeNull();
+  });
+});
+
+describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', () => {
+  it('연속 행 세로 여백이 3pt 보다 크다', () => {
+    // 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다. 시각이 오른쪽에
+    // 표식을 만들고, 세로 여백이 그 둘을 함께 경계로 만든다.
+    //
+    // 소스 문자열이 아니라 **그려진 값**을 잰다: `paddingVertical: 3` 은 반응
+    // 칩에도 있고, 그것까지 금지하면 이 단정은 자기가 무엇을 지키는지 모르는
+    // 단정이 된다.
+    const view = render(
+      <MessageRow
+        message={message()}
+        startsGroup={false}
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+    const inner = flatten(view.getByTestId('message-press').props.style);
+    expect(Number(inner.paddingVertical)).toBeGreaterThan(3);
+    expect(inner.paddingVertical).toBe(space.xs);
+  });
+
+  it('그룹 사이 여백이 그룹 안 여백보다 크다 — 아니면 경계가 뒤집힌다', () => {
+    expect(space.md).toBeGreaterThan(space.xs);
   });
 });
