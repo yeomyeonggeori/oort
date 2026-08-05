@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
   rowChannel: {flexShrink: 1, fontSize: font.label, fontWeight: '700', color: color.text},
   rowMeta: {flex: 1, fontSize: font.meta, color: color.textFaint},
   snippet: {fontSize: font.label, color: color.textMuted, lineHeight: 19},
-  match: {color: color.text, fontWeight: '700', backgroundColor: '#2a3550'},
+  match: {color: color.text, fontWeight: '700', backgroundColor: color.accentSurfaceStrong},
   more: {
     minHeight: TOUCH_TARGET,
     alignItems: 'center',

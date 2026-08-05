@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#000000aa',
+    backgroundColor: color.scrim,
   },
   sheet: {
     backgroundColor: color.surface,
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  reactionMine: {borderColor: color.accent, backgroundColor: '#1a2740'},
+  reactionMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
   reactionGlyph: {fontSize: 24},
   sheetRow: {minHeight: TOUCH_TARGET, justifyContent: 'center'},
   sheetRowLabel: {fontSize: font.body, color: color.text},

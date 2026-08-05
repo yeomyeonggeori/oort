@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
   buttonReject: {backgroundColor: color.dangerBorder},
   buttonInert: {opacity: 0.6},
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
-  buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: '#ffffff'},
+  buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
   error: {fontSize: font.meta, color: color.danger, lineHeight: 18},
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},

@@ -182,7 +182,7 @@ export function PrimaryButton({
       testID={testID}>
       {busy ? (
         <View style={styles.buttonBusy}>
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color={color.onAccent} />
           {busyLabel ? <Text style={styles.buttonLabel}>{busyLabel}</Text> : null}
         </View>
       ) : (
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
   buttonDisabled: {backgroundColor: color.border},
   buttonPressed: {backgroundColor: color.accentPressed},
   buttonBusy: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
-  buttonLabel: {color: '#ffffff', fontSize: font.body, fontWeight: '600'},
+  buttonLabel: {color: color.onAccent, fontSize: font.body, fontWeight: '600'},
   badge: {
     minWidth: 22,
     paddingHorizontal: 6,
@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
   },
   badgeMention: {backgroundColor: color.warn},
   badgeText: {fontSize: font.meta, fontWeight: '600', color: color.text},
-  badgeMentionText: {color: '#1b1405'},
+  badgeMentionText: {color: color.onWarn},
   stateBlock: {
     paddingHorizontal: SAFE_GUTTER,
     paddingVertical: space.xl,
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
     borderColor: color.dangerBorder,
     gap: space.sm,
   },
-  failureText: {color: '#f0b4b8', fontSize: font.label, lineHeight: 20},
+  failureText: {color: color.dangerText, fontSize: font.label, lineHeight: 20},
   sectionLabel: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.lg,

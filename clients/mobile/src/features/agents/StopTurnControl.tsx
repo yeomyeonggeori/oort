@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   },
   buttonQuiet: {borderWidth: 1, borderColor: color.border},
   buttonCommit: {backgroundColor: color.dangerBorder},
-  commitLabel: {fontSize: font.label, fontWeight: '600', color: '#ffffff'},
+  commitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
   inert: {opacity: 0.6},
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},

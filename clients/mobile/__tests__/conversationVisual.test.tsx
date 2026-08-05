@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 
-import {color, SAFE_GUTTER, space} from '../src/design/tokens';
+import {color, line, SAFE_GUTTER, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
   DayDivider,
@@ -615,11 +615,47 @@ describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
   it('시각이 **한 칸**에 있다 — 머리 행과 연속 행이 같은 자리다', () => {
     // 두 자리에 있으면 눈이 매 줄 어느 쪽을 볼지 다시 정해야 한다. 한 칸이면
     // 그 칸을 **안 보기로** 정할 수 있다.
+    //
+    // ## 이 단정이 「칸」으로 좁아진 이유 (u44 리뷰 M-2)
+    //
+    // 첫 판은 두 스타일 객체가 **통째로** 같기를 요구했다. 그 요구는 칸이 하는
+    // 일보다 넓다: 칸을 만드는 것은 x·폭·정렬·잉크이고, `lineHeight` 는 칸이
+    // 아니라 **그 글자가 어느 줄 옆에 앉는가**를 정한다. 그리고 그 줄이 두
+    // 경우에 다르다 — 그룹 머리의 첫 줄은 작성자 줄(13pt)이고 연속 행의 첫
+    // 줄은 본문(16pt)이다. 하나로 묶어 두었더니 시각이 작성자 이름보다 2~3pt
+    // 아래에 앉았고(리뷰 실측), 그것이 M-2 다.
+    //
+    // 그래서 칸의 정체성은 아래 네 값이 지고, 줄 상자는 **다르기를** 요구한다.
     const head = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
     const cont = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
-    expect(head).toEqual(cont);
+    for (const key of ['right', 'width', 'textAlign', 'color', 'fontSize', 'top']) {
+      expect([key, head[key]]).toEqual([key, cont[key]]);
+    }
     expect(head.position).toBe('absolute');
     expect(head.textAlign).toBe('right');
+  });
+
+  it('M-2 — 시각의 줄 상자가 자기 옆에 선 줄을 따라간다', () => {
+    const head = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
+    const cont = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
+    // 그룹 머리 = 머리줄, 연속 행 = 본문 줄. 둘 다 **스케일 위의 이름**이고,
+    // 리뷰가 잡아낸 스케일 밖 숫자(22 를 손으로 적어 둔 것)는 이제 없다.
+    expect(head.lineHeight).toBe(line.head);
+    expect(cont.lineHeight).toBe(line.body);
+    // 그리고 작성자 이름이 **같은 이름의 상자**를 든다 — 두 조각이 한 줄로
+    // 읽히는 근거가 그것이다(폰에는 컨테이너를 건너뛰는 baseline 정렬이 없다).
+    const author = flatten(rowAt(true).getByText('김인턴').props.style);
+    expect(author.lineHeight).toBe(head.lineHeight);
+  });
+
+  it('M-2 — 시각의 y 가 그릇의 위쪽 패딩과 **같은 곳에서** 온다', () => {
+    // 절대 배치 자식은 부모의 패딩을 건너뛰므로, 첫 줄의 y 는 `paddingTop` 이고
+    // 시각의 y 는 `top` 이다. 두 숫자가 따로 적혀 있으면(4 대 6) 그 차이가 그대로
+    // 어긋남이 된다 — 그것이 M-2 의 절반이었다.
+    const view = rowAt(true);
+    const inner = flatten(view.getByTestId('message-press').props.style);
+    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
+    expect(Number(time.top)).toBe(Number(inner.paddingVertical));
   });
 
   it('세로를 한 픽셀도 안 쓴다 — 줄을 세우면 5연발에 80pt 가 사라진다', () => {

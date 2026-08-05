@@ -49,7 +49,16 @@ import {
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {
+  color,
+  font,
+  line,
+  radius,
+  SAFE_GUTTER,
+  slopTo,
+  space,
+  TOUCH_TARGET,
+} from '../../design/tokens';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
@@ -123,6 +132,49 @@ const UNKNOWN_MEMBER = '알 수 없는 멤버';
  * 매 줄 다른 자리에 있으면 매번 다시 봐야 한다.
  */
 const TIME_COLUMN = 34;
+
+/**
+ * 반응 칩의 레이아웃 변. 두 축 모두 이 값이고, 두 축 모두 슬롭이 44 로 채운다.
+ *
+ * 세로 32 는 원래부터 있었다(「44pt 짜리 칩은 반응이 달린 메시지마다 꼬리를 한 줄
+ * 더 밀어 내린다」 — 아래 `Chips` 머리말의 거래). **가로는 보증이 없었다**: 슬롭이
+ * 좌우 2 뿐이라 칩 너비가 40 미만이면 그대로 미달이고, 한 자리 숫자 반응 칩이
+ * 정확히 그 경우다(감사 M-14). 그래서 같은 값을 `minWidth` 로도 깔아, 두 축의
+ * 산수를 **하나의 상수**가 지게 한다.
+ */
+const CHIP_SIZE = 32;
+
+/** 칩을 44pt 로 만드는 슬롭 — 네 변 모두 같다(`CHIP_SIZE` 가 정사각 바닥이므로). */
+const CHIP_SLOP = slopTo(CHIP_SIZE);
+const CHIP_HIT_SLOP = {
+  top: CHIP_SLOP,
+  bottom: CHIP_SLOP,
+  left: CHIP_SLOP,
+  right: CHIP_SLOP,
+} as const;
+
+/**
+ * `font.meta` 한 줄짜리 누를 것을 44pt 로 만드는 슬롭 (감사 M-14).
+ *
+ * 답글 표식 · 스레드 롤업 · 아티팩트 주소 · 행 오류 「닫기」가 전부 이 모양이다 —
+ * 12pt 글자 한 줄(`line.meta`)이고, 높이를 44 로 올리면 그만큼 세로가 사라진다.
+ * 슬롭 값을 손으로 적어 두었던 것이 결함이었으므로(6·6 → 29pt) 여기서 도출한다.
+ *
+ * ## 겹침은 여기서 해가 되지 않는다
+ *
+ * 14pt 씩 넓히면 답글 표식은 위로 작성자 줄에, 스레드 롤업은 위로 본문에 닿는다.
+ * 그런데 그 자리들의 탭은 **같은 곳으로 간다**: 행 탭은 `threadTarget` 을 열고,
+ * 두 표식이 여는 것도 같은 스레드다(위 `ReplyMarker` 머리말·아래 롤업 참조).
+ * 그리고 아래로 겹치는 반응 칩은 JSX 에서 **뒤에** 그려지므로 RN 의 히트 테스트가
+ * 칩을 먼저 집는다 — 형제는 쓰인 순서대로 칠해지고 역순으로 눌린다.
+ */
+const META_SLOP = slopTo(line.meta);
+const META_HIT_SLOP = {
+  top: META_SLOP,
+  bottom: META_SLOP,
+  left: META_SLOP,
+  right: META_SLOP,
+} as const;
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
 function timeLabel(atMs: number): string {
@@ -311,8 +363,9 @@ function Author({
  *
  * `hitSlop` rather than padding for the 44px target: a 44px-tall chip would push
  * the tail of every reacted message a line further down, and density is one of
- * the things this product has. The slop is 6 top and bottom over a 32px chip,
- * which is 44 to a thumb and 32 to the layout.
+ * the things this product has. The slop is derived from `CHIP_SIZE` so the chip
+ * is 44 to a thumb and 32 to the layout — **on both axes now** (감사 M-14: 세로만
+ * 보증되고 가로는 슬롭 2 뿐이라 한 자리 숫자 칩이 미달이었다).
  */
 function Chips({
   chips,
@@ -333,7 +386,7 @@ function Chips({
             chip.mine ? '내 반응 취소' : '나도 반응하기'
           }`}
           disabled={onToggle === undefined}
-          hitSlop={{top: 6, bottom: 6, left: 2, right: 2}}
+          hitSlop={CHIP_HIT_SLOP}
           onPress={() => onToggle?.(chip.emoji)}
           style={({pressed}) => [
             styles.chip,
@@ -418,7 +471,7 @@ function ReplyMarker({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="이 답글이 달린 스레드 열기"
-      hitSlop={{top: 6, bottom: 6, left: 4, right: 4}}
+      hitSlop={META_HIT_SLOP}
       onPress={onOpen}
       style={({pressed}) => [pressed && styles.pressed]}
       testID="reply-marker">
@@ -678,7 +731,7 @@ function ArtifactCard({
             <Pressable
               accessibilityRole="link"
               accessibilityLabel={`${artifact.url} 열기`}
-              hitSlop={{top: 6, bottom: 6, left: 4, right: 4}}
+              hitSlop={META_HIT_SLOP}
               onPress={() => openLink(artifact.url as string)}
               testID="artifact-link">
               <Text style={styles.cardLink} numberOfLines={1}>
@@ -767,6 +820,21 @@ export interface MessageRowProps {
   chips: ReactionChip[];
   /** This paused-agent notice stands in for N of them (core folded the rest). */
   pausedRepeat?: number;
+  /**
+   * 이 묘비가 자기를 포함해 **몇 개의 삭제된 메시지를 대신하는가** (2 이상, 감사 M-1).
+   *
+   * 그 외의 행에는 없다. 접기 판정은 목록이 하고(`foldDeletedRuns`), 이 행은
+   * 자기가 몇을 대신하는지만 듣는다 — `pausedRepeat` 이 이미 쓰는 모양 그대로다.
+   */
+  deletedRepeat?: number;
+  /**
+   * 방금 점프해서 도착한 행인가 (#1076).
+   *
+   * 목록이 든다. 행이 스스로 알 수 없는 사실이기도 하지만, 무엇보다 **한 번에 한
+   * 행만** 참이어야 하고 그것을 아는 것은 목록뿐이다. 표시가 언제 물러나는지는
+   * `styles.rowLanded` 주석에 있다.
+   */
+  landed?: boolean;
   nowMs: number;
   /** A server-stored `failed` row offers a fresh send, not a replay. */
   onResend?: (message: Message) => void;
@@ -861,6 +929,8 @@ function MessageRowInner({
   directory,
   chips,
   pausedRepeat,
+  deletedRepeat,
+  landed,
   nowMs,
   onResend,
   actions,
@@ -1122,6 +1192,13 @@ function MessageRowInner({
     UNKNOWN_MEMBER,
   ).name;
 
+  // 접힌 묘비의 문장. 접히지 않았으면 예전 그대로 한 낱말이다 — 「삭제된 메시지
+  // 1개」라고 세는 화면은 아무도 묻지 않은 것을 센다.
+  const tombstoneText =
+    deletedRepeat !== undefined && deletedRepeat > 1
+      ? `삭제된 메시지 ${deletedRepeat}개`
+      : '삭제된 메시지';
+
   const tail = [
     !deleted && message.state === 'edited' ? '수정됨' : null,
     rollup
@@ -1145,6 +1222,7 @@ function MessageRowInner({
         chips,
         tail,
         deleted,
+        tombstoneText,
         replyTo:
           isMarkedReply && !deleted
             ? replyParent === null
@@ -1164,7 +1242,14 @@ function MessageRowInner({
       })}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
-      style={[styles.row, startsGroup && styles.rowStartsGroup]}
+      style={[
+        styles.row,
+        startsGroup && styles.rowStartsGroup,
+        // 착지 틴트는 **그릇**이 입는다: 안쪽(`rowInner`)에 걸면 좌우
+        // `SAFE_GUTTER` 만큼이 물들지 않아, 화면 너비를 가로지르는 한 줄이 아니라
+        // 가운데 떠 있는 상자가 된다 — 그것은 「여기다」가 아니라 카드다.
+        landed && styles.rowLanded,
+      ]}
       testID="message-row"
       {...longPress.handlers}>
       <Pressable
@@ -1244,8 +1329,11 @@ function MessageRowInner({
           // tombstone is a statement ABOUT a message, not a message. Web R2 M5
           // set this in body size and leading, and at a glance it read as
           // content — it keeps its place and gives up its weight.
+          // 연달아 지워진 메시지들은 **한 줄**로 접힌다 (감사 M-1: 캡처 `m-09` 에
+          // 「삭제된 메시지」가 두 줄 연속으로 서 있다 — 지워진 것들이 지워지지
+          // 않은 것들만큼 자리를 차지한다). 접기 규칙은 `foldDeletedRuns` 에 있다.
           <Text style={styles.tombstone} testID="tombstone">
-            {appNote('삭제된 메시지')}
+            {appNote(tombstoneText)}
           </Text>
         ) : (
           <>
@@ -1320,7 +1408,7 @@ function MessageRowInner({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="스레드 열기"
-                  hitSlop={{top: 6, bottom: 6, left: 4, right: 4}}
+                  hitSlop={META_HIT_SLOP}
                   onPress={() => {
                     if (longPress.consumeTap()) return;
                     actions.onOpenThread?.(message);
@@ -1382,7 +1470,7 @@ function MessageRowInner({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="오류 닫기"
-              hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+              hitSlop={META_HIT_SLOP}
               onPress={() => setRowError(null)}
               testID="message-action-error-dismiss">
               <Text style={styles.rowFailureDismiss}>닫기</Text>
@@ -1429,7 +1517,9 @@ function MessageRowInner({
           <Text
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
-            style={styles.rowTime}
+            // 어느 줄 옆에 서는지에 따라 줄 상자를 고른다 (u44 리뷰 M-2 —
+            // `styles.rowTime` 주석에 실측과 이유가 있다).
+            style={[styles.rowTime, startsGroup && styles.rowTimeGroupHead]}
             testID="row-time">
             {timeLabel(message.createdAtMs)}
           </Text>
@@ -1596,6 +1686,8 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   directory: true,
   chips: true,
   pausedRepeat: true,
+  deletedRepeat: true,
+  landed: true,
   nowMs: true,
   onResend: true,
   actions: true,
@@ -1637,7 +1729,7 @@ function sameQuote(
     a.quotesAnother === b.quotesAnother &&
     a.edited === b.edited &&
     a.lines.length === b.lines.length &&
-    a.lines.every((line, index) => line === b.lines[index])
+    a.lines.every((text, index) => text === b.lines[index])
   );
 }
 
@@ -1650,6 +1742,11 @@ export function sameMessageRowProps(
     a.startsGroup === b.startsGroup &&
     a.directory === b.directory &&
     a.pausedRepeat === b.pausedRepeat &&
+    // 둘 다 스칼라라 동일성 비교로 충분하다. `landed` 는 점프 한 번에 두 번
+    // 바뀌고(세우기·거두기) 그때 붙어 있는 행이 전부 비교를 한 번씩 지나는데,
+    // 다시 그려지는 것은 참이 된 행과 거짓이 된 행 둘뿐이다.
+    a.deletedRepeat === b.deletedRepeat &&
+    a.landed === b.landed &&
     a.nowMs === b.nowMs &&
     a.onResend === b.onResend &&
     a.actions === b.actions &&
@@ -1701,6 +1798,7 @@ export function rowAccessibilityLabel({
   chips,
   tail,
   deleted,
+  tombstoneText,
   replyTo,
   quoted,
 }: {
@@ -1709,6 +1807,15 @@ export function rowAccessibilityLabel({
   chips: ReactionChip[];
   tail: string[];
   deleted: boolean;
+  /**
+   * 묘비가 화면에서 말하는 그 문장. 접혀 있으면 「삭제된 메시지 3개」다.
+   *
+   * 눈이 읽는 것과 로터가 듣는 것이 갈리면 안 된다: 접기는 **몇 개가 지워졌는지**를
+   * 나르는 장치이고, 그 수를 화면에만 주면 눈으로 못 읽는 사람에게는 세 줄이
+   * 조용히 한 줄이 된 것이 된다. 기본값은 낱말 그대로라 호출부가 안 넘기면
+   * 예전과 같다.
+   */
+  tombstoneText?: string;
   /**
    * What the 답글 marker says, when the row is drawing one. It comes FIRST,
    * before the body, for the same reason it is drawn above the body: a reader
@@ -1728,7 +1835,7 @@ export function rowAccessibilityLabel({
     timeLabel(message.createdAtMs),
     replyTo ?? '',
     quoted ?? '',
-    deleted ? '삭제된 메시지' : (message.body ?? '').trim(),
+    deleted ? (tombstoneText ?? '삭제된 메시지') : (message.body ?? '').trim(),
     ...tail,
     ...chips.map(
       chip => `${chip.emoji} 반응 ${chip.count}개${chip.mine ? ', 내 반응' : ''}`,
@@ -1809,7 +1916,25 @@ export function WorkingRow({
   );
 }
 
-/** A local echo: on screen the instant it is sent, with no seq and no clock. */
+/**
+ * A local echo: on screen the instant it is sent, with no seq and no clock.
+ *
+ * ## 이 행만 화면 가장자리에 붙어 있었다 (감사 M-12 / #1093 관찰)
+ *
+ * 확정된 행의 좌우 여백은 `styles.rowInner` 가 지고, 바깥 `styles.row` 는 비어
+ * 있다(`row: {}` — 여백을 안쪽 `Pressable` 에 둔 이유는 눌림 채움이 행 전체를
+ * 덮게 하려는 것이었다). 이 행은 누를 것이 없어서 그 `Pressable` 도 없었고, 그
+ * 결과 **자식들이 빈 그릇에 직결**돼 좌우 여백이 0 이 됐다.
+ *
+ * 보이는 결과: 내가 방금 보낸 메시지만 왼쪽으로 튀어나왔다가, 서버 사본이 이 행을
+ * 대체하는 순간 제자리를 찾는다. 이 행이 존재하는 이유가 「서버 사본이 도착해도
+ * 글이 다시 흐르지 않게 한다」인데(아래 `quote` 주석·`MessageBody` 의 같은 규율),
+ * 정작 행 자신이 가장 큰 흐름을 만들고 있었다.
+ *
+ * `WorkingRow` 가 이미 답을 들고 있다: 누를 것이 없는 행도 **여백은 진다**. 같은
+ * `rowInner` 를 쓰되 `rowTimeReserve` 는 안 쓴다 — 이 행에는 시각이 없고, 없는
+ * 것을 위해 자리를 비우면 그것은 예약이 아니라 그냥 여백이다.
+ */
 export function PendingRow({
   pending,
   startsGroup,
@@ -1836,34 +1961,37 @@ export function PendingRow({
     <View
       style={[styles.row, startsGroup && styles.rowStartsGroup]}
       testID="pending-row">
-      {startsGroup ? (
-        <Author directory={directory} memberId={pending.authorMemberId} />
-      ) : null}
-      {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
-      {/* Same anatomy as a confirmed row, dimmed: the text must not re-flow when
-          the server's copy replaces this one — which is exactly why the echo
-          goes through the SAME renderer. Before this, a pending row printed
-          markdown raw and then rearranged itself the instant its seq landed. */}
-      <MessageBody body={pending.body} muted selectable />
-      {failed ? (
-        <View style={styles.failedRow}>
-          <Text style={styles.failedText}>전송 실패</Text>
-          {onResend ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="다시 보내기"
-              onPress={() => onResend(pending.clientMsgId)}
-              style={({pressed}) => [styles.resend, pressed && styles.pressed]}
-              testID="pending-resend">
-              <Text style={styles.resendLabel}>다시 보내기</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : (
-        <Text style={styles.sending} testID="pending-sending">
-          전송 중
-        </Text>
-      )}
+      <View style={styles.rowInner}>
+        {startsGroup ? (
+          <Author directory={directory} memberId={pending.authorMemberId} />
+        ) : null}
+        {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
+        {/* Same anatomy as a confirmed row, dimmed: the text must not re-flow
+            when the server's copy replaces this one — which is exactly why the
+            echo goes through the SAME renderer. Before this, a pending row
+            printed markdown raw and then rearranged itself the instant its seq
+            landed. */}
+        <MessageBody body={pending.body} muted selectable />
+        {failed ? (
+          <View style={styles.failedRow}>
+            <Text style={styles.failedText}>전송 실패</Text>
+            {onResend ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="다시 보내기"
+                onPress={() => onResend(pending.clientMsgId)}
+                style={({pressed}) => [styles.resend, pressed && styles.pressed]}
+                testID="pending-resend">
+                <Text style={styles.resendLabel}>다시 보내기</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : (
+          <Text style={styles.sending} testID="pending-sending">
+            전송 중
+          </Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -1922,14 +2050,43 @@ const styles = StyleSheet.create({
    * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다 — 흐름에
    * 넣으면 줄이 하나 늘고, 5연발에서 그것은 80pt 다. 겹침을 막는 것은
    * `rowTimeReserve` 이고, 가림을 막는 것은 렌더 순서다(위 JSX 주석).
+   *
+   * ## 기준선 (u44 리뷰 M-2)
+   *
+   * 리뷰 실측: 그룹 머리에서 `06:59` 가 `곽성재` 보다 **2~3pt 아래**에 앉는다.
+   * 두 가지가 겹쳐 있었다.
+   *
+   * 1. `top: space.xs`(4)가 **그릇의 패딩과 다른 숫자**였다. RN(Yoga)에서 절대
+   *    배치 자식의 오프셋은 부모의 패딩을 건너뛰므로(리뷰가 잰 우측 끝
+   *    386 = 402 − `SAFE_GUTTER` 가 그 증거다), 첫 줄의 y 는 `rowInner` 의
+   *    `paddingTop` 이고 시각의 y 는 4 였다. 두 값이 우연히 가까웠을 뿐 같은
+   *    사실에서 나온 적이 없다. 이제 둘 다 `ROW_SPACE.withinGroup / 2` 를 든다.
+   * 2. `lineHeight: 22` 는 **본문 줄 상자**의 값인데 그룹 머리의 첫 줄은
+   *    작성자 줄(13pt)이다. iOS 는 `lineHeight` 가 붙은 글자를 줄 상자 가운데에
+   *    놓으므로, 15.5pt 짜리 줄 옆에 22pt 짜리 상자를 세우면 그 차이의 절반이
+   *    그대로 어긋남이 된다.
+   *
+   * 그래서 시각은 자기가 어느 줄 옆에 서는지에 따라 **상자를 고른다**:
+   * 연속 행이면 본문 상자(`line.body`), 그룹 머리면 머리줄 상자(`line.head` —
+   * `authorName` 이 같은 이름을 든다). 폰에는 컨테이너를 건너뛰는 baseline
+   * 정렬이 없으므로 「선언된 같은 상자를 같은 y 에서 시작한다」가 여기서 쓸 수
+   * 있는 가장 강한 규율이다.
+   *
+   * **실측** (iPhone 17 Pro · `measure/captures/u44-group.png` · pt=px/3):
+   * 그룹 머리의 광학 어긋남 **+2.67pt → +0.33pt**. 남는 0.33pt 는 13pt 와 12pt
+   * 글자의 상승부 차이라 상자 값을 어떻게 잡아도 그대로다 — 다섯 값을 세워
+   * 확인했고, 그 실험은 `line.head` 의 주석에 있다.
+   *
+   * 첫 흐름 자식이 카드·인용·묘비인 행은 근사다 — 그 경우 예약(`rowTimeReserve`)이
+   * 겹침을 막고 있고, 정렬은 그 다음 문제다. 모른다고 적어 둔다.
    */
   rowTime: {
     position: 'absolute',
     right: SAFE_GUTTER,
-    // 규칙 하나: **이 메시지의 맨 위 오른쪽**. 그룹 머리면 그 줄이 작성자
-    // 줄이고 연속 행이면 본문 첫 줄이다 — 자리를 따로 계산하지 않는다.
+    // 규칙 하나: **이 메시지의 맨 위 오른쪽**. 그 y 는 그릇의 위쪽 패딩이고,
+    // 값은 그 패딩과 **같은 곳**에서 온다(`rowInner.paddingVertical`).
     // (`rowStartsGroup` 의 여백은 바깥 `row` 에 있으므로 여기 안 들어온다.)
-    top: space.xs,
+    top: ROW_SPACE.withinGroup / 2,
     width: TIME_COLUMN,
     textAlign: 'right',
     fontSize: font.meta,
@@ -1938,11 +2095,63 @@ const styles = StyleSheet.create({
     // 함께 옮겼다: 한 화면에서 같은 종류의 글자가 두 밝기면, 덜 중요한 쪽이
     // 더 밝아지는 일이 생긴다.
     color: color.textMuted,
-    lineHeight: 22,
+    // 연속 행의 첫 줄은 본문이다.
+    lineHeight: line.body,
   },
+  /** 그룹 머리의 첫 줄은 **작성자 줄**이므로 상자도 그쪽을 든다 (M-2). */
+  rowTimeGroupHead: {lineHeight: line.head},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
   rowPressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
+  /**
+   * 「방금 여기로 왔다」 — 인용·검색 점프의 착지 표시 (#1076).
+   *
+   * ## 왜 파랑이 아닌가 (색 선택 근거)
+   *
+   * 웹의 대응물은 `bg-accent-soft` 이고, 그래서 첫 번째 유혹은 폰의
+   * `accentSurface`(파랑)를 쓰는 것이다. **그것은 이름을 옮긴 것이지 뜻을 옮긴
+   * 것이 아니다.**
+   *
+   * 웹의 accent 는 호박(앰버)이고 그 색이 이미 맡고 있는 뜻이 셋이다 — 멘션 ·
+   * 미읽 경계 · 앵커 착지(`gates/gate-quote.mjs` 가 그 셋을 로그에 함께 찍어
+   * 「인용이 저것들과 같은 색인가」를 사람이 눈이 아니라 숫자로 보게 한다).
+   * 셋의 공통점은 **「여기를 보라」** 다. 착지는 그 가족의 셋째다.
+   *
+   * 폰의 accent 는 파랑이고, 그 색이 맡고 있는 뜻은 다른 가족이다 — 보내기 버튼과
+   * **내 반응 칩**, 즉 **「내가 한 것」**. u44 직전 리뷰가 인용 레일에 대해 이미
+   * 같은 판정을 내렸고 그 단정이 테스트로 남아 있다(`conversationVisual` H-2:
+   * *"accent 는 이미 보내기 버튼과 내 반응 칩의 뜻이고, 세 번째 뜻을 갖게 두지
+   * 않는다"*). 착지 틴트에 파랑을 쓰면 방금 점프해 온 행이 **내가 반응한 행**의
+   * 옷을 입는다.
+   *
+   * 폰에서 「여기를 보라」를 맡고 있는 색은 앰버다: 미읽 구분선이 `warn` 으로
+   * 그려진다(`dividerLineWarn`) — 웹에서 그 경계가 accent 로 그려지는 것과 같은
+   * 자리다. 그래서 대응은 **accent→accent 가 아니라 「미읽 경계를 그리는 색」→
+   * 「미읽 경계를 그리는 색」** 이고, 그 색의 가장 부드러운 단이 `warnSurface` 다.
+   *
+   * ## 값이 옳은지 (실측)
+   *
+   * `warnSurface`(#241d0f) 는 앱 배경(#0f1115) 위에서 **1.13:1**. 같은 팔레트의
+   * 다른 부드러운 단들과 한 계단이고(`dangerSurface` 1.16 · `okSurface` 1.17),
+   * 웹의 착지 틴트가 자기 표면(`--surface`) 위에서 갖는 값(1.23:1)과 같은
+   * 자릿수다. 즉 이것은
+   * **띠가 아니라 물듦**이다 — 고도(`surface`, 1.08:1)로 오해되지 않을 만큼
+   * 색을 갖되, 행을 카드로 만들지 않는다.
+   *
+   * ## 언제 사라지는가 — 시간이 아니라 손가락
+   *
+   * 웹은 1,600ms 타이머를 쓴다(`inbox/anchor.ts`). 폰에서 그 값을 베끼면 타이머가
+   * **이동 애니메이션과 경주한다**: 점프는 `scrollToIndex({animated: true})` 이고,
+   * 목표 행이 아직 측정되지 않았으면 `onScrollToIndexFailed` 가 한 번 더 돈다.
+   * 그 사이에 표시가 꺼지면 사람은 도착한 자리에서 아무 표시도 못 본다 — 표시가
+   * 없는 것보다 나쁘다(있다고 약속하고 안 준 것이므로).
+   *
+   * 그래서 기준은 **사람이 화면을 다시 가져가는 순간**이다: `onScrollBeginDrag`
+   * — 유리에 닿은 손가락. 이 목록은 그 신호를 이미 「읽는 사람이 주도권을
+   * 되찾았다」는 뜻으로 쓰고 있다(따라가기 보정이 물러나는 자리와 같은 신호).
+   * 표시를 세운 것이 사람의 동작이었으므로, 거두는 것도 사람의 동작이다.
+   */
+  rowLanded: {backgroundColor: color.warnSurface},
   // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
   // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
   rowStartsGroup: {marginTop: ROW_SPACE.betweenGroups - ROW_SPACE.withinGroup},
@@ -1955,7 +2164,15 @@ const styles = StyleSheet.create({
     gap: space.xs,
     flexWrap: 'wrap',
   },
-  authorName: {fontSize: font.label, fontWeight: '700', color: color.text},
+  // 줄 상자를 **선언한다**: 행 시각이 이 줄 옆에 서므로(`rowTimeGroupHead`),
+  // 이 값이 암묵적인 서체 자연값이면 그 정렬은 아무도 적어 둘 수 없는 값에
+  // 기대게 된다 (u44 리뷰 M-2).
+  authorName: {
+    fontSize: font.label,
+    lineHeight: line.head,
+    fontWeight: '700',
+    color: color.text,
+  },
   authorNameAgent: {color: color.agent},
   authorHandle: {fontSize: font.meta, color: color.textFaint},
   authorMeta: {fontSize: font.meta, color: color.textFaint},
@@ -1963,7 +2180,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: radius.sm,
-    backgroundColor: '#2a2136',
+    backgroundColor: color.agentSurface,
   },
   agentTagText: {fontSize: 10, color: color.agent, fontWeight: '600'},
   // 그룹 머리의 시각. 연속 행의 것과 **같은 밝기**여야 한다 — 위 주석 참조.
@@ -1971,7 +2188,7 @@ const styles = StyleSheet.create({
   // 앱이 말하는 문장이다 — 구분축은 `appVoice.ts` 의 `※` 가 든다. 인용 안의
   // 묘비와 **같은 낱말이므로 같은 모양이어야 한다**: 한 화면에 두 모양으로 나오면
   // 사람은 둘이 다른 것을 뜻한다고 읽는다.
-  tombstone: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
+  tombstone: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
   edited: {fontSize: font.meta, color: color.textFaint},
   tailRow: {
     flexDirection: 'row',
@@ -1980,12 +2197,27 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     paddingTop: 2,
   },
-  rollup: {fontSize: font.meta, color: color.textFaint},
-  rollupLink: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
+  // 아래 넷은 전부 **누를 것의 라벨**이므로 줄 상자를 선언한다: 44pt 슬롭
+  // (`META_SLOP`)이 그 줄 높이에서 도출되고, 선언하지 않으면 그 산수가 서체
+  // 자연값이라는 아무도 못 적는 숫자 위에 서게 된다 (감사 M-14).
+  rollup: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
+  rollupLink: {
+    fontSize: font.meta,
+    lineHeight: line.meta,
+    color: color.accentText,
+    fontWeight: '600',
+  },
   // Meta size, like the tail: this is a statement ABOUT the message, and it must
   // not compete with the message for the eye.
-  replyMark: {fontSize: font.meta, color: color.textFaint},
-  replyMarkLink: {fontSize: font.meta, color: color.textMuted},
+  replyMark: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
+  replyMarkLink: {
+    fontSize: font.meta,
+    lineHeight: line.meta,
+    color: color.textMuted,
+    // 「↳ 답글」(루트를 못 불러온 경우)이 이 라벨의 가장 짧은 판이다. 가로도
+    // 슬롭과 더해 44 가 되도록 바닥을 깐다 — 세로만 보증하던 것이 M-14 였다.
+    minWidth: TOUCH_TARGET - 2 * META_SLOP,
+  },
   rowFailure: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1998,9 +2230,22 @@ const styles = StyleSheet.create({
     borderColor: color.dangerBorder,
     backgroundColor: color.dangerSurface,
   },
-  rowFailureText: {flex: 1, fontSize: font.meta, color: '#f0b4b8', lineHeight: 17},
+  rowFailureText: {
+    flex: 1,
+    fontSize: font.meta,
+    color: color.dangerText,
+    lineHeight: line.meta,
+  },
   rowReceipt: {fontSize: font.meta, color: color.textMuted, paddingTop: space.xs},
-  rowFailureDismiss: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
+  rowFailureDismiss: {
+    fontSize: font.meta,
+    lineHeight: line.meta,
+    color: color.textMuted,
+    fontWeight: '600',
+    // 「닫기」 두 글자여도 슬롭과 더해 44 가 되도록 (감사 M-14 — 33pt 였다).
+    minWidth: TOUCH_TARGET - 2 * META_SLOP,
+    textAlign: 'right',
+  },
   sending: {fontSize: font.meta, color: color.textFaint},
   // 본문 크기의 자리를 차지하되 본문의 무게는 갖지 않는다 — 이것은 메시지에
   // **대한** 서술이지 메시지가 아니다(묘비와 같은 규칙).
@@ -2011,7 +2256,7 @@ const styles = StyleSheet.create({
   // 남겨 두면 다음 사람이 그 축이 서 있다고 믿는다.
   workingBody: {
     fontSize: font.body,
-    lineHeight: 22,
+    lineHeight: line.body,
     color: color.textMuted,
   },
   failedRow: {
@@ -2065,7 +2310,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     // 32 in layout, 44 to a thumb via `hitSlop`. See the note on `Chips`.
-    minHeight: 32,
+    // **두 축 모두** — `minWidth` 가 M-14 가 센 가로 미보증을 닫는다.
+    minHeight: CHIP_SIZE,
+    minWidth: CHIP_SIZE,
     gap: 4,
     paddingHorizontal: space.sm,
     paddingVertical: 3,
@@ -2074,7 +2321,7 @@ const styles = StyleSheet.create({
     borderColor: color.border,
     backgroundColor: color.surface,
   },
-  chipMine: {borderColor: color.accent, backgroundColor: '#1a2740'},
+  chipMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
   chipPressed: {backgroundColor: color.surfacePressed},
   chipEmoji: {fontSize: font.label},
   chipCount: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
@@ -2097,10 +2344,10 @@ const styles = StyleSheet.create({
   },
   cardTitle: {flex: 1, fontSize: font.label, fontWeight: '700', color: color.text},
   cardBody: {fontSize: font.label, color: color.text, lineHeight: 19},
-  cardNote: {fontSize: font.meta, color: color.textMuted, lineHeight: 17},
+  cardNote: {fontSize: font.meta, color: color.textMuted, lineHeight: line.meta},
   cardNoteDanger: {color: color.danger},
   cardMeta: {fontSize: font.meta, color: color.textFaint},
-  cardLink: {fontSize: font.meta, color: color.accentText},
+  cardLink: {fontSize: font.meta, lineHeight: line.meta, color: color.accentText},
   detailRows: {gap: 2, paddingTop: space.xs},
   detailRow: {flexDirection: 'row', gap: space.sm},
   detailLabel: {fontSize: font.meta, color: color.textFaint, minWidth: 72},
@@ -2116,7 +2363,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   statusChip_ok: {borderColor: color.okBorder, backgroundColor: color.okSurface},
-  statusChip_warn: {borderColor: '#4a3a1c', backgroundColor: '#241d0f'},
+  statusChip_warn: {borderColor: color.warnBorder, backgroundColor: color.warnSurface},
   statusChip_danger: {borderColor: color.dangerBorder, backgroundColor: color.dangerSurface},
   statusChip_muted: {borderColor: color.border, backgroundColor: color.surfacePressed},
   statusChipText: {fontSize: 11, fontWeight: '600'},
