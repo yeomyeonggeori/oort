@@ -121,11 +121,53 @@ export interface ProviderLinkTest {
   entries?: ProviderChainProbe[];
 }
 
-/** Closed-world PUT body: the server rejects any other key with a 400. */
+/**
+ * The `oauth` half of a PUT body (`PutProviderOAuthRequest`, ADR-0147 결정 1).
+ *
+ * Write-only in exactly the sense the bearer is: `refreshToken` and
+ * `accessToken` go up and nothing brings them back. Field names mirror the
+ * Codex CLI's `auth.json` `tokens` object so an operator moves a grant across
+ * without translating, and `idToken` is deliberately ABSENT — the server
+ * refuses it by name, because it is a login-flow identity assertion rather than
+ * a call credential. Turning a pasted document into this shape belongs to the
+ * surface that owns the paste box (`features/settings/oauthGrant.ts` in the web
+ * client), not to the transport.
+ */
+export interface ProviderOAuthInput {
+  refreshToken: string;
+  accessToken?: string;
+  /** Absolute deadline, epoch ms. Absent means "refresh reactively on a 401". */
+  expiresAtMs?: number;
+  accountId?: string;
+  /** Whose subscription this is, for the ADR-0147 attribution label. */
+  accountLabel?: string;
+  clientId?: string;
+  tokenEndpoint?: string;
+}
+
+/**
+ * Closed-world PUT body: the server rejects any other key with a 400
+ * (`PutProviderLinkRequest`, `#[serde(deny_unknown_fields)]`).
+ *
+ * `bearer` and `oauth` are both optional and exactly one must be present — a
+ * link carries one credential, and a body naming both is refused rather than
+ * resolved by picking a winner, because picking silently would store the
+ * credential the operator did not mean to store. `mode` is optional for the
+ * same kind of reason: absent means `external-hermes`, since configuring a link
+ * at all is choosing the external boundary, and an unknown value is a 400
+ * rather than a quiet downgrade to a mock.
+ *
+ * This used to be three REQUIRED fields under a comment asserting the world was
+ * closed at three. It was closed at four from the moment ADR-0147 landed on the
+ * server; only the comment had not moved. That gap was not academic — the
+ * 2026-08-04 registration went through a browser console snippet because the
+ * panel had no way to express a grant.
+ */
 export interface ProviderLinkInput {
   baseUrl: string;
-  bearer: string;
-  mode: string;
+  bearer?: string;
+  mode?: string;
+  oauth?: ProviderOAuthInput;
 }
 
 export function fetchProviderLink(): Promise<ProviderLink> {
