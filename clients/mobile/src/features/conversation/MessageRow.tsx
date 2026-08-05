@@ -891,7 +891,7 @@ function MessageRowInner({
           label:
             affordances.codeCount > 1
               ? `첫 코드 복사 (총 ${affordances.codeCount}개)`
-              : '코드 복사',
+              : '코드 복사하기',
         });
       }
       if (presentation.artifact && 'url' in presentation.artifact
@@ -1407,6 +1407,22 @@ MessageRow.displayName = 'MessageRow';
  * Exported for the test that counts what VoiceOver would say — a label assembled
  * inline is a label nobody checks.
  */
+/**
+ * 행이 눌려 있는 동안의 채움.
+ *
+ * 이름을 붙여 내보내는 이유는 **측정 하네스가 이 값을 읽어 눌린 행을 세우기
+ * 때문**이다(design-review M-2 는 「도출 — 눌린 상태 캡처 없음」으로 남았다).
+ * 시뮬레이터는 손가락을 대고 있을 수 없으므로 그 상태는 찍히지 않는데, 하네스가
+ * 색을 **베껴 적으면** 그 사진은 증거가 아니게 된다. 같은 심볼을 들면 이 값이
+ * 바뀌는 순간 사진도 함께 틀린 것이 된다.
+ *
+ * 그리고 이것이 M-2 의 실체다: 이 값은 코드 상자의 채움과 **같은 `color.surface`**
+ * 라서, 행을 누르는 동안 상자의 고도가 사라진다(1.000:1). 값 공간을 가르는 것은
+ * 토큰 체계 결정이라 U2 소관이고, 여기서는 그 사실을 **사진과 단정으로 붙잡아
+ * 둔다**.
+ */
+export const ROW_PRESSED_BACKGROUND = color.surface;
+
 export function rowAccessibilityLabel({
   message,
   authorLabel,
@@ -1591,7 +1607,7 @@ const styles = StyleSheet.create({
   rowInner: {paddingHorizontal: SAFE_GUTTER, paddingVertical: 3, gap: 2},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
-  rowPressed: {backgroundColor: color.surface},
+  rowPressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
   rowStartsGroup: {paddingTop: space.md},
   authorRow: {
     flexDirection: 'row',

@@ -2,15 +2,20 @@ import type {Message, RosterMember} from '@momo/core/lib/api';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
+import {Text} from 'react-native';
 
 import {color, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
-import {MessageRow} from '../src/features/conversation/MessageRow';
+import {
+  MessageRow,
+  ROW_PRESSED_BACKGROUND,
+} from '../src/features/conversation/MessageRow';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
+import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {
   QuoteBlock,
   quoteAccessibilityPhrase,
@@ -298,8 +303,25 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
   });
 
   it('한 덩이 문장이 아니라 무슨 일 + 무엇을 하면 되는지로 나뉜다', () => {
-    expect(code).toContain("headline: '인용한 원본은 이 대화의 더 위쪽에 있습니다'");
-    expect(code).toContain("headline: '인용한 원본을 이 화면에서 찾지 못했습니다'");
+    for (const reason of ['older', 'unknown'] as const) {
+      const notice = jumpMissedNotice(reason);
+      expect(notice.headline).not.toBe('');
+      expect(notice.detail).not.toBe('');
+      expect(notice.headline).not.toBe(notice.detail);
+    }
+  });
+
+  it('어디 있는지 아는 경우에만 「위쪽에 있다」고 단정한다', () => {
+    // 라이브 프레임으로 온 인용에는 원본 `seq` 가 없다. 그때 「위에 있습니다」는
+    // 거짓일 수 있다.
+    expect(jumpMissedNotice('older').headline).toContain('위쪽');
+    expect(jumpMissedNotice('unknown').headline).not.toContain('위쪽');
+  });
+
+  it('화면이 그 문장을 손으로 다시 적지 않는다 — 하네스와 갈라지지 않게', () => {
+    // 문장이 두 벌이면 사진이 배송되는 화면과 다른 말을 하게 된다.
+    expect(code).toContain('jumpMissedNotice(reason)');
+    expect(code).not.toContain('인용한 원본은 이 대화의');
   });
 });
 
@@ -424,6 +446,129 @@ describe('#1078 — 묘비·미해결의 구분축', () => {
     for (const name of APP_SENTENCE_FILES) {
       // 문자를 손으로 박은 자리가 있으면 `appNote()` 를 우회한 것이다.
       expect(codeOnly(SRC(name))).not.toContain(APP_NOTE_MARK);
+    }
+  });
+});
+
+// =============================================================================
+// U4-3 #1079 — 싼 다듬기와, 사진이 거짓말하지 않게 하는 장치
+// =============================================================================
+
+describe('#1079 N-1 — 같은 동사에 한 이름', () => {
+  // 규칙을 발명한 것이 아니라 **이미 이 앱을 지배하던 것**을 적용했다: 액션은
+  // `~기` 서술형이다(답글 달기 · 인용해서 답하기 · 고치기 · 지우기 · 닫기 ·
+  // 스레드 열기 · 링크 열기 · 다시 보내기 · 오류 닫기). 복사만 갈라져 있었다.
+  const FILES = ['MessageBody.tsx', 'MessageRow.tsx', 'MessageActionSheet.tsx'];
+
+  it('복사를 부르는 이름이 하나다 — 명사형이 남아 있으면 빨갛다', () => {
+    for (const name of FILES) {
+      const code = codeOnly(SRC(name));
+      // 「복사」 뒤에 「하기」도 「됨」도 안 오는 자리가 있으면 갈라진 것이다.
+      expect(code).not.toMatch(/'[^']*복사'/);
+      expect(code).not.toMatch(/"[^"]*복사"/);
+    }
+  });
+
+  it('이름은 서술형, 영수증은 완료형 — 둘은 다른 종류의 문장이다', () => {
+    const view = render(<MessageBody body={'```sh\necho hi\n```'} />);
+    const button = view.getByTestId('code-copy');
+    expect(String(button.props.accessibilityLabel)).toMatch(/하기$/);
+    expect(within(button).getByText(/복사/).props.children).toMatch(/하기$/);
+  });
+
+  it('시트와 코드 상자가 한 화면에서 같은 낱말을 쓴다', () => {
+    // 이 둘은 마크다운 답 하나에서 **동시에** 만날 수 있는 두 문이다.
+    const sheet = codeOnly(SRC('MessageActionSheet.tsx'));
+    expect(sheet).toContain('메시지 복사하기');
+    expect(codeOnly(SRC('MessageBody.tsx'))).toContain('복사하기');
+  });
+});
+
+describe('#1079 M-4 — 마커 칸이 불릿과 숫자에 각각 맞는다', () => {
+  function list(body: string) {
+    return within(render(<MessageBody body={body} />).getByTestId('message-list'));
+  }
+
+  it('불릿은 글자가 아니라 도형이다 — 점의 크기·위치가 우리 값이어야 한다', () => {
+    // 칸을 좁히면 빈칸은 줄지만(17.0 → 10.0pt), 점 자체의 폭과 자기 advance
+    // 안에서의 위치는 여전히 서체가 정한다(잉크가 2.0~4.7pt 에 앉는다). 도형은
+    // 셋 다 우리 값이다 — 실측 빈칸 8.0pt.
+    expect(list('- 하나').queryByText('•')).toBeNull();
+    const cell = flatten(list('- 하나').getByTestId('list-bullet').props.style);
+    expect(cell.width).toBe(10);
+  });
+
+  it('숫자 칸은 두 자리 + 마침표만큼이고 오른쪽 정렬이다', () => {
+    const marker = flatten(list('9. 아홉\n10. 열').getByText('9.').props.style);
+    expect(marker.minWidth).toBe(22);
+    // 마침표가 한 줄에 서야 9번과 10번의 본문 시작점도 한 줄에 선다.
+    expect(marker.textAlign).toBe('right');
+  });
+
+  it('불릿 칸이 숫자 칸보다 좁다 — 하나의 값은 둘 다에게 틀렸다', () => {
+    const cell = flatten(list('- 하나').getByTestId('list-bullet').props.style);
+    const marker = flatten(list('9. 아홉\n10. 열').getByText('9.').props.style);
+    expect(Number(cell.width)).toBeLessThan(Number(marker.minWidth));
+  });
+});
+
+describe('#1079 — 사진이 배송되는 화면과 갈라지지 않게', () => {
+  const HARNESS = fs.readFileSync(
+    path.resolve(__dirname, '../measure/surfaces.tsx'),
+    'utf8',
+  );
+
+  it('리뷰가 지목한 네 표면이 하네스에 선다', () => {
+    // 사진이 없어서 SKIPPED 로 남았던 것들이다. 케이스가 사라지면 다음 배치가
+    // 같은 자리에서 같은 이유로 막힌다.
+    for (const name of ['typing-empty', 'jump-missed', 'row-pressed', 'sheet']) {
+      expect(HARNESS).toContain(`case '${name}'`);
+    }
+  });
+
+  it('하네스가 문장과 색을 베껴 적지 않는다 — 같은 심볼을 든다', () => {
+    const code = codeOnly(HARNESS);
+    expect(code).toContain('jumpMissedNotice(');
+    expect(code).not.toContain('인용한 원본은 이 대화의');
+    expect(code).toContain('ROW_PRESSED_BACKGROUND');
+    // 색을 리터럴로 박으면 화면이 바뀌어도 사진은 옛말을 계속 한다.
+    expect(code).not.toMatch(/backgroundColor: '#/);
+  });
+
+  it('N-7 — 인용 fixture 의 원본 저자가 타인이다', () => {
+    // 자기 말을 자기가 인용하는 화면은 이 기능이 쓰이는 모양이 아니고, 인용
+    // 머리줄이 무슨 일을 하는지도 사진에서 안 보인다.
+    const code = codeOnly(HARNESS);
+    expect(code).toContain('const OTHER =');
+    expect(code).not.toMatch(/authorMemberId: SELF,\s*\n\s*\}\)\}/);
+  });
+
+  it('M-2 — 눌린 행과 코드 상자가 같은 값이라는 사진의 전제를 잠근다', () => {
+    // 이 사진이 보여 주려는 것은 「눌리면 상자가 사라진다」이고, 그 전제는
+    // 두 채움이 같은 색이라는 것이다. 전제가 깨지면 사진이 거짓말하게 되므로
+    // 여기서 값으로 붙잡는다. (값 공간을 가르는 것은 U2 소관 — 범위 밖.)
+    const body = render(<MessageBody body={'```sh\necho hi\n```'} />);
+    const wrap = flatten(body.getByTestId('message-code-block').props.style);
+    expect(wrap.backgroundColor).toBe(ROW_PRESSED_BACKGROUND);
+    expect(contrast(String(wrap.backgroundColor), ROW_PRESSED_BACKGROUND)).toBe(
+      1,
+    );
+  });
+});
+
+describe('#1079 M-7 — 사진 속 시트가 배송되는 시트와 같은 줄 수여야 한다', () => {
+  const HARNESS = fs.readFileSync(
+    path.resolve(__dirname, '../measure/surfaces.tsx'),
+    'utf8',
+  );
+
+  it('하네스 시트가 모든 액션을 건넨다 — 안 그러면 짧은 시트를 찍는다', () => {
+    // `MessageActionSheet` 은 `availability.quote && onQuote` 로 줄을 그린다.
+    // 콜백이 없으면 그 줄이 사라지고, 큰 글자에서 넘침을 보려던 사진이 하필
+    // 넘치지 않는 시트를 찍게 된다(AX5 캡처가 이것을 드러냈다).
+    const code = codeOnly(HARNESS);
+    for (const prop of ['onQuote=', 'onCopy=', 'onReply=', 'onEdit=', 'onDelete=']) {
+      expect(code).toContain(prop);
     }
   });
 });

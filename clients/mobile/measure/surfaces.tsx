@@ -11,7 +11,12 @@ import {MessageActionSheet} from '../src/features/conversation/MessageActionShee
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
-import {MessageRow} from '../src/features/conversation/MessageRow';
+import {
+  MessageRow,
+  ROW_PRESSED_BACKGROUND,
+} from '../src/features/conversation/MessageRow';
+import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
+import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import {color} from '../src/design/tokens';
@@ -51,6 +56,11 @@ import {color} from '../src/design/tokens';
 const ROSTER = makeStressRoster();
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
+// 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
+// 모양이 아니다 (design-review N-7).
+const OTHER = (
+  ROSTER.find(m => m.kind === 'human' && m.id !== SELF) ?? ROSTER[1] ?? ROSTER[0]
+).id;
 const NOW = 1_700_000_000_000;
 
 const MESSAGE: Message = {
@@ -66,6 +76,15 @@ const MESSAGE: Message = {
   createdAtMs: NOW,
   thread: {reply_count: 3, last_reply_seq: 51, last_reply_at: NOW + 600_000},
 };
+
+/** M-2 가 말하는 충돌은 **코드 상자를 든 행**에서만 보인다. */
+const CODE_BODY = [
+  '재시작 절차는 아래와 같습니다',
+  '',
+  '```sh',
+  'systemctl restart momo-relay',
+  '```',
+].join('\n');
 
 const CHIPS = [
   {emoji: '👍', count: 3, mine: true},
@@ -155,6 +174,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       onClose={() => {}}
       onToggleReaction={() => {}}
       onReply={() => {}}
+      // 이 둘이 빠져 있었다. `onQuote`/`onCopy` 가 없으면 시트가 그 줄을 아예
+      // 안 그리므로(`availability.quote && onQuote`), 사진 속 시트는 **배송되는
+      // 시트보다 두 줄 짧았다** — 큰 접근성 글자에서 넘침을 보려던 M-7 증거가
+      // 하필 넘치지 않는 시트를 찍고 있었다. AX5 캡처가 이 결함을 드러냈다.
+      onQuote={() => {}}
+      onCopy={() => {}}
       onEdit={() => {}}
       onDelete={() => {}}
     />
@@ -181,6 +206,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         ...MESSAGE,
         id: 'orig-1',
         seq: 4,
+        // 원본은 **타인**이 썼다 (N-7). `MESSAGE` 를 그대로 펼치면 저자가
+        // `SELF` 라 행 저자와 인용 저자가 같은 이름으로 찍힌다.
+        authorMemberId: OTHER,
         body: '릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.',
       });
       return (
@@ -192,11 +220,16 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'quote-deleted':
       return (
         <Frame label="인용 · 삭제된 원본 — 사본을 남기지 않는다">
+          {/* 인용 원본의 저자는 **타인**이다 (design-review N-7). 첫 판은
+              `SELF` 였고, 그래서 사진에서 행 저자와 인용 저자가 둘 다 같은
+              이름으로 나왔다 — 자기 말을 자기가 인용하는 화면은 이 기능이
+              실제로 쓰이는 모양이 아니고, 「누가 한 말인가」가 보이지 않아
+              인용 머리줄이 무슨 일을 하는지도 안 보인다. */}
           {quoted({
             kind: 'deleted',
             targetId: 'orig-1',
             targetSeq: 4,
-            authorMemberId: SELF,
+            authorMemberId: OTHER,
           })}
         </Frame>
       );
@@ -204,6 +237,58 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <Frame label="인용 · 아직 못 푼 원본 — 삭제라고 부르지 않는다">
           {quoted({kind: 'unresolved', targetId: 'orig-1', targetSeq: null})}
+        </Frame>
+      );
+    // ---- U4-3 (#1079): 최종 리뷰가 지목한 잔여 위상 --------------------------
+    case 'typing-empty':
+      return (
+        <Frame label="작성 중 · 아무도 안 침 — 자리는 그대로 (H-3)">
+          {/* `typing-one` 과 **나란히 놓고 보라**는 것이 이 사진의 용도다.
+              H-3 이 주장하는 것은 「줄이 뜨고 질 때 컴포저가 안 움직인다」이고,
+              그 주장은 두 장의 높이가 같을 때만 참이다. 한 장으로는 증명이
+              안 되므로 두 장이 한 쌍이다. */}
+          <TypingBar segments={[]} />
+        </Frame>
+      );
+    case 'jump-missed':
+      return (
+        <Frame label="인용 점프 실패 — 실패가 아니라 사실 진술이다 (H-5)">
+          {/* 두 이유를 **함께** 세운다. 이 고지의 설계 논점이 「어디 있는지
+              모르면 모른다고 말한다」인데, 한 장만 찍으면 그 대비가 안 보인다.
+              문장은 화면이 쓰는 것과 **같은 상수**에서 온다. */}
+          <View style={styles.noticeStack}>
+            <NoticeBlock
+              headline={jumpMissedNotice('older').headline}
+              detail={jumpMissedNotice('older').detail}
+              onDismiss={() => {}}
+              testID="quote-jump-missed"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('unknown').headline}
+              detail={jumpMissedNotice('unknown').detail}
+              onDismiss={() => {}}
+              testID="quote-jump-missed-unknown"
+            />
+          </View>
+        </Frame>
+      );
+    case 'row-pressed':
+      return (
+        <Frame label="행 눌림 — 코드 상자의 고도가 사라진다 (M-2, 1.000:1)">
+          {/* 시뮬레이터는 손가락을 대고 있을 수 없다. 그래서 눌린 채움을
+              **같은 심볼**(`ROW_PRESSED_BACKGROUND`)로 깔고 진짜 행을 그 위에
+              세운다 — 색을 베껴 적었다면 이 사진은 증거가 아니다.
+
+              아래 두 행은 코드 상자를 든 같은 본문이고, 위는 평상시·아래는
+              눌린 동안이다. M-2 의 주장은 「눌리면 상자의 채움과 행의 채움이
+              같은 `surface` 가 되어 상자가 사라진다」이므로, **아래 사진에서
+              상자가 안 보이는 것이 곧 확인**이다. */}
+          <View style={styles.pressPair}>
+            <MessageBody body={CODE_BODY} />
+          </View>
+          <View style={[styles.pressPair, styles.pressed]}>
+            <MessageBody body={CODE_BODY} />
+          </View>
         </Frame>
       );
     case 'typing-one':
@@ -222,13 +307,20 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'markdown':
       return (
-        <Frame label="본문 렌더 — 코드 상자·목록·인라인 코드 (H-4·N-1)">
+        <Frame label="본문 렌더 — 코드 상자·불릿·순서 목록·인라인 코드 (H-4·M-4)">
           <MessageBody
             body={[
               '**결론**: 재시작이 필요합니다',
               '',
               '- `outbox_drain_worker` 가 멈췄다',
               '- 재시작 뒤 `seq` 는 이어진다',
+              '',
+              // 순서 목록이 하네스에 없어서 M-4 의 마커 칸이 **한 번도 안
+              // 찍혔다**. 9→10 경계를 넘겨 두는 이유는 그 자리에서만 보이는
+              // 것이 있기 때문이다: 마커 폭이 한 자리에서 두 자리로 늘 때
+              // 본문 시작점이 따라 밀리는지.
+              '9. 릴레이를 멈춘다',
+              '10. `seq` 가 이어지는지 확인한다',
               '',
               '```sh',
               'systemctl restart momo-relay',
@@ -363,4 +455,8 @@ export default function SurfacesHarness({name}: {name: string}): React.JSX.Eleme
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
   label: {color: '#6b7280', fontSize: 11, fontWeight: '600', paddingHorizontal: 12},
+  noticeStack: {padding: 16, gap: 12},
+  pressPair: {paddingHorizontal: 16, paddingVertical: 8},
+  // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
+  pressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
 });

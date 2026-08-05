@@ -281,7 +281,23 @@ function CodeCopyButton({text}: {text: string}): React.JSX.Element {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={done ? '코드 복사됨' : '코드 복사'}
+      // -----------------------------------------------------------------
+      // 액션 이름은 `~기` 서술형이다 (design-review N-1).
+      //
+      // 이 규칙은 발명한 것이 아니라 **이미 이 앱을 지배하고 있던 것**이다:
+      // 답글 달기 · 인용해서 답하기 · 메시지 복사하기 · 고치기 · 지우기 ·
+      // 닫기 · 스레드 열기 · 링크 열기 · 다시 보내기 · 오류 닫기. 복사만
+      // 두 형태로 갈라져 있었다 — 시트에서는 「메시지 복사하기」인데 코드
+      // 상자에서는 「복사」, 로터에서는 「코드 복사」.
+      //
+      // **한 메시지 안에서 사람이 그 둘을 다 만난다.** 마크다운 답 하나에
+      // 코드 상자가 있으면 시트의 「메시지 복사하기」와 상자의 「복사」가 같은
+      // 화면에 있고, 이름이 다르면 다른 일이라고 읽는다.
+      //
+      // 영수증은 완료형 `~됨` 이다(복사됨 · 코드 복사됨) — 이미 일관적이라
+      // 그대로 둔다. 이름과 영수증은 다른 종류의 문장이다.
+      // -----------------------------------------------------------------
+      accessibilityLabel={done ? '코드 복사됨' : '코드 복사하기'}
       // 24pt 의 시각 높이에 위아래 10pt 씩 — 엄지에게는 **44pt**, 레이아웃에는
       // 24pt (design-review M-9: 첫 판은 8pt 라 40pt 였다). 실제 높이를 44 로
       // 올리지 않는 이유는 반응 칩에서 이미 고른 거래와 같다: 코드 상자마다
@@ -290,7 +306,7 @@ function CodeCopyButton({text}: {text: string}): React.JSX.Element {
       onPress={onPress}
       style={({pressed}) => [styles.codeCopy, pressed && styles.pressed]}
       testID="code-copy">
-      <Text style={styles.codeCopyLabel}>{done ? '복사됨' : '복사'}</Text>
+      <Text style={styles.codeCopyLabel}>{done ? '복사됨' : '복사하기'}</Text>
     </Pressable>
   );
 }
@@ -350,9 +366,31 @@ function BlockNode({
             {/* 마커가 자기 칸을 갖는다(웹의 `list-outside`). 같은 `Text` 안에
                 넣으면 접힌 한글 둘째 줄이 마커 **밑**에서 시작해, 항목 경계가
                 눈으로 사라진다. */}
-            <Text style={[styles.listMarker, muted && styles.muted]}>
-              {block.ordered ? `${block.start + index}.` : '•'}
-            </Text>
+            {block.ordered ? (
+              <Text style={[styles.listMarker, muted && styles.muted]}>
+                {`${block.start + index}.`}
+              </Text>
+            ) : (
+              // 불릿은 **글자가 아니라 도형**이다 (design-review M-4).
+              //
+              // 칸을 좁히는 것(`minWidth: 18 → 10`)만으로 빈칸은 17.0pt →
+              // 10.0pt 가 됐다(실측). 남은 것은 칸이 아니라 **글리프**였다:
+              // `'•'` 의 잉크는 자기 advance 안에서 2.0~4.7pt 에 앉는다 — 폭도
+              // 위치도 서체가 정하고, 우리는 그것을 못 고른다. 게다가 줄의
+              // 세로 중심이 아니라 **베이스라인**에 선다(22pt 행간에서 눈에
+              // 띈다).
+              //
+              // 도형으로 그리면 셋 다 우리 값이 된다: 점 4pt, 칸 10pt 안의
+              // 정중앙, 세로도 중앙. 사진에서 빈칸 **8.0pt**.
+              //
+              // (첫 판정은 「서체가 전각으로 준다」였는데 **그건 틀렸다** —
+              // 캡처를 2x 로 환산해서 나온 오독이었다. 이 기기는 3x 다.)
+              <View style={styles.listBulletCell} testID="list-bullet">
+                <View
+                  style={[styles.listBulletDot, muted && styles.listBulletDotMuted]}
+                />
+              </View>
+            )}
             <Text
               selectable={selectable}
               style={[styles.listText, muted && styles.muted]}>
@@ -502,12 +540,32 @@ const styles = StyleSheet.create({
   code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.text, lineHeight: 17},
   list: {gap: space.xs},
   listItem: {flexDirection: 'row', gap: space.xs},
-  // 마커 칸. 숫자 두 자리까지 흔들리지 않을 만큼만 넓다.
+  // ===========================================================================
+  // 마커 칸 (design-review M-4)
+  //
+  // 첫 판은 불릿과 숫자에 **같은 칸**(`minWidth: 18`)을 줬다. 그 하나의 값은 둘
+  // 다에게 틀렸다:
+  //
+  // - 불릿 `•` 는 1.5 글자쯤 되는 칸 안에서 왼쪽에 붙고, 글머리와 본문 사이가
+  //   이유 없이 벌어진다.
+  // - 숫자는 `1.` 과 `10.` 의 폭이 다른데 왼쪽 정렬이라 **마침표가 어긋난다** —
+  //   9번과 10번 사이에서 본문 시작점이 한 글자씩 밀린다.
+  //
+  // 그래서 칸을 가른다. 불릿은 글자 하나만큼, 숫자는 두 자리 + 마침표만큼 잡고
+  // **오른쪽 정렬**한다(마침표가 한 줄에 선다 = 본문 시작점이 한 줄에 선다).
+  // ===========================================================================
   listMarker: {
-    minWidth: 18,
     fontSize: font.body,
     lineHeight: 22,
     color: color.textMuted,
+    // 두 자리 + 마침표만큼. **오른쪽 정렬**이라 마침표가 한 줄에 서고, 그래서
+    // 9번과 10번의 본문 시작점도 한 줄에 선다.
+    minWidth: 22,
+    textAlign: 'right',
   },
+  // 불릿 칸. 글자가 아니라 도형이므로 폭이 서체와 무관하다.
+  listBulletCell: {width: 10, height: 22, alignItems: 'center', justifyContent: 'center'},
+  listBulletDot: {width: 4, height: 4, borderRadius: 2, backgroundColor: color.textMuted},
+  listBulletDotMuted: {backgroundColor: color.textFaint},
   listText: {flex: 1, fontSize: font.body, color: color.text, lineHeight: 22},
 });
