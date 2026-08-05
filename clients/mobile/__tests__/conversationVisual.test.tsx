@@ -1,4 +1,5 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
@@ -9,7 +10,11 @@ import React from 'react';
 import {color, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {MessageRow} from '../src/features/conversation/MessageRow';
-import {QuoteBlock} from '../src/features/conversation/Quote';
+import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
+import {
+  QuoteBlock,
+  quoteAccessibilityPhrase,
+} from '../src/features/conversation/Quote';
 
 // =============================================================================
 // 시각·위계 — design-review H-2·H-4·N-1·N-2 를 **값으로** 잠근다.
@@ -96,6 +101,21 @@ function readyBlock() {
   if (draft === null) throw new Error('fixture');
   return draft.block;
 }
+
+function deletedBlock(): QuoteBlockModel {
+  return {
+    kind: 'deleted',
+    targetId: 'orig-1',
+    targetSeq: 4,
+    authorMemberId: OTHER,
+  };
+}
+
+const UNRESOLVED: QuoteBlockModel = {
+  kind: 'unresolved',
+  targetId: 'orig-1',
+  targetSeq: null,
+};
 
 const SRC = (name: string) =>
   fs.readFileSync(
@@ -280,5 +300,130 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
   it('한 덩이 문장이 아니라 무슨 일 + 무엇을 하면 되는지로 나뉜다', () => {
     expect(code).toContain("headline: '인용한 원본은 이 대화의 더 위쪽에 있습니다'");
     expect(code).toContain("headline: '인용한 원본을 이 화면에서 찾지 못했습니다'");
+  });
+});
+
+// =============================================================================
+// U4-3 #1078 — 앱이 말하는 문장의 구분축
+//
+// 첫 판의 축은 `fontStyle:'italic'` + 한 급 흐린 회색이었다. 그런데 italic 은
+// 한글에서 **무동작**이었고(기울기 차 0, 픽셀 확증), 남은 회색 한 단계의 크기는
+// `textFaint`↔`textMuted` = **1.834:1** 뿐이었다. 게다가 `textFaint` 는 배경
+// 대비 3.909:1 로 본문 AA 를 못 지났다 — 「잘 안 보이는 것」이 구분축을 겸하고
+// 있었다.
+//
+// 축을 글자로 옮겼다(`appVoice.ts` 의 `※`). 아래 단정들은 그 축이 **서체·
+// 팔레트·플랫폼 어디에도 기대지 않는다**는 것을 지킨다.
+// =============================================================================
+
+function DeletedRow(): React.JSX.Element {
+  return (
+    <MessageRow
+      message={message({state: 'deleted'})}
+      startsGroup
+      directory={DIRECTORY}
+      chips={[]}
+      nowMs={BASE_MS}
+      actions={{
+        myMemberId: SELF,
+        onToggleReaction: async () => {},
+        onEdit: async () => {},
+        onDelete: async () => {},
+      }}
+    />
+  );
+}
+
+describe('#1078 — 묘비·미해결의 구분축', () => {
+  const APP_SENTENCE_FILES = ['Quote.tsx', 'MessageRow.tsx'];
+
+  it('italic 이 되살아나면 빨갛다 — 한글에 무동작인 축을 다시 세우지 않는다', () => {
+    for (const name of APP_SENTENCE_FILES) {
+      expect(codeOnly(SRC(name))).not.toMatch(/fontStyle/);
+    }
+  });
+
+  it('앱의 문장이 본문 AA 를 지난다 — 흐림이 구분을 겸하지 않는다', () => {
+    render(<QuoteBlock block={deletedBlock()} directory={DIRECTORY} />);
+    const tombstone = flatten(screen.getByTestId('quote-tombstone').props.style);
+    expect(tombstone.color).toBe(color.textMuted);
+    expect(contrast(String(tombstone.color), color.bg)).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
+
+  it('축이 글자에 있다 — 부재를 말하는 세 문장 모두 표시를 단다', () => {
+    const deleted = render(
+      <QuoteBlock block={deletedBlock()} directory={DIRECTORY} />,
+    );
+    expect(deleted.getByTestId('quote-tombstone').props.children).toContain(
+      APP_NOTE_MARK,
+    );
+    deleted.unmount();
+
+    const unresolved = render(
+      <QuoteBlock block={UNRESOLVED} directory={DIRECTORY} />,
+    );
+    expect(unresolved.getByTestId('quote-unresolved').props.children).toContain(
+      APP_NOTE_MARK,
+    );
+    unresolved.unmount();
+
+    const row = render(<DeletedRow />);
+    expect(row.getByTestId('tombstone').props.children).toContain(
+      APP_NOTE_MARK,
+    );
+  });
+
+  it('같은 낱말이면 같은 모양이다 — 행의 묘비와 인용 안의 묘비', () => {
+    const rowView = render(<DeletedRow />);
+    const rowStyle = flatten(rowView.getByTestId('tombstone').props.style);
+    const rowText = rowView.getByTestId('tombstone').props.children;
+    rowView.unmount();
+
+    const quoteView = render(
+      <QuoteBlock block={deletedBlock()} directory={DIRECTORY} />,
+    );
+    const node = quoteView.getByTestId('quote-tombstone');
+    const quoted = flatten(node.props.style);
+    expect(node.props.children).toBe(rowText);
+    expect(quoted.color).toBe(rowStyle.color);
+    expect(quoted.fontSize).toBe(rowStyle.fontSize);
+  });
+
+  it('표시가 잘림 접미사와 겹치지 않는다 — 한 글자가 두 뜻을 갖지 않는다', () => {
+    // `…` 는 이미 「인용문이 더 있다」를 뜻한다. 구분축이 그 글자를 빌리면
+    // 「더 있다」와 「못 불러왔다」가 같은 모양이 된다.
+    expect(APP_NOTE_MARK).not.toBe('…');
+    expect(APP_NOTE_MARK).not.toContain('.');
+    // 마크다운 문자도 아니다 — 우리 문장은 파서를 타지 않으므로, 마크업처럼
+    // 생긴 표시는 「안 그려진 마크다운」으로 읽힌다(BL-1 의 실패 모양).
+    expect(APP_NOTE_MARK).not.toMatch(/[*_`#[\]()>|~]/);
+  });
+
+  it('보조기술 라벨에는 표시가 없다 — 눈으로 훑을 때의 단서다', () => {
+    expect(quoteAccessibilityPhrase(deletedBlock(), DIRECTORY)).not.toContain(
+      APP_NOTE_MARK,
+    );
+    expect(quoteAccessibilityPhrase(UNRESOLVED, DIRECTORY)).not.toContain(
+      APP_NOTE_MARK,
+    );
+    // 행 라벨도 마찬가지다. 이건 자동으로 참이 아니라 **`deleted` 플래그에서
+    // 짓기 때문에** 참이다 — 화면 글자를 긁어 라벨을 만들었다면 표시가 딸려
+    // 들어갔을 자리다.
+    const row = render(<DeletedRow />);
+    expect(
+      String(row.getByTestId('message-row').props.accessibilityLabel),
+    ).not.toContain(APP_NOTE_MARK);
+    expect(
+      String(row.getByTestId('message-row').props.accessibilityLabel),
+    ).toContain('삭제된 메시지');
+  });
+
+  it('표시를 짓는 자리가 하나다 — 사이 공백이 자리마다 어긋나지 않는다', () => {
+    for (const name of APP_SENTENCE_FILES) {
+      // 문자를 손으로 박은 자리가 있으면 `appNote()` 를 우회한 것이다.
+      expect(codeOnly(SRC(name))).not.toContain(APP_NOTE_MARK);
+    }
   });
 });

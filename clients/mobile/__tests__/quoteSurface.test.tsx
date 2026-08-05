@@ -8,6 +8,7 @@ import {
 } from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {appNote} from '../src/features/conversation/appVoice';
 import React from 'react';
 
 import {
@@ -120,7 +121,7 @@ describe('인용 블록', () => {
   it('지워진 원본을 「삭제된 메시지」로 말한다 — 코어의 낱말로', () => {
     render(<QuoteBlock block={DELETED_BLOCK} directory={DIRECTORY} />);
     expect(screen.getByTestId('quote-tombstone').props.children).toBe(
-      QUOTE_DELETED_TEXT,
+      appNote(QUOTE_DELETED_TEXT),
     );
     expect(screen.queryByTestId('quote-body')).toBeNull();
   });

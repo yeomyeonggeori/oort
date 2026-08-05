@@ -12,6 +12,7 @@ import {
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {appNote} from './appVoice';
 
 // =============================================================================
 // 인용 — 본류에 남으면서 맥락만 끌어오는 장치 (ADR-0148).
@@ -106,8 +107,8 @@ export function QuoteBlock({
       <View style={styles.blockText}>
         {block.kind === 'unresolved' ? (
           // 「인용했다」는 참이고 「무엇을」은 모른다. 모르면 모른다고 말한다.
-          <Text style={styles.unresolved} testID="quote-unresolved">
-            인용한 원본을 아직 불러오지 않았습니다
+          <Text style={styles.appNote} testID="quote-unresolved">
+            {appNote('인용한 원본을 아직 불러오지 않았습니다')}
           </Text>
         ) : (
           <>
@@ -132,8 +133,8 @@ export function QuoteBlock({
             {block.kind === 'deleted' ? (
               // 사본을 남기지 않는 것이 삭제의 뜻이다(규칙 3). 행의 묘비와 같은
               // 낱말이고, 그 낱말은 코어가 든다.
-              <Text style={styles.quotedTombstone} testID="quote-tombstone">
-                {QUOTE_DELETED_TEXT}
+              <Text style={styles.appNote} testID="quote-tombstone">
+                {appNote(QUOTE_DELETED_TEXT)}
               </Text>
             ) : (
               <Text style={styles.quotedBody} testID="quote-body">
@@ -326,16 +327,11 @@ const styles = StyleSheet.create({
   meta: {fontSize: font.meta, color: color.textFaint},
   // 본문보다 한 급 작고 흐리다. 인용은 이 메시지의 **맥락**이지 내용이 아니다.
   quotedBody: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
-  quotedTombstone: {
-    fontSize: font.label,
-    color: color.textFaint,
-    fontStyle: 'italic',
-  },
-  unresolved: {
-    fontSize: font.label,
-    color: color.textFaint,
-    fontStyle: 'italic',
-  },
+  // 앱이 말하는 두 문장. 구분축은 `appVoice.ts` 의 `※` 가 들고, 색은 읽히는
+  // 데만 쓴다 — `textFaint` 는 배경 대비 3.909:1 로 본문 AA 를 못 지났고,
+  // `fontStyle:'italic'` 은 한글에서 무동작이었다(기울기 차 0, 픽셀 확증).
+  // 흐린 회색이 구분축을 겸하면 「잘 안 보이는 것」이 「다른 것」의 표시가 된다.
+  appNote: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
 
   draft: {
     flexDirection: 'row',

@@ -3,6 +3,7 @@ import {QUOTE_DELETED_TEXT} from '@momo/core/features/timeline/quote';
 import type {PendingMessage} from '@momo/core/features/timeline/model';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, render, screen} from '@testing-library/react-native';
+import {appNote} from '../src/features/conversation/appVoice';
 import React from 'react';
 
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
@@ -146,7 +147,7 @@ describe('라이브로 온 인용', () => {
       }),
     ]);
     expect(screen.getByTestId('quote-tombstone').props.children).toBe(
-      QUOTE_DELETED_TEXT,
+      appNote(QUOTE_DELETED_TEXT),
     );
     expect(screen.queryByTestId('quote-unresolved')).toBeNull();
   });
