@@ -81,6 +81,11 @@ const BASE: MessageRowProps = {
   actions: undefined,
   rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
   replyParent: undefined,
+  approvalGates: new Map([
+    ['ap-1', {approvalId: 'ap-1', reversible: false, expiresAtMs: null}],
+  ]),
+  approvalReceipts: new Map(),
+  onApprovalSettled: () => {},
   quote: {
     kind: 'ready',
     targetId: 'orig-1',
@@ -133,6 +138,13 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
       edited: true,
     },
   },
+  // 두 표는 **동일성**으로 본다(`directory` 와 같은 취급). 화면이 `useMemo` 로
+  // 붙잡으므로 승인이 실제로 바뀔 때만 새 표가 된다.
+  approvalGates: {approvalGates: new Map()},
+  approvalReceipts: {
+    approvalReceipts: new Map([['ap-1', '승인을 기록했습니다.']]),
+  },
+  onApprovalSettled: {onApprovalSettled: () => {}},
 };
 
 describe('memo 비교자는 모든 prop 을 본다', () => {

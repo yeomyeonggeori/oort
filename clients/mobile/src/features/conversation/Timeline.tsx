@@ -32,6 +32,8 @@ import {
   type MessageRowActions,
 } from './MessageRow';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
+import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
+import type {ApprovalGate} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 
 // =============================================================================
@@ -390,6 +392,9 @@ function TimelineInner({
   pending,
   working,
   reactions,
+  approvalGates,
+  approvalReceipts,
+  onApprovalSettled,
   myMemberId,
   loadingOlder,
   reachedStart,
@@ -432,6 +437,17 @@ function TimelineInner({
    */
   working?: readonly {memberId: string}[];
   reactions?: ReactionMap;
+  /**
+   * 결정 가능한 대기 승인, `approvalId` 로.
+   *
+   * 화면이 **한 번** 구독해서 내려보낸다. 행마다 물으면 스크롤 한 번이 요청
+   * 폭풍이 되고, 승인 카드가 셋 있는 화면에서 그 셋이 같은 목록을 각자 부른다.
+   * 왜 카드 대신 원장을 봐야 하는지는 `approvalGate.ts` 머리말에 있다.
+   */
+  approvalGates?: ReadonlyMap<string, ApprovalGate>;
+  /** 결정이 끝난 카드가 말할 영수증, `approvalId` 로. 컨트롤과 자리를 바꾼다. */
+  approvalReceipts?: ReadonlyMap<string, string>;
+  onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   myMemberId: string;
   loadingOlder?: boolean;
   reachedStart?: boolean;
@@ -947,6 +963,9 @@ function TimelineInner({
             markReplies ? parentOf(item.message, threads) : undefined
           }
           quote={resolveQuote(item.message, quoteLookup)}
+          approvalGates={approvalGates}
+          approvalReceipts={approvalReceipts}
+          onApprovalSettled={onApprovalSettled}
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {

@@ -58,6 +58,8 @@ const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
 // 모양이 아니다 (design-review N-7).
+/** 승인을 요청하는 쪽은 에이전트다 — 에이전트는 멤버다(ADR-0004). */
+const AGENT = (ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0]).id;
 const OTHER = (
   ROSTER.find(m => m.kind === 'human' && m.id !== SELF) ?? ROSTER[1] ?? ROSTER[0]
 ).id;
@@ -378,6 +380,56 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </Frame>
       );
+    // ---- U4-4 M1 (#1084): 승인 카드가 막다른 길이 아니게 됐다 -----------------
+    case 'approval-card': {
+      const approvalMessage = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000000b1',
+        type: 'approval_request',
+        body: '툴 호출 승인',
+        authorMemberId: AGENT,
+        props: {
+          approval_id: 'ap-1',
+          title: 'github.search_issues 실행 허가',
+          approval_status: 'pending',
+        },
+      } as unknown as Message;
+      const gates = new Map([
+        [
+          'ap-1',
+          {approvalId: 'ap-1', reversible: false, expiresAtMs: null},
+        ],
+      ]);
+      return (
+        <Frame label="승인 카드 — 결정 가능 / 불가 / 결정 뒤 (감사 H-1)">
+          {/* 세 상태를 한 장에 세운다. 이 goal 의 논점이 「언제 컨트롤이 서는가」
+              이므로 한 상태만 찍으면 그 논점이 사진에 안 나온다. */}
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={gates}
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalReceipts={new Map([['ap-1', '승인을 기록했습니다.']])}
+          />
+        </Frame>
+      );
+    }
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">

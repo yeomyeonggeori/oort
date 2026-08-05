@@ -50,15 +50,22 @@ import {fetchMentionsAfter} from './mentions';
 // partial result renders, and the aggregate only reports failure when there is
 // genuinely nothing to show.
 //
-// ## Two of these three feeds are dark on the current server
+// ## One of these three feeds is dark on the current server
 //
-// `approvals` and `agentRunHistory` are `provided: false` in
-// `@momo/core/features/capabilities/serverSurfaces` (measured 2026-08-02 against
-// the Rust server). They are implemented anyway, and gated by
-// `availableInboxFilters` at the screen — which means the person never sees a
-// tab that would always be empty, and the day those routes land the change is
-// the one line in the core's table, with no RN edit at all. That is precisely
-// what that table was built for.
+// **이 문단은 2026-08-05 에 정정됐다.** 이전 판은 `approvals` 와
+// `agentRunHistory` 가 **둘 다** `provided: false` 라고 적고 있었는데(2026-08-02
+// 측정), `approvals` 는 그 뒤 #979 로 랜딩해서 표가 이미 `provided: true` 다
+// (`serverSurfaces.ts` — GET list + POST decision). `InboxScreen` 머리말은 그
+// 사실을 알고 있었으므로 **같은 저장소 안에서 두 주석이 반대를 말하고 있었다.**
+//
+// 지금 어두운 것은 `agentRunHistory` 하나다. 판정은 여전히
+// `@momo/core/features/capabilities/serverSurfaces` 표가 하고, 화면은
+// `availableInboxFilters` 로 탭을 감춘다 — 사람은 언제나 비어 있을 탭을 보지
+// 않고, 그 경로가 랜딩하는 날 바뀌는 것은 표의 한 줄뿐이다. 그 표가 그러라고
+// 있다.
+//
+// (U4-4 M1 이 이 표면 위에 타임라인 승인 컨트롤을 세우면서 정정했다 — 그
+// goal 이 「승인 경로가 어둡다」는 낡은 주석을 근거로 취소될 뻔했다.)
 // =============================================================================
 
 /** Feeds hold their answers this long before a refetch is considered. */
