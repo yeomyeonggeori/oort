@@ -767,7 +767,7 @@ export function RecoveryDivider({
   return (
     <DividerRow
       testId="recovery-divider"
-      segments={recoveryDividerSegments(seq)}
+      segments={recoveryDividerSegments(seq, source)}
       tone="muted"
       padClass={MARKER_DIVIDER_PAD_CLASS}
       extra={{ "data-seq": seq, "data-source": source }}

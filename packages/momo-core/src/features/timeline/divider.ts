@@ -188,17 +188,47 @@ export function unreadDividerSegments(count: number): DividerSegment[] {
 }
 
 /**
+ * 어느 레일이 틈을 메웠는가.
+ *
+ * `replay`는 전송 레인이 끊긴 구간을 그대로 다시 흘려 준 것이고, `backfill`은
+ * 클라이언트가 REST로 되읽은 것이다. 둘은 **같은 자리를 메우지만 같은 강도가
+ * 아니다** — 그래서 화면이 그 차이를 말한다.
+ */
+export type RecoverySource = "replay" | "backfill";
+
+/**
  * 재연결 표지.
  *
  * `seq`는 서버가 발급한 값이라 정확하다 — 시계 오차가 섞인 「5초 전부터」 대신 어디까지
  * 복구됐는지를 그대로 말한다 (R-1 §3).
+ *
+ * ## `source`가 인자인 이유 (design-review D-1)
+ *
+ * 이 모듈이 생긴 커밋에서 폰은 `source === 'backfill'`일 때 `' (다시 읽음)'`을
+ * **자기 파일에서** 이어 붙였고, 웹은 같은 사실을 `data-source` 속성으로만 내보내
+ * 화면에는 한 글자도 없었다. 즉 모듈을 만든 그 커밋이 어휘 판정 하나를 로컬에
+ * 남겼고, 두 클라는 복구 구분선에서 **다른 문장**을 말하고 있었다.
+ *
+ * 어휘 판정이 인자 하나만큼 밖에 있으면 그 판정은 클라마다 갈라진다 — 이 파일
+ * 머리말이 적은 실패 양식 그대로다. 그래서 `source`를 **필수 인자**로 올린다:
+ * 선택 인자로 두면 한쪽이 안 넘기는 날 그 클라만 조용히 짧은 문장을 말하고,
+ * 그것이 바로 지금 고치고 있는 상태다. 필수이므로 컴파일러가 두 호출부를 센다.
  */
-export function recoveryDividerSegments(seq: number): DividerSegment[] {
-  return [
+export function recoveryDividerSegments(
+  seq: number,
+  source: RecoverySource
+): DividerSegment[] {
+  const segments: DividerSegment[] = [
     { kind: "prose", text: "재연결됨, seq " },
     { kind: "figure", text: `${seq}` },
     { kind: "prose", text: "까지 복구" },
   ];
+  // 되읽은 구간은 「이미 본 것이 다시 온다」는 사실을 말해야 한다. 레일이 그대로
+  // 흘려 준 구간(`replay`)에는 할 말이 없으므로 아무것도 붙이지 않는다.
+  if (source === "backfill") {
+    segments.push({ kind: "prose", text: " (다시 읽음)" });
+  }
+  return segments;
 }
 
 /** 조각을 이어 붙인 글자. 라벨 문자열이 필요한 자리(테스트·낭독)를 위한 것. */
