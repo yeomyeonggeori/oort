@@ -119,8 +119,16 @@ export interface UseTimelineResult {
   recoveryMarkers: RecoveryMarker[];
   /** Channel-level echoes awaiting their server seq. Never inside `state`. */
   pending: PendingMessage[];
-  /** The one send path: optimistic echo now, server seq when it lands. */
-  send: (body: string) => Promise<void>;
+  /**
+   * The one send path: optimistic echo now, server seq when it lands.
+   *
+   * `replyToId` is ADR-0148 인용 — a column on the same write, never a second
+   * path. It rides the pending row (core `PendingMessage.replyToId`) rather than
+   * a side map like `pendingRootRef`, because the echo has to draw its own quote
+   * block: without it the optimistic row shows no quote and then grows one the
+   * instant its seq lands, moving the text under the reader's eye.
+   */
+  send: (body: string, replyToId?: string) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   /**
@@ -225,7 +233,11 @@ export function useTimeline(
       try {
         const rootId = pendingRootRef.current[row.clientMsgId];
         const confirmed = await (rootId === undefined
-          ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body)
+          ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body, {
+              ...(row.replyToId === undefined
+                ? {}
+                : {replyToId: row.replyToId}),
+            })
           : sendThreadReply(
               workspaceId,
               row.channelId,
@@ -249,7 +261,7 @@ export function useTimeline(
   );
 
   const send = useCallback(
-    async (body: string) => {
+    async (body: string, replyToId?: string) => {
       const channel = channelId;
       if (channel === null || body === '') return;
       const row: PendingMessage = {
@@ -266,6 +278,7 @@ export function useTimeline(
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: 'sending',
+        ...(replyToId === undefined ? {} : {replyToId}),
       };
       updatePending(list => addPending(list, row));
       await post(row);

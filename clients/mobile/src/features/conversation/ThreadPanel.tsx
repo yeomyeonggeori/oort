@@ -111,6 +111,16 @@ export function ThreadPanel({
       onEdit: editBody,
       onDelete: removeMessage,
       // No `onOpenThread`: see the header. Every row here is already in one.
+      //
+      // No `onQuote` either, and that absence is a decision rather than an
+      // omission. ADR-0148 규칙 1 explicitly allows quoting a reply from inside
+      // its thread — but the composer that would receive the quote is the
+      // CHANNEL's, and on a phone that composer is behind this panel. Pinning a
+      // quote to an input the person cannot see is the shape of thing this
+      // product keeps refusing: an action whose result is off screen. The
+      // honest version needs this panel's own composer to carry it, which is a
+      // decision about where a quoted thread reply lands (본류 or the thread)
+      // and belongs to whoever makes that one.
     }),
     [myMemberId, toggleReaction, editBody, removeMessage],
   );

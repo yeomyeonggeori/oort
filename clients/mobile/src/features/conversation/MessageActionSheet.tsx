@@ -1,5 +1,6 @@
 import type {Message} from '@momo/core/lib/api';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
+import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
 import {
   QUICK_REACTIONS,
   type ReactionChip,
@@ -59,6 +60,7 @@ export function MessageActionSheet({
   onClose,
   onToggleReaction,
   onReply,
+  onQuote,
   onEdit,
   onDelete,
 }: {
@@ -81,6 +83,15 @@ export function MessageActionSheet({
   onClose: () => void;
   onToggleReaction: (emoji: string) => void;
   onReply: () => void;
+  /**
+   * 인용하기 (ADR-0148). 낱말은 코어의 `QUOTE_ACTION_LABEL` 이다 — 웹과 폰이
+   * 같은 말을 해야 하고, 이 시트의 다른 낱말들이 웹에서 온 것과 같은 이유다.
+   *
+   * 항목이 서는 조건은 `availability.quote`(코어의 `canQuoteMessage`)와 이
+   * 핸들러 **둘 다**이고, 그것은 `reply` 가 `onOpenThread` 유무를 함께 보는 것과
+   * 같은 모양이다.
+   */
+  onQuote?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
@@ -191,8 +202,21 @@ export function MessageActionSheet({
                 </View>
               ) : null}
 
+              {/* 두 항목이 나란히 선다. 같은 「답」이지만 가는 곳이 다르다:
+                  「답글 달기」는 대화를 옆으로 치우고(다른 화면이 열린다),
+                  「인용하기」는 여기 남아서 저 줄을 가리킨다(ADR-0148). 낱말을
+                  이 파일이 고르지 않는 것이 그 구별을 지키는 방법이다 — 폰이
+                  자기 말을 지어내면 웹과 갈라지고, 갈라지는 순간 두 화면이
+                  같은 장치를 다르게 부른다. */}
               {availability.reply ? (
                 <SheetRow label="답글 달기" onPress={onReply} testID="sheet-reply" />
+              ) : null}
+              {availability.quote && onQuote ? (
+                <SheetRow
+                  label={QUOTE_ACTION_LABEL}
+                  onPress={onQuote}
+                  testID="sheet-quote"
+                />
               ) : null}
               {availability.edit ? (
                 <SheetRow label="고치기" onPress={onEdit} testID="sheet-edit" />

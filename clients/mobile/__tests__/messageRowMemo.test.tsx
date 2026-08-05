@@ -81,14 +81,24 @@ const BASE: MessageRowProps = {
   actions: undefined,
   rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
   replyParent: undefined,
+  quote: {
+    kind: 'ready',
+    targetId: 'orig-1',
+    targetSeq: 4,
+    authorMemberId: OTHER,
+    lines: ['배포 로그 확인했습니다'],
+    truncated: false,
+    quotesAnother: false,
+    edited: false,
+  },
 };
 
 /**
  * 키마다 "이것이 바뀌면 행이 달라 보인다"의 한 예.
  *
- * `chips` 와 `rollup` 은 **값**만 바꾼다(새 배열/새 객체이되 내용이 같으면 같아야
- * 하므로, 내용을 바꾸지 않으면 이 테스트는 아무것도 묻지 못한다). 나머지는 동일성만
- * 바꾸어도 충분하다 — 그것이 그 prop 들의 계약이다.
+ * `chips`·`rollup`·`quote` 는 **값**만 바꾼다(새 배열/새 객체이되 내용이 같으면
+ * 같아야 하므로, 내용을 바꾸지 않으면 이 테스트는 아무것도 묻지 못한다). 나머지는
+ * 동일성만 바꾸어도 충분하다 — 그것이 그 prop 들의 계약이다.
  */
 const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   message: {message: message(2)},
@@ -108,6 +118,21 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   },
   rollup: {rollup: {replyCount: 2, lastReplySeq: 10, lastReplyAtMs: BASE_MS}},
   replyParent: {replyParent: message(1)},
+  // 원본이 **수정되면** 인용도 따라 바뀐다(ADR-0148 규칙 3: 참조이지 사본이
+  // 아니다). 그 변화는 새 페이지가 실어 오는 새 객체로 도착하므로, 값으로 보지
+  // 않으면 행은 옛 본문을 그대로 들고 앉아 있게 된다.
+  quote: {
+    quote: {
+      kind: 'ready',
+      targetId: 'orig-1',
+      targetSeq: 4,
+      authorMemberId: OTHER,
+      lines: ['고쳐 쓴 원문'],
+      truncated: false,
+      quotesAnother: false,
+      edited: true,
+    },
+  },
 };
 
 describe('memo 비교자는 모든 prop 을 본다', () => {
@@ -115,15 +140,58 @@ describe('memo 비교자는 모든 prop 을 본다', () => {
     expect(sameMessageRowProps(BASE, {...BASE})).toBe(true);
   });
 
-  it('값이 같은 새 chips / rollup 은 같다 — 얕은 비교였다면 여기서 실패한다', () => {
-    // `chipsFor` 는 새 배열을, `rollupFor` 는 새 객체를 렌더마다 돌려준다. 이
-    // 단정이 memo 가 실제로 무언가를 사는 유일한 이유다.
+  it('값이 같은 새 chips / rollup / quote 는 같다 — 얕은 비교였다면 여기서 실패한다', () => {
+    // `chipsFor` 는 새 배열을, `rollupFor` 는 새 객체를 렌더마다 돌려준다. 인용
+    // 미리보기도 호출부가 페이지의 `replyTo` 를 풀어 만드는 새 객체다. 이 단정이
+    // memo 가 실제로 무언가를 사는 유일한 이유다.
     expect(
       sameMessageRowProps(BASE, {
         ...BASE,
         chips: [{emoji: '👍', count: 1, mine: false}],
         rollup: {replyCount: 1, lastReplySeq: 9, lastReplyAtMs: BASE_MS},
+        quote: {
+          kind: 'ready',
+          targetId: 'orig-1',
+          targetSeq: 4,
+          authorMemberId: OTHER,
+          lines: ['배포 로그 확인했습니다'],
+          truncated: false,
+          quotesAnother: false,
+          edited: false,
+        },
       }),
+    ).toBe(true);
+  });
+
+  it('인용이 지워지면 다르다 — 묘비 전환을 memo 가 가리면 안 된다', () => {
+    // 갈래가 바뀌는 것은 화면에 반드시 보여야 하는 변화다. 그리고 그 반대편도
+    // 마찬가지다: 못 푼 인용(`unresolved`)이 풀리는 순간을 memo 가 가리면, 원본이
+    // 스크롤로 로드된 뒤에도 「아직 못 불러왔다」가 남는다.
+    expect(
+      sameMessageRowProps(BASE, {
+        ...BASE,
+        quote: {
+          kind: 'deleted',
+          targetId: 'orig-1',
+          targetSeq: 4,
+          authorMemberId: OTHER,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      sameMessageRowProps(BASE, {
+        ...BASE,
+        quote: {kind: 'unresolved', targetId: 'orig-1', targetSeq: null},
+      }),
+    ).toBe(false);
+  });
+
+  it('인용이 없는 행에서 null 과 undefined 는 같다', () => {
+    // `rollup` 과 반대다(바로 아래 단정이 그 차이를 지킨다). 인용에는 「이 표면은
+    // 인용을 안 그린다」와 「서버의 것을 쓰라」의 구별이 없다 — 둘 다 「아무것도
+    // 인용하지 않는다」 하나뿐이므로, 갈라 두면 memo 만 헛되이 놓친다.
+    expect(
+      sameMessageRowProps({...BASE, quote: null}, {...BASE, quote: undefined}),
     ).toBe(true);
   });
 

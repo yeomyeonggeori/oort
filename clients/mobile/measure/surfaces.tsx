@@ -55,7 +55,13 @@ const CHIPS = [
   {emoji: '🎉', count: 1, mine: false},
 ];
 
-const AVAILABILITY = {reply: true, react: true, edit: true, delete: true};
+const AVAILABILITY = {
+  reply: true,
+  quote: true,
+  react: true,
+  edit: true,
+  delete: true,
+};
 
 const HITS: MessageSearchHit[] = [
   {

@@ -19,6 +19,8 @@ import {
   matchMembers,
   mentionQueryAt,
 } from './mentionQuery';
+import type {QuoteDraft} from '@momo/core/features/timeline/quote';
+import {QuoteDraftBar} from './Quote';
 
 // =============================================================================
 // The composer.
@@ -49,6 +51,14 @@ import {
 // rendered `value` after each one, synchronously, with no act() flush between.
 // An implementation that deferred the write fails it.
 //
+// **`onTyping` is the second thing to obey that rule** (ADR-0149). 「작성 중」 is
+// a per-keystroke signal, which is exactly the shape that could break composition
+// — so it is fired the way `onSend` is: AFTER the value is written, never
+// awaited, and never allowed to decide anything about `value`. What it costs a
+// keystroke is one function call; everything expensive (the grant, the 3s
+// republish cadence, the POST) lives in the surface that owns the channel, for
+// the same reason the send does.
+//
 // ## Enter is a newline here, and there is a send button
 //
 // The core's `composerKeyIntent` exists so the web client can send on Enter
@@ -68,6 +78,9 @@ export function Composer({
   dmAgent,
   disabled,
   onSend,
+  onTyping,
+  quote,
+  onCancelQuote,
   placeholder,
   sendLabel = '보내기',
   inputRef: externalInputRef,
@@ -83,6 +96,25 @@ export function Composer({
   /** The rail is down: the composer says so rather than failing silently. */
   disabled?: boolean;
   onSend: (body: string) => void;
+  /**
+   * 자판이 눌렸다 (ADR-0149 「작성 중」).
+   *
+   * 한 글자마다 한 번, **동기 쓰기 뒤에** 불린다. 얼마나 자주 실제로 보낼지는
+   * 여기서 정하지 않는다 — 재전송 주기는 서버가 grant 응답으로 내려보내는 값이고
+   * (`republishIntervalMs`), 그것을 지키는 것은 채널을 아는 화면의 일이다. 이
+   * 파일이 아는 것은 「방금 무언가 쳤다」뿐이다.
+   *
+   * 「입력을 멈추면 송신이 멈춘다」는 따로 배선하지 않아도 성립한다: 재전송을
+   * 미는 것이 키스트로크이므로, 키스트로크가 멎으면 재전송도 멎고 TTL 이 나머지를
+   * 한다. **stop 신호가 없는 것이 계약이다.**
+   */
+  onTyping?: () => void;
+  /**
+   * 지금 인용을 걸고 쓰는 중이면 그 원문 (ADR-0148). `null`/`undefined` 면 없다.
+   */
+  quote?: QuoteDraft | null;
+  /** 인용을 무른다. 인용이 있는데 이것이 없으면 나가는 길이 없다. */
+  onCancelQuote?: () => void;
   /**
    * The text field itself. Exposed so a caller can put the caret here — the
    * empty-state "첫 메시지 쓰기" affordance wants it, and `measure/` uses it to
@@ -112,6 +144,12 @@ export function Composer({
   );
   const showMentions = candidates.length > 0;
 
+  // `onTyping` 을 의존성으로 들지 않기 위한 거울. 호출자가 핸들러 동일성을
+  // 흘리면 `onChangeText` 가 키스트로크마다 새로 만들어지고, 그것은 이 파일이
+  // 가장 조심하는 종류의 흔들림이다.
+  const onTypingRef = useRef(onTyping);
+  onTypingRef.current = onTyping;
+
   const onChangeText = useCallback((next: string) => {
     // SYNCHRONOUS. See the header. The caret is derived from the edit itself
     // rather than read from `onSelectionChange`, because that event arrives on
@@ -123,6 +161,10 @@ export function Composer({
     currentTextRef.current = next;
     setText(next);
     setMentionOpen(true);
+    // LAST, and on a separate rail. Everything above is the value; this is a
+    // signal about the person, and it must never be able to reorder itself in
+    // front of the write (see the header's 「작성 중」 note).
+    onTypingRef.current?.();
   }, []);
 
   const onSelectionChange = useCallback(
@@ -223,6 +265,17 @@ export function Composer({
         <Text style={styles.offline}>
           연결이 끊겼습니다. 보낸 메시지는 연결이 돌아오면 다시 시도할 수 있습니다.
         </Text>
+      ) : null}
+
+      {/* 입력창 **바로 위**. 지금 쓰고 있는 글이 무엇을 가리키는지는 그 글을
+          쓰는 자리에 붙어 있어야 하고, 취소도 거기 있어야 한다 — 들어가는 길만
+          있고 나오는 길이 없으면 안 된다(ADR-0148 미결 3). */}
+      {quote && onCancelQuote ? (
+        <QuoteDraftBar
+          block={quote.block}
+          directory={directory}
+          onCancel={onCancelQuote}
+        />
       ) : null}
 
       <View style={styles.bar}>

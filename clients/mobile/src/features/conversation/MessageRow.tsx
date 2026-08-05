@@ -20,6 +20,8 @@ import {
 } from '@momo/core/features/timeline/rowModel';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
+import {canQuoteMessage} from '@momo/core/features/timeline/quote';
+import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
   canDeleteMessage,
   canEditMessage,
@@ -40,6 +42,7 @@ import {Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-nat
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
+import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
 // =============================================================================
@@ -248,10 +251,21 @@ function Chips({
  *
  * ## Why it is a glyph and a name rather than a quoted parent
  *
- * The quote is the tempting version and it is wrong on a phone: it doubles the
- * height of every reply and re-renders text the reader can already scroll to.
- * One meta-sized line names the destination and opens it, which is the whole job
- * — and it keeps the density this product has.
+ * The quote is the tempting version and it is wrong FOR THIS DEVICE: a thread
+ * reply is about BELONGING (`root_id`), and belonging is answered by naming the
+ * room and opening it. Drawing the parent's text here would double the height of
+ * every reply and re-render text the reader can already scroll to. One
+ * meta-sized line names the destination and opens it, which is the whole job —
+ * and it keeps the density this product has.
+ *
+ * **This is not the argument against quoting** (ADR-0148 settled that: 인용 is a
+ * different device and DOES draw the original). `reply_to_id` is AIM rather than
+ * belonging, it stays in the main channel, and it exists precisely for the case
+ * where the context has to come along. That block is `Quote.tsx`, it sits right
+ * below this line, and the two are deliberately built to look nothing alike —
+ * a line vs a block, an arrow vs a rule, 답글 vs 인용, another screen vs this one.
+ * A row can carry both at once (ADR-0148 규칙 1: quoting one reply inside the
+ * thread it belongs to), which is why they had to be told apart at a glance.
  *
  * ## Pressable only when there is a room to enter
  *
@@ -550,6 +564,21 @@ export interface MessageRowActions {
    * handler renders as a LABEL rather than a dead button (QA P3 1-1).
    */
   onOpenThread?: (message: Message) => void;
+  /**
+   * Quote this message: bind it to the composer as 인용, in the MAIN channel.
+   *
+   * Deliberately NOT `onOpenThread` with a flag. The two are different devices
+   * (ADR-0148) and they go to different places — a thread is another screen, a
+   * quote stays here — so folding them into one handler would be the first step
+   * toward the surface treating them as one thing.
+   */
+  onQuote?: (message: Message) => void;
+  /**
+   * Scroll to the message this row quotes. ONE identity for the whole list (see
+   * `quoteReachable`); the row hands back its own message and the surface reads
+   * the target off it, because the row does not know what the page holds.
+   */
+  onJumpToQuoted?: (message: Message) => void;
   /** The gesture was used at least once, so the hint can retire itself. */
   onLongPressUsed?: () => void;
 }
@@ -580,6 +609,19 @@ export interface MessageRowProps {
    * 답글 without claiming to know to whom.
    */
   replyParent?: Message | null;
+  /**
+   * The message this one QUOTES (ADR-0148 `reply_to_id`), already resolved.
+   *
+   * A different device from `replyParent` and never a substitute for it — see
+   * `ReplyMarker`'s header. `null`/`undefined` means this row quotes nothing.
+   *
+   * **The value rides the page.** The server LEFT JOINs the quoted row onto
+   * every history page (`momo-messaging/src/message.rs:1062`), so the caller
+   * unpacks what it already holds and this row never asks for anything. A row
+   * that fetched its own quote would turn one scroll into a request storm,
+   * hardest exactly when the conversation is busy.
+   */
+  quote?: QuoteBlockModel | null;
 }
 
 function MessageRowInner({
@@ -593,6 +635,7 @@ function MessageRowInner({
   actions,
   rollup: rollupOverride,
   replyParent,
+  quote,
 }: MessageRowProps): React.JSX.Element {
   rowRenders += 1;
   const presentation = useMemo(() => rowPresentation(message), [message]);
@@ -614,13 +657,17 @@ function MessageRowInner({
   // belongs beside the message it is about (B8 + B11).
   const [rowError, setRowError] = useState<string | null>(null);
 
-  // The four answers come from the core, which is also where the server's rules
+  // The five answers come from the core, which is also where the server's rules
   // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
   // and a reply is never offered a reply of its own (momo threads are one level).
   const available = useMemo<MessageActionAvailability>(
     () => ({
       reply:
         actions?.onOpenThread !== undefined && canReplyToMessage(message),
+      // 인용은 답글과 **다른 축**이다(core `model.ts`): 이미 답글인 행은 답글을
+      // 더 달 수 없지만 인용은 할 수 있다. 두 답을 하나로 접으면 ADR-0148 이
+      // 나눈 두 장치가 UI 에서 다시 합쳐진다.
+      quote: actions?.onQuote !== undefined && canQuoteMessage(message),
       react: actions !== undefined && canReactToMessage(message),
       edit: actions !== undefined && canEditMessage(message, actions.myMemberId),
       delete:
@@ -786,6 +833,10 @@ function MessageRowInner({
                   ).name
                 }님에게 답글`
             : null,
+        quoted:
+          quote && !deleted
+            ? quoteAccessibilityPhrase(quote, directory)
+            : null,
       })}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
@@ -827,6 +878,38 @@ function MessageRowInner({
                 ? () => {
                     if (longPress.consumeTap()) return;
                     actions.onOpenThread?.(replyParent);
+                  }
+                : undefined
+            }
+          />
+        ) : null}
+
+        {/* 인용 블록 (ADR-0148). 표식 **아래**, 본문 **위** — 한 행이 둘 다 가질
+            수 있고(규칙 1), 그때 읽히는 순서는 「어느 대화에 속하는가」 →
+            「무엇을 가리키는가」 → 「무슨 말인가」다. 묘비에는 붙이지 않는다:
+            지워진 메시지가 무엇을 인용했었는지는 그 메시지에 대한 사실이지
+            묘비에 대한 사실이 아니다. */}
+        {quote && !deleted ? (
+          <QuoteBlock
+            block={quote}
+            directory={directory}
+            // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
+            // 범위 안에 있든 없든.
+            //
+            // 처음 판은 로드된 것만 눌리게 했고, 그것이 이 레포의 「없는 방으로
+            // 가는 문은 짓지 않는다」를 잘못 적용한 것이었다. 여기서 **방은
+            // 있다.** 아직 거기까지 안 걸어갔을 뿐이다. 그 경우에 아무 반응도 안
+            // 주면 사람은 이유를 모른 채 막히고, 목록은 「더 위쪽에 있어 아직
+            // 불러오지 않았습니다. 위로 올려 이어서 불러오세요」라고 말할 수
+            // 있었는데 말하지 못한다 — 검색 앵커가 이미 같은 말을 하는 자리다.
+            //
+            // 정말로 목적지를 모르는 경우(`unresolved`)에만 문이 없고, 그 판정은
+            // `QuoteBlock` 이 자기 갈래로 직접 한다.
+            onJump={
+              actions?.onJumpToQuoted
+                ? () => {
+                    if (longPress.consumeTap()) return;
+                    actions.onJumpToQuoted?.(message);
                   }
                 : undefined
             }
@@ -981,6 +1064,14 @@ function MessageRowInner({
             setSheetOpen(false);
             actions.onOpenThread?.(message);
           }}
+          onQuote={
+            available.quote
+              ? () => {
+                  setSheetOpen(false);
+                  actions.onQuote?.(message);
+                }
+              : undefined
+          }
           onEdit={() => {
             setSheetOpen(false);
             setEditError(null);
@@ -1108,7 +1199,41 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   actions: true,
   rollup: true,
   replyParent: true,
+  quote: true,
 };
+
+/**
+ * `chips`·`rollup` 과 같은 이유로 **값**으로 본다.
+ *
+ * 인용 미리보기는 호출부가 페이지의 `replyTo` 를 풀어 만드는 객체이므로 렌더마다
+ * 새 동일성을 얻는다. 동일성으로 비교하면 이 행은 화면에 붙어 있는 동안 memo 가
+ * 절대 적중하지 못하고, 그것은 goal RN-P2a 가 산 것을 조용히 되돌리는 일이다.
+ * 필드는 네 개이고 전부 스칼라라, 이 비교는 행 하나를 다시 그리는 것보다
+ * 압도적으로 싸다.
+ */
+function sameQuote(
+  a: QuoteBlockModel | null | undefined,
+  b: QuoteBlockModel | null | undefined,
+): boolean {
+  if (a === b) return true;
+  // `sameRollup` 과 달리 `null` 과 `undefined` 는 여기서 같은 뜻이다 — 둘 다
+  // 「이 행은 아무것도 인용하지 않는다」이고, 구별할 세 번째 상태가 없다.
+  if (a == null || b == null) return a == null && b == null;
+  // 갈래가 바뀐 것은 언제나 보여야 하는 변화다: 못 푼 인용이 풀리는 것도,
+  // 원본이 지워지는 것도 여기로 온다.
+  if (a.kind !== b.kind) return false;
+  if (a.targetId !== b.targetId) return false;
+  if (a.kind === 'unresolved' || b.kind === 'unresolved') return true;
+  if (a.authorMemberId !== b.authorMemberId) return false;
+  if (a.kind !== 'ready' || b.kind !== 'ready') return true;
+  return (
+    a.truncated === b.truncated &&
+    a.quotesAnother === b.quotesAnother &&
+    a.edited === b.edited &&
+    a.lines.length === b.lines.length &&
+    a.lines.every((line, index) => line === b.lines[index])
+  );
+}
 
 export function sameMessageRowProps(
   a: MessageRowProps,
@@ -1124,7 +1249,8 @@ export function sameMessageRowProps(
     a.actions === b.actions &&
     a.replyParent === b.replyParent &&
     sameChips(a.chips, b.chips) &&
-    sameRollup(a.rollup, b.rollup)
+    sameRollup(a.rollup, b.rollup) &&
+    sameQuote(a.quote, b.quote)
   );
 }
 
@@ -1146,6 +1272,7 @@ export function rowAccessibilityLabel({
   tail,
   deleted,
   replyTo,
+  quoted,
 }: {
   message: Message;
   authorLabel: string;
@@ -1158,11 +1285,19 @@ export function rowAccessibilityLabel({
    * who hears the answer before the question has to go back for the context.
    */
   replyTo?: string | null;
+  /**
+   * What the 인용 block says, when the row is drawing one. Between the 답글
+   * marker and the body, in the same order the eye reads them — and the block
+   * does NOT get its own accessibility element, because the row is one element
+   * (the count this client cut from 6 to 1 on the web side).
+   */
+  quoted?: string | null;
 }): string {
   const parts = [
     authorLabel,
     timeLabel(message.createdAtMs),
     replyTo ?? '',
+    quoted ?? '',
     deleted ? '삭제된 메시지' : (message.body ?? '').trim(),
     ...tail,
     ...chips.map(
@@ -1249,11 +1384,21 @@ export function PendingRow({
   pending,
   startsGroup,
   directory,
+  quote,
   onResend,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
   directory: Directory;
+  /**
+   * 이 전송이 인용을 걸고 나갔다면 그 블록 (ADR-0148).
+   *
+   * 메아리가 자기 인용을 **먼저** 그려야 한다. 없으면 낙관적 행에는 인용이 없다가
+   * seq 가 도착하는 순간 블록이 자라나고, 읽던 사람 눈 밑에서 본문이 밀린다 —
+   * 이 파일이 `bodyPending` 에서 이미 한 번 고른 규율이다(서버 사본이 이 행을
+   * 대체할 때 글이 다시 흐르면 안 된다).
+   */
+  quote?: QuoteBlockModel | null;
   onResend?: (clientMsgId: string) => void;
 }): React.JSX.Element {
   const failed = pending.status === 'failed';
@@ -1268,6 +1413,7 @@ export function PendingRow({
           atMs={pending.createdAtMs}
         />
       ) : null}
+      {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
       {/* Same body style as a confirmed row, dimmed: the text must not re-flow
           when the server's copy replaces this one. */}
       <Text style={[styles.body, styles.bodyPending]} selectable>

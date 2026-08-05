@@ -1,4 +1,9 @@
 import {uuidEq, type Message} from '@momo/core/lib/api';
+import {
+  quoteDraftFor,
+  quoteDraftStillValid,
+  type QuoteDraft,
+} from '@momo/core/features/timeline/quote';
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {
   dmAutoReplyAgent,
@@ -13,6 +18,7 @@ import {
   Text,
   View,
   type AppStateStatus,
+  type TextInput,
 } from 'react-native';
 import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space} from '../design/tokens';
@@ -395,14 +401,91 @@ export default function ConversationScreen({
   const [thread, setThread] = useState<Message | null>(null);
   const hint = useLongPressHint();
 
+  // ---- 걸어 둔 인용 (ADR-0148) ----------------------------------------------
+  //
+  // `thread` 와 같은 자리에 산다: 둘 다 「이 표면이 지금 무엇을 가리키고 있나」이고,
+  // 둘 다 채널을 옮기면 뜻을 잃는다. 컴포저 **안**에 두지 않는 이유는 컴포저가
+  // 마운트/언마운트되기 때문이다 — 스레드를 열었다 닫는 사이에 걸어 둔 인용이
+  // 사라지면 사람은 자기가 무엇을 눌렀는지 의심하게 된다.
+  const [quote, setQuote] = useState<QuoteDraft | null>(null);
+  useEffect(() => setQuote(null), [channelId]);
+  const composerInputRef = useRef<TextInput | null>(null);
+
+  const messages = timeline.state.messages;
+  // 걸어 둔 원본이 지워졌다. 서버는 받아 주지만(같은 채널이면 묘비도 유효한
+  // 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다. 조용히
+  // 떼는 것이 맞다 — 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
+  useEffect(() => {
+    if (quote === null) return;
+    const lookup = (messageId: string) =>
+      messages.find(message => uuidEq(message.id, messageId));
+    if (!quoteDraftStillValid(quote, lookup)) setQuote(null);
+  }, [quote, messages]);
+
+  const onQuoteMessage = useCallback((message: Message) => {
+    setQuote(quoteDraftFor(message));
+    // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
+    // 떴는데 손은 아직 타임라인에 있다.
+    composerInputRef.current?.focus();
+  }, []);
+  const onCancelQuote = useCallback(() => setQuote(null), []);
+
+  // ---- 인용이 가리키는 줄로 이동 --------------------------------------------
+  //
+  // 토큰을 함께 올리는 이유: 같은 인용을 두 번 누르는 것은 **두 번의 요청**이고,
+  // id 만 내려보내면 두 번째 누름에는 아무 일도 일어나지 않는다.
+  const [jumpTarget, setJumpTarget] = useState<{
+    messageId: string;
+    seq: number | null;
+    token: number;
+  } | null>(null);
+  const [jumpMissed, setJumpMissed] = useState<string | null>(null);
+  useEffect(() => {
+    setJumpTarget(null);
+    setJumpMissed(null);
+  }, [channelId]);
+
+  const onJumpToQuoted = useCallback((message: Message) => {
+    const targetId = message.replyToId;
+    if (targetId === undefined) return;
+    setJumpMissed(null);
+    setJumpTarget(current => ({
+      messageId: targetId,
+      // 서버가 인용에 원본의 seq 를 실어 준다. 라이브 프레임으로 온 인용에는
+      // 없으므로 `null` 이고, 그때는 「모르겠다」라고 말하게 된다.
+      seq: message.replyTo?.seq ?? null,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, []);
+
+  const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
+    setJumpMissed(
+      reason === 'older'
+        ? '인용한 원본은 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.'
+        : '인용한 원본을 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요.',
+    );
+  }, []);
+
   // Bumped the moment a send is issued — before the round trip, because the
   // optimistic echo is already on screen and that is when it has to be visible.
   const [selfSendToken, setSelfSendToken] = useState(0);
   const {send} = timeline;
+  // 거울. `onSend` 가 `quote` 를 **의존성으로** 들면 인용을 걸고 무를 때마다 이
+  // 핸들러의 동일성이 바뀌고, 그것은 `Timeline` 의 `renderItem` 을 타고 내려가
+  // 「붙어 있는 모든 행을 다시 그려라」가 된다(goal RN-P2a 가 산 것). 사람의
+  // 동작이라 초당 한 번은 아니지만, 값을 읽기만 하면 되는 자리에서 목록 전체를
+  // 지불할 이유가 없다 — 이 화면이 `markReadRef` 에서 이미 고른 모양이다.
+  const quoteRef = useRef<QuoteDraft | null>(null);
+  quoteRef.current = quote;
   const onSend = useCallback(
     (body: string) => {
       setSelfSendToken(token => token + 1);
-      void send(body);
+      // 인용은 **보낸 순간** 떨어진다. 남겨 두면 다음 줄까지 같은 원본을 가리키게
+      // 되는데, 그것을 원한 사람은 거의 없고 알아채는 사람은 더 적다. 컴포저가
+      // 자기 글을 먼저 비우는 것과 같은 규율이다.
+      const replyToId = quoteRef.current?.targetId;
+      setQuote(null);
+      void send(body, replyToId);
     },
     [send],
   );
@@ -467,9 +550,20 @@ export default function ConversationScreen({
       onEdit: editBody,
       onDelete: removeMessage,
       onOpenThread: openThread,
+      onQuote: onQuoteMessage,
+      onJumpToQuoted,
       onLongPressUsed: hint.markUsed,
     }),
-    [member.id, toggleReaction, editBody, removeMessage, openThread, hint.markUsed],
+    [
+      member.id,
+      toggleReaction,
+      editBody,
+      removeMessage,
+      openThread,
+      onQuoteMessage,
+      onJumpToQuoted,
+      hint.markUsed,
+    ],
   );
 
   // ---- a search result that we cannot show says so --------------------------
@@ -500,8 +594,16 @@ export default function ConversationScreen({
         list={
           <>
             {anchorNotice ? (
-              <View style={{padding: 12}}>
+              <View style={styles.notice}>
                 <FailureBanner message={anchorNotice} testID="anchor-missed" />
+              </View>
+            ) : null}
+            {/* 인용 점프가 빈손으로 돌아온 자리. 검색 앵커와 같은 배너를 쓴다 —
+                같은 사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할
+                이유가 없다. */}
+            {jumpMissed ? (
+              <View style={styles.notice}>
+                <FailureBanner message={jumpMissed} testID="quote-jump-missed" />
               </View>
             ) : null}
             <Timeline
@@ -526,6 +628,8 @@ export default function ConversationScreen({
               onRetry={reload}
               onResend={onResend}
               onResendPending={onResendPending}
+              jumpTarget={jumpTarget ?? undefined}
+              onJumpMissed={onJumpMissed}
             />
           </>
         }
@@ -562,6 +666,9 @@ export default function ConversationScreen({
               directory={directory}
               dmAgent={dmAgent}
               disabled={railStatus === 'disconnected'}
+              quote={quote}
+              onCancelQuote={onCancelQuote}
+              inputRef={composerInputRef}
               onSend={onSend}
             />
           </>
@@ -584,6 +691,7 @@ export default function ConversationScreen({
 }
 
 const styles = StyleSheet.create({
+  notice: {padding: space.md},
   /**
    * 중단의 결과 한 줄. 활동 줄과 입력창 사이, 방금 누른 버튼 바로 아래다 —
    * 토스트가 아니라 제자리 문장인 이유는 그것이 판단의 근거 옆이기 때문이다.

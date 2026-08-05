@@ -1,4 +1,4 @@
-import type {Channel, Message, RosterMember} from '@momo/core/lib/api';
+import {uuidEq, type Channel, type Message, type RosterMember} from '@momo/core/lib/api';
 import {
   buildTimelineItems,
   emptyChannelCopy,
@@ -31,6 +31,7 @@ import {
   WorkingRow,
   type MessageRowActions,
 } from './MessageRow';
+import {resolveQuote} from '@momo/core/features/timeline/quote';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 
 // =============================================================================
@@ -404,6 +405,8 @@ function TimelineInner({
   showRollup = true,
   anchorSeq,
   anchorRef,
+  jumpTarget,
+  onJumpMissed,
   tailRef,
   metricsRef,
   listRef: externalListRef,
@@ -486,6 +489,20 @@ function TimelineInner({
    */
   anchorSeq?: number;
   anchorRef?: React.MutableRefObject<View | null>;
+  /**
+   * 이 메시지로 이동하라 (ADR-0148 인용 점프).
+   *
+   * `token` 이 함께 오는 이유: 같은 인용을 두 번 누르는 것은 두 번의 요청이고,
+   * id 만 보면 두 번째 누름은 아무 일도 안 일어난다. 값이 아니라 **사건**이므로
+   * 사건마다 다른 값이 필요하다.
+   */
+  jumpTarget?: {messageId: string; seq: number | null; token: number};
+  /**
+   * 그 행이 이 화면에 없다. 「더 위쪽이라 아직 안 불러왔다」와 「모르겠다」를
+   * 가른 채로 돌려준다 — 인용은 원본의 `seq` 를 들고 오므로 그 구별이 추측이
+   * 아니라 사실이다. 라이브 프레임으로 온 인용에는 seq 가 없어서 `null` 이 온다.
+   */
+  onJumpMissed?: (reason: 'older' | 'unknown') => void;
   /**
    * The seam that had to exist before this batch could measure anything, and the
    * reason the last one reported 「미측정」 instead of a number.
@@ -864,6 +881,23 @@ function TimelineInner({
     [listRef, noteGeometry],
   );
 
+  // ---- 라이브로 온 인용을 화면에 있는 행에서 푼다 (ADR-0148) ----------------
+  //
+  // `message.new` 프레임에는 `reply_to` 가 없다 — outbox 행은 한 번 쓰이고 영원히
+  // 재생되므로 본문을 실으면 그것이 곧 규칙 3 이 금지한 스냅샷이다. 그래서 코어의
+  // `resolveQuote` 는 두 재료만 쓴다: 페이지가 동봉한 것, 아니면 **이미 여기 있는
+  // 행**. 어느 쪽도 요청이 아니다.
+  //
+  // Map 을 한 번 만들고 행들이 공유한다: 행마다 `messages.find` 를 돌면 화면에
+  // 50개 행이 있을 때 조회가 2500번이 되고, 그 값은 스크롤마다 다시 계산된다.
+  // 키는 소문자 id 다 — 와이어가 대소문자를 섞어 보낸다(Swift `uuidString` 은
+  // 대문자, 페이지 행은 소문자).
+  const quoteLookup = useMemo(() => {
+    const index = new Map<string, Message>();
+    for (const message of messages) index.set(message.id.toLowerCase(), message);
+    return (messageId: string) => index.get(messageId.toLowerCase());
+  }, [messages]);
+
   const renderItem = useCallback(
     ({item}: {item: TimelineStreamItem}) => {
       renderItemCalls += 1;
@@ -881,6 +915,10 @@ function TimelineInner({
             pending={item.pending}
             startsGroup={item.startsGroup}
             directory={directory}
+            quote={resolveQuote(
+              {replyToId: item.pending.replyToId},
+              quoteLookup,
+            )}
             onResend={onResendPending}
           />
         );
@@ -905,6 +943,7 @@ function TimelineInner({
           replyParent={
             markReplies ? parentOf(item.message, threads) : undefined
           }
+          quote={resolveQuote(item.message, quoteLookup)}
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
@@ -946,7 +985,63 @@ function TimelineInner({
       threads,
       markReplies,
       showRollup,
+      quoteLookup,
     ],
+  );
+
+  // ---- 인용이 가리키는 줄로 이동 (ADR-0148) ---------------------------------
+  //
+  // 새 앵커 기계를 만들지 않는다: 목적지는 **이 목록이 이미 들고 있는 항목**이고,
+  // 없으면 없다고 말한다. 웹은 행이 나타나기를 기다리는 워처를 두지만, 그것이
+  // 성립하는 이유는 웹이 위로 자동으로 더 불러오기 때문이다. 이 목록은 사람이
+  // 끌어올려야 더 불러오므로, 기다리는 워처는 영영 안 오는 행을 기다린다 —
+  // 그 자리에서 「더 위쪽에 있습니다」라고 말하는 편이 정직하고, 그 말이 곧 사람이
+  // 해야 할 동작(위로 끌어올리기)을 알려 준다.
+  const jumpToken = jumpTarget?.token;
+  useEffect(() => {
+    if (jumpTarget === undefined) return;
+    const index = items.findIndex(
+      item =>
+        item.kind === 'message' && uuidEq(item.message.id, jumpTarget.messageId),
+    );
+    if (index < 0) {
+      // 로드된 범위의 가장 오래된 seq 보다 위면 그것은 **사실**이다.
+      const oldest = items.reduce(
+        (min, item) =>
+          item.kind === 'message' ? Math.min(min, item.message.seq) : min,
+        Number.POSITIVE_INFINITY,
+      );
+      onJumpMissed?.(
+        jumpTarget.seq !== null && jumpTarget.seq < oldest ? 'older' : 'unknown',
+      );
+      return;
+    }
+    // 이동은 **따라가기를 끈다**. 안 끄면 다음 메시지 한 통에 맨 아래로 되돌아가고,
+    // 사람은 자기가 방금 연 자리를 잃는다.
+    followingRef.current = false;
+    // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
+    listRef.current?.scrollToIndex({index, viewPosition: 0.5, animated: true});
+  }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onScrollToIndexFailed = useCallback(
+    (info: {index: number; averageItemLength: number}) => {
+      // `getItemLayout` 이 없는 목록에서 아직 측정되지 않은 행을 겨누면 여기로
+      // 온다. RN 이 권하는 회복 그대로: 대략의 자리로 한 번 밀어 두면 그 행이
+      // 마운트되고, 다음 프레임에 정확히 앉는다. 실패를 삼키지 않는 이유는
+      // 삼키면 「눌렀는데 아무 일도 안 일어남」이 되기 때문이다.
+      listRef.current?.scrollToOffset({
+        offset: info.averageItemLength * info.index,
+        animated: false,
+      });
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToIndex({
+          index: info.index,
+          viewPosition: 0.5,
+          animated: false,
+        });
+      });
+    },
+    [listRef],
   );
 
   const keyExtractor = useCallback((item: TimelineStreamItem) => item.key, []);
@@ -1031,6 +1126,7 @@ function TimelineInner({
       data={items}
       renderItem={renderItem}
       keyExtractor={keyExtractor}
+      onScrollToIndexFailed={onScrollToIndexFailed}
       // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
       // the bottom, because the keyboard lifts this list's top edge out of sight.
       contentContainerStyle={CONTENT_ALIGNMENT}
