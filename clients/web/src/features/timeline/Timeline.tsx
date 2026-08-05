@@ -1,4 +1,5 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown } from "lucide-react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type { Channel, Message, RosterMember } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -20,6 +21,11 @@ import {
 } from "./MessageRow";
 import { PendingRow } from "./PendingRow";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
+import {
+  AT_BOTTOM_SLACK_PX,
+  countNewerThan,
+  newestSeqOf,
+} from "./navigation";
 
 // =============================================================================
 // Timeline (R-1 §3). Virtualised by react-virtuoso, ordered by seq only, with
@@ -66,6 +72,21 @@ interface AnchorState {
   /** Bumped when the stream is replaced, to remount instead of shifting. */
   epoch: number;
 }
+
+// ---- 항법 (U4-j · 진단 M-9) --------------------------------------------------
+//
+// 진단이 실측한 것: `ref`는 선언되고 전달만 될 뿐 **한 번도 역참조되지 않았다**.
+// 위로 올라가 읽다가 현재로 돌아오려면 손으로 끝까지 밀어야 했다.
+//
+// 두 컨트롤이 아니라 **한 컨트롤의 두 문장**이다. 자리도 같고 하는 일도 같다
+// (맨 아래로 간다). 다른 것은 그 사이에 새 메시지가 왔는가뿐이고, 그것을 아는
+// 사람에게 두 개의 버튼을 세우면 같은 자리에서 두 번 고르게 만드는 일이 된다.
+//
+// `followOutput="auto"`와의 계약: 바닥에 있으면 virtuoso가 스스로 따라가므로
+// 이 컨트롤은 아예 뜨지 않는다. 읽던 중(바닥이 아닌 상태)에는 화면이 **움직이지
+// 않아야** 하고 — 읽던 줄이 밀려나는 것은 새 메시지가 저지를 수 있는 가장 나쁜
+// 일이다 — 대신 아래에 몇 개가 쌓였는지를 이 줄이 말한다. 그 산수는 조용히
+// 틀릴 수 있어서 따로 산다: `navigation.ts`.
 
 export function Timeline({
   messages,
@@ -191,6 +212,30 @@ export function Timeline({
   }
   const { firstItemIndex, epoch } = anchorRef.current;
 
+  // ---- 항법 상태 (U4-j) -----------------------------------------------------
+  //
+  // 바닥에 있는지는 virtuoso만 안다(스크롤 위치는 이 컴포넌트가 재지 않는다).
+  // 기준선은 **바닥을 떠난 순간의 가장 새 seq**다: 그때 화면에 없던 것이 곧
+  // 「아래에 쌓인 것」이다. 상태가 아니라 ref인 이유는 그 값이 바뀌어도 다시
+  // 그릴 것이 없기 때문이다 — 그릴 것은 아래 개수뿐이다.
+  const [atBottom, setAtBottom] = useState(true);
+  const [newCount, setNewCount] = useState(0);
+  const baselineRef = useRef<number | null>(null);
+  const newestSeqRef = useRef<number | null>(null);
+  newestSeqRef.current = newestSeqOf(messages);
+
+  useEffect(() => {
+    const baseline = baselineRef.current;
+    setNewCount(baseline === null ? 0 : countNewerThan(messages, baseline));
+  }, [messages]);
+
+  // 채널을 갈아타면 기준선도 버린다. `epoch`가 바뀌는 것이 곧 「다른 대화」다.
+  useEffect(() => {
+    baselineRef.current = null;
+    setNewCount(0);
+    setAtBottom(true);
+  }, [epoch]);
+
   if (status === "error") {
     return (
       <InlineBanner
@@ -237,78 +282,140 @@ export function Timeline({
   }
 
   return (
-    <Virtuoso
-      key={epoch}
-      ref={ref}
-      // `overscroll-contain` (goal B9): 목록 끝에 닿은 뒤 한 번 더 미는 손가락이
-      // 브라우저에게 넘어가지 않는다. 넘어가면 안드로이드 크롬은 pull-to-refresh로
-      // 페이지를 다시 읽고 iOS는 화면 전체를 고무줄처럼 끌어당긴다 — 타임라인 맨
-      // 위에서 더 당기는 몸짓의 뜻은 언제나 "더 옛날 것"이지 "앱을 다시 열기"가
-      // 아니다. `none`이 아닌 이유는 고무줄 자체는 남겨야 화면이 살아 있게
-      // 느껴지기 때문이다.
-      className="overscroll-contain h-full"
-      data={items}
-      data-testid="timeline-virtuoso"
-      alignToBottom
-      followOutput="auto"
-      startReached={onStartReached}
-      firstItemIndex={firstItemIndex}
-      // initialItemCount forces a first paint of rows independent of the
-      // ResizeObserver measurement pass (in an embedded webview the scroller
-      // height can resolve a tick after mount, leaving the list empty).
-      initialItemCount={Math.min(items.length, 24)}
-      defaultItemHeight={48}
-      increaseViewportBy={{ top: 600, bottom: 600 }}
-      computeItemKey={(_index, item: TimelineItem) => item.key}
-      itemContent={(_index, item: TimelineItem) => {
-        // 「오늘/어제」는 지금이 언제인지를 알아야 나온다 (H-4). 렌더 시각을 그대로
-        // 쓰는 것은 `Sidebar`가 이미 하는 것과 같다. 1Hz 시계를 붙이지 않는 이유는
-        // 그 시계가 가상 리스트 전체를 초당 한 번 다시 그리기 때문이다 — 하루에 한
-        // 번 바뀌는 낱말에 치를 값이 아니다. 자정을 넘겨 열어 둔 채널은 다음
-        // 렌더(새 메시지·스크롤·포커스)에 스스로 맞는다.
-        if (item.kind === "day") {
-          return <DayDivider atMs={item.atMs} nowMs={Date.now()} />;
-        }
-        if (item.kind === "unread") return <UnreadDivider count={item.count} />;
-        if (item.kind === "recovery") {
-          return <RecoveryDivider seq={item.seq} source={item.source} />;
-        }
-        if (item.kind === "pending") {
+    // `relative`는 아래 항법 컨트롤이 붙을 자리다. 컨트롤이 타임라인 **안**에
+    // 사는 이유: 그 줄이 가리키는 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다.
+    <div className="relative h-full">
+      <Virtuoso
+        key={epoch}
+        ref={ref}
+        // `overscroll-contain` (goal B9): 목록 끝에 닿은 뒤 한 번 더 미는 손가락이
+        // 브라우저에게 넘어가지 않는다. 넘어가면 안드로이드 크롬은 pull-to-refresh로
+        // 페이지를 다시 읽고 iOS는 화면 전체를 고무줄처럼 끌어당긴다 — 타임라인 맨
+        // 위에서 더 당기는 몸짓의 뜻은 언제나 "더 옛날 것"이지 "앱을 다시 열기"가
+        // 아니다. `none`이 아닌 이유는 고무줄 자체는 남겨야 화면이 살아 있게
+        // 느껴지기 때문이다.
+        className="overscroll-contain h-full"
+        data={items}
+        data-testid="timeline-virtuoso"
+        alignToBottom
+        followOutput="auto"
+        startReached={onStartReached}
+        // 바닥의 여유 (U4-j). 0이면 마지막 행의 자기 여백 몇 픽셀만으로도 「바닥이
+        // 아님」이 되어, 아무도 스크롤하지 않았는데 항법 컨트롤이 떴다 사라진다.
+        atBottomThreshold={AT_BOTTOM_SLACK_PX}
+        atBottomStateChange={(bottom) => {
+          setAtBottom(bottom);
+          if (bottom) {
+            // 바닥에 닿으면 아래에 쌓인 것은 0이다. 「읽음」의 정본은 서버가
+            // 가지므로(안읽음 구분선) 여기서는 아무것도 주장하지 않는다.
+            baselineRef.current = null;
+            setNewCount(0);
+            return;
+          }
+          baselineRef.current = newestSeqRef.current;
+          setNewCount(0);
+        }}
+        firstItemIndex={firstItemIndex}
+        // initialItemCount forces a first paint of rows independent of the
+        // ResizeObserver measurement pass (in an embedded webview the scroller
+        // height can resolve a tick after mount, leaving the list empty).
+        initialItemCount={Math.min(items.length, 24)}
+        defaultItemHeight={48}
+        increaseViewportBy={{ top: 600, bottom: 600 }}
+        computeItemKey={(_index, item: TimelineItem) => item.key}
+        itemContent={(_index, item: TimelineItem) => {
+          // 「오늘/어제」는 지금이 언제인지를 알아야 나온다 (H-4). 렌더 시각을 그대로
+          // 쓰는 것은 `Sidebar`가 이미 하는 것과 같다. 1Hz 시계를 붙이지 않는 이유는
+          // 그 시계가 가상 리스트 전체를 초당 한 번 다시 그리기 때문이다 — 하루에 한
+          // 번 바뀌는 낱말에 치를 값이 아니다. 자정을 넘겨 열어 둔 채널은 다음
+          // 렌더(새 메시지·스크롤·포커스)에 스스로 맞는다.
+          if (item.kind === "day") {
+            return <DayDivider atMs={item.atMs} nowMs={Date.now()} />;
+          }
+          if (item.kind === "unread") return <UnreadDivider count={item.count} />;
+          if (item.kind === "recovery") {
+            return <RecoveryDivider seq={item.seq} source={item.source} />;
+          }
+          if (item.kind === "pending") {
+            return (
+              <PendingRow
+                pending={item.pending}
+                startsGroup={item.startsGroup}
+                directory={directory}
+                quoteLookup={quoteLookup}
+                onResend={onResendPending}
+              />
+            );
+          }
           return (
-            <PendingRow
-              pending={item.pending}
+            <MessageRow
+              message={item.message}
               startsGroup={item.startsGroup}
               directory={directory}
+              actions={
+                actions && {
+                  ...actions,
+                  chips: chipsFor(
+                    reactions ?? {},
+                    item.message.id,
+                    actions.myMemberId
+                  ),
+                }
+              }
+              pausedRepeat={item.pausedRepeat}
+              onOpenThread={onOpenThread}
+              onQuoteMessage={onQuoteMessage}
+              onJumpToMessage={onJumpToMessage}
               quoteLookup={quoteLookup}
-              onResend={onResendPending}
+              onOpenWorkSession={onOpenWorkSession}
+              onResend={onResend}
             />
           );
-        }
-        return (
-          <MessageRow
-            message={item.message}
-            startsGroup={item.startsGroup}
-            directory={directory}
-            actions={
-              actions && {
-                ...actions,
-                chips: chipsFor(
-                  reactions ?? {},
-                  item.message.id,
-                  actions.myMemberId
-                ),
-              }
-            }
-            pausedRepeat={item.pausedRepeat}
-            onOpenThread={onOpenThread}
-            onQuoteMessage={onQuoteMessage}
-            onJumpToMessage={onJumpToMessage}
-            quoteLookup={quoteLookup}
-            onOpenWorkSession={onOpenWorkSession}
-            onResend={onResend}
-          />
-        );
-      }}
-    />
+        }}
+      />
+      {!atBottom && (
+        // 컨트롤은 떠 있고 그 아래 타임라인은 계속 눌린다: 감싼 상자는 클릭을
+        // 통과시키고 버튼만 받는다. 그러지 않으면 이 줄이 덮은 폭만큼 마지막
+        // 메시지가 눌리지 않는 띠가 된다.
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+          <button
+            type="button"
+            data-testid="jump-latest"
+            data-new-count={newCount}
+            onClick={() => {
+              ref.current?.scrollToIndex({
+                index: "LAST",
+                align: "end",
+                // 움직임은 피드백이다: 어디로 가는지가 보여야 「맨 아래로
+                // 뛰었다」가 읽힌다. 그것을 원하지 않는다고 말한 사람에게는
+                // 즉시 도착한다 — 목적지는 같고 가는 길만 다르다.
+                behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                  .matches
+                  ? "auto"
+                  : "smooth",
+              });
+            }}
+            className="pointer-events-auto flex h-control-sm items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            <ArrowDown className="size-4 shrink-0" aria-hidden="true" />
+            {/* 라벨은 **한 조각**이다. 조각을 나누어 flex의 자식으로 두면 `gap-2`가
+                낱말 사이에도 8px씩 들어가 「새 메시지  1  개 보기」가 된다 — 같은
+                레포가 구분선에서 이미 겪은 「7월  29일」과 같은 종류의 벌어짐이다. */}
+            <span>
+              {newCount > 0 ? (
+                // 안읽음 구분선과 **같은 낱말**을 쓴다(코어 `unreadDividerSegments`:
+                // 「새 메시지 N개, 여기까지 읽음」). 같은 것을 가리키는 두 자리가
+                // 서로 다른 이름을 쓰면 읽는 사람이 그 둘을 대조해야 한다.
+                <>
+                  새 메시지 <span data-numeric>{newCount}</span>개 보기
+                </>
+              ) : (
+                "최신 메시지로 이동"
+              )}
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

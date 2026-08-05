@@ -30,6 +30,7 @@
     "gate:quote": "npm run build && node gates/gate-quote.mjs",
     "gate:typing": "npm run build && node gates/gate-typing.mjs",
     "gate:borders": "npm run build && node gates/gate-time-borders.mjs",
+    "gate:fold": "npm run build && node gates/gate-fold-nav.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",

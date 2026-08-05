@@ -334,6 +334,11 @@ export function MessageRow({
         // find by already being on it. `no-touch-callout` stops iOS raising its
         // own selection menu on top of the long-press sheet.
         "group flex gap-2 px-4 hover:bg-surface-hover",
+        // 컨트롤이 없는 행은 자기 자신이 탭 정거장이 된다 (rowFocus.ts, 리뷰 W-4).
+        // 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에 그린다 — 행은
+        // 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은 잘린다
+        // (ArtifactCard가 diff 본문 안에서 같은 이유로 같은 선택을 한다).
+        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
         actionable && "no-touch-callout",
         // 행 사이 간격은 코어가 정한다 (H-7 · `ROW_SPACE`). 진단이 실측한 값은 연속
         // 행 8px이고, 거기서 한 사람이 연달아 쓴 다섯 발화가 한 문단으로 뭉쳤다.
@@ -353,6 +358,9 @@ export function MessageRow({
             dateTime={new Date(message.createdAtMs).toISOString()}
             data-numeric
             data-testid="row-time"
+            // 이 시각이 **거터의 시계**라는 표시 (리뷰 W-4). hover가 없는 기기에서
+            // 정지 상태로 서는 규칙이 이 속성에 걸려 있다 — tokens.css.
+            data-row-clock=""
             // **DOM에는 언제나 있고 눈에만 조건부다.** 보조기술은 폰이 이미 모든 행의
             // 시각을 라벨에 넣고 있었고(진단 H-3의 아이러니: "VoiceOver는 아는 것을
             // 눈은 모른다"), 웹에서 그 값을 hover에만 두면 같은 비대칭을 반대로
@@ -466,7 +474,10 @@ export function MessageRow({
               }}
             />
           ) : (
-            <MessageBody body={message.body ?? ""} />
+            // `foldKey`가 메시지 id인 이유는 접힘 상태가 이 행보다 오래 살아야
+            // 하기 때문이다: 긴 답을 펴 놓고 위 대화를 확인하러 갔다 오면
+            // virtuoso는 그 사이에 이 행을 언마운트한다 (fold.ts).
+            <MessageBody body={message.body ?? ""} foldKey={message.id} />
           ))}
         {idleNotice && (
           <WorkSessionIdleCard
