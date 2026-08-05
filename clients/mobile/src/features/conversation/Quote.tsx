@@ -166,6 +166,10 @@ export function QuoteBlock({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={QUOTE_JUMP_HINT}
+      // 엄지에게 44pt (design-review M-8: 첫 판은 ≈41pt). 블록 높이는 원문
+      // 길이에 따라 변하므로 바닥(`blockText.minHeight`)과 여유(`hitSlop`)를
+      // 함께 둔다 — 한 줄짜리 인용에서도 44 가 보장된다.
+      hitSlop={{top: 6, bottom: 6, left: 0, right: 0}}
       onPress={onJump}
       style={({pressed}) => [styles.block, pressed && styles.blockPressed]}
       testID="quote-block">
@@ -304,6 +308,10 @@ const styles = StyleSheet.create({
   rule: {width: 2, backgroundColor: color.textFaint},
   blockText: {
     flex: 1,
+    // 32 + hitSlop 6·6 = 44 (M-8). 한 줄짜리 인용(묘비·미해결)도 이 바닥을
+    // 지나므로 엄지가 겨눌 것이 언제나 44pt 다.
+    minHeight: 32,
+    justifyContent: 'center',
     paddingVertical: space.xs,
     paddingHorizontal: space.sm,
     gap: space.xs,
