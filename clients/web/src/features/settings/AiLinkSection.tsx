@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -131,6 +131,22 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   // secret in memory and there is no avoiding that (it has to be sent), but
   // only one of them has to be legible on screen, and that one is neither.
   const [grant, setGrant] = useState<ProviderOAuthGrant | null>(null);
+  // What each method was last holding in the address box.
+  //
+  // Making the address follow the method fixed a hint that lied about the value
+  // under it, and bought a worse bug: the address became a function of the
+  // RADIO, with no memory of what the operator had. Opening a link on a custom
+  // tenant, glancing at the other method and coming back rewrote the endpoint
+  // to the default — and the button underneath says "연결 교체 저장", so a look
+  // turned into an edit of a field nobody touched. The key side went blank the
+  // same way.
+  //
+  // Suggesting and owning are different things. The method proposes a starting
+  // value the first time it is chosen; after that the box belongs to whoever
+  // typed in it, and a round trip is a look.
+  const [addressMemory, setAddressMemory] = useState<
+    Partial<Record<LinkMethod, string>>
+  >({});
   const [accountLabel, setAccountLabel] = useState("");
   const [fieldError, setFieldError] = useState<
     Partial<Record<LinkFormField, string>>
@@ -171,6 +187,25 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     setPaste(next);
   }
 
+  const previewRef = useRef<HTMLDivElement>(null);
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
+  const hadGrant = useRef(false);
+
+  // Swapping the paste box for the read-back removes the element the person was
+  // just typing into, and a focused element that leaves the DOM drops focus to
+  // <body> — the next Tab restarts from the top of the page. This file already
+  // makes that argument twice about `aria-disabled` (SettingsFields), so the
+  // swap does not get to be the exception. Focus follows the content that
+  // replaced it, in both directions.
+  useEffect(() => {
+    const has = Boolean(grant);
+    if (has !== hadGrant.current) {
+      if (has) previewRef.current?.focus();
+      else if (method === "oauth") pasteRef.current?.focus();
+    }
+    hadGrant.current = has;
+  }, [grant, method]);
+
   const invalidate = () =>
     client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
 
@@ -204,6 +239,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     setPaste("");
     setGrant(null);
     setAccountLabel("");
+    setAddressMemory({});
     setFieldError({});
   }
 
@@ -225,12 +261,25 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     setBearer("");
     setPaste("");
     setGrant(null);
+    setAddressMemory({});
     setFieldError({});
     setEditing(true);
   }
 
+  /**
+   * The starting value a method offers the FIRST time it is chosen.
+   *
+   * The key method offers nothing on purpose: the environment fallback is a
+   * mock address, so proposing it would be a suggestion rather than a default.
+   * The OAuth default is a measurement, not a preference (CHATGPT_OAUTH_BASE_URL).
+   */
+  function defaultAddress(chosen: LinkMethod): string {
+    return chosen === "oauth" ? CHATGPT_OAUTH_BASE_URL : "";
+  }
+
   function switchMethod(next: string) {
     const chosen: LinkMethod = next === "oauth" ? "oauth" : "key";
+    if (chosen === method) return;
     setMethod(chosen);
     setFieldError({});
     // Never carry a credential across methods: the two boxes hold different
@@ -247,8 +296,11 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     //
     // So the address moves with the method, in both directions. A different
     // tenant is one edit away, which is the case the hint actually describes.
-    if (chosen === "oauth") setBaseUrl(CHATGPT_OAUTH_BASE_URL);
-    else if (baseUrl.trim() === CHATGPT_OAUTH_BASE_URL) setBaseUrl("");
+    // `??`, not `||`: an operator who deliberately emptied the box gets their
+    // empty box back rather than the suggestion they just rejected.
+    const remembered = { ...addressMemory, [method]: baseUrl };
+    setAddressMemory(remembered);
+    setBaseUrl(remembered[chosen] ?? defaultAddress(chosen));
   }
 
   // Both methods report AT the field. They did not: the key path piled the same
@@ -566,10 +618,16 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                   Presence, never values (ADR-0004 #2/#5). */}
               {grant ? (
                 <div
-                  className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4"
+                  ref={previewRef}
+                  tabIndex={-1}
+                  className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   data-testid="ai-link-oauth-preview"
                 >
-                  <p className="break-keep text-meta text-ink-muted">
+                  {/* The box vanishing is the only signal a sighted user gets.
+                      `role="status"` makes the exchange audible too, instead of
+                      leaving a screen-reader user with a control that silently
+                      stopped existing. */}
+                  <p className="break-keep text-meta text-ink-muted" role="status">
                     auth.json 을 읽었습니다. 붙여넣은 원문은 화면에서 지웠습니다.
                   </p>
                   <KeyValueRows rows={grantPreviewRows(grant)} />
@@ -599,6 +657,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                       계열을 쓰되 높이(rows)와 세로 패딩(py-2)이 다르고,
                       transition-colors/tap-target은 붙이지 않는다. */}
                   <textarea
+                    ref={pasteRef}
                     id="provider-oauth-paste"
                     name="oauthPaste"
                     value={paste}

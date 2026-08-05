@@ -284,11 +284,12 @@ export function buildOAuthLinkBody(input: {
  */
 export function grantPreviewRows(
   grant: ProviderOAuthGrant
-): { key: string; value: string }[] {
+): { key: string; value: string; prose?: boolean }[] {
   return [
     { key: "갱신 토큰", value: "읽었습니다" },
     {
       key: "액세스 토큰",
+      prose: true,
       value: grant.accessToken
         ? "함께 등록됩니다"
         : "없음. 다음 턴에 서버가 발급합니다",

@@ -61,6 +61,11 @@ const ID_TOKEN = "gate-id-token-not-a-credential";
 const ACCOUNT_ID = "acct-01996f2a-7c3d-4f11-9a20-3d6f0c9b41ee";
 const ACCOUNT_LABEL = "성재 개인 ChatGPT 구독";
 const BASE_URL = "https://chatgpt.com/backend-api/codex";
+// A tenant that is NOT the default. The old H3 assertion round-tripped an
+// address that happened to equal the suggestion, which is the one case where
+// losing it is invisible — so it never measured whether the operator's own
+// value survives. That gap is exactly what a review found by hand.
+const CUSTOM_BASE_URL = "https://codex.acme-internal.test/backend-api/codex";
 
 // The measured key structure of `~/.codex/auth.json`
 // (server-rust/crates/momo-settings/src/oauth.rs), values invented.
@@ -368,6 +373,23 @@ async function main() {
       }
       await assertNoCredentialOnScreen(page, "right after the paste was read");
 
+      // The control the operator was typing into just left the DOM. If focus is
+      // not moved it falls to <body> and the next Tab restarts at the top of the
+      // page — a keyboard user loses their place mid-task.
+      const focusLanded = await page.evaluate(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body) return "body";
+        return active.closest('[data-testid="ai-link-oauth-preview"]')
+          ? "preview"
+          : (active.getAttribute("data-testid") ?? active.tagName);
+      });
+      if (focusLanded !== "preview") {
+        fail(
+          `focus fell to ${focusLanded} when the paste box was swapped for the ` +
+            `read-back, so a keyboard user is thrown to the top of the page`
+        );
+      }
+
       // The read-back is not a dead end: a wrong file has to be replaceable.
       await page.getByTestId("ai-link-oauth-repaste").click();
       await page.waitForSelector('[data-testid="ai-link-oauth-paste"]');
@@ -452,7 +474,8 @@ async function main() {
         fail("editing an existing link offers a save button that never says it replaces one");
       }
 
-      // --- H3: the address belongs to the credential, not to the form -------
+      // --- H3: a method SUGGESTS an address; it does not own one ------------
+      // First choice of a method offers its default...
       await page.locator("#provider-method-key").check();
       const afterKey = await page.locator("#provider-base-url").inputValue();
       if (afterKey === BASE_URL) {
@@ -467,6 +490,62 @@ async function main() {
         fail(
           `switching back to OAuth left ${JSON.stringify(afterOAuth)} under a hint ` +
             `that calls the field the address a ChatGPT grant actually reaches`
+        );
+      }
+
+      // ...and after that the box belongs to whoever typed in it. A round trip
+      // through the other radio is a LOOK, not an edit: the button underneath
+      // reads "연결 교체 저장", so silently restoring a default here replaces an
+      // endpoint the operator never touched.
+      await page.locator("#provider-base-url").fill(CUSTOM_BASE_URL);
+      await page.locator("#provider-method-key").check();
+      const keyAfterCustom = await page.locator("#provider-base-url").inputValue();
+      if (keyAfterCustom === CUSTOM_BASE_URL) {
+        fail("the key method inherited the OAuth tenant address instead of its own");
+      }
+      await page.locator("#provider-method-oauth").check();
+      const restoredCustom = await page.locator("#provider-base-url").inputValue();
+      if (restoredCustom !== CUSTOM_BASE_URL) {
+        fail(
+          `a radio round trip rewrote a custom tenant address: expected ` +
+            `${JSON.stringify(CUSTOM_BASE_URL)}, got ${JSON.stringify(restoredCustom)}. ` +
+            `The operator changed nothing and their endpoint would be replaced on save.`
+        );
+      }
+
+      // The key side must come back too, not blank out.
+      await page.locator("#provider-method-key").check();
+      await page.locator("#provider-base-url").fill("https://api.openai.com/v1");
+      await page.locator("#provider-method-oauth").check();
+      await page.locator("#provider-method-key").check();
+      const restoredKey = await page.locator("#provider-base-url").inputValue();
+      if (restoredKey !== "https://api.openai.com/v1") {
+        fail(
+          `a radio round trip emptied the key method's address: got ` +
+            `${JSON.stringify(restoredKey)}. Submitting now asks for an address ` +
+            `the card is still showing as saved.`
+        );
+      }
+
+      // And the wire agrees with the screen: what survived the round trip is
+      // what gets saved.
+      await page.locator("#provider-method-oauth").check();
+      await page.getByTestId("ai-link-oauth-paste").fill(AUTH_JSON);
+      await page.waitForSelector('[data-testid="ai-link-oauth-preview"]');
+      await page.getByRole("button", { name: "연결 교체 저장", exact: true }).click();
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="ai-link-form"]') === null,
+        undefined,
+        { timeout: 10_000 }
+      );
+      if (state.putBodies.length !== 2) {
+        fail(`expected a second PUT after the round trip, saw ${state.putBodies.length}`);
+      }
+      const replaced = JSON.parse(state.putBodies[1]);
+      if (replaced.baseUrl !== CUSTOM_BASE_URL) {
+        fail(
+          `the replace-save sent ${JSON.stringify(replaced.baseUrl)} for a link the ` +
+            `operator had pointed at ${JSON.stringify(CUSTOM_BASE_URL)}`
         );
       }
 
