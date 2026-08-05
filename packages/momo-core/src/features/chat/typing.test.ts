@@ -15,8 +15,10 @@ import {
   renewMargin,
   typingGrantFrom,
   typingLabel,
+  typingLead,
   typingSegments,
   typingSentence,
+  typingTail,
   withTypingGrant,
   withTypingPublished,
   withTypingRefusal,
@@ -465,6 +467,38 @@ describe("liveTypists", () => {
     const read = (list: TypingSignal[]) =>
       liveTypists(list, { channelId: CH, nowMs: NOW, isEligible: humansOnly });
     expect(read(a)).toEqual(read(b));
+
+    // **결정적인 것만으로는 부족하다 — 어느 쪽으로 결정적인지를 못박는다** (#1065).
+    //
+    // 위 두 줄은 「도착 순서에 안 흔들린다」만 말한다. 그런데 이 tie를 실제로 읽는
+    // 쪽(화면 문장 단정)은 **순서 그 자체**를 기대하고, 그 기대가 어디에도 적혀
+    // 있지 않으면 픽스처 id가 우연히 정렬돼 초록인 테스트가 된다 — B3M의 M2 테스트가
+    // 정확히 그 상태였다. 규칙은 **member id 오름차순**이다.
+    expect(DOHYUN < MINSEO).toBe(true);
+    expect(read(a)).toEqual([DOHYUN, MINSEO]);
+  });
+
+  /**
+   * 같은 규칙을 문장 쪽에서 한 번 더. 이름이 아니라 **id**가 순서를 정한다는 것이
+   * 요점이라, 이름 순서와 id 순서가 어긋나는 픽스처를 쓴다: 「지우」가 가나다순으로는
+   * 앞이지만 id는 뒤(…104)이므로, 이름으로 정렬하는 구현은 여기서 걸린다.
+   */
+  it("spells the tie rule out in the sentence: id order, not name order", () => {
+    const list = [
+      signal({ memberId: JIWOO, startedAtMs: NOW }),
+      signal({ memberId: DOHYUN, startedAtMs: NOW }),
+    ];
+    const names: Record<string, string> = {
+      [DOHYUN]: "이도현",
+      [JIWOO]: "박지우",
+    };
+    const ordered = liveTypists(list, {
+      channelId: CH,
+      nowMs: NOW,
+      isEligible: humansOnly,
+    }).map((id) => names[id]);
+    expect(ordered).toEqual(["이도현", "박지우"]);
+    expect(typingSentence(ordered)).toBe("이도현님, 박지우님이 작성 중…");
   });
 
   it("folds the mixed case the wire sends", () => {
@@ -509,7 +543,7 @@ describe("typingSentence", () => {
 
   it("names two, which is the last count that fits a composer line", () => {
     expect(typingSentence(["이도현", "김민서"])).toBe(
-      "이도현, 김민서님이 작성 중…"
+      "이도현님, 김민서님이 작성 중…"
     );
   });
 
@@ -523,7 +557,7 @@ describe("typingSentence", () => {
     expect(typingSentence(["이도현"], 2)).toBe("이도현님이 작성 중…");
     // 4로 올리면 이름이 세 개까지 남는다.
     expect(typingSentence(["이도현", "김민서", "박지우"], 4)).toBe(
-      "이도현, 김민서, 박지우님이 작성 중…"
+      "이도현님, 김민서님, 박지우님이 작성 중…"
     );
   });
 
@@ -547,23 +581,96 @@ describe("typingSentence", () => {
     ]);
     expect(typingSegments(["이도현", "김민서"])).toEqual([
       { kind: "name", text: "이도현" },
-      { kind: "plain", text: ", " },
+      { kind: "plain", text: "님, " },
       { kind: "name", text: "김민서" },
       { kind: "plain", text: "님이 작성 중…" },
     ]);
   });
 
-  it("has no name segment in the collapsed form, because it names nobody", () => {
+  /**
+   * N-1. 1차는 `join(", ")` 뒤에 님을 **한 번** 붙여 「이도현, 김민서님이」가 됐다 —
+   * 존대가 마지막 사람에게만 간 문장이고, 같은 화면 위 채널 헤더는 나열에 님을 아예
+   * 쓰지 않아 한 화면에 나열 규칙이 둘이었다. 통일은 「이름마다 님」 쪽이다(님을 떼면
+   * 사람 줄의 유일한 낱말 표지가 사라진다 — 코어 독스트링).
+   */
+  it("puts 님 on every listed name, not only the last one (N-1)", () => {
+    // 이름 개수 = 님 개수. 하나라도 맨이름으로 남으면 여기서 걸린다.
+    for (const [names, threshold, count] of [
+      [["이도현"], 3, 1],
+      [["이도현", "김민서"], 3, 2],
+      [["이도현", "김민서", "박지우"], 4, 3],
+    ] as const) {
+      const sentence = typingSentence([...names], threshold) ?? "";
+      expect(sentence.match(/님/g)).toHaveLength(count);
+    }
+    // 집계 문구에는 이름이 없으므로 님도 없다.
+    expect(typingSentence(["a", "b", "c"])).not.toContain("님");
+  });
+
+  /**
+   * N-2. 집계 숫자는 2 → 3 → 4명으로 **바뀌는** 숫자다. 문자열 안에 녹아 있으면
+   * 자릿폭 고정(`data-numeric`)을 걸 자리가 없어 줄이 미세하게 흔들린다.
+   * 조각으로 빼되 **문장은 한 글자도 바뀌지 않는다**(아래 concat 단정이 그것을 잡는다).
+   */
+  it("hands the aggregate count out as its own segment (N-2)", () => {
     expect(typingSegments(["a", "b", "c"])).toEqual([
-      { kind: "plain", text: "3명이 작성 중…" },
+      { kind: "count", text: "3" },
+      { kind: "plain", text: "명이 작성 중…" },
     ]);
+    // 숫자 조각은 숫자만 든다 — 낱말이 섞이면 자릿폭 고정이 낱말까지 잡아 늘린다.
+    const [count] = typingSegments(["a", "b", "c", "d"]);
+    expect(count).toEqual({ kind: "count", text: "4" });
+    expect(count.text).toMatch(/^\d+$/);
+  });
+
+  it("has no name segment in the collapsed form, because it names nobody", () => {
+    expect(typingSegments(["a", "b", "c"]).some((s) => s.kind === "name")).toBe(
+      false
+    );
     expect(typingSegments([])).toEqual([]);
+  });
+
+  /**
+   * M-3의 계약. 한국어는 동사가 끝에 오므로, 자리가 모자라 뒤가 잘리면 사라지는 것이
+   * 하필 「작성 중」이고 남는 것은 이름 나열 + `…` — 집계 문구도 아니고 아무 말도 아닌
+   * 문자열이다. 화면은 [`typingLead`]만 줄이고 꼬리는 줄이지 않는데, 그 방어는 **꼬리에
+   * 언제나 동사가 있고 앞부분에는 없다**는 이 계약 위에 서 있다.
+   *
+   * 마지막 단정이 M-3의 나머지 절반이다: `…`가 꼬리에만 있으므로, 잘림이 만드는 `…`는
+   * 언제나 **이름 안쪽**에 생긴다 — 그래야 잘린 줄과 온전한 줄이 구분된다.
+   */
+  it("always keeps the verb in the tail segment (M-3)", () => {
+    for (const names of [
+      ["이도현"],
+      ["이도현", "김민서"],
+      ["a", "b", "c"],
+      ["a", "b", "c", "d", "e"],
+    ]) {
+      for (const threshold of [2, 3, 4]) {
+        const segments = typingSegments(names, threshold);
+        const tail = typingTail(segments);
+        expect(tail?.kind).toBe("plain");
+        expect(tail?.text).toContain("작성 중");
+        for (const segment of typingLead(segments)) {
+          expect(segment.text).not.toContain("작성 중");
+          expect(segment.text).not.toContain("…");
+        }
+      }
+    }
+    expect(typingTail([])).toBeNull();
+    expect(typingLead([])).toEqual([]);
   });
 
   /** 조각을 이어 붙이면 문장과 **정확히** 같아야 한다. 두 경로가 갈리면 화면과
    *  보조기술이 다른 문장을 말한다. */
   it("concatenates back into exactly the sentence", () => {
-    for (const names of [["이도현"], ["이도현", "김민서"], ["a", "b", "c"], []]) {
+    for (const names of [
+      ["이도현"],
+      ["이도현", "김민서"],
+      ["a", "b", "c"],
+      ["a", "b", "c", "d"],
+      [],
+    ]) {
       for (const threshold of [2, 3, 4]) {
         const joined = typingSegments(names, threshold)
           .map((segment) => segment.text)
