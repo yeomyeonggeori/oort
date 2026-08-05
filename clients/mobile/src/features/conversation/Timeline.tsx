@@ -35,7 +35,11 @@ import {resolveQuote} from '@momo/core/features/timeline/quote';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
-import {foldDeletedRuns, type FoldedTimelineItem} from './deletedFold';
+import {
+  foldDeletedRuns,
+  foldedStandInIndex,
+  type FoldedTimelineItem,
+} from './deletedFold';
 
 // =============================================================================
 // The message list. **Forward — newest at the bottom.**
@@ -1070,10 +1074,24 @@ function TimelineInner({
   const jumpToken = jumpTarget?.token;
   useEffect(() => {
     if (jumpTarget === undefined) return;
-    const index = items.findIndex(
+    let index = items.findIndex(
       item =>
         item.kind === 'message' && uuidEq(item.message.id, jumpTarget.messageId),
     );
+    // ## 접힌 묘비는 자기 행이 없다 (design-review H-1)
+    //
+    // 삭제 원본을 가리키는 인용은 문이다(`QuoteBlock` 의 `jumpable` 은 `deleted` 를
+    // 배제하지 않는다 — 지워진 것도 **어디서** 지워졌는지는 볼 수 있어야 한다).
+    // 그런데 그 원본이 연속 묘비 묶음 안에 있으면 `foldDeletedRuns` 가 앞선 행으로
+    // 접어 넣으므로 위의 `findIndex` 는 빈손으로 돌아온다. 그 자리에서 아래 고지가
+    // 뜨면 화면은 「위로 올려 이전 대화를 더 불러오세요」라고 **거짓 지시**를 한다 —
+    // 그 메시지는 이미 로드돼 있고 접혀 있을 뿐이다.
+    //
+    // 그래서 접기가 적어 둔 것을 한 번 더 본다. 착지 지점은 그 묘비를 **대신해 서
+    // 있는 행**이고, 그 행은 「삭제된 메시지 N개」라고 자기가 무엇을 포함하는지
+    // 말한다. 왜 이쪽이고 「인용된 묘비는 접지 않는다」가 아닌지는 `deletedFold.ts`
+    // 머리말에 적혀 있다.
+    if (index < 0) index = foldedStandInIndex(items, jumpTarget.messageId);
     if (index < 0) {
       // 로드된 범위의 가장 오래된 seq 보다 위면 그것은 **사실**이다.
       const oldest = items.reduce(
@@ -1099,7 +1117,14 @@ function TimelineInner({
     // 표시를 **먼저** 세우고 스크롤한다. 반대로 두면 이동이 실패해
     // (`onScrollToIndexFailed` 회복 경로) 두 프레임 뒤에 앉는 동안 표시가 없는
     // 창이 생기고, 그 창에서 사람이 보는 것은 표시 없이 움직이는 화면이다.
-    setLandedId(jumpTarget.messageId);
+    //
+    // 표시는 **착지한 행**의 것이다. 목적지 id 를 그대로 쓰면 접힌 묘비로 간 경우
+    // (H-1) 화면에 없는 id 에 틴트를 걸게 되고, 사람은 움직이기만 하고 아무것도
+    // 켜지지 않는 화면을 본다.
+    const landing = items[index];
+    setLandedId(
+      landing?.kind === 'message' ? landing.message.id : jumpTarget.messageId,
+    );
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
     listRef.current?.scrollToIndex({index, viewPosition: 0.5, animated: true});
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
