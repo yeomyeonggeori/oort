@@ -4,7 +4,14 @@ import type {
   PendingMessage,
   TimelineStreamItem,
 } from '@momo/core/features/timeline/model';
-import {cleanup, render, screen} from '@testing-library/react-native';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
@@ -225,7 +232,6 @@ describe('M-14 — 누를 것은 전부 44pt 다', () => {
         }}
       />,
     );
-    const {fireEvent, act} = require('@testing-library/react-native');
     fireEvent.press(screen.getByTestId('reaction-chip-👍'));
     await act(async () => {
       await Promise.resolve();
@@ -551,7 +557,6 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     }
 
     it('점프한 행 하나만 물들고, 손가락이 닿으면 물러난다', async () => {
-      const {fireEvent, act} = require('@testing-library/react-native');
       const view = render(
         <Timeline
           messages={HISTORY}
@@ -577,11 +582,7 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
       });
       // **하나만.** 「방금 여기로 왔다」가 두 행에 있으면 그것은 표시가 아니다.
       expect(tinted()).toHaveLength(1);
-      expect(
-        require('@testing-library/react-native').within(tinted()[0]).getByText(
-          '가운데 줄',
-        ),
-      ).toBeTruthy();
+      expect(within(tinted()[0]).getByText('가운데 줄')).toBeTruthy();
 
       // 사람이 화면을 다시 가져간다.
       await act(async () => {
