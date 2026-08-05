@@ -38,6 +38,7 @@ import { WorkPanel } from "@/features/work/WorkPanel";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
+import { useTypingReceive } from "@/features/chat/useTyping";
 import {
   makeStressRoster,
   makeSyntheticMessages,
@@ -145,6 +146,14 @@ export function ChatShell() {
     session.member.id
   );
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
+
+  // 「작성 중」 수신 (ADR-0149). **보이는 채널만** 구독한다 - 그것이 이 레일의 유일한
+  // 폭 제어다. 스트레스 픽스처에는 서버가 없으므로 걸지 않는다.
+  useTypingReceive(
+    stressCount > 0 ? null : realtime,
+    workspaceId,
+    stressCount > 0 ? null : channelId
+  );
 
   // Unread boundary is the cursor as it stood when the channel was OPENED:
   // advancing the cursor below must not erase the divider under the reader.
@@ -799,6 +808,7 @@ export function ChatShell() {
         {stressCount === 0 && channelId !== null && <LongPressHint />}
         {stressCount === 0 && channelId !== null && (
           <Composer
+            workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}
             channelLabel={label}

@@ -5,12 +5,14 @@ import {
   asHuddleLifecycleFrame,
   asMessageDeletedFrame,
   asReactionFrame,
+  asTypingFrame,
   asWorkSessionACPFrame,
   asWorkSessionLifecycleFrame,
   asWorkSessionObserverFrame,
   asWorkSessionToolTransitionFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
+  centrifugoTypingChannelName,
   createReplayGate,
   type AgentProgressEvent,
   type CascadeFallbackFrame,
@@ -21,6 +23,7 @@ import {
   type RealtimeHandle,
   type RealtimeStatus,
   type SubscribedRecoveryContext,
+  type TypingFrame,
   type WorkSessionACPFrame,
   type WorkSessionLifecycleFrame,
   type WorkSessionObserverFrame,
@@ -292,6 +295,46 @@ export function createRealtime(
     );
   }
 
+  /**
+   * 「작성 중」 (ADR-0149). **새 소켓이 아니다** — 이 파일의 `attach()`가 이미
+   * 관리하는 그 centrifuge 클라이언트에 채널 하나를 더 붙인다.
+   *
+   * 세 가지가 다른 레일들과 다르고, 셋 다 서버 설정에서 따라 나온 것이다:
+   *
+   *   - **replay gate가 없다.** `agent` 네임스페이스에서 게이트가 필요했던 이유는
+   *     `force_recovery`로 24시간 히스토리를 되쏘기 때문인데, `typing`은
+   *     `history_size: 0`이다(infra/centrifugo.json). 되살릴 과거가 존재하지 않으므로
+   *     막을 것도 없다.
+   *   - **복구를 요구하지 않는다.** 끊긴 동안의 작성 중은 이미 만료됐다. 재구독 뒤
+   *     첫 신호가 곧 현재 상태이고, 그것이 REST로 물어볼 것이 없는 유일한 레일인
+   *     이유다.
+   *   - **이미 만료된 신호는 버린다.** 지연된 프레임을 명부에 넣으면 다음 sweep까지
+   *     한 번 깜박인다. 여기서 거르는 편이 값싸고, 판정 근거는 신호 자신이 들고 온
+   *     `expires_at`이다(가드 4).
+   */
+  function subscribeTyping(
+    workspaceId: string,
+    channelId: string,
+    handlers: { onTyping: (frame: TypingFrame) => void }
+  ): () => void {
+    return attach(
+      centrifugoTypingChannelName(workspaceId, channelId),
+      { recoverable: false, positioned: false },
+      (sub) => {
+        const onPublication = (ctx: { data?: unknown }) => {
+          const frame = asTypingFrame(ctx.data);
+          if (!frame) return;
+          if (frame.payload.expires_at <= Date.now()) return;
+          handlers.onTyping(frame);
+        };
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   function subscribeWorkSession(
     workspaceId: string,
     channelId: string,
@@ -414,6 +457,7 @@ export function createRealtime(
   return {
     subscribeChannel,
     subscribeAgent,
+    subscribeTyping,
     subscribeWorkSession,
     subscribeCascade,
     subscribeHuddle,
