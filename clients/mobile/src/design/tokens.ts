@@ -75,8 +75,7 @@ export const color = {
    * accent 의 가장 부드러운 단. 내 반응 칩의 채움이 이 값이다 (감사 M-13).
    *
    * `surface`(중성 고도)와 뜻이 다르다: 이것은 **내가 참여했다**는 표시라 색을
-   * 가진다. 배경 대비 1.18:1 로, `okSurface`(1.17) · `dangerSurface`(1.16) 와
-   * 같은 계단에 선다.
+   * 가진다. 칩이 서는 자리인 `surface` 위에서 1.17:1 (배경 위 1.27:1).
    */
   accentSurface: '#1a2740',
   /**
@@ -112,8 +111,8 @@ export const color = {
    * danger 상자 **안**의 글자 — `danger` 보다 한 단 밝다.
    *
    * 상자 밖의 표식(「전송 실패」 한 낱말)과 상자 안의 문장(실패 사유 한 줄)은
-   * 읽히는 시간이 다르다. 후자는 `dangerSurface` 위에서 6.62:1 이고 전자의
-   * 값(`danger`, 5.53:1)보다 위다.
+   * 읽히는 시간이 다르다. 후자는 `dangerSurface` 위에서 **9.29:1** 이고 전자의
+   * 값(`danger`, 5.53:1)보다 위다 — 둘 다 AA 를 지나되 한 단 갈라 둔다.
    */
   dangerText: '#f0b4b8',
   /** A settled success. */
