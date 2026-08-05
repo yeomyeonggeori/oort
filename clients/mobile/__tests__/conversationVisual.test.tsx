@@ -7,16 +7,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 
-import {color, space} from '../src/design/tokens';
+import {color, SAFE_GUTTER, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
   DayDivider,
   MessageRow,
   PendingRow,
+  RecoveryDivider,
   ROW_PRESSED_BACKGROUND,
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {
+  dividerText,
+  recoveryDividerSegments,
   DIVIDER_LABEL_SIDE,
   DIVIDER_SPACE,
   ROW_SPACE,
@@ -626,10 +629,16 @@ describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
   });
 
   it('본문이 시각 밑으로 흘러들지 않는다', () => {
-    const source = codeOnly(SRC('MessageRow.tsx'));
-    // 겹침을 막는 것은 여백 하나이고, 그래서 시각의 칸과 **같은 상수**를 쓴다.
-    expect(source).toMatch(/continuationBody:\s*\{paddingRight: TIME_COLUMN/);
-    expect(source).toMatch(/paddingRight: TIME_COLUMN \+ space\.sm,/);
+    // 이 단정은 예전에 `continuationBody`(본문에 걸린 여백)를 소스에서 찾았다.
+    // 그 여백이 **본문에만** 있었다는 것이 M-1 이 말한 구멍이므로, 이제
+    // 그려진 값으로 그릇을 본다 — 아래 M-1 절이 나머지 첫 자식들을 센다.
+    const view = rowAt(false);
+    const inner = flatten(view.getByTestId('message-press').props.style);
+    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
+    expect(Number(inner.paddingRight)).toBe(
+      SAFE_GUTTER + Number(time.width) + space.sm,
+    );
+    expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('continuationBody');
   });
 
   it('보조기술이 같은 시각을 두 번 읽지 않는다', () => {
@@ -654,6 +663,177 @@ describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
   it('그룹 머리의 시각도 같은 밝기다 — 덜 중요한 쪽이 더 밝지 않게', () => {
     const source = codeOnly(SRC('MessageRow.tsx'));
     expect(source).not.toMatch(/time: \{fontSize: font\.meta, color: color\.textFaint\}/);
+  });
+});
+
+// =============================================================================
+// #1092 M-1 — 시각 칸을 예약하는 것은 「행의 첫 줄」이다
+//
+// 예약이 **자식**(작성자 줄과, 연속 행일 때의 본문)에 걸려 있었다. 그래서 행의 첫
+// 흐름 자식이 답글 표식·인용·묘비·아티팩트 카드·승인 카드일 때는 예약이 없었고,
+// 리뷰는 저장소가 커밋한 캡처에서 그 겹침을 읽어 냈다(`...문서에⁷젝³`).
+//
+// 그 구멍의 성질이 요점이다: **자식 종류가 늘 때마다 같은 구멍이 다시 생긴다.**
+// 그래서 이 절은 「이 여섯 경우가 맞다」를 세지 않고 **그릇 하나가 진다**를 센다 —
+// 앞으로 무엇이 더 들어와도 같은 여백 밑으로 들어오게.
+// =============================================================================
+
+describe('#1092 M-1 — 예약은 자식이 아니라 그릇이 진다', () => {
+  const HIDDEN = {includeHiddenElements: true} as const;
+
+  /** 이 행에서 **첫 흐름 자식**이 무엇인가로 갈리는 경우들. */
+  const LEADS: {name: string; props: Partial<React.ComponentProps<typeof MessageRow>>}[] = [
+    {name: '본문', props: {message: message({body: '재시작하면 seq 는 이어집니다'})}},
+    {
+      name: '답글 표식',
+      props: {
+        message: message({rootId: 'root-1'} as never),
+        replyParent: message({id: 'root-1', body: '원본'}),
+      },
+    },
+    {name: '인용', props: {quote: readyBlock()}},
+    {name: '묘비', props: {message: message({state: 'deleted'})}},
+    {
+      name: '승인 카드',
+      props: {
+        message: message({
+          type: 'approval_request',
+          body: '툴 호출 승인',
+          props: {
+            approval_id: 'ap-1',
+            title: 'github.search_issues 실행 허가',
+            approval_status: 'pending',
+          },
+        } as never),
+      },
+    },
+    {
+      name: '아티팩트 카드',
+      props: {
+        message: message({
+          type: 'artifact',
+          body: '',
+          props: {
+            artifact_kind: 'pr',
+            title: 'PR #12',
+            url: 'https://github.com/example/repo/pull/12',
+          },
+        } as never),
+      },
+    },
+    {name: '내용 없는 메시지', props: {message: message({body: ''})}},
+  ];
+
+  function renderLead(
+    props: Partial<React.ComponentProps<typeof MessageRow>>,
+  ) {
+    return render(
+      <MessageRow
+        message={message()}
+        startsGroup={false}
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        {...props}
+      />,
+    );
+  }
+
+  it.each(LEADS)('첫 자식이 $name 이어도 시각 칸이 비어 있다', ({props}) => {
+    const view = renderLead(props);
+    const inner = flatten(view.getByTestId('message-press').props.style);
+    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
+    // 시각은 화면 오른쪽에서 `right` 만큼 떨어져 서고 폭이 `width` 다. 흐름
+    // 자식의 오른쪽 끝은 그보다 최소 `space.sm` 더 안쪽이어야 한다 — 그렇지
+    // 않으면 그 자식이 시각 밑으로 흘러든다.
+    expect(Number(inner.paddingRight)).toBeGreaterThanOrEqual(
+      Number(time.right) + Number(time.width) + space.sm,
+    );
+  });
+
+  it('예약이 `startsGroup` 에 따라 달라지지 않는다 — 시각은 두 경우 다 선다', () => {
+    // 예전 예약은 연속 행에만 있었다(`startsGroup ? undefined : ...`). 시각은
+    // 두 경우 다 서므로 예약도 두 경우 다 서야 한다.
+    const head = flatten(
+      renderLead({startsGroup: true}).getByTestId('message-press').props.style,
+    );
+    const cont = flatten(
+      renderLead({startsGroup: false}).getByTestId('message-press').props.style,
+    );
+    expect(head.paddingRight).toBe(cont.paddingRight);
+  });
+
+  it('예약이 소스에서 한 곳뿐이다 — 자식마다 걸면 다음 자식이 또 빠진다', () => {
+    const code = codeOnly(SRC('MessageRow.tsx'));
+    const reservations = code.match(/TIME_COLUMN \+ space\.sm/g) ?? [];
+    expect(reservations).toHaveLength(1);
+    expect(code).toMatch(
+      /rowTimeReserve: \{paddingRight: SAFE_GUTTER \+ TIME_COLUMN \+ space\.sm\}/,
+    );
+  });
+
+  it('카드가 시각을 덮지 않는다 — 시각이 흐름 자식보다 **뒤에** 칠해진다', () => {
+    // RN 에는 z-index 기본값이 없다: 형제는 쓰인 순서대로 칠해진다. 불투명한
+    // `styles.card` 배경을 든 카드가 시각보다 뒤에 있으면 시각이 조용히
+    // 사라진다 — 자리를 비워도 칠이 덮으면 같은 결함이다.
+    const code = codeOnly(SRC('MessageRow.tsx'));
+    expect(code.indexOf('testID="row-time"')).toBeGreaterThan(
+      code.indexOf('<AgentCard'),
+    );
+    expect(code.indexOf('testID="row-time"')).toBeGreaterThan(
+      code.indexOf('<ArtifactCard'),
+    );
+    // 그리고 런타임에서도 마지막 형제다 — 소스 순서만 보면 조건부 분기가
+    // 순서를 뒤집는 날을 못 잡는다.
+    const view = renderLead(LEADS[4].props);
+    const kids = view
+      .getByTestId('message-press')
+      .children.filter((kid: unknown) => {
+        // `Pressable` 이 스스로 덧붙이는 개발용 오버레이. 우리가 쓴 자식이 아니다.
+        if (typeof kid === 'string') return true;
+        const type = (kid as {type?: {name?: string}}).type;
+        return type?.name !== 'PressabilityDebugView';
+      });
+    const last = kids[kids.length - 1];
+    expect(typeof last === 'string' ? last : last.props.testID).toBe(
+      'row-time',
+    );
+  });
+
+  it('상태 칩이 시각 칸 밖에 선다 — 카드가 예약 안으로 들어왔다', () => {
+    // 승인 카드의 「승인 대기」 칩은 카드 오른쪽 위, 정확히 시각의 칸 자리에
+    // 있다. 카드가 그릇의 예약을 함께 받으면 칩도 그 왼쪽으로 물러난다.
+    const view = renderLead(LEADS[4].props);
+    expect(view.getByTestId('agent-card')).toBeTruthy();
+    const inner = flatten(view.getByTestId('message-press').props.style);
+    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
+    expect(Number(inner.paddingRight)).toBeGreaterThanOrEqual(
+      Number(time.right) + Number(time.width) + space.sm,
+    );
+  });
+
+  it('시각이 없는 행은 자리를 비우지 않는다 — 없는 것을 위한 예약은 여백일 뿐', () => {
+    // `WorkingRow` 에는 시각이 없다. 예약을 `rowInner` 자체에 넣었다면 이 행도
+    // 42pt 를 잃었을 것이다.
+    const code = codeOnly(SRC('MessageRow.tsx'));
+    expect(code).not.toMatch(
+      /rowInner: \{[^}]*paddingRight: SAFE_GUTTER \+ TIME_COLUMN/s,
+    );
+  });
+});
+
+describe('#1092 M-1 — 하네스가 그 경로를 실제로 세운다', () => {
+  const HARNESS = fs.readFileSync(
+    path.resolve(__dirname, '../measure/surfaces.tsx'),
+    'utf8',
+  );
+
+  it('연속 승인 카드가 픽스처에 있다 — 가장 흔한 미캡처 경로였다', () => {
+    // U4-4 의 픽스처는 승인 카드 셋 전부에 `startsGroup` 을 걸었다. 즉 타임라인이
+    // 승인 카드를 둘 이상 보여 주는 경로는 **한 번도 촬영된 적이 없었고**, M-1 의
+    // 겹침은 정확히 거기서 일어난다.
+    expect(HARNESS).toContain("case 'row-lead'");
+    expect(codeOnly(HARNESS)).toContain('startsGroup={false}');
   });
 });
 
@@ -805,5 +985,45 @@ describe('#1083 H-4·M-2 — 구분선은 코어 판정을 소비한다', () => 
     expect(contrast(String(label.color ?? color.textMuted), color.bg)).toBeGreaterThanOrEqual(
       4.5,
     );
+  });
+});
+
+// =============================================================================
+// #1092 D-1 — 복구 구분선에서 두 클라가 같은 문장을 말한다
+//
+// 「(다시 읽음)」은 **이 파일 안에서** 이어 붙던 낱말이었다. 웹은 같은 사실을
+// `data-source` 속성으로만 내보내 화면에는 한 글자도 없었다. 코어 `divider.ts` 가
+// 존재하는 이유가 정확히 이것(*"각자 짓는 한 고쳐도 다시 벌어진다"*)인데, 모듈을
+// 만든 그 커밋이 어휘 판정 하나를 로컬에 남겼다.
+// =============================================================================
+
+describe('#1092 D-1 — 복구 구분선의 낱말이 코어의 것이다', () => {
+  const rendered = (source: 'replay' | 'backfill') =>
+    within(
+      render(<RecoveryDivider seq={4821} source={source} />).getByTestId(
+        'recovery-divider',
+      ),
+    );
+
+  it.each(['replay', 'backfill'] as const)(
+    '%s — 화면 문장이 코어 조각과 **글자 하나까지** 같다',
+    source => {
+      // 이 단정이 잡는 것은 두 방향이다: 화면이 코어보다 더 말하거나(로컬 접합),
+      // 덜 말하거나(웹의 현행). 둘 다 두 클라를 갈라놓는다.
+      const expected = dividerText(recoveryDividerSegments(4821, source));
+      expect(rendered(source).getByText(expected)).toBeTruthy();
+    },
+  );
+
+  it('되읽은 구간만 그렇게 말한다 — 두 레일이 같은 문장이면 구분이 없다', () => {
+    expect(
+      rendered('backfill').queryByText(/다시 읽음/),
+    ).not.toBeNull();
+    expect(rendered('replay').queryByText(/다시 읽음/)).toBeNull();
+  });
+
+  it('낱말이 이 파일에 없다 — 있으면 다음 goal 에서 다시 갈라진다', () => {
+    // 판정이 화면 파일에 남아 있으면 웹은 그것을 영영 모른다. 그 구멍이 D-1 이다.
+    expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('다시 읽음');
   });
 });

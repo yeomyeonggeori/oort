@@ -57,6 +57,27 @@ import {color} from '../src/design/tokens';
 //   MARKDOWN                                          코드·리스트·인라인 코드
 //
 // 시트류는 `Modal` 이라 화면을 덮으므로 한 번에 하나씩 띄운다.
+//
+// ## 캡처는 코드와 **같은 커밋**에서 갱신한다 (design-review E-1)
+//
+// U4-4 는 이 규율 없이 랜딩했고, 그래서 `captures/u44-row.png` 가 두 커밋 낡은
+// 채 남았다 — 그 사이에 행 지오메트리가 바뀌었는데 사진은 옛 코드의 **겹쳐 인쇄된
+// 글자**를 담고 있었다. 결과는 리뷰어가 저장소만 읽어서는 그것이 고쳐진 것인지
+// 남아 있는 것인지 판별할 수 없었고, 실제로 판별하지 못해 지적 하나를
+// 「확인 필요」로 쪼개야 했다. **낡은 캡처는 증거가 아니라 잘못된 증언이다.**
+//
+// 그래서 규칙은 둘 중 하나다: 이 파일이나 그 표면이 그리는 컴포넌트를 고치는
+// 커밋은 해당 캡처를 함께 갱신하거나, 그 캡처를 지운다. 명령은 이렇다 —
+// 앱을 이 체크아웃에서 빌드·설치한 뒤(`npm run build:sim`),
+//
+//   xcrun simctl launch booted app.momo.ios --args \
+//     -momoMeasure ROW-LEAD -RCT_jsLocation "127.0.0.1:$METRO_PORT"
+//   xcrun simctl io booted screenshot --type=png measure/captures/u44-row-lead.png
+//
+// 기기는 **iPhone 17 Pro**(1206×2622, 3x)이고 읽을 때 **pt = px/3** 이다.
+// Metro 가 다른 워크트리를 서빙하고 있으면 사진은 이 체크아웃의 것이 아니다 —
+// `scripts/measure.sh` 가 그 함정과 확인 방법(`/status` 의 project-root 헤더)을
+// 이미 적어 두었고, 캡처도 같은 확인을 지나야 한다.
 // =============================================================================
 
 const ROSTER = makeStressRoster();
@@ -490,6 +511,106 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Row />
         </Frame>
       );
+    // ---- U4-4R M-1 (#1092): 행의 첫 줄이 시각 칸을 진다 -----------------------
+    //
+    // 이 goal 이 고친 구멍은 **연속 행의 첫 흐름 자식이 본문이 아닐 때** 시각
+    // 칸이 무예약이라는 것이었다. U4-4 의 픽스처는 그 경우를 한 번도 세우지
+    // 않았다 — `approval-card` 는 승인 카드 셋 전부에 `startsGroup` 을 건다.
+    // 즉 **연달아 온 승인 카드**(타임라인이 승인 카드를 둘 이상 보여 주는 가장
+    // 흔한 경로)는 촬영된 적이 없었고, 겹침은 정확히 거기서 일어난다.
+    //
+    // 한 장에 네 가지 첫 자식을 세운다: 승인 카드(머리) → 승인 카드(연속) →
+    // 인용(연속) → 묘비(연속). 논점이 「자식 종류가 늘어도 같은 여백 밑으로
+    // 들어오는가」이므로 한 종류만 찍으면 그 논점이 사진에 안 나온다.
+    case 'row-lead': {
+      // 시각이 **칸**이라는 주장은 값이 서로 다를 때만 사진에서 확인된다 — 넷이
+      // 같은 시각이면 오른쪽 정렬인지 우연인지 구분이 안 된다.
+      const leadAt = (min: number) => NOW - (14 - min) * 60_000;
+      const approvalMessage = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000000c1',
+        type: 'approval_request',
+        body: '툴 호출 승인',
+        authorMemberId: AGENT,
+        thread: undefined,
+        createdAtMs: leadAt(0),
+        props: {
+          approval_id: 'ap-2',
+          title: 'github.search_issues 실행 허가',
+          approval_status: 'pending',
+        },
+      } as unknown as Message;
+      const leadQuote = quoteDraftFor({
+        ...MESSAGE,
+        id: 'orig-lead',
+        seq: 7,
+        authorMemberId: OTHER,
+        body: '릴레이 로그는 어디서 봅니까',
+      } as unknown as Message);
+      return (
+        <Frame label="행의 첫 줄이 시각 칸을 진다 — 연속 승인 카드·인용·묘비 (리뷰 M-1)">
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          {/* 이 행이 이 표면의 이유다: 첫 흐름 자식이 **카드**이고, 카드는
+              불투명한 배경과 오른쪽 위 상태 칩을 함께 든다. 예약이 없으면
+              시각이 카드 밑으로 사라지거나 「승인 대기」 칩과 겹친다. */}
+          <MessageRow
+            message={
+              {
+                ...approvalMessage,
+                id: 'ap-row-2',
+                seq: 43,
+                createdAtMs: leadAt(2),
+              } as Message
+            }
+            startsGroup={false}
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          {leadQuote ? (
+            <MessageRow
+              message={
+                {
+                  ...MESSAGE,
+                  id: 'q-row',
+                  seq: 44,
+                  thread: undefined,
+                  body: '이 로그는 릴레이 컨테이너 안에 있습니다.',
+                  createdAtMs: leadAt(5),
+                } as Message
+              }
+              startsGroup={false}
+              directory={DIRECTORY}
+              chips={[]}
+              nowMs={NOW}
+              quote={leadQuote.block}
+            />
+          ) : null}
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'del-row',
+                seq: 45,
+                state: 'deleted',
+                thread: undefined,
+                createdAtMs: leadAt(11),
+              } as unknown as Message
+            }
+            startsGroup={false}
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
+    }
     case 'search-idle':
       return (
         <Frame label="검색 · 입력 전">
@@ -524,8 +645,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <Frame label={`알 수 없는 표면: ${name}`}>
           <Text style={styles.label}>
-            sheet · delete · editor · editor-error · row · search-idle ·
-            search-searching · search-empty · search-error · search-results
+            sheet · delete · editor · editor-error · row · row-lead ·
+            approval-card · group · dividers · search-idle · search-searching ·
+            search-empty · search-error · search-results
           </Text>
         </Frame>
       );

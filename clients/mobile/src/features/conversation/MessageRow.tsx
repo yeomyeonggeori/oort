@@ -7,6 +7,7 @@ import {
   DIVIDER_SPACE,
   ROW_SPACE,
   type DividerSegment,
+  type RecoverySource,
 } from '@momo/core/features/timeline/divider';
 import {
   memberFor,
@@ -218,24 +219,30 @@ export function UnreadDivider({count}: {count: number}): React.JSX.Element {
   );
 }
 
+/**
+ * 재연결 표지.
+ *
+ * ## 「(다시 읽음)」이 여기서 사라진 이유 (design-review D-1)
+ *
+ * 이 낱말은 **이 파일 안에서** 이어 붙던 것이었다. 그동안 웹은 같은 사실을
+ * `data-source` 속성으로만 내보내 화면에는 한 글자도 없었고, 그래서 두 클라가
+ * 복구 구분선에서 다른 문장을 말했다 — `divider.ts` 가 생긴 그 커밋이 어휘 판정
+ * 하나를 로컬에 남긴 것이다.
+ *
+ * 이제 `source` 는 코어 `recoveryDividerSegments` 의 **필수 인자**다. 이 함수는
+ * 조각 배열을 받아 칠하기만 하고, 붙일지 말지는 판정하지 않는다.
+ */
 export function RecoveryDivider({
   seq,
   source,
 }: {
   seq: number;
   /** Which rail healed the gap. Stated, because they are not equally strong. */
-  source: 'replay' | 'backfill';
+  source: RecoverySource;
 }): React.JSX.Element {
   return (
     <View style={styles.divider} testID="recovery-divider">
-      <DividerLabel
-        segments={[
-          ...recoveryDividerSegments(seq),
-          ...(source === 'backfill'
-            ? [{kind: 'prose' as const, text: ' (다시 읽음)'}]
-            : []),
-        ]}
-      />
+      <DividerLabel segments={recoveryDividerSegments(seq, source)} />
       <View style={styles.dividerLine} />
     </View>
   );
@@ -1171,50 +1178,15 @@ function MessageRowInner({
         disabled={actions === undefined}
         style={({pressed}) => [
           styles.rowInner,
+          // 시각 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
+          // `rowTimeReserve` 주석이 왜 자식이 아니라 그릇인지 든다.
+          styles.rowTimeReserve,
           pressed && actions !== undefined && styles.rowPressed,
         ]}
         testID="message-press">
         {startsGroup ? (
           <Author directory={directory} memberId={message.authorMemberId} />
         ) : null}
-        {/* 아래 시각은 **모든 행**에 있다 — 위 주석 참조. */}
-        {
-          // ===================================================================
-          // 행의 시각 (감사 H-3)
-          //
-          // 그룹 창은 **5분**이다(`AUTHOR_GROUP_WINDOW_MS`). 즉 한 그룹이 최대
-          // 5분을 덮는데 그 안 개별 발화의 시각이 화면 어디에도 없었다 —
-          // 「이 말 언제 한 거지?」에 답이 없다.
-          //
-          // 그런데 **접근성 라벨에는 모든 행의 시각이 들어 있다**
-          // (`rowAccessibilityLabel`). 로터는 아는 것을 눈은 몰랐다. 즉 이
-          // 정보가 값어치 있다는 판단은 이미 내려져 있었고, 빠진 것은 눈으로
-          // 가는 길뿐이었다.
-          //
-          // 웹은 hover 로 준다. **폰에는 hover 가 없다** — 그래서 이 화면의
-          // 선택지는 「항상」 아니면 「전혀」 둘뿐이고, 「전혀」가 지금 고장난
-          // 쪽이다.
-          //
-          // ## 세로를 한 픽셀도 안 쓴다
-          //
-          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 대신 본문 첫 줄
-          // 오른쪽 끝에 절대 위치로 앉히고 본문에 그만큼 오른쪽 여백을 준다.
-          // 겹치지 않으면서 세로 비용이 0 이다.
-          //
-          // ## 보조기술에는 안 보인다
-          //
-          // 행 라벨이 이미 이 시각을 말한다. 여기서 또 하나의 원소를 세우면
-          // 로터가 같은 사실을 두 번 읽는다 — 「행 하나 = 원소 하나」를 다른
-          // 방식으로 깨는 것이다.
-          // ===================================================================
-          <Text
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={styles.rowTime}
-            testID="row-time">
-            {timeLabel(message.createdAtMs)}
-          </Text>
-        }
 
         {/* 답글 표식 (성재: "답글 모양 아이콘과 함께 별도로 안 보이는 거 같아").
             본문 **위**에 온다 — 맥락은 내용보다 먼저 읽혀야 이 줄이 무엇에 대한
@@ -1278,10 +1250,9 @@ function MessageRowInner({
         ) : (
           <>
             {presentation.keepsBody && body !== '' ? (
-              // 연속 행에서는 오른쪽 끝에 시각이 절대 위치로 앉아 있다(H-3).
-              // 본문이 그 밑으로 흘러들지 않게 그만큼 비워 둔다 — 겹침을 막는
-              // 것은 이 여백 하나이고, 그래서 시각과 같은 상수를 쓴다.
-              <View style={startsGroup ? undefined : styles.continuationBody}>
+              // 시각 칸의 여백은 여기 없다. 그릇(`rowTimeReserve`)이 진다 —
+              // 본문에 걸어 두었더니 본문이 첫 자식이 아닌 행마다 구멍이었다
+              // (design-review M-1).
               <MessageBody
                 body={body}
                 // ===================================================
@@ -1300,7 +1271,6 @@ function MessageRowInner({
                 // ===================================================
                 selectable={!actionable}
               />
-              </View>
             ) : null}
 
             {presentation.artifact ? (
@@ -1419,6 +1389,51 @@ function MessageRowInner({
             </Pressable>
           </View>
         ) : null}
+
+        {
+          // ===================================================================
+          // 행의 시각 (감사 H-3)
+          //
+          // 그룹 창은 **5분**이다(`AUTHOR_GROUP_WINDOW_MS`). 즉 한 그룹이 최대
+          // 5분을 덮는데 그 안 개별 발화의 시각이 화면 어디에도 없었다 —
+          // 「이 말 언제 한 거지?」에 답이 없다.
+          //
+          // 그런데 **접근성 라벨에는 모든 행의 시각이 들어 있다**
+          // (`rowAccessibilityLabel`). 로터는 아는 것을 눈은 몰랐다. 즉 이
+          // 정보가 값어치 있다는 판단은 이미 내려져 있었고, 빠진 것은 눈으로
+          // 가는 길뿐이었다.
+          //
+          // 웹은 hover 로 준다. **폰에는 hover 가 없다** — 그래서 이 화면의
+          // 선택지는 「항상」 아니면 「전혀」 둘뿐이고, 「전혀」가 지금 고장난
+          // 쪽이다.
+          //
+          // ## 세로를 한 픽셀도 안 쓴다
+          //
+          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 대신 행의 첫 줄
+          // 오른쪽 끝에 절대 위치로 앉히고, 그릇이 그만큼 오른쪽을 비워 둔다
+          // (`rowTimeReserve`). 겹치지 않으면서 세로 비용이 0 이다.
+          //
+          // ## 흐름 자식 **뒤**에 그린다 (design-review M-1)
+          //
+          // RN 에는 z-index 기본값이 없다 — 형제는 **쓰인 순서대로** 칠해진다.
+          // 이 `Text` 가 카드보다 앞에 있었을 때, 불투명한 `styles.card` 배경이
+          // 그 위에 칠해져 시각이 조용히 사라질 수 있었다. 자리는 이제 여백이
+          // 지키고 순서는 칠을 지킨다 — 둘 중 하나가 깨져도 나머지가 남는다.
+          //
+          // ## 보조기술에는 안 보인다
+          //
+          // 행 라벨이 이미 이 시각을 말한다. 여기서 또 하나의 원소를 세우면
+          // 로터가 같은 사실을 두 번 읽는다 — 「행 하나 = 원소 하나」를 다른
+          // 방식으로 깨는 것이다.
+          // ===================================================================
+          <Text
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={styles.rowTime}
+            testID="row-time">
+            {timeLabel(message.createdAtMs)}
+          </Text>
+        }
       </Pressable>
 
       {sheetOpen && actions ? (
@@ -1870,11 +1885,43 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   /**
-   * 연속 행의 시각 (H-3). 본문 첫 줄 오른쪽 끝.
+   * 시각 칸의 예약. **그릇이 진다** (design-review M-1).
+   *
+   * ## 자식에게 걸었던 것이 왜 구멍이었나
+   *
+   * 시각은 모든 행에 절대 위치로 앉는데, 오른쪽을 비워 두는 자리는 둘뿐이었다:
+   * 작성자 줄과 — 연속 행일 때만 — 본문. 그래서 행의 **첫 흐름 자식**이 답글
+   * 표식·인용·묘비·아티팩트 카드·승인 카드일 때는 예약이 없었고, 리뷰가 그
+   * 겹침을 저장소의 캡처에서 읽어 냈다(`...문서에⁷젝³`).
+   *
+   * 그 구멍은 오타가 아니라 **자리의 문제**였다: 예약을 자식에 걸면 자식 종류가
+   * 늘 때마다 같은 구멍이 다시 생기고, 그때마다 아무도 알아채지 못한다. 그래서
+   * 예약을 그릇으로 올린다 — 이 그릇에 무엇이 들어오든, 앞으로 무엇이 더
+   * 들어오든, 오른쪽 34pt 는 시각의 것이다.
+   *
+   * ## 값
+   *
+   * `SAFE_GUTTER`(그릇 자신의 좌우 여백) + `TIME_COLUMN` + `space.sm`. 시각은
+   * 화면 오른쪽에서 `SAFE_GUTTER` 만큼 떨어져 서므로(`rowTime.right`), 내용의
+   * 오른쪽 끝과 시각의 왼쪽 끝 사이에 정확히 `space.sm` 이 남는다.
+   *
+   * ## 값이 사는 비용
+   *
+   * 그룹 **머리** 행의 본문도 이제 42pt 좁아진다 — 전에는 작성자 줄만 비켜 주고
+   * 본문은 끝까지 갔다. 그 대신 한 묶음 안 모든 행의 본문 오른쪽 끝이 같은 x 에
+   * 서고, 시각이 그제야 **칸**이 된다. 「눈이 그 칸을 안 읽기로 정할 수 있다」는
+   * 이 배치의 주장은 다른 것이 그 칸에 들어오지 않을 때만 참이다.
+   *
+   * `WorkingRow` 는 이 스타일을 안 쓴다 — 그 행에는 시각이 없고, 없는 것을 위해
+   * 자리를 비우면 그것은 예약이 아니라 그냥 여백이다.
+   */
+  rowTimeReserve: {paddingRight: SAFE_GUTTER + TIME_COLUMN + space.sm},
+  /**
+   * 행의 시각 (H-3). 행의 첫 줄 오른쪽 끝.
    *
    * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다 — 흐름에
-   * 넣으면 줄이 하나 늘고, 5연발에서 그것은 80pt 다. 본문 쪽 `paddingRight` 가
-   * 겹침을 막는다.
+   * 넣으면 줄이 하나 늘고, 5연발에서 그것은 80pt 다. 겹침을 막는 것은
+   * `rowTimeReserve` 이고, 가림을 막는 것은 렌더 순서다(위 JSX 주석).
    */
   rowTime: {
     position: 'absolute',
@@ -1893,21 +1940,19 @@ const styles = StyleSheet.create({
     color: color.textMuted,
     lineHeight: 22,
   },
-  /** 시각이 앉을 자리만큼 본문을 비운다. 겹침을 막는 것은 이 여백 하나다. */
-  continuationBody: {paddingRight: TIME_COLUMN + space.sm},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
   rowPressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
   // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
   // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
   rowStartsGroup: {marginTop: ROW_SPACE.betweenGroups - ROW_SPACE.withinGroup},
+  // 시각 칸의 여백은 여기 없다 — 그릇(`rowTimeReserve`)이 진다. 이 줄에만
+  // 걸어 두었던 것이 M-1 이 말한 구멍의 절반이었다: 예약이 자식에 붙어 있으면
+  // **그 자식이 없는 행**은 예약도 없다.
   authorRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: space.xs,
-    // 시각이 이 줄 오른쪽 끝에 절대 위치로 앉는다(H-3). 긴 이름 + 핸들 +
-    // 에이전트 표 + 관리자까지 붙으면 그 밑으로 흘러들 수 있다.
-    paddingRight: TIME_COLUMN + space.sm,
     flexWrap: 'wrap',
   },
   authorName: {fontSize: font.label, fontWeight: '700', color: color.text},

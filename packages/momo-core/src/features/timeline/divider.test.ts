@@ -106,7 +106,8 @@ describe("dayDividerSegments", () => {
       dayDividerSegments(at(2026, 8, 3), now),
       dayDividerSegments(at(2025, 12, 31), now),
       unreadDividerSegments(12),
-      recoveryDividerSegments(4821),
+      recoveryDividerSegments(4821, "replay"),
+      recoveryDividerSegments(4821, "backfill"),
     ]) {
       for (const segment of segments) {
         if (segment.kind === "figure") {
@@ -168,9 +169,32 @@ describe("unread / recovery", () => {
   });
 
   it("keeps seq exact — it is the server's number", () => {
-    expect(dividerText(recoveryDividerSegments(4821))).toBe(
+    expect(dividerText(recoveryDividerSegments(4821, "replay"))).toBe(
       "재연결됨, seq 4821까지 복구"
     );
+  });
+
+  /**
+   * design-review D-1. 이 낱말은 폰의 `RecoveryDivider` 안에 로컬로 있었고 웹에는
+   * 아예 없었다 — 같은 사실에 두 클라가 두 문장을 말했다. 판정이 여기 있으면
+   * 두 화면이 같은 배열을 받으므로 갈라질 자리가 없다.
+   */
+  it("names the rail that healed the gap — 되읽은 구간만 그렇게 말한다", () => {
+    expect(dividerText(recoveryDividerSegments(4821, "backfill"))).toBe(
+      "재연결됨, seq 4821까지 복구 (다시 읽음)"
+    );
+    // 그리고 `replay`에는 붙지 않는다. 둘이 같은 문장이면 `source`가 인자인
+    // 이유가 사라진다.
+    expect(dividerText(recoveryDividerSegments(4821, "replay"))).not.toContain(
+      "다시 읽음"
+    );
+  });
+
+  it("차이가 꼬리에만 있다 — 앞부분은 두 레일이 같은 문장이다", () => {
+    const replay = recoveryDividerSegments(4821, "replay");
+    const backfill = recoveryDividerSegments(4821, "backfill");
+    expect(backfill.slice(0, replay.length)).toEqual(replay);
+    expect(backfill).toHaveLength(replay.length + 1);
   });
 });
 
