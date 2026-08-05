@@ -76,6 +76,15 @@ export function markTyping(frame: TypingFrame): void {
     mergeTypingSignal(signals, {
       channelId: frame.payload.channel_id,
       memberId: frame.payload.member_id,
+      // **이 프레임이 새 버스트의 첫 타라면** 이것이 시작 시각이다. 아니라면
+      // 코어의 merge 가 기존 엔트리의 시작 시각을 지켜 준다 — 이 값은 거기서
+      // 버려진다. 그러므로 여기서 「처음인가」를 판정하지 않는다: 명부를 든 쪽이
+      // 이미 아는 것을 레일이 다시 추측하면 그 둘이 갈리는 날이 온다.
+      //
+      // 이 필드가 옵셔널이 아닌 것이 의도다(#1059 design-review H-1). 정렬 키가
+      // 재발행 시각이면 두 사람이 치는 동안 이름 순서가 재발행마다 뒤집히고,
+      // 화면에서 그것은 「누가 들어왔다」로 읽힌다.
+      startedAtMs: frame.ts,
       sentAtMs: frame.ts,
       expiresAtMs: frame.payload.expires_at,
     }),

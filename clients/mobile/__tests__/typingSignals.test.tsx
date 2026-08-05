@@ -205,6 +205,42 @@ describe('스스로 잊는다 — 서버는 상태를 안 들고 있다', () => 
   });
 });
 
+describe('이름 순서는 시작 순서다', () => {
+  it('재발행이 이름 순서를 뒤집지 않는다', () => {
+    // #1059 design-review H-1. 정렬 키가 **재발행** 시각이면, 두 사람이 치는 동안
+    // 먼저 시작한 사람이 재발행할 때마다 맨 뒤로 밀린다 — 이름이 3초마다 자리를
+    // 바꾸고, 화면에서 그것은 「누가 들어왔다」로 읽힌다.
+    //
+    // 수리 전 코어에서 실측한 값(2026-08-05):
+    //   BEFORE: 김민수, 이하늘님이 작성 중…
+    //   AFTER : 이하늘, 김민수님이 작성 중…
+    const view = render(<Line nowMs={NOW + 2_000} />);
+    act(() => {
+      markTyping(frame(HUMAN, NOW)); // 김민수가 먼저 시작
+      markTyping(frame(HUMAN2, NOW + 1_500)); // 이하늘이 1.5초 뒤
+    });
+    const before = screen.getByTestId('composer-typing').props.children;
+    expect(before).toBe('김민수, 이하늘님이 작성 중…');
+
+    // 먼저 시작한 사람이 재발행한다. 여기서 뒤집히면 결함이 돌아온 것이다.
+    act(() => markTyping(frame(HUMAN, NOW + 3_000)));
+    view.rerender(<Line nowMs={NOW + 3_500} />);
+    expect(screen.getByTestId('composer-typing').props.children).toBe(before);
+  });
+
+  it('시작 시각은 재발행에 덮이지 않는다 — 명부 수준에서도', () => {
+    act(() => {
+      markTyping(frame(HUMAN, NOW));
+      markTyping(frame(HUMAN, NOW + 3_000));
+    });
+    const [entry] = typingSnapshot();
+    expect(entry.startedAtMs).toBe(NOW);
+    // 갱신되는 것은 만료와 최근 발행 시각뿐이다.
+    expect(entry.sentAtMs).toBe(NOW + 3_000);
+    expect(entry.expiresAtMs).toBe(NOW + 3_000 + 6_000);
+  });
+});
+
 describe('뭉치는 규칙은 코어의 것', () => {
   it('임계를 넘으면 이름 대신 수를 말한다', () => {
     render(<Line nowMs={NOW} />);
