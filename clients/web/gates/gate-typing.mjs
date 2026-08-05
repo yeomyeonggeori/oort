@@ -52,6 +52,13 @@
 //   TYPING_GATE_PROVE_RED_LABEL=1 npm run gate:typing
 //     expected failure: "assistive tech was left reading the truncated text"
 //
+// W-3(「…님이」 고아)에는 이름 붙은 seam이 없다. 그 결함은 **문구의 조각 경계**가
+// 만드는 것이라 CSS나 목으로는 재현되지 않는다 — 증명은 코어 `typingSegments`의
+// 경계를 1차대로 되돌려(한 줄) 이 게이트를 돌리는 것이고, 그 결과는
+//   "잘린 이름에 조사가 매달렸다: … 이도현 플랫폼…님이 작성 중…"
+// 이다(U4-4R에서 실제로 그렇게 확인했다). 되돌린 줄은 컴파일되고 다른 단정은 전부
+// 초록인 채라, 이 seam이 겨누는 자리가 정확히 그 한 줄임이 드러난다.
+//
 // red seam은 **목/드라이버의 행동만** 바꾼다. AGENT는 명부에서 에이전트를 사람으로
 // 바꾸고, SELF는 내 id 대신 남의 id로 발행하고, TTL은 기다리는 동안 계속 재발행하고,
 // STOP은 멈춰야 할 구간에도 계속 타이핑하고, GRANT는 grant TTL을 12초로 줄이고, LIVE는
@@ -830,10 +837,80 @@ async function exercise(browser) {
       `잘린 줄이 문장으로 끝나지 않는다: "${narrowVisible}" (리뷰 M-3)`
     );
   }
-  // 잘림의 `…`는 이름 안쪽에만 생긴다 — 그래야 잘린 줄과 온전한 줄이 구분된다.
-  // (문장 자체의 `…`는 맨 끝 하나뿐이므로, 앞쪽 `…`의 존재가 곧 「잘렸다」는 표지다.)
-  if (fit.leadClipped > 0 && !narrowVisible.includes("…")) {
-    throw new Error(`잘림 표지가 없다: "${narrowVisible}"`);
+  // ---- W-3. 잘림은 한국어가 끊어도 되는 자리에서만 일어난다 ------------------
+  //
+  // 동사가 살아남는 것만으로는 부족하다는 것을 리뷰가 이 폭에서 실측했다: 꼬리가
+  // 「님이 작성 중…」이던 판에서는 앞부분이 이름 한가운데를 자르고 화면에
+  // `이도현 플랫폼…님이 작성 중…`이 남았다. 님은 이름에 붙는 의존 형태소라 붙을
+  // 이름이 사라지면 존대할 대상이 없고, 그 줄은 한국어 문장이 아니다.
+  //
+  // **이 판정은 `textContent`로 할 수 없다.** CSS의 말줄임은 DOM을 바꾸지 않으므로
+  // 텍스트를 읽으면 잘리지 않은 문장이 그대로 나온다 — 리뷰가 본 것은 픽셀이었다.
+  // 그래서 여기서는 **글자 하나하나의 사각형**을 재서 잘림 상자 안에 실제로 그려진
+  // 글자만 모은다. 그것이 「화면이 말하는 것」이다.
+  const painted = await page.evaluate(() => {
+    const lead = document.querySelector('[data-testid="composer-typing-lead"]');
+    const tail = document.querySelector('[data-testid="composer-typing-tail"]');
+    if (lead === null) return null;
+    const box = lead.getBoundingClientRect();
+    const walker = document.createTreeWalker(lead, NodeFilter.SHOW_TEXT);
+    let visible = "";
+    let clipped = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const text = node.textContent ?? "";
+      for (let i = 0; i < text.length; i += 1) {
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const rect = range.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue;
+        // 오른쪽 경계를 넘는 글자는 그려지지 않는다(`overflow: hidden`).
+        if (rect.right <= box.right + 0.5) visible += text[i];
+        else clipped = true;
+      }
+    }
+    return {
+      lead: visible,
+      clipped,
+      // 말줄임표는 마지막 보이는 글자를 대체해 그려진다. 줄이 눈에 말하는 문장은
+      // 「보이는 앞부분 + (잘렸으면) … + 꼬리」다.
+      line: `${visible}${clipped ? "…" : ""}${tail?.textContent ?? ""}`,
+    };
+  });
+  if (painted === null) {
+    throw new Error("잘림 장면에서 앞부분을 측정하지 못했다");
+  }
+  console.log(
+    `[cut] 320폭에서 화면이 말하는 것: "${painted.line}" (잘림 ${painted.clipped ? "있음" : "없음"})`
+  );
+  if (!painted.clipped) {
+    throw new Error(
+      `이 장면이 잘림을 만들지 못했다: 화면이 "${painted.line}"을 온전히 그렸다`
+    );
+  }
+  // **본론**: 말줄임표 바로 뒤에 조사가 오면 그것이 고아다.
+  const orphan = painted.line.match(/…\s*(님|명)/);
+  if (orphan !== null) {
+    throw new Error(
+      `잘린 이름에 조사가 매달렸다: "${painted.line}" — 「${orphan[1]}」은 앞 낱말에 ` +
+        "붙는 의존 형태소라, 그 낱말이 잘려 나간 자리에 남으면 문장이 아니다 (리뷰 W-3)"
+    );
+  }
+  // 꼬리는 **이름 없이 성립하는 서술어**여야 한다. 조사를 꼬리에 두면 위 고아가
+  // 구조적으로 다시 생긴다 — 그 자리를 코어의 조각 경계가 진다.
+  if (/^\s*(님|명)?[이가은는]/.test(fit.tailText)) {
+    throw new Error(
+      `꼬리가 조사로 시작한다 ("${fit.tailText}"): 앞부분이 잘리는 순간 그 조사는 ` +
+        "붙을 낱말을 잃는다. 꼬리는 주어 없이 성립하는 서술어여야 한다 (리뷰 W-3)"
+    );
+  }
+  // 잘린 이름과 서술어가 붙어 버리지 않는다 (`플랫폼…작성 중…`). 빈칸은 꼬리 조각이
+  // 들고 있고, `whitespace-pre`가 그것을 지킨다.
+  if (!/…\s/.test(painted.line)) {
+    throw new Error(
+      `잘린 이름과 서술어 사이에 빈칸이 없다: "${painted.line}" (리뷰 W-3)`
+    );
   }
   // 1줄 고정을 지켰는가. 예약 자리와 같은 높이여야 한다 (H-2와 같은 축).
   if (reservedHeight > 0 && fit.height !== reservedHeight) {

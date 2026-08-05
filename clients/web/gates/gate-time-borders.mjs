@@ -45,12 +45,36 @@
 // 것은 그 판정이 **화면에 도달했는가**다.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 코어가 정한 행 간격 (`ROW_SPACE`). 이 게이트는 노드 스크립트라 TypeScript 모듈을
+ * 그대로 import 할 수 없어서 **정본 파일을 읽는다** — 숫자를 여기에 베껴 적으면
+ * 「두 벌이 조용히 갈라진다」는 이 배치가 고치려는 결함을 게이트가 한 번 더 저지르는
+ * 것이 된다. 파일 모양이 바뀌면 파싱이 실패하고, 그때는 게이트가 죽는 편이 옳다.
+ */
+function coreRowSpace() {
+  const source = readFileSync(
+    resolve(webRoot, "../../packages/momo-core/src/features/timeline/divider.ts"),
+    "utf8"
+  );
+  const match = source.match(
+    /ROW_SPACE\s*=\s*\{\s*withinGroup:\s*(\d+),\s*betweenGroups:\s*(\d+)\s*\}/
+  );
+  if (match === null) {
+    throw new Error(
+      "코어의 ROW_SPACE를 읽지 못했다: divider.ts의 모양이 바뀌었다면 이 게이트도 함께 고칠 것"
+    );
+  }
+  return { withinGroup: Number(match[1]), betweenGroups: Number(match[2]) };
+}
+
+const ROW_SPACE = coreRowSpace();
 
 const port = Number(process.env.BORDERS_GATE_PORT || 5196);
 const origin = `http://127.0.0.1:${port}`;
@@ -662,13 +686,36 @@ async function exercise(browser) {
   );
   const withinGap = gaps.contPad.bottom + gaps.cont2Pad.top;
   const betweenGap = gaps.contPad.bottom + gaps.headPad.top;
+  // **찍는 값은 단정이 읽는 값이어야 한다** (U4-4R W-1). 1차의 이 줄은
+  // `headPad.top * 2`를 「묶음 사이」라고 불렀다 — 어떤 단정도 읽지 않는 숫자였고,
+  // 인라인 스타일로 `paddingTop: 18/2`를 걸었던 판에서 우연히 18을 찍었다. 그 값이
+  // PR 본문에 「묶음 사이 18px」로 실렸고, 그 뒤 클래스로 갈아타며 실제 여백이
+  // 무너졌을 때 로그는 24를 찍었다. 아무도 그 둘을 대조할 수 없었다.
   console.log(
-    `[gap] 묶음 안 ${withinGap}px · 묶음 사이(머리 행 위) ${gaps.headPad.top * 2}px`
+    `[gap] 묶음 안 ${withinGap}px · 묶음 사이 ${betweenGap}px ` +
+      `(머리 pt ${gaps.headPad.top}/pb ${gaps.headPad.bottom} · ` +
+      `연속 pt ${gaps.contPad.top}/pb ${gaps.contPad.bottom})`
   );
   if (withinGap <= 8) {
     throw new Error(
       `rows inside one author group are packed: 간격이 ${withinGap}px다. 진단이 실측한 ` +
         "8px에서 다섯 발화가 한 문단으로 뭉쳤다 (진단 H-7)"
+    );
+  }
+  // 「8px보다 넓다」만으로는 부족하다 (U4-4R W-1). 그 단정은 0px을 잡지만, 코어가
+  // 정한 12/18이 아닌 **다른 양수**는 전부 통과시킨다 — 인라인 판의 실제 값(12/15)이
+  // 그렇게 통과했다. 화면이 코어의 판정을 그리는지는 그 숫자와 대조해야 알 수 있고,
+  // 코어 값은 이 게이트가 직접 읽는다(사본을 여기 또 만들면 갈라질 자리가 하나 는다).
+  if (withinGap !== ROW_SPACE.withinGroup) {
+    throw new Error(
+      `묶음 안 간격이 코어 판정과 다르다: 화면 ${withinGap}px · 코어 ${ROW_SPACE.withinGroup}px. ` +
+        "클래스가 이 레포의 스케일에 없으면 여백은 조용히 0px이 된다 (U4-4R W-1)"
+    );
+  }
+  if (betweenGap !== ROW_SPACE.betweenGroups) {
+    throw new Error(
+      `묶음 사이 간격이 코어 판정과 다르다: 화면 ${betweenGap}px · 코어 ${ROW_SPACE.betweenGroups}px ` +
+        "(U4-4R W-1)"
     );
   }
   if (gaps.headPad.top <= gaps.contPad.top) {
