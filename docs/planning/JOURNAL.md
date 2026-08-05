@@ -1734,3 +1734,8 @@
 - **웹 배포 완료**: track/engine 빌드(index-CfaAQbFh.js) → app.oor7.com 검증 일치. 함정 재확인: clients/web은 루트 워크스페이스(packages/*) 밖 — **fresh 워크트리는 clients/web에서 자체 npm ci 필요**(런북에 추가할 것).
 - 워크트리 정리: B3M-conversation·SRV-B6 제거(잔여 4: 684·RN-B4-defects·WEB-WP1-panel(merged=0 불확실 보존)·구레포류). 폰 대화 표면 **일괄 design-review 가동 중**(M1~M4 병합 결과 — 산출은 U4-c~j 편성 입력).
 - 다음: 일괄 리뷰 결과 → U4 잔여 편성 · 폰 재빌드는 성재 검수 타이밍에 · #1065 typing 묶음 goal 편성(tie 단정 포함) · ADR-0150/0151 승인 대기 유지.
+
+## 2026-08-05 (낮) · Fable · 폰 일괄 리뷰 → U4-2차 편성·B3M 재기동
+- **폰 대화 표면 일괄 리뷰 도착**(M1~M4 병합 결과): B0·**H5**·M10·N8 — 시각 위상은 캡처 부재로 SKIPPED 정직 명기, (도출)/확인 필요 증거 등급 분리. 전문: `research/2026-08-05-mobile-b3-design-review.md`. 백미: H-2에서 웹 B-1 근거(멘션 색 충돌)가 폰에 전이되지 않음을 밝히고 **폰 고유 근거 3개를 새로 세움**(배경 1.08:1·눌림 색 동일·accent 3중 의미) — 유령 없는 리뷰 계보 유지.
+- **U4-2차 편성**: 3-goal 체인 #1070(시각 — accent 규정선·코드 색 박음·danger 배너→NoticeBlock)·#1071(접근성 — VoiceOver 로터 액션 4종·마크다운 selectable 배선·44pt)·#1072(작성중 안정화 — 자리 예약·typingSegments·스택). 패킷 `handoffs/2026-08-05-U4-2-phone-followup-packet.md`. **공통 완료 조건 = measure/ 하네스 캡처**(시각 SKIPPED 해소). B3M 재기동.
+- 참고: 이슈 URL이 yeomyeonggeori/momo로 발급됨(org 이동 반영).
