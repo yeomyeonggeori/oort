@@ -148,6 +148,22 @@ jest.mock('react-native-safe-area-context', () => {
   };
 });
 
+// ---- expo-clipboard ----------------------------------------------------------
+// The clipboard, faked as an actual box rather than a spy. What is worth
+// asserting about 복사 is WHAT LANDED — the markdown source a person can paste
+// back, not the rendered text — and a `jest.fn()` that records a call without
+// keeping the value cannot answer that.
+jest.mock('expo-clipboard', () => {
+  const box = {value: null};
+  return {
+    __box: box,
+    setStringAsync: async text => {
+      box.value = text;
+      return true;
+    },
+  };
+});
+
 // ---- centrifuge --------------------------------------------------------------
 // The realtime client. Faked rather than stubbed for the same reason as the two
 // stores above: what is worth asserting is BEHAVIOUR over the socket — that a

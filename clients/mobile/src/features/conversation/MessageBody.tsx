@@ -5,9 +5,17 @@ import {
   type Block,
   type Inline,
 } from '@momo/core/features/timeline/markdown';
-import React, {useMemo} from 'react';
-import {Linking, ScrollView, StyleSheet, Text, View} from 'react-native';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {color, font, radius, space} from '../../design/tokens';
+import {copyText} from './copy';
 
 // =============================================================================
 // 메시지 본문 — 웹 `MessageBody.tsx` 의 RN 판 (goal U4-a / #1048, BL-1·BL-3).
@@ -173,6 +181,49 @@ function EmphasisNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
  * 한다. **중첩된 `Text` 끼리는 상속되므로**(그래서 인라인 코드는 색을 안 박는다)
  * 내려보낼 자리는 문단·목록 두 곳뿐이다.
  */
+/**
+ * 코드 한 상자를 클립보드로.
+ *
+ * 상태를 자기가 든다(「복사됨」 한 순간). 부모에 올리면 코드 블록 하나가 바뀔
+ * 때마다 본문 전체가 다시 그려지고, 그것은 이 배치가 계속 피해 온 전파다.
+ */
+function CodeCopyButton({text}: {text: string}): React.JSX.Element {
+  const [done, setDone] = useState(false);
+  // 되돌리는 타이머. **끄는 자리가 필요하다** — 사람이 복사하고 바로 스크롤하면
+  // 이 행은 가상화에서 빠지는데, 1.5초 뒤 타이머는 살아 있다. 그 자체로 큰 해는
+  // 아니지만 타임라인에서 코드 블록은 흔하고, 끄지 않는 타이머가 흔한 컴포넌트에
+  // 붙어 있는 것은 이 클라이언트가 「작성 중」에서 통째로 거부한 모양이다.
+  // (제스트가 이것을 먼저 말해 줬다: "Jest did not exit one second after…".)
+  const revertRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (revertRef.current !== null) clearTimeout(revertRef.current);
+    },
+    [],
+  );
+  const onPress = useCallback(() => {
+    void copyText(text).then(ok => {
+      if (!ok) return;
+      setDone(true);
+      // 한 순간의 영수증이다. 안 되돌리면 그 상자는 영원히 「복사됨」이라고
+      // 말하는 상자가 된다.
+      if (revertRef.current !== null) clearTimeout(revertRef.current);
+      revertRef.current = setTimeout(() => setDone(false), 1_500);
+    });
+  }, [text]);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={done ? '코드 복사됨' : '코드 복사'}
+      hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+      onPress={onPress}
+      style={({pressed}) => [styles.codeCopy, pressed && styles.pressed]}
+      testID="code-copy">
+      <Text style={styles.codeCopyLabel}>{done ? '복사됨' : '복사'}</Text>
+    </Pressable>
+  );
+}
+
 function BlockNode({
   block,
   muted,
@@ -183,14 +234,24 @@ function BlockNode({
   if (block.kind === 'code') {
     return (
       <View style={styles.codeWrap} testID="message-code-block">
-        {block.lang ? (
-          // 언어 라벨. 웹은 이것을 `data-lang` 과 `aria-label` 로만 들고 있지만
-          // 폰에는 hover 도 개발자도구도 없으므로 보이게 적는다 — 그리고 그것이
-          // 「이 상자는 코드다」를 말하는 가장 싼 방법이다.
-          <Text style={styles.codeLang} testID="message-code-lang">
-            {block.lang}
-          </Text>
-        ) : null}
+        {/* 머리줄: 언어 라벨(왼쪽)과 복사(오른쪽). */}
+        <View style={styles.codeHead}>
+          {block.lang ? (
+            // 언어 라벨. 웹은 이것을 `data-lang` 과 `aria-label` 로만 들고 있지만
+            // 폰에는 hover 도 개발자도구도 없으므로 보이게 적는다 — 그리고 그것이
+            // 「이 상자는 코드다」를 말하는 가장 싼 방법이다.
+            <Text style={styles.codeLang} testID="message-code-lang">
+              {block.lang}
+            </Text>
+          ) : (
+            <View />
+          )}
+          {/* 코드 블록만 자기 복사를 갖는다 (H-9). 시트의 「메시지 복사」는 답
+              전체를 주는데, 사람이 터미널에 붙여 넣으려는 것은 **이 상자 안의
+              것**이고 그 둘은 다르다 — 답 전체를 붙이면 산문까지 따라간다.
+              펜스 마커도 안 들어간다: 붙여 넣을 곳은 마크다운을 모른다. */}
+          <CodeCopyButton text={block.text} />
+        </View>
         <ScrollView
           horizontal
           // 가로로 끌리는 것이 이 상자의 일이다. 긴 로그 한 줄이 대화 전체를
@@ -311,12 +372,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0d11',
     overflow: 'hidden',
   },
-  codeLang: {
-    paddingHorizontal: space.sm,
+  codeHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: space.sm,
+    paddingRight: space.xs,
     paddingTop: space.xs,
-    fontSize: font.meta,
-    color: color.textFaint,
   },
+  codeLang: {fontSize: font.meta, color: color.textFaint},
+  // 44pt 는 `hitSlop` 으로 만든다 — 실제 높이를 44 로 올리면 코드 상자마다 머리줄이
+  // 그만큼 두꺼워지고, 답 하나에 상자가 셋이면 화면 한 뼘이 사라진다.
+  codeCopy: {minHeight: 24, justifyContent: 'center', paddingHorizontal: space.sm},
+  codeCopyLabel: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
+  pressed: {opacity: 0.6},
   codeScroll: {},
   codeContent: {padding: space.sm},
   code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.textMuted, lineHeight: 17},
