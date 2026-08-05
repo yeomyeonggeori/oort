@@ -22,6 +22,11 @@ import {
   hasAnyAction,
 } from "@momo/core/features/timeline/model";
 import {
+  canQuoteMessage,
+  resolveQuote,
+} from "@momo/core/features/timeline/quote";
+import { QuoteBlock } from "./QuoteBlock";
+import {
   DeleteMessageDialog,
   MessageActionColumn,
   MessageActionSheet,
@@ -127,6 +132,9 @@ export function MessageRow({
   actions,
   pausedRepeat,
   onOpenThread,
+  onQuoteMessage,
+  onJumpToMessage,
+  quoteLookup,
   onOpenWorkSession,
   onResend,
   showRollup = true,
@@ -142,6 +150,27 @@ export function MessageRow({
    */
   pausedRepeat?: number;
   onOpenThread?: (message: Message) => void;
+  /**
+   * ADR-0148 - pin this row to the composer as a quote. Absent on surfaces with
+   * no composer to pin to (the work-session event log), and the action is then
+   * not offered at all rather than offered and dead.
+   */
+  onQuoteMessage?: (message: Message) => void;
+  /**
+   * 인용 블록을 눌러 원본으로 점프한다. 채널 표면이 이미 가진 앵커 기계를 그대로
+   * 쓴다(`features/inbox/anchor.ts`), 그래서 못 찾았을 때의 문장도 이미 있는
+   * 그것이다.
+   */
+  onJumpToMessage?: (messageId: string, seq: number | null) => void;
+  /**
+   * 실시간으로 도착한 인용 답글의 원본을 **화면에 이미 있는 행**에서 찾는다.
+   *
+   * `message.new`에는 원문이 실리지 않는다(ADR-0148 규칙 3: outbox 행에 본문을
+   * 실으면 그게 곧 금지된 스냅샷이다). 그래서 라이브 인용은 이 조회로 풀리고,
+   * 조회가 없거나 못 찾으면 블록은 「이 화면에 없습니다」라고 말한다 - 어느 경로도
+   * 네트워크를 다시 때리지 않는다.
+   */
+  quoteLookup?: (messageId: string) => Message | undefined;
   onOpenWorkSession?: (sessionId: string) => void;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
@@ -209,12 +238,19 @@ export function MessageRow({
     [message]
   );
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
+  // ADR-0148. 인용은 **받은 것으로** 그린다: 서버가 페이지에 동봉한 `replyTo`가
+  // 있으면 그것, 없으면(라이브 프레임) 이미 로드된 같은 채널의 행. 어느 쪽도
+  // 재조회가 아니고, 이 행에 fetch 씨앗이 아예 없다.
+  const quote = resolveQuote(message, quoteLookup);
 
   // What this row is allowed to offer. The server decides for real (403/400);
   // these only decide what to draw, and `onOpenThread` gates 답글 because a
   // reply with nowhere to open is a dead end.
   const available = {
     reply: Boolean(actions && onOpenThread) && canReplyToMessage(message),
+    // 답글과 **다른 축**이다: 이미 답글인 행도 인용할 수 있다(규칙 1). 컴포저에
+    // 걸 곳이 없는 표면에서는 내놓지 않는다.
+    quote: Boolean(actions && onQuoteMessage) && canQuoteMessage(message),
     react: Boolean(actions) && canReactToMessage(message),
     edit: Boolean(actions) && canEditMessage(message, actions?.myMemberId),
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
@@ -223,6 +259,7 @@ export function MessageRow({
 
   const callbacks: MessageActionCallbacks = {
     onReply: () => onOpenThread?.(message),
+    onQuote: () => onQuoteMessage?.(message),
     onReact: (emoji) => {
       if (!actions) return;
       setRowError(null);
@@ -321,6 +358,17 @@ export function MessageRow({
               {timeLabel(message.createdAtMs)}
             </time>
           </div>
+        )}
+        {/* 본문 **위**. 스레드 롤업이 본문 아래 꼬리에 있는 것과 대칭이고, 그
+            대칭이 ADR-0148의 두 장치를 화면에서 갈라 놓는 첫 번째 축이다.
+            tombstone에도 그린다: 지워진 메시지도 무언가를 가리켰다는 사실은
+            지워지지 않는다. */}
+        {quote && (
+          <QuoteBlock
+            block={quote}
+            directory={directory}
+            {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
+          />
         )}
         {keepsBody &&
           idleNotice === null &&

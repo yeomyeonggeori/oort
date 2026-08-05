@@ -40,6 +40,8 @@ import {
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
 import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
+import type { QuoteDraft } from "@momo/core/features/timeline/quote";
+import { QuoteChip } from "@/features/timeline/QuoteBlock";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -256,6 +258,8 @@ export function Composer({
   directory,
   channelLabel,
   dmAgent,
+  quote,
+  onCancelQuote,
   onSend,
 }: {
   /** Scopes the agent working signal to this channel; sending goes via onSend. */
@@ -269,11 +273,22 @@ export function Composer({
    */
   dmAgent: RosterMember | null;
   /**
+   * ADR-0148 - 이 글이 가리키는 메시지, 또는 null. 채널 표면이 들고 있는 이유는
+   * 인용을 거는 행위가 **타임라인에서** 일어나고 컴포저는 마운트/언마운트되기
+   * 때문이다: 여기 두면 스레드를 열었다 닫는 사이에 걸어 둔 인용이 사라진다.
+   */
+  quote: QuoteDraft | null;
+  onCancelQuote: () => void;
+  /**
    * useTimeline's send: inserts the local echo, then reconciles by seq.
    * `routing` is ADR-0134 D1's per-request override and is undefined for every
    * send that inherits, which is every send this ticket did not change.
+   * `replyToId` is the quote binding and travels the same one write path.
    */
-  onSend: (body: string, routing?: RequestRouting) => Promise<void> | void;
+  onSend: (
+    body: string,
+    options?: { routing?: RequestRouting; replyToId?: string }
+  ) => Promise<void> | void;
 }) {
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
@@ -359,13 +374,20 @@ export function Composer({
     // 순서인 이유는 "1회"라는 라벨이 지켜져야 하기 때문이다: 보낸 뒤에도 줄이
     // 켜져 있으면 다음 메시지가 고른 적 없는 강도로 나간다.
     const payload = routingPayload(routing.draft);
+    // 인용도 같은 성질이다: 이 전송분과 함께 떠난다. 한 번 인용했다고 다음 글도
+    // 같은 메시지를 가리키면, 사람이 고르지 않은 주장을 대화에 넣는 것이다.
+    const replyToId = quote?.targetId;
     // Clear first, send second. The echo row carries the message from here on,
     // including its failure state and its retry, so there is nothing left for
     // the composer to hold on to.
     setText("");
     setMentionOpen(false);
     routing.reset();
-    void onSend(body, payload);
+    onCancelQuote();
+    void onSend(body, {
+      ...(payload ? { routing: payload } : {}),
+      ...(replyToId === undefined ? {} : { replyToId }),
+    });
   }
 
   function onSubmit(event: FormEvent) {
@@ -398,6 +420,7 @@ export function Composer({
         mentionsOpen: showMentions,
         justComposed: justComposedRef.current,
         enterSends: !isMobile,
+        quoteOpen: quote !== null,
       }
     );
 
@@ -424,6 +447,13 @@ export function Composer({
         event.preventDefault();
         setMentionOpen(false);
         return;
+      case "quote-cancel":
+        // Esc는 「지금 열려 있는 것을 닫는다」이고, 멘션 목록이 닫혀 있을 때 이
+        // 컴포저에 열려 있는 것은 인용이다. 취소 버튼과 같은 일을 하는 두 번째
+        // 길이며, 키보드에만 있는 쪽이다 (ADR-0148 미결 3).
+        event.preventDefault();
+        onCancelQuote();
+        return;
       // "newline" and "pass" are both the textarea's own behaviour, and that is
       // the point: an IME keystroke is never intercepted, not even to be
       // re-dispatched.
@@ -438,6 +468,16 @@ export function Composer({
     // iOS 홈 인디케이터다. 안전 영역만큼 물러나지 않으면 전송 버튼의 아랫부분이
     // 시스템 제스처 영역에 들어가 눌리지 않는다.
     <div className="safe-area-bottom border-t border-line">
+      {/* 인용 칩 (ADR-0148). 라우팅 줄보다 **위**에 온다: 라우팅은 "이 글이 어떻게
+          처리되는가"고 인용은 "이 글이 무엇에 대한 것인가"라서, 읽는 순서가
+          맥락 -> 처리 -> 입력이다. */}
+      {quote && (
+        <QuoteChip
+          block={quote.block}
+          directory={directory}
+          onCancel={onCancelQuote}
+        />
+      )}
       {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면

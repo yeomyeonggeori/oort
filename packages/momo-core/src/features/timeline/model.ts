@@ -227,9 +227,16 @@ export function canReplyToMessage(message: Message): boolean {
   return isActionable(message) && !message.rootId;
 }
 
-/** What a row may offer, all four answers together. */
+/** What a row may offer, all five answers together. */
 export interface MessageActionAvailability {
   reply: boolean;
+  /**
+   * ADR-0148 — 인용. `reply`와 **다른 축**이다: 스레드는 대화를 옆으로 치우고
+   * 인용은 본류에 두면서 맥락만 끌어온다. 그래서 답글이 불가능한 행(이미 답글인
+   * 행)도 인용은 가능하고, 둘을 하나로 접으면 ADR이 나눈 두 장치가 UI에서 다시
+   * 합쳐진다. 판정은 `features/timeline/quote.ts` `canQuoteMessage`.
+   */
+  quote: boolean;
   react: boolean;
   edit: boolean;
   delete: boolean;
@@ -242,7 +249,11 @@ export interface MessageActionAvailability {
  */
 export function hasAnyAction(available: MessageActionAvailability): boolean {
   return (
-    available.reply || available.react || available.edit || available.delete
+    available.reply ||
+    available.quote ||
+    available.react ||
+    available.edit ||
+    available.delete
   );
 }
 
@@ -506,6 +517,13 @@ export interface PendingMessage {
    * dropping it would send a different request under the same idempotency key.
    */
   routing?: RequestRouting;
+  /**
+   * ADR-0148 — the message this send quotes. Rides the row for the same reason
+   * `routing` does, and for one more: the echo renders its own quote block, so
+   * without it the optimistic row would show no quote and then grow one the
+   * instant its seq landed, moving the text under the reader's eye.
+   */
+  replyToId?: string;
 }
 
 /** True when `message` is the server's echo of `pending`. */

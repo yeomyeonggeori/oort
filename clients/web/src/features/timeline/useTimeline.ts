@@ -7,7 +7,7 @@ import {
   sendMessage,
   setReaction,
   type Message,
-  type RequestRouting,
+  type SendMessageOptions,
 } from "@momo/core/lib/api";
 import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
 import {
@@ -53,11 +53,12 @@ export interface UseTimelineResult {
   pending: PendingMessage[];
   /**
    * The one send path: optimistic echo now, server seq when it lands.
-   * `routing` is the composer's per-request override (ADR-0134 D1); it rides
-   * the pending row so a retry re-sends the choice the person actually made
-   * rather than quietly falling back to the inherited value.
+   * `routing` is the composer's per-request override (ADR-0134 D1) and
+   * `replyToId` is ADR-0148's quote binding; both ride the pending row so a
+   * retry re-sends what the person actually chose rather than quietly falling
+   * back to the inherited value or dropping the quote.
    */
-  send: (body: string, routing?: RequestRouting) => Promise<void>;
+  send: (body: string, options?: SendMessageOptions) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
@@ -173,7 +174,12 @@ export function useTimeline(
           row.channelId,
           row.clientMsgId,
           row.body,
-          row.routing
+          {
+            ...(row.routing ? { routing: row.routing } : {}),
+            ...(row.replyToId === undefined
+              ? {}
+              : { replyToId: row.replyToId }),
+          }
         );
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
@@ -191,7 +197,7 @@ export function useTimeline(
   );
 
   const send = useCallback(
-    async (body: string, routing?: RequestRouting) => {
+    async (body: string, options?: SendMessageOptions) => {
       const channel = channelId;
       if (channel === null || body === "") return;
       const row: PendingMessage = {
@@ -199,7 +205,12 @@ export function useTimeline(
         channelId: channel,
         authorMemberId,
         body,
-        ...(routing ? { routing } : {}),
+        ...(options?.routing ? { routing: options.routing } : {}),
+        // ADR-0148 - the echo renders its own quote block from this, and a retry
+        // must re-send the SAME request under the same idempotency key.
+        ...(options?.replyToId === undefined
+          ? {}
+          : { replyToId: options.replyToId }),
         // Local clock, used only for grouping and the time label on a row that
         // has not been ordered yet. Ordering still waits for seq.
         createdAtMs: Date.now(),

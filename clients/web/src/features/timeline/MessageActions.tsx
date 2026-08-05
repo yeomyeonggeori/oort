@@ -2,6 +2,7 @@ import {
   MessageSquareReply,
   MoreHorizontal,
   Pencil,
+  Quote,
   Smile,
   Trash2,
 } from "lucide-react";
@@ -53,9 +54,18 @@ import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 // =============================================================================
 
 import { hasAnyAction, type MessageActionAvailability } from "@momo/core/features/timeline/model";
+import { QUOTE_ACTION_LABEL } from "@momo/core/features/timeline/quote";
 
 export interface MessageActionCallbacks {
   onReply: () => void;
+  /**
+   * ADR-0148 - pin this message to the composer as a quote. A different action
+   * from `onReply` because they are different devices: 답글 moves the
+   * conversation aside into a thread, 인용 keeps it in the channel's main flow
+   * and drags the context along. Sharing one menu item would put the ADR's two
+   * devices back together in the only place the reader can see them.
+   */
+  onQuote: () => void;
   onReact: (emoji: string) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -159,9 +169,10 @@ export function MessageActionColumn({
               </>
             )}
             {offersReactions &&
-              (available.reply || available.edit || available.delete) && (
-                <DropdownMenuSeparator />
-              )}
+              (available.reply ||
+                available.quote ||
+                available.edit ||
+                available.delete) && <DropdownMenuSeparator />}
             {available.reply && (
               <DropdownMenuItem
                 data-testid="menu-reply"
@@ -169,6 +180,18 @@ export function MessageActionColumn({
               >
                 <MessageSquareReply className="size-4" aria-hidden="true" />
                 답글 달기
+              </DropdownMenuItem>
+            )}
+            {/* 답글 바로 아래, 다른 글리프, 다른 말 (ADR-0148). 나란히 두는 것이
+                요점이다: 두 장치의 차이는 둘을 같은 자리에서 고를 수 있을 때만
+                배울 수 있고, 하나를 메뉴 밑바닥에 숨기면 사람은 평생 하나만 쓴다. */}
+            {available.quote && (
+              <DropdownMenuItem
+                data-testid="menu-quote"
+                onSelect={callbacks.onQuote}
+              >
+                <Quote className="size-4" aria-hidden="true" />
+                {QUOTE_ACTION_LABEL}
               </DropdownMenuItem>
             )}
             {available.edit && (
@@ -303,6 +326,18 @@ export function MessageActionSheet({
             }}
           >
             <MessageSquareReply className="size-4" aria-hidden="true" />
+          </SheetAction>
+        )}
+        {available.quote && (
+          <SheetAction
+            label={QUOTE_ACTION_LABEL}
+            testId="sheet-quote"
+            onSelect={() => {
+              close();
+              callbacks.onQuote();
+            }}
+          >
+            <Quote className="size-4" aria-hidden="true" />
           </SheetAction>
         )}
         {available.edit && (
