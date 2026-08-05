@@ -53,9 +53,16 @@ import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
  */
 export function TypingBar({
   sentence,
+  label,
   testID = 'composer-typing',
 }: {
   sentence: string | null;
+  /**
+   * 보조기술이 읽을 이름 (코어의 `typingLabel`). 문장과 같은 값이되 말줄임표가
+   * 없다 — 스크린리더는 「…」을 「점점점」으로 읽거나 통째로 삼키고, 둘 다 이 줄이
+   * 하려는 말이 아니다. 없으면 문장을 그대로 읽는다.
+   */
+  label?: string | null;
   testID?: string;
 }): React.JSX.Element | null {
   if (sentence === null || sentence.trim() === '') return null;
@@ -64,6 +71,7 @@ export function TypingBar({
       // `Text`는 그 자체로 접근성 원소다. `View`에 라벨을 붙였다가 아무도 읽지
       // 않는 라벨을 만든 전례가 이 레포에 있다(`AgentActivityBar` 2R M1).
       accessibilityRole="text"
+      accessibilityLabel={label ?? sentence}
       // 이 줄은 사람이 초점을 옮기지 않아도 바뀐다. `polite`는 읽던 문장을
       // 끊지 않고 다음 틈에 말한다 — 「누가 치고 있다」는 절대 남의 말을 자를
       // 만큼 중요하지 않다.

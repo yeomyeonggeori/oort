@@ -6,6 +6,12 @@ import {
 } from '@momo/core/features/timeline/quote';
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {
+  typingLabel,
+  typingSentence,
+  TYPING_AGGREGATE_THRESHOLD_FALLBACK,
+} from '@momo/core/features/chat/typing';
+import {memberFor, memberNameParts} from '@momo/core/features/workspace/directory';
+import {
   dmAutoReplyAgent,
   dmPeer,
   unreadFor,
@@ -35,6 +41,14 @@ import {
   turnPlaceholderKey,
 } from '@momo/core/features/agents/workingSignal';
 import {Composer} from '../features/conversation/Composer';
+import {TypingBar} from '../features/conversation/TypingBar';
+import {
+  markTyping,
+  resetTyping,
+  sweepTyping,
+  useTypists,
+} from '../features/conversation/typingSignals';
+import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {
   LongPressHint,
@@ -397,6 +411,65 @@ export default function ConversationScreen({
     return () => subscription.remove();
   }, [flushReadCursor]);
 
+  // ---- 「작성 중」 (ADR-0149) ------------------------------------------------
+  //
+  // 수신: 기존 레일에 채널 하나를 더 건다. **보이는 채널만** — 사이드바의 모든
+  // 방을 구독하면 읽지도 않을 프레임이 방 수 × 타이피스트 수만큼 들어오고, 그것은
+  // 폰에서 배터리다. 이 화면이 살아 있는 동안만, 이 채널만.
+  //
+  // 레일이 끊기거나 채널을 옮기면 **명부를 비운다.** 남은 신호는 6초 뒤에 어차피
+  // 만료되지만 그 6초가 거짓말이다 — 끊긴 동안 그 사람이 아직 치고 있는지 우리는
+  // 모르고, 다른 방의 「작성 중」은 이 방에 대해 아무 말도 아니다. 이 화면이
+  // 명부의 유일한 공급자이므로(구독은 보이는 채널 하나뿐) 통째로 비우는 것이 곧
+  // 이 채널을 비우는 것이다.
+  useEffect(() => {
+    if (!rail || !railLive) {
+      resetTyping();
+      return undefined;
+    }
+    const detach = rail.subscribeTyping(workspaceId, channelId, {
+      onTyping: markTyping,
+    });
+    return () => {
+      detach();
+      resetTyping();
+    };
+  }, [rail, railLive, workspaceId, channelId]);
+
+  // 만료는 1Hz 시계가 훑는다. 두 번째 인터벌을 세우지 않는 이유는
+  // `typingSignals.ts` 머리말에 있다 — 같은 박자를 두 번 사는 일이다.
+  useEffect(() => sweepTyping(nowMs), [nowMs]);
+
+  // 에이전트를 화면에서 떨구는 자리. 서버가 403 으로 막지만(`require_human`)
+  // 그것은 서버의 방어이고 이것은 화면의 방어다: 어떤 경로로든 에이전트 id 를
+  // 실은 신호가 그려지는 순간 「사람은 작성 중, 에이전트는 작업 중」이 깨진다.
+  // 명부에 없는 id 도 떨군다 — 이름 없는 「누군가 작성 중」은 나르는 정보가 0이다.
+  const isTypistEligible = useCallback(
+    (memberId: string) => memberFor(directory, memberId)?.kind === 'human',
+    [directory],
+  );
+  const typists = useTypists({
+    channelId,
+    nowMs,
+    myMemberId: member.id,
+    isEligible: isTypistEligible,
+  });
+  const typistNames = useMemo(
+    () => typists.map(id => memberNameParts(directory, id, '').name),
+    [typists, directory],
+  );
+  const typingLine = useMemo(
+    () => typingSentence(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
+    [typistNames],
+  );
+  const typingA11y = useMemo(
+    () => typingLabel(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
+    [typistNames],
+  );
+
+  // 송신: 타이머 없이 키스트로크에 매단다. 자세한 이유는 `useTypingSender` 머리말.
+  const onTyping = useTypingSender(workspaceId, channelId, railLive);
+
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
   const hint = useLongPressHint();
@@ -661,6 +734,10 @@ export default function ConversationScreen({
               </Text>
             ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
+            {/* 활동 줄(에이전트 「작업 중」) **아래**, 컴포저 바로 위. 사라지는
+                것이 아래에 있어야 사라질 때 사람이 겨누고 있던 「중단」 버튼이
+                손가락 밑에서 움직이지 않는다. */}
+            <TypingBar sentence={typingLine} label={typingA11y} />
             <Composer
               channelLabel={title}
               directory={directory}
@@ -669,6 +746,7 @@ export default function ConversationScreen({
               quote={quote}
               onCancelQuote={onCancelQuote}
               inputRef={composerInputRef}
+              onTyping={onTyping}
               onSend={onSend}
             />
           </>
