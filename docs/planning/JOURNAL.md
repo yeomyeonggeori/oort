@@ -1727,3 +1727,10 @@
 - 머지 시 `clients/web/package.json` 게이트 스크립트 충돌(B3 gate:quote/typing vs U3 gate:ailink)은 통합자 권한으로 합집합 해소·수동 머지. **교훈: 머지 성공 확인 전 워크트리 제거 금지**(이번엔 클린 상태라 무손실).
 - red proof 방법론 적립(U3): "삭제로 되돌리면 컴파일러가 먼저 죽어 게이트 증명이 안 된다 — **컴파일 통과+결함만 살아 있는 형태로 주입**해야 red가 증명된다."
 - 남은 체인: B3M 20-stop flake/회귀 판정(기준 선고정: 2연속 초록) → M4 PR → 3단 스택 수술 → #1064→#1067→M4 머지. 그러면 배치 3 + 폰 Blocker 전체 랜딩.
+
+## 2026-08-05 (오전2) · Fable · 배치 3 완주 — 8 PR 전량 머지 + 웹 배포
+- **머지 완주(8건)**: #1058(rust 샘플)·#1052(웹 인용)·#1062(모바일 인용)·#1059(웹 작성중)·#1056(OAuth 폼)·#1064(모바일 작성중)·#1067(폰 마크다운)·#1068(폰 복사) — track/engine c9ea9cc9. **배치 3(4/4) + 폰 Blocker 3건(U4-a/b) + U3 + SRV-B7 전부 랜딩.**
+- B3M 수술: track/engine 위 3단 rebase — M1'/M2'/M3' 중복 patch-id 자동 스킵·충돌 0·모바일 byte-동일(게이트만 재실행 634/646/655). 20-stop flake 확정(#1069 — 단독 2연속 초록·인과 증거=목 턴 미오픈). #1068 스팟 체크(복사 페이로드 상자 목·selectable 갈림) 후 머지.
+- **웹 배포 완료**: track/engine 빌드(index-CfaAQbFh.js) → app.oor7.com 검증 일치. 함정 재확인: clients/web은 루트 워크스페이스(packages/*) 밖 — **fresh 워크트리는 clients/web에서 자체 npm ci 필요**(런북에 추가할 것).
+- 워크트리 정리: B3M-conversation·SRV-B6 제거(잔여 4: 684·RN-B4-defects·WEB-WP1-panel(merged=0 불확실 보존)·구레포류). 폰 대화 표면 **일괄 design-review 가동 중**(M1~M4 병합 결과 — 산출은 U4-c~j 편성 입력).
+- 다음: 일괄 리뷰 결과 → U4 잔여 편성 · 폰 재빌드는 성재 검수 타이밍에 · #1065 typing 묶음 goal 편성(tie 단정 포함) · ADR-0150/0151 승인 대기 유지.
