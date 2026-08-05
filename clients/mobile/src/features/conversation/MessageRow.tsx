@@ -40,6 +40,7 @@ import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useMemo, useState} from 'react';
 import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {copyText} from './copy';
 import {MessageBody, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
@@ -934,13 +935,20 @@ function MessageRowInner({
             {presentation.keepsBody && body !== '' ? (
               <MessageBody
                 body={body}
-                // Selectable ONLY where no gesture wants the same press. iOS
-                // text selection is itself a long press, so on an actionable
-                // row the two fight and the loser is whichever the OS decides
-                // — a magnifier appearing over the action sheet. Where there
-                // is no sheet to open there is nothing to fight, so those rows
-                // keep their copy. (goal U4-b 가 「메시지 복사」를 시트에 놓으면
-                // 이 자리의 거래가 다시 열린다.)
+                // ===================================================
+                // 규칙: **모든 행에 텍스트를 꺼내는 길이 정확히 하나** (goal U4-b)
+                //
+                // iOS 의 텍스트 선택은 그 자체가 길게 누르기라, 시트가 있는 행에서
+                // 둘은 같은 제스처를 다툰다 — 이기는 쪽을 OS 가 정하고, 지면 시트
+                // 위로 돋보기가 올라온다. 그래서 예전 판은 시트가 있는 행의 선택을
+                // 껐고, 시트에 복사도 없었으므로 **꺼낼 길이 0이 됐다**(BL-2).
+                //
+                // 이제 시트에 「메시지 복사」가 있다. 그러므로 이 행의 답은
+                // 「선택을 켜서 둘이 다투게 한다」가 아니라 **「길이 시트에 있으므로
+                // 선택은 끈다」** 이다. 시트가 없는 행(낙관적 메아리)만 선택을 갖고,
+                // 그것은 비일관이 아니라 같은 규칙의 다른 답이다 — 감사가 지적한
+                // 「보내는 중엔 선택되고 확인되면 꺼진다」가 이제 뜻을 갖는다.
+                // ===================================================
                 selectable={!actionable}
               />
             ) : null}
@@ -1064,6 +1072,19 @@ function MessageRowInner({
             setSheetOpen(false);
             actions.onOpenThread?.(message);
           }}
+          onCopy={
+            // 묘비에는 꺼낼 내용이 없다. `body` 가 비었을 때도 마찬가지 —
+            // 빈 문자열을 클립보드에 넣는 것은 「복사했다」는 거짓말이다.
+            !deleted && body !== ''
+              ? () => {
+                  setSheetOpen(false);
+                  setRowError(null);
+                  void copyText(body).then(ok => {
+                    if (!ok) setRowError('복사하지 못했습니다.');
+                  });
+                }
+              : undefined
+          }
           onQuote={
             available.quote
               ? () => {

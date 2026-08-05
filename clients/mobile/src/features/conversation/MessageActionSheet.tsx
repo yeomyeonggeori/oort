@@ -61,6 +61,7 @@ export function MessageActionSheet({
   onToggleReaction,
   onReply,
   onQuote,
+  onCopy,
   onEdit,
   onDelete,
 }: {
@@ -92,6 +93,12 @@ export function MessageActionSheet({
    * 같은 모양이다.
    */
   onQuote?: () => void;
+  /**
+   * 메시지 복사 (BL-2). 복사되는 것은 **저자가 친 원문**이다 — 화면에 그려진
+   * 모양이 아니라 마크다운 소스. 사람이 꺼내려는 것은 명령어·해시·경로이고,
+   * 그것을 다시 붙여 넣을 곳은 대개 마크다운을 아는 자리가 아니라 터미널이다.
+   */
+  onCopy?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
@@ -216,6 +223,17 @@ export function MessageActionSheet({
                   label={QUOTE_ACTION_LABEL}
                   onPress={onQuote}
                   testID="sheet-quote"
+                />
+              ) : null}
+              {/* 복사는 **묘비에도 있다** — 지워진 메시지에는 꺼낼 내용이 없으므로
+                  거기서는 애초에 오지 않는다(행이 그것을 판정한다). 여기 두는
+                  순서는 「읽어서 가져가는 것」 다음에 「고치는 것」이다: 파괴적인
+                  쪽이 아래로 간다. */}
+              {onCopy ? (
+                <SheetRow
+                  label="메시지 복사"
+                  onPress={onCopy}
+                  testID="sheet-copy"
                 />
               ) : null}
               {availability.edit ? (
