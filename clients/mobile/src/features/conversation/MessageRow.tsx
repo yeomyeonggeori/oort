@@ -49,6 +49,7 @@ import {
   deadlinePassed,
   gateFor,
   type ApprovalGate,
+  type ApprovalReceipt,
 } from './approvalGate';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
@@ -367,7 +368,7 @@ function AgentCard({
 }: {
   card: AgentCardModel;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
-  approvalReceipts?: ReadonlyMap<string, string>;
+  approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   nowMs: number;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }): React.JSX.Element {
@@ -379,15 +380,25 @@ function AgentCard({
       card.approvalId === null
         ? undefined
         : approvalReceipts?.get(card.approvalId);
+    const settledStatus = receipt?.status ?? card.status;
     return (
       <View style={styles.card} testID="agent-card">
         <View style={styles.cardHead}>
           <Text style={styles.cardTitle} numberOfLines={2}>
             {card.title}
           </Text>
+          {/* 원장이 방금 답해 준 상태가 있으면 그것이 이긴다. 없으면 스냅샷.
+              둘을 섞지 않는 이유는 사진이 잡아냈다 — 영수증이 「승인을
+              기록했습니다」인데 칩이 「승인 대기」였다. */}
           <StatusChip
-            label={APPROVAL_STATUS_LABEL[card.status]}
-            tone={card.status === 'pending' ? 'warn' : card.status === 'approved' ? 'ok' : 'muted'}
+            label={APPROVAL_STATUS_LABEL[settledStatus]}
+            tone={
+              settledStatus === 'pending'
+                ? 'warn'
+                : settledStatus === 'approved'
+                  ? 'ok'
+                  : 'muted'
+            }
           />
         </View>
         {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
@@ -411,7 +422,7 @@ function AgentCard({
             ===================================================================== */}
         {receipt !== undefined ? (
           <Text style={styles.cardNote} testID="card-approval-receipt">
-            {receipt}
+            {receipt.note}
           </Text>
         ) : approval ? (
           <ApprovalDecision
@@ -713,7 +724,7 @@ export interface MessageRowProps {
    * 사람은 자기가 무엇을 했는지 못 본 채 카드가 조용히 바뀐 것만 본다.
    * (인박스가 이미 같은 이유로 화면에 둔다.)
    */
-  approvalReceipts?: ReadonlyMap<string, string>;
+  approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   /** 결정을 원장에 보낸 뒤. 화면이 영수증을 만들고 목록을 무효화한다. */
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }

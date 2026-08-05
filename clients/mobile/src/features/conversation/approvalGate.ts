@@ -1,5 +1,8 @@
 import type {Approval} from '@momo/core/lib/api';
-import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardModel';
+import type {
+  AgentApprovalCard,
+  ApprovalStatus,
+} from '@momo/core/features/timeline/agentCardModel';
 
 // =============================================================================
 // 타임라인 승인 카드가 결정 가능한가
@@ -119,6 +122,23 @@ export function gateFor(
  */
 export function deadlinePassed(gate: ApprovalGate, nowMs: number): boolean {
   return gate.expiresAtMs !== null && gate.expiresAtMs <= nowMs;
+}
+
+/**
+ * 결정이 끝난 카드가 말할 것.
+ *
+ * 문장만 들었더니 사진에서 모순이 나왔다: 영수증은 「승인을 기록했습니다」인데
+ * 머리의 상태 칩은 여전히 **「승인 대기」**였다. 칩은 카드 스냅샷의 `status` 를
+ * 읽고, 그 스냅샷은 서버가 새 프레임을 보낼 때까지 갱신되지 않는다.
+ *
+ * 원장이 방금 답해 준 상태를 함께 들면 그 창이 닫힌다 — 같은 카드가 한 줄에서
+ * 두 가지를 말하지 않는다. `status` 가 없을 수 있는 이유는 `DecisionOutcome`
+ * 자신이 모를 수 있기 때문이다(200 인데 알아볼 수 없는 상태). 모르면 칩은
+ * 스냅샷을 그대로 둔다 — 지어내지 않는다.
+ */
+export interface ApprovalReceipt {
+  note: string;
+  status?: ApprovalStatus;
 }
 
 /** `memo` 비교용. 필드가 셋이고 전부 스칼라라 행 하나를 다시 그리는 것보다 싸다. */

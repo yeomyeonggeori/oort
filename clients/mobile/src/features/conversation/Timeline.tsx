@@ -33,7 +33,7 @@ import {
 } from './MessageRow';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
-import type {ApprovalGate} from './approvalGate';
+import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
 
 // =============================================================================
@@ -446,7 +446,7 @@ function TimelineInner({
    */
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   /** 결정이 끝난 카드가 말할 영수증, `approvalId` 로. 컨트롤과 자리를 바꾼다. */
-  approvalReceipts?: ReadonlyMap<string, string>;
+  approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   myMemberId: string;
   loadingOlder?: boolean;

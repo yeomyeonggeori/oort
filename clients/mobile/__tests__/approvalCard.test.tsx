@@ -11,6 +11,7 @@ import {
   deadlinePassed,
   gateFor,
   type ApprovalGate,
+  type ApprovalReceipt,
 } from '../src/features/conversation/approvalGate';
 import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {MessageRow} from '../src/features/conversation/MessageRow';
@@ -95,7 +96,7 @@ const GATE: ApprovalGate = {
 function renderCard(props: {
   message?: Message;
   gates?: ReadonlyMap<string, ApprovalGate>;
-  receipts?: ReadonlyMap<string, string>;
+  receipts?: ReadonlyMap<string, ApprovalReceipt>;
 }) {
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}},
@@ -236,10 +237,38 @@ describe('모르는 것을 안다고 말하지 않는다', () => {
 
 // -----------------------------------------------------------------------------
 describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인다', () => {
+  it('영수증이 있으면 상태 칩도 원장이 답한 것을 말한다', () => {
+    // 사진이 이 모순을 잡아냈다: 영수증은 「승인을 기록했습니다」인데 칩은
+    // 여전히 「승인 대기」였다. 칩은 카드 **스냅샷**의 status 를 읽고, 그
+    // 스냅샷은 서버가 새 프레임을 보낼 때까지 갱신되지 않는다.
+    const view = renderCard({
+      gates: new Map(),
+      receipts: new Map([
+        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+      ]),
+    });
+    const agentCard = view.getByTestId('agent-card');
+    expect(within(agentCard).queryByText('승인 대기')).toBeNull();
+  });
+
+  it('원장이 상태를 모르면 칩은 스냅샷을 그대로 둔다 — 지어내지 않는다', () => {
+    const view = renderCard({
+      gates: new Map(),
+      receipts: new Map([
+        ['ap-1', {note: '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.'}],
+      ]),
+    });
+    expect(
+      within(view.getByTestId('agent-card')).getByText('승인 대기'),
+    ).toBeTruthy();
+  });
+
   it('영수증이 있으면 컨트롤 대신 영수증이다', () => {
     const view = renderCard({
       gates: new Map([['ap-1', GATE]]),
-      receipts: new Map([['ap-1', '승인을 기록했습니다.']]),
+      receipts: new Map([
+        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+      ]),
     });
     const agentCard = view.getByTestId('agent-card');
     expect(
@@ -256,11 +285,42 @@ describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인�
     // 조용히 바뀐 것만 본다.
     const view = renderCard({
       gates: new Map(),
-      receipts: new Map([['ap-1', '거부를 기록했습니다.']]),
+      receipts: new Map([
+        ['ap-1', {note: '거부를 기록했습니다.', status: 'rejected'}],
+      ]),
     });
     const agentCard = view.getByTestId('agent-card');
     expect(within(agentCard).getByTestId('card-approval-receipt')).toBeTruthy();
     expect(within(agentCard).queryByText(DEAD_END)).toBeNull();
+  });
+});
+
+// -----------------------------------------------------------------------------
+describe('게이트를 건네면 세션이 필요하다 — 안 건네면 아니다', () => {
+  // 이 계약은 **하네스가 처음 어겼고 사진이 그것을 잡아냈다**: `approval-card`
+  // 표면이 빨간 `useSession() was called outside SessionProvider` 로 찍혔다.
+  // `ApprovalDecision` 은 결정을 어느 워크스페이스로 보낼지 세션에서 읽는다.
+  it('읽기 전용 표면은 세션 없이도 그대로 선다 — 게이트를 안 건네므로', () => {
+    const view = render(
+      <MessageRow
+        message={card()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+    expect(view.getByTestId('agent-card')).toBeTruthy();
+    expect(within(view.getByTestId('agent-card')).getByText(DEAD_END)).toBeTruthy();
+  });
+
+  it('측정 하네스가 그 계약을 지킨다 — 세션을 세운다', () => {
+    const harness = fs.readFileSync(
+      path.resolve(__dirname, '../measure/surfaces.tsx'),
+      'utf8',
+    );
+    expect(harness).toContain('SessionProvider');
+    expect(harness).toContain("case 'approval-card'");
   });
 });
 

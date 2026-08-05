@@ -44,6 +44,7 @@ import {
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {decisionReceiptCopy} from '../features/inbox/ApprovalDecision';
 import {useInvalidateApprovals} from '../features/inbox/useInbox';
+import type {ApprovalReceipt} from '../features/conversation/approvalGate';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {jumpMissedNotice} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
@@ -561,12 +562,16 @@ export default function ConversationScreen({
   const {gates: approvalGates} = usePendingApprovals(channelId);
   const invalidateApprovals = useInvalidateApprovals();
   const [approvalReceipts, setApprovalReceipts] = useState<
-    ReadonlyMap<string, string>
+    ReadonlyMap<string, ApprovalReceipt>
   >(() => new Map());
   const onApprovalSettled = useCallback(
     (approvalId: string, outcome: DecisionOutcome) => {
       const note = decisionReceiptCopy(outcome);
-      setApprovalReceipts(previous => new Map(previous).set(approvalId, note));
+      // 문장과 **상태**를 함께 든다. 상태가 없으면 칩은 스냅샷을 그대로 둔다 —
+      // 원장이 알아볼 수 없는 상태를 답했을 때 우리가 지어내지 않는다.
+      setApprovalReceipts(previous =>
+        new Map(previous).set(approvalId, {note, status: outcome.status}),
+      );
       // 결과도 말해 준다. 무장은 알리고 결과는 알리지 않으면, 화면을 보지 않는
       // 사람에게 되돌릴 수 없는 행동이 소리 없이 끝난 것이 된다(인박스 2R H3).
       AccessibilityInfo.announceForAccessibility(note);

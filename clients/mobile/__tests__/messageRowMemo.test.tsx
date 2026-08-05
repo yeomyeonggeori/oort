@@ -142,7 +142,9 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   // 붙잡으므로 승인이 실제로 바뀔 때만 새 표가 된다.
   approvalGates: {approvalGates: new Map()},
   approvalReceipts: {
-    approvalReceipts: new Map([['ap-1', '승인을 기록했습니다.']]),
+    approvalReceipts: new Map([
+      ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+    ]),
   },
   onApprovalSettled: {onApprovalSettled: () => {}},
 };
