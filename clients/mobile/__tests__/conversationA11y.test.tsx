@@ -375,3 +375,28 @@ describe('M-2 — 목록의 결', () => {
     );
   });
 });
+
+describe('M-7 — 접근성 글꼴에서도 「닫기」에 닿는다', () => {
+  it('시트가 스크롤하고 최대 높이를 갖는다', () => {
+    // 실측(코드에서 도출): 기본 ≈482pt · AX5 ≈850pt. SE(667pt)에서 넘치고,
+    // 넘치면 잘리는 것은 목록의 **끝** — 이 시트의 끝은 「닫기」다.
+    render(
+      <MessageRow
+        message={message()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions({onQuote: () => {}, onOpenThread: () => {}})}
+      />,
+    );
+    const point = {
+      nativeEvent: {pageX: 100, pageY: 200, locationX: 100, locationY: 200},
+    };
+    fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
+    fireEvent(screen.getByTestId('message-press'), 'longPress');
+    expect(screen.getByTestId('sheet-scroll')).toBeTruthy();
+    // 「닫기」가 그 스크롤 안에 있다 — 밖에 두면 스크롤이 그것을 못 데려온다.
+    expect(screen.getByTestId('sheet-close')).toBeTruthy();
+  });
+});

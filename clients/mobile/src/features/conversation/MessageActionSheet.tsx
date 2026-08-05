@@ -6,7 +6,15 @@ import {
   type ReactionChip,
 } from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useState} from 'react';
-import {Modal, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
 
@@ -103,6 +111,22 @@ export function MessageActionSheet({
   onDelete: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  // ===========================================================================
+  // 시트는 스크롤한다 (design-review M-7 — 실측으로 확정)
+  //
+  // 기본 글꼴에서 이 시트는 ≈482pt 이고 SE(667pt)에 185pt 여유가 있다. 그런데
+  // 이번 배치가 항목을 둘 늘렸고(인용하기·메시지 복사하기 = **+88pt**, 리뷰의
+  // 「약 +86pt」 확정), RN `Text` 는 기본이 `allowFontScaling` 이므로 접근성
+  // 글꼴에서 모든 줄이 함께 자란다:
+  //
+  //     기본 ≈482 · XXL ≈522 · AX2 ≈620 · **AX5 ≈850**  (SE 667 초과)
+  //
+  // 넘치는 순간 잘리는 것은 목록의 **끝**이고, 이 시트의 끝은 「닫기」다 —
+  // 접근성 글꼴을 쓰는 사람이 시트를 닫을 수 없게 된다. 그래서 최대 높이를
+  // 화면의 비율로 묶고 그 안에서 스크롤한다. 기본 글꼴에서는 내용이 그 높이보다
+  // 짧으므로 **스크롤이 나타나지 않는다** — 지금 화면은 하나도 안 변한다.
+  // ===========================================================================
+  const {height: windowHeight} = useWindowDimensions();
   const [confirmingDelete, setConfirmingDelete] = useState(startInDeleteConfirm);
 
   const isMine = useCallback(
@@ -132,8 +156,21 @@ export function MessageActionSheet({
 
         <View
           accessibilityViewIsModal
-          style={[styles.sheet, {paddingBottom: Math.max(insets.bottom, space.md)}]}>
+          style={[
+            styles.sheet,
+            {
+              paddingBottom: Math.max(insets.bottom, space.md),
+              // 화면의 85% 를 넘지 않는다. 배경 탭으로 닫는 길이 언제나 보이게
+              // 남겨 두는 것이 그 나머지의 몫이다.
+              maxHeight: windowHeight * 0.85,
+            },
+          ]}>
           <View style={styles.grabber} />
+          <ScrollView
+            // 내용이 짧으면 아무 일도 하지 않는다. 길면 「닫기」까지 닿는다.
+            bounces={false}
+            showsVerticalScrollIndicator
+            testID="sheet-scroll">
 
           <View style={styles.preview}>
             <Text style={styles.previewTitle}>메시지 액션</Text>
@@ -231,7 +268,10 @@ export function MessageActionSheet({
                   쪽이 아래로 간다. */}
               {onCopy ? (
                 <SheetRow
-                  label="메시지 복사"
+                  // 동사형 (design-review M-2). 이웃이 전부 「답글 달기」·
+                  // 「인용해서 답하기」·「고치기」·「지우기」인데 이 항목만
+                  // 명사형이었다 — 목록의 결이 한 줄에서 끊긴다.
+                  label="메시지 복사하기"
                   onPress={onCopy}
                   testID="sheet-copy"
                 />
@@ -251,6 +291,7 @@ export function MessageActionSheet({
               <SheetRow label="닫기" tone="muted" onPress={onClose} testID="sheet-close" />
             </>
           )}
+          </ScrollView>
         </View>
       </View>
     </Modal>

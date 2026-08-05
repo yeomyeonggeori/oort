@@ -41,7 +41,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
 import {COPY_RECEIPT_MS, copyText} from './copy';
-import {MessageBody, openLink} from './MessageBody';
+import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
@@ -630,6 +630,28 @@ export interface MessageRowProps {
   quote?: QuoteBlockModel | null;
 }
 
+/**
+ * 로터가 읽을 링크 라벨.
+ *
+ * 여럿이면 **첫 개만** 올린다 — 스무 개짜리 답에 액션 스무 개를 얹으면 로터가
+ * 그 자체로 못 쓸 물건이 되고, 그것은 「하나의 원소」 규칙을 다른 방식으로
+ * 깨는 것이다. 대신 라벨이 **총 개수와 목적지**를 말한다: 첫 개만 준다는 사실도,
+ * 어디로 가는지도 숨기지 않는다.
+ *
+ * 둘째 링크부터는 지금 닿을 길이 없다 — 알려진 한계이고 #1071 에 적었다.
+ * (시트에 링크 절을 만드는 것이 후속 후보이지만 이 배치의 범위가 아니다.)
+ */
+function linkActionLabel(href: string, count: number): string {
+  let host = '';
+  try {
+    host = new URL(href).host;
+  } catch {
+    host = '';
+  }
+  const where = host === '' ? '링크 열기' : `링크 열기: ${host}`;
+  return count > 1 ? `첫 ${where} (총 ${count}개)` : where;
+}
+
 function MessageRowInner({
   message,
   startsGroup,
@@ -697,6 +719,23 @@ function MessageRowInner({
     [actions, message],
   );
   const actionable = actions !== undefined && hasAnyAction(available);
+
+  // ===========================================================================
+  // 행 안의 컨트롤을 로터에 올린다 (design-review H-1)
+  //
+  // 이 행은 접근성 원소 **하나**다 — 웹에서 6→1 로 줄인 그 규칙이고, 그것을
+  // 되돌리지 않는다. 그런데 이번 배치가 행 안에 누를 것을 넷 더 넣었고
+  // (인용 점프·코드 복사·본문 링크·아티팩트 주소) 그중 셋은 **본문 안**에 있다.
+  // 손가락은 닿는데 VoiceOver 는 못 닿았다.
+  //
+  // 답은 원소를 늘리는 것이 아니라 **행동을 등재**하는 것이다: 원소는 하나로
+  // 두고 로터가 그 넷을 부른다.
+  //
+  // 파싱은 `bodyAffordances` 가 한 번 더 돈다. 그 비용이 감당되는 이유는 이 행이
+  // `React.memo` 아래 있고 `body` 가 안 바뀌면 이 `useMemo` 도 안 돌기 때문이다 —
+  // **프레임당이 아니라 메시지당 한 번**이다.
+  // ===========================================================================
+  const affordances = useMemo(() => bodyAffordances(body), [body]);
 
   const openSheet = useCallback(() => {
     setRowError(null);
@@ -798,10 +837,33 @@ function MessageRowInner({
         case 'momoThread':
           if (threadTarget) actions?.onOpenThread?.(threadTarget);
           return;
+        case 'momoQuoteJump':
+          actions?.onJumpToQuoted?.(message);
+          return;
+        case 'momoLink':
+          if (affordances.firstLink) openLink(affordances.firstLink);
+          return;
+        case 'momoCopyCode':
+          if (affordances.firstCode) void copyText(affordances.firstCode);
+          return;
+        case 'momoArtifactLink':
+          if (presentation.artifact && 'url' in presentation.artifact) {
+            const url = presentation.artifact.url;
+            if (url) openLink(url);
+          }
+          return;
         default:
       }
     },
-    [actionable, openSheet, threadTarget, actions],
+    [
+      actionable,
+      openSheet,
+      threadTarget,
+      actions,
+      message,
+      affordances,
+      presentation.artifact,
+    ],
   );
 
   // VoiceOver reaches the actions through the rotor rather than through a row
@@ -810,8 +872,42 @@ function MessageRowInner({
     const list: {name: string; label: string}[] = [];
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (threadTarget) list.push({name: 'momoThread', label: '스레드 열기'});
+    // 아래 넷이 H-1 이 더한 것이다. 묘비에는 하나도 붙지 않는다 — 지워진
+    // 메시지에는 열 링크도 복사할 코드도 없다.
+    if (!deleted) {
+      if (quote && quote.kind !== 'unresolved' && actions?.onJumpToQuoted) {
+        list.push({name: 'momoQuoteJump', label: '인용한 원본으로 이동'});
+      }
+      if (affordances.firstLink) {
+        list.push({
+          name: 'momoLink',
+          label: linkActionLabel(affordances.firstLink, affordances.linkCount),
+        });
+      }
+      if (affordances.firstCode) {
+        list.push({
+          name: 'momoCopyCode',
+          label:
+            affordances.codeCount > 1
+              ? `첫 코드 복사 (총 ${affordances.codeCount}개)`
+              : '코드 복사',
+        });
+      }
+      if (presentation.artifact && 'url' in presentation.artifact
+          && presentation.artifact.url) {
+        list.push({name: 'momoArtifactLink', label: '아티팩트 주소 열기'});
+      }
+    }
     return list.length > 0 ? list : undefined;
-  }, [actionable, threadTarget]);
+  }, [
+    actionable,
+    threadTarget,
+    deleted,
+    quote,
+    actions,
+    affordances,
+    presentation.artifact,
+  ]);
 
   const authorLabel = memberNameParts(
     directory,

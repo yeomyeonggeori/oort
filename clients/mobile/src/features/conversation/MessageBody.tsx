@@ -108,6 +108,73 @@ export function openLink(href: string): void {
   });
 }
 
+/**
+ * 이 본문이 품고 있는 **행 안의 컨트롤들** (design-review H-1).
+ *
+ * 행은 접근성 원소 **하나**여야 한다(이 클라이언트가 웹에서 6→1 로 줄인 그
+ * 규칙). 그런데 이번 배치가 행 안에 누를 것을 넷 더 넣었고 — 인용 점프·코드
+ * 복사·본문 링크·아티팩트 주소 — 그중 셋은 **본문 안**에 있다. 손가락은 닿지만
+ * VoiceOver 는 못 닿는 상태였다.
+ *
+ * 답은 「원소를 늘린다」가 아니라 **로터 액션으로 등재한다**이다. 그러려면 행이
+ * 자기 본문에 무엇이 들었는지 알아야 하는데, 파싱은 이 파일 안에서 일어난다.
+ * 그래서 파서를 한 번 더 도는 **순수 함수**를 내준다 — 행이 `useMemo(body)` 로
+ * 부르고, 행 자체가 memo 되어 있으므로 이 비용은 프레임당이 아니라 **메시지당**
+ * 이다.
+ *
+ * 링크가 여럿이면 **첫 개만** 로터에 올린다. 스무 개짜리 답에 액션 스무 개를
+ * 얹으면 로터가 그 자체로 못 쓸 물건이 되고, 그것은 「하나의 원소」 규칙을 다른
+ * 방식으로 깨는 것이다. 대신 라벨이 총 개수를 말한다 — 첫 개만 준다는 사실을
+ * 숨기지 않는다.
+ */
+export interface BodyAffordances {
+  firstLink: string | null;
+  linkCount: number;
+  firstCode: string | null;
+  codeCount: number;
+}
+
+function walkInline(
+  nodes: Inline[],
+  out: {links: string[]},
+): void {
+  for (const node of nodes) {
+    if (node.kind === 'link') out.links.push(node.href);
+    if (node.kind === 'link' || node.kind === 'strong' || node.kind === 'em') {
+      walkInline(node.children, out);
+    }
+  }
+}
+
+export function bodyAffordances(body: string): BodyAffordances {
+  const empty: BodyAffordances = {
+    firstLink: null,
+    linkCount: 0,
+    firstCode: null,
+    codeCount: 0,
+  };
+  if (body === '' || isPlainText(body)) return empty;
+  const out = {links: [] as string[]};
+  const codes: string[] = [];
+  for (const block of parseMarkdown(body)) {
+    if (block.kind === 'code') {
+      codes.push(block.text);
+      continue;
+    }
+    if (block.kind === 'list') {
+      for (const item of block.items) walkInline(item, out);
+      continue;
+    }
+    for (const line of block.lines) walkInline(line, out);
+  }
+  return {
+    firstLink: out.links[0] ?? null,
+    linkCount: out.links.length,
+    firstCode: codes[0] ?? null,
+    codeCount: codes.length,
+  };
+}
+
 function InlineNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
   return (
     <>
@@ -215,7 +282,11 @@ function CodeCopyButton({text}: {text: string}): React.JSX.Element {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={done ? '코드 복사됨' : '코드 복사'}
-      hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+      // 24pt 의 시각 높이에 위아래 10pt 씩 — 엄지에게는 **44pt**, 레이아웃에는
+      // 24pt (design-review M-9: 첫 판은 8pt 라 40pt 였다). 실제 높이를 44 로
+      // 올리지 않는 이유는 반응 칩에서 이미 고른 거래와 같다: 코드 상자마다
+      // 머리줄이 그만큼 두꺼워지고, 답 하나에 상자가 셋이면 화면 한 뼘이 사라진다.
+      hitSlop={{top: 10, bottom: 10, left: 8, right: 8}}
       onPress={onPress}
       style={({pressed}) => [styles.codeCopy, pressed && styles.pressed]}
       testID="code-copy">
@@ -227,9 +298,11 @@ function CodeCopyButton({text}: {text: string}): React.JSX.Element {
 function BlockNode({
   block,
   muted,
+  selectable,
 }: {
   block: Block;
   muted: boolean;
+  selectable: boolean;
 }): React.JSX.Element {
   if (block.kind === 'code') {
     return (
@@ -259,7 +332,11 @@ function BlockNode({
           style={styles.codeScroll}
           contentContainerStyle={styles.codeContent}
           showsHorizontalScrollIndicator>
-          <Text style={[styles.code, muted && styles.muted]}>{block.text}</Text>
+          <Text
+            selectable={selectable}
+            style={[styles.code, muted && styles.muted]}>
+            {block.text}
+          </Text>
         </ScrollView>
       </View>
     );
@@ -276,7 +353,9 @@ function BlockNode({
             <Text style={[styles.listMarker, muted && styles.muted]}>
               {block.ordered ? `${block.start + index}.` : '•'}
             </Text>
-            <Text style={[styles.listText, muted && styles.muted]}>
+            <Text
+              selectable={selectable}
+              style={[styles.listText, muted && styles.muted]}>
               <InlineNodes nodes={item} />
             </Text>
           </View>
@@ -286,7 +365,9 @@ function BlockNode({
   }
 
   return (
-    <Text style={[styles.paragraph, muted && styles.muted]}>
+    <Text
+      selectable={selectable}
+      style={[styles.paragraph, muted && styles.muted]}>
       {block.lines.map((line, index) => (
         <React.Fragment key={index}>
           {index > 0 ? '\n' : null}
@@ -323,6 +404,10 @@ export function MessageBody({
    * iOS 의 텍스트 선택은 그 자체가 길게 누르기라 메시지 액션 시트와 같은 제스처를
    * 다툰다. 그 판정은 행이 들고 있으므로(행만이 자기에게 시트가 있는지 안다)
    * 여기서는 받기만 한다.
+   *
+   * **마크다운 경로에도 내려간다** (design-review M-1). 첫 판은 평문 경로에만
+   * 걸어서, 마크다운을 담은 낙관적 메아리(시트가 없는 행 — 그래서 선택이 텍스트를
+   * 꺼내는 **유일한** 길인 행)에서 그 길이 사라졌다. BL-2 의 잔여였다.
    */
   selectable?: boolean;
 }): React.JSX.Element {
@@ -344,7 +429,12 @@ export function MessageBody({
   return (
     <View style={styles.markdown} testID="message-markdown">
       {blocks.map((block, index) => (
-        <BlockNode key={index} block={block} muted={muted} />
+        <BlockNode
+          key={index}
+          block={block}
+          muted={muted}
+          selectable={selectable}
+        />
       ))}
     </View>
   );
