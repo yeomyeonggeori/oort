@@ -1,6 +1,8 @@
 import {
   typingLabel,
+  typingLead,
   typingSegments,
+  typingTail,
 } from "@momo/core/features/chat/typing";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 
@@ -52,6 +54,50 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 // 보조기술이 남이 타이핑하는 동안 같은 문장을 계속 낭독한다 — 작업 패널의 1Hz 시계를
 // live 영역 **바깥**으로 뺀 것과 정확히 같은 판단이다(gate-work-panel의 live 시나리오).
 // 문장은 DOM에 있으므로 읽으려는 사람은 언제든 읽을 수 있고, 강제로 끼어들지 않는다.
+//
+// ## 한 줄로 못 박은 뒤에 남는 것 (U4-4 W1 — M-2·M-3의 한 결정)
+//
+// 예약 높이는 **1줄 고정을 유지한다.** 두 대안을 다 재보고 기각한 결과다:
+//
+//   * **2줄 허용(가변)** — 문장이 길면 두 줄, 짧으면 한 줄. 예약이 가변이 되는 순간
+//     H-2가 통째로 되돌아온다. 그것도 더 나쁜 형태로: 지금 흔들림은 「없다↔있다」
+//     한 번인데, 가변 2줄은 **치는 사람이 한 명 늘 때마다** 26px이 오르내린다.
+//   * **2줄 고정** — 흔들림은 없다. 대신 아무도 안 치는 대부분의 시각에 죽은 공간이
+//     26 → 52px가 되고, 컴포저 아래 3행 스택(힌트·작성 중·작업 중)에서는 그 값이
+//     78px다. 화면 아래쪽 78px는 폰에서 메시지 두 줄이다.
+//
+// 1줄 고정을 고르면 **긴 이름에서 잘림은 불가피**하다. 그래서 이 파일이 하는 일은
+// 잘림을 없애는 시늉이 아니라 **잘림의 대상을 고르는 것**이다.
+//
+// ### 무엇이 잘리는가 — 이름이 잘린다, 동사는 안 잘린다 (M-3)
+//
+// 1차는 `truncate`를 줄 전체에 걸었다. 한국어는 동사가 끝에 오므로 그 줄이 넘치면
+// 잘려 나가는 것이 하필 **「작성 중」**이고, 남는 것은 「김민서 프로덕트디자…」 —
+// 집계 문구도 아니고 아무 말도 아닌 문자열이다. 게다가 그 `…`는 문장이 원래 갖고 있는
+// `…`와 **같은 글자**라, 잘린 줄과 온전한 줄이 구분되지도 않았다.
+//
+// 지금은 줄을 둘로 나눈다: 코어의 [`typingLead`](이름들)만 줄어들고
+// [`typingTail`](「님이 작성 중…」/「명이 작성 중…」)은 `shrink-0`으로 못 박는다.
+// 결과로 두 가지가 동시에 닫힌다 — 동사는 어떤 폭에서도 살아남고, 잘림의 `…`는
+// **이름 안쪽**에만 생겨 문장 끝의 `…`와 자리가 갈린다.
+//
+// ### 잘린 이름을 되찾는 길 (M-2)
+//
+// 1차의 유일한 복구 경로는 `title` 툴팁이었고 — hover 전용이라 키보드·터치에는 길이
+// 없었다. 더 나쁜 것은 그 `title`이 **원래 노리던 일도 못 했다는 점**이다: 역할 없는
+// `<p>`의 접근 이름은 텍스트 콘텐츠에서 나오므로, 스크린리더는 잘린 채 보이는 텍스트를
+// 그대로 읽고 `title`은 설명으로 덧붙을 뿐이다. 코어가 `typingLabel`을 「보조기술이
+// 읽을 이름」이라 부르는데 그 치환이 한 번도 일어나지 않았다.
+//
+// 그래서 뒤집는다: **보이는 조각은 `aria-hidden`, 온전한 문장은 `sr-only`.** 이제
+// 보조기술은 폭과 무관하게 언제나 이름 전체를 얻고, hover는 그 위에 얹힌 포인터용
+// 보너스로 남는다(사라뜨릴 이유가 없다).
+//
+// **터치에는 여전히 복구 경로가 없고, 그것을 결함이 아니라 값으로 받는다.** 이 줄은
+// 주변시로 흘려보내는 신호이고 사람을 *식별*하는 자리가 아니다 — 그 일은 명부와
+// 헤더가 한다. 1줄 고정을 지키는 한 터치에 복구를 주려면 탭 가능한 원소를 하나
+// 세워야 하는데, 그러면 「누를 수 있나: 아니다」(위 표 둘째 줄)가 깨져 작업 중 줄과의
+// 대조축을 하나 잃는다. 잃는 쪽이 더 크다.
 // =============================================================================
 
 /**
@@ -62,8 +108,14 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
  * 세로선에 선다). 1차는 `px-4`였고, 입력창 아래 12px 회색 3행이 왼쪽 모서리를 두 개
  * 갖고 있었다 — 그 판정이 이미 같은 파일 주석에 적혀 있었다
  * (design-review PR 1059 H-3).
+ *
+ * **`truncate`가 여기서 빠지고 `flex`가 들어온 것이 M-3의 실체다.** 줄 전체에 걸린
+ * 말줄임은 한국어에서 동사를 먼저 먹는다. 자르는 일은 이제 안쪽의 `lead` 조각만
+ * 맡고, 이 줄은 그 조각들을 한 줄에 세우는 상자다 — 문장이 있든 없든 `overflow-hidden`
+ * 이 두 번째 줄로 넘어가는 것을 막는다(`whitespace-nowrap`은 조각 쪽에 있다).
  */
-const LINE_CLASS = "truncate px-6 pb-2 text-meta";
+const LINE_CLASS =
+  "flex items-baseline overflow-hidden px-6 pb-2 text-meta";
 
 export function TypingLine({
   memberIds,
@@ -102,25 +154,65 @@ export function TypingLine({
     );
   }
 
+  const lead = typingLead(segments);
+  const tail = typingTail(segments);
+  const label = typingLabel(names, threshold);
+
   return (
     <p
       className={LINE_CLASS}
       data-testid="composer-typing"
       data-count={memberIds.length}
-      title={typingLabel(names, threshold) ?? undefined}
     >
-      {segments.map((segment, index) =>
-        segment.kind === "name" ? (
-          // 사람의 잉크 (M-1). 에이전트 줄의 `--agent`와 대조되는 축이고, 이 앱이
-          // 메시지 행에서 이미 쓰는 규칙과 같다: 이름은 `--ink`, 부속물은 muted.
-          <span key={index} className="text-ink">
-            {segment.text}
-          </span>
-        ) : (
-          <span key={index} className="text-ink-muted">
-            {segment.text}
-          </span>
-        )
+      {/* 보조기술이 읽는 것은 **이것 하나**다 (M-2). 아래 보이는 조각들은 폭에 따라
+          잘릴 수 있고, 잘린 텍스트를 읽어 주는 것은 이 줄이 하려는 말이 아니다.
+          `title`로는 이 치환이 일어나지 않았다 — 역할 없는 `<p>`의 접근 이름은
+          텍스트 콘텐츠에서 나오고 `title`은 거기에 덧붙을 뿐이라, 스크린리더는 잘린
+          채로 읽었다. live 영역이 아닌 것은 그대로다(머리 주석). */}
+      <span className="sr-only" data-testid="composer-typing-label">
+        {label}
+      </span>
+
+      {/* 줄어드는 쪽. `min-w-0`이 있어야 flex 자식이 내용보다 작아질 수 있고, 그래야
+          `truncate`의 말줄임이 실제로 걸린다. `title`은 이제 유일한 경로가 아니라
+          포인터 사용자에게 얹히는 보너스다. */}
+      <span
+        className="min-w-0 truncate"
+        aria-hidden="true"
+        data-testid="composer-typing-lead"
+        title={label ?? undefined}
+      >
+        {lead.map((segment, index) =>
+          segment.kind === "name" ? (
+            // 사람의 잉크 (M-1). 에이전트 줄의 `--agent`와 대조되는 축이고, 이 앱이
+            // 메시지 행에서 이미 쓰는 규칙과 같다: 이름은 `--ink`, 부속물은 muted.
+            <span key={index} className="text-ink">
+              {segment.text}
+            </span>
+          ) : segment.kind === "count" ? (
+            // 2 → 3 → 4명으로 바뀌는 숫자다. 26px 아래 같은 컴포저의 「외 N명」이
+            // 이미 쓰는 표지를 그대로 쓴다 — 자릿수가 바뀌어도 폭이 안 흔들린다 (N-2).
+            <span key={index} className="text-ink-muted" data-numeric>
+              {segment.text}
+            </span>
+          ) : (
+            <span key={index} className="text-ink-muted">
+              {segment.text}
+            </span>
+          )
+        )}
+      </span>
+
+      {/* 안 줄어드는 쪽 (M-3). 「님이 작성 중…」/「명이 작성 중…」 — 한국어는 동사가
+          끝에 오므로, 이 조각이 줄어들 수 있으면 넘치는 순간 문장이 말을 잃는다. */}
+      {tail !== null && (
+        <span
+          className="shrink-0 whitespace-pre text-ink-muted"
+          aria-hidden="true"
+          data-testid="composer-typing-tail"
+        >
+          {tail.text}
+        </span>
       )}
     </p>
   );
