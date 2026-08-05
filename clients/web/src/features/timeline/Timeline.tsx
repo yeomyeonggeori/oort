@@ -224,10 +224,15 @@ export function Timeline({
   const newestSeqRef = useRef<number | null>(null);
   newestSeqRef.current = newestSeqOf(messages);
 
+  // 내 확정 전송은 「새 메시지」가 아니다 (design-review M-3) — 그 낱말은 안읽음
+  // 구분선에서 **남의 말**을 뜻한다. 이유는 `navigation.ts`에.
+  const myMemberId = actions?.myMemberId;
   useEffect(() => {
     const baseline = baselineRef.current;
-    setNewCount(baseline === null ? 0 : countNewerThan(messages, baseline));
-  }, [messages]);
+    setNewCount(
+      baseline === null ? 0 : countNewerThan(messages, baseline, myMemberId)
+    );
+  }, [messages, myMemberId]);
 
   // 채널을 갈아타면 기준선도 버린다. `epoch`가 바뀌는 것이 곧 「다른 대화」다.
   useEffect(() => {
