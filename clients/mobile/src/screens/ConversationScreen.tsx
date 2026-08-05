@@ -45,6 +45,7 @@ import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecisio
 import {decisionReceiptCopy} from '../features/inbox/ApprovalDecision';
 import {useInvalidateApprovals} from '../features/inbox/useInbox';
 import type {ApprovalReceipt} from '../features/conversation/approvalGate';
+import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {jumpMissedNotice} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
@@ -560,6 +561,10 @@ export default function ConversationScreen({
   // 방금 누른 사람이 영수증 대신 예전 안내 문장을 보게 된다.
   // ===========================================================================
   const {gates: approvalGates} = usePendingApprovals(channelId);
+  // **레일 상태(`railStatus`)가 아니다.** 레일은 웹소켓이고 결정은 REST 로
+  // 나간다 — 레일이 재연결 중이어도 그 POST 는 멀쩡히 성공한다. 승인에는
+  // 기한이 있으므로, 할 수 있는 결정을 막는 쪽이 더 비싸다.
+  const approvalOnline = useOnline();
   const invalidateApprovals = useInvalidateApprovals();
   const [approvalReceipts, setApprovalReceipts] = useState<
     ReadonlyMap<string, ApprovalReceipt>
@@ -774,6 +779,7 @@ export default function ConversationScreen({
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
+              approvalOffline={!approvalOnline}
               onApprovalSettled={onApprovalSettled}
               messages={timeline.state.messages}
               directory={directory}

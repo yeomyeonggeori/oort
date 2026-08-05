@@ -14,6 +14,7 @@ import {
   type ApprovalReceipt,
 } from '../src/features/conversation/approvalGate';
 import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
+import {APPROVAL_OFFLINE_COPY} from '../src/features/inbox/useOnline';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
 
@@ -97,6 +98,7 @@ function renderCard(props: {
   message?: Message;
   gates?: ReadonlyMap<string, ApprovalGate>;
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
+  offline?: boolean;
 }) {
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}},
@@ -112,6 +114,7 @@ function renderCard(props: {
           nowMs={BASE_MS}
           approvalGates={props.gates}
           approvalReceipts={props.receipts}
+          approvalOffline={props.offline}
           onApprovalSettled={() => {}}
         />
       </SessionProvider>
@@ -321,6 +324,71 @@ describe('게이트를 건네면 세션이 필요하다 — 안 건네면 아니
     );
     expect(harness).toContain('SessionProvider');
     expect(harness).toContain("case 'approval-card'");
+  });
+});
+
+// -----------------------------------------------------------------------------
+describe('오프라인 — 같은 컨트롤은 화면마다 같은 결을 갖는다', () => {
+  it('연결이 끊기면 컨트롤 대신 인박스와 **같은 문장**이 선다', () => {
+    const view = renderCard({gates: new Map([['ap-1', GATE]]), offline: true});
+    const agentCard = view.getByTestId('agent-card');
+    expect(
+      within(agentCard).getByTestId('card-approval-offline').props.children,
+    ).toBe(APPROVAL_OFFLINE_COPY);
+    expect(
+      within(agentCard).queryByTestId('card-approval-ap-1-actions'),
+    ).toBeNull();
+    // 「다른 데서 하세요」와 다른 문장이어야 한다 — 이건 자리의 문제가 아니라
+    // **때**의 문제다.
+    expect(within(agentCard).queryByText(DEAD_END)).toBeNull();
+  });
+
+  it('영수증은 오프라인보다 세다 — 이미 끝난 결정은 연결과 무관하다', () => {
+    const view = renderCard({
+      gates: new Map([['ap-1', GATE]]),
+      offline: true,
+      receipts: new Map([
+        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+      ]),
+    });
+    expect(
+      within(view.getByTestId('agent-card')).getByTestId(
+        'card-approval-receipt',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('결정할 수 없는 카드는 오프라인이어도 예전 문장이다', () => {
+    // 오프라인은 「지금은 못 보낸다」이고 게이트 없음은 「여기서 할 일이
+    // 아니다」다. 둘을 섞으면 다시 연결됐을 때 사람이 여기서 기다린다.
+    const view = renderCard({gates: new Map(), offline: true});
+    expect(within(view.getByTestId('agent-card')).getByText(DEAD_END)).toBeTruthy();
+  });
+
+  it('문장이 한 벌이다 — 두 화면이 같은 상수를 든다', () => {
+    const SRC2 = (p: string) =>
+      fs.readFileSync(path.resolve(__dirname, `../src/${p}`), 'utf8');
+    const codeOnly2 = (t: string) =>
+      t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const file of [
+      'screens/InboxScreen.tsx',
+      'features/conversation/MessageRow.tsx',
+    ]) {
+      const code = codeOnly2(SRC2(file));
+      expect(code).toContain('APPROVAL_OFFLINE_COPY');
+      expect(code).not.toContain('연결이 끊겨 지금은 결정할 수 없습니다');
+    }
+  });
+
+  it('레일 상태가 아니라 네트워크를 본다 — 결정은 REST 로 나간다', () => {
+    // 레일은 웹소켓이다. 재연결 중이어도 그 POST 는 멀쩡히 성공하고, 승인에는
+    // 기한이 있으므로 할 수 있는 결정을 막는 쪽이 더 비싸다.
+    const screenSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/screens/ConversationScreen.tsx'),
+      'utf8',
+    );
+    expect(screenSrc).toMatch(/approvalOnline = useOnline\(\)/);
+    expect(screenSrc).not.toMatch(/approvalOffline=\{railStatus/);
   });
 });
 

@@ -394,6 +394,7 @@ function TimelineInner({
   reactions,
   approvalGates,
   approvalReceipts,
+  approvalOffline,
   onApprovalSettled,
   myMemberId,
   loadingOlder,
@@ -447,6 +448,8 @@ function TimelineInner({
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   /** 결정이 끝난 카드가 말할 영수증, `approvalId` 로. 컨트롤과 자리를 바꾼다. */
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+  /** 연결이 끊겼는가 — 끊겼으면 컨트롤 대신 인박스와 같은 문장. */
+  approvalOffline?: boolean;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   myMemberId: string;
   loadingOlder?: boolean;
@@ -965,6 +968,7 @@ function TimelineInner({
           quote={resolveQuote(item.message, quoteLookup)}
           approvalGates={approvalGates}
           approvalReceipts={approvalReceipts}
+          approvalOffline={approvalOffline}
           onApprovalSettled={onApprovalSettled}
         />
       );
@@ -1008,6 +1012,14 @@ function TimelineInner({
       markReplies,
       showRollup,
       quoteLookup,
+      // 승인 표가 바뀌면 `renderItem` 의 동일성도 바뀌어야 한다 — 안 그러면
+      // 결정한 뒤에도 목록이 옛 표를 든 클로저를 계속 쓴다. 붙어 있는 행이
+      // 전부 다시 그려지는 값이지만 승인은 드물고, 대안은 결정이 화면에
+      // 반영되지 않는 것이다.
+      approvalGates,
+      approvalReceipts,
+      approvalOffline,
+      onApprovalSettled,
     ],
   );
 

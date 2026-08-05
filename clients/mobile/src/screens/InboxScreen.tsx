@@ -13,7 +13,6 @@ import {
   type InboxFilter,
 } from '@momo/core/features/inbox/model';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
-import NetInfo from '@react-native-community/netinfo';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -38,6 +37,7 @@ import {
   ApprovalDecision,
   decisionReceiptCopy,
 } from '../features/inbox/ApprovalDecision';
+import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
 import {
   useAgentFeed,
   useInvalidateApprovals,
@@ -47,7 +47,6 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
-import {isOnlineFromNetInfo} from '../query/queryClient';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
@@ -170,13 +169,9 @@ export default function InboxScreen({
   );
   const runHistory = serverSurface('agentRunHistory');
 
-  const [online, setOnline] = useState(true);
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setOnline(isOnlineFromNetInfo(state));
-    });
-    return unsubscribe;
-  }, []);
+  // 배선은 `useOnline` 이 든다 — 승인 컨트롤이 서는 화면이 둘이 됐고, 같은
+  // 컨트롤이 화면마다 다른 오프라인 결을 가지면 그것은 어휘 분열이다.
+  const online = useOnline();
 
   // All three are mounted; `enabled` decides which ones actually fetch. Same
   // shape as the web route, so a tab switch is instant on a warm cache instead
@@ -312,8 +307,7 @@ export default function InboxScreen({
       if (!online) {
         return (
           <Text style={styles.managed} testID={`decision-offline-${item.key}`}>
-            연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나
-            거부할 수 있습니다.
+            {APPROVAL_OFFLINE_COPY}
           </Text>
         );
       }

@@ -56,6 +56,7 @@ import {
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {ApprovalDecision} from '../inbox/ApprovalDecision';
+import {APPROVAL_OFFLINE_COPY} from '../inbox/useOnline';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -363,12 +364,14 @@ function AgentCard({
   card,
   approvalGates,
   approvalReceipts,
+  approvalOffline,
   nowMs,
   onApprovalSettled,
 }: {
   card: AgentCardModel;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+  approvalOffline?: boolean;
   nowMs: number;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }): React.JSX.Element {
@@ -423,6 +426,12 @@ function AgentCard({
         {receipt !== undefined ? (
           <Text style={styles.cardNote} testID="card-approval-receipt">
             {receipt.note}
+          </Text>
+        ) : approval && approvalOffline ? (
+          // 결정할 수 있는 건인데 지금은 못 보낸다. 「다른 데서 하세요」와 다른
+          // 문장이어야 한다 — 이건 자리의 문제가 아니라 **때**의 문제다.
+          <Text style={styles.cardNote} testID="card-approval-offline">
+            {APPROVAL_OFFLINE_COPY}
           </Text>
         ) : approval ? (
           <ApprovalDecision
@@ -725,6 +734,13 @@ export interface MessageRowProps {
    * (인박스가 이미 같은 이유로 화면에 둔다.)
    */
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+  /**
+   * 연결이 끊겼는가. 끊겼으면 컨트롤 대신 **인박스와 같은 문장**이 선다.
+   *
+   * 같은 결정 컨트롤이 화면마다 다른 오프라인 결을 가지면 어휘 분열이다. 판정은
+   * 화면이 하고(`useOnline`), 문장은 두 화면이 같은 상수를 든다.
+   */
+  approvalOffline?: boolean;
   /** 결정을 원장에 보낸 뒤. 화면이 영수증을 만들고 목록을 무효화한다. */
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }
@@ -765,6 +781,7 @@ function MessageRowInner({
   quote,
   approvalGates,
   approvalReceipts,
+  approvalOffline,
   onApprovalSettled,
 }: MessageRowProps): React.JSX.Element {
   rowRenders += 1;
@@ -1176,6 +1193,7 @@ function MessageRowInner({
                 card={presentation.card}
                 approvalGates={approvalGates}
                 approvalReceipts={approvalReceipts}
+                approvalOffline={approvalOffline}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
               />
@@ -1451,6 +1469,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   quote: true,
   approvalGates: true,
   approvalReceipts: true,
+  approvalOffline: true,
   onApprovalSettled: true,
 };
 
@@ -1509,6 +1528,7 @@ export function sameMessageRowProps(
     // 행마다 카드를 다시 파싱하는 것(코어 규칙의 두 번째 구현)이다.
     a.approvalGates === b.approvalGates &&
     a.approvalReceipts === b.approvalReceipts &&
+    a.approvalOffline === b.approvalOffline &&
     a.onApprovalSettled === b.onApprovalSettled
   );
 }

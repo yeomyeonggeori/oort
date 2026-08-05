@@ -85,6 +85,7 @@ const BASE: MessageRowProps = {
     ['ap-1', {approvalId: 'ap-1', reversible: false, expiresAtMs: null}],
   ]),
   approvalReceipts: new Map(),
+  approvalOffline: false,
   onApprovalSettled: () => {},
   quote: {
     kind: 'ready',
@@ -146,6 +147,7 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
       ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
     ]),
   },
+  approvalOffline: {approvalOffline: true},
   onApprovalSettled: {onApprovalSettled: () => {}},
 };
 
