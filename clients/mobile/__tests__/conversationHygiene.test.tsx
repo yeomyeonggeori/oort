@@ -27,7 +27,10 @@ import {
   MessageRow,
   PendingRow,
 } from '../src/features/conversation/MessageRow';
-import {foldDeletedRuns} from '../src/features/conversation/deletedFold';
+import {
+  foldDeletedRuns,
+  foldedStandInIndex,
+} from '../src/features/conversation/deletedFold';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -381,6 +384,37 @@ describe('M-1 — 연달아 지워진 메시지가 한 줄로 접힌다', () => 
     expect(folded).toHaveLength(2);
   });
 
+  // -------------------------------------------------------------------------
+  // H-1 — 접힌 행은 자기가 **누구를** 대신하는지 안다
+  //
+  // 개수만으로는 「이 행이 그 메시지를 대신한다」를 답할 수 없고, 그 질문에
+  // 답하지 못한 것이 인용 점프의 거짓 안내였다.
+  // -------------------------------------------------------------------------
+  it('접힌 행이 자기가 흡수한 id 를 든다 — 자기 것은 빼고', () => {
+    const folded = foldDeletedRuns(
+      [deletedItem(1, true), deletedItem(2, false), deletedItem(3, false)],
+      NO_EXTRAS,
+    );
+    expect(folded[0].deletedFoldedIds).toEqual(['m-2', 'm-3']);
+  });
+
+  it('대신 서는 행을 id 로 되찾는다 — 대소문자를 접고, 없으면 -1', () => {
+    const folded = foldDeletedRuns(
+      [
+        liveItem(1),
+        deletedItem(2, true),
+        deletedItem(3, false),
+        deletedItem(4, false),
+      ],
+      NO_EXTRAS,
+    );
+    // `m-3` 은 목록에 자기 행이 없다. 그것을 대신해 서 있는 행은 `m-2` 다.
+    expect(foldedStandInIndex(folded, 'M-3')).toBe(1);
+    // 자기 행이 그대로 있는 것은 이 함수의 질문이 아니다(호출자의 findIndex).
+    expect(foldedStandInIndex(folded, 'm-2')).toBe(-1);
+    expect(foldedStandInIndex(folded, 'm-99')).toBe(-1);
+  });
+
   it('행이 접힌 수를 화면에도 로터에도 말한다', () => {
     render(
       <MessageRow
@@ -616,6 +650,100 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
       expect(screen.getByTestId('tombstone').props.children).toContain(
         '삭제된 메시지 3개',
       );
+    });
+
+    // -----------------------------------------------------------------------
+    // H-1 (design-review U4-5) — 접기와 항법이 서로를 안다
+    //
+    // 첫 판에서 두 기계는 서로를 몰랐다: 삭제 원본을 가리키는 인용은 문이고, 그
+    // 원본이 접히면 목록의 `findIndex` 가 빈손으로 돌아와 화면이 「위로 올려 이전
+    // 대화를 더 불러오세요」라고 말했다 — 이미 로드돼 있고 접혀 있을 뿐인데.
+    // 그 문장은 **사람이 해도 아무 일도 일어나지 않는 지시**다.
+    //
+    // 아래 둘은 그 배선을 잰다. 접기 단위 테스트도, 고지 문장 테스트도 이것을
+    // 못 잡았던 이유는 결함이 **둘 사이**에 있었기 때문이다.
+    // -----------------------------------------------------------------------
+    describe('H-1 — 접힌 묘비를 겨눈 인용 점프', () => {
+      /** 셋 연속 삭제 + 그중 가운데를 인용한 라이브 메시지. */
+      const RUN_WITH_QUOTE = [
+        message({id: 'd-1', seq: 1, state: 'deleted', body: ''}),
+        message({id: 'd-2', seq: 2, state: 'deleted', body: ''}),
+        message({id: 'd-3', seq: 3, state: 'deleted', body: ''}),
+        message({id: 'm-9', seq: 9, body: '그 줄 말입니다', replyToId: 'd-2'}),
+      ];
+
+      /** 인용 블록이 **문**이 되려면 목록이 그 핸들러를 들고 있어야 한다. */
+      const ACTIONS = {
+        myMemberId: SELF,
+        onToggleReaction: async () => {},
+        onEdit: async () => {},
+        onDelete: async () => {},
+        onJumpToQuoted: () => {},
+      };
+
+      function jumpTo(
+        messageId: string,
+        seq: number | null,
+      ): {missed: jest.Mock; landed: jest.Mock} {
+        const missed = jest.fn();
+        const landed = jest.fn();
+        const props = {
+          messages: RUN_WITH_QUOTE,
+          directory: DIRECTORY,
+          status: 'ready' as const,
+          myMemberId: SELF,
+          nowMs: BASE_MS,
+          actions: ACTIONS,
+          onJumpMissed: missed,
+          onJumpLanded: landed,
+        };
+        const view = render(<Timeline {...props} />);
+        act(() => {
+          view.rerender(
+            <Timeline {...props} jumpTarget={{messageId, seq, token: 1}} />,
+          );
+        });
+        return {missed, landed};
+      }
+
+      it('거짓 지시를 하지 않는다 — 그 메시지는 이미 로드돼 있다', () => {
+        const {missed, landed} = jumpTo('d-2', 2);
+        // 이것이 결함이었다: 「위로 올려 이전 대화를 더 불러오세요」.
+        expect(missed).not.toHaveBeenCalled();
+        expect(landed).toHaveBeenCalled();
+      });
+
+      it('대신 서 있는 행에 착지하고, 그 행이 무엇을 포함하는지 말한다', () => {
+        jumpTo('d-2', 2);
+        const marks = tinted();
+        expect(marks).toHaveLength(1);
+        // 「삭제된 메시지 3개」 — 원본은 이 셋 안에 있고, 사람이 누른 인용 블록은
+        // 이미 「삭제된 메시지」라고 말해 두었다. 없는 것을 있다고 하지 않는다.
+        expect(
+          within(marks[0]).getByTestId('tombstone').props.children,
+        ).toContain('삭제된 메시지 3개');
+      });
+
+      it('라이브로 온 인용도 같은 문이다 — 상류에 가드가 없다', () => {
+        // `m-9` 에는 `replyTo` 가 없다(실시간 프레임). 목록이 화면의 행에서 풀어
+        // 주므로 블록은 `deleted` 가 되고 **문이 된다** — 어디에도 「접힌 대상은
+        // 인용이 풀리지 않게 한다」는 가드가 없다. 그래서 이 경로도 같은 결함을
+        // 밟았고, 같은 수리로 함께 낫는다. seq 는 `null` 이다(프레임이 안 나른다).
+        const {missed, landed} = jumpTo('d-2', null);
+        expect(screen.getByTestId('quote-block').props.accessibilityRole).toBe(
+          'button',
+        );
+        expect(screen.getByTestId('quote-tombstone')).toBeTruthy();
+        expect(missed).not.toHaveBeenCalled();
+        expect(landed).toHaveBeenCalled();
+      });
+
+      it('진짜로 없는 것은 여전히 없다고 말한다', () => {
+        // 접기가 항법을 삼키지 않는다. 로드 범위 밖은 그대로 고지가 뜬다.
+        const {missed, landed} = jumpTo('m-없음', null);
+        expect(missed).toHaveBeenCalledWith('unknown');
+        expect(landed).not.toHaveBeenCalled();
+      });
     });
   });
 
