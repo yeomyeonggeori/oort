@@ -194,5 +194,10 @@ describe("두 클라가 같은 얼굴을 갖는다 (M-2)", () => {
 
   it("separates author groups more than rows inside one", () => {
     expect(ROW_SPACE.betweenGroups).toBeGreaterThan(ROW_SPACE.withinGroup);
+    // 그러나 묶음 안이 8px(현행 웹)보다는 넓어야 한다 — H-7이 실측한 값이 그것이고,
+    // 거기서 다섯 메시지가 한 문단으로 뭉쳤다.
+    expect(ROW_SPACE.withinGroup).toBeGreaterThan(8);
+    // 그리고 묶음 안이 묶음 사이를 따라잡으면 묶음이라는 개념이 사라진다.
+    expect(ROW_SPACE.withinGroup).toBeLessThan(ROW_SPACE.betweenGroups);
   });
 });

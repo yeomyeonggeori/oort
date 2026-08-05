@@ -261,7 +261,14 @@ export function Timeline({
       increaseViewportBy={{ top: 600, bottom: 600 }}
       computeItemKey={(_index, item: TimelineItem) => item.key}
       itemContent={(_index, item: TimelineItem) => {
-        if (item.kind === "day") return <DayDivider atMs={item.atMs} />;
+        // 「오늘/어제」는 지금이 언제인지를 알아야 나온다 (H-4). 렌더 시각을 그대로
+        // 쓰는 것은 `Sidebar`가 이미 하는 것과 같다. 1Hz 시계를 붙이지 않는 이유는
+        // 그 시계가 가상 리스트 전체를 초당 한 번 다시 그리기 때문이다 — 하루에 한
+        // 번 바뀌는 낱말에 치를 값이 아니다. 자정을 넘겨 열어 둔 채널은 다음
+        // 렌더(새 메시지·스크롤·포커스)에 스스로 맞는다.
+        if (item.kind === "day") {
+          return <DayDivider atMs={item.atMs} nowMs={Date.now()} />;
+        }
         if (item.kind === "unread") return <UnreadDivider count={item.count} />;
         if (item.kind === "recovery") {
           return <RecoveryDivider seq={item.seq} source={item.source} />;
