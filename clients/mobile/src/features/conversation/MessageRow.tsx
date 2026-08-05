@@ -44,6 +44,7 @@ import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
+import {appNote} from './appVoice';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -1039,7 +1040,7 @@ function MessageRowInner({
           // set this in body size and leading, and at a glance it read as
           // content — it keeps its place and gives up its weight.
           <Text style={styles.tombstone} testID="tombstone">
-            삭제된 메시지
+            {appNote('삭제된 메시지')}
           </Text>
         ) : (
           <>
@@ -1077,7 +1078,7 @@ function MessageRowInner({
             body === '' &&
             !presentation.card &&
             !presentation.artifact ? (
-              <Text style={styles.tombstone}>내용 없는 메시지</Text>
+              <Text style={styles.tombstone}>{appNote('내용 없는 메시지')}</Text>
             ) : null}
           </>
         )}
@@ -1610,7 +1611,10 @@ const styles = StyleSheet.create({
   },
   agentTagText: {fontSize: 10, color: color.agent, fontWeight: '600'},
   time: {fontSize: font.meta, color: color.textFaint},
-  tombstone: {fontSize: font.label, color: color.textFaint, fontStyle: 'italic'},
+  // 앱이 말하는 문장이다 — 구분축은 `appVoice.ts` 의 `※` 가 든다. 인용 안의
+  // 묘비와 **같은 낱말이므로 같은 모양이어야 한다**: 한 화면에 두 모양으로 나오면
+  // 사람은 둘이 다른 것을 뜻한다고 읽는다.
+  tombstone: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
   edited: {fontSize: font.meta, color: color.textFaint},
   tailRow: {
     flexDirection: 'row',
@@ -1643,11 +1647,15 @@ const styles = StyleSheet.create({
   sending: {fontSize: font.meta, color: color.textFaint},
   // 본문 크기의 자리를 차지하되 본문의 무게는 갖지 않는다 — 이것은 메시지에
   // **대한** 서술이지 메시지가 아니다(묘비와 같은 규칙).
+  //
+  // 다만 `※` 는 **안 붙인다**. 이 줄은 *부재* 서술이 아니라 *진행* 서술이고
+  // (「작업 중」은 지금 일어나는 일이다), 이미 말줄임표라는 자기 표시를 달고
+  // 있다. 죽은 `fontStyle:'italic'` 만 걷어내고 AA 로 올렸다 — 무동작인 채로
+  // 남겨 두면 다음 사람이 그 축이 서 있다고 믿는다.
   workingBody: {
     fontSize: font.body,
     lineHeight: 22,
-    color: color.textFaint,
-    fontStyle: 'italic',
+    color: color.textMuted,
   },
   failedRow: {
     flexDirection: 'row',
