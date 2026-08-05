@@ -17,8 +17,6 @@ import {
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {
-  dayDividerSegments,
-  dividerText,
   DIVIDER_LABEL_SIDE,
   DIVIDER_SPACE,
   ROW_SPACE,
