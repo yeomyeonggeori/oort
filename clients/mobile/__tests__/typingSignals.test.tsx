@@ -231,15 +231,15 @@ describe('이름 순서는 시작 순서다', () => {
     // 바꾸고, 화면에서 그것은 「누가 들어왔다」로 읽힌다.
     //
     // 수리 전 코어에서 실측한 값(2026-08-05):
-    //   BEFORE: 김민수, 이하늘님이 작성 중…
-    //   AFTER : 이하늘, 김민수님이 작성 중…
+    //   BEFORE: 김민수님, 이하늘님이 작성 중…
+    //   AFTER : 이하늘님, 김민수님이 작성 중…
     const view = render(<Line nowMs={NOW + 2_000} />);
     act(() => {
       markTyping(frame(HUMAN, NOW)); // 김민수가 먼저 시작
       markTyping(frame(HUMAN2, NOW + 1_500)); // 이하늘이 1.5초 뒤
     });
     const before = typingLineText();
-    expect(before).toBe('김민수, 이하늘님이 작성 중…');
+    expect(before).toBe('김민수님, 이하늘님이 작성 중…');
 
     // 먼저 시작한 사람이 재발행한다. 여기서 뒤집히면 결함이 돌아온 것이다.
     act(() => markTyping(frame(HUMAN, NOW + 3_000)));
@@ -263,11 +263,18 @@ describe('이름 순서는 시작 순서다', () => {
 describe('뭉치는 규칙은 코어의 것', () => {
   it('임계를 넘으면 이름 대신 수를 말한다', () => {
     render(<Line nowMs={NOW} />);
+    // **이 단정은 tie 케이스다** (#1065). `frame()`의 기본 시각이 `NOW`라 두 사람의
+    // 시작 시각이 같고, 그러면 순서를 정하는 것은 시작 시각이 아니라 **member id
+    // 오름차순**이다(코어 `liveTypists`의 tie-break). 1차는 그 의존을 어디에도 적지
+    // 않은 채 픽스처 id가 우연히 삽입 순서와 같아서 초록이었다 — 규칙이 바뀌어도
+    // 이 테스트는 몰랐을 것이다. 아래 두 줄이 그 우연을 걷어낸다: 도착 순서를 뒤집어
+    // 넣고, 기대하는 것이 id 순서임을 명시한다.
+    expect(HUMAN < HUMAN2).toBe(true);
     act(() => {
-      markTyping(frame(HUMAN));
-      markTyping(frame(HUMAN2));
+      markTyping(frame(HUMAN2)); // 이하늘이 **먼저** 도착
+      markTyping(frame(HUMAN)); // 김민수가 나중에 도착
     });
-    expect(typingLineText()).toBe('김민수, 이하늘님이 작성 중…');
+    expect(typingLineText()).toBe('김민수님, 이하늘님이 작성 중…');
 
     act(() => markTyping(frame(HUMAN3)));
     expect(typingLineText()).toBe('3명이 작성 중…');
