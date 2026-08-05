@@ -14,6 +14,7 @@ import {
   pruneTypingSignals,
   renewMargin,
   typingGrantFrom,
+  TYPING_PREDICATE,
   typingLabel,
   typingLead,
   typingSegments,
@@ -577,13 +578,15 @@ describe("typingSentence", () => {
   it("hands the names out as their own segments (M-1)", () => {
     expect(typingSegments(["이도현"])).toEqual([
       { kind: "name", text: "이도현" },
-      { kind: "plain", text: "님이 작성 중…" },
+      { kind: "plain", text: "님이" },
+      { kind: "plain", text: TYPING_PREDICATE },
     ]);
     expect(typingSegments(["이도현", "김민서"])).toEqual([
       { kind: "name", text: "이도현" },
       { kind: "plain", text: "님, " },
       { kind: "name", text: "김민서" },
-      { kind: "plain", text: "님이 작성 중…" },
+      { kind: "plain", text: "님이" },
+      { kind: "plain", text: TYPING_PREDICATE },
     ]);
   });
 
@@ -615,7 +618,8 @@ describe("typingSentence", () => {
   it("hands the aggregate count out as its own segment (N-2)", () => {
     expect(typingSegments(["a", "b", "c"])).toEqual([
       { kind: "count", text: "3" },
-      { kind: "plain", text: "명이 작성 중…" },
+      { kind: "plain", text: "명이" },
+      { kind: "plain", text: TYPING_PREDICATE },
     ]);
     // 숫자 조각은 숫자만 든다 — 낱말이 섞이면 자릿폭 고정이 낱말까지 잡아 늘린다.
     const [count] = typingSegments(["a", "b", "c", "d"]);
@@ -635,9 +639,6 @@ describe("typingSentence", () => {
    * 하필 「작성 중」이고 남는 것은 이름 나열 + `…` — 집계 문구도 아니고 아무 말도 아닌
    * 문자열이다. 화면은 [`typingLead`]만 줄이고 꼬리는 줄이지 않는데, 그 방어는 **꼬리에
    * 언제나 동사가 있고 앞부분에는 없다**는 이 계약 위에 서 있다.
-   *
-   * 마지막 단정이 M-3의 나머지 절반이다: `…`가 꼬리에만 있으므로, 잘림이 만드는 `…`는
-   * 언제나 **이름 안쪽**에 생긴다 — 그래야 잘린 줄과 온전한 줄이 구분된다.
    */
   it("always keeps the verb in the tail segment (M-3)", () => {
     for (const names of [
@@ -659,6 +660,38 @@ describe("typingSentence", () => {
     }
     expect(typingTail([])).toBeNull();
     expect(typingLead([])).toEqual([]);
+  });
+
+  /**
+   * W-3. 꼬리는 **이름 없이 성립하는 서술어**여야 한다.
+   *
+   * 1차의 꼬리는 「님이 작성 중…」이었다. 동사는 지켰지만 조사를 함께 들고 있어서,
+   * 앞부분이 이름 한가운데서 잘리면 화면에 `…님이 작성 중…`이 남았다 — 님은 이름에
+   * 붙는 의존 형태소이고, 붙을 이름이 사라지면 그 줄은 한국어 문장이 아니다
+   * (리뷰 U4-4 W-3, 320폭 실측).
+   *
+   * 그래서 판정은 「꼬리에 동사가 있나」가 아니라 **「꼬리가 혼자 설 수 있나」**다.
+   * 조사는 자기가 붙는 낱말과 같은 조각 편에 있어야 하고, 그러면 잘림은 언제나
+   * 「이름 + 그 이름의 조사」를 통째로 데려간다.
+   */
+  it("keeps the tail a predicate that stands without a name (W-3)", () => {
+    for (const names of [
+      ["이도현"],
+      ["김민서 프로덕트디자인", "이도현 플랫폼엔지니어링"],
+      ["a", "b", "c"],
+      ["a", "b", "c", "d", "e"],
+    ]) {
+      for (const threshold of [2, 3, 4]) {
+        const segments = typingSegments(names, threshold);
+        // 두 갈래(이름 나열 · 집계)가 **같은 꼬리**를 쓴다.
+        expect(typingTail(segments)?.text).toBe(TYPING_PREDICATE);
+        // 조사는 꼬리에 없다. 있으면 그것이 곧 고아가 될 형태소다.
+        expect(TYPING_PREDICATE).not.toMatch(/^[\s]*(님|명)?[이가은는]/);
+        // 그리고 조사는 앞부분의 **마지막** 조각에 있다 — 자기가 붙는 낱말 바로 뒤.
+        const lead = typingLead(segments);
+        expect(lead[lead.length - 1]?.text).toMatch(/(님|명)이$/);
+      }
+    }
   });
 
   /** 조각을 이어 붙이면 문장과 **정확히** 같아야 한다. 두 경로가 갈리면 화면과

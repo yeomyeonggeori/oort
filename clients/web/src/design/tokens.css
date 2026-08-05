@@ -164,6 +164,24 @@
    * pixels is a state marker; the 1px hairline reads as a border artifact. */
   --spacing-marker: 2px;
 
+  /* 타임라인 행이 자기 몫으로 무는 세로 여백 (U4-4R W-1). 이 값은 「행 사이의
+   * 거리」가 아니라 그 거리의 **절반**이다 — 웹에서 두 행 사이에 남는 거리는 위 행의
+   * padding-bottom + 아래 행의 padding-top이므로, 코어가 정한 거리를 화면에 만들려면
+   * 그 절반을 적어야 한다 (`features/timeline/spacing.ts`).
+   *
+   * **왜 리듬 스케일 밖의 값이 이름을 얻는가.** 코어의 `ROW_SPACE`는 묶음 안 12 ·
+   * 묶음 사이 18이고, 위 스케일의 단계는 1px 헤어라인을 빼면 전부 4의 배수다.
+   * 두 단계의 합으로 18을 만들 수 있는 조합은 없다(18 ≡ 2 mod 4). 그래서 이 값을
+   * 이름 없이 쓰려면 `py-1.5` 같은 격자 밖 클래스를 적게 되는데, 그것은 **아예
+   * 컴파일되지 않는다**(바로 위 주석이 그 예로 이름을 대어 적어 둔 클래스다).
+   * U4-4가 실제로 그렇게 적었고, 묶음 안 간격이 화면에서 0px이 됐다.
+   *
+   * 그래서 --spacing-pane / --spacing-action과 같은 규율을 따른다: 격자 밖 측정값은
+   * **숫자가 아니라 이름**으로 들어온다. `py-row`는 있고 `py-1.5`는 여전히 없다.
+   * 값을 바꾸려면 코어의 `ROW_SPACE`를 바꿔야 하고, 그러면 `spacing.test.ts`가
+   * 둘이 어긋난 것을 잡는다. */
+  --spacing-row: 6px;
+
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
