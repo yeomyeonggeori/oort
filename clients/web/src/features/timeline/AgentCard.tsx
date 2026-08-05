@@ -14,6 +14,7 @@ import {
 } from "@momo/core/features/timeline/agentCardModel";
 import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
+import { FoldedValue } from "./FoldToggle";
 import {
   isSurfaceProvided,
   serverSurface,
@@ -109,7 +110,12 @@ function PayloadDisclosure({ detail }: { detail: PayloadDetail }) {
       <dl className="pb-2">
         {detail.rows.map((row) => (
           <LabeledRow key={row.label} label={row.label}>
-            {row.value}
+            {/* 값에는 예산이 붙는다 (U4-e · 진단 H-8 「에이전트 카드 값 무제한」).
+                행의 **개수**가 아닌 이유는 코어의 `payloadDetail`이 이름 붙은
+                필드만 만들어 개수가 이미 유한하기 때문이다 — 무한한 축은 값의
+                길이이고, 여러 줄짜리 결정 사유 하나가 카드를 본문보다 크게
+                만든다 (fold.ts `CARD_FOLD`). */}
+            <FoldedValue text={row.value} testId="agent-payload-fold" />
           </LabeledRow>
         ))}
       </dl>
@@ -332,9 +338,15 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
             <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
               자세히
             </summary>
-            <p className="break-keep px-3 pb-2 text-meta text-ink-muted">
-              {card.failure.detail}
-            </p>
+            {/* 실패 상세도 같은 예산을 쓴다 (진단 H-8: 「실패 상세도 별도
+                무제한」). 프로바이더가 스택 트레이스를 통째로 보내는 경우가
+                이 자리이고, 그때 이 접힘 하나가 카드 전체보다 길어진다. */}
+            <div className="break-keep px-3 pb-2 text-meta text-ink-muted">
+              <FoldedValue
+                text={card.failure.detail}
+                testId="turn-failure-fold"
+              />
+            </div>
           </details>
         )
       }

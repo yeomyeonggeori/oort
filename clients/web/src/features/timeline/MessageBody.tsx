@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import {
@@ -7,6 +7,8 @@ import {
   type Block,
   type Inline,
 } from "@momo/core/features/timeline/markdown";
+import { foldBlocks, foldText, foldWasOpened, rememberFoldOpen } from "./fold";
+import { FoldToggle } from "./FoldToggle";
 
 // =============================================================================
 // The body of one message (goal B8 H6).
@@ -202,21 +204,46 @@ function BlockNode({ block }: { block: Block }) {
  * `muted` is the pending echo's one difference: the same anatomy in
  * `text-ink-muted`, so a row does not change shape when the server echo
  * replaces it (PendingRow's whole reason for borrowing this grid).
+ *
+ * 긴 답변은 접힌 채로 온다 (U4-e · 진단 H-8). 예산과 그 숫자의 근거는 `fold.ts`에
+ * 있고, 여기서 하는 일은 그 판정을 그리는 것뿐이다. **예산에 걸리지 않는 본문은
+ * 이 파일이 원래 그리던 것과 정확히 같은 마크업으로 나간다** — 채널의 대부분인
+ * 짧은 메시지는 이 goal 이후에도 한 픽셀도 달라지지 않아야 한다.
  */
 export function MessageBody({
   body,
   muted = false,
+  foldKey,
 }: {
   body: string;
   muted?: boolean;
+  /**
+   * 펼쳐 둔 상태를 기억하는 키(메시지 id). 없으면 이 본문은 언제나 접힌 채로
+   * 시작한다 — 낙관적 에코처럼 곧 다른 행으로 교체될 행이 그렇다.
+   */
+  foldKey?: string;
 }) {
   const blocks = useMemo(
     () => (isPlainText(body) ? null : parseMarkdown(body)),
     [body]
   );
+  const [expanded, setExpanded] = useState(() => foldWasOpened(foldKey));
+  const toggle = () =>
+    setExpanded((open) => {
+      rememberFoldOpen(foldKey, !open);
+      return !open;
+    });
+  // 파싱과 같은 이유로 메모한다: 가상 리스트는 스크롤마다 이 행을 다시 그리고,
+  // 500줄 펜스를 줄 단위로 세는 일을 그때마다 되풀이할 이유가 없다.
+  const fold = useMemo(() => {
+    if (blocks === null || blocks.length === 0) {
+      return { kind: "plain" as const, ...foldText(body) };
+    }
+    return { kind: "blocks" as const, ...foldBlocks(blocks) };
+  }, [blocks, body]);
 
-  if (blocks === null || blocks.length === 0) {
-    return (
+  if (fold.kind === "plain") {
+    const paragraph = (
       <p
         className={cn(
           "whitespace-pre-wrap",
@@ -224,19 +251,38 @@ export function MessageBody({
           muted && "text-ink-muted"
         )}
       >
-        {body}
+        {expanded ? body : fold.text}
       </p>
+    );
+    if (fold.hiddenLines === 0) return paragraph;
+    return (
+      <div className={cn("flex flex-col gap-1", muted && "text-ink-muted")}>
+        {paragraph}
+        <FoldToggle
+          hiddenLines={fold.hiddenLines}
+          expanded={expanded}
+          onToggle={toggle}
+        />
+      </div>
     );
   }
 
+  const shown = expanded && blocks !== null ? blocks : fold.blocks;
   return (
     <div
       className={cn("flex flex-col gap-2", muted && "text-ink-muted")}
       data-testid="message-markdown"
     >
-      {blocks.map((block, index) => (
+      {shown.map((block, index) => (
         <BlockNode key={index} block={block} />
       ))}
+      {fold.hiddenLines > 0 && (
+        <FoldToggle
+          hiddenLines={fold.hiddenLines}
+          expanded={expanded}
+          onToggle={toggle}
+        />
+      )}
     </div>
   );
 }
