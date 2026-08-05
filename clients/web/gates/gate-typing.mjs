@@ -276,11 +276,54 @@ async function installRealtimeSocket(page) {
   });
 }
 
+/**
+ * 밀집 타임라인 200행 (루브릭 phase 5 · design-review PR 1059 N-4).
+ *
+ * **`?stress=200`을 쓰지 않는다 — 그 모드는 이 캡처를 만들 수 없다.** `ChatShell`이
+ * 스트레스 모드에서 `useTypingReceive`에 `null` 레일과 `null` 채널을 넘기므로
+ * (`ChatShell.tsx`) 「작성 중」 구독이 아예 없고, 따라서 그 줄이 렌더될 수 없다.
+ * 목으로 200행을 돌려주는 편이 증거로도 낫다: 실제 페이지 경로·실제 가상 리스트·
+ * 실제 반응 맵을 그대로 통과한다.
+ *
+ * 내용은 실제 팀 대화처럼 섞는다(사람·에이전트·길고 짧은 줄) — 「테스트 메시지 1」로
+ * 채운 200행은 밀도를 재는 데 쓸모가 없다(SKILL §7).
+ */
+const DENSE_LINES = [
+  "롤백 스크립트 최신인지 확인 부탁합니다.",
+  "어제 배포분에서 마이그레이션 044까지 적용됐어요.",
+  "@kim-intern 이 채널 로그에서 5xx만 뽑아 줄 수 있어?",
+  "네, 지금 봅니다. 배포 로그부터 읽었습니다.",
+  "그 구간은 relay 지연이지 서버 오류가 아니었습니다. outbox 적체 3분.",
+  "확인했습니다. 그러면 이번 배포는 그대로 가도 되겠네요.",
+  "센트리에 같은 스택 두 건 더 있는데 원인은 같아 보입니다.",
+  "좋아요. 릴리스 노트에 그 문장 한 줄만 추가해 둘게요.",
+];
+
+function densePage(memberIds) {
+  const rows = [];
+  for (let i = 0; i < 200; i += 1) {
+    const author = memberIds[i % memberIds.length];
+    rows.push({
+      id: `0199dddd-0000-7000-8000-${String(i).padStart(12, "0")}`,
+      channelId,
+      seq: i + 1,
+      hlcTs: 1_785_238_400_000 + i * 60_000,
+      hlcCount: 0,
+      authorMemberId: author,
+      type: "text",
+      body: DENSE_LINES[i % DENSE_LINES.length],
+      state: "sent",
+      createdAtMs: 1_785_238_400_000 + i * 60_000,
+    });
+  }
+  return rows;
+}
+
 function makeTraffic() {
   return { grants: 0, publishes: [], order: [], bodies: [] };
 }
 
-async function installRoutes(context, traffic) {
+async function installRoutes(context, traffic, options = {}) {
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -344,7 +387,16 @@ async function installRoutes(context, traffic) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
     if (path.endsWith("/replies")) return json(route, { messages: [] });
-    if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.includes("/messages")) {
+      if (options.dense !== true) return json(route, { messages: [] });
+      // 밀집 캡처: 첫 페이지만 채우고 이후 페이지 요청은 비운다(백필 루프 종료).
+      if (new URL(request.url()).searchParams.has("after")) {
+        return json(route, { messages: [] });
+      }
+      return json(route, {
+        messages: densePage([memberId, dohyunId, minseoId, agentId]),
+      });
+    }
     return json(route, {});
   });
 }
@@ -882,7 +934,8 @@ async function exercise(browser) {
 }
 
 /** 리뷰용 스크린샷 (SKILL §11). 판정하지 않는다. */
-async function captureShots(browser) {
+async function captureShots(browser, options = {}) {
+  const dense = options.dense === true;
   const outDir = resolve(webRoot, "artifacts/typing");
   mkdirSync(outDir, { recursive: true });
   for (const scheme of ["light", "dark"]) {
@@ -894,7 +947,7 @@ async function captureShots(browser) {
     });
     const page = await context.newPage();
     await installRealtimeSocket(page);
-    await installRoutes(context, traffic);
+    await installRoutes(context, traffic, { dense });
     await login(page);
     await publishAgentTurn(page, "queued", "queued");
     await publishAgentTurn(page, "streaming", "running");
@@ -902,10 +955,24 @@ async function captureShots(browser) {
     await publishTyping(page, { memberId: minseoId, ttlMs: 30_000 });
     await page.getByTestId("composer-typing").waitFor();
     await page.getByTestId("composer-input").fill("저도 곧 올립니다.");
-    await page.screenshot({ path: resolve(outDir, `typing-${scheme}.png`) });
+    if (dense) {
+      // 200행이 실제로 화면에 있는지 확인한 뒤 찍는다 — 밀집을 주장하는 캡처가
+      // 빈 채널이면 증거가 아니다.
+      const count =
+        (await page.getByTestId("message-count").textContent()) ?? "";
+      if (!count.includes("200")) {
+        throw new Error(`밀집 캡처가 200행을 담지 못했다: "${count}"`);
+      }
+    }
+    const name = dense ? `typing-dense-${scheme}` : `typing-${scheme}`;
+    await page.screenshot({ path: resolve(outDir, `${name}.png`) });
     await context.close();
   }
-  console.log("[shots] artifacts/typing/typing-{light,dark}.png");
+  console.log(
+    dense
+      ? "[shots] artifacts/typing/typing-dense-{light,dark}.png (200행)"
+      : "[shots] artifacts/typing/typing-{light,dark}.png"
+  );
 }
 
 async function main() {
@@ -922,7 +989,11 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await exercise(browser);
-      if (process.env.TYPING_GATE_SHOTS === "1") await captureShots(browser);
+      if (process.env.TYPING_GATE_SHOTS === "1") {
+        await captureShots(browser);
+        // N-4: 루브릭 phase 5. 3행 메타 스택이 밀집 타임라인 위에서 어떻게 읽히는가.
+        await captureShots(browser, { dense: true });
+      }
     } finally {
       await browser.close();
     }

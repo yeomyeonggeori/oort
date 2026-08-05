@@ -368,6 +368,56 @@ describe("liveTypists", () => {
     expect(order[0]).toBe(`${DOHYUN}>${MINSEO}`);
   });
 
+  /**
+   * **정정된 서술 (B3M 폰 실측 → 코어 확인): 위상차는 필요 없다.**
+   *
+   * 첫 서술은 「1.5초 위상차를 두고 치면」이었는데, 정렬 키가 최근 발행 시각이면
+   * **발행하는 순간 그 사람이 맨 뒤로** 가므로 조건이 아예 없다. 세 타이밍 전부에서
+   * 1차 규칙은 순서를 뒤집었다 — 이 테스트는 셋 다 안정임을 요구한다.
+   */
+  it("holds the order for every timing relationship, not just an offset one", () => {
+    const timings: Array<[string, Array<[string, number]>]> = [
+      ["1.5s 위상차", [["A", 0], ["B", 1_500], ["A", 3_000], ["B", 4_500], ["A", 6_000]]],
+      ["100ms 차", [["A", 0], ["B", 100], ["A", 3_000], ["B", 3_100], ["A", 6_000]]],
+      ["완전 동시", [["A", 0], ["B", 0], ["A", 3_000], ["B", 3_000], ["A", 6_000]]],
+    ];
+    const idOf = (label: string) => (label === "A" ? DOHYUN : MINSEO);
+    for (const [label, events] of timings) {
+      let list: TypingSignal[] = [];
+      const seen: string[] = [];
+      for (const [who, t] of events) {
+        list = republish(list, idOf(who), NOW + t);
+        const live = liveTypists(list, {
+          channelId: CH,
+          nowMs: NOW + t,
+          isEligible: humansOnly,
+        });
+        if (live.length === 2) seen.push(live.join(">"));
+      }
+      expect(seen.length, label).toBeGreaterThan(1);
+      expect(new Set(seen).size, label).toBe(1);
+    }
+  });
+
+  /**
+   * 「먼저 시작한 사람이 계속 치면 계속 뒤로 밀린다」가 결함의 정확한 서술이었다.
+   * 그 반대를 단정한다: 먼저 시작한 사람은 몇 번을 더 치든 앞에 남는다.
+   */
+  it("keeps the earlier starter first no matter how much they keep typing", () => {
+    let list = republish([], DOHYUN, NOW);
+    list = republish(list, MINSEO, NOW + 500);
+    for (const t of [3_000, 6_000, 9_000, 12_000]) {
+      list = republish(list, DOHYUN, NOW + t);
+      expect(
+        liveTypists(list, {
+          channelId: CH,
+          nowMs: NOW + t,
+          isEligible: humansOnly,
+        })[0]
+      ).toBe(DOHYUN);
+    }
+  });
+
   it("keeps the first start time and moves only the expiry", () => {
     let list = republish([], DOHYUN, NOW);
     list = republish(list, DOHYUN, NOW + 3_000);
@@ -399,9 +449,14 @@ describe("liveTypists", () => {
     ).toEqual([MINSEO, DOHYUN]);
   });
 
+  /**
+   * **수용 기준 밖의 추가분이고, 모바일(M2)이 알아야 하는 지점이다.**
+   *
+   * V8의 안정 정렬은 tie에서 삽입 순서를 지키는데, 삽입 순서는 프레임 도착 순서이고
+   * 웹과 폰이 다를 수 있다. 그래서 tie를 member id로 가른다 — 화면 문장 단정을 쓰는
+   * 쪽은 「같은 시작 시각이면 id 순」을 기대해야 하고 삽입 순서를 기대하면 안 된다.
+   */
   it("breaks a start-time tie deterministically, not by arrival order", () => {
-    // 같은 tick에 두 신호가 오면 배열 순서는 우연이다. 그 우연이 화면에 나오면
-    // 같은 상태가 리로드마다 다르게 읽힌다.
     const a = [
       signal({ memberId: MINSEO, startedAtMs: NOW }),
       signal({ memberId: DOHYUN, startedAtMs: NOW }),
