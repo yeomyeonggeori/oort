@@ -197,7 +197,7 @@ describe('H-9 — 코드 블록은 자기 복사를 갖는다', () => {
     jest.useFakeTimers();
     render(<MessageBody body={ANSWER} />);
     const button = screen.getByTestId('code-copy');
-    expect(button.props.accessibilityLabel).toBe('코드 복사');
+    expect(button.props.accessibilityLabel).toBe('코드 복사하기');
 
     fireEvent.press(button);
     await act(async () => {
@@ -213,7 +213,7 @@ describe('H-9 — 코드 블록은 자기 복사를 갖는다', () => {
       jest.advanceTimersByTime(1_600);
     });
     expect(screen.getByTestId('code-copy').props.accessibilityLabel).toBe(
-      '코드 복사',
+      '코드 복사하기',
     );
     jest.useRealTimers();
   });

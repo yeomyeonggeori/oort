@@ -40,6 +40,7 @@ import {
   parseTurnPlaceholderKey,
   turnPlaceholderKey,
 } from '@momo/core/features/agents/workingSignal';
+import {jumpMissedNotice} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
 import {TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -540,18 +541,11 @@ export default function ConversationScreen({
   // 자리 위에 「못 찾았습니다」가 계속 붙어 있게 된다 — 다음 점프나 채널 이동까지.
   const clearJumpNotice = useCallback(() => setJumpMissed(null), []);
 
+  // 문장은 `jumpNotice.ts` 가 든다 — **측정 하네스가 같은 상수를 읽어 사진을
+  // 찍기 때문**이다(H-5 는 「코드 확인 / 시각 SKIPPED」로 남아 있었다). 하네스가
+  // 베껴 적으면 배송되는 문장이 바뀌어도 사진은 옛말을 계속 한다.
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
-    setJumpMissed(
-      reason === 'older'
-        ? {
-            headline: '인용한 원본은 이 대화의 더 위쪽에 있습니다',
-            detail: '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.',
-          }
-        : {
-            headline: '인용한 원본을 이 화면에서 찾지 못했습니다',
-            detail: '위로 올려 이전 대화를 더 불러오세요.',
-          },
-    );
+    setJumpMissed(jumpMissedNotice(reason));
   }, []);
 
   // Bumped the moment a send is issued — before the round trip, because the
