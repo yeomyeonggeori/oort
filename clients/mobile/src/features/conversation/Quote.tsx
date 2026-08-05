@@ -255,25 +255,49 @@ export function QuoteDraftBar({
 }
 
 const styles = StyleSheet.create({
-  // 블록은 본문과 같은 들여쓰기 안에 있고, 자기 배경을 갖는다. 왼쪽 규칙이
-  // 「이건 내 말이 아니다」를 그리고, 배경이 그 범위를 닫는다.
+  // ===========================================================================
+  // 배경이 없다 (design-review H-2). 그리고 그것이 이 수리의 핵심이다.
+  //
+  // 첫 판은 「왼쪽 규칙이 '이건 내 말이 아니다'를 그리고, **배경이 그 범위를
+  // 닫는다**」고 적었다. 그 배경을 실제로 재 보면 `surface` on `bg` =
+  // **1.084:1** 이다 — 범위를 닫기는커녕 눈에 보이지 않는다. 그래서 블록을
+  // 실제로 그리는 것은 선 하나뿐이었고, 그 선이 accent 였으므로 인용은 「참조」가
+  // 아니라 **이 표면에서 가장 색이 센 요소**가 됐다.
+  //
+  // 웹이 같은 자리에서 raised 배경을 넣었다 되돌리며 남긴 문장이 그것이다:
+  // *"폭을 꽉 채운 고도 있는 띠는 인용의 무게를 **올린다**."* 그래서 색을 바꾸는
+  // 대신 **띠를 걷었다**. 웹 정본도 배경이 없다(`QuoteBlock.tsx` RAIL =
+  // `border-l-2 border-line-strong pl-2`, `bg-*` 없음).
+  //
+  // 덤으로 두 가지가 함께 풀린다:
+  //   * 그 배경값(`surface`)은 **행의 눌림 색**이다(`MessageRow.rowPressed`).
+  //     가만히 있는 인용이 「지금 눌린 행」과 같은 채움을 쓰고 있었다.
+  //   * 눌림 피드백은 남는다 — 배경이 없으니 `surfacePressed` 가 이제 **누를
+  //     때만** 나타나고, 그래야 그 색이 자기 뜻을 되찾는다.
+  // ===========================================================================
   block: {
-    marginTop: 2,
+    marginTop: space.xs,
     marginBottom: space.xs,
     borderRadius: radius.sm,
-    backgroundColor: color.surface,
     overflow: 'hidden',
   },
   blockPressed: {backgroundColor: color.surfacePressed},
   blockInner: {flexDirection: 'row'},
   // 세로 규칙. 스레드 표식의 「↳」와 겹치지 않아야 하므로 글리프가 아니라
   // 도형이다 — 화살표 두 개가 한 행에 서면 어느 쪽이 어느 장치인지 못 읽는다.
-  rule: {width: 2, backgroundColor: color.accent},
+  //
+  // **중성이다** (H-2). accent 는 이 화면에서 이미 두 가지 뜻이다 — 보내기 버튼
+  // 채움과 내 반응 칩 테두리. 인용에 같은 색을 주면 세 번째 뜻이 된다.
+  // `textFaint`(#6b7280)는 웹의 `--line-strong`(#6f6e73)과 사실상 같은 자리이고,
+  // 타임라인 배경 대비 **3.909:1** 로 웹이 컨트롤 테두리에 요구하는 ≥3:1 을
+  // 넘는다 — 중성이면서 실제로 보이는 값이다. (`border`(#2a2f38)는 1.406:1 이라
+  // 「중성」이라는 말만 지키고 선을 지우게 된다.)
+  rule: {width: 2, backgroundColor: color.textFaint},
   blockText: {
     flex: 1,
     paddingVertical: space.xs,
     paddingHorizontal: space.sm,
-    gap: 1,
+    gap: space.xs,
   },
   blockHead: {flexDirection: 'row', alignItems: 'baseline', gap: space.xs},
   quotedAuthor: {
@@ -306,8 +330,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.border,
   },
-  draftRule: {alignSelf: 'stretch', width: 2, backgroundColor: color.accent},
-  draftText: {flex: 1, gap: 1},
+  // 본류 규칙과 같은 중성 (H-2).
+  draftRule: {alignSelf: 'stretch', width: 2, backgroundColor: color.textFaint},
+  draftText: {flex: 1, gap: space.xs},
   draftLabel: {fontSize: font.meta, color: color.textFaint, fontWeight: '600'},
   draftBody: {fontSize: font.label, color: color.textMuted},
   draftCancel: {

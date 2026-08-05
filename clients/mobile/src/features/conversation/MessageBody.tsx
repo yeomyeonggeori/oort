@@ -15,7 +15,7 @@ import {
   View,
 } from 'react-native';
 import {color, font, radius, space} from '../../design/tokens';
-import {copyText} from './copy';
+import {COPY_RECEIPT_MS, copyText} from './copy';
 
 // =============================================================================
 // 메시지 본문 — 웹 `MessageBody.tsx` 의 RN 판 (goal U4-a / #1048, BL-1·BL-3).
@@ -208,7 +208,7 @@ function CodeCopyButton({text}: {text: string}): React.JSX.Element {
       // 한 순간의 영수증이다. 안 되돌리면 그 상자는 영원히 「복사됨」이라고
       // 말하는 상자가 된다.
       if (revertRef.current !== null) clearTimeout(revertRef.current);
-      revertRef.current = setTimeout(() => setDone(false), 1_500);
+      revertRef.current = setTimeout(() => setDone(false), COPY_RECEIPT_MS);
     });
   }, [text]);
   return (
@@ -259,7 +259,7 @@ function BlockNode({
           style={styles.codeScroll}
           contentContainerStyle={styles.codeContent}
           showsHorizontalScrollIndicator>
-          <Text style={styles.code}>{block.text}</Text>
+          <Text style={[styles.code, muted && styles.muted]}>{block.text}</Text>
         </ScrollView>
       </View>
     );
@@ -365,11 +365,15 @@ const styles = StyleSheet.create({
     backgroundColor: color.surfacePressed,
   },
   link: {color: color.accentText, textDecorationLine: 'underline'},
+  // N-1: `#0b0d11` 은 토큰이 아니었고 **앱 배경보다 더 어두웠다**. 웹은 반대
+  // 방향으로 한 단 **올린다**(`bg-surface-hover`) — 코드 상자는 파묻히는 것이
+  // 아니라 떠 있는 것이다. 폰의 그 한 단이 `surface` 이고, 이 파일의 카드들이
+  // 이미 쓰는 값이다.
   codeWrap: {
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: color.border,
-    backgroundColor: '#0b0d11',
+    backgroundColor: color.surface,
     overflow: 'hidden',
   },
   codeHead: {
@@ -388,8 +392,25 @@ const styles = StyleSheet.create({
   pressed: {opacity: 0.6},
   codeScroll: {},
   codeContent: {padding: space.sm},
-  code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.textMuted, lineHeight: 17},
-  list: {gap: 2},
+  // ===========================================================================
+  // 색을 박지 않는다 (design-review H-4).
+  //
+  // 첫 판은 `color: textMuted` 를 박았는데, 그 값이 **`muted` 와 같은 값**이었다
+  // — 즉 확정된 코드 블록과 「보내는 중」 본문이 같은 잉크였다. 그리고 낙관적
+  // 메아리가 흐려질 때 그 안의 코드만 안 흐려졌다: 자기 상태에 대해 두 가지를
+  // 말하는 행이다.
+  //
+  // 같은 파일이 인라인 코드에 대해 이미 그 규칙을 적어 뒀는데(「색을 따로 박지
+  // 않는다 — 상속되어야 …」) 블록이 그것을 깨고 있었다. 웹도 `CODE_CLASS` 에
+  // 색이 없고 같은 문장을 적어 뒀다.
+  //
+  // RN 은 `View` 를 통해 색을 상속시키지 않으므로 「안 박는다」가 곧 「부모를
+  // 따라간다」가 아니다 — 그래서 `muted` 를 명시적으로 내려보낸다(이 파일이
+  // 문단·목록에서 이미 하는 것과 같은 배선). 기본은 본문과 **같은 잉크**다:
+  // 사람이 꺼내러 온 것(명령어·해시·경로)이 산문보다 한 급 아래일 이유가 없다.
+  // ===========================================================================
+  code: {fontFamily: 'Menlo', fontSize: font.meta, color: color.text, lineHeight: 17},
+  list: {gap: space.xs},
   listItem: {flexDirection: 'row', gap: space.xs},
   // 마커 칸. 숫자 두 자리까지 흔들리지 않을 만큼만 넓다.
   listMarker: {

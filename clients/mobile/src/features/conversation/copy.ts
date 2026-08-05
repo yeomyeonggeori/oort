@@ -28,6 +28,17 @@ import * as Clipboard from 'expo-clipboard';
  * 부른 쪽이 자기 자리에서 말해야 한다(토스트가 아니라 제자리 — 이 클라이언트가
  * 반응·삭제 실패에서 이미 고른 규율).
  */
+/**
+ * 「복사됨」이 화면에 머무는 시간, ms.
+ *
+ * **두 복사가 이 값을 함께 쓴다** (design-review M-3). 코드 블록 버튼과 액션
+ * 시트의 「복사하기」는 30pt 옆의 형제 컨트롤인데, 첫 판은 한쪽만 영수증을 냈다 —
+ * 같은 동사가 두 가지 계약을 갖는 것으로 읽힌다. 통일하는 방향은 **말하는 쪽**
+ * 이다: iOS 의 조용한 복사가 관례이긴 하나, 그 관례는 옆에서 다른 컨트롤이
+ * 말하고 있지 않을 때의 것이다.
+ */
+export const COPY_RECEIPT_MS = 1_500;
+
 export async function copyText(text: string): Promise<boolean> {
   try {
     await Clipboard.setStringAsync(text);

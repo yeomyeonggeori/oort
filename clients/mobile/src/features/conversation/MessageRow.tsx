@@ -37,10 +37,10 @@ import {
   reactionFailureMessage,
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
-import {copyText} from './copy';
+import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
@@ -662,6 +662,21 @@ function MessageRowInner({
   // A Korean sentence, never the wire string, and never a toast — the reason
   // belongs beside the message it is about (B8 + B11).
   const [rowError, setRowError] = useState<string | null>(null);
+  // 「복사됨」 영수증 (design-review M-3). 실패 슬롯(`rowError`)과 나누는 이유는
+  // 색과 뜻이 다르기 때문이다 — 이건 성공이고, 빨간 상자를 쓰면 안 된다.
+  const [rowReceipt, setRowReceipt] = useState<string | null>(null);
+  const receiptRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (receiptRef.current !== null) clearTimeout(receiptRef.current);
+    },
+    [],
+  );
+  const showReceipt = useCallback((text: string) => {
+    setRowReceipt(text);
+    if (receiptRef.current !== null) clearTimeout(receiptRef.current);
+    receiptRef.current = setTimeout(() => setRowReceipt(null), COPY_RECEIPT_MS);
+  }, []);
 
   // The five answers come from the core, which is also where the server's rules
   // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
@@ -1039,6 +1054,14 @@ function MessageRowInner({
 
         <Chips chips={chips} onToggle={actions ? onChipPress : undefined} />
 
+        {rowReceipt ? (
+          // 성공의 자리. 실패와 같은 상자를 쓰지 않는다 — 테두리도 danger 색도
+          // 없고, 스스로 물러난다.
+          <Text style={styles.rowReceipt} testID="message-copy-receipt">
+            {rowReceipt}
+          </Text>
+        ) : null}
+
         {rowError ? (
           // The optimistic change has already gone back to where it was; this is
           // the reason, on the row it belongs to.
@@ -1080,7 +1103,8 @@ function MessageRowInner({
                   setSheetOpen(false);
                   setRowError(null);
                   void copyText(body).then(ok => {
-                    if (!ok) setRowError('복사하지 못했습니다.');
+                    if (ok) showReceipt('복사됨');
+                    else setRowError('복사하지 못했습니다.');
                   });
                 }
               : undefined
@@ -1518,6 +1542,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.dangerSurface,
   },
   rowFailureText: {flex: 1, fontSize: font.meta, color: '#f0b4b8', lineHeight: 17},
+  rowReceipt: {fontSize: font.meta, color: color.textMuted, paddingTop: space.xs},
   rowFailureDismiss: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
   sending: {fontSize: font.meta, color: color.textFaint},
   // 본문 크기의 자리를 차지하되 본문의 무게는 갖지 않는다 — 이것은 메시지에

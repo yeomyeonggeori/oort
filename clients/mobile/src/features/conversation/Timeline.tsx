@@ -407,6 +407,7 @@ function TimelineInner({
   anchorRef,
   jumpTarget,
   onJumpMissed,
+  onJumpLanded,
   tailRef,
   metricsRef,
   listRef: externalListRef,
@@ -503,6 +504,8 @@ function TimelineInner({
    * 아니라 사실이다. 라이브 프레임으로 온 인용에는 seq 가 없어서 `null` 이 온다.
    */
   onJumpMissed?: (reason: 'older' | 'unknown') => void;
+  /** 점프가 실제로 착지했다. 앞선 「못 찾았습니다」 고지를 거두는 신호. */
+  onJumpLanded?: () => void;
   /**
    * The seam that had to exist before this batch could measure anything, and the
    * reason the last one reported 「미측정」 instead of a number.
@@ -1019,6 +1022,8 @@ function TimelineInner({
     // 이동은 **따라가기를 끈다**. 안 끄면 다음 메시지 한 통에 맨 아래로 되돌아가고,
     // 사람은 자기가 방금 연 자리를 잃는다.
     followingRef.current = false;
+    // 도착했으므로 「못 찾았습니다」 고지는 물러난다 (design-review H-5).
+    onJumpLanded?.();
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
     listRef.current?.scrollToIndex({index, viewPosition: 0.5, animated: true});
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps

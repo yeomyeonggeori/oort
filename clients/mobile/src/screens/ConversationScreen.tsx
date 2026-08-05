@@ -26,7 +26,7 @@ import {
   type AppStateStatus,
   type TextInput,
 } from 'react-native';
-import {FailureBanner, Screen, ScreenHeader} from '../design/atoms';
+import {NoticeBlock, Screen, ScreenHeader} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space} from '../design/tokens';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
 import {AgentActivityBar} from '../features/agents/turnSurfaces';
@@ -512,7 +512,12 @@ export default function ConversationScreen({
     seq: number | null;
     token: number;
   } | null>(null);
-  const [jumpMissed, setJumpMissed] = useState<string | null>(null);
+  // `NoticeBlock` 은 제목과 설명을 나눠 받는다 — 한 덩이 문장보다 이쪽이 낫다:
+  // 첫 줄이 **무슨 일인지**, 둘째 줄이 **무엇을 하면 되는지**다.
+  const [jumpMissed, setJumpMissed] = useState<{
+    headline: string;
+    detail: string;
+  } | null>(null);
   useEffect(() => {
     setJumpTarget(null);
     setJumpMissed(null);
@@ -531,11 +536,21 @@ export default function ConversationScreen({
     }));
   }, []);
 
+  // 점프가 **성공하면** 고지는 스스로 물러난다. 남겨 두면 사람이 이미 도착한
+  // 자리 위에 「못 찾았습니다」가 계속 붙어 있게 된다 — 다음 점프나 채널 이동까지.
+  const clearJumpNotice = useCallback(() => setJumpMissed(null), []);
+
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
     setJumpMissed(
       reason === 'older'
-        ? '인용한 원본은 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.'
-        : '인용한 원본을 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요.',
+        ? {
+            headline: '인용한 원본은 이 대화의 더 위쪽에 있습니다',
+            detail: '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.',
+          }
+        : {
+            headline: '인용한 원본을 이 화면에서 찾지 못했습니다',
+            detail: '위로 올려 이전 대화를 더 불러오세요.',
+          },
     );
   }, []);
 
@@ -643,6 +658,17 @@ export default function ConversationScreen({
   // Only once the first page has settled: before that, "not found" would be a
   // statement about a list that has not loaded yet.
   const oldestSeq = timeline.state.oldestSeq;
+  //
+  // **이것도 실패가 아니다** (design-review H-5 의 같은 논리). 리뷰는 인용 점프
+  // 고지만 지목했지만, 이 줄은 M1 에서 내가 **일부러 같은 배너를 쓰게** 만든
+  // 자리다 — 「같은 사실을 두 모양으로 말할 이유가 없다」. 그러므로 한쪽만
+  // 고치면 내가 세운 그 규칙이 깨진다. 둘 다 `NoticeBlock` 으로 간다.
+  //
+  // 다만 닫기는 주지 않는다. 인용 점프 고지는 사람이 방금 누른 것에 대한
+  // **영수증**이라 한 번 읽으면 끝이지만, 이 줄은 「이 화면은 당신이 찾아온
+  // 메시지를 아직 안 들고 있다」는 **상태**다 — 닫아도 여전히 참이고, 닫으면
+  // 사람이 왜 엉뚱한 자리에 있는지 설명하는 유일한 문장이 사라진다.
+  // (`NoticeBlock.onDismiss` 독스트링이 그 갈림을 이미 적어 두었다.)
   const anchorNotice = useMemo(() => {
     if (!anchor || timeline.status !== 'ready') return null;
     const found = timeline.state.messages.some(message =>
@@ -650,9 +676,15 @@ export default function ConversationScreen({
     );
     if (found) return null;
     if (oldestSeq !== null && anchor.seq < oldestSeq) {
-      return '찾던 메시지는 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.';
+      return {
+        headline: '찾던 메시지는 이 대화의 더 위쪽에 있습니다',
+        detail: '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.',
+      };
     }
-    return '찾던 메시지를 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요.';
+    return {
+      headline: '찾던 메시지를 이 화면에서 찾지 못했습니다',
+      detail: '위로 올려 이전 대화를 더 불러오세요.',
+    };
   }, [anchor, timeline.status, timeline.state.messages, oldestSeq]);
 
   return (
@@ -668,15 +700,42 @@ export default function ConversationScreen({
           <>
             {anchorNotice ? (
               <View style={styles.notice}>
-                <FailureBanner message={anchorNotice} testID="anchor-missed" />
+                <NoticeBlock
+                  headline={anchorNotice.headline}
+                  detail={anchorNotice.detail}
+                  testID="anchor-missed"
+                />
               </View>
             ) : null}
             {/* 인용 점프가 빈손으로 돌아온 자리. 검색 앵커와 같은 배너를 쓴다 —
                 같은 사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할
                 이유가 없다. */}
+            {/* ===================================================
+                실패가 아니라 **사실 진술**이다 (design-review H-5).
+
+                사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다.
+                빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는
+                「내가 뭔가 잘못했다」를 말한다. `atoms` 에 이 경우를 위한
+                컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로
+                *"A statement of fact that is not a failure … Deliberately has
+                no retry and no danger colour."*
+
+                닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인
+                알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이
+                방금 한 동작(인용 탭)에 대한 답이고, 한 번 읽으면 목록 아래에
+                영영 붙어 있을 이유가 없다. 서버가 못 하는 일에 대한 고지가
+                아니다.
+
+                점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
+                =================================================== */}
             {jumpMissed ? (
               <View style={styles.notice}>
-                <FailureBanner message={jumpMissed} testID="quote-jump-missed" />
+                <NoticeBlock
+                  headline={jumpMissed.headline}
+                  detail={jumpMissed.detail}
+                  onDismiss={clearJumpNotice}
+                  testID="quote-jump-missed"
+                />
               </View>
             ) : null}
             <Timeline
@@ -703,6 +762,7 @@ export default function ConversationScreen({
               onResendPending={onResendPending}
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
+              onJumpLanded={clearJumpNotice}
             />
           </>
         }

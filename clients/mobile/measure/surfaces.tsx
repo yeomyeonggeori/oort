@@ -5,7 +5,11 @@ import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
+import {typingSentence} from '@momo/core/features/chat/typing';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
+import {TypingBar} from '../src/features/conversation/TypingBar';
+import {MessageBody} from '../src/features/conversation/MessageBody';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
@@ -27,6 +31,19 @@ import {color} from '../src/design/tokens';
 //
 //   xcrun simctl launch booted app.momo.ios --args -momoMeasure SHEET
 //   … DELETE · EDITOR · SEARCH-IDLE · SEARCH-EMPTY · SEARCH-ERROR · SEARCH-RESULTS
+//
+// ## U4-2 가 더한 것 (design-review N-8)
+//
+// 그 리뷰의 **시각 위상이 통째로 SKIPPED** 였고, 직접적 원인이 이것이었다:
+// M1~M4 가 더한 네 표면 중 **하나도** 이 하네스에 서지 않았다. 그래서 대비·기하
+// 지적이 전부 「코드에서 도출한 값」으로만 남았고, 리뷰어가 스스로 적었다 —
+// *"픽셀을 봤다고 주장하는 지적은 이 보고서에 없다."*
+//
+// 아래 여섯 케이스가 그 공백을 닫는다. 다음 리뷰는 계산이 아니라 사진을 본다:
+//
+//   QUOTE-READY · QUOTE-DELETED · QUOTE-UNRESOLVED   인용 3상태
+//   TYPING-ONE · TYPING-MANY                          작성 중 (1인·집계)
+//   MARKDOWN                                          코드·리스트·인라인 코드
 //
 // 시트류는 `Modal` 이라 화면을 덮으므로 한 번에 하나씩 띄운다.
 // =============================================================================
@@ -143,7 +160,94 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     />
   );
 
+  // ---- U4-2 (N-8): 이번 배치가 만든 표면들 ----------------------------------
+  //
+  // 인용 블록은 **행 안에** 세운다. 따로 띄우면 이 배치가 고친 것(H-2 — 인용이
+  // 행 위에서 어떤 무게로 앉는가)이 사진에 안 나온다.
+  const quoted = (block: QuoteBlockModel) => (
+    <MessageRow
+      message={MESSAGE}
+      startsGroup
+      directory={DIRECTORY}
+      chips={CHIPS}
+      nowMs={NOW}
+      quote={block}
+    />
+  );
+
   switch (name) {
+    case 'quote-ready': {
+      const draft = quoteDraftFor({
+        ...MESSAGE,
+        id: 'orig-1',
+        seq: 4,
+        body: '릴레이가 pool exhausted 로 멈췄습니다. 재시작이 필요합니다.',
+      });
+      return (
+        <Frame label="인용 · 정상 — 중성 규정선, 배경 없음 (H-2)">
+          {draft ? quoted(draft.block) : <View />}
+        </Frame>
+      );
+    }
+    case 'quote-deleted':
+      return (
+        <Frame label="인용 · 삭제된 원본 — 사본을 남기지 않는다">
+          {quoted({
+            kind: 'deleted',
+            targetId: 'orig-1',
+            targetSeq: 4,
+            authorMemberId: SELF,
+          })}
+        </Frame>
+      );
+    case 'quote-unresolved':
+      return (
+        <Frame label="인용 · 아직 못 푼 원본 — 삭제라고 부르지 않는다">
+          {quoted({kind: 'unresolved', targetId: 'orig-1', targetSeq: null})}
+        </Frame>
+      );
+    case 'typing-one':
+      return (
+        <Frame label="작성 중 · 1인 — 컴포저 위 한 줄">
+          <TypingBar sentence={typingSentence(['김민수'])} />
+        </Frame>
+      );
+    case 'typing-many':
+      return (
+        <Frame label="작성 중 · 집계 — 임계를 넘으면 수를 말한다">
+          <TypingBar
+            sentence={typingSentence(['김민수', '이하늘', '박도윤'])}
+          />
+        </Frame>
+      );
+    case 'markdown':
+      return (
+        <Frame label="본문 렌더 — 코드 상자·목록·인라인 코드 (H-4·N-1)">
+          <MessageBody
+            body={[
+              '**결론**: 재시작이 필요합니다',
+              '',
+              '- `outbox_drain_worker` 가 멈췄다',
+              '- 재시작 뒤 `seq` 는 이어진다',
+              '',
+              '```sh',
+              'systemctl restart momo-relay',
+              '```',
+              '',
+              '자세한 것은 [배포 문서](https://momo.example/deploy) 참고.',
+            ].join('\n')}
+          />
+        </Frame>
+      );
+    case 'markdown-pending':
+      return (
+        <Frame label="본문 렌더 · 보내는 중 — 코드까지 함께 흐려진다 (H-4)">
+          <MessageBody
+            body={['보내는 중입니다', '', '```sh', 'echo hi', '```'].join('\n')}
+            muted
+          />
+        </Frame>
+      );
     case 'sheet':
       return (
         <Frame label="길게 누르기 시트 — 반응·답글·고치기·지우기·닫기">
