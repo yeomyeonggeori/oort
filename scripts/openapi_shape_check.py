@@ -241,6 +241,15 @@ def main():
         "sample is stale and fails the gate so the list can only shrink",
     )
     parser.add_argument(
+        "--sampled-elsewhere",
+        help="text file of 'METHOD /path' spec operations whose 정본 has moved "
+        "to another server and are sampled by a DIFFERENT pass "
+        "(scripts/openapi_sampled_on_rust.txt); exempt from operation coverage "
+        "here because this pass is no longer the authority on their shape. "
+        "Unlike --known-unsampled (debt, may only shrink) this list may only "
+        "GROW — it is how the second pass encroaches on the first (#1042).",
+    )
+    parser.add_argument(
         "--server-route-manifest",
         help="JSON {operations:[{method,path}]} registered by the server; fail when one is absent from the spec",
     )
@@ -312,15 +321,35 @@ def main():
 
     if args.require_operation_coverage:
         sampled = {(s["method"].lower(), s["path"]) for s in samples}
-        known_unsampled = set()
-        if args.known_unsampled:
-            with open(args.known_unsampled, encoding="utf-8") as handle:
+
+        def load_operation_list(path):
+            ops = set()
+            if not path:
+                return ops
+            with open(path, encoding="utf-8") as handle:
                 for line in handle:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
+                    line = line.split("#", 1)[0].strip()
+                    if not line:
                         continue
-                    method, _, path = line.partition(" ")
-                    known_unsampled.add((method.lower(), path.strip()))
+                    method, _, op_path = line.partition(" ")
+                    ops.add((method.lower(), op_path.strip()))
+            return ops
+
+        known_unsampled = load_operation_list(args.known_unsampled)
+        # 다른 패스가 소유하는 연산. 부채(known_unsampled)와 의미가 다르다:
+        # 저쪽은 "아무도 안 봤다", 이쪽은 "여기 말고 저기서 본다".
+        sampled_elsewhere = load_operation_list(args.sampled_elsewhere)
+        conflicted = sorted(known_unsampled & sampled_elsewhere)
+        if conflicted:
+            failures += 1
+            print(
+                "[openapi-shape] FAIL an operation is both named debt and "
+                "sampled-elsewhere — the two lists mean opposite things and "
+                "cannot overlap:",
+                file=sys.stderr,
+            )
+            for method, path in conflicted:
+                print(f"    - {method.upper()} {path}", file=sys.stderr)
         stale = sorted(known_unsampled & sampled)
         if stale:
             failures += 1
@@ -332,7 +361,9 @@ def main():
             )
             for method, path in stale:
                 print(f"    - {method.upper()} {path}", file=sys.stderr)
-        uncovered = sorted(spec_operations(spec) - sampled - known_unsampled)
+        uncovered = sorted(
+            spec_operations(spec) - sampled - known_unsampled - sampled_elsewhere
+        )
         if uncovered:
             failures += 1
             print(
@@ -343,15 +374,22 @@ def main():
             for method, path in uncovered:
                 print(f"    - {method.upper()} {path}", file=sys.stderr)
         else:
-            suffix = (
-                f", {len(known_unsampled)} named debt entries "
-                f"(scripts/openapi_known_unsampled.txt)"
-                if known_unsampled else ""
-            )
+            parts = []
+            if known_unsampled:
+                parts.append(
+                    f"{len(known_unsampled)} named debt entries "
+                    f"(scripts/openapi_known_unsampled.txt)"
+                )
+            if sampled_elsewhere:
+                parts.append(
+                    f"{len(sampled_elsewhere)} operations owned by another pass "
+                    f"(scripts/openapi_sampled_on_rust.txt)"
+                )
+            suffix = (", " + ", ".join(parts)) if parts else ""
+            covered = spec_operations(spec) - known_unsampled - sampled_elsewhere
             print(
                 f"[openapi-shape] PASS operation coverage "
-                f"({len(spec_operations(spec) - known_unsampled)} operations "
-                f"sampled{suffix})"
+                f"({len(covered)} operations sampled{suffix})"
             )
 
     total = len(samples)
