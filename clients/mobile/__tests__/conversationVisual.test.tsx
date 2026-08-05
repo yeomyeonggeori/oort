@@ -10,9 +10,17 @@ import React from 'react';
 import {color, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
+  DayDivider,
   MessageRow,
+  PendingRow,
   ROW_PRESSED_BACKGROUND,
+  UnreadDivider,
 } from '../src/features/conversation/MessageRow';
+import {
+  DIVIDER_LABEL_SIDE,
+  DIVIDER_SPACE,
+  ROW_SPACE,
+} from '@momo/core/features/timeline/divider';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {
@@ -569,5 +577,233 @@ describe('#1079 M-7 — 사진 속 시트가 배송되는 시트와 같은 줄 �
     for (const prop of ['onQuote=', 'onCopy=', 'onReply=', 'onEdit=', 'onDelete=']) {
       expect(code).toContain(prop);
     }
+  });
+});
+
+// =============================================================================
+// U4-4 M2 (#1083) — 시간과 경계
+//
+// 감사 H-3: 그룹 창이 **5분**인데(`AUTHOR_GROUP_WINDOW_MS`) 그 안 개별 발화의
+// 시각이 화면 어디에도 없었다. 그런데 **접근성 라벨에는 모든 행의 시각이 있다** —
+// 로터는 아는 것을 눈은 몰랐다. 웹은 hover 로 주지만 폰에는 hover 가 없으므로
+// 선택지는 「항상」 아니면 「전혀」뿐이고, 「전혀」가 고장난 쪽이었다.
+// =============================================================================
+
+describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
+  /** 시각은 접근성에서 숨겨져 있으므로 기본 쿼리가 건너뛴다 — 그것이 설계다. */
+  const HIDDEN = {includeHiddenElements: true} as const;
+
+  function rowAt(startsGroup: boolean) {
+    return render(
+      <MessageRow
+        message={message({body: '재시작하면 seq 는 이어집니다'})}
+        startsGroup={startsGroup}
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+  }
+
+  it('연속 행에도 시각이 있다 — 예전에는 그룹 머리에만 있었다', () => {
+    expect(rowAt(false).getByTestId('row-time', HIDDEN)).toBeTruthy();
+  });
+
+  it('시각이 **한 칸**에 있다 — 머리 행과 연속 행이 같은 자리다', () => {
+    // 두 자리에 있으면 눈이 매 줄 어느 쪽을 볼지 다시 정해야 한다. 한 칸이면
+    // 그 칸을 **안 보기로** 정할 수 있다.
+    const head = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
+    const cont = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
+    expect(head).toEqual(cont);
+    expect(head.position).toBe('absolute');
+    expect(head.textAlign).toBe('right');
+  });
+
+  it('세로를 한 픽셀도 안 쓴다 — 줄을 세우면 5연발에 80pt 가 사라진다', () => {
+    expect(
+      flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style).position,
+    ).toBe('absolute');
+  });
+
+  it('본문이 시각 밑으로 흘러들지 않는다', () => {
+    const source = codeOnly(SRC('MessageRow.tsx'));
+    // 겹침을 막는 것은 여백 하나이고, 그래서 시각의 칸과 **같은 상수**를 쓴다.
+    expect(source).toMatch(/continuationBody:\s*\{paddingRight: TIME_COLUMN/);
+    expect(source).toMatch(/paddingRight: TIME_COLUMN \+ space\.sm,/);
+  });
+
+  it('보조기술이 같은 시각을 두 번 읽지 않는다', () => {
+    const view = rowAt(false);
+    const time = view.getByTestId('row-time', HIDDEN);
+    // 기본 쿼리로는 안 찾힌다 — 그것 자체가 「로터가 안 만난다」의 뜻이다.
+    expect(view.queryByTestId('row-time')).toBeNull();
+    expect(time.props.accessibilityElementsHidden).toBe(true);
+    expect(time.props.importantForAccessibility).toBe('no-hide-descendants');
+    // 그래도 라벨에는 있다 — 눈에서 뺀 것이 아니라 눈에 **더한** 것이다.
+    expect(
+      String(view.getByTestId('message-row').props.accessibilityLabel),
+    ).toMatch(/\d\d:\d\d/);
+  });
+
+  it('시각이 본문 AA 를 지난다 — 뜻을 나르는 글자다', () => {
+    const style = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
+    expect(style.color).toBe(color.textMuted);
+    expect(contrast(String(style.color), color.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('그룹 머리의 시각도 같은 밝기다 — 덜 중요한 쪽이 더 밝지 않게', () => {
+    const source = codeOnly(SRC('MessageRow.tsx'));
+    expect(source).not.toMatch(/time: \{fontSize: font\.meta, color: color\.textFaint\}/);
+  });
+});
+
+describe('#1083 — 아직 서버 시계가 없는 행은 시각을 지어내지 않는다', () => {
+  it('보내는 중인 메아리는 시각 대신 「전송 중」을 든다', () => {
+    // `Author` 가 시각을 들고 있을 때 낙관적 메아리도 **기기 시계**를 그렸다.
+    // 그건 이 행의 머리말이 스스로 적은 규율("no seq and no clock")과 어긋나고,
+    // 서버가 찍을 시각과 다를 수 있다. 시각이 행으로 옮겨가면서 이 행에는
+    // 붙지 않게 됐고, 그 자리는 이미 「전송 중」이 갖고 있다.
+    const view = render(
+      <PendingRow
+        pending={
+          {
+            clientMsgId: 'c1',
+            channelId: 'ch',
+            authorMemberId: OTHER,
+            body: '보내는 중입니다',
+            createdAtMs: BASE_MS,
+            state: 'sending',
+          } as never
+        }
+        startsGroup
+        directory={DIRECTORY}
+      />,
+    );
+    expect(view.getByTestId('pending-sending')).toBeTruthy();
+    expect(
+      view.queryByTestId('row-time', {includeHiddenElements: true}),
+    ).toBeNull();
+  });
+});
+
+describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', () => {
+  it('연속 행 세로 여백이 3pt 보다 크다', () => {
+    // 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다. 시각이 오른쪽에
+    // 표식을 만들고, 세로 여백이 그 둘을 함께 경계로 만든다.
+    //
+    // 소스 문자열이 아니라 **그려진 값**을 잰다: `paddingVertical: 3` 은 반응
+    // 칩에도 있고, 그것까지 금지하면 이 단정은 자기가 무엇을 지키는지 모르는
+    // 단정이 된다.
+    const view = render(
+      <MessageRow
+        message={message()}
+        startsGroup={false}
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+    const inner = flatten(view.getByTestId('message-press').props.style);
+    expect(Number(inner.paddingVertical)).toBeGreaterThan(3);
+    // 값은 **코어가 정한다**. 두 행 사이에 실제로 남는 거리가 `withinGroup`
+    // 이 되도록 절반씩 나눠 문다 — 웹은 같은 값을 위아래 패딩의 합으로 만든다.
+    expect(Number(inner.paddingVertical) * 2).toBe(ROW_SPACE.withinGroup);
+  });
+
+  it('그룹 사이 여백이 그룹 안 여백보다 크다 — 아니면 경계가 뒤집힌다', () => {
+    expect(ROW_SPACE.betweenGroups).toBeGreaterThan(ROW_SPACE.withinGroup);
+    const head = render(
+      <MessageRow
+        message={message()}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+    const outer = flatten(head.getByTestId('message-row').props.style);
+    // 안쪽이 절반씩 물고 있으므로 차이만 더한다: 6+6=12(안), 6+6+6=18(사이).
+    expect(
+      Number(outer.marginTop) + ROW_SPACE.withinGroup,
+    ).toBe(ROW_SPACE.betweenGroups);
+  });
+});
+
+describe('#1083 H-4·M-2 — 구분선은 코어 판정을 소비한다', () => {
+  it('오늘/어제를 말한다 — 절대 날짜를 읽고 오늘인지 계산하게 하지 않는다', () => {
+    // **그려진 글자**를 본다. 첫 판은 `dividerText(dayDividerSegments(...))` 를
+    // 단정했는데 그건 코어를 시험하는 것이지 이 화면을 시험하는 것이 아니다 —
+    // 컴포넌트가 코어를 안 쓰도록 되돌려도 초록이었다(red proof 가 잡아냈다).
+    const day = (atMs: number) =>
+      within(
+        render(<DayDivider atMs={atMs} nowMs={BASE_MS} />).getByTestId(
+          'day-divider',
+        ),
+      );
+    expect(day(BASE_MS).getByText('오늘')).toBeTruthy();
+    expect(day(BASE_MS - 26 * 3_600_000).getByText('어제')).toBeTruthy();
+    // 그리고 오래된 것은 절대 날짜로 돌아간다 — 「40일 전」은 날짜가 아니다.
+    const old = day(BASE_MS - 40 * 24 * 3_600_000);
+    expect(old.queryByText('오늘')).toBeNull();
+    expect(old.queryByText('어제')).toBeNull();
+    // 숫자 조각이 자기 `Text` 로 서 있다(자릿폭 고정을 걸어야 하므로).
+    expect(old.getAllByText(/^\d+$/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('보이는 글자와 읽히는 글자가 다르다 — 라벨은 절대 날짜를 함께 말한다', () => {
+    // 「오늘」은 눈에는 가장 값싼 낱말이지만 귀에는 어느 날인지 알려주지 않는다.
+    const view = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
+    const label = String(
+      view.getByTestId('day-divider').props.accessibilityLabel,
+    );
+    expect(label).toContain('오늘');
+    expect(label).toMatch(/\d{4}년 \d{1,2}월 \d{1,2}일/);
+  });
+
+  it('라벨이 앞에 서고 rule 은 하나다 — 가운데 라벨은 글자 수만큼 움직인다', () => {
+    const view = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
+    const kids = view.getByTestId('day-divider').props.children;
+    expect(DIVIDER_LABEL_SIDE).toBe('leading');
+    // 양쪽 rule 은 라벨을 가운데 고정할 때만 뜻이 있다. 소스에 둘이 남아 있으면
+    // 폰만 다시 가운데로 돌아간 것이다.
+    const source = codeOnly(SRC('MessageRow.tsx'));
+    expect(source).not.toMatch(
+      /<View style=\{styles\.dividerLine\} \/>\s*\n\s*<DividerLabel/,
+    );
+    expect(kids).toBeTruthy();
+  });
+
+  it('숫자만 자릿폭을 고정한다 — 조사·단위가 함께 받으면 음절이 벌어진다', () => {
+    const view = render(<UnreadDivider count={12} />);
+    const figures = within(view.getByTestId('unread-divider'))
+      .getAllByText(/^\d+$/)
+      .map(node => flatten(node.props.style));
+    expect(figures.length).toBeGreaterThan(0);
+    for (const style of figures) {
+      expect(style.fontVariant).toEqual(['tabular-nums']);
+    }
+  });
+
+  it('세 구분선이 같은 여백이 아니다 — 날짜가 가장 큰 경계다', () => {
+    const day = flatten(
+      render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />).getByTestId(
+        'day-divider',
+      ).props.style,
+    );
+    const unread = flatten(
+      render(<UnreadDivider count={1} />).getByTestId('unread-divider').props
+        .style,
+    );
+    expect(Number(day.paddingTop)).toBe(DIVIDER_SPACE.day.blockStart);
+    expect(Number(unread.paddingTop)).toBe(DIVIDER_SPACE.marker.blockStart);
+    expect(Number(day.paddingTop)).toBeGreaterThan(Number(unread.paddingTop));
+  });
+
+  it('구분선 글자가 본문 AA 를 지난다', () => {
+    const view = render(<UnreadDivider count={1} />);
+    const label = flatten(view.getByText(/새 메시지/).props.style);
+    expect(contrast(String(label.color ?? color.textMuted), color.bg)).toBeGreaterThanOrEqual(
+      4.5,
+    );
   });
 });

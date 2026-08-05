@@ -1,5 +1,14 @@
 import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
 import {
+  dayDividerLabel,
+  dayDividerSegments,
+  recoveryDividerSegments,
+  unreadDividerSegments,
+  DIVIDER_SPACE,
+  ROW_SPACE,
+  type DividerSegment,
+} from '@momo/core/features/timeline/divider';
+import {
   memberFor,
   memberNameParts,
   type Directory,
@@ -105,6 +114,15 @@ import {useLongPress} from './useLongPress';
 
 const UNKNOWN_MEMBER = '알 수 없는 멤버';
 
+/**
+ * 연속 행 오른쪽 시각 칸 (감사 H-3).
+ *
+ * `09:01` 다섯 글자가 `font.meta` 로 들어가는 폭. 고정 폭에 오른쪽 정렬이라
+ * 시각들이 한 줄에 서고, 그래서 눈이 그 칸을 **읽지 않기로** 정할 수 있다 —
+ * 매 줄 다른 자리에 있으면 매번 다시 봐야 한다.
+ */
+const TIME_COLUMN = 34;
+
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
 function timeLabel(atMs: number): string {
   const d = new Date(atMs);
@@ -125,13 +143,67 @@ function relativeLabel(atMs: number, nowMs: number): string {
 
 // ---- dividers ---------------------------------------------------------------
 
-export function DayDivider({atMs}: {atMs: number}): React.JSX.Element {
-  const d = new Date(atMs);
-  const label = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+/**
+ * 라벨 조각을 그린다. `figure` 만 자릿폭을 고정한다 (코어의 `DividerSegment`).
+ *
+ * 「3개」의 `3` 은 figure 이고 `개` 는 prose 다 — 조사와 단위는 한글이라, 같은
+ * 표지를 함께 받으면 음절 사이가 벌어진다. 판정은 코어가 하고 여기서는 칠한다.
+ */
+function DividerLabel({
+  segments,
+  tone,
+}: {
+  segments: readonly DividerSegment[];
+  tone?: 'warn';
+}): React.JSX.Element {
   return (
-    <View style={styles.divider} testID="day-divider">
-      <View style={styles.dividerLine} />
-      <Text style={styles.dividerLabel}>{label}</Text>
+    <Text style={[styles.dividerLabel, tone === 'warn' && styles.dividerLabelWarn]}>
+      {segments.map((segment, index) =>
+        segment.kind === 'figure' ? (
+          <Text key={index} style={styles.dividerFigure}>
+            {segment.text}
+          </Text>
+        ) : (
+          segment.text
+        ),
+      )}
+    </Text>
+  );
+}
+
+/**
+ * 하루가 바뀌는 자리.
+ *
+ * ## 문구도 배치도 코어가 정한다 (감사 H-4·M-2)
+ *
+ * 첫 판은 `${y}년 ${m}월 ${d}일` 절대 표기 **고정**이었다. 오늘 대화를 보면서
+ * 「2026년 8월 5일」을 읽고 그게 오늘인지 계산해야 했고, 아픈 것은 상대 표기
+ * 함수가 **같은 파일에 이미 있었다**는 점이다(`relativeLabel` — 스레드 롤업만
+ * 그걸 썼다).
+ *
+ * 그리고 배치가 웹과 달랐다(폰=가운데 라벨+양쪽 rule, 웹=좌측 라벨+우측 rule).
+ * 통일값은 **`leading`** 이고 그 판정은 `divider.ts` 가 든다 — 가운데 라벨은
+ * 글자 수(「오늘」 두 글자 ↔ 「2025년 12월 31일」 열두 글자)에 따라 좌우로
+ * 움직여서, 같은 자리에 반복해 나타나야 할 표지가 매번 다른 x 에 선다.
+ *
+ * 보이는 글자와 **읽히는 글자가 다르다**: 라벨은 언제나 절대 날짜를 함께 말한다
+ * (`dayDividerLabel`). 「오늘」은 눈에는 가장 값싼 낱말이지만 귀에는 어느 날인지
+ * 알려주지 않는다.
+ */
+export function DayDivider({
+  atMs,
+  nowMs,
+}: {
+  atMs: number;
+  nowMs: number;
+}): React.JSX.Element {
+  return (
+    <View
+      accessibilityRole="text"
+      accessibilityLabel={dayDividerLabel(atMs, nowMs)}
+      style={[styles.divider, styles.dividerDay]}
+      testID="day-divider">
+      <DividerLabel segments={dayDividerSegments(atMs, nowMs)} />
       <View style={styles.dividerLine} />
     </View>
   );
@@ -140,10 +212,7 @@ export function DayDivider({atMs}: {atMs: number}): React.JSX.Element {
 export function UnreadDivider({count}: {count: number}): React.JSX.Element {
   return (
     <View style={styles.divider} testID="unread-divider">
-      <View style={[styles.dividerLine, styles.dividerLineWarn]} />
-      <Text style={[styles.dividerLabel, styles.dividerLabelWarn]}>
-        {`새 메시지 ${count}개, 여기까지 읽음`}
-      </Text>
+      <DividerLabel segments={unreadDividerSegments(count)} tone="warn" />
       <View style={[styles.dividerLine, styles.dividerLineWarn]} />
     </View>
   );
@@ -159,10 +228,14 @@ export function RecoveryDivider({
 }): React.JSX.Element {
   return (
     <View style={styles.divider} testID="recovery-divider">
-      <View style={styles.dividerLine} />
-      <Text style={styles.dividerLabel}>
-        {`재연결됨, seq ${seq}까지 복구${source === 'backfill' ? ' (다시 읽음)' : ''}`}
-      </Text>
+      <DividerLabel
+        segments={[
+          ...recoveryDividerSegments(seq),
+          ...(source === 'backfill'
+            ? [{kind: 'prose' as const, text: ' (다시 읽음)'}]
+            : []),
+        ]}
+      />
       <View style={styles.dividerLine} />
     </View>
   );
@@ -170,14 +243,19 @@ export function RecoveryDivider({
 
 // ---- shared bits ------------------------------------------------------------
 
+/**
+ * 작성자 줄. **시각은 여기 없다** — 행이 오른쪽 한 칸으로 가져갔다(감사 H-3).
+ *
+ * 연속 행에 시각을 세우고 나니 같은 정보가 두 자리에 있었고, 그러면 눈이 매 줄
+ * 어느 쪽을 볼지 다시 정해야 한다. 한 칸에 모으면 그 칸을 **안 보기로** 정할 수
+ * 있다 — 그것이 이 배치가 산 것이다.
+ */
 function Author({
   directory,
   memberId,
-  atMs,
 }: {
   directory: Directory;
   memberId: string;
-  atMs: number;
 }): React.JSX.Element {
   const member = memberFor(directory, memberId);
   const parts = memberNameParts(directory, memberId, UNKNOWN_MEMBER);
@@ -208,7 +286,10 @@ function Author({
           {`${owner.displayName}님이 관리`}
         </Text>
       ) : null}
-      <Text style={styles.time}>{timeLabel(atMs)}</Text>
+      {/* 시각은 여기 있었다. 행이 **오른쪽 한 칸**으로 가져갔다 (감사 H-3):
+          연속 행에 시각을 세우고 나니 같은 정보가 두 자리에 있었고(머리 행은
+          이름 옆, 연속 행은 오른쪽 끝), 그러면 눈이 매 줄 어느 쪽을 볼지 다시
+          정해야 한다. 한 칸에 모으면 그 칸을 **안 보기로** 정할 수 있다. */}
     </View>
   );
 }
@@ -1094,12 +1175,46 @@ function MessageRowInner({
         ]}
         testID="message-press">
         {startsGroup ? (
-          <Author
-            directory={directory}
-            memberId={message.authorMemberId}
-            atMs={message.createdAtMs}
-          />
+          <Author directory={directory} memberId={message.authorMemberId} />
         ) : null}
+        {/* 아래 시각은 **모든 행**에 있다 — 위 주석 참조. */}
+        {
+          // ===================================================================
+          // 행의 시각 (감사 H-3)
+          //
+          // 그룹 창은 **5분**이다(`AUTHOR_GROUP_WINDOW_MS`). 즉 한 그룹이 최대
+          // 5분을 덮는데 그 안 개별 발화의 시각이 화면 어디에도 없었다 —
+          // 「이 말 언제 한 거지?」에 답이 없다.
+          //
+          // 그런데 **접근성 라벨에는 모든 행의 시각이 들어 있다**
+          // (`rowAccessibilityLabel`). 로터는 아는 것을 눈은 몰랐다. 즉 이
+          // 정보가 값어치 있다는 판단은 이미 내려져 있었고, 빠진 것은 눈으로
+          // 가는 길뿐이었다.
+          //
+          // 웹은 hover 로 준다. **폰에는 hover 가 없다** — 그래서 이 화면의
+          // 선택지는 「항상」 아니면 「전혀」 둘뿐이고, 「전혀」가 지금 고장난
+          // 쪽이다.
+          //
+          // ## 세로를 한 픽셀도 안 쓴다
+          //
+          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 대신 본문 첫 줄
+          // 오른쪽 끝에 절대 위치로 앉히고 본문에 그만큼 오른쪽 여백을 준다.
+          // 겹치지 않으면서 세로 비용이 0 이다.
+          //
+          // ## 보조기술에는 안 보인다
+          //
+          // 행 라벨이 이미 이 시각을 말한다. 여기서 또 하나의 원소를 세우면
+          // 로터가 같은 사실을 두 번 읽는다 — 「행 하나 = 원소 하나」를 다른
+          // 방식으로 깨는 것이다.
+          // ===================================================================
+          <Text
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={styles.rowTime}
+            testID="row-time">
+            {timeLabel(message.createdAtMs)}
+          </Text>
+        }
 
         {/* 답글 표식 (성재: "답글 모양 아이콘과 함께 별도로 안 보이는 거 같아").
             본문 **위**에 온다 — 맥락은 내용보다 먼저 읽혀야 이 줄이 무엇에 대한
@@ -1163,6 +1278,10 @@ function MessageRowInner({
         ) : (
           <>
             {presentation.keepsBody && body !== '' ? (
+              // 연속 행에서는 오른쪽 끝에 시각이 절대 위치로 앉아 있다(H-3).
+              // 본문이 그 밑으로 흘러들지 않게 그만큼 비워 둔다 — 겹침을 막는
+              // 것은 이 여백 하나이고, 그래서 시각과 같은 상수를 쓴다.
+              <View style={startsGroup ? undefined : styles.continuationBody}>
               <MessageBody
                 body={body}
                 // ===================================================
@@ -1181,6 +1300,7 @@ function MessageRowInner({
                 // ===================================================
                 selectable={!actionable}
               />
+              </View>
             ) : null}
 
             {presentation.artifact ? (
@@ -1702,11 +1822,7 @@ export function PendingRow({
       style={[styles.row, startsGroup && styles.rowStartsGroup]}
       testID="pending-row">
       {startsGroup ? (
-        <Author
-          directory={directory}
-          memberId={pending.authorMemberId}
-          atMs={pending.createdAtMs}
-        />
+        <Author directory={directory} memberId={pending.authorMemberId} />
       ) : null}
       {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
       {/* Same anatomy as a confirmed row, dimmed: the text must not re-flow when
@@ -1741,15 +1857,57 @@ const styles = StyleSheet.create({
   // The padding lives on the inner pressable so the press highlight covers the
   // whole row rather than a box floating inside it.
   row: {},
-  rowInner: {paddingHorizontal: SAFE_GUTTER, paddingVertical: 3, gap: 2},
+  rowInner: {
+    paddingHorizontal: SAFE_GUTTER,
+    // 3pt 였다 — 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다(감사
+    // H-7). 값은 **코어가 정한다**: 두 행 사이에 실제로 남는 거리가
+    // `ROW_SPACE.withinGroup` 이 되도록 절반씩 나눠 문다. 웹은 같은 값을
+    // 위아래 패딩의 합으로 만든다.
+    //
+    // 첫 판은 `space.xs`(4 → 사이 8pt)로 잡았는데 코어 랜딩이 그것을 12 로
+    // 정정했다. 「둘의 비를 지키면서 안쪽을 넓힌다」가 그 판정이다.
+    paddingVertical: ROW_SPACE.withinGroup / 2,
+    gap: 2,
+  },
+  /**
+   * 연속 행의 시각 (H-3). 본문 첫 줄 오른쪽 끝.
+   *
+   * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다 — 흐름에
+   * 넣으면 줄이 하나 늘고, 5연발에서 그것은 80pt 다. 본문 쪽 `paddingRight` 가
+   * 겹침을 막는다.
+   */
+  rowTime: {
+    position: 'absolute',
+    right: SAFE_GUTTER,
+    // 규칙 하나: **이 메시지의 맨 위 오른쪽**. 그룹 머리면 그 줄이 작성자
+    // 줄이고 연속 행이면 본문 첫 줄이다 — 자리를 따로 계산하지 않는다.
+    // (`rowStartsGroup` 의 여백은 바깥 `row` 에 있으므로 여기 안 들어온다.)
+    top: space.xs,
+    width: TIME_COLUMN,
+    textAlign: 'right',
+    fontSize: font.meta,
+    // 시각은 뜻을 나르는 글자다 — `textFaint` 는 배경 대비 3.909:1 로 본문
+    // AA(4.5)를 못 지난다(U4-2 M-6 실측). 그룹 머리의 시각도 같은 이유로
+    // 함께 옮겼다: 한 화면에서 같은 종류의 글자가 두 밝기면, 덜 중요한 쪽이
+    // 더 밝아지는 일이 생긴다.
+    color: color.textMuted,
+    lineHeight: 22,
+  },
+  /** 시각이 앉을 자리만큼 본문을 비운다. 겹침을 막는 것은 이 여백 하나다. */
+  continuationBody: {paddingRight: TIME_COLUMN + space.sm},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
   rowPressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
-  rowStartsGroup: {paddingTop: space.md},
+  // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
+  // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
+  rowStartsGroup: {marginTop: ROW_SPACE.betweenGroups - ROW_SPACE.withinGroup},
   authorRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: space.xs,
+    // 시각이 이 줄 오른쪽 끝에 절대 위치로 앉는다(H-3). 긴 이름 + 핸들 +
+    // 에이전트 표 + 관리자까지 붙으면 그 밑으로 흘러들 수 있다.
+    paddingRight: TIME_COLUMN + space.sm,
     flexWrap: 'wrap',
   },
   authorName: {fontSize: font.label, fontWeight: '700', color: color.text},
@@ -1763,7 +1921,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#2a2136',
   },
   agentTagText: {fontSize: 10, color: color.agent, fontWeight: '600'},
-  time: {fontSize: font.meta, color: color.textFaint},
+  // 그룹 머리의 시각. 연속 행의 것과 **같은 밝기**여야 한다 — 위 주석 참조.
+  time: {fontSize: font.meta, color: color.textMuted},
   // 앱이 말하는 문장이다 — 구분축은 `appVoice.ts` 의 `※` 가 든다. 인용 안의
   // 묘비와 **같은 낱말이므로 같은 모양이어야 한다**: 한 화면에 두 모양으로 나오면
   // 사람은 둘이 다른 것을 뜻한다고 읽는다.
@@ -1829,16 +1988,30 @@ const styles = StyleSheet.create({
   resendLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
   pressed: {opacity: 0.6},
 
+  // 라벨이 **앞**에 선다(`DIVIDER_LABEL_SIDE`). 여백·두께도 코어 값이다.
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
+    gap: DIVIDER_SPACE.labelGap,
     paddingHorizontal: SAFE_GUTTER,
-    paddingVertical: space.md,
+    paddingTop: DIVIDER_SPACE.marker.blockStart,
+    paddingBottom: DIVIDER_SPACE.marker.blockEnd,
   },
-  dividerLine: {flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.border},
+  // 날짜는 **가장 큰 경계**라 더 연다. 셋이 같은 여백이면 위계가 사라진다.
+  dividerDay: {
+    paddingTop: DIVIDER_SPACE.day.blockStart,
+    paddingBottom: DIVIDER_SPACE.day.blockEnd,
+  },
+  dividerLine: {
+    flex: 1,
+    height: DIVIDER_SPACE.ruleThickness,
+    backgroundColor: color.border,
+  },
   dividerLineWarn: {backgroundColor: color.warn},
-  dividerLabel: {fontSize: font.meta, color: color.textFaint},
+  // `textFaint` 는 배경 대비 3.909:1 로 본문 AA 미달이다(U4-2 M-6 실측).
+  dividerLabel: {fontSize: font.meta, color: color.textMuted},
+  /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
+  dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelWarn: {color: color.warn, fontWeight: '600'},
 
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, paddingTop: space.xs},
