@@ -5,7 +5,7 @@ import {
   centrifugoTypingChannelName,
 } from '@momo/core/lib/realtimeEvents';
 import {
-  typingSentence,
+  typingSegments,
   TYPING_AGGREGATE_THRESHOLD_FALLBACK,
 } from '@momo/core/features/chat/typing';
 import {
@@ -105,9 +105,30 @@ function Line({nowMs}: {nowMs: number}): React.JSX.Element {
   );
   return (
     <TypingBar
-      sentence={typingSentence(names, TYPING_AGGREGATE_THRESHOLD_FALLBACK)}
+      segments={typingSegments(names, TYPING_AGGREGATE_THRESHOLD_FALLBACK)}
     />
   );
+}
+
+/**
+ * 줄이 실제로 말하는 글자.
+ *
+ * H-3(자리 예약) 이후로 이 줄은 **언제나 있다** — 비어 있을 때도 자리를 지킨다.
+ * 그래서 「없다」를 `queryByTestId` 로 물으면 답이 안 나온다. 물어야 하는 것은
+ * 「무엇을 말하는가」이고, M-4 이후로 그것은 조각들의 합이다.
+ */
+function typingLineText(): string {
+  const node = screen.queryByTestId('composer-typing');
+  if (node === null) return '';
+  const walk = (child: unknown): string => {
+    if (typeof child === 'string') return child;
+    if (Array.isArray(child)) return child.map(walk).join('');
+    if (child && typeof child === 'object' && 'props' in child) {
+      return walk((child as {props: {children?: unknown}}).props.children);
+    }
+    return '';
+  };
+  return walk(node.props.children);
 }
 
 beforeEach(() => resetTyping());
@@ -118,13 +139,13 @@ describe('에이전트는 작성 중이 아니다', () => {
     render(<Line nowMs={NOW} />);
     // #839: 구독이 붙은 tick 에 프레임이 오면 이 단정은 헛초록이다. 먼저 없음을
     // 확인하고, 그 다음에 보낸다.
-    expect(screen.queryByTestId('composer-typing')).toBeNull();
+    expect(typingLineText()).toBe('');
 
     act(() => markTyping(frame(AGENT)));
 
     // 명부에는 들어왔다 — 화면이 거르는 것이지 레일이 거르는 것이 아니다.
     expect(typingSnapshot()).toHaveLength(1);
-    expect(screen.queryByTestId('composer-typing')).toBeNull();
+    expect(typingLineText()).toBe('');
   });
 
   it('사람과 에이전트가 함께 와도 사람만 센다', () => {
@@ -134,15 +155,13 @@ describe('에이전트는 작성 중이 아니다', () => {
       markTyping(frame(HUMAN));
     });
     // 「2명이」가 아니라 이름 하나다. 에이전트를 세면 여기서 걸린다.
-    expect(screen.getByTestId('composer-typing').props.children).toBe(
-      '김민수님이 작성 중…',
-    );
+    expect(typingLineText()).toBe('김민수님이 작성 중…');
   });
 
   it('화면에 나가는 문장에 「작업」이라는 글자가 없다', () => {
     render(<Line nowMs={NOW} />);
     act(() => markTyping(frame(HUMAN)));
-    const line: string = screen.getByTestId('composer-typing').props.children;
+    const line = typingLineText();
     expect(line).toContain('작성 중');
     expect(line).not.toContain('작업');
   });
@@ -151,13 +170,13 @@ describe('에이전트는 작성 중이 아니다', () => {
     // 이름 없는 「누군가 작성 중」은 나르는 정보가 0이다.
     render(<Line nowMs={NOW} />);
     act(() => markTyping(frame('99999999-9999-4999-8999-999999999999')));
-    expect(screen.queryByTestId('composer-typing')).toBeNull();
+    expect(typingLineText()).toBe('');
   });
 
   it('자기 자신은 절대 그리지 않는다', () => {
     render(<Line nowMs={NOW} />);
     act(() => markTyping(frame(SELF)));
-    expect(screen.queryByTestId('composer-typing')).toBeNull();
+    expect(typingLineText()).toBe('');
   });
 });
 
@@ -165,18 +184,18 @@ describe('스스로 잊는다 — 서버는 상태를 안 들고 있다', () => 
   it('만료가 지나면 줄이 사라진다', () => {
     const view = render(<Line nowMs={NOW} />);
     act(() => markTyping(frame(HUMAN, NOW, 6_000)));
-    expect(screen.getByTestId('composer-typing')).toBeTruthy();
+    expect(typingLineText()).not.toBe('');
 
     // 「정지」 신호는 오지 않는다. 그것이 계약이다 — 시계만 흐른다.
     view.rerender(<Line nowMs={NOW + 6_001} />);
-    expect(screen.queryByTestId('composer-typing')).toBeNull();
+    expect(typingLineText()).toBe('');
   });
 
   it('만료 직전에는 아직 살아 있다 — 일찍 지우지 않는다', () => {
     const view = render(<Line nowMs={NOW} />);
     act(() => markTyping(frame(HUMAN, NOW, 6_000)));
     view.rerender(<Line nowMs={NOW + 5_999} />);
-    expect(screen.getByTestId('composer-typing')).toBeTruthy();
+    expect(typingLineText()).not.toBe('');
   });
 
   it('sweep 은 버릴 것이 없으면 아무것도 흔들지 않는다', () => {
@@ -200,7 +219,7 @@ describe('스스로 잊는다 — 서버는 상태를 안 들고 있다', () => 
       markTyping(frame(HUMAN, NOW, 6_000)); // 늦게 온 옛 신호, 만료 NOW+6000
     });
     view.rerender(<Line nowMs={NOW + 6_500} />);
-    expect(screen.getByTestId('composer-typing')).toBeTruthy();
+    expect(typingLineText()).not.toBe('');
     expect(typingSnapshot()).toHaveLength(1);
   });
 });
@@ -219,13 +238,13 @@ describe('이름 순서는 시작 순서다', () => {
       markTyping(frame(HUMAN, NOW)); // 김민수가 먼저 시작
       markTyping(frame(HUMAN2, NOW + 1_500)); // 이하늘이 1.5초 뒤
     });
-    const before = screen.getByTestId('composer-typing').props.children;
+    const before = typingLineText();
     expect(before).toBe('김민수, 이하늘님이 작성 중…');
 
     // 먼저 시작한 사람이 재발행한다. 여기서 뒤집히면 결함이 돌아온 것이다.
     act(() => markTyping(frame(HUMAN, NOW + 3_000)));
     view.rerender(<Line nowMs={NOW + 3_500} />);
-    expect(screen.getByTestId('composer-typing').props.children).toBe(before);
+    expect(typingLineText()).toBe(before);
   });
 
   it('시작 시각은 재발행에 덮이지 않는다 — 명부 수준에서도', () => {
@@ -248,14 +267,10 @@ describe('뭉치는 규칙은 코어의 것', () => {
       markTyping(frame(HUMAN));
       markTyping(frame(HUMAN2));
     });
-    expect(screen.getByTestId('composer-typing').props.children).toBe(
-      '김민수, 이하늘님이 작성 중…',
-    );
+    expect(typingLineText()).toBe('김민수, 이하늘님이 작성 중…');
 
     act(() => markTyping(frame(HUMAN3)));
-    expect(screen.getByTestId('composer-typing').props.children).toBe(
-      '3명이 작성 중…',
-    );
+    expect(typingLineText()).toBe('3명이 작성 중…');
   });
 });
 
