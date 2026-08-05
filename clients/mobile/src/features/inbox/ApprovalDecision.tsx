@@ -312,3 +312,44 @@ const styles = StyleSheet.create({
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},
 });
+
+// -----------------------------------------------------------------------------
+// 결정 뒤에 무엇이라 말하는가
+//
+// 이 문구는 `InboxScreen` 안에 있었다. U4-4 M1 이 타임라인 승인 카드에 같은
+// 컨트롤을 세우면서 **호출자가 둘**이 됐고, 화면 안에 두면 두 번째 호출자는
+// 화면에서 화면을 import 하거나(순환) 문장을 복제하게 된다. 복제된 순간 두
+// 경로는 같은 원장 응답에 서로 다른 말을 하기 시작하고, 갈라진 쪽은 아무도 보고
+// 있지 않은 쪽이다 — 이 파일 머리말이 `decideApproval` 에 대해 이미 한 말과 같다.
+// -----------------------------------------------------------------------------
+/**
+ * 원장이 답한 것을 한 문장으로 (2R H4/M3).
+ *
+ * 두 가지가 1R과 다르다. 첫째, **약속하지 않는다**: "에이전트가 이어서 실행합니다"는
+ * 서버가 보장하지 않는 후속(`approve_run`은 run이 hold를 떠났으면 job 없이 200)이라
+ * 영수증은 원장에 무엇이 적혔는지까지만 말한다. 둘째, superseded일 때 **실제로
+ * 기록된 방향**을 말한다 — 내가 승인을 눌렀는데 원장에 거부가 적혀 있을 수 있고,
+ * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
+ */
+export function decisionReceiptCopy(outcome: DecisionOutcome): string {
+  if (outcome.kind === 'superseded') {
+    if (outcome.status === 'approved') {
+      return '이미 승인으로 기록되어 있었습니다.';
+    }
+    if (outcome.status === 'rejected') {
+      return '이미 거부로 기록되어 있었습니다.';
+    }
+    if (outcome.status === 'expired') {
+      return '결정 전에 만료되어 만료로 기록되었습니다.';
+    }
+    if (outcome.status === 'cancelled') {
+      return '이 요청은 취소되어 있었습니다.';
+    }
+    return outcome.note ?? '이 요청은 이미 결정되어 있었습니다.';
+  }
+  if (outcome.status === 'approved') return '승인을 기록했습니다.';
+  if (outcome.status === 'rejected') return '거부를 기록했습니다.';
+  // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지 우리가
+  // 모르므로, 안다고 말하지 않는다.
+  return '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.';
+}

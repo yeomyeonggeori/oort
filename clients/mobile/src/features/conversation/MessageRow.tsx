@@ -45,6 +45,18 @@ import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
+import {
+  deadlinePassed,
+  gateFor,
+  type ApprovalGate,
+  type ApprovalReceipt,
+} from './approvalGate';
+
+/** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
+const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
+import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
+import {ApprovalDecision} from '../inbox/ApprovalDecision';
+import {APPROVAL_OFFLINE_COPY} from '../inbox/useOnline';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -348,24 +360,94 @@ function toneForTurn(status: string): 'ok' | 'warn' | 'danger' | 'muted' {
   return 'muted';
 }
 
-function AgentCard({card}: {card: AgentCardModel}): React.JSX.Element {
+function AgentCard({
+  card,
+  approvalGates,
+  approvalReceipts,
+  approvalOffline,
+  nowMs,
+  onApprovalSettled,
+}: {
+  card: AgentCardModel;
+  approvalGates?: ReadonlyMap<string, ApprovalGate>;
+  approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+  approvalOffline?: boolean;
+  nowMs: number;
+  onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
+}): React.JSX.Element {
   if (card.kind === 'approval') {
+    // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
+    // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
+    const approval = gateFor(card, approvalGates ?? EMPTY_GATES);
+    const receipt =
+      card.approvalId === null
+        ? undefined
+        : approvalReceipts?.get(card.approvalId);
+    const settledStatus = receipt?.status ?? card.status;
     return (
       <View style={styles.card} testID="agent-card">
         <View style={styles.cardHead}>
           <Text style={styles.cardTitle} numberOfLines={2}>
             {card.title}
           </Text>
+          {/* 원장이 방금 답해 준 상태가 있으면 그것이 이긴다. 없으면 스냅샷.
+              둘을 섞지 않는 이유는 사진이 잡아냈다 — 영수증이 「승인을
+              기록했습니다」인데 칩이 「승인 대기」였다. */}
           <StatusChip
-            label={APPROVAL_STATUS_LABEL[card.status]}
-            tone={card.status === 'pending' ? 'warn' : card.status === 'approved' ? 'ok' : 'muted'}
+            label={APPROVAL_STATUS_LABEL[settledStatus]}
+            tone={
+              settledStatus === 'pending'
+                ? 'warn'
+                : settledStatus === 'approved'
+                  ? 'ok'
+                  : 'muted'
+            }
           />
         </View>
         {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
-        {/* 승인/거부 버튼은 이 배치가 아니다 — 결정은 데스크톱이나 인박스에서. */}
-        <Text style={styles.cardNote}>
-          이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.
-        </Text>
+        {/* =====================================================================
+            여기 있던 문장은 이랬다 (감사 H-1):
+
+              // 승인/거부 버튼은 이 배치가 아니다 — 결정은 데스크톱이나 인박스에서.
+              <Text>이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.</Text>
+
+            승인을 기다리는 에이전트가 **지금 이 화면에 있는데** 폰은 다른 앱으로
+            가라고만 했다. 감사 캡처(`m-07`)에는 같은 카드 셋이 연달아 그 한 문장만
+            반복한다.
+
+            컨트롤은 새로 만들지 않는다 — 잠금화면 알림과 인박스가 이미 쓰는 것을
+            그대로 부른다(세 번째 호출자). 결정 가능 여부는 `approval` 이 들고,
+            그것을 누가 어떻게 판정하는지는 `approvalGate.ts` 머리말에 있다.
+
+            영수증이 컨트롤보다 **먼저** 온다: 결정한 순간 그 승인은 대기 목록에서
+            빠져 `approval` 이 `null` 이 되므로, 순서를 반대로 두면 방금 누른 사람이
+            영수증 대신 예전 안내 문장을 보게 된다.
+            ===================================================================== */}
+        {receipt !== undefined ? (
+          <Text style={styles.cardNote} testID="card-approval-receipt">
+            {receipt.note}
+          </Text>
+        ) : approval && approvalOffline ? (
+          // 결정할 수 있는 건인데 지금은 못 보낸다. 「다른 데서 하세요」와 다른
+          // 문장이어야 한다 — 이건 자리의 문제가 아니라 **때**의 문제다.
+          <Text style={styles.cardNote} testID="card-approval-offline">
+            {APPROVAL_OFFLINE_COPY}
+          </Text>
+        ) : approval ? (
+          <ApprovalDecision
+            approvalId={approval.approvalId}
+            reversible={approval.reversible}
+            deadlinePassed={deadlinePassed(approval, nowMs)}
+            onSettled={outcome =>
+              onApprovalSettled?.(approval.approvalId, outcome)
+            }
+            testIDPrefix={`card-approval-${approval.approvalId}`}
+          />
+        ) : (
+          <Text style={styles.cardNote}>
+            이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.
+          </Text>
+        )}
       </View>
     );
   }
@@ -629,6 +711,38 @@ export interface MessageRowProps {
    * hardest exactly when the conversation is busy.
    */
   quote?: QuoteBlockModel | null;
+  /**
+   * 이 행의 승인 카드를 **지금 결정할 수 있는가** (감사 H-1 / goal U4-g).
+   *
+   * `null`/`undefined` 면 컨트롤을 안 세운다. 왜 그 넷인지는 `approvalGate.ts`
+   * 머리말이 든다 — 요약하면 카드는 메시지의 스냅샷이고 「지금 무엇이 참인가」는
+   * 승인 원장만 안다.
+   *
+   * **값이 페이지를 타지 않는다.** 인용(`quote`)과 다른 점이 여기다: 인용은 서버가
+   * 히스토리 페이지에 LEFT JOIN 해 주지만 승인의 기한·가역성은 그 페이지에 없다.
+   * 그래서 화면이 대기 목록을 **한 번** 구독하고 행마다 나눠 준다 — 행이 스스로
+   * 물으면 스크롤 한 번이 요청 폭풍이 된다.
+   */
+  approvalGates?: ReadonlyMap<string, ApprovalGate>;
+  /**
+   * 결정이 끝난 뒤 이 행이 말할 영수증. 화면이 든다.
+   *
+   * 행이 들 수 없는 이유: 결정하면 그 승인은 대기 목록에서 빠지고 `approval` 이
+   * `null` 이 된다 — 즉 **컨트롤과 영수증은 같은 순간에 서로 반대로 움직인다**.
+   * 영수증을 행의 상태로 두면 그 행이 목록에서 사라질 때 영수증도 함께 사라져,
+   * 사람은 자기가 무엇을 했는지 못 본 채 카드가 조용히 바뀐 것만 본다.
+   * (인박스가 이미 같은 이유로 화면에 둔다.)
+   */
+  approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+  /**
+   * 연결이 끊겼는가. 끊겼으면 컨트롤 대신 **인박스와 같은 문장**이 선다.
+   *
+   * 같은 결정 컨트롤이 화면마다 다른 오프라인 결을 가지면 어휘 분열이다. 판정은
+   * 화면이 하고(`useOnline`), 문장은 두 화면이 같은 상수를 든다.
+   */
+  approvalOffline?: boolean;
+  /** 결정을 원장에 보낸 뒤. 화면이 영수증을 만들고 목록을 무효화한다. */
+  onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }
 
 /**
@@ -665,6 +779,10 @@ function MessageRowInner({
   rollup: rollupOverride,
   replyParent,
   quote,
+  approvalGates,
+  approvalReceipts,
+  approvalOffline,
+  onApprovalSettled,
 }: MessageRowProps): React.JSX.Element {
   rowRenders += 1;
   const presentation = useMemo(() => rowPresentation(message), [message]);
@@ -1071,7 +1189,14 @@ function MessageRowInner({
                 state={presentation.artifactState}
               />
             ) : presentation.card ? (
-              <AgentCard card={presentation.card} />
+              <AgentCard
+                card={presentation.card}
+                approvalGates={approvalGates}
+                approvalReceipts={approvalReceipts}
+                approvalOffline={approvalOffline}
+                nowMs={nowMs}
+                onApprovalSettled={onApprovalSettled}
+              />
             ) : null}
 
             {presentation.keepsBody &&
@@ -1342,6 +1467,10 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   rollup: true,
   replyParent: true,
   quote: true,
+  approvalGates: true,
+  approvalReceipts: true,
+  approvalOffline: true,
+  onApprovalSettled: true,
 };
 
 /**
@@ -1392,7 +1521,15 @@ export function sameMessageRowProps(
     a.replyParent === b.replyParent &&
     sameChips(a.chips, b.chips) &&
     sameRollup(a.rollup, b.rollup) &&
-    sameQuote(a.quote, b.quote)
+    sameQuote(a.quote, b.quote) &&
+    // 두 표는 **동일성**으로 본다(`directory` 와 같은 취급). 화면이 `useMemo`
+    // 로 붙잡고 있으므로 승인이 실제로 바뀔 때만 새 표가 되고, 그때는 붙어 있는
+    // 행이 전부 다시 그려진다 — 승인은 드물어 감당할 수 있는 값이고, 대안은
+    // 행마다 카드를 다시 파싱하는 것(코어 규칙의 두 번째 구현)이다.
+    a.approvalGates === b.approvalGates &&
+    a.approvalReceipts === b.approvalReceipts &&
+    a.approvalOffline === b.approvalOffline &&
+    a.onApprovalSettled === b.onApprovalSettled
   );
 }
 

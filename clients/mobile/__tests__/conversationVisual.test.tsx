@@ -6,7 +6,6 @@ import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {Text} from 'react-native';
 
 import {color, space} from '../src/design/tokens';
 import {MessageBody} from '../src/features/conversation/MessageBody';

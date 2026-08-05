@@ -13,7 +13,6 @@ import {
   type InboxFilter,
 } from '@momo/core/features/inbox/model';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
-import NetInfo from '@react-native-community/netinfo';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -34,7 +33,11 @@ import {
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
 import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
-import {ApprovalDecision} from '../features/inbox/ApprovalDecision';
+import {
+  ApprovalDecision,
+  decisionReceiptCopy,
+} from '../features/inbox/ApprovalDecision';
+import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
 import {
   useAgentFeed,
   useInvalidateApprovals,
@@ -44,7 +47,6 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
-import {isOnlineFromNetInfo} from '../query/queryClient';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
@@ -167,13 +169,9 @@ export default function InboxScreen({
   );
   const runHistory = serverSurface('agentRunHistory');
 
-  const [online, setOnline] = useState(true);
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setOnline(isOnlineFromNetInfo(state));
-    });
-    return unsubscribe;
-  }, []);
+  // 배선은 `useOnline` 이 든다 — 승인 컨트롤이 서는 화면이 둘이 됐고, 같은
+  // 컨트롤이 화면마다 다른 오프라인 결을 가지면 그것은 어휘 분열이다.
+  const online = useOnline();
 
   // All three are mounted; `enabled` decides which ones actually fetch. Same
   // shape as the web route, so a tab switch is instant on a warm cache instead
@@ -309,8 +307,7 @@ export default function InboxScreen({
       if (!online) {
         return (
           <Text style={styles.managed} testID={`decision-offline-${item.key}`}>
-            연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나
-            거부할 수 있습니다.
+            {APPROVAL_OFFLINE_COPY}
           </Text>
         );
       }
@@ -537,38 +534,6 @@ function FeedRow({
       {decision ? <View style={styles.decision}>{decision}</View> : null}
     </View>
   );
-}
-
-/**
- * 원장이 답한 것을 한 문장으로 (2R H4/M3).
- *
- * 두 가지가 1R과 다르다. 첫째, **약속하지 않는다**: "에이전트가 이어서 실행합니다"는
- * 서버가 보장하지 않는 후속(`approve_run`은 run이 hold를 떠났으면 job 없이 200)이라
- * 영수증은 원장에 무엇이 적혔는지까지만 말한다. 둘째, superseded일 때 **실제로
- * 기록된 방향**을 말한다 — 내가 승인을 눌렀는데 원장에 거부가 적혀 있을 수 있고,
- * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
- */
-export function decisionReceiptCopy(outcome: DecisionOutcome): string {
-  if (outcome.kind === 'superseded') {
-    if (outcome.status === 'approved') {
-      return '이미 승인으로 기록되어 있었습니다.';
-    }
-    if (outcome.status === 'rejected') {
-      return '이미 거부로 기록되어 있었습니다.';
-    }
-    if (outcome.status === 'expired') {
-      return '결정 전에 만료되어 만료로 기록되었습니다.';
-    }
-    if (outcome.status === 'cancelled') {
-      return '이 요청은 취소되어 있었습니다.';
-    }
-    return outcome.note ?? '이 요청은 이미 결정되어 있었습니다.';
-  }
-  if (outcome.status === 'approved') return '승인을 기록했습니다.';
-  if (outcome.status === 'rejected') return '거부를 기록했습니다.';
-  // 200을 받았지만 원장이 알아볼 수 없는 상태를 답했다. 무엇으로 기록됐는지 우리가
-  // 모르므로, 안다고 말하지 않는다.
-  return '결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.';
 }
 
 function outcomeStyle(tone: FeedItem['outcomeTone']) {

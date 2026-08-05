@@ -4,7 +4,10 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
+import type {Member} from '@momo/core/lib/api';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {SessionProvider} from '../src/session/useSession';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
@@ -58,6 +61,8 @@ const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
 // 모양이 아니다 (design-review N-7).
+/** 승인을 요청하는 쪽은 에이전트다 — 에이전트는 멤버다(ADR-0004). */
+const AGENT = (ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0]).id;
 const OTHER = (
   ROSTER.find(m => m.kind === 'human' && m.id !== SELF) ?? ROSTER[1] ?? ROSTER[0]
 ).id;
@@ -378,6 +383,58 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </Frame>
       );
+    // ---- U4-4 M1 (#1084): 승인 카드가 막다른 길이 아니게 됐다 -----------------
+    case 'approval-card': {
+      const approvalMessage = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000000b1',
+        type: 'approval_request',
+        body: '툴 호출 승인',
+        authorMemberId: AGENT,
+        props: {
+          approval_id: 'ap-1',
+          title: 'github.search_issues 실행 허가',
+          approval_status: 'pending',
+        },
+      } as unknown as Message;
+      const gates = new Map([
+        [
+          'ap-1',
+          {approvalId: 'ap-1', reversible: false, expiresAtMs: null},
+        ],
+      ]);
+      return (
+        <Frame label="승인 카드 — 결정 가능 / 불가 / 결정 뒤 (감사 H-1)">
+          {/* 세 상태를 한 장에 세운다. 이 goal 의 논점이 「언제 컨트롤이 서는가」
+              이므로 한 상태만 찍으면 그 논점이 사진에 안 나온다. */}
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={gates}
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalReceipts={
+              new Map([['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}]])
+            }
+          />
+        </Frame>
+      );
+    }
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">
@@ -444,13 +501,49 @@ function SearchResults(): React.JSX.Element {
   );
 }
 
+// =============================================================================
+// 이 하네스에는 세션이 없었다 — 그리고 그것이 결합 하나를 드러냈다
+//
+// U4-4 M1 이 승인 카드에 컨트롤을 세우자 `approval-card` 사진이 **빨간 에러
+// 화면**으로 찍혔다: `useSession() was called outside SessionProvider`.
+//
+// 원인은 하네스의 버그가 아니라 **진짜 결합**이다. `ApprovalDecision` 은
+// `workspaceId` 를 세션에서 읽는다(결정을 어느 워크스페이스에 보내는지는 화면이
+// 아니라 세션이 안다). 그래서 「행에 게이트를 건네면 그 표면에는 세션이 있어야
+// 한다」가 이 배치가 만든 새 계약이고, 하네스는 그 계약을 처음 어긴 호출자였다.
+//
+// 읽기 전용 표면(하네스·검색 미리보기)이 게이트를 **안** 건네면 세션 없이도
+// 그대로 선다 — `actions?` prop 이 이미 쓰는 규율과 같다. 그 사실은 단정으로
+// 잠갔다(`approvalCard.test.tsx`).
+//
+// 여기서는 사진을 찍어야 하므로 세션을 세운다. 가짜 멤버 하나면 되고, 그
+// 멤버는 이미 로스터가 만들고 있다 — 목업을 그리는 것이 아니라 **배송되는
+// 컴포넌트가 요구하는 문맥을 그대로 주는 것**이다.
+// =============================================================================
+
+/** 하네스용 세션. 결정은 전송되지 않는다(사진은 무장 전 상태를 찍는다). */
+const HARNESS_MEMBER = {
+  id: SELF,
+  workspaceId: 'measure-ws',
+  displayName: '곽성재',
+} as Member;
+
 export default function SurfacesHarness({name}: {name: string}): React.JSX.Element {
   return (
     <SafeAreaProvider>
-      <Surface name={name} />
+      <QueryClientProvider client={harnessClient}>
+        <SessionProvider member={HARNESS_MEMBER}>
+          <Surface name={name} />
+        </SessionProvider>
+      </QueryClientProvider>
     </SafeAreaProvider>
   );
 }
+
+/** 네트워크로 나가지 않는다. 하네스는 사진을 찍지 데이터를 받지 않는다. */
+const harnessClient = new QueryClient({
+  defaultOptions: {queries: {retry: false, enabled: false, gcTime: 0}},
+});
 
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
