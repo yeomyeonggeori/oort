@@ -1833,3 +1833,8 @@
 - **#1124 머지**: Swift 패스 기본 off(강등 대가를 이름 붙임 — 미커버 125/128 연산을 매 실행 경고, 두 패스 동시 off 거부)·verify_merge_tree.sh(20초 — red proof가 U4-6 B1과 동일 코드 재현)·**선재 FAIL 4건 규명=원인 하나**(/v1/auth/refresh 스텁 부재 → 앱 자가 로그아웃 → 타임아웃, 3줄 수리)·#1099 근인="길게 누르기 touchEnd가 합성 클릭으로 자기가 연 시트를 닫음" → touchCancel 교정+조용한 초록 차단+설정 6표면 → **130프레임 완주**(#1057 동반 폐쇄). 웹 게이트 17/17.
 - B가 경고한 Dockerfile 누락은 A(#1123)가 기수리 — 병합 확인 후 머지. 잔여 관측 2건=#1125.
 - **ADR-0145 증보 2(Swift 퇴역) 3자리 전부 이행**: ①레인=rust(A) ②openapi Swift 패스 opt-in(B) ③Xcode Cloud 준비(C — 콘솔 Disable만 성재 몫). 위생 배치 종결 — 남은 것: build-sim 술어 소수리 워커 1기.
+
+## 2026-08-06 (심야2) · Fable · ADR-0154 Accepted(D2 수정)·리서치 파이프라인 규칙·ADE 1단계 발사
+- **ADR-0154 Accepted**: 성재 D2 수정 승인 — "대화 공간=summary 한 줄('실행 중인 작업 N개')·클릭=drawer 관제·터미널=상세"의 3층. 나머지 D 원안. ADR 본문 갱신 완료.
+- **리서치 파이프라인 규칙 영구화**(메모리 research-via-ouroboros-interview): 리서치 발제 → ouroboros 인터뷰로 구체화 → 워커 발사. 방향 열린 리서치에만(단답 조회 제외).
+- **3워커 발사**(패킷 2026-08-06-ade-stage1-spikes-packet.md): ①#1114 서버 축(work_control 이식·spawn 승인 폐곡선·호스트 후보 동봉 — ADE 1단계) ②#1120 prime 스파이크(컨테이너·RPC·키 주입 금지) ③#1121 herdr 스파이크(라이선스 실측 1순위). 스파이크는 "안 되는 이유의 실측도 완주".
