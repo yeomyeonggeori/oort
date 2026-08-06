@@ -1250,6 +1250,19 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
+  // 작업 세션 원장 (ADR-0154 D2 / 이슈 1135). **이 라우트가 없으면 캡처가 로그인
+  // 화면으로 되돌아간다** — 아래 스레드 답글 라우트의 주석과 똑같은 덫이다: ADE
+  // 요약 줄이 셸에 상주하면서 이 경로를 읽는데, 목이 없으면 요청이 프리뷰 서버로
+  // 새고, 프리뷰 서버는 모르는 `/v1/*`에 401을 답하며, 클라는 회전에도 401을 받고
+  // 세션을 끝낸다. 화면에는 채팅 대신 로그인 폼이 뜬다.
+  //
+  // 원장을 비워 두는 것은 **선택**이다. 이 캡처가 재는 것은 다른 표면들의 기하이고,
+  // 살아 있는 작업이 0이면 요약 줄은 아예 그리지 않는다(그것이 그 줄의 계약이다).
+  // ADE 표면 자체의 light/dark 캡처는 `npm run gate:ade`가 매 실행마다 다시 만든다
+  // (artifacts/ade/). 여기에 실행 중 세션을 실으면 관계없는 수십 장이 함께 밀린다.
+  await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
+    json(route, { workSessions: [] })
+  );
   // 설정 > AI 연결 (MOMO-627). The chain routes are matched BEFORE the singleton
   // so `**/v1/provider/link` does not swallow `/link/chain` and `/link/test`.
   await context.route("**/v1/provider/link/chain", (route) =>

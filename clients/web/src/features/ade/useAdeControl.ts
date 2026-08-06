@@ -1,6 +1,4 @@
 import { useCallback, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchWorkSessions } from "@momo/core/lib/api";
 import { UNKNOWN_AGENT_NAME } from "@momo/core/features/agents/turnCopy";
 import {
   adeCounts,
@@ -10,7 +8,7 @@ import {
 } from "@momo/core/features/work/adeControl";
 import { useSession } from "@/app/session";
 import { memberNameParts, useDirectory } from "@/features/workspace/useWorkspace";
-import { useWorkHosts } from "@/features/work/useWorkSessions";
+import { useWorkHosts, useWorkSessions } from "@/features/work/useWorkSessions";
 import {
   isStaleSignal,
   useAgentWorkingSignals,
@@ -66,11 +64,7 @@ export interface AdeControl {
 export function useAdeControl(clockAlways: boolean): AdeControl {
   const { workspaceId } = useSession();
   const { directory } = useDirectory(workspaceId);
-  const sessionsQuery = useQuery({
-    queryKey: ["work-sessions", workspaceId],
-    queryFn: () => fetchWorkSessions(workspaceId),
-    refetchInterval: ADE_SESSION_POLL_MS,
-  });
+  const sessionsQuery = useWorkSessions(workspaceId, ADE_SESSION_POLL_MS);
   const hostsQuery = useWorkHosts(workspaceId);
   const signals = useAgentWorkingSignals();
   const nowMs = useTickingNow(clockAlways || signals.size > 0);

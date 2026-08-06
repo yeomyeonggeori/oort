@@ -40,7 +40,7 @@ describe("adeDrawerStore", () => {
     expect(takeAdeDrawerOpener()).toBeNull();
   });
 
-  it("초기화하면 남아 있던 opener 도 버린다 — 열지 않은 서랍의 캐럿 주소는 없다", () => {
+  it("초기화하면 남아 있던 opener 도 버린다 (열지 않은 서랍의 캐럿 주소는 없다)", () => {
     openAdeDrawer({ isConnected: true, focus: () => {} });
     resetAdeDrawer();
     expect(takeAdeDrawerOpener()).toBeNull();
