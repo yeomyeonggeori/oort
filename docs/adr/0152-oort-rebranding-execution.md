@@ -1,6 +1,6 @@
 # ADR-0152 — oort 리브랜딩 실행: 동결층·6단계·게이트
 
-- Status: **Proposed** (성재 발제 2026-08-05 — "레포 이름부터 momo 대신 oort로. Apple developer 같은 건 momo 당분간 유지, 앱 출시는 oort")
+- Status: **Accepted** (2026-08-06 성재 승인 — 1단계 실행 지시와 함께. 발제 2026-08-05)
 - Date: 2026-08-05
 - 근거 실측: `docs/planning/research/2026-08-05-oort-naming-inventory.md` (전수 — 1,763파일/27,917줄, 6축 분류)
 
