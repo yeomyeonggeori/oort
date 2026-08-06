@@ -48,6 +48,21 @@ import {
  */
 export const ZOMBIE_CLEAR_MS = 120_000;
 
+/**
+ * 만료(90초 TTL) 판정에 쓰는 시계의 격자, ms (goal RN-P2a).
+ *
+ * 화면의 경과 숫자는 1초마다 바뀌어야 하지만 **어떤 턴이 살아 있는가**는 그렇지
+ * 않다. 그 판정에 1Hz 시계를 그대로 먹이면 파생되는 배열이 매초 새 동일성을 얻고,
+ * 그 아래의 모든 `useMemo` 가 무효가 된다. 5초는 90초 TTL 대비 5.5% 의 지연이고,
+ * 스토어의 zombie sweep 이 15초마다 도는 것보다 여전히 촘촘하다.
+ *
+ * 이 파일에 있는 이유는 소비자가 둘이 됐기 때문이다(#1137): 대화 화면의 채널
+ * 스코프 필터와 ADE 요약 줄의 워크스페이스 스코프 필터가 **같은 격자**를 써야
+ * 한다. 두 표면이 서로 다른 격자로 같은 신호를 거르면, 한 화면은 살아 있다고
+ * 하고 다른 화면은 아니라고 하는 구간이 생긴다.
+ */
+export const TURN_STALENESS_GRID_MS = 5_000;
+
 type Key = string;
 
 function keyOf(channelId: string, memberId: string): Key {
