@@ -540,18 +540,38 @@ async function captureScheme(browser, scheme, support) {
     await shoot(chat, `${OUT_DIR}/composer-routing-unsettled-collapsed-${tag}.png`, shots);
   }
 
-  // 7. 에이전트를 여러 명 부르면 붙일 수 없다고 말한다. 이름은 두 개까지 적고
-  //    나머지는 수로 접는다(줄이 문단이 되지 않도록). 조사는 목록의 끝에 달려
-  //    있으므로 두 명(라틴 핸들로 끝남)도 함께 찍는다(R2 M4).
+  // 7. 에이전트를 여러 명 부른 줄 (#1113). 접혀 있을 때는 한 명일 때와 같은
+  //    문법이고, 이름은 두 개까지 적고 나머지는 수로 접는다(줄이 문단이 되지
+  //    않도록). 펼치면 부른 각자에게 이번 메시지가 무엇으로 도착하는지가 한 줄씩
+  //    적히고, 그 위의 상자 한 벌은 **모두에게 같이** 걸리는 값이다.
   await chat
     .getByTestId("composer-input")
     .fill("@hermes @kim-intern 두 분 같이 확인 부탁합니다");
-  await chat.getByTestId("composer-routing-many").waitFor({ state: "visible" });
+  await chat
+    .locator('[data-testid="composer-routing"][data-called="2"]')
+    .waitFor({ state: "visible" });
   await shoot(chat, `${OUT_DIR}/composer-routing-many-two-${tag}.png`, shots);
+  await chat.getByTestId("composer-routing-toggle").click();
+  await chat.getByTestId("composer-routing-called").waitFor({ state: "visible" });
+  await chat.waitForTimeout(300);
+  await shoot(chat, `${OUT_DIR}/composer-routing-many-open-${tag}.png`, shots);
+  if (support === "ready") {
+    // 부른 모두가 받아 주는 강도만 상자에 올라온다. hermes-fast를 상속한
+    // 에이전트가 섞여 있으면 xhigh는 애초에 목록에 없다.
+    await chat.getByTestId("composer-routing-effort").selectOption("low");
+    await chat
+      .locator('[data-testid="composer-routing"][data-override]')
+      .waitFor({ state: "visible" });
+    await shoot(chat, `${OUT_DIR}/composer-routing-many-override-${tag}.png`, shots);
+    await chat.getByTestId("composer-routing-reset").click();
+  }
+  await chat.getByTestId("composer-routing-toggle").click();
   await chat
     .getByTestId("composer-input")
     .fill("@hermes @kim-intern @tidy-bot 세 분 같이 확인 부탁합니다");
-  await chat.getByTestId("composer-routing-many").waitFor({ state: "visible" });
+  await chat
+    .locator('[data-testid="composer-routing"][data-called="3"]')
+    .waitFor({ state: "visible" });
   await shoot(chat, `${OUT_DIR}/composer-routing-many-${tag}.png`, shots);
   console.log(`[${tag}] PUT triggers: ${JSON.stringify(probes.puts.map((p) => p.triggers))}`);
   await context.close();
