@@ -217,7 +217,7 @@ build_and_stage() {
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Speak with your team in a momo huddle.</string>
+  <string>Speak with your team in an oort huddle.</string>
 </dict>
 </plist>
 EOF

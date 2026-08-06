@@ -514,8 +514,8 @@ struct MomoProviderLinkCopy {
     var providerSectionHeader: String { isKorean ? "AI 연결 (LLM provider)" : "AI connection (LLM provider)" }
     var providerSectionFooter: String {
         isKorean
-            ? "momo가 에이전트 응답을 받는 OpenAI 호환 provider입니다. base URL과 게이트웨이 bearer만 저장합니다."
-            : "The OpenAI-compatible provider momo uses for agent replies. Only the base URL and gateway bearer are stored."
+            ? "oort가 에이전트 응답을 받는 OpenAI 호환 provider입니다. base URL과 게이트웨이 bearer만 저장합니다."
+            : "The OpenAI-compatible provider oort uses for agent replies. Only the base URL and gateway bearer are stored."
     }
     var connectionLabel: String { isKorean ? "연결 상태" : "Connection" }
     func connectionValue(_ state: ProviderConnectionState) -> String {

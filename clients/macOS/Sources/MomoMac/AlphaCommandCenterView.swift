@@ -220,7 +220,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 AlphaCapabilityItem(
                     id: "credential-boundary",
                     title: "Provider credential boundary",
-                    detail: "Codex/OpenAI OAuth stays in the local provider; momo receives only endpoint, Hermes bearer, context, usage, and audit evidence.",
+                    detail: "Codex/OpenAI OAuth stays in the local provider; oort receives only endpoint, Hermes bearer, context, usage, and audit evidence.",
                     isAvailable: true
                 ),
                 AlphaCapabilityItem(
@@ -261,7 +261,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 area: .server,
                 health: workspaceId == nil ? .blocked : .degraded,
                 detail: "Connection needs attention. Raw diagnostics are available only in collected logs.",
-                recovery: "Retry the selected channel or switch sessions after checking MomoServer."
+                recovery: "Retry the selected channel or switch sessions after checking the oort server."
             )
         }
         guard let workspaceId else {
@@ -269,7 +269,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 area: .server,
                 health: .working,
                 detail: "No active workspace session yet.",
-                recovery: "Open demo mode or sign in to a local MomoServer."
+                recovery: "Open demo mode or sign in to a local oort server."
             )
         }
         return AlphaCommandCenterStatus(
@@ -469,7 +469,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 area: .updates,
                 health: .ready,
                 detail: status.surfaceDetail,
-                recovery: status.canOpenDownload ? "Open the download, install the new build, and relaunch momo." : nil
+                recovery: status.canOpenDownload ? "Open the download, install the new build, and relaunch oort." : nil
             )
         case .upToDate:
             return AlphaCommandCenterStatus(

@@ -52,7 +52,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$VERSION" ] || { echo "usage: $0 --version 0.1.0-next.N [--notes ...] [--dry-run]" >&2; exit 2; }
-[ -n "$NOTES" ] || NOTES="momo-next 내부 빌드 ${VERSION}"
+[ -n "$NOTES" ] || NOTES="oort next 내부 빌드 ${VERSION}"
 
 # semver 프리릴리스만 허용한다. 0.1.0 을 실수로 next 채널에 밀면 오픈 베타 번호를
 # 태워버리고 되돌릴 수 없다(업데이터는 내려가지 않는다).
@@ -102,7 +102,7 @@ echo "[next-publish] 1/6 build (v${VERSION}, build ${BUILD_NUM} @${GIT_SHA}, ${U
   cargo tauri build --bundles app --ci --config "{\"version\":\"${VERSION}\"}"
 ) > "$WORK/build.log" 2>&1 || { tail -40 "$WORK/build.log" >&2; exit 1; }
 
-APP_PATH="clients/desktop/src-tauri/target/release/bundle/macos/momo.app"
+APP_PATH="clients/desktop/src-tauri/target/release/bundle/macos/oort.app"
 [ -d "$APP_PATH" ] || { echo "[next-publish] .app not found at $APP_PATH" >&2; exit 1; }
 
 echo "[next-publish] 2/6 verify signature"
@@ -169,7 +169,7 @@ ZIP_SHA256="$(shasum -a 256 "$WORK/$ZIP_NAME" | cut -d' ' -f1)"
 
 echo "[next-publish] 5/6 release upload to $DIST_REPO ($TAG)"
 gh release create "$TAG" --repo "$DIST_REPO" --prerelease \
-  --title "momo next ${VERSION}" \
+  --title "oort next ${VERSION}" \
   --notes "${NOTES}
 
 - channel: next (Tauri 2 셸, 자동 업데이트)

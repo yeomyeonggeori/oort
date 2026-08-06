@@ -10,8 +10,13 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<!-- 표시명은 타깃명과 분리한다(ADR-0152 D2-1). PRODUCT_NAME = TARGET_NAME =
+	     MomoiOS 는 서명·프로파일·CI가 함께 물고 있는 식별자라 그대로 두고, 사람이
+	     읽는 이름만 여기서 oort 로 고정한다. -->
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>oort</string>
+	<key>CFBundleDisplayName</key>
+	<string>oort</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -42,11 +47,11 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>momo connects to your Mac on the local network during internal testing.</string>
+	<string>oort connects to your Mac on the local network during internal testing.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Attach a photo you take to a momo message.</string>
+	<string>Attach a photo you take to an oort message.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Join huddles and speak with your momo workspace using your microphone.</string>
+	<string>Join huddles and speak with your oort workspace using your microphone.</string>
 	<key>MomoAPNSEnvironment</key>
 	<string>$(APS_ENVIRONMENT)</string>
 	<key>MomoKeychainAccessGroup</key>

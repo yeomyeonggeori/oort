@@ -64,7 +64,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         defer { demoSeedBaseTimestampMs = nil }
         let ws = WorkspaceID()
         workspace = ws
-        workspaceProfile = Workspace(id: ws, slug: "momo-demo", name: "momo")
+        workspaceProfile = Workspace(id: ws, slug: "momo-demo", name: "oort")
         inviteJoinState = .idle
         demoRealtimeByChannel = [:]
         demoCostSnapshotsByChannel = [:]
@@ -626,7 +626,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         if let workspaceProfile, workspaceProfile.id == id {
             return workspaceProfile
         }
-        let profile = Workspace(id: id, slug: "momo-demo", name: "momo")
+        let profile = Workspace(id: id, slug: "momo-demo", name: "oort")
         workspaceProfile = profile
         return profile
     }
@@ -637,7 +637,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         expectedUpdatedAtMs: Int64
     ) async throws -> Workspace {
         guard connected, self.workspace == workspace else { throw BackendError.notConnected }
-        var profile = workspaceProfile ?? Workspace(id: workspace, slug: "momo-demo", name: "momo")
+        var profile = workspaceProfile ?? Workspace(id: workspace, slug: "momo-demo", name: "oort")
         guard profile.updatedAtMs == expectedUpdatedAtMs else {
             throw BackendError.problem(status: 409, title: "workspace changed", detail: "Reload and try again.")
         }

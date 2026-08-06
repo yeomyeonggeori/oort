@@ -8,7 +8,7 @@ struct MomoMacDevApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("momo") {
+        WindowGroup("oort") {
             DevAppRoot()
         }
         .defaultSize(width: 1180, height: 760)

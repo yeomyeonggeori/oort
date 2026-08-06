@@ -735,7 +735,7 @@ final class MomoMacTests: XCTestCase {
         try await backend.connect(workspace: seed.workspace, accessToken: "local-token")
 
         let initial = try await backend.workspace(id: seed.workspace)
-        XCTAssertEqual(initial.name, "momo")
+        XCTAssertEqual(initial.name, "oort")
         let updated = try await backend.updateWorkspaceName(
             workspace: seed.workspace,
             name: "  모모 작업실  ",
@@ -3768,7 +3768,7 @@ final class MomoMacTests: XCTestCase {
             downloadPageURL: nil
         )
 
-        XCTAssertEqual(content.subject, "momo 워크스페이스 초대")
+        XCTAssertEqual(content.subject, "oort 워크스페이스 초대")
         XCTAssertTrue(content.body.contains("oort://join?server=https%3A%2F%2Fapi.momo.test&code=momo_raw_once"))
         XCTAssertTrue(content.body.contains("서버 주소: https://api.momo.test"))
         XCTAssertTrue(content.body.contains("초대 코드: momo_raw_once"))
@@ -3785,7 +3785,7 @@ final class MomoMacTests: XCTestCase {
             downloadPageURL: URL(string: "https://downloads.momo.example/alpha")!
         )
 
-        XCTAssertEqual(content.subject, "Join our momo workspace")
+        XCTAssertEqual(content.subject, "Join our oort workspace")
         XCTAssertTrue(content.body.contains("Download page: https://downloads.momo.example/alpha"))
         XCTAssertTrue(content.body.contains("Server: https://api.momo.test"))
         XCTAssertTrue(content.body.contains("Invite code: C1"))
