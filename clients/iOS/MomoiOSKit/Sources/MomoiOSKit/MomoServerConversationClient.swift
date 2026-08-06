@@ -528,7 +528,7 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SessionError.transport("Could not reach the momo server. Check your connection and try again.")
+            throw SessionError.transport("Could not reach the oort server. Check your connection and try again.")
         }
     }
 

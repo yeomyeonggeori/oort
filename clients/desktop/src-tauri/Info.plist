@@ -8,7 +8,7 @@
   `tauri.conf.json > plugins > deep-link > desktop > schemes`, and a second copy
   here would register the join schemes twice. The generated plist is the place to check
   that it landed:
-    plutil -p src-tauri/target/release/bundle/macos/momo-spike.app/Contents/Info.plist
+    plutil -p src-tauri/target/release/bundle/macos/oort.app/Contents/Info.plist
 -->
 <plist version="1.0">
 <dict>
@@ -18,7 +18,7 @@
 	     NSBonjourServices whitelists the service types we may browse. Without
 	     both, the browse returns nothing and — by design — says nothing. -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>momo looks for a workspace server on your local network so you can connect without typing its address.</string>
+	<string>oort looks for a workspace server on your local network so you can connect without typing its address.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_momo._tcp</string>

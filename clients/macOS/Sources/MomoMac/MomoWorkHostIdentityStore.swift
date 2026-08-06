@@ -355,7 +355,7 @@ actor MomoWorkHostRegistrar {
 
     private static func normalizedDisplayName(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = trimmed.isEmpty ? "Momo for Mac" : trimmed
+        let fallback = trimmed.isEmpty ? "oort for Mac" : trimmed
         return String(fallback.prefix(80))
     }
 }

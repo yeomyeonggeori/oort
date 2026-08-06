@@ -14,8 +14,11 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<!-- CFBundleDisplayName 이 이미 oort 이지만, 그것이 없거나 잘릴 때 OS가 읽는
+	     짧은 이름은 CFBundleName 이다. PRODUCT_NAME(=MomoMobile, 실행파일·타깃명)은
+	     건드리지 않고 표시용 이름만 분리한다(ADR-0152 D2-1). -->
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>oort</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

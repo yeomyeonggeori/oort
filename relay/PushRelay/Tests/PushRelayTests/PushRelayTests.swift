@@ -129,7 +129,7 @@ final class PushRelayTests: XCTestCase {
         XCTAssertEqual(aps["category"] as? String, "momo.mention")
         let alert = try XCTUnwrap(aps["alert"] as? [String: Any])
         XCTAssertEqual(Set(alert.keys), ["title", "body"])
-        XCTAssertEqual(alert["title"] as? String, "momo")
+        XCTAssertEqual(alert["title"] as? String, "oort")
         XCTAssertEqual(alert["body"] as? String, "새 알림")
         let momo = try XCTUnwrap(object["momo"] as? [String: Any])
         XCTAssertEqual(Set(momo.keys), [

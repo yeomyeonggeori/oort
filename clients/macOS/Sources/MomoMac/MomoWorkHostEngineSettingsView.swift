@@ -449,15 +449,15 @@ struct MomoWorkHostEngineCopy {
     func engineSummary(_ engine: MomoWorkHostEngine) -> String {
         switch (language, engine) {
         case (.korean, .opencode):
-            return "momo와 함께 배포되는 기본 엔진입니다. 별도 설치가 필요 없습니다."
+            return "oort와 함께 배포되는 기본 엔진입니다. 별도 설치가 필요 없습니다."
         case (.korean, .goose):
-            return "momo와 함께 배포되는 엔진입니다. 별도 설치가 필요 없습니다."
+            return "oort와 함께 배포되는 엔진입니다. 별도 설치가 필요 없습니다."
         case (.korean, .codexLocal):
             return "이 Mac에 설치된 Codex CLI에 연결합니다. 실행은 사용자 호스트에서 이뤄집니다."
         case (.english, .opencode):
-            return "The default engine that ships with momo. No separate install is needed."
+            return "The default engine that ships with oort. No separate install is needed."
         case (.english, .goose):
-            return "An engine that ships with momo. No separate install is needed."
+            return "An engine that ships with oort. No separate install is needed."
         case (.english, .codexLocal):
             return "Connects to the Codex CLI installed on this Mac. Work runs on your own host."
         }

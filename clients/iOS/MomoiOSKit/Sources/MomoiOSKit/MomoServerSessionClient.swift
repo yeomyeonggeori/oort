@@ -131,7 +131,7 @@ public actor MomoServerSessionClient: SessionBackend {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SessionError.transport("Could not reach the momo server. Check the URL and try again.")
+            throw SessionError.transport("Could not reach the oort server. Check the URL and try again.")
         }
     }
 

@@ -1830,7 +1830,7 @@ public struct ChannelListView: View {
         if let human = viewModel.members.first(where: { !$0.isAgent }) {
             return human.displayName
         }
-        return "momo"
+        return "oort"
     }
 
     private var profileDetail: String {

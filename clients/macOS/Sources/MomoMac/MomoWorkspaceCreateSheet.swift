@@ -370,7 +370,7 @@ struct MomoWorkspaceCreateCopy {
     }
 
     var nameLabel: String { isKorean ? "이름" : "Name" }
-    var namePlaceholder: String { isKorean ? "예: 모모 코어팀" : "e.g. Momo Core Team" }
+    var namePlaceholder: String { isKorean ? "예: 오르트 코어팀" : "e.g. Oort Core Team" }
     var nameHelp: String {
         isKorean
             ? "사이드바와 초대장에 보이는 이름이에요."
@@ -383,7 +383,7 @@ struct MomoWorkspaceCreateCopy {
     }
 
     var slugLabel: String { isKorean ? "주소(slug)" : "Address (slug)" }
-    var slugPlaceholder: String { "momo-core-team" }
+    var slugPlaceholder: String { "oort-core-team" }
     var slugHelp: String {
         isKorean
             ? "워크스페이스 주소로 쓰여요. 이름에서 자동으로 채워지고, 직접 고칠 수 있어요."
