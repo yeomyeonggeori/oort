@@ -32,6 +32,7 @@
 //! |---|---|
 //! | `b52_1_a_mention_starts_a_run_the_worker_answers` | drop `route_agent_mentions_in_tx` from the send path, emit the job with the wrong `method`/`partition_key`, or enqueue it outside the send transaction |
 //! | `b52_2_the_same_utterance_never_starts_two_runs` | route mentions on a deduped retry, or drop the `mention:<message>:<agent>` idempotency key |
+//! | `b52_5_two_mentions_in_one_utterance_start_two_runs` | collapse `addressed_agents` to the first match, drop the agent segment from the idempotency key, or partition both jobs under one key |
 //! | `b52_3_mentioning_a_human_starts_no_run` | widen the candidate query past `member.kind = 'agent'`, or route on the read-state mention list instead of the agent one |
 //! | `b52_4_a_created_agent_joins_the_roster_and_becomes_mentionable` | create the agent without its `workspace_membership` row (it vanishes from the roster), or with `kind='human'` (it stops being a mention candidate) |
 
@@ -1224,6 +1225,197 @@ async fn b52_2_the_same_utterance_never_starts_two_runs() {
         runs_for(&su, tenant.workspace).await.len(),
         2,
         "a second utterance is not deduplicated by its body"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 2b — one utterance, several agents (#1113)
+// ---------------------------------------------------------------------------
+
+/// **Calling two agents in one sentence starts two runs, one per agent, each
+/// under its own idempotency key.**
+///
+/// The fan-out is `addressed_agents` → the per-agent loop in
+/// `routes::agent_mentions`, and until this test the suite only ever asserted on
+/// the *singular* shapes: one mention (`b52_1`), the same mention twice
+/// (`b52_2`), a human (`b52_3`), a DM (`b13_*`). "One mention, one run" and
+/// "two mentions, two runs" are different statements, and a loop that answered
+/// only its first match satisfied every assertion the suite had.
+///
+/// Three properties, each independently revertible:
+///
+/// 1. **the count** — two named agents, two runs, two jobs. A `break` after the
+///    first candidate, or a `.first()` in `addressed_agents`, leaves one;
+/// 2. **the key** — `mention:<message>:<agent>` carries the *agent* segment, so
+///    the second INSERT is a different row. Drop that segment and the UNIQUE
+///    index collapses the pair back into one run while every single-mention test
+///    stays green (the key is still unique per message);
+/// 3. **the partition** — each job's `partition_key` is its own agent, which is
+///    what lets the two turns run at the same time. One shared key would
+///    serialize the second agent behind the first for no reason (L4 §3.5).
+///
+/// The provider is scripted rather than echoing: an echo would put `@luna
+/// @oort` back into the channel as an **agent-authored** message, and this test
+/// would then be measuring the A2A delegation path instead of the fan-out
+/// (`a2a_conformance_pg` owns that one).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn b52_5_two_mentions_in_one_utterance_start_two_runs() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let luna = seed_agent(&su, &tenant, "luna", true).await;
+    let oort = seed_agent(&su, &tenant, "oort", true).await;
+    // A third agent, in the same channel and never named. Without it a routing
+    // pass that woke *every* agent in the channel would also produce two runs.
+    let bystander = seed_agent(&su, &tenant, "atlas", true).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+
+    let client_msg_id = Uuid::new_v4();
+    let sent = send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        client_msg_id,
+        "@luna @oort 배포 상태 같이 봐줘",
+    )
+    .await;
+    let message_id = sent["id"].as_str().expect("the send returns its id");
+    let trigger_seq = sent["seq"].as_i64().expect("the send returns its seq");
+
+    // ---- 1. two runs, one per named agent -----------------------------------
+    let runs = runs_for(&su, tenant.workspace).await;
+    assert_eq!(
+        runs.len(),
+        2,
+        "one utterance that names two agents is two runs — one loop iteration \
+         each, not one run for the first name: {runs:?}"
+    );
+    let agents: std::collections::BTreeSet<Uuid> = runs.iter().map(|run| run.1).collect();
+    assert_eq!(
+        agents,
+        [luna, oort]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        "the two runs belong to the two agents that were named: {runs:?}"
+    );
+    assert!(
+        !agents.contains(&bystander),
+        "an agent in the channel that nobody named takes no run: {runs:?}"
+    );
+
+    for (_, agent, status, input, key) in &runs {
+        assert_eq!(status, "queued", "a fresh mention run starts queued");
+        assert_eq!(input["surface"], json!("mention"));
+        assert_eq!(
+            input["addressing"],
+            json!("mention"),
+            "both runs were addressed the same way — by a typed handle: {input}"
+        );
+        assert_eq!(
+            input["trigger_message_id"],
+            json!(message_id.to_uppercase()),
+            "both runs answer the SAME utterance: {input}"
+        );
+        assert_eq!(
+            input["agent_member_id"],
+            json!(agent.to_string().to_uppercase()),
+            "…and each names the agent whose turn it is: {input}"
+        );
+        assert_eq!(input["depth"], json!(0), "a human trigger is depth 0");
+        // ---- 2. the key names the agent, which is what makes them two rows ---
+        assert_eq!(
+            key.as_deref(),
+            Some(
+                format!(
+                    "mention:{}:{}",
+                    message_id.to_uppercase(),
+                    agent.to_string().to_uppercase()
+                )
+                .as_str()
+            ),
+            "`mention:<message>:<agent>` — without the agent segment the second \
+             INSERT collides with the first and one of the two agents silently \
+             never answers: {runs:?}"
+        );
+    }
+    let keys: std::collections::BTreeSet<Option<String>> =
+        runs.iter().map(|run| run.4.clone()).collect();
+    assert_eq!(keys.len(), 2, "two runs, two distinct keys: {keys:?}");
+
+    // ---- 3. two jobs, partitioned per agent ---------------------------------
+    let jobs = agent_jobs_for(&su, tenant.workspace).await;
+    assert_eq!(jobs.len(), 2, "two runs, two jobs: {jobs:?}");
+    let partitions: std::collections::BTreeSet<Option<Uuid>> =
+        jobs.iter().map(|job| job.3).collect();
+    assert_eq!(
+        partitions,
+        [Some(luna), Some(oort)]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        "each turn is partitioned under its OWN agent, so the two answer in \
+         parallel; one shared key would queue oort behind luna: {jobs:?}"
+    );
+    for (_, status, method, _, payload) in &jobs {
+        assert_eq!(status, "pending");
+        assert_eq!(method, "publish");
+        assert_eq!(payload["trigger_message_seq"], json!(trigger_seq));
+    }
+
+    let queued = audit_actions(&su, tenant.workspace)
+        .await
+        .into_iter()
+        .filter(|action| action == "agent.mention.queued")
+        .count();
+    assert_eq!(
+        queued, 2,
+        "one enqueue per agent is auditable, not one for the pair"
+    );
+
+    // ---- 4. the retry is still idempotent, per agent -------------------------
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        client_msg_id,
+        "@luna @oort 배포 상태 같이 봐줘",
+    )
+    .await;
+    assert_eq!(
+        runs_for(&su, tenant.workspace).await.len(),
+        2,
+        "a resent multi-mention is still two runs, not four"
+    );
+
+    // ---- 5. and both agents actually answer ---------------------------------
+    let provider = Arc::new(MockChatProvider::scripted([(
+        "배포 상태",
+        "배포는 어제 21시에 끝났습니다.",
+    )]));
+    let worker = worker(provider).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert!(
+        stats.answered >= 2,
+        "one claim batch carries both turns; a fan-out that produced one job \
+         could never reach two answers: {stats:?}"
+    );
+    for (agent, handle) in [(luna, "luna"), (oort, "oort")] {
+        assert_eq!(
+            messages_by(&su, &tenant, agent).await.len(),
+            1,
+            "@{handle} answered exactly once"
+        );
+    }
+    assert!(
+        messages_by(&su, &tenant, bystander).await.is_empty(),
+        "the agent nobody named stayed out of it"
     );
 }
 
